@@ -9,6 +9,11 @@
 export function mentorQuestionFixture(instructions, userRequest, stepIndex) {
   const marker = [...instructions.matchAll(/^Current information question: (.+)$/gm)].at(-1);
   const question = marker ? JSON.parse(marker[1]) : null;
+  // The host owns the question's display identity. Use its label verbatim when
+  // it is present; otherwise stay neutral instead of inventing a number from the
+  // step index, the field title or the reply text.
+  const label = typeof question?.label === "string" && /^\d+\.\d+$/.test(question.label) ? question.label : null;
+  const where = label ? `第 ${label} 题` : "当前这一题";
   const roles = (() => {
     const found = /Field roles for the current question: (\[.*?\])(?:\. |\.$|$)/s.exec(instructions);
     try { return found ? JSON.parse(found[1]) : []; } catch { return []; }
@@ -37,8 +42,8 @@ export function mentorQuestionFixture(instructions, userRequest, stepIndex) {
       // A distinct prefix keeps the Agent's own opening separable from a reply
       // to something the user said.
       message: proposalField
-        ? `【导师主动引导，仅验证流程】第 ${stepIndex + 1} 步：我先把“${title}”的草案放上来。${proposal}`
-        : `【导师主动引导，仅验证流程】第 ${stepIndex + 1} 步：我先替你把“${title}”这个问题开个头。${easier}`,
+        ? `【导师主动引导，仅验证流程】${where}：我先把“${title}”的草案放上来。${proposal}`
+        : `【导师主动引导，仅验证流程】${where}：我先替你把“${title}”这个问题开个头。${easier}`,
       inputKind: "answer",
       informationPatch: proposalField ? patch(proposal, "provisional", "decision", "agent_proposal") : {},
     };
@@ -63,7 +68,7 @@ export function mentorQuestionFixture(instructions, userRequest, stepIndex) {
     };
   }
   return {
-    message: `【分步模拟，仅验证流程】第 ${stepIndex + 1} 步：现在只聊“${title}”。这次回答会作为本题的待核对信息，不会自动确认。还有什么要补充或修改的吗？准备好后，点击右侧本题的确认按钮继续。`,
+    message: `【分步模拟，仅验证流程】${where}：现在只聊“${title}”。这次回答会作为本题的待核对信息，不会自动确认。还有什么要补充或修改的吗？准备好后，点击右侧本题的确认按钮继续。`,
     inputKind: "answer",
     informationPatch: fieldId && text ? patch(text, "provisional", "hypothesis", "user_statement") : {},
   };

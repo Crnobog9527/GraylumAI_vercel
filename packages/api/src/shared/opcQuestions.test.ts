@@ -1,14 +1,18 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from "vitest";
 import {
+  confirmationActionIsRedundant,
   confirmQuestionValues,
   displayedQuestion,
   emptyAnswer,
   isRecordedNonAnswer,
+  navigatorRows,
   nextInformationQuestion,
   openingEntryKey,
   openingRequestId,
+  questionDisplayState,
   questionLabel,
+  questionStatusLabel,
   reachedQuestions,
   type QuestionAnswer,
 } from "./opcQuestions";
@@ -149,4 +153,61 @@ it("preserves a recorded uncertainty as an explicit deferral, never as a confirm
   expect(result.finishStep).toBe(false);
   expect(() => confirmQuestionValues(schema, {}, "lane", true, options))
     .toThrow("OPC_QUESTION_ANSWER_REQUIRED");
+});
+
+it("keeps every reached question in the navigator with its own truthful status", () => {
+  const values: Record<string, QuestionAnswer> = {
+    lane: { ...emptyAnswer, value: "AI 工具", status: "confirmed" },
+    offer: { ...emptyAnswer, value: "摄影经验", status: "deferred" },
+    extra: { ...emptyAnswer, value: "草稿", status: "provisional" },
+  };
+  const rows = navigatorRows(0, schema, values, "offer");
+  expect(rows.map((row) => row.id)).toEqual(["lane", "offer", "extra"]);
+  expect(rows.map((row) => row.label)).toEqual(["1.1", "1.2", "1.3"]);
+  expect(rows.map((row) => row.state)).toEqual(["confirmed", "deferred", "pending"]);
+  expect(rows.map((row) => row.selected)).toEqual([false, true, false]);
+  expect(questionStatusLabel(rows[0].state)).toBe("已确认");
+  expect(questionStatusLabel(rows[1].state)).toBe("待定（已暂缓）");
+  // Reached = already resolved plus the current one; the unseen 1.5 stays out.
+  const onlyLaneReached = navigatorRows(0, schema, { lane: values.lane }, "lane");
+  expect(onlyLaneReached.map((r) => r.id)).toEqual(["lane", "offer"]);
+  expect(onlyLaneReached.map((r) => r.label)).toEqual(["1.1", "1.2"]);
+  expect(onlyLaneReached.some((r) => r.id === "extra")).toBe(false);
+  // A later step numbers its own rows from the pinned field order.
+  expect(navigatorRows(2, schema, { lane: values.lane }, "lane")[0].label).toBe("3.1");
+});
+
+it("keeps navigator order, identity and status stable while selection changes", () => {
+  const values: Record<string, QuestionAnswer> = {
+    lane: { ...emptyAnswer, value: "AI 工具", status: "confirmed" },
+    offer: { ...emptyAnswer, value: "摄影经验", status: "deferred" },
+  };
+  const atLane = navigatorRows(0, schema, values, "lane");
+  const atOffer = navigatorRows(0, schema, values, "offer");
+  expect(atLane.map((row) => row.id)).toEqual(atOffer.map((row) => row.id));
+  expect(atLane.map((row) => row.title)).toEqual(atOffer.map((row) => row.title));
+  expect(atLane.map((row) => row.state)).toEqual(atOffer.map((row) => row.state));
+  // Selecting a reviewed row never changes its answer status.
+  expect(atOffer[1].state).toBe("deferred");
+});
+
+it("never presents a deferred answer as confirmed in the display state", () => {
+  expect(questionDisplayState({ ...emptyAnswer, value: "暂缓原因", status: "deferred" })).toBe("deferred");
+  expect(questionDisplayState({ ...emptyAnswer, value: "已确认内容", status: "confirmed" })).toBe("confirmed");
+  expect(questionDisplayState({ ...emptyAnswer, value: "草稿", status: "provisional" })).toBe("pending");
+  expect(questionDisplayState({ ...emptyAnswer, value: "   ", status: "confirmed" })).toBe("unanswered");
+  expect(questionDisplayState(undefined)).toBe("unanswered");
+});
+
+it("separates a redundant re-confirmation from a deferred → confirmed action", () => {
+  const deferred: QuestionAnswer = { ...emptyAnswer, value: "还没有案例", status: "deferred" };
+  const confirmed: QuestionAnswer = { ...emptyAnswer, value: "还没有案例", status: "confirmed" };
+  expect(confirmationActionIsRedundant(confirmed, "confirm", "还没有案例")).toBe(true);
+  expect(confirmationActionIsRedundant(deferred, "defer", "还没有案例")).toBe(true);
+  // Explicitly revisiting a skipped question is a real action even when the stored
+  // text is identical, so it must never be suppressed as a duplicate.
+  expect(confirmationActionIsRedundant(deferred, "confirm", "还没有案例")).toBe(false);
+  expect(confirmationActionIsRedundant(confirmed, "defer", "还没有案例")).toBe(false);
+  expect(confirmationActionIsRedundant(confirmed, "confirm", "改过的内容")).toBe(false);
+  expect(confirmationActionIsRedundant(undefined, "confirm", "任何内容")).toBe(false);
 });

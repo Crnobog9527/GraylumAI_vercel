@@ -934,6 +934,95 @@ it("OPC: browser can correct plan inputs after a definite invalid completed resp
     await browser.close();
   }
 }, 300000);
+
+it("OPC: the ordered question navigator keeps reached rows and lets a deferred question be explicitly confirmed", async () => {
+  const {chromium} = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await fixture(3, true), model = randomUUID();
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Question nav local','opc-question-nav','fixture','true',1000,32000)",[model]);
+  await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  const draft = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
+  const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
+  const startedAt = Date.now();
+  const milestones: Record<string, number> = {};
+  const external: string[] = [];
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", route => {
+      const host = new URL(route.request().url()).hostname;
+      if (["127.0.0.1","localhost"].includes(host)) return route.continue();
+      external.push(host);
+      return route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(90000);
+    const errors: string[] = [];
+    page.on("pageerror", e => errors.push(e.message));
+    const path = "/positioning/" + draft.draftId;
+    const ready = page.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), {timeout: 90000});
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path));
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", {name:"登录", exact:true}).last().click();
+    await page.waitForURL(process.env.V3_LOCAL_APP + path);
+    milestones.loginLoaded = Date.now() - startedAt;
+
+    const questionLog = page.getByRole("log", {name:"完整导师消息"});
+    const opening = questionLog.getByText("导师主动引导 · 1.1", {exact:true}).locator("..").locator("p");
+    // The mentor's own prose must carry the host-derived label, never the step index.
+    await expect.poll(() => opening.textContent(), {timeout:30000}).toContain("第 1.1 题");
+    milestones.openingVisible = Date.now() - startedAt;
+
+    const navigator = page.getByRole("navigation", {name:"本步骤已到达的问题"});
+    const rowTexts = async () =>
+      (await navigator.getByRole("button").allTextContents()).map(t => t.replace(/\s+/g," ").trim());
+    const confirmButton = () => page.getByRole("button", {name:"确认本题并继续", exact:true});
+
+    await page.getByRole("textbox", {name:"已知目标 0", exact:true}).fill("做 AI 工具赛道");
+    milestones.formTyped = Date.now() - startedAt;
+    await confirmButton().click();
+    await expect.poll(async () => (await f.service.read(draft.draftId)).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("confirmed");
+    milestones.firstConfirmReadBack = Date.now() - startedAt;
+
+    // The page's own read-back follows the confirmation, so wait for the
+    // navigator to reflect the newly reached current question.
+    await expect.poll(async () => (await rowTexts()).length, {timeout:30000}).toBe(2);
+    let rows = await rowTexts();
+    expect(rows[0]).toContain("1.1");
+    expect(rows[0]).toContain("已确认");
+    expect(rows[1]).toContain("1.2");
+    expect(rows[1]).toContain("当前");
+    expect(rows.join(" | ")).not.toContain("Synthetic step 2");
+
+    // Repeated row selection must not re-sort, remove or rename any row.
+    await navigator.getByRole("button").nth(1).click();
+    await navigator.getByRole("button").nth(0).click();
+    await navigator.getByRole("button").nth(1).click();
+    expect(await rowTexts()).toEqual(rows);
+
+    // A deferred answer stays visible as its own state instead of "已确认".
+    await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
+    await expect.poll(async () => (await f.service.read(draft.draftId)).information["step-0"].values?.other?.status, {timeout:30000}).toBe("deferred");
+    milestones.deferReadBack = Date.now() - startedAt;
+    await page.getByRole("navigation", {name:"定位步骤"}).getByRole("button", {name:/Synthetic step 1/}).click();
+    await expect.poll(async () => (await rowTexts())[1] ?? "", {timeout:30000}).toContain("待定（已暂缓）");
+
+    // The deferred question must be revisitable: an explicit deferred → confirmed
+    // is a real action, not a redundant duplicate.
+    await expect.poll(() => confirmButton().isEnabled(), {timeout:15000}).toBe(true);
+    await confirmButton().click();
+    await expect.poll(async () => (await f.service.read(draft.draftId)).information["step-0"].values?.other?.status, {timeout:90000}).toBe("confirmed");
+    milestones.deferredThenConfirmedReadBack = Date.now() - startedAt;
+    await expect.poll(async () => (await rowTexts())[1] ?? "", {timeout:30000}).toContain("已确认");
+
+    expect(errors).toEqual([]);
+    expect(external).toEqual([]);
+    console.log("OPC_QUESTION_NAV_MILESTONES " + JSON.stringify({...milestones, totalMs: Date.now() - startedAt}));
+  } finally {
+    await browser.close();
+  }
+}, 300000);
 it("OPC: work item uses shared Runtime and saves non-workflow Skill artifact once; source revocation denies recovery reads", async () => {
   const { runtimeAdmissionService } = await import("../runtime/admission");
   const { runtimeExecutor } = await import("../runtime/execute");
@@ -2462,7 +2551,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
         .getByRole("textbox", { name: "给导师的回复", exact: true })
         .fill("I want to teach photography beginners.");
       await page.getByRole("button", { name: "发送", exact: true }).click();
-      await page.getByText(/【分步模拟，仅验证流程】第 1 步/).waitFor();
+      // The mentor prose now carries the host-derived hierarchical label.
+      await page.getByText(/【分步模拟，仅验证流程】第 1\.1 题/).waitFor();
       expect(
         (
           await sql.query(
@@ -2555,8 +2645,10 @@ for (const scenario of ["fresh", "retry", "same-field", "offline", "response-los
       await a.getByRole("textbox",{name:"Second independent field",exact:true}).waitFor();
       const b=await context.newPage(); b.setDefaultTimeout(20000); await b.goto(url);
       await b.getByRole("textbox",{name:"Second independent field",exact:true}).waitFor();
-      await a.getByRole("button",{name:"已确认 · 已知目标 0 · 回看修改",exact:true}).click();
-      if(scenario==="same-field") await b.getByRole("button",{name:"已确认 · 已知目标 0 · 回看修改",exact:true}).click();
+      // The ordered navigator names each reached row with its hierarchical
+      // question number and its own answer status.
+      await a.getByRole("button",{name:/^1\.1 已知目标 0 · 已确认/}).click();
+      if(scenario==="same-field") await b.getByRole("button",{name:/^1\.1 已知目标 0 · 已确认/}).click();
       await a.getByRole("textbox",{name:"已知目标 0",exact:true}).waitFor();
       const held=new Promise<void>(resolve=>{release=resolve;});
       let reached!:()=>void;
@@ -2675,7 +2767,7 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     await expectOpening("1.2", "Second independent field");
     expect(await page.getByRole("status", { name: "当前导师任务" }).count()).toBe(0);
     expect((await f.service.read(draft.draftId)).snapshot.steps["step-0"].valid).toBe(false);
-    await page.getByRole("button", {name:"已确认 · 已知目标 0 · 回看修改",exact:true}).click();
+    await page.getByRole("button", {name:/^1\.1 已知目标 0 · 已确认/}).click();
     expect(await first().inputValue()).toBe("我做 AI 赛道");
     expect(await page.getByRole("button", {name:"确认本题并继续",exact:true}).isEnabled()).toBe(false);
     await page.getByRole("button", {name:"继续当前待确认问题",exact:true}).click();
@@ -2730,7 +2822,8 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     ]);
     expect(result.turns.every((turn:any)=>turn.kind==="organizer"||Boolean(turn.questionId))).toBe(true);
     const runs=await sql.query("select payload from runtime_executions where actor_id=$1 order by created_at",[f.actor]);
-    expect(runs.rows.some(row=>row.payload.instructions.includes('Current information question: {"id":"other","title":"Second independent field"}'))).toBe(true);
+    // The frozen mentor context carries the host-derived hierarchical label.
+    expect(runs.rows.some(row=>row.payload.instructions.includes('Current information question: {"id":"other","title":"Second independent field","label":"1.2"}'))).toBe(true);
     expect(runs.rows.some(row=>row.payload.instructions.includes("opened by the host, not by the user"))).toBe(true);
     expect(errors).toEqual([]);
   } finally { release?.();await browser.close(); }

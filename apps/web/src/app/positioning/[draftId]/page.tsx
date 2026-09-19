@@ -9,15 +9,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { mergeInformation } from "./information-merge";
 import { applyMentorTurnRules, readWorkflowMentorTurn } from "./mentor-response";
 import {
+  confirmationActionIsRedundant,
   confirmQuestionValues,
   displayedQuestion,
   isOpeningInput,
+  navigatorRows,
   nextInformationQuestion,
   OPENING_INPUT,
   openingEntryKey,
   openingRequestId,
   questionIsConfirmed,
   questionLabel,
+  questionStatusLabel,
   reachedQuestions,
 } from "@repo/api/src/shared/opcQuestions";
 import { isAgentProposal } from "@repo/api/src/shared/opcMethodPolicy";
@@ -1056,12 +1059,26 @@ export default function PositioningDraft({
     const state = confirmEnvelopeState(stepId);
     return state.kind === "valid" ? state.envelope : null;
   }
-  function confirmationRedundant(stepId: string, questionId: string) {
-    // A pending envelope is a recovery, never a duplicate; server validity must
-    // not disable it. Otherwise an unchanged confirmed answer needs no rewrite.
+  /**
+   * Duplicate-action suppression for one explicit button. The requested status
+   * is part of the comparison: an unchanged `confirmed → confirmed` action stays
+   * a no-op, but `deferred → confirmed` with identical text is a real user
+   * action (revisiting a skipped question) and must not be suppressed. A pending
+   * envelope is a recovery, never a duplicate.
+   */
+  function confirmationRedundant(stepId: string, questionId: string, defer = false) {
     if (confirmEnvelopeState(stepId).kind !== "none") return false;
-    return !infoEdits[stepId] && questionIsConfirmed(d.information[stepId].values?.[questionId]) &&
-      (Boolean(nextInformationQuestion(d.information[stepId].schema, d.information[stepId].values)) || snap.steps[stepId].valid);
+    if (infoEdits[stepId]) return false;
+    // Reached only when this step has no local edits, so the stored answer is
+    // the one the action would confirm or defer.
+    const answer = d.information[stepId].values?.[questionId] as
+      | Information
+      | undefined;
+    return confirmationActionIsRedundant(
+      answer,
+      defer ? "defer" : "confirm",
+      answer?.value ?? "",
+    );
   }
   async function recoverCorruptConfirmation(stepId: string) {
     const state = confirmEnvelopeState(stepId);
@@ -1095,7 +1112,10 @@ export default function PositioningDraft({
     if (
       envelopeState.kind === "none" &&
       !infoEditsRef.current[step.id] &&
-      questionIsConfirmed(d.information[step.id].values?.[questionId]) &&
+      // Compare the requested action with the stored status: a resolved-but-
+      // deferred answer must still be explicitly confirmable, so this guard may
+      // only short-circuit a genuine duplicate of the same action.
+      confirmationRedundant(step.id, questionId, defer) &&
       (Boolean(nextInformationQuestion(d.information[step.id].schema, d.information[step.id].values)) || snap.steps[step.id].valid)
     ) {
       // The stored answer is already confirmed and unchanged. Re-running the
@@ -1652,7 +1672,6 @@ export default function PositioningDraft({
           const pendingConfirmation = pendingConfirmationFor(step.id);
           const activeQuestion = (pendingConfirmation?.questionId && schema.find(f => f.id === pendingConfirmation.questionId)) || displayedQuestion(schema, d.information[step.id].values, activeQuestions[step.id]);
           if (!activeQuestion) return null;
-          const knownQuestions = reachedQuestions(schema, d.information[step.id].values);
           const questionConfirmed =
             questionIsConfirmed(d.information[step.id].values?.[activeQuestion.id]) &&
             !infoEdits[step.id];
@@ -1876,10 +1895,17 @@ export default function PositioningDraft({
                       }
                       return (
                         <div key={field.id} className="space-y-2">
-                          <label className="block font-medium" htmlFor={`${step.id}-${field.id}`}>
-                            {questionLabel(index, schema, field.id)} {field.title}
-                            {field.required ? "（必需）" : ""}
-                          </label>
+                          {/* The dynamic question title above is the single
+                              visible title for the current question, so no
+                              second visible label is rendered for it. The input
+                              keeps its accessible name via aria-label, and any
+                              other rendered field keeps its own visible label. */}
+                          {field.id !== activeQuestion.id && (
+                            <label className="block font-medium" htmlFor={`${step.id}-${field.id}`}>
+                              {questionLabel(index, schema, field.id)} {field.title}
+                              {field.required ? "（必需）" : ""}
+                            </label>
+                          )}
                           <p className="text-xs text-[var(--text-secondary)]">
                             {isAgentProposal(field)
                               ? "这是导师要给出的成果建议：由导师根据已确认的资料先提出草案，你只需要核对、修改或确认，不需要自己从头写分析。"
@@ -1939,14 +1965,25 @@ export default function PositioningDraft({
                               答案已保存为待核对内容，请确认或继续修改。
                             </p>
                           )}
-                          <Button className="w-full" disabled={busy || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || confirmationRedundant(step.id, field.id)} onClick={() => confirmStep(step, index, field.id, false, nonAnswersFor(step.id, field.id))}>
+                          <Button className="w-full" disabled={busy || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || confirmationRedundant(step.id, field.id, false)} onClick={() => confirmStep(step, index, field.id, false, nonAnswersFor(step.id, field.id))}>
                             {pendingConfirmation ? "继续核对本题确认" : "确认本题并继续"}
                           </Button>
-                          <Button variant="outline" className="w-full" disabled={busy || hasPendingConfirmation || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || confirmationRedundant(step.id, field.id)} onClick={() => confirmStep(step, index, field.id, true, nonAnswersFor(step.id, field.id))}>
+                          <Button variant="outline" className="w-full" disabled={busy || hasPendingConfirmation || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || confirmationRedundant(step.id, field.id, true)} onClick={() => confirmStep(step, index, field.id, true, nonAnswersFor(step.id, field.id))}>
                             {field.required ? "按填写的原因暂缓本题并继续" : "暂时跳过本题"}
                           </Button>
                           <p className="text-xs text-[var(--text-secondary)]">还没想清楚可以继续和导师聊。{field.required ? "暂缓时请在上方写明原因，不会记成已确认事实。" : "选填问题可以明确选择跳过。"}</p>
                           {pendingConfirmation && <p role="status">正在核对原确认请求。确认成功前保持本题，不会跳过下一题。</p>}
+                          {confirmationState.kind === "valid" && (
+                            <p role="status">
+                              正在继续上次未完成的确认（
+                              {confirmationState.envelope.phase === "information"
+                                ? "保存本题信息"
+                                : confirmationState.envelope.phase === "save"
+                                  ? "保存步骤结果"
+                                  : "确认步骤"}
+                              ）。若长时间没有变化，可点击上方按钮继续核对；原请求会复用，不会重复执行或重复扣费。
+                            </p>
+                          )}
 
                         </div>
                       );
@@ -1976,18 +2013,72 @@ export default function PositioningDraft({
                       </Button>
                     ) : null;
                   })()}
-                  {knownQuestions.some(field => field.id !== activeQuestion.id && questionIsConfirmed(d.information[step.id].values?.[field.id])) && (
-                    <nav aria-label="已确认的问题" className="space-y-2 border-t border-[var(--border-primary)] pt-3">
-                      <p className="text-xs text-[var(--text-secondary)]">回看已确认的内容</p>
-                      {knownQuestions.filter(field => field.id !== activeQuestion.id && questionIsConfirmed(d.information[step.id].values?.[field.id])).map(field => (
-                        <Button key={field.id} variant="outline" className="w-full justify-start whitespace-normal text-left" disabled={busy || hasPendingConfirmation || hasPendingStepRequest || Boolean(pendingMentor)} onClick={() => setActiveQuestions(old => ({...old,[step.id]:field.id}))}>
-                          已确认 · {field.title} · 回看修改
-                        </Button>
-                      ))}
-                    </nav>
-                  )}
+                  {(() => {
+                    // Ordered navigator over the questions already reached plus
+                    // the current one. Rows keep their pinned key/order, so
+                    // selecting one never removes, renames or re-sorts another,
+                    // and the selected row keeps its own answer status.
+                    const rows = navigatorRows(
+                      index,
+                      schema,
+                      d.information[step.id].values,
+                      activeQuestion.id,
+                    );
+                    return (
+                      <nav
+                        aria-label="本步骤已到达的问题"
+                        className="space-y-2 border-t border-[var(--border-primary)] pt-3"
+                      >
+                        <p className="text-xs text-[var(--text-secondary)]">
+                          本步骤已到达的问题（尚未到达的问题不显示）
+                        </p>
+                        <ul className="space-y-2">
+                          {rows.map((row) => (
+                            <li key={row.id}>
+                              <Button
+                                variant={row.selected ? "default" : "outline"}
+                                aria-current={row.selected ? "true" : undefined}
+                                className="w-full justify-start whitespace-normal text-left"
+                                disabled={
+                                  busy ||
+                                  hasPendingConfirmation ||
+                                  hasPendingStepRequest ||
+                                  Boolean(pendingMentor)
+                                }
+                                onClick={() =>
+                                  setActiveQuestions((old) => ({
+                                    ...old,
+                                    [step.id]: row.id,
+                                  }))
+                                }
+                              >
+                                {row.label ?? "—"} {row.title} ·{" "}
+                                {questionStatusLabel(row.state)}
+                                {row.selected ? " · 当前" : ""}
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      </nav>
+                    );
+                  })()}
                 </section>
               </div>
+              {s.valid && index === steps.length - 1 && (
+                <div
+                  role="status"
+                  className="space-y-2 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-4"
+                >
+                  <h3 className="font-semibold">
+                    全部问题已确认或已明确暂缓 —— 本步骤已完成
+                  </h3>
+                  <p className="text-sm text-[var(--text-secondary)]">
+                    {snap.state === "published"
+                      ? "定位版本已发布。你可以在下方进入第一周计划，或修订定位并保留原版本；历史版本与对话保持不变。"
+                      : "已暂缓的问题按“接受局限”记录，不会被当作已确认事实。下一步是确认正式定位；确认后才会询问是否生成第一周选题，生成需要你再次明确同意。"}
+                  </p>
+                </div>
+              )}
               {s.valid && index < steps.length - 1 && (
                 <Button
                   disabled={busy || hasUnsavedInformation || hasPendingStepRequest}

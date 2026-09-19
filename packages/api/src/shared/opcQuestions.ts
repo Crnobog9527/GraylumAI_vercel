@@ -56,6 +56,82 @@ export function questionLabel(
   const position = questionPosition(schema, questionId);
   return position < 0 ? null : `${stepIndex + 1}.${position + 1}`;
 }
+/**
+ * Display/action state of one reached question. This is deliberately separate
+ * from `questionIsConfirmed()`: that helper answers "is this resolved for
+ * workflow progression?" (`confirmed` OR `deferred`), which must never be used
+ * to present a deferred answer as if the user had confirmed it.
+ */
+export type QuestionDisplayState =
+  | "unanswered"
+  | "pending"
+  | "deferred"
+  | "confirmed";
+export function questionDisplayState(
+  answer: QuestionAnswer | undefined,
+): QuestionDisplayState {
+  if (!answer?.value?.trim()) return "unanswered";
+  if (answer.status === "confirmed") return "confirmed";
+  if (answer.status === "deferred") return "deferred";
+  return "pending";
+}
+/** User-facing wording for one display state. */
+export function questionStatusLabel(state: QuestionDisplayState) {
+  return state === "confirmed"
+    ? "已确认"
+    : state === "deferred"
+      ? "待定（已暂缓）"
+      : state === "pending"
+        ? "进行中 · 待核对"
+        : "尚未填写";
+}
+export type NavigatorRow = {
+  id: string;
+  title: string;
+  required: boolean;
+  label: string | null;
+  state: QuestionDisplayState;
+  selected: boolean;
+};
+/**
+ * Ordered navigation over every question already reached plus the current one.
+ *
+ * Identity and order come from the pinned method's declared field order, so
+ * selecting a row never reorders, removes or renames an adjacent row, a
+ * deferred row stays where it is, and the selected row keeps its own status.
+ * Unreached questions are never included and no total count is exposed.
+ */
+export function navigatorRows(
+  stepIndex: number,
+  schema: readonly InformationQuestion[],
+  values: Record<string, QuestionAnswer> | null | undefined = {},
+  selectedId?: string | null,
+): NavigatorRow[] {
+  const answers = values ?? {};
+  return reachedQuestions(schema, answers).map(field => ({
+    id: field.id,
+    title: field.title,
+    required: Boolean(field.required),
+    label: questionLabel(stepIndex, schema, field.id),
+    state: questionDisplayState(answers[field.id]),
+    selected: Boolean(selectedId) && field.id === selectedId,
+  }));
+}
+/**
+ * Duplicate-action suppression must compare the requested status as well as the
+ * value. Re-confirming an unchanged `confirmed` answer stays a no-op, but an
+ * explicit `deferred → confirmed` is a real user action even when the stored
+ * text is identical, so it must never be treated as redundant.
+ */
+export function confirmationActionIsRedundant(
+  answer: QuestionAnswer | undefined,
+  action: "confirm" | "defer",
+  value: string,
+) {
+  if (!answer) return false;
+  if ((answer.value ?? "").trim() !== (value ?? "").trim()) return false;
+  return answer.status === (action === "defer" ? "deferred" : "confirmed");
+}
 /** Same normalization for stored utterances and candidate answers. */
 function normalizeUtterance(value: string) {
   return value

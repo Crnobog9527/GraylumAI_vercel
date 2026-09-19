@@ -5,7 +5,7 @@ import { isEmailVerified } from "../../lib/auth";
 import { runtimeAdmissionService } from "../runtime/admission";
 import { workbenchService } from "../artifacts/workbench";
 import type {StagingPolicy} from '../runtime/stagingPolicy';
-import { displayedQuestion, isOpeningInput, questionTask, reachedQuestions } from "./questions";
+import { displayedQuestion, isOpeningInput, questionLabel, questionTask, reachedQuestions } from "./questions";
 import { elicitFieldSpecs } from "../../shared/opcMethodPolicy";
 const uuid = z.string().uuid();
 export const opcStart = z
@@ -151,6 +151,16 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       if (opening && v.organizeAfter) throw new Error("OPC_STEP_DENIED");
       const state = d.information[v.stepId];
       const question = displayedQuestion(state.schema, state.values, v.questionId);
+      // The host owns the question's display identity. It is derived from the
+      // pinned method's declared step/field order and handed to the model so the
+      // mentor prose never invents or recomputes a question number.
+      const questionStepIndex = snapshot.workflow.steps.findIndex(
+        (candidate: { id: string }) => candidate.id === v.stepId,
+      );
+      const questionDisplayLabel =
+        question && questionStepIndex >= 0
+          ? questionLabel(questionStepIndex, state.schema, question.id)
+          : null;
       // A question outside the reached set is refused, but only for a NEW turn:
       // an already admitted request keeps its frozen identity, so a changed
       // question is reported as a conflict below instead.
@@ -236,7 +246,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         (v.purpose === "mentor" ? " The current workflow step is the viewed step. If the user explicitly asks to revise another step, add targetStepId to the JSON response and propose informationPatch only for that target's listed fields. Otherwise omit targetStepId. Do not restart completed steps; ask what to adjust and preserve all other decisions. Steps and allowed fields: " + JSON.stringify(workflowContext) + "\n" : "") +
         "Current workflow step: " +
         v.stepId +
-        (v.purpose === "mentor" ? "\nCurrent information question: " + JSON.stringify(question ? {id:question.id,title:question.title} : null) + "\nThe current question above is the ONLY topic to ask about now. A filled/provisional value is not a confirmation. Do not ask the next field or reveal future questions, their names or their count. Reflect the current answer and invite clarification or explicit confirmation using the button under this question. Even if an earlier instruction says next question, it means a follow-up within this same field until the host advances after confirmation. Do not invent facts.\n" : "") +
+        (v.purpose === "mentor" ? "\nCurrent information question: " + JSON.stringify(question ? {id:question.id,title:question.title,label:questionDisplayLabel} : null) + "\nThe host-provided `label` is this question's hierarchical number inside its step (for example 1.2). When you name the question, use exactly that label; never invent, recompute or infer a question number from the step, the field text, an earlier message or the conversation. If the label is null, refer to the question without a number. The current question above is the ONLY topic to ask about now. A filled/provisional value is not a confirmation. Do not ask the next field or reveal future questions, their names or their count. Reflect the current answer and invite clarification or explicit confirmation using the button under this question. Even if an earlier instruction says next question, it means a follow-up within this same field until the host advances after confirmation. Do not invent facts.\n" : "") +
         (opening
           ? "\nThis turn is opened by the host, not by the user: the user has not spoken yet. Do not invent, quote or summarise a user message. Open the current question now: in one short paragraph connect it to what is already confirmed, say in one sentence why this question matters for the positioning, and then ask exactly one concrete question. If the current field's elicit is \"agent_proposal\", present one concrete draft recommendation with basis \"agent_proposal\" for the user to verify instead of asking the user to author it. Use inputKind \"answer\".\n"
           : "") +
