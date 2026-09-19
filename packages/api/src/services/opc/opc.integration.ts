@@ -5568,8 +5568,67 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     await expect.poll(() => proposalBox.count(), {timeout: 60000}).toBe(1);
     await expect.poll(() => proposalBox.inputValue(), {timeout: 60000}).toBe(expectedProposal);
     mark("new progressed to 1.3");
+    // Advance across steps: confirm the pending proposal so step-0 becomes valid
+    // and the next step opens its own same-titled field.
+    await page.getByRole("button", {name:"确认本题并继续", exact:true}).click();
+    await expect.poll(async () => (await secondRead()).information["step-0"].values?.extra0?.status, {timeout:60000}).toBe("confirmed");
+    await expect.poll(async () => (await secondRead()).snapshot.steps["step-0"].valid, {timeout:60000}).toBe(true);
+    await expect.poll(async () => await page.getByRole("navigation",{name:"定位步骤"}).getByRole("button",{name:/^2\./}).getAttribute("aria-current"), {timeout:60000}).toBe("step");
+    await expect.poll(async () => (await page.locator("section[aria-label='本步填写信息']").getByRole("heading",{level:3}).first().textContent()) ?? "", {timeout:60000}).toContain("2.1");
+    mark("new at step-1");
+    // Complete cross-draft identity table for this actor: five legal openings.
+    const effectRows = async () => (await sql.query(
+      `select e.request_id::text request_id, e.payload->'request'->>'input' input, e.state,
+              b.state billing_state, b.id::text billing_id, b.pre_deduct_id::text pre_deduct_id,
+              t.draft_id::text draft_id, t.round_id::text round_id, t.step_id,
+              e.payload->'request'->'selection'->>'task' task
+         from runtime_executions e left join bill2_runs b on b.id=e.billing_run_id
+         left join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id
+        where e.actor_id=$1 order by e.created_at, e.id`,
+      [f.actor],
+    )).rows as Array<{request_id:string;input:string|null;state:string;billing_state:string|null;billing_id:string|null;pre_deduct_id:string|null;draft_id:string;round_id:string;step_id:string;task:string|null}>;
+    const questionOf = (task: string | null) => (task ?? "").replace(/^opc-(question|opening):/, "");
+    const signature = (row: {request_id:string;billing_id:string|null;pre_deduct_id:string|null}) =>
+      [row.request_id, row.billing_id, row.pre_deduct_id].join("|");
+    const expectedOpenings = [
+      {draft_id: first.draftId, round_id: first.roundId, step_id: "step-0", question: "extra1"},
+      {draft_id: second!.draftId, round_id: second!.roundId, step_id: "step-0", question: "extra1"},
+      {draft_id: second!.draftId, round_id: second!.roundId, step_id: "step-0", question: "goal"},
+      {draft_id: second!.draftId, round_id: second!.roundId, step_id: "step-0", question: "extra0"},
+      {draft_id: second!.draftId, round_id: second!.roundId, step_id: "step-1", question: "goal"},
+    ];
+    const assertOpenings = async (phase: string) => {
+      const rows = await effectRows();
+      const actual = rows.map(row => ({
+        draft_id: row.draft_id, round_id: row.round_id, step_id: row.step_id, question: questionOf(row.task),
+      })).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+      expect(actual, phase).toEqual([...expectedOpenings].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+      expect(rows.every(row => row.input === OPENING_INPUT), phase).toBe(true);
+      expect(rows.every(row => row.state === "completed"), phase).toBe(true);
+      expect(rows.every(row => row.billing_state === "settled" && row.billing_id && row.pre_deduct_id), phase).toBe(true);
+      const totals = (await sql.query(
+        `select (select count(*)::int from runtime_executions where actor_id=$1) executions,
+                (select count(*)::int from bill2_runs where actor_id=$1) runs,
+                (select count(*)::int from credit_transactions where user_id=$1 and reason_code='bill2_reserve') reserves`,
+        [f.actor],
+      )).rows[0] as {executions:number;runs:number;reserves:number};
+      expect(totals, phase).toEqual({executions: 5, runs: 5, reserves: 5});
+      return rows.map(signature).sort();
+    };
+    // Entering step 1 fires ITS opening: wait for that entry's execution to be
+    // recorded and settled before comparing the complete actor table.
+    await expect.poll(async () => Number((await sql.query(
+      "select count(*)::int n from runtime_executions where actor_id=$1",
+      [f.actor],
+    )).rows[0].n), {timeout: 60000}).toBe(5);
+    await expect.poll(async () => Number((await sql.query(
+      "select count(*)::int n from runtime_executions where actor_id=$1 and state not in ('completed','failed','cancelled')",
+      [f.actor],
+    )).rows[0].n), {timeout: 60000}).toBe(0);
+    const identitiesAfterAdvance = await assertOpenings("after advance");
     await openDraft(first.draftId, "old revisit");
     expect(await headingText()).toContain("Extra field 1");
+    expect(await assertOpenings("after revisit")).toEqual(identitiesAfterAdvance);
     const rounds = (await sql.query(
       `select d.draft_id::text draft_id, r.revision_id::text revision_id from opc_drafts d
        join artifact_rounds r on r.id=d.round_id where d.draft_id in ($1,$2)`,
