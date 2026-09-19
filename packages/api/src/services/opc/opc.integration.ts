@@ -4907,6 +4907,13 @@ it("OPC: a legally reached question keeps its explicit confirm and mentor send w
     await row("1.3").click();
     await field("Extra field 1").waitFor();
     const before = await executions();
+    const settledActorCounts = (await sql.query(
+      `select (select count(*)::int from runtime_executions where actor_id=$1) executions,
+              (select count(*)::int from bill2_runs where actor_id=$1) runs,
+              (select count(*)::int from credit_transactions where user_id=$1 and reason_code='bill2_reserve') reserves,
+              (select count(*)::int from runtime_executions e left join bill2_runs b on b.id=e.billing_run_id where e.actor_id=$1 and b.id is null) unlinked`,
+      [f.actor],
+    )).rows[0];
     const submittedRequestIds: string[] = [];
     page.on("request", request => {
       if (request.method() !== "POST" || !request.url().includes("opc.prepareStep")) return;
@@ -4973,7 +4980,27 @@ it("OPC: a legally reached question keeps its explicit confirm and mentor send w
       if (typeof parsedStored?.message === "string") storedMessage = parsedStored.message;
     } catch { /* a plain-text body is already the message */ }
     expect(storedMessage.trim().length).toBeGreaterThan(20);
-    expect(assistantText).toContain(storedMessage.trim().slice(0, 20));
+    // Compare the whole public message, normalising only whitespace.
+    const normalise = (value: string) => value.replace(/\s+/g, " ").trim();
+    const bubbleParagraph = normalise(
+      (await assistantBubble.locator("p").first().textContent()) ?? assistantText,
+    );
+    expect(bubbleParagraph).toBe(normalise(storedMessage));
+    // Actor-wide identity accounting: exactly one new execution/run/reserve and
+    // every one of them is linked, so an unlinked extra run cannot hide.
+    const actorAfter = await sql.query(
+      `select (select count(*)::int from runtime_executions where actor_id=$1) executions,
+              (select count(*)::int from bill2_runs where actor_id=$1) runs,
+              (select count(*)::int from credit_transactions where user_id=$1 and reason_code='bill2_reserve') reserves,
+              (select count(*)::int from runtime_executions e left join bill2_runs b on b.id=e.billing_run_id where e.actor_id=$1 and b.id is null) unlinked`,
+      [f.actor],
+    );
+    expect(actorAfter.rows[0]).toEqual({
+      executions: settledActorCounts.executions + 1,
+      runs: settledActorCounts.runs + 1,
+      reserves: settledActorCounts.reserves + 1,
+      unlinked: settledActorCounts.unlinked,
+    });
     expect((await executions()).filter(row => row.task === "opc-question:extra1")).toHaveLength(1);
     expect((await read()).information["step-0"].values?.extra2?.status).not.toBe("confirmed");
     expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
@@ -5099,12 +5126,17 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
     expect(schemaIds.findIndex(id => !isResolved(recovered!.values, id))).toBe(3);
     // Repeated later edits (more than fields x 2) must not lose the historical
     // maximum, and the reach must stay stable.
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 10; i++) {
       await row("1.1").click();
-      await field("已知目标 0").fill("客户定位（多次修改 " + i + "）");
+      const goalInput = field("已知目标 0");
+      await goalInput.waitFor();
+      const nextValue = "客户定位（多次修改 " + i + "）";
+      await goalInput.fill(nextValue);
+      // Wait for the typed value first, then for its persisted value.
+      await expect.poll(async () => await goalInput.inputValue(), {timeout:30000}).toBe(nextValue);
       await expect.poll(async () =>
-        (await read()).information["step-0"].values?.goal?.value ?? "", {timeout:30000},
-      ).toBe("客户定位（多次修改 " + i + "）");
+        (await read()).information["step-0"].values?.goal?.value ?? "", {timeout:60000},
+      ).toBe(nextValue);
     }
     await page.reload();
     await expect.poll(async () => (await rowTexts()).length, {timeout:90000}).toBe(4);
@@ -5135,6 +5167,29 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
     expect(
       ((await read()).information["step-1"] as { reached?: string[] }).reached ?? [],
     ).toEqual([]);
+    // Real logout/login (a fresh context, not another reload) keeps the four
+    // server-backed rows and hides q5.
+    const relogin = await browser.newContext();
+    await relogin.route("**/*", route => {
+      const host = new URL(route.request().url()).hostname;
+      return ["127.0.0.1","localhost"].includes(host) ? route.continue() : route.abort();
+    });
+    const page2 = await relogin.newPage();
+    page2.setDefaultTimeout(30000);
+    page2.setDefaultNavigationTimeout(90000);
+    const ready2 = page2.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), {timeout: 90000});
+    await page2.goto(process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path));
+    await ready2;
+    await page2.getByPlaceholder("name@example.com").fill(f.email);
+    await page2.getByPlaceholder("输入你的密码").fill(f.password);
+    await page2.getByRole("button", {name:"登录", exact:true}).last().click();
+    await page2.waitForURL(process.env.V3_LOCAL_APP + path);
+    const rowsAfterRelogin = async () =>
+      (await page2.getByRole("navigation", {name:"本步骤已到达的问题"}).getByRole("button").allTextContents())
+        .map(t => t.replace(/\s+/g," ").trim());
+    await expect.poll(async () => (await rowsAfterRelogin()).length, {timeout:90000}).toBe(4);
+    expect((await rowsAfterRelogin()).join(" | ")).not.toContain("Extra field 3");
+    await relogin.close();
     console.log("OPC_FRONTIER_EVIDENCE " + JSON.stringify({
       snapshotsBeforeEdit: preEdit.length,
       settledSnapshotVersion: snapshot!.version,
@@ -5152,7 +5207,9 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
 it("OPC: the historical reach projection is idempotent, permission-scoped and contamination-safe", async () => {
   const { readFileSync } = await import("node:fs");
   const { resolve } = await import("node:path");
-  const f = await fixture(3, false, 2), model = randomUUID();
+  // Five fields keeps q4/q5 unreached, so a foreign stronger frontier would be
+  // visible if it leaked and a rejected write could really extend reach.
+  const f = await fixture(3, false, 4), model = randomUUID();
   await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Reach local','opc-reach','fixture','true',1000,32000)",[model]);
   await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
   const draft = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
@@ -5161,6 +5218,16 @@ it("OPC: the historical reach projection is idempotent, permission-scoped and co
   const reachOf = async (stepId: string) =>
     ((await f.service.read(draft.draftId)).information[stepId] as { reached?: string[] }).reached ?? [];
 
+  // Reproduce the previous read contract for real: restore 0110 (no `reached`),
+  // then create records under it before applying 0111.
+  const migration = (name: string) => readFileSync(
+    resolve(import.meta.dirname, "../../../../db/migrations/" + name),
+    "utf8",
+  );
+  await sql.query(migration("0110_opc_turn_round_ownership.sql"));
+  const priorRead = await f.service.read(draft.draftId);
+  expect(Object.hasOwn(priorRead.information["step-0"], "reached")).toBe(false);
+
   await f.service.information({
     draftId: draft.draftId, stepId: "step-0", requestId: randomUUID(),
     expectedVersion: await stepVersion("step-0"),
@@ -5168,24 +5235,33 @@ it("OPC: the historical reach projection is idempotent, permission-scoped and co
       goal: { status: "confirmed", nature: "fact", value: "客户定位" },
       extra0: { status: "deferred", nature: "unknown", value: "暂缓的原因" },
       extra1: { status: "unknown", nature: "unknown", value: "" },
+      extra2: { status: "unknown", nature: "unknown", value: "" },
+      extra3: { status: "unknown", nature: "unknown", value: "" },
     },
   });
   const before = await f.service.read(draft.draftId);
   const beforeKeys = Object.keys(before).sort();
   const beforeSteps = JSON.stringify(before.snapshot.steps);
   const beforeValues = JSON.stringify(before.information["step-0"].values);
-  expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
+  expect(Object.hasOwn(before.information["step-0"], "reached")).toBe(false);
 
-  // Re-applying the migration must not change history or the read contract.
-  await sql.query(readFileSync(
-    resolve(import.meta.dirname, "../../../../db/migrations/0111_opc_historical_reach.sql"),
-    "utf8",
-  ));
+  // Upgrade: the prior records must survive and the new reach must appear.
+  await sql.query(migration("0111_opc_historical_reach.sql"));
   const after = await f.service.read(draft.draftId);
   expect(Object.keys(after).sort()).toEqual(beforeKeys);
   expect(JSON.stringify(after.snapshot.steps)).toBe(beforeSteps);
   expect(JSON.stringify(after.information["step-0"].values)).toBe(beforeValues);
   expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
+
+  // Restore the prior contract and re-apply 0111 without losing records.
+  await sql.query(migration("0110_opc_turn_round_ownership.sql"));
+  const restored = await f.service.read(draft.draftId);
+  expect(Object.hasOwn(restored.information["step-0"], "reached")).toBe(false);
+  expect(JSON.stringify(restored.snapshot.steps)).toBe(beforeSteps);
+  expect(JSON.stringify(restored.information["step-0"].values)).toBe(beforeValues);
+  await sql.query(migration("0111_opc_historical_reach.sql"));
+  expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
+  expect(JSON.stringify((await f.service.read(draft.draftId)).snapshot.steps)).toBe(beforeSteps);
 
   // Grants: the helper is internal-only and the read entry stays service-role only.
   const privilege = async (role: string, fn: string) => Number((await sql.query(
@@ -5197,9 +5273,25 @@ it("OPC: the historical reach projection is idempotent, permission-scoped and co
   for (const role of ["anon","authenticated","service_role"])
     expect(await privilege(role,"opc_historical_reach(uuid,uuid,text)")).toBe(0);
 
-  // Denied entry point: another authenticated actor cannot read this draft.
-  const other = await fixture(3, false, 0);
+  // Denied entry point: another authenticated actor cannot read this draft, and
+  // its own longer, stronger frontier must not leak into this draft.
+  const other = await fixture(3, false, 4);
+  const otherDraft = await other.service.start({requestId: randomUUID(), registration: other.registration, mode: "mentor"});
+  const otherVersion = (await other.service.read(otherDraft.draftId)).snapshot.steps["step-0"].version;
+  await other.service.information({
+    draftId: otherDraft.draftId, stepId: "step-0", requestId: randomUUID(), expectedVersion: otherVersion,
+    values: {
+      goal: { status: "confirmed", nature: "fact", value: "别的账号第一步" },
+      extra0: { status: "confirmed", nature: "fact", value: "别的账号第二步" },
+      extra1: { status: "confirmed", nature: "fact", value: "别的账号第三步" },
+      extra2: { status: "confirmed", nature: "fact", value: "别的账号第四步" },
+      extra3: { status: "unknown", nature: "unknown", value: "" },
+    },
+  });
   await expect(other.service.read(draft.draftId)).rejects.toThrow();
+  expect(((await other.service.read(otherDraft.draftId)).information["step-0"] as { reached?: string[] }).reached)
+    .toEqual(["goal","extra0","extra1","extra2","extra3"]);
+  expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
 
   // Absent history falls back honestly instead of claiming a frontier.
   const fresh = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
@@ -5223,6 +5315,8 @@ it("OPC: the historical reach projection is idempotent, permission-scoped and co
       goal: { status: "confirmed", nature: "fact", value: "不应写入" },
       extra0: { status: "confirmed", nature: "fact", value: "不应写入" },
       extra1: { status: "confirmed", nature: "fact", value: "不应写入" },
+      extra2: { status: "confirmed", nature: "fact", value: "不应写入" },
+      extra3: { status: "confirmed", nature: "fact", value: "不应写入" },
     },
   })).rejects.toThrow();
   expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
