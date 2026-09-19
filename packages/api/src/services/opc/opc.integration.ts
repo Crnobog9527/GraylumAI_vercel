@@ -5253,7 +5253,10 @@ it("OPC: the historical reach projection is idempotent, permission-scoped and co
   expect(JSON.stringify(after.information["step-0"].values)).toBe(beforeValues);
   expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
 
-  // Restore the prior contract and re-apply 0111 without losing records.
+  // Restore the prior contract and re-apply 0111 without losing records. The
+  // current definition is restored in `finally` so a failure cannot leave the
+  // disposable database on the older read contract.
+  try {
   await sql.query(migration("0110_opc_turn_round_ownership.sql"));
   const restored = await f.service.read(draft.draftId);
   expect(Object.hasOwn(restored.information["step-0"], "reached")).toBe(false);
@@ -5262,6 +5265,15 @@ it("OPC: the historical reach projection is idempotent, permission-scoped and co
   await sql.query(migration("0111_opc_historical_reach.sql"));
   expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
   expect(JSON.stringify((await f.service.read(draft.draftId)).snapshot.steps)).toBe(beforeSteps);
+  } finally {
+    await sql.query(migration("0111_opc_historical_reach.sql"));
+  }
+
+  // Revoked scope is denied through the normal read entry, then restored.
+  await sql.query("update bill2_drafts set revoked=true where id=$1", [draft.draftId]);
+  await expect(f.service.read(draft.draftId)).rejects.toThrow();
+  await sql.query("update bill2_drafts set revoked=false where id=$1", [draft.draftId]);
+  expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
 
   // Grants: the helper is internal-only and the read entry stays service-role only.
   const privilege = async (role: string, fn: string) => Number((await sql.query(
