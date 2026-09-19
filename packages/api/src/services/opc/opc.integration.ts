@@ -5493,31 +5493,30 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     await openDraft(first.draftId, "old");
     await expect.poll(headingText, {timeout:60000}).toContain("Extra field 1");
     expect(await page.getByRole("textbox", {name:"Extra field 1", exact:true}).count()).toBe(1);
-    // Wait for the opening this entry triggers to settle, then take the passive
-    // baseline: the reload itself must add nothing.
-    await expect.poll(async () => Number((await sql.query(
-      "select count(*)::int n from runtime_executions where actor_id=$1 and state not in ('completed','failed','cancelled')",
-      [f.actor],
-    )).rows[0].n), {timeout:60000}).toBe(0);
+    // Positively verify the entry's only legal opening (step-0/extra1) rather
+    // than waiting for an empty non-terminal set: the helper asserts the exact
+    // actor-wide effect set, completed execution, settled billing and non-empty
+    // request/execution/run/pre-deduct identities, then returns the identity set.
+    const oldOpening = [{
+      stepId: "step-0",
+      questionId: "extra1",
+      opening: true,
+      input: OPENING_INPUT,
+    }];
+    const oldIdentity = await expectExactMentorEffects(f.actor, first.draftId, first.roundId, oldOpening);
+    const openingBubble = page.locator("[data-message-role='assistant']").last();
+    await expect.poll(async () => (await openingBubble.textContent({timeout:5000})) ?? "", {timeout:60000})
+      .toContain("导师主动引导");
     mark("old opening settled");
-    const passiveBaseline = (await sql.query(
-      `select (select count(*)::int from runtime_executions where actor_id=$1) executions,
-              (select count(*)::int from bill2_runs where actor_id=$1) runs,
-              (select count(*)::int from credit_transactions where user_id=$1 and reason_code='bill2_reserve') reserves`,
-      [f.actor],
-    )).rows[0];
     await page.reload();
     await formHeading().waitFor({timeout:60000});
     mark("old reload");
     expect(await headingText()).toContain("Extra field 1");
-    expect((await sql.query(
-      `select (select count(*)::int from runtime_executions where actor_id=$1) executions,
-              (select count(*)::int from bill2_runs where actor_id=$1) runs,
-              (select count(*)::int from credit_transactions where user_id=$1 and reason_code='bill2_reserve') reserves`,
-      [f.actor],
-    )).rows[0]).toEqual(passiveBaseline);
+    expect(await expectExactMentorEffects(f.actor, first.draftId, first.roundId, oldOpening))
+      .toEqual(oldIdentity);
     await openDraft(second!.draftId, "new");
     await expect.poll(headingText, {timeout:60000}).toContain("重复标题");
+    expect(await page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3}).count()).toBe(1);
     expect(await page.getByRole("textbox", {name:"重复标题", exact:true}).count()).toBe(1);
     expect(await page.getByRole("textbox", {name:"Renamed goal", exact:true}).count()).toBe(0);
     await openDraft(first.draftId, "old revisit");
@@ -5529,6 +5528,7 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     )).rows as Array<{draft_id:string;revision_id:string}>;
     expect(rounds.find(r => r.draft_id === first.draftId)?.revision_id).toBe(f.pack.revisionId);
     expect(rounds.find(r => r.draft_id === second!.draftId)?.revision_id).toBe(pack2.revisionId);
+    expect(pageErrors).toEqual([]);
     mark("A complete");
     console.log("OPC_REVISION_PIN_BROWSER " + JSON.stringify({
       reads, pageErrors, oldRevision: f.pack.revisionId, newRevision: pack2.revisionId,
