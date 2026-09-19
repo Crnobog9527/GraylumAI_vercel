@@ -5555,10 +5555,18 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     await expect.poll(async () => (await page.getByText("这是导师要给出的成果建议", {exact:false}).count()), {timeout:60000}).toBeGreaterThan(0);
     expect(await page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3}).count()).toBe(1);
     expect(await page.getByRole("textbox", {name:"重复标题", exact:true}).count()).toBe(1);
+    // The mentor fixture deterministically proposes this text for the current
+    // question and the host keeps it unconfirmed: assert the exact value, the
+    // provisional status, and that the user actually sees it in the form.
+    const expectedProposal =
+      "建议草稿：围绕“重复标题”给出一个可直接使用的具体方案，依据已确认的信息，不声称做过真实研究。";
     await expect.poll(async () => {
-      const values = (await secondRead()).information["step-0"].values;
-      return [values?.extra0?.value ?? "", values?.extra0?.status ?? ""].join("|");
-    }, {timeout:60000}).not.toBe("|");
+      const proposal = (await secondRead()).information["step-0"].values?.extra0;
+      return {value: proposal?.value ?? "", status: proposal?.status ?? ""};
+    }, {timeout: 60000}).toEqual({value: expectedProposal, status: "provisional"});
+    const proposalBox = page.locator("section[aria-label='本步填写信息']").getByRole("textbox", {name:"重复标题", exact:true});
+    await expect.poll(() => proposalBox.count(), {timeout: 60000}).toBe(1);
+    await expect.poll(() => proposalBox.inputValue(), {timeout: 60000}).toBe(expectedProposal);
     mark("new progressed to 1.3");
     await openDraft(first.draftId, "old revisit");
     expect(await headingText()).toContain("Extra field 1");
