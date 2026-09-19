@@ -5224,6 +5224,10 @@ it("OPC: the historical reach projection is idempotent, permission-scoped and co
     resolve(import.meta.dirname, "../../../../db/migrations/" + name),
     "utf8",
   );
+  // The whole transition runs under one failure-safe cleanup: any failure —
+  // including the first swap — restores the current read definition, and the
+  // original error is preserved (the restore never masks it).
+  try {
   await sql.query(migration("0110_opc_turn_round_ownership.sql"));
   const priorRead = await f.service.read(draft.draftId);
   expect(Object.hasOwn(priorRead.information["step-0"], "reached")).toBe(false);
@@ -5253,10 +5257,7 @@ it("OPC: the historical reach projection is idempotent, permission-scoped and co
   expect(JSON.stringify(after.information["step-0"].values)).toBe(beforeValues);
   expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
 
-  // Restore the prior contract and re-apply 0111 without losing records. The
-  // current definition is restored in `finally` so a failure cannot leave the
-  // disposable database on the older read contract.
-  try {
+  // Restore the prior contract and re-apply 0111 without losing records.
   await sql.query(migration("0110_opc_turn_round_ownership.sql"));
   const restored = await f.service.read(draft.draftId);
   expect(Object.hasOwn(restored.information["step-0"], "reached")).toBe(false);
@@ -5266,13 +5267,23 @@ it("OPC: the historical reach projection is idempotent, permission-scoped and co
   expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
   expect(JSON.stringify((await f.service.read(draft.draftId)).snapshot.steps)).toBe(beforeSteps);
   } finally {
-    await sql.query(migration("0111_opc_historical_reach.sql"));
+    try {
+      await sql.query(migration("0111_opc_historical_reach.sql"));
+    } catch (restoreError) {
+      console.error("reach read-contract restore failed", String(restoreError));
+      throw restoreError;
+    }
   }
 
-  // Revoked scope is denied through the normal read entry, then restored.
-  await sql.query("update bill2_drafts set revoked=true where id=$1", [draft.draftId]);
-  await expect(f.service.read(draft.draftId)).rejects.toThrow();
-  await sql.query("update bill2_drafts set revoked=false where id=$1", [draft.draftId]);
+  // Revoked scope is denied with the exact code through the normal read entry,
+  // and the flag is restored even if the assertion fails.
+  expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
+  try {
+    await sql.query("update bill2_drafts set revoked=true where id=$1", [draft.draftId]);
+    await expect(f.service.read(draft.draftId)).rejects.toThrow("OPC_DENIED");
+  } finally {
+    await sql.query("update bill2_drafts set revoked=false where id=$1", [draft.draftId]);
+  }
   expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
 
   // Grants: the helper is internal-only and the read entry stays service-role only.
@@ -5343,12 +5354,7 @@ it("OPC: the historical reach projection is idempotent, permission-scoped and co
   }));
 }, 300000);
 
-// Reproducible blocker: republishing a second revision of the SAME skill id is
-// currently refused by the publication validation (`INVALID_PACKAGE`) after the
-// skill-binding mismatch was fixed, so the pinned-draft assertions below cannot
-// run yet. `it.fails` keeps the reproduction executable without a red suite; flip
-// it back to `it(` as soon as the publication path accepts the second revision.
-it.fails("OPC: a second published revision drives new drafts while an existing draft stays pinned", async () => {
+it("OPC: a second published revision drives new drafts while an existing draft stays pinned", async () => {
   const f = await fixture(3, false, 4), model = randomUUID();
   await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Revision local','opc-revision','fixture','true',1000,32000)",[model]);
   await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
@@ -5377,9 +5383,17 @@ it.fails("OPC: a second published revision drives new drafts while an existing d
 
   // Publish a second revision of the same module: renamed, reordered, fewer
   // fields, a repeated title across steps and one agent_proposal role.
-  // Republish the SAME skill: a second revision must keep the module's skill
-  // binding while the new registration points at the new revision.
-  const pack2 = { ...makePackage(), id: f.pack.id }, registration2 = "opc2-" + randomUUID(), flow2 = makeWorkflow(3, false);
+  // Republish the SAME skill: the factory keeps the outer id, the descriptor
+  // packageId, the file hashes and the prior version coherent (a hand-patched
+  // identity would be rejected as INVALID_PACKAGE before any publication).
+  const pack2 = makePackage(f.pack.id, true), registration2 = "opc2-" + randomUUID(), flow2 = makeWorkflow(3, false);
+  expect(pack2.id).toBe(f.pack.id);
+  expect(pack2.descriptor.packageId).toBe(pack2.id);
+  expect(pack2.revisionId).not.toBe(f.pack.revisionId);
+  expect(pack2.expectedVersion).toBe(1);
+  expect(pack2.descriptor.packageHash).toBe(
+    (await import("../skills/loader")).packageHash(pack2.descriptor),
+  );
   flow2.steps.forEach((step, index) => {
     step.information = index === 0
       ? [
@@ -5394,14 +5408,16 @@ it.fails("OPC: a second published revision drives new drafts while an existing d
     "insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)",
     [registration2, f.moduleId, pack2.id, pack2.revisionId, flow2, "第二版定位"],
   );
-  // Surface the unmasked database error if the second registration is refused.
+  const secondRequestId = randomUUID();
   let second: {draftId: string};
   try {
-    second = await f.service.start({requestId: randomUUID(), registration: registration2, mode: "mentor"});
+    second = await f.service.start({requestId: secondRequestId, registration: registration2, mode: "mentor"});
   } catch (error) {
+    // Observe (never replace) the same request so the failed action's identity is
+    // preserved while the raw database error is surfaced for a local test.
     const raw = await sql.query(
-      "select opc_start($1,$2,$3,$4) result", [f.actor, randomUUID(), registration2, "mentor"],
-    ).then(() => "unexpectedly succeeded").catch((cause) => String((cause as Error).message));
+      "select opc_start($1,$2,$3,$4) result", [f.actor, secondRequestId, registration2, "mentor"],
+    ).then(() => "replayed without error").catch((cause) => String((cause as Error).message));
     throw new Error("second registration refused: " + String((error as Error).message) + " | raw: " + raw);
   }
   const secondSchema = await schemaOf(second!.draftId, "step-0");
