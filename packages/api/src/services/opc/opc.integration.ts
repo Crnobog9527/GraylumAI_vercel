@@ -5504,14 +5504,36 @@ it("OPC: a second published revision drives new drafts while an existing draft s
       input: OPENING_INPUT,
     }];
     const oldIdentity = await expectExactMentorEffects(f.actor, first.draftId, first.roundId, oldOpening);
-    const openingBubble = page.locator("[data-message-role='assistant']").last();
-    await expect.poll(async () => (await openingBubble.textContent({timeout:5000})) ?? "", {timeout:60000})
-      .toContain("导师主动引导");
+    expect(oldIdentity).toHaveLength(1);
+    const [openingExecutionId] = JSON.parse(oldIdentity[0]) as [string, string, string, string];
+    const openingRows = (await sql.query<{ body: string | null }>(
+      "select coalesce(result->>'body', primary_result->>'body') body from runtime_executions where actor_id=$1 and id=$2",
+      [f.actor, openingExecutionId],
+    )).rows;
+    expect(openingRows).toHaveLength(1);
+    const openingPayload = JSON.parse(openingRows[0].body ?? "") as { message?: unknown } | null;
+    if (typeof openingPayload?.message !== "string" || !openingPayload.message.trim())
+      throw new Error("expected this synthetic opening's completed public message");
+    const normaliseOpening = (value: string) => value.replace(/\s+/g, " ").trim();
+    const expectedOpeningMessage = normaliseOpening(openingPayload.message);
+    const openingParagraph = page.locator(
+      `[data-execution-id="${openingExecutionId}"] [data-message-role="assistant"] p`,
+    );
+    const expectOpeningVisible = async () => {
+      await expect.poll(() => openingParagraph.count(), {timeout: 60000}).toBe(1);
+      await openingParagraph.waitFor({state: "visible", timeout: 60000});
+      await expect.poll(async () => normaliseOpening(
+        (await openingParagraph.textContent({timeout: 5000})) ?? "",
+      ), {timeout: 60000}).toBe(expectedOpeningMessage);
+    };
+    await expectOpeningVisible();
     mark("old opening settled");
     await page.reload();
     await formHeading().waitFor({timeout:60000});
     mark("old reload");
     expect(await headingText()).toContain("Extra field 1");
+    // The same execution's same public body must come back after the reload.
+    await expectOpeningVisible();
     expect(await expectExactMentorEffects(f.actor, first.draftId, first.roundId, oldOpening))
       .toEqual(oldIdentity);
     await openDraft(second!.draftId, "new");
