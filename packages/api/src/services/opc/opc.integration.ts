@@ -5342,3 +5342,79 @@ it("OPC: the historical reach projection is idempotent, permission-scoped and co
     otherStepReach: ["goal"],
   }));
 }, 300000);
+
+// Reproducible blocker: republishing a second revision of the SAME skill id is
+// currently refused by the publication validation (`INVALID_PACKAGE`) after the
+// skill-binding mismatch was fixed, so the pinned-draft assertions below cannot
+// run yet. `it.fails` keeps the reproduction executable without a red suite; flip
+// it back to `it(` as soon as the publication path accepts the second revision.
+it.fails("OPC: a second published revision drives new drafts while an existing draft stays pinned", async () => {
+  const f = await fixture(3, false, 4), model = randomUUID();
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Revision local','opc-revision','fixture','true',1000,32000)",[model]);
+  await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  const first = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
+  const schemaOf = async (draftId: string, stepId: string) =>
+    (await f.service.read(draftId)).information[stepId].schema as Array<{id:string;title:string;elicitation?:string}>;
+  const reachOfStep = async (draftId: string, stepId: string) =>
+    ((await f.service.read(draftId)).information[stepId] as { reached?: string[] }).reached ?? [];
+  const versionOf = async (draftId: string, stepId: string) =>
+    (await f.service.read(draftId)).snapshot.steps[stepId].version;
+
+  const firstSchema = await schemaOf(first.draftId, "step-0");
+  expect(firstSchema.map(field => field.id)).toEqual(["goal","extra0","extra1","extra2","extra3"]);
+  await f.service.information({
+    draftId: first.draftId, stepId: "step-0", requestId: randomUUID(),
+    expectedVersion: await versionOf(first.draftId, "step-0"),
+    values: {
+      goal: { status: "confirmed", nature: "fact", value: "第一步目标" },
+      extra0: { status: "deferred", nature: "unknown", value: "第一步暂缓" },
+      extra1: { status: "unknown", nature: "unknown", value: "" },
+      extra2: { status: "unknown", nature: "unknown", value: "" },
+      extra3: { status: "unknown", nature: "unknown", value: "" },
+    },
+  });
+  expect(await reachOfStep(first.draftId, "step-0")).toEqual(["goal","extra0","extra1"]);
+
+  // Publish a second revision of the same module: renamed, reordered, fewer
+  // fields, a repeated title across steps and one agent_proposal role.
+  // Republish the SAME skill: a second revision must keep the module's skill
+  // binding while the new registration points at the new revision.
+  const pack2 = { ...makePackage(), id: f.pack.id }, registration2 = "opc2-" + randomUUID(), flow2 = makeWorkflow(3, false);
+  flow2.steps.forEach((step, index) => {
+    step.information = index === 0
+      ? [
+          { id: "extra1", title: "重复标题", required: false, profileKey: "r_extra1" },
+          { id: "goal", title: "Renamed goal", required: true, profileKey: "r_goal" },
+          { id: "extra0", title: "重复标题", required: false, profileKey: "r_extra0", elicitation: "agent_proposal" },
+        ]
+      : [{ id: "goal", title: "重复标题", required: true, profileKey: "r_goal_" + index }];
+  });
+  await publishSkillPackage(admin, f.owner, pack2);
+  await sql.query(
+    "insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)",
+    [registration2, f.moduleId, pack2.id, pack2.revisionId, flow2, "第二版定位"],
+  );
+  // Surface the unmasked database error if the second registration is refused.
+  let second: {draftId: string};
+  try {
+    second = await f.service.start({requestId: randomUUID(), registration: registration2, mode: "mentor"});
+  } catch (error) {
+    const raw = await sql.query(
+      "select opc_start($1,$2,$3,$4) result", [f.actor, randomUUID(), registration2, "mentor"],
+    ).then(() => "unexpectedly succeeded").catch((cause) => String((cause as Error).message));
+    throw new Error("second registration refused: " + String((error as Error).message) + " | raw: " + raw);
+  }
+  const secondSchema = await schemaOf(second!.draftId, "step-0");
+  expect(secondSchema.map(field => field.id)).toEqual(["extra1","goal","extra0"]);
+  expect(secondSchema.map(field => field.title)).toEqual(["重复标题","Renamed goal","重复标题"]);
+  expect(secondSchema[2].elicitation).toBe("agent_proposal");
+  expect((await schemaOf(second!.draftId, "step-1")).map(field => field.title)).toEqual(["重复标题"]);
+  // The existing draft stays pinned to its original revision.
+  const pinned = await schemaOf(first.draftId, "step-0");
+  expect(pinned.map(field => field.id)).toEqual(["goal","extra0","extra1","extra2","extra3"]);
+  expect(pinned.some(field => field.title === "Renamed goal")).toBe(false);
+  console.log("OPC_REVISION_PIN " + JSON.stringify({
+    secondOrder: secondSchema.map(field => field.id),
+    pinnedOrder: pinned.map(field => field.id),
+  }));
+}, 300000);
