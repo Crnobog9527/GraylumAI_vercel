@@ -152,6 +152,32 @@ export function navigatorRows(
   }));
 }
 /**
+ * Display-only resolver for the review range.
+ *
+ * A visible navigator row must be openable: the selected id resolves inside the
+ * reviewable range (questions already reached in this draft/round), so a
+ * previously reached question stays readable while an earlier answer is being
+ * reviewed. When the selected id is not reviewable it falls back to the current
+ * progression question and then to the last reviewable question.
+ *
+ * This never authorizes anything: server admission, confirmation and unknown
+ * question rejection keep using the progression range and the SQL checks.
+ */
+export function displayedReviewQuestion(
+  schema: readonly InformationQuestion[],
+  values: Record<string, QuestionAnswer> | null | undefined = {},
+  selectedId?: string | null,
+  reachedIds: readonly (string | null | undefined)[] = [],
+) {
+  const answers = values ?? {};
+  const reviewable = reviewableQuestions(schema, answers, reachedIds);
+  return (
+    reviewable.find(field => field.id === selectedId) ??
+    nextInformationQuestion(schema, answers) ??
+    reviewable.at(-1)
+  );
+}
+/**
  * Duplicate-action suppression must compare the requested status as well as the
  * value. Re-confirming an unchanged `confirmed` answer stays a no-op, but an
  * explicit `deferred → confirmed` is a real user action even when the stored

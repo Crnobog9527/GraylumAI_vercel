@@ -93,7 +93,7 @@ async function expectExactMentorEffects(
     row.execution_id, row.request_id, row.billing_id, row.pre_deduct_id,
   ])).sort();
 }
-async function fixture(n = 6, secondField = false) {
+async function fixture(n = 6, secondField = false, extraFields = 0) {
   const password = "Local-" + randomUUID() + "!",
     email = randomUUID() + "@example.test";
   const made = await admin.auth.admin.createUser({
@@ -138,6 +138,15 @@ async function fixture(n = 6, secondField = false) {
     ];
   });
   if (secondField) flow.steps[0].information!.push({id:"other",title:"Second independent field",required:false,profileKey:"other"});
+  // Configurable extra fields let a focused case exercise more than the two
+  // default questions of the first step without a second fixture.
+  for (let i = 0; i < extraFields; i++)
+    flow.steps[0].information!.push({
+      id: "extra" + i,
+      title: "Extra field " + i,
+      required: false,
+      profileKey: "extra_" + i,
+    });
   await sql.query(
     "insert into skills(id,skill_key,created_by) values($1,$2,$3)",
     [pack.id, registration, owner],
@@ -2772,7 +2781,12 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     expect(await page.getByRole("button", {name:"确认本题并继续",exact:true}).isEnabled()).toBe(false);
     await page.getByRole("button", {name:"继续当前待确认问题",exact:true}).click();
     await second().waitFor();
-    await send("摄影课程");await expect.poll(()=>second().inputValue()).toBe("摄影课程");
+    await send("摄影课程");
+    // Wait for the durable projection under a bounded timeout, then for the UI
+    // to show it. The former 1 s UI poll failed intermittently while the
+    // request/execute/result-read chain was still in flight.
+    await expect.poll(async()=>(await f.service.read(draft.draftId)).information["step-0"].values?.other?.value ?? "",{timeout:30000}).toBe("摄影课程");
+    await expect.poll(()=>second().inputValue(),{timeout:30000}).toBe("摄影课程");
     // The 700ms debounce plus authenticated read/write is not a 1000ms
     // operation. Keep an explicit upper bound and assert durable content, not
     // just that a matching HTTP request was sent.
@@ -4675,6 +4689,130 @@ it("OPC: an upstream reconfirmation can be resubmitted and never hides already a
     expect(errors).toEqual([]);
     expect(external).toEqual([]);
     console.log("OPC_QF_MILESTONES " + JSON.stringify({...marks, totalMs: Date.now() - startedAt}));
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+
+it("OPC: clicking a review row opens that reached question without advancing progression or spending", async () => {
+  const {chromium} = await import("../../../../../apps/web/node_modules/@playwright/test");
+  // Five questions in the first step: q1, q2, q3, q4 reached, q5 never reached.
+  const f = await fixture(3, false, 4), model = randomUUID();
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Review select local','opc-review-select','fixture','true',1000,32000)",[model]);
+  await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  const draft = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
+  const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
+  const startedAt = Date.now();
+  const external: string[] = [];
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", route => {
+      const host = new URL(route.request().url()).hostname;
+      if (["127.0.0.1","localhost"].includes(host)) return route.continue();
+      external.push(host);
+      return route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(90000);
+    const errors: string[] = [];
+    page.on("pageerror", e => errors.push(e.message));
+    const path = "/positioning/" + draft.draftId;
+    const ready = page.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), {timeout: 90000});
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path));
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", {name:"登录", exact:true}).last().click();
+    await page.waitForURL(process.env.V3_LOCAL_APP + path);
+
+    const read = async () => await f.service.read(draft.draftId);
+    const counts = async () => (await sql.query(
+      `select (select count(*)::int from runtime_executions where actor_id=$1) executions,
+              (select count(*)::int from bill2_runs where actor_id=$1) runs,
+              (select count(*)::int from credit_transactions where user_id=$1 and reason_code='bill2_reserve') reserves`,
+      [f.actor],
+    )).rows[0] as {executions:number; runs:number; reserves:number};
+    const field = (title: string) => page.getByRole("textbox", {name:title, exact:true});
+    const heading = () =>
+      page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3});
+    const confirmButton = () => page.getByRole("button", {name:"确认本题并继续", exact:true});
+    const navigator = page.getByRole("navigation", {name:"本步骤已到达的问题"});
+    const rowTexts = async () =>
+      (await navigator.getByRole("button").allTextContents()).map(t => t.replace(/\s+/g," ").trim());
+    const row = (label: string) => navigator.getByRole("button", {name:new RegExp("^" + label.replace(".","\\.") + " ")});
+
+    // q1, q2 confirmed; q3 deferred; that reaches q4 and never q5.
+    await field("已知目标 0").fill("客户定位");
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("confirmed");
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.2");
+    await field("Extra field 0").fill("第二条事实");
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra0?.status, {timeout:30000}).toBe("confirmed");
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.3");
+    await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.status, {timeout:30000}).toBe("deferred");
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra2?.status, {timeout:30000}).not.toBe("confirmed");
+    await expect.poll(async () => (await rowTexts()).length, {timeout:60000}).toBe(4);
+    expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
+
+    // Edit q1 and let its real autosave land: rows must stay q1..q4.
+    await row("1.1").click();
+    await field("已知目标 0").fill("客户定位（修改）");
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("provisional");
+    await expect.poll(async () => (await rowTexts()).length, {timeout:30000}).toBe(4);
+    await expect.poll(async () => (await rowTexts())[0] ?? "", {timeout:30000}).toContain("待核对");
+    const rowsWhileEditing = await rowTexts();
+    expect(rowsWhileEditing.map(t => t.split(" ")[0])).toEqual(["1.1","1.2","1.3","1.4"]);
+    expect(rowsWhileEditing[1]).toContain("已确认");
+    expect(rowsWhileEditing[2]).toContain("待定（已暂缓）");
+    const settled = await counts();
+
+    // Clicking q3 must display q3, not jump back to the pending q1.
+    await row("1.3").click();
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.3");
+    await expect.poll(async () => field("Extra field 1").count(), {timeout:30000}).toBe(1);
+    expect(await field("Extra field 1").inputValue()).toBe("用户明确选择暂不提供此选填信息。");
+    await expect.poll(() => row("1.3").getAttribute("aria-current"), {timeout:15000}).toBe("true");
+    // Clicking q4 must display q4 as well.
+    await row("1.4").click();
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.4");
+    await expect.poll(async () => field("Extra field 2").count(), {timeout:30000}).toBe(1);
+    expect(await field("Extra field 2").inputValue()).toBe("");
+    await expect.poll(() => row("1.4").getAttribute("aria-current"), {timeout:15000}).toBe("true");
+    // The pending progression question is still q1, and a review-only selection
+    // may not confirm, defer or spend.
+    expect((await read()).information["step-0"].values?.goal?.status).toBe("provisional");
+    await expect.poll(() => confirmButton().isEnabled(), {timeout:15000}).toBe(false);
+    await expect.poll(async () => page.getByText("这是回看较早的问题", {exact:false}).count(), {timeout:15000}).toBeGreaterThan(0);
+    expect(await counts()).toEqual(settled);
+    // Only the "当前" marker follows the selection; identity, order and the
+    // answer states of every row stay unchanged.
+    const stripCurrent = (rows: string[]) => rows.map(t => t.replace(" · 当前", ""));
+    expect(stripCurrent(await rowTexts())).toEqual(stripCurrent(rowsWhileEditing));
+
+    // Refresh keeps the same rows and the same click behaviour.
+    await page.reload();
+    await expect.poll(async () => (await rowTexts()).length, {timeout:90000}).toBe(4);
+    await row("1.4").click();
+    await expect.poll(async () => heading().textContent(), {timeout:60000}).toContain("1.4");
+    expect(await counts()).toEqual(settled);
+
+    // Reconfirming the pending q1 continues normally.
+    await row("1.1").click();
+    await field("已知目标 0").waitFor();
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:60000}).toBe("confirmed");
+    expect((await read()).snapshot.steps["step-0"].valid).toBe(false);
+
+    expect(errors).toEqual([]);
+    expect(external).toEqual([]);
+    console.log("OPC_QF2_MILESTONES " + JSON.stringify({
+      rowsReached: rowsWhileEditing.length,
+      settled,
+      totalMs: Date.now() - startedAt,
+    }));
   } finally {
     await browser.close();
   }

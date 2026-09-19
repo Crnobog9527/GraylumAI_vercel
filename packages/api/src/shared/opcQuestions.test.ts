@@ -4,6 +4,7 @@ import {
   confirmationActionIsRedundant,
   confirmQuestionValues,
   displayedQuestion,
+  displayedReviewQuestion,
   emptyAnswer,
   isRecordedNonAnswer,
   navigatorRows,
@@ -264,4 +265,30 @@ it("keeps the already answered rows pinned when an earlier question becomes prov
   // row; it is not invented into the review list.
   expect(before.map((row) => row.id)).toContain("extra");
   expect(after.map((row) => row.id)).not.toContain("extra");
+});
+
+it("resolves a review selection inside the reached range instead of jumping back to the pending question", () => {
+  const values: Record<string, QuestionAnswer> = {
+    lane: { ...emptyAnswer, value: "编辑中的内容", status: "provisional" },
+    offer: { ...emptyAnswer, value: "受众事实", status: "confirmed" },
+    extra: { ...emptyAnswer, value: "补充内容", status: "deferred" },
+  };
+  // The progression prefix shrank while lane is unresolved…
+  expect(reachedQuestions(schema, values).map((f) => f.id)).toEqual(["lane"]);
+  // …so the old resolver cannot open a reached row the navigator still shows…
+  expect(displayedQuestion(schema, values, "extra")?.id).toBe("lane");
+  // …while the review resolver opens exactly the clicked reached question.
+  expect(displayedReviewQuestion(schema, values, "extra")?.id).toBe("extra");
+  expect(displayedReviewQuestion(schema, values, "offer")?.id).toBe("offer");
+  // Unknown or absent selections fall back to the pending progression question.
+  expect(displayedReviewQuestion(schema, values, "unknown-id")?.id).toBe("lane");
+  expect(displayedReviewQuestion(schema, values, undefined)?.id).toBe("lane");
+  // Server-recorded turn evidence can reopen a reached-but-unanswered question.
+  const onlyLane: Record<string, QuestionAnswer> = {
+    lane: { ...emptyAnswer, value: "编辑中的内容", status: "provisional" },
+  };
+  expect(displayedReviewQuestion(schema, onlyLane, "extra")?.id).toBe("lane");
+  expect(displayedReviewQuestion(schema, onlyLane, "extra", ["extra"])?.id).toBe("extra");
+  // Ids that are not part of the pinned schema are never invented into it.
+  expect(displayedReviewQuestion(schema, onlyLane, "not-in-schema", ["not-in-schema"])?.id).toBe("lane");
 });

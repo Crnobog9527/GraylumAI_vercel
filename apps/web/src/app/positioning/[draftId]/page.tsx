@@ -11,7 +11,7 @@ import { applyMentorTurnRules, readWorkflowMentorTurn } from "./mentor-response"
 import {
   confirmationActionIsRedundant,
   confirmQuestionValues,
-  displayedQuestion,
+  displayedReviewQuestion,
   isOpeningInput,
   navigatorRows,
   nextInformationQuestion,
@@ -726,8 +726,13 @@ export default function PositioningDraft({
         ) as Record<string, Information>;
         let changed = false;
         for (const [fieldId, suggestion] of Object.entries(accepted)) {
-          // A late response for a different question cannot fill an unseen field.
-          if (fieldId !== displayedQuestion(schema, d.information[turn.stepId].values, activeQuestions[turn.stepId])?.id || values[fieldId]?.value.trim()) continue;
+          // A late response is projected onto the question it was actually
+          // asked about (its own stored identity), never onto whatever the user
+          // is currently reviewing, and never onto an unseen field.
+          const turnQuestionId =
+            turn.questionId ??
+            nextInformationQuestion(schema, d.information[turn.stepId].values)?.id;
+          if (fieldId !== turnQuestionId || values[fieldId]?.value.trim()) continue;
           values[fieldId] = toInformation(suggestion);
           changed = true;
         }
@@ -769,7 +774,9 @@ export default function PositioningDraft({
     // pending step, or an already confirmed step being reviewed.
     if (!d.snapshot.steps[step.id].valid && stepIndex !== firstPending) return;
     const state = d.information[step.id];
-    const question = displayedQuestion(state.schema, state.values, activeQuestions[step.id]);
+    // Opening targets the progression question only: reviewing an earlier
+    // reached question must never trigger a new paid opening for another one.
+    const question = nextInformationQuestion(state.schema, state.values);
     if (!question) return;
     // Reviewing a question that is already confirmed restores its content; it
     // does not generate another turn.
@@ -1689,8 +1696,39 @@ export default function PositioningDraft({
           }>;
           const confirmationState = confirmEnvelopeState(step.id);
           const pendingConfirmation = pendingConfirmationFor(step.id);
-          const activeQuestion = (pendingConfirmation?.questionId && schema.find(f => f.id === pendingConfirmation.questionId)) || displayedQuestion(schema, d.information[step.id].values, activeQuestions[step.id]);
+          // Server-recorded turns of this draft/round are the durable "already
+          // reached" evidence for the review range of this step.
+          const reviewReachedIds = (
+            (d.turns ?? []) as Array<{
+              stepId: string;
+              questionId: string | null;
+              roundId?: string | null;
+            }>
+          )
+            .filter(
+              (turn) =>
+                turn.stepId === step.id &&
+                (!Object.hasOwn(turn, "roundId") || turn.roundId === d.roundId),
+            )
+            .map((turn) => turn.questionId);
+          // The displayed question follows the review selection, so a row that
+          // is visible can actually be opened and read. An unresolved
+          // confirmation keeps owning its original question.
+          const activeQuestion = (pendingConfirmation?.questionId && schema.find(f => f.id === pendingConfirmation.questionId)) || displayedReviewQuestion(schema, d.information[step.id].values, activeQuestions[step.id], reviewReachedIds);
           if (!activeQuestion) return null;
+          // Review-only selection: the visible question is not the progression
+          // question of an unfinished step, so it stays readable but may not
+          // start a confirmation, a deferral or a mentor request.
+          const pendingQuestion = nextInformationQuestion(schema, d.information[step.id].values);
+          // A pending (or malformed) confirmation envelope keeps owning its own
+          // question and must stay resumable, so it is never treated as a pure
+          // review selection.
+          const reviewOnly =
+            confirmationState.kind === "none" &&
+            !pendingConfirmation &&
+            !snap.steps[step.id].valid &&
+            Boolean(pendingQuestion) &&
+            pendingQuestion?.id !== activeQuestion.id;
           const questionConfirmed =
             questionIsConfirmed(d.information[step.id].values?.[activeQuestion.id]) &&
             !infoEdits[step.id];
@@ -1822,6 +1860,7 @@ export default function PositioningDraft({
                       openingSteps.includes(step.id) ||
                       Boolean(pendingMentor) || hasPendingConfirmation || hasPendingStepRequest ||
                       snap.state !== "draft" ||
+                      reviewOnly ||
                       !mentorInput.trim()
                     }
                     onClick={() => ask(step, activeQuestion.id)}
@@ -1984,17 +2023,24 @@ export default function PositioningDraft({
                               答案已保存为待核对内容，请确认或继续修改。
                             </p>
                           )}
-                          <Button className="w-full" disabled={busy || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || confirmationRedundant(step.id, field.id, false)} onClick={() => confirmStep(step, index, field.id, false, nonAnswersFor(step.id, field.id))}>
+                          <Button className="w-full" disabled={busy || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || reviewOnly || confirmationRedundant(step.id, field.id, false)} onClick={() => confirmStep(step, index, field.id, false, nonAnswersFor(step.id, field.id))}>
                             {pendingConfirmation ? "继续核对本题确认" : "确认本题并继续"}
                           </Button>
-                          <Button variant="outline" className="w-full" disabled={busy || hasPendingConfirmation || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || confirmationRedundant(step.id, field.id, true)} onClick={() => confirmStep(step, index, field.id, true, nonAnswersFor(step.id, field.id))}>
+                          <Button variant="outline" className="w-full" disabled={busy || hasPendingConfirmation || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || reviewOnly || confirmationRedundant(step.id, field.id, true)} onClick={() => confirmStep(step, index, field.id, true, nonAnswersFor(step.id, field.id))}>
                             {field.required ? "按填写的原因暂缓本题并继续" : "暂时跳过本题"}
                           </Button>
                           <p className="text-xs text-[var(--text-secondary)]">还没想清楚可以继续和导师聊。{field.required ? "暂缓时请在上方写明原因，不会记成已确认事实。" : "选填问题可以明确选择跳过。"}</p>
                           {pendingConfirmation && <p role="status">正在核对原确认请求。确认成功前保持本题，不会跳过下一题。</p>}
+                          {reviewOnly && (
+                            <p role="status">
+                              这是回看较早的问题：答案与历史仍然可读。当前推进仍在「
+                              {pendingQuestion?.title ?? "当前待确认问题"}
+                              」，请先回答并确认它；回看本身不会确认、不会推进进度，也不会产生新的模型调用。
+                            </p>
+                          )}
                           {confirmationState.kind === "valid" && (
                             <p role="status">
-                              正在继续上次未完成的确认（
+      正在继续上次未完成的确认（
                               {confirmationState.envelope.phase === "information"
                                 ? "保存本题信息"
                                 : confirmationState.envelope.phase === "save"
@@ -2042,23 +2088,7 @@ export default function PositioningDraft({
                       schema,
                       d.information[step.id].values,
                       activeQuestion.id,
-                      // Server-recorded turns of this draft/round are the
-                      // durable "already reached" evidence, so an earlier edit
-                      // can never shrink the review list.
-                      (
-                        (d.turns ?? []) as Array<{
-                          stepId: string;
-                          questionId: string | null;
-                          roundId?: string | null;
-                        }>
-                      )
-                        .filter(
-                          (turn) =>
-                            turn.stepId === step.id &&
-                            (!Object.hasOwn(turn, "roundId") ||
-                              turn.roundId === d.roundId),
-                        )
-                        .map((turn) => turn.questionId),
+                      reviewReachedIds,
                     );
                     return (
                       <nav
