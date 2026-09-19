@@ -1,7 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { transportEvidence, localFixtureAdapter, unknownEvidence, type CallIdentity, type TransportObservation } from './fixtureAdapter';
+import { transportEvidence, unknownEvidence, type CallIdentity, type TransportObservation } from './fixtureAdapter';
+import {openRouterLimits} from './openRouterPolicy';
+import { openRouterEvidence } from './openRouterEvidence';
 import { aggregateCredits } from './decimal';
 import { applyInvitationRebateForSpend } from '../invitationRebate';
 const uuid = z.string().uuid();
@@ -9,10 +11,11 @@ const scope = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('positioning_draft'), draftId: uuid }).strict(),
   z.object({ kind: z.literal('work_item'), projectId: uuid, workItemId: uuid }).strict(),
 ]);
+export const frozenCallPolicy = z.object({ modelId: uuid, provider:z.string().min(1),account:z.string().min(1),model:z.string().min(1),protocol:z.enum(['fixture-cost-v1','openrouter-chat-v1']),providerLimits:openRouterLimits.optional(),upperUsd:z.string(),inputLimit:z.number().int().positive().max(1_000_000),outputLimit:z.number().int().positive().max(1_000_000),automaticRetry:z.literal(false),hiddenTools:z.literal(false),lookupSupported:z.boolean() }).strict();
 const frozen = z.object({
-  contractVersion: z.literal('bill2.v1'), mode: z.literal('isolated'), sessionRef: z.null().optional(), scope,
+  contractVersion: z.literal('bill2.v1'), mode: z.enum(['isolated','staging_test']), testWindowId:uuid.optional(), sessionRef: z.null().optional(), scope,
   moduleId: uuid.optional(), skillId: uuid.optional(),
-  callPolicy: z.array(z.object({ modelId: uuid, provider:z.string().min(1),account:z.string().min(1),model:z.string().min(1),protocol:z.literal('fixture-cost-v1'),upperUsd:z.string(),inputLimit:z.number().int().positive().max(1_000_000),outputLimit:z.number().int().positive().max(1_000_000),automaticRetry:z.literal(false),hiddenTools:z.literal(false),lookupSupported:z.boolean() }).strict()).min(1).max(32),
+  callPolicy: z.array(frozenCallPolicy).min(1).max(32),
   operation: z.enum(['question', 'research', 'organize', 'plan', 'work']), modelId: uuid, revisionId: uuid.optional(),
   sourceHash: z.string().regex(/^[a-f0-9]{64}$/), input: z.unknown(),
   rules: z.object({ version: z.string().min(1), quoteVersion: z.string().min(1), creditsPerUsd: z.string(), multiplier: z.string(),
@@ -22,17 +25,31 @@ const frozen = z.object({
 }).strict();
 export type FrozenRun = z.infer<typeof frozen>;
 const call = z.object({ provider: z.string().min(1).max(128), account: z.string().min(1).max(128), model: z.string().min(1).max(256),
-  protocol: z.literal('fixture-cost-v1'), requestHash: z.string().regex(/^[a-f0-9]{64}$/), upperUsd: z.string(),
+  protocol: z.enum(['fixture-cost-v1','openrouter-chat-v1']), providerLimits:openRouterLimits.optional(), requestHash: z.string().regex(/^[a-f0-9]{64}$/), upperUsd: z.string(),
   inputLimit: z.number().int().positive().max(1_000_000), outputLimit: z.number().int().positive().max(1_000_000),
   automaticRetry: z.literal(false), hiddenTools: z.literal(false), lookupSupported: z.boolean(), phase: z.string().min(1).max(64) }).strict();
 export type FrozenCall = z.infer<typeof call>;
 export type RunView = { id: string; state: 'prepared' | 'dispatched' | 'unknown' | 'cost_pending' | 'settled' | 'refunded';
   preDeductId: string; closed: boolean; conflict: boolean; reservedCredits: number; chargedCredits: number | null; outcome: string | null };
 export interface BillingRpc { rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }> }
+export interface BillingTransport {
+ /** Private no-HTTP validation before persistent dispatch; returned capability
+  * encloses the exact validated request and credential for one send. */
+ prepareDispatch?(body:unknown,identity:CallIdentity):Promise<()=>Promise<TransportObservation>>;
+ dispatch(body:unknown, identity:CallIdentity):Promise<TransportObservation>;
+ lookup(providerId:string, identity:CallIdentity):Promise<TransportObservation>;
+}
+function providerEvidence(observation:TransportObservation,identity:CallIdentity,source:'response'|'lookup',expectedProviderId?:string){
+ if(identity.protocol==='openrouter-chat-v1') {
+  if(identity.provider!=='openrouter')throw new Error('BILL2_PROVIDER_IDENTITY_DENIED');
+  return openRouterEvidence(observation,{...identity,provider:'openrouter',protocol:'openrouter-chat-v1'},source,expectedProviderId);
+ }
+ return transportEvidence(observation,identity,source);
+}
 export type DispatchClaim = { id: string; state: string; dispatchToken: string | null };
 /** Trusted server composition only: actor comes from verified authentication, policy from the server.
  * No public route exposes raw RPC payloads or accepts a browser price/receipt. No env/fallback loading. */
-export function authoritativeBilling(deps: { admin: BillingRpc; actor: () => Promise<string>; adapter: ReturnType<typeof localFixtureAdapter>;
+export function authoritativeBilling(deps: { admin: BillingRpc; actor: () => Promise<string>; adapter: BillingTransport;
   /** Existing downstream rebate, explicitly enabled only by the trusted host. */
   rebateClient?: Parameters<typeof applyInvitationRebateForSpend>[0]['supabase'];
 }) {
@@ -66,7 +83,7 @@ export function authoritativeBilling(deps: { admin: BillingRpc; actor: () => Pro
         const identity = await rpc<(CallIdentity & { providerId: string }) | null>('bill2_recovery_claim', { p_run_id: runId, p_call_id: callId });
         if (!identity) continue;
         let evidence;
-        try { evidence = transportEvidence(await deps.adapter.lookup(identity.providerId), identity, 'lookup'); }
+        try { evidence = providerEvidence(await deps.adapter.lookup(identity.providerId,identity), identity, 'lookup',identity.providerId); }
         catch { continue; } // No receipt is not evidence of zero cost. SQL enforces attempt/time bounds.
         await recordReceipt(runId, callId, { ...evidence, expectedProviderId: identity.providerId });
       }
@@ -100,13 +117,17 @@ export function authoritativeBilling(deps: { admin: BillingRpc; actor: () => Pro
       if (!capability) return { dispatched: false };
       if (createHash('sha256').update(body).digest('hex') !== capability.frozen.requestHash) throw new Error('BILL2_REQUEST_CONFLICT');
       if (body.length > capability.frozen.inputLimit) throw new Error('BILL2_INPUT_LIMIT');
-      capabilities.delete(callId); // Single process possession is consumed before awaiting any commit response.
+      capabilities.delete(callId); // Single process possession is consumed before any await.
+      const identity: CallIdentity = capability.frozen;
+      const input={input:body,maxOutputTokens:capability.frozen.outputLimit,automaticRetry:false,hiddenTools:false};
+      // A known local preflight failure leaves the SQL call prepared, so the
+      // existing Runtime fail-before-dispatch path can safely release it.
+      const send=deps.adapter.prepareDispatch?await deps.adapter.prepareDispatch(input,identity):()=>deps.adapter.dispatch(input,identity);
       const permission = await rpc<{ dispatch: boolean }>('bill2_dispatch', { p_run_id: capability.runId, p_call_id: callId, p_token: capability.token });
       if (!permission.dispatch) return { dispatched: false };
-      const identity: CallIdentity = capability.frozen;
       let evidence;
       let observation: TransportObservation | undefined;
-      try { observation = await deps.adapter.dispatch({ input: body, maxOutputTokens: capability.frozen.outputLimit, automaticRetry: false, hiddenTools: false }); evidence = transportEvidence(observation, identity, 'response'); }
+      try { observation = await send(); evidence = providerEvidence(observation, identity, 'response'); }
       catch { evidence = { ...unknownEvidence(identity), evidenceKind: 'transport_observation' }; }
       try { await recordReceipt(capability.runId, callId, evidence); }
       catch { return { dispatched: true, pendingReceipt: { runId: capability.runId, callId, evidence } }; }

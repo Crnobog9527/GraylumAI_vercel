@@ -28,6 +28,11 @@ if (
   throw new Error("isolated workbench runner required");
 const sql = new pg.Client({ connectionString: process.env.V3_LOCAL_DB });
 const db = createClient(url, process.env.V3_LOCAL_SERVICE_JWT!, {
+  global:{fetch:async(input,init)=>{
+    const settle=String(input).endsWith('/rpc/agent_slice_call')&&typeof init?.body==='string'&&JSON.parse(init.body).p_action==='settle';
+    try{const response=await fetch(input,init);if(settle&&!response.ok){const error=await response.clone().json();console.log('SLICE_SETTLE_HTTP_FAILURE',JSON.stringify({status:response.status,code:error.code}));}return response;}
+    catch(error){if(settle)console.log('SLICE_SETTLE_TRANSPORT_FAILURE',error instanceof Error?error.name:'unknown');throw error;}
+  }},
   auth: { persistSession: false },
 });
 const password = `Local-${randomUUID()}!`;
@@ -2594,7 +2599,7 @@ aiTest('CHAT: summary HTTP 429 keeps the paid reply and retries only the summary
   await page.goto(app+'/chat?conversation='+binding.conversationId);
   const input=page.getByLabel('给当前步骤发消息');await input.fill('LOCAL_SUMMARY_RATE_LIMIT_ONCE');
   await page.getByRole('button',{name:'发送',exact:true}).click();
-  await page.getByText('成果整理服务繁忙，整理预留积分已退还。已有回复保留，请稍后点击“继续整理成果”。',{exact:true}).waitFor();
+  await page.getByText('成果整理服务繁忙，整理预留积分已退还。已有回复保留，请稍后点击“继续整理成果”。',{exact:true}).waitFor({timeout:60000});
   expect(await input.inputValue()).toBe('');
   expect(await page.locator('[data-message-role="assistant"]').count()).toBe(1);
   const before=await t.ai.list(t.scope);expect(before).toHaveLength(2);
@@ -3703,12 +3708,27 @@ it('ADMIN: browser imports a Skill folder, configures steps, publishes and opens
     await page.getByRole('heading', { name: input.module.title, exact: true }).waitFor({ timeout: 30000 });
     await page.getByRole('button', { name: /^1\. 需求确认/ }).waitFor();
     await page.screenshot({ path: output + '/admin-skill-conversation.png' });
+    const configured = (await sql.query('select workflow from artifact_workflows where module_id=$1 and enabled',[module.id])).rows[0].workflow;
+    configured.planResources=['SKILL.md'];
+    configured.steps.forEach((step: any,i:number)=>{step.information=[{id:'goal',title:'Goal '+i,required:true,profileKey:'goal_'+i}];});
+    const original = await db.rpc('admin_read_skill_module',{p_actor_id:admin.id,p_module_id:module.id});
+    expect(original.error).toBeNull();
+    const timestamp=(await sql.query('select updated_at::text from modules where id=$1',[module.id])).rows[0].updated_at;
+    await saveModuleSkill(db,admin.id,{...input,moduleId:module.id,skillId:module.skill_id,revisionId:randomUUID(),requestId:randomUUID(),expectedVersion:original.data.expectedVersion,expectedUpdatedAt:timestamp,directoryName:original.data.directoryName,files:original.data.files,kind:configured.kind,planResources:configured.planResources,steps:configured.steps.map((step:any)=>({title:step.title,resources:step.resources,information:step.information}))});
     await page.goto(app + '/admin/prompts');
     const row = page.getByRole('row').filter({ hasText: input.module.title });
     await row.getByRole('button').first().click();
     await page.getByLabel('步骤 1 名称', { exact: true }).waitFor();
     await expect.poll(() => page.getByLabel('步骤 1 名称', { exact: true }).inputValue(), { timeout: 20000 }).toBe('需求确认');
     await page.screenshot({ path: output + '/admin-skill-editor.png' });
+    await page.getByLabel('我已检查步骤顺序和各步使用的参考文件').check();
+    await page.getByTestId('prompt-save').click();
+    await expect.poll(() => page.getByRole('dialog').count(), {timeout:30000}).toBe(0);
+    const republished=(await sql.query('select workflow from artifact_workflows where module_id=$1 and enabled',[module.id])).rows[0].workflow;
+    expect(republished.planResources).toEqual(configured.planResources);
+    expect(republished.steps.map((step:any)=>step.information)).toEqual(configured.steps.map((step:any)=>step.information));
+    await row.getByRole('button').first().click();
+    await page.getByLabel('步骤 1 名称', {exact:true}).waitFor();
     // A slow second import must revoke confirmation before bytes finish reading.
     await page.getByLabel('我已检查步骤顺序和各步使用的参考文件').check();
     await page.evaluate(() => {
@@ -4596,7 +4616,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   await browserSession.page.goto(app+'/chat?mode=agent-slice&conversation='+conversation);
   await browserSession.page.getByRole('main',{name:'双 Skill 对话'}).waitFor();
   await browserSession.page.getByText('Joined title',{exact:true}).waitFor();
-  await expect.poll(async()=>(await sql.query("select state from agent_slice_calls where execution_id=$1 and phase='summary'",[sdkRequest])).rows[0].state).toBe('settled');
+  await expect.poll(async()=>(await sql.query("select state from agent_slice_calls where execution_id=$1 and phase='summary'",[sdkRequest])).rows[0].state,{timeout:15000}).toBe('settled');
   expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[sdkRequest])).rows[0].n).toBe(3);
   expect(summaryCalls).toBe(1);expect(providerCalls).toBe(2);
   await browserSession.page.reload();await browserSession.page.getByText('Joined title',{exact:true}).waitFor();

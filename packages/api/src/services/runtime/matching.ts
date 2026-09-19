@@ -23,7 +23,7 @@ export function parseMatch(body:string,candidates:MatchCandidate[]){
 }
 /** Discovery projects only public metadata into the matching request. The
  * original loader still verifies the entry and every later private resource. */
-export async function discoverRuntimeCandidates(user:SupabaseClient,admin:SupabaseClient,limits:{inputBytes:number;maxOutputTokens:number}){
+export async function discoverRuntimeCandidates(user:SupabaseClient,admin:SupabaseClient,limits:{inputBytes:number;maxOutputTokens:number;resolveCapacity?:(row:Record<string,unknown>)=>{inputLimit:number;outputLimit:number}}){
  const visible=await user.from('modules').select('id,active').eq('active',true).order('id').limit(65);
  if(visible.error||visible.data.length>64)throw new Error('RUNTIME_CATALOG_CAPACITY');
  if(!visible.data.length)return [];
@@ -35,9 +35,10 @@ export async function discoverRuntimeCandidates(user:SupabaseClient,admin:Supaba
   const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId:row.id,skillId:row.skill_id});
   let found;try{found=await discoverSkills(source);}catch{continue;}
   const model=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit').eq('id',row.model_id).single();
-  if(model.error||model.data.is_active!=='true'||model.data.provider!=='fixture')continue;
-  const outputLimit=Math.min(limits.maxOutputTokens,Number(model.data.max_tokens));
-  const inputLimit=fixtureInputCapacity(Number(model.data.input_limit),outputLimit,limits.inputBytes);
+  if(model.error||model.data.is_active!=='true'||(!limits.resolveCapacity&&model.data.provider!=='fixture'))continue;
+  let capacity;try{capacity=limits.resolveCapacity?.(model.data);}catch{continue;}
+  const outputLimit=capacity?.outputLimit??Math.min(limits.maxOutputTokens,Number(model.data.max_tokens));
+  const inputLimit=capacity?.inputLimit??fixtureInputCapacity(Number(model.data.input_limit),outputLimit,limits.inputBytes);
   const descriptors=await source.list();
   for(const item of found){
    const descriptor=descriptors.find(d=>d.revisionId===item.selection.revisionId);

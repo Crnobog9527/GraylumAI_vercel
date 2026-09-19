@@ -1,7 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { authoritativeBilling, type FrozenRun, type FrozenCall } from '../bill2/service';
+import { authoritativeBilling, type FrozenRun, type FrozenCall, type BillingTransport } from '../bill2/service';
+import {decimal} from '../bill2/decimal';
+import {openRouterBound} from '../bill2/openRouterPolicy';
 import { localFixtureAdapter } from '../bill2/fixtureAdapter';
 import { PostgresSession, type SessionRpc } from './session';
 import { runRuntime, type RuntimeTool } from './runner';
@@ -16,14 +18,15 @@ export const runtimeContext=z.object({
  tools:z.array(z.enum(['search','read_source'])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
  modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
  attachedOrganizer:z.object({modelId:z.string().uuid(),model:z.string().min(1),maxOutputTokens:z.number().int().positive()}).strict().optional(),
- matching:matchingPlan.optional(),scopeMaterial:z.unknown().optional(),
+ opcTurnToken:z.string().uuid().optional(),matching:matchingPlan.optional(),scopeMaterial:z.unknown().optional(),
  request:z.unknown().optional(),moduleId:z.string().uuid().optional(),skillId:z.string().uuid().optional(),revisionId:z.string().uuid().optional(),sources:z.array(z.unknown()).optional(),
 }).strict();
 /** Trusted server host only. The public admission layer must construct this context.
- * All network in this host is confined to the explicit local cost fixture protocol.
+ * The default transport is local-only; the Staging host must explicitly supply
+ * its allowlisted official adapter and frozen price policy.
  */
-export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<string>;endpoint:string;activateSkill?:(candidate:MatchCandidate)=>Promise<string>}){
- const adapter=localFixtureAdapter(options.endpoint);
+export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<string>;endpoint?:string;adapter?:BillingTransport;activateSkill?:(candidate:MatchCandidate)=>Promise<string>}){
+ const adapter=options.adapter ?? localFixtureAdapter(options.endpoint??'');
  const billing=authoritativeBilling({admin:options.database,actor:options.actor,adapter});
  async function rpc<T>(name:string,args:Record<string,unknown>):Promise<T>{
   const result=await options.database.rpc(name,{...args,p_actor_id:z.string().uuid().parse(await options.actor())});
@@ -64,6 +67,15 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
    let callSequence=0;
    let primaryPolicy=policy;
    const exchange=async(request:string,phase:string,selectedPolicy=primaryPolicy)=>{
+    if(selectedPolicy.protocol==='openrouter-chat-v1') {
+     const original=JSON.parse(request);
+     if(context.tools.length || context.network!=='deny' || original.tools?.length || original.model!==selectedPolicy.model)
+      throw new Error('RUNTIME_REAL_TOOLS_DISABLED');
+     if(!selectedPolicy.providerLimits)throw new Error('RUNTIME_REAL_QUOTE_REQUIRED');
+     const quoted=openRouterBound(selectedPolicy.providerLimits,selectedPolicy.outputLimit);
+     if(decimal(quoted.upperUsd)!==decimal(selectedPolicy.upperUsd))throw new Error('RUNTIME_REAL_QUOTE_CONFLICT');
+     request=JSON.stringify({...original,stream:false,provider:quoted.routing});
+    }
     assertRuntimeRequestCapacity(request,selectedPolicy.inputLimit);
     const sequence=++callSequence;
      const requestHash=hash(request);
@@ -73,7 +85,7 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
       // Recovery is replay-only, even when a later step had not yet been sent.
       if(!execution.live||existing?.state==='dispatched'||existing?.state==='unknown'||existing?.state==='responded')throw new Error('RUNTIME_RESPONSE_PENDING');
       const call:FrozenCall={provider:selectedPolicy.provider,account:selectedPolicy.account,model:selectedPolicy.model,protocol:selectedPolicy.protocol,
-       phase,requestHash,upperUsd:selectedPolicy.upperUsd,inputLimit:selectedPolicy.inputLimit,outputLimit:selectedPolicy.outputLimit,
+       ...(selectedPolicy.providerLimits?{providerLimits:selectedPolicy.providerLimits}:{}),phase,requestHash,upperUsd:selectedPolicy.upperUsd,inputLimit:selectedPolicy.inputLimit,outputLimit:selectedPolicy.outputLimit,
        automaticRetry:false,hiddenTools:false,lookupSupported:selectedPolicy.lookupSupported};
       const claim=await billing.claimCall(execution.runId,sequence,call);
       const dispatch=await billing.dispatchOnce(claim.id,request);
@@ -94,7 +106,8 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
       raw=saved?.rawBody;
      }
      if(!raw)throw new Error('RUNTIME_RESPONSE_PENDING');
-     return JSON.parse(raw);
+     const decoded=JSON.parse(raw);
+     return selectedPolicy.protocol==='openrouter-chat-v1' ? {usage:{sdkResponse:decoded}} : decoded;
    };
    let effective={model:context.model,instructions:context.instructions,maxOutputTokens:context.maxOutputTokens,role:context.role};
    if(context.matching){
