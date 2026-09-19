@@ -4871,9 +4871,9 @@ it("OPC: a legally reached question keeps its explicit confirm and mentor send w
       (await navigator.getByRole("button").allTextContents()).map(t => t.replace(/\s+/g," ").trim());
     const row = (label: string) => navigator.getByRole("button", {name:new RegExp("^" + label.replace(".","\\.") + " ")});
     const executions = async () => (await sql.query(
-      "select id::text id, state, payload->'request'->'selection'->>'task' task from runtime_executions where actor_id=$1 order by created_at, id",
+      "select id::text id, request_id::text requestId, state, payload->'request'->'selection'->>'task' task from runtime_executions where actor_id=$1 order by created_at, id",
       [f.actor],
-    )).rows as Array<{id:string;state:string;task:string|null}>;
+    )).rows as Array<{id:string;requestId:string;state:string;task:string|null}>;
 
     // q1/q2 confirmed, q3 has a substantive answer but is deferred, q4 pending.
     await field("已知目标 0").fill("客户定位");
@@ -4912,7 +4912,28 @@ it("OPC: a legally reached question keeps its explicit confirm and mentor send w
     await page.getByRole("button", {name:"发送", exact:true}).click();
     await expect.poll(async () => (await executions()).length, {timeout:60000}).toBe(before.length + 1);
     const after = await executions();
-    expect(after.at(-1)?.task).toBe("opc-question:extra1");
+    const newRow = after.find(row => !before.some(prev => prev.id === row.id));
+    expect(newRow?.task).toBe("opc-question:extra1");
+    // Admission identity is not a completed turn: wait for the terminal state and
+    // verify the exact execution/request/billing identities, the reserve, and the
+    // user-visible reply before this counts as conversation proof.
+    await expect.poll(async () => ((await executions()).find(row => row.id === newRow!.id)?.state ?? ""), {timeout:90000}).toBe("completed");
+    const sentIdentity = (await sql.query(
+      `select e.state, b.id::text billing_id, b.state billing_state
+         from runtime_executions e left join bill2_runs b on b.id=e.billing_run_id
+        where e.actor_id=$1 and e.id=$2`,
+      [f.actor, newRow!.id],
+    )).rows[0] as {state:string;billing_id:string|null;billing_state:string|null};
+    expect(sentIdentity.state).toBe("completed");
+    expect(sentIdentity.billing_id).toBeTruthy();
+    expect(["settled", "cost_pending", "refunded"]).toContain(sentIdentity.billing_state);
+    expect((await sql.query(
+      "select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve' and source_id=$2",
+      [f.actor, sentIdentity.billing_id],
+    )).rows[0].n).toBe(1);
+    await expect.poll(async () => (await page.getByRole("log", {name:"完整导师消息"}).textContent()) ?? "", {timeout:60000})
+      .toContain("分步模拟");
+    expect((await executions()).filter(row => row.task === "opc-question:extra1")).toHaveLength(1);
     expect((await read()).information["step-0"].values?.extra2?.status).not.toBe("confirmed");
     expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
 
@@ -4921,8 +4942,116 @@ it("OPC: a legally reached question keeps its explicit confirm and mentor send w
     console.log("OPC_QF2_ACTION_MILESTONES " + JSON.stringify({
       executionsBefore: before.length,
       executionsAfter: after.length,
-      lastTask: after.at(-1)?.task ?? null,
+      newTask: newRow?.task ?? null,
       totalMs: Date.now() - startedAt,
+    }));
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+
+it("OPC: an immutable information snapshot reconstructs the reached frontier when the next question never opened", async () => {
+  const {chromium} = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await fixture(3, false, 4), model = randomUUID();
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Frontier local','opc-frontier','fixture','true',1000,32000)",[model]);
+  await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  const draft = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
+  const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", route => {
+      const host = new URL(route.request().url()).hostname;
+      return ["127.0.0.1","localhost"].includes(host) ? route.continue() : route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(90000);
+    const path = "/positioning/" + draft.draftId;
+    const ready = page.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), {timeout: 90000});
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path));
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", {name:"登录", exact:true}).last().click();
+    await page.waitForURL(process.env.V3_LOCAL_APP + path);
+    await page.route("**/api/trpc/opc.prepareStep*", async route => {
+      const raw = route.request().postData() ?? "";
+      return raw.includes("extra2") ? route.abort() : route.continue();
+    });
+    const read = async () => await f.service.read(draft.draftId);
+    const field = (title: string) => page.getByRole("textbox", {name:title, exact:true});
+    const heading = () => page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3});
+    const confirmButton = () => page.getByRole("button", {name:"确认本题并继续", exact:true});
+    const navigator = page.getByRole("navigation", {name:"本步骤已到达的问题"});
+    const rowTexts = async () =>
+      (await navigator.getByRole("button").allTextContents()).map(t => t.replace(/\s+/g," ").trim());
+    const row = (label: string) => navigator.getByRole("button", {name:new RegExp("^" + label.replace(".","\\.") + " ")});
+    const snapshots = async () => (await sql.query(
+      "select (response->>'version')::int version, payload->'values' values from artifact_requests where project_id=$1 and round_id=$2 and action='opc_information' order by (response->>'version')::int",
+      [draft.projectId, draft.roundId],
+    )).rows as Array<{version:number; values:Record<string,{status?:string}>}>;
+    const schemaIds = ["goal","extra0","extra1","extra2","extra3"];
+    const isResolved = (values:Record<string,{status?:string}>, id:string) =>
+      ["confirmed","deferred"].includes(values[id]?.status ?? "");
+    const settled = (values:Record<string,{status?:string}>) =>
+      values.goal?.status === "confirmed" && values.extra0?.status === "confirmed" && values.extra1?.status === "deferred";
+
+    await field("已知目标 0").fill("客户定位");
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("confirmed");
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.2");
+    await field("Extra field 0").fill("第二条事实");
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra0?.status, {timeout:30000}).toBe("confirmed");
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.3");
+    await field("Extra field 1").fill("第三条实质答案");
+    await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.status, {timeout:30000}).toBe("deferred");
+    await expect.poll(async () => (await rowTexts()).length, {timeout:60000}).toBe(4);
+    const q4Turns = Number((await sql.query(
+      "select count(*)::int n from opc_turns t join runtime_executions e on e.session_id=t.session_id and e.request_id=t.request_id where t.draft_id=$1 and t.step_id='step-0' and t.round_id=$2 and e.payload->'request'->'selection'->>'task'='opc-opening:extra2'",
+      [draft.draftId, draft.roundId],
+    )).rows[0].n);
+    expect(q4Turns).toBe(0);
+
+    const preEdit = await snapshots();
+    const snapshot = preEdit.find(s => settled(s.values));
+    expect(snapshot).toBeTruthy();
+    expect(schemaIds.filter(id => isResolved(snapshot!.values, id))).toEqual(["goal","extra0","extra1"]);
+    const nextUnresolved = schemaIds.findIndex(id => !isResolved(snapshot!.values, id));
+    expect(schemaIds[nextUnresolved]).toBe("extra2");
+    expect(schemaIds[nextUnresolved + 1]).toBe("extra3");
+
+    await row("1.1").click();
+    await field("已知目标 0").fill("客户定位（修改）");
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("provisional");
+    await page.reload();
+    // Current helper keeps the answered rows (q1..q3) but loses the empty,
+    // never-opened q4 — the limitation this investigation is about.
+    await expect.poll(async () => (await rowTexts()).length, {timeout:90000}).toBe(3);
+    expect((await rowTexts()).join(" | ")).not.toContain("Extra field 2");
+    expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
+    expect((await snapshots()).some(s => settled(s.values))).toBe(true);
+
+    await row("1.1").click();
+    await field("已知目标 0").fill("客户定位（再次修改）");
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("provisional");
+    const recovered = (await snapshots()).find(s => settled(s.values));
+    expect(recovered).toBeTruthy();
+    expect(schemaIds.findIndex(id => !isResolved(recovered!.values, id))).toBe(3);
+    const foreignRequests = Number((await sql.query(
+      "select count(*)::int n from artifact_requests where project_id=$1 and round_id<>$2",
+      [draft.projectId, draft.roundId],
+    )).rows[0].n);
+    expect(foreignRequests).toBe(0);
+    console.log("OPC_FRONTIER_EVIDENCE " + JSON.stringify({
+      snapshotsBeforeEdit: preEdit.length,
+      settledSnapshotVersion: snapshot!.version,
+      recoveredSnapshotVersion: recovered!.version,
+      frontier: "extra2",
+      nextUnreached: "extra3",
+      q4Turns,
+      rowsAfterEditRefresh: (await rowTexts()).length,
     }));
   } finally {
     await browser.close();
