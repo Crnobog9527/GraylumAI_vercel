@@ -1795,10 +1795,10 @@ export default function PositioningDraft({
                         reachedQuestions(d.information[parsed.targetStepId]?.schema ?? [], d.information[parsed.targetStepId]?.values).some(f => f.id === id) &&
                         value.value !== (infoEdits[parsed.targetStepId]?.[id] ?? d.information[parsed.targetStepId]?.values?.[id])?.value);
                       return (
-                        <div key={execution.executionId} className="space-y-2">
+                        <div key={execution.executionId} data-execution-id={execution.executionId} className="space-y-2">
                           {/* The host opens the question itself: no fabricated user message. */}
                           {!openingTurn && (
-                            <div className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
+                            <div data-message-role="user" className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
                               <span className="text-xs text-[var(--text-secondary)]">
                                 你{turnLabel ? ` · ${turnLabel}` : turnStep ? ` · ${turnStep.title}` : ""}
                               </span>
@@ -1807,7 +1807,7 @@ export default function PositioningDraft({
                               </p>
                             </div>
                           )}
-                          <div className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
+                          <div data-message-role="assistant" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
                             <span className="text-xs text-[var(--text-secondary)]">
                               {openingTurn ? "导师主动引导" : "导师"}
                               {turnLabel ? ` · ${turnLabel}` : turnStep ? ` · ${turnStep.title}` : ""}

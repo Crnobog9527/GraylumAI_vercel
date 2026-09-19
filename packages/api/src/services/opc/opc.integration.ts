@@ -4947,8 +4947,33 @@ it("OPC: a legally reached question keeps its explicit confirm and mentor send w
       "select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve' and source_id=$2",
       [f.actor, sentIdentity.billing_id],
     )).rows[0].n).toBe(1);
-    await expect.poll(async () => (await page.getByRole("log", {name:"完整导师消息"}).textContent()) ?? "", {timeout:60000})
-      .toContain("补充一条关于第三条的说明");
+    // The visible reply must belong to THIS execution's assistant bubble and be
+    // the authorized completed public message — an input echo is not enough.
+    const storedReply = String((await sql.query(
+      "select coalesce(result->>'body', primary_result->>'body') body from runtime_executions where actor_id=$1 and id=$2",
+      [f.actor, newRow!.id],
+    )).rows[0].body ?? "");
+    const assistantBubble = page.locator(
+      `[data-execution-id="${newRow!.id}"] [data-message-role="assistant"]`,
+    );
+    const userBubble = page.locator(
+      `[data-execution-id="${newRow!.id}"] [data-message-role="user"]`,
+    );
+    await expect.poll(async () => (await assistantBubble.textContent()) ?? "", {timeout:60000})
+      .toContain("【分步模拟，仅验证流程】");
+    const assistantText = ((await assistantBubble.textContent()) ?? "").trim();
+    expect(assistantText.length).toBeGreaterThan(20);
+    expect(assistantText).not.toContain("这条回复还在核对原请求");
+    expect(assistantText).not.toContain("这条回复未发给模型");
+    expect((await userBubble.textContent()) ?? "").toContain("补充一条关于第三条的说明");
+    expect(assistantText).not.toBe(((await userBubble.textContent()) ?? "").trim());
+    let storedMessage = storedReply;
+    try {
+      const parsedStored = JSON.parse(storedReply) as { message?: unknown };
+      if (typeof parsedStored?.message === "string") storedMessage = parsedStored.message;
+    } catch { /* a plain-text body is already the message */ }
+    expect(storedMessage.trim().length).toBeGreaterThan(20);
+    expect(assistantText).toContain(storedMessage.trim().slice(0, 20));
     expect((await executions()).filter(row => row.task === "opc-question:extra1")).toHaveLength(1);
     expect((await read()).information["step-0"].values?.extra2?.status).not.toBe("confirmed");
     expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
@@ -5122,4 +5147,92 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
   } finally {
     await browser.close();
   }
+}, 300000);
+
+it("OPC: the historical reach projection is idempotent, permission-scoped and contamination-safe", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { resolve } = await import("node:path");
+  const f = await fixture(3, false, 2), model = randomUUID();
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Reach local','opc-reach','fixture','true',1000,32000)",[model]);
+  await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  const draft = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
+  const stepVersion = async (stepId: string) =>
+    (await f.service.read(draft.draftId)).snapshot.steps[stepId].version;
+  const reachOf = async (stepId: string) =>
+    ((await f.service.read(draft.draftId)).information[stepId] as { reached?: string[] }).reached ?? [];
+
+  await f.service.information({
+    draftId: draft.draftId, stepId: "step-0", requestId: randomUUID(),
+    expectedVersion: await stepVersion("step-0"),
+    values: {
+      goal: { status: "confirmed", nature: "fact", value: "客户定位" },
+      extra0: { status: "deferred", nature: "unknown", value: "暂缓的原因" },
+      extra1: { status: "unknown", nature: "unknown", value: "" },
+    },
+  });
+  const before = await f.service.read(draft.draftId);
+  const beforeKeys = Object.keys(before).sort();
+  const beforeSteps = JSON.stringify(before.snapshot.steps);
+  const beforeValues = JSON.stringify(before.information["step-0"].values);
+  expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
+
+  // Re-applying the migration must not change history or the read contract.
+  await sql.query(readFileSync(
+    resolve(import.meta.dirname, "../../../../db/migrations/0111_opc_historical_reach.sql"),
+    "utf8",
+  ));
+  const after = await f.service.read(draft.draftId);
+  expect(Object.keys(after).sort()).toEqual(beforeKeys);
+  expect(JSON.stringify(after.snapshot.steps)).toBe(beforeSteps);
+  expect(JSON.stringify(after.information["step-0"].values)).toBe(beforeValues);
+  expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
+
+  // Grants: the helper is internal-only and the read entry stays service-role only.
+  const privilege = async (role: string, fn: string) => Number((await sql.query(
+    "select has_function_privilege($1,$2,'EXECUTE')::int p", [role, fn],
+  )).rows[0].p);
+  expect(await privilege("service_role","opc_query(uuid,uuid)")).toBe(1);
+  expect(await privilege("anon","opc_query(uuid,uuid)")).toBe(0);
+  expect(await privilege("authenticated","opc_query(uuid,uuid)")).toBe(0);
+  for (const role of ["anon","authenticated","service_role"])
+    expect(await privilege(role,"opc_historical_reach(uuid,uuid,text)")).toBe(0);
+
+  // Denied entry point: another authenticated actor cannot read this draft.
+  const other = await fixture(3, false, 0);
+  await expect(other.service.read(draft.draftId)).rejects.toThrow();
+
+  // Absent history falls back honestly instead of claiming a frontier.
+  const fresh = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
+  expect(((await f.service.read(fresh.draftId)).information["step-0"] as { reached?: string[] }).reached ?? [])
+    .toEqual([]);
+
+  // Contamination control: another step with the same field id and a longer
+  // prefix must not extend this step's reach.
+  await f.service.information({
+    draftId: draft.draftId, stepId: "step-1", requestId: randomUUID(),
+    expectedVersion: await stepVersion("step-1"),
+    values: { goal: { status: "confirmed", nature: "fact", value: "第二步已确认" } },
+  });
+  expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
+  expect(await reachOf("step-1")).toEqual(["goal"]);
+
+  // A definitely rejected write cannot add reach.
+  await expect(f.service.information({
+    draftId: draft.draftId, stepId: "step-0", requestId: randomUUID(), expectedVersion: 999,
+    values: {
+      goal: { status: "confirmed", nature: "fact", value: "不应写入" },
+      extra0: { status: "confirmed", nature: "fact", value: "不应写入" },
+      extra1: { status: "confirmed", nature: "fact", value: "不应写入" },
+    },
+  })).rejects.toThrow();
+  expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
+  expect(Number((await sql.query(
+    "select count(*)::int n from artifact_requests where project_id=$1 and round_id=$2 and action='opc_information' and payload->>'stepId'='step-0'",
+    [draft.projectId, draft.roundId],
+  )).rows[0].n)).toBe(1);
+  console.log("OPC_REACH_COMPAT " + JSON.stringify({
+    rowsForStep: 1,
+    reach: ["goal","extra0","extra1"],
+    otherStepReach: ["goal"],
+  }));
 }, 300000);
