@@ -1699,19 +1699,27 @@ export default function PositioningDraft({
           const pendingConfirmation = pendingConfirmationFor(step.id);
           // Server-recorded turns of this draft/round are the durable "already
           // reached" evidence for the review range of this step.
-          const reviewReachedIds = (
-            (d.turns ?? []) as Array<{
-              stepId: string;
-              questionId: string | null;
-              roundId?: string | null;
-            }>
-          )
-            .filter(
-              (turn) =>
-                turn.stepId === step.id &&
-                (!Object.hasOwn(turn, "roundId") || turn.roundId === d.roundId),
+          // The server projection additionally returns the bounded historical
+          // reach of this round/step (derived from immutable successful
+          // information snapshots), which survives an earlier answer being
+          // edited back to a provisional value.
+          const reviewReachedIds = [
+            ...(((d.information[step.id] as { reached?: string[] } | undefined)
+              ?.reached) ?? []),
+            ...(
+              (d.turns ?? []) as Array<{
+                stepId: string;
+                questionId: string | null;
+                roundId?: string | null;
+              }>
             )
-            .map((turn) => turn.questionId);
+              .filter(
+                (turn) =>
+                  turn.stepId === step.id &&
+                  (!Object.hasOwn(turn, "roundId") || turn.roundId === d.roundId),
+              )
+              .map((turn) => turn.questionId),
+          ];
           // The displayed question follows the review selection, so a row that
           // is visible can actually be opened and read. An unresolved
           // confirmation keeps owning its original question.

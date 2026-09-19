@@ -4871,7 +4871,7 @@ it("OPC: a legally reached question keeps its explicit confirm and mentor send w
       (await navigator.getByRole("button").allTextContents()).map(t => t.replace(/\s+/g," ").trim());
     const row = (label: string) => navigator.getByRole("button", {name:new RegExp("^" + label.replace(".","\\.") + " ")});
     const executions = async () => (await sql.query(
-      "select id::text id, request_id::text requestId, state, payload->'request'->'selection'->>'task' task from runtime_executions where actor_id=$1 order by created_at, id",
+      "select id::text id, request_id::text \"requestId\", state, payload->'request'->'selection'->>'task' task from runtime_executions where actor_id=$1 order by created_at, id",
       [f.actor],
     )).rows as Array<{id:string;requestId:string;state:string;task:string|null}>;
 
@@ -4907,6 +4907,12 @@ it("OPC: a legally reached question keeps its explicit confirm and mentor send w
     await row("1.3").click();
     await field("Extra field 1").waitFor();
     const before = await executions();
+    const submittedRequestIds: string[] = [];
+    page.on("request", request => {
+      if (request.method() !== "POST" || !request.url().includes("opc.prepareStep")) return;
+      const match = /"requestId":"([0-9a-f-]{36})"/.exec(request.postData() ?? "");
+      if (match) submittedRequestIds.push(match[1]);
+    });
     await composer().fill("补充一条关于第三条的说明");
     await expect.poll(() => page.getByRole("button", {name:"发送", exact:true}).isEnabled(), {timeout:30000}).toBe(true);
     await page.getByRole("button", {name:"发送", exact:true}).click();
@@ -4919,20 +4925,30 @@ it("OPC: a legally reached question keeps its explicit confirm and mentor send w
     // user-visible reply before this counts as conversation proof.
     await expect.poll(async () => ((await executions()).find(row => row.id === newRow!.id)?.state ?? ""), {timeout:90000}).toBe("completed");
     const sentIdentity = (await sql.query(
-      `select e.state, b.id::text billing_id, b.state billing_state
+      `select e.state, b.id::text billing_id, b.state billing_state, b.pre_deduct_id::text pre_deduct_id
          from runtime_executions e left join bill2_runs b on b.id=e.billing_run_id
         where e.actor_id=$1 and e.id=$2`,
       [f.actor, newRow!.id],
-    )).rows[0] as {state:string;billing_id:string|null;billing_state:string|null};
+    )).rows[0] as {state:string;billing_id:string|null;billing_state:string|null;pre_deduct_id:string|null};
     expect(sentIdentity.state).toBe("completed");
     expect(sentIdentity.billing_id).toBeTruthy();
-    expect(["settled", "cost_pending", "refunded"]).toContain(sentIdentity.billing_state);
+    // The deterministic synthetic fixture settles; a pending/unknown cost would
+    // mean the accounting path did not finish.
+    expect(sentIdentity.billing_state).toBe("settled");
+    expect(sentIdentity.pre_deduct_id).toBeTruthy();
+    // The execution is tied to the request id the browser actually submitted.
+    expect(newRow!.requestId).toBe(submittedRequestIds.at(-1));
+    // Exactly one mentor turn exists for that request, on the selected question.
+    expect((await sql.query(
+      "select count(*)::int n from opc_turns t where t.draft_id=$1 and t.step_id='step-0' and t.purpose='mentor' and t.request_id=$2",
+      [draft.draftId, newRow!.requestId],
+    )).rows[0].n).toBe(1);
     expect((await sql.query(
       "select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve' and source_id=$2",
       [f.actor, sentIdentity.billing_id],
     )).rows[0].n).toBe(1);
     await expect.poll(async () => (await page.getByRole("log", {name:"完整导师消息"}).textContent()) ?? "", {timeout:60000})
-      .toContain("分步模拟");
+      .toContain("补充一条关于第三条的说明");
     expect((await executions()).filter(row => row.task === "opc-question:extra1")).toHaveLength(1);
     expect((await read()).information["step-0"].values?.extra2?.status).not.toBe("confirmed");
     expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
@@ -5013,6 +5029,10 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
       [draft.draftId, draft.roundId],
     )).rows[0].n);
     expect(q4Turns).toBe(0);
+    const turnsBeforeRecovery = Number((await sql.query(
+      "select count(*)::int n from opc_turns t where t.draft_id=$1 and t.step_id='step-0' and t.round_id=$2",
+      [draft.draftId, draft.roundId],
+    )).rows[0].n);
 
     const preEdit = await snapshots();
     const snapshot = preEdit.find(s => settled(s.values));
@@ -5026,12 +5046,25 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
     await field("已知目标 0").fill("客户定位（修改）");
     await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("provisional");
     await page.reload();
-    // Current helper keeps the answered rows (q1..q3) but loses the empty,
-    // never-opened q4 — the limitation this investigation is about.
-    await expect.poll(async () => (await rowTexts()).length, {timeout:90000}).toBe(3);
-    expect((await rowTexts()).join(" | ")).not.toContain("Extra field 2");
+    // With the bounded historical reach from this round's snapshots, the empty
+    // and never-opened q4 stays reviewable after the earlier edit.
+    await expect.poll(async () => (await rowTexts()).length, {timeout:90000}).toBe(4);
+    expect((await rowTexts())[3]).toContain("Extra field 2");
     expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
     expect((await snapshots()).some(s => settled(s.values))).toBe(true);
+    // q4 is selectable and readable, but passive recovery must not make it
+    // confirmable or create any new execution/opening for it.
+    await row("1.4").click();
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.4");
+    expect(await field("Extra field 2").inputValue()).toBe("");
+    await expect.poll(() => row("1.4").getAttribute("aria-current"), {timeout:15000}).toBe("true");
+    await expect.poll(() => confirmButton().isEnabled(), {timeout:15000}).toBe(false);
+    expect((await read()).information["step-0"].values?.goal?.status).toBe("provisional");
+    // Passive recovery created no new turn/execution for q4.
+    expect(Number((await sql.query(
+      "select count(*)::int n from opc_turns t where t.draft_id=$1 and t.step_id='step-0' and t.round_id=$2",
+      [draft.draftId, draft.roundId],
+    )).rows[0].n)).toBe(turnsBeforeRecovery);
 
     await row("1.1").click();
     await field("已知目标 0").fill("客户定位（再次修改）");
@@ -5039,11 +5072,44 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
     const recovered = (await snapshots()).find(s => settled(s.values));
     expect(recovered).toBeTruthy();
     expect(schemaIds.findIndex(id => !isResolved(recovered!.values, id))).toBe(3);
+    // Repeated later edits (more than fields x 2) must not lose the historical
+    // maximum, and the reach must stay stable.
+    for (let i = 0; i < 8; i++) {
+      await row("1.1").click();
+      await field("已知目标 0").fill("客户定位（多次修改 " + i + "）");
+      await expect.poll(async () =>
+        (await read()).information["step-0"].values?.goal?.value ?? "", {timeout:30000},
+      ).toBe("客户定位（多次修改 " + i + "）");
+    }
+    await page.reload();
+    await expect.poll(async () => (await rowTexts()).length, {timeout:90000}).toBe(4);
+    expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
+    // Another actor's stronger-looking history must not influence this frontier.
+    const other = await fixture(3, false, 0);
+    const otherDraft = await other.service.start({requestId: randomUUID(), registration: other.registration, mode: "mentor"});
+    const otherVersion = (await other.service.read(otherDraft.draftId)).snapshot.steps["step-0"].version;
+    await other.service.information({
+      draftId: otherDraft.draftId, stepId: "step-0", requestId: randomUUID(), expectedVersion: otherVersion,
+      values: { goal: { status: "confirmed", nature: "fact", value: "另一个账号的定位" } },
+    });
+    expect((await read()).information["step-0"].values?.goal?.status).toBe("provisional");
+    expect((await rowTexts()).length).toBe(4);
     const foreignRequests = Number((await sql.query(
       "select count(*)::int n from artifact_requests where project_id=$1 and round_id<>$2",
       [draft.projectId, draft.roundId],
     )).rows[0].n);
     expect(foreignRequests).toBe(0);
+    // The reach helper is internal: it is not callable through the public RPC
+    // surface, and another step's own reach is not polluted by this step.
+    const deniedReach = await admin.rpc("opc_historical_reach", {
+      p_actor_id: f.actor,
+      p_draft_id: draft.draftId,
+      p_step_id: "step-0",
+    });
+    expect(deniedReach.error).toBeTruthy();
+    expect(
+      ((await read()).information["step-1"] as { reached?: string[] }).reached ?? [],
+    ).toEqual([]);
     console.log("OPC_FRONTIER_EVIDENCE " + JSON.stringify({
       snapshotsBeforeEdit: preEdit.length,
       settledSnapshotVersion: snapshot!.version,
