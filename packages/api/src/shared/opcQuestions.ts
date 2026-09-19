@@ -94,6 +94,39 @@ export type NavigatorRow = {
   selected: boolean;
 };
 /**
+ * The review/display reach: every question the user has actually reached, which
+ * is a superset of the progression prefix.
+ *
+ * `reachedQuestions()` answers "how far may progression go right now" and is the
+ * authority the server keeps enforcing. This answers the different question
+ * "which rows may stay visible for review": a question that was already reached
+ * and answered, or that the host already opened in this draft/round, must not
+ * disappear from the list merely because an earlier answer is temporarily
+ * unresolved (for example while it is being edited and auto-saved).
+ *
+ * Only server-derived evidence is used: stored answers of this draft/round and
+ * the question ids of turns the server recorded for it. Unreached questions are
+ * never included, and nothing here authorizes an API operation.
+ */
+export function reviewableQuestions(
+  schema: readonly InformationQuestion[],
+  values: Record<string, QuestionAnswer> | null | undefined = {},
+  reachedIds: readonly (string | null | undefined)[] = [],
+): InformationQuestion[] {
+  const answers = values ?? {};
+  let reach = reachedQuestions(schema, answers).length - 1;
+  for (const id of reachedIds) {
+    if (!id) continue;
+    const index = schema.findIndex(field => field.id === id);
+    if (index > reach) reach = index;
+  }
+  schema.forEach((field, index) => {
+    if (index <= reach) return;
+    if ((answers[field.id]?.value ?? "").trim()) reach = index;
+  });
+  return schema.slice(0, reach + 1);
+}
+/**
  * Ordered navigation over every question already reached plus the current one.
  *
  * Identity and order come from the pinned method's declared field order, so
@@ -106,9 +139,10 @@ export function navigatorRows(
   schema: readonly InformationQuestion[],
   values: Record<string, QuestionAnswer> | null | undefined = {},
   selectedId?: string | null,
+  reachedIds: readonly (string | null | undefined)[] = [],
 ): NavigatorRow[] {
   const answers = values ?? {};
-  return reachedQuestions(schema, answers).map(field => ({
+  return reviewableQuestions(schema, answers, reachedIds).map(field => ({
     id: field.id,
     title: field.title,
     required: Boolean(field.required),

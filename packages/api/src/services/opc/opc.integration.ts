@@ -4558,3 +4558,124 @@ it("OPC: a retained handoff request does not block a newly saved current plan", 
     await browser.close();
   }
 }, 300000);
+
+it("OPC: an upstream reconfirmation can be resubmitted and never hides already answered questions", async () => {
+  const {chromium} = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await fixture(3, true), model = randomUUID();
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Reconfirm local','opc-reconfirm','fixture','true',1000,32000)",[model]);
+  await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  const draft = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
+  const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
+  const startedAt = Date.now();
+  const marks: Record<string, number> = {};
+  const external: string[] = [];
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", route => {
+      const host = new URL(route.request().url()).hostname;
+      if (["127.0.0.1","localhost"].includes(host)) return route.continue();
+      external.push(host);
+      return route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(90000);
+    const errors: string[] = [];
+    page.on("pageerror", e => errors.push(e.message));
+    const path = "/positioning/" + draft.draftId;
+    const ready = page.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), {timeout: 90000});
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path));
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", {name:"登录", exact:true}).last().click();
+    await page.waitForURL(process.env.V3_LOCAL_APP + path);
+
+    const read = async () => await f.service.read(draft.draftId);
+    const stepState = async (stepId: string) => (await read()).snapshot.steps[stepId] as {valid: boolean};
+    // Each configured step owns its own field title.
+    const goalOf = (n: number) => page.getByRole("textbox", {name:"已知目标 " + n, exact:true});
+    const confirmButton = () => page.getByRole("button", {name:"确认本题并继续", exact:true});
+    const navigator = page.getByRole("navigation", {name:"本步骤已到达的问题"});
+    const stepPill = (n: number) =>
+      page.getByRole("navigation", {name:"定位步骤"}).getByRole("button", {name:new RegExp("^" + n + "\\. ")});
+    const rowTexts = async () =>
+      (await navigator.getByRole("button").allTextContents()).map(t => t.replace(/\s+/g," ").trim());
+
+    // Step 0: confirm the first question, defer the optional one, so step 0 is valid.
+    await goalOf(0).fill("初始定位");
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("confirmed");
+    await expect.poll(async () => (await rowTexts()).length, {timeout:30000}).toBe(2);
+    await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.other?.status, {timeout:30000}).toBe("deferred");
+    await expect.poll(async () => (await stepState("step-0")).valid, {timeout:30000}).toBe(true);
+
+    // Step 1 must be confirmed BEFORE the upstream change, so it can be invalidated.
+    await stepPill(2).click();
+    await goalOf(1).waitFor();
+    await goalOf(1).fill("第二步定位");
+    await confirmButton().click();
+    await expect.poll(async () => (await stepState("step-1")).valid, {timeout:60000}).toBe(true);
+    marks.step1Confirmed = Date.now() - startedAt;
+
+    // Q-F2: going back and editing the first answer must not shrink the review list.
+    await stepPill(1).click();
+    await expect.poll(async () => (await rowTexts()).length, {timeout:30000}).toBe(2);
+    const pinned = await rowTexts();
+    await navigator.getByRole("button", {name:/^1\.1 /}).click();
+    await goalOf(0).fill("修改后的定位");
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("provisional");
+    await expect.poll(async () => (await rowTexts()).length, {timeout:30000}).toBe(2);
+    await expect.poll(async () => (await rowTexts())[0] ?? "", {timeout:30000}).toContain("待核对");
+    const afterEdit = await rowTexts();
+    expect(afterEdit.map(t => t.split(" ")[0])).toEqual(pinned.map(t => t.split(" ")[0]));
+    expect(afterEdit[0]).toContain("待核对");
+    expect(afterEdit[1]).toContain("待定（已暂缓）");
+    marks.rowsKeptAfterEdit = Date.now() - startedAt;
+    // A refresh keeps the same durable rows.
+    await page.reload();
+    await expect.poll(async () => (await rowTexts()).length, {timeout:90000}).toBe(2);
+
+    // Q-F1: resubmit the upstream step without changing anything else; that
+    // invalidates the confirmed downstream step.
+    await navigator.getByRole("button", {name:/^1\.1 /}).click();
+    await confirmButton().click();
+    await expect.poll(async () => (await stepState("step-0")).valid, {timeout:90000}).toBe(true);
+    await expect.poll(async () => (await stepState("step-1")).valid, {timeout:60000}).toBe(false);
+    marks.downstreamInvalidated = Date.now() - startedAt;
+
+    // The downstream answers are still resolved, but the step needs an explicit
+    // reconfirmation; the button must be actionable and the resubmit must stick.
+    await stepPill(2).click();
+    await expect.poll(async () => confirmButton().isEnabled(), {timeout:30000}).toBe(true);
+    await confirmButton().click();
+    await expect.poll(async () => (await stepState("step-1")).valid, {timeout:90000}).toBe(true);
+    marks.downstreamReconfirmed = Date.now() - startedAt;
+    expect((await read()).information["step-1"].values?.goal?.value).toBe("第二步定位");
+    // A valid step with an unchanged answer offers no duplicate submit.
+    await stepPill(2).click();
+    await goalOf(1).waitFor();
+    await expect.poll(async () => confirmButton().isEnabled(), {timeout:30000}).toBe(false);
+
+    // Q-F3: finish the workflow and check the completion copy does not promise a
+    // dialog that does not exist yet.
+    await stepPill(3).click();
+    await goalOf(2).waitFor();
+    await goalOf(2).fill("第三步定位");
+    await confirmButton().click();
+    await expect.poll(async () => (await stepState("step-2")).valid, {timeout:90000}).toBe(true);
+    const completion = page.getByText("全部问题已确认或已明确暂缓", {exact:false}).first();
+    await completion.waitFor();
+    const completionText = await page.locator("body").textContent();
+    expect(completionText).not.toContain("再次明确同意");
+    expect(completionText).not.toContain("才会询问是否生成");
+    await expect.poll(() => page.getByRole("button", {name:"确认正式定位并生成第一周计划", exact:true}).count(), {timeout:30000}).toBe(1);
+
+    expect(errors).toEqual([]);
+    expect(external).toEqual([]);
+    console.log("OPC_QF_MILESTONES " + JSON.stringify({...marks, totalMs: Date.now() - startedAt}));
+  } finally {
+    await browser.close();
+  }
+}, 300000);

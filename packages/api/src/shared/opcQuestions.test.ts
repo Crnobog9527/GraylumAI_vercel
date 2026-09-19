@@ -211,3 +211,57 @@ it("separates a redundant re-confirmation from a deferred → confirmed action",
   expect(confirmationActionIsRedundant(confirmed, "confirm", "改过的内容")).toBe(false);
   expect(confirmationActionIsRedundant(undefined, "confirm", "任何内容")).toBe(false);
 });
+
+it("an earlier answer under edit never hides later reached rows", () => {
+  const values: Record<string, QuestionAnswer> = {
+    lane: { ...emptyAnswer, value: "正在修改", status: "provisional" },
+    offer: { ...emptyAnswer, value: "摄影经验", status: "deferred" },
+    extra: { ...emptyAnswer, value: "已确认补充", status: "confirmed" },
+  };
+  // The progression prefix shrinks while lane is unresolved…
+  expect(reachedQuestions(schema, values).map((f) => f.id)).toEqual(["lane"]);
+  // …but the review rows keep every question that was already reached.
+  const rows = navigatorRows(0, schema, values, "lane");
+  expect(rows.map((row) => row.id)).toEqual(["lane", "offer", "extra"]);
+  expect(rows.map((row) => row.label)).toEqual(["1.1", "1.2", "1.3"]);
+  expect(rows.map((row) => row.state)).toEqual(["pending", "deferred", "confirmed"]);
+  expect(rows[0].selected).toBe(true);
+});
+
+it("server-recorded turns extend the visible reach without exposing unreached questions", () => {
+  const values: Record<string, QuestionAnswer> = {
+    lane: { ...emptyAnswer, value: "改过的内容", status: "provisional" },
+  };
+  expect(navigatorRows(0, schema, values, "lane").map((row) => row.id)).toEqual(["lane"]);
+  expect(navigatorRows(0, schema, values, "lane", ["extra"]).map((row) => row.id))
+    .toEqual(["lane", "offer", "extra"]);
+  expect(navigatorRows(0, schema, values, "lane", ["extra", "unknown-id"]).map((row) => row.id))
+    .toEqual(["lane", "offer", "extra"]);
+  expect(navigatorRows(0, schema, values, "lane", ["unknown-id"]).map((row) => row.id))
+    .toEqual(["lane"]);
+});
+
+it("keeps the already answered rows pinned when an earlier question becomes provisional", () => {
+  const resolved: Record<string, QuestionAnswer> = {
+    lane: { ...emptyAnswer, value: "AI 工具", status: "confirmed" },
+    offer: { ...emptyAnswer, value: "摄影经验", status: "deferred" },
+  };
+  const before = navigatorRows(0, schema, resolved, "offer");
+  const editing: Record<string, QuestionAnswer> = {
+    ...resolved,
+    lane: { ...resolved.lane, value: "AI 工具（修改中）", status: "provisional" },
+  };
+  const after = navigatorRows(0, schema, editing, "offer");
+  // Every answered row keeps its pinned identity, label and order.
+  expect(after.map((row) => row.id)).toEqual(["lane", "offer"]);
+  expect(after.map((row) => row.label)).toEqual(["1.1", "1.2"]);
+  expect(before.slice(0, 2).map((row) => row.id)).toEqual(after.map((row) => row.id));
+  expect(before.slice(0, 2).map((row) => row.label)).toEqual(after.map((row) => row.label));
+  expect(before.slice(0, 2).map((row) => row.title)).toEqual(after.map((row) => row.title));
+  expect(after[0].state).toBe("pending");
+  expect(after[1].state).toBe("deferred");
+  // The never answered, never opened trailing question was only the current
+  // row; it is not invented into the review list.
+  expect(before.map((row) => row.id)).toContain("extra");
+  expect(after.map((row) => row.id)).not.toContain("extra");
+});

@@ -1069,6 +1069,25 @@ export default function PositioningDraft({
   function confirmationRedundant(stepId: string, questionId: string, defer = false) {
     if (confirmEnvelopeState(stepId).kind !== "none") return false;
     if (infoEdits[stepId]) return false;
+    // A step whose answers are all resolved but which is not valid (typically
+    // after an upstream change invalidated it) is waiting for an explicit
+    // reconfirmation: resubmitting those same answers is a real action there,
+    // not a duplicate. A step that is still being filled in keeps the plain
+    // duplicate-suppression behaviour, and a valid step stays a no-op.
+    const stepState = snap.steps[stepId] as
+      | { valid: boolean; reviewVersion?: number }
+      | undefined;
+    if (stepState && !stepState.valid) {
+      const stepSchema = d.information[stepId]?.schema ?? [];
+      const stepValues = d.information[stepId]?.values;
+      if (
+        stepSchema.length > 0 &&
+        stepSchema.every((field: { id: string }) =>
+          questionIsConfirmed(stepValues?.[field.id]),
+        )
+      )
+        return false;
+    }
     // Reached only when this step has no local edits, so the stored answer is
     // the one the action would confirm or defer.
     const answer = d.information[stepId].values?.[questionId] as
@@ -2023,6 +2042,23 @@ export default function PositioningDraft({
                       schema,
                       d.information[step.id].values,
                       activeQuestion.id,
+                      // Server-recorded turns of this draft/round are the
+                      // durable "already reached" evidence, so an earlier edit
+                      // can never shrink the review list.
+                      (
+                        (d.turns ?? []) as Array<{
+                          stepId: string;
+                          questionId: string | null;
+                          roundId?: string | null;
+                        }>
+                      )
+                        .filter(
+                          (turn) =>
+                            turn.stepId === step.id &&
+                            (!Object.hasOwn(turn, "roundId") ||
+                              turn.roundId === d.roundId),
+                        )
+                        .map((turn) => turn.questionId),
                     );
                     return (
                       <nav
@@ -2075,7 +2111,7 @@ export default function PositioningDraft({
                   <p className="text-sm text-[var(--text-secondary)]">
                     {snap.state === "published"
                       ? "定位版本已发布。你可以在下方进入第一周计划，或修订定位并保留原版本；历史版本与对话保持不变。"
-                      : "已暂缓的问题按“接受局限”记录，不会被当作已确认事实。下一步是确认正式定位；确认后才会询问是否生成第一周选题，生成需要你再次明确同意。"}
+                      : "已暂缓的问题按“接受局限”记录，不会被当作已确认事实。下一步是确认正式定位：发布后会按现有流程生成一份第一周计划候选，生成走正常的模型与额度计费；候选不会自动保存为计划，也不会自动创建账号或选题。"}
                   </p>
                 </div>
               )}
