@@ -5541,6 +5541,25 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     expect(await page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3}).count()).toBe(1);
     expect(await page.getByRole("textbox", {name:"重复标题", exact:true}).count()).toBe(1);
     expect(await page.getByRole("textbox", {name:"Renamed goal", exact:true}).count()).toBe(0);
+    // Drive the new revision through its own buttons: 1.1 defer, 1.2 answer,
+    // then 1.3 must show the agent_proposal guidance and its pending proposal.
+    const secondRead = async () => await f.service.read(second!.draftId);
+    await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
+    await expect.poll(async () => (await secondRead()).information["step-0"].values?.extra1?.status, {timeout:60000}).toBe("deferred");
+    await expect.poll(headingText, {timeout:60000}).toContain("Renamed goal");
+    expect(await page.getByRole("textbox", {name:"Renamed goal", exact:true}).count()).toBe(1);
+    await page.getByRole("textbox", {name:"Renamed goal", exact:true}).fill("具体事实：我做 AI 工具内容");
+    await page.getByRole("button", {name:"确认本题并继续", exact:true}).click();
+    await expect.poll(async () => (await secondRead()).information["step-0"].values?.goal?.status, {timeout:60000}).toBe("confirmed");
+    await expect.poll(headingText, {timeout:60000}).toContain("1.3");
+    await expect.poll(async () => (await page.getByText("这是导师要给出的成果建议", {exact:false}).count()), {timeout:60000}).toBeGreaterThan(0);
+    expect(await page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3}).count()).toBe(1);
+    expect(await page.getByRole("textbox", {name:"重复标题", exact:true}).count()).toBe(1);
+    await expect.poll(async () => {
+      const values = (await secondRead()).information["step-0"].values;
+      return [values?.extra0?.value ?? "", values?.extra0?.status ?? ""].join("|");
+    }, {timeout:60000}).not.toBe("|");
+    mark("new progressed to 1.3");
     await openDraft(first.draftId, "old revisit");
     expect(await headingText()).toContain("Extra field 1");
     const rounds = (await sql.query(
