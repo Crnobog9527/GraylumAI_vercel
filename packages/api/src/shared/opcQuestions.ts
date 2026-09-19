@@ -192,6 +192,30 @@ export function confirmationActionIsRedundant(
   if ((answer.value ?? "").trim() !== (value ?? "").trim()) return false;
   return answer.status === (action === "defer" ? "deferred" : "confirmed");
 }
+/**
+ * Whether the currently displayed question may only be reviewed.
+ *
+ * Action eligibility mirrors the existing legal range (`reachedQuestions`), not
+ * "is this the single pending question": a question that is still inside the
+ * current legal range keeps every existing action rule (explicit
+ * `deferred → confirmed`, explicit mentor send, duplicate suppression). Only a
+ * question that is merely historically visible — outside the current legal
+ * range — is display-only. A valid step is never display-only, so a step that
+ * needs an explicit reconfirmation stays actionable.
+ *
+ * This is presentation gating only: server admission and confirmation keep
+ * enforcing the same range themselves.
+ */
+export function isReviewOnlySelection(
+  schema: readonly InformationQuestion[],
+  values: Record<string, QuestionAnswer> | null | undefined,
+  displayedId: string | null | undefined,
+  stepValid: boolean,
+) {
+  if (stepValid || !displayedId) return false;
+  const answers = values ?? {};
+  return !reachedQuestions(schema, answers).some(field => field.id === displayedId);
+}
 /** Same normalization for stored utterances and candidate answers. */
 function normalizeUtterance(value: string) {
   return value

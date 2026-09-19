@@ -7,6 +7,7 @@ import {
   displayedReviewQuestion,
   emptyAnswer,
   isRecordedNonAnswer,
+  isReviewOnlySelection,
   navigatorRows,
   nextInformationQuestion,
   openingEntryKey,
@@ -291,4 +292,29 @@ it("resolves a review selection inside the reached range instead of jumping back
   expect(displayedReviewQuestion(schema, onlyLane, "extra", ["extra"])?.id).toBe("extra");
   // Ids that are not part of the pinned schema are never invented into it.
   expect(displayedReviewQuestion(schema, onlyLane, "not-in-schema", ["not-in-schema"])?.id).toBe("lane");
+});
+
+it("keeps a legally reached question actionable instead of calling it review-only", () => {
+  // q1 confirmed, q2 deferred with a substantive answer, q3 still pending:
+  // the legal range is [lane, offer, extra], so the deferred q2 stays actionable.
+  const values: Record<string, QuestionAnswer> = {
+    lane: { ...emptyAnswer, value: "赛道事实", status: "confirmed" },
+    offer: { ...emptyAnswer, value: "实质答案", status: "deferred" },
+  };
+  expect(reachedQuestions(schema, values).map((f) => f.id)).toEqual(["lane", "offer", "extra"]);
+  expect(isReviewOnlySelection(schema, values, "offer", false)).toBe(false);
+  expect(isReviewOnlySelection(schema, values, "lane", false)).toBe(false);
+  expect(isReviewOnlySelection(schema, values, "extra", false)).toBe(false);
+  // Once the earlier answer is being edited, only the legal range is actionable
+  // and the previously reached q2 becomes display-only.
+  const editing: Record<string, QuestionAnswer> = {
+    ...values,
+    lane: { ...values.lane, value: "修改中的赛道", status: "provisional" },
+  };
+  expect(reachedQuestions(schema, editing).map((f) => f.id)).toEqual(["lane"]);
+  expect(isReviewOnlySelection(schema, editing, "lane", false)).toBe(false);
+  expect(isReviewOnlySelection(schema, editing, "offer", false)).toBe(true);
+  expect(isReviewOnlySelection(schema, editing, "extra", false)).toBe(true);
+  // A valid step is never display-only (an invalidated step stays actionable).
+  expect(isReviewOnlySelection(schema, editing, "offer", true)).toBe(false);
 });

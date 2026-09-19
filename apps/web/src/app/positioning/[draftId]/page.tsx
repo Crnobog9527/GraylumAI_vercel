@@ -13,6 +13,7 @@ import {
   confirmQuestionValues,
   displayedReviewQuestion,
   isOpeningInput,
+  isReviewOnlySelection,
   navigatorRows,
   nextInformationQuestion,
   OPENING_INPUT,
@@ -1726,9 +1727,12 @@ export default function PositioningDraft({
           const reviewOnly =
             confirmationState.kind === "none" &&
             !pendingConfirmation &&
-            !snap.steps[step.id].valid &&
-            Boolean(pendingQuestion) &&
-            pendingQuestion?.id !== activeQuestion.id;
+            isReviewOnlySelection(
+              schema,
+              d.information[step.id].values,
+              activeQuestion.id,
+              snap.steps[step.id].valid,
+            );
           const questionConfirmed =
             questionIsConfirmed(d.information[step.id].values?.[activeQuestion.id]) &&
             !infoEdits[step.id];

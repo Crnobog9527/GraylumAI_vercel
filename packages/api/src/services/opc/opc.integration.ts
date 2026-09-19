@@ -4767,7 +4767,18 @@ it("OPC: clicking a review row opens that reached question without advancing pro
     expect(rowsWhileEditing.map(t => t.split(" ")[0])).toEqual(["1.1","1.2","1.3","1.4"]);
     expect(rowsWhileEditing[1]).toContain("已确认");
     expect(rowsWhileEditing[2]).toContain("待定（已暂缓）");
+    // Wait for every related opening/request to reach a verifiable terminal
+    // state, then freeze the exact identity set as the review-only baseline.
+    await expect.poll(async () => Number((await sql.query(
+      "select count(*)::int n from runtime_executions where actor_id=$1 and state not in ('completed','failed','cancelled')",
+      [f.actor],
+    )).rows[0].n), {timeout:60000}).toBe(0);
+    const identitySignature = async () => (await sql.query(
+      "select coalesce(string_agg(id::text||':'||state||':'||coalesce(request_id::text,''), ',' order by created_at,id),'') s from runtime_executions where actor_id=$1",
+      [f.actor],
+    )).rows[0].s as string;
     const settled = await counts();
+    const settledIdentity = await identitySignature();
 
     // Clicking q3 must display q3, not jump back to the pending q1.
     await row("1.3").click();
@@ -4787,6 +4798,7 @@ it("OPC: clicking a review row opens that reached question without advancing pro
     await expect.poll(() => confirmButton().isEnabled(), {timeout:15000}).toBe(false);
     await expect.poll(async () => page.getByText("这是回看较早的问题", {exact:false}).count(), {timeout:15000}).toBeGreaterThan(0);
     expect(await counts()).toEqual(settled);
+    expect(await identitySignature()).toBe(settledIdentity);
     // Only the "当前" marker follows the selection; identity, order and the
     // answer states of every row stay unchanged.
     const stripCurrent = (rows: string[]) => rows.map(t => t.replace(" · 当前", ""));
@@ -4811,6 +4823,105 @@ it("OPC: clicking a review row opens that reached question without advancing pro
     console.log("OPC_QF2_MILESTONES " + JSON.stringify({
       rowsReached: rowsWhileEditing.length,
       settled,
+      totalMs: Date.now() - startedAt,
+    }));
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+
+it("OPC: a legally reached question keeps its explicit confirm and mentor send while review stays display-only", async () => {
+  const {chromium} = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await fixture(3, false, 4), model = randomUUID();
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Legal action local','opc-legal-action','fixture','true',1000,32000)",[model]);
+  await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  const draft = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
+  const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
+  const startedAt = Date.now();
+  const external: string[] = [];
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", route => {
+      const host = new URL(route.request().url()).hostname;
+      if (["127.0.0.1","localhost"].includes(host)) return route.continue();
+      external.push(host);
+      return route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(90000);
+    const errors: string[] = [];
+    page.on("pageerror", e => errors.push(e.message));
+    const path = "/positioning/" + draft.draftId;
+    const ready = page.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), {timeout: 90000});
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path));
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", {name:"登录", exact:true}).last().click();
+    await page.waitForURL(process.env.V3_LOCAL_APP + path);
+
+    const read = async () => await f.service.read(draft.draftId);
+    const field = (title: string) => page.getByRole("textbox", {name:title, exact:true});
+    const composer = () => page.getByRole("textbox", {name:"给导师的回复", exact:true});
+    const heading = () => page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3});
+    const confirmButton = () => page.getByRole("button", {name:"确认本题并继续", exact:true});
+    const navigator = page.getByRole("navigation", {name:"本步骤已到达的问题"});
+    const rowTexts = async () =>
+      (await navigator.getByRole("button").allTextContents()).map(t => t.replace(/\s+/g," ").trim());
+    const row = (label: string) => navigator.getByRole("button", {name:new RegExp("^" + label.replace(".","\\.") + " ")});
+    const executions = async () => (await sql.query(
+      "select id::text id, state, payload->'request'->'selection'->>'task' task from runtime_executions where actor_id=$1 order by created_at, id",
+      [f.actor],
+    )).rows as Array<{id:string;state:string;task:string|null}>;
+
+    // q1/q2 confirmed, q3 has a substantive answer but is deferred, q4 pending.
+    await field("已知目标 0").fill("客户定位");
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("confirmed");
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.2");
+    await field("Extra field 0").fill("第二条事实");
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra0?.status, {timeout:30000}).toBe("confirmed");
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.3");
+    await field("Extra field 1").fill("第三条实质答案");
+    await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.status, {timeout:30000}).toBe("deferred");
+    await expect.poll(async () => (await rowTexts()).length, {timeout:60000}).toBe(4);
+    expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
+
+    // q3 is a legal, already reached question: revisiting it must keep the
+    // explicit actions available (this is the Q-F2-ACTION regression).
+    await row("1.3").click();
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.3");
+    expect(await field("Extra field 1").inputValue()).toBe("第三条实质答案");
+    await expect.poll(() => confirmButton().isEnabled(), {timeout:30000}).toBe(true);
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.status, {timeout:60000}).toBe("confirmed");
+    expect((await read()).information["step-0"].values?.extra1?.value).toBe("第三条实质答案");
+    expect((await read()).information["step-0"].values?.extra2?.status).not.toBe("confirmed");
+    expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
+
+    // An explicit mentor send on a legal reached question is allowed and freezes
+    // that question's identity in the request.
+    await row("1.3").click();
+    await field("Extra field 1").waitFor();
+    const before = await executions();
+    await composer().fill("补充一条关于第三条的说明");
+    await expect.poll(() => page.getByRole("button", {name:"发送", exact:true}).isEnabled(), {timeout:30000}).toBe(true);
+    await page.getByRole("button", {name:"发送", exact:true}).click();
+    await expect.poll(async () => (await executions()).length, {timeout:60000}).toBe(before.length + 1);
+    const after = await executions();
+    expect(after.at(-1)?.task).toBe("opc-question:extra1");
+    expect((await read()).information["step-0"].values?.extra2?.status).not.toBe("confirmed");
+    expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
+
+    expect(errors).toEqual([]);
+    expect(external).toEqual([]);
+    console.log("OPC_QF2_ACTION_MILESTONES " + JSON.stringify({
+      executionsBefore: before.length,
+      executionsAfter: after.length,
+      lastTask: after.at(-1)?.task ?? null,
       totalMs: Date.now() - startedAt,
     }));
   } finally {
