@@ -8,6 +8,7 @@ import { publishSkillPackage } from "../skills/publication";
 import { opcService } from "./service";
 import { workbenchService } from "../artifacts/workbench";
 import { OPENING_INPUT } from "../../shared/opcQuestions";
+import type { Page } from "../../../../../apps/web/node_modules/@playwright/test";
 const connectionString = process.env.V3_LOCAL_DB!;
 if (
   !connectionString?.startsWith("postgres://postgres@127.0.0.1:") ||
@@ -97,7 +98,38 @@ async function expectExactMentorEffects(
     row.execution_id, row.request_id, row.billing_id, row.pre_deduct_id,
   ])).sort();
 }
-async function fixture(n = 6, secondField = false, extraFields = 0) {
+async function mentorMessageCheck(
+  page: Page,
+  actorId: string,
+  executionId: string,
+): Promise<() => Promise<void>> {
+  const rows = (await sql.query<{ body: string | null }>(
+    "select coalesce(result->>'body', primary_result->>'body') body from runtime_executions where actor_id=$1 and id=$2",
+    [actorId, executionId],
+  )).rows;
+  expect(rows).toHaveLength(1);
+  const payload: unknown = JSON.parse(rows[0].body ?? "null");
+  if (!payload || typeof payload !== "object" || !("message" in payload) ||
+      typeof payload.message !== "string" || !payload.message.trim())
+    throw new Error("expected this execution's completed public message");
+  const normalise = (value: string) => value.replace(/\s+/g, " ").trim();
+  const expected = normalise(payload.message);
+  const paragraph = page.locator(
+    `[data-execution-id="${executionId}"] [data-message-role="assistant"] p`,
+  );
+  return async () => {
+    await expect.poll(() => paragraph.count(), { timeout: 60000 }).toBe(1);
+    await paragraph.waitFor({ state: "visible", timeout: 60000 });
+    await expect.poll(async () => normalise(
+      (await paragraph.textContent({ timeout: 5000 })) ?? "",
+    ), { timeout: 60000 }).toBe(expected);
+  };
+}
+
+async function fixture(
+  n = 6, secondField = false, extraFields = 0,
+  configure?: (flow: ReturnType<typeof makeWorkflow>) => void,
+) {
   const password = "Local-" + randomUUID() + "!",
     email = randomUUID() + "@example.test";
   const made = await admin.auth.admin.createUser({
@@ -151,6 +183,7 @@ async function fixture(n = 6, secondField = false, extraFields = 0) {
       required: false,
       profileKey: "extra_" + i,
     });
+  configure?.(flow);
   await sql.query(
     "insert into skills(id,skill_key,created_by) values($1,$2,$3)",
     [pack.id, registration, owner],
@@ -5510,26 +5543,7 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     const oldIdentity = await expectExactMentorEffects(f.actor, first.draftId, first.roundId, oldOpening);
     expect(oldIdentity).toHaveLength(1);
     const [openingExecutionId] = JSON.parse(oldIdentity[0]) as [string, string, string, string];
-    const openingRows = (await sql.query<{ body: string | null }>(
-      "select coalesce(result->>'body', primary_result->>'body') body from runtime_executions where actor_id=$1 and id=$2",
-      [f.actor, openingExecutionId],
-    )).rows;
-    expect(openingRows).toHaveLength(1);
-    const openingPayload = JSON.parse(openingRows[0].body ?? "") as { message?: unknown } | null;
-    if (typeof openingPayload?.message !== "string" || !openingPayload.message.trim())
-      throw new Error("expected this synthetic opening's completed public message");
-    const normaliseOpening = (value: string) => value.replace(/\s+/g, " ").trim();
-    const expectedOpeningMessage = normaliseOpening(openingPayload.message);
-    const openingParagraph = page.locator(
-      `[data-execution-id="${openingExecutionId}"] [data-message-role="assistant"] p`,
-    );
-    const expectOpeningVisible = async () => {
-      await expect.poll(() => openingParagraph.count(), {timeout: 60000}).toBe(1);
-      await openingParagraph.waitFor({state: "visible", timeout: 60000});
-      await expect.poll(async () => normaliseOpening(
-        (await openingParagraph.textContent({timeout: 5000})) ?? "",
-      ), {timeout: 60000}).toBe(expectedOpeningMessage);
-    };
+    const expectOpeningVisible = await mentorMessageCheck(page, f.actor, openingExecutionId);
     await expectOpeningVisible();
     mark("old opening settled");
     await page.reload();
@@ -5540,6 +5554,7 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     await expectOpeningVisible();
     expect(await expectExactMentorEffects(f.actor, first.draftId, first.roundId, oldOpening))
       .toEqual(oldIdentity);
+    const oldValuesBeforeNew = structuredClone((await f.service.read(first.draftId)).information["step-0"].values);
     await openDraft(second!.draftId, "new");
     await expect.poll(headingText, {timeout:60000}).toContain("重复标题");
     expect(await page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3}).count()).toBe(1);
@@ -5548,10 +5563,28 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     // Drive the new revision through its own buttons: 1.1 defer, 1.2 answer,
     // then 1.3 must show the agent_proposal guidance and its pending proposal.
     const secondRead = async () => await f.service.read(second!.draftId);
+    // Four-opening baseline before the cross-step action (shared helper, scopes).
+    const secondRoundId: unknown = (await secondRead()).roundId;
+    if (typeof secondRoundId !== "string" || !secondRoundId)
+      throw new Error("expected the new draft's persisted roundId");
+    const oldScope = {draftId: first.draftId, roundId: first.roundId};
+    const newScope = {draftId: second!.draftId, roundId: secondRoundId};
+    const allExpected: ExpectedMentorEffect[] = [
+      {scope: oldScope, stepId: "step-0", questionId: "extra1", opening: true, input: OPENING_INPUT},
+      {scope: newScope, stepId: "step-0", questionId: "extra1", opening: true, input: OPENING_INPUT},
+      {scope: newScope, stepId: "step-0", questionId: "goal", opening: true, input: OPENING_INPUT},
+      {scope: newScope, stepId: "step-0", questionId: "extra0", opening: true, input: OPENING_INPUT},
+      {scope: newScope, stepId: "step-1", questionId: "goal", opening: true, input: OPENING_INPUT},
+    ];
+    const checkEffects = (count: number) => expectExactMentorEffects(
+      f.actor, first.draftId, first.roundId, allExpected.slice(0, count),
+    );
+    await checkEffects(2);
     await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
     await expect.poll(async () => (await secondRead()).information["step-0"].values?.extra1?.status, {timeout:60000}).toBe("deferred");
     await expect.poll(headingText, {timeout:60000}).toContain("Renamed goal");
     expect(await page.getByRole("textbox", {name:"Renamed goal", exact:true}).count()).toBe(1);
+    await checkEffects(3);
     await page.getByRole("textbox", {name:"Renamed goal", exact:true}).fill("具体事实：我做 AI 工具内容");
     await page.getByRole("button", {name:"确认本题并继续", exact:true}).click();
     await expect.poll(async () => (await secondRead()).information["step-0"].values?.goal?.status, {timeout:60000}).toBe("confirmed");
@@ -5572,22 +5605,7 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     await expect.poll(() => proposalBox.count(), {timeout: 60000}).toBe(1);
     await expect.poll(() => proposalBox.inputValue(), {timeout: 60000}).toBe(expectedProposal);
     mark("new progressed to 1.3");
-    // Four-opening baseline before the cross-step action (shared helper, scopes).
-    const secondRoundId: unknown = (await secondRead()).roundId;
-    if (typeof secondRoundId !== "string" || !secondRoundId)
-      throw new Error("expected the new draft's persisted roundId");
-    const oldScope = {draftId: first.draftId, roundId: first.roundId};
-    const newScope = {draftId: second!.draftId, roundId: secondRoundId};
-    const allExpected: ExpectedMentorEffect[] = [
-      {scope: oldScope, stepId: "step-0", questionId: "extra1", opening: true, input: OPENING_INPUT},
-      {scope: newScope, stepId: "step-0", questionId: "extra1", opening: true, input: OPENING_INPUT},
-      {scope: newScope, stepId: "step-0", questionId: "goal", opening: true, input: OPENING_INPUT},
-      {scope: newScope, stepId: "step-0", questionId: "extra0", opening: true, input: OPENING_INPUT},
-      {scope: newScope, stepId: "step-1", questionId: "goal", opening: true, input: OPENING_INPUT},
-    ];
-    const checkEffects = (count: number) => expectExactMentorEffects(
-      f.actor, first.draftId, first.roundId, allExpected.slice(0, count),
-    );
+
     await checkEffects(4);
     // Advance across steps: confirm the pending proposal so step-0 becomes valid
     // and the next step opens its own same-titled field.
@@ -5602,16 +5620,31 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     await expect.poll(async () => (await secondRead()).information["step-1"].values?.goal?.value ?? "", {timeout:60000}).toBe("");
     expect(await page.locator("section[aria-label='本步填写信息']").getByRole("textbox", {name:"重复标题", exact:true}).inputValue()).toBe("");
     const stableIdentities = await checkEffects(5);
-    // Real refresh on the new draft under the five-opening baseline.
+    const openingTurns = ((await secondRead()).turns as Array<{
+      roundId: string; stepId: string; questionId: string; kind: string; executionId: string;
+    }>).filter(turn => turn.roundId === secondRoundId && turn.stepId === "step-1" &&
+      turn.questionId === "goal" && turn.kind === "opening");
+    expect(openingTurns).toHaveLength(1);
+    const expectNewOpeningVisible = await mentorMessageCheck(page, f.actor, openingTurns[0].executionId);
+    await expectNewOpeningVisible();
+    // A completed five-opening baseline, then the same page and same message.
     await page.reload();
-    await formHeading().waitFor({timeout:60000});
-    await expect.poll(async () => (await page.locator("section[aria-label='本步填写信息']").getByRole("heading",{level:3}).first().textContent()) ?? "", {timeout:60000}).toContain("重复标题");
-    expect(await page.locator("section[aria-label='本步填写信息']").getByRole("textbox", {name:"重复标题", exact:true}).inputValue()).toBe("");
+    const refreshedForm = page.locator("section[aria-label='本步填写信息']");
+    await expect.poll(() => refreshedForm.getByRole("heading", {level:3}).count()).toBe(1);
+    await expect.poll(() => refreshedForm.getByRole("heading", {level:3}).textContent()).toMatch(/^2\.1 重复标题/);
+    expect(await page.getByRole("navigation", {name:"定位步骤"})
+      .getByRole("button", {name:/^2\./}).getAttribute("aria-current")).toBe("step");
+    expect(await refreshedForm.getByRole("textbox", {name:"重复标题", exact:true}).inputValue()).toBe("");
+    await expectNewOpeningVisible();
     expect(await checkEffects(5)).toEqual(stableIdentities);
     mark("new refreshed");
+    const newValues = (await secondRead()).information["step-0"].values;
+    expect(newValues.goal.value).toBe("具体事实：我做 AI 工具内容");
+    expect({value:newValues.extra0.value, status:newValues.extra0.status})
+      .toEqual({value:expectedProposal, status:"confirmed"});
     await openDraft(first.draftId, "old revisit");
     expect(await headingText()).toContain("Extra field 1");
-    expect((await secondRead()).information["step-0"].values?.extra0?.value).toBe(expectedProposal);
+    expect((await f.service.read(first.draftId)).information["step-0"].values).toEqual(oldValuesBeforeNew);
     expect(await checkEffects(5)).toEqual(stableIdentities);
     const rounds = (await sql.query(
       `select d.draft_id::text draft_id, r.revision_id::text revision_id from opc_drafts d
@@ -5637,5 +5670,244 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     mark("browser close begin");
     await browser.close();
     mark("browser close end");
+  }
+}, 300000);
+
+it("OPC: published revision stays immutable while its revised round owns reach and openings", async () => {
+  const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const ids = ["goal", "extra0", "extra1", "extra2", "extra3"];
+  const f = await fixture(3, false, 0, flow => {
+    for (const step of flow.steps.slice(0, 2)) {
+      step.information = ids.map(id => ({
+        id, title: "B " + id, required: id === "goal",
+        profileKey: step.id.replace(/-/g, "_") + "_" + id,
+      }));
+    }
+  });
+  const draft = await f.service.start({
+    requestId: randomUUID(), registration: f.registration, mode: "mentor",
+  });
+  const { draftId, projectId, sessionId, roundId: r1 } = draft as {
+    draftId: string; projectId: string; sessionId: string; roundId: string;
+  };
+  for (const id of [draftId, projectId, sessionId, r1]) {
+    if (typeof id !== "string" || !id) throw new Error("missing B fixture identity");
+  }
+  const read = () => f.service.read(draftId);
+  const app = process.env.V3_LOCAL_APP;
+  if (!app) throw new Error("V3_LOCAL_APP required");
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  });
+  const pageErrors: string[] = [], externalRequests: string[] = [];
+  let phase = "setup";
+  let page: Page | undefined;
+  type Values = Record<string, {
+    status: "confirmed" | "provisional" | "unknown";
+    nature: "fact" | "unknown"; value: string;
+  }>;
+  const opening = (roundId: string): ExpectedMentorEffect => ({
+    scope: { draftId, roundId }, stepId: "step-0", questionId: "goal",
+    opening: true, input: OPENING_INPUT,
+  });
+  const writeValues = async (stepId: string, values: Values) => {
+    const before = await f.artifacts.read(projectId, (await read()).roundId);
+    const saved = await f.service.information({
+      draftId, stepId, requestId: randomUUID(),
+      expectedVersion: before.steps[stepId].version, values,
+    });
+    const after = await read();
+    expect(after.information[stepId].values).toEqual(values);
+    expect(after.snapshot.steps[stepId].version).toBe(saved.version);
+    expect(saved.version).toBe(before.steps[stepId].version + 1);
+    return after;
+  };
+  const prefix = (count: number): Values => Object.fromEntries(ids.map((id, index) => [id,
+    index < count
+      ? { status: "confirmed" as const, nature: "fact" as const, value: "B evidence " + id }
+      : { status: "unknown" as const, nature: "unknown" as const, value: "" },
+  ]));
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", route => {
+      const target = new URL(route.request().url());
+      if (!["127.0.0.1", "localhost", "[::1]"].includes(target.hostname)) {
+        externalRequests.push(target.origin);
+        return route.abort("blockedbyclient");
+      }
+      return route.continue();
+    });
+    const newPage = async () => {
+      const next = await context.newPage();
+      next.setDefaultTimeout(30000);
+      next.on("pageerror", error => pageErrors.push(error.message));
+      return next;
+    };
+    page = await newPage();
+    phase = "login";
+    const settings = page.waitForResponse(
+      response => response.url().includes("settings.getSystemSettings") && response.ok(),
+      { timeout: 60000 },
+    );
+    await page.goto(app + "/login");
+    await settings;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    expect(await page.getByPlaceholder("name@example.com").inputValue()).toBe(f.email);
+    expect(await page.getByPlaceholder("输入你的密码").inputValue()).toBe(f.password);
+    await page.getByRole("button", { name: "登录", exact: true }).last().click();
+    await page.waitForURL(url => !url.pathname.startsWith("/login"), { timeout: 60000 });
+
+    phase = "R1 opening";
+    await page.goto(app + "/positioning/" + draftId);
+    const oldIdentities = await expectExactMentorEffects(f.actor, draftId, r1, [opening(r1)]);
+    expect(oldIdentities).toHaveLength(1);
+    const [oldExecution] = JSON.parse(oldIdentities[0]) as [string, string, string, string];
+    const oldMessage = await mentorMessageCheck(page, f.actor, oldExecution);
+    await oldMessage();
+    await page.close();
+    page = undefined;
+
+    // No live page during preparation: only the two deliberate openings cost.
+    phase = "R1 save confirm publish";
+    for (const step of f.flow.steps) {
+      const before = await f.artifacts.read(projectId, r1);
+      await f.artifacts.execute({
+        action: "save", projectId, roundId: r1, requestId: randomUUID(),
+        stepId: step.id, body: "B published body " + step.id, evidenceIds: [],
+        expectedVersion: before.steps[step.id].version,
+      });
+      const values: Values = Object.fromEntries((step.information ?? []).map(field => [field.id, {
+        status: "confirmed" as const, nature: "fact" as const,
+        value: "B R1 " + step.id + " " + field.id,
+      }]));
+      await writeValues(step.id, values);
+      const state = (await f.artifacts.read(projectId, r1)).steps[step.id];
+      await f.artifacts.execute({
+        action: "confirm", projectId, roundId: r1, requestId: randomUUID(), stepId: step.id,
+        expectedVersion: state.version, expectedReviewVersion: state.reviewVersion,
+      });
+    }
+    const confirmed = await f.artifacts.read(projectId, r1);
+    await f.artifacts.execute({
+      action: "publish", projectId, roundId: r1, requestId: randomUUID(),
+      expectedSteps: Object.fromEntries(Object.entries(confirmed.steps).map(([id, state]) => [id, {
+        version: state.version, reviewVersion: state.reviewVersion,
+      }])),
+    });
+    const reportBefore = structuredClone(await f.artifacts.report(projectId, r1));
+    expect(reportBefore.available).toBe(true);
+    const versionId = reportBefore.id;
+    if (typeof versionId !== "string" || !versionId) throw new Error("R1 version required");
+    const versionJSON = async () => {
+      const rows = (await sql.query<{ body: Record<string, unknown> }>(
+        "select to_jsonb(v) body from artifact_versions v where v.id=$1 and v.round_id=$2",
+        [versionId, r1],
+      )).rows;
+      expect(rows).toHaveLength(1);
+      return rows[0].body;
+    };
+    const roundSteps = async (roundId: string) => {
+      const rows = (await sql.query<{ steps: Record<string, { confirmationId?: string; valid?: boolean }> }>(
+        "select steps from artifact_rounds where id=$1 and project_id=$2", [roundId, projectId],
+      )).rows;
+      expect(rows).toHaveLength(1);
+      return rows[0].steps;
+    };
+    const versionBefore = structuredClone(await versionJSON());
+    const stepsBefore = structuredClone(await roundSteps(r1));
+    expect((await read()).information["step-0"].reached).toEqual(ids);
+    expect((await read()).information["step-1"].reached).toEqual(ids);
+
+    phase = "published page and explicit revise";
+    page = await newPage();
+    await page.goto(app + "/positioning/" + draftId);
+    const reviseButton = page.getByRole("button", { name: "修订定位，保留原版本", exact: true });
+    await reviseButton.waitFor({ state: "visible" });
+    expect((await read()).snapshot.state).toBe("published");
+    await expect.poll(() => page!.getByRole("button", { name: "确认本题并继续", exact: true }).isDisabled())
+      .toBe(true);
+    await reviseButton.click();
+    await expect.poll(async () => (await read()).roundId, { timeout: 60000 }).not.toBe(r1);
+    const revised = await read();
+    const r2: unknown = revised.roundId;
+    if (typeof r2 !== "string" || !r2) throw new Error("R2 identity required");
+    expect(revised.snapshot.state).toBe("draft");
+    expect({ draftId: revised.draftId, projectId: revised.projectId, sessionId: revised.sessionId })
+      .toEqual({ draftId, projectId, sessionId });
+    const revisedSteps = await roundSteps(r2);
+    for (const step of f.flow.steps) {
+      expect(revisedSteps[step.id].valid).toBe(true);
+      expect(revisedSteps[step.id].confirmationId).toBeTruthy();
+      expect(revisedSteps[step.id].confirmationId).not.toBe(stepsBefore[step.id].confirmationId);
+    }
+    expect(await expectExactMentorEffects(f.actor, draftId, r1, [opening(r1)])).toEqual(oldIdentities);
+    await page.close();
+    page = undefined;
+
+    phase = "round and step isolation";
+    const short = await writeValues("step-0", prefix(1));
+    expect(short.information["step-0"].reached).toEqual(["goal", "extra0"]);
+    const long = await writeValues("step-1", prefix(5));
+    expect(long.information["step-1"].reached).toEqual(ids);
+    expect(long.information["step-0"].reached).toEqual(["goal", "extra0"]);
+    const pending = prefix(0);
+    pending.goal = { status: "provisional", nature: "fact", value: "B R2 revised goal" };
+    const current = await writeValues("step-0", pending);
+    expect(current.information["step-0"].reached).toEqual(["goal", "extra0"]);
+
+    phase = "R2 opening and edit";
+    page = await newPage();
+    await page.goto(app + "/positioning/" + draftId);
+    const allExpected = [opening(r1), opening(r2)];
+    const identities = await expectExactMentorEffects(f.actor, draftId, r1, allExpected);
+    const newIdentities = identities.filter(identity => !oldIdentities.includes(identity));
+    expect(newIdentities).toHaveLength(1);
+    const [newExecution] = JSON.parse(newIdentities[0]) as [string, string, string, string];
+    expect(newExecution).not.toBe(oldExecution);
+    const currentMessage = await mentorMessageCheck(page, f.actor, newExecution);
+    await currentMessage();
+    const form = page.locator("section[aria-label='本步填写信息']");
+    const heading = form.getByRole("heading", { level: 3 });
+    const box = form.getByRole("textbox", { name: "B goal", exact: true });
+    const nav = page.getByRole("navigation", { name: "本步骤已到达的问题" });
+    const expectCurrent = async (value: string) => {
+      await expect.poll(() => heading.count()).toBe(1);
+      await expect.poll(() => heading.textContent()).toMatch(/^1\.1 B goal/);
+      await expect.poll(() => box.inputValue()).toBe(value);
+      await expect.poll(() => nav.getByRole("button").count()).toBe(2);
+      expect(await nav.getByRole("button", { name: /B extra1/ }).count()).toBe(0);
+      expect((await read()).information["step-0"].reached).toEqual(["goal", "extra0"]);
+    };
+    await expectCurrent(pending.goal.value);
+    const beforeEdit = await f.artifacts.read(projectId, r2);
+    const edited = "B R2 edited by browser";
+    await box.fill(edited);
+    await expect.poll(async () => (await read()).information["step-0"].values.goal.value,
+      { timeout: 30000 }).toBe(edited);
+    await expect.poll(async () => (await read()).snapshot.steps["step-0"].version,
+      { timeout: 30000 }).toBe(beforeEdit.steps["step-0"].version + 1);
+    expect((await read()).information["step-0"].values.goal.status).toBe("provisional");
+    await expectCurrent(edited);
+    phase = "R2 reload and R1 immutability";
+    await page.reload();
+    await expectCurrent(edited);
+    await currentMessage();
+    expect(await expectExactMentorEffects(f.actor, draftId, r1, allExpected)).toEqual(identities);
+    expect(await versionJSON()).toEqual(versionBefore);
+    expect(await roundSteps(r1)).toEqual(stepsBefore);
+    expect(await f.artifacts.report(projectId, r1)).toEqual(reportBefore);
+    expect(pageErrors).toEqual([]);
+    expect(externalRequests).toEqual([]);
+    console.log("OPC_REVISION_ISOLATION " + JSON.stringify({
+      draftId, projectId, sessionId, r1, r2, versionId,
+      openings: 2, runs: 2, reserves: 2, reached: ["goal", "extra0"],
+    }));
+  } catch (error) {
+    console.error("B_FAILURE", { phase, message: String(error), pathname: page ? new URL(page.url()).pathname : null });
+    throw error;
+  } finally {
+    await browser.close();
   }
 }, 300000);
