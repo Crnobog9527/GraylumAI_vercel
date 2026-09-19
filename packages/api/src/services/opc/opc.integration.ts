@@ -5433,4 +5433,117 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     secondOrder: secondSchema.map(field => field.id),
     pinnedOrder: pinned.map(field => field.id),
   }));
+  // A: browser evidence — ONE login, then switch drafts directly (staged
+  // diagnostics so a failure points at a specific await).
+  const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const t0 = Date.now();
+  const mark = (phase: string) => console.log("A_MS " + phase + " " + (Date.now() - t0) + "ms");
+  mark("browser launch begin");
+  const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless:true});
+  mark("browser launch end");
+  const context = await browser.newContext();
+  await context.route("**/*", route => {
+    const host = new URL(route.request().url()).hostname;
+    return ["127.0.0.1","localhost"].includes(host) ? route.continue() : route.abort();
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(20000);
+  page.setDefaultNavigationTimeout(60000);
+  const reads: Array<{path:string;draftId:string|null;ok:boolean}> = [];
+  page.on("response", response => {
+    if (!response.url().includes("opc.read")) return;
+    const url = decodeURIComponent(response.url());
+    reads.push({
+      path: new URL(response.url()).pathname,
+      draftId: /"draftId":\s*"([0-9a-f-]{36})"/.exec(url)?.[1] ?? null,
+      ok: response.ok(),
+    });
+  });
+  const pageErrors: string[] = [];
+  page.on("pageerror", error => pageErrors.push(error.message));
+  const formHeading = () =>
+    page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3}).first();
+  const headingText = async () => {
+    try {
+      return (((await formHeading().textContent({timeout:5000})) ?? "")).replace(/\s+/g," ").trim();
+    } catch { return ""; }
+  };
+  try {
+    mark("login document begin");
+    const settings = page.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), {timeout:60000});
+    await page.goto(process.env.V3_LOCAL_APP + "/login");
+    await settings;
+    mark("settings ready");
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    expect(await page.getByPlaceholder("name@example.com").inputValue()).toBe(f.email);
+    mark("form filled");
+    await page.getByRole("button", {name:"登录", exact:true}).last().click();
+    mark("login submitted");
+    await page.waitForURL(url => !url.pathname.startsWith("/login"), {timeout:60000});
+    mark("auth navigated");
+    const openDraft = async (draftId: string, label: string) => {
+      mark(label + " goto begin");
+      await page.goto(process.env.V3_LOCAL_APP + "/positioning/" + draftId);
+      await page.waitForURL(url => url.pathname === "/positioning/" + draftId, {timeout:60000});
+      mark(label + " url ok");
+      await formHeading().waitFor({timeout:60000});
+      mark(label + " form ready");
+    };
+    await openDraft(first.draftId, "old");
+    await expect.poll(headingText, {timeout:60000}).toContain("Extra field 1");
+    expect(await page.getByRole("textbox", {name:"Extra field 1", exact:true}).count()).toBe(1);
+    // Wait for the opening this entry triggers to settle, then take the passive
+    // baseline: the reload itself must add nothing.
+    await expect.poll(async () => Number((await sql.query(
+      "select count(*)::int n from runtime_executions where actor_id=$1 and state not in ('completed','failed','cancelled')",
+      [f.actor],
+    )).rows[0].n), {timeout:60000}).toBe(0);
+    mark("old opening settled");
+    const passiveBaseline = (await sql.query(
+      `select (select count(*)::int from runtime_executions where actor_id=$1) executions,
+              (select count(*)::int from bill2_runs where actor_id=$1) runs,
+              (select count(*)::int from credit_transactions where user_id=$1 and reason_code='bill2_reserve') reserves`,
+      [f.actor],
+    )).rows[0];
+    await page.reload();
+    await formHeading().waitFor({timeout:60000});
+    mark("old reload");
+    expect(await headingText()).toContain("Extra field 1");
+    expect((await sql.query(
+      `select (select count(*)::int from runtime_executions where actor_id=$1) executions,
+              (select count(*)::int from bill2_runs where actor_id=$1) runs,
+              (select count(*)::int from credit_transactions where user_id=$1 and reason_code='bill2_reserve') reserves`,
+      [f.actor],
+    )).rows[0]).toEqual(passiveBaseline);
+    await openDraft(second!.draftId, "new");
+    await expect.poll(headingText, {timeout:60000}).toContain("重复标题");
+    expect(await page.getByRole("textbox", {name:"重复标题", exact:true}).count()).toBe(1);
+    expect(await page.getByRole("textbox", {name:"Renamed goal", exact:true}).count()).toBe(0);
+    await openDraft(first.draftId, "old revisit");
+    expect(await headingText()).toContain("Extra field 1");
+    const rounds = (await sql.query(
+      `select d.draft_id::text draft_id, r.revision_id::text revision_id from opc_drafts d
+       join artifact_rounds r on r.id=d.round_id where d.draft_id in ($1,$2)`,
+      [first.draftId, second!.draftId],
+    )).rows as Array<{draft_id:string;revision_id:string}>;
+    expect(rounds.find(r => r.draft_id === first.draftId)?.revision_id).toBe(f.pack.revisionId);
+    expect(rounds.find(r => r.draft_id === second!.draftId)?.revision_id).toBe(pack2.revisionId);
+    mark("A complete");
+    console.log("OPC_REVISION_PIN_BROWSER " + JSON.stringify({
+      reads, pageErrors, oldRevision: f.pack.revisionId, newRevision: pack2.revisionId,
+    }));
+  } catch (error) {
+    console.error("A_FAILURE " + JSON.stringify({
+      message: String((error as Error).message).slice(0, 300),
+      pathname: (() => { try { return new URL(page.url()).pathname; } catch { return "unavailable"; } })(),
+      heading: await headingText(),
+      reads, pageErrors,
+    }));
+    throw error;
+  } finally {
+    mark("browser close begin");
+    await browser.close();
+    mark("browser close end");
+  }
 }, 300000);
