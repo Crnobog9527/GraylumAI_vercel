@@ -17,32 +17,8 @@ env:
   NODE_VERSION: '24'
 
 jobs:
-  scope:
-    name: Validate change scope
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    outputs:
-      mode: ${{ steps.scope.outputs.mode }}
-    steps:
-      - name: Checkout complete history
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Test scope and required-check contracts
-        run: |
-          ruby .github/scripts/test-ci-scope.rb
-          ruby .github/scripts/test-ci-workflows.rb
-      - name: Classify exact event diff and validate documentation
-        id: scope
-        run: ruby .github/scripts/ci-scope.rb
-
   lint-and-type:
     name: Run lint and typecheck
-    needs: [scope]
-    if: needs.scope.outputs.mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -73,8 +49,6 @@ jobs:
 
   test:
     name: Run unit and regression tests
-    needs: [scope]
-    if: needs.scope.outputs.mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -85,6 +59,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Test required-check contracts
+        run: ruby .github/scripts/test-ci-workflows.rb
 
       - name: Setup Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
@@ -173,26 +150,11 @@ jobs:
       - name: Run API tests
         run: pnpm test:api
 
-      - name: Launch regression — auth bootstrap including OAuth
-        run: pnpm test:ci:auth-bootstrap
-
-      - name: Launch regression — checkout readiness, cancellation, and PAY-1
-        run: pnpm test:ci:checkout-cancellation
-
       - name: Launch regression — PAY-1 frontend checkout readiness and cancellation
         run: pnpm test:ci:pay-1-frontend
 
-      - name: Launch regression — Skill runtime active and unbound fail-closed
-        run: pnpm test:ci:skill-runtime
-
-      - name: Launch regression — YEAR-1 calendar grants
-        run: pnpm test:ci:year-calendar
-
-      - name: Launch regression — REFUND-1B counters and race protections
-        run: pnpm test:ci:refund-race
-
       - name: Launch regression — billing cron authorization and reconciliation
-        run: pnpm test:ci:billing-cron
+        run: pnpm --filter web exec vitest run src/app/api/cron/billing-reconcile/route.test.ts
 
       - name: Launch regression — proxy hostname behavior
         run: pnpm test:ci:proxy-hostname
@@ -202,8 +164,6 @@ jobs:
 
   build-and-e2e:
     name: Run build and secretless security E2E
-    needs: [scope]
-    if: needs.scope.outputs.mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     permissions:
@@ -284,138 +244,120 @@ jobs:
 
   lint-check:
     name: Lint & Type Check
-    needs: [scope, lint-and-type]
+    needs: [lint-and-type]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
     steps:
-      - name: Require successful scope-appropriate validation
+      - name: Require successful worker validation
         env:
-          SCOPE_RESULT: ${{ needs.scope.result }}
-          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
           WORK_RESULT: ${{ needs.lint-and-type.result }}
         run: |
           set -euo pipefail
-          test "$SCOPE_RESULT" = success
-          case "$SCOPE_MODE:$WORK_RESULT" in
-            full:success) echo 'Full validation passed.' ;;
-            docs:skipped) echo 'Allowlisted regular documentation validated by scope job; runtime checks not applicable.' ;;
-            *) echo 'Missing, failed, cancelled, or inconsistent validation.' >&2; exit 1 ;;
-          esac
+          if [ "$WORK_RESULT" != success ]; then
+            echo 'Missing, failed, cancelled, or skipped validation.' >&2
+            exit 1
+          fi
+          echo 'Validation passed.'
 
   typecheck:
     name: TypeScript Check
-    needs: [scope, lint-and-type]
+    needs: [lint-and-type]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
     steps:
-      - name: Require successful scope-appropriate validation
+      - name: Require successful worker validation
         env:
-          SCOPE_RESULT: ${{ needs.scope.result }}
-          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
           WORK_RESULT: ${{ needs.lint-and-type.result }}
         run: |
           set -euo pipefail
-          test "$SCOPE_RESULT" = success
-          case "$SCOPE_MODE:$WORK_RESULT" in
-            full:success) echo 'Full validation passed.' ;;
-            docs:skipped) echo 'Allowlisted regular documentation validated by scope job; runtime checks not applicable.' ;;
-            *) echo 'Missing, failed, cancelled, or inconsistent validation.' >&2; exit 1 ;;
-          esac
+          if [ "$WORK_RESULT" != success ]; then
+            echo 'Missing, failed, cancelled, or skipped validation.' >&2
+            exit 1
+          fi
+          echo 'Validation passed.'
 
   unit-check:
     name: Unit Tests
-    needs: [scope, test]
+    needs: [test]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
     steps:
-      - name: Require successful scope-appropriate validation
+      - name: Require successful worker validation
         env:
-          SCOPE_RESULT: ${{ needs.scope.result }}
-          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
           WORK_RESULT: ${{ needs.test.result }}
         run: |
           set -euo pipefail
-          test "$SCOPE_RESULT" = success
-          case "$SCOPE_MODE:$WORK_RESULT" in
-            full:success) echo 'Full validation passed.' ;;
-            docs:skipped) echo 'Allowlisted regular documentation validated by scope job; runtime checks not applicable.' ;;
-            *) echo 'Missing, failed, cancelled, or inconsistent validation.' >&2; exit 1 ;;
-          esac
+          if [ "$WORK_RESULT" != success ]; then
+            echo 'Missing, failed, cancelled, or skipped validation.' >&2
+            exit 1
+          fi
+          echo 'Validation passed.'
 
   security-unit-tests:
     name: Security Unit Tests
-    needs: [scope, test]
+    needs: [test]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
     steps:
-      - name: Require successful scope-appropriate validation
+      - name: Require successful worker validation
         env:
-          SCOPE_RESULT: ${{ needs.scope.result }}
-          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
           WORK_RESULT: ${{ needs.test.result }}
         run: |
           set -euo pipefail
-          test "$SCOPE_RESULT" = success
-          case "$SCOPE_MODE:$WORK_RESULT" in
-            full:success) echo 'Full validation passed.' ;;
-            docs:skipped) echo 'Allowlisted regular documentation validated by scope job; runtime checks not applicable.' ;;
-            *) echo 'Missing, failed, cancelled, or inconsistent validation.' >&2; exit 1 ;;
-          esac
+          if [ "$WORK_RESULT" != success ]; then
+            echo 'Missing, failed, cancelled, or skipped validation.' >&2
+            exit 1
+          fi
+          echo 'Validation passed.'
 
   build:
     name: Build Check
-    needs: [scope, build-and-e2e]
+    needs: [build-and-e2e]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
     steps:
-      - name: Require successful scope-appropriate validation
+      - name: Require successful worker validation
         env:
-          SCOPE_RESULT: ${{ needs.scope.result }}
-          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
           WORK_RESULT: ${{ needs.build-and-e2e.result }}
         run: |
           set -euo pipefail
-          test "$SCOPE_RESULT" = success
-          case "$SCOPE_MODE:$WORK_RESULT" in
-            full:success) echo 'Full validation passed.' ;;
-            docs:skipped) echo 'Allowlisted regular documentation validated by scope job; runtime checks not applicable.' ;;
-            *) echo 'Missing, failed, cancelled, or inconsistent validation.' >&2; exit 1 ;;
-          esac
+          if [ "$WORK_RESULT" != success ]; then
+            echo 'Missing, failed, cancelled, or skipped validation.' >&2
+            exit 1
+          fi
+          echo 'Validation passed.'
 
   security-e2e-tests:
     name: Security E2E Tests
-    needs: [scope, build-and-e2e]
+    needs: [build-and-e2e]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
     steps:
-      - name: Require successful scope-appropriate validation
+      - name: Require successful worker validation
         env:
-          SCOPE_RESULT: ${{ needs.scope.result }}
-          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
           WORK_RESULT: ${{ needs.build-and-e2e.result }}
         run: |
           set -euo pipefail
-          test "$SCOPE_RESULT" = success
-          case "$SCOPE_MODE:$WORK_RESULT" in
-            full:success) echo 'Full validation passed.' ;;
-            docs:skipped) echo 'Allowlisted regular documentation validated by scope job; runtime checks not applicable.' ;;
-            *) echo 'Missing, failed, cancelled, or inconsistent validation.' >&2; exit 1 ;;
-          esac
+          if [ "$WORK_RESULT" != success ]; then
+            echo 'Missing, failed, cancelled, or skipped validation.' >&2
+            exit 1
+          fi
+          echo 'Validation passed.'

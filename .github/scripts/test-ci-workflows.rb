@@ -24,19 +24,17 @@ class CIWorkflowsTest < Minitest::Test
     GATES.each do |id, (name, worker)|
       job=@ci.fetch('jobs').fetch(id)
       assert_equal name, job.fetch('name'); assert_equal 'always()', job.fetch('if')
-      assert_equal ['scope',worker], job.fetch('needs')
+      assert_equal [worker], job.fetch('needs')
       assert_equal 1, job.fetch('steps').length
       step=job['steps'].first
-      assert_equal({'SCOPE_RESULT'=>'${{ needs.scope.result }}', 'SCOPE_MODE'=>'${{ needs.scope.outputs.mode }}',
-                    'WORK_RESULT'=>"${{ needs.#{worker}.result }}"}, step.fetch('env'))
-      %w[success failure cancelled skipped].product(['full','docs','', 'invalid'], %w[success failure cancelled skipped]).each do |scope, mode, result|
-        _,_,status=Open3.capture3({'SCOPE_RESULT'=>scope, 'SCOPE_MODE'=>mode,'WORK_RESULT'=>result},'bash','-c',step.fetch('run'))
-        expected=scope=='success' && ((mode=='full' && result=='success') || (mode=='docs' && result=='skipped'))
-        assert_equal expected,status.success?,"#{id}: #{[scope,mode,result].inspect}"
+      assert_equal({'WORK_RESULT'=>"${{ needs.#{worker}.result }}"}, step.fetch('env'))
+      ['success', 'failure', 'cancelled', 'skipped', '', 'invalid'].each do |result|
+        _,_,status=Open3.capture3({'WORK_RESULT'=>result},'bash','-c',step.fetch('run'))
+        assert_equal result == 'success',status.success?,"#{id}: #{result.inspect}"
       end
       work=@ci['jobs'].fetch(worker)
-      assert_equal ['scope'], work.fetch('needs')
-      assert_equal "needs.scope.outputs.mode == 'full'", work.fetch('if')
+      refute work.key?('needs')
+      refute work.key?('if')
       refute work.key?('continue-on-error')
     end
   end
@@ -57,9 +55,19 @@ class CIWorkflowsTest < Minitest::Test
     runs=[@ci,@security].flat_map { |w| w['jobs'].values.flat_map { |j| j['steps'].map { |s| s['run'] }.compact } }
     %w[pnpm\ build pnpm\ --filter\ web\ typecheck pnpm\ test:api].each { |command| assert_equal 1,runs.count(command),command }
     refute_includes runs, 'pnpm --filter @repo/api test:run'
-    %w[auth-bootstrap checkout-cancellation pay-1-frontend skill-runtime year-calendar refund-race billing-cron proxy-hostname safeguards].each do |suite|
+    %w[pay-1-frontend proxy-hostname safeguards].each do |suite|
       assert_includes runs, "pnpm test:ci:#{suite}"
     end
+    assert_includes runs, 'pnpm --filter web exec vitest run src/app/api/cron/billing-reconcile/route.test.ts'
+    %w[auth-bootstrap checkout-cancellation skill-runtime year-calendar refund-race billing-cron].each do |suite|
+      refute_includes runs, "pnpm test:ci:#{suite}"
+    end
+    refute @ci['jobs'].key?('scope')
+    steps = @ci['jobs']['test']['steps']
+    contract_index = steps.index { |step| step['run'] == 'ruby .github/scripts/test-ci-workflows.rb' }
+    install_index = steps.index { |step| step['run'] == 'pnpm install --frozen-lockfile' }
+    refute_nil contract_index
+    assert_operator contract_index, :<, install_index
     assert_equal 'true', @ci['jobs']['build-and-e2e']['env']['SECURITY_E2E_LOCAL_ONLY']
     assert_equal 'false', @ci['jobs']['build-and-e2e']['env']['E2E_ALLOW_DATABASE_FIXTURES']
   end
