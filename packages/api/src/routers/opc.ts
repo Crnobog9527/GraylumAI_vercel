@@ -89,6 +89,15 @@ export const opcRouter = router({
     .query(({ ctx, input }) => ctx.opc.workResults(input.sessionId)),
   catalog: procedure.query(({ ctx }) => ctx.opc.catalog()),
   list: readProcedure.query(({ ctx }) => ctx.opc.list()),
+  planRequestState: readProcedure
+    .input(
+      z
+        .object({ draftId: z.string().uuid(), requestId: z.string().uuid() })
+        .strict(),
+    )
+    .query(({ ctx, input }) =>
+      ctx.opc.planRequestState(input.draftId, input.requestId),
+    ),
   read: readProcedure
     .input(z.object({ draftId: z.string().uuid() }).strict())
     .query(async({ ctx, input }) => dedupeHandoffResults({...await ctx.opc.read(input.draftId),runtimeMode:ctx.stagingRead?"staging_test":"isolated"})),

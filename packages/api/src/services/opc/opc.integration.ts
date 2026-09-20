@@ -6298,6 +6298,106 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
   }
 }, 300000);
 
+it("OPC: an explicit continue keeps a retained request identity instead of overwriting an unknown outcome", async () => {
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
+  // The draft is already published, so the completed state owns the explicit
+  // re-entry control this case presses.
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const browser = await chromium.launch({
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+  const context = await browser.newContext();
+  await context.route("**/*", (route) => {
+    const u = new URL(route.request().url());
+    return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+      ["data:", "blob:"].includes(u.protocol)
+      ? route.continue()
+      : route.abort();
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(90000);
+  const draftPath = "/positioning/" + f.d.draftId;
+  const key = "opc-plan-generation:" + f.d.draftId;
+  try {
+    await page.goto(
+      process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(draftPath),
+    );
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", { name: "登录", exact: true }).last().click();
+    await page.waitForURL((url) => url.pathname.endsWith(draftPath));
+    // A consented envelope that still owns an unresolved request: pressing the
+    // re-entry control again must continue THAT request, never replace it.
+    const original = planEnvelopeFor(f, {
+      requestId: "1f0a1c2d-3e4f-4a5b-8c6d-7e8f90a1b2c3",
+    });
+    await page.evaluate(
+      ({ key, envelope }) => sessionStorage.setItem(key, JSON.stringify(envelope)),
+      { key, envelope: original },
+    );
+    const before = await planIdentity(f.actor, f.d.draftId);
+    await page
+      .getByRole("button", { name: "继续生成第一周选题", exact: true })
+      .click();
+    await page
+      .getByRole("dialog", { name: "是否继续生成第一周选题" })
+      .getByRole("button", { name: "继续生成第一周选题", exact: true })
+      .click();
+    await page.waitForURL((url) => url.pathname.endsWith(draftPath + "/plan"));
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    const stored = JSON.parse(
+      (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
+    ) as { request: { requestId: string } };
+    expect(stored.request.requestId).toBe(original.request.requestId);
+    const after = await planIdentity(f.actor, f.d.draftId);
+    expect(after.planExecutions - before.planExecutions).toBe(1);
+    expect(after.reserves - before.reserves).toBe(1);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+it("OPC: a local record without consent is checked on the server and only recovered by an explicit continue", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const legacy = planEnvelopeFor(f, {
+    requestId: "2b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e",
+  }) as Record<string, unknown>;
+  // A pre-upgrade record: no consent marker, and nothing was ever dispatched.
+  delete legacy.consentedAt;
+  legacy.v = 2;
+  const { browser, page, key } = await planBrowser(f, { envelope: legacy });
+  try {
+    await page.reload();
+    await page
+      .getByRole("heading", { name: "本机保留了一条早先的生成请求", exact: true })
+      .waitFor();
+    const before = await planIdentity(f.actor, f.d.draftId);
+    expect(before.planExecutions).toBe(0);
+    // The page must report the server's own verdict instead of assuming that a
+    // local record was never executed or never cost anything.
+    await expect
+      .poll(
+        async () =>
+          (await page.getByRole("status").allTextContents()).join(" "),
+        { timeout: 30000 },
+      )
+      .toContain("服务端没有这条请求的准入记录");
+    expect(before.planExecutions).toBe(0);
+    await page.getByRole("button", { name: "继续这条原请求", exact: true }).click();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    const stored = JSON.parse(
+      (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
+    ) as { request: { requestId: string } };
+    expect(stored.request.requestId).toBe("2b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e");
+    const after = await planIdentity(f.actor, f.d.draftId);
+    expect(after.planExecutions - before.planExecutions).toBe(1);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
 it.each(["save", "confirm"] as const)(
   "OPC: workbench %s conflict recovery preserves unknown-outcome replay",
   async targetPhase => {

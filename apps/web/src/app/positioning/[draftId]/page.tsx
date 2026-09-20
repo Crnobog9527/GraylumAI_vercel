@@ -330,6 +330,15 @@ export default function PositioningDraft({
   const [retainedPlan, setRetainedPlan] = useState<
     { requestId: string; sourceRoundId: string | null } | null
   >(null);
+  /**
+   * The server's own record for that retained request. It is what lets the page
+   * distinguish "never admitted" from "admitted, outcome unknown" truthfully
+   * instead of assuming a cancellation or a zero cost.
+   */
+  const retainedState = trpc.opc.planRequestState.useQuery(
+    { draftId, requestId: retainedPlan?.requestId ?? "" },
+    { enabled: Boolean(retainedPlan?.requestId) },
+  );
   const planEnvelopeKey = "opc-plan-generation:" + draftId;
   const hasUnsavedInformation = Object.keys(infoEdits).length > 0;
   const d = read.data,
@@ -966,6 +975,18 @@ export default function PositioningDraft({
     sessionStorage.removeItem(planEnvelopeKey);
   }
   /**
+   * A local record that an explicit new intent replaces is archived verbatim.
+   * Archiving is not a cancellation: whatever state that request reached on the
+   * server stays as it is, and the archived copy is only local evidence.
+   */
+  function archiveRetainedPlanRecord() {
+    const raw = sessionStorage.getItem(planEnvelopeKey);
+    if (!raw) return;
+    sessionStorage.setItem(planEnvelopeKey + ":replaced:" + Date.now(), raw);
+    sessionStorage.removeItem(planEnvelopeKey);
+    setRetainedPlan(null);
+  }
+  /**
    * A retained request that cannot belong to the round on screen is archived
    * verbatim, never migrated onto the new round, and never executed.
    */
@@ -1326,9 +1347,24 @@ export default function PositioningDraft({
    * explicitly continued lost reply replays its own identity instead of paying
    * for a second call.
    */
-  function consentPlan() {
+  async function consentPlan() {
     if (!d || hasUnsavedInformation) return;
     const retained = readRetainedPlan();
+    // An already consented envelope for this round may still own an unresolved
+    // request. "继续生成第一周选题" means continue that request: its exact
+    // identity is never overwritten, so an unknown outcome stays recoverable.
+    // A fresh generation is a separate explicit action ("重新生成").
+    if (
+      retained?.kind === "envelope" &&
+      retained.envelope.request.draftId === draftId &&
+      retained.envelope.sourceRoundId === d.roundId
+    ) {
+      const request = retained.envelope.request;
+      setConsentOpen(false);
+      if (planView) await run(async () => void (await runPlanRequest(request)));
+      else router.push(`/positioning/${draftId}/plan`);
+      return;
+    }
     const retainedRequest =
       retained?.kind === "unconsented" &&
       retained.request.draftId === draftId &&
@@ -1337,6 +1373,8 @@ export default function PositioningDraft({
         : retained?.kind === "legacy" && retained.request.draftId === draftId
           ? retained.request
           : null;
+    // A replaced local record is preserved verbatim instead of being lost.
+    if (!retainedRequest && retained) archiveRetainedPlanRecord();
     const request: PlanRequest = retainedRequest ?? {
       draftId,
       requestId: crypto.randomUUID(),
@@ -1353,7 +1391,8 @@ export default function PositioningDraft({
     sessionStorage.setItem(planEnvelopeKey, JSON.stringify(envelope));
     setRetainedPlan(null);
     setConsentOpen(false);
-    router.push(`/positioning/${draftId}/plan`);
+    if (planView) await run(async () => void (await runPlanRequest(request)));
+    else router.push(`/positioning/${draftId}/plan`);
   }
   async function generatePlan() {
     await run(async () => {
@@ -1405,7 +1444,20 @@ export default function PositioningDraft({
         consentedAt: new Date().toISOString(),
         request,
       };
+      // A new intent replaces the local record; the old one is archived instead
+      // of being silently overwritten.
+      if (!reuse) archiveRetainedPlanRecord();
       sessionStorage.setItem(planEnvelopeKey, JSON.stringify(envelope));
+      await runPlanRequest(request);
+    });
+  }
+  /**
+   * Dispatch the exact frozen request that authorizes this generation, under
+   * its own identity. A completed-but-unusable body releases the request; a
+   * timeout, a lost reply or any other unknown outcome keeps the envelope so the
+   * same request can be replayed instead of paying for a second call.
+   */
+  async function runPlanRequest(request: PlanRequest) {
       const prepared = await prepareStep.mutateAsync(request);
       await execute.mutateAsync({ executionId: prepared.executionId });
       const candidate = await utils.opc.planResult.fetch({
@@ -1425,7 +1477,6 @@ export default function PositioningDraft({
       // same execution instead of paying for another one.
       persistPlanCandidate(candidate.body, d.roundId, request.requestId);
       setPlanRecovery("idle");
-    });
   }
   /**
    * The retained handoff request, or null when there is none or it cannot be
@@ -1609,6 +1660,15 @@ export default function PositioningDraft({
     setInfoEdits(infoEditsRef.current);
     setInformationConflicts(old=>{const next={...old};delete next[stepId];return next;});
   }
+  /** The server's identity/lifecycle projection for the retained request. */
+  const retainedStateData = retainedState.data as
+    | {
+        admitted?: boolean;
+        state?: string | null;
+        hasResult?: boolean;
+        materialRevoked?: boolean;
+      }
+    | undefined;
   if (read.isLoading || hydratedDraft !== draftId) return <main className="p-6">正在恢复定位…</main>;
   if (read.error || !d)
     return (
@@ -2313,7 +2373,7 @@ export default function PositioningDraft({
           继续生成第一周选题
         </Button>
       )}
-      {!planView && consentOpen && (
+      {consentOpen && (
         <div
           role="dialog"
           aria-label="是否继续生成第一周选题"
@@ -2331,7 +2391,7 @@ export default function PositioningDraft({
             <div className="flex flex-wrap gap-3">
               <Button
                 disabled={busy || hasUnsavedInformation}
-                onClick={() => consentPlan()}
+                onClick={() => void consentPlan()}
               >
                 继续生成第一周选题
               </Button>
@@ -2389,27 +2449,57 @@ export default function PositioningDraft({
           )}
           {retainedPlan && (
             <div className="space-y-3 rounded-xl border border-[var(--border-primary)] p-4">
-              <h3>有一条尚未开始的生成请求保留在本机</h3>
+              <h3>本机保留了一条早先的生成请求</h3>
               <p className="text-sm text-[var(--text-secondary)]" role="status">
-                请求标识 {retainedPlan.requestId.slice(0, 8)}… 属于
-                {retainedPlan.sourceRoundId ? "本机记录的这份定位" : "更早的一份本机记录"}
-                ，尚未执行，也没有产生费用。它不会自动运行：你可以继续这条原请求，或丢弃它并按当前定位重新生成。
+                请求标识 {retainedPlan.requestId.slice(0, 8)}…
+                {retainedPlan.sourceRoundId
+                  ? "（属于本机记录的这份定位）"
+                  : "（更早的一份本机记录）"}
+                。
+                {retainedState.isLoading
+                  ? "正在核对它在服务端的状态…"
+                  : retainedState.error || !retainedStateData
+                    ? "暂时无法核对它的服务端状态；它不会被自动执行。你可以稍后重试核对，或按原身份继续恢复。"
+                    : !retainedStateData.admitted
+                      ? "服务端没有这条请求的准入记录：它尚未开始，也没有产生执行、预留或费用。"
+                      : retainedStateData.materialRevoked
+                        ? "这条请求绑定的来源已撤回：服务端保留了原记录，但不能按原来源继续派发。"
+                        : retainedStateData.state === "completed"
+                          ? retainedStateData.hasResult
+                            ? "服务端已保存这条请求的完成结果，可以按原身份恢复读取，不会重新派发。"
+                            : "服务端记录这条请求已完成，但没有可读结果；继续只会按原身份核对，不会重新派发。"
+                          : retainedStateData.state === "cancelled"
+                            ? "服务端记录这条请求已取消；继续只会按原身份核对，不会重新派发。"
+                            : `服务端已记录这条请求（${retainedStateData.state ?? "状态未知"}）：结果尚未确定，继续会按原身份恢复，不会重复派发或重复扣费。`}
               </p>
               <div className="flex flex-wrap gap-3">
-                <Button disabled={busy} onClick={() => consentPlan()}>
+                <Button disabled={busy} onClick={() => void consentPlan()}>
                   继续这条原请求
                 </Button>
                 <Button
                   variant="outline"
-                  disabled={busy}
+                  disabled={busy || hasUnsavedInformation}
                   onClick={() => {
-                    archiveStalePlanEnvelope(
-                      "本机保留的旧生成请求已归档，不会执行，也没有产生费用。",
-                    );
-                    setRetainedPlan(null);
+                    // A fresh generation is a separate explicit action: the old
+                    // local record is archived (its server state is untouched),
+                    // then the consent ask starts a new identity.
+                    archiveRetainedPlanRecord();
+                    setConsentOpen(true);
                   }}
                 >
-                  丢弃这条记录
+                  重新生成（新请求）
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => {
+                    archiveRetainedPlanRecord();
+                    setNotice(
+                      "本机记录已归档保留；这条请求在服务端的状态不受影响。",
+                    );
+                  }}
+                >
+                  归档这条本机记录
                 </Button>
               </div>
             </div>

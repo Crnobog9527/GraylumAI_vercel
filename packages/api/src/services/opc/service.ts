@@ -337,6 +337,17 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       );
     },
     list: () => rpc("opc_query", {}),
+    /**
+     * The server's own record of one retained generation request. The local
+     * page uses it to tell "this request never reached the server" apart from
+     * "it was admitted and its outcome is unknown", so it never claims a
+     * cancellation or a zero cost it cannot prove.
+     */
+    planRequestState: (draftId: string, requestId: string) =>
+      rpc("opc_plan_request_state", {
+        p_draft_id: uuid.parse(draftId),
+        p_request_id: uuid.parse(requestId),
+      }),
     read: async (draftId: string) =>
       ({...(await rpc("opc_query", { p_draft_id: uuid.parse(draftId) })),runtimeMode:real?"staging_test":"isolated"}),
     start: async (value: unknown) => {
