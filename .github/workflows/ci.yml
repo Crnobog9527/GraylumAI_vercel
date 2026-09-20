@@ -121,7 +121,22 @@ jobs:
             trusted_checker="$RUNNER_TEMP/graylum-check-migration-ledger.mjs"
             git show "${migration_base_sha}:scripts/check-migration-ledger.mjs" > "$trusted_checker"
             echo 'Using migration ledger checker from the exact base commit.'
-            node "$trusted_checker"
+            if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+              # The frozen checker CLI accepts PR/push events only. Its exported
+              # validator accepts the exact schedule commit without weakening it.
+              node --input-type=module -e '
+                import { pathToFileURL } from "node:url";
+                const { checkMigrationLedger } = await import(pathToFileURL(process.argv[2]).href);
+                const errors = await checkMigrationLedger("packages/db/migrations", {
+                  baseSha: process.argv[3], repositoryRoot: process.cwd(),
+                });
+                for (const error of errors) console.error(`Migration ledger check failed: ${error}`);
+                if (errors.length) process.exit(1);
+                console.log("Migration ledger check passed.");
+              ' -- schedule-ledger "$trusted_checker" "$migration_base_sha"
+            else
+              node "$trusted_checker"
+            fi
           else
             echo 'Bootstrapping the migration ledger checker; base-existing migrations must be unchanged.'
             checker_index_entry="$(git ls-files --stage -- scripts/check-migration-ledger.mjs)"

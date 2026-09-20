@@ -1,6 +1,9 @@
 require 'minitest/autorun'
 require 'yaml'
 require 'open3'
+require 'tmpdir'
+require 'fileutils'
+require 'json'
 
 class CIWorkflowsTest < Minitest::Test
   ROOT = File.expand_path('..', __dir__)
@@ -60,4 +63,29 @@ class CIWorkflowsTest < Minitest::Test
     assert_equal 'true', @ci['jobs']['build-and-e2e']['env']['SECURITY_E2E_LOCAL_ONLY']
     assert_equal 'false', @ci['jobs']['build-and-e2e']['env']['E2E_ALLOW_DATABASE_FIXTURES']
   end
+  def test_scheduled_migration_step_executes_trusted_checker_and_rejects_damage
+    # Execute the actual workflow shell, not a reimplementation of its routing.
+    step = @ci.fetch('jobs').fetch('test').fetch('steps').find { |s| s['name'] == 'CI safeguard — check migration ledger' }
+    repository = File.expand_path('..', ROOT)
+    Dir.mktmpdir('ci-schedule-ledger-') do |dir|
+      checkout = File.join(dir, 'checkout')
+      out, err, status = Open3.capture3('git', 'clone', '--quiet', '--no-hardlinks', '--local', repository, checkout)
+      assert status.success?, out + err
+      sha, _, status = Open3.capture3('git', '-C', checkout, 'rev-parse', 'HEAD')
+      assert status.success?
+      event = File.join(dir, 'event.json')
+      File.write(event, '{}')
+      env = {'GITHUB_EVENT_NAME'=>'schedule', 'GITHUB_EVENT_PATH'=>event,
+             'GITHUB_SHA'=>sha.strip, 'RUNNER_TEMP'=>dir}
+      out, err, status = Open3.capture3(env, 'bash', '-c', step.fetch('run'), chdir: checkout)
+      assert status.success?, out + err
+      assert_includes out, 'Migration ledger check passed.'
+      migration = Dir[File.join(checkout, 'packages/db/migrations/*.sql')].sort.first
+      File.open(migration, 'a') { |f| f.puts "\n-- unexpected migration mutation" }
+      out, err, status = Open3.capture3(env, 'bash', '-c', step.fetch('run'), chdir: checkout)
+      refute status.success?, out + err
+      assert_includes err, 'Base-existing migration differs from exact base'
+    end
+  end
+
 end
