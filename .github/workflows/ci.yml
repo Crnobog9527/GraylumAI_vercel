@@ -185,6 +185,7 @@ jobs:
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
+        id: build-node
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '24'
@@ -192,6 +193,23 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Resolve cache ref scope
+        id: cache-scope
+        run: |
+          set -euo pipefail
+          printf 'workflow=%s\n' "$(sha256sum .github/workflows/ci.yml | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          printf 'ref=%s\n' "$(printf '%s' "$GITHUB_REF" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      # Cache compiler state only, never build outputs or test results. Scope to
+      # this ref and the exact toolchain/config; Next still checks changed inputs.
+      - name: Cache Next.js build state
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: apps/web/.next/cache
+          key: secretless-next-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.build-node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/*/package.json', 'packages/*/package.json', 'apps/*/tsconfig*.json', 'packages/tsconfig/*.json', 'apps/web/next.config.*', 'apps/web/postcss.config.*', 'turbo.json') }}-${{ steps.cache-scope.outputs.workflow }}-${{ steps.cache-scope.outputs.ref }}-${{ github.sha }}
+          restore-keys: |
+            secretless-next-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.build-node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/*/package.json', 'packages/*/package.json', 'apps/*/tsconfig*.json', 'packages/tsconfig/*.json', 'apps/web/next.config.*', 'apps/web/postcss.config.*', 'turbo.json') }}-${{ steps.cache-scope.outputs.workflow }}-${{ steps.cache-scope.outputs.ref }}-
 
       - name: Install Playwright browser
         run: cd apps/web && pnpm exec playwright install --with-deps --only-shell chromium

@@ -71,6 +71,51 @@ class CIWorkflowsTest < Minitest::Test
     assert_equal 'true', @ci['jobs']['build-and-e2e']['env']['SECURITY_E2E_LOCAL_ONLY']
     assert_equal 'false', @ci['jobs']['build-and-e2e']['env']['E2E_ALLOW_DATABASE_FIXTURES']
   end
+  def test_build_cache_is_scoped_and_never_substitutes_for_checks
+    steps = @ci.fetch('jobs').fetch('build-and-e2e').fetch('steps')
+    cache = steps.find { |step| step['name'] == 'Cache Next.js build state' }
+    assert_equal 'apps/web/.next/cache', cache.fetch('with').fetch('path')
+    prefix = cache['with'].fetch('restore-keys').strip
+    assert_equal 1, prefix.lines.length
+    assert_equal "#{prefix}${{ github.sha }}", cache['with'].fetch('key')
+    %w[runner.os runner.arch steps.build-node.outputs.node-version steps.cache-scope.outputs.workflow steps.cache-scope.outputs.ref].each do |scope|
+      assert_includes prefix, "${{ #{scope} }}"
+    end
+    %w[pnpm-lock.yaml pnpm-workspace.yaml package.json apps/*/package.json packages/*/package.json apps/*/tsconfig*.json packages/tsconfig/*.json apps/web/next.config.* apps/web/postcss.config.* turbo.json].each do |input|
+      assert_includes prefix, "'#{input}'"
+    end
+    ['Build application', 'Run transitional secretless Security E2E'].each do |name|
+      step = steps.find { |item| item['name'] == name }
+      refute_nil step
+      refute step.key?('if'), "#{name} must execute even on a cache hit"
+      refute step.key?('continue-on-error')
+    end
+    # Execute the actual scope script with shell metacharacters as input data.
+    scope = steps.find { |step| step['id'] == 'cache-scope' }.fetch('run')
+    Dir.mktmpdir('cache-scope-') do |dir|
+      FileUtils.mkdir_p("#{dir}/.github/workflows")
+      workflow = "#{dir}/.github/workflows/ci.yml"
+      File.write(workflow, 'config-one')
+      run_scope = lambda do |ref|
+        output = "#{dir}/output"
+        File.write(output, '')
+        out, err, status = Open3.capture3({'GITHUB_REF'=>ref, 'GITHUB_OUTPUT'=>output}, 'bash', '-c', scope, chdir: dir)
+        assert status.success?, out + err
+        File.read(output).lines.to_h { |line| line.strip.split('=', 2) }
+      end
+      first = run_scope.call('refs/pull/428/merge')
+      assert_equal first, run_scope.call('refs/pull/428/merge')
+      other = run_scope.call('refs/pull/429/merge')
+      refute_equal first['ref'], other['ref']
+      assert_equal first['workflow'], other['workflow']
+      File.write(workflow, 'config-two')
+      refute_equal first['workflow'], run_scope.call('refs/pull/428/merge')['workflow']
+      malicious = run_scope.call('refs/heads/$(touch injected); branch')
+      assert_match(/\A[0-9a-f]{64}\z/, malicious['ref'])
+      refute File.exist?("#{dir}/injected")
+    end
+  end
+
   def test_scheduled_migration_step_executes_trusted_checker_and_rejects_damage
     # Execute the actual workflow shell, not a reimplementation of its routing.
     step = @ci.fetch('jobs').fetch('test').fetch('steps').find { |s| s['name'] == 'CI safeguard — check migration ledger' }
