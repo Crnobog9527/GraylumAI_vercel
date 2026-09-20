@@ -68,6 +68,21 @@ export const opcSaveResult = z
     requestId: uuid,
   })
   .strict();
+export const opcTopicBind = z
+  .object({ draftId: uuid, requestId: uuid, sourceVersionId: uuid })
+  .strict();
+export const opcTopicTurn = z
+  .object({ draftId: uuid, requestId: uuid, input: z.string().trim().min(1).max(8000) })
+  .strict();
+/**
+ * The host owns the topic workspace rules. The confirmed positioning content is
+ * the only established fact set; candidate rows are proposals the user still
+ * has to accept, and a proposed account name is never an existing account.
+ */
+const TOPIC_WORKSPACE_INSTRUCTION =
+  "This turn runs inside the user's first-week topic workspace. Work conversationally in the user's own language and treat the confirmed positioning content supplied as scope material as the only established facts about the account, the audience and the goals. " +
+  "You may propose concrete topics, dates, titles and briefs, and you may propose plausible account names, but a proposed account name is not a registered, existing or verified external account and you must never state or imply that it exists, is available, is registered or has been checked. Never invent traction, results, audience data or platform rules: say what is still missing instead. " +
+  "Answer the user's actual message first. When the user asks for the first-week plan, or asks to revise it, also end that reply with exactly one JSON code block that contains only an array of items with the keys id (UUID), platform (lowercase platform slug), account (lowercase account handle), title, brief and day (YYYY-MM-DD), so the host can save it as a versioned candidate. Do not create accounts, do not publish anything, and never claim that an article, script or external action was generated or performed. ";
 export const opcInformation = z
   .object({
     draftId: uuid,
@@ -348,6 +363,93 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         p_draft_id: uuid.parse(draftId),
         p_request_id: uuid.parse(requestId),
       }),
+    /**
+     * The persisted topic workspace of one draft: which confirmed positioning
+     * version and which pinned method revision it is bound to. It is read from
+     * the server, never inferred from client storage.
+     */
+    topicRead: (draftId: string) =>
+      rpc("opc_topic_read", { p_draft_id: uuid.parse(draftId) }),
+    /**
+     * One explicit, idempotent bind of the draft's topic workspace. The server
+     * freezes the source version, the pinned revision and its declared topic
+     * resources; it fails closed instead of inventing a topic Skill.
+     */
+    topicBind: async (value: unknown) => {
+      const v = opcTopicBind.parse(value);
+      return rpc("opc_topic_bind", {
+        p_draft_id: v.draftId,
+        p_request_id: v.requestId,
+        p_source_version_id: v.sourceVersionId,
+      });
+    },
+    /**
+     * One normal Agent turn inside the bound topic workspace. It runs through
+     * the same Runtime/BILL2 path as every other Skill turn: the persisted
+     * binding decides the Session, the Skill revision and the scope material,
+     * so a tampered session id, Skill id or source cannot borrow another
+     * workspace. A lost reply is replayed under the original request id.
+     */
+    async prepareTopicTurn(value: unknown) {
+      const v = opcTopicTurn.parse(value);
+      const d = await rpc("opc_query", { p_draft_id: v.draftId });
+      const bound = await rpc("opc_topic_read", { p_draft_id: v.draftId });
+      if (!bound?.bound || !bound.sessionId) throw new Error("OPC_TOPIC_UNBOUND");
+      const actor = (await user.auth.getUser()).data.user!.id;
+      const resolved = await admin.rpc("artifact_query", {
+        p_actor_id: actor,
+        p_action: "resolve",
+        p_project_id: d.projectId,
+        p_round_id: d.roundId,
+      });
+      if (resolved.error) throw new Error("OPC_DENIED");
+      const resources = resolved.data?.workflow?.planResources;
+      if (!Array.isArray(resources) || !resources.length)
+        throw new Error("OPC_TOPIC_SKILL_MISSING");
+      const material = await rpc("opc_topic_material", {
+        p_draft_id: v.draftId,
+        p_request_id: v.requestId,
+        p_input: v.input,
+      });
+      const runtimeRequest = {
+        sessionId: material.sessionId,
+        organizeAfter: false,
+        requestId: v.requestId,
+        input: v.input,
+        selection: {
+          kind: "skill" as const,
+          moduleId: uuid.parse(material.moduleId),
+          revisionId: uuid.parse(material.revisionId),
+        },
+        network: "deny" as const,
+        sources: [],
+      };
+      // Recover the frozen identity of this request before anything else, so a
+      // replay after a lost reply never pays for a second call.
+      const replay = await admin.rpc("runtime_admission_replay", {
+        p_actor_id: actor,
+        p_request_id: v.requestId,
+        p_request: runtimeRequest,
+      });
+      if (replay.error) throw new Error("OPC_REQUEST_CONFLICT");
+      if (replay.data) return replay.data;
+      return runtimeAdmissionService(user, admin, {
+        ...(real ? { real } : {}),
+        account: "runtime-local",
+        additionalInstructions: TOPIC_WORKSPACE_INSTRUCTION,
+        costPerCall: "0.02",
+        creditsPerUsd: "1000",
+        multiplier: "1",
+        maxCalls: 1,
+        maxOutputTokens: 1000,
+        inputBytes: 64000,
+        historyItems: 100,
+        expectedMaterialRevision: material.revision,
+        opcTurnToken: material.turnToken,
+        skillResources: resources,
+        searchEnabled: false,
+      }).prepare(runtimeRequest);
+    },
     read: async (draftId: string) =>
       ({...(await rpc("opc_query", { p_draft_id: uuid.parse(draftId) })),runtimeMode:real?"staging_test":"isolated"}),
     start: async (value: unknown) => {

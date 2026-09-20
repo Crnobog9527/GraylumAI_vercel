@@ -6625,3 +6625,252 @@ it.each(["save", "confirm"] as const)(
   },
   300000,
 );
+
+/**
+ * A draft whose pinned method revision declares topic resources, with every
+ * step confirmed and the positioning version published, so the topic workspace
+ * has an immutable source version to bind to.
+ */
+async function publishedDraft(n = 3, withTopics = true) {
+  const f = await fixture(
+    n,
+    false,
+    0,
+    withTopics ? (flow) => { flow.planResources = ["SKILL.md"]; } : undefined,
+  );
+  const d = await f.service.start({
+    requestId: randomUUID(),
+    registration: f.registration,
+    mode: "manual",
+  });
+  for (const step of f.flow.steps) {
+    await f.artifacts.execute({
+      action: "save", projectId: d.projectId, roundId: d.roundId,
+      requestId: randomUUID(), stepId: step.id,
+      body: "User confirmed " + step.title, evidenceIds: [], expectedVersion: 0,
+    });
+    const state = (await f.artifacts.read(d.projectId, d.roundId)).steps[step.id];
+    await f.service.information({
+      draftId: d.draftId, stepId: step.id, requestId: randomUUID(),
+      expectedVersion: state.version,
+      values: {
+        goal: { status: "confirmed", nature: "decision", value: "A concrete user decision" },
+      },
+    });
+    const updated = (await f.artifacts.read(d.projectId, d.roundId)).steps[step.id];
+    await f.artifacts.execute({
+      action: "confirm", projectId: d.projectId, roundId: d.roundId,
+      requestId: randomUUID(), stepId: step.id,
+      expectedVersion: updated.version, expectedReviewVersion: updated.reviewVersion,
+    });
+  }
+  const published = await f.artifacts.read(d.projectId, d.roundId);
+  await f.artifacts.execute({
+    action: "publish", projectId: d.projectId, roundId: d.roundId,
+    requestId: randomUUID(),
+    expectedSteps: Object.fromEntries(
+      Object.entries(published.steps).map(([k, v]) => [k, { version: v.version, reviewVersion: v.reviewVersion }]),
+    ),
+  });
+  const sourceVersionId = (await f.service.read(d.draftId)).report.id as string;
+  return { ...f, d, sourceVersionId };
+}
+
+/** Every turn, run, reservation and binding the topic workspace created. */
+async function topicIdentity(actor: string) {
+  const count = async (q: string) =>
+    Number((await sql.query(q, [actor])).rows[0].n);
+  return {
+    binds: await count(
+      "select count(*)::int n from opc_topic_workspaces w join opc_drafts d on d.draft_id=w.draft_id where d.actor_id=$1",
+    ),
+    turns: await count(
+      "select count(*)::int n from opc_turns t join opc_drafts d on d.draft_id=t.draft_id where d.actor_id=$1 and t.purpose='topic'",
+    ),
+    topicExecutions: await count(
+      "select count(*)::int n from runtime_executions e join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id where e.actor_id=$1 and t.purpose='topic'",
+    ),
+    topicRuns: await count(
+      "select count(*)::int n from bill2_runs b join runtime_executions e on e.billing_run_id=b.id join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id where b.actor_id=$1 and t.purpose='topic'",
+    ),
+    reserves: await count(
+      "select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve'",
+    ),
+  };
+}
+
+it("OPC: the topic workspace binds one confirmed source and one turn identity, and fails closed without a topic Skill", async () => {
+  // (1) The pinned revision of the default fixture declares no topic resources:
+  // the host refuses instead of inventing a topic Skill or silently falling
+  // back to plain chat, and creates nothing.
+  const plain = await publishedDraft(3, false);
+  const refused = await plain.service
+    .topicBind({
+      draftId: plain.d.draftId,
+      requestId: randomUUID(),
+      sourceVersionId: plain.sourceVersionId,
+    })
+    .then(() => null)
+    .catch((error: unknown) => (error instanceof Error ? error.message : String(error)));
+  console.log("TOPIC_BIND_REFUSAL", refused);
+  expect(refused).toMatch(/OPC_TOPIC_SKILL_MISSING/);
+  expect(await plain.service.topicRead(plain.d.draftId)).toEqual({ bound: false });
+  expect(await topicIdentity(plain.actor)).toEqual({
+    binds: 0, turns: 0, topicExecutions: 0, topicRuns: 0, reserves: 0,
+  });
+
+  // (2) With declared topic resources the binding freezes the confirmed
+  // version, the pinned method revision and its own Session and material.
+  const f = await publishedDraft(3, true);
+  const bindRequest = randomUUID();
+  const bound = await f.service.topicBind({
+    draftId: f.d.draftId,
+    requestId: bindRequest,
+    sourceVersionId: f.sourceVersionId,
+  });
+  expect(bound.bound).toBe(true);
+  expect(await f.service.topicRead(f.d.draftId)).toMatchObject({
+    bound: true,
+    sourceVersionId: f.sourceVersionId,
+    sessionId: bound.sessionId,
+    sourceAllowed: true,
+  });
+  // The same bind request is free and identical; a different request or source
+  // is a definite conflict instead of a silent rebind onto a newer version.
+  expect(
+    (await f.service.topicBind({
+      draftId: f.d.draftId,
+      requestId: bindRequest,
+      sourceVersionId: f.sourceVersionId,
+    })).sessionId,
+  ).toBe(bound.sessionId);
+  await expect(
+    f.service.topicBind({
+      draftId: f.d.draftId,
+      requestId: randomUUID(),
+      sourceVersionId: f.sourceVersionId,
+    }),
+  ).rejects.toThrow(/OPC_TOPIC_BOUND/);
+  const scope = (await sql.query(
+    "select scope from runtime_sessions where id=$1",
+    [bound.sessionId],
+  )).rows[0].scope as { kind: string; draftId: string };
+  expect(scope).toEqual({ kind: "positioning_topic", draftId: f.d.draftId });
+  const material = (await sql.query(
+    "select content from runtime_scope_material where session_id=$1 order by revision desc limit 1",
+    [bound.sessionId],
+  )).rows[0].content as { brief: string; material: string; roundId: string | null };
+  expect(material.brief).toBe("topic:first-week");
+  expect(material.material.length).toBeGreaterThan(0);
+  expect(material.roundId).toBeNull();
+  const afterBind = await topicIdentity(f.actor);
+  expect(afterBind).toEqual({
+    binds: 1, turns: 0, topicExecutions: 0, topicRuns: 0, reserves: 0,
+  });
+
+  // (3) One topic turn is one frozen identity: one execution, one billing run
+  // and one reservation. A lost reply replays that identity for free.
+  const turnRequest = randomUUID();
+  const turn = await f.service.prepareTopicTurn({
+    draftId: f.d.draftId,
+    requestId: turnRequest,
+    input: "给我一版第一周选题。",
+  });
+  expect(turn.executionId).toBeTruthy();
+  expect(
+    (await f.service.prepareTopicTurn({
+      draftId: f.d.draftId,
+      requestId: turnRequest,
+      input: "给我一版第一周选题。",
+    })).executionId,
+  ).toBe(turn.executionId);
+  await expect(
+    f.service.prepareTopicTurn({
+      draftId: f.d.draftId,
+      requestId: turnRequest,
+      input: "换一条不相干的负载。",
+    }),
+  ).rejects.toThrow(/OPC_REQUEST_CONFLICT/);
+  const afterTurn = await topicIdentity(f.actor);
+  expect(afterTurn).toEqual({
+    binds: 1, turns: 1, topicExecutions: 1, topicRuns: 1, reserves: 1,
+  });
+
+  // (4) The frozen run is authorized only for this Session, this turn identity
+  // and this method revision; a substituted Skill or a detached token is
+  // refused before any dispatch.
+  const frozen = (await sql.query(
+    "select b.id::text id, b.payload from bill2_runs b join runtime_executions e on e.billing_run_id=b.id where e.id=$1",
+    [turn.executionId],
+  )).rows[0] as { id: string; payload: Record<string, unknown> };
+  await sql.query("select runtime_direct_billing_allowed($1,$2,$3)", [
+    f.actor, frozen.payload, frozen.id,
+  ]);
+  // A detached turn token is invisible to the older scope checks, so this one
+  // proves the topic check itself runs.
+  await expect(
+    sql.query("select runtime_direct_billing_allowed($1,$2,$3)", [
+      f.actor,
+      {
+        ...frozen.payload,
+        input: { ...(frozen.payload.input as Record<string, unknown>), opcTurnToken: randomUUID() },
+      },
+      frozen.id,
+    ]),
+  ).rejects.toThrow(/OPC_TOPIC_TURN_REQUIRED/);
+  // A substituted Skill, revision or role is refused as well; the existing
+  // capability gate may raise before the topic check does.
+  await expect(
+    sql.query("select runtime_direct_billing_allowed($1,$2,$3)", [
+      f.actor,
+      { ...frozen.payload, moduleId: randomUUID() },
+      frozen.id,
+    ]),
+  ).rejects.toThrow(/^(OPC_|RUNTIME_|BILL2_)/);
+  await expect(
+    sql.query("select runtime_direct_billing_allowed($1,$2,$3)", [
+      f.actor,
+      { ...frozen.payload, revisionId: randomUUID() },
+      frozen.id,
+    ]),
+  ).rejects.toThrow(/^(OPC_|RUNTIME_|BILL2_)/);
+  await expect(
+    sql.query("select runtime_direct_billing_allowed($1,$2,$3)", [
+      f.actor,
+      {
+        ...frozen.payload,
+        input: { ...(frozen.payload.input as Record<string, unknown>), role: "ordinary" },
+      },
+      frozen.id,
+    ]),
+  ).rejects.toThrow(/^(OPC_|RUNTIME_|BILL2_)/);
+
+  // (5) Another actor can neither read this workspace nor spend inside it.
+  const other = await fixture(3);
+  await expect(other.service.topicRead(f.d.draftId)).rejects.toThrow(/OPC_DENIED/);
+  await expect(
+    other.service.prepareTopicTurn({
+      draftId: f.d.draftId,
+      requestId: randomUUID(),
+      input: "别人的工作空间。",
+    }),
+  ).rejects.toThrow(/OPC_DENIED/);
+  expect(await topicIdentity(f.actor)).toEqual(afterTurn);
+
+  // (6) A revoked source stops new dispatch and keeps every existing record.
+  await sql.query("update bill2_drafts set revoked=true where id=$1", [f.d.draftId]);
+  await expect(
+    f.service.prepareTopicTurn({
+      draftId: f.d.draftId,
+      requestId: randomUUID(),
+      input: "撤回来源后继续。",
+    }),
+  ).rejects.toThrow(/OPC_(TOPIC_SOURCE_REVOKED|DENIED)/);
+  expect(await topicIdentity(f.actor)).toEqual(afterTurn);
+  expect(
+    Number((await sql.query(
+      "select count(*)::int n from runtime_scope_material where session_id=$1",
+      [bound.sessionId],
+    )).rows[0].n),
+  ).toBe(1);
+}, 180000);

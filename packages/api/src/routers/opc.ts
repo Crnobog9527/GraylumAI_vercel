@@ -12,6 +12,8 @@ import {
   opcGenerate,
   opcSaveResult,
   opcInformation,
+  opcTopicBind,
+  opcTopicTurn,
 } from "../services/opc/service";
 const procedure = protectedProcedure.use(async ({ ctx, next }) => {
   // Remote access requires the explicit Staging target and server-side actor window.
@@ -98,6 +100,18 @@ export const opcRouter = router({
     .query(({ ctx, input }) =>
       ctx.opc.planRequestState(input.draftId, input.requestId),
     ),
+  // The bound topic workspace of the draft: binding read, the single explicit
+  // bind, and one normal Agent turn inside it. All three keep their server-side
+  // authorization; nothing here trusts a client-supplied session or Skill.
+  topicWorkspace: readProcedure
+    .input(z.object({ draftId: z.string().uuid() }).strict())
+    .query(({ ctx, input }) => ctx.opc.topicRead(input.draftId)),
+  bindTopicWorkspace: procedure
+    .input(opcTopicBind)
+    .mutation(({ ctx, input }) => ctx.opc.topicBind(input)),
+  topicTurn: procedure
+    .input(opcTopicTurn)
+    .mutation(({ ctx, input }) => ctx.opc.prepareTopicTurn(input)),
   read: readProcedure
     .input(z.object({ draftId: z.string().uuid() }).strict())
     .query(async({ ctx, input }) => dedupeHandoffResults({...await ctx.opc.read(input.draftId),runtimeMode:ctx.stagingRead?"staging_test":"isolated"})),
