@@ -703,7 +703,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .poll(
         () =>
           page
-            .getByRole("button", { name: "确认正式定位并生成第一周计划", exact: true })
+            .getByRole("button", { name: "确认正式定位", exact: true })
             .isEnabled(),
         { timeout: 15000 },
       )
@@ -723,7 +723,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .fill("Updated confirmed decision before publication");
     expect(
       await page
-        .getByRole("button", { name: "确认正式定位并生成第一周计划", exact: true })
+        .getByRole("button", { name: "确认正式定位", exact: true })
         .isEnabled(),
     ).toBe(false);
     await page.reload();
@@ -755,7 +755,13 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .poll(() => lastArticle.textContent(), { timeout: 15000 })
       .toContain("已确认");
     await page
-      .getByRole("button", { name: "确认正式定位并生成第一周计划", exact: true })
+      .getByRole("button", { name: "确认正式定位", exact: true })
+      .click();
+    // Confirming the positioning only asks; the generation needs its own
+    // explicit consent.
+    await page
+      .getByRole("dialog", { name: "是否继续生成第一周选题" })
+      .getByRole("button", { name: "继续生成第一周选题", exact: true })
       .click();
     await page.waitForURL(url => url.pathname.endsWith("/plan"));
     expect(await page.getByLabel("定位摘要").textContent()).toContain("Updated confirmed decision");
@@ -3702,8 +3708,12 @@ function planEnvelopeFor(
   options: { requestId?: string; sourceRoundId?: string; accounts?: string[] } = {},
 ) {
   return {
-    v: 2,
+    // The consent marker: these cases seed the envelope that only an explicit
+    // "继续生成第一周选题" may write, so they keep proving that a lost reply
+    // replays its own identity instead of paying twice.
+    v: 3,
     sourceRoundId: options.sourceRoundId ?? f.d.roundId,
+    consentedAt: new Date("2026-09-20T07:00:00.000Z").toISOString(),
     request: {
       draftId: f.d.draftId,
       requestId: options.requestId ?? randomUUID(),
@@ -3776,7 +3786,7 @@ async function planBrowser(
   return { browser, context, page, key };
 }
 const CANDIDATE_HEADING = "AI 计划候选 · 尚未替换你的编辑";
-it("OPC: Stage C1 the final positioning confirmation itself generates one plan candidate", async () => {
+it("OPC: Stage C1 the final positioning confirmation asks first and spends nothing until an explicit continue generates one candidate", async () => {
   const { chromium } =
     await import("../../../../../apps/web/node_modules/@playwright/test");
   const f = await finalized(3);
@@ -3806,7 +3816,7 @@ it("OPC: Stage C1 the final positioning confirmation itself generates one plan c
     await page.getByRole("button", { name: "登录", exact: true }).last().click();
     await page.waitForURL((url) => url.pathname.endsWith(draftPath));
     const finalButton = page.getByRole("button", {
-      name: "确认正式定位并生成第一周计划",
+      name: "确认正式定位",
       exact: true,
     });
     await expect.poll(() => finalButton.isEnabled(), { timeout: 30000 }).toBe(true);
@@ -3818,6 +3828,30 @@ it("OPC: Stage C1 the final positioning confirmation itself generates one plan c
     expect(before.planExecutions).toBe(0);
     expect(before.planRuns).toBe(0);
     await finalButton.click();
+    // Confirming the positioning publishes the version and asks. It must not
+    // create a generation request by itself.
+    const dialog = page.getByRole("dialog", { name: "是否继续生成第一周选题" });
+    await dialog.waitFor();
+    await dialog.getByRole("button", { name: "稍后", exact: true }).click();
+    await expect.poll(() => dialog.count(), { timeout: 15000 }).toBe(0);
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), envelopeKey)).toBeNull();
+    // A refresh, a re-login or the re-entry control are not consent either.
+    await page.reload();
+    await page
+      .getByRole("button", { name: "继续生成第一周选题", exact: true })
+      .waitFor();
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), envelopeKey)).toBeNull();
+    const asked = await planIdentity(f.actor, f.d.draftId);
+    expect(asked.planExecutions).toBe(0);
+    expect(asked.planRuns).toBe(0);
+    expect(asked.reserves).toBe(0);
+    // The explicit continue is the only path that starts the generation.
+    await page
+      .getByRole("button", { name: "继续生成第一周选题", exact: true })
+      .click();
+    await dialog
+      .getByRole("button", { name: "继续生成第一周选题", exact: true })
+      .click();
     await page.waitForURL((url) => url.pathname.endsWith(draftPath + "/plan"));
     // The user clicks nothing else: no generation button, no topic row.
     await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
@@ -3826,7 +3860,7 @@ it("OPC: Stage C1 the final positioning confirmation itself generates one plan c
     expect(await page.evaluate((k) => sessionStorage.getItem(k), envelopeKey)).not.toBeNull();
     const after = await planIdentity(f.actor, f.d.draftId);
     // Exactly one plan execution, one BILL2 run and one reserve came from the
-    // confirmation itself, and nothing else was created.
+    // explicit consent, and nothing else was created.
     expect(after.planExecutions - before.planExecutions).toBe(1);
     expect(after.planRuns - before.planRuns).toBe(1);
     expect(after.reserves - before.reserves).toBe(1);
@@ -4721,7 +4755,7 @@ it("OPC: an upstream reconfirmation can be resubmitted and never hides already a
     const completionText = await page.locator("body").textContent();
     expect(completionText).not.toContain("再次明确同意");
     expect(completionText).not.toContain("才会询问是否生成");
-    await expect.poll(() => page.getByRole("button", {name:"确认正式定位并生成第一周计划", exact:true}).count(), {timeout:30000}).toBe(1);
+    await expect.poll(() => page.getByRole("button", {name:"确认正式定位", exact:true}).count(), {timeout:30000}).toBe(1);
 
     expect(errors).toEqual([]);
     expect(external).toEqual([]);

@@ -53,7 +53,18 @@ type PlanRequest = {
   stepId: string;
   input: string;
 };
-type PlanEnvelope = { v: 2; sourceRoundId: string | null; request: PlanRequest };
+/**
+ * `consentedAt` records the user's explicit "继续生成第一周选题" choice. It is
+ * the only thing that authorizes an automatic first-week topic generation: an
+ * envelope without it (a pre-upgrade `v:2`, or a bare legacy request) stays
+ * recoverable with its own identity, but is never dispatched on its own.
+ */
+type PlanEnvelope = { v: 3; sourceRoundId: string | null; consentedAt: string; request: PlanRequest };
+type RetainedPlan =
+  | { kind: "envelope"; envelope: PlanEnvelope }
+  | { kind: "unconsented"; request: PlanRequest; sourceRoundId: string | null }
+  | { kind: "legacy"; request: PlanRequest }
+  | { kind: "invalid" };
 function planRequestShape(value: unknown): PlanRequest | null {
   if (!value || typeof value !== "object") return null;
   const candidate = value as Record<string, unknown>;
@@ -73,13 +84,7 @@ function planRequestShape(value: unknown): PlanRequest | null {
  * `sourceRoundId`, so it can never authorize an automatic one. Malformed data
  * is reported as invalid instead of being reinterpreted.
  */
-function readPlanEnvelope(
-  raw: string | null,
-):
-  | { kind: "envelope"; envelope: PlanEnvelope }
-  | { kind: "legacy"; request: PlanRequest }
-  | { kind: "invalid" }
-  | null {
+function readPlanEnvelope(raw: string | null): RetainedPlan | null {
   if (!raw) return null;
   let parsed: unknown;
   try {
@@ -91,13 +96,15 @@ function readPlanEnvelope(
     const request = planRequestShape((parsed as { request: unknown }).request);
     if (!request) return { kind: "invalid" };
     const round = (parsed as { sourceRoundId?: unknown }).sourceRoundId;
+    const consentedAt = (parsed as { consentedAt?: unknown }).consentedAt;
+    const sourceRoundId = typeof round === "string" ? round : null;
+    // Only an envelope that recorded the user's explicit consent may run by
+    // itself. Anything else keeps its identity for an explicit continue.
+    if (typeof consentedAt !== "string" || !consentedAt)
+      return { kind: "unconsented", request, sourceRoundId };
     return {
       kind: "envelope",
-      envelope: {
-        v: 2,
-        sourceRoundId: typeof round === "string" ? round : null,
-        request,
-      },
+      envelope: { v: 3, sourceRoundId, consentedAt, request },
     };
   }
   const legacy = planRequestShape(parsed);
@@ -315,6 +322,14 @@ export default function PositioningDraft({
   const [planRecovery, setPlanRecovery] = useState<
     "idle" | "running" | "invalid" | "unknown" | "stale"
   >("idle");
+  /**
+   * The explicit "现在生成第一周选题吗？" ask, and the retained request that is
+   * waiting for that decision. Neither can start work on its own.
+   */
+  const [consentOpen, setConsentOpen] = useState(false);
+  const [retainedPlan, setRetainedPlan] = useState<
+    { requestId: string; sourceRoundId: string | null } | null
+  >(null);
   const planEnvelopeKey = "opc-plan-generation:" + draftId;
   const hasUnsavedInformation = Object.keys(infoEdits).length > 0;
   const d = read.data,
@@ -476,8 +491,18 @@ export default function PositioningDraft({
       );
       return;
     }
-    // No round binding: an explicit user action may reuse it, nothing else.
-    if (retained.kind === "legacy") return;
+    // A retained request the user has not explicitly approved, and a bare
+    // legacy record, are only surfaced for an explicit decision. Mounting this
+    // page, refreshing, re-logging in or following a link is never consent.
+    if (retained.kind === "unconsented" || retained.kind === "legacy") {
+      setRetainedPlan({
+        requestId: retained.request.requestId,
+        sourceRoundId:
+          retained.kind === "unconsented" ? retained.sourceRoundId : null,
+      });
+      return;
+    }
+    setRetainedPlan(null);
     if (retained.envelope.request.draftId !== draftId) {
       archiveStalePlanEnvelope(
         "发现一条属于其它定位草稿的计划生成请求，已在本机归档。它不会被执行，也不会产生费用。",
@@ -1281,20 +1306,60 @@ export default function PositioningDraft({
     }
     return summary;
   }
+  /**
+   * The user-owned choices the generation request is frozen with. Topics,
+   * dates, titles and briefs stay the Agent's output.
+   */
+  function planConstraintsInput() {
+    return JSON.stringify({
+      confirmedPositioning: positioningSummary(),
+      platforms: planPlatform.split(",").map(v => v.trim()).filter(Boolean),
+      accounts: planAccount.split(",").map(v => v.trim()).filter(Boolean),
+      startDate: planStart,
+      days: planDays,
+    });
+  }
+  /**
+   * The explicit consent that may start the first-week topic generation. It is
+   * the only path that writes a consented envelope, and it reuses a retained
+   * request only when that request belongs to this draft and round, so an
+   * explicitly continued lost reply replays its own identity instead of paying
+   * for a second call.
+   */
+  function consentPlan() {
+    if (!d || hasUnsavedInformation) return;
+    const retained = readRetainedPlan();
+    const retainedRequest =
+      retained?.kind === "unconsented" &&
+      retained.request.draftId === draftId &&
+      retained.sourceRoundId === d.roundId
+        ? retained.request
+        : retained?.kind === "legacy" && retained.request.draftId === draftId
+          ? retained.request
+          : null;
+    const request: PlanRequest = retainedRequest ?? {
+      draftId,
+      requestId: crypto.randomUUID(),
+      purpose: "plan",
+      stepId: snap.workflow.steps.at(-1).id,
+      input: planConstraintsInput(),
+    };
+    const envelope: PlanEnvelope = {
+      v: 3,
+      sourceRoundId: d.roundId,
+      consentedAt: new Date().toISOString(),
+      request,
+    };
+    sessionStorage.setItem(planEnvelopeKey, JSON.stringify(envelope));
+    setRetainedPlan(null);
+    setConsentOpen(false);
+    router.push(`/positioning/${draftId}/plan`);
+  }
   async function generatePlan() {
     await run(async () => {
       await resumeInterruptedOpening();
       if (hasUnsavedInformation) throw new Error("save information first");
-      // No manually authored topic row is required: the Agent produces the
-      // topics, dates, titles and briefs. Only user-owned choices are supplied.
-      const constraints = {
-        confirmedPositioning: positioningSummary(),
-        platforms: planPlatform.split(",").map(v => v.trim()).filter(Boolean),
-        accounts: planAccount.split(",").map(v => v.trim()).filter(Boolean),
-        startDate: planStart,
-        days: planDays,
-      };
-      const accountInput = JSON.stringify(constraints);
+      const accountInput = planConstraintsInput();
       // A retained request may only be replayed when it is genuinely the same
       // intent: the user's constraints are unchanged, and the visible candidate
       // does not already close exactly this request. A candidate that names a
@@ -1308,6 +1373,10 @@ export default function PositioningDraft({
         retained.envelope.sourceRoundId === d.roundId &&
         retained.envelope.request.draftId === draftId
           ? retained.envelope.request
+          : retained?.kind === "unconsented" &&
+              retained.sourceRoundId === d.roundId &&
+              retained.request.draftId === draftId
+            ? retained.request
           : retained?.kind === "legacy" && retained.request.draftId === draftId
             ? retained.request
             : null;
@@ -1329,8 +1398,11 @@ export default function PositioningDraft({
         input: accountInput,
       };
       const envelope: PlanEnvelope = {
-        v: 2,
+        // Clicking "生成候选" is itself an explicit user action, so the
+        // request it starts carries the consent marker from here on.
+        v: 3,
         sourceRoundId: d.roundId,
+        consentedAt: new Date().toISOString(),
         request,
       };
       sessionStorage.setItem(planEnvelopeKey, JSON.stringify(envelope));
@@ -2160,7 +2232,7 @@ export default function PositioningDraft({
                   <p className="text-sm text-[var(--text-secondary)]">
                     {snap.state === "published"
                       ? "定位版本已发布。你可以在下方进入第一周计划，或修订定位并保留原版本；历史版本与对话保持不变。"
-                      : "已暂缓的问题按“接受局限”记录，不会被当作已确认事实。下一步是确认正式定位：发布后会按现有流程生成一份第一周计划候选，生成走正常的模型与额度计费；候选不会自动保存为计划，也不会自动创建账号或选题。"}
+                      : "已暂缓的问题按“接受局限”记录，不会被当作已确认事实。下一步是确认正式定位：发布定位本身不会调用模型；发布后你会被明确询问是否继续生成第一周选题，只有你选择继续时才会调用模型并按额度计费。"}
                   </p>
                 </div>
               )}
@@ -2206,28 +2278,6 @@ export default function PositioningDraft({
         }
         onClick={() =>
           run(async () => {
-            // Freeze the future plan request from the confirmed information on
-            // screen, before anything navigates.
-            const request: PlanRequest = {
-              draftId,
-              requestId: crypto.randomUUID(),
-              purpose: "plan",
-              stepId: snap.workflow.steps.at(-1).id,
-              input: JSON.stringify({
-                confirmedPositioning: positioningSummary(),
-                platforms: planPlatform
-                  .split(",")
-                  .map((v) => v.trim())
-                  .filter(Boolean),
-                accounts: planAccount
-                  .split(",")
-                  .map((v) => v.trim())
-                  .filter(Boolean),
-                startDate: planStart,
-                days: planDays,
-              }),
-            };
-            const sourceRoundId = d.roundId;
             await change.mutateAsync({
               action: "publish",
               projectId: d.projectId,
@@ -2245,19 +2295,60 @@ export default function PositioningDraft({
                 ]),
               ),
             });
-            // Only a successful publish authorizes the automatic generation,
-            // and only for the round that was just published.
-            const envelope: PlanEnvelope = { v: 2, sourceRoundId, request };
-            sessionStorage.setItem(planEnvelopeKey, JSON.stringify(envelope));
-            router.push(`/positioning/${draftId}/plan`);
+            // Publishing the confirmed positioning only ends the step-by-step
+            // confirmation. It never authorizes a generation: the next step is
+            // the explicit "现在生成第一周选题吗？" ask.
+            setConsentOpen(true);
           })
         }
       >
-        确认正式定位并生成第一周计划
+        确认正式定位
       </Button>}
+      {!planView && snap.state === "published" && (
+        <Button
+          variant="outline"
+          disabled={busy || hasUnsavedInformation || hasPendingStepRequest}
+          onClick={() => setConsentOpen(true)}
+        >
+          继续生成第一周选题
+        </Button>
+      )}
+      {!planView && consentOpen && (
+        <div
+          role="dialog"
+          aria-label="是否继续生成第一周选题"
+          tabIndex={-1}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setConsentOpen(false);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+        >
+          <div className="w-full max-w-lg space-y-4 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-5">
+            <h2 className="text-xl">正式定位已发布。现在生成第一周选题吗？</h2>
+            <p className="text-sm text-[var(--text-secondary)]">
+              继续后，导师会按你已确认的正式定位和下面填写的平台、账号与日期生成第一周选题候选。这一步会调用模型并消耗额度；候选不会自动保存为计划，也不会自动创建账号或选题。选择“稍后”不会产生任何调用，正式定位与历史保持原样，你可以随时回来继续。
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                disabled={busy || hasUnsavedInformation}
+                onClick={() => consentPlan()}
+              >
+                继续生成第一周选题
+              </Button>
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() => setConsentOpen(false)}
+              >
+                稍后
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       {!planView && (
         <p className="text-xs text-[var(--text-secondary)]">
-          确认后会先正式发布你的定位版本，然后自动生成一份第一周计划候选。生成走正常的模型与额度计费；候选不会自动保存为计划，也不会自动创建账号或选题。
+          确认正式定位只会发布你的定位版本，不会调用模型。生成第一周选题是下一步的独立动作：你明确选择“继续生成”后才会调用模型并按额度计费；候选不会自动保存为计划，也不会自动创建账号或选题。
         </p>
       )}
       {!planView && d.report?.available && <Link className="block underline" href={`/positioning/${draftId}/plan`}>进入第一周计划</Link>}
@@ -2294,6 +2385,33 @@ export default function PositioningDraft({
                   上一轮定位留下的生成请求已在本机归档，不会执行。请按当前定位重新生成计划候选。
                 </p>
               )}
+            </div>
+          )}
+          {retainedPlan && (
+            <div className="space-y-3 rounded-xl border border-[var(--border-primary)] p-4">
+              <h3>有一条尚未开始的生成请求保留在本机</h3>
+              <p className="text-sm text-[var(--text-secondary)]" role="status">
+                请求标识 {retainedPlan.requestId.slice(0, 8)}… 属于
+                {retainedPlan.sourceRoundId ? "本机记录的这份定位" : "更早的一份本机记录"}
+                ，尚未执行，也没有产生费用。它不会自动运行：你可以继续这条原请求，或丢弃它并按当前定位重新生成。
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <Button disabled={busy} onClick={() => consentPlan()}>
+                  继续这条原请求
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => {
+                    archiveStalePlanEnvelope(
+                      "本机保留的旧生成请求已归档，不会执行，也没有产生费用。",
+                    );
+                    setRetainedPlan(null);
+                  }}
+                >
+                  丢弃这条记录
+                </Button>
+              </div>
             </div>
           )}
           {shownPlanCandidate && (

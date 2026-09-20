@@ -152,3 +152,17 @@ The private real-protocol adapter/evidence tests pass **27 cases**, exit 0 (`pr4
 The candidate remains **NOT clean**: real Staging policy/budget/forward-schema wiring, affected end-to-end provider-contract proof, exact-head CI and fresh complete independent review are unfinished. No merge, remote migration/configuration, real provider cost or Owner real-dialogue acceptance is claimed.
 
 2026-09-16：`pr422-opc-full-staging-stack.log` 在完整 0105/0106/0107/0108 隔离迁移栈下完成 OPC 全量：24 通过 / 156 未选择，退出 0，private-canary PASS。源码快照 `c66edb5907b6aebc2bc99ae751945a7148e1526f14f37ddf7afd145158c9576c`，包含 OPC wrapper 保留、全流程、确认不重复模型调用、五类自动保存浏览器场景。原私有六步输入用例本轮未提供输入，仍单独跳过；不冒充新的原方法验收。该轮浏览器走本地 fixture 分支，不替代 Staging 专用 host/真实供应商验收。后续维护分支变更由独立的 actual-router/HTTP 聚焦记录验证，最终完整候选审查仍待完成。
+
+## Positioning consent separation (2026-09-20)
+
+`确认正式定位` 现在只发布正式定位版本并弹出「是否继续生成第一周选题」询问，不再冻结生成请求、也不再跳转到计划页；发布定位本身不调用模型。选择「稍后」、关闭、Escape、刷新或仅重新进入草稿都不产生选题执行，也不创建账号或工作项；再次继续入口保留在已完成状态与 `/plan` 页。
+
+生成请求改为携带显式同意标记的冻结包（`v:3` + `consentedAt`）：只有用户明确选择「继续生成第一周选题」或点击「生成候选」才会写入该标记，随后仍沿用原有 request/execution/billing 身份与幂等重放。旧版本 `v:2` 冻结包与更早的裸请求仍可读取，但只在用户显式点击「继续这条原请求」后按其原 request id 重放，页面挂载、刷新或跟随链接都不会自动执行；「丢弃这条记录」会把本机原值归档到 `…:stale:<时间>` 后再清除。
+
+本增量在隔离 disposable 栈实测（本机 Docker，仅新建隔离数据；未触碰保留中的 Owner 预览 `owner422-5d14112b`、原始输入或取证卷/归档）：
+
+- `run-workbench.mjs --opc-only --case-pattern='^OPC: (Stage C1|browser manual positioning|browser can correct plan inputs|workbench (save|confirm) conflict recovery)'`：**5 passed / 202 skipped**，退出 0，private-canary PASS。含改写后的 Stage C1（先询问、稍后与刷新零花费、显式继续恰好一次）与 F1 确定拒绝/丢回包恢复。
+- `run-workbench.mjs --opc-only --case-pattern='^OPC: (Stage C[2-8]|a retained handoff request|a confirmed positioning produces|the Agent opens the current question|question-by-question confirmation keeps mentor|plan generation uses the original SDK|a revised round opens|a revision makes the page|revising positioning retains)'`：**15 passed / 192 skipped**，退出 0，private-canary PASS。旧 Stage C2–C8 的丢回包/多标签/跨轮次幂等恢复断言保留。
+- `pnpm --filter web lint` 与 `apps/web` 的 `tsc --noEmit`：通过。
+
+旧 Stage C「确认定位即授权生成」的验收口径已按新产品决定（架构文档 §5.1）作废，不再作为验收预期。本增量不含选题 Agent 工作对话与来源/Skill/Session 持久绑定（该闭环仍未实现），也不含真实模型、Staging/远端环境与 Owner 产品验收，均为 NOT_RUN。
