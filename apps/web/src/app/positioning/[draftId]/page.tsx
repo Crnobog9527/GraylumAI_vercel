@@ -1382,21 +1382,37 @@ export default function PositioningDraft({
     // resources, and refuses when the method declares none. Nothing is
     // dispatched here — the workspace's own turn is the paid action.
     if (!retainedRequest) {
+      // The first bind keeps one stable identity, so a retry after a lost reply
+      // replays the same bind instead of being refused as a different request.
+      const bindKey = "opc-topic-bind:" + draftId;
+      const bindRequestId =
+        sessionStorage.getItem(bindKey) ?? crypto.randomUUID();
+      sessionStorage.setItem(bindKey, bindRequestId);
       try {
         await bindTopic.mutateAsync({
           draftId,
-          requestId: crypto.randomUUID(),
+          requestId: bindRequestId,
           sourceVersionId: d.report?.id ?? "",
         });
+        sessionStorage.removeItem(bindKey);
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : "";
-        setConsentOpen(false);
-        setNotice(
-          message.includes("OPC_TOPIC_SKILL_MISSING")
-            ? "当前定位方法没有声明可用的选题方法资源，无法开始选题工作对话。请联系管理员配置后再继续；本次没有任何调用或花费。"
-            : "暂时无法建立选题工作空间。你的正式定位与历史保持原样，可以稍后重试。",
-        );
-        return;
+        // An already bound draft (or a source that this draft can no longer
+        // rebind) is not a failure: the workspace already exists and must keep
+        // its own identity, so continue into it instead of creating nothing.
+        if (
+          !message.includes("OPC_TOPIC_BOUND") &&
+          !message.includes("OPC_TOPIC_SOURCE_CHANGED")
+        ) {
+          setConsentOpen(false);
+          setNotice(
+            message.includes("OPC_TOPIC_SKILL_MISSING")
+              ? "当前定位方法没有声明可用的选题方法资源，无法开始选题工作对话。请联系管理员配置后再继续；本次没有任何调用或花费。"
+              : "暂时无法建立选题工作空间。你的正式定位与历史保持原样，可以稍后重试。",
+          );
+          return;
+        }
+        sessionStorage.removeItem(bindKey);
       }
       setConsentOpen(false);
       router.push(`/positioning/${draftId}/topics`);

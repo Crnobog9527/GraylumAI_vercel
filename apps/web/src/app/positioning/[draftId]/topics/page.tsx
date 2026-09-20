@@ -122,7 +122,14 @@ export default function TopicWorkspacePage() {
     () => plans.reduce((max, plan) => Math.max(max, plan.version), 0),
     [plans],
   );
-  const accounts = (read.data?.accounts ?? []) as Array<{
+  /**
+   * Account identities come from the owned account list, not from the draft
+   * read: `opc.read` for one draft has no accounts projection, so reading them
+   * from there silently produced a null expected revision for every existing
+   * account. The list carries the authoritative current revision.
+   */
+  const accountList = trpc.opc.list.useQuery();
+  const accounts = (accountList.data?.accounts ?? []) as Array<{
     platform: string;
     account: string;
     revision: number;
@@ -241,9 +248,33 @@ export default function TopicWorkspacePage() {
       return;
     }
     try {
+      // One explicit adoption keeps one identity: the same plan version and the
+      // same selected accounts replay the original handoff request instead of
+      // creating a new one on every click.
+      const adoptKey =
+        'opc-topic-adopt:' + draftId + ':' + planId;
+      const selectionKey = [...unique.keys()].sort().join(',');
+      const retainedAdopt = sessionStorage.getItem(adoptKey);
+      let adoptRequestId = crypto.randomUUID();
+      if (retainedAdopt) {
+        try {
+          const parsed = JSON.parse(retainedAdopt) as {
+            requestId?: string;
+            selectionKey?: string;
+          };
+          if (parsed.selectionKey === selectionKey && parsed.requestId)
+            adoptRequestId = parsed.requestId;
+        } catch {
+          /* An unreadable local record never authorizes the new identity. */
+        }
+      }
+      sessionStorage.setItem(
+        adoptKey,
+        JSON.stringify({ requestId: adoptRequestId, selectionKey }),
+      );
       const result = await handoff.mutateAsync({
         draftId,
-        requestId: crypto.randomUUID(),
+        requestId: adoptRequestId,
         planId,
         accounts: [...unique.values()].map((item) => ({
           platform: item.platform,
@@ -253,6 +284,7 @@ export default function TopicWorkspacePage() {
               ?.revision ?? null,
         })),
       });
+      sessionStorage.removeItem(adoptKey);
       setAdopted(result as typeof adopted);
       setNotice('已按你选择的账号承接这一次的计划；每个选题都有独立工作空间。');
       await read.refetch();
