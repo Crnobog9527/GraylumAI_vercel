@@ -3865,24 +3865,56 @@ it("OPC: Stage C1 the final positioning confirmation asks first and spends nothi
     await page
       .getByRole("heading", { name: "第一周选题工作对话", exact: true })
       .waitFor();
-    const bound = (
-      await sql.query(
-        "select w.source_version_id::text v, w.session_id::text s, vp.round_id::text r from opc_topic_workspaces w join artifact_versions vp on vp.id=w.source_version_id where w.draft_id=$1",
-        [f.d.draftId],
-      )
-    ).rows[0] as { v: string; s: string; r: string };
+    // One canonical reading of the binding row. Mentor Session, topic Session,
+    // bind request, frozen source version and creation time are different
+    // fields; the earlier failure compared a bind request id with a round id.
+    const bindingState = async () =>
+      (
+        await sql.query(
+          "select w.session_id::text topic_session, w.request_id::text bind_request, w.source_version_id::text source_version, w.created_at::text created_at, s.scope topic_scope from opc_topic_workspaces w join runtime_sessions s on s.id=w.session_id and s.actor_id=w.actor_id where w.draft_id=$1 and w.actor_id=$2",
+          [f.d.draftId, f.actor],
+        )
+      ).rows as Array<Record<string, unknown>>;
+    const boundRows = await bindingState();
+    expect(boundRows).toHaveLength(1);
+    const bound = boundRows[0]!;
     // Bound to the confirmed version of this round, in its own Session.
-    expect(bound.r).toBe(f.d.roundId);
     expect(
-      (await sql.query("select scope from runtime_sessions where id=$1", [bound.s]))
-        .rows[0].scope,
-    ).toEqual({ kind: "positioning_topic", draftId: f.d.draftId });
+      (
+        await sql.query(
+          "select round_id::text r from artifact_versions where id=$1",
+          [bound.source_version],
+        )
+      ).rows[0].r,
+    ).toBe(f.d.roundId);
+    expect(bound.topic_scope).toEqual({
+      kind: "positioning_topic",
+      draftId: f.d.draftId,
+    });
     expect(await page.evaluate((k) => sessionStorage.getItem(k), envelopeKey)).toBeNull();
     const after = await planIdentity(f.actor, f.d.draftId);
     // The binding is free: no plan execution, no run and no reserve.
     expect(after.planExecutions - before.planExecutions).toBe(0);
     expect(after.planRuns - before.planRuns).toBe(0);
     expect(after.reserves - before.reserves).toBe(0);
+    // Re-entering with the same confirmed source recovers the very same
+    // binding: same Session, same bind identity, no second workspace.
+    await page.goto(process.env.V3_LOCAL_APP + draftPath);
+    await page
+      .getByRole("button", { name: "继续生成第一周选题", exact: true })
+      .click();
+    await dialog
+      .getByRole("button", { name: "继续生成第一周选题", exact: true })
+      .click();
+    await page.waitForURL((url) => url.pathname.endsWith(draftPath + "/topics"));
+    await page
+      .getByRole("heading", { name: "第一周选题工作对话", exact: true })
+      .waitFor();
+    const againRows = await bindingState();
+    expect(againRows).toHaveLength(1);
+    // The identical row: same topic Session, same bind request identity, same
+    // frozen source version and the same creation time.
+    expect(againRows[0]).toEqual(bound);
     expect(after.plans).toBe(0);
     expect(after.accounts).toBe(0);
     expect(after.workItems).toBe(0);

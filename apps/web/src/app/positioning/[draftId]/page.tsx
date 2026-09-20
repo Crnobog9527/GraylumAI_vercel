@@ -341,6 +341,10 @@ export default function PositioningDraft({
   );
   /** The bound topic workspace of this draft (the consented entry target). */
   const bindTopic = trpc.opc.bindTopicWorkspace.useMutation();
+  const topicWorkspace = trpc.opc.topicWorkspace.useQuery(
+    { draftId },
+    { enabled: Boolean(draftId) },
+  );
   const planEnvelopeKey = "opc-plan-generation:" + draftId;
   const hasUnsavedInformation = Object.keys(infoEdits).length > 0;
   const d = read.data,
@@ -1382,6 +1386,26 @@ export default function PositioningDraft({
     // resources, and refuses when the method declares none. Nothing is
     // dispatched here — the workspace's own turn is the paid action.
     if (!retainedRequest) {
+      const currentSource = d.report?.id ?? "";
+      const bound = topicWorkspace.data as
+        | { bound?: boolean; sourceVersionId?: string }
+        | undefined;
+      if (bound?.bound) {
+        if (bound.sourceVersionId === currentSource) {
+          // Same confirmed source: this is the workspace this draft owns, so
+          // recover it as it is instead of issuing another bind identity.
+          setConsentOpen(false);
+          router.push(`/positioning/${draftId}/topics`);
+          return;
+        }
+        // A different confirmed source is an explicit decision, never a silent
+        // entry into (or a silent rebind of) the older workspace.
+        setConsentOpen(false);
+        setNotice(
+          "这个定位草稿已经有一个绑定在较早确认版本上的选题工作空间。它仍然保留并可继续使用；如需按当前确认版本另建，请先在该工作空间中处理原有计划与承接，避免两套来源混用。",
+        );
+        return;
+      }
       // The first bind keeps one stable identity, so a retry after a lost reply
       // replays the same bind instead of being refused as a different request.
       const bindKey = "opc-topic-bind:" + draftId;
