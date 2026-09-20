@@ -327,6 +327,8 @@ export default function PositioningDraft({
    * waiting for that decision. Neither can start work on its own.
    */
   const [consentOpen, setConsentOpen] = useState(false);
+  const consentDialog = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (consentOpen) consentDialog.current?.focus(); }, [consentOpen]);
   const [retainedPlan, setRetainedPlan] = useState<
     { requestId: string; sourceRoundId: string | null } | null
   >(null);
@@ -340,11 +342,7 @@ export default function PositioningDraft({
     { enabled: Boolean(retainedPlan?.requestId) },
   );
   /** The bound topic workspace of this draft (the consented entry target). */
-  const bindTopic = trpc.opc.bindTopicWorkspace.useMutation();
-  const topicWorkspace = trpc.opc.topicWorkspace.useQuery(
-    { draftId },
-    { enabled: Boolean(draftId) },
-  );
+  const bindTopic = trpc.opc.consentTopicWorkspace.useMutation();
   const planEnvelopeKey = "opc-plan-generation:" + draftId;
   const hasUnsavedInformation = Object.keys(infoEdits).length > 0;
   const d = read.data,
@@ -354,7 +352,7 @@ export default function PositioningDraft({
   // uses them, and it must never disable the form the user is filling in. Every
   // user-initiated use of them runs inside `run()` (or a named flag), which is
   // what actually gates the controls.
-  const busy =
+  const busy = bindTopic.isPending ||
     running || confirmingQuestion ||
     revise.isPending ||
     change.isPending ||
@@ -1386,60 +1384,23 @@ export default function PositioningDraft({
     // resources, and refuses when the method declares none. Nothing is
     // dispatched here — the workspace's own turn is the paid action.
     if (!retainedRequest) {
-      const currentSource = d.report?.id ?? "";
-      const bound = topicWorkspace.data as
-        | { bound?: boolean; sourceVersionId?: string }
-        | undefined;
-      if (bound?.bound) {
-        if (bound.sourceVersionId === currentSource) {
-          // Same confirmed source: this is the workspace this draft owns, so
-          // recover it as it is instead of issuing another bind identity.
-          setConsentOpen(false);
-          router.push(`/positioning/${draftId}/topics`);
-          return;
-        }
-        // A different confirmed source is an explicit decision, never a silent
-        // entry into (or a silent rebind of) the older workspace.
-        setConsentOpen(false);
-        setNotice(
-          "这个定位草稿已经有一个绑定在较早确认版本上的选题工作空间。它仍然保留并可继续使用；如需按当前确认版本另建，请先在该工作空间中处理原有计划与承接，避免两套来源混用。",
-        );
-        return;
-      }
-      // The first bind keeps one stable identity, so a retry after a lost reply
-      // replays the same bind instead of being refused as a different request.
-      const bindKey = "opc-topic-bind:" + draftId;
-      const bindRequestId =
-        sessionStorage.getItem(bindKey) ?? crypto.randomUUID();
-      sessionStorage.setItem(bindKey, bindRequestId);
       try {
-        await bindTopic.mutateAsync({
-          draftId,
-          requestId: bindRequestId,
-          sourceVersionId: d.report?.id ?? "",
-        });
-        sessionStorage.removeItem(bindKey);
+        // This mutation checks the displayed source under the same server lock
+        // as binding/consent. No cached read or caught conflict permits a jump.
+        const accepted = await bindTopic.mutateAsync({ draftId, sourceVersionId: d.report?.id ?? "" });
+        if (!accepted.bound || accepted.sourceVersionId !== d.report?.id)
+          throw new Error("OPC_TOPIC_SOURCE_CHANGED");
+        setConsentOpen(false);
+        router.push(`/positioning/${draftId}/topics`);
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : "";
-        // An already bound draft (or a source that this draft can no longer
-        // rebind) is not a failure: the workspace already exists and must keep
-        // its own identity, so continue into it instead of creating nothing.
-        if (
-          !message.includes("OPC_TOPIC_BOUND") &&
-          !message.includes("OPC_TOPIC_SOURCE_CHANGED")
-        ) {
-          setConsentOpen(false);
-          setNotice(
-            message.includes("OPC_TOPIC_SKILL_MISSING")
-              ? "当前定位方法没有声明可用的选题方法资源，无法开始选题工作对话。请联系管理员配置后再继续；本次没有任何调用或花费。"
-              : "暂时无法建立选题工作空间。你的正式定位与历史保持原样，可以稍后重试。",
-          );
-          return;
-        }
-        sessionStorage.removeItem(bindKey);
+        setConsentOpen(false);
+        setNotice(message.includes("OPC_TOPIC_SOURCE_CHANGED") || message.includes("OPC_TOPIC_BOUND")
+          ? "当前定位版本与原选题工作空间来源不同，已停止进入。原对话和计划保留，请从历史入口核对原来源。"
+          : message.includes("OPC_TOPIC_SKILL_MISSING")
+            ? "当前定位方法没有声明可用的选题资源，无法开始；本次没有模型调用。"
+            : "暂时无法核实选题同意状态，请重试原入口；不会创建第二次首轮意图。");
       }
-      setConsentOpen(false);
-      router.push(`/positioning/${draftId}/topics`);
       return;
     }
     const request: PlanRequest = retainedRequest ?? {
@@ -2442,7 +2403,9 @@ export default function PositioningDraft({
       )}
       {consentOpen && (
         <div
+          ref={consentDialog}
           role="dialog"
+          aria-modal="true"
           aria-label="是否继续生成第一周选题"
           tabIndex={-1}
           onKeyDown={(event) => {
@@ -2453,8 +2416,9 @@ export default function PositioningDraft({
           <div className="w-full max-w-lg space-y-4 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-5">
             <h2 className="text-xl">正式定位已发布。现在生成第一周选题吗？</h2>
             <p className="text-sm text-[var(--text-secondary)]">
-              继续后，导师会按你已确认的正式定位和下面填写的平台、账号与日期生成第一周选题候选。这一步会调用模型并消耗额度；候选不会自动保存为计划，也不会自动创建账号或选题。选择“稍后”不会产生任何调用，正式定位与历史保持原样，你可以随时回来继续。
+              继续后，Agent 会按你已确认的正式定位和绑定的选题方法开始首轮工作对话。你可以继续补充平台、账号与日期，修改候选。这一步会调用模型并消耗额度；候选不会自动保存为计划，也不会自动创建账号或选题。选择“稍后”不会产生任何调用，正式定位与历史保持原样，你可以随时回来继续。
             </p>
+            <Button variant="ghost" aria-label="关闭选题询问" disabled={busy} onClick={() => setConsentOpen(false)}>关闭</Button>
             <div className="flex flex-wrap gap-3">
               <Button
                 disabled={busy || hasUnsavedInformation}

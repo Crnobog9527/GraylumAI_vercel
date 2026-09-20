@@ -375,6 +375,10 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
      * freezes the source version, the pinned revision and its declared topic
      * resources; it fails closed instead of inventing a topic Skill.
      */
+    topicConsent: (value: unknown) => {
+      const v = opcTopicBind.omit({ requestId: true }).parse(value);
+      return rpc("opc_topic_consent", { p_draft_id: v.draftId, p_source_version_id: v.sourceVersionId });
+    },
     topicBind: async (value: unknown) => {
       const v = opcTopicBind.parse(value);
       return rpc("opc_topic_bind", {
@@ -400,7 +404,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         p_actor_id: actor,
         p_action: "resolve",
         p_project_id: d.projectId,
-        p_round_id: d.roundId,
+        p_round_id: bound.sourceRoundId,
       });
       if (resolved.error) throw new Error("OPC_DENIED");
       const resources = resolved.data?.workflow?.planResources;

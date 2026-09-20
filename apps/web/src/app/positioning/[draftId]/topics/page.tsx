@@ -29,6 +29,14 @@ type PlanItem = {
   day: string;
 };
 
+type ChatRequest = { draftId: string; requestId: string; input: string };
+type SaveRequest = { draftId: string; requestId: string; expectedVersion: number; sourceVersionId: string; body: PlanItem[] };
+type AdoptRequest = { draftId: string; requestId: string; planId: string; accounts: Array<{ platform: string; account: string; expectedRevision: number | null }> };
+type Operation = { kind: 'chat'; request: ChatRequest } | { kind: 'save'; request: SaveRequest } | { kind: 'adopt'; request: AdoptRequest };
+// Only transaction-level definite rejections release a request. Unknown replies
+// and identity conflicts retain the whole original envelope, never just its ID.
+const definiteRejections = new Set(['OPC_VERSION_CONFLICT', 'OPC_ACCOUNT_CONFLICT', 'OPC_ACCOUNTS_INVALID', 'OPC_PLAN_INVALID', 'OPC_DUPLICATE_ITEM', 'OPC_SOURCE_DENIED', 'OPC_DENIED', 'OPC_TOPIC_SOURCE_REVOKED', 'OPC_TOPIC_UNBOUND', 'OPC_TOPIC_SKILL_MISSING']);
+
 /** The last JSON array the Agent offered as the first-week plan, if any. */
 function parseCandidate(text: string | null | undefined): PlanItem[] | null {
   if (!text) return null;
@@ -86,7 +94,10 @@ export default function TopicWorkspacePage() {
   const [input, setInput] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [pending, setPending] = useState<{ requestId: string; input: string } | null>(null);
+  const [pending, setPending] = useState<Operation | null>(null);
+  const operationBusy = useRef(false);
+  const openingAttempt = useRef('');
+  const [working, setWorking] = useState(false);
   const [candidate, setCandidate] = useState<{ body: PlanItem[]; requestId: string } | null>(null);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [adopted, setAdopted] = useState<
@@ -104,14 +115,42 @@ export default function TopicWorkspacePage() {
     { sessionId },
     { enabled: Boolean(sessionId), refetchInterval: 5000 },
   );
-  const bind = trpc.opc.bindTopicWorkspace.useMutation();
+  const bind = trpc.opc.consentTopicWorkspace.useMutation();
   const turn = trpc.opc.topicTurn.useMutation();
   const execute = trpc.runtime.execute.useMutation();
   const cancel = trpc.runtime.cancel.useMutation();
   const savePlan = trpc.opc.savePlan.useMutation();
   const handoff = trpc.opc.handoff.useMutation();
 
-  const busy = turn.isPending || execute.isPending || bind.isPending;
+  const busy = working || turn.isPending || execute.isPending || bind.isPending || savePlan.isPending || handoff.isPending;
+  const storageKey = sessionId ? 'opc-topic-operation:' + sessionId : '';
+  const candidateKey = sessionId ? 'opc-topic-candidate:' + sessionId : '';
+  useEffect(() => {
+    if (!storageKey) return;
+    const restore = () => {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        const op = raw ? JSON.parse(raw) as Operation : null;
+        if (op && op.request.draftId !== draftId) throw new Error('wrong draft');
+        setPending(op);
+        const saved = localStorage.getItem(candidateKey);
+        setCandidate(saved ? JSON.parse(saved) : null);
+      } catch { setError('本机恢复记录无法读取，已停止新请求，请保留记录。'); }
+    };
+    restore();
+    window.addEventListener('storage', restore);
+    return () => window.removeEventListener('storage', restore);
+  }, [storageKey, candidateKey, draftId]);
+  function editCandidate(value: typeof candidate) {
+    // Persist before changing the UI: refresh/re-login must not discard edits.
+    if (!candidateKey) return;
+    try {
+      if (value) localStorage.setItem(candidateKey, JSON.stringify(value));
+      else localStorage.removeItem(candidateKey);
+      setCandidate(value);
+    } catch { setError('无法保存本机草稿，已停止修改。'); }
+  }
+
   const plans = (read.data?.plans ?? []) as Array<{
     planId: string;
     version: number;
@@ -165,36 +204,79 @@ export default function TopicWorkspacePage() {
 
   async function start() {
     setError('');
-    setNotice('');
     const sourceVersionId = read.data?.report?.id;
-    if (!sourceVersionId) {
-      setError('请先确认正式定位，再开始选题工作对话。');
-      return;
-    }
+    if (!sourceVersionId) return;
     try {
-      await bind.mutateAsync({ draftId, requestId: crypto.randomUUID(), sourceVersionId });
+      const accepted = await bind.mutateAsync({ draftId, sourceVersionId });
+      if (accepted.sourceVersionId !== sourceVersionId) throw new Error('OPC_TOPIC_SOURCE_CHANGED');
       await workspace.refetch();
-    } catch (cause) {
-      setError(failureMessage(cause));
-    }
+    } catch (cause) { setError(failureMessage(cause)); }
   }
 
-  async function send(requestId = crypto.randomUUID(), text = input) {
-    if (!sessionId || !text.trim()) return;
+  async function perform(proposed: Operation) {
+    if (!storageKey || operationBusy.current) return;
+    operationBusy.current = true;
+    setWorking(true);
     setError('');
     setNotice('');
-    setPending({ requestId, input: text });
     try {
-      const admitted = await turn.mutateAsync({ draftId, requestId, input: text });
-      await execute.mutateAsync({ executionId: admitted.executionId });
-      setPending(null);
-      setInput('');
-      await view.refetch();
-    } catch (cause) {
-      setError(failureMessage(cause));
-      await view.refetch();
-    }
+      // The browser lock prevents two tabs from replacing an unknown operation.
+      await navigator.locks.request(storageKey, async () => {
+        const raw = localStorage.getItem(storageKey);
+        const op: Operation = raw ? JSON.parse(raw) : proposed;
+        if (op.request.draftId !== draftId) throw new Error('OPC_REQUEST_CONFLICT');
+        localStorage.setItem(storageKey, JSON.stringify(op));
+        setPending(op);
+        try {
+          if (op.kind === 'chat') {
+            const admitted = await turn.mutateAsync(op.request);
+            await execute.mutateAsync({ executionId: admitted.executionId });
+            setInput('');
+          } else if (op.kind === 'save') {
+            const result = await savePlan.mutateAsync(op.request);
+            editCandidate(null);
+            setNotice('已保存为第 ' + result.version + ' 版候选。请核对该版本后明确采纳。');
+          } else {
+            const result = await handoff.mutateAsync(op.request);
+            setAdopted(result as typeof adopted);
+            setNotice('已承接所选计划版本；进入对应工作项后可另行生成正文。');
+          }
+          localStorage.setItem(storageKey + ':completed:' + op.request.requestId, JSON.stringify(op));
+          localStorage.removeItem(storageKey);
+          setPending(null);
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : '';
+          if (definiteRejections.has(message)) {
+            localStorage.setItem(storageKey + ':rejected:' + op.request.requestId, JSON.stringify(op));
+            localStorage.removeItem(storageKey);
+            setPending(null);
+            setError('本次请求已明确拒绝（' + message + '），未提交此项修改。请核对刷新后的计划与账号，再明确重试。');
+          } else setError(failureMessage(cause));
+        }
+        await Promise.all([read.refetch(), view.refetch(), accountList.refetch()]);
+      });
+    } catch (cause) { setError(failureMessage(cause)); }
+    finally { operationBusy.current = false; setWorking(false); }
   }
+
+  async function send() {
+    if (!sessionId || !input.trim() || pending) return;
+    await perform({ kind: 'chat', request: { draftId, requestId: crypto.randomUUID(), input: input.trim() } });
+  }
+
+  // Opening is authorized by the persisted consent, never by this page/URL.
+  // All tabs recover the exact same ID/input. Existing conversations without
+  // that consent remain passive until an explicit action.
+  const opening = workspace.data?.opening as (ChatRequest & { executionId?: string | null }) | null | undefined;
+  useEffect(() => {
+    if (!opening || !sessionId || !view.data || busy || pending || !workspace.data?.sourceAllowed) return;
+    if (openingAttempt.current === opening.requestId) return;
+    const already = opening.executionId || view.data.executions?.some((e: { input?: string | null }) => e.input === opening.input);
+    openingAttempt.current = opening.requestId;
+    if (!already) void perform({ kind: 'chat', request: { draftId: opening.draftId, requestId: opening.requestId, input: opening.input } });
+    // One attempt per mounted accepted intent; failures expose explicit recovery.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opening?.requestId, sessionId, view.data, pending, busy]);
 
   async function stop(executionId: string) {
     setError('');
@@ -217,80 +299,35 @@ export default function TopicWorkspacePage() {
   }
 
   async function saveCandidate() {
-    if (!candidate) return;
-    setError('');
-    setNotice('');
-    try {
-      const saved = await savePlan.mutateAsync({
-        draftId,
-        requestId: candidate.requestId,
-        expectedVersion: nextVersion,
-        sourceVersionId: workspace.data?.sourceVersionId ?? '',
-        body: candidate.body,
-      });
-      setNotice('已保存为第 ' + saved.version + ' 版候选；采纳仍然需要你这一次的明确确认。');
-      setCandidate(null);
-      await read.refetch();
-    } catch (cause) {
-      setError(failureMessage(cause));
-    }
+    if (!candidate || pending) return;
+    await perform({ kind: 'save', request: {
+      draftId, requestId: candidate.requestId, expectedVersion: nextVersion,
+      sourceVersionId: workspace.data?.sourceVersionId ?? '', body: candidate.body,
+    } });
   }
 
   async function adopt(planId: string, body: PlanItem[]) {
-    setError('');
-    setNotice('');
-    const chosen = body.filter((item) =>
-      selectedAccounts.includes(item.platform + '::' + item.account),
-    );
-    const unique = new Map(chosen.map((item) => [item.platform + '::' + item.account, item]));
-    if (!unique.size) {
-      setError('请先选择要承接的平台账号。');
+    if (pending || accountList.isFetching || accountList.error || !accountList.data) return;
+    const chosen = body.filter(item => selectedAccounts.includes(item.platform + '::' + item.account));
+    const unique = new Map(chosen.map(item => [item.platform + '::' + item.account, item]));
+    if (!unique.size) { setError('请先选择要承接的平台账号。'); return; }
+    const plan = plans.find(value => value.planId === planId)!;
+    if (chosen.length !== body.length || plan.version !== nextVersion) {
+      // Preserve history and the atomic handoff contract: show the actual saved
+      // subset/new version before the user explicitly adopts it.
+      await perform({ kind: 'save', request: {
+        draftId, requestId: crypto.randomUUID(), expectedVersion: nextVersion,
+        sourceVersionId: plan.sourceVersionId, body: chosen,
+      } });
       return;
     }
-    try {
-      // One explicit adoption keeps one identity: the same plan version and the
-      // same selected accounts replay the original handoff request instead of
-      // creating a new one on every click.
-      const adoptKey =
-        'opc-topic-adopt:' + draftId + ':' + planId;
-      const selectionKey = [...unique.keys()].sort().join(',');
-      const retainedAdopt = sessionStorage.getItem(adoptKey);
-      let adoptRequestId = crypto.randomUUID();
-      if (retainedAdopt) {
-        try {
-          const parsed = JSON.parse(retainedAdopt) as {
-            requestId?: string;
-            selectionKey?: string;
-          };
-          if (parsed.selectionKey === selectionKey && parsed.requestId)
-            adoptRequestId = parsed.requestId;
-        } catch {
-          /* An unreadable local record never authorizes the new identity. */
-        }
-      }
-      sessionStorage.setItem(
-        adoptKey,
-        JSON.stringify({ requestId: adoptRequestId, selectionKey }),
-      );
-      const result = await handoff.mutateAsync({
-        draftId,
-        requestId: adoptRequestId,
-        planId,
-        accounts: [...unique.values()].map((item) => ({
-          platform: item.platform,
-          account: item.account,
-          expectedRevision:
-            accounts.find((a) => a.platform === item.platform && a.account === item.account)
-              ?.revision ?? null,
-        })),
-      });
-      sessionStorage.removeItem(adoptKey);
-      setAdopted(result as typeof adopted);
-      setNotice('已按你选择的账号承接这一次的计划；每个选题都有独立工作空间。');
-      await read.refetch();
-    } catch (cause) {
-      setError(failureMessage(cause));
-    }
+    await perform({ kind: 'adopt', request: {
+      draftId, requestId: crypto.randomUUID(), planId,
+      accounts: [...unique.values()].map(item => ({
+        platform: item.platform, account: item.account,
+        expectedRevision: accounts.find(a => a.platform === item.platform && a.account === item.account)?.revision ?? null,
+      })),
+    } });
   }
 
   if (read.isLoading || workspace.isLoading)
@@ -309,7 +346,7 @@ export default function TopicWorkspacePage() {
   const sourceAvailable = workspace.data?.sourceAllowed !== false;
 
   return (
-    <main className="flex h-dvh min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
+    <main className="flex h-dvh min-h-0 flex-col overflow-y-auto bg-[var(--bg-primary)] text-[var(--text-primary)]">
       <header className="flex h-16 shrink-0 items-center justify-between border-b border-[var(--border-primary)] px-4 sm:px-6">
         <div className="flex items-center gap-3">
           <Link className="underline" href={`/positioning/${draftId}`}>
@@ -320,7 +357,7 @@ export default function TopicWorkspacePage() {
             <p className="text-xs text-[var(--text-tertiary)]">
               {bound
                 ? '绑定来源：已确认的正式定位版本 · 方法修订 ' +
-                  (workspace.data?.revisionId ?? '').slice(0, 8)
+                  (workspace.data?.revisionId ?? '').slice(0, 8) + ' · 正式定位 v' + workspace.data?.sourceVersion
                 : '尚未开始'}
             </p>
           </div>
@@ -337,7 +374,7 @@ export default function TopicWorkspacePage() {
           <h2 className="text-lg font-semibold">开始第一周选题</h2>
           <p className="mt-3 text-sm text-[var(--text-secondary)]">
             确认定位不会自动生成选题。这里会创建一个绑定本次确认定位版本与你当前方法修订的工作对话；
-            你可以反复对话、修改候选，之后再明确采纳。绑定本身不调用模型，也不产生费用。
+            你可以反复对话、修改候选，之后再明确采纳。点击开始即同意使用 AI 生成首轮选题；生成与采纳独立。
           </p>
           {!read.data?.report?.available && (
             <p role="status" className="mt-3 text-sm">
@@ -358,16 +395,20 @@ export default function TopicWorkspacePage() {
 
       {bound && sourceAvailable && (
         <>
-          <div className="min-h-0 flex-1 overflow-y-auto" aria-label="选题对话记录">
+          <div className="min-h-64 flex-1 shrink-0 overflow-y-auto" aria-label="选题对话记录">
             {!executions?.length && (
               <div className="mx-auto flex min-h-48 max-w-xl flex-col items-center justify-center px-6 py-10 text-center">
                 <Bot className="mb-3 h-8 w-8 text-[var(--color-primary)]" />
                 <p className="text-sm text-[var(--text-tertiary)]">
-                  说一句你想先解决的问题，例如「先给我一版第一周选题，我再改」。
+                  {opening ? '正在恢复你已同意的首轮选题请求。' : '说一句你想先解决的问题，例如「先给我一版第一周选题，我再改」。'}
                 </p>
               </div>
             )}
             <section className="mx-auto w-full max-w-4xl space-y-6 p-4 sm:p-6">
+              <details className="text-sm">
+                <summary>本次引用的正式定位 v{workspace.data?.sourceVersion}</summary>
+                <pre className="whitespace-pre-wrap break-words">{JSON.stringify(workspace.data?.profile, null, 2)}</pre>
+              </details>
               {executions?.map((e) => (
                 <article key={e.executionId} className="space-y-3">
                   {e.input && (
@@ -406,18 +447,23 @@ export default function TopicWorkspacePage() {
                           const body = parseCandidate(e.body ?? e.primaryBody);
                           if (!body) return null;
                           return (
+                            <div>
+                            <ul className="mt-3 space-y-2" aria-label="回复中的选题候选">
+                              {body.map(item => <li key={item.id}><strong>{item.day} · {item.title}</strong><p>{item.platform}/{item.account} · {item.brief}</p></li>)}
+                            </ul>
                             <Button
                               className="mt-3"
                               size="sm"
                               variant="outline"
-                              disabled={busy}
+                              disabled={busy || Boolean(pending)}
                               onClick={() => {
                                 setNotice('');
-                                setCandidate({ body, requestId: crypto.randomUUID() });
+                                editCandidate({ body, requestId: crypto.randomUUID() });
                               }}
                             >
                               把这条回复保存为候选版本
                             </Button>
+                            </div>
                           );
                         })()}
                     </div>
@@ -427,9 +473,9 @@ export default function TopicWorkspacePage() {
               {pending && (
                 <div className="rounded-xl border border-[var(--border-primary)] p-4">
                   <p role="status" className="text-sm">
-                    上一条消息的结果尚未确认（原请求已冻结）。可用同一个身份重试，不会重复计费。
+                    上一项操作的结果尚未确认（完整原请求已冻结）。恢复会核对原消息、保存或采纳，不新建身份。
                   </p>
-                  <Button className="mt-3" size="sm" variant="outline" disabled={busy} onClick={() => send(pending.requestId, pending.input)}>
+                  <Button className="mt-3" size="sm" variant="outline" disabled={busy} onClick={() => perform(pending)}>
                     恢复原请求
                   </Button>
                 </div>
@@ -453,15 +499,24 @@ export default function TopicWorkspacePage() {
                 <ul className="mt-2 max-h-40 overflow-y-auto text-sm" aria-label="候选选题">
                   {candidate.body.map((item) => (
                     <li key={item.id}>
-                      {item.day} · {item.platform}/{item.account} · {item.title}
+                      {item.day} · {item.platform}/{item.account}
+                      <select aria-label={'候选账号 ' + item.id} value={item.platform + '::' + item.account} disabled={Boolean(pending)} onChange={event => {
+                        const [platform, account] = event.target.value.split('::');
+                        editCandidate({ ...candidate, requestId: crypto.randomUUID(), body: candidate.body.map(row => row.id === item.id ? { ...row, platform, account } : row) });
+                      }}>
+                        <option value={item.platform + '::' + item.account}>{item.platform}/{item.account}</option>
+                        {accounts.filter(a => a.platform !== item.platform || a.account !== item.account).map(a => <option key={a.platform + '::' + a.account} value={a.platform + '::' + a.account}>已有账号：{a.platform}/{a.account}</option>)}
+                      </select>
+                      <input aria-label={'选题标题 ' + item.id} value={item.title} disabled={Boolean(pending)} maxLength={160} onChange={event => editCandidate({ ...candidate, requestId: crypto.randomUUID(), body: candidate.body.map(row => row.id === item.id ? { ...row, title: event.target.value } : row) })} />
+                      <Textarea aria-label={'选题简报 ' + item.id} value={item.brief} disabled={Boolean(pending)} maxLength={2000} onChange={event => editCandidate({ ...candidate, requestId: crypto.randomUUID(), body: candidate.body.map(row => row.id === item.id ? { ...row, brief: event.target.value } : row) })} />
                     </li>
                   ))}
                 </ul>
                 <div className="mt-3 flex gap-2">
-                  <Button size="sm" disabled={savePlan.isPending} onClick={saveCandidate}>
+                  <Button size="sm" disabled={busy || Boolean(pending)} onClick={saveCandidate}>
                     保存这一版候选
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setCandidate(null)}>
+                  <Button size="sm" variant="ghost" disabled={Boolean(pending)} onClick={() => editCandidate(null)}>
                     放弃
                   </Button>
                 </div>
@@ -496,7 +551,7 @@ export default function TopicWorkspacePage() {
                                       )
                                     }
                                   />
-                                  {item.day} · {item.platform}/{item.account} · {item.title}
+                                  {item.day} · {item.platform}/{item.account} · {item.title} · {accounts.some(a => a.platform === item.platform && a.account === item.account) ? '采用已有账号项目' : '创建账号项目（不注册外部账号）'}
                                 </label>
                               </li>
                             );
@@ -505,10 +560,10 @@ export default function TopicWorkspacePage() {
                         <Button
                           className="mt-3"
                           size="sm"
-                          disabled={handoff.isPending}
+                          disabled={busy || Boolean(pending) || accountList.isFetching || Boolean(accountList.error)}
                           onClick={() => adopt(plan.planId, plan.body as PlanItem[])}
                         >
-                          按所选账号采纳这次计划
+                          {plan.version !== nextVersion || plan.body.some(item => !selectedAccounts.includes(item.platform + '::' + item.account)) ? '将所选账号保存为独立候选版本' : '按所选账号采纳这次计划'}
                         </Button>
                       </>
                     ) : (
@@ -518,7 +573,7 @@ export default function TopicWorkspacePage() {
                     )}
                   </article>
                 ))}
-                {adopted.map((item) => (
+                {(read.data?.handoffs?.flatMap((h: { result: typeof adopted }) => h.result) ?? adopted).map((item: typeof adopted[number]) => (
                   <p key={item.itemId} className="mt-2 text-sm">
                     已承接：
                     <Link className="underline" href={'/runtime?session=' + item.sessionId}>
@@ -537,12 +592,12 @@ export default function TopicWorkspacePage() {
                   aria-label="消息"
                   placeholder="继续讨论、修改或要求生成第一周选题…"
                   value={input}
-                  disabled={busy || Boolean(view.data?.activeExecution)}
+                  disabled={busy || Boolean(pending) || Boolean(view.data?.activeExecution)}
                   onChange={(event) => setInput(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                       event.preventDefault();
-                      if (!busy && input.trim() && !view.data?.activeExecution) void send();
+                      if (!busy && !pending && input.trim() && !view.data?.activeExecution) void send();
                     }
                   }}
                   className="min-h-12 max-h-36 flex-1 resize-none border-0 bg-transparent px-2 focus-visible:ring-0"
@@ -551,7 +606,7 @@ export default function TopicWorkspacePage() {
                 <Button
                   aria-label="发送"
                   className="h-10 w-10 shrink-0 rounded-xl p-0"
-                  disabled={busy || !input.trim() || Boolean(view.data?.activeExecution)}
+                  disabled={busy || Boolean(pending) || !input.trim() || Boolean(view.data?.activeExecution)}
                   onClick={() => send()}
                 >
                   <Send className="h-4 w-4" />

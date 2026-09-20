@@ -3839,6 +3839,14 @@ it("OPC: Stage C1 the final positioning confirmation asks first and spends nothi
     // create a generation request by itself.
     const dialog = page.getByRole("dialog", { name: "是否继续生成第一周选题" });
     await dialog.waitFor();
+    await page.keyboard.press('Escape');
+    await expect.poll(() => dialog.count()).toBe(0);
+    expect((await topicIdentity(f.actor)).topicExecutions).toBe(0);
+    await page.getByRole('button', { name: '继续生成第一周选题', exact: true }).click();
+    await dialog.getByRole('button', { name: '关闭选题询问', exact: true }).click();
+    await expect.poll(() => dialog.count()).toBe(0);
+    expect((await topicIdentity(f.actor)).binds).toBe(0);
+    await page.getByRole('button', { name: '继续生成第一周选题', exact: true }).click();
     await dialog.getByRole("button", { name: "稍后", exact: true }).click();
     await expect.poll(() => dialog.count(), { timeout: 15000 }).toBe(0);
     expect(await page.evaluate((k) => sessionStorage.getItem(k), envelopeKey)).toBeNull();
@@ -3854,7 +3862,7 @@ it("OPC: Stage C1 the final positioning confirmation asks first and spends nothi
     expect(asked.reserves).toBe(0);
     // The explicit continue enters the bound topic workspace. It binds the
     // confirmed version, the pinned method revision and a dedicated Session,
-    // and dispatches nothing by itself.
+    // and starts the one explicitly accepted first turn.
     await page
       .getByRole("button", { name: "继续生成第一周选题", exact: true })
       .click();
@@ -3893,10 +3901,10 @@ it("OPC: Stage C1 the final positioning confirmation asks first and spends nothi
     });
     expect(await page.evaluate((k) => sessionStorage.getItem(k), envelopeKey)).toBeNull();
     const after = await planIdentity(f.actor, f.d.draftId);
-    // The binding is free: no plan execution, no run and no reserve.
+    // Opening runs under topic purpose, separate from legacy plan generation.
     expect(after.planExecutions - before.planExecutions).toBe(0);
     expect(after.planRuns - before.planRuns).toBe(0);
-    expect(after.reserves - before.reserves).toBe(0);
+    await expect.poll(async () => (await topicIdentity(f.actor)).topicExecutions, { timeout: 30000 }).toBe(1);
     // Re-entering with the same confirmed source recovers the very same
     // binding: same Session, same bind identity, no second workspace.
     await page.goto(process.env.V3_LOCAL_APP + draftPath);
@@ -6938,4 +6946,196 @@ it("OPC: the topic workspace binds one confirmed source and one turn identity, a
       [bound.sessionId],
     )).rows[0].n),
   ).toBe(1);
+}, 180000);
+
+it("OPC: topic consent concurrency and source mismatch preserve the accepted intent", async () => {
+  const f = await publishedDraft();
+  const consent = { draftId: f.d.draftId, sourceVersionId: f.sourceVersionId };
+  const accepted = await Promise.all([f.service.topicConsent(consent), f.service.topicConsent(consent)]);
+  expect(accepted[0]).toEqual(accepted[1]);
+  expect(accepted[0].opening.requestId).toBeTruthy();
+  const other = await publishedDraft();
+  await expect(other.service.topicConsent(consent)).rejects.toThrow(/OPC_DENIED/);
+  await expect(f.service.topicConsent({ ...consent, sourceVersionId: other.sourceVersionId })).rejects.toThrow(/OPC_TOPIC_SOURCE_CHANGED/);
+  expect(await f.service.topicRead(f.d.draftId)).toEqual(accepted[0]);
+  expect(await topicIdentity(f.actor)).toEqual({ binds: 1, turns: 0, topicExecutions: 0, topicRuns: 0, reserves: 0 });
+  // Schema may be reapplied to populated records without losing consent.
+  const { readFile } = await import('node:fs/promises');
+  const migration = await readFile(new URL('../../../../db/migrations/0114_opc_topic_consent.sql', import.meta.url), 'utf8');
+  await sql.query(migration);
+  expect(await f.service.topicRead(f.d.draftId)).toEqual(accepted[0]);
+}, 120000);
+
+it("OPC: topic browser closes multi-turn edited subset adoption with frozen lost replies", async () => {
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  // Seed a real existing owned account through the established atomic handoff.
+  const seed = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'existing-account', title: '原工作', brief: '原有账号项目', day: '2026-09-20' }] });
+  await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: seed.planId, accounts: [{ platform: 'x', account: 'existing-account', expectedRevision: null }] });
+  const { browser, context, page } = await planBrowser(f);
+  const path = '/positioning/' + f.d.draftId + '/topics';
+  const losses = { consent: 0, chat: 0, save: 0, adopt: 0 };
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + path);
+    await page.getByRole('button', { name: '开始选题工作对话', exact: true }).waitFor();
+    expect((await topicIdentity(f.actor)).topicExecutions).toBe(0);
+    // Lose successful admission: the original full message survives reload.
+    await page.route('**/api/trpc/opc.topicTurn*', async route => { const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort(); losses.chat += 1; });
+    await page.route('**/api/trpc/opc.consentTopicWorkspace*', async route => { const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort(); losses.consent += 1; });
+    await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
+    await expect.poll(() => losses.consent, { timeout: 30000 }).toBeGreaterThan(0);
+    expect((await f.service.topicRead(f.d.draftId)).bound).toBe(true);
+    const acceptedOpening = (await f.service.topicRead(f.d.draftId)).opening;
+    await expect.poll(() => losses.consent, { timeout: 30000 }).toBeGreaterThan(0);
+    await page.unroute('**/api/trpc/opc.consentTopicWorkspace*');
+    await page.reload();
+    await page.getByRole('button', { name: '恢复原请求', exact: true }).waitFor();
+    expect((await f.service.topicRead(f.d.draftId)).opening.requestId).toBe(acceptedOpening.requestId);
+    await expect.poll(() => losses.chat, { timeout: 30000 }).toBeGreaterThan(0);
+    expect((await topicIdentity(f.actor)).topicExecutions).toBe(1);
+    const bound = await f.service.topicRead(f.d.draftId);
+    const key = 'opc-topic-operation:' + bound.sessionId;
+    await expect.poll(() => losses.chat, { timeout: 30000 }).toBeGreaterThan(0);
+    const frozen = await page.evaluate(k => localStorage.getItem(k), key);
+    expect(JSON.parse(frozen!).request).toEqual({ draftId: f.d.draftId, requestId: bound.opening.requestId, input: bound.opening.input });
+    await expect.poll(() => losses.chat, { timeout: 30000 }).toBeGreaterThan(0);
+    await page.unroute('**/api/trpc/opc.topicTurn*');
+    await page.reload();
+    await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
+    await page.getByRole('button', { name: '把这条回复保存为候选版本', exact: true }).waitFor();
+    expect((await topicIdentity(f.actor)).topicExecutions).toBe(1);
+    const tab = await context.newPage();
+    await tab.goto(process.env.V3_LOCAL_APP + path);
+    await tab.getByRole('button', { name: '把这条回复保存为候选版本', exact: true }).waitFor();
+    await tab.close();
+    await page.reload();
+    await page.getByRole('button', { name: '把这条回复保存为候选版本', exact: true }).waitFor();
+    expect((await topicIdentity(f.actor)).topicExecutions).toBe(1);
+    await page.getByLabel('消息', { exact: true }).fill('请修改第一条选题');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await expect.poll(() => page.getByRole('button', { name: '把这条回复保存为候选版本', exact: true }).count(), { timeout: 30000 }).toBe(2);
+    await page.getByRole('button', { name: '把这条回复保存为候选版本', exact: true }).last().click();
+    const title = page.getByLabel('选题标题 aaaaaaaa-1111-4111-8111-111111111111');
+    await title.fill('用户核对后的选题');
+    await page.reload();
+    await expect.poll(() => title.inputValue()).toBe('用户核对后的选题');
+    // Save committed, response lost. expectedVersion/body/source must stay frozen.
+    await page.route('**/api/trpc/opc.savePlan*', async route => { const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort(); losses.save += 1; });
+    await page.getByRole('button', { name: '保存这一版候选', exact: true }).click();
+    await page.getByRole('button', { name: '恢复原请求', exact: true }).waitFor();
+    await expect.poll(() => losses.save, { timeout: 30000 }).toBeGreaterThan(0);
+    const savedEnvelope = JSON.parse((await page.evaluate(k => localStorage.getItem(k), key))!);
+    expect(savedEnvelope.request.expectedVersion).toBe(1);
+    await expect.poll(async () => (await f.service.read(f.d.draftId)).plans.length).toBe(2);
+    await expect.poll(() => losses.save, { timeout: 30000 }).toBeGreaterThan(0);
+    await page.unroute('**/api/trpc/opc.savePlan*');
+    await page.reload();
+    await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
+    await expect.poll(() => page.evaluate(k => localStorage.getItem(k), key)).toBeNull();
+    expect((await f.service.read(f.d.draftId)).plans).toHaveLength(2);
+    const version2 = page.locator('article').filter({ has: page.getByRole('heading', { name: '第 2 版 · 2 个选题', exact: true }) });
+    await version2.getByRole('checkbox', { name: 'x::existing-account', exact: true }).check();
+    await version2.getByRole('button', { name: '将所选账号保存为独立候选版本', exact: true }).click();
+    const version3 = page.locator('article').filter({ has: page.getByRole('heading', { name: '第 3 版 · 1 个选题', exact: true }) });
+    await version3.waitFor();
+    const versions = (await f.service.read(f.d.draftId)).plans;
+    expect(versions.find((p: { version: number }) => p.version === 2).body).toHaveLength(2);
+    expect(versions.find((p: { version: number }) => p.version === 3).body).toHaveLength(1);
+    const beforeAdopt = await topicIdentity(f.actor);
+    // Another actor-owned operation changed this existing account after the
+    // page read. The UI must release only this definite rollback, refresh the
+    // revision, and require another explicit adoption click.
+    await sql.query('update opc_accounts set revision=revision+1 where actor_id=$1', [f.actor]);
+    await version3.getByRole('button', { name: '按所选账号采纳这次计划', exact: true }).click();
+    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' ')).toContain('OPC_ACCOUNT_CONFLICT');
+    expect(await page.evaluate(k => localStorage.getItem(k), key)).toBeNull();
+    expect((await f.service.read(f.d.draftId)).handoffs).toHaveLength(1);
+    await page.route('**/api/trpc/opc.handoff*', async route => { const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort(); losses.adopt += 1; });
+    await version3.getByRole('button', { name: '按所选账号采纳这次计划', exact: true }).click();
+    await page.getByRole('button', { name: '恢复原请求', exact: true }).waitFor();
+    await expect.poll(() => losses.adopt, { timeout: 30000 }).toBeGreaterThan(0);
+    const adoptEnvelope = JSON.parse((await page.evaluate(k => localStorage.getItem(k), key))!);
+    expect(adoptEnvelope.request.planId).toBe(versions.find((p: { version: number }) => p.version === 3).planId);
+    expect(adoptEnvelope.request.accounts).toEqual([{ platform: 'x', account: 'existing-account', expectedRevision: 2 }]);
+    await expect.poll(() => losses.adopt, { timeout: 30000 }).toBeGreaterThan(0);
+    await page.unroute('**/api/trpc/opc.handoff*');
+    // Fresh authentication recovers complete payload even though account revision advanced.
+    await context.clearCookies();
+    await page.goto(process.env.V3_LOCAL_APP + '/login?redirect=' + encodeURIComponent(path));
+    await page.getByPlaceholder('name@example.com').fill(f.email);
+    await page.getByPlaceholder('输入你的密码').fill(f.password);
+    await page.getByRole('button', { name: '登录', exact: true }).last().click();
+    await page.waitForURL(url => url.pathname === path);
+    await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
+    await expect.poll(() => page.evaluate(k => localStorage.getItem(k), key)).toBeNull();
+    expect(await topicIdentity(f.actor)).toEqual(beforeAdopt);
+    const history = await f.service.read(f.d.draftId);
+    expect(history.handoffs).toHaveLength(2);
+    expect((await sql.query('select count(*)::int n from opc_accounts where actor_id=$1', [f.actor])).rows[0].n).toBe(1);
+    await page.getByRole('link', { name: '进入该选题的工作空间', exact: true }).last().click();
+    await page.waitForURL(url => url.pathname === '/runtime');
+    expect(await topicIdentity(f.actor)).toEqual(beforeAdopt);
+  } finally { await browser.close(); }
+}, 300000);
+
+it("OPC: old v2 executed lost reply upgrades by replaying the original paid request", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const envelope = planEnvelopeFor(f);
+  const { browser, page, key } = await planBrowser(f, { envelope });
+  try {
+    await page.route('**/api/trpc/opc.planResult*', async route => { await route.fetch(); await route.abort(); });
+    await page.reload();
+    await page.getByText('这次生成的结果暂时无法确认').waitFor();
+    const identity = await planIdentityRows(f.actor);
+    const counts = await planIdentity(f.actor, f.d.draftId);
+    expect(counts.planExecutions).toBe(1);
+    await page.unroute('**/api/trpc/opc.planResult*');
+    await page.evaluate(({ key, id }) => {
+      const old = JSON.parse(sessionStorage.getItem(key)!);
+      old.v = 2; delete old.consentedAt;
+      sessionStorage.setItem(key, JSON.stringify(old));
+      sessionStorage.removeItem('opc-edit:' + id);
+    }, { key, id: f.d.draftId });
+    await page.reload();
+    await page.getByRole('heading', { name: '本机保留了一条早先的生成请求', exact: true }).waitFor();
+    await expect.poll(async () => (await page.getByRole('status').allTextContents()).join(' ')).toContain('服务端已保存这条请求的完成结果');
+    expect(await planIdentityRows(f.actor)).toEqual(identity);
+    await page.getByRole('button', { name: '继续这条原请求', exact: true }).click();
+    await page.getByRole('heading', { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    expect(await planIdentityRows(f.actor)).toEqual(identity);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(counts);
+  } finally { await browser.close(); }
+}, 300000);
+
+it("OPC: two topic pages explicitly consent concurrently and execute one first turn", async () => {
+  const f = await publishedDraft();
+  const modelId = await planFixtureModel(f.moduleId);
+  const { browser, context, page } = await planBrowser(f);
+  const path = '/positioning/' + f.d.draftId + '/topics';
+  const tab = await context.newPage();
+  try {
+    await Promise.all([page.goto(process.env.V3_LOCAL_APP + path), tab.goto(process.env.V3_LOCAL_APP + path)]);
+    const buttons = [page, tab].map(p => p.getByRole('button', { name: '开始选题工作对话', exact: true }));
+    await Promise.all(buttons.map(b => b.waitFor()));
+    expect((await topicIdentity(f.actor)).binds).toBe(0);
+    await Promise.all(buttons.map(b => b.click()));
+    await Promise.all([page, tab].map(p => p.getByRole('button', { name: '把这条回复保存为候选版本', exact: true }).waitFor()));
+    expect(await topicIdentity(f.actor)).toEqual({ binds: 1, turns: 1, topicExecutions: 1, topicRuns: 1, reserves: 1 });
+    const opening = (await f.service.topicRead(f.d.draftId)).opening;
+    const run = (await sql.query('select request_id::text, payload, state from runtime_executions where actor_id=$1', [f.actor])).rows;
+    expect(run).toHaveLength(1);
+    expect(run[0].request_id).toBe(opening.requestId);
+    expect(run[0].state).toBe('completed');
+    const privileges = (await sql.query("select has_function_privilege('authenticated','opc_topic_consent(uuid,uuid,uuid)','execute') client, has_function_privilege('service_role','opc_topic_consent(uuid,uuid,uuid)','execute') server, has_table_privilege('authenticated','opc_topic_openings','select') records")).rows[0];
+    expect(privileges).toEqual({ client: false, server: true, records: false });
+    await page.screenshot({ path: process.env.V3_WORKBENCH_OUTPUT + '/topic-conversation.png', fullPage: true });
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(process.env.V3_WORKBENCH_OUTPUT + '/opc-acceptance.json', JSON.stringify({
+      url: process.env.V3_LOCAL_APP + path, actor: f.actor,
+      credentials: { email: f.email, password: f.password }, sessionId: (await f.service.topicRead(f.d.draftId)).sessionId,
+      moduleId: f.moduleId, modelId, mode: 'Synthetic topic fixture only; no real model, research, payment or external account creation',
+    }), { mode: 0o600 });
+  } finally { await browser.close(); }
 }, 180000);

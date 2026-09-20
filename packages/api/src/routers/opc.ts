@@ -106,6 +106,9 @@ export const opcRouter = router({
   topicWorkspace: readProcedure
     .input(z.object({ draftId: z.string().uuid() }).strict())
     .query(({ ctx, input }) => ctx.opc.topicRead(input.draftId)),
+  consentTopicWorkspace: procedure
+    .input(opcTopicBind.omit({ requestId: true }))
+    .mutation(({ ctx, input }) => ctx.opc.topicConsent(input)),
   bindTopicWorkspace: procedure
     .input(opcTopicBind)
     .mutation(({ ctx, input }) => ctx.opc.topicBind(input)),
