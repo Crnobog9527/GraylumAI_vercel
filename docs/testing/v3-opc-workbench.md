@@ -166,3 +166,14 @@ The candidate remains **NOT clean**: real Staging policy/budget/forward-schema w
 - `pnpm --filter web lint` 与 `apps/web` 的 `tsc --noEmit`：通过。
 
 旧 Stage C「确认定位即授权生成」的验收口径已按新产品决定（架构文档 §5.1）作废，不再作为验收预期。本增量不含选题 Agent 工作对话与来源/Skill/Session 持久绑定（该闭环仍未实现），也不含真实模型、Staging/远端环境与 Owner 产品验收，均为 NOT_RUN。
+
+## Retained request identity and state (2026-09-20, second correction)
+
+`继续生成第一周选题` 对**已同意**的 `v:3` 冻结包不再覆盖身份：它按原 request id 继续该请求，"重新生成（新请求）" 是独立显式动作，被替换的本机记录归档为 `…:replaced:<时间>` 而不是被丢弃。旧 `v:2`/legacy 记录不再声称"尚未执行或没有费用"：新增只读 `opc_plan_request_state`（迁移 `0112_opc_plan_request_state.sql`）返回服务端自己的 identity/lifecycle（是否准入、material revision/撤回、turn purpose、execution state、是否有结果、财务是否已关闭），页面据此区分"服务端没有准入记录""结果尚未确定""已完成可恢复读取""来源已撤回"，每一种都保留按原身份的恢复入口，核对失败时明确写"暂时无法核对"。
+
+隔离 disposable 栈实测（仅新建隔离数据；未触碰 Owner 预览与取证资源）：
+
+- `run-workbench.mjs --opc-only --case-pattern='^OPC: (an explicit continue keeps|a local record without consent|Stage C1|Stage C4|Stage C5|workbench (save|confirm) conflict recovery)'`：**7 passed，退出 0**，private-canary PASS。
+- `pnpm --filter web lint`、`apps/web` `tsc --noEmit`、`node --test scripts/tests/*.test.mjs`（44 passed / 0 failed）：通过。
+
+仍未实现：评论 5748406396 的 B/C（绑定来源与 Skill 的多轮选题工作对话、服务端持久绑定与拒绝语义、对话内候选版本与采纳承接）。真实模型/provider、Staging/远端环境与 Owner 产品验收仍然 NOT_RUN。
