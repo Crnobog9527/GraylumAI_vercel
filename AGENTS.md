@@ -10,8 +10,11 @@ claims that depend on remote state; do not infer branch readiness, approval,
 mergeability, or writer clearance from local files. Conceptual questions
 independent of repository state need no GitHub bootstrap.
 
-Before repository implementation, a formal semantic review, or a protected
-operation, fresh-read the relevant GitHub live state, including:
+At the start of a new implementation task, establish the relevant GitHub live
+state below. Reuse that verified baseline during the same task; ordinary local
+edits, tests, and follow-up requests do not restart the bootstrap. A formal
+review, push, or protected operation refreshes the evidence relevant to that
+action, not every unrelated repository fact:
 
 - repository identity;
 - current target branch/ref;
@@ -67,10 +70,10 @@ The Owner communicates in natural language.
 The Owner:
 
 - states the desired outcome;
-- explicitly selects a Launch task when Launch work is requested;
+- explicitly selects a Launch task or bounded batch when Launch work is requested;
 - decides business or product questions that cannot be derived technically;
 - performs product-level browser testing when applicable;
-- explicitly approves merge when ready; and
+- approves high-risk staging merges; low-risk delivery uses Section 9's standing authorization; and
 - separately approves production or real external effects.
 
 The Agent determines all technical mechanics, including:
@@ -120,16 +123,18 @@ protected mutation surface.
 
 Clearly disjoint tasks may run in parallel.
 
-Check relevant open PRs and remote activity, then use current task status,
-worktree status, and available agent coordination to identify local writers.
-GitHub cannot prove the absence of unpushed local work. Do not treat an empty PR
-list, an idle task, or an isolated worktree alone as writer clearance. Resolve
-concrete overlaps before writing; keep one responsible writer for each
-overlapping surface. If material overlap remains unresolved, stop the affected
-mutation with `BLOCKED_CONTEXT_NOT_VERIFIED` and continue disjoint work.
+For a new task or a handoff, check relevant open PRs and available local task
+and worktree state. During normal continuation, retain the established writer
+unless a new parallel task, conflicting edit, changed branch, or remote update
+indicates a possible overlap. Refresh relevant writer evidence before push and
+merge. Do not poll idle or unrelated tasks to prove a universal absence of
+writers; lack of a complete task inventory alone is not a concrete conflict.
 
-Use the available evidence proportionately; do not repeatedly query unchanged
-state or create a new writer registry, ledger, or coordination harness.
+GitHub cannot prove the absence of unpushed local work. An empty PR list, idle
+task, or isolated worktree alone does not resolve a known overlap. Resolve
+concrete conflicts before writing; if material overlap remains unresolved, stop
+the affected mutation with `BLOCKED_CONTEXT_NOT_VERIFIED` and continue disjoint
+work. Do not create a writer registry, ledger, or coordination harness.
 
 Do not bundle unrelated work into a task PR.
 
@@ -169,13 +174,21 @@ is included only where its effects remain within the authorized task and test
 boundaries. Inspect relevant automation before pushing; if it would trigger a
 protected external effect, obtain the required approval before that trigger.
 
-This exception does not authorize merge, explicit deployment, repository settings,
-secrets, database/provider changes, monetary actions, or other protected external
-effects. Any actual high-risk production or external effect outside this exception
+Merge authorization is defined separately in Section 9. Implementation
+authorization does not permit explicit deployment, repository settings, secrets,
+database/provider changes, monetary actions, or other protected external effects.
+Any actual high-risk production or external effect outside this exception
 requires explicit Owner approval immediately before that effect.
 
 No separate Task Issue, Sprint Contract, Owner Gate, receipt, Bookkeeper,
 Evaluator pipeline, or Release Auditor is required by default.
+
+Owner-confirmed environment fact (2026-09-20): staging uses independent Vercel
+and Supabase projects and Stripe sandbox APIs, isolated from production data
+and real payments. Accept this confirmation without repeating isolation checks
+or asking the Owner to reconfirm. It is an Owner-confirmed fact, not an Agent
+verification claim. It does not authorize changes to those bindings or any
+production/real-money effect.
 
 ## 5. Native Execution and Remediation
 
@@ -211,19 +224,17 @@ repeating a failed attempt without new evidence or a changed hypothesis; relevan
 code or environment changes justify retesting. Section 6's remote-state check
 before retrying ambiguous durable effects still applies.
 
-Launch tasks are never selected automatically by an Agent. Read-only discovery,
-comparison, and readiness audits do not require task selection. Starting a new
-Launch implementation requires an explicit eligible Owner selection; continuing
-the same selected task does not require reselection.
+The Owner may select one eligible Launch task or authorize a bounded batch of
+named tasks or concrete product outcomes in natural language. Within that batch,
+the Agent may order ready work, complete technical dependencies, and continue
+without asking for task-by-task reselection. Task readiness and completion do not
+authorize work outside that batch or changes to locked product decisions.
 
-Launch readiness may narrow the set of eligible Owner choices, but readiness,
-priority, dependency completion, or prior task completion never selects or
-authorizes the next task.
-
-Product specifications define WHAT to build and the applicable acceptance
-criteria. They do not grant repository mutation, merge, or production authority.
-
-After a Launch task completes, do not automatically start another Launch task.
+If a dependency requires a new product decision or work outside the authorized
+outcomes, explain that decision and continue independent work in the batch.
+Product specifications define WHAT to build and acceptance criteria; they do not
+independently grant mutation or external-effect authority. After completing the
+selected task or batch, stop rather than automatically selecting new work.
 
 ## 6. Required Validation
 
@@ -231,6 +242,13 @@ Run validation relevant to the changed scope plus all repository-required remote
 checks.
 
 Required CI and Security checks must pass on the exact current candidate.
+Equivalent checks may share one actual execution for that candidate; a dependent
+status must fail if its prerequisite fails, is cancelled, or is unexpectedly
+skipped. A conservative CI scope check may mark runtime work not applicable for
+allowlisted non-executable documentation only. Governance, agent instructions,
+CI, dependencies, configuration, code, mixed changes, and uncertain scope take
+the full path. Secret and policy checks remain required. Report scope exclusions
+as not applicable, never as tests that ran and passed.
 
 Never claim a check that was not actually run. Distinguish passed, failed,
 skipped, and blocked/not-run validation.
@@ -264,34 +282,35 @@ Never blindly retry an ambiguous durable external result.
 
 ## 7. Pull Requests and Semantic Review
 
-Every implementation PR should minimally record:
+Keep PR descriptions proportional to the change. Record the concrete outcome,
+risk classification, validation results, and remaining material risk. A short
+paragraph is enough for an ordinary change; high-risk work additionally states
+its affected safety boundary, external/production relevance, and recovery or
+compatibility considerations where applicable. Link a product specification or
+Issue only when it helps review. No fixed seven-section template is required.
 
-- Goal / Why;
-- Risk;
-- Scope;
-- Validation;
-- External / Production relevance;
-- Remaining risk; and
-- relevant product specification or Issue when useful.
+Independent Codex semantic review remains mandatory. Use a fresh context separate
+from implementation and independently verify the relevant live GitHub candidate
+and authoritative policy through a read-only API/CLI. Schedule final review after
+implementation and local fixes stabilize. One valid independent review is enough;
+do not add a second review merely because another native or cloud entry exists.
 
-Independent Codex semantic review is mandatory for the exact current candidate.
-Start the final review after implementation and relevant local fixes stabilize;
-independent read-only investigation may run earlier when useful. Do not request
-repeated final reviews while knowingly continuing candidate edits.
-The reviewer must use a fresh context separate from implementation and verify
-live GitHub state through the GitHub plugin or another available read-only
-GitHub API/CLI. The review does not have to run in the GitHub cloud bot.
+Initially review the complete intended base-to-head change. After a small,
+bounded follow-up, an independent reviewer may reuse the earlier review of
+unchanged content and review the exact old-head-to-new-head delta plus affected
+interactions. The reviewer must verify the earlier review and exact identities,
+confirm unchanged base and scope, and state that the combined coverage applies
+to the complete final candidate. Missing prior evidence, base drift, material
+scope/architecture changes, or uncertain interactions require full review again.
+High-risk deltas must cover their security, data, or monetary implications; a
+small line count alone does not make a change low risk. The implementer cannot
+self-certify unchanged review coverage.
 
-Record the review conclusion, findings, validation limits, and exact base/head
-on the PR, with clear attribution to the independent reviewer. Reading GitHub
-metadata or passing CI alone is not semantic review. A review blocked by missing
-access or evidence must not be recorded as passed.
-
-Review must cover the complete intended base-to-head change, not only the latest
-patch.
-
-If candidate content changes after semantic review, obtain a fresh semantic
-review for the new exact candidate.
+Record the attributed conclusion, findings, validation limits, exact base/final
+head, and any reused review/previous head on the PR. A new candidate always
+requires a new independent conclusion; reuse reduces repeated reading, not the
+coverage requirement. Metadata or green CI alone is not semantic review; blocked
+review must not be recorded as passed.
 
 The Agent handles same-scope CI, test, and review remediation until no concrete
 blocker remains.
@@ -308,7 +327,7 @@ A candidate is clean when:
 
 - applicable Section 6 validation is complete, including required runtime proof;
 - required CI and Security checks pass;
-- independent Codex review covers the exact current candidate and is recorded on the PR;
+- independent Codex review covers the full current candidate under Section 7 and is recorded on the PR;
 - no concrete actionable blocker remains; and
 - remaining material risk is stated accurately.
 
@@ -319,7 +338,10 @@ When the candidate is clean, tell the Owner:
 - Codex Review status;
 - remaining real risk;
 - what the Owner should actually test; and
-- the exact next reply required.
+- the exact next reply only when a product decision or approval is still required.
+
+For Section 9 standing-authorized delivery, this is a completion report, not an
+additional approval stop.
 
 Separate Agent technical validation from Owner product acceptance. Missing
 required technical validation means the candidate is not clean. Do not make
@@ -327,30 +349,38 @@ the Owner handle technical lifecycle mechanics.
 
 ## 9. Merge
 
-`同意合并` authorizes merge of the clearly identified current PR into `staging`
-only, provided the exact live candidate remains clean.
+The Owner grants standing authorization to deliver already-requested low-risk
+changes into the isolated `staging` environment after the candidate is clean.
+Do not request an extra "同意合并" for each such change. This authorization becomes
+active only after this policy is merged through the previously effective rules;
+it cannot authorize its own adoption.
 
-Immediately before merge, the Agent must fresh-check:
+For this exception, low-risk means a bounded, reversible `ordinary` change within
+the Owner's requested outcome, with no unapproved business/product decision and
+no high-risk surface from Section 4. Record why it qualifies. Governance (including
+this file), CI/checks, dependencies, auth/permissions, schema/migrations, billing,
+payment, secrets, and provider/environment configuration are always excluded.
+Uncertain cases use the explicit-approval path; the Agent determines technical
+classification rather than asking the Owner to classify it.
 
-- current base/head;
-- required CI and Security;
-- current semantic review;
-- mergeability;
-- current Owner authorization; and
-- overlapping writer state.
+High-risk or otherwise excluded staging merges still require explicit Owner
+approval for the described candidate. `同意合并` authorizes the clearly identified
+current PR into `staging` only, provided the exact live candidate remains clean.
 
-An Agent-executed merge must use `expected_head_sha`, compare-and-swap, or an
-equivalent stale-head protection mechanism.
+Immediately before either kind of merge, fresh-check current base/head, required
+CI/Security, current full-candidate semantic review coverage, mergeability,
+applicable Owner authorization, and relevant writer evidence. Use
+`expected_head_sha`, compare-and-swap, or equivalent stale-head protection.
+Candidate drift requires appropriate fresh validation and a new independent
+review conclusion under Section 7.
 
-Candidate drift requires fresh validation and semantic review.
-
-Do not ask the Owner again for same-scope technical remediation.
-
-Ask again only when the product decision, material scope/risk, target, or
-external authorization has changed.
-
-Do not enable auto-merge. A staging merge is an explicit Owner-authorized
-transition and never implies authorization to promote or modify `main`.
+Use an explicit Agent-executed merge, not GitHub auto-merge or a background queue.
+For standing-authorized delivery, notify the Owner after completion with the
+result, validation, and any useful preview entry. Do not make technical checks
+contingent on the Owner testing the product; unresolved product decisions still
+need Owner input. Same-scope technical remediation needs no repeated approval;
+ask again only if the product decision, material scope/risk, target, or external
+authorization changes. No staging approval authorizes `main` or production.
 
 ## 10. Main, Production, and Durable External Effects
 
