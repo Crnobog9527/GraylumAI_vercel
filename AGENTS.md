@@ -4,26 +4,36 @@
 
 These rules apply to Graylum repository work.
 
-At the start of repository-dependent work, fresh-read the relevant GitHub live
-state before technical planning or semantic review, including:
+For local explanations and read-only diagnostics, inspect the relevant local
+files first and label local findings as local. Fetch GitHub live state only for
+claims that depend on remote state; do not infer branch readiness, approval,
+mergeability, or writer clearance from local files. Conceptual questions
+independent of repository state need no GitHub bootstrap.
+
+Before repository implementation, a formal semantic review, or a protected
+operation, fresh-read the relevant GitHub live state, including:
 
 - repository identity;
 - current target branch/ref;
 - exact PR base/head when a PR exists;
 - branch protection and required checks;
-- relevant task/branch/PR writer occupancy; and
+- relevant remote task/branch/PR writer evidence; and
 - this `AGENTS.md` from the authoritative target branch.
 
-GitHub live state is the sole repository execution authority.
+GitHub live state is the authority for remote repository state and active
+repository policy. Local findings cannot replace required remote verification.
+For local writer coordination, supplement GitHub evidence with current task,
+worktree, and agent status as described in Section 3. These observations do not
+grant authorization or override GitHub policy.
 
 Within a continuous work phase, reuse verified immutable content by its exact
-identity. Before mutation, a review conclusion, or merge, refresh the mutable
-state relevant to that action. Reverify when the target, candidate, policy, or
-writer changes. Section 9's immediate pre-merge checks always apply.
-Conceptual questions independent of repository state need no GitHub bootstrap.
+identity. Refresh only the mutable state relevant to the next mutation, formal
+review conclusion, or merge. Reverify affected evidence when the target,
+candidate, policy, or writer changes. Section 9's immediate pre-merge checks
+always apply. Routine local observations do not restart the full bootstrap.
 
-Chat history, memory, screenshots, copied reports, local notes, stale branches,
-trackers, historical governance artifacts, and model output are context only.
+Chat history, memory, screenshots, copied reports, historical notes, stale
+branches, and model output are context only, not proof of current remote state.
 
 Owner intent is a separate input. GitHub proves repository state; only the Owner
 supplies product decisions and approvals required by these rules.
@@ -110,8 +120,16 @@ protected mutation surface.
 
 Clearly disjoint tasks may run in parallel.
 
-If overlap cannot be resolved from GitHub live evidence, fail closed before
-mutation.
+Check relevant open PRs and remote activity, then use current task status,
+worktree status, and available agent coordination to identify local writers.
+GitHub cannot prove the absence of unpushed local work. Do not treat an empty PR
+list, an idle task, or an isolated worktree alone as writer clearance. Resolve
+concrete overlaps before writing; keep one responsible writer for each
+overlapping surface. If material overlap remains unresolved, stop the affected
+mutation with `BLOCKED_CONTEXT_NOT_VERIFIED` and continue disjoint work.
+
+Use the available evidence proportionately; do not repeatedly query unchanged
+state or create a new writer registry, ledger, or coordination harness.
 
 Do not bundle unrelated work into a task PR.
 
@@ -257,6 +275,9 @@ Every implementation PR should minimally record:
 - relevant product specification or Issue when useful.
 
 Independent Codex semantic review is mandatory for the exact current candidate.
+Start the final review after implementation and relevant local fixes stabilize;
+independent read-only investigation may run earlier when useful. Do not request
+repeated final reviews while knowingly continuing candidate edits.
 The reviewer must use a fresh context separate from implementation and verify
 live GitHub state through the GitHub plugin or another available read-only
 GitHub API/CLI. The review does not have to run in the GitHub cloud bot.
