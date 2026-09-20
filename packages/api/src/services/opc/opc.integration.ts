@@ -6263,3 +6263,231 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
     await browser.close();
   }
 }, 300000);
+
+it.each(["save", "confirm"] as const)(
+  "OPC: workbench %s conflict recovery preserves unknown-outcome replay",
+  async targetPhase => {
+    const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
+    const f = await fixture(3);
+    const draft = await f.service.start({
+      requestId: randomUUID(), registration: f.registration, mode: "mentor",
+    });
+    const { draftId, projectId, roundId, sessionId } = draft;
+    const stepId = f.flow.steps[0].id;
+    const original = "F1 original audience: first-time film makers";
+    const updated = "F1 reviewed audience: experienced documentary directors";
+    const readDraft = () => f.service.read(draftId);
+    await f.service.information({
+      draftId, stepId, requestId: randomUUID(),
+      expectedVersion: (await readDraft()).snapshot.steps[stepId].version,
+      values: { goal: { value: original, status: "provisional", nature: "decision" } },
+    });
+    const app = process.env.V3_LOCAL_APP;
+    if (!app || !["127.0.0.1", "localhost", "[::1]"].includes(new URL(app).hostname))
+      throw new Error("F1 requires the existing loopback disposable runner");
+    const origin = new URL(app).origin;
+    const key = "opc-confirm-step:" + draftId + ":" + stepId;
+    type Pending = {
+      phase: "information" | "save" | "confirm";
+      information: { requestId: string };
+      save: { requestId: string; expectedVersion: number | null; body: string };
+      confirm: { requestId: string; expectedVersion: number | null; expectedReviewVersion: number | null };
+    };
+    const browser = await chromium.launch({
+      headless: true,
+      executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    });
+    let phase = "setup", fault: "conflict" | "loss" | "done" = "conflict";
+    let rejectedId = "", lostRaw = "", lostPost = "", replayCount = 0;
+    let committedVersion = -1, routeFailure: string | null = null;
+    const pageErrors: string[] = [], externalRequests: string[] = [];
+    let page: Page | undefined;
+    const receiptCount = async (id: string) => (await sql.query<{ n: number }>(
+      "select count(*)::int n from artifact_requests where project_id=$1 and round_id=$2 and request_id=$3",
+      [projectId, roundId, id],
+    )).rows[0].n;
+    const opening: ExpectedMentorEffect = {
+      stepId, questionId: "goal", opening: true, input: OPENING_INPUT,
+    };
+    try {
+      const context = await browser.newContext();
+      await context.route("**/*", route => {
+        const url = new URL(route.request().url());
+        if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) {
+          externalRequests.push(url.origin);
+          return route.abort("blockedbyclient");
+        }
+        return route.continue();
+      });
+      const p = await context.newPage();
+      page = p;
+      p.setDefaultTimeout(30000);
+      p.on("pageerror", error => pageErrors.push(error.message));
+      const rawPending = () => p.evaluate(k => sessionStorage.getItem(k), key);
+      const form = () => p.locator("section[aria-label='本步填写信息']");
+      const answer = () => form().getByRole("textbox", { name: "已知目标 0", exact: true });
+      const confirm = () => form().getByRole("button", { name: "确认本题并继续", exact: true });
+      const retry = () => form().getByRole("button", { name: "继续核对本题确认", exact: true });
+      const settings = p.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), { timeout: 60000 });
+      await p.goto(app + "/login");
+      await settings;
+      await p.getByPlaceholder("name@example.com").fill(f.email);
+      await p.getByPlaceholder("输入你的密码").fill(f.password);
+      await p.getByRole("button", { name: "登录", exact: true }).last().click();
+      await p.waitForURL(u => u.origin === origin && !u.pathname.startsWith("/login"), { timeout: 60000 });
+      await p.goto(app + "/positioning/" + draftId);
+      await expect.poll(() => answer().inputValue(), { timeout: 60000 }).toBe(original);
+      const initialEffects = await expectExactMentorEffects(f.actor, draftId, roundId, [opening]);
+      const [openingExecution] = JSON.parse(initialEffects[0]) as string[];
+      await (await mentorMessageCheck(p, f.actor, openingExecution))();
+      await expect.poll(() => confirm().isEnabled(), { timeout: 30000 }).toBe(true);
+
+      // Delay the real workbench mutation after the page froze its version.
+      // No fabricated error, success, batch-response decoder or DB shortcut.
+      await p.route("**/api/trpc/**", async route => {
+        const req = route.request(), url = new URL(req.url());
+        const procedures = decodeURIComponent(url.pathname.slice("/api/trpc/".length)).split(",");
+        if (req.method() !== "POST" || url.origin !== origin || !procedures.includes("workbench.execute")) {
+          await route.fallback();
+          return;
+        }
+        try {
+          const raw = await rawPending();
+          if (!raw) { await route.fallback(); return; }
+          const pending = JSON.parse(raw) as Pending;
+          if (pending.phase !== targetPhase) { await route.fallback(); return; }
+          const post = req.postData();
+          if (!post) throw new Error("expected a real workbench mutation body");
+          const target = pending[targetPhase];
+          if (fault === "conflict") {
+            rejectedId = target.requestId;
+            const before = await readDraft();
+            expect(target.expectedVersion).toBe(before.snapshot.steps[stepId].version);
+            await f.service.information({
+              draftId, stepId, requestId: randomUUID(),
+              expectedVersion: before.snapshot.steps[stepId].version,
+              values: { goal: { value: updated, status: "provisional", nature: "decision" } },
+            });
+            const concurrent = await readDraft();
+            expect(concurrent.snapshot.steps[stepId].version).toBe(before.snapshot.steps[stepId].version + 1);
+            const response = await route.fetch();
+            const body = JSON.stringify(await response.json());
+            expect(body).toContain('"code":"CONFLICT"');
+            expect(body).toContain('"path":"workbench.execute"');
+            // A concurrent provisional answer makes the server's OPC
+            // required-information gate reject the confirm before any version
+            // comparison, so confirm returns the generic workbench CONFLICT
+            // message while save returns the version-conflict one.
+            expect(body).toContain(
+              targetPhase === "save" ? "保存版本已变化" : "操作未完成，请重新加载项目状态",
+            );
+            expect(body).not.toContain("ARTIFACT_VERSION_CONFLICT");
+            expect(body).not.toContain("ARTIFACT_REVIEW_REQUIRED");
+            expect(await receiptCount(rejectedId)).toBe(0);
+            fault = "loss";
+            await route.fulfill({ response }); // Deliver the actual server rejection.
+            return;
+          }
+          if (fault === "loss") {
+            expect(target.requestId).not.toBe(rejectedId);
+            lostRaw = raw;
+            lostPost = post;
+            const response = await route.fetch();
+            expect(response.ok()).toBe(true);
+            expect(JSON.stringify(await response.json())).toContain('"accepted":true');
+            expect(await receiptCount(target.requestId)).toBe(1);
+            const committed = await readDraft();
+            committedVersion = committed.snapshot.steps[stepId].version;
+            expect(committed.information[stepId].values.goal.value).toBe(updated);
+            expect(committed.snapshot.steps[stepId].body).toContain(updated);
+            expect(committed.snapshot.steps[stepId].valid).toBe(targetPhase === "confirm");
+            fault = "done";
+            await route.abort("failed"); // Server committed; browser receives nothing.
+            return;
+          }
+          expect(raw).toBe(lostRaw);
+          expect(post).toBe(lostPost); // Same request ID AND frozen versions/payload.
+          replayCount++;
+          await route.continue();
+        } catch (error) {
+          routeFailure = error instanceof Error ? error.message : String(error);
+          await route.abort("failed").catch(() => {});
+        }
+      });
+
+      phase = "real mapped conflict releases the rejected envelope";
+      await confirm().click();
+      await expect.poll(() => rejectedId, { timeout: 30000 }).not.toBe("");
+      await expect.poll(rawPending, { timeout: 30000 }).toBeNull();
+      expect(routeFailure).toBeNull();
+      await expect.poll(() => answer().inputValue(), { timeout: 30000 }).toBe(updated);
+      await expect.poll(() => answer().isEnabled(), { timeout: 30000 }).toBe(true);
+      await expect.poll(() => confirm().isEnabled(), { timeout: 30000 }).toBe(true);
+      const afterConflict = await readDraft();
+      expect(afterConflict.snapshot.steps[stepId].valid).toBe(false);
+      expect(afterConflict.information[stepId].values.goal).toEqual({ value: updated, status: "provisional", nature: "decision" });
+      expect(await receiptCount(rejectedId)).toBe(0);
+      expect(await expectExactMentorEffects(f.actor, draftId, roundId, [opening])).toEqual(initialEffects);
+
+      phase = "explicitly confirm the changed answer, then lose the committed reply";
+      await confirm().click();
+      await expect.poll(() => fault, { timeout: 30000 }).toBe("done");
+      await expect.poll(() => retry().isEnabled(), { timeout: 30000 }).toBe(true);
+      expect(routeFailure).toBeNull();
+      expect(lostRaw).not.toBe("");
+      expect(await rawPending()).toBe(lostRaw);
+      const lost = JSON.parse(lostRaw) as Pending;
+      expect(lost.phase).toBe(targetPhase);
+      expect(lost[targetPhase].expectedVersion).not.toBeNull();
+      expect(await answer().isDisabled()).toBe(true);
+      expect(await receiptCount(lost[targetPhase].requestId)).toBe(1);
+      expect(await expectExactMentorEffects(f.actor, draftId, roundId, [opening])).toEqual(initialEffects);
+
+      phase = "refresh retains unknown outcome, then the same request recovers";
+      await p.reload();
+      await expect.poll(() => retry().isEnabled(), { timeout: 60000 }).toBe(true);
+      expect(await rawPending()).toBe(lostRaw);
+      expect(replayCount).toBe(0);
+      expect(await answer().inputValue()).toBe(updated);
+      expect(await answer().isDisabled()).toBe(true);
+      expect(await expectExactMentorEffects(f.actor, draftId, roundId, [opening])).toEqual(initialEffects);
+      await retry().click();
+      await expect.poll(rawPending, { timeout: 30000 }).toBeNull();
+      expect(routeFailure).toBeNull();
+      expect(replayCount).toBe(1);
+      const final = await readDraft();
+      expect({ draftId: final.draftId, projectId: final.projectId, roundId: final.roundId, sessionId: final.sessionId })
+        .toEqual({ draftId, projectId, roundId, sessionId });
+      expect(final.snapshot.steps[stepId].valid).toBe(true);
+      expect(final.snapshot.steps[stepId].body).toContain(updated);
+      expect(final.snapshot.steps[stepId].body).not.toContain(original);
+      expect(final.information[stepId].values.goal).toEqual({ value: updated, status: "confirmed", nature: "decision" });
+      if (targetPhase === "confirm") expect(final.snapshot.steps[stepId].version).toBe(committedVersion);
+      for (const id of [lost.information.requestId, lost.save.requestId, lost.confirm.requestId])
+        expect(await receiptCount(id)).toBe(1);
+      expect(await receiptCount(rejectedId)).toBe(0);
+      const finalEffects = await expectExactMentorEffects(f.actor, draftId, roundId, [
+        opening, { stepId: f.flow.steps[1].id, questionId: "goal", opening: true, input: OPENING_INPUT },
+      ]);
+      for (const identity of initialEffects) expect(finalEffects).toContain(identity);
+      await expect.poll(() => form().getByRole("heading", { level: 3 }).textContent(), { timeout: 60000 })
+        .toContain("2.1");
+      expect(pageErrors).toEqual([]);
+      expect(externalRequests).toEqual([]);
+      console.log("F1_WORKBENCH_RECOVERY", JSON.stringify({
+        targetPhase, draftId, roundId, rejectedId,
+        recovered: [lost.information.requestId, lost.save.requestId, lost.confirm.requestId],
+        replayCount, initialEffects, finalEffects,
+      }));
+    } catch (error) {
+      console.error("F1_RECOVERY_FAILURE", JSON.stringify({
+        targetPhase, phase, fault, routeFailure, pageErrors, externalRequests,
+        pending: page ? await page.evaluate(k => sessionStorage.getItem(k), key).catch(() => null) : null,
+      }));
+      throw error;
+    } finally {
+      await browser.close();
+    }
+  },
+  300000,
+);

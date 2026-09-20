@@ -33,7 +33,7 @@ export default function PositioningHome() {
           先完成定位，再确认第一周计划。确认后，每个选题都有独立的工作记录。
         </p>
       </header>
-      <p role="status">本地隔离体验 · 真实研究尚未开放，AI 使用模拟回复。</p>
+      <p role="status">运行环境和模型模式请以进入草稿或工作会话后的提示为准。</p>
       {(catalog.error || list.error) && (
         <p role="alert">当前环境未开放，或登录已失效。请登录后重试。</p>
       )}
