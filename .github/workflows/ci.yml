@@ -7,6 +7,9 @@ on:
   push:
     branches: [main, staging]
 
+  schedule:
+    - cron: '0 9 * * 1'
+
 permissions:
   contents: read
 
@@ -14,8 +17,32 @@ env:
   NODE_VERSION: '24'
 
 jobs:
+  scope:
+    name: Validate change scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.scope.outputs.mode }}
+    steps:
+      - name: Checkout complete history
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test scope and required-check contracts
+        run: |
+          ruby .github/scripts/test-ci-scope.rb
+          ruby .github/scripts/test-ci-workflows.rb
+      - name: Classify exact event diff and validate documentation
+        id: scope
+        run: ruby .github/scripts/ci-scope.rb
+
   lint-and-type:
-    name: Lint & Type Check
+    name: Run lint and typecheck
+    needs: [scope]
+    if: needs.scope.outputs.mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -45,7 +72,9 @@ jobs:
         run: pnpm --filter web typecheck
 
   test:
-    name: Unit Tests
+    name: Run unit and regression tests
+    needs: [scope]
+    if: needs.scope.outputs.mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -72,6 +101,9 @@ jobs:
               ;;
             push)
               migration_base_sha="$(jq -er '.before' "$GITHUB_EVENT_PATH")"
+              ;;
+            schedule)
+              migration_base_sha="$GITHUB_SHA"
               ;;
             *)
               echo 'Unsupported workflow event for migration ledger check.' >&2
@@ -153,13 +185,21 @@ jobs:
       - name: CI safeguards — migration ledger and db push guard
         run: pnpm test:ci:safeguards
 
-  build:
-    name: Build Check
+  build-and-e2e:
+    name: Run build and secretless security E2E
+    needs: [scope]
+    if: needs.scope.outputs.mode == 'full'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-    needs: [lint-and-type]
+    timeout-minutes: 35
     permissions:
       contents: read
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://local.invalid
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: local-noncredential-value-local-noncredential-value-local-noncredential-value-local-noncredential-value
+      NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
+      OPENROUTER_API_KEY: disabled-local-runtime
+      SECURITY_E2E_LOCAL_ONLY: 'true'
+      E2E_ALLOW_DATABASE_FIXTURES: 'false'
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -172,14 +212,195 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: '24'
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build
+      - name: Install Playwright browser
+        run: cd apps/web && pnpm exec playwright install --with-deps chromium
+
+      - name: Build application
         run: pnpm build
+
+      - name: Start application
+        run: |
+          set -euo pipefail
+          cd apps/web
+          pnpm start > "$RUNNER_TEMP/graylum-security-e2e.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/graylum-security-e2e.pid"
+          for _ in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/login > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'Application failed to start for secretless E2E.'
+          exit 1
+
+      - name: Run transitional secretless Security E2E
         env:
-          NEXT_PUBLIC_SUPABASE_URL: https://local.invalid
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: local-noncredential-value
+          CI: 'true'
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+        run: |
+          set +e
+          cd apps/web
+          PLAYWRIGHT_JSON_OUTPUT_FILE="$RUNNER_TEMP/security-e2e-results.json" \
+            pnpm exec playwright test security.spec.ts --project=chromium --reporter=json
+          playwright_status=$?
+          cd ../..
+          set -e
+          node .github/scripts/check-playwright-results.cjs \
+            "$RUNNER_TEMP/security-e2e-results.json" \
+            --allow-skipped
+          if [ "$playwright_status" -ne 0 ]; then
+            exit "$playwright_status"
+          fi
+
+      - name: Stop application
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/graylum-security-e2e.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/graylum-security-e2e.pid")"
+          fi
+
+      # Browser reports, storage state, traces, videos, and screenshots are intentionally not uploaded.
+
+  lint-check:
+    name: Lint & Type Check
+    needs: [scope, lint-and-type]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Require successful scope-appropriate validation
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
+          WORK_RESULT: ${{ needs.lint-and-type.result }}
+        run: |
+          set -euo pipefail
+          test "$SCOPE_RESULT" = success
+          case "$SCOPE_MODE:$WORK_RESULT" in
+            full:success) echo 'Full validation passed.' ;;
+            docs:skipped) echo 'Allowlisted regular documentation validated by scope job; runtime checks not applicable.' ;;
+            *) echo 'Missing, failed, cancelled, or inconsistent validation.' >&2; exit 1 ;;
+          esac
+
+  typecheck:
+    name: TypeScript Check
+    needs: [scope, lint-and-type]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Require successful scope-appropriate validation
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
+          WORK_RESULT: ${{ needs.lint-and-type.result }}
+        run: |
+          set -euo pipefail
+          test "$SCOPE_RESULT" = success
+          case "$SCOPE_MODE:$WORK_RESULT" in
+            full:success) echo 'Full validation passed.' ;;
+            docs:skipped) echo 'Allowlisted regular documentation validated by scope job; runtime checks not applicable.' ;;
+            *) echo 'Missing, failed, cancelled, or inconsistent validation.' >&2; exit 1 ;;
+          esac
+
+  unit-check:
+    name: Unit Tests
+    needs: [scope, test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Require successful scope-appropriate validation
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
+          WORK_RESULT: ${{ needs.test.result }}
+        run: |
+          set -euo pipefail
+          test "$SCOPE_RESULT" = success
+          case "$SCOPE_MODE:$WORK_RESULT" in
+            full:success) echo 'Full validation passed.' ;;
+            docs:skipped) echo 'Allowlisted regular documentation validated by scope job; runtime checks not applicable.' ;;
+            *) echo 'Missing, failed, cancelled, or inconsistent validation.' >&2; exit 1 ;;
+          esac
+
+  security-unit-tests:
+    name: Security Unit Tests
+    needs: [scope, test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Require successful scope-appropriate validation
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
+          WORK_RESULT: ${{ needs.test.result }}
+        run: |
+          set -euo pipefail
+          test "$SCOPE_RESULT" = success
+          case "$SCOPE_MODE:$WORK_RESULT" in
+            full:success) echo 'Full validation passed.' ;;
+            docs:skipped) echo 'Allowlisted regular documentation validated by scope job; runtime checks not applicable.' ;;
+            *) echo 'Missing, failed, cancelled, or inconsistent validation.' >&2; exit 1 ;;
+          esac
+
+  build:
+    name: Build Check
+    needs: [scope, build-and-e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Require successful scope-appropriate validation
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
+          WORK_RESULT: ${{ needs.build-and-e2e.result }}
+        run: |
+          set -euo pipefail
+          test "$SCOPE_RESULT" = success
+          case "$SCOPE_MODE:$WORK_RESULT" in
+            full:success) echo 'Full validation passed.' ;;
+            docs:skipped) echo 'Allowlisted regular documentation validated by scope job; runtime checks not applicable.' ;;
+            *) echo 'Missing, failed, cancelled, or inconsistent validation.' >&2; exit 1 ;;
+          esac
+
+  security-e2e-tests:
+    name: Security E2E Tests
+    needs: [scope, build-and-e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Require successful scope-appropriate validation
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
+          WORK_RESULT: ${{ needs.build-and-e2e.result }}
+        run: |
+          set -euo pipefail
+          test "$SCOPE_RESULT" = success
+          case "$SCOPE_MODE:$WORK_RESULT" in
+            full:success) echo 'Full validation passed.' ;;
+            docs:skipped) echo 'Allowlisted regular documentation validated by scope job; runtime checks not applicable.' ;;
+            *) echo 'Missing, failed, cancelled, or inconsistent validation.' >&2; exit 1 ;;
+          esac
