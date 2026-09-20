@@ -14,6 +14,7 @@ runtime ledger, or completion state.
 - [Launch task graph](plan-core.md).
 - [OPC 七阶段实施任务映射](tasks/V3-OPC-implementation.md)：任务身份、依赖、验收、历史复用和 V3-M3/REL-1 接入。
 - [V3-BILL-2 统一计费开工规格](tasks/V3-BILL-2-provider-authoritative-billing.md)：第一批独立实施契约；当前仅文档，功能开工须另行明确选择。
+- [社媒发布、数据同步与管理后台对接规格](tasks/V3-social-sync-admin-integration.md)：2026-09-21 记录已批准同步架构、现有后台复用与 #422/#423/#424 管理接线设计；区分源码事实、待实施设计和待验证供应商条件。MCP/飞书与 Post for Me 不互为业务前置；本文不改变任务图或启动功能开发。
 - Stable task specifications under `docs/launch/tasks/`.
 
 PR #388 was closed without merge because its 2026-09-08 assumption—an existing global chat as the primary workflow without the newly approved account-project journey—was superseded by the 2026-09-13 Owner decision.
