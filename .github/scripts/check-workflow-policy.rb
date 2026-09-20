@@ -7,6 +7,7 @@ REQUIRED_WORKFLOW_FILES = %w[ci.yml security.yml].freeze
 ALLOWED_REQUIRED_BRANCHES = %w[main staging develop].freeze
 ALLOWED_GITHUB_CONTEXTS = %w[github.sha github.event_name].freeze
 APPROVED_ACTION_REPOSITORIES = %w[
+  actions/cache
   actions/checkout
   actions/dependency-review-action
   actions/download-artifact
