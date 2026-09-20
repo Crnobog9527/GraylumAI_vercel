@@ -477,7 +477,7 @@ export default function PositioningDraft({
    */
   useEffect(() => {
     if (!planView || hydratedDraft !== draftId) return;
-    if (!d?.report?.available) return;
+    if (!d) return;
     if (planAutoRunning.current) return;
     const retained = readRetainedPlan();
     // A local candidate only proves the outcome of the exact request that
@@ -489,7 +489,7 @@ export default function PositioningDraft({
     // request stays an unresolved authorization that must be recovered under
     // its own identity instead of being paid for again.
     if (
-      candidateBelongsToCurrentRound() &&
+      Boolean(planCandidate) &&
       planCandidateRequest !== null &&
       retained?.kind === "envelope" &&
       retained.envelope.request.requestId === planCandidateRequest
@@ -523,11 +523,11 @@ export default function PositioningDraft({
       return;
     }
     if (retained.envelope.sourceRoundId !== d.roundId) {
-      archiveStalePlanEnvelope(
-        "定位已修订，上一轮的计划生成请求已在本机归档，不会执行。请按当前定位重新生成计划候选。",
-      );
+      setRetainedPlan({ requestId: retained.envelope.request.requestId,
+        sourceRoundId: retained.envelope.sourceRoundId });
       return;
     }
+    if (!d.report?.available) return;
     const request = retained.envelope.request;
     if (planAutoAttempts.current.has(request.requestId)) return;
     planAutoAttempts.current.add(request.requestId);
@@ -550,7 +550,7 @@ export default function PositioningDraft({
         }
         persistPlanCandidate(
           candidate.body,
-          retained.envelope.sourceRoundId,
+          candidate.sourceRoundId,
           request.requestId,
         );
         setPlanRecovery("idle");
@@ -1346,44 +1346,39 @@ export default function PositioningDraft({
   }
   /**
    * The explicit consent that may start the first-week topic generation. It is
-   * the only path that writes a consented envelope, and it reuses a retained
-   * request only when that request belongs to this draft and round, so an
-   * explicitly continued lost reply replays its own identity instead of paying
-   * for a second call.
+   * a new topic intent. Retained requests always keep their original source;
+   * an explicit recovery never becomes authorization for a new round.
    */
   async function consentPlan() {
-    if (!d || hasUnsavedInformation) return;
+    if (!d) return;
     const retained = readRetainedPlan();
-    // An already consented envelope for this round may still own an unresolved
-    // request. "继续生成第一周选题" means continue that request: its exact
-    // identity is never overwritten, so an unknown outcome stays recoverable.
-    // A fresh generation is a separate explicit action ("重新生成").
-    if (
-      retained?.kind === "envelope" &&
-      retained.envelope.request.draftId === draftId &&
-      retained.envelope.sourceRoundId === d.roundId
-    ) {
-      const request = retained.envelope.request;
+    const retainedRequest = retained?.kind === "envelope"
+      ? retained.envelope.request
+      : retained?.kind === "unconsented" || retained?.kind === "legacy"
+        ? retained.request : null;
+    if (retainedRequest?.draftId === draftId) {
+      // Recovery never changes the request's source metadata or creates a new
+      // topic intent. Across rounds it is explicit and reads the original run.
+      const sourceRoundId = retained?.kind === "envelope" ? retained.envelope.sourceRoundId
+        : retained?.kind === "unconsented" ? retained.sourceRoundId : null;
+      if (retained?.kind !== "envelope") sessionStorage.setItem(planEnvelopeKey,
+        JSON.stringify({ v: 3, sourceRoundId, consentedAt: new Date().toISOString(), request: retainedRequest }));
       setConsentOpen(false);
-      if (planView) await run(async () => void (await runPlanRequest(request)));
+      if (planView) await run(async () => {
+        await runPlanRequest(retainedRequest, sourceRoundId);
+        setRetainedPlan(null);
+      });
       else router.push(`/positioning/${draftId}/plan`);
       return;
     }
-    const retainedRequest =
-      retained?.kind === "unconsented" &&
-      retained.request.draftId === draftId &&
-      retained.sourceRoundId === d.roundId
-        ? retained.request
-        : retained?.kind === "legacy" && retained.request.draftId === draftId
-          ? retained.request
-          : null;
+    if (hasUnsavedInformation) return;
     // A replaced local record is preserved verbatim instead of being lost.
-    if (!retainedRequest && retained) archiveRetainedPlanRecord();
+    if (retained) archiveRetainedPlanRecord();
     // A fresh intent enters the bound topic workspace: the server freezes the
     // confirmed version, the pinned method revision and its declared topic
     // resources, and refuses when the method declares none. Nothing is
     // dispatched here — the workspace's own turn is the paid action.
-    if (!retainedRequest) {
+    {
       try {
         // This mutation checks the displayed source under the same server lock
         // as binding/consent. No cached read or caught conflict permits a jump.
@@ -1403,24 +1398,6 @@ export default function PositioningDraft({
       }
       return;
     }
-    const request: PlanRequest = retainedRequest ?? {
-      draftId,
-      requestId: crypto.randomUUID(),
-      purpose: "plan",
-      stepId: snap.workflow.steps.at(-1).id,
-      input: planConstraintsInput(),
-    };
-    const envelope: PlanEnvelope = {
-      v: 3,
-      sourceRoundId: d.roundId,
-      consentedAt: new Date().toISOString(),
-      request,
-    };
-    sessionStorage.setItem(planEnvelopeKey, JSON.stringify(envelope));
-    setRetainedPlan(null);
-    setConsentOpen(false);
-    if (planView) await run(async () => void (await runPlanRequest(request)));
-    else router.push(`/positioning/${draftId}/plan`);
   }
   async function generatePlan() {
     await run(async () => {
@@ -1485,9 +1462,15 @@ export default function PositioningDraft({
    * timeout, a lost reply or any other unknown outcome keeps the envelope so the
    * same request can be replayed instead of paying for a second call.
    */
-  async function runPlanRequest(request: PlanRequest) {
-      const prepared = await prepareStep.mutateAsync(request);
-      await execute.mutateAsync({ executionId: prepared.executionId });
+  async function runPlanRequest(request: PlanRequest, sourceRoundId: string | null = d.roundId) {
+      const state = await utils.opc.planRequestState.fetch({ draftId, requestId: request.requestId });
+      if (!state.executionId && sourceRoundId !== null && sourceRoundId !== d.roundId) {
+        setNotice("原请求属于旧定位轮次，服务端尚无可恢复执行；已保留记录，没有按新定位生成。请核对后另行选择新请求。");
+        throw new Error("OPC_OLD_REQUEST_NOT_ADMITTED");
+      }
+      const prepared = state.executionId ? { executionId: state.executionId }
+        : await prepareStep.mutateAsync(request);
+      if (state.state !== "completed") await execute.mutateAsync({ executionId: prepared.executionId });
       const candidate = await utils.opc.planResult.fetch({
         draftId,
         executionId: prepared.executionId,
@@ -1503,7 +1486,7 @@ export default function PositioningDraft({
       // The envelope is deliberately retained while the candidate waits for the
       // user's decision: that is what lets a reload or a re-login recover the
       // same execution instead of paying for another one.
-      persistPlanCandidate(candidate.body, d.roundId, request.requestId);
+      persistPlanCandidate(candidate.body, candidate.sourceRoundId, request.requestId);
       setPlanRecovery("idle");
   }
   /**
@@ -2445,40 +2428,7 @@ export default function PositioningDraft({
       {!planView && d.report?.available && <Link className="block underline" href={`/positioning/${draftId}/plan`}>进入第一周计划</Link>}
       {planView && <Link className="block underline" href={`/positioning/${draftId}`}>返回定位与导师对话</Link>}
       {planView && !d.report?.available && <p role="status">请先确认正式定位，再制定第一周计划。原定位和对话仍保留。</p>}
-      {planView && d.report?.available && <section aria-label="定位摘要" className="rounded-xl border border-[var(--border-primary)] p-4">
-        <h2 className="text-xl">已确认的定位</h2>
-        <dl className="grid gap-3 sm:grid-cols-2">{steps.flatMap(step => d.information[step.id].schema.map((field: {id:string;title:string}) =>
-          <div key={step.id+":"+field.id}><dt className="text-sm text-[var(--text-secondary)]">{field.title}</dt><dd className="whitespace-pre-wrap">{d.information[step.id].values?.[field.id]?.value || "未填写"}</dd></div>))}</dl>
-      </section>}
-      {planView && d.report?.available && (
-        <section className="space-y-4">
-          <h2 className="text-xl">第一周计划</h2>
-          <p>可编辑账号、日期和简报。确认承接不会调用模型或产生新的费用。</p>
-          {planRecovery !== "idle" && (
-            <div className="rounded-xl border border-[var(--border-primary)] p-4">
-              {planRecovery === "running" && (
-                <p role="status">
-                  正在按你刚确认的定位生成第一周计划候选，不需要你再点一次。生成完成后会显示在这里。
-                </p>
-              )}
-              {planRecovery === "unknown" && (
-                <p role="status">
-                  这次生成的结果暂时无法确认。原请求已保留，不会重复扣费；请刷新页面或重新登录，我们会用同一条请求恢复结果。
-                </p>
-              )}
-              {planRecovery === "invalid" && (
-                <p role="status">
-                  这次生成完成，但没有返回可用的计划内容，原请求已释放。请核对下方的平台、日期后手动点击生成。
-                </p>
-              )}
-              {planRecovery === "stale" && (
-                <p role="status">
-                  上一轮定位留下的生成请求已在本机归档，不会执行。请按当前定位重新生成计划候选。
-                </p>
-              )}
-            </div>
-          )}
-          {retainedPlan && (
+          {planView && retainedPlan && (
             <div className="space-y-3 rounded-xl border border-[var(--border-primary)] p-4">
               <h3>本机保留了一条早先的生成请求</h3>
               <p className="text-sm text-[var(--text-secondary)]" role="status">
@@ -2533,6 +2483,46 @@ export default function PositioningDraft({
                   归档这条本机记录
                 </Button>
               </div>
+            </div>
+          )}
+          {planView && planCandidate && planCandidateRound && planCandidateRound !== d.roundId && (
+            <div className="space-y-3 rounded border border-[var(--border-primary)] p-4">
+              <h3>原定位轮次的计划结果 · 已恢复</h3>
+              <p>这是原请求的完成结果，保留原定位来源；没有按当前定位重新生成，也不会替换当前计划。</p>
+              {planCandidate.map(item => <p key={item.id}>{item.day} · {item.platform}/{item.account} · {item.title} · {item.brief}</p>)}
+            </div>
+          )}
+      {planView && d.report?.available && <section aria-label="定位摘要" className="rounded-xl border border-[var(--border-primary)] p-4">
+        <h2 className="text-xl">已确认的定位</h2>
+        <dl className="grid gap-3 sm:grid-cols-2">{steps.flatMap(step => d.information[step.id].schema.map((field: {id:string;title:string}) =>
+          <div key={step.id+":"+field.id}><dt className="text-sm text-[var(--text-secondary)]">{field.title}</dt><dd className="whitespace-pre-wrap">{d.information[step.id].values?.[field.id]?.value || "未填写"}</dd></div>))}</dl>
+      </section>}
+      {planView && d.report?.available && (
+        <section className="space-y-4">
+          <h2 className="text-xl">第一周计划</h2>
+          <p>可编辑账号、日期和简报。确认承接不会调用模型或产生新的费用。</p>
+          {planRecovery !== "idle" && (
+            <div className="rounded-xl border border-[var(--border-primary)] p-4">
+              {planRecovery === "running" && (
+                <p role="status">
+                  正在按你刚确认的定位生成第一周计划候选，不需要你再点一次。生成完成后会显示在这里。
+                </p>
+              )}
+              {planRecovery === "unknown" && (
+                <p role="status">
+                  这次生成的结果暂时无法确认。原请求已保留，不会重复扣费；请刷新页面或重新登录，我们会用同一条请求恢复结果。
+                </p>
+              )}
+              {planRecovery === "invalid" && (
+                <p role="status">
+                  这次生成完成，但没有返回可用的计划内容，原请求已释放。请核对下方的平台、日期后手动点击生成。
+                </p>
+              )}
+              {planRecovery === "stale" && (
+                <p role="status">
+                  上一轮定位留下的生成请求已在本机归档，不会执行。请按当前定位重新生成计划候选。
+                </p>
+              )}
             </div>
           )}
           {shownPlanCandidate && (

@@ -4088,7 +4088,7 @@ it("OPC: Stage C4 an already published draft spends nothing by waiting or refres
     await browser.close();
   }
 }, 300000);
-it("OPC: Stage C5 a retained request from another round is archived, never executed", async () => {
+it("OPC: Stage C5 an unadmitted old-round request stays recoverable and never becomes current generation", async () => {
   const f = await completed(3);
   await planFixtureModel(f.moduleId);
   const staleRequestId = randomUUID();
@@ -4100,19 +4100,12 @@ it("OPC: Stage C5 a retained request from another round is archived, never execu
   });
   try {
     await page.reload();
-    await page.getByText("上一轮定位留下的生成请求已在本机归档").waitFor();
-    // The stale request is released and archived verbatim, and never executed.
-    expect(await page.evaluate((k) => sessionStorage.getItem(k), key)).toBeNull();
-    const archived = await page.evaluate((k) => {
-      const found: string[] = [];
-      for (let i = 0; i < sessionStorage.length; i += 1) {
-        const name = sessionStorage.key(i);
-        if (name && name.startsWith(k + ":stale:")) found.push(name);
-      }
-      return found.map((name) => sessionStorage.getItem(name) as string);
-    }, key);
-    expect(archived).toHaveLength(1);
-    expect(JSON.parse(archived[0]).request.requestId).toBe(staleRequestId);
+    await page.getByRole('heading', { name: '本机保留了一条早先的生成请求', exact: true }).waitFor();
+    const original = await page.evaluate(k => sessionStorage.getItem(k), key);
+    expect(JSON.parse(original!).request.requestId).toBe(staleRequestId);
+    await page.getByRole('button', { name: '继续这条原请求', exact: true }).click();
+    await expect.poll(async () => (await page.getByRole('status').allTextContents()).join(' ')).toContain('服务端尚无可恢复执行');
+    expect(await page.evaluate(k => sessionStorage.getItem(k), key)).toBe(original);
     expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
       executions: 0, planExecutions: 0, planRuns: 0, reserves: 0,
       plans: 0, accounts: 0, workItems: 0,
@@ -7032,7 +7025,7 @@ it("OPC: topic browser closes multi-turn edited subset adoption with frozen lost
     await page.unroute('**/api/trpc/opc.savePlan*');
     await page.reload();
     await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
-    await expect.poll(() => page.evaluate(k => localStorage.getItem(k), key)).toBeNull();
+    await expect.poll(() => page.evaluate(k => localStorage.getItem(k), key), { timeout: 30000 }).toBeNull();
     expect((await f.service.read(f.d.draftId)).plans).toHaveLength(2);
     const version2 = page.locator('article').filter({ has: page.getByRole('heading', { name: '第 2 版 · 2 个选题', exact: true }) });
     await version2.getByRole('checkbox', { name: 'x::existing-account', exact: true }).check();
@@ -7068,7 +7061,7 @@ it("OPC: topic browser closes multi-turn edited subset adoption with frozen lost
     await page.getByRole('button', { name: '登录', exact: true }).last().click();
     await page.waitForURL(url => url.pathname === path);
     await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
-    await expect.poll(() => page.evaluate(k => localStorage.getItem(k), key)).toBeNull();
+    await expect.poll(() => page.evaluate(k => localStorage.getItem(k), key), { timeout: 30000 }).toBeNull();
     expect(await topicIdentity(f.actor)).toEqual(beforeAdopt);
     const history = await f.service.read(f.d.draftId);
     expect(history.handoffs).toHaveLength(2);
@@ -7079,33 +7072,67 @@ it("OPC: topic browser closes multi-turn edited subset adoption with frozen lost
   } finally { await browser.close(); }
 }, 300000);
 
-it("OPC: old v2 executed lost reply upgrades by replaying the original paid request", async () => {
+it.each([[2, "same"], [2, "draft"], [2, "published"], [3, "published"]] as const)("OPC: old v%i executed lost reply restores its original source across revision %s", async (version, revise) => {
   const f = await completed(3);
   await planFixtureModel(f.moduleId);
   const envelope = planEnvelopeFor(f);
   const { browser, page, key } = await planBrowser(f, { envelope });
   try {
-    await page.route('**/api/trpc/opc.planResult*', async route => { await route.fetch(); await route.abort(); });
+    let resultLost = 0;
+    await page.route('**/api/trpc/opc.planResult*', async route => { await route.fetch(); await route.abort(); resultLost += 1; });
     await page.reload();
     await page.getByText('这次生成的结果暂时无法确认').waitFor();
     const identity = await planIdentityRows(f.actor);
     const counts = await planIdentity(f.actor, f.d.draftId);
     expect(counts.planExecutions).toBe(1);
+    await expect.poll(() => resultLost, { timeout: 30000 }).toBeGreaterThan(0);
     await page.unroute('**/api/trpc/opc.planResult*');
-    await page.evaluate(({ key, id }) => {
+    if (revise !== "same") {
+      const revised = await f.service.revise(f.d.draftId, randomUUID(), f.d.roundId);
+      const snap = await f.artifacts.read(f.d.projectId, revised.roundId);
+      if (revise === 'published') await f.artifacts.execute({ action: 'publish', projectId: f.d.projectId, roundId: revised.roundId,
+        requestId: randomUUID(), expectedSteps: Object.fromEntries(Object.entries(snap.steps).map(([id, st]) => [id, { version: st.version, reviewVersion: st.reviewVersion }])) });
+      expect((await f.service.read(f.d.draftId)).roundId).not.toBe(f.d.roundId);
+    }
+    await page.evaluate(({ key, id, version }) => {
       const old = JSON.parse(sessionStorage.getItem(key)!);
-      old.v = 2; delete old.consentedAt;
+      old.v = version; if (version === 2) delete old.consentedAt;
       sessionStorage.setItem(key, JSON.stringify(old));
       sessionStorage.removeItem('opc-edit:' + id);
-    }, { key, id: f.d.draftId });
+    }, { key, id: f.d.draftId, version });
     await page.reload();
     await page.getByRole('heading', { name: '本机保留了一条早先的生成请求', exact: true }).waitFor();
     await expect.poll(async () => (await page.getByRole('status').allTextContents()).join(' ')).toContain('服务端已保存这条请求的完成结果');
     expect(await planIdentityRows(f.actor)).toEqual(identity);
     await page.getByRole('button', { name: '继续这条原请求', exact: true }).click();
-    await page.getByRole('heading', { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    await page.getByRole('heading', { name: revise !== "same" ? '原定位轮次的计划结果 · 已恢复' : CANDIDATE_HEADING, exact: true }).waitFor();
     expect(await planIdentityRows(f.actor)).toEqual(identity);
     expect(await planIdentity(f.actor, f.d.draftId)).toEqual(counts);
+    expect((await topicIdentity(f.actor)).binds).toBe(0);
+    const stored = JSON.parse((await page.evaluate(k => sessionStorage.getItem(k), key))!);
+    expect(stored.request).toEqual(envelope.request);
+    expect(stored.sourceRoundId).toBe(f.d.roundId);
+    const executionId = (await f.service.planRequestState(f.d.draftId, envelope.request.requestId)).executionId;
+    const result = await f.service.planResult(f.d.draftId, executionId);
+    expect(result.sourceVersionId).toBe(f.sourceVersionId);
+    expect(result.sourceRoundId).toBe(f.d.roundId);
+    const other = await fixture(3);
+    await expect(other.service.planResult(f.d.draftId, executionId)).rejects.toThrow('OPC_RESULT_DENIED');
+    if (revise !== "same") {
+      await page.reload();
+      await page.getByRole('heading', { name: '原定位轮次的计划结果 · 已恢复', exact: true }).waitFor();
+      expect(await planIdentityRows(f.actor)).toEqual(identity);
+      expect(await page.getByRole('button', { name: '采用候选到计划工作稿', exact: true }).count()).toBe(0);
+    }
+    if (revise === 'published' && version === 2) {
+      const { readFile } = await import('node:fs/promises');
+      await sql.query(await readFile(new URL('../../../../db/migrations/0115_opc_historical_plan_result.sql', import.meta.url), 'utf8'));
+      expect((await f.service.planResult(f.d.draftId, executionId)).sourceVersionId).toBe(f.sourceVersionId);
+      const privileges = (await sql.query("select has_function_privilege('authenticated','opc_plan_result(uuid,uuid,uuid)','execute') client, has_function_privilege('service_role','opc_plan_result(uuid,uuid,uuid)','execute') server")).rows[0];
+      expect(privileges).toEqual({ client: false, server: true });
+      await sql.query('update bill2_drafts set revoked=true where id=$1', [f.d.draftId]);
+      await expect(f.service.planResult(f.d.draftId, executionId)).rejects.toThrow('OPC_RESULT_DENIED');
+    }
   } finally { await browser.close(); }
 }, 300000);
 
@@ -7139,3 +7166,59 @@ it("OPC: two topic pages explicitly consent concurrently and execute one first t
     }), { mode: 0o600 });
   } finally { await browser.close(); }
 }, 180000);
+
+
+it("OPC: topic invalid edits and legacy invalid pending records remain editable without dispatch", async () => {
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const { browser, page } = await planBrowser(f);
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + f.d.draftId + '/topics');
+    await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
+    await page.getByRole('button', { name: '把这条回复保存为候选版本', exact: true }).click();
+    const workspace = await f.service.topicRead(f.d.draftId);
+    const key = 'opc-topic-operation:' + workspace.sessionId;
+    const identity = await topicIdentity(f.actor);
+    const title = page.getByRole('textbox', { name: /^选题标题 / }).first();
+    const brief = page.getByRole('textbox', { name: /^选题简报 / }).first();
+    await title.fill('');
+    await page.getByRole('button', { name: '保存这一版候选', exact: true }).click();
+    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' ')).toContain('标题须为');
+    expect(await page.evaluate(k => localStorage.getItem(k), key)).toBeNull();
+    expect(await title.isEnabled()).toBe(true);
+    await title.fill('用户修正后的标题');
+    await brief.fill('');
+    await page.getByRole('button', { name: '保存这一版候选', exact: true }).click();
+    expect(await brief.isEnabled()).toBe(true);
+    expect(await page.evaluate(k => localStorage.getItem(k), key)).toBeNull();
+    await brief.fill('用户补全的简报');
+    const input = page.getByRole('textbox', { name: '消息', exact: true });
+    await input.fill('a'.repeat(8001));
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' ')).toContain('1–8000');
+    expect(await topicIdentity(f.actor)).toEqual(identity);
+    expect(await input.isEnabled()).toBe(true);
+    // A record frozen by the earlier UI before its schema rejection is equally
+    // provable invalid; release it without dispatch while retaining the edit.
+    const invalidId = randomUUID();
+    await page.evaluate(({ key, id, requestId, sourceVersionId }) => {
+      const candidate = JSON.parse(localStorage.getItem('opc-topic-candidate:' + id)!);
+      localStorage.setItem(key, JSON.stringify({ kind: 'save', request: {
+        draftId: candidate.body.length ? location.pathname.split('/')[2] : '', requestId,
+        expectedVersion: 0, sourceVersionId, body: candidate.body.map((row: object) => ({ ...row, title: '' })),
+      } }));
+    }, { key, id: workspace.sessionId, requestId: invalidId, sourceVersionId: workspace.sourceVersionId });
+    await page.reload();
+    await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
+    await expect.poll(() => page.evaluate(k => localStorage.getItem(k), key), { timeout: 30000 }).toBeNull();
+    expect(await title.isEnabled()).toBe(true);
+    expect(await page.evaluate(k => localStorage.getItem(k), key + ':invalid:' + invalidId)).not.toBeNull();
+    await page.getByRole('button', { name: '保存这一版候选', exact: true }).click();
+    await page.getByRole('heading', { name: '第 1 版 · 2 个选题', exact: true }).waitFor();
+    expect((await f.service.read(f.d.draftId)).plans[0].body[0].title).toBe('用户修正后的标题');
+    expect(await topicIdentity(f.actor)).toEqual(identity);
+    await input.fill('请修改第一条选题');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await expect.poll(async () => (await topicIdentity(f.actor)).topicExecutions, { timeout: 30000 }).toBe(2);
+  } finally { await browser.close(); }
+}, 300000);

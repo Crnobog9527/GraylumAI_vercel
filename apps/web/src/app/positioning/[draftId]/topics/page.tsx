@@ -19,6 +19,7 @@ import { ArrowLeft, Bot, Loader2, Send, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { trpc } from '@/trpc/client';
+import { opcPlan, opcHandoff, opcTopicTurn } from '@repo/api/src/shared/opcRequests';
 
 type PlanItem = {
   id: string;
@@ -225,6 +226,23 @@ export default function TopicWorkspacePage() {
         const raw = localStorage.getItem(storageKey);
         const op: Operation = raw ? JSON.parse(raw) : proposed;
         if (op.request.draftId !== draftId) throw new Error('OPC_REQUEST_CONFLICT');
+        // Use the exact server schemas before freezing or dispatching. Even an
+        // invalid pre-upgrade pending record can be released without guessing
+        // whether a transport failure committed a valid business operation.
+        const valid = op.kind === 'chat' ? opcTopicTurn.safeParse(op.request)
+          : op.kind === 'save' ? opcPlan.safeParse(op.request)
+          : op.kind === 'adopt' ? opcHandoff.safeParse(op.request) : null;
+        if (!valid?.success) {
+          if (raw) {
+            localStorage.setItem(storageKey + ':invalid:' + op.request.requestId, raw);
+            localStorage.removeItem(storageKey);
+            setPending(null);
+          }
+          setError(op.kind === 'chat'
+            ? '消息须为 1–8000 字，请修改后重试。本次未发送。'
+            : '候选格式不完整：标题须为 1–160 字，简报须为 1–2000 字，请核对账号、日期和内容后重试。本次未发送。');
+          return;
+        }
         localStorage.setItem(storageKey, JSON.stringify(op));
         setPending(op);
         try {
