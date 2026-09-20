@@ -3618,8 +3618,13 @@ it("OPC: a published revision's per-field elicitation reaches the read schema an
  * confirmed and the round not published yet. No mentor turn is involved, so the
  * only money this draft can spend is its own plan generation.
  */
-async function finalized(n = 3) {
-  const f = await fixture(n);
+async function finalized(n = 3, withTopics = false) {
+  const f = await fixture(
+    n,
+    false,
+    0,
+    withTopics ? (flow) => { flow.planResources = ["SKILL.md"]; } : undefined,
+  );
   const d = await f.service.start({
     requestId: randomUUID(),
     registration: f.registration,
@@ -3789,7 +3794,9 @@ const CANDIDATE_HEADING = "AI 计划候选 · 尚未替换你的编辑";
 it("OPC: Stage C1 the final positioning confirmation asks first and spends nothing until an explicit continue generates one candidate", async () => {
   const { chromium } =
     await import("../../../../../apps/web/node_modules/@playwright/test");
-  const f = await finalized(3);
+  // This draft's method declares topic resources, so the explicit consent may
+  // bind the topic workspace.
+  const f = await finalized(3, true);
   await planFixtureModel(f.moduleId);
   const browser = await chromium.launch({
     executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -3845,25 +3852,37 @@ it("OPC: Stage C1 the final positioning confirmation asks first and spends nothi
     expect(asked.planExecutions).toBe(0);
     expect(asked.planRuns).toBe(0);
     expect(asked.reserves).toBe(0);
-    // The explicit continue is the only path that starts the generation.
+    // The explicit continue enters the bound topic workspace. It binds the
+    // confirmed version, the pinned method revision and a dedicated Session,
+    // and dispatches nothing by itself.
     await page
       .getByRole("button", { name: "继续生成第一周选题", exact: true })
       .click();
     await dialog
       .getByRole("button", { name: "继续生成第一周选题", exact: true })
       .click();
-    await page.waitForURL((url) => url.pathname.endsWith(draftPath + "/plan"));
-    // The user clicks nothing else: no generation button, no topic row.
-    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
-    expect(await page.getByRole("textbox", { name: "title 0", exact: true }).count()).toBe(0);
-    // The envelope is retained while the candidate waits for a decision.
-    expect(await page.evaluate((k) => sessionStorage.getItem(k), envelopeKey)).not.toBeNull();
+    await page.waitForURL((url) => url.pathname.endsWith(draftPath + "/topics"));
+    await page
+      .getByRole("heading", { name: "第一周选题工作对话", exact: true })
+      .waitFor();
+    const bound = (
+      await sql.query(
+        "select w.source_version_id::text v, w.session_id::text s, vp.round_id::text r from opc_topic_workspaces w join artifact_versions vp on vp.id=w.source_version_id where w.draft_id=$1",
+        [f.d.draftId],
+      )
+    ).rows[0] as { v: string; s: string; r: string };
+    // Bound to the confirmed version of this round, in its own Session.
+    expect(bound.r).toBe(f.d.roundId);
+    expect(
+      (await sql.query("select scope from runtime_sessions where id=$1", [bound.s]))
+        .rows[0].scope,
+    ).toEqual({ kind: "positioning_topic", draftId: f.d.draftId });
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), envelopeKey)).toBeNull();
     const after = await planIdentity(f.actor, f.d.draftId);
-    // Exactly one plan execution, one BILL2 run and one reserve came from the
-    // explicit consent, and nothing else was created.
-    expect(after.planExecutions - before.planExecutions).toBe(1);
-    expect(after.planRuns - before.planRuns).toBe(1);
-    expect(after.reserves - before.reserves).toBe(1);
+    // The binding is free: no plan execution, no run and no reserve.
+    expect(after.planExecutions - before.planExecutions).toBe(0);
+    expect(after.planRuns - before.planRuns).toBe(0);
+    expect(after.reserves - before.reserves).toBe(0);
     expect(after.plans).toBe(0);
     expect(after.accounts).toBe(0);
     expect(after.workItems).toBe(0);
@@ -6398,6 +6417,20 @@ it("OPC: a local record without consent is checked on the server and only recove
     await browser.close();
   }
 }, 300000);
+it("OPC: the retained-request state read denies another actor's draft and reports this actor's own verdict", async () => {
+  const mine = await publishedDraft(3, true);
+  const other = await publishedDraft(3, true);
+  const requestId = randomUUID();
+  // Another actor's draft is a denied read, never someone else's workspace.
+  await expect(
+    mine.service.planRequestState(other.d.draftId, requestId),
+  ).rejects.toThrow(/OPC_DENIED/);
+  // The server's own verdict for this actor: this exact request was never
+  // admitted, so recovery will admit it rather than replay a committed reply.
+  await expect(
+    mine.service.planRequestState(mine.d.draftId, requestId),
+  ).resolves.toMatchObject({ admitted: false, requestId });
+});
 it.each(["save", "confirm"] as const)(
   "OPC: workbench %s conflict recovery preserves unknown-outcome replay",
   async targetPhase => {

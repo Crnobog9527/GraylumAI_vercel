@@ -339,6 +339,8 @@ export default function PositioningDraft({
     { draftId, requestId: retainedPlan?.requestId ?? "" },
     { enabled: Boolean(retainedPlan?.requestId) },
   );
+  /** The bound topic workspace of this draft (the consented entry target). */
+  const bindTopic = trpc.opc.bindTopicWorkspace.useMutation();
   const planEnvelopeKey = "opc-plan-generation:" + draftId;
   const hasUnsavedInformation = Object.keys(infoEdits).length > 0;
   const d = read.data,
@@ -1375,6 +1377,31 @@ export default function PositioningDraft({
           : null;
     // A replaced local record is preserved verbatim instead of being lost.
     if (!retainedRequest && retained) archiveRetainedPlanRecord();
+    // A fresh intent enters the bound topic workspace: the server freezes the
+    // confirmed version, the pinned method revision and its declared topic
+    // resources, and refuses when the method declares none. Nothing is
+    // dispatched here — the workspace's own turn is the paid action.
+    if (!retainedRequest) {
+      try {
+        await bindTopic.mutateAsync({
+          draftId,
+          requestId: crypto.randomUUID(),
+          sourceVersionId: d.report?.id ?? "",
+        });
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : "";
+        setConsentOpen(false);
+        setNotice(
+          message.includes("OPC_TOPIC_SKILL_MISSING")
+            ? "当前定位方法没有声明可用的选题方法资源，无法开始选题工作对话。请联系管理员配置后再继续；本次没有任何调用或花费。"
+            : "暂时无法建立选题工作空间。你的正式定位与历史保持原样，可以稍后重试。",
+        );
+        return;
+      }
+      setConsentOpen(false);
+      router.push(`/positioning/${draftId}/topics`);
+      return;
+    }
     const request: PlanRequest = retainedRequest ?? {
       draftId,
       requestId: crypto.randomUUID(),
