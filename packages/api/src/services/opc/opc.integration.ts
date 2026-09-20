@@ -5911,3 +5911,355 @@ it("OPC: published revision stays immutable while its revised round owns reach a
     await browser.close();
   }
 }, 300000);
+
+it("OPC: two real tabs retain review, resolve edits and recover one reply after real logout", async () => {
+  const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const fields = ["goal", "extra0", "extra1", "extra2", "extra3"];
+  const f = await fixture(3, false, 0, flow => {
+    flow.steps[0].information = fields.map(id => ({
+      id, title: "C " + id, required: id === "goal", profileKey: "c_" + id,
+    }));
+  });
+  const started = await f.service.start({
+    requestId: randomUUID(), registration: f.registration, mode: "mentor",
+  });
+  const { draftId, projectId, sessionId, roundId } = started as {
+    draftId: string; projectId: string; sessionId: string; roundId: string;
+  };
+  for (const id of [draftId, projectId, sessionId, roundId]) {
+    if (typeof id !== "string" || !id) throw new Error("missing C fixture identity");
+  }
+  const app = process.env.V3_LOCAL_APP;
+  if (!app || !["127.0.0.1", "localhost", "[::1]"].includes(new URL(app).hostname))
+    throw new Error("C requires the existing loopback runner");
+  const origin = new URL(app).origin;
+  const draftPath = "/positioning/" + draftId;
+  const read = () => f.service.read(draftId);
+  type Answer = {
+    value: string; status: "confirmed" | "deferred" | "unknown" | "provisional";
+    nature: "fact" | "unknown";
+  };
+  const seeded: Record<string, Answer> = {
+    goal: { value: "C original goal", status: "confirmed", nature: "fact" },
+    extra0: { value: "C known audience", status: "confirmed", nature: "fact" },
+    extra1: { value: "C needs source material", status: "deferred", nature: "fact" },
+    extra2: { value: "", status: "unknown", nature: "unknown" },
+    extra3: { value: "", status: "unknown", nature: "unknown" },
+  };
+  // Make q4 durably reached without ever admitting an opening for it, then
+  // edit q1 back to provisional. Only the existing information RPC is used.
+  await f.service.information({
+    draftId, stepId: "step-0", requestId: randomUUID(),
+    expectedVersion: (await read()).snapshot.steps["step-0"].version, values: seeded,
+  });
+  const values = structuredClone(seeded);
+  values.goal = { ...values.goal, value: "C editable goal", status: "provisional" };
+  await f.service.information({
+    draftId, stepId: "step-0", requestId: randomUUID(),
+    expectedVersion: (await read()).snapshot.steps["step-0"].version, values,
+  });
+  const reached = ["goal", "extra0", "extra1", "extra2"];
+  const baseOtherValues = structuredClone(values);
+  delete baseOtherValues.goal;
+  const opening: ExpectedMentorEffect = {
+    stepId: "step-0", questionId: "goal", opening: true, input: OPENING_INPUT,
+  };
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  });
+  let phase = "browser setup";
+  const pageErrors: string[] = [], externalRequests: string[] = [];
+  let page: Page | undefined;
+  let releaseHeld: (() => void) | undefined;
+  let holdSave = false, dropExecutionReply = false;
+  const localInput = "C tab one keeps this exact edit";
+  const remoteInput = "C tab two saved this different edit";
+  const stepKey = "opc-step:" + draftId + ":step-0";
+  const form = (p: Page) => p.locator("section[aria-label='本步填写信息']");
+  const nav = (p: Page) => p.getByRole("navigation", { name: "本步骤已到达的问题" });
+  const box = (p: Page, id = "goal") => form(p).getByRole("textbox", { name: "C " + id, exact: true });
+  const show = async (p: Page, id: string, expectedValue: string) => {
+    const number = fields.indexOf(id) + 1;
+    if (number < 1) throw new Error("unknown C question");
+    await expect.poll(() => form(p).getByRole("heading", { level: 3 }).count(), { timeout: 60000 }).toBe(1);
+    await expect.poll(() => form(p).getByRole("heading", { level: 3 }).textContent(), { timeout: 60000 })
+      .toMatch(new RegExp("^1\\." + number + " C " + id + "(?:\\s|[（(]|$)"));
+    await expect.poll(() => box(p, id).count()).toBe(1);
+    await expect.poll(() => box(p, id).inputValue(), { timeout: 30000 }).toBe(expectedValue);
+    await expect.poll(() => nav(p).getByRole("button").count()).toBe(4);
+    expect(await nav(p).getByRole("button", { name: /C extra3/ }).count()).toBe(0);
+    expect(new URL(p.url()).pathname).toBe(draftPath);
+  };
+  const assertBinding = async () => {
+    const d = await read();
+    expect({ draftId: d.draftId, projectId: d.projectId, sessionId: d.sessionId, roundId: d.roundId })
+      .toEqual({ draftId, projectId, sessionId, roundId });
+    expect(d.information["step-0"].reached).toEqual(reached);
+    const otherValues = { ...d.information["step-0"].values };
+    delete otherValues.goal;
+    expect(otherValues).toEqual(baseOtherValues);
+    return d;
+  };
+  const countInformation = async () => (await sql.query<{ n: number }>(
+    "select count(*)::int n from artifact_requests where project_id=$1 and round_id=$2 and action='opc_information' and payload->>'stepId'='step-0'",
+    [projectId, roundId],
+  )).rows[0].n;
+  const saved = async (p: Page, value: string, version: number) => {
+    await expect.poll(() => box(p).inputValue(), { timeout: 30000 }).toBe(value);
+    await expect.poll(async () => {
+      const d = await read();
+      return { value: d.information["step-0"].values.goal.value,
+        status: d.information["step-0"].values.goal.status,
+        version: d.snapshot.steps["step-0"].version };
+    }, { timeout: 30000 }).toEqual({ value, status: "provisional", version });
+    await expect.poll(() => form(p).getByRole("status").allTextContents(), { timeout: 30000 })
+      .toContain("已自动保存");
+    await expect.poll(() => p.evaluate(id => {
+      if (sessionStorage.getItem("opc-information-autosave:" + id + ":step-0")) return false;
+      const raw = sessionStorage.getItem("opc-edit:" + id);
+      if (!raw) return false;
+      const state: unknown = JSON.parse(raw);
+      return Boolean(state && typeof state === "object" && "infoEdits" in state &&
+        state.infoEdits && typeof state.infoEdits === "object" && !Object.hasOwn(state.infoEdits, "step-0"));
+    }, draftId), { timeout: 30000 }).toBe(true);
+  };
+  const login = async (p: Page) => {
+    const settings = p.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), { timeout: 60000 });
+    await p.goto(app + "/login");
+    await settings;
+    await p.getByPlaceholder("name@example.com").fill(f.email);
+    await p.getByPlaceholder("输入你的密码").fill(f.password);
+    expect(await p.getByPlaceholder("name@example.com").inputValue()).toBe(f.email);
+    expect(await p.getByPlaceholder("输入你的密码").inputValue()).toBe(f.password);
+    await p.getByRole("button", { name: "登录", exact: true }).last().click();
+    await p.waitForURL(url => url.origin === origin && !url.pathname.startsWith("/login"), { timeout: 60000 });
+  };
+  const isProcedure = (url: string, name: string) => {
+    const u = new URL(url);
+    return u.origin === origin && u.pathname.startsWith("/api/trpc/") &&
+      decodeURIComponent(u.pathname.slice("/api/trpc/".length)).split(",").includes(name);
+  };
+  const readEnvelope = async (p: Page) => {
+    const raw = await p.evaluate(key => sessionStorage.getItem(key), stepKey);
+    if (!raw) throw new Error("the original mentor request must remain retained");
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !("request" in parsed) ||
+        !parsed.request || typeof parsed.request !== "object" ||
+        !("requestId" in parsed.request) || typeof parsed.request.requestId !== "string")
+      throw new Error("invalid retained request shape");
+    return { raw, requestId: parsed.request.requestId, request: parsed.request };
+  };
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", route => {
+      const u = new URL(route.request().url());
+      if (!["127.0.0.1", "localhost", "[::1]"].includes(u.hostname)) {
+        externalRequests.push(u.origin);
+        return route.abort("blockedbyclient");
+      }
+      return route.continue();
+    });
+    page = await context.newPage();
+    const tab1 = page;
+    tab1.setDefaultTimeout(30000);
+    tab1.on("pageerror", error => pageErrors.push(error.message));
+    phase = "login and one shared opening";
+    await login(tab1);
+    await tab1.goto(app + draftPath);
+    await show(tab1, "goal", values.goal.value);
+    const initialIdentities = await expectExactMentorEffects(f.actor, draftId, roundId, [opening]);
+    expect(initialIdentities).toHaveLength(1);
+    const [openingExecution] = JSON.parse(initialIdentities[0]) as [string, string, string, string];
+    const openingMessage = await mentorMessageCheck(tab1, f.actor, openingExecution);
+    await openingMessage();
+    const tab2 = await context.newPage();
+    tab2.setDefaultTimeout(30000);
+    tab2.on("pageerror", error => pageErrors.push(error.message));
+    await tab2.goto(app + draftPath);
+    await show(tab2, "goal", values.goal.value);
+    await (await mentorMessageCheck(tab2, f.actor, openingExecution))();
+    expect(await expectExactMentorEffects(f.actor, draftId, roundId, [opening])).toEqual(initialIdentities);
+
+    phase = "real second-tab update during historical review";
+    await nav(tab1).getByRole("button", { name: /C extra2/ }).click();
+    await show(tab1, "extra2", "");
+    expect(await tab1.getByRole("button", { name: "确认本题并继续", exact: true }).isDisabled()).toBe(true);
+    const beforeRemote = (await read()).snapshot.steps["step-0"].version;
+    const firstRemote = "C updated while the other tab reviews question four";
+    await box(tab2).fill(firstRemote);
+    await saved(tab2, firstRemote, beforeRemote + 1);
+    await tab1.getByRole("button", { name: "重新读取状态", exact: true }).click();
+    await show(tab1, "extra2", "");
+    expect(await tab1.getByRole("button", { name: "确认本题并继续", exact: true }).isDisabled()).toBe(true);
+    expect((await assertBinding()).information["step-0"].values.goal.value).toBe(firstRemote);
+    await nav(tab1).getByRole("button", { name: /C goal/ }).click();
+    await show(tab1, "goal", firstRemote);
+
+    phase = "two real writes produce an explicit conflict";
+    let sawHeldSave = false;
+    const gate = new Promise<void>(resolve => { releaseHeld = resolve; });
+    await tab1.route("**/api/trpc/**", async route => {
+      if (holdSave && route.request().method() === "POST" && isProcedure(route.request().url(), "opc.information")) {
+        holdSave = false;
+        sawHeldSave = true;
+        await gate; // Delay the real request; never fabricate a successful write.
+        await route.continue();
+        return;
+      }
+      await route.fallback();
+    });
+    const conflictVersion = (await read()).snapshot.steps["step-0"].version;
+    const conflictCount = await countInformation();
+    holdSave = true;
+    await box(tab1).fill(localInput);
+    await expect.poll(() => sawHeldSave, { timeout: 30000 }).toBe(true);
+    await box(tab2).fill(remoteInput);
+    await saved(tab2, remoteInput, conflictVersion + 1);
+    releaseHeld!();
+    await expect.poll(() => form(tab1).getByRole("alert").textContent(), { timeout: 30000 })
+      .toContain("其他窗口修改了相同字段");
+    expect(await box(tab1).inputValue()).toBe(localInput);
+    expect((await read()).information["step-0"].values.goal.value).toBe(remoteInput);
+    expect(await countInformation()).toBe(conflictCount + 1);
+    await form(tab1).getByRole("button", { name: "保留我的这些修改并重新保存", exact: true }).click();
+    await saved(tab1, localInput, conflictVersion + 2);
+    expect(await countInformation()).toBe(conflictCount + 2);
+    await show(tab1, "goal", localInput);
+    expect(await expectExactMentorEffects(f.actor, draftId, roundId, [opening])).toEqual(initialIdentities);
+    await tab2.close();
+
+    phase = "twelve persisted edits without truncating historical reach";
+    const editBase = (await read()).snapshot.steps["step-0"].version;
+    const requestBase = await countInformation();
+    let finalValue = localInput;
+    for (let index = 1; index <= 12; index++) {
+      finalValue = "C persisted edit " + index + " -- exact value";
+      await box(tab1).fill(finalValue);
+      await saved(tab1, finalValue, editBase + index);
+      expect(await countInformation()).toBe(requestBase + index);
+      await assertBinding();
+    }
+    await tab1.reload();
+    await show(tab1, "goal", finalValue);
+    await openingMessage();
+    expect(await expectExactMentorEffects(f.actor, draftId, roundId, [opening])).toEqual(initialIdentities);
+    expect((await read()).snapshot.steps["step-0"].version).toBe(editBase + 12);
+    const scopedCount = await countInformation();
+    // Observe the same scoped SELECT used by 0111. Do not require an index scan
+    // on a tiny fixture, or claim a latency guarantee from this query plan.
+    const planRows = (await sql.query<{ "QUERY PLAN": Array<Record<string, unknown>> }>(
+      "explain (analyze, buffers, format json) select a.payload->'values' from artifact_requests a where a.project_id=$1 and a.round_id=$2 and a.action='opc_information' and a.payload->>'stepId'=$3",
+      [projectId, roundId, "step-0"],
+    )).rows;
+    const explain = planRows[0]?.["QUERY PLAN"]?.[0];
+    const plan = explain?.Plan;
+    if (!plan || typeof plan !== "object" || !("Actual Rows" in plan))
+      throw new Error("missing actual scoped historical query result");
+    expect(plan["Actual Rows"]).toBe(scopedCount);
+    expect(scopedCount).toBe(requestBase + 12);
+    expect((await assertBinding()).information["step-0"].values.goal.value).toBe(finalValue);
+
+    phase = "lose a completed explicit reply without creating a new request";
+    let sawSuccessfulDroppedReply = false;
+    await tab1.route("**/api/trpc/**", async route => {
+      if (dropExecutionReply && route.request().method() === "POST" && isProcedure(route.request().url(), "runtime.execute")) {
+        const response = await route.fetch(); // Real server execution and settlement happen first.
+        const succeeded = response.ok();
+        await route.abort("failed");
+        if (succeeded) sawSuccessfulDroppedReply = true;
+        return;
+      }
+      await route.fallback();
+    });
+    const mentorInput = "C request: explain this saved goal without changing my confirmed audience.";
+    dropExecutionReply = true;
+    await tab1.getByRole("textbox", { name: "给导师的回复", exact: true }).fill(mentorInput);
+    await tab1.getByRole("button", { name: "发送", exact: true }).click();
+    const explicit: ExpectedMentorEffect = {
+      stepId: "step-0", questionId: "goal", opening: false, input: mentorInput,
+    };
+    const expected = [opening, explicit];
+    const paidIdentities = await expectExactMentorEffects(f.actor, draftId, roundId, expected);
+    await expect.poll(() => sawSuccessfulDroppedReply, { timeout: 30000 }).toBe(true);
+    const retained = await readEnvelope(tab1);
+    expect(retained.request).toEqual({
+      draftId, stepId: "step-0", purpose: "mentor", requestId: retained.requestId,
+      input: mentorInput, questionId: "goal",
+    });
+    const explicitRows = paidIdentities.map(identity => JSON.parse(identity) as [string, string, string, string])
+      .filter(identity => identity[1] === retained.requestId);
+    expect(explicitRows).toHaveLength(1);
+    const explicitExecution = explicitRows[0][0];
+    expect(explicitExecution).not.toBe(openingExecution);
+    await expect.poll(() => tab1.getByRole("button", { name: "继续核对这条原请求", exact: true }).isEnabled(), { timeout: 30000 })
+      .toBe(true);
+
+    phase = "real website logout in the original tab";
+    // Positioning has no user-menu header. Use the existing profile page in
+    // THIS page/context to invoke AppHeader's real supabase.auth.signOut().
+    await tab1.goto(app + "/profile");
+    expect((await readEnvelope(tab1)).raw).toBe(retained.raw);
+    await tab1.getByRole("button", { name: "打开用户菜单", exact: true }).click();
+    const logoutResponse = tab1.waitForResponse(response => {
+      const url = new URL(response.url());
+      return ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) &&
+        /\/logout\/?$/.test(url.pathname) && response.request().method() === "POST";
+    }, { timeout: 60000 });
+    await tab1.getByRole("menuitem", { name: "退出登录", exact: true }).click();
+    expect((await logoutResponse).ok()).toBe(true);
+    await tab1.waitForURL(url => url.origin === origin && url.pathname === "/landing", { timeout: 60000 });
+    await tab1.goto(app + draftPath);
+    await tab1.waitForURL(url => url.origin === origin && url.pathname === "/login", { timeout: 60000 });
+    expect(await tab1.locator("section[aria-label='本步填写信息']").count()).toBe(0);
+    expect((await readEnvelope(tab1)).raw).toBe(retained.raw);
+    expect(await expectExactMentorEffects(f.actor, draftId, roundId, expected)).toEqual(paidIdentities);
+
+    phase = "same-page login and same-request recovery";
+    dropExecutionReply = false;
+    await login(tab1);
+    // Global sign-out also revokes the fixture service client's refresh token.
+    // Restore that independent probe only after the browser itself logged in.
+    const probeLogin = await f.user.auth.signInWithPassword({ email: f.email, password: f.password });
+    if (probeLogin.error) throw probeLogin.error;
+    expect(probeLogin.data.user?.id).toBe(f.actor);
+    await tab1.goto(app + draftPath);
+    await show(tab1, "goal", finalValue);
+    expect((await readEnvelope(tab1)).raw).toBe(retained.raw);
+    expect(await expectExactMentorEffects(f.actor, draftId, roundId, expected)).toEqual(paidIdentities);
+    await tab1.getByRole("button", { name: "继续核对这条原请求", exact: true }).click();
+    await expect.poll(() => tab1.evaluate(key => sessionStorage.getItem(key), stepKey), { timeout: 60000 }).toBeNull();
+    const explicitMessage = await mentorMessageCheck(tab1, f.actor, explicitExecution);
+    await explicitMessage();
+    await show(tab1, "goal", finalValue);
+    expect(await expectExactMentorEffects(f.actor, draftId, roundId, expected)).toEqual(paidIdentities);
+    await tab1.reload();
+    await show(tab1, "goal", finalValue);
+    await explicitMessage();
+    expect(await expectExactMentorEffects(f.actor, draftId, roundId, expected)).toEqual(paidIdentities);
+    const final = await assertBinding();
+    expect(final.snapshot.steps["step-0"].version).toBe(editBase + 12);
+    expect(final.information["step-0"].values.goal.status).toBe("provisional");
+    expect(await countInformation()).toBe(scopedCount);
+    expect((await sql.query<{ n: number }>(
+      "select count(*)::int n from opc_turns t join runtime_executions e on e.session_id=t.session_id and e.request_id=t.request_id where t.draft_id=$1 and t.round_id=$2 and e.payload->'request'->'selection'->>'task' in ('opc-opening:extra2','opc-question:extra2','opc-opening:extra3','opc-question:extra3')",
+      [draftId, roundId],
+    )).rows[0].n).toBe(0);
+    expect(pageErrors).toEqual([]);
+    expect(externalRequests).toEqual([]);
+    console.log("OPC_C_RECOVERY " + JSON.stringify({
+      draftId, roundId, sessionId, edits: 12, reached,
+      executions: 2, runs: 2, reserves: 2, requestId: retained.requestId,
+      executionId: explicitExecution, samePageLogout: true,
+      scopedRows: scopedCount, queryPlan: plan,
+    }));
+  } catch (error) {
+    console.error("C_FAILURE", { phase, message: String(error), pathname: page ? new URL(page.url()).pathname : null });
+    throw error;
+  } finally {
+    holdSave = false;
+    dropExecutionReply = false;
+    releaseHeld?.();
+    await browser.close();
+  }
+}, 300000);
