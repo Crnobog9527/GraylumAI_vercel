@@ -724,7 +724,7 @@ export default function PositioningDraft({
     };
   }, [draftId, hydratedDraft, infoEdits]);
   useEffect(() => {
-    if (!d || !history.data) return;
+    if (!d || !history.data || hydratedDraft !== draftId) return;
     const executions = history.data.executions ?? [];
     for (const execution of executions as Array<{
       executionId: string;
@@ -739,8 +739,10 @@ export default function PositioningDraft({
       )
         continue;
       const turn = d.turns?.find(
-        (item: { executionId: string; stepId: string; kind: string }) =>
+        (item: { executionId: string; stepId: string; kind: string; roundId?: string; informationVersion?: number }) =>
           item.executionId === execution.executionId &&
+          item.roundId === d.roundId &&
+          item.informationVersion === d.snapshot.steps[item.stepId]?.version &&
           (item.kind === "mentor" || item.kind === "opening"),
       );
       if (!turn) continue;
@@ -759,6 +761,10 @@ export default function PositioningDraft({
       if (!Object.keys(accepted).length || parsed.targetStepId !== turn.stepId ||
           d.snapshot.state !== "draft" || d.snapshot.steps[turn.stepId].valid) continue;
       setInfoEdits((old) => {
+        // A saved edit advances the server version; an unsaved edit (including
+        // an intentional empty value) also owns this form. History is still
+        // readable and its suggestion can be adopted explicitly.
+        if (old[turn.stepId]) return old;
         const values = Object.fromEntries(
           schema.map((field: { id: string }) => [
             field.id,
@@ -794,7 +800,7 @@ export default function PositioningDraft({
         return next;
       });
     }
-  }, [d, history.data, activeQuestions]);
+  }, [d, history.data, activeQuestions, hydratedDraft, draftId]);
   /**
    * The Agent opens the current question itself, so a beginner is never asked to
    * send a placeholder like "你好" or "继续" first. This runs on first entry into

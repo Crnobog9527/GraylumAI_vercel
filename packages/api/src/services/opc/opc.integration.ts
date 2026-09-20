@@ -2250,7 +2250,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     await adopt.waitFor();
     expect((await f.service.read(draftId)).information["step-0"].values.goal.value).toBe("A concrete user decision");
     await adopt.click();
-    await expect.poll(async() => (await f.service.read(draftId)).information["step-0"].values.goal.value).toBe("改为帮助独立开发者");
+    await expect.poll(async() => (await f.service.read(draftId)).information["step-0"].values.goal.value, {timeout:30000}).toBe("改为帮助独立开发者");
     await page.reload();
     // Explicitly reopen the revised step after reload before inspecting its
     // form; do not assume the asynchronous selection was already persisted.
@@ -7222,3 +7222,107 @@ it("OPC: topic invalid edits and legacy invalid pending records remain editable 
     await expect.poll(async () => (await topicIdentity(f.actor)).topicExecutions, { timeout: 30000 }).toBe(2);
   } finally { await browser.close(); }
 }, 300000);
+
+it.each([false, true])("OPC: mentor history preserves a saved empty edit after refresh across revision %s", async (reviseRound) => {
+  const f = await fixture(1);
+  await planFixtureModel(f.moduleId);
+  const d = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: 'mentor' });
+  const { browser, page } = await planBrowser({ ...f, d });
+  const path = '/positioning/' + d.draftId;
+  const read = () => f.service.read(d.draftId);
+  const title = f.flow.steps[0].information![0].title;
+  const reply = '我想帮助刚接触短视频的人';
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + path);
+    await page.getByRole('log', { name: '完整导师消息' }).getByText('导师主动引导 · 1.1', { exact: true }).waitFor();
+    const input = page.getByRole('textbox', { name: '给导师的回复', exact: true });
+    await expect.poll(() => input.isEnabled(), { timeout: 30000 }).toBe(true);
+    await input.fill(reply);
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await expect.poll(async () => (await read()).information['step-0'].values?.goal?.value, { timeout: 30000 }).toBe(reply);
+    await expect.poll(() => input.inputValue(), { timeout: 30000 }).toBe('');
+    const oldIdentity = await planIdentityRows(f.actor);
+    if (reviseRound) {
+      // Publish/revise via the real business operations, then clear the
+      // inherited field through the actual page in the new round.
+      let state = (await read()).snapshot.steps['step-0'];
+      await f.artifacts.execute({ action: 'save', projectId: d.projectId, roundId: d.roundId,
+        requestId: randomUUID(), stepId: 'step-0', expectedVersion: state.version, body: 'Owner confirmed positioning for recovery test', evidenceIds: [] });
+      state = (await read()).snapshot.steps['step-0'];
+      await f.service.information({ draftId: d.draftId, stepId: 'step-0', requestId: randomUUID(), expectedVersion: state.version,
+        values: { goal: { status: 'confirmed', nature: 'decision', value: reply } } });
+      state = (await read()).snapshot.steps['step-0'];
+      await f.artifacts.execute({ action: 'confirm', projectId: d.projectId, roundId: d.roundId, requestId: randomUUID(),
+        stepId: 'step-0', expectedVersion: state.version, expectedReviewVersion: state.reviewVersion });
+      state = (await read()).snapshot.steps['step-0'];
+      await f.artifacts.execute({ action: 'publish', projectId: d.projectId, roundId: d.roundId, requestId: randomUUID(),
+        expectedSteps: { 'step-0': { version: state.version, reviewVersion: state.reviewVersion } } });
+      await f.service.revise(d.draftId, randomUUID(), d.roundId);
+      await page.reload();
+    }
+    const field = page.getByRole('textbox', { name: title, exact: true });
+    await expect.poll(() => field.inputValue(), { timeout: 30000 }).toBe(reply);
+    const beforeClear = (await read()).snapshot.steps['step-0'].version;
+    await field.fill('');
+    await expect.poll(async () => {
+      const saved = await read();
+      return [saved.snapshot.steps['step-0'].version, saved.information['step-0'].values.goal.value];
+    }, { timeout: 30000 }).toEqual([beforeClear + 1, '']);
+    if (reviseRound) await expect.poll(async () => (await read()).turns.filter((t: { roundId: string; kind: string }) => t.roundId !== d.roundId && t.kind === 'opening').length, { timeout: 30000 }).toBe(1);
+    await page.reload();
+    await page.getByRole('log', { name: '完整导师消息' }).getByText(reply, { exact: true }).waitFor();
+    await page.getByRole('button', { name: '重新读取状态', exact: true }).click();
+    await expect.poll(() => field.inputValue(), { timeout: 30000 }).toBe('');
+    // Wait through the page's autosave interval after history hydration. This
+    // would allow the old reply to silently refill and persist the field.
+    await page.waitForTimeout(1500);
+    const after = await read();
+    expect(after.information['step-0'].values.goal.value).toBe('');
+    expect(after.snapshot.steps['step-0'].version).toBe(beforeClear + 1);
+    expect((await planIdentityRows(f.actor)).filter(row => oldIdentity.includes(row))).toEqual(oldIdentity);
+    if (!reviseRound) expect(await planIdentityRows(f.actor)).toEqual(oldIdentity);
+    expect(after.turns.find((t: { kind: string }) => t.kind === 'mentor').informationVersion).toBe(0);
+    const { readFile } = await import('node:fs/promises');
+    await sql.query(await readFile(new URL('../../../../db/migrations/0116_opc_mentor_projection_basis.sql', import.meta.url), 'utf8'));
+    expect((await read()).turns).toEqual(after.turns);
+    const other = await fixture(1);
+    await expect(other.service.read(d.draftId)).rejects.toThrow('OPC_DENIED');
+  } finally { await browser.close(); }
+}, 240000);
+
+it("OPC: mentor lost reply still projects once from its unchanged frozen information basis", async () => {
+  const f = await fixture(1);
+  await planFixtureModel(f.moduleId);
+  const d = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: 'mentor' });
+  const { browser, page } = await planBrowser({ ...f, d });
+  const reply = '我想帮助刚接触短视频的人';
+  let lost = 0;
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + d.draftId);
+    await page.getByRole('log', { name: '完整导师消息' }).getByText('导师主动引导 · 1.1', { exact: true }).waitFor();
+    const input = page.getByRole('textbox', { name: '给导师的回复', exact: true });
+    await expect.poll(() => input.isEnabled(), { timeout: 30000 }).toBe(true);
+    await page.route('**/api/trpc/runtime.view*', route => route.abort());
+    await page.route('**/api/trpc/runtime.execute*', async route => {
+      const response = await route.fetch(); expect(response.ok()).toBe(true);
+      await route.abort(); lost += 1;
+    });
+    await input.fill(reply);
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await expect.poll(() => lost, { timeout: 30000 }).toBe(1);
+    const identity = await planIdentityRows(f.actor);
+    expect(identity).toHaveLength(2);
+    expect((await f.service.read(d.draftId)).information['step-0'].values?.goal?.value ?? '').toBe('');
+    await page.unroute('**/api/trpc/runtime.execute*');
+    await page.unroute('**/api/trpc/runtime.view*');
+    await page.reload();
+    await page.getByRole('button', { name: '继续核对这条原请求', exact: true }).click();
+    await expect.poll(async () => (await f.service.read(d.draftId)).information['step-0'].values?.goal?.value, { timeout: 30000 }).toBe(reply);
+    await expect.poll(() => page.evaluate(id => sessionStorage.getItem('opc-step:' + id + ':step-0'), d.draftId), { timeout: 30000 }).toBeNull();
+    const savedVersion = (await f.service.read(d.draftId)).snapshot.steps['step-0'].version;
+    await page.reload();
+    await expect.poll(() => page.getByRole('textbox', { name: f.flow.steps[0].information![0].title, exact: true }).inputValue(), { timeout: 30000 }).toBe(reply);
+    expect((await f.service.read(d.draftId)).snapshot.steps['step-0'].version).toBe(savedVersion);
+    expect(await planIdentityRows(f.actor)).toEqual(identity);
+  } finally { await browser.close(); }
+}, 240000);
