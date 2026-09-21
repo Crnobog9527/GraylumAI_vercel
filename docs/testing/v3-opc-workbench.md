@@ -239,3 +239,13 @@ Actual results: `pr422-b1-ux-0921c.log` had 3 passed / 1 failed (login navigatio
 Docker清理：Owner要求后，归档并回收60个遗留临时容器、20个网络及其匿名卷；保留所有命名Owner预览/取证/其他项目。归档 `/Users/simon/.graylum/docker-cleanup-20260921/`。发现旧runner只在serve就绪后监听终止信号，普通测试中断会绕过finally。最小修正将监听前移，终止活动测试进程组，并经原finally回收资源；不新增清理服务/调度器。实际SIGTERM验证创建3容器后remaining=[]，网络不存在，证据 `/tmp/pr422-signal-cleanup-result.json`。早期pool耗尽使用临时runner小网段，清理后恢复原runner，临时副本已删除。
 
 本轮最终定向验证：`/tmp/pr422-owner-feedback-final2.log` 2 PASS /235 skipped：真实页面跨业务明确拒绝→原请求归档→账号修改→刷新→单题准确采用；动态分镜前置/自然语言拒绝、精确冻结分镜正文与版本、撤回来源、旧editing绑定升级重放、重复迁移、并发卡片/丢回包和重新定稿。此前 `/tmp/pr422-owner-feedback-test4.log` 3 PASS（含旧单项升级恢复）；`test3` 主闭环单项PASS但另2项失败，随后修复，不能合称全套PASS。`final.log` 新增断言曾发现返回投影误比及刷新勾选重置，已修正并由final2覆盖。lint、web typecheck通过；preview lifecycle/resources 19 PASS。旧paid/unknown按原绑定回放；模拟不证明真实Skill质量。当前Owner预览先备份数据后原址更新，不清空输入与历史。
+
+独立审查在385ae164发现新卡片文案未被自然语言识别，必须修正后重新审查；已沿用原chooseVideo动作补充匹配（中文/英文逗号及空白），不增加派发通道。对应浏览器回归输入页面原文，断言无普通runtime.prepare请求、仅一个组合execution，并恢复同一丢回包成果。首次该回归在更早的选题阶段失败：后端新版本已保存但页面旧版本尚未替换时测试取消勾选。页面在原操作完成前禁用选择，测试等待实际新标题及可操作状态再选择，保留准确单题断言。
+
+原址预览385ae164读回：旧视频协议已显示为分镜/剪辑自然文本。摄影课程原冻结请求经页面“恢复原请求”确认OPC_BUSINESS_CONFLICT，显示明确归属提示并恢复编辑，未替Owner改账号或采用；历史、定位、选题均保留。
+
+`/tmp/pr422-natural-choice-final2.log`仍为FAIL：新禁用条件下断言在恢复回调刷新完成前读到disabled；改为等待该具体控件启用，不放松单题/版本/身份断言。
+
+`natural-choice-final3.log`FAIL为新增观测断言误比：视频动作本来就复用runtime.prepare，不能禁止该RPC。已按原负载区分普通消息与视频协议请求，仍验证唯一视频execution、绑定及同一次结果恢复。
+
+最终`/tmp/pr422-natural-choice-final4.log`：1 PASS /236 skipped，exit0，private canary PASS；覆盖多轮/部分采用/实际重登/资料库编辑和新文案组合请求成功丢回包恢复，无额外普通消息、仅1个组合execution。web typecheck通过。最终候选另见PR精确SHA/独立审查记录。

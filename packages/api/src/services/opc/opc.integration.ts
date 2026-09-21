@@ -7038,6 +7038,8 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     await page.getByLabel('消息', { exact: true }).fill('请修改第一条选题');
     await page.getByRole('button', { name: '发送', exact: true }).click();
     await expect.poll(async () => (await f.service.topicDraftRead(f.d.draftId)).version, { timeout: 60000 }).toBe(2);
+    await page.getByLabel('选择 修改后的选题').waitFor();
+    await expect.poll(()=>page.getByLabel('选择 第二个账号选题').isEnabled(),{timeout:30000}).toBe(true);
     await page.getByLabel('选择 第二个账号选题').uncheck();
 
     await page.route('**/api/trpc/opc.adoptTopics*', async route => {
@@ -7067,7 +7069,7 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     expect(plans[0].body).toHaveLength(1);
     expect(await page.getByRole('button', {name:'采用所选并保存到资料库',exact:true}).isVisible()).toBe(false);
     await page.getByRole('button', {name:/展开选题/}).click();
-    expect(await page.getByLabel('选择 第二个账号选题').isEnabled()).toBe(true);
+    await expect.poll(()=>page.getByLabel('选择 第二个账号选题').isEnabled(),{timeout:30000}).toBe(true);
     await page.getByRole('button', {name:/收起选题/}).click();
 
     await page.getByRole('link', { name: '打开内容资料库', exact: true }).first().click();
@@ -7096,7 +7098,11 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
       if (lostPackage++) return route.continue();
       const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort();
     });
-    await page.getByRole('button', { name: '先做分镜，再生成剪辑建议', exact: true }).click();
+    const ordinaryPrepareCalls:string[]=[];
+    page.on('request',request=>{if(/\/api\/trpc\/runtime\.prepare(?:[?,]|$)/.test(request.url())&&!request.postData()?.includes('[OPC_VIDEO_PACKAGE_V1]'))ordinaryPrepareCalls.push(request.url());});
+    // The visible card wording must take the exact same frozen business action.
+    await page.getByLabel('消息', { exact: true }).fill('先做分镜，再生成剪辑建议');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
     await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('状态待核实');
     const videoKey = 'opc-video-operation:' + new URL(page.url()).searchParams.get('session');
     const frozenVideo = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
@@ -7105,6 +7111,8 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     await expect.poll(() => recoveryTab.evaluate(key => localStorage.getItem(key), videoKey), { timeout: 60000 }).toBeNull();
     const completedVideo = await recoveryTab.evaluate(({key,requestId}) => localStorage.getItem(key + ':completed:' + requestId), { key: videoKey, requestId: frozenVideo.package.requestId });
     expect(JSON.parse(completedVideo!)).toEqual(frozenVideo);
+    expect(ordinaryPrepareCalls).toEqual([]);
+    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'",[f.actor,new URL(page.url()).searchParams.get('session')])).rows[0].n)).toBe(packageRunsBefore+1);
     await recoveryTab.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
     await recoveryTab.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor();
     await recoveryTab.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor();
