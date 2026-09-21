@@ -8088,3 +8088,56 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   expect((await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='brief'",[article.workItemId])).rows[0].n).toBe(2);
  }finally{await browser.close();}
 },180000);
+
+it('OPC: Agent-first U1 sample preserves target, partial adoption, document edits and a narrow-screen return',async()=>{
+ const f=await publishedDraft();
+ const {browser,page}=await planBrowser(f);
+ try{
+  await page.setViewportSize({width:1440,height:1000});
+  await page.goto(process.env.V3_LOCAL_APP+'/workbench/agent-first-preview');
+  await page.getByRole('heading',{name:'正在做：本周选题',exact:true}).waitFor();
+  await page.getByRole('link',{name:'首页',exact:true}).waitFor();
+  await page.getByText('交互样片：操作仅保存在本机浏览器，不调用模型、不写入正式资料。',{exact:true}).waitFor();
+
+  // Previewing material does not silently change the operation target.
+  await page.getByRole('button',{name:'新手最常见的三种构图误区',exact:true}).click();
+  await page.getByRole('heading',{name:'正在做：本周选题',exact:true}).waitFor();
+  await page.getByText(/仅查看，操作目标未改变/).waitFor();
+
+  const article=page.getByRole('article').filter({hasText:'新手最常见的三种构图误区'});
+  await article.getByRole('button',{name:'继续这条',exact:true}).click();
+  await page.getByRole('heading',{name:'正在做：新手最常见的三种构图误区',exact:true}).waitFor();
+  await page.getByLabel('文章正文').fill('这是用户在原处修改并保存的文章样片。');
+  await page.getByRole('button',{name:'保存修改',exact:true}).click();
+  await page.getByRole('heading',{name:'文章草稿 · 第 2 版',exact:true}).waitFor();
+
+  await page.getByRole('button',{name:'采用所选 1 条',exact:true}).click();
+  await page.getByText('已采用 2 条 · 草稿 1 条',{exact:true}).waitFor();
+  await page.getByText('所选内容已保存，剩余草稿仍可继续讨论。',{exact:true}).waitFor();
+  await page.getByRole('button',{name:/查看剩余草稿/}).click();
+  await page.getByRole('button',{name:'新手最常见的三种构图误区',exact:true}).waitFor();
+
+  const video=page.getByRole('article').filter({hasText:'一次实拍：把杂乱画面整理清楚'});
+  await video.getByRole('button',{name:'继续这条',exact:true}).click();
+  const documentPanel=page.getByRole('complementary',{name:'当前资料文档'});
+  await documentPanel.getByRole('button',{name:'暂时结束',exact:true}).click();
+  await page.reload();
+  await page.getByText('本次视频工作已暂时结束',{exact:true}).first().waitFor();
+  await page.getByLabel('工作方法').selectOption('案例叙事方法');
+  await page.getByRole('heading',{name:'正在做：一次实拍：把杂乱画面整理清楚',exact:true}).waitFor();
+
+  // Narrow screens use a dismissible document sheet and return to the same composer.
+  await page.setViewportSize({width:390,height:844});
+  await page.getByRole('button',{name:'当前资料',exact:true}).click();
+  const sheet=page.getByRole('dialog');
+  await sheet.getByRole('heading',{name:'一次实拍：把杂乱画面整理清楚',exact:true}).waitFor();
+  await sheet.getByRole('button',{name:'关闭当前资料',exact:true}).click();
+  await page.getByLabel('消息').waitFor();
+
+  await page.getByRole('button',{name:'定位入口',exact:true}).click();
+  await page.getByRole('heading',{name:'从同一个 Agent 工作区开始',exact:true}).waitFor();
+  await page.getByRole('button',{name:/我是新手/}).click();
+  await page.getByRole('button',{name:'定位入口',exact:true}).click();
+  await page.getByText('当前入口：新手引导',{exact:true}).waitFor();
+ }finally{await browser.close();}
+},180000);

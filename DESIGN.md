@@ -45,7 +45,7 @@ components:
 
 ### Creative North Star
 
-GraylumAI uses the visual hierarchy of a quiet editing studio: the active work is brightly legible, supporting context recedes into dark surfaces, and gold marks the single action that moves the work forward.
+GraylumAI uses the visual hierarchy of a quiet editing studio: the active work is brightly legible, supporting context recedes into dark surfaces, and gold marks the current target and the single action that moves the work forward.
 
 ### Product context and register
 
@@ -54,7 +54,7 @@ GraylumAI uses the visual hierarchy of a quiet editing studio: the active work i
 - **Locales and language policy:** Product UI is Chinese-first. English identifiers appear only when they are part of an external account or technical artifact. `PingFang SC`, `Hiragino Sans GB`, and `Microsoft YaHei` provide CJK fallbacks.
 - **Usage scene:** Repeated desktop work with long conversations and structured review; mobile stacks the same flow without removing any action.
 - **Register:** Product application. Familiar chat, form, navigation, and status patterns take priority over decorative expression.
-- **Memorable signature:** Gold identifies the active step and the one primary continuation action.
+- **Memorable signature:** A compact gold target mark identifies the current work, and gold identifies the one primary continuation action.
 - **Restraint:** Dense forms, billing states, recovery states, and account handoffs use calm borders and plain language.
 - **Anti-references:** Avoid marketing-page hero treatments inside workspaces, card grids for sequential steps, hidden primary forms, and technical recovery jargon in normal flows.
 - **Token ownership/runtime mapping:** This file mirrors the implemented tokens in `apps/web/src/app/globals.css`; it does not generate runtime CSS.
@@ -69,7 +69,9 @@ The existing system stack supports mixed Chinese and Latin text. Headings use we
 
 ## Layout
 
-Pages use the existing responsive spacing scale and a maximum width of `90rem` for two-pane workspaces. Sequential step navigation stays horizontally scrollable. On wide screens, guided workflows keep one uninterrupted conversation on the left and switch only the current structured result on the right. On narrow screens, conversation appears first and the form follows. Changing steps must not filter, replace, or remount the conversation history; only the selected step's form changes.
+Pages use the existing responsive spacing scale and a maximum width of `90rem` for two-pane workspaces. The global header remains visible. A compact work strip names the business and current target; a collapsible evidence summary holds positioning, method, source, confirmed facts, and pending facts without taking over the conversation.
+
+On wide screens, the Agent conversation remains uninterrupted on the left and the current material or document opens on the right. Candidate cards and short results remain at their point in the conversation. On narrow screens, conversation remains primary and the material/document pane opens as a dismissible sheet. Closing the pane, viewing history, or making an unsaved manual edit protects that view from being replaced by a late result.
 
 ## Elevation & Depth
 
@@ -91,11 +93,11 @@ Each working pane has one primary action. Outline buttons handle recovery, revis
 
 ### Navigation and data display
 
-Step navigation shows order, active state, and confirmed state. Future dependent steps may remain visible but disabled. Saved results and plans use readable lists rather than decorative dashboards.
+The work strip always distinguishes the current operation target from content that is merely being viewed. Opening a title previews its material; only an explicit continuation action changes the target. Saved results, candidates, versions, and plans use readable lists or cards rather than decorative dashboards. Do not expose future steps as a generic Agent-workspace navigation pattern; a Skill may show its own real progress when that progress helps the current task.
 
 ### Forms and overlays
 
-Labels remain visible above fields. Routine text edits autosave after an IME-safe debounce and expose saved, syncing, failure, and retry states. Domain metadata such as certainty and source nature is available through a secondary disclosure so it does not obscure the questions users must answer.
+Labels remain visible above fields. Routine structured-form edits autosave after an IME-safe debounce and expose saved, syncing, failure, and retry states. Long-form documents may use an explicit save action when the version boundary matters; success must show the saved version and a direct route to its library record. Domain metadata such as certainty and source nature is available through a secondary disclosure so it does not obscure the questions users must answer.
 
 ### Iconography
 
@@ -112,8 +114,12 @@ Instructions use direct Chinese verbs and explain the next decision. A recovery 
 ## Do's and Don'ts
 
 - **Do:** Keep the Agent conversation visible while the user reviews the current step.
+- **Do:** Keep candidate cards in conversation and full material in the document pane.
+- **Do:** Preserve the current work target while the user previews another item.
 - **Do:** Let the structured form be the editable step result and freeze it only on explicit confirmation.
 - **Do:** Preserve user text locally and on the server across refresh and sign-in recovery.
 - **Don't:** Require a manual save button for ordinary form edits.
 - **Don't:** Ask the user to copy the form into a second work-draft or trigger a duplicate organizer pass.
 - **Don't:** Hide the current task behind explanatory cards or implementation terminology.
+- **Don't:** Hard-code coaching questions, response templates, or content-generation order into the workspace shell.
+- **Don't:** Make the library a required detour before continuing the selected content.
