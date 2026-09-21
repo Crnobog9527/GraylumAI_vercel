@@ -7195,6 +7195,57 @@ it("OPC: B1 business scope, legacy handoff replay and library edits stay owned a
   await expect(f.service.libraryEdit({ ...editRequest, requestId: randomUUID(), expectedRevision: edit.revision })).rejects.toThrow("OPC_DENIED");
 }, 120000);
 
+it("OPC: new business start restores the complete frozen request before another business can begin", async () => {
+  const f=await publishedDraft();
+  const originalBusiness=(await sql.query('select business_id::text id from opc_draft_businesses where draft_id=$1',[f.d.draftId])).rows[0].id;
+  const other=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'manual',businessName:'另一个业务'});
+  const {browser,page}=await planBrowser(f);
+  try{
+    await page.goto(process.env.V3_LOCAL_APP+'/positioning');
+    await page.getByLabel('定位方法').selectOption(f.registration);
+    await page.getByLabel('所属业务').selectOption(originalBusiness);
+    let lost=0;
+    await page.route('**/api/trpc/opc.start*',async route=>{const response=await route.fetch();expect(response.ok()).toBe(true);lost+=1;await route.abort();});
+    await page.getByRole('button',{name:'我从零开始 · Agent 引导',exact:true}).click();
+    await page.getByRole('button',{name:'恢复上次开始请求',exact:true}).waitFor({timeout:60000});
+    await expect.poll(()=>lost,{timeout:60000}).toBe(1);
+    const frozen=JSON.parse((await page.evaluate(key=>sessionStorage.getItem(key),'opc-start-operation'))!);
+    expect(frozen).toMatchObject({registration:f.registration,mode:'mentor',businessId:originalBusiness});
+    await page.getByLabel('所属业务').selectOption(other.businessId);
+    expect(await page.getByRole('button',{name:'我从零开始 · Agent 引导',exact:true}).isDisabled()).toBe(true);
+    await page.unroute('**/api/trpc/opc.start*');
+    await page.getByRole('button',{name:'恢复上次开始请求',exact:true}).click();
+    await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname),{timeout:60000});
+    const restoredDraft=page.url().split('/').at(-1)!;
+    expect((await sql.query('select business_id::text id from opc_draft_businesses where draft_id=$1',[restoredDraft])).rows[0].id).toBe(originalBusiness);
+    expect(await page.evaluate(key=>sessionStorage.getItem(key),'opc-start-operation')).toBeNull();
+  }finally{await browser.close();}
+},180000);
+
+it("OPC: library edit binds fields and revision to one snapshot across a concurrent refresh", async()=>{
+  const f=await publishedDraft();
+  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+    body:[{id:randomUUID(),platform:'x',account:'edit-account',title:'原始标题',brief:'原始简报',day:'2026-09-25'}]});
+  const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'edit-account',expectedRevision:null}]});
+  const {browser,page}=await planBrowser(f);
+  try{
+    await page.goto(process.env.V3_LOCAL_APP+'/library');
+    const card=page.getByRole('article').filter({hasText:'原始标题'});
+    await card.getByRole('button',{name:'直接编辑',exact:true}).click();
+    await page.getByLabel('选题标题').fill('本标签准备保存的标题');
+    const before=(await f.service.library({search:'原始标题',from:null,to:null})).businesses.flatMap((business:{accounts:Array<{items:Array<{workItemId:string;revision:number}>}>})=>business.accounts.flatMap(account=>account.items)).find((item:{workItemId:string})=>item.workItemId===work.workItemId)!;
+    await f.service.libraryEdit({requestId:randomUUID(),target:'item',targetId:work.workItemId,expectedRevision:before.revision,patch:{title:'另一标签已保存的标题',brief:'另一标签已保存的简报',day:'2026-09-26'}});
+    const refreshed=page.waitForResponse(response=>response.url().includes('opc.library')&&response.ok());
+    await page.getByLabel('当前阶段 edit-account').selectOption('starting');
+    await refreshed;
+    await page.getByRole('button',{name:'保存修改',exact:true}).click();
+    await expect.poll(async()=>(await page.getByRole('alert').allTextContents()).join(' '),{timeout:30000}).toContain('没有覆盖更新后的内容');
+    const library=await f.service.library({search:'另一标签已保存的标题',from:null,to:null});
+    const saved=library.businesses.flatMap((business:{accounts:Array<{items:Array<{workItemId:string;title:string;brief:string;day:string}>}>})=>business.accounts.flatMap(account=>account.items)).find((item:{workItemId:string})=>item.workItemId===work.workItemId);
+    expect(saved).toMatchObject({title:'另一标签已保存的标题',brief:'另一标签已保存的简报',day:'2026-09-26'});
+  }finally{await browser.close();}
+},180000);
+
 it("OPC: final script asks before derivatives, supports a partial choice, and marks prior results old after re-finalizing", async () => {
   const f = await publishedDraft();
   await planFixtureModel(f.moduleId);
@@ -7202,7 +7253,7 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
     body: [{ id: randomUUID(), platform: 'x', account: 'consent-account', title: '口播稿授权边界', brief: '验证口播稿定稿与分镜、剪辑建议的授权分离。', day: '2026-09-26' }] });
   const [work] = await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId,
     accounts: [{ platform: 'x', account: 'consent-account', expectedRevision: null }] });
-  const { browser, page } = await planBrowser(f);
+  const { browser, context, page } = await planBrowser(f);
   const packageRuns = async () => Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, work.sessionId])).rows[0].n);
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
@@ -7214,12 +7265,20 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
     await finalize.click();
     await page.getByRole('heading', { name: '口播稿已定稿。要继续基于这版生成分镜脚本和剪辑建议吗？', exact: true }).waitFor();
     expect(await packageRuns()).toBe(0);
+    const staleTab=await context.newPage();
+    await staleTab.goto(page.url());
+    await staleTab.getByLabel('对话方式').selectOption({ index: 1 });
+    await staleTab.getByRole('button', { name: '只生成分镜', exact: true }).waitFor();
 
     await page.getByLabel('消息', { exact: true }).fill('只生成分镜');
     await page.getByRole('button', { name: '发送', exact: true }).click();
     await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
     expect(await packageRuns()).toBe(1);
     expect(await page.getByRole('heading', { name: /剪辑建议 · 第 1 版/ }).count()).toBe(0);
+    await staleTab.getByRole('button', { name: '只生成分镜', exact: true }).click();
+    await expect.poll(async()=>(await staleTab.getByRole('alert').allTextContents()).join(' '),{timeout:60000}).toContain('OPC_CONTENT_ALREADY_GENERATED');
+    expect(await packageRuns()).toBe(1);
+    await staleTab.close();
 
     await page.getByLabel('消息', { exact: true }).fill('请重新讨论并给我第二版口播稿。');
     await page.getByRole('button', { name: '发送', exact: true }).click();
@@ -7230,12 +7289,23 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
     await page.getByRole('heading', { name: '口播稿已定稿。要继续基于这版生成分镜脚本和剪辑建议吗？', exact: true }).waitFor();
     expect(await packageRuns()).toBe(1);
 
+    const pendingResponse=await fetch(process.env.V3_LOCAL_REST!+'/__runtime_pending',{method:'POST',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}});
+    expect(pendingResponse.ok).toBe(true);
     await page.getByRole('button', { name: '只生成剪辑建议', exact: true }).click();
+    await expect.poll(async()=>(await page.getByRole('alert').allTextContents()).join(' '),{timeout:60000}).toContain('状态待核实');
+    const videoKey='opc-video-operation:'+work.sessionId;
+    const pendingOperation=JSON.parse((await page.evaluate(key=>localStorage.getItem(key),videoKey))!);
+    expect(pendingOperation.followup.executionId).toBeTruthy();
+    expect(await packageRuns()).toBe(2);
+    const finalResponse=await fetch(process.env.V3_LOCAL_REST!+'/__runtime_final',{method:'POST',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}});
+    expect(finalResponse.ok).toBe(true);
+    await page.reload();
+    await expect.poll(()=>page.evaluate(key=>localStorage.getItem(key),videoKey),{timeout:60000}).toBeNull();
     await page.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
     expect(await packageRuns()).toBe(2);
     await page.getByRole('button', { name: '暂时结束', exact: true }).click();
     expect(await page.getByRole('heading', { name: '口播稿已定稿。要继续基于这版生成分镜脚本和剪辑建议吗？', exact: true }).count()).toBe(0);
-  } finally { await browser.close(); }
+  } finally { await fetch(process.env.V3_LOCAL_REST!+'/__runtime_final',{method:'POST',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}}).catch(()=>null);await browser.close(); }
 }, 300000);
 
 it("OPC: natural-language adoption stays complete after refresh and permits the next turn", async () => {

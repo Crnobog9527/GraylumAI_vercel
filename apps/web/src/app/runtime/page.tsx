@@ -65,7 +65,25 @@ export default function RuntimePage(){
   let active=initial;
   try{await navigator.locks.request(videoKey,async()=>{
    const frozen=localStorage.getItem(videoKey);const op:VideoOperation=frozen?JSON.parse(frozen):initial;active=op;
-   if(op.workItemId!==workItem?.workItemId)throw new Error('OPC_REQUEST_CONFLICT');storeVideo(op);
+   if(op.workItemId!==workItem?.workItemId)throw new Error('OPC_REQUEST_CONFLICT');
+   const refreshed=await library.refetch();
+   if(!refreshed.data)throw new Error('OPC_CONTENT_PENDING');
+   const freshItem=refreshed.data.businesses
+    .flatMap((business:{accounts:Array<{items:Array<{workItemId:string;content:ContentVersion[]}>}>})=>business.accounts.flatMap(account=>account.items))
+    .find((item:{workItemId:string})=>item.workItemId===op.workItemId);
+   if(!freshItem)throw new Error('OPC_CONTENT_DENIED');
+   const freshVersions=freshItem.content as ContentVersion[];
+   const latestFinalScript=freshVersions.filter(version=>version.kind==='script'&&version.status==='final').sort((a,b)=>b.version-a.version)[0];
+   if(op.sourceScriptId&&latestFinalScript?.id!==op.sourceScriptId)throw new Error('OPC_CONTENT_SOURCE');
+   const requestedKinds=(op.choice??'both')==='both'?['storyboard','editing']:(op.choice==='storyboard'?['storyboard']:['editing']);
+   const existing=freshVersions.filter(version=>requestedKinds.includes(version.kind)&&version.sourceContentId===op.sourceScriptId);
+   if(existing.length===requestedKinds.length&&existing.every(version=>version.requestId===op.package.requestId)){
+    localStorage.setItem(videoKey+':completed:'+op.package.requestId,JSON.stringify(op));localStorage.removeItem(videoKey);await view.refetch();return;
+   }
+   if(existing.length)throw new Error('OPC_CONTENT_ALREADY_GENERATED');
+   const latestFresh=(kind:string)=>freshVersions.filter(version=>version.kind===kind).reduce((n,version)=>Math.max(n,version.version),0);
+   if(latestFresh('storyboard')!==op.package.expectedStoryboardVersion||latestFresh('editing')!==op.package.expectedEditingVersion)throw new Error('OPC_VERSION_CONFLICT');
+   storeVideo(op);
    if(!op.sourceScriptId){const script=await saveContent.mutateAsync({workItemId:op.workItemId,requestId:op.script.requestId,expectedVersion:op.script.expectedVersion,kind:'script',status:'final',executionId:op.script.executionId,sourceContentId:null});op.sourceScriptId=script.id;storeVideo(op);await library.refetch();}
    const sourceScriptId=op.sourceScriptId;if(!sourceScriptId)throw new Error('OPC_CONTENT_PENDING');
    await prepareVideoMaterial.mutateAsync({workItemId:op.workItemId,requestId:op.followup.requestId,sourceScriptId});
@@ -73,7 +91,9 @@ export default function RuntimePage(){
    if(!packageExecutionId){const admitted=await prepare.mutateAsync({sessionId,requestId:op.followup.requestId,input:op.followup.input,selection:op.followup.selection,network:'deny',sources:[]});packageExecutionId=admitted.executionId;op.followup.executionId=packageExecutionId;storeVideo(op);}
    if(!packageExecutionId)throw new Error('OPC_CONTENT_PENDING');
    await checkVideo.mutateAsync({workItemId:op.workItemId,executionId:packageExecutionId,sourceScriptId});
-   await execute.mutateAsync({executionId:packageExecutionId});
+   const executed=await execute.mutateAsync({executionId:packageExecutionId});
+   if(executed.state==='cancelled')throw new Error('OPC_CONTENT_DENIED');
+   if(executed.state!=='completed')throw new Error('OPC_CONTENT_PENDING');
    await saveResults.mutateAsync({workItemId:op.workItemId,requestId:op.package.requestId,executionId:packageExecutionId,sourceScriptId,expectedStoryboardVersion:op.package.expectedStoryboardVersion,expectedEditingVersion:op.package.expectedEditingVersion,choice:op.choice??'both'});
    localStorage.setItem(videoKey+':completed:'+op.package.requestId,JSON.stringify(op));localStorage.removeItem(videoKey);const rejectedPackage=localStorage.getItem(videoKey+':rejected-source:'+op.script.executionId);if(rejectedPackage)localStorage.removeItem(videoKey+':rejected:'+rejectedPackage);localStorage.removeItem(videoKey+':rejected-source:'+op.script.executionId);await Promise.all([view.refetch(),library.refetch()]);
   });}catch(cause){const message=cause instanceof Error?cause.message:'';let definite=videoDefiniteRejections.has(message);if(message==='OPC_CONTENT_BINDING'&&active.followup.executionId)try{await cancel.mutateAsync({executionId:active.followup.executionId});await view.refetch();}catch{definite=false;}if(definite){localStorage.setItem(videoKey+':rejected:'+active.package.requestId,JSON.stringify(active));localStorage.setItem(videoKey+':rejected-source:'+active.script.executionId,active.package.requestId);localStorage.removeItem(videoKey);setError(message==='OPC_CONTENT_RESPONSE_INVALID'?'分镜回复格式未通过保存校验，口播稿定稿已保留；请在原对话要求 Agent 重新整理。':'原视频工作请求已明确拒绝（'+message+'），没有再次派发。请刷新后基于最新版本重试。');}else setError('视频工作请求状态待核实。完整原请求已保留；再次点击只会恢复这一次请求。');}finally{setVideoBusy(false);}

@@ -1,9 +1,11 @@
 "use client";
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
+type StartOperation={requestId:string;registration:string;mode:"mentor"|"manual";businessId:string|null;businessName?:string};
+const startOperationKey="opc-start-operation";
 export default function PositioningHome() {
   const catalog = trpc.opc.catalog.useQuery(),
     list = trpc.opc.list.useQuery(),
@@ -12,27 +14,21 @@ export default function PositioningHome() {
   const [choice, setChoice] = useState(""),
     [businessId, setBusinessId] = useState(""),
     [businessName, setBusinessName] = useState("我的业务"),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [pendingStart,setPendingStart]=useState<StartOperation|null>(null);
+  useEffect(()=>{const raw=sessionStorage.getItem(startOperationKey);if(!raw)return;try{setPendingStart(JSON.parse(raw));}catch{sessionStorage.removeItem(startOperationKey);}},[]);
+  async function runStart(op:StartOperation){
+    setError("");sessionStorage.setItem(startOperationKey,JSON.stringify(op));setPendingStart(op);
+    try {
+      const d=await start.mutateAsync(op);
+      sessionStorage.removeItem(startOperationKey);setPendingStart(null);location.href="/positioning/"+d.draftId;
+    } catch { setError("未能建立定位草稿。完整的原开始请求已保留，请恢复该请求。"); }
+  }
   async function begin(mode: "mentor" | "manual") {
-    setError("");
+    if(pendingStart){setError("请先恢复上次开始请求；恢复完成后再选择其他业务。");return;}
     const registration = choice || catalog.data?.[0]?.id;
     if (!registration) return;
-    const key = "opc-start:" + registration + ":" + mode;
-    const requestId = sessionStorage.getItem(key) || crypto.randomUUID();
-    sessionStorage.setItem(key, requestId);
-    try {
-      const d = await start.mutateAsync({
-        requestId,
-        registration,
-        mode,
-        businessId: businessId || null,
-        ...(!businessId ? { businessName } : {}),
-      });
-      sessionStorage.removeItem(key);
-      location.href = "/positioning/" + d.draftId;
-    } catch {
-      setError("未能建立定位草稿，重试会恢复同一次开始请求。");
-    }
+    await runStart({requestId:crypto.randomUUID(),registration,mode,businessId:businessId||null,...(!businessId?{businessName:businessName.trim()}: {})});
   }
   return (
     <main className="mx-auto max-w-5xl space-y-8 p-6 text-[var(--text-primary)]">
@@ -46,6 +42,7 @@ export default function PositioningHome() {
       {(catalog.error || list.error) && (
         <p role="alert">当前环境未开放，或登录已失效。请登录后重试。</p>
       )}
+      {pendingStart&&!start.isPending&&<section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--color-primary)] p-4" aria-label="待恢复的开始请求"><p>上次开始定位的结果尚未确认。先恢复同一请求，避免把草稿绑定到另一个业务。</p><Button onClick={()=>runStart(pendingStart)}>恢复上次开始请求</Button></section>}
       <section className="space-y-4 rounded-xl border border-[var(--border-primary)] p-5">
         <h2 className="text-xl">选择定位入口</h2>
         <label>
@@ -75,14 +72,14 @@ export default function PositioningHome() {
         {!businessId && <label className="block">业务名称 <input aria-label="业务名称" value={businessName} maxLength={120} onChange={(e) => setBusinessName(e.target.value)} className="ml-2 rounded border bg-[var(--bg-secondary)] p-2" /></label>}
         <div className="grid gap-3 sm:grid-cols-2">
           <Button
-            disabled={!catalog.data?.length || start.isPending || (!businessId && !businessName.trim())}
+            disabled={!catalog.data?.length || start.isPending || Boolean(pendingStart) || (!businessId && !businessName.trim())}
             onClick={() => begin("mentor")}
           >
             我从零开始 · Agent 引导
           </Button>
           <Button
             variant="outline"
-            disabled={!catalog.data?.length || start.isPending || (!businessId && !businessName.trim())}
+            disabled={!catalog.data?.length || start.isPending || Boolean(pendingStart) || (!businessId && !businessName.trim())}
             onClick={() => begin("manual")}
           >
             我已有定位 · 结构化录入

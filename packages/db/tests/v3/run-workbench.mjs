@@ -525,7 +525,7 @@ try {
       res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({calls:runtimeCalls.length,userRequests:(publicRequest?.messages ?? []).filter(m=>m.role==='user').map(m=>{try{return JSON.parse(m.content).userRequest ?? null;}catch{return typeof m.content==='string'?m.content:null;}})}));return;
     }
 
-    if(runtimeUpgrade && req.url?.startsWith('/receipt/local-runtime-')){
+    if((opcMode||runtimeMode||runtimeUpgrade) && req.url?.startsWith('/receipt/local-runtime-')){
       const index=Number(req.url.slice('/receipt/local-runtime-'.length))-1,request=runtimeCalls[index];
       if(!request){res.writeHead(404).end();return;}
       res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({id:'local-runtime-'+(index+1),model:request.model,final:runtimeFinal,cost:runtimeFinal?'0.003':null,currency:'USD',coverage:'request_total'}));return;
@@ -534,9 +534,9 @@ try {
       if(req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
       res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({pid:app.pid,root:applicationRoot}));return;
     }
-    if(runtimeUpgrade && req.url==='/__runtime_final'){
+    if((opcMode||runtimeMode||runtimeUpgrade) && ['/__runtime_pending','/__runtime_final'].includes(req.url)){
       if(req.method!=='POST'||req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
-      runtimeFinal=true;res.writeHead(200).end('ok');return;
+      runtimeFinal=req.url==='/__runtime_final';res.writeHead(200).end('ok');return;
     }
     if(chatCompatibility && await chatCompatibility(req,res))return;
     if(upgradeMode && ['/__upgrade_bill2','/__runtime_candidate','/__runtime_legacy','/__legacy_reader_compat','/__legacy_ledger_reader_compat','/__finance_read_context'].includes(req.url)){
