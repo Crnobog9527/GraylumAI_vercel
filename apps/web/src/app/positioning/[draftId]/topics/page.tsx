@@ -38,7 +38,7 @@ type AdoptTopicsRequest = SaveRequest & { accounts: Array<{ platform: string; ac
 type Operation = { kind: 'chat'; request: ChatRequest } | { kind: 'save'; request: SaveRequest } | { kind: 'adopt'; request: AdoptRequest } | { kind: 'draft'; request: DraftRequest } | { kind: 'adoptTopics'; request: AdoptTopicsRequest };
 // Only transaction-level definite rejections release a request. Unknown replies
 // and identity conflicts retain the whole original envelope, never just its ID.
-const definiteRejections = new Set(['OPC_VERSION_CONFLICT', 'OPC_ACCOUNT_CONFLICT', 'OPC_ACCOUNTS_INVALID', 'OPC_PLAN_INVALID', 'OPC_DUPLICATE_ITEM', 'OPC_TOPIC_ALREADY_ADOPTED', 'OPC_SOURCE_DENIED', 'OPC_DENIED', 'OPC_TOPIC_SOURCE_REVOKED', 'OPC_TOPIC_UNBOUND', 'OPC_TOPIC_SKILL_MISSING']);
+const definiteRejections = new Set(['OPC_BUSINESS_CONFLICT', 'OPC_BUSINESS_DENIED', 'OPC_VERSION_CONFLICT', 'OPC_ACCOUNT_CONFLICT', 'OPC_ACCOUNTS_INVALID', 'OPC_PLAN_INVALID', 'OPC_DUPLICATE_ITEM', 'OPC_TOPIC_ALREADY_ADOPTED', 'OPC_SOURCE_DENIED', 'OPC_DENIED', 'OPC_TOPIC_SOURCE_REVOKED', 'OPC_TOPIC_UNBOUND', 'OPC_TOPIC_SKILL_MISSING']);
 
 /** The last JSON array the Agent offered as the first-week plan, if any. */
 function parseCandidate(text: string | null | undefined): PlanItem[] | null {
@@ -170,12 +170,24 @@ export default function TopicWorkspacePage() {
       setCandidate(value);
     } catch { setError('无法保存本机草稿，已停止修改。'); }
   }
+  const selectionDraftVersion = useRef<string | null>(null);
   useEffect(() => {
     const body = topicDraft.data?.body as PlanItem[] | null | undefined;
     if (!body?.length) return;
-    setCandidate({ body, requestId: topicDraft.data.draftVersionId ?? crypto.randomUUID() });
-    setSelectedItems(current => current.length ? current.filter(id => body.some(item => item.id === id)) : body.map(item => item.id));
-  }, [topicDraft.data?.draftVersionId, topicDraft.data?.body]);
+    const requestId = topicDraft.data.draftVersionId ?? crypto.randomUUID();
+    // Local corrections remain attached to the same server draft version.
+    // A new Agent draft replaces them; a refresh of the same version does not.
+    try {
+      const local = candidateKey ? localStorage.getItem(candidateKey) : null;
+      const edited = local ? JSON.parse(local) : null;
+      setCandidate(edited?.requestId === requestId ? edited : { body, requestId });
+    } catch { setError('本机候选修改无法读取，请保留记录。'); }
+
+    if (selectionDraftVersion.current !== requestId) {
+      selectionDraftVersion.current = requestId;
+      setSelectedItems(body.map(item => item.id));
+    }
+  }, [topicDraft.data?.draftVersionId, topicDraft.data?.body, candidateKey]);
 
   const plans = (read.data?.plans ?? []) as Array<{
     planId: string;
@@ -315,7 +327,7 @@ export default function TopicWorkspacePage() {
             localStorage.setItem(storageKey + ':rejected:' + op.request.requestId, JSON.stringify(op));
             localStorage.removeItem(storageKey);
             setPending(null);
-            setError('本次请求已明确拒绝（' + message + '），未提交此项修改。请核对刷新后的计划与账号，再明确重试。');
+            setError(message === 'OPC_BUSINESS_CONFLICT' ? '这个账号已属于另一项业务，本次没有采用。请展开选题，修改为当前业务的账号后再采用；原请求已保留。' : '本次请求已明确拒绝（' + message + '），未提交此项修改。请核对刷新后的计划与账号，再明确重试。');
           } else setError(failureMessage(cause));
         }
         await Promise.all([read.refetch(), view.refetch(), accountList.refetch(), topicDraft.refetch()]);
@@ -577,7 +589,7 @@ export default function TopicWorkspacePage() {
             </section>
           </div>
 
-          {candidate && (
+          {candidate && topicDraft.data && (
             <section className="shrink-0 border-t border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4">
               <div className="mx-auto max-w-4xl">
                 <button type="button" className="flex w-full items-center justify-between text-sm font-medium" aria-expanded={candidateOpen} onClick={()=>setCandidateOpen(!candidateOpen)}><span>选题草稿 · {candidate.body.filter(item=>!adoptedItemIds.has(item.id)).length} 条未采用</span><span>{candidateOpen?'收起选题':'展开选题'}</span></button>
@@ -591,7 +603,7 @@ export default function TopicWorkspacePage() {
                     return (
                     <li key={item.id} className="flex items-start gap-2 py-2">
                       <input type="checkbox" aria-label={'选择 '+item.title} disabled={wasAdopted} checked={!wasAdopted && selectedItems.includes(item.id)} onChange={event=>setSelectedItems(current=>event.target.checked?[...new Set([...current,item.id])]:current.filter(id=>id!==item.id))}/>
-                      <span><strong>{item.day} · {item.title}</strong>{wasAdopted ? ' · 已采用' : ''}<br/><span className="text-xs text-[var(--text-tertiary)]">{item.platform}/{item.account} · {item.brief}</span></span>
+                      <span><strong>{item.day} · {item.title}</strong>{wasAdopted ? ' · 已采用' : ''}<br/><span className="text-xs text-[var(--text-tertiary)]">{item.platform}/{item.account} · {item.brief}</span>{!wasAdopted && <details className="mt-1"><summary className="cursor-pointer text-xs">修改平台或账号</summary><label className="block text-xs">平台<input aria-label={'平台 '+item.title} disabled={busy||Boolean(pending)} value={item.platform} onChange={event=>editCandidate({...candidate,body:candidate.body.map(row=>row.id===item.id?{...row,platform:event.target.value}:row)})} className="ml-2 rounded border bg-transparent px-2"/></label><label className="block text-xs">账号<input aria-label={'账号 '+item.title} disabled={busy||Boolean(pending)} value={item.account} onChange={event=>editCandidate({...candidate,body:candidate.body.map(row=>row.id===item.id?{...row,account:event.target.value}:row)})} className="ml-2 rounded border bg-transparent px-2"/></label></details>}</span>
                     </li>
                   );})}
                 </ul>

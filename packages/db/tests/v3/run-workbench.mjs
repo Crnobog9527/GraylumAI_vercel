@@ -139,11 +139,19 @@ const sql = (s) =>
 let gateway, app, tokenWarning;
 let intentionalRestart = false;
 let stoppingApplication = false;
-let finishServing;
+let finishServing, activeChild;
+let interrupted = false;
 const servingEnded = new Promise((resolve) => { finishServing = resolve; });
-const stopServing = () => finishServing();
+const stopServing = () => {
+  interrupted = true;
+  if (activeChild?.pid) {
+    try { process.kill(-activeChild.pid, 'SIGTERM'); } catch { activeChild.kill('SIGTERM'); }
+  }
+  finishServing();
+};
 const waitForDb = async () => {
   for (let i = 0; i < 100; i++) {
+    if (interrupted) throw new Error("local run interrupted");
     try { docker("exec", db, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"); return; }
     catch { await new Promise((r) => setTimeout(r, 200)); }
   }
@@ -158,12 +166,17 @@ const cleanEnv = {
 };
 const childExit = (child) =>
   new Promise((r, j) => {
-    child.on("error", j);
-    child.on("exit", (code) =>
-      code === 0 ? r() : j(new Error(`child exit ${code}`)),
-    );
+    activeChild = child;
+    child.on("error", error => { activeChild = undefined; j(error); });
+    child.on("exit", code => {
+      activeChild = undefined;
+      code === 0 && !interrupted ? r() : j(new Error(interrupted ? 'local run interrupted' : `child exit ${code}`));
+    });
+    if (interrupted) stopServing();
   });
 try {
+  process.once("SIGINT", stopServing);
+  process.once("SIGTERM", stopServing);
   if (previewState) {
     assertPreviewResources(previewState, docker, { requireAll: !lifecycle.bootstrap, mustBeAbsent: lifecycle.bootstrap });
     if (lifecycle.bootstrap) {
@@ -179,6 +192,7 @@ try {
     spawn("pnpm", ["install", "--frozen-lockfile", "--offline"], {
       cwd: root,
       env: cleanEnv,
+      detached: true,
       stdio: "inherit",
     }),
   );
@@ -322,7 +336,7 @@ try {
     apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
     apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
   }
-  if(runtimeSchema&&!upgradeMode){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0120_opc_entry_projection.sql');apply('packages/db/migrations/0120_opc_entry_projection.sql');}}
+  if(runtimeSchema&&!upgradeMode){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0120_opc_entry_projection.sql');apply('packages/db/migrations/0120_opc_entry_projection.sql');apply('packages/db/migrations/0121_opc_storyboard_dependency.sql');apply('packages/db/migrations/0121_opc_storyboard_dependency.sql');}}
   if(stagingSchema&&!upgradeMode){apply('packages/db/migrations/0108_runtime_staging_window.sql');apply('packages/db/migrations/0108_runtime_staging_window.sql');}
   console.log("SQL additive migration and repeat application PASS; runtime schema="+runtimeSchema+"; deferred upgrade="+upgradeMode);
   docker(
@@ -549,7 +563,7 @@ try {
     if(chatCompatibility && await chatCompatibility(req,res))return;
     if(upgradeMode && ['/__upgrade_bill2','/__runtime_candidate','/__runtime_legacy','/__legacy_reader_compat','/__legacy_ledger_reader_compat','/__finance_read_context'].includes(req.url)){
       if(req.method!=='POST'||req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
-      try{if(req.url==='/__upgrade_bill2'){apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');if(runtimeSchema){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0120_opc_entry_projection.sql');apply('packages/db/migrations/0120_opc_entry_projection.sql');}}if(stagingSchema){apply('packages/db/migrations/0108_runtime_staging_window.sql');apply('packages/db/migrations/0108_runtime_staging_window.sql');}sql("NOTIFY pgrst, 'reload schema'");}
+      try{if(req.url==='/__upgrade_bill2'){apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');if(runtimeSchema){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0120_opc_entry_projection.sql');apply('packages/db/migrations/0120_opc_entry_projection.sql');apply('packages/db/migrations/0121_opc_storyboard_dependency.sql');apply('packages/db/migrations/0121_opc_storyboard_dependency.sql');}}if(stagingSchema){apply('packages/db/migrations/0108_runtime_staging_window.sql');apply('packages/db/migrations/0108_runtime_staging_window.sql');}sql("NOTIFY pgrst, 'reload schema'");}
       else if(req.url==='/__finance_read_context'){apply('packages/db/migrations/0103_bill_1_reservation_read_contract.sql');sql("NOTIFY pgrst, 'reload schema'");}
       else {if(req.url==='/__legacy_reader_compat'||req.url==='/__legacy_ledger_reader_compat')patchLegacyFinanceReader(legacyRoot,evidenceDirectory,req.url==='/__legacy_ledger_reader_compat'?'ledger':'complete');await restartApplication(req.url==='/__runtime_candidate'?root:legacyRoot);}res.writeHead(200).end('ok');}catch(error){console.error(String(error));res.writeHead(500).end('compatibility transition failed');}return;
     }
@@ -780,6 +794,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
   const waitForApplication = async () => {
     const deadline = Date.now() + 90000;
     while (Date.now() < deadline) {
+      if (interrupted) throw new Error("local run interrupted");
       if (app.exitCode !== null || app.signalCode !== null) throw new Error("local application exited before readiness");
       try { if ((await fetch(env.V3_LOCAL_APP + "/login", { signal: AbortSignal.timeout(2000) })).ok) return; } catch {}
       await new Promise((resolve) => setTimeout(resolve, 200));
@@ -799,8 +814,6 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
     finally { intentionalRestart = false; }
   };
   if (serve) {
-    process.once("SIGINT", stopServing);
-    process.once("SIGTERM", stopServing);
     tokenWarning = setTimeout(() => console.log("Preview role keys expire in 10 minutes. Ctrl+C, then run the same preview with --preview-action=renew. Browser sign-in refresh is separate; saved data is retained."), 6600 * 1000);
     tokenWarning.unref();
   }
@@ -831,7 +844,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
               : "^restores all projects in a new browser login after a real application process restart$"]
           : primaryTestArgs),
       ],
-      { cwd: legacyRoot&&!upgradeMode?legacyRoot:root, env, stdio: "inherit" },
+      { cwd: legacyRoot&&!upgradeMode?legacyRoot:root, env, detached: true, stdio: "inherit" },
     );
   await runPreviewPhase(previewOptions, "runTests", async () => {
   await childExit(runTests());
