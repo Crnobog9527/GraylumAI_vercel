@@ -1,5 +1,13 @@
 # OPC 七阶段实施任务映射
 
+> **当前实施入口：[Master Plan v11 施工章节](../MASTER_PLAN.md#construction)。** [批次/并行](../MASTER_PLAN.md#parallel)、[完整验收](../MASTER_PLAN.md#acceptance)与最新产品要求集中维护，不在本文另列当前施工顺序。
+>
+> 下方是逐字保留的 2026-09-13 历史映射、精确技术验收和当时的选择示例；“尚未实施”“优先开工 BILL2”“下一次选择”等历史时态不代表现在的任务状态或授权。历史未决项不能擅自清零；已合并基础也不应从零重建。原身份、不冲突的依赖/技术/发布要求及锚点继续保留。
+>
+> 入口随 #432 经批准合入 staging 后生效；Master Plan 第 11–12 节拟议调整须经 Owner 明确确认，确认前原已批准依赖继续约束相关就绪判断。文档批准不恢复 #422、不启动 B1 或其他功能批次；[当前 AGENTS](../../../AGENTS.md)及 Owner 实际授权决定执行边界。
+
+---
+
 依据：[产品修订](../Graylum_Master_Plan_v10.2_OPC_Growth_Agent_Amendment.md)、[详细架构](V3-OPC-growth-agent-architecture.md)、[当前任务图](../plan-core.md)。本次仅建立任务映射与第一批规格；所有新增范围均未由本文实施或验收。节点不是自动执行指令，也不替代 Owner 选择、合并及外部操作授权。
 
 ## 1. 身份与依赖
