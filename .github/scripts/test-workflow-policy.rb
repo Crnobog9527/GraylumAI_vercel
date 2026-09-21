@@ -885,6 +885,17 @@ add_case.call('pull-request-target', workflow_yaml(safe_sha, events: ['pull_requ
 
 current_category = :action_pinning_cases
 add_case.call(
+  'pinned-official-build-cache',
+  workflow_yaml(safe_sha, jobs: { 'cache' => standard_job(safe_sha, 'steps' => [{ 'uses' => 'actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809', 'with' => { 'path' => 'apps/web/.next/cache', 'key' => 'secretless-next-test' } }]) }),
+  true
+)
+add_case.call(
+  'floating-official-build-cache',
+  workflow_yaml(safe_sha, jobs: { 'cache' => standard_job(safe_sha, 'steps' => [{ 'uses' => 'actions/cache@v4' }]) }),
+  false,
+  'action is not pinned'
+)
+add_case.call(
   'floating-step-action',
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'uses' => 'actions/checkout@v5' }]) }),
   false,

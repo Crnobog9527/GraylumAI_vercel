@@ -5,6 +5,7 @@
  */
 
 import type { Metadata } from 'next';
+import { cache } from 'react';
 import { appRouter } from '@repo/api/src/root';
 import { createTRPCContext } from '@repo/api/src/trpc';
 import { resolveSiteName, resolveSupportEmail } from '@/lib/site-config';
@@ -41,7 +42,23 @@ function parseBooleanSetting(value: unknown, fallback: boolean) {
   return fallback;
 }
 
+function resolveFallbackPublicSiteSettings(): PublicSiteSettings {
+  return {
+    siteName: resolveSiteName(),
+    supportEmail: resolveSupportEmail(),
+    showOnboarding: true,
+    showFeaturedModules: true,
+    membershipPlans: [],
+    membershipPlansStatus: 'unavailable',
+    featuredModules: [],
+  };
+}
+
 async function loadPublicSiteSettingsUncached(): Promise<PublicSiteSettings> {
+  if (process.env.SECURITY_E2E_LOCAL_ONLY === 'true') {
+    return resolveFallbackPublicSiteSettings();
+  }
+
   try {
     const ctx = await createTRPCContext({ headers: new Headers() });
     const caller = appRouter.createCaller(ctx);
@@ -72,21 +89,11 @@ async function loadPublicSiteSettingsUncached(): Promise<PublicSiteSettings> {
       featuredModules,
     };
   } catch {
-    return {
-      siteName: resolveSiteName(),
-      supportEmail: resolveSupportEmail(),
-      showOnboarding: true,
-      showFeaturedModules: true,
-      membershipPlans: [],
-      membershipPlansStatus: 'unavailable',
-      featuredModules: [],
-    };
+    return resolveFallbackPublicSiteSettings();
   }
 }
 
-export async function getPublicSiteSettings(): Promise<PublicSiteSettings> {
-  return loadPublicSiteSettingsUncached();
-}
+export const getPublicSiteSettings = cache(loadPublicSiteSettingsUncached);
 
 export async function buildPublicPageMetadata(
   title: string,
