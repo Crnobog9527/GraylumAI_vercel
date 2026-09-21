@@ -7336,6 +7336,80 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
   } finally { await fetch(process.env.V3_LOCAL_REST!+'/__runtime_final',{method:'POST',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}}).catch(()=>null);await browser.close(); }
 }, 300000);
 
+it("OPC: definite pre-admission failure revokes its claim and permits an explicit retry", async () => {
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'admission-retry', title: '准入失败恢复', brief: '验证未创建 execution 的确定失败不会永久占位。', day: '2026-09-27' }] });
+  const [work] = await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId,
+    accounts: [{ platform: 'x', account: 'admission-retry', expectedRevision: null }] });
+  const { browser, page } = await planBrowser(f);
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    await page.getByLabel('对话方式').selectOption({ index: 1 });
+    await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿。');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    const finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
+    await finalize.waitFor({ timeout: 60000 }); await finalize.click();
+    await page.route('**/api/trpc/runtime.prepare*', route => {
+      if (!(route.request().postData() ?? '').includes('OPC_VIDEO_PACKAGE_V1')) return route.continue();
+      return route.abort();
+    });
+    await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
+    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('明确拒绝');
+    const abandoned = (await sql.query('select b.request_id,m.revoked from opc_video_material_bindings b join runtime_scope_material m on m.session_id=b.session_id and m.revision=b.material_revision where b.actor_id=$1 and b.work_item_id=$2 order by b.created_at desc limit 1', [f.actor, work.workItemId])).rows[0];
+    expect(abandoned.revoked).toBe(true);
+    expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2', [f.actor, abandoned.request_id])).rows[0].n).toBe(0);
+    await page.unroute('**/api/trpc/runtime.prepare*');
+    await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
+    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
+    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, work.sessionId])).rows[0].n)).toBe(1);
+  } finally { await browser.close(); }
+}, 240000);
+
+it("OPC: upgraded legacy partial result blocks a duplicate dispatch and remains recoverable", async () => {
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'legacy-partial', title: '旧单项结果恢复', brief: '验证升级前已完成但丢回包的单项结果。', day: '2026-09-28' }] });
+  const [work] = await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId,
+    accounts: [{ platform: 'x', account: 'legacy-partial', expectedRevision: null }] });
+  const { browser, page } = await planBrowser(f);
+  const packageRuns = async () => Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, work.sessionId])).rows[0].n);
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    await page.getByLabel('对话方式').selectOption({ index: 1 });
+    await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿。');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    const finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
+    await finalize.waitFor({ timeout: 60000 }); await finalize.click();
+    await page.route('**/api/trpc/opc.saveVideoResults*', route => route.abort());
+    await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
+    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('状态待核实');
+    const key = 'opc-video-operation:' + work.sessionId;
+    const original = JSON.parse((await page.evaluate(k => localStorage.getItem(k), key))!);
+    expect(original.followup.executionId).toBeTruthy(); expect(await packageRuns()).toBe(1);
+    await sql.query('alter table opc_video_material_bindings disable trigger artifact_immutable');
+    try { await sql.query('update opc_video_material_bindings set storyboard=null,editing=null,expected_storyboard_version=null,expected_editing_version=null where actor_id=$1 and request_id=$2', [f.actor, original.followup.requestId]); }
+    finally { await sql.query('alter table opc_video_material_bindings enable trigger artifact_immutable'); }
+
+    const independent = await browser.newContext();
+    await independent.route('**/*', route => { const u = new URL(route.request().url()); return ['127.0.0.1', 'localhost'].includes(u.hostname) || ['data:', 'blob:'].includes(u.protocol) ? route.continue() : route.abort(); });
+    const retry = await independent.newPage(); retry.setDefaultTimeout(90000);
+    await retry.goto(process.env.V3_LOCAL_APP + '/login?redirect=' + encodeURIComponent('/runtime?session=' + work.sessionId));
+    await retry.getByPlaceholder('name@example.com').fill(f.email); await retry.getByPlaceholder('输入你的密码').fill(f.password);
+    await retry.getByRole('button', { name: '登录', exact: true }).last().click(); await retry.waitForURL(url => url.pathname === '/runtime');
+    await retry.getByLabel('对话方式').selectOption({ index: 1 });
+    await retry.getByRole('button', { name: '只生成分镜', exact: true }).click();
+    await expect.poll(async () => (await retry.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('OPC_CONTENT_ALREADY_GENERATED');
+    expect(await packageRuns()).toBe(1); await independent.close();
+
+    await page.unroute('**/api/trpc/opc.saveVideoResults*'); await page.reload();
+    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
+    expect(await packageRuns()).toBe(1);
+  } finally { await browser.close(); }
+}, 300000);
+
 it("OPC: natural-language adoption stays complete after refresh and permits the next turn", async () => {
   const f = await publishedDraft();
   await planFixtureModel(f.moduleId);

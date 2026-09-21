@@ -14,7 +14,20 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE i opc_items;s runtime_sessions;script opc_content_versions;binding opc_video_material_bindings;m runtime_scope_material;result jsonb;n bigint;material_request uuid:=gen_random_uuid();conflict record;package jsonb;want_story boolean;want_edit boolean;
 BEGIN
  PERFORM bill2_actor(p_actor_id);
- IF NOT coalesce(p_storyboard,false) AND NOT coalesce(p_editing,false) THEN RAISE EXCEPTION 'OPC_CONTENT_CHOICE_INVALID';END IF;
+ -- The all-false form is the terminal action for a material claim whose
+ -- Runtime admission is now proven absent. It reuses the existing immutable
+ -- request identity and material revocation; no second claim ledger exists.
+ PERFORM pg_advisory_xact_lock(hashtextextended(p_actor_id::text||p_request_id::text,107));
+ IF NOT coalesce(p_storyboard,false) AND NOT coalesce(p_editing,false) THEN
+  SELECT * INTO binding FROM opc_video_material_bindings WHERE actor_id=p_actor_id AND request_id=p_request_id;
+  IF binding.request_id IS NULL OR binding.work_item_id<>p_work_item_id OR binding.source_script_id<>p_source_script_id
+   OR (binding.expected_storyboard_version IS NOT NULL AND binding.expected_storyboard_version<>p_expected_storyboard_version)
+   OR (binding.expected_editing_version IS NOT NULL AND binding.expected_editing_version<>p_expected_editing_version)
+   OR EXISTS(SELECT 1 FROM runtime_executions e WHERE e.actor_id=p_actor_id AND e.request_id=p_request_id)
+   THEN RAISE EXCEPTION 'OPC_CONTENT_PENDING';END IF;
+  result:=runtime_material(p_actor_id,binding.session_id,'revoke',NULL,binding.material_revision,NULL);
+  RETURN result||jsonb_build_object('abandoned',true);
+ END IF;
  PERFORM pg_advisory_xact_lock(hashtextextended(p_actor_id::text||p_work_item_id::text,119));
  SELECT wi.* INTO i FROM opc_items wi JOIN artifact_projects p ON p.id=wi.work_item_id
   WHERE wi.work_item_id=p_work_item_id AND p.actor_id=p_actor_id AND opc_source_allowed(p_actor_id,wi.source_version_id);
@@ -42,9 +55,10 @@ BEGIN
  -- under a new explicit request. Every other overlap is still recoverable and
  -- therefore blocks a second paid dispatch.
  FOR conflict IN
-  SELECT b.*,e.id execution_id,e.state execution_state,coalesce(e.result->>'body',e.primary_result->>'body') raw
+  SELECT b.*,e.id execution_id,e.state execution_state,coalesce(e.result->>'body',e.primary_result->>'body') raw,material_row.revoked material_revoked
   FROM opc_video_material_bindings b
   LEFT JOIN runtime_executions e ON e.actor_id=b.actor_id AND e.request_id=b.request_id
+  LEFT JOIN runtime_scope_material material_row ON material_row.session_id=b.session_id AND material_row.revision=b.material_revision
   WHERE b.actor_id=p_actor_id AND b.work_item_id=p_work_item_id AND b.request_id<>p_request_id
    AND ((p_storyboard AND coalesce(b.storyboard,true)) OR (p_editing AND coalesce(b.editing,true)))
    AND NOT (
@@ -52,10 +66,25 @@ BEGIN
     AND (NOT coalesce(b.editing,true) OR EXISTS(SELECT 1 FROM opc_content_versions c WHERE c.actor_id=b.actor_id AND c.request_id=b.request_id AND c.kind='editing' AND c.source_content_id=b.source_script_id))
    )
  LOOP
+  IF coalesce(conflict.material_revoked,false) THEN CONTINUE;END IF;
   IF conflict.execution_id IS NULL OR conflict.execution_state NOT IN ('cancelled','completed') THEN RAISE EXCEPTION 'OPC_CONTENT_ALREADY_GENERATED';END IF;
   IF conflict.execution_state='cancelled' THEN CONTINUE;END IF;
   package:=NULL;
   BEGIN package:=conflict.raw::jsonb;EXCEPTION WHEN others THEN CONTINUE;END;
+  -- 0118 rows predate explicit choice columns. Infer only a structurally valid
+  -- completed package; an unknown/nonterminal legacy row remains conservative.
+  IF conflict.storyboard IS NULL AND conflict.editing IS NULL THEN
+   want_story:=jsonb_typeof(package)='object' AND package-ARRAY['storyboard']='{}'::jsonb
+    AND jsonb_typeof(package->'storyboard')='string' AND char_length(package->>'storyboard') BETWEEN 1 AND 20000;
+   want_edit:=jsonb_typeof(package)='object' AND package-ARRAY['editing']='{}'::jsonb
+    AND jsonb_typeof(package->'editing')='string' AND char_length(package->>'editing') BETWEEN 1 AND 20000;
+   IF jsonb_typeof(package)='object' AND package-ARRAY['storyboard','editing']='{}'::jsonb
+    AND jsonb_typeof(package->'storyboard')='string' AND char_length(package->>'storyboard') BETWEEN 1 AND 20000
+    AND jsonb_typeof(package->'editing')='string' AND char_length(package->>'editing') BETWEEN 1 AND 20000
+   THEN want_story:=true;want_edit:=true;END IF;
+   IF (p_storyboard AND want_story) OR (p_editing AND want_edit) THEN RAISE EXCEPTION 'OPC_CONTENT_ALREADY_GENERATED';END IF;
+   CONTINUE;
+  END IF;
   want_story:=coalesce(conflict.storyboard,true);want_edit:=coalesce(conflict.editing,true);
   IF jsonb_typeof(package)='object'
    AND ((want_story AND want_edit AND package-ARRAY['storyboard','editing']='{}'::jsonb)

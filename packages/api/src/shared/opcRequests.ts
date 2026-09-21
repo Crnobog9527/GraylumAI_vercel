@@ -76,6 +76,7 @@ export const opcVideoExecutionCheck = z.object({
   sourceScriptId: uuid,
 }).strict();
 export const opcVideoMaterialPrepare = z.object({
+  action: z.enum(["prepare", "abandon"]).default("prepare"),
   workItemId: uuid,
   requestId: uuid,
   sourceScriptId: uuid,
