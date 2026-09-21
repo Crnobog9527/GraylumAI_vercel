@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
   BookOpen,
@@ -304,8 +304,13 @@ export function AgentFirstWorkspaceSample() {
   const [entryOpen, setEntryOpen] = useState(false);
   const [narrow, setNarrow] = useState(false);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
+  const [sending, setSending] = useState(false);
+  const pendingReply = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const viewState = useRef({ narrow, mobilePanelOpen });
   useEffect(() => { setState(readState()); setReady(true); }, []);
   useEffect(() => { if (ready) localStorage.setItem(storageKey, JSON.stringify(state)); }, [ready, state]);
+  useEffect(() => { viewState.current = { narrow, mobilePanelOpen }; }, [narrow, mobilePanelOpen]);
+  useEffect(() => () => { if (pendingReply.current) clearTimeout(pendingReply.current); }, []);
   useEffect(() => {
     const media = window.matchMedia('(max-width: 1279px)');
     const sync = () => {
@@ -345,24 +350,51 @@ export function AgentFirstWorkspaceSample() {
   }
   function send() {
     const text = input.trim();
-    if (!text) return;
-    const next: Message[] = [...state.messages, { id: crypto.randomUUID(), role: 'user', body: text }];
-    if (target?.type === 'article') {
-      next.push({ id: crypto.randomUUID(), role: 'agent', body: '这是一条交互样片回复：实际专业分析、追问和写法由当前 Skill 决定。这里仅演示新草稿如何绑定当前文章并进入文档区。' });
-      const panelVisible = narrow ? mobilePanelOpen : state.panelOpen;
-      const protectedView = !panelVisible || state.documentDirty || state.historyVersion !== null || state.viewedId !== target.id;
-      update({
-        messages: next,
-        newDraftReady: protectedView,
-        ...(protectedView ? {} : { documentBody: revisedArticle, documentVersion: state.documentVersion + 1 }),
-      });
-    } else {
-      next.push({ id: crypto.randomUUID(), role: 'agent', body: '实际回应将由适用 Skill 根据当前资料生成。本样片只验证工作目标、查看和保存不会串线。' });
-      update({ messages: next });
-    }
+    if (!text || sending) return;
+    const requestedTarget = target;
+    setState((current) => ({ ...current, messages: [...current.messages, { id: crypto.randomUUID(), role: 'user', body: text }] }));
+    setSending(true);
     setInput('');
+    pendingReply.current = setTimeout(() => {
+      setState((current) => {
+        const reply: Message = {
+          id: crypto.randomUUID(),
+          role: 'agent',
+          body: requestedTarget?.type === 'article'
+            ? '这是一条交互样片回复：实际专业分析、追问和写法由当前 Skill 决定。这里仅演示新草稿如何绑定当前文章并进入文档区。'
+            : '实际回应将由适用 Skill 根据当前资料生成。本样片只验证工作目标、查看和保存不会串线。',
+        };
+        if (requestedTarget?.type !== 'article') return { ...current, messages: [...current.messages, reply] };
+        const panelVisible = viewState.current.narrow ? viewState.current.mobilePanelOpen : current.panelOpen;
+        const protectedView = !panelVisible
+          || current.documentDirty
+          || current.historyVersion !== null
+          || current.viewedId !== requestedTarget.id
+          || current.targetId !== requestedTarget.id;
+        return {
+          ...current,
+          messages: [...current.messages, reply],
+          newDraftReady: protectedView,
+          ...(protectedView ? {} : {
+            documentBody: revisedArticle,
+            documentVersion: current.documentVersion + 1,
+            documentDirty: false,
+          }),
+        };
+      });
+      pendingReply.current = null;
+      setSending(false);
+    }, 700);
   }
-  function reset() { localStorage.removeItem(storageKey); setState(initialState); setInput(''); setMobilePanelOpen(false); }
+  function reset() {
+    if (pendingReply.current) clearTimeout(pendingReply.current);
+    pendingReply.current = null;
+    localStorage.removeItem(storageKey);
+    setState(initialState);
+    setInput('');
+    setSending(false);
+    setMobilePanelOpen(false);
+  }
   if (!ready) return <main className="min-h-dvh bg-[var(--bg-primary)] p-6 text-[var(--text-primary)]">正在准备交互样片…</main>;
 
   const document = (
@@ -429,6 +461,7 @@ export function AgentFirstWorkspaceSample() {
                     {message.role === 'user' && <User className="mt-3 h-5 w-5 shrink-0 text-[var(--text-secondary)]" />}
                   </article>
                 ))}
+                {sending && <p role="status" className="text-sm text-[var(--text-tertiary)]">Agent 正在整理…</p>}
 
                 <section aria-label="本周选题候选" className="space-y-3">
                   <div className="flex flex-wrap items-end justify-between gap-2">
@@ -472,7 +505,7 @@ export function AgentFirstWorkspaceSample() {
                 </div>
                 <div className="flex items-end gap-2 rounded-2xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-3 focus-within:border-[var(--color-primary)]">
                   <Textarea aria-label="消息" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} placeholder={target ? `继续讨论“${target.title}”…` : '告诉 Agent 想查看、采用或继续哪条选题…'} rows={2} className="min-h-12 max-h-32 resize-none border-0 bg-transparent focus-visible:ring-0" />
-                  <Button aria-label="发送" size="icon" disabled={!input.trim()} onClick={send}><Send /></Button>
+                  <Button aria-label="发送" size="icon" disabled={!input.trim() || sending} onClick={send}><Send /></Button>
                 </div>
               </div>
             </footer>

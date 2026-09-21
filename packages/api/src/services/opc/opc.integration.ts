@@ -8111,6 +8111,30 @@ it('OPC: Agent-first U1 sample preserves target, partial adoption, document edit
   await page.getByRole('button',{name:'保存修改',exact:true}).click();
   await page.getByRole('heading',{name:'文章草稿 · 第 2 版',exact:true}).waitFor();
 
+  // A result reads the latest view state when it arrives, rather than the view at send time.
+  const documentPanel=page.getByRole('complementary',{name:'当前资料文档'});
+  await page.getByLabel('消息').fill('请给我一版修改稿');
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.getByText('Agent 正在整理…',{exact:true}).waitFor();
+  await documentPanel.getByRole('button',{name:'关闭当前资料',exact:true}).click();
+  await page.getByText('Agent 正在整理…',{exact:true}).waitFor({state:'hidden'});
+  await page.getByRole('button',{name:'当前资料',exact:true}).click();
+  await documentPanel.getByText('新草稿已到达。当前视图受保护，点击查看新版本。',{exact:true}).click();
+
+  await page.getByLabel('消息').fill('再给我一版修改稿');
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  await documentPanel.getByText('版本',{exact:true}).click();
+  await documentPanel.getByRole('button',{name:'历史草稿 · v1',exact:true}).click();
+  await documentPanel.getByText('新草稿已到达。当前视图受保护，点击查看新版本。',{exact:true}).waitFor();
+  await documentPanel.getByRole('heading',{name:'文章草稿 · 第 1 版',exact:true}).waitFor();
+  await documentPanel.getByText('新草稿已到达。当前视图受保护，点击查看新版本。',{exact:true}).click();
+
+  await page.getByLabel('文章正文').fill('这是尚未保存、不能被迟到结果覆盖的修改。');
+  await page.getByLabel('消息').fill('请继续修改');
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  await documentPanel.getByText('新草稿已到达。当前视图受保护，点击查看新版本。',{exact:true}).waitFor();
+  expect(await page.getByLabel('文章正文').inputValue()).toBe('这是尚未保存、不能被迟到结果覆盖的修改。');
+
   await page.getByRole('button',{name:'采用所选 1 条',exact:true}).click();
   await page.getByText('已采用 2 条 · 草稿 1 条',{exact:true}).waitFor();
   await page.getByText('所选内容已保存，剩余草稿仍可继续讨论。',{exact:true}).waitFor();
@@ -8119,7 +8143,6 @@ it('OPC: Agent-first U1 sample preserves target, partial adoption, document edit
 
   const video=page.getByRole('article').filter({hasText:'一次实拍：把杂乱画面整理清楚'});
   await video.getByRole('button',{name:'继续这条',exact:true}).click();
-  const documentPanel=page.getByRole('complementary',{name:'当前资料文档'});
   await documentPanel.getByRole('button',{name:'暂时结束',exact:true}).click();
   await page.reload();
   await page.getByText('本次视频工作已暂时结束',{exact:true}).first().waitFor();
