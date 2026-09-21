@@ -39,3 +39,31 @@ export const opcHandoff = z
 export const opcTopicTurn = z
   .object({ draftId: uuid, requestId: uuid, input: z.string().trim().min(1).max(8000) })
   .strict();
+export const opcTopicDraft = opcPlan.extend({ executionId: uuid }).strict();
+export const opcAdoptTopics = opcPlan.extend({
+  accounts: opcHandoff.shape.accounts,
+}).strict();
+export const opcLibraryEdit = z.object({
+  requestId: uuid,
+  target: z.enum(["business", "account", "item"]),
+  targetId: uuid,
+  expectedRevision: z.number().int().positive(),
+  patch: z.record(z.string(), z.string()),
+}).strict();
+export const opcContentFromExecution = z.object({
+  workItemId: uuid,
+  requestId: uuid,
+  expectedVersion: z.number().int().nonnegative(),
+  kind: z.enum(["brief", "script"]),
+  status: z.enum(["draft", "final"]),
+  executionId: uuid,
+  sourceContentId: uuid.nullable().default(null),
+}).strict();
+export const opcVideoPackage = z.object({
+  workItemId: uuid,
+  requestId: uuid,
+  executionId: uuid,
+  sourceScriptId: uuid,
+  expectedStoryboardVersion: z.number().int().nonnegative(),
+  expectedEditingVersion: z.number().int().nonnegative(),
+}).strict();

@@ -7,8 +7,11 @@ import { Button } from "@/components/ui/button";
 export default function PositioningHome() {
   const catalog = trpc.opc.catalog.useQuery(),
     list = trpc.opc.list.useQuery(),
+    library = trpc.opc.library.useQuery({ search: "", from: null, to: null }),
     start = trpc.opc.start.useMutation();
   const [choice, setChoice] = useState(""),
+    [businessId, setBusinessId] = useState(""),
+    [businessName, setBusinessName] = useState("我的业务"),
     [error, setError] = useState("");
   async function begin(mode: "mentor" | "manual") {
     setError("");
@@ -18,7 +21,13 @@ export default function PositioningHome() {
     const requestId = sessionStorage.getItem(key) || crypto.randomUUID();
     sessionStorage.setItem(key, requestId);
     try {
-      const d = await start.mutateAsync({ requestId, registration, mode });
+      const d = await start.mutateAsync({
+        requestId,
+        registration,
+        mode,
+        businessId: businessId || null,
+        ...(!businessId ? { businessName } : {}),
+      });
       sessionStorage.removeItem(key);
       location.href = "/positioning/" + d.draftId;
     } catch {
@@ -30,7 +39,7 @@ export default function PositioningHome() {
       <header>
         <h1 className="text-3xl font-semibold">开始经营你的账号</h1>
         <p className="mt-3 text-[var(--text-secondary)]">
-          先完成定位，再确认第一周计划。确认后，每个选题都有独立的工作记录。
+          选择适合你的入口。Agent 会保存过程，完成正式定位后再询问是否开始选题。
         </p>
       </header>
       <p role="status">运行环境和模型模式请以进入草稿或工作会话后的提示为准。</p>
@@ -38,7 +47,7 @@ export default function PositioningHome() {
         <p role="alert">当前环境未开放，或登录已失效。请登录后重试。</p>
       )}
       <section className="space-y-4 rounded-xl border border-[var(--border-primary)] p-5">
-        <h2 className="text-xl">新建定位</h2>
+        <h2 className="text-xl">选择定位入口</h2>
         <label>
           定位方法{" "}
           <select
@@ -54,19 +63,29 @@ export default function PositioningHome() {
             ))}
           </select>
         </label>
-        <div className="flex gap-3">
+        <label className="block">
+          业务
+          <select aria-label="所属业务" value={businessId} onChange={(e) => setBusinessId(e.target.value)} className="ml-2 rounded border bg-[var(--bg-secondary)] p-2">
+            <option value="">新业务</option>
+            {library.data?.businesses?.map((business: { businessId: string; name: string }) => (
+              <option key={business.businessId} value={business.businessId}>{business.name}</option>
+            ))}
+          </select>
+        </label>
+        {!businessId && <label className="block">业务名称 <input aria-label="业务名称" value={businessName} maxLength={120} onChange={(e) => setBusinessName(e.target.value)} className="ml-2 rounded border bg-[var(--bg-secondary)] p-2" /></label>}
+        <div className="grid gap-3 sm:grid-cols-2">
           <Button
-            disabled={!catalog.data?.length || start.isPending}
+            disabled={!catalog.data?.length || start.isPending || (!businessId && !businessName.trim())}
             onClick={() => begin("mentor")}
           >
-            导师引导
+            我从零开始 · Agent 引导
           </Button>
           <Button
             variant="outline"
-            disabled={!catalog.data?.length || start.isPending}
+            disabled={!catalog.data?.length || start.isPending || (!businessId && !businessName.trim())}
             onClick={() => begin("manual")}
           >
-            我已有明确定位
+            我已有定位 · 结构化录入
           </Button>
         </div>
         {!catalog.isLoading && !catalog.data?.length && (
@@ -84,58 +103,9 @@ export default function PositioningHome() {
         ))}
         {list.data?.drafts?.length === 0 && <p>尚无定位草稿。</p>}
       </section>
-      <section className="space-y-4">
-        <h2 className="text-xl">账号与选题</h2>
-        {list.data?.accounts?.map(
-          (a: {
-            projectId: string;
-            platform: string;
-            account: string;
-            revision: number;
-            profile: Record<
-              string,
-              { label: string; value: string; status: string }
-            > | null;
-            items: Array<{
-              workItemId: string;
-              sessionId: string;
-              title: string;
-              day: string;
-            }>;
-          }) => (
-            <article
-              key={a.projectId}
-              className="rounded-xl border border-[var(--border-primary)] p-4"
-            >
-              <h3>
-                {a.platform} · {a.account}
-              </h3>
-              <details>
-                <summary>当前经营资料 · 第 {a.revision} 版</summary>
-                {a.profile ? (
-                  Object.entries(a.profile).map(([key, f]) => (
-                    <p key={key} className="mt-2">
-                      {f.label}：{f.value}
-                      {f.status === "deferred" ? "（已明确延期）" : ""}
-                    </p>
-                  ))
-                ) : (
-                  <p>来源暂不可用。</p>
-                )}
-              </details>
-              {a.items.map((i) => (
-                <div className="mt-3" key={i.workItemId}>
-                  <Link
-                    className="underline"
-                    href={"/runtime?session=" + i.sessionId}
-                  >
-                    {i.day} · {i.title}
-                  </Link>
-                </div>
-              ))}
-            </article>
-          ),
-        )}
+      <section className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-[var(--border-primary)] p-5">
+        <div><h2 className="text-xl">内容资料库</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">已保存的业务、账号、选题和内容版本统一在资料库查找与继续。</p></div>
+        <Link className="underline" href="/library">打开内容资料库</Link>
       </section>
       {error && <p role="alert">{error}</p>}
     </main>

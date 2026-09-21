@@ -6,15 +6,15 @@
 
 - [当前目标分支 AGENTS.md](../../AGENTS.md)：仓库操作、writer、验证、审查、合并及生产权限。
 - [Master Plan：产品与已确认决定](MASTER_PLAN.md#overview)：Agent、定位、资料库、内容交付、后台、集成、自动追踪与支付。
-- [施工范围、依赖和状态](MASTER_PLAN.md#construction)；[批次与并行边界](MASTER_PLAN.md#parallel)：只在 Master Plan 维护；第 11–12 节的拟议调整须获 Owner 明确确认才替代原顺序，见下方生效边界。
+- [施工范围、依赖和状态](MASTER_PLAN.md#construction)；[批次与并行边界](MASTER_PLAN.md#parallel)：只在 Master Plan 维护；第 11–12 节已获 Owner 确认，实际功能仍按具名批次分别授权。
 - [完整验收与发布出口](MASTER_PLAN.md#acceptance)；[不可变来源和技术附录](MASTER_PLAN.md#sources)。
 - [原任务图的兼容入口](plan-core.md)；[原实施映射的兼容入口](tasks/V3-OPC-implementation.md)：保留历史身份与原文，不再分别更新当前施工顺序。
 
 ## Product specification vs execution authority
 
-本入口与 Master Plan 同属 #432 文档候选。只有该候选经适用验证、独立审查及 Owner 明确批准合入 `staging` 后，才完成目标分支的入口切换；在候选分支读到本文不代表已经合并。
+本入口与 Master Plan 已随 #432 于 `ded1ee0d553c6124e094e721471aa8e45bf6a172` 合入 `staging`，目标分支已完成入口切换。
 
-入口统一不使拟议依赖或批次自动获批。Owner 尚未确认第 11–12 节调整时，原已批准依赖仍用于相关就绪判断；Owner 可以在明确批准本计划及其顺序后合并。任何一种文档批准都不选中 B1 或其他功能批次、不恢复已暂停的 #422、不授予代码合并、真实调用或生产权限。当前工作仍限 B0 文档收口。
+Owner 已确认第 11–12 节的计划和施工顺序，并另行选择、授权 #422 的 B1 核心体验。B2–B4、代码合并、真实调用和生产仍未因此获批。
 
 当前执行要求只来自 authoritative `staging/AGENTS.md` 和 Owner 的实际授权。技术规范定义需求、依赖、验收和 Definition of Done，不替代权限；历史文档中的状态、未来选择示例和过程用语也不构成新授权。
 

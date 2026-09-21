@@ -6959,101 +6959,41 @@ it("OPC: topic consent concurrency and source mismatch preserve the accepted int
   expect(await f.service.topicRead(f.d.draftId)).toEqual(accepted[0]);
 }, 120000);
 
-it("OPC: topic browser closes multi-turn edited subset adoption with frozen lost replies", async () => {
+it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the library and continues video work", async () => {
   const f = await publishedDraft();
   await planFixtureModel(f.moduleId);
-  // Seed a real existing owned account through the established atomic handoff.
   const seed = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'existing-account', title: '原工作', brief: '原有账号项目', day: '2026-09-20' }] });
   await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: seed.planId, accounts: [{ platform: 'x', account: 'existing-account', expectedRevision: null }] });
   const { browser, context, page } = await planBrowser(f);
   const path = '/positioning/' + f.d.draftId + '/topics';
-  const losses = { consent: 0, chat: 0, save: 0, adopt: 0 };
+  let lostAdoption = 0;
   try {
     await page.goto(process.env.V3_LOCAL_APP + path);
-    await page.getByRole('button', { name: '开始选题工作对话', exact: true }).waitFor();
-    expect((await topicIdentity(f.actor)).topicExecutions).toBe(0);
-    // Lose successful admission: the original full message survives reload.
-    await page.route('**/api/trpc/opc.topicTurn*', async route => { const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort(); losses.chat += 1; });
-    await page.route('**/api/trpc/opc.consentTopicWorkspace*', async route => { const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort(); losses.consent += 1; });
     await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
-    await expect.poll(() => losses.consent, { timeout: 30000 }).toBeGreaterThan(0);
-    expect((await f.service.topicRead(f.d.draftId)).bound).toBe(true);
-    const acceptedOpening = (await f.service.topicRead(f.d.draftId)).opening;
-    await expect.poll(() => losses.consent, { timeout: 30000 }).toBeGreaterThan(0);
-    await page.unroute('**/api/trpc/opc.consentTopicWorkspace*');
-    await page.reload();
-    await page.getByRole('button', { name: '恢复原请求', exact: true }).waitFor();
-    expect((await f.service.topicRead(f.d.draftId)).opening.requestId).toBe(acceptedOpening.requestId);
-    await expect.poll(() => losses.chat, { timeout: 30000 }).toBeGreaterThan(0);
-    expect((await topicIdentity(f.actor)).topicExecutions).toBe(1);
-    const bound = await f.service.topicRead(f.d.draftId);
-    const key = 'opc-topic-operation:' + bound.sessionId;
-    await expect.poll(() => losses.chat, { timeout: 30000 }).toBeGreaterThan(0);
-    const frozen = await page.evaluate(k => localStorage.getItem(k), key);
-    expect(JSON.parse(frozen!).request).toEqual({ draftId: f.d.draftId, requestId: bound.opening.requestId, input: bound.opening.input });
-    await expect.poll(() => losses.chat, { timeout: 30000 }).toBeGreaterThan(0);
-    await page.unroute('**/api/trpc/opc.topicTurn*');
-    await page.reload();
-    await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
-    await page.getByRole('button', { name: '把这条回复保存为候选版本', exact: true }).waitFor();
-    expect((await topicIdentity(f.actor)).topicExecutions).toBe(1);
-    const tab = await context.newPage();
-    await tab.goto(process.env.V3_LOCAL_APP + path);
-    await tab.getByRole('button', { name: '把这条回复保存为候选版本', exact: true }).waitFor();
-    await tab.close();
-    await page.reload();
-    await page.getByRole('button', { name: '把这条回复保存为候选版本', exact: true }).waitFor();
-    expect((await topicIdentity(f.actor)).topicExecutions).toBe(1);
+    await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).waitFor({ timeout: 60000 });
+    expect((await f.service.topicDraftRead(f.d.draftId)).version).toBe(1);
+    expect(await page.getByRole('link', { name: '打开内容资料库', exact: true }).count()).toBe(1);
+
     await page.getByLabel('消息', { exact: true }).fill('请修改第一条选题');
     await page.getByRole('button', { name: '发送', exact: true }).click();
-    await expect.poll(() => page.getByRole('button', { name: '把这条回复保存为候选版本', exact: true }).count(), { timeout: 30000 }).toBe(2);
-    await page.getByRole('button', { name: '把这条回复保存为候选版本', exact: true }).last().click();
-    const title = page.getByLabel('选题标题 aaaaaaaa-1111-4111-8111-111111111111');
-    await title.fill('用户核对后的选题');
-    await page.reload();
-    await expect.poll(() => title.inputValue()).toBe('用户核对后的选题');
-    // Save committed, response lost. expectedVersion/body/source must stay frozen.
-    await page.route('**/api/trpc/opc.savePlan*', async route => { const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort(); losses.save += 1; });
-    await page.getByRole('button', { name: '保存这一版候选', exact: true }).click();
-    await page.getByRole('button', { name: '恢复原请求', exact: true }).waitFor();
-    await expect.poll(() => losses.save, { timeout: 30000 }).toBeGreaterThan(0);
-    const savedEnvelope = JSON.parse((await page.evaluate(k => localStorage.getItem(k), key))!);
-    expect(savedEnvelope.request.expectedVersion).toBe(1);
-    await expect.poll(async () => (await f.service.read(f.d.draftId)).plans.length).toBe(2);
-    await expect.poll(() => losses.save, { timeout: 30000 }).toBeGreaterThan(0);
-    await page.unroute('**/api/trpc/opc.savePlan*');
-    await page.reload();
-    await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
-    await expect.poll(() => page.evaluate(k => localStorage.getItem(k), key), { timeout: 30000 }).toBeNull();
-    expect((await f.service.read(f.d.draftId)).plans).toHaveLength(2);
-    const version2 = page.locator('article').filter({ has: page.getByRole('heading', { name: '第 2 版 · 2 个选题', exact: true }) });
-    await version2.getByRole('checkbox', { name: 'x::existing-account', exact: true }).check();
-    await version2.getByRole('button', { name: '将所选账号保存为独立候选版本', exact: true }).click();
-    const version3 = page.locator('article').filter({ has: page.getByRole('heading', { name: '第 3 版 · 1 个选题', exact: true }) });
-    await version3.waitFor();
-    const versions = (await f.service.read(f.d.draftId)).plans;
-    expect(versions.find((p: { version: number }) => p.version === 2).body).toHaveLength(2);
-    expect(versions.find((p: { version: number }) => p.version === 3).body).toHaveLength(1);
-    const beforeAdopt = await topicIdentity(f.actor);
-    // Another actor-owned operation changed this existing account after the
-    // page read. The UI must release only this definite rollback, refresh the
-    // revision, and require another explicit adoption click.
-    await sql.query('update opc_accounts set revision=revision+1 where actor_id=$1', [f.actor]);
-    await version3.getByRole('button', { name: '按所选账号采纳这次计划', exact: true }).click();
-    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' ')).toContain('OPC_ACCOUNT_CONFLICT');
-    expect(await page.evaluate(k => localStorage.getItem(k), key)).toBeNull();
-    expect((await f.service.read(f.d.draftId)).handoffs).toHaveLength(1);
-    await page.route('**/api/trpc/opc.handoff*', async route => { const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort(); losses.adopt += 1; });
-    await version3.getByRole('button', { name: '按所选账号采纳这次计划', exact: true }).click();
-    await page.getByRole('button', { name: '恢复原请求', exact: true }).waitFor();
-    await expect.poll(() => losses.adopt, { timeout: 30000 }).toBeGreaterThan(0);
-    const adoptEnvelope = JSON.parse((await page.evaluate(k => localStorage.getItem(k), key))!);
-    expect(adoptEnvelope.request.planId).toBe(versions.find((p: { version: number }) => p.version === 3).planId);
-    expect(adoptEnvelope.request.accounts).toEqual([{ platform: 'x', account: 'existing-account', expectedRevision: 2 }]);
-    await expect.poll(() => losses.adopt, { timeout: 30000 }).toBeGreaterThan(0);
-    await page.unroute('**/api/trpc/opc.handoff*');
-    // Fresh authentication recovers complete payload even though account revision advanced.
+    await expect.poll(async () => (await f.service.topicDraftRead(f.d.draftId)).version, { timeout: 60000 }).toBe(2);
+    await page.getByLabel('选择 第二个账号选题').uncheck();
+
+    await page.route('**/api/trpc/opc.adoptTopics*', async route => {
+      const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort(); lostAdoption += 1;
+    });
+    await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).click();
+    await page.getByRole('button', { name: '恢复原请求', exact: true }).waitFor({ timeout: 60000 });
+    await expect.poll(() => lostAdoption, { timeout: 30000 }).toBeGreaterThan(0);
+    const bound = await f.service.topicRead(f.d.draftId);
+    const frozenKey = 'opc-topic-operation:' + bound.sessionId;
+    const frozen = JSON.parse((await page.evaluate(key => localStorage.getItem(key), frozenKey))!);
+    expect(frozen.kind).toBe('adoptTopics');
+    expect(frozen.request.body).toHaveLength(1);
+    expect(frozen.request.expectedVersion).toBe(1);
+    await page.unroute('**/api/trpc/opc.adoptTopics*');
+
     await context.clearCookies();
     await page.goto(process.env.V3_LOCAL_APP + '/login?redirect=' + encodeURIComponent(path));
     await page.getByPlaceholder('name@example.com').fill(f.email);
@@ -7061,16 +7001,93 @@ it("OPC: topic browser closes multi-turn edited subset adoption with frozen lost
     await page.getByRole('button', { name: '登录', exact: true }).last().click();
     await page.waitForURL(url => url.pathname === path);
     await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
-    await expect.poll(() => page.evaluate(k => localStorage.getItem(k), key), { timeout: 30000 }).toBeNull();
-    expect(await topicIdentity(f.actor)).toEqual(beforeAdopt);
-    const history = await f.service.read(f.d.draftId);
-    expect(history.handoffs).toHaveLength(2);
-    expect((await sql.query('select count(*)::int n from opc_accounts where actor_id=$1', [f.actor])).rows[0].n).toBe(1);
-    await page.getByRole('link', { name: '进入该选题的工作空间', exact: true }).last().click();
+    await expect.poll(() => page.evaluate(key => localStorage.getItem(key), frozenKey), { timeout: 30000 }).toBeNull();
+    const plans = (await f.service.read(f.d.draftId)).plans;
+    expect(plans).toHaveLength(2);
+    expect(plans[0].body).toHaveLength(1);
+
+    await page.getByRole('link', { name: '打开内容资料库', exact: true }).first().click();
+    await page.waitForURL(url => url.pathname === '/library');
+    const adoptedCard = page.getByRole('article').filter({ hasText: '修改后的选题' });
+    await adoptedCard.getByRole('button', { name: '直接编辑', exact: true }).click();
+    await page.getByLabel('选题标题').fill('资料库修订标题');
+    await page.getByLabel('完整选题简报').fill('内容：真实案例；对象：起步创作者；价值：明确行动；结构：问题、过程、结果；假设：案例提升收藏。');
+    await page.getByRole('button', { name: '保存修改', exact: true }).click();
+    await page.getByText('资料库修订标题', { exact: true }).waitFor();
+    await page.getByRole('article').filter({ hasText: '资料库修订标题' }).getByRole('link', { name: '继续工作', exact: true }).click();
     await page.waitForURL(url => url.pathname === '/runtime');
-    expect(await topicIdentity(f.actor)).toEqual(beforeAdopt);
+    await page.getByRole('heading', { name: '资料库修订标题', exact: true }).waitFor();
+
+    await page.getByLabel('对话方式').selectOption({ index: 1 });
+    await page.getByLabel('消息', { exact: true }).fill('请和我讨论这条视频的口播稿。');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await page.getByRole('button', { name: '定稿口播稿并生成分镜与剪辑建议', exact: true }).waitFor({ timeout: 60000 });
+    await page.getByRole('button', { name: '定稿口播稿并生成分镜与剪辑建议', exact: true }).click();
+    await page.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿', exact: true }).waitFor();
+    await page.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿', exact: true }).waitFor();
+    const library = await f.service.library({ search: '资料库修订标题', from: null, to: null });
+    expect(library.businesses[0].accounts.flatMap((account: {items: unknown[]}) => account.items)).toHaveLength(1);
   } finally { await browser.close(); }
 }, 300000);
+
+it("OPC: B1 business scope, legacy handoff replay and library edits stay owned and versioned", async () => {
+  const f = await publishedDraft();
+  const businessId = (await sql.query(
+    "select business_id::text from opc_draft_businesses where draft_id=$1",
+    [f.d.draftId],
+  )).rows[0].business_id as string;
+  const shared = await f.service.start({
+    requestId: randomUUID(), registration: f.registration, mode: "manual", businessId,
+  });
+  expect(shared.businessId).toBe(businessId);
+  const isolated = await f.service.start({
+    requestId: randomUUID(), registration: f.registration, mode: "manual", businessName: "隔离业务",
+  });
+  expect(isolated.businessId).not.toBe(businessId);
+
+  const body = [{
+    id: randomUUID(), platform: "x", account: "owned-account", title: "可恢复的选题",
+    brief: "完整简报保留内容、对象、价值、结构和待验证假设。", day: "2026-09-23",
+  }];
+  const plan = await f.service.savePlan({
+    draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0,
+    sourceVersionId: f.sourceVersionId, body,
+  });
+  const handoffRequest = {
+    draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId,
+    accounts: [{ platform: "x", account: "owned-account", expectedRevision: null }],
+  };
+  const first = await f.service.handoff(handoffRequest);
+  expect(await f.service.handoff(handoffRequest)).toEqual(first);
+
+  const library = await f.service.library({ search: "可恢复的选题", from: null, to: null });
+  const ownedBusiness = library.businesses.find((entry: {businessId: string}) => entry.businessId === businessId);
+  const item = ownedBusiness.accounts.flatMap((account: {items: Array<{workItemId: string;revision: number}>}) => account.items)[0];
+  expect(item.workItemId).toBe(first[0].workItemId);
+  const editRequest = {
+    requestId: randomUUID(), target: "item", targetId: item.workItemId, expectedRevision: item.revision,
+    patch: { title: "资料库已修订", brief: "修订后的完整简报仍可追溯。", day: "2026-09-24" },
+  };
+  const edit = await f.service.libraryEdit(editRequest);
+  expect(await f.service.libraryEdit(editRequest)).toEqual(edit);
+  await expect(f.service.libraryEdit({ ...editRequest, requestId: randomUUID() })).rejects.toThrow("OPC_VERSION_CONFLICT");
+
+  await sql.query("update opc_accounts set business_id=$1 where project_id=$2", [isolated.businessId, first[0].projectId]);
+  await expect(f.service.handoff({
+    ...handoffRequest, requestId: randomUUID(),
+    accounts: [{ platform: "x", account: "owned-account", expectedRevision: 1 }],
+  })).rejects.toThrow("OPC_BUSINESS_CONFLICT");
+
+  const other = await publishedDraft();
+  const otherLibrary = await other.service.library({ search: "资料库已修订", from: null, to: null });
+  expect(otherLibrary.businesses.flatMap((entry: {accounts: Array<{items: unknown[]}>}) =>
+    entry.accounts.flatMap(account => account.items))).toHaveLength(0);
+  await expect(other.service.libraryEdit({
+    requestId: randomUUID(), target: "item", targetId: item.workItemId, expectedRevision: edit.revision,
+    patch: { title: "越权修改", brief: "不能写入其他用户的完整简报。", day: "2026-09-25" },
+  })).rejects.toThrow("OPC_DENIED");
+}, 120000);
 
 it.each([[2, "same"], [2, "draft"], [2, "published"], [3, "published"]] as const)("OPC: old v%i executed lost reply restores its original source across revision %s", async (version, revise) => {
   const f = await completed(3);
@@ -7148,7 +7165,7 @@ it("OPC: two topic pages explicitly consent concurrently and execute one first t
     await Promise.all(buttons.map(b => b.waitFor()));
     expect((await topicIdentity(f.actor)).binds).toBe(0);
     await Promise.all(buttons.map(b => b.click()));
-    await Promise.all([page, tab].map(p => p.getByRole('button', { name: '把这条回复保存为候选版本', exact: true }).waitFor()));
+    await Promise.all([page, tab].map(p => p.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).waitFor()));
     expect(await topicIdentity(f.actor)).toEqual({ binds: 1, turns: 1, topicExecutions: 1, topicRuns: 1, reserves: 1 });
     const opening = (await f.service.topicRead(f.d.draftId)).opening;
     const run = (await sql.query('select request_id::text, payload, state from runtime_executions where actor_id=$1', [f.actor])).rows;
@@ -7168,30 +7185,17 @@ it("OPC: two topic pages explicitly consent concurrently and execute one first t
 }, 180000);
 
 
-it("OPC: topic invalid edits and legacy invalid pending records remain editable without dispatch", async () => {
+it("OPC: topic invalid messages and legacy invalid pending records remain recoverable without dispatch", async () => {
   const f = await publishedDraft();
   await planFixtureModel(f.moduleId);
   const { browser, page } = await planBrowser(f);
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + f.d.draftId + '/topics');
     await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
-    await page.getByRole('button', { name: '把这条回复保存为候选版本', exact: true }).click();
+    await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).waitFor();
     const workspace = await f.service.topicRead(f.d.draftId);
     const key = 'opc-topic-operation:' + workspace.sessionId;
     const identity = await topicIdentity(f.actor);
-    const title = page.getByRole('textbox', { name: /^选题标题 / }).first();
-    const brief = page.getByRole('textbox', { name: /^选题简报 / }).first();
-    await title.fill('');
-    await page.getByRole('button', { name: '保存这一版候选', exact: true }).click();
-    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' ')).toContain('标题须为');
-    expect(await page.evaluate(k => localStorage.getItem(k), key)).toBeNull();
-    expect(await title.isEnabled()).toBe(true);
-    await title.fill('用户修正后的标题');
-    await brief.fill('');
-    await page.getByRole('button', { name: '保存这一版候选', exact: true }).click();
-    expect(await brief.isEnabled()).toBe(true);
-    expect(await page.evaluate(k => localStorage.getItem(k), key)).toBeNull();
-    await brief.fill('用户补全的简报');
     const input = page.getByRole('textbox', { name: '消息', exact: true });
     await input.fill('a'.repeat(8001));
     await page.getByRole('button', { name: '发送', exact: true }).click();
@@ -7211,11 +7215,9 @@ it("OPC: topic invalid edits and legacy invalid pending records remain editable 
     await page.reload();
     await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
     await expect.poll(() => page.evaluate(k => localStorage.getItem(k), key), { timeout: 30000 }).toBeNull();
-    expect(await title.isEnabled()).toBe(true);
     expect(await page.evaluate(k => localStorage.getItem(k), key + ':invalid:' + invalidId)).not.toBeNull();
-    await page.getByRole('button', { name: '保存这一版候选', exact: true }).click();
-    await page.getByRole('heading', { name: '第 1 版 · 2 个选题', exact: true }).waitFor();
-    expect((await f.service.read(f.d.draftId)).plans[0].body[0].title).toBe('用户修正后的标题');
+    await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).waitFor();
+    expect((await f.service.topicDraftRead(f.d.draftId)).version).toBe(1);
     expect(await topicIdentity(f.actor)).toEqual(identity);
     await input.fill('请修改第一条选题');
     await page.getByRole('button', { name: '发送', exact: true }).click();

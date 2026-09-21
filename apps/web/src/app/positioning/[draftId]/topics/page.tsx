@@ -19,7 +19,7 @@ import { ArrowLeft, Bot, Loader2, Send, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { trpc } from '@/trpc/client';
-import { opcPlan, opcHandoff, opcTopicTurn } from '@repo/api/src/shared/opcRequests';
+import { opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 
 type PlanItem = {
   id: string;
@@ -33,7 +33,9 @@ type PlanItem = {
 type ChatRequest = { draftId: string; requestId: string; input: string };
 type SaveRequest = { draftId: string; requestId: string; expectedVersion: number; sourceVersionId: string; body: PlanItem[] };
 type AdoptRequest = { draftId: string; requestId: string; planId: string; accounts: Array<{ platform: string; account: string; expectedRevision: number | null }> };
-type Operation = { kind: 'chat'; request: ChatRequest } | { kind: 'save'; request: SaveRequest } | { kind: 'adopt'; request: AdoptRequest };
+type DraftRequest = SaveRequest & { executionId: string };
+type AdoptTopicsRequest = SaveRequest & { accounts: Array<{ platform: string; account: string; expectedRevision: number | null }> };
+type Operation = { kind: 'chat'; request: ChatRequest } | { kind: 'save'; request: SaveRequest } | { kind: 'adopt'; request: AdoptRequest } | { kind: 'draft'; request: DraftRequest } | { kind: 'adoptTopics'; request: AdoptTopicsRequest };
 // Only transaction-level definite rejections release a request. Unknown replies
 // and identity conflicts retain the whole original envelope, never just its ID.
 const definiteRejections = new Set(['OPC_VERSION_CONFLICT', 'OPC_ACCOUNT_CONFLICT', 'OPC_ACCOUNTS_INVALID', 'OPC_PLAN_INVALID', 'OPC_DUPLICATE_ITEM', 'OPC_SOURCE_DENIED', 'OPC_DENIED', 'OPC_TOPIC_SOURCE_REVOKED', 'OPC_TOPIC_UNBOUND', 'OPC_TOPIC_SKILL_MISSING']);
@@ -86,7 +88,18 @@ function parseCandidate(text: string | null | undefined): PlanItem[] | null {
 /** The user-facing text of a reply without the machine-readable plan block. */
 function replyProse(text: string | null | undefined) {
   if (!text) return '正在核实结果，请保留本次对话。';
-  return text.replace(/```(?:json)?\s*\[[\s\S]*?\]\s*```/g, '').trim() || text.trim();
+  return text.replace(/```(?:json)?\s*(?:\[[\s\S]*?\]|\{[\s\S]*?\})\s*```/g, '').trim() || text.trim();
+}
+
+function parseAdoption(text: string | null | undefined): string[] | null {
+  if (!text) return null;
+  for (const match of [...text.matchAll(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/g)].reverse()) {
+    try {
+      const value = JSON.parse(match[1]) as { action?: unknown; itemIds?: unknown };
+      if (value.action === 'adopt' && Array.isArray(value.itemIds) && value.itemIds.length > 0 && value.itemIds.every(id => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id))) return [...new Set(value.itemIds as string[])];
+    } catch { /* not an adoption block */ }
+  }
+  return null;
 }
 
 export default function TopicWorkspacePage() {
@@ -100,11 +113,13 @@ export default function TopicWorkspacePage() {
   const openingAttempt = useRef('');
   const [working, setWorking] = useState(false);
   const [candidate, setCandidate] = useState<{ body: PlanItem[]; requestId: string } | null>(null);
-  const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
+  const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [adopted, setAdopted] = useState<
     Array<{ projectId: string; workItemId: string; sessionId: string; itemId: string }>
   >([]);
   const end = useRef<HTMLDivElement>(null);
+  const persistedExecution = useRef('');
+  const adoptedExecution = useRef('');
 
   const read = trpc.opc.read.useQuery({ draftId }, { enabled: Boolean(draftId) });
   const workspace = trpc.opc.topicWorkspace.useQuery(
@@ -122,8 +137,11 @@ export default function TopicWorkspacePage() {
   const cancel = trpc.runtime.cancel.useMutation();
   const savePlan = trpc.opc.savePlan.useMutation();
   const handoff = trpc.opc.handoff.useMutation();
+  const saveDraft = trpc.opc.saveTopicDraft.useMutation();
+  const adoptTopics = trpc.opc.adoptTopics.useMutation();
+  const topicDraft = trpc.opc.topicDraft.useQuery({ draftId }, { enabled: Boolean(draftId && sessionId) });
 
-  const busy = working || turn.isPending || execute.isPending || bind.isPending || savePlan.isPending || handoff.isPending;
+  const busy = working || turn.isPending || execute.isPending || bind.isPending || savePlan.isPending || handoff.isPending || saveDraft.isPending || adoptTopics.isPending;
   const storageKey = sessionId ? 'opc-topic-operation:' + sessionId : '';
   const candidateKey = sessionId ? 'opc-topic-candidate:' + sessionId : '';
   useEffect(() => {
@@ -151,6 +169,12 @@ export default function TopicWorkspacePage() {
       setCandidate(value);
     } catch { setError('无法保存本机草稿，已停止修改。'); }
   }
+  useEffect(() => {
+    const body = topicDraft.data?.body as PlanItem[] | null | undefined;
+    if (!body?.length) return;
+    setCandidate({ body, requestId: topicDraft.data.draftVersionId ?? crypto.randomUUID() });
+    setSelectedItems(current => current.length ? current.filter(id => body.some(item => item.id === id)) : body.map(item => item.id));
+  }, [topicDraft.data?.draftVersionId, topicDraft.data?.body]);
 
   const plans = (read.data?.plans ?? []) as Array<{
     planId: string;
@@ -231,7 +255,9 @@ export default function TopicWorkspacePage() {
         // whether a transport failure committed a valid business operation.
         const valid = op.kind === 'chat' ? opcTopicTurn.safeParse(op.request)
           : op.kind === 'save' ? opcPlan.safeParse(op.request)
-          : op.kind === 'adopt' ? opcHandoff.safeParse(op.request) : null;
+          : op.kind === 'adopt' ? opcHandoff.safeParse(op.request)
+          : op.kind === 'draft' ? opcTopicDraft.safeParse(op.request)
+          : op.kind === 'adoptTopics' ? opcAdoptTopics.safeParse(op.request) : null;
         if (!valid?.success) {
           if (raw) {
             localStorage.setItem(storageKey + ':invalid:' + op.request.requestId, raw);
@@ -254,10 +280,18 @@ export default function TopicWorkspacePage() {
             const result = await savePlan.mutateAsync(op.request);
             editCandidate(null);
             setNotice('已保存为第 ' + result.version + ' 版候选。请核对该版本后明确采纳。');
-          } else {
+          } else if (op.kind === 'adopt') {
             const result = await handoff.mutateAsync(op.request);
             setAdopted(result as typeof adopted);
-            setNotice('已承接所选计划版本；进入对应工作项后可另行生成正文。');
+            setNotice('已采用所选内容并保存到资料库。');
+          } else if (op.kind === 'draft') {
+            const result = await saveDraft.mutateAsync(op.request);
+            editCandidate({ body: result.body as PlanItem[], requestId: op.request.requestId });
+            setSelectedItems((result.body as PlanItem[]).map(item => item.id));
+          } else {
+            const result = await adoptTopics.mutateAsync(op.request);
+            setAdopted(result.items as typeof adopted);
+            setNotice('已采用所选内容并保存到资料库。你可以在资料库继续任一具体内容。');
           }
           localStorage.setItem(storageKey + ':completed:' + op.request.requestId, JSON.stringify(op));
           localStorage.removeItem(storageKey);
@@ -271,7 +305,7 @@ export default function TopicWorkspacePage() {
             setError('本次请求已明确拒绝（' + message + '），未提交此项修改。请核对刷新后的计划与账号，再明确重试。');
           } else setError(failureMessage(cause));
         }
-        await Promise.all([read.refetch(), view.refetch(), accountList.refetch()]);
+        await Promise.all([read.refetch(), view.refetch(), accountList.refetch(), topicDraft.refetch()]);
       });
     } catch (cause) { setError(failureMessage(cause)); }
     finally { operationBusy.current = false; setWorking(false); }
@@ -316,37 +350,58 @@ export default function TopicWorkspacePage() {
     }
   }
 
-  async function saveCandidate() {
-    if (!candidate || pending) return;
-    await perform({ kind: 'save', request: {
-      draftId, requestId: candidate.requestId, expectedVersion: nextVersion,
-      sourceVersionId: workspace.data?.sourceVersionId ?? '', body: candidate.body,
-    } });
-  }
-
-  async function adopt(planId: string, body: PlanItem[]) {
-    if (pending || accountList.isFetching || accountList.error || !accountList.data) return;
-    const chosen = body.filter(item => selectedAccounts.includes(item.platform + '::' + item.account));
+  function adoptionRequest(body: PlanItem[], itemIds: string[], requestId = crypto.randomUUID()): AdoptTopicsRequest | null {
+    if (accountList.isFetching || accountList.error || !accountList.data) return null;
+    const chosen = body.filter(item => itemIds.includes(item.id));
     const unique = new Map(chosen.map(item => [item.platform + '::' + item.account, item]));
-    if (!unique.size) { setError('请先选择要承接的平台账号。'); return; }
-    const plan = plans.find(value => value.planId === planId)!;
-    if (chosen.length !== body.length || plan.version !== nextVersion) {
-      // Preserve history and the atomic handoff contract: show the actual saved
-      // subset/new version before the user explicitly adopts it.
-      await perform({ kind: 'save', request: {
-        draftId, requestId: crypto.randomUUID(), expectedVersion: nextVersion,
-        sourceVersionId: plan.sourceVersionId, body: chosen,
-      } });
-      return;
-    }
-    await perform({ kind: 'adopt', request: {
-      draftId, requestId: crypto.randomUUID(), planId,
+    if (!chosen.length || !unique.size) return null;
+    return {
+      draftId, requestId, expectedVersion: nextVersion,
+      sourceVersionId: workspace.data?.sourceVersionId ?? '', body: chosen,
       accounts: [...unique.values()].map(item => ({
         platform: item.platform, account: item.account,
         expectedRevision: accounts.find(a => a.platform === item.platform && a.account === item.account)?.revision ?? null,
       })),
-    } });
+    };
   }
+
+  async function adoptCurrent(itemIds = selectedItems, requestId?: string) {
+    if (!candidate || pending) return;
+    const request = adoptionRequest(candidate.body, itemIds, requestId);
+    if (!request) { setError('请先选择要采用的具体选题。'); return; }
+    await perform({ kind: 'adoptTopics', request });
+  }
+
+  // Every completed Agent proposal is durably auto-saved as a draft version.
+  // The execution id is also the stable save identity, so refresh, re-login and
+  // two tabs converge on the same version instead of creating duplicate drafts.
+  useEffect(() => {
+    if (!executions || !workspace.data?.sourceVersionId || pending || busy || !topicDraft.data) return;
+    const offered = [...executions].reverse().find(e => e.state === 'completed' && e.contentAvailable && parseCandidate(e.body ?? e.primaryBody));
+    if (!offered || persistedExecution.current === offered.executionId) return;
+    if (topicDraft.data.requestId === offered.executionId) {
+      persistedExecution.current = offered.executionId;
+      return;
+    }
+    const body = parseCandidate(offered.body ?? offered.primaryBody);
+    if (!body) return;
+    persistedExecution.current = offered.executionId;
+    void perform({kind:'draft',request:{draftId,requestId:offered.executionId,executionId:offered.executionId,expectedVersion:topicDraft.data.version??0,sourceVersionId:workspace.data.sourceVersionId,body}});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [executions, workspace.data?.sourceVersionId, topicDraft.data?.version, pending, busy]);
+
+  // Clear natural-language adoption from the Agent uses the same atomic action
+  // as the card. Vague agreement never produces the action block and is inert.
+  useEffect(() => {
+    if (!executions || !candidate || pending || busy) return;
+    const action = [...executions].reverse().find(e => e.state === 'completed' && parseAdoption(e.body ?? e.primaryBody));
+    if (!action || adoptedExecution.current === action.executionId) return;
+    const ids = parseAdoption(action.body ?? action.primaryBody);
+    if (!ids) return;
+    adoptedExecution.current = action.executionId;
+    void adoptCurrent(ids, action.executionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [executions, candidate, pending, busy]);
 
   if (read.isLoading || workspace.isLoading)
     return <main className="p-6">正在读取选题工作空间…</main>;
@@ -381,8 +436,8 @@ export default function TopicWorkspacePage() {
           </div>
         </div>
         {bound && (
-          <Link className="text-sm underline" href={`/positioning/${draftId}/plan`}>
-            查看历史计划与承接
+          <Link className="text-sm underline" href="/library">
+            打开内容资料库
           </Link>
         )}
       </header>
@@ -469,18 +524,7 @@ export default function TopicWorkspacePage() {
                             <ul className="mt-3 space-y-2" aria-label="回复中的选题候选">
                               {body.map(item => <li key={item.id}><strong>{item.day} · {item.title}</strong><p>{item.platform}/{item.account} · {item.brief}</p></li>)}
                             </ul>
-                            <Button
-                              className="mt-3"
-                              size="sm"
-                              variant="outline"
-                              disabled={busy || Boolean(pending)}
-                              onClick={() => {
-                                setNotice('');
-                                editCandidate({ body, requestId: crypto.randomUUID() });
-                              }}
-                            >
-                              把这条回复保存为候选版本
-                            </Button>
+                            <p className="mt-3 text-xs text-[var(--text-tertiary)]">这版候选会自动保存；你可以继续对话修改，或在下方选择采用。</p>
                             </div>
                           );
                         })()}
@@ -510,32 +554,24 @@ export default function TopicWorkspacePage() {
           {candidate && (
             <section className="shrink-0 border-t border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4">
               <div className="mx-auto max-w-4xl">
-                <h2 className="text-sm font-medium">保存为候选版本</h2>
+                <h2 className="text-sm font-medium">当前候选 · 自动保存</h2>
                 <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                  将保存为第 {nextVersion + 1} 版，不会覆盖历史版本，也不会创建账号或生成正文。
+                  选择具体选题后直接采用；也可以用自然语言告诉 Agent「采用全部」或「只采用第 1、3 条」。
                 </p>
                 <ul className="mt-2 max-h-40 overflow-y-auto text-sm" aria-label="候选选题">
                   {candidate.body.map((item) => (
-                    <li key={item.id}>
-                      {item.day} · {item.platform}/{item.account}
-                      <select aria-label={'候选账号 ' + item.id} value={item.platform + '::' + item.account} disabled={Boolean(pending)} onChange={event => {
-                        const [platform, account] = event.target.value.split('::');
-                        editCandidate({ ...candidate, requestId: crypto.randomUUID(), body: candidate.body.map(row => row.id === item.id ? { ...row, platform, account } : row) });
-                      }}>
-                        <option value={item.platform + '::' + item.account}>{item.platform}/{item.account}</option>
-                        {accounts.filter(a => a.platform !== item.platform || a.account !== item.account).map(a => <option key={a.platform + '::' + a.account} value={a.platform + '::' + a.account}>已有账号：{a.platform}/{a.account}</option>)}
-                      </select>
-                      <input aria-label={'选题标题 ' + item.id} value={item.title} disabled={Boolean(pending)} maxLength={160} onChange={event => editCandidate({ ...candidate, requestId: crypto.randomUUID(), body: candidate.body.map(row => row.id === item.id ? { ...row, title: event.target.value } : row) })} />
-                      <Textarea aria-label={'选题简报 ' + item.id} value={item.brief} disabled={Boolean(pending)} maxLength={2000} onChange={event => editCandidate({ ...candidate, requestId: crypto.randomUUID(), body: candidate.body.map(row => row.id === item.id ? { ...row, brief: event.target.value } : row) })} />
+                    <li key={item.id} className="flex items-start gap-2 py-2">
+                      <input type="checkbox" aria-label={'选择 '+item.title} checked={selectedItems.includes(item.id)} onChange={event=>setSelectedItems(current=>event.target.checked?[...current,item.id]:current.filter(id=>id!==item.id))}/>
+                      <span><strong>{item.day} · {item.title}</strong><br/><span className="text-xs text-[var(--text-tertiary)]">{item.platform}/{item.account} · {item.brief}</span></span>
                     </li>
                   ))}
                 </ul>
                 <div className="mt-3 flex gap-2">
-                  <Button size="sm" disabled={busy || Boolean(pending)} onClick={saveCandidate}>
-                    保存这一版候选
+                  <Button size="sm" disabled={busy || Boolean(pending) || !selectedItems.length} onClick={()=>adoptCurrent()}>
+                    采用所选并保存到资料库
                   </Button>
-                  <Button size="sm" variant="ghost" disabled={Boolean(pending)} onClick={() => editCandidate(null)}>
-                    放弃
+                  <Button size="sm" variant="outline" disabled={busy || Boolean(pending)} onClick={()=>setSelectedItems(candidate.body.map(item=>item.id))}>
+                    全选
                   </Button>
                 </div>
               </div>
@@ -545,60 +581,21 @@ export default function TopicWorkspacePage() {
           {(plans.length > 0 || adopted.length > 0) && (
             <section className="shrink-0 border-t border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4">
               <div className="mx-auto max-w-4xl">
-                <h2 className="text-sm font-medium">候选版本与承接</h2>
-                {plans.map((plan) => (
+                <details><summary className="cursor-pointer text-sm font-medium">历史正式采用版本 · {plans.length}</summary>{plans.map((plan) => (
                   <article key={plan.planId} className="mt-3 rounded-xl border border-[var(--border-primary)] p-3">
                     <h3 className="text-sm font-medium">第 {plan.version} 版 · {plan.body?.length ?? 0} 个选题</h3>
                     {plan.body ? (
-                      <>
                         <ul className="mt-2 max-h-40 overflow-y-auto text-sm" aria-label={'第 ' + plan.version + ' 版选题'}>
-                          {plan.body.map((item) => {
-                            const key = item.platform + '::' + item.account;
-                            return (
-                              <li key={item.id} className="flex items-center gap-2">
-                                <label className="flex items-center gap-2">
-                                  <input
-                                    type="checkbox"
-                                    aria-label={key}
-                                    checked={selectedAccounts.includes(key)}
-                                    onChange={(event) =>
-                                      setSelectedAccounts((current) =>
-                                        event.target.checked
-                                          ? [...current, key]
-                                          : current.filter((value) => value !== key),
-                                      )
-                                    }
-                                  />
-                                  {item.day} · {item.platform}/{item.account} · {item.title} · {accounts.some(a => a.platform === item.platform && a.account === item.account) ? '采用已有账号项目' : '创建账号项目（不注册外部账号）'}
-                                </label>
-                              </li>
-                            );
-                          })}
+                          {plan.body.map((item) => <li key={item.id}>{item.day} · {item.platform}/{item.account} · {item.title}</li>)}
                         </ul>
-                        <Button
-                          className="mt-3"
-                          size="sm"
-                          disabled={busy || Boolean(pending) || accountList.isFetching || Boolean(accountList.error)}
-                          onClick={() => adopt(plan.planId, plan.body as PlanItem[])}
-                        >
-                          {plan.version !== nextVersion || plan.body.some(item => !selectedAccounts.includes(item.platform + '::' + item.account)) ? '将所选账号保存为独立候选版本' : '按所选账号采纳这次计划'}
-                        </Button>
-                      </>
                     ) : (
                       <p role="status" className="mt-2 text-sm">
                         来源已不可用，暂不能采纳此版本。
                       </p>
                     )}
                   </article>
-                ))}
-                {(read.data?.handoffs?.flatMap((h: { result: typeof adopted }) => h.result) ?? adopted).map((item: typeof adopted[number]) => (
-                  <p key={item.itemId} className="mt-2 text-sm">
-                    已承接：
-                    <Link className="underline" href={'/runtime?session=' + item.sessionId}>
-                      进入该选题的工作空间
-                    </Link>
-                  </p>
-                ))}
+                ))}</details>
+                {(read.data?.handoffs?.length || adopted.length)>0&&<p className="mt-3 rounded-xl border border-[var(--border-primary)] p-3 text-sm">已采用的选题都已进入资料库，可按业务和账号查看，再选择具体内容继续。</p>}
               </div>
             </section>
           )}
@@ -631,7 +628,7 @@ export default function TopicWorkspacePage() {
                 </Button>
               </div>
               <p className="mt-2 text-center text-xs text-[var(--text-tertiary)]">
-                这个对话绑定已确认的定位版本与当前方法修订；生成候选和采纳账号是两次独立动作。
+                候选会自动保存；只有你明确采用的具体选题才会进入资料库。
               </p>
             </div>
           </footer>

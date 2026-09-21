@@ -14,6 +14,11 @@ import {
   opcInformation,
   opcTopicBind,
   opcTopicTurn,
+  opcTopicDraft,
+  opcAdoptTopics,
+  opcLibraryEdit,
+  opcContentFromExecution,
+  opcVideoPackage,
 } from "../services/opc/service";
 const procedure = protectedProcedure.use(async ({ ctx, next }) => {
   // Remote access requires the explicit Staging target and server-side actor window.
@@ -115,6 +120,27 @@ export const opcRouter = router({
   topicTurn: procedure
     .input(opcTopicTurn)
     .mutation(({ ctx, input }) => ctx.opc.prepareTopicTurn(input)),
+  saveTopicDraft: procedure
+    .input(opcTopicDraft)
+    .mutation(({ ctx, input }) => ctx.opc.topicDraft(input)),
+  topicDraft: readProcedure
+    .input(z.object({ draftId: z.string().uuid() }).strict())
+    .query(({ ctx, input }) => ctx.opc.topicDraftRead(input.draftId)),
+  adoptTopics: procedure
+    .input(opcAdoptTopics)
+    .mutation(({ ctx, input }) => ctx.opc.adoptTopics(input)),
+  library: readProcedure
+    .input(z.object({ search: z.string().max(160).default(''), from: z.string().date().nullable().default(null), to: z.string().date().nullable().default(null) }).strict())
+    .query(({ ctx, input }) => ctx.opc.library(input)),
+  editLibrary: procedure
+    .input(opcLibraryEdit)
+    .mutation(({ ctx, input }) => ctx.opc.libraryEdit(input)),
+  saveContentResult: procedure
+    .input(opcContentFromExecution)
+    .mutation(({ ctx, input }) => ctx.opc.contentFromExecution(input)),
+  saveVideoPackage: procedure
+    .input(opcVideoPackage)
+    .mutation(({ ctx, input }) => ctx.opc.videoPackage(input)),
   read: readProcedure
     .input(z.object({ draftId: z.string().uuid() }).strict())
     .query(async({ ctx, input }) => dedupeHandoffResults({...await ctx.opc.read(input.draftId),runtimeMode:ctx.stagingRead?"staging_test":"isolated"})),

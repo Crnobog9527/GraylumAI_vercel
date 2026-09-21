@@ -7,14 +7,16 @@ import { workbenchService } from "../artifacts/workbench";
 import type {StagingPolicy} from '../runtime/stagingPolicy';
 import { displayedQuestion, isOpeningInput, questionLabel, questionTask, reachedQuestions } from "./questions";
 import { elicitFieldSpecs } from "../../shared/opcMethodPolicy";
-import { planItem, opcPlan, opcHandoff, opcTopicTurn } from "../../shared/opcRequests";
-export { planItem, opcPlan, opcHandoff, opcTopicTurn } from "../../shared/opcRequests";
+import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcVideoPackage } from "../../shared/opcRequests";
+export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcVideoPackage } from "../../shared/opcRequests";
 const uuid = z.string().uuid();
 export const opcStart = z
   .object({
     requestId: uuid,
     registration: z.string().min(1).max(100),
     mode: z.enum(["mentor", "manual"]),
+    businessId: uuid.nullable().optional(),
+    businessName: z.string().trim().min(1).max(120).optional(),
   })
   .strict();
 export const opcGenerate = z
@@ -45,9 +47,9 @@ export const opcTopicBind = z
  * has to accept, and a proposed account name is never an existing account.
  */
 const TOPIC_WORKSPACE_INSTRUCTION =
-  "This turn runs inside the user's first-week topic workspace. Work conversationally in the user's own language and treat the confirmed positioning content supplied as scope material as the only established facts about the account, the audience and the goals. " +
-  "You may propose concrete topics, dates, titles and briefs, and you may propose plausible account names, but a proposed account name is not a registered, existing or verified external account and you must never state or imply that it exists, is available, is registered or has been checked. Never invent traction, results, audience data or platform rules: say what is still missing instead. " +
-  "Answer the user's actual message first. When the user asks for the first-week plan, or asks to revise it, also end that reply with exactly one JSON code block that contains only an array of items with the keys id (UUID), platform (lowercase platform slug), account (lowercase account handle), title, brief and day (YYYY-MM-DD), so the host can save it as a versioned candidate. Do not create accounts, do not publish anything, and never claim that an article, script or external action was generated or performed. ";
+  "This turn runs inside the user's first-week topic workspace and may continue into later dated ranges. Work conversationally in the user's own language and treat the confirmed positioning content supplied as scope material as the only established facts about the business, accounts, audience and goals. Ask one focused question when required information is missing; do not force a fixed seven-item week. " +
+  "You may propose concrete topics, dates, titles and complete briefs. Every brief must state what the content covers, who it is for, why it matters now, a useful structure, and the hypothesis to validate. A proposed account name is not a registered, existing or verified external account and you must never imply otherwise. Never invent traction, results, audience data or platform rules. " +
+  "Answer the user's actual message first. When offering or revising topics, end with exactly one JSON code block containing only an array with id (UUID), platform, account, title, brief and day. When the user explicitly says to adopt all or a subset of the most recent offered topics, end with exactly one JSON code block containing only {\"action\":\"adopt\",\"itemIds\":[UUIDs]}; do this only for clear adoption, never for vague agreement, questions, later, close, or opening a link. The host persists the draft and performs the business action; never claim it succeeded yourself. Do not create external accounts, publish, generate media or claim an external action occurred. ";
 export const opcInformation = z
   .object({
     draftId: uuid,
@@ -423,10 +425,75 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       ({...(await rpc("opc_query", { p_draft_id: uuid.parse(draftId) })),runtimeMode:real?"staging_test":"isolated"}),
     start: async (value: unknown) => {
       const v = opcStart.parse(value);
-      return rpc("opc_start", {
+      return rpc("opc_start_b1", {
         p_request_id: v.requestId,
         p_registration: v.registration,
         p_mode: v.mode,
+        p_business_id: v.businessId ?? null,
+        p_business_name: v.businessName ?? null,
+      });
+    },
+    topicDraft: async (value: unknown) => {
+      const v = opcTopicDraft.parse(value);
+      return rpc("opc_topic_draft_save", {
+        p_draft_id: v.draftId,
+        p_request_id: v.requestId,
+        p_expected_version: v.expectedVersion,
+        p_source_version_id: v.sourceVersionId,
+        p_body: v.body,
+      });
+    },
+    topicDraftRead: (draftId: string) => rpc("opc_topic_draft_read", { p_draft_id: uuid.parse(draftId) }),
+    adoptTopics: async (value: unknown) => {
+      const v = opcAdoptTopics.parse(value);
+      return rpc("opc_adopt_topics", {
+        p_draft_id: v.draftId,
+        p_request_id: v.requestId,
+        p_expected_version: v.expectedVersion,
+        p_source_version_id: v.sourceVersionId,
+        p_body: v.body,
+        p_accounts: v.accounts,
+      });
+    },
+    library: (value: unknown) => {
+      const v = z.object({
+        search: z.string().max(160).default(""),
+        from: z.string().date().nullable().default(null),
+        to: z.string().date().nullable().default(null),
+      }).strict().parse(value);
+      return rpc("opc_library", { p_search: v.search, p_from: v.from, p_to: v.to });
+    },
+    libraryEdit: (value: unknown) => {
+      const v = opcLibraryEdit.parse(value);
+      return rpc("opc_library_edit", {
+        p_request_id: v.requestId,
+        p_target: v.target,
+        p_target_id: v.targetId,
+        p_expected_revision: v.expectedRevision,
+        p_patch: v.patch,
+      });
+    },
+    contentFromExecution: (value: unknown) => {
+      const v = opcContentFromExecution.parse(value);
+      return rpc("opc_content_from_execution", {
+        p_work_item_id: v.workItemId,
+        p_request_id: v.requestId,
+        p_expected_version: v.expectedVersion,
+        p_kind: v.kind,
+        p_status: v.status,
+        p_execution_id: v.executionId,
+        p_source_content_id: v.sourceContentId,
+      });
+    },
+    videoPackage: (value: unknown) => {
+      const v = opcVideoPackage.parse(value);
+      return rpc("opc_video_package_from_execution", {
+        p_work_item_id: v.workItemId,
+        p_request_id: v.requestId,
+        p_execution_id: v.executionId,
+        p_source_script_id: v.sourceScriptId,
+        p_expected_storyboard_version: v.expectedStoryboardVersion,
+        p_expected_editing_version: v.expectedEditingVersion,
       });
     },
     savePlan: async (value: unknown) => {
@@ -441,7 +508,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
     },
     handoff: async (value: unknown) => {
       const v = opcHandoff.parse(value);
-      return rpc("opc_handoff", {
+      return rpc("opc_handoff_b1", {
         p_draft_id: v.draftId,
         p_request_id: v.requestId,
         p_plan_id: v.planId,

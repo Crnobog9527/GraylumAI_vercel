@@ -17,6 +17,10 @@ export default function HomePage() {
   const router = useRouter();
   // 从 tRPC 获取用户数据
   const { data: userProfile } = trpc.user.getUserProfile.useQuery();
+  const positioningLibrary = trpc.opc.library.useQuery(
+    { search: '', from: null, to: null },
+    { retry: false },
+  );
 
   // 从 tRPC 获取公告数据
   const { data: announcementsData, isLoading: isAnnouncementsLoading } = trpc.settings.getActiveAnnouncements.useQuery();
@@ -168,6 +172,14 @@ export default function HomePage() {
         }}
       >
         <WelcomeBanner user={user} />
+        {!positioningLibrary.isLoading && !positioningLibrary.error &&
+          !positioningLibrary.data?.businesses?.some((business: { sourceAvailable: boolean }) => business.sourceAvailable) && (
+          <section className="mb-8 rounded-2xl border border-[var(--color-primary)] bg-[var(--bg-secondary)] p-6">
+            <h2 className="text-xl font-semibold text-[var(--text-primary)]">先完成正式定位</h2>
+            <p className="mt-2 text-sm text-[var(--text-secondary)]">你可以让 Agent 从零引导，也可以录入已有定位。未完成的内容会原样保留，下次登录继续。</p>
+            <button className="mt-4 rounded-lg bg-[var(--color-primary)] px-4 py-2 font-medium text-[var(--bg-primary)]" onClick={() => router.push('/positioning')}>选择定位入口</button>
+          </section>
+        )}
         {showOnboarding && <SixStepsGuide onStartAnalysis={() => {
           const localDatabase=process.env.NEXT_PUBLIC_SUPABASE_URL;
           if(localDatabase&&/^http:\/\/(127\.0\.0\.1|\[::1\])(:[0-9]+)?\//.test(localDatabase+'/')){router.push('/positioning');return;}
