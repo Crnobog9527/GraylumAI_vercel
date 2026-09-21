@@ -144,7 +144,9 @@ BEGIN
    VALUES(p_actor_id,p_work_item_id,p_kind,n+1,p_status,body,p_source_content_id,p_execution_id,p_request_id) RETURNING * INTO c;
   IF p_status='final' THEN
    SELECT coalesce(max(revision),0) INTO material_revision FROM runtime_scope_material WHERE session_id=s.id;
-   PERFORM runtime_material(p_actor_id,s.id,'save',p_request_id,material_revision,jsonb_build_object('brief',CASE WHEN p_kind='script' THEN '已定稿口播稿：'||body ELSE '已保存内容：'||body END,'material',coalesce(opc_profile(i.source_version_id)::text,''),'roundId',NULL));
+   -- Content identity distinguishes brief/script saves of the same execution.
+   -- The existing content request still replays before this insertion path.
+   PERFORM runtime_material(p_actor_id,s.id,'save',c.id,material_revision,jsonb_build_object('brief',CASE WHEN p_kind='script' THEN '已定稿口播稿：'||body ELSE '已保存内容：'||body END,'material',coalesce(opc_profile(i.source_version_id)::text,''),'roundId',NULL));
   END IF;
  END IF;
  RETURN jsonb_build_object('id',c.id,'kind',c.kind,'version',c.version,'status',c.status,'body',c.body);
@@ -315,7 +317,10 @@ BEGIN
  IF p_material IS NULL OR p_material='null'::jsonb THEN RETURN;END IF;
  SELECT * INTO m FROM runtime_scope_material WHERE session_id=(p_material->>'sessionId')::uuid AND revision=(p_material->>'revision')::bigint;
  SELECT id INTO source_script FROM opc_content_versions
-  WHERE actor_id=p_actor_id AND request_id=m.request_id AND kind IN ('script','brief');
+  WHERE actor_id=p_actor_id AND kind IN ('script','brief')
+   AND (id=m.request_id OR (request_id=m.request_id AND m.content->>'brief'=
+    CASE WHEN kind='script' THEN '已定稿口播稿：'||body ELSE '已保存内容：'||body END))
+  ORDER BY (id=m.request_id) DESC LIMIT 1;
  IF source_script IS NULL THEN
   SELECT source_script_id INTO source_script FROM opc_video_material_bindings
    WHERE actor_id=p_actor_id AND session_id=m.session_id AND material_revision=m.revision;

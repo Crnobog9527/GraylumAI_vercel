@@ -8041,6 +8041,26 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   const previous=(await sql.query('select e.payload,b.payload billing from runtime_executions e join bill2_runs b on b.id=e.billing_run_id where e.id=$1',[saved.execution_id])).rows[0];
   previous.payload.input='[OPC_SCRIPT_V1] 请求口播稿';previous.billing.input=previous.payload;
   await expect(sql.query('select runtime_admit($1,$2,$3,$4,$5)',[f.actor,article.sessionId,randomUUID(),previous.payload,previous.billing])).rejects.toThrow('OPC_VIDEO_TYPE_REQUIRED');
+  // The same reply may be explicitly saved under a corrected content type.
+  // Its frozen public request stays unchanged; each saved content owns its material.
+  await card.getByRole('button',{name:'直接编辑',exact:true}).click();
+  await card.getByLabel('内容类型',{exact:true}).selectOption('video');
+  await card.getByRole('button',{name:'保存修改',exact:true}).click();
+  await card.getByRole('button',{name:'直接编辑',exact:true}).waitFor();
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+article.sessionId);
+  await page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true}).click();
+  await page.getByRole('link',{name:'这版口播稿已定稿 · 查看',exact:true}).waitFor();
+  const originalRequest=(await sql.query("select request_id from opc_content_versions where work_item_id=$1 and kind='brief'",[article.workItemId])).rows[0].request_id;
+  const replay={workItemId:article.workItemId,requestId:originalRequest,executionId:saved.execution_id,kind:'script' as const,status:'final' as const,expectedVersion:0};
+  const firstScript=await f.service.contentFromExecution(replay);
+  expect(await f.service.contentFromExecution(replay)).toEqual(firstScript);
+  const materials=await sql.query("select m.request_id from runtime_scope_material m join opc_content_versions c on c.id=m.request_id where c.work_item_id=$1",[article.workItemId]);
+  expect(materials.rows).toHaveLength(2);
+  // Reverse direction also accepts the exact old-style shared execution/request ID.
+  const reverse={...replay,kind:'brief' as const,requestId:randomUUID(),expectedVersion:1};
+  await f.service.contentFromExecution({...reverse,kind:'script',expectedVersion:1});
+  const secondBrief=await f.service.contentFromExecution(reverse);
+  expect(await f.service.contentFromExecution(reverse)).toEqual(secondBrief);
   await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+unknown.sessionId+'&continue=1');
   await page.getByRole('heading',{name:'这条选题准备做成什么内容？',exact:true}).waitFor();
   expect(await page.getByRole('button',{name:'起草口播稿',exact:true}).count()).toBe(0);
@@ -8065,6 +8085,6 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   await page.getByRole('link',{name:'文章细化',exact:true}).click();
   await page.waitForURL(url=>url.pathname==='/library'&&url.searchParams.get('item')===article.workItemId);
   expect(await guideCount()).toBe(1);
-  expect((await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='brief'",[article.workItemId])).rows[0].n).toBe(1);
+  expect((await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='brief'",[article.workItemId])).rows[0].n).toBe(2);
  }finally{await browser.close();}
 },180000);
