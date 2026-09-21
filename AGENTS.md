@@ -133,6 +133,42 @@ out-of-scope dependencies while continuing independent work. Specifications
 define requirements/acceptance, not execution authority. Stop after the selected
 task or batch rather than choosing additional work.
 
+
+### Shortest Correct Path
+
+Prefer reuse and the smallest correct change over architectural expansion. Start
+each implementation slice from an architecture delta of zero: first inspect the
+existing repository mechanisms and authoritative data sources that could satisfy
+the current authorized acceptance criteria.
+
+Before adding a new persistent or shared infrastructure primitive, verify that
+the requirement cannot be correctly satisfied by existing mechanisms. This
+applies in particular to new database tables, RPC/API families, queues,
+schedulers or cron jobs, persistent state machines, runtimes, ledgers, memory
+systems, workflow engines, standalone services/listeners, permission systems,
+or generic frameworks.
+
+When such an addition is necessary, the Agent owns the technical decision and
+must be able to state in the implementation/PR record:
+
+- which existing mechanisms were considered and why they are insufficient;
+- the smallest missing capability;
+- why the proposed addition is the minimum correct solution; and
+- which source remains authoritative so the change does not create a parallel
+  authority or duplicate system.
+
+Do not build generalized infrastructure solely for hypothetical future use.
+Prefer a local, reversible implementation until current requirements demonstrate
+the abstraction is needed; extract reusable infrastructure when a real repeated
+use case or the present requirement itself justifies it.
+
+This principle does not prohibit ordinary local helpers, test fixtures, or
+bounded refactors that do not create a new persistent/shared architectural
+authority. It is an implementation principle, not a new approval Gate. Proceed
+autonomously within authorized scope; ask the Owner only when the solution
+materially changes product outcome, permissions, cost, data safety, protected
+external effects, or another Owner decision.
+
 ## 6. Required Validation
 
 Run validation relevant to the changed scope plus all repository-required remote
