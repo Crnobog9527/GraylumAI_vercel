@@ -7353,15 +7353,21 @@ it("OPC: completed video generation permits the next dialogue and a new script f
     await finalize.waitFor({ timeout: 60000 }); await finalize.click();
     await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
     await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
+    expect(await page.getByRole('button', { name: '定稿口播稿', exact: true }).count()).toBe(0);
 
-    await page.getByLabel('消息', { exact: true }).fill('请继续讨论并给我一版改写后的口播稿。');
+    const rewriteInput = '请继续讨论并给我一版改写后的口播稿。';
+    await page.getByLabel('消息', { exact: true }).fill(rewriteInput);
     await page.getByRole('button', { name: '发送', exact: true }).click();
-    finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
+    const rewriteCard = page.getByRole('article').filter({ hasText: rewriteInput });
+    finalize = rewriteCard.getByRole('button', { name: '定稿口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 }); await finalize.click();
     await page.getByRole('heading', { name: '口播稿 · 第 2 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
     await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 旧口播稿版本', exact: true }).waitFor();
     await page.getByRole('heading', { name: '口播稿已定稿。要继续基于这版生成分镜脚本和剪辑建议吗？', exact: true }).waitFor();
     expect((await page.getByRole('alert').allTextContents()).join(' ')).not.toContain('当前执行不可用');
+    const rewriteExecution = (await sql.query("select id from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input'=$3", [f.actor, work.sessionId, rewriteInput])).rows[0];
+    const savedScript = (await sql.query("select execution_id from opc_content_versions where actor_id=$1 and work_item_id=$2 and kind='script' and version=2", [f.actor, work.workItemId])).rows[0];
+    expect(savedScript.execution_id).toBe(rewriteExecution.id);
   } finally { await browser.close(); }
 }, 240000);
 
