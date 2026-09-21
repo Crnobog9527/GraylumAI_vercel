@@ -5,6 +5,7 @@ import {
   readMentorResponse,
   readMentorTurn,
   readWorkflowMentorResponse,
+  readWorkflowMentorExecution,
   readWorkflowMentorTurn,
 } from "./mentor-response";
 
@@ -120,4 +121,16 @@ it("exposes the workflow-aware turn classification the page renders", () => {
   const turn = readWorkflowMentorTurn(raw, "first", fields);
   expect(turn.targetStepId).toBe("first");
   expect(turn.informationPatch.goal.basis).toBe("agent_proposal");
+});
+
+it("keeps the public mentor reply separate from the extractor patch", () => {
+  const turn = readWorkflowMentorExecution(
+    JSON.stringify({ message: "我们继续核对这一项。" }),
+    JSON.stringify({ inputKind: "answer", targetStepId: "first", informationPatch: { goal: { value: "帮助独立开发者", nature: "decision", status: "provisional", basis: "user_statement" } } }),
+    "first",
+    { first: { schema: [{ id: "goal" }] } },
+  );
+  expect(turn.message).toBe("我们继续核对这一项。");
+  expect(turn.informationPatch.goal.value).toBe("帮助独立开发者");
+  expect(turn.targetStepId).toBe("first");
 });

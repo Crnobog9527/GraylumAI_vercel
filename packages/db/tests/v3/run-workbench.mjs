@@ -320,7 +320,7 @@ try {
     apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
     apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
   }
-  if(runtimeSchema&&!upgradeMode){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');}}
+  if(runtimeSchema&&!upgradeMode){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');}}
   if(stagingSchema&&!upgradeMode){apply('packages/db/migrations/0108_runtime_staging_window.sql');apply('packages/db/migrations/0108_runtime_staging_window.sql');}
   console.log("SQL additive migration and repeat application PASS; runtime schema="+runtimeSchema+"; deferred upgrade="+upgradeMode);
   docker(
@@ -424,8 +424,28 @@ try {
         content='【固定模拟回复，仅验证流程】你最想帮助哪类人解决一个什么具体问题？';
         try{
           const last=request.messages.filter(m=>m.role==='user').at(-1);
-          const isOrganizer=request.messages.some(m=>m.role!=='user' && typeof m.content==='string' && m.content.includes('Organize this operation result.'));
-          if(isOrganizer){content='【模拟整理成果】\n'+last.content;}
+          const instructionText=typeof request.instructions==='string'
+            ? request.instructions
+            : request.messages.filter(m=>m.role!=='user' && typeof m.content==='string').map(m=>m.content).join('\n');
+          const isOrganizer=instructionText.includes('Organize this operation result.')||instructionText.includes('independent structured-information extractor');
+          if(isOrganizer){
+            try{
+              let organizerText=String(last.content);
+              try {
+                const organizerEnvelope=JSON.parse(organizerText);
+                if(typeof organizerEnvelope?.userRequest==='string') organizerText=organizerEnvelope.userRequest;
+              } catch {}
+              const [contextRaw,primaryRaw='']=organizerText.split('\n\nPrimary assistant reply:\n');
+              const context=JSON.parse(contextRaw);JSON.parse(primaryRaw);
+              const {mentorQuestionFixture}=await import('./opc-mentor-fixture.mjs');
+              const extraction=mentorQuestionFixture(
+                'Current information question: '+JSON.stringify(context.currentQuestion)+'\nField roles for the current question: '+JSON.stringify(context.currentQuestion?.fields??[])+'. ',
+                context.userInput,
+                Object.keys(context.allowedWorkflow??{}).indexOf(context.originalStepId),
+              );
+              content=JSON.stringify({inputKind:extraction.inputKind??'answer',targetStepId:extraction.targetStepId??context.originalStepId,informationPatch:extraction.informationPatch??{}});
+            }catch{content=JSON.stringify({inputKind:'answer',informationPatch:{}});}
+          }
           const input=isOrganizer ? {} : JSON.parse(last.content);
           const brief=input.scopeMaterial?.content?.brief ?? '';
           const stepId=/^(step|mentor):/.test(brief) ? brief.slice(brief.indexOf(':')+1) : null;
@@ -433,11 +453,11 @@ try {
           if(stepId){
             const questions=['你希望帮助哪类人解决什么问题？','你手里有哪些对标账号或内容例子？','你希望别人因为什么特点记住你？','你最容易持续制作哪一种内容？','你每周可以投入多少时间？','你希望先尝试哪一种变现方式？'];
             if(input.scopeMaterial?.content?.brief?.startsWith('mentor:')){
-              const instructionText=typeof request.instructions==='string'
+              const mentorInstructions=typeof request.instructions==='string'
                 ? request.instructions
                 : request.messages.filter(m=>['system','developer'].includes(m.role)).map(m=>typeof m.content==='string'?m.content:'').join('\n');
               const {mentorQuestionFixture}=await import('./opc-mentor-fixture.mjs');
-              content=JSON.stringify(mentorQuestionFixture(instructionText,input.userRequest,stepIndex));
+              content=JSON.stringify(mentorQuestionFixture(mentorInstructions,input.userRequest,stepIndex));
             }else content='【分步模拟，仅验证流程】第 '+(stepIndex+1)+' 步示例：'+(questions[stepIndex] ?? '这一步你最想确认什么？')+'\n你可以继续回复，也可以在表单里补充想法。此示例不会理解或评估你的答案。';
           }
           if(brief==='topic:first-week') {
@@ -448,7 +468,14 @@ try {
             const rows=[{id:'aaaaaaaa-1111-4111-8111-111111111111',platform:'x',account:'existing-account',title:revision?'修改后的选题':'首周选题',brief:'内容：展示一次真实工作过程；对象：正在起步的创作者；价值：解决本周行动不清；结构：问题、过程、结果；假设：具体案例更容易促成收藏。',day:'2026-09-21'}, {id:'bbbbbbbb-2222-4222-8222-222222222222',platform:'x',account:'proposed-account',title:'第二个账号选题',brief:'内容：解释定位方法；对象：准备开新账号的人；价值：减少试错；结构：误区、方法、行动；假设：步骤清单会提升完成率。建议账号未注册。',day:'2026-09-22'}];
             content=String(input.userRequest).includes('采用')?'已识别明确采用指令。\n```json\n'+JSON.stringify({action:'adopt',itemIds:String(input.userRequest).includes('全部')?rows.map(row=>row.id):[rows[0].id]})+'\n```':'【选题合成回复，仅验证流程】已读取正式定位与选题方法。'+(revision?'已按本轮要求修改。':'先给出可核对的候选。')+'\n```json\n'+JSON.stringify(rows)+'\n```';
           }
-          if(String(input.userRequest).includes('[OPC_VIDEO_PACKAGE_V1]')) content=JSON.stringify({storyboard:'镜头 1：开场问题；镜头 2：展示过程；镜头 3：给出结论。',editing:'保留自然口播节奏；关键步骤加字幕；结尾停留行动提示。'});
+          if(String(input.userRequest).includes('[OPC_VIDEO_PACKAGE_V1]')){
+            const requested=String(input.userRequest);
+            content=JSON.stringify(requested.includes('只生成分镜脚本')
+              ? {storyboard:'镜头 1：开场问题；镜头 2：展示过程；镜头 3：给出结论。'}
+              : requested.includes('只生成剪辑建议')
+                ? {editing:'保留自然口播节奏；关键步骤加字幕；结尾停留行动提示。'}
+                : {storyboard:'镜头 1：开场问题；镜头 2：展示过程；镜头 3：给出结论。',editing:'保留自然口播节奏；关键步骤加字幕；结尾停留行动提示。'});
+          }
           if(stepId && request.messages.some(m=>m.role!=='user' && typeof m.content==='string' && m.content.includes('Required information is confirmed or explicitly deferred.'))){
             const information=input.scopeMaterial.content.work.steps[stepId]?.information ?? {};
             content='【模拟步骤素材】\n'+Object.entries(information).map(([key,value])=>key+'：'+value.value+'（'+value.status+'）').join('\n');
@@ -485,7 +512,17 @@ try {
     }
     if((opcMode||runtimeMode||runtimeUpgrade) && req.url==='/__runtime_count'){
       if(req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
-      res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({calls:runtimeCalls.length,userRequests:(runtimeCalls.at(-1)?.messages ?? []).filter(m=>m.role==='user').map(m=>{try{return JSON.parse(m.content).userRequest ?? null;}catch{return typeof m.content==='string'?m.content:null;}})}));return;
+      // The independently billed organizer receives a private extraction
+      // envelope rather than the user's public conversation. Report the most
+      // recent primary request when tests verify preserved multi-turn input.
+      const publicRequest=[...runtimeCalls].reverse().find(request=>{
+        const instructions=typeof request.instructions==='string'
+          ? request.instructions
+          : (request.messages??[]).filter(m=>m.role!=='user'&&typeof m.content==='string').map(m=>m.content).join('\n');
+        return !instructions.includes('Organize this operation result.') &&
+          !instructions.includes('independent structured-information extractor');
+      }) ?? runtimeCalls.at(-1);
+      res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({calls:runtimeCalls.length,userRequests:(publicRequest?.messages ?? []).filter(m=>m.role==='user').map(m=>{try{return JSON.parse(m.content).userRequest ?? null;}catch{return typeof m.content==='string'?m.content:null;}})}));return;
     }
 
     if(runtimeUpgrade && req.url?.startsWith('/receipt/local-runtime-')){
@@ -504,7 +541,7 @@ try {
     if(chatCompatibility && await chatCompatibility(req,res))return;
     if(upgradeMode && ['/__upgrade_bill2','/__runtime_candidate','/__runtime_legacy','/__legacy_reader_compat','/__legacy_ledger_reader_compat','/__finance_read_context'].includes(req.url)){
       if(req.method!=='POST'||req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
-      try{if(req.url==='/__upgrade_bill2'){apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');if(runtimeSchema){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');}}if(stagingSchema){apply('packages/db/migrations/0108_runtime_staging_window.sql');apply('packages/db/migrations/0108_runtime_staging_window.sql');}sql("NOTIFY pgrst, 'reload schema'");}
+      try{if(req.url==='/__upgrade_bill2'){apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');if(runtimeSchema){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');}}if(stagingSchema){apply('packages/db/migrations/0108_runtime_staging_window.sql');apply('packages/db/migrations/0108_runtime_staging_window.sql');}sql("NOTIFY pgrst, 'reload schema'");}
       else if(req.url==='/__finance_read_context'){apply('packages/db/migrations/0103_bill_1_reservation_read_contract.sql');sql("NOTIFY pgrst, 'reload schema'");}
       else {if(req.url==='/__legacy_reader_compat'||req.url==='/__legacy_ledger_reader_compat')patchLegacyFinanceReader(legacyRoot,evidenceDirectory,req.url==='/__legacy_ledger_reader_compat'?'ledger':'complete');await restartApplication(req.url==='/__runtime_candidate'?root:legacyRoot);}res.writeHead(200).end('ok');}catch(error){console.error(String(error));res.writeHead(500).end('compatibility transition failed');}return;
     }

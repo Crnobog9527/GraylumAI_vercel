@@ -38,7 +38,7 @@ type AdoptTopicsRequest = SaveRequest & { accounts: Array<{ platform: string; ac
 type Operation = { kind: 'chat'; request: ChatRequest } | { kind: 'save'; request: SaveRequest } | { kind: 'adopt'; request: AdoptRequest } | { kind: 'draft'; request: DraftRequest } | { kind: 'adoptTopics'; request: AdoptTopicsRequest };
 // Only transaction-level definite rejections release a request. Unknown replies
 // and identity conflicts retain the whole original envelope, never just its ID.
-const definiteRejections = new Set(['OPC_VERSION_CONFLICT', 'OPC_ACCOUNT_CONFLICT', 'OPC_ACCOUNTS_INVALID', 'OPC_PLAN_INVALID', 'OPC_DUPLICATE_ITEM', 'OPC_SOURCE_DENIED', 'OPC_DENIED', 'OPC_TOPIC_SOURCE_REVOKED', 'OPC_TOPIC_UNBOUND', 'OPC_TOPIC_SKILL_MISSING']);
+const definiteRejections = new Set(['OPC_VERSION_CONFLICT', 'OPC_ACCOUNT_CONFLICT', 'OPC_ACCOUNTS_INVALID', 'OPC_PLAN_INVALID', 'OPC_DUPLICATE_ITEM', 'OPC_TOPIC_ALREADY_ADOPTED', 'OPC_SOURCE_DENIED', 'OPC_DENIED', 'OPC_TOPIC_SOURCE_REVOKED', 'OPC_TOPIC_UNBOUND', 'OPC_TOPIC_SKILL_MISSING']);
 
 /** The last JSON array the Agent offered as the first-week plan, if any. */
 function parseCandidate(text: string | null | undefined): PlanItem[] | null {
@@ -186,6 +186,13 @@ export default function TopicWorkspacePage() {
     () => plans.reduce((max, plan) => Math.max(max, plan.version), 0),
     [plans],
   );
+  const adoptedItemIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const handoff of (read.data?.handoffs ?? []) as Array<{ result?: Array<{ itemId?: string }> }>)
+      for (const item of handoff.result ?? []) if (item.itemId) ids.add(item.itemId);
+    for (const item of adopted) ids.add(item.itemId);
+    return ids;
+  }, [read.data?.handoffs, adopted]);
   /**
    * Account identities come from the owned account list, not from the draft
    * read: `opc.read` for one draft has no accounts projection, so reading them
@@ -291,6 +298,8 @@ export default function TopicWorkspacePage() {
           } else {
             const result = await adoptTopics.mutateAsync(op.request);
             setAdopted(result.items as typeof adopted);
+            const acceptedIds = new Set((result.items as typeof adopted).map(item => item.itemId));
+            setSelectedItems(current => current.filter(id => !acceptedIds.has(id)));
             setNotice('已采用所选内容并保存到资料库。你可以在资料库继续任一具体内容。');
           }
           localStorage.setItem(storageKey + ':completed:' + op.request.requestId, JSON.stringify(op));
@@ -367,8 +376,14 @@ export default function TopicWorkspacePage() {
 
   async function adoptCurrent(itemIds = selectedItems, requestId?: string) {
     if (!candidate || pending) return;
-    const request = adoptionRequest(candidate.body, itemIds, requestId);
-    if (!request) { setError('请先选择要采用的具体选题。'); return; }
+    const remaining = itemIds.filter(id => !adoptedItemIds.has(id));
+    const request = adoptionRequest(candidate.body, remaining, requestId);
+    if (!request) {
+      setError(itemIds.some(id => adoptedItemIds.has(id))
+        ? '所选选题已经采用并保存在资料库中，请选择尚未采用的选题。'
+        : '请先选择要采用的具体选题。');
+      return;
+    }
     await perform({ kind: 'adoptTopics', request });
   }
 
@@ -566,18 +581,20 @@ export default function TopicWorkspacePage() {
                   选择具体选题后直接采用；也可以用自然语言告诉 Agent「采用全部」或「只采用第 1、3 条」。
                 </p>
                 <ul className="mt-2 max-h-40 overflow-y-auto text-sm" aria-label="候选选题">
-                  {candidate.body.map((item) => (
+                  {candidate.body.map((item) => {
+                    const wasAdopted = adoptedItemIds.has(item.id);
+                    return (
                     <li key={item.id} className="flex items-start gap-2 py-2">
-                      <input type="checkbox" aria-label={'选择 '+item.title} checked={selectedItems.includes(item.id)} onChange={event=>setSelectedItems(current=>event.target.checked?[...current,item.id]:current.filter(id=>id!==item.id))}/>
-                      <span><strong>{item.day} · {item.title}</strong><br/><span className="text-xs text-[var(--text-tertiary)]">{item.platform}/{item.account} · {item.brief}</span></span>
+                      <input type="checkbox" aria-label={'选择 '+item.title} disabled={wasAdopted} checked={!wasAdopted && selectedItems.includes(item.id)} onChange={event=>setSelectedItems(current=>event.target.checked?[...new Set([...current,item.id])]:current.filter(id=>id!==item.id))}/>
+                      <span><strong>{item.day} · {item.title}</strong>{wasAdopted ? ' · 已采用' : ''}<br/><span className="text-xs text-[var(--text-tertiary)]">{item.platform}/{item.account} · {item.brief}</span></span>
                     </li>
-                  ))}
+                  );})}
                 </ul>
                 <div className="mt-3 flex gap-2">
-                  <Button size="sm" disabled={busy || Boolean(pending) || !selectedItems.length} onClick={()=>adoptCurrent()}>
+                  <Button size="sm" disabled={busy || Boolean(pending) || !selectedItems.some(id=>!adoptedItemIds.has(id))} onClick={()=>adoptCurrent()}>
                     采用所选并保存到资料库
                   </Button>
-                  <Button size="sm" variant="outline" disabled={busy || Boolean(pending)} onClick={()=>setSelectedItems(candidate.body.map(item=>item.id))}>
+                  <Button size="sm" variant="outline" disabled={busy || Boolean(pending) || candidate.body.every(item=>adoptedItemIds.has(item.id))} onClick={()=>setSelectedItems(candidate.body.filter(item=>!adoptedItemIds.has(item.id)).map(item=>item.id))}>
                     全选
                   </Button>
                 </div>

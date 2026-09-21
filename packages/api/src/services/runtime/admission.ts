@@ -24,7 +24,7 @@ export const runtimeAdmission=z.object({sessionId:uuid,requestId:uuid,input:z.st
  ]),sources:z.array(z.object({projectId:uuid,roundId:uuid,sourceVersionId:uuid,hash:z.string().regex(/^[a-f0-9]{64}$/)}).strict()).max(1).default([]),network:z.enum(['deny','allow','require_latest']).default('allow')}).strict();
 /** Deployment policy is server configuration, never request input.
  * Real admission requires the separately loaded, enabled Staging window. */
-export type LocalRuntimePolicy={real?:StagingPolicy;account:string;costPerCall:string;creditsPerUsd:string;multiplier:string;maxCalls:number;maxOutputTokens:number;inputBytes:number;historyItems:number;expectedMaterialRevision?:number;opcTurnToken?:string;additionalInstructions?:string;skillResources?:readonly string[];searchEnabled?:boolean};
+export type LocalRuntimePolicy={real?:StagingPolicy;account:string;costPerCall:string;creditsPerUsd:string;multiplier:string;maxCalls:number;maxOutputTokens:number;inputBytes:number;historyItems:number;expectedMaterialRevision?:number;opcTurnToken?:string;additionalInstructions?:string;skillResources?:readonly string[];searchEnabled?:boolean;organizerInstructions?:string;organizerInput?:string};
 export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient,policy:LocalRuntimePolicy){
  policy=Object.freeze({...policy,...(policy.real?{real:structuredClone(policy.real),creditsPerUsd:policy.real.creditsPerUsd,multiplier:policy.real.multiplier}:{}),...(policy.skillResources?{skillResources:Object.freeze([...policy.skillResources])}:{})});
  z.number().int().min(1).max(32).parse(policy.maxCalls);
@@ -81,7 +81,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(row.error||row.data?.is_active!=='true'||(!policy.real&&row.data.provider!=='fixture'))throw new Error('RUNTIME_MODEL_CAPABILITY_UNVERIFIED');
    if(policy.real)realModel(row.data);
    if(input.selection.kind==='organizer')assertSeparateSummaryModel(session.dialogueModel,row.data.model_id);
-   let attachedOrganizer:{modelId:string;model:string;maxOutputTokens:number}|undefined;
+   let attachedOrganizer:{modelId:string;model:string;maxOutputTokens:number;instructions?:string;input?:string}|undefined;
    let attachedInputLimit:number|undefined;
    if(input.organizeAfter){
     if(input.selection.kind==='organizer'||policy.maxCalls<2)throw new Error('RUNTIME_ORGANIZER_BUDGET');
@@ -94,7 +94,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     const limit=Math.min(policy.maxOutputTokens,summary.maxTokens,Number(model.data.max_tokens),policy.real?realModel(model.data).outputLimit:Infinity);
     if(!Number.isSafeInteger(limit)||limit<1)throw new Error('RUNTIME_MODEL_CAPACITY');
     attachedInputLimit=inputCapacity(model.data,limit);
-    attachedOrganizer={modelId:summary.modelId,model:model.data.model_id,maxOutputTokens:limit};
+    attachedOrganizer={
+     modelId:summary.modelId,model:model.data.model_id,maxOutputTokens:limit,
+     ...(policy.organizerInstructions?{instructions:z.string().max(12000).parse(policy.organizerInstructions)}:{}),
+     ...(policy.organizerInput?{input:z.string().max(24000).parse(policy.organizerInput)}:{}),
+    };
    }
    // SDK turns count model requests only. Paid search consumes another BILL2
    // call, and attached organization must remain inside this same frozen run.

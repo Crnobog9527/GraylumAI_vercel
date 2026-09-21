@@ -7,7 +7,7 @@ import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { mergeInformation } from "./information-merge";
-import { applyMentorTurnRules, readWorkflowMentorTurn } from "./mentor-response";
+import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-response";
 import {
   confirmationActionIsRedundant,
   confirmQuestionValues,
@@ -168,6 +168,7 @@ type MentorRequest = {
   requestId: string;
   input: string;
   questionId?: string;
+  organizeAfter?: true;
 };
 type StepEnvelope = {
   request: MentorRequest;
@@ -302,6 +303,7 @@ export default function PositioningDraft({
   const confirmationLock = useRef(false);
   const chatScroll = useRef<HTMLDivElement>(null);
   const [mentorInput, setMentorInput] = useState("");
+  const [manualMentorEnabled, setManualMentorEnabled] = useState(false);
   const [hydratedDraft, setHydratedDraft] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<
     Record<string, "idle" | "saving" | "saved" | "error">
@@ -386,6 +388,7 @@ export default function PositioningDraft({
                 (value) => typeof value === "string" && value.trim(),
               )) ?? "",
     );
+    setManualMentorEnabled(Boolean(local.manualMentorEnabled));
     setInfoEdits(local.infoEdits ?? {});
     setPlanCandidate(
       Array.isArray(local.planCandidate) ? local.planCandidate : null,
@@ -426,6 +429,7 @@ export default function PositioningDraft({
           activeStep,
           activeQuestions,
           mentorInput,
+          manualMentorEnabled,
         }),
       );
     } catch {
@@ -452,6 +456,7 @@ export default function PositioningDraft({
     activeStep,
     activeQuestions,
     mentorInput,
+    manualMentorEnabled,
   ]);
   useEffect(() => {
     infoEditsRef.current = infoEdits;
@@ -732,6 +737,7 @@ export default function PositioningDraft({
       input: string | null;
       body: string | null;
       primaryBody: string | null;
+      summary: string | null;
     }>) {
       if (
         execution.state !== "completed" ||
@@ -743,7 +749,7 @@ export default function PositioningDraft({
           item.executionId === execution.executionId &&
           item.roundId === d.roundId &&
           item.informationVersion === d.snapshot.steps[item.stepId]?.version &&
-          (item.kind === "mentor" || item.kind === "opening"),
+          (item.kind === "mentor" || item.kind === "organizer" || item.kind === "opening"),
       );
       if (!turn) continue;
       const schema = d.information[turn.stepId]?.schema ?? [];
@@ -753,52 +759,57 @@ export default function PositioningDraft({
       // exists, otherwise a later refresh can show the mentor reply without
       // ever applying its form suggestions.
       if (!rawResponse) continue;
-      const parsed = readWorkflowMentorTurn(rawResponse, turn.stepId, d.information);
+      const parsed = readWorkflowMentorExecution(rawResponse, execution.summary, turn.stepId, d.information);
       // A non-substantive user turn (an acknowledgement, an uncertainty or a
       // request for help) never becomes business content on its own.
       const accepted = applyMentorTurnRules(parsed, execution.input ?? "");
-      appliedMentor.current.add(execution.executionId);
       if (!Object.keys(accepted).length || parsed.targetStepId !== turn.stepId ||
-          d.snapshot.state !== "draft" || d.snapshot.steps[turn.stepId].valid) continue;
-      setInfoEdits((old) => {
-        // A saved edit advances the server version; an unsaved edit (including
-        // an intentional empty value) also owns this form. History is still
-        // readable and its suggestion can be adopted explicitly.
-        if (old[turn.stepId]) return old;
-        const values = Object.fromEntries(
-          schema.map((field: { id: string }) => [
-            field.id,
-            old[turn.stepId]?.[field.id] ??
-              d.information[turn.stepId].values?.[field.id] ?? {
-                status: "unknown",
-                nature: "unknown",
-                value: "",
-              },
-          ]),
-        ) as Record<string, Information>;
-        let changed = false;
-        for (const [fieldId, suggestion] of Object.entries(accepted)) {
-          // A late response is projected onto the question it was actually
-          // asked about (its own stored identity), never onto whatever the user
-          // is currently reviewing, and never onto an unseen field.
-          const turnQuestionId =
-            turn.questionId ??
-            nextInformationQuestion(schema, d.information[turn.stepId].values)?.id;
-          if (fieldId !== turnQuestionId || values[fieldId]?.value.trim()) continue;
-          values[fieldId] = toInformation(suggestion);
-          changed = true;
-        }
-        if (!changed) return old;
-        captureInformationBase(turn.stepId);
-        const next = { ...old, [turn.stepId]: values };
-        // Autosave reads the ref inside a queued async task. Keep it in sync
-        // with this mentor projection immediately instead of waiting for the
-        // follow-up effect, otherwise a fast save can persist the previous
-        // question's unknown value while the input already shows the mentor
-        // suggestion.
-        infoEditsRef.current = next;
-        return next;
-      });
+          d.snapshot.state !== "draft" || d.snapshot.steps[turn.stepId].valid) {
+        appliedMentor.current.add(execution.executionId);
+        continue;
+      }
+      // A saved edit advances the server version; an unsaved edit (including
+      // an intentional empty value) also owns this form. History is still
+      // readable and its suggestion can be adopted explicitly.
+      const old = infoEditsRef.current;
+      if (old[turn.stepId]) {
+        appliedMentor.current.add(execution.executionId);
+        continue;
+      }
+      const values = Object.fromEntries(
+        schema.map((field: { id: string }) => [
+          field.id,
+          d.information[turn.stepId].values?.[field.id] ?? {
+            status: "unknown",
+            nature: "unknown",
+            value: "",
+          },
+        ]),
+      ) as Record<string, Information>;
+      let changed = false;
+      for (const [fieldId, suggestion] of Object.entries(accepted)) {
+        // A late response is projected onto the question it was actually
+        // asked about (its own stored identity), never onto whatever the user
+        // is currently reviewing, and never onto an unseen field.
+        const turnQuestionId =
+          turn.questionId ??
+          nextInformationQuestion(schema, d.information[turn.stepId].values)?.id;
+        if (fieldId !== turnQuestionId || values[fieldId]?.value.trim()) continue;
+        values[fieldId] = toInformation(suggestion);
+        changed = true;
+      }
+      if (!changed) {
+        appliedMentor.current.add(execution.executionId);
+        continue;
+      }
+      captureInformationBase(turn.stepId);
+      const next = { ...old, [turn.stepId]: values };
+      // Autosave reads the ref inside a queued async task. Install the
+      // projection synchronously before marking this execution consumed;
+      // otherwise a refetch/render race can skip the only recovery attempt.
+      infoEditsRef.current = next;
+      setInfoEdits(next);
+      appliedMentor.current.add(execution.executionId);
     }
   }, [d, history.data, activeQuestions, hydratedDraft, draftId]);
   /**
@@ -814,6 +825,7 @@ export default function PositioningDraft({
   const [notice, setNotice] = useState("");
   useEffect(() => {
     if (planView || hydratedDraft !== draftId || !d || !history.data) return;
+    if (d.mode === "manual" && !manualMentorEnabled) return;
     if (d.snapshot.state !== "draft") return;
     const flowSteps: Step[] = d.snapshot.workflow.steps;
     const firstPending = flowSteps.findIndex(step => !d.snapshot.steps[step.id].valid);
@@ -851,7 +863,7 @@ export default function PositioningDraft({
     if (turns.some(turn =>
       turn.stepId === step.id && turn.questionId === question.id &&
       sameRound(turn) &&
-      (turn.kind === "mentor" || turn.kind === "opening")))
+      (turn.kind === "mentor" || turn.kind === "organizer" || turn.kind === "opening")))
       return;
     // A retained explicit mentor request already owns this step's next turn.
     if (sessionStorage.getItem("opc-step:" + draftId + ":" + step.id)) return;
@@ -899,7 +911,7 @@ export default function PositioningDraft({
         setOpeningSteps([...openingInFlight.current]);
       }
     })();
-  }, [planView, hydratedDraft, draftId, d, history.data, activeStep, activeQuestions]);
+  }, [planView, hydratedDraft, draftId, d, history.data, activeStep, activeQuestions, manualMentorEnabled]);
   async function run(fn: () => Promise<unknown>) {
     setRunning(true);
     setError("");
@@ -1074,7 +1086,7 @@ export default function PositioningDraft({
       const fixed: StepEnvelope = {
         request: {
           draftId, stepId: step.id, purpose: "mentor", requestId: crypto.randomUUID(),
-          input: mentorInput.trim(), questionId,
+          input: mentorInput.trim(), questionId, organizeAfter: true,
         },
       };
       sessionStorage.setItem(key, JSON.stringify(fixed));
@@ -1192,7 +1204,7 @@ export default function PositioningDraft({
   function sameInformation(a: Information | undefined, b: Information | undefined) {
     return a?.value === b?.value && a?.status === b?.status && a?.nature === b?.nature;
   }
-  async function confirmStep(step: Step, stepIndex: number, questionId: string, defer = false, nonAnswers: readonly string[] = []) {
+  async function confirmStep(step: Step, stepIndex: number, questionId: string, defer = false, nonAnswers: readonly string[] = [], allowUnreached = false) {
     if (confirmationLock.current) return;
     const envelopeState = confirmEnvelopeState(step.id);
     if (envelopeState.kind === "malformed") {
@@ -1231,7 +1243,7 @@ export default function PositioningDraft({
         const savedValue = current.information[step.id].values?.[questionId];
         if ((viewed?.value ?? "") !== (savedValue?.value ?? "") || infoEditsRef.current[step.id])
           throw new Error("OPC_INFORMATION_CONFLICT");
-        const { values, finishStep } = confirmQuestionValues(schema, current.information[step.id].values ?? {}, questionId, defer, { nonAnswers });
+        const { values, finishStep } = confirmQuestionValues(schema, current.information[step.id].values ?? {}, questionId, defer, { nonAnswers, allowUnreached });
         const body = schema.filter((field: {id:string}) => values[field.id].value).map((field: {id:string;title:string}) =>
           `${field.title}\n${values[field.id].status === "deferred" ? "（暂缓确认）" : ""}${values[field.id].value}`).join("\n\n");
         fixed = {
@@ -1712,6 +1724,10 @@ export default function PositioningDraft({
       : null;
   const planNeedsCandidate = !shownPlanCandidate && !latest && !dirtyPlan;
   const firstPending = steps.findIndex((step) => !snap.steps[step.id].valid);
+  const manualEntry = d.mode === "manual" && !manualMentorEnabled;
+  const hasUnconfirmedRequired = steps.some(step =>
+    (d.information[step.id]?.schema ?? []).some((field: { id: string; required: boolean }) =>
+      field.required && d.information[step.id]?.values?.[field.id]?.status !== "confirmed"));
   const selectedStep =
     steps.find((step) => step.id === activeStep) ??
     steps[Math.max(0, firstPending)];
@@ -1726,11 +1742,12 @@ export default function PositioningDraft({
     input: string | null;
     body: string | null;
     primaryBody: string | null;
+    summary: string | null;
     state: string;
   };
   const mentorTurns = new Map<string, MentorTurn>(
     ((d.turns ?? []) as MentorTurn[])
-      .filter((turn) => turn.kind === "mentor" || turn.kind === "opening")
+      .filter((turn) => turn.kind === "mentor" || turn.kind === "organizer" || turn.kind === "opening")
       .map((turn) => [turn.executionId, turn]),
   );
   const mentorExecutions = Array.from(
@@ -1744,7 +1761,7 @@ export default function PositioningDraft({
   for (const execution of mentorExecutions) {
     const turn = mentorTurns.get(execution.executionId);
     if (!turn || execution.state !== "completed") continue;
-    const parsed = readWorkflowMentorTurn(execution.body ?? execution.primaryBody, turn.stepId, d.information);
+    const parsed = readWorkflowMentorExecution(execution.body ?? execution.primaryBody, execution.summary, turn.stepId, d.information);
     if (Object.keys(applyMentorTurnRules(parsed, execution.input ?? "")).length) latestSuggestion.set(parsed.targetStepId, execution.executionId);
   }
   /** Utterances the mentor classified as non-answers, per question. */
@@ -1755,7 +1772,7 @@ export default function PositioningDraft({
         return turn?.stepId === stepId && turn?.questionId === questionId;
       })
       .map((execution) => {
-        const parsed = readWorkflowMentorTurn(execution.body ?? execution.primaryBody, stepId, d.information);
+        const parsed = readWorkflowMentorExecution(execution.body ?? execution.primaryBody, execution.summary, stepId, d.information);
         return parsed.inputKind === "answer" ? "" : execution.input ?? "";
       })
       .filter((value) => Boolean(value));
@@ -1774,14 +1791,14 @@ export default function PositioningDraft({
   // is a convenience and must never block the form or the other controls.
   const pendingMentor = mentorExecutions.find(
     (execution) =>
-      mentorTurns.get(execution.executionId)?.kind === "mentor" &&
+      ["mentor", "organizer"].includes(mentorTurns.get(execution.executionId)?.kind ?? "") &&
       !["completed", "cancelled"].includes(execution.state),
   );
   return (
     <main className="mx-auto max-w-[90rem] space-y-4 p-4 sm:p-6 text-[var(--text-primary)]">
       <header className="flex flex-wrap justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">{planView ? "第一周计划" : "与导师确定定位"}</h1>
+          <h1 className="text-2xl font-semibold">{planView ? "第一周计划" : manualEntry ? "录入已有定位" : "与导师确定定位"}</h1>
           <p className="text-xs text-[var(--text-secondary)]">{d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'隔离模拟 · 未调用真实模型或研究服务'}</p>
         </div>
         <Link href="/positioning" className="underline">
@@ -1908,11 +1925,22 @@ export default function PositioningDraft({
               <h2 className="text-lg">
                 {index + 1}. {step.title} {s.valid ? "· 已确认" : "· 待确认"}
               </h2>
+              {manualEntry && (
+                <div role="status" className="space-y-2 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-4">
+                  <p className="font-medium">直接填写完整策略</p>
+                  <p className="text-sm text-[var(--text-secondary)]">当前阶段的全部字段都在右侧。内容会自动保存；逐项核对确认后进入下一阶段，全程不会调用 Agent。</p>
+                  <Button variant="outline" disabled={busy || hasPendingConfirmation || hasPendingStepRequest} onClick={() => setManualMentorEnabled(true)}>
+                    信息不够，让 Agent 帮我补齐
+                  </Button>
+                  <p className="text-xs text-[var(--text-secondary)]">切换后会带着已保存内容进入同一草稿的导师对话，不会清空或要求机械重填。</p>
+                </div>
+              )}
               <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)]">
                 <aside
                   aria-label="全程导师聊天"
                   className="space-y-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-4 lg:sticky lg:top-4"
                 >
+                  {manualEntry && <p className="rounded-lg bg-[var(--bg-secondary)] p-3 text-sm">你选择了结构化录入。Agent 当前未启动；直接填写右侧即可。</p>}
                   <div>
                     <p className="text-xs text-[var(--text-secondary)]">全程同一对话</p>
                     <h3 className="font-semibold">
@@ -1943,7 +1971,7 @@ export default function PositioningDraft({
                       const turnLabel = turnIndex >= 0
                         ? questionLabel(turnIndex, d.information[turn!.stepId]?.schema ?? [], turn?.questionId)
                         : null;
-                      const parsed = readWorkflowMentorTurn(execution.body ?? execution.primaryBody, turn?.stepId ?? step.id, d.information);
+                      const parsed = readWorkflowMentorExecution(execution.body ?? execution.primaryBody, execution.summary, turn?.stepId ?? step.id, d.information);
                       const accepted = applyMentorTurnRules(parsed, execution.input ?? "");
                       const openingTurn = turn?.kind === "opening" || isOpeningInput(execution.input);
                       const target = steps.find(candidate => candidate.id === parsed.targetStepId);
@@ -2011,7 +2039,7 @@ export default function PositioningDraft({
                       className="resize-none"
                       aria-label="给导师的回复"
                       value={mentorInput}
-                      disabled={busy || hasPendingConfirmation || hasPendingStepRequest || Boolean(pendingMentor) || snap.state !== "draft"}
+                      disabled={manualEntry || busy || hasPendingConfirmation || hasPendingStepRequest || Boolean(pendingMentor) || snap.state !== "draft"}
                       onChange={(event) => setMentorInput(event.target.value)}
                       placeholder="用自己的话说就好，可以多聊几轮。"
                       maxLength={8000}
@@ -2024,7 +2052,7 @@ export default function PositioningDraft({
                   )}
                   <Button
                     disabled={
-                      busy ||
+                      manualEntry || busy ||
                       openingSteps.includes(step.id) ||
                       Boolean(pendingMentor) || hasPendingConfirmation || hasPendingStepRequest ||
                       snap.state !== "draft" ||
@@ -2046,11 +2074,10 @@ export default function PositioningDraft({
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <p className="text-xs text-[var(--text-secondary)]">
-                        当前问题 · {questionLabel(index, schema, activeQuestion.id)}
+                      {manualEntry ? "当前阶段 · 完整策略" : `当前问题 · ${questionLabel(index, schema, activeQuestion.id)}`}
                       </p>
                       <h3 className="font-semibold">
-                        {questionLabel(index, schema, activeQuestion.id)} {activeQuestion.title}
-                        {activeQuestion.required ? "（必需）" : "（选填）"}
+                        {manualEntry ? `${index + 1}. ${step.title}` : `${questionLabel(index, schema, activeQuestion.id)} ${activeQuestion.title}${activeQuestion.required ? "（必需）" : "（选填）"}`}
                       </h3>
                     </div>
                     <p role="status" className="text-xs text-[var(--text-secondary)]">
@@ -2070,7 +2097,7 @@ export default function PositioningDraft({
                     </p>
                   )}
                   <p className="text-sm text-[var(--text-secondary)]">
-                    你可以直接填写，也可以和左侧导师聊。填写与自动保存不等于确认；当前答案由你核对确认后，我们再进入下一个问题。
+                    {manualEntry ? "填写与自动保存不等于确认；请逐项核对，必需信息全部确认后才能发布正式定位。" : "你可以直接填写，也可以和左侧导师聊。填写与自动保存不等于确认；当前答案由你核对确认后，我们再进入下一个问题。"}
                   </p>
                   {informationConflicts[step.id] && <div role="alert">
                     <p>其他窗口修改了相同字段。你的输入未提交，请比较后决定。</p>
@@ -2090,7 +2117,7 @@ export default function PositioningDraft({
                     </div>
                   )}
                   <div className="space-y-4">
-                  {[activeQuestion].map((field) => {
+                  {(manualEntry ? schema : [activeQuestion]).map((field) => {
                       const value = infoEdits[step.id]?.[field.id] ??
                         d.information[step.id].values?.[field.id] ?? {
                           status: "unknown",
@@ -2191,15 +2218,15 @@ export default function PositioningDraft({
                               答案已保存为待核对内容，请确认或继续修改。
                             </p>
                           )}
-                          <Button className="w-full" disabled={busy || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || reviewOnly || confirmationRedundant(step.id, field.id, false)} onClick={() => confirmStep(step, index, field.id, false, nonAnswersFor(step.id, field.id))}>
+                          <Button className="w-full" disabled={busy || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || (!manualEntry && reviewOnly) || confirmationRedundant(step.id, field.id, false)} onClick={() => confirmStep(step, index, field.id, false, nonAnswersFor(step.id, field.id), manualEntry)}>
                             {pendingConfirmation ? "继续核对本题确认" : "确认本题并继续"}
                           </Button>
-                          <Button variant="outline" className="w-full" disabled={busy || hasPendingConfirmation || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || reviewOnly || confirmationRedundant(step.id, field.id, true)} onClick={() => confirmStep(step, index, field.id, true, nonAnswersFor(step.id, field.id))}>
+                          <Button variant="outline" className="w-full" disabled={busy || hasPendingConfirmation || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || (!manualEntry && reviewOnly) || confirmationRedundant(step.id, field.id, true)} onClick={() => confirmStep(step, index, field.id, true, nonAnswersFor(step.id, field.id), manualEntry)}>
                             {field.required ? "按填写的原因暂缓本题并继续" : "暂时跳过本题"}
                           </Button>
                           <p className="text-xs text-[var(--text-secondary)]">还没想清楚可以继续和导师聊。{field.required ? "暂缓时请在上方写明原因，不会记成已确认事实。" : "选填问题可以明确选择跳过。"}</p>
                           {pendingConfirmation && <p role="status">正在核对原确认请求。确认成功前保持本题，不会跳过下一题。</p>}
-                          {reviewOnly && (
+                          {!manualEntry && reviewOnly && (
                             <p role="status">
                               这是回看较早的问题：答案与历史仍然可读。当前推进仍在「
                               {pendingQuestion?.title ?? "当前待确认问题"}
@@ -2304,12 +2331,14 @@ export default function PositioningDraft({
                   className="space-y-2 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-4"
                 >
                   <h3 className="font-semibold">
-                    全部问题已确认或已明确暂缓 —— 本步骤已完成
+                    本步骤进度已完成
                   </h3>
                   <p className="text-sm text-[var(--text-secondary)]">
                     {snap.state === "published"
                       ? "定位版本已发布。你可以在下方进入第一周计划，或修订定位并保留原版本；历史版本与对话保持不变。"
-                      : "已暂缓的问题按“接受局限”记录，不会被当作已确认事实。下一步是确认正式定位：发布定位本身不会调用模型；发布后你会被明确询问是否继续生成第一周选题，只有你选择继续时才会调用模型并按额度计费。"}
+                      : hasUnconfirmedRequired
+                        ? "暂缓内容已保留，但必需信息仍需回来确认，才能发布正式定位。"
+                        : "下一步是确认正式定位：发布定位本身不会调用模型；发布后你会被明确询问是否继续生成第一周选题，只有你选择继续时才会调用模型并按额度计费。"}
                   </p>
                 </div>
               )}
@@ -2350,7 +2379,7 @@ export default function PositioningDraft({
         disabled={
           busy ||
           hasUnsavedInformation ||
-          hasPendingConfirmation || hasPendingStepRequest || steps.some((step) => !snap.steps[step.id].valid) ||
+          hasPendingConfirmation || hasPendingStepRequest || hasUnconfirmedRequired || steps.some((step) => !snap.steps[step.id].valid) ||
           snap.state !== "draft"
         }
         onClick={() =>

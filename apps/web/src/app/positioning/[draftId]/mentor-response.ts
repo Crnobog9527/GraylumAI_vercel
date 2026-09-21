@@ -221,3 +221,19 @@ export function readWorkflowMentorTurn(
   return { ...readMentorTurn(raw, allowed), targetStepId };
 }
 
+/**
+ * New mentor turns keep the public reply and the administrator-selected
+ * extractor result separate. Older saved turns had one combined JSON object,
+ * so the missing-extraction branch intentionally preserves that projection.
+ */
+export function readWorkflowMentorExecution(
+  primary: string | null | undefined,
+  extraction: string | null | undefined,
+  originalStepId: string,
+  fields: Record<string, { schema: Array<{ id: string }> }>,
+): Omit<MentorTurn, "targetStepId"> & { targetStepId: string } {
+  if (!extraction) return readWorkflowMentorTurn(primary, originalStepId, fields);
+  const structured = readWorkflowMentorTurn(extraction, originalStepId, fields);
+  const visible = readMentorTurn(primary, new Set());
+  return { ...structured, message: visible.message };
+}

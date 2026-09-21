@@ -17,7 +17,7 @@ export const runtimeContext=z.object({
  historyItems:z.number().int().min(0).max(1000),
  tools:z.array(z.enum(['search','read_source'])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
  modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
- attachedOrganizer:z.object({modelId:z.string().uuid(),model:z.string().min(1),maxOutputTokens:z.number().int().positive()}).strict().optional(),
+ attachedOrganizer:z.object({modelId:z.string().uuid(),model:z.string().min(1),maxOutputTokens:z.number().int().positive(),instructions:z.string().max(12000).optional(),input:z.string().max(24000).optional()}).strict().optional(),
  opcTurnToken:z.string().uuid().optional(),matching:matchingPlan.optional(),scopeMaterial:z.unknown().optional(),
  request:z.unknown().optional(),moduleId:z.string().uuid().optional(),skillId:z.string().uuid().optional(),revisionId:z.string().uuid().optional(),sources:z.array(z.unknown()).optional(),
 }).strict();
@@ -173,8 +173,9 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
     await rpc('runtime_execution',{...args,p_action:'checkpoint_primary',p_result:{body,lastSequence:callSequence}});
     const organizer=context.attachedOrganizer,organizerPolicy=execution.billing.callPolicy.find(p=>p.modelId===organizer.modelId&&p.model===organizer.model);
     if(!organizerPolicy)throw new Error('RUNTIME_ORGANIZER_DENIED');
-    const instructions='Organize this operation result. Preserve provenance and uncertainty. Do not add new facts.';
-    summary=await runRuntime({model:organizer.model,instructions,input:body,session,maxOutputTokens:organizer.maxOutputTokens,maxTurns:1,tools:[],
+    const instructions=organizer.instructions ?? 'Organize this operation result. Preserve provenance and uncertainty. Do not add new facts.';
+    const organizerInput=organizer.input ? organizer.input+'\n\nPrimary assistant reply:\n'+body : body;
+    summary=await runRuntime({model:organizer.model,instructions,input:organizerInput,session,maxOutputTokens:organizer.maxOutputTokens,maxTurns:1,tools:[],
      selectHistory:async(_history,incoming)=>selectRuntimeHistory([],incoming,{instructions,inputBytes:organizerPolicy.inputLimit,historyItems:0,toolBytes:0}),
      exchange:async(_sequence,request)=>{
       const envelope=await exchange(request,'attached_organizer',organizerPolicy),response=envelope.usage?.sdkResponse;

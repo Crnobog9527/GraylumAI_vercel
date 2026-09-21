@@ -319,9 +319,9 @@ export function confirmQuestionValues(
   current: Record<string, QuestionAnswer>,
   questionId: string,
   defer = false,
-  options: { nonAnswers?: readonly string[] } = {},
+  options: { nonAnswers?: readonly string[]; allowUnreached?: boolean } = {},
 ) {
-  const field = reachedQuestions(schema, current).find(item => item.id === questionId);
+  const field = (options.allowUnreached ? schema : reachedQuestions(schema, current)).find(item => item.id === questionId);
   if (!field) throw new Error("OPC_QUESTION_NOT_REACHED");
   const values = Object.fromEntries(schema.map(item => [item.id, { ...(current[item.id] ?? emptyAnswer) }]));
   const answer = values[questionId];

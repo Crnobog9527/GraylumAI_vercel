@@ -19,6 +19,7 @@ import {
   opcLibraryEdit,
   opcContentFromExecution,
   opcVideoPackage,
+  opcVideoResults,
   opcVideoExecutionCheck,
   opcVideoMaterialPrepare,
 } from "../services/opc/service";
@@ -143,6 +144,9 @@ export const opcRouter = router({
   saveVideoPackage: procedure
     .input(opcVideoPackage)
     .mutation(({ ctx, input }) => ctx.opc.videoPackage(input)),
+  saveVideoResults: procedure
+    .input(opcVideoResults)
+    .mutation(({ ctx, input }) => ctx.opc.videoResults(input)),
   checkVideoExecution: procedure
     .input(opcVideoExecutionCheck)
     .mutation(({ ctx, input }) => ctx.opc.videoExecutionCheck(input)),

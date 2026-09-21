@@ -572,15 +572,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
   const { chromium } =
     await import("../../../../../apps/web/node_modules/@playwright/test");
   const f = await fixture(3);
-  const browserModel = randomUUID();
-  await sql.query(
-    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-browser','fixture','true',1000,32000)",
-    [browserModel],
-  );
-  await sql.query("update modules set model_id=$1 where id=$2", [
-    browserModel,
-    f.moduleId,
-  ]);
+  await planFixtureModel(f.moduleId);
   const browser = await chromium.launch({
     executablePath:
       "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -618,7 +610,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .getByRole("combobox", { name: "定位方法" })
       .selectOption(f.registration);
     await page
-      .getByRole("button", { name: "我已有明确定位", exact: true })
+      .getByRole("button", { name: "我已有定位 · 结构化录入", exact: true })
       .click();
     await page.waitForURL((url) => url.pathname.startsWith("/positioning/"));
     const draftUrl = page.url();
@@ -629,6 +621,9 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .toBe(1);
     expect(await page.getByRole("button", { name: "保存信息状态" }).count()).toBe(0);
     expect(await page.getByRole("button", { name: "确认所填信息并整理成果" }).count()).toBe(0);
+    await page.getByText("直接填写完整策略", { exact: true }).waitFor();
+    expect(await page.getByRole("button", { name: "信息不够，让 Agent 帮我补齐", exact: true }).count()).toBe(1);
+    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n)).toBe(0);
     let firstInformation = true,
       informationArrived!: () => void;
     const heldInformation = new Promise<void>((resolve) => {
@@ -757,18 +752,19 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     await page
       .getByRole("button", { name: "确认正式定位", exact: true })
       .click();
-    // Confirming the positioning only asks; the generation needs its own
-    // explicit consent.
+    // The current B1 entry opens the topic conversation. This legacy plan
+    // remains directly recoverable, but opening it never inherits the topic
+    // consent or starts a model call on its own.
     await page
       .getByRole("dialog", { name: "是否继续生成第一周选题" })
-      .getByRole("button", { name: "继续生成第一周选题", exact: true })
+      .getByRole("button", { name: "稍后", exact: true })
       .click();
-    await page.waitForURL(url => url.pathname.endsWith("/plan"));
+    await page.goto(draftUrl + "/plan");
     expect(await page.getByLabel("定位摘要").textContent()).toContain("Updated confirmed decision");
     expect(await page.getByLabel("当前定位步骤").count()).toBe(0);
     expect(await page.getByRole("table", {name:"第一周选题计划"}).count()).toBe(1);
-    // New flow: the final confirmation itself authorizes exactly one plan
-    // generation, so the candidate must appear with no generation click.
+    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n)).toBe(0);
+    await page.getByRole("button", { name: "生成第一周计划", exact: true }).click();
     await page
       .getByRole("heading", {
         name: "AI 计划候选 · 尚未替换你的编辑",
@@ -849,7 +845,8 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .getByRole("button", { name: "登录", exact: true })
       .last()
       .click();
-    await page.waitForURL(draftUrl + "/plan");
+    const expectedPlanPath = new URL(draftUrl).pathname + "/plan";
+    await page.waitForURL(url => url.pathname === expectedPlanPath);
     await page.getByRole("link", { name: "进入选题工作空间" }).first().waitFor();
     expect(
       await page
@@ -1395,6 +1392,28 @@ it("OPC: required information states gate confirmation and survive revisions wit
       values: {},
     }),
   ).rejects.toThrow("DENIED");
+});
+it("OPC: deferred required information preserves draft progress but cannot publish a formal positioning", async () => {
+  const f = await fixture(3);
+  const d = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: "manual" });
+  for (const step of f.flow.steps) {
+    const before = await f.service.read(d.draftId);
+    const values = Object.fromEntries(step.information!.map(field => [field.id, {
+      status: "deferred", nature: "unknown", value: "用户明确说明目前缺少这项必需信息。",
+    }]));
+    await f.service.information({ draftId: d.draftId, stepId: step.id, requestId: randomUUID(), expectedVersion: before.snapshot.steps[step.id].version, values });
+    const saved = await f.service.read(d.draftId);
+    await f.artifacts.execute({ action: "save", projectId: d.projectId, roundId: d.roundId, requestId: randomUUID(), stepId: step.id, expectedVersion: saved.snapshot.steps[step.id].version, body: "暂缓原因已保留", evidenceIds: [] });
+    const ready = await f.service.read(d.draftId);
+    await f.artifacts.execute({ action: "confirm", projectId: d.projectId, roundId: d.roundId, requestId: randomUUID(), stepId: step.id, expectedVersion: ready.snapshot.steps[step.id].version, expectedReviewVersion: ready.snapshot.steps[step.id].reviewVersion });
+  }
+  const ready = await f.service.read(d.draftId);
+  expect(Object.values(ready.snapshot.steps).every((step: any) => step.valid)).toBe(true);
+  await expect(f.artifacts.execute({
+    action: "publish", projectId: d.projectId, roundId: d.roundId, requestId: randomUUID(),
+    expectedSteps: Object.fromEntries(Object.entries(ready.snapshot.steps).map(([id, step]: [string, any]) => [id, { version: step.version, reviewVersion: step.reviewVersion }])),
+  })).rejects.toThrow("ARTIFACT_REVIEW_REQUIRED");
+  expect((await f.service.read(d.draftId)).snapshot.state).toBe("draft");
 });
 it("OPC: plan generation uses the original SDK session and returns a separate bounded plan candidate", async () => {
   const { runtimeExecutor } = await import("../runtime/execute");
@@ -1949,15 +1968,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
   const { chromium } =
     await import("../../../../../apps/web/node_modules/@playwright/test");
   const f = await fixture(3);
-  const browserModel = randomUUID();
-  await sql.query(
-    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-browser','fixture','true',1000,32000)",
-    [browserModel],
-  );
-  await sql.query("update modules set model_id=$1 where id=$2", [
-    browserModel,
-    f.moduleId,
-  ]);
+  await planFixtureModel(f.moduleId);
   const browser = await chromium.launch({
     executablePath:
       "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -1994,7 +2005,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     await page
       .getByRole("combobox", { name: "定位方法" })
       .selectOption(f.registration);
-    await page.getByRole("button", { name: "导师引导", exact: true }).click();
+    await page.getByRole("button", { name: "我从零开始 · Agent 引导", exact: true }).click();
     await page.waitForURL((url) => url.pathname.startsWith("/positioning/"));
 
     const draftUrl = page.url();
@@ -2084,7 +2095,8 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     expect(afterChat.information["step-0"].values.goal.status).toBe("provisional");
     expect(afterChat.snapshot.candidates).toHaveLength(0);
     expect(afterChat.snapshot.steps["step-0"].valid).toBe(false);
-    expect(afterChat.turns.filter((t: {stepId:string;kind:string})=>t.stepId==="step-0"&&t.kind==="mentor")).toHaveLength(3);
+    expect(afterChat.turns.filter((t: {stepId:string;kind:string})=>
+      t.stepId==="step-0" && ["mentor", "organizer"].includes(t.kind))).toHaveLength(3);
     const box = await page.getByRole("log",{name:"完整导师消息"}).boundingBox();
     expect(box!.height).toBeLessThanOrEqual(400);
     await page.reload();
@@ -2180,7 +2192,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     const afterSecondChat = await f.service.read(draftId);
     const secondTurn = afterSecondChat.turns.find(
       (turn: { executionId: string; stepId: string; kind: string }) =>
-        turn.stepId === "step-1" && turn.kind === "mentor",
+        turn.stepId === "step-1" && ["mentor", "organizer"].includes(turn.kind),
     );
     expect(secondTurn).toBeTruthy();
     const dependencies = new Set(
@@ -2193,7 +2205,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     );
     for (const prior of afterChat.turns.filter(
       (turn: { executionId: string; stepId: string; kind: string }) =>
-        turn.stepId === "step-0" && turn.kind === "mentor",
+        turn.stepId === "step-0" && ["mentor", "organizer"].includes(turn.kind),
     ))
       expect(dependencies.has(prior.executionId)).toBe(true);
     const expectedBeforeRevision: ExpectedMentorEffect[] = [
@@ -3656,9 +3668,18 @@ async function finalized(n = 3, withTopics = false) {
 /** A fixture-backed model bound to the module under test. */
 async function planFixtureModel(moduleId: string) {
   const model = randomUUID();
+  const summaryModel = randomUUID();
   await sql.query(
     "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-browser','fixture','true',1000,32000)",
     [model],
+  );
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'OPC organizer',$2,'fixture','true',1000,32000)",
+    [summaryModel, "opc-organizer-" + summaryModel],
+  );
+  await sql.query(
+    "insert into system_settings(key,value) values('v3_summary_model_id',to_jsonb($1::text)),('v3_summary_max_tokens','1000'::jsonb) on conflict(key) do update set value=excluded.value",
+    [summaryModel],
   );
   await sql.query("update modules set model_id=$1 where id=$2", [model, moduleId]);
   return model;
@@ -6006,6 +6027,7 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
       id, title: "C " + id, required: id === "goal", profileKey: "c_" + id,
     }));
   });
+  await planFixtureModel(f.moduleId);
   const started = await f.service.start({
     requestId: randomUUID(), registration: f.registration, mode: "mentor",
   });
@@ -6271,7 +6293,7 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
     const retained = await readEnvelope(tab1);
     expect(retained.request).toEqual({
       draftId, stepId: "step-0", purpose: "mentor", requestId: retained.requestId,
-      input: mentorInput, questionId: "goal",
+      input: mentorInput, questionId: "goal", organizeAfter: true,
     });
     const explicitRows = paidIdentities.map(identity => JSON.parse(identity) as [string, string, string, string])
       .filter(identity => identity[1] === retained.requestId);
@@ -6965,23 +6987,10 @@ it("OPC: old publish and adoption replays cannot roll back the current business 
     "select request_id::text,round_id::text,payload from artifact_requests where project_id=$1 and action='publish' order by request_id limit 1",
     [f.d.projectId],
   )).rows[0];
-  const adoptRequest = {
-    draftId: f.d.draftId,
-    requestId: randomUUID(),
-    expectedVersion: 0,
-    sourceVersionId: f.sourceVersionId,
-    body: [{ id: randomUUID(), platform: 'x', account: 'replay-account', title: '旧定位选题', brief: '旧定位来源的完整选题简报', day: '2026-09-20' }],
-    accounts: [{ platform: 'x', account: 'replay-account', expectedRevision: null }],
-  };
-  await f.service.adoptTopics(adoptRequest);
-  const revised = await f.service.revise(f.d.draftId, randomUUID(), f.d.roundId);
-  const snapshot = await f.artifacts.read(f.d.projectId, revised.roundId);
-  await f.artifacts.execute({
-    action: 'publish', projectId: f.d.projectId, roundId: revised.roundId, requestId: randomUUID(),
-    expectedSteps: Object.fromEntries(Object.entries(snapshot.steps).map(([id, step]) => [id, { version: step.version, reviewVersion: step.reviewVersion }])),
-  });
-  const currentSource = (await f.service.read(f.d.draftId)).report.id as string;
+  const newer = await publishedDraft();
+  const currentSource = newer.sourceVersionId;
   expect(currentSource).not.toBe(f.sourceVersionId);
+  await sql.query("update opc_businesses b set current_source_version_id=$1,revision=revision+1 from opc_draft_businesses db where db.draft_id=$2 and b.id=db.business_id", [currentSource, f.d.draftId]);
   const state = async () => (await sql.query(
     "select b.current_source_version_id::text source,b.revision::int revision from opc_businesses b join opc_draft_businesses db on db.business_id=b.id where db.draft_id=$1",
     [f.d.draftId],
@@ -6992,8 +7001,17 @@ it("OPC: old publish and adoption replays cannot roll back the current business 
     action: 'publish', projectId: f.d.projectId, roundId: oldPublish.round_id,
     requestId: oldPublish.request_id, expectedSteps: oldPublish.payload.expectedSteps,
   });
-  await f.service.adoptTopics(adoptRequest);
+  const historicalItemId = randomUUID();
+  const historicalAdoption = {
+    draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: historicalItemId, platform: 'x', account: 'historical-account', title: '历史来源新采用', brief: '采用旧定位候选但不改变业务当前定位', day: '2026-09-21' }],
+    accounts: [{ platform: 'x', account: 'historical-account', expectedRevision: null }],
+  };
+  await f.service.adoptTopics(historicalAdoption);
   expect(await state()).toEqual(beforeReplay);
+  const itemCount = Number((await sql.query("select count(*)::int n from opc_items i join opc_plans p on p.id=i.plan_id where p.draft_id=$1 and i.item_key=$2", [f.d.draftId, historicalItemId])).rows[0].n);
+  await expect(f.service.adoptTopics({ ...historicalAdoption, requestId: randomUUID(), expectedVersion: 1 })).rejects.toThrow('OPC_TOPIC_ALREADY_ADOPTED');
+  expect(Number((await sql.query("select count(*)::int n from opc_items i join opc_plans p on p.id=i.plan_id where p.draft_id=$1 and i.item_key=$2", [f.d.draftId, historicalItemId])).rows[0].n)).toBe(itemCount);
 }, 120000);
 
 it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the library and continues video work", async () => {
@@ -7061,14 +7079,19 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     await page.getByLabel('对话方式').selectOption({ index: 1 });
     await page.getByLabel('消息', { exact: true }).fill('请和我讨论这条视频的口播稿。');
     await page.getByRole('button', { name: '发送', exact: true }).click();
-    const finalize = page.getByRole('button', { name: '定稿口播稿并生成分镜与剪辑建议', exact: true });
+    const finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 });
+    const packageRunsBefore = Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, new URL(page.url()).searchParams.get('session')])).rows[0].n);
+    await finalize.click();
+    await page.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    await page.getByRole('heading', { name: '口播稿已定稿。要继续基于这版生成分镜脚本和剪辑建议吗？', exact: true }).waitFor();
+    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, new URL(page.url()).searchParams.get('session')])).rows[0].n)).toBe(packageRunsBefore);
     let lostPackage = 0;
-    await page.route('**/api/trpc/opc.saveVideoPackage*', async route => {
+    await page.route('**/api/trpc/opc.saveVideoResults*', async route => {
       if (lostPackage++) return route.continue();
       const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort();
     });
-    await finalize.click();
+    await page.getByRole('button', { name: '分镜 + 剪辑建议都生成', exact: true }).click();
     await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('状态待核实');
     const videoKey = 'opc-video-operation:' + new URL(page.url()).searchParams.get('session');
     const frozenVideo = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
@@ -7078,13 +7101,16 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     const completedVideo = await recoveryTab.evaluate(({key,requestId}) => localStorage.getItem(key + ':completed:' + requestId), { key: videoKey, requestId: frozenVideo.package.requestId });
     expect(JSON.parse(completedVideo!)).toEqual(frozenVideo);
     await recoveryTab.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
-    await recoveryTab.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿', exact: true }).waitFor();
-    await recoveryTab.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿', exact: true }).waitFor();
+    await recoveryTab.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor();
+    await recoveryTab.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor();
     await recoveryTab.close();
     const library = await f.service.library({ search: '资料库修订标题', from: null, to: null });
     const [savedItem] = library.businesses[0].accounts.flatMap((account: {items: any[]}) => account.items);
     expect(savedItem).toBeDefined();
     const script = savedItem.content.find((entry: {kind: string}) => entry.kind === 'script');
+    const completedPackage = (await sql.query("select id::text from runtime_executions where actor_id=$1 and session_id=$2 and state='completed' and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, savedItem.sessionId])).rows[0].id;
+    await sql.query("update runtime_executions set result=jsonb_build_object('body','{}') where id=$1", [completedPackage]);
+    await expect(f.service.videoPackage({ workItemId: savedItem.workItemId, requestId: randomUUID(), executionId: completedPackage, sourceScriptId: script.id, expectedStoryboardVersion: 1, expectedEditingVersion: 1 })).rejects.toThrow('OPC_CONTENT_RESPONSE_INVALID');
     const materialRevision = Number((await sql.query("select payload#>>'{scopeMaterial,revision}' revision from runtime_executions where id=$1", [script.executionId])).rows[0].revision);
     await sql.query("select runtime_material($1,$2,'revoke',NULL,$3)", [f.actor, savedItem.sessionId, materialRevision]);
     const withdrawn = await f.service.library({ search: '资料库修订标题', from: null, to: null });
@@ -7169,6 +7195,49 @@ it("OPC: B1 business scope, legacy handoff replay and library edits stay owned a
   await expect(f.service.libraryEdit({ ...editRequest, requestId: randomUUID(), expectedRevision: edit.revision })).rejects.toThrow("OPC_DENIED");
 }, 120000);
 
+it("OPC: final script asks before derivatives, supports a partial choice, and marks prior results old after re-finalizing", async () => {
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'consent-account', title: '口播稿授权边界', brief: '验证口播稿定稿与分镜、剪辑建议的授权分离。', day: '2026-09-26' }] });
+  const [work] = await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId,
+    accounts: [{ platform: 'x', account: 'consent-account', expectedRevision: null }] });
+  const { browser, page } = await planBrowser(f);
+  const packageRuns = async () => Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, work.sessionId])).rows[0].n);
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    await page.getByLabel('对话方式').selectOption({ index: 1 });
+    await page.getByLabel('消息', { exact: true }).fill('先讨论并给我第一版口播稿。');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    const finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
+    await finalize.waitFor({ timeout: 60000 });
+    await finalize.click();
+    await page.getByRole('heading', { name: '口播稿已定稿。要继续基于这版生成分镜脚本和剪辑建议吗？', exact: true }).waitFor();
+    expect(await packageRuns()).toBe(0);
+
+    await page.getByLabel('消息', { exact: true }).fill('只生成分镜');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
+    expect(await packageRuns()).toBe(1);
+    expect(await page.getByRole('heading', { name: /剪辑建议 · 第 1 版/ }).count()).toBe(0);
+
+    await page.getByLabel('消息', { exact: true }).fill('请重新讨论并给我第二版口播稿。');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await finalize.waitFor({ timeout: 60000 });
+    await finalize.click();
+    await page.getByRole('heading', { name: '口播稿 · 第 2 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 旧口播稿版本', exact: true }).waitFor();
+    await page.getByRole('heading', { name: '口播稿已定稿。要继续基于这版生成分镜脚本和剪辑建议吗？', exact: true }).waitFor();
+    expect(await packageRuns()).toBe(1);
+
+    await page.getByRole('button', { name: '只生成剪辑建议', exact: true }).click();
+    await page.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
+    expect(await packageRuns()).toBe(2);
+    await page.getByRole('button', { name: '暂时结束', exact: true }).click();
+    expect(await page.getByRole('heading', { name: '口播稿已定稿。要继续基于这版生成分镜脚本和剪辑建议吗？', exact: true }).count()).toBe(0);
+  } finally { await browser.close(); }
+}, 300000);
+
 it("OPC: natural-language adoption stays complete after refresh and permits the next turn", async () => {
   const f = await publishedDraft();
   await planFixtureModel(f.moduleId);
@@ -7210,15 +7279,17 @@ it("OPC: video package dispatch refuses a different frozen material and cancels 
     await page.getByLabel('对话方式').selectOption({ index: 1 });
     await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿');
     await page.getByRole('button', { name: '发送', exact: true }).click();
-    const finalize = page.getByRole('button', { name: '定稿口播稿并生成分镜与剪辑建议', exact: true });
+    const finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 });
-    const sourceExecutionId = (await sql.query("select id::text from runtime_executions where actor_id=$1 and session_id=$2 and state='completed' order by created_at desc limit 1", [f.actor, work.sessionId])).rows[0].id;
+    await finalize.click();
+    await page.getByRole('heading', { name: '口播稿已定稿。要继续基于这版生成分镜脚本和剪辑建议吗？', exact: true }).waitFor();
     await page.route('**/api/trpc/runtime.prepare*', async route => {
       if (!(route.request().postData() ?? '').includes('OPC_VIDEO_PACKAGE_V1')) return route.continue();
       packagePrepare = true; await gate; await route.continue();
     });
-    const click = finalize.click();
+    const click = page.getByRole('button', { name: '分镜 + 剪辑建议都生成', exact: true }).click();
     await expect.poll(() => packagePrepare, { timeout: 30000 }).toBe(true);
+    const pendingVideo = JSON.parse((await page.evaluate(key => localStorage.getItem(key), 'opc-video-operation:' + work.sessionId))!);
     const current = (await f.service.library({ search: '绑定检查', from: null, to: null })).businesses
       .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;revision: number}>}>}) => business.accounts.flatMap(account => account.items))
       .find((item: {workItemId: string}) => item.workItemId === work.workItemId);
@@ -7226,7 +7297,7 @@ it("OPC: video package dispatch refuses a different frozen material and cancels 
       patch: { title: '绑定检查已改', brief: '此修改产生另一份冻结 material。', day: '2026-09-25' } });
     releasePrepare(); await click;
     await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('OPC_CONTENT_BINDING');
-    const packageExecution = (await sql.query('select state from runtime_executions where actor_id=$1 and session_id=$2 and request_id=$3', [f.actor, work.sessionId, sourceExecutionId])).rows[0];
+    const packageExecution = (await sql.query('select state from runtime_executions where actor_id=$1 and session_id=$2 and request_id=$3', [f.actor, work.sessionId, pendingVideo.followup.requestId])).rows[0];
     expect(packageExecution.state).toBe('cancelled');
     const content = (await f.service.library({ search: '绑定检查已改', from: null, to: null })).businesses
       .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;content: Array<{id: string;kind: string}>}>}>}) => business.accounts.flatMap(account => account.items))
@@ -7235,15 +7306,16 @@ it("OPC: video package dispatch refuses a different frozen material and cancels 
     expect(sourceScript).toBeDefined();
     expect(content.filter((entry: {kind: string}) => entry.kind === 'storyboard' || entry.kind === 'editing')).toHaveLength(0);
     await page.reload();
-    const retry = page.getByRole('button', { name: '恢复对应分镜与剪辑建议', exact: true });
+    await page.getByLabel('对话方式').selectOption({ index: 1 });
+    const retry = page.getByRole('button', { name: '分镜 + 剪辑建议都生成', exact: true });
     await retry.waitFor(); await retry.click();
-    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
-    await page.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿', exact: true }).waitFor();
+    // The raced request is definitely rejected and cancelled. A later explicit
+    // choice may bind a new frozen material snapshot to the same exact final
+    // script; changing the library title does not create a new script version.
+    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
+    await page.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
     const packageStates = (await sql.query("select state from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%' order by created_at", [f.actor, work.sessionId])).rows.map(row => row.state);
     expect(packageStates).toEqual(['cancelled', 'completed']);
-    const completedPackage = (await sql.query("select id::text from runtime_executions where actor_id=$1 and session_id=$2 and state='completed' and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, work.sessionId])).rows[0].id;
-    await sql.query("update runtime_executions set result=jsonb_build_object('body','{}') where id=$1", [completedPackage]);
-    await expect(f.service.videoPackage({ workItemId: work.workItemId, requestId: randomUUID(), executionId: completedPackage, sourceScriptId: sourceScript.id, expectedStoryboardVersion: 1, expectedEditingVersion: 1 })).rejects.toThrow('OPC_CONTENT_RESPONSE_INVALID');
   } finally { releasePrepare?.(); await browser.close(); }
 }, 240000);
 
@@ -7441,7 +7513,8 @@ it.each([false, true])("OPC: mentor history preserves a saved empty edit after r
     expect(after.snapshot.steps['step-0'].version).toBe(beforeClear + 1);
     expect((await planIdentityRows(f.actor)).filter(row => oldIdentity.includes(row))).toEqual(oldIdentity);
     if (!reviseRound) expect(await planIdentityRows(f.actor)).toEqual(oldIdentity);
-    expect(after.turns.find((t: { kind: string }) => t.kind === 'mentor').informationVersion).toBe(0);
+    expect(after.turns.find((t: { kind: string }) =>
+      ["mentor", "organizer"].includes(t.kind))?.informationVersion).toBe(0);
     const { readFile } = await import('node:fs/promises');
     await sql.query(await readFile(new URL('../../../../db/migrations/0116_opc_mentor_projection_basis.sql', import.meta.url), 'utf8'));
     expect((await read()).turns).toEqual(after.turns);

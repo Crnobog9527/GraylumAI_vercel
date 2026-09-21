@@ -318,3 +318,12 @@ it("keeps a legally reached question actionable instead of calling it review-onl
   // A valid step is never display-only (an invalidated step stays actionable).
   expect(isReviewOnlySelection(schema, editing, "offer", true)).toBe(false);
 });
+
+it("lets manual entry confirm a later field without pretending it was mentor-reached", () => {
+  const current: Record<string, QuestionAnswer> = {
+    lane: { ...emptyAnswer, value: "赛道内容", status: "provisional" },
+    offer: { ...emptyAnswer, value: "卖点内容", status: "provisional" },
+  };
+  expect(() => confirmQuestionValues(schema, current, "offer")).toThrow("OPC_QUESTION_NOT_REACHED");
+  expect(confirmQuestionValues(schema, current, "offer", false, { allowUnreached: true }).values.offer.status).toBe("confirmed");
+});
