@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
-type StartOperation={requestId:string;registration:string;mode:"mentor"|"manual";businessId:string|null;businessName?:string};
+import { createClient } from "@/lib/supabase";
+type StartOperation={actorId:string;requestId:string;registration:string;mode:"mentor"|"manual";businessId:string|null;businessName?:string};
 const startOperationKey="opc-start-operation";
 export default function PositioningHome() {
   const catalog = trpc.opc.catalog.useQuery(),
@@ -15,20 +16,25 @@ export default function PositioningHome() {
     [businessId, setBusinessId] = useState(""),
     [businessName, setBusinessName] = useState("我的业务"),
     [error, setError] = useState(""),
+    [actorId,setActorId]=useState(""),
     [pendingStart,setPendingStart]=useState<StartOperation|null>(null);
-  useEffect(()=>{const raw=sessionStorage.getItem(startOperationKey);if(!raw)return;try{setPendingStart(JSON.parse(raw));}catch{sessionStorage.removeItem(startOperationKey);}},[]);
+  useEffect(()=>{const client=createClient();let alive=true;void client.auth.getUser().then(({data})=>{if(alive)setActorId(data.user?.id??"");});const {data:{subscription}}=client.auth.onAuthStateChange((_event,session)=>{if(alive)setActorId(session?.user.id??"");});return()=>{alive=false;subscription.unsubscribe();};},[]);
+  useEffect(()=>{setPendingStart(null);if(!actorId)return;const legacy=sessionStorage.getItem(startOperationKey);if(legacy){sessionStorage.setItem(startOperationKey+":legacy:"+Date.now(),legacy);sessionStorage.removeItem(startOperationKey);}const key=startOperationKey+":"+actorId,raw=sessionStorage.getItem(key);if(!raw)return;try{const op:StartOperation=JSON.parse(raw);if(op.actorId===actorId)setPendingStart(op);}catch{sessionStorage.removeItem(key);}},[actorId]);
   async function runStart(op:StartOperation){
-    setError("");sessionStorage.setItem(startOperationKey,JSON.stringify(op));setPendingStart(op);
+    if(!actorId||op.actorId!==actorId){setError("登录账号已变化，请切回原账号恢复该请求。");return;}
+    const key=startOperationKey+":"+actorId;
+    setError("");sessionStorage.setItem(key,JSON.stringify(op));setPendingStart(op);
     try {
-      const d=await start.mutateAsync(op);
-      sessionStorage.removeItem(startOperationKey);setPendingStart(null);location.href="/positioning/"+d.draftId;
+      const {actorId:_,...request}=op;void _;const d=await start.mutateAsync(request);
+      sessionStorage.removeItem(key);setPendingStart(null);location.href="/positioning/"+d.draftId;
     } catch { setError("未能建立定位草稿。完整的原开始请求已保留，请恢复该请求。"); }
   }
   async function begin(mode: "mentor" | "manual") {
     if(pendingStart){setError("请先恢复上次开始请求；恢复完成后再选择其他业务。");return;}
     const registration = choice || catalog.data?.[0]?.id;
     if (!registration) return;
-    await runStart({requestId:crypto.randomUUID(),registration,mode,businessId:businessId||null,...(!businessId?{businessName:businessName.trim()}: {})});
+    if(!actorId)return;
+    await runStart({actorId,requestId:crypto.randomUUID(),registration,mode,businessId:businessId||null,...(!businessId?{businessName:businessName.trim()}: {})});
   }
   return (
     <main className="mx-auto max-w-5xl space-y-8 p-6 text-[var(--text-primary)]">

@@ -79,4 +79,7 @@ export const opcVideoMaterialPrepare = z.object({
   workItemId: uuid,
   requestId: uuid,
   sourceScriptId: uuid,
+  choice: z.enum(["both", "storyboard", "editing"]),
+  expectedStoryboardVersion: z.number().int().nonnegative(),
+  expectedEditingVersion: z.number().int().nonnegative(),
 }).strict();

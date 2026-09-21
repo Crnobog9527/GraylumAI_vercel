@@ -542,6 +542,10 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         p_work_item_id: v.workItemId,
         p_request_id: v.requestId,
         p_source_script_id: v.sourceScriptId,
+        p_storyboard: v.choice === "both" || v.choice === "storyboard",
+        p_editing: v.choice === "both" || v.choice === "editing",
+        p_expected_storyboard_version: v.expectedStoryboardVersion,
+        p_expected_editing_version: v.expectedEditingVersion,
       });
     },
     savePlan: async (value: unknown) => {

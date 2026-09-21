@@ -64,7 +64,7 @@ export default function RuntimePage(){
   if(!videoKey||videoBusy)return;setVideoBusy(true);setError('');
   let active=initial;
   try{await navigator.locks.request(videoKey,async()=>{
-   const frozen=localStorage.getItem(videoKey);const op:VideoOperation=frozen?JSON.parse(frozen):initial;active=op;
+   const frozen=localStorage.getItem(videoKey);const recovering=Boolean(frozen);const op:VideoOperation=frozen?JSON.parse(frozen):initial;active=op;
    if(op.workItemId!==workItem?.workItemId)throw new Error('OPC_REQUEST_CONFLICT');
    const refreshed=await library.refetch();
    if(!refreshed.data)throw new Error('OPC_CONTENT_PENDING');
@@ -74,7 +74,7 @@ export default function RuntimePage(){
    if(!freshItem)throw new Error('OPC_CONTENT_DENIED');
    const freshVersions=freshItem.content as ContentVersion[];
    const latestFinalScript=freshVersions.filter(version=>version.kind==='script'&&version.status==='final').sort((a,b)=>b.version-a.version)[0];
-   if(op.sourceScriptId&&latestFinalScript?.id!==op.sourceScriptId)throw new Error('OPC_CONTENT_SOURCE');
+   if(!recovering&&op.sourceScriptId&&latestFinalScript?.id!==op.sourceScriptId)throw new Error('OPC_CONTENT_SOURCE');
    const requestedKinds=(op.choice??'both')==='both'?['storyboard','editing']:(op.choice==='storyboard'?['storyboard']:['editing']);
    const existing=freshVersions.filter(version=>requestedKinds.includes(version.kind)&&version.sourceContentId===op.sourceScriptId);
    if(existing.length===requestedKinds.length&&existing.every(version=>version.requestId===op.package.requestId)){
@@ -82,11 +82,11 @@ export default function RuntimePage(){
    }
    if(existing.length)throw new Error('OPC_CONTENT_ALREADY_GENERATED');
    const latestFresh=(kind:string)=>freshVersions.filter(version=>version.kind===kind).reduce((n,version)=>Math.max(n,version.version),0);
-   if(latestFresh('storyboard')!==op.package.expectedStoryboardVersion||latestFresh('editing')!==op.package.expectedEditingVersion)throw new Error('OPC_VERSION_CONFLICT');
+   if(!recovering&&(latestFresh('storyboard')!==op.package.expectedStoryboardVersion||latestFresh('editing')!==op.package.expectedEditingVersion))throw new Error('OPC_VERSION_CONFLICT');
    storeVideo(op);
    if(!op.sourceScriptId){const script=await saveContent.mutateAsync({workItemId:op.workItemId,requestId:op.script.requestId,expectedVersion:op.script.expectedVersion,kind:'script',status:'final',executionId:op.script.executionId,sourceContentId:null});op.sourceScriptId=script.id;storeVideo(op);await library.refetch();}
    const sourceScriptId=op.sourceScriptId;if(!sourceScriptId)throw new Error('OPC_CONTENT_PENDING');
-   await prepareVideoMaterial.mutateAsync({workItemId:op.workItemId,requestId:op.followup.requestId,sourceScriptId});
+   await prepareVideoMaterial.mutateAsync({workItemId:op.workItemId,requestId:op.followup.requestId,sourceScriptId,choice:op.choice??'both',expectedStoryboardVersion:op.package.expectedStoryboardVersion,expectedEditingVersion:op.package.expectedEditingVersion});
    let packageExecutionId=op.followup.executionId;
    if(!packageExecutionId){const admitted=await prepare.mutateAsync({sessionId,requestId:op.followup.requestId,input:op.followup.input,selection:op.followup.selection,network:'deny',sources:[]});packageExecutionId=admitted.executionId;op.followup.executionId=packageExecutionId;storeVideo(op);}
    if(!packageExecutionId)throw new Error('OPC_CONTENT_PENDING');
