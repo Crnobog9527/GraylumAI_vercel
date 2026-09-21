@@ -249,3 +249,9 @@ Docker清理：Owner要求后，归档并回收60个遗留临时容器、20个�
 `natural-choice-final3.log`FAIL为新增观测断言误比：视频动作本来就复用runtime.prepare，不能禁止该RPC。已按原负载区分普通消息与视频协议请求，仍验证唯一视频execution、绑定及同一次结果恢复。
 
 最终`/tmp/pr422-natural-choice-final4.log`：1 PASS /236 skipped，exit0，private canary PASS；覆盖多轮/部分采用/实际重登/资料库编辑和新文案组合请求成功丢回包恢复，无额外普通消息、仅1个组合execution。web typecheck通过。最终候选另见PR精确SHA/独立审查记录。
+
+### 2026-09-22 右侧资料与内容类型反馈
+
+写入前第一性检查：选题及历史已经由opc_plans/opc_topic_draft_versions保存，当前修改由opc_item_edits及原revision/请求表负责；Session/Runtime/BILL2已有执行去重、历史与付费恢复。采用Sheet右侧面板，链接使用既有handoff workItemId。类型直接存在计划行，用户后续纠正在既有item edits增加一个nullable字段，旧无类型选题保持unknown；只对已存在script成果的旧工作推导video。0122仅扩展原函数，内部类型读取无客户端权限，无新表/API family/状态机。普通成果旧记录保留读取；明确保存内容复用opc_content_versions。继续工作引导复用原Runtime，按当前成果ID/工作项ID稳定请求，浏览器完整冻结，跨标签/重进相同阶段不新增执行；只讨论，不隐含创作或派生授权。Risk high：既有SQL类型约束与Runtime准入，必须本地隔离验证及独立审查。
+
+本轮验证记录：`pr422-content-types-test1.log` FAIL（测试清理误调用不存在的restoreCatalog，已删除；不能记为PASS）；`test2` 2 PASS/236 skipped，覆盖原B1多轮/部分采用/实际重登/资料库编辑/视频成功丢回包及新类型/面板/主动引导主线；`test3` 1 PASS/237 skipped，增加引导与类型保存成功丢回包、双标签及刷新原请求恢复。`pr422-types-video-regression.log` 1 PASS/237 skipped：分镜前置、部分派生、并发、旧绑定升级重放、0122已存数据重复迁移、重新定稿后旧版本及撤回保护。`pr422-content-types-final.log`为1 PASS/1 FAIL：扩展内容保存丢回包与唯一成果版本的typed case通过；资料库并发编辑仅旧提示文案断言失败，准确原字段/版本断言保留，改用新明确拒绝提示后单独复跑。最终结果和独立审查归属以PR最新候选记录为准，不把选中用例记成全套通过。新内部SQL helper无authenticated/service_role执行权，新Runtime口播请求和保存对非视频均拒绝。保存与类型确认冻结完整请求，旧script-key与新的written-key各自可恢复；不因用户改类型丢弃已冻结旧保存。文章/图文定稿材料复用现有Runtime material，继承原来源撤回检查。

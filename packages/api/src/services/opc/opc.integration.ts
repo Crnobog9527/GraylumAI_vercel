@@ -7031,13 +7031,16 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     expect(await page.getByRole('heading', { name: '先完成正式定位', exact: true }).count()).toBe(0);
     await page.goto(process.env.V3_LOCAL_APP + path);
     await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
+    await page.getByRole('button',{name:'选题与版本',exact:true}).click();
     await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).waitFor({ timeout: 60000 });
     expect((await f.service.topicDraftRead(f.d.draftId)).version).toBe(1);
     expect(await page.getByRole('link', { name: '打开内容资料库', exact: true }).count()).toBe(1);
 
+    await page.getByRole('button',{name:'Close',exact:true}).click();
     await page.getByLabel('消息', { exact: true }).fill('请修改第一条选题');
     await page.getByRole('button', { name: '发送', exact: true }).click();
     await expect.poll(async () => (await f.service.topicDraftRead(f.d.draftId)).version, { timeout: 60000 }).toBe(2);
+    await page.getByRole('button',{name:'选题与版本',exact:true}).click();
     await page.getByLabel('选择 修改后的选题').waitFor();
     await expect.poll(()=>page.getByLabel('选择 第二个账号选题').isEnabled(),{timeout:30000}).toBe(true);
     await page.getByLabel('选择 第二个账号选题').uncheck();
@@ -7046,6 +7049,7 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
       const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort(); lostAdoption += 1;
     });
     await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).click();
+    await page.getByRole('button',{name:'Close',exact:true}).click();
     await page.getByRole('button', { name: '恢复原请求', exact: true }).waitFor({ timeout: 60000 });
     await expect.poll(() => lostAdoption, { timeout: 30000 }).toBeGreaterThan(0);
     const bound = await f.service.topicRead(f.d.draftId);
@@ -7067,11 +7071,13 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     const plans = (await f.service.read(f.d.draftId)).plans;
     expect(plans).toHaveLength(2);
     expect(plans[0].body).toHaveLength(1);
+    await page.getByRole('button',{name:'选题与版本',exact:true}).click();
     expect(await page.getByRole('button', {name:'采用所选并保存到资料库',exact:true}).isVisible()).toBe(false);
     await page.getByRole('button', {name:/展开选题/}).click();
     await expect.poll(()=>page.getByLabel('选择 第二个账号选题').isEnabled(),{timeout:30000}).toBe(true);
     await page.getByRole('button', {name:/收起选题/}).click();
 
+    await page.getByRole('button',{name:'Close',exact:true}).click();
     await page.getByRole('link', { name: '打开内容资料库', exact: true }).first().click();
     await page.waitForURL(url => url.pathname === '/library');
     const adoptedCard = page.getByRole('article').filter({ hasText: '修改后的选题' });
@@ -7084,13 +7090,14 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     await page.waitForURL(url => url.pathname === '/runtime');
     await page.getByRole('heading', { name: '资料库修订标题', exact: true }).waitFor();
 
+    await page.getByText('【主动引导合成示例，仅验证交互】我们先细化这条选题：你最希望读者看完后理解哪一个重点？',{exact:true}).waitFor({timeout:60000});
     await page.getByLabel('消息', { exact: true }).fill('请和我讨论这条视频的口播稿。');
     await page.getByRole('button', { name: '发送', exact: true }).click();
     const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 });
     const packageRunsBefore = Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, new URL(page.url()).searchParams.get('session')])).rows[0].n);
     await finalize.click();
-    await page.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    await page.getByRole('link',{name:'这版口播稿已定稿 · 查看',exact:true}).waitFor({timeout:60000});
     await page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true }).waitFor();
     expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, new URL(page.url()).searchParams.get('session')])).rows[0].n)).toBe(packageRunsBefore);
     let lostPackage = 0;
@@ -7113,6 +7120,7 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     expect(JSON.parse(completedVideo!)).toEqual(frozenVideo);
     expect(ordinaryPrepareCalls).toEqual([]);
     expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'",[f.actor,new URL(page.url()).searchParams.get('session')])).rows[0].n)).toBe(packageRunsBefore+1);
+    await recoveryTab.getByRole('button',{name:'成果与版本',exact:true}).click();
     await recoveryTab.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
     await recoveryTab.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor();
     await recoveryTab.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor();
@@ -7272,7 +7280,7 @@ it("OPC: library edit binds fields and revision to one snapshot across a concurr
     await page.getByLabel('当前阶段 edit-account').selectOption('starting');
     await refreshed;
     await page.getByRole('button',{name:'保存修改',exact:true}).click();
-    await expect.poll(async()=>(await page.getByRole('alert').allTextContents()).join(' '),{timeout:30000}).toContain('没有覆盖更新后的内容');
+    await expect.poll(async()=>(await page.getByRole('alert').allTextContents()).join(' '),{timeout:30000}).toContain('保存已明确拒绝，已读取当前版本，请重新编辑。');
     const library=await f.service.library({search:'另一标签已保存的标题',from:null,to:null});
     const saved=library.businesses.flatMap((business:{accounts:Array<{items:Array<{workItemId:string;title:string;brief:string;day:string}>}>})=>business.accounts.flatMap(account=>account.items)).find((item:{workItemId:string})=>item.workItemId===work.workItemId);
     expect(saved).toMatchObject({title:'另一标签已保存的标题',brief:'另一标签已保存的简报',day:'2026-09-26'});
@@ -7283,7 +7291,7 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
   const f = await publishedDraft();
   await planFixtureModel(f.moduleId);
   const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
-    body: [{ id: randomUUID(), platform: 'x', account: 'consent-account', title: '口播稿授权边界', brief: '验证口播稿定稿与分镜、剪辑建议的授权分离。', day: '2026-09-26' }] });
+    body: [{ id: randomUUID(), platform: 'x', account: 'consent-account', title: '口播稿授权边界', brief: '验证口播稿定稿与分镜、剪辑建议的授权分离。', day: '2026-09-26', contentType:'video' }] });
   const [work] = await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId,
     accounts: [{ platform: 'x', account: 'consent-account', expectedRevision: null }] });
   const { browser, page } = await planBrowser(f);
@@ -7312,6 +7320,8 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
     const legacyMaterial=await f.service.videoMaterialPrepare(legacyChoice);
     await sql.query(readFileSync('../../packages/db/migrations/0121_opc_storyboard_dependency.sql','utf8'));
     await sql.query(readFileSync('../../packages/db/migrations/0121_opc_storyboard_dependency.sql','utf8'));
+    await sql.query(readFileSync('../../packages/db/migrations/0122_opc_content_type.sql','utf8'));
+    await sql.query(readFileSync('../../packages/db/migrations/0122_opc_content_type.sql','utf8'));
     expect(await f.service.videoMaterialPrepare(legacyChoice)).toEqual({sessionId:legacyMaterial.sessionId,revision:legacyMaterial.revision,hash:legacyMaterial.hash});
     await f.service.videoMaterialPrepare({...legacyChoice,action:'abandon'});
     const independent=await browser.newContext();
@@ -7330,6 +7340,7 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
 
     await page.getByLabel('消息', { exact: true }).fill('只生成分镜');
     await page.getByRole('button', { name: '发送', exact: true }).click();
+    await page.getByRole('button',{name:'成果与版本',exact:true}).click();
     await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
     expect(await packageRuns()).toBe(1);
     expect(await page.getByRole('heading', { name: /剪辑建议 · 第 1 版/ }).count()).toBe(0);
@@ -7343,6 +7354,7 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
 
     expect(await packageRuns()).toBe(1);
 
+    await page.getByRole('button',{name:'Close',exact:true}).click();
     const pendingResponse=await fetch(process.env.V3_LOCAL_REST!+'/__runtime_pending',{method:'POST',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}});
     expect(pendingResponse.ok).toBe(true);
     await page.getByRole('button', { name: '只生成剪辑建议', exact: true }).click();
@@ -7363,11 +7375,13 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
     expect(finalResponse.ok).toBe(true);
     await page.reload();
     await expect.poll(()=>page.evaluate(key=>localStorage.getItem(key),videoKey),{timeout:60000}).toBeNull();
+    await page.getByRole('button',{name:'成果与版本',exact:true}).click();
     await page.getByRole('heading', { name: '口播稿 · 第 2 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
     await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 旧口播稿版本', exact: true }).waitFor();
     await page.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿 · 旧口播稿版本', exact: true }).waitFor({ timeout: 60000 });
     expect(await packageRuns()).toBe(2);
     await page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true }).waitFor();
+    await page.getByRole('button',{name:'Close',exact:true}).click();
     await page.getByRole('button', { name: '暂时结束', exact: true }).click();
     expect(await page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true }).count()).toBe(0);
     const storyboardExecution=beforeRefinalize.content.find(entry=>entry.kind==='storyboard')!.executionId;
@@ -7985,5 +7999,72 @@ it('OPC: rejected cross-business adoption recovers its original request and perm
   expect(plans[0].body).toHaveLength(1);expect(plans[0].body[0].account).toBe('photography-account');
   await page.getByRole('link',{name:'打开内容资料库',exact:true}).click();
   await page.getByRole('heading',{name:'x · photography-account',exact:true}).waitFor();
+ }finally{await browser.close();}
+},180000);
+
+it('OPC: typed content uses a right panel, deep links and one proactive continuation across tabs',async()=>{
+ const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const rows=[{id:randomUUID(),platform:'x',account:'typed-account',title:'文章细化',brief:'内容：摄影课；对象：新手；价值：改善构图；结构：案例与练习；假设：一次练习帮助理解。',day:'2026-09-22',contentType:'article'}, {id:randomUUID(),platform:'x',account:'typed-account',title:'视频选题',brief:'摄影构图示范视频，先讨论再起草。',day:'2026-09-23',contentType:'video'}, {id:randomUUID(),platform:'x',account:'typed-account',title:'旧类型未确认',brief:'旧选题简报保持可读',day:'2026-09-24'}];
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:rows});
+ const work=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'typed-account',expectedRevision:null}]});
+ const article=work.find((w:any)=>w.itemId===rows[0].id),video=work.find((w:any)=>w.itemId===rows[1].id),unknown=work.find((w:any)=>w.itemId===rows[2].id);
+ const privileges=await sql.query("select has_function_privilege('authenticated','opc_item_content_type(uuid)','execute') allowed,has_function_privilege('service_role','opc_item_content_type(uuid)','execute') service");
+ expect(privileges.rows[0]).toEqual({allowed:false,service:false});
+ const {browser,context,page}=await planBrowser(f);
+ const guideCount=async()=>Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_WORK_CONTINUE_V1]%'",[f.actor,article.sessionId])).rows[0].n);
+ let lostGuide=0;
+ await page.route('**/api/trpc/runtime.execute*',async route=>{if(lostGuide++)return route.continue();const response=await route.fetch();expect(response.ok()).toBe(true);await route.abort();});
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+article.sessionId+'&continue=1');
+  const second=await context.newPage();await second.goto(page.url());
+  await page.getByText('【主动引导合成示例，仅验证交互】我们先细化这条选题：你最希望读者看完后理解哪一个重点？',{exact:true}).waitFor({timeout:60000});
+  await expect.poll(guideCount).toBe(1);
+  expect(await page.getByRole('button',{name:'起草口播稿',exact:true}).count()).toBe(0);
+  expect(await page.getByRole('button',{name:'另存普通成果',exact:true}).count()).toBe(0);
+  await second.close();await page.reload();
+  await page.getByLabel('消息',{exact:true}).fill('请细化构图的练习重点。');await page.getByRole('button',{name:'发送',exact:true}).click();
+  let lostContent=0;
+  await page.route('**/api/trpc/opc.saveContentResult*',async route=>{if(lostContent++)return route.continue();const response=await route.fetch();expect(response.ok()).toBe(true);await route.abort();});
+  const save=page.getByRole('button',{name:'保存这版内容到资料库',exact:true});await save.waitFor({timeout:60000});await save.click();
+  await page.getByRole('link',{name:'已保存到资料库 · 查看',exact:true}).waitFor({timeout:30000});
+  expect(await page.getByRole('heading',{name:'成果与版本',exact:true}).count()).toBe(0);
+  await page.getByRole('button',{name:'成果与版本',exact:true}).click();
+  await page.getByRole('heading',{name:'成果与版本',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Close',exact:true}).click();
+  await page.getByRole('link',{name:'已保存到资料库 · 查看',exact:true}).click();
+  await page.waitForURL(url=>url.pathname==='/library'&&url.searchParams.get('item')===article.workItemId);
+  const card=page.locator('#item-'+article.workItemId);await card.getByText('文章细化',{exact:true}).waitFor();
+  expect(await card.innerText()).toContain('文章');
+  const saved=(await sql.query("select execution_id from opc_content_versions where work_item_id=$1 and kind='brief'",[article.workItemId])).rows[0];
+  await expect(f.service.contentFromExecution({workItemId:article.workItemId,requestId:randomUUID(),executionId:saved.execution_id,kind:'script',status:'final',expectedVersion:0})).rejects.toThrow('OPC_VIDEO_TYPE_REQUIRED');
+  // A service-role caller cannot bypass the type constraint at Runtime admission.
+  const previous=(await sql.query('select e.payload,b.payload billing from runtime_executions e join bill2_runs b on b.id=e.billing_run_id where e.id=$1',[saved.execution_id])).rows[0];
+  previous.payload.input='[OPC_SCRIPT_V1] 请求口播稿';previous.billing.input=previous.payload;
+  await expect(sql.query('select runtime_admit($1,$2,$3,$4,$5)',[f.actor,article.sessionId,randomUUID(),previous.payload,previous.billing])).rejects.toThrow('OPC_VIDEO_TYPE_REQUIRED');
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+unknown.sessionId+'&continue=1');
+  await page.getByRole('heading',{name:'这条选题准备做成什么内容？',exact:true}).waitFor();
+  expect(await page.getByRole('button',{name:'起草口播稿',exact:true}).count()).toBe(0);
+  let lostType=0;
+  await page.route('**/api/trpc/opc.editLibrary*',async route=>{if(lostType++)return route.continue();const response=await route.fetch();expect(response.ok()).toBe(true);await route.abort();});
+  await page.getByRole('button',{name:'图文',exact:true}).click();
+  await page.getByRole('button',{name:'恢复类型保存',exact:true}).waitFor();
+  await page.reload();
+  await page.getByRole('button',{name:'恢复类型保存',exact:true}).click();
+  await expect.poll(()=>page.getByRole('button',{name:'恢复类型保存',exact:true}).count()).toBe(0);
+  await page.getByText('【主动引导合成示例，仅验证交互】我们先细化这条选题：你最希望读者看完后理解哪一个重点？',{exact:true}).waitFor({timeout:60000});
+  expect((await sql.query('select opc_item_content_type($1) t',[unknown.workItemId])).rows[0].t).toBe('image_text');
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+video.sessionId);
+  await page.getByRole('button',{name:'起草口播稿',exact:true}).waitFor();
+  await page.getByRole('button',{name:'起草口播稿',exact:true}).click();
+  await page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true}).waitFor({timeout:60000});
+  // The existing history panel uses exact adopted item identity, not a title search.
+  await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+f.d.draftId+'/topics');
+  await page.getByRole('button',{name:'开始选题工作对话',exact:true}).click();
+  await page.getByRole('button',{name:'选题与版本',exact:true}).click();
+  await page.getByText('历史正式采用版本 · 1',{exact:true}).click();
+  await page.getByRole('link',{name:'文章细化',exact:true}).click();
+  await page.waitForURL(url=>url.pathname==='/library'&&url.searchParams.get('item')===article.workItemId);
+  expect(await guideCount()).toBe(1);
+  expect((await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='brief'",[article.workItemId])).rows[0].n).toBe(1);
  }finally{await browser.close();}
 },180000);

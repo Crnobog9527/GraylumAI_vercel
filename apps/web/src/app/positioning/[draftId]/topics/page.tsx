@@ -18,8 +18,9 @@ import { useParams } from 'next/navigation';
 import { ArrowLeft, Bot, Loader2, Send, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { trpc } from '@/trpc/client';
-import { opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
+import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 
 type PlanItem = {
   id: string;
@@ -28,6 +29,7 @@ type PlanItem = {
   title: string;
   brief: string;
   day: string;
+  contentType?: 'article'|'image_text'|'video'|'unknown';
 };
 
 type ChatRequest = { draftId: string; requestId: string; input: string };
@@ -65,6 +67,7 @@ function parseCandidate(text: string | null | undefined): PlanItem[] | null {
           title: value('title'),
           brief: value('brief'),
           day: value('day'),
+          ...(value('contentType')?{contentType:planItem.shape.contentType.parse(value('contentType'))} : {}),
         };
         if (
           !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidate.id) ||
@@ -105,6 +108,7 @@ function parseAdoption(text: string | null | undefined): string[] | null {
 export default function TopicWorkspacePage() {
   const params = useParams<{ draftId: string }>();
   const draftId = params?.draftId ?? '';
+  const [panelOpen,setPanelOpen]=useState(false);
   const [input, setInput] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -206,6 +210,8 @@ export default function TopicWorkspacePage() {
     for (const item of adopted) ids.add(item.itemId);
     return ids;
   }, [read.data?.handoffs, adopted]);
+  const handoffItems = [...(read.data?.handoffs??[]).flatMap((h:{result?:Array<{itemId:string;workItemId:string}>})=>h.result??[]),...adopted];
+  function topicLink(item:PlanItem){const saved=handoffItems.find((h:{itemId:string})=>h.itemId===item.id);return saved?'/library?item='+saved.workItemId:undefined;}
   const candidateOpen = candidateExpanded ?? !candidate?.body.some(item => adoptedItemIds.has(item.id));
   /**
    * Account identities come from the owned account list, not from the draft
@@ -457,7 +463,7 @@ export default function TopicWorkspacePage() {
   const sourceAvailable = workspace.data?.sourceAllowed !== false;
 
   return (
-    <main className="flex h-dvh min-h-0 flex-col overflow-y-auto bg-[var(--bg-primary)] text-[var(--text-primary)]">
+    <main className={"flex h-dvh min-h-0 flex-col overflow-y-auto bg-[var(--bg-primary)] text-[var(--text-primary)] "+(panelOpen?"lg:pr-[32rem]":"")}>
       <header className="flex h-16 shrink-0 items-center justify-between border-b border-[var(--border-primary)] px-4 sm:px-6">
         <div className="flex items-center gap-3">
           <Link className="underline" href={`/positioning/${draftId}`}>
@@ -474,9 +480,7 @@ export default function TopicWorkspacePage() {
           </div>
         </div>
         {bound && (
-          <Link className="text-sm underline" href="/library">
-            打开内容资料库
-          </Link>
+          <div className="flex gap-3 items-center"><Button variant="outline" onClick={()=>setPanelOpen(true)}>选题与版本</Button><Link className="text-sm underline" href="/library">打开内容资料库</Link></div>
         )}
       </header>
 
@@ -559,10 +563,8 @@ export default function TopicWorkspacePage() {
                           if (!body) return null;
                           return (
                             <div>
-                            <ul className="mt-3 space-y-2" aria-label="回复中的选题候选">
-                              {body.map(item => <li key={item.id}><strong>{item.day} · {item.title}</strong><p>{item.platform}/{item.account} · {item.brief}</p></li>)}
-                            </ul>
-                            <p className="mt-3 text-xs text-[var(--text-tertiary)]">这版候选会自动保存；你可以继续对话修改，或在下方选择采用。</p>
+                            <Button variant="outline" className="mt-3" onClick={()=>setPanelOpen(true)}>查看 {body.length} 条候选选题</Button>
+                            <p className="mt-3 text-xs text-[var(--text-tertiary)]">这版候选会自动保存；你可以继续对话修改，或打开右侧“选题与版本”选择采用。</p>
                             </div>
                           );
                         })()}
@@ -589,6 +591,7 @@ export default function TopicWorkspacePage() {
             </section>
           </div>
 
+          <Sheet open={panelOpen} onOpenChange={setPanelOpen} modal={false}><SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto bg-[var(--bg-primary)] text-[var(--text-primary)]"><SheetHeader><SheetTitle>选题与版本</SheetTitle></SheetHeader>
           {candidate && topicDraft.data && (
             <section className="shrink-0 border-t border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4">
               <div className="mx-auto max-w-4xl">
@@ -597,13 +600,13 @@ export default function TopicWorkspacePage() {
                 <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                   选择具体选题后直接采用；也可以用自然语言告诉 Agent「采用全部」或「只采用第 1、3 条」。
                 </p>
-                <ul className="mt-2 max-h-40 overflow-y-auto text-sm" aria-label="候选选题">
+                <ul className="mt-2  text-sm" aria-label="候选选题">
                   {candidate.body.map((item) => {
                     const wasAdopted = adoptedItemIds.has(item.id);
                     return (
                     <li key={item.id} className="flex items-start gap-2 py-2">
                       <input type="checkbox" aria-label={'选择 '+item.title} disabled={wasAdopted||busy||Boolean(pending)} checked={!wasAdopted && selectedItems.includes(item.id)} onChange={event=>setSelectedItems(current=>event.target.checked?[...new Set([...current,item.id])]:current.filter(id=>id!==item.id))}/>
-                      <span><strong>{item.day} · {item.title}</strong>{wasAdopted ? ' · 已采用' : ''}<br/><span className="text-xs text-[var(--text-tertiary)]">{item.platform}/{item.account} · {item.brief}</span>{!wasAdopted && <details className="mt-1"><summary className="cursor-pointer text-xs">修改平台或账号</summary><label className="block text-xs">平台<input aria-label={'平台 '+item.title} disabled={busy||Boolean(pending)} value={item.platform} onChange={event=>editCandidate({...candidate,body:candidate.body.map(row=>row.id===item.id?{...row,platform:event.target.value}:row)})} className="ml-2 rounded border bg-transparent px-2"/></label><label className="block text-xs">账号<input aria-label={'账号 '+item.title} disabled={busy||Boolean(pending)} value={item.account} onChange={event=>editCandidate({...candidate,body:candidate.body.map(row=>row.id===item.id?{...row,account:event.target.value}:row)})} className="ml-2 rounded border bg-transparent px-2"/></label></details>}</span>
+                      <span><strong>{item.day} · {topicLink(item)?<Link className="underline" href={topicLink(item)!}>{item.title}</Link>:item.title}</strong>{wasAdopted ? ' · 已采用' : ''}<br/><span className="text-xs text-[var(--text-tertiary)]">{item.platform}/{item.account} · {item.brief}</span>{!wasAdopted && <label className="block mt-2 text-xs">内容类型<select aria-label={'内容类型 '+item.title} value={item.contentType??'unknown'} disabled={busy||Boolean(pending)} onChange={event=>editCandidate({...candidate,body:candidate.body.map(row=>row.id===item.id?{...row,contentType:planItem.shape.contentType.parse(event.target.value)}:row)})} className="ml-2 rounded border bg-[var(--bg-primary)] p-1"><option value="unknown">待确认</option><option value="article">文章</option><option value="image_text">图文</option><option value="video">视频</option></select></label>}{!wasAdopted && <details className="mt-1"><summary className="cursor-pointer text-xs">修改平台或账号</summary><label className="block text-xs">平台<input aria-label={'平台 '+item.title} disabled={busy||Boolean(pending)} value={item.platform} onChange={event=>editCandidate({...candidate,body:candidate.body.map(row=>row.id===item.id?{...row,platform:event.target.value}:row)})} className="ml-2 rounded border bg-transparent px-2"/></label><label className="block text-xs">账号<input aria-label={'账号 '+item.title} disabled={busy||Boolean(pending)} value={item.account} onChange={event=>editCandidate({...candidate,body:candidate.body.map(row=>row.id===item.id?{...row,account:event.target.value}:row)})} className="ml-2 rounded border bg-transparent px-2"/></label></details>}</span>
                     </li>
                   );})}
                 </ul>
@@ -627,8 +630,8 @@ export default function TopicWorkspacePage() {
                   <article key={plan.planId} className="mt-3 rounded-xl border border-[var(--border-primary)] p-3">
                     <h3 className="text-sm font-medium">第 {plan.version} 版 · {plan.body?.length ?? 0} 个选题</h3>
                     {plan.body ? (
-                        <ul className="mt-2 max-h-40 overflow-y-auto text-sm" aria-label={'第 ' + plan.version + ' 版选题'}>
-                          {plan.body.map((item) => <li key={item.id}>{item.day} · {item.platform}/{item.account} · {item.title}</li>)}
+                        <ul className="mt-2  text-sm" aria-label={'第 ' + plan.version + ' 版选题'}>
+                          {plan.body.map((item) => <li key={item.id}>{item.day} · {item.platform}/{item.account} · {topicLink(item)?<Link className="underline" href={topicLink(item)!}>{item.title}</Link>:item.title}</li>)}
                         </ul>
                     ) : (
                       <p role="status" className="mt-2 text-sm">
@@ -641,6 +644,9 @@ export default function TopicWorkspacePage() {
               </div>
             </section>
           )}
+
+          <details className="p-4"><summary>讨论中的候选记录</summary>{executions?.filter(e=>e.contentAvailable&&e.state==='completed').map(e=>{const rows=parseCandidate(e.body??e.primaryBody);return rows?<article key={e.executionId} className="border-t py-3"><ul>{rows.map(item=><li key={item.id} className="py-2"><strong>{topicLink(item)?<Link href={topicLink(item)!} className="underline">{item.title}</Link>:item.title}</strong><p className="text-sm">{item.day} · {item.platform}/{item.account}</p><p className="text-sm whitespace-pre-wrap">{item.brief}</p></li>)}</ul></article>:null;})}</details>
+          </SheetContent></Sheet>
 
           <footer className="shrink-0 border-t border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4">
             <div className="mx-auto max-w-3xl">

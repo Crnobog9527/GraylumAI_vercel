@@ -10,6 +10,7 @@ export const planItem = z
     title: z.string().trim().min(1).max(160),
     brief: z.string().trim().min(1).max(2000),
     day: z.string().date(),
+    contentType: z.enum(["article", "image_text", "video", "unknown"]).optional(),
   })
   .strict();
 export const opcPlan = z
