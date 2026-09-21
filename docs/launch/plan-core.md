@@ -1,5 +1,13 @@
 # Launch Plan Core
 
+> **当前计划入口：[Master Plan v11](MASTER_PLAN.md#construction)。** 产品默认、施工范围及已确认依赖只在 Master Plan 集中维护；[批次与并行边界](MASTER_PLAN.md#parallel)、[完整验收](MASTER_PLAN.md#acceptance)一并阅读。
+>
+> 下方正文原样保留为历史任务映射和技术要求，保留原 task ID、lane、迁移说明、验收及深链接；不把历史“current”“新增”或完成文案当作最新状态。不冲突的技术约束仍有效，替代范围见 [Master Plan §2/§14](MASTER_PLAN.md#cutover)。
+>
+> 本入口随 #432 经批准合入 staging 后生效；第 11–12 节拟议依赖调整须由 Owner 明确确认，在此之前原已批准依赖仍约束相关就绪判断。入口或计划批准不启动 B1、不恢复 #422，也不授予代码合并或外部操作；当前执行权限只依 [AGENTS.md](../../AGENTS.md)。
+
+---
+
 This document is the Launch product structure and discovery root. It stores no
 runtime authorization, current-task writer state, or automatic-progression state.
 
