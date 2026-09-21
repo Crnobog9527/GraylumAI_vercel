@@ -7879,6 +7879,9 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
     await page.getByRole('button',{name:'采用所选并保存到资料库',exact:true}).click();
     await page.getByRole('button',{name:/展开选题/}).waitFor();
     expect(await page.getByRole('button',{name:'采用所选并保存到资料库',exact:true}).isVisible()).toBe(false);
+    await page.reload();
+    await page.getByRole('button',{name:/展开选题/}).waitFor();
+    expect(await page.getByRole('button',{name:'采用所选并保存到资料库',exact:true}).isVisible()).toBe(false);
     await page.getByRole('link',{name:'打开内容资料库',exact:true}).click();
     const business=page.locator('section').filter({has:page.getByRole('heading',{name:'创作者咨询 · 完整体验',exact:true})});
     await business.getByRole('link',{name:'继续工作',exact:true}).click();

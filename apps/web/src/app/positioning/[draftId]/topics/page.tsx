@@ -141,7 +141,7 @@ export default function TopicWorkspacePage() {
   const adoptTopics = trpc.opc.adoptTopics.useMutation();
   const topicDraft = trpc.opc.topicDraft.useQuery({ draftId }, { enabled: Boolean(draftId && sessionId) });
 
-  const [candidateOpen, setCandidateOpen] = useState(true);
+  const [candidateExpanded, setCandidateOpen] = useState<boolean | null>(null);
   const busy = working || turn.isPending || execute.isPending || bind.isPending || savePlan.isPending || handoff.isPending || saveDraft.isPending || adoptTopics.isPending;
   const storageKey = sessionId ? 'opc-topic-operation:' + sessionId : '';
   const candidateKey = sessionId ? 'opc-topic-candidate:' + sessionId : '';
@@ -194,6 +194,7 @@ export default function TopicWorkspacePage() {
     for (const item of adopted) ids.add(item.itemId);
     return ids;
   }, [read.data?.handoffs, adopted]);
+  const candidateOpen = candidateExpanded ?? !candidate?.body.some(item => adoptedItemIds.has(item.id));
   /**
    * Account identities come from the owned account list, not from the draft
    * read: `opc.read` for one draft has no accounts projection, so reading them
@@ -579,7 +580,7 @@ export default function TopicWorkspacePage() {
           {candidate && (
             <section className="shrink-0 border-t border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4">
               <div className="mx-auto max-w-4xl">
-                <button type="button" className="flex w-full items-center justify-between text-sm font-medium" aria-expanded={candidateOpen} onClick={()=>setCandidateOpen(open=>!open)}><span>选题草稿 · {candidate.body.filter(item=>!adoptedItemIds.has(item.id)).length} 条未采用</span><span>{candidateOpen?'收起选题':'展开选题'}</span></button>
+                <button type="button" className="flex w-full items-center justify-between text-sm font-medium" aria-expanded={candidateOpen} onClick={()=>setCandidateOpen(!candidateOpen)}><span>选题草稿 · {candidate.body.filter(item=>!adoptedItemIds.has(item.id)).length} 条未采用</span><span>{candidateOpen?'收起选题':'展开选题'}</span></button>
                 {candidateOpen && <>
                 <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                   选择具体选题后直接采用；也可以用自然语言告诉 Agent「采用全部」或「只采用第 1、3 条」。
