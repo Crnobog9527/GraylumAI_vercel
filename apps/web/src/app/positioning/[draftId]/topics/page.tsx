@@ -141,6 +141,7 @@ export default function TopicWorkspacePage() {
   const adoptTopics = trpc.opc.adoptTopics.useMutation();
   const topicDraft = trpc.opc.topicDraft.useQuery({ draftId }, { enabled: Boolean(draftId && sessionId) });
 
+  const [candidateOpen, setCandidateOpen] = useState(true);
   const busy = working || turn.isPending || execute.isPending || bind.isPending || savePlan.isPending || handoff.isPending || saveDraft.isPending || adoptTopics.isPending;
   const storageKey = sessionId ? 'opc-topic-operation:' + sessionId : '';
   const candidateKey = sessionId ? 'opc-topic-candidate:' + sessionId : '';
@@ -290,6 +291,7 @@ export default function TopicWorkspacePage() {
           } else if (op.kind === 'adopt') {
             const result = await handoff.mutateAsync(op.request);
             setAdopted(result as typeof adopted);
+            setCandidateOpen(false);
             setNotice('已采用所选内容并保存到资料库。');
           } else if (op.kind === 'draft') {
             const result = await saveDraft.mutateAsync(op.request);
@@ -300,6 +302,7 @@ export default function TopicWorkspacePage() {
             setAdopted(result.items as typeof adopted);
             const acceptedIds = new Set((result.items as typeof adopted).map(item => item.itemId));
             setSelectedItems(current => current.filter(id => !acceptedIds.has(id)));
+            setCandidateOpen(false);
             setNotice('已采用所选内容并保存到资料库。你可以在资料库继续任一具体内容。');
           }
           localStorage.setItem(storageKey + ':completed:' + op.request.requestId, JSON.stringify(op));
@@ -576,7 +579,8 @@ export default function TopicWorkspacePage() {
           {candidate && (
             <section className="shrink-0 border-t border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4">
               <div className="mx-auto max-w-4xl">
-                <h2 className="text-sm font-medium">当前候选 · 自动保存</h2>
+                <button type="button" className="flex w-full items-center justify-between text-sm font-medium" aria-expanded={candidateOpen} onClick={()=>setCandidateOpen(open=>!open)}><span>选题草稿 · {candidate.body.filter(item=>!adoptedItemIds.has(item.id)).length} 条未采用</span><span>{candidateOpen?'收起选题':'展开选题'}</span></button>
+                {candidateOpen && <>
                 <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                   选择具体选题后直接采用；也可以用自然语言告诉 Agent「采用全部」或「只采用第 1、3 条」。
                 </p>
@@ -598,6 +602,7 @@ export default function TopicWorkspacePage() {
                     全选
                   </Button>
                 </div>
+                </>}
               </div>
             </section>
           )}
@@ -619,7 +624,7 @@ export default function TopicWorkspacePage() {
                     )}
                   </article>
                 ))}</details>
-                {(read.data?.handoffs?.length || adopted.length)>0&&<p className="mt-3 rounded-xl border border-[var(--border-primary)] p-3 text-sm">已采用的选题都已进入资料库，可按业务和账号查看，再选择具体内容继续。</p>}
+
               </div>
             </section>
           )}

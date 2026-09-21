@@ -6,6 +6,8 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomUUID, createHash } from "node:crypto";
 import {
   readFileSync,
+  appendFileSync,
+  existsSync,
   writeFileSync,
   mkdirSync,
   copyFileSync,
@@ -320,7 +322,7 @@ try {
     apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
     apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
   }
-  if(runtimeSchema&&!upgradeMode){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');}}
+  if(runtimeSchema&&!upgradeMode){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0120_opc_entry_projection.sql');apply('packages/db/migrations/0120_opc_entry_projection.sql');}}
   if(stagingSchema&&!upgradeMode){apply('packages/db/migrations/0108_runtime_staging_window.sql');apply('packages/db/migrations/0108_runtime_staging_window.sql');}
   console.log("SQL additive migration and repeat application PASS; runtime schema="+runtimeSchema+"; deferred upgrade="+upgradeMode);
   docker(
@@ -411,7 +413,8 @@ try {
   const sliceCalls=[];
   const controlToken=randomUUID();let holdSlice=false,restartApplication;
   const documentCalls=[];
-  const runtimeCalls=[];let runtimeFinal=!runtimeUpgrade,holdRuntime=false;const heldRuntime=[];
+  const receiptFile=resolve(evidenceDirectory,'synthetic-receipts.jsonl');
+  const runtimeCalls=[];const runtimeReceipts=new Map(existsSync(receiptFile)?readFileSync(receiptFile,'utf8').trim().split('\n').filter(Boolean).map(line=>{const entry=JSON.parse(line);return [entry.id,{model:entry.model}];}):[]);let runtimeFinal=!runtimeUpgrade,holdRuntime=false;const heldRuntime=[];
   let rateLimitFixtureRejected = false;
   let summaryRateLimitFixtureRejected = false;
   gateway = createServer(async (req, res) => {
@@ -419,6 +422,8 @@ try {
       let raw='';for await(const chunk of req)raw+=chunk;
       const request=req.url==='/__official_chat'?JSON.parse(raw):JSON.parse(JSON.parse(raw).input);runtimeCalls.push(request);
       const id=serve ? 'local-runtime-'+randomUUID() : 'local-runtime-'+runtimeCalls.length;
+      runtimeReceipts.set(id,request);
+      appendFileSync(receiptFile,JSON.stringify({id,model:request.model})+'\n',{mode:0o600});
       let content='Saved runtime answer '+runtimeCalls.length;
       if(opcMode){
         content='【固定模拟回复，仅验证流程】你最想帮助哪类人解决一个什么具体问题？';
@@ -467,6 +472,9 @@ try {
             const revision=String(input.userRequest).includes('修改');
             const rows=[{id:'aaaaaaaa-1111-4111-8111-111111111111',platform:'x',account:'existing-account',title:revision?'修改后的选题':'首周选题',brief:'内容：展示一次真实工作过程；对象：正在起步的创作者；价值：解决本周行动不清；结构：问题、过程、结果；假设：具体案例更容易促成收藏。',day:'2026-09-21'}, {id:'bbbbbbbb-2222-4222-8222-222222222222',platform:'x',account:'proposed-account',title:'第二个账号选题',brief:'内容：解释定位方法；对象：准备开新账号的人；价值：减少试错；结构：误区、方法、行动；假设：步骤清单会提升完成率。建议账号未注册。',day:'2026-09-22'}];
             content=String(input.userRequest).includes('采用')?'已识别明确采用指令。\n```json\n'+JSON.stringify({action:'adopt',itemIds:String(input.userRequest).includes('全部')?rows.map(row=>row.id):[rows[0].id]})+'\n```':'【选题合成回复，仅验证流程】已读取正式定位与选题方法。'+(revision?'已按本轮要求修改。':'先给出可核对的候选。')+'\n```json\n'+JSON.stringify(rows)+'\n```';
+          }
+          if(String(input.userRequest).includes('口播稿')&&!String(input.userRequest).includes('[OPC_VIDEO_PACKAGE_V1]')){
+            content='【口播稿合成示例，仅验证交互】\n你是否也遇到过：每天想做内容，却不知道从哪里开始？今天我用一个真实工作案例，分享把目标拆成一个小行动的方法。先明确要帮助谁，再记录一次具体尝试，最后复盘结果。你可以先试一天，把实际发现告诉我。';
           }
           if(String(input.userRequest).includes('[OPC_VIDEO_PACKAGE_V1]')){
             const requested=String(input.userRequest);
@@ -526,9 +534,9 @@ try {
     }
 
     if((opcMode||runtimeMode||runtimeUpgrade) && req.url?.startsWith('/receipt/local-runtime-')){
-      const index=Number(req.url.slice('/receipt/local-runtime-'.length))-1,request=runtimeCalls[index];
+      const id=req.url.slice('/receipt/'.length),request=runtimeReceipts.get(id);
       if(!request){res.writeHead(404).end();return;}
-      res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({id:'local-runtime-'+(index+1),model:request.model,final:runtimeFinal,cost:runtimeFinal?'0.003':null,currency:'USD',coverage:'request_total'}));return;
+      res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({id,model:request.model,final:runtimeFinal,cost:runtimeFinal?'0.003':null,currency:'USD',coverage:'request_total'}));return;
     }
     if((opcMode||runtimeMode||runtimeUpgrade) && req.url==='/__runtime_process'){
       if(req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
@@ -541,7 +549,7 @@ try {
     if(chatCompatibility && await chatCompatibility(req,res))return;
     if(upgradeMode && ['/__upgrade_bill2','/__runtime_candidate','/__runtime_legacy','/__legacy_reader_compat','/__legacy_ledger_reader_compat','/__finance_read_context'].includes(req.url)){
       if(req.method!=='POST'||req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
-      try{if(req.url==='/__upgrade_bill2'){apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');if(runtimeSchema){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');}}if(stagingSchema){apply('packages/db/migrations/0108_runtime_staging_window.sql');apply('packages/db/migrations/0108_runtime_staging_window.sql');}sql("NOTIFY pgrst, 'reload schema'");}
+      try{if(req.url==='/__upgrade_bill2'){apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');if(runtimeSchema){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0120_opc_entry_projection.sql');apply('packages/db/migrations/0120_opc_entry_projection.sql');}}if(stagingSchema){apply('packages/db/migrations/0108_runtime_staging_window.sql');apply('packages/db/migrations/0108_runtime_staging_window.sql');}sql("NOTIFY pgrst, 'reload schema'");}
       else if(req.url==='/__finance_read_context'){apply('packages/db/migrations/0103_bill_1_reservation_read_contract.sql');sql("NOTIFY pgrst, 'reload schema'");}
       else {if(req.url==='/__legacy_reader_compat'||req.url==='/__legacy_ledger_reader_compat')patchLegacyFinanceReader(legacyRoot,evidenceDirectory,req.url==='/__legacy_ledger_reader_compat'?'ledger':'complete');await restartApplication(req.url==='/__runtime_candidate'?root:legacyRoot);}res.writeHead(200).end('ok');}catch(error){console.error(String(error));res.writeHead(500).end('compatibility transition failed');}return;
     }
@@ -800,7 +808,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
   const primaryTestArgs = [
     ...(aiOnly ? ["--testNamePattern", testPattern] : []),
   ];
-  const runTests = () =>
+  const runTests = (patternOverride) =>
     spawn(
       "pnpm",
       [
@@ -817,7 +825,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
         ...(opcMode ? ['src/services/opc/opc.integration.ts'] : []),
         "--reporter",
         "verbose",
-        ...(env.V3_WORKBENCH_PHASE === "restore"
+        ...(patternOverride ? ["--testNamePattern",patternOverride] : env.V3_WORKBENCH_PHASE === "restore"
           ? ["--testNamePattern", args.includes('--reuse-only')
               ? "^REUSE: restart preserves"
               : "^restores all projects in a new browser login after a real application process restart$"]
@@ -849,7 +857,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
       const saved=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'opc-acceptance.json'),'utf8'));
       if(![saved.moduleId,saved.modelId].every(v=>/^[a-f0-9-]{36}$/.test(v))||new URL(saved.url).origin!==env.V3_LOCAL_APP)throw new Error('invalid OPC preview identity');
       // Curate only this disposable preview after assertions; retain every ledger row and receipt.
-      sql(`UPDATE modules SET active=false WHERE id<>'${saved.moduleId}'; UPDATE ai_models SET is_active=false WHERE id<>'${saved.modelId}';`);
+      sql(`UPDATE modules SET active=false WHERE id<>'${saved.moduleId}'; UPDATE ai_models SET is_active=false WHERE id<>'${saved.modelId}' AND id::text IS DISTINCT FROM (SELECT value #>> '{}' FROM system_settings WHERE key='v3_summary_model_id');`);
       console.log('LOCAL_OPC_ACCEPTANCE_READY '+saved.url);
     }else if(runtimeMode){
       const saved=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'runtime-acceptance.json'),'utf8'));
@@ -875,6 +883,10 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
     previewState.initialized = true;
     writePreviewState(previewState);
     });
+    if(lifecycle.bootstrap&&opcMode){
+      env.V3_VERIFY_DELIVERED_PREVIEW='true';
+      await childExit(runTests('^OPC: delivered preview'));
+    }
     console.log("PERSISTENT_PREVIEW_READY " + JSON.stringify({ id: previewState.id, url: env.V3_LOCAL_APP + (opcMode ? "/positioning" : runtimeMode ? "/runtime" : ""), action: previewOptions.action, volume: previewState.names.volume, bootstrap: lifecycle.bootstrap }));
     await servingEnded;
   }

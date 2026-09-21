@@ -14,7 +14,8 @@ export default function PositioningHome() {
     start = trpc.opc.start.useMutation();
   const [choice, setChoice] = useState(""),
     [businessId, setBusinessId] = useState(""),
-    [businessName, setBusinessName] = useState("我的业务"),
+    [businessName, setBusinessName] = useState(""),
+    [showStart,setShowStart]=useState(false),
     [error, setError] = useState(""),
     [actorId,setActorId]=useState(""),
     [pendingStart,setPendingStart]=useState<StartOperation|null>(null);
@@ -49,8 +50,9 @@ export default function PositioningHome() {
         <p role="alert">当前环境未开放，或登录已失效。请登录后重试。</p>
       )}
       {pendingStart&&!start.isPending&&<section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--color-primary)] p-4" aria-label="待恢复的开始请求"><p>上次开始定位的结果尚未确认。先恢复同一请求，避免把草稿绑定到另一个业务。</p><Button onClick={()=>runStart(pendingStart)}>恢复上次开始请求</Button></section>}
-      <section className="space-y-4 rounded-xl border border-[var(--border-primary)] p-5">
-        <h2 className="text-xl">选择定位入口</h2>
+      {Boolean(list.data?.drafts?.length) && <Button variant="outline" onClick={()=>setShowStart(value=>!value)}>{showStart?'收起新定位入口':'为另一个产品、服务或品牌开始定位'}</Button>}
+      {(showStart || list.data?.drafts?.length === 0) && <section className="space-y-4 rounded-xl border border-[var(--border-primary)] p-5">
+        <h2 className="text-xl">这次要为哪个产品、服务或品牌定位？</h2>
         <label>
           定位方法{" "}
           <select
@@ -69,13 +71,13 @@ export default function PositioningHome() {
         <label className="block">
           业务
           <select aria-label="所属业务" value={businessId} onChange={(e) => setBusinessId(e.target.value)} className="ml-2 rounded border bg-[var(--bg-secondary)] p-2">
-            <option value="">新业务</option>
+            <option value="">另一个产品、服务或品牌</option>
             {library.data?.businesses?.map((business: { businessId: string; name: string }) => (
               <option key={business.businessId} value={business.businessId}>{business.name}</option>
             ))}
           </select>
         </label>
-        {!businessId && <label className="block">业务名称 <input aria-label="业务名称" value={businessName} maxLength={120} onChange={(e) => setBusinessName(e.target.value)} className="ml-2 rounded border bg-[var(--bg-secondary)] p-2" /></label>}
+        {!businessId && <label className="block">产品、服务或品牌名称 <input placeholder="例如：摄影课程、我的咨询服务" aria-label="业务名称" value={businessName} maxLength={120} onChange={(e) => setBusinessName(e.target.value)} className="ml-2 rounded border bg-[var(--bg-secondary)] p-2" /></label>}
         <div className="grid gap-3 sm:grid-cols-2">
           <Button
             disabled={!catalog.data?.length || start.isPending || Boolean(pendingStart) || (!businessId && !businessName.trim())}
@@ -94,14 +96,15 @@ export default function PositioningHome() {
         {!catalog.isLoading && !catalog.data?.length && (
           <p>当前没有可用的已发布定位方法。</p>
         )}
-      </section>
+      </section>}
       <section className="space-y-3">
         <h2 className="text-xl">继续已有定位</h2>
-        {list.data?.drafts?.map((d: { draftId: string; mode: string }) => (
-          <div key={d.draftId}>
+        {list.data?.drafts?.map((d: { draftId: string; mode: string; businessName?:string;createdAt?:string;currentVersion?:number;state?:string }) => (
+          <div key={d.draftId} className="rounded-xl border border-[var(--border-primary)] p-4">
             <Link className="underline" href={"/positioning/" + d.draftId}>
-              继续{d.mode === "manual" ? "手动" : "导师"}定位
+              {d.businessName ?? "未命名业务"} · 继续定位
             </Link>
+            <p className="mt-2 text-sm text-[var(--text-secondary)]">{d.state==='published' ? `正式定位第 ${d.currentVersion} 版 · 查看或继续选题` : d.currentVersion ? `正在修订 · 原正式第 ${d.currentVersion} 版保留` : '定位进行中 · 接着上次继续'}{d.createdAt ? ' · '+new Date(d.createdAt).toLocaleString('zh-CN') : ''}</p>
           </div>
         ))}
         {list.data?.drafts?.length === 0 && <p>尚无定位草稿。</p>}

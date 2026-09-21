@@ -42,8 +42,8 @@ const procedure=protectedProcedure.use(async({ctx,next})=>{
 });
 export const runtimeRouter=router({
  choices:procedure.input(z.object({sessionId:z.string().uuid().optional()}).optional()).query(async({ctx,input})=>{
-  let work=false;
-  if(input?.sessionId){const listing=await ctx.supabaseAdmin!.rpc('opc_query',{p_actor_id:ctx.user.id});if(!listing.error)work=(listing.data.accounts??[]).some((a:{items:Array<{sessionId:string}>})=>a.items.some(i=>i.sessionId===input.sessionId));}
+  let work=false;let workModuleId:string|null=null;let workRevisionId:string|null=null;
+  if(input?.sessionId){const listing=await ctx.supabaseAdmin!.rpc('opc_query',{p_actor_id:ctx.user.id});if(!listing.error){const item=(listing.data.accounts??[]).flatMap((a:{items:Array<{sessionId:string;workItemId:string;moduleId?:string;methodRevisionId?:string}>})=>a.items).find((i:{sessionId:string})=>i.sessionId===input.sessionId);work=Boolean(item);if(item){workModuleId=item.moduleId??null;workRevisionId=item.methodRevisionId??null;}}}
 
   // This loopback-only Owner entry advertises its two acceptance fixtures,
   // not the unrelated fault/organizer fixtures left by the integration suite.
@@ -58,7 +58,7 @@ export const runtimeRouter=router({
   if(modules.error)throw new Error('RUNTIME_SKILLS_UNAVAILABLE');
   const skills:Array<{moduleId:string;revisionId:string;name:string}>=[];
   for(const m of modules.data){if(!m.skill_id||(ctx.real&&!ctx.real.callPolicies.some(q=>q.modelId===m.model_id)))continue;try{
-   const source=databaseSkillSource({userClient:ctx.userScopedSupabase,privateClient:ctx.supabaseAdmin,moduleId:m.id,skillId:m.skill_id});
+   const source=databaseSkillSource({userClient:ctx.userScopedSupabase,privateClient:ctx.supabaseAdmin,moduleId:m.id,skillId:m.skill_id,...(m.id===workModuleId&&workRevisionId?{revisionId:workRevisionId}:{})});
    const descriptors=await source.list();
    const list=await discoverSkills(source);
    for(const s of list.filter(s=>ctx.real||work||s.public.name==='runtime-demo')){
@@ -67,7 +67,7 @@ export const runtimeRouter=router({
     skills.push({moduleId:m.id,revisionId:s.public.revisionId,name:work?m.title:s.public.name});
    }
   }catch{/* unavailable packages are not advertised as runnable */}}
-  return {models:models.data,skills,mode:ctx.real?'staging_test' as const:'isolated' as const};
+  return {models:models.data,skills,defaultSkill:skills.find(skill=>skill.moduleId===workModuleId)??null,mode:ctx.real?'staging_test' as const:'isolated' as const};
  }),
  start:procedure.input(z.object({requestId:z.string().uuid(),scope:z.unknown()}).strict()).mutation(({ctx,input})=>ctx.admission.start(input.requestId,input.scope)),
  saveMaterial:procedure.input(runtimeMaterialInput).mutation(({ctx,input})=>ctx.admission.saveMaterial(input)),

@@ -609,6 +609,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     await page
       .getByRole("combobox", { name: "定位方法" })
       .selectOption(f.registration);
+    await page.getByLabel("业务名称",{exact:true}).fill("已有定位测试业务");
     await page
       .getByRole("button", { name: "我已有定位 · 结构化录入", exact: true })
       .click();
@@ -2005,6 +2006,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     await page
       .getByRole("combobox", { name: "定位方法" })
       .selectOption(f.registration);
+    await page.getByLabel("业务名称",{exact:true}).fill("导师引导测试业务");
     await page.getByRole("button", { name: "我从零开始 · Agent 引导", exact: true }).click();
     await page.waitForURL((url) => url.pathname.startsWith("/positioning/"));
 
@@ -7063,6 +7065,10 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     const plans = (await f.service.read(f.d.draftId)).plans;
     expect(plans).toHaveLength(2);
     expect(plans[0].body).toHaveLength(1);
+    expect(await page.getByRole('button', {name:'采用所选并保存到资料库',exact:true}).isVisible()).toBe(false);
+    await page.getByRole('button', {name:/展开选题/}).click();
+    expect(await page.getByLabel('选择 第二个账号选题').isEnabled()).toBe(true);
+    await page.getByRole('button', {name:/收起选题/}).click();
 
     await page.getByRole('link', { name: '打开内容资料库', exact: true }).first().click();
     await page.waitForURL(url => url.pathname === '/library');
@@ -7076,10 +7082,9 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     await page.waitForURL(url => url.pathname === '/runtime');
     await page.getByRole('heading', { name: '资料库修订标题', exact: true }).waitFor();
 
-    await page.getByLabel('对话方式').selectOption({ index: 1 });
     await page.getByLabel('消息', { exact: true }).fill('请和我讨论这条视频的口播稿。');
     await page.getByRole('button', { name: '发送', exact: true }).click();
-    const finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
+    const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 });
     const packageRunsBefore = Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, new URL(page.url()).searchParams.get('session')])).rows[0].n);
     await finalize.click();
@@ -7203,6 +7208,7 @@ it("OPC: new business start restores the complete frozen request before another 
   const {browser,page}=await planBrowser(f);
   try{
     await page.goto(process.env.V3_LOCAL_APP+'/positioning');
+    await page.getByRole('button',{name:'为另一个产品、服务或品牌开始定位',exact:true}).click();
     await page.getByLabel('定位方法').selectOption(f.registration);
     await page.getByLabel('所属业务').selectOption(originalBusiness);
     let lost=0;
@@ -7221,6 +7227,7 @@ it("OPC: new business start restores the complete frozen request before another 
     await page.getByPlaceholder('输入你的密码').fill(otherActor.password);
     await page.getByRole('button',{name:'登录',exact:true}).last().click();
     await page.waitForURL(url=>url.pathname==='/positioning');
+    await page.getByRole('heading',{name:'开始经营你的账号',exact:true}).waitFor();
     expect(await page.getByRole('button',{name:'恢复上次开始请求',exact:true}).count()).toBe(0);
     expect(await page.evaluate(key=>sessionStorage.getItem(key),startKey)).toBeTruthy();
     await page.context().clearCookies();
@@ -7229,6 +7236,7 @@ it("OPC: new business start restores the complete frozen request before another 
     await page.getByPlaceholder('输入你的密码').fill(f.password);
     await page.getByRole('button',{name:'登录',exact:true}).last().click();
     await page.waitForURL(url=>url.pathname==='/positioning');
+    await page.getByRole('heading',{name:'开始经营你的账号',exact:true}).waitFor();
     await page.getByRole('button',{name:'恢复上次开始请求',exact:true}).waitFor();
     await page.unroute('**/api/trpc/opc.start*');
     await page.getByRole('button',{name:'恢复上次开始请求',exact:true}).click();
@@ -7274,10 +7282,9 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
   const packageRuns = async () => Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, work.sessionId])).rows[0].n);
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
-    await page.getByLabel('对话方式').selectOption({ index: 1 });
     await page.getByLabel('消息', { exact: true }).fill('先讨论并给我第一版口播稿。');
     await page.getByRole('button', { name: '发送', exact: true }).click();
-    const finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
+    const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 });
     await finalize.click();
     await page.getByRole('heading', { name: '口播稿已定稿。要继续基于这版生成分镜脚本和剪辑建议吗？', exact: true }).waitFor();
@@ -7290,7 +7297,6 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
     await staleTab.getByPlaceholder('输入你的密码').fill(f.password);
     await staleTab.getByRole('button',{name:'登录',exact:true}).last().click();
     await staleTab.waitForURL(url=>url.pathname==='/runtime');
-    await staleTab.getByLabel('对话方式').selectOption({ index: 1 });
     await staleTab.getByRole('button', { name: '只生成分镜', exact: true }).waitFor();
     let releaseSecond!:()=>void,secondPrepared=false;const secondGate=new Promise<void>(resolve=>{releaseSecond=resolve;});
     await staleTab.route('**/api/trpc/opc.prepareVideoMaterial*',async route=>{secondPrepared=true;await secondGate;await route.continue();});
@@ -7346,20 +7352,19 @@ it("OPC: completed video generation permits the next dialogue and a new script f
   const { browser, page } = await planBrowser(f);
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
-    await page.getByLabel('对话方式').selectOption({ index: 1 });
     await page.getByLabel('消息', { exact: true }).fill('先给我一版口播稿。');
     await page.getByRole('button', { name: '发送', exact: true }).click();
-    let finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
+    let finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 }); await finalize.click();
     await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
     await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
-    expect(await page.getByRole('button', { name: '定稿口播稿', exact: true }).count()).toBe(0);
+    expect(await page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true }).count()).toBe(0);
 
     const rewriteInput = '请继续讨论并给我一版改写后的口播稿。';
     await page.getByLabel('消息', { exact: true }).fill(rewriteInput);
     await page.getByRole('button', { name: '发送', exact: true }).click();
     const rewriteCard = page.getByRole('article').filter({ hasText: rewriteInput });
-    finalize = rewriteCard.getByRole('button', { name: '定稿口播稿', exact: true });
+    finalize = rewriteCard.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 }); await finalize.click();
     await page.getByRole('heading', { name: '口播稿 · 第 2 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
     await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 旧口播稿版本', exact: true }).waitFor();
@@ -7381,10 +7386,9 @@ it("OPC: definite pre-admission failure revokes its claim and permits an explici
   const { browser, page } = await planBrowser(f);
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
-    await page.getByLabel('对话方式').selectOption({ index: 1 });
     await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿。');
     await page.getByRole('button', { name: '发送', exact: true }).click();
-    const finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
+    const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 }); await finalize.click();
     await page.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
     let lateRequestBody = '';
@@ -7422,10 +7426,9 @@ it("OPC: video claim material stays exclusive and a rejected claim can be retrie
   const { browser, page } = await planBrowser(f);
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
-    await page.getByLabel('对话方式').selectOption({ index: 1 });
     await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿。');
     await page.getByRole('button', { name: '发送', exact: true }).click();
-    const finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
+    const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 }); await finalize.click();
     await page.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
     const item = (await f.service.library({ search: '', from: null, to: null })).businesses
@@ -7460,10 +7463,9 @@ it("OPC: upgraded legacy partial result blocks a duplicate dispatch and remains 
   const packageRuns = async () => Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, work.sessionId])).rows[0].n);
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
-    await page.getByLabel('对话方式').selectOption({ index: 1 });
     await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿。');
     await page.getByRole('button', { name: '发送', exact: true }).click();
-    const finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
+    const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 }); await finalize.click();
     await page.route('**/api/trpc/opc.saveVideoResults*', route => route.abort());
     await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
@@ -7481,7 +7483,6 @@ it("OPC: upgraded legacy partial result blocks a duplicate dispatch and remains 
     await retry.goto(process.env.V3_LOCAL_APP + '/login?redirect=' + encodeURIComponent('/runtime?session=' + work.sessionId));
     await retry.getByPlaceholder('name@example.com').fill(f.email); await retry.getByPlaceholder('输入你的密码').fill(f.password);
     await retry.getByRole('button', { name: '登录', exact: true }).last().click(); await retry.waitForURL(url => url.pathname === '/runtime');
-    await retry.getByLabel('对话方式').selectOption({ index: 1 });
     await retry.getByRole('button', { name: '只生成分镜', exact: true }).click();
     await expect.poll(async () => (await retry.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('OPC_CONTENT_ALREADY_GENERATED');
     expect(await packageRuns()).toBe(1); await independent.close();
@@ -7497,7 +7498,6 @@ it("OPC: upgraded legacy partial result blocks a duplicate dispatch and remains 
       kind: 'script', status: 'final', executionId: firstScript.executionId, sourceContentId: null });
     await page.reload();
     await page.getByRole('heading', { name: '口播稿 · 第 2 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
-    await page.getByLabel('对话方式').selectOption({ index: 1 });
     await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
     await expect.poll(async () => {
       const item = (await f.service.library({ search: '旧单项结果恢复', from: null, to: null })).businesses
@@ -7549,10 +7549,9 @@ it("OPC: video package dispatch refuses a different frozen material before admis
   const gate = new Promise<void>(resolve => { releasePrepare = resolve; });
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
-    await page.getByLabel('对话方式').selectOption({ index: 1 });
     await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿');
     await page.getByRole('button', { name: '发送', exact: true }).click();
-    const finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
+    const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 });
     await finalize.click();
     await page.getByRole('heading', { name: '口播稿已定稿。要继续基于这版生成分镜脚本和剪辑建议吗？', exact: true }).waitFor();
@@ -7579,7 +7578,6 @@ it("OPC: video package dispatch refuses a different frozen material before admis
     expect(sourceScript).toBeDefined();
     expect(content.filter((entry: {kind: string}) => entry.kind === 'storyboard' || entry.kind === 'editing')).toHaveLength(0);
     await page.reload();
-    await page.getByLabel('对话方式').selectOption({ index: 1 });
     const retry = page.getByRole('button', { name: '分镜 + 剪辑建议都生成', exact: true });
     await retry.waitFor(); await retry.click();
     // The raced request is definitely rejected before admission. A later explicit
@@ -7832,3 +7830,82 @@ it("OPC: mentor lost reply still projects once from its unchanged frozen informa
     expect(await planIdentityRows(f.actor)).toEqual(identity);
   } finally { await browser.close(); }
 }, 240000);
+
+it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered preview completes the default entry and content journey after curation", async () => {
+  const {readFileSync,writeFileSync}=await import('node:fs');
+  const saved=JSON.parse(readFileSync(process.env.V3_WORKBENCH_OUTPUT+'/opc-acceptance.json','utf8'));
+  const {chromium}=await import('../../../../../apps/web/node_modules/@playwright/test');
+  const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+  const context=await browser.newContext();
+  await context.route('**/*',route=>['127.0.0.1','localhost'].includes(new URL(route.request().url()).hostname)?route.continue():route.abort());
+  const page=await context.newPage();page.setDefaultTimeout(60000);
+  try {
+    await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/positioning');
+    await page.getByPlaceholder('name@example.com').fill(saved.credentials.email);
+    await page.getByPlaceholder('输入你的密码').fill(saved.credentials.password);
+    await page.getByRole('button',{name:'登录',exact:true}).last().click();
+    await page.waitForURL(url=>url.pathname==='/positioning');
+    await page.getByRole('heading',{name:'开始经营你的账号',exact:true}).waitFor();
+    await page.getByRole('button',{name:'为另一个产品、服务或品牌开始定位',exact:true}).click();
+    await page.getByLabel('业务名称',{exact:true}).fill('摄影课程 · 新手体验');
+    await page.getByRole('button',{name:'我从零开始 · Agent 引导',exact:true}).click();
+    await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname));
+    const mentorUrl=page.url();
+    await page.getByRole('log',{name:'完整导师消息'}).getByText('导师主动引导 · 1.1',{exact:true}).waitFor();
+    await page.getByRole('textbox',{name:'给导师的回复',exact:true}).fill('我帮助初学摄影的创作者，通过每周一次手机拍摄练习建立作品集。');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await expect.poll(()=>page.getByRole('textbox',{name:'已知目标 0',exact:true}).inputValue(),{timeout:60000}).toContain('摄影');
+    await page.reload();
+    await expect.poll(()=>page.getByRole('textbox',{name:'已知目标 0',exact:true}).inputValue(),{timeout:60000}).toContain('摄影');
+    await page.goto(process.env.V3_LOCAL_APP+'/positioning');
+    await page.getByRole('link',{name:'摄影课程 · 新手体验 · 继续定位',exact:true}).waitFor();
+    await page.getByRole('button',{name:'为另一个产品、服务或品牌开始定位',exact:true}).click();
+    await page.getByLabel('业务名称',{exact:true}).fill('创作者咨询 · 完整体验');
+    await page.getByRole('button',{name:'我已有定位 · 结构化录入',exact:true}).click();
+    await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname));
+    const positioningUrl=page.url();
+    const flow=(await sql.query('select workflow from artifact_workflows where module_id=$1',[saved.moduleId])).rows[0].workflow;
+    for(const step of flow.steps){
+      for(const field of step.information){
+        const article=page.locator('article').filter({has:page.getByRole('textbox',{name:field.title,exact:true})});
+        await article.getByRole('textbox',{name:field.title,exact:true}).fill('为初创咨询业务提供每周一次真实案例分享，帮助独立创作者验证服务需求。');
+        await article.getByText('已自动保存',{exact:true}).waitFor();
+        await article.getByRole('button',{name:'确认本题并继续',exact:true}).click();
+      }
+    }
+    await page.getByRole('button',{name:'确认正式定位',exact:true}).click();
+    await page.getByRole('dialog').getByRole('button',{name:'继续生成第一周选题',exact:true}).click();
+    await page.getByLabel('选择 第二个账号选题').uncheck();
+    await page.getByRole('button',{name:'采用所选并保存到资料库',exact:true}).click();
+    await page.getByRole('button',{name:/展开选题/}).waitFor();
+    expect(await page.getByRole('button',{name:'采用所选并保存到资料库',exact:true}).isVisible()).toBe(false);
+    await page.getByRole('link',{name:'打开内容资料库',exact:true}).click();
+    const business=page.locator('section').filter({has:page.getByRole('heading',{name:'创作者咨询 · 完整体验',exact:true})});
+    await business.getByRole('link',{name:'继续工作',exact:true}).click();
+    await page.getByRole('button',{name:'起草口播稿',exact:true}).click();
+    await page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true}).click();
+    await page.getByRole('heading',{name:'口播稿已定稿。要继续基于这版生成分镜脚本和剪辑建议吗？',exact:true}).waitFor();
+    await page.getByRole('button',{name:'暂时结束',exact:true}).click();
+    const contentUrl=page.url();
+    await page.goto(process.env.V3_LOCAL_APP+'/library');
+    await page.getByLabel('查找资料').fill('首周选题');
+    await page.locator('section').filter({has:page.getByRole('heading',{name:'创作者咨询 · 完整体验',exact:true})}).getByRole('link',{name:'继续工作',exact:true}).click();
+    await page.getByRole('heading',{name:'口播稿 · 第 1 版 · 已定稿',exact:true}).waitFor();
+    expect(page.url()).toBe(contentUrl);
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/default-content-journey.png',fullPage:true});
+    writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/default-journey.json',JSON.stringify({mentorUrl,positioningUrl,contentUrl,entry:process.env.V3_LOCAL_APP+'/positioning',mode:'synthetic only; all journey mutations through visible default UI'},null,2));
+  }finally{await browser.close();}
+},360000);
+
+it("OPC: entry projection stays actor-owned and repeatable without granting table access", async()=>{
+  const a=await publishedDraft(),b=await publishedDraft();
+  const before=await a.service.list();
+  expect(before.drafts.map((d:{draftId:string})=>d.draftId)).toContain(a.d.draftId);
+  expect(before.drafts.map((d:{draftId:string})=>d.draftId)).not.toContain(b.d.draftId);
+  expect(before.drafts.find((d:{draftId:string})=>d.draftId===a.d.draftId)).toMatchObject({state:'published',currentVersion:1});
+  const {readFileSync}=await import('node:fs');
+  await sql.query(readFileSync('../../packages/db/migrations/0120_opc_entry_projection.sql','utf8'));
+  expect(await a.service.list()).toEqual(before);
+  const privileges=(await sql.query("select has_function_privilege('authenticated','opc_query(uuid,uuid)','execute') client,has_table_privilege('service_role','opc_businesses','select') business_table,has_function_privilege('service_role','opc_query_before_entry_projection(uuid,uuid)','execute') predecessor")).rows[0];
+  expect(privileges).toEqual({client:false,business_table:false,predecessor:false});
+},60000);
