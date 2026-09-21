@@ -7336,6 +7336,35 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
   } finally { await fetch(process.env.V3_LOCAL_REST!+'/__runtime_final',{method:'POST',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}}).catch(()=>null);await browser.close(); }
 }, 300000);
 
+it("OPC: completed video generation permits the next dialogue and a new script final", async () => {
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'post-video-dialogue', title: '派生后继续讨论', brief: '验证派生成功后继续讨论并重新定稿。', day: '2026-09-26' }] });
+  const [work] = await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId,
+    accounts: [{ platform: 'x', account: 'post-video-dialogue', expectedRevision: null }] });
+  const { browser, page } = await planBrowser(f);
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    await page.getByLabel('对话方式').selectOption({ index: 1 });
+    await page.getByLabel('消息', { exact: true }).fill('先给我一版口播稿。');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    let finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
+    await finalize.waitFor({ timeout: 60000 }); await finalize.click();
+    await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
+    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
+
+    await page.getByLabel('消息', { exact: true }).fill('请继续讨论并给我一版改写后的口播稿。');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
+    await finalize.waitFor({ timeout: 60000 }); await finalize.click();
+    await page.getByRole('heading', { name: '口播稿 · 第 2 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 旧口播稿版本', exact: true }).waitFor();
+    await page.getByRole('heading', { name: '口播稿已定稿。要继续基于这版生成分镜脚本和剪辑建议吗？', exact: true }).waitFor();
+    expect((await page.getByRole('alert').allTextContents()).join(' ')).not.toContain('当前执行不可用');
+  } finally { await browser.close(); }
+}, 240000);
+
 it("OPC: definite pre-admission failure revokes its claim and permits an explicit retry", async () => {
   const f = await publishedDraft();
   await planFixtureModel(f.moduleId);

@@ -176,11 +176,20 @@ CREATE OR REPLACE FUNCTION opc_video_runtime_binding_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 DECLARE binding opc_video_material_bindings;m runtime_scope_material;
 BEGIN
+ -- Before the claimed request is admitted, no other request may freeze its
+ -- material. Afterwards the immutable execution is the authority and the
+ -- existing abandon check prevents revocation, so normal dialogue may resume.
  IF EXISTS(
   SELECT 1 FROM opc_video_material_bindings claimed
   WHERE claimed.actor_id=NEW.actor_id AND claimed.session_id=NEW.session_id
    AND claimed.material_revision::text=NEW.payload#>>'{scopeMaterial,revision}'
    AND claimed.request_id<>NEW.request_id
+   AND NOT EXISTS(
+    SELECT 1 FROM runtime_executions claimed_execution
+    WHERE claimed_execution.actor_id=claimed.actor_id
+     AND claimed_execution.session_id=claimed.session_id
+     AND claimed_execution.request_id=claimed.request_id
+   )
  ) THEN RAISE EXCEPTION 'OPC_CONTENT_BINDING';END IF;
  SELECT * INTO binding FROM opc_video_material_bindings WHERE actor_id=NEW.actor_id AND request_id=NEW.request_id;
  IF binding.request_id IS NULL THEN RETURN NEW;END IF;
