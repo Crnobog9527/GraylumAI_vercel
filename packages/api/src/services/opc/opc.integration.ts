@@ -7351,8 +7351,11 @@ it("OPC: definite pre-admission failure revokes its claim and permits an explici
     await page.getByRole('button', { name: '发送', exact: true }).click();
     const finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 }); await finalize.click();
+    await page.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    let lateRequestBody = '';
     await page.route('**/api/trpc/runtime.prepare*', route => {
       if (!(route.request().postData() ?? '').includes('OPC_VIDEO_PACKAGE_V1')) return route.continue();
+      lateRequestBody = route.request().postData()!;
       return route.abort();
     });
     await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
@@ -7363,7 +7366,47 @@ it("OPC: definite pre-admission failure revokes its claim and permits an explici
     await page.unroute('**/api/trpc/runtime.prepare*');
     await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
     await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
+    expect(lateRequestBody).toContain('OPC_VIDEO_PACKAGE_V1');
+    await page.evaluate(async body => {
+      await fetch('/api/trpc/runtime.prepare?batch=1', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    }, lateRequestBody);
+    expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2', [f.actor, abandoned.request_id])).rows[0].n).toBe(0);
+    expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1 and request_id=$2', [f.actor, abandoned.request_id])).rows[0].n).toBe(0);
     expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, work.sessionId])).rows[0].n)).toBe(1);
+  } finally { await browser.close(); }
+}, 240000);
+
+it("OPC: abandon preserves material already frozen by another Runtime request", async () => {
+  const { runtimeAdmissionService } = await import('../runtime/admission');
+  const f = await publishedDraft();
+  const modelId = await planFixtureModel(f.moduleId);
+  const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'shared-material', title: '共享材料保护', brief: '验证其他执行冻结后不能撤销材料。', day: '2026-09-29' }] });
+  const [work] = await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId,
+    accounts: [{ platform: 'x', account: 'shared-material', expectedRevision: null }] });
+  const { browser, page } = await planBrowser(f);
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    await page.getByLabel('对话方式').selectOption({ index: 1 });
+    await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿。');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    const finalize = page.getByRole('button', { name: '定稿口播稿', exact: true });
+    await finalize.waitFor({ timeout: 60000 }); await finalize.click();
+    await page.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    const item = (await f.service.library({ search: '', from: null, to: null })).businesses
+      .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;content: Array<{id: string;kind: string}>}>}>}) => business.accounts.flatMap(account => account.items))
+      .find((entry: {workItemId: string}) => entry.workItemId === work.workItemId)!;
+    const script = item.content.find(entry => entry.kind === 'script')!;
+    const claimRequestId = randomUUID();
+    const material = await f.service.videoMaterialPrepare({ workItemId: work.workItemId, requestId: claimRequestId, sourceScriptId: script.id,
+      choice: 'storyboard', expectedStoryboardVersion: 0, expectedEditingVersion: 0 });
+    const admission = runtimeAdmissionService(f.user, admin, { account: 'local', costPerCall: '0.02', creditsPerUsd: '1000', multiplier: '1', maxCalls: 1, maxOutputTokens: 1000, inputBytes: 32000, historyItems: 20, searchEnabled: false });
+    const otherRequestId = randomUUID();
+    await admission.prepare({ sessionId: work.sessionId, requestId: otherRequestId, input: '冻结当前口播稿材料', selection: { kind: 'ordinary', modelId }, network: 'deny', sources: [] });
+    await expect(f.service.videoMaterialPrepare({ action: 'abandon', workItemId: work.workItemId, requestId: claimRequestId, sourceScriptId: script.id,
+      choice: 'storyboard', expectedStoryboardVersion: 0, expectedEditingVersion: 0 })).rejects.toThrow('OPC_CONTENT_PENDING');
+    expect((await sql.query('select revoked from runtime_scope_material where session_id=$1 and revision=$2', [work.sessionId, material.revision])).rows[0].revoked).toBe(false);
+    expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2', [f.actor, otherRequestId])).rows[0].n).toBe(1);
   } finally { await browser.close(); }
 }, 240000);
 
@@ -7407,6 +7450,25 @@ it("OPC: upgraded legacy partial result blocks a duplicate dispatch and remains 
     await page.unroute('**/api/trpc/opc.saveVideoResults*'); await page.reload();
     await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
     expect(await packageRuns()).toBe(1);
+    const beforeRefinalize = (await f.service.library({ search: '旧单项结果恢复', from: null, to: null })).businesses
+      .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;content: Array<{id: string;kind: string;executionId: string}>}>}>}) => business.accounts.flatMap(account => account.items))
+      .find((item: {workItemId: string}) => item.workItemId === work.workItemId)!;
+    const firstScript = beforeRefinalize.content.find(entry => entry.kind === 'script')!;
+    const secondScript = await f.service.contentFromExecution({ workItemId: work.workItemId, requestId: randomUUID(), expectedVersion: 1,
+      kind: 'script', status: 'final', executionId: firstScript.executionId, sourceContentId: null });
+    await page.reload();
+    await page.getByRole('heading', { name: '口播稿 · 第 2 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    await page.getByLabel('对话方式').selectOption({ index: 1 });
+    await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
+    await expect.poll(async () => {
+      const item = (await f.service.library({ search: '旧单项结果恢复', from: null, to: null })).businesses
+        .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;content: Array<{kind: string;sourceContentId: string|null}>}>}>}) => business.accounts.flatMap(account => account.items))
+        .find((entry: {workItemId: string}) => entry.workItemId === work.workItemId);
+      return item?.content.filter(entry => entry.kind === 'storyboard' && entry.sourceContentId === secondScript.id).length ?? 0;
+    }, { timeout: 60000 }).toBe(1);
+    await page.reload();
+    await page.getByRole('heading', { name: '分镜 · 第 2 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
+    expect(await packageRuns()).toBe(2);
   } finally { await browser.close(); }
 }, 300000);
 
@@ -7436,7 +7498,7 @@ it("OPC: natural-language adoption stays complete after refresh and permits the 
   } finally { await browser.close(); }
 }, 240000);
 
-it("OPC: video package dispatch refuses a different frozen material and cancels before model execution", async () => {
+it("OPC: video package dispatch refuses a different frozen material before admission", async () => {
   const f = await publishedDraft();
   await planFixtureModel(f.moduleId);
   const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
@@ -7468,9 +7530,9 @@ it("OPC: video package dispatch refuses a different frozen material and cancels 
     await f.service.libraryEdit({ requestId: randomUUID(), target: 'item', targetId: work.workItemId, expectedRevision: current.revision,
       patch: { title: '绑定检查已改', brief: '此修改产生另一份冻结 material。', day: '2026-09-25' } });
     releasePrepare(); await click;
-    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('OPC_CONTENT_BINDING');
-    const packageExecution = (await sql.query('select state from runtime_executions where actor_id=$1 and session_id=$2 and request_id=$3', [f.actor, work.sessionId, pendingVideo.followup.requestId])).rows[0];
-    expect(packageExecution.state).toBe('cancelled');
+    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('明确拒绝');
+    expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and request_id=$3', [f.actor, work.sessionId, pendingVideo.followup.requestId])).rows[0].n).toBe(0);
+    expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1 and request_id=$2', [f.actor, pendingVideo.followup.requestId])).rows[0].n).toBe(0);
     const content = (await f.service.library({ search: '绑定检查已改', from: null, to: null })).businesses
       .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;content: Array<{id: string;kind: string}>}>}>}) => business.accounts.flatMap(account => account.items))
       .find((item: {workItemId: string}) => item.workItemId === work.workItemId).content;
@@ -7481,13 +7543,13 @@ it("OPC: video package dispatch refuses a different frozen material and cancels 
     await page.getByLabel('对话方式').selectOption({ index: 1 });
     const retry = page.getByRole('button', { name: '分镜 + 剪辑建议都生成', exact: true });
     await retry.waitFor(); await retry.click();
-    // The raced request is definitely rejected and cancelled. A later explicit
+    // The raced request is definitely rejected before admission. A later explicit
     // choice may bind a new frozen material snapshot to the same exact final
     // script; changing the library title does not create a new script version.
     await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
     await page.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
     const packageStates = (await sql.query("select state from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%' order by created_at", [f.actor, work.sessionId])).rows.map(row => row.state);
-    expect(packageStates).toEqual(['cancelled', 'completed']);
+    expect(packageStates).toEqual(['completed']);
   } finally { releasePrepare?.(); await browser.close(); }
 }, 240000);
 

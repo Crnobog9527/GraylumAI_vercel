@@ -23,8 +23,18 @@ BEGIN
   IF binding.request_id IS NULL OR binding.work_item_id<>p_work_item_id OR binding.source_script_id<>p_source_script_id
    OR (binding.expected_storyboard_version IS NOT NULL AND binding.expected_storyboard_version<>p_expected_storyboard_version)
    OR (binding.expected_editing_version IS NOT NULL AND binding.expected_editing_version<>p_expected_editing_version)
-   OR EXISTS(SELECT 1 FROM runtime_executions e WHERE e.actor_id=p_actor_id AND e.request_id=p_request_id)
    THEN RAISE EXCEPTION 'OPC_CONTENT_PENDING';END IF;
+  -- Runtime admission uses the same request-then-session lock order. Once this
+  -- lock is held, either an execution already froze this exact material and
+  -- the claim stays recoverable, or a later admission observes the revocation.
+  PERFORM 1 FROM runtime_sessions WHERE id=binding.session_id AND actor_id=p_actor_id FOR UPDATE;
+  SELECT * INTO m FROM runtime_scope_material WHERE session_id=binding.session_id AND revision=binding.material_revision;
+  IF m.session_id IS NULL OR EXISTS(
+   SELECT 1 FROM runtime_executions e WHERE e.actor_id=p_actor_id AND e.session_id=binding.session_id
+    AND e.payload#>>'{scopeMaterial,sessionId}'=binding.session_id::text
+    AND e.payload#>>'{scopeMaterial,revision}'=binding.material_revision::text
+    AND e.payload#>>'{scopeMaterial,hash}'=m.content_hash
+  ) THEN RAISE EXCEPTION 'OPC_CONTENT_PENDING';END IF;
   result:=runtime_material(p_actor_id,binding.session_id,'revoke',NULL,binding.material_revision,NULL);
   RETURN result||jsonb_build_object('abandoned',true);
  END IF;
@@ -61,18 +71,13 @@ BEGIN
   LEFT JOIN runtime_scope_material material_row ON material_row.session_id=b.session_id AND material_row.revision=b.material_revision
   WHERE b.actor_id=p_actor_id AND b.work_item_id=p_work_item_id AND b.request_id<>p_request_id
    AND ((p_storyboard AND coalesce(b.storyboard,true)) OR (p_editing AND coalesce(b.editing,true)))
-   AND NOT (
-    (NOT coalesce(b.storyboard,true) OR EXISTS(SELECT 1 FROM opc_content_versions c WHERE c.actor_id=b.actor_id AND c.request_id=b.request_id AND c.kind='storyboard' AND c.source_content_id=b.source_script_id))
-    AND (NOT coalesce(b.editing,true) OR EXISTS(SELECT 1 FROM opc_content_versions c WHERE c.actor_id=b.actor_id AND c.request_id=b.request_id AND c.kind='editing' AND c.source_content_id=b.source_script_id))
-   )
  LOOP
   IF coalesce(conflict.material_revoked,false) THEN CONTINUE;END IF;
-  IF conflict.execution_id IS NULL OR conflict.execution_state NOT IN ('cancelled','completed') THEN RAISE EXCEPTION 'OPC_CONTENT_ALREADY_GENERATED';END IF;
-  IF conflict.execution_state='cancelled' THEN CONTINUE;END IF;
   package:=NULL;
-  BEGIN package:=conflict.raw::jsonb;EXCEPTION WHEN others THEN CONTINUE;END;
+  IF conflict.execution_state='completed' THEN BEGIN package:=conflict.raw::jsonb;EXCEPTION WHEN others THEN package:=NULL;END;END IF;
   -- 0118 rows predate explicit choice columns. Infer only a structurally valid
   -- completed package; an unknown/nonterminal legacy row remains conservative.
+  want_story:=coalesce(conflict.storyboard,true);want_edit:=coalesce(conflict.editing,true);
   IF conflict.storyboard IS NULL AND conflict.editing IS NULL THEN
    want_story:=jsonb_typeof(package)='object' AND package-ARRAY['storyboard']='{}'::jsonb
     AND jsonb_typeof(package->'storyboard')='string' AND char_length(package->>'storyboard') BETWEEN 1 AND 20000;
@@ -82,10 +87,17 @@ BEGIN
     AND jsonb_typeof(package->'storyboard')='string' AND char_length(package->>'storyboard') BETWEEN 1 AND 20000
     AND jsonb_typeof(package->'editing')='string' AND char_length(package->>'editing') BETWEEN 1 AND 20000
    THEN want_story:=true;want_edit:=true;END IF;
-   IF (p_storyboard AND want_story) OR (p_editing AND want_edit) THEN RAISE EXCEPTION 'OPC_CONTENT_ALREADY_GENERATED';END IF;
-   CONTINUE;
+   IF NOT want_story AND NOT want_edit THEN want_story:=true;want_edit:=true;END IF;
   END IF;
-  want_story:=coalesce(conflict.storyboard,true);want_edit:=coalesce(conflict.editing,true);
+  -- A recovered legacy single-kind request releases only the kind proven by
+  -- its exact terminal package and saved artifact. It must not reserve both
+  -- kinds forever or block the same kind for a newly finalized script.
+  IF (NOT want_story OR EXISTS(SELECT 1 FROM opc_content_versions c WHERE c.actor_id=conflict.actor_id AND c.request_id=conflict.request_id AND c.kind='storyboard' AND c.source_content_id=conflict.source_script_id))
+   AND (NOT want_edit OR EXISTS(SELECT 1 FROM opc_content_versions c WHERE c.actor_id=conflict.actor_id AND c.request_id=conflict.request_id AND c.kind='editing' AND c.source_content_id=conflict.source_script_id))
+  THEN CONTINUE;END IF;
+  IF NOT ((p_storyboard AND want_story) OR (p_editing AND want_edit)) THEN CONTINUE;END IF;
+  IF conflict.execution_id IS NULL OR conflict.execution_state NOT IN ('cancelled','completed') THEN RAISE EXCEPTION 'OPC_CONTENT_ALREADY_GENERATED';END IF;
+  IF conflict.execution_state='cancelled' THEN CONTINUE;END IF;
   IF jsonb_typeof(package)='object'
    AND ((want_story AND want_edit AND package-ARRAY['storyboard','editing']='{}'::jsonb)
     OR (want_story AND NOT want_edit AND package-ARRAY['storyboard']='{}'::jsonb)
@@ -156,7 +168,30 @@ BEGIN
  RETURN result;
 END $$;
 
-REVOKE ALL ON FUNCTION opc_video_material_prepare(uuid,uuid,uuid,uuid),opc_video_material_prepare(uuid,uuid,uuid,uuid,boolean,boolean,bigint,bigint),opc_video_results_from_execution(uuid,uuid,uuid,uuid,uuid,bigint,bigint,boolean,boolean) FROM PUBLIC,anon,authenticated,service_role;
+-- Runtime remains the sole admission boundary. This trigger only binds an
+-- existing OPC request claim to its exact, non-revoked session material inside
+-- runtime_admit's transaction; ordinary Runtime requests have no binding and
+-- are unchanged. A rejection rolls back BILL2 preparation in the same tx.
+CREATE OR REPLACE FUNCTION opc_video_runtime_binding_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+DECLARE binding opc_video_material_bindings;m runtime_scope_material;
+BEGIN
+ SELECT * INTO binding FROM opc_video_material_bindings WHERE actor_id=NEW.actor_id AND request_id=NEW.request_id;
+ IF binding.request_id IS NULL THEN RETURN NEW;END IF;
+ SELECT * INTO m FROM runtime_scope_material WHERE session_id=binding.session_id AND revision=binding.material_revision;
+ IF m.session_id IS NULL OR m.revoked
+  OR NEW.session_id IS DISTINCT FROM binding.session_id
+  OR NEW.payload#>>'{scopeMaterial,sessionId}' IS DISTINCT FROM binding.session_id::text
+  OR NEW.payload#>>'{scopeMaterial,revision}' IS DISTINCT FROM binding.material_revision::text
+  OR NEW.payload#>>'{scopeMaterial,hash}' IS DISTINCT FROM m.content_hash
+ THEN RAISE EXCEPTION 'OPC_CONTENT_BINDING';END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS opc_video_runtime_binding_guard ON runtime_executions;
+CREATE TRIGGER opc_video_runtime_binding_guard BEFORE INSERT ON runtime_executions
+FOR EACH ROW EXECUTE FUNCTION opc_video_runtime_binding_guard();
+
+REVOKE ALL ON FUNCTION opc_video_material_prepare(uuid,uuid,uuid,uuid),opc_video_material_prepare(uuid,uuid,uuid,uuid,boolean,boolean,bigint,bigint),opc_video_results_from_execution(uuid,uuid,uuid,uuid,uuid,bigint,bigint,boolean,boolean),opc_video_runtime_binding_guard() FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION opc_video_material_prepare(uuid,uuid,uuid,uuid,boolean,boolean,bigint,bigint),opc_video_results_from_execution(uuid,uuid,uuid,uuid,uuid,bigint,bigint,boolean,boolean) TO service_role;
 
 COMMIT;
