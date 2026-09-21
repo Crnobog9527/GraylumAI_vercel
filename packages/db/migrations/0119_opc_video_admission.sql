@@ -176,6 +176,12 @@ CREATE OR REPLACE FUNCTION opc_video_runtime_binding_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 DECLARE binding opc_video_material_bindings;m runtime_scope_material;
 BEGIN
+ IF EXISTS(
+  SELECT 1 FROM opc_video_material_bindings claimed
+  WHERE claimed.actor_id=NEW.actor_id AND claimed.session_id=NEW.session_id
+   AND claimed.material_revision::text=NEW.payload#>>'{scopeMaterial,revision}'
+   AND claimed.request_id<>NEW.request_id
+ ) THEN RAISE EXCEPTION 'OPC_CONTENT_BINDING';END IF;
  SELECT * INTO binding FROM opc_video_material_bindings WHERE actor_id=NEW.actor_id AND request_id=NEW.request_id;
  IF binding.request_id IS NULL THEN RETURN NEW;END IF;
  SELECT * INTO m FROM runtime_scope_material WHERE session_id=binding.session_id AND revision=binding.material_revision;

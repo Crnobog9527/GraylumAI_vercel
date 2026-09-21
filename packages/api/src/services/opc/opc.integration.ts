@@ -7376,7 +7376,7 @@ it("OPC: definite pre-admission failure revokes its claim and permits an explici
   } finally { await browser.close(); }
 }, 240000);
 
-it("OPC: abandon preserves material already frozen by another Runtime request", async () => {
+it("OPC: video claim material stays exclusive and a rejected claim can be retried", async () => {
   const { runtimeAdmissionService } = await import('../runtime/admission');
   const f = await publishedDraft();
   const modelId = await planFixtureModel(f.moduleId);
@@ -7402,11 +7402,15 @@ it("OPC: abandon preserves material already frozen by another Runtime request", 
       choice: 'storyboard', expectedStoryboardVersion: 0, expectedEditingVersion: 0 });
     const admission = runtimeAdmissionService(f.user, admin, { account: 'local', costPerCall: '0.02', creditsPerUsd: '1000', multiplier: '1', maxCalls: 1, maxOutputTokens: 1000, inputBytes: 32000, historyItems: 20, searchEnabled: false });
     const otherRequestId = randomUUID();
-    await admission.prepare({ sessionId: work.sessionId, requestId: otherRequestId, input: '冻结当前口播稿材料', selection: { kind: 'ordinary', modelId }, network: 'deny', sources: [] });
-    await expect(f.service.videoMaterialPrepare({ action: 'abandon', workItemId: work.workItemId, requestId: claimRequestId, sourceScriptId: script.id,
-      choice: 'storyboard', expectedStoryboardVersion: 0, expectedEditingVersion: 0 })).rejects.toThrow('OPC_CONTENT_PENDING');
-    expect((await sql.query('select revoked from runtime_scope_material where session_id=$1 and revision=$2', [work.sessionId, material.revision])).rows[0].revoked).toBe(false);
-    expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2', [f.actor, otherRequestId])).rows[0].n).toBe(1);
+    await expect(admission.prepare({ sessionId: work.sessionId, requestId: otherRequestId, input: '尝试占用视频请求的专属材料', selection: { kind: 'ordinary', modelId }, network: 'deny', sources: [] })).rejects.toThrow('RUNTIME_ADMISSION_DENIED');
+    expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2', [f.actor, otherRequestId])).rows[0].n).toBe(0);
+    expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1 and request_id=$2', [f.actor, otherRequestId])).rows[0].n).toBe(0);
+    await f.service.videoMaterialPrepare({ action: 'abandon', workItemId: work.workItemId, requestId: claimRequestId, sourceScriptId: script.id,
+      choice: 'storyboard', expectedStoryboardVersion: 0, expectedEditingVersion: 0 });
+    expect((await sql.query('select revoked from runtime_scope_material where session_id=$1 and revision=$2', [work.sessionId, material.revision])).rows[0].revoked).toBe(true);
+    const retry = await f.service.videoMaterialPrepare({ workItemId: work.workItemId, requestId: randomUUID(), sourceScriptId: script.id,
+      choice: 'storyboard', expectedStoryboardVersion: 0, expectedEditingVersion: 0 });
+    expect(retry.revision).toBeGreaterThan(material.revision);
   } finally { await browser.close(); }
 }, 240000);
 
