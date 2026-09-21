@@ -7,8 +7,8 @@ import { workbenchService } from "../artifacts/workbench";
 import type {StagingPolicy} from '../runtime/stagingPolicy';
 import { displayedQuestion, isOpeningInput, questionLabel, questionTask, reachedQuestions } from "./questions";
 import { elicitFieldSpecs } from "../../shared/opcMethodPolicy";
-import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcVideoPackage, opcVideoExecutionCheck } from "../../shared/opcRequests";
-export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcVideoPackage, opcVideoExecutionCheck } from "../../shared/opcRequests";
+import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcVideoPackage, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
+export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcVideoPackage, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
 const uuid = z.string().uuid();
 export const opcStart = z
   .object({
@@ -501,6 +501,14 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       return rpc("opc_video_execution_check", {
         p_work_item_id: v.workItemId,
         p_execution_id: v.executionId,
+        p_source_script_id: v.sourceScriptId,
+      });
+    },
+    videoMaterialPrepare: (value: unknown) => {
+      const v = opcVideoMaterialPrepare.parse(value);
+      return rpc("opc_video_material_prepare", {
+        p_work_item_id: v.workItemId,
+        p_request_id: v.requestId,
         p_source_script_id: v.sourceScriptId,
       });
     },

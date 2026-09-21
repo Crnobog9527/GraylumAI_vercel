@@ -76,6 +76,19 @@ REVOKE ALL ON opc_content_versions FROM PUBLIC,anon,authenticated,service_role;
 DROP TRIGGER IF EXISTS artifact_immutable ON opc_content_versions;
 CREATE TRIGGER artifact_immutable BEFORE UPDATE OR DELETE ON opc_content_versions FOR EACH ROW EXECUTE FUNCTION artifact_immutable();
 
+-- A regenerated video follow-up may need a fresh Runtime material revision,
+-- but it must remain linked to the exact final script that supplied the text.
+CREATE TABLE IF NOT EXISTS opc_video_material_bindings (
+ actor_id uuid NOT NULL REFERENCES profiles(id),request_id uuid NOT NULL,
+ work_item_id uuid NOT NULL REFERENCES opc_items(work_item_id),source_script_id uuid NOT NULL REFERENCES opc_content_versions(id),
+ session_id uuid NOT NULL,material_revision bigint NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(actor_id,request_id),FOREIGN KEY(session_id,material_revision) REFERENCES runtime_scope_material(session_id,revision)
+);
+ALTER TABLE opc_video_material_bindings ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON opc_video_material_bindings FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS artifact_immutable ON opc_video_material_bindings;
+CREATE TRIGGER artifact_immutable BEFORE UPDATE OR DELETE ON opc_video_material_bindings FOR EACH ROW EXECUTE FUNCTION artifact_immutable();
+
 -- Start or replay one positioning draft with an explicit business scope. A new
 -- business is created once; selecting an existing business shares only its core
 -- positioning while account-specific stage and content remain separate.
@@ -115,10 +128,11 @@ DO $$ BEGIN
 END $$;
 CREATE OR REPLACE FUNCTION artifact_transition(p_actor_id uuid,p_module_id uuid,p_skill_id uuid,p_action text,p_project_id uuid DEFAULT NULL,p_round_id uuid DEFAULT NULL,p_request_id uuid DEFAULT NULL,p_payload jsonb DEFAULT '{}') RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE result jsonb;
+DECLARE result jsonb;replay boolean;
 BEGIN
+ SELECT EXISTS(SELECT 1 FROM artifact_requests WHERE project_id=p_project_id AND request_id=p_request_id) INTO replay;
  result:=artifact_transition_before_b1(p_actor_id,p_module_id,p_skill_id,p_action,p_project_id,p_round_id,p_request_id,p_payload);
- IF p_action='publish' AND result->>'versionId' IS NOT NULL THEN
+ IF NOT replay AND p_action='publish' AND result->>'versionId' IS NOT NULL THEN
   UPDATE opc_businesses b SET current_source_version_id=(result->>'versionId')::uuid,revision=b.revision+1
   FROM opc_drafts d JOIN opc_draft_businesses db ON db.draft_id=d.draft_id
   WHERE d.project_id=p_project_id AND d.actor_id=p_actor_id AND b.id=db.business_id
@@ -196,12 +210,13 @@ END $$;
 -- transaction. Replaying the frozen request returns the same plan/work items.
 CREATE OR REPLACE FUNCTION opc_adopt_topics(p_actor_id uuid,p_draft_id uuid,p_request_id uuid,p_expected_version bigint,p_source_version_id uuid,p_body jsonb,p_accounts jsonb) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE d opc_drafts;business uuid;plan jsonb;result jsonb;target jsonb;ac opc_accounts;
+DECLARE d opc_drafts;business uuid;plan jsonb;result jsonb;target jsonb;ac opc_accounts;replay boolean;
 BEGIN
  PERFORM bill2_actor(p_actor_id);
  PERFORM pg_advisory_xact_lock(hashtextextended(p_actor_id::text,107));
  SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
  IF d.draft_id IS NULL THEN RAISE EXCEPTION 'OPC_DENIED';END IF;
+ SELECT EXISTS(SELECT 1 FROM opc_plans WHERE draft_id=p_draft_id AND request_id=p_request_id) INTO replay;
  SELECT business_id INTO business FROM opc_draft_businesses WHERE draft_id=d.draft_id;
  IF business IS NULL THEN RAISE EXCEPTION 'OPC_BUSINESS_DENIED';END IF;
  FOR target IN SELECT value FROM jsonb_array_elements(p_accounts) LOOP
@@ -210,8 +225,52 @@ BEGIN
  END LOOP;
  plan:=opc_save_plan(p_actor_id,p_draft_id,p_request_id,p_expected_version,p_source_version_id,p_body);
  result:=opc_handoff_b1(p_actor_id,p_draft_id,p_request_id,(plan->>'planId')::uuid,p_accounts);
- UPDATE opc_businesses SET current_source_version_id=p_source_version_id,revision=revision+1 WHERE id=business AND current_source_version_id IS DISTINCT FROM p_source_version_id;
+ IF NOT replay THEN UPDATE opc_businesses SET current_source_version_id=p_source_version_id,revision=revision+1 WHERE id=business AND current_source_version_id IS DISTINCT FROM p_source_version_id;END IF;
  RETURN jsonb_build_object('planId',plan->>'planId','version',(plan->>'version')::bigint,'items',result);
+END $$;
+
+-- Content remains readable and reusable only while every item in its source
+-- lineage is still authorized. This covers a package's source script as well
+-- as the Runtime execution that originally produced each version.
+CREATE OR REPLACE FUNCTION opc_content_allowed(p_actor_id uuid,p_content_id uuid) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE current_id uuid:=p_content_id;seen uuid[]:='{}';c opc_content_versions;i opc_items;p artifact_projects;
+BEGIN
+ LOOP
+  IF current_id IS NULL THEN RETURN true;END IF;
+  IF current_id=ANY(seen) OR cardinality(seen)>=64 THEN RETURN false;END IF;
+  SELECT * INTO c FROM opc_content_versions WHERE id=current_id AND actor_id=p_actor_id;
+  IF NOT FOUND THEN RETURN false;END IF;
+  SELECT wi.* INTO i FROM opc_items wi WHERE wi.work_item_id=c.work_item_id;
+  SELECT ap.* INTO p FROM artifact_projects ap WHERE ap.id=i.work_item_id AND ap.actor_id=p_actor_id;
+  IF i.work_item_id IS NULL OR p.id IS NULL OR NOT opc_source_allowed(p_actor_id,i.source_version_id)
+   OR (c.execution_id IS NOT NULL AND NOT runtime_history_available(c.execution_id)) THEN RETURN false;END IF;
+  seen:=array_append(seen,current_id);current_id:=c.source_content_id;
+ END LOOP;
+END $$;
+
+-- Extend Runtime's existing material check for B1-created script material.
+-- Revoking the original script execution therefore blocks every Runtime role
+-- before billing or provider dispatch, including ordinary conversation.
+DO $$ BEGIN
+ IF to_regprocedure('runtime_material_allowed_before_b1(uuid,jsonb)') IS NULL THEN
+  ALTER FUNCTION runtime_material_allowed(uuid,jsonb) RENAME TO runtime_material_allowed_before_b1;
+ END IF;
+END $$;
+CREATE OR REPLACE FUNCTION runtime_material_allowed(p_actor_id uuid,p_material jsonb) RETURNS void
+LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+DECLARE m runtime_scope_material;source_script uuid;
+BEGIN
+ PERFORM runtime_material_allowed_before_b1(p_actor_id,p_material);
+ IF p_material IS NULL OR p_material='null'::jsonb THEN RETURN;END IF;
+ SELECT * INTO m FROM runtime_scope_material WHERE session_id=(p_material->>'sessionId')::uuid AND revision=(p_material->>'revision')::bigint;
+ SELECT id INTO source_script FROM opc_content_versions
+  WHERE actor_id=p_actor_id AND request_id=m.request_id AND kind='script';
+ IF source_script IS NULL THEN
+  SELECT source_script_id INTO source_script FROM opc_video_material_bindings
+   WHERE actor_id=p_actor_id AND session_id=m.session_id AND material_revision=m.revision;
+ END IF;
+ IF source_script IS NOT NULL AND NOT opc_content_allowed(p_actor_id,source_script) THEN RAISE EXCEPTION 'RUNTIME_MATERIAL_UNAVAILABLE';END IF;
 END $$;
 
 CREATE OR REPLACE FUNCTION opc_library(p_actor_id uuid,p_search text DEFAULT '',p_from date DEFAULT NULL,p_to date DEFAULT NULL) RETURNS jsonb
@@ -224,7 +283,7 @@ BEGIN
   'sourceAvailable',CASE WHEN b.current_source_version_id IS NULL THEN false ELSE opc_source_allowed(p_actor_id,b.current_source_version_id) END,
   'accounts',coalesce((SELECT jsonb_agg(jsonb_build_object('projectId',a.project_id,'platform',a.platform,'account',a.account_key,'stage',a.stage,'revision',a.revision,
    'items',coalesce((SELECT jsonb_agg(jsonb_build_object('workItemId',i.work_item_id,'title',coalesce(ed.title,p.work_title),'brief',CASE WHEN opc_source_allowed(p_actor_id,i.source_version_id) THEN coalesce(ed.brief,i.brief) ELSE NULL END,'day',coalesce(ed.day,i.day),'revision',coalesce(ed.revision,1),'sessionId',s.id,'sourceAvailable',opc_source_allowed(p_actor_id,i.source_version_id),
-    'content',coalesce((SELECT jsonb_agg(jsonb_build_object('id',c.id,'kind',c.kind,'version',c.version,'status',c.status,'body',CASE WHEN opc_source_allowed(p_actor_id,i.source_version_id) AND (c.execution_id IS NULL OR runtime_history_available(c.execution_id)) THEN c.body ELSE NULL END,'contentAvailable',opc_source_allowed(p_actor_id,i.source_version_id) AND (c.execution_id IS NULL OR runtime_history_available(c.execution_id)),'sourceContentId',c.source_content_id,'executionId',c.execution_id,'requestId',c.request_id,'createdAt',c.created_at) ORDER BY c.created_at) FROM opc_content_versions c WHERE c.work_item_id=i.work_item_id),'[]'::jsonb)) ORDER BY i.day,p.work_title)
+    'content',coalesce((SELECT jsonb_agg(jsonb_build_object('id',c.id,'kind',c.kind,'version',c.version,'status',c.status,'body',CASE WHEN opc_content_allowed(p_actor_id,c.id) THEN c.body ELSE NULL END,'contentAvailable',opc_content_allowed(p_actor_id,c.id),'sourceContentId',c.source_content_id,'executionId',c.execution_id,'requestId',c.request_id,'createdAt',c.created_at) ORDER BY c.created_at) FROM opc_content_versions c WHERE c.work_item_id=i.work_item_id),'[]'::jsonb)) ORDER BY i.day,p.work_title)
     FROM opc_items i JOIN artifact_projects p ON p.id=i.work_item_id LEFT JOIN opc_item_edits ed ON ed.work_item_id=i.work_item_id JOIN runtime_sessions s ON s.actor_id=p_actor_id AND s.scope=jsonb_build_object('kind','work_item','projectId',a.project_id,'workItemId',i.work_item_id)
     WHERE i.account_project_id=a.project_id AND (p_from IS NULL OR coalesce(ed.day,i.day)>=p_from) AND (p_to IS NULL OR coalesce(ed.day,i.day)<=p_to)
      AND (q='%%' OR lower(coalesce(ed.title,p.work_title)) LIKE q OR (opc_source_allowed(p_actor_id,i.source_version_id) AND lower(coalesce(ed.brief,i.brief)) LIKE q))),'[]'::jsonb)) ORDER BY a.platform,a.account_key)
@@ -296,6 +355,33 @@ BEGIN
  RETURN jsonb_build_object('id',c.id,'kind',c.kind,'version',c.version,'status',c.status,'body',c.body);
 END $$;
 
+-- Re-establish the exact final script as the latest Runtime material before a
+-- video follow-up is admitted. Replays return the same immutable material;
+-- an explicit retry after a definite rejection uses a new request identity.
+CREATE OR REPLACE FUNCTION opc_video_material_prepare(p_actor_id uuid,p_work_item_id uuid,p_request_id uuid,p_source_script_id uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE i opc_items;s runtime_sessions;script opc_content_versions;binding opc_video_material_bindings;m runtime_scope_material;result jsonb;n bigint;material_request uuid:=gen_random_uuid();
+BEGIN
+ PERFORM bill2_actor(p_actor_id);
+ SELECT wi.* INTO i FROM opc_items wi JOIN artifact_projects p ON p.id=wi.work_item_id
+  WHERE wi.work_item_id=p_work_item_id AND p.actor_id=p_actor_id AND opc_source_allowed(p_actor_id,wi.source_version_id);
+ SELECT * INTO s FROM runtime_sessions WHERE actor_id=p_actor_id AND scope=jsonb_build_object('kind','work_item','projectId',i.account_project_id,'workItemId',i.work_item_id) FOR UPDATE;
+ SELECT * INTO script FROM opc_content_versions WHERE id=p_source_script_id AND actor_id=p_actor_id AND work_item_id=p_work_item_id AND kind='script' AND status='final';
+ IF i.work_item_id IS NULL OR s.id IS NULL OR script.id IS NULL OR NOT opc_content_allowed(p_actor_id,script.id) THEN RAISE EXCEPTION 'OPC_CONTENT_BINDING';END IF;
+ SELECT * INTO binding FROM opc_video_material_bindings WHERE actor_id=p_actor_id AND request_id=p_request_id;
+ IF binding.request_id IS NOT NULL THEN
+  IF binding.work_item_id<>p_work_item_id OR binding.source_script_id<>p_source_script_id OR binding.session_id<>s.id THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
+  SELECT * INTO m FROM runtime_scope_material WHERE session_id=binding.session_id AND revision=binding.material_revision;
+  IF m.session_id IS NULL OR m.revoked THEN RAISE EXCEPTION 'OPC_CONTENT_BINDING';END IF;
+  RETURN jsonb_build_object('sessionId',m.session_id,'revision',m.revision,'hash',m.content_hash);
+ END IF;
+ SELECT coalesce(max(revision),0) INTO n FROM runtime_scope_material WHERE session_id=s.id;
+ result:=runtime_material(p_actor_id,s.id,'save',material_request,n,jsonb_build_object('brief','已定稿口播稿：'||script.body,'material',coalesce(opc_profile(i.source_version_id)::text,''),'roundId',NULL));
+ INSERT INTO opc_video_material_bindings(actor_id,request_id,work_item_id,source_script_id,session_id,material_revision)
+  VALUES(p_actor_id,p_request_id,p_work_item_id,p_source_script_id,s.id,(result->>'revision')::bigint);
+ RETURN result;
+END $$;
+
 -- Validate the prepared follow-up before dispatch. Its frozen Runtime material
 -- must be the material revision created by this exact final script version.
 CREATE OR REPLACE FUNCTION opc_video_execution_check(p_actor_id uuid,p_work_item_id uuid,p_execution_id uuid,p_source_script_id uuid) RETURNS jsonb
@@ -308,12 +394,14 @@ BEGIN
  SELECT * INTO s FROM runtime_sessions WHERE actor_id=p_actor_id AND scope=jsonb_build_object('kind','work_item','projectId',i.account_project_id,'workItemId',i.work_item_id);
  SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND actor_id=p_actor_id AND session_id=s.id;
  SELECT * INTO script FROM opc_content_versions WHERE id=p_source_script_id AND actor_id=p_actor_id AND work_item_id=p_work_item_id AND kind='script' AND status='final';
- SELECT * INTO m FROM runtime_scope_material WHERE session_id=s.id AND request_id=script.request_id AND NOT revoked;
+ SELECT * INTO m FROM runtime_scope_material WHERE session_id=s.id AND revision=(e.payload#>>'{scopeMaterial,revision}')::bigint AND NOT revoked;
  IF i.work_item_id IS NULL OR e.id IS NULL OR script.id IS NULL OR script.execution_id IS NULL OR NOT runtime_history_available(script.execution_id)
   OR m.session_id IS NULL OR e.payload#>>'{scopeMaterial,sessionId}' IS DISTINCT FROM s.id::text
   OR e.payload#>>'{scopeMaterial,revision}' IS DISTINCT FROM m.revision::text
   OR e.payload#>>'{scopeMaterial,hash}' IS DISTINCT FROM m.content_hash
-  OR m.content->>'brief' IS DISTINCT FROM '已定稿口播稿：'||script.body THEN RAISE EXCEPTION 'OPC_CONTENT_BINDING';END IF;
+  OR m.content->>'brief' IS DISTINCT FROM '已定稿口播稿：'||script.body
+  OR NOT (m.request_id=script.request_id OR EXISTS(SELECT 1 FROM opc_video_material_bindings b WHERE b.actor_id=p_actor_id AND b.session_id=m.session_id AND b.material_revision=m.revision AND b.source_script_id=script.id))
+  THEN RAISE EXCEPTION 'OPC_CONTENT_BINDING';END IF;
  RETURN jsonb_build_object('valid',true,'materialRevision',m.revision);
 END $$;
 
@@ -336,8 +424,9 @@ BEGIN
  END IF;
  raw:=coalesce(e.result->>'body',e.primary_result->>'body');
  BEGIN package:=raw::jsonb;EXCEPTION WHEN others THEN RAISE EXCEPTION 'OPC_CONTENT_RESPONSE_INVALID';END;
- IF package-ARRAY['storyboard','editing']<>'{}' OR jsonb_typeof(package->'storyboard')<>'string' OR jsonb_typeof(package->'editing')<>'string'
-  OR char_length(package->>'storyboard') NOT BETWEEN 1 AND 20000 OR char_length(package->>'editing') NOT BETWEEN 1 AND 20000 THEN RAISE EXCEPTION 'OPC_CONTENT_RESPONSE_INVALID';END IF;
+ IF jsonb_typeof(package) IS DISTINCT FROM 'object' OR package-ARRAY['storyboard','editing'] IS DISTINCT FROM '{}'::jsonb
+  OR jsonb_typeof(package->'storyboard') IS DISTINCT FROM 'string' OR jsonb_typeof(package->'editing') IS DISTINCT FROM 'string'
+  OR coalesce(char_length(package->>'storyboard'),0) NOT BETWEEN 1 AND 20000 OR coalesce(char_length(package->>'editing'),0) NOT BETWEEN 1 AND 20000 THEN RAISE EXCEPTION 'OPC_CONTENT_RESPONSE_INVALID';END IF;
  SELECT coalesce(max(version),0) INTO n FROM opc_content_versions WHERE work_item_id=p_work_item_id AND kind='storyboard';IF n<>p_expected_storyboard_version THEN RAISE EXCEPTION 'OPC_VERSION_CONFLICT';END IF;
  INSERT INTO opc_content_versions(actor_id,work_item_id,kind,version,status,body,source_content_id,execution_id,request_id) VALUES(p_actor_id,p_work_item_id,'storyboard',n+1,'final',package->>'storyboard',script.id,e.id,p_request_id) RETURNING * INTO story;
  SELECT coalesce(max(version),0) INTO n FROM opc_content_versions WHERE work_item_id=p_work_item_id AND kind='editing';IF n<>p_expected_editing_version THEN RAISE EXCEPTION 'OPC_VERSION_CONFLICT';END IF;
@@ -345,7 +434,7 @@ BEGIN
  RETURN jsonb_build_object('storyboard',jsonb_build_object('id',story.id,'version',story.version),'editing',jsonb_build_object('id',editing.id,'version',editing.version));
 END $$;
 
-REVOKE ALL ON FUNCTION artifact_transition_before_b1(uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb),artifact_transition(uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb),opc_start_b1(uuid,uuid,text,text,uuid,text),opc_topic_draft_save(uuid,uuid,uuid,bigint,uuid,jsonb),opc_topic_draft_read(uuid,uuid),opc_handoff_b1(uuid,uuid,uuid,uuid,jsonb),opc_adopt_topics(uuid,uuid,uuid,bigint,uuid,jsonb,jsonb),opc_library(uuid,text,date,date),opc_library_edit(uuid,uuid,text,uuid,bigint,jsonb),opc_content_from_execution(uuid,uuid,uuid,bigint,text,text,uuid,uuid),opc_video_execution_check(uuid,uuid,uuid,uuid),opc_video_package_from_execution(uuid,uuid,uuid,uuid,uuid,bigint,bigint) FROM PUBLIC,anon,authenticated,service_role;
-GRANT EXECUTE ON FUNCTION artifact_transition(uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb),opc_start_b1(uuid,uuid,text,text,uuid,text),opc_topic_draft_save(uuid,uuid,uuid,bigint,uuid,jsonb),opc_topic_draft_read(uuid,uuid),opc_handoff_b1(uuid,uuid,uuid,uuid,jsonb),opc_adopt_topics(uuid,uuid,uuid,bigint,uuid,jsonb,jsonb),opc_library(uuid,text,date,date),opc_library_edit(uuid,uuid,text,uuid,bigint,jsonb),opc_content_from_execution(uuid,uuid,uuid,bigint,text,text,uuid,uuid),opc_video_execution_check(uuid,uuid,uuid,uuid),opc_video_package_from_execution(uuid,uuid,uuid,uuid,uuid,bigint,bigint) TO service_role;
+REVOKE ALL ON FUNCTION artifact_transition_before_b1(uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb),artifact_transition(uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb),opc_start_b1(uuid,uuid,text,text,uuid,text),opc_topic_draft_save(uuid,uuid,uuid,bigint,uuid,jsonb),opc_topic_draft_read(uuid,uuid),opc_handoff_b1(uuid,uuid,uuid,uuid,jsonb),opc_adopt_topics(uuid,uuid,uuid,bigint,uuid,jsonb,jsonb),opc_content_allowed(uuid,uuid),runtime_material_allowed_before_b1(uuid,jsonb),runtime_material_allowed(uuid,jsonb),opc_library(uuid,text,date,date),opc_library_edit(uuid,uuid,text,uuid,bigint,jsonb),opc_content_from_execution(uuid,uuid,uuid,bigint,text,text,uuid,uuid),opc_video_material_prepare(uuid,uuid,uuid,uuid),opc_video_execution_check(uuid,uuid,uuid,uuid),opc_video_package_from_execution(uuid,uuid,uuid,uuid,uuid,bigint,bigint) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION artifact_transition(uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb),opc_start_b1(uuid,uuid,text,text,uuid,text),opc_topic_draft_save(uuid,uuid,uuid,bigint,uuid,jsonb),opc_topic_draft_read(uuid,uuid),opc_handoff_b1(uuid,uuid,uuid,uuid,jsonb),opc_adopt_topics(uuid,uuid,uuid,bigint,uuid,jsonb,jsonb),opc_library(uuid,text,date,date),opc_library_edit(uuid,uuid,text,uuid,bigint,jsonb),opc_content_from_execution(uuid,uuid,uuid,bigint,text,text,uuid,uuid),opc_video_material_prepare(uuid,uuid,uuid,uuid),opc_video_execution_check(uuid,uuid,uuid,uuid),opc_video_package_from_execution(uuid,uuid,uuid,uuid,uuid,bigint,bigint) TO service_role;
 
 COMMIT;

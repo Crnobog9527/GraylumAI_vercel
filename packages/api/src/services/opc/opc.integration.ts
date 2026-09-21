@@ -6959,9 +6959,46 @@ it("OPC: topic consent concurrency and source mismatch preserve the accepted int
   expect(await f.service.topicRead(f.d.draftId)).toEqual(accepted[0]);
 }, 120000);
 
+it("OPC: old publish and adoption replays cannot roll back the current business source", async () => {
+  const f = await publishedDraft();
+  const oldPublish = (await sql.query(
+    "select request_id::text,round_id::text,payload from artifact_requests where project_id=$1 and action='publish' order by request_id limit 1",
+    [f.d.projectId],
+  )).rows[0];
+  const adoptRequest = {
+    draftId: f.d.draftId,
+    requestId: randomUUID(),
+    expectedVersion: 0,
+    sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'replay-account', title: '旧定位选题', brief: '旧定位来源的完整选题简报', day: '2026-09-20' }],
+    accounts: [{ platform: 'x', account: 'replay-account', expectedRevision: null }],
+  };
+  await f.service.adoptTopics(adoptRequest);
+  const revised = await f.service.revise(f.d.draftId, randomUUID(), f.d.roundId);
+  const snapshot = await f.artifacts.read(f.d.projectId, revised.roundId);
+  await f.artifacts.execute({
+    action: 'publish', projectId: f.d.projectId, roundId: revised.roundId, requestId: randomUUID(),
+    expectedSteps: Object.fromEntries(Object.entries(snapshot.steps).map(([id, step]) => [id, { version: step.version, reviewVersion: step.reviewVersion }])),
+  });
+  const currentSource = (await f.service.read(f.d.draftId)).report.id as string;
+  expect(currentSource).not.toBe(f.sourceVersionId);
+  const state = async () => (await sql.query(
+    "select b.current_source_version_id::text source,b.revision::int revision from opc_businesses b join opc_draft_businesses db on db.business_id=b.id where db.draft_id=$1",
+    [f.d.draftId],
+  )).rows[0];
+  const beforeReplay = await state();
+  expect(beforeReplay.source).toBe(currentSource);
+  await f.artifacts.execute({
+    action: 'publish', projectId: f.d.projectId, roundId: oldPublish.round_id,
+    requestId: oldPublish.request_id, expectedSteps: oldPublish.payload.expectedSteps,
+  });
+  await f.service.adoptTopics(adoptRequest);
+  expect(await state()).toEqual(beforeReplay);
+}, 120000);
+
 it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the library and continues video work", async () => {
   const f = await publishedDraft();
-  await planFixtureModel(f.moduleId);
+  const modelId = await planFixtureModel(f.moduleId);
   const seed = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'existing-account', title: '原工作', brief: '原有账号项目', day: '2026-09-20' }] });
   await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: seed.planId, accounts: [{ platform: 'x', account: 'existing-account', expectedRevision: null }] });
@@ -7045,7 +7082,19 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     await recoveryTab.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿', exact: true }).waitFor();
     await recoveryTab.close();
     const library = await f.service.library({ search: '资料库修订标题', from: null, to: null });
-    expect(library.businesses[0].accounts.flatMap((account: {items: unknown[]}) => account.items)).toHaveLength(1);
+    const [savedItem] = library.businesses[0].accounts.flatMap((account: {items: any[]}) => account.items);
+    expect(savedItem).toBeDefined();
+    const script = savedItem.content.find((entry: {kind: string}) => entry.kind === 'script');
+    const materialRevision = Number((await sql.query("select payload#>>'{scopeMaterial,revision}' revision from runtime_executions where id=$1", [script.executionId])).rows[0].revision);
+    await sql.query("select runtime_material($1,$2,'revoke',NULL,$3)", [f.actor, savedItem.sessionId, materialRevision]);
+    const withdrawn = await f.service.library({ search: '资料库修订标题', from: null, to: null });
+    const withdrawnItem = withdrawn.businesses[0].accounts.flatMap((account: {items: any[]}) => account.items)[0];
+    expect(withdrawnItem.content.map((entry: {contentAvailable: boolean}) => entry.contentAvailable)).toEqual([false, false, false]);
+    const { runtimeAdmissionService } = await import('../runtime/admission');
+    const admission = runtimeAdmissionService(f.user, admin, { account: 'local', costPerCall: '0.02', creditsPerUsd: '1000', multiplier: '1', maxCalls: 1, maxOutputTokens: 1000, inputBytes: 32000, historyItems: 20, searchEnabled: false });
+    const runsBefore = Number((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1', [f.actor])).rows[0].n);
+    await expect(admission.prepare({ sessionId: savedItem.sessionId, requestId: randomUUID(), input: '继续使用已撤回口播稿', selection: { kind: 'ordinary', modelId }, network: 'deny', sources: [] })).rejects.toThrow('RUNTIME_ADMISSION_DENIED');
+    expect(Number((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1', [f.actor])).rows[0].n)).toBe(runsBefore);
   } finally { await browser.close(); }
 }, 300000);
 
@@ -7180,10 +7229,21 @@ it("OPC: video package dispatch refuses a different frozen material and cancels 
     const packageExecution = (await sql.query('select state from runtime_executions where actor_id=$1 and session_id=$2 and request_id=$3', [f.actor, work.sessionId, sourceExecutionId])).rows[0];
     expect(packageExecution.state).toBe('cancelled');
     const content = (await f.service.library({ search: '绑定检查已改', from: null, to: null })).businesses
-      .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;content: Array<{kind: string}>}>}>}) => business.accounts.flatMap(account => account.items))
+      .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;content: Array<{id: string;kind: string}>}>}>}) => business.accounts.flatMap(account => account.items))
       .find((item: {workItemId: string}) => item.workItemId === work.workItemId).content;
-    expect(content.filter((entry: {kind: string}) => entry.kind === 'script')).toHaveLength(1);
+    const [sourceScript] = content.filter((entry: {kind: string}) => entry.kind === 'script');
+    expect(sourceScript).toBeDefined();
     expect(content.filter((entry: {kind: string}) => entry.kind === 'storyboard' || entry.kind === 'editing')).toHaveLength(0);
+    await page.reload();
+    const retry = page.getByRole('button', { name: '恢复对应分镜与剪辑建议', exact: true });
+    await retry.waitFor(); await retry.click();
+    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    await page.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿', exact: true }).waitFor();
+    const packageStates = (await sql.query("select state from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%' order by created_at", [f.actor, work.sessionId])).rows.map(row => row.state);
+    expect(packageStates).toEqual(['cancelled', 'completed']);
+    const completedPackage = (await sql.query("select id::text from runtime_executions where actor_id=$1 and session_id=$2 and state='completed' and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, work.sessionId])).rows[0].id;
+    await sql.query("update runtime_executions set result=jsonb_build_object('body','{}') where id=$1", [completedPackage]);
+    await expect(f.service.videoPackage({ workItemId: work.workItemId, requestId: randomUUID(), executionId: completedPackage, sourceScriptId: sourceScript.id, expectedStoryboardVersion: 1, expectedEditingVersion: 1 })).rejects.toThrow('OPC_CONTENT_RESPONSE_INVALID');
   } finally { releasePrepare?.(); await browser.close(); }
 }, 240000);
 

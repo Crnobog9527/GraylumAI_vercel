@@ -72,3 +72,8 @@ export const opcVideoExecutionCheck = z.object({
   executionId: uuid,
   sourceScriptId: uuid,
 }).strict();
+export const opcVideoMaterialPrepare = z.object({
+  workItemId: uuid,
+  requestId: uuid,
+  sourceScriptId: uuid,
+}).strict();
