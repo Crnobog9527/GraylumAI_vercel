@@ -396,12 +396,19 @@ export default function TopicWorkspacePage() {
     if (!executions || !candidate || pending || busy) return;
     const action = [...executions].reverse().find(e => e.state === 'completed' && parseAdoption(e.body ?? e.primaryBody));
     if (!action || adoptedExecution.current === action.executionId) return;
+    const alreadyAdopted = (read.data?.handoffs ?? []).some(
+      (handoff: { requestId?: string }) => handoff.requestId === action.executionId,
+    );
+    if (alreadyAdopted) {
+      adoptedExecution.current = action.executionId;
+      return;
+    }
     const ids = parseAdoption(action.body ?? action.primaryBody);
     if (!ids) return;
     adoptedExecution.current = action.executionId;
     void adoptCurrent(ids, action.executionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [executions, candidate, pending, busy]);
+  }, [executions, candidate, pending, busy, read.data?.handoffs]);
 
   if (read.isLoading || workspace.isLoading)
     return <main className="p-6">正在读取选题工作空间…</main>;

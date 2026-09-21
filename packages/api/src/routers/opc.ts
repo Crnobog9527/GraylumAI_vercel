@@ -19,6 +19,7 @@ import {
   opcLibraryEdit,
   opcContentFromExecution,
   opcVideoPackage,
+  opcVideoExecutionCheck,
 } from "../services/opc/service";
 const procedure = protectedProcedure.use(async ({ ctx, next }) => {
   // Remote access requires the explicit Staging target and server-side actor window.
@@ -141,6 +142,9 @@ export const opcRouter = router({
   saveVideoPackage: procedure
     .input(opcVideoPackage)
     .mutation(({ ctx, input }) => ctx.opc.videoPackage(input)),
+  checkVideoExecution: procedure
+    .input(opcVideoExecutionCheck)
+    .mutation(({ ctx, input }) => ctx.opc.videoExecutionCheck(input)),
   read: readProcedure
     .input(z.object({ draftId: z.string().uuid() }).strict())
     .query(async({ ctx, input }) => dedupeHandoffResults({...await ctx.opc.read(input.draftId),runtimeMode:ctx.stagingRead?"staging_test":"isolated"})),

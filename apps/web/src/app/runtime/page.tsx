@@ -8,6 +8,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { trpc } from '@/trpc/client';
 
 type VideoOperation={workItemId:string;script:{requestId:string;executionId:string;expectedVersion:number};followup:{requestId:string;input:string;selection:{kind:'skill';moduleId:string;revisionId:string};executionId?:string};package:{requestId:string;expectedStoryboardVersion:number;expectedEditingVersion:number};sourceScriptId?:string};
+type ContentVersion={id:string;kind:string;version:number;status:string;body:string|null;sourceContentId:string|null;executionId:string|null;requestId:string};
+const videoDefiniteRejections=new Set(['OPC_VERSION_CONFLICT','OPC_REQUEST_CONFLICT','OPC_CONTENT_DENIED','OPC_CONTENT_BINDING','OPC_CONTENT_RESPONSE_INVALID','OPC_CONTENT_SOURCE']);
 
 export default function RuntimePage(){
  const [sessionId,setSession]=useState(''),[input,setInput]=useState(''),[selection,setSelection]=useState(''),[error,setError]=useState('');
@@ -17,7 +19,7 @@ export default function RuntimePage(){
  const saved=trpc.opc.workResults.useQuery({sessionId},{enabled:Boolean(sessionId&&view.data?.scope?.kind==='work_item')});
  const library=trpc.opc.library.useQuery({search:'',from:null,to:null},{enabled:Boolean(sessionId&&view.data?.scope?.kind==='work_item')});
  const saveWork=trpc.opc.saveWorkResult.useMutation();
- const saveContent=trpc.opc.saveContentResult.useMutation(),savePackage=trpc.opc.saveVideoPackage.useMutation();
+ const saveContent=trpc.opc.saveContentResult.useMutation(),checkVideo=trpc.opc.checkVideoExecution.useMutation(),savePackage=trpc.opc.saveVideoPackage.useMutation();
  const start=trpc.runtime.start.useMutation(),prepare=trpc.runtime.prepare.useMutation(),execute=trpc.runtime.execute.useMutation(),cancel=trpc.runtime.cancel.useMutation();
  const [videoBusy,setVideoBusy]=useState(false);
  const busy=start.isPending||prepare.isPending||execute.isPending||videoBusy;
@@ -29,7 +31,7 @@ export default function RuntimePage(){
   for(const business of library.data?.businesses??[])for(const account of business.accounts??[])for(const item of account.items??[])if(item.workItemId===id)return {...item,businessName:business.name,platform:account.platform,account:account.account,stage:account.stage};
   return null;
  },[library.data,view.data?.scope]);
- const versions=(workItem?.content??[]) as Array<{id:string;kind:string;version:number;status:string;body:string}>;
+ const versions=(workItem?.content??[]) as ContentVersion[];
  const latest=(kind:string)=>versions.filter(v=>v.kind===kind).reduce((n,v)=>Math.max(n,v.version),0);
  useEffect(()=>{end.current?.scrollIntoView({block:'end'});},[view.data?.executions?.length,busy]);
  async function open(){setError('');try{
@@ -50,21 +52,24 @@ export default function RuntimePage(){
  function storeVideo(op:VideoOperation){localStorage.setItem(videoKey,JSON.stringify(op));}
  async function runVideo(initial:VideoOperation){
   if(!videoKey||videoBusy)return;setVideoBusy(true);setError('');
+  let active=initial;
   try{await navigator.locks.request(videoKey,async()=>{
-   const frozen=localStorage.getItem(videoKey);const op:VideoOperation=frozen?JSON.parse(frozen):initial;
+   const frozen=localStorage.getItem(videoKey);const op:VideoOperation=frozen?JSON.parse(frozen):initial;active=op;
    if(op.workItemId!==workItem?.workItemId)throw new Error('OPC_REQUEST_CONFLICT');storeVideo(op);
    if(!op.sourceScriptId){const script=await saveContent.mutateAsync({workItemId:op.workItemId,requestId:op.script.requestId,expectedVersion:op.script.expectedVersion,kind:'script',status:'final',executionId:op.script.executionId,sourceContentId:null});op.sourceScriptId=script.id;storeVideo(op);await library.refetch();}
    let packageExecutionId=op.followup.executionId;
    if(!packageExecutionId){const admitted=await prepare.mutateAsync({sessionId,requestId:op.followup.requestId,input:op.followup.input,selection:op.followup.selection,network:'deny',sources:[]});packageExecutionId=admitted.executionId;op.followup.executionId=packageExecutionId;storeVideo(op);}
    if(!packageExecutionId||!op.sourceScriptId)throw new Error('OPC_CONTENT_PENDING');
+   await checkVideo.mutateAsync({workItemId:op.workItemId,executionId:packageExecutionId,sourceScriptId:op.sourceScriptId});
    await execute.mutateAsync({executionId:packageExecutionId});
    await savePackage.mutateAsync({workItemId:op.workItemId,requestId:op.package.requestId,executionId:packageExecutionId,sourceScriptId:op.sourceScriptId,expectedStoryboardVersion:op.package.expectedStoryboardVersion,expectedEditingVersion:op.package.expectedEditingVersion});
    localStorage.setItem(videoKey+':completed:'+op.package.requestId,JSON.stringify(op));localStorage.removeItem(videoKey);await Promise.all([view.refetch(),library.refetch()]);
-  });}catch(cause){const message=cause instanceof Error?cause.message:'';setError(message.includes('OPC_CONTENT_RESPONSE_INVALID')?'分镜回复格式未通过保存校验，口播稿定稿已保留；请在原对话要求 Agent 重新整理。':'视频工作请求状态待核实。完整原请求已保留，刷新后会恢复同一次定稿与生成。');}finally{setVideoBusy(false);}
+  });}catch(cause){const message=cause instanceof Error?cause.message:'';let definite=videoDefiniteRejections.has(message);if(message==='OPC_CONTENT_BINDING'&&active.followup.executionId)try{await cancel.mutateAsync({executionId:active.followup.executionId});await view.refetch();}catch{definite=false;}if(definite){localStorage.setItem(videoKey+':rejected:'+active.package.requestId,JSON.stringify(active));localStorage.removeItem(videoKey);setError(message==='OPC_CONTENT_RESPONSE_INVALID'?'分镜回复格式未通过保存校验，口播稿定稿已保留；请在原对话要求 Agent 重新整理。':'原视频工作请求已明确拒绝（'+message+'），没有再次派发。请刷新后基于最新版本重试。');}else setError('视频工作请求状态待核实。完整原请求已保留；再次点击只会恢复这一次请求。');}finally{setVideoBusy(false);}
  }
  async function finalizeAndContinue(executionId:string){
-  if(!workItem||!choices.data)return;const skill=choices.data.skills.find(s=>'skill:'+s.moduleId===activeSelection);if(!skill){setError('请选择当前选题可用的 Skill，再定稿口播稿。');return;}
-  const op:VideoOperation={workItemId:workItem.workItemId,script:{requestId:crypto.randomUUID(),executionId,expectedVersion:latest('script')},followup:{requestId:crypto.randomUUID(),input:'[OPC_VIDEO_PACKAGE_V1] 基于资料中已定稿的口播稿，直接给出对应分镜和剪辑建议。只返回严格 JSON 对象，且只含 storyboard 与 editing 两个字符串字段；不要生成图片、视频或执行发布。',selection:{kind:'skill',moduleId:skill.moduleId,revisionId:skill.revisionId}},package:{requestId:crypto.randomUUID(),expectedStoryboardVersion:latest('storyboard'),expectedEditingVersion:latest('editing')}};storeVideo(op);await runVideo(op);
+  if(!workItem||!choices.data)return;const frozen=videoKey?localStorage.getItem(videoKey):null;if(frozen){await runVideo(JSON.parse(frozen));return;}const skill=choices.data.skills.find(s=>'skill:'+s.moduleId===activeSelection);if(!skill){setError('请选择当前选题可用的 Skill，再定稿口播稿。');return;}
+  const existing=versions.find(v=>v.kind==='script'&&v.status==='final'&&v.executionId===executionId);
+  const op:VideoOperation={workItemId:workItem.workItemId,script:{requestId:existing?.requestId??executionId,executionId,expectedVersion:existing?existing.version-1:latest('script')},followup:{requestId:executionId,input:'[OPC_VIDEO_PACKAGE_V1] 基于资料中已定稿的口播稿，直接给出对应分镜和剪辑建议。只返回严格 JSON 对象，且只含 storyboard 与 editing 两个字符串字段；不要生成图片、视频或执行发布。',selection:{kind:'skill',moduleId:skill.moduleId,revisionId:skill.revisionId}},package:{requestId:executionId,expectedStoryboardVersion:latest('storyboard'),expectedEditingVersion:latest('editing')},...(existing?{sourceScriptId:existing.id}:{})};await runVideo(op);
  }
  useEffect(()=>{if(!videoKey||videoAttempt.current||!workItem||!view.data)return;const raw=localStorage.getItem(videoKey);if(!raw)return;videoAttempt.current=true;void runVideo(JSON.parse(raw));
  // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -86,7 +91,7 @@ export default function RuntimePage(){
     <div className="flex items-start gap-3"><div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-[var(--bg-primary)]"><Bot className="h-4 w-4"/></div><div className="min-w-0 max-w-[85%] rounded-2xl rounded-bl-sm border border-[var(--border-primary)] bg-[var(--bg-secondary)] px-4 py-3">
      <p className="whitespace-pre-wrap break-words">{e.contentAvailable?(e.body??e.primaryBody??'正在核实结果，请保留原任务。'):'来源已不可用，暂不展示此内容。'}</p>
      {e.primaryBody&&!e.organizerComplete&&<p role="status" className="mt-2 text-sm">主回复已保存，附属整理未完成。</p>}
-     {view.data?.scope?.kind==='work_item'&&e.state==='completed'&&e.skillExecution&&<div className="mt-3 flex flex-wrap gap-2"><Button disabled={busy||!workItem} onClick={()=>finalizeAndContinue(e.executionId)}>定稿口播稿并生成分镜与剪辑建议</Button><Button variant="outline" disabled={saveWork.isPending} onClick={async()=>{try{await saveWork.mutateAsync({executionId:e.executionId});await saved.refetch();}catch{setError('这条记录尚不能保存为普通 Skill 成果。');}}}>另存普通成果</Button></div>}
+     {view.data?.scope?.kind==='work_item'&&e.state==='completed'&&e.skillExecution&&<div className="mt-3 flex flex-wrap gap-2">{!versions.some(v=>v.kind==='storyboard'&&v.sourceContentId===versions.find(s=>s.kind==='script'&&s.executionId===e.executionId)?.id)&&<Button disabled={busy||!workItem} onClick={()=>finalizeAndContinue(e.executionId)}>{versions.some(v=>v.kind==='script'&&v.executionId===e.executionId)?'恢复对应分镜与剪辑建议':'定稿口播稿并生成分镜与剪辑建议'}</Button>}<Button variant="outline" disabled={saveWork.isPending} onClick={async()=>{try{await saveWork.mutateAsync({executionId:e.executionId});await saved.refetch();}catch{setError('这条记录尚不能保存为普通 Skill 成果。');}}}>另存普通成果</Button></div>}
      {e.state==='cancelled'&&<p role="status" className="mt-2 text-sm">已取消剩余执行，保留原记录。</p>}
      {e.state==='cost_pending'&&<p role="status" className="mt-2 text-sm">费用待核实；恢复只核对原调用。</p>}
      {e.needsTask&&<p className="mt-2 text-sm">当前入口暂不支持这个 Skill 的任务选择。可取消剩余执行后使用普通对话。</p>}

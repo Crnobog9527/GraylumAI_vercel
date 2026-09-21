@@ -67,3 +67,8 @@ export const opcVideoPackage = z.object({
   expectedStoryboardVersion: z.number().int().nonnegative(),
   expectedEditingVersion: z.number().int().nonnegative(),
 }).strict();
+export const opcVideoExecutionCheck = z.object({
+  workItemId: uuid,
+  executionId: uuid,
+  sourceScriptId: uuid,
+}).strict();

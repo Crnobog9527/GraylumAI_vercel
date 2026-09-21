@@ -6969,6 +6969,9 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
   const path = '/positioning/' + f.d.draftId + '/topics';
   let lostAdoption = 0;
   try {
+    const homeLibrary = page.waitForResponse(response => response.url().includes('opc.library'));
+    await page.goto(process.env.V3_LOCAL_APP + '/'); await homeLibrary;
+    expect(await page.getByRole('heading', { name: '先完成正式定位', exact: true }).count()).toBe(0);
     await page.goto(process.env.V3_LOCAL_APP + path);
     await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
     await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).waitFor({ timeout: 60000 });
@@ -7021,11 +7024,26 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     await page.getByLabel('对话方式').selectOption({ index: 1 });
     await page.getByLabel('消息', { exact: true }).fill('请和我讨论这条视频的口播稿。');
     await page.getByRole('button', { name: '发送', exact: true }).click();
-    await page.getByRole('button', { name: '定稿口播稿并生成分镜与剪辑建议', exact: true }).waitFor({ timeout: 60000 });
-    await page.getByRole('button', { name: '定稿口播稿并生成分镜与剪辑建议', exact: true }).click();
-    await page.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
-    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿', exact: true }).waitFor();
-    await page.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿', exact: true }).waitFor();
+    const finalize = page.getByRole('button', { name: '定稿口播稿并生成分镜与剪辑建议', exact: true });
+    await finalize.waitFor({ timeout: 60000 });
+    let lostPackage = 0;
+    await page.route('**/api/trpc/opc.saveVideoPackage*', async route => {
+      if (lostPackage++) return route.continue();
+      const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort();
+    });
+    await finalize.click();
+    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('状态待核实');
+    const videoKey = 'opc-video-operation:' + new URL(page.url()).searchParams.get('session');
+    const frozenVideo = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
+    const recoveryTab = await context.newPage();
+    await recoveryTab.goto(page.url());
+    await expect.poll(() => recoveryTab.evaluate(key => localStorage.getItem(key), videoKey), { timeout: 60000 }).toBeNull();
+    const completedVideo = await recoveryTab.evaluate(({key,requestId}) => localStorage.getItem(key + ':completed:' + requestId), { key: videoKey, requestId: frozenVideo.package.requestId });
+    expect(JSON.parse(completedVideo!)).toEqual(frozenVideo);
+    await recoveryTab.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    await recoveryTab.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿', exact: true }).waitFor();
+    await recoveryTab.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿', exact: true }).waitFor();
+    await recoveryTab.close();
     const library = await f.service.library({ search: '资料库修订标题', from: null, to: null });
     expect(library.businesses[0].accounts.flatMap((account: {items: unknown[]}) => account.items)).toHaveLength(1);
   } finally { await browser.close(); }
@@ -7037,6 +7055,8 @@ it("OPC: B1 business scope, legacy handoff replay and library edits stay owned a
     "select business_id::text from opc_draft_businesses where draft_id=$1",
     [f.d.draftId],
   )).rows[0].business_id as string;
+  const publishedLibrary = await f.service.library({ search: "", from: null, to: null });
+  expect(publishedLibrary.businesses.find((entry: {businessId: string}) => entry.businessId === businessId).sourceAvailable).toBe(true);
   const shared = await f.service.start({
     requestId: randomUUID(), registration: f.registration, mode: "manual", businessId,
   });
@@ -7087,7 +7107,85 @@ it("OPC: B1 business scope, legacy handoff replay and library edits stay owned a
     requestId: randomUUID(), target: "item", targetId: item.workItemId, expectedRevision: edit.revision,
     patch: { title: "越权修改", brief: "不能写入其他用户的完整简报。", day: "2026-09-25" },
   })).rejects.toThrow("OPC_DENIED");
+
+  await sql.query("insert into opc_content_versions(actor_id,work_item_id,kind,version,status,body,request_id) values($1,$2,'brief',1,'final','撤回后不得读取的成果正文',$3)", [f.actor, item.workItemId, randomUUID()]);
+  await sql.query("update bill2_drafts set revoked=true where id=$1", [f.d.draftId]);
+  const revoked = await f.service.library({ search: "", from: null, to: null });
+  const hidden = revoked.businesses.flatMap((entry: {accounts: Array<{items: unknown[]}>}) => entry.accounts.flatMap(account => account.items))
+    .find((entry: {workItemId: string}) => entry.workItemId === item.workItemId);
+  expect(hidden).toMatchObject({ sourceAvailable: false, brief: null });
+  expect(hidden.content[0]).toMatchObject({ body: null, contentAvailable: false });
+  const hiddenSearch = await f.service.library({ search: "修订后的完整简报", from: null, to: null });
+  expect(hiddenSearch.businesses.flatMap((entry: {accounts: Array<{items: unknown[]}>}) => entry.accounts.flatMap(account => account.items))).toHaveLength(0);
+  await expect(f.service.libraryEdit({ ...editRequest, requestId: randomUUID(), expectedRevision: edit.revision })).rejects.toThrow("OPC_DENIED");
 }, 120000);
+
+it("OPC: natural-language adoption stays complete after refresh and permits the next turn", async () => {
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const { browser, page } = await planBrowser(f);
+  const path = '/positioning/' + f.d.draftId + '/topics';
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + path);
+    await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
+    await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).waitFor({ timeout: 60000 });
+    await page.getByLabel('消息', { exact: true }).fill('采用第一条选题');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await expect.poll(async () => (await f.service.read(f.d.draftId)).handoffs.length, { timeout: 60000 }).toBe(1);
+    const before = await f.service.read(f.d.draftId);
+    await page.reload();
+    await page.getByLabel('消息', { exact: true }).waitFor();
+    expect(await page.getByRole('button', { name: '恢复原请求', exact: true }).count()).toBe(0);
+    expect((await page.getByRole('alert').allTextContents()).join(' ')).not.toContain('原请求身份');
+    await page.getByLabel('消息', { exact: true }).fill('请继续修改标题');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await expect.poll(async () => (await f.service.topicDraftRead(f.d.draftId)).version, { timeout: 60000 }).toBe(2);
+    const after = await f.service.read(f.d.draftId);
+    expect(after.handoffs).toEqual(before.handoffs);
+    expect(after.plans).toEqual(before.plans);
+  } finally { await browser.close(); }
+}, 240000);
+
+it("OPC: video package dispatch refuses a different frozen material and cancels before model execution", async () => {
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'binding-account', title: '绑定检查', brief: '验证口播稿与分镜来源绑定。', day: '2026-09-25' }] });
+  const [work] = await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId, accounts: [{ platform: 'x', account: 'binding-account', expectedRevision: null }] });
+  const { browser, page } = await planBrowser(f);
+  let releasePrepare!: () => void;
+  let packagePrepare = false;
+  const gate = new Promise<void>(resolve => { releasePrepare = resolve; });
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    await page.getByLabel('对话方式').selectOption({ index: 1 });
+    await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    const finalize = page.getByRole('button', { name: '定稿口播稿并生成分镜与剪辑建议', exact: true });
+    await finalize.waitFor({ timeout: 60000 });
+    const sourceExecutionId = (await sql.query("select id::text from runtime_executions where actor_id=$1 and session_id=$2 and state='completed' order by created_at desc limit 1", [f.actor, work.sessionId])).rows[0].id;
+    await page.route('**/api/trpc/runtime.prepare*', async route => {
+      if (!(route.request().postData() ?? '').includes('OPC_VIDEO_PACKAGE_V1')) return route.continue();
+      packagePrepare = true; await gate; await route.continue();
+    });
+    const click = finalize.click();
+    await expect.poll(() => packagePrepare, { timeout: 30000 }).toBe(true);
+    const current = (await f.service.library({ search: '绑定检查', from: null, to: null })).businesses
+      .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;revision: number}>}>}) => business.accounts.flatMap(account => account.items))
+      .find((item: {workItemId: string}) => item.workItemId === work.workItemId);
+    await f.service.libraryEdit({ requestId: randomUUID(), target: 'item', targetId: work.workItemId, expectedRevision: current.revision,
+      patch: { title: '绑定检查已改', brief: '此修改产生另一份冻结 material。', day: '2026-09-25' } });
+    releasePrepare(); await click;
+    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('OPC_CONTENT_BINDING');
+    const packageExecution = (await sql.query('select state from runtime_executions where actor_id=$1 and session_id=$2 and request_id=$3', [f.actor, work.sessionId, sourceExecutionId])).rows[0];
+    expect(packageExecution.state).toBe('cancelled');
+    const content = (await f.service.library({ search: '绑定检查已改', from: null, to: null })).businesses
+      .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;content: Array<{kind: string}>}>}>}) => business.accounts.flatMap(account => account.items))
+      .find((item: {workItemId: string}) => item.workItemId === work.workItemId).content;
+    expect(content.filter((entry: {kind: string}) => entry.kind === 'script')).toHaveLength(1);
+    expect(content.filter((entry: {kind: string}) => entry.kind === 'storyboard' || entry.kind === 'editing')).toHaveLength(0);
+  } finally { releasePrepare?.(); await browser.close(); }
+}, 240000);
 
 it.each([[2, "same"], [2, "draft"], [2, "published"], [3, "published"]] as const)("OPC: old v%i executed lost reply restores its original source across revision %s", async (version, revise) => {
   const f = await completed(3);

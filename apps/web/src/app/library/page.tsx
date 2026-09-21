@@ -7,21 +7,21 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { trpc } from '@/trpc/client';
 
-type ContentVersion={id:string;kind:'brief'|'script'|'storyboard'|'editing';version:number;status:'draft'|'final';body:string;createdAt:string};
-type Item={workItemId:string;title:string;brief:string;day:string;revision:number;sessionId:string;content:ContentVersion[]};
+type ContentVersion={id:string;kind:'brief'|'script'|'storyboard'|'editing';version:number;status:'draft'|'final';body:string|null;contentAvailable:boolean;sourceContentId:string|null;executionId:string|null;requestId:string;createdAt:string};
+type Item={workItemId:string;title:string;brief:string|null;day:string;revision:number;sessionId:string;sourceAvailable:boolean;content:ContentVersion[]};
 type Account={projectId:string;platform:string;account:string;stage:'unknown'|'starting'|'growing'|'mature';revision:number;items:Item[]};
 type Business={businessId:string;name:string;revision:number;sourceAvailable:boolean;accounts:Account[]};
 const stageLabel={unknown:'阶段待确认',starting:'起步期',growing:'发展期',mature:'成熟期'} as const;
 
 function ItemCard({item,account,onSaved}:{item:Item;account:Account;onSaved:()=>Promise<unknown>}){
- const [editing,setEditing]=useState(false),[title,setTitle]=useState(item.title),[brief,setBrief]=useState(item.brief),[day,setDay]=useState(item.day),[error,setError]=useState('');
+ const [editing,setEditing]=useState(false),[title,setTitle]=useState(item.title),[brief,setBrief]=useState(item.brief??''),[day,setDay]=useState(item.day),[error,setError]=useState('');
  const edit=trpc.opc.editLibrary.useMutation();
  async function save(){setError('');try{await edit.mutateAsync({requestId:crypto.randomUUID(),target:'item',targetId:item.workItemId,expectedRevision:item.revision,patch:{title:title.trim(),brief:brief.trim(),day}});setEditing(false);await onSaved();}catch{setError('保存状态待核实。请刷新资料库读取当前版本，不要覆盖新版本。');}}
  return <article className="rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-4">
   {editing?<div className="space-y-3"><input aria-label="选题标题" value={title} maxLength={160} onChange={e=>setTitle(e.target.value)} className="w-full rounded border bg-[var(--bg-secondary)] p-2"/><Textarea aria-label="完整选题简报" value={brief} maxLength={2000} onChange={e=>setBrief(e.target.value)}/><input aria-label="时间节点" type="date" value={day} onChange={e=>setDay(e.target.value)} className="rounded border bg-[var(--bg-secondary)] p-2"/><div className="flex gap-2"><Button size="sm" disabled={edit.isPending||!title.trim()||!brief.trim()||!day} onClick={save}>保存修改</Button><Button size="sm" variant="ghost" onClick={()=>setEditing(false)}>取消</Button></div></div>:<>
-   <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs text-[var(--text-tertiary)]">{item.day} · {account.platform}/{account.account}</p><h4 className="mt-1 font-medium">{item.title}</h4></div><div className="flex gap-2"><Button size="sm" variant="outline" onClick={()=>setEditing(true)}>直接编辑</Button><Link className="rounded-md bg-[var(--color-primary)] px-3 py-2 text-sm text-[var(--bg-primary)]" href={'/runtime?session='+item.sessionId}>继续工作</Link></div></div>
-   <p className="mt-3 whitespace-pre-wrap text-sm text-[var(--text-secondary)]">{item.brief}</p>
-   {item.content.length>0&&<details className="mt-3"><summary className="cursor-pointer text-sm">成果与历史 · {item.content.length} 个版本</summary><div className="mt-2 space-y-2">{item.content.map(content=><div key={content.id} className="rounded-lg bg-[var(--bg-secondary)] p-3 text-sm"><strong>{content.kind==='script'?'口播稿':content.kind==='storyboard'?'分镜':content.kind==='editing'?'剪辑建议':'简报'} v{content.version} · {content.status==='final'?'已定稿':'草稿'}</strong><p className="mt-1 whitespace-pre-wrap">{content.body}</p></div>)}</div></details>}
+   <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs text-[var(--text-tertiary)]">{item.day} · {account.platform}/{account.account}</p><h4 className="mt-1 font-medium">{item.title}</h4></div>{item.sourceAvailable&&<div className="flex gap-2"><Button size="sm" variant="outline" onClick={()=>setEditing(true)}>直接编辑</Button><Link className="rounded-md bg-[var(--color-primary)] px-3 py-2 text-sm text-[var(--bg-primary)]" href={'/runtime?session='+item.sessionId}>继续工作</Link></div>}</div>
+   {item.sourceAvailable?<p className="mt-3 whitespace-pre-wrap text-sm text-[var(--text-secondary)]">{item.brief}</p>:<p className="mt-3 text-sm text-[var(--text-tertiary)]">来源已不可用，正文暂不可读。</p>}
+   {item.content.length>0&&<details className="mt-3"><summary className="cursor-pointer text-sm">成果与历史 · {item.content.length} 个版本</summary><div className="mt-2 space-y-2">{item.content.map(content=><div key={content.id} className="rounded-lg bg-[var(--bg-secondary)] p-3 text-sm"><strong>{content.kind==='script'?'口播稿':content.kind==='storyboard'?'分镜':content.kind==='editing'?'剪辑建议':'简报'} v{content.version} · {content.status==='final'?'已定稿':'草稿'}</strong><p className="mt-1 whitespace-pre-wrap">{content.contentAvailable?content.body:'该版本来源或历史已不可用，正文暂不可读。'}</p></div>)}</div></details>}
   </>}{error&&<p role="alert" className="mt-2 text-sm">{error}</p>}
  </article>;
 }

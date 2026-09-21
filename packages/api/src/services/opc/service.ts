@@ -7,8 +7,8 @@ import { workbenchService } from "../artifacts/workbench";
 import type {StagingPolicy} from '../runtime/stagingPolicy';
 import { displayedQuestion, isOpeningInput, questionLabel, questionTask, reachedQuestions } from "./questions";
 import { elicitFieldSpecs } from "../../shared/opcMethodPolicy";
-import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcVideoPackage } from "../../shared/opcRequests";
-export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcVideoPackage } from "../../shared/opcRequests";
+import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcVideoPackage, opcVideoExecutionCheck } from "../../shared/opcRequests";
+export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcVideoPackage, opcVideoExecutionCheck } from "../../shared/opcRequests";
 const uuid = z.string().uuid();
 export const opcStart = z
   .object({
@@ -494,6 +494,14 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         p_source_script_id: v.sourceScriptId,
         p_expected_storyboard_version: v.expectedStoryboardVersion,
         p_expected_editing_version: v.expectedEditingVersion,
+      });
+    },
+    videoExecutionCheck: (value: unknown) => {
+      const v = opcVideoExecutionCheck.parse(value);
+      return rpc("opc_video_execution_check", {
+        p_work_item_id: v.workItemId,
+        p_execution_id: v.executionId,
+        p_source_script_id: v.sourceScriptId,
       });
     },
     savePlan: async (value: unknown) => {
