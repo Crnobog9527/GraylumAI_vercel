@@ -2460,7 +2460,7 @@ export default function PositioningDraft({
           确认正式定位只会发布你的定位版本，不会调用模型。生成第一周选题是下一步的独立动作：你明确选择“继续生成”后才会调用模型并按额度计费；候选不会自动保存为计划，也不会自动创建账号或选题。
         </p>
       )}
-      {!planView && d.report?.available && <Link className="block underline" href={`/positioning/${draftId}/plan`}>进入第一周计划</Link>}
+      {!planView && d.report?.available && <Link className="block underline" href={`/positioning/${draftId}/topics`}>进入选题工作对话</Link>}
       {planView && <Link className="block underline" href={`/positioning/${draftId}`}>返回定位与导师对话</Link>}
       {planView && !d.report?.available && <p role="status">请先确认正式定位，再制定第一周计划。原定位和对话仍保留。</p>}
           {planView && retainedPlan && (

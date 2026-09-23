@@ -15,10 +15,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, Bot, Loader2, Send, User } from 'lucide-react';
+import { ArrowLeft, ArrowUp, Bot, Loader2, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { WorkspaceFrame } from '@/components/opc/workspace-frame';
+import composerStyles from '@/components/opc/work-composer.module.css';
 import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 
@@ -210,8 +212,8 @@ export default function TopicWorkspacePage() {
     for (const item of adopted) ids.add(item.itemId);
     return ids;
   }, [read.data?.handoffs, adopted]);
-  const handoffItems = [...(read.data?.handoffs??[]).flatMap((h:{result?:Array<{itemId:string;workItemId:string}>})=>h.result??[]),...adopted];
-  function topicLink(item:PlanItem){const saved=handoffItems.find((h:{itemId:string})=>h.itemId===item.id);return saved?'/library?item='+saved.workItemId:undefined;}
+  const handoffItems = [...(read.data?.handoffs??[]).flatMap((h:{result?:Array<{itemId:string;workItemId:string;sessionId:string}>})=>h.result??[]),...adopted];
+  function topicLink(item:PlanItem){const saved=handoffItems.find((h:{itemId:string;sessionId:string})=>h.itemId===item.id);return saved?'/runtime?session='+saved.sessionId+'&continue=1':undefined;}
   const candidateOpen = candidateExpanded ?? !candidate?.body.some(item => adoptedItemIds.has(item.id));
   /**
    * Account identities come from the owned account list, not from the draft
@@ -311,6 +313,7 @@ export default function TopicWorkspacePage() {
             const result = await handoff.mutateAsync(op.request);
             setAdopted(result as typeof adopted);
             setCandidateOpen(false);
+            setPanelOpen(false);
             setNotice('已采用所选内容并保存到资料库。');
           } else if (op.kind === 'draft') {
             const result = await saveDraft.mutateAsync(op.request);
@@ -322,7 +325,8 @@ export default function TopicWorkspacePage() {
             const acceptedIds = new Set((result.items as typeof adopted).map(item => item.itemId));
             setSelectedItems(current => current.filter(id => !acceptedIds.has(id)));
             setCandidateOpen(false);
-            setNotice('已采用所选内容并保存到资料库。你可以在资料库继续任一具体内容。');
+            setPanelOpen(false);
+            setNotice('已采用所选内容并保存到资料库。可从下方进入对应内容工作。');
           }
           localStorage.setItem(storageKey + ':completed:' + op.request.requestId, JSON.stringify(op));
           localStorage.removeItem(storageKey);
@@ -430,7 +434,7 @@ export default function TopicWorkspacePage() {
   // Clear natural-language adoption from the Agent uses the same atomic action
   // as the card. Vague agreement never produces the action block and is inert.
   useEffect(() => {
-    if (!executions || !candidate || pending || busy) return;
+    if (!executions || !candidate || pending || busy || accountList.isFetching || !accountList.data || accountList.error) return;
     const action = [...executions].reverse().find(e => e.state === 'completed' && parseAdoption(e.body ?? e.primaryBody));
     if (!action || adoptedExecution.current === action.executionId) return;
     const alreadyAdopted = (read.data?.handoffs ?? []).some(
@@ -442,10 +446,12 @@ export default function TopicWorkspacePage() {
     }
     const ids = parseAdoption(action.body ?? action.primaryBody);
     if (!ids) return;
+    const request = adoptionRequest(candidate.body, ids.filter(id => !adoptedItemIds.has(id)), action.executionId);
+    if (!request) return;
     adoptedExecution.current = action.executionId;
-    void adoptCurrent(ids, action.executionId);
+    void perform({ kind: 'adoptTopics', request });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [executions, candidate, pending, busy, read.data?.handoffs]);
+  }, [executions, candidate, pending, busy, read.data?.handoffs, accountList.data, accountList.isFetching, accountList.error]);
 
   if (read.isLoading || workspace.isLoading)
     return <main className="p-6">正在读取选题工作空间…</main>;
@@ -463,8 +469,8 @@ export default function TopicWorkspacePage() {
   const sourceAvailable = workspace.data?.sourceAllowed !== false;
 
   return (
-    <main className={"flex h-dvh min-h-0 flex-col overflow-y-auto bg-[var(--bg-primary)] text-[var(--text-primary)] "+(panelOpen?"lg:pr-[32rem]":"")}>
-      <header className="flex h-16 shrink-0 items-center justify-between border-b border-[var(--border-primary)] px-4 sm:px-6">
+    <WorkspaceFrame area="topics"><main className={"flex h-full min-h-0 flex-col overflow-y-auto bg-[var(--bg-primary)] text-[var(--text-primary)] "+(panelOpen?"lg:pr-[32rem]":"")}>
+      <header className="flex h-16 shrink-0 items-center justify-between border-b px-4 sm:px-6" style={{borderColor:'#ededed'}}>
         <div className="flex items-center gap-3">
           <Link className="underline" href={`/positioning/${draftId}`}>
             <ArrowLeft className="h-4 w-4" />
@@ -528,7 +534,7 @@ export default function TopicWorkspacePage() {
                 <article key={e.executionId} className="space-y-3">
                   {e.input && (
                     <div className="flex justify-end gap-3">
-                      <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-secondary)] px-4 py-3 text-[var(--bg-primary)]">
+                      <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-[#f5f5f6] px-4 py-3 text-[#303030]">
                         {e.input}
                       </p>
                       <User className="mt-3 h-5 w-5 shrink-0 text-[var(--text-secondary)]" />
@@ -538,7 +544,7 @@ export default function TopicWorkspacePage() {
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-[var(--bg-primary)]">
                       <Bot className="h-4 w-4" />
                     </div>
-                    <div className="min-w-0 max-w-[85%] rounded-2xl rounded-bl-sm border border-[var(--border-primary)] bg-[var(--bg-secondary)] px-4 py-3">
+                    <div className="min-w-0 max-w-[85%] px-1 py-2">
                       <p className="whitespace-pre-wrap break-words">
                         {e.contentAvailable ? replyProse(e.body ?? e.primaryBody) : '来源已不可用，暂不展示此内容。'}
                       </p>
@@ -572,6 +578,19 @@ export default function TopicWorkspacePage() {
                   </div>
                 </article>
               ))}
+              {candidate?.body.some(item => adoptedItemIds.has(item.id) && topicLink(item)) && (
+                <section aria-label="已采用的选题" className="rounded-xl border bg-[var(--bg-primary)] p-4" style={{borderColor:'#e9e9e9'}}>
+                  <h3 className="text-sm font-semibold">已采用的选题</h3>
+                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">继续会进入对应内容工作；未采用的选题仍留在本次讨论中。</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {candidate.body.filter(item => adoptedItemIds.has(item.id) && topicLink(item)).map(item => (
+                      <button key={item.id} type="button" onClick={()=>location.assign(topicLink(item)!)} className="rounded-lg border border-[var(--border-primary)] px-3 py-2 text-sm hover:bg-[var(--bg-secondary)]">
+                        继续 {item.title}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
               {pending && (
                 <div className="rounded-xl border border-[var(--border-primary)] p-4">
                   <p role="status" className="text-sm">
@@ -591,7 +610,7 @@ export default function TopicWorkspacePage() {
             </section>
           </div>
 
-          <Sheet open={panelOpen} onOpenChange={setPanelOpen} modal={false}><SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto bg-[var(--bg-primary)] text-[var(--text-primary)]"><SheetHeader><SheetTitle>选题与版本</SheetTitle></SheetHeader>
+          <Sheet open={panelOpen} onOpenChange={setPanelOpen} modal={false}><SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto bg-white text-[#262626]" style={{'--bg-primary':'#fff','--bg-secondary':'#f7f7f7','--text-primary':'#262626','--text-secondary':'#777','--text-tertiary':'#999','--border-primary':'#ededed','--color-primary':'#242424'} as React.CSSProperties}><SheetHeader><SheetTitle>选题与版本</SheetTitle></SheetHeader>
           {candidate && topicDraft.data && (
             <section className="shrink-0 border-t border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4">
               <div className="mx-auto max-w-4xl">
@@ -648,9 +667,9 @@ export default function TopicWorkspacePage() {
           <details className="p-4"><summary>讨论中的候选记录</summary>{executions?.filter(e=>e.contentAvailable&&e.state==='completed').map(e=>{const rows=parseCandidate(e.body??e.primaryBody);return rows?<article key={e.executionId} className="border-t py-3"><ul>{rows.map(item=><li key={item.id} className="py-2"><strong>{topicLink(item)?<Link href={topicLink(item)!} className="underline">{item.title}</Link>:item.title}</strong><p className="text-sm">{item.day} · {item.platform}/{item.account}</p><p className="text-sm whitespace-pre-wrap">{item.brief}</p></li>)}</ul></article>:null;})}</details>
           </SheetContent></Sheet>
 
-          <footer className="shrink-0 border-t border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4">
-            <div className="mx-auto max-w-3xl">
-              <div className="flex items-end gap-2 rounded-2xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-3 focus-within:border-[var(--color-primary)]">
+          <footer className={composerStyles.zone}>
+            <div className={composerStyles.wrap}>
+              <div className={composerStyles.composer}>
                 <Textarea
                   aria-label="消息"
                   placeholder="继续讨论、修改或要求生成第一周选题…"
@@ -663,19 +682,21 @@ export default function TopicWorkspacePage() {
                       if (!busy && !pending && input.trim() && !view.data?.activeExecution) void send();
                     }
                   }}
-                  className="min-h-12 max-h-36 flex-1 resize-none border-0 bg-transparent px-2 focus-visible:ring-0"
+                  className={composerStyles.textarea}
                   rows={2}
                 />
+                <div className={composerStyles.tools}><span className="text-xs text-[var(--text-tertiary)]">本次讨论绑定已确认的定位与选题方法</span>
                 <Button
                   aria-label="发送"
-                  className="h-10 w-10 shrink-0 rounded-xl p-0"
+                  className={composerStyles.send}
                   disabled={busy || Boolean(pending) || !input.trim() || Boolean(view.data?.activeExecution)}
                   onClick={() => send()}
                 >
-                  <Send className="h-4 w-4" />
+                  <ArrowUp className="h-4 w-4" />
                 </Button>
+                </div>
               </div>
-              <p className="mt-2 text-center text-xs text-[var(--text-tertiary)]">
+              <p className={composerStyles.note}>
                 候选会自动保存；只有你明确采用的具体选题才会进入资料库。
               </p>
             </div>
@@ -693,6 +714,6 @@ export default function TopicWorkspacePage() {
           {error}
         </p>
       )}
-    </main>
+    </main></WorkspaceFrame>
   );
 }

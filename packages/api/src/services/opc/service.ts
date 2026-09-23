@@ -7,8 +7,8 @@ import { workbenchService } from "../artifacts/workbench";
 import type {StagingPolicy} from '../runtime/stagingPolicy';
 import { displayedQuestion, isOpeningInput, questionLabel, questionTask, reachedQuestions } from "./questions";
 import { elicitFieldSpecs } from "../../shared/opcMethodPolicy";
-import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
-export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
+import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
+export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
 const uuid = z.string().uuid();
 export const opcStart = z
   .object({
@@ -502,6 +502,19 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         p_status: v.status,
         p_execution_id: v.executionId,
         p_source_content_id: v.sourceContentId,
+      });
+    },
+    contentManualSave: (value: unknown) => {
+      const v = opcContentManualSave.parse(value);
+      return rpc("opc_content_manual_save", {
+        p_work_item_id: v.workItemId,
+        p_request_id: v.requestId,
+        p_expected_version: v.expectedVersion,
+        p_source_content_id: v.sourceContentId,
+        p_kind: v.kind,
+        p_status: v.status,
+        p_title: v.title,
+        p_body: v.body,
       });
     },
     videoPackage: (value: unknown) => {

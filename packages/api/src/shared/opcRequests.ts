@@ -60,6 +60,16 @@ export const opcContentFromExecution = z.object({
   executionId: uuid,
   sourceContentId: uuid.nullable().default(null),
 }).strict();
+export const opcContentManualSave = z.object({
+  workItemId: uuid,
+  requestId: uuid,
+  expectedVersion: z.number().int().nonnegative(),
+  sourceContentId: uuid.nullable(),
+  kind: z.enum(["brief", "script"]),
+  status: z.enum(["draft", "final"]),
+  title: z.string().trim().min(1).max(160),
+  body: z.string().trim().min(1).max(20000),
+}).strict();
 export const opcVideoPackage = z.object({
   workItemId: uuid,
   requestId: uuid,

@@ -18,6 +18,7 @@ import {
   opcAdoptTopics,
   opcLibraryEdit,
   opcContentFromExecution,
+  opcContentManualSave,
   opcVideoPackage,
   opcVideoResults,
   opcVideoExecutionCheck,
@@ -141,6 +142,9 @@ export const opcRouter = router({
   saveContentResult: procedure
     .input(opcContentFromExecution)
     .mutation(({ ctx, input }) => ctx.opc.contentFromExecution(input)),
+  saveContentManual: procedure
+    .input(opcContentManualSave)
+    .mutation(({ ctx, input }) => ctx.opc.contentManualSave(input)),
   saveVideoPackage: procedure
     .input(opcVideoPackage)
     .mutation(({ ctx, input }) => ctx.opc.videoPackage(input)),

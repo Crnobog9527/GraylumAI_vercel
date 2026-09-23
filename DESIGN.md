@@ -41,6 +41,42 @@ components:
 
 # GraylumAI Design System
 
+## U0/U1 accepted workbench and U2 migration boundary
+
+The accepted workbench is a scoped light surface. The dark tokens above still
+describe the older application; they must not be applied over the accepted
+workbench or replaced globally as part of the first U2 slice. The workbench
+uses white conversation and result surfaces, a `#f7f7f7` surrounding canvas,
+`#262626` primary text, `#777` secondary text, and quiet `#ededed` borders.
+The small warm selection accent is reserved for the active work. The current
+component source is `apps/web/src/components/opc/workspace-frame.module.css`,
+`work-composer.module.css`, `content-editor.module.css`, and the library's
+`library.module.css`, adapted from the accepted local high-fidelity reference.
+These styles are scoped to the OPC workbench.
+
+On desktop the shell uses a 264px platform/account/work rail, a flexible
+conversation, an 8px gutter, and a 330px results rail. The global navigation
+contains Home, Chat, and Profile; Feature Marketplace belongs in the left
+work rail. The account strategy is a fixed entry under each account, while
+individual adopted topics link to their own Runtime session. At narrow widths
+the work rail and results rail become dismissible surfaces so the conversation
+and composer remain usable. A viewed library item does not change the active
+session; continuation is an explicit link to that item's session.
+The visible first-week entry opens the bound `/topics` conversation. Existing
+`/plan` URLs remain available for retained request recovery and old records;
+they are not the entry used for a new topic work session.
+
+U2 currently migrates the real topic-adoption, Runtime content-work, version
+save, history, and library return path. The right editor is bound to an owned
+work item and creates immutable server versions; local text caching only
+protects unsent or unsaved input. `draft`, `final`, and publication are distinct
+states. A definite conflict keeps the edit available for comparison, and an
+unknown outcome retains the original request for recovery. The broader
+positioning forms, Profile/Tickets, full Marketplace, and advanced composer
+interactions remain outside this slice and must not be presented as connected.
+Existing video work keeps its script, storyboard, and editing-history rail;
+the new article editor does not replace those owned versions.
+
 ## Overview
 
 ### Creative North Star
