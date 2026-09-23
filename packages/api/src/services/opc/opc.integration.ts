@@ -7249,6 +7249,19 @@ it("OPC: U2 manual article versions are owned, immutable and replayed once", asy
   const [metadataA,metadataB]=await Promise.all([f.service.libraryEdit(metadata),f.service.libraryEdit(metadata)]);
   expect(metadataA).toEqual(metadataB);
   expect(metadataA.revision).toBe(item.revision+1);
+  const videoItem=accounts.find((account:{account:string})=>account.account==='u2-account-a')?.items[0];
+  await f.service.libraryEdit({requestId:randomUUID(),target:'item',targetId:videoItem.workItemId,expectedRevision:videoItem.revision,
+    patch:{title:videoItem.title,brief:videoItem.brief,day:videoItem.day,contentType:'video'}});
+  await expect(f.service.contentManualSave({...request,workItemId:videoItem.workItemId,requestId:randomUUID(),
+    kind:'script',expectedVersion:0,sourceContentId:null})).rejects.toThrow('OPC_CONTENT_INVALID');
+  await sql.query('update bill2_drafts set revoked=true where id=$1',[f.d.draftId]);
+  const withdrawn=await f.service.library({search:'',from:null,to:null});
+  const withdrawnVersions=withdrawn.businesses.flatMap((business:{accounts:Array<{items:any[]}>})=>business.accounts.flatMap(account=>account.items))
+    .find((entry:{workItemId:string})=>entry.workItemId===second.workItemId).content;
+  expect(withdrawnVersions).toHaveLength(2);
+  expect(withdrawnVersions.every((version:{title:string|null;body:string|null;contentAvailable:boolean})=>
+    version.title===null&&version.body===null&&!version.contentAvailable)).toBe(true);
+  await expect(f.service.contentManualSave(request)).rejects.toThrow('OPC_CONTENT_DENIED');
 },120000);
 
 it("OPC: U2 browser adopts only second topic, edits a server version and returns from library", async()=>{

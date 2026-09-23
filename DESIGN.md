@@ -75,7 +75,9 @@ unknown outcome retains the original request for recovery. The broader
 positioning forms, Profile/Tickets, full Marketplace, and advanced composer
 interactions remain outside this slice and must not be presented as connected.
 Existing video work keeps its script, storyboard, and editing-history rail;
-the new article editor does not replace those owned versions.
+the new article editor does not replace those owned versions. Manual video
+script saves are not exposed by this slice: B1 video follow-ups require the
+existing admitted execution identity for the script source.
 
 ## Overview
 

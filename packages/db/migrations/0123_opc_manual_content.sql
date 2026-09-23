@@ -15,7 +15,9 @@ DECLARE i opc_items;s runtime_sessions;c opc_content_versions;previous opc_conte
  clean_body text:=trim(coalesce(p_body,''));
 BEGIN
  PERFORM bill2_actor(p_actor_id);
- IF p_kind NOT IN ('brief','script') OR p_status NOT IN ('draft','final')
+ -- Video scripts must retain an admitted execution for B1 provenance and
+ -- downstream storyboard/editing admission. U2 manual editing covers articles.
+ IF p_kind IS DISTINCT FROM 'brief' OR p_status NOT IN ('draft','final')
   OR char_length(clean_title) NOT BETWEEN 1 AND 160
   OR char_length(clean_body) NOT BETWEEN 1 AND 20000
   OR p_expected_version<0 THEN RAISE EXCEPTION 'OPC_CONTENT_INVALID';END IF;
@@ -26,7 +28,7 @@ BEGIN
   WHERE wi.work_item_id=p_work_item_id AND p.actor_id=p_actor_id
    AND opc_source_allowed(p_actor_id,wi.source_version_id) FOR UPDATE OF wi;
  IF i.work_item_id IS NULL THEN RAISE EXCEPTION 'OPC_CONTENT_DENIED';END IF;
- IF (p_kind='script') IS DISTINCT FROM (opc_item_content_type(p_work_item_id)='video')
+ IF opc_item_content_type(p_work_item_id) NOT IN ('article','image_text')
   THEN RAISE EXCEPTION 'OPC_CONTENT_INVALID';END IF;
  SELECT * INTO s FROM runtime_sessions WHERE actor_id=p_actor_id
   AND scope=jsonb_build_object('kind','work_item','projectId',i.account_project_id,'workItemId',i.work_item_id);
@@ -39,6 +41,7 @@ BEGIN
    OR c.status<>p_status OR c.title IS DISTINCT FROM clean_title
    OR c.body<>clean_body OR c.execution_id IS NOT NULL
    THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
+  IF NOT opc_content_allowed(p_actor_id,c.id) THEN RAISE EXCEPTION 'OPC_CONTENT_SOURCE';END IF;
  ELSE
   SELECT coalesce(max(version),0) INTO n FROM opc_content_versions
    WHERE work_item_id=p_work_item_id AND kind=p_kind;
@@ -88,7 +91,7 @@ BEGIN
     LIMIT 1),
    'items',coalesce((SELECT jsonb_agg(jsonb_build_object('workItemId',i.work_item_id,'title',coalesce(ed.title,p.work_title),'brief',CASE WHEN opc_source_allowed(p_actor_id,i.source_version_id) THEN coalesce(ed.brief,i.brief) ELSE NULL END,'day',coalesce(ed.day,i.day),'revision',coalesce(ed.revision,1),'contentType',opc_item_content_type(i.work_item_id),'sessionId',s.id,'sourceAvailable',opc_source_allowed(p_actor_id,i.source_version_id),
     'lastActivityAt',coalesce((SELECT max(c.created_at) FROM opc_content_versions c WHERE c.work_item_id=i.work_item_id),p.created_at),
-    'content',coalesce((SELECT jsonb_agg(jsonb_build_object('id',c.id,'kind',c.kind,'version',c.version,'status',c.status,'title',c.title,'body',CASE WHEN opc_content_allowed(p_actor_id,c.id) THEN c.body ELSE NULL END,'contentAvailable',opc_content_allowed(p_actor_id,c.id),'sourceContentId',c.source_content_id,'executionId',c.execution_id,'requestId',c.request_id,'createdAt',c.created_at) ORDER BY c.created_at) FROM opc_content_versions c WHERE c.work_item_id=i.work_item_id),'[]'::jsonb)) ORDER BY i.day,p.work_title)
+    'content',coalesce((SELECT jsonb_agg(jsonb_build_object('id',c.id,'kind',c.kind,'version',c.version,'status',c.status,'title',CASE WHEN opc_content_allowed(p_actor_id,c.id) THEN c.title ELSE NULL END,'body',CASE WHEN opc_content_allowed(p_actor_id,c.id) THEN c.body ELSE NULL END,'contentAvailable',opc_content_allowed(p_actor_id,c.id),'sourceContentId',c.source_content_id,'executionId',c.execution_id,'requestId',c.request_id,'createdAt',c.created_at) ORDER BY c.created_at) FROM opc_content_versions c WHERE c.work_item_id=i.work_item_id),'[]'::jsonb)) ORDER BY i.day,p.work_title)
     FROM opc_items i JOIN artifact_projects p ON p.id=i.work_item_id LEFT JOIN opc_item_edits ed ON ed.work_item_id=i.work_item_id JOIN runtime_sessions s ON s.actor_id=p_actor_id AND s.scope=jsonb_build_object('kind','work_item','projectId',a.project_id,'workItemId',i.work_item_id)
     WHERE i.account_project_id=a.project_id AND (p_from IS NULL OR coalesce(ed.day,i.day)>=p_from) AND (p_to IS NULL OR coalesce(ed.day,i.day)<=p_to)
      AND (q='%%' OR lower(coalesce(ed.title,p.work_title)) LIKE q OR (opc_source_allowed(p_actor_id,i.source_version_id) AND lower(coalesce(ed.brief,i.brief)) LIKE q))),'[]'::jsonb)) ORDER BY a.platform,a.account_key)
