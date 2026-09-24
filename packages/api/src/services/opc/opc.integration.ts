@@ -7561,6 +7561,25 @@ it("OPC: account strategy edits stay draft-scoped and publish only for the chose
   expect((await f.service.accountStrategyHistory(a.projectId)).map((v:{id:string})=>v.id)).toEqual([f.sourceVersionId]);
   const draft=await f.service.read(saved.draftId);
   expect(draft.information[f.flow.steps[0].id].values.goal).toMatchObject({value:'仅账号 A 的待确认新方向',status:'provisional'});
+  // The open library dialog must refresh its account binding after a save.
+  // A second edit in the same dialog must target the pending draft, not the
+  // previously published account snapshot.
+  const {browser:strategyBrowser,page:strategyPage}=await planBrowser(f);
+  try{
+    await strategyPage.goto(process.env.V3_LOCAL_APP+'/library');
+    await strategyPage.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/strategy-a/}).click();
+    await strategyPage.getByRole('button',{name:/x · strategy-a.*查看详情/}).click();
+    const dialog=strategyPage.getByRole('dialog',{name:'定位详情'});
+    for(const text of ['第一次在弹窗修改','第二次在同一弹窗修改']){
+      await dialog.getByRole('button',{name:'修改定位'}).click();
+      await dialog.getByRole('textbox').first().fill(text);
+      await dialog.getByRole('button',{name:'确认保存'}).click();
+      await dialog.getByRole('status').filter({hasText:'已保存到此账号的待确认定位草稿'}).waitFor();
+      await dialog.getByRole('button',{name:'修改定位'}).waitFor();
+    }
+    expect((await f.service.read(saved.draftId)).information[f.flow.steps[0].id].values.goal.value)
+      .toBe('第二次在同一弹窗修改');
+  }finally{await strategyBrowser.close();}
   for(const step of f.flow.steps){
     const state=(await f.service.read(saved.draftId)).snapshot.steps[step.id];
     await f.artifacts.execute({action:'save',projectId:draft.projectId,roundId:saved.roundId,requestId:randomUUID(),stepId:step.id,
@@ -7585,6 +7604,45 @@ it("OPC: account strategy edits stay draft-scoped and publish only for the chose
   expect((await sql.query('select source_version_id from opc_items where account_project_id=$1',[a.projectId])).rows[0].source_version_id).toBe(f.sourceVersionId);
   expect(initialA.sourceVersionId).toBe(f.sourceVersionId);
   await expect(other.service.accountStrategyHistory(a.projectId)).rejects.toThrow('OPC_DENIED');
+  const secondPackage=makePackage(f.pack.id,true);
+  const secondFlow=structuredClone(f.flow);
+  secondFlow.steps[0].title='新版账号问题';
+  secondFlow.steps[0].information=[...secondFlow.steps[0].information,
+    {id:'new_need',title:'新增问题',required:true,profileKey:'new_need'}];
+  secondFlow.report.sections[0].title='新版账号问题';
+  const secondRegistration='opc-account-next-'+randomUUID();
+  await publishSkillPackage(admin,f.owner,secondPackage);
+  await sql.query('update artifact_workflows set enabled=false where id=$1',[f.registration]);
+  await sql.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',
+    [secondRegistration,f.moduleId,secondPackage.id,secondPackage.revisionId,secondFlow,'账号定位新版']);
+  const secondStartRequest=randomUUID();
+  const secondDraft=await f.service.accountStrategyBegin(a.projectId,secondStartRequest);
+  expect(secondDraft.draftId).not.toBe(saved.draftId);
+  expect((await f.service.accountStrategyBegin(a.projectId,request.requestId)).draftId).toBe(saved.draftId);
+  const secondRead=await f.service.read(secondDraft.draftId);
+  expect(secondRead.snapshot.workflow.steps[0].title).toBe('新版账号问题');
+  expect(secondRead.information[secondFlow.steps[0].id].schema.map((field:{title:string})=>field.title)).toContain('新增问题');
+  expect((await f.service.accountStrategyHistory(a.projectId)).map((v:{id:string})=>v.id))
+    .toEqual([nowA.sourceVersionId,f.sourceVersionId]);
+  const secondRoundId=secondDraft.roundId;
+  for(const step of secondFlow.steps){
+    const state=(await f.service.read(secondDraft.draftId)).snapshot.steps[step.id];
+    await f.artifacts.execute({action:'save',projectId:secondRead.projectId,roundId:secondRoundId,requestId:randomUUID(),stepId:step.id,
+      body:'用户核对的新版账号定位 '+step.title,evidenceIds:[],expectedVersion:state.version});
+    const next=(await f.service.read(secondDraft.draftId)).snapshot.steps[step.id];
+    const values=Object.fromEntries(step.information!.map(field=>[field.id,{status:'confirmed',nature:'decision',value:'用户确认 '+field.title}]));
+    await f.service.information({draftId:secondDraft.draftId,stepId:step.id,requestId:randomUUID(),expectedVersion:next.version,values});
+    const confirmed=(await f.service.read(secondDraft.draftId)).snapshot.steps[step.id];
+    await f.artifacts.execute({action:'confirm',projectId:secondRead.projectId,roundId:secondRoundId,requestId:randomUUID(),stepId:step.id,
+      expectedVersion:confirmed.version,expectedReviewVersion:confirmed.reviewVersion});
+  }
+  const secondReady=(await f.service.read(secondDraft.draftId)).snapshot;
+  await f.artifacts.execute({action:'publish',projectId:secondRead.projectId,roundId:secondRoundId,requestId:randomUUID(),
+    expectedSteps:Object.fromEntries(Object.entries(secondReady.steps).map(([id,state])=>[id,{version:(state as {version:number}).version,reviewVersion:(state as {reviewVersion:number}).reviewVersion}]))});
+  const thirdHistory=await f.service.accountStrategyHistory(a.projectId);
+  expect(thirdHistory).toHaveLength(3);
+  expect(thirdHistory[1].id).toBe(nowA.sourceVersionId);
+  expect(thirdHistory[2].id).toBe(f.sourceVersionId);
 },180000);
 
 it("OPC: the first account strategy revision after Skill upload uses its latest published questions",async()=>{
@@ -8566,28 +8624,14 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   const previous=(await sql.query('select e.payload,b.payload billing from runtime_executions e join bill2_runs b on b.id=e.billing_run_id where e.id=$1',[saved.execution_id])).rows[0];
   previous.payload.input='[OPC_SCRIPT_V1] 请求口播稿';previous.billing.input=previous.payload;
   await expect(sql.query('select runtime_admit($1,$2,$3,$4,$5)',[f.actor,article.sessionId,randomUUID(),previous.payload,previous.billing])).rejects.toThrow('OPC_VIDEO_TYPE_REQUIRED');
-  // The same reply may be explicitly saved under a corrected content type.
-  // Its frozen public request stays unchanged; each saved content owns its material.
+  // A saved article keeps its version stream visible; metadata cannot silently
+  // turn it into a video and hide the draft from the library.
   await card.getByRole('dialog',{name:'选题详情'}).waitFor();
   await card.getByRole('button',{name:'编辑稿件',exact:true}).click();
-  await card.getByLabel('内容类型',{exact:true}).selectOption('video');
-  await card.getByRole('button',{name:'保存选题信息',exact:true}).click();
-  await card.getByRole('button',{name:'返回详情',exact:false}).click();
-  await card.getByRole('button',{name:'编辑稿件',exact:true}).waitFor();
+  expect(await card.getByLabel('内容类型',{exact:true}).isDisabled()).toBe(true);
+  await expect(f.service.libraryEdit({requestId:randomUUID(),target:'item',targetId:article.workItemId,expectedRevision:1,
+    patch:{title:rows[0].title,brief:rows[0].brief,day:rows[0].day,contentType:'video'}})).rejects.toThrow('OPC_LIBRARY_INVALID');
   await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+article.sessionId);
-  await page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true}).click();
-  await page.getByRole('link',{name:'这版口播稿已定稿 · 查看',exact:true}).waitFor();
-  const originalRequest=(await sql.query("select request_id from opc_content_versions where work_item_id=$1 and kind='brief'",[article.workItemId])).rows[0].request_id;
-  const replay={workItemId:article.workItemId,requestId:originalRequest,executionId:saved.execution_id,kind:'script' as const,status:'final' as const,expectedVersion:0};
-  const firstScript=await f.service.contentFromExecution(replay);
-  expect(await f.service.contentFromExecution(replay)).toEqual(firstScript);
-  const materials=await sql.query("select m.request_id from runtime_scope_material m join opc_content_versions c on c.id=m.request_id where c.work_item_id=$1",[article.workItemId]);
-  expect(materials.rows).toHaveLength(1);
-  // Reverse direction also accepts the exact old-style shared execution/request ID.
-  const reverse={...replay,kind:'brief' as const,requestId:randomUUID(),expectedVersion:1};
-  await f.service.contentFromExecution({...reverse,kind:'script',expectedVersion:1});
-  const secondBrief=await f.service.contentFromExecution(reverse);
-  expect(await f.service.contentFromExecution(reverse)).toEqual(secondBrief);
   await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+unknown.sessionId+'&continue=1');
   await page.getByRole('heading',{name:'这条选题准备做成什么内容？',exact:true}).waitFor();
   await page.getByText('先在对话中确认这条选题的内容类型，再起草和保存稿件。已确认前不会创建内容版本。',{exact:true}).waitFor();
@@ -8607,15 +8651,15 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   await page.getByRole('button',{name:'起草口播稿',exact:true}).waitFor();
   await page.getByRole('button',{name:'起草口播稿',exact:true}).click();
   await page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true}).waitFor({timeout:60000});
-  // The history entry resumes the exact adopted session, not a title search or a new work item.
+  // The current adopted-work panel resumes the exact session, not a title
+  // search or a new work item. The old "选题与版本" control is no longer UI.
   await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+f.d.draftId+'/topics');
   await page.getByRole('button',{name:'开始选题工作对话',exact:true}).click();
-  await page.getByRole('button',{name:'选题与版本',exact:true}).click();
-  await page.getByText('历史正式采用版本 · 1',{exact:true}).click();
-  await page.getByRole('link',{name:'文章细化',exact:true}).click();
+  await page.getByRole('heading',{name:'已采用选题',exact:true}).waitFor();
+  await page.locator('a[href*="'+article.sessionId+'"]').first().click();
   await page.waitForURL(url=>url.pathname==='/runtime'&&url.searchParams.get('session')===article.sessionId);
   expect(await guideCount()).toBe(1);
-  expect((await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='brief'",[article.workItemId])).rows[0].n).toBe(2);
+  expect((await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='brief'",[article.workItemId])).rows[0].n).toBe(1);
  }finally{await browser.close();}
 },180000);
 

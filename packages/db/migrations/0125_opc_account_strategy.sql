@@ -5,13 +5,26 @@
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS opc_account_strategy_drafts (
- account_project_id uuid PRIMARY KEY REFERENCES opc_accounts(project_id),
- draft_id uuid NOT NULL UNIQUE REFERENCES opc_drafts(draft_id),
+ account_project_id uuid NOT NULL REFERENCES opc_accounts(project_id),
+ draft_id uuid PRIMARY KEY REFERENCES opc_drafts(draft_id),
  actor_id uuid NOT NULL REFERENCES profiles(id),
  root_source_version_id uuid NOT NULL REFERENCES artifact_versions(id),
  base_source_version_id uuid NOT NULL REFERENCES artifact_versions(id),
- base_account_revision bigint NOT NULL
+ base_account_revision bigint NOT NULL,
+ current boolean NOT NULL DEFAULT true
 );
+-- Preserve installations that received an earlier local candidate of this
+-- migration. Historical rows remain; only the key shape changes.
+ALTER TABLE opc_account_strategy_drafts ADD COLUMN IF NOT EXISTS current boolean NOT NULL DEFAULT true;
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='opc_account_strategy_drafts'::regclass
+  AND conname='opc_account_strategy_drafts_pkey' AND pg_get_constraintdef(oid)='PRIMARY KEY (account_project_id)') THEN
+  ALTER TABLE opc_account_strategy_drafts DROP CONSTRAINT opc_account_strategy_drafts_pkey;
+  ALTER TABLE opc_account_strategy_drafts ADD PRIMARY KEY(draft_id);
+ END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS opc_account_strategy_current_one
+ ON opc_account_strategy_drafts(account_project_id) WHERE current;
 ALTER TABLE opc_account_strategy_drafts ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON opc_account_strategy_drafts FROM PUBLIC,anon,authenticated,service_role;
 
@@ -33,15 +46,12 @@ BEGIN
    THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
   RETURN jsonb_build_object('draftId',d.draft_id,'roundId',d.round_id);
  END IF;
- SELECT * INTO binding FROM opc_account_strategy_drafts WHERE account_project_id=p_account_project_id FOR UPDATE;
+ SELECT * INTO binding FROM opc_account_strategy_drafts WHERE account_project_id=p_account_project_id AND current FOR UPDATE;
  IF binding.draft_id IS NOT NULL THEN
   SELECT * INTO d FROM opc_drafts WHERE draft_id=binding.draft_id AND actor_id=p_actor_id;
   SELECT * INTO r FROM artifact_rounds WHERE id=d.round_id;
   IF r.state='draft' THEN RETURN jsonb_build_object('draftId',d.draft_id,'roundId',d.round_id);END IF;
   IF r.state<>'published' THEN RAISE EXCEPTION 'OPC_VERSION_CONFLICT';END IF;
-  PERFORM opc_revise(p_actor_id,d.draft_id,p_request_id,d.round_id);
-  SELECT round_id INTO d.round_id FROM opc_drafts WHERE draft_id=d.draft_id;
-  RETURN jsonb_build_object('draftId',d.draft_id,'roundId',d.round_id);
  END IF;
  SELECT * INTO source_v FROM artifact_versions WHERE id=a.source_version_id;
  SELECT * INTO source_d FROM opc_drafts WHERE project_id=source_v.project_id AND actor_id=p_actor_id;
@@ -57,8 +67,11 @@ BEGIN
  -- Earlier drafts keep their own pinned workflow and immutable source.
  started:=opc_start_b1(p_actor_id,p_request_id,current_workflow.id,'manual',a.business_id,NULL);
  SELECT * INTO d FROM opc_drafts WHERE draft_id=(started->>'draftId')::uuid;
+ IF binding.draft_id IS NOT NULL THEN
+  UPDATE opc_account_strategy_drafts SET current=false WHERE draft_id=binding.draft_id;
+ END IF;
  INSERT INTO opc_account_strategy_drafts(account_project_id,draft_id,actor_id,root_source_version_id,base_source_version_id,base_account_revision)
- VALUES(a.project_id,d.draft_id,p_actor_id,a.source_version_id,a.source_version_id,a.revision);
+ VALUES(a.project_id,d.draft_id,p_actor_id,coalesce(binding.root_source_version_id,a.source_version_id),a.source_version_id,a.revision);
  SELECT * INTO r FROM artifact_rounds WHERE id=d.round_id;
  profile:=opc_profile(a.source_version_id);
  -- Carry real source values into the new draft as unconfirmed information.
@@ -94,7 +107,7 @@ BEGIN
  END IF;
  SELECT asd.* INTO binding FROM opc_account_strategy_drafts asd
   JOIN opc_drafts d ON d.draft_id=asd.draft_id
-  WHERE d.project_id=p_project_id AND d.round_id=p_round_id AND asd.actor_id=p_actor_id;
+  WHERE d.project_id=p_project_id AND d.round_id=p_round_id AND asd.actor_id=p_actor_id AND asd.current;
  IF binding.draft_id IS NULL THEN
   RETURN artifact_transition_before_account_strategy(p_actor_id,p_module_id,p_skill_id,p_action,p_project_id,p_round_id,p_request_id,p_payload);
  END IF;
@@ -112,7 +125,7 @@ BEGIN
  UPDATE opc_businesses SET current_source_version_id=b.current_source_version_id,revision=b.revision WHERE id=b.id;
  UPDATE opc_accounts SET source_version_id=(result->>'versionId')::uuid,revision=revision+1 WHERE project_id=a.project_id;
  UPDATE opc_account_strategy_drafts SET base_source_version_id=(result->>'versionId')::uuid,base_account_revision=a.revision+1
-  WHERE account_project_id=a.project_id;
+  WHERE draft_id=binding.draft_id;
  RETURN result;
 END $$;
 REVOKE ALL ON FUNCTION artifact_transition_before_account_strategy(uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb),artifact_transition(uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb) FROM PUBLIC,anon,authenticated,service_role;
@@ -125,7 +138,7 @@ BEGIN
  PERFORM bill2_actor(p_actor_id);
  SELECT * INTO a FROM opc_accounts WHERE project_id=p_account_project_id AND actor_id=p_actor_id;
  IF a.project_id IS NULL OR NOT opc_source_allowed(p_actor_id,a.source_version_id) THEN RAISE EXCEPTION 'OPC_DENIED';END IF;
- SELECT * INTO binding FROM opc_account_strategy_drafts WHERE account_project_id=a.project_id;
+ SELECT * INTO binding FROM opc_account_strategy_drafts WHERE account_project_id=a.project_id AND current;
  SELECT * INTO root FROM artifact_versions WHERE id=coalesce(binding.root_source_version_id,a.source_version_id);
  SELECT coalesce(jsonb_agg(jsonb_build_object('id',history.id,'version',history.ordinal,'sourceVersion',history.version,
   'source',history.source,'profile',opc_profile(history.id),'createdAt',history.created_at)
@@ -134,7 +147,8 @@ BEGIN
    row_number() OVER (ORDER BY v.created_at,v.id)::integer ordinal
   FROM artifact_versions v WHERE opc_source_allowed(p_actor_id,v.id) AND
    (v.project_id=root.project_id AND v.version<=root.version OR
-    binding.draft_id IS NOT NULL AND v.project_id=(SELECT project_id FROM opc_drafts WHERE draft_id=binding.draft_id))
+    v.project_id IN (SELECT d.project_id FROM opc_account_strategy_drafts h JOIN opc_drafts d ON d.draft_id=h.draft_id
+      WHERE h.account_project_id=a.project_id AND h.actor_id=p_actor_id))
  ) history;
  RETURN result;
 END $$;
@@ -161,7 +175,7 @@ BEGIN
  SELECT * INTO a FROM opc_accounts WHERE project_id=p_account_project_id AND actor_id=p_actor_id FOR UPDATE;
  IF a.project_id IS NULL OR NOT opc_source_allowed(p_actor_id,a.source_version_id) THEN RAISE EXCEPTION 'OPC_DENIED';END IF;
  IF a.source_version_id IS DISTINCT FROM p_expected_source_version_id THEN RAISE EXCEPTION 'OPC_VERSION_CONFLICT';END IF;
- SELECT * INTO binding FROM opc_account_strategy_drafts WHERE account_project_id=a.project_id;
+ SELECT * INTO binding FROM opc_account_strategy_drafts WHERE account_project_id=a.project_id AND current;
  IF binding.draft_id IS NOT NULL THEN
   SELECT * INTO d FROM opc_drafts WHERE draft_id=binding.draft_id;
   SELECT * INTO r FROM artifact_rounds WHERE id=d.round_id;
@@ -213,7 +227,7 @@ BEGIN
  FOR business IN SELECT x.value FROM jsonb_array_elements(source->'businesses') x LOOP
   accounts:='[]';
   FOR account IN SELECT x.value FROM jsonb_array_elements(business->'accounts') x LOOP
-   SELECT * INTO binding FROM opc_account_strategy_drafts WHERE account_project_id=(account->>'projectId')::uuid AND actor_id=p_actor_id;
+   SELECT * INTO binding FROM opc_account_strategy_drafts WHERE account_project_id=(account->>'projectId')::uuid AND actor_id=p_actor_id AND current;
    history:=opc_account_strategy_history(p_actor_id,(account->>'projectId')::uuid);
    account:=account||jsonb_build_object('sourceVersion',jsonb_array_length(history),'pendingStrategyDraftId',NULL);
    IF binding.draft_id IS NOT NULL THEN

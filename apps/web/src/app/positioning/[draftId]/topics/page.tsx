@@ -23,6 +23,7 @@ import composerStyles from '@/components/opc/work-composer.module.css';
 import topicStyles from './topic-candidates.module.css';
 import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
+import { consentedTopicIds } from './adoption-consent';
 
 type PlanItem = {
   id: string;
@@ -440,6 +441,8 @@ export default function TopicWorkspacePage() {
     }
     const ids = parseAdoption(action.body ?? action.primaryBody);
     if (!ids) return;
+    const consented = consentedTopicIds(action.input, candidate.body.map(item => item.id));
+    if (!consented || consented.length !== ids.length || consented.some(id => !ids.includes(id))) return;
     const request = adoptionRequest(candidate.body, ids.filter(id => !adoptedItemIds.has(id)), action.executionId);
     if (!request) return;
     adoptedExecution.current = action.executionId;

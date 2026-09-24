@@ -75,6 +75,26 @@ ALTER TABLE opc_publication_ui ADD COLUMN IF NOT EXISTS published_version intege
 ALTER TABLE opc_publication_ui ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON opc_publication_ui FROM PUBLIC,anon,authenticated,service_role;
 
+-- A saved article/script has an immutable version stream. Switching the item's
+-- content type after that point would hide those versions from the library.
+CREATE OR REPLACE FUNCTION opc_guard_saved_content_type() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE previous_type text;
+BEGIN
+ -- Read the effective old type, including legacy rows whose edit column is
+ -- null but whose adopted plan already declared a type.
+ previous_type:=opc_item_content_type(NEW.work_item_id);
+ IF NEW.content_type IS DISTINCT FROM previous_type AND
+  (EXISTS(SELECT 1 FROM opc_content_versions WHERE work_item_id=NEW.work_item_id) OR
+   EXISTS(SELECT 1 FROM opc_publication_ui WHERE work_item_id=NEW.work_item_id AND status='published'))
+ THEN RAISE EXCEPTION 'OPC_LIBRARY_INVALID';END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION opc_guard_saved_content_type() FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS opc_guard_saved_content_type ON opc_item_edits;
+CREATE TRIGGER opc_guard_saved_content_type BEFORE INSERT OR UPDATE OF content_type ON opc_item_edits
+ FOR EACH ROW EXECUTE FUNCTION opc_guard_saved_content_type();
+
 CREATE OR REPLACE FUNCTION opc_publication_ui_change(
  p_actor_id uuid,p_request_id uuid,p_work_item_id uuid,p_expected_revision bigint,
  p_planned_date date,p_status text,p_published_date date
