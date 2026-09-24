@@ -3,6 +3,20 @@
 -- creating a draft. A pending revision continues on its pinned declaration.
 BEGIN;
 
+-- Keep the editor's optimistic baseline beside the existing immutable request.
+-- This is request metadata, not a second strategy or version store.
+CREATE TABLE IF NOT EXISTS opc_account_strategy_request_bases (
+ actor_id uuid NOT NULL,request_id uuid NOT NULL,registration_id text NOT NULL,
+ step_versions jsonb,
+ PRIMARY KEY(actor_id,request_id),
+ FOREIGN KEY(actor_id,request_id) REFERENCES opc_library_requests(actor_id,request_id)
+);
+ALTER TABLE opc_account_strategy_request_bases ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON opc_account_strategy_request_bases FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS artifact_immutable ON opc_account_strategy_request_bases;
+CREATE TRIGGER artifact_immutable BEFORE UPDATE OR DELETE ON opc_account_strategy_request_bases
+ FOR EACH ROW EXECUTE FUNCTION artifact_immutable();
+
 CREATE OR REPLACE FUNCTION opc_account_strategy_schema(p_actor_id uuid,p_account_project_id uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE a opc_accounts;binding opc_account_strategy_drafts;d opc_drafts;r artifact_rounds;
@@ -39,9 +53,10 @@ GRANT EXECUTE ON FUNCTION opc_account_strategy_schema(uuid,uuid) TO service_role
 -- declaration shown in the editor must still be current when it is saved.
 CREATE OR REPLACE FUNCTION opc_account_strategy_save_checked(
  p_actor_id uuid,p_account_project_id uuid,p_request_id uuid,p_expected_source_version_id uuid,
- p_expected_pending_draft_id uuid,p_expected_registration_id text,p_edits jsonb)
+ p_expected_pending_draft_id uuid,p_expected_registration_id text,p_edits jsonb,p_expected_step_versions jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE schema_now jsonb;result jsonb;saved_registration text;
+DECLARE schema_now jsonb;result jsonb;saved_registration text;basis opc_account_strategy_request_bases;
+ pending opc_drafts;round_now artifact_rounds;step_edit record;
 BEGIN
  PERFORM bill2_actor(p_actor_id);
  PERFORM pg_advisory_xact_lock(hashtextextended(p_actor_id::text||p_request_id::text,125));
@@ -50,6 +65,16 @@ BEGIN
  IF EXISTS(SELECT 1 FROM opc_library_requests WHERE actor_id=p_actor_id AND request_id=p_request_id) THEN
   result:=opc_account_strategy_save(p_actor_id,p_account_project_id,p_request_id,
    p_expected_source_version_id,p_expected_pending_draft_id,p_edits);
+  SELECT * INTO basis FROM opc_account_strategy_request_bases
+   WHERE actor_id=p_actor_id AND request_id=p_request_id;
+  IF basis.request_id IS NULL AND p_expected_step_versions IS NOT NULL THEN
+   RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';
+  END IF;
+  IF basis.request_id IS NOT NULL AND
+   (basis.registration_id IS DISTINCT FROM p_expected_registration_id OR
+    basis.step_versions IS DISTINCT FROM p_expected_step_versions) THEN
+   RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';
+  END IF;
   SELECT registration INTO saved_registration FROM opc_drafts
    WHERE draft_id=(result->>'draftId')::uuid AND actor_id=p_actor_id;
   IF p_expected_registration_id IS NOT NULL AND saved_registration IS DISTINCT FROM p_expected_registration_id THEN
@@ -63,6 +88,25 @@ BEGIN
  IF schema_now->>'registrationId' IS DISTINCT FROM p_expected_registration_id THEN
   RAISE EXCEPTION 'OPC_VERSION_CONFLICT';
  END IF;
+ IF p_expected_pending_draft_id IS NOT NULL THEN
+  SELECT * INTO pending FROM opc_drafts WHERE draft_id=p_expected_pending_draft_id AND actor_id=p_actor_id;
+  IF pending.draft_id IS NULL THEN RAISE EXCEPTION 'OPC_VERSION_CONFLICT';END IF;
+  -- Positioning-page edits lock this project too. Check the exact versions the
+  -- library dialog displayed while holding that same lock until save commits.
+  PERFORM 1 FROM artifact_projects WHERE id=pending.project_id FOR UPDATE;
+  SELECT * INTO round_now FROM artifact_rounds WHERE id=pending.round_id;
+  IF round_now.state<>'draft' OR jsonb_typeof(p_expected_step_versions) IS DISTINCT FROM 'object'
+   THEN RAISE EXCEPTION 'OPC_VERSION_CONFLICT';END IF;
+  FOR step_edit IN SELECT x.key FROM jsonb_each(p_edits) x LOOP
+   IF jsonb_typeof(p_expected_step_versions->step_edit.key) IS DISTINCT FROM 'number' OR
+    (round_now.steps->step_edit.key->>'version')::integer IS DISTINCT FROM
+     (p_expected_step_versions->>step_edit.key)::integer THEN
+    RAISE EXCEPTION 'OPC_VERSION_CONFLICT';
+   END IF;
+  END LOOP;
+ ELSIF p_expected_step_versions IS NOT NULL THEN
+  RAISE EXCEPTION 'OPC_VERSION_CONFLICT';
+ END IF;
  result:=opc_account_strategy_save(p_actor_id,p_account_project_id,p_request_id,
   p_expected_source_version_id,p_expected_pending_draft_id,p_edits);
  -- Publication does not lock this account. If it committed between the
@@ -72,9 +116,15 @@ BEGIN
  IF saved_registration IS DISTINCT FROM p_expected_registration_id THEN
   RAISE EXCEPTION 'OPC_VERSION_CONFLICT';
  END IF;
+ INSERT INTO opc_account_strategy_request_bases(actor_id,request_id,registration_id,step_versions)
+ VALUES(p_actor_id,p_request_id,p_expected_registration_id,p_expected_step_versions);
  RETURN result;
 END $$;
-REVOKE ALL ON FUNCTION opc_account_strategy_save_checked(uuid,uuid,uuid,uuid,uuid,text,jsonb) FROM PUBLIC,anon,authenticated,service_role;
-GRANT EXECUTE ON FUNCTION opc_account_strategy_save_checked(uuid,uuid,uuid,uuid,uuid,text,jsonb) TO service_role;
+-- Reapplying this migration to an existing local preview must retire its old
+-- seven-argument entry point; clients use the checked eight-argument path.
+DROP FUNCTION IF EXISTS opc_account_strategy_save_checked(uuid,uuid,uuid,uuid,uuid,text,jsonb);
+REVOKE ALL ON FUNCTION opc_account_strategy_save_checked(uuid,uuid,uuid,uuid,uuid,text,jsonb,jsonb) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION opc_account_strategy_save_checked(uuid,uuid,uuid,uuid,uuid,text,jsonb,jsonb) TO service_role;
+REVOKE EXECUTE ON FUNCTION opc_account_strategy_save(uuid,uuid,uuid,uuid,uuid,jsonb) FROM service_role;
 
 COMMIT;

@@ -7553,6 +7553,7 @@ it("OPC: account strategy edits stay draft-scoped and publish only for the chose
   await expect(other.service.accountStrategySave({...request,requestId:randomUUID()})).rejects.toThrow('OPC_DENIED');
   const saved=await f.service.accountStrategySave(request);
   expect(await f.service.accountStrategySave(request)).toEqual(saved);
+  await expect(f.service.accountStrategySave({...request,expectedStepVersions:{[f.flow.steps[0].id]:1}})).rejects.toThrow('OPC_REQUEST_CONFLICT');
   await expect(f.service.accountStrategySave({...request,expectedRegistrationId:'another-skill-revision'})).rejects.toThrow('OPC_REQUEST_CONFLICT');
   await expect(f.service.accountStrategySave({...request,edits:{[f.flow.steps[0].id]:{goal:'重放不能换内容'}}})).rejects.toThrow('OPC_REQUEST_CONFLICT');
   await expect(f.service.accountStrategySave({...request,requestId:randomUUID()})).rejects.toThrow('OPC_VERSION_CONFLICT');
@@ -7562,6 +7563,20 @@ it("OPC: account strategy edits stay draft-scoped and publish only for the chose
   expect((await f.service.accountStrategyHistory(a.projectId)).map((v:{id:string})=>v.id)).toEqual([f.sourceVersionId]);
   const draft=await f.service.read(saved.draftId);
   expect(draft.information[f.flow.steps[0].id].values.goal).toMatchObject({value:'仅账号 A 的待确认新方向',status:'provisional'});
+  const stepId=f.flow.steps[0].id;
+  const concurrentBase={accountProjectId:a.projectId,expectedSourceVersionId:f.sourceVersionId,
+    expectedPendingDraftId:saved.draftId,expectedRegistrationId:f.registration,
+    expectedStepVersions:{[stepId]:draft.snapshot.steps[stepId].version}};
+  const firstConcurrent={...concurrentBase,requestId:randomUUID(),edits:{[stepId]:{goal:'先保存的标签页'}}};
+  const secondConcurrent={...concurrentBase,requestId:randomUUID(),edits:{[stepId]:{goal:'迟到的标签页'}}};
+  const firstSaved=await f.service.accountStrategySave(firstConcurrent);
+  expect(await f.service.accountStrategySave(firstConcurrent)).toEqual(firstSaved);
+  await expect(f.service.accountStrategySave({...firstConcurrent,expectedStepVersions:{[stepId]:draft.snapshot.steps[stepId].version+1}}))
+    .rejects.toThrow('OPC_REQUEST_CONFLICT');
+  await expect(f.service.accountStrategySave(secondConcurrent)).rejects.toThrow('OPC_VERSION_CONFLICT');
+  await expect(f.service.accountStrategySave({...secondConcurrent,requestId:randomUUID(),expectedStepVersions:null}))
+    .rejects.toThrow('OPC_VERSION_CONFLICT');
+  expect((await f.service.read(saved.draftId)).information[stepId].values.goal.value).toBe('先保存的标签页');
   // The open library dialog must refresh its account binding after a save.
   // A second edit in the same dialog must target the pending draft, not the
   // previously published account snapshot.
@@ -7571,6 +7586,23 @@ it("OPC: account strategy edits stay draft-scoped and publish only for the chose
     await strategyPage.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/strategy-a/}).click();
     await strategyPage.getByRole('button',{name:/x · strategy-a.*查看详情/}).click();
     const dialog=strategyPage.getByRole('dialog',{name:'定位详情'});
+    const secondTab=await strategyPage.context().newPage();
+    secondTab.setDefaultTimeout(90000);
+    await secondTab.goto(process.env.V3_LOCAL_APP+'/library');
+    await secondTab.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/strategy-a/}).click();
+    await secondTab.getByRole('button',{name:/x · strategy-a.*查看详情/}).click();
+    const secondDialog=secondTab.getByRole('dialog',{name:'定位详情'});
+    await dialog.getByRole('button',{name:'修改定位'}).click();
+    await secondDialog.getByRole('button',{name:'修改定位'}).click();
+    await dialog.getByRole('textbox').first().fill('标签页 A 已保存');
+    await secondDialog.getByRole('textbox').first().fill('标签页 B 未保存');
+    await dialog.getByRole('button',{name:'确认保存'}).click();
+    await dialog.getByText('标签页 A 已保存',{exact:true}).first().waitFor();
+    await secondDialog.getByRole('button',{name:'确认保存'}).click();
+    await secondDialog.getByRole('alert').filter({hasText:'OPC_VERSION_CONFLICT'}).waitFor();
+    expect(await secondDialog.getByRole('textbox').first().inputValue()).toBe('标签页 B 未保存');
+    expect((await f.service.read(saved.draftId)).information[stepId].values.goal.value).toBe('标签页 A 已保存');
+    await secondTab.close();
     for(const text of ['第一次在弹窗修改','第二次在同一弹窗修改']){
       await dialog.getByRole('button',{name:'修改定位'}).click();
       await dialog.getByRole('textbox').first().fill(text);

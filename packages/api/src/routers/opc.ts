@@ -158,7 +158,7 @@ export const opcRouter = router({
     .input(z.object({accountProjectId:z.string().uuid(),requestId:z.string().uuid()}).strict())
     .mutation(({ctx,input})=>ctx.opc.accountStrategyBegin(input.accountProjectId,input.requestId)),
   accountStrategySave: procedure
-    .input(z.object({accountProjectId:z.string().uuid(),requestId:z.string().uuid(),expectedSourceVersionId:z.string().uuid(),expectedPendingDraftId:z.string().uuid().nullable(),expectedRegistrationId:z.string().min(1).max(100).nullable().optional(),edits:z.record(z.string().max(64),z.record(z.string().max(64),z.string().max(400)))}).strict())
+    .input(z.object({accountProjectId:z.string().uuid(),requestId:z.string().uuid(),expectedSourceVersionId:z.string().uuid(),expectedPendingDraftId:z.string().uuid().nullable(),expectedRegistrationId:z.string().min(1).max(100).nullable().optional(),expectedStepVersions:z.record(z.string().max(64),z.number().int().nonnegative()).nullable().optional(),edits:z.record(z.string().max(64),z.record(z.string().max(64),z.string().max(400)))}).strict())
     .mutation(({ctx,input})=>ctx.opc.accountStrategySave(input)),
   editLibrary: procedure
     .input(opcLibraryEdit)
