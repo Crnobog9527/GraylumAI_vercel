@@ -62,6 +62,21 @@ describe('administrator module publication', () => {
       { id: 'agent_deliverable', title: '导师成果建议', required: true, elicitation: 'agent_proposal' },
     ]);
   });
+  it('publishes exactly the steps and questions declared in the uploaded workflow file', () => {
+    const input = moduleInput();
+    input.kind = 'social';
+    input.steps = [
+      {title:'需求确认',resources:['SKILL.md'],information:[{id:'product',title:'产品与服务',required:true}]},
+      {title:'效果验证',resources:['SKILL.md'],information:[{id:'measure',title:'如何验证效果',required:true}]},
+    ];
+    input.files.push({path:'workflow.yaml',base64:Buffer.from(
+      'kind: social\nsteps:\n  - title: 需求确认\n    resources: [SKILL.md]\n    information:\n      - id: product\n        title: 产品与服务\n        required: true\n  - title: 效果验证\n    resources: [SKILL.md]\n    information:\n      - id: measure\n        title: 如何验证效果\n        required: true\n',
+    ).toString('base64')});
+    expect(prepareModuleSkill(input).workflow.steps.map(step=>step.title))
+      .toEqual(['需求确认','效果验证']);
+    input.steps[1].information![0].title='旧问题';
+    expect(()=>prepareModuleSkill(input)).toThrow('不一致');
+  });
   it('keeps an older revision without the property valid and publishable', async () => {
     const input = moduleInput();
     input.steps[0].information = [{ id: 'legacy_fact', title: '旧版字段', required: true, profileKey: 'legacy_fact' }];

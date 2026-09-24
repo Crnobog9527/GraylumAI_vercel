@@ -73,40 +73,37 @@ The ordinary Chat entry opens a general new-task surface. Choosing account
 positioning first presents the two accepted methods; the existing real
 registration and business prerequisites appear only after a method is chosen.
 The in-progress strategy keeps its actual Skill questions and persistence in
-the right rail, while the conversation remains central. The accepted reference
-has six illustrative phases, which must not be fabricated when the bound Skill
-has a different step definition. Sidebar search and the fixed account strategy
-entry use owned projections. The current library edit contract changes the
-actual topic title and Runtime material, so it cannot implement the accepted
-independent chat display name. The sidebar marks chat rename as unavailable;
-the real topic title remains editable only through explicit library metadata
-editing until an owned work-name contract is admitted.
+the right rail, while the conversation remains central. Isolated UX acceptance
+uses the approved six-stage positioning scenario, including all nine questions;
+production renders the actual bound Skill without inventing stages. Sidebar search, fixed account strategy,
+independent chat display names, pinning, archive recovery, and account display
+names use owned projections and versioned mutations. Chat actions appear on
+hover or keyboard focus; renaming is inline and deleting requires a second
+explicit action.
 
 U2 currently migrates the bound topic conversation, explicit single-topic
 adoption, Runtime Agent suggestion and draft adoption, manual version save,
-expanded edit, read-only side-by-side version comparison, library detail, and
-return path. The right editor is bound to an owned work item and creates
+expanded edit, read-only version comparison, library detail, and return path.
+The same result editor now handles articles and video scripts. Video manual
+revisions must descend from an admitted execution; storyboard and editing
+results remain bound to the exact final script version. The editor creates
 immutable server versions; local text caching only protects unsent or unsaved
 input. `draft`, `final`, and publication are distinct states. A definite
 conflict keeps the edit available for comparison, and an unknown outcome
-retains the original request for recovery. The left Feature Marketplace is now
-viewed within the workspace; a module may begin a new task only when its
-runtime Skill and prerequisites are actually available. Viewing a module does
-not execute it. The positioning strategy route now enters the workbench shell
-and shows its live editing form or confirmed information in a collapsible
-result rail. The library uses the platform/account scope, filter, status list,
-item detail, editor, and version view from the accepted workbench. The real
-library projection does not yet provide a full strategy summary for that scope,
-so it links to the owned strategy rather than displaying invented fields.
-Work rename, pin, archive, delete, and archive recovery have no admitted real mutation
-path in this slice and remain visibly unavailable. Profile/Tickets, the
-complete Marketplace catalog, publication scheduling, account rename, and
-advanced composer integrations remain outside this slice and must not be
-presented as connected. These are migration limits, not U0/U1 product decisions.
-Existing video work keeps its script, storyboard, and editing-history rail;
-the new article editor does not replace those owned versions. Manual video
-script saves are not exposed by this slice: B1 video follow-ups require the
-existing admitted execution identity for the script source.
+retains the original request for recovery. A single saved version leaves the
+opposite comparison pane empty, and the same version cannot occupy both panes.
+The left Feature Marketplace is viewed within the workspace; a module may
+begin a new task only when its Runtime Skill and prerequisites are available.
+Viewing a module does not execute it. The positioning route keeps the central
+conversation and the bound Skill questions in the right rail. The library
+offers account strategy detail, actual saved history, metadata and content
+editing, and manual publication-date/status recording; it does not publish to
+an external platform. Feedback, credits and account popovers use existing
+services. File, library, and connector attachments, publication scheduling,
+data review, full Profile migration, and unrelated application pages remain
+outside this workbench slice. The formal strategy edit currently saves a
+pending revision through the shared OPC draft; the reference's independent
+per-account versus shared-business edit choice is not yet a formal contract.
 
 ## Overview
 
@@ -189,4 +186,5 @@ Instructions use direct Chinese verbs and explain the next decision. A recovery 
 - **Don't:** Ask the user to copy the form into a second work-draft or trigger a duplicate organizer pass.
 - **Don't:** Hide the current task behind explanatory cards or implementation terminology.
 - **Don't:** Hard-code coaching questions, response templates, or content-generation order into the workspace shell.
+- **Do:** Render positioning steps and questions from the draft's published Skill revision. A newly uploaded Skill package can declare changed structure in `workflow.yaml`; see [Skill workflow manifest](docs/skills/workflow-manifest.md). Existing drafts retain their bound revision.
 - **Don't:** Make the library a required detour before continuing the selected content.

@@ -40,7 +40,8 @@
     "./src/services/streamingOutput": "./src/services/streamingOutput.ts",
     "./src/services/providerUsage": "./src/services/providerUsage.ts",
     "./src/services/modelCapabilities": "./src/services/modelCapabilities.ts",
-    "./services/bill2": "./src/services/bill2/service.ts"
+    "./services/bill2": "./src/services/bill2/service.ts",
+    "./skills/workflowManifest": "./src/services/skills/workflowManifest.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.0.0",

@@ -1,6 +1,6 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useState, type ReactNode } from 'react';
 import { trpc } from '@/trpc/client';
 import { VersionCompare } from './version-compare';
 import styles from './content-editor.module.css';
@@ -12,25 +12,48 @@ type Frozen=Draft&{workItemId:string;requestId:string;expectedVersion:number;kin
 export type ContentEditorHandle={finalize:()=>void};
 const rejected=new Set(['OPC_VERSION_CONFLICT','OPC_REQUEST_CONFLICT','OPC_CONTENT_DENIED','OPC_CONTENT_INVALID','OPC_CONTENT_SOURCE','OPC_CONTENT_BINDING']);
 
-export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onSaved:()=>Promise<unknown>}>(function ContentEditor({item,onSaved},ref){
+export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onSaved:()=>Promise<unknown>;children?:ReactNode}>(function ContentEditor({item,onSaved,children},ref){
  const kind=item.contentType==='video'?'script':'brief';
  const versions=useMemo(()=>item.content.filter(version=>version.kind===kind).sort((a,b)=>b.version-a.version),[item.content,kind]);
  const latest=versions[0]??null;
- const key='opc-content-draft:'+item.workItemId;
- const pendingKey='opc-content-save:'+item.workItemId;
+ const key='opc-content-draft:'+item.workItemId+':'+kind;
+ const pendingKey='opc-content-save:'+item.workItemId+':'+kind;
  const [draft,setDraft]=useState<Draft|null>(null),[pending,setPending]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState('');
  const [history,setHistory]=useState(false),[expanded,setExpanded]=useState(false);
+ useEffect(()=>{if(!expanded)return;function onEscape(event:KeyboardEvent){if(event.key==='Escape')setExpanded(false);}window.addEventListener('keydown',onEscape);return()=>window.removeEventListener('keydown',onEscape);},[expanded]);
  const [expandedTitle,setExpandedTitle]=useState(''),[expandedBody,setExpandedBody]=useState('');
  const saveMutation=trpc.opc.saveContentManual.useMutation();
  useEffect(()=>{
   try{
+   const legacyDraft='opc-content-draft:'+item.workItemId;
+   const legacyPending='opc-content-save:'+item.workItemId;
+   const oldPending=localStorage.getItem(legacyPending);
+   const pendingKind=oldPending?(JSON.parse(oldPending) as Frozen).kind:null;
+   const oldDraft=localStorage.getItem(legacyDraft);
+   if(oldDraft){
+    const old=JSON.parse(oldDraft) as Draft;
+    const sourceKind=item.content.find(version=>version.id===old.sourceContentId)?.kind;
+    const knownKinds=[...new Set(item.content.filter(version=>version.kind==='brief'||version.kind==='script').map(version=>version.kind))];
+    const oldKind=pendingKind??sourceKind??(knownKinds.length===1?knownKinds[0]:knownKinds.length===0?kind:null);
+    if(oldKind==='brief'||oldKind==='script'){
+     const scopedDraft='opc-content-draft:'+item.workItemId+':'+oldKind;
+     if(!localStorage.getItem(scopedDraft))localStorage.setItem(scopedDraft,oldDraft);
+     else localStorage.setItem(legacyDraft+':backup',oldDraft);
+     localStorage.removeItem(legacyDraft);
+    }else setError('检测到旧版未归类编辑；原输入仍保留在本机，请先核对稿件类型。');
+   }
+   if(oldPending){
+    const scopedPending='opc-content-save:'+item.workItemId+':'+pendingKind;
+    if(!localStorage.getItem(scopedPending))localStorage.setItem(scopedPending,oldPending);
+    localStorage.removeItem(legacyPending);
+   }
    const cached=localStorage.getItem(key);
    setDraft(cached?JSON.parse(cached) as Draft:{baseVersion:latest?.version??0,sourceContentId:latest?.id??null,title:latest?.title||item.title,body:latest?.body??''});
    setPending(Boolean(localStorage.getItem(pendingKey)));
   }catch{setError('本机未保存的编辑无法读取，请先保留当前页面内容。');}
  // A new server version must never replace local unsaved input.
  // eslint-disable-next-line react-hooks/exhaustive-deps
- },[item.workItemId]);
+ },[item.workItemId,kind]);
  useEffect(()=>{
   if(!latest||localStorage.getItem(key))return;
   setDraft(current=>current&&current.baseVersion<latest.version?{baseVersion:latest.version,sourceContentId:latest.id,title:latest.title||item.title,body:latest.body??''}:current);
@@ -93,7 +116,7 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
   <div className={styles.body}>
    {!item.sourceAvailable||latest&&latest.contentAvailable===false?<p role="alert">来源已不可用，不能编辑或保存这条工作。</p>:<>
     <label>标题<input aria-label="稿件标题" value={draft.title} onChange={event=>change({title:event.target.value})} maxLength={160}/></label>
-    <label>文章正文<textarea aria-label="文章正文" value={draft.body} onChange={event=>change({body:event.target.value})} maxLength={20000} placeholder="先写下草稿，保存后会形成可找回的版本。"/></label>
+    <label>{kind==='script'?'口播稿正文':'文章正文'}<textarea aria-label={kind==='script'?'口播稿正文':'文章正文'} value={draft.body} onChange={event=>change({body:event.target.value})} maxLength={20000} placeholder="先写下草稿，保存后会形成可找回的版本。"/></label>
     <p className={styles.version}>{latest?'服务端已保存 v'+latest.version+' · '+(latest.status==='final'?'已定稿':'草稿'):'尚无已保存稿件'}</p>
     {saved&&<p role="status" className={styles.success}>{saved}</p>}
     {error&&<p role="alert" className={styles.error}>{error}</p>}
@@ -103,10 +126,11 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
      <button onClick={openExpanded}>展开编辑</button>
      <button onClick={()=>setHistory(true)}>历史版本</button>
     </div>
+    {children}
    </>}
   </div>
-  <footer><button className={styles.primary} onClick={()=>save('final')} disabled={pending||saveMutation.isPending||!item.sourceAvailable}>将标题和文章定稿</button><p>定稿不等于发布</p></footer>
-  {expanded&&<div className={styles.backdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setExpanded(false);}}><div role="dialog" aria-modal="true" aria-label="编辑标题与正文" className={styles.modal}><header><h2>编辑标题与正文</h2><button aria-label="关闭编辑" onClick={()=>setExpanded(false)}>×</button></header><div className={styles.modalFields}><label>标题<input aria-label="展开编辑标题" value={expandedTitle} maxLength={160} onChange={event=>setExpandedTitle(event.target.value)}/></label><label>文章正文<textarea aria-label="展开编辑正文" value={expandedBody} maxLength={20000} onChange={event=>setExpandedBody(event.target.value)}/></label></div><footer><p>此窗口的修改暂不保存。确认修改后写入当前未保存编辑，仍需明确保存版本。</p><div><button onClick={()=>setExpanded(false)}>取消</button><button className={styles.primary} onClick={()=>{change({title:expandedTitle,body:expandedBody});setExpanded(false);}}>确认修改</button></div></footer></div></div>}
+  <footer><button className={styles.primary} onClick={()=>save('final')} disabled={pending||saveMutation.isPending||!item.sourceAvailable}>将标题和{kind==='script'?'口播稿':'文章'}定稿</button><p>定稿不等于发布</p></footer>
+  {expanded&&<div className={styles.backdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setExpanded(false);}}><div role="dialog" aria-modal="true" aria-label="编辑标题与正文" className={styles.modal}><header><h2>编辑标题与正文</h2><button aria-label="关闭编辑" onClick={()=>setExpanded(false)}>×</button></header><div className={styles.modalFields}><label>标题<input aria-label="展开编辑标题" value={expandedTitle} maxLength={160} onChange={event=>setExpandedTitle(event.target.value)}/></label><label>{kind==='script'?'口播稿正文':'文章正文'}<textarea aria-label="展开编辑正文" value={expandedBody} maxLength={20000} onChange={event=>setExpandedBody(event.target.value)}/></label></div><footer><p>此窗口的修改暂不保存。确认修改后写入当前未保存编辑，仍需明确保存版本。</p><div><button onClick={()=>setExpanded(false)}>取消</button><button className={styles.primary} onClick={()=>{change({title:expandedTitle,body:expandedBody});setExpanded(false);}}>确认修改</button></div></footer></div></div>}
   {history&&<VersionCompare versions={versions} onClose={()=>setHistory(false)}/>}
  </div>;
 });

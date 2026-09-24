@@ -3638,7 +3638,20 @@ it('ADMIN: atomic package, YAML template, workflow and module publication with r
   const before = (await sql.query('select updated_at::text from modules where id=$1', [input.moduleId])).rows[0];
   const next = { ...input, revisionId: randomUUID(), requestId: randomUUID(), expectedVersion: 1, expectedUpdatedAt: before.updated_at };
   next.files = input.files.map(f => f.path === 'references/step-0.md' ? { ...f, base64: Buffer.from('Revised private method').toString('base64') } : f);
+  next.steps = [
+    {title:'需求与目标',resources:['SKILL.md'],information:[{id:'product',title:'产品与服务',required:true,profileKey:'product'}]},
+    {title:'受众研究',resources:['SKILL.md'],information:[{id:'audience',title:'优先服务的用户',required:true,profileKey:'audience'}]},
+    {title:'效果验证',resources:['SKILL.md'],information:[{id:'measure',title:'如何验证效果',required:true,profileKey:'measure'}]},
+  ];
+  next.files.push({path:'workflow.yaml',base64:Buffer.from(
+    'kind: document\nsteps:\n  - title: 需求与目标\n    resources: [SKILL.md]\n    information:\n      - id: product\n        title: 产品与服务\n        required: true\n        profileKey: product\n  - title: 受众研究\n    resources: [SKILL.md]\n    information:\n      - id: audience\n        title: 优先服务的用户\n        required: true\n        profileKey: audience\n  - title: 效果验证\n    resources: [SKILL.md]\n    information:\n      - id: measure\n        title: 如何验证效果\n        required: true\n        profileKey: measure\n',
+  ).toString('base64')});
   expect((await saveModuleSkill(db, owner, next)).version).toBe(2);
+  const latest = await db.rpc('admin_read_skill_module',{p_actor_id:owner,p_module_id:input.moduleId});
+  expect(latest.error).toBeNull();
+  expect(latest.data.workflow.steps.map((step:any)=>step.title)).toEqual(['需求与目标','受众研究','效果验证']);
+  expect(latest.data.workflow.steps.map((step:any)=>step.information[0].title))
+    .toEqual(['产品与服务','优先服务的用户','如何验证效果']);
   await expect(saveModuleSkill(db, owner, { ...next, revisionId: randomUUID(), requestId: randomUUID() })).rejects.toThrow();
   const history = await db.rpc('read_skill_package', { p_actor_id: actor, p_module_id: input.moduleId, p_skill_id: input.skillId, p_revision_id: input.revisionId });
   expect(history.error).toBeNull();
@@ -3898,6 +3911,66 @@ it('ADMIN: model edits and unused-module deletion work through authenticated HTT
   const privileges = await sql.query("select has_table_privilege('anon','ai_models','UPDATE') as anon,has_table_privilege('authenticated','modules','DELETE') as authenticated");
   expect(privileges.rows[0]).toEqual({anon:false,authenticated:false});
 });
+it('ADMIN: re-uploading a declared Skill updates the active steps and questions without editing front-end code', async () => {
+  const administrator=await newUser();
+  await sql.query("update profiles set role='admin' where id=$1",[administrator.id]);
+  const input=adminModuleInput();
+  await sql.query("insert into ai_models(id,model_id,name,provider,api_key,max_tokens,input_limit) values($1,'qwen/qwen3.8-27b','Workflow upload fixture','openai','LOCAL_ONLY',4096,800000)",[input.module.model_id]);
+  const directory=output+'/synthetic-method';mkdirSync(directory,{recursive:true});
+  for(const file of input.files){
+    const target=directory+'/'+file.path;mkdirSync(target.slice(0,target.lastIndexOf('/')),{recursive:true});
+    writeFileSync(target,Buffer.from(file.base64,'base64'));
+  }
+  const labels=['需求确认','竞品研究','账号定位','内容策略','运营建议','商业规划','效果验证'];
+  const declaration=(count:number,revised:boolean)=>[
+    'kind: document','steps:',...labels.slice(0,count).flatMap((title,index)=>[
+      `  - title: ${revised&&index===0?'需求与目标':title}`,
+      '    resources: [SKILL.md]','    information:',
+      `      - id: question_${index+1}`,
+      `        title: ${revised&&index===0?'本期服务目标':`问题 ${index+1}`}`,
+      '        required: true',`        profileKey: question_${index+1}`,
+    ]),'',
+  ].join('\n');
+  writeFileSync(directory+'/workflow.yaml',declaration(6,false));
+  const context=await browser.newContext(),page=await context.newPage();
+  try {
+    await page.goto(app+'/login?redirect=/admin/prompts');
+    await page.getByPlaceholder('name@example.com').fill(administrator.email);
+    await page.getByPlaceholder('输入你的密码').fill(administrator.password);
+    await page.getByRole('button',{name:'登录',exact:true}).last().click();
+    await page.waitForURL(url=>url.pathname==='/admin/prompts',{timeout:90000});
+    await page.getByRole('button',{name:'新建模块',exact:true}).click();
+    await page.getByLabel('功能类型',{exact:true}).selectOption('skill');
+    await page.getByLabel('导入 Skill 文件夹',{exact:true}).setInputFiles(directory);
+    await page.getByText('已载入 11 个文件',{exact:true}).waitFor();
+    expect(await page.getByLabel('步骤 6 名称',{exact:true}).inputValue()).toBe('商业规划');
+    await page.getByText('问题 1 · 必需',{exact:true}).waitFor();
+    await page.getByTestId('prompt-name-input').fill(input.module.title);
+    const model=page.getByRole('dialog').getByRole('combobox').filter({hasText:'不限制'});
+    await model.click();await page.getByRole('option',{name:'Workflow upload fixture',exact:true}).click();
+    await page.getByLabel('我已检查步骤顺序和各步使用的参考文件').check();
+    await page.getByTestId('prompt-save').click();
+    await expect.poll(()=>page.getByRole('dialog').count(),{timeout:30000}).toBe(0);
+    const module=(await sql.query('select id from modules where title=$1',[input.module.title])).rows[0];
+    const current=async()=> (await sql.query('select workflow from artifact_workflows where module_id=$1 and enabled',[module.id])).rows[0].workflow;
+    expect((await current()).steps).toHaveLength(6);
+    writeFileSync(directory+'/workflow.yaml',declaration(7,true));
+    const row=page.getByRole('row').filter({hasText:input.module.title});
+    await row.getByRole('button').first().click();
+    await page.getByLabel('步骤 1 名称',{exact:true}).waitFor();
+    await page.getByLabel('导入 Skill 文件夹',{exact:true}).setInputFiles(directory);
+    await expect.poll(()=>page.getByLabel('步骤 7 名称',{exact:true}).inputValue()).toBe('效果验证');
+    expect(await page.getByLabel('步骤 1 名称',{exact:true}).inputValue()).toBe('需求与目标');
+    await page.getByText('本期服务目标 · 必需',{exact:true}).waitFor();
+    await page.getByLabel('我已检查步骤顺序和各步使用的参考文件').check();
+    await page.getByTestId('prompt-save').click();
+    await expect.poll(()=>page.getByRole('dialog').count(),{timeout:30000}).toBe(0);
+    expect((await current()).steps.map((step:{title:string})=>step.title))
+      .toEqual(['需求与目标','竞品研究','账号定位','内容策略','运营建议','商业规划','效果验证']);
+    expect((await current()).steps[0].information[0].title).toBe('本期服务目标');
+    expect((await sql.query('select count(*)::int n from artifact_workflows where module_id=$1 and enabled',[module.id])).rows[0].n).toBe(1);
+  }finally{await context.close();}
+},180000);
 
 
 it('ADMIN: model deletion and settings writes serialize in both transaction orders', async () => {

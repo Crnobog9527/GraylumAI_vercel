@@ -8,8 +8,9 @@ import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { WorkspaceFrame } from "@/components/opc/workspace-frame";
-import { PanelRightOpen } from "lucide-react";
+import { PanelRightOpen, Plus, Box, Search } from "lucide-react";
 import resultStyles from "@/components/opc/positioning-result.module.css";
+import composerStyles from "@/components/opc/work-composer.module.css";
 import { mergeInformation } from "./information-merge";
 import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-response";
 import {
@@ -276,6 +277,8 @@ export default function PositioningDraft({
     handoff = trpc.opc.handoff.useMutation();
   const [running, setRunning] = useState(false);
   const [resultOpen,setResultOpen]=useState(true);
+  const [workInfoOpen,setWorkInfoOpen]=useState(false);
+  useEffect(()=>{if(!workInfoOpen)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape')setWorkInfoOpen(false);};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close);},[workInfoOpen]);
   const [resultBodyNode,setResultBodyNode]=useState<HTMLDivElement|null>(null);
   const [items, setItems] = useState<Item[]>([]),
     [dirtyPlan, setDirtyPlan] = useState(false),
@@ -310,6 +313,8 @@ export default function PositioningDraft({
   const chatScroll = useRef<HTMLDivElement>(null);
   const attachChatScroll = useCallback((node:HTMLDivElement|null)=>{chatScroll.current=node;if(node)requestAnimationFrame(()=>{if(chatScroll.current===node)node.scrollTop=node.scrollHeight;});},[]);
   const [mentorInput, setMentorInput] = useState("");
+  const [mentorAddMenu,setMentorAddMenu]=useState(false),[mentorSkillMenu,setMentorSkillMenu]=useState(false),[mentorSkillQuery,setMentorSkillQuery]=useState('');
+  const mentorSkillCatalog=trpc.modules.getModules.useQuery({category:'all',limit:100,offset:0,sortBy:'newest'},{enabled:mentorSkillMenu});
   const [manualMentorEnabled, setManualMentorEnabled] = useState(false);
   const [hydratedDraft, setHydratedDraft] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<
@@ -1056,12 +1061,12 @@ export default function PositioningDraft({
     if (!request.input?.trim()) throw new Error("OPC_INPUT_REQUIRED");
     const admitted = await prepareStep.mutateAsync(request);
     await execute.mutateAsync({ executionId: admitted.executionId });
-    // Pull the completed mentor execution while this request still owns the
-    // current question identity. The generic post-action refresh below also
-    // refreshes history, but read/list updates can re-render the query first;
-    // relying on that later refetch left a completed mentor result invisible
-    // to the form projection until a manual reload.
-    await history.refetch();
+    // Read the turn binding and its execution together while the retained
+    // envelope still blocks automatic opening. Clearing the envelope first
+    // lets that effect race an explicit first message on a manual draft.
+    const [draftRead, historyRead] = await Promise.all([read.refetch(), history.refetch()]);
+    if (draftRead.error || !draftRead.data || historyRead.error || !historyRead.data)
+      throw new Error('OPC_MENTOR_READBACK_UNAVAILABLE');
     sessionStorage.removeItem(key);
     // A newer typed message is not overwritten; only an exact match is cleared.
     setMentorInput((old) => (old.trim() === request.input.trim() ? "" : old));
@@ -1079,7 +1084,7 @@ export default function PositioningDraft({
     if (interrupted)
       await execute.mutateAsync({ executionId: interrupted.executionId });
   }
-  async function ask(step: Step, questionId: string) {
+  async function ask(step: Step, questionId: string, inputOverride?: string) {
     const key = "opc-step:" + draftId + ":" + step.id;
     if (sessionStorage.getItem(key)) {
       // A retained envelope still owns this step. Never create a second
@@ -1093,10 +1098,14 @@ export default function PositioningDraft({
       const fixed: StepEnvelope = {
         request: {
           draftId, stepId: step.id, purpose: "mentor", requestId: crypto.randomUUID(),
-          input: mentorInput.trim(), questionId, organizeAfter: true,
+          input: (inputOverride ?? mentorInput).trim(), questionId, organizeAfter: true,
         },
       };
       sessionStorage.setItem(key, JSON.stringify(fixed));
+      // Reserve the user's turn before enabling the mentor. Otherwise the
+      // automatic opening effect races this send and both try to admit work on
+      // the same Session.
+      if (manualEntry) setManualMentorEnabled(true);
       await resumeStepEnvelope(step, fixed);
     });
   }
@@ -1393,7 +1402,7 @@ export default function PositioningDraft({
         await runPlanRequest(retainedRequest, sourceRoundId);
         setRetainedPlan(null);
       });
-      else router.push(`/positioning/${draftId}/plan`);
+      else router.push(`/positioning/${draftId}/topics`);
       return;
     }
     if (hasUnsavedInformation) return;
@@ -1802,23 +1811,17 @@ export default function PositioningDraft({
       !["completed", "cancelled"].includes(execution.state),
   );
   return (
-    <WorkspaceFrame area="chat" rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<div className={resultStyles.panel}><header><h2>{planView?'已采用选题':snap.state==='draft'?'当前问题':'已确认的定位'}</h2><p>{snap.state==='draft'?'本步骤的信息与确认操作':'当前策略与信息状态'}</p></header><div className={resultStyles.body} ref={setResultBodyNode}>{snap.state!=='draft'&&steps.map((step,index)=><details key={step.id} open={step.id===selectedStep?.id}><summary><span>{index+1}. {step.title}</span><small>{snap.steps[step.id].valid?'已确认':'待核对'}</small></summary><div className={resultStyles.fields}>{(d.information[step.id]?.schema??[]).map((field:{id:string;title:string})=><div key={field.id}><strong>{field.title}</strong><p>{d.information[step.id]?.values?.[field.id]?.value||'待补充'}</p></div>)}</div></details>)}</div><footer>修改后须按原流程明确保存与确认。</footer></div>}>
+    <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'本地模拟 · 回复、保存与交接均为演示'} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<div className={resultStyles.panel}><header><h2>{planView?'已采用选题':'已确认的定位'}</h2><p>{snap.state==='draft'?'已核对信息与当前问题':'当前策略与信息状态'}</p></header><div className={resultStyles.body} ref={setResultBodyNode}>{steps.filter(step=>snap.steps[step.id].valid).map((step,index)=><details key={step.id} open={step.id===selectedStep?.id}><summary><span>{index+1}. {step.title}</span><small>已确认</small></summary><div className={resultStyles.fields}>{(d.information[step.id]?.schema??[]).map((field:{id:string;title:string})=><div key={field.id}><strong>{field.title}</strong><p>{d.information[step.id]?.values?.[field.id]?.value||'待补充'}</p></div>)}</div></details>)}</div></div>}>
     <main className={`${resultStyles.workspaceMain} h-full w-full overflow-y-auto text-[var(--text-primary)]`}><div className={resultStyles.workspaceContent}>
       <header className={resultStyles.positionTop}>
-        <div>
-          <h1>{planView ? "第一周计划" : manualEntry ? "录入已有定位" : "定位分析"}</h1>
-          <p className="text-xs text-[var(--text-secondary)]">{d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'隔离模拟 · 未调用真实模型或研究服务'}</p>
-        </div>
+        <h1>{planView ? "第一周计划" : manualEntry ? "录入已有定位" : "我的定位分析"}</h1>
         <div className={resultStyles.positionActions}>
-          <Link href="/positioning" className="underline">账号与定位列表</Link>
+          <span>{snap.state==='published'?'整体规划 · 已确认':'整体规划 · 进行中'}</span>
+          <button type="button" onClick={()=>setWorkInfoOpen(true)}>工作信息</button>
           {!resultOpen&&<button type="button" aria-label="展开右边栏" onClick={()=>setResultOpen(true)}><PanelRightOpen size={18}/></button>}
         </div>
       </header>
-      <div className={resultStyles.recoveryActions}>
-        <Button variant="outline" onClick={() => read.refetch()}>
-          重新读取状态
-        </Button>
-      </div>
+      {workInfoOpen&&<div className={resultStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setWorkInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={resultStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setWorkInfoOpen(false)}>×</button></header><p>当前工作：{manualEntry?'已有定位录入':'定位分析'}</p><p>状态：{snap.state==='published'?'定位已确认':'定位进行中'}</p><p>定位讨论、待确认修改与历史版本留在原工作；查看不会确认或保存。</p><footer><button type="button" onClick={()=>{void read.refetch();setWorkInfoOpen(false);}}>重新读取状态</button><Link href="/positioning">新任务与账号</Link></footer></section></div>}
       {!planView && <>{hasPendingStepRequest && (
         <section role="status" aria-label="待恢复的导师请求" className="space-y-2 rounded-xl border border-[var(--border-primary)] p-3">
           <p>有一条发给导师的内容结果尚未确认。原始请求已保留；恢复前不会发送新请求、确认步骤或切换步骤。</p>
@@ -1857,8 +1860,7 @@ export default function PositioningDraft({
             }
             onClick={() => setActiveStep(step.id)}
           >
-            {index + 1}. {step.title}
-            {snap.steps[step.id].valid ? " · 已确认" : ""}
+            {snap.steps[step.id].valid ? "✓ " : `${index + 1} `}{step.title}
           </Button>
         ))}
       </nav>
@@ -1963,12 +1965,12 @@ export default function PositioningDraft({
                     aria-live="polite"
                     className="max-h-[55vh] min-h-56 space-y-3 overflow-y-auto overscroll-contain pr-2"
                   >
-                    <div className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
-                      <span className="text-xs text-[var(--text-secondary)]">导师</span>
+                    {mentorExecutions.length===0&&<div className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
+                      <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>Graylum · 增长顾问</span>
                       <p className="mt-1 whitespace-pre-wrap break-words">
                         我会在同一个对话里陪你完成全部步骤，一次问一个问题，并把从回答中梳理出的信息放到右侧对应表单，供你核对。
                       </p>
-                    </div>
+                    </div>}
                     {mentorExecutions.map((execution) => {
                       const turn = mentorTurns.get(execution.executionId);
                       const turnStep = steps.find(
@@ -2001,7 +2003,7 @@ export default function PositioningDraft({
                             </div>
                           )}
                           <div data-message-role="assistant" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
-                            <span className="text-xs text-[var(--text-secondary)]">
+                            <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>
                               {openingTurn ? "导师主动引导" : "导师"}
                               {turnLabel ? ` · ${turnLabel}` : turnStep ? ` · ${turnStep.title}` : ""}
                             </span>
@@ -2041,34 +2043,47 @@ export default function PositioningDraft({
                         </div>
                       );
                     })}
+                  {!manualEntry && snap.state === "draft" && !reviewOnly && <section className={resultStyles.currentAction} aria-label="当前问题操作">
+                    <strong>当前核对：{activeQuestion.title}</strong>
+                    <p>{(infoEdits[step.id]?.[activeQuestion.id] ?? d.information[step.id].values?.[activeQuestion.id])?.value || '先讨论当前问题，或在右侧填写答案。'}</p>
+                    <div>
+                      <Button disabled={busy || hasPendingStepRequest || Boolean(pendingMentor) || confirmationState.kind === "malformed" || confirmationRedundant(step.id, activeQuestion.id, false) || !(infoEdits[step.id]?.[activeQuestion.id] ?? d.information[step.id].values?.[activeQuestion.id])?.value?.trim()} onClick={() => confirmStep(step, index, activeQuestion.id, false, nonAnswersFor(step.id, activeQuestion.id), false)}>{pendingConfirmation ? '继续核对本题确认' : '确认当前信息，继续'}</Button>
+                      <Button variant="outline" disabled={busy || openingSteps.includes(step.id) || hasPendingConfirmation || hasPendingStepRequest || Boolean(pendingMentor)} onClick={() => { void ask(step, activeQuestion.id, '我不确定，帮我判断。'); }}>我不确定，帮我判断</Button>
+                    </div>
+                  </section>}
                   </div>
                   <div className={resultStyles.composerZone}><label className="block text-sm">
-                    回复导师
+                    <span className={resultStyles.visuallyHidden}>回复导师</span>
                     <Textarea
                       className="resize-none"
                       aria-label="给导师的回复"
                       value={mentorInput}
-                      disabled={manualEntry || busy || hasPendingConfirmation || hasPendingStepRequest || Boolean(pendingMentor) || snap.state !== "draft"}
+                      disabled={snap.state !== "draft"}
                       onChange={(event) => setMentorInput(event.target.value)}
-                      placeholder="用自己的话说就好，可以多聊几轮。"
+                      placeholder="消息"
                       maxLength={8000}
                     />
                   </label>
+                  <div className={resultStyles.mentorTools}>
+                    <div className={composerStyles.menuAnchor}><button type="button" aria-label="添加资料" aria-expanded={mentorAddMenu} onClick={()=>{setMentorAddMenu(value=>!value);setMentorSkillMenu(false);}}><Plus size={19}/></button>{mentorAddMenu&&<div className={composerStyles.menu} role="menu"><p>添加资料 · 待接入</p><button disabled>从文件添加</button><button disabled>从资料库添加</button><button disabled>添加连接器</button></div>}</div>
+                    <div className={composerStyles.menuAnchor}><button type="button" aria-label="使用技能" aria-expanded={mentorSkillMenu} onClick={()=>{setMentorSkillMenu(value=>!value);setMentorAddMenu(false);}}><Box size={18}/></button>{mentorSkillMenu&&<div className={composerStyles.skillMenu} role="dialog" aria-label="使用技能"><div className={composerStyles.skillHead}><strong>使用技能</strong><span>当前定位工作</span></div><label className={composerStyles.skillSearch}><Search size={16}/><input aria-label="搜索技能" placeholder="搜索技能" value={mentorSkillQuery} onChange={event=>setMentorSkillQuery(event.target.value)}/></label><div className={composerStyles.skillList} role="group" aria-label="功能广场中的技能">{mentorSkillCatalog.isLoading?<p role="status">正在读取技能…</p>:mentorSkillCatalog.error?<p role="alert">技能列表暂不可用。</p>:<>{mentorSkillCatalog.data?.modules.filter(module=>module.title.toLocaleLowerCase().includes(mentorSkillQuery.trim().toLocaleLowerCase())).map(module=><button key={module.id} type="button" disabled><span className={composerStyles.skillGlyph}><Box size={16}/></span><span><strong>{module.title}</strong><small>定位流程已绑定方法；从功能广场开启其他任务</small></span></button>)}{!mentorSkillCatalog.data?.modules.some(module=>module.title.toLocaleLowerCase().includes(mentorSkillQuery.trim().toLocaleLowerCase()))&&<p>没有匹配的技能</p>}</>}</div><div className={composerStyles.skillFoot}><Link href="/workbench/marketplace">浏览功能广场</Link></div></div>}</div>
+                  </div>
                   {openingSteps.includes(step.id) && (
                     <p role="status" className="text-xs text-[var(--text-secondary)]">
                       导师正在准备这道题的引导，不需要你先发言；右侧表单现在就可以填写。
                     </p>
                   )}
                   <Button
+                    aria-label="发送"
                     disabled={
-                      manualEntry || busy ||
+                      busy ||
                       openingSteps.includes(step.id) ||
                       Boolean(pendingMentor) || hasPendingConfirmation || hasPendingStepRequest ||
                       snap.state !== "draft" ||
                       reviewOnly ||
                       !mentorInput.trim()
                     }
-                    onClick={() => ask(step, activeQuestion.id)}
+                    onClick={() => { void ask(step, activeQuestion.id); }}
                   >
                     {busy ? "正在回复…" : "发送"}
                   </Button></div>
@@ -2105,9 +2120,7 @@ export default function PositioningDraft({
                       {s.valid ? `；本步骤「${step.title}」已确认，无需重复确认。` : "。继续修改后可重新确认。"}
                     </p>
                   )}
-                  <p className="text-sm text-[var(--text-secondary)]">
-                    {manualEntry ? "填写与自动保存不等于确认；请逐项核对，必需信息全部确认后才能发布正式定位。" : "你可以直接填写，也可以和左侧导师聊。填写与自动保存不等于确认；当前答案由你核对确认后，我们再进入下一个问题。"}
-                  </p>
+                  {manualEntry && <p className="text-sm text-[var(--text-secondary)]">填写与自动保存不等于确认；请逐项核对，必需信息全部确认后才能发布正式定位。</p>}
                   {informationConflicts[step.id] && <div role="alert">
                     <p>其他窗口修改了相同字段。你的输入未提交，请比较后决定。</p>
                     {informationConflicts[step.id].fields.map(id=><p key={id}>{schema.find(f=>f.id===id)?.title ?? id}：服务器「{informationConflicts[step.id].current[id]?.value ?? ""}」；你的输入「{infoEdits[step.id]?.[id]?.value ?? ""}」</p>)}
@@ -2168,15 +2181,15 @@ export default function PositioningDraft({
                               {field.required ? "（必需）" : ""}
                             </label>
                           )}
-                          <p className="text-xs text-[var(--text-secondary)]">
+                          {manualEntry && <p className="text-xs text-[var(--text-secondary)]">
                             {isAgentProposal(field)
                               ? "这是导师要给出的成果建议：由导师根据已确认的资料先提出草案，你只需要核对、修改或确认，不需要自己从头写分析。"
                               : "这是你自己的事实：请按你的真实情况填写，导师不会替你编造。"}
                             {value.status === "provisional" && value.nature === "hypothesis"
                               ? " 当前内容为导师提出的待验证建议。"
                               : ""}
-                          </p>
-                          {value.value.trim() && (
+                          </p>}
+                          {value.value.trim() && manualEntry && (
                             <p className="text-xs text-[var(--text-secondary)]">
                               性质：
                               {value.nature === "fact" ? "已陈述事实"
@@ -2196,7 +2209,7 @@ export default function PositioningDraft({
                             aria-label={field.title}
                             maxLength={400}
                             className="min-h-20 resize-none"
-                            disabled={busy || hasPendingConfirmation || hasPendingStepRequest || snap.state !== "draft"}
+                            disabled={snap.state !== "draft" || hasPendingConfirmation}
                             value={value.value}
                             onCompositionStart={() => {
                               composing.current = true;
@@ -2227,13 +2240,11 @@ export default function PositioningDraft({
                               答案已保存为待核对内容，请确认或继续修改。
                             </p>
                           )}
-                          <Button className="w-full" disabled={busy || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || (!manualEntry && reviewOnly) || confirmationRedundant(step.id, field.id, false)} onClick={() => confirmStep(step, index, field.id, false, nonAnswersFor(step.id, field.id), manualEntry)}>
+                          {manualEntry && <><Button className="w-full" disabled={busy || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || confirmationRedundant(step.id, field.id, false)} onClick={() => confirmStep(step, index, field.id, false, nonAnswersFor(step.id, field.id), true)}>
                             {pendingConfirmation ? "继续核对本题确认" : "确认本题并继续"}
-                          </Button>
-                          <Button variant="outline" className="w-full" disabled={busy || hasPendingConfirmation || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || (!manualEntry && reviewOnly) || confirmationRedundant(step.id, field.id, true)} onClick={() => confirmStep(step, index, field.id, true, nonAnswersFor(step.id, field.id), manualEntry)}>
+                          </Button><Button variant="outline" className="w-full" disabled={busy || hasPendingConfirmation || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || confirmationRedundant(step.id, field.id, true)} onClick={() => confirmStep(step, index, field.id, true, nonAnswersFor(step.id, field.id), true)}>
                             {field.required ? "按填写的原因暂缓本题并继续" : "暂时跳过本题"}
-                          </Button>
-                          <p className="text-xs text-[var(--text-secondary)]">还没想清楚可以继续和导师聊。{field.required ? "暂缓时请在上方写明原因，不会记成已确认事实。" : "选填问题可以明确选择跳过。"}</p>
+                          </Button></>}
                           {pendingConfirmation && <p role="status">正在核对原确认请求。确认成功前保持本题，不会跳过下一题。</p>}
                           {!manualEntry && reviewOnly && (
                             <p role="status">
@@ -2258,6 +2269,22 @@ export default function PositioningDraft({
                       );
                     })}
                   </div>
+                  {!manualEntry && <div className={resultStyles.confirmedPositions} aria-label="已确认的定位信息">
+                    <p>未确定的建议留在对话中。这里保留已确认信息；修改自动同步，确认与推进仍由你决定。</p>
+                    {d.snapshot.workflow.steps.map((confirmedStep:Step,confirmedIndex:number)=>{
+                      const info=d.information[confirmedStep.id];
+                      const confirmedFields=info.schema.filter((field:{id:string})=>info.values?.[field.id]?.status==='confirmed'||Boolean(infoEdits[confirmedStep.id]?.[field.id]));
+                      if(!confirmedFields.length)return null;
+                      return <section key={confirmedStep.id}><h4>{confirmedIndex+1}. {confirmedStep.title}</h4>{confirmedFields.map((field:{id:string;title:string})=>{
+                        const value=infoEdits[confirmedStep.id]?.[field.id]??info.values?.[field.id];
+                        if(!value)return null;
+                        return <label key={field.id}><span>{field.title}</span><Textarea aria-label={`已确认：${field.title}`} maxLength={400} value={value.value} disabled={hasPendingConfirmation} onChange={event=>{
+                          captureInformationBase(confirmedStep.id);
+                          setInfoEdits(old=>({...old,[confirmedStep.id]:{...Object.fromEntries(info.schema.map((part:{id:string})=>[part.id,old[confirmedStep.id]?.[part.id]??info.values?.[part.id]??{status:'unknown',nature:'unknown',value:''}])),[field.id]:{...value,value:event.target.value,status:event.target.value.trim()?'provisional':'unknown'}}}));
+                        }}/><small>{value.status==='confirmed'?'已确认':'修改已自动保存 · 待重新确认'}</small>{value.status!=='confirmed'&&<Button variant="outline" disabled={busy||hasPendingConfirmation||hasPendingStepRequest} onClick={()=>confirmStep(confirmedStep,confirmedIndex,field.id,false,nonAnswersFor(confirmedStep.id,field.id),true)}>确认这项修改</Button>}</label>;
+                      })}</section>;
+                    })}
+                  </div>}
                   {saveState[step.id] === "error" && (
                     <Button
                       variant="outline"
@@ -2294,7 +2321,7 @@ export default function PositioningDraft({
                       activeQuestion.id,
                       reviewReachedIds,
                     );
-                    return (
+                    return rows.length > 1 ? (
                       <nav
                         aria-label="本步骤已到达的问题"
                         className="space-y-2 border-t border-[var(--border-primary)] pt-3"
@@ -2330,7 +2357,7 @@ export default function PositioningDraft({
                           ))}
                         </ul>
                       </nav>
-                    );
+                    ) : null;
                   })()}
                 </section>,resultBodyNode)}
               </div>

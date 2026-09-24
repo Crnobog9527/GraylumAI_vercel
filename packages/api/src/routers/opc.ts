@@ -136,6 +136,27 @@ export const opcRouter = router({
   library: readProcedure
     .input(z.object({ search: z.string().max(160).default(''), from: z.string().date().nullable().default(null), to: z.string().date().nullable().default(null) }).strict())
     .query(({ ctx, input }) => ctx.opc.library(input)),
+  workUiChange: procedure
+    .input(z.object({workItemId:z.string().uuid(),requestId:z.string().uuid(),expectedRevision:z.number().int().positive(),action:z.enum(['rename','pin','unpin','archive','restore','delete']),name:z.string().trim().min(1).max(160).optional()}).strict())
+    .mutation(({ctx,input})=>ctx.opc.workUiChange(input)),
+  accountUiChange: procedure
+    .input(z.object({accountProjectId:z.string().uuid(),requestId:z.string().uuid(),expectedRevision:z.number().int().positive(),name:z.string().trim().min(1).max(120)}).strict())
+    .mutation(({ctx,input})=>ctx.opc.accountUiChange(input)),
+  publicationUiChange: procedure
+    .input(z.object({workItemId:z.string().uuid(),requestId:z.string().uuid(),expectedRevision:z.number().int().positive(),plannedDate:z.string().date().nullable(),status:z.enum(['unpublished','published']),publishedDate:z.string().date().nullable()}).strict())
+    .mutation(({ctx,input})=>ctx.opc.publicationUiChange(input)),
+  positionHistory: readProcedure
+    .input(z.object({draftId:z.string().uuid()}).strict())
+    .query(({ctx,input})=>ctx.opc.positionHistory(input.draftId)),
+  accountStrategyHistory: readProcedure
+    .input(z.object({accountProjectId:z.string().uuid()}).strict())
+    .query(({ctx,input})=>ctx.opc.accountStrategyHistory(input.accountProjectId)),
+  accountStrategyBegin: procedure
+    .input(z.object({accountProjectId:z.string().uuid(),requestId:z.string().uuid()}).strict())
+    .mutation(({ctx,input})=>ctx.opc.accountStrategyBegin(input.accountProjectId,input.requestId)),
+  accountStrategySave: procedure
+    .input(z.object({accountProjectId:z.string().uuid(),requestId:z.string().uuid(),expectedSourceVersionId:z.string().uuid(),expectedPendingDraftId:z.string().uuid().nullable(),edits:z.record(z.string().max(64),z.record(z.string().max(64),z.string().max(400)))}).strict())
+    .mutation(({ctx,input})=>ctx.opc.accountStrategySave(input)),
   editLibrary: procedure
     .input(opcLibraryEdit)
     .mutation(({ ctx, input }) => ctx.opc.libraryEdit(input)),

@@ -1,3 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Reuse the existing draft, plan and handoff operations under a focused route.
-export { default } from "../page";
+import { redirect } from 'next/navigation';
+
+/** Preserve old plan deep links on the current topic workspace. */
+export default async function LegacyPlan({params}:{params:Promise<{draftId:string}>}) {
+  const {draftId}=await params;
+  redirect(`/positioning/${encodeURIComponent(draftId)}/topics`);
+}

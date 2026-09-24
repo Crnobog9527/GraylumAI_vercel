@@ -18,4 +18,14 @@ describe('administrator folder import', () => {
     await expect(readSkillFiles([file('references/only.md')])).rejects.toThrow('SKILL.md');
     await expect(readSkillFiles([file('SKILL.md',new Uint8Array([0xc3,0x28]))])).rejects.toThrow('UTF-8');
   });
+  it('loads changed steps and questions from the uploaded workflow declaration', async () => {
+    const result = await readSkillFiles([file('SKILL.md'),file('workflow.yaml',
+      'kind: social\nsteps:\n  - title: 需求确认\n    resources: [SKILL.md]\n    information:\n      - id: product\n        title: 产品与服务\n        required: true\n  - title: 效果验证\n    resources: [SKILL.md]\n    information:\n      - id: measure\n        title: 如何验证效果\n        required: true\n')]);
+    expect(result.workflow?.steps.map(step=>step.title)).toEqual(['需求确认','效果验证']);
+    expect(result.workflow?.steps[1].information?.[0].title).toBe('如何验证效果');
+  });
+  it('rejects ambiguous workflow declarations before replacing the current editor state', async () => {
+    await expect(readSkillFiles([file('SKILL.md'),file('workflow.yaml',
+      'kind: social\nsteps: *missing\n')])).rejects.toThrow('workflow.yaml');
+  });
 });

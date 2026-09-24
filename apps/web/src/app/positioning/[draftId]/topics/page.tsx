@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, ArrowUp, Bot, Loader2, User } from 'lucide-react';
+import { ArrowUp, Box, Loader2, Plus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
@@ -111,6 +111,8 @@ export default function TopicWorkspacePage() {
   const params = useParams<{ draftId: string }>();
   const draftId = params?.draftId ?? '';
   const [panelOpen,setPanelOpen]=useState(true);
+  const [infoOpen,setInfoOpen]=useState(false);
+  const [skillMenu,setSkillMenu]=useState(false),[addMenu,setAddMenu]=useState(false),[skillQuery,setSkillQuery]=useState('');
   const [input, setInput] = useState('');
   const inputKey=draftId?'opc-topic-input:'+draftId:'';
   useEffect(()=>{if(inputKey)setInput(localStorage.getItem(inputKey)??'');},[inputKey]);
@@ -122,7 +124,6 @@ export default function TopicWorkspacePage() {
   const openingAttempt = useRef('');
   const [working, setWorking] = useState(false);
   const [candidate, setCandidate] = useState<{ body: PlanItem[]; requestId: string } | null>(null);
-  const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [adopted, setAdopted] = useState<
     Array<{ projectId: string; workItemId: string; sessionId: string; itemId: string }>
   >([]);
@@ -148,9 +149,10 @@ export default function TopicWorkspacePage() {
   const handoff = trpc.opc.handoff.useMutation();
   const saveDraft = trpc.opc.saveTopicDraft.useMutation();
   const adoptTopics = trpc.opc.adoptTopics.useMutation();
+  const queryUtils = trpc.useUtils();
   const topicDraft = trpc.opc.topicDraft.useQuery({ draftId }, { enabled: Boolean(draftId && sessionId) });
+  const skillCatalog=trpc.modules.getModules.useQuery({category:'all',limit:100,offset:0,sortBy:'newest'},{enabled:skillMenu});
 
-  const [candidateExpanded, setCandidateOpen] = useState<boolean | null>(null);
   const busy = working || turn.isPending || execute.isPending || bind.isPending || savePlan.isPending || handoff.isPending || saveDraft.isPending || adoptTopics.isPending;
   const storageKey = sessionId ? 'opc-topic-operation:' + sessionId : '';
   const candidateKey = sessionId ? 'opc-topic-candidate:' + sessionId : '';
@@ -179,7 +181,6 @@ export default function TopicWorkspacePage() {
       setCandidate(value);
     } catch { setError('无法保存本机草稿，已停止修改。'); }
   }
-  const selectionDraftVersion = useRef<string | null>(null);
   useEffect(() => {
     const body = topicDraft.data?.body as PlanItem[] | null | undefined;
     if (!body?.length) return;
@@ -192,10 +193,6 @@ export default function TopicWorkspacePage() {
       setCandidate(edited?.requestId === requestId ? edited : { body, requestId });
     } catch { setError('本机候选修改无法读取，请保留记录。'); }
 
-    if (selectionDraftVersion.current !== requestId) {
-      selectionDraftVersion.current = requestId;
-      setSelectedItems(body.map(item => item.id));
-    }
   }, [topicDraft.data?.draftVersionId, topicDraft.data?.body, candidateKey]);
 
   const plans = (read.data?.plans ?? []) as Array<{
@@ -215,9 +212,8 @@ export default function TopicWorkspacePage() {
     for (const item of adopted) ids.add(item.itemId);
     return ids;
   }, [read.data?.handoffs, adopted]);
-  const handoffItems = [...(read.data?.handoffs??[]).flatMap((h:{result?:Array<{itemId:string;workItemId:string;sessionId:string}>})=>h.result??[]),...adopted];
+  const handoffItems = [...new Map([...((read.data?.handoffs??[]).flatMap((h:{result?:Array<{itemId:string;workItemId:string;sessionId:string}>})=>h.result??[])),...adopted].map(item=>[item.itemId,item])).values()];
   function topicLink(item:PlanItem){const saved=handoffItems.find((h:{itemId:string;sessionId:string})=>h.itemId===item.id);return saved?'/runtime?session='+saved.sessionId+'&continue=1':undefined;}
-  const candidateOpen = candidateExpanded ?? !candidate?.body.some(item => adoptedItemIds.has(item.id));
   /**
    * Account identities come from the owned account list, not from the draft
    * read: `opc.read` for one draft has no accounts projection, so reading them
@@ -314,21 +310,16 @@ export default function TopicWorkspacePage() {
             setNotice('已保存为第 ' + result.version + ' 版候选。请核对该版本后明确采纳。');
           } else if (op.kind === 'adopt') {
             const result = await handoff.mutateAsync(op.request);
+            await queryUtils.opc.library.invalidate();
             setAdopted(result as typeof adopted);
-            setCandidateOpen(false);
-            setPanelOpen(false);
             setNotice('已采用所选内容并保存到资料库。');
           } else if (op.kind === 'draft') {
             const result = await saveDraft.mutateAsync(op.request);
             editCandidate({ body: result.body as PlanItem[], requestId: op.request.requestId });
-            setSelectedItems((result.body as PlanItem[]).map(item => item.id));
           } else {
             const result = await adoptTopics.mutateAsync(op.request);
+            await queryUtils.opc.library.invalidate();
             setAdopted(result.items as typeof adopted);
-            const acceptedIds = new Set((result.items as typeof adopted).map(item => item.itemId));
-            setSelectedItems(current => current.filter(id => !acceptedIds.has(id)));
-            setCandidateOpen(false);
-            setPanelOpen(false);
             setNotice('已采用所选内容并保存到资料库。可从下方进入对应内容工作。');
           }
           localStorage.setItem(storageKey + ':completed:' + op.request.requestId, JSON.stringify(op));
@@ -403,7 +394,7 @@ export default function TopicWorkspacePage() {
     };
   }
 
-  async function adoptCurrent(itemIds = selectedItems, requestId?: string) {
+  async function adoptCurrent(itemIds: string[], requestId?: string) {
     if (!candidate || pending) return;
     const remaining = itemIds.filter(id => !adoptedItemIds.has(id));
     const request = adoptionRequest(candidate.body, remaining, requestId);
@@ -470,82 +461,18 @@ export default function TopicWorkspacePage() {
 
   const bound = Boolean(workspace.data?.bound);
   const sourceAvailable = workspace.data?.sourceAllowed !== false;
+  const adoptedTopics = [...new Map([...plans.flatMap(plan => plan.body ?? []), ...(candidate?.body ?? [])].filter(item => adoptedItemIds.has(item.id)).map(item => [item.id, item])).values()];
 
   return (
-    <WorkspaceFrame area="topics" rightOpen={panelOpen} onToggleRight={()=>setPanelOpen(value=>!value)} right={<div className="h-full overflow-y-auto"><header className="border-b px-4 py-5 text-base font-medium">选题与版本</header>
-          {candidate && topicDraft.data && (
-            <section className="shrink-0 border-t border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4">
-              <div className="mx-auto max-w-4xl">
-                <button type="button" className="flex w-full items-center justify-between text-sm font-medium" aria-expanded={candidateOpen} onClick={()=>setCandidateOpen(!candidateOpen)}><span>选题草稿 · {candidate.body.filter(item=>!adoptedItemIds.has(item.id)).length} 条未采用</span><span>{candidateOpen?'收起选题':'展开选题'}</span></button>
-                {candidateOpen && <>
-                <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                  选择具体选题后直接采用；也可以用自然语言告诉 Agent「采用全部」或「只采用第 1、3 条」。
-                </p>
-                <ul className="mt-2  text-sm" aria-label="候选选题">
-                  {candidate.body.map((item) => {
-                    const wasAdopted = adoptedItemIds.has(item.id);
-                    return (
-                    <li key={item.id} className="flex items-start gap-2 py-2">
-                      <input type="checkbox" aria-label={'选择 '+item.title} disabled={wasAdopted||busy||Boolean(pending)} checked={!wasAdopted && selectedItems.includes(item.id)} onChange={event=>setSelectedItems(current=>event.target.checked?[...new Set([...current,item.id])]:current.filter(id=>id!==item.id))}/>
-                      <span><strong>{item.day} · {topicLink(item)?<Link className="underline" href={topicLink(item)!}>{item.title}</Link>:item.title}</strong>{wasAdopted ? ' · 已采用' : ''}<br/><span className="text-xs text-[var(--text-tertiary)]">{item.platform}/{item.account} · {item.brief}</span>{!wasAdopted && <label className="block mt-2 text-xs">内容类型<select aria-label={'内容类型 '+item.title} value={item.contentType??'unknown'} disabled={busy||Boolean(pending)} onChange={event=>editCandidate({...candidate,body:candidate.body.map(row=>row.id===item.id?{...row,contentType:planItem.shape.contentType.parse(event.target.value)}:row)})} className="ml-2 rounded border bg-[var(--bg-primary)] p-1"><option value="unknown">待确认</option><option value="article">文章</option><option value="image_text">图文</option><option value="video">视频</option></select></label>}{!wasAdopted && <details className="mt-1"><summary className="cursor-pointer text-xs">修改平台或账号</summary><label className="block text-xs">平台<input aria-label={'平台 '+item.title} disabled={busy||Boolean(pending)} value={item.platform} onChange={event=>editCandidate({...candidate,body:candidate.body.map(row=>row.id===item.id?{...row,platform:event.target.value}:row)})} className="ml-2 rounded border bg-transparent px-2"/></label><label className="block text-xs">账号<input aria-label={'账号 '+item.title} disabled={busy||Boolean(pending)} value={item.account} onChange={event=>editCandidate({...candidate,body:candidate.body.map(row=>row.id===item.id?{...row,account:event.target.value}:row)})} className="ml-2 rounded border bg-transparent px-2"/></label></details>}</span>
-                    </li>
-                  );})}
-                </ul>
-                <div className="mt-3 flex gap-2">
-                  <Button size="sm" disabled={busy || Boolean(pending) || !selectedItems.some(id=>!adoptedItemIds.has(id))} onClick={()=>adoptCurrent()}>
-                    采用所选并保存到资料库
-                  </Button>
-                  <Button size="sm" variant="outline" disabled={busy || Boolean(pending) || candidate.body.every(item=>adoptedItemIds.has(item.id))} onClick={()=>setSelectedItems(candidate.body.filter(item=>!adoptedItemIds.has(item.id)).map(item=>item.id))}>
-                    全选
-                  </Button>
-                </div>
-                </>}
-              </div>
-            </section>
-          )}
-
-          {(plans.length > 0 || adopted.length > 0) && (
-            <section className="shrink-0 border-t border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4">
-              <div className="mx-auto max-w-4xl">
-                <details><summary className="cursor-pointer text-sm font-medium">历史正式采用版本 · {plans.length}</summary>{plans.map((plan) => (
-                  <article key={plan.planId} className="mt-3 rounded-xl border border-[var(--border-primary)] p-3">
-                    <h3 className="text-sm font-medium">第 {plan.version} 版 · {plan.body?.length ?? 0} 个选题</h3>
-                    {plan.body ? (
-                        <ul className="mt-2  text-sm" aria-label={'第 ' + plan.version + ' 版选题'}>
-                          {plan.body.map((item) => <li key={item.id}>{item.day} · {item.platform}/{item.account} · {topicLink(item)?<Link className="underline" href={topicLink(item)!}>{item.title}</Link>:item.title}</li>)}
-                        </ul>
-                    ) : (
-                      <p role="status" className="mt-2 text-sm">
-                        来源已不可用，暂不能采纳此版本。
-                      </p>
-                    )}
-                  </article>
-                ))}</details>
-
-              </div>
-            </section>
-          )}
-
-          <details className="p-4"><summary>讨论中的候选记录</summary>{executions?.filter(e=>e.contentAvailable&&e.state==='completed').map(e=>{const rows=parseCandidate(e.body??e.primaryBody);return rows?<article key={e.executionId} className="border-t py-3"><ul>{rows.map(item=><li key={item.id} className="py-2"><strong>{topicLink(item)?<Link href={topicLink(item)!} className="underline">{item.title}</Link>:item.title}</strong><p className="text-sm">{item.day} · {item.platform}/{item.account}</p><p className="text-sm whitespace-pre-wrap">{item.brief}</p></li>)}</ul></article>:null;})}</details>
-          </div>}><main className="flex h-full min-h-0 flex-col overflow-y-auto bg-[var(--bg-primary)] text-[var(--text-primary)]">
-      <header className="flex h-16 shrink-0 items-center justify-between border-b px-4 sm:px-6" style={{borderColor:'#ededed'}}>
-        <div className="flex items-center gap-3">
-          <Link className="underline" href={`/positioning/${draftId}`}>
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-          <div>
-            <h1 className="font-medium">第一周选题工作对话</h1>
-            <p className="text-xs text-[var(--text-tertiary)]">
-              {bound
-                ? '绑定来源：已确认的正式定位版本 · 方法修订 ' +
-                  (workspace.data?.revisionId ?? '').slice(0, 8) + ' · 正式定位 v' + workspace.data?.sourceVersion
-                : '尚未开始'}
-            </p>
-          </div>
-        </div>
-        {bound && (
-          <div className="flex gap-3 items-center"><Button variant="outline" onClick={()=>setPanelOpen(true)}>选题与版本</Button><Link className="text-sm underline" href={"/library?returnTo="+encodeURIComponent("/positioning/"+draftId+"/topics")}>打开内容资料库</Link></div>
-        )}
+    <WorkspaceFrame area="topics" rightOpen={panelOpen} onToggleRight={()=>setPanelOpen(value=>!value)} right={<div className={topicStyles.resultPanel}>
+      <header><h2>已采用选题</h2><p>整体规划 · 已采用 {adoptedItemIds.size} 项 · 已创建 {handoffItems.length} 项工作</p></header>
+      <div className={topicStyles.resultBody}><p>候选留在对话中；只有明确采用的选题才进入资料库。</p>
+        {adoptedTopics.length ? adoptedTopics.map(item=><div key={item.id} className={topicStyles.adoptedRow}><strong>{item.title}</strong><small>{item.platform} · {item.account}</small>{topicLink(item)&&<Link href={topicLink(item)!}>继续内容工作 →</Link>}</div>) : <p>还没有采用选题。先在对话中看理由、作选择。</p>}
+      </div>
+    </div>}><main className={topicStyles.main}>
+      <header className={topicStyles.top}>
+        <h1>第一批选题</h1>
+        <div><span>整体规划 · {candidate?.body[0]?.account ?? '选题工作'}</span><button type="button" onClick={()=>setInfoOpen(true)}>工作信息</button></div>
       </header>
 
       {!bound && (
@@ -577,13 +504,13 @@ export default function TopicWorkspacePage() {
           <div className="min-h-64 flex-1 shrink-0 overflow-y-auto" aria-label="选题对话记录">
             {!executions?.length && (
               <div className="mx-auto flex min-h-48 max-w-xl flex-col items-center justify-center px-6 py-10 text-center">
-                <Bot className="mb-3 h-8 w-8 text-[var(--color-primary)]" />
+                <img className="mb-3 h-8 w-8" src="/graylum-logo.png" alt="" />
                 <p className="text-sm text-[var(--text-tertiary)]">
                   {opening ? '正在恢复你已同意的首轮选题请求。' : '说一句你想先解决的问题，例如「先给我一版第一周选题，我再改」。'}
                 </p>
               </div>
             )}
-            <section className="mx-auto w-full max-w-4xl space-y-6 p-4 sm:p-6">
+            <section className={topicStyles.transcript}>
               <details className="text-sm">
                 <summary>本次引用的正式定位 v{workspace.data?.sourceVersion}</summary>
                 <pre className="whitespace-pre-wrap break-words">{JSON.stringify(workspace.data?.profile, null, 2)}</pre>
@@ -595,14 +522,12 @@ export default function TopicWorkspacePage() {
                       <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-[#f5f5f6] px-4 py-3 text-[#303030]">
                         {e.input}
                       </p>
-                      <User className="mt-3 h-5 w-5 shrink-0 text-[var(--text-secondary)]" />
                     </div>
                   )}
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-[var(--bg-primary)]">
-                      <Bot className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0 max-w-[85%] px-1 py-2">
+                  <div className={topicStyles.assistantTurn}>
+                    <img className={topicStyles.agentAvatar} src="/graylum-logo.png" alt="" />
+                    <div className={topicStyles.assistantMessage}>
+                      <span className={topicStyles.agentName}>Graylum · 增长顾问</span>
                       <p className="whitespace-pre-wrap break-words">
                         {e.contentAvailable ? replyProse(e.body ?? e.primaryBody) : '来源已不可用，暂不展示此内容。'}
                       </p>
@@ -637,26 +562,13 @@ export default function TopicWorkspacePage() {
                                 {!current&&<p className={topicStyles.old}>过往建议 · 仅供查看</p>}
                               </section>;
                             })}
-                            <p className={topicStyles.note}>候选留在对话中；只有明确采用的选题才进入资料库。右侧可查看选题草稿和版本。</p>
+                            <p className={topicStyles.note}>候选留在对话中；只有明确采用的选题才进入资料库。右侧只显示已采用的选题。</p>
                           </div>;
                         })()}
                     </div>
                   </div>
                 </article>
               ))}
-              {candidate?.body.some(item => adoptedItemIds.has(item.id) && topicLink(item)) && (
-                <section aria-label="已采用的选题" className="rounded-xl border bg-[var(--bg-primary)] p-4" style={{borderColor:'#e9e9e9'}}>
-                  <h3 className="text-sm font-semibold">已采用的选题</h3>
-                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">继续会进入对应内容工作；未采用的选题仍留在本次讨论中。</p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {candidate.body.filter(item => adoptedItemIds.has(item.id) && topicLink(item)).map(item => (
-                      <button key={item.id} type="button" onClick={()=>location.assign(topicLink(item)!)} className="rounded-lg border border-[var(--border-primary)] px-3 py-2 text-sm hover:bg-[var(--bg-secondary)]">
-                        继续 {item.title}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              )}
               {pending && (
                 <div className="rounded-xl border border-[var(--border-primary)] p-4">
                   <p role="status" className="text-sm">
@@ -696,7 +608,10 @@ export default function TopicWorkspacePage() {
                   className={composerStyles.textarea}
                   rows={2}
                 />
-                <div className={composerStyles.tools}><span className="text-xs text-[var(--text-tertiary)]">本次讨论绑定已确认的定位与选题方法</span>
+                <div className={composerStyles.tools}><div className={composerStyles.toolLeft}>
+                  <div className={composerStyles.menuAnchor}><button type="button" aria-label="添加资料" aria-expanded={addMenu} onClick={()=>{setAddMenu(value=>!value);setSkillMenu(false);}}><Plus size={19}/></button>{addMenu&&<div className={composerStyles.menu} role="menu"><p>添加资料 · 待接入</p><button disabled>从文件添加</button><button disabled>从资料库添加</button><button disabled>添加连接器</button></div>}</div>
+                  <div className={composerStyles.menuAnchor}><button type="button" aria-label="使用技能" aria-expanded={skillMenu} onClick={()=>{setSkillMenu(value=>!value);setAddMenu(false);}}><Box size={18}/></button>{skillMenu&&<div className={composerStyles.skillMenu} role="dialog" aria-label="使用技能"><div className={composerStyles.skillHead}><strong>使用技能</strong><span>选题工作</span></div><label className={composerStyles.skillSearch}><Search size={16}/><input aria-label="搜索技能" placeholder="搜索技能" value={skillQuery} onChange={event=>setSkillQuery(event.target.value)}/></label><div className={composerStyles.skillList} role="group" aria-label="功能广场中的技能">{skillCatalog.isLoading?<p role="status">正在读取技能…</p>:skillCatalog.error?<p role="alert">技能列表暂不可用。</p>:skillCatalog.data?.modules.filter(module=>module.title.toLocaleLowerCase().includes(skillQuery.trim().toLocaleLowerCase())).map(module=><button key={module.id} type="button" disabled><span className={composerStyles.skillGlyph}><Box size={16}/></span><span><strong>{module.title}</strong><small>选题工作已绑定方法；其他技能需从功能广场开启</small></span></button>)}</div><div className={composerStyles.skillFoot}><Link href="/workbench/marketplace" onClick={()=>setSkillMenu(false)}>浏览功能广场</Link></div></div>}</div>
+                </div><div className={composerStyles.toolRight}>
                 <Button
                   aria-label="发送"
                   className={composerStyles.send}
@@ -705,7 +620,7 @@ export default function TopicWorkspacePage() {
                 >
                   <ArrowUp className="h-4 w-4" />
                 </Button>
-                </div>
+                </div></div>
               </div>
               <p className={composerStyles.note}>
                 候选会自动保存；只有你明确采用的具体选题才会进入资料库。
@@ -725,6 +640,6 @@ export default function TopicWorkspacePage() {
           {error}
         </p>
       )}
-    </main></WorkspaceFrame>
+    </main>{infoOpen&&<div className={topicStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={topicStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setInfoOpen(false)}>×</button></header><p>本工作绑定正式定位 v{workspace.data?.sourceVersion??'—'} 与原选题方法修订。查看不会生成或采用。</p><div><Link href={`/positioning/${draftId}`}>查看原定位</Link><Link href={'/library?returnTo='+encodeURIComponent('/positioning/'+draftId+'/topics')}>打开资料库</Link></div></section></div>}</WorkspaceFrame>
   );
 }

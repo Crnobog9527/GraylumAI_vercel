@@ -482,6 +482,25 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       }).strict().parse(value);
       return rpc("opc_library", { p_search: v.search, p_from: v.from, p_to: v.to });
     },
+    workUiChange: (value: unknown) => {
+      const v = z.object({workItemId:uuid,requestId:uuid,expectedRevision:z.number().int().positive(),action:z.enum(['rename','pin','unpin','archive','restore','delete']),name:z.string().trim().min(1).max(160).optional()}).strict().parse(value);
+      return rpc('opc_work_ui_change',{p_work_item_id:v.workItemId,p_request_id:v.requestId,p_expected_revision:v.expectedRevision,p_action:v.action,p_name:v.name??null});
+    },
+    accountUiChange: (value: unknown) => {
+      const v=z.object({accountProjectId:uuid,requestId:uuid,expectedRevision:z.number().int().positive(),name:z.string().trim().min(1).max(120)}).strict().parse(value);
+      return rpc('opc_account_ui_change',{p_account_project_id:v.accountProjectId,p_request_id:v.requestId,p_expected_revision:v.expectedRevision,p_name:v.name});
+    },
+    publicationUiChange: (value: unknown) => {
+      const v=z.object({workItemId:uuid,requestId:uuid,expectedRevision:z.number().int().positive(),plannedDate:z.string().date().nullable(),status:z.enum(['unpublished','published']),publishedDate:z.string().date().nullable()}).strict().parse(value);
+      return rpc('opc_publication_ui_change',{p_work_item_id:v.workItemId,p_request_id:v.requestId,p_expected_revision:v.expectedRevision,p_planned_date:v.plannedDate,p_status:v.status,p_published_date:v.publishedDate});
+    },
+    positionHistory: (draftId:string) => rpc('opc_position_history',{p_draft_id:uuid.parse(draftId)}),
+    accountStrategyHistory: (accountProjectId:string) => rpc('opc_account_strategy_history',{p_account_project_id:uuid.parse(accountProjectId)}),
+    accountStrategyBegin: (accountProjectId:string,requestId:string) => rpc('opc_account_strategy_begin',{p_account_project_id:uuid.parse(accountProjectId),p_request_id:uuid.parse(requestId)}),
+    accountStrategySave: (value:unknown) => {
+      const v=z.object({accountProjectId:uuid,requestId:uuid,expectedSourceVersionId:uuid,expectedPendingDraftId:uuid.nullable(),edits:z.record(z.string().max(64),z.record(z.string().max(64),z.string().max(400)))}).strict().parse(value);
+      return rpc('opc_account_strategy_save',{p_account_project_id:v.accountProjectId,p_request_id:v.requestId,p_expected_source_version_id:v.expectedSourceVersionId,p_expected_pending_draft_id:v.expectedPendingDraftId,p_edits:v.edits});
+    },
     libraryEdit: (value: unknown) => {
       const v = opcLibraryEdit.parse(value);
       return rpc("opc_library_edit", {

@@ -1,10 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import { isDeepStrictEqual } from 'node:util';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { packageHash, packageHashPayload, sha256, type PackageDescriptor } from './loader';
 import { validatePublication } from './publication';
 import { validateWorkflow,informationSchema } from '../artifacts/workflow';
 import { summaryModelOption } from '../artifacts/modelPolicy';
+import { parseWorkflowManifest, workflowManifestPath } from './workflowManifest';
 
 const label = z.string().trim().min(1).max(160).regex(/^[^\r\n\x00-\x1f]+$/);
 export const moduleSkillInput = z.object({
@@ -33,6 +35,15 @@ export type ModuleSkillInput = z.infer<typeof moduleSkillInput>;
 
 export function prepareModuleSkill(value: ModuleSkillInput) {
   const input = moduleSkillInput.parse(value);
+  const manifestFile = input.files.find(file=>file.path===workflowManifestPath);
+  if (manifestFile) {
+    let manifestText: string;
+    try { manifestText = new TextDecoder('utf-8',{fatal:true}).decode(Buffer.from(manifestFile.base64,'base64')); }
+    catch { throw new Error('workflow.yaml 必须使用 UTF-8 编码'); }
+    const declared = parseWorkflowManifest(manifestText);
+    if (!isDeepStrictEqual(declared,JSON.parse(JSON.stringify({kind:input.kind,steps:input.steps,planResources:input.planResources}))))
+      throw new Error('workflow.yaml 与提交的步骤或问题不一致，请重新导入 Skill 文件夹');
+  }
   const descriptor: PackageDescriptor = {
     packageId: input.skillId, revisionId: input.revisionId, directoryName: input.directoryName,
     packageHash: '', tasks: {}, requiredCapabilities: ['documents.read'],

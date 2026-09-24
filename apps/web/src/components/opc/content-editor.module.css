@@ -6,7 +6,7 @@
 .body label{display:block;font-size:12px;color:#777;margin:0 0 17px}
 .body input,.body textarea{display:block;width:100%;margin-top:8px;padding:10px 12px;border:1px solid #e5e5e5;border-radius:9px;background:#fff;color:#292929;font-size:14px;line-height:1.65;outline:none}
 .body input:focus,.body textarea:focus{border-color:#a5b3c0;box-shadow:0 0 0 2px #4162870d}
-.body textarea{min-height:260px;resize:vertical}
+.body textarea{min-height:260px;resize:none}
 .version{font-size:11px;color:#999;margin:3px 0 12px}
 .actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:13px}
 .actions button{border:1px solid #e1e1e1;border-radius:8px;background:#fff;padding:7px 10px;font-size:11px;color:#333}
