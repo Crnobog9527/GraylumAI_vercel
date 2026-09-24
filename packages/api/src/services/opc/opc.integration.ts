@@ -7553,6 +7553,7 @@ it("OPC: account strategy edits stay draft-scoped and publish only for the chose
   await expect(other.service.accountStrategySave({...request,requestId:randomUUID()})).rejects.toThrow('OPC_DENIED');
   const saved=await f.service.accountStrategySave(request);
   expect(await f.service.accountStrategySave(request)).toEqual(saved);
+  await expect(f.service.accountStrategySave({...request,expectedRegistrationId:'another-skill-revision'})).rejects.toThrow('OPC_REQUEST_CONFLICT');
   await expect(f.service.accountStrategySave({...request,edits:{[f.flow.steps[0].id]:{goal:'重放不能换内容'}}})).rejects.toThrow('OPC_REQUEST_CONFLICT');
   await expect(f.service.accountStrategySave({...request,requestId:randomUUID()})).rejects.toThrow('OPC_VERSION_CONFLICT');
   const pending=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts;
@@ -7575,7 +7576,11 @@ it("OPC: account strategy edits stay draft-scoped and publish only for the chose
       await dialog.getByRole('textbox').first().fill(text);
       await dialog.getByRole('button',{name:'确认保存'}).click();
       await dialog.getByRole('status').filter({hasText:'已保存到此账号的待确认定位草稿'}).waitFor();
+      await dialog.getByText(text,{exact:true}).first().waitFor();
       await dialog.getByRole('button',{name:'修改定位'}).waitFor();
+      await dialog.getByRole('button',{name:'修改定位'}).click();
+      expect(await dialog.getByRole('textbox').first().inputValue()).toBe(text);
+      await dialog.getByRole('button',{name:'取消'}).click();
     }
     expect((await f.service.read(saved.draftId)).information[f.flow.steps[0].id].values.goal.value)
       .toBe('第二次在同一弹窗修改');

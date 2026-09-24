@@ -48,8 +48,14 @@ BEGIN
  -- A replay must be checked against the original payload by the existing RPC,
  -- even when a newer Skill was published after the original save.
  IF EXISTS(SELECT 1 FROM opc_library_requests WHERE actor_id=p_actor_id AND request_id=p_request_id) THEN
-  RETURN opc_account_strategy_save(p_actor_id,p_account_project_id,p_request_id,
+  result:=opc_account_strategy_save(p_actor_id,p_account_project_id,p_request_id,
    p_expected_source_version_id,p_expected_pending_draft_id,p_edits);
+  SELECT registration INTO saved_registration FROM opc_drafts
+   WHERE draft_id=(result->>'draftId')::uuid AND actor_id=p_actor_id;
+  IF p_expected_registration_id IS NOT NULL AND saved_registration IS DISTINCT FROM p_expected_registration_id THEN
+   RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';
+  END IF;
+  RETURN result;
  END IF;
  IF p_expected_registration_id IS NULL THEN RAISE EXCEPTION 'OPC_VERSION_CONFLICT';END IF;
  PERFORM pg_advisory_xact_lock(hashtextextended(p_actor_id::text||p_account_project_id::text,125));

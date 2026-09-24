@@ -50,6 +50,7 @@ export function StrategyOverviewDialog({account,onClose,onSaved}:{account:Accoun
    sessionStorage.removeItem(key);setRecoverable(false);
    setSavedDraftId(result.draftId);
    await onSaved();
+   if(result.draftId===draftId)await read.refetch();
    setEditing(false);setEditSchema(null);setSaved('已保存到此账号的待确认定位草稿。原正式版本及已有选题、稿件来源保持不变；请逐项确认后再发布新版。');
   });}
   catch(cause){const code=cause instanceof Error?cause.message:'';if(['OPC_VERSION_CONFLICT','OPC_INFORMATION_CONFLICT','OPC_INFORMATION_INVALID','OPC_DENIED','OPC_REQUEST_CONFLICT','OPC_SOURCE_DENIED'].includes(code)){sessionStorage.removeItem(key);setRecoverable(false);await onSaved();setError('服务端拒绝保存（'+code+'）。输入仍保留，请核对账号的当前版本。');}else setError('保存结果暂不确定。原请求已保留；再次保存只会恢复同一请求。');}
