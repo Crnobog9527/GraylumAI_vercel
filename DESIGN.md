@@ -50,8 +50,11 @@ uses white conversation and result surfaces, a `#f7f7f7` surrounding canvas,
 `#262626` primary text, `#777` secondary text, and quiet `#ededed` borders.
 The small warm selection accent is reserved for the active work. The current
 component source is `apps/web/src/components/opc/workspace-frame.module.css`,
-`work-composer.module.css`, `content-editor.module.css`, and the library's
-`library.module.css`, adapted from the accepted local high-fidelity reference.
+`work-composer.module.css`, `content-editor.module.css`,
+`version-compare.module.css`, `apps/web/src/app/runtime/runtime-work.module.css`,
+and the library's `library.module.css`, adapted
+from the accepted local high-fidelity reference. The new-task surface is in
+`apps/web/src/app/positioning/start-work.module.css`.
 These styles are scoped to the OPC workbench.
 
 On desktop the shell uses a 264px platform/account/work rail, a flexible
@@ -66,14 +69,22 @@ The visible first-week entry opens the bound `/topics` conversation. Existing
 `/plan` URLs remain available for retained request recovery and old records;
 they are not the entry used for a new topic work session.
 
-U2 currently migrates the real topic-adoption, Runtime content-work, version
-save, history, and library return path. The right editor is bound to an owned
-work item and creates immutable server versions; local text caching only
-protects unsent or unsaved input. `draft`, `final`, and publication are distinct
-states. A definite conflict keeps the edit available for comparison, and an
-unknown outcome retains the original request for recovery. The broader
-positioning forms, Profile/Tickets, full Marketplace, and advanced composer
-interactions remain outside this slice and must not be presented as connected.
+U2 currently migrates the bound topic conversation, explicit single-topic
+adoption, Runtime Agent suggestion and draft adoption, manual version save,
+expanded edit, read-only side-by-side version comparison, library detail, and
+return path. The right editor is bound to an owned work item and creates
+immutable server versions; local text caching only protects unsent or unsaved
+input. `draft`, `final`, and publication are distinct states. A definite
+conflict keeps the edit available for comparison, and an unknown outcome
+retains the original request for recovery. The left Feature Marketplace is now
+viewed within the workspace; a module may begin a new task only when its
+runtime Skill and prerequisites are actually available. Viewing a module does
+not execute it. The positioning strategy route now enters the workbench shell
+and shows current confirmed information in a collapsible result rail. Its
+legacy step-by-step editing form is still being adapted and must not be claimed
+as a fully migrated high-fidelity view. Profile/Tickets, the complete
+Marketplace catalog, and advanced composer integrations remain outside this
+slice and must not be presented as connected.
 Existing video work keeps its script, storyboard, and editing-history rail;
 the new article editor does not replace those owned versions. Manual video
 script saves are not exposed by this slice: B1 video follow-ups require the

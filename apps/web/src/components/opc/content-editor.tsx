@@ -1,23 +1,26 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { useEffect, useMemo, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import { trpc } from '@/trpc/client';
+import { VersionCompare } from './version-compare';
 import styles from './content-editor.module.css';
 
 export type ContentVersion={id:string;kind:string;version:number;status:string;title?:string|null;body:string|null;contentAvailable?:boolean;sourceContentId:string|null;executionId:string|null;requestId:string};
 export type EditableItem={workItemId:string;sessionId:string;title:string;brief:string|null;contentType?:string;platform:string;account:string;sourceAvailable:boolean;content:ContentVersion[]};
 type Draft={baseVersion:number;sourceContentId:string|null;title:string;body:string};
 type Frozen=Draft&{workItemId:string;requestId:string;expectedVersion:number;kind:'brief'|'script';status:'draft'|'final'};
+export type ContentEditorHandle={finalize:()=>void};
 const rejected=new Set(['OPC_VERSION_CONFLICT','OPC_REQUEST_CONFLICT','OPC_CONTENT_DENIED','OPC_CONTENT_INVALID','OPC_CONTENT_SOURCE','OPC_CONTENT_BINDING']);
 
-export function ContentEditor({item,onSaved}:{item:EditableItem;onSaved:()=>Promise<unknown>}){
+export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onSaved:()=>Promise<unknown>}>(function ContentEditor({item,onSaved},ref){
  const kind=item.contentType==='video'?'script':'brief';
  const versions=useMemo(()=>item.content.filter(version=>version.kind===kind).sort((a,b)=>b.version-a.version),[item.content,kind]);
  const latest=versions[0]??null;
  const key='opc-content-draft:'+item.workItemId;
  const pendingKey='opc-content-save:'+item.workItemId;
  const [draft,setDraft]=useState<Draft|null>(null),[pending,setPending]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState('');
- const [history,setHistory]=useState(false);
+ const [history,setHistory]=useState(false),[expanded,setExpanded]=useState(false);
+ const [expandedTitle,setExpandedTitle]=useState(''),[expandedBody,setExpandedBody]=useState('');
  const saveMutation=trpc.opc.saveContentManual.useMutation();
  useEffect(()=>{
   try{
@@ -28,6 +31,11 @@ export function ContentEditor({item,onSaved}:{item:EditableItem;onSaved:()=>Prom
  // A new server version must never replace local unsaved input.
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[item.workItemId]);
+ useEffect(()=>{
+  if(!latest||localStorage.getItem(key))return;
+  setDraft(current=>current&&current.baseVersion<latest.version?{baseVersion:latest.version,sourceContentId:latest.id,title:latest.title||item.title,body:latest.body??''}:current);
+ },[latest?.id,item.title,key]);
+ function openExpanded(){if(!draft)return;setExpandedTitle(draft.title);setExpandedBody(draft.body);setExpanded(true);}
  function change(patch:Partial<Draft>){
   if(!draft)return;
   const next={...draft,...patch};
@@ -78,6 +86,7 @@ export function ContentEditor({item,onSaved}:{item:EditableItem;onSaved:()=>Prom
    }else setError('保存结果待核实。原请求已保留；请用“恢复原保存”核对，不要重复创建版本。');
   }
  }
+ useImperativeHandle(ref,()=>({finalize:()=>{void save('final');}}));
  if(!draft)return <p className={styles.loading}>正在读取当前成果…</p>;
  return <div className={styles.editor}>
   <header><p className={styles.label}>当前成果</p><p className={styles.meta}>{item.platform} · {item.account} · {item.contentType==='video'?'口播稿':'内容创作'}</p></header>
@@ -91,11 +100,13 @@ export function ContentEditor({item,onSaved}:{item:EditableItem;onSaved:()=>Prom
     {latest&&draft.baseVersion<latest.version&&!pending&&<button className={styles.rebase} onClick={()=>change({baseVersion:latest.version,sourceContentId:latest.id})}>已比较历史，基于服务端 v{latest.version} 保留我的编辑</button>}
     <div className={styles.actions}>
      {pending?<button onClick={()=>save('draft')} disabled={saveMutation.isPending}>恢复原保存</button>:<button onClick={()=>save('draft')} disabled={saveMutation.isPending}>保存稿件版本</button>}
-     <button onClick={()=>setHistory(value=>!value)} aria-expanded={history}>历史版本</button>
+     <button onClick={openExpanded}>展开编辑</button>
+     <button onClick={()=>setHistory(true)}>历史版本</button>
     </div>
-    {history&&<div className={styles.history} aria-label="稿件历史">{versions.length?versions.map(version=><article key={version.id}><strong>{version.title||item.title} · v{version.version} · {version.status==='final'?'已定稿':'草稿'}</strong><p>{version.contentAvailable===false?'来源已不可用':version.body}</p></article>):<p>还没有已保存版本。</p>}</div>}
    </>}
   </div>
   <footer><button className={styles.primary} onClick={()=>save('final')} disabled={pending||saveMutation.isPending||!item.sourceAvailable}>将标题和文章定稿</button><p>定稿不等于发布</p></footer>
+  {expanded&&<div className={styles.backdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setExpanded(false);}}><div role="dialog" aria-modal="true" aria-label="编辑标题与正文" className={styles.modal}><header><h2>编辑标题与正文</h2><button aria-label="关闭编辑" onClick={()=>setExpanded(false)}>×</button></header><div className={styles.modalFields}><label>标题<input aria-label="展开编辑标题" value={expandedTitle} maxLength={160} onChange={event=>setExpandedTitle(event.target.value)}/></label><label>文章正文<textarea aria-label="展开编辑正文" value={expandedBody} maxLength={20000} onChange={event=>setExpandedBody(event.target.value)}/></label></div><footer><p>此窗口的修改暂不保存。确认修改后写入当前未保存编辑，仍需明确保存版本。</p><div><button onClick={()=>setExpanded(false)}>取消</button><button className={styles.primary} onClick={()=>{change({title:expandedTitle,body:expandedBody});setExpanded(false);}}>确认修改</button></div></footer></div></div>}
+  {history&&<VersionCompare versions={versions} onClose={()=>setHistory(false)}/>}
  </div>;
-}
+});

@@ -184,7 +184,7 @@ export default function HomePage() {
           const localDatabase=process.env.NEXT_PUBLIC_SUPABASE_URL;
           if(localDatabase&&/^http:\/\/(127\.0\.0\.1|\[::1\])(:[0-9]+)?\//.test(localDatabase+'/')){router.push('/positioning');return;}
           const id = systemSettings?.home_analysis_module_id;
-          router.push(typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id) ? `/chat?module=${encodeURIComponent(id)}` : '/marketplace');
+          router.push(typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id) ? `/workbench/marketplace?module=${encodeURIComponent(id)}` : '/workbench/marketplace');
         }} />}
         {showFeaturedModules && !isFeaturedModulesLoading && featuredModules && featuredModules.length > 0 && (
           <FeaturedModules
@@ -201,7 +201,7 @@ export default function HomePage() {
               link_url: module.link_url ?? undefined,
               link_module_id: module.link_module_id ?? undefined,
             }))}
-            onModuleClick={() => router.push('/marketplace')}
+            onModuleClick={() => router.push('/workbench/marketplace')}
           />
         )}
         <UpdatesSection announcements={announcements} isLoading={isAnnouncementsLoading} />

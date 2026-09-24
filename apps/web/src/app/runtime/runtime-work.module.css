@@ -1,0 +1,10 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+.workHead{display:flex;align-items:center;justify-content:space-between;gap:20px;min-height:54px;flex:none;padding:0 24px;border-bottom:1px solid #ededed}
+.workTitle{min-width:0}.workTitle h1{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:550}.workTitle small{display:block;color:#999;font-size:11px}
+.workMeta{display:flex;align-items:center;gap:18px;flex:none;color:#888;font-size:12px}.workMeta a,.workMeta button{color:#666;text-decoration:none;white-space:nowrap}.workMeta button{border:1px solid #e5e5e5;border-radius:7px;background:#fff;padding:5px 9px}.workMeta a:hover{text-decoration:underline}
+.transcript{width:min(780px,100%);margin:0 auto;padding:32px 0 45px}
+.turn{margin-bottom:35px}
+.userMessage{width:fit-content;max-width:85%;margin:0 0 55px auto;padding:12px 17px;border-radius:20px;background:#f4f4f5;color:#292929;font-size:15px;line-height:1.85;white-space:pre-wrap;overflow-wrap:anywhere}
+.agentMessage{min-width:0}.agentIdentity{display:flex;align-items:center;gap:8px;margin-bottom:16px;color:#8e8e8e;font-size:12px}.agentIdentity img{width:24px;height:24px;border-radius:6px;background:#242424}.reply,.proposal p{white-space:pre-wrap;overflow-wrap:anywhere;font-size:16px;line-height:1.9}.proposal{margin-top:28px}.proposalHead{display:flex;align-items:center;gap:14px;margin-bottom:13px}.proposalHead strong{font-size:18px;font-weight:590}.proposalHead span{font-size:11px;color:#999}.agentMessage button{margin-top:21px;border-radius:8px;background:#292929;color:#fff}.agentMessage a{display:inline-block;margin-top:21px;color:#555;font-size:12px;text-decoration:none}.agentMessage a:hover{text-decoration:underline}
+@media(max-width:900px){.transcript{width:100%;padding:24px 27px 30px}}
+@media(max-width:650px){.workHead{padding:0 14px;gap:10px}.workMeta span{display:none}.workMeta{gap:9px}.transcript{padding:22px 23px 28px}.userMessage{max-width:90%;margin-bottom:37px;font-size:14px}.reply,.proposal p{font-size:15px}.proposalHead strong{font-size:17px}}

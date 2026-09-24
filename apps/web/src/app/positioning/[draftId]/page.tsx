@@ -6,6 +6,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { WorkspaceFrame } from "@/components/opc/workspace-frame";
+import resultStyles from "@/components/opc/positioning-result.module.css";
 import { mergeInformation } from "./information-merge";
 import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-response";
 import {
@@ -271,6 +273,7 @@ export default function PositioningDraft({
     savePlan = trpc.opc.savePlan.useMutation(),
     handoff = trpc.opc.handoff.useMutation();
   const [running, setRunning] = useState(false);
+  const [resultOpen,setResultOpen]=useState(true);
   const [items, setItems] = useState<Item[]>([]),
     [dirtyPlan, setDirtyPlan] = useState(false),
     [planCandidate, setPlanCandidate] = useState<Item[] | null>(null),
@@ -1795,7 +1798,8 @@ export default function PositioningDraft({
       !["completed", "cancelled"].includes(execution.state),
   );
   return (
-    <main className="mx-auto max-w-[90rem] space-y-4 p-4 sm:p-6 text-[var(--text-primary)]">
+    <WorkspaceFrame area="chat" rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<div className={resultStyles.panel}><header><h2>{planView?'已采用选题':'已确认的定位'}</h2><p>当前策略与信息状态</p></header><div className={resultStyles.body}>{steps.map((step,index)=><details key={step.id} open={step.id===selectedStep?.id}><summary><span>{index+1}. {step.title}</span><small>{snap.steps[step.id].valid?'已确认':'待核对'}</small></summary><div className={resultStyles.fields}>{(d.information[step.id]?.schema??[]).map((field:{id:string;title:string})=><div key={field.id}><strong>{field.title}</strong><p>{d.information[step.id]?.values?.[field.id]?.value||'待补充'}</p></div>)}</div></details>)}</div><footer>修改后须按原流程明确保存与确认。</footer></div>}>
+    <main className={`${resultStyles.workspaceMain} h-full w-full overflow-y-auto text-[var(--text-primary)]`}><div className={resultStyles.workspaceContent}>
       <header className="flex flex-wrap justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">{planView ? "第一周计划" : manualEntry ? "录入已有定位" : "与导师确定定位"}</h1>
@@ -1920,7 +1924,7 @@ export default function PositioningDraft({
           return (
             <article
               key="positioning-workspace"
-              className="space-y-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4"
+              className={`${resultStyles.stepArticle} space-y-3`}
             >
               <h2 className="text-lg">
                 {index + 1}. {step.title} {s.valid ? "· 已确认" : "· 待确认"}
@@ -1935,10 +1939,10 @@ export default function PositioningDraft({
                   <p className="text-xs text-[var(--text-secondary)]">切换后会带着已保存内容进入同一草稿的导师对话，不会清空或要求机械重填。</p>
                 </div>
               )}
-              <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)]">
+              <div className={resultStyles.stepColumns}>
                 <aside
                   aria-label="全程导师聊天"
-                  className="space-y-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-4 lg:sticky lg:top-4"
+                  className={`${resultStyles.mentorChat} space-y-3`}
                 >
                   {manualEntry && <p className="rounded-lg bg-[var(--bg-secondary)] p-3 text-sm">你选择了结构化录入。Agent 当前未启动；直接填写右侧即可。</p>}
                   <div>
@@ -2067,9 +2071,9 @@ export default function PositioningDraft({
                     导师会主动引导当前问题，不需要你先发“你好”或“继续”。各步骤共用这一条对话记录；右侧每次只显示当前问题，确认后再继续，刷新或重新登录可恢复已保存进度。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
                   </p>
                 </aside>
-                <section
+                {snap.state === "draft" && <section
                   aria-label="本步填写信息"
-                  className="space-y-4 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-4"
+                  className={`${resultStyles.stepForm} space-y-4`}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
@@ -2323,7 +2327,7 @@ export default function PositioningDraft({
                       </nav>
                     );
                   })()}
-                </section>
+                </section>}
               </div>
               {s.valid && index === steps.length - 1 && (
                 <div
@@ -2790,6 +2794,6 @@ export default function PositioningDraft({
       )}
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
-    </main>
+    </div></main></WorkspaceFrame>
   );
 }
