@@ -8,6 +8,7 @@ import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { WorkspaceFrame } from "@/components/opc/workspace-frame";
+import { PanelRightOpen } from "lucide-react";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import { mergeInformation } from "./information-merge";
 import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-response";
@@ -1808,9 +1809,10 @@ export default function PositioningDraft({
           <h1>{planView ? "第一周计划" : manualEntry ? "录入已有定位" : "定位分析"}</h1>
           <p className="text-xs text-[var(--text-secondary)]">{d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'隔离模拟 · 未调用真实模型或研究服务'}</p>
         </div>
-        <Link href="/positioning" className="underline">
-          账号与定位列表
-        </Link>
+        <div className={resultStyles.positionActions}>
+          <Link href="/positioning" className="underline">账号与定位列表</Link>
+          {!resultOpen&&<button type="button" aria-label="展开右边栏" onClick={()=>setResultOpen(true)}><PanelRightOpen size={18}/></button>}
+        </div>
       </header>
       <div className={resultStyles.recoveryActions}>
         <Button variant="outline" onClick={() => read.refetch()}>
