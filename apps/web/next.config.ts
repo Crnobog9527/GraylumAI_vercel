@@ -10,6 +10,7 @@ const sentryBuildUploadEnabled =
   );
 
 const nextConfig: NextConfig = {
+  devIndicators: false,
   transpilePackages: [
     "@repo/api",
     "@radix-ui/react-avatar",

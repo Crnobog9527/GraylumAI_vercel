@@ -1,6 +1,6 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ArrowUpRight, BookOpen, CalendarDays, ChartNoAxesColumnIncreasing, ChevronDown, Ellipsis, Grid2X2, LogOut, Menu, PanelRightClose, Pencil, Pin, Search, Sparkles, Ticket, UserRound, Wallet, X } from 'lucide-react';
@@ -18,7 +18,7 @@ type Draft = {draftId:string;businessName?:string;createdAt?:string;currentVersi
 /** The accepted U0/U1 shell, with real owned OPC projections instead of demo state. */
 export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,activeWorkItemId,area='chat',notice}:{
  children:ReactNode;right?:ReactNode;rightOpen?:boolean;onToggleRight?:()=>void;
- activeWorkItemId?:string;area?:'chat'|'library'|'topics'|'marketplace'|'start';notice?:string;
+ activeWorkItemId?:string;area?:'chat'|'library'|'topics'|'marketplace'|'search'|'start';notice?:string;
 }){
  const [mobileNav,setMobileNav]=useState(false),[mobileRight,setMobileRight]=useState(false),[query,setQuery]=useState('');
  const [archiveView,setArchiveView]=useState(false),[menuId,setMenuId]=useState(''),[menuPosition,setMenuPosition]=useState({top:0,left:0});
@@ -31,7 +31,6 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  const [feedbackDraft,setFeedbackDraft]=useState({title:'',description:'',category:'technical_support'});
  const [feedbackError,setFeedbackError]=useState(''),[feedbackSent,setFeedbackSent]=useState(false),[loggingOut,setLoggingOut]=useState(false);
  const [groupOpen,setGroupOpen]=useState<Record<string,boolean>>({});
- const searchRef=useRef<HTMLInputElement>(null);
  const pathname=usePathname();
  const [workReturn,setWorkReturn]=useState('');
  useEffect(()=>{
@@ -104,10 +103,10 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
   <div className={[styles.shell,right&&rightOpen?styles.withRight:'',mobileNav?styles.navOpen:'',mobileRight?styles.mobileRightOpen:'',!noticeOpen?styles.noNotice:''].join(' ')}>
    <aside className={styles.rail} aria-label="工作区导航">
     <div className={styles.railMobile}><strong>工作区</strong><button aria-label="关闭导航" onClick={()=>setMobileNav(false)}><X size={18}/></button></div>
-    <Link className={styles.newConversation} href="/positioning"><span className={styles.newConversationIcon} aria-hidden="true">＋</span>新对话</Link>
+    <Link className={styles.newConversation} href="/positioning"><img className={styles.newConversationIcon} src="/opc-reference/new-chat.svg" alt=""/>新对话</Link>
     <nav className={styles.railNav} aria-label="工作区功能">
      <Link href={'/workbench/marketplace'+returnParam} aria-current={area==='marketplace'?'page':undefined}><Grid2X2 size={17}/>功能广场</Link>
-     <button onClick={()=>{setArchiveView(false);searchRef.current?.focus()}}><Search size={17}/>搜索</button>
+     <Link href={'/workbench/search'+returnParam} aria-current={area==='search'?'page':undefined}><Search size={17}/>搜索</Link>
      <Link href={'/library'+returnParam} aria-current={area==='library'?'page':undefined}><BookOpen size={17}/>资料库</Link>
      <button disabled><CalendarDays size={17}/>发布排期 <small>待接入</small></button>
      <button disabled><ChartNoAxesColumnIncreasing size={17}/>数据复盘 <small>待接入</small></button>
@@ -115,7 +114,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
     <div className={styles.history} aria-label="平台、账号与工作" onScroll={()=>setMenuId('')}>
     <div className={styles.historyHead}><span>{archiveView?'归档记录':'平台 · 账号 · 工作'}</span><button onClick={()=>setArchiveView(value=>!value)}>{archiveView?'返回最近工作':'查看归档'}</button></div>
     <label className={styles.searchLabel} htmlFor="workspace-work-search">查找账号或工作</label>
-    <label className={styles.search}><Search size={14}/><input id="workspace-work-search" ref={searchRef} aria-label="查找账号或工作" placeholder="搜索账号、工作" value={query} onChange={event=>setQuery(event.target.value)}/></label>
+    <input id="workspace-work-search" className={styles.search} type="search" aria-label="查找账号或工作" placeholder="搜索账号、工作" value={query} onChange={event=>setQuery(event.target.value)}/>
      {[...platforms].map(([platform,accounts])=>{
       const needle=query.trim().toLocaleLowerCase();
       const visible=accounts.map(account=>{

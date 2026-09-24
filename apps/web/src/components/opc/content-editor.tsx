@@ -71,9 +71,8 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
   const body=(offeredBody??draft.body).trim(),title=draft.title.trim();
   if(!pendingRaw&&(!title||!body)){setError('请填写标题和正文。');return;}
   if(!pendingRaw&&(body.length>20000||title.length>160)){setError('标题或正文超出长度限制。');return;}
-  if(!pendingRaw&&draft.baseVersion>(latest?.version??0)){
-   setSaved('上一版已在服务端保存，正在等待读取最新历史。');return;
-  }
+  // A successful save can advance the draft before the library query refreshes.
+  // The service checks expectedVersion, so a stale query must not block the next explicit save.
   if(!pendingRaw&&latest?.status===status&&latest?.title===title&&latest?.body===body){
    setSaved('当前内容已经是已保存版本。');return;
   }

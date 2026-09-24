@@ -482,13 +482,18 @@ try {
           if(brief==='topic:first-week') {
             const material=input.scopeMaterial?.content?.material ?? '';
             const instructionText=request.messages.filter(m=>m.role!=='user').map(m=>m.content).join('\n') + (request.instructions??'');
-            if(!material.includes('goal') || !instructionText.includes('first-week topic workspace')) throw new Error('topic context missing');
+            // Question ids are supplied by the uploaded Skill. The transport
+            // fixture must not require an old hard-coded field named "goal".
+            if(!material || !instructionText.includes('first-week topic workspace')) throw new Error('topic context missing');
             const revision=String(input.userRequest).includes('修改');
             const rows=[{id:'aaaaaaaa-1111-4111-8111-111111111111',platform:'x',account:'existing-account',title:revision?'修改后的选题':'首周选题',brief:'内容：展示一次真实工作过程；对象：正在起步的创作者；价值：解决本周行动不清；结构：问题、过程、结果；假设：具体案例更容易促成收藏。',day:'2026-09-21',contentType:'video'}, {id:'bbbbbbbb-2222-4222-8222-222222222222',platform:'x',account:'proposed-account',title:'第二个账号选题',brief:'内容：解释定位方法；对象：准备开新账号的人；价值：减少试错；结构：误区、方法、行动；假设：步骤清单会提升完成率。建议账号未注册。',day:'2026-09-22',contentType:'article'}];
             content=String(input.userRequest).includes('采用')?'已识别明确采用指令。\n```json\n'+JSON.stringify({action:'adopt',itemIds:String(input.userRequest).includes('全部')?rows.map(row=>row.id):[rows[0].id]})+'\n```':'【选题合成回复，仅验证流程】已读取正式定位与选题方法。'+(revision?'已按本轮要求修改。':'先给出可核对的候选。')+'\n```json\n'+JSON.stringify(rows)+'\n```';
           }
           if(String(input.userRequest).includes('口播稿')&&!String(input.userRequest).includes('[OPC_VIDEO_PACKAGE_V1]')){
             content='【口播稿合成示例，仅验证交互】\n你是否也遇到过：每天想做内容，却不知道从哪里开始？今天我用一个真实工作案例，分享把目标拆成一个小行动的方法。先明确要帮助谁，再记录一次具体尝试，最后复盘结果。你可以先试一天，把实际发现告诉我。';
+          }
+          if(brief!=='topic:first-week'&&/文章正文|正文建议|起草文章/.test(String(input.userRequest))){
+            content='【文章草稿合成示例，仅验证交互】\n先从一个真实场景写起：学员看到照片背景杂乱，却不知道该移动相机还是换器材。展示同一场景前后的两张照片，解释取景判断，再给读者一次可以完成的小练习。';
           }
           if(String(input.userRequest).includes('[OPC_VIDEO_PACKAGE_V1]')){
             const requested=String(input.userRequest);
@@ -855,6 +860,12 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
   await childExit(runTests());
   }
   });
+  // An initialized disposable preview may run a focused browser regression
+  // against its retained local data without repeating schema bootstrap.
+  if (serve && !lifecycle.bootstrap && casePattern) {
+    env.V3_VERIFY_DELIVERED_PREVIEW = 'true';
+    await childExit(runTests(casePattern));
+  }
   if (appLog.join("").includes("METHOD_CANARY"))
     throw new Error("private method leaked in application logs");
   writeFileSync(

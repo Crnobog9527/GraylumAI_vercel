@@ -129,6 +129,7 @@ async function mentorMessageCheck(
 async function fixture(
   n = 6, secondField = false, extraFields = 0,
   configure?: (flow: ReturnType<typeof makeWorkflow>) => void,
+  methodLabel = "隔离定位 " + n,
 ) {
   const password = "Local-" + randomUUID() + "!",
     email = randomUUID() + "@example.test";
@@ -194,12 +195,12 @@ async function fixture(
   );
   await sql.query(
     "insert into modules(id,title,skill_id,model_id,active) values($1,$2,$3,$4,true)",
-    [moduleId, "隔离定位 " + n, pack.id, fixtureModel],
+    [moduleId, methodLabel, pack.id, fixtureModel],
   );
   await publishSkillPackage(admin, owner, pack);
   await sql.query(
     "insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)",
-    [registration, moduleId, pack.id, pack.revisionId, flow, "隔离定位 " + n],
+    [registration, moduleId, pack.id, pack.revisionId, flow, methodLabel],
   );
   return {
     actor,
@@ -229,12 +230,13 @@ async function mergedPositioningFixture() {
     [['offer','内容如何支持业务']],
   ] as const;
   const result=await fixture(6,false,0,flow=>{
+    flow.planResources=['SKILL.md'];
     flow.steps.forEach((step,index)=>{
       step.title=titles[index];
       step.information=questions[index].map(([id,title])=>({id,title,required:true,profileKey:id,elicitation:['reference','audience','roles','cadence','offer'].includes(id)?'agent_proposal' as const:'user_fact' as const}));
       flow.report.sections[index].title=titles[index];
     });
-  });
+  },'梳理账号定位 · 六步');
   return result;
 }
 it("OPC: an edited six-stage Skill gives new drafts new steps and questions while old drafts stay pinned", async () => {
@@ -7297,11 +7299,9 @@ it("OPC: U2 browser adopts only second topic, edits a server version and returns
     await page.getByRole('link',{name:'进入选题工作对话',exact:true}).click();
     await page.waitForURL(url=>url.pathname===path);
     await page.getByRole('button',{name:'开始选题工作对话',exact:true}).click();
-    await page.getByRole('button',{name:'选题与版本',exact:true}).click();
-    await page.getByLabel('选择 首周选题').waitFor({timeout:60000});
-    await page.getByLabel('选择 首周选题').uncheck();
-    await page.getByLabel('选择 第二个账号选题').check();
-    await page.getByRole('button',{name:'采用所选并保存到资料库',exact:true}).click();
+    const second=page.getByRole('heading',{name:'2. 第二个账号选题',exact:true}).locator('..');
+    await second.waitFor({timeout:60000});
+    await second.getByRole('button',{name:'采用这个选题',exact:true}).click();
     await expect.poll(async()=>{
       const snapshot=await f.service.library({search:'',from:null,to:null});
       return snapshot.businesses.flatMap((business:{accounts:Array<{items:any[]}>})=>business.accounts.flatMap(account=>account.items)).map((item:{title:string})=>item.title);
@@ -7310,7 +7310,7 @@ it("OPC: U2 browser adopts only second topic, edits a server version and returns
     const items=adopted.businesses.flatMap((business:{accounts:Array<{items:any[]}>})=>business.accounts.flatMap(account=>account.items));
     expect(items.map((item:{title:string})=>item.title)).toEqual(['第二个账号选题']);
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-topic-adopted-desktop.png'});
-    const continueLink=page.getByRole('button',{name:'继续 第二个账号选题',exact:true});
+    const continueLink=second.getByRole('link',{name:'继续这条内容工作',exact:true});
     await continueLink.click();
     await page.waitForURL(url=>url.pathname==='/runtime');
     await page.getByLabel('文章正文').fill('先讲真实场景，再说明判断，最后安排一次练习。');
@@ -7319,7 +7319,7 @@ it("OPC: U2 browser adopts only second topic, edits a server version and returns
     const workUrl=page.url();
     await page.getByRole('link',{name:'资料库',exact:true}).click();
     await page.waitForURL(url=>url.pathname==='/library');
-    await page.getByRole('button',{name:/第二个账号选题/}).first().click();
+    await page.getByRole('main').getByRole('button',{name:/第二个账号选题/}).first().click();
     await page.getByText('先讲真实场景，再说明判断，最后安排一次练习。').waitFor();
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-library-desktop.png'});
     await page.getByRole('button',{name:'关闭窗口',exact:true}).click();
@@ -7331,24 +7331,23 @@ it("OPC: U2 browser adopts only second topic, edits a server version and returns
     await page.getByLabel('消息',{exact:true}).fill('这条问题先不要发送');
     await page.getByLabel('文章正文').fill('未保存的下一次修改');
     await page.reload();
-    expect(await page.getByLabel('消息',{exact:true}).inputValue()).toBe('这条问题先不要发送');
-    expect(await page.getByLabel('文章正文').inputValue()).toBe('未保存的下一次修改');
+    await expect.poll(()=>page.getByLabel('消息',{exact:true}).inputValue()).toBe('这条问题先不要发送');
+    await expect.poll(()=>page.getByLabel('文章正文').inputValue()).toBe('未保存的下一次修改');
     await page.getByRole('button',{name:'历史版本',exact:true}).click();
     await page.getByText('修改后的正文：补充前后对照案例。').waitFor();
     await page.setViewportSize({width:1440,height:900});
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-article-desktop.png'});
     await page.setViewportSize({width:390,height:844});
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-article-narrow.png'});
-    await page.getByRole('button',{name:'收起成果面板'}).click();
-    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-chat-narrow.png'});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
     await context.clearCookies();
     await page.goto(process.env.V3_LOCAL_APP+'/login?redirect='+encodeURIComponent(new URL(workUrl).pathname+new URL(workUrl).search));
     await page.getByPlaceholder('name@example.com').fill(f.email);
     await page.getByPlaceholder('输入你的密码').fill(f.password);
     await page.getByRole('button',{name:'登录',exact:true}).last().click();
     await page.waitForURL(url=>url.pathname==='/runtime');
-    expect(await page.getByLabel('文章正文').inputValue()).toBe('未保存的下一次修改');
-    expect(await page.getByLabel('消息',{exact:true}).inputValue()).toBe('这条问题先不要发送');
+    await expect.poll(()=>page.getByLabel('文章正文').inputValue()).toBe('未保存的下一次修改');
+    await expect.poll(()=>page.getByLabel('消息',{exact:true}).inputValue()).toBe('这条问题先不要发送');
   }finally{await browser.close();}
 },300000);
 
@@ -8388,7 +8387,7 @@ it.each([[2, "same"], [2, "draft"], [2, "published"], [3, "published"]] as const
 }, 300000);
 
 it("OPC: two topic pages explicitly consent concurrently and execute one first turn", async () => {
-  const f = await publishedDraft();
+  const f = await publishedDraft(6);
   const modelId = await planFixtureModel(f.moduleId);
   const { browser, context, page } = await planBrowser(f);
   const path = '/positioning/' + f.d.draftId + '/topics';
@@ -8399,8 +8398,7 @@ it("OPC: two topic pages explicitly consent concurrently and execute one first t
     await Promise.all(buttons.map(b => b.waitFor()));
     expect((await topicIdentity(f.actor)).binds).toBe(0);
     await Promise.all(buttons.map(b => b.click()));
-    await Promise.all([page, tab].map(p => p.getByRole('button', { name: '选题与版本', exact: true }).click()));
-    await Promise.all([page, tab].map(p => p.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).waitFor()));
+    await Promise.all([page, tab].map(p => p.getByRole('button', { name: '采用这个选题', exact: true }).first().waitFor()));
     expect(await topicIdentity(f.actor)).toEqual({ binds: 1, turns: 1, topicExecutions: 1, topicRuns: 1, reserves: 1 });
     const opening = (await f.service.topicRead(f.d.draftId)).opening;
     const run = (await sql.query('select request_id::text, payload, state from runtime_executions where actor_id=$1', [f.actor])).rows;
@@ -8566,79 +8564,117 @@ it("OPC: mentor lost reply still projects once from its unchanged frozen informa
 }, 240000);
 
 it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered preview completes the default entry and content journey after curation", async () => {
-  const {readFileSync,writeFileSync}=await import('node:fs');
-  const saved=JSON.parse(readFileSync(process.env.V3_WORKBENCH_OUTPUT+'/opc-acceptance.json','utf8'));
+  const {writeFileSync}=await import('node:fs');
+  // The delivered preview starts with the accepted six-stage Skill and a fresh
+  // local identity. Older synthetic drafts are deliberately not its baseline.
+  const f=await mergedPositioningFixture();
+  const modelId=await planFixtureModel(f.moduleId);
+  await sql.query('update modules set active=false where id<>$1',[f.moduleId]);
+  const saved={credentials:{email:f.email,password:f.password},actor:f.actor,moduleId:f.moduleId,modelId};
   const {chromium}=await import('../../../../../apps/web/node_modules/@playwright/test');
   const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
   const context=await browser.newContext();
   await context.route('**/*',route=>['127.0.0.1','localhost'].includes(new URL(route.request().url()).hostname)?route.continue():route.abort());
   const page=await context.newPage();page.setDefaultTimeout(60000);
   try {
-    await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/positioning');
+    await page.setViewportSize({width:1600,height:900});
+    await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/');
     await page.getByPlaceholder('name@example.com').fill(saved.credentials.email);
     await page.getByPlaceholder('输入你的密码').fill(saved.credentials.password);
     await page.getByRole('button',{name:'登录',exact:true}).last().click();
+    await page.waitForURL(url=>url.pathname==='/');
+    await page.getByRole('link',{name:'对话',exact:true}).click();
     await page.waitForURL(url=>url.pathname==='/positioning');
     await page.getByRole('heading',{name:'今天，想推进什么？',exact:true}).waitFor();
+    await page.evaluate(()=>document.fonts.ready);
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-start-1600x900.png'});
     await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
     await page.getByRole('button',{name:'继续选择定位方式',exact:true}).click();
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-positioning-choice-1600x900.png'});
     await page.getByRole('dialog',{name:'新建账号策略'}).getByRole('button',{name:'从头分析新定位'}).click();
+    await page.getByRole('combobox',{name:'定位方法'}).selectOption(f.registration);
     await page.getByLabel('业务名称',{exact:true}).fill('摄影课程 · 新手体验');
     await page.getByRole('button',{name:'开始 Agent 引导',exact:true}).click();
     await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname));
     const mentorUrl=page.url();
-    await page.getByRole('log',{name:'完整导师消息'}).getByText('导师主动引导 · 1.1',{exact:true}).waitFor();
+    const draftId=page.url().split('/positioning/')[1]?.split('?')[0]??'';
+    const steps=page.getByRole('navigation',{name:'定位步骤'}).getByRole('button');
+    await expect.poll(()=>steps.count()).toBe(6);
+    expect((await steps.allTextContents()).join(' ')).toContain('商业规划');
     await page.getByRole('textbox',{name:'给导师的回复',exact:true}).fill('我帮助初学摄影的创作者，通过每周一次手机拍摄练习建立作品集。');
     await page.getByRole('button',{name:'发送',exact:true}).click();
-    await expect.poll(()=>page.getByRole('textbox',{name:'已知目标 0',exact:true}).inputValue(),{timeout:60000}).toContain('摄影');
+    await expect.poll(()=>page.getByRole('textbox',{name:'产品与服务',exact:true}).inputValue(),{timeout:60000}).toContain('摄影');
     await page.reload();
-    await expect.poll(()=>page.getByRole('textbox',{name:'已知目标 0',exact:true}).inputValue(),{timeout:60000}).toContain('摄影');
-    await page.goto(process.env.V3_LOCAL_APP+'/positioning');
-    await page.getByRole('link',{name:'摄影课程 · 新手体验 · 继续定位',exact:true}).waitFor();
-    await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
-    await page.getByRole('button',{name:'继续选择定位方式',exact:true}).click();
-    await page.getByRole('dialog',{name:'新建账号策略'}).getByRole('button',{name:'整理另一份已有定位'}).click();
-    await page.getByLabel('业务名称',{exact:true}).fill('创作者咨询 · 完整体验');
-    await page.getByRole('button',{name:'带入已有定位',exact:true}).click();
-    await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname));
-    const positioningUrl=page.url();
-    const flow=(await sql.query('select workflow from artifact_workflows where module_id=$1',[saved.moduleId])).rows[0].workflow;
-    for(const step of flow.steps){
-      for(const field of step.information){
-        const article=page.locator('article').filter({has:page.getByRole('textbox',{name:field.title,exact:true})});
-        await article.getByRole('textbox',{name:field.title,exact:true}).fill('为初创咨询业务提供每周一次真实案例分享，帮助独立创作者验证服务需求。');
-        await article.getByText('已自动保存',{exact:true}).waitFor();
-        await article.getByRole('button',{name:'确认本题并继续',exact:true}).click();
+    await expect.poll(()=>page.getByRole('textbox',{name:'产品与服务',exact:true}).inputValue(),{timeout:60000}).toContain('摄影');
+    const answers:[string,string][]=[
+      ['准备经营的平台','先做公众号和小红书，公众号解释判断，小红书展示练习。'],
+      ['每周可用时间','每周稳定投入 3 小时。'],
+      ['参考研究结论','借鉴同场景前后对照的讲解方式，不以器材评测为主。'],
+      ['优先服务的用户','会操作相机，但不知道如何整理画面的摄影新手。'],
+      ['价值与依据','曾带学员在同一街景中移动机位，用前后两张照片解释背景干扰。'],
+      ['内容表达与平台安排','公众号解释判断；小红书提供练习清单。'],
+      ['可持续的制作安排','每周先完成一个核心案例，再按时间选择平台版本。'],
+      ['内容如何支持业务','先帮助用户完成一次构图练习，再说明课程的系统训练。'],
+    ];
+    const confirm=page.getByRole('button',{name:'确认当前信息，继续',exact:true});
+    for(const [label,value] of answers){
+      await confirm.click();
+      await page.getByRole('textbox',{name:label,exact:true}).fill(value);
+      await page.getByText('已自动保存',{exact:true}).waitFor();
+      if(label==='优先服务的用户'){
+        await page.evaluate(()=>document.fonts.ready);
+        await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-positioning-stage3-1600x900.png'});
       }
     }
+    await confirm.click();
+    const positioningUrl=page.url();
+    const confirmed=await f.service.read(draftId);
+    expect(confirmed.snapshot.workflow.steps.map((step:{title:string})=>step.title)).toEqual(['需求确认','竞品研究','账号定位','内容策略','运营建议','商业规划']);
+    expect(Object.values(confirmed.information).flatMap((step:any)=>Object.values(step.values??{}))).toHaveLength(9);
     await page.getByRole('button',{name:'确认正式定位',exact:true}).click();
     await page.getByRole('dialog').getByRole('button',{name:'继续生成第一周选题',exact:true}).click();
-    await page.getByRole('button',{name:'选题与版本',exact:true}).click();
-    await page.getByLabel('选择 第二个账号选题').uncheck();
-    await page.getByRole('button',{name:'采用所选并保存到资料库',exact:true}).click();
-    await page.getByRole('heading',{name:'已采用的选题',exact:true}).waitFor();
-    await page.getByRole('button',{name:'Close',exact:true}).waitFor({state:'hidden'});
-    await page.getByRole('button',{name:'选题与版本',exact:true}).click();
-    await page.getByRole('button',{name:/展开选题/}).waitFor();
-    expect(await page.getByRole('button',{name:'采用所选并保存到资料库',exact:true}).isVisible()).toBe(false);
-    await page.reload();
-    await page.getByRole('button',{name:'选题与版本',exact:true}).click();
-    await page.getByRole('button',{name:/展开选题/}).waitFor();
-    expect(await page.getByRole('button',{name:'采用所选并保存到资料库',exact:true}).isVisible()).toBe(false);
-    await page.getByRole('button',{name:'Close',exact:true}).click();
-    await page.getByRole('link',{name:'打开内容资料库',exact:true}).click();
-    await page.getByRole('article').filter({hasText:'首周选题'}).getByRole('link',{name:'继续工作',exact:true}).click();
-    await page.getByRole('button',{name:'起草口播稿',exact:true}).click();
-    await page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true}).click();
-    await page.getByRole('heading',{name:'口播稿已定稿。要先制作分镜脚本吗？',exact:true}).waitFor();
-    await page.getByRole('button',{name:'暂时结束',exact:true}).click();
+    await page.waitForURL(url=>url.pathname.endsWith('/topics'));
+    // Confirming the positioning binds the topic workspace and freezes one
+    // opening turn; the workspace recovers that turn on mount.
+    const second=page.getByRole('heading',{name:'2. 第二个账号选题',exact:true}).locator('..');
+    await second.waitFor();
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-topics-1600x900.png'});
+    await second.getByRole('button',{name:'采用这个选题',exact:true}).click();
+    await second.getByRole('link',{name:'继续这条内容工作',exact:true}).waitFor();
+    const adopted=await f.service.library({search:'',from:null,to:null});
+    expect(adopted.businesses.flatMap((business:{accounts:Array<{items:Array<{title:string}>}>})=>business.accounts.flatMap(account=>account.items.map(item=>item.title)))).toEqual(['第二个账号选题']);
+    await second.getByRole('link',{name:'继续这条内容工作',exact:true}).click();
+    await page.waitForURL(url=>url.pathname==='/runtime');
+    await page.getByLabel('消息',{exact:true}).fill('请根据这条选题给我一版文章正文建议，先不要定稿。');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    const adoptDraft=page.getByRole('button',{name:'采用为当前草稿',exact:true});
+    await adoptDraft.waitFor({timeout:60000});
+    await adoptDraft.click();
+    await page.getByRole('link',{name:'已采用为草稿 · 查看',exact:true}).waitFor();
+    await page.getByLabel('文章正文').fill('先讲真实场景，再说明取景判断，最后安排一次练习。');
+    await page.getByRole('button',{name:'保存稿件版本',exact:true}).click();
+    await page.getByRole('status').filter({hasText:'已在服务端保存 v2'}).waitFor();
+    await page.getByRole('button',{name:'将标题和文章定稿',exact:true}).click();
+    await expect.poll(async()=>({statuses:await page.getByRole('status').allTextContents(),alerts:await page.getByRole('alert').allTextContents(),version:await page.locator('[class*=version]').allTextContents()}),{timeout:60000}).toMatchObject({statuses:expect.arrayContaining([expect.stringContaining('已定稿')])});
     const contentUrl=page.url();
-    await page.goto(process.env.V3_LOCAL_APP+'/library');
-    await page.getByLabel('查找资料').fill('首周选题');
-    await page.getByRole('article').filter({hasText:'首周选题'}).getByRole('link',{name:'继续工作',exact:true}).click();
-    await page.getByRole('heading',{name:'口播稿 · 第 1 版 · 已定稿',exact:true}).waitFor();
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-content-1600x900.png'});
+    await page.getByRole('link',{name:'资料库',exact:true}).click();
+    await page.waitForURL(url=>url.pathname==='/library');
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-library-1600x900.png'});
+    await page.getByRole('main').getByRole('button',{name:/第二个账号选题/}).first().click();
+    await page.getByText('先讲真实场景，再说明取景判断，最后安排一次练习。').waitFor();
+    await page.getByRole('button',{name:'关闭窗口',exact:true}).click();
+    await page.getByRole('link',{name:'返回当前工作',exact:true}).last().click();
+    await page.waitForURL(url=>url.pathname==='/runtime');
     expect(page.url()).toBe(contentUrl);
+    await page.reload();
+    await page.getByLabel('文章正文').waitFor();
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/default-content-journey.png',fullPage:true});
+    writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/opc-acceptance.json',JSON.stringify({
+      url:process.env.V3_LOCAL_APP+'/positioning',actor:f.actor,credentials:saved.credentials,
+      sessionId:new URL(contentUrl).searchParams.get('session'),moduleId:f.moduleId,modelId,
+      mode:'Approved six-stage synthetic Skill; no real model, research, payment or external account creation',
+    }),{mode:0o600});
     writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/default-journey.json',JSON.stringify({mentorUrl,positioningUrl,contentUrl,entry:process.env.V3_LOCAL_APP+'/positioning',mode:'synthetic only; all journey mutations through visible default UI'},null,2));
   }finally{await browser.close();}
 },360000);

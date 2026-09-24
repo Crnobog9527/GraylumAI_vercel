@@ -258,7 +258,13 @@ BEGIN
   accounts:='[]';
   FOR account IN SELECT x.value FROM jsonb_array_elements(business->'accounts') x LOOP
    SELECT * INTO binding FROM opc_account_strategy_drafts WHERE account_project_id=(account->>'projectId')::uuid AND actor_id=p_actor_id AND current;
-   history:=opc_account_strategy_history(p_actor_id,(account->>'projectId')::uuid);
+   -- The library remains readable with redacted content after a source is
+   -- withdrawn. Direct strategy-history reads still require a live source.
+   IF account->>'sourceVersionId' IS NOT NULL THEN
+    history:=opc_account_strategy_history(p_actor_id,(account->>'projectId')::uuid);
+   ELSE
+    history:='[]'::jsonb;
+   END IF;
    account:=account||jsonb_build_object('sourceVersion',jsonb_array_length(history),'pendingStrategyDraftId',NULL);
    IF binding.draft_id IS NOT NULL THEN
     SELECT * INTO d FROM opc_drafts WHERE draft_id=binding.draft_id;
