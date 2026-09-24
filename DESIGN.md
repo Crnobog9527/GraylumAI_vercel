@@ -69,6 +69,16 @@ The visible first-week entry opens the bound `/topics` conversation. Existing
 `/plan` URLs remain available for retained request recovery and old records;
 they are not the entry used for a new topic work session.
 
+The ordinary Chat entry opens a general new-task surface. Choosing account
+positioning first presents the two accepted methods; the existing real
+registration and business prerequisites appear only after a method is chosen.
+The in-progress strategy keeps its actual Skill questions and persistence in
+the right rail, while the conversation remains central. The accepted reference
+has six illustrative phases, which must not be fabricated when the bound Skill
+has a different step definition. Sidebar search and the fixed account strategy
+entry use owned projections. Work rename writes through the existing library
+edit contract, so the sidebar and library read the same title.
+
 U2 currently migrates the bound topic conversation, explicit single-topic
 adoption, Runtime Agent suggestion and draft adoption, manual version save,
 expanded edit, read-only side-by-side version comparison, library detail, and
@@ -80,11 +90,16 @@ retains the original request for recovery. The left Feature Marketplace is now
 viewed within the workspace; a module may begin a new task only when its
 runtime Skill and prerequisites are actually available. Viewing a module does
 not execute it. The positioning strategy route now enters the workbench shell
-and shows current confirmed information in a collapsible result rail. Its
-legacy step-by-step editing form is still being adapted and must not be claimed
-as a fully migrated high-fidelity view. Profile/Tickets, the complete
-Marketplace catalog, and advanced composer integrations remain outside this
-slice and must not be presented as connected.
+and shows its live editing form or confirmed information in a collapsible
+result rail. The library uses the platform/account scope, filter, status list,
+item detail, editor, and version view from the accepted workbench. The real
+library projection does not yet provide a full strategy summary for that scope,
+so it links to the owned strategy rather than displaying invented fields.
+Work pin, archive, delete, and archive recovery have no admitted real mutation
+path in this slice and remain visibly unavailable. Profile/Tickets, the
+complete Marketplace catalog, publication scheduling, account rename, and
+advanced composer integrations remain outside this slice and must not be
+presented as connected. These are migration limits, not U0/U1 product decisions.
 Existing video work keeps its script, storyboard, and editing-history rail;
 the new article editor does not replace those owned versions. Manual video
 script saves are not exposed by this slice: B1 video follow-ups require the

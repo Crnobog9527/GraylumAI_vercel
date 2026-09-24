@@ -1,6 +1,7 @@
 "use client";
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { use, useEffect, useRef, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { trpc } from "@/trpc/client";
@@ -274,6 +275,7 @@ export default function PositioningDraft({
     handoff = trpc.opc.handoff.useMutation();
   const [running, setRunning] = useState(false);
   const [resultOpen,setResultOpen]=useState(true);
+  const [resultBodyNode,setResultBodyNode]=useState<HTMLDivElement|null>(null);
   const [items, setItems] = useState<Item[]>([]),
     [dirtyPlan, setDirtyPlan] = useState(false),
     [planCandidate, setPlanCandidate] = useState<Item[] | null>(null),
@@ -305,6 +307,7 @@ export default function PositioningDraft({
   const [confirmingQuestion, setConfirmingQuestion] = useState(false);
   const confirmationLock = useRef(false);
   const chatScroll = useRef<HTMLDivElement>(null);
+  const attachChatScroll = useCallback((node:HTMLDivElement|null)=>{chatScroll.current=node;if(node)requestAnimationFrame(()=>{if(chatScroll.current===node)node.scrollTop=node.scrollHeight;});},[]);
   const [mentorInput, setMentorInput] = useState("");
   const [manualMentorEnabled, setManualMentorEnabled] = useState(false);
   const [hydratedDraft, setHydratedDraft] = useState<string | null>(null);
@@ -1798,18 +1801,18 @@ export default function PositioningDraft({
       !["completed", "cancelled"].includes(execution.state),
   );
   return (
-    <WorkspaceFrame area="chat" rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<div className={resultStyles.panel}><header><h2>{planView?'已采用选题':'已确认的定位'}</h2><p>当前策略与信息状态</p></header><div className={resultStyles.body}>{steps.map((step,index)=><details key={step.id} open={step.id===selectedStep?.id}><summary><span>{index+1}. {step.title}</span><small>{snap.steps[step.id].valid?'已确认':'待核对'}</small></summary><div className={resultStyles.fields}>{(d.information[step.id]?.schema??[]).map((field:{id:string;title:string})=><div key={field.id}><strong>{field.title}</strong><p>{d.information[step.id]?.values?.[field.id]?.value||'待补充'}</p></div>)}</div></details>)}</div><footer>修改后须按原流程明确保存与确认。</footer></div>}>
+    <WorkspaceFrame area="chat" rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<div className={resultStyles.panel}><header><h2>{planView?'已采用选题':snap.state==='draft'?'当前问题':'已确认的定位'}</h2><p>{snap.state==='draft'?'本步骤的信息与确认操作':'当前策略与信息状态'}</p></header><div className={resultStyles.body} ref={setResultBodyNode}>{snap.state!=='draft'&&steps.map((step,index)=><details key={step.id} open={step.id===selectedStep?.id}><summary><span>{index+1}. {step.title}</span><small>{snap.steps[step.id].valid?'已确认':'待核对'}</small></summary><div className={resultStyles.fields}>{(d.information[step.id]?.schema??[]).map((field:{id:string;title:string})=><div key={field.id}><strong>{field.title}</strong><p>{d.information[step.id]?.values?.[field.id]?.value||'待补充'}</p></div>)}</div></details>)}</div><footer>修改后须按原流程明确保存与确认。</footer></div>}>
     <main className={`${resultStyles.workspaceMain} h-full w-full overflow-y-auto text-[var(--text-primary)]`}><div className={resultStyles.workspaceContent}>
-      <header className="flex flex-wrap justify-between gap-3">
+      <header className={resultStyles.positionTop}>
         <div>
-          <h1 className="text-2xl font-semibold">{planView ? "第一周计划" : manualEntry ? "录入已有定位" : "与导师确定定位"}</h1>
+          <h1>{planView ? "第一周计划" : manualEntry ? "录入已有定位" : "定位分析"}</h1>
           <p className="text-xs text-[var(--text-secondary)]">{d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'隔离模拟 · 未调用真实模型或研究服务'}</p>
         </div>
         <Link href="/positioning" className="underline">
           账号与定位列表
         </Link>
       </header>
-      <div className="flex flex-wrap gap-3">
+      <div className={resultStyles.recoveryActions}>
         <Button variant="outline" onClick={() => read.refetch()}>
           重新读取状态
         </Button>
@@ -1838,7 +1841,7 @@ export default function PositioningDraft({
           ))}
         </section>
       )}
-      <nav aria-label="定位步骤" className="flex gap-2 overflow-x-auto pb-1">
+      <nav aria-label="定位步骤" className={resultStyles.phaseStrip} style={{gridTemplateColumns:`repeat(${steps.length},minmax(0,1fr))`}}>
         {steps.map((step, index) => (
           <Button
             key={step.id}
@@ -1952,7 +1955,7 @@ export default function PositioningDraft({
                     </h3>
                   </div>
                   <div
-                    ref={chatScroll}
+                    ref={attachChatScroll}
                     role="log"
                     aria-label="完整导师消息"
                     aria-live="polite"
@@ -2037,7 +2040,7 @@ export default function PositioningDraft({
                       );
                     })}
                   </div>
-                  <label className="block text-sm">
+                  <div className={resultStyles.composerZone}><label className="block text-sm">
                     回复导师
                     <Textarea
                       className="resize-none"
@@ -2066,12 +2069,12 @@ export default function PositioningDraft({
                     onClick={() => ask(step, activeQuestion.id)}
                   >
                     {busy ? "正在回复…" : "发送"}
-                  </Button>
+                  </Button></div>
                   <p className="text-xs text-[var(--text-secondary)]">
-                    导师会主动引导当前问题，不需要你先发“你好”或“继续”。各步骤共用这一条对话记录；右侧每次只显示当前问题，确认后再继续，刷新或重新登录可恢复已保存进度。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
+                    同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
                   </p>
                 </aside>
-                {snap.state === "draft" && <section
+                {snap.state === "draft" && resultBodyNode && createPortal(<section
                   aria-label="本步填写信息"
                   className={`${resultStyles.stepForm} space-y-4`}
                 >
@@ -2327,7 +2330,7 @@ export default function PositioningDraft({
                       </nav>
                     );
                   })()}
-                </section>}
+                </section>,resultBodyNode)}
               </div>
               {s.valid && index === steps.length - 1 && (
                 <div

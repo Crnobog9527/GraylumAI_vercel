@@ -1,6 +1,7 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { useEffect,useState,useRef,useMemo } from 'react';
+import { Suspense,useEffect,useState,useRef,useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Bot,ArrowUp,Box,Plus,MessageSquare,Loader2,Search } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -27,10 +28,18 @@ function displayReply(input:string|null,body:string|null){
  return '生成结果尚未整理完成，请保留原任务并恢复核对。';
 }
 
-export default function RuntimePage(){
- const [sessionId,setSession]=useState(''),[input,setInput]=useState(''),[selection,setSelection]=useState(''),[error,setError]=useState('');
- const [requestedModule,setRequestedModule]=useState('');
- useEffect(()=>{const params=new URL(location.href).searchParams;const id=params.get('session');if(id)setSession(id);const moduleId=params.get('module');if(moduleId)setRequestedModule(moduleId);},[]);
+export default function RuntimePage(){return <Suspense fallback={<p>正在读取工作…</p>}><RuntimeRoute/></Suspense>}
+function RuntimeRoute(){
+ const params=useSearchParams();
+ const routeSession=params.get('session')??'';
+ const routeModule=params.get('module')??'';
+ return <RuntimeWorkspace key={routeSession||'new:'+routeModule} routeSession={routeSession} routeModule={routeModule}/>;
+}
+function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeModule:string}){
+ const [sessionId,setSession]=useState(routeSession),[input,setInput]=useState(''),[selection,setSelection]=useState(''),[error,setError]=useState('');
+ const requestedModule=routeModule;
+ const alive=useRef(true);
+ useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
  useEffect(()=>{if(sessionId)setInput(localStorage.getItem('opc-runtime-input:'+sessionId)??'');},[sessionId]);
  function updateInput(value:string){setInput(value);if(sessionId)localStorage.setItem('opc-runtime-input:'+sessionId,value);}
  const choices=trpc.runtime.choices.useQuery(sessionId?{sessionId}:undefined);
@@ -69,6 +78,7 @@ export default function RuntimePage(){
  async function open(){setError('');try{
   const url=new URL(location.href),requestId=url.searchParams.get('start')??crypto.randomUUID();url.search='';url.searchParams.set('start',requestId);history.replaceState(null,'',url);
   const result=await start.mutateAsync({requestId,scope:{kind:'positioning_draft'}});
+  if(!alive.current)return;
   if(requestedModule)localStorage.setItem('opc-runtime-skill:'+result.sessionId,requestedModule);
   url.search='';url.searchParams.set('session',result.sessionId);history.replaceState(null,'',url);setSession(result.sessionId);
  }catch{setError('建立草稿失败。再次点击会恢复同一次开始请求。');}}
@@ -79,10 +89,11 @@ export default function RuntimePage(){
   const url=new URL(location.href),requestId=url.searchParams.get('request')??crypto.randomUUID();url.searchParams.set('request',requestId);history.replaceState(null,'',url);
   const submitted=input;
   const admitted=await prepare.mutateAsync({sessionId,requestId,input:scriptRequest?'[OPC_SCRIPT_V1] 请基于当前选题简报讨论并给出可修改的口播稿。'+(submitted.trim()||'先给我一版口播稿。'):submitted,selection:selected,network:'deny',sources:[]});
+  if(!alive.current)return;
   url.searchParams.delete('request');history.replaceState(null,'',url);
   setInput(current=>{if(current===submitted){localStorage.removeItem('opc-runtime-input:'+sessionId);return '';}return current;});
-  await execute.mutateAsync({executionId:admitted.executionId});await view.refetch();
- }catch{setError('请求状态待核实。请读取原任务状态，不要重新发送相同内容。');await view.refetch();}}
+  await execute.mutateAsync({executionId:admitted.executionId});if(alive.current)await view.refetch();
+ }catch{if(alive.current){setError('请求状态待核实。请读取原任务状态，不要重新发送相同内容。');await view.refetch();}}}
  const videoKey=sessionId?'opc-video-operation:'+sessionId:'';
  const scriptKey=sessionId?(isVideo?'opc-script-final:':'opc-written-final:')+sessionId:'';
  const videoAttempt=useRef(false);
