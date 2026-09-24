@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ArrowUpRight, BookOpen, CalendarDays, ChartNoAxesColumnIncreasing, ChevronDown, Ellipsis, Grid2X2, LogOut, Menu, PanelRightClose, Pencil, Pin, Search, Sparkles, Ticket, UserRound, Wallet, X } from 'lucide-react';
+import { BookOpen, ChevronDown, Ellipsis, Grid2X2, LogOut, Menu, PanelRightClose, Pencil, Pin, Sparkles, UserRound, X } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import { useCreditsBalance } from '@/hooks/use-credits';
 import { createClient } from '@/lib/supabase';
@@ -20,7 +20,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  children:ReactNode;right?:ReactNode;rightOpen?:boolean;onToggleRight?:()=>void;
  activeWorkItemId?:string;area?:'chat'|'library'|'topics'|'marketplace'|'search'|'start';notice?:string;
 }){
- const [mobileNav,setMobileNav]=useState(false),[mobileRight,setMobileRight]=useState(false),[query,setQuery]=useState('');
+ const [mobileNav,setMobileNav]=useState(false),[mobileRight,setMobileRight]=useState(false);
  const [archiveView,setArchiveView]=useState(false),[menuId,setMenuId]=useState(''),[menuPosition,setMenuPosition]=useState({top:0,left:0});
  const [renameId,setRenameId]=useState(''),[renameValue,setRenameValue]=useState(''),[confirmDelete,setConfirmDelete]=useState(''),[uiError,setUiError]=useState('');
  const [renameAccountId,setRenameAccountId]=useState(''),[renameAccountValue,setRenameAccountValue]=useState('');
@@ -65,7 +65,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
   const group=platforms.get(account.platform)??[];group.push(account);platforms.set(account.platform,group);
  }
  const assigned=new Set([...platforms.values()].flat().map(account=>account.strategyDraftId).filter(Boolean));
- const unassigned=((drafts.data?.drafts??[]) as Draft[]).filter(draft=>!assigned.has(draft.draftId)&&(!query||(`${draft.businessName??''} 定位`).toLocaleLowerCase().includes(query.toLocaleLowerCase())));
+ const unassigned=((drafts.data?.drafts??[]) as Draft[]).filter(draft=>!assigned.has(draft.draftId));
  async function changeRecord(item:Item,action:'rename'|'pin'|'unpin'|'archive'|'restore'|'delete',name?:string){
   if(changeWorkUi.isPending)return;
   const key='opc-work-ui:'+item.workItemId;
@@ -102,36 +102,32 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
   {noticeOpen&&<div className={styles.announcement}>{notice&&<span>{notice}</span>}<Sparkles size={15}/><strong>让好想法，继续向前。</strong><Link href={'/workbench/marketplace'+returnParam}>探索创作功能</Link><button aria-label="关闭公告" onClick={()=>setNoticeOpen(false)}><X size={15}/></button></div>}
   <div className={[styles.shell,right&&rightOpen?styles.withRight:'',mobileNav?styles.navOpen:'',mobileRight?styles.mobileRightOpen:'',!noticeOpen?styles.noNotice:''].join(' ')}>
    <aside className={styles.rail} aria-label="工作区导航">
-    <div className={styles.railMobile}><strong>工作区</strong><button aria-label="关闭导航" onClick={()=>setMobileNav(false)}><X size={18}/></button></div>
+    <div className={styles.railMobile}><button aria-label="关闭导航" onClick={()=>setMobileNav(false)}>关闭工作列表</button></div>
     <Link className={styles.newConversation} href="/positioning"><img className={styles.newConversationIcon} src="/opc-reference/new-chat.svg" alt=""/>新对话</Link>
     <nav className={styles.railNav} aria-label="工作区功能">
-     <Link href={'/workbench/marketplace'+returnParam} aria-current={area==='marketplace'?'page':undefined}><Grid2X2 size={17}/>功能广场</Link>
-     <Link href={'/workbench/search'+returnParam} aria-current={area==='search'?'page':undefined}><Search size={17}/>搜索</Link>
-     <Link href={'/library'+returnParam} aria-current={area==='library'?'page':undefined}><BookOpen size={17}/>资料库</Link>
-     <button disabled><CalendarDays size={17}/>发布排期 <small>待接入</small></button>
-     <button disabled><ChartNoAxesColumnIncreasing size={17}/>数据复盘 <small>待接入</small></button>
+     <Link href={'/workbench/marketplace'+returnParam} aria-current={area==='marketplace'?'page':undefined}><img className={styles.navIcon} src="/opc-reference/squares-four.svg" alt=""/>功能广场</Link>
+     <Link href={'/workbench/search'+returnParam} aria-current={area==='search'?'page':undefined}><img className={styles.navIcon} src="/opc-reference/magnifying-glass.svg" alt=""/>搜索</Link>
+     <Link href={'/library'+returnParam} aria-current={area==='library'?'page':undefined}><img className={styles.navIcon} src="/opc-reference/books.svg" alt=""/>资料库</Link>
+     <button disabled><img className={styles.navIcon} src="/opc-reference/calendar-blank.svg" alt=""/>发布排期 <small>待接入</small></button>
+     <button disabled><img className={styles.navIcon} src="/opc-reference/chart-bar.svg" alt=""/>数据复盘 <small>待接入</small></button>
     </nav>
     <div className={styles.history} aria-label="平台、账号与工作" onScroll={()=>setMenuId('')}>
     <div className={styles.historyHead}><span>{archiveView?'归档记录':'平台 · 账号 · 工作'}</span><button onClick={()=>setArchiveView(value=>!value)}>{archiveView?'返回最近工作':'查看归档'}</button></div>
-    <label className={styles.searchLabel} htmlFor="workspace-work-search">查找账号或工作</label>
-    <input id="workspace-work-search" className={styles.search} type="search" aria-label="查找账号或工作" placeholder="搜索账号、工作" value={query} onChange={event=>setQuery(event.target.value)}/>
      {[...platforms].map(([platform,accounts])=>{
-      const needle=query.trim().toLocaleLowerCase();
       const visible=accounts.map(account=>{
-       const scopeMatch=(account.account+' '+(account.displayName??'')+' '+platform).toLocaleLowerCase().includes(needle);
-       const showStrategy=Boolean(account.strategyDraftId)&&(!needle||scopeMatch||'定位策略'.includes(needle));
-       return {account,showStrategy:archiveView?false:showStrategy,items:account.items.filter(item=>!item.deleted&&Boolean(item.archived)===archiveView&&(scopeMatch||(item.chatName??item.title).toLocaleLowerCase().includes(needle)))
+       const showStrategy=Boolean(account.strategyDraftId);
+       return {account,showStrategy:archiveView?false:showStrategy,items:account.items.filter(item=>!item.deleted&&Boolean(item.archived)===archiveView)
         .sort((a,b)=>Number(Boolean(b.pinned))-Number(Boolean(a.pinned))||(b.lastActivityAt??'').localeCompare(a.lastActivityAt??''))};})
-       .filter(row=>archiveView?row.items.length:!needle||row.items.length||row.showStrategy||(row.account.displayName??row.account.account).toLocaleLowerCase().includes(needle));
+       .filter(row=>archiveView?row.items.length:true);
       if(!visible.length)return null;
       return <details key={platform} open={groupOpen['platform:'+platform]??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current['platform:'+platform]===next?current:{...current,['platform:'+platform]:next});}}>
        <summary>{platform}<ChevronDown size={14}/></summary>
        {visible.map(({account,items,showStrategy})=>{
-        const shown=query||expanded.includes(account.projectId)?items:items.slice(0,6);
+        const shown=expanded.includes(account.projectId)?items:items.slice(0,6);
         const strategy=((drafts.data?.drafts??[]) as Draft[]).find(draft=>draft.draftId===account.strategyDraftId);
         return <details key={account.projectId} open={groupOpen['account:'+account.projectId]??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current['account:'+account.projectId]===next?current:{...current,['account:'+account.projectId]:next});}} className={styles.account}>
          <summary>{renameAccountId===account.projectId?<input className={styles.accountRename} aria-label="重命名账号" maxLength={120} autoFocus value={renameAccountValue} onClick={event=>event.stopPropagation()} onChange={event=>setRenameAccountValue(event.target.value)} onKeyDown={event=>{event.stopPropagation();if(event.key==='Escape')setRenameAccountId('');if(event.key==='Enter')void renameAccount(account);}}/>:<span>{account.displayName??account.account}</span>}<button type="button" aria-label={renameAccountId===account.projectId?'保存账号名称':'重命名账号 '+(account.displayName??account.account)} onClick={event=>{event.preventDefault();event.stopPropagation();if(renameAccountId===account.projectId)void renameAccount(account);else{setRenameAccountId(account.projectId);setRenameAccountValue(account.displayName??account.account);}}}>{renameAccountId===account.projectId?'✓':<Pencil size={14}/>}</button><ChevronDown size={13}/></summary>
-         {showStrategy&&account.strategyDraftId?<Link className={styles.strategy} href={'/positioning/'+account.strategyDraftId}><span><Pin size={12}/>定位策略</span><small>{strategy?.currentVersion?`当前 v${strategy.currentVersion}`:'进行中'} · {account.displayName??account.account}</small></Link>:!needle&&!account.strategyDraftId?<p className={styles.empty}>定位策略待建立</p>:null}
+         {showStrategy&&account.strategyDraftId?<Link className={styles.strategy} href={'/positioning/'+account.strategyDraftId}><span><Pin size={12}/>定位策略</span><small>{strategy?.currentVersion?`当前 v${strategy.currentVersion}`:'进行中'} · {account.displayName??account.account}</small></Link>:!account.strategyDraftId?<p className={styles.empty}>定位策略待建立</p>:null}
          {shown.map(recordMenu)}
          {shown.length<items.length&&<button className={styles.older} onClick={()=>setExpanded(current=>[...current,account.projectId])}>查看更早 {items.length-shown.length} 项</button>}
         </details>;
@@ -141,7 +137,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
      {!archiveView&&unassigned.length>0&&<details open={groupOpen.unassigned??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current.unassigned===next?current:{...current,unassigned:next});}}><summary>待归类<ChevronDown size={14}/></summary>{unassigned.map(draft=><Link key={draft.draftId} className={styles.thread} href={'/positioning/'+draft.draftId}><span>{draft.businessName??'新账号'} · 定位分析</span><small>{draft.state==='published'?'已确认':'进行中'}</small></Link>)}</details>}
      {!library.isLoading&&(!archiveView&&!platforms.size&&!unassigned.length||archiveView&&![...platforms.values()].flat().some(account=>account.items.some(item=>item.archived&&!item.deleted)))&&<p className={styles.empty}>{archiveView?'暂无归档记录。':'完成定位并采用选题后，账号工作会出现在这里。'}</p>}
     </div>
-    {uiError&&<p role="alert" className={styles.uiError}>{uiError}</p>}<div className={styles.railBottom}><div className={styles.creditWidget}><button type="button" onClick={event=>{setFeedbackSent(false);openBottomPanel('feedback',event.currentTarget);}}><Ticket size={19}/>在线反馈<ArrowUpRight size={14} className={styles.externalIcon}/></button><button type="button" aria-expanded={bottomPanel==='credits'} onClick={event=>openBottomPanel('credits',event.currentTarget)}><Wallet size={19}/>积分 <small>{credits.status==='ready'?credits.credits:'查看'}</small></button></div><button type="button" className={styles.profile} aria-expanded={bottomPanel==='profile'} onClick={event=>openBottomPanel('profile',event.currentTarget)}><span className={styles.avatar}>{(profile.data?.nickname??profile.data?.email??'我').slice(0,1)}</span><span>{profile.data?.nickname??profile.data?.email??'个人中心'}<small>{profile.data?.membership_level==='free'?'普通会员':'查看账户'}</small></span><ChevronDown size={14}/></button></div>
+    {uiError&&<p role="alert" className={styles.uiError}>{uiError}</p>}<div className={styles.railBottom}><div className={styles.creditWidget}><button type="button" onClick={event=>{setFeedbackSent(false);openBottomPanel('feedback',event.currentTarget);}}><img className={styles.navIcon} src="/opc-reference/feedback.svg" alt=""/>在线反馈<img className={styles.externalIcon} src="/opc-reference/arrow-up-right.svg" alt=""/></button><button type="button" aria-expanded={bottomPanel==='credits'} onClick={event=>openBottomPanel('credits',event.currentTarget)}><img className={styles.navIcon} src="/opc-reference/wallet-color.svg" alt=""/>积分 <small>{credits.status==='ready'?credits.credits:'查看'}</small></button></div><button type="button" className={styles.profile} aria-expanded={bottomPanel==='profile'} onClick={event=>openBottomPanel('profile',event.currentTarget)}><span className={styles.avatar}>{(profile.data?.nickname??profile.data?.email??'我').slice(0,1)}</span><span>{profile.data?.nickname??profile.data?.email??'个人中心'}<small>{profile.data?.membership_level==='free'?'普通会员':'查看账户'}</small></span><ChevronDown size={14}/></button></div>
    </aside>
    <section className={styles.center}>
    {right&&<button type="button" className={styles.mobileRightToggle} aria-label="展开右边栏" onClick={()=>{if(!rightOpen)onToggleRight?.();setMobileRight(true);}}><PanelRightClose size={18}/></button>}

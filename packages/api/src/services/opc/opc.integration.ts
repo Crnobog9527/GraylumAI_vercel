@@ -8586,8 +8586,18 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
     await page.getByRole('link',{name:'对话',exact:true}).click();
     await page.waitForURL(url=>url.pathname==='/positioning');
     await page.getByRole('heading',{name:'今天，想推进什么？',exact:true}).waitFor();
+    await expect.poll(()=>page.getByRole('link',{name:'搜索',exact:true}).count()).toBe(1);
+    await expect.poll(()=>page.getByRole('searchbox',{name:'查找账号或工作'}).count()).toBe(0);
+    await expect.poll(()=>page.locator('nav[aria-label="工作区功能"] img').evaluateAll(images=>images.length===5&&images.every(image=>image instanceof HTMLImageElement&&image.complete&&image.naturalWidth>0))).toBe(true);
+    await expect.poll(()=>page.locator('section[class*="discovery"] [class*="discoverGrid"] > *').count()).toBe(8);
     await page.evaluate(()=>document.fonts.ready);
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-start-1600x900.png'});
+    await page.setViewportSize({width:390,height:844});
+    await page.getByRole('button',{name:'打开导航'}).first().click();
+    await expect.poll(()=>page.locator('aside[aria-label="工作区导航"]').evaluate(element=>{const bounds=element.getBoundingClientRect();return [bounds.x,bounds.y,bounds.width,bounds.height].map(Math.round).join(',');})).toBe('0,96,272,748');
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-mobile-nav-390x844.png'});
+    await page.getByRole('button',{name:'关闭导航'}).click();
+    await page.setViewportSize({width:1600,height:900});
     await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
     await page.getByRole('button',{name:'继续选择定位方式',exact:true}).click();
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-positioning-choice-1600x900.png'});
@@ -8661,6 +8671,14 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
     await page.getByRole('link',{name:'资料库',exact:true}).click();
     await page.waitForURL(url=>url.pathname==='/library');
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-library-1600x900.png'});
+    await page.getByRole('main').locator('section').filter({has:page.getByRole('heading',{name:'定位概览'})}).getByRole('button',{name:/proposed-account/}).click();
+    const positioningDetail=page.getByRole('dialog',{name:'定位详情'});
+    await expect.poll(()=>positioningDetail.locator('details').count()).toBe(6);
+    for(const title of ['需求确认','竞品研究','账号定位','内容策略','运营建议','商业规划'])
+      await expect.poll(()=>positioningDetail.locator('summary',{hasText:title}).count()).toBe(1);
+    await positioningDetail.getByRole('button',{name:'修改定位',exact:true}).click();
+    await expect.poll(()=>positioningDetail.getByRole('textbox').count()).toBe(9);
+    await positioningDetail.getByRole('button',{name:'关闭定位详情'}).click();
     await page.getByRole('main').getByRole('button',{name:/第二个账号选题/}).first().click();
     await page.getByText('先讲真实场景，再说明取景判断，最后安排一次练习。').waitFor();
     await page.getByRole('button',{name:'关闭窗口',exact:true}).click();

@@ -76,8 +76,9 @@ The in-progress strategy keeps its actual Skill questions and persistence in
 the right rail, while the conversation remains central. Isolated UX acceptance
 uses the approved six-stage positioning scenario, including all nine questions;
 production renders the actual bound Skill without inventing stages. The
-sidebar's top Search opens a workspace search page for work, archived records,
-and features; the field above platform groups filters accounts and work in place. Fixed
+sidebar's Search opens a workspace search page for work, archived records,
+and features. The separate account/work filter above platform groups is intentionally
+omitted per the Owner's latest direction, even though it appears in the accepted prototype. Fixed
 account strategy, independent chat display names, pinning, archive recovery, and account display
 names use owned projections and versioned mutations. Chat actions appear on
 hover or keyboard focus; renaming is inline and deleting requires a second
