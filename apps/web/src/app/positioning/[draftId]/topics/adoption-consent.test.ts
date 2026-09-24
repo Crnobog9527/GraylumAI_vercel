@@ -11,7 +11,8 @@ describe('natural-language topic adoption consent', () => {
     expect(consentedTopicIds('采用全部选题', ids)).toEqual(ids);
   });
   it('refuses questions, vague agreement, negation and out-of-range selection', () => {
-    for (const message of ['不要采用第一条', '采用第一条吗？', '好，继续', '先看看第二条', '采用第四条', '别人说采用第一条']) {
+    for (const message of ['不要采用第一条', '采用第一条吗？', '好，继续', '先看看第二条', '采用第四条', '别人说采用第一条',
+      '采用第一条和', '采用和第一条', '采用第一条和选题']) {
       expect(consentedTopicIds(message, ids)).toBeNull();
     }
   });

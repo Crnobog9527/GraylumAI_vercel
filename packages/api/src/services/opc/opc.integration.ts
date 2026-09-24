@@ -7619,6 +7619,17 @@ it("OPC: account strategy edits stay draft-scoped and publish only for the chose
   const secondDraft=await f.service.accountStrategyBegin(a.projectId,secondStartRequest);
   expect(secondDraft.draftId).not.toBe(saved.draftId);
   expect((await f.service.accountStrategyBegin(a.projectId,request.requestId)).draftId).toBe(saved.draftId);
+  const sharedBefore=(await sql.query('select current_source_version_id from opc_businesses where id=(select business_id from opc_accounts where project_id=$1)',[a.projectId])).rows[0].current_source_version_id;
+  await expect(f.service.revise(saved.draftId,randomUUID(),saved.roundId)).rejects.toThrow('OPC_VERSION_CONFLICT');
+  await expect(sql.query('select artifact_transition($1,$2,$3,$4,$5,$6,$7,$8)',
+    [f.actor,f.moduleId,f.pack.id,'publish',draft.projectId,saved.roundId,randomUUID(),{}])).rejects.toThrow('OPC_VERSION_CONFLICT');
+  expect((await sql.query('select current_source_version_id from opc_businesses where id=(select business_id from opc_accounts where project_id=$1)',[a.projectId])).rows[0].current_source_version_id).toBe(sharedBefore);
+  const {browser:historicalBrowser,page:historicalPage}=await planBrowser(f);
+  try{
+    await historicalPage.goto(process.env.V3_LOCAL_APP+'/positioning/'+saved.draftId);
+    await historicalPage.getByRole('button',{name:'修订定位，保留原版本',exact:true}).click();
+    await expect.poll(async()=>(await historicalPage.getByRole('alert').allTextContents()).join(' '),{timeout:15000}).toContain('版本已变化');
+  }finally{await historicalBrowser.close();}
   const secondRead=await f.service.read(secondDraft.draftId);
   expect(secondRead.snapshot.workflow.steps[0].title).toBe('新版账号问题');
   expect(secondRead.information[secondFlow.steps[0].id].schema.map((field:{title:string})=>field.title)).toContain('新增问题');
@@ -8153,6 +8164,12 @@ it("OPC: natural-language adoption stays complete after refresh and permits the 
     await page.getByLabel('消息', { exact: true }).fill('请继续修改标题');
     await page.getByRole('button', { name: '发送', exact: true }).click();
     await expect.poll(async () => (await f.service.topicDraftRead(f.d.draftId)).version, { timeout: 60000 }).toBe(2);
+    await expect.poll(async () => {
+      const latest = await f.service.topicDraftRead(f.d.draftId);
+      const stored = await page.evaluate((sessionId) => JSON.parse(localStorage.getItem('opc-topic-candidate:' + sessionId) ?? 'null'),
+        (await f.service.topicRead(f.d.draftId)).sessionId);
+      return JSON.stringify(stored?.body) === JSON.stringify(latest.body);
+    }, { timeout: 10000 }).toBe(true);
     const after = await f.service.read(f.d.draftId);
     expect(after.handoffs).toEqual(before.handoffs);
     expect(after.plans).toEqual(before.plans);

@@ -91,6 +91,33 @@ END $$;
 REVOKE ALL ON FUNCTION opc_account_strategy_begin(uuid,uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION opc_account_strategy_begin(uuid,uuid,uuid) TO service_role;
 
+-- A historical account revision remains readable, but cannot start another
+-- writable round after the account has moved to a newer draft. Exact prior
+-- request replays still return through the original idempotent implementation.
+DO $$ BEGIN
+ IF to_regprocedure('opc_revise_before_account_strategy(uuid,uuid,uuid,uuid)') IS NULL THEN
+  ALTER FUNCTION opc_revise(uuid,uuid,uuid,uuid) RENAME TO opc_revise_before_account_strategy;
+ END IF;
+END $$;
+CREATE OR REPLACE FUNCTION opc_revise(p_actor_id uuid,p_draft_id uuid,p_request_id uuid,p_expected_round_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE d opc_drafts;binding opc_account_strategy_drafts;
+BEGIN
+ PERFORM bill2_actor(p_actor_id);
+ SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
+ IF d.draft_id IS NULL THEN RAISE EXCEPTION 'OPC_DENIED';END IF;
+ PERFORM 1 FROM opc_accounts a JOIN opc_account_strategy_drafts asd ON asd.account_project_id=a.project_id
+  WHERE asd.draft_id=p_draft_id AND asd.actor_id=p_actor_id AND a.actor_id=p_actor_id FOR UPDATE OF a;
+ SELECT * INTO binding FROM opc_account_strategy_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id FOR UPDATE;
+ IF binding.draft_id IS NOT NULL AND NOT binding.current AND NOT EXISTS(
+  SELECT 1 FROM artifact_requests WHERE project_id=d.project_id AND request_id=p_request_id
+   AND action='opc_revision' AND payload->>'fromRoundId'=p_expected_round_id::text
+ ) THEN RAISE EXCEPTION 'OPC_VERSION_CONFLICT';END IF;
+ RETURN opc_revise_before_account_strategy(p_actor_id,p_draft_id,p_request_id,p_expected_round_id);
+END $$;
+REVOKE ALL ON FUNCTION opc_revise_before_account_strategy(uuid,uuid,uuid,uuid),opc_revise(uuid,uuid,uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION opc_revise(uuid,uuid,uuid,uuid) TO service_role;
+
 -- The existing publish path still checks every required field and writes the
 -- immutable artifact version. Only its destination is account-scoped here.
 DO $$ BEGIN
@@ -107,13 +134,16 @@ BEGIN
  END IF;
  SELECT asd.* INTO binding FROM opc_account_strategy_drafts asd
   JOIN opc_drafts d ON d.draft_id=asd.draft_id
-  WHERE d.project_id=p_project_id AND d.round_id=p_round_id AND asd.actor_id=p_actor_id AND asd.current;
+  WHERE d.project_id=p_project_id AND d.round_id=p_round_id AND asd.actor_id=p_actor_id;
  IF binding.draft_id IS NULL THEN
   RETURN artifact_transition_before_account_strategy(p_actor_id,p_module_id,p_skill_id,p_action,p_project_id,p_round_id,p_request_id,p_payload);
  END IF;
  SELECT EXISTS(SELECT 1 FROM artifact_requests WHERE project_id=p_project_id AND request_id=p_request_id) INTO replay;
  IF replay THEN RETURN artifact_transition_before_account_strategy(p_actor_id,p_module_id,p_skill_id,p_action,p_project_id,p_round_id,p_request_id,p_payload);END IF;
+ IF NOT binding.current THEN RAISE EXCEPTION 'OPC_VERSION_CONFLICT';END IF;
  SELECT * INTO a FROM opc_accounts WHERE project_id=binding.account_project_id AND actor_id=p_actor_id FOR UPDATE;
+ SELECT * INTO binding FROM opc_account_strategy_drafts WHERE draft_id=binding.draft_id AND actor_id=p_actor_id FOR UPDATE;
+ IF NOT binding.current THEN RAISE EXCEPTION 'OPC_VERSION_CONFLICT';END IF;
  IF a.project_id IS NULL OR a.source_version_id IS DISTINCT FROM binding.base_source_version_id OR
   a.revision IS DISTINCT FROM binding.base_account_revision THEN RAISE EXCEPTION 'OPC_VERSION_CONFLICT';END IF;
  SELECT * INTO b FROM opc_businesses WHERE id=a.business_id AND actor_id=p_actor_id FOR UPDATE;

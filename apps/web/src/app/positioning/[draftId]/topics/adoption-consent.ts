@@ -15,8 +15,9 @@ export function consentedTopicIds(input: string | null, candidateIds: string[]):
     const tens = value.match(/^([一二])?十([一二三四五六七八九])?$/);
     return tens ? (tens[1] ? numerals[tens[1]] : 1) * 10 + (tens[2] ? numerals[tens[2]] : 0) : NaN;
   }
-  const parts = [...selection.matchAll(/第\s*([一二三四五六七八九十两\d]+)\s*条/g)];
-  if (!parts.length || !/^(?:[\s、,，]|和|及|与|以及|选题|内容)*$/.test(selection.replace(/第\s*[一二三四五六七八九十两\d]+\s*条/g, ''))) return null;
+  const token = /第\s*([一二三四五六七八九十两\d]+)\s*条(?:选题|内容)?/g;
+  const parts = [...selection.matchAll(token)];
+  if (!parts.length || !/^#(?:\s*(?:、|,|，|和|及|与|以及)\s*#)*$/.test(selection.replace(token, '#'))) return null;
   const positions = [...new Set(parts.map(part => ordinal(part[1])))];
   return positions.every(position => Number.isInteger(position) && position >= 1 && position <= candidateIds.length)
     ? positions.map(position => candidateIds[position - 1]) : null;

@@ -192,7 +192,12 @@ export default function TopicWorkspacePage() {
     try {
       const local = candidateKey ? localStorage.getItem(candidateKey) : null;
       const edited = local ? JSON.parse(local) : null;
-      setCandidate(edited?.requestId === requestId ? edited : { body, requestId });
+      if (edited?.requestId === requestId) setCandidate(edited);
+      else {
+        const next = { body, requestId };
+        if (candidateKey) localStorage.setItem(candidateKey, JSON.stringify(next));
+        setCandidate(next);
+      }
     } catch { setError('本机候选修改无法读取，请保留记录。'); }
 
   }, [topicDraft.data?.draftVersionId, topicDraft.data?.body, candidateKey]);
