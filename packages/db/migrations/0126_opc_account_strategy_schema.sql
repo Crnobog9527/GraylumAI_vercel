@@ -41,7 +41,7 @@ CREATE OR REPLACE FUNCTION opc_account_strategy_save_checked(
  p_actor_id uuid,p_account_project_id uuid,p_request_id uuid,p_expected_source_version_id uuid,
  p_expected_pending_draft_id uuid,p_expected_registration_id text,p_edits jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE schema_now jsonb;
+DECLARE schema_now jsonb;result jsonb;saved_registration text;
 BEGIN
  PERFORM bill2_actor(p_actor_id);
  PERFORM pg_advisory_xact_lock(hashtextextended(p_actor_id::text||p_request_id::text,125));
@@ -57,8 +57,16 @@ BEGIN
  IF schema_now->>'registrationId' IS DISTINCT FROM p_expected_registration_id THEN
   RAISE EXCEPTION 'OPC_VERSION_CONFLICT';
  END IF;
- RETURN opc_account_strategy_save(p_actor_id,p_account_project_id,p_request_id,
+ result:=opc_account_strategy_save(p_actor_id,p_account_project_id,p_request_id,
   p_expected_source_version_id,p_expected_pending_draft_id,p_edits);
+ -- Publication does not lock this account. If it committed between the
+ -- preview check and the inner begin, roll the entire save back atomically.
+ SELECT registration INTO saved_registration FROM opc_drafts
+  WHERE draft_id=(result->>'draftId')::uuid AND actor_id=p_actor_id;
+ IF saved_registration IS DISTINCT FROM p_expected_registration_id THEN
+  RAISE EXCEPTION 'OPC_VERSION_CONFLICT';
+ END IF;
+ RETURN result;
 END $$;
 REVOKE ALL ON FUNCTION opc_account_strategy_save_checked(uuid,uuid,uuid,uuid,uuid,text,jsonb) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION opc_account_strategy_save_checked(uuid,uuid,uuid,uuid,uuid,text,jsonb) TO service_role;

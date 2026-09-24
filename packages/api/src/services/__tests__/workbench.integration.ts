@@ -3924,9 +3924,9 @@ it('ADMIN: re-uploading a declared Skill updates the active steps and questions 
   const labels=['需求确认','竞品研究','账号定位','内容策略','运营建议','商业规划','效果验证'];
   const declaration=(count:number,revised:boolean)=>[
     'kind: document','steps:',...labels.slice(0,count).flatMap((title,index)=>[
-      `  - title: ${revised&&index===0?'需求与目标':title}`,
+      `  - title: ${revised&&index===0?'竞品研究':revised&&index===1?'需求与目标':title}`,
       '    resources: [SKILL.md]','    information:',
-      `      - id: question_${index+1}`,
+      `      - id: ${revised&&index===0?'question_revised':`question_${index+1}`}`,
       `        title: ${revised&&index===0?'本期服务目标':`问题 ${index+1}`}`,
       '        required: true',`        profileKey: question_${index+1}`,
     ]),'',
@@ -3960,14 +3960,16 @@ it('ADMIN: re-uploading a declared Skill updates the active steps and questions 
     await page.getByLabel('步骤 1 名称',{exact:true}).waitFor();
     await page.getByLabel('导入 Skill 文件夹',{exact:true}).setInputFiles(directory);
     await expect.poll(()=>page.getByLabel('步骤 7 名称',{exact:true}).inputValue()).toBe('效果验证');
-    expect(await page.getByLabel('步骤 1 名称',{exact:true}).inputValue()).toBe('需求与目标');
+    expect(await page.getByLabel('步骤 1 名称',{exact:true}).inputValue()).toBe('竞品研究');
+    expect(await page.getByLabel('步骤 2 名称',{exact:true}).inputValue()).toBe('需求与目标');
     await page.getByText('本期服务目标 · 必需',{exact:true}).waitFor();
     await page.getByLabel('我已检查步骤顺序和各步使用的参考文件').check();
     await page.getByTestId('prompt-save').click();
     await expect.poll(()=>page.getByRole('dialog').count(),{timeout:30000}).toBe(0);
     expect((await current()).steps.map((step:{title:string})=>step.title))
-      .toEqual(['需求与目标','竞品研究','账号定位','内容策略','运营建议','商业规划','效果验证']);
+      .toEqual(['竞品研究','需求与目标','账号定位','内容策略','运营建议','商业规划','效果验证']);
     expect((await current()).steps[0].information[0].title).toBe('本期服务目标');
+    expect((await current()).steps[0].information[0].id).toBe('question_revised');
     expect((await sql.query('select count(*)::int n from artifact_workflows where module_id=$1 and enabled',[module.id])).rows[0].n).toBe(1);
   }finally{await context.close();}
 },180000);
