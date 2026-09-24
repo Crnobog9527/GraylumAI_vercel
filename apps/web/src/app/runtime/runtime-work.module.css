@@ -2,6 +2,7 @@
 .workHead{display:flex;align-items:center;justify-content:space-between;gap:20px;min-height:54px;flex:none;padding:0 24px;border-bottom:1px solid #ededed}
 .workTitle{min-width:0}.workTitle h1{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:550}.workTitle small{display:block;color:#999;font-size:11px}
 .workMeta{display:flex;align-items:center;gap:18px;flex:none;color:#888;font-size:12px}.workMeta a,.workMeta button{color:#666;text-decoration:none;white-space:nowrap}.workMeta button{border:1px solid #e5e5e5;border-radius:7px;background:#fff;padding:5px 9px}.workMeta a:hover{text-decoration:underline}
+.typePending{padding:24px 22px;color:#777}.typePending h2{font-size:16px;font-weight:550;color:#333}.typePending p{margin-top:18px;font-size:13px;line-height:1.8}
 .transcript{width:min(780px,100%);margin:0 auto;padding:32px 0 45px}
 .turn{margin-bottom:35px}
 .userMessage{width:fit-content;max-width:85%;margin:0 0 55px auto;padding:12px 17px;border-radius:20px;background:#f4f4f5;color:#292929;font-size:15px;line-height:1.85;white-space:pre-wrap;overflow-wrap:anywhere}

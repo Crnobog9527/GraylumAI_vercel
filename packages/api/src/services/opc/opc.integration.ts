@@ -8205,13 +8205,13 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   await page.getByLabel('消息',{exact:true}).fill('请细化构图的练习重点。');await page.getByRole('button',{name:'发送',exact:true}).click();
   let lostContent=0;
   await page.route('**/api/trpc/opc.saveContentResult*',async route=>{if(lostContent++)return route.continue();const response=await route.fetch();expect(response.ok()).toBe(true);await route.abort();});
-  const save=page.getByRole('button',{name:'保存这版内容到资料库',exact:true});await save.waitFor({timeout:60000});await save.click();
-  await page.getByRole('link',{name:'已保存到资料库 · 查看',exact:true}).waitFor({timeout:30000});
-  expect(await page.getByRole('heading',{name:'成果与版本',exact:true}).count()).toBe(0);
-  await page.getByRole('button',{name:'成果与版本',exact:true}).click();
-  await page.getByRole('heading',{name:'成果与版本',exact:true}).waitFor();
-  await page.getByRole('button',{name:'Close',exact:true}).click();
-  await page.getByRole('link',{name:'已保存到资料库 · 查看',exact:true}).click();
+  const save=page.getByRole('button',{name:'采用为当前草稿',exact:true});await save.waitFor({timeout:60000});await save.click();
+  await page.getByRole('link',{name:'已采用为草稿 · 查看',exact:true}).waitFor({timeout:30000});
+  expect((await sql.query("select status from opc_content_versions where work_item_id=$1 and kind='brief'",[article.workItemId])).rows[0].status).toBe('draft');
+  await page.getByRole('button',{name:'收起成果面板',exact:true}).click();
+  await page.getByRole('button',{name:'展开成果',exact:true}).click();
+  await page.getByRole('button',{name:'收起成果面板',exact:true}).waitFor();
+  await page.getByRole('link',{name:'已采用为草稿 · 查看',exact:true}).click();
   await page.waitForURL(url=>url.pathname==='/library'&&url.searchParams.get('item')===article.workItemId);
   const card=page.locator('#item-'+article.workItemId);await card.getByText('文章细化',{exact:true}).waitFor();
   expect(await card.innerText()).toContain('文章');
@@ -8223,10 +8223,10 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   await expect(sql.query('select runtime_admit($1,$2,$3,$4,$5)',[f.actor,article.sessionId,randomUUID(),previous.payload,previous.billing])).rejects.toThrow('OPC_VIDEO_TYPE_REQUIRED');
   // The same reply may be explicitly saved under a corrected content type.
   // Its frozen public request stays unchanged; each saved content owns its material.
-  await card.getByRole('button',{name:'直接编辑',exact:true}).click();
+  await card.getByRole('button',{name:'编辑选题信息',exact:true}).click();
   await card.getByLabel('内容类型',{exact:true}).selectOption('video');
   await card.getByRole('button',{name:'保存修改',exact:true}).click();
-  await card.getByRole('button',{name:'直接编辑',exact:true}).waitFor();
+  await card.getByRole('button',{name:'编辑选题信息',exact:true}).waitFor();
   await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+article.sessionId);
   await page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true}).click();
   await page.getByRole('link',{name:'这版口播稿已定稿 · 查看',exact:true}).waitFor();
@@ -8235,7 +8235,7 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   const firstScript=await f.service.contentFromExecution(replay);
   expect(await f.service.contentFromExecution(replay)).toEqual(firstScript);
   const materials=await sql.query("select m.request_id from runtime_scope_material m join opc_content_versions c on c.id=m.request_id where c.work_item_id=$1",[article.workItemId]);
-  expect(materials.rows).toHaveLength(2);
+  expect(materials.rows).toHaveLength(1);
   // Reverse direction also accepts the exact old-style shared execution/request ID.
   const reverse={...replay,kind:'brief' as const,requestId:randomUUID(),expectedVersion:1};
   await f.service.contentFromExecution({...reverse,kind:'script',expectedVersion:1});
@@ -8243,6 +8243,8 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   expect(await f.service.contentFromExecution(reverse)).toEqual(secondBrief);
   await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+unknown.sessionId+'&continue=1');
   await page.getByRole('heading',{name:'这条选题准备做成什么内容？',exact:true}).waitFor();
+  await page.getByText('先在对话中确认这条选题的内容类型，再起草和保存稿件。已确认前不会创建内容版本。',{exact:true}).waitFor();
+  expect(await page.getByRole('button',{name:'保存稿件版本',exact:true}).count()).toBe(0);
   expect(await page.getByRole('button',{name:'起草口播稿',exact:true}).count()).toBe(0);
   let lostType=0;
   await page.route('**/api/trpc/opc.editLibrary*',async route=>{if(lostType++)return route.continue();const response=await route.fetch();expect(response.ok()).toBe(true);await route.abort();});
@@ -8253,17 +8255,18 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   await expect.poll(()=>page.getByRole('button',{name:'恢复类型保存',exact:true}).count()).toBe(0);
   await page.getByText('【主动引导合成示例，仅验证交互】我们先细化这条选题：你最希望读者看完后理解哪一个重点？',{exact:true}).waitFor({timeout:60000});
   expect((await sql.query('select opc_item_content_type($1) t',[unknown.workItemId])).rows[0].t).toBe('image_text');
+  await page.getByRole('button',{name:'保存稿件版本',exact:true}).waitFor();
   await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+video.sessionId);
   await page.getByRole('button',{name:'起草口播稿',exact:true}).waitFor();
   await page.getByRole('button',{name:'起草口播稿',exact:true}).click();
   await page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true}).waitFor({timeout:60000});
-  // The existing history panel uses exact adopted item identity, not a title search.
+  // The history entry resumes the exact adopted session, not a title search or a new work item.
   await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+f.d.draftId+'/topics');
   await page.getByRole('button',{name:'开始选题工作对话',exact:true}).click();
   await page.getByRole('button',{name:'选题与版本',exact:true}).click();
   await page.getByText('历史正式采用版本 · 1',{exact:true}).click();
   await page.getByRole('link',{name:'文章细化',exact:true}).click();
-  await page.waitForURL(url=>url.pathname==='/library'&&url.searchParams.get('item')===article.workItemId);
+  await page.waitForURL(url=>url.pathname==='/runtime'&&url.searchParams.get('session')===article.sessionId);
   expect(await guideCount()).toBe(1);
   expect((await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='brief'",[article.workItemId])).rows[0].n).toBe(2);
  }finally{await browser.close();}

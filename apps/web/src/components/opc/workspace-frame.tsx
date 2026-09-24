@@ -12,9 +12,9 @@ type Account = {projectId:string;platform:string;account:string;strategyDraftId?
 type Business = {businessId:string;accounts:Account[]};
 
 /** The accepted U0/U1 shell, with real owned OPC projections instead of demo state. */
-export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,activeWorkItemId,area='chat'}:{
+export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,activeWorkItemId,area='chat',notice}:{
  children:ReactNode;right?:ReactNode;rightOpen?:boolean;onToggleRight?:()=>void;
- activeWorkItemId?:string;area?:'chat'|'library'|'topics'|'marketplace'|'start';
+ activeWorkItemId?:string;area?:'chat'|'library'|'topics'|'marketplace'|'start';notice?:string;
 }){
  const [mobileNav,setMobileNav]=useState(false),[mobileRight,setMobileRight]=useState(false),[query,setQuery]=useState('');
  const searchRef=useRef<HTMLInputElement>(null);
@@ -38,7 +38,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
    <Link href="/" className={styles.brand}><img src="/graylum-logo.png" alt="" />Graylum</Link>
    <nav aria-label="全局导航"><Link href="/">首页</Link><Link href="/positioning" aria-current={area==='chat'||area==='topics'||area==='start'?'page':undefined}>对话</Link><Link href="/profile">个人中心</Link></nav>
   </header>
-  <div className={styles.announcement}><span>本地隔离 · 模型回复为模拟，保存写入本地测试服务</span><strong>让好想法，继续向前。</strong></div>
+  <div className={styles.announcement}>{notice&&<span>{notice}</span>}<strong>让好想法，继续向前。</strong></div>
   <div className={[styles.shell,right&&rightOpen?styles.withRight:'',mobileNav?styles.navOpen:'',mobileRight?styles.mobileRightOpen:''].join(' ')}>
    <aside className={styles.rail} aria-label="工作区导航">
     <div className={styles.railMobile}><strong>工作区</strong><button aria-label="关闭导航" onClick={()=>setMobileNav(false)}><X size={18}/></button></div>
@@ -71,7 +71,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
      })}
      {!library.isLoading&&!platforms.size&&<p className={styles.empty}>完成定位并采用选题后，账号工作会出现在这里。</p>}
     </div>
-    <div className={styles.railBottom}><Link href="/profile">个人中心</Link><span>本地隔离体验</span></div>
+    <div className={styles.railBottom}><Link href="/profile">个人中心</Link></div>
    </aside>
    <section className={styles.center}>
     <div className={styles.mobileBar}><button aria-label="打开导航" onClick={()=>setMobileNav(true)}><Menu size={19}/></button><span>Graylum · 工作区</span>{right&&<button onClick={()=>{if(!rightOpen)onToggleRight?.();setMobileRight(true);}} aria-label="打开成果"><BookOpen size={18}/></button>}</div>
