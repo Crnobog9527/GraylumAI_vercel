@@ -7548,7 +7548,7 @@ it("OPC: account strategy edits stay draft-scoped and publish only for the chose
   const a=original.find((account:{account:string})=>account.account==='strategy-a')!;
   const b=original.find((account:{account:string})=>account.account==='strategy-b')!;
   const initialA=a;
-  const request={accountProjectId:a.projectId,requestId:randomUUID(),expectedSourceVersionId:f.sourceVersionId,expectedPendingDraftId:null,
+  const request={accountProjectId:a.projectId,requestId:randomUUID(),expectedSourceVersionId:f.sourceVersionId,expectedPendingDraftId:null,expectedRegistrationId:f.registration,
     edits:{[f.flow.steps[0].id]:{goal:'仅账号 A 的待确认新方向'}}};
   await expect(other.service.accountStrategySave({...request,requestId:randomUUID()})).rejects.toThrow('OPC_DENIED');
   const saved=await f.service.accountStrategySave(request);
@@ -7684,6 +7684,63 @@ it("OPC: the first account strategy revision after Skill upload uses its latest 
   expect(draft.information[revisedFlow.steps[0].id].values.new_need?.value??'').toBe('');
   expect((await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0].sourceVersionId)
     .toBe(f.sourceVersionId);
+},180000);
+
+it("OPC: library edits use renamed Skill steps and questions without writing on cancel",async()=>{
+  const f=await publishedDraft();
+  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+    body:[{id:randomUUID(),platform:'x',account:'renamed-schema',title:'旧稿来源',brief:'保留来源',day:'2026-09-26'}]});
+  await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,
+    accounts:[{platform:'x',account:'renamed-schema',expectedRevision:null}]});
+  const account=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0];
+  const nextPackage=makePackage(f.pack.id,true);
+  const nextFlow=structuredClone(f.flow);
+  nextFlow.steps[0].id='renamed-step';
+  nextFlow.steps[0].title='新版问题顺序';
+  nextFlow.steps[0].information![0].id='renamed-goal';
+  nextFlow.steps[0].information![0].title='新版目标问题';
+  nextFlow.steps[1].dependsOn=['renamed-step'];
+  nextFlow.report.sections[0].stepId='renamed-step';
+  nextFlow.report.sections[0].title='新版问题顺序';
+  const nextRegistration='opc-renamed-'+randomUUID();
+  await publishSkillPackage(admin,f.owner,nextPackage);
+  await sql.query('update artifact_workflows set enabled=false where id=$1',[f.registration]);
+  await sql.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',
+    [nextRegistration,f.moduleId,nextPackage.id,nextPackage.revisionId,nextFlow,'新版问题']);
+  const directSchema=await sql.query('select opc_account_strategy_schema($1,$2) as schema',[f.actor,account.projectId]);
+  expect(directSchema.rows[0].schema.registrationId).toBe(nextRegistration);
+  const schema=await f.service.accountStrategySchema(account.projectId);
+  expect(schema.registrationId).toBe(nextRegistration);
+  expect(schema.workflow.steps[0].information[0].id).toBe('renamed-goal');
+  const other=await publishedDraft();
+  await expect(other.service.accountStrategySchema(account.projectId)).rejects.toThrow('OPC_DENIED');
+  await expect(f.service.accountStrategySave({accountProjectId:account.projectId,requestId:randomUUID(),
+    expectedSourceVersionId:f.sourceVersionId,expectedPendingDraftId:null,expectedRegistrationId:f.registration,
+    edits:{'renamed-step':{'renamed-goal':'旧 Skill 的过期保存'}}})).rejects.toThrow('OPC_VERSION_CONFLICT');
+  const {browser,page}=await planBrowser(f);
+  try{
+    await page.goto(process.env.V3_LOCAL_APP+'/library');
+    await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/renamed-schema/}).click();
+    await page.getByRole('button',{name:/x · renamed-schema.*查看详情/}).click();
+    const dialog=page.getByRole('dialog',{name:'定位详情'});
+    await dialog.getByRole('button',{name:'修改定位'}).click();
+    await dialog.getByText('新版问题顺序').waitFor();
+    await dialog.getByText('新版目标问题',{exact:true}).first().waitFor();
+    expect(await dialog.getByText('已知目标 0').count()).toBe(0);
+    await dialog.getByRole('textbox').first().fill('取消后不能写入');
+    await dialog.getByRole('button',{name:'取消'}).click();
+    expect((await sql.query('select count(*)::int as n from opc_account_strategy_drafts where account_project_id=$1',[account.projectId])).rows[0].n).toBe(0);
+    await dialog.getByRole('button',{name:'修改定位'}).click();
+    await dialog.getByRole('textbox').first().fill('新版问题下的待确认答案');
+    await dialog.getByRole('button',{name:'确认保存'}).click();
+    await dialog.getByRole('status').filter({hasText:'已保存到此账号的待确认定位草稿'}).waitFor();
+  }finally{await browser.close();}
+  const updated=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0];
+  expect(updated.sourceVersionId).toBe(f.sourceVersionId);
+  expect(updated.pendingStrategyDraftId).toBeTruthy();
+  const draft=await f.service.read(updated.pendingStrategyDraftId);
+  expect(draft.snapshot.workflow.steps[0].id).toBe('renamed-step');
+  expect(draft.information['renamed-step'].values['renamed-goal']).toMatchObject({value:'新版问题下的待确认答案',status:'provisional'});
 },180000);
 
 it("OPC: manual positioning keeps both the composer and current answer editable",async()=>{

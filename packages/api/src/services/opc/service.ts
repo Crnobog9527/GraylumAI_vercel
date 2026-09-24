@@ -496,10 +496,11 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
     },
     positionHistory: (draftId:string) => rpc('opc_position_history',{p_draft_id:uuid.parse(draftId)}),
     accountStrategyHistory: (accountProjectId:string) => rpc('opc_account_strategy_history',{p_account_project_id:uuid.parse(accountProjectId)}),
+    accountStrategySchema: (accountProjectId:string) => rpc('opc_account_strategy_schema',{p_account_project_id:uuid.parse(accountProjectId)}),
     accountStrategyBegin: (accountProjectId:string,requestId:string) => rpc('opc_account_strategy_begin',{p_account_project_id:uuid.parse(accountProjectId),p_request_id:uuid.parse(requestId)}),
     accountStrategySave: (value:unknown) => {
-      const v=z.object({accountProjectId:uuid,requestId:uuid,expectedSourceVersionId:uuid,expectedPendingDraftId:uuid.nullable(),edits:z.record(z.string().max(64),z.record(z.string().max(64),z.string().max(400)))}).strict().parse(value);
-      return rpc('opc_account_strategy_save',{p_account_project_id:v.accountProjectId,p_request_id:v.requestId,p_expected_source_version_id:v.expectedSourceVersionId,p_expected_pending_draft_id:v.expectedPendingDraftId,p_edits:v.edits});
+      const v=z.object({accountProjectId:uuid,requestId:uuid,expectedSourceVersionId:uuid,expectedPendingDraftId:uuid.nullable(),expectedRegistrationId:z.string().min(1).max(100).nullable().optional(),edits:z.record(z.string().max(64),z.record(z.string().max(64),z.string().max(400)))}).strict().parse(value);
+      return rpc('opc_account_strategy_save_checked',{p_account_project_id:v.accountProjectId,p_request_id:v.requestId,p_expected_source_version_id:v.expectedSourceVersionId,p_expected_pending_draft_id:v.expectedPendingDraftId,p_expected_registration_id:v.expectedRegistrationId??null,p_edits:v.edits});
     },
     libraryEdit: (value: unknown) => {
       const v = opcLibraryEdit.parse(value);

@@ -151,11 +151,14 @@ export const opcRouter = router({
   accountStrategyHistory: readProcedure
     .input(z.object({accountProjectId:z.string().uuid()}).strict())
     .query(({ctx,input})=>ctx.opc.accountStrategyHistory(input.accountProjectId)),
+  accountStrategySchema: readProcedure
+    .input(z.object({accountProjectId:z.string().uuid()}).strict())
+    .query(({ctx,input})=>ctx.opc.accountStrategySchema(input.accountProjectId)),
   accountStrategyBegin: procedure
     .input(z.object({accountProjectId:z.string().uuid(),requestId:z.string().uuid()}).strict())
     .mutation(({ctx,input})=>ctx.opc.accountStrategyBegin(input.accountProjectId,input.requestId)),
   accountStrategySave: procedure
-    .input(z.object({accountProjectId:z.string().uuid(),requestId:z.string().uuid(),expectedSourceVersionId:z.string().uuid(),expectedPendingDraftId:z.string().uuid().nullable(),edits:z.record(z.string().max(64),z.record(z.string().max(64),z.string().max(400)))}).strict())
+    .input(z.object({accountProjectId:z.string().uuid(),requestId:z.string().uuid(),expectedSourceVersionId:z.string().uuid(),expectedPendingDraftId:z.string().uuid().nullable(),expectedRegistrationId:z.string().min(1).max(100).nullable().optional(),edits:z.record(z.string().max(64),z.record(z.string().max(64),z.string().max(400)))}).strict())
     .mutation(({ctx,input})=>ctx.opc.accountStrategySave(input)),
   editLibrary: procedure
     .input(opcLibraryEdit)

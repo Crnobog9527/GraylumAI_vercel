@@ -187,4 +187,5 @@ Instructions use direct Chinese verbs and explain the next decision. A recovery 
 - **Don't:** Hide the current task behind explanatory cards or implementation terminology.
 - **Don't:** Hard-code coaching questions, response templates, or content-generation order into the workspace shell.
 - **Do:** Render positioning steps and questions from the draft's published Skill revision. A newly uploaded Skill package can declare changed structure in `workflow.yaml`; see [Skill workflow manifest](docs/skills/workflow-manifest.md). Existing drafts retain their bound revision.
+- **Do:** In the library, show the confirmed account positioning as saved; when editing without a pending revision, preview the latest published Skill questions without writing until Save. A pending revision stays on its pinned questions, and Save rejects a Skill change made during editing.
 - **Don't:** Make the library a required detour before continuing the selected content.
