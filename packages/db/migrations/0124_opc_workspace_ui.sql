@@ -95,6 +95,26 @@ DROP TRIGGER IF EXISTS opc_guard_saved_content_type ON opc_item_edits;
 CREATE TRIGGER opc_guard_saved_content_type BEFORE INSERT OR UPDATE OF content_type ON opc_item_edits
  FOR EACH ROW EXECUTE FUNCTION opc_guard_saved_content_type();
 
+-- A content version must remain visible under the item's effective type. Lock
+-- the item before checking so a concurrent type edit cannot commit between
+-- this check and the version insert.
+CREATE OR REPLACE FUNCTION opc_guard_content_kind() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE item opc_items; effective_type text;
+BEGIN
+ SELECT * INTO item FROM opc_items WHERE work_item_id=NEW.work_item_id FOR UPDATE;
+ IF item.work_item_id IS NULL THEN RAISE EXCEPTION 'OPC_CONTENT_INVALID';END IF;
+ effective_type:=opc_item_content_type(NEW.work_item_id);
+ IF (NEW.kind='brief' AND effective_type NOT IN ('article','image_text')) OR
+    (NEW.kind IN ('script','storyboard','editing') AND effective_type<>'video')
+ THEN RAISE EXCEPTION 'OPC_CONTENT_INVALID';END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION opc_guard_content_kind() FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS opc_guard_content_kind ON opc_content_versions;
+CREATE TRIGGER opc_guard_content_kind BEFORE INSERT OR UPDATE OF kind,work_item_id ON opc_content_versions
+ FOR EACH ROW EXECUTE FUNCTION opc_guard_content_kind();
+
 CREATE OR REPLACE FUNCTION opc_publication_ui_change(
  p_actor_id uuid,p_request_id uuid,p_work_item_id uuid,p_expected_revision bigint,
  p_planned_date date,p_status text,p_published_date date

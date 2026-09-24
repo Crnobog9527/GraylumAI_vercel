@@ -36,11 +36,12 @@ type PlanItem = {
 };
 
 type ChatRequest = { draftId: string; requestId: string; input: string };
+type CandidateSnapshot = { body: PlanItem[]; requestId: string };
 type SaveRequest = { draftId: string; requestId: string; expectedVersion: number; sourceVersionId: string; body: PlanItem[] };
 type AdoptRequest = { draftId: string; requestId: string; planId: string; accounts: Array<{ platform: string; account: string; expectedRevision: number | null }> };
 type DraftRequest = SaveRequest & { executionId: string };
 type AdoptTopicsRequest = SaveRequest & { accounts: Array<{ platform: string; account: string; expectedRevision: number | null }> };
-type Operation = { kind: 'chat'; request: ChatRequest } | { kind: 'save'; request: SaveRequest } | { kind: 'adopt'; request: AdoptRequest } | { kind: 'draft'; request: DraftRequest } | { kind: 'adoptTopics'; request: AdoptTopicsRequest };
+type Operation = { kind: 'chat'; request: ChatRequest; candidateAtSend?: CandidateSnapshot | null } | { kind: 'save'; request: SaveRequest } | { kind: 'adopt'; request: AdoptRequest } | { kind: 'draft'; request: DraftRequest } | { kind: 'adoptTopics'; request: AdoptTopicsRequest };
 // Only transaction-level definite rejections release a request. Unknown replies
 // and identity conflicts retain the whole original envelope, never just its ID.
 const definiteRejections = new Set(['OPC_BUSINESS_CONFLICT', 'OPC_BUSINESS_DENIED', 'OPC_VERSION_CONFLICT', 'OPC_ACCOUNT_CONFLICT', 'OPC_ACCOUNTS_INVALID', 'OPC_PLAN_INVALID', 'OPC_DUPLICATE_ITEM', 'OPC_TOPIC_ALREADY_ADOPTED', 'OPC_SOURCE_DENIED', 'OPC_DENIED', 'OPC_TOPIC_SOURCE_REVOKED', 'OPC_TOPIC_UNBOUND', 'OPC_TOPIC_SKILL_MISSING']);
@@ -303,6 +304,7 @@ export default function TopicWorkspacePage() {
         try {
           if (op.kind === 'chat') {
             const admitted = await turn.mutateAsync(op.request);
+            if (op.candidateAtSend) localStorage.setItem('opc-topic-adoption-context:'+sessionId+':'+admitted.executionId,JSON.stringify(op.candidateAtSend));
             await execute.mutateAsync({ executionId: admitted.executionId });
             setInput(current=>{if(current===op.request.input){localStorage.removeItem(inputKey);return '';}return current;});
           } else if (op.kind === 'save') {
@@ -343,7 +345,9 @@ export default function TopicWorkspacePage() {
 
   async function send() {
     if (!sessionId || !input.trim() || pending) return;
-    await perform({ kind: 'chat', request: { draftId, requestId: crypto.randomUUID(), input: input.trim() } });
+    const visible = candidate ?? (topicDraft.data?.body?.length
+      ? { body: topicDraft.data.body as PlanItem[], requestId: topicDraft.data.draftVersionId ?? '' } : null);
+    await perform({ kind: 'chat', request: { draftId, requestId: crypto.randomUUID(), input: input.trim() }, candidateAtSend:visible?structuredClone(visible):null });
   }
 
   // Opening is authorized by the persisted consent, never by this page/URL.
@@ -441,9 +445,21 @@ export default function TopicWorkspacePage() {
     }
     const ids = parseAdoption(action.body ?? action.primaryBody);
     if (!ids) return;
-    const consented = consentedTopicIds(action.input, candidate.body.map(item => item.id));
+    // The consent applies to the exact candidate visible when this user turn
+    // was sent, never a later edit from another tab with the same item IDs.
+    let frozen:CandidateSnapshot|null=null;
+    try { frozen=JSON.parse(localStorage.getItem('opc-topic-adoption-context:'+sessionId+':'+action.executionId)??'null') as CandidateSnapshot|null; }
+    catch { return; }
+    if (!frozen || !Array.isArray(frozen.body) || !frozen.body.every(item=>typeof item?.id==='string') ||
+        JSON.stringify(frozen.body)!==JSON.stringify(candidate.body)) return;
+    const stored=candidateKey?localStorage.getItem(candidateKey):null;
+    if (stored) {
+      try { if (JSON.stringify((JSON.parse(stored) as CandidateSnapshot).body)!==JSON.stringify(frozen.body)) return; }
+      catch { return; }
+    }
+    const consented = consentedTopicIds(action.input, frozen.body.map(item => item.id));
     if (!consented || consented.length !== ids.length || consented.some(id => !ids.includes(id))) return;
-    const request = adoptionRequest(candidate.body, ids.filter(id => !adoptedItemIds.has(id)), action.executionId);
+    const request = adoptionRequest(frozen.body, ids.filter(id => !adoptedItemIds.has(id)), action.executionId);
     if (!request) return;
     adoptedExecution.current = action.executionId;
     void perform({ kind: 'adoptTopics', request });

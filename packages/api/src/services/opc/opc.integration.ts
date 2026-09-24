@@ -8141,7 +8141,7 @@ it("OPC: natural-language adoption stays complete after refresh and permits the 
   try {
     await page.goto(process.env.V3_LOCAL_APP + path);
     await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
-    await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).waitFor({ timeout: 60000 });
+    await page.getByRole('button', { name: '采用这个选题', exact: true }).first().waitFor({ timeout: 60000 });
     await page.getByLabel('消息', { exact: true }).fill('采用第一条选题');
     await page.getByRole('button', { name: '发送', exact: true }).click();
     await expect.poll(async () => (await f.service.read(f.d.draftId)).handoffs.length, { timeout: 60000 }).toBe(1);
@@ -8651,6 +8651,9 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   await page.getByRole('button',{name:'起草口播稿',exact:true}).waitFor();
   await page.getByRole('button',{name:'起草口播稿',exact:true}).click();
   await page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true}).waitFor({timeout:60000});
+  const videoExecution=(await sql.query("select id from runtime_executions where session_id=$1 and state='completed' order by created_at desc limit 1",[video.sessionId])).rows[0];
+  await expect(f.service.contentFromExecution({workItemId:video.workItemId,requestId:randomUUID(),executionId:videoExecution.id,kind:'brief',status:'draft',expectedVersion:0})).rejects.toThrow('OPC_CONTENT_INVALID');
+  expect((await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='brief'",[video.workItemId])).rows[0].n).toBe(0);
   // The current adopted-work panel resumes the exact session, not a title
   // search or a new work item. The old "选题与版本" control is no longer UI.
   await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+f.d.draftId+'/topics');

@@ -7,6 +7,7 @@ describe('natural-language topic adoption consent', () => {
   it('binds explicit ordinal and all instructions to the offered IDs', () => {
     expect(consentedTopicIds('采用第二条选题', ids)).toEqual(['two']);
     expect(consentedTopicIds('请采纳第 3 条内容。', ids)).toEqual(['three']);
+    expect(consentedTopicIds('采用第一条和第三条选题', ids)).toEqual(['one','three']);
     expect(consentedTopicIds('采用全部选题', ids)).toEqual(ids);
   });
   it('refuses questions, vague agreement, negation and out-of-range selection', () => {
