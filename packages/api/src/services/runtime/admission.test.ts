@@ -18,5 +18,5 @@ it.each(['PGRST202','42883','42501','PGRST301','XX000',null])('workspace capabil
  const admission=runtimeAdmissionService(user,admin,{workspaceContext:true,account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:10});
  const promise=admission.prepare({sessionId,requestId,input:'General travel tips',selection:{kind:'ordinary',modelId},network:'deny'});
  if(code&&!['PGRST202','42883'].includes(code)){await expect(promise).rejects.toThrow('RUNTIME_WORKSPACE_UNAVAILABLE');expect(frozen).toBeUndefined();}
- else{await promise;expect(frozen?.workspaceContext).toBe(code?undefined:true);expect(frozen?.scopeMaterial).toBeUndefined();expect(frozen?.sources).toEqual([]);}
+ else{await promise;expect(frozen?.inputSelection).toBe('scope-projection-v1');expect(frozen?.workspaceContext).toBe(code?undefined:true);expect(frozen?.scopeMaterial).toBeUndefined();expect(frozen?.sources).toEqual([]);}
 });

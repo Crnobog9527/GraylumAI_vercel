@@ -257,3 +257,27 @@ Docker清理：Owner要求后，归档并回收60个遗留临时容器、20个�
 本轮验证记录：`pr422-content-types-test1.log` FAIL（测试清理误调用不存在的restoreCatalog，已删除；不能记为PASS）；`test2` 2 PASS/236 skipped，覆盖原B1多轮/部分采用/实际重登/资料库编辑/视频成功丢回包及新类型/面板/主动引导主线；`test3` 1 PASS/237 skipped，增加引导与类型保存成功丢回包、双标签及刷新原请求恢复。`pr422-types-video-regression.log` 1 PASS/237 skipped：分镜前置、部分派生、并发、旧绑定升级重放、0122已存数据重复迁移、重新定稿后旧版本及撤回保护。`pr422-content-types-final.log`为1 PASS/1 FAIL：扩展内容保存丢回包与唯一成果版本的typed case通过；资料库并发编辑仅旧提示文案断言失败，准确原字段/版本断言保留，改用新明确拒绝提示后单独复跑。最终结果和独立审查归属以PR最新候选记录为准，不把选中用例记成全套通过。新内部SQL helper无authenticated/service_role执行权，新Runtime口播请求和保存对非视频均拒绝。保存与类型确认冻结完整请求，旧script-key与新的written-key各自可恢复；不因用户改类型丢弃已冻结旧保存。文章/图文定稿材料复用现有Runtime material，继承原来源撤回检查。
 
 独立审查408fbcb9发现同一execution先存brief后存script会复用Runtime material请求ID而冲突。最小修正复用既有content version.id作为新material identity；公开保存请求及完整冻结负载不变，已保存结果仍优先原样回放。来源检查同时支持新content ID和旧request ID+原正文匹配，不新增表或请求机制。补充真实页面改类型后同回复定稿，以及双方向相同请求ID保存/重复恢复和唯一material断言。资料库并发编辑最终`pr422-types-conflict-final.log`为1 PASS/237 skipped。
+
+## 2026-09-26 U3：类型、工具结果、交互语义与升级兼容
+
+范围依据：Owner 本轮明确的五项 U3 要求、`V3-OPC-growth-agent-architecture.md` §0，以及原网页交接对 UX Proposal v2 §14 的 U3 定义（统一类型、工具结果、保存/采用/聚焦/恢复及旧记录/请求/深链接兼容）。原 Proposal 文件全文未在本地或 PR 附件中取得，不宣称已逐字核验全文。保留已认可 UI、版本来源与上下文容量规则；未进入 U4、全站迁移、任意历史版本检索或真实外部服务。
+
+### 修复及兼容边界
+
+- `6d70caf1` 的实际 Runtime + 官方 SDK 0.18.0，在隔离 Postgres/Session 中发送带旧稿材料的请求，模型模拟服务真实返回，回执入库后在 Session append 前通过 RPC 故障注入模拟中断。`34bbea47` 恢复相同 execution 时得到 `RUNTIME_RESPONSE_CONFLICT`、停在 pending：`pr422-u3-red.log` 是完整失败证据，不是单函数哈希演示。
+- 新 admission 在既有不可变执行负载内固定 `inputSelection=scope-projection-v1`。已有无标记执行先使用现有筛选；仅在 **replay-only 且数据库明确返回原请求哈希冲突** 时，使用升级前的输入选择方式做一次有界 SDK 回放。每个回包仍通过原哈希校验；不发送模型请求、不重写旧哈希/回执/材料/历史。无标记但已筛选的 `34bbea47` 请求不降级；有标记请求不协商其他策略。权限、存储错误不触发兼容回放。没有新表、迁移、执行器、Session、账本或持久化状态机。
+- 修正旧浏览器 `opc-script-final` 未带 `kind` 的待恢复保存：沿用旧 `script/final` 语义；不能把同一请求重建为 `script/draft`。文章/图文采用仍为 draft，视频定稿仍为 final。
+- 旧 `/positioning/:id/plan` 曾无条件跳转 `/topics`，导致原 v2/v3 本机计划请求不可恢复。复用原页面的解析、服务端请求状态、原 execution 恢复和结果读取，提供只恢复旧请求的兼容入口；没有本机旧请求时仍进入当前选题工作。未准入不补建请求，跨工作记录拒绝，撤销来源不显示缓存结果，旧轮次结果只读不采用到新轮次；不恢复旧生成表单，不新增平行工作流程。旧入口禁止定位自动保存与导师自动投影，查看不会写入定位。
+- 图文正文/展开编辑/定稿按钮按图文显示，不再显示“文章”；继续工作不再固定专业问法的句数和问题数。视频的来源依赖、明确同意、禁止发布和严格 JSON 字段约束保留；专业写法继续由冻结 Skill revision 提供。
+
+### 实际验证记录
+
+- 旧 `6d70caf1` → 新代码：`pr422-u3-legacy-final.log` PASS，含已保存回执恢复完成、unknown 不重发、新标记请求恢复；原请求 UTF-8 3,914 / 3,920 B，新标记 2,585 B。逐项比较原 execution/request/run ID、冻结 payload、candidate/selected history、调用 hash、回执和原历史前缀，完成只追加一次应有的两条 Session 记录。保存新版后恢复仍依据原材料。
+- 无标记筛选版 `34bbea47` → 新代码：`pr422-u3-filtered-upgrade.log` PASS；已保存回执与新标记均完成，unknown 仍 pending，恢复新增发送为 0，无哈希冲突。测试分别加载 exact-ref 源码与其锁文件依赖，只有模型网络和中断位置由测试控制。
+- `pr422-u3-browser2.log` 中已通过的容量场景：1/60/100 个真实保存版本分别 3,388/3,390/3,392 B，仅当前稿；界面保存 v101 后 3,144 B 仅 v101，明确比较 7,556 B 保留 v100/v101，普通“比较喜欢当前稿”4,458 B 仅 v101。12 轮保留原始 24 条历史，最后请求 12,413 B，仅 v12 全文。9,000 B 工具请求为 5,205/5,908/8,508 B，两个完整调用/结果对、必要来源出现一次；4,000 B 时明确 capacity，保留两份工具成果，未发送超限第三次请求。
+- 同一初轮日志包含两个 FAIL：旧视频用例未通过当前可见入口确认类型，且仍查找已改为折叠摘要的旧 heading。测试已改为点击“视频”并读取实际成果/版本状态；未改变生产类型规则、原输入、版本归属或重复执行断言。这些 FAIL 不计为通过，定向复跑另记。
+- `pr422-u3-followup.log`：工具拥挤场景中，在三次回执和两个工具结果完成、Session append 前中断，原身份恢复完成；三个请求仍为 5,205/5,908/8,508 B，没有新派发或重复追加。两个旧视频用例复跑通过。新增 Skill 切换断言初次因测试模块同名匹配四个按钮而失败，改为独立模块名后 `pr422-u3-typed-final.log` 通过：同一 Session/execution、固定 Skill revision、图文草稿自动保存→明确定稿、历史查看和资料库一致。旧无 kind 口播保存缓存恢复与重复定稿已在 `pr422-u3-legacy-ui.log` 通过；同一日志旧计划深链接失败暴露上述真实兼容缺口，保留 FAIL。修复后 `pr422-u3-legacy-link.log` 5 PASS，含 v2/v3 原请求、跨轮次与丢回包、他人拒绝、来源撤回以及非法选题恢复。
+- 增强拒绝路径：旧请求未准入时，页面保持按钮禁用、原缓存完全不变且执行数为 0；准入由测试服务显式完成后才进入旧请求恢复。`pr422-u3-revoked-link.log` 1 PASS，等待实际授权拒绝后再断言缓存正文不显示（不是加载态空白断言）。当前手动定位、六阶段引导及 v2 当前/草稿轮次在 `pr422-u3-legacy-link-final.log` 中逐项通过。未完成或超时的汇总执行不算整套通过。
+- Runtime context/Session/admission 单元测试 14 PASS；web typecheck、web lint PASS。午夜临时目录有 562 个未改动跟踪文件及 Git 指针缺失；先备份差异，仅从当前 HEAD 补回不存在的文件，现存修改全部保留；依赖按原锁文件离线恢复。没有 reset、分支更换或 Owner 预览清理。
+
+真实模型理解/生成质量、供应商精确 token/usage、真实 compaction、远端数据库、发布/支付服务未运行。所有容量数字都是完整模型请求的 UTF-8 字节，不是 token；模拟 usage 不参与容量结论。历史任意版本按需读取能力未扩建。

@@ -342,13 +342,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const autosaveChain = useRef<Promise<void>>(Promise.resolve());
   const appliedMentor = useRef(new Set<string>());
   const composing = useRef(false);
-  /**
-   * Automatic plan recovery is bounded twice: one attempt per retained request
-   * id per page load, and one in-flight attempt at a time. A React effect must
-   * never be able to turn into a loop of provider calls.
-   */
-  const planAutoRunning = useRef(false);
-  const planAutoAttempts = useRef(new Set<string>());
   const [planRecovery, setPlanRecovery] = useState<
     "idle" | "running" | "invalid" | "unknown" | "stale"
   >("idle");
@@ -500,111 +493,25 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       snap.workflow.steps[0];
     setActiveStep(initial.id);
   }, [draftId, hydratedDraft, activeStep, snap]);
-  /**
-   * Bounded automatic generation of the first-week plan candidate.
-   *
-   * It runs only for an envelope frozen by the final positioning confirmation
-   * of the round currently on screen. Opening `/plan` for an older published
-   * draft carries no such envelope, so waiting or refreshing there can never
-   * call a model on its own.
-   */
+  // Legacy links expose only an existing request. Opening a link is never
+  // permission to admit another request or to replace the current topic work.
   useEffect(() => {
-    if (!planView || hydratedDraft !== draftId) return;
-    if (!d) return;
-    if (planAutoRunning.current) return;
+    if (!planView || hydratedDraft !== draftId || !d) return;
     const retained = readRetainedPlan();
-    // A local candidate only proves the outcome of the exact request that
-    // produced it. It suppresses recovery only when it is that request's
-    // terminal result: it belongs to this round and it names the request the
-    // retained envelope still authorizes. Any other candidate is a visible
-    // fallback — an older request of this round, another round's, or a
-    // pre-upgrade buffer with no request identity at all — and the retained
-    // request stays an unresolved authorization that must be recovered under
-    // its own identity instead of being paid for again.
-    if (
-      Boolean(planCandidate) &&
-      planCandidateRequest !== null &&
-      retained?.kind === "envelope" &&
-      retained.envelope.request.requestId === planCandidateRequest
-    )
-      return;
-    if (!retained) return;
+    if (!retained) { router.replace(`/positioning/${draftId}/topics`); return; }
     if (retained.kind === "invalid") {
-      releasePlanEnvelope();
-      setPlanRecovery("invalid");
-      setNotice(
-        "本机保存的计划生成记录无法读取，已停止自动生成。请手动点击生成；只有你确认后才会产生新的模型调用。",
-      );
+      setNotice("本机旧请求无法读取，原记录已保留；没有开始新的生成。");
       return;
     }
-    // A retained request the user has not explicitly approved, and a bare
-    // legacy record, are only surfaced for an explicit decision. Mounting this
-    // page, refreshing, re-logging in or following a link is never consent.
-    if (retained.kind === "unconsented" || retained.kind === "legacy") {
-      setRetainedPlan({
-        requestId: retained.request.requestId,
-        sourceRoundId:
-          retained.kind === "unconsented" ? retained.sourceRoundId : null,
-      });
+    const request = retained.kind === "envelope" ? retained.envelope.request : retained.request;
+    if (request.draftId !== draftId) {
+      setNotice("这条本机记录属于其它定位，不能在当前工作恢复；原记录已保留。");
       return;
     }
-    setRetainedPlan(null);
-    if (retained.envelope.request.draftId !== draftId) {
-      archiveStalePlanEnvelope(
-        "发现一条属于其它定位草稿的计划生成请求，已在本机归档。它不会被执行，也不会产生费用。",
-      );
-      return;
-    }
-    if (retained.envelope.sourceRoundId !== d.roundId) {
-      setRetainedPlan({ requestId: retained.envelope.request.requestId,
-        sourceRoundId: retained.envelope.sourceRoundId });
-      return;
-    }
-    if (!d.report?.available) return;
-    const request = retained.envelope.request;
-    if (planAutoAttempts.current.has(request.requestId)) return;
-    planAutoAttempts.current.add(request.requestId);
-    planAutoRunning.current = true;
-    setPlanRecovery("running");
-    void (async () => {
-      try {
-        const prepared = await prepareStep.mutateAsync(request);
-        await execute.mutateAsync({ executionId: prepared.executionId });
-        const candidate = await utils.opc.planResult.fetch({
-          draftId,
-          executionId: prepared.executionId,
-        });
-        if (!candidate.valid) {
-          // A definite invalid result is terminal for this request: the
-          // execution completed and its body can never become a plan.
-          releasePlanEnvelope();
-          setPlanRecovery("invalid");
-          return;
-        }
-        persistPlanCandidate(
-          candidate.body,
-          candidate.sourceRoundId,
-          request.requestId,
-        );
-        setPlanRecovery("idle");
-      } catch {
-        // Timeout, lost reply or unknown outcome: the same envelope and request
-        // id are retained, and replay is idempotent, so recovering cannot cost
-        // a second call.
-        setPlanRecovery("unknown");
-      } finally {
-        planAutoRunning.current = false;
-      }
-    })();
-  }, [
-    planView,
-    hydratedDraft,
-    draftId,
-    d?.report?.available,
-    d?.roundId,
-    planCandidate,
-    planCandidateRound,
-  ]);
+    setRetainedPlan({ requestId: request.requestId, sourceRoundId:
+      retained.kind === "envelope" ? retained.envelope.sourceRoundId :
+      retained.kind === "unconsented" ? retained.sourceRoundId : null });
+  }, [planView, hydratedDraft, draftId, d?.roundId]);
   useEffect(() => {
     const node=chatScroll.current;
     if(!node||!history.data)return;
@@ -749,7 +656,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     else await autosaveChain.current;
   }
   useEffect(() => {
-    if (hydratedDraft !== draftId || composing.current) return;
+    if (planView || hydratedDraft !== draftId || composing.current) return;
     if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
     const pending = Object.entries(infoEdits).filter(([stepId]) => !sessionStorage.getItem("opc-confirm-step:" + draftId + ":" + stepId));
     if (!pending.length) return;
@@ -762,9 +669,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     return () => {
       if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
     };
-  }, [draftId, hydratedDraft, infoEdits]);
+  }, [planView, draftId, hydratedDraft, infoEdits]);
   useEffect(() => {
-    if (!d || !history.data || hydratedDraft !== draftId) return;
+    if (planView || !d || !history.data || hydratedDraft !== draftId) return;
     const executions = history.data.executions ?? [];
     for (const execution of executions as Array<{
       executionId: string;
@@ -846,7 +753,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       setInfoEdits(next);
       appliedMentor.current.add(execution.executionId);
     }
-  }, [d, history.data, activeQuestions, hydratedDraft, draftId]);
+  }, [planView, d, history.data, activeQuestions, hydratedDraft, draftId]);
   /**
    * The Agent opens the current question itself, so a beginner is never asked to
    * send a placeholder like "你好" or "继续" first. This runs on first entry into
@@ -1523,7 +1430,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
    */
   async function runPlanRequest(request: PlanRequest, sourceRoundId: string | null = d.roundId) {
       const state = await utils.opc.planRequestState.fetch({ draftId, requestId: request.requestId });
-      if (!state.executionId && sourceRoundId !== null && sourceRoundId !== d.roundId) {
+      if (!state.executionId && (planView || (sourceRoundId !== null && sourceRoundId !== d.roundId))) {
         setNotice("原请求属于旧定位轮次，服务端尚无可恢复执行；已保留记录，没有按新定位生成。请核对后另行选择新请求。");
         throw new Error("OPC_OLD_REQUEST_NOT_ADMITTED");
       }
@@ -1747,6 +1654,35 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         <Link href="/positioning">返回定位列表</Link>
       </main>
     );
+  if (planView) return <main className="mx-auto max-w-3xl space-y-4 p-6">
+    <Link href={`/positioning/${draftId}/topics`}>进入当前选题工作</Link>
+    <h1>旧计划请求恢复</h1>
+    {error && <p role="alert">{error}</p>}
+    <p>这里只恢复原请求及其结果，不创建新请求，不替换当前工作。</p>
+    {notice && <p role="alert">{notice}</p>}
+    {retainedPlan && <section className="space-y-3">
+      <h2>本机保留了一条早先的生成请求</h2>
+      <p role="status">{retainedState.isLoading ? "正在核对原请求…" : retainedState.error || !retainedStateData
+        ? "暂时无法核对原请求，请稍后重试；原记录仍保留。"
+        : !retainedStateData.admitted ? "服务端没有这条请求的准入记录；没有开始新的生成。"
+        : retainedStateData.materialRevoked ? "原请求来源已撤回，不能继续恢复。"
+        : retainedStateData.hasResult ? "服务端已保存这条请求的完成结果，可以按原身份恢复读取。"
+        : "原请求结果尚未确定；继续使用原身份恢复，不会重复执行或重复扣费。"}</p>
+      <Button disabled={busy || !retainedStateData?.admitted || retainedStateData.materialRevoked || Boolean(retainedState.error)} onClick={() => void run(async () => {
+        const retained = readRetainedPlan();
+        if (!retained || retained.kind === "invalid") throw new Error("OPC_REQUEST_INVALID");
+        const request = retained.kind === "envelope" ? retained.envelope.request : retained.request;
+        if (request.draftId !== draftId || request.requestId !== retainedPlan.requestId) throw new Error("OPC_REQUEST_CONFLICT");
+        try { await runPlanRequest(request, retainedPlan.sourceRoundId); }
+        catch { setNotice("这次生成的结果暂时无法确认。原请求与原始记录仍保留，请稍后按原身份恢复。"); }
+      })}>继续这条原请求</Button>
+      {planCandidate && planCandidateRequest === retainedPlan.requestId && retainedStateData?.hasResult && !retainedStateData.materialRevoked && !retainedState.error && <section>
+        <h2>{planCandidateRound !== d.roundId ? "原定位轮次的计划结果 · 已恢复" : "AI 计划候选 · 尚未替换你的编辑"}</h2>
+        <p>保留原定位来源，当前选题与编辑没有改变。</p>
+        {planCandidate.map(item => <p key={item.id}>{item.day} · {item.platform}/{item.account} · {item.title} · {item.brief}</p>)}
+      </section>}
+    </section>}
+  </main>;
   const steps: Step[] = snap.workflow.steps;
   /**
    * Until a candidate has been adopted and while no plan version is saved, the

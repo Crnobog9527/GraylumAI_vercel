@@ -2904,7 +2904,7 @@ it('OPC: CAPACITY tool continuation measures each complete SDK request and cap b
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'capacity-source',title:'长来源',brief:sourceMarker+'内容'.repeat(950),day:'2026-09-25',contentType:'article'}]});
  const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'capacity-source',expectedRevision:null}]});
  const modelId=(await sql.query('select model_id from modules where id=$1',[f.moduleId])).rows[0].model_id;
- const run=async(inputBytes:number,seedHistory=false)=>{
+ const run=async(inputBytes:number,seedHistory=false,interrupt=false)=>{
   const admission=runtimeAdmissionService(f.user,admin,{account:'capacity-fixture',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:200,inputBytes,historyItems:20,workspaceContext:true});
   const session=await admission.start(randomUUID(),{kind:'positioning_draft'});
   if(seedHistory){
@@ -2927,8 +2927,20 @@ it('OPC: CAPACITY tool continuation measures each complete SDK request and cap b
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   try{
    const address=server.address();if(!address||typeof address==='string')throw new Error('local server');
-   const executor=runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
-   const result=await executor.execute(prepared.executionId);
+   let interrupted=interrupt;
+   const database={rpc:async(name:string,args:Record<string,unknown>)=>{
+    if(interrupted&&name==='runtime_session_items'&&args.p_action==='append')return {data:null,error:{message:'synthetic interruption after tool-loop receipts'}};
+    return admin.rpc(name,args);
+   }};
+   const executor=runtimeExecutor({database,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
+   let result=await executor.execute(prepared.executionId);
+   if(interrupt){
+    expect(result).toMatchObject({state:'pending'});expect(requests).toHaveLength(3);
+    const frozen=(await sql.query('select payload,selected_history from runtime_executions where id=$1',[prepared.executionId])).rows[0];
+    interrupted=false;result=await executor.execute(prepared.executionId);
+    expect((await sql.query('select payload,selected_history from runtime_executions where id=$1',[prepared.executionId])).rows[0]).toEqual(frozen);
+    expect(requests).toHaveLength(3);
+   }
    const dispatched=requests.length;
    const replay=await executor.execute(prepared.executionId);
    expect(requests).toHaveLength(dispatched);
@@ -2939,8 +2951,8 @@ it('OPC: CAPACITY tool continuation measures each complete SDK request and cap b
    const recordedHashes=(await sql.query("select payload->>'requestHash' hash from bill2_calls where run_id=$1 order by sequence",[prepared.runId])).rows.map((row:{hash:string})=>row.hash);
    expect(recordedHashes).toEqual(requests.map(request=>createHash('sha256').update(JSON.stringify(request)).digest('hex')));
    const {writeFileSync}=await import('node:fs');
-   writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/capacity-tool-'+inputBytes+(seedHistory?'-history':'-fresh')+'.jsonl',requests.map(request=>JSON.stringify(request)).join('\n')+'\n',{mode:0o600});
-   console.info('CAPACITY_TOOL_RESULTS',JSON.stringify({inputBytes,seedHistory,result,rows,historyEntries,savedTools,transportHashesMatch:true}));
+   writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/capacity-tool-'+inputBytes+(seedHistory?'-history':'-fresh')+(interrupt?'-recovery':'')+'.jsonl',requests.map(request=>JSON.stringify(request)).join('\n')+'\n',{mode:0o600});
+   console.info('CAPACITY_TOOL_RESULTS',JSON.stringify({inputBytes,seedHistory,interrupt,result,rows,historyEntries,savedTools,transportHashesMatch:true}));
    for(const row of rows)expect(row.bytes).toBeLessThanOrEqual(inputBytes);
    return {result,rows,requests,historyEntries,savedTools,sessionId:session.sessionId,executionId:prepared.executionId};
   }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
@@ -2971,6 +2983,8 @@ it('OPC: CAPACITY tool continuation measures each complete SDK request and cap b
  expect(historical.savedTools).toBe(2);
  expect(JSON.stringify(historical.requests[0])).toContain('HISTORY_CANARY_');
  expect(JSON.stringify(historical.requests[2])).not.toContain('HISTORY_CANARY_');
+ const recovered=await run(9000,true,true);
+ expect(recovered.result).toMatchObject({state:'completed'});expect(recovered.historyEntries).toBe(8);expect(recovered.savedTools).toBe(2);
 },120000);
 
 it('OPC: CAPACITY interrupted request retains frozen manuscript after a new save and denies foreign actor',async()=>{
@@ -8175,12 +8189,28 @@ it("OPC: completed video generation permits the next dialogue and a new script f
   const { browser, page } = await planBrowser(f);
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    await page.getByRole('button',{name:'视频',exact:true}).click();
+    await page.getByLabel('口播稿正文',{exact:true}).waitFor();
     await page.getByLabel('消息', { exact: true }).fill('先给我一版口播稿。');
     await page.getByRole('button', { name: '发送', exact: true }).click();
     let finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 }); await finalize.click();
+    await page.getByRole('button',{name:'只生成分镜',exact:true}).waitFor();
+    const firstScript=(await sql.query("select request_id,execution_id,status from opc_content_versions where work_item_id=$1 and kind='script'",[work.workItemId])).rows[0];
+    expect(firstScript.status).toBe('final');
+    const legacyKey='opc-script-final:'+work.sessionId;
+    // Old clients persisted this same completed-but-unacknowledged save without
+    // a kind discriminator. Restore that original request, never create a draft.
+    await page.evaluate(({key,requestId})=>{
+     const original=JSON.parse(localStorage.getItem(key+':completed:'+requestId)!);delete original.kind;
+     localStorage.setItem(key,JSON.stringify(original));
+    },{key:legacyKey,requestId:firstScript.request_id});
+    await page.reload();
+    await expect.poll(()=>page.evaluate(key=>localStorage.getItem(key),legacyKey)).toBeNull();
+    expect(await page.evaluate(({key,id})=>localStorage.getItem(key+':rejected:'+id),{key:legacyKey,id:firstScript.execution_id})).toBeNull();
+    expect((await sql.query("select request_id,execution_id,status from opc_content_versions where work_item_id=$1 and kind='script'",[work.workItemId])).rows).toEqual([firstScript]);
     await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
-    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
+    await page.locator('summary').filter({hasText:'分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿'}).waitFor({ timeout: 60000 });
     expect(await page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true }).count()).toBe(0);
 
     const rewriteInput = '请继续讨论并给我一版改写后的口播稿。';
@@ -8189,8 +8219,8 @@ it("OPC: completed video generation permits the next dialogue and a new script f
     const rewriteCard = page.getByRole('article').filter({ hasText: rewriteInput });
     finalize = rewriteCard.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 }); await finalize.click();
-    await page.getByRole('heading', { name: '口播稿 · 第 2 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
-    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 旧口播稿版本', exact: true }).waitFor();
+    await page.getByText('账号已保存 v2 · 已定稿',{exact:true}).waitFor({ timeout: 60000 });
+    await page.locator('summary').filter({hasText:'分镜 · 第 1 版 · 已定稿 · 旧口播稿版本'}).waitFor();
     await page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true }).waitFor();
     expect((await page.getByRole('alert').allTextContents()).join(' ')).not.toContain('当前执行不可用');
     const rewriteExecution = (await sql.query("select id from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input'=$3", [f.actor, work.sessionId, rewriteInput])).rows[0];
@@ -8286,6 +8316,8 @@ it("OPC: upgraded legacy partial result blocks a duplicate dispatch and remains 
   const packageRuns = async () => Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, work.sessionId])).rows[0].n);
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    await page.getByRole('button',{name:'视频',exact:true}).click();
+    await page.getByLabel('口播稿正文',{exact:true}).waitFor();
     await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿。');
     await page.getByRole('button', { name: '发送', exact: true }).click();
     const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
@@ -8311,7 +8343,7 @@ it("OPC: upgraded legacy partial result blocks a duplicate dispatch and remains 
     expect(await packageRuns()).toBe(1); await independent.close();
 
     await page.unroute('**/api/trpc/opc.saveVideoResults*'); await page.reload();
-    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
+    await page.locator('summary').filter({hasText:'分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿'}).waitFor({ timeout: 60000 });
     expect(await packageRuns()).toBe(1);
     const beforeRefinalize = (await f.service.library({ search: '旧单项结果恢复', from: null, to: null })).businesses
       .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;content: Array<{id: string;kind: string;executionId: string}>}>}>}) => business.accounts.flatMap(account => account.items))
@@ -8320,7 +8352,7 @@ it("OPC: upgraded legacy partial result blocks a duplicate dispatch and remains 
     const secondScript = await f.service.contentFromExecution({ workItemId: work.workItemId, requestId: randomUUID(), expectedVersion: 1,
       kind: 'script', status: 'final', executionId: firstScript.executionId, sourceContentId: null });
     await page.reload();
-    await page.getByRole('heading', { name: '口播稿 · 第 2 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    await page.getByText('账号已保存 v2 · 已定稿',{exact:true}).waitFor({ timeout: 60000 });
     await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
     await expect.poll(async () => {
       const item = (await f.service.library({ search: '旧单项结果恢复', from: null, to: null })).businesses
@@ -8329,7 +8361,7 @@ it("OPC: upgraded legacy partial result blocks a duplicate dispatch and remains 
       return item?.content.filter(entry => entry.kind === 'storyboard' && entry.sourceContentId === secondScript.id).length ?? 0;
     }, { timeout: 60000 }).toBe(1);
     await page.reload();
-    await page.getByRole('heading', { name: '分镜 · 第 2 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
+    await page.locator('summary').filter({hasText:'分镜 · 第 2 版 · 已定稿 · 匹配当前口播稿'}).waitFor({ timeout: 60000 });
     expect(await packageRuns()).toBe(2);
   } finally { await browser.close(); }
 }, 300000);
@@ -8423,12 +8455,23 @@ it.each([[2, "same"], [2, "draft"], [2, "published"], [3, "published"]] as const
   const f = await completed(3);
   await planFixtureModel(f.moduleId);
   const envelope = planEnvelopeFor(f);
+  // The old client already admitted/executed this request; only its UI reply
+  // was lost. The compatibility link must never perform a fresh admission.
   const { browser, page, key } = await planBrowser(f, { envelope });
   try {
+    await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + f.d.draftId + '/plan');
+    await page.getByText('服务端没有这条请求的准入记录；没有开始新的生成。', {exact:true}).waitFor();
+    expect(await page.getByRole('button', {name:'继续这条原请求',exact:true}).isDisabled()).toBe(true);
+    expect((await planIdentity(f.actor, f.d.draftId)).planExecutions).toBe(0);
+    expect(JSON.parse((await page.evaluate(k=>sessionStorage.getItem(k),key))!)).toEqual(envelope);
+    const prepared = await f.service.prepareStep(envelope.request);
+    const { runtimeExecutor } = await import("../runtime/execute");
+    await runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:process.env.V3_RUNTIME_LOCAL_ENDPOINT!}).execute(prepared.executionId);
     let resultLost = 0;
     await page.route('**/api/trpc/opc.planResult*', async route => { await route.fetch(); await route.abort(); resultLost += 1; });
-    await page.reload();
-    await page.getByText('这次生成的结果暂时无法确认').waitFor();
+    await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + f.d.draftId + '/plan');
+    await page.getByRole('button', {name:'继续这条原请求',exact:true}).click();
+    await page.getByText('这次生成的结果暂时无法确认。原请求与原始记录仍保留，请稍后按原身份恢复。', {exact:true}).waitFor();
     const identity = await planIdentityRows(f.actor);
     const counts = await planIdentity(f.actor, f.d.draftId);
     expect(counts.planExecutions).toBe(1);
@@ -8479,6 +8522,12 @@ it.each([[2, "same"], [2, "draft"], [2, "published"], [3, "published"]] as const
       expect(privileges).toEqual({ client: false, server: true });
       await sql.query('update bill2_drafts set revoked=true where id=$1', [f.d.draftId]);
       await expect(f.service.planResult(f.d.draftId, executionId)).rejects.toThrow('OPC_RESULT_DENIED');
+      await page.reload();
+      // Wait for the authorization verdict, not the initial empty loading view.
+      await page.getByText('原请求来源已撤回，不能继续恢复。', {exact:true}).or(page.getByRole('alert').filter({hasText:'无法读取这份定位'})).waitFor();
+      // The browser cannot reveal its cached candidate once access is revoked.
+      await expect.poll(async()=>await page.getByRole('heading', {name:'原定位轮次的计划结果 · 已恢复',exact:true}).count()).toBe(0);
+      expect(await planIdentityRows(f.actor)).toEqual(identity);
     }
   } finally { await browser.close(); }
 }, 300000);
@@ -8981,6 +9030,7 @@ it('OPC: rejected cross-business adoption recovers its original request and perm
 
 it('OPC: typed content uses a right panel, deep links and one proactive continuation across tabs',async()=>{
  const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ await sql.query('update modules set title=$1 where id=$2',['U3 独立测试技能 '+f.moduleId,f.moduleId]);
  const rows=[{id:randomUUID(),platform:'x',account:'typed-account',title:'文章细化',brief:'内容：摄影课；对象：新手；价值：改善构图；结构：案例与练习；假设：一次练习帮助理解。',day:'2026-09-22',contentType:'article'}, {id:randomUUID(),platform:'x',account:'typed-account',title:'视频选题',brief:'摄影构图示范视频，先讨论再起草。',day:'2026-09-23',contentType:'video'}, {id:randomUUID(),platform:'x',account:'typed-account',title:'旧类型未确认',brief:'旧选题简报保持可读',day:'2026-09-24'}];
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:rows});
  const work=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'typed-account',expectedRevision:null}]});
@@ -8999,6 +9049,15 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   expect(await page.getByRole('button',{name:'起草口播稿',exact:true}).count()).toBe(0);
   expect(await page.getByRole('button',{name:'另存普通成果',exact:true}).count()).toBe(0);
   await second.close();await page.reload();
+  const identityBefore=(await sql.query('select id,session_id,payload from runtime_executions where session_id=$1 order by created_at',[article.sessionId])).rows;
+  expect(identityBefore[0].payload.revisionId).toBe(f.pack.revisionId);
+  expect(identityBefore[0].payload.input).not.toContain('主动用一句话');
+  const skillTitle=(await sql.query('select title from modules where id=$1',[f.moduleId])).rows[0].title;
+  await page.getByRole('button',{name:'使用技能',exact:true}).click();
+  await page.getByRole('dialog',{name:'使用技能',exact:true}).getByRole('button').filter({hasText:skillTitle}).click();
+  expect(new URL(page.url()).searchParams.get('session')).toBe(article.sessionId);
+  expect((await sql.query('select id,session_id,payload from runtime_executions where session_id=$1 order by created_at',[article.sessionId])).rows).toEqual(identityBefore);
+
   await page.getByLabel('消息',{exact:true}).fill('请细化构图的练习重点。');await page.getByRole('button',{name:'发送',exact:true}).click();
   let lostContent=0;
   await page.route('**/api/trpc/opc.saveContentResult*',async route=>{if(lostContent++)return route.continue();const response=await route.fetch();expect(response.ok()).toBe(true);await route.abort();});
@@ -9041,7 +9100,21 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   await expect.poll(()=>page.getByRole('button',{name:'恢复类型保存',exact:true}).count()).toBe(0);
   await page.getByText('【主动引导合成示例，仅验证交互】我们先细化这条选题：你最希望读者看完后理解哪一个重点？',{exact:true}).waitFor({timeout:60000});
   expect((await sql.query('select opc_item_content_type($1) t',[unknown.workItemId])).rows[0].t).toBe('image_text');
-  await page.getByLabel('文章正文').waitFor();
+  await page.getByLabel('图文正文',{exact:true}).fill('图文 U3 合成正文');
+  await page.getByRole('status').filter({hasText:/已在服务端保存.*草稿/}).waitFor();
+  await page.getByRole('button',{name:'确认定稿图文',exact:true}).click();
+  await page.getByRole('status').filter({hasText:'已定稿'}).waitFor();
+  const imageVersions=async()=>(await sql.query('select id,status,body from opc_content_versions where work_item_id=$1 order by version',[unknown.workItemId])).rows;
+  const beforeView=await imageVersions();expect(beforeView.map((v:any)=>v.status)).toEqual(['draft','final']);
+  await page.getByRole('button',{name:'历史版本',exact:true}).click();
+  await page.getByRole('dialog',{name:'历史版本',exact:true}).getByText('仅查看已保存的版本，不会更改当前内容。',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'完成查看',exact:true}).click();
+  await page.goto(process.env.V3_LOCAL_APP+'/library?item='+unknown.workItemId);
+  const imageCard=page.locator('#item-'+unknown.workItemId);
+  expect(await imageCard.innerText()).toContain('图文');expect(await imageCard.innerText()).toContain('未发布');
+  await imageCard.getByRole('button',{name:'编辑稿件',exact:true}).click();
+  expect(await imageCard.getByLabel('图文正文',{exact:true}).inputValue()).toBe('图文 U3 合成正文');
+  expect(await imageVersions()).toEqual(beforeView);
   await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+video.sessionId);
   await page.getByRole('button',{name:'起草口播稿',exact:true}).waitFor();
   await page.getByRole('button',{name:'起草口播稿',exact:true}).click();
@@ -9531,3 +9604,77 @@ it.each([65,67])('OPC: boundary browser continues legitimate v%s video source hi
   writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/boundary-video-v'+targetVersion+'-source-guards.json',JSON.stringify({passed:['missing immediate source rejected','foreign actor rejected','revoked original execution unavailable','revoked source preparation rejected'],rootExecution:root.execution_id,version:targetVersion}));
  }finally{await browser.close();}
 },240000);
+
+
+it.skipIf(!process.env.V3_LEGACY_ROOT)('OPC: U3 cross-code receipt recovery preserves old and filtered request identities',async()=>{
+ const legacy=process.env.V3_LEGACY_ROOT!;
+ if(!legacy.includes('graylum-bill2-legacy-'))throw new Error('isolated legacy runtime required');
+ const oldAdmission=(await import(/* @vite-ignore */ legacy+'/packages/api/src/services/runtime/admission.ts')).runtimeAdmissionService;
+ const oldExecutor=(await import(/* @vite-ignore */ legacy+'/packages/api/src/services/runtime/execute.ts')).runtimeExecutor;
+ const {runtimeExecutor}=await import('../runtime/execute');
+ const {runtimeAdmissionService}=await import('../runtime/admission');
+ const {createServer}=await import('node:http');
+ const requests:string[]=[],errors:string[]=[];let unknown=false;
+ const server=createServer(async(req,res)=>{
+  let raw='';for await(const chunk of req)raw+=chunk;const input=JSON.parse(raw).input;requests.push(input);
+  if(unknown){res.destroy();return;}
+  const request=JSON.parse(input),id='upgrade-'+randomUUID();res.setHeader('content-type','application/json');
+  res.end(JSON.stringify({id,model:request.model,final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:request.model,choices:[{index:0,message:{role:'assistant',content:'合成回复：保留初学者约束'},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));
+ });
+ await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('local fixture');const endpoint='http://127.0.0.1:'+address.port;
+  for(const mode of ['paid','unknown','marked'] as const){
+   errors.length=0;
+ const f=await publishedDraft();
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'upgrade',title:'升级恢复稿',brief:'合成测试',day:'2026-09-25',contentType:'article'}]});
+ const modelId=(await sql.query('select model_id from modules where id=$1',[f.moduleId])).rows[0].model_id;
+ const admission=(mode==='marked'?runtimeAdmissionService:oldAdmission)(f.user,admin,{account:'upgrade',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:200,inputBytes:32000,historyItems:20});
+
+   const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'upgrade',expectedRevision:null}]});
+   // Each case owns a separate real work and its persistent Session.
+   const session=work;
+   const latest=(await f.service.library({search:'',from:null,to:null})).businesses.flatMap((b:any)=>b.accounts.flatMap((a:any)=>a.items)).find((i:any)=>i.workItemId===work.workItemId);
+   let version=latest.content.length;let source=latest.content[0]?.id??null;
+   const first=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:version,sourceContentId:source,kind:'brief',status:'final',title:'升级恢复稿',body:'UPGRADE_OLD_BODY_'+mode});version++;
+   const request=(input:string)=>({sessionId:session.sessionId,requestId:randomUUID(),input,selection:{kind:'ordinary' as const,modelId},network:'deny' as const});
+   const seed=await admission.prepare(request('受众必须是初学者'));
+   expect(await (mode==='marked'?runtimeExecutor:oldExecutor)({database:admin,actor:async()=>f.actor,endpoint}).execute(seed.executionId)).toMatchObject({state:'completed'});
+   const second=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:version,sourceContentId:first.id,kind:'brief',status:'final',title:'升级恢复稿',body:'UPGRADE_CURRENT_BODY_'+mode});version++;
+   const input=request('请修改当前稿结尾');const prepared=await admission.prepare(input);
+   // Lose the application continuation after the real response receipt commits,
+   // before SDK Session append or execution completion. No request/response mock.
+   const interruptedDb={rpc:async(name:string,args:Record<string,unknown>)=>{
+    if(name==='runtime_session_items'&&args.p_action==='append')return {data:null,error:{message:'synthetic process interruption'}};
+    return admin.rpc(name,args);
+   }};
+   unknown=mode==='unknown';const beforeDispatch=requests.length;
+   expect(await (mode==='marked'?runtimeExecutor:oldExecutor)({database:interruptedDb,actor:async()=>f.actor,endpoint}).execute(prepared.executionId)).toMatchObject({state:'pending'});
+   expect(requests.length).toBe(beforeDispatch+1);unknown=false;
+   const sent=requests.at(-1)!;expect(sent).toContain('UPGRADE_CURRENT_BODY_'+mode);expect(sent).toContain('受众必须是初学者');
+   expect(sent.includes('UPGRADE_OLD_BODY_'+mode)).toBe(mode!=='marked'&&process.env.V3_LEGACY_REF?.startsWith('6d70caf'));
+   const snapshot=async()=>({
+    execution:(await sql.query('select id,request_id,payload,candidate_history,selected_history,billing_run_id from runtime_executions where id=$1',[prepared.executionId])).rows,
+    calls:(await sql.query('select id,sequence,payload from bill2_calls where run_id=$1 order by sequence',[prepared.runId])).rows,
+    receipts:(await sql.query('select r.* from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1 order by r.id',[prepared.runId])).rows,
+    history:(await sql.query('select * from runtime_session_history where session_id=$1 order by revision',[session.sessionId])).rows,
+   });
+   const before=await snapshot();
+   expect(before.execution[0].payload.inputSelection).toBe(mode==='marked'?'scope-projection-v1':undefined);expect(before.calls[0].payload.requestHash).toBe(createHash('sha256').update(sent).digest('hex'));
+   if(mode!=='unknown')expect(JSON.stringify(before.receipts)).toContain('合成回复');
+   await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:version,sourceContentId:second.id,kind:'brief',status:'final',title:'升级恢复稿',body:'UPGRADE_AFTER_INTERRUPT_'+mode});
+   const observed={rpc:async(name:string,args:Record<string,unknown>)=>{const r=await admin.rpc(name,args);if(r.error)errors.push(r.error.message);return r;}};
+   const executor=runtimeExecutor({database:observed,actor:async()=>f.actor,endpoint});
+   const recovered=await executor.execute(prepared.executionId);
+   console.info('U3_UPGRADE_RESULT',JSON.stringify({legacyRef:process.env.V3_LEGACY_REF,mode,recovered,errors,dispatches:requests.length-beforeDispatch,requestBytes:Buffer.byteLength(sent),requestHash:before.calls[0].payload.requestHash}));
+   if(mode==='marked'||!process.env.V3_LEGACY_REF?.startsWith('6d70caf'))expect(errors).toEqual([]);
+   expect(recovered).toMatchObject({state:mode!=='unknown'?'completed':'pending'});
+   expect(requests.length).toBe(beforeDispatch+1);
+   const after=await snapshot();expect(after.execution).toEqual(before.execution);expect(after.calls).toEqual(before.calls);expect(after.receipts).toEqual(before.receipts);
+   expect(after.history.slice(0,before.history.length)).toEqual(before.history);expect(after.history.length-before.history.length).toBe(mode!=='unknown'?2:0);
+   expect(await executor.execute(prepared.executionId)).toEqual(recovered);expect(await snapshot()).toEqual(after);expect(requests.length).toBe(beforeDispatch+1);
+   const {writeFileSync}=await import('node:fs');
+   writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/upgrade-'+process.env.V3_LEGACY_REF?.slice(0,8)+'-'+mode+'.json',JSON.stringify({sent,before,after,recovered},null,2),{mode:0o600});
+  }
+ }finally{await new Promise<void>((resolve,reject)=>server.close(e=>e?reject(e):resolve()));}
+},180000);

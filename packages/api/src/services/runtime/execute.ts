@@ -14,6 +14,7 @@ export const runtimeContext=z.object({
  version:z.literal('runtime.v1'),sdkVersion:z.literal('0.18.0'),role:z.enum(['ordinary','skill','organizer']),
  input:z.string().min(1).max(20000),instructions:z.string().max(262144),model:z.string().min(1),
  maxOutputTokens:z.number().int().positive().max(20000),maxTurns:z.number().int().min(1).max(32),
+ inputSelection:z.literal('scope-projection-v1').optional(),
  historyItems:z.number().int().min(0).max(1000),
  tools:z.array(z.enum(['search','read_source'])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
  modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
@@ -30,7 +31,12 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
  const billing=authoritativeBilling({admin:options.database,actor:options.actor,adapter});
  async function rpc<T>(name:string,args:Record<string,unknown>):Promise<T>{
   const result=await options.database.rpc(name,{...args,p_actor_id:z.string().uuid().parse(await options.actor())});
-  if(result.error)throw new Error('RUNTIME_DATABASE_UNAVAILABLE');return result.data as T;
+  if(result.error){
+   // A private, exact identity mismatch permits only the bounded legacy replay
+   // below. Authorization, storage and all other failures never trigger it.
+   if(name==='runtime_response'&&typeof result.error==='object'&&'message' in result.error&&result.error.message==='RUNTIME_RESPONSE_CONFLICT')throw new Error('RUNTIME_RESPONSE_CONFLICT');
+   throw new Error('RUNTIME_DATABASE_UNAVAILABLE');
+  }return result.data as T;
  }
  return {
   cancel:(executionId:string)=>rpc<{state:string}>('runtime_cancel',{p_execution_id:z.string().uuid().parse(executionId)}),
@@ -65,6 +71,8 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
   const session=new PostgresSession(options.database,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
   try{
    let callSequence=0;
+   // The SDK wraps fetch errors; retain only this verified database verdict.
+   let responseConflict=false;
    let primaryPolicy=policy;
    const exchange=async(request:string,phase:string,selectedPolicy=primaryPolicy)=>{
     if(selectedPolicy.protocol==='openrouter-chat-v1') {
@@ -79,7 +87,9 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
     assertRuntimeRequestCapacity(request,selectedPolicy.inputLimit);
     const sequence=++callSequence;
      const requestHash=hash(request);
-     const existing=await rpc<{callId:string;state:string;rawBody:string|null}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash});
+     const existing=await rpc<{callId:string;state:string;rawBody:string|null}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash}).catch(error=>{
+      responseConflict=error instanceof Error&&error.message==='RUNTIME_RESPONSE_CONFLICT';throw error;
+     });
      let raw=existing?.rawBody;
      if(!raw){
       // Recovery is replay-only, even when a later step had not yet been sent.
@@ -164,15 +174,17 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
     }}));
    const toolBytes=Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description}))));
    const preserveHistoricalMaterial=Boolean(context.sources?.length)||requestsHistoricalComparison(context.input);
+   const primarySequence=callSequence;
+   const runPrimary=async(legacyInput=false)=>{
    let selectedHistoryCount=0;
-   const body=await runRuntime({...context,...effective,input:runtimeScopeInput(context.input,context.scopeMaterial),session,tools,selectHistory:async(history,incoming)=>{
+   return runRuntime({...context,...effective,input:runtimeScopeInput(context.input,context.scopeMaterial),session,tools,selectHistory:async(history,incoming)=>{
     const selected=selectRuntimeHistory(history,incoming,{instructions:effective.instructions,inputBytes:primaryPolicy.inputLimit,historyItems:context.historyItems,toolBytes,
-     projectHistoryItem:item=>preserveHistoricalMaterial?item:projectSupersededScopeItem(item,context.scopeMaterial)});
+     projectHistoryItem:item=>legacyInput||preserveHistoricalMaterial?item:projectSupersededScopeItem(item,context.scopeMaterial)});
     selectedHistoryCount=selected.length-incoming.length;
     // Freeze the exact first-call history members. Later tool calls may use a
     // subset, but never acquire a new Session dependency during this execution.
     await session.freezeHistoryItems(selected.slice(0,selectedHistoryCount));return selected;
-   },filterModelInput:(items,instructions)=>selectRuntimeCallInput(items,selectedHistoryCount,{
+   },filterModelInput:legacyInput?undefined:(items,instructions)=>selectRuntimeCallInput(items,selectedHistoryCount,{
     instructions,inputBytes:primaryPolicy.inputLimit,toolBytes,currentMaterial:context.scopeMaterial,preserveHistoricalMaterial,
    }) as typeof items,
     exchange:async(_sequence,request)=>{
@@ -183,6 +195,19 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
      if(!response||response.model!==effective.model||response.choices?.length!==1)throw new Error('RUNTIME_RESPONSE_INVALID');
      return JSON.stringify(response);
     }});
+   };
+   let body:string;
+   try{body=await runPrimary();}
+   catch(error){
+    if(execution.live||context.inputSelection||!responseConflict)throw error;
+    // Unmarked executions exist on both sides of the selector upgrade. Try the
+    // prior selector only when a saved call rejects the new bytes. Both SDK runs
+    // are replay-only: every response still must match its original hash, tools
+    // reuse their original claims/results, and nothing is dispatched or rewritten.
+    // Marked executions never negotiate a different input policy.
+    callSequence=primarySequence;
+    body=await runPrimary(true);
+   }
    if(context.network==='require_latest'){
     const latest=await rpc<{state:'cancelled'|'cost_pending';unavailable?:boolean}>('runtime_execution',{...args,p_action:'check_latest'});
     if(latest.unavailable)return {state:latest.state,unavailable:'latest' as const};

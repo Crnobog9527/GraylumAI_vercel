@@ -14,6 +14,7 @@ const rejected=new Set(['OPC_VERSION_CONFLICT','OPC_REQUEST_CONFLICT','OPC_CONTE
 
 export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onSaved:()=>Promise<unknown>;onFinalized?:()=>void;children?:ReactNode}>(function ContentEditor({item,onSaved,onFinalized,children},ref){
  const kind=item.contentType==='video'?'script':'brief';
+ const contentLabel=kind==='script'?'口播稿':item.contentType==='image_text'?'图文':'文章';
  const versions=useMemo(()=>item.content.filter(version=>version.kind===kind).sort((a,b)=>b.version-a.version),[item.content,kind]);
  const latest=versions[0]??null;
  const key='opc-content-draft:'+item.workItemId+':'+kind;
@@ -122,11 +123,11 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
  useImperativeHandle(ref,()=>({finalize:()=>{void save('final');}}));
  if(!draft)return <p className={styles.loading}>正在读取当前成果…</p>;
  return <div className={styles.editor}>
-  <header><p className={styles.label}>正文稿件</p><p className={styles.meta}>{item.platform} · {item.account} · {item.contentType==='video'?'口播稿':'文章'}</p></header>
+  <header><p className={styles.label}>正文稿件</p><p className={styles.meta}>{item.platform} · {item.account} · {contentLabel}</p></header>
   <div className={styles.body}>
    {!item.sourceAvailable||latest&&latest.contentAvailable===false?<p role="alert">来源已不可用，不能编辑或保存这条工作。</p>:<>
     <label>稿件标题<input aria-label="稿件标题" value={draft.title} onChange={event=>change({title:event.target.value})} maxLength={160}/></label>
-    <label>{kind==='script'?'口播稿正文':'文章正文'}<textarea aria-label={kind==='script'?'口播稿正文':'文章正文'} value={draft.body} onChange={event=>change({body:event.target.value})} maxLength={20000} placeholder="先写下草稿，保存后会形成可找回的版本。"/></label>
+    <label>{contentLabel+'正文'}<textarea aria-label={contentLabel+'正文'} value={draft.body} onChange={event=>change({body:event.target.value})} maxLength={20000} placeholder="先写下草稿，保存后会形成可找回的版本。"/></label>
     <p className={styles.version}>{latest?'账号已保存 v'+latest.version+' · '+(latest.status==='final'?'已定稿':'草稿'):'草稿会在停止输入后自动同步到账号'}</p>
     {saved&&<p role="status" className={styles.success}>{saved}</p>}
     {error&&<p role="alert" className={styles.error}>{error}</p>}
@@ -139,8 +140,8 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
     {children}
    </>}
   </div>
-  <footer><button className={styles.primary} onClick={()=>save('final')} disabled={pending||saveMutation.isPending||!item.sourceAvailable}>确认定稿{kind==='script'?'口播稿':'文章'}</button><p>修改会自动同步为草稿；定稿会另存正式版本，不等于发布。</p></footer>
-  {expanded&&expandedDraft&&<div className={styles.backdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setExpanded(false);}}><div role="dialog" aria-modal="true" aria-label="编辑标题与正文" className={styles.modal}><header><h2>编辑标题与正文</h2><button aria-label="关闭编辑" onClick={()=>setExpanded(false)}>×</button></header><div className={styles.modalFields}><label>稿件标题<input aria-label="展开编辑标题" value={expandedDraft.title} maxLength={160} onChange={event=>setExpandedDraft({...expandedDraft,title:event.target.value})}/></label><label>{kind==='script'?'口播稿正文':'文章正文'}<textarea aria-label="展开编辑正文" value={expandedDraft.body} maxLength={20000} onChange={event=>setExpandedDraft({...expandedDraft,body:event.target.value})}/></label></div><footer><p>确认修改后会自动同步为草稿。</p><div><button onClick={()=>setExpanded(false)}>取消</button><button className={styles.primary} onClick={()=>{change(expandedDraft);setExpanded(false);}}>确认修改</button></div></footer></div></div>}
+  <footer><button className={styles.primary} onClick={()=>save('final')} disabled={pending||saveMutation.isPending||!item.sourceAvailable}>确认定稿{contentLabel}</button><p>修改会自动同步为草稿；定稿会另存正式版本，不等于发布。</p></footer>
+  {expanded&&expandedDraft&&<div className={styles.backdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setExpanded(false);}}><div role="dialog" aria-modal="true" aria-label="编辑标题与正文" className={styles.modal}><header><h2>编辑标题与正文</h2><button aria-label="关闭编辑" onClick={()=>setExpanded(false)}>×</button></header><div className={styles.modalFields}><label>稿件标题<input aria-label="展开编辑标题" value={expandedDraft.title} maxLength={160} onChange={event=>setExpandedDraft({...expandedDraft,title:event.target.value})}/></label><label>{contentLabel+'正文'}<textarea aria-label="展开编辑正文" value={expandedDraft.body} maxLength={20000} onChange={event=>setExpandedDraft({...expandedDraft,body:event.target.value})}/></label></div><footer><p>确认修改后会自动同步为草稿。</p><div><button onClick={()=>setExpanded(false)}>取消</button><button className={styles.primary} onClick={()=>{change(expandedDraft);setExpanded(false);}}>确认修改</button></div></footer></div></div>}
   {history&&<VersionCompare versions={versions} onClose={()=>setHistory(false)}/>}
  </div>;
 });

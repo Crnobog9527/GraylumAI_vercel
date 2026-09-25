@@ -436,7 +436,7 @@ try {
       let raw='';for await(const chunk of req)raw+=chunk;
       const request=req.url==='/__official_chat'?JSON.parse(raw):JSON.parse(JSON.parse(raw).input);runtimeCalls.push(request);
       // Disposable synthetic transport sampling for the capacity validation.
-      if(!previewOptions.persistent&&!stagingHost&&req.url==='/call'&&casePattern?.startsWith('^OPC: CAPACITY'))appendFileSync(resolve(evidenceDirectory,'capacity-requests.jsonl'),JSON.stringify(request)+'\n',{mode:0o600});
+      if(!previewOptions.persistent&&!stagingHost&&req.url==='/call'&&casePattern?.includes('CAPACITY'))appendFileSync(resolve(evidenceDirectory,'capacity-requests.jsonl'),JSON.stringify(request)+'\n',{mode:0o600});
       const id=serve ? 'local-runtime-'+randomUUID() : 'local-runtime-'+runtimeCalls.length;
       runtimeReceipts.set(id,request);
       appendFileSync(receiptFile,JSON.stringify({id,model:request.model})+'\n',{mode:0o600});
@@ -859,7 +859,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
               : "^restores all projects in a new browser login after a real application process restart$"]
           : primaryTestArgs),
       ],
-      { cwd: legacyRoot&&!upgradeMode?legacyRoot:root, env, detached: true, stdio: "inherit" },
+      { cwd: legacyRoot&&!upgradeMode&&!opcMode?legacyRoot:root, env, detached: true, stdio: "inherit" },
     );
   await runPreviewPhase(previewOptions, "runTests", async () => {
   await childExit(runTests());
