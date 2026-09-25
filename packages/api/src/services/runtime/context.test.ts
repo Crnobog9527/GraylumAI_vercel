@@ -42,6 +42,11 @@ it('projects only an authenticated same-session superseded snapshot and keeps th
  expect(requestsHistoricalComparison('请比较 v100 与 v101')).toBe(true);
  expect(requestsHistoricalComparison('请比较第 100 版和当前稿')).toBe(true);
  expect(requestsHistoricalComparison('对照刚才那版与现在')).toBe(true);
+ expect(requestsHistoricalComparison('这版和之前的有什么差异')).toBe(true);
+ expect(requestsHistoricalComparison('我比较喜欢当前稿，微调开头')).toBe(false);
+ expect(requestsHistoricalComparison('我比较喜欢当前稿，请保留前面确认的受众并改结尾')).toBe(false);
+ expect(requestsHistoricalComparison('请做出差异化')).toBe(false);
+ expect(requestsHistoricalComparison('与竞品对比当前稿')).toBe(false);
  expect(requestsHistoricalComparison('修改当前稿件开头')).toBe(false);
  expect(requestsHistoricalComparison('[OPC_SCRIPT_V1] 修改当前口播稿')).toBe(false);
  expect(old).toEqual(copy);

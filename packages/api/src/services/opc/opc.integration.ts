@@ -8886,14 +8886,14 @@ it('OPC: CAPACITY version counts use only current manuscript through browser and
     const compared=JSON.stringify(comparison[0]);expect(compared).toContain(marker(100));expect(compared).toContain(marker(101));
     results.push({storedVersions:101,inputVersions:[100,101],requestBytes:Buffer.byteLength(compared),comparison:true});
     const sameOffset=all().length;
-    await page.getByLabel('消息',{exact:true}).fill('请继续修改当前稿件的结尾，保留前面确认的受众。');
+    await page.getByLabel('消息',{exact:true}).fill('我比较喜欢当前稿，请继续修改结尾，保留前面确认的受众。');
     await page.getByRole('button',{name:'发送',exact:true}).click();
     await expect.poll(async()=>(await sql.query("select count(*)::int n from runtime_executions where session_id=$1 and state='completed'",[work.sessionId])).rows[0].n,{timeout:60000}).toBe(4);
     const same=all().slice(sameOffset);expect(same).toHaveLength(1);
     const sameBody=JSON.stringify(same[0]);
     expect(sameBody).not.toContain(marker(100));
     expect(sameBody.split(marker(101))).toHaveLength(2);
-    expect(sameBody).toContain('保留前面确认的受众');
+    expect(sameBody).toContain('我比较喜欢当前稿');
     results.push({storedVersions:101,inputVersions:[101],requestBytes:Buffer.byteLength(sameBody),sameMaterialAgain:true});
    }
   }finally{await browser.close();}

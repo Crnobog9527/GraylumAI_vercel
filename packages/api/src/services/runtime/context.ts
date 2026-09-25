@@ -54,7 +54,8 @@ export function runtimeScopeInput(input:string,scopeMaterial?:unknown){
  * or authorize selecting a historical version. Explicit version reads remain a
  * separate unsupported source operation. */
 export function requestsHistoricalComparison(input:string){
- return /(旧版|旧稿|旧版本|历史版本|上一版|前一版|此前稿|两个版本|第\s*\d+\s*版|刚才那版|(?:^|[^\w])v\d+\b|比较|对照|对比|异同|差异|区别|previous version|older draft|compare|versus)/i.test(input);
+ if(/(旧版|旧稿|旧版本|历史版本|上一版|前一版|此前稿|两个版本|第\s*\d+\s*版|刚才那版|(?:^|[^\w])v\d+\b|previous version|older draft|earlier draft)/i.test(input))return true;
+ return /(?:这版|当前稿|当前版本|现在).{0,6}(?:和|与|比|相较|对照).{0,6}(?:之前的|前面的|刚才的)|(?:之前的|前面的|刚才的).{0,6}(?:和|与|比|相较|对照).{0,6}(?:这版|当前稿|当前版本|现在)/.test(input);
 }
 
 /** Keep the prior user request while removing only a complete scope snapshot
