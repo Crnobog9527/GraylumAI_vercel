@@ -336,7 +336,7 @@ try {
     apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
     apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
   }
-  if(runtimeSchema&&!upgradeMode){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0120_opc_entry_projection.sql');apply('packages/db/migrations/0120_opc_entry_projection.sql');apply('packages/db/migrations/0121_opc_storyboard_dependency.sql');apply('packages/db/migrations/0121_opc_storyboard_dependency.sql');apply('packages/db/migrations/0122_opc_content_type.sql');apply('packages/db/migrations/0122_opc_content_type.sql');apply('packages/db/migrations/0123_opc_manual_content.sql');apply('packages/db/migrations/0123_opc_manual_content.sql');apply('packages/db/migrations/0124_opc_workspace_ui.sql');apply('packages/db/migrations/0124_opc_workspace_ui.sql');apply('packages/db/migrations/0125_opc_account_strategy.sql');apply('packages/db/migrations/0125_opc_account_strategy.sql');apply('packages/db/migrations/0126_opc_account_strategy_schema.sql');apply('packages/db/migrations/0126_opc_account_strategy_schema.sql');apply('packages/db/migrations/0127_opc_work_name_sync.sql');apply('packages/db/migrations/0127_opc_work_name_sync.sql');apply('packages/db/migrations/0128_opc_script_ancestry.sql');apply('packages/db/migrations/0128_opc_script_ancestry.sql');}}
+  if(runtimeSchema&&!upgradeMode){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0111_opc_historical_reach.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0112_opc_plan_request_state.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0113_opc_topic_workspace.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0114_opc_topic_consent.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0115_opc_historical_plan_result.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0116_opc_mentor_projection_basis.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0117_opc_core_experience.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0118_opc_b1_acceptance.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0119_opc_video_admission.sql');apply('packages/db/migrations/0120_opc_entry_projection.sql');apply('packages/db/migrations/0120_opc_entry_projection.sql');apply('packages/db/migrations/0121_opc_storyboard_dependency.sql');apply('packages/db/migrations/0121_opc_storyboard_dependency.sql');apply('packages/db/migrations/0122_opc_content_type.sql');apply('packages/db/migrations/0122_opc_content_type.sql');apply('packages/db/migrations/0123_opc_manual_content.sql');apply('packages/db/migrations/0123_opc_manual_content.sql');apply('packages/db/migrations/0124_opc_workspace_ui.sql');apply('packages/db/migrations/0124_opc_workspace_ui.sql');apply('packages/db/migrations/0125_opc_account_strategy.sql');apply('packages/db/migrations/0125_opc_account_strategy.sql');apply('packages/db/migrations/0126_opc_account_strategy_schema.sql');apply('packages/db/migrations/0126_opc_account_strategy_schema.sql');apply('packages/db/migrations/0127_opc_work_name_sync.sql');apply('packages/db/migrations/0127_opc_work_name_sync.sql');apply('packages/db/migrations/0128_opc_script_ancestry.sql');apply('packages/db/migrations/0128_opc_script_ancestry.sql');apply('packages/db/migrations/0129_opc_library_read_once.sql');apply('packages/db/migrations/0129_opc_library_read_once.sql');}}
   if(stagingSchema&&!upgradeMode){apply('packages/db/migrations/0108_runtime_staging_window.sql');apply('packages/db/migrations/0108_runtime_staging_window.sql');}
   console.log("SQL additive migration and repeat application PASS; runtime schema="+runtimeSchema+"; deferred upgrade="+upgradeMode);
   docker(
@@ -710,7 +710,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
   let searchSource=readFileSync(searchPath,'utf8');
   const searchMarker="options=>connectAgentKey(options,process.env.AGENTKEY_API_KEY??'')";
   if(searchSource.split(searchMarker).length!==2)throw new Error('research fixture boundary changed');
-  searchSource=searchSource.replace('connectAgentKey, researchIdentity,','connectAgentKey, connectLocalAgentKey, researchIdentity,').replace(searchMarker,"async options=>{const row=await privateClient.from('system_settings').select('value').eq('key','local_research_endpoint').single();return connectLocalAgentKey(options,new URL(row.data.value));}");
+  searchSource=searchSource.replace('connectAgentKey, researchIdentity,','connectAgentKey, connectLocalAgentKey, researchIdentity,').replace(searchMarker,"async options=>{if(!privateClient)throw new Error('LOCAL_RESEARCH_CLIENT_REQUIRED');const row=await privateClient.from('system_settings').select('value').eq('key','local_research_endpoint').single();if(row.error||!row.data)throw new Error('LOCAL_RESEARCH_ENDPOINT_REQUIRED');return connectLocalAgentKey(options,new URL(row.data.value));}");
   writeFileSync(searchPath,searchSource);
   if(legacyRoot)instrumentLegacy(legacyRoot,apiUrl);
   const service = jwt("service_role"),
@@ -737,7 +737,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
     ...(args.includes('--reuse-only') ? {V3_REUSE_TEST:'1'} : {}),
     ...((args.includes('--real-skill-only')||opcMode) ? {V3_REAL_SKILL_INPUT:process.env.V3_REAL_SKILL_INPUT} : {}),
     V3_LEGACY_ROOT:legacyRoot??'', V3_LEGACY_REF:legacyRef??'',
-    NODE_ENV: "development",
+    NODE_ENV: serve ? "production" : "development",
     NODE_OPTIONS:`--require=${networkGuard}`,
     NEXT_PUBLIC_SUPABASE_URL: stagingHost?'https://'+syntheticStagingHost:apiUrl,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: anon,
@@ -759,6 +759,14 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
   };
   mkdirSync(env.V3_WORKBENCH_OUTPUT, { recursive: true });
 
+  // Owner previews run prebuilt assets, avoiding lazy route compilation and HMR.
+  // Integration tests retain the development server and the same loopback isolation.
+  if (serve) {
+    console.log('Building local preview once; saved preview data is retained');
+    await childExit(spawn('pnpm', ['--filter', 'web', 'build'], {
+      cwd: root, env, detached: true, stdio: 'inherit',
+    }));
+  }
   let applicationRoot=legacyRoot??root;
   const startApp = () => {
     app = spawn(
@@ -768,8 +776,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
         "web",
         "exec",
         "next",
-        "dev",
-        "--webpack",
+        ...(serve ? ["start"] : ["dev", "--webpack"]),
         "--hostname",
         "127.0.0.1",
         "--port",

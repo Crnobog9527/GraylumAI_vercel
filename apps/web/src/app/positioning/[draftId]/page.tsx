@@ -260,10 +260,17 @@ export default function PositioningDraft({
   params: Promise<{ draftId: string }>;
 }) {
   const { draftId } = use(params);
+  return <PositioningDraftContent key={draftId} draftId={draftId}/>;
+}
+
+function PositioningDraftContent({draftId}:{draftId:string}){
   const router = useRouter();
   const planView = usePathname().endsWith("/plan");
   const utils = trpc.useUtils();
   const read = trpc.opc.read.useQuery({ draftId });
+  const library = trpc.opc.library.useQuery({search:'',from:null,to:null});
+  const discussionAccounts = ((library.data?.businesses??[]) as Array<{accounts:Array<{strategyDraftId?:string;pendingStrategyDraftId?:string|null;displayName?:string;account:string;platform:string}>}>).flatMap(business=>business.accounts).filter(account=>account.pendingStrategyDraftId===draftId||account.strategyDraftId===draftId);
+  const discussionAccount = discussionAccounts.length===1?discussionAccounts[0]:undefined;
   const list = trpc.opc.list.useQuery();
   const prepareStep = trpc.opc.prepareStep.useMutation(),
     execute = trpc.runtime.execute.useMutation();
@@ -1814,9 +1821,9 @@ export default function PositioningDraft({
     <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'本地模拟 · 回复、保存与交接均为演示'} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<div className={resultStyles.panel}><header><h2>{planView?'已采用选题':'已确认的定位'}</h2><p>{snap.state==='draft'?'已核对信息与当前问题':'当前策略与信息状态'}</p></header><div className={resultStyles.body} ref={setResultBodyNode}>{steps.filter(step=>snap.steps[step.id].valid).map((step,index)=><details key={step.id} open={step.id===selectedStep?.id}><summary><span>{index+1}. {step.title}</span><small>已确认</small></summary><div className={resultStyles.fields}>{(d.information[step.id]?.schema??[]).map((field:{id:string;title:string})=><div key={field.id}><strong>{field.title}</strong><p>{d.information[step.id]?.values?.[field.id]?.value||'待补充'}</p></div>)}</div></details>)}</div></div>}>
     <main className={`${resultStyles.workspaceMain} h-full w-full overflow-y-auto text-[var(--text-primary)]`}><div className={resultStyles.workspaceContent}>
       <header className={resultStyles.positionTop}>
-        <h1>{planView ? "第一周计划" : manualEntry ? "录入已有定位" : "我的定位分析"}</h1>
+        <h1>{planView ? "第一周计划" : discussionAccount ? (discussionAccount.displayName??discussionAccount.account)+" · 定位策略" : manualEntry ? "录入已有定位" : "我的定位分析"}</h1>
         <div className={resultStyles.positionActions}>
-          <span>{snap.state==='published'?'整体规划 · 已确认':'整体规划 · 进行中'}</span>
+          <span>{(discussionAccount?discussionAccount.platform:'整体规划')+(snap.state==='published'?' · 已确认':' · 进行中')}</span>
           <button type="button" onClick={()=>setWorkInfoOpen(true)}>工作信息</button>
           {!resultOpen&&<button type="button" aria-label="展开右边栏" onClick={()=>setResultOpen(true)}><PanelRightOpen size={18}/></button>}
         </div>

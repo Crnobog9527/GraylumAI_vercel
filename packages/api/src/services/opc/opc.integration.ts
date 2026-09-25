@@ -7314,7 +7314,6 @@ it("OPC: U2 browser adopts only second topic, edits a server version and returns
     await continueLink.click();
     await page.waitForURL(url=>url.pathname==='/runtime');
     await page.getByLabel('文章正文').fill('先讲真实场景，再说明判断，最后安排一次练习。');
-    await page.getByRole('button',{name:'保存稿件版本',exact:true}).click();
     await page.getByRole('status').filter({hasText:'已在服务端保存 v1'}).waitFor();
     const workUrl=page.url();
     await page.getByRole('link',{name:'资料库',exact:true}).click();
@@ -7326,7 +7325,6 @@ it("OPC: U2 browser adopts only second topic, edits a server version and returns
     await page.getByRole('link',{name:'返回当前工作',exact:true}).last().click();
     await page.waitForURL(url=>url.pathname==='/runtime');
     await page.getByLabel('文章正文').fill('修改后的正文：补充前后对照案例。');
-    await page.getByRole('button',{name:'保存稿件版本',exact:true}).click();
     await page.getByRole('status').filter({hasText:'已在服务端保存 v2'}).waitFor();
     await page.getByLabel('消息',{exact:true}).fill('这条问题先不要发送');
     await page.getByLabel('文章正文').fill('未保存的下一次修改');
@@ -7368,37 +7366,33 @@ it("OPC: U2 browser preserves later edits across unknown saves, conflict and ano
     await page.route('**/api/trpc/opc.saveContentManual*',async route=>{
       const response=await route.fetch();received=true;await gate;await route.fulfill({response});
     });
-    await page.getByRole('button',{name:'保存稿件版本',exact:true}).click();
     await expect.poll(()=>received,{timeout:30000}).toBe(true);
     await body.fill('第一版提交后继续写的新内容');
     release();
     await page.getByRole('status').filter({hasText:'已在服务端保存 v1'}).waitFor();
-    await page.getByText('服务端已保存 v1 · 草稿').waitFor();
+    await page.getByText('账号已保存 v1 · 草稿').waitFor();
     expect(await body.inputValue()).toBe('第一版提交后继续写的新内容');
     await page.unroute('**/api/trpc/opc.saveContentManual*');
 
     await page.route('**/api/trpc/opc.saveContentManual*',async route=>{
       const response=await route.fetch();expect(response.ok()).toBe(true);await route.abort();
     });
-    await page.getByRole('button',{name:'保存稿件版本',exact:true}).click();
     await page.getByRole('alert').filter({hasText:'保存结果待核实'}).waitFor();
     const before=(await f.service.library({search:'仅本账号内容',from:null,to:null})).businesses
       .flatMap((business:{accounts:Array<{items:any[]}>})=>business.accounts.flatMap(account=>account.items))[0];
     expect(before.content.map((version:{version:number})=>version.version)).toEqual([1,2]);
     await body.fill('未知结果后继续写，不能被旧结果覆盖');
     await page.unroute('**/api/trpc/opc.saveContentManual*');
-    await page.getByRole('button',{name:'恢复原保存',exact:true}).click();
+    await page.getByRole('button',{name:'恢复草稿同步',exact:true}).click();
     await page.getByRole('status').filter({hasText:'已在服务端保存 v2'}).waitFor();
-    await page.getByText('服务端已保存 v2 · 草稿').waitFor();
+    await page.getByText('账号已保存 v2 · 草稿').waitFor();
     expect(await body.inputValue()).toBe('未知结果后继续写，不能被旧结果覆盖');
     const versions=before.content as Array<{id:string;version:number}>;
     const other=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:2,
       sourceContentId:versions[1].id,kind:'brief',status:'draft',title:'仅本账号内容',body:'另一标签已保存'});
-    await page.getByRole('button',{name:'保存稿件版本',exact:true}).click();
     await page.getByRole('alert').filter({hasText:'已有更新版本'}).waitFor();
     expect(await body.inputValue()).toBe('未知结果后继续写，不能被旧结果覆盖');
     await page.getByRole('button',{name:/已比较历史，基于服务端 v3/}).click();
-    await page.getByRole('button',{name:'保存稿件版本',exact:true}).click();
     await page.getByRole('status').filter({hasText:'已在服务端保存 v4'}).waitFor();
     expect(other.version).toBe(3);
 
@@ -8067,7 +8061,7 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
     await page.reload();
     await expect.poll(()=>page.evaluate(key=>localStorage.getItem(key),videoKey),{timeout:60000}).toBeNull();
     await page.getByText('当前成果',{exact:true}).waitFor();
-    await page.getByText('服务端已保存 v2 · 已定稿',{exact:true}).waitFor({ timeout: 60000 });
+    await page.getByText('账号已保存 v2 · 已定稿',{exact:true}).waitFor({ timeout: 60000 });
     await page.getByText('分镜 · 第 1 版 · 已定稿 · 旧口播稿版本',{exact:true}).waitFor();
     await page.getByText('剪辑建议 · 第 1 版 · 已定稿 · 旧口播稿版本',{exact:true}).waitFor({ timeout: 60000 });
     expect(await packageRuns()).toBe(2);
@@ -8676,9 +8670,8 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
     await adoptDraft.click();
     await page.getByRole('link',{name:'已采用为草稿 · 查看',exact:true}).waitFor();
     await page.getByLabel('文章正文').fill('先讲真实场景，再说明取景判断，最后安排一次练习。');
-    await page.getByRole('button',{name:'保存稿件版本',exact:true}).click();
     await page.getByRole('status').filter({hasText:'已在服务端保存 v2'}).waitFor();
-    await page.getByRole('button',{name:'将标题和文章定稿',exact:true}).click();
+    await page.getByRole('button',{name:'确认定稿文章',exact:true}).click();
     await expect.poll(async()=>({statuses:await page.getByRole('status').allTextContents(),alerts:await page.getByRole('alert').allTextContents(),version:await page.locator('[class*=version]').allTextContents()}),{timeout:60000}).toMatchObject({statuses:expect.arrayContaining([expect.stringContaining('已定稿')])});
     const contentUrl=page.url();
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-content-1600x900.png'});
@@ -8807,6 +8800,7 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   // turn it into a video and hide the draft from the library.
   await card.getByRole('dialog',{name:'选题详情'}).waitFor();
   await card.getByRole('button',{name:'编辑稿件',exact:true}).click();
+  await card.getByRole('button',{name:/选题方向/}).click();
   expect(await card.getByLabel('内容类型',{exact:true}).isDisabled()).toBe(true);
   await expect(f.service.libraryEdit({requestId:randomUUID(),target:'item',targetId:article.workItemId,expectedRevision:1,
     patch:{title:rows[0].title,brief:rows[0].brief,day:rows[0].day,contentType:'video'}})).rejects.toThrow('OPC_LIBRARY_INVALID');
@@ -8825,7 +8819,7 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   await expect.poll(()=>page.getByRole('button',{name:'恢复类型保存',exact:true}).count()).toBe(0);
   await page.getByText('【主动引导合成示例，仅验证交互】我们先细化这条选题：你最希望读者看完后理解哪一个重点？',{exact:true}).waitFor({timeout:60000});
   expect((await sql.query('select opc_item_content_type($1) t',[unknown.workItemId])).rows[0].t).toBe('image_text');
-  await page.getByRole('button',{name:'保存稿件版本',exact:true}).waitFor();
+  await page.getByLabel('文章正文').waitFor();
   await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+video.sessionId);
   await page.getByRole('button',{name:'起草口播稿',exact:true}).waitFor();
   await page.getByRole('button',{name:'起草口播稿',exact:true}).click();
@@ -8920,3 +8914,65 @@ it('OPC: Agent-first U1 sample preserves target, partial adoption, document edit
   await page.getByText('当前入口：新手引导',{exact:true}).waitFor();
  }finally{await browser.close();}
 },180000);
+
+it("OPC: library finalization closes only on success and account discussion switches ownership",async()=>{
+ const f=await publishedDraft();
+ const rows=['ux-account-a','ux-account-b'].map((account,index)=>({id:randomUUID(),platform:'x',account,title:'选题方向 '+index,brief:'讨论方向简报',day:'2026-09-25',contentType:'article' as const}));
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:rows});
+ const works=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:rows.map(row=>({platform:row.platform,account:row.account,expectedRevision:null}))});
+ const work=works[0];
+ await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:0,sourceContentId:null,kind:'brief',status:'draft',title:'独立正文标题',body:'需要定稿的正文'});
+ const {browser,page}=await planBrowser(f);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/');
+  expect(await page.getByRole('link',{name:'继续上次工作',exact:true}).count()).toBe(0);
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
+  const rail=page.getByRole('complementary',{name:'工作区导航'});
+  const thread=rail.getByRole('link',{name:/选题方向 0/});
+  await thread.waitFor();
+  const font=await thread.locator('span').evaluate(el=>getComputedStyle(el).fontSize);
+  const strategy=rail.getByRole('button',{name:/定位策略 当前/}).first();
+  expect(await strategy.evaluate(el=>getComputedStyle(el).fontSize)).toBe(font);
+  await thread.hover();
+  await rail.getByRole('button',{name:'选题方向 0的更多操作',exact:true}).click();
+  await rail.getByRole('menuitem',{name:'重命名',exact:true}).click();
+  const rename=page.getByLabel('重命名对话',{exact:true});
+  expect(await rename.evaluate(el=>getComputedStyle(el).fontSize)).toBe(font);
+  await rename.fill('改名后的选题方向');await rename.press('Enter');
+  await rail.getByRole('link',{name:/改名后的选题方向/}).waitFor();
+  const card=page.locator('#item-'+work.workItemId);
+  await card.getByRole('button').first().click();
+  await card.getByRole('button',{name:'编辑稿件',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'选题详情',exact:true});
+  expect(await dialog.getByLabel('稿件标题',{exact:true}).inputValue()).toBe('独立正文标题');
+  await dialog.getByRole('button',{name:/选题方向/}).filter({hasText:'改名后的选题方向'}).waitFor();
+  await page.route('**/api/trpc/opc.saveContentManual*',route=>route.abort());
+  await dialog.getByRole('button',{name:'确认定稿文章',exact:true}).click();
+  await dialog.getByRole('alert').filter({hasText:'保存结果待核实'}).waitFor();
+  expect(await dialog.isVisible()).toBe(true);
+  await page.unroute('**/api/trpc/opc.saveContentManual*');
+  await dialog.getByRole('button',{name:'恢复草稿同步',exact:true}).click();
+  await dialog.waitFor({state:'hidden'});
+  await page.getByText('正文稿件已定稿',{exact:true}).waitFor();
+  await card.getByRole('button').first().click();
+  await card.getByRole('button',{name:'编辑稿件',exact:true}).click();
+  await dialog.getByRole('button',{name:'确认定稿文章',exact:true}).click();
+  await dialog.waitFor({state:'hidden'});
+  expect((await sql.query('select count(*)::int n from opc_content_versions where work_item_id=$1',[work.workItemId])).rows[0].n).toBe(2);
+  const destinations:string[]=[];
+  for(const name of ['ux-account-a','ux-account-b','ux-account-a']){
+   const account=rail.locator('details').filter({has:page.locator('summary').filter({hasText:name})}).last();
+   await account.getByRole('button',{name:/定位策略 当前/}).click();
+   const strategyDialog=page.getByRole('dialog',{name:'定位详情',exact:true});
+   await strategyDialog.getByRole('button',{name:'回到策略讨论',exact:true}).click();
+   await strategyDialog.waitFor({state:'hidden'});
+   await page.getByRole('heading',{name:name+' · 定位策略',exact:true}).waitFor();
+   destinations.push(new URL(page.url()).pathname);
+   if(name==='ux-account-a'&&destinations.length===1)await page.getByLabel('给导师的回复',{exact:true}).fill('只属于账号 A 的未发送消息');
+  }
+  expect(destinations[0]).not.toBe(destinations[1]);expect(destinations[2]).toBe(destinations[0]);
+  expect(await page.getByLabel('给导师的回复',{exact:true}).inputValue()).toBe('只属于账号 A 的未发送消息');
+  const accounts=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts;
+  expect(accounts.every((account:{sourceVersionId:string})=>account.sourceVersionId===f.sourceVersionId)).toBe(true);
+ }finally{await browser.close();}
+},240000);

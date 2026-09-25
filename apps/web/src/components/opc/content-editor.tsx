@@ -12,7 +12,7 @@ type Frozen=Draft&{workItemId:string;requestId:string;expectedVersion:number;kin
 export type ContentEditorHandle={finalize:()=>void};
 const rejected=new Set(['OPC_VERSION_CONFLICT','OPC_REQUEST_CONFLICT','OPC_CONTENT_DENIED','OPC_CONTENT_INVALID','OPC_CONTENT_SOURCE','OPC_CONTENT_BINDING']);
 
-export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onSaved:()=>Promise<unknown>;children?:ReactNode}>(function ContentEditor({item,onSaved,children},ref){
+export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onSaved:()=>Promise<unknown>;onFinalized?:()=>void;children?:ReactNode}>(function ContentEditor({item,onSaved,onFinalized,children},ref){
  const kind=item.contentType==='video'?'script':'brief';
  const versions=useMemo(()=>item.content.filter(version=>version.kind===kind).sort((a,b)=>b.version-a.version),[item.content,kind]);
  const latest=versions[0]??null;
@@ -81,7 +81,7 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
   // A successful save can advance the draft before the library query refreshes.
   // The service checks expectedVersion, so a stale query must not block the next explicit save.
   if(!pendingRaw&&latest?.version===draft.baseVersion&&latest?.status===status&&latest?.title===title&&latest?.body===body){
-   localStorage.removeItem(key);setSaved('当前内容已经是已保存版本。');return;
+   localStorage.removeItem(key);setSaved('当前内容已经是已保存版本。');if(status==='final')onFinalized?.();return;
   }
   setError('');setSaved('');
   try{
@@ -104,7 +104,7 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
      localStorage.setItem(key,JSON.stringify(next));setDraft(next);
     }
     setSaved('已在服务端保存 v'+result.version+(result.status==='final'?' · 已定稿':' · 草稿'));
-    try{await onSaved();}catch{setError('版本已在服务端保存，但最新历史暂未刷新；请稍后重新打开当前工作。');}
+    try{await onSaved();if(result.status==='final'&&!localStorage.getItem(key))onFinalized?.();}catch{setError('版本已在服务端保存，但最新历史暂未刷新；请稍后重新打开当前工作。');}
    });
   }catch(cause){
    const code=cause instanceof Error?cause.message:'';

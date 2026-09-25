@@ -5,8 +5,7 @@ import { trpc } from '@/trpc/client';
 import { useCreditsBalance } from '@/hooks/use-credits';
 import styles from './home.module.css';
 
-type HomeItem={workItemId:string;sessionId:string;title:string;chatName?:string;deleted?:boolean;lastActivityAt?:string};
-type HomeAccount={platform:string;account:string;displayName?:string;strategyDraftId?:string|null;items:HomeItem[]};
+type HomeAccount={strategyDraftId?:string|null};
 type HomeBusiness={accounts:HomeAccount[]};
 
 export default function HomePage(){
@@ -15,7 +14,6 @@ export default function HomePage(){
  const catalog=trpc.opc.catalog.useQuery();
  const credits=useCreditsBalance();
  const accounts=((library.data?.businesses??[]) as HomeBusiness[]).flatMap(business=>business.accounts);
- const latestWork=accounts.flatMap(account=>account.items.map(item=>({account,item}))).filter(({item})=>!item.deleted).sort((a,b)=>(b.item.lastActivityAt??'').localeCompare(a.item.lastActivityAt??''))[0];
  const hasStrategy=accounts.some(account=>account.strategyDraftId);
  const name=profile.data?.nickname||profile.data?.email?.split('@')[0]||'用户';
  const steps=catalog.data?.[0]?.workflow.steps??[];
@@ -24,7 +22,6 @@ export default function HomePage(){
   <header className={styles.header}><Link href="/" className={styles.brand}><img src="/graylum-logo.png" alt=""/>Graylum</Link><nav aria-label="全局导航"><Link href="/" aria-current="page">首页</Link><Link href="/positioning">对话</Link><Link href="/profile">个人中心</Link></nav><div className={styles.headerEnd}><Link href="/profile?tab=subscription">{credits.status==='ready'?credits.credits:'—'} 积分</Link><Link href="/profile" aria-label="个人中心" className={styles.avatar}>{name.slice(0,1)}</Link></div></header>
   <main className={styles.page}>
    <section className={styles.account}><div><strong>欢迎回来，{name}</strong><span>{profile.data?.membership_level==='free'?'普通会员':'会员账户'}</span></div><Link href="/profile?tab=subscription">账户与积分 →</Link></section>
-   {latestWork&&<section className={styles.resume}><p>{latestWork.account.platform} · {latestWork.account.displayName??latestWork.account.account}</p><h2>{latestWork.item.chatName??latestWork.item.title}</h2><div><Link className={styles.primary} href={'/runtime?session='+latestWork.item.sessionId}>继续上次工作</Link><Link href="/library">查看资料库</Link></div></section>}
    <section className={styles.value}><h1>让你的业务，<br/>拥有清楚的内容方向</h1><p>从找到自己的位置，到持续做出有价值的内容。<br/>Graylum 和你一起分析、判断和创作，让每一步都有依据。</p></section>
    <section className={styles.method}><div className={styles.sectionIntro}><h2>{steps.length?`${stepCount}个环节，理解你的内容增长路径`:'定位方法准备中'}</h2><p>Agent 提供分析与建议，你核对真实情况、作出关键决定。</p></div>{steps.length>0&&<ol>{steps.map((step,index)=><li key={step.id}><span>{String(index+1).padStart(2,'0')}</span><h3>{step.title}</h3><p>具体问题将在进入定位工作后呈现。</p></li>)}</ol>}</section>
    <section className={styles.entry}><div><Link className={styles.primary} href="/positioning">{hasStrategy?'进入对话':'开始新手引导'}</Link><Link href={hasStrategy?'/library':'/positioning'}>{hasStrategy?'查看正式定位':'我已有定位'}</Link></div><p>{hasStrategy?'已有定位和工作会保留；你可以继续原对话。':'先一起确认定位，再开展选题和内容创作。已有资料可以直接带入。'}</p></section>
