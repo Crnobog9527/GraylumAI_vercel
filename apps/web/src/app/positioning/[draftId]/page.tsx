@@ -1993,7 +1993,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   >
                     {mentorExecutions.length===0&&<div className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
                       <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>Graylum · 增长顾问</span>
-                      <p className="mt-1 whitespace-pre-wrap break-words">
+                      <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>
                         我会在同一个对话里陪你完成全部步骤，一次问一个问题，并把从回答中梳理出的信息放到右侧对应表单，供你核对。
                       </p>
                     </div>}
@@ -2023,7 +2023,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                               <span className="text-xs text-[var(--text-secondary)]">
                                 你{turnLabel ? ` · ${turnLabel}` : turnStep ? ` · ${turnStep.title}` : ""}
                               </span>
-                              <p className="mt-1 whitespace-pre-wrap break-words">
+                              <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>
                                 {execution.input ?? "内容暂不可用"}
                               </p>
                             </div>
@@ -2033,7 +2033,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                               {openingTurn ? "导师主动引导" : "导师"}
                               {turnLabel ? ` · ${turnLabel}` : turnStep ? ` · ${turnStep.title}` : ""}
                             </span>
-                            <p className="mt-1 whitespace-pre-wrap break-words">
+                            <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>
                               {parsed.message ||
                                 (execution.state === "cancelled"
                                   ? "这条回复未发给模型，你可以直接重新描述问题。"
