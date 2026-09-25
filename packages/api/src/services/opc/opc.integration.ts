@@ -2942,7 +2942,7 @@ it('OPC: CAPACITY tool continuation measures each complete SDK request and cap b
    writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/capacity-tool-'+inputBytes+(seedHistory?'-history':'-fresh')+'.jsonl',requests.map(request=>JSON.stringify(request)).join('\n')+'\n',{mode:0o600});
    console.info('CAPACITY_TOOL_RESULTS',JSON.stringify({inputBytes,seedHistory,result,rows,historyEntries,savedTools,transportHashesMatch:true}));
    for(const row of rows)expect(row.bytes).toBeLessThanOrEqual(inputBytes);
-   return {result,rows,requests,historyEntries,savedTools};
+   return {result,rows,requests,historyEntries,savedTools,sessionId:session.sessionId,executionId:prepared.executionId};
   }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
  };
  const supported=await run(32000);
@@ -2952,6 +2952,15 @@ it('OPC: CAPACITY tool continuation measures each complete SDK request and cap b
  const bounded=await run(4000);
  expect(bounded.result).toMatchObject({state:'pending',unavailable:'capacity'});expect(bounded.rows.length).toBeGreaterThanOrEqual(1);expect(bounded.rows.length).toBeLessThan(3);
  expect(bounded.savedTools).toBe(2);
+ const {browser,page}=await planBrowser(f);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+bounded.sessionId);
+  await page.evaluate(({sessionId,executionId})=>sessionStorage.setItem('opc-runtime-capacity:'+sessionId+':'+executionId,'1'),{sessionId:bounded.sessionId,executionId:bounded.executionId});
+  await page.reload();
+  await page.getByText('本次必要材料超过模型输入容量，原请求和已完成内容已保留。取消剩余执行后可缩短材料并新发请求。').waitFor();
+  expect(await page.getByRole('button',{name:'恢复原任务'}).count()).toBe(0);
+  expect(await page.getByRole('button',{name:'取消剩余执行'}).count()).toBe(1);
+ }finally{await browser.close();}
  const historical=await run(9000,true);
  expect(supported.rows[2].bytes).toBeLessThan(9000);
  expect(historical.result).toMatchObject({state:'completed'});
@@ -8870,7 +8879,7 @@ it('OPC: CAPACITY version counts use only current manuscript through browser and
     expect(selected).toHaveLength(2);
     results.push({storedVersions:101,inputVersions:[101],requestBytes:Buffer.byteLength(after),messages:next[0].messages.length,uiSaved:true});
     const compareOffset=all().length;
-    await page.getByLabel('消息',{exact:true}).fill('请比较旧版与当前稿的开头，不要直接改稿。');
+    await page.getByLabel('消息',{exact:true}).fill('请比较第 100 版和当前稿的开头，不要直接改稿。');
     await page.getByRole('button',{name:'发送',exact:true}).click();
     await expect.poll(async()=>(await sql.query("select count(*)::int n from runtime_executions where session_id=$1 and state='completed'",[work.sessionId])).rows[0].n,{timeout:60000}).toBe(3);
     const comparison=all().slice(compareOffset);expect(comparison).toHaveLength(1);
@@ -8909,7 +8918,7 @@ it('OPC: CAPACITY chat history projects superseded scope bodies without rewritin
    const marker='CHAT_OLD_V'+String(version).padStart(2,'0')+'_';
    previous=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:version-1,sourceContentId:previous?.id??null,kind:'brief',status:'final',title:'历史容量文章',body:marker+'正文'.repeat(500)});
    const offset=all().length;
-   await page.getByLabel('消息',{exact:true}).fill('请继续修改当前稿件第 '+version+' 次，保留核心约束。');
+   await page.getByLabel('消息',{exact:true}).fill('请继续修改当前稿件第 '+version+' 次，保留核心约束。'+(version===1?'唯一受众约束：只写初学者。':''));
    await page.getByRole('button',{name:'发送',exact:true}).click();
    await expect.poll(async()=>(await sql.query("select count(*)::int n from runtime_executions where session_id=$1 and state='completed'",[work.sessionId])).rows[0].n,{timeout:60000}).toBe(version);
    const request=all().slice(offset);expect(request).toHaveLength(1);
@@ -8917,11 +8926,13 @@ it('OPC: CAPACITY chat history projects superseded scope bodies without rewritin
    expect(body).toContain(marker);expect(Buffer.byteLength(body)).toBeLessThanOrEqual(31000);
    for(let old=1;old<version;old++)expect(body).not.toContain('CHAT_OLD_V'+String(old).padStart(2,'0')+'_');
    if(version>1)expect(body).toContain('保留核心约束');
+   if(version===7)expect(body).toContain('唯一受众约束：只写初学者');
    rows.push({version,bytes:Buffer.byteLength(body),messages:request[0].messages.length,markers:[...new Set([...body.matchAll(/CHAT_OLD_V\d{2}_/g)].map(m=>m[0]))]});
   }
   const history=(await sql.query('select count(*)::int n from runtime_session_history where session_id=$1',[work.sessionId])).rows[0].n;
   console.info('CAPACITY_CHAT_RESULTS',JSON.stringify({rows,history}));
-  expect(history).toBeGreaterThan(rows.at(-1)!.messages as number);
+  expect(history).toBe(24);
+  expect(rows.at(-1)!.messages).toBe(24);
   expect((rows.at(-1)!.markers as string[])).toEqual(['CHAT_OLD_V12_']);
   const persisted=JSON.stringify((await sql.query('select item from runtime_session_history where session_id=$1 order by revision',[work.sessionId])).rows);
   expect(persisted).toContain('CHAT_OLD_V01_');expect(persisted).toContain('CHAT_OLD_V12_');

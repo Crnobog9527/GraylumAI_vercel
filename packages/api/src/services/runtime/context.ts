@@ -3,7 +3,7 @@
  * assertion about an unverified real model's tokenizer. Required method/input
  * are indivisible; only old Session history may be omitted from model input.
  */
-export function selectRuntimeHistory(history:unknown[],incoming:unknown[],options:{instructions:string;inputBytes:number;historyItems:number;toolBytes:number}){
+export function selectRuntimeHistory(history:unknown[],incoming:unknown[],options:{instructions:string;inputBytes:number;historyItems:number;toolBytes:number;projectHistoryItem?:(item:unknown)=>unknown}){
  // The locked SDK represents a tool invocation/result as separate items.
  // Cuts inside any dependency interval are forbidden, including interleaved
  // parallel calls. Malformed/incomplete history is never sent as a tool result
@@ -28,7 +28,9 @@ export function selectRuntimeHistory(history:unknown[],incoming:unknown[],option
  const safeCut=()=>{let changed=true;while(changed){changed=false;for(const [start,end] of intervals)if(start<cut&&cut<=end){cut=end+1;changed=true;}}};
  safeCut();
  let selected=history.slice(cut);
- const size=()=>Buffer.byteLength(JSON.stringify({instructions:options.instructions,messages:[...selected,...incoming]}))+options.toolBytes+1024;
+ // Measure the same safe material projection that will be sent to the model,
+ // but return the original Session objects for exact-revision freezing.
+ const size=()=>Buffer.byteLength(JSON.stringify({instructions:options.instructions,messages:[...selected.map(item=>options.projectHistoryItem?.(item)??item),...incoming]}))+options.toolBytes+1024;
  while(selected.length&&size()>options.inputBytes){cut++;safeCut();selected=history.slice(cut);}
  if(size()>options.inputBytes)throw new Error('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
  return [...selected,...incoming];
@@ -52,7 +54,7 @@ export function runtimeScopeInput(input:string,scopeMaterial?:unknown){
  * or authorize selecting a historical version. Explicit version reads remain a
  * separate unsupported source operation. */
 export function requestsHistoricalComparison(input:string){
- return /(旧版|旧稿|旧版本|历史版本|上一版|前一版|此前稿|两个版本|(?:^|[^\w])v\d+\b|previous version|older draft)/i.test(input);
+ return /(旧版|旧稿|旧版本|历史版本|上一版|前一版|此前稿|两个版本|第\s*\d+\s*版|刚才那版|(?:^|[^\w])v\d+\b|比较|对照|对比|异同|差异|区别|previous version|older draft|compare|versus)/i.test(input);
 }
 
 /** Keep the prior user request while removing only a complete scope snapshot
