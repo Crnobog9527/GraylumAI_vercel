@@ -754,9 +754,11 @@ it('RUNTIME: browser ordinary and document Skill survive refresh, actual process
   const choicesResponse=page.waitForResponse(r=>r.url().includes('runtime.choices'));
   await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/runtime');
   expect((await choicesResponse).status()).toBe(200);
-  await page.getByRole('button',{name:'新建对话',exact:true}).click();await page.getByLabel('消息',{exact:true}).waitFor();
-  const url=page.url();await page.getByLabel('消息',{exact:true}).fill('A persisted ordinary response');
+  expect(await page.getByRole('button',{name:'新建对话',exact:true}).count()).toBe(0);
+  await page.getByRole('link',{name:'新对话',exact:true}).click();
+  await page.getByLabel('新任务内容',{exact:true}).fill('A persisted ordinary response');
   await page.getByRole('button',{name:'发送',exact:true}).click();await page.getByText('Saved runtime answer 1',{exact:true}).waitFor({timeout:60000});
+  const url=page.url();
   const getCount=async()=>{const r=await fetch(process.env.V3_LOCAL_REST!+'/__runtime_count',{headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}});return (await r.json()).calls;};
   expect(await getCount()).toBe(1);await page.reload();await page.getByText('Saved runtime answer 1',{exact:true}).waitFor();
   await page.getByRole('button',{name:'使用技能',exact:true}).click();await page.getByRole('dialog',{name:'使用技能'}).getByRole('button',{name:/Browser document Skill/}).click();
