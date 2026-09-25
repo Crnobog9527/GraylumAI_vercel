@@ -8434,8 +8434,9 @@ it("OPC: topic invalid messages and legacy invalid pending records remain recove
     const identity = await topicIdentity(f.actor);
     const input = page.getByRole('textbox', { name: '消息', exact: true });
     await input.fill('a'.repeat(8001));
-    await page.getByRole('button', { name: '发送', exact: true }).click();
-    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' ')).toContain('1–8000');
+    // The shared composer bounds typed input before dispatch; backend schema
+    // validation still protects restored legacy requests below.
+    expect((await input.inputValue()).length).toBe(8000);
     expect(await topicIdentity(f.actor)).toEqual(identity);
     expect(await input.isEnabled()).toBe(true);
     // A record frozen by the earlier UI before its schema rejection is equally
