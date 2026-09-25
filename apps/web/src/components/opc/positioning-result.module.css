@@ -72,3 +72,6 @@
 .publishBar p,.publishBar a{margin:0;color:#999;font-size:11px;line-height:17px}
 .publishBar a{color:#666;text-decoration:none}
 @media(max-width:700px){.conversationPage .workspaceContent>section[aria-label="当前定位步骤"]{padding:0 14px 8px}.publishBar{padding:8px 12px;gap:5px 10px}.publishBar p{width:100%;text-align:center}}
+
+.currentQuestionBox{padding:16px;border:1px solid #dcdcdc;border-radius:12px;background:#fff}.currentQuestionBox>div+div,.currentQuestionBox>p{margin-top:16px}
+.confirmedPositions{margin-top:24px;padding:16px;border:1px solid #e4e4e4;border-radius:12px;background:#f8f8f8}.confirmedPositions section:last-child{margin-bottom:0}.confirmedPositions label:last-child{margin-bottom:0}

@@ -2088,6 +2088,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   aria-label="本步填写信息"
                   className={`${resultStyles.stepForm} space-y-4`}
                 >
+                  <div className={manualEntry ? undefined : resultStyles.currentQuestionBox}>
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <p className="text-xs text-[var(--text-secondary)]">
@@ -2262,11 +2263,12 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                       );
                     })}
                   </div>
+                  </div>
                   {!manualEntry && <div className={resultStyles.confirmedPositions} aria-label="已确认的定位信息">
                     <p>未确定的建议留在对话中。这里保留已确认信息；修改自动同步，确认与推进仍由你决定。</p>
                     {d.snapshot.workflow.steps.map((confirmedStep:Step,confirmedIndex:number)=>{
                       const info=d.information[confirmedStep.id];
-                      const confirmedFields=info.schema.filter((field:{id:string})=>info.values?.[field.id]?.status==='confirmed'||Boolean(infoEdits[confirmedStep.id]?.[field.id]));
+                      const confirmedFields=info.schema.filter((field:{id:string})=>info.values?.[field.id]?.status==='confirmed'||infoEdits[confirmedStep.id]?.[field.id]?.status==='confirmed');
                       if(!confirmedFields.length)return null;
                       return <section key={confirmedStep.id}><h4>{confirmedIndex+1}. {confirmedStep.title}</h4>{confirmedFields.map((field:{id:string;title:string})=>{
                         const value=infoEdits[confirmedStep.id]?.[field.id]??info.values?.[field.id];
