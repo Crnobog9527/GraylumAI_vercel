@@ -320,13 +320,13 @@ it("OPC: an edited six-stage Skill gives new drafts new steps and questions whil
     await page.getByRole('textbox',{name:'产品与服务',exact:true}).waitFor();
   } finally { await browser.close(); }
 },180000);
-async function completed(n = 6) {
+async function completed(n = 6, mode: "manual" | "mentor" = "manual") {
   const f = await fixture(n);
   const requestId = randomUUID();
   const d = await f.service.start({
     requestId,
     registration: f.registration,
-    mode: "manual",
+    mode,
   });
   for (const step of f.flow.steps) {
     await f.artifacts.execute({
@@ -7980,12 +7980,25 @@ it("OPC: prior confirmed information remains scoped after edits and reader upgra
  expect(privileges).toEqual({client:false,server:true});
  await sql.query('update bill2_drafts set revoked=true where id=$1',[d.draftId]);
  await expect(read()).rejects.toThrow('OPC_DENIED');
- // A different round cannot borrow confirmation history from this round.
+ // A revision inherits only its exact published predecessor's confirmed values.
  await sql.query('update bill2_drafts set revoked=false where id=$1',[d.draftId]);
- const published=await completed(3);
+ const published=await completed(3,'mentor');
  expect((await published.service.read(published.d.draftId)).information['step-0'].previouslyConfirmed).toEqual(['goal']);
  await published.service.revise(published.d.draftId,randomUUID(),published.d.roundId);
- expect((await published.service.read(published.d.draftId)).information['step-0'].previouslyConfirmed).toEqual([]);
+ const revised=await published.service.read(published.d.draftId);
+ expect(revised.information['step-0'].previouslyConfirmed).toEqual(['goal']);
+ await published.service.information({draftId:published.d.draftId,stepId:'step-0',requestId:randomUUID(),expectedVersion:revised.snapshot.steps['step-0'].version,
+  values:{goal:{...revised.information['step-0'].values.goal,status:'provisional',value:'A corrected inherited decision'}}});
+ const {browser,page}=await planBrowser(published);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+published.d.draftId);
+  await page.reload();
+  const inherited=page.getByRole('textbox',{name:'已确认：已知目标 0',exact:true});
+  await inherited.waitFor();
+  expect(await inherited.inputValue()).toBe('A corrected inherited decision');
+  await page.getByRole('button',{name:'确认这项修改',exact:true}).first().click();
+  await expect.poll(async()=>(await published.service.read(published.d.draftId)).information['step-0'].values.goal.status).toBe('confirmed');
+ }finally{await browser.close();}
 },60000);
 
 it("OPC: approved six-stage guided positioning keeps one editable conversation and current question",async()=>{
@@ -8085,6 +8098,15 @@ it("OPC: approved six-stage guided positioning keeps one editable conversation a
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-six-stage-reconfirm-1600x900.png'});
     await reconfirm.click({timeout:15000});
     await expect.poll(async()=> (await f.service.read(draftId)).information[f.flow.steps[0].id].values?.product?.status,{timeout:15000}).toBe('confirmed');
+    await expect.poll(async()=> (await f.service.read(draftId)).snapshot.steps[f.flow.steps[0].id].valid,{timeout:15000}).toBe(true);
+    // A later explicit deferral must not be relabelled as a pending correction.
+    const confirmed=await f.service.read(draftId),stepId=f.flow.steps[0].id;
+    await f.service.information({draftId,stepId,requestId:randomUUID(),expectedVersion:confirmed.snapshot.steps[stepId].version,
+      values:{...confirmed.information[stepId].values,product:{...confirmed.information[stepId].values.product,status:'deferred'}}});
+    await page.reload();
+    await page.getByRole('textbox',{name:'已确认：准备经营的平台',exact:true}).waitFor();
+    expect(await earlier.count()).toBe(0);
+    expect((await f.service.read(draftId)).information[stepId].values.product.status).toBe('deferred');
   }catch(error){console.info('U4_GUIDED_FAILURE',error instanceof Error?error.stack:'unknown');throw error;}finally{console.info('U4_GUIDED_CLOSE_START');await browser.close();console.info('U4_GUIDED_CLOSED');}
 },240000);
 

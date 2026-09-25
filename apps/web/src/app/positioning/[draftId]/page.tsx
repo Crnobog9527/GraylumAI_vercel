@@ -2204,7 +2204,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     <p>未确定的建议留在对话中。这里保留已确认信息；修改自动同步，确认与推进仍由你决定。</p>
                     {d.snapshot.workflow.steps.map((confirmedStep:Step,confirmedIndex:number)=>{
                       const info=d.information[confirmedStep.id];
-                      const confirmedFields=info.schema.filter((field:{id:string})=>info.values?.[field.id]?.status==='confirmed'||infoEdits[confirmedStep.id]?.[field.id]?.status==='confirmed'||info.previouslyConfirmed?.includes(field.id));
+                      const confirmedFields=info.schema.filter((field:{id:string})=>{
+                        const value=infoEdits[confirmedStep.id]?.[field.id]??info.values?.[field.id];
+                        return value?.status==='confirmed'||(['provisional','unknown','unclear'].includes(value?.status??'')&&(info.values?.[field.id]?.status==='confirmed'||info.previouslyConfirmed?.includes(field.id)));
+                      });
                       if(!confirmedFields.length)return null;
                       return <section key={confirmedStep.id}><h4>{confirmedIndex+1}. {confirmedStep.title}</h4>{confirmedFields.map((field:{id:string;title:string})=>{
                         const value=infoEdits[confirmedStep.id]?.[field.id]??info.values?.[field.id];

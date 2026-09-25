@@ -314,10 +314,19 @@ Docker清理：Owner要求后，归档并回收60个遗留临时容器、20个�
 
 - 原失败日志仍保留。其 Git 指针为 `34bbea47`，但隔离副本包含当时未提交的 U3 修改，副本已清理；不能用该 Git 提交的测试源码替代当时实际执行源码，也不能从最后一次重复调用的身份查询确定失败阶段。
 - `pr422-u4-timeout-retry.log` 和 `pr422-u4-timeout-diagnostic.log` 均为 **6 PASS / 1 FAIL / 255 skipped**。原 v2 published 两次通过；失败均在相邻六阶段引导的“确认这项修改”入口。第一次 DEBUG 被 runner 的 cleanEnv 丢弃；第二次增加仅允许 `DEBUG=pw:browser` 的测试专用透传，真实记录启动、退出和临时目录清理，不输出 API 请求正文。
-- 真实缺陷：已确认字段编辑后成为 provisional；自动保存完成、服务端投影刷新清除本地编辑时，右侧仅按当前 confirmed 状态筛选，导致该字段与重新确认按钮消失。刷新后稳定复现，不能用延长超时解决。现在从已有不可变 `artifact_requests` 中，按原授权读者已验证的同一 project/round/step 与 schema 字段投影 `previouslyConfirmed`；只保留曾明确 confirmed 的字段，未确认或仅 deferred 不纳入。UI 保留原编辑及明确确认操作，空值不可确认；不改布局、自动保存、Runtime、Session、来源或请求身份。
+- 真实缺陷：已确认字段编辑后成为 provisional；自动保存完成、服务端投影刷新清除本地编辑时，右侧仅按当前 confirmed 状态筛选，导致该字段与重新确认按钮消失。刷新后稳定复现，不能用延长超时解决。现在从已有不可变 `artifact_requests` 中，按原授权读者已验证的同一 project/round/step 与 schema 字段投影 `previouslyConfirmed`，并沿当前轮唯一 `opc_revision` 读取其精确发布前轮所继承的 confirmed 信息；只保留曾明确 confirmed 的字段，未确认或仅 deferred 不纳入。UI 保留原编辑及明确确认操作，空值不可确认；不改布局、自动保存、Runtime、Session、来源或请求身份。
 - 风险 **high**：增加 `0133_opc_confirmed_information_history.sql` 读函数替换，权限不变、没有新存储或数据重写。真实本地数据库验证：单字段确认但步骤未完成、编辑后刷新重新确认、未确认/延后字段排除、不同步骤/新轮次隔离、他人及撤销访问拒绝、客户端无执行权、重复应用与恢复旧 0120 读函数再升级；原历史逐行不变。回滚只恢复 0120 的 `opc_query`，不修改已保存资料。
 - 第一次修复后运行 `pr422-u4-timeout-fixed.log` 在测试准备期因未跟踪的新 SQL 未被 runner 复制而失败，无用例结果；将新增迁移纳入 Git 跟踪后执行。`pr422-u4-timeout-fixed2.log` 为 **8 PASS / 255 skipped**（原七项顺序及新增读投影回归），没有增大预算、超时或减少输入。`pr422-u4-reconfirm-final.log` 为 **1 PASS / 262 skipped**，只为修正截图采样时机再次验证六阶段；实际查看刷新后字段正文及重新确认按钮截图，点击后服务端 confirmed 断言通过。加载态截图不计视觉证据。
 - 实际浏览器追踪显示部分成功用例关闭 Chrome 等待约 24–25 s，随后 exit 0、临时目录清理约十余毫秒；其他关闭约百毫秒。锁定 Playwright 1.60.0 已有 30 s graceful-close 后 kill 兜底。本次原生采样为测试 Chrome 主线程空闲，不证明原 300 s 的原因。一次按已确认测试 PID 发出的终止命令返回 No such process，实际未终止进程；这些结果不能宣称原超时已归因或修复。
 - web TypeScript/lint、runner 生命周期/资源单元测试 **19 PASS**。新精确候选 CI、独立审查与保留数据的原址预览结果见 PR 后续交付评论。
 
 本次已关闭可复现的确认入口缺陷，当前相邻聚合通过；**原 300 s 历史超时根因仍 BLOCKED**，不以本次绿色覆盖原 FAIL，不宣称 U4 最终 clean。真实模型、远端数据库、支付、发布与压缩接口仍 NOT_RUN；未合并、部署或推进下一阶段。
+
+
+Owner 后续决定：停止追查未复现的历史超时；在当前必要验证通过后，不再以该未知历史失败单独阻塞交付。原始 FAIL 和原因未确定的限制保留，不改记为 PASS，也不把 skipped 算作通过。独立审查另发现曾 confirmed 后明确 deferred 的字段不应继续显示为待重新确认；UI 已按当前状态排除 deferred，补充真实页面刷新及原暂缓状态不变回归。最终结果以新候选 PR 记录为准。
+
+
+独立审查还发现：修订轮次继承前轮 confirmed 信息，却尚无本轮 confirmed 写入；仅查本轮历史会再次丢失重确认入口。0133 因此只沿当前 project/round 的既有 `opc_revision`（request_id=round_id）关联同 project 已发布前轮，读取当时继承的字段状态；不遍历任意旧轮，也不引入新状态。补 mentor 修订轮次编辑后刷新与确认的页面回归。`pr422-u4-deferred-final.log` 的 1 PASS / 1 FAIL 是新增测试仅等信息写入而未等整项确认结束，即发下一次版本写入，引发真实冲突保护；补等步骤 valid 后才进行下一项操作，不删除冲突校验。后续精确结果记录在 PR。
+
+
+审查修复验证：`pr422-u4-review-fixes.log` 中修订轮次、投影权限、历史不变和读函数回滚/重放用例 PASS；同一运行的暂缓测试仍使用尚未加入完整确认等待的副本，保留 1 PASS / 1 FAIL。最终 `pr422-u4-deferred-settled.log` 为 **1 PASS / 262 skipped**，含完整确认后明确暂缓、刷新后退出右栏且服务端 deferred 不变。web TypeScript/lint PASS。后续最终候选聚合及 CI 结果记录于 PR，不将不同运行伪称为一次全套执行。

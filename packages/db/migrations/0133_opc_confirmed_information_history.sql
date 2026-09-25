@@ -11,7 +11,8 @@ BEGIN
  IF p_draft_id IS NOT NULL THEN
   -- The predecessor already verifies actor ownership and source access. Only
   -- successful immutable writes of this same project/round/step can prove a
-  -- field was confirmed; reach alone also includes merely deferred questions.
+  -- field was confirmed; a revision may also inherit confirmed fields from its
+  -- exact published predecessor. Reach alone includes deferred questions.
   SELECT jsonb_object_agg(info.key,info.value || jsonb_build_object('previouslyConfirmed',coalesce((
    SELECT jsonb_agg(field->>'id' ORDER BY ord)
    FROM jsonb_array_elements(info.value->'schema') WITH ORDINALITY fields(field,ord)
@@ -19,6 +20,12 @@ BEGIN
     WHERE a.project_id=(result->>'projectId')::uuid AND a.round_id=(result->>'roundId')::uuid
      AND a.action='opc_information' AND a.payload->>'stepId'=info.key
      AND a.payload->'values'->(field->>'id')->>'status'='confirmed')
+    OR EXISTS(SELECT 1 FROM artifact_requests revision
+     JOIN artifact_rounds prior ON prior.id=(revision.payload->>'fromRoundId')::uuid
+      AND prior.project_id=revision.project_id AND prior.state='published'
+     WHERE revision.project_id=(result->>'projectId')::uuid AND revision.round_id=(result->>'roundId')::uuid
+      AND revision.request_id=revision.round_id AND revision.action='opc_revision'
+      AND prior.steps->info.key->'information'->(field->>'id')->>'status'='confirmed')
   ),'[]'::jsonb))) INTO information FROM jsonb_each(result->'information') info;
   RETURN jsonb_set(result,'{information}',coalesce(information,'{}'::jsonb));
  END IF;
