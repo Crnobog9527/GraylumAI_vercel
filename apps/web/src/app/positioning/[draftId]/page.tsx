@@ -1821,11 +1821,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           ))}
         </section>
       )}
-      {d.accountRevision&&<div role="status">
-        当前正式版本 v{d.accountRevision.officialVersion} · {snap.state==='published'?'正式定位已更新':'修改自动保存为草稿，尚未定稿。确认修改的信息后，点击“确认正式定位”更新版本。'}
-        {d.accountRevision.methodConflict&&<div role="alert">此修改草稿使用的方法与原正式版本不同，未自动合并或覆盖任何答案。请对照原正式内容核对当前草稿。
+      {d.accountRevision?.methodConflict&&<div role="alert">此修改草稿使用的方法与原正式版本不同，未自动合并或覆盖任何答案。请对照原正式内容核对当前草稿。
           <details><summary>查看原正式版本完整内容</summary>{Object.entries(d.accountRevision.sourceInformation as Record<string,{title:string;schema:Array<{id:string;title:string}>;values:Record<string,Information>}>).map(([id,part])=><section key={id}><h4>{part.title}</h4>{part.schema.map(field=><p key={field.id}>{field.title}：{part.values?.[field.id]?.value}</p>)}</section>)}</details>
-        </div>}
       </div>}
       <nav aria-label="定位步骤" className={resultStyles.phaseStrip} style={{gridTemplateColumns:`repeat(${steps.length},minmax(0,1fr))`}}>
         {steps.map((step, index) => (
@@ -2333,12 +2330,14 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                 </div>
               )}
               {s.valid && index < steps.length - 1 && (
-                <Button
+                <div className={resultStyles.stepNavigation}>
+                <Button variant="outline"
                   disabled={busy || hasUnsavedInformation || hasPendingStepRequest}
                   onClick={() => setActiveStep(steps[index + 1].id)}
                 >
                   继续下一步
                 </Button>
+                </div>
               )}
             </article>
           );
