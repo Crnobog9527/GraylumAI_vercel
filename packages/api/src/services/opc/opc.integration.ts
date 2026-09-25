@@ -765,7 +765,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
         )
         .toBe(1);
       await article
-        .getByRole("button", { name: /确认本题并继续|继续核对本题确认/, exact: true })
+        .getByRole("button", { name: /确认本题并继续|确认当前信息，继续|继续核对本题确认/, exact: true })
         .click();
       if (step.id !== f.flow.steps.at(-1)!.id) {
         const next = f.flow.steps[f.flow.steps.indexOf(step) + 1];
@@ -831,13 +831,13 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .poll(
         () =>
           lastArticle
-            .getByRole("button", { name: /确认本题并继续|继续核对本题确认/, exact: true })
+            .getByRole("button", { name: /确认本题并继续|确认当前信息，继续|继续核对本题确认/, exact: true })
             .isEnabled(),
         { timeout: 15000 },
       )
       .toBe(true);
     await lastArticle
-      .getByRole("button", { name: /确认本题并继续|继续核对本题确认/, exact: true })
+      .getByRole("button", { name: /确认本题并继续|确认当前信息，继续|继续核对本题确认/, exact: true })
       .click();
     await expect
       .poll(() => lastArticle.textContent(), { timeout: 15000 })
@@ -2360,7 +2360,7 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
         .toContain(`“${title}”`);
     }
     await expectOpening("1.1", f.flow.steps[0].information![0].title);
-    await expect.poll(() => page.getByRole("button", { name: /确认本题并继续|继续核对本题确认/, exact: true }).count()).toBe(1);
+    await expect.poll(() => page.getByRole("button", { name: /确认本题并继续|确认当前信息，继续|继续核对本题确认/, exact: true }).count()).toBe(1);
     expect(await page.getByRole("button", { name: "确认所填信息并整理成果" }).count()).toBe(0);
     await expect(
       f.service.prepareStep({
@@ -2402,7 +2402,7 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
       await route.continue();
     });
     await page
-      .getByRole("button", { name: /确认本题并继续|继续核对本题确认/, exact: true })
+      .getByRole("button", { name: /确认本题并继续|确认当前信息，继续|继续核对本题确认/, exact: true })
       .click();
     const operationAlert = page
       .getByRole("alert")
@@ -2427,7 +2427,7 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
     });
     const priorConflictCleared = operationAlert.waitFor({ state: "hidden" });
     await page
-      .getByRole("button", { name: /确认本题并继续|继续核对本题确认/, exact: true })
+      .getByRole("button", { name: /确认本题并继续|确认当前信息，继续|继续核对本题确认/, exact: true })
       .click();
     await priorConflictCleared;
     await operationAlert.waitFor();
@@ -2444,7 +2444,7 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
       .toBe("save");
     await page.reload();
     await page
-      .getByRole("button", { name: /确认本题并继续|继续核对本题确认/, exact: true })
+      .getByRole("button", { name: /确认本题并继续|确认当前信息，继续|继续核对本题确认/, exact: true })
       .click();
     await page
       .getByRole("textbox", {
@@ -2702,7 +2702,7 @@ for (const scenario of ["fresh", "retry", "same-field", "offline", "response-los
       }
       // B reaches its next question only after A explicitly confirms the first.
       await a.getByRole("textbox",{name:"已知目标 0",exact:true}).fill("Initially confirmed goal");
-      await a.getByRole("textbox",{name:"已知目标 0",exact:true}).locator("..").getByRole("button",{name:"确认本题并继续",exact:true}).click();
+      await a.getByRole("textbox",{name:"已知目标 0",exact:true}).locator("..").getByRole("button",{name:/^(确认本题并继续|确认当前信息，继续)$/,exact:true}).click();
       await a.getByRole("textbox",{name:"Second independent field",exact:true}).waitFor();
       const b=await context.newPage(); b.setDefaultTimeout(20000); await b.goto(url);
       await b.getByRole("textbox",{name:"Second independent field",exact:true}).waitFor();
@@ -2784,8 +2784,8 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     // The first actual mentor message must appear while the user is idle.
     await expectOpening("1.1", "已知目标 0");
     expect(await page.locator("body").textContent()).not.toContain("Second independent field");
-    expect(await page.getByRole("button",{name:"确认本题并继续",exact:true}).isVisible()).toBe(true);
-    expect(await page.getByRole("button",{name:"确认本题并继续",exact:true}).evaluate(el=>Boolean(el.closest("details")))).toBe(false);
+    expect(await page.getByRole("button",{name:/^(确认本题并继续|确认当前信息，继续)$/,exact:true}).isVisible()).toBe(true);
+    expect(await page.getByRole("button",{name:/^(确认本题并继续|确认当前信息，继续)$/,exact:true}).evaluate(el=>Boolean(el.closest("details")))).toBe(false);
     const admissions:any[]=[];const informationWrites:string[]=[];
     page.on("request",r=>{
       if(r.method()==="POST"&&r.url().includes("opc.prepareStep")){const body=r.postDataJSON();const v=body[0]??body;admissions.push(v.json??v);}
@@ -2811,7 +2811,7 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
       }
       return route.continue();
     });
-    await page.getByRole("button",{name:"确认本题并继续",exact:true}).click();
+    await page.getByRole("button",{name:/^(确认本题并继续|确认当前信息，继续)$/,exact:true}).click();
     await Promise.race([intercepted,new Promise((_,reject)=>setTimeout(()=>reject(new Error("confirmation barrier not reached")),30000))]);
     expect(await second().count()).toBe(0);expect(await first().isVisible()).toBe(true);
     expect(confirmations).toHaveLength(1);release!();
@@ -2830,7 +2830,7 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     expect((await f.service.read(draft.draftId)).snapshot.steps["step-0"].valid).toBe(false);
     await page.getByRole("button", {name:/^1\.1 已知目标 0 · 已确认/}).click();
     expect(await first().inputValue()).toBe("我做 AI 赛道");
-    expect(await page.getByRole("button", {name:"确认本题并继续",exact:true}).isEnabled()).toBe(false);
+    expect(await page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/,exact:true}).isEnabled()).toBe(false);
     await page.getByRole("button", {name:"继续当前待确认问题",exact:true}).click();
     await second().waitFor();
     await send("摄影课程");
@@ -2872,7 +2872,7 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
       .toEqual({value:"摄影课程",nature:"hypothesis",status:"provisional"});
     expect(await expectExactMentorEffects(f.actor,draft.draftId,draft.roundId,expectedBeforeRecovery))
       .toEqual(beforeRecoveryEffects);
-    await page.getByRole("button",{name:"确认本题并继续",exact:true}).click();
+    await page.getByRole("button",{name:/^(确认本题并继续|确认当前信息，继续)$/,exact:true}).click();
     await page.getByRole("textbox",{name:"已知目标 1",exact:true}).waitFor();
     // Do not send another user message to make the new step's opening visible.
     await expectOpening("2.1", "已知目标 1");
@@ -4753,7 +4753,7 @@ it("OPC: an upstream reconfirmation can be resubmitted and never hides already a
     const stepState = async (stepId: string) => (await read()).snapshot.steps[stepId] as {valid: boolean};
     // Each configured step owns its own field title.
     const goalOf = (n: number) => page.getByRole("textbox", {name:"已知目标 " + n, exact:true});
-    const confirmButton = () => page.getByRole("button", {name:"确认本题并继续", exact:true});
+    const confirmButton = () => page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/, exact:true});
     const navigator = page.getByRole("navigation", {name:"本步骤已到达的问题"});
     const stepPill = (n: number) =>
       page.getByRole("navigation", {name:"定位步骤"}).getByRole("button", {name:new RegExp("^" + n + "\\. ")});
@@ -4880,7 +4880,7 @@ it("OPC: clicking a review row opens that reached question without advancing pro
     const field = (title: string) => page.getByRole("textbox", {name:title, exact:true});
     const heading = () =>
       page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3});
-    const confirmButton = () => page.getByRole("button", {name:"确认本题并继续", exact:true});
+    const confirmButton = () => page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/, exact:true});
     const navigator = page.getByRole("navigation", {name:"本步骤已到达的问题"});
     const rowTexts = async () =>
       (await navigator.getByRole("button").allTextContents()).map(t => t.replace(/\s+/g," ").trim());
@@ -5009,7 +5009,7 @@ it("OPC: a legally reached question keeps its explicit confirm and mentor send w
     const field = (title: string) => page.getByRole("textbox", {name:title, exact:true});
     const composer = () => page.getByRole("textbox", {name:"给导师的回复", exact:true});
     const heading = () => page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3});
-    const confirmButton = () => page.getByRole("button", {name:"确认本题并继续", exact:true});
+    const confirmButton = () => page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/, exact:true});
     const navigator = page.getByRole("navigation", {name:"本步骤已到达的问题"});
     const rowTexts = async () =>
       (await navigator.getByRole("button").allTextContents()).map(t => t.replace(/\s+/g," ").trim());
@@ -5193,7 +5193,7 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
     const read = async () => await f.service.read(draft.draftId);
     const field = (title: string) => page.getByRole("textbox", {name:title, exact:true});
     const heading = () => page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3});
-    const confirmButton = () => page.getByRole("button", {name:"确认本题并继续", exact:true});
+    const confirmButton = () => page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/, exact:true});
     const navigator = page.getByRole("navigation", {name:"本步骤已到达的问题"});
     const rowTexts = async () =>
       (await navigator.getByRole("button").allTextContents()).map(t => t.replace(/\s+/g," ").trim());
@@ -5693,7 +5693,7 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     expect(await page.getByRole("textbox", {name:"Renamed goal", exact:true}).count()).toBe(1);
     await checkEffects(3);
     await page.getByRole("textbox", {name:"Renamed goal", exact:true}).fill("具体事实：我做 AI 工具内容");
-    await page.getByRole("button", {name:"确认本题并继续", exact:true}).click();
+    await page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/, exact:true}).click();
     await expect.poll(async () => (await secondRead()).information["step-0"].values?.goal?.status, {timeout:60000}).toBe("confirmed");
     await expect.poll(headingText, {timeout:60000}).toContain("1.3");
     await expect.poll(async () => (await page.getByText("这是导师要给出的成果建议", {exact:false}).count()), {timeout:60000}).toBeGreaterThan(0);
@@ -5716,7 +5716,7 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     await checkEffects(4);
     // Advance across steps: confirm the pending proposal so step-0 becomes valid
     // and the next step opens its own same-titled field.
-    await page.getByRole("button", {name:"确认本题并继续", exact:true}).click();
+    await page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/, exact:true}).click();
     await expect.poll(async () => (await secondRead()).information["step-0"].values?.extra0?.status, {timeout:60000}).toBe("confirmed");
     await expect.poll(async () => (await secondRead()).snapshot.steps["step-0"].valid, {timeout:60000}).toBe(true);
     await expect.poll(async () => await page.getByRole("navigation",{name:"定位步骤"}).getByRole("button",{name:/^2\./}).getAttribute("aria-current"), {timeout:60000}).toBe("step");
@@ -5939,7 +5939,7 @@ it("OPC: published revision stays immutable while its revised round owns reach a
     expect((await read()).snapshot.state).toBe("published");
     // A published strategy exposes its read-only result until an explicit
     // revision is requested. The old question action is absent in that view.
-    expect(await page.getByRole("button", { name: "确认本题并继续", exact: true }).count()).toBe(0);
+    expect(await page.getByRole("button", { name: /^(确认本题并继续|确认当前信息，继续)$/, exact: true }).count()).toBe(0);
     await reviseButton.click();
     await expect.poll(async () => (await read()).roundId, { timeout: 60000 }).not.toBe(r1);
     const revised = await read();
@@ -6197,14 +6197,14 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
     phase = "real second-tab update during historical review";
     await nav(tab1).getByRole("button", { name: /C extra2/ }).click();
     await show(tab1, "extra2", "");
-    expect(await tab1.getByRole("button", { name: "确认本题并继续", exact: true }).isDisabled()).toBe(true);
+    expect(await tab1.getByRole("button", { name: /^(确认本题并继续|确认当前信息，继续)$/, exact: true }).isDisabled()).toBe(true);
     const beforeRemote = (await read()).snapshot.steps["step-0"].version;
     const firstRemote = "C updated while the other tab reviews question four";
     await box(tab2).fill(firstRemote);
     await saved(tab2, firstRemote, beforeRemote + 1);
     await tab1.getByRole("button", { name: "重新读取状态", exact: true }).click();
     await show(tab1, "extra2", "");
-    expect(await tab1.getByRole("button", { name: "确认本题并继续", exact: true }).isDisabled()).toBe(true);
+    expect(await tab1.getByRole("button", { name: /^(确认本题并继续|确认当前信息，继续)$/, exact: true }).isDisabled()).toBe(true);
     expect((await assertBinding()).information["step-0"].values.goal.value).toBe(firstRemote);
     await nav(tab1).getByRole("button", { name: /C goal/ }).click();
     await show(tab1, "goal", firstRemote);
@@ -6553,7 +6553,7 @@ it.each(["save", "confirm"] as const)(
       const rawPending = () => p.evaluate(k => sessionStorage.getItem(k), key);
       const form = () => p.locator("section[aria-label='本步填写信息']");
       const answer = () => form().getByRole("textbox", { name: "已知目标 0", exact: true });
-      const confirm = () => form().getByRole("button", { name: "确认本题并继续", exact: true });
+      const confirm = () => form().getByRole("button", { name: /^(确认本题并继续|确认当前信息，继续)$/, exact: true });
       const retry = () => form().getByRole("button", { name: "继续核对本题确认", exact: true });
       const settings = p.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), { timeout: 60000 });
       await p.goto(app + "/login");
