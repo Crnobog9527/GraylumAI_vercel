@@ -1,6 +1,6 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { trpc } from '@/trpc/client';
 import styles from './strategy-overview-dialog.module.css';
@@ -14,7 +14,7 @@ type Schema={registrationId:string;workflow:{steps:Step[]}};
 type Edits=Record<string,Record<string,string>>;
 type Frozen={accountProjectId:string;requestId:string;expectedSourceVersionId:string;expectedPendingDraftId:string|null;expectedRegistrationId?:string|null;expectedStepVersions?:Record<string,number>|null;edits:Edits};
 
-export function StrategyOverviewDialog({account,onClose,onSaved,initialEditing=false}:{initialEditing?:boolean;account:Account;onClose:()=>void;onSaved:()=>Promise<unknown>}){
+export function StrategyOverviewDialog({account,onClose,onSaved}:{account:Account;onClose:()=>void;onSaved:()=>Promise<unknown>}){
  const discussion=useAccountDiscussion();
  const draftId=account.pendingStrategyDraftId??account.strategyDraftId;
  const read=trpc.opc.read.useQuery({draftId});
@@ -27,8 +27,6 @@ export function StrategyOverviewDialog({account,onClose,onSaved,initialEditing=f
  useEffect(()=>{setRecoverable(Boolean(sessionStorage.getItem(key)));},[key]);
  useEffect(()=>{function escape(event:KeyboardEvent){if(event.key==='Escape'&&!saving)onClose();}window.addEventListener('keydown',escape);return()=>window.removeEventListener('keydown',escape);},[onClose,saving]);
  const data=read.data;
- const initialEditOpened=useRef(false);
- useEffect(()=>{if(initialEditing&&!initialEditOpened.current&&latestSchema.data&&data?.draftId===draftId){initialEditOpened.current=true;beginEdit();}});
  const viewedEntries=data?Object.entries(data.information as Record<string,{schema:Array<{id:string;title:string;profileKey?:string}>;values:Record<string,Value>|null}>):[];
  const entries=editing&&editSchema?editSchema.workflow.steps.map(step=>[step.id,{schema:step.information??[],values:(data?.information as Record<string,{values:Record<string,Value>|null}>|undefined)?.[step.id]?.values??null}] as const):viewedEntries;
  function baseValue(entry:{values:Record<string,Value>|null},field:{id:string;profileKey?:string}){

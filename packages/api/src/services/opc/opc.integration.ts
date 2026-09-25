@@ -2826,6 +2826,9 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     await expect.poll(() => form.textContent()).toContain("1.2");
     expect(await form.textContent()).toContain("Second independent field");
     await expectOpening("1.2", "Second independent field");
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/question-navigation.png'}); // TEMP_EVIDENCE
+    console.log('QUESTION_STYLES',await page.getByRole('navigation',{name:'本步骤已到达的问题'}).getByRole('button').first().evaluate(el=>{const s=getComputedStyle(el);return {fontSize:s.fontSize,border:s.border,radius:s.borderRadius};})); // TEMP_EVIDENCE
+
     expect(await page.getByRole("status", { name: "当前导师任务" }).count()).toBe(0);
     expect((await f.service.read(draft.draftId)).snapshot.steps["step-0"].valid).toBe(false);
     await page.getByRole("button", {name:/^1\.1 已知目标 0 · 已确认/}).click();
@@ -8514,6 +8517,10 @@ it("OPC: mentor lost reply still projects once from its unchanged frozen informa
   const { browser, page } = await planBrowser({ ...f, d });
   const reply = '我想帮助刚接触短视频的人';
   let lost = 0;
+  let release!:()=>void;
+  const held=new Promise<void>(resolve=>{release=resolve;});
+  let reached!:()=>void;
+  const intercepted=new Promise<void>(resolve=>{reached=resolve;});
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + d.draftId);
     await page.getByRole('log', { name: '完整导师消息' }).getByText('导师主动引导 · 1.1', { exact: true }).waitFor();
@@ -8522,11 +8529,20 @@ it("OPC: mentor lost reply still projects once from its unchanged frozen informa
     await page.route('**/api/trpc/runtime.view*', route => route.abort());
     await page.route('**/api/trpc/runtime.execute*', async route => {
       const response = await route.fetch(); expect(response.ok()).toBe(true);
+      reached(); await held;
       await route.abort(); lost += 1;
     });
     await input.fill(reply);
     await page.getByRole('button', { name: '发送', exact: true }).click();
+    await Promise.race([intercepted,new Promise((_,reject)=>setTimeout(()=>reject(new Error('mentor response barrier not reached')),30000))]);
+    const recovery=page.getByRole('status',{name:'待恢复的导师请求',exact:true});
+    expect(await recovery.count()).toBe(0);
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-busy.png'}); // TEMP_EVIDENCE
+    release();
     await expect.poll(() => lost, { timeout: 30000 }).toBe(1);
+    await recovery.waitFor();
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-recovery.png'}); // TEMP_EVIDENCE
+    console.log('RECOVERY_STYLES',await recovery.evaluate(el=>{const s=getComputedStyle(el);return {fontSize:s.fontSize,border:s.border,radius:s.borderRadius};})); // TEMP_EVIDENCE
     const identity = await planIdentityRows(f.actor);
     expect(identity).toHaveLength(2);
     expect((await f.service.read(d.draftId)).information['step-0'].values?.goal?.value ?? '').toBe('');
@@ -8541,7 +8557,7 @@ it("OPC: mentor lost reply still projects once from its unchanged frozen informa
     await expect.poll(() => page.getByRole('textbox', { name: f.flow.steps[0].information![0].title, exact: true }).inputValue(), { timeout: 30000 }).toBe(reply);
     expect((await f.service.read(d.draftId)).snapshot.steps['step-0'].version).toBe(savedVersion);
     expect(await planIdentityRows(f.actor)).toEqual(identity);
-  } finally { await browser.close(); }
+  } finally { release(); await browser.close(); }
 }, 240000);
 
 it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered preview completes the default entry and content journey after curation", async () => {
@@ -9090,12 +9106,14 @@ it('OPC: positioning entry creates a new business or edits only the selected exi
   await page.getByRole('dialog',{name:'梳理账号定位',exact:true}).getByRole('button',{name:'整理另一份已有定位',exact:true}).click();
   expect(await page.getByLabel('业务名称',{exact:true}).count()).toBe(0);
   expect(await page.getByLabel('定位方法',{exact:true}).count()).toBe(0);
-  const edit=page.getByRole('button',{name:'修改定位',exact:true});expect(await edit.isDisabled()).toBe(true);
-  const choice=page.getByRole('combobox',{name:'已有定位',exact:true});
-  await expect.poll(()=>choice.locator('option').count(),{timeout:15000}).toBe(3);
-  await choice.selectOption(a.projectId);
-  await edit.click();
+  await page.waitForURL(url=>url.pathname==='/library');
+  expect(await page.getByRole('combobox',{name:'已有定位',exact:true}).count()).toBe(0);
+  expect(Number((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n)).toBe(draftCount);
+  expect(await readAccounts()).toEqual(before);
+  await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/^entry-account-a/}).click();
+  await page.getByRole('button',{name:'修改定位',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'定位详情',exact:true});
+  await dialog.getByRole('button',{name:'修改定位',exact:true}).click();
   await dialog.getByRole('heading',{name:'修改定位',exact:true}).waitFor();
   expect(Number((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n)).toBe(draftCount);
   await dialog.locator('textarea').first().fill('只修订账号A的定位');
@@ -9110,10 +9128,8 @@ it('OPC: positioning entry creates a new business or edits only the selected exi
   await dialog.getByRole('button',{name:'关闭定位详情',exact:true}).click();
   const savedAccounts=await readAccounts();
   const savedCounts=(await sql.query('select (select count(*)::int from opc_drafts where actor_id=$1) drafts,(select count(*)::int from opc_businesses where actor_id=$1) businesses',[f.actor])).rows[0];
-  await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
-  await page.getByRole('dialog',{name:'梳理账号定位',exact:true}).getByRole('button',{name:'整理另一份已有定位',exact:true}).click();
-  await page.getByRole('combobox',{name:'已有定位',exact:true}).selectOption(a.projectId);
   await page.getByRole('button',{name:'修改定位',exact:true}).click();
+  await dialog.getByRole('button',{name:'修改定位',exact:true}).click();
   await dialog.getByRole('heading',{name:'修改定位',exact:true}).waitFor();
   expect(await dialog.locator('textarea').first().inputValue()).toBe('只修订账号A的定位');
   await dialog.locator('textarea').first().fill('取消时不得保存');

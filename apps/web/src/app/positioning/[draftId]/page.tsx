@@ -1828,9 +1828,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         </div>
       </header>
       {workInfoOpen&&<div className={resultStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setWorkInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={resultStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setWorkInfoOpen(false)}>×</button></header><p>当前工作：{manualEntry?'已有定位录入':'定位分析'}</p><p>状态：{snap.state==='published'?'定位已确认':'定位进行中'}</p><p>定位讨论、待确认修改与历史版本留在原工作；查看不会确认或保存。</p><footer><button type="button" onClick={()=>{void read.refetch();setWorkInfoOpen(false);}}>重新读取状态</button><Link href="/positioning">新任务与账号</Link></footer></section></div>}
-      {!planView && <>{hasPendingStepRequest && (
-        <section role="status" aria-label="待恢复的导师请求" className="space-y-2 rounded-xl border border-[var(--border-primary)] p-3">
-          <p>有一条发给导师的内容结果尚未确认。原始请求已保留；恢复前不会发送新请求、确认步骤或切换步骤。</p>
+      {!planView && <>{hasPendingStepRequest && !busy && (
+        <section role="status" aria-label="待恢复的导师请求" className={resultStyles.requestRecovery}>
+          <p>上一条消息的结果暂未确认，请恢复后继续。</p>
           {pendingStepRequests.map(({ step, parsed }) => (
             <div key={step.id} className="space-y-2">
               <p className="text-sm">
@@ -2017,7 +2017,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                               {parsed.message ||
                                 (execution.state === "cancelled"
                                   ? "这条回复未发给模型，你可以直接重新描述问题。"
-                                  : "这条回复还在核对原请求，不会重复发送或重复扣费。")}
+                                  : busy ? "正在回复…" : "回复暂未完成，请继续核对。")}
                             </p>
                           </div>
                           {execution.state === "completed" && target && latestSuggestion.get(target.id) === execution.executionId && proposed.length > 0 && (
@@ -2029,7 +2029,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                               <p className="text-xs">原有内容在采用前保持不变。采用后请核对本步骤及受影响的后续结果。</p>
                             </div>
                           )}
-                          {!["completed", "cancelled"].includes(
+                          {!busy && !["completed", "cancelled"].includes(
                             execution.state,
                           ) && (
                             <Button
@@ -2058,7 +2058,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     </div>
                   </section>}
                   </div>
-                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" maxLength={8000} disabled={busy||openingSteps.includes(step.id)||Boolean(pendingMentor)||hasPendingConfirmation||hasPendingStepRequest||snap.state!=="draft"||reviewOnly||free.busy} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step,activeQuestion.id);}}/>
+                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" note={busy && hasPendingStepRequest ? "正在回复…" : undefined} maxLength={8000} disabled={busy||openingSteps.includes(step.id)||Boolean(pendingMentor)||hasPendingConfirmation||hasPendingStepRequest||snap.state!=="draft"||reviewOnly||free.busy} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step,activeQuestion.id);}}/>
                   {free.error&&<p role="alert">{free.error}</p>}
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
@@ -2297,10 +2297,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     return rows.length > 1 ? (
                       <nav
                         aria-label="本步骤已到达的问题"
-                        className="space-y-2 border-t border-[var(--border-primary)] pt-3"
+                        className={resultStyles.questionNav}
                       >
                         <p className="text-xs text-[var(--text-secondary)]">
-                          本步骤已到达的问题（尚未到达的问题不显示）
+                          本步骤的问题
                         </p>
                         <ul className="space-y-2">
                           {rows.map((row) => (

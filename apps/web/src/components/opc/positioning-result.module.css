@@ -36,3 +36,17 @@
 /* Keep result fields at the same width while steps expand and the panel scrolls. */
 .panel>.body{overflow-y:scroll;scrollbar-gutter:stable;min-width:0}.panel>.body details,.panel>.body .fields,.panel>.body .fields p{min-width:0;box-sizing:border-box}.panel>.body .fields p{width:100%}
 .positionActions button{font-family:inherit!important;font-size:12px!important;font-weight:400!important;line-height:18px!important;letter-spacing:0!important}
+
+/* Positioning actions use the same quiet controls as the merged workspace. */
+.currentAction button,.stepForm button,.requestRecovery button,.mentorChat [role=log] button{height:auto;min-height:34px;padding:7px 12px;border:1px solid #e6e6e6;border-radius:8px;background:#fff;color:#444;font-family:inherit;font-size:12px;font-weight:400;line-height:18px;letter-spacing:0;white-space:normal;box-shadow:none;transform:none}
+.currentAction button:first-child{border-color:#262626;background:#262626;color:#fff}
+.currentAction button:disabled,.stepForm button:disabled,.requestRecovery button:disabled,.mentorChat [role=log] button:disabled{opacity:1;background:#f5f5f5;border-color:#ececec;color:#aaa;cursor:default}
+.currentAction button:hover:not(:disabled),.stepForm button:hover:not(:disabled),.requestRecovery button:hover:not(:disabled),.mentorChat [role=log] button:hover:not(:disabled){background:#f5f5f5;border-color:#ddd;color:#262626}
+.currentAction button:first-child:hover:not(:disabled){background:#3b3b3b;color:#fff}
+.questionNav{margin-top:20px;padding-top:16px;border-top:1px solid #eee}
+.questionNav>p{margin:0 0 10px;color:#999;font-size:11px;line-height:18px}
+.questionNav ul{display:grid;gap:4px;margin:0;padding:0;list-style:none}
+.questionNav button{width:100%;justify-content:flex-start;text-align:left;border-color:transparent;background:transparent;color:#777}
+.questionNav button[aria-current=true]{border-color:#eee;background:#f6f6f6;color:#333;font-weight:500}
+.requestRecovery{margin:12px 24px;padding:12px 14px;border:1px solid #ececec;border-radius:10px;background:#fafafa;color:#666;font-size:12px;line-height:1.6}
+.requestRecovery>p{margin:0 0 6px;color:#444}.requestRecovery p{font-size:12px}.requestRecovery button{margin-top:8px}

@@ -8,23 +8,21 @@ import { createClient } from "@/lib/supabase";
 import { CalendarDays, ChartNoAxesColumnIncreasing, Sparkles, Target, X } from 'lucide-react';
 import { WorkspaceFrame } from "@/components/opc/workspace-frame";
 import styles from './start-work.module.css';
-import { StrategyOverviewDialog } from '@/components/opc/strategy-overview-dialog';
+import { useRouter } from "next/navigation";
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 type StartOperation={actorId:string;requestId:string;registration:string;mode:"mentor"|"manual";businessId:string|null;businessName?:string};
 type StartAccount={projectId:string;platform:string;account:string;businessName:string;strategyDraftId?:string|null;sourceVersionId?:string|null;pendingStrategyDraftId?:string|null;sourceVersion?:number;displayName?:string;profile?:Record<string,{value?:string;label?:string;status?:string}>|null;items:Array<{workItemId:string;sessionId:string;title:string}>};
 const startOperationKey="opc-start-operation";
 export default function PositioningHome() {
+  const router = useRouter();
   const free = useFreeConversation();
   const [skillId,setSkillId]=useState('');
   const catalog = trpc.opc.catalog.useQuery(),
     list = trpc.opc.list.useQuery(),
     library = trpc.opc.library.useQuery({ search: "", from: null, to: null }),
     start = trpc.opc.start.useMutation();
-  const [existingId,setExistingId]=useState(""),
-    [editingAccount,setEditingAccount]=useState<StartAccount|null>(null),
-    [businessName, setBusinessName] = useState(""),
+  const [businessName, setBusinessName] = useState(""),
     [showStart,setShowStart]=useState(false),
-    [startMode,setStartMode]=useState<'mentor'|'manual'>('mentor'),
     [methodDialog,setMethodDialog]=useState(false),
     [showSource,setShowSource]=useState(false),
     [intent,setIntent]=useState<'topics'|'content'|'position'|''>(''),
@@ -90,24 +88,22 @@ export default function PositioningHome() {
         <p role="alert">当前环境未开放，或登录已失效。请登录后重试。</p>
       )}
       {pendingStart&&!start.isPending&&<section className={styles.selection} aria-label="待恢复的开始请求"><p>上次开始定位的结果尚未确认。先恢复同一请求，避免把草稿绑定到另一个业务。</p><Button onClick={()=>runStart(pendingStart)}>恢复上次开始请求</Button></section>}
-      {methodDialog&&<div className={styles.modalScrim} role="presentation"><section className={styles.methodDialog} role="dialog" aria-modal="true" aria-label="梳理账号定位"><header><h2>梳理账号定位</h2><button autoFocus aria-label="关闭窗口" onClick={()=>setMethodDialog(false)}><X size={17}/></button></header><p>开始新账号的定位分析，或选择一份已有定位继续修改。</p><div className={styles.methodActions}><button onClick={()=>{setStartMode('mentor');setMethodDialog(false);setShowStart(true);}}>从头分析新定位</button><button onClick={()=>{setStartMode('manual');setExistingId('');setMethodDialog(false);setShowStart(true);}}>整理另一份已有定位</button></div></section></div>}
+      {methodDialog&&<div className={styles.modalScrim} role="presentation"><section className={styles.methodDialog} role="dialog" aria-modal="true" aria-label="梳理账号定位"><header><h2>梳理账号定位</h2><button autoFocus aria-label="关闭窗口" onClick={()=>setMethodDialog(false)}><X size={17}/></button></header><p>开始新账号的定位分析，或选择一份已有定位继续修改。</p><div className={styles.methodActions}><button onClick={()=>{setMethodDialog(false);setShowStart(true);}}>从头分析新定位</button><button onClick={()=>{setMethodDialog(false);router.push('/library');}}>整理另一份已有定位</button></div></section></div>}
       {showStart && <div className={styles.modalScrim} role="presentation"><section className={styles.startForm} role="dialog" aria-modal="true" aria-label="准备定位任务">
-        <div className={styles.formHead}><div><h2>{startMode==='mentor'?'从头分析新定位':'整理另一份已有定位'}</h2><p>{startMode==='mentor'?'填写产品、服务或品牌名称，开始新账号的定位分析。':'选择一份已有定位，继续修改。'}</p></div><button autoFocus aria-label="关闭窗口" onClick={()=>setShowStart(false)}><X size={17}/></button></div>
-        {startMode==='mentor'?<label className="block">产品、服务或品牌名称 <input placeholder="例如：摄影课程、我的咨询服务" aria-label="业务名称" value={businessName} maxLength={120} onChange={(e)=>setBusinessName(e.target.value)} className="ml-2 rounded border bg-[var(--bg-secondary)] p-2" /></label>:<label>已有定位<select aria-label="已有定位" value={existingId} onChange={e=>setExistingId(e.target.value)}><option value="">请选择已有定位</option>{accounts.filter(a=>a.strategyDraftId&&a.sourceVersionId).map(a=><option key={a.projectId} value={a.projectId}>{a.platform} · {a.displayName??a.account} · {a.businessName}</option>)}</select></label>}
+        <div className={styles.formHead}><div><h2>从头分析新定位</h2><p>填写产品、服务或品牌名称，开始新账号的定位分析。</p></div><button autoFocus aria-label="关闭窗口" onClick={()=>setShowStart(false)}><X size={17}/></button></div>
+        <label className="block">产品、服务或品牌名称 <input placeholder="例如：摄影课程、我的咨询服务" aria-label="业务名称" value={businessName} maxLength={120} onChange={(e)=>setBusinessName(e.target.value)} className="ml-2 rounded border bg-[var(--bg-secondary)] p-2" /></label>
         <div className={styles.methodActions}>
           <Button
-            disabled={startMode==='mentor'?(!catalog.data?.length||start.isPending||Boolean(pendingStart)||!businessName.trim()):!accounts.some(a=>a.projectId===existingId&&a.strategyDraftId&&a.sourceVersionId)}
-            onClick={()=>{if(startMode==='mentor')void begin();else {const a=accounts.find(a=>a.projectId===existingId&&a.strategyDraftId&&a.sourceVersionId);if(a){setEditingAccount(a);setShowStart(false);}}}}
+            disabled={!catalog.data?.length||start.isPending||Boolean(pendingStart)||!businessName.trim()}
+            onClick={()=>void begin()}
           >
-            {start.isPending?'正在准备…':startMode==='mentor'?'开始 Agent 引导':'修改定位'}
+            {start.isPending?'正在准备…':'开始 Agent 引导'}
           </Button>
         </div>
-        {startMode==='manual'&&!accounts.some(a=>a.strategyDraftId&&a.sourceVersionId)&&<p>还没有已有定位，请先从头分析新定位。</p>}
-        {startMode==='mentor'&&!catalog.isLoading && !catalog.data?.length && (
+        {!catalog.isLoading && !catalog.data?.length && (
           <p>当前没有可用的已发布定位方法。</p>
         )}
       </section></div>}
-      {editingAccount?.strategyDraftId&&editingAccount.sourceVersionId&&<StrategyOverviewDialog key={editingAccount.projectId} initialEditing account={{...editingAccount,account:editingAccount.displayName??editingAccount.account,strategyDraftId:editingAccount.strategyDraftId,sourceVersionId:editingAccount.sourceVersionId,currentVersion:editingAccount.sourceVersion}} onClose={()=>setEditingAccount(null)} onSaved={async()=>{const fresh=await library.refetch();const updated=(fresh.data?.businesses??[]).flatMap((b:{accounts:StartAccount[]})=>b.accounts).find((a:StartAccount)=>a.projectId===editingAccount.projectId);if(updated)setEditingAccount(updated);}}/>}
       {error && <p role="alert">{error}</p>}
     </div></main></WorkspaceFrame>
   );
