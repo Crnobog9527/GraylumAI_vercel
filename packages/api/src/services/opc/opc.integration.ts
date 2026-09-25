@@ -8145,8 +8145,9 @@ it("OPC: account strategy edits stay draft-scoped and publish only for the chose
   const pendingRead=await f.service.read(pendingAgain.draftId);
   const beforeStale=(await sql.query('select steps from artifact_rounds where id=$1',[pendingAgain.roundId])).rows[0];
   const revision=(await sql.query('select revision from opc_accounts where project_id=$1',[a.projectId])).rows[0].revision;
+  const otherRevision=(await sql.query('select revision from opc_accounts where project_id=$1',[b.projectId])).rows[0].revision;
   console.info('ACCOUNT_SOURCE_DRIFT','before');
-  await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'strategy-a',expectedRevision:Number(revision)}]});
+  await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'strategy-a',expectedRevision:Number(revision)},{platform:'x',account:'strategy-b',expectedRevision:Number(otherRevision)}]});
   console.info('ACCOUNT_SOURCE_DRIFT','after');
   const target=pendingRead.snapshot.steps[f.flow.steps[0].id];
   await expect(f.artifacts.execute({action:'confirm',projectId:pendingRead.projectId,roundId:pendingRead.roundId,requestId:randomUUID(),stepId:f.flow.steps[0].id,expectedVersion:target.version,expectedReviewVersion:target.reviewVersion})).rejects.toThrow();

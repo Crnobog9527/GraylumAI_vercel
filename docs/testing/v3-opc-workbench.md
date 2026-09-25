@@ -365,3 +365,7 @@ Owner 截图对应原本地草稿只读状态为九个答案 confirmed、六个�
 定向证据：`pr422-edit-only-fixed.log` 7 PASS /1 FAIL（账号路径均通过；新用户用例单独运行缺少先前测试留下的模拟 organizer 配置）。`proof.log` 2 PASS /1 FAIL，新增 required-deferred 入口、原确认回包恢复、旧草稿改回负例通过；`review.log` 2 PASS /2 FAIL，单次 target 确认数=1 通过，新增来源漂移测试的 SQL bigint 字符串被接口类型拒绝。补齐测试自身 fixture 配置、按接口类型转换 revision 后，`ready.log` **2 PASS /266 skipped**，新用户逐题/回包恢复与账号仅确认改动/正式 v2 均通过，已查看定稿按钮可用的实际渲染截图。其余补测与精确候选结果以 PR 交付记录为准，不将多次执行合称一次全套绿。
 
 兼容/回退：0135 可重复应用；不更新任何原始表行，运行时只追加原机制所需确认与显式发布记录。必要时可恢复 0125 的 account wrapper 与 0067 的 publish-current 函数并保留 0134 来源授权及全部数据（交互会回到逐步复核）；不自动执行回退或远端迁移。
+
+最终来源漂移补测 `pr422-edit-only-conflict-final.log` **1 PASS /267 skipped**：原双账号保存/并发/正式历史和新旧方法路径通过；原计划两个账号合法再次交接后，旧草稿 confirm/publish 均拒绝，原步骤无变化。保留 `conflict.log` 的 180s timeout：仅见最后保存/读取返回成功，不能判断原等待点；一次加入现有 pw:browser 与阶段日志的诊断走完相同 UI 和 close，随后准确暴露新增夹具漏传原计划第二账号，修正后上述最终运行通过。没有提高超时或移除断言，不宣称旧超时已归因。
+
+原预览已 resume（bootstrap=false），本地 0135 应用前后全部 artifact rounds/requests/versions 数量及内容摘要一致，备份保留。只读打开 Owner 原草稿确认正式按钮 enabled，所有业务 POST 拦截且实际 writes=[]；未代用户确认/定稿。最终候选 UI 与迁移文件和当前预览逐字一致，production build/typecheck/lint 通过；精确 CI/Security 及独立审查结果记录于 PR。
