@@ -1,0 +1,6 @@
+MiSans 字体版权归小米科技有限责任公司所有。
+MiSans fonts are copyright Xiaomi Inc.
+本网站使用 MiSans 字体。完整许可协议见同目录 LICENSE.pdf。
+来源：https://hyperos.mi.com/font/download
+官方网页静态分包：https://font.sec.miui.com/font/css?family=MiSans:400,500,600:Chinese_Simplify,Latin&display=swap
+字体二进制保持官方原样；manifest.json 记录原始来源与 SHA-256。

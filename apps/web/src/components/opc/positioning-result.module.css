@@ -20,7 +20,7 @@
 @media(max-width:700px){.workspaceContent>section[aria-label="当前定位步骤"]{padding-top:0}.mentorChat [role=log]{height:clamp(210px,calc(100dvh - 360px),550px)}}
 .agentIdentity{display:flex;align-items:center;gap:8px;color:#929292;font-size:12px;line-height:20px}
 .agentIdentity img{width:22px;height:22px;object-fit:contain;border-radius:6px}
-.mentorChat .messageBody{font-family:"PingFang SC","Hiragino Sans GB",var(--font-primary);font-size:15px;font-weight:400;line-height:1.75;color:#444}
+.mentorChat .messageBody{font-family:var(--font-primary);font-size:15px;font-weight:400;line-height:1.75;color:#444}
 .visuallyHidden{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .mentorTools{position:absolute;left:17px;bottom:14px;display:flex;align-items:center;gap:8px;z-index:3}
 .mentorChat .mentorTools label{display:flex;width:auto;max-width:none;min-height:0;margin:0 13px 9px;padding:0 11px;border:0;border-radius:11px;background:#f7f7f8;box-shadow:none}
