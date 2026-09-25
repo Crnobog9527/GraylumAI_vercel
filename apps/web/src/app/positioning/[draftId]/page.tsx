@@ -2359,12 +2359,12 @@ function PositioningDraftContent({draftId}:{draftId:string}){
               {s.valid && index === steps.length - 1 && (
                 <div
                   role="status"
-                  className="space-y-2 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-4"
+                  className={resultStyles.completionNotice}
                 >
-                  <h3 className="font-semibold">
+                  <h3>
                     本步骤进度已完成
                   </h3>
-                  <p className="text-sm text-[var(--text-secondary)]">
+                  <p>
                     {snap.state === "published"
                       ? "定位版本已发布。你可以在下方进入第一周计划，或修订定位并保留原版本；历史版本与对话保持不变。"
                       : hasUnconfirmedRequired
