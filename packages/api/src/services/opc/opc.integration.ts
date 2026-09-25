@@ -8962,6 +8962,9 @@ it("OPC: library finalization closes only on success and account discussion swit
   expect(await dialog.isVisible()).toBe(true);
   await page.unroute('**/api/trpc/opc.saveContentManual*');
   await page.getByRole('button',{name:'确认修改',exact:true}).click();
+  await dialog.getByRole('alert').filter({hasText:'已有更新版本'}).waitFor();
+  expect(await dialog.getByLabel('文章正文',{exact:true}).inputValue()).toBe('定稿等待期间的展开输入');
+  await dialog.getByRole('button',{name:/已比较历史，基于服务端/}).click();
   await dialog.getByRole('status').filter({hasText:/已在服务端保存.*草稿/}).waitFor();
   await dialog.getByRole('button',{name:'← 返回详情',exact:true}).click();
   held=new Promise<void>(resolve=>{release=resolve;});submitted=new Promise<void>(resolve=>{arrived=resolve;});
@@ -9133,3 +9136,94 @@ it('OPC: positioning entry creates a new business or edits only the selected exi
   expect((await f.service.read(updated.pendingStrategyDraftId!)).information['step-0'].values.goal.value).toBe('只修订账号A的定位');
  }finally{await browser.close();}
 },180000);
+
+it('OPC: boundary browser freezes expanded edits across a delayed real adoption and concurrent saves',async()=>{
+ const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'boundary-article',title:'边界文章',brief:'讨论后采用',day:'2026-09-25',contentType:'article'}]});
+ const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'boundary-article',expectedRevision:null}]});
+ const {browser,page}=await planBrowser(f);
+ let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});let adopted=false;
+ const rows=async()=>(await sql.query("select id,version,body,source_content_id from opc_content_versions where work_item_id=$1 and kind='brief' order by version",[work.workItemId])).rows;
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+work.sessionId);
+  await page.getByLabel('消息',{exact:true}).fill('请给我第一版正文。');await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.getByRole('button',{name:'采用为当前草稿',exact:true}).waitFor({timeout:60000});
+  await page.route('**/api/trpc/opc.saveContentResult*',async route=>{const response=await route.fetch();expect(response.ok()).toBe(true);adopted=true;await held;await route.fulfill({response});});
+  await page.getByRole('button',{name:'采用为当前草稿',exact:true}).click();
+  await expect.poll(()=>adopted).toBe(true);expect(await rows()).toHaveLength(1);
+  await page.getByRole('button',{name:'展开编辑',exact:true}).click();
+  await page.getByLabel('展开编辑标题',{exact:true}).fill('我的展开标题');await page.getByLabel('展开编辑正文',{exact:true}).fill('响应到达前写下的正文');
+  release();await page.getByText('账号已保存 v1 · 草稿',{exact:true}).waitFor();
+  expect(await page.getByLabel('展开编辑正文',{exact:true}).inputValue()).toBe('响应到达前写下的正文');
+  await page.getByRole('button',{name:'确认修改',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'已有更新版本'}).waitFor();
+  expect(await rows()).toHaveLength(1);expect(await page.getByLabel('文章正文',{exact:true}).inputValue()).toBe('响应到达前写下的正文');
+  const savedDraft=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)!),`opc-content-draft:${work.workItemId}:brief`);
+  expect(savedDraft).toMatchObject({baseVersion:0,sourceContentId:null,title:'我的展开标题',body:'响应到达前写下的正文'});
+  await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/boundary-adoption-conflict.png'});
+  const {writeFileSync}=await import('node:fs');
+  writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/boundary-adoption.json',JSON.stringify({transport:'real local adoption response held after route.fetch',savedDraft,versions:await rows()}));
+  await page.getByRole('button',{name:/已比较历史，基于服务端 v1/}).click();
+  await expect.poll(async()=>(await rows()).length,{timeout:30000}).toBe(2);
+  await page.getByText('账号已保存 v2 · 草稿',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'展开编辑',exact:true}).click();await page.getByLabel('展开编辑正文',{exact:true}).fill('取消的正文');await page.getByRole('button',{name:'取消',exact:true}).click();
+  expect(await page.getByLabel('文章正文',{exact:true}).inputValue()).toBe('响应到达前写下的正文');
+  await page.getByRole('button',{name:'展开编辑',exact:true}).click();await page.getByLabel('展开编辑正文',{exact:true}).fill('普通保存正文');await page.getByRole('button',{name:'确认修改',exact:true}).click();
+  await page.getByText('账号已保存 v3 · 草稿',{exact:true}).waitFor();
+  const latest=(await rows()).at(-1);
+  await page.getByRole('button',{name:'展开编辑',exact:true}).click();await page.getByLabel('展开编辑正文',{exact:true}).fill('并发情况下保留的正文');
+  await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:3,sourceContentId:latest.id,kind:'brief',status:'draft',title:'其他标签',body:'并发服务端正文'});
+  await page.getByRole('button',{name:'确认修改',exact:true}).click();await page.getByRole('alert').filter({hasText:'已有更新版本'}).waitFor();
+  expect(await rows()).toHaveLength(4);expect(await page.getByLabel('文章正文',{exact:true}).inputValue()).toBe('并发情况下保留的正文');
+  writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/boundary-editor-completed.json',JSON.stringify({passed:['delayed real adoption conflict','explicit rebase','cancel preserves input','ordinary save','concurrent conflict preserves input'],versions:await rows(),retainedInput:await page.getByLabel('文章正文',{exact:true}).inputValue()}));
+ }finally{release();await browser.close();}
+},180000);
+
+it.each([65,67])('OPC: boundary browser continues legitimate v%s video source history',async(targetVersion)=>{
+ const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'boundary-video',title:'长历史视频',brief:'合法原始执行与修订来源',day:'2026-09-25',contentType:'video'}]});
+ const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'boundary-video',expectedRevision:null}]});
+ const {browser,page}=await planBrowser(f);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+work.sessionId);
+  await page.getByRole('button',{name:'起草口播稿',exact:true}).click();
+  await page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true}).waitFor({timeout:60000});await page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true}).click();
+  await page.getByRole('heading',{name:'口播稿已定稿。要先制作分镜脚本吗？',exact:true}).waitFor();
+  let previous=(await sql.query("select id,version,execution_id from opc_content_versions where work_item_id=$1 and kind='script' and version=1",[work.workItemId])).rows[0];
+  expect(previous.execution_id).toBeTruthy();
+  const root=previous;
+  for(let version=2;version<=targetVersion;version++){
+   previous=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:version-1,sourceContentId:previous.id,kind:'script',status:'final',title:'長历史口播稿',body:'合法人工修订 '+version});
+   if(version!==targetVersion)continue;
+   await page.reload();await page.getByText('账号已保存 v'+version+' · 已定稿',{exact:true}).waitFor();
+   const checked=page.waitForResponse(response=>response.url().includes('opc.checkVideoExecution'));
+   await page.getByRole('button',{name:'只生成分镜',exact:true}).click();
+   const checkResponse=await checked;
+   if(!checkResponse.ok()){
+    const {writeFileSync}=await import('node:fs');
+    writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/boundary-video-v'+version+'-check-failure.json',JSON.stringify({version,rootExecution:root.execution_id,script:previous,status:checkResponse.status(),response:await checkResponse.json()}));
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/boundary-video-v'+version+'-check-failure.png'});
+    expect.soft(checkResponse.ok()).toBe(true);
+    continue; // Still verify original-source protection after recording this failure.
+   }
+   const storyboardVersion=1;
+   await page.getByText('分镜 · 第 '+storyboardVersion+' 版 · 已定稿 · 匹配当前口播稿',{exact:true}).waitFor({timeout:60000});
+   await page.getByRole('button',{name:'只生成剪辑建议',exact:true}).click();
+   await page.getByText('剪辑建议 · 第 '+storyboardVersion+' 版 · 已定稿 · 匹配当前口播稿',{exact:true}).waitFor({timeout:60000});
+   const derivatives=(await sql.query("select kind,source_content_id from opc_content_versions where work_item_id=$1 and kind in ('storyboard','editing') and version=$2",[work.workItemId,storyboardVersion])).rows;
+   expect(derivatives).toHaveLength(2);expect(derivatives.every(row=>row.source_content_id===previous.id)).toBe(true);
+   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/boundary-video-v'+version+'.png'});
+   const {writeFileSync}=await import('node:fs');
+   writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/boundary-video-v'+version+'.json',JSON.stringify({rootExecution:root.execution_id,script:previous,derivatives}));
+  }
+  expect((await sql.query("select execution_id from opc_content_versions where id=$1",[root.id])).rows[0].execution_id).toBe(root.execution_id);
+  expect((await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='script' and execution_id is not null",[work.workItemId])).rows[0].n).toBe(1);
+  await expect(f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:targetVersion,sourceContentId:null,kind:'script',status:'draft',title:'无来源',body:'不能断开原视频来源'})).rejects.toThrow('OPC_CONTENT_SOURCE');
+  const outsider=await publishedDraft();await expect(outsider.service.videoMaterialPrepare({workItemId:work.workItemId,requestId:randomUUID(),sourceScriptId:previous.id,choice:'storyboard',expectedStoryboardVersion:1,expectedEditingVersion:1})).rejects.toThrow('OPC_CONTENT_BINDING');
+  await sql.query('update bill2_drafts set revoked=true where id=$1',[f.d.draftId]);
+  expect((await sql.query('select runtime_history_available($1) allowed',[root.execution_id])).rows[0].allowed).toBe(false);
+  await expect(f.service.videoMaterialPrepare({workItemId:work.workItemId,requestId:randomUUID(),sourceScriptId:previous.id,choice:'storyboard',expectedStoryboardVersion:1,expectedEditingVersion:1})).rejects.toThrow('OPC_CONTENT_BINDING');
+  await page.reload();await page.getByText('来源已不可用，不能编辑或保存这条工作。',{exact:true}).waitFor();
+  expect(await page.getByRole('button',{name:'只生成分镜',exact:true}).count()).toBe(0);
+ }finally{await browser.close();}
+},240000);

@@ -90,7 +90,19 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  }
  const latest=(kind:string)=>versions.filter(v=>v.kind===kind).reduce((n,v)=>Math.max(n,v.version),0);
  const currentScript=versions.filter(v=>v.kind==='script'&&v.status==='final').sort((a,b)=>b.version-a.version)[0]??null;
- const videoSourceExecution=useMemo(()=>{let cursor:ContentVersion|null=currentScript;const visited=new Set<string>();for(let depth=0;cursor&&depth<64;depth++){if(visited.has(cursor.id))return null;visited.add(cursor.id);if(cursor.executionId)return cursor.executionId;cursor=versions.find(version=>version.id===cursor?.sourceContentId)??null;}return null;},[currentScript,versions]);
+ const videoSourceExecution=useMemo(()=>{
+  const byId=new Map(versions.filter(version=>version.kind==='script').map(version=>[version.id,version]));
+  let cursor:ContentVersion|null=currentScript;
+  const visited=new Set<string>();
+  // Manual revisions retain their admitted ancestor; chain length is not a validity limit.
+  while(cursor){
+   if(visited.has(cursor.id))return null;
+   visited.add(cursor.id);
+   if(cursor.executionId)return cursor.executionId;
+   cursor=cursor.sourceContentId?byId.get(cursor.sourceContentId)??null:null;
+  }
+  return null;
+ },[currentScript,versions]);
  const currentStoryboard=Boolean(currentScript&&versions.some(v=>v.kind==='storyboard'&&v.sourceContentId===currentScript.id));
  const currentEditing=Boolean(currentScript&&versions.some(v=>v.kind==='editing'&&v.sourceContentId===currentScript.id));
  const videoPromptEnded=Boolean(currentScript&&typeof window!=='undefined'&&localStorage.getItem('opc-video-ended:'+currentScript.id));

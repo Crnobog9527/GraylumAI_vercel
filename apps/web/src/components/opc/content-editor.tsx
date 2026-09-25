@@ -24,7 +24,7 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
  expandedOpen.current=expanded;
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
  useEffect(()=>{if(!expanded)return;function onEscape(event:KeyboardEvent){if(event.key==='Escape')setExpanded(false);}window.addEventListener('keydown',onEscape);return()=>window.removeEventListener('keydown',onEscape);},[expanded]);
- const [expandedTitle,setExpandedTitle]=useState(''),[expandedBody,setExpandedBody]=useState('');
+ const [expandedDraft,setExpandedDraft]=useState<Draft|null>(null);
  const saveMutation=trpc.opc.saveContentManual.useMutation();
  useEffect(()=>{
   try{
@@ -61,7 +61,8 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
   if(!latest||localStorage.getItem(key))return;
   setDraft(current=>current&&current.baseVersion<latest.version?{baseVersion:latest.version,sourceContentId:latest.id,title:latest.title||item.title,body:latest.body??''}:current);
  },[latest?.id,item.title,key]);
- function openExpanded(){if(!draft)return;setExpandedTitle(draft.title);setExpandedBody(draft.body);setExpanded(true);}
+ // Keep text and its version basis together while late server results refresh the main draft.
+ function openExpanded(){if(!draft)return;setExpandedDraft({...draft});setExpanded(true);}
  function change(patch:Partial<Draft>){
   if(!draft)return;
   const next={...draft,...patch};
@@ -139,7 +140,7 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
    </>}
   </div>
   <footer><button className={styles.primary} onClick={()=>save('final')} disabled={pending||saveMutation.isPending||!item.sourceAvailable}>确认定稿{kind==='script'?'口播稿':'文章'}</button><p>修改会自动同步为草稿；定稿会另存正式版本，不等于发布。</p></footer>
-  {expanded&&<div className={styles.backdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setExpanded(false);}}><div role="dialog" aria-modal="true" aria-label="编辑标题与正文" className={styles.modal}><header><h2>编辑标题与正文</h2><button aria-label="关闭编辑" onClick={()=>setExpanded(false)}>×</button></header><div className={styles.modalFields}><label>稿件标题<input aria-label="展开编辑标题" value={expandedTitle} maxLength={160} onChange={event=>setExpandedTitle(event.target.value)}/></label><label>{kind==='script'?'口播稿正文':'文章正文'}<textarea aria-label="展开编辑正文" value={expandedBody} maxLength={20000} onChange={event=>setExpandedBody(event.target.value)}/></label></div><footer><p>确认修改后会自动同步为草稿。</p><div><button onClick={()=>setExpanded(false)}>取消</button><button className={styles.primary} onClick={()=>{change({title:expandedTitle,body:expandedBody});setExpanded(false);}}>确认修改</button></div></footer></div></div>}
+  {expanded&&expandedDraft&&<div className={styles.backdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setExpanded(false);}}><div role="dialog" aria-modal="true" aria-label="编辑标题与正文" className={styles.modal}><header><h2>编辑标题与正文</h2><button aria-label="关闭编辑" onClick={()=>setExpanded(false)}>×</button></header><div className={styles.modalFields}><label>稿件标题<input aria-label="展开编辑标题" value={expandedDraft.title} maxLength={160} onChange={event=>setExpandedDraft({...expandedDraft,title:event.target.value})}/></label><label>{kind==='script'?'口播稿正文':'文章正文'}<textarea aria-label="展开编辑正文" value={expandedDraft.body} maxLength={20000} onChange={event=>setExpandedDraft({...expandedDraft,body:event.target.value})}/></label></div><footer><p>确认修改后会自动同步为草稿。</p><div><button onClick={()=>setExpanded(false)}>取消</button><button className={styles.primary} onClick={()=>{change(expandedDraft);setExpanded(false);}}>确认修改</button></div></footer></div></div>}
   {history&&<VersionCompare versions={versions} onClose={()=>setHistory(false)}/>}
  </div>;
 });
