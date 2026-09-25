@@ -288,7 +288,7 @@ Docker清理：Owner要求后，归档并回收60个遗留临时容器、20个�
 
 ### 原聚合超时：原因仍 BLOCKED
 
-原 `pr422-u3-legacy-link-final.log` 保持 **6 PASS / 1 timeout FAIL / 255 skipped**。v2 published 的最后页面请求在撤销访问后的 `/plan` reload 返回 200；当时数据库只读采样没有活动查询或锁等待，测试连接最后执行的是 execution/request 身份查询。原测试没有阶段结束标记或浏览器关闭追踪，不能区分最终身份读取的 Node 返回与浏览器清理阶段，也不能证明根因。`legacy-link`、`revoked-link` 单项成功不改变原失败结论。
+原 `pr422-u3-legacy-link-final.log` 保持 **6 PASS / 1 timeout FAIL / 255 skipped**。v2 published 的最后页面请求是 `/plan` GET 200；原日志没有阶段标记，不能确定它属于哪一次 reload（此前将其认定为撤销访问后的 reload，证据不足，在此更正）；当时数据库只读采样没有活动查询或锁等待，测试连接最后执行的是 execution/request 身份查询。原测试没有阶段结束标记或浏览器关闭追踪，不能区分最终身份读取的 Node 返回与浏览器清理阶段，也不能证明根因。`legacy-link`、`revoked-link` 单项成功不改变原失败结论。
 
 在原 a8 生产代码上，仅加入测试阶段、耗时、未完成请求的 pathname 诊断（无正文、凭据或常驻日志），按原七项及相邻顺序运行 `pr422-u4-timeout.log`：**7 PASS / 255 skipped**。v2 published 在 16.710 s 看见实际撤销判定、16.714 s 开始关闭浏览器、16.907 s 关闭完成。未增加 300 s 超时、删断言或减少材料。此结果排除了这次运行的卡点，不能反推旧失败原因；没有继续盲目重跑。因此 U4 不能以最终 clean / 全部验收通过交付。
 
@@ -308,3 +308,16 @@ Docker清理：Owner要求后，归档并回收60个遗留临时容器、20个�
 - 本轮 web TypeScript 与仓库 web lint 通过；最终精确候选 CI/Security、独立审查和原址预览的源码核对结果记录于原 PR。预览继续使用 `pr422-u2-20260924` 与原数据，resume 而非 bootstrap；入口 `http://127.0.0.1:49550/positioning`。
 
 交付状态：已修复并回归本轮实际键盘缺陷；旧超时根因仍 BLOCKED，不能宣布 U4 clean 或授权合并。证据保留在原 PR 及本机任务的 `pr422-u4` 输出目录；不新建审计台账或常驻采样。
+
+
+### 2026-09-26 再次诊断：聚合通过，发现并修复确认入口丢失
+
+- 原失败日志仍保留。其 Git 指针为 `34bbea47`，但隔离副本包含当时未提交的 U3 修改，副本已清理；不能用该 Git 提交的测试源码替代当时实际执行源码，也不能从最后一次重复调用的身份查询确定失败阶段。
+- `pr422-u4-timeout-retry.log` 和 `pr422-u4-timeout-diagnostic.log` 均为 **6 PASS / 1 FAIL / 255 skipped**。原 v2 published 两次通过；失败均在相邻六阶段引导的“确认这项修改”入口。第一次 DEBUG 被 runner 的 cleanEnv 丢弃；第二次增加仅允许 `DEBUG=pw:browser` 的测试专用透传，真实记录启动、退出和临时目录清理，不输出 API 请求正文。
+- 真实缺陷：已确认字段编辑后成为 provisional；自动保存完成、服务端投影刷新清除本地编辑时，右侧仅按当前 confirmed 状态筛选，导致该字段与重新确认按钮消失。刷新后稳定复现，不能用延长超时解决。现在从已有不可变 `artifact_requests` 中，按原授权读者已验证的同一 project/round/step 与 schema 字段投影 `previouslyConfirmed`；只保留曾明确 confirmed 的字段，未确认或仅 deferred 不纳入。UI 保留原编辑及明确确认操作，空值不可确认；不改布局、自动保存、Runtime、Session、来源或请求身份。
+- 风险 **high**：增加 `0133_opc_confirmed_information_history.sql` 读函数替换，权限不变、没有新存储或数据重写。真实本地数据库验证：单字段确认但步骤未完成、编辑后刷新重新确认、未确认/延后字段排除、不同步骤/新轮次隔离、他人及撤销访问拒绝、客户端无执行权、重复应用与恢复旧 0120 读函数再升级；原历史逐行不变。回滚只恢复 0120 的 `opc_query`，不修改已保存资料。
+- 第一次修复后运行 `pr422-u4-timeout-fixed.log` 在测试准备期因未跟踪的新 SQL 未被 runner 复制而失败，无用例结果；将新增迁移纳入 Git 跟踪后执行。`pr422-u4-timeout-fixed2.log` 为 **8 PASS / 255 skipped**（原七项顺序及新增读投影回归），没有增大预算、超时或减少输入。`pr422-u4-reconfirm-final.log` 为 **1 PASS / 262 skipped**，只为修正截图采样时机再次验证六阶段；实际查看刷新后字段正文及重新确认按钮截图，点击后服务端 confirmed 断言通过。加载态截图不计视觉证据。
+- 实际浏览器追踪显示部分成功用例关闭 Chrome 等待约 24–25 s，随后 exit 0、临时目录清理约十余毫秒；其他关闭约百毫秒。锁定 Playwright 1.60.0 已有 30 s graceful-close 后 kill 兜底。本次原生采样为测试 Chrome 主线程空闲，不证明原 300 s 的原因。一次按已确认测试 PID 发出的终止命令返回 No such process，实际未终止进程；这些结果不能宣称原超时已归因或修复。
+- web TypeScript/lint、runner 生命周期/资源单元测试 **19 PASS**。新精确候选 CI、独立审查与保留数据的原址预览结果见 PR 后续交付评论。
+
+本次已关闭可复现的确认入口缺陷，当前相邻聚合通过；**原 300 s 历史超时根因仍 BLOCKED**，不以本次绿色覆盖原 FAIL，不宣称 U4 最终 clean。真实模型、远端数据库、支付、发布与压缩接口仍 NOT_RUN；未合并、部署或推进下一阶段。

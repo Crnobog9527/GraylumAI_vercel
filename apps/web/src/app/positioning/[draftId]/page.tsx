@@ -2204,7 +2204,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     <p>未确定的建议留在对话中。这里保留已确认信息；修改自动同步，确认与推进仍由你决定。</p>
                     {d.snapshot.workflow.steps.map((confirmedStep:Step,confirmedIndex:number)=>{
                       const info=d.information[confirmedStep.id];
-                      const confirmedFields=info.schema.filter((field:{id:string})=>info.values?.[field.id]?.status==='confirmed'||infoEdits[confirmedStep.id]?.[field.id]?.status==='confirmed');
+                      const confirmedFields=info.schema.filter((field:{id:string})=>info.values?.[field.id]?.status==='confirmed'||infoEdits[confirmedStep.id]?.[field.id]?.status==='confirmed'||info.previouslyConfirmed?.includes(field.id));
                       if(!confirmedFields.length)return null;
                       return <section key={confirmedStep.id}><h4>{confirmedIndex+1}. {confirmedStep.title}</h4>{confirmedFields.map((field:{id:string;title:string})=>{
                         const value=infoEdits[confirmedStep.id]?.[field.id]??info.values?.[field.id];
@@ -2212,7 +2212,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                         return <label key={field.id}><span>{field.title}</span><Textarea aria-label={`已确认：${field.title}`} maxLength={400} value={value.value} disabled={hasPendingConfirmation} onChange={event=>{
                           captureInformationBase(confirmedStep.id);
                           setInfoEdits(old=>({...old,[confirmedStep.id]:{...Object.fromEntries(info.schema.map((part:{id:string})=>[part.id,old[confirmedStep.id]?.[part.id]??info.values?.[part.id]??{status:'unknown',nature:'unknown',value:''}])),[field.id]:{...value,value:event.target.value,status:event.target.value.trim()?'provisional':'unknown'}}}));
-                        }}/><small>{value.status==='confirmed'?'已确认':'修改已自动保存 · 待重新确认'}</small>{value.status!=='confirmed'&&<Button variant="outline" disabled={busy||hasPendingConfirmation||hasPendingStepRequest} onClick={()=>confirmStep(confirmedStep,confirmedIndex,field.id,false,nonAnswersFor(confirmedStep.id,field.id),true)}>确认这项修改</Button>}</label>;
+                        }}/><small>{value.status==='confirmed'?'已确认':'修改已自动保存 · 待重新确认'}</small>{value.status!=='confirmed'&&<Button variant="outline" disabled={busy||hasPendingConfirmation||hasPendingStepRequest||!value.value.trim()} onClick={()=>confirmStep(confirmedStep,confirmedIndex,field.id,false,nonAnswersFor(confirmedStep.id,field.id),true)}>确认这项修改</Button>}</label>;
                       })}</section>;
                     })}
                   </div>}

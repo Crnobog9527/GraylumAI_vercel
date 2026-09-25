@@ -7950,6 +7950,44 @@ it("OPC: manual positioning keeps both the composer and current answer editable"
   }finally{await browser.close();}
 },180000);
 
+it("OPC: prior confirmed information remains scoped after edits and reader upgrade",async()=>{
+ const f=await fixture(3,false,2);
+ const d=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'manual'});
+ const read=()=>f.service.read(d.draftId);
+ const values={goal:{status:'confirmed',nature:'fact',value:'Previously confirmed'},extra0:{status:'deferred',nature:'unknown',value:'Explicitly deferred'},extra1:{status:'provisional',nature:'decision',value:'Never confirmed'}};
+ const write=async(next:typeof values)=>f.service.information({draftId:d.draftId,stepId:'step-0',requestId:randomUUID(),expectedVersion:(await read()).snapshot.steps['step-0'].version,values:next});
+ await write(values);
+ // No completed-step confirmation is needed to preserve an individually confirmed field.
+ expect((await read()).snapshot.steps['step-0'].valid).toBe(false);
+ await write({...values,goal:{...values.goal,status:'provisional',value:'Edited confirmed answer'},extra0:{...values.extra0,status:'provisional',value:'Edited deferred answer'}});
+ const edited=await read();
+ expect(edited.information['step-0'].previouslyConfirmed).toEqual(['goal']);
+ expect(edited.information['step-1'].previouslyConfirmed).toEqual([]);
+ const records=async()=>(await sql.query('select to_jsonb(a) row from artifact_requests a where project_id=$1 order by request_id',[d.projectId])).rows;
+ const frozen=await records();
+ const {readFile}=await import('node:fs/promises');
+ const migration=await readFile(new URL('../../../../db/migrations/0133_opc_confirmed_information_history.sql',import.meta.url),'utf8');
+ await sql.query(await readFile(new URL('../../../../db/migrations/0120_opc_entry_projection.sql',import.meta.url),'utf8'));
+ try{
+  expect((await read()).information['step-0'].previouslyConfirmed).toBeUndefined();
+ }finally{await sql.query(migration);}
+ await sql.query(migration);
+ expect((await read()).information['step-0']).toEqual(edited.information['step-0']);
+ expect(await records()).toEqual(frozen);
+ const other=await fixture(3);
+ await expect(other.service.read(d.draftId)).rejects.toThrow('OPC_DENIED');
+ const privileges=(await sql.query("select has_function_privilege('authenticated','opc_query(uuid,uuid)','execute') client,has_function_privilege('service_role','opc_query(uuid,uuid)','execute') server")).rows[0];
+ expect(privileges).toEqual({client:false,server:true});
+ await sql.query('update bill2_drafts set revoked=true where id=$1',[d.draftId]);
+ await expect(read()).rejects.toThrow('OPC_DENIED');
+ // A different round cannot borrow confirmation history from this round.
+ await sql.query('update bill2_drafts set revoked=false where id=$1',[d.draftId]);
+ const published=await completed(3);
+ expect((await published.service.read(published.d.draftId)).information['step-0'].previouslyConfirmed).toEqual(['goal']);
+ await published.service.revise(published.d.draftId,randomUUID(),published.d.roundId);
+ expect((await published.service.read(published.d.draftId)).information['step-0'].previouslyConfirmed).toEqual([]);
+},60000);
+
 it("OPC: approved six-stage guided positioning keeps one editable conversation and current question",async()=>{
   const f=await mergedPositioningFixture();
   await planFixtureModel(f.moduleId);
@@ -8041,12 +8079,13 @@ it("OPC: approved six-stage guided positioning keeps one editable conversation a
     const earlier=page.getByRole('textbox',{name:'已确认：产品与服务'});
     await earlier.fill('摄影入门课程，用真实学员案例讲解取景。');
     await expect.poll(async()=> (await f.service.read(draftId)).information[f.flow.steps[0].id].values?.product?.status,{timeout:15000}).toBe('provisional');
-    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-six-stage-reconfirm-1600x900.png'});
+    await page.reload(); // A saved correction must remain available after the server projection refreshes.
     const reconfirm=page.getByRole('button',{name:'确认这项修改',exact:true}).first();
     await expect.poll(()=>reconfirm.isEnabled(),{timeout:15000}).toBe(true);
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-six-stage-reconfirm-1600x900.png'});
     await reconfirm.click({timeout:15000});
     await expect.poll(async()=> (await f.service.read(draftId)).information[f.flow.steps[0].id].values?.product?.status,{timeout:15000}).toBe('confirmed');
-  }finally{await browser.close();}
+  }catch(error){console.info('U4_GUIDED_FAILURE',error instanceof Error?error.stack:'unknown');throw error;}finally{console.info('U4_GUIDED_CLOSE_START');await browser.close();console.info('U4_GUIDED_CLOSED');}
 },240000);
 
 it("OPC: manual video revisions preserve execution ancestry, ownership and exact replay", async () => {
