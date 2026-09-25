@@ -435,6 +435,8 @@ try {
     if((opcMode||runtimeMode||runtimeUpgrade) && (req.url==='/call'||(stagingHost&&req.url==='/__official_chat'))){
       let raw='';for await(const chunk of req)raw+=chunk;
       const request=req.url==='/__official_chat'?JSON.parse(raw):JSON.parse(JSON.parse(raw).input);runtimeCalls.push(request);
+      // Disposable synthetic transport sampling for the capacity validation.
+      if(!previewOptions.persistent&&!stagingHost&&req.url==='/call'&&casePattern?.startsWith('^OPC: CAPACITY'))appendFileSync(resolve(evidenceDirectory,'capacity-requests.jsonl'),JSON.stringify(request)+'\n',{mode:0o600});
       const id=serve ? 'local-runtime-'+randomUUID() : 'local-runtime-'+runtimeCalls.length;
       runtimeReceipts.set(id,request);
       appendFileSync(receiptFile,JSON.stringify({id,model:request.model})+'\n',{mode:0o600});

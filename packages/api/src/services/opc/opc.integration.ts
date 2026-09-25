@@ -2894,6 +2894,114 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     expect(errors).toEqual([]);
   } finally { release?.();await browser.close(); }
 },300000);
+
+it('OPC: CAPACITY tool continuation measures each complete SDK request and cap behavior',async()=>{
+ const {runtimeAdmissionService}=await import('../runtime/admission');
+ const {runtimeExecutor}=await import('../runtime/execute');
+ const {createServer}=await import('node:http');
+ const f=await publishedDraft();
+ const sourceMarker='CAPACITY_LONG_SOURCE_'+randomUUID().replaceAll('-','');
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'capacity-source',title:'长来源',brief:sourceMarker+'内容'.repeat(950),day:'2026-09-25',contentType:'article'}]});
+ const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'capacity-source',expectedRevision:null}]});
+ const modelId=(await sql.query('select model_id from modules where id=$1',[f.moduleId])).rows[0].model_id;
+ const run=async(inputBytes:number,seedHistory=false)=>{
+  const admission=runtimeAdmissionService(f.user,admin,{account:'capacity-fixture',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:200,inputBytes,historyItems:20,workspaceContext:true});
+  const session=await admission.start(randomUUID(),{kind:'positioning_draft'});
+  if(seedHistory){
+   const seed=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'HISTORY_CANARY_'+ '旧讨论'.repeat(400),selection:{kind:'ordinary',modelId},network:'deny'});
+   const seedServer=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;const request=JSON.parse(JSON.parse(raw).input);const id='seed-'+randomUUID();res.setHeader('content-type','application/json');res.end(JSON.stringify({id,model:request.model,final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:request.model,choices:[{index:0,message:{role:'assistant',content:'必要约束已保留'},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));});
+   await new Promise<void>(resolve=>seedServer.listen(0,'127.0.0.1',resolve));
+   try{const address=seedServer.address();if(!address||typeof address==='string')throw new Error('seed server');const executor=runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});expect(await executor.execute(seed.executionId)).toMatchObject({state:'completed'});}
+   finally{await new Promise<void>((resolve,reject)=>seedServer.close(error=>error?reject(error):resolve()));}
+  }
+  const prepared=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'请读取我的长来源并回答',selection:{kind:'ordinary',modelId},network:'deny'});
+  const requests:Array<Record<string,any>>=[];
+  const server=createServer(async(req,res)=>{
+   let raw='';for await(const chunk of req)raw+=chunk;
+   const request=JSON.parse(JSON.parse(raw).input);requests.push(request);
+   const phase=requests.length;
+   const message=phase<3?{role:'assistant',content:null,tool_calls:[{id:'cap-call-'+phase,type:'function',function:{name:'read_source',arguments:phase===1?'{}':JSON.stringify({query:work.workItemId})}}]}:{role:'assistant',content:'已读取合成来源'};
+   const id='cap-'+randomUUID();
+   res.setHeader('content-type','application/json');res.end(JSON.stringify({id,model:request.model,final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:request.model,choices:[{index:0,message,finish_reason:phase<3?'tool_calls':'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));
+  });
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try{
+   const address=server.address();if(!address||typeof address==='string')throw new Error('local server');
+   const executor=runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
+   const result=await executor.execute(prepared.executionId);
+   const dispatched=requests.length;
+   const replay=await executor.execute(prepared.executionId);
+   expect(requests).toHaveLength(dispatched);
+   expect(replay).toMatchObject(result);
+   const rows=requests.map((request,index)=>({call:index+1,bytes:Buffer.byteLength(JSON.stringify(request)),roles:request.messages.map((m:any)=>m.role),sourceMarkerCount:JSON.stringify(request).split(sourceMarker).length-1,messageBytes:request.messages.map((m:any)=>({role:m.role,bytes:Buffer.byteLength(JSON.stringify(m))})),toolCalls:request.messages.reduce((n:number,m:any)=>n+(m.tool_calls?.length??0),0),toolResults:request.messages.filter((m:any)=>m.role==='tool').length}));
+   const historyEntries=(await sql.query('select count(*)::int n from runtime_session_history where session_id=$1',[session.sessionId])).rows[0].n;
+   const savedTools=(await sql.query('select count(*)::int n from runtime_tool_calls where execution_id=$1 and result is not null',[prepared.executionId])).rows[0].n;
+   const recordedHashes=(await sql.query("select payload->>'requestHash' hash from bill2_calls where run_id=$1 order by sequence",[prepared.runId])).rows.map((row:{hash:string})=>row.hash);
+   expect(recordedHashes).toEqual(requests.map(request=>createHash('sha256').update(JSON.stringify(request)).digest('hex')));
+   const {writeFileSync}=await import('node:fs');
+   writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/capacity-tool-'+inputBytes+(seedHistory?'-history':'-fresh')+'.jsonl',requests.map(request=>JSON.stringify(request)).join('\n')+'\n',{mode:0o600});
+   console.info('CAPACITY_TOOL_RESULTS',JSON.stringify({inputBytes,seedHistory,result,rows,historyEntries,savedTools,transportHashesMatch:true}));
+   for(const row of rows)expect(row.bytes).toBeLessThanOrEqual(inputBytes);
+   return {result,rows,requests,historyEntries,savedTools};
+  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+ };
+ const supported=await run(32000);
+ expect(supported.result).toMatchObject({state:'completed'});expect(supported.rows).toHaveLength(3);
+ expect(supported.rows[2].sourceMarkerCount).toBe(1);
+ expect(supported.rows[2].toolCalls).toBe(2);expect(supported.rows[2].toolResults).toBe(2);
+ const bounded=await run(4000);
+ expect(bounded.result).toMatchObject({state:'pending',unavailable:'capacity'});expect(bounded.rows.length).toBeGreaterThanOrEqual(1);expect(bounded.rows.length).toBeLessThan(3);
+ expect(bounded.savedTools).toBe(2);
+ const historical=await run(9000,true);
+ expect(supported.rows[2].bytes).toBeLessThan(9000);
+ expect(historical.result).toMatchObject({state:'completed'});
+ expect(historical.rows).toHaveLength(3);
+ expect(historical.rows[2].bytes).toBeLessThanOrEqual(9000);
+ expect(historical.rows[2]).toMatchObject({sourceMarkerCount:1,toolCalls:2,toolResults:2});
+ expect(historical.historyEntries).toBe(8);
+ expect(historical.savedTools).toBe(2);
+ expect(JSON.stringify(historical.requests[0])).toContain('HISTORY_CANARY_');
+ expect(JSON.stringify(historical.requests[2])).not.toContain('HISTORY_CANARY_');
+},120000);
+
+it('OPC: CAPACITY interrupted request retains frozen manuscript after a new save and denies foreign actor',async()=>{
+ const {runtimeAdmissionService}=await import('../runtime/admission');
+ const {runtimeExecutor}=await import('../runtime/execute');
+ const {createServer}=await import('node:http');
+ const f=await publishedDraft();
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'capacity-recovery',title:'恢复隔离稿',brief:'隔离测试选题',day:'2026-09-25',contentType:'article'}]});
+ const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'capacity-recovery',expectedRevision:null}]});
+ const first=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:0,sourceContentId:null,kind:'brief',status:'final',title:'恢复隔离稿',body:'CAPACITY_FROZEN_V1_正文'});
+ const modelId=(await sql.query('select model_id from modules where id=$1',[f.moduleId])).rows[0].model_id;
+ const admission=runtimeAdmissionService(f.user,admin,{account:'capacity-recovery',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:200,inputBytes:32000,historyItems:20});
+ const request={sessionId:work.sessionId,requestId:randomUUID(),input:'修改当前稿件',selection:{kind:'ordinary' as const,modelId},network:'deny' as const};
+ const prepared=await admission.prepare(request);
+ const frozen=(await sql.query('select payload from runtime_executions where id=$1',[prepared.executionId])).rows[0].payload;
+ expect(JSON.stringify(frozen.scopeMaterial)).toContain('CAPACITY_FROZEN_V1_');
+ let dispatches=0,frozenRequest='';const server=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;dispatches++;frozenRequest=JSON.stringify(JSON.parse(JSON.parse(raw).input));res.destroy();});
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('local server');
+  const executor=runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
+  expect(await executor.execute(prepared.executionId)).toMatchObject({state:'pending'});
+  const historyBefore=(await sql.query('select count(*)::int n from runtime_session_history where session_id=$1',[work.sessionId])).rows[0].n;
+  await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:1,sourceContentId:first.id,kind:'brief',status:'final',title:'恢复隔离稿',body:'CAPACITY_NEW_V2_正文'});
+  expect(await admission.prepare(request)).toMatchObject({executionId:prepared.executionId,runId:prepared.runId,sessionId:prepared.sessionId,state:'interrupted'});
+  expect(await executor.execute(prepared.executionId)).toMatchObject({state:'pending'});
+  expect(dispatches).toBe(1);
+  expect(frozenRequest).toContain('CAPACITY_FROZEN_V1_');expect(frozenRequest).not.toContain('CAPACITY_NEW_V2_');
+  const retained=(await sql.query('select payload from runtime_executions where id=$1',[prepared.executionId])).rows[0].payload;
+  expect(retained).toEqual(frozen);expect(JSON.stringify(retained.scopeMaterial)).not.toContain('CAPACITY_NEW_V2_');
+  const historyAfter=(await sql.query('select count(*)::int n from runtime_session_history where session_id=$1',[work.sessionId])).rows[0].n;
+  expect(historyAfter).toBe(historyBefore);
+  const outsider=await publishedDraft();
+  const foreign=runtimeAdmissionService(outsider.user,admin,{account:'capacity-recovery',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:200,inputBytes:32000,historyItems:20});
+  await expect(foreign.prepare({...request,requestId:randomUUID()})).rejects.toThrow('RUNTIME_ADMISSION_DENIED');
+  const {writeFileSync}=await import('node:fs');
+  writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/capacity-recovery-request.json',frozenRequest,{mode:0o600});
+  console.info('CAPACITY_RECOVERY_RESULTS',JSON.stringify({dispatches,requestBytes:Buffer.byteLength(frozenRequest),historyBefore,historyAfter,storedVersions:2,frozenVersion:1,foreignDenied:true}));
+ }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+},90000);
 it("OPC: the Agent opens the current question once per entry and plans without user-authored topic rows", async () => {
   const { runtimeExecutor } = await import("../runtime/execute");
   const { createServer } = await import("node:http");
@@ -8699,6 +8807,126 @@ it("OPC: entry projection stays actor-owned and repeatable without granting tabl
   const privileges=(await sql.query("select has_function_privilege('authenticated','opc_query(uuid,uuid)','execute') client,has_table_privilege('service_role','opc_businesses','select') business_table,has_function_privilege('service_role','opc_query_before_entry_projection(uuid,uuid)','execute') predecessor")).rows[0];
   expect(privileges).toEqual({client:false,business_table:false,predecessor:false});
 },60000);
+
+it('OPC: CAPACITY version counts use only current manuscript through browser and refresh after save',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const capture=process.env.V3_WORKBENCH_OUTPUT+'/capacity-requests.jsonl';
+ const all=()=>{try{return readFileSync(capture,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));}catch{return [];}};
+ const results:Array<Record<string,unknown>>=[];
+ for(const target of [1,60,100]){
+  const f=await publishedDraft();await planFixtureModel(f.moduleId);
+  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'capacity-'+target,title:'容量测试文章',brief:'隔离测试选题',day:'2026-09-25',contentType:'article'}]});
+  const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'capacity-'+target,expectedRevision:null}]});
+  let previous:{id:string}|null=null;
+  const marker=(n:number)=>'CAPACITY_'+target+'_V'+String(n).padStart(3,'0')+'_';
+  for(let version=1;version<=target;version++)previous=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:version-1,sourceContentId:previous?.id??null,kind:'brief',status:'final',title:'容量测试文章',body:marker(version)+'正文'.repeat(180)});
+  expect((await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='brief'",[work.workItemId])).rows[0].n).toBe(target);
+  const visible=(await f.service.library({search:'',from:null,to:null})).businesses.flatMap((business:any)=>business.accounts.flatMap((account:any)=>account.items)).find((item:any)=>item.workItemId===work.workItemId);
+  expect(visible.content).toHaveLength(target);
+  expect(visible.content.every((item:any)=>item.contentAvailable===true)).toBe(true);
+  const {browser,page}=await planBrowser(f);
+  try{
+   if(target===100){
+    await page.goto(process.env.V3_LOCAL_APP+'/library');
+    const card=page.locator('#item-'+work.workItemId);await card.getByRole('button').first().click();
+    await card.getByRole('button',{name:'编辑稿件',exact:true}).click();
+    const editor=page.getByRole('dialog',{name:'选题详情',exact:true});
+    await editor.getByRole('button',{name:'历史版本',exact:true}).click();
+    const history=page.getByRole('dialog',{name:'历史版本',exact:true});
+    await history.getByText('100 个已保存版本').waitFor();
+    await history.getByText('v1',{exact:true}).waitFor();
+    await history.getByRole('button',{name:'完成查看',exact:true}).click();
+    expect(await editor.getByLabel('文章正文',{exact:true}).inputValue()).toContain(marker(100));
+   }
+   await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+work.sessionId);
+   const offset=all().length;
+   await page.getByLabel('消息',{exact:true}).fill('请修改当前文章正文的开头，保留原有受众。');
+   await page.getByRole('button',{name:'发送',exact:true}).click();
+   await expect.poll(async()=>(await sql.query("select count(*)::int n from runtime_executions where session_id=$1 and state='completed'",[work.sessionId])).rows[0].n,{timeout:60000}).toBe(1);
+   const requests=all().slice(offset);expect(requests).toHaveLength(1);
+   const serialized=JSON.stringify(requests[0]);
+   expect(serialized).toContain(marker(target));
+   for(let version=1;version<target;version++)expect(serialized).not.toContain(marker(version));
+   results.push({storedVersions:target,inputVersions:[target],requestBytes:Buffer.byteLength(serialized),messages:requests[0].messages.length});
+   if(target===100){
+    await page.goto(process.env.V3_LOCAL_APP+'/library');
+    const card=page.locator('#item-'+work.workItemId);await card.getByRole('button').first().click();
+    await card.getByRole('button',{name:'编辑稿件',exact:true}).click();
+    const dialog=page.getByRole('dialog',{name:'选题详情',exact:true});
+    await dialog.getByLabel('文章正文',{exact:true}).fill(marker(101)+'界面保存后的新正文');
+    await dialog.getByRole('button',{name:'确认定稿文章',exact:true}).click();
+    await expect.poll(async()=>(await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='brief'",[work.workItemId])).rows[0].n,{timeout:30000}).toBe(101);
+    await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+work.sessionId);
+    const nextOffset=all().length;
+    await page.getByLabel('消息',{exact:true}).fill('再修改一处结尾，保持刚保存的正文。');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await expect.poll(async()=>(await sql.query("select count(*)::int n from runtime_executions where session_id=$1 and state='completed'",[work.sessionId])).rows[0].n,{timeout:60000}).toBe(2);
+    const next=all().slice(nextOffset);expect(next).toHaveLength(1);
+    const after=JSON.stringify(next[0]);expect(after).toContain(marker(101));expect(after).not.toContain(marker(100));
+    expect(after).toContain('保留原有受众');expect(after).toContain('再修改一处结尾');
+    const storedHistory=JSON.stringify((await sql.query('select item from runtime_session_history where session_id=$1 order by revision',[work.sessionId])).rows);
+    expect(storedHistory).toContain(marker(100));expect(storedHistory).toContain(marker(101));
+    const selected=(await sql.query("select selected_history from runtime_executions where session_id=$1 and state='completed' order by created_at desc,id desc limit 1",[work.sessionId])).rows[0].selected_history;
+    expect(selected).toHaveLength(2);
+    results.push({storedVersions:101,inputVersions:[101],requestBytes:Buffer.byteLength(after),messages:next[0].messages.length,uiSaved:true});
+    const compareOffset=all().length;
+    await page.getByLabel('消息',{exact:true}).fill('请比较旧版与当前稿的开头，不要直接改稿。');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await expect.poll(async()=>(await sql.query("select count(*)::int n from runtime_executions where session_id=$1 and state='completed'",[work.sessionId])).rows[0].n,{timeout:60000}).toBe(3);
+    const comparison=all().slice(compareOffset);expect(comparison).toHaveLength(1);
+    const compared=JSON.stringify(comparison[0]);expect(compared).toContain(marker(100));expect(compared).toContain(marker(101));
+    results.push({storedVersions:101,inputVersions:[100,101],requestBytes:Buffer.byteLength(compared),comparison:true});
+    const sameOffset=all().length;
+    await page.getByLabel('消息',{exact:true}).fill('请继续修改当前稿件的结尾，保留前面确认的受众。');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await expect.poll(async()=>(await sql.query("select count(*)::int n from runtime_executions where session_id=$1 and state='completed'",[work.sessionId])).rows[0].n,{timeout:60000}).toBe(4);
+    const same=all().slice(sameOffset);expect(same).toHaveLength(1);
+    const sameBody=JSON.stringify(same[0]);
+    expect(sameBody).not.toContain(marker(100));
+    expect(sameBody.split(marker(101))).toHaveLength(2);
+    expect(sameBody).toContain('保留前面确认的受众');
+    results.push({storedVersions:101,inputVersions:[101],requestBytes:Buffer.byteLength(sameBody),sameMaterialAgain:true});
+   }
+  }finally{await browser.close();}
+ }
+ console.info('CAPACITY_BROWSER_RESULTS',JSON.stringify(results));
+ const base=results.find(x=>x.storedVersions===1)!.requestBytes as number;
+ expect((results.find(x=>x.storedVersions===100)!.requestBytes as number)-base).toBeLessThan(3000);
+},300000);
+
+it('OPC: CAPACITY chat history projects superseded scope bodies without rewriting stored turns',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const capture=process.env.V3_WORKBENCH_OUTPUT+'/capacity-requests.jsonl';
+ const all=()=>{try{return readFileSync(capture,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));}catch{return [];}};
+ const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'capacity-history',title:'历史容量文章',brief:'隔离测试选题',day:'2026-09-25',contentType:'article'}]});
+ const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'capacity-history',expectedRevision:null}]});
+ const {browser,page}=await planBrowser(f);let previous:{id:string}|null=null;
+ const rows:Array<Record<string,unknown>>=[];
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+work.sessionId);
+  for(let version=1;version<=12;version++){
+   const marker='CHAT_OLD_V'+String(version).padStart(2,'0')+'_';
+   previous=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:version-1,sourceContentId:previous?.id??null,kind:'brief',status:'final',title:'历史容量文章',body:marker+'正文'.repeat(500)});
+   const offset=all().length;
+   await page.getByLabel('消息',{exact:true}).fill('请继续修改当前稿件第 '+version+' 次，保留核心约束。');
+   await page.getByRole('button',{name:'发送',exact:true}).click();
+   await expect.poll(async()=>(await sql.query("select count(*)::int n from runtime_executions where session_id=$1 and state='completed'",[work.sessionId])).rows[0].n,{timeout:60000}).toBe(version);
+   const request=all().slice(offset);expect(request).toHaveLength(1);
+   const body=JSON.stringify(request[0]);
+   expect(body).toContain(marker);expect(Buffer.byteLength(body)).toBeLessThanOrEqual(31000);
+   for(let old=1;old<version;old++)expect(body).not.toContain('CHAT_OLD_V'+String(old).padStart(2,'0')+'_');
+   if(version>1)expect(body).toContain('保留核心约束');
+   rows.push({version,bytes:Buffer.byteLength(body),messages:request[0].messages.length,markers:[...new Set([...body.matchAll(/CHAT_OLD_V\d{2}_/g)].map(m=>m[0]))]});
+  }
+  const history=(await sql.query('select count(*)::int n from runtime_session_history where session_id=$1',[work.sessionId])).rows[0].n;
+  console.info('CAPACITY_CHAT_RESULTS',JSON.stringify({rows,history}));
+  expect(history).toBeGreaterThan(rows.at(-1)!.messages as number);
+  expect((rows.at(-1)!.markers as string[])).toEqual(['CHAT_OLD_V12_']);
+  const persisted=JSON.stringify((await sql.query('select item from runtime_session_history where session_id=$1 order by revision',[work.sessionId])).rows);
+  expect(persisted).toContain('CHAT_OLD_V01_');expect(persisted).toContain('CHAT_OLD_V12_');
+ }finally{await browser.close();}
+},300000);
 
 it('OPC: rejected cross-business adoption recovers its original request and permits corrected account adoption', async()=>{
  const f=await publishedDraft();await planFixtureModel(f.moduleId);

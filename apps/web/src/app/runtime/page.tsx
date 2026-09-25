@@ -126,7 +126,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   sessionStorage.removeItem('opc-runtime-send:'+sessionId);
   url.searchParams.delete('request');history.replaceState(null,'',url);
   setInput(current=>{if(current===submitted){localStorage.removeItem('opc-runtime-input:'+sessionId);return '';}return current;});
-  await execute.mutateAsync({executionId:admitted.executionId});if(alive.current)await Promise.all([view.refetch(),utils.opc.conversations.invalidate()]);
+  const executed=await execute.mutateAsync({executionId:admitted.executionId});
+  if(alive.current){if('unavailable' in executed&&executed.unavailable==='capacity')setError('本次必要材料超过模型输入容量。原请求和已完成内容已保留；请取消剩余执行后缩短材料再发送。');await Promise.all([view.refetch(),utils.opc.conversations.invalidate()]);}
  }catch{if(alive.current){setError('请求状态待核实。请读取原任务状态，不要重新发送相同内容。');await view.refetch();}}}
  const initialSend=useRef(false);
  useEffect(()=>{
@@ -190,7 +191,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  },[sessionId,workItem?.workItemId,view.data,videoBusy]);
 
  async function stop(executionId:string){setError('');try{await cancel.mutateAsync({executionId});await view.refetch();}catch{setError('取消状态待核实，请读取原任务。');}}
- async function recover(executionId:string){setError('');try{await execute.mutateAsync({executionId});await view.refetch();}catch{setError('暂时无法恢复，请保留原任务。');}}
+ async function recover(executionId:string){setError('');try{const executed=await execute.mutateAsync({executionId});if('unavailable' in executed&&executed.unavailable==='capacity')setError('原请求的必要材料超过模型输入容量，无法继续发送。已有内容已保留；请取消剩余执行后缩短材料再发送。');await view.refetch();}catch{setError('暂时无法恢复，请保留原任务。');}}
  const executions=view.data?.executions as Array<{executionId:string;createdAt?:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;contentAvailable:boolean}>|undefined;
  useEffect(()=>{
   const node=scrollArea.current;if(!node)return;

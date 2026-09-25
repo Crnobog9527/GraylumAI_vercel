@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { Agent, Runner, OpenAIChatCompletionsModel, tool, type Session } from '@openai/agents';
+import { Agent, Runner, OpenAIChatCompletionsModel, tool, type Session, type AgentInputItem } from '@openai/agents';
 import OpenAI from 'openai';
 import { z } from 'zod';
 
@@ -11,6 +11,7 @@ export type RuntimeRunnerInput = {
    * During recovery this callback may only return the original stored response. */
   exchange: (sequence: number, body: string) => Promise<string>;
   selectHistory: (history: unknown[], incoming: unknown[]) => Promise<unknown[]>;
+  filterModelInput?: (items: AgentInputItem[], instructions: string) => AgentInputItem[];
   tools: RuntimeTool[];
   signal?: AbortSignal;
 };
@@ -39,8 +40,14 @@ export async function runRuntime(input: RuntimeRunnerInput) {
   const runner=new Runner({model,tracingDisabled:true,traceIncludeSensitiveData:false});
   try{
     const result=await runner.run(agent,input.input,{session:input.session,maxTurns:input.maxTurns,
-      signal:input.signal,sessionInputCallback:async(history,incoming)=>await input.selectHistory(history,incoming) as typeof history});
+      signal:input.signal,sessionInputCallback:async(history,incoming)=>await input.selectHistory(history,incoming) as typeof history,
+      ...(input.filterModelInput?{callModelInputFilter:({modelData}:{modelData:{input:AgentInputItem[];instructions?:string}})=>({
+        ...modelData,input:input.filterModelInput!(modelData.input,modelData.instructions??input.instructions),
+      })}:{})});
     if(typeof result.finalOutput!=='string'||!result.finalOutput.trim())throw new Error('RUNTIME_EMPTY_RESULT');
     return result.finalOutput;
-  }catch{throw new Error('RUNTIME_EXECUTION_PENDING');}
+  }catch(error){
+    if(error instanceof Error&&['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY'].includes(error.message))throw error;
+    throw new Error('RUNTIME_EXECUTION_PENDING');
+  }
 }
