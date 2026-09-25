@@ -42,6 +42,7 @@ function RuntimeRoute(){
 }
 function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeModule:string}){
  const utils=trpc.useUtils();
+ const profile=trpc.user.getUserProfile.useQuery();
  const [sessionId,setSession]=useState(routeSession),[input,setInput]=useState(''),[selection,setSelection]=useState(''),[error,setError]=useState('');
  const [storedModule,setStoredModule]=useState('');
  const requestedModule=routeModule;
@@ -67,7 +68,10 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const moduleSelection=requestedModule||storedModule;
  const chosenModule=choices.data?.skills.find(skill=>skill.moduleId===moduleSelection);
  const activeSelection=selection||(moduleSelection?(chosenModule?'skill:'+chosenModule.moduleId:''):(choices.data?.defaultSkill?'skill:'+choices.data.defaultSkill.moduleId:ordinary));
- const end=useRef<HTMLDivElement>(null);
+ const scrollArea=useRef<HTMLDivElement>(null);
+ const scrollState=useRef({key:'',follow:true,signature:''});
+ const scrollKey=profile.data?.id&&sessionId?'opc-runtime-scroll:'+profile.data.id+':'+sessionId:'';
+ function rememberScroll(){const node=scrollArea.current;if(!node||!scrollKey||scrollState.current.key!==scrollKey)return;scrollState.current.follow=node.scrollHeight-node.clientHeight-node.scrollTop<80;try{sessionStorage.setItem(scrollKey,String(node.scrollTop));}catch{/* Browsing remains available without session storage. */}}
  const workItem=useMemo(()=>{
   const id=view.data?.scope?.kind==='work_item'?view.data.scope.workItemId:'';
   for(const business of library.data?.businesses??[])for(const account of business.accounts??[])for(const item of account.items??[])if(item.workItemId===id)return {...item,businessName:business.name,platform:account.platform,account:account.account,stage:account.stage};
@@ -90,7 +94,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const currentStoryboard=Boolean(currentScript&&versions.some(v=>v.kind==='storyboard'&&v.sourceContentId===currentScript.id));
  const currentEditing=Boolean(currentScript&&versions.some(v=>v.kind==='editing'&&v.sourceContentId===currentScript.id));
  const videoPromptEnded=Boolean(currentScript&&typeof window!=='undefined'&&localStorage.getItem('opc-video-ended:'+currentScript.id));
- useEffect(()=>{end.current?.scrollIntoView({block:'end'});},[view.data?.executions?.length,busy]);
+
  async function open(){setError('');try{
   const url=new URL(location.href),requestId=url.searchParams.get('start')??crypto.randomUUID();url.search='';url.searchParams.set('start',requestId);history.replaceState(null,'',url);
   const result=await start.mutateAsync({requestId,scope:{kind:'positioning_draft'}});
@@ -176,6 +180,24 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  async function stop(executionId:string){setError('');try{await cancel.mutateAsync({executionId});await view.refetch();}catch{setError('取消状态待核实，请读取原任务。');}}
  async function recover(executionId:string){setError('');try{await execute.mutateAsync({executionId});await view.refetch();}catch{setError('暂时无法恢复，请保留原任务。');}}
  const executions=view.data?.executions as Array<{executionId:string;createdAt?:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;contentAvailable:boolean}>|undefined;
+ useEffect(()=>{
+  const node=scrollArea.current;if(!node)return;
+  const align=()=>node.parentElement?.style.setProperty('--chat-scrollbar-space',((node.offsetWidth-node.clientWidth)/2)+'px');
+  align();const observer=new ResizeObserver(align);observer.observe(node);return()=>observer.disconnect();
+ },[]);
+ const scrollSignature=executions?.map(item=>[item.executionId,item.state,item.body,item.primaryBody].join(':')).join('|');
+ useEffect(()=>{
+  const node=scrollArea.current;if(!node||!scrollKey||scrollSignature===undefined)return;
+  if(scrollState.current.key!==scrollKey){
+   let saved:string|null=null;try{saved=sessionStorage.getItem(scrollKey);}catch{/* First entry uses the latest messages. */}
+   const top=saved===null?NaN:Number(saved);
+   node.scrollTop=Number.isFinite(top)?Math.max(0,top):node.scrollHeight;
+   scrollState.current={key:scrollKey,follow:node.scrollHeight-node.clientHeight-node.scrollTop<80,signature:scrollSignature};
+  }else if(scrollState.current.signature!==scrollSignature){
+   if(scrollState.current.follow)node.scrollTop=node.scrollHeight;
+   scrollState.current.signature=scrollSignature;
+  }
+ },[scrollKey,scrollSignature]);
  async function guide(){
   if(!workItem||!choices.data?.defaultSkill||!sessionId||contentType==='unknown')return;
   const stage=versions.at(-1)?.id??workItem.workItemId;
@@ -191,14 +213,14 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  },[workItem,view.data,choices.data,contentType,videoBusy]);
  async function setType(value:string){if(!workItem)return;const key='opc-content-type:'+workItem.workItemId;try{await navigator.locks.request(key,async()=>{const raw=localStorage.getItem(key);const frozen=raw?JSON.parse(raw):{requestId:crypto.randomUUID(),target:'item' as const,targetId:workItem.workItemId,expectedRevision:workItem.revision,patch:{title:workItem.title,brief:workItem.brief??'',day:workItem.day,contentType:value}};localStorage.setItem(key,JSON.stringify(frozen));setTypePending(true);await editItem.mutateAsync(frozen);localStorage.removeItem(key);setTypePending(false);await library.refetch();});}catch(cause){const code=cause instanceof Error?cause.message:'';if(['OPC_VERSION_CONFLICT','OPC_REQUEST_CONFLICT','OPC_DENIED','OPC_LIBRARY_INVALID'].includes(code)){localStorage.setItem(key+':rejected',localStorage.getItem(key)??'');localStorage.removeItem(key);setTypePending(false);await library.refetch();setError('类型保存已明确拒绝，已读取当前版本，请重新确认。');}else setError('类型保存状态待核实；再次选择会恢复原请求，不会覆盖为另一类型。');}}
 
- return <WorkspaceFrame area="chat" activeWorkItemId={workItem?.workItemId} notice={choices.data?.mode==='staging_test'?'Staging 真实对话测试 · 消耗测试预算':choices.data?.mode==='isolated'?'本地隔离 · 模型回复为模拟，保存写入本地测试服务':undefined} rightOpen={panelOpen} onToggleRight={()=>setPanelOpen(value=>!value)} right={workItem?(contentType==='unknown'?<div className={workStyles.typePending}><h2>当前成果</h2><p>先在对话中确认这条选题的内容类型，再起草和保存稿件。已确认前不会创建内容版本。</p></div>:<ContentEditor key={workItem.workItemId+':'+contentType} item={workItem} onSaved={()=>library.refetch()}>{(isVideo||Boolean(saved.data?.length))&&<section aria-label={isVideo?'视频派生成果':'其他 Skill 成果'} className={workStyles.videoResults}>{isVideo&&<><h2>分镜与剪辑建议</h2>{versions.filter(version=>version.kind==='storyboard'||version.kind==='editing').map(version=><details key={version.id}><summary>{version.kind==='storyboard'?'分镜':'剪辑建议'} · 第 {version.version} 版 · {version.status==='final'?'已定稿':'草稿'}{version.sourceContentId===currentScript?.id?' · 匹配当前口播稿':' · 旧口播稿版本'}</summary><p>{version.body}</p></details>)}</>}{saved.data?.map((artifact:{artifactId:string;version:number;body:string|null})=><details key={artifact.artifactId}><summary>其他 Skill 成果 · 第 {artifact.version} 版</summary><p>{artifact.body??'来源不可用'}</p></details>)}<Link href={'/library?item='+workItem.workItemId+'&return='+sessionId}>在资料库查看这个选题</Link></section>}</ContentEditor>):undefined}><main className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
+ return <WorkspaceFrame area="chat" activeWorkItemId={workItem?.workItemId} notice={choices.data?.mode==='staging_test'?'Staging 真实对话测试 · 消耗测试预算':choices.data?.mode==='isolated'?'本地隔离 · 模型回复为模拟，保存写入本地测试服务':undefined} rightOpen={panelOpen} onToggleRight={()=>setPanelOpen(value=>!value)} right={workItem?(contentType==='unknown'?<div className={workStyles.typePending}><h2>当前成果</h2><p>先在对话中确认这条选题的内容类型，再起草和保存稿件。已确认前不会创建内容版本。</p></div>:<ContentEditor key={workItem.workItemId+':'+contentType} item={workItem} onSaved={()=>library.refetch()}>{(isVideo||Boolean(saved.data?.length))&&<section aria-label={isVideo?'视频派生成果':'其他 Skill 成果'} className={workStyles.videoResults}>{isVideo&&<><h2>分镜与剪辑建议</h2>{versions.filter(version=>version.kind==='storyboard'||version.kind==='editing').map(version=><details key={version.id}><summary>{version.kind==='storyboard'?'分镜':'剪辑建议'} · 第 {version.version} 版 · {version.status==='final'?'已定稿':'草稿'}{version.sourceContentId===currentScript?.id?' · 匹配当前口播稿':' · 旧口播稿版本'}</summary><p>{version.body}</p></details>)}</>}{saved.data?.map((artifact:{artifactId:string;version:number;body:string|null})=><details key={artifact.artifactId}><summary>其他 Skill 成果 · 第 {artifact.version} 版</summary><p>{artifact.body??'来源不可用'}</p></details>)}<Link href={'/library?item='+workItem.workItemId+'&return='+sessionId}>在资料库查看这个选题</Link></section>}</ContentEditor>):undefined}><main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}>
   <header className={workStyles.workHead}>
    <div className={workStyles.workTitle}><h1>{workItem?.title??'工作对话'}</h1>{!workItem&&<small>{(choices.data?.mode??view.data?.mode)==='staging_test'?'Staging 真实对话测试':'本地模拟体验'}</small>}</div>
    {workItem?<div className={workStyles.workMeta}><span>{workItem.platform} · {workItem.account}</span><Link href={'/library?item='+workItem.workItemId+'&return='+sessionId}>工作信息</Link>{!panelOpen&&<button type="button" onClick={()=>setPanelOpen(true)}>展开成果</button>}</div>:<Button variant="outline" disabled={busy||!choices.data||Boolean(input.trim())||Boolean(requestedModule&&!chosenModule)} onClick={open}><Plus className="mr-2 h-4 w-4"/>{requestedModule?'用此功能准备新任务':'新建对话'}</Button>}
   </header>
   {requestedModule&&!chosenModule&&<p className="shrink-0 px-6 py-1 text-center text-[11px] text-[var(--text-tertiary)]">所选功能当前不满足本地工作区准入条件；不会自动换用其他功能。</p>}
   {(choices.error||view.error||library.error)&&<p role="alert" className="p-4 text-center">当前环境不可用，或你无权访问此工作。</p>}
-  <div className="min-h-0 flex-1 overflow-y-auto" aria-label="对话记录">
+  <div ref={scrollArea} onScroll={rememberScroll} className={workStyles.scrollArea} aria-label="对话记录">
    {!executions?.length&&<div className="mx-auto flex min-h-64 max-w-xl flex-col items-center justify-center px-6 py-12 text-center"><Bot className="mb-4 h-9 w-9 text-[var(--color-primary)]"/><h2 className="text-2xl font-semibold">开始一段对话</h2><p className="mt-3 text-sm text-[var(--text-tertiary)]">{workItem?'已带入选题简报和原工作方法，正在根据当前进度准备引导。':sessionId?'输入一条消息，发送后可刷新查看记录。':'点击右上角“新建对话”，开始体验。'}</p></div>}
    <section className={workStyles.transcript}>{workItem&&typePending&&<Button disabled={editItem.isPending} onClick={()=>setType('unknown')}>恢复类型保存</Button>}{workItem&&contentType==='unknown'&&<section className="rounded-xl border p-4" aria-label="确认内容类型"><h2>这条选题准备做成什么内容？</h2><p>先确认形式，再一起细化重点和结构。</p><div className="flex gap-2 mt-3">{['article','image_text','video'].map(value=><Button key={value} disabled={busy||editItem.isPending||typePending} onClick={()=>setType(value)}>{typeLabel[value]}</Button>)}</div></section>}{error.startsWith('引导请求')&&<Button disabled={busy} onClick={guide}>恢复引导</Button>}{executions?.map((e,index)=><div key={e.executionId}>{e.createdAt&&(index===0||!executions[index-1].createdAt||transcriptDay(executions[index-1].createdAt!)!==transcriptDay(e.createdAt))&&<p className={workStyles.dateMarker}>{transcriptDate(e.createdAt)}</p>}<article className={workStyles.turn}>
     {e.input&&!e.input.startsWith('[OPC_WORK_CONTINUE_V1]')&&<p className={workStyles.userMessage}>{e.input.startsWith('[OPC_VIDEO_PACKAGE_V1]')?(e.input.includes('只生成分镜脚本')?'请基于已定稿口播稿生成分镜脚本。':e.input.includes('只生成剪辑建议')?'请基于已保存的分镜生成剪辑建议。':'请先完成分镜脚本，再基于分镜生成剪辑建议。'):e.input.replace(/^\[OPC_SCRIPT_V1\]\s*/, '')}</p>}
@@ -216,9 +238,9 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
    </article></div>)}
    {isVideo&&currentScript&&videoPromptEnded&&(!currentStoryboard||!currentEditing)&&<Button variant="outline" onClick={()=>{localStorage.removeItem('opc-video-ended:'+currentScript.id);setVideoUiRevision(v=>v+1);}}>继续这版口播稿的分镜或剪辑</Button>}
    {isVideo&&currentScript&&!videoPromptEnded&&(!currentStoryboard||!currentEditing)&&<section aria-label="口播稿后续选择" className="space-y-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4"><h2 className="font-medium">{currentStoryboard?'分镜已保存。要基于这版分镜生成剪辑建议吗？':'口播稿已定稿。要先制作分镜脚本吗？'}</h2><p className="text-sm text-[var(--text-secondary)]">本次只绑定口播稿第 {currentScript.version} 版。选择后才会调用 Agent；以后重新定稿口播稿时不会自动生成。</p><div className="flex flex-wrap gap-2">{!currentStoryboard&&<Button disabled={busy||currentEditing} onClick={()=>chooseVideo('both')}>先做分镜，再生成剪辑建议</Button>}{!currentStoryboard&&<Button variant="outline" disabled={busy} onClick={()=>chooseVideo('storyboard')}>只生成分镜</Button>}{currentStoryboard&&<Button variant="outline" disabled={busy||currentEditing} onClick={()=>chooseVideo('editing')}>只生成剪辑建议</Button>}<Button variant="ghost" disabled={busy} onClick={()=>chooseVideo('end')}>暂时结束</Button></div><p className="text-xs text-[var(--text-tertiary)]">也可以在消息框输入同样的选择；提问卡和自然语言只执行同一个业务动作。</p></section>}
-{busy&&<p role="status" className="flex items-center gap-2 text-sm text-[var(--text-tertiary)]"><Loader2 className="h-4 w-4 animate-spin"/>正在处理，请稍候…</p>}<div ref={end}/></section>
+{busy&&<p role="status" className="flex items-center gap-2 text-sm text-[var(--text-tertiary)]"><Loader2 className="h-4 w-4 animate-spin"/>正在处理，请稍候…</p>}</section>
   </div>
-  {sessionId&&<footer className={composerStyles.zone}><div className={composerStyles.wrap}>
+  {sessionId&&<footer className={`${composerStyles.zone} ${workStyles.composerZone}`}><div className={composerStyles.wrap}>
    {workItem&&isVideo&&<Button variant="outline" disabled={busy||Boolean(view.data?.activeExecution)||!choices.data?.defaultSkill} onClick={()=>send(true)}>{currentScript?'修改口播稿':'起草口播稿'}</Button>}
    <WorkComposer value={input} onChange={updateInput} onSend={()=>void send()} disabled={busy||Boolean(view.data?.activeExecution)} sendDisabled={!workContextReady||!choices.data||!activeSelection} sessionId={sessionId} skillId={activeSelection.startsWith('skill:')?activeSelection.slice(6):''} onSkillChange={id=>{setSelection(id?'skill:'+id:ordinary);if(id)localStorage.setItem('opc-runtime-skill:'+sessionId,id);else localStorage.removeItem('opc-runtime-skill:'+sessionId);}} note={workItem?'本次讨论参考当前工作的最新成果。Enter 发送，Shift + Enter 换行。':'可以自由提问；Agent 按需查阅相关资料。Enter 发送，Shift + Enter 换行。'}/>
   </div></footer>}{error&&<p role="alert" className="shrink-0 p-3 text-center text-sm">{error}</p>}

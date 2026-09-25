@@ -112,6 +112,7 @@ function parseAdoption(text: string | null | undefined): string[] | null {
 export default function TopicWorkspacePage() {
   const params = useParams<{ draftId: string }>();
   const draftId = params?.draftId ?? '';
+  const profile=trpc.user.getUserProfile.useQuery();
   const [panelOpen,setPanelOpen]=useState(true);
   const [infoOpen,setInfoOpen]=useState(false);
   const free=useFreeConversation();
@@ -129,7 +130,10 @@ export default function TopicWorkspacePage() {
   const [adopted, setAdopted] = useState<
     Array<{ projectId: string; workItemId: string; sessionId: string; itemId: string }>
   >([]);
-  const end = useRef<HTMLDivElement>(null);
+  const scrollArea=useRef<HTMLDivElement>(null);
+  const scrollState=useRef({key:'',follow:true,signature:''});
+  const scrollKey=profile.data?.id&&draftId?'opc-topic-scroll:'+profile.data.id+':'+draftId:'';
+  function rememberScroll(){const node=scrollArea.current;if(!node||!scrollKey||scrollState.current.key!==scrollKey)return;scrollState.current.follow=node.scrollHeight-node.clientHeight-node.scrollTop<80;try{sessionStorage.setItem(scrollKey,String(node.scrollTop));}catch{/* Optional presentation state. */}}
   const persistedExecution = useRef('');
   const adoptedExecution = useRef('');
 
@@ -233,9 +237,7 @@ export default function TopicWorkspacePage() {
     revision: number;
   }>;
 
-  useEffect(() => {
-    end.current?.scrollIntoView({ block: 'end' });
-  }, [view.data?.executions?.length, busy]);
+
 
   const executions = view.data?.executions as
     | Array<{
@@ -247,6 +249,20 @@ export default function TopicWorkspacePage() {
         contentAvailable: boolean;
       }>
     | undefined;
+
+  const scrollSignature=executions?.map(item=>[item.executionId,item.state,item.body,item.primaryBody].join(':')).join('|');
+  useEffect(()=>{
+    const node=scrollArea.current;if(!node||!scrollKey||scrollSignature===undefined)return;
+    if(scrollState.current.key!==scrollKey){
+      let saved:string|null=null;try{saved=sessionStorage.getItem(scrollKey);}catch{/* Use latest messages on first entry. */}
+      const top=saved===null?NaN:Number(saved);
+      node.scrollTop=Number.isFinite(top)?Math.max(0,top):node.scrollHeight;
+      scrollState.current={key:scrollKey,follow:node.scrollHeight-node.clientHeight-node.scrollTop<80,signature:scrollSignature};
+    }else if(scrollState.current.signature!==scrollSignature){
+      if(scrollState.current.follow)node.scrollTop=node.scrollHeight;
+      scrollState.current.signature=scrollSignature;
+    }
+  },[scrollKey,scrollSignature]);
 
   function failureMessage(cause: unknown) {
     const message = cause instanceof Error ? cause.message : '';
@@ -524,7 +540,7 @@ export default function TopicWorkspacePage() {
 
       {bound && sourceAvailable && (
         <>
-          <div className="min-h-64 flex-1 shrink-0 overflow-y-auto" aria-label="选题对话记录">
+          <div ref={scrollArea} onScroll={rememberScroll} className="min-h-0 flex-1 overflow-y-auto" aria-label="选题对话记录">
             {!executions?.length && (
               <div className="mx-auto flex min-h-48 max-w-xl flex-col items-center justify-center px-6 py-10 text-center">
                 <img className="mb-3 h-8 w-8" src="/graylum-logo.png" alt="" />
@@ -607,7 +623,7 @@ export default function TopicWorkspacePage() {
                   <Loader2 className="h-4 w-4 animate-spin" />正在处理，请稍候…
                 </p>
               )}
-              <div ref={end} />
+
             </section>
           </div>
 

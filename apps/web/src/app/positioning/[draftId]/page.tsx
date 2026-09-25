@@ -287,6 +287,14 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [workInfoOpen,setWorkInfoOpen]=useState(false);
   useEffect(()=>{if(!workInfoOpen)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape')setWorkInfoOpen(false);};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close);},[workInfoOpen]);
   const [resultBodyNode,setResultBodyNode]=useState<HTMLDivElement|null>(null);
+  useEffect(()=>{
+    if(!resultBodyNode)return;
+    const key='opc-position-result-scroll:'+draftId;
+    const frame=requestAnimationFrame(()=>{resultBodyNode.scrollTop=Number(sessionStorage.getItem(key))||0;});
+    const save=()=>sessionStorage.setItem(key,String(resultBodyNode.scrollTop));
+    resultBodyNode.addEventListener('scroll',save,{passive:true});
+    return()=>{cancelAnimationFrame(frame);resultBodyNode.removeEventListener('scroll',save);};
+  },[resultBodyNode,draftId]);
   const [items, setItems] = useState<Item[]>([]),
     [dirtyPlan, setDirtyPlan] = useState(false),
     [planCandidate, setPlanCandidate] = useState<Item[] | null>(null),
@@ -318,7 +326,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [confirmingQuestion, setConfirmingQuestion] = useState(false);
   const confirmationLock = useRef(false);
   const chatScroll = useRef<HTMLDivElement>(null);
-  const attachChatScroll = useCallback((node:HTMLDivElement|null)=>{chatScroll.current=node;if(node)requestAnimationFrame(()=>{if(chatScroll.current===node)node.scrollTop=node.scrollHeight;});},[]);
+  const chatRestored = useRef(false), chatFollow = useRef(true);
+  const chatKey = 'opc-position-chat-scroll:' + draftId;
+  const attachChatScroll = useCallback((node:HTMLDivElement|null)=>{chatScroll.current=node;},[]);
   const [mentorInput, setMentorInput] = useState("");
   const free=useFreeConversation();
   const [manualMentorEnabled, setManualMentorEnabled] = useState(false);
@@ -596,8 +606,15 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     planCandidateRound,
   ]);
   useEffect(() => {
-    if (chatScroll.current) chatScroll.current.scrollTop = chatScroll.current.scrollHeight;
-  }, [history.data]);
+    const node=chatScroll.current;
+    if(!node||!history.data)return;
+    if(!chatRestored.current){
+      const saved=sessionStorage.getItem(chatKey);
+      node.scrollTop=saved===null?node.scrollHeight:Number(saved)||0;
+      chatFollow.current=node.scrollHeight-node.clientHeight-node.scrollTop<64;
+      chatRestored.current=true;
+    }else if(chatFollow.current) node.scrollTop=node.scrollHeight;
+  }, [history.data,chatKey]);
   function captureInformationBase(stepId: string) {
     const key = "opc-information-base:" + draftId + ":" + stepId;
     if (!sessionStorage.getItem(key)) sessionStorage.setItem(key, JSON.stringify(d.information[stepId].values ?? {}));
@@ -1098,6 +1115,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       setError("上一条发给导师的内容仍在核对。请先用“继续核对这条原请求”恢复，不会重复发送。");
       return;
     }
+    chatFollow.current = true;
     await run(async () => {
       await resumeInterruptedOpening();
       await flushInformation(step.id);
@@ -1440,6 +1458,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     }
   }
   async function generatePlan() {
+    chatFollow.current = true;
     await run(async () => {
       await resumeInterruptedOpening();
       if (hasUnsavedInformation) throw new Error("save information first");
@@ -1818,7 +1837,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   );
   return (
     <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'本地模拟 · 回复、保存与交接均为演示'} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<div className={resultStyles.panel}><header><h2>{planView?'已采用选题':'已确认的定位'}</h2><p>{snap.state==='draft'?'已核对信息与当前问题':'当前策略与信息状态'}</p></header><div className={resultStyles.body} ref={setResultBodyNode}>{steps.filter(step=>snap.steps[step.id].valid).map((step,index)=><details key={step.id} open={step.id===selectedStep?.id}><summary><span>{index+1}. {step.title}</span><small>已确认</small></summary><div className={resultStyles.fields}>{(d.information[step.id]?.schema??[]).map((field:{id:string;title:string})=><div key={field.id}><strong>{field.title}</strong><p>{d.information[step.id]?.values?.[field.id]?.value||'待补充'}</p></div>)}</div></details>)}</div></div>}>
-    <main className={`${resultStyles.workspaceMain} h-full w-full overflow-y-auto text-[var(--text-primary)]`}><div className={resultStyles.workspaceContent}>
+    <main className={`${resultStyles.workspaceMain} ${!planView ? resultStyles.conversationPage : ""} h-full w-full overflow-y-auto text-[var(--text-primary)]`}><div className={resultStyles.workspaceContent}>
       <header className={resultStyles.positionTop}>
         <h1>{planView ? "第一周计划" : discussionAccount ? (discussionAccount.displayName??discussionAccount.account)+" · 定位策略" : manualEntry ? "录入已有定位" : "我的定位分析"}</h1>
         <div className={resultStyles.positionActions}>
@@ -1966,6 +1985,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   </div>
                   <div
                     ref={attachChatScroll}
+                    onScroll={event=>{const node=event.currentTarget;chatFollow.current=node.scrollHeight-node.clientHeight-node.scrollTop<64;if(chatRestored.current)sessionStorage.setItem(chatKey,String(node.scrollTop));}}
                     role="log"
                     aria-label="完整导师消息"
                     aria-live="polite"
@@ -2364,6 +2384,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         })}
       </section>
       </>}
+      {!planView && <footer className={resultStyles.publishBar}><div>
       {!planView && snap.state === "published" && (
         <Button
           variant="outline"
@@ -2428,6 +2449,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           继续生成第一周选题
         </Button>
       )}
+      </div><p>确认后保存为正式定位；生成选题将在下一步单独确认。</p>
+      {d.report?.available && <Link href={`/positioning/${draftId}/topics`}>进入选题工作对话 →</Link>}
+      </footer>}
       {consentOpen && (
         <div
           ref={consentDialog}
@@ -2464,12 +2488,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           </div>
         </div>
       )}
-      {!planView && (
-        <p className="text-xs text-[var(--text-secondary)]">
-          确认正式定位只会发布你的定位版本，不会调用模型。生成第一周选题是下一步的独立动作：你明确选择“继续生成”后才会调用模型并按额度计费；候选不会自动保存为计划，也不会自动创建账号或选题。
-        </p>
-      )}
-      {!planView && d.report?.available && <Link className="block underline" href={`/positioning/${draftId}/topics`}>进入选题工作对话</Link>}
       {planView && <Link className="block underline" href={`/positioning/${draftId}`}>返回定位与导师对话</Link>}
       {planView && !d.report?.available && <p role="status">请先确认正式定位，再制定第一周计划。原定位和对话仍保留。</p>}
           {planView && retainedPlan && (

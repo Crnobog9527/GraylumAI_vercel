@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { trpc } from '@/trpc/client';
+import { useScrollPosition } from '@/components/opc/use-scroll-position';
 import styles from './workspace-search.module.css';
 
 type Work = { workItemId:string;sessionId:string;title:string;chatName?:string;brief:string|null;archived?:boolean;deleted?:boolean;uiRevision?:number };
@@ -19,6 +20,8 @@ export default function WorkspaceSearch(){
  const changeWorkUi=trpc.opc.workUiChange.useMutation();
  useEffect(()=>{const params=new URL(location.href).searchParams;setReturnTo(params.get('returnTo')??sessionStorage.getItem('opc-work-return')??'');},[]);
  const back=/^\/(runtime\?session=[0-9a-f-]{36}|positioning\/[0-9a-f-]{36}(\/topics)?)([&#?].*)?$/i.test(returnTo)?returnTo:'/positioning';
+ const profile=trpc.user.getUserProfile.useQuery();
+ const scrollProps=useScrollPosition(profile.data?.id?'opc-search-scroll:'+profile.data.id+':'+(query):null,library.isSuccess&&drafts.isSuccess&&modules.isSuccess);
  const normalized=query.trim().toLocaleLowerCase();
  const matches=(...values:(string|undefined|null)[])=>!normalized||values.some(value=>value?.toLocaleLowerCase().includes(normalized));
  const accounts=((library.data?.businesses??[]) as Business[]).flatMap(business=>business.accounts);
@@ -38,7 +41,7 @@ export default function WorkspaceSearch(){
   catch(cause){const code=cause instanceof Error?cause.message:'';if(['OPC_VERSION_CONFLICT','OPC_REQUEST_CONFLICT','OPC_DENIED','OPC_LIBRARY_INVALID'].includes(code)){sessionStorage.removeItem(key);await library.refetch();setError('恢复未保存（'+code+'）。列表已刷新，请核对后重试。');}else setError('恢复结果暂不确定；原请求已保留，请用同一操作核对，避免重复写入。');}
   finally{setRestoring('');}
  }
- return <WorkspaceFrame area="search"><main className={styles.page}>
+ return <WorkspaceFrame area="search"><main {...scrollProps} className={styles.page}>
   <header className={styles.heading}><h1>搜索</h1><Link href={back}>返回原工作 →</Link></header>
   <p className={styles.intro}>查找工作、归档记录和功能。打开具体工作才会切换对话；恢复归档不会自动打开。</p>
   <label className={styles.search} htmlFor="workspace-search">搜索工作或功能</label>

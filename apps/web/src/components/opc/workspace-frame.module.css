@@ -5,7 +5,7 @@
  --scroll-thumb:#c4c4c4;--scroll-track:transparent;
  --primary:0 0% 13%;--primary-foreground:0 0% 100%;
  height:100dvh;overflow:hidden;background:#f7f7f7;color:#262626;color-scheme:light;scrollbar-color:var(--scroll-thumb) var(--scroll-track);scrollbar-width:thin;
- font:400 16px/24px ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",Ubuntu,Cantarell,"Helvetica Neue","San Francisco Pro",sans-serif,"PingFang SC","Microsoft YaHei","Source Han Sans SC","Noto Sans SC";
+ font:400 16px/24px var(--font-primary);
 }
 .workspace *{box-sizing:border-box;scrollbar-color:var(--scroll-thumb) var(--scroll-track);scrollbar-width:thin}
 .workspace *::-webkit-scrollbar{width:7px;height:7px}.workspace *::-webkit-scrollbar-thumb{background:var(--scroll-thumb);border-radius:9px}.workspace *::-webkit-scrollbar-thumb:hover{background:#999}

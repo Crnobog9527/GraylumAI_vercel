@@ -1,6 +1,6 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { BookOpen, ChevronDown, Ellipsis, Grid2X2, LogOut, Menu, PanelRightClose, Pencil, Pin, Sparkles, UserRound, X } from 'lucide-react';
@@ -48,6 +48,43 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  const drafts=trpc.opc.list.useQuery();
  const conversations=trpc.opc.conversations.useQuery(undefined,{staleTime:0});
  const profile=trpc.user.getUserProfile.useQuery();
+ const historyRef=useRef<HTMLDivElement>(null);
+ const sidebarActor=profile.data?.id;
+ const [restoredActor,setRestoredActor]=useState<string>();
+ const pendingScroll=useRef<number|null>(null);
+ const restoringScroll=useRef(false);
+ const sidebarTouched=useRef(false);
+ const previousSidebarActor=useRef<string|undefined>(undefined);
+ const sidebarSnapshot=useRef({groupOpen,expanded,archiveView});
+ sidebarSnapshot.current={groupOpen,expanded,archiveView};
+ const saveSidebar=useCallback(()=>{
+  if(!sidebarActor||restoredActor!==sidebarActor)return;
+  try{sessionStorage.setItem('opc-sidebar-view:'+sidebarActor,JSON.stringify({...sidebarSnapshot.current,scrollTop:pendingScroll.current??historyRef.current?.scrollTop??0}));}catch{/* View preferences must not block navigation. */}
+ },[sidebarActor,restoredActor]);
+ function takeSidebarControl(){sidebarTouched.current=true;pendingScroll.current=null;restoringScroll.current=false;}
+ useLayoutEffect(()=>{
+  if(!sidebarActor)return;
+  if(previousSidebarActor.current&&previousSidebarActor.current!==sidebarActor)sidebarTouched.current=false;
+  previousSidebarActor.current=sidebarActor;
+  let saved:Record<string,unknown>={};
+  try{const value=JSON.parse(sessionStorage.getItem('opc-sidebar-view:'+sidebarActor)??'null');if(value&&typeof value==='object')saved=value;}catch{/* Ignore invalid view preferences. */}
+  setGroupOpen(saved.groupOpen&&typeof saved.groupOpen==='object'?Object.fromEntries(Object.entries(saved.groupOpen).filter(([,value])=>typeof value==='boolean')):{});
+  setExpanded(Array.isArray(saved.expanded)?saved.expanded.filter((value):value is string=>typeof value==='string'):[]);
+  setArchiveView(saved.archiveView===true);
+  pendingScroll.current=sidebarTouched.current?null:typeof saved.scrollTop==='number'&&Number.isFinite(saved.scrollTop)?Math.max(0,saved.scrollTop):0;
+  restoringScroll.current=pendingScroll.current!==null;setRestoredActor(sidebarActor);
+ },[sidebarActor]);
+ // Wait for every list and the restored expansion state before measuring. A
+ // pointer/wheel/key action takes control, so delayed data never moves the user.
+ useLayoutEffect(()=>{
+  if(!sidebarActor||restoredActor!==sidebarActor||!library.isSuccess||!drafts.isSuccess||!conversations.isSuccess||pendingScroll.current===null)return;
+  let frame=0;
+  const restore=()=>{const element=historyRef.current;if(!element||pendingScroll.current===null)return;element.scrollTop=pendingScroll.current;};
+  restore();
+  frame=requestAnimationFrame(()=>{restore();frame=requestAnimationFrame(()=>{if(pendingScroll.current!==null){restore();pendingScroll.current=null;restoringScroll.current=false;saveSidebar();}});});
+  return()=>cancelAnimationFrame(frame);
+ },[sidebarActor,restoredActor,library.isSuccess,drafts.isSuccess,conversations.isSuccess,library.data,drafts.data,conversations.data,groupOpen,expanded,archiveView,saveSidebar]);
+ useEffect(()=>{saveSidebar();},[groupOpen,expanded,archiveView,saveSidebar]);
  const credits=useCreditsBalance();
  const createTicket=trpc.ticket.createTicket.useMutation();
  const changeWorkUi=trpc.opc.workUiChange.useMutation();
@@ -115,7 +152,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
      <button disabled><img className={styles.navIcon} src="/opc-reference/calendar-blank.svg" alt=""/>发布排期 <small>待接入</small></button>
      <button disabled><img className={styles.navIcon} src="/opc-reference/chart-bar.svg" alt=""/>数据复盘 <small>待接入</small></button>
     </nav>
-    <div className={styles.history} aria-label="平台、账号与工作" onScroll={()=>setMenuId('')}>
+    <div ref={historyRef} className={styles.history} aria-label="平台、账号与工作" onPointerDownCapture={takeSidebarControl} onWheelCapture={takeSidebarControl} onTouchStartCapture={takeSidebarControl} onKeyDownCapture={takeSidebarControl} onScroll={()=>{setMenuId('');if(!restoringScroll.current&&pendingScroll.current===null)saveSidebar();}}>
     <div className={styles.historyHead}><span>{archiveView?'归档记录':'平台 · 账号 · 工作'}</span><button onClick={()=>setArchiveView(value=>!value)}>{archiveView?'返回最近工作':'查看归档'}</button></div>
      {[...platforms].map(([platform,accounts])=>{
       const visible=accounts.map(account=>{
