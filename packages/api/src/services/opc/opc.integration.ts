@@ -711,13 +711,8 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     await page.waitForURL((url) => url.pathname === "/positioning", {
       timeout: 90000,
     });
-    await page.getByRole("button",{name:"梳理账号定位",exact:true}).first().click();
-    await page.getByRole("dialog",{name:"新建账号策略"})
-      .getByRole("button",{name:"整理另一份已有定位"}).click();
-    await page.getByRole("combobox", { name: "定位方法" }).selectOption(f.registration);
-    await page.getByLabel("业务名称",{exact:true}).fill("已有定位测试业务");
-    await page.getByRole("button", { name: "带入已有定位", exact: true }).click();
-    await page.waitForURL((url) => url.pathname.startsWith("/positioning/"));
+    const fixtureDraft=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'manual',businessName:'已有定位测试业务'});
+    await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+fixtureDraft.draftId);
     const draftUrl = page.url();
     await expect
       .poll(() => page.getByLabel("全程导师聊天").count(), {
@@ -2012,15 +2007,8 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     await page.waitForURL((url) => url.pathname === "/positioning", {
       timeout: 90000,
     });
-    await page.getByRole("button",{name:"梳理账号定位",exact:true}).first().click();
-    await page.getByRole("dialog",{name:"新建账号策略"})
-      .getByRole("button",{name:"从头分析新定位"}).click();
-    await page
-      .getByRole("combobox", { name: "定位方法" })
-      .selectOption(f.registration);
-    await page.getByLabel("业务名称",{exact:true}).fill("导师引导测试业务");
-    await page.getByRole("button", { name: "开始 Agent 引导", exact: true }).click();
-    await page.waitForURL((url) => url.pathname.startsWith("/positioning/"));
+    const fixtureDraft=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'mentor',businessName:'导师引导测试业务'});
+    await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+fixtureDraft.draftId);
 
     const draftUrl = page.url();
     const draftId = new URL(draftUrl).pathname.split("/").at(-1)!;
@@ -2360,17 +2348,8 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
     await page.waitForURL((url) => url.pathname === "/positioning", {
       timeout: 90000,
     });
-    await page.getByRole("button",{name:"梳理账号定位",exact:true}).first().click();
-    await page.getByRole("dialog",{name:"新建账号策略"})
-      .getByRole("button",{name:"整理另一份已有定位"}).click();
-    await page
-      .getByRole("combobox", { name: "定位方法" })
-      .selectOption(f.registration);
-    await page.getByLabel("业务名称",{exact:true}).fill("已有定位引导测试业务");
-    await page
-      .getByRole("button", { name: "带入已有定位", exact: true })
-      .click();
-    await page.waitForURL((url) => url.pathname.startsWith("/positioning/"));
+    const fixtureDraft=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'manual',businessName:'已有定位引导测试业务'});
+    await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+fixtureDraft.draftId);
 
     const draftId = new URL(page.url()).pathname.split("/").at(-1)!;
     async function expectOpening(label: string, title: string) {
@@ -7408,15 +7387,14 @@ it("OPC: U2 browser preserves later edits across unknown saves, conflict and ano
 it("OPC: new business start restores the complete frozen request before another business can begin", async () => {
   const f=await publishedDraft();
   const originalBusiness=(await sql.query('select business_id::text id from opc_draft_businesses where draft_id=$1',[f.d.draftId])).rows[0].id;
-  const otherBusiness=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'manual',businessName:'另一个业务'});
   const otherActor=await publishedDraft();
   const {browser,page}=await planBrowser(f);
   try{
     await page.goto(process.env.V3_LOCAL_APP+'/positioning');
     await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
-    await page.getByRole('dialog',{name:'新建账号策略'}).getByRole('button',{name:'从头分析新定位'}).click();
-    await page.getByLabel('定位方法').selectOption(f.registration);
-    await page.getByLabel('所属业务').selectOption(originalBusiness);
+    await page.getByRole('dialog',{name:'梳理账号定位'}).getByRole('button',{name:'从头分析新定位'}).click();
+    expect(await page.getByRole('combobox').count()).toBe(0);
+    await page.getByLabel('业务名称',{exact:true}).fill('独立新业务');
     let lost=0;
     await page.route('**/api/trpc/opc.start*',async route=>{const response=await route.fetch();expect(response.ok()).toBe(true);lost+=1;await route.abort();});
     await page.getByRole('button',{name:'开始 Agent 引导',exact:true}).click();
@@ -7424,16 +7402,17 @@ it("OPC: new business start restores the complete frozen request before another 
     await expect.poll(()=>lost,{timeout:60000}).toBe(1);
     const startKey='opc-start-operation:'+f.actor;
     const frozen=JSON.parse((await page.evaluate(key=>sessionStorage.getItem(key),startKey))!);
-    expect(frozen).toMatchObject({actorId:f.actor,registration:f.registration,mode:'mentor',businessId:originalBusiness});
-    await page.getByLabel('所属业务').selectOption(otherBusiness.businessId);
-    expect(await page.getByRole('button',{name:'我从零开始 · Agent 引导',exact:true}).isDisabled()).toBe(true);
+    expect(frozen).toMatchObject({actorId:f.actor,mode:'mentor',businessName:'独立新业务'});
+    expect(frozen.businessId).toBeNull();
+    await page.getByLabel('业务名称',{exact:true}).fill('另一个新业务');
+    expect(await page.getByRole('button',{name:'开始 Agent 引导',exact:true}).isDisabled()).toBe(true);
     await page.context().clearCookies();
     await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/positioning');
     await page.getByPlaceholder('name@example.com').fill(otherActor.email);
     await page.getByPlaceholder('输入你的密码').fill(otherActor.password);
     await page.getByRole('button',{name:'登录',exact:true}).last().click();
     await page.waitForURL(url=>url.pathname==='/positioning');
-    await page.getByRole('heading',{name:'开始经营你的账号',exact:true}).waitFor();
+    await page.getByRole('heading',{name:'今天，想推进什么？',exact:true}).waitFor();
     expect(await page.getByRole('button',{name:'恢复上次开始请求',exact:true}).count()).toBe(0);
     expect(await page.evaluate(key=>sessionStorage.getItem(key),startKey)).toBeTruthy();
     await page.context().clearCookies();
@@ -7442,13 +7421,15 @@ it("OPC: new business start restores the complete frozen request before another 
     await page.getByPlaceholder('输入你的密码').fill(f.password);
     await page.getByRole('button',{name:'登录',exact:true}).last().click();
     await page.waitForURL(url=>url.pathname==='/positioning');
-    await page.getByRole('heading',{name:'开始经营你的账号',exact:true}).waitFor();
+    await page.getByRole('heading',{name:'今天，想推进什么？',exact:true}).waitFor();
     await page.getByRole('button',{name:'恢复上次开始请求',exact:true}).waitFor();
     await page.unroute('**/api/trpc/opc.start*');
     await page.getByRole('button',{name:'恢复上次开始请求',exact:true}).click();
     await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname),{timeout:60000});
     const restoredDraft=page.url().split('/').at(-1)!;
-    expect((await sql.query('select business_id::text id from opc_draft_businesses where draft_id=$1',[restoredDraft])).rows[0].id).toBe(originalBusiness);
+    const restoredBusiness=(await sql.query('select business_id::text id from opc_draft_businesses where draft_id=$1',[restoredDraft])).rows[0].id;
+    expect(restoredBusiness).not.toBe(originalBusiness);
+    expect((await sql.query('select name from opc_businesses where id=$1',[restoredBusiness])).rows[0].name).toBe('独立新业务');
     expect(await page.evaluate(key=>sessionStorage.getItem(key),startKey)).toBeNull();
   }finally{await browser.close();}
 },180000);
@@ -7825,12 +7806,8 @@ it("OPC: approved six-stage guided positioning keeps one editable conversation a
     await page.getByPlaceholder('输入你的密码').fill(f.password);
     await page.getByRole('button',{name:'登录',exact:true}).last().click();
     await page.waitForURL(url=>url.pathname==='/positioning');
-    await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
-    await page.getByRole('dialog',{name:'新建账号策略'}).getByRole('button',{name:'从头分析新定位'}).click();
-    await page.getByRole('combobox',{name:'定位方法'}).selectOption(f.registration);
-    await page.getByLabel('业务名称',{exact:true}).fill('摄影入门课程');
-    await page.getByRole('button',{name:'开始 Agent 引导',exact:true}).click();
-    await page.waitForURL(url=>url.pathname.startsWith('/positioning/'));
+    const fixtureDraft=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'mentor',businessName:'摄影入门课程'});
+    await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+fixtureDraft.draftId);
     const draftId=page.url().split('/positioning/')[1]?.split('?')[0]??'';
     expect(draftId).toBeTruthy();
     const phases=page.getByRole('navigation',{name:'定位步骤'}).getByRole('button');
@@ -8604,8 +8581,9 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
     await page.setViewportSize({width:1600,height:900});
     await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-positioning-choice-1600x900.png'});
-    await page.getByRole('dialog',{name:'新建账号策略'}).getByRole('button',{name:'从头分析新定位'}).click();
-    await page.getByRole('combobox',{name:'定位方法'}).selectOption(f.registration);
+    await page.getByRole('dialog',{name:'梳理账号定位'}).getByRole('button',{name:'从头分析新定位'}).click();
+    expect(await page.getByRole('combobox',{name:'定位方法'}).count()).toBe(0);
+    expect(await page.getByRole('combobox',{name:'所属业务'}).count()).toBe(0);
     await page.getByLabel('业务名称',{exact:true}).fill('摄影课程 · 新手体验');
     await page.getByRole('button',{name:'开始 Agent 引导',exact:true}).click();
     await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname));
@@ -9078,3 +9056,68 @@ it('OPC: free runtime reads owned context only on model tool request and recheck
   expect(await rpc('runtime_workspace_source',{p_actor_id:f.actor,p_session_id:session.sessionId,p_query:workId})).toMatchObject({kind:'unavailable'});
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },60000);
+
+
+it('OPC: positioning entry creates a new business or edits only the selected existing account',async()=>{
+ const f=await publishedDraft();
+ await planFixtureModel(f.moduleId);
+ const rows=['entry-account-a','entry-account-b'].map(account=>({id:randomUUID(),platform:'x',account,title:account+'选题',brief:'保留的选题来源',day:'2026-09-25'}));
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:rows});
+ await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:rows.map(row=>({platform:row.platform,account:row.account,expectedRevision:null}))});
+ const readAccounts=async()=>(await f.service.library({search:'',from:null,to:null})).businesses.flatMap((b:{accounts:Array<{projectId:string;account:string;sourceVersionId:string;pendingStrategyDraftId?:string|null}>})=>b.accounts);
+ const before=await readAccounts(),a=before.find((x:{account:string})=>x.account==='entry-account-a')!,b=before.find((x:{account:string})=>x.account==='entry-account-b')!;
+ const originalBusiness=(await sql.query('select business_id::text id from opc_draft_businesses where draft_id=$1',[f.d.draftId])).rows[0].id;
+ const {browser,page}=await planBrowser(f);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/positioning');
+  await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
+  await page.getByRole('dialog',{name:'梳理账号定位',exact:true}).getByRole('button',{name:'从头分析新定位',exact:true}).click();
+  expect(await page.getByRole('combobox').count()).toBe(0);
+  const start=page.getByRole('button',{name:'开始 Agent 引导',exact:true});
+  expect(await start.isDisabled()).toBe(true);
+  await page.getByLabel('业务名称',{exact:true}).fill('独立摄影服务');
+  await start.click();
+  await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname));
+  const createdDraft=new URL(page.url()).pathname.split('/').at(-1)!;
+  expect(createdDraft).not.toBe(f.d.draftId);
+  const created=(await sql.query('select b.id,b.name from opc_draft_businesses d join opc_businesses b on b.id=d.business_id where d.draft_id=$1',[createdDraft])).rows[0];
+  expect(created.name).toBe('独立摄影服务');expect(created.id).not.toBe(originalBusiness);
+  expect(await readAccounts()).toEqual(before);
+  await page.goto(process.env.V3_LOCAL_APP+'/positioning');
+  const draftCount=Number((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n);
+  await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
+  await page.getByRole('dialog',{name:'梳理账号定位',exact:true}).getByRole('button',{name:'整理另一份已有定位',exact:true}).click();
+  expect(await page.getByLabel('业务名称',{exact:true}).count()).toBe(0);
+  expect(await page.getByLabel('定位方法',{exact:true}).count()).toBe(0);
+  const edit=page.getByRole('button',{name:'修改定位',exact:true});expect(await edit.isDisabled()).toBe(true);
+  const choice=page.getByRole('combobox',{name:'已有定位',exact:true});
+  expect(await choice.locator('option').count()).toBe(3);
+  await choice.selectOption(a.projectId);await edit.click();
+  const dialog=page.getByRole('dialog',{name:'定位详情',exact:true});
+  await dialog.getByRole('heading',{name:'修改定位',exact:true}).waitFor();
+  expect(Number((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n)).toBe(draftCount);
+  await dialog.locator('textarea').first().fill('只修订账号A的定位');
+  await dialog.getByRole('button',{name:'确认保存',exact:true}).click();
+  await dialog.getByRole('status').filter({hasText:'已保存到此账号的待确认定位草稿'}).waitFor();
+  const after=await readAccounts(),updated=after.find((x:{projectId:string})=>x.projectId===a.projectId)!;
+  expect(after.find((x:{projectId:string})=>x.projectId===b.projectId)).toEqual(b);
+  expect(updated.sourceVersionId).toBe(a.sourceVersionId);
+  expect(updated.pendingStrategyDraftId).toBeTruthy();
+  const changed=await f.service.read(updated.pendingStrategyDraftId!);
+  expect(changed.information['step-0'].values.goal.value).toBe('只修订账号A的定位');
+  await dialog.getByRole('button',{name:'关闭定位详情',exact:true}).click();
+  const savedAccounts=await readAccounts();
+  const savedCounts=(await sql.query('select (select count(*)::int from opc_drafts where actor_id=$1) drafts,(select count(*)::int from opc_businesses where actor_id=$1) businesses',[f.actor])).rows[0];
+  await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
+  await page.getByRole('dialog',{name:'梳理账号定位',exact:true}).getByRole('button',{name:'整理另一份已有定位',exact:true}).click();
+  await page.getByRole('combobox',{name:'已有定位',exact:true}).selectOption(a.projectId);
+  await page.getByRole('button',{name:'修改定位',exact:true}).click();
+  await dialog.getByRole('heading',{name:'修改定位',exact:true}).waitFor();
+  expect(await dialog.locator('textarea').first().inputValue()).toBe('只修订账号A的定位');
+  await dialog.locator('textarea').first().fill('取消时不得保存');
+  await dialog.getByRole('button',{name:'取消',exact:true}).click();
+  expect(await readAccounts()).toEqual(savedAccounts);
+  expect((await sql.query('select (select count(*)::int from opc_drafts where actor_id=$1) drafts,(select count(*)::int from opc_businesses where actor_id=$1) businesses',[f.actor])).rows[0]).toEqual(savedCounts);
+  expect((await f.service.read(updated.pendingStrategyDraftId!)).information['step-0'].values.goal.value).toBe('只修订账号A的定位');
+ }finally{await browser.close();}
+},180000);
