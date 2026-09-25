@@ -9060,12 +9060,13 @@ it('OPC: free runtime reads owned context only on model tool request and recheck
 
 it('OPC: positioning entry creates a new business or edits only the selected existing account',async()=>{
  const f=await publishedDraft();
- await planFixtureModel(f.moduleId);
  const rows=['entry-account-a','entry-account-b'].map(account=>({id:randomUUID(),platform:'x',account,title:account+'选题',brief:'保留的选题来源',day:'2026-09-25'}));
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:rows});
  await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:rows.map(row=>({platform:row.platform,account:row.account,expectedRevision:null}))});
  const readAccounts=async()=>(await f.service.library({search:'',from:null,to:null})).businesses.flatMap((b:{accounts:Array<{projectId:string;account:string;sourceVersionId:string;pendingStrategyDraftId?:string|null}>})=>b.accounts);
  const before=await readAccounts(),a=before.find((x:{account:string})=>x.account==='entry-account-a')!,b=before.find((x:{account:string})=>x.account==='entry-account-b')!;
+ expect(a.sourceVersionId).toBe(f.sourceVersionId);
+ expect(b.sourceVersionId).toBe(f.sourceVersionId);
  const originalBusiness=(await sql.query('select business_id::text id from opc_draft_businesses where draft_id=$1',[f.d.draftId])).rows[0].id;
  const {browser,page}=await planBrowser(f);
  try{
@@ -9091,8 +9092,9 @@ it('OPC: positioning entry creates a new business or edits only the selected exi
   expect(await page.getByLabel('定位方法',{exact:true}).count()).toBe(0);
   const edit=page.getByRole('button',{name:'修改定位',exact:true});expect(await edit.isDisabled()).toBe(true);
   const choice=page.getByRole('combobox',{name:'已有定位',exact:true});
-  expect(await choice.locator('option').count()).toBe(3);
-  await choice.selectOption(a.projectId);await edit.click();
+  await expect.poll(()=>choice.locator('option').count(),{timeout:15000}).toBe(3);
+  await choice.selectOption(a.projectId);
+  await edit.click();
   const dialog=page.getByRole('dialog',{name:'定位详情',exact:true});
   await dialog.getByRole('heading',{name:'修改定位',exact:true}).waitFor();
   expect(Number((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n)).toBe(draftCount);
