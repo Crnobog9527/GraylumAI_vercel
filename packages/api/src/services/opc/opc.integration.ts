@@ -7998,7 +7998,7 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
 
     await page.getByLabel('消息', { exact: true }).fill('只生成分镜');
     await page.getByRole('button', { name: '发送', exact: true }).click();
-    await page.getByText('当前成果',{exact:true}).waitFor();
+    await page.getByRole('complementary',{name:'当前成果',exact:true}).waitFor();
     await page.getByText('分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿',{exact:true}).waitFor({ timeout: 60000 });
     expect(await packageRuns()).toBe(1);
     expect(await page.getByText(/剪辑建议 · 第 1 版/).count()).toBe(0);
@@ -8032,7 +8032,7 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
     expect(finalResponse.ok).toBe(true);
     await page.reload();
     await expect.poll(()=>page.evaluate(key=>localStorage.getItem(key),videoKey),{timeout:60000}).toBeNull();
-    await page.getByText('当前成果',{exact:true}).waitFor();
+    await page.getByRole('complementary',{name:'当前成果',exact:true}).waitFor();
     await page.getByText('账号已保存 v2 · 已定稿',{exact:true}).waitFor({ timeout: 60000 });
     await page.getByText('分镜 · 第 1 版 · 已定稿 · 旧口播稿版本',{exact:true}).waitFor();
     await page.getByText('剪辑建议 · 第 1 版 · 已定稿 · 旧口播稿版本',{exact:true}).waitFor({ timeout: 60000 });
@@ -8253,7 +8253,7 @@ it("OPC: video package dispatch refuses a different frozen material before admis
   const f = await publishedDraft();
   await planFixtureModel(f.moduleId);
   const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
-    body: [{ id: randomUUID(), platform: 'x', account: 'binding-account', title: '绑定检查', brief: '验证口播稿与分镜来源绑定。', day: '2026-09-25' }] });
+    body: [{ id: randomUUID(), platform: 'x', account: 'binding-account', title: '绑定检查', brief: '验证口播稿与分镜来源绑定。', day: '2026-09-25', contentType:'video' }] });
   const [work] = await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId, accounts: [{ platform: 'x', account: 'binding-account', expectedRevision: null }] });
   const { browser, page } = await planBrowser(f);
   let releasePrepare!: () => void;
@@ -8295,8 +8295,8 @@ it("OPC: video package dispatch refuses a different frozen material before admis
     // The raced request is definitely rejected before admission. A later explicit
     // choice may bind a new frozen material snapshot to the same exact final
     // script; changing the library title does not create a new script version.
-    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
-    await page.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
+    await page.getByText('分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', { exact: true }).waitFor({ timeout: 60000 });
+    await page.getByText('剪辑建议 · 第 1 版 · 已定稿 · 匹配当前口播稿', { exact: true }).waitFor({ timeout: 60000 });
     const packageStates = (await sql.query("select state from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%' order by created_at", [f.actor, work.sessionId])).rows.map(row => row.state);
     expect(packageStates).toEqual(['completed']);
   } finally { releasePrepare?.(); await browser.close(); }
@@ -9230,7 +9230,61 @@ it.each([65,67])('OPC: boundary browser continues legitimate v%s video source hi
   const outsider=await publishedDraft();await expect(outsider.service.videoMaterialPrepare({workItemId:work.workItemId,requestId:randomUUID(),sourceScriptId:previous.id,choice:'storyboard',expectedStoryboardVersion:1,expectedEditingVersion:1})).rejects.toThrow('OPC_CONTENT_BINDING');
   const effects=async()=>(await sql.query("select (select count(*)::int from runtime_executions where session_id=$1) executions,(select count(*)::int from opc_content_versions where work_item_id=$2 and kind in ('storyboard','editing')) derivatives",[work.sessionId,work.workItemId])).rows[0];
   const beforeRevocation=await effects();
+  const generated=(await sql.query("select execution_id from opc_content_versions where work_item_id=$1 and kind='storyboard' and version=1",[work.workItemId])).rows[0];
+  if(generated){
+   const checkArgs=[f.actor,work.workItemId,generated.execution_id,previous.id];
+   const checkSql='select opc_video_execution_check($1,$2,$3,$4) result';
+   expect((await sql.query(checkSql,checkArgs)).rows[0].result.valid).toBe(true);
+   await expect(outsider.service.videoExecutionCheck({workItemId:work.workItemId,executionId:generated.execution_id,sourceScriptId:previous.id})).rejects.toThrow('OPC_CONTENT_BINDING');
+   // Corrupt only disposable rows inside rolled-back transactions. Public writes
+   // cannot create these shapes; the validator must still fail closed on them.
+   const denied: string[]=[];
+   const malformed=async(name:string,statement:string,values:unknown[])=>{
+    await sql.query('BEGIN');
+    try{
+     await sql.query("SET LOCAL session_replication_role='replica'");
+     await sql.query(statement,values);
+     await expect(sql.query(checkSql,checkArgs)).rejects.toThrow('OPC_CONTENT_BINDING');
+     denied.push(name);
+    }finally{await sql.query('ROLLBACK');}
+    expect((await sql.query(checkSql,checkArgs)).rows[0].result.valid).toBe(true);
+   };
+   await malformed('no admitted ancestor','update opc_content_versions set execution_id=null where id=$1',[root.id]);
+   await malformed('missing ancestor','update opc_content_versions set source_content_id=$2 where id=$1',[previous.id,randomUUID()]);
+   await malformed('self cycle','update opc_content_versions set source_content_id=id where id=$1',[previous.id]);
+   await malformed('cycle after admitted ancestor','update opc_content_versions set source_content_id=$2 where id=$1',[root.id,previous.id]);
+   await malformed('wrong kind ancestor',"update opc_content_versions set kind='brief' where id=$1",[root.id]);
+   await malformed('foreign actor ancestor','update opc_content_versions set actor_id=$2 where id=$1',[root.id,outsider.actor]);
+   await malformed('wrong work item ancestor','update opc_content_versions set work_item_id=$2 where id=$1',[root.id,randomUUID()]);
+   await malformed('unavailable original execution',"update runtime_executions set unavailable_reason='test revoked' where id=$1",[root.execution_id]);
+   await malformed('incomplete original execution',"update runtime_executions set state='prepared' where id=$1",[root.execution_id]);
+   await malformed('different execution session','update runtime_executions set session_id=$2 where id=$1',[root.execution_id,randomUUID()]);
+   await malformed('draft current source',"update opc_content_versions set status='draft' where id=$1",[previous.id]);
+   await malformed('wrong frozen hash',"update runtime_executions set payload=jsonb_set(payload,'{scopeMaterial,hash}','\"wrong\"') where id=$1",[generated.execution_id]);
+   await malformed('wrong frozen body',"update opc_content_versions set body='wrong body' where id=$1",[previous.id]);
+   const {readFileSync,writeFileSync}=await import('node:fs');
+   const old=readFileSync('../../packages/db/migrations/0117_opc_core_experience.sql','utf8');
+   const oldCheck=old.slice(old.indexOf('CREATE OR REPLACE FUNCTION opc_video_execution_check('),old.indexOf('CREATE OR REPLACE FUNCTION opc_video_package_from_execution('));
+   const upgrade=readFileSync('../../packages/db/migrations/0132_opc_video_execution_ancestry.sql','utf8').replace(/^BEGIN;$/m,'').replace(/^COMMIT;$/m,'');
+   const beforeRows=(await sql.query('select * from opc_content_versions where work_item_id=$1 order by id',[work.workItemId])).rows;
+   await sql.query('BEGIN');
+   try{
+    await sql.query(oldCheck);
+    await sql.query('SAVEPOINT legacy_check');
+    await expect(sql.query(checkSql,checkArgs)).rejects.toThrow('OPC_CONTENT_BINDING');
+    await sql.query('ROLLBACK TO SAVEPOINT legacy_check');
+    await sql.query(upgrade);await sql.query(upgrade);
+    expect((await sql.query(checkSql,checkArgs)).rows[0].result.valid).toBe(true);
+    expect((await sql.query('select * from opc_content_versions where work_item_id=$1 order by id',[work.workItemId])).rows).toEqual(beforeRows);
+    for(const role of ['anon','authenticated'])expect((await sql.query("select has_function_privilege($1,'opc_video_execution_check(uuid,uuid,uuid,uuid)','EXECUTE') allowed",[role])).rows[0].allowed).toBe(false);
+    expect((await sql.query("select has_function_privilege('service_role','opc_video_execution_check(uuid,uuid,uuid,uuid)','EXECUTE') allowed")).rows[0].allowed).toBe(true);
+   }finally{await sql.query('ROLLBACK');}
+   expect((await sql.query(checkSql,checkArgs)).rows[0].result.valid).toBe(true);
+   expect(await effects()).toEqual(beforeRevocation);
+   writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/boundary-video-v'+targetVersion+'-ancestry-check.json',JSON.stringify({denied,upgrade:'legacy failure reproduced; repeated upgrade passed with all content rows unchanged; rollback restored; grants checked',executionId:generated.execution_id}));
+  }
   await sql.query('update bill2_drafts set revoked=true where id=$1',[f.d.draftId]);
+  if(generated)await expect(f.service.videoExecutionCheck({workItemId:work.workItemId,executionId:generated.execution_id,sourceScriptId:previous.id})).rejects.toThrow('OPC_CONTENT_BINDING');
   expect((await sql.query('select runtime_history_available($1) allowed',[root.execution_id])).rows[0].allowed).toBe(false);
   await expect(f.service.videoMaterialPrepare({workItemId:work.workItemId,requestId:randomUUID(),sourceScriptId:previous.id,choice:'storyboard',expectedStoryboardVersion:1,expectedEditingVersion:1})).rejects.toThrow('OPC_CONTENT_BINDING');
   expect(await effects()).toEqual(beforeRevocation);
