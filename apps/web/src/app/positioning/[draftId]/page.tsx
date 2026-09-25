@@ -1701,7 +1701,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       : null;
   const planNeedsCandidate = !shownPlanCandidate && !latest && !dirtyPlan;
   const firstPending = steps.findIndex((step) => !snap.steps[step.id].valid);
-  const manualEntry = d.mode === "manual" && !manualMentorEnabled;
+  const manualEntry = d.mode === "manual" && !manualMentorEnabled && !d.accountRevision;
   const hasUnconfirmedRequired = steps.some(step =>
     (d.information[step.id]?.schema ?? []).some((field: { id: string; required: boolean }) =>
       field.required && d.information[step.id]?.values?.[field.id]?.status !== "confirmed"));
@@ -1807,6 +1807,12 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           ))}
         </section>
       )}
+      {d.accountRevision&&<div role="status">
+        当前正式版本 v{d.accountRevision.officialVersion} · {snap.state==='published'?'正式定位已更新':'修改自动保存为草稿，尚未定稿。核对修改及受影响部分后，点击“确认正式定位”更新版本。'}
+        {d.accountRevision.methodConflict&&<div role="alert">此修改草稿使用的方法与原正式版本不同，未自动合并或覆盖任何答案。请对照原正式内容核对当前草稿。
+          <details><summary>查看原正式版本完整内容</summary>{Object.entries(d.accountRevision.sourceInformation as Record<string,{title:string;schema:Array<{id:string;title:string}>;values:Record<string,Information>}>).map(([id,part])=><section key={id}><h4>{part.title}</h4>{part.schema.map(field=><p key={field.id}>{field.title}：{part.values?.[field.id]?.value}</p>)}</section>)}</details>
+        </div>}
+      </div>}
       <nav aria-label="定位步骤" className={resultStyles.phaseStrip} style={{gridTemplateColumns:`repeat(${steps.length},minmax(0,1fr))`}}>
         {steps.map((step, index) => (
           <Button
@@ -1815,7 +1821,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
             aria-current={selectedStep.id === step.id ? "step" : undefined}
             disabled={
               busy || hasPendingConfirmation || hasPendingStepRequest ||
-              (firstPending >= 0 &&
+              (!d.accountRevision && firstPending >= 0 &&
                 index > firstPending &&
                 !snap.steps[step.id].valid)
             }
@@ -1930,7 +1936,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     {mentorExecutions.length===0&&<div className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
                       <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>Graylum · 增长顾问</span>
                       <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>
-                        我会在同一个对话里陪你完成全部步骤，一次问一个问题，并把从回答中梳理出的信息放到右侧对应表单，供你核对。
+                        {d.accountRevision ? "已保留原正式定位的全部步骤。请选择需要修改的部分；未变化且已确认的内容无需重新填写。修改保存为草稿，核对后可更新正式版本。" : "我会在同一个对话里陪你完成全部步骤，一次问一个问题，并把从回答中梳理出的信息放到右侧对应表单，供你核对。"}
                       </p>
                     </div>}
                     {mentorExecutions.map((execution) => {

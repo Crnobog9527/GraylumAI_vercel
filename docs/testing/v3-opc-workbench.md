@@ -330,3 +330,18 @@ Owner 后续决定：停止追查未复现的历史超时；在当前必要验�
 
 
 审查修复验证：`pr422-u4-review-fixes.log` 中修订轮次、投影权限、历史不变和读函数回滚/重放用例 PASS；同一运行的暂缓测试仍使用尚未加入完整确认等待的副本，保留 1 PASS / 1 FAIL。最终 `pr422-u4-deferred-settled.log` 为 **1 PASS / 262 skipped**，含完整确认后明确暂缓、刷新后退出右栏且服务端 deferred 不变。web TypeScript/lint PASS。后续最终候选聚合及 CI 结果记录于 PR，不将不同运行伪称为一次全套执行。
+
+
+## 2026-09-26 账号已定稿定位返回讨论的定向修复
+
+Owner 新报告优先于 U4 交付；暂停 staging 交付。原 writer、PR #422 和预览数据保留。
+
+- 原按钮复现 `pr422-account-revision-red.log`：1 FAIL /263 skipped。六步不同答案的正式定位经“资料库 → 账号定位详情 → 回到策略讨论”，前五题被降为 provisional，第六题无 profileKey 被漏掉；六步可点击状态仅第一步。独立草稿/Session 身份正确，故不是进入别的账号。
+- 0134 复用现有草稿、不可变 artifact_requests、来源证据及正式版本。精确读取正式 round 的方法和答案，给新项目重新通过已有确认校验；不复制外项目 confirmation/evidence ID、不直接置 valid。合法 workflow 的显示顺序不必是依赖顺序，因此按依赖就绪顺序确认。
+- 旧草稿在再次显式进入时修复，不批量更新。只恢复初始 legacy seed 后从未改变的字段；曾改后改回仍保留为修改。方法/revision 不同保留原草稿和正式来源并提示。原 immutable 请求、正式版本及账号关联选题不改。
+- 来源撤销在 OPC、Runtime scope、证据使用和直接 workbench.read/resolve 重新检查；新增 revision evidence 使用既有限制表。自动保存与正式版本分开标注，历史显示完整问题答案并提供当前修改草稿入口。
+- 中途证据保留：green1 1 PASS（仅入口）；green2 2 PASS /3 FAIL；green3 2 PASS /2 FAIL；green4 2 PASS /1 FAIL。失败分别涉及新测试的三阶段确认仅给默认 1 秒、fixture 误把 accepted 回包当证据 ID、旧方法标题断言，以及直接服务拒绝码已映射为 ARTIFACT_DENIED。实际确认等待采用原测试常用的 15 秒，未改总超时或业务容量。最终结果见下方与 PR 精确候选记录；这些中途日志不称全套通过。
+
+兼容与回退：迁移可重复应用，无新表、无批量改写。已创建继承记录后不可直接恢复旧授权函数，否则会丢失来源撤销保护；如需产品回退，可暂停新修订入口，保留本迁移的来源检查及所有原数据。未经授权不执行远端迁移。真实模型理解质量、供应商 usage、远端服务、支付及发布均 NOT_RUN。
+
+已完成验证：`pr422-account-revision-final2.log` **8 PASS /259 skipped**，覆盖实际弹窗返回、六步/无映射字段、修改/刷新/退出返回、自动保存不新增正式版、丢失定稿回包后回读 v2、旧正式内容与选题来源、双账号/双标签冲突、旧草稿保留、不同方法并列提示、逆序依赖与本地/原始来源撤销、新用户六步逐题确认。随后仅修订提示文案，并补同项目旧 revise 入口后重开不形成自继承，`final3.log` **1 PASS /266 skipped**。`final.log` 保留 6 PASS /2 FAIL（两项均为已确认的拒绝错误码映射断言），不能与后续运行合称一次全套通过。最终源码的弹窗来源投影、逆序夹具补测、精确 CI/独立审查及原址预览同步结果记在原 PR 交付评论。lint、web typecheck 已通过。

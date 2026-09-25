@@ -6855,30 +6855,33 @@ it.each(["save", "confirm"] as const)(
  * step confirmed and the positioning version published, so the topic workspace
  * has an immutable source version to bind to.
  */
-async function publishedDraft(n = 3, withTopics = true) {
+async function publishedDraft(n = 3, withTopics = true, revisionFixture = false, reverseDisplay = false) {
   const f = await fixture(
     n,
     false,
     0,
-    withTopics ? (flow) => { flow.planResources = ["SKILL.md"]; } : undefined,
+    (flow) => { if(withTopics)flow.planResources = ["SKILL.md"]; if(revisionFixture)delete flow.steps.at(-1)!.information![0].profileKey; if(reverseDisplay)flow.steps.reverse(); },
   );
   const d = await f.service.start({
     requestId: randomUUID(),
     registration: f.registration,
     mode: "manual",
   });
-  for (const step of f.flow.steps) {
+  if(revisionFixture)await f.artifacts.execute({action:'userEvidence',projectId:d.projectId,roundId:d.roundId,
+    requestId:randomUUID(),body:'原正式版本的可撤销事实依据',observedAt:null,supersedes:null});
+  const sourceEvidence=revisionFixture?(await f.artifacts.read(d.projectId,d.roundId)).evidence[0].id as string:null;
+  for (const step of reverseDisplay ? [...f.flow.steps].reverse() : f.flow.steps) {
     await f.artifacts.execute({
       action: "save", projectId: d.projectId, roundId: d.roundId,
       requestId: randomUUID(), stepId: step.id,
-      body: "User confirmed " + step.title, evidenceIds: [], expectedVersion: 0,
+      body: "User confirmed " + step.title, evidenceIds: sourceEvidence?[sourceEvidence]:[], expectedVersion: 0,
     });
     const state = (await f.artifacts.read(d.projectId, d.roundId)).steps[step.id];
     await f.service.information({
       draftId: d.draftId, stepId: step.id, requestId: randomUUID(),
       expectedVersion: state.version,
       values: {
-        goal: { status: "confirmed", nature: "decision", value: "A concrete user decision" },
+        goal: { status: "confirmed", nature: "decision", value: revisionFixture ? "原正式答案 "+step.id : "A concrete user decision" },
       },
     });
     const updated = (await f.artifacts.read(d.projectId, d.roundId)).steps[step.id];
@@ -6897,7 +6900,7 @@ async function publishedDraft(n = 3, withTopics = true) {
     ),
   });
   const sourceVersionId = (await f.service.read(d.draftId)).report.id as string;
-  return { ...f, d, sourceVersionId };
+  return { ...f, d, sourceVersionId, sourceEvidence };
 }
 
 /** Every turn, run, reservation and binding the topic workspace created. */
@@ -7672,6 +7675,212 @@ it("OPC: workspace presentation changes preserve ownership, replay and version b
   await expect(other.service.positionHistory(f.d.draftId)).rejects.toThrow('OPC_DENIED');
 },180000);
 
+it("OPC: account strategy dialog returns to a complete revision and explicit official history",async()=>{
+ const f=await publishedDraft(6,true,true);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+  body:['revision-a','revision-b'].map(account=>({id:randomUUID(),platform:'x',account,title:'原来源选题 '+account,brief:'保持旧来源',day:'2026-09-26'}))});
+ await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,
+  accounts:['revision-a','revision-b'].map(account=>({platform:'x',account,expectedRevision:null}))});
+ const accounts=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts;
+ const a=accounts.find((a:{account:string})=>a.account==='revision-a')!;
+ const source=await f.service.read(f.d.draftId);
+ const {browser,page}=await planBrowser(f);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
+  await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/revision-a/}).click();
+  await page.getByRole('button',{name:/x · revision-a.*查看详情/}).click();
+  await page.getByRole('dialog',{name:'定位详情'}).getByRole('button',{name:'回到策略讨论',exact:true}).click();
+  await page.waitForURL(url=>/^\/positioning\/[^/]+$/.test(url.pathname));
+  const draftId=page.url().split('/positioning/')[1];
+  const draft=await f.service.read(draftId);
+  await page.getByRole('navigation',{name:'定位步骤'}).waitFor();
+  await page.getByText('已保留原正式定位的全部步骤。请选择需要修改的部分；未变化且已确认的内容无需重新填写。修改保存为草稿，核对后可更新正式版本。',{exact:true}).waitFor();
+  const phases=page.getByRole('navigation',{name:'定位步骤'}).getByRole('button');
+  console.info('ACCOUNT_REVISION_INPUT',JSON.stringify({sourceVersionId:f.sourceVersionId,sourceDraftId:f.d.draftId,draftId,
+   source:source.information,draft:draft.information,phaseDisabled:await phases.evaluateAll(nodes=>nodes.map(n=>(n as HTMLButtonElement).disabled))}));
+  await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/account-revision-return.png'});
+  expect(draftId).not.toBe(f.d.draftId);
+  expect(draft.sessionId).not.toBe(source.sessionId);
+  for(const step of f.flow.steps)expect(draft.information[step.id].values).toEqual(source.information[step.id].values);
+  expect(await phases.evaluateAll(nodes=>nodes.map(n=>(n as HTMLButtonElement).disabled))).toEqual(Array(6).fill(false));
+  expect(await f.service.accountStrategyHistory(a.projectId)).toHaveLength(1);
+  const last=f.flow.steps.at(-1)!;
+  for(let i=0;i<6;i++){
+   await phases.nth(i).click();
+   expect(await page.getByRole('textbox',{name:'已知目标 '+i,exact:true}).inputValue()).toBe('原正式答案 step-'+i);
+  }
+  const answer=page.getByRole('textbox',{name:'已知目标 5',exact:true});
+  await answer.fill('账号 A 新修改，无 profileKey 也必须保留');
+  await page.getByText('已自动保存',{exact:true}).waitFor();
+  await page.reload();
+  await page.getByRole('navigation',{name:'定位步骤'}).getByRole('button').nth(5).click();
+  expect(await answer.inputValue()).toBe('账号 A 新修改，无 profileKey 也必须保留');
+  expect(await f.service.accountStrategyHistory(a.projectId)).toHaveLength(1);
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
+  await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/revision-a/}).click();
+  await page.getByRole('button',{name:/x · revision-a.*查看详情/}).click();
+  const dialog=page.getByRole('dialog',{name:'定位详情'});
+  await dialog.getByRole('button',{name:'历史版本',exact:true}).click();
+  await dialog.getByText('正式版本历史',{exact:true}).waitFor();
+  await dialog.getByText('原正式答案 step-5',{exact:true}).waitFor();
+  await dialog.getByRole('button',{name:'继续当前修改草稿',exact:true}).click();
+  await page.waitForURL('**/positioning/'+draftId);
+  expect((await f.service.read(draftId)).sessionId).toBe(draft.sessionId);
+  await page.getByRole('navigation',{name:'定位步骤'}).getByRole('button').nth(5).click();
+  expect(await answer.inputValue()).toBe('账号 A 新修改，无 profileKey 也必须保留');
+  await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).click();
+  await expect.poll(async()=>(await f.service.read(draftId)).snapshot.steps[last.id].valid,{timeout:15000}).toBe(true);
+  const finalize=page.getByRole('button',{name:'确认正式定位',exact:true});
+  await expect.poll(()=>finalize.isEnabled(),{timeout:15000}).toBe(true);
+  // A lost publish response must be recovered by reading the actual version,
+  // never by publishing another account or clearing the draft.
+  let lost=false;
+  await page.route('**/api/trpc/workbench.execute*',async route=>{
+   if(!lost&&route.request().postData()?.includes('publish')){lost=true;await route.fetch();await route.abort();return;}
+   await route.continue();
+  });
+  await finalize.click();
+  await expect.poll(async()=>(await f.service.accountStrategyHistory(a.projectId)).length,{timeout:15000}).toBe(2);
+  await page.reload();
+  expect(await finalize.isEnabled()).toBe(false);
+  expect(lost).toBe(true);
+  const history=await f.service.accountStrategyHistory(a.projectId);
+  expect(history[1].id).toBe(f.sourceVersionId);
+  expect(history[0].information[last.id].values.goal.value).toBe('账号 A 新修改，无 profileKey 也必须保留');
+  for(const step of f.flow.steps.slice(0,-1))expect(history[0].information[step.id].values).toEqual(source.information[step.id].values);
+  expect((await f.service.read(f.d.draftId)).information).toEqual(source.information);
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
+  await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/revision-a/}).click();
+  await page.getByRole('button',{name:/x · revision-a.*查看详情/}).click();
+  await dialog.getByRole('button',{name:'历史版本',exact:true}).click();
+  await dialog.getByText('账号 A 新修改，无 profileKey 也必须保留',{exact:true}).waitFor();
+  await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/account-revision-official-history.png'});
+  const b=accounts.find((a:{account:string})=>a.account==='revision-b')!;
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
+  await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/revision-b/}).click();
+  await page.getByRole('button',{name:/x · revision-b.*查看详情/}).click();
+  await page.getByRole('dialog',{name:'定位详情'}).getByRole('button',{name:'回到策略讨论',exact:true}).click();
+  await page.waitForURL(url=>/^\/positioning\/[^/]+$/.test(url.pathname));
+  const bDraft=await f.service.read(page.url().split('/positioning/')[1]);
+  expect(bDraft.sessionId).not.toBe(draft.sessionId);
+  for(const step of f.flow.steps)expect(bDraft.information[step.id].values).toEqual(source.information[step.id].values);
+  expect(await f.service.accountStrategyHistory(b.projectId)).toHaveLength(1);
+  const itemSources=(await sql.query('select distinct source_version_id from opc_items where account_project_id=ANY($1)',[[a.projectId,b.projectId]])).rows;
+  expect(itemSources).toEqual([{source_version_id:f.sourceVersionId}]);
+  const sameProject=await f.service.revise(draftId,randomUUID(),draft.roundId);
+  const reopened=await f.service.accountStrategyBegin(a.projectId,randomUUID());
+  expect(reopened).toEqual({draftId,roundId:sameProject.roundId});
+  expect((await f.service.read(draftId)).sessionId).toBe(draft.sessionId);
+  expect((await sql.query("select count(*)::int n from artifact_requests where project_id=$1 and round_id=$2 and action='opc_account_inherit'",[draft.projectId,sameProject.roundId])).rows[0].n).toBe(0);
+
+  // Revoking the original source still denies the now-published account
+  // version after its binding has advanced to that account's own version.
+  await f.artifacts.execute({action:'restrictEvidence',projectId:f.d.projectId,roundId:f.d.roundId,requestId:randomUUID(),evidenceId:f.sourceEvidence!,deleted:true,expiresAt:null});
+  await expect(f.service.accountStrategyHistory(a.projectId)).rejects.toThrow('OPC_DENIED');
+  await expect(f.artifacts.read(draft.projectId,draft.roundId)).rejects.toThrow('ARTIFACT_DENIED');
+
+ }catch(error){console.info('ACCOUNT_REVISION_FAILURE',error instanceof Error?error.stack:String(error),await page.getByRole('alert').allTextContents());await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/account-revision-failure.png'});throw error;}finally{await browser.close();}
+},180000);
+
+it("OPC: legacy account revisions repair only untouched answers and retain source revocation",async()=>{
+ const f=await publishedDraft(6,true,true);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+  body:[{id:randomUUID(),platform:'x',account:'legacy-revision',title:'原来源',brief:'保留原正式内容',day:'2026-09-26'}]});
+ await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'legacy-revision',expectedRevision:null}]});
+ const account=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0];
+ const {readFile}=await import('node:fs/promises');
+ const oldSql=await readFile(new URL('../../../../db/migrations/0125_opc_account_strategy.sql',import.meta.url),'utf8');
+ const newSql=await readFile(new URL('../../../../db/migrations/0134_opc_account_strategy_inheritance.sql',import.meta.url),'utf8');
+ const begin=oldSql.slice(oldSql.indexOf('CREATE OR REPLACE FUNCTION opc_account_strategy_begin('),oldSql.indexOf('END $$;',oldSql.indexOf('CREATE OR REPLACE FUNCTION opc_account_strategy_begin('))+7);
+ let legacy:{draftId:string;roundId:string};
+ await sql.query(begin);
+ try{legacy=await f.service.accountStrategyBegin(account.projectId,randomUUID());}finally{await sql.query(newSql);}
+ const before=await f.service.read(legacy!.draftId);
+ const edit=async(stepId:string,value:string)=>{const d=await f.service.read(legacy!.draftId);await f.service.information({draftId:d.draftId,stepId,requestId:randomUUID(),expectedVersion:d.snapshot.steps[stepId].version,
+  values:{goal:{...d.information[stepId].values.goal,value}}});};
+ await edit('step-1','用户已保存的新修改');
+ await edit('step-2','曾经改动');await edit('step-2','原正式答案 step-2');
+ const originals=(await sql.query('select request_id,to_jsonb(h) row from artifact_requests h where project_id=$1',[before.projectId])).rows;
+ const [repair,duplicate]=await Promise.all([f.service.accountStrategyBegin(account.projectId,randomUUID()),f.service.accountStrategyBegin(account.projectId,randomUUID())]);
+ expect(repair).toEqual(duplicate);expect(repair.draftId).toBe(legacy!.draftId);
+ const after=await f.service.read(repair.draftId);
+ expect(after.sessionId).toBe(before.sessionId);
+ expect(after.information['step-1'].values.goal).toMatchObject({value:'用户已保存的新修改',status:'provisional'});
+ expect(after.information['step-2'].values.goal).toMatchObject({value:'原正式答案 step-2',status:'provisional'});
+ expect(after.information['step-5'].values.goal).toMatchObject({value:'原正式答案 step-5',status:'confirmed'});
+ expect(after.snapshot.steps['step-0'].valid).toBe(true);
+ expect(after.snapshot.steps['step-1'].valid).toBe(false);
+ expect(after.snapshot.steps['step-5'].valid).toBe(false);
+ for(const row of originals)expect((await sql.query('select to_jsonb(h) row from artifact_requests h where project_id=$1 and request_id=$2',[before.projectId,row.request_id])).rows[0].row).toEqual(row.row);
+ const stable=(await sql.query('select steps from artifact_rounds where id=$1',[repair.roundId])).rows[0];
+ await f.service.accountStrategyBegin(account.projectId,randomUUID());
+ expect((await sql.query('select steps from artifact_rounds where id=$1',[repair.roundId])).rows[0]).toEqual(stable);
+ const other=await publishedDraft();await expect(other.service.read(repair.draftId)).rejects.toThrow('OPC_DENIED');
+ await f.artifacts.execute({action:'restrictEvidence',projectId:f.d.projectId,roundId:f.d.roundId,requestId:randomUUID(),evidenceId:f.sourceEvidence!,deleted:true,expiresAt:null});
+ await expect(f.service.read(repair.draftId)).rejects.toThrow('OPC_DENIED');
+ await expect(f.artifacts.read(before.projectId,repair.roundId)).rejects.toThrow('ARTIFACT_DENIED');
+ await expect(f.service.accountStrategyHistory(account.projectId)).rejects.toThrow('OPC_DENIED');
+ await expect(f.service.prepareStep({draftId:repair.draftId,stepId:'step-0',requestId:randomUUID(),input:'不可读取已撤销的原依据'})).rejects.toThrow();
+ expect((await sql.query("select artifact_evidence_allowed($1,'[]'::jsonb) allowed",[before.projectId])).rows[0].allowed).toBe(false);
+},120000);
+
+it("OPC: account inheritance validates dependency order and revocable local evidence",async()=>{
+ const f=await publishedDraft(3,true,true,true);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+  body:[{id:randomUUID(),platform:'x',account:'reverse-order',title:'合法的依赖顺序',brief:'显示顺序不等于确认顺序',day:'2026-09-26'}]});
+ await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'reverse-order',expectedRevision:null}]});
+ const account=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0];
+ const begun=await f.service.accountStrategyBegin(account.projectId,randomUUID());
+ const d=await f.service.read(begun.draftId);
+ expect(d.snapshot.workflow.steps.map((step:{id:string})=>step.id)).toEqual(['step-2','step-1','step-0']);
+ expect(Object.values(d.snapshot.steps).every((step:any)=>step.valid)).toBe(true);
+ const evidence=d.snapshot.steps['step-0'].evidenceIds[0];
+ expect((await sql.query('select count(*)::int n from artifact_evidence_restrictions where evidence_id=$1',[evidence])).rows[0].n).toBe(1);
+ await f.artifacts.execute({action:'restrictEvidence',projectId:d.projectId,roundId:d.roundId,requestId:randomUUID(),evidenceId:evidence,deleted:true,expiresAt:null});
+ expect((await sql.query('select artifact_evidence_allowed($1,$2::jsonb) allowed',[d.projectId,JSON.stringify([evidence])])).rows[0].allowed).toBe(false);
+ await expect(f.service.read(d.draftId)).rejects.toThrow('OPC_DENIED');
+ await expect(f.service.accountStrategySchema(account.projectId)).rejects.toThrow('OPC_SOURCE_DENIED');
+ await expect(f.artifacts.read(d.projectId,d.roundId)).rejects.toThrow('ARTIFACT_DENIED');
+ await expect(f.artifacts.execute({action:'publish',projectId:d.projectId,roundId:d.roundId,requestId:randomUUID(),expectedSteps:Object.fromEntries(Object.entries(d.snapshot.steps).map(([k,v]:[string,any])=>[k,{version:v.version,reviewVersion:v.reviewVersion}]))})).rejects.toThrow();
+ expect(await f.service.accountStrategyHistory(account.projectId)).toHaveLength(1);
+},120000);
+
+it("OPC: an older account draft with a different method keeps both sides without guessed repair",async()=>{
+ const f=await publishedDraft();
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+  body:[{id:randomUUID(),platform:'x',account:'method-conflict',title:'方法边界',brief:'不猜测映射',day:'2026-09-26'}]});
+ await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'method-conflict',expectedRevision:null}]});
+ const account=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0];
+ const next=makePackage(f.pack.id,true),flow=structuredClone(f.flow),registration='conflict-'+randomUUID();
+ flow.steps[0].information![0].title='新方法的不同问法';
+ await publishSkillPackage(admin,f.owner,next);
+ await sql.query('update artifact_workflows set enabled=false where id=$1',[f.registration]);
+ await sql.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',[registration,f.moduleId,next.id,next.revisionId,flow,'新方法']);
+ const {readFile}=await import('node:fs/promises');
+ const oldSql=await readFile(new URL('../../../../db/migrations/0125_opc_account_strategy.sql',import.meta.url),'utf8');
+ const newSql=await readFile(new URL('../../../../db/migrations/0134_opc_account_strategy_inheritance.sql',import.meta.url),'utf8');
+ const begin=oldSql.slice(oldSql.indexOf('CREATE OR REPLACE FUNCTION opc_account_strategy_begin('),oldSql.indexOf('END $$;',oldSql.indexOf('CREATE OR REPLACE FUNCTION opc_account_strategy_begin('))+7);
+ let legacy:{draftId:string;roundId:string};await sql.query(begin);
+ try{legacy=await f.service.accountStrategyBegin(account.projectId,randomUUID());}finally{await sql.query(newSql);}
+ const d=await f.service.read(legacy!.draftId);
+ await f.service.information({draftId:d.draftId,stepId:'step-0',requestId:randomUUID(),expectedVersion:d.snapshot.steps['step-0'].version,
+  values:{goal:{...d.information['step-0'].values.goal,value:'新方法下用户的新输入'}}});
+ const before=(await sql.query('select to_jsonb(r) value from artifact_rounds r where id=$1',[legacy!.roundId])).rows[0];
+ const {browser,page}=await planBrowser(f);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
+  await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/method-conflict/}).click();
+  await page.getByRole('button',{name:/x · method-conflict.*查看详情/}).click();
+  await page.getByRole('dialog',{name:'定位详情'}).getByRole('button',{name:'回到策略讨论',exact:true}).click();
+  await page.waitForURL('**/positioning/'+legacy!.draftId);
+  await page.getByRole('alert').filter({hasText:'未自动合并或覆盖任何答案'}).waitFor();
+  await page.getByText('查看原正式版本完整内容',{exact:true}).click();
+  expect((await page.getByRole('alert').allTextContents()).join(' ')).toContain('A concrete user decision');
+  expect(await page.getByRole('textbox',{name:'新方法的不同问法',exact:true}).inputValue()).toBe('新方法下用户的新输入');
+  expect((await sql.query('select to_jsonb(r) value from artifact_rounds r where id=$1',[legacy!.roundId])).rows[0]).toEqual(before);
+ }finally{await browser.close();}
+},180000);
+
 it("OPC: account strategy edits stay draft-scoped and publish only for the chosen account", async()=>{
   const f=await publishedDraft();
   const other=await publishedDraft();
@@ -7803,12 +8012,12 @@ it("OPC: account strategy edits stay draft-scoped and publish only for the chose
     await expect.poll(async()=>(await historicalPage.getByRole('alert').allTextContents()).join(' '),{timeout:15000}).toContain('版本已变化');
   }finally{await historicalBrowser.close();}
   const secondRead=await f.service.read(secondDraft.draftId);
-  expect(secondRead.snapshot.workflow.steps[0].title).toBe('新版账号问题');
-  expect(secondRead.information[secondFlow.steps[0].id].schema.map((field:{title:string})=>field.title)).toContain('新增问题');
+  expect(secondRead.snapshot.workflow.steps[0].title).toBe(f.flow.steps[0].title);
+  expect(secondRead.information[secondFlow.steps[0].id].schema.map((field:{title:string})=>field.title)).not.toContain('新增问题');
   expect((await f.service.accountStrategyHistory(a.projectId)).map((v:{id:string})=>v.id))
     .toEqual([nowA.sourceVersionId,f.sourceVersionId]);
   const secondRoundId=secondDraft.roundId;
-  for(const step of secondFlow.steps){
+  for(const step of f.flow.steps){
     const state=(await f.service.read(secondDraft.draftId)).snapshot.steps[step.id];
     await f.artifacts.execute({action:'save',projectId:secondRead.projectId,roundId:secondRoundId,requestId:randomUUID(),stepId:step.id,
       body:'用户核对的新版账号定位 '+step.title,evidenceIds:[],expectedVersion:state.version});
@@ -7828,7 +8037,7 @@ it("OPC: account strategy edits stay draft-scoped and publish only for the chose
   expect(thirdHistory[2].id).toBe(f.sourceVersionId);
 },180000);
 
-it("OPC: the first account strategy revision after Skill upload uses its latest published questions",async()=>{
+it("OPC: account strategy revision after Skill upload preserves its exact published method",async()=>{
   const f=await publishedDraft();
   const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
     body:[{id:randomUUID(),platform:'x',account:'strategy-upgrade',title:'旧来源选题',brief:'来源须保留',day:'2026-09-26'}]});
@@ -7850,15 +8059,15 @@ it("OPC: the first account strategy revision after Skill upload uses its latest 
     [revisedRegistration,f.moduleId,revisedPackage.id,revisedPackage.revisionId,revisedFlow,'新版定位']);
   const started=await f.service.accountStrategyBegin(account.projectId,randomUUID());
   const draft=await f.service.read(started.draftId);
-  expect(draft.snapshot.workflow.steps[0].title).toBe('更新后的需求确认');
+  expect(draft.snapshot.workflow.steps[0].title).toBe(f.flow.steps[0].title);
   expect(draft.information[revisedFlow.steps[0].id].schema.map((field:{title:string})=>field.title))
-    .toContain('新增待确认问题');
+    .not.toContain('新增待确认问题');
   expect(draft.information[revisedFlow.steps[0].id].values.new_need?.value??'').toBe('');
   expect((await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0].sourceVersionId)
     .toBe(f.sourceVersionId);
 },180000);
 
-it("OPC: library edits use renamed Skill steps and questions without writing on cancel",async()=>{
+it("OPC: library edits retain source Skill fields after a renamed method is published",async()=>{
   const f=await publishedDraft();
   const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
     body:[{id:randomUUID(),platform:'x',account:'renamed-schema',title:'旧稿来源',brief:'保留来源',day:'2026-09-26'}]});
@@ -7880,14 +8089,14 @@ it("OPC: library edits use renamed Skill steps and questions without writing on 
   await sql.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',
     [nextRegistration,f.moduleId,nextPackage.id,nextPackage.revisionId,nextFlow,'新版问题']);
   const directSchema=await sql.query('select opc_account_strategy_schema($1,$2) as schema',[f.actor,account.projectId]);
-  expect(directSchema.rows[0].schema.registrationId).toBe(nextRegistration);
+  expect(directSchema.rows[0].schema.registrationId).toBe(f.registration);
   const schema=await f.service.accountStrategySchema(account.projectId);
-  expect(schema.registrationId).toBe(nextRegistration);
-  expect(schema.workflow.steps[0].information[0].id).toBe('renamed-goal');
+  expect(schema.registrationId).toBe(f.registration);
+  expect(schema.workflow.steps[0].information[0].id).toBe('goal');
   const other=await publishedDraft();
   await expect(other.service.accountStrategySchema(account.projectId)).rejects.toThrow('OPC_DENIED');
   await expect(f.service.accountStrategySave({accountProjectId:account.projectId,requestId:randomUUID(),
-    expectedSourceVersionId:f.sourceVersionId,expectedPendingDraftId:null,expectedRegistrationId:f.registration,
+    expectedSourceVersionId:f.sourceVersionId,expectedPendingDraftId:null,expectedRegistrationId:nextRegistration,
     edits:{'renamed-step':{'renamed-goal':'旧 Skill 的过期保存'}}})).rejects.toThrow('OPC_VERSION_CONFLICT');
   const {browser,page}=await planBrowser(f);
   try{
@@ -7896,9 +8105,9 @@ it("OPC: library edits use renamed Skill steps and questions without writing on 
     await page.getByRole('button',{name:/x · renamed-schema.*查看详情/}).click();
     const dialog=page.getByRole('dialog',{name:'定位详情'});
     await dialog.getByRole('button',{name:'修改定位'}).click();
-    await dialog.getByText('新版问题顺序').waitFor();
-    await dialog.getByText('新版目标问题',{exact:true}).first().waitFor();
-    expect(await dialog.getByText('已知目标 0').count()).toBe(0);
+    await dialog.getByText(f.flow.steps[0].title,{exact:true}).waitFor();
+    await dialog.getByText('已知目标 0',{exact:true}).first().waitFor();
+    expect(await dialog.getByText('新版目标问题').count()).toBe(0);
     await dialog.getByRole('textbox').first().fill('取消后不能写入');
     await dialog.getByRole('button',{name:'取消'}).click();
     expect((await sql.query('select count(*)::int as n from opc_account_strategy_drafts where account_project_id=$1',[account.projectId])).rows[0].n).toBe(0);
@@ -7911,8 +8120,8 @@ it("OPC: library edits use renamed Skill steps and questions without writing on 
   expect(updated.sourceVersionId).toBe(f.sourceVersionId);
   expect(updated.pendingStrategyDraftId).toBeTruthy();
   const draft=await f.service.read(updated.pendingStrategyDraftId);
-  expect(draft.snapshot.workflow.steps[0].id).toBe('renamed-step');
-  expect(draft.information['renamed-step'].values['renamed-goal']).toMatchObject({value:'新版问题下的待确认答案',status:'provisional'});
+  expect(draft.snapshot.workflow.steps[0].id).toBe(f.flow.steps[0].id);
+  expect(draft.information[f.flow.steps[0].id].values.goal).toMatchObject({value:'新版问题下的待确认答案',status:'provisional'});
 },180000);
 
 it("OPC: manual positioning keeps both the composer and current answer editable",async()=>{

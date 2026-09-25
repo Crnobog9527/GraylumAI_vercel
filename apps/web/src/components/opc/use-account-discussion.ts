@@ -15,21 +15,13 @@ export function useAccountDiscussion(){
   busy.current=true;setOpening(true);setError('');
   const key='opc-account-discussion:'+accountProjectId;
   try{
-   const [library,history]=await Promise.all([utils.opc.library.fetch({search:'',from:null,to:null}),utils.opc.accountStrategyHistory.fetch({accountProjectId})]);
-   const accounts=(library.businesses as Array<{accounts:Array<{projectId:string;strategyDraftId?:string;pendingStrategyDraftId?:string|null;sourceVersionId?:string|null}>}>).flatMap(business=>business.accounts);
-   const account=accounts.find(value=>value.projectId===accountProjectId);
-   if(!account?.sourceVersionId||!account.strategyDraftId)throw new Error('OPC_DENIED');
-   let draftId=account.pendingStrategyDraftId??account.strategyDraftId;
-   const retained=sessionStorage.getItem(key);
-   // The first account discussion forks the shared source using the existing
-   // account revision operation. Later visits retain the same chat and history.
-   if(retained||(!account.pendingStrategyDraftId&&(history as Array<{source:string}>)[0]?.source!=='account')){
-    const requestId=retained??crypto.randomUUID();
-    sessionStorage.setItem(key,requestId);
-    const result=await begin.mutateAsync({accountProjectId,requestId}) as {draftId:string};
-    draftId=result.draftId;sessionStorage.removeItem(key);
-    await utils.opc.library.invalidate();
-   }
+   const requestId=sessionStorage.getItem(key)??crypto.randomUUID();
+   sessionStorage.setItem(key,requestId);
+   // The server retains this account's existing draft or starts its exact
+   // source revision. It also repairs proven untouched legacy fields in place.
+   const result=await begin.mutateAsync({accountProjectId,requestId}) as {draftId:string};
+   const draftId=result.draftId;sessionStorage.removeItem(key);
+   await utils.opc.library.invalidate();
    router.push('/positioning/'+draftId);
    onOpened?.();
   }catch(cause){
