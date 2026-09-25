@@ -8970,8 +8970,11 @@ it("OPC: library finalization closes only on success and account discussion swit
   await dialog.getByRole('button',{name:'确认定稿文章',exact:true}).click();await submitted;
   await dialog.getByRole('button',{name:'展开编辑',exact:true}).click();
   await page.getByLabel('展开编辑正文',{exact:true}).fill('定稿等待期间的展开输入');
+  const refreshed=page.waitForResponse(response=>response.url().includes('opc.library')&&response.request().method()==='GET');
   release();
   await dialog.getByRole('status').filter({hasText:'已定稿'}).waitFor();
+  await (await refreshed).finished();
+  await page.waitForTimeout(500); // Let onSaved's continuation run before asserting or confirming later edits.
   expect(await page.getByLabel('展开编辑正文',{exact:true}).inputValue()).toBe('定稿等待期间的展开输入');
   expect(await dialog.isVisible()).toBe(true);
   await page.unroute('**/api/trpc/opc.saveContentManual*');
