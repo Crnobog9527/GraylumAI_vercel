@@ -30,7 +30,7 @@ import {
   reachedQuestions,
 } from "@repo/api/src/shared/opcQuestions";
 import { isAgentProposal } from "@repo/api/src/shared/opcMethodPolicy";
-type Step = { id: string; title: string };
+type Step = { id: string; title: string; dependsOn?: string[] };
 type Information = {
   status: "unknown" | "unclear" | "provisional" | "confirmed" | "deferred";
   nature: "fact" | "decision" | "hypothesis" | "unknown";
@@ -1172,6 +1172,11 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       setError("");
       return;
     }
+    if (d.accountRevision && envelopeState.kind === "none" && (step.dependsOn ?? []).some(id => !snap.steps[id]?.valid)) {
+      setError(`需要先核对“${nextReviewStep?.title ?? "前置步骤"}”。已有答案和修改均已保留，无需重新填写。`);
+      if (nextReviewStep) setActiveStep(nextReviewStep.id);
+      return;
+    }
     confirmationLock.current = true;
     setConfirmingQuestion(true);
     setError("");
@@ -1705,6 +1710,14 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const hasUnconfirmedRequired = steps.some(step =>
     (d.information[step.id]?.schema ?? []).some((field: { id: string; required: boolean }) =>
       field.required && d.information[step.id]?.values?.[field.id]?.status !== "confirmed"));
+  // Confirmed answers and a valid step are distinct: upstream edits invalidate
+  // dependent confirmations without erasing the answers. Offer a ready step,
+  // including workflows whose display order is not dependency order.
+  const needsReview = (step: Step) => !snap.steps[step.id].valid ||
+    (d.information[step.id]?.schema ?? []).some((field: {id:string;required:boolean}) =>
+      field.required && d.information[step.id]?.values?.[field.id]?.status !== "confirmed");
+  const nextReviewStep = steps.find(step => needsReview(step) &&
+    (step.dependsOn ?? []).every(id => snap.steps[id]?.valid));
   const selectedStep =
     steps.find((step) => step.id === activeStep) ??
     steps[Math.max(0, firstPending)];
@@ -2053,7 +2066,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   {questionConfirmed && (
                     <p role="status" className="text-sm">
                       已确认当前问题「{activeQuestion.title}」
-                      {s.valid ? `；本步骤「${step.title}」已确认，无需重复确认。` : "。继续修改后可重新确认。"}
+                      {s.valid ? `；本步骤「${step.title}」已确认，无需重复确认。` : d.accountRevision ? "。本步骤待核对，可直接重新确认已有答案。" : "。继续修改后可重新确认。"}
                     </p>
                   )}
                   {manualEntry && <p className="text-sm text-[var(--text-secondary)]">填写与自动保存不等于确认；请逐项核对，必需信息全部确认后才能发布正式定位。</p>}
@@ -2221,7 +2234,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                         return <label key={field.id}><span>{field.title}</span><Textarea aria-label={`已确认：${field.title}`} maxLength={400} value={value.value} disabled={hasPendingConfirmation} onChange={event=>{
                           captureInformationBase(confirmedStep.id);
                           setInfoEdits(old=>({...old,[confirmedStep.id]:{...Object.fromEntries(info.schema.map((part:{id:string})=>[part.id,old[confirmedStep.id]?.[part.id]??info.values?.[part.id]??{status:'unknown',nature:'unknown',value:''}])),[field.id]:{...value,value:event.target.value,status:event.target.value.trim()?'provisional':'unknown'}}}));
-                        }}/><small>{value.status==='confirmed'?'已确认':'修改已自动保存 · 待重新确认'}</small>{value.status!=='confirmed'&&<Button variant="outline" disabled={busy||hasPendingConfirmation||hasPendingStepRequest||!value.value.trim()} onClick={()=>confirmStep(confirmedStep,confirmedIndex,field.id,false,nonAnswersFor(confirmedStep.id,field.id),true)}>确认这项修改</Button>}</label>;
+                        }}/><small>{value.status==='confirmed'?(d.accountRevision&&!snap.steps[confirmedStep.id].valid?'答案已确认 · 步骤待核对':'已确认'):'修改已自动保存 · 待重新确认'}</small>{value.status!=='confirmed'&&<Button variant="outline" disabled={busy||hasPendingConfirmation||hasPendingStepRequest||!value.value.trim()} onClick={()=>confirmStep(confirmedStep,confirmedIndex,field.id,false,nonAnswersFor(confirmedStep.id,field.id),true)}>确认这项修改</Button>}</label>;
                       })}</section>;
                     })}
                   </div>}
@@ -2352,6 +2365,13 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           修订定位，保留原版本
         </Button>
       )}
+      {!planView && d.accountRevision && snap.state === "draft" && nextReviewStep && <div role="status">
+        <p>修改影响了步骤确认。请核对“{nextReviewStep.title}”及受影响的后续步骤；已有答案保留，核对完成后即可确认正式定位。</p>
+        <Button variant="outline" disabled={busy || hasUnsavedInformation || hasPendingConfirmation || hasPendingStepRequest}
+          onClick={() => { setError(""); setActiveStep(nextReviewStep.id); }}>
+          继续核对：{nextReviewStep.title}
+        </Button>
+      </div>}
       {!planView && <Button
         disabled={
           busy ||

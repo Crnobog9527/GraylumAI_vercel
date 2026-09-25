@@ -7782,6 +7782,53 @@ it("OPC: account strategy dialog returns to a complete revision and explicit off
  }catch(error){console.info('ACCOUNT_REVISION_FAILURE',error instanceof Error?error.stack:String(error),await page.getByRole('alert').allTextContents());await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/account-revision-failure.png'});throw error;}finally{await browser.close();}
 },180000);
 
+it("OPC: account revision guides dependent reviews before official confirmation without refilling",async()=>{
+ const f=await publishedDraft(6,true,true);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+  body:[{id:randomUUID(),platform:'x',account:'review-revision',title:'确认路径',brief:'只修改两处，其余保留',day:'2026-09-26'}]});
+ await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'review-revision',expectedRevision:null}]});
+ const account=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0];
+ const {browser,page}=await planBrowser(f);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
+  await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/review-revision/}).click();
+  await page.getByRole('button',{name:/x · review-revision.*查看详情/}).click();
+  await page.getByRole('dialog',{name:'定位详情'}).getByRole('button',{name:'回到策略讨论',exact:true}).click();
+  await page.waitForURL(url=>/^\/positioning\/[^/]+$/.test(url.pathname));
+  const draftId=page.url().split('/positioning/')[1];
+  const phases=page.getByRole('navigation',{name:'定位步骤'}).getByRole('button');
+  await page.getByRole('textbox',{name:'已知目标 0',exact:true}).fill('第一步的新业务目标');
+  await page.getByText('已自动保存',{exact:true}).waitFor();
+  await phases.nth(3).click();
+  await page.getByRole('textbox',{name:'已知目标 3',exact:true}).fill('第四步的新内容安排');
+  await page.getByText('已自动保存',{exact:true}).waitFor();
+  await phases.nth(5).click();
+  const finalize=page.getByRole('button',{name:'确认正式定位',exact:true});
+  expect(await finalize.isEnabled()).toBe(false);
+  await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/account-review-blocked.png'});
+  const frozen=(await f.service.read(draftId)).snapshot.steps;
+  await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'需要先核对“需求确认”'}).waitFor();
+  expect((await f.service.read(draftId)).snapshot.steps).toEqual(frozen);
+  await page.getByRole('button',{name:'继续核对：需求确认',exact:true}).click();
+  for(let i=0;i<6;i++){
+   const answer=page.getByRole('textbox',{name:'已知目标 '+i,exact:true});
+   await answer.waitFor();
+   expect(await answer.inputValue()).toBe(i===0?'第一步的新业务目标':i===3?'第四步的新内容安排':'原正式答案 step-'+i);
+   await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).click();
+   await expect.poll(async()=>(await f.service.read(draftId)).snapshot.steps['step-'+i].valid,{timeout:15000}).toBe(true);
+  }
+  await expect.poll(()=>finalize.isEnabled(),{timeout:15000}).toBe(true);
+  await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/account-review-ready.png'});
+  await finalize.click();
+  await expect.poll(async()=>(await f.service.accountStrategyHistory(account.projectId)).length,{timeout:15000}).toBe(2);
+  const versions=await f.service.accountStrategyHistory(account.projectId);
+  expect(versions[0].information['step-0'].values.goal.value).toBe('第一步的新业务目标');
+  expect(versions[0].information['step-3'].values.goal.value).toBe('第四步的新内容安排');
+  expect(versions[1].information['step-0'].values.goal.value).toBe('原正式答案 step-0');
+ }finally{await browser.close();}
+},180000);
+
 it("OPC: legacy account revisions repair only untouched answers and retain source revocation",async()=>{
  const f=await publishedDraft(6,true,true);
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
