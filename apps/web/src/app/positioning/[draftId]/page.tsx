@@ -2041,12 +2041,12 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                             </p>
                           </div>
                           {execution.state === "completed" && target && latestSuggestion.get(target.id) === execution.executionId && proposed.length > 0 && (
-                            <div className="rounded border border-[var(--border-primary)] p-3">
-                              <p>导师建议调整 · {target.title}</p>
-                              {proposed.map(([id, value]) => <p key={id} className="text-sm">{d.information[target.id].schema.find((f: {id:string}) => f.id === id)?.title}：{value.value}</p>)}
+                            <div className={resultStyles.suggestionCard}>
+                              <p className={resultStyles.suggestionTitle}>导师建议调整 · {target.title}</p>
+                              <div className={resultStyles.suggestionFields}>{proposed.map(([id, value]) => <p key={id}><span>{d.information[target.id].schema.find((f: {id:string}) => f.id === id)?.title}</span>{value.value}</p>)}</div>
                               <Button variant="outline" disabled={busy || hasPendingConfirmation || hasPendingStepRequest || Boolean(pendingMentor) || snap.state !== "draft"}
                                 onClick={() => acceptSuggestion(execution.executionId, target.id, Object.fromEntries(proposed.map(([id, entry]) => [id, toInformation(entry)])))}>采用这些修改到“{target.title}”</Button>
-                              <p className="text-xs">原有内容在采用前保持不变。采用后请核对本步骤及受影响的后续结果。</p>
+                              <p className={resultStyles.suggestionNote}>原有内容在采用前保持不变。采用后请核对本步骤及受影响的后续结果。</p>
                             </div>
                           )}
                           {!busy && !["completed", "cancelled"].includes(
