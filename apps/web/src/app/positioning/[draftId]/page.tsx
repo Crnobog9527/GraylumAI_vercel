@@ -8,7 +8,7 @@ import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { WorkspaceFrame } from "@/components/opc/workspace-frame";
-import { PanelRightOpen } from "lucide-react";
+import { PanelRightOpen, X } from "lucide-react";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 import { mergeInformation } from "./information-merge";
@@ -2466,13 +2466,15 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           }}
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
         >
-          <div className="w-full max-w-lg space-y-4 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-5">
-            <h2 className="text-xl">正式定位已发布。现在生成第一周选题吗？</h2>
-            <p className="text-sm text-[var(--text-secondary)]">
+          <div className={resultStyles.consentCard}>
+            <header>
+              <h2>正式定位已发布。现在生成第一周选题吗？</h2>
+              <Button className={resultStyles.consentClose} variant="ghost" aria-label="关闭选题询问" disabled={busy} onClick={() => setConsentOpen(false)}><X size={18} aria-hidden="true" /></Button>
+            </header>
+            <p>
               继续后，Agent 会按你已确认的正式定位和绑定的选题方法开始首轮工作对话。你可以继续补充平台、账号与日期，修改候选。这一步会调用模型并消耗额度；候选不会自动保存为计划，也不会自动创建账号或选题。选择“稍后”不会产生任何调用，正式定位与历史保持原样，你可以随时回来继续。
             </p>
-            <Button variant="ghost" aria-label="关闭选题询问" disabled={busy} onClick={() => setConsentOpen(false)}>关闭</Button>
-            <div className="flex flex-wrap gap-3">
+            <div className={resultStyles.consentActions}>
               <Button
                 disabled={busy || hasUnsavedInformation}
                 onClick={() => void consentPlan()}
