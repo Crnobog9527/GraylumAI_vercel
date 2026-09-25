@@ -2748,6 +2748,11 @@ for (const scenario of ["fresh", "retry", "same-field", "offline", "response-los
 it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hidden fields aligned", async () => {
   const {chromium} = await import("../../../../../apps/web/node_modules/@playwright/test");
   const f=await fixture(3,true), model=randomUUID();
+  // This test runs independently as well as in the full suite. Do not depend
+  // on an earlier browser test having configured its local organizer model.
+  const summaryModel=randomUUID();
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'OPC organizer','opc-organizer','fixture','true',1000,32000)",[summaryModel]);
+  await sql.query("insert into system_settings(key,value) values('v3_summary_model_id',to_jsonb($1::text)),('v3_summary_max_tokens','1000'::jsonb) on conflict(key) do update set value=excluded.value",[summaryModel]);
   await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Question local','opc-question','fixture','true',1000,32000)",[model]);
   await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
   const draft=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:"mentor"});
@@ -2787,13 +2792,14 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     expect(await page.getByRole("button",{name:/^(确认本题并继续|确认当前信息，继续)$/,exact:true}).isVisible()).toBe(true);
     expect(await page.getByRole("button",{name:/^(确认本题并继续|确认当前信息，继续)$/,exact:true}).evaluate(el=>Boolean(el.closest("details")))).toBe(false);
     const admissions:any[]=[];const informationWrites:string[]=[];
+    page.on('response',async response=>{if(response.status()>=400&&response.url().includes('/api/trpc/'))console.info('QUESTION_HTTP_FAILURE',response.status(),(await response.json()).map((item:any)=>item.error?.message));});
     page.on("request",r=>{
       if(r.method()==="POST"&&r.url().includes("opc.prepareStep")){const body=r.postDataJSON();const v=body[0]??body;admissions.push(v.json??v);}
       if(r.method()==="POST"&&r.url().includes("opc.information")) {
         informationWrites.push(r.postData()??"");
       }
     });
-    async function send(text:string){await composer().fill(text);await page.getByRole("button",{name:"发送",exact:true}).click();await expect.poll(()=>composer().inputValue(),{timeout:30000}).toBe("");}
+    async function send(text:string){await composer().fill(text);await page.getByRole("button",{name:"发送",exact:true}).click();try{await expect.poll(()=>composer().inputValue(),{timeout:30000}).toBe("");}catch(error){console.info('QUESTION_SEND_FAILURE',{alerts:await page.getByRole('alert').allTextContents(),admissions:admissions.length});await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/question-send-failure.png'});throw error;}}
     await send("我做 AI 赛道");
     await expect.poll(()=>first().inputValue()).toBe("我做 AI 赛道");
     // Autosave includes a 700ms debounce plus a fresh read and the write.
@@ -7782,7 +7788,7 @@ it("OPC: account strategy dialog returns to a complete revision and explicit off
  }catch(error){console.info('ACCOUNT_REVISION_FAILURE',error instanceof Error?error.stack:String(error),await page.getByRole('alert').allTextContents());await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/account-revision-failure.png'});throw error;}finally{await browser.close();}
 },180000);
 
-it("OPC: account revision guides dependent reviews before official confirmation without refilling",async()=>{
+it("OPC: account revision confirms only edited information before official finalization",async()=>{
  const f=await publishedDraft(6,true,true);
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
   body:[{id:randomUUID(),platform:'x',account:'review-revision',title:'确认路径',brief:'只修改两处，其余保留',day:'2026-09-26'}]});
@@ -7797,29 +7803,48 @@ it("OPC: account revision guides dependent reviews before official confirmation 
   await page.waitForURL(url=>/^\/positioning\/[^/]+$/.test(url.pathname));
   const draftId=page.url().split('/positioning/')[1];
   const phases=page.getByRole('navigation',{name:'定位步骤'}).getByRole('button');
+  const initial=await f.service.read(draftId);
+  await f.service.information({draftId,stepId:'step-0',requestId:randomUUID(),expectedVersion:initial.snapshot.steps['step-0'].version,values:{goal:{...initial.information['step-0'].values.goal,status:'deferred'}}});
+  await page.reload();
+  expect(await page.getByRole('button',{name:'确认正式定位',exact:true}).isEnabled()).toBe(false);
+  await page.getByRole('button',{name:/核对修改：/}).click();
   await page.getByRole('textbox',{name:'已知目标 0',exact:true}).fill('第一步的新业务目标');
   await page.getByText('已自动保存',{exact:true}).waitFor();
   await phases.nth(3).click();
   await page.getByRole('textbox',{name:'已知目标 3',exact:true}).fill('第四步的新内容安排');
   await page.getByText('已自动保存',{exact:true}).waitFor();
-  await phases.nth(5).click();
   const finalize=page.getByRole('button',{name:'确认正式定位',exact:true});
   expect(await finalize.isEnabled()).toBe(false);
-  await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/account-review-blocked.png'});
-  const frozen=(await f.service.read(draftId)).snapshot.steps;
+  // Confirm the later edit first; unedited dependencies require no user action.
   await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).click();
-  await page.getByRole('alert').filter({hasText:'需要先核对“需求确认”'}).waitFor();
-  expect((await f.service.read(draftId)).snapshot.steps).toEqual(frozen);
-  await page.getByRole('button',{name:'继续核对：需求确认',exact:true}).click();
-  for(let i=0;i<6;i++){
-   const answer=page.getByRole('textbox',{name:'已知目标 '+i,exact:true});
-   await answer.waitFor();
-   expect(await answer.inputValue()).toBe(i===0?'第一步的新业务目标':i===3?'第四步的新内容安排':'原正式答案 step-'+i);
-   await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).click();
-   await expect.poll(async()=>(await f.service.read(draftId)).snapshot.steps['step-'+i].valid,{timeout:15000}).toBe(true);
-  }
+  await expect.poll(async()=>(await f.service.read(draftId)).information['step-3'].values.goal.status,{timeout:15000}).toBe('confirmed');
+  await expect.poll(()=>page.getByRole('button',{name:'确认当前信息，继续',exact:true}).isEnabled(),{timeout:15000}).toBe(false);
+  expect(await finalize.isEnabled()).toBe(false); // step 0 is still unconfirmed.
+  await page.reload();
+  await phases.nth(0).click();
+  expect(await page.getByRole('textbox',{name:'已知目标 0',exact:true}).inputValue()).toBe('第一步的新业务目标');
+  let lostConfirm=true;
+  const confirmRequests:unknown[]=[];
+  await page.route('**/api/trpc/workbench.execute*',async route=>{
+   const body=route.request().postDataJSON(),entry=body[0]??body,input=entry.json??entry;
+   if(input.action!=='confirm')return route.continue();
+   confirmRequests.push(input);
+   if(!lostConfirm)return route.continue();
+   lostConfirm=false;const response=await route.fetch();expect(response.ok()).toBe(true);await route.abort();
+  });
+  await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'操作未完成'}).waitFor();
+  expect(await page.evaluate(id=>JSON.parse(sessionStorage.getItem('opc-confirm-step:'+id+':step-0')!).phase,draftId)).toBe('confirm');
+  await page.reload();
+  await page.getByRole('button',{name:/确认当前信息，继续|继续核对本题确认/,exact:true}).click();
   await expect.poll(()=>finalize.isEnabled(),{timeout:15000}).toBe(true);
-  await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/account-review-ready.png'});
+  expect(confirmRequests).toHaveLength(2);expect(confirmRequests[1]).toEqual(confirmRequests[0]);
+  const confirmed=await f.service.read(draftId);
+  expect((await sql.query('select count(*)::int n from artifact_confirmations where round_id=$1 and step_id=$2 and version=$3',[confirmed.roundId,'step-0',confirmed.snapshot.steps['step-0'].version])).rows[0].n).toBe(1);
+  await page.waitForLoadState('networkidle');
+  expect(await finalize.isEnabled()).toBe(true);
+  await finalize.scrollIntoViewIfNeeded();
+  await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/account-review-ready.png',animations:'disabled'});
   await finalize.click();
   await expect.poll(async()=>(await f.service.accountStrategyHistory(account.projectId)).length,{timeout:15000}).toBe(2);
   const versions=await f.service.accountStrategyHistory(account.projectId);
@@ -7862,6 +7887,38 @@ it("OPC: legacy account revisions repair only untouched answers and retain sourc
  const stable=(await sql.query('select steps from artifact_rounds where id=$1',[repair.roundId])).rows[0];
  await f.service.accountStrategyBegin(account.projectId,randomUUID());
  expect((await sql.query('select steps from artifact_rounds where id=$1',[repair.roundId])).rows[0]).toEqual(stable);
+ // Repaired legacy descendants have no confirmationId. Exact inheritance
+ // still carries their accepted answers; only the two edited fields are confirmed.
+ const publishRequest=async()=>{const d=await f.service.read(repair.draftId);return {action:'publish' as const,projectId:d.projectId,roundId:d.roundId,requestId:randomUUID(),expectedSteps:Object.fromEntries(Object.entries(d.snapshot.steps).map(([k,v]:[string,any])=>[k,{version:v.version,reviewVersion:v.reviewVersion}]))};};
+ await expect(f.artifacts.execute(await publishRequest())).rejects.toThrow();
+ const stale=await publishRequest();
+ for(const stepId of ['step-2','step-1']){
+  let d=await f.service.read(repair.draftId);
+  const value=d.information[stepId].values.goal;
+  await f.service.information({draftId:d.draftId,stepId,requestId:randomUUID(),expectedVersion:d.snapshot.steps[stepId].version,values:{goal:{...value,status:'confirmed'}}});
+  d=await f.service.read(repair.draftId);
+  await f.artifacts.execute({action:'save',projectId:d.projectId,roundId:d.roundId,requestId:randomUUID(),stepId,body:'已知目标 '+stepId.slice(-1)+'\n'+value.value,evidenceIds:d.snapshot.steps[stepId].evidenceIds,expectedVersion:d.snapshot.steps[stepId].version});
+ }
+ const beforeStale=(await sql.query('select steps from artifact_rounds where id=$1',[repair.roundId])).rows[0];
+ await expect(f.artifacts.execute(stale)).rejects.toThrow();
+ expect((await sql.query('select steps from artifact_rounds where id=$1',[repair.roundId])).rows[0]).toEqual(beforeStale);
+ // Returning a touched answer to its original text is not proof of being
+ // untouched. It still needs the explicit confirmation's canonical save.
+ for(const value of ['改过后返回原文','原正式答案 step-5']){
+  const d=await f.service.read(repair.draftId);
+  await f.service.information({draftId:d.draftId,stepId:'step-5',requestId:randomUUID(),expectedVersion:d.snapshot.steps['step-5'].version,values:{goal:{...d.information['step-5'].values.goal,value,status:'confirmed'}}});
+ }
+ await expect(f.artifacts.execute(await publishRequest())).rejects.toThrow();
+ const accepted=await f.service.read(repair.draftId);
+ await f.artifacts.execute({action:'save',projectId:accepted.projectId,roundId:accepted.roundId,requestId:randomUUID(),stepId:'step-5',body:'已知目标 5\n原正式答案 step-5',evidenceIds:accepted.snapshot.steps['step-5'].evidenceIds,expectedVersion:accepted.snapshot.steps['step-5'].version});
+ const publish=await publishRequest();
+ const [done,replayed]=await Promise.all([f.artifacts.execute(publish),f.artifacts.execute(publish)]);
+ expect(replayed).toEqual(done);
+ expect(await f.service.accountStrategyHistory(account.projectId)).toHaveLength(2);
+ const finalHistory=await f.service.accountStrategyHistory(account.projectId);
+ expect(finalHistory[0].information['step-1'].values.goal.value).toBe('用户已保存的新修改');
+ expect(finalHistory[0].information['step-5'].values.goal.value).toBe('原正式答案 step-5');
+ for(const row of originals)expect((await sql.query('select to_jsonb(h) row from artifact_requests h where project_id=$1 and request_id=$2',[before.projectId,row.request_id])).rows[0].row).toEqual(row.row);
  const other=await publishedDraft();await expect(other.service.read(repair.draftId)).rejects.toThrow('OPC_DENIED');
  await f.artifacts.execute({action:'restrictEvidence',projectId:f.d.projectId,roundId:f.d.roundId,requestId:randomUUID(),evidenceId:f.sourceEvidence!,deleted:true,expiresAt:null});
  await expect(f.service.read(repair.draftId)).rejects.toThrow('OPC_DENIED');
@@ -7995,10 +8052,12 @@ it("OPC: account strategy edits stay draft-scoped and publish only for the chose
     expect((await f.service.read(saved.draftId)).information[stepId].values.goal.value).toBe('标签页 A 已保存');
     await secondTab.close();
     for(const text of ['第一次在弹窗修改','第二次在同一弹窗修改']){
+      console.info('ACCOUNT_SAVE_PHASE','edit',text);
       await dialog.getByRole('button',{name:'修改定位'}).click();
       await dialog.getByRole('textbox').first().fill(text);
       await dialog.getByRole('button',{name:'确认保存'}).click();
       await dialog.getByRole('status').filter({hasText:'已保存到此账号的待确认定位草稿'}).waitFor();
+      console.info('ACCOUNT_SAVE_PHASE','saved',text);
       await dialog.getByText(text,{exact:true}).first().waitFor();
       await dialog.getByRole('button',{name:'修改定位'}).waitFor();
       await dialog.getByRole('button',{name:'修改定位'}).click();
@@ -8007,7 +8066,7 @@ it("OPC: account strategy edits stay draft-scoped and publish only for the chose
     }
     expect((await f.service.read(saved.draftId)).information[f.flow.steps[0].id].values.goal.value)
       .toBe('第二次在同一弹窗修改');
-  }finally{await strategyBrowser.close();}
+  }catch(error){console.info('ACCOUNT_SAVE_FAILURE',error instanceof Error?error.message:String(error));throw error;}finally{console.info('ACCOUNT_SAVE_PHASE','closing');await strategyBrowser.close();console.info('ACCOUNT_SAVE_PHASE','closed');}
   for(const step of f.flow.steps){
     const state=(await f.service.read(saved.draftId)).snapshot.steps[step.id];
     await f.artifacts.execute({action:'save',projectId:draft.projectId,roundId:saved.roundId,requestId:randomUUID(),stepId:step.id,
@@ -8082,6 +8141,17 @@ it("OPC: account strategy edits stay draft-scoped and publish only for the chose
   expect(thirdHistory).toHaveLength(3);
   expect(thirdHistory[1].id).toBe(nowA.sourceVersionId);
   expect(thirdHistory[2].id).toBe(f.sourceVersionId);
+  const pendingAgain=await f.service.accountStrategyBegin(a.projectId,randomUUID());
+  const pendingRead=await f.service.read(pendingAgain.draftId);
+  const beforeStale=(await sql.query('select steps from artifact_rounds where id=$1',[pendingAgain.roundId])).rows[0];
+  const revision=(await sql.query('select revision from opc_accounts where project_id=$1',[a.projectId])).rows[0].revision;
+  console.info('ACCOUNT_SOURCE_DRIFT','before');
+  await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'strategy-a',expectedRevision:Number(revision)}]});
+  console.info('ACCOUNT_SOURCE_DRIFT','after');
+  const target=pendingRead.snapshot.steps[f.flow.steps[0].id];
+  await expect(f.artifacts.execute({action:'confirm',projectId:pendingRead.projectId,roundId:pendingRead.roundId,requestId:randomUUID(),stepId:f.flow.steps[0].id,expectedVersion:target.version,expectedReviewVersion:target.reviewVersion})).rejects.toThrow();
+  await expect(f.artifacts.execute({action:'publish',projectId:pendingRead.projectId,roundId:pendingRead.roundId,requestId:randomUUID(),expectedSteps:Object.fromEntries(Object.entries(pendingRead.snapshot.steps).map(([k,v]:[string,any])=>[k,{version:v.version,reviewVersion:v.reviewVersion}]))})).rejects.toThrow();
+  expect((await sql.query('select steps from artifact_rounds where id=$1',[pendingAgain.roundId])).rows[0]).toEqual(beforeStale);
 },180000);
 
 it("OPC: account strategy revision after Skill upload preserves its exact published method",async()=>{
