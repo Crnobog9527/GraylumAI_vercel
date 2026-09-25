@@ -16,7 +16,7 @@ CREATE TRIGGER opc_item_title_sync AFTER INSERT OR UPDATE OF title ON opc_item_e
 CREATE OR REPLACE FUNCTION opc_work_ui_change(
  p_actor_id uuid,p_request_id uuid,p_work_item_id uuid,p_expected_revision bigint,p_action text,p_name text DEFAULT NULL
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE saved opc_library_requests;payload jsonb;state opc_work_ui;result jsonb;item opc_items;ed opc_item_edits;
+DECLARE saved opc_library_requests;payload jsonb;state opc_work_ui;result jsonb;item opc_items;ed opc_item_edits;s runtime_sessions;n bigint;
 BEGIN
  PERFORM bill2_actor(p_actor_id);
  IF p_request_id IS NULL OR p_work_item_id IS NULL OR p_expected_revision IS NULL OR p_expected_revision<1 OR
@@ -48,12 +48,15 @@ BEGIN
  IF p_action='rename' THEN
   SELECT * INTO ed FROM opc_item_edits WHERE work_item_id=p_work_item_id FOR UPDATE;
   IF FOUND THEN
-   UPDATE opc_item_edits SET title=trim(p_name),revision=revision+1 WHERE work_item_id=p_work_item_id;
+   UPDATE opc_item_edits SET title=trim(p_name),revision=revision+1 WHERE work_item_id=p_work_item_id RETURNING * INTO ed;
   ELSE
    INSERT INTO opc_item_edits(work_item_id,revision,title,brief,day,content_type)
-   VALUES(p_work_item_id,2,trim(p_name),item.brief,item.day,opc_item_content_type(p_work_item_id));
+   VALUES(p_work_item_id,2,trim(p_name),item.brief,item.day,opc_item_content_type(p_work_item_id)) RETURNING * INTO ed;
   END IF;
   UPDATE artifact_projects SET work_title=trim(p_name) WHERE id=p_work_item_id AND actor_id=p_actor_id;
+  SELECT * INTO s FROM runtime_sessions WHERE actor_id=p_actor_id AND scope=jsonb_build_object('kind','work_item','projectId',item.account_project_id,'workItemId',item.work_item_id);
+  SELECT coalesce(max(revision),0) INTO n FROM runtime_scope_material WHERE session_id=s.id;
+  PERFORM runtime_material(p_actor_id,s.id,'save',p_request_id,n,jsonb_build_object('brief','内容类型：'||ed.content_type||E'\n标题：'||ed.title||E'\n简报：'||ed.brief,'material',coalesce(opc_profile(item.source_version_id)::text,''),'roundId',NULL));
  END IF;
  result:=jsonb_build_object('revision',state.revision,'displayName',state.display_name,'pinned',state.pinned,'archived',state.archived,'deleted',state.deleted);
  INSERT INTO opc_library_requests(actor_id,request_id,payload,result) VALUES(p_actor_id,p_request_id,payload,result);

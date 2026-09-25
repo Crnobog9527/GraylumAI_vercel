@@ -62,7 +62,7 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
  function change(patch:Partial<Draft>){
   if(!draft)return;
   const next={...draft,...patch};
-  try{localStorage.setItem(key,JSON.stringify(next));setDraft(next);setSaved('正在自动同步草稿…');}
+  try{localStorage.setItem(key,JSON.stringify(next));setDraft(next);if(next.baseVersion>=(latest?.version??0))setError('');setSaved('正在自动同步草稿…');}
   catch{setError('无法保留未保存编辑，请检查本机存储。');}
  }
  useEffect(()=>{
@@ -81,7 +81,7 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
   // A successful save can advance the draft before the library query refreshes.
   // The service checks expectedVersion, so a stale query must not block the next explicit save.
   if(!pendingRaw&&latest?.version===draft.baseVersion&&latest?.status===status&&latest?.title===title&&latest?.body===body){
-   setSaved('当前内容已经是已保存版本。');return;
+   localStorage.removeItem(key);setSaved('当前内容已经是已保存版本。');return;
   }
   setError('');setSaved('');
   try{
@@ -126,7 +126,7 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
     <p className={styles.version}>{latest?'账号已保存 v'+latest.version+' · '+(latest.status==='final'?'已定稿':'草稿'):'草稿会在停止输入后自动同步到账号'}</p>
     {saved&&<p role="status" className={styles.success}>{saved}</p>}
     {error&&<p role="alert" className={styles.error}>{error}</p>}
-    {latest&&draft.baseVersion<latest.version&&!pending&&<button className={styles.rebase} onClick={()=>change({baseVersion:latest.version,sourceContentId:latest.id})}>已比较历史，基于服务端 v{latest.version} 保留我的编辑</button>}
+    {latest&&draft.baseVersion<latest.version&&!pending&&<button className={styles.rebase} onClick={()=>{change({baseVersion:latest.version,sourceContentId:latest.id});setError('');}}>已比较历史，基于服务端 v{latest.version} 保留我的编辑</button>}
     <div className={styles.actions}>
      {pending&&<button onClick={()=>save('draft')} disabled={saveMutation.isPending}>恢复草稿同步</button>}
      <button onClick={openExpanded}>展开编辑</button>

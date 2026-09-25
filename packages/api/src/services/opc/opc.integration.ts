@@ -7509,6 +7509,8 @@ it("OPC: workspace presentation changes preserve ownership, replay and version b
   expect(await f.service.workUiChange(rename)).toEqual(changed);
   const renamedItem=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0].items[0];
   expect(renamedItem).toMatchObject({title:'人工命名的对话',chatName:'人工命名的对话',revision:2});
+  const renamedMaterial=(await sql.query("select content->>'brief' brief from runtime_scope_material where session_id=$1 order by revision desc limit 1",[work.sessionId])).rows[0];
+  expect(renamedMaterial.brief).toContain('标题：人工命名的对话');
   await expect(f.service.workUiChange({...rename,name:'不同名称'})).rejects.toThrow('OPC_REQUEST_CONFLICT');
   await expect(f.service.workUiChange({...rename,requestId:randomUUID()})).rejects.toThrow('OPC_VERSION_CONFLICT');
   await expect(other.service.workUiChange({workItemId:work.workItemId,requestId:randomUUID(),expectedRevision:1,action:'archive'})).rejects.toThrow('OPC_DENIED');
@@ -7967,6 +7969,13 @@ it("OPC: manual video revisions preserve execution ancestry, ownership and exact
       .find((item:{workItemId:string})=>item.workItemId===work.workItemId);
     expect(projected?.content.filter((version:{version:number})=>version.version<=3)).toHaveLength(3);
     expect(projected?.content.find((version:{id:string})=>version.id===final.id)?.sourceContentId).toBe(draft.id);
+    let previous=final;
+    for(let revision=4;revision<=67;revision++){
+      previous=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:revision-1,
+        sourceContentId:previous.id,kind:'script',status:'draft',title:'长期修订的口播稿',body:'第 '+revision+' 次人工修订'});
+    }
+    expect(previous.version).toBe(67);
+    expect((await sql.query('select opc_content_allowed($1,$2) allowed',[f.actor,previous.id])).rows[0].allowed).toBe(true);
   }finally{await browser.close();}
 },180000);
 
