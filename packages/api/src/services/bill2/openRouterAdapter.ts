@@ -1,12 +1,16 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {z} from 'zod';
 import {openRouterBound} from './openRouterPolicy';
 import {decimal} from './decimal';
 import {createHash} from 'node:crypto';
 import {openRouterEvidence,type OpenRouterIdentity} from './openRouterEvidence';
 import type {CallIdentity,TransportObservation} from './fixtureAdapter';
 const requestFields=new Set(['model','stream','store','messages','provider','max_tokens','max_completion_tokens','temperature','top_p','parallel_tool_calls','response_format']);
+const sourceCall=z.object({id:z.string().min(1).max(256),type:z.literal('function'),function:z.object({name:z.literal('read_source'),arguments:z.string().max(4000)}).strict()}).strict();
+const workspaceMessage=z.union([z.object({role:z.literal('assistant'),content:z.string().nullable(),tool_calls:z.array(sourceCall).min(1).max(1)}).strict(),z.object({role:z.literal('tool'),content:z.string(),tool_call_id:z.string().min(1).max(256)}).strict()]);
+const workspaceTools=z.array(z.object({type:z.literal('function'),function:z.object({name:z.literal('read_source'),description:z.string().max(16000).optional(),parameters:z.record(z.string(),z.unknown()),strict:z.boolean().optional()}).strict()}).strict()).max(1);
 /** Private trusted composition. No environment fallback, browser endpoint or automatic retry. */
-export function openRouterAdapter(options:{credential:(identity:OpenRouterIdentity)=>Promise<string>;transport?:typeof fetch}) {
+export function openRouterAdapter(options:{credential:(identity:OpenRouterIdentity)=>Promise<string>;transport?:typeof fetch;allowWorkspaceRead?:boolean}) {
  const transport=options.transport ?? fetch;
  async function credential(identity:OpenRouterIdentity){
   const key=await options.credential(identity);
@@ -37,7 +41,8 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    const quote=openRouterBound(identity.providerLimits,identity.outputLimit);
    if(decimal(quote.upperUsd)!==decimal(identity.upperUsd))throw new Error('BILL2_PROVIDER_QUOTE_CONFLICT');
    // These routing constraints must already be in the frozen request bytes.
-   if(!parsed || typeof parsed!=='object' || Array.isArray(parsed) || Object.keys(parsed).some(key=>!requestFields.has(key)) ||
+   if(!parsed || typeof parsed!=='object' || Array.isArray(parsed) || Object.keys(parsed).some(key=>!requestFields.has(key)&&!(options.allowWorkspaceRead&&key==='tools')) ||
+     (parsed.tools!==undefined&&!workspaceTools.safeParse(parsed.tools).success) ||
      parsed.model!==identity.model || parsed.stream!==false || parsed.store!==false || !Array.isArray(parsed.messages) ||
      parsed.provider?.allow_fallbacks!==false || parsed.provider?.require_parameters!==true ||
      JSON.stringify(parsed.provider)!==JSON.stringify(quote.routing) ||
@@ -48,6 +53,7 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
      parsed.messages.some((message:unknown)=>{
       if(!message || typeof message!=='object' || Array.isArray(message))return true;
       const m=message as Record<string,unknown>;
+      if(options.allowWorkspaceRead&&workspaceMessage.safeParse(m).success)return false;
       return Object.keys(m).some(key=>!['role','content'].includes(key)) || !['system','developer','user','assistant'].includes(String(m.role)) ||
        !(typeof m.content==='string' || (Array.isArray(m.content) && m.content.every(part=>part && typeof part==='object' &&
          Object.keys(part).every(key=>['type','text'].includes(key)) && part.type==='text' && typeof part.text==='string')));

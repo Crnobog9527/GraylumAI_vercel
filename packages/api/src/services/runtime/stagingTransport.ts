@@ -8,7 +8,7 @@ import type {StagingPolicy} from './stagingPolicy';
  * key fallback. The namespace binds recovery to the exact original credential.
  */
 export function stagingTransport(admin:SupabaseClient,policy:StagingPolicy){
- return openRouterAdapter({credential:async identity=>{
+ return openRouterAdapter({allowWorkspaceRead:true,credential:async identity=>{
   const quotes=policy.callPolicies.filter(q=>q.account===identity.account&&q.model===identity.model);
   if(quotes.length!==1)throw new Error('RUNTIME_PROVIDER_BINDING_DENIED');
   const row=await admin.from('ai_models').select('id,model_id,provider,api_endpoint,api_key').eq('id',quotes[0]!.modelId).single();

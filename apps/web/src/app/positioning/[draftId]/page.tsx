@@ -8,9 +8,9 @@ import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { WorkspaceFrame } from "@/components/opc/workspace-frame";
-import { PanelRightOpen, Plus, Box, Search } from "lucide-react";
+import { PanelRightOpen } from "lucide-react";
 import resultStyles from "@/components/opc/positioning-result.module.css";
-import composerStyles from "@/components/opc/work-composer.module.css";
+import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 import { mergeInformation } from "./information-merge";
 import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-response";
 import {
@@ -320,8 +320,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const chatScroll = useRef<HTMLDivElement>(null);
   const attachChatScroll = useCallback((node:HTMLDivElement|null)=>{chatScroll.current=node;if(node)requestAnimationFrame(()=>{if(chatScroll.current===node)node.scrollTop=node.scrollHeight;});},[]);
   const [mentorInput, setMentorInput] = useState("");
-  const [mentorAddMenu,setMentorAddMenu]=useState(false),[mentorSkillMenu,setMentorSkillMenu]=useState(false),[mentorSkillQuery,setMentorSkillQuery]=useState('');
-  const mentorSkillCatalog=trpc.modules.getModules.useQuery({category:'all',limit:100,offset:0,sortBy:'newest'},{enabled:mentorSkillMenu});
+  const free=useFreeConversation();
   const [manualMentorEnabled, setManualMentorEnabled] = useState(false);
   const [hydratedDraft, setHydratedDraft] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<
@@ -2059,41 +2058,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     </div>
                   </section>}
                   </div>
-                  <div className={resultStyles.composerZone}><label className="block text-sm">
-                    <span className={resultStyles.visuallyHidden}>回复导师</span>
-                    <Textarea
-                      className="resize-none"
-                      aria-label="给导师的回复"
-                      value={mentorInput}
-                      disabled={snap.state !== "draft"}
-                      onChange={(event) => setMentorInput(event.target.value)}
-                      placeholder="消息"
-                      maxLength={8000}
-                    />
-                  </label>
-                  <div className={resultStyles.mentorTools}>
-                    <div className={composerStyles.menuAnchor}><button type="button" aria-label="添加资料" aria-expanded={mentorAddMenu} onClick={()=>{setMentorAddMenu(value=>!value);setMentorSkillMenu(false);}}><Plus size={19}/></button>{mentorAddMenu&&<div className={composerStyles.menu} role="menu"><p>添加资料 · 待接入</p><button disabled>从文件添加</button><button disabled>从资料库添加</button><button disabled>添加连接器</button></div>}</div>
-                    <div className={composerStyles.menuAnchor}><button type="button" aria-label="使用技能" aria-expanded={mentorSkillMenu} onClick={()=>{setMentorSkillMenu(value=>!value);setMentorAddMenu(false);}}><Box size={18}/></button>{mentorSkillMenu&&<div className={composerStyles.skillMenu} role="dialog" aria-label="使用技能"><div className={composerStyles.skillHead}><strong>使用技能</strong><span>当前定位工作</span></div><label className={composerStyles.skillSearch}><Search size={16}/><input aria-label="搜索技能" placeholder="搜索技能" value={mentorSkillQuery} onChange={event=>setMentorSkillQuery(event.target.value)}/></label><div className={composerStyles.skillList} role="group" aria-label="功能广场中的技能">{mentorSkillCatalog.isLoading?<p role="status">正在读取技能…</p>:mentorSkillCatalog.error?<p role="alert">技能列表暂不可用。</p>:<>{mentorSkillCatalog.data?.modules.filter(module=>module.title.toLocaleLowerCase().includes(mentorSkillQuery.trim().toLocaleLowerCase())).map(module=><button key={module.id} type="button" disabled><span className={composerStyles.skillGlyph}><Box size={16}/></span><span><strong>{module.title}</strong><small>定位流程已绑定方法；从功能广场开启其他任务</small></span></button>)}{!mentorSkillCatalog.data?.modules.some(module=>module.title.toLocaleLowerCase().includes(mentorSkillQuery.trim().toLocaleLowerCase()))&&<p>没有匹配的技能</p>}</>}</div><div className={composerStyles.skillFoot}><Link href="/workbench/marketplace">浏览功能广场</Link></div></div>}</div>
-                  </div>
-                  {openingSteps.includes(step.id) && (
-                    <p role="status" className="text-xs text-[var(--text-secondary)]">
-                      导师正在准备这道题的引导，不需要你先发言；右侧表单现在就可以填写。
-                    </p>
-                  )}
-                  <Button
-                    aria-label="发送"
-                    disabled={
-                      busy ||
-                      openingSteps.includes(step.id) ||
-                      Boolean(pendingMentor) || hasPendingConfirmation || hasPendingStepRequest ||
-                      snap.state !== "draft" ||
-                      reviewOnly ||
-                      !mentorInput.trim()
-                    }
-                    onClick={() => { void ask(step, activeQuestion.id); }}
-                  >
-                    {busy ? "正在回复…" : "发送"}
-                  </Button></div>
+                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" maxLength={8000} disabled={busy||openingSteps.includes(step.id)||Boolean(pendingMentor)||hasPendingConfirmation||hasPendingStepRequest||snap.state!=="draft"||reviewOnly||free.busy} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step,activeQuestion.id);}}/>
+                  {free.error&&<p role="alert">{free.error}</p>}
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
                   </p>

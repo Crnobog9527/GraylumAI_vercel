@@ -712,7 +712,6 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       timeout: 90000,
     });
     await page.getByRole("button",{name:"梳理账号定位",exact:true}).first().click();
-    await page.getByRole("button",{name:"继续选择定位方式",exact:true}).click();
     await page.getByRole("dialog",{name:"新建账号策略"})
       .getByRole("button",{name:"整理另一份已有定位"}).click();
     await page.getByRole("combobox", { name: "定位方法" }).selectOption(f.registration);
@@ -2014,7 +2013,6 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
       timeout: 90000,
     });
     await page.getByRole("button",{name:"梳理账号定位",exact:true}).first().click();
-    await page.getByRole("button",{name:"继续选择定位方式",exact:true}).click();
     await page.getByRole("dialog",{name:"新建账号策略"})
       .getByRole("button",{name:"从头分析新定位"}).click();
     await page
@@ -2363,7 +2361,6 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
       timeout: 90000,
     });
     await page.getByRole("button",{name:"梳理账号定位",exact:true}).first().click();
-    await page.getByRole("button",{name:"继续选择定位方式",exact:true}).click();
     await page.getByRole("dialog",{name:"新建账号策略"})
       .getByRole("button",{name:"整理另一份已有定位"}).click();
     await page
@@ -7417,7 +7414,6 @@ it("OPC: new business start restores the complete frozen request before another 
   try{
     await page.goto(process.env.V3_LOCAL_APP+'/positioning');
     await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
-    await page.getByRole('button',{name:'继续选择定位方式',exact:true}).click();
     await page.getByRole('dialog',{name:'新建账号策略'}).getByRole('button',{name:'从头分析新定位'}).click();
     await page.getByLabel('定位方法').selectOption(f.registration);
     await page.getByLabel('所属业务').selectOption(originalBusiness);
@@ -7830,7 +7826,6 @@ it("OPC: approved six-stage guided positioning keeps one editable conversation a
     await page.getByRole('button',{name:'登录',exact:true}).last().click();
     await page.waitForURL(url=>url.pathname==='/positioning');
     await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
-    await page.getByRole('button',{name:'继续选择定位方式',exact:true}).click();
     await page.getByRole('dialog',{name:'新建账号策略'}).getByRole('button',{name:'从头分析新定位'}).click();
     await page.getByRole('combobox',{name:'定位方法'}).selectOption(f.registration);
     await page.getByLabel('业务名称',{exact:true}).fill('摄影入门课程');
@@ -8607,7 +8602,6 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
     await page.getByRole('button',{name:'关闭导航'}).click();
     await page.setViewportSize({width:1600,height:900});
     await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
-    await page.getByRole('button',{name:'继续选择定位方式',exact:true}).click();
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-positioning-choice-1600x900.png'});
     await page.getByRole('dialog',{name:'新建账号策略'}).getByRole('button',{name:'从头分析新定位'}).click();
     await page.getByRole('combobox',{name:'定位方法'}).selectOption(f.registration);
@@ -9011,3 +9005,75 @@ it("OPC: library finalization closes only on success and account discussion swit
   expect(accounts.every((account:{sourceVersionId:string})=>account.sourceVersionId===f.sourceVersionId)).toBe(true);
  }finally{await browser.close();}
 },240000);
+
+it('OPC: free start sends attachments without selecting account or direction and survives refresh once', async () => {
+  const f=await fixture(1);await planFixtureModel(f.moduleId);
+  const {chromium}=await import('../../../../../apps/web/node_modules/@playwright/test');
+  const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+  try {
+    const page=await browser.newPage();page.setDefaultTimeout(60000);
+    await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/positioning');
+    await page.getByPlaceholder('name@example.com').fill(f.email);await page.getByPlaceholder('输入你的密码').fill(f.password);
+    await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(url=>url.pathname==='/positioning');
+    const message='帮我规划三天成都旅行。';const input=page.getByRole('textbox',{name:'新任务内容'});
+    await input.fill(message);
+    await page.getByLabel('选择附件').setInputFiles({name:'preferences.txt',mimeType:'text/plain',buffer:Buffer.from('慢节奏，公共交通。')});
+    await expect.poll(()=>input.inputValue()).toContain('慢节奏，公共交通。');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await page.waitForURL(url=>url.pathname==='/runtime'&&url.searchParams.has('session'));
+    const sessionId=new URL(page.url()).searchParams.get('session');
+    await expect.poll(async()=>Number((await sql.query("select count(*) from runtime_executions where actor_id=$1 and session_id=$2 and state='completed'",[f.actor,sessionId])).rows[0].count),{timeout:60000}).toBe(1);
+    const stored=async()=>(await sql.query("select e.id,e.payload->>'input' input,s.scope from runtime_executions e join runtime_sessions s on s.id=e.session_id where e.actor_id=$1 and e.session_id=$2",[f.actor,sessionId])).rows;
+    const before=await stored();expect(before).toHaveLength(1);expect(before[0].input).toContain(message);expect(before[0].input).toContain('preferences.txt');expect(before[0].scope.kind).toBe('positioning_draft');expect(before[0].scope.projectId).toBeUndefined();expect(before[0].scope.workItemId).toBeUndefined();
+    await page.reload();await page.getByLabel('对话记录').getByText(/帮我规划三天成都旅行/).waitFor();expect(await stored()).toEqual(before);
+    expect((await sql.query('select count(*) from opc_drafts where actor_id=$1',[f.actor])).rows[0].count).toBe('0');
+    await page.getByRole('complementary',{name:'工作区导航'}).getByRole('link',{name:/帮我规划三天成都旅行/}).waitFor();
+  } finally {await browser.close();}
+},180000);
+
+it('OPC: free runtime reads owned context only on model tool request and rechecks source revocation',async()=>{
+ const {runtimeAdmissionService}=await import('../runtime/admission');
+ const {runtimeExecutor}=await import('../runtime/execute');
+ const {createServer}=await import('node:http');
+ const f=await completed(),secret='PRIVATE_TOPIC_'+randomUUID();
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'context-account',title:'Owned topic',brief:secret,day:'2026-09-25'}]});
+ const bound=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'context-account',expectedRevision:null}]});
+ const workId=bound[0].workItemId;
+ const modelId=(await sql.query('select model_id from modules where id=$1',[f.moduleId])).rows[0].model_id;
+ const rpc=async(name:string,args:Record<string,unknown>)=>{const result=await admin.rpc(name,args);if(result.error)throw result.error;return result.data;};
+ const admission=runtimeAdmissionService(f.user,admin,{account:'workspace-test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:200,inputBytes:32000,historyItems:50,workspaceContext:true});
+ const session=await admission.start(randomUUID(),{kind:'positioning_draft'});
+ expect(await rpc('runtime_workspace_session',{p_actor_id:f.actor,p_session_id:f.d.sessionId})).toBe(false);
+ expect(await rpc('runtime_workspace_session',{p_actor_id:f.actor,p_session_id:bound[0].sessionId})).toBe(false);
+ const other=await fixture();
+ await expect(rpc('runtime_workspace_source',{p_actor_id:other.actor,p_session_id:session.sessionId,p_query:workId})).rejects.toBeTruthy();
+ const otherSession=await rpc('runtime_start',{p_actor_id:other.actor,p_request_id:randomUUID(),p_payload:{scope:{kind:'positioning_draft'}}});
+ expect(await rpc('runtime_workspace_source',{p_actor_id:other.actor,p_session_id:otherSession.sessionId,p_query:workId})).toMatchObject({kind:'unavailable'});
+ let phase=0;const requests:Array<{messages:unknown[]}>=[];
+ const server=createServer(async(req,res)=>{
+  let raw='';for await(const chunk of req)raw+=chunk;const request=JSON.parse(JSON.parse(raw).input);requests.push(request);
+  const id='workspace-'+randomUUID();
+  const message=phase===1?{role:'assistant',content:null,tool_calls:[{id,type:'function',function:{name:'read_source',arguments:'{}'}}]}:phase===2?{role:'assistant',content:null,tool_calls:[{id,type:'function',function:{name:'read_source',arguments:JSON.stringify({query:workId})}}]}:{role:'assistant',content:phase===0?'Travel answer':'Relevant topic answer'};
+  phase++;
+  res.setHeader('content-type','application/json');res.end(JSON.stringify({id,model:'opc-fixture-default',final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:'opc-fixture-default',choices:[{index:0,message,finish_reason:message.tool_calls?'tool_calls':'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
+  const executor=runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
+  const unrelated=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'Give general travel packing tips',selection:{kind:'ordinary',modelId},network:'deny'});
+  expect(await executor.execute(unrelated.executionId)).toMatchObject({state:'completed'});
+  expect(JSON.stringify(requests[0])).not.toContain(secret);expect(JSON.stringify(requests[0])).not.toContain('context-account');
+  expect((await sql.query('select count(*)::int n from runtime_tool_calls where execution_id=$1',[unrelated.executionId])).rows[0].n).toBe(0);
+  const related=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'Use my saved topic brief to help plan content',selection:{kind:'ordinary',modelId},network:'deny'});
+  expect(await executor.execute(related.executionId)).toMatchObject({state:'completed'});
+  expect(requests).toHaveLength(4);expect(JSON.stringify(requests[1])).not.toContain(secret);
+  expect(JSON.stringify(requests[2])).toContain('context-account');expect(JSON.stringify(requests[2])).not.toContain(secret);
+  expect(JSON.stringify(requests[3])).toContain(secret);
+  expect((await sql.query('select count(*)::int n from runtime_tool_calls where execution_id=$1',[related.executionId])).rows[0].n).toBe(2);
+  expect(await executor.execute(related.executionId)).toMatchObject({state:'completed'});expect(requests).toHaveLength(4);
+  await sql.query('update bill2_drafts set revoked=true where id=$1',[f.d.draftId]);
+  expect((await sql.query('select runtime_history_available($1) allowed',[related.executionId])).rows[0].allowed).toBe(false);
+  expect(await rpc('runtime_workspace_source',{p_actor_id:f.actor,p_session_id:session.sessionId,p_query:workId})).toMatchObject({kind:'unavailable'});
+ }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+},60000);

@@ -33,7 +33,7 @@ const procedure=protectedProcedure.use(async({ctx,next})=>{
   let endpoint:string|undefined,real;
   try{endpoint=localEndpoint();}catch{real=await loadStagingPolicy(ctx.supabaseAdmin,ctx.user.id,process.env);}
   const actor=async()=>{const a=await ctx.userScopedSupabase.auth.getUser();if(a.error||!a.data.user||a.data.user.id!==ctx.user.id)throw new Error('RUNTIME_DENIED');return a.data.user.id;};
-  const admission=runtimeAdmissionService(ctx.userScopedSupabase,ctx.supabaseAdmin,{...(real?{real}:{}),account:'runtime-local',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:100,searchEnabled:!real});
+  const admission=runtimeAdmissionService(ctx.userScopedSupabase,ctx.supabaseAdmin,{...(real?{real}:{}),account:'runtime-local',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:100,searchEnabled:!real,workspaceContext:true});
   const executor=runtimeExecutor({database:ctx.supabaseAdmin,actor,endpoint,...(real?{adapter:stagingTransport(ctx.supabaseAdmin,real)}:{}),activateSkill:c=>activateRuntimeCandidate(ctx.userScopedSupabase,ctx.supabaseAdmin!,c)});
   const result=await next({ctx:{...ctx,admission,executor,real}});
   if(!result.ok)throw new Error('RUNTIME_UNAVAILABLE');
@@ -45,8 +45,8 @@ export const runtimeRouter=router({
   let work=false;let workModuleId:string|null=null;let workRevisionId:string|null=null;
   if(input?.sessionId){const listing=await ctx.supabaseAdmin!.rpc('opc_query',{p_actor_id:ctx.user.id});if(!listing.error){const item=(listing.data.accounts??[]).flatMap((a:{items:Array<{sessionId:string;workItemId:string;moduleId?:string;methodRevisionId?:string}>})=>a.items).find((i:{sessionId:string})=>i.sessionId===input.sessionId);work=Boolean(item);if(item){workModuleId=item.moduleId??null;workRevisionId=item.methodRevisionId??null;}}}
 
-  // This loopback-only Owner entry advertises its two acceptance fixtures,
-  // not the unrelated fault/organizer fixtures left by the integration suite.
+  // Loopback advertises the curated ordinary model. Free-chat skills must use
+  // that same model, excluding fault/organizer fixtures without name matching.
   const modelQuery=ctx.supabaseAdmin!.from('ai_models').select('id,name').eq('is_active','true');
   const models=await (ctx.real?modelQuery.in('id',ctx.real.callPolicies.map(q=>q.modelId)):modelQuery.eq('provider','fixture').eq('name','Runtime local'));
   if(models.error)throw new Error('RUNTIME_MODELS_UNAVAILABLE');
@@ -61,10 +61,10 @@ export const runtimeRouter=router({
    const source=databaseSkillSource({userClient:ctx.userScopedSupabase,privateClient:ctx.supabaseAdmin,moduleId:m.id,skillId:m.skill_id,...(m.id===workModuleId&&workRevisionId?{revisionId:workRevisionId}:{})});
    const descriptors=await source.list();
    const list=await discoverSkills(source);
-   for(const s of list.filter(s=>ctx.real||work||s.public.name==='runtime-demo')){
+   for(const s of list.filter(()=>ctx.real||work||models.data.some(model=>model.id===m.model_id))){
     const descriptor=descriptors.find(d=>d.revisionId===s.public.revisionId);
     if(!descriptor||Object.keys(descriptor.tasks).length)continue;
-    skills.push({moduleId:m.id,revisionId:s.public.revisionId,name:work?m.title:s.public.name});
+    skills.push({moduleId:m.id,revisionId:s.public.revisionId,name:m.title});
    }
   }catch{/* unavailable packages are not advertised as runnable */}}
   return {models:models.data,skills,defaultSkill:skills.find(skill=>skill.moduleId===workModuleId)??null,mode:ctx.real?'staging_test' as const:'isolated' as const};

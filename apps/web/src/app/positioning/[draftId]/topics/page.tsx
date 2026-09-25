@@ -15,9 +15,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowUp, Box, Loader2, Plus, Search } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import topicStyles from './topic-candidates.module.css';
@@ -114,7 +114,7 @@ export default function TopicWorkspacePage() {
   const draftId = params?.draftId ?? '';
   const [panelOpen,setPanelOpen]=useState(true);
   const [infoOpen,setInfoOpen]=useState(false);
-  const [skillMenu,setSkillMenu]=useState(false),[addMenu,setAddMenu]=useState(false),[skillQuery,setSkillQuery]=useState('');
+  const free=useFreeConversation();
   const [input, setInput] = useState('');
   const inputKey=draftId?'opc-topic-input:'+draftId:'';
   useEffect(()=>{if(inputKey)setInput(localStorage.getItem(inputKey)??'');},[inputKey]);
@@ -153,7 +153,6 @@ export default function TopicWorkspacePage() {
   const adoptTopics = trpc.opc.adoptTopics.useMutation();
   const queryUtils = trpc.useUtils();
   const topicDraft = trpc.opc.topicDraft.useQuery({ draftId }, { enabled: Boolean(draftId && sessionId) });
-  const skillCatalog=trpc.modules.getModules.useQuery({category:'all',limit:100,offset:0,sortBy:'newest'},{enabled:skillMenu});
 
   const busy = working || turn.isPending || execute.isPending || bind.isPending || savePlan.isPending || handoff.isPending || saveDraft.isPending || adoptTopics.isPending;
   const storageKey = sessionId ? 'opc-topic-operation:' + sessionId : '';
@@ -616,36 +615,8 @@ export default function TopicWorkspacePage() {
 
           <footer className={composerStyles.zone}>
             <div className={composerStyles.wrap}>
-              <div className={composerStyles.composer}>
-                <Textarea
-                  aria-label="消息"
-                  placeholder="继续讨论、修改或要求生成第一周选题…"
-                  value={input}
-                  disabled={busy || Boolean(pending) || Boolean(view.data?.activeExecution)}
-                  onChange={(event) => updateInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                      event.preventDefault();
-                      if (!busy && !pending && input.trim() && !view.data?.activeExecution) void send();
-                    }
-                  }}
-                  className={composerStyles.textarea}
-                  rows={2}
-                />
-                <div className={composerStyles.tools}><div className={composerStyles.toolLeft}>
-                  <div className={composerStyles.menuAnchor}><button type="button" aria-label="添加资料" aria-expanded={addMenu} onClick={()=>{setAddMenu(value=>!value);setSkillMenu(false);}}><Plus size={19}/></button>{addMenu&&<div className={composerStyles.menu} role="menu"><p>添加资料 · 待接入</p><button disabled>从文件添加</button><button disabled>从资料库添加</button><button disabled>添加连接器</button></div>}</div>
-                  <div className={composerStyles.menuAnchor}><button type="button" aria-label="使用技能" aria-expanded={skillMenu} onClick={()=>{setSkillMenu(value=>!value);setAddMenu(false);}}><Box size={18}/></button>{skillMenu&&<div className={composerStyles.skillMenu} role="dialog" aria-label="使用技能"><div className={composerStyles.skillHead}><strong>使用技能</strong><span>选题工作</span></div><label className={composerStyles.skillSearch}><Search size={16}/><input aria-label="搜索技能" placeholder="搜索技能" value={skillQuery} onChange={event=>setSkillQuery(event.target.value)}/></label><div className={composerStyles.skillList} role="group" aria-label="功能广场中的技能">{skillCatalog.isLoading?<p role="status">正在读取技能…</p>:skillCatalog.error?<p role="alert">技能列表暂不可用。</p>:skillCatalog.data?.modules.filter(module=>module.title.toLocaleLowerCase().includes(skillQuery.trim().toLocaleLowerCase())).map(module=><button key={module.id} type="button" disabled><span className={composerStyles.skillGlyph}><Box size={16}/></span><span><strong>{module.title}</strong><small>选题工作已绑定方法；其他技能需从功能广场开启</small></span></button>)}</div><div className={composerStyles.skillFoot}><Link href="/workbench/marketplace" onClick={()=>setSkillMenu(false)}>浏览功能广场</Link></div></div>}</div>
-                </div><div className={composerStyles.toolRight}>
-                <Button
-                  aria-label="发送"
-                  className={composerStyles.send}
-                  disabled={busy || Boolean(pending) || !input.trim() || Boolean(view.data?.activeExecution)}
-                  onClick={() => send()}
-                >
-                  <ArrowUp className="h-4 w-4" />
-                </Button>
-                </div></div>
-              </div>
+              <WorkComposer maxLength={8000} value={input} onChange={updateInput} disabled={busy||Boolean(pending)||Boolean(view.data?.activeExecution)||free.busy} onSend={skill=>{if(skill)void free.send(input,skill);else void send();}}/>
+              {free.error&&<p role="alert">{free.error}</p>}
               <p className={composerStyles.note}>
                 候选会自动保存；只有你明确采用的具体选题才会进入资料库。
               </p>

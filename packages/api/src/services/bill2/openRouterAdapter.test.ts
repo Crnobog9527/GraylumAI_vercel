@@ -59,3 +59,16 @@ it('preflights once and binds the captured credential before any HTTP',async()=>
  expect(transport.mock.calls[0]?.[1]).toMatchObject({headers:{Authorization:'Bearer SYNTHETIC_ORIGINAL'}});
  expect(()=>send()).toThrow('CAPABILITY_CONSUMED');expect(transport).toHaveBeenCalledTimes(1);
 });
+
+it('allows only the opt-in first-party read_source tool and its message roundtrip',async()=>{
+ const transport=vi.fn(async()=>new Response('{}'));
+ const adapter=openRouterAdapter({allowWorkspaceRead:true,credential:async()=> 'LOCAL_SYNTHETIC_KEY',transport});
+ const source={type:'function',function:{name:'read_source',description:'Read own workspace',parameters:{type:'object',properties:{query:{type:'string'}}}}};
+ const request={...JSON.parse(body),tools:[source],messages:[{role:'assistant',content:null,tool_calls:[{id:'call-source',type:'function',function:{name:'read_source',arguments:'{}'}}]},{role:'tool',tool_call_id:'call-source',content:'{"entries":[]}'}]};
+ await adapter.dispatch({input:JSON.stringify(request)},identity);
+ expect(transport).toHaveBeenCalledTimes(1);
+ for(const patch of [{tools:[{...source,function:{...source.function,name:'search'}}]},{plugins:[{id:'web'}]},{messages:[{role:'assistant',content:null,tool_calls:[{id:'bad',type:'function',function:{name:'search',arguments:'{}'}}]}]}]){
+  await expect(adapter.dispatch({input:JSON.stringify({...request,...patch})},identity)).rejects.toThrow('DENIED');
+ }
+ expect(transport).toHaveBeenCalledTimes(1);
+});

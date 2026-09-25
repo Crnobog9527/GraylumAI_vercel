@@ -2,10 +2,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { Suspense,useEffect,useState,useRef,useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Bot,ArrowUp,Box,Plus,Loader2,Search } from 'lucide-react';
+import { Bot,Plus,Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import { WorkComposer } from '@/components/opc/work-composer';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { ContentEditor } from '@/components/opc/content-editor';
 import composerStyles from '@/components/opc/work-composer.module.css';
@@ -41,6 +41,7 @@ function RuntimeRoute(){
  return <RuntimeWorkspace key={routeSession||'new:'+routeModule} routeSession={routeSession} routeModule={routeModule}/>;
 }
 function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeModule:string}){
+ const utils=trpc.useUtils();
  const [sessionId,setSession]=useState(routeSession),[input,setInput]=useState(''),[selection,setSelection]=useState(''),[error,setError]=useState('');
  const [storedModule,setStoredModule]=useState('');
  const requestedModule=routeModule;
@@ -54,9 +55,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const saved=trpc.opc.workResults.useQuery({sessionId},{enabled:Boolean(sessionId&&view.data?.scope?.kind==='work_item')});
  const saveWorkResult=trpc.opc.saveWorkResult.useMutation();
  const library=trpc.opc.library.useQuery({search:'',from:null,to:null},{enabled:Boolean(sessionId&&view.data?.scope?.kind==='work_item')});
- const [panelOpen,setPanelOpen]=useState(true),[guiding,setGuiding]=useState(false),[skillMenu,setSkillMenu]=useState(false),[addMenu,setAddMenu]=useState(false),[skillQuery,setSkillQuery]=useState('');
- const skillCatalog=trpc.modules.getModules.useQuery({category:'all',limit:100,offset:0,sortBy:'newest'},{enabled:skillMenu});
- const listedSkills=(skillCatalog.data?.modules??[]).filter(module=>module.title.toLocaleLowerCase().includes(skillQuery.trim().toLocaleLowerCase()));
+ const [panelOpen,setPanelOpen]=useState(true),[guiding,setGuiding]=useState(false);
  const guidanceAttempt=useRef(false);
  const [typePending,setTypePending]=useState(false);
  const editItem=trpc.opc.editLibrary.useMutation();
@@ -107,10 +106,21 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   const submitted=input;
   const admitted=await prepare.mutateAsync({sessionId,requestId,input:scriptRequest?'[OPC_SCRIPT_V1] 请基于当前选题简报讨论并给出可修改的口播稿。'+(submitted.trim()||'先给我一版口播稿。'):submitted,selection:selected,network:'deny',sources:[]});
   if(!alive.current)return;
+  void utils.opc.conversations.invalidate();
+  sessionStorage.removeItem('opc-runtime-send:'+sessionId);
   url.searchParams.delete('request');history.replaceState(null,'',url);
   setInput(current=>{if(current===submitted){localStorage.removeItem('opc-runtime-input:'+sessionId);return '';}return current;});
-  await execute.mutateAsync({executionId:admitted.executionId});if(alive.current)await view.refetch();
+  await execute.mutateAsync({executionId:admitted.executionId});if(alive.current)await Promise.all([view.refetch(),utils.opc.conversations.invalidate()]);
  }catch{if(alive.current){setError('请求状态待核实。请读取原任务状态，不要重新发送相同内容。');await view.refetch();}}}
+ const initialSend=useRef(false);
+ useEffect(()=>{
+  if(initialSend.current||!sessionId||!input.trim()||!workContextReady||!choices.data||!activeSelection||busy)return;
+  const requestId=sessionStorage.getItem('opc-runtime-send:'+sessionId);
+  if(!requestId||new URL(location.href).searchParams.get('request')!==requestId)return;
+  initialSend.current=true;void send();
+  // The marker records an explicit send on the start page, never mere navigation.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+ },[sessionId,input,workContextReady,choices.data,activeSelection,busy]);
  const videoKey=sessionId?'opc-video-operation:'+sessionId:'';
  const scriptKey=sessionId?(isVideo?'opc-script-final:':'opc-written-final:')+sessionId:'';
  const videoAttempt=useRef(false);
@@ -184,12 +194,12 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  return <WorkspaceFrame area="chat" activeWorkItemId={workItem?.workItemId} notice={choices.data?.mode==='staging_test'?'Staging 真实对话测试 · 消耗测试预算':choices.data?.mode==='isolated'?'本地隔离 · 模型回复为模拟，保存写入本地测试服务':undefined} rightOpen={panelOpen} onToggleRight={()=>setPanelOpen(value=>!value)} right={workItem?(contentType==='unknown'?<div className={workStyles.typePending}><h2>当前成果</h2><p>先在对话中确认这条选题的内容类型，再起草和保存稿件。已确认前不会创建内容版本。</p></div>:<ContentEditor key={workItem.workItemId+':'+contentType} item={workItem} onSaved={()=>library.refetch()}>{(isVideo||Boolean(saved.data?.length))&&<section aria-label={isVideo?'视频派生成果':'其他 Skill 成果'} className={workStyles.videoResults}>{isVideo&&<><h2>分镜与剪辑建议</h2>{versions.filter(version=>version.kind==='storyboard'||version.kind==='editing').map(version=><details key={version.id}><summary>{version.kind==='storyboard'?'分镜':'剪辑建议'} · 第 {version.version} 版 · {version.status==='final'?'已定稿':'草稿'}{version.sourceContentId===currentScript?.id?' · 匹配当前口播稿':' · 旧口播稿版本'}</summary><p>{version.body}</p></details>)}</>}{saved.data?.map((artifact:{artifactId:string;version:number;body:string|null})=><details key={artifact.artifactId}><summary>其他 Skill 成果 · 第 {artifact.version} 版</summary><p>{artifact.body??'来源不可用'}</p></details>)}<Link href={'/library?item='+workItem.workItemId+'&return='+sessionId}>在资料库查看这个选题</Link></section>}</ContentEditor>):undefined}><main className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
   <header className={workStyles.workHead}>
    <div className={workStyles.workTitle}><h1>{workItem?.title??'工作对话'}</h1>{!workItem&&<small>{(choices.data?.mode??view.data?.mode)==='staging_test'?'Staging 真实对话测试':'本地模拟体验'}</small>}</div>
-   {workItem?<div className={workStyles.workMeta}><span>{workItem.platform} · {workItem.account}</span><Link href={'/library?item='+workItem.workItemId+'&return='+sessionId}>工作信息</Link>{!panelOpen&&<button type="button" onClick={()=>setPanelOpen(true)}>展开成果</button>}</div>:<Button variant="outline" disabled={busy||!choices.data||Boolean(input.trim())||Boolean(requestedModule&&!chosenModule)} onClick={open}><Plus className="mr-2 h-4 w-4"/>{requestedModule?'用此功能准备新任务':'新建定位草稿'}</Button>}
+   {workItem?<div className={workStyles.workMeta}><span>{workItem.platform} · {workItem.account}</span><Link href={'/library?item='+workItem.workItemId+'&return='+sessionId}>工作信息</Link>{!panelOpen&&<button type="button" onClick={()=>setPanelOpen(true)}>展开成果</button>}</div>:<Button variant="outline" disabled={busy||!choices.data||Boolean(input.trim())||Boolean(requestedModule&&!chosenModule)} onClick={open}><Plus className="mr-2 h-4 w-4"/>{requestedModule?'用此功能准备新任务':'新建对话'}</Button>}
   </header>
   {requestedModule&&!chosenModule&&<p className="shrink-0 px-6 py-1 text-center text-[11px] text-[var(--text-tertiary)]">所选功能当前不满足本地工作区准入条件；不会自动换用其他功能。</p>}
   {(choices.error||view.error||library.error)&&<p role="alert" className="p-4 text-center">当前环境不可用，或你无权访问此工作。</p>}
   <div className="min-h-0 flex-1 overflow-y-auto" aria-label="对话记录">
-   {!executions?.length&&<div className="mx-auto flex min-h-64 max-w-xl flex-col items-center justify-center px-6 py-12 text-center"><Bot className="mb-4 h-9 w-9 text-[var(--color-primary)]"/><h2 className="text-2xl font-semibold">开始一段对话</h2><p className="mt-3 text-sm text-[var(--text-tertiary)]">{workItem?'已带入选题简报和原工作方法，正在根据当前进度准备引导。':sessionId?'输入一条消息，发送后可刷新查看记录。':'点击右上角“新建定位草稿”，开始体验。'}</p></div>}
+   {!executions?.length&&<div className="mx-auto flex min-h-64 max-w-xl flex-col items-center justify-center px-6 py-12 text-center"><Bot className="mb-4 h-9 w-9 text-[var(--color-primary)]"/><h2 className="text-2xl font-semibold">开始一段对话</h2><p className="mt-3 text-sm text-[var(--text-tertiary)]">{workItem?'已带入选题简报和原工作方法，正在根据当前进度准备引导。':sessionId?'输入一条消息，发送后可刷新查看记录。':'点击右上角“新建对话”，开始体验。'}</p></div>}
    <section className={workStyles.transcript}>{workItem&&typePending&&<Button disabled={editItem.isPending} onClick={()=>setType('unknown')}>恢复类型保存</Button>}{workItem&&contentType==='unknown'&&<section className="rounded-xl border p-4" aria-label="确认内容类型"><h2>这条选题准备做成什么内容？</h2><p>先确认形式，再一起细化重点和结构。</p><div className="flex gap-2 mt-3">{['article','image_text','video'].map(value=><Button key={value} disabled={busy||editItem.isPending||typePending} onClick={()=>setType(value)}>{typeLabel[value]}</Button>)}</div></section>}{error.startsWith('引导请求')&&<Button disabled={busy} onClick={guide}>恢复引导</Button>}{executions?.map((e,index)=><div key={e.executionId}>{e.createdAt&&(index===0||!executions[index-1].createdAt||transcriptDay(executions[index-1].createdAt!)!==transcriptDay(e.createdAt))&&<p className={workStyles.dateMarker}>{transcriptDate(e.createdAt)}</p>}<article className={workStyles.turn}>
     {e.input&&!e.input.startsWith('[OPC_WORK_CONTINUE_V1]')&&<p className={workStyles.userMessage}>{e.input.startsWith('[OPC_VIDEO_PACKAGE_V1]')?(e.input.includes('只生成分镜脚本')?'请基于已定稿口播稿生成分镜脚本。':e.input.includes('只生成剪辑建议')?'请基于已保存的分镜生成剪辑建议。':'请先完成分镜脚本，再基于分镜生成剪辑建议。'):e.input.replace(/^\[OPC_SCRIPT_V1\]\s*/, '')}</p>}
     <div className={workStyles.agentMessage}><div className={workStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/><span>Graylum · {e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')?'已完成本轮建议':'增长顾问'}</span></div><div>
@@ -210,16 +220,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   </div>
   {sessionId&&<footer className={composerStyles.zone}><div className={composerStyles.wrap}>
    {workItem&&isVideo&&<Button variant="outline" disabled={busy||Boolean(view.data?.activeExecution)||!choices.data?.defaultSkill} onClick={()=>send(true)}>{currentScript?'修改口播稿':'起草口播稿'}</Button>}
-   <div className={composerStyles.composer}>
-    <Textarea aria-label="消息" placeholder="消息" value={input} disabled={busy||Boolean(view.data?.activeExecution)} onChange={e=>updateInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();if(!busy&&workContextReady&&choices.data&&activeSelection&&input.trim()&&!view.data?.activeExecution)void send();}}} className={composerStyles.textarea} rows={2}/>
-    <div className={composerStyles.tools}>
-     <div className={composerStyles.toolLeft}>
-      <div className={composerStyles.menuAnchor}><button type="button" aria-label="添加资料" aria-expanded={addMenu} onClick={()=>{setAddMenu(value=>!value);setSkillMenu(false);}}><Plus size={19}/></button>{addMenu&&<div className={composerStyles.menu} role="menu"><p>添加资料 · 待接入</p><button disabled>从文件添加</button><button disabled>从资料库添加</button><button disabled>添加连接器</button></div>}</div>
-      <div className={composerStyles.menuAnchor}><button type="button" aria-label="加载 Skill" aria-expanded={skillMenu} onClick={()=>{setSkillMenu(value=>!value);setAddMenu(false);}}><Box size={18}/></button>{skillMenu&&<div className={composerStyles.skillMenu} role="dialog" aria-label="使用技能"><div className={composerStyles.skillHead}><strong>使用技能</strong><span>当前对话</span></div><label className={composerStyles.skillSearch}><Search size={16}/><input aria-label="搜索技能" placeholder="搜索技能" value={skillQuery} onChange={event=>setSkillQuery(event.target.value)}/></label><div className={composerStyles.skillList} role="group" aria-label="功能广场中的技能">{skillCatalog.isLoading||choices.isLoading?<p role="status">正在读取技能…</p>:skillCatalog.error||choices.error?<p role="alert">技能列表暂不可用。</p>:<>{listedSkills.map(module=>{const runnable=choices.data?.skills.some(skill=>skill.moduleId===module.id);return <button key={module.id} disabled={!runnable} onClick={()=>{if(!runnable)return;setSelection('skill:'+module.id);setSkillMenu(false);}}><span className={composerStyles.skillGlyph}><Box size={16}/></span><span><strong>{module.title}</strong><small>{runnable?'加载到本对话，不自动发送':'当前工作暂不可加载'}</small></span></button>;})}{!listedSkills.length&&<p>没有匹配的技能</p>}</>}</div><div className={composerStyles.skillFoot}><Link href="/workbench/marketplace" onClick={()=>setSkillMenu(false)}>浏览功能广场{skillCatalog.data?.hasMore?'全部技能':''}</Link>{activeSelection!==ordinary&&<button onClick={()=>{setSelection(ordinary);setSkillMenu(false);}}>卸载当前技能</button>}</div></div>}</div>
-     </div>
-     <div className={composerStyles.toolRight}><button aria-label="发送" className={composerStyles.send} disabled={busy||!workContextReady||!choices.data||!activeSelection||!input.trim()||Boolean(view.data?.activeExecution)} onClick={()=>send()}><ArrowUp size={18}/></button></div>
-    </div>
-   </div><p className={composerStyles.note}>本次讨论参考当前工作的最新成果。Enter 发送，Shift + Enter 换行。</p>
+   <WorkComposer value={input} onChange={updateInput} onSend={()=>void send()} disabled={busy||Boolean(view.data?.activeExecution)} sendDisabled={!workContextReady||!choices.data||!activeSelection} sessionId={sessionId} skillId={activeSelection.startsWith('skill:')?activeSelection.slice(6):''} onSkillChange={id=>{setSelection(id?'skill:'+id:ordinary);if(id)localStorage.setItem('opc-runtime-skill:'+sessionId,id);else localStorage.removeItem('opc-runtime-skill:'+sessionId);}} note={workItem?'本次讨论参考当前工作的最新成果。Enter 发送，Shift + Enter 换行。':'可以自由提问；Agent 按需查阅相关资料。Enter 发送，Shift + Enter 换行。'}/>
   </div></footer>}{error&&<p role="alert" className="shrink-0 p-3 text-center text-sm">{error}</p>}
  </main></WorkspaceFrame>;
 }

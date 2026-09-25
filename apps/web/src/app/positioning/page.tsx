@@ -8,10 +8,13 @@ import { createClient } from "@/lib/supabase";
 import { CalendarDays, ChartNoAxesColumnIncreasing, Sparkles, Target, X } from 'lucide-react';
 import { WorkspaceFrame } from "@/components/opc/workspace-frame";
 import styles from './start-work.module.css';
+import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 type StartOperation={actorId:string;requestId:string;registration:string;mode:"mentor"|"manual";businessId:string|null;businessName?:string};
 type StartAccount={projectId:string;platform:string;account:string;businessName:string;strategyDraftId?:string|null;items:Array<{workItemId:string;sessionId:string;title:string}>};
 const startOperationKey="opc-start-operation";
 export default function PositioningHome() {
+  const free = useFreeConversation();
+  const [skillId,setSkillId]=useState('');
   const catalog = trpc.opc.catalog.useQuery(),
     list = trpc.opc.list.useQuery(),
     library = trpc.opc.library.useQuery({ search: "", from: null, to: null }),
@@ -24,7 +27,6 @@ export default function PositioningHome() {
     [methodDialog,setMethodDialog]=useState(false),
     [showSource,setShowSource]=useState(false),
     [intent,setIntent]=useState<'topics'|'content'|'position'|''>(''),
-    [chooseHint,setChooseHint]=useState(false),
     [startInput,setStartInput]=useState(''),
     [recommendation,setRecommendation]=useState<'all'|'strategy'|'writing'|'operations'>('all'),
     [workReturn,setWorkReturn]=useState(''),
@@ -63,9 +65,8 @@ export default function PositioningHome() {
     // new one may be created from the current published round.
     return strategy&&(strategy.state==='published'||(strategy.currentVersion??0)>0)?[{...account,strategyState:strategy.state}]:[];
   });
-  function chooseTopics(){setIntent('topics');setShowSource(false);setShowStart(false);setChooseHint(false);if(!startInput.trim()){const value='请基于当前账号定位，帮我策划下一批选题。';setStartInput(value);sessionStorage.setItem('opc-new-task-input',value);}}
-  function choosePosition(){setIntent('position');setShowSource(false);setShowStart(false);setChooseHint(false);if(!startInput.trim()){const value='我想梳理一个账号的定位，请从需要确认的问题开始。';setStartInput(value);sessionStorage.setItem('opc-new-task-input',value);}}
-  function prepareTask(){if(!startInput.trim())return;if(!intent){setChooseHint(true);return;}if(intent==='position'){setMethodDialog(true);return;}setShowSource(true);requestAnimationFrame(()=>document.querySelector('[aria-label="选择任务来源"]')?.scrollIntoView({behavior:'smooth',block:'nearest'}));}
+  function chooseTopics(){setIntent('topics');setShowSource(true);setShowStart(false);if(!startInput.trim()){const value='请基于当前账号定位，帮我策划下一批选题。';setStartInput(value);sessionStorage.setItem('opc-new-task-input',value);}}
+  function choosePosition(){setMethodDialog(true);setIntent('position');setShowSource(false);setShowStart(false);if(!startInput.trim()){const value='我想梳理一个账号的定位，请从需要确认的问题开始。';setStartInput(value);sessionStorage.setItem('opc-new-task-input',value);}}
   return (
     <WorkspaceFrame area="start"><main className={styles.page}><header className={styles.startTop}><strong>我的增长工作</strong>{workReturn&&<Link href={workReturn}>返回当前工作 →</Link>}</header><div className={styles.content}>
       <header className={styles.hero}><h1>今天，想推进什么？</h1></header>
@@ -74,13 +75,12 @@ export default function PositioningHome() {
         <button aria-pressed={intent==='position'} onClick={choosePosition}><Target size={15}/>梳理账号定位</button>
         <button disabled><ChartNoAxesColumnIncreasing size={15}/>数据复盘</button><button disabled><CalendarDays size={15}/>发布排期</button>
       </section>
-      <div className={styles.composer}><textarea aria-label="新任务内容" placeholder="描述你想做的事，或从一个选题开始…" value={startInput} onChange={event=>{setStartInput(event.target.value);sessionStorage.setItem('opc-new-task-input',event.target.value);}}/><div className={styles.composerFoot}><span>{intent==='topics'?'先选择已确认策略的账号':intent==='position'?'先选择新账号的定位路径':'选择功能与来源后开始新任务'}</span><button type="button" aria-label={intent==='position'?'继续选择定位方式':'继续选择任务来源'} disabled={!startInput.trim()} onClick={prepareTask}>↑</button></div></div>
-      <p className={styles.note}>选择功能与来源后才开始新任务；原工作的输入、成果和归属保持不变。</p>
-      {chooseHint&&<section className={styles.selection} aria-label="选择任务方向"><h2>这次要做哪类工作？</h2><p>请明确选择工作方向和来源；输入已保留，不会自动发送。</p><div className={styles.directionActions}><button onClick={chooseTopics}>做一批新选题</button><button onClick={choosePosition}>梳理账号定位</button><button onClick={()=>{setIntent('content');setShowSource(false);setChooseHint(false);}}>继续已有内容工作</button></div></section>}
+      <WorkComposer value={startInput} onChange={value=>{setStartInput(value);sessionStorage.setItem('opc-new-task-input',value);}} onSend={()=>void free.send(startInput,skillId)} disabled={free.busy} label="新任务内容" placeholder="问一个问题，或描述你想做的事…" skillId={skillId} onSkillChange={setSkillId} note="直接发送即可开始对话，也可以添加资料或选择技能。"/>
+      {free.error&&<p role="alert">{free.error}</p>}
       {showSource&&intent==='topics'&&<section className={styles.selection} aria-label="选择任务来源"><h2>选择账号的定位策略</h2><p>查看账号与来源后进入对应选题对话；此步不会自动采用选题或生成内容。</p>{topicAccounts.filter(a=>!sourceAccount||a.projectId===sourceAccount).map(a=><Link key={a.projectId} href={'/positioning/'+a.strategyDraftId+'/topics'} onClick={()=>{if(startInput.trim())localStorage.setItem('opc-topic-input:'+a.strategyDraftId,startInput);}}>{a.platform} · {a.account}<small>{a.businessName}{a.strategyState==='published'?' · 定位已确认':' · 定位修订中；可继续已绑定工作'}</small></Link>)}{!topicAccounts.length&&<p>还没有可用于选题的已确认策略账号。请先梳理定位。</p>}</section>}
       {!showStart&&<section className={styles.discovery}><div className={styles.discoveryHead}><div className={styles.recommendTabs}>{([['all','为你推荐'],['strategy','策略'],['writing','写作'],['operations','运营']] as const).map(([id,label])=><button key={id} aria-pressed={recommendation===id} onClick={()=>setRecommendation(id)}>{label}</button>)}</div><Link href="/workbench/marketplace">浏览全部 →</Link></div><div className={styles.discoverGrid}>
         {(recommendation==='all'||recommendation==='strategy')&&<><button onClick={chooseTopics}><span className={`${styles.moduleVisual} ${styles.artTopics}`}><span className={styles.big}>让好想法<br/>接着发生。</span><span className={styles.mini}>IDEAS, INTO STORIES.</span></span><strong>做一批新选题</strong><small>选定规划，找到值得写的方向</small></button><button onClick={choosePosition}><span className={`${styles.moduleVisual} ${styles.artPosition}`}><span className={styles.targetRings}/><b>找到<br/>你的坐标</b></span><strong>找到你的内容定位</strong><small>定位分析，明确受众与价值</small></button></>}
-        {(recommendation==='all'||recommendation==='writing')&&<><button onClick={()=>{setIntent('content');setShowSource(false);}}><span className={`${styles.moduleVisual} ${styles.artDraft}`}><span className={styles.big}>从一句，<br/>到一篇。</span><span className={styles.lines}><i/><i/><i/></span></span><strong>从选题写到成稿</strong><small>内容创作，把思路写清楚</small></button><Link href="/workbench/marketplace"><span className={`${styles.moduleVisual} ${styles.artRewrite}`}><span className={styles.wordPaper}><b>长文</b><small>ORIGINAL</small></span><span>→</span><span className={styles.wordPaper}><b>短句</b><small>RECRAFTED</small></span></span><strong>换个平台，继续表达</strong><small>跨平台改编，保留内容的核心</small></Link><Link href="/workbench/marketplace"><span className={`${styles.moduleVisual} ${styles.artTitle}`}><span className={styles.big}>值得<br/>被看见。</span><span className={styles.underline}/></span><strong>推敲一个好标题</strong><small>内容创作，标题讨论快捷起点</small></Link><Link href="/workbench/marketplace"><span className={`${styles.moduleVisual} ${styles.artOpening}`}><span className={styles.quote}>“</span><b>从一个真实<br/>的瞬间开始。</b></span><strong>让开头更具体</strong><small>内容创作，开头修改快捷起点</small></Link></>}
+        {(recommendation==='all'||recommendation==='writing')&&<><button onClick={()=>{setIntent('content');setShowSource(true);}}><span className={`${styles.moduleVisual} ${styles.artDraft}`}><span className={styles.big}>从一句，<br/>到一篇。</span><span className={styles.lines}><i/><i/><i/></span></span><strong>从选题写到成稿</strong><small>内容创作，把思路写清楚</small></button><Link href="/workbench/marketplace"><span className={`${styles.moduleVisual} ${styles.artRewrite}`}><span className={styles.wordPaper}><b>长文</b><small>ORIGINAL</small></span><span>→</span><span className={styles.wordPaper}><b>短句</b><small>RECRAFTED</small></span></span><strong>换个平台，继续表达</strong><small>跨平台改编，保留内容的核心</small></Link><Link href="/workbench/marketplace"><span className={`${styles.moduleVisual} ${styles.artTitle}`}><span className={styles.big}>值得<br/>被看见。</span><span className={styles.underline}/></span><strong>推敲一个好标题</strong><small>内容创作，标题讨论快捷起点</small></Link><Link href="/workbench/marketplace"><span className={`${styles.moduleVisual} ${styles.artOpening}`}><span className={styles.quote}>“</span><b>从一个真实<br/>的瞬间开始。</b></span><strong>让开头更具体</strong><small>内容创作，开头修改快捷起点</small></Link></>}
         {(recommendation==='all'||recommendation==='operations')&&<><button disabled aria-label="发布排期，待接入"><span className={`${styles.moduleVisual} ${styles.artSchedule}`}><span className={styles.calendarArt}>WEEK<span className={styles.week}>{Array.from({length:12},(_,index)=><i key={index}/>)}</span></span><b>有序<br/>发生</b></span><strong>发布排期</strong><small>待接入，安排内容节奏</small></button><button disabled aria-label="数据复盘，待接入"><span className={`${styles.moduleVisual} ${styles.artReview}`}><span className={styles.bars}><i/><i/><i/><i/></span><b>回看，<br/>再向前。</b></span><strong>数据复盘</strong><small>待接入，从实际表现出发</small></button></>}
       </div></section>}
       {showSource&&intent==='content'&&<section className={styles.selection} aria-label="选择任务来源"><h2>选择已有内容工作</h2><p>只进入你选择的原工作；浏览列表不会生成或保存稿件。</p>{accounts.flatMap(a=>a.items.map(item=><Link key={item.workItemId} href={'/runtime?session='+item.sessionId}>{item.title}<small>{a.platform} · {a.account}</small></Link>))}{!accounts.some(a=>a.items.length)&&<p>当前没有已采用的内容工作。先在选题对话中明确采用一条选题。</p>}</section>}

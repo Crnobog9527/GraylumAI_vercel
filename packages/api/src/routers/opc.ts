@@ -100,6 +100,12 @@ export const opcRouter = router({
     .query(({ ctx, input }) => ctx.opc.workResults(input.sessionId)),
   catalog: procedure.query(({ ctx }) => ctx.opc.catalog()),
   list: readProcedure.query(({ ctx }) => ctx.opc.list()),
+  conversations: readProcedure.query(async ({ ctx }) => {
+    // Actor is always derived from the verified session, never supplied by input.
+    const { data, error } = await ctx.supabaseAdmin.rpc('opc_free_conversations', { p_actor_id: ctx.user.id });
+    if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '对话记录暂时无法读取。' });
+    return z.array(z.object({ sessionId: z.string().uuid(), title: z.string(), lastActivityAt: z.string() })).parse(data);
+  }),
   planRequestState: readProcedure
     .input(
       z
