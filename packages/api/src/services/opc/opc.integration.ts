@@ -2826,9 +2826,6 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     await expect.poll(() => form.textContent()).toContain("1.2");
     expect(await form.textContent()).toContain("Second independent field");
     await expectOpening("1.2", "Second independent field");
-    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/question-navigation.png'}); // TEMP_EVIDENCE
-    console.log('QUESTION_STYLES',await page.getByRole('navigation',{name:'本步骤已到达的问题'}).getByRole('button').first().evaluate(el=>{const s=getComputedStyle(el);return {fontSize:s.fontSize,border:s.border,radius:s.borderRadius};})); // TEMP_EVIDENCE
-
     expect(await page.getByRole("status", { name: "当前导师任务" }).count()).toBe(0);
     expect((await f.service.read(draft.draftId)).snapshot.steps["step-0"].valid).toBe(false);
     await page.getByRole("button", {name:/^1\.1 已知目标 0 · 已确认/}).click();
@@ -8537,12 +8534,9 @@ it("OPC: mentor lost reply still projects once from its unchanged frozen informa
     await Promise.race([intercepted,new Promise((_,reject)=>setTimeout(()=>reject(new Error('mentor response barrier not reached')),30000))]);
     const recovery=page.getByRole('status',{name:'待恢复的导师请求',exact:true});
     expect(await recovery.count()).toBe(0);
-    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-busy.png'}); // TEMP_EVIDENCE
     release();
     await expect.poll(() => lost, { timeout: 30000 }).toBe(1);
     await recovery.waitFor();
-    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-recovery.png'}); // TEMP_EVIDENCE
-    console.log('RECOVERY_STYLES',await recovery.evaluate(el=>{const s=getComputedStyle(el);return {fontSize:s.fontSize,border:s.border,radius:s.borderRadius};})); // TEMP_EVIDENCE
     const identity = await planIdentityRows(f.actor);
     expect(identity).toHaveLength(2);
     expect((await f.service.read(d.draftId)).information['step-0'].values?.goal?.value ?? '').toBe('');
