@@ -751,7 +751,7 @@ it('RUNTIME: browser ordinary and document Skill survive refresh, actual process
   const hydrated=page.waitForResponse(r=>r.url().includes('/api/trpc/settings.getSystemSettings')&&r.ok(),{timeout:60000});
   await page.goto(app+'/login?redirect=/runtime');await hydrated;
   await page.getByPlaceholder('name@example.com').fill(email);await page.getByPlaceholder('输入你的密码').fill(password);
-  const choicesResponse=page.waitForResponse(r=>r.url().includes('/api/trpc/runtime.choices'));
+  const choicesResponse=page.waitForResponse(r=>r.url().includes('runtime.choices'));
   await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/runtime');
   expect((await choicesResponse).status()).toBe(200);
   await page.getByRole('button',{name:'新建对话',exact:true}).click();await page.getByLabel('消息',{exact:true}).waitFor();

@@ -8428,7 +8428,7 @@ it("OPC: topic invalid messages and legacy invalid pending records remain recove
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + f.d.draftId + '/topics');
     await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
-    await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).waitFor();
+    await page.getByRole('button', { name: '采用这个选题', exact: true }).first().waitFor();
     const workspace = await f.service.topicRead(f.d.draftId);
     const key = 'opc-topic-operation:' + workspace.sessionId;
     const identity = await topicIdentity(f.actor);
@@ -8452,7 +8452,7 @@ it("OPC: topic invalid messages and legacy invalid pending records remain recove
     await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
     await expect.poll(() => page.evaluate(k => localStorage.getItem(k), key), { timeout: 30000 }).toBeNull();
     expect(await page.evaluate(k => localStorage.getItem(k), key + ':invalid:' + invalidId)).not.toBeNull();
-    await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).waitFor();
+    await page.getByRole('button', { name: '采用这个选题', exact: true }).first().waitFor();
     expect((await f.service.topicDraftRead(f.d.draftId)).version).toBe(1);
     expect(await topicIdentity(f.actor)).toEqual(identity);
     await input.fill('请修改第一条选题');
