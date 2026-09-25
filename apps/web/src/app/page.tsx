@@ -1,211 +1,39 @@
 'use client';
-
-import { useRouter } from 'next/navigation';
-import { AppHeader } from '@/components/layout/AppHeader';
-import GlobalBanner from '@/components/layout/GlobalBanner';
-import WelcomeBanner from '@/components/home/WelcomeBanner';
-import SixStepsGuide from '@/components/home/SixStepsGuide';
-import UpdatesSection from '@/components/home/UpdatesSection';
-import FeaturedModules from '@/components/marketplace/FeaturedModules';
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import Link from 'next/link';
 import { trpc } from '@/trpc/client';
+import { useCreditsBalance } from '@/hooks/use-credits';
+import styles from './home.module.css';
 
-/**
- * 首页组件
- * 使用设计系统: 背景色、容器布局、动画效果
- */
-export default function HomePage() {
-  const router = useRouter();
-  // 从 tRPC 获取用户数据
-  const { data: userProfile } = trpc.user.getUserProfile.useQuery();
-  const positioningLibrary = trpc.opc.library.useQuery(
-    { search: '', from: null, to: null },
-    { retry: false },
-  );
+const steps = [
+ ['需求确认','先理解你的业务、目标和实际条件。'],
+ ['竞品研究','研究相关表达，判断哪些经验值得借鉴。'],
+ ['账号定位','明确帮助谁，以及能够提供什么价值。'],
+ ['内容策略','把定位变成适合已选平台的内容方向。'],
+ ['运营建议','结合时间和能力，安排可持续的工作。'],
+ ['商业规划','让内容支持产品与服务，避免只追逐流量。'],
+] as const;
+type HomeItem={workItemId:string;sessionId:string;title:string;chatName?:string;deleted?:boolean;lastActivityAt?:string};
+type HomeAccount={platform:string;account:string;displayName?:string;strategyDraftId?:string|null;items:HomeItem[]};
+type HomeBusiness={accounts:HomeAccount[]};
 
-  // 从 tRPC 获取公告数据
-  const { data: announcementsData, isLoading: isAnnouncementsLoading } = trpc.settings.getActiveAnnouncements.useQuery();
-  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
-  const showOnboarding =
-    systemSettings?.home_show_onboarding === true || systemSettings?.home_show_onboarding === 'true';
-  const showFeaturedModules =
-    systemSettings?.home_show_featured_modules === true || systemSettings?.home_show_featured_modules === 'true';
-  const { data: featuredModules, isLoading: isFeaturedModulesLoading } = trpc.modules.getFeaturedModules.useQuery(
-    { limit: 4 },
-    { enabled: showFeaturedModules }
-  );
-
-  // 从 tRPC 获取横幅公告
-  const { data: bannerData } = trpc.settings.getBannerAnnouncement.useQuery();
-
-  // 用户数据 (从 tRPC 获取)
-  const user = {
-    full_name: userProfile?.nickname || userProfile?.email?.split('@')[0] || '用户',
-    email: userProfile?.email || '',
-    membership_level: userProfile?.membership_level || 'free',
-    membership_expiry_date: undefined,
-  };
-
-  // 公告数据 (从 tRPC 获取)
-  const announcements = (announcementsData ?? []).map(announcement => ({
-    id: announcement.id,
-    title: announcement.title,
-    description: announcement.description || '',
-    icon: announcement.icon || 'Megaphone',
-    tag: announcement.tag || '',
-    tag_color: announcement.tag_color || 'yellow',
-    publish_date: announcement.created_at?.split('T')[0] || '',
-    link_url: announcement.link_url,
-  }));
-
-  // 横幅公告数据 (从 tRPC 获取)
-  const banners = bannerData ? [{
-    id: bannerData.id,
-    title: bannerData.title,
-    description: bannerData.description || '',
-    tag: bannerData.tag || '限量优惠',
-    banner_style: bannerData.banner_style || 'promo',
-    banner_link: bannerData.link_url,
-  }] : [];
-
-  return (
-    <div
-      className="min-h-screen relative overflow-hidden"
-      style={{ background: 'var(--bg-primary)' }}
-    >
-      {/* ============================================
-          动态背景系统 - 多层叠加效果
-          ============================================ */}
-
-      {/* 1. 基础渐变层 */}
-      <div
-        className="absolute inset-0"
-        style={{
-          background: `linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 50%, var(--bg-primary) 100%)`
-        }}
-      />
-
-      {/* 2. 右上角金色光晕 - 简化动画 */}
-      <div
-        className="absolute -top-32 -right-32 w-[500px] h-[500px] rounded-full opacity-40 blur-[100px]"
-        style={{
-          background: `linear-gradient(135deg, var(--color-secondary) 0%, var(--color-primary) 100%)`,
-          willChange: 'transform',
-          contain: 'layout paint',
-        }}
-      />
-
-      {/* 3. 左侧紫色光晕 - 静态 */}
-      <div
-        className="absolute top-1/4 -left-32 w-[400px] h-[400px] rounded-full opacity-20 blur-[80px]"
-        style={{
-          background: `rgba(139, 92, 246, 0.5)`,
-          contain: 'layout paint',
-        }}
-      />
-
-      {/* 4. 底部暖色光晕 - 静态 */}
-      <div
-        className="absolute -bottom-32 left-1/4 w-[500px] h-[300px] rounded-full opacity-30 blur-[100px]"
-        style={{
-          background: `var(--color-secondary)`,
-          contain: 'layout paint',
-        }}
-      />
-
-      {/* 5. 网格纹理层 - 静态 */}
-      <div
-        className="absolute inset-0 opacity-[0.03]"
-        style={{
-          backgroundImage: `linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)`,
-          backgroundSize: '50px 50px',
-          contain: 'layout paint',
-        }}
-      />
-
-      {/* 6. 暗角遮罩 */}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background: 'radial-gradient(ellipse 80% 70% at 50% 50%, transparent 30%, rgba(0,0,0,0.3) 70%, rgba(0,0,0,0.6) 100%)',
-          contain: 'layout paint',
-        }}
-      />
-
-      {/* 动画样式定义 - 精简版 */}
-      <style>{`
-        @keyframes fadeInUp {
-          from { opacity: 0; transform: translateY(20px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .card-clickable:hover {
-          border-color: var(--color-primary) !important;
-        }
-        .card-clickable:hover .heading-4 {
-          color: var(--color-primary) !important;
-        }
-        .card-clickable:hover svg {
-          color: var(--color-primary) !important;
-        }
-        .card-clickable:hover > div:first-child > div:first-child {
-          border-color: var(--color-primary) !important;
-        }
-      `}</style>
-
-      {/* ============================================
-          顶部导航
-          ============================================ */}
-      <AppHeader />
-
-      {/* ============================================
-          全站横幅公告 (导航栏下方)
-          ============================================ */}
-      <GlobalBanner banners={banners} />
-
-      {/* ============================================
-          内容层
-          ============================================ */}
-      <div
-        className="relative container mx-auto max-w-7xl"
-        style={{
-          zIndex: 'var(--z-base)',
-          padding: 'var(--space-xl) var(--space-lg)'
-        }}
-      >
-        <WelcomeBanner user={user} />
-        {!positioningLibrary.isLoading && !positioningLibrary.error &&
-          !positioningLibrary.data?.businesses?.some((business: { sourceAvailable: boolean }) => business.sourceAvailable) && (
-          <section className="mb-8 rounded-2xl border border-[var(--color-primary)] bg-[var(--bg-secondary)] p-6">
-            <h2 className="text-xl font-semibold text-[var(--text-primary)]">先完成正式定位</h2>
-            <p className="mt-2 text-sm text-[var(--text-secondary)]">你可以让 Agent 从零引导，也可以录入已有定位。未完成的内容会原样保留，下次登录继续。</p>
-            <button className="mt-4 rounded-lg bg-[var(--color-primary)] px-4 py-2 font-medium text-[var(--bg-primary)]" onClick={() => router.push('/positioning')}>选择定位入口</button>
-          </section>
-        )}
-        {showOnboarding && <SixStepsGuide onStartAnalysis={() => {
-          const localDatabase=process.env.NEXT_PUBLIC_SUPABASE_URL;
-          if(localDatabase&&/^http:\/\/(127\.0\.0\.1|\[::1\])(:[0-9]+)?\//.test(localDatabase+'/')){router.push('/positioning');return;}
-          const id = systemSettings?.home_analysis_module_id;
-          router.push(typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id) ? `/workbench/marketplace?module=${encodeURIComponent(id)}` : '/workbench/marketplace');
-        }} />}
-        {showFeaturedModules && !isFeaturedModulesLoading && featuredModules && featuredModules.length > 0 && (
-          <FeaturedModules
-            featuredModules={featuredModules.map((module) => ({
-              id: module.id,
-              title: module.title,
-              description: module.description ?? '',
-              icon: module.icon ?? '✨',
-              image_url: module.image_url ?? '',
-              badge_type: (module.badge_type as 'hot' | 'new' | 'recommend') ?? 'recommend',
-              badge_text: module.badge_text ?? '',
-              credits_display: module.credits_display ?? '',
-              usage_count: module.usage_count ?? 0,
-              link_url: module.link_url ?? undefined,
-              link_module_id: module.link_module_id ?? undefined,
-            }))}
-            onModuleClick={() => router.push('/workbench/marketplace')}
-          />
-        )}
-        <UpdatesSection announcements={announcements} isLoading={isAnnouncementsLoading} />
-      </div>
-    </div>
-  );
+export default function HomePage(){
+ const profile=trpc.user.getUserProfile.useQuery();
+ const library=trpc.opc.library.useQuery({search:'',from:null,to:null},{retry:false});
+ const credits=useCreditsBalance();
+ const accounts=((library.data?.businesses??[]) as HomeBusiness[]).flatMap(business=>business.accounts);
+ const latestWork=accounts.flatMap(account=>account.items.map(item=>({account,item}))).filter(({item})=>!item.deleted).sort((a,b)=>(b.item.lastActivityAt??'').localeCompare(a.item.lastActivityAt??''))[0];
+ const hasStrategy=accounts.some(account=>account.strategyDraftId);
+ const name=profile.data?.nickname||profile.data?.email?.split('@')[0]||'用户';
+ return <div className={styles.home}>
+  <header className={styles.header}><Link href="/" className={styles.brand}><img src="/graylum-logo.png" alt=""/>Graylum</Link><nav aria-label="全局导航"><Link href="/" aria-current="page">首页</Link><Link href="/positioning">对话</Link><Link href="/profile">个人中心</Link></nav><div className={styles.headerEnd}><Link href="/profile?tab=subscription">{credits.status==='ready'?credits.credits:'—'} 积分</Link><Link href="/profile" aria-label="个人中心" className={styles.avatar}>{name.slice(0,1)}</Link></div></header>
+  <main className={styles.page}>
+   <section className={styles.account}><div><strong>欢迎回来，{name}</strong><span>{profile.data?.membership_level==='free'?'普通会员':'会员账户'}</span></div><Link href="/profile?tab=subscription">账户与积分 →</Link></section>
+   {latestWork&&<section className={styles.resume}><p>{latestWork.account.platform} · {latestWork.account.displayName??latestWork.account.account}</p><h2>{latestWork.item.chatName??latestWork.item.title}</h2><div><Link className={styles.primary} href={'/runtime?session='+latestWork.item.sessionId}>继续上次工作</Link><Link href="/library">查看资料库</Link></div></section>}
+   <section className={styles.value}><h1>让你的业务，<br/>拥有清楚的内容方向</h1><p>从找到自己的位置，到持续做出有价值的内容。<br/>Graylum 和你一起分析、判断和创作，让每一步都有依据。</p></section>
+   <section className={styles.method}><div className={styles.sectionIntro}><h2>六个环节，理解你的内容增长路径</h2><p>Agent 提供分析与建议，你核对真实情况、作出关键决定。</p></div><ol>{steps.map(([title,description],index)=><li key={title}><span>{String(index+1).padStart(2,'0')}</span><h3>{title}</h3><p>{description}</p></li>)}</ol></section>
+   <section className={styles.entry}><div><Link className={styles.primary} href="/positioning">{hasStrategy?'进入对话':'开始新手引导'}</Link><Link href={hasStrategy?'/library':'/positioning'}>{hasStrategy?'查看正式定位':'我已有定位'}</Link></div><p>{hasStrategy?'已有定位和工作会保留；你可以继续原对话。':'先一起确认定位，再开展选题和内容创作。已有资料可以直接带入。'}</p></section>
+   <section className={styles.capabilities}><h2>从策略，继续走向实际创作</h2><div>{[['AI 对话','持续讨论，获得建议'],['内容创作','选题、起草、修改与定稿'],['功能广场','探索工具与方法'],['个人成长','回看自己的创作历程']].map(([title,description])=><article key={title}><h3>{title}</h3><p>{description}</p></article>)}</div></section>
+  </main>
+ </div>;
 }

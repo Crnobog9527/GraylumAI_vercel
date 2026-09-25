@@ -62,9 +62,16 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
  function change(patch:Partial<Draft>){
   if(!draft)return;
   const next={...draft,...patch};
-  try{localStorage.setItem(key,JSON.stringify(next));setDraft(next);setSaved('');}
+  try{localStorage.setItem(key,JSON.stringify(next));setDraft(next);setSaved('正在自动同步草稿…');}
   catch{setError('无法保留未保存编辑，请检查本机存储。');}
  }
+ useEffect(()=>{
+  if(!draft||!item.sourceAvailable||!draft.title.trim()||!draft.body.trim()||pending||error||!localStorage.getItem(key)||localStorage.getItem(pendingKey))return;
+  const timer=window.setTimeout(()=>{void save('draft');},1500);
+  return()=>window.clearTimeout(timer);
+ // Save a settled edit, never every keystroke. The existing idempotent save handles recovery.
+ // eslint-disable-next-line react-hooks/exhaustive-deps
+ },[draft,pending,error,key,pendingKey,item.sourceAvailable]);
  async function save(status:'draft'|'final',offeredBody?:string){
   if(!draft||!item.sourceAvailable||latest&&latest.contentAvailable===false)return;
   const pendingRaw=localStorage.getItem(pendingKey);
@@ -73,7 +80,7 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
   if(!pendingRaw&&(body.length>20000||title.length>160)){setError('标题或正文超出长度限制。');return;}
   // A successful save can advance the draft before the library query refreshes.
   // The service checks expectedVersion, so a stale query must not block the next explicit save.
-  if(!pendingRaw&&latest?.status===status&&latest?.title===title&&latest?.body===body){
+  if(!pendingRaw&&latest?.version===draft.baseVersion&&latest?.status===status&&latest?.title===title&&latest?.body===body){
    setSaved('当前内容已经是已保存版本。');return;
   }
   setError('');setSaved('');
@@ -111,25 +118,25 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
  useImperativeHandle(ref,()=>({finalize:()=>{void save('final');}}));
  if(!draft)return <p className={styles.loading}>正在读取当前成果…</p>;
  return <div className={styles.editor}>
-  <header><p className={styles.label}>当前成果</p><p className={styles.meta}>{item.platform} · {item.account} · {item.contentType==='video'?'口播稿':'内容创作'}</p></header>
+  <header><p className={styles.label}>正文稿件</p><p className={styles.meta}>{item.platform} · {item.account} · {item.contentType==='video'?'口播稿':'文章'}</p></header>
   <div className={styles.body}>
    {!item.sourceAvailable||latest&&latest.contentAvailable===false?<p role="alert">来源已不可用，不能编辑或保存这条工作。</p>:<>
-    <label>标题<input aria-label="稿件标题" value={draft.title} onChange={event=>change({title:event.target.value})} maxLength={160}/></label>
+    <label>稿件标题<input aria-label="稿件标题" value={draft.title} onChange={event=>change({title:event.target.value})} maxLength={160}/></label>
     <label>{kind==='script'?'口播稿正文':'文章正文'}<textarea aria-label={kind==='script'?'口播稿正文':'文章正文'} value={draft.body} onChange={event=>change({body:event.target.value})} maxLength={20000} placeholder="先写下草稿，保存后会形成可找回的版本。"/></label>
-    <p className={styles.version}>{latest?'服务端已保存 v'+latest.version+' · '+(latest.status==='final'?'已定稿':'草稿'):'尚无已保存稿件'}</p>
+    <p className={styles.version}>{latest?'账号已保存 v'+latest.version+' · '+(latest.status==='final'?'已定稿':'草稿'):'草稿会在停止输入后自动同步到账号'}</p>
     {saved&&<p role="status" className={styles.success}>{saved}</p>}
     {error&&<p role="alert" className={styles.error}>{error}</p>}
     {latest&&draft.baseVersion<latest.version&&!pending&&<button className={styles.rebase} onClick={()=>change({baseVersion:latest.version,sourceContentId:latest.id})}>已比较历史，基于服务端 v{latest.version} 保留我的编辑</button>}
     <div className={styles.actions}>
-     {pending?<button onClick={()=>save('draft')} disabled={saveMutation.isPending}>恢复原保存</button>:<button onClick={()=>save('draft')} disabled={saveMutation.isPending}>保存稿件版本</button>}
+     {pending&&<button onClick={()=>save('draft')} disabled={saveMutation.isPending}>恢复草稿同步</button>}
      <button onClick={openExpanded}>展开编辑</button>
      <button onClick={()=>setHistory(true)}>历史版本</button>
     </div>
     {children}
    </>}
   </div>
-  <footer><button className={styles.primary} onClick={()=>save('final')} disabled={pending||saveMutation.isPending||!item.sourceAvailable}>将标题和{kind==='script'?'口播稿':'文章'}定稿</button><p>定稿不等于发布</p></footer>
-  {expanded&&<div className={styles.backdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setExpanded(false);}}><div role="dialog" aria-modal="true" aria-label="编辑标题与正文" className={styles.modal}><header><h2>编辑标题与正文</h2><button aria-label="关闭编辑" onClick={()=>setExpanded(false)}>×</button></header><div className={styles.modalFields}><label>标题<input aria-label="展开编辑标题" value={expandedTitle} maxLength={160} onChange={event=>setExpandedTitle(event.target.value)}/></label><label>{kind==='script'?'口播稿正文':'文章正文'}<textarea aria-label="展开编辑正文" value={expandedBody} maxLength={20000} onChange={event=>setExpandedBody(event.target.value)}/></label></div><footer><p>此窗口的修改暂不保存。确认修改后写入当前未保存编辑，仍需明确保存版本。</p><div><button onClick={()=>setExpanded(false)}>取消</button><button className={styles.primary} onClick={()=>{change({title:expandedTitle,body:expandedBody});setExpanded(false);}}>确认修改</button></div></footer></div></div>}
+  <footer><button className={styles.primary} onClick={()=>save('final')} disabled={pending||saveMutation.isPending||!item.sourceAvailable}>确认定稿{kind==='script'?'口播稿':'文章'}</button><p>修改会自动同步为草稿；定稿会另存正式版本，不等于发布。</p></footer>
+  {expanded&&<div className={styles.backdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setExpanded(false);}}><div role="dialog" aria-modal="true" aria-label="编辑标题与正文" className={styles.modal}><header><h2>编辑标题与正文</h2><button aria-label="关闭编辑" onClick={()=>setExpanded(false)}>×</button></header><div className={styles.modalFields}><label>稿件标题<input aria-label="展开编辑标题" value={expandedTitle} maxLength={160} onChange={event=>setExpandedTitle(event.target.value)}/></label><label>{kind==='script'?'口播稿正文':'文章正文'}<textarea aria-label="展开编辑正文" value={expandedBody} maxLength={20000} onChange={event=>setExpandedBody(event.target.value)}/></label></div><footer><p>确认修改后会自动同步为草稿。</p><div><button onClick={()=>setExpanded(false)}>取消</button><button className={styles.primary} onClick={()=>{change({title:expandedTitle,body:expandedBody});setExpanded(false);}}>确认修改</button></div></footer></div></div>}
   {history&&<VersionCompare versions={versions} onClose={()=>setHistory(false)}/>}
  </div>;
 });

@@ -7507,6 +7507,8 @@ it("OPC: workspace presentation changes preserve ownership, replay and version b
   const rename={workItemId:work.workItemId,requestId:randomUUID(),expectedRevision:1,action:'rename' as const,name:'人工命名的对话'};
   const changed=await f.service.workUiChange(rename);
   expect(await f.service.workUiChange(rename)).toEqual(changed);
+  const renamedItem=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0].items[0];
+  expect(renamedItem).toMatchObject({title:'人工命名的对话',chatName:'人工命名的对话',revision:2});
   await expect(f.service.workUiChange({...rename,name:'不同名称'})).rejects.toThrow('OPC_REQUEST_CONFLICT');
   await expect(f.service.workUiChange({...rename,requestId:randomUUID()})).rejects.toThrow('OPC_VERSION_CONFLICT');
   await expect(other.service.workUiChange({workItemId:work.workItemId,requestId:randomUUID(),expectedRevision:1,action:'archive'})).rejects.toThrow('OPC_DENIED');
@@ -7522,8 +7524,11 @@ it("OPC: workspace presentation changes preserve ownership, replay and version b
   await expect(other.service.publicationUiChange({...published,requestId:randomUUID()})).rejects.toThrow('OPC_DENIED');
   await expect(f.service.publicationUiChange({...published,requestId:randomUUID()})).rejects.toThrow('OPC_VERSION_CONFLICT');
   const projected=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0].items[0];
-  expect(projected).toMatchObject({chatName:'人工命名的对话',pinned:true,publication:{status:'published',plannedDate:'2026-10-01',publishedDate:'2026-09-23',publishedVersion:final.version}});
-  const archived=await f.service.workUiChange({workItemId:work.workItemId,requestId:randomUUID(),expectedRevision:pinned.revision,action:'archive'});
+  expect(projected).toMatchObject({title:'人工命名的对话',chatName:'人工命名的对话',pinned:true,publication:{status:'published',plannedDate:'2026-10-01',publishedDate:'2026-09-23',publishedVersion:final.version}});
+  await f.service.libraryEdit({requestId:randomUUID(),target:'item',targetId:work.workItemId,expectedRevision:projected.revision,patch:{title:'资料库改名后同步侧栏',brief:projected.brief,day:projected.day,contentType:projected.contentType}});
+  const synchronized=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0].items[0];
+  expect(synchronized).toMatchObject({title:'资料库改名后同步侧栏',chatName:'资料库改名后同步侧栏',uiRevision:pinned.revision+1});
+  const archived=await f.service.workUiChange({workItemId:work.workItemId,requestId:randomUUID(),expectedRevision:synchronized.uiRevision,action:'archive'});
   expect(archived).toMatchObject({archived:true,pinned:false});
   const restored=await f.service.workUiChange({workItemId:work.workItemId,requestId:randomUUID(),expectedRevision:archived.revision,action:'restore'});
   expect(restored.archived).toBe(false);
