@@ -7401,9 +7401,9 @@ it("OPC: U2 browser adopts only second topic, edits a server version and returns
   const {browser,context,page}=await planBrowser(f);
   const path='/positioning/'+f.d.draftId+'/topics';
   try{
-    await page.setViewportSize({width:1440,height:900});
+    await page.setViewportSize({width:1600,height:900});
     await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+f.d.draftId);
-    await page.getByRole('link',{name:'进入选题工作对话',exact:true}).click();
+    await page.getByRole('link',{name:'进入选题工作对话 →',exact:true}).click();
     await page.waitForURL(url=>url.pathname===path);
     await page.getByRole('button',{name:'开始选题工作对话',exact:true}).click();
     const second=page.getByRole('heading',{name:'2. 第二个账号选题',exact:true}).locator('..');
@@ -7433,6 +7433,33 @@ it("OPC: U2 browser adopts only second topic, edits a server version and returns
     await page.waitForURL(url=>url.pathname==='/runtime');
     await page.getByLabel('文章正文').fill('修改后的正文：补充前后对照案例。');
     await page.getByRole('status').filter({hasText:'已在服务端保存 v2'}).waitFor();
+    // U4: keyboard users must stay in the visible modal, return to its
+    // trigger, and leave cancelled edits and read-only history unchanged.
+    for(const viewport of [{width:1600,height:900},{width:390,height:844}]){
+      await page.setViewportSize(viewport);
+      if(viewport.width===390)await page.getByRole('button',{name:'展开右边栏',exact:true}).click();
+      const trigger=page.getByRole('button',{name:'展开编辑',exact:true});
+      await trigger.focus();await page.keyboard.press('Enter');
+      const editor=page.getByRole('dialog',{name:'编辑标题与正文',exact:true});await editor.waitFor();
+      await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+`/u4-editor-${viewport.width}.png`});
+      await expect.poll(()=>editor.evaluate(node=>node.contains(document.activeElement))).toBe(true);
+      for(let i=0;i<8;i++){await page.keyboard.press('Tab');expect(await editor.evaluate(node=>node.contains(document.activeElement))).toBe(true);}
+      await editor.getByLabel('展开编辑正文',{exact:true}).fill('U4 取消的编辑不能保存');
+      await page.keyboard.press('Escape');await editor.waitFor({state:'hidden'});
+      await expect.poll(()=>trigger.evaluate(node=>node===document.activeElement)).toBe(true);
+      expect(await page.getByLabel('文章正文').inputValue()).toBe('修改后的正文：补充前后对照案例。');
+      const historyTrigger=page.getByRole('button',{name:'历史版本',exact:true});
+      await historyTrigger.focus();await page.keyboard.press('Enter');
+      const history=page.getByRole('dialog',{name:'历史版本',exact:true});await history.waitFor();
+      await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+`/u4-history-${viewport.width}.png`});
+      await expect.poll(()=>history.evaluate(node=>node.contains(document.activeElement))).toBe(true);
+      for(let i=0;i<8;i++){await page.keyboard.press('Tab');expect(await history.evaluate(node=>node.contains(document.activeElement))).toBe(true);}
+      await page.keyboard.press('Escape');await history.waitFor({state:'hidden'});
+      await expect.poll(()=>historyTrigger.evaluate(node=>node===document.activeElement)).toBe(true);
+      expect(await page.getByLabel('文章正文').inputValue()).toBe('修改后的正文：补充前后对照案例。');
+      expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    }
+    await page.setViewportSize({width:1600,height:900});
     await page.getByLabel('消息',{exact:true}).fill('这条问题先不要发送');
     await page.getByLabel('文章正文').fill('未保存的下一次修改');
     await page.reload();
@@ -7440,7 +7467,7 @@ it("OPC: U2 browser adopts only second topic, edits a server version and returns
     await expect.poll(()=>page.getByLabel('文章正文').inputValue()).toBe('未保存的下一次修改');
     await page.getByRole('button',{name:'历史版本',exact:true}).click();
     await page.getByText('修改后的正文：补充前后对照案例。').waitFor();
-    await page.setViewportSize({width:1440,height:900});
+    await page.setViewportSize({width:1600,height:900});
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-article-desktop.png'});
     await page.setViewportSize({width:390,height:844});
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-article-narrow.png'});
@@ -7453,7 +7480,7 @@ it("OPC: U2 browser adopts only second topic, edits a server version and returns
     await page.waitForURL(url=>url.pathname==='/runtime');
     await expect.poll(()=>page.getByLabel('文章正文').inputValue()).toBe('未保存的下一次修改');
     await expect.poll(()=>page.getByLabel('消息',{exact:true}).inputValue()).toBe('这条问题先不要发送');
-  }finally{await browser.close();}
+  }catch(error){console.info('U4_CORE_FAILURE',error instanceof Error?error.stack:'unknown');throw error;}finally{console.info('U4_CORE_CLOSE_START');await browser.close();console.info('U4_CORE_CLOSED');}
 },300000);
 
 it("OPC: U2 browser preserves later edits across unknown saves, conflict and another login", async()=>{
@@ -8452,26 +8479,40 @@ it("OPC: video package dispatch refuses a different frozen material before admis
 }, 240000);
 
 it.each([[2, "same"], [2, "draft"], [2, "published"], [3, "published"]] as const)("OPC: old v%i executed lost reply restores its original source across revision %s", async (version, revise) => {
+  const started=Date.now();let phase='fixture';
+  const pending=new Map<object,string>();
+  const mark=(next:string)=>{phase=next;console.info('U4_LEGACY_PHASE',JSON.stringify({version,revise,phase,ms:Date.now()-started,pending:[...pending.values()]}));};
+  mark('fixture');
   const f = await completed(3);
   await planFixtureModel(f.moduleId);
   const envelope = planEnvelopeFor(f);
   // The old client already admitted/executed this request; only its UI reply
   // was lost. The compatibility link must never perform a fresh admission.
+  mark('browser-login');
   const { browser, page, key } = await planBrowser(f, { envelope });
+  page.on('request',request=>pending.set(request,new URL(request.url()).pathname));
+  page.on('requestfinished',request=>pending.delete(request));
+  page.on('requestfailed',request=>pending.delete(request));
+  page.on('pageerror',error=>console.info('U4_LEGACY_PAGE_ERROR',error.name));
+  const heartbeat=setInterval(()=>mark(phase),15000);
+  mark('browser-ready');
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + f.d.draftId + '/plan');
     await page.getByText('服务端没有这条请求的准入记录；没有开始新的生成。', {exact:true}).waitFor();
     expect(await page.getByRole('button', {name:'继续这条原请求',exact:true}).isDisabled()).toBe(true);
     expect((await planIdentity(f.actor, f.d.draftId)).planExecutions).toBe(0);
     expect(JSON.parse((await page.evaluate(k=>sessionStorage.getItem(k),key))!)).toEqual(envelope);
+    mark('unadmitted-verified');
     const prepared = await f.service.prepareStep(envelope.request);
     const { runtimeExecutor } = await import("../runtime/execute");
     await runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:process.env.V3_RUNTIME_LOCAL_ENDPOINT!}).execute(prepared.executionId);
+    mark('receipt-saved');
     let resultLost = 0;
     await page.route('**/api/trpc/opc.planResult*', async route => { await route.fetch(); await route.abort(); resultLost += 1; });
     await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + f.d.draftId + '/plan');
     await page.getByRole('button', {name:'继续这条原请求',exact:true}).click();
     await page.getByText('这次生成的结果暂时无法确认。原请求与原始记录仍保留，请稍后按原身份恢复。', {exact:true}).waitFor();
+    mark('lost-result-visible');
     const identity = await planIdentityRows(f.actor);
     const counts = await planIdentity(f.actor, f.d.draftId);
     expect(counts.planExecutions).toBe(1);
@@ -8484,13 +8525,16 @@ it.each([[2, "same"], [2, "draft"], [2, "published"], [3, "published"]] as const
         requestId: randomUUID(), expectedSteps: Object.fromEntries(Object.entries(snap.steps).map(([id, st]) => [id, { version: st.version, reviewVersion: st.reviewVersion }])) });
       expect((await f.service.read(f.d.draftId)).roundId).not.toBe(f.d.roundId);
     }
+    mark('round-revised');
     await page.evaluate(({ key, id, version }) => {
       const old = JSON.parse(sessionStorage.getItem(key)!);
       old.v = version; if (version === 2) delete old.consentedAt;
       sessionStorage.setItem(key, JSON.stringify(old));
       sessionStorage.removeItem('opc-edit:' + id);
     }, { key, id: f.d.draftId, version });
+    mark('legacy-reload-start');
     await page.reload();
+    mark('legacy-reload-loaded');
     await page.getByRole('heading', { name: '本机保留了一条早先的生成请求', exact: true }).waitFor();
     await expect.poll(async () => (await page.getByRole('status').allTextContents()).join(' ')).toContain('服务端已保存这条请求的完成结果');
     expect(await planIdentityRows(f.actor)).toEqual(identity);
@@ -8506,30 +8550,41 @@ it.each([[2, "same"], [2, "draft"], [2, "published"], [3, "published"]] as const
     const result = await f.service.planResult(f.d.draftId, executionId);
     expect(result.sourceVersionId).toBe(f.sourceVersionId);
     expect(result.sourceRoundId).toBe(f.d.roundId);
+    mark('original-result-verified');
     const other = await fixture(3);
     await expect(other.service.planResult(f.d.draftId, executionId)).rejects.toThrow('OPC_RESULT_DENIED');
     if (revise !== "same") {
+      mark('historical-reload-start');
       await page.reload();
+      mark('historical-reload-loaded');
       await page.getByRole('heading', { name: '原定位轮次的计划结果 · 已恢复', exact: true }).waitFor();
       expect(await planIdentityRows(f.actor)).toEqual(identity);
       expect(await page.getByRole('button', { name: '采用候选到计划工作稿', exact: true }).count()).toBe(0);
     }
     if (revise === 'published' && version === 2) {
+      mark('migration-repeat-start');
       const { readFile } = await import('node:fs/promises');
       await sql.query(await readFile(new URL('../../../../db/migrations/0115_opc_historical_plan_result.sql', import.meta.url), 'utf8'));
+      mark('migration-repeat-done');
       expect((await f.service.planResult(f.d.draftId, executionId)).sourceVersionId).toBe(f.sourceVersionId);
       const privileges = (await sql.query("select has_function_privilege('authenticated','opc_plan_result(uuid,uuid,uuid)','execute') client, has_function_privilege('service_role','opc_plan_result(uuid,uuid,uuid)','execute') server")).rows[0];
       expect(privileges).toEqual({ client: false, server: true });
+      mark('revoke-start');
       await sql.query('update bill2_drafts set revoked=true where id=$1', [f.d.draftId]);
       await expect(f.service.planResult(f.d.draftId, executionId)).rejects.toThrow('OPC_RESULT_DENIED');
+      mark('revoked-reload-start');
       await page.reload();
+      mark('revoked-reload-loaded');
       // Wait for the authorization verdict, not the initial empty loading view.
       await page.getByText('原请求来源已撤回，不能继续恢复。', {exact:true}).or(page.getByRole('alert').filter({hasText:'无法读取这份定位'})).waitFor();
+      mark('revoked-verdict-visible');
       // The browser cannot reveal its cached candidate once access is revoked.
       await expect.poll(async()=>await page.getByRole('heading', {name:'原定位轮次的计划结果 · 已恢复',exact:true}).count()).toBe(0);
+      mark('final-identity-start');
       expect(await planIdentityRows(f.actor)).toEqual(identity);
+      mark('final-identity-verified');
     }
-  } finally { await browser.close(); }
+  } finally { mark('browser-close-start');try {await browser.close();mark('browser-closed');}finally{clearInterval(heartbeat);} }
 }, 300000);
 
 it("OPC: two topic pages explicitly consent concurrently and execute one first turn", async () => {
@@ -9267,7 +9322,8 @@ it("OPC: library finalization closes only on success and account discussion swit
   await page.getByLabel('展开编辑正文',{exact:true}).fill('定稿等待期间的展开输入');
   const refreshed=page.waitForResponse(response=>response.url().includes('opc.library')&&response.request().method()==='GET');
   release();
-  await dialog.getByRole('status').filter({hasText:'已定稿'}).waitFor();
+  // The foreground modal correctly hides background status from the accessibility tree.
+  await dialog.getByRole('status',{includeHidden:true}).filter({hasText:'已定稿'}).waitFor();
   await (await refreshed).finished();
   await page.waitForTimeout(500); // Let onSaved's continuation run before asserting or confirming later edits.
   expect(await page.getByLabel('展开编辑正文',{exact:true}).inputValue()).toBe('定稿等待期间的展开输入');

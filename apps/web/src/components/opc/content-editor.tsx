@@ -1,6 +1,7 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
 import { trpc } from '@/trpc/client';
 import { VersionCompare } from './version-compare';
 import styles from './content-editor.module.css';
@@ -21,10 +22,10 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
  const pendingKey='opc-content-save:'+item.workItemId+':'+kind;
  const [draft,setDraft]=useState<Draft|null>(null),[pending,setPending]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState('');
  const [history,setHistory]=useState(false),[expanded,setExpanded]=useState(false);
+ const expandedTrigger=useRef<HTMLButtonElement>(null),historyTrigger=useRef<HTMLButtonElement>(null);
  const mounted=useRef(false),expandedOpen=useRef(false);
  expandedOpen.current=expanded;
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
- useEffect(()=>{if(!expanded)return;function onEscape(event:KeyboardEvent){if(event.key==='Escape')setExpanded(false);}window.addEventListener('keydown',onEscape);return()=>window.removeEventListener('keydown',onEscape);},[expanded]);
  const [expandedDraft,setExpandedDraft]=useState<Draft|null>(null);
  const saveMutation=trpc.opc.saveContentManual.useMutation();
  useEffect(()=>{
@@ -134,14 +135,14 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
     {latest&&draft.baseVersion<latest.version&&!pending&&<button className={styles.rebase} onClick={()=>{change({baseVersion:latest.version,sourceContentId:latest.id});setError('');}}>已比较历史，基于服务端 v{latest.version} 保留我的编辑</button>}
     <div className={styles.actions}>
      {pending&&<button onClick={()=>save('draft')} disabled={saveMutation.isPending}>恢复草稿同步</button>}
-     <button onClick={openExpanded}>展开编辑</button>
-     <button onClick={()=>setHistory(true)}>历史版本</button>
+     <button ref={expandedTrigger} onClick={openExpanded}>展开编辑</button>
+     <button ref={historyTrigger} onClick={()=>setHistory(true)}>历史版本</button>
     </div>
     {children}
    </>}
   </div>
   <footer><button className={styles.primary} onClick={()=>save('final')} disabled={pending||saveMutation.isPending||!item.sourceAvailable}>确认定稿{contentLabel}</button><p>修改会自动同步为草稿；定稿会另存正式版本，不等于发布。</p></footer>
-  {expanded&&expandedDraft&&<div className={styles.backdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setExpanded(false);}}><div role="dialog" aria-modal="true" aria-label="编辑标题与正文" className={styles.modal}><header><h2>编辑标题与正文</h2><button aria-label="关闭编辑" onClick={()=>setExpanded(false)}>×</button></header><div className={styles.modalFields}><label>稿件标题<input aria-label="展开编辑标题" value={expandedDraft.title} maxLength={160} onChange={event=>setExpandedDraft({...expandedDraft,title:event.target.value})}/></label><label>{contentLabel+'正文'}<textarea aria-label="展开编辑正文" value={expandedDraft.body} maxLength={20000} onChange={event=>setExpandedDraft({...expandedDraft,body:event.target.value})}/></label></div><footer><p>确认修改后会自动同步为草稿。</p><div><button onClick={()=>setExpanded(false)}>取消</button><button className={styles.primary} onClick={()=>{change(expandedDraft);setExpanded(false);}}>确认修改</button></div></footer></div></div>}
-  {history&&<VersionCompare versions={versions} onClose={()=>setHistory(false)}/>}
+  {expanded&&expandedDraft&&<Dialog.Root open onOpenChange={setExpanded}><Dialog.Overlay className={styles.backdrop}><Dialog.Content aria-label="编辑标题与正文" aria-describedby={undefined} className={styles.modal} onCloseAutoFocus={event=>{event.preventDefault();expandedTrigger.current?.focus();}}><header><Dialog.Title asChild><h2>编辑标题与正文</h2></Dialog.Title><button aria-label="关闭编辑" onClick={()=>setExpanded(false)}>×</button></header><div className={styles.modalFields}><label>稿件标题<input aria-label="展开编辑标题" value={expandedDraft.title} maxLength={160} onChange={event=>setExpandedDraft({...expandedDraft,title:event.target.value})}/></label><label>{contentLabel+'正文'}<textarea aria-label="展开编辑正文" value={expandedDraft.body} maxLength={20000} onChange={event=>setExpandedDraft({...expandedDraft,body:event.target.value})}/></label></div><footer><p>确认修改后会自动同步为草稿。</p><div><button onClick={()=>setExpanded(false)}>取消</button><button className={styles.primary} onClick={()=>{change(expandedDraft);setExpanded(false);}}>确认修改</button></div></footer></Dialog.Content></Dialog.Overlay></Dialog.Root>}
+  {history&&<VersionCompare returnFocusRef={historyTrigger} versions={versions} onClose={()=>setHistory(false)}/>}
  </div>;
 });
