@@ -1,6 +1,6 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useState, type ReactNode } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import { trpc } from '@/trpc/client';
 import { VersionCompare } from './version-compare';
 import styles from './content-editor.module.css';
@@ -20,6 +20,9 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
  const pendingKey='opc-content-save:'+item.workItemId+':'+kind;
  const [draft,setDraft]=useState<Draft|null>(null),[pending,setPending]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState('');
  const [history,setHistory]=useState(false),[expanded,setExpanded]=useState(false);
+ const mounted=useRef(false),expandedOpen=useRef(false);
+ expandedOpen.current=expanded;
+ useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
  useEffect(()=>{if(!expanded)return;function onEscape(event:KeyboardEvent){if(event.key==='Escape')setExpanded(false);}window.addEventListener('keydown',onEscape);return()=>window.removeEventListener('keydown',onEscape);},[expanded]);
  const [expandedTitle,setExpandedTitle]=useState(''),[expandedBody,setExpandedBody]=useState('');
  const saveMutation=trpc.opc.saveContentManual.useMutation();
@@ -81,7 +84,7 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
   // A successful save can advance the draft before the library query refreshes.
   // The service checks expectedVersion, so a stale query must not block the next explicit save.
   if(!pendingRaw&&latest?.version===draft.baseVersion&&latest?.status===status&&latest?.title===title&&latest?.body===body){
-   localStorage.removeItem(key);setSaved('当前内容已经是已保存版本。');if(status==='final')onFinalized?.();return;
+   localStorage.removeItem(key);setSaved('当前内容已经是已保存版本。');if(status==='final'&&mounted.current&&!expandedOpen.current)onFinalized?.();return;
   }
   setError('');setSaved('');
   try{
@@ -104,7 +107,7 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
      localStorage.setItem(key,JSON.stringify(next));setDraft(next);
     }
     setSaved('已在服务端保存 v'+result.version+(result.status==='final'?' · 已定稿':' · 草稿'));
-    try{await onSaved();if(result.status==='final'&&!localStorage.getItem(key))onFinalized?.();}catch{setError('版本已在服务端保存，但最新历史暂未刷新；请稍后重新打开当前工作。');}
+    try{await onSaved();if(result.status==='final'&&mounted.current&&!expandedOpen.current&&!localStorage.getItem(key))onFinalized?.();}catch{setError('版本已在服务端保存，但最新历史暂未刷新；请稍后重新打开当前工作。');}
    });
   }catch(cause){
    const code=cause instanceof Error?cause.message:'';

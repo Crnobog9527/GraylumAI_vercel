@@ -8959,6 +8959,38 @@ it("OPC: library finalization closes only on success and account discussion swit
   await dialog.getByRole('button',{name:'确认定稿文章',exact:true}).click();
   await dialog.waitFor({state:'hidden'});
   expect((await sql.query('select count(*)::int n from opc_content_versions where work_item_id=$1',[work.workItemId])).rows[0].n).toBe(2);
+  // A delayed final response must not discard edits opened after submission.
+  await card.getByRole('button').first().click();
+  await card.getByRole('button',{name:'编辑稿件',exact:true}).click();
+  await dialog.getByLabel('文章正文',{exact:true}).fill('提交定稿的正文');
+  let release!:()=>void,arrived!:()=>void;
+  let held=new Promise<void>(resolve=>{release=resolve;});
+  let submitted=new Promise<void>(resolve=>{arrived=resolve;});
+  await page.route('**/api/trpc/opc.saveContentManual*',async route=>{arrived();await held;await route.continue();});
+  await dialog.getByRole('button',{name:'确认定稿文章',exact:true}).click();await submitted;
+  await dialog.getByRole('button',{name:'展开编辑',exact:true}).click();
+  await page.getByLabel('展开编辑正文',{exact:true}).fill('定稿等待期间的展开输入');
+  release();
+  await dialog.getByRole('status').filter({hasText:'已定稿'}).waitFor();
+  expect(await page.getByLabel('展开编辑正文',{exact:true}).inputValue()).toBe('定稿等待期间的展开输入');
+  expect(await dialog.isVisible()).toBe(true);
+  await page.unroute('**/api/trpc/opc.saveContentManual*');
+  await page.getByRole('button',{name:'确认修改',exact:true}).click();
+  await dialog.getByRole('status').filter({hasText:/已在服务端保存.*草稿/}).waitFor();
+  await dialog.getByRole('button',{name:'← 返回详情',exact:true}).click();
+  held=new Promise<void>(resolve=>{release=resolve;});submitted=new Promise<void>(resolve=>{arrived=resolve;});
+  await page.route('**/api/trpc/opc.saveContentManual*',async route=>{arrived();await held;await route.continue();});
+  await dialog.getByRole('button',{name:'确认定稿当前稿件',exact:true}).click();await submitted;
+  await dialog.getByRole('button',{name:'编辑稿件',exact:true}).click();
+  await dialog.getByRole('button',{name:'展开编辑',exact:true}).click();
+  await page.getByLabel('展开编辑正文',{exact:true}).fill('从详情定稿之后开始的输入');
+  release();
+  await page.getByText('正文稿件已定稿，后续编辑已保留',{exact:true}).waitFor();
+  expect(await page.getByLabel('展开编辑正文',{exact:true}).inputValue()).toBe('从详情定稿之后开始的输入');
+  expect(await dialog.isVisible()).toBe(true);
+  await page.unroute('**/api/trpc/opc.saveContentManual*');
+  await page.getByRole('button',{name:'取消',exact:true}).click();
+  await dialog.getByRole('button',{name:'关闭窗口',exact:true}).click();
   const destinations:string[]=[];
   for(const name of ['ux-account-a','ux-account-b','ux-account-a']){
    const account=rail.locator('details').filter({has:page.locator('summary').filter({hasText:name})}).last();
