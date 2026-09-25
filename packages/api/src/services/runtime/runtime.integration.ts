@@ -759,7 +759,7 @@ it('RUNTIME: browser ordinary and document Skill survive refresh, actual process
   await page.getByRole('button',{name:'发送',exact:true}).click();await page.getByText('Saved runtime answer 1',{exact:true}).waitFor({timeout:60000});
   const getCount=async()=>{const r=await fetch(process.env.V3_LOCAL_REST!+'/__runtime_count',{headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}});return (await r.json()).calls;};
   expect(await getCount()).toBe(1);await page.reload();await page.getByText('Saved runtime answer 1',{exact:true}).waitFor();
-  await page.getByRole('button',{name:'使用技能',exact:true}).click();await page.getByRole('dialog',{name:'使用技能'}).getByRole('button',{name:/runtime-demo/}).click();
+  await page.getByRole('button',{name:'使用技能',exact:true}).click();await page.getByRole('dialog',{name:'使用技能'}).getByRole('button',{name:/Browser document Skill/}).click();
   await page.getByLabel('消息',{exact:true}).fill('Use the published document method');
   await page.getByRole('button',{name:'发送',exact:true}).click();
   await page.getByText('Saved runtime answer 2',{exact:true}).waitFor({timeout:60000});
