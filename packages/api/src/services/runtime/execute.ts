@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import {logger} from '../../lib/logger';
+import {normalizeOpenRouterHistory,projectOpenRouterItemsForSizing} from './openRouterHistory';
 import { authoritativeBilling, type FrozenRun, type FrozenCall, type BillingTransport } from '../bill2/service';
 import {decimal} from '../bill2/decimal';
 import {openRouterBound} from '../bill2/openRouterPolicy';
@@ -9,13 +11,14 @@ import { PostgresSession, type SessionRpc } from './session';
 import { runRuntime, type RuntimeTool } from './runner';
 import { selectRuntimeHistory, selectRuntimeCallInput, projectSupersededScopeItem, requestsHistoricalComparison, assertRuntimeRequestCapacity, runtimeScopeInput } from './context';
 import { matchingPlan, matchingInput, MATCH_INSTRUCTIONS, parseMatch, type MatchCandidate } from './matching';
+const preflightCodes=new Set(['RUNTIME_PROVIDER_HISTORY_DENIED','RUNTIME_PROVIDER_BINDING_DENIED','BILL2_PROVIDER_REQUEST_DENIED','BILL2_PROVIDER_CREDENTIAL_UNAVAILABLE','BILL2_PROVIDER_IDENTITY_DENIED','BILL2_PROVIDER_MODEL_DENIED','BILL2_PROVIDER_QUOTE_REQUIRED','BILL2_PROVIDER_QUOTE_CONFLICT']);
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 export const runtimeContext=z.object({
  version:z.literal('runtime.v1'),sdkVersion:z.literal('0.18.0'),role:z.enum(['ordinary','skill','organizer']),
  input:z.string().min(1).max(20000),instructions:z.string().max(262144),model:z.string().min(1),
  maxOutputTokens:z.number().int().positive().max(20000),maxTurns:z.number().int().min(1).max(32),
  inputSelection:z.literal('scope-projection-v1').optional(),
- providerRequestFormat:z.literal('serial-tools-v1').optional(),
+ providerRequestFormat:z.enum(['serial-tools-v1','serial-tools-v2']).optional(),
  historyItems:z.number().int().min(0).max(1000),
  tools:z.array(z.enum(['search','read_source'])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
  modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
@@ -76,6 +79,7 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
    let responseConflict=false;
    let primaryPolicy=policy;
    const exchange=async(request:string,phase:string,selectedPolicy=primaryPolicy)=>{
+    try{
     if(selectedPolicy.protocol==='openrouter-chat-v1') {
      const original=JSON.parse(request);
      if(context.tools.some(name=>name!=='read_source'||!context.workspaceContext) || context.network!=='deny' || (original.tools??[]).some((tool:{type?:string;function?:{name?:string}})=>tool.type!=='function'||tool.function?.name!=='read_source'||!context.workspaceContext) || original.model!==selectedPolicy.model)
@@ -86,7 +90,8 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
      // This optional SDK hint excludes providers that otherwise support tools.
      // New admissions freeze this format before hashing. Unmarked executions
      // keep their original bytes for replay; the runner enforces one tool/turn.
-     if(context.providerRequestFormat==='serial-tools-v1')delete original.parallel_tool_calls;
+     if(context.providerRequestFormat)delete original.parallel_tool_calls;
+     if(context.providerRequestFormat==='serial-tools-v2')normalizeOpenRouterHistory(original);
      request=JSON.stringify({...original,stream:false,provider:quoted.routing});
     }
     assertRuntimeRequestCapacity(request,selectedPolicy.inputLimit);
@@ -123,6 +128,13 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
      if(!raw)throw new Error('RUNTIME_RESPONSE_PENDING');
      const decoded=JSON.parse(raw);
      return selectedPolicy.protocol==='openrouter-chat-v1' ? {usage:{sdkResponse:decoded}} : decoded;
+    }catch(error){
+     // These exact codes originate before provider dispatch. The SDK wraps the
+     // exception later; retain a bounded diagnostic without request/error data.
+     if(selectedPolicy.protocol==='openrouter-chat-v1'&&error instanceof Error&&preflightCodes.has(error.message))
+      logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});
+     throw error;
+    }
    };
    let effective={model:context.model,instructions:context.instructions,maxOutputTokens:context.maxOutputTokens,role:context.role};
    if(context.matching){
@@ -181,16 +193,22 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
    const preserveHistoricalMaterial=Boolean(context.sources?.length)||requestsHistoricalComparison(context.input);
    const primarySequence=callSequence;
    const runPrimary=async(legacyInput=false)=>{
+   const sizing=context.providerRequestFormat==='serial-tools-v2'?{projectItemsForSizing:(items:unknown[],historyCount:number)=>{
+    try{return projectOpenRouterItemsForSizing(items,historyCount);}catch(error){
+     if(error instanceof Error&&error.message==='RUNTIME_PROVIDER_HISTORY_DENIED')logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});
+     throw error;
+    }
+   }}:{};
    let selectedHistoryCount=0;
    return runRuntime({...context,...effective,input:runtimeScopeInput(context.input,context.scopeMaterial),session,tools,selectHistory:async(history,incoming)=>{
-    const selected=selectRuntimeHistory(history,incoming,{instructions:effective.instructions,inputBytes:primaryPolicy.inputLimit,historyItems:context.historyItems,toolBytes,
+    const selected=selectRuntimeHistory(history,incoming,{instructions:effective.instructions,inputBytes:primaryPolicy.inputLimit,historyItems:context.historyItems,toolBytes,...sizing,
      projectHistoryItem:item=>legacyInput||preserveHistoricalMaterial?item:projectSupersededScopeItem(item,context.scopeMaterial)});
     selectedHistoryCount=selected.length-incoming.length;
     // Freeze the exact first-call history members. Later tool calls may use a
     // subset, but never acquire a new Session dependency during this execution.
     await session.freezeHistoryItems(selected.slice(0,selectedHistoryCount));return selected;
    },filterModelInput:legacyInput?undefined:(items,instructions)=>selectRuntimeCallInput(items,selectedHistoryCount,{
-    instructions,inputBytes:primaryPolicy.inputLimit,toolBytes,currentMaterial:context.scopeMaterial,preserveHistoricalMaterial,
+    instructions,inputBytes:primaryPolicy.inputLimit,toolBytes,currentMaterial:context.scopeMaterial,preserveHistoricalMaterial,...sizing,
    }) as typeof items,
     exchange:async(_sequence,request)=>{
      const envelope=await exchange(request,effective.role);

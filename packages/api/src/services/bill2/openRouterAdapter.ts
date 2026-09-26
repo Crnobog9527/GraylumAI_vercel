@@ -6,7 +6,7 @@ import {createHash} from 'node:crypto';
 import {openRouterEvidence,type OpenRouterIdentity} from './openRouterEvidence';
 import type {CallIdentity,TransportObservation} from './fixtureAdapter';
 const requestFields=new Set(['model','stream','store','messages','provider','max_tokens','max_completion_tokens','temperature','top_p','parallel_tool_calls','response_format']);
-const sourceCall=z.object({id:z.string().min(1).max(256),type:z.literal('function'),function:z.object({name:z.literal('read_source'),arguments:z.string().max(4000)}).strict()}).strict();
+export const sourceCall=z.object({id:z.string().min(1).max(256),type:z.literal('function'),function:z.object({name:z.literal('read_source'),arguments:z.string().max(4000)}).strict()}).strict();
 const workspaceMessage=z.union([z.object({role:z.literal('assistant'),content:z.string().nullable(),tool_calls:z.array(sourceCall).min(1).max(1)}).strict(),z.object({role:z.literal('tool'),content:z.string(),tool_call_id:z.string().min(1).max(256)}).strict()]);
 const workspaceTools=z.array(z.object({type:z.literal('function'),function:z.object({name:z.literal('read_source'),description:z.string().max(16000).optional(),parameters:z.record(z.string(),z.unknown()),strict:z.boolean().optional()}).strict()}).strict()).max(1);
 /** Private trusted composition. No environment fallback, browser endpoint or automatic retry. */

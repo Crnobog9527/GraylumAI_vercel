@@ -3,7 +3,12 @@
  * assertion about an unverified real model's tokenizer. Required method/input
  * are indivisible; only old Session history may be omitted from model input.
  */
-export function selectRuntimeHistory(history:unknown[],incoming:unknown[],options:{instructions:string;inputBytes:number;historyItems:number;toolBytes:number;projectHistoryItem?:(item:unknown)=>unknown}){
+export function selectRuntimeHistory(history:unknown[],incoming:unknown[],options:{instructions:string;inputBytes:number;historyItems:number;toolBytes:number;projectHistoryItem?:(item:unknown)=>unknown;projectItemsForSizing?:(items:unknown[],historyCount:number)=>unknown[]}){
+ // Validate every candidate before trimming so unsupported metadata cannot
+ // evade the v2 boundary by inflating itself or falling outside the item limit.
+ const projected=options.projectItemsForSizing?.([...history.map(item=>options.projectHistoryItem?.(item)??item),...incoming],history.length);
+ const measured=projected?.slice(0,history.length);
+ const measuredIncoming=projected?.slice(history.length)??incoming;
  // The locked SDK represents a tool invocation/result as separate items.
  // Cuts inside any dependency interval are forbidden, including interleaved
  // parallel calls. Malformed/incomplete history is never sent as a tool result
@@ -30,7 +35,7 @@ export function selectRuntimeHistory(history:unknown[],incoming:unknown[],option
  let selected=history.slice(cut);
  // Measure the same safe material projection that will be sent to the model,
  // but return the original Session objects for exact-revision freezing.
- const size=()=>Buffer.byteLength(JSON.stringify({instructions:options.instructions,messages:[...selected.map(item=>options.projectHistoryItem?.(item)??item),...incoming]}))+options.toolBytes+1024;
+ const size=()=>Buffer.byteLength(JSON.stringify({instructions:options.instructions,messages:[...(measured?measured.slice(cut):selected.map(item=>options.projectHistoryItem?.(item)??item)),...measuredIncoming]}))+options.toolBytes+1024;
  while(selected.length&&size()>options.inputBytes){cut++;safeCut();selected=history.slice(cut);}
  if(size()>options.inputBytes)throw new Error('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
  return [...selected,...incoming];
@@ -84,11 +89,17 @@ export function projectSupersededScopeItem(item:unknown,currentMaterial:unknown)
 /** The SDK invokes this before every model call, including after tool results.
  * Only prior Session turns are optional; the current input and its tool trace
  * remain intact. Final serialized transport capacity is checked separately. */
-export function selectRuntimeCallInput(items:unknown[],historyCount:number,options:{instructions:string;inputBytes:number;toolBytes:number;currentMaterial?:unknown;preserveHistoricalMaterial?:boolean}){
+export function selectRuntimeCallInput(items:unknown[],historyCount:number,options:{instructions:string;inputBytes:number;toolBytes:number;currentMaterial?:unknown;preserveHistoricalMaterial?:boolean;projectItemsForSizing?:(items:unknown[],historyCount:number)=>unknown[]}){
  if(!Number.isSafeInteger(historyCount)||historyCount<0||historyCount>items.length)throw new Error('RUNTIME_HISTORY_SELECTION');
  let history=items.slice(0,historyCount).map(item=>options.preserveHistoricalMaterial?item:projectSupersededScopeItem(item,options.currentMaterial));
  const required=items.slice(historyCount);
- const size=()=>Buffer.byteLength(JSON.stringify({instructions:options.instructions,messages:[...history,...required]}))+options.toolBytes+128;
+ const projected=options.projectItemsForSizing?.([...history,...required],history.length);
+ let measured=projected?.slice(0,history.length);
+ const measuredRequired=projected?.slice(history.length)??required;
+ // SQL can cut off the call immediately before the first old result. v2 has
+ // validated its fields, but must not send that orphan even when it fits.
+ if(projected&&(history[0] as {type?:string}|undefined)?.type==='function_call_result'){history=[];measured=[];}
+ const size=()=>Buffer.byteLength(JSON.stringify({instructions:options.instructions,messages:[...(measured??history),...measuredRequired]}))+options.toolBytes+128;
  while(history.length&&size()>options.inputBytes){
   // Drop one complete prior conversation turn, including any old tool calls
   // and results. Never remove a tool result from the current turn.
@@ -117,7 +128,7 @@ export function selectRuntimeCallInput(items:unknown[],historyCount:number,optio
     while(next<history.length&&(!history[next]||typeof history[next]!=='object'||(history[next] as {role?:string}).role!=='user')){next++;changed=true;}
    }
   }
-  history=history.slice(next);
+  history=history.slice(next);if(measured)measured=measured.slice(next);
  }
  if(size()>options.inputBytes)throw new Error('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
  return [...history,...required];

@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { beforeAll, afterAll, it, expect } from 'vitest';
+import { beforeAll, afterAll, it, expect, vi } from 'vitest';
+import {logger} from '../../lib/logger';
 import { randomUUID, createHash } from 'node:crypto';
 import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
@@ -41,13 +42,13 @@ async function fixture(existingActor?:string){
  const admit={p_actor_id:actorId,p_session_id:s.sessionId,p_request_id:randomUUID(),p_payload:{text:'hello'},p_billing:billing};
  return {actorId,start,requestId,s,billing,admit};
 }
-it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['legacy','serial-tools-v1'])('RUNTIME: staging window runs official-protocol HTTP through original SDK and BILL2 once (%s)',async(format)=>{
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['legacy','serial-tools-v1','serial-tools-v2'])('RUNTIME: staging window runs official-protocol HTTP through original SDK and BILL2 once (%s)',async(format)=>{
  const exists=await db.query("select to_regclass('public.runtime_test_windows') present");
  if(!exists.rows[0].present)throw new Error('requires --with-staging-schema');
  const f=await fixture(),realModel=randomUUID(),windowId=randomUUID();
  await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic official protocol','test/model','openai','true')",[realModel]);
  const policy={...f.billing.callPolicy[0],modelId:realModel,provider:'openrouter',model:'test/model',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
- const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'hello',instructions:'Only local synthetic input',model:'test/model',maxOutputTokens:100,maxTurns:1,historyItems:0,network:'deny',workspaceContext:true,tools:['read_source'],request:{sessionId:f.s.sessionId,requestId:f.admit.p_request_id},...(format==='serial-tools-v1'?{providerRequestFormat:format}:{})};
+ const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'hello',instructions:'Only local synthetic input',model:'test/model',maxOutputTokens:100,maxTurns:1,historyItems:0,network:'deny',workspaceContext:true,tools:['read_source'],request:{sessionId:f.s.sessionId,requestId:f.admit.p_request_id},...(format!=='legacy'?{providerRequestFormat:format}:{})};
  const billing={...f.billing,mode:'staging_test',testWindowId:windowId,modelId:realModel,input:context,callPolicy:[policy],rules:{...f.billing.rules,version:'runtime-staging-v1',quoteVersion:windowId}};
  await db.query("insert into runtime_test_windows(id,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",[windowId,[f.actorId],JSON.stringify([policy])]);
  const args={...f.admit,p_payload:context,p_billing:billing};
@@ -90,6 +91,54 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['legacy','serial-to
   await expect(rpc('runtime_admit',{...args,p_session_id:next.sessionId,p_request_id:randomUUID(),p_billing:{...billing,scope:next.scope}})).rejects.toThrow('TEST_BUDGET_EXHAUSTED');
   expect((await db.query('select count(*)::int n from bill2_runs where test_window_id=$1',[windowId])).rows[0].n).toBe(1);
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+},30000);
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['plain','reasoning','unsupported'])('RUNTIME: staging SDK assistant history across executions preserves %s and rejects unsupported metadata',async(shape)=>{
+ const f=await fixture(),model=randomUUID(),windowId=randomUUID();
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic history','test/history','openrouter','true')",[model]);
+ const policy={...f.billing.callPolicy[0],modelId:model,provider:'openrouter',model:'test/history',protocol:'openrouter-chat-v1',inputLimit:5000,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
+ await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.10,3,now()+interval '2 hours')",[windowId,[f.actorId],JSON.stringify([policy])]);
+ const bodies:string[]=[];
+ const server=createServer(async(req,res)=>{
+  let raw='';for await(const chunk of req)raw+=chunk;bodies.push(raw);
+  const request=JSON.parse(raw),number=bodies.length;
+  expect(Buffer.byteLength(raw)).toBeLessThanOrEqual(policy.inputLimit);
+  expect(request.messages.filter((m:{role:string})=>m.role==='assistant')).toEqual(Array.from({length:number-1},(_,index)=>({role:'assistant',content:'Synthetic history answer '+(index+1)})));
+  const extra=shape==='reasoning'?{refusal:null,reasoning:'SYNTHETIC_PRIVATE_REASONING'.repeat(600),reasoning_details:[{type:'reasoning.text',format:'unknown',index:0,text:'SYNTHETIC_PRIVATE_REASONING'.repeat(600)}]}:shape==='unsupported'?{plugins:[{id:'web',query:'SYNTHETIC_PRIVATE_BODY'}]}:{tool_calls:number===1?null:[]};
+  res.setHeader('content-type','application/json');res.end(JSON.stringify({id:'gen-history-'+windowId+'-'+number,object:'chat.completion',created:1,model:'test/history',choices:[{index:0,message:{role:'assistant',content:'Synthetic history answer '+number,...extra},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}}));
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const diagnostic=vi.spyOn(logger,'error');
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('local server');
+  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>fetch('http://127.0.0.1:'+address.port,init)});
+  for(let turn=0;turn<3;turn++){
+   const requestId=randomUUID(),context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:'scope-projection-v1',providerRequestFormat:turn===0?'serial-tools-v1':'serial-tools-v2',role:'ordinary',input:'Synthetic history question '+turn,instructions:'Keep the local synthetic conversation',model:'test/history',maxOutputTokens:100,maxTurns:1,historyItems:20,network:'deny',tools:[],request:{sessionId:f.s.sessionId,requestId}};
+   const billing={...f.billing,mode:'staging_test',testWindowId:windowId,modelId:model,input:context,callPolicy:[policy],rules:{...f.billing.rules,version:'runtime-staging-v1',quoteVersion:windowId}};
+   const e=await rpc('runtime_admit',{...f.admit,p_request_id:requestId,p_payload:context,p_billing:billing});
+   let failCompletion=turn===1;
+   const database={rpc:async(name:string,args:Record<string,unknown>)=>{
+    if(name==='runtime_execution'&&args.p_action==='complete'&&failCompletion){failCompletion=false;return {data:null,error:{message:'synthetic completion failure'}};}
+    return admin.rpc(name,args);
+   }};
+   const host=runtimeExecutor({database,actor:async()=>f.actorId,adapter});
+   let result=await host.execute(e.executionId);
+   if(shape==='unsupported'&&turn===1){
+    expect(result).toEqual({state:'cancelled'});expect(await host.execute(e.executionId)).toEqual(result);expect(bodies).toHaveLength(1);
+    expect((await db.query('select state,charged from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual({state:'refunded',charged:0});
+    expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1',[e.runId])).rows[0].n).toBe(0);
+    expect(diagnostic.mock.calls.filter(call=>call[1]==='runtime_provider_preflight_failed')).toEqual([['api','runtime_provider_preflight_failed',{executionId:e.executionId,code:'RUNTIME_PROVIDER_HISTORY_DENIED'}]]);
+    break;
+   }
+   if(turn===1){expect(result).toMatchObject({state:'pending'});result=await host.execute(e.executionId);}
+   expect(result).toMatchObject({state:'completed',body:'Synthetic history answer '+(turn+1)});expect(await host.execute(e.executionId)).toEqual(result);
+   expect(bodies).toHaveLength(turn+1);
+   expect((await db.query('select payload from bill2_calls where run_id=$1',[e.runId])).rows[0].payload.requestHash).toBe(createHash('sha256').update(bodies[turn]!).digest('hex'));
+  }
+  expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(shape==='unsupported'?97:91);
+  const history=JSON.stringify((await db.query('select item from runtime_session_history where session_id=$1 order by revision',[f.s.sessionId])).rows);
+  expect(history).toContain('providerData');if(shape==='reasoning'){expect(history).toContain('SYNTHETIC_PRIVATE_REASONING');expect(Buffer.byteLength(history)).toBeGreaterThan(policy.inputLimit*8);}
+  if(shape!=='unsupported')expect(diagnostic.mock.calls.filter(call=>call[1]==='runtime_provider_preflight_failed')).toHaveLength(0);
+ }finally{diagnostic.mockRestore();await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },30000);
 it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['disabled','expired','rollover'])('RUNTIME: staging temporary lookup failure recovers once after window %s',async(stopped)=>{
  const email='recovery-'+randomUUID()+'@example.test',password='Local-test-password-42!';
@@ -235,7 +284,10 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['missing','mismatch
  const e=await rpc('runtime_admit',{...f.admit,p_payload:context,p_billing:billing});
  const real=await loadStagingPolicy(admin,f.actorId,{V3_RUNTIME_STAGING_ENABLED:'true',VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'graylumai-staging.vercel.app',VERCEL_GIT_COMMIT_REF:'staging',VERCEL_GIT_REPO_OWNER:'Crnobog9527',VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',V3_RUNTIME_STAGING_PROJECT_ID:'synthetic-project',VERCEL_PROJECT_ID:'synthetic-project',NEXT_PUBLIC_SUPABASE_URL:'https://synthetic.supabase.co',V3_RUNTIME_STAGING_DATABASE_HOST:'synthetic.supabase.co',V3_RUNTIME_STAGING_WINDOW_ID:windowId});
  const adapter=stagingTransport(admin,real);
+ const diagnostic=vi.spyOn(logger,'error');
  const result=await runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter}).execute(e.executionId);
+ const recorded=diagnostic.mock.calls.filter(call=>call[1]==='runtime_provider_preflight_failed');diagnostic.mockRestore();
+ expect(recorded).toEqual([['api','runtime_provider_preflight_failed',{executionId:e.executionId,code:'RUNTIME_PROVIDER_BINDING_DENIED'}]]);
  expect(result).toEqual({state:'cancelled'});
  expect((await db.query('select dispatched_at,provider_id from bill2_calls where run_id=$1',[e.runId])).rows).toEqual([{dispatched_at:null,provider_id:null}]);
  expect((await db.query('select state,charged,conflict from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual({state:'refunded',charged:0,conflict:false});
