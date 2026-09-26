@@ -1801,7 +1801,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       {workInfoOpen&&<div className={resultStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setWorkInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={resultStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setWorkInfoOpen(false)}>×</button></header><p>当前工作：{manualEntry?'已有定位录入':'定位分析'}</p><p>状态：{snap.state==='published'?'定位已确认':'定位进行中'}</p><p>定位讨论、待确认修改与历史版本留在原工作；查看不会确认或保存。</p><footer><button type="button" onClick={()=>{void read.refetch();setWorkInfoOpen(false);}}>重新读取状态</button><Link href="/positioning">新任务与账号</Link></footer></section></div>}
       {!planView && <>{hasPendingStepRequest && !busy && (
         <section role="status" aria-label="待恢复的导师请求" className={resultStyles.requestRecovery}>
-          <p>上一条请求已保留，请按原身份继续核对。</p>
+          <p>上一条请求已保留，请继续核对这条请求。</p>
           {pendingStepRequests.map(({ step, parsed }) => (
             <div key={step.id} className="space-y-2">
               <p className="text-sm">
