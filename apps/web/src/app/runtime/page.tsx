@@ -10,6 +10,7 @@ import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { ContentEditor } from '@/components/opc/content-editor';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import workStyles from './runtime-work.module.css';
+import { QueryNotice } from '@/components/opc/query-notice';
 import { trpc } from '@/trpc/client';
 
 type VideoChoice='both'|'storyboard'|'editing';
@@ -240,7 +241,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
    {workItem?<div className={workStyles.workMeta}><span>{workItem.platform} · {workItem.account}</span><Link href={'/library?item='+workItem.workItemId+'&return='+sessionId}>工作信息</Link>{!panelOpen&&<button type="button" onClick={()=>setPanelOpen(true)}>展开成果</button>}</div>:!sessionId&&requestedModule?<Button variant="outline" disabled={busy||!choices.data||Boolean(input.trim())||Boolean(requestedModule&&!chosenModule)} onClick={open}><Plus className="mr-2 h-4 w-4"/>用此功能准备新任务</Button>:null}
   </header>
   {requestedModule&&!chosenModule&&<p className="shrink-0 px-6 py-1 text-center text-[11px] text-[var(--text-tertiary)]">所选功能当前不满足本地工作区准入条件；不会自动换用其他功能。</p>}
-  {(choices.error||view.error||library.error)&&<p role="alert" className="p-4 text-center">当前环境不可用，或你无权访问此工作。</p>}
+  <QueryNotice error={choices.error||view.error||library.error} label="当前工作" retry={()=>Promise.all([choices.refetch(),...(sessionId?[view.refetch()]:[]),...(sessionId&&view.data?.scope?.kind==='work_item'?[library.refetch()]:[])])}/>
   <div ref={scrollArea} onScroll={rememberScroll} className={workStyles.scrollArea} aria-label="对话记录">
    {!executions?.length&&<div className="mx-auto flex min-h-64 max-w-xl flex-col items-center justify-center px-6 py-12 text-center"><Bot className="mb-4 h-9 w-9 text-[var(--color-primary)]"/><h2 className="text-2xl font-semibold">开始一段对话</h2><p className="mt-3 text-sm text-[var(--text-tertiary)]">{workItem?'已带入选题简报和原工作方法，正在根据当前进度准备引导。':sessionId?'输入一条消息，发送后可刷新查看记录。':'从左侧“新对话”开始。'}</p></div>}
    <section className={workStyles.transcript}>{workItem&&typePending&&<Button disabled={editItem.isPending} onClick={()=>setType('unknown')}>恢复类型保存</Button>}{workItem&&contentType==='unknown'&&<section className="rounded-xl border p-4" aria-label="确认内容类型"><h2>这条选题准备做成什么内容？</h2><p>先确认形式，再一起细化重点和结构。</p><div className="flex gap-2 mt-3">{['article','image_text','video'].map(value=><Button key={value} disabled={busy||editItem.isPending||typePending} onClick={()=>setType(value)}>{typeLabel[value]}</Button>)}</div></section>}{error==='引导请求待恢复。再次恢复会沿用原请求，不会另开一次。'&&<Button disabled={busy} onClick={guide}>恢复引导</Button>}{executions?.map((e,index)=><div key={e.executionId}>{e.createdAt&&(index===0||!executions[index-1].createdAt||transcriptDay(executions[index-1].createdAt!)!==transcriptDay(e.createdAt))&&<p className={workStyles.dateMarker}>{transcriptDate(e.createdAt)}</p>}<article className={workStyles.turn}>

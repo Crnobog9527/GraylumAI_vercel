@@ -1643,9 +1643,9 @@ it.skipIf(!process.env.V3_REAL_SKILL_INPUT)(
         input.steps[index].information.map((field: any) => [
           field.id,
           {
-            status: "deferred",
-            nature: "unknown",
-            value: "隔离测试：真实研究与业务判断暂未验证，用户明确接受此局限。",
+            status: "confirmed",
+            nature: "decision",
+            value: "隔离测试手工确认项，不代表真实研究与业务判断通过。",
           },
         ]),
       );
@@ -1699,13 +1699,13 @@ it.skipIf(!process.env.V3_REAL_SKILL_INPUT)(
     const profile = (
       await sql.query("select opc_profile($1) as p", [report.id])
     ).rows[0].p;
-    expect(Object.keys(profile)).toHaveLength(23);
+    expect(Object.keys(profile)).toHaveLength(inputCounts.total);
     expect(
       Object.values(profile).every(
         (p: any) =>
           p.sourceVersionId === report.id &&
           p.confirmationId &&
-          p.status === "deferred",
+          p.status === "confirmed",
       ),
     ).toBe(true);
     const plan = await f.service.savePlan({
@@ -2511,11 +2511,73 @@ it("OPC: browser stale account confirmation restarts only after definite rejecti
 },180000);
 
 it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
+  "OPC: staging host admission states never masquerade as empty data",
+  async () => {
+    const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
+    const { writeFile } = await import("node:fs/promises");
+    const f = await fixture(6), windowId = process.env.V3_RUNTIME_STAGING_WINDOW_ID!;
+    const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
+    const context = await browser.newContext({viewport:{width:1440,height:1000},deviceScaleFactor:1});
+    await context.route("**/*",async route=>{
+      const url=new URL(route.request().url());
+      if(url.hostname==='syntheticstaging.supabase.co')return route.fulfill({response:await route.fetch({url:process.env.V3_LOCAL_REST+url.pathname+url.search})});
+      if(['127.0.0.1','localhost'].includes(url.hostname)||['data:','blob:'].includes(url.protocol))return route.continue();
+      return route.abort();
+    });
+    const page=await context.newPage();page.setDefaultTimeout(60000);
+    const screenshots:Record<string,unknown>={};
+    async function capture(name:string){
+      await page.evaluate(()=>document.fonts.ready);
+      screenshots[name]=await page.evaluate(()=>({viewport:{width:innerWidth,height:innerHeight,dpr:devicePixelRatio},fonts:document.fonts.status,headings:Array.from(document.querySelectorAll('h1,h2')).map(el=>{const s=getComputedStyle(el);return {text:el.textContent,font:s.fontFamily,fontSize:s.fontSize,lineHeight:s.lineHeight,width:el.getBoundingClientRect().width};})}));
+      await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/'+name+'.png',fullPage:true});
+    }
+    try {
+      const ready=page.waitForResponse(r=>r.url().includes('settings.getSystemSettings')&&r.ok());
+      await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/');await ready;
+      await page.getByPlaceholder('name@example.com').fill(f.email);await page.getByPlaceholder('输入你的密码').fill(f.password);
+      await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(url=>url.pathname==='/');
+      await page.getByRole('heading',{name:'定位方法暂未开放'}).waitFor();
+      await page.getByRole('alert').filter({hasText:'账号与资料'}).waitFor();
+      expect(await page.getByText('开始新手引导',{exact:true}).count()).toBe(0);
+      expect(await page.getByText('定位方法准备中',{exact:true}).count()).toBe(0);
+      await capture('staging-no-window');
+      await page.getByRole('link',{name:'对话',exact:true}).click();await page.getByRole('textbox',{name:'新任务内容'}).waitFor();
+      await page.getByRole('button',{name:'做一批新选题',exact:true}).first().click();
+      expect(await page.getByText('还没有可用于选题的已确认策略账号。请先梳理定位。').count()).toBe(0);
+      expect(await page.getByText('完成定位并采用选题后，账号工作会出现在这里。').count()).toBe(0);
+      await page.getByRole('alert').filter({hasText:'账号未获准'}).first().waitFor();
+      await capture('staging-actor-denied');
+      const policy={modelId:randomUUID(),provider:'openrouter',account:'synthetic',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:8000,outputLimit:100,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
+      await sql.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '1 hour')",[windowId,[f.actor],JSON.stringify([policy])]);
+      await page.goto(process.env.V3_LOCAL_APP+'/');await page.getByRole('heading',{name:'六个环节，理解你的内容增长路径'}).waitFor();
+      await capture('staging-allowed-directory');
+      await sql.query('update artifact_workflows set enabled=false where id=$1',[f.registration]);
+      await page.reload();await page.getByRole('heading',{name:'暂无已发布定位方法'}).waitFor();
+      expect(await page.locator('main').getByRole('alert').count()).toBe(0);await capture('staging-empty-directory');
+      await sql.query('update runtime_test_windows set enabled=false where id=$1',[windowId]);
+      await page.reload();await page.getByRole('heading',{name:'定位方法暂未开放'}).waitFor();
+      // Retained read access is independent of current execution enablement.
+      expect(await page.getByRole('alert').filter({hasText:'账号与资料'}).count()).toBe(0);
+      await sql.query("update runtime_test_windows set enabled=true,expires_at=now()-interval '1 minute' where id=$1",[windowId]);
+      await page.reload();await page.getByRole('heading',{name:'定位方法暂未开放'}).waitFor();
+      await capture('staging-expired-window');
+      expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actor])).rows[0].n).toBe(0);
+      await writeFile(process.env.V3_WORKBENCH_OUTPUT+'/staging-state-styles.json',JSON.stringify(screenshots,null,2));
+    } finally {
+      await browser.close();
+      // This is the disposable runner database, never the preserved Owner preview.
+      await sql.query('delete from runtime_test_windows where id=$1',[windowId]);
+      await sql.query('update artifact_workflows set enabled=false where id=$1',[f.registration]);
+    }
+  },180000,
+);
+
+it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
   "OPC: staging host protected browser route uses the bounded official protocol once",
   async () => {
     const { chromium } =
       await import("../../../../../apps/web/node_modules/@playwright/test");
-    const f = await fixture(3),
+    const f = await fixture(6),
       modelId = randomUUID(),
       key = "LOCAL_STAGING_" + randomUUID(),
       windowId = process.env.V3_RUNTIME_STAGING_WINDOW_ID!;
@@ -2553,11 +2615,6 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       "insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",
       [windowId, [f.actor], JSON.stringify([callPolicy])],
     );
-    const draft = await f.service.start({
-      requestId: randomUUID(),
-      registration: f.registration,
-      mode: "mentor",
-    });
     const browser = await chromium.launch({
       executablePath:
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -2593,7 +2650,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       await page.goto(
         process.env.V3_LOCAL_APP +
           "/login?redirect=" +
-          encodeURIComponent("/positioning/" + draft.draftId),
+          encodeURIComponent("/"),
       );
       await loginReady;
       await page.getByPlaceholder("name@example.com").fill(f.email);
@@ -2602,18 +2659,25 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
         .getByRole("button", { name: "登录", exact: true })
         .last()
         .click();
-      await page.waitForURL(
-        (url) => url.pathname === "/positioning/" + draft.draftId,
-      );
+      await page.waitForURL(url => url.pathname === "/");
+      await page.getByRole('heading',{name:'六个环节，理解你的内容增长路径'}).waitFor();
+      await page.getByRole('link',{name:'对话',exact:true}).click();
+      await page.getByRole('button',{name:'梳理账号定位',exact:true}).click();
+      await page.getByRole('button',{name:'从头分析新定位',exact:true}).click();
+      await page.getByRole('textbox',{name:'业务名称',exact:true}).fill('Staging local acceptance');
+      await page.getByRole('button',{name:'开始 Agent 引导',exact:true}).click();
+      await page.waitForURL(url => /^\/positioning\/[a-f0-9-]{36}$/.test(url.pathname));
+      const draftPath = new URL(page.url()).pathname;
       await page
         .getByText("Staging 真实模型测试 · 未开放联网研究", { exact: true })
         .waitFor();
-      await page
-        .getByRole("textbox", { name: "给导师的回复", exact: true })
-        .fill("I want to teach photography beginners.");
-      await page.getByRole("button", { name: "发送", exact: true }).click();
-      // The mentor prose now carries the host-derived hierarchical label.
-      await page.getByText(/【分步模拟，仅验证流程】第 1\.1 题/).waitFor();
+      // Entry opens the current question once; no second generation is needed.
+      await page.getByText(/【导师主动引导，仅验证流程】第 1\.1 题/).waitFor();
+      await page.reload();
+      await page.getByText(/【导师主动引导，仅验证流程】第 1\.1 题/).waitFor();
+      await page.goto(process.env.V3_LOCAL_APP + '/positioning');
+      await page.locator('a[href="'+draftPath+'"]').first().click();
+      await page.getByText(/【导师主动引导，仅验证流程】第 1\.1 题/).waitFor();
       expect(
         (
           await sql.query(

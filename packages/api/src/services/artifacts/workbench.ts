@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from "zod";
+import { DatabaseReadError } from "../../lib/databaseReadError";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isEmailVerified } from "../../lib/auth";
 import { databaseArtifactStore, commandSchema } from "./store";
@@ -92,8 +93,8 @@ export function workbenchService(
       })
       .abortSignal(AbortSignal.timeout(10000));
     if (error)
-      throw new Error(
-        error.code === "42501" ? "ARTIFACT_DENIED" : "ARTIFACT_UNAVAILABLE",
+      throw new DatabaseReadError(
+        error.code === "42501" ? "ARTIFACT_DENIED" : "ARTIFACT_UNAVAILABLE", error.code,
       );
     return data;
   }
@@ -102,7 +103,7 @@ export function workbenchService(
     if(moduleId){
       const actorId=await actor();
       const result=await privateClient!.rpc('artifact_module_catalog',{p_actor_id:actorId,p_module_id:uuid.parse(moduleId)}).abortSignal(AbortSignal.timeout(10000));
-      if(result.error)throw new Error(result.error.code==='42501'?'ARTIFACT_DENIED':'ARTIFACT_UNAVAILABLE');
+      if(result.error)throw new DatabaseReadError(result.error.code==='42501'?'ARTIFACT_DENIED':'ARTIFACT_UNAVAILABLE',result.error.code);
       raw=result.data;
     } else raw=await query('catalog');
     const registrations = registrationSchema
@@ -114,7 +115,7 @@ export function workbenchService(
       .select("id,active")
       .in("id", [...new Set(registrations.map((r) => r.moduleId))])
       .eq("active", true);
-    if (visible.error) throw new Error("ARTIFACT_UNAVAILABLE");
+    if (visible.error) throw new DatabaseReadError("ARTIFACT_UNAVAILABLE", visible.error.code);
     const ids = new Set((visible.data ?? []).map((r) => r.id));
     return registrations.filter((r) => ids.has(r.moduleId));
   };

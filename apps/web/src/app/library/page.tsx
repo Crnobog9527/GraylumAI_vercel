@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { Search } from 'lucide-react';
 import { trpc } from '@/trpc/client';
+import { QueryNotice } from '@/components/opc/query-notice';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { ContentEditor } from '@/components/opc/content-editor';
 import { VersionCompare } from '@/components/opc/version-compare';
@@ -86,10 +87,10 @@ export default function LibraryPage(){
     <div className={styles.filterCaption}><span>查找选题</span><span>排序</span></div>
     <div className={styles.filters}><label><Search size={17}/><input aria-label="查找选题" value={search} onChange={event=>{setSearch(event.target.value);setPage(1);}} placeholder="搜索标题、平台或账号"/></label><select aria-label="排序" value={sortOrder} onChange={event=>{setSortOrder(event.target.value as 'updated'|'created'|'scheduled');setPage(1);}}><option value="updated">最近更新</option><option value="created">创建日期</option><option value="scheduled">预计发布日期</option></select></div>
     <div className={styles.statusTabs} role="group" aria-label="筛选选题">{([['all','全部'],['new','待创作'],['draft','草稿'],['final','已定稿'],['published','已发布']] as const).map(([key,label])=><button key={key} aria-pressed={statusFilter===key} onClick={()=>{setStatusFilter(key);setPage(1);}}>{label} <span>{accounts.filter(account=>!selectedProject||account.projectId===selectedProject).flatMap(account=>account.items).filter(item=>{const version=item.content.filter(v=>v.kind===(item.contentType==='video'?'script':'brief')).sort((a,b)=>b.version-a.version)[0];return key==='all'||(key==='new'?!version:key==='draft'?version?.status==='draft':key==='published'?item.publication?.status==='published':version?.status==='final');}).length}</span></button>)}</div>
-    {library.isLoading&&<p role="status">正在读取资料库…</p>}{library.error&&<p role="alert">资料库当前不可用，或登录已失效。</p>}
+    <QueryNotice error={library.error} loading={library.isPending} label="资料库" retry={()=>library.refetch()}/>
     <div className={styles.tableHead}><span>选题 / 稿件</span><span>平台 · 账号</span><span>稿件状态</span><span>发布状态</span><span>创建日期</span><span>预计发布</span></div>
     <div className={styles.items}>{pagedRows.map(({account,item})=><ItemCard key={item.workItemId} item={item} account={account} focused={focusedItemId===item.workItemId} onSaved={()=>library.refetch()}/>)}</div>
-    {!library.isLoading&&!rows.length&&<p className={styles.empty}>{search||statusFilter!=='all'?'没有符合筛选条件的选题。':'这个范围还没有收录选题。在对话中采用选题后会显示在这里。'}</p>}{error&&<p role="alert">{error}</p>}
+    {library.isSuccess&&!library.error&&!rows.length&&<p className={styles.empty}>{search||statusFilter!=='all'?'没有符合筛选条件的选题。':'这个范围还没有收录选题。在对话中采用选题后会显示在这里。'}</p>}{error&&<p role="alert">{error}</p>}
     <footer className={styles.pagination}><span>显示 {rows.length?(currentPage-1)*15+1:0}–{Math.min(currentPage*15,rows.length)} / {rows.length} 条</span><div><button disabled={currentPage<=1} onClick={()=>setPage(currentPage-1)}>上一页</button><span>{currentPage} / {pages}</span><button disabled={currentPage>=pages} onClick={()=>setPage(currentPage+1)}>下一页</button></div></footer>
     <p className={styles.catalogNote}>“已发布”独立于稿件状态；修订草稿不会改变旧版的发布记录。预计日期不代表自动发布。</p>
    </div>

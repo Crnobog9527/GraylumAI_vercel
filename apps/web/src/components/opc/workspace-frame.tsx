@@ -9,6 +9,7 @@ import { useCreditsBalance } from '@/hooks/use-credits';
 import { createClient } from '@/lib/supabase';
 import { buildAppHref } from '@/lib/site-config';
 import { StrategyOverviewDialog } from './strategy-overview-dialog';
+import { QueryNotice } from './query-notice';
 import { useAccountDiscussion } from './use-account-discussion';
 import styles from './workspace-frame.module.css';
 
@@ -174,10 +175,11 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
        })}
       </details>;
      })}
-     {!archiveView&&conversations.isError&&<p role="status" className={styles.empty}>对话记录暂时无法读取。<button className={styles.older} onClick={()=>void conversations.refetch()}>重试</button></p>}
+     {!archiveView&&<QueryNotice error={conversations.error} loading={conversations.isPending} label="对话记录" retry={()=>conversations.refetch()}/>}
      {!archiveView&&Boolean(conversations.data?.length)&&<details open={groupOpen.conversations??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current.conversations===next?current:{...current,conversations:next});}}><summary>对话<ChevronDown size={14}/></summary>{conversations.data?.map(conversation=><Link key={conversation.sessionId} className={styles.thread} href={'/runtime?session='+conversation.sessionId}><span>{conversation.title}</span><small>{new Date(conversation.lastActivityAt).toLocaleDateString('zh-CN')} · 对话</small></Link>)}</details>}
      {!archiveView&&unassigned.length>0&&<details open={groupOpen.unassigned??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current.unassigned===next?current:{...current,unassigned:next});}}><summary>待归类<ChevronDown size={14}/></summary>{unassigned.map(draft=><Link key={draft.draftId} className={styles.thread} href={'/positioning/'+draft.draftId}><span>{draft.businessName??'新账号'} · 定位分析</span><small>{draft.state==='published'?'已确认':'进行中'}</small></Link>)}</details>}
-     {!library.isLoading&&(!archiveView&&!platforms.size&&!unassigned.length||archiveView&&![...platforms.values()].flat().some(account=>account.items.some(item=>item.archived&&!item.deleted)))&&<p className={styles.empty}>{archiveView?'暂无归档记录。':'完成定位并采用选题后，账号工作会出现在这里。'}</p>}
+     <QueryNotice error={library.error||drafts.error} loading={library.isPending||drafts.isPending} label="账号与资料" retry={()=>Promise.all([library.refetch(),drafts.refetch()])}/>
+     {library.isSuccess&&drafts.isSuccess&&!library.error&&!drafts.error&&(!archiveView&&!platforms.size&&!unassigned.length||archiveView&&![...platforms.values()].flat().some(account=>account.items.some(item=>item.archived&&!item.deleted)))&&<p className={styles.empty}>{archiveView?'暂无归档记录。':'完成定位并采用选题后，账号工作会出现在这里。'}</p>}
     </div>
     {discussion.error&&<p role="alert" className={styles.uiError}>{discussion.error}</p>}{uiError&&<p role="alert" className={styles.uiError}>{uiError}</p>}<div className={styles.railBottom}><div className={styles.creditWidget}><button type="button" onClick={event=>{setFeedbackSent(false);openBottomPanel('feedback',event.currentTarget);}}><img className={styles.navIcon} src="/opc-reference/feedback.svg" alt=""/>在线反馈<img className={styles.externalIcon} src="/opc-reference/arrow-up-right.svg" alt=""/></button><button type="button" aria-expanded={bottomPanel==='credits'} onClick={event=>openBottomPanel('credits',event.currentTarget)}><img className={styles.navIcon} src="/opc-reference/wallet-color.svg" alt=""/>积分 <small>{credits.status==='ready'?credits.credits:'查看'}</small></button></div><button type="button" className={styles.profile} aria-expanded={bottomPanel==='profile'} onClick={event=>openBottomPanel('profile',event.currentTarget)}><span className={styles.avatar}>{(profile.data?.nickname??profile.data?.email??'我').slice(0,1)}</span><span>{profile.data?.nickname??profile.data?.email??'个人中心'}<small>{profile.data?.membership_level==='free'?'普通会员':'查看账户'}</small></span><ChevronDown size={14}/></button></div>
    </aside>
