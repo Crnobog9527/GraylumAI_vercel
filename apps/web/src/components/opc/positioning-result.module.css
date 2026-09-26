@@ -1,0 +1,104 @@
+.panel{height:100%;display:flex;flex-direction:column;min-height:0;color:#262626}.panel>header{flex:none;padding:20px 22px;border-bottom:1px solid #eee}.panel h2{font-size:17px;font-weight:550}.panel>header p{margin-top:6px;color:#999;font-size:11px}.body{min-height:0;flex:1;overflow:auto;padding:12px 17px}.body details{margin-bottom:8px;border:1px solid #ececec;border-radius:9px;overflow:hidden}.body summary{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px;cursor:pointer;list-style:none;background:#fafafa;font-size:12px}.body summary::-webkit-details-marker{display:none}.body summary small{color:#999;white-space:nowrap}.fields{display:grid;gap:12px;padding:12px}.fields strong{display:block;color:#666;font-size:11px;font-weight:500}.fields p{margin-top:4px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.55}.panel>footer{flex:none;padding:13px 20px;border-top:1px solid #eee;color:#999;font-size:11px}
+.workspaceMain{padding:24px 28px}.workspaceContent{max-width:1140px;margin:0 auto;display:grid;gap:18px}.stepArticle{background:#fff}.stepArticle>h2{font-size:16px;font-weight:550}.stepColumns{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,.78fr);align-items:start;gap:24px}.stepColumns:not(:has(.stepForm)){display:block}.mentorChat{min-width:0;padding:14px 0}.mentorChat [role=log]{max-height:none;min-height:260px;padding:12px 8px 22px 0}.mentorChat [role=log]>div:first-child,.mentorChat [data-message-role=assistant]{border:0;background:#fff;max-width:690px;padding:9px 0}.mentorChat [data-message-role=user]{width:fit-content;max-width:85%;margin-left:auto;background:#f4f4f5;border-radius:19px;padding:12px 16px}.mentorChat label{display:block;margin-top:20px;padding:11px 14px 8px;border:1px solid #e7e7eb;border-radius:20px;box-shadow:0 2px 8px #02041a0b}.mentorChat label textarea{margin-top:7px;border:0;background:transparent;box-shadow:none;outline:0}.stepForm{min-width:0;padding:17px;border:1px solid #ececec;border-radius:12px;background:#fff}.stepForm textarea{border:1px solid #e5e5e8;background:#fff}.stepForm button{white-space:normal;height:auto;min-height:34px}.stepForm button:disabled{color:#777}.stepArticle>div[role=status]{border-color:#e8e8e8}
+@media(max-width:1280px){.stepColumns{grid-template-columns:minmax(0,1fr)}.stepForm{max-width:720px}}
+@media(max-width:700px){.workspaceMain{padding:18px 16px}.stepArticle>h2{font-size:15px}.mentorChat [role=log]{min-height:220px}.stepForm{padding:12px}}
+.panel>header{padding:16px 20px}.panel h2{font-size:17px;line-height:26px;font-weight:500}.body{padding:20px;scrollbar-width:thin}.stepForm{padding:0;border:0;border-radius:0}.stepForm textarea{width:100%;min-height:82px;padding:10px 12px;border:1px solid #e5e5e5;border-radius:8px;color:#262626;font-size:14px;line-height:1.65}.stepForm input,.stepForm select{max-width:100%}.stepForm button{white-space:normal;overflow-wrap:anywhere}.panel>footer{font-size:10px}
+.workspaceMain{padding:0;overflow:auto}.workspaceContent{max-width:none;gap:0}.positionTop{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:58px;padding:9px 27px;border-bottom:1px solid #f0f0f0}.positionTop h1{margin:0;font-size:13px;font-weight:500;line-height:22px}.positionTop p{margin:0;color:#909090;font-size:11px}.positionTop a{color:#747474;font-size:12px;text-decoration:none}.positionTop a:hover{text-decoration:underline}.positionActions{display:flex;align-items:center;gap:16px;flex:none}.positionActions button{display:grid;place-items:center;width:30px;height:30px;border:0;border-radius:7px;background:#fff;color:#777;cursor:pointer}.positionActions button:hover{background:#f4f4f4}.recoveryActions{padding:7px 20px;text-align:right}.recoveryActions button{height:27px;background:none;border:0;color:#888;font-size:11px}.phaseStrip{display:grid;gap:5px;min-height:56px;margin:0;padding:10px 20px;border-bottom:1px solid #eee;overflow:auto}.phaseStrip button{min-width:0;height:auto;min-height:30px;padding:5px 1px 0;border:0;border-top:2px solid #ddd;border-radius:0;background:none!important;color:#999!important;font-size:11px;line-height:15px;text-align:left;white-space:normal;box-shadow:none}.phaseStrip button[aria-current=step]{border-top-color:#333;color:#333!important;font-weight:550}.phaseStrip button:disabled{opacity:.65}.phaseStrip button:hover:not(:disabled){color:#333!important}
+.workspaceContent>section[aria-label="当前定位步骤"]{padding:20px max(24px,calc((100% - 720px)/2)) 30px}.stepArticle{min-width:0}.stepArticle>h2{font-size:13px;color:#777;font-weight:500}.stepColumns{display:block}.mentorChat{padding:0}.mentorChat [role=log]{max-height:none!important;min-height:300px;margin:0;padding:10px 0 28px}.mentorChat [role=log]>div:first-child{padding:9px 0;border:0;background:none}.mentorChat [data-message-role=assistant]{padding:9px 0;border:0;background:none}.mentorChat [data-message-role=user]{margin-left:auto;border-radius:20px;background:#f4f4f5;padding:12px 17px}.mentorChat label{max-width:720px;margin:14px auto 0;padding:13px 17px 11px;border:1px solid #e8e8e8;border-radius:23px;box-shadow:0 2px 5px #00000008}.mentorChat label textarea{min-height:46px;max-height:160px;margin:0;border:0;padding:0;resize:vertical;font-size:14px;line-height:1.65}.mentorChat>button{display:block;margin:8px 0 0 auto;border-radius:50%;min-width:34px;width:34px;height:34px;padding:0;overflow:hidden;font-size:0}.mentorChat>button:after{content:"↑";font-size:18px}.mentorChat>p:last-child{font-size:10px;color:#919191;line-height:1.5}
+@media(max-width:1100px){.workspaceContent>section[aria-label="当前定位步骤"]{padding:18px 27px 30px}.body{padding:20px}}
+@media(max-width:700px){.positionTop{min-height:48px;padding:6px 16px}.positionActions button{display:none}.workspaceContent>section[aria-label="当前定位步骤"]{padding:14px 16px 24px}.phaseStrip{padding:8px 12px;gap:4px}.phaseStrip button{font-size:10px}.body{padding:16px}.mentorChat [role=log]{min-height:220px}}
+.mentorChat [role=log]{height:clamp(250px,calc(100dvh - 535px),590px);min-height:250px;max-height:590px!important;overflow-y:auto;scrollbar-width:thin}.mentorChat .composerZone{position:relative;max-width:720px;margin:10px auto 0;width:100%}.composerZone label{margin:0;padding:15px 56px 38px 17px;min-height:111px}.composerZone label textarea{min-height:46px}.composerZone>button{position:absolute;right:16px;bottom:14px;display:grid;place-items:center;min-width:34px;width:34px;height:34px;padding:0;border:0;border-radius:50%;font-size:0;box-shadow:none}.composerZone>button:after{content:"↑";font-size:18px}.composerZone>p[role=status]{position:absolute;left:17px;bottom:13px;max-width:calc(100% - 70px);font-size:10px;color:#888}.mentorChat>p:last-child{max-width:720px;width:100%;margin:5px auto 0;font-size:10px}
+.body details{margin:0;border:0;border-bottom:1px solid #eee;border-radius:0;overflow:visible}.body summary{padding:13px 0;background:#fff;color:#444;font-size:13px}.body summary small{font-size:10px}.fields{padding:3px 0 16px;gap:15px}.fields strong{font-size:12px;color:#555}.fields p{min-height:55px;padding:10px 12px;border:1px solid #e5e5e5;border-radius:8px;background:#fff;font-size:14px;line-height:1.65}
+@media(max-width:700px){.mentorChat [role=log]{height:clamp(210px,calc(100dvh - 440px),470px);min-height:210px}.composerZone label{min-height:91px}}
+.mentorChat label textarea{resize:none;color:#262626;scrollbar-width:thin;scrollbar-color:#c4c4c4 transparent}
+.positionTop{min-height:46px;padding:6px 24px}
+.panel>header{padding:16px 20px}
+.workspaceContent>section[aria-label="当前定位步骤"]{padding-top:0}
+.stepArticle>h2,.mentorChat>div:has(>h3){display:none}
+.mentorChat [role=log]{height:clamp(250px,calc(100dvh - 371px),650px);max-height:650px!important;margin-top:0}
+.mentorChat .composerZone{margin-top:8px}
+@media(max-width:700px){.workspaceContent>section[aria-label="当前定位步骤"]{padding-top:0}.mentorChat [role=log]{height:clamp(210px,calc(100dvh - 360px),550px)}}
+.agentIdentity{display:flex;align-items:center;gap:8px;color:#929292;font-size:12px;line-height:20px}
+.agentIdentity img{width:22px;height:22px;object-fit:contain;border-radius:6px}
+.mentorChat .messageBody{font-family:var(--font-primary);font-size:15px;font-weight:400;line-height:1.75;color:#444}
+.visuallyHidden{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.mentorTools{position:absolute;left:17px;bottom:14px;display:flex;align-items:center;gap:8px;z-index:3}
+.mentorChat .mentorTools label{display:flex;width:auto;max-width:none;min-height:0;margin:0 13px 9px;padding:0 11px;border:0;border-radius:11px;background:#f7f7f8;box-shadow:none}
+.mentorChat .mentorTools label input{height:42px;margin:0;padding:0;border:0;background:transparent}
+.positionTop{min-height:58px;padding:9px 24px}
+.composerZone label{min-height:124px}
+.positionActions{gap:10px}.positionActions span{color:#8e8e8e;font-size:11px;white-space:nowrap}.positionActions button{display:inline-flex;align-items:center;justify-content:center;width:auto;min-width:30px;padding:0 4px;color:#777;font-size:12px;white-space:nowrap}
+.phaseStrip{min-height:42px;padding:0 20px;gap:4px;align-items:end}.phaseStrip button{min-height:39px;padding:8px 1px 4px;border-top:2px solid #e1e1e1;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.currentAction{max-width:720px;margin:18px 0;padding:14px 0;border-top:1px solid #eee}.currentAction strong{font-size:13px;font-weight:600}.currentAction p{margin:7px 0 0;font-size:13px;line-height:1.6;white-space:pre-wrap}.currentAction>div{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}.currentAction button{min-height:38px;padding:7px 11px;border-radius:8px;font-size:12px}.currentAction button:first-child{background:#1f1f1f;color:#fff}
+.confirmedPositions{margin-top:20px;padding-top:16px;border-top:1px solid #ececec}.confirmedPositions>p{margin:0 0 16px;color:#888;font-size:12px;line-height:1.7}.confirmedPositions section{margin:0 0 24px}.confirmedPositions h4{margin:0 0 8px;color:#888;font-size:12px;font-weight:500}.confirmedPositions label{display:block;margin:0 0 20px;font-size:13px}.confirmedPositions label>span{display:block;margin-bottom:7px;color:#555}.confirmedPositions textarea{width:100%;min-height:82px;resize:none;border:1px solid #e5e5e5;border-radius:8px;background:#fff;padding:10px 12px;color:#262626;font-size:14px;line-height:1.65}.confirmedPositions small{display:block;margin-top:4px;color:#999;font-size:11px;line-height:18px}.confirmedPositions button{width:max-content;margin-top:8px;border:1px solid #ddd;background:#fff;color:#333}
+.infoBackdrop{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:14px;background:#0006}.infoDialog{width:min(460px,100%);padding:0 24px 24px;border-radius:14px;background:#fff;box-shadow:0 18px 55px #0002}.infoDialog header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;border-bottom:1px solid #eee}.infoDialog h2{margin:0;padding:18px 0;font-size:16px}.infoDialog header button{border:0;background:none;font-size:22px}.infoDialog p{font-size:13px;line-height:1.7}.infoDialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}.infoDialog footer button,.infoDialog footer a{padding:8px 12px;border:1px solid #ddd;border-radius:7px;background:#fff;color:#333;font-size:12px;text-decoration:none}
+@media(max-width:700px){.positionTop{min-height:48px;padding:6px 16px}.positionActions span{display:none}.positionActions button{display:inline-flex}.phaseStrip{padding:0 12px}.phaseStrip button{font-size:10px}}
+/* Keep result fields at the same width while steps expand and the panel scrolls. */
+.panel>.body{overflow-y:scroll;scrollbar-gutter:stable;min-width:0}.panel>.body details,.panel>.body .fields,.panel>.body .fields p{min-width:0;box-sizing:border-box}.panel>.body .fields p{width:100%}
+.positionActions button{font-family:inherit!important;font-size:12px!important;font-weight:400!important;line-height:18px!important;letter-spacing:0!important}
+
+/* Positioning actions use the same quiet controls as the merged workspace. */
+.currentAction button,.stepForm button,.requestRecovery button,.mentorChat [role=log] button{height:auto;min-height:34px;padding:7px 12px;border:1px solid #e6e6e6;border-radius:8px;background:#fff;color:#444;font-family:inherit;font-size:12px;font-weight:400;line-height:18px;letter-spacing:0;white-space:normal;box-shadow:none;transform:none}
+.currentAction button:first-child{border-color:#262626;background:#262626;color:#fff}
+.currentAction button:disabled,.stepForm button:disabled,.requestRecovery button:disabled,.mentorChat [role=log] button:disabled{opacity:1;background:#f5f5f5;border-color:#ececec;color:#aaa;cursor:default}
+.currentAction button:hover:not(:disabled),.stepForm button:hover:not(:disabled),.requestRecovery button:hover:not(:disabled),.mentorChat [role=log] button:hover:not(:disabled){background:#f5f5f5;border-color:#ddd;color:#262626}
+.currentAction button:first-child:hover:not(:disabled){background:#3b3b3b;color:#fff}
+.questionNav{margin-top:20px;padding-top:16px;border-top:1px solid #eee}
+.questionNav>p{margin:0 0 10px;color:#999;font-size:11px;line-height:18px}
+.questionNav ul{display:grid;gap:4px;margin:0;padding:0;list-style:none}
+.questionNav button{width:100%;justify-content:flex-start;text-align:left;border-color:transparent;background:transparent;color:#777}
+.questionNav button[aria-current=true]{border-color:#eee;background:#f6f6f6;color:#333;font-weight:500}
+.requestRecovery{margin:12px 24px;padding:12px 14px;border:1px solid #ececec;border-radius:10px;background:#fafafa;color:#666;font-size:12px;line-height:1.6}
+.requestRecovery>p{margin:0 0 6px;color:#444}.requestRecovery p{font-size:12px}.requestRecovery button{margin-top:8px}
+
+/* The workspace owns the viewport; only messages and results scroll. */
+.conversationPage{height:100%;min-height:0;overflow:hidden!important}
+.conversationPage>.workspaceContent{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.conversationPage .positionTop,.conversationPage .phaseStrip,.conversationPage .publishBar{flex:none}
+.conversationPage .workspaceContent>section[aria-label="当前定位步骤"]{flex:1;min-height:0;overflow:hidden;padding:0 24px 10px;display:flex;flex-direction:column}
+.conversationPage .stepArticle{flex:1;min-height:0;display:flex;flex-direction:column;max-width:720px;width:100%;margin:0 auto}
+.conversationPage .stepColumns{flex:1;min-height:0;display:flex;flex-direction:column;margin:0}
+.conversationPage .mentorChat{flex:1;min-height:0;display:flex;flex-direction:column;margin:0}
+.conversationPage .mentorChat [role=log]{flex:1;min-height:0;height:auto;max-height:none!important;padding:16px 4px 12px;margin:0;overflow-y:auto;overscroll-behavior:contain}
+.conversationPage .mentorChat>div:has(textarea){flex:none;width:100%;max-width:720px;align-self:stretch}
+.conversationPage .mentorChat>p{flex:none}
+.conversationPage .mentorChat>p:last-child{margin:4px 0 0;font-size:10px;line-height:15px}
+.conversationPage .mentorChat [data-message-role=assistant]{max-width:100%;margin-right:0}
+.conversationPage .mentorChat [data-message-role=user]{max-width:85%;margin-right:0}
+.publishBar{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px 16px;padding:10px 24px;border-top:1px solid #eee;background:#fff}
+.publishBar>div{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap}
+.publishBar button{height:34px;min-width:120px;padding:7px 14px;border:1px solid #e5e5e5;border-radius:8px;background:#262626;color:#fff;font:400 12px/18px var(--font-primary);box-shadow:none}
+.publishBar button:disabled{background:#f5f5f5;color:#aaa;opacity:1;border-color:#eee}
+.publishBar p,.publishBar a{margin:0;color:#999;font-size:11px;line-height:17px}
+.publishBar a{color:#666;text-decoration:none}
+@media(max-width:700px){.conversationPage .workspaceContent>section[aria-label="当前定位步骤"]{padding:0 14px 8px}.publishBar{padding:8px 12px;gap:5px 10px}.publishBar p{width:100%;text-align:center}}
+
+.currentQuestionBox{padding:16px;border:1px solid #dcdcdc;border-radius:12px;background:#fff}.currentQuestionBox>div+div,.currentQuestionBox>p{margin-top:16px}
+.confirmedPositions{margin-top:24px;padding:16px;border:1px solid #e4e4e4;border-radius:12px;background:#f8f8f8}.confirmedPositions section:last-child{margin-bottom:0}.confirmedPositions label:last-child{margin-bottom:0}
+
+.completionNotice{flex:none;margin-top:12px;padding:10px 12px;border:1px solid #ededed;border-radius:10px;background:#fafafa}.completionNotice h3{margin:0;font-size:13px;font-weight:500;line-height:20px;color:#444}.completionNotice p{margin:4px 0 0;font-size:12px;font-weight:400;line-height:19px;color:#737373}
+
+.consentCard{width:100%;max-width:520px;max-height:calc(100dvh - 32px);overflow-y:auto;padding:24px;border:1px solid #e8e8e8;border-radius:18px;background:#fff;box-shadow:0 16px 48px #00000014;color:#262626}
+.consentCard>header{display:flex;align-items:flex-start;gap:16px;padding-bottom:16px;border-bottom:1px solid #eee}
+.consentCard h2{flex:1;margin:0;font-size:16px;font-weight:500;line-height:25px}
+.consentCard>p{margin:18px 0 24px;color:#737373;font-size:13px;line-height:22px}
+.consentCard .consentClose{flex:none;width:28px;height:28px;min-height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:#777;box-shadow:none}
+.consentActions{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:12px}
+.consentActions button{min-height:36px;height:auto;padding:8px 16px;border:1px solid #e5e5e5;border-radius:8px;background:#fff;color:#555;font-family:inherit;font-size:12px;font-weight:400;line-height:18px;box-shadow:none;white-space:normal}
+.consentActions button:first-child{background:#262626;border-color:#262626;color:#fff}
+.consentActions button:hover:not(:disabled){background:#f5f5f5}.consentActions button:first-child:hover:not(:disabled){background:#3b3b3b}
+.consentActions button:disabled{opacity:.5;cursor:default}
+@media(max-width:480px){.consentCard{padding:20px}.consentCard h2{font-size:15px;line-height:24px}.consentActions{gap:8px}.consentActions button{min-height:44px}.consentCard .consentClose{width:32px;height:32px}}
+
+.suggestionCard{display:flex;flex-direction:column;align-items:flex-start;gap:14px;padding:18px 20px;border:1px solid #e5e5e5;border-radius:12px;background:#fafafa}
+.suggestionTitle{margin:0;color:#444;font-size:13px;font-weight:500;line-height:20px}
+.suggestionFields{display:grid;gap:12px;width:100%}.suggestionFields p{margin:0;color:#444;font-size:14px;font-weight:400;line-height:24px;white-space:pre-wrap;overflow-wrap:anywhere}.suggestionFields span{display:block;margin-bottom:4px;color:#777;font-size:12px;line-height:19px}
+.mentorChat [role=log] .suggestionCard>button{max-width:100%;min-height:34px;padding:7px 12px;font-size:12px;line-height:18px;text-align:left}
+.suggestionNote{width:100%;margin:0;padding-top:12px;border-top:1px solid #e9e9e9;color:#858585;font-size:11px;font-weight:400;line-height:18px}
+@media(max-width:480px){.suggestionCard{padding:16px;gap:12px}.mentorChat [role=log] .suggestionCard>button{min-height:44px}}
+
+.stepNavigation{display:flex;justify-content:flex-end;padding:12px 0 4px}
+.stepNavigation>button{width:auto;min-width:112px;height:34px;padding:7px 14px;border:1px solid #e5e5e5;border-radius:8px;background:#fff;color:#555;font:400 12px/18px var(--font-primary);box-shadow:none}
+.stepNavigation>button:hover:not(:disabled){background:#f7f7f7;border-color:#ccc;color:#262626}
+.stepNavigation>button:disabled{background:#fafafa;color:#aaa;opacity:1}
+@media(max-width:700px){.stepNavigation>button{height:44px;padding:12px 14px}}

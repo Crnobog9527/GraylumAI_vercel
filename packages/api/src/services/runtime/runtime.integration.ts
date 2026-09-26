@@ -15,6 +15,12 @@ import { publishSkillPackage } from '../skills/publication';
 import { chromium } from '../../../../../apps/web/node_modules/@playwright/test';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
+import { openRouterAdapter } from '../bill2/openRouterAdapter';
+import { authoritativeBilling } from '../bill2/service';
+import {loadStagingPolicy,loadStagingRecoveryPolicy,assertStagingReadAccess} from './stagingPolicy';
+import {stagingTransport} from './stagingTransport';
+import {runtimeRouter} from '../../routers/runtime';
+import {createTRPCContext} from '../../trpc';
 const connectionString=process.env.V3_LOCAL_DB!;
 if(!connectionString?.startsWith('postgres://postgres@127.0.0.1:')||!connectionString.endsWith('/v3_disposable')) throw new Error('isolated runner required');
 const db=new pg.Client({connectionString});
@@ -23,8 +29,9 @@ const modelId=randomUUID();
 async function rpc(name:string,args:Record<string,unknown>){const r=await admin.rpc(name,args);if(r.error)throw new Error(r.error.message);return r.data;}
 beforeAll(async()=>{await db.connect();await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Runtime local','runtime-m','fixture','true')",[modelId]);});
 afterAll(async()=>{await db.end();});
-async function fixture(){
- const actorId=randomUUID();await db.query('insert into profiles(id,credits) values($1,100)',[actorId]);
+async function fixture(existingActor?:string){
+ const actorId=existingActor??randomUUID();
+ await db.query(existingActor?'insert into profiles(id,credits) values($1,100) on conflict(id) do update set credits=100':'insert into profiles(id,credits) values($1,100)',[actorId]);
  await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,100,'addition','grant','opening_grant','system',$2,0,100)",[actorId,'opening:'+actorId]);
  const requestId=randomUUID(),start={scope:{kind:'positioning_draft'}};
  const s=await rpc('runtime_start',{p_actor_id:actorId,p_request_id:requestId,p_payload:start});
@@ -34,6 +41,229 @@ async function fixture(){
  const admit={p_actor_id:actorId,p_session_id:s.sessionId,p_request_id:randomUUID(),p_payload:{text:'hello'},p_billing:billing};
  return {actorId,start,requestId,s,billing,admit};
 }
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: staging window runs official-protocol HTTP through original SDK and BILL2 once',async()=>{
+ const exists=await db.query("select to_regclass('public.runtime_test_windows') present");
+ if(!exists.rows[0].present)throw new Error('requires --with-staging-schema');
+ const f=await fixture(),realModel=randomUUID(),windowId=randomUUID();
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic official protocol','test/model','openai','true')",[realModel]);
+ const policy={...f.billing.callPolicy[0],modelId:realModel,provider:'openrouter',model:'test/model',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
+ const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'hello',instructions:'Only local synthetic input',model:'test/model',maxOutputTokens:100,maxTurns:1,historyItems:0,network:'deny',tools:[]};
+ const billing={...f.billing,mode:'staging_test',testWindowId:windowId,modelId:realModel,input:context,callPolicy:[policy],rules:{...f.billing.rules,version:'runtime-staging-v1',quoteVersion:windowId}};
+ await db.query("insert into runtime_test_windows(id,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",[windowId,[f.actorId],JSON.stringify([policy])]);
+ const args={...f.admit,p_payload:context,p_billing:billing};
+ await expect(rpc('runtime_admit',args)).rejects.toThrow('TEST_WINDOW_DENIED');
+ await db.query('update runtime_test_windows set enabled=true where id=$1',[windowId]);
+ const e=await rpc('runtime_admit',args);expect(await rpc('runtime_admit',args)).toEqual(e);
+ let requests=0;
+ const server=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;requests++;
+  expect(JSON.parse(raw).model).toBe('test/model');
+  res.setHeader('content-type','application/json');res.end(JSON.stringify({id:'gen-window-local',object:'chat.completion',created:1,model:'test/model',choices:[{index:0,message:{role:'assistant',content:'Local official-protocol answer'},finish_reason:'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7,cost:0.003}}));
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('local server');
+  const endpoint='http://127.0.0.1:'+address.port;
+  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(url,init)=>{
+   expect(String(url)).toBe('https://openrouter.ai/api/v1/chat/completions');return fetch(endpoint,init);
+  }});
+  const host=runtimeExecutor({database:admin,actor:async()=>f.actorId,endpoint,adapter});
+  const result=await host.execute(e.executionId);expect(result).toMatchObject({state:'completed',body:'Local official-protocol answer'});
+  expect(await host.execute(e.executionId)).toEqual(result);expect(requests).toBe(1);
+  const run=(await db.query('select state,charged,provider_cost_usd::text cost,test_window_id from bill2_runs where id=$1',[e.runId])).rows[0];
+  expect(run).toMatchObject({state:'settled',charged:3,cost:'0.003',test_window_id:windowId});
+  expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(97);
+  const next=await rpc('runtime_start',{p_actor_id:f.actorId,p_request_id:randomUUID(),p_payload:f.start});
+  await expect(rpc('runtime_admit',{...args,p_session_id:next.sessionId,p_request_id:randomUUID(),p_billing:{...billing,scope:next.scope}})).rejects.toThrow('TEST_BUDGET_EXHAUSTED');
+  expect((await db.query('select count(*)::int n from bill2_runs where test_window_id=$1',[windowId])).rows[0].n).toBe(1);
+ }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+},30000);
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['disabled','expired','rollover'])('RUNTIME: staging temporary lookup failure recovers once after window %s',async(stopped)=>{
+ const email='recovery-'+randomUUID()+'@example.test',password='Local-test-password-42!';
+ const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
+ const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
+ const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
+ const f=await fixture(created.data.user.id),model=randomUUID(),windowId=randomUUID(),key='SYNTHETIC_RECOVERY_ORIGINAL';
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,api_key) values($1,'Synthetic recovery','test/recovery','openai','true','https://openrouter.ai/api/v1',$2)",[model,key]);
+ const policy={...f.billing.callPolicy[0],modelId:model,provider:'openrouter',account:'openrouter-key:'+createHash('sha256').update(key).digest('hex'),model:'test/recovery',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
+ await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",[windowId,[f.actorId],JSON.stringify([policy])]);
+ const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'hello',instructions:'Synthetic receipt recovery',model:'test/recovery',maxOutputTokens:100,maxTurns:1,historyItems:0,network:'deny',tools:[]};
+ const billing={...f.billing,mode:'staging_test',testWindowId:windowId,modelId:model,input:context,callPolicy:[policy],rules:{...f.billing.rules,version:'runtime-staging-v1',quoteVersion:windowId}};
+ const e=await rpc('runtime_admit',{...f.admit,p_payload:context,p_billing:billing});
+ let posts=0,lookups=0;
+ const server=createServer(async(req,res)=>{
+  for await(const chunk of req)void chunk;
+  res.setHeader('content-type','application/json');
+  if(req.method==='POST'){
+   posts++;res.end(JSON.stringify({id:'gen-recovery-'+windowId,object:'chat.completion',created:1,model:'test/recovery',choices:[{index:0,message:{role:'assistant',content:'Original answer without cost'},finish_reason:'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7}}));
+  }else{
+   lookups++;expect(req.url).toContain(encodeURIComponent('gen-recovery-'+windowId));
+   if(lookups===1){res.statusCode=404;res.end('{"error":{"message":"generation not ready"}}');}
+   else res.end(JSON.stringify({data:{id:'gen-recovery-'+windowId,model:'test/recovery',finish_reason:'stop',total_cost:0.003}}));
+  }
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('local server');
+  const endpoint='http://127.0.0.1:'+address.port;
+  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(url,init)=>fetch(endpoint+new URL(String(url)).pathname+new URL(String(url)).search,init)});
+  const host=()=>runtimeExecutor({database:admin,actor:async()=>f.actorId,endpoint,adapter});
+  const first=await host().execute(e.executionId);expect(first).toMatchObject({state:'cost_pending',body:'Original answer without cost'});
+  if(!('body' in first))throw new Error('expected preserved response');
+  const original=(await db.query('select request_id,pre_deduct_id,payload from bill2_runs where id=$1',[e.runId])).rows[0];
+  const history=(await db.query('select count(*)::int n from runtime_session_history where session_id=$1',[f.s.sessionId])).rows[0].n;
+  const financial=authoritativeBilling({admin,actor:async()=>f.actorId,adapter});
+  await financial.recoverReceipts(e.runId);
+  expect((await db.query('select conflict from bill2_runs where id=$1',[e.runId])).rows[0].conflict).toBe(false);
+  expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(80);
+  await db.query(stopped!=='expired'?'update runtime_test_windows set enabled=false where id=$1':"update runtime_test_windows set expires_at=now()-interval '1 second' where id=$1",[windowId]);
+  const env={V3_RUNTIME_STAGING_ENABLED:'false',VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'graylumai-staging.vercel.app',VERCEL_GIT_COMMIT_REF:'staging',VERCEL_GIT_REPO_OWNER:'Crnobog9527',VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',V3_RUNTIME_STAGING_PROJECT_ID:'synthetic-project',VERCEL_PROJECT_ID:'synthetic-project',NEXT_PUBLIC_SUPABASE_URL:'https://synthetic.supabase.co',V3_RUNTIME_STAGING_DATABASE_HOST:'synthetic.supabase.co',V3_RUNTIME_STAGING_WINDOW_ID:windowId};
+  await expect(loadStagingPolicy(admin,f.actorId,{...env,V3_RUNTIME_STAGING_ENABLED:'true'})).rejects.toThrow('POLICY_DENIED');
+  await assertStagingReadAccess(admin,f.actorId,env);
+  await expect(assertStagingReadAccess(admin,randomUUID(),env)).rejects.toThrow('ACTOR_DENIED');
+  const originalPolicy=await loadStagingRecoveryPolicy(admin,f.actorId,e.executionId,env);
+  expect(originalPolicy.callPolicies).toEqual([policy]);
+  await expect(loadStagingRecoveryPolicy(admin,randomUUID(),e.executionId,env)).rejects.toThrow('RECOVERY_DENIED');
+  const maintenance=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter:{dispatch:async()=>{throw new Error('NO_NEW_DISPATCH');},lookup:adapter.lookup}});
+  const caller=runtimeRouter.createCaller(await createTRPCContext({headers:new Headers(),supabaseAuth:user}));
+  const hostEnv={...env};
+  if(stopped==='rollover'){
+   const nextWindow=randomUUID(),nextPolicy={...policy,modelId:randomUUID(),model:'different/model',account:'different-account'};
+   await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",[nextWindow,[f.actorId],JSON.stringify([nextPolicy])]);
+   hostEnv.V3_RUNTIME_STAGING_ENABLED='true';hostEnv.V3_RUNTIME_STAGING_WINDOW_ID=nextWindow;
+  }
+  const previousEnv=Object.fromEntries(Object.keys(hostEnv).map(k=>[k,process.env[k]])),previousFetch=globalThis.fetch;
+  try{
+   // Only the test transport redirects the fixed official endpoint to a real
+   // local HTTP server. The protected router, credential resolver and SQL are unchanged.
+   globalThis.fetch=async(input,init)=>{
+    const url=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url);
+    if(url.origin==='https://openrouter.ai'){
+     expect(new Headers(init?.headers).get('authorization')).toBe('Bearer '+key);
+     return previousFetch(endpoint+url.pathname+url.search,init);
+    }
+    return previousFetch(input,init);
+   };
+   Object.assign(process.env,hostEnv);
+   expect(await caller.execute({executionId:e.executionId})).toMatchObject({state:'completed'});
+  }finally{
+   globalThis.fetch=previousFetch;
+   for(const [name,value] of Object.entries(previousEnv)){if(value===undefined)delete process.env[name];else process.env[name]=value;}
+  }
+  // Repeated private recovery reads the same settled identity without lookup.
+  await maintenance.recoverFinancial(e.executionId);
+  const visible=await rpc('runtime_view',{p_actor_id:f.actorId,p_session_id:f.s.sessionId});
+  expect(visible.executions[0]).toMatchObject({body:first.body,contentAvailable:true,state:'completed'});
+  const next=await rpc('runtime_start',{p_actor_id:f.actorId,p_request_id:randomUUID(),p_payload:f.start});
+  await expect(rpc('runtime_admit',{...f.admit,p_session_id:next.sessionId,p_request_id:randomUUID(),p_payload:context,p_billing:{...billing,scope:next.scope}})).rejects.toThrow('TEST_WINDOW_DENIED');
+  expect(await host().execute(e.executionId)).toMatchObject({state:'completed',body:first.body});
+  expect(await host().execute(e.executionId)).toMatchObject({state:'completed',body:first.body});
+  expect(posts).toBe(1);expect(lookups).toBe(2);
+  expect((await db.query('select request_id,pre_deduct_id,payload from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual(original);
+  expect((await db.query('select count(*)::int n from runtime_session_history where session_id=$1',[f.s.sessionId])).rows[0].n).toBe(history);
+  expect((await db.query('select state,charged,provider_cost_usd::text cost,conflict from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual({state:'settled',charged:3,cost:'0.003',conflict:false});
+  expect((await db.query("select count(*)::int n from credit_transactions where bill2_run_id=$1 and reason_code='bill2_spend'",[e.runId])).rows[0].n).toBe(1);
+  const receipts=(await db.query('select payload from bill2_receipts where call_id in(select id from bill2_calls where run_id=$1)',[e.runId])).rows.map(r=>r.payload);
+  expect(receipts.some(r=>r.evidenceKind==='transport_observation'&&r.transport.httpStatus===404)).toBe(true);
+ }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+},30000);
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: staging window concurrent admissions and unknown costs retain the same total budget',async()=>{
+ const actors=await Promise.all([fixture(),fixture()]),model=randomUUID(),windowId=randomUUID();
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic bounded model','test/unknown','openai','true')",[model]);
+ const policy={...actors[0]!.billing.callPolicy[0],modelId:model,provider:'openrouter',model:'test/unknown',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
+ await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,2,now()+interval '2 hours')",[windowId,actors.map(f=>f.actorId),JSON.stringify([policy])]);
+ const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'hello',instructions:'Synthetic unknown',model:'test/unknown',maxOutputTokens:100,maxTurns:1,historyItems:0,network:'deny',tools:[]};
+ const args=actors.map(f=>({...f.admit,p_payload:context,p_billing:{...f.billing,mode:'staging_test',testWindowId:windowId,modelId:model,input:context,callPolicy:[policy],rules:{...f.billing.rules,version:'runtime-staging-v1',quoteVersion:windowId}}}));
+ const results=await Promise.allSettled(args.map(arg=>rpc('runtime_admit',arg)));
+ expect(results.filter(r=>r.status==='fulfilled')).toHaveLength(1);
+ expect(results.filter(r=>r.status==='rejected')).toHaveLength(1);
+ const winner=results.findIndex(r=>r.status==='fulfilled'),e=(results[winner] as PromiseFulfilledResult<any>).value;
+ const loser=1-winner;expect(String((results[loser] as PromiseRejectedResult).reason)).toContain('TEST_BUDGET_EXHAUSTED');
+ let requests=0;
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_ONLY',transport:async()=>{requests++;return new Response('{"id":"gen-unknown-original","model":"test/unknown"}',{status:500});}});
+ const host=()=>runtimeExecutor({database:admin,actor:async()=>actors[winner]!.actorId,endpoint:'http://127.0.0.1:1',adapter});
+ await host().execute(e.executionId);await host().execute(e.executionId);
+ expect(requests).toBe(1);
+ expect((await db.query('select provider_id,selected_cost_usd from bill2_calls where run_id=$1',[e.runId])).rows).toEqual([{provider_id:'gen-unknown-original',selected_cost_usd:null}]);
+ await expect(rpc('runtime_admit',args[loser]!)).rejects.toThrow('TEST_BUDGET_EXHAUSTED');
+ expect((await db.query('select count(*)::int n from bill2_runs where test_window_id=$1',[windowId])).rows[0].n).toBe(1);
+ expect((await db.query('select credits from profiles where id=$1',[actors[loser]!.actorId])).rows[0].credits).toBe(100);
+ const anon=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
+ const denied=await anon.rpc('runtime_test_policy',{p_actor_id:actors[winner]!.actorId,p_window_id:windowId});
+ expect(denied.error).not.toBeNull();expect(['42501','PGRST202']).toContain(denied.error!.code);
+ expect((await db.query("select has_function_privilege('authenticated','runtime_test_policy(uuid,uuid)','execute') allowed")).rows[0].allowed).toBe(false);
+},30000);
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: staging window stop between claim and dispatch denies HTTP without losing the original reservation',async()=>{
+ const f=await fixture(),model=randomUUID(),windowId=randomUUID();
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic stop','test/stop','openai','true')",[model]);
+ const policy={...f.billing.callPolicy[0],modelId:model,provider:'openrouter',model:'test/stop',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
+ await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",[windowId,[f.actorId],JSON.stringify([policy])]);
+ const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'hello',instructions:'Synthetic stop',model:'test/stop',maxOutputTokens:100,maxTurns:1,historyItems:0,network:'deny',tools:[]};
+ const billing={...f.billing,mode:'staging_test',testWindowId:windowId,modelId:model,input:context,callPolicy:[policy],rules:{...f.billing.rules,version:'runtime-staging-v1',quoteVersion:windowId}};
+ const e=await rpc('runtime_admit',{...f.admit,p_payload:context,p_billing:billing});
+ const request='synthetic-unsent';
+ const call={...policy,phase:'primary',requestHash:createHash('sha256').update(request).digest('hex')};
+ const claimed=await rpc('bill2_claim',{p_actor_id:f.actorId,p_run_id:e.runId,p_sequence:1,p_payload:call});
+ await db.query('update runtime_test_windows set enabled=false where id=$1',[windowId]);
+ await expect(rpc('bill2_dispatch',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:claimed.id,p_token:claimed.dispatchToken})).rejects.toThrow('TEST_WINDOW_DENIED');
+ expect((await db.query('select state,dispatched_at from bill2_calls where id=$1',[claimed.id])).rows[0]).toEqual({state:'prepared',dispatched_at:null});
+ expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(80);
+ await rpc('runtime_financial_recovery',{p_actor_id:f.actorId,p_execution_id:e.executionId,p_finish:true});
+ expect((await db.query('select state,charged from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual({state:'refunded',charged:0});
+ expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(100);
+},30000);
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['missing','mismatched'])('RUNTIME: staging %s credential fails before dispatch and releases only the unsent reservation',async(kind)=>{
+ const f=await fixture(),model=randomUUID(),windowId=randomUUID(),key='SYNTHETIC_EXPECTED';
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,api_key) values($1,'Synthetic preflight','test/preflight','openai','true','https://openrouter.ai/api/v1',$2)",[model,kind==='missing'?null:'SYNTHETIC_OTHER']);
+ const policy={...f.billing.callPolicy[0],modelId:model,provider:'openrouter',account:'openrouter-key:'+createHash('sha256').update(key).digest('hex'),model:'test/preflight',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
+ await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",[windowId,[f.actorId],JSON.stringify([policy])]);
+ const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'hello',instructions:'Synthetic preflight',model:'test/preflight',maxOutputTokens:100,maxTurns:1,historyItems:0,network:'deny',tools:[]};
+ const billing={...f.billing,mode:'staging_test',testWindowId:windowId,modelId:model,input:context,callPolicy:[policy],rules:{...f.billing.rules,version:'runtime-staging-v1',quoteVersion:windowId}};
+ const e=await rpc('runtime_admit',{...f.admit,p_payload:context,p_billing:billing});
+ const real=await loadStagingPolicy(admin,f.actorId,{V3_RUNTIME_STAGING_ENABLED:'true',VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'graylumai-staging.vercel.app',VERCEL_GIT_COMMIT_REF:'staging',VERCEL_GIT_REPO_OWNER:'Crnobog9527',VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',V3_RUNTIME_STAGING_PROJECT_ID:'synthetic-project',VERCEL_PROJECT_ID:'synthetic-project',NEXT_PUBLIC_SUPABASE_URL:'https://synthetic.supabase.co',V3_RUNTIME_STAGING_DATABASE_HOST:'synthetic.supabase.co',V3_RUNTIME_STAGING_WINDOW_ID:windowId});
+ const adapter=stagingTransport(admin,real);
+ const result=await runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter}).execute(e.executionId);
+ expect(result).toEqual({state:'cancelled'});
+ expect((await db.query('select dispatched_at,provider_id from bill2_calls where run_id=$1',[e.runId])).rows).toEqual([{dispatched_at:null,provider_id:null}]);
+ expect((await db.query('select state,charged,conflict from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual({state:'refunded',charged:0,conflict:false});
+ expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(100);
+ // The isolated runner also denies every nonloopback fetch. Successful release
+ // follows an explicit local preflight rejection, not a network timeout.
+ expect((await db.query('select count(*)::int n from bill2_receipts where call_id in(select id from bill2_calls where run_id=$1)',[e.runId])).rows[0].n).toBe(0);
+},30000);
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: staging authenticated original admission freezes the allowlisted quote',async()=>{
+ const email='window-'+randomUUID()+'@example.test',password='Local-test-password-42!';
+ const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
+ const actor=created.data.user.id,model=randomUUID(),windowId=randomUUID();
+ await db.query('insert into profiles(id,credits) values($1,100) on conflict(id) do update set credits=100',[actor]);
+ const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
+ const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Synthetic quote','test/admission','openai','true',1000,10000)",[model]);
+ const call={modelId:model,provider:'openrouter',account:'synthetic-account',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:8000,outputLimit:100,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
+ await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",[windowId,[actor],JSON.stringify([call])]);
+ const env={V3_RUNTIME_STAGING_ENABLED:'true',VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'graylumai-staging.vercel.app',VERCEL_GIT_COMMIT_REF:'staging',VERCEL_GIT_REPO_OWNER:'Crnobog9527',VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',V3_RUNTIME_STAGING_PROJECT_ID:'synthetic-project',VERCEL_PROJECT_ID:'synthetic-project',NEXT_PUBLIC_SUPABASE_URL:'https://synthetic.supabase.co',V3_RUNTIME_STAGING_DATABASE_HOST:'synthetic.supabase.co',V3_RUNTIME_STAGING_WINDOW_ID:windowId};
+ const real=await loadStagingPolicy(admin,actor,env);
+ const admission=runtimeAdmissionService(user,admin,{real,account:'unused-local',costPerCall:'999',creditsPerUsd:'999',multiplier:'999',maxCalls:1,maxOutputTokens:100,inputBytes:8000,historyItems:0,searchEnabled:false});
+ const s=await admission.start(randomUUID(),{kind:'positioning_draft'});
+ const request={sessionId:s.sessionId,requestId:randomUUID(),input:'User-provided local material',selection:{kind:'ordinary',modelId:model},network:'deny'} as const;
+ await expect(admission.prepare({...request,network:'allow'})).rejects.toThrow('REAL_SEARCH_DISABLED');
+ const e=await admission.prepare(request);expect(await admission.prepare(request)).toEqual(e);
+ const saved=(await db.query('select payload,reserved from bill2_runs where id=$1',[e.runId])).rows[0];
+ expect(saved.reserved).toBe(20);expect(saved.payload).toMatchObject({mode:'staging_test',testWindowId:windowId,callPolicy:[call],rules:{creditsPerUsd:'1000',multiplier:'1'}});
+ // Actual protected router + real Auth/PostgREST: switching only the host
+ // enablement off must preserve reads and cancel a definitely unsent request.
+ const caller=runtimeRouter.createCaller(await createTRPCContext({headers:new Headers(),supabaseAuth:user}));
+ const previous=Object.fromEntries(Object.keys(env).map(k=>[k,process.env[k]]));
+ try{
+  Object.assign(process.env,{...env,V3_RUNTIME_STAGING_ENABLED:'false'});
+  expect(await caller.execute({executionId:e.executionId})).toEqual({state:'cancelled'});
+  expect((await caller.view({sessionId:s.sessionId})).executions[0]).toMatchObject({state:'cancelled'});
+  await expect(caller.prepare({...request,requestId:randomUUID()})).rejects.toThrow();
+  expect((await db.query('select enabled from runtime_test_windows where id=$1',[windowId])).rows[0].enabled).toBe(true);
+  expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1',[e.runId])).rows[0].n).toBe(0);
+  expect((await db.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(100);
+ }finally{for(const [key,value] of Object.entries(previous)){if(value===undefined)delete process.env[key];else process.env[key]=value;}}
+ await user.auth.signOut();await expect(admission.prepare(request)).rejects.toThrow('AUTH_REQUIRED');
+},30000);
 it('RUNTIME: atomic draft/session/start replay, admission and SDK append identities',async()=>{
  const f=await fixture();expect(await rpc('runtime_start',{p_actor_id:f.actorId,p_request_id:f.requestId,p_payload:f.start})).toEqual(f.s);
  const e=await rpc('runtime_admit',f.admit);expect(await rpc('runtime_admit',f.admit)).toEqual(e);
@@ -514,22 +744,24 @@ it('RUNTIME: browser ordinary and document Skill survive refresh, actual process
  await db.query("update profiles set role='user' where id=$1",[actor]);
  const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});const context=await browser.newContext();
  await context.route('**/*',route=>{const url=new URL(route.request().url());return ['127.0.0.1','localhost'].includes(url.hostname)||['data:','blob:'].includes(url.protocol)?route.continue():route.abort();});
- const page=await context.newPage(),app=process.env.V3_LOCAL_APP!;
+ const page=await context.newPage(),app=process.env.V3_LOCAL_APP!;page.setDefaultNavigationTimeout(90000);
  try{
   // Disposable Next startup compiles both login and its first RPC route. This
   // is a bounded readiness observation, not another login or model request.
   const hydrated=page.waitForResponse(r=>r.url().includes('/api/trpc/settings.getSystemSettings')&&r.ok(),{timeout:60000});
   await page.goto(app+'/login?redirect=/runtime');await hydrated;
   await page.getByPlaceholder('name@example.com').fill(email);await page.getByPlaceholder('输入你的密码').fill(password);
-  const choicesResponse=page.waitForResponse(r=>r.url().includes('/api/trpc/runtime.choices'));
+  const choicesResponse=page.waitForResponse(r=>r.url().includes('runtime.choices'));
   await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/runtime');
   expect((await choicesResponse).status()).toBe(200);
-  await page.getByRole('button',{name:'新建定位草稿'}).click();await page.getByText('已保存独立工作记录，刷新后可继续。').waitFor();
-  const url=page.url();expect(await page.getByLabel('对话方式').inputValue()).toBe(modelId);expect(await page.getByLabel('对话方式').locator('option').allTextContents()).toEqual(['普通对话','Skill 演示']);await page.getByLabel('消息',{exact:true}).fill('A persisted ordinary response');
+  expect(await page.getByRole('button',{name:'新建对话',exact:true}).count()).toBe(0);
+  await page.getByRole('link',{name:'新对话',exact:true}).click();
+  await page.getByLabel('新任务内容',{exact:true}).fill('A persisted ordinary response');
   await page.getByRole('button',{name:'发送',exact:true}).click();await page.getByText('Saved runtime answer 1',{exact:true}).waitFor({timeout:60000});
+  const url=page.url();
   const getCount=async()=>{const r=await fetch(process.env.V3_LOCAL_REST!+'/__runtime_count',{headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}});return (await r.json()).calls;};
   expect(await getCount()).toBe(1);await page.reload();await page.getByText('Saved runtime answer 1',{exact:true}).waitFor();
-  await page.getByLabel('对话方式').selectOption('skill:'+moduleId);
+  await page.getByRole('button',{name:'使用技能',exact:true}).click();await page.getByRole('dialog',{name:'使用技能'}).getByRole('button',{name:/Browser document Skill/}).click();
   await page.getByLabel('消息',{exact:true}).fill('Use the published document method');
   await page.getByRole('button',{name:'发送',exact:true}).click();
   await page.getByText('Saved runtime answer 2',{exact:true}).waitFor({timeout:60000});

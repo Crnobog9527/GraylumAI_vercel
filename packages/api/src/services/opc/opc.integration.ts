@@ -1,0 +1,10124 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { beforeAll, afterAll, it, expect } from "vitest";
+import { createHash, randomUUID } from "node:crypto";
+import pg from "pg";
+import { createClient } from "@supabase/supabase-js";
+import { makePackage, makeWorkflow } from "../__tests__/fixtures/artifacts";
+import { publishSkillPackage } from "../skills/publication";
+import { opcService } from "./service";
+import { workbenchService } from "../artifacts/workbench";
+import { OPENING_INPUT } from "../../shared/opcQuestions";
+import type { Page } from "../../../../../apps/web/node_modules/@playwright/test";
+const connectionString = process.env.V3_LOCAL_DB!;
+if (
+  !connectionString?.startsWith("postgres://postgres@127.0.0.1:") ||
+  !connectionString.endsWith("/v3_disposable")
+)
+  throw new Error("isolated runner required");
+const sql = new pg.Client({ connectionString });
+const admin = createClient(
+  process.env.V3_LOCAL_REST!,
+  process.env.V3_LOCAL_SERVICE_JWT!,
+  { auth: { persistSession: false } },
+);
+beforeAll(() => sql.connect());
+afterAll(() => sql.end());
+
+/** The exact business turns in a fixture, not just "one row per request ID". */
+type ExpectedMentorEffect = {
+  stepId: string;
+  questionId: string;
+  opening: boolean;
+  input: string;
+  /** Optional per-turn scope; defaults to the call's draft/round. */
+  scope?: Readonly<{ draftId: string; roundId: string }>;
+};
+type MentorEffectRow = {
+  execution_id: string;
+  request_id: string;
+  billing_id: string | null;
+  pre_deduct_id: string | null;
+  draft_id: string | null;
+  round_id: string | null;
+  step_id: string | null;
+  purpose: string | null;
+  task: string | null;
+  input: string | null;
+  execution_state: string;
+  billing_state: string | null;
+};
+async function expectExactMentorEffects(
+  actorId: string,
+  draftId: string,
+  roundId: string,
+  expected: readonly ExpectedMentorEffect[],
+) {
+  const readEffects = async () => (await sql.query<MentorEffectRow>(
+    `select e.id::text execution_id, e.request_id::text request_id,
+       b.id::text billing_id, b.pre_deduct_id::text pre_deduct_id,
+       t.draft_id::text draft_id, t.round_id::text round_id, t.step_id, t.purpose,
+       e.payload->'request'->'selection'->>'task' task,
+       e.payload->'request'->>'input' input,
+       e.state execution_state, b.state billing_state
+     from runtime_executions e
+     left join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id
+     left join bill2_runs b on b.id=e.billing_run_id and b.actor_id=e.actor_id
+     where e.actor_id=$1`,
+    [actorId],
+  )).rows;
+  const expectedTurns = expected.map(turn => JSON.stringify({
+    draftId: turn.scope?.draftId ?? draftId,
+    roundId: turn.scope?.roundId ?? roundId,
+    stepId: turn.stepId, purpose: "mentor",
+    task: (turn.opening ? "opc-opening:" : "opc-question:") + turn.questionId,
+    input: turn.input, executionState: "completed", billingState: "settled",
+  })).sort();
+  const project = (rows: MentorEffectRow[]) => rows.map(row => JSON.stringify({
+    draftId: row.draft_id, roundId: row.round_id, stepId: row.step_id,
+    purpose: row.purpose, task: row.task, input: row.input,
+    executionState: row.execution_state, billingState: row.billing_state,
+  })).sort();
+  await expect.poll(async () => project(await readEffects()), { timeout: 30000 })
+    .toEqual(expectedTurns);
+  const rows = await readEffects();
+  expect(project(rows)).toEqual(expectedTurns);
+  // Also count all actor billing runs/reservations, so unlinked duplicate runs
+  // cannot be hidden by the join or by using a fresh random request ID.
+  expect((await sql.query("select count(*)::int n from bill2_runs where actor_id=$1", [actorId])).rows[0].n)
+    .toBe(expected.length);
+  expect((await sql.query("select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve'", [actorId])).rows[0].n)
+    .toBe(expected.length);
+  expect(new Set(rows.map(row => row.request_id)).size).toBe(expected.length);
+  expect(rows.every(row => Boolean(row.billing_id && row.pre_deduct_id))).toBe(true);
+  expect(new Set(rows.map(row => row.billing_id)).size).toBe(expected.length);
+  expect(new Set(rows.map(row => row.pre_deduct_id)).size).toBe(expected.length);
+  // Identity sets are compared before/after navigation and authentication
+  // recovery; a replacement execution must not pass as a restored one.
+  return rows.map(row => JSON.stringify([
+    row.execution_id, row.request_id, row.billing_id, row.pre_deduct_id,
+  ])).sort();
+}
+async function mentorMessageCheck(
+  page: Page,
+  actorId: string,
+  executionId: string,
+): Promise<() => Promise<void>> {
+  const rows = (await sql.query<{ body: string | null }>(
+    "select coalesce(result->>'body', primary_result->>'body') body from runtime_executions where actor_id=$1 and id=$2",
+    [actorId, executionId],
+  )).rows;
+  expect(rows).toHaveLength(1);
+  const payload: unknown = JSON.parse(rows[0].body ?? "null");
+  if (!payload || typeof payload !== "object" || !("message" in payload) ||
+      typeof payload.message !== "string" || !payload.message.trim())
+    throw new Error("expected this execution's completed public message");
+  const normalise = (value: string) => value.replace(/\s+/g, " ").trim();
+  const expected = normalise(payload.message);
+  const paragraph = page.locator(
+    `[data-execution-id="${executionId}"] [data-message-role="assistant"] p`,
+  );
+  return async () => {
+    await expect.poll(() => paragraph.count(), { timeout: 60000 }).toBe(1);
+    await paragraph.waitFor({ state: "visible", timeout: 60000 });
+    await expect.poll(async () => normalise(
+      (await paragraph.textContent({ timeout: 5000 })) ?? "",
+    ), { timeout: 60000 }).toBe(expected);
+  };
+}
+
+async function fixture(
+  n = 6, secondField = false, extraFields = 0,
+  configure?: (flow: ReturnType<typeof makeWorkflow>) => void,
+  methodLabel = "隔离定位 " + n,
+) {
+  const password = "Local-" + randomUUID() + "!",
+    email = randomUUID() + "@example.test";
+  const made = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+  });
+  if (made.error) throw made.error;
+  const actor = made.data.user.id;
+  await sql.query(
+    "insert into profiles(id,email,role,credits) values($1,$2,'user',1000)",
+    [actor, email],
+  );
+  await sql.query(
+    "insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,1000,'addition','grant','opening_grant','system',$2,0,1000)",
+    [actor, randomUUID()],
+  );
+  const user = createClient(
+    process.env.V3_LOCAL_REST!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { auth: { persistSession: false } },
+  );
+  const login = await user.auth.signInWithPassword({ email, password });
+  if (login.error) throw login.error;
+  const owner = randomUUID();
+  await sql.query("insert into profiles(id,role) values($1,'admin')", [owner]);
+  const pack = makePackage(),
+    moduleId = randomUUID(),
+    registration = "opc-" + randomUUID(),
+    flow = makeWorkflow(n, n === 6),
+    // The published module always carries an administrator model binding, the
+    // same way the real product does, so the host can open a question itself.
+    fixtureModel = randomUUID();
+  flow.steps.forEach((step, index) => {
+    step.information = [
+      {
+        id: "goal",
+        title: "已知目标 " + index,
+        required: true,
+        profileKey: "goal_" + index,
+      },
+    ];
+  });
+  if (secondField) flow.steps[0].information!.push({id:"other",title:"Second independent field",required:false,profileKey:"other"});
+  // Configurable extra fields let a focused case exercise more than the two
+  // default questions of the first step without a second fixture.
+  for (let i = 0; i < extraFields; i++)
+    flow.steps[0].information!.push({
+      id: "extra" + i,
+      title: "Extra field " + i,
+      required: false,
+      profileKey: "extra_" + i,
+    });
+  configure?.(flow);
+  await sql.query(
+    "insert into skills(id,skill_key,created_by) values($1,$2,$3)",
+    [pack.id, registration, owner],
+  );
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Fixture default','opc-fixture-default','fixture','true',1000,32000)",
+    [fixtureModel],
+  );
+  await sql.query(
+    "insert into modules(id,title,skill_id,model_id,active) values($1,$2,$3,$4,true)",
+    [moduleId, methodLabel, pack.id, fixtureModel],
+  );
+  await publishSkillPackage(admin, owner, pack);
+  await sql.query(
+    "insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)",
+    [registration, moduleId, pack.id, pack.revisionId, flow, methodLabel],
+  );
+  return {
+    actor,
+    owner,
+    user,
+    pack,
+    moduleId,
+    registration,
+    flow,
+    email,
+    password,
+    service: opcService(user, admin),
+    artifacts: workbenchService(user, admin),
+  };
+}
+// The approved merged workspace currently illustrates these six positioning
+// stages. This is test data, not the production Skill definition: the latter
+// is read from each draft's pinned workflow revision.
+async function mergedPositioningFixture() {
+  const titles = ['需求确认','竞品研究','账号定位','内容策略','运营建议','商业规划'];
+  const questions = [
+    [['product','产品与服务'],['platforms','准备经营的平台'],['time','每周可用时间']],
+    [['reference','参考研究结论']],
+    [['audience','优先服务的用户'],['difference','价值与依据']],
+    [['roles','内容表达与平台安排']],
+    [['cadence','可持续的制作安排']],
+    [['offer','内容如何支持业务']],
+  ] as const;
+  const result=await fixture(6,false,0,flow=>{
+    flow.planResources=['SKILL.md'];
+    flow.steps.forEach((step,index)=>{
+      step.title=titles[index];
+      step.information=questions[index].map(([id,title])=>({id,title,required:true,profileKey:id,elicitation:['reference','audience','roles','cadence','offer'].includes(id)?'agent_proposal' as const:'user_fact' as const}));
+      flow.report.sections[index].title=titles[index];
+    });
+  },'梳理账号定位 · 六步');
+  return result;
+}
+it("OPC: an edited six-stage Skill gives new drafts new steps and questions while old drafts stay pinned", async () => {
+  const f = await mergedPositioningFixture();
+  const oldDraft = await f.service.start({requestId:randomUUID(),registration:f.registration,mode:"manual"});
+  const oldBefore = await f.service.read(oldDraft.draftId);
+  expect(oldBefore.snapshot.workflow.steps.map((step:{title:string})=>step.title)).toEqual(
+    ['需求确认','竞品研究','账号定位','内容策略','运营建议','商业规划'],
+  );
+  expect(oldBefore.information['step-0'].schema.map((field:{id:string})=>field.id))
+    .toEqual(['product','platforms','time']);
+
+  const revisedPackage = makePackage(f.pack.id,true);
+  const revisedRegistration = 'opc-six-revised-'+randomUUID();
+  const revisedFlow = makeWorkflow(7,false);
+  f.flow.steps.forEach((step,index)=>{
+    revisedFlow.steps[index] = structuredClone(step);
+    revisedFlow.report.sections[index].title = step.title;
+  });
+  revisedFlow.steps[0].title = '需求与目标';
+  revisedFlow.steps[0].information = [
+    {id:'audience_goal',title:'本期服务目标',required:true,profileKey:'audience_goal'},
+    ...structuredClone(f.flow.steps[0].information),
+  ];
+  revisedFlow.report.sections[0].title = '需求与目标';
+  revisedFlow.steps[6].title = '效果验证';
+  revisedFlow.steps[6].information = [
+    {id:'measure',title:'如何验证效果',required:true,profileKey:'measure'},
+  ];
+  revisedFlow.report.sections[6].title = '效果验证';
+  await publishSkillPackage(admin,f.owner,revisedPackage);
+  await sql.query(
+    'insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',
+    [revisedRegistration,f.moduleId,revisedPackage.id,revisedPackage.revisionId,revisedFlow,'修订后的定位'],
+  );
+  const newDraft = await f.service.start({requestId:randomUUID(),registration:revisedRegistration,mode:"manual"});
+  const [oldAfter,newAfter] = await Promise.all([
+    f.service.read(oldDraft.draftId),f.service.read(newDraft.draftId),
+  ]);
+  expect(oldAfter.snapshot.workflow.steps).toHaveLength(6);
+  expect(oldAfter.snapshot.workflow.steps[0].title).toBe('需求确认');
+  expect(oldAfter.information['step-0'].schema.map((field:{id:string})=>field.id))
+    .toEqual(['product','platforms','time']);
+  expect(newAfter.snapshot.workflow.steps).toHaveLength(7);
+  expect(newAfter.snapshot.workflow.steps[0].title).toBe('需求与目标');
+  expect(newAfter.snapshot.workflow.steps[6].title).toBe('效果验证');
+  expect(newAfter.information['step-0'].schema.map((field:{id:string})=>field.id))
+    .toEqual(['audience_goal','product','platforms','time']);
+  expect(newAfter.information['step-6'].schema.map((field:{id:string})=>field.id))
+    .toEqual(['measure']);
+  const pinned = await sql.query(
+    `select d.draft_id::text draft_id,r.revision_id::text revision_id from opc_drafts d
+     join artifact_rounds r on r.id=d.round_id where d.draft_id in ($1,$2)`,
+    [oldDraft.draftId,newDraft.draftId],
+  );
+  expect(pinned.rows.find((row:{draft_id:string})=>row.draft_id===oldDraft.draftId)?.revision_id)
+    .toBe(f.pack.revisionId);
+  expect(pinned.rows.find((row:{draft_id:string})=>row.draft_id===newDraft.draftId)?.revision_id)
+    .toBe(revisedPackage.revisionId);
+  const {chromium}=await import('../../../../../apps/web/node_modules/@playwright/test');
+  const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+  try {
+    const context=await browser.newContext({viewport:{width:1600,height:900},deviceScaleFactor:1});
+    await context.route('**/*',route=>['127.0.0.1','localhost'].includes(new URL(route.request().url()).hostname)?route.continue():route.abort());
+    const page=await context.newPage();
+    page.setDefaultTimeout(30000);
+    await page.goto(process.env.V3_LOCAL_APP+'/login?redirect='+encodeURIComponent('/positioning/'+newDraft.draftId));
+    await page.getByPlaceholder('name@example.com').fill(f.email);
+    await page.getByPlaceholder('输入你的密码').fill(f.password);
+    await page.getByRole('button',{name:'登录',exact:true}).last().click();
+    await page.waitForURL(url=>url.pathname==='/positioning/'+newDraft.draftId);
+    const stages=page.getByRole('navigation',{name:'定位步骤'}).getByRole('button');
+    await expect.poll(()=>stages.count()).toBe(7);
+    expect(await stages.first().innerText()).toContain('需求与目标');
+    expect(await stages.last().innerText()).toContain('效果验证');
+    await page.getByRole('textbox',{name:'本期服务目标',exact:true}).waitFor();
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-revised-skill-seven-stage.png'});
+    await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+oldDraft.draftId);
+    await expect.poll(()=>stages.count()).toBe(6);
+    expect(await stages.first().innerText()).toContain('需求确认');
+    await page.getByRole('textbox',{name:'产品与服务',exact:true}).waitFor();
+  } finally { await browser.close(); }
+},180000);
+async function completed(n = 6, mode: "manual" | "mentor" = "manual") {
+  const f = await fixture(n);
+  const requestId = randomUUID();
+  const d = await f.service.start({
+    requestId,
+    registration: f.registration,
+    mode,
+  });
+  for (const step of f.flow.steps) {
+    await f.artifacts.execute({
+      action: "save",
+      projectId: d.projectId,
+      roundId: d.roundId,
+      requestId: randomUUID(),
+      stepId: step.id,
+      body: "User confirmed " + step.title,
+      evidenceIds: [],
+      expectedVersion: 0,
+    });
+    const snap = await f.artifacts.read(d.projectId, d.roundId);
+    const state = snap.steps[step.id];
+    await f.service.information({
+      draftId: d.draftId,
+      stepId: step.id,
+      requestId: randomUUID(),
+      expectedVersion: state.version,
+      values: {
+        goal: {
+          status: "confirmed",
+          nature: "decision",
+          value: "A concrete user decision",
+        },
+      },
+    });
+    const updated = (await f.artifacts.read(d.projectId, d.roundId)).steps[
+      step.id
+    ];
+    await f.artifacts.execute({
+      action: "confirm",
+      projectId: d.projectId,
+      roundId: d.roundId,
+      requestId: randomUUID(),
+      stepId: step.id,
+      expectedVersion: updated.version,
+      expectedReviewVersion: updated.reviewVersion,
+    });
+  }
+  const snap = await f.artifacts.read(d.projectId, d.roundId);
+  await f.artifacts.execute({
+    action: "publish",
+    projectId: d.projectId,
+    roundId: d.roundId,
+    requestId: randomUUID(),
+    expectedSteps: Object.fromEntries(
+      Object.entries(snap.steps).map(([k, v]) => [
+        k,
+        { version: v.version, reviewVersion: v.reviewVersion },
+      ]),
+    ),
+  });
+  const read = await f.service.read(d.draftId);
+  return { ...f, d, sourceVersionId: read.report.id };
+}
+it.each([3, 6, 8, 4])(
+  "OPC: configured %i step draft, manual persistence and publication before account creation",
+  async (n) => {
+    const f = await completed(n);
+    const read = await f.service.read(f.d.draftId);
+    expect(read.snapshot.workflow.steps).toHaveLength(n);
+    expect(read.report.available).toBe(true);
+    expect(
+      (
+        await sql.query(
+          "select count(*)::int n from opc_accounts where actor_id=$1",
+          [f.actor],
+        )
+      ).rows[0].n,
+    ).toBe(0);
+    expect(
+      (
+        await sql.query(
+          "select count(*)::int n from bill2_runs where actor_id=$1",
+          [f.actor],
+        )
+      ).rows[0].n,
+    ).toBe(0);
+    expect((await f.service.list()).drafts).toHaveLength(1);
+  },
+);
+it("OPC: start replay and concurrency preserve one draft/session; actor and payload changes denied", async () => {
+  const f = await fixture(),
+    input = {
+      requestId: randomUUID(),
+      registration: f.registration,
+      mode: "mentor",
+    };
+  const [a, b] = await Promise.all([
+    f.service.start(input),
+    f.service.start(input),
+  ]);
+  expect(a).toEqual(b);
+  await expect(f.service.start({ ...input, mode: "manual" })).rejects.toThrow(
+    "CONFLICT",
+  );
+  const other = await fixture();
+  await expect(other.service.read(a.draftId)).rejects.toThrow("DENIED");
+});
+it("OPC: confirmed multi-account handoff is atomic, concurrent/replayed once and keeps original source/session/money", async () => {
+  const f = await completed();
+  const body = [
+    {
+      id: randomUUID(),
+      platform: "x",
+      account: "one",
+      title: "Topic one",
+      brief: "Original brief",
+      day: "2026-09-15",
+    },
+    {
+      id: randomUUID(),
+      platform: "youtube",
+      account: "two",
+      title: "Topic two",
+      brief: "Second brief",
+      day: "2026-09-16",
+    },
+  ];
+  const plan = await f.service.savePlan({
+    draftId: f.d.draftId,
+    requestId: randomUUID(),
+    expectedVersion: 0,
+    sourceVersionId: f.sourceVersionId,
+    body,
+  });
+  const input = {
+    draftId: f.d.draftId,
+    requestId: randomUUID(),
+    planId: plan.planId,
+    accounts: body.map((i) => ({
+      platform: i.platform,
+      account: i.account,
+      expectedRevision: null,
+    })),
+  };
+  const [a, b] = await Promise.all([
+    f.service.handoff(input),
+    f.service.handoff(input),
+  ]);
+  expect(a).toEqual(b);
+  expect(a).toHaveLength(2);
+  expect(new Set(a.map((x: { sessionId: string }) => x.sessionId)).size).toBe(
+    2,
+  );
+  expect(
+    a.every((x: { sessionId: string }) => x.sessionId !== f.d.sessionId),
+  ).toBe(true);
+  expect((await f.service.list()).accounts).toHaveLength(2);
+  expect((await f.service.read(f.d.draftId)).sessionId).toBe(f.d.sessionId);
+  expect(
+    (await sql.query("select credits from profiles where id=$1", [f.actor]))
+      .rows[0].credits,
+  ).toBe(1000);
+  await expect(
+    f.service.handoff({ ...input, accounts: [input.accounts[0]] }),
+  ).rejects.toThrow("CONFLICT");
+  await expect(
+    f.service.handoff({ ...input, requestId: randomUUID() }),
+  ).rejects.toThrow("ACCOUNT_CONFLICT");
+  expect(
+    (
+      await sql.query(
+        "select count(*)::int n from opc_items where plan_id=$1",
+        [plan.planId],
+      )
+    ).rows[0].n,
+  ).toBe(2);
+});
+it("OPC: stale plan, invalid target and transaction failure leave no partial accounts", async () => {
+  const f = await completed();
+  const body = [
+    {
+      id: randomUUID(),
+      platform: "x",
+      account: "one",
+      title: "Topic",
+      brief: "Brief",
+      day: "2026-09-15",
+    },
+  ];
+  const p = await f.service.savePlan({
+    draftId: f.d.draftId,
+    requestId: randomUUID(),
+    expectedVersion: 0,
+    sourceVersionId: f.sourceVersionId,
+    body,
+  });
+  const input = {
+    draftId: f.d.draftId,
+    requestId: randomUUID(),
+    planId: p.planId,
+    accounts: [{ platform: "x", account: "one", expectedRevision: 1 }],
+  };
+  await expect(f.service.handoff(input)).rejects.toThrow("CONFLICT");
+  await f.service.savePlan({
+    draftId: f.d.draftId,
+    requestId: randomUUID(),
+    expectedVersion: 1,
+    sourceVersionId: f.sourceVersionId,
+    body,
+  });
+  await expect(
+    f.service.handoff({
+      ...input,
+      accounts: [{ ...input.accounts[0], expectedRevision: null }],
+    }),
+  ).rejects.toThrow("VERSION_CONFLICT");
+  expect((await f.service.list()).accounts).toHaveLength(0);
+});
+
+it("OPC: real SDK HTTP result becomes a candidate on original draft; restart/replay does not resend or append twice", async () => {
+  const { runtimeExecutor } = await import("../runtime/execute");
+  const { createServer } = await import("node:http");
+  const f = await fixture(),
+    modelId = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-fixture','fixture','true',1000,32000)",
+    [modelId],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [
+    modelId,
+    f.moduleId,
+  ]);
+  const d = await f.service.start({
+    requestId: randomUUID(),
+    registration: f.registration,
+    mode: "mentor",
+  });
+  await f.service.information({
+    draftId: d.draftId,
+    stepId: "step-0",
+    requestId: randomUUID(),
+    expectedVersion: 0,
+    values: {
+      goal: {
+        status: "confirmed",
+        nature: "decision",
+        value: "Teach photography",
+      },
+    },
+  });
+  const prepared = await f.service.prepareStep({
+    draftId: d.draftId,
+    requestId: randomUUID(),
+    stepId: "step-0",
+    input: "I want to teach photography.",
+  });
+  let calls = 0;
+  const server = createServer(async (req, res) => {
+    calls++;
+    let raw = "";
+    for await (const c of req) raw += c;
+    const request = JSON.parse(JSON.parse(raw).input);
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify({
+        id: "opc-" + prepared.executionId,
+        model: request.model,
+        final: true,
+        cost: "0.003",
+        currency: "USD",
+        coverage: "request_total",
+        usage: {
+          sdkResponse: {
+            id: "opc-" + prepared.executionId,
+            object: "chat.completion",
+            created: 1,
+            model: request.model,
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content:
+                    "Photography audience: beginners. Hypothesis awaiting confirmation.",
+                },
+                finish_reason: "stop",
+              },
+            ],
+            usage: {
+              prompt_tokens: 10,
+              completion_tokens: 5,
+              total_tokens: 15,
+            },
+          },
+        },
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const addr = server.address();
+    if (!addr || typeof addr === "string") throw new Error("local endpoint");
+    const endpoint = "http://127.0.0.1:" + addr.port;
+    await runtimeExecutor({
+      database: admin,
+      actor: async () => f.actor,
+      endpoint,
+    }).execute(prepared.executionId);
+    const input = {
+      draftId: d.draftId,
+      executionId: prepared.executionId,
+      stepId: "step-0",
+      requestId: randomUUID(),
+    };
+    const candidate = await f.service.saveResult(input);
+    expect(await f.service.saveResult(input)).toEqual(candidate);
+    expect(
+      await f.service.saveResult({ ...input, requestId: randomUUID() }),
+    ).toEqual(candidate);
+    await expect(
+      f.service.saveResult({ ...input, stepId: "step-1" }),
+    ).rejects.toThrow("DENIED");
+    await expect(
+      f.service.planResult(d.draftId, prepared.executionId),
+    ).rejects.toThrow("DENIED");
+    await runtimeExecutor({
+      database: admin,
+      actor: async () => f.actor,
+      endpoint,
+    }).execute(prepared.executionId);
+    expect(calls).toBe(1);
+    const view = await f.service.read(d.draftId);
+    expect(view.snapshot.candidates).toHaveLength(1);
+    expect(view.snapshot.candidates[0].body).toContain("Photography");
+    expect(view.snapshot.steps["step-0"].body).toBe("");
+    expect(
+      (
+        await sql.query(
+          "select count(*)::int n from runtime_session_history where session_id=$1",
+          [d.sessionId],
+        )
+      ).rows[0].n,
+    ).toBe(2);
+    await sql.query("update bill2_drafts set revoked=true where id=$1", [
+      d.draftId,
+    ]);
+    await expect(f.service.read(d.draftId)).rejects.toThrow("DENIED");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((e) => (e ? reject(e) : resolve())),
+    );
+  }
+});
+it("OPC: browser manual positioning, versioned week plan, handoff and authenticated recovery", async () => {
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await fixture(3);
+  await planFixtureModel(f.moduleId);
+  const browser = await chromium.launch({
+    executablePath:
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+  let releaseInformation = () => {};
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", (route) => {
+      const u = new URL(route.request().url());
+      return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+        ["data:", "blob:"].includes(u.protocol)
+        ? route.continue()
+        : route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(90000);
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    const ready = page.waitForResponse(
+      (r) => r.url().includes("/api/trpc/settings.getSystemSettings") && r.ok(),
+    );
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=/positioning");
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page
+      .getByRole("button", { name: "登录", exact: true })
+      .last()
+      .click();
+    await page.waitForURL((url) => url.pathname === "/positioning", {
+      timeout: 90000,
+    });
+    const fixtureDraft=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'manual',businessName:'已有定位测试业务'});
+    await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+fixtureDraft.draftId);
+    const draftUrl = page.url();
+    await expect
+      .poll(() => page.getByLabel("全程导师聊天").count(), {
+        timeout: 15000,
+      })
+      .toBe(1);
+    expect(await page.getByRole("button", { name: "保存信息状态" }).count()).toBe(0);
+    expect(await page.getByRole("button", { name: "确认所填信息并整理成果" }).count()).toBe(0);
+    await page.getByText("直接填写完整策略", { exact: true }).waitFor();
+    expect(await page.getByRole("button", { name: "信息不够，让 Agent 帮我补齐", exact: true }).count()).toBe(1);
+    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n)).toBe(0);
+    let firstInformation = true,
+      informationArrived!: () => void;
+    const heldInformation = new Promise<void>((resolve) => {
+      releaseInformation = resolve;
+    });
+    const informationReady = new Promise<void>((resolve) => {
+      informationArrived = resolve;
+    });
+    await page.route("**/api/trpc/opc.information*", async (route) => {
+      if (!firstInformation) {
+        await route.continue();
+        return;
+      }
+      firstInformation = false;
+      const response = await route.fetch();
+      informationArrived();
+      await heldInformation;
+      await route.fulfill({ response });
+    });
+    for (const step of f.flow.steps) {
+      const field = step.information![0];
+      const article = page.getByLabel("本步填写信息");
+      await article
+        .getByRole("textbox", { name: field.title, exact: true })
+        .fill("Confirmed test decision");
+      if (step.id === f.flow.steps[0].id) {
+        await informationReady;
+        expect(
+          await article
+            .getByRole("textbox", { name: field.title, exact: true })
+            .isEnabled(),
+        ).toBe(true);
+        releaseInformation();
+      }
+      await expect
+        .poll(
+          () => article.getByText("已自动保存", { exact: true }).count(),
+          { timeout: 15000 },
+        )
+        .toBe(1);
+      await article
+        .getByRole("button", { name: /确认本题并继续|确认当前信息，继续|继续核对本题确认/, exact: true })
+        .click();
+      if (step.id !== f.flow.steps.at(-1)!.id) {
+        const next = f.flow.steps[f.flow.steps.indexOf(step) + 1];
+        const nextField = page.getByRole("textbox", {
+          name: next.information![0].title,
+          exact: true,
+        });
+        try {
+          await nextField.waitFor({ state: "visible", timeout: 15000 });
+        } catch {
+          throw new Error(
+            "next step unavailable: " +
+              JSON.stringify({
+                heading: await page.locator("article h2").allTextContents(),
+                screen: (await page.locator("main").innerText()).slice(0, 2000),
+              }),
+          );
+        }
+        await page.reload();
+        await expect
+          .poll(() => page.getByLabel("全程导师聊天").count(), {
+            timeout: 15000,
+          })
+          .toBe(1);
+      }
+    }
+    await expect
+      .poll(
+        () =>
+          page
+            .getByRole("button", { name: "确认正式定位", exact: true })
+            .isEnabled(),
+        { timeout: 15000 },
+      )
+      .toBe(true);
+    const lastStep = f.flow.steps.at(-1)!;
+    const lastArticle = page.getByLabel("本步填写信息");
+    await lastArticle
+      .getByRole("textbox", {
+        name: lastStep.information![0].title,
+        exact: true,
+      })
+      .fill("Updated confirmed decision before publication");
+    expect(
+      await page
+        .getByRole("button", { name: "确认正式定位", exact: true })
+        .isEnabled(),
+    ).toBe(false);
+    await page.reload();
+    await expect
+      .poll(
+        () =>
+          lastArticle
+            .getByRole("textbox", {
+              name: lastStep.information![0].title,
+              exact: true,
+            })
+            .inputValue(),
+        { timeout: 15000 },
+      )
+      .toBe("Updated confirmed decision before publication");
+    await expect
+      .poll(
+        () =>
+          lastArticle
+            .getByRole("button", { name: /确认本题并继续|确认当前信息，继续|继续核对本题确认/, exact: true })
+            .isEnabled(),
+        { timeout: 15000 },
+      )
+      .toBe(true);
+    await lastArticle
+      .getByRole("button", { name: /确认本题并继续|确认当前信息，继续|继续核对本题确认/, exact: true })
+      .click();
+    await expect
+      .poll(() => lastArticle.textContent(), { timeout: 15000 })
+      .toContain("已确认");
+    await page
+      .getByRole("button", { name: "确认正式定位", exact: true })
+      .click();
+    // The current B1 entry opens the topic conversation. This legacy plan
+    // remains directly recoverable, but opening it never inherits the topic
+    // consent or starts a model call on its own.
+    await page
+      .getByRole("dialog", { name: "是否继续生成第一周选题" })
+      .getByRole("button", { name: "稍后", exact: true })
+      .click();
+    await page.goto(draftUrl + "/plan");
+    expect(await page.getByLabel("定位摘要").textContent()).toContain("Updated confirmed decision");
+    expect(await page.getByLabel("当前定位步骤").count()).toBe(0);
+    expect(await page.getByRole("table", {name:"第一周选题计划"}).count()).toBe(1);
+    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n)).toBe(0);
+    await page.getByRole("button", { name: "生成第一周计划", exact: true }).click();
+    await page
+      .getByRole("heading", {
+        name: "AI 计划候选 · 尚未替换你的编辑",
+        exact: true,
+      })
+      .waitFor();
+    expect(
+      await page
+        .getByRole("button", { name: "重新生成计划候选", exact: true })
+        .count(),
+    ).toBe(1);
+    await page
+      .getByRole("button", { name: "采用候选到计划工作稿", exact: true })
+      .click();
+    await page.getByRole("textbox", { name: "title 0", exact: true }).waitFor();
+    expect(
+      await page
+        .getByRole("textbox", { name: "title 0", exact: true })
+        .inputValue(),
+    ).toBe("模拟选题 1");
+    // Adopting the candidate ends the recovery envelope, so a reload must not
+    // generate a second one.
+    await page.reload();
+    await expect
+      .poll(
+        () =>
+          page
+            .getByRole("heading", {
+              name: "AI 计划候选 · 尚未替换你的编辑",
+              exact: true,
+            })
+            .count(),
+        { timeout: 15000 },
+      )
+      .toBe(0);
+    // Manual editing stays available once a candidate has been adopted.
+    await page
+      .getByRole("textbox", { name: "title 0", exact: true })
+      .fill("Browser topic");
+    await page.getByRole("button", { name: "保存计划版本" }).click();
+    let lostHandoff = false;
+    await page.route("**/api/trpc/opc.handoff*", async (route) => {
+      if (!lostHandoff) {
+        lostHandoff = true;
+        const response = await route.fetch();
+        expect(response.status()).toBe(200);
+        await route.abort();
+      } else await route.continue();
+    });
+    await page
+      .getByRole("button", { name: "确认账号与计划，创建选题" })
+      .click();
+    await page.getByRole("alert").waitFor();
+    await page.reload();
+    await page
+      .getByRole("button", { name: "确认账号与计划，创建选题" })
+      .click();
+    await page.getByRole("link", { name: "进入选题工作空间" }).first().waitFor();
+    const href = await page
+      .getByRole("link", { name: "进入选题工作空间" }).first()
+      .getAttribute("href");
+    await page.reload();
+    await page.getByRole("link", { name: "进入选题工作空间" }).first().waitFor();
+    expect(
+      await page
+        .getByRole("link", { name: "进入选题工作空间" }).first()
+        .getAttribute("href"),
+    ).toBe(href);
+    await context.clearCookies();
+    await page.goto(
+      process.env.V3_LOCAL_APP +
+        "/login?redirect=" +
+        encodeURIComponent(new URL(draftUrl).pathname + "/plan"),
+    );
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page
+      .getByRole("button", { name: "登录", exact: true })
+      .last()
+      .click();
+    const expectedPlanPath = new URL(draftUrl).pathname + "/plan";
+    await page.waitForURL(url => url.pathname === expectedPlanPath);
+    await page.getByRole("link", { name: "进入选题工作空间" }).first().waitFor();
+    expect(
+      await page
+        .getByRole("link", { name: "进入选题工作空间" }).first()
+        .getAttribute("href"),
+    ).toBe(href);
+    expect((await f.service.list()).accounts[0].profile.goal_2.value).toBe(
+      "Updated confirmed decision before publication",
+    );
+    // The Agent produced the seven-row candidate that was adopted, so the
+    // handoff created exactly one work item per adopted row.
+    expect(
+      (
+        await sql.query(
+          "select count(*)::int n from opc_items i join artifact_projects p on p.id=i.work_item_id where p.actor_id=$1",
+          [f.actor],
+        )
+      ).rows[0].n,
+    ).toBe(7);
+    expect(
+      (
+        await sql.query(
+          "select count(*)::int n from bill2_runs b join runtime_executions e on e.billing_run_id=b.id join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id where b.actor_id=$1 and t.purpose='plan'",
+          [f.actor],
+        )
+      ).rows[0].n,
+    ).toBe(1);
+    expect(errors).toEqual([]);
+  } finally {
+    releaseInformation();
+    await browser.close();
+  }
+}, 300000);
+it("OPC: browser can correct plan inputs after a definite invalid completed response", async () => {
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await completed(3);
+  const browserModel = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-browser','fixture','true',1000,32000)",
+    [browserModel],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [
+    browserModel,
+    f.moduleId,
+  ]);
+  const browser = await chromium.launch({
+    executablePath:
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", (route) => {
+      const u = new URL(route.request().url());
+      return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+        ["data:", "blob:"].includes(u.protocol)
+        ? route.continue()
+        : route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(90000);
+    await page.goto(
+      process.env.V3_LOCAL_APP +
+        "/login?redirect=" +
+        encodeURIComponent("/positioning/" + f.d.draftId + "/plan"),
+    );
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page
+      .getByRole("button", { name: "登录", exact: true })
+      .last()
+      .click();
+    await page.waitForURL((url) =>
+      url.pathname.endsWith("/positioning/" + f.d.draftId + "/plan"),
+    );
+    await page.getByRole("button", { name: "添加选题" }).click();
+    await page
+      .getByRole("textbox", { name: "account 0", exact: true })
+      .fill("manual-user-row");
+    await page
+      .getByRole("textbox", { name: "title 0", exact: true })
+      .fill("Original user title");
+    await page
+      .getByRole("textbox", { name: "简报", exact: true })
+      .fill("Original user brief");
+    // The user supplies their own choices; the Agent produces the rows.
+    const accountChoice = page.getByRole("textbox", {
+      name: "具体账号",
+      exact: true,
+    });
+    await accountChoice.fill("invalid-plan");
+    const generate = page.getByRole("button", {
+      name: "生成第一周计划",
+      exact: true,
+    });
+    const invalidResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/trpc/opc.planResult") && response.ok(),
+    );
+    await generate.click();
+    await invalidResponse;
+    await expect
+      .poll(() =>
+        page.evaluate((id) =>
+          sessionStorage.getItem("opc-plan-generation:" + id),
+        f.d.draftId),
+      )
+      .toBeNull();
+    await accountChoice.fill("corrected-plan");
+    await generate.click();
+    await page
+      .getByRole("heading", {
+        name: "AI 计划候选 · 尚未替换你的编辑",
+        exact: true,
+      })
+      .waitFor();
+    expect(
+      await page
+        .getByRole("textbox", { name: "title 0", exact: true })
+        .inputValue(),
+    ).toBe("Original user title");
+    const requests = await sql.query(
+      "select request_id,state from runtime_executions where session_id=$1 order by created_at,id",
+      [f.d.sessionId],
+    );
+    expect(requests.rows).toHaveLength(2);
+    expect(new Set(requests.rows.map((row) => row.request_id)).size).toBe(2);
+    expect(requests.rows.map((row) => row.state)).toEqual([
+      "completed",
+      "completed",
+    ]);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+
+it("OPC: work item uses shared Runtime and saves non-workflow Skill artifact once; source revocation denies recovery reads", async () => {
+  const { runtimeAdmissionService } = await import("../runtime/admission");
+  const { runtimeExecutor } = await import("../runtime/execute");
+  const { createServer } = await import("node:http");
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await completed(),
+    modelId = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-work','fixture','true',1000,32000)",
+    [modelId],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [
+    modelId,
+    f.moduleId,
+  ]);
+  const plan = await f.service.savePlan({
+    draftId: f.d.draftId,
+    requestId: randomUUID(),
+    expectedVersion: 0,
+    sourceVersionId: f.sourceVersionId,
+    body: [
+      {
+        id: randomUUID(),
+        platform: "x",
+        account: "owner",
+        title: "A topic",
+        brief: "Use the confirmed positioning.",
+        day: "2026-09-15",
+      },
+    ],
+  });
+  const [work] = await f.service.handoff({
+    draftId: f.d.draftId,
+    requestId: randomUUID(),
+    planId: plan.planId,
+    accounts: [{ platform: "x", account: "owner", expectedRevision: null }],
+  });
+  const admission = runtimeAdmissionService(f.user, admin, {
+    account: "local",
+    costPerCall: "0.02",
+    creditsPerUsd: "1000",
+    multiplier: "1",
+    maxCalls: 1,
+    maxOutputTokens: 1000,
+    inputBytes: 32000,
+    historyItems: 20,
+    searchEnabled: false,
+  });
+  const prepared = await admission.prepare({
+    sessionId: work.sessionId,
+    requestId: randomUUID(),
+    input: "Write the topic artifact.",
+    selection: {
+      kind: "skill",
+      moduleId: f.moduleId,
+      revisionId: f.pack.revisionId,
+    },
+    network: "deny",
+    sources: [],
+  });
+  let calls = 0;
+  const server = createServer(async (req, res) => {
+    calls++;
+    for await (const _ of req) void _;
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify({
+        id: "work-" + calls,
+        model: "opc-work",
+        final: true,
+        cost: "0.003",
+        currency: "USD",
+        coverage: "request_total",
+        usage: {
+          sdkResponse: {
+            id: "work-" + prepared.executionId,
+            object: "chat.completion",
+            created: 1,
+            model: "opc-work",
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "Saved Skill work artifact",
+                },
+                finish_reason: "stop",
+              },
+            ],
+            usage: {
+              prompt_tokens: 10,
+              completion_tokens: 5,
+              total_tokens: 15,
+            },
+          },
+        },
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw new Error("local server");
+    const endpoint = "http://127.0.0.1:" + address.port;
+    await runtimeExecutor({
+      database: admin,
+      actor: async () => f.actor,
+      endpoint,
+    }).execute(prepared.executionId);
+    const ordinary = await admission.prepare({
+      sessionId: work.sessionId,
+      requestId: randomUUID(),
+      input: "Keep this as an ordinary conversation.",
+      selection: { kind: "ordinary", modelId },
+      network: "deny",
+      sources: [],
+    });
+    await runtimeExecutor({
+      database: admin,
+      actor: async () => f.actor,
+      endpoint,
+    }).execute(ordinary.executionId);
+    const publicView = await admin.rpc("runtime_view", {
+      p_actor_id: f.actor,
+      p_session_id: work.sessionId,
+    });
+    expect(publicView.error).toBeNull();
+    expect(
+      publicView.data.executions.map((execution: any) => ({
+        executionId: execution.executionId,
+        skillExecution: execution.skillExecution,
+      })),
+    ).toEqual([
+      { executionId: prepared.executionId, skillExecution: true },
+      { executionId: ordinary.executionId, skillExecution: false },
+    ]);
+    const browser = await chromium.launch({
+      executablePath:
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      headless: true,
+    });
+    try {
+      const context = await browser.newContext();
+      await context.route("**/*", (route) => {
+        const u = new URL(route.request().url());
+        return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+          ["data:", "blob:"].includes(u.protocol)
+          ? route.continue()
+          : route.abort();
+      });
+      const page = await context.newPage();
+      page.setDefaultTimeout(90000);
+      await page.goto(
+        process.env.V3_LOCAL_APP +
+          "/login?redirect=" +
+          encodeURIComponent("/runtime?session=" + work.sessionId),
+      );
+      await page.getByPlaceholder("name@example.com").fill(f.email);
+      await page.getByPlaceholder("输入你的密码").fill(f.password);
+      await page
+        .getByRole("button", { name: "登录", exact: true })
+        .last()
+        .click();
+      await page.waitForURL((url) => url.pathname === "/runtime");
+      await expect
+        .poll(
+          () =>
+            page
+              .getByRole("button", { name: "保存 Skill 成果", exact: true })
+              .count(),
+          { timeout: 15000 },
+        )
+        .toBe(1);
+      await page
+        .getByRole("button", { name: "保存 Skill 成果", exact: true })
+        .click();
+      await page.getByText("已保存成果 · 第 1 版", { exact: true }).waitFor();
+    } finally {
+      await browser.close();
+    }
+    const saved = await f.service.saveWorkResult(prepared.executionId);
+    expect(await f.service.saveWorkResult(prepared.executionId)).toEqual(saved);
+    await expect(f.service.saveWorkResult(ordinary.executionId)).rejects.toThrow();
+    expect((await f.service.workResults(work.sessionId))[0].body).toBe(
+      "Saved Skill work artifact",
+    );
+    expect(await f.artifacts.projects()).toEqual([]);
+    expect(
+      (await f.artifacts.read(saved.artifactId, saved.artifactId)).workflow
+        .steps,
+    ).toEqual([]);
+    await expect(
+      f.artifacts.report(saved.artifactId, saved.artifactId),
+    ).rejects.toThrow("DENIED"); // Dedicated result projection above is readable; workflow mutation/export entry stays closed.
+    await runtimeExecutor({
+      database: admin,
+      actor: async () => f.actor,
+      endpoint,
+    }).execute(prepared.executionId);
+    expect(calls).toBe(2);
+    expect(
+      (
+        await sql.query(
+          "select count(*)::int n from artifact_versions where id=$1",
+          [saved.artifactId],
+        )
+      ).rows[0].n,
+    ).toBe(1);
+    await sql.query("update bill2_drafts set revoked=true where id=$1", [
+      f.d.draftId,
+    ]);
+    await expect(f.service.workResults(work.sessionId)).rejects.toThrow(
+      "DENIED",
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((e) => (e ? reject(e) : resolve())),
+    );
+  }
+}, 300000);
+it("OPC: revising positioning retains original version/session and invalidates only configured dependents", async () => {
+  const f = await completed(3);
+  const old = await f.service.read(f.d.draftId);
+  const request = randomUUID();
+  const revision = await f.service.revise(f.d.draftId, request, f.d.roundId);
+  expect(await f.service.revise(f.d.draftId, request, f.d.roundId)).toEqual(
+    revision,
+  );
+  const current = await f.service.read(f.d.draftId);
+  expect(current.sessionId).toBe(f.d.sessionId);
+  expect(current.roundId).not.toBe(f.d.roundId);
+  await f.artifacts.execute({
+    action: "save",
+    projectId: f.d.projectId,
+    roundId: current.roundId,
+    requestId: randomUUID(),
+    stepId: "step-1",
+    expectedVersion: current.snapshot.steps["step-1"].version,
+    body: "Changed decision",
+    evidenceIds: [],
+  });
+  const next = await f.service.read(f.d.draftId);
+  expect(next.snapshot.steps["step-0"].valid).toBe(true);
+  expect(next.snapshot.steps["step-1"].valid).toBe(false);
+  expect(next.snapshot.steps["step-2"].valid).toBe(false);
+  expect(await f.artifacts.report(f.d.projectId, f.d.roundId)).toEqual(
+    old.report,
+  );
+});
+it("OPC: required information states gate confirmation and survive revisions without replacing facts", async () => {
+  const f = await fixture(3),
+    d = await f.service.start({
+      requestId: randomUUID(),
+      registration: f.registration,
+      mode: "mentor",
+    });
+  await f.artifacts.execute({
+    action: "save",
+    projectId: d.projectId,
+    roundId: d.roundId,
+    requestId: randomUUID(),
+    stepId: "step-0",
+    expectedVersion: 0,
+    body: "A provisional answer",
+    evidenceIds: [],
+  });
+  for (const status of [
+    "unknown",
+    "unclear",
+    "provisional",
+    "deferred",
+    "confirmed",
+  ] as const) {
+    const before = await f.artifacts.read(d.projectId, d.roundId);
+    await f.service.information({
+      draftId: d.draftId,
+      requestId: randomUUID(),
+      stepId: "step-0",
+      expectedVersion: before.steps["step-0"].version,
+      values: {
+        goal: {
+          status,
+          nature: "hypothesis",
+          value:
+            status === "deferred"
+              ? "User accepts this limitation"
+              : "User material",
+        },
+      },
+    });
+    const after = await f.artifacts.read(d.projectId, d.roundId),
+      command = {
+        action: "confirm" as const,
+        projectId: d.projectId,
+        roundId: d.roundId,
+        requestId: randomUUID(),
+        stepId: "step-0",
+        expectedVersion: after.steps["step-0"].version,
+        expectedReviewVersion: after.steps["step-0"].reviewVersion,
+      };
+    if (["deferred", "confirmed"].includes(status))
+      await f.artifacts.execute(command);
+    else await expect(f.artifacts.execute(command)).rejects.toThrow();
+    expect(
+      (await f.service.read(d.draftId)).information["step-0"].values.goal
+        .status,
+    ).toBe(status);
+  }
+  const other = await fixture();
+  await expect(
+    other.service.information({
+      draftId: d.draftId,
+      requestId: randomUUID(),
+      stepId: "step-0",
+      expectedVersion: 0,
+      values: {},
+    }),
+  ).rejects.toThrow("DENIED");
+});
+it("OPC: deferred required information preserves draft progress but cannot publish a formal positioning", async () => {
+  const f = await fixture(3);
+  const d = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: "manual" });
+  for (const step of f.flow.steps) {
+    const before = await f.service.read(d.draftId);
+    const values = Object.fromEntries(step.information!.map(field => [field.id, {
+      status: "deferred", nature: "unknown", value: "用户明确说明目前缺少这项必需信息。",
+    }]));
+    await f.service.information({ draftId: d.draftId, stepId: step.id, requestId: randomUUID(), expectedVersion: before.snapshot.steps[step.id].version, values });
+    const saved = await f.service.read(d.draftId);
+    await f.artifacts.execute({ action: "save", projectId: d.projectId, roundId: d.roundId, requestId: randomUUID(), stepId: step.id, expectedVersion: saved.snapshot.steps[step.id].version, body: "暂缓原因已保留", evidenceIds: [] });
+    const ready = await f.service.read(d.draftId);
+    await f.artifacts.execute({ action: "confirm", projectId: d.projectId, roundId: d.roundId, requestId: randomUUID(), stepId: step.id, expectedVersion: ready.snapshot.steps[step.id].version, expectedReviewVersion: ready.snapshot.steps[step.id].reviewVersion });
+  }
+  const ready = await f.service.read(d.draftId);
+  expect(Object.values(ready.snapshot.steps).every((step: any) => step.valid)).toBe(true);
+  await expect(f.artifacts.execute({
+    action: "publish", projectId: d.projectId, roundId: d.roundId, requestId: randomUUID(),
+    expectedSteps: Object.fromEntries(Object.entries(ready.snapshot.steps).map(([id, step]: [string, any]) => [id, { version: step.version, reviewVersion: step.reviewVersion }])),
+  })).rejects.toThrow("ARTIFACT_REVIEW_REQUIRED");
+  expect((await f.service.read(d.draftId)).snapshot.state).toBe("draft");
+});
+it("OPC: plan generation uses the original SDK session and returns a separate bounded plan candidate", async () => {
+  const { runtimeExecutor } = await import("../runtime/execute");
+  const { createServer } = await import("node:http");
+  const f = await completed(3),
+    modelId = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-plan','fixture','true',1000,32000)",
+    [modelId],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [
+    modelId,
+    f.moduleId,
+  ]);
+  const request = {
+    draftId: f.d.draftId,
+    requestId: randomUUID(),
+    purpose: "plan" as const,
+    stepId: "step-2",
+    input: "x account test-account; start 2026-09-15",
+  };
+  const prepared = await f.service.prepareStep(request);
+  const body = [
+    {
+      id: randomUUID(),
+      platform: "x",
+      account: "test-account",
+      title: "First topic",
+      brief: "Use confirmed facts.",
+      day: "2026-09-15",
+    },
+  ];
+  let calls = 0;
+  const server = createServer(async (req, res) => {
+    calls++;
+    for await (const _ of req) void _;
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify({
+        id: "plan-" + prepared.executionId,
+        model: "opc-plan",
+        final: true,
+        cost: "0.003",
+        currency: "USD",
+        coverage: "request_total",
+        usage: {
+          sdkResponse: {
+            id: "plan-" + prepared.executionId,
+            object: "chat.completion",
+            created: 1,
+            model: "opc-plan",
+            choices: [
+              {
+                index: 0,
+                message: { role: "assistant", content: JSON.stringify(body) },
+                finish_reason: "stop",
+              },
+            ],
+            usage: {
+              prompt_tokens: 10,
+              completion_tokens: 5,
+              total_tokens: 15,
+            },
+          },
+        },
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw new Error("local server");
+    const endpoint = "http://127.0.0.1:" + address.port;
+    await runtimeExecutor({
+      database: admin,
+      actor: async () => f.actor,
+      endpoint,
+    }).execute(prepared.executionId);
+    expect(
+      (await f.service.planResult(f.d.draftId, prepared.executionId)).body,
+    ).toEqual(body);
+    expect((await f.service.read(f.d.draftId)).plans).toEqual([]);
+    await expect(
+      f.service.saveResult({
+        draftId: f.d.draftId,
+        executionId: prepared.executionId,
+        stepId: "step-2",
+        requestId: randomUUID(),
+      }),
+    ).rejects.toThrow("DENIED");
+    expect((await f.service.prepareStep(request)).executionId).toBe(
+      prepared.executionId,
+    );
+    await runtimeExecutor({
+      database: admin,
+      actor: async () => f.actor,
+      endpoint,
+    }).execute(prepared.executionId);
+    expect(calls).toBe(1);
+    const other = await fixture();
+    await expect(
+      other.service.planResult(f.d.draftId, prepared.executionId),
+    ).rejects.toThrow("DENIED");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((e) => (e ? reject(e) : resolve())),
+    );
+  }
+});
+it.skipIf(!process.env.V3_REAL_SKILL_INPUT)(
+  "OPC: original private six-step productization publishes intact resources and binds information/profile to the original Session",
+  async () => {
+    const { readFileSync, writeFileSync } = await import("node:fs");
+    const { createHash } = await import("node:crypto");
+    const { saveModuleSkill } = await import("../skills/modulePublication");
+    const input = JSON.parse(
+      readFileSync(process.env.V3_REAL_SKILL_INPUT!, "utf8"),
+    );
+    const f = await fixture(),
+      model = randomUUID();
+    input.moduleId = randomUUID();
+    input.skillId = randomUUID();
+    input.revisionId = randomUUID();
+    input.requestId = randomUUID();
+    input.expectedVersion = 0;
+    input.expectedUpdatedAt = null;
+    input.module.model_id = model;
+    await sql.query(
+      "insert into ai_models(id,name,model_id,provider,is_active,api_key,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family) values($1,'Runtime local','qwen/qwen3.8-27b','openai','true','LOCAL_ONLY','',4096,128000,'false','openai')",
+      [model],
+    );
+    await saveModuleSkill(admin, f.owner, input);
+    const stored = await admin.rpc("admin_read_skill_module", {
+      p_actor_id: f.owner,
+      p_module_id: input.moduleId,
+    });
+    expect(stored.error).toBeNull();
+    for (const file of input.files)
+      expect(
+        stored.data.files.find((v: any) => v.path === file.path).base64,
+      ).toBe(file.base64);
+    const registration = (
+      await sql.query(
+        "select id from artifact_workflows where module_id=$1 and revision_id=$2",
+        [input.moduleId, input.revisionId],
+      )
+    ).rows[0].id;
+    const d = await f.service.start({
+      requestId: randomUUID(),
+      registration,
+      mode: "manual",
+    });
+    const first = await f.service.read(d.draftId);
+    expect(first.snapshot.workflow.steps.map((s: any) => s.title)).toEqual(
+      input.steps.map((s: any) => s.title),
+    );
+    // The published revision is the only authority for a field's elicitation
+    // role: a declared role survives publication and read unchanged, and a
+    // revision that declares nothing stays valid without inventing one.
+    const storedWorkflow = (
+      await sql.query("select workflow from artifact_rounds where id=$1", [d.roundId])
+    ).rows[0].workflow;
+    for (const [index, step] of input.steps.entries()) {
+      const published = storedWorkflow.steps[index].information as any[];
+      expect(published).toHaveLength(step.information.length);
+      step.information.forEach((field: any, fieldIndex: number) => {
+        expect(published[fieldIndex].id).toBe(field.id);
+        if (field.elicitation === undefined)
+          expect(published[fieldIndex]).not.toHaveProperty("elicitation");
+        else expect(published[fieldIndex].elicitation).toBe(field.elicitation);
+      });
+    }
+    for (const [index, step] of input.steps.entries()) {
+      const readSchema = first.information[`step-${index + 1}`].schema as any[];
+      expect(readSchema).toHaveLength(step.information.length);
+      step.information.forEach((field: any, fieldIndex: number) => {
+        expect(readSchema[fieldIndex].id).toBe(field.id);
+        if (field.elicitation === undefined)
+          expect(readSchema[fieldIndex]).not.toHaveProperty("elicitation");
+        else expect(readSchema[fieldIndex].elicitation).toBe(field.elicitation);
+      });
+    }
+    // Per-field equality above only proves agreement with whatever the input
+    // declared. These counts make the input's own composition visible from
+    // inside the run, so a derived copy that declared nothing cannot pass by
+    // agreeing with nothing. Nothing here is hardcoded: every count comes from
+    // the loaded input or from a stored/read surface.
+    const roleCounts = (fields: any[]) => {
+      const counts = {
+        agent_proposal: 0,
+        user_fact: 0,
+        undeclared: 0,
+        total: fields.length,
+      };
+      for (const field of fields)
+        if (field?.elicitation === "agent_proposal") counts.agent_proposal += 1;
+        else if (field?.elicitation === "user_fact") counts.user_fact += 1;
+        else counts.undeclared += 1;
+      return counts;
+    };
+    const inputCounts = roleCounts(
+      input.steps.flatMap((step: any) => step.information),
+    );
+    const storedCounts = roleCounts(
+      storedWorkflow.steps.flatMap((step: any) => step.information),
+    );
+    const readCounts = roleCounts(
+      input.steps.flatMap(
+        (_step: any, index: number) =>
+          first.information[`step-${index + 1}`].schema as any[],
+      ),
+    );
+    for (const counts of [inputCounts, storedCounts, readCounts])
+      expect(
+        counts.agent_proposal + counts.user_fact + counts.undeclared,
+      ).toBe(counts.total);
+    expect(storedCounts).toEqual(inputCounts);
+    expect(readCounts).toEqual(inputCounts);
+    for (const [index, step] of first.snapshot.workflow.steps.entries()) {
+      const values = Object.fromEntries(
+        input.steps[index].information.map((field: any) => [
+          field.id,
+          {
+            status: "deferred",
+            nature: "unknown",
+            value: "隔离测试：真实研究与业务判断暂未验证，用户明确接受此局限。",
+          },
+        ]),
+      );
+      await f.service.information({
+        draftId: d.draftId,
+        stepId: step.id,
+        requestId: randomUUID(),
+        expectedVersion: 0,
+        values,
+      });
+      await f.artifacts.execute({
+        action: "save",
+        projectId: d.projectId,
+        roundId: d.roundId,
+        stepId: step.id,
+        requestId: randomUUID(),
+        expectedVersion: 1,
+        body:
+          "隔离验证草稿：" +
+          step.title +
+          "。不声明真实研究或商业建议质量通过。",
+        evidenceIds: [],
+      });
+      const current = (await f.artifacts.read(d.projectId, d.roundId)).steps[
+        step.id
+      ];
+      await f.artifacts.execute({
+        action: "confirm",
+        projectId: d.projectId,
+        roundId: d.roundId,
+        stepId: step.id,
+        requestId: randomUUID(),
+        expectedVersion: current.version,
+        expectedReviewVersion: current.reviewVersion,
+      });
+    }
+    const snapshot = await f.artifacts.read(d.projectId, d.roundId);
+    await f.artifacts.execute({
+      action: "publish",
+      projectId: d.projectId,
+      roundId: d.roundId,
+      requestId: randomUUID(),
+      expectedSteps: Object.fromEntries(
+        Object.entries(snapshot.steps).map(([k, v]) => [
+          k,
+          { version: v.version, reviewVersion: v.reviewVersion },
+        ]),
+      ),
+    });
+    const report = (await f.service.read(d.draftId)).report;
+    const profile = (
+      await sql.query("select opc_profile($1) as p", [report.id])
+    ).rows[0].p;
+    expect(Object.keys(profile)).toHaveLength(23);
+    expect(
+      Object.values(profile).every(
+        (p: any) =>
+          p.sourceVersionId === report.id &&
+          p.confirmationId &&
+          p.status === "deferred",
+      ),
+    ).toBe(true);
+    const plan = await f.service.savePlan({
+      draftId: d.draftId,
+      requestId: randomUUID(),
+      expectedVersion: 0,
+      sourceVersionId: report.id,
+      body: [
+        {
+          id: randomUUID(),
+          platform: "x",
+          account: "original-local",
+          title: "原方法的隔离工作项",
+          brief: "仅验证原方法业务接线",
+          day: "2026-09-15",
+        },
+      ],
+    });
+    const [work] = await f.service.handoff({
+      draftId: d.draftId,
+      requestId: randomUUID(),
+      planId: plan.planId,
+      accounts: [
+        { platform: "x", account: "original-local", expectedRevision: null },
+      ],
+    });
+    const material = (
+      await sql.query(
+        "select content from runtime_scope_material where session_id=$1",
+        [work.sessionId],
+      )
+    ).rows[0].content;
+    expect(JSON.parse(material.material)).toEqual(profile);
+    expect(material.material).not.toContain("隔离验证草稿：");
+    await sql.query("update ai_models set provider='fixture' where id=$1", [
+      model,
+    ]);
+    const admitted = await f.service.prepareStep({
+      draftId: d.draftId,
+      requestId: randomUUID(),
+      purpose: "plan",
+      stepId: "step-6",
+      input: JSON.stringify([
+        { platform: "x", account: "original-local", day: "2026-09-15" },
+      ]),
+    });
+    const frozen = (
+      await sql.query("select payload from runtime_executions where id=$1", [
+        admitted.executionId,
+      ])
+    ).rows[0].payload;
+    expect(frozen.instructions).toContain("内容支柱");
+    expect(frozen.instructions).toContain("不编造数据");
+    expect(frozen.request.sessionId).toBe(d.sessionId);
+    const { runtimeExecutor } = await import("../runtime/execute");
+    await runtimeExecutor({
+      database: admin,
+      actor: async () => f.actor,
+      endpoint: process.env.V3_RUNTIME_LOCAL_ENDPOINT!,
+    }).execute(admitted.executionId);
+    const generated = await f.service.planResult(
+      d.draftId,
+      admitted.executionId,
+    );
+    expect(generated.body[0]).toMatchObject({
+      platform: "x",
+      account: "original-local",
+      title: "模拟选题 1",
+    });
+    writeFileSync(
+      process.env.V3_WORKBENCH_OUTPUT + "/opc-acceptance.json",
+      JSON.stringify({
+        url: process.env.V3_LOCAL_APP + "/positioning/" + d.draftId,
+        actor: f.actor,
+        credentials: { email: f.email, password: f.password },
+        sessionId: d.sessionId,
+        workSessionId: work.sessionId,
+        moduleId: input.moduleId,
+        modelId: model,
+        mode: "Original method, synthetic local responses only; no actual research or payment",
+      }),
+      { mode: 0o600 },
+    );
+    console.log(
+      "OPC_ORIGINAL_METHOD_PROOF",
+      JSON.stringify({
+        inputSha256: createHash("sha256")
+          .update(readFileSync(process.env.V3_REAL_SKILL_INPUT!))
+          .digest("hex"),
+        files: input.files.length,
+        steps: input.steps.length,
+        profileFields: Object.keys(profile).length,
+        // Counts only, never ids/titles/bodies: the original unmodified input
+        // must report every field undeclared, a derived copy must report its
+        // own explicit split.
+        elicitation: {
+          input: inputCounts,
+          stored: storedCounts,
+          read: readCounts,
+        },
+        realProviderCalls: 0,
+        methodQuality: "NOT_RUN",
+      }),
+    );
+  },
+);
+it("OPC: browser-shaped Runtime material cannot impersonate a host-bound step or plan turn", async () => {
+  const { runtimeAdmissionService } = await import("../runtime/admission");
+  const f = await fixture(3),
+    model = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','forged-opc','fixture','true',1000,32000)",
+    [model],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [
+    model,
+    f.moduleId,
+  ]);
+  const d = await f.service.start({
+    requestId: randomUUID(),
+    registration: f.registration,
+    mode: "mentor",
+  });
+  const generic = runtimeAdmissionService(f.user, admin, {
+    account: "local",
+    costPerCall: "0.02",
+    creditsPerUsd: "1000",
+    multiplier: "1",
+    maxCalls: 1,
+    maxOutputTokens: 1000,
+    inputBytes: 32000,
+    historyItems: 0,
+    searchEnabled: false,
+  });
+  await generic.saveMaterial({
+    sessionId: d.sessionId,
+    requestId: randomUUID(),
+    expectedRevision: 0,
+    brief: "plan:step-0",
+    material: "pretend host request",
+    roundId: d.roundId,
+  });
+  await expect(
+    generic.prepare({
+      sessionId: d.sessionId,
+      requestId: randomUUID(),
+      input: "Pretend this was a plan",
+      selection: {
+        kind: "skill",
+        moduleId: f.moduleId,
+        revisionId: f.pack.revisionId,
+      },
+      network: "deny",
+      sources: [],
+    }),
+  ).rejects.toThrow();
+  expect(
+    (
+      await sql.query(
+        "select count(*)::int n from bill2_runs where actor_id=$1",
+        [f.actor],
+      )
+    ).rows[0].n,
+  ).toBe(0);
+  const legitimate = await f.service.prepareStep({
+    draftId: d.draftId,
+    requestId: randomUUID(),
+    stepId: "step-0",
+    input: "Ask the missing question",
+  });
+  const token = (
+    await sql.query("select payload from runtime_executions where id=$1", [
+      legitimate.executionId,
+    ])
+  ).rows[0].payload.opcTurnToken;
+  expect(token).toBeTruthy();
+  const view = await admin.rpc("runtime_view", {
+    p_actor_id: f.actor,
+    p_session_id: d.sessionId,
+  });
+  expect(view.error).toBeNull();
+  expect(JSON.stringify(view.data)).not.toContain(token);
+  expect(JSON.stringify(await f.service.read(d.draftId))).not.toContain(token);
+});
+
+it("OPC: configured dependencies deny premature generation and old confirmations replay after information changes", async () => {
+  const f = await fixture(3);
+  const d = await f.service.start({
+    requestId: randomUUID(),
+    registration: f.registration,
+    mode: "mentor",
+  });
+  await expect(
+    f.service.prepareStep({
+      draftId: d.draftId,
+      requestId: randomUUID(),
+      stepId: "step-1",
+      purpose: "step",
+      input: "premature",
+    }),
+  ).rejects.toThrow("OPC_DEPENDENCIES_UNCONFIRMED");
+  await expect(f.service.prepareStep({draftId:d.draftId,requestId:randomUUID(),stepId:"step-1",purpose:"mentor",input:"premature discussion"})).rejects.toThrow("OPC_DEPENDENCIES_UNCONFIRMED");
+  expect(
+    (
+      await sql.query(
+        "select count(*)::int n from bill2_runs where actor_id=$1",
+        [f.actor],
+      )
+    ).rows[0].n,
+  ).toBe(0);
+  const values = {
+    goal: {
+      status: "confirmed",
+      nature: "fact",
+      value: "Local verified input",
+    },
+  };
+  await f.service.information({
+    draftId: d.draftId,
+    stepId: "step-0",
+    requestId: randomUUID(),
+    expectedVersion: 0,
+    values,
+  });
+  await f.artifacts.execute({
+    action: "save",
+    projectId: d.projectId,
+    roundId: d.roundId,
+    stepId: "step-0",
+    requestId: randomUUID(),
+    expectedVersion: 1,
+    body: "Local working result",
+    evidenceIds: [],
+  });
+  const state = (await f.artifacts.read(d.projectId, d.roundId)).steps[
+    "step-0"
+  ];
+  const confirmation = {
+    action: "confirm" as const,
+    projectId: d.projectId,
+    roundId: d.roundId,
+    stepId: "step-0",
+    requestId: randomUUID(),
+    expectedVersion: state.version,
+    expectedReviewVersion: state.reviewVersion,
+  };
+  const saved = await f.artifacts.execute(confirmation);
+  const fresh = (await f.artifacts.read(d.projectId, d.roundId)).steps[
+    "step-0"
+  ];
+  await f.service.information({
+    draftId: d.draftId,
+    stepId: "step-0",
+    requestId: randomUUID(),
+    expectedVersion: fresh.version,
+    values: { goal: { status: "unknown", nature: "unknown", value: "" } },
+  });
+  expect(await f.artifacts.execute(confirmation)).toEqual(saved);
+  await expect(
+    f.artifacts.execute({ ...confirmation, requestId: randomUUID() }),
+  ).rejects.toThrow();
+});
+
+it("OPC: one mentor conversation persists across steps, refresh and original Session recovery", async () => {
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await fixture(3);
+  await planFixtureModel(f.moduleId);
+  const browser = await chromium.launch({
+    executablePath:
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", (route) => {
+      const u = new URL(route.request().url());
+      return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+        ["data:", "blob:"].includes(u.protocol)
+        ? route.continue()
+        : route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(90000);
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    const ready = page.waitForResponse(
+      (r) => r.url().includes("/api/trpc/settings.getSystemSettings") && r.ok(),
+    );
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=/positioning");
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page
+      .getByRole("button", { name: "登录", exact: true })
+      .last()
+      .click();
+    await page.waitForURL((url) => url.pathname === "/positioning", {
+      timeout: 90000,
+    });
+    const fixtureDraft=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'mentor',businessName:'导师引导测试业务'});
+    await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+fixtureDraft.draftId);
+
+    const draftUrl = page.url();
+    const draftId = new URL(draftUrl).pathname.split("/").at(-1)!;
+    // Await actual hydration, including the authenticated OPC response; URL
+    // navigation alone completes before the form exists under a cold build.
+    await page.getByRole("textbox", { name: f.flow.steps[0].information![0].title, exact: true })
+      .waitFor({state:"visible",timeout:30000});
+    expect(await page.getByRole("textbox", {name:"给导师的回复"}).isVisible()).toBe(true);
+    async function expectOpening(label: string, title: string) {
+      const paragraph = page.getByRole("log", { name: "完整导师消息" })
+        .getByText(`导师主动引导 · ${label}`, { exact: true })
+        .locator("..").locator("p");
+      await expect.poll(() => paragraph.textContent(), { timeout: 30000 })
+        .toContain(`“${title}”`);
+    }
+    // No fill, send, reload or manual refetch is allowed to reveal this opening.
+    await expectOpening("1.1", f.flow.steps[0].information![0].title);
+    await page.getByRole("textbox", {name:f.flow.steps[0].information![0].title,exact:true}).fill("尚未确定的用户想法");
+    const order = await page.evaluate(() => {
+      const form = document.querySelector('[aria-label="本步填写信息"]')!;
+      const chat = document.querySelector('[aria-label="全程导师聊天"]')!;
+      return Boolean(chat.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+    expect(order).toBe(true);
+    const nextButton = page
+      .getByRole("navigation", { name: "定位步骤" })
+      .getByRole("button")
+      .nth(1);
+    expect(await nextButton.isEnabled()).toBe(false);
+    await page
+      .getByRole("textbox", { name: "给导师的回复" })
+      .fill("我想先明确我的受众");
+    await page.reload();
+    await expect
+      .poll(() =>
+        page.getByRole("textbox", { name: "给导师的回复" }).inputValue(),
+      )
+      .toBe("我想先明确我的受众");
+    let loseFirstReply = true;
+    await page.route("**/api/trpc/runtime.execute*", async (route) => {
+      if (!loseFirstReply) return route.continue();
+      loseFirstReply = false;
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      await route.abort();
+    });
+    await page
+      .getByRole("button", { name: "发送", exact: true })
+      .click();
+    await page.getByRole("alert").filter({ hasText: "操作未完成" }).waitFor();
+    expect(await page.getByRole("button", { name: "发送", exact: true }).isEnabled()).toBe(false);
+    // Simulate a newer unsent buffer retained across an interrupted render.
+    // Recovery must use the original envelope, not a new send identity.
+    await page.evaluate((id) => {
+      const key = "opc-edit:" + id;
+      const saved = JSON.parse(sessionStorage.getItem(key)!);
+      saved.mentorInput = "恢复期间另写的未发送内容";
+      sessionStorage.setItem(key, JSON.stringify(saved));
+    }, draftId);
+    await page.reload();
+    await page.getByRole("button", { name: "继续核对这条原请求", exact: true }).click();
+    await expect.poll(() => page.getByRole("log", { name: "完整导师消息" })
+      .getByText("导师 · 1.1", { exact: true }).count(), { timeout: 30000 }).toBe(1);
+    expect(
+      await page
+        .getByRole("textbox", { name: "给导师的回复", exact: true })
+        .inputValue(),
+    ).toBe("恢复期间另写的未发送内容");
+    const d = await f.service.read(draftId);
+    expect(d.sessionId).toBeTruthy();
+    expect(d.information["step-0"].values.goal).toMatchObject({value:"尚未确定的用户想法",status:"provisional"});
+    for (const reply of ["我想帮助刚接触短视频的人", "我担心自己没有可以教的经验"]) {
+      await page.getByRole("textbox",{name:"给导师的回复",exact:true}).fill(reply);
+      await page.getByRole("button",{name:"发送",exact:true}).click();
+      await expect.poll(() => page.getByRole("textbox",{name:"给导师的回复",exact:true}).inputValue(), {timeout:15000}).toBe("");
+    }
+    const count = await fetch(process.env.V3_LOCAL_REST!+"/__runtime_count", {headers:{"x-local-control":process.env.V3_LOCAL_CONTROL!}});
+    const observed = await count.json();
+    expect(observed.userRequests).toEqual(expect.arrayContaining(["我想先明确我的受众", "我想帮助刚接触短视频的人", "我担心自己没有可以教的经验"]));
+    const afterChat = await f.service.read(draftId);
+    const frozenChat = await sql.query("select payload from runtime_executions where actor_id=$1 order by created_at desc limit 1", [f.actor]);
+    expect(frozenChat.rows[0].payload.instructions).toContain("single continuous mentor");
+    expect(frozenChat.rows[0].payload.instructions).toContain("Confirmed fields do not end the conversation");
+    expect(frozenChat.rows[0].payload.scopeMaterial.content.brief).toBe("mentor:step-0");
+    await expect(f.service.saveResult({draftId,stepId:"step-0",executionId:afterChat.turns[0].executionId,requestId:randomUUID()})).rejects.toThrow("OPC_RESULT_DENIED");
+    expect(afterChat.information["step-0"].values.goal.status).toBe("provisional");
+    expect(afterChat.snapshot.candidates).toHaveLength(0);
+    expect(afterChat.snapshot.steps["step-0"].valid).toBe(false);
+    expect(afterChat.turns.filter((t: {stepId:string;kind:string})=>
+      t.stepId==="step-0" && ["mentor", "organizer"].includes(t.kind))).toHaveLength(3);
+    const box = await page.getByRole("log",{name:"完整导师消息"}).boundingBox();
+    expect(box!.height).toBeLessThanOrEqual(400);
+    await page.reload();
+    await expect
+      .poll(
+        () =>
+          page
+            .getByRole("log", { name: "完整导师消息" })
+            .textContent(),
+        { timeout: 15000 },
+      )
+      .toContain("我想帮助刚接触短视频的人");
+    const first = f.flow.steps[0];
+    await f.artifacts.execute({
+      action: "save",
+      projectId: d.projectId,
+      roundId: d.roundId,
+      requestId: randomUUID(),
+      stepId: first.id,
+      body: "User confirmed first step",
+      evidenceIds: [],
+      expectedVersion: afterChat.snapshot.steps[first.id].version,
+    });
+    let state = (await f.artifacts.read(d.projectId, d.roundId)).steps[
+      first.id
+    ];
+    await f.service.information({
+      draftId,
+      stepId: first.id,
+      requestId: randomUUID(),
+      expectedVersion: state.version,
+      values: {
+        goal: {
+          status: "confirmed",
+          nature: "decision",
+          value: "A concrete user decision",
+        },
+      },
+    });
+    state = (await f.artifacts.read(d.projectId, d.roundId)).steps[first.id];
+    await f.artifacts.execute({
+      action: "confirm",
+      projectId: d.projectId,
+      roundId: d.roundId,
+      requestId: randomUUID(),
+      stepId: first.id,
+      expectedVersion: state.version,
+      expectedReviewVersion: state.reviewVersion,
+    });
+    await page.reload();
+    await expect.poll(() => nextButton.isEnabled()).toBe(true);
+    const sharedLog = page.getByRole("log", { name: "完整导师消息" });
+    // The step response and Session history are separate authenticated reads.
+    // Wait for the history itself before comparing it across navigation.
+    await expect.poll(()=>sharedLog.textContent(),{timeout:15000}).toContain("我担心自己没有可以教的经验");
+    await page
+      .getByRole("textbox", { name: "给导师的回复", exact: true })
+      .fill("跨步骤保留的未发送内容");
+    await nextButton.click();
+    const formPanel = page.locator("section[aria-label='本步填写信息']");
+    // The current question carries its own hierarchical identity.
+    await expect.poll(() => formPanel.textContent(), { timeout: 20000 }).toContain("2.1");
+    expect(await sharedLog.textContent()).toContain("我担心自己没有可以教的经验");
+    // The Agent opens the newly reached question itself; the host never
+    // fabricates a user message to trigger it.
+    await expectOpening("2.1", f.flow.steps[1].information![0].title);
+    expect(
+      await page
+        .getByRole("textbox", { name: "给导师的回复", exact: true })
+        .inputValue(),
+    ).toBe("跨步骤保留的未发送内容");
+    await page
+      .getByRole("textbox", { name: "给导师的回复" })
+      .fill("我有两个参考账号");
+    await page
+      .getByRole("button", { name: "发送", exact: true })
+      .click();
+    await page.getByRole("log", { name: "完整导师消息" })
+      .getByText("导师 · 2.1", { exact: true }).waitFor();
+    const secondField = f.flow.steps[1].information![0];
+    await expect
+      .poll(() =>
+        page
+          .getByRole("textbox", { name: secondField.title, exact: true })
+          .inputValue(),
+        { timeout: 15_000 },
+      )
+      .toBe("我有两个参考账号");
+    await expect.poll(async () =>
+      (await f.service.read(draftId)).information["step-1"].values?.goal?.status,
+      {timeout:15000},
+    ).toBe("provisional");
+    const afterSecondChat = await f.service.read(draftId);
+    const secondTurn = afterSecondChat.turns.find(
+      (turn: { executionId: string; stepId: string; kind: string }) =>
+        turn.stepId === "step-1" && ["mentor", "organizer"].includes(turn.kind),
+    );
+    expect(secondTurn).toBeTruthy();
+    const dependencies = new Set(
+      (
+        await sql.query(
+          "select dependency_id::text id from runtime_history_dependencies where execution_id=$1",
+          [secondTurn.executionId],
+        )
+      ).rows.map((row: { id: string }) => row.id),
+    );
+    for (const prior of afterChat.turns.filter(
+      (turn: { executionId: string; stepId: string; kind: string }) =>
+        turn.stepId === "step-0" && ["mentor", "organizer"].includes(turn.kind),
+    ))
+      expect(dependencies.has(prior.executionId)).toBe(true);
+    const expectedBeforeRevision: ExpectedMentorEffect[] = [
+      { stepId: "step-0", questionId: "goal", opening: true, input: OPENING_INPUT },
+      { stepId: "step-1", questionId: "goal", opening: true, input: OPENING_INPUT },
+      ...["我想先明确我的受众", "我想帮助刚接触短视频的人", "我担心自己没有可以教的经验"]
+        .map(input => ({ stepId: "step-0", questionId: "goal", opening: false, input })),
+      { stepId: "step-1", questionId: "goal", opening: false, input: "我有两个参考账号" },
+    ];
+    const beforeRecoveryEffects = await expectExactMentorEffects(
+      f.actor, draftId, d.roundId, expectedBeforeRevision,
+    );
+    const conversationAfterSecondStep = await sharedLog.textContent();
+    expect(conversationAfterSecondStep).toContain("我想帮助刚接触短视频的人");
+    expect(conversationAfterSecondStep).toContain("我有两个参考账号");
+    const stepNavigation = page.getByRole("navigation", { name: "定位步骤" });
+    await stepNavigation.getByRole("button").nth(0).click();
+    // Reviewing an already confirmed question restores it without dispatching.
+    await expect.poll(() => page.locator("section[aria-label='本步填写信息']").textContent()).toContain("1.1");
+    expect(await sharedLog.textContent()).toBe(conversationAfterSecondStep);
+    await stepNavigation.getByRole("button").nth(1).click();
+    expect(await sharedLog.textContent()).toBe(conversationAfterSecondStep);
+    await page.reload();
+    await page.getByRole("log", { name: "完整导师消息" })
+      .getByText("导师 · 2.1", { exact: true }).waitFor();
+    await context.clearCookies();
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(new URL(draftUrl).pathname));
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", {name:"登录",exact:true}).last().click();
+    await page.waitForURL(draftUrl,{timeout:90000});
+    await page.getByRole("log", { name: "完整导师消息" })
+      .getByText("导师 · 2.1", { exact: true }).waitFor();
+    expect((await f.service.read(draftId)).sessionId).toBe(d.sessionId);
+    expect(await page.getByRole("log",{name:"完整导师消息"}).textContent()).toContain("我想帮助刚接触短视频的人");
+    expect(
+      await page
+        .getByRole("textbox", {
+          name: f.flow.steps[0].title + " 工作稿",
+          exact: true,
+        })
+        .count(),
+    ).toBe(0);
+    // Four user messages plus two distinct step openings: exactly six effects,
+    // with identical execution/request/billing IDs after refresh and re-login.
+    expect(await expectExactMentorEffects(f.actor, draftId, d.roundId, expectedBeforeRevision))
+      .toEqual(beforeRecoveryEffects);
+    // A model-proposed cross-step change stays separate until explicit acceptance.
+    await page.getByRole("textbox", {name:"给导师的回复"}).fill("模拟：修改第一步目标");
+    await page.getByRole("button", {name:"发送",exact:true}).click();
+    await expect.poll(()=>page.getByRole("textbox",{name:"给导师的回复"}).inputValue(),{timeout:15000}).toBe("");
+    await page.getByText("已知目标 0：改为帮助独立开发者",{exact:true}).waitFor();
+    const adopt = page.getByRole("button", {name:'采用这些修改到“'+f.flow.steps[0].title+'”',exact:true});
+    await adopt.waitFor();
+    expect((await f.service.read(draftId)).information["step-0"].values.goal.value).toBe("A concrete user decision");
+    await adopt.click();
+    await expect.poll(async() => (await f.service.read(draftId)).information["step-0"].values.goal.value, {timeout:30000}).toBe("改为帮助独立开发者");
+    await page.reload();
+    // Explicitly reopen the revised step after reload before inspecting its
+    // form; do not assume the asynchronous selection was already persisted.
+    await page.getByRole("navigation", {name:"定位步骤"}).getByRole("button").nth(0).click({timeout:15000});
+    await expect.poll(()=>page.getByRole("textbox",{name:f.flow.steps[0].information![0].title,exact:true}).inputValue({timeout:15000})).toBe("改为帮助独立开发者");
+    expect((await f.service.read(draftId)).sessionId).toBe(d.sessionId);
+    const finalEffects = await expectExactMentorEffects(f.actor, draftId, d.roundId, [
+      ...expectedBeforeRevision,
+      { stepId: "step-1", questionId: "goal", opening: false, input: "模拟：修改第一步目标" },
+    ]);
+    expect(finalEffects.filter(identity => beforeRecoveryEffects.includes(identity)))
+      .toEqual(beforeRecoveryEffects);
+    expect(errors).toEqual([]);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+
+it("OPC: browser confirms the autosaved form as the step result without a duplicate model pass and recovers once", async () => {
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await fixture(3);
+  const providerCount = async () => {
+    const response = await fetch(process.env.V3_LOCAL_REST! + "/__runtime_count", {
+      headers: { "x-local-control": process.env.V3_LOCAL_CONTROL! },
+    });
+    if (!response.ok) throw new Error("local fixture counter unavailable");
+    return (await response.json()).calls as number;
+  };
+  const callsBefore = await providerCount();
+  const browserModel = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-browser','fixture','true',1000,32000)",
+    [browserModel],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [
+    browserModel,
+    f.moduleId,
+  ]);
+  const summaryModel = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'OPC organizer','opc-organizer','fixture','true',1000,32000)",
+    [summaryModel],
+  );
+  await sql.query(
+    "insert into system_settings(key,value) values('v3_summary_model_id',to_jsonb($1::text)),('v3_summary_max_tokens','1000'::jsonb) on conflict(key) do update set value=excluded.value",
+    [summaryModel],
+  );
+  const browser = await chromium.launch({
+    executablePath:
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", (route) => {
+      const u = new URL(route.request().url());
+      return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+        ["data:", "blob:"].includes(u.protocol)
+        ? route.continue()
+        : route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(90000);
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    const ready = page.waitForResponse(
+      (r) => r.url().includes("/api/trpc/settings.getSystemSettings") && r.ok(),
+      { timeout: 90000 },
+    );
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=/positioning");
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page
+      .getByRole("button", { name: "登录", exact: true })
+      .last()
+      .click();
+    await page.waitForURL((url) => url.pathname === "/positioning", {
+      timeout: 90000,
+    });
+    const fixtureDraft=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'manual',businessName:'已有定位引导测试业务'});
+    await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+fixtureDraft.draftId);
+
+    const draftId = new URL(page.url()).pathname.split("/").at(-1)!;
+    async function expectOpening(label: string, title: string) {
+      const paragraph = page.getByRole("log", { name: "完整导师消息" })
+        .getByText(`导师主动引导 · ${label}`, { exact: true })
+        .locator("..").locator("p");
+      await expect.poll(() => paragraph.textContent(), { timeout: 30000 })
+        .toContain(`“${title}”`);
+    }
+    await expectOpening("1.1", f.flow.steps[0].information![0].title);
+    await expect.poll(() => page.getByRole("button", { name: /确认本题并继续|确认当前信息，继续|继续核对本题确认/, exact: true }).count()).toBe(1);
+    expect(await page.getByRole("button", { name: "确认所填信息并整理成果" }).count()).toBe(0);
+    await expect(
+      f.service.prepareStep({
+        draftId,
+        stepId: f.flow.steps[0].id,
+        requestId: randomUUID(),
+        organizeAfter: true,
+        input: "organize",
+      }),
+    ).rejects.toThrow("OPC_INFORMATION_REQUIRED");
+    const field = f.flow.steps[0].information![0];
+    await page
+      .getByRole("textbox", { name: field.title, exact: true })
+      .fill("用户亲自填写的经营目标");
+    await expect
+      .poll(() => page.getByText("已自动保存", { exact: true }).count(), {
+        timeout: 15_000,
+      })
+      .toBe(1);
+    let injectDefiniteConflict = true;
+    await page.route("**/api/trpc/opc.information*", async (route) => {
+      if (injectDefiniteConflict) {
+        injectDefiniteConflict = false;
+        const current = await f.service.read(draftId);
+        await f.service.information({
+          draftId,
+          stepId: f.flow.steps[0].id,
+          requestId: randomUUID(),
+          expectedVersion: current.snapshot.steps[f.flow.steps[0].id].version,
+          values: {
+            goal: {
+              status: "confirmed",
+              nature: "decision",
+              value: "用户亲自填写的经营目标",
+            },
+          },
+        });
+      }
+      await route.continue();
+    });
+    await page
+      .getByRole("button", { name: /确认本题并继续|确认当前信息，继续|继续核对本题确认/, exact: true })
+      .click();
+    const operationAlert = page
+      .getByRole("alert")
+      .filter({ hasText: "操作未完成" });
+    await operationAlert.waitFor();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (storageKey) => sessionStorage.getItem(storageKey),
+          `opc-confirm-step:${draftId}:${f.flow.steps[0].id}`,
+        ),
+      )
+      .toBeNull();
+    await page.unroute("**/api/trpc/opc.information*");
+    let lost = true;
+    await page.route("**/api/trpc/workbench.execute*", async (route) => {
+      if (!lost) return route.continue();
+      lost = false;
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      await route.abort();
+    });
+    const priorConflictCleared = operationAlert.waitFor({ state: "hidden" });
+    await page
+      .getByRole("button", { name: /确认本题并继续|确认当前信息，继续|继续核对本题确认/, exact: true })
+      .click();
+    await priorConflictCleared;
+    await operationAlert.waitFor();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (storageKey) => {
+            const raw = sessionStorage.getItem(storageKey);
+            return raw ? JSON.parse(raw).phase : null;
+          },
+          `opc-confirm-step:${draftId}:${f.flow.steps[0].id}`,
+        ),
+      )
+      .toBe("save");
+    await page.reload();
+    await page
+      .getByRole("button", { name: /确认本题并继续|确认当前信息，继续|继续核对本题确认/, exact: true })
+      .click();
+    await page
+      .getByRole("textbox", {
+        name: f.flow.steps[1].information![0].title,
+        exact: true,
+      })
+      .waitFor();
+    await expectOpening("2.1", f.flow.steps[1].information![0].title);
+    const read = await f.service.read(draftId);
+    expect(read.information[f.flow.steps[0].id].values.goal.value).toBe(
+      "用户亲自填写的经营目标",
+    );
+    expect(read.snapshot.candidates).toHaveLength(0);
+    expect(read.snapshot.steps[f.flow.steps[0].id].body).toContain(
+      "用户亲自填写的经营目标",
+    );
+    expect(read.snapshot.steps[f.flow.steps[0].id].valid).toBe(true);
+    await sql.query("update ai_models set is_active='false' where id=$1", [
+      summaryModel,
+    ]);
+    // Saving, confirming and recovering the form do not make model calls.
+    // Only the initial and newly reached question each have one opening.
+    await expectExactMentorEffects(f.actor,draftId,read.roundId,[
+      {stepId:"step-0",questionId:"goal",opening:true,input:OPENING_INPUT},
+      {stepId:"step-1",questionId:"goal",opening:true,input:OPENING_INPUT},
+    ]);
+    expect(await providerCount() - callsBefore).toBe(2);
+    expect(await page.getByRole("textbox", { name: f.flow.steps[0].title + " 工作稿" }).count()).toBe(0);
+    expect(errors).toEqual([]);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+
+it("OPC: browser stale account confirmation restarts only after definite rejection", async () => {
+  const {chromium}=await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f=await completed(3);
+  const saved=await f.service.savePlan({draftId:f.d.draftId,sourceVersionId:f.sourceVersionId,requestId:randomUUID(),expectedVersion:0,body:[{id:randomUUID(),platform:"x",account:"stale-browser",day:"2026-09-15",title:"Topic",brief:"Brief"}]});
+  const request={draftId:f.d.draftId,planId:saved.planId,requestId:randomUUID(),accounts:[{platform:"x",account:"stale-browser",expectedRevision:null}]};
+  await f.service.handoff(request);
+  const browser=await chromium.launch({headless:true,executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"}),context=await browser.newContext(),page=await context.newPage();
+  page.setDefaultTimeout(90000);
+  try {
+    const url=process.env.V3_LOCAL_APP+"/positioning/"+f.d.draftId+"/plan";
+    await page.goto(process.env.V3_LOCAL_APP+"/login?redirect="+encodeURIComponent(new URL(url).pathname));
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button",{name:"登录",exact:true}).last().click();
+    await page.waitForURL(url);
+    const button=page.getByRole("button",{name:"确认账号与计划，创建选题",exact:true});
+    await button.waitFor();
+    await expect.poll(()=>button.isEnabled(),{timeout:15000}).toBe(true);
+    await f.service.handoff({...request,requestId:randomUUID(),accounts:[{...request.accounts[0],expectedRevision:1}]});
+    const failed=page.waitForResponse(r=>r.url().includes("/api/trpc/opc.handoff"));
+    await button.click();await failed;
+    await page.getByRole("alert").filter({hasText:"操作未完成"}).waitFor();
+    await page.getByRole("button",{name:"重新读取状态",exact:true}).click();
+    await expect.poll(()=>button.isEnabled(),{timeout:15000}).toBe(true);
+    await button.click();
+    await expect.poll(async()=>Number((await sql.query('select revision from opc_accounts where actor_id=$1',[f.actor])).rows[0].revision),{timeout:15000}).toBe(3);
+    expect((await sql.query('select count(*)::int n from opc_items i join artifact_projects p on p.id=i.work_item_id where p.actor_id=$1',[f.actor])).rows[0].n).toBe(1);
+    expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actor])).rows[0].n).toBe(0);
+  }finally{await browser.close();}
+},180000);
+
+it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
+  "OPC: staging host protected browser route uses the bounded official protocol once",
+  async () => {
+    const { chromium } =
+      await import("../../../../../apps/web/node_modules/@playwright/test");
+    const f = await fixture(3),
+      modelId = randomUUID(),
+      key = "LOCAL_STAGING_" + randomUUID(),
+      windowId = process.env.V3_RUNTIME_STAGING_WINDOW_ID!;
+    expect(windowId).toMatch(/^[a-f0-9-]{36}$/);
+    const callPolicy = {
+      modelId,
+      provider: "openrouter",
+      account:
+        "openrouter-key:" + createHash("sha256").update(key).digest("hex"),
+      model: "test/opc-staging",
+      protocol: "openrouter-chat-v1",
+      upperUsd: "0.02",
+      inputLimit: 8000,
+      outputLimit: 100,
+      automaticRetry: false,
+      hiddenTools: false,
+      lookupSupported: true,
+      providerLimits: {
+        providerSlug: "synthetic",
+        contextTokens: 10000,
+        promptUsdPerMillion: "2",
+        completionUsdPerMillion: "0",
+        requestUsd: "0",
+      },
+    };
+    await sql.query(
+      "insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,api_key,max_tokens,input_limit) values($1,'Synthetic Staging OPC','test/opc-staging','openai','true','https://openrouter.ai/api/v1',$2,1000,10000)",
+      [modelId, key],
+    );
+    await sql.query("update modules set model_id=$1 where id=$2", [
+      modelId,
+      f.moduleId,
+    ]);
+    await sql.query(
+      "insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",
+      [windowId, [f.actor], JSON.stringify([callPolicy])],
+    );
+    const draft = await f.service.start({
+      requestId: randomUUID(),
+      registration: f.registration,
+      mode: "mentor",
+    });
+    const browser = await chromium.launch({
+      executablePath:
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      headless: true,
+    });
+    try {
+      const context = await browser.newContext();
+      await context.route("**/*", async (route) => {
+        const url = new URL(route.request().url());
+        if (url.hostname === "syntheticstaging.supabase.co") {
+          const response = await route.fetch({
+            url: process.env.V3_LOCAL_REST + url.pathname + url.search,
+          });
+          await route.fulfill({ response });
+          return;
+        }
+        if (
+          ["127.0.0.1", "localhost"].includes(url.hostname) ||
+          ["data:", "blob:"].includes(url.protocol)
+        ) {
+          await route.continue();
+          return;
+        }
+        await route.abort();
+      });
+      const page = await context.newPage();
+      page.setDefaultTimeout(90000);
+      const loginReady = page.waitForResponse(
+        (response) =>
+          response.url().includes("settings.getSystemSettings") &&
+          response.ok(),
+      );
+      await page.goto(
+        process.env.V3_LOCAL_APP +
+          "/login?redirect=" +
+          encodeURIComponent("/positioning/" + draft.draftId),
+      );
+      await loginReady;
+      await page.getByPlaceholder("name@example.com").fill(f.email);
+      await page.getByPlaceholder("输入你的密码").fill(f.password);
+      await page
+        .getByRole("button", { name: "登录", exact: true })
+        .last()
+        .click();
+      await page.waitForURL(
+        (url) => url.pathname === "/positioning/" + draft.draftId,
+      );
+      await page
+        .getByText("Staging 真实模型测试 · 未开放联网研究", { exact: true })
+        .waitFor();
+      await page
+        .getByRole("textbox", { name: "给导师的回复", exact: true })
+        .fill("I want to teach photography beginners.");
+      await page.getByRole("button", { name: "发送", exact: true }).click();
+      // The mentor prose now carries the host-derived hierarchical label.
+      await page.getByText(/【分步模拟，仅验证流程】第 1\.1 题/).waitFor();
+      expect(
+        (
+          await sql.query(
+            "select state,charged,provider_cost_usd::text cost,test_window_id from bill2_runs where actor_id=$1",
+            [f.actor],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          state: "settled",
+          charged: 3,
+          cost: "0.003",
+          test_window_id: windowId,
+        },
+      ]);
+      const count = await fetch(process.env.V3_LOCAL_REST + "/__runtime_count", {
+        headers: { "x-local-control": process.env.V3_LOCAL_CONTROL! },
+      });
+      expect(count.ok).toBe(true);
+      expect((await count.json()).calls).toBe(1);
+    } finally {
+      await browser.close();
+    }
+  },
+  180000,
+);
+
+for (const scenario of ["fresh", "retry", "same-field", "offline", "response-lost"]) {
+  const conflict=scenario!=="fresh";
+  it(`OPC: two browser tabs preserve edits (${scenario})`, async () => {
+    const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
+    const f = await fixture(3, true);
+    const draft = await f.service.start({requestId:randomUUID(),registration:f.registration,mode:"manual"});
+    const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
+    let release: (()=>void) | undefined;
+    try {
+      const context = await browser.newContext();
+      await context.route("**/*",route => ["127.0.0.1","localhost"].includes(new URL(route.request().url()).hostname) ? route.continue() : route.abort());
+      const a = await context.newPage();
+      a.setDefaultTimeout(20000);
+      const loginReady=a.waitForResponse(r=>r.url().includes("settings.getSystemSettings") && r.ok(),{timeout:90000});
+      await a.goto(process.env.V3_LOCAL_APP+"/login?redirect=/positioning",{timeout:90000,waitUntil:"domcontentloaded"});
+      await loginReady;
+      await a.getByPlaceholder("name@example.com").fill(f.email);
+      await a.getByPlaceholder("输入你的密码").fill(f.password);
+      await a.getByRole("button",{name:"登录",exact:true}).last().click();
+      await a.waitForURL(url=>url.pathname==="/positioning",{timeout:90000});
+      const url=process.env.V3_LOCAL_APP+"/positioning/"+draft.draftId;
+      await a.goto(url);
+      if(scenario==="offline" || scenario==="response-lost") {
+        await a.getByRole("textbox",{name:"已知目标 0",exact:true}).waitFor();
+        const requests: string[]=[];
+        let blocked=true, committed=false;
+        await a.route("**/api/trpc/**",async route=>{
+          if(route.request().method()==="POST" && route.request().url().includes("opc.information")) {
+            requests.push(route.request().postData()!);
+            if(blocked) {
+              if(scenario==="response-lost" && !committed) { const response=await route.fetch(); expect(response.ok()).toBe(true);committed=true; }
+              return route.abort("connectionreset");
+            }
+          }
+          return route.continue();
+        });
+        await a.getByRole("textbox",{name:"已知目标 0",exact:true}).fill("Recover my original edit");
+        await a.getByRole("button",{name:"重试自动保存",exact:true}).waitFor();
+        const original=requests[0]; expect(original).toBeTruthy();
+        expect((await sql.query("select count(*)::int n from artifact_requests where project_id=$1 and action='opc_information'",[draft.projectId])).rows[0].n).toBe(scenario==="response-lost"?1:0);
+        await context.clearCookies();
+        const readyAgain=a.waitForResponse(r=>r.url().includes("settings.getSystemSettings") && r.ok(),{timeout:90000});
+        await a.goto(process.env.V3_LOCAL_APP+"/login?redirect="+encodeURIComponent(new URL(url).pathname));
+        await readyAgain;
+        await a.getByPlaceholder("name@example.com").fill(f.email);
+        await a.getByPlaceholder("输入你的密码").fill(f.password);
+        await a.getByRole("button",{name:"登录",exact:true}).last().click();
+        await a.waitForURL(url,{timeout:90000});
+        await a.getByRole("button",{name:"重试自动保存",exact:true}).waitFor();
+        expect(await a.getByRole("textbox",{name:"已知目标 0",exact:true}).inputValue()).toBe("Recover my original edit");
+        blocked=false;
+        await a.getByRole("button",{name:"重试自动保存",exact:true}).click();
+        await expect.poll(async()=> (await f.service.read(draft.draftId)).information["step-0"].values?.goal?.value,{timeout:20000}).toBe("Recover my original edit");
+        await expect.poll(()=>a.getByRole("button",{name:"重试自动保存",exact:true}).count()).toBe(0);
+        expect(new Set(requests).size).toBe(1);
+        expect((await sql.query("select count(*)::int n from artifact_requests where project_id=$1 and action='opc_information'",[draft.projectId])).rows[0].n).toBe(1);
+        expect((await f.service.read(draft.draftId)).sessionId).toBe(draft.sessionId);
+        return;
+      }
+      // B reaches its next question only after A explicitly confirms the first.
+      await a.getByRole("textbox",{name:"已知目标 0",exact:true}).fill("Initially confirmed goal");
+      await a.getByRole("textbox",{name:"已知目标 0",exact:true}).locator("..").getByRole("button",{name:/^(确认本题并继续|确认当前信息，继续)$/,exact:true}).click();
+      await a.getByRole("textbox",{name:"Second independent field",exact:true}).waitFor();
+      const b=await context.newPage(); b.setDefaultTimeout(20000); await b.goto(url);
+      await b.getByRole("textbox",{name:"Second independent field",exact:true}).waitFor();
+      // The ordered navigator names each reached row with its hierarchical
+      // question number and its own answer status.
+      await a.getByRole("button",{name:/^1\.1 已知目标 0 · 已确认/}).click();
+      if(scenario==="same-field") await b.getByRole("button",{name:/^1\.1 已知目标 0 · 已确认/}).click();
+      await a.getByRole("textbox",{name:"已知目标 0",exact:true}).waitFor();
+      const held=new Promise<void>(resolve=>{release=resolve;});
+      let reached!:()=>void;
+      const intercepted=new Promise<void>(resolve=>{reached=resolve;});
+      // Hold either B's fresh-version read or its first write, not the backend.
+      let once=true;
+      await b.route("**/api/trpc/**",async route=>{
+        const req=route.request();
+        if(once && (conflict ? req.method()==="POST" && req.url().includes("opc.information") : req.method()==="GET" && req.url().includes("opc.read"))) {
+          once=false; reached(); await held;
+        }
+        await route.continue();
+      });
+      await b.getByRole("textbox",{name:scenario==="same-field" ? "已知目标 0" : "Second independent field",exact:true}).fill("B original edit");
+      await Promise.race([intercepted,new Promise((_,reject)=>setTimeout(()=>reject(new Error("autosave barrier not reached")),20000))]);
+      await a.getByRole("textbox",{name:"已知目标 0",exact:true}).fill("A saved independently");
+      await expect.poll(async()=>(await f.service.read(draft.draftId)).information["step-0"].values?.goal?.value,{timeout:20000}).toBe("A saved independently");
+      release!();
+      if(scenario==="same-field") {
+        await b.getByText("其他窗口修改了相同字段。你的输入未提交，请比较后决定。",{exact:true}).waitFor();
+        expect((await f.service.read(draft.draftId)).information["step-0"].values.goal.value).toBe("A saved independently");
+        await b.reload();
+        await b.getByText("其他窗口修改了相同字段。你的输入未提交，请比较后决定。",{exact:true}).waitFor();
+        expect(await b.getByRole("textbox",{name:"已知目标 0",exact:true}).inputValue()).toBe("B original edit");
+        await b.getByRole("button",{name:"保留我的这些修改并重新保存",exact:true}).click();
+        await expect.poll(async()=>(await f.service.read(draft.draftId)).information["step-0"].values?.goal?.value,{timeout:20000}).toBe("B original edit");
+        return;
+      }
+      await expect.poll(async()=>(await f.service.read(draft.draftId)).information["step-0"].values?.other?.value,{timeout:20000}).toBe("B original edit");
+      expect((await f.service.read(draft.draftId)).information["step-0"].values.goal.value).toBe("A saved independently");
+    } finally { release?.(); await browser.close(); }
+  },180000);
+}
+
+
+it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hidden fields aligned", async () => {
+  const {chromium} = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f=await fixture(3,true), model=randomUUID();
+  // This test runs independently as well as in the full suite. Do not depend
+  // on an earlier browser test having configured its local organizer model.
+  const summaryModel=randomUUID();
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'OPC organizer','opc-organizer','fixture','true',1000,32000)",[summaryModel]);
+  await sql.query("insert into system_settings(key,value) values('v3_summary_model_id',to_jsonb($1::text)),('v3_summary_max_tokens','1000'::jsonb) on conflict(key) do update set value=excluded.value",[summaryModel]);
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Question local','opc-question','fixture','true',1000,32000)",[model]);
+  await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  const draft=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:"mentor"});
+  for (const questionId of ["other", "unknown-question", "constructor"])
+    await expect(f.service.prepareStep({draftId:draft.draftId,stepId:"step-0",purpose:"mentor",questionId,requestId:randomUUID(),input:"premature"})).rejects.toThrow("OPC_QUESTION_NOT_REACHED");
+  await expect(f.service.prepareStep({draftId:draft.draftId,stepId:"step-0",purpose:"mentor",questionId:17,requestId:randomUUID(),input:"invalid"})).rejects.toThrow();
+  expect((await sql.query("select count(*)::int n from bill2_runs where actor_id=$1",[f.actor])).rows[0].n).toBe(0);
+  expect((await f.service.read(draft.draftId)).turns).toHaveLength(0);
+  const browser=await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
+  let release: (()=>void)|undefined;
+  try {
+    const url=process.env.V3_LOCAL_APP+"/positioning/"+draft.draftId;
+    async function login() {
+      const context=await browser.newContext();
+      await context.route("**/*",route=>["127.0.0.1","localhost"].includes(new URL(route.request().url()).hostname)?route.continue():route.abort());
+      const page=await context.newPage();page.setDefaultTimeout(30000);page.setDefaultNavigationTimeout(90000);
+      const ready=page.waitForResponse(r=>r.url().includes("settings.getSystemSettings")&&r.ok(),{timeout:90000});
+      await page.goto(process.env.V3_LOCAL_APP+"/login?redirect="+encodeURIComponent(new URL(url).pathname));await ready;
+      await page.getByPlaceholder("name@example.com").fill(f.email);await page.getByPlaceholder("输入你的密码").fill(f.password);
+      await page.getByRole("button",{name:"登录",exact:true}).last().click();await page.waitForURL(url);return {context,page};
+    }
+    const {page}=await login();const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));
+    const first=()=>page.getByRole("textbox",{name:"已知目标 0",exact:true});
+    const second=()=>page.getByRole("textbox",{name:"Second independent field",exact:true});
+    const composer=()=>page.getByRole("textbox",{name:"给导师的回复",exact:true});
+    await first().waitFor();expect(await second().count()).toBe(0);
+    async function expectOpening(label: string, title: string) {
+      const paragraph = page.getByRole("log", { name: "完整导师消息" })
+        .getByText(`导师主动引导 · ${label}`, { exact: true })
+        .locator("..").locator("p");
+      await expect.poll(() => paragraph.textContent(), { timeout: 30000 })
+        .toContain(`“${title}”`);
+    }
+    // The first actual mentor message must appear while the user is idle.
+    await expectOpening("1.1", "已知目标 0");
+    expect(await page.locator("body").textContent()).not.toContain("Second independent field");
+    expect(await page.getByRole("button",{name:/^(确认本题并继续|确认当前信息，继续)$/,exact:true}).isVisible()).toBe(true);
+    expect(await page.getByRole("button",{name:/^(确认本题并继续|确认当前信息，继续)$/,exact:true}).evaluate(el=>Boolean(el.closest("details")))).toBe(false);
+    const admissions:any[]=[];const informationWrites:string[]=[];
+    page.on('response',async response=>{if(response.status()>=400&&response.url().includes('/api/trpc/'))console.info('QUESTION_HTTP_FAILURE',response.status(),(await response.json()).map((item:any)=>item.error?.message));});
+    page.on("request",r=>{
+      if(r.method()==="POST"&&r.url().includes("opc.prepareStep")){const body=r.postDataJSON();const v=body[0]??body;admissions.push(v.json??v);}
+      if(r.method()==="POST"&&r.url().includes("opc.information")) {
+        informationWrites.push(r.postData()??"");
+      }
+    });
+    async function send(text:string){await composer().fill(text);await page.getByRole("button",{name:"发送",exact:true}).click();try{await expect.poll(()=>composer().inputValue(),{timeout:30000}).toBe("");}catch(error){console.info('QUESTION_SEND_FAILURE',{alerts:await page.getByRole('alert').allTextContents(),admissions:admissions.length});await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/question-send-failure.png'});throw error;}}
+    await send("我做 AI 赛道");
+    await expect.poll(()=>first().inputValue()).toBe("我做 AI 赛道");
+    // Autosave includes a 700ms debounce plus a fresh read and the write.
+    await expect.poll(async()=>(await f.service.read(draft.draftId)).information["step-0"].values?.goal?.status,{timeout:30000}).toBe("provisional");
+    expect(await second().count()).toBe(0);
+    await send("不知道呢");await page.getByText("还没想清楚没关系",{exact:false}).waitFor();
+    expect(await first().inputValue()).toBe("我做 AI 赛道");expect(await second().count()).toBe(0);
+    const held=new Promise<void>(resolve=>{release=resolve;});let reached!:()=>void;
+    const intercepted=new Promise<void>(resolve=>{reached=resolve;});const confirmations:string[]=[];let hold=true;
+    await page.route("**/api/trpc/opc.information*",async route=>{
+      const raw=route.request().postData()??"";
+      if(raw.includes('"status":"confirmed"')) {
+        confirmations.push(raw);
+        if(hold){hold=false;const response=await route.fetch();expect(response.ok()).toBe(true);reached();await held;return route.abort("connectionreset");}
+      }
+      return route.continue();
+    });
+    await page.getByRole("button",{name:/^(确认本题并继续|确认当前信息，继续)$/,exact:true}).click();
+    await Promise.race([intercepted,new Promise((_,reject)=>setTimeout(()=>reject(new Error("confirmation barrier not reached")),30000))]);
+    expect(await second().count()).toBe(0);expect(await first().isVisible()).toBe(true);
+    expect(confirmations).toHaveLength(1);release!();
+    await page.getByRole("alert").filter({hasText:"操作未完成"}).waitFor();
+    await page.reload();await first().waitFor();expect(await second().count()).toBe(0);
+    await page.getByRole("button",{name:"继续核对本题确认",exact:true}).click();
+    await second().waitFor();expect(await first().count()).toBe(0);expect(confirmations).toHaveLength(2);expect(new Set(confirmations).size).toBe(1);
+    await page.unroute("**/api/trpc/opc.information*");
+    // The current question carries its hierarchical identity in the form itself,
+    // instead of a static guide card repeating the step name.
+    const form = page.locator("section[aria-label='本步填写信息']");
+    await expect.poll(() => form.textContent()).toContain("1.2");
+    expect(await form.textContent()).toContain("Second independent field");
+    await expectOpening("1.2", "Second independent field");
+    expect(await page.getByRole("status", { name: "当前导师任务" }).count()).toBe(0);
+    expect((await f.service.read(draft.draftId)).snapshot.steps["step-0"].valid).toBe(false);
+    await page.getByRole("button", {name:/^1\.1 已知目标 0 · 已确认/}).click();
+    expect(await first().inputValue()).toBe("我做 AI 赛道");
+    expect(await page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/,exact:true}).isEnabled()).toBe(false);
+    await page.getByRole("button", {name:"继续当前待确认问题",exact:true}).click();
+    await second().waitFor();
+    await send("摄影课程");
+    // Wait for the durable projection under a bounded timeout, then for the UI
+    // to show it. The former 1 s UI poll failed intermittently while the
+    // request/execute/result-read chain was still in flight.
+    await expect.poll(async()=>(await f.service.read(draft.draftId)).information["step-0"].values?.other?.value ?? "",{timeout:30000}).toBe("摄影课程");
+    await expect.poll(()=>second().inputValue(),{timeout:30000}).toBe("摄影课程");
+    // The 700ms debounce plus authenticated read/write is not a 1000ms
+    // operation. Keep an explicit upper bound and assert durable content, not
+    // just that a matching HTTP request was sent.
+    await expect.poll(()=>informationWrites.some(raw=>raw.includes('"other"')&&raw.includes('"摄影课程"')&&raw.includes('"status":"provisional"')),{timeout:30000}).toBe(true);
+    await expect.poll(async()=>(await f.service.read(draft.draftId)).information["step-0"].values?.other,{timeout:30000})
+      .toEqual({value:"摄影课程",nature:"hypothesis",status:"provisional"});
+    const before=await f.service.read(draft.draftId);expect(before.information["step-0"].values.goal.value).toBe("我做 AI 赛道");
+    expect(admissions.at(-1).questionId).toBe("other");
+    const original=await f.service.prepareStep(admissions.at(-1));
+    await f.service.information({draftId:draft.draftId,stepId:"step-0",requestId:randomUUID(),expectedVersion:before.snapshot.steps["step-0"].version,values:{...before.information["step-0"].values,goal:{...before.information["step-0"].values.goal,status:"provisional"}}});
+    expect((await f.service.prepareStep(admissions.at(-1))).executionId).toBe(original.executionId);
+    await expect(f.service.prepareStep({...admissions.at(-1),questionId:"goal"})).rejects.toThrow("OPC_REQUEST_CONFLICT");
+    const revised=await f.service.read(draft.draftId);
+    await f.service.information({draftId:draft.draftId,stepId:"step-0",requestId:randomUUID(),expectedVersion:revised.snapshot.steps["step-0"].version,values:before.information["step-0"].values});
+    const expectedBeforeRecovery: ExpectedMentorEffect[] = [
+      {stepId:"step-0",questionId:"goal",opening:true,input:OPENING_INPUT},
+      {stepId:"step-0",questionId:"other",opening:true,input:OPENING_INPUT},
+      {stepId:"step-0",questionId:"goal",opening:false,input:"我做 AI 赛道"},
+      {stepId:"step-0",questionId:"goal",opening:false,input:"不知道呢"},
+      {stepId:"step-0",questionId:"other",opening:false,input:"摄影课程"},
+    ];
+    const beforeRecoveryEffects=await expectExactMentorEffects(f.actor,draft.draftId,draft.roundId,expectedBeforeRecovery);
+    const fresh=await login();await fresh.page.getByRole("textbox",{name:"Second independent field",exact:true}).waitFor();
+    await expect.poll(()=>fresh.page.getByRole("log",{name:"完整导师消息"}).textContent()).toContain("我做 AI 赛道");
+    await expect.poll(()=>fresh.page.getByRole("textbox",{name:"Second independent field",exact:true}).inputValue(),{timeout:30000}).toBe("摄影课程");
+    expect((await f.service.read(draft.draftId)).information["step-0"].values.other)
+      .toEqual({value:"摄影课程",nature:"hypothesis",status:"provisional"});
+    await fresh.context.close();
+    await page.reload();await second().waitFor();expect(await second().inputValue()).toBe("摄影课程");
+    expect((await f.service.read(draft.draftId)).information["step-0"].values.other)
+      .toEqual({value:"摄影课程",nature:"hypothesis",status:"provisional"});
+    expect(await expectExactMentorEffects(f.actor,draft.draftId,draft.roundId,expectedBeforeRecovery))
+      .toEqual(beforeRecoveryEffects);
+    await page.getByRole("button",{name:/^(确认本题并继续|确认当前信息，继续)$/,exact:true}).click();
+    await page.getByRole("textbox",{name:"已知目标 1",exact:true}).waitFor();
+    // Do not send another user message to make the new step's opening visible.
+    await expectOpening("2.1", "已知目标 1");
+    const result=await f.service.read(draft.draftId);expect(result.snapshot.steps["step-0"].valid).toBe(true);expect(result.sessionId).toBe(draft.sessionId);
+    // The host opened the current question itself, and every stored turn keeps
+    // the question identity it was asked under.
+    const opened=result.turns.filter((turn:any)=>turn.kind==="opening");
+    expect(opened.map((turn:{stepId:string;questionId:string|null})=>[turn.stepId,turn.questionId]))
+      .toEqual([["step-0","goal"],["step-0","other"],["step-1","goal"]]);
+    await expectExactMentorEffects(f.actor,draft.draftId,draft.roundId,[
+      ...expectedBeforeRecovery,
+      {stepId:"step-1",questionId:"goal",opening:true,input:OPENING_INPUT},
+    ]);
+    expect(result.turns.every((turn:any)=>turn.kind==="organizer"||Boolean(turn.questionId))).toBe(true);
+    const runs=await sql.query("select payload from runtime_executions where actor_id=$1 order by created_at",[f.actor]);
+    // The frozen mentor context carries the host-derived hierarchical label.
+    expect(runs.rows.some(row=>row.payload.instructions.includes('Current information question: {"id":"other","title":"Second independent field","label":"1.2"}'))).toBe(true);
+    expect(runs.rows.some(row=>row.payload.instructions.includes("opened by the host, not by the user"))).toBe(true);
+    expect(errors).toEqual([]);
+  } finally { release?.();await browser.close(); }
+},300000);
+
+it('OPC: CAPACITY tool continuation measures each complete SDK request and cap behavior',async()=>{
+ const {runtimeAdmissionService}=await import('../runtime/admission');
+ const {runtimeExecutor}=await import('../runtime/execute');
+ const {createServer}=await import('node:http');
+ const f=await publishedDraft();
+ const sourceMarker='CAPACITY_LONG_SOURCE_'+randomUUID().replaceAll('-','');
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'capacity-source',title:'长来源',brief:sourceMarker+'内容'.repeat(950),day:'2026-09-25',contentType:'article'}]});
+ const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'capacity-source',expectedRevision:null}]});
+ const modelId=(await sql.query('select model_id from modules where id=$1',[f.moduleId])).rows[0].model_id;
+ const run=async(inputBytes:number,seedHistory=false,interrupt=false)=>{
+  const admission=runtimeAdmissionService(f.user,admin,{account:'capacity-fixture',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:200,inputBytes,historyItems:20,workspaceContext:true});
+  const session=await admission.start(randomUUID(),{kind:'positioning_draft'});
+  if(seedHistory){
+   const seed=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'HISTORY_CANARY_'+ '旧讨论'.repeat(400),selection:{kind:'ordinary',modelId},network:'deny'});
+   const seedServer=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;const request=JSON.parse(JSON.parse(raw).input);const id='seed-'+randomUUID();res.setHeader('content-type','application/json');res.end(JSON.stringify({id,model:request.model,final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:request.model,choices:[{index:0,message:{role:'assistant',content:'必要约束已保留'},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));});
+   await new Promise<void>(resolve=>seedServer.listen(0,'127.0.0.1',resolve));
+   try{const address=seedServer.address();if(!address||typeof address==='string')throw new Error('seed server');const executor=runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});expect(await executor.execute(seed.executionId)).toMatchObject({state:'completed'});}
+   finally{await new Promise<void>((resolve,reject)=>seedServer.close(error=>error?reject(error):resolve()));}
+  }
+  const prepared=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'请读取我的长来源并回答',selection:{kind:'ordinary',modelId},network:'deny'});
+  const requests:Array<Record<string,any>>=[];
+  const server=createServer(async(req,res)=>{
+   let raw='';for await(const chunk of req)raw+=chunk;
+   const request=JSON.parse(JSON.parse(raw).input);requests.push(request);
+   const phase=requests.length;
+   const message=phase<3?{role:'assistant',content:null,tool_calls:[{id:'cap-call-'+phase,type:'function',function:{name:'read_source',arguments:phase===1?'{}':JSON.stringify({query:work.workItemId})}}]}:{role:'assistant',content:'已读取合成来源'};
+   const id='cap-'+randomUUID();
+   res.setHeader('content-type','application/json');res.end(JSON.stringify({id,model:request.model,final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:request.model,choices:[{index:0,message,finish_reason:phase<3?'tool_calls':'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));
+  });
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try{
+   const address=server.address();if(!address||typeof address==='string')throw new Error('local server');
+   let interrupted=interrupt;
+   const database={rpc:async(name:string,args:Record<string,unknown>)=>{
+    if(interrupted&&name==='runtime_session_items'&&args.p_action==='append')return {data:null,error:{message:'synthetic interruption after tool-loop receipts'}};
+    return admin.rpc(name,args);
+   }};
+   const executor=runtimeExecutor({database,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
+   let result=await executor.execute(prepared.executionId);
+   if(interrupt){
+    expect(result).toMatchObject({state:'pending'});expect(requests).toHaveLength(3);
+    const frozen=(await sql.query('select payload,selected_history from runtime_executions where id=$1',[prepared.executionId])).rows[0];
+    interrupted=false;result=await executor.execute(prepared.executionId);
+    expect((await sql.query('select payload,selected_history from runtime_executions where id=$1',[prepared.executionId])).rows[0]).toEqual(frozen);
+    expect(requests).toHaveLength(3);
+   }
+   const dispatched=requests.length;
+   const replay=await executor.execute(prepared.executionId);
+   expect(requests).toHaveLength(dispatched);
+   expect(replay).toMatchObject(result);
+   const rows=requests.map((request,index)=>({call:index+1,bytes:Buffer.byteLength(JSON.stringify(request)),roles:request.messages.map((m:any)=>m.role),sourceMarkerCount:JSON.stringify(request).split(sourceMarker).length-1,messageBytes:request.messages.map((m:any)=>({role:m.role,bytes:Buffer.byteLength(JSON.stringify(m))})),toolCalls:request.messages.reduce((n:number,m:any)=>n+(m.tool_calls?.length??0),0),toolResults:request.messages.filter((m:any)=>m.role==='tool').length}));
+   const historyEntries=(await sql.query('select count(*)::int n from runtime_session_history where session_id=$1',[session.sessionId])).rows[0].n;
+   const savedTools=(await sql.query('select count(*)::int n from runtime_tool_calls where execution_id=$1 and result is not null',[prepared.executionId])).rows[0].n;
+   const recordedHashes=(await sql.query("select payload->>'requestHash' hash from bill2_calls where run_id=$1 order by sequence",[prepared.runId])).rows.map((row:{hash:string})=>row.hash);
+   expect(recordedHashes).toEqual(requests.map(request=>createHash('sha256').update(JSON.stringify(request)).digest('hex')));
+   const {writeFileSync}=await import('node:fs');
+   writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/capacity-tool-'+inputBytes+(seedHistory?'-history':'-fresh')+(interrupt?'-recovery':'')+'.jsonl',requests.map(request=>JSON.stringify(request)).join('\n')+'\n',{mode:0o600});
+   console.info('CAPACITY_TOOL_RESULTS',JSON.stringify({inputBytes,seedHistory,interrupt,result,rows,historyEntries,savedTools,transportHashesMatch:true}));
+   for(const row of rows)expect(row.bytes).toBeLessThanOrEqual(inputBytes);
+   return {result,rows,requests,historyEntries,savedTools,sessionId:session.sessionId,executionId:prepared.executionId};
+  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+ };
+ const supported=await run(32000);
+ expect(supported.result).toMatchObject({state:'completed'});expect(supported.rows).toHaveLength(3);
+ expect(supported.rows[2].sourceMarkerCount).toBe(1);
+ expect(supported.rows[2].toolCalls).toBe(2);expect(supported.rows[2].toolResults).toBe(2);
+ const bounded=await run(4000);
+ expect(bounded.result).toMatchObject({state:'pending',unavailable:'capacity'});expect(bounded.rows.length).toBeGreaterThanOrEqual(1);expect(bounded.rows.length).toBeLessThan(3);
+ expect(bounded.savedTools).toBe(2);
+ const {browser,page}=await planBrowser(f);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+bounded.sessionId);
+  await page.evaluate(({sessionId,executionId})=>sessionStorage.setItem('opc-runtime-capacity:'+sessionId+':'+executionId,'1'),{sessionId:bounded.sessionId,executionId:bounded.executionId});
+  await page.reload();
+  await page.getByText('本次必要材料超过模型输入容量，原请求和已完成内容已保留。取消剩余执行后可缩短材料并新发请求。').waitFor();
+  expect(await page.getByRole('button',{name:'恢复原任务'}).count()).toBe(0);
+  expect(await page.getByRole('button',{name:'取消剩余执行'}).count()).toBe(1);
+ }finally{await browser.close();}
+ const historical=await run(9000,true);
+ expect(supported.rows[2].bytes).toBeLessThan(9000);
+ expect(historical.result).toMatchObject({state:'completed'});
+ expect(historical.rows).toHaveLength(3);
+ expect(historical.rows[2].bytes).toBeLessThanOrEqual(9000);
+ expect(historical.rows[2]).toMatchObject({sourceMarkerCount:1,toolCalls:2,toolResults:2});
+ expect(historical.historyEntries).toBe(8);
+ expect(historical.savedTools).toBe(2);
+ expect(JSON.stringify(historical.requests[0])).toContain('HISTORY_CANARY_');
+ expect(JSON.stringify(historical.requests[2])).not.toContain('HISTORY_CANARY_');
+ const recovered=await run(9000,true,true);
+ expect(recovered.result).toMatchObject({state:'completed'});expect(recovered.historyEntries).toBe(8);expect(recovered.savedTools).toBe(2);
+},120000);
+
+it('OPC: CAPACITY interrupted request retains frozen manuscript after a new save and denies foreign actor',async()=>{
+ const {runtimeAdmissionService}=await import('../runtime/admission');
+ const {runtimeExecutor}=await import('../runtime/execute');
+ const {createServer}=await import('node:http');
+ const f=await publishedDraft();
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'capacity-recovery',title:'恢复隔离稿',brief:'隔离测试选题',day:'2026-09-25',contentType:'article'}]});
+ const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'capacity-recovery',expectedRevision:null}]});
+ const first=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:0,sourceContentId:null,kind:'brief',status:'final',title:'恢复隔离稿',body:'CAPACITY_FROZEN_V1_正文'});
+ const modelId=(await sql.query('select model_id from modules where id=$1',[f.moduleId])).rows[0].model_id;
+ const admission=runtimeAdmissionService(f.user,admin,{account:'capacity-recovery',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:200,inputBytes:32000,historyItems:20});
+ const request={sessionId:work.sessionId,requestId:randomUUID(),input:'修改当前稿件',selection:{kind:'ordinary' as const,modelId},network:'deny' as const};
+ const prepared=await admission.prepare(request);
+ const frozen=(await sql.query('select payload from runtime_executions where id=$1',[prepared.executionId])).rows[0].payload;
+ expect(JSON.stringify(frozen.scopeMaterial)).toContain('CAPACITY_FROZEN_V1_');
+ let dispatches=0,frozenRequest='';const server=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;dispatches++;frozenRequest=JSON.stringify(JSON.parse(JSON.parse(raw).input));res.destroy();});
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('local server');
+  const executor=runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
+  expect(await executor.execute(prepared.executionId)).toMatchObject({state:'pending'});
+  const historyBefore=(await sql.query('select count(*)::int n from runtime_session_history where session_id=$1',[work.sessionId])).rows[0].n;
+  await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:1,sourceContentId:first.id,kind:'brief',status:'final',title:'恢复隔离稿',body:'CAPACITY_NEW_V2_正文'});
+  expect(await admission.prepare(request)).toMatchObject({executionId:prepared.executionId,runId:prepared.runId,sessionId:prepared.sessionId,state:'interrupted'});
+  expect(await executor.execute(prepared.executionId)).toMatchObject({state:'pending'});
+  expect(dispatches).toBe(1);
+  expect(frozenRequest).toContain('CAPACITY_FROZEN_V1_');expect(frozenRequest).not.toContain('CAPACITY_NEW_V2_');
+  const retained=(await sql.query('select payload from runtime_executions where id=$1',[prepared.executionId])).rows[0].payload;
+  expect(retained).toEqual(frozen);expect(JSON.stringify(retained.scopeMaterial)).not.toContain('CAPACITY_NEW_V2_');
+  const historyAfter=(await sql.query('select count(*)::int n from runtime_session_history where session_id=$1',[work.sessionId])).rows[0].n;
+  expect(historyAfter).toBe(historyBefore);
+  const outsider=await publishedDraft();
+  const foreign=runtimeAdmissionService(outsider.user,admin,{account:'capacity-recovery',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:200,inputBytes:32000,historyItems:20});
+  await expect(foreign.prepare({...request,requestId:randomUUID()})).rejects.toThrow('RUNTIME_ADMISSION_DENIED');
+  const {writeFileSync}=await import('node:fs');
+  writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/capacity-recovery-request.json',frozenRequest,{mode:0o600});
+  console.info('CAPACITY_RECOVERY_RESULTS',JSON.stringify({dispatches,requestBytes:Buffer.byteLength(frozenRequest),historyBefore,historyAfter,storedVersions:2,frozenVersion:1,foreignDenied:true}));
+ }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+},90000);
+it("OPC: the Agent opens the current question once per entry and plans without user-authored topic rows", async () => {
+  const { runtimeExecutor } = await import("../runtime/execute");
+  const { createServer } = await import("node:http");
+  const { OPENING_INPUT, openingRequestId, questionLabel } =
+    await import("../../shared/opcQuestions");
+  const f = await fixture(2, true),
+    model = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Opening local','opc-opening','fixture','true',1000,32000)",
+    [model],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [model, f.moduleId]);
+  const draft = await f.service.start({
+    requestId: randomUUID(),
+    registration: f.registration,
+    mode: "mentor",
+  });
+  const schema = (await f.service.read(draft.draftId)).information["step-0"].schema;
+  // Hierarchical identity comes from the method's declared field order.
+  expect(questionLabel(0, schema, schema[0].id)).toBe("1.1");
+  expect(questionLabel(0, schema, schema[1].id)).toBe("1.2");
+  let calls = 0;
+  const instructions: string[] = [];
+  const server = createServer(async (req, res) => {
+    calls++;
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const request = JSON.parse(JSON.parse(raw).input);
+    instructions.push(
+      typeof request.instructions === "string"
+        ? request.instructions
+        : (request.messages ?? [])
+            .filter((m: { role: string }) => ["system", "developer"].includes(m.role))
+            .map((m: { content: unknown }) =>
+              typeof m.content === "string" ? m.content : "",
+            )
+            .join("\n"),
+    );
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify({
+        id: "opening-" + calls,
+        model: "opc-opening",
+        final: true,
+        cost: "0.003",
+        currency: "USD",
+        coverage: "request_total",
+        usage: {
+          sdkResponse: {
+            id: "opening-" + calls,
+            object: "chat.completion",
+            created: 1,
+            model: "opc-opening",
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: JSON.stringify({
+                    message: "【隔离模拟】先把当前问题聊清楚。",
+                    inputKind: "answer",
+                    informationPatch: {},
+                  }),
+                },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+          },
+        },
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("local server");
+    const executor = runtimeExecutor({
+      database: admin,
+      actor: async () => f.actor,
+      endpoint: "http://127.0.0.1:" + address.port,
+    });
+    const openingRequest = {
+      draftId: draft.draftId,
+      stepId: "step-0",
+      purpose: "mentor" as const,
+      requestId: openingRequestId(draft.draftId, draft.roundId, "step-0", schema[0].id),
+      input: OPENING_INPUT,
+      // The host always freezes the question it is opening with the request; the
+      // turn's projected question/kind identity comes from that frozen value.
+      questionId: schema[0].id,
+    };
+    const opening = await f.service.prepareStep(openingRequest);
+    await executor.execute(opening.executionId);
+    // A future question cannot be opened before the current one is confirmed.
+    await expect(
+      f.service.prepareStep({
+        draftId: draft.draftId,
+        stepId: "step-0",
+        purpose: "mentor",
+        requestId: randomUUID(),
+        input: OPENING_INPUT,
+        questionId: schema[1].id,
+      }),
+    ).rejects.toThrow("OPC_QUESTION_NOT_REACHED");
+    // A NEW host opening that does not freeze the question it is opening is
+    // malformed: it must fail closed instead of degrading into a generic mentor
+    // turn, and it must not create any execution, BILL2 run or reservation.
+    await expect(
+      f.service.prepareStep({
+        draftId: draft.draftId,
+        stepId: "step-0",
+        purpose: "mentor",
+        requestId: randomUUID(),
+        input: OPENING_INPUT,
+      }),
+    ).rejects.toThrow("OPC_QUESTION_NOT_REACHED");
+    expect(
+      (await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n,
+    ).toBe(1);
+    expect(
+      (await sql.query("select count(*)::int n from bill2_runs where actor_id=$1", [f.actor])).rows[0].n,
+    ).toBe(1);
+    expect(
+      (await sql.query("select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve'", [f.actor])).rows[0].n,
+    ).toBe(1);
+    // Refresh, re-login or a second tab reuses the same entry identity.
+    expect((await f.service.prepareStep(openingRequest)).executionId).toBe(
+      opening.executionId,
+    );
+    await executor.execute(opening.executionId);
+    expect(calls).toBe(1);
+    const after = await f.service.read(draft.draftId);
+    // The turn is owned by the draft's current round, and every other projected
+    // value stays exact.
+    expect(after.turns).toEqual([
+      {
+        executionId: opening.executionId,
+        stepId: "step-0",
+        questionId: schema[0].id,
+        roundId: draft.roundId,
+        kind: "opening",
+        informationVersion: 0,
+      },
+    ]);
+    // The host marker is stored instead of fabricated user speech.
+    const history = await admin.rpc("runtime_view", {
+      p_actor_id: f.actor,
+      p_session_id: draft.sessionId,
+    });
+    expect(history.error).toBeNull();
+    expect(history.data.executions[0].input).toBe(OPENING_INPUT);
+    expect(instructions[0]).toContain("opened by the host, not by the user");
+    expect(instructions[0]).toContain('"elicit"');
+    expect(instructions[0]).toContain("inputKind");
+    // One entry is one charge.
+    expect(
+      (
+        await sql.query("select count(*)::int n from bill2_runs where actor_id=$1", [
+          f.actor,
+        ])
+      ).rows[0].n,
+    ).toBe(1);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((e) => (e ? reject(e) : resolve())),
+    );
+  }
+}, 180000);
+
+it("OPC: a confirmed positioning produces an editable first-week plan candidate without user-authored rows", async () => {
+  const { runtimeExecutor } = await import("../runtime/execute");
+  const { createServer } = await import("node:http");
+  const f = await completed(2),
+    model = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Plan local','opc-plan-free','fixture','true',1000,32000)",
+    [model],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [model, f.moduleId]);
+  // The user supplies only their own choices: no topic row is required.
+  const request = {
+    draftId: f.d.draftId,
+    requestId: randomUUID(),
+    purpose: "plan" as const,
+    stepId: "step-1",
+    input: JSON.stringify({
+      confirmedPositioning: { "已知目标 0": "A concrete user decision" },
+      platforms: [],
+      accounts: [],
+      startDate: "2026-09-21",
+      days: 7,
+    }),
+  };
+  const prepared = await f.service.prepareStep(request);
+  const body = [
+    {
+      id: randomUUID(),
+      platform: "x",
+      account: "proposed-handle",
+      title: "Agent proposed topic",
+      brief: "Generated from the confirmed positioning; the account name is only a proposal.",
+      day: "2026-09-21",
+    },
+    {
+      id: randomUUID(),
+      platform: "x",
+      account: "proposed-handle",
+      title: "Agent proposed topic 2",
+      brief: "Second proposed topic.",
+      day: "2026-09-23",
+    },
+  ];
+  let calls = 0;
+  const server = createServer(async (req, res) => {
+    calls++;
+    for await (const _ of req) void _;
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify({
+        id: "plan-free-" + prepared.executionId,
+        model: "opc-plan-free",
+        final: true,
+        cost: "0.003",
+        currency: "USD",
+        coverage: "request_total",
+        usage: {
+          sdkResponse: {
+            id: "plan-free-" + prepared.executionId,
+            object: "chat.completion",
+            created: 1,
+            model: "opc-plan-free",
+            choices: [
+              {
+                index: 0,
+                message: { role: "assistant", content: JSON.stringify(body) },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+          },
+        },
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("local server");
+    await runtimeExecutor({
+      database: admin,
+      actor: async () => f.actor,
+      endpoint: "http://127.0.0.1:" + address.port,
+    }).execute(prepared.executionId);
+    const candidate = await f.service.planResult(f.d.draftId, prepared.executionId);
+    expect(candidate.body).toEqual(body);
+    expect(candidate.sourceVersionId).toBe(f.sourceVersionId);
+    // A proposal is a plan version only: no account or work item exists yet.
+    expect(
+      (
+        await sql.query("select count(*)::int n from opc_accounts where actor_id=$1", [
+          f.actor,
+        ])
+      ).rows[0].n,
+    ).toBe(0);
+    const saved = await f.service.savePlan({
+      draftId: f.d.draftId,
+      requestId: randomUUID(),
+      expectedVersion: 0,
+      sourceVersionId: f.sourceVersionId,
+      body: candidate.body,
+    });
+    expect(saved.version).toBe(1);
+    const read = await f.service.read(f.d.draftId);
+    expect(read.plans[0].body).toEqual(body);
+    expect(
+      (
+        await sql.query("select count(*)::int n from artifact_projects where actor_id=$1 and work_kind='account'", [
+          f.actor,
+        ])
+      ).rows[0].n,
+    ).toBe(0);
+    expect(calls).toBe(1);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((e) => (e ? reject(e) : resolve())),
+    );
+  }
+}, 180000);
+it("OPC: a revised round opens the same question under its own identity without reusing or duplicating the original", async () => {
+  const { runtimeExecutor } = await import("../runtime/execute");
+  const { createServer } = await import("node:http");
+  const { OPENING_INPUT, openingRequestId } = await import("../../shared/opcQuestions");
+  const f = await fixture(2), model = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Round local','opc-round','fixture','true',1000,32000)",
+    [model],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [model, f.moduleId]);
+  const draft = await f.service.start({
+    requestId: randomUUID(),
+    registration: f.registration,
+    mode: "mentor",
+  });
+  const roundA = draft.roundId;
+  const schema = (await f.service.read(draft.draftId)).information["step-0"].schema;
+  const questionId = schema[0].id;
+  let calls = 0;
+  const server = createServer(async (req, res) => {
+    calls++;
+    for await (const _ of req) void _;
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify({
+        id: "round-" + calls,
+        model: "opc-round",
+        final: true,
+        cost: "0.003",
+        currency: "USD",
+        coverage: "request_total",
+        usage: {
+          sdkResponse: {
+            id: "round-" + calls,
+            object: "chat.completion",
+            created: 1,
+            model: "opc-round",
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: JSON.stringify({
+                    message: "【隔离模拟】第 " + calls + " 次开场。",
+                    inputKind: "answer",
+                    informationPatch: {},
+                  }),
+                },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+          },
+        },
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("local server");
+    const executor = runtimeExecutor({
+      database: admin,
+      actor: async () => f.actor,
+      endpoint: "http://127.0.0.1:" + address.port,
+    });
+    const requestFor = (roundId: string) => ({
+      draftId: draft.draftId,
+      stepId: "step-0",
+      purpose: "mentor" as const,
+      requestId: openingRequestId(draft.draftId, roundId, "step-0", questionId),
+      input: OPENING_INPUT,
+      questionId,
+    });
+    const roundARequest = requestFor(roundA);
+    const openingA = await f.service.prepareStep(roundARequest);
+    // Prepared but not yet executed: an unresolved request is already owned by
+    // its own identity, so a retry adopts it instead of creating another
+    // execution, run or reservation.
+    expect((await f.service.prepareStep(roundARequest)).executionId).toBe(openingA.executionId);
+    expect(
+      (await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n,
+    ).toBe(1);
+    expect(
+      (await sql.query("select count(*)::int n from bill2_runs where actor_id=$1", [f.actor])).rows[0].n,
+    ).toBe(1);
+    expect(calls).toBe(0);
+    await executor.execute(openingA.executionId);
+    expect(calls).toBe(1);
+    // The original round's request stays retryable and recoverable as itself.
+    expect((await f.service.prepareStep(roundARequest)).executionId).toBe(openingA.executionId);
+    await executor.execute(openingA.executionId);
+    expect(calls).toBe(1);
+    // Publish round A so a revision is allowed, exactly as the product requires.
+    for (const step of f.flow.steps) {
+      await f.artifacts.execute({
+        action: "save", projectId: draft.projectId, roundId: roundA,
+        requestId: randomUUID(), stepId: step.id, body: "Round A " + step.title,
+        evidenceIds: [], expectedVersion: 0,
+      });
+      const state = (await f.artifacts.read(draft.projectId, roundA)).steps[step.id];
+      await f.service.information({
+        draftId: draft.draftId, stepId: step.id, requestId: randomUUID(),
+        expectedVersion: state.version,
+        values: { goal: { status: "confirmed", nature: "decision", value: "A concrete user decision" } },
+      });
+      const updated = (await f.artifacts.read(draft.projectId, roundA)).steps[step.id];
+      await f.artifacts.execute({
+        action: "confirm", projectId: draft.projectId, roundId: roundA,
+        requestId: randomUUID(), stepId: step.id,
+        expectedVersion: updated.version, expectedReviewVersion: updated.reviewVersion,
+      });
+    }
+    const published = await f.artifacts.read(draft.projectId, roundA);
+    await f.artifacts.execute({
+      action: "publish", projectId: draft.projectId, roundId: roundA,
+      requestId: randomUUID(),
+      expectedSteps: Object.fromEntries(
+        Object.entries(published.steps).map(([k, v]) => [k, { version: v.version, reviewVersion: v.reviewVersion }]),
+      ),
+    });
+    const revised = await f.service.revise(draft.draftId, randomUUID(), roundA);
+    const roundB = revised.roundId;
+    expect(roundB).not.toBe(roundA);
+    expect((await f.service.read(draft.draftId)).roundId).toBe(roundB);
+    // A revision legitimately needs a fresh opening for the same step/question.
+    const roundBRequest = requestFor(roundB);
+    expect(roundBRequest.requestId).not.toBe(roundARequest.requestId);
+    const openingB = await f.service.prepareStep(roundBRequest);
+    expect(openingB.executionId).not.toBe(openingA.executionId);
+    await executor.execute(openingB.executionId);
+    expect(calls).toBe(2);
+    // The older round keeps its own identity: it replays to its own execution
+    // and never adopts the revised round's turn.
+    expect((await f.service.prepareStep(roundARequest)).executionId).toBe(openingA.executionId);
+    await executor.execute(openingA.executionId);
+    expect(calls).toBe(2);
+    const after = await f.service.read(draft.draftId);
+    const openings = after.turns.filter((turn: any) => turn.kind === "opening");
+    expect(openings).toHaveLength(2);
+    expect(new Set(openings.map((turn: any) => turn.questionId))).toEqual(new Set([questionId]));
+    expect(new Set(openings.map((turn: any) => turn.roundId))).toEqual(new Set([roundA, roundB]));
+    expect(new Set(openings.map((turn: any) => turn.executionId))).toEqual(
+      new Set([openingA.executionId, openingB.executionId]),
+    );
+    // Each opening owns exactly one execution, one BILL2 run and one reservation.
+    expect(
+      (await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n,
+    ).toBe(2);
+    expect(
+      (await sql.query("select count(*)::int n from bill2_runs where actor_id=$1", [f.actor])).rows[0].n,
+    ).toBe(2);
+    expect(
+      (await sql.query("select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve'", [f.actor])).rows[0].n,
+    ).toBe(2);
+    // The revised opening material belongs to the revised round.
+    expect(
+      (
+        await sql.query(
+          "select count(*)::int n from opc_turns t where t.draft_id=$1 and t.purpose='mentor' and t.round_id=$2",
+          [draft.draftId, roundB],
+        )
+      ).rows[0].n,
+    ).toBe(1);
+    expect(
+      (
+        await sql.query(
+          "select count(*)::int n from opc_turns t where t.draft_id=$1 and t.purpose='mentor' and t.round_id=$2",
+          [draft.draftId, roundA],
+        )
+      ).rows[0].n,
+    ).toBe(1);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((e) => (e ? reject(e) : resolve())),
+    );
+  }
+}, 180000);
+it("OPC: a revision makes the page open the current question again in the new round without duplicating the original", async () => {
+  const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await fixture(2);
+  const draft = await f.service.start({
+    requestId: randomUUID(),
+    registration: f.registration,
+    mode: "mentor",
+  });
+  const roundA = draft.roundId;
+  const draftUrl = process.env.V3_LOCAL_APP + "/positioning/" + draft.draftId;
+  const browser = await chromium.launch({
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", (route) => {
+      const u = new URL(route.request().url());
+      return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+        ["data:", "blob:"].includes(u.protocol)
+        ? route.continue()
+        : route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(90000);
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    async function login() {
+      const ready = page.waitForResponse(
+        (r) => r.url().includes("settings.getSystemSettings") && r.ok(),
+        { timeout: 90000 },
+      );
+      await page.goto(
+        process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(new URL(draftUrl).pathname),
+      );
+      await ready;
+      await page.getByPlaceholder("name@example.com").fill(f.email);
+      await page.getByPlaceholder("输入你的密码").fill(f.password);
+      await page.getByRole("button", { name: "登录", exact: true }).last().click();
+      await page.waitForURL(draftUrl, { timeout: 90000 });
+    }
+    const openingFor = (label: string) =>
+      page.getByRole("log", { name: "完整导师消息" })
+        .getByText(`导师主动引导 · ${label}`, { exact: true });
+    await login();
+    // Round A opens its current question while the user is idle.
+    await expect.poll(() => openingFor("1.1").count(), { timeout: 30000 }).toBe(1);
+    const afterRoundA = await f.service.read(draft.draftId);
+    expect(afterRoundA.roundId).toBe(roundA);
+    const roundAOpening = afterRoundA.turns.find((turn: any) => turn.kind === "opening");
+    expect(roundAOpening?.roundId).toBe(roundA);
+    // Publish round A, then revise it, exactly as the product flow does.
+    for (const step of f.flow.steps) {
+      await f.artifacts.execute({
+        action: "save", projectId: draft.projectId, roundId: roundA,
+        requestId: randomUUID(), stepId: step.id, body: "Round A " + step.title,
+        evidenceIds: [], expectedVersion: 0,
+      });
+      const state = (await f.artifacts.read(draft.projectId, roundA)).steps[step.id];
+      await f.service.information({
+        draftId: draft.draftId, stepId: step.id, requestId: randomUUID(),
+        expectedVersion: state.version,
+        values: { goal: { status: "confirmed", nature: "decision", value: "A concrete user decision" } },
+      });
+      const updated = (await f.artifacts.read(draft.projectId, roundA)).steps[step.id];
+      await f.artifacts.execute({
+        action: "confirm", projectId: draft.projectId, roundId: roundA,
+        requestId: randomUUID(), stepId: step.id,
+        expectedVersion: updated.version, expectedReviewVersion: updated.reviewVersion,
+      });
+    }
+    const published = await f.artifacts.read(draft.projectId, roundA);
+    await f.artifacts.execute({
+      action: "publish", projectId: draft.projectId, roundId: roundA,
+      requestId: randomUUID(),
+      expectedSteps: Object.fromEntries(
+        Object.entries(published.steps).map(([k, v]) => [k, { version: v.version, reviewVersion: v.reviewVersion }]),
+      ),
+    });
+    const revised = await f.service.revise(draft.draftId, randomUUID(), roundA);
+    const roundB = revised.roundId;
+    expect(roundB).not.toBe(roundA);
+    // The user revisits and changes the answer, so the question is open again.
+    const roundBState = (await f.artifacts.read(draft.projectId, roundB)).steps["step-0"];
+    await f.service.information({
+      draftId: draft.draftId, stepId: "step-0", requestId: randomUUID(),
+      expectedVersion: roundBState.version,
+      values: { goal: { status: "provisional", nature: "decision", value: "修订后的定位目标" } },
+    });
+    await page.reload();
+    // The revised round must be opened again; the older round's reply must not
+    // suppress it and must not be reused for it.
+    await expect.poll(() => openingFor("1.1").count(), { timeout: 30000 }).toBe(2);
+    const afterRoundB = await f.service.read(draft.draftId);
+    expect(afterRoundB.roundId).toBe(roundB);
+    const openings = afterRoundB.turns.filter((turn: any) => turn.kind === "opening");
+    expect(new Set(openings.map((turn: any) => turn.roundId))).toEqual(new Set([roundA, roundB]));
+    expect(new Set(openings.map((turn: any) => turn.executionId)).size).toBe(2);
+    const identities = async () =>
+      (
+        await sql.query(
+          "select e.id::text id, e.request_id::text request_id, b.id::text billing_id, b.pre_deduct_id::text pre_deduct_id from runtime_executions e join bill2_runs b on b.id=e.billing_run_id where e.actor_id=$1 order by e.id",
+          [f.actor],
+        )
+      ).rows.map((row: any) => JSON.stringify(row)).sort();
+    const beforeReload = await identities();
+    expect(beforeReload).toHaveLength(2);
+    // Refresh and re-login must not add a second execution, run or reservation.
+    await page.reload();
+    await expect.poll(() => openingFor("1.1").count(), { timeout: 30000 }).toBe(2);
+    await context.clearCookies();
+    await login();
+    await expect.poll(() => openingFor("1.1").count(), { timeout: 30000 }).toBe(2);
+    expect(await identities()).toEqual(beforeReload);
+    expect(
+      (await sql.query("select count(*)::int n from bill2_runs where actor_id=$1", [f.actor])).rows[0].n,
+    ).toBe(2);
+    expect(
+      (await sql.query("select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve'", [f.actor])).rows[0].n,
+    ).toBe(2);
+    expect(errors).toEqual([]);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+it("OPC: a published revision's per-field elicitation reaches the read schema and the mentor directive", async () => {
+  const { saveModuleSkill } = await import("../skills/modulePublication");
+  const f = await fixture(2);
+  const publishRevision = async (
+    steps: Array<{ title: string; resources: string[]; information: Array<Record<string, unknown>> }>,
+  ) => {
+    const pack = makePackage();
+    const model = randomUUID();
+    // Publication validates the administrator model binding; the runtime
+    // admission below needs the same row switched to the fixture protocol.
+    await sql.query(
+      "insert into ai_models(id,name,model_id,provider,is_active,api_key,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family) values($1,'Stage B local','qwen/qwen3.8-27b','openai','true','LOCAL_ONLY','',4096,128000,'false','openai')",
+      [model],
+    );
+    const moduleId = randomUUID();
+    await saveModuleSkill(admin, f.owner, {
+      moduleId, skillId: pack.id, revisionId: pack.revisionId, requestId: pack.requestId,
+      expectedUpdatedAt: null, expectedVersion: 0, directoryName: "synthetic-method", kind: "document",
+      files: pack.files, steps, resourcePlanReviewed: true,
+      module: {
+        title: "Stage B method", description: null, full_description: null, model_id: model,
+        platform: "all", category: "analysis", icon: "Wand2", image_url: null,
+        badge_type: null, badge_text: null, credits_display: null, sort_order: 0,
+        active: true, is_featured: false, features: null, examples: null, preparation_questions: null,
+      },
+    } as any);
+    await sql.query("update ai_models set provider='fixture' where id=$1", [model]);
+    const registration = (
+      await sql.query("select id from artifact_workflows where module_id=$1 and revision_id=$2", [
+        moduleId, pack.revisionId,
+      ])
+    ).rows[0].id;
+    return { registration, moduleId, model };
+  };
+  const directiveFor = async (executionId: string) =>
+    (await sql.query("select payload from runtime_executions where id=$1", [executionId])).rows[0]
+      .payload.instructions as string;
+  // One admission per draft keeps every session free; the directive is frozen
+  // at admission, so no provider call is needed to inspect it.
+  const directiveForQuestion = async (
+    registration: string,
+    questionId: string,
+    confirm: Array<{ id: string; title: string; required: boolean; profileKey?: string }> = [],
+  ) => {
+    const started = await f.service.start({
+      requestId: randomUUID(), registration, mode: "mentor",
+    });
+    if (confirm.length) {
+      await f.service.information({
+        draftId: started.draftId, stepId: "step-1", requestId: randomUUID(), expectedVersion: 0,
+        values: Object.fromEntries(
+          (await f.service.read(started.draftId)).information["step-1"].schema.map(
+            (field: { id: string }) => [
+              field.id,
+              confirm.some((entry) => entry.id === field.id)
+                ? { status: "confirmed", nature: "fact", value: "用户确认的自有事实" }
+                : { status: "unknown", nature: "unknown", value: "" },
+            ],
+          ),
+        ),
+      });
+    }
+    const prepared = await f.service.prepareStep({
+      draftId: started.draftId, stepId: "step-1", purpose: "mentor",
+      requestId: randomUUID(), input: "请开始", questionId,
+    });
+    return { started, instructions: await directiveFor(prepared.executionId) };
+  };
+
+  // A revision that declares both roles explicitly. The method-information
+  // contract still requires a distinct profileKey per declared field.
+  const declared = await publishRevision([
+    {
+      title: "需求确认",
+      resources: ["references/step-0.md"],
+      information: [
+        { id: "owned_fact", title: "用户自有事实", required: true, profileKey: "owned_fact", elicitation: "user_fact" },
+        { id: "agent_deliverable", title: "导师成果建议", required: true, profileKey: "agent_deliverable", elicitation: "agent_proposal" },
+      ],
+    },
+    { title: "成果", resources: ["SKILL.md"], information: [
+      { id: "summary", title: "结论", required: true, profileKey: "summary", elicitation: "agent_proposal" },
+    ] },
+  ]);
+  const readDraft = await f.service.start({
+    requestId: randomUUID(), registration: declared.registration, mode: "mentor",
+  });
+  const read = await f.service.read(readDraft.draftId);
+  // The stored workflow keeps both declared values.
+  const storedWorkflow = (
+    await sql.query("select workflow from artifact_rounds where id=$1", [readDraft.roundId])
+  ).rows[0].workflow;
+  expect(storedWorkflow.steps[0].information).toEqual([
+    { id: "owned_fact", title: "用户自有事实", required: true, profileKey: "owned_fact", elicitation: "user_fact" },
+    { id: "agent_deliverable", title: "导师成果建议", required: true, profileKey: "agent_deliverable", elicitation: "agent_proposal" },
+  ]);
+  // The read projection exposes the same roles.
+  expect(read.information["step-1"].schema).toEqual([
+    { id: "owned_fact", title: "用户自有事实", required: true, profileKey: "owned_fact", elicitation: "user_fact" },
+    { id: "agent_deliverable", title: "导师成果建议", required: true, profileKey: "agent_deliverable", elicitation: "agent_proposal" },
+  ]);
+  const fact = await directiveForQuestion(declared.registration, "owned_fact");
+  expect(fact.instructions).toContain('"id":"owned_fact"');
+  expect(fact.instructions).toContain('"elicit":"user_fact"');
+  expect(fact.instructions).not.toContain('"elicit":"agent_proposal"');
+  const proposal = await directiveForQuestion(declared.registration, "agent_deliverable", [
+    { id: "owned_fact", title: "用户自有事实", required: true, profileKey: "owned_fact" },
+  ]);
+  expect(proposal.instructions).toContain('"id":"agent_deliverable"');
+  expect(proposal.instructions).toContain('"elicit":"agent_proposal"');
+  expect(proposal.instructions).not.toContain('"elicit":"user_fact"');
+
+  // An older revision without the property stays valid and resolves to user_fact.
+  const legacy = await publishRevision([
+    {
+      title: "需求确认",
+      resources: ["references/step-0.md"],
+      information: [{ id: "position", title: "一句话核心商业定位", required: true, profileKey: "position" }],
+    },
+    { title: "成果", resources: ["SKILL.md"], information: [
+      { id: "summary", title: "结论", required: true, profileKey: "legacy_summary" },
+    ] },
+  ]);
+  const legacyDraft = await f.service.start({
+    requestId: randomUUID(), registration: legacy.registration, mode: "mentor",
+  });
+  expect((await f.service.read(legacyDraft.draftId)).information["step-1"].schema).toEqual([
+    { id: "position", title: "一句话核心商业定位", required: true, profileKey: "position" },
+  ]);
+  const legacyFact = await directiveForQuestion(legacy.registration, "position");
+  // The name `position` used to be classified as a deliverable; it must now
+  // resolve to a user-owned fact because the revision declares nothing.
+  expect(legacyFact.instructions).toContain('"id":"position"');
+  expect(legacyFact.instructions).toContain('"elicit":"user_fact"');
+  expect(legacyFact.instructions).not.toContain('"elicit":"agent_proposal"');
+}, 180000);
+/**
+ * The state the new final-confirmation button acts on: every positioning step
+ * confirmed and the round not published yet. No mentor turn is involved, so the
+ * only money this draft can spend is its own plan generation.
+ */
+async function finalized(n = 3, withTopics = false) {
+  const f = await fixture(
+    n,
+    false,
+    0,
+    withTopics ? (flow) => { flow.planResources = ["SKILL.md"]; } : undefined,
+  );
+  const d = await f.service.start({
+    requestId: randomUUID(),
+    registration: f.registration,
+    mode: "manual",
+  });
+  for (const step of f.flow.steps) {
+    await f.artifacts.execute({
+      action: "save", projectId: d.projectId, roundId: d.roundId,
+      requestId: randomUUID(), stepId: step.id,
+      body: "User confirmed " + step.title, evidenceIds: [], expectedVersion: 0,
+    });
+    const state = (await f.artifacts.read(d.projectId, d.roundId)).steps[step.id];
+    await f.service.information({
+      draftId: d.draftId, stepId: step.id, requestId: randomUUID(),
+      expectedVersion: state.version,
+      values: {
+        goal: { status: "confirmed", nature: "decision", value: "A concrete user decision" },
+      },
+    });
+    const updated = (await f.artifacts.read(d.projectId, d.roundId)).steps[step.id];
+    await f.artifacts.execute({
+      action: "confirm", projectId: d.projectId, roundId: d.roundId,
+      requestId: randomUUID(), stepId: step.id,
+      expectedVersion: updated.version, expectedReviewVersion: updated.reviewVersion,
+    });
+  }
+  return { ...f, d };
+}
+/** A fixture-backed model bound to the module under test. */
+async function planFixtureModel(moduleId: string) {
+  const model = randomUUID();
+  const summaryModel = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-browser','fixture','true',1000,32000)",
+    [model],
+  );
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'OPC organizer',$2,'fixture','true',1000,32000)",
+    [summaryModel, "opc-organizer-" + summaryModel],
+  );
+  await sql.query(
+    "insert into system_settings(key,value) values('v3_summary_model_id',to_jsonb($1::text)),('v3_summary_max_tokens','1000'::jsonb) on conflict(key) do update set value=excluded.value",
+    [summaryModel],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [model, moduleId]);
+  return model;
+}
+/**
+ * Exact plan-purpose money and identity for one actor: nothing here is derived
+ * from a request the test itself made up.
+ */
+async function planIdentity(actor: string, draftId: string) {
+  const count = async (q: string, params: unknown[]) =>
+    Number((await sql.query(q, params)).rows[0].n);
+  return {
+    executions: await count(
+      "select count(*)::int n from runtime_executions where actor_id=$1", [actor]),
+    planExecutions: await count(
+      "select count(*)::int n from runtime_executions e join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id where e.actor_id=$1 and t.purpose='plan'",
+      [actor],
+    ),
+    planRuns: await count(
+      "select count(*)::int n from bill2_runs b join runtime_executions e on e.billing_run_id=b.id join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id where b.actor_id=$1 and t.purpose='plan'",
+      [actor],
+    ),
+    reserves: await count(
+      "select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve'",
+      [actor],
+    ),
+    plans: await count("select count(*)::int n from opc_plans where draft_id=$1", [draftId]),
+    accounts: await count(
+      "select count(*)::int n from opc_accounts where actor_id=$1", [actor]),
+    workItems: await count(
+      "select count(*)::int n from artifact_projects where actor_id=$1 and work_kind='account'",
+      [actor],
+    ),
+  };
+}
+/** Execution/billing/pre-deduct identity rows, compared before and after recovery. */
+async function planIdentityRows(actor: string) {
+  return (await sql.query(
+    `select e.id::text execution_id, e.request_id::text request_id,
+       b.id::text billing_id, b.pre_deduct_id::text pre_deduct_id
+     from runtime_executions e
+     left join bill2_runs b on b.id=e.billing_run_id
+     where e.actor_id=$1`,
+    [actor],
+  )).rows.map((row) =>
+    JSON.stringify([row.execution_id, row.request_id, row.billing_id, row.pre_deduct_id]),
+  ).sort();
+}
+/** The envelope the positioning page freezes after a successful publish. */
+function planEnvelopeFor(
+  f: { d: { draftId: string; roundId: string } },
+  options: { requestId?: string; sourceRoundId?: string; accounts?: string[] } = {},
+) {
+  return {
+    // The consent marker: these cases seed the envelope that only an explicit
+    // "继续生成第一周选题" may write, so they keep proving that a lost reply
+    // replays its own identity instead of paying twice.
+    v: 3,
+    sourceRoundId: options.sourceRoundId ?? f.d.roundId,
+    consentedAt: new Date("2026-09-20T07:00:00.000Z").toISOString(),
+    request: {
+      draftId: f.d.draftId,
+      requestId: options.requestId ?? randomUUID(),
+      purpose: "plan",
+      stepId: "step-1",
+      input: JSON.stringify({
+        confirmedPositioning: { "已知目标 0": "A concrete user decision" },
+        platforms: [],
+        accounts: options.accounts ?? [],
+        startDate: "2026-09-21",
+        days: 7,
+      }),
+    },
+  };
+}
+/**
+ * Logs a browser page into an already published draft's plan page. The
+ * envelope is seeded afterwards so each case controls exactly what automatic
+ * recovery is allowed to see.
+ */
+async function planBrowser(
+  f: { email: string; password: string; d: { draftId: string } },
+  options: {
+    envelope?: Record<string, unknown> | null;
+    clearBuffer?: boolean;
+    buffer?: Record<string, unknown> | null;
+  } = {},
+) {
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
+  const browser = await chromium.launch({
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+  const context = await browser.newContext();
+  await context.route("**/*", (route) => {
+    const u = new URL(route.request().url());
+    return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+      ["data:", "blob:"].includes(u.protocol)
+      ? route.continue()
+      : route.abort();
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(90000);
+  const path = "/positioning/" + f.d.draftId + "/plan";
+  await page.goto(
+    process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path),
+  );
+  await page.getByPlaceholder("name@example.com").fill(f.email);
+  await page.getByPlaceholder("输入你的密码").fill(f.password);
+  await page.getByRole("button", { name: "登录", exact: true }).last().click();
+  // The legacy /plan deep link must recover the same draft in the current
+  // topic workspace; the normal route is now /topics.
+  await page.waitForURL((url) => url.pathname.endsWith('/positioning/' + f.d.draftId + '/topics'));
+  const key = "opc-plan-generation:" + f.d.draftId;
+  await page.evaluate(
+    ({ key, envelope, clearBuffer, buffer, draftId }) => {
+      sessionStorage.removeItem(key);
+      if (envelope) sessionStorage.setItem(key, JSON.stringify(envelope));
+      if (clearBuffer) sessionStorage.removeItem("opc-edit:" + draftId);
+      if (buffer)
+        sessionStorage.setItem("opc-edit:" + draftId, JSON.stringify(buffer));
+    },
+    {
+      key,
+      envelope: options.envelope ?? null,
+      clearBuffer: options.clearBuffer ?? false,
+      buffer: options.buffer ?? null,
+      draftId: f.d.draftId,
+    },
+  );
+  return { browser, context, page, key };
+}
+const CANDIDATE_HEADING = "AI 计划候选 · 尚未替换你的编辑";
+it("OPC: Stage C1 the final positioning confirmation asks first and spends nothing until an explicit continue generates one candidate", async () => {
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
+  // This draft's method declares topic resources, so the explicit consent may
+  // bind the topic workspace.
+  const f = await finalized(3, true);
+  await planFixtureModel(f.moduleId);
+  const browser = await chromium.launch({
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+  const context = await browser.newContext();
+  await context.route("**/*", (route) => {
+    const u = new URL(route.request().url());
+    return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+      ["data:", "blob:"].includes(u.protocol)
+      ? route.continue()
+      : route.abort();
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(90000);
+  const draftPath = "/positioning/" + f.d.draftId;
+  const envelopeKey = "opc-plan-generation:" + f.d.draftId;
+  try {
+    await page.goto(
+      process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(draftPath),
+    );
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", { name: "登录", exact: true }).last().click();
+    await page.waitForURL((url) => url.pathname.endsWith(draftPath));
+    const finalButton = page.getByRole("button", {
+      name: "确认正式定位",
+      exact: true,
+    });
+    await expect.poll(() => finalButton.isEnabled(), { timeout: 30000 }).toBe(true);
+    // Nothing is authorized before the user confirms: no envelope, and no plan
+    // work of any kind. (The positioning page may open its mentor question on
+    // its own; that is not plan work and is excluded by the plan-purpose joins.)
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), envelopeKey)).toBeNull();
+    const before = await planIdentity(f.actor, f.d.draftId);
+    expect(before.planExecutions).toBe(0);
+    expect(before.planRuns).toBe(0);
+    await finalButton.click();
+    // Confirming the positioning publishes the version and asks. It must not
+    // create a generation request by itself.
+    const dialog = page.getByRole("dialog", { name: "是否继续生成第一周选题" });
+    await dialog.waitFor();
+    await page.keyboard.press('Escape');
+    await expect.poll(() => dialog.count()).toBe(0);
+    expect((await topicIdentity(f.actor)).topicExecutions).toBe(0);
+    await page.getByRole('button', { name: '继续生成第一周选题', exact: true }).click();
+    await dialog.getByRole('button', { name: '关闭选题询问', exact: true }).click();
+    await expect.poll(() => dialog.count()).toBe(0);
+    expect((await topicIdentity(f.actor)).binds).toBe(0);
+    await page.getByRole('button', { name: '继续生成第一周选题', exact: true }).click();
+    await dialog.getByRole("button", { name: "稍后", exact: true }).click();
+    await expect.poll(() => dialog.count(), { timeout: 15000 }).toBe(0);
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), envelopeKey)).toBeNull();
+    // A refresh, a re-login or the re-entry control are not consent either.
+    await page.reload();
+    await page
+      .getByRole("button", { name: "继续生成第一周选题", exact: true })
+      .waitFor();
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), envelopeKey)).toBeNull();
+    const asked = await planIdentity(f.actor, f.d.draftId);
+    expect(asked.planExecutions).toBe(0);
+    expect(asked.planRuns).toBe(0);
+    expect(asked.reserves).toBe(0);
+    // The explicit continue enters the bound topic workspace. It binds the
+    // confirmed version, the pinned method revision and a dedicated Session,
+    // and starts the one explicitly accepted first turn.
+    await page
+      .getByRole("button", { name: "继续生成第一周选题", exact: true })
+      .click();
+    await dialog
+      .getByRole("button", { name: "继续生成第一周选题", exact: true })
+      .click();
+    await page.waitForURL((url) => url.pathname.endsWith(draftPath + "/topics"));
+    await page
+      .getByRole("heading", { name: "第一周选题工作对话", exact: true })
+      .waitFor();
+    // One canonical reading of the binding row. Mentor Session, topic Session,
+    // bind request, frozen source version and creation time are different
+    // fields; the earlier failure compared a bind request id with a round id.
+    const bindingState = async () =>
+      (
+        await sql.query(
+          "select w.session_id::text topic_session, w.request_id::text bind_request, w.source_version_id::text source_version, w.created_at::text created_at, s.scope topic_scope from opc_topic_workspaces w join runtime_sessions s on s.id=w.session_id and s.actor_id=w.actor_id where w.draft_id=$1 and w.actor_id=$2",
+          [f.d.draftId, f.actor],
+        )
+      ).rows as Array<Record<string, unknown>>;
+    const boundRows = await bindingState();
+    expect(boundRows).toHaveLength(1);
+    const bound = boundRows[0]!;
+    // Bound to the confirmed version of this round, in its own Session.
+    expect(
+      (
+        await sql.query(
+          "select round_id::text r from artifact_versions where id=$1",
+          [bound.source_version],
+        )
+      ).rows[0].r,
+    ).toBe(f.d.roundId);
+    expect(bound.topic_scope).toEqual({
+      kind: "positioning_topic",
+      draftId: f.d.draftId,
+    });
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), envelopeKey)).toBeNull();
+    const after = await planIdentity(f.actor, f.d.draftId);
+    // Opening runs under topic purpose, separate from legacy plan generation.
+    expect(after.planExecutions - before.planExecutions).toBe(0);
+    expect(after.planRuns - before.planRuns).toBe(0);
+    await expect.poll(async () => (await topicIdentity(f.actor)).topicExecutions, { timeout: 30000 }).toBe(1);
+    // Re-entering with the same confirmed source recovers the very same
+    // binding: same Session, same bind identity, no second workspace.
+    await page.goto(process.env.V3_LOCAL_APP + draftPath);
+    await page
+      .getByRole("button", { name: "继续生成第一周选题", exact: true })
+      .click();
+    await dialog
+      .getByRole("button", { name: "继续生成第一周选题", exact: true })
+      .click();
+    await page.waitForURL((url) => url.pathname.endsWith(draftPath + "/topics"));
+    await page
+      .getByRole("heading", { name: "第一周选题工作对话", exact: true })
+      .waitFor();
+    const againRows = await bindingState();
+    expect(againRows).toHaveLength(1);
+    // The identical row: same topic Session, same bind request identity, same
+    // frozen source version and the same creation time.
+    expect(againRows[0]).toEqual(bound);
+    expect(after.plans).toBe(0);
+    expect(after.accounts).toBe(0);
+    expect(after.workItems).toBe(0);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+it("OPC: Stage C2 a lost reply keeps one plan identity across refresh and re-login", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const envelope = planEnvelopeFor(f);
+  const { browser, context, page, key } = await planBrowser(f, { envelope });
+  try {
+    let releases = 0;
+    await page.route("**/api/trpc/opc.planResult*", async (route) => {
+      // The server admitted and finished the work; every client reply is lost,
+      // including any automatic query retry, so the page cannot confirm the
+      // outcome on its own.
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      releases += 1;
+      await route.abort();
+    });
+    await page.reload();
+    await expect.poll(() => page.getByText("这次生成的结果暂时无法确认").count(), {
+      timeout: 30000,
+    }).toBe(1);
+    expect(releases).toBeGreaterThan(0);
+    const afterLoss = await planIdentity(f.actor, f.d.draftId);
+    expect(afterLoss.planExecutions).toBe(1);
+    expect(afterLoss.planRuns).toBe(1);
+    expect(afterLoss.reserves).toBe(1);
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), key)).not.toBeNull();
+    const identity = await planIdentityRows(f.actor);
+    expect(identity).toHaveLength(1);
+    // A reload with no local candidate must replay the same request, not make
+    // a new one: the buffer is cleared first so only recovery can help.
+    await page.unroute("**/api/trpc/opc.planResult*");
+    await page.evaluate(
+      (id) => sessionStorage.removeItem("opc-edit:" + id),
+      f.d.draftId,
+    );
+    await page.reload();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(afterLoss);
+    expect(await planIdentityRows(f.actor)).toEqual(identity);
+    expect(
+      JSON.parse(
+        (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
+      ).request.requestId,
+    ).toBe(envelope.request.requestId);
+    // Re-login on a fresh session recovers the same identity again.
+    await context.clearCookies();
+    await page.goto(
+      process.env.V3_LOCAL_APP +
+        "/login?redirect=" +
+        encodeURIComponent("/positioning/" + f.d.draftId + "/plan"),
+    );
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", { name: "登录", exact: true }).last().click();
+    await page.waitForURL((url) => url.pathname.endsWith("/plan"));
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(afterLoss);
+    expect(await planIdentityRows(f.actor)).toEqual(identity);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+it("OPC: Stage C3 adopting or dismissing the candidate is a local edit, never a call", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const { browser, page, key } = await planBrowser(f, {
+    envelope: planEnvelopeFor(f, { accounts: ["c3-account"] }),
+  });
+  try {
+    await page.reload();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    const generated = await planIdentity(f.actor, f.d.draftId);
+    expect(generated.planRuns).toBe(1);
+    // Dismissing ends the envelope without touching the working rows.
+    await page.getByRole("button", { name: "保留原计划", exact: true }).click();
+    await expect
+      .poll(() => page.evaluate((k) => sessionStorage.getItem(k), key), { timeout: 15000 })
+      .toBeNull();
+    expect(await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).count()).toBe(0);
+    expect(await page.getByRole("textbox", { name: "title 0", exact: true }).count()).toBe(0);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(generated);
+    // A second, user-authorized generation adopts instead.
+    await page.evaluate(
+      ({ k, value }) => sessionStorage.setItem(k, JSON.stringify(value)),
+      { k: key, value: planEnvelopeFor(f, { accounts: ["c3-account"] }) },
+    );
+    await page.reload();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    const second = await planIdentity(f.actor, f.d.draftId);
+    expect(second.planRuns).toBe(2);
+    await page.getByRole("button", { name: "采用候选到计划工作稿", exact: true }).click();
+    await expect
+      .poll(() => page.evaluate((k) => sessionStorage.getItem(k), key), { timeout: 15000 })
+      .toBeNull();
+    expect(await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).count()).toBe(0);
+    const titles = await page.getByRole("textbox", { name: /^title / }).all();
+    expect(titles).toHaveLength(7);
+    expect(await page.getByRole("textbox", { name: "title 0", exact: true }).inputValue()).toBe("模拟选题 1");
+    // Adopting is local: no model call, no plan row, no account, no work item.
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(second);
+    await page.getByRole("button", { name: "保存计划版本" }).click();
+    await expect
+      .poll(async () => (await planIdentity(f.actor, f.d.draftId)).plans, { timeout: 30000 })
+      .toBe(1);
+    const saved = await planIdentity(f.actor, f.d.draftId);
+    expect(saved.executions).toBe(second.executions);
+    expect(saved.planRuns).toBe(second.planRuns);
+    expect(saved.reserves).toBe(second.reserves);
+    expect(saved.accounts).toBe(0);
+    expect(saved.workItems).toBe(0);
+    // Handoff stays a separate explicit action that has not happened yet.
+    await expect
+      .poll(
+        () =>
+          page
+            .getByRole("button", {
+              name: "确认账号与计划，创建选题",
+              exact: true,
+            })
+            .count(),
+        { timeout: 30000 },
+      )
+      .toBe(1);
+    expect((await planIdentity(f.actor, f.d.draftId)).workItems).toBe(0);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+it("OPC: Stage C4 an already published draft spends nothing by waiting or refreshing", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const { browser, page, key } = await planBrowser(f);
+  try {
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), key)).toBeNull();
+    const generate = page.getByRole("button", { name: "生成第一周计划", exact: true });
+    await generate.waitFor();
+    await page.reload();
+    await generate.waitFor();
+    // Give an automatic generation every chance to (wrongly) fire.
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await page.reload();
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
+      executions: 0, planExecutions: 0, planRuns: 0, reserves: 0,
+      plans: 0, accounts: 0, workItems: 0,
+    });
+    expect(await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).count()).toBe(0);
+    // Only the explicit button may create one request.
+    await generate.click();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
+      executions: 1, planExecutions: 1, planRuns: 1, reserves: 1,
+      plans: 0, accounts: 0, workItems: 0,
+    });
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+it("OPC: Stage C5 an unadmitted old-round request stays recoverable and never becomes current generation", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const staleRequestId = randomUUID();
+  const { browser, page, key } = await planBrowser(f, {
+    envelope: planEnvelopeFor(f, {
+      requestId: staleRequestId,
+      sourceRoundId: randomUUID(),
+    }),
+  });
+  try {
+    await page.reload();
+    await page.getByRole('heading', { name: '本机保留了一条早先的生成请求', exact: true }).waitFor();
+    const original = await page.evaluate(k => sessionStorage.getItem(k), key);
+    expect(JSON.parse(original!).request.requestId).toBe(staleRequestId);
+    await page.getByRole('button', { name: '继续这条原请求', exact: true }).click();
+    await expect.poll(async () => (await page.getByRole('status').allTextContents()).join(' ')).toContain('服务端尚无可恢复执行');
+    expect(await page.evaluate(k => sessionStorage.getItem(k), key)).toBe(original);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
+      executions: 0, planExecutions: 0, planRuns: 0, reserves: 0,
+      plans: 0, accounts: 0, workItems: 0,
+    });
+    // The bounded notice offers an explicit regenerate path for this round.
+    await page.getByRole("button", { name: "生成第一周计划", exact: true }).click();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
+      executions: 1, planExecutions: 1, planRuns: 1, reserves: 1,
+      plans: 0, accounts: 0, workItems: 0,
+    });
+    // No migration: the new request is a new identity, not the archived one.
+    const fresh = JSON.parse(
+      (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
+    );
+    expect(fresh.request.requestId).not.toBe(staleRequestId);
+    expect(fresh.sourceRoundId).toBe(f.d.roundId);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+/** The frozen plan requests this actor actually sent, in send order. */
+async function planRequests(actor: string) {
+  return (await sql.query(
+    `select e.request_id::text request_id, e.payload->'request'->>'input' input
+     from runtime_executions e
+     join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id
+     where e.actor_id=$1 and t.purpose='plan'
+     order by e.created_at, e.id`,
+    [actor],
+  )).rows;
+}
+it("OPC: Stage C6 explicit regeneration honours changed constraints and a new identity", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const { browser, page, key } = await planBrowser(f, {
+    envelope: planEnvelopeFor(f, { accounts: ["c6-account"] }),
+  });
+  const bufferOf = async () =>
+    JSON.parse(
+      (await page.evaluate(
+        (id) => sessionStorage.getItem("opc-edit:" + id),
+        f.d.draftId,
+      )) as string,
+    );
+  try {
+    await page.reload();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    const first = await planIdentity(f.actor, f.d.draftId);
+    expect(first.planRuns).toBe(1);
+    const sent = await planRequests(f.actor);
+    expect(sent).toHaveLength(1);
+    const firstRequestId = sent[0].request_id;
+    expect(JSON.parse(sent[0].input).accounts).toEqual(["c6-account"]);
+    expect(JSON.parse(sent[0].input).platforms).toEqual([]);
+    expect((await bufferOf()).planCandidateRequestId).toBe(firstRequestId);
+    // The user changes two optional constraints, then explicitly regenerates.
+    await page.getByRole("textbox", { name: "目标平台", exact: true }).fill("douyin");
+    await page.getByRole("textbox", { name: "开始日期", exact: true }).fill("2026-10-05");
+    await page
+      .getByRole("button", { name: "重新生成计划候选", exact: true })
+      .click();
+    await expect
+      .poll(async () => (await planRequests(f.actor)).length, { timeout: 90000 })
+      .toBe(2);
+    const after = await planRequests(f.actor);
+    // The new constraints really reached the model, on a new identity.
+    expect(JSON.parse(after[1].input).platforms).toEqual(["douyin"]);
+    expect(JSON.parse(after[1].input).startDate).toBe("2026-10-05");
+    expect(after[1].request_id).not.toBe(firstRequestId);
+    // Exactly one more generation was paid for.
+    const second = await planIdentity(f.actor, f.d.draftId);
+    expect(second.planExecutions - first.planExecutions).toBe(1);
+    expect(second.planRuns - first.planRuns).toBe(1);
+    expect(second.reserves - first.reserves).toBe(1);
+    // Only the candidate changed: the working rows were never overwritten.
+    expect(await page.getByRole("textbox", { name: "title 0", exact: true }).count()).toBe(0);
+    await expect
+      .poll(() => page.getByText("douyin").count(), { timeout: 30000 })
+      .toBeGreaterThan(0);
+    const buffer = await bufferOf();
+    expect(buffer.planCandidateRequestId).toBe(after[1].request_id);
+    expect(buffer.planCandidateSourceRoundId).toBe(f.d.roundId);
+    expect(
+      JSON.parse(
+        (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
+      ).request.requestId,
+    ).toBe(after[1].request_id);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+it("OPC: Stage C7 a stale round candidate neither suppresses nor impersonates the current round", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const staleRoundId = randomUUID();
+  const staleRequestId = randomUUID();
+  const staleCandidate = [
+    {
+      id: randomUUID(),
+      platform: "x",
+      account: "stale-round-a",
+      title: "上一轮候选",
+      brief: "上一轮生成的候选，不得作为当前轮展示",
+      day: "2026-01-01",
+    },
+  ];
+  const { browser, page } = await planBrowser(f, {
+    envelope: planEnvelopeFor(f),
+    buffer: {
+      planCandidate: staleCandidate,
+      planCandidateSourceRoundId: staleRoundId,
+      planCandidateRequestId: staleRequestId,
+      items: [],
+      dirtyPlan: false,
+    },
+  });
+  const bufferOf = async () =>
+    JSON.parse(
+      (await page.evaluate(
+        (id) => sessionStorage.getItem("opc-edit:" + id),
+        f.d.draftId,
+      )) as string,
+    );
+  try {
+    await page.reload();
+    // The round-A candidate is not rendered as this round's candidate, and it
+    // does not stop the round-B envelope from executing exactly once.
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    expect(await page.getByText("上一轮候选").count()).toBe(0);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
+      executions: 1, planExecutions: 1, planRuns: 1, reserves: 1,
+      plans: 0, accounts: 0, workItems: 0,
+    });
+    const generated = await bufferOf();
+    expect(generated.planCandidateSourceRoundId).toBe(f.d.roundId);
+    expect(generated.planCandidateRequestId).not.toBe(staleRequestId);
+    expect(
+      (generated.planCandidate as Array<{ title: string }>).map((i) => i.title),
+    ).not.toContain("上一轮候选");
+    expect(generated.planCandidate).toHaveLength(7);
+    // Repair B4, through the real revise button: a successful revision archives
+    // the previous round's candidate so it cannot become current again.
+    await page.goto(process.env.V3_LOCAL_APP + "/positioning/" + f.d.draftId);
+    await page.evaluate(
+      ({ id, candidate, roundId }) =>
+        sessionStorage.setItem(
+          "opc-edit:" + id,
+          JSON.stringify({
+            planCandidate: candidate,
+            planCandidateSourceRoundId: roundId,
+            planCandidateRequestId: "round-a-request",
+            items: [],
+            dirtyPlan: false,
+          }),
+        ),
+      { id: f.d.draftId, candidate: staleCandidate, roundId: f.d.roundId },
+    );
+    const revise = page.getByRole("button", {
+      name: "修订定位，保留原版本",
+      exact: true,
+    });
+    await expect.poll(() => revise.isEnabled(), { timeout: 30000 }).toBe(true);
+    await revise.click();
+    await expect
+      .poll(
+        async () => {
+          const buffer = await bufferOf();
+          return [
+            Boolean(buffer.planCandidate),
+            (buffer.planCandidateArchive?.body ?? []).length,
+            buffer.planCandidateArchive?.roundId ?? null,
+          ];
+        },
+        { timeout: 30000 },
+      )
+      .toEqual([false, 1, f.d.roundId]);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+it("OPC: Stage C8 an ambiguous explicit regeneration recovers B behind candidate A without creating C", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const { browser, context, page, key } = await planBrowser(f, {
+    envelope: planEnvelopeFor(f, { accounts: ["c8-account"] }),
+  });
+  const bufferOf = async () =>
+    JSON.parse(
+      (await page.evaluate(
+        (id) => sessionStorage.getItem("opc-edit:" + id),
+        f.d.draftId,
+      )) as string,
+    );
+  const envelopeOf = async () =>
+    JSON.parse(
+      (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
+    );
+  const rowsOf = async () =>
+    (await planIdentityRows(f.actor)).map((row) => JSON.parse(row) as string[]);
+  try {
+    // Candidate A: the confirmation's own authorization, confirmed normally.
+    await page.reload();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    const first = await planRequests(f.actor);
+    expect(first).toHaveLength(1);
+    const aRequestId = first[0].request_id;
+    expect(JSON.parse(first[0].input).accounts).toEqual(["c8-account"]);
+    expect(JSON.parse(first[0].input).platforms).toEqual([]);
+    expect((await bufferOf()).planCandidateRequestId).toBe(aRequestId);
+    expect((await envelopeOf()).request.requestId).toBe(aRequestId);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
+      executions: 1, planExecutions: 1, planRuns: 1, reserves: 1,
+      plans: 0, accounts: 0, workItems: 0,
+    });
+    const rowsA = await rowsOf();
+    expect(rowsA).toHaveLength(1);
+    expect(rowsA[0][1]).toBe(aRequestId);
+    expect(await page.getByText("c8-account").count()).toBeGreaterThan(0);
+
+    // B is a real second authorization: the user changes two optional
+    // constraints and clicks the regeneration control. The server admits,
+    // executes and reserves B, but every client reply for its plan result is
+    // fetched and then dropped, so the page cannot confirm what it paid for.
+    let releases = 0;
+    await page.route("**/api/trpc/opc.planResult*", async (route) => {
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      releases += 1;
+      await route.abort();
+    });
+    await page.getByRole("textbox", { name: "目标平台", exact: true }).fill("douyin");
+    await page.getByRole("textbox", { name: "开始日期", exact: true }).fill("2026-10-05");
+    await page
+      .getByRole("button", { name: "重新生成计划候选", exact: true })
+      .click();
+    await expect
+      .poll(async () => (await planRequests(f.actor)).length, { timeout: 90000 })
+      .toBe(2);
+    await expect.poll(() => releases, { timeout: 90000 }).toBeGreaterThan(0);
+    const sent = await planRequests(f.actor);
+    const bRequestId = sent[1].request_id;
+    expect(bRequestId).not.toBe(aRequestId);
+    // B really carries the changed constraints.
+    expect(JSON.parse(sent[1].input).platforms).toEqual(["douyin"]);
+    expect(JSON.parse(sent[1].input).startDate).toBe("2026-10-05");
+    // The old candidate A is still what the user sees; the retained envelope
+    // already names the newer, unconfirmed request B.
+    expect((await bufferOf()).planCandidateRequestId).toBe(aRequestId);
+    expect(await page.getByText("c8-account").count()).toBeGreaterThan(0);
+    expect(await page.getByText("douyin").count()).toBe(0);
+    const lost = await envelopeOf();
+    expect(lost.request.requestId).toBe(bRequestId);
+    expect(lost.sourceRoundId).toBe(f.d.roundId);
+    expect(JSON.parse(lost.request.input).platforms).toEqual(["douyin"]);
+    const afterLoss = await planIdentity(f.actor, f.d.draftId);
+    expect(afterLoss.planExecutions).toBe(2);
+    expect(afterLoss.planRuns).toBe(2);
+    expect(afterLoss.reserves).toBe(2);
+    const rowsAB = await rowsOf();
+    expect(rowsAB).toHaveLength(2);
+    expect(rowsAB.map((row) => row[1]).sort()).toEqual([aRequestId, bRequestId].sort());
+    const bBefore = rowsAB.find((row) => row[1] === bRequestId)!;
+    expect(bBefore.every((value) => typeof value === "string" && value.length > 0)).toBe(true);
+
+    // Explicit recovery of the same unresolved intent must reuse B, not create
+    // a third request C that would be a third charge.
+    await page
+      .getByRole("button", { name: "重新生成计划候选", exact: true })
+      .click();
+    await expect.poll(() => releases, { timeout: 90000 }).toBeGreaterThan(1);
+    expect((await envelopeOf()).request.requestId).toBe(bRequestId);
+    expect((await envelopeOf()).request.input).toBe(lost.request.input);
+    expect((await bufferOf()).planCandidateRequestId).toBe(aRequestId);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    expect((await planRequests(f.actor)).map((row) => row.request_id)).toEqual([
+      aRequestId,
+      bRequestId,
+    ]);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(afterLoss);
+    expect(await rowsOf()).toEqual(rowsAB);
+
+    // With the interception removed, a reload recovers B on its own identity
+    // instead of stopping at the visible fallback candidate A.
+    await page.unroute("**/api/trpc/opc.planResult*");
+    await page.reload();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    await expect
+      .poll(async () => (await bufferOf()).planCandidateRequestId, { timeout: 30000 })
+      .toBe(bRequestId);
+    const recovered = await envelopeOf();
+    expect(recovered.request.requestId).toBe(bRequestId);
+    expect(JSON.parse(recovered.request.input).platforms).toEqual(["douyin"]);
+    expect(await page.getByText("douyin").count()).toBeGreaterThan(0);
+    expect(await page.getByText("c8-account").count()).toBe(0);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(afterLoss);
+    const rowsRecovered = await rowsOf();
+    expect(rowsRecovered).toEqual(rowsAB);
+    expect(rowsRecovered.find((row) => row[1] === bRequestId)).toEqual(bBefore);
+    expect((await planRequests(f.actor)).map((row) => row.request_id)).toEqual([
+      aRequestId,
+      bRequestId,
+    ]);
+
+    // A fresh login recovers the same identity once more and still cannot
+    // create a third request.
+    await context.clearCookies();
+    await page.goto(
+      process.env.V3_LOCAL_APP +
+        "/login?redirect=" +
+        encodeURIComponent("/positioning/" + f.d.draftId + "/plan"),
+    );
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", { name: "登录", exact: true }).last().click();
+    await page.waitForURL((url) => url.pathname.endsWith("/plan"));
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    await expect
+      .poll(async () => (await bufferOf()).planCandidateRequestId, { timeout: 30000 })
+      .toBe(bRequestId);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(afterLoss);
+    expect(await rowsOf()).toEqual(rowsAB);
+    expect((await planRequests(f.actor)).map((row) => row.request_id)).toEqual([
+      aRequestId,
+      bRequestId,
+    ]);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+/**
+ * The retained `opc-confirm:<draftId>` request owns a business intent: the
+ * draft, the plan version and the normalized platform/account set. A lost
+ * reply must keep replaying that exact intent, while a NEW current intent must
+ * be able to form its own explicit request instead of being refused locally
+ * with `confirmation pending` forever.
+ */
+it("OPC: a retained handoff request does not block a newly saved current plan", async () => {
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await completed(3);
+  const planA = await f.service.savePlan({
+    draftId: f.d.draftId,
+    sourceVersionId: f.sourceVersionId,
+    requestId: randomUUID(),
+    expectedVersion: 0,
+    body: [
+      {
+        id: randomUUID(),
+        platform: "x",
+        account: "f1-retained",
+        day: "2026-09-15",
+        title: "Plan A topic",
+        brief: "Plan A brief",
+      },
+    ],
+  });
+  const key = "opc-confirm:" + f.d.draftId;
+  const path = "/positioning/" + f.d.draftId + "/plan";
+  const handoffHistory = async () =>
+    (
+      await sql.query(
+        "select request_id::text request_id, payload, result from opc_handoffs where actor_id=$1",
+        [f.actor],
+      )
+    ).rows as Array<{
+      request_id: string;
+      payload: { draftId: string; planId: string; accounts: unknown[] };
+      result: Array<{ workItemId: string; sessionId: string }>;
+    }>;
+  const currentPlan = async () =>
+    (
+      await sql.query(
+        "select id::text id, version::int version from opc_plans where draft_id=$1 order by version desc limit 1",
+        [f.d.draftId],
+      )
+    ).rows[0] as { id: string; version: number };
+  const workItemCount = async () =>
+    Number(
+      (
+        await sql.query(
+          "select count(*)::int n from opc_items i join artifact_projects p on p.id=i.work_item_id where p.actor_id=$1",
+          [f.actor],
+        )
+      ).rows[0].n,
+    );
+  const accountRevision = async () =>
+    Number(
+      (
+        await sql.query("select revision::int r from opc_accounts where actor_id=$1", [
+          f.actor,
+        ])
+      ).rows[0].r,
+    );
+  const browser = await chromium.launch({
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+  const context = await browser.newContext();
+  await context.route("**/*", (route) => {
+    const u = new URL(route.request().url());
+    return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+      ["data:", "blob:"].includes(u.protocol)
+      ? route.continue()
+      : route.abort();
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(90000);
+  /** The exact retained request body, or null when the key is gone. */
+  const retainedRequest = async () =>
+    (await page.evaluate(
+      (k) => sessionStorage.getItem(k) ?? "null",
+      key,
+    )) as string;
+  let lostHandoffs = 0;
+  try {
+    await page.goto(
+      process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path),
+    );
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", { name: "登录", exact: true }).last().click();
+    await page.waitForURL((url) => url.pathname.endsWith(path));
+    const confirm = page.getByRole("button", {
+      name: "确认账号与计划，创建选题",
+      exact: true,
+    });
+    await confirm.waitFor();
+    await expect.poll(() => confirm.isEnabled(), { timeout: 15000 }).toBe(true);
+    // Steps 1-4. Plan A's handoff really completes on the server while the
+    // browser loses the successful reply, so the page keeps request A as an
+    // unresolved authorization for plan A.
+    await page.route("**/api/trpc/opc.handoff*", async (route) => {
+      const response = await route.fetch();
+      expect(response.status()).toBe(200);
+      lostHandoffs += 1;
+      await route.abort();
+    });
+    await confirm.click();
+    await expect.poll(() => lostHandoffs, { timeout: 90000 }).toBe(1);
+    await expect
+      .poll(async () => (await retainedRequest()) !== "null", { timeout: 30000 })
+      .toBe(true);
+    const retainedA = JSON.parse(await retainedRequest());
+    expect(retainedA.planId).toBe(planA.planId);
+    expect(retainedA.draftId).toBe(f.d.draftId);
+    expect(retainedA.accounts).toEqual([
+      { platform: "x", account: "f1-retained", expectedRevision: null },
+    ]);
+    const historyA = await handoffHistory();
+    expect(historyA.map((row) => row.request_id)).toEqual([
+      retainedA.requestId,
+    ]);
+    expect(historyA[0].payload.planId).toBe(planA.planId);
+    expect(historyA[0].result).toHaveLength(1);
+    // Step 5. Change the editable working plan and explicitly save plan B.
+    await page
+      .getByRole("textbox", { name: "title 0", exact: true })
+      .fill("Plan B topic");
+    await page.getByRole("button", { name: "保存计划版本" }).click();
+    await expect
+      .poll(async () => (await currentPlan()).version, { timeout: 30000 })
+      .toBe(2);
+    const planB = await currentPlan();
+    expect(planB.id).not.toBe(planA.planId);
+    // The page itself must have re-read plan B and cleared its dirty state
+    // before the reload, otherwise a reload correctly restores the pending
+    // local edits this test is not exercising.
+    await page
+      .getByRole("heading", { name: "确认采用定位与计划第 2 版", exact: true })
+      .waitFor();
+    // Step 6. Reload so plan B and the current account revision are what the
+    // page shows, while request A is still retained.
+    await page.reload();
+    await confirm.waitFor();
+    await expect.poll(() => confirm.isEnabled(), { timeout: 15000 }).toBe(true);
+    expect(JSON.parse(await retainedRequest()).requestId).toBe(
+      retainedA.requestId,
+    );
+    // Steps 7-8. Confirming plan B is a new explicit authorization. A local
+    // `confirmation pending` refusal would issue no HTTP request at all, so the
+    // second interception is the proof the repair removed the deadlock.
+    await confirm.click();
+    await expect.poll(() => lostHandoffs, { timeout: 90000 }).toBe(2);
+    const retainedB = JSON.parse(await retainedRequest());
+    expect(retainedB.planId).toBe(planB.id);
+    expect(retainedB.requestId).not.toBe(retainedA.requestId);
+    expect(retainedB.accounts).toEqual([
+      { platform: "x", account: "f1-retained", expectedRevision: 1 },
+    ]);
+    const historyB = await handoffHistory();
+    expect(historyB).toHaveLength(2);
+    expect(historyB.map((row) => row.request_id).sort()).toEqual(
+      [retainedA.requestId, retainedB.requestId].sort(),
+    );
+    expect(
+      historyB.find((row) => row.request_id === retainedB.requestId)!.payload
+        .planId,
+    ).toBe(planB.id);
+    expect(await workItemCount()).toBe(2);
+    expect(await accountRevision()).toBe(2);
+    // The same-intent path still replays: B's unresolved request recovers its
+    // own committed result instead of creating anything new.
+    await page.unroute("**/api/trpc/opc.handoff*");
+    await page.reload();
+    await confirm.waitFor();
+    await expect.poll(() => confirm.isEnabled(), { timeout: 15000 }).toBe(true);
+    await confirm.click();
+    await expect
+      .poll(async () => await retainedRequest(), { timeout: 30000 })
+      .toBe("null");
+    await page.getByRole("link", { name: "进入选题工作空间" }).first().waitFor();
+    expect(
+      await page.getByRole("link", { name: "进入选题工作空间" }).count(),
+    ).toBe(2);
+    expect((await handoffHistory()).map((row) => row.request_id).sort()).toEqual(
+      historyB.map((row) => row.request_id).sort(),
+    );
+    expect(await workItemCount()).toBe(2);
+    // H3 for the version dimension: another writer saves a newer plan while this
+    // confirmation is in flight. The save runs strictly before the server sees
+    // the pending handoff, so the answer is a definite `OPC_VERSION_CONFLICT`
+    // rollback rather than a timing race. That transaction must leave no
+    // handoff history and release the local request for the current plan.
+    let planC: { planId: string; version: number } | null = null;
+    await page.route("**/api/trpc/opc.handoff*", async (route) => {
+      planC ??= await f.service.savePlan({
+        draftId: f.d.draftId,
+        sourceVersionId: f.sourceVersionId,
+        requestId: randomUUID(),
+        expectedVersion: 2,
+        body: [
+          {
+            id: randomUUID(),
+            platform: "x",
+            account: "f1-retained",
+            day: "2026-09-16",
+            title: "Plan C topic",
+            brief: "Plan C brief",
+          },
+        ],
+      });
+      await route.continue();
+    });
+    await confirm.click();
+    await page.getByRole("alert").filter({ hasText: "操作未完成" }).waitFor();
+    expect(planC).not.toBeNull();
+    expect(planC!.planId).not.toBe(planB.id);
+    expect(await handoffHistory()).toHaveLength(2);
+    expect(await workItemCount()).toBe(2);
+    await expect
+      .poll(async () => await retainedRequest(), { timeout: 30000 })
+      .toBe("null");
+    await page.unroute("**/api/trpc/opc.handoff*");
+    await expect.poll(() => confirm.isEnabled(), { timeout: 15000 }).toBe(true);
+    await confirm.click();
+    await expect
+      .poll(async () => (await handoffHistory()).length, { timeout: 90000 })
+      .toBe(3);
+    const historyC = await handoffHistory();
+    const requestC = historyC.find(
+      (row) =>
+        row.request_id !== retainedA.requestId &&
+        row.request_id !== retainedB.requestId,
+    )!;
+    expect(requestC.payload.planId).toBe(planC!.planId);
+    expect(await workItemCount()).toBe(3);
+    expect(await accountRevision()).toBe(3);
+    // Step 9. The current handoff result stays visible after a reload.
+    await page.reload();
+    await page.getByRole("link", { name: "进入选题工作空间" }).first().waitFor();
+    expect(
+      await page.getByRole("link", { name: "进入选题工作空间" }).count(),
+    ).toBe(3);
+    // Handoff itself is a financial no-op: no model execution, BILL2 run or
+    // reservation is introduced by any of the three explicit confirmations.
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
+      executions: 0,
+      planExecutions: 0,
+      planRuns: 0,
+      reserves: 0,
+      plans: 3,
+      accounts: 1,
+      workItems: 1,
+    });
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+
+it("OPC: an upstream reconfirmation can be resubmitted and never hides already answered questions", async () => {
+  const {chromium} = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await fixture(3, true), model = randomUUID();
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Reconfirm local','opc-reconfirm','fixture','true',1000,32000)",[model]);
+  await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  const draft = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
+  const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
+  const startedAt = Date.now();
+  const marks: Record<string, number> = {};
+  const external: string[] = [];
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", route => {
+      const host = new URL(route.request().url()).hostname;
+      if (["127.0.0.1","localhost"].includes(host)) return route.continue();
+      external.push(host);
+      return route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(90000);
+    const errors: string[] = [];
+    page.on("pageerror", e => errors.push(e.message));
+    const path = "/positioning/" + draft.draftId;
+    const ready = page.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), {timeout: 90000});
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path));
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", {name:"登录", exact:true}).last().click();
+    await page.waitForURL(process.env.V3_LOCAL_APP + path);
+
+    const read = async () => await f.service.read(draft.draftId);
+    const stepState = async (stepId: string) => (await read()).snapshot.steps[stepId] as {valid: boolean};
+    // Each configured step owns its own field title.
+    const goalOf = (n: number) => page.getByRole("textbox", {name:"已知目标 " + n, exact:true});
+    const confirmButton = () => page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/, exact:true});
+    const navigator = page.getByRole("navigation", {name:"本步骤已到达的问题"});
+    const stepPill = (n: number) =>
+      page.getByRole("navigation", {name:"定位步骤"}).getByRole("button", {name:new RegExp("^" + n + "\\. ")});
+    const rowTexts = async () =>
+      (await navigator.getByRole("button").allTextContents()).map(t => t.replace(/\s+/g," ").trim());
+
+    // Step 0: confirm the first question, defer the optional one, so step 0 is valid.
+    await goalOf(0).fill("初始定位");
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("confirmed");
+    await expect.poll(async () => (await rowTexts()).length, {timeout:30000}).toBe(2);
+    await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.other?.status, {timeout:30000}).toBe("deferred");
+    await expect.poll(async () => (await stepState("step-0")).valid, {timeout:30000}).toBe(true);
+
+    // Step 1 must be confirmed BEFORE the upstream change, so it can be invalidated.
+    await stepPill(2).click();
+    await goalOf(1).waitFor();
+    await goalOf(1).fill("第二步定位");
+    await confirmButton().click();
+    await expect.poll(async () => (await stepState("step-1")).valid, {timeout:60000}).toBe(true);
+    marks.step1Confirmed = Date.now() - startedAt;
+
+    // Q-F2: going back and editing the first answer must not shrink the review list.
+    await stepPill(1).click();
+    await expect.poll(async () => (await rowTexts()).length, {timeout:30000}).toBe(2);
+    const pinned = await rowTexts();
+    await navigator.getByRole("button", {name:/^1\.1 /}).click();
+    await goalOf(0).fill("修改后的定位");
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("provisional");
+    await expect.poll(async () => (await rowTexts()).length, {timeout:30000}).toBe(2);
+    await expect.poll(async () => (await rowTexts())[0] ?? "", {timeout:30000}).toContain("待核对");
+    const afterEdit = await rowTexts();
+    expect(afterEdit.map(t => t.split(" ")[0])).toEqual(pinned.map(t => t.split(" ")[0]));
+    expect(afterEdit[0]).toContain("待核对");
+    expect(afterEdit[1]).toContain("待定（已暂缓）");
+    marks.rowsKeptAfterEdit = Date.now() - startedAt;
+    // A refresh keeps the same durable rows.
+    await page.reload();
+    await expect.poll(async () => (await rowTexts()).length, {timeout:90000}).toBe(2);
+
+    // Q-F1: resubmit the upstream step without changing anything else; that
+    // invalidates the confirmed downstream step.
+    await navigator.getByRole("button", {name:/^1\.1 /}).click();
+    await confirmButton().click();
+    await expect.poll(async () => (await stepState("step-0")).valid, {timeout:90000}).toBe(true);
+    await expect.poll(async () => (await stepState("step-1")).valid, {timeout:60000}).toBe(false);
+    marks.downstreamInvalidated = Date.now() - startedAt;
+
+    // The downstream answers are still resolved, but the step needs an explicit
+    // reconfirmation; the button must be actionable and the resubmit must stick.
+    await stepPill(2).click();
+    await expect.poll(async () => confirmButton().isEnabled(), {timeout:30000}).toBe(true);
+    await confirmButton().click();
+    await expect.poll(async () => (await stepState("step-1")).valid, {timeout:90000}).toBe(true);
+    marks.downstreamReconfirmed = Date.now() - startedAt;
+    expect((await read()).information["step-1"].values?.goal?.value).toBe("第二步定位");
+    // A valid step with an unchanged answer offers no duplicate submit.
+    await stepPill(2).click();
+    await goalOf(1).waitFor();
+    await expect.poll(async () => confirmButton().isEnabled(), {timeout:30000}).toBe(false);
+
+    // Q-F3: finish the workflow and check the completion copy does not promise a
+    // dialog that does not exist yet.
+    await stepPill(3).click();
+    await goalOf(2).waitFor();
+    await goalOf(2).fill("第三步定位");
+    await confirmButton().click();
+    await expect.poll(async () => (await stepState("step-2")).valid, {timeout:90000}).toBe(true);
+    const completion = page.getByText("本步骤进度已完成", {exact:true}).first();
+    await completion.waitFor();
+    const completionText = await page.locator("body").textContent();
+    expect(completionText).not.toContain("再次明确同意");
+    expect(completionText).not.toContain("才会询问是否生成");
+    await expect.poll(() => page.getByRole("button", {name:"确认正式定位", exact:true}).count(), {timeout:30000}).toBe(1);
+
+    expect(errors).toEqual([]);
+    expect(external).toEqual([]);
+    console.log("OPC_QF_MILESTONES " + JSON.stringify({...marks, totalMs: Date.now() - startedAt}));
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+
+it("OPC: clicking a review row opens that reached question without advancing progression or spending", async () => {
+  const {chromium} = await import("../../../../../apps/web/node_modules/@playwright/test");
+  // Five questions in the first step: q1, q2, q3, q4 reached, q5 never reached.
+  const f = await fixture(3, false, 4), model = randomUUID();
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Review select local','opc-review-select','fixture','true',1000,32000)",[model]);
+  await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  const draft = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
+  const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
+  const startedAt = Date.now();
+  const external: string[] = [];
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", route => {
+      const host = new URL(route.request().url()).hostname;
+      if (["127.0.0.1","localhost"].includes(host)) return route.continue();
+      external.push(host);
+      return route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(90000);
+    const errors: string[] = [];
+    page.on("pageerror", e => errors.push(e.message));
+    const path = "/positioning/" + draft.draftId;
+    const ready = page.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), {timeout: 90000});
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path));
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", {name:"登录", exact:true}).last().click();
+    await page.waitForURL(process.env.V3_LOCAL_APP + path);
+
+    const read = async () => await f.service.read(draft.draftId);
+    const counts = async () => (await sql.query(
+      `select (select count(*)::int from runtime_executions where actor_id=$1) executions,
+              (select count(*)::int from bill2_runs where actor_id=$1) runs,
+              (select count(*)::int from credit_transactions where user_id=$1 and reason_code='bill2_reserve') reserves`,
+      [f.actor],
+    )).rows[0] as {executions:number; runs:number; reserves:number};
+    const field = (title: string) => page.getByRole("textbox", {name:title, exact:true});
+    const heading = () =>
+      page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3});
+    const confirmButton = () => page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/, exact:true});
+    const navigator = page.getByRole("navigation", {name:"本步骤已到达的问题"});
+    const rowTexts = async () =>
+      (await navigator.getByRole("button").allTextContents()).map(t => t.replace(/\s+/g," ").trim());
+    const row = (label: string) => navigator.getByRole("button", {name:new RegExp("^" + label.replace(".","\\.") + " ")});
+
+    // q1, q2 confirmed; q3 deferred; that reaches q4 and never q5.
+    await field("已知目标 0").fill("客户定位");
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("confirmed");
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.2");
+    await field("Extra field 0").fill("第二条事实");
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra0?.status, {timeout:30000}).toBe("confirmed");
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.3");
+    await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.status, {timeout:30000}).toBe("deferred");
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra2?.status, {timeout:30000}).not.toBe("confirmed");
+    await expect.poll(async () => (await rowTexts()).length, {timeout:60000}).toBe(4);
+    expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
+
+    // Edit q1 and let its real autosave land: rows must stay q1..q4.
+    await row("1.1").click();
+    await field("已知目标 0").fill("客户定位（修改）");
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("provisional");
+    await expect.poll(async () => (await rowTexts()).length, {timeout:30000}).toBe(4);
+    await expect.poll(async () => (await rowTexts())[0] ?? "", {timeout:30000}).toContain("待核对");
+    const rowsWhileEditing = await rowTexts();
+    expect(rowsWhileEditing.map(t => t.split(" ")[0])).toEqual(["1.1","1.2","1.3","1.4"]);
+    expect(rowsWhileEditing[1]).toContain("已确认");
+    expect(rowsWhileEditing[2]).toContain("待定（已暂缓）");
+    // Wait for every related opening/request to reach a verifiable terminal
+    // state, then freeze the exact identity set as the review-only baseline.
+    await expect.poll(async () => Number((await sql.query(
+      "select count(*)::int n from runtime_executions where actor_id=$1 and state not in ('completed','failed','cancelled')",
+      [f.actor],
+    )).rows[0].n), {timeout:60000}).toBe(0);
+    const identitySignature = async () => (await sql.query(
+      "select coalesce(string_agg(id::text||':'||state||':'||coalesce(request_id::text,''), ',' order by created_at,id),'') s from runtime_executions where actor_id=$1",
+      [f.actor],
+    )).rows[0].s as string;
+    const settled = await counts();
+    const settledIdentity = await identitySignature();
+
+    // Clicking q3 must display q3, not jump back to the pending q1.
+    await row("1.3").click();
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.3");
+    await expect.poll(async () => field("Extra field 1").count(), {timeout:30000}).toBe(1);
+    expect(await field("Extra field 1").inputValue()).toBe("用户明确选择暂不提供此选填信息。");
+    await expect.poll(() => row("1.3").getAttribute("aria-current"), {timeout:15000}).toBe("true");
+    // Clicking q4 must display q4 as well.
+    await row("1.4").click();
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.4");
+    await expect.poll(async () => field("Extra field 2").count(), {timeout:30000}).toBe(1);
+    expect(await field("Extra field 2").inputValue()).toBe("");
+    await expect.poll(() => row("1.4").getAttribute("aria-current"), {timeout:15000}).toBe("true");
+    // The pending progression question is still q1, and a review-only selection
+    // may not confirm, defer or spend.
+    expect((await read()).information["step-0"].values?.goal?.status).toBe("provisional");
+    await expect.poll(() => confirmButton().isEnabled(), {timeout:15000}).toBe(false);
+    await expect.poll(async () => page.getByText("这是回看较早的问题", {exact:false}).count(), {timeout:15000}).toBeGreaterThan(0);
+    expect(await counts()).toEqual(settled);
+    expect(await identitySignature()).toBe(settledIdentity);
+    // Only the "当前" marker follows the selection; identity, order and the
+    // answer states of every row stay unchanged.
+    const stripCurrent = (rows: string[]) => rows.map(t => t.replace(" · 当前", ""));
+    expect(stripCurrent(await rowTexts())).toEqual(stripCurrent(rowsWhileEditing));
+
+    // Refresh keeps the same rows and the same click behaviour.
+    await page.reload();
+    await expect.poll(async () => (await rowTexts()).length, {timeout:90000}).toBe(4);
+    await row("1.4").click();
+    await expect.poll(async () => heading().textContent(), {timeout:60000}).toContain("1.4");
+    expect(await counts()).toEqual(settled);
+
+    // Reconfirming the pending q1 continues normally.
+    await row("1.1").click();
+    await field("已知目标 0").waitFor();
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:60000}).toBe("confirmed");
+    expect((await read()).snapshot.steps["step-0"].valid).toBe(false);
+
+    expect(errors).toEqual([]);
+    expect(external).toEqual([]);
+    console.log("OPC_QF2_MILESTONES " + JSON.stringify({
+      rowsReached: rowsWhileEditing.length,
+      settled,
+      totalMs: Date.now() - startedAt,
+    }));
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+
+it("OPC: a legally reached question keeps its explicit confirm and mentor send while review stays display-only", async () => {
+  const {chromium} = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await fixture(3, false, 4), model = randomUUID();
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Legal action local','opc-legal-action','fixture','true',1000,32000)",[model]);
+  await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  const draft = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
+  const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
+  const startedAt = Date.now();
+  const external: string[] = [];
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", route => {
+      const host = new URL(route.request().url()).hostname;
+      if (["127.0.0.1","localhost"].includes(host)) return route.continue();
+      external.push(host);
+      return route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(90000);
+    const errors: string[] = [];
+    page.on("pageerror", e => errors.push(e.message));
+    const path = "/positioning/" + draft.draftId;
+    const ready = page.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), {timeout: 90000});
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path));
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", {name:"登录", exact:true}).last().click();
+    await page.waitForURL(process.env.V3_LOCAL_APP + path);
+
+    const read = async () => await f.service.read(draft.draftId);
+    const field = (title: string) => page.getByRole("textbox", {name:title, exact:true});
+    const composer = () => page.getByRole("textbox", {name:"给导师的回复", exact:true});
+    const heading = () => page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3});
+    const confirmButton = () => page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/, exact:true});
+    const navigator = page.getByRole("navigation", {name:"本步骤已到达的问题"});
+    const rowTexts = async () =>
+      (await navigator.getByRole("button").allTextContents()).map(t => t.replace(/\s+/g," ").trim());
+    const row = (label: string) => navigator.getByRole("button", {name:new RegExp("^" + label.replace(".","\\.") + " ")});
+    const executions = async () => (await sql.query(
+      "select id::text id, request_id::text \"requestId\", state, payload->'request'->'selection'->>'task' task from runtime_executions where actor_id=$1 order by created_at, id",
+      [f.actor],
+    )).rows as Array<{id:string;requestId:string;state:string;task:string|null}>;
+
+    // q1/q2 confirmed, q3 has a substantive answer but is deferred, q4 pending.
+    await field("已知目标 0").fill("客户定位");
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("confirmed");
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.2");
+    await field("Extra field 0").fill("第二条事实");
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra0?.status, {timeout:30000}).toBe("confirmed");
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.3");
+    await field("Extra field 1").fill("第三条实质答案");
+    await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.status, {timeout:30000}).toBe("deferred");
+    await expect.poll(async () => (await rowTexts()).length, {timeout:60000}).toBe(4);
+    expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
+
+    // q3 is a legal, already reached question: revisiting it must keep the
+    // explicit actions available (this is the Q-F2-ACTION regression).
+    await row("1.3").click();
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.3");
+    expect(await field("Extra field 1").inputValue()).toBe("第三条实质答案");
+    await expect.poll(() => confirmButton().isEnabled(), {timeout:30000}).toBe(true);
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.status, {timeout:60000}).toBe("confirmed");
+    expect((await read()).information["step-0"].values?.extra1?.value).toBe("第三条实质答案");
+    expect((await read()).information["step-0"].values?.extra2?.status).not.toBe("confirmed");
+    expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
+
+    // An explicit mentor send on a legal reached question is allowed and freezes
+    // that question's identity in the request.
+    await row("1.3").click();
+    await field("Extra field 1").waitFor();
+    const before = await executions();
+    const settledActorCounts = (await sql.query(
+      `select (select count(*)::int from runtime_executions where actor_id=$1) executions,
+              (select count(*)::int from bill2_runs where actor_id=$1) runs,
+              (select count(*)::int from credit_transactions where user_id=$1 and reason_code='bill2_reserve') reserves,
+              (select count(*)::int from runtime_executions e left join bill2_runs b on b.id=e.billing_run_id where e.actor_id=$1 and b.id is null) unlinked`,
+      [f.actor],
+    )).rows[0];
+    const submittedRequestIds: string[] = [];
+    page.on("request", request => {
+      if (request.method() !== "POST" || !request.url().includes("opc.prepareStep")) return;
+      const match = /"requestId":"([0-9a-f-]{36})"/.exec(request.postData() ?? "");
+      if (match) submittedRequestIds.push(match[1]);
+    });
+    await composer().fill("补充一条关于第三条的说明");
+    await expect.poll(() => page.getByRole("button", {name:"发送", exact:true}).isEnabled(), {timeout:30000}).toBe(true);
+    await page.getByRole("button", {name:"发送", exact:true}).click();
+    await expect.poll(async () => (await executions()).length, {timeout:60000}).toBe(before.length + 1);
+    const after = await executions();
+    const newRow = after.find(row => !before.some(prev => prev.id === row.id));
+    expect(newRow?.task).toBe("opc-question:extra1");
+    // Admission identity is not a completed turn: wait for the terminal state and
+    // verify the exact execution/request/billing identities, the reserve, and the
+    // user-visible reply before this counts as conversation proof.
+    await expect.poll(async () => ((await executions()).find(row => row.id === newRow!.id)?.state ?? ""), {timeout:90000}).toBe("completed");
+    const sentIdentity = (await sql.query(
+      `select e.state, b.id::text billing_id, b.state billing_state, b.pre_deduct_id::text pre_deduct_id
+         from runtime_executions e left join bill2_runs b on b.id=e.billing_run_id
+        where e.actor_id=$1 and e.id=$2`,
+      [f.actor, newRow!.id],
+    )).rows[0] as {state:string;billing_id:string|null;billing_state:string|null;pre_deduct_id:string|null};
+    expect(sentIdentity.state).toBe("completed");
+    expect(sentIdentity.billing_id).toBeTruthy();
+    // The deterministic synthetic fixture settles; a pending/unknown cost would
+    // mean the accounting path did not finish.
+    expect(sentIdentity.billing_state).toBe("settled");
+    expect(sentIdentity.pre_deduct_id).toBeTruthy();
+    // The execution is tied to the request id the browser actually submitted.
+    expect(newRow!.requestId).toBe(submittedRequestIds.at(-1));
+    // Exactly one mentor turn exists for that request, on the selected question.
+    expect((await sql.query(
+      "select count(*)::int n from opc_turns t where t.draft_id=$1 and t.step_id='step-0' and t.purpose='mentor' and t.request_id=$2",
+      [draft.draftId, newRow!.requestId],
+    )).rows[0].n).toBe(1);
+    expect((await sql.query(
+      "select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve' and source_id=$2",
+      [f.actor, sentIdentity.billing_id],
+    )).rows[0].n).toBe(1);
+    // The visible reply must belong to THIS execution's assistant bubble and be
+    // the authorized completed public message — an input echo is not enough.
+    const storedReply = String((await sql.query(
+      "select coalesce(result->>'body', primary_result->>'body') body from runtime_executions where actor_id=$1 and id=$2",
+      [f.actor, newRow!.id],
+    )).rows[0].body ?? "");
+    const assistantBubble = page.locator(
+      `[data-execution-id="${newRow!.id}"] [data-message-role="assistant"]`,
+    );
+    const userBubble = page.locator(
+      `[data-execution-id="${newRow!.id}"] [data-message-role="user"]`,
+    );
+    await expect.poll(async () => (await assistantBubble.textContent()) ?? "", {timeout:60000})
+      .toContain("【分步模拟，仅验证流程】");
+    const assistantText = ((await assistantBubble.textContent()) ?? "").trim();
+    expect(assistantText.length).toBeGreaterThan(20);
+    expect(assistantText).not.toContain("这条回复还在核对原请求");
+    expect(assistantText).not.toContain("这条回复未发给模型");
+    expect((await userBubble.textContent()) ?? "").toContain("补充一条关于第三条的说明");
+    expect(assistantText).not.toBe(((await userBubble.textContent()) ?? "").trim());
+    let storedMessage = storedReply;
+    try {
+      const parsedStored = JSON.parse(storedReply) as { message?: unknown };
+      if (typeof parsedStored?.message === "string") storedMessage = parsedStored.message;
+    } catch { /* a plain-text body is already the message */ }
+    expect(storedMessage.trim().length).toBeGreaterThan(20);
+    // Compare the whole public message, normalising only whitespace.
+    const normalise = (value: string) => value.replace(/\s+/g, " ").trim();
+    const bubbleParagraph = normalise(
+      (await assistantBubble.locator("p").first().textContent()) ?? assistantText,
+    );
+    expect(bubbleParagraph).toBe(normalise(storedMessage));
+    // Actor-wide identity accounting: exactly one new execution/run/reserve and
+    // every one of them is linked, so an unlinked extra run cannot hide.
+    const actorAfter = await sql.query(
+      `select (select count(*)::int from runtime_executions where actor_id=$1) executions,
+              (select count(*)::int from bill2_runs where actor_id=$1) runs,
+              (select count(*)::int from credit_transactions where user_id=$1 and reason_code='bill2_reserve') reserves,
+              (select count(*)::int from runtime_executions e left join bill2_runs b on b.id=e.billing_run_id where e.actor_id=$1 and b.id is null) unlinked`,
+      [f.actor],
+    );
+    expect(actorAfter.rows[0]).toEqual({
+      executions: settledActorCounts.executions + 1,
+      runs: settledActorCounts.runs + 1,
+      reserves: settledActorCounts.reserves + 1,
+      unlinked: settledActorCounts.unlinked,
+    });
+    expect((await executions()).filter(row => row.task === "opc-question:extra1")).toHaveLength(1);
+    expect((await read()).information["step-0"].values?.extra2?.status).not.toBe("confirmed");
+    expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
+
+    expect(errors).toEqual([]);
+    expect(external).toEqual([]);
+    console.log("OPC_QF2_ACTION_MILESTONES " + JSON.stringify({
+      executionsBefore: before.length,
+      executionsAfter: after.length,
+      newTask: newRow?.task ?? null,
+      totalMs: Date.now() - startedAt,
+    }));
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+
+it("OPC: an immutable information snapshot reconstructs the reached frontier when the next question never opened", async () => {
+  const {chromium} = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await fixture(3, false, 4), model = randomUUID();
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Frontier local','opc-frontier','fixture','true',1000,32000)",[model]);
+  await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  const draft = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
+  const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", route => {
+      const host = new URL(route.request().url()).hostname;
+      return ["127.0.0.1","localhost"].includes(host) ? route.continue() : route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(90000);
+    const path = "/positioning/" + draft.draftId;
+    const ready = page.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), {timeout: 90000});
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path));
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", {name:"登录", exact:true}).last().click();
+    await page.waitForURL(process.env.V3_LOCAL_APP + path);
+    await page.route("**/api/trpc/opc.prepareStep*", async route => {
+      const raw = route.request().postData() ?? "";
+      return raw.includes("extra2") ? route.abort() : route.continue();
+    });
+    const read = async () => await f.service.read(draft.draftId);
+    const field = (title: string) => page.getByRole("textbox", {name:title, exact:true});
+    const heading = () => page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3});
+    const confirmButton = () => page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/, exact:true});
+    const navigator = page.getByRole("navigation", {name:"本步骤已到达的问题"});
+    const rowTexts = async () =>
+      (await navigator.getByRole("button").allTextContents()).map(t => t.replace(/\s+/g," ").trim());
+    const row = (label: string) => navigator.getByRole("button", {name:new RegExp("^" + label.replace(".","\\.") + " ")});
+    const snapshots = async () => (await sql.query(
+      "select (response->>'version')::int version, payload->'values' values from artifact_requests where project_id=$1 and round_id=$2 and action='opc_information' order by (response->>'version')::int",
+      [draft.projectId, draft.roundId],
+    )).rows as Array<{version:number; values:Record<string,{status?:string}>}>;
+    const schemaIds = ["goal","extra0","extra1","extra2","extra3"];
+    const isResolved = (values:Record<string,{status?:string}>, id:string) =>
+      ["confirmed","deferred"].includes(values[id]?.status ?? "");
+    const settled = (values:Record<string,{status?:string}>) =>
+      values.goal?.status === "confirmed" && values.extra0?.status === "confirmed" && values.extra1?.status === "deferred";
+
+    await field("已知目标 0").fill("客户定位");
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("confirmed");
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.2");
+    await field("Extra field 0").fill("第二条事实");
+    await confirmButton().click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra0?.status, {timeout:30000}).toBe("confirmed");
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.3");
+    await field("Extra field 1").fill("第三条实质答案");
+    await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.status, {timeout:30000}).toBe("deferred");
+    await expect.poll(async () => (await rowTexts()).length, {timeout:60000}).toBe(4);
+    const q4Turns = Number((await sql.query(
+      "select count(*)::int n from opc_turns t join runtime_executions e on e.session_id=t.session_id and e.request_id=t.request_id where t.draft_id=$1 and t.step_id='step-0' and t.round_id=$2 and e.payload->'request'->'selection'->>'task'='opc-opening:extra2'",
+      [draft.draftId, draft.roundId],
+    )).rows[0].n);
+    expect(q4Turns).toBe(0);
+    const turnsBeforeRecovery = Number((await sql.query(
+      "select count(*)::int n from opc_turns t where t.draft_id=$1 and t.step_id='step-0' and t.round_id=$2",
+      [draft.draftId, draft.roundId],
+    )).rows[0].n);
+
+    const preEdit = await snapshots();
+    const snapshot = preEdit.find(s => settled(s.values));
+    expect(snapshot).toBeTruthy();
+    expect(schemaIds.filter(id => isResolved(snapshot!.values, id))).toEqual(["goal","extra0","extra1"]);
+    const nextUnresolved = schemaIds.findIndex(id => !isResolved(snapshot!.values, id));
+    expect(schemaIds[nextUnresolved]).toBe("extra2");
+    expect(schemaIds[nextUnresolved + 1]).toBe("extra3");
+
+    await row("1.1").click();
+    await field("已知目标 0").fill("客户定位（修改）");
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("provisional");
+    await page.reload();
+    // With the bounded historical reach from this round's snapshots, the empty
+    // and never-opened q4 stays reviewable after the earlier edit.
+    await expect.poll(async () => (await rowTexts()).length, {timeout:90000}).toBe(4);
+    expect((await rowTexts())[3]).toContain("Extra field 2");
+    expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
+    expect((await snapshots()).some(s => settled(s.values))).toBe(true);
+    // q4 is selectable and readable, but passive recovery must not make it
+    // confirmable or create any new execution/opening for it.
+    await row("1.4").click();
+    await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.4");
+    expect(await field("Extra field 2").inputValue()).toBe("");
+    await expect.poll(() => row("1.4").getAttribute("aria-current"), {timeout:15000}).toBe("true");
+    await expect.poll(() => confirmButton().isEnabled(), {timeout:15000}).toBe(false);
+    expect((await read()).information["step-0"].values?.goal?.status).toBe("provisional");
+    // Passive recovery created no new turn/execution for q4.
+    expect(Number((await sql.query(
+      "select count(*)::int n from opc_turns t where t.draft_id=$1 and t.step_id='step-0' and t.round_id=$2",
+      [draft.draftId, draft.roundId],
+    )).rows[0].n)).toBe(turnsBeforeRecovery);
+
+    await row("1.1").click();
+    await field("已知目标 0").fill("客户定位（再次修改）");
+    await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("provisional");
+    const recovered = (await snapshots()).find(s => settled(s.values));
+    expect(recovered).toBeTruthy();
+    expect(schemaIds.findIndex(id => !isResolved(recovered!.values, id))).toBe(3);
+    // Repeated later edits (more than fields x 2) must not lose the historical
+    // maximum, and the reach must stay stable.
+    for (let i = 0; i < 10; i++) {
+      await row("1.1").click();
+      const goalInput = field("已知目标 0");
+      await goalInput.waitFor();
+      const nextValue = "客户定位（多次修改 " + i + "）";
+      await goalInput.fill(nextValue);
+      // Wait for the typed value first, then for its persisted value.
+      await expect.poll(async () => await goalInput.inputValue(), {timeout:30000}).toBe(nextValue);
+      await expect.poll(async () =>
+        (await read()).information["step-0"].values?.goal?.value ?? "", {timeout:60000},
+      ).toBe(nextValue);
+    }
+    await page.reload();
+    await expect.poll(async () => (await rowTexts()).length, {timeout:90000}).toBe(4);
+    expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
+    // Another actor's stronger-looking history must not influence this frontier.
+    const other = await fixture(3, false, 0);
+    const otherDraft = await other.service.start({requestId: randomUUID(), registration: other.registration, mode: "mentor"});
+    const otherVersion = (await other.service.read(otherDraft.draftId)).snapshot.steps["step-0"].version;
+    await other.service.information({
+      draftId: otherDraft.draftId, stepId: "step-0", requestId: randomUUID(), expectedVersion: otherVersion,
+      values: { goal: { status: "confirmed", nature: "fact", value: "另一个账号的定位" } },
+    });
+    expect((await read()).information["step-0"].values?.goal?.status).toBe("provisional");
+    expect((await rowTexts()).length).toBe(4);
+    const foreignRequests = Number((await sql.query(
+      "select count(*)::int n from artifact_requests where project_id=$1 and round_id<>$2",
+      [draft.projectId, draft.roundId],
+    )).rows[0].n);
+    expect(foreignRequests).toBe(0);
+    // The reach helper is internal: it is not callable through the public RPC
+    // surface, and another step's own reach is not polluted by this step.
+    const deniedReach = await admin.rpc("opc_historical_reach", {
+      p_actor_id: f.actor,
+      p_draft_id: draft.draftId,
+      p_step_id: "step-0",
+    });
+    expect(deniedReach.error).toBeTruthy();
+    expect(
+      ((await read()).information["step-1"] as { reached?: string[] }).reached ?? [],
+    ).toEqual([]);
+    // Real logout/login (a fresh context, not another reload) keeps the four
+    // server-backed rows and hides q5.
+    const relogin = await browser.newContext();
+    await relogin.route("**/*", route => {
+      const host = new URL(route.request().url()).hostname;
+      return ["127.0.0.1","localhost"].includes(host) ? route.continue() : route.abort();
+    });
+    const page2 = await relogin.newPage();
+    page2.setDefaultTimeout(30000);
+    page2.setDefaultNavigationTimeout(90000);
+    const ready2 = page2.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), {timeout: 90000});
+    await page2.goto(process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path));
+    await ready2;
+    await page2.getByPlaceholder("name@example.com").fill(f.email);
+    await page2.getByPlaceholder("输入你的密码").fill(f.password);
+    await page2.getByRole("button", {name:"登录", exact:true}).last().click();
+    await page2.waitForURL(process.env.V3_LOCAL_APP + path);
+    const rowsAfterRelogin = async () =>
+      (await page2.getByRole("navigation", {name:"本步骤已到达的问题"}).getByRole("button").allTextContents())
+        .map(t => t.replace(/\s+/g," ").trim());
+    await expect.poll(async () => (await rowsAfterRelogin()).length, {timeout:90000}).toBe(4);
+    expect((await rowsAfterRelogin()).join(" | ")).not.toContain("Extra field 3");
+    await relogin.close();
+    console.log("OPC_FRONTIER_EVIDENCE " + JSON.stringify({
+      snapshotsBeforeEdit: preEdit.length,
+      settledSnapshotVersion: snapshot!.version,
+      recoveredSnapshotVersion: recovered!.version,
+      frontier: "extra2",
+      nextUnreached: "extra3",
+      q4Turns,
+      rowsAfterEditRefresh: (await rowTexts()).length,
+    }));
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+
+it("OPC: the historical reach projection is idempotent, permission-scoped and contamination-safe", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { resolve } = await import("node:path");
+  // Five fields keeps q4/q5 unreached, so a foreign stronger frontier would be
+  // visible if it leaked and a rejected write could really extend reach.
+  const f = await fixture(3, false, 4), model = randomUUID();
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Reach local','opc-reach','fixture','true',1000,32000)",[model]);
+  await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  const draft = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
+  const stepVersion = async (stepId: string) =>
+    (await f.service.read(draft.draftId)).snapshot.steps[stepId].version;
+  const reachOf = async (stepId: string) =>
+    ((await f.service.read(draft.draftId)).information[stepId] as { reached?: string[] }).reached ?? [];
+
+  // Reproduce the previous read contract for real: restore 0110 (no `reached`),
+  // then create records under it before applying 0111.
+  const migration = (name: string) => readFileSync(
+    resolve(import.meta.dirname, "../../../../db/migrations/" + name),
+    "utf8",
+  );
+  // The whole transition runs under one failure-safe cleanup: any failure —
+  // including the first swap — restores the current read definition, and the
+  // original error is preserved (the restore never masks it).
+  try {
+  await sql.query(migration("0110_opc_turn_round_ownership.sql"));
+  const priorRead = await f.service.read(draft.draftId);
+  expect(Object.hasOwn(priorRead.information["step-0"], "reached")).toBe(false);
+
+  await f.service.information({
+    draftId: draft.draftId, stepId: "step-0", requestId: randomUUID(),
+    expectedVersion: await stepVersion("step-0"),
+    values: {
+      goal: { status: "confirmed", nature: "fact", value: "客户定位" },
+      extra0: { status: "deferred", nature: "unknown", value: "暂缓的原因" },
+      extra1: { status: "unknown", nature: "unknown", value: "" },
+      extra2: { status: "unknown", nature: "unknown", value: "" },
+      extra3: { status: "unknown", nature: "unknown", value: "" },
+    },
+  });
+  const before = await f.service.read(draft.draftId);
+  const beforeKeys = Object.keys(before).sort();
+  const beforeSteps = JSON.stringify(before.snapshot.steps);
+  const beforeValues = JSON.stringify(before.information["step-0"].values);
+  expect(Object.hasOwn(before.information["step-0"], "reached")).toBe(false);
+
+  // Upgrade: the prior records must survive and the new reach must appear.
+  await sql.query(migration("0111_opc_historical_reach.sql"));
+  const after = await f.service.read(draft.draftId);
+  expect(Object.keys(after).sort()).toEqual(beforeKeys);
+  expect(JSON.stringify(after.snapshot.steps)).toBe(beforeSteps);
+  expect(JSON.stringify(after.information["step-0"].values)).toBe(beforeValues);
+  expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
+
+  // Restore the prior contract and re-apply 0111 without losing records.
+  await sql.query(migration("0110_opc_turn_round_ownership.sql"));
+  const restored = await f.service.read(draft.draftId);
+  expect(Object.hasOwn(restored.information["step-0"], "reached")).toBe(false);
+  expect(JSON.stringify(restored.snapshot.steps)).toBe(beforeSteps);
+  expect(JSON.stringify(restored.information["step-0"].values)).toBe(beforeValues);
+  await sql.query(migration("0111_opc_historical_reach.sql"));
+  expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
+  expect(JSON.stringify((await f.service.read(draft.draftId)).snapshot.steps)).toBe(beforeSteps);
+  } finally {
+    try {
+      await sql.query(migration("0111_opc_historical_reach.sql"));
+    } catch (restoreError) {
+      console.error("reach read-contract restore failed", String(restoreError));
+      throw restoreError;
+    }
+  }
+
+  // Revoked scope is denied with the exact code through the normal read entry,
+  // and the flag is restored even if the assertion fails.
+  expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
+  try {
+    await sql.query("update bill2_drafts set revoked=true where id=$1", [draft.draftId]);
+    await expect(f.service.read(draft.draftId)).rejects.toThrow("OPC_DENIED");
+  } finally {
+    await sql.query("update bill2_drafts set revoked=false where id=$1", [draft.draftId]);
+  }
+  expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
+
+  // Grants: the helper is internal-only and the read entry stays service-role only.
+  const privilege = async (role: string, fn: string) => Number((await sql.query(
+    "select has_function_privilege($1,$2,'EXECUTE')::int p", [role, fn],
+  )).rows[0].p);
+  expect(await privilege("service_role","opc_query(uuid,uuid)")).toBe(1);
+  expect(await privilege("anon","opc_query(uuid,uuid)")).toBe(0);
+  expect(await privilege("authenticated","opc_query(uuid,uuid)")).toBe(0);
+  for (const role of ["anon","authenticated","service_role"])
+    expect(await privilege(role,"opc_historical_reach(uuid,uuid,text)")).toBe(0);
+
+  // Denied entry point: another authenticated actor cannot read this draft, and
+  // its own longer, stronger frontier must not leak into this draft.
+  const other = await fixture(3, false, 4);
+  const otherDraft = await other.service.start({requestId: randomUUID(), registration: other.registration, mode: "mentor"});
+  const otherVersion = (await other.service.read(otherDraft.draftId)).snapshot.steps["step-0"].version;
+  await other.service.information({
+    draftId: otherDraft.draftId, stepId: "step-0", requestId: randomUUID(), expectedVersion: otherVersion,
+    values: {
+      goal: { status: "confirmed", nature: "fact", value: "别的账号第一步" },
+      extra0: { status: "confirmed", nature: "fact", value: "别的账号第二步" },
+      extra1: { status: "confirmed", nature: "fact", value: "别的账号第三步" },
+      extra2: { status: "confirmed", nature: "fact", value: "别的账号第四步" },
+      extra3: { status: "unknown", nature: "unknown", value: "" },
+    },
+  });
+  await expect(other.service.read(draft.draftId)).rejects.toThrow();
+  expect(((await other.service.read(otherDraft.draftId)).information["step-0"] as { reached?: string[] }).reached)
+    .toEqual(["goal","extra0","extra1","extra2","extra3"]);
+  expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
+
+  // Absent history falls back honestly instead of claiming a frontier.
+  const fresh = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
+  expect(((await f.service.read(fresh.draftId)).information["step-0"] as { reached?: string[] }).reached ?? [])
+    .toEqual([]);
+
+  // Contamination control: another step with the same field id and a longer
+  // prefix must not extend this step's reach.
+  await f.service.information({
+    draftId: draft.draftId, stepId: "step-1", requestId: randomUUID(),
+    expectedVersion: await stepVersion("step-1"),
+    values: { goal: { status: "confirmed", nature: "fact", value: "第二步已确认" } },
+  });
+  expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
+  expect(await reachOf("step-1")).toEqual(["goal"]);
+
+  // A definitely rejected write cannot add reach.
+  await expect(f.service.information({
+    draftId: draft.draftId, stepId: "step-0", requestId: randomUUID(), expectedVersion: 999,
+    values: {
+      goal: { status: "confirmed", nature: "fact", value: "不应写入" },
+      extra0: { status: "confirmed", nature: "fact", value: "不应写入" },
+      extra1: { status: "confirmed", nature: "fact", value: "不应写入" },
+      extra2: { status: "confirmed", nature: "fact", value: "不应写入" },
+      extra3: { status: "confirmed", nature: "fact", value: "不应写入" },
+    },
+  })).rejects.toThrow();
+  expect(await reachOf("step-0")).toEqual(["goal","extra0","extra1"]);
+  expect(Number((await sql.query(
+    "select count(*)::int n from artifact_requests where project_id=$1 and round_id=$2 and action='opc_information' and payload->>'stepId'='step-0'",
+    [draft.projectId, draft.roundId],
+  )).rows[0].n)).toBe(1);
+  console.log("OPC_REACH_COMPAT " + JSON.stringify({
+    rowsForStep: 1,
+    reach: ["goal","extra0","extra1"],
+    otherStepReach: ["goal"],
+  }));
+}, 300000);
+
+it("OPC: a second published revision drives new drafts while an existing draft stays pinned", async () => {
+  const f = await fixture(3, false, 4), model = randomUUID();
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Revision local','opc-revision','fixture','true',1000,32000)",[model]);
+  await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  const first = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
+  const schemaOf = async (draftId: string, stepId: string) =>
+    (await f.service.read(draftId)).information[stepId].schema as Array<{id:string;title:string;elicitation?:string}>;
+  const reachOfStep = async (draftId: string, stepId: string) =>
+    ((await f.service.read(draftId)).information[stepId] as { reached?: string[] }).reached ?? [];
+  const versionOf = async (draftId: string, stepId: string) =>
+    (await f.service.read(draftId)).snapshot.steps[stepId].version;
+
+  const firstSchema = await schemaOf(first.draftId, "step-0");
+  expect(firstSchema.map(field => field.id)).toEqual(["goal","extra0","extra1","extra2","extra3"]);
+  await f.service.information({
+    draftId: first.draftId, stepId: "step-0", requestId: randomUUID(),
+    expectedVersion: await versionOf(first.draftId, "step-0"),
+    values: {
+      goal: { status: "confirmed", nature: "fact", value: "第一步目标" },
+      extra0: { status: "deferred", nature: "unknown", value: "第一步暂缓" },
+      extra1: { status: "unknown", nature: "unknown", value: "" },
+      extra2: { status: "unknown", nature: "unknown", value: "" },
+      extra3: { status: "unknown", nature: "unknown", value: "" },
+    },
+  });
+  expect(await reachOfStep(first.draftId, "step-0")).toEqual(["goal","extra0","extra1"]);
+
+  // Publish a second revision of the same module: renamed, reordered, fewer
+  // fields, a repeated title across steps and one agent_proposal role.
+  // Republish the SAME skill: the factory keeps the outer id, the descriptor
+  // packageId, the file hashes and the prior version coherent (a hand-patched
+  // identity would be rejected as INVALID_PACKAGE before any publication).
+  const pack2 = makePackage(f.pack.id, true), registration2 = "opc2-" + randomUUID(), flow2 = makeWorkflow(3, false);
+  expect(pack2.id).toBe(f.pack.id);
+  expect(pack2.descriptor.packageId).toBe(pack2.id);
+  expect(pack2.revisionId).not.toBe(f.pack.revisionId);
+  expect(pack2.expectedVersion).toBe(1);
+  expect(pack2.descriptor.packageHash).toBe(
+    (await import("../skills/loader")).packageHash(pack2.descriptor),
+  );
+  flow2.steps.forEach((step, index) => {
+    step.information = index === 0
+      ? [
+          { id: "extra1", title: "重复标题", required: false, profileKey: "r_extra1" },
+          { id: "goal", title: "Renamed goal", required: true, profileKey: "r_goal" },
+          { id: "extra0", title: "重复标题", required: false, profileKey: "r_extra0", elicitation: "agent_proposal" },
+        ]
+      : [{ id: "goal", title: "重复标题", required: true, profileKey: "r_goal_" + index }];
+  });
+  await publishSkillPackage(admin, f.owner, pack2);
+  await sql.query(
+    "insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)",
+    [registration2, f.moduleId, pack2.id, pack2.revisionId, flow2, "第二版定位"],
+  );
+  const secondRequestId = randomUUID();
+  let second: {draftId: string; roundId?: string};
+  try {
+    second = await f.service.start({requestId: secondRequestId, registration: registration2, mode: "mentor"});
+  } catch (error) {
+    // Observe (never replace) the same request so the failed action's identity is
+    // preserved while the raw database error is surfaced for a local test.
+    const raw = await sql.query(
+      "select opc_start($1,$2,$3,$4) result", [f.actor, secondRequestId, registration2, "mentor"],
+    ).then(() => "replayed without error").catch((cause) => String((cause as Error).message));
+    throw new Error("second registration refused: " + String((error as Error).message) + " | raw: " + raw);
+  }
+  const secondSchema = await schemaOf(second!.draftId, "step-0");
+  expect(secondSchema.map(field => field.id)).toEqual(["extra1","goal","extra0"]);
+  expect(secondSchema.map(field => field.title)).toEqual(["重复标题","Renamed goal","重复标题"]);
+  expect(secondSchema[2].elicitation).toBe("agent_proposal");
+  expect((await schemaOf(second!.draftId, "step-1")).map(field => field.title)).toEqual(["重复标题"]);
+  // The existing draft stays pinned to its original revision.
+  const pinned = await schemaOf(first.draftId, "step-0");
+  expect(pinned.map(field => field.id)).toEqual(["goal","extra0","extra1","extra2","extra3"]);
+  expect(pinned.some(field => field.title === "Renamed goal")).toBe(false);
+  console.log("OPC_REVISION_PIN " + JSON.stringify({
+    secondOrder: secondSchema.map(field => field.id),
+    pinnedOrder: pinned.map(field => field.id),
+  }));
+  // A: browser evidence — ONE login, then switch drafts directly (staged
+  // diagnostics so a failure points at a specific await).
+  const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const t0 = Date.now();
+  const mark = (phase: string) => console.log("A_MS " + phase + " " + (Date.now() - t0) + "ms");
+  mark("browser launch begin");
+  const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless:true});
+  mark("browser launch end");
+  const context = await browser.newContext();
+  await context.route("**/*", route => {
+    const host = new URL(route.request().url()).hostname;
+    return ["127.0.0.1","localhost"].includes(host) ? route.continue() : route.abort();
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(20000);
+  page.setDefaultNavigationTimeout(60000);
+  const reads: Array<{path:string;draftId:string|null;ok:boolean}> = [];
+  page.on("response", response => {
+    if (!response.url().includes("opc.read")) return;
+    const url = decodeURIComponent(response.url());
+    reads.push({
+      path: new URL(response.url()).pathname,
+      draftId: /"draftId":\s*"([0-9a-f-]{36})"/.exec(url)?.[1] ?? null,
+      ok: response.ok(),
+    });
+  });
+  const pageErrors: string[] = [];
+  page.on("pageerror", error => pageErrors.push(error.message));
+  const formHeading = () =>
+    page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3}).first();
+  const headingText = async () => {
+    try {
+      return (((await formHeading().textContent({timeout:5000})) ?? "")).replace(/\s+/g," ").trim();
+    } catch { return ""; }
+  };
+  try {
+    mark("login document begin");
+    const settings = page.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), {timeout:60000});
+    await page.goto(process.env.V3_LOCAL_APP + "/login");
+    await settings;
+    mark("settings ready");
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    expect(await page.getByPlaceholder("name@example.com").inputValue()).toBe(f.email);
+    mark("form filled");
+    await page.getByRole("button", {name:"登录", exact:true}).last().click();
+    mark("login submitted");
+    await page.waitForURL(url => !url.pathname.startsWith("/login"), {timeout:60000});
+    mark("auth navigated");
+    const openDraft = async (draftId: string, label: string) => {
+      mark(label + " goto begin");
+      await page.goto(process.env.V3_LOCAL_APP + "/positioning/" + draftId);
+      await page.waitForURL(url => url.pathname === "/positioning/" + draftId, {timeout:60000});
+      mark(label + " url ok");
+      await formHeading().waitFor({timeout:60000});
+      mark(label + " form ready");
+    };
+    await openDraft(first.draftId, "old");
+    await expect.poll(headingText, {timeout:60000}).toContain("Extra field 1");
+    expect(await page.getByRole("textbox", {name:"Extra field 1", exact:true}).count()).toBe(1);
+    // Positively verify the entry's only legal opening (step-0/extra1) rather
+    // than waiting for an empty non-terminal set: the helper asserts the exact
+    // actor-wide effect set, completed execution, settled billing and non-empty
+    // request/execution/run/pre-deduct identities, then returns the identity set.
+    const oldOpening = [{
+      stepId: "step-0",
+      questionId: "extra1",
+      opening: true,
+      input: OPENING_INPUT,
+    }];
+    const oldIdentity = await expectExactMentorEffects(f.actor, first.draftId, first.roundId, oldOpening);
+    expect(oldIdentity).toHaveLength(1);
+    const [openingExecutionId] = JSON.parse(oldIdentity[0]) as [string, string, string, string];
+    const expectOpeningVisible = await mentorMessageCheck(page, f.actor, openingExecutionId);
+    await expectOpeningVisible();
+    mark("old opening settled");
+    await page.reload();
+    await formHeading().waitFor({timeout:60000});
+    mark("old reload");
+    expect(await headingText()).toContain("Extra field 1");
+    // The same execution's same public body must come back after the reload.
+    await expectOpeningVisible();
+    expect(await expectExactMentorEffects(f.actor, first.draftId, first.roundId, oldOpening))
+      .toEqual(oldIdentity);
+    const oldValuesBeforeNew = structuredClone((await f.service.read(first.draftId)).information["step-0"].values);
+    await openDraft(second!.draftId, "new");
+    await expect.poll(headingText, {timeout:60000}).toContain("重复标题");
+    expect(await page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3}).count()).toBe(1);
+    expect(await page.getByRole("textbox", {name:"重复标题", exact:true}).count()).toBe(1);
+    expect(await page.getByRole("textbox", {name:"Renamed goal", exact:true}).count()).toBe(0);
+    // Drive the new revision through its own buttons: 1.1 defer, 1.2 answer,
+    // then 1.3 must show the agent_proposal guidance and its pending proposal.
+    const secondRead = async () => await f.service.read(second!.draftId);
+    // Four-opening baseline before the cross-step action (shared helper, scopes).
+    const secondRoundId: unknown = (await secondRead()).roundId;
+    if (typeof secondRoundId !== "string" || !secondRoundId)
+      throw new Error("expected the new draft's persisted roundId");
+    const oldScope = {draftId: first.draftId, roundId: first.roundId};
+    const newScope = {draftId: second!.draftId, roundId: secondRoundId};
+    const allExpected: ExpectedMentorEffect[] = [
+      {scope: oldScope, stepId: "step-0", questionId: "extra1", opening: true, input: OPENING_INPUT},
+      {scope: newScope, stepId: "step-0", questionId: "extra1", opening: true, input: OPENING_INPUT},
+      {scope: newScope, stepId: "step-0", questionId: "goal", opening: true, input: OPENING_INPUT},
+      {scope: newScope, stepId: "step-0", questionId: "extra0", opening: true, input: OPENING_INPUT},
+      {scope: newScope, stepId: "step-1", questionId: "goal", opening: true, input: OPENING_INPUT},
+    ];
+    const checkEffects = (count: number) => expectExactMentorEffects(
+      f.actor, first.draftId, first.roundId, allExpected.slice(0, count),
+    );
+    await checkEffects(2);
+    await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
+    await expect.poll(async () => (await secondRead()).information["step-0"].values?.extra1?.status, {timeout:60000}).toBe("deferred");
+    await expect.poll(headingText, {timeout:60000}).toContain("Renamed goal");
+    expect(await page.getByRole("textbox", {name:"Renamed goal", exact:true}).count()).toBe(1);
+    await checkEffects(3);
+    await page.getByRole("textbox", {name:"Renamed goal", exact:true}).fill("具体事实：我做 AI 工具内容");
+    await page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/, exact:true}).click();
+    await expect.poll(async () => (await secondRead()).information["step-0"].values?.goal?.status, {timeout:60000}).toBe("confirmed");
+    await expect.poll(headingText, {timeout:60000}).toContain("1.3");
+    await expect.poll(async () => (await page.getByText("这是导师要给出的成果建议", {exact:false}).count()), {timeout:60000}).toBeGreaterThan(0);
+    expect(await page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3}).count()).toBe(1);
+    expect(await page.getByRole("textbox", {name:"重复标题", exact:true}).count()).toBe(1);
+    // The mentor fixture deterministically proposes this text for the current
+    // question and the host keeps it unconfirmed: assert the exact value, the
+    // provisional status, and that the user actually sees it in the form.
+    const expectedProposal =
+      "建议草稿：围绕“重复标题”给出一个可直接使用的具体方案，依据已确认的信息，不声称做过真实研究。";
+    await expect.poll(async () => {
+      const proposal = (await secondRead()).information["step-0"].values?.extra0;
+      return {value: proposal?.value ?? "", status: proposal?.status ?? ""};
+    }, {timeout: 60000}).toEqual({value: expectedProposal, status: "provisional"});
+    const proposalBox = page.locator("section[aria-label='本步填写信息']").getByRole("textbox", {name:"重复标题", exact:true});
+    await expect.poll(() => proposalBox.count(), {timeout: 60000}).toBe(1);
+    await expect.poll(() => proposalBox.inputValue(), {timeout: 60000}).toBe(expectedProposal);
+    mark("new progressed to 1.3");
+
+    await checkEffects(4);
+    // Advance across steps: confirm the pending proposal so step-0 becomes valid
+    // and the next step opens its own same-titled field.
+    await page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/, exact:true}).click();
+    await expect.poll(async () => (await secondRead()).information["step-0"].values?.extra0?.status, {timeout:60000}).toBe("confirmed");
+    await expect.poll(async () => (await secondRead()).snapshot.steps["step-0"].valid, {timeout:60000}).toBe(true);
+    await expect.poll(async () => await page.getByRole("navigation",{name:"定位步骤"}).getByRole("button",{name:/^2\./}).getAttribute("aria-current"), {timeout:60000}).toBe("step");
+    await expect.poll(async () => (await page.locator("section[aria-label='本步填写信息']").getByRole("heading",{level:3}).first().textContent()) ?? "", {timeout:60000}).toContain("2.1");
+    mark("new at step-1");
+    // The next step's own user_fact question must stay empty: the earlier step's
+    // suggestion must not leak across the repeated title.
+    await expect.poll(async () => (await secondRead()).information["step-1"].values?.goal?.value ?? "", {timeout:60000}).toBe("");
+    expect(await page.locator("section[aria-label='本步填写信息']").getByRole("textbox", {name:"重复标题", exact:true}).inputValue()).toBe("");
+    const stableIdentities = await checkEffects(5);
+    const openingTurns = ((await secondRead()).turns as Array<{
+      roundId: string; stepId: string; questionId: string; kind: string; executionId: string;
+    }>).filter(turn => turn.roundId === secondRoundId && turn.stepId === "step-1" &&
+      turn.questionId === "goal" && turn.kind === "opening");
+    expect(openingTurns).toHaveLength(1);
+    const expectNewOpeningVisible = await mentorMessageCheck(page, f.actor, openingTurns[0].executionId);
+    await expectNewOpeningVisible();
+    // A completed five-opening baseline, then the same page and same message.
+    await page.reload();
+    const refreshedForm = page.locator("section[aria-label='本步填写信息']");
+    await expect.poll(() => refreshedForm.getByRole("heading", {level:3}).count()).toBe(1);
+    await expect.poll(() => refreshedForm.getByRole("heading", {level:3}).textContent()).toMatch(/^2\.1 重复标题/);
+    expect(await page.getByRole("navigation", {name:"定位步骤"})
+      .getByRole("button", {name:/^2\./}).getAttribute("aria-current")).toBe("step");
+    expect(await refreshedForm.getByRole("textbox", {name:"重复标题", exact:true}).inputValue()).toBe("");
+    await expectNewOpeningVisible();
+    expect(await checkEffects(5)).toEqual(stableIdentities);
+    mark("new refreshed");
+    const newValues = (await secondRead()).information["step-0"].values;
+    expect(newValues.goal.value).toBe("具体事实：我做 AI 工具内容");
+    expect({value:newValues.extra0.value, status:newValues.extra0.status})
+      .toEqual({value:expectedProposal, status:"confirmed"});
+    await openDraft(first.draftId, "old revisit");
+    expect(await headingText()).toContain("Extra field 1");
+    expect((await f.service.read(first.draftId)).information["step-0"].values).toEqual(oldValuesBeforeNew);
+    expect(await checkEffects(5)).toEqual(stableIdentities);
+    const rounds = (await sql.query(
+      `select d.draft_id::text draft_id, r.revision_id::text revision_id from opc_drafts d
+       join artifact_rounds r on r.id=d.round_id where d.draft_id in ($1,$2)`,
+      [first.draftId, second!.draftId],
+    )).rows as Array<{draft_id:string;revision_id:string}>;
+    expect(rounds.find(r => r.draft_id === first.draftId)?.revision_id).toBe(f.pack.revisionId);
+    expect(rounds.find(r => r.draft_id === second!.draftId)?.revision_id).toBe(pack2.revisionId);
+    expect(pageErrors).toEqual([]);
+    mark("A complete");
+    console.log("OPC_REVISION_PIN_BROWSER " + JSON.stringify({
+      reads, pageErrors, oldRevision: f.pack.revisionId, newRevision: pack2.revisionId,
+    }));
+  } catch (error) {
+    const diagnostic = second ? await f.service.read(second.draftId).catch(() => null) : null;
+    console.error("A_FAILURE " + JSON.stringify({
+      message: String((error as Error).message).slice(0, 300),
+      pathname: (() => { try { return new URL(page.url()).pathname; } catch { return "unavailable"; } })(),
+      heading: await headingText(),
+      activeStepVersion: diagnostic?.snapshot?.steps?.["step-0"]?.version,
+      turns: diagnostic?.turns?.filter((turn: {stepId:string}) => turn.stepId === "step-0"),
+      currentValues: diagnostic?.information?.["step-0"]?.values,
+      reads, pageErrors,
+    }));
+    throw error;
+  } finally {
+    mark("browser close begin");
+    await browser.close();
+    mark("browser close end");
+  }
+}, 300000);
+
+it("OPC: published revision stays immutable while its revised round owns reach and openings", async () => {
+  const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const ids = ["goal", "extra0", "extra1", "extra2", "extra3"];
+  const f = await fixture(3, false, 0, flow => {
+    for (const step of flow.steps.slice(0, 2)) {
+      step.information = ids.map(id => ({
+        id, title: "B " + id, required: id === "goal",
+        profileKey: step.id.replace(/-/g, "_") + "_" + id,
+      }));
+    }
+  });
+  const draft = await f.service.start({
+    requestId: randomUUID(), registration: f.registration, mode: "mentor",
+  });
+  const { draftId, projectId, sessionId, roundId: r1 } = draft as {
+    draftId: string; projectId: string; sessionId: string; roundId: string;
+  };
+  for (const id of [draftId, projectId, sessionId, r1]) {
+    if (typeof id !== "string" || !id) throw new Error("missing B fixture identity");
+  }
+  const read = () => f.service.read(draftId);
+  const app = process.env.V3_LOCAL_APP;
+  if (!app) throw new Error("V3_LOCAL_APP required");
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  });
+  const pageErrors: string[] = [], externalRequests: string[] = [];
+  let phase = "setup";
+  let page: Page | undefined;
+  type Values = Record<string, {
+    status: "confirmed" | "provisional" | "unknown";
+    nature: "fact" | "unknown"; value: string;
+  }>;
+  const opening = (roundId: string): ExpectedMentorEffect => ({
+    scope: { draftId, roundId }, stepId: "step-0", questionId: "goal",
+    opening: true, input: OPENING_INPUT,
+  });
+  const writeValues = async (stepId: string, values: Values) => {
+    const before = await f.artifacts.read(projectId, (await read()).roundId);
+    const saved = await f.service.information({
+      draftId, stepId, requestId: randomUUID(),
+      expectedVersion: before.steps[stepId].version, values,
+    });
+    const after = await read();
+    expect(after.information[stepId].values).toEqual(values);
+    expect(after.snapshot.steps[stepId].version).toBe(saved.version);
+    expect(saved.version).toBe(before.steps[stepId].version + 1);
+    return after;
+  };
+  const prefix = (count: number): Values => Object.fromEntries(ids.map((id, index) => [id,
+    index < count
+      ? { status: "confirmed" as const, nature: "fact" as const, value: "B evidence " + id }
+      : { status: "unknown" as const, nature: "unknown" as const, value: "" },
+  ]));
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", route => {
+      const target = new URL(route.request().url());
+      if (!["127.0.0.1", "localhost", "[::1]"].includes(target.hostname)) {
+        externalRequests.push(target.origin);
+        return route.abort("blockedbyclient");
+      }
+      return route.continue();
+    });
+    const newPage = async () => {
+      const next = await context.newPage();
+      next.setDefaultTimeout(30000);
+      next.on("pageerror", error => pageErrors.push(error.message));
+      return next;
+    };
+    page = await newPage();
+    phase = "login";
+    const settings = page.waitForResponse(
+      response => response.url().includes("settings.getSystemSettings") && response.ok(),
+      { timeout: 60000 },
+    );
+    await page.goto(app + "/login");
+    await settings;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    expect(await page.getByPlaceholder("name@example.com").inputValue()).toBe(f.email);
+    expect(await page.getByPlaceholder("输入你的密码").inputValue()).toBe(f.password);
+    await page.getByRole("button", { name: "登录", exact: true }).last().click();
+    await page.waitForURL(url => !url.pathname.startsWith("/login"), { timeout: 60000 });
+
+    phase = "R1 opening";
+    await page.goto(app + "/positioning/" + draftId);
+    const oldIdentities = await expectExactMentorEffects(f.actor, draftId, r1, [opening(r1)]);
+    expect(oldIdentities).toHaveLength(1);
+    const [oldExecution] = JSON.parse(oldIdentities[0]) as [string, string, string, string];
+    const oldMessage = await mentorMessageCheck(page, f.actor, oldExecution);
+    await oldMessage();
+    await page.close();
+    page = undefined;
+
+    // No live page during preparation: only the two deliberate openings cost.
+    phase = "R1 save confirm publish";
+    for (const step of f.flow.steps) {
+      const before = await f.artifacts.read(projectId, r1);
+      await f.artifacts.execute({
+        action: "save", projectId, roundId: r1, requestId: randomUUID(),
+        stepId: step.id, body: "B published body " + step.id, evidenceIds: [],
+        expectedVersion: before.steps[step.id].version,
+      });
+      const values: Values = Object.fromEntries((step.information ?? []).map(field => [field.id, {
+        status: "confirmed" as const, nature: "fact" as const,
+        value: "B R1 " + step.id + " " + field.id,
+      }]));
+      await writeValues(step.id, values);
+      const state = (await f.artifacts.read(projectId, r1)).steps[step.id];
+      await f.artifacts.execute({
+        action: "confirm", projectId, roundId: r1, requestId: randomUUID(), stepId: step.id,
+        expectedVersion: state.version, expectedReviewVersion: state.reviewVersion,
+      });
+    }
+    const confirmed = await f.artifacts.read(projectId, r1);
+    await f.artifacts.execute({
+      action: "publish", projectId, roundId: r1, requestId: randomUUID(),
+      expectedSteps: Object.fromEntries(Object.entries(confirmed.steps).map(([id, state]) => [id, {
+        version: state.version, reviewVersion: state.reviewVersion,
+      }])),
+    });
+    const reportBefore = structuredClone(await f.artifacts.report(projectId, r1));
+    expect(reportBefore.available).toBe(true);
+    const versionId = reportBefore.id;
+    if (typeof versionId !== "string" || !versionId) throw new Error("R1 version required");
+    const versionJSON = async () => {
+      const rows = (await sql.query<{ body: Record<string, unknown> }>(
+        "select to_jsonb(v) body from artifact_versions v where v.id=$1 and v.round_id=$2",
+        [versionId, r1],
+      )).rows;
+      expect(rows).toHaveLength(1);
+      return rows[0].body;
+    };
+    const roundSteps = async (roundId: string) => {
+      const rows = (await sql.query<{ steps: Record<string, { confirmationId?: string; valid?: boolean }> }>(
+        "select steps from artifact_rounds where id=$1 and project_id=$2", [roundId, projectId],
+      )).rows;
+      expect(rows).toHaveLength(1);
+      return rows[0].steps;
+    };
+    const versionBefore = structuredClone(await versionJSON());
+    const stepsBefore = structuredClone(await roundSteps(r1));
+    expect((await read()).information["step-0"].reached).toEqual(ids);
+    expect((await read()).information["step-1"].reached).toEqual(ids);
+
+    phase = "published page and explicit revise";
+    page = await newPage();
+    await page.goto(app + "/positioning/" + draftId);
+    const reviseButton = page.getByRole("button", { name: "修订定位，保留原版本", exact: true });
+    await reviseButton.waitFor({ state: "visible" });
+    expect((await read()).snapshot.state).toBe("published");
+    // A published strategy exposes its read-only result until an explicit
+    // revision is requested. The old question action is absent in that view.
+    expect(await page.getByRole("button", { name: /^(确认本题并继续|确认当前信息，继续)$/, exact: true }).count()).toBe(0);
+    await reviseButton.click();
+    await expect.poll(async () => (await read()).roundId, { timeout: 60000 }).not.toBe(r1);
+    const revised = await read();
+    const r2: unknown = revised.roundId;
+    if (typeof r2 !== "string" || !r2) throw new Error("R2 identity required");
+    expect(revised.snapshot.state).toBe("draft");
+    expect({ draftId: revised.draftId, projectId: revised.projectId, sessionId: revised.sessionId })
+      .toEqual({ draftId, projectId, sessionId });
+    const revisedSteps = await roundSteps(r2);
+    for (const step of f.flow.steps) {
+      expect(revisedSteps[step.id].valid).toBe(true);
+      expect(revisedSteps[step.id].confirmationId).toBeTruthy();
+      expect(revisedSteps[step.id].confirmationId).not.toBe(stepsBefore[step.id].confirmationId);
+    }
+    expect(await expectExactMentorEffects(f.actor, draftId, r1, [opening(r1)])).toEqual(oldIdentities);
+    await page.close();
+    page = undefined;
+
+    phase = "round and step isolation";
+    const short = await writeValues("step-0", prefix(1));
+    expect(short.information["step-0"].reached).toEqual(["goal", "extra0"]);
+    const long = await writeValues("step-1", prefix(5));
+    expect(long.information["step-1"].reached).toEqual(ids);
+    expect(long.information["step-0"].reached).toEqual(["goal", "extra0"]);
+    const pending = prefix(0);
+    pending.goal = { status: "provisional", nature: "fact", value: "B R2 revised goal" };
+    const current = await writeValues("step-0", pending);
+    expect(current.information["step-0"].reached).toEqual(["goal", "extra0"]);
+
+    phase = "R2 opening and edit";
+    page = await newPage();
+    await page.goto(app + "/positioning/" + draftId);
+    const allExpected = [opening(r1), opening(r2)];
+    const identities = await expectExactMentorEffects(f.actor, draftId, r1, allExpected);
+    const newIdentities = identities.filter(identity => !oldIdentities.includes(identity));
+    expect(newIdentities).toHaveLength(1);
+    const [newExecution] = JSON.parse(newIdentities[0]) as [string, string, string, string];
+    expect(newExecution).not.toBe(oldExecution);
+    const currentMessage = await mentorMessageCheck(page, f.actor, newExecution);
+    await currentMessage();
+    const form = page.locator("section[aria-label='本步填写信息']");
+    const heading = form.getByRole("heading", { level: 3 });
+    const box = form.getByRole("textbox", { name: "B goal", exact: true });
+    const nav = page.getByRole("navigation", { name: "本步骤已到达的问题" });
+    const expectCurrent = async (value: string) => {
+      await expect.poll(() => heading.count()).toBe(1);
+      await expect.poll(() => heading.textContent()).toMatch(/^1\.1 B goal/);
+      await expect.poll(() => box.inputValue()).toBe(value);
+      await expect.poll(() => nav.getByRole("button").count()).toBe(2);
+      expect(await nav.getByRole("button", { name: /B extra1/ }).count()).toBe(0);
+      expect((await read()).information["step-0"].reached).toEqual(["goal", "extra0"]);
+    };
+    await expectCurrent(pending.goal.value);
+    const beforeEdit = await f.artifacts.read(projectId, r2);
+    const edited = "B R2 edited by browser";
+    await box.fill(edited);
+    await expect.poll(async () => (await read()).information["step-0"].values.goal.value,
+      { timeout: 30000 }).toBe(edited);
+    await expect.poll(async () => (await read()).snapshot.steps["step-0"].version,
+      { timeout: 30000 }).toBe(beforeEdit.steps["step-0"].version + 1);
+    expect((await read()).information["step-0"].values.goal.status).toBe("provisional");
+    await expectCurrent(edited);
+    phase = "R2 reload and R1 immutability";
+    await page.reload();
+    await expectCurrent(edited);
+    await currentMessage();
+    expect(await expectExactMentorEffects(f.actor, draftId, r1, allExpected)).toEqual(identities);
+    expect(await versionJSON()).toEqual(versionBefore);
+    expect(await roundSteps(r1)).toEqual(stepsBefore);
+    expect(await f.artifacts.report(projectId, r1)).toEqual(reportBefore);
+    expect(pageErrors).toEqual([]);
+    expect(externalRequests).toEqual([]);
+    console.log("OPC_REVISION_ISOLATION " + JSON.stringify({
+      draftId, projectId, sessionId, r1, r2, versionId,
+      openings: 2, runs: 2, reserves: 2, reached: ["goal", "extra0"],
+    }));
+  } catch (error) {
+    console.error("B_FAILURE", { phase, message: String(error), pathname: page ? new URL(page.url()).pathname : null });
+    throw error;
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+
+it("OPC: two real tabs retain review, resolve edits and recover one reply after real logout", async () => {
+  const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const fields = ["goal", "extra0", "extra1", "extra2", "extra3"];
+  const f = await fixture(3, false, 0, flow => {
+    flow.steps[0].information = fields.map(id => ({
+      id, title: "C " + id, required: id === "goal", profileKey: "c_" + id,
+    }));
+  });
+  await planFixtureModel(f.moduleId);
+  const started = await f.service.start({
+    requestId: randomUUID(), registration: f.registration, mode: "mentor",
+  });
+  const { draftId, projectId, sessionId, roundId } = started as {
+    draftId: string; projectId: string; sessionId: string; roundId: string;
+  };
+  for (const id of [draftId, projectId, sessionId, roundId]) {
+    if (typeof id !== "string" || !id) throw new Error("missing C fixture identity");
+  }
+  const app = process.env.V3_LOCAL_APP;
+  if (!app || !["127.0.0.1", "localhost", "[::1]"].includes(new URL(app).hostname))
+    throw new Error("C requires the existing loopback runner");
+  const origin = new URL(app).origin;
+  const draftPath = "/positioning/" + draftId;
+  const read = () => f.service.read(draftId);
+  type Answer = {
+    value: string; status: "confirmed" | "deferred" | "unknown" | "provisional";
+    nature: "fact" | "unknown";
+  };
+  const seeded: Record<string, Answer> = {
+    goal: { value: "C original goal", status: "confirmed", nature: "fact" },
+    extra0: { value: "C known audience", status: "confirmed", nature: "fact" },
+    extra1: { value: "C needs source material", status: "deferred", nature: "fact" },
+    extra2: { value: "", status: "unknown", nature: "unknown" },
+    extra3: { value: "", status: "unknown", nature: "unknown" },
+  };
+  // Make q4 durably reached without ever admitting an opening for it, then
+  // edit q1 back to provisional. Only the existing information RPC is used.
+  await f.service.information({
+    draftId, stepId: "step-0", requestId: randomUUID(),
+    expectedVersion: (await read()).snapshot.steps["step-0"].version, values: seeded,
+  });
+  const values = structuredClone(seeded);
+  values.goal = { ...values.goal, value: "C editable goal", status: "provisional" };
+  await f.service.information({
+    draftId, stepId: "step-0", requestId: randomUUID(),
+    expectedVersion: (await read()).snapshot.steps["step-0"].version, values,
+  });
+  const reached = ["goal", "extra0", "extra1", "extra2"];
+  const baseOtherValues = structuredClone(values);
+  delete baseOtherValues.goal;
+  const opening: ExpectedMentorEffect = {
+    stepId: "step-0", questionId: "goal", opening: true, input: OPENING_INPUT,
+  };
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  });
+  let phase = "browser setup";
+  const pageErrors: string[] = [], externalRequests: string[] = [];
+  let page: Page | undefined;
+  let releaseHeld: (() => void) | undefined;
+  let holdSave = false, dropExecutionReply = false;
+  const localInput = "C tab one keeps this exact edit";
+  const remoteInput = "C tab two saved this different edit";
+  const stepKey = "opc-step:" + draftId + ":step-0";
+  const form = (p: Page) => p.locator("section[aria-label='本步填写信息']");
+  const nav = (p: Page) => p.getByRole("navigation", { name: "本步骤已到达的问题" });
+  const box = (p: Page, id = "goal") => form(p).getByRole("textbox", { name: "C " + id, exact: true });
+  const show = async (p: Page, id: string, expectedValue: string) => {
+    const number = fields.indexOf(id) + 1;
+    if (number < 1) throw new Error("unknown C question");
+    await expect.poll(() => form(p).getByRole("heading", { level: 3 }).count(), { timeout: 60000 }).toBe(1);
+    await expect.poll(() => form(p).getByRole("heading", { level: 3 }).textContent(), { timeout: 60000 })
+      .toMatch(new RegExp("^1\\." + number + " C " + id + "(?:\\s|[（(]|$)"));
+    await expect.poll(() => box(p, id).count()).toBe(1);
+    await expect.poll(() => box(p, id).inputValue(), { timeout: 30000 }).toBe(expectedValue);
+    await expect.poll(() => nav(p).getByRole("button").count()).toBe(4);
+    expect(await nav(p).getByRole("button", { name: /C extra3/ }).count()).toBe(0);
+    expect(new URL(p.url()).pathname).toBe(draftPath);
+  };
+  const assertBinding = async () => {
+    const d = await read();
+    expect({ draftId: d.draftId, projectId: d.projectId, sessionId: d.sessionId, roundId: d.roundId })
+      .toEqual({ draftId, projectId, sessionId, roundId });
+    expect(d.information["step-0"].reached).toEqual(reached);
+    const otherValues = { ...d.information["step-0"].values };
+    delete otherValues.goal;
+    expect(otherValues).toEqual(baseOtherValues);
+    return d;
+  };
+  const countInformation = async () => (await sql.query<{ n: number }>(
+    "select count(*)::int n from artifact_requests where project_id=$1 and round_id=$2 and action='opc_information' and payload->>'stepId'='step-0'",
+    [projectId, roundId],
+  )).rows[0].n;
+  const saved = async (p: Page, value: string, version: number) => {
+    await expect.poll(() => box(p).inputValue(), { timeout: 30000 }).toBe(value);
+    await expect.poll(async () => {
+      const d = await read();
+      return { value: d.information["step-0"].values.goal.value,
+        status: d.information["step-0"].values.goal.status,
+        version: d.snapshot.steps["step-0"].version };
+    }, { timeout: 30000 }).toEqual({ value, status: "provisional", version });
+    await expect.poll(() => form(p).getByRole("status").allTextContents(), { timeout: 30000 })
+      .toContain("已自动保存");
+    await expect.poll(() => p.evaluate(id => {
+      if (sessionStorage.getItem("opc-information-autosave:" + id + ":step-0")) return false;
+      const raw = sessionStorage.getItem("opc-edit:" + id);
+      if (!raw) return false;
+      const state: unknown = JSON.parse(raw);
+      return Boolean(state && typeof state === "object" && "infoEdits" in state &&
+        state.infoEdits && typeof state.infoEdits === "object" && !Object.hasOwn(state.infoEdits, "step-0"));
+    }, draftId), { timeout: 30000 }).toBe(true);
+  };
+  const login = async (p: Page) => {
+    const settings = p.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), { timeout: 60000 });
+    await p.goto(app + "/login");
+    await settings;
+    await p.getByPlaceholder("name@example.com").fill(f.email);
+    await p.getByPlaceholder("输入你的密码").fill(f.password);
+    expect(await p.getByPlaceholder("name@example.com").inputValue()).toBe(f.email);
+    expect(await p.getByPlaceholder("输入你的密码").inputValue()).toBe(f.password);
+    await p.getByRole("button", { name: "登录", exact: true }).last().click();
+    await p.waitForURL(url => url.origin === origin && !url.pathname.startsWith("/login"), { timeout: 60000 });
+  };
+  const isProcedure = (url: string, name: string) => {
+    const u = new URL(url);
+    return u.origin === origin && u.pathname.startsWith("/api/trpc/") &&
+      decodeURIComponent(u.pathname.slice("/api/trpc/".length)).split(",").includes(name);
+  };
+  const readEnvelope = async (p: Page) => {
+    const raw = await p.evaluate(key => sessionStorage.getItem(key), stepKey);
+    if (!raw) throw new Error("the original mentor request must remain retained");
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !("request" in parsed) ||
+        !parsed.request || typeof parsed.request !== "object" ||
+        !("requestId" in parsed.request) || typeof parsed.request.requestId !== "string")
+      throw new Error("invalid retained request shape");
+    return { raw, requestId: parsed.request.requestId, request: parsed.request };
+  };
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", route => {
+      const u = new URL(route.request().url());
+      if (!["127.0.0.1", "localhost", "[::1]"].includes(u.hostname)) {
+        externalRequests.push(u.origin);
+        return route.abort("blockedbyclient");
+      }
+      return route.continue();
+    });
+    page = await context.newPage();
+    const tab1 = page;
+    tab1.setDefaultTimeout(30000);
+    tab1.on("pageerror", error => pageErrors.push(error.message));
+    phase = "login and one shared opening";
+    await login(tab1);
+    await tab1.goto(app + draftPath);
+    await show(tab1, "goal", values.goal.value);
+    const initialIdentities = await expectExactMentorEffects(f.actor, draftId, roundId, [opening]);
+    expect(initialIdentities).toHaveLength(1);
+    const [openingExecution] = JSON.parse(initialIdentities[0]) as [string, string, string, string];
+    const openingMessage = await mentorMessageCheck(tab1, f.actor, openingExecution);
+    await openingMessage();
+    const tab2 = await context.newPage();
+    tab2.setDefaultTimeout(30000);
+    tab2.on("pageerror", error => pageErrors.push(error.message));
+    await tab2.goto(app + draftPath);
+    await show(tab2, "goal", values.goal.value);
+    await (await mentorMessageCheck(tab2, f.actor, openingExecution))();
+    expect(await expectExactMentorEffects(f.actor, draftId, roundId, [opening])).toEqual(initialIdentities);
+
+    phase = "real second-tab update during historical review";
+    await nav(tab1).getByRole("button", { name: /C extra2/ }).click();
+    await show(tab1, "extra2", "");
+    expect(await tab1.getByRole("button", { name: /^(确认本题并继续|确认当前信息，继续)$/, exact: true }).isDisabled()).toBe(true);
+    const beforeRemote = (await read()).snapshot.steps["step-0"].version;
+    const firstRemote = "C updated while the other tab reviews question four";
+    await box(tab2).fill(firstRemote);
+    await saved(tab2, firstRemote, beforeRemote + 1);
+    await tab1.getByRole("button", { name: "重新读取状态", exact: true }).click();
+    await show(tab1, "extra2", "");
+    expect(await tab1.getByRole("button", { name: /^(确认本题并继续|确认当前信息，继续)$/, exact: true }).isDisabled()).toBe(true);
+    expect((await assertBinding()).information["step-0"].values.goal.value).toBe(firstRemote);
+    await nav(tab1).getByRole("button", { name: /C goal/ }).click();
+    await show(tab1, "goal", firstRemote);
+
+    phase = "two real writes produce an explicit conflict";
+    let sawHeldSave = false;
+    const gate = new Promise<void>(resolve => { releaseHeld = resolve; });
+    await tab1.route("**/api/trpc/**", async route => {
+      if (holdSave && route.request().method() === "POST" && isProcedure(route.request().url(), "opc.information")) {
+        holdSave = false;
+        sawHeldSave = true;
+        await gate; // Delay the real request; never fabricate a successful write.
+        await route.continue();
+        return;
+      }
+      await route.fallback();
+    });
+    const conflictVersion = (await read()).snapshot.steps["step-0"].version;
+    const conflictCount = await countInformation();
+    holdSave = true;
+    await box(tab1).fill(localInput);
+    await expect.poll(() => sawHeldSave, { timeout: 30000 }).toBe(true);
+    await box(tab2).fill(remoteInput);
+    await saved(tab2, remoteInput, conflictVersion + 1);
+    releaseHeld!();
+    await expect.poll(() => form(tab1).getByRole("alert").textContent(), { timeout: 30000 })
+      .toContain("其他窗口修改了相同字段");
+    expect(await box(tab1).inputValue()).toBe(localInput);
+    expect((await read()).information["step-0"].values.goal.value).toBe(remoteInput);
+    expect(await countInformation()).toBe(conflictCount + 1);
+    await form(tab1).getByRole("button", { name: "保留我的这些修改并重新保存", exact: true }).click();
+    await saved(tab1, localInput, conflictVersion + 2);
+    expect(await countInformation()).toBe(conflictCount + 2);
+    await show(tab1, "goal", localInput);
+    expect(await expectExactMentorEffects(f.actor, draftId, roundId, [opening])).toEqual(initialIdentities);
+    await tab2.close();
+
+    phase = "twelve persisted edits without truncating historical reach";
+    const editBase = (await read()).snapshot.steps["step-0"].version;
+    const requestBase = await countInformation();
+    let finalValue = localInput;
+    for (let index = 1; index <= 12; index++) {
+      finalValue = "C persisted edit " + index + " -- exact value";
+      await box(tab1).fill(finalValue);
+      await saved(tab1, finalValue, editBase + index);
+      expect(await countInformation()).toBe(requestBase + index);
+      await assertBinding();
+    }
+    await tab1.reload();
+    await show(tab1, "goal", finalValue);
+    await openingMessage();
+    expect(await expectExactMentorEffects(f.actor, draftId, roundId, [opening])).toEqual(initialIdentities);
+    expect((await read()).snapshot.steps["step-0"].version).toBe(editBase + 12);
+    const scopedCount = await countInformation();
+    // Observe the same scoped SELECT used by 0111. Do not require an index scan
+    // on a tiny fixture, or claim a latency guarantee from this query plan.
+    const planRows = (await sql.query<{ "QUERY PLAN": Array<Record<string, unknown>> }>(
+      "explain (analyze, buffers, format json) select a.payload->'values' from artifact_requests a where a.project_id=$1 and a.round_id=$2 and a.action='opc_information' and a.payload->>'stepId'=$3",
+      [projectId, roundId, "step-0"],
+    )).rows;
+    const explain = planRows[0]?.["QUERY PLAN"]?.[0];
+    const plan = explain?.Plan;
+    if (!plan || typeof plan !== "object" || !("Actual Rows" in plan))
+      throw new Error("missing actual scoped historical query result");
+    expect(plan["Actual Rows"]).toBe(scopedCount);
+    expect(scopedCount).toBe(requestBase + 12);
+    expect((await assertBinding()).information["step-0"].values.goal.value).toBe(finalValue);
+
+    phase = "lose a completed explicit reply without creating a new request";
+    let sawSuccessfulDroppedReply = false;
+    await tab1.route("**/api/trpc/**", async route => {
+      if (dropExecutionReply && route.request().method() === "POST" && isProcedure(route.request().url(), "runtime.execute")) {
+        const response = await route.fetch(); // Real server execution and settlement happen first.
+        const succeeded = response.ok();
+        await route.abort("failed");
+        if (succeeded) sawSuccessfulDroppedReply = true;
+        return;
+      }
+      await route.fallback();
+    });
+    const mentorInput = "C request: explain this saved goal without changing my confirmed audience.";
+    dropExecutionReply = true;
+    await tab1.getByRole("textbox", { name: "给导师的回复", exact: true }).fill(mentorInput);
+    await tab1.getByRole("button", { name: "发送", exact: true }).click();
+    const explicit: ExpectedMentorEffect = {
+      stepId: "step-0", questionId: "goal", opening: false, input: mentorInput,
+    };
+    const expected = [opening, explicit];
+    const paidIdentities = await expectExactMentorEffects(f.actor, draftId, roundId, expected);
+    await expect.poll(() => sawSuccessfulDroppedReply, { timeout: 30000 }).toBe(true);
+    const retained = await readEnvelope(tab1);
+    expect(retained.request).toEqual({
+      draftId, stepId: "step-0", purpose: "mentor", requestId: retained.requestId,
+      input: mentorInput, questionId: "goal", organizeAfter: true,
+    });
+    const explicitRows = paidIdentities.map(identity => JSON.parse(identity) as [string, string, string, string])
+      .filter(identity => identity[1] === retained.requestId);
+    expect(explicitRows).toHaveLength(1);
+    const explicitExecution = explicitRows[0][0];
+    expect(explicitExecution).not.toBe(openingExecution);
+    await expect.poll(() => tab1.getByRole("button", { name: "继续核对这条原请求", exact: true }).isEnabled(), { timeout: 30000 })
+      .toBe(true);
+
+    phase = "real website logout in the original tab";
+    // Positioning has no user-menu header. Use the existing profile page in
+    // THIS page/context to invoke AppHeader's real supabase.auth.signOut().
+    await tab1.goto(app + "/profile");
+    expect((await readEnvelope(tab1)).raw).toBe(retained.raw);
+    await tab1.getByRole("button", { name: "打开用户菜单", exact: true }).click();
+    const logoutResponse = tab1.waitForResponse(response => {
+      const url = new URL(response.url());
+      return ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) &&
+        /\/logout\/?$/.test(url.pathname) && response.request().method() === "POST";
+    }, { timeout: 60000 });
+    await tab1.getByRole("menuitem", { name: "退出登录", exact: true }).click();
+    expect((await logoutResponse).ok()).toBe(true);
+    await tab1.waitForURL(url => url.origin === origin && url.pathname === "/landing", { timeout: 60000 });
+    await tab1.goto(app + draftPath);
+    await tab1.waitForURL(url => url.origin === origin && url.pathname === "/login", { timeout: 60000 });
+    expect(await tab1.locator("section[aria-label='本步填写信息']").count()).toBe(0);
+    expect((await readEnvelope(tab1)).raw).toBe(retained.raw);
+    expect(await expectExactMentorEffects(f.actor, draftId, roundId, expected)).toEqual(paidIdentities);
+
+    phase = "same-page login and same-request recovery";
+    dropExecutionReply = false;
+    await login(tab1);
+    // Global sign-out also revokes the fixture service client's refresh token.
+    // Restore that independent probe only after the browser itself logged in.
+    const probeLogin = await f.user.auth.signInWithPassword({ email: f.email, password: f.password });
+    if (probeLogin.error) throw probeLogin.error;
+    expect(probeLogin.data.user?.id).toBe(f.actor);
+    await tab1.goto(app + draftPath);
+    await show(tab1, "goal", finalValue);
+    expect((await readEnvelope(tab1)).raw).toBe(retained.raw);
+    expect(await expectExactMentorEffects(f.actor, draftId, roundId, expected)).toEqual(paidIdentities);
+    await tab1.getByRole("button", { name: "继续核对这条原请求", exact: true }).click();
+    await expect.poll(() => tab1.evaluate(key => sessionStorage.getItem(key), stepKey), { timeout: 60000 }).toBeNull();
+    const explicitMessage = await mentorMessageCheck(tab1, f.actor, explicitExecution);
+    await explicitMessage();
+    await show(tab1, "goal", finalValue);
+    expect(await expectExactMentorEffects(f.actor, draftId, roundId, expected)).toEqual(paidIdentities);
+    await tab1.reload();
+    await show(tab1, "goal", finalValue);
+    await explicitMessage();
+    expect(await expectExactMentorEffects(f.actor, draftId, roundId, expected)).toEqual(paidIdentities);
+    const final = await assertBinding();
+    expect(final.snapshot.steps["step-0"].version).toBe(editBase + 12);
+    expect(final.information["step-0"].values.goal.status).toBe("provisional");
+    expect(await countInformation()).toBe(scopedCount);
+    expect((await sql.query<{ n: number }>(
+      "select count(*)::int n from opc_turns t join runtime_executions e on e.session_id=t.session_id and e.request_id=t.request_id where t.draft_id=$1 and t.round_id=$2 and e.payload->'request'->'selection'->>'task' in ('opc-opening:extra2','opc-question:extra2','opc-opening:extra3','opc-question:extra3')",
+      [draftId, roundId],
+    )).rows[0].n).toBe(0);
+    expect(pageErrors).toEqual([]);
+    expect(externalRequests).toEqual([]);
+    console.log("OPC_C_RECOVERY " + JSON.stringify({
+      draftId, roundId, sessionId, edits: 12, reached,
+      executions: 2, runs: 2, reserves: 2, requestId: retained.requestId,
+      executionId: explicitExecution, samePageLogout: true,
+      scopedRows: scopedCount, queryPlan: plan,
+    }));
+  } catch (error) {
+    console.error("C_FAILURE", { phase, message: String(error), pathname: page ? new URL(page.url()).pathname : null });
+    throw error;
+  } finally {
+    holdSave = false;
+    dropExecutionReply = false;
+    releaseHeld?.();
+    await browser.close();
+  }
+}, 300000);
+
+it("OPC: an explicit continue keeps a retained request identity instead of overwriting an unknown outcome", async () => {
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
+  // The draft is already published, so the completed state owns the explicit
+  // re-entry control this case presses.
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const browser = await chromium.launch({
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+  const context = await browser.newContext();
+  await context.route("**/*", (route) => {
+    const u = new URL(route.request().url());
+    return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+      ["data:", "blob:"].includes(u.protocol)
+      ? route.continue()
+      : route.abort();
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(90000);
+  const draftPath = "/positioning/" + f.d.draftId;
+  const key = "opc-plan-generation:" + f.d.draftId;
+  try {
+    await page.goto(
+      process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(draftPath),
+    );
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", { name: "登录", exact: true }).last().click();
+    await page.waitForURL((url) => url.pathname.endsWith(draftPath));
+    // A consented envelope that still owns an unresolved request: pressing the
+    // re-entry control again must continue THAT request, never replace it.
+    const original = planEnvelopeFor(f, {
+      requestId: "1f0a1c2d-3e4f-4a5b-8c6d-7e8f90a1b2c3",
+    });
+    await page.evaluate(
+      ({ key, envelope }) => sessionStorage.setItem(key, JSON.stringify(envelope)),
+      { key, envelope: original },
+    );
+    const before = await planIdentity(f.actor, f.d.draftId);
+    await page
+      .getByRole("button", { name: "继续生成第一周选题", exact: true })
+      .click();
+    await page
+      .getByRole("dialog", { name: "是否继续生成第一周选题" })
+      .getByRole("button", { name: "继续生成第一周选题", exact: true })
+      .click();
+    await page.waitForURL((url) => url.pathname.endsWith(draftPath + "/plan"));
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    const stored = JSON.parse(
+      (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
+    ) as { request: { requestId: string } };
+    expect(stored.request.requestId).toBe(original.request.requestId);
+    const after = await planIdentity(f.actor, f.d.draftId);
+    expect(after.planExecutions - before.planExecutions).toBe(1);
+    expect(after.reserves - before.reserves).toBe(1);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+it("OPC: a local record without consent is checked on the server and only recovered by an explicit continue", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const legacy = planEnvelopeFor(f, {
+    requestId: "2b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e",
+  }) as Record<string, unknown>;
+  // A pre-upgrade record: no consent marker, and nothing was ever dispatched.
+  delete legacy.consentedAt;
+  legacy.v = 2;
+  const { browser, page, key } = await planBrowser(f, { envelope: legacy });
+  try {
+    await page.reload();
+    await page
+      .getByRole("heading", { name: "本机保留了一条早先的生成请求", exact: true })
+      .waitFor();
+    const before = await planIdentity(f.actor, f.d.draftId);
+    expect(before.planExecutions).toBe(0);
+    // The page must report the server's own verdict instead of assuming that a
+    // local record was never executed or never cost anything.
+    await expect
+      .poll(
+        async () =>
+          (await page.getByRole("status").allTextContents()).join(" "),
+        { timeout: 30000 },
+      )
+      .toContain("服务端没有这条请求的准入记录");
+    expect(before.planExecutions).toBe(0);
+    await page.getByRole("button", { name: "继续这条原请求", exact: true }).click();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    const stored = JSON.parse(
+      (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
+    ) as { request: { requestId: string } };
+    expect(stored.request.requestId).toBe("2b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e");
+    const after = await planIdentity(f.actor, f.d.draftId);
+    expect(after.planExecutions - before.planExecutions).toBe(1);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+it("OPC: the retained-request state read denies another actor's draft and reports this actor's own verdict", async () => {
+  const mine = await publishedDraft(3, true);
+  const other = await publishedDraft(3, true);
+  const requestId = randomUUID();
+  // Another actor's draft is a denied read, never someone else's workspace.
+  await expect(
+    mine.service.planRequestState(other.d.draftId, requestId),
+  ).rejects.toThrow(/OPC_DENIED/);
+  // The server's own verdict for this actor: this exact request was never
+  // admitted, so recovery will admit it rather than replay a committed reply.
+  await expect(
+    mine.service.planRequestState(mine.d.draftId, requestId),
+  ).resolves.toMatchObject({ admitted: false, requestId });
+});
+it.each(["save", "confirm"] as const)(
+  "OPC: workbench %s conflict recovery preserves unknown-outcome replay",
+  async targetPhase => {
+    const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
+    const f = await fixture(3);
+    const draft = await f.service.start({
+      requestId: randomUUID(), registration: f.registration, mode: "mentor",
+    });
+    const { draftId, projectId, roundId, sessionId } = draft;
+    const stepId = f.flow.steps[0].id;
+    const original = "F1 original audience: first-time film makers";
+    const updated = "F1 reviewed audience: experienced documentary directors";
+    const readDraft = () => f.service.read(draftId);
+    await f.service.information({
+      draftId, stepId, requestId: randomUUID(),
+      expectedVersion: (await readDraft()).snapshot.steps[stepId].version,
+      values: { goal: { value: original, status: "provisional", nature: "decision" } },
+    });
+    const app = process.env.V3_LOCAL_APP;
+    if (!app || !["127.0.0.1", "localhost", "[::1]"].includes(new URL(app).hostname))
+      throw new Error("F1 requires the existing loopback disposable runner");
+    const origin = new URL(app).origin;
+    const key = "opc-confirm-step:" + draftId + ":" + stepId;
+    type Pending = {
+      phase: "information" | "save" | "confirm";
+      information: { requestId: string };
+      save: { requestId: string; expectedVersion: number | null; body: string };
+      confirm: { requestId: string; expectedVersion: number | null; expectedReviewVersion: number | null };
+    };
+    const browser = await chromium.launch({
+      headless: true,
+      executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    });
+    let phase = "setup", fault: "conflict" | "loss" | "done" = "conflict";
+    let rejectedId = "", lostRaw = "", lostPost = "", replayCount = 0;
+    let committedVersion = -1, routeFailure: string | null = null;
+    const pageErrors: string[] = [], externalRequests: string[] = [];
+    let page: Page | undefined;
+    const receiptCount = async (id: string) => (await sql.query<{ n: number }>(
+      "select count(*)::int n from artifact_requests where project_id=$1 and round_id=$2 and request_id=$3",
+      [projectId, roundId, id],
+    )).rows[0].n;
+    const opening: ExpectedMentorEffect = {
+      stepId, questionId: "goal", opening: true, input: OPENING_INPUT,
+    };
+    try {
+      const context = await browser.newContext();
+      await context.route("**/*", route => {
+        const url = new URL(route.request().url());
+        if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) {
+          externalRequests.push(url.origin);
+          return route.abort("blockedbyclient");
+        }
+        return route.continue();
+      });
+      const p = await context.newPage();
+      page = p;
+      p.setDefaultTimeout(30000);
+      p.on("pageerror", error => pageErrors.push(error.message));
+      const rawPending = () => p.evaluate(k => sessionStorage.getItem(k), key);
+      const form = () => p.locator("section[aria-label='本步填写信息']");
+      const answer = () => form().getByRole("textbox", { name: "已知目标 0", exact: true });
+      const confirm = () => form().getByRole("button", { name: /^(确认本题并继续|确认当前信息，继续)$/, exact: true });
+      const retry = () => form().getByRole("button", { name: "继续核对本题确认", exact: true });
+      const settings = p.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), { timeout: 60000 });
+      await p.goto(app + "/login");
+      await settings;
+      await p.getByPlaceholder("name@example.com").fill(f.email);
+      await p.getByPlaceholder("输入你的密码").fill(f.password);
+      await p.getByRole("button", { name: "登录", exact: true }).last().click();
+      await p.waitForURL(u => u.origin === origin && !u.pathname.startsWith("/login"), { timeout: 60000 });
+      await p.goto(app + "/positioning/" + draftId);
+      await expect.poll(() => answer().inputValue(), { timeout: 60000 }).toBe(original);
+      const initialEffects = await expectExactMentorEffects(f.actor, draftId, roundId, [opening]);
+      const [openingExecution] = JSON.parse(initialEffects[0]) as string[];
+      await (await mentorMessageCheck(p, f.actor, openingExecution))();
+      await expect.poll(() => confirm().isEnabled(), { timeout: 30000 }).toBe(true);
+
+      // Delay the real workbench mutation after the page froze its version.
+      // No fabricated error, success, batch-response decoder or DB shortcut.
+      await p.route("**/api/trpc/**", async route => {
+        const req = route.request(), url = new URL(req.url());
+        const procedures = decodeURIComponent(url.pathname.slice("/api/trpc/".length)).split(",");
+        if (req.method() !== "POST" || url.origin !== origin || !procedures.includes("workbench.execute")) {
+          await route.fallback();
+          return;
+        }
+        try {
+          const raw = await rawPending();
+          if (!raw) { await route.fallback(); return; }
+          const pending = JSON.parse(raw) as Pending;
+          if (pending.phase !== targetPhase) { await route.fallback(); return; }
+          const post = req.postData();
+          if (!post) throw new Error("expected a real workbench mutation body");
+          const target = pending[targetPhase];
+          if (fault === "conflict") {
+            rejectedId = target.requestId;
+            const before = await readDraft();
+            expect(target.expectedVersion).toBe(before.snapshot.steps[stepId].version);
+            await f.service.information({
+              draftId, stepId, requestId: randomUUID(),
+              expectedVersion: before.snapshot.steps[stepId].version,
+              values: { goal: { value: updated, status: "provisional", nature: "decision" } },
+            });
+            const concurrent = await readDraft();
+            expect(concurrent.snapshot.steps[stepId].version).toBe(before.snapshot.steps[stepId].version + 1);
+            const response = await route.fetch();
+            const body = JSON.stringify(await response.json());
+            expect(body).toContain('"code":"CONFLICT"');
+            expect(body).toContain('"path":"workbench.execute"');
+            // A concurrent provisional answer makes the server's OPC
+            // required-information gate reject the confirm before any version
+            // comparison, so confirm returns the generic workbench CONFLICT
+            // message while save returns the version-conflict one.
+            expect(body).toContain(
+              targetPhase === "save" ? "保存版本已变化" : "操作未完成，请重新加载项目状态",
+            );
+            expect(body).not.toContain("ARTIFACT_VERSION_CONFLICT");
+            expect(body).not.toContain("ARTIFACT_REVIEW_REQUIRED");
+            expect(await receiptCount(rejectedId)).toBe(0);
+            fault = "loss";
+            await route.fulfill({ response }); // Deliver the actual server rejection.
+            return;
+          }
+          if (fault === "loss") {
+            expect(target.requestId).not.toBe(rejectedId);
+            lostRaw = raw;
+            lostPost = post;
+            const response = await route.fetch();
+            expect(response.ok()).toBe(true);
+            expect(JSON.stringify(await response.json())).toContain('"accepted":true');
+            expect(await receiptCount(target.requestId)).toBe(1);
+            const committed = await readDraft();
+            committedVersion = committed.snapshot.steps[stepId].version;
+            expect(committed.information[stepId].values.goal.value).toBe(updated);
+            expect(committed.snapshot.steps[stepId].body).toContain(updated);
+            expect(committed.snapshot.steps[stepId].valid).toBe(targetPhase === "confirm");
+            fault = "done";
+            await route.abort("failed"); // Server committed; browser receives nothing.
+            return;
+          }
+          expect(raw).toBe(lostRaw);
+          expect(post).toBe(lostPost); // Same request ID AND frozen versions/payload.
+          replayCount++;
+          await route.continue();
+        } catch (error) {
+          routeFailure = error instanceof Error ? error.message : String(error);
+          await route.abort("failed").catch(() => {});
+        }
+      });
+
+      phase = "real mapped conflict releases the rejected envelope";
+      await confirm().click();
+      await expect.poll(() => rejectedId, { timeout: 30000 }).not.toBe("");
+      await expect.poll(rawPending, { timeout: 30000 }).toBeNull();
+      expect(routeFailure).toBeNull();
+      await expect.poll(() => answer().inputValue(), { timeout: 30000 }).toBe(updated);
+      await expect.poll(() => answer().isEnabled(), { timeout: 30000 }).toBe(true);
+      await expect.poll(() => confirm().isEnabled(), { timeout: 30000 }).toBe(true);
+      const afterConflict = await readDraft();
+      expect(afterConflict.snapshot.steps[stepId].valid).toBe(false);
+      expect(afterConflict.information[stepId].values.goal).toEqual({ value: updated, status: "provisional", nature: "decision" });
+      expect(await receiptCount(rejectedId)).toBe(0);
+      expect(await expectExactMentorEffects(f.actor, draftId, roundId, [opening])).toEqual(initialEffects);
+
+      phase = "explicitly confirm the changed answer, then lose the committed reply";
+      await confirm().click();
+      await expect.poll(() => fault, { timeout: 30000 }).toBe("done");
+      await expect.poll(() => retry().isEnabled(), { timeout: 30000 }).toBe(true);
+      expect(routeFailure).toBeNull();
+      expect(lostRaw).not.toBe("");
+      expect(await rawPending()).toBe(lostRaw);
+      const lost = JSON.parse(lostRaw) as Pending;
+      expect(lost.phase).toBe(targetPhase);
+      expect(lost[targetPhase].expectedVersion).not.toBeNull();
+      expect(await answer().isDisabled()).toBe(true);
+      expect(await receiptCount(lost[targetPhase].requestId)).toBe(1);
+      expect(await expectExactMentorEffects(f.actor, draftId, roundId, [opening])).toEqual(initialEffects);
+
+      phase = "refresh retains unknown outcome, then the same request recovers";
+      await p.reload();
+      await expect.poll(() => retry().isEnabled(), { timeout: 60000 }).toBe(true);
+      expect(await rawPending()).toBe(lostRaw);
+      expect(replayCount).toBe(0);
+      expect(await answer().inputValue()).toBe(updated);
+      expect(await answer().isDisabled()).toBe(true);
+      expect(await expectExactMentorEffects(f.actor, draftId, roundId, [opening])).toEqual(initialEffects);
+      await retry().click();
+      await expect.poll(rawPending, { timeout: 30000 }).toBeNull();
+      expect(routeFailure).toBeNull();
+      expect(replayCount).toBe(1);
+      const final = await readDraft();
+      expect({ draftId: final.draftId, projectId: final.projectId, roundId: final.roundId, sessionId: final.sessionId })
+        .toEqual({ draftId, projectId, roundId, sessionId });
+      expect(final.snapshot.steps[stepId].valid).toBe(true);
+      expect(final.snapshot.steps[stepId].body).toContain(updated);
+      expect(final.snapshot.steps[stepId].body).not.toContain(original);
+      expect(final.information[stepId].values.goal).toEqual({ value: updated, status: "confirmed", nature: "decision" });
+      if (targetPhase === "confirm") expect(final.snapshot.steps[stepId].version).toBe(committedVersion);
+      for (const id of [lost.information.requestId, lost.save.requestId, lost.confirm.requestId])
+        expect(await receiptCount(id)).toBe(1);
+      expect(await receiptCount(rejectedId)).toBe(0);
+      const finalEffects = await expectExactMentorEffects(f.actor, draftId, roundId, [
+        opening, { stepId: f.flow.steps[1].id, questionId: "goal", opening: true, input: OPENING_INPUT },
+      ]);
+      for (const identity of initialEffects) expect(finalEffects).toContain(identity);
+      await expect.poll(() => form().getByRole("heading", { level: 3 }).textContent(), { timeout: 60000 })
+        .toContain("2.1");
+      expect(pageErrors).toEqual([]);
+      expect(externalRequests).toEqual([]);
+      console.log("F1_WORKBENCH_RECOVERY", JSON.stringify({
+        targetPhase, draftId, roundId, rejectedId,
+        recovered: [lost.information.requestId, lost.save.requestId, lost.confirm.requestId],
+        replayCount, initialEffects, finalEffects,
+      }));
+    } catch (error) {
+      console.error("F1_RECOVERY_FAILURE", JSON.stringify({
+        targetPhase, phase, fault, routeFailure, pageErrors, externalRequests,
+        pending: page ? await page.evaluate(k => sessionStorage.getItem(k), key).catch(() => null) : null,
+      }));
+      throw error;
+    } finally {
+      await browser.close();
+    }
+  },
+  300000,
+);
+
+/**
+ * A draft whose pinned method revision declares topic resources, with every
+ * step confirmed and the positioning version published, so the topic workspace
+ * has an immutable source version to bind to.
+ */
+async function publishedDraft(n = 3, withTopics = true, revisionFixture = false, reverseDisplay = false) {
+  const f = await fixture(
+    n,
+    false,
+    0,
+    (flow) => { if(withTopics)flow.planResources = ["SKILL.md"]; if(revisionFixture)delete flow.steps.at(-1)!.information![0].profileKey; if(reverseDisplay)flow.steps.reverse(); },
+  );
+  const d = await f.service.start({
+    requestId: randomUUID(),
+    registration: f.registration,
+    mode: "manual",
+  });
+  if(revisionFixture)await f.artifacts.execute({action:'userEvidence',projectId:d.projectId,roundId:d.roundId,
+    requestId:randomUUID(),body:'原正式版本的可撤销事实依据',observedAt:null,supersedes:null});
+  const sourceEvidence=revisionFixture?(await f.artifacts.read(d.projectId,d.roundId)).evidence[0].id as string:null;
+  for (const step of reverseDisplay ? [...f.flow.steps].reverse() : f.flow.steps) {
+    await f.artifacts.execute({
+      action: "save", projectId: d.projectId, roundId: d.roundId,
+      requestId: randomUUID(), stepId: step.id,
+      body: "User confirmed " + step.title, evidenceIds: sourceEvidence?[sourceEvidence]:[], expectedVersion: 0,
+    });
+    const state = (await f.artifacts.read(d.projectId, d.roundId)).steps[step.id];
+    await f.service.information({
+      draftId: d.draftId, stepId: step.id, requestId: randomUUID(),
+      expectedVersion: state.version,
+      values: {
+        goal: { status: "confirmed", nature: "decision", value: revisionFixture ? "原正式答案 "+step.id : "A concrete user decision" },
+      },
+    });
+    const updated = (await f.artifacts.read(d.projectId, d.roundId)).steps[step.id];
+    await f.artifacts.execute({
+      action: "confirm", projectId: d.projectId, roundId: d.roundId,
+      requestId: randomUUID(), stepId: step.id,
+      expectedVersion: updated.version, expectedReviewVersion: updated.reviewVersion,
+    });
+  }
+  const published = await f.artifacts.read(d.projectId, d.roundId);
+  await f.artifacts.execute({
+    action: "publish", projectId: d.projectId, roundId: d.roundId,
+    requestId: randomUUID(),
+    expectedSteps: Object.fromEntries(
+      Object.entries(published.steps).map(([k, v]) => [k, { version: v.version, reviewVersion: v.reviewVersion }]),
+    ),
+  });
+  const sourceVersionId = (await f.service.read(d.draftId)).report.id as string;
+  return { ...f, d, sourceVersionId, sourceEvidence };
+}
+
+/** Every turn, run, reservation and binding the topic workspace created. */
+async function topicIdentity(actor: string) {
+  const count = async (q: string) =>
+    Number((await sql.query(q, [actor])).rows[0].n);
+  return {
+    binds: await count(
+      "select count(*)::int n from opc_topic_workspaces w join opc_drafts d on d.draft_id=w.draft_id where d.actor_id=$1",
+    ),
+    turns: await count(
+      "select count(*)::int n from opc_turns t join opc_drafts d on d.draft_id=t.draft_id where d.actor_id=$1 and t.purpose='topic'",
+    ),
+    topicExecutions: await count(
+      "select count(*)::int n from runtime_executions e join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id where e.actor_id=$1 and t.purpose='topic'",
+    ),
+    topicRuns: await count(
+      "select count(*)::int n from bill2_runs b join runtime_executions e on e.billing_run_id=b.id join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id where b.actor_id=$1 and t.purpose='topic'",
+    ),
+    reserves: await count(
+      "select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve'",
+    ),
+  };
+}
+
+it("OPC: the topic workspace binds one confirmed source and one turn identity, and fails closed without a topic Skill", async () => {
+  // (1) The pinned revision of the default fixture declares no topic resources:
+  // the host refuses instead of inventing a topic Skill or silently falling
+  // back to plain chat, and creates nothing.
+  const plain = await publishedDraft(3, false);
+  const refused = await plain.service
+    .topicBind({
+      draftId: plain.d.draftId,
+      requestId: randomUUID(),
+      sourceVersionId: plain.sourceVersionId,
+    })
+    .then(() => null)
+    .catch((error: unknown) => (error instanceof Error ? error.message : String(error)));
+  console.log("TOPIC_BIND_REFUSAL", refused);
+  expect(refused).toMatch(/OPC_TOPIC_SKILL_MISSING/);
+  expect(await plain.service.topicRead(plain.d.draftId)).toEqual({ bound: false });
+  expect(await topicIdentity(plain.actor)).toEqual({
+    binds: 0, turns: 0, topicExecutions: 0, topicRuns: 0, reserves: 0,
+  });
+
+  // (2) With declared topic resources the binding freezes the confirmed
+  // version, the pinned method revision and its own Session and material.
+  const f = await publishedDraft(3, true);
+  const bindRequest = randomUUID();
+  const bound = await f.service.topicBind({
+    draftId: f.d.draftId,
+    requestId: bindRequest,
+    sourceVersionId: f.sourceVersionId,
+  });
+  expect(bound.bound).toBe(true);
+  expect(await f.service.topicRead(f.d.draftId)).toMatchObject({
+    bound: true,
+    sourceVersionId: f.sourceVersionId,
+    sessionId: bound.sessionId,
+    sourceAllowed: true,
+  });
+  // The same bind request is free and identical; a different request or source
+  // is a definite conflict instead of a silent rebind onto a newer version.
+  expect(
+    (await f.service.topicBind({
+      draftId: f.d.draftId,
+      requestId: bindRequest,
+      sourceVersionId: f.sourceVersionId,
+    })).sessionId,
+  ).toBe(bound.sessionId);
+  await expect(
+    f.service.topicBind({
+      draftId: f.d.draftId,
+      requestId: randomUUID(),
+      sourceVersionId: f.sourceVersionId,
+    }),
+  ).rejects.toThrow(/OPC_TOPIC_BOUND/);
+  const scope = (await sql.query(
+    "select scope from runtime_sessions where id=$1",
+    [bound.sessionId],
+  )).rows[0].scope as { kind: string; draftId: string };
+  expect(scope).toEqual({ kind: "positioning_topic", draftId: f.d.draftId });
+  const material = (await sql.query(
+    "select content from runtime_scope_material where session_id=$1 order by revision desc limit 1",
+    [bound.sessionId],
+  )).rows[0].content as { brief: string; material: string; roundId: string | null };
+  expect(material.brief).toBe("topic:first-week");
+  expect(material.material.length).toBeGreaterThan(0);
+  expect(material.roundId).toBeNull();
+  const afterBind = await topicIdentity(f.actor);
+  expect(afterBind).toEqual({
+    binds: 1, turns: 0, topicExecutions: 0, topicRuns: 0, reserves: 0,
+  });
+
+  // (3) One topic turn is one frozen identity: one execution, one billing run
+  // and one reservation. A lost reply replays that identity for free.
+  const turnRequest = randomUUID();
+  const turn = await f.service.prepareTopicTurn({
+    draftId: f.d.draftId,
+    requestId: turnRequest,
+    input: "给我一版第一周选题。",
+  });
+  expect(turn.executionId).toBeTruthy();
+  expect(
+    (await f.service.prepareTopicTurn({
+      draftId: f.d.draftId,
+      requestId: turnRequest,
+      input: "给我一版第一周选题。",
+    })).executionId,
+  ).toBe(turn.executionId);
+  await expect(
+    f.service.prepareTopicTurn({
+      draftId: f.d.draftId,
+      requestId: turnRequest,
+      input: "换一条不相干的负载。",
+    }),
+  ).rejects.toThrow(/OPC_REQUEST_CONFLICT/);
+  const afterTurn = await topicIdentity(f.actor);
+  expect(afterTurn).toEqual({
+    binds: 1, turns: 1, topicExecutions: 1, topicRuns: 1, reserves: 1,
+  });
+
+  // (4) The frozen run is authorized only for this Session, this turn identity
+  // and this method revision; a substituted Skill or a detached token is
+  // refused before any dispatch.
+  const frozen = (await sql.query(
+    "select b.id::text id, b.payload from bill2_runs b join runtime_executions e on e.billing_run_id=b.id where e.id=$1",
+    [turn.executionId],
+  )).rows[0] as { id: string; payload: Record<string, unknown> };
+  await sql.query("select runtime_direct_billing_allowed($1,$2,$3)", [
+    f.actor, frozen.payload, frozen.id,
+  ]);
+  // A detached turn token is invisible to the older scope checks, so this one
+  // proves the topic check itself runs.
+  await expect(
+    sql.query("select runtime_direct_billing_allowed($1,$2,$3)", [
+      f.actor,
+      {
+        ...frozen.payload,
+        input: { ...(frozen.payload.input as Record<string, unknown>), opcTurnToken: randomUUID() },
+      },
+      frozen.id,
+    ]),
+  ).rejects.toThrow(/OPC_TOPIC_TURN_REQUIRED/);
+  // A substituted Skill, revision or role is refused as well; the existing
+  // capability gate may raise before the topic check does.
+  await expect(
+    sql.query("select runtime_direct_billing_allowed($1,$2,$3)", [
+      f.actor,
+      { ...frozen.payload, moduleId: randomUUID() },
+      frozen.id,
+    ]),
+  ).rejects.toThrow(/^(OPC_|RUNTIME_|BILL2_)/);
+  await expect(
+    sql.query("select runtime_direct_billing_allowed($1,$2,$3)", [
+      f.actor,
+      { ...frozen.payload, revisionId: randomUUID() },
+      frozen.id,
+    ]),
+  ).rejects.toThrow(/^(OPC_|RUNTIME_|BILL2_)/);
+  await expect(
+    sql.query("select runtime_direct_billing_allowed($1,$2,$3)", [
+      f.actor,
+      {
+        ...frozen.payload,
+        input: { ...(frozen.payload.input as Record<string, unknown>), role: "ordinary" },
+      },
+      frozen.id,
+    ]),
+  ).rejects.toThrow(/^(OPC_|RUNTIME_|BILL2_)/);
+
+  // (5) Another actor can neither read this workspace nor spend inside it.
+  const other = await fixture(3);
+  await expect(other.service.topicRead(f.d.draftId)).rejects.toThrow(/OPC_DENIED/);
+  await expect(
+    other.service.prepareTopicTurn({
+      draftId: f.d.draftId,
+      requestId: randomUUID(),
+      input: "别人的工作空间。",
+    }),
+  ).rejects.toThrow(/OPC_DENIED/);
+  expect(await topicIdentity(f.actor)).toEqual(afterTurn);
+
+  // (6) A revoked source stops new dispatch and keeps every existing record.
+  await sql.query("update bill2_drafts set revoked=true where id=$1", [f.d.draftId]);
+  await expect(
+    f.service.prepareTopicTurn({
+      draftId: f.d.draftId,
+      requestId: randomUUID(),
+      input: "撤回来源后继续。",
+    }),
+  ).rejects.toThrow(/OPC_(TOPIC_SOURCE_REVOKED|DENIED)/);
+  expect(await topicIdentity(f.actor)).toEqual(afterTurn);
+  expect(
+    Number((await sql.query(
+      "select count(*)::int n from runtime_scope_material where session_id=$1",
+      [bound.sessionId],
+    )).rows[0].n),
+  ).toBe(1);
+}, 180000);
+
+it("OPC: topic consent concurrency and source mismatch preserve the accepted intent", async () => {
+  const f = await publishedDraft();
+  const consent = { draftId: f.d.draftId, sourceVersionId: f.sourceVersionId };
+  const accepted = await Promise.all([f.service.topicConsent(consent), f.service.topicConsent(consent)]);
+  expect(accepted[0]).toEqual(accepted[1]);
+  expect(accepted[0].opening.requestId).toBeTruthy();
+  const other = await publishedDraft();
+  await expect(other.service.topicConsent(consent)).rejects.toThrow(/OPC_DENIED/);
+  await expect(f.service.topicConsent({ ...consent, sourceVersionId: other.sourceVersionId })).rejects.toThrow(/OPC_TOPIC_SOURCE_CHANGED/);
+  expect(await f.service.topicRead(f.d.draftId)).toEqual(accepted[0]);
+  expect(await topicIdentity(f.actor)).toEqual({ binds: 1, turns: 0, topicExecutions: 0, topicRuns: 0, reserves: 0 });
+  // Schema may be reapplied to populated records without losing consent.
+  const { readFile } = await import('node:fs/promises');
+  const migration = await readFile(new URL('../../../../db/migrations/0114_opc_topic_consent.sql', import.meta.url), 'utf8');
+  await sql.query(migration);
+  expect(await f.service.topicRead(f.d.draftId)).toEqual(accepted[0]);
+}, 120000);
+
+it("OPC: old publish and adoption replays cannot roll back the current business source", async () => {
+  const f = await publishedDraft();
+  const oldPublish = (await sql.query(
+    "select request_id::text,round_id::text,payload from artifact_requests where project_id=$1 and action='publish' order by request_id limit 1",
+    [f.d.projectId],
+  )).rows[0];
+  const newer = await publishedDraft();
+  const currentSource = newer.sourceVersionId;
+  expect(currentSource).not.toBe(f.sourceVersionId);
+  await sql.query("update opc_businesses b set current_source_version_id=$1,revision=revision+1 from opc_draft_businesses db where db.draft_id=$2 and b.id=db.business_id", [currentSource, f.d.draftId]);
+  const state = async () => (await sql.query(
+    "select b.current_source_version_id::text source,b.revision::int revision from opc_businesses b join opc_draft_businesses db on db.business_id=b.id where db.draft_id=$1",
+    [f.d.draftId],
+  )).rows[0];
+  const beforeReplay = await state();
+  expect(beforeReplay.source).toBe(currentSource);
+  await f.artifacts.execute({
+    action: 'publish', projectId: f.d.projectId, roundId: oldPublish.round_id,
+    requestId: oldPublish.request_id, expectedSteps: oldPublish.payload.expectedSteps,
+  });
+  const historicalItemId = randomUUID();
+  const historicalAdoption = {
+    draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: historicalItemId, platform: 'x', account: 'historical-account', title: '历史来源新采用', brief: '采用旧定位候选但不改变业务当前定位', day: '2026-09-21' }],
+    accounts: [{ platform: 'x', account: 'historical-account', expectedRevision: null }],
+  };
+  await f.service.adoptTopics(historicalAdoption);
+  expect(await state()).toEqual(beforeReplay);
+  const itemCount = Number((await sql.query("select count(*)::int n from opc_items i join opc_plans p on p.id=i.plan_id where p.draft_id=$1 and i.item_key=$2", [f.d.draftId, historicalItemId])).rows[0].n);
+  await expect(f.service.adoptTopics({ ...historicalAdoption, requestId: randomUUID(), expectedVersion: 1 })).rejects.toThrow('OPC_TOPIC_ALREADY_ADOPTED');
+  expect(Number((await sql.query("select count(*)::int n from opc_items i join opc_plans p on p.id=i.plan_id where p.draft_id=$1 and i.item_key=$2", [f.d.draftId, historicalItemId])).rows[0].n)).toBe(itemCount);
+}, 120000);
+
+it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the library and continues video work", async () => {
+  const f = await publishedDraft();
+  const modelId = await planFixtureModel(f.moduleId);
+  const seed = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'existing-account', title: '原工作', brief: '原有账号项目', day: '2026-09-20' }] });
+  await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: seed.planId, accounts: [{ platform: 'x', account: 'existing-account', expectedRevision: null }] });
+  const { browser, context, page } = await planBrowser(f);
+  const path = '/positioning/' + f.d.draftId + '/topics';
+  let lostAdoption = 0;
+  try {
+    const homeLibrary = page.waitForResponse(response => response.url().includes('opc.library'));
+    await page.goto(process.env.V3_LOCAL_APP + '/'); await homeLibrary;
+    expect(await page.getByRole('heading', { name: '先完成正式定位', exact: true }).count()).toBe(0);
+    await page.goto(process.env.V3_LOCAL_APP + path);
+    await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
+    await page.getByRole('button',{name:'选题与版本',exact:true}).click();
+    await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).waitFor({ timeout: 60000 });
+    expect((await f.service.topicDraftRead(f.d.draftId)).version).toBe(1);
+    expect(await page.getByRole('link', { name: '打开内容资料库', exact: true }).count()).toBe(1);
+
+    await page.getByLabel('消息', { exact: true }).fill('请修改第一条选题');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await expect.poll(async () => (await f.service.topicDraftRead(f.d.draftId)).version, { timeout: 60000 }).toBe(2);
+    await page.getByRole('button',{name:'选题与版本',exact:true}).click();
+    await page.getByLabel('选择 修改后的选题').waitFor();
+    await expect.poll(()=>page.getByLabel('选择 第二个账号选题').isEnabled(),{timeout:30000}).toBe(true);
+    await page.getByLabel('选择 第二个账号选题').uncheck();
+
+    await page.route('**/api/trpc/opc.adoptTopics*', async route => {
+      const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort(); lostAdoption += 1;
+    });
+    await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).click();
+    await page.getByRole('button', { name: '恢复原请求', exact: true }).waitFor({ timeout: 60000 });
+    await expect.poll(() => lostAdoption, { timeout: 30000 }).toBeGreaterThan(0);
+    const bound = await f.service.topicRead(f.d.draftId);
+    const frozenKey = 'opc-topic-operation:' + bound.sessionId;
+    const frozen = JSON.parse((await page.evaluate(key => localStorage.getItem(key), frozenKey))!);
+    expect(frozen.kind).toBe('adoptTopics');
+    expect(frozen.request.body).toHaveLength(1);
+    expect(frozen.request.expectedVersion).toBe(1);
+    await page.unroute('**/api/trpc/opc.adoptTopics*');
+
+    await context.clearCookies();
+    await page.goto(process.env.V3_LOCAL_APP + '/login?redirect=' + encodeURIComponent(path));
+    await page.getByPlaceholder('name@example.com').fill(f.email);
+    await page.getByPlaceholder('输入你的密码').fill(f.password);
+    await page.getByRole('button', { name: '登录', exact: true }).last().click();
+    await page.waitForURL(url => url.pathname === path);
+    await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
+    await expect.poll(() => page.evaluate(key => localStorage.getItem(key), frozenKey), { timeout: 30000 }).toBeNull();
+    const plans = (await f.service.read(f.d.draftId)).plans;
+    expect(plans).toHaveLength(2);
+    expect(plans[0].body).toHaveLength(1);
+    await page.getByRole('button',{name:'选题与版本',exact:true}).click();
+    expect(await page.getByRole('button', {name:'采用所选并保存到资料库',exact:true}).isVisible()).toBe(false);
+    await page.getByRole('button', {name:/展开选题/}).click();
+    await expect.poll(()=>page.getByLabel('选择 第二个账号选题').isEnabled(),{timeout:30000}).toBe(true);
+    await page.getByRole('button', {name:/收起选题/}).click();
+
+    await page.getByRole('button',{name:'Close',exact:true}).click();
+    await page.getByRole('link', { name: '打开内容资料库', exact: true }).first().click();
+    await page.waitForURL(url => url.pathname === '/library');
+    const adoptedCard = page.getByRole('article').filter({ hasText: '修改后的选题' });
+    await adoptedCard.getByRole('button', { name: '直接编辑', exact: true }).click();
+    await page.getByLabel('选题标题').fill('资料库修订标题');
+    await page.getByLabel('完整选题简报').fill('内容：真实案例；对象：起步创作者；价值：明确行动；结构：问题、过程、结果；假设：案例提升收藏。');
+    await page.getByRole('button', { name: '保存修改', exact: true }).click();
+    await page.getByRole('heading', { name: '资料库修订标题', exact: true }).waitFor();
+    await page.getByRole('article').filter({ hasText: '资料库修订标题' }).getByRole('link', { name: '继续工作', exact: true }).click();
+    await page.waitForURL(url => url.pathname === '/runtime');
+    await page.getByRole('heading', { name: '资料库修订标题', exact: true }).waitFor();
+
+    await page.getByText('【主动引导合成示例，仅验证交互】我们先细化这条选题：你最希望读者看完后理解哪一个重点？',{exact:true}).waitFor({timeout:60000});
+    await page.getByLabel('消息', { exact: true }).fill('请和我讨论这条视频的口播稿。');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
+    await finalize.waitFor({ timeout: 60000 });
+    const packageRunsBefore = Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, new URL(page.url()).searchParams.get('session')])).rows[0].n);
+    await finalize.click();
+    await page.getByRole('link',{name:'这版口播稿已定稿 · 查看',exact:true}).waitFor({timeout:60000});
+    await page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true }).waitFor();
+    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, new URL(page.url()).searchParams.get('session')])).rows[0].n)).toBe(packageRunsBefore);
+    let lostPackage = 0;
+    await page.route('**/api/trpc/opc.saveVideoResults*', async route => {
+      if (lostPackage++) return route.continue();
+      const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort();
+    });
+    const ordinaryPrepareCalls:string[]=[];
+    page.on('request',request=>{if(/\/api\/trpc\/runtime\.prepare(?:[?,]|$)/.test(request.url())&&!request.postData()?.includes('[OPC_VIDEO_PACKAGE_V1]'))ordinaryPrepareCalls.push(request.url());});
+    // The visible card wording must take the exact same frozen business action.
+    await page.getByLabel('消息', { exact: true }).fill('先做分镜，再生成剪辑建议');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('状态待核实');
+    const videoKey = 'opc-video-operation:' + new URL(page.url()).searchParams.get('session');
+    const frozenVideo = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
+    const recoveryTab = await context.newPage();
+    await recoveryTab.goto(page.url());
+    await expect.poll(() => recoveryTab.evaluate(key => localStorage.getItem(key), videoKey), { timeout: 60000 }).toBeNull();
+    const completedVideo = await recoveryTab.evaluate(({key,requestId}) => localStorage.getItem(key + ':completed:' + requestId), { key: videoKey, requestId: frozenVideo.package.requestId });
+    expect(JSON.parse(completedVideo!)).toEqual(frozenVideo);
+    expect(ordinaryPrepareCalls).toEqual([]);
+    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'",[f.actor,new URL(page.url()).searchParams.get('session')])).rows[0].n)).toBe(packageRunsBefore+1);
+    await recoveryTab.getByRole('heading',{name:'成果与版本',exact:true}).waitFor();
+    await recoveryTab.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    await recoveryTab.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor();
+    await recoveryTab.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor();
+    await recoveryTab.close();
+    const library = await f.service.library({ search: '资料库修订标题', from: null, to: null });
+    const [savedItem] = library.businesses[0].accounts.flatMap((account: {items: any[]}) => account.items);
+    expect(savedItem).toBeDefined();
+    const script = savedItem.content.find((entry: {kind: string}) => entry.kind === 'script');
+    const completedPackage = (await sql.query("select id::text from runtime_executions where actor_id=$1 and session_id=$2 and state='completed' and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, savedItem.sessionId])).rows[0].id;
+    await sql.query("update runtime_executions set result=jsonb_build_object('body','{}') where id=$1", [completedPackage]);
+    await expect(f.service.videoPackage({ workItemId: savedItem.workItemId, requestId: randomUUID(), executionId: completedPackage, sourceScriptId: script.id, expectedStoryboardVersion: 1, expectedEditingVersion: 1 })).rejects.toThrow('OPC_CONTENT_RESPONSE_INVALID');
+    const materialRevision = Number((await sql.query("select payload#>>'{scopeMaterial,revision}' revision from runtime_executions where id=$1", [script.executionId])).rows[0].revision);
+    await sql.query("select runtime_material($1,$2,'revoke',NULL,$3)", [f.actor, savedItem.sessionId, materialRevision]);
+    const withdrawn = await f.service.library({ search: '资料库修订标题', from: null, to: null });
+    const withdrawnItem = withdrawn.businesses[0].accounts.flatMap((account: {items: any[]}) => account.items)[0];
+    expect(withdrawnItem.content.map((entry: {contentAvailable: boolean}) => entry.contentAvailable)).toEqual([false, false, false]);
+    const { runtimeAdmissionService } = await import('../runtime/admission');
+    const admission = runtimeAdmissionService(f.user, admin, { account: 'local', costPerCall: '0.02', creditsPerUsd: '1000', multiplier: '1', maxCalls: 1, maxOutputTokens: 1000, inputBytes: 32000, historyItems: 20, searchEnabled: false });
+    const runsBefore = Number((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1', [f.actor])).rows[0].n);
+    await expect(admission.prepare({ sessionId: savedItem.sessionId, requestId: randomUUID(), input: '继续使用已撤回口播稿', selection: { kind: 'ordinary', modelId }, network: 'deny', sources: [] })).rejects.toThrow('RUNTIME_ADMISSION_DENIED');
+    expect(Number((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1', [f.actor])).rows[0].n)).toBe(runsBefore);
+  } finally { await browser.close(); }
+}, 300000);
+
+it("OPC: B1 business scope, legacy handoff replay and library edits stay owned and versioned", async () => {
+  const f = await publishedDraft();
+  const businessId = (await sql.query(
+    "select business_id::text from opc_draft_businesses where draft_id=$1",
+    [f.d.draftId],
+  )).rows[0].business_id as string;
+  const publishedLibrary = await f.service.library({ search: "", from: null, to: null });
+  expect(publishedLibrary.businesses.find((entry: {businessId: string}) => entry.businessId === businessId).sourceAvailable).toBe(true);
+  const shared = await f.service.start({
+    requestId: randomUUID(), registration: f.registration, mode: "manual", businessId,
+  });
+  expect(shared.businessId).toBe(businessId);
+  const isolated = await f.service.start({
+    requestId: randomUUID(), registration: f.registration, mode: "manual", businessName: "隔离业务",
+  });
+  expect(isolated.businessId).not.toBe(businessId);
+
+  const body = [{
+    id: randomUUID(), platform: "x", account: "owned-account", title: "可恢复的选题",
+    brief: "完整简报保留内容、对象、价值、结构和待验证假设。", day: "2026-09-23",
+  }];
+  const plan = await f.service.savePlan({
+    draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0,
+    sourceVersionId: f.sourceVersionId, body,
+  });
+  const handoffRequest = {
+    draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId,
+    accounts: [{ platform: "x", account: "owned-account", expectedRevision: null }],
+  };
+  const first = await f.service.handoff(handoffRequest);
+  expect(await f.service.handoff(handoffRequest)).toEqual(first);
+
+  const library = await f.service.library({ search: "可恢复的选题", from: null, to: null });
+  const ownedBusiness = library.businesses.find((entry: {businessId: string}) => entry.businessId === businessId);
+  const item = ownedBusiness.accounts.flatMap((account: {items: Array<{workItemId: string;revision: number}>}) => account.items)[0];
+  expect(item.workItemId).toBe(first[0].workItemId);
+  const editRequest = {
+    requestId: randomUUID(), target: "item", targetId: item.workItemId, expectedRevision: item.revision,
+    patch: { title: "资料库已修订", brief: "修订后的完整简报仍可追溯。", day: "2026-09-24" },
+  };
+  const edit = await f.service.libraryEdit(editRequest);
+  expect(await f.service.libraryEdit(editRequest)).toEqual(edit);
+  await expect(f.service.libraryEdit({ ...editRequest, requestId: randomUUID() })).rejects.toThrow("OPC_VERSION_CONFLICT");
+
+  await sql.query("update opc_accounts set business_id=$1 where project_id=$2", [isolated.businessId, first[0].projectId]);
+  await expect(f.service.handoff({
+    ...handoffRequest, requestId: randomUUID(),
+    accounts: [{ platform: "x", account: "owned-account", expectedRevision: 1 }],
+  })).rejects.toThrow("OPC_BUSINESS_CONFLICT");
+
+  const other = await publishedDraft();
+  const otherLibrary = await other.service.library({ search: "资料库已修订", from: null, to: null });
+  expect(otherLibrary.businesses.flatMap((entry: {accounts: Array<{items: unknown[]}>}) =>
+    entry.accounts.flatMap(account => account.items))).toHaveLength(0);
+  await expect(other.service.libraryEdit({
+    requestId: randomUUID(), target: "item", targetId: item.workItemId, expectedRevision: edit.revision,
+    patch: { title: "越权修改", brief: "不能写入其他用户的完整简报。", day: "2026-09-25" },
+  })).rejects.toThrow("OPC_DENIED");
+
+  await sql.query("insert into opc_content_versions(actor_id,work_item_id,kind,version,status,body,request_id) values($1,$2,'brief',1,'final','撤回后不得读取的成果正文',$3)", [f.actor, item.workItemId, randomUUID()]);
+  await sql.query("update bill2_drafts set revoked=true where id=$1", [f.d.draftId]);
+  const revoked = await f.service.library({ search: "", from: null, to: null });
+  const hidden = revoked.businesses.flatMap((entry: {accounts: Array<{items: unknown[]}>}) => entry.accounts.flatMap(account => account.items))
+    .find((entry: {workItemId: string}) => entry.workItemId === item.workItemId);
+  expect(hidden).toMatchObject({ sourceAvailable: false, brief: null });
+  expect(hidden.content[0]).toMatchObject({ body: null, contentAvailable: false });
+  const hiddenSearch = await f.service.library({ search: "修订后的完整简报", from: null, to: null });
+  expect(hiddenSearch.businesses.flatMap((entry: {accounts: Array<{items: unknown[]}>}) => entry.accounts.flatMap(account => account.items))).toHaveLength(0);
+  await expect(f.service.libraryEdit({ ...editRequest, requestId: randomUUID(), expectedRevision: edit.revision })).rejects.toThrow("OPC_DENIED");
+}, 120000);
+
+it("OPC: U2 manual article versions are owned, immutable and replayed once", async () => {
+  const f=await publishedDraft();
+  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+    body:[{id:randomUUID(),platform:'x',account:'u2-account-a',title:'第一条',brief:'第一条简报',day:'2026-09-24',contentType:'article'},
+      {id:randomUUID(),platform:'x',account:'u2-account-b',title:'第二条',brief:'第二条简报',day:'2026-09-25',contentType:'article'}]});
+  const handoff=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,
+    accounts:[{platform:'x',account:'u2-account-a',expectedRevision:null},{platform:'x',account:'u2-account-b',expectedRevision:null}]});
+  const second=handoff[1];
+  const request={workItemId:second.workItemId,requestId:randomUUID(),expectedVersion:0,sourceContentId:null,
+    kind:'brief' as const,status:'draft' as const,title:'第二条文章',body:'真实内容第一版'};
+  const [first,replay]=await Promise.all([f.service.contentManualSave(request),f.service.contentManualSave(request)]);
+  expect(replay).toEqual(first);
+  expect(first.version).toBe(1);
+  await expect(f.service.contentManualSave({...request,body:'偷换内容'})).rejects.toThrow('OPC_REQUEST_CONFLICT');
+  await expect(f.service.contentManualSave({...request,requestId:randomUUID(),body:'过期编辑'})).rejects.toThrow('OPC_VERSION_CONFLICT');
+  const next=await f.service.contentManualSave({...request,requestId:randomUUID(),expectedVersion:1,sourceContentId:first.id,status:'final',body:'真实内容第二版'});
+  expect(next.version).toBe(2);
+  const library=await f.service.library({search:'',from:null,to:null});
+  const accounts=library.businesses.flatMap((business:{accounts:Array<{account:string;items:any[]}>})=>business.accounts);
+  expect(accounts.find((account:{account:string})=>account.account==='u2-account-b')?.strategyDraftId).toBe(f.d.draftId);
+  expect(accounts.find((account:{account:string})=>account.account==='u2-account-a')?.items[0].content).toEqual([]);
+  const saved=accounts.find((account:{account:string})=>account.account==='u2-account-b')?.items[0].content;
+  expect(saved.map((version:{version:number})=>version.version)).toEqual([1,2]);
+  expect(saved[1]).toMatchObject({title:'第二条文章',body:'真实内容第二版',status:'final',sourceContentId:first.id});
+  const outsider=await publishedDraft();
+  await expect(outsider.service.contentManualSave({...request,requestId:randomUUID(),expectedVersion:2,sourceContentId:next.id,body:'越权写入'})).rejects.toThrow('OPC_CONTENT_DENIED');
+  expect((await outsider.service.library({search:'第二条',from:null,to:null})).businesses.flatMap((business:{accounts:Array<{items:any[]}>})=>business.accounts.flatMap(account=>account.items))).toEqual([]);
+  const item=accounts.find((account:{account:string})=>account.account==='u2-account-b')?.items[0];
+  const metadata={requestId:randomUUID(),target:'item' as const,targetId:item.workItemId,expectedRevision:item.revision,
+    patch:{title:'资料库元数据标题',brief:item.brief,day:item.day,contentType:'article'}};
+  const [metadataA,metadataB]=await Promise.all([f.service.libraryEdit(metadata),f.service.libraryEdit(metadata)]);
+  expect(metadataA).toEqual(metadataB);
+  expect(metadataA.revision).toBe(item.revision+1);
+  const videoItem=accounts.find((account:{account:string})=>account.account==='u2-account-a')?.items[0];
+  await f.service.libraryEdit({requestId:randomUUID(),target:'item',targetId:videoItem.workItemId,expectedRevision:videoItem.revision,
+    patch:{title:videoItem.title,brief:videoItem.brief,day:videoItem.day,contentType:'video'}});
+  await expect(f.service.contentManualSave({...request,workItemId:videoItem.workItemId,requestId:randomUUID(),
+    kind:'script',expectedVersion:0,sourceContentId:null})).rejects.toThrow('OPC_CONTENT_SOURCE');
+  await sql.query('update bill2_drafts set revoked=true where id=$1',[f.d.draftId]);
+  const withdrawn=await f.service.library({search:'',from:null,to:null});
+  const withdrawnVersions=withdrawn.businesses.flatMap((business:{accounts:Array<{items:any[]}>})=>business.accounts.flatMap(account=>account.items))
+    .find((entry:{workItemId:string})=>entry.workItemId===second.workItemId).content;
+  expect(withdrawnVersions).toHaveLength(2);
+  expect(withdrawnVersions.every((version:{title:string|null;body:string|null;contentAvailable:boolean})=>
+    version.title===null&&version.body===null&&!version.contentAvailable)).toBe(true);
+  await expect(f.service.contentManualSave(request)).rejects.toThrow('OPC_CONTENT_DENIED');
+},120000);
+
+it("OPC: U2 browser adopts only second topic, edits a server version and returns from library", async()=>{
+  const f=await publishedDraft();
+  const {browser,context,page}=await planBrowser(f);
+  const path='/positioning/'+f.d.draftId+'/topics';
+  try{
+    await page.setViewportSize({width:1600,height:900});
+    await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+f.d.draftId);
+    await page.getByRole('link',{name:'进入选题工作对话 →',exact:true}).click();
+    await page.waitForURL(url=>url.pathname===path);
+    await page.getByRole('button',{name:'开始选题工作对话',exact:true}).click();
+    const second=page.getByRole('heading',{name:'2. 第二个账号选题',exact:true}).locator('..');
+    await second.waitFor({timeout:60000});
+    await second.getByRole('button',{name:'采用这个选题',exact:true}).click();
+    await expect.poll(async()=>{
+      const snapshot=await f.service.library({search:'',from:null,to:null});
+      return snapshot.businesses.flatMap((business:{accounts:Array<{items:any[]}>})=>business.accounts.flatMap(account=>account.items)).map((item:{title:string})=>item.title);
+    },{timeout:30000}).toEqual(['第二个账号选题']);
+    const adopted=await f.service.library({search:'',from:null,to:null});
+    const items=adopted.businesses.flatMap((business:{accounts:Array<{items:any[]}>})=>business.accounts.flatMap(account=>account.items));
+    expect(items.map((item:{title:string})=>item.title)).toEqual(['第二个账号选题']);
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-topic-adopted-desktop.png'});
+    const continueLink=second.getByRole('link',{name:'继续这条内容工作',exact:true});
+    await continueLink.click();
+    await page.waitForURL(url=>url.pathname==='/runtime');
+    await page.getByLabel('文章正文').fill('先讲真实场景，再说明判断，最后安排一次练习。');
+    await page.getByRole('status').filter({hasText:'已在服务端保存 v1'}).waitFor();
+    const workUrl=page.url();
+    await page.getByRole('link',{name:'资料库',exact:true}).click();
+    await page.waitForURL(url=>url.pathname==='/library');
+    await page.getByRole('main').getByRole('button',{name:/第二个账号选题/}).first().click();
+    await page.getByText('先讲真实场景，再说明判断，最后安排一次练习。').waitFor();
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-library-desktop.png'});
+    await page.getByRole('button',{name:'关闭窗口',exact:true}).click();
+    await page.getByRole('link',{name:'返回当前工作',exact:true}).last().click();
+    await page.waitForURL(url=>url.pathname==='/runtime');
+    await page.getByLabel('文章正文').fill('修改后的正文：补充前后对照案例。');
+    await page.getByRole('status').filter({hasText:'已在服务端保存 v2'}).waitFor();
+    // U4: keyboard users must stay in the visible modal, return to its
+    // trigger, and leave cancelled edits and read-only history unchanged.
+    for(const viewport of [{width:1600,height:900},{width:390,height:844}]){
+      await page.setViewportSize(viewport);
+      if(viewport.width===390)await page.getByRole('button',{name:'展开右边栏',exact:true}).click();
+      const trigger=page.getByRole('button',{name:'展开编辑',exact:true});
+      await trigger.focus();await page.keyboard.press('Enter');
+      const editor=page.getByRole('dialog',{name:'编辑标题与正文',exact:true});await editor.waitFor();
+      await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+`/u4-editor-${viewport.width}.png`});
+      await expect.poll(()=>editor.evaluate(node=>node.contains(document.activeElement))).toBe(true);
+      for(let i=0;i<8;i++){await page.keyboard.press('Tab');expect(await editor.evaluate(node=>node.contains(document.activeElement))).toBe(true);}
+      await editor.getByLabel('展开编辑正文',{exact:true}).fill('U4 取消的编辑不能保存');
+      await page.keyboard.press('Escape');await editor.waitFor({state:'hidden'});
+      await expect.poll(()=>trigger.evaluate(node=>node===document.activeElement)).toBe(true);
+      expect(await page.getByLabel('文章正文').inputValue()).toBe('修改后的正文：补充前后对照案例。');
+      const historyTrigger=page.getByRole('button',{name:'历史版本',exact:true});
+      await historyTrigger.focus();await page.keyboard.press('Enter');
+      const history=page.getByRole('dialog',{name:'历史版本',exact:true});await history.waitFor();
+      await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+`/u4-history-${viewport.width}.png`});
+      await expect.poll(()=>history.evaluate(node=>node.contains(document.activeElement))).toBe(true);
+      for(let i=0;i<8;i++){await page.keyboard.press('Tab');expect(await history.evaluate(node=>node.contains(document.activeElement))).toBe(true);}
+      await page.keyboard.press('Escape');await history.waitFor({state:'hidden'});
+      await expect.poll(()=>historyTrigger.evaluate(node=>node===document.activeElement)).toBe(true);
+      expect(await page.getByLabel('文章正文').inputValue()).toBe('修改后的正文：补充前后对照案例。');
+      expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    }
+    await page.setViewportSize({width:1600,height:900});
+    await page.getByLabel('消息',{exact:true}).fill('这条问题先不要发送');
+    await page.getByLabel('文章正文').fill('未保存的下一次修改');
+    await page.reload();
+    await expect.poll(()=>page.getByLabel('消息',{exact:true}).inputValue()).toBe('这条问题先不要发送');
+    await expect.poll(()=>page.getByLabel('文章正文').inputValue()).toBe('未保存的下一次修改');
+    await page.getByRole('button',{name:'历史版本',exact:true}).click();
+    await page.getByText('修改后的正文：补充前后对照案例。').waitFor();
+    await page.setViewportSize({width:1600,height:900});
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-article-desktop.png'});
+    await page.setViewportSize({width:390,height:844});
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-article-narrow.png'});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await context.clearCookies();
+    await page.goto(process.env.V3_LOCAL_APP+'/login?redirect='+encodeURIComponent(new URL(workUrl).pathname+new URL(workUrl).search));
+    await page.getByPlaceholder('name@example.com').fill(f.email);
+    await page.getByPlaceholder('输入你的密码').fill(f.password);
+    await page.getByRole('button',{name:'登录',exact:true}).last().click();
+    await page.waitForURL(url=>url.pathname==='/runtime');
+    await expect.poll(()=>page.getByLabel('文章正文').inputValue()).toBe('未保存的下一次修改');
+    await expect.poll(()=>page.getByLabel('消息',{exact:true}).inputValue()).toBe('这条问题先不要发送');
+  }catch(error){console.info('U4_CORE_FAILURE',error instanceof Error?error.stack:'unknown');throw error;}finally{console.info('U4_CORE_CLOSE_START');await browser.close();console.info('U4_CORE_CLOSED');}
+},300000);
+
+it("OPC: U2 browser preserves later edits across unknown saves, conflict and another login", async()=>{
+  const f=await publishedDraft();
+  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+    body:[{id:randomUUID(),platform:'x',account:'protected-account',title:'仅本账号内容',brief:'真实简报',day:'2026-09-25',contentType:'article'}]});
+  const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,
+    accounts:[{platform:'x',account:'protected-account',expectedRevision:null}]});
+  const outsider=await publishedDraft();
+  const {browser,context,page}=await planBrowser(f);
+  try{
+    await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+work.sessionId);
+    const body=page.getByLabel('文章正文');
+    await body.fill('第一版正文');
+    let release!:()=>void,received=false;
+    const gate=new Promise<void>(resolve=>{release=resolve;});
+    await page.route('**/api/trpc/opc.saveContentManual*',async route=>{
+      const response=await route.fetch();received=true;await gate;await route.fulfill({response});
+    });
+    await expect.poll(()=>received,{timeout:30000}).toBe(true);
+    await body.fill('第一版提交后继续写的新内容');
+    release();
+    await page.getByRole('status').filter({hasText:'已在服务端保存 v1'}).waitFor();
+    await page.getByText('账号已保存 v1 · 草稿').waitFor();
+    expect(await body.inputValue()).toBe('第一版提交后继续写的新内容');
+    await page.unroute('**/api/trpc/opc.saveContentManual*');
+
+    await page.route('**/api/trpc/opc.saveContentManual*',async route=>{
+      const response=await route.fetch();expect(response.ok()).toBe(true);await route.abort();
+    });
+    await page.getByRole('alert').filter({hasText:'保存结果待核实'}).waitFor();
+    const before=(await f.service.library({search:'仅本账号内容',from:null,to:null})).businesses
+      .flatMap((business:{accounts:Array<{items:any[]}>})=>business.accounts.flatMap(account=>account.items))[0];
+    expect(before.content.map((version:{version:number})=>version.version)).toEqual([1,2]);
+    await body.fill('未知结果后继续写，不能被旧结果覆盖');
+    await page.unroute('**/api/trpc/opc.saveContentManual*');
+    await page.getByRole('button',{name:'恢复草稿同步',exact:true}).click();
+    await page.getByRole('status').filter({hasText:'已在服务端保存 v2'}).waitFor();
+    await page.getByText('账号已保存 v2 · 草稿').waitFor();
+    expect(await body.inputValue()).toBe('未知结果后继续写，不能被旧结果覆盖');
+    const versions=before.content as Array<{id:string;version:number}>;
+    const other=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:2,
+      sourceContentId:versions[1].id,kind:'brief',status:'draft',title:'仅本账号内容',body:'另一标签已保存'});
+    await page.getByRole('alert').filter({hasText:'已有更新版本'}).waitFor();
+    expect(await body.inputValue()).toBe('未知结果后继续写，不能被旧结果覆盖');
+    await page.getByRole('button',{name:/已比较历史，基于服务端 v3/}).click();
+    await page.getByRole('status').filter({hasText:'已在服务端保存 v4'}).waitFor();
+    expect(other.version).toBe(3);
+
+    await context.clearCookies();
+    await page.goto(process.env.V3_LOCAL_APP+'/login?redirect='+encodeURIComponent('/runtime?session='+work.sessionId));
+    await page.getByPlaceholder('name@example.com').fill(outsider.email);
+    await page.getByPlaceholder('输入你的密码').fill(outsider.password);
+    await page.getByRole('button',{name:'登录',exact:true}).last().click();
+    await page.waitForURL(url=>url.pathname==='/runtime');
+    await page.getByRole('alert').filter({hasText:'无权访问'}).waitFor();
+    expect(await page.getByText('未知结果后继续写，不能被旧结果覆盖').count()).toBe(0);
+    expect(await page.getByLabel('文章正文').count()).toBe(0);
+  }finally{await browser.close();}
+},300000);
+
+it("OPC: new business start restores the complete frozen request before another business can begin", async () => {
+  const f=await publishedDraft();
+  const originalBusiness=(await sql.query('select business_id::text id from opc_draft_businesses where draft_id=$1',[f.d.draftId])).rows[0].id;
+  const otherActor=await publishedDraft();
+  const {browser,page}=await planBrowser(f);
+  try{
+    await page.goto(process.env.V3_LOCAL_APP+'/positioning');
+    await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
+    await page.getByRole('dialog',{name:'梳理账号定位'}).getByRole('button',{name:'从头分析新定位'}).click();
+    expect(await page.getByRole('combobox').count()).toBe(0);
+    await page.getByLabel('业务名称',{exact:true}).fill('独立新业务');
+    let lost=0;
+    await page.route('**/api/trpc/opc.start*',async route=>{const response=await route.fetch();expect(response.ok()).toBe(true);lost+=1;await route.abort();});
+    await page.getByRole('button',{name:'开始 Agent 引导',exact:true}).click();
+    await page.getByRole('button',{name:'恢复上次开始请求',exact:true}).waitFor({timeout:60000});
+    await expect.poll(()=>lost,{timeout:60000}).toBe(1);
+    const startKey='opc-start-operation:'+f.actor;
+    const frozen=JSON.parse((await page.evaluate(key=>sessionStorage.getItem(key),startKey))!);
+    expect(frozen).toMatchObject({actorId:f.actor,mode:'mentor',businessName:'独立新业务'});
+    expect(frozen.businessId).toBeNull();
+    await page.getByLabel('业务名称',{exact:true}).fill('另一个新业务');
+    expect(await page.getByRole('button',{name:'开始 Agent 引导',exact:true}).isDisabled()).toBe(true);
+    await page.context().clearCookies();
+    await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/positioning');
+    await page.getByPlaceholder('name@example.com').fill(otherActor.email);
+    await page.getByPlaceholder('输入你的密码').fill(otherActor.password);
+    await page.getByRole('button',{name:'登录',exact:true}).last().click();
+    await page.waitForURL(url=>url.pathname==='/positioning');
+    await page.getByRole('heading',{name:'今天，想推进什么？',exact:true}).waitFor();
+    expect(await page.getByRole('button',{name:'恢复上次开始请求',exact:true}).count()).toBe(0);
+    expect(await page.evaluate(key=>sessionStorage.getItem(key),startKey)).toBeTruthy();
+    await page.context().clearCookies();
+    await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/positioning');
+    await page.getByPlaceholder('name@example.com').fill(f.email);
+    await page.getByPlaceholder('输入你的密码').fill(f.password);
+    await page.getByRole('button',{name:'登录',exact:true}).last().click();
+    await page.waitForURL(url=>url.pathname==='/positioning');
+    await page.getByRole('heading',{name:'今天，想推进什么？',exact:true}).waitFor();
+    await page.getByRole('button',{name:'恢复上次开始请求',exact:true}).waitFor();
+    await page.unroute('**/api/trpc/opc.start*');
+    await page.getByRole('button',{name:'恢复上次开始请求',exact:true}).click();
+    await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname),{timeout:60000});
+    const restoredDraft=page.url().split('/').at(-1)!;
+    const restoredBusiness=(await sql.query('select business_id::text id from opc_draft_businesses where draft_id=$1',[restoredDraft])).rows[0].id;
+    expect(restoredBusiness).not.toBe(originalBusiness);
+    expect((await sql.query('select name from opc_businesses where id=$1',[restoredBusiness])).rows[0].name).toBe('独立新业务');
+    expect(await page.evaluate(key=>sessionStorage.getItem(key),startKey)).toBeNull();
+  }finally{await browser.close();}
+},180000);
+
+it("OPC: library edit binds fields and revision to one snapshot across a concurrent refresh", async()=>{
+  const f=await publishedDraft();
+  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+    body:[{id:randomUUID(),platform:'x',account:'edit-account',title:'原始标题',brief:'原始简报',day:'2026-09-25'}]});
+  const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'edit-account',expectedRevision:null}]});
+  const {browser,page}=await planBrowser(f);
+  try{
+    await page.goto(process.env.V3_LOCAL_APP+'/library');
+    await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/edit-account/}).click();
+    const card=page.getByRole('article').filter({hasText:'原始标题'});
+    await card.getByRole('button',{name:/原始标题/}).first().click();
+    await page.getByRole('dialog',{name:'选题详情'}).getByRole('button',{name:'编辑稿件'}).click();
+    await page.getByLabel('选题标题').fill('本标签准备保存的标题');
+    const before=(await f.service.library({search:'原始标题',from:null,to:null})).businesses.flatMap((business:{accounts:Array<{items:Array<{workItemId:string;revision:number}>}>})=>business.accounts.flatMap(account=>account.items)).find((item:{workItemId:string})=>item.workItemId===work.workItemId)!;
+    await f.service.libraryEdit({requestId:randomUUID(),target:'item',targetId:work.workItemId,expectedRevision:before.revision,patch:{title:'另一标签已保存的标题',brief:'另一标签已保存的简报',day:'2026-09-26'}});
+    const refreshed=page.waitForResponse(response=>response.url().includes('opc.library')&&response.ok());
+    await page.getByLabel('当前阶段 edit-account').selectOption('starting');
+    await refreshed;
+    await page.getByRole('button',{name:'保存选题信息',exact:true}).click();
+    await expect.poll(async()=>(await page.getByRole('alert').allTextContents()).join(' '),{timeout:30000}).toContain('OPC_VERSION_CONFLICT');
+    const library=await f.service.library({search:'另一标签已保存的标题',from:null,to:null});
+    const saved=library.businesses.flatMap((business:{accounts:Array<{items:Array<{workItemId:string;title:string;brief:string;day:string}>}>})=>business.accounts.flatMap(account=>account.items)).find((item:{workItemId:string})=>item.workItemId===work.workItemId);
+    expect(saved).toMatchObject({title:'另一标签已保存的标题',brief:'另一标签已保存的简报',day:'2026-09-26'});
+  }finally{await browser.close();}
+},180000);
+
+it("OPC: workspace presentation changes preserve ownership, replay and version boundaries", async()=>{
+  const f=await publishedDraft();
+  const other=await publishedDraft();
+  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+    body:[{id:randomUUID(),platform:'x',account:'ui-account',title:'UI 测试选题',brief:'独立测试资料',day:'2026-09-26',contentType:'article'}]});
+  const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'ui-account',expectedRevision:null}]});
+  const accountRename={accountProjectId:work.projectId,requestId:randomUUID(),expectedRevision:1,name:'测试账号显示名'};
+  const accountChanged=await f.service.accountUiChange(accountRename);
+  expect(await f.service.accountUiChange(accountRename)).toEqual(accountChanged);
+  await expect(f.service.accountUiChange({...accountRename,name:'不同账号名'})).rejects.toThrow('OPC_REQUEST_CONFLICT');
+  await expect(f.service.accountUiChange({...accountRename,requestId:randomUUID()})).rejects.toThrow('OPC_VERSION_CONFLICT');
+  await expect(other.service.accountUiChange({...accountRename,requestId:randomUUID()})).rejects.toThrow('OPC_DENIED');
+  expect((await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0]).toMatchObject({account:'ui-account',displayName:'测试账号显示名',uiRevision:2,sourceVersionId:f.sourceVersionId,sourceVersion:1});
+  const initial=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0].items[0];
+  expect(initial).toMatchObject({workItemId:work.workItemId,pinned:false,archived:false,deleted:false,uiRevision:1,publication:{revision:1,status:'unpublished',plannedDate:null,publishedDate:null}});
+  const rename={workItemId:work.workItemId,requestId:randomUUID(),expectedRevision:1,action:'rename' as const,name:'人工命名的对话'};
+  const changed=await f.service.workUiChange(rename);
+  expect(await f.service.workUiChange(rename)).toEqual(changed);
+  const renamedItem=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0].items[0];
+  expect(renamedItem).toMatchObject({title:'人工命名的对话',chatName:'人工命名的对话',revision:2});
+  const renamedMaterial=(await sql.query("select content->>'brief' brief from runtime_scope_material where session_id=$1 order by revision desc limit 1",[work.sessionId])).rows[0];
+  expect(renamedMaterial.brief).toContain('标题：人工命名的对话');
+  await expect(f.service.workUiChange({...rename,name:'不同名称'})).rejects.toThrow('OPC_REQUEST_CONFLICT');
+  await expect(f.service.workUiChange({...rename,requestId:randomUUID()})).rejects.toThrow('OPC_VERSION_CONFLICT');
+  await expect(other.service.workUiChange({workItemId:work.workItemId,requestId:randomUUID(),expectedRevision:1,action:'archive'})).rejects.toThrow('OPC_DENIED');
+  const pinned=await f.service.workUiChange({workItemId:work.workItemId,requestId:randomUUID(),expectedRevision:changed.revision,action:'pin'});
+  expect(pinned.pinned).toBe(true);
+  const unpublished={workItemId:work.workItemId,requestId:randomUUID(),expectedRevision:1,plannedDate:'2026-10-01',status:'unpublished' as const,publishedDate:null};
+  await expect(f.service.publicationUiChange({...unpublished,status:'published',publishedDate:'2026-09-23'})).rejects.toThrow('OPC_LIBRARY_INVALID');
+  const final=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:0,sourceContentId:null,kind:'brief',status:'final',title:'UI 测试稿件',body:'已定稿的真实版本'});
+  const published={...unpublished,requestId:randomUUID(),publishedDate:'2026-09-23',status:'published' as const};
+  const saved=await f.service.publicationUiChange(published);
+  expect(await f.service.publicationUiChange(published)).toEqual(saved);
+  expect(saved.publishedVersion).toBe(final.version);
+  await expect(other.service.publicationUiChange({...published,requestId:randomUUID()})).rejects.toThrow('OPC_DENIED');
+  await expect(f.service.publicationUiChange({...published,requestId:randomUUID()})).rejects.toThrow('OPC_VERSION_CONFLICT');
+  const projected=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0].items[0];
+  expect(projected).toMatchObject({title:'人工命名的对话',chatName:'人工命名的对话',pinned:true,publication:{status:'published',plannedDate:'2026-10-01',publishedDate:'2026-09-23',publishedVersion:final.version}});
+  await f.service.libraryEdit({requestId:randomUUID(),target:'item',targetId:work.workItemId,expectedRevision:projected.revision,patch:{title:'资料库改名后同步侧栏',brief:projected.brief,day:projected.day,contentType:projected.contentType}});
+  const synchronized=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0].items[0];
+  expect(synchronized).toMatchObject({title:'资料库改名后同步侧栏',chatName:'资料库改名后同步侧栏',uiRevision:pinned.revision+1});
+  const archived=await f.service.workUiChange({workItemId:work.workItemId,requestId:randomUUID(),expectedRevision:synchronized.uiRevision,action:'archive'});
+  expect(archived).toMatchObject({archived:true,pinned:false});
+  const restored=await f.service.workUiChange({workItemId:work.workItemId,requestId:randomUUID(),expectedRevision:archived.revision,action:'restore'});
+  expect(restored.archived).toBe(false);
+  const deleted=await f.service.workUiChange({workItemId:work.workItemId,requestId:randomUUID(),expectedRevision:restored.revision,action:'delete'});
+  expect(deleted.deleted).toBe(true);
+  expect((await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0].items[0].content).toHaveLength(1);
+  const history=await f.service.positionHistory(f.d.draftId);
+  expect(history).toHaveLength(1);
+  expect(history[0]).toMatchObject({id:f.sourceVersionId,version:1});
+  await expect(other.service.positionHistory(f.d.draftId)).rejects.toThrow('OPC_DENIED');
+},180000);
+
+it("OPC: account strategy dialog returns to a complete revision and explicit official history",async()=>{
+ const f=await publishedDraft(6,true,true);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+  body:['revision-a','revision-b'].map(account=>({id:randomUUID(),platform:'x',account,title:'原来源选题 '+account,brief:'保持旧来源',day:'2026-09-26'}))});
+ await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,
+  accounts:['revision-a','revision-b'].map(account=>({platform:'x',account,expectedRevision:null}))});
+ const accounts=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts;
+ const a=accounts.find((a:{account:string})=>a.account==='revision-a')!;
+ const source=await f.service.read(f.d.draftId);
+ const {browser,page}=await planBrowser(f);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
+  await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/revision-a/}).click();
+  await page.getByRole('button',{name:/x · revision-a.*查看详情/}).click();
+  await page.getByRole('dialog',{name:'定位详情'}).getByRole('button',{name:'回到策略讨论',exact:true}).click();
+  await page.waitForURL(url=>/^\/positioning\/[^/]+$/.test(url.pathname));
+  const draftId=page.url().split('/positioning/')[1];
+  const draft=await f.service.read(draftId);
+  await page.getByRole('navigation',{name:'定位步骤'}).waitFor();
+  await page.getByText('已保留原正式定位的全部步骤。请选择需要修改的部分；未变化且已确认的内容无需重新填写。修改保存为草稿，核对后可更新正式版本。',{exact:true}).waitFor();
+  const phases=page.getByRole('navigation',{name:'定位步骤'}).getByRole('button');
+  console.info('ACCOUNT_REVISION_INPUT',JSON.stringify({sourceVersionId:f.sourceVersionId,sourceDraftId:f.d.draftId,draftId,
+   source:source.information,draft:draft.information,phaseDisabled:await phases.evaluateAll(nodes=>nodes.map(n=>(n as HTMLButtonElement).disabled))}));
+  await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/account-revision-return.png'});
+  expect(draftId).not.toBe(f.d.draftId);
+  expect(draft.sessionId).not.toBe(source.sessionId);
+  for(const step of f.flow.steps)expect(draft.information[step.id].values).toEqual(source.information[step.id].values);
+  expect(await phases.evaluateAll(nodes=>nodes.map(n=>(n as HTMLButtonElement).disabled))).toEqual(Array(6).fill(false));
+  expect(await f.service.accountStrategyHistory(a.projectId)).toHaveLength(1);
+  const last=f.flow.steps.at(-1)!;
+  for(let i=0;i<6;i++){
+   await phases.nth(i).click();
+   expect(await page.getByRole('textbox',{name:'已知目标 '+i,exact:true}).inputValue()).toBe('原正式答案 step-'+i);
+  }
+  const answer=page.getByRole('textbox',{name:'已知目标 5',exact:true});
+  await answer.fill('账号 A 新修改，无 profileKey 也必须保留');
+  await page.getByText('已自动保存',{exact:true}).waitFor();
+  await page.reload();
+  await page.getByRole('navigation',{name:'定位步骤'}).getByRole('button').nth(5).click();
+  expect(await answer.inputValue()).toBe('账号 A 新修改，无 profileKey 也必须保留');
+  expect(await f.service.accountStrategyHistory(a.projectId)).toHaveLength(1);
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
+  await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/revision-a/}).click();
+  await page.getByRole('button',{name:/x · revision-a.*查看详情/}).click();
+  const dialog=page.getByRole('dialog',{name:'定位详情'});
+  await dialog.getByRole('button',{name:'历史版本',exact:true}).click();
+  await dialog.getByText('正式版本历史',{exact:true}).waitFor();
+  await dialog.getByText('原正式答案 step-5',{exact:true}).waitFor();
+  await dialog.getByRole('button',{name:'继续当前修改草稿',exact:true}).click();
+  await page.waitForURL('**/positioning/'+draftId);
+  expect((await f.service.read(draftId)).sessionId).toBe(draft.sessionId);
+  await page.getByRole('navigation',{name:'定位步骤'}).getByRole('button').nth(5).click();
+  expect(await answer.inputValue()).toBe('账号 A 新修改，无 profileKey 也必须保留');
+  await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).click();
+  await expect.poll(async()=>(await f.service.read(draftId)).snapshot.steps[last.id].valid,{timeout:15000}).toBe(true);
+  const finalize=page.getByRole('button',{name:'确认正式定位',exact:true});
+  await expect.poll(()=>finalize.isEnabled(),{timeout:15000}).toBe(true);
+  // A lost publish response must be recovered by reading the actual version,
+  // never by publishing another account or clearing the draft.
+  let lost=false;
+  await page.route('**/api/trpc/workbench.execute*',async route=>{
+   if(!lost&&route.request().postData()?.includes('publish')){lost=true;await route.fetch();await route.abort();return;}
+   await route.continue();
+  });
+  await finalize.click();
+  await expect.poll(async()=>(await f.service.accountStrategyHistory(a.projectId)).length,{timeout:15000}).toBe(2);
+  await page.reload();
+  expect(await finalize.isEnabled()).toBe(false);
+  expect(lost).toBe(true);
+  const history=await f.service.accountStrategyHistory(a.projectId);
+  expect(history[1].id).toBe(f.sourceVersionId);
+  expect(history[0].information[last.id].values.goal.value).toBe('账号 A 新修改，无 profileKey 也必须保留');
+  for(const step of f.flow.steps.slice(0,-1))expect(history[0].information[step.id].values).toEqual(source.information[step.id].values);
+  expect((await f.service.read(f.d.draftId)).information).toEqual(source.information);
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
+  await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/revision-a/}).click();
+  await page.getByRole('button',{name:/x · revision-a.*查看详情/}).click();
+  await dialog.getByRole('button',{name:'历史版本',exact:true}).click();
+  await dialog.getByText('账号 A 新修改，无 profileKey 也必须保留',{exact:true}).waitFor();
+  await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/account-revision-official-history.png'});
+  const b=accounts.find((a:{account:string})=>a.account==='revision-b')!;
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
+  await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/revision-b/}).click();
+  await page.getByRole('button',{name:/x · revision-b.*查看详情/}).click();
+  await page.getByRole('dialog',{name:'定位详情'}).getByRole('button',{name:'回到策略讨论',exact:true}).click();
+  await page.waitForURL(url=>/^\/positioning\/[^/]+$/.test(url.pathname));
+  const bDraft=await f.service.read(page.url().split('/positioning/')[1]);
+  expect(bDraft.sessionId).not.toBe(draft.sessionId);
+  for(const step of f.flow.steps)expect(bDraft.information[step.id].values).toEqual(source.information[step.id].values);
+  expect(await f.service.accountStrategyHistory(b.projectId)).toHaveLength(1);
+  const itemSources=(await sql.query('select distinct source_version_id from opc_items where account_project_id=ANY($1)',[[a.projectId,b.projectId]])).rows;
+  expect(itemSources).toEqual([{source_version_id:f.sourceVersionId}]);
+  const sameProject=await f.service.revise(draftId,randomUUID(),draft.roundId);
+  const reopened=await f.service.accountStrategyBegin(a.projectId,randomUUID());
+  expect(reopened).toEqual({draftId,roundId:sameProject.roundId});
+  expect((await f.service.read(draftId)).sessionId).toBe(draft.sessionId);
+  expect((await sql.query("select count(*)::int n from artifact_requests where project_id=$1 and round_id=$2 and action='opc_account_inherit'",[draft.projectId,sameProject.roundId])).rows[0].n).toBe(0);
+
+  // Revoking the original source still denies the now-published account
+  // version after its binding has advanced to that account's own version.
+  await f.artifacts.execute({action:'restrictEvidence',projectId:f.d.projectId,roundId:f.d.roundId,requestId:randomUUID(),evidenceId:f.sourceEvidence!,deleted:true,expiresAt:null});
+  await expect(f.service.accountStrategyHistory(a.projectId)).rejects.toThrow('OPC_DENIED');
+  await expect(f.artifacts.read(draft.projectId,draft.roundId)).rejects.toThrow('ARTIFACT_DENIED');
+
+ }catch(error){console.info('ACCOUNT_REVISION_FAILURE',error instanceof Error?error.stack:String(error),await page.getByRole('alert').allTextContents());await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/account-revision-failure.png'});throw error;}finally{await browser.close();}
+},180000);
+
+it("OPC: account revision confirms only edited information before official finalization",async()=>{
+ const f=await publishedDraft(6,true,true);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+  body:[{id:randomUUID(),platform:'x',account:'review-revision',title:'确认路径',brief:'只修改两处，其余保留',day:'2026-09-26'}]});
+ await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'review-revision',expectedRevision:null}]});
+ const account=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0];
+ const {browser,page}=await planBrowser(f);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
+  await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/review-revision/}).click();
+  await page.getByRole('button',{name:/x · review-revision.*查看详情/}).click();
+  await page.getByRole('dialog',{name:'定位详情'}).getByRole('button',{name:'回到策略讨论',exact:true}).click();
+  await page.waitForURL(url=>/^\/positioning\/[^/]+$/.test(url.pathname));
+  const draftId=page.url().split('/positioning/')[1];
+  const phases=page.getByRole('navigation',{name:'定位步骤'}).getByRole('button');
+  const initial=await f.service.read(draftId);
+  await f.service.information({draftId,stepId:'step-0',requestId:randomUUID(),expectedVersion:initial.snapshot.steps['step-0'].version,values:{goal:{...initial.information['step-0'].values.goal,status:'deferred'}}});
+  await page.reload();
+  expect(await page.getByRole('button',{name:'确认正式定位',exact:true}).isEnabled()).toBe(false);
+  await page.getByRole('button',{name:/核对修改：/}).click();
+  await page.getByRole('textbox',{name:'已知目标 0',exact:true}).fill('第一步的新业务目标');
+  await page.getByText('已自动保存',{exact:true}).waitFor();
+  await phases.nth(3).click();
+  await page.getByRole('textbox',{name:'已知目标 3',exact:true}).fill('第四步的新内容安排');
+  await page.getByText('已自动保存',{exact:true}).waitFor();
+  const finalize=page.getByRole('button',{name:'确认正式定位',exact:true});
+  expect(await finalize.isEnabled()).toBe(false);
+  // Confirm the later edit first; unedited dependencies require no user action.
+  await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).click();
+  await expect.poll(async()=>(await f.service.read(draftId)).information['step-3'].values.goal.status,{timeout:15000}).toBe('confirmed');
+  await expect.poll(()=>page.getByRole('button',{name:'确认当前信息，继续',exact:true}).isEnabled(),{timeout:15000}).toBe(false);
+  expect(await finalize.isEnabled()).toBe(false); // step 0 is still unconfirmed.
+  await page.reload();
+  await phases.nth(0).click();
+  expect(await page.getByRole('textbox',{name:'已知目标 0',exact:true}).inputValue()).toBe('第一步的新业务目标');
+  let lostConfirm=true;
+  const confirmRequests:unknown[]=[];
+  await page.route('**/api/trpc/workbench.execute*',async route=>{
+   const body=route.request().postDataJSON(),entry=body[0]??body,input=entry.json??entry;
+   if(input.action!=='confirm')return route.continue();
+   confirmRequests.push(input);
+   if(!lostConfirm)return route.continue();
+   lostConfirm=false;const response=await route.fetch();expect(response.ok()).toBe(true);await route.abort();
+  });
+  await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'操作未完成'}).waitFor();
+  expect(await page.evaluate(id=>JSON.parse(sessionStorage.getItem('opc-confirm-step:'+id+':step-0')!).phase,draftId)).toBe('confirm');
+  await page.reload();
+  await page.getByRole('button',{name:/确认当前信息，继续|继续核对本题确认/,exact:true}).click();
+  await expect.poll(()=>finalize.isEnabled(),{timeout:15000}).toBe(true);
+  expect(confirmRequests).toHaveLength(2);expect(confirmRequests[1]).toEqual(confirmRequests[0]);
+  const confirmed=await f.service.read(draftId);
+  expect((await sql.query('select count(*)::int n from artifact_confirmations where round_id=$1 and step_id=$2 and version=$3',[confirmed.roundId,'step-0',confirmed.snapshot.steps['step-0'].version])).rows[0].n).toBe(1);
+  await page.waitForLoadState('networkidle');
+  expect(await finalize.isEnabled()).toBe(true);
+  await finalize.scrollIntoViewIfNeeded();
+  await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/account-review-ready.png',animations:'disabled'});
+  await finalize.click();
+  await expect.poll(async()=>(await f.service.accountStrategyHistory(account.projectId)).length,{timeout:15000}).toBe(2);
+  const versions=await f.service.accountStrategyHistory(account.projectId);
+  expect(versions[0].information['step-0'].values.goal.value).toBe('第一步的新业务目标');
+  expect(versions[0].information['step-3'].values.goal.value).toBe('第四步的新内容安排');
+  expect(versions[1].information['step-0'].values.goal.value).toBe('原正式答案 step-0');
+ }finally{await browser.close();}
+},180000);
+
+it("OPC: legacy account revisions repair only untouched answers and retain source revocation",async()=>{
+ const f=await publishedDraft(6,true,true);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+  body:[{id:randomUUID(),platform:'x',account:'legacy-revision',title:'原来源',brief:'保留原正式内容',day:'2026-09-26'}]});
+ await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'legacy-revision',expectedRevision:null}]});
+ const account=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0];
+ const {readFile}=await import('node:fs/promises');
+ const oldSql=await readFile(new URL('../../../../db/migrations/0125_opc_account_strategy.sql',import.meta.url),'utf8');
+ const newSql=await readFile(new URL('../../../../db/migrations/0134_opc_account_strategy_inheritance.sql',import.meta.url),'utf8');
+ const begin=oldSql.slice(oldSql.indexOf('CREATE OR REPLACE FUNCTION opc_account_strategy_begin('),oldSql.indexOf('END $$;',oldSql.indexOf('CREATE OR REPLACE FUNCTION opc_account_strategy_begin('))+7);
+ let legacy:{draftId:string;roundId:string};
+ await sql.query(begin);
+ try{legacy=await f.service.accountStrategyBegin(account.projectId,randomUUID());}finally{await sql.query(newSql);}
+ const before=await f.service.read(legacy!.draftId);
+ const edit=async(stepId:string,value:string)=>{const d=await f.service.read(legacy!.draftId);await f.service.information({draftId:d.draftId,stepId,requestId:randomUUID(),expectedVersion:d.snapshot.steps[stepId].version,
+  values:{goal:{...d.information[stepId].values.goal,value}}});};
+ await edit('step-1','用户已保存的新修改');
+ await edit('step-2','曾经改动');await edit('step-2','原正式答案 step-2');
+ const originals=(await sql.query('select request_id,to_jsonb(h) row from artifact_requests h where project_id=$1',[before.projectId])).rows;
+ const [repair,duplicate]=await Promise.all([f.service.accountStrategyBegin(account.projectId,randomUUID()),f.service.accountStrategyBegin(account.projectId,randomUUID())]);
+ expect(repair).toEqual(duplicate);expect(repair.draftId).toBe(legacy!.draftId);
+ const after=await f.service.read(repair.draftId);
+ expect(after.sessionId).toBe(before.sessionId);
+ expect(after.information['step-1'].values.goal).toMatchObject({value:'用户已保存的新修改',status:'provisional'});
+ expect(after.information['step-2'].values.goal).toMatchObject({value:'原正式答案 step-2',status:'provisional'});
+ expect(after.information['step-5'].values.goal).toMatchObject({value:'原正式答案 step-5',status:'confirmed'});
+ expect(after.snapshot.steps['step-0'].valid).toBe(true);
+ expect(after.snapshot.steps['step-1'].valid).toBe(false);
+ expect(after.snapshot.steps['step-5'].valid).toBe(false);
+ for(const row of originals)expect((await sql.query('select to_jsonb(h) row from artifact_requests h where project_id=$1 and request_id=$2',[before.projectId,row.request_id])).rows[0].row).toEqual(row.row);
+ const stable=(await sql.query('select steps from artifact_rounds where id=$1',[repair.roundId])).rows[0];
+ await f.service.accountStrategyBegin(account.projectId,randomUUID());
+ expect((await sql.query('select steps from artifact_rounds where id=$1',[repair.roundId])).rows[0]).toEqual(stable);
+ // Repaired legacy descendants have no confirmationId. Exact inheritance
+ // still carries their accepted answers; only the two edited fields are confirmed.
+ const publishRequest=async()=>{const d=await f.service.read(repair.draftId);return {action:'publish' as const,projectId:d.projectId,roundId:d.roundId,requestId:randomUUID(),expectedSteps:Object.fromEntries(Object.entries(d.snapshot.steps).map(([k,v]:[string,any])=>[k,{version:v.version,reviewVersion:v.reviewVersion}]))};};
+ await expect(f.artifacts.execute(await publishRequest())).rejects.toThrow();
+ const stale=await publishRequest();
+ for(const stepId of ['step-2','step-1']){
+  let d=await f.service.read(repair.draftId);
+  const value=d.information[stepId].values.goal;
+  await f.service.information({draftId:d.draftId,stepId,requestId:randomUUID(),expectedVersion:d.snapshot.steps[stepId].version,values:{goal:{...value,status:'confirmed'}}});
+  d=await f.service.read(repair.draftId);
+  await f.artifacts.execute({action:'save',projectId:d.projectId,roundId:d.roundId,requestId:randomUUID(),stepId,body:'已知目标 '+stepId.slice(-1)+'\n'+value.value,evidenceIds:d.snapshot.steps[stepId].evidenceIds,expectedVersion:d.snapshot.steps[stepId].version});
+ }
+ const beforeStale=(await sql.query('select steps from artifact_rounds where id=$1',[repair.roundId])).rows[0];
+ await expect(f.artifacts.execute(stale)).rejects.toThrow();
+ expect((await sql.query('select steps from artifact_rounds where id=$1',[repair.roundId])).rows[0]).toEqual(beforeStale);
+ // Returning a touched answer to its original text is not proof of being
+ // untouched. It still needs the explicit confirmation's canonical save.
+ for(const value of ['改过后返回原文','原正式答案 step-5']){
+  const d=await f.service.read(repair.draftId);
+  await f.service.information({draftId:d.draftId,stepId:'step-5',requestId:randomUUID(),expectedVersion:d.snapshot.steps['step-5'].version,values:{goal:{...d.information['step-5'].values.goal,value,status:'confirmed'}}});
+ }
+ await expect(f.artifacts.execute(await publishRequest())).rejects.toThrow();
+ const accepted=await f.service.read(repair.draftId);
+ await f.artifacts.execute({action:'save',projectId:accepted.projectId,roundId:accepted.roundId,requestId:randomUUID(),stepId:'step-5',body:'已知目标 5\n原正式答案 step-5',evidenceIds:accepted.snapshot.steps['step-5'].evidenceIds,expectedVersion:accepted.snapshot.steps['step-5'].version});
+ const publish=await publishRequest();
+ const [done,replayed]=await Promise.all([f.artifacts.execute(publish),f.artifacts.execute(publish)]);
+ expect(replayed).toEqual(done);
+ expect(await f.service.accountStrategyHistory(account.projectId)).toHaveLength(2);
+ const finalHistory=await f.service.accountStrategyHistory(account.projectId);
+ expect(finalHistory[0].information['step-1'].values.goal.value).toBe('用户已保存的新修改');
+ expect(finalHistory[0].information['step-5'].values.goal.value).toBe('原正式答案 step-5');
+ for(const row of originals)expect((await sql.query('select to_jsonb(h) row from artifact_requests h where project_id=$1 and request_id=$2',[before.projectId,row.request_id])).rows[0].row).toEqual(row.row);
+ const other=await publishedDraft();await expect(other.service.read(repair.draftId)).rejects.toThrow('OPC_DENIED');
+ await f.artifacts.execute({action:'restrictEvidence',projectId:f.d.projectId,roundId:f.d.roundId,requestId:randomUUID(),evidenceId:f.sourceEvidence!,deleted:true,expiresAt:null});
+ await expect(f.service.read(repair.draftId)).rejects.toThrow('OPC_DENIED');
+ await expect(f.artifacts.read(before.projectId,repair.roundId)).rejects.toThrow('ARTIFACT_DENIED');
+ await expect(f.service.accountStrategyHistory(account.projectId)).rejects.toThrow('OPC_DENIED');
+ await expect(f.service.prepareStep({draftId:repair.draftId,stepId:'step-0',requestId:randomUUID(),input:'不可读取已撤销的原依据'})).rejects.toThrow();
+ expect((await sql.query("select artifact_evidence_allowed($1,'[]'::jsonb) allowed",[before.projectId])).rows[0].allowed).toBe(false);
+},120000);
+
+it("OPC: account inheritance validates dependency order and revocable local evidence",async()=>{
+ const f=await publishedDraft(3,true,true,true);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+  body:[{id:randomUUID(),platform:'x',account:'reverse-order',title:'合法的依赖顺序',brief:'显示顺序不等于确认顺序',day:'2026-09-26'}]});
+ await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'reverse-order',expectedRevision:null}]});
+ const account=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0];
+ const begun=await f.service.accountStrategyBegin(account.projectId,randomUUID());
+ const d=await f.service.read(begun.draftId);
+ expect(d.snapshot.workflow.steps.map((step:{id:string})=>step.id)).toEqual(['step-2','step-1','step-0']);
+ expect(Object.values(d.snapshot.steps).every((step:any)=>step.valid)).toBe(true);
+ const evidence=d.snapshot.steps['step-0'].evidenceIds[0];
+ expect((await sql.query('select count(*)::int n from artifact_evidence_restrictions where evidence_id=$1',[evidence])).rows[0].n).toBe(1);
+ await f.artifacts.execute({action:'restrictEvidence',projectId:d.projectId,roundId:d.roundId,requestId:randomUUID(),evidenceId:evidence,deleted:true,expiresAt:null});
+ expect((await sql.query('select artifact_evidence_allowed($1,$2::jsonb) allowed',[d.projectId,JSON.stringify([evidence])])).rows[0].allowed).toBe(false);
+ await expect(f.service.read(d.draftId)).rejects.toThrow('OPC_DENIED');
+ await expect(f.service.accountStrategySchema(account.projectId)).rejects.toThrow('OPC_SOURCE_DENIED');
+ await expect(f.artifacts.read(d.projectId,d.roundId)).rejects.toThrow('ARTIFACT_DENIED');
+ await expect(f.artifacts.execute({action:'publish',projectId:d.projectId,roundId:d.roundId,requestId:randomUUID(),expectedSteps:Object.fromEntries(Object.entries(d.snapshot.steps).map(([k,v]:[string,any])=>[k,{version:v.version,reviewVersion:v.reviewVersion}]))})).rejects.toThrow();
+ expect(await f.service.accountStrategyHistory(account.projectId)).toHaveLength(1);
+},120000);
+
+it("OPC: an older account draft with a different method keeps both sides without guessed repair",async()=>{
+ const f=await publishedDraft();
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+  body:[{id:randomUUID(),platform:'x',account:'method-conflict',title:'方法边界',brief:'不猜测映射',day:'2026-09-26'}]});
+ await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'method-conflict',expectedRevision:null}]});
+ const account=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0];
+ const next=makePackage(f.pack.id,true),flow=structuredClone(f.flow),registration='conflict-'+randomUUID();
+ flow.steps[0].information![0].title='新方法的不同问法';
+ await publishSkillPackage(admin,f.owner,next);
+ await sql.query('update artifact_workflows set enabled=false where id=$1',[f.registration]);
+ await sql.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',[registration,f.moduleId,next.id,next.revisionId,flow,'新方法']);
+ const {readFile}=await import('node:fs/promises');
+ const oldSql=await readFile(new URL('../../../../db/migrations/0125_opc_account_strategy.sql',import.meta.url),'utf8');
+ const newSql=await readFile(new URL('../../../../db/migrations/0134_opc_account_strategy_inheritance.sql',import.meta.url),'utf8');
+ const begin=oldSql.slice(oldSql.indexOf('CREATE OR REPLACE FUNCTION opc_account_strategy_begin('),oldSql.indexOf('END $$;',oldSql.indexOf('CREATE OR REPLACE FUNCTION opc_account_strategy_begin('))+7);
+ let legacy:{draftId:string;roundId:string};await sql.query(begin);
+ try{legacy=await f.service.accountStrategyBegin(account.projectId,randomUUID());}finally{await sql.query(newSql);}
+ const d=await f.service.read(legacy!.draftId);
+ await f.service.information({draftId:d.draftId,stepId:'step-0',requestId:randomUUID(),expectedVersion:d.snapshot.steps['step-0'].version,
+  values:{goal:{...d.information['step-0'].values.goal,value:'新方法下用户的新输入'}}});
+ const before=(await sql.query('select to_jsonb(r) value from artifact_rounds r where id=$1',[legacy!.roundId])).rows[0];
+ const {browser,page}=await planBrowser(f);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
+  await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/method-conflict/}).click();
+  await page.getByRole('button',{name:/x · method-conflict.*查看详情/}).click();
+  await page.getByRole('dialog',{name:'定位详情'}).getByRole('button',{name:'回到策略讨论',exact:true}).click();
+  await page.waitForURL('**/positioning/'+legacy!.draftId);
+  await page.getByRole('alert').filter({hasText:'未自动合并或覆盖任何答案'}).waitFor();
+  await page.getByText('查看原正式版本完整内容',{exact:true}).click();
+  expect((await page.getByRole('alert').allTextContents()).join(' ')).toContain('A concrete user decision');
+  expect(await page.getByRole('textbox',{name:'新方法的不同问法',exact:true}).inputValue()).toBe('新方法下用户的新输入');
+  expect((await sql.query('select to_jsonb(r) value from artifact_rounds r where id=$1',[legacy!.roundId])).rows[0]).toEqual(before);
+ }finally{await browser.close();}
+},180000);
+
+it("OPC: account strategy edits stay draft-scoped and publish only for the chosen account", async()=>{
+  const f=await publishedDraft();
+  const other=await publishedDraft();
+  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+    body:[{id:randomUUID(),platform:'x',account:'strategy-a',title:'旧来源选题',brief:'已有稿件必须保留旧来源',day:'2026-09-26'},
+      {id:randomUUID(),platform:'x',account:'strategy-b',title:'另一账号选题',brief:'另一账号不变',day:'2026-09-27'}]});
+  const works=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'strategy-a',expectedRevision:null},{platform:'x',account:'strategy-b',expectedRevision:null}]});
+  const original=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts;
+  const a=original.find((account:{account:string})=>account.account==='strategy-a')!;
+  const b=original.find((account:{account:string})=>account.account==='strategy-b')!;
+  const initialA=a;
+  const request={accountProjectId:a.projectId,requestId:randomUUID(),expectedSourceVersionId:f.sourceVersionId,expectedPendingDraftId:null,expectedRegistrationId:f.registration,
+    edits:{[f.flow.steps[0].id]:{goal:'仅账号 A 的待确认新方向'}}};
+  await expect(other.service.accountStrategySave({...request,requestId:randomUUID()})).rejects.toThrow('OPC_DENIED');
+  const saved=await f.service.accountStrategySave(request);
+  expect(await f.service.accountStrategySave(request)).toEqual(saved);
+  await expect(f.service.accountStrategySave({...request,expectedStepVersions:{[f.flow.steps[0].id]:1}})).rejects.toThrow('OPC_REQUEST_CONFLICT');
+  await expect(f.service.accountStrategySave({...request,expectedRegistrationId:'another-skill-revision'})).rejects.toThrow('OPC_REQUEST_CONFLICT');
+  await expect(f.service.accountStrategySave({...request,edits:{[f.flow.steps[0].id]:{goal:'重放不能换内容'}}})).rejects.toThrow('OPC_REQUEST_CONFLICT');
+  await expect(f.service.accountStrategySave({...request,requestId:randomUUID()})).rejects.toThrow('OPC_VERSION_CONFLICT');
+  const pending=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts;
+  expect(pending.find((account:{projectId:string})=>account.projectId===a.projectId)).toMatchObject({sourceVersionId:f.sourceVersionId,pendingStrategyDraftId:saved.draftId,sourceVersion:1});
+  expect(pending.find((account:{projectId:string})=>account.projectId===b.projectId)).toMatchObject({sourceVersionId:f.sourceVersionId,pendingStrategyDraftId:null,sourceVersion:1});
+  expect((await f.service.accountStrategyHistory(a.projectId)).map((v:{id:string})=>v.id)).toEqual([f.sourceVersionId]);
+  const draft=await f.service.read(saved.draftId);
+  expect(draft.information[f.flow.steps[0].id].values.goal).toMatchObject({value:'仅账号 A 的待确认新方向',status:'provisional'});
+  const stepId=f.flow.steps[0].id;
+  const concurrentBase={accountProjectId:a.projectId,expectedSourceVersionId:f.sourceVersionId,
+    expectedPendingDraftId:saved.draftId,expectedRegistrationId:f.registration,
+    expectedStepVersions:{[stepId]:draft.snapshot.steps[stepId].version}};
+  const firstConcurrent={...concurrentBase,requestId:randomUUID(),edits:{[stepId]:{goal:'先保存的标签页'}}};
+  const secondConcurrent={...concurrentBase,requestId:randomUUID(),edits:{[stepId]:{goal:'迟到的标签页'}}};
+  const firstSaved=await f.service.accountStrategySave(firstConcurrent);
+  expect(await f.service.accountStrategySave(firstConcurrent)).toEqual(firstSaved);
+  await expect(f.service.accountStrategySave({...firstConcurrent,expectedStepVersions:{[stepId]:draft.snapshot.steps[stepId].version+1}}))
+    .rejects.toThrow('OPC_REQUEST_CONFLICT');
+  await expect(f.service.accountStrategySave(secondConcurrent)).rejects.toThrow('OPC_VERSION_CONFLICT');
+  await expect(f.service.accountStrategySave({...secondConcurrent,requestId:randomUUID(),expectedStepVersions:null}))
+    .rejects.toThrow('OPC_VERSION_CONFLICT');
+  expect((await f.service.read(saved.draftId)).information[stepId].values.goal.value).toBe('先保存的标签页');
+  // The open library dialog must refresh its account binding after a save.
+  // A second edit in the same dialog must target the pending draft, not the
+  // previously published account snapshot.
+  const {browser:strategyBrowser,page:strategyPage}=await planBrowser(f);
+  try{
+    await strategyPage.goto(process.env.V3_LOCAL_APP+'/library');
+    await strategyPage.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/strategy-a/}).click();
+    await strategyPage.getByRole('button',{name:/x · strategy-a.*查看详情/}).click();
+    const dialog=strategyPage.getByRole('dialog',{name:'定位详情'});
+    const secondTab=await strategyPage.context().newPage();
+    secondTab.setDefaultTimeout(90000);
+    await secondTab.goto(process.env.V3_LOCAL_APP+'/library');
+    await secondTab.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/strategy-a/}).click();
+    await secondTab.getByRole('button',{name:/x · strategy-a.*查看详情/}).click();
+    const secondDialog=secondTab.getByRole('dialog',{name:'定位详情'});
+    await dialog.getByRole('button',{name:'修改定位'}).click();
+    await secondDialog.getByRole('button',{name:'修改定位'}).click();
+    await dialog.getByRole('textbox').first().fill('标签页 A 已保存');
+    await secondDialog.getByRole('textbox').first().fill('标签页 B 未保存');
+    await dialog.getByRole('button',{name:'确认保存'}).click();
+    await dialog.getByText('标签页 A 已保存',{exact:true}).first().waitFor();
+    await secondDialog.getByRole('button',{name:'确认保存'}).click();
+    await secondDialog.getByRole('alert').filter({hasText:'OPC_VERSION_CONFLICT'}).waitFor();
+    expect(await secondDialog.getByRole('textbox').first().inputValue()).toBe('标签页 B 未保存');
+    expect((await f.service.read(saved.draftId)).information[stepId].values.goal.value).toBe('标签页 A 已保存');
+    await secondTab.close();
+    for(const text of ['第一次在弹窗修改','第二次在同一弹窗修改']){
+      console.info('ACCOUNT_SAVE_PHASE','edit',text);
+      await dialog.getByRole('button',{name:'修改定位'}).click();
+      await dialog.getByRole('textbox').first().fill(text);
+      await dialog.getByRole('button',{name:'确认保存'}).click();
+      await dialog.getByRole('status').filter({hasText:'已保存到此账号的待确认定位草稿'}).waitFor();
+      console.info('ACCOUNT_SAVE_PHASE','saved',text);
+      await dialog.getByText(text,{exact:true}).first().waitFor();
+      await dialog.getByRole('button',{name:'修改定位'}).waitFor();
+      await dialog.getByRole('button',{name:'修改定位'}).click();
+      expect(await dialog.getByRole('textbox').first().inputValue()).toBe(text);
+      await dialog.getByRole('button',{name:'取消'}).click();
+    }
+    expect((await f.service.read(saved.draftId)).information[f.flow.steps[0].id].values.goal.value)
+      .toBe('第二次在同一弹窗修改');
+  }catch(error){console.info('ACCOUNT_SAVE_FAILURE',error instanceof Error?error.message:String(error));throw error;}finally{console.info('ACCOUNT_SAVE_PHASE','closing');await strategyBrowser.close();console.info('ACCOUNT_SAVE_PHASE','closed');}
+  for(const step of f.flow.steps){
+    const state=(await f.service.read(saved.draftId)).snapshot.steps[step.id];
+    await f.artifacts.execute({action:'save',projectId:draft.projectId,roundId:saved.roundId,requestId:randomUUID(),stepId:step.id,
+      body:'用户核对的账号定位 '+step.title,evidenceIds:[],expectedVersion:state.version});
+    const next=(await f.service.read(saved.draftId)).snapshot.steps[step.id];
+    await f.service.information({draftId:saved.draftId,stepId:step.id,requestId:randomUUID(),expectedVersion:next.version,
+      values:{goal:{status:'confirmed',nature:'decision',value:step.id===f.flow.steps[0].id?'仅账号 A 的已确认新方向':'保留原方向'}}});
+    const confirmed=(await f.service.read(saved.draftId)).snapshot.steps[step.id];
+    await f.artifacts.execute({action:'confirm',projectId:draft.projectId,roundId:saved.roundId,requestId:randomUUID(),stepId:step.id,
+      expectedVersion:confirmed.version,expectedReviewVersion:confirmed.reviewVersion});
+  }
+  const ready=(await f.service.read(saved.draftId)).snapshot;
+  await f.artifacts.execute({action:'publish',projectId:draft.projectId,roundId:saved.roundId,requestId:randomUUID(),
+    expectedSteps:Object.fromEntries(Object.entries(ready.steps).map(([id,state])=>[id,{version:(state as {version:number}).version,reviewVersion:(state as {reviewVersion:number}).reviewVersion}]))});
+  const after=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts;
+  const nowA=after.find((account:{projectId:string})=>account.projectId===a.projectId)!;
+  const nowB=after.find((account:{projectId:string})=>account.projectId===b.projectId)!;
+  expect(nowA.sourceVersionId).not.toBe(f.sourceVersionId);
+  expect(nowA).toMatchObject({sourceVersion:2,pendingStrategyDraftId:null});
+  expect(nowB.sourceVersionId).toBe(f.sourceVersionId);
+  expect((await f.service.accountStrategyHistory(a.projectId)).map((v:{id:string})=>v.id)).toEqual([nowA.sourceVersionId,f.sourceVersionId]);
+  expect((await sql.query('select source_version_id from opc_items where account_project_id=$1',[a.projectId])).rows[0].source_version_id).toBe(f.sourceVersionId);
+  expect(initialA.sourceVersionId).toBe(f.sourceVersionId);
+  await expect(other.service.accountStrategyHistory(a.projectId)).rejects.toThrow('OPC_DENIED');
+  const secondPackage=makePackage(f.pack.id,true);
+  const secondFlow=structuredClone(f.flow);
+  secondFlow.steps[0].title='新版账号问题';
+  secondFlow.steps[0].information=[...secondFlow.steps[0].information,
+    {id:'new_need',title:'新增问题',required:true,profileKey:'new_need'}];
+  secondFlow.report.sections[0].title='新版账号问题';
+  const secondRegistration='opc-account-next-'+randomUUID();
+  await publishSkillPackage(admin,f.owner,secondPackage);
+  await sql.query('update artifact_workflows set enabled=false where id=$1',[f.registration]);
+  await sql.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',
+    [secondRegistration,f.moduleId,secondPackage.id,secondPackage.revisionId,secondFlow,'账号定位新版']);
+  const secondStartRequest=randomUUID();
+  const secondDraft=await f.service.accountStrategyBegin(a.projectId,secondStartRequest);
+  expect(secondDraft.draftId).not.toBe(saved.draftId);
+  expect((await f.service.accountStrategyBegin(a.projectId,request.requestId)).draftId).toBe(saved.draftId);
+  const sharedBefore=(await sql.query('select current_source_version_id from opc_businesses where id=(select business_id from opc_accounts where project_id=$1)',[a.projectId])).rows[0].current_source_version_id;
+  await expect(f.service.revise(saved.draftId,randomUUID(),saved.roundId)).rejects.toThrow('OPC_VERSION_CONFLICT');
+  await expect(sql.query('select artifact_transition($1,$2,$3,$4,$5,$6,$7,$8)',
+    [f.actor,f.moduleId,f.pack.id,'publish',draft.projectId,saved.roundId,randomUUID(),{}])).rejects.toThrow('OPC_VERSION_CONFLICT');
+  expect((await sql.query('select current_source_version_id from opc_businesses where id=(select business_id from opc_accounts where project_id=$1)',[a.projectId])).rows[0].current_source_version_id).toBe(sharedBefore);
+  const {browser:historicalBrowser,page:historicalPage}=await planBrowser(f);
+  try{
+    await historicalPage.goto(process.env.V3_LOCAL_APP+'/positioning/'+saved.draftId);
+    await historicalPage.getByRole('button',{name:'修订定位，保留原版本',exact:true}).click();
+    await expect.poll(async()=>(await historicalPage.getByRole('alert').allTextContents()).join(' '),{timeout:15000}).toContain('版本已变化');
+  }finally{await historicalBrowser.close();}
+  const secondRead=await f.service.read(secondDraft.draftId);
+  expect(secondRead.snapshot.workflow.steps[0].title).toBe(f.flow.steps[0].title);
+  expect(secondRead.information[secondFlow.steps[0].id].schema.map((field:{title:string})=>field.title)).not.toContain('新增问题');
+  expect((await f.service.accountStrategyHistory(a.projectId)).map((v:{id:string})=>v.id))
+    .toEqual([nowA.sourceVersionId,f.sourceVersionId]);
+  const secondRoundId=secondDraft.roundId;
+  for(const step of f.flow.steps){
+    const state=(await f.service.read(secondDraft.draftId)).snapshot.steps[step.id];
+    await f.artifacts.execute({action:'save',projectId:secondRead.projectId,roundId:secondRoundId,requestId:randomUUID(),stepId:step.id,
+      body:'用户核对的新版账号定位 '+step.title,evidenceIds:[],expectedVersion:state.version});
+    const next=(await f.service.read(secondDraft.draftId)).snapshot.steps[step.id];
+    const values=Object.fromEntries(step.information!.map(field=>[field.id,{status:'confirmed',nature:'decision',value:'用户确认 '+field.title}]));
+    await f.service.information({draftId:secondDraft.draftId,stepId:step.id,requestId:randomUUID(),expectedVersion:next.version,values});
+    const confirmed=(await f.service.read(secondDraft.draftId)).snapshot.steps[step.id];
+    await f.artifacts.execute({action:'confirm',projectId:secondRead.projectId,roundId:secondRoundId,requestId:randomUUID(),stepId:step.id,
+      expectedVersion:confirmed.version,expectedReviewVersion:confirmed.reviewVersion});
+  }
+  const secondReady=(await f.service.read(secondDraft.draftId)).snapshot;
+  await f.artifacts.execute({action:'publish',projectId:secondRead.projectId,roundId:secondRoundId,requestId:randomUUID(),
+    expectedSteps:Object.fromEntries(Object.entries(secondReady.steps).map(([id,state])=>[id,{version:(state as {version:number}).version,reviewVersion:(state as {reviewVersion:number}).reviewVersion}]))});
+  const thirdHistory=await f.service.accountStrategyHistory(a.projectId);
+  expect(thirdHistory).toHaveLength(3);
+  expect(thirdHistory[1].id).toBe(nowA.sourceVersionId);
+  expect(thirdHistory[2].id).toBe(f.sourceVersionId);
+  const pendingAgain=await f.service.accountStrategyBegin(a.projectId,randomUUID());
+  const pendingRead=await f.service.read(pendingAgain.draftId);
+  const beforeStale=(await sql.query('select steps from artifact_rounds where id=$1',[pendingAgain.roundId])).rows[0];
+  const revision=(await sql.query('select revision from opc_accounts where project_id=$1',[a.projectId])).rows[0].revision;
+  const otherRevision=(await sql.query('select revision from opc_accounts where project_id=$1',[b.projectId])).rows[0].revision;
+  console.info('ACCOUNT_SOURCE_DRIFT','before');
+  await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'strategy-a',expectedRevision:Number(revision)},{platform:'x',account:'strategy-b',expectedRevision:Number(otherRevision)}]});
+  console.info('ACCOUNT_SOURCE_DRIFT','after');
+  const target=pendingRead.snapshot.steps[f.flow.steps[0].id];
+  await expect(f.artifacts.execute({action:'confirm',projectId:pendingRead.projectId,roundId:pendingRead.roundId,requestId:randomUUID(),stepId:f.flow.steps[0].id,expectedVersion:target.version,expectedReviewVersion:target.reviewVersion})).rejects.toThrow();
+  await expect(f.artifacts.execute({action:'publish',projectId:pendingRead.projectId,roundId:pendingRead.roundId,requestId:randomUUID(),expectedSteps:Object.fromEntries(Object.entries(pendingRead.snapshot.steps).map(([k,v]:[string,any])=>[k,{version:v.version,reviewVersion:v.reviewVersion}]))})).rejects.toThrow();
+  expect((await sql.query('select steps from artifact_rounds where id=$1',[pendingAgain.roundId])).rows[0]).toEqual(beforeStale);
+},180000);
+
+it("OPC: account strategy revision after Skill upload preserves its exact published method",async()=>{
+  const f=await publishedDraft();
+  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+    body:[{id:randomUUID(),platform:'x',account:'strategy-upgrade',title:'旧来源选题',brief:'来源须保留',day:'2026-09-26'}]});
+  await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,
+    accounts:[{platform:'x',account:'strategy-upgrade',expectedRevision:null}]});
+  const account=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0];
+  const revisedPackage=makePackage(f.pack.id,true);
+  const revisedFlow=structuredClone(f.flow);
+  revisedFlow.steps[0].title='更新后的需求确认';
+  revisedFlow.steps[0].information=[
+    ...revisedFlow.steps[0].information,
+    {id:'new_need',title:'新增待确认问题',required:true,profileKey:'new_need'},
+  ];
+  revisedFlow.report.sections[0].title='更新后的需求确认';
+  const revisedRegistration='opc-account-revised-'+randomUUID();
+  await publishSkillPackage(admin,f.owner,revisedPackage);
+  await sql.query('update artifact_workflows set enabled=false where id=$1',[f.registration]);
+  await sql.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',
+    [revisedRegistration,f.moduleId,revisedPackage.id,revisedPackage.revisionId,revisedFlow,'新版定位']);
+  const started=await f.service.accountStrategyBegin(account.projectId,randomUUID());
+  const draft=await f.service.read(started.draftId);
+  expect(draft.snapshot.workflow.steps[0].title).toBe(f.flow.steps[0].title);
+  expect(draft.information[revisedFlow.steps[0].id].schema.map((field:{title:string})=>field.title))
+    .not.toContain('新增待确认问题');
+  expect(draft.information[revisedFlow.steps[0].id].values.new_need?.value??'').toBe('');
+  expect((await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0].sourceVersionId)
+    .toBe(f.sourceVersionId);
+},180000);
+
+it("OPC: library edits retain source Skill fields after a renamed method is published",async()=>{
+  const f=await publishedDraft();
+  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+    body:[{id:randomUUID(),platform:'x',account:'renamed-schema',title:'旧稿来源',brief:'保留来源',day:'2026-09-26'}]});
+  await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,
+    accounts:[{platform:'x',account:'renamed-schema',expectedRevision:null}]});
+  const account=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0];
+  const nextPackage=makePackage(f.pack.id,true);
+  const nextFlow=structuredClone(f.flow);
+  nextFlow.steps[0].id='renamed-step';
+  nextFlow.steps[0].title='新版问题顺序';
+  nextFlow.steps[0].information![0].id='renamed-goal';
+  nextFlow.steps[0].information![0].title='新版目标问题';
+  nextFlow.steps[1].dependsOn=['renamed-step'];
+  nextFlow.report.sections[0].stepId='renamed-step';
+  nextFlow.report.sections[0].title='新版问题顺序';
+  const nextRegistration='opc-renamed-'+randomUUID();
+  await publishSkillPackage(admin,f.owner,nextPackage);
+  await sql.query('update artifact_workflows set enabled=false where id=$1',[f.registration]);
+  await sql.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',
+    [nextRegistration,f.moduleId,nextPackage.id,nextPackage.revisionId,nextFlow,'新版问题']);
+  const directSchema=await sql.query('select opc_account_strategy_schema($1,$2) as schema',[f.actor,account.projectId]);
+  expect(directSchema.rows[0].schema.registrationId).toBe(f.registration);
+  const schema=await f.service.accountStrategySchema(account.projectId);
+  expect(schema.registrationId).toBe(f.registration);
+  expect(schema.workflow.steps[0].information[0].id).toBe('goal');
+  const other=await publishedDraft();
+  await expect(other.service.accountStrategySchema(account.projectId)).rejects.toThrow('OPC_DENIED');
+  await expect(f.service.accountStrategySave({accountProjectId:account.projectId,requestId:randomUUID(),
+    expectedSourceVersionId:f.sourceVersionId,expectedPendingDraftId:null,expectedRegistrationId:nextRegistration,
+    edits:{'renamed-step':{'renamed-goal':'旧 Skill 的过期保存'}}})).rejects.toThrow('OPC_VERSION_CONFLICT');
+  const {browser,page}=await planBrowser(f);
+  try{
+    await page.goto(process.env.V3_LOCAL_APP+'/library');
+    await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/renamed-schema/}).click();
+    await page.getByRole('button',{name:/x · renamed-schema.*查看详情/}).click();
+    const dialog=page.getByRole('dialog',{name:'定位详情'});
+    await dialog.getByRole('button',{name:'修改定位'}).click();
+    await dialog.getByText(f.flow.steps[0].title,{exact:true}).waitFor();
+    await dialog.getByText('已知目标 0',{exact:true}).first().waitFor();
+    expect(await dialog.getByText('新版目标问题').count()).toBe(0);
+    await dialog.getByRole('textbox').first().fill('取消后不能写入');
+    await dialog.getByRole('button',{name:'取消'}).click();
+    expect((await sql.query('select count(*)::int as n from opc_account_strategy_drafts where account_project_id=$1',[account.projectId])).rows[0].n).toBe(0);
+    await dialog.getByRole('button',{name:'修改定位'}).click();
+    await dialog.getByRole('textbox').first().fill('新版问题下的待确认答案');
+    await dialog.getByRole('button',{name:'确认保存'}).click();
+    await dialog.getByRole('status').filter({hasText:'已保存到此账号的待确认定位草稿'}).waitFor();
+  }finally{await browser.close();}
+  const updated=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0];
+  expect(updated.sourceVersionId).toBe(f.sourceVersionId);
+  expect(updated.pendingStrategyDraftId).toBeTruthy();
+  const draft=await f.service.read(updated.pendingStrategyDraftId);
+  expect(draft.snapshot.workflow.steps[0].id).toBe(f.flow.steps[0].id);
+  expect(draft.information[f.flow.steps[0].id].values.goal).toMatchObject({value:'新版问题下的待确认答案',status:'provisional'});
+},180000);
+
+it("OPC: manual positioning keeps both the composer and current answer editable",async()=>{
+  const f=await mergedPositioningFixture();
+  await planFixtureModel(f.moduleId);
+  const d=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'manual'});
+  const {chromium}=await import('../../../../../apps/web/node_modules/@playwright/test');
+  const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+  const context=await browser.newContext({viewport:{width:1440,height:900}});
+  await context.route('**/*',route=>['127.0.0.1','localhost'].includes(new URL(route.request().url()).hostname)?route.continue():route.abort());
+  const page=await context.newPage();page.setDefaultTimeout(60000);
+  try{
+    await page.goto(process.env.V3_LOCAL_APP+'/login?redirect='+encodeURIComponent('/positioning/'+d.draftId));
+    await page.getByPlaceholder('name@example.com').fill(f.email);
+    await page.getByPlaceholder('输入你的密码').fill(f.password);
+    await page.getByRole('button',{name:'登录',exact:true}).last().click();
+    await page.waitForURL(url=>url.pathname==='/positioning/'+d.draftId);
+    const mentor=page.getByRole('textbox',{name:'给导师的回复',exact:true});
+    const answer=page.getByRole('textbox',{name:'产品与服务',exact:true});
+    await answer.waitFor();
+    const phases=page.getByRole('navigation',{name:'定位步骤'}).getByRole('button');
+    expect(await phases.count()).toBe(6);
+    for(const [index,title] of ['需求确认','竞品研究','账号定位','内容策略','运营建议','商业规划'].entries())
+      expect((await phases.nth(index).innerText()).replace(/\s+/g,' ')).toContain(`${index+1} ${title}`);
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-six-stage-positioning-desktop.png'});
+    await mentor.fill('请帮我理解这一步怎样回答。');
+    await answer.fill('我教摄影新手建立每周拍摄练习。');
+    expect(await mentor.inputValue()).toBe('请帮我理解这一步怎样回答。');
+    await page.getByText('已自动保存',{exact:true}).waitFor();
+    await page.reload();
+    expect(await mentor.inputValue()).toBe('请帮我理解这一步怎样回答。');
+    expect(await answer.inputValue()).toBe('我教摄影新手建立每周拍摄练习。');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await page.getByRole('log',{name:'完整导师消息'}).getByText('请帮我理解这一步怎样回答。',{exact:true}).waitFor({timeout:15000});
+  }finally{await browser.close();}
+},180000);
+
+it("OPC: prior confirmed information remains scoped after edits and reader upgrade",async()=>{
+ const f=await fixture(3,false,2);
+ const d=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'manual'});
+ const read=()=>f.service.read(d.draftId);
+ const values={goal:{status:'confirmed',nature:'fact',value:'Previously confirmed'},extra0:{status:'deferred',nature:'unknown',value:'Explicitly deferred'},extra1:{status:'provisional',nature:'decision',value:'Never confirmed'}};
+ const write=async(next:typeof values)=>f.service.information({draftId:d.draftId,stepId:'step-0',requestId:randomUUID(),expectedVersion:(await read()).snapshot.steps['step-0'].version,values:next});
+ await write(values);
+ // No completed-step confirmation is needed to preserve an individually confirmed field.
+ expect((await read()).snapshot.steps['step-0'].valid).toBe(false);
+ await write({...values,goal:{...values.goal,status:'provisional',value:'Edited confirmed answer'},extra0:{...values.extra0,status:'provisional',value:'Edited deferred answer'}});
+ const edited=await read();
+ expect(edited.information['step-0'].previouslyConfirmed).toEqual(['goal']);
+ expect(edited.information['step-1'].previouslyConfirmed).toEqual([]);
+ const records=async()=>(await sql.query('select to_jsonb(a) row from artifact_requests a where project_id=$1 order by request_id',[d.projectId])).rows;
+ const frozen=await records();
+ const {readFile}=await import('node:fs/promises');
+ const migration=await readFile(new URL('../../../../db/migrations/0133_opc_confirmed_information_history.sql',import.meta.url),'utf8');
+ await sql.query(await readFile(new URL('../../../../db/migrations/0120_opc_entry_projection.sql',import.meta.url),'utf8'));
+ try{
+  expect((await read()).information['step-0'].previouslyConfirmed).toBeUndefined();
+ }finally{await sql.query(migration);}
+ await sql.query(migration);
+ expect((await read()).information['step-0']).toEqual(edited.information['step-0']);
+ expect(await records()).toEqual(frozen);
+ const other=await fixture(3);
+ await expect(other.service.read(d.draftId)).rejects.toThrow('OPC_DENIED');
+ const privileges=(await sql.query("select has_function_privilege('authenticated','opc_query(uuid,uuid)','execute') client,has_function_privilege('service_role','opc_query(uuid,uuid)','execute') server")).rows[0];
+ expect(privileges).toEqual({client:false,server:true});
+ await sql.query('update bill2_drafts set revoked=true where id=$1',[d.draftId]);
+ await expect(read()).rejects.toThrow('OPC_DENIED');
+ // A revision inherits only its exact published predecessor's confirmed values.
+ await sql.query('update bill2_drafts set revoked=false where id=$1',[d.draftId]);
+ const published=await completed(3,'mentor');
+ expect((await published.service.read(published.d.draftId)).information['step-0'].previouslyConfirmed).toEqual(['goal']);
+ await published.service.revise(published.d.draftId,randomUUID(),published.d.roundId);
+ const revised=await published.service.read(published.d.draftId);
+ expect(revised.information['step-0'].previouslyConfirmed).toEqual(['goal']);
+ await published.service.information({draftId:published.d.draftId,stepId:'step-0',requestId:randomUUID(),expectedVersion:revised.snapshot.steps['step-0'].version,
+  values:{goal:{...revised.information['step-0'].values.goal,status:'provisional',value:'A corrected inherited decision'}}});
+ const {browser,page}=await planBrowser(published);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+published.d.draftId);
+  await page.reload();
+  const inherited=page.getByRole('textbox',{name:'已确认：已知目标 0',exact:true});
+  await inherited.waitFor();
+  expect(await inherited.inputValue()).toBe('A corrected inherited decision');
+  await page.getByRole('button',{name:'确认这项修改',exact:true}).first().click();
+  await expect.poll(async()=>(await published.service.read(published.d.draftId)).information['step-0'].values.goal.status).toBe('confirmed');
+ }finally{await browser.close();}
+},60000);
+
+it("OPC: approved six-stage guided positioning keeps one editable conversation and current question",async()=>{
+  const f=await mergedPositioningFixture();
+  await planFixtureModel(f.moduleId);
+  const {chromium}=await import('../../../../../apps/web/node_modules/@playwright/test');
+  const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+  const context=await browser.newContext({viewport:{width:1600,height:900},deviceScaleFactor:1});
+  await context.route('**/*',route=>['127.0.0.1','localhost'].includes(new URL(route.request().url()).hostname)?route.continue():route.abort());
+  const page=await context.newPage();page.setDefaultTimeout(60000);
+  try{
+    await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/positioning');
+    await page.getByPlaceholder('name@example.com').fill(f.email);
+    await page.getByPlaceholder('输入你的密码').fill(f.password);
+    await page.getByRole('button',{name:'登录',exact:true}).last().click();
+    await page.waitForURL(url=>url.pathname==='/positioning');
+    const fixtureDraft=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'mentor',businessName:'摄影入门课程'});
+    await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+fixtureDraft.draftId);
+    const draftId=page.url().split('/positioning/')[1]?.split('?')[0]??'';
+    expect(draftId).toBeTruthy();
+    const phases=page.getByRole('navigation',{name:'定位步骤'}).getByRole('button');
+    await expect.poll(()=>phases.count()).toBe(6);
+    for(const [index,title] of ['需求确认','竞品研究','账号定位','内容策略','运营建议','商业规划'].entries())
+      expect((await phases.nth(index).innerText()).replace(/\s+/g,' ')).toContain(`${index+1} ${title}`);
+    const answer=page.getByRole('textbox',{name:'产品与服务',exact:true});
+    const mentor=page.getByRole('textbox',{name:'给导师的回复',exact:true});
+    await answer.fill('摄影入门课程，用真实场景带新手练习取景。');
+    await page.getByText('已自动保存',{exact:true}).waitFor();
+    await mentor.fill('我想先聊真实的学员困境。');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await page.getByRole('log',{name:'完整导师消息'}).getByText('我想先聊真实的学员困境。',{exact:true}).waitFor();
+    await page.evaluate(()=>document.fonts.ready);
+    console.error('SIX_STAGE_METRICS',JSON.stringify(await page.evaluate(()=>{
+      const entries:[string,string][]=[['rail','[aria-label="工作区导航"]'],['center','main'],['right','[aria-label="当前成果"]'],['composer','[aria-label="给导师的回复"]']];
+      return Object.fromEntries(entries.map(([name,selector])=>{const element=document.querySelector(selector);if(!element)return[name,null];const rect=element.getBoundingClientRect(),style=getComputedStyle(element);return[name,{x:rect.x,y:rect.y,width:rect.width,height:rect.height,fontSize:style.fontSize,color:style.color,background:style.backgroundColor}]}));
+    })));
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-approved-six-stage-guided-1600x900.png'});
+    await page.setViewportSize({width:390,height:844});
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-approved-six-stage-guided-390x844.png'});
+    await page.getByRole('button',{name:'展开右边栏'}).click();
+    await answer.waitFor({state:'visible'});
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-approved-six-stage-answer-390x844.png'});
+    await page.getByRole('button',{name:'收起成果面板'}).click();
+    await page.setViewportSize({width:1600,height:900});
+    await page.reload();
+    expect(await answer.inputValue()).toBe('摄影入门课程，用真实场景带新手练习取景。');
+    const answers:[string,string][]=[
+      ['准备经营的平台','先做公众号和小红书，公众号解释判断，小红书展示练习。'],
+      ['每周可用时间','每周稳定投入 3 小时。'],
+      ['参考研究结论','借鉴同场景前后对照的讲解方式，不以器材评测为主。'],
+      ['优先服务的用户','会操作相机，但不知道如何整理画面的摄影新手。'],
+      ['价值与依据','曾带学员在同一街景中移动机位，用前后两张照片解释背景干扰。'],
+      ['内容表达与平台安排','公众号解释判断；小红书提供练习清单。'],
+      ['可持续的制作安排','每周先完成一个核心案例，再按时间选择平台版本。'],
+      ['内容如何支持业务','先帮助用户完成一次构图练习，再说明课程的系统训练。'],
+    ];
+    const confirm=page.getByRole('button',{name:'确认当前信息，继续',exact:true});
+    for(const [index,[label,value]] of answers.entries()){
+      await confirm.click({timeout:15000});
+      const next=page.getByRole('textbox',{name:label,exact:true});
+      await next.waitFor();
+      if(index===0){
+        const reached=page.getByRole('navigation',{name:'本步骤已到达的问题'}).getByRole('button');
+        await expect.poll(()=>reached.count()).toBe(2);
+        const before=await reached.allTextContents();
+        await reached.nth(0).click();
+        await reached.nth(1).click();
+        expect(await reached.allTextContents()).toEqual(before);
+      }
+      await next.fill(value);
+      await page.getByText('已自动保存',{exact:true}).waitFor();
+      const stepIndex=[0,0,1,2,2,3,4,5][index];
+      const fieldId=['platforms','time','reference','audience','difference','roles','cadence','offer'][index];
+      await expect.poll(async()=> (await f.service.read(draftId)).information[f.flow.steps[stepIndex].id].values?.[fieldId]?.value,{timeout:10000}).toBe(value);
+      if([2,3,5,6,7].includes(index)){
+        await page.evaluate(()=>document.fonts.ready);
+        await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+`/u2-six-stage-${index+2}-1600x900.png`});
+      }
+    }
+    await confirm.click({timeout:15000});
+    await expect.poll(async()=>{
+      const state=await f.service.read(draftId);
+      return state.snapshot.workflow.steps.map((step:{id:string})=>Object.values(state.information[step.id].values??{}).map((entry:{status:string})=>entry.status));
+    },{timeout:20000}).toEqual([['confirmed','confirmed','confirmed'],['confirmed'],['confirmed','confirmed'],['confirmed'],['confirmed'],['confirmed']]);
+    const final=await f.service.read(draftId);
+    expect(final.snapshot.workflow.steps).toHaveLength(6);
+    for(const step of final.snapshot.workflow.steps){
+      const values=final.information[step.id].values;
+      expect(Object.values(values).every((entry:{status:string})=>entry.status==='confirmed')).toBe(true);
+    }
+    const earlier=page.getByRole('textbox',{name:'已确认：产品与服务'});
+    await earlier.fill('摄影入门课程，用真实学员案例讲解取景。');
+    await expect.poll(async()=> (await f.service.read(draftId)).information[f.flow.steps[0].id].values?.product?.status,{timeout:15000}).toBe('provisional');
+    await page.reload(); // A saved correction must remain available after the server projection refreshes.
+    const reconfirm=page.getByRole('button',{name:'确认这项修改',exact:true}).first();
+    await expect.poll(()=>reconfirm.isEnabled(),{timeout:15000}).toBe(true);
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-six-stage-reconfirm-1600x900.png'});
+    await reconfirm.click({timeout:15000});
+    await expect.poll(async()=> (await f.service.read(draftId)).information[f.flow.steps[0].id].values?.product?.status,{timeout:15000}).toBe('confirmed');
+    await expect.poll(async()=> (await f.service.read(draftId)).snapshot.steps[f.flow.steps[0].id].valid,{timeout:15000}).toBe(true);
+    // A later explicit deferral must not be relabelled as a pending correction.
+    const confirmed=await f.service.read(draftId),stepId=f.flow.steps[0].id;
+    await f.service.information({draftId,stepId,requestId:randomUUID(),expectedVersion:confirmed.snapshot.steps[stepId].version,
+      values:{...confirmed.information[stepId].values,product:{...confirmed.information[stepId].values.product,status:'deferred'}}});
+    await page.reload();
+    await page.getByRole('textbox',{name:'已确认：准备经营的平台',exact:true}).waitFor();
+    expect(await earlier.count()).toBe(0);
+    expect((await f.service.read(draftId)).information[stepId].values.product.status).toBe('deferred');
+  }catch(error){console.info('U4_GUIDED_FAILURE',error instanceof Error?error.stack:'unknown');throw error;}finally{console.info('U4_GUIDED_CLOSE_START');await browser.close();console.info('U4_GUIDED_CLOSED');}
+},240000);
+
+it("OPC: manual video revisions preserve execution ancestry, ownership and exact replay", async () => {
+  const f=await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+    body:[{id:randomUUID(),platform:'x',account:'video-revision-account',title:'口播稿修订',brief:'人工编辑后仍须保留原执行来源。',day:'2026-09-26',contentType:'video'}]});
+  const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,
+    accounts:[{platform:'x',account:'video-revision-account',expectedRevision:null}]});
+  const {browser,page}=await planBrowser(f);
+  try{
+    await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+work.sessionId);
+    await page.getByLabel('消息',{exact:true}).fill('请给我一版可以修改的口播稿。');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    try { await page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true}).waitFor({timeout:60000}); }
+    catch (error) { console.error('VIDEO_ADOPTION_DIAGNOSTIC',JSON.stringify({body:(await page.locator('body').innerText()).slice(-1200),executions:(await admin.rpc('runtime_view',{p_actor_id:f.actor,p_session_id:work.sessionId})).data?.executions?.map((entry:{state:string;skillExecution:boolean;unavailableReason:string|null;input:string|null})=>({state:entry.state,skillExecution:entry.skillExecution,unavailableReason:entry.unavailableReason,input:entry.input}))}));throw error; }
+    await page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true}).click();
+    await page.getByRole('heading',{name:'口播稿已定稿。要先制作分镜脚本吗？',exact:true}).waitFor({timeout:60000});
+    const root=(await sql.query("select * from opc_content_versions where work_item_id=$1 and kind='script' and version=1",[work.workItemId])).rows[0];
+    expect(root.execution_id).toBeTruthy();
+    await expect(f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:0,sourceContentId:null,
+      kind:'script',status:'draft',title:'不允许的独立稿',body:'没有原执行'})).rejects.toThrow('OPC_VERSION_CONFLICT');
+    const draftRequest={workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:1,sourceContentId:root.id,
+      kind:'script' as const,status:'draft' as const,title:'人工口播稿',body:'人工修订第一版'};
+    const [draft,replay]=await Promise.all([f.service.contentManualSave(draftRequest),f.service.contentManualSave(draftRequest)]);
+    expect(replay).toEqual(draft);
+    expect(draft).toMatchObject({version:2,status:'draft',body:'人工修订第一版'});
+    await expect(f.service.contentManualSave({...draftRequest,body:'偷换稿件'})).rejects.toThrow('OPC_REQUEST_CONFLICT');
+    await expect(f.service.contentManualSave({...draftRequest,requestId:randomUUID(),body:'过期修订'})).rejects.toThrow('OPC_VERSION_CONFLICT');
+    const final=await f.service.contentManualSave({...draftRequest,requestId:randomUUID(),expectedVersion:2,sourceContentId:draft.id,
+      status:'final',body:'人工修订并明确定稿'});
+    expect(final).toMatchObject({version:3,status:'final'});
+    expect((await sql.query('select opc_content_allowed($1,$2) allowed',[f.actor,final.id])).rows[0].allowed).toBe(true);
+    const outsider=await publishedDraft();
+    await expect(outsider.service.contentManualSave({...draftRequest,requestId:randomUUID(),expectedVersion:3,sourceContentId:final.id}))
+      .rejects.toThrow('OPC_CONTENT_DENIED');
+    await expect(outsider.service.videoMaterialPrepare({workItemId:work.workItemId,requestId:randomUUID(),sourceScriptId:final.id,
+      choice:'storyboard',expectedStoryboardVersion:0,expectedEditingVersion:0})).rejects.toThrow();
+    const material=await f.service.videoMaterialPrepare({workItemId:work.workItemId,requestId:randomUUID(),sourceScriptId:final.id,
+      choice:'storyboard',expectedStoryboardVersion:0,expectedEditingVersion:0});
+    expect(material.sessionId).toBe(work.sessionId);
+    const projected=(await f.service.library({search:'口播稿修订',from:null,to:null})).businesses
+      .flatMap((business:{accounts:Array<{items:Array<{workItemId:string;content:Array<{id:string;sourceContentId:string|null;version:number}>}>}>})=>business.accounts.flatMap(account=>account.items))
+      .find((item:{workItemId:string})=>item.workItemId===work.workItemId);
+    expect(projected?.content.filter((version:{version:number})=>version.version<=3)).toHaveLength(3);
+    expect(projected?.content.find((version:{id:string})=>version.id===final.id)?.sourceContentId).toBe(draft.id);
+    let previous=final;
+    for(let revision=4;revision<=67;revision++){
+      previous=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:revision-1,
+        sourceContentId:previous.id,kind:'script',status:'draft',title:'长期修订的口播稿',body:'第 '+revision+' 次人工修订'});
+    }
+    expect(previous.version).toBe(67);
+    expect((await sql.query('select opc_content_allowed($1,$2) allowed',[f.actor,previous.id])).rows[0].allowed).toBe(true);
+  }finally{await browser.close();}
+},180000);
+
+it("OPC: final script asks before derivatives, supports a partial choice, and marks prior results old after re-finalizing", async () => {
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'consent-account', title: '口播稿授权边界', brief: '验证口播稿定稿与分镜、剪辑建议的授权分离。', day: '2026-09-26', contentType:'video' }] });
+  const [work] = await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId,
+    accounts: [{ platform: 'x', account: 'consent-account', expectedRevision: null }] });
+  const { browser, page } = await planBrowser(f);
+  const packageRuns = async () => Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, work.sessionId])).rows[0].n);
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    await page.getByLabel('消息', { exact: true }).fill('先讨论并给我第一版口播稿。');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
+    await finalize.waitFor({ timeout: 60000 });
+    await finalize.click();
+    await page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true }).waitFor();
+    expect(await packageRuns()).toBe(0);
+    expect(await page.getByRole('button',{name:'只生成剪辑建议',exact:true}).count()).toBe(0);
+    await page.getByLabel('消息',{exact:true}).fill('只生成剪辑建议');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await expect.poll(async()=>(await page.getByRole('alert').allTextContents()).join(' ')).toContain('请先完成');
+    expect(await packageRuns()).toBe(0);
+    const firstContent=(await sql.query("select id from opc_content_versions where work_item_id=$1 and kind='script'",[work.workItemId])).rows[0];
+    await expect(f.service.videoMaterialPrepare({workItemId:work.workItemId,requestId:randomUUID(),sourceScriptId:firstContent.id,choice:'editing',expectedStoryboardVersion:0,expectedEditingVersion:0})).rejects.toThrow('OPC_STORYBOARD_REQUIRED');
+
+    // A pre-upgrade editing-only binding keeps its original material on replay.
+    const {readFileSync}=await import('node:fs');
+    const legacyChoice={workItemId:work.workItemId,requestId:randomUUID(),sourceScriptId:firstContent.id,choice:'editing' as const,expectedStoryboardVersion:0,expectedEditingVersion:0};
+    await sql.query(readFileSync('../../packages/db/migrations/0119_opc_video_admission.sql','utf8'));
+    const legacyMaterial=await f.service.videoMaterialPrepare(legacyChoice);
+    await sql.query(readFileSync('../../packages/db/migrations/0121_opc_storyboard_dependency.sql','utf8'));
+    await sql.query(readFileSync('../../packages/db/migrations/0121_opc_storyboard_dependency.sql','utf8'));
+    await sql.query(readFileSync('../../packages/db/migrations/0122_opc_content_type.sql','utf8'));
+    await sql.query(readFileSync('../../packages/db/migrations/0122_opc_content_type.sql','utf8'));
+    expect(await f.service.videoMaterialPrepare(legacyChoice)).toEqual({sessionId:legacyMaterial.sessionId,revision:legacyMaterial.revision,hash:legacyMaterial.hash});
+    await f.service.videoMaterialPrepare({...legacyChoice,action:'abandon'});
+    const independent=await browser.newContext();
+    await independent.route('**/*',route=>{const u=new URL(route.request().url());return ['127.0.0.1','localhost'].includes(u.hostname)||['data:','blob:'].includes(u.protocol)?route.continue():route.abort();});
+    const staleTab=await independent.newPage();staleTab.setDefaultTimeout(90000);
+    await staleTab.goto(process.env.V3_LOCAL_APP+'/login?redirect='+encodeURIComponent('/runtime?session='+work.sessionId));
+    await staleTab.getByPlaceholder('name@example.com').fill(f.email);
+    await staleTab.getByPlaceholder('输入你的密码').fill(f.password);
+    await staleTab.getByRole('button',{name:'登录',exact:true}).last().click();
+    await staleTab.waitForURL(url=>url.pathname==='/runtime');
+    await staleTab.getByRole('button', { name: '只生成分镜', exact: true }).waitFor();
+    let releaseSecond!:()=>void,secondPrepared=false;const secondGate=new Promise<void>(resolve=>{releaseSecond=resolve;});
+    await staleTab.route('**/api/trpc/opc.prepareVideoMaterial*',async route=>{secondPrepared=true;await secondGate;await route.continue();});
+    const secondClick=staleTab.getByRole('button',{name:'只生成分镜',exact:true}).click();
+    await expect.poll(()=>secondPrepared,{timeout:30000}).toBe(true);
+
+    await page.getByLabel('消息', { exact: true }).fill('只生成分镜');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await page.getByRole('complementary',{name:'当前成果',exact:true}).waitFor();
+    await page.getByText('分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿',{exact:true}).waitFor({ timeout: 60000 });
+    expect(await packageRuns()).toBe(1);
+    expect(await page.getByText(/剪辑建议 · 第 1 版/).count()).toBe(0);
+    expect(await page.getByText('[OPC_VIDEO_PACKAGE_V1]',{exact:false}).count()).toBe(0);
+    expect(await page.getByText('只返回严格 JSON',{exact:false}).count()).toBe(0);
+    expect(await page.getByText('{"storyboard":',{exact:false}).count()).toBe(0);
+    releaseSecond();await secondClick;
+    await expect.poll(async()=>(await staleTab.getByRole('alert').allTextContents()).join(' '),{timeout:60000}).toContain('OPC_CONTENT_ALREADY_GENERATED');
+    expect(await packageRuns()).toBe(1);
+    await independent.close();
+
+    expect(await packageRuns()).toBe(1);
+
+    const pendingResponse=await fetch(process.env.V3_LOCAL_REST!+'/__runtime_pending',{method:'POST',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}});
+    expect(pendingResponse.ok).toBe(true);
+    await page.getByRole('button', { name: '只生成剪辑建议', exact: true }).click();
+    await expect.poll(async()=>(await page.getByRole('alert').allTextContents()).join(' '),{timeout:60000}).toContain('状态待核实');
+    const videoKey='opc-video-operation:'+work.sessionId;
+    const pendingOperation=JSON.parse((await page.evaluate(key=>localStorage.getItem(key),videoKey))!);
+    expect(pendingOperation.followup.executionId).toBeTruthy();
+    expect(await packageRuns()).toBe(2);
+    const frozenMaterial=(await sql.query("select m.content from opc_video_material_bindings b join runtime_scope_material m on m.session_id=b.session_id and m.revision=b.material_revision where b.request_id=$1",[pendingOperation.followup.requestId])).rows[0].content;
+    expect(JSON.parse(frozenMaterial.material).storyboardVersion).toBe(1);
+    expect(JSON.parse(frozenMaterial.material).storyboard).toContain('镜头 1');
+    const beforeRefinalize=(await f.service.library({search:'口播稿授权边界',from:null,to:null})).businesses
+      .flatMap((business:{accounts:Array<{items:Array<{workItemId:string;content:Array<{id:string;kind:string;executionId:string;version:number}>}>}>})=>business.accounts.flatMap(account=>account.items))
+      .find((item:{workItemId:string})=>item.workItemId===work.workItemId)!;
+    const firstScript=beforeRefinalize.content.find(entry=>entry.kind==='script')!;
+    await f.service.contentFromExecution({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:1,kind:'script',status:'final',executionId:firstScript.executionId,sourceContentId:null});
+    const finalResponse=await fetch(process.env.V3_LOCAL_REST!+'/__runtime_final',{method:'POST',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}});
+    expect(finalResponse.ok).toBe(true);
+    await page.reload();
+    await expect.poll(()=>page.evaluate(key=>localStorage.getItem(key),videoKey),{timeout:60000}).toBeNull();
+    await page.getByRole('complementary',{name:'当前成果',exact:true}).waitFor();
+    await page.getByText('账号已保存 v2 · 已定稿',{exact:true}).waitFor({ timeout: 60000 });
+    await page.getByText('分镜 · 第 1 版 · 已定稿 · 旧口播稿版本',{exact:true}).waitFor();
+    await page.getByText('剪辑建议 · 第 1 版 · 已定稿 · 旧口播稿版本',{exact:true}).waitFor({ timeout: 60000 });
+    expect(await packageRuns()).toBe(2);
+    await page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true }).waitFor();
+    await page.getByRole('button', { name: '暂时结束', exact: true }).click();
+    expect(await page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true }).count()).toBe(0);
+    const storyboardExecution=beforeRefinalize.content.find(entry=>entry.kind==='storyboard')!.executionId;
+    const storyMaterial=(await sql.query("select (payload#>>'{scopeMaterial,revision}')::bigint revision from runtime_executions where id=$1",[storyboardExecution])).rows[0].revision;
+    await sql.query("select runtime_material($1,$2,'revoke',NULL,$3)",[f.actor,work.sessionId,storyMaterial]);
+    expect((await sql.query('select runtime_history_available($1) allowed',[pendingOperation.followup.executionId])).rows[0].allowed).toBe(false);
+
+  } finally { await fetch(process.env.V3_LOCAL_REST!+'/__runtime_final',{method:'POST',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}}).catch(()=>null);await browser.close(); }
+}, 300000);
+
+it("OPC: completed video generation permits the next dialogue and a new script final", async () => {
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'post-video-dialogue', title: '派生后继续讨论', brief: '验证派生成功后继续讨论并重新定稿。', day: '2026-09-26' }] });
+  const [work] = await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId,
+    accounts: [{ platform: 'x', account: 'post-video-dialogue', expectedRevision: null }] });
+  const { browser, page } = await planBrowser(f);
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    await page.getByRole('button',{name:'视频',exact:true}).click();
+    await page.getByLabel('口播稿正文',{exact:true}).waitFor();
+    await page.getByLabel('消息', { exact: true }).fill('先给我一版口播稿。');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    let finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
+    await finalize.waitFor({ timeout: 60000 }); await finalize.click();
+    await page.getByRole('button',{name:'只生成分镜',exact:true}).waitFor();
+    const firstScript=(await sql.query("select request_id,execution_id,status from opc_content_versions where work_item_id=$1 and kind='script'",[work.workItemId])).rows[0];
+    expect(firstScript.status).toBe('final');
+    const legacyKey='opc-script-final:'+work.sessionId;
+    // Old clients persisted this same completed-but-unacknowledged save without
+    // a kind discriminator. Restore that original request, never create a draft.
+    await page.evaluate(({key,requestId})=>{
+     const original=JSON.parse(localStorage.getItem(key+':completed:'+requestId)!);delete original.kind;
+     localStorage.setItem(key,JSON.stringify(original));
+    },{key:legacyKey,requestId:firstScript.request_id});
+    await page.reload();
+    await expect.poll(()=>page.evaluate(key=>localStorage.getItem(key),legacyKey)).toBeNull();
+    expect(await page.evaluate(({key,id})=>localStorage.getItem(key+':rejected:'+id),{key:legacyKey,id:firstScript.execution_id})).toBeNull();
+    expect((await sql.query("select request_id,execution_id,status from opc_content_versions where work_item_id=$1 and kind='script'",[work.workItemId])).rows).toEqual([firstScript]);
+    await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
+    await page.locator('summary').filter({hasText:'分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿'}).waitFor({ timeout: 60000 });
+    expect(await page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true }).count()).toBe(0);
+
+    const rewriteInput = '请继续讨论并给我一版改写后的口播稿。';
+    await page.getByLabel('消息', { exact: true }).fill(rewriteInput);
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    const rewriteCard = page.getByRole('article').filter({ hasText: rewriteInput });
+    finalize = rewriteCard.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
+    await finalize.waitFor({ timeout: 60000 }); await finalize.click();
+    await page.getByText('账号已保存 v2 · 已定稿',{exact:true}).waitFor({ timeout: 60000 });
+    await page.locator('summary').filter({hasText:'分镜 · 第 1 版 · 已定稿 · 旧口播稿版本'}).waitFor();
+    await page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true }).waitFor();
+    expect((await page.getByRole('alert').allTextContents()).join(' ')).not.toContain('当前执行不可用');
+    const rewriteExecution = (await sql.query("select id from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input'=$3", [f.actor, work.sessionId, rewriteInput])).rows[0];
+    const savedScript = (await sql.query("select execution_id from opc_content_versions where actor_id=$1 and work_item_id=$2 and kind='script' and version=2", [f.actor, work.workItemId])).rows[0];
+    expect(savedScript.execution_id).toBe(rewriteExecution.id);
+  } finally { await browser.close(); }
+}, 240000);
+
+it("OPC: definite pre-admission failure revokes its claim and permits an explicit retry", async () => {
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'admission-retry', title: '准入失败恢复', brief: '验证未创建 execution 的确定失败不会永久占位。', day: '2026-09-27' }] });
+  const [work] = await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId,
+    accounts: [{ platform: 'x', account: 'admission-retry', expectedRevision: null }] });
+  const { browser, page } = await planBrowser(f);
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿。');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
+    await finalize.waitFor({ timeout: 60000 }); await finalize.click();
+    await page.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    let lateRequestBody = '';
+    await page.route('**/api/trpc/runtime.prepare*', route => {
+      if (!(route.request().postData() ?? '').includes('OPC_VIDEO_PACKAGE_V1')) return route.continue();
+      lateRequestBody = route.request().postData()!;
+      return route.abort();
+    });
+    await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
+    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('明确拒绝');
+    const abandoned = (await sql.query('select b.request_id,m.revoked from opc_video_material_bindings b join runtime_scope_material m on m.session_id=b.session_id and m.revision=b.material_revision where b.actor_id=$1 and b.work_item_id=$2 order by b.created_at desc limit 1', [f.actor, work.workItemId])).rows[0];
+    expect(abandoned.revoked).toBe(true);
+    expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2', [f.actor, abandoned.request_id])).rows[0].n).toBe(0);
+    await page.unroute('**/api/trpc/runtime.prepare*');
+    await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
+    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
+    expect(lateRequestBody).toContain('OPC_VIDEO_PACKAGE_V1');
+    await page.evaluate(async body => {
+      await fetch('/api/trpc/runtime.prepare?batch=1', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    }, lateRequestBody);
+    expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2', [f.actor, abandoned.request_id])).rows[0].n).toBe(0);
+    expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1 and request_id=$2', [f.actor, abandoned.request_id])).rows[0].n).toBe(0);
+    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, work.sessionId])).rows[0].n)).toBe(1);
+  } finally { await browser.close(); }
+}, 240000);
+
+it("OPC: video claim material stays exclusive and a rejected claim can be retried", async () => {
+  const { runtimeAdmissionService } = await import('../runtime/admission');
+  const f = await publishedDraft();
+  const modelId = await planFixtureModel(f.moduleId);
+  const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'shared-material', title: '共享材料保护', brief: '验证其他执行冻结后不能撤销材料。', day: '2026-09-29' }] });
+  const [work] = await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId,
+    accounts: [{ platform: 'x', account: 'shared-material', expectedRevision: null }] });
+  const { browser, page } = await planBrowser(f);
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿。');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
+    await finalize.waitFor({ timeout: 60000 }); await finalize.click();
+    await page.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    const item = (await f.service.library({ search: '', from: null, to: null })).businesses
+      .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;content: Array<{id: string;kind: string}>}>}>}) => business.accounts.flatMap(account => account.items))
+      .find((entry: {workItemId: string}) => entry.workItemId === work.workItemId)!;
+    const script = item.content.find(entry => entry.kind === 'script')!;
+    const claimRequestId = randomUUID();
+    const material = await f.service.videoMaterialPrepare({ workItemId: work.workItemId, requestId: claimRequestId, sourceScriptId: script.id,
+      choice: 'storyboard', expectedStoryboardVersion: 0, expectedEditingVersion: 0 });
+    const admission = runtimeAdmissionService(f.user, admin, { account: 'local', costPerCall: '0.02', creditsPerUsd: '1000', multiplier: '1', maxCalls: 1, maxOutputTokens: 1000, inputBytes: 32000, historyItems: 20, searchEnabled: false });
+    const otherRequestId = randomUUID();
+    await expect(admission.prepare({ sessionId: work.sessionId, requestId: otherRequestId, input: '尝试占用视频请求的专属材料', selection: { kind: 'ordinary', modelId }, network: 'deny', sources: [] })).rejects.toThrow('RUNTIME_ADMISSION_DENIED');
+    expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2', [f.actor, otherRequestId])).rows[0].n).toBe(0);
+    expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1 and request_id=$2', [f.actor, otherRequestId])).rows[0].n).toBe(0);
+    await f.service.videoMaterialPrepare({ action: 'abandon', workItemId: work.workItemId, requestId: claimRequestId, sourceScriptId: script.id,
+      choice: 'storyboard', expectedStoryboardVersion: 0, expectedEditingVersion: 0 });
+    expect((await sql.query('select revoked from runtime_scope_material where session_id=$1 and revision=$2', [work.sessionId, material.revision])).rows[0].revoked).toBe(true);
+    const retry = await f.service.videoMaterialPrepare({ workItemId: work.workItemId, requestId: randomUUID(), sourceScriptId: script.id,
+      choice: 'storyboard', expectedStoryboardVersion: 0, expectedEditingVersion: 0 });
+    expect(retry.revision).toBeGreaterThan(material.revision);
+  } finally { await browser.close(); }
+}, 240000);
+
+it("OPC: upgraded legacy partial result blocks a duplicate dispatch and remains recoverable", async () => {
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'legacy-partial', title: '旧单项结果恢复', brief: '验证升级前已完成但丢回包的单项结果。', day: '2026-09-28' }] });
+  const [work] = await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId,
+    accounts: [{ platform: 'x', account: 'legacy-partial', expectedRevision: null }] });
+  const { browser, page } = await planBrowser(f);
+  const packageRuns = async () => Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, work.sessionId])).rows[0].n);
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    await page.getByRole('button',{name:'视频',exact:true}).click();
+    await page.getByLabel('口播稿正文',{exact:true}).waitFor();
+    await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿。');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
+    await finalize.waitFor({ timeout: 60000 }); await finalize.click();
+    await page.route('**/api/trpc/opc.saveVideoResults*', route => route.abort());
+    await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
+    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('状态待核实');
+    const key = 'opc-video-operation:' + work.sessionId;
+    const original = JSON.parse((await page.evaluate(k => localStorage.getItem(k), key))!);
+    expect(original.followup.executionId).toBeTruthy(); expect(await packageRuns()).toBe(1);
+    await sql.query('alter table opc_video_material_bindings disable trigger artifact_immutable');
+    try { await sql.query('update opc_video_material_bindings set storyboard=null,editing=null,expected_storyboard_version=null,expected_editing_version=null where actor_id=$1 and request_id=$2', [f.actor, original.followup.requestId]); }
+    finally { await sql.query('alter table opc_video_material_bindings enable trigger artifact_immutable'); }
+
+    const independent = await browser.newContext();
+    await independent.route('**/*', route => { const u = new URL(route.request().url()); return ['127.0.0.1', 'localhost'].includes(u.hostname) || ['data:', 'blob:'].includes(u.protocol) ? route.continue() : route.abort(); });
+    const retry = await independent.newPage(); retry.setDefaultTimeout(90000);
+    await retry.goto(process.env.V3_LOCAL_APP + '/login?redirect=' + encodeURIComponent('/runtime?session=' + work.sessionId));
+    await retry.getByPlaceholder('name@example.com').fill(f.email); await retry.getByPlaceholder('输入你的密码').fill(f.password);
+    await retry.getByRole('button', { name: '登录', exact: true }).last().click(); await retry.waitForURL(url => url.pathname === '/runtime');
+    await retry.getByRole('button', { name: '只生成分镜', exact: true }).click();
+    await expect.poll(async () => (await retry.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('OPC_CONTENT_ALREADY_GENERATED');
+    expect(await packageRuns()).toBe(1); await independent.close();
+
+    await page.unroute('**/api/trpc/opc.saveVideoResults*'); await page.reload();
+    await page.locator('summary').filter({hasText:'分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿'}).waitFor({ timeout: 60000 });
+    expect(await packageRuns()).toBe(1);
+    const beforeRefinalize = (await f.service.library({ search: '旧单项结果恢复', from: null, to: null })).businesses
+      .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;content: Array<{id: string;kind: string;executionId: string}>}>}>}) => business.accounts.flatMap(account => account.items))
+      .find((item: {workItemId: string}) => item.workItemId === work.workItemId)!;
+    const firstScript = beforeRefinalize.content.find(entry => entry.kind === 'script')!;
+    const secondScript = await f.service.contentFromExecution({ workItemId: work.workItemId, requestId: randomUUID(), expectedVersion: 1,
+      kind: 'script', status: 'final', executionId: firstScript.executionId, sourceContentId: null });
+    await page.reload();
+    await page.getByText('账号已保存 v2 · 已定稿',{exact:true}).waitFor({ timeout: 60000 });
+    await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
+    await expect.poll(async () => {
+      const item = (await f.service.library({ search: '旧单项结果恢复', from: null, to: null })).businesses
+        .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;content: Array<{kind: string;sourceContentId: string|null}>}>}>}) => business.accounts.flatMap(account => account.items))
+        .find((entry: {workItemId: string}) => entry.workItemId === work.workItemId);
+      return item?.content.filter(entry => entry.kind === 'storyboard' && entry.sourceContentId === secondScript.id).length ?? 0;
+    }, { timeout: 60000 }).toBe(1);
+    await page.reload();
+    await page.locator('summary').filter({hasText:'分镜 · 第 2 版 · 已定稿 · 匹配当前口播稿'}).waitFor({ timeout: 60000 });
+    expect(await packageRuns()).toBe(2);
+  } finally { await browser.close(); }
+}, 300000);
+
+it("OPC: natural-language adoption stays complete after refresh and permits the next turn", async () => {
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const { browser, page } = await planBrowser(f);
+  const path = '/positioning/' + f.d.draftId + '/topics';
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + path);
+    await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
+    await page.getByRole('button', { name: '采用这个选题', exact: true }).first().waitFor({ timeout: 60000 });
+    await page.getByLabel('消息', { exact: true }).fill('采用第一条选题');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await expect.poll(async () => (await f.service.read(f.d.draftId)).handoffs.length, { timeout: 60000 }).toBe(1);
+    const before = await f.service.read(f.d.draftId);
+    await page.reload();
+    await page.getByLabel('消息', { exact: true }).waitFor();
+    expect(await page.getByRole('button', { name: '恢复原请求', exact: true }).count()).toBe(0);
+    expect((await page.getByRole('alert').allTextContents()).join(' ')).not.toContain('原请求身份');
+    await page.getByLabel('消息', { exact: true }).fill('请继续修改标题');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await expect.poll(async () => (await f.service.topicDraftRead(f.d.draftId)).version, { timeout: 60000 }).toBe(2);
+    await expect.poll(async () => {
+      const latest = await f.service.topicDraftRead(f.d.draftId);
+      const stored = await page.evaluate((sessionId) => JSON.parse(localStorage.getItem('opc-topic-candidate:' + sessionId) ?? 'null'),
+        (await f.service.topicRead(f.d.draftId)).sessionId);
+      return JSON.stringify(stored?.body) === JSON.stringify(latest.body);
+    }, { timeout: 10000 }).toBe(true);
+    const after = await f.service.read(f.d.draftId);
+    expect(after.handoffs).toEqual(before.handoffs);
+    expect(after.plans).toEqual(before.plans);
+  } finally { await browser.close(); }
+}, 240000);
+
+it("OPC: video package dispatch refuses a different frozen material before admission", async () => {
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'binding-account', title: '绑定检查', brief: '验证口播稿与分镜来源绑定。', day: '2026-09-25', contentType:'video' }] });
+  const [work] = await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: plan.planId, accounts: [{ platform: 'x', account: 'binding-account', expectedRevision: null }] });
+  const { browser, page } = await planBrowser(f);
+  let releasePrepare!: () => void;
+  let packagePrepare = false;
+  const gate = new Promise<void>(resolve => { releasePrepare = resolve; });
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
+    await finalize.waitFor({ timeout: 60000 });
+    await finalize.click();
+    await page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true }).waitFor();
+    await page.route('**/api/trpc/runtime.prepare*', async route => {
+      if (!(route.request().postData() ?? '').includes('OPC_VIDEO_PACKAGE_V1')) return route.continue();
+      packagePrepare = true; await gate; await route.continue();
+    });
+    const click = page.getByRole('button', { name: '先做分镜，再生成剪辑建议', exact: true }).click();
+    await expect.poll(() => packagePrepare, { timeout: 30000 }).toBe(true);
+    const pendingVideo = JSON.parse((await page.evaluate(key => localStorage.getItem(key), 'opc-video-operation:' + work.sessionId))!);
+    const current = (await f.service.library({ search: '绑定检查', from: null, to: null })).businesses
+      .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;revision: number}>}>}) => business.accounts.flatMap(account => account.items))
+      .find((item: {workItemId: string}) => item.workItemId === work.workItemId);
+    await f.service.libraryEdit({ requestId: randomUUID(), target: 'item', targetId: work.workItemId, expectedRevision: current.revision,
+      patch: { title: '绑定检查已改', brief: '此修改产生另一份冻结 material。', day: '2026-09-25' } });
+    releasePrepare(); await click;
+    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('明确拒绝');
+    expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and request_id=$3', [f.actor, work.sessionId, pendingVideo.followup.requestId])).rows[0].n).toBe(0);
+    expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1 and request_id=$2', [f.actor, pendingVideo.followup.requestId])).rows[0].n).toBe(0);
+    const content = (await f.service.library({ search: '绑定检查已改', from: null, to: null })).businesses
+      .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;content: Array<{id: string;kind: string}>}>}>}) => business.accounts.flatMap(account => account.items))
+      .find((item: {workItemId: string}) => item.workItemId === work.workItemId).content;
+    const [sourceScript] = content.filter((entry: {kind: string}) => entry.kind === 'script');
+    expect(sourceScript).toBeDefined();
+    expect(content.filter((entry: {kind: string}) => entry.kind === 'storyboard' || entry.kind === 'editing')).toHaveLength(0);
+    await page.reload();
+    const retry = page.getByRole('button', { name: '先做分镜，再生成剪辑建议', exact: true });
+    await retry.waitFor(); await retry.click();
+    // The raced request is definitely rejected before admission. A later explicit
+    // choice may bind a new frozen material snapshot to the same exact final
+    // script; changing the library title does not create a new script version.
+    await page.getByText('分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', { exact: true }).waitFor({ timeout: 60000 });
+    await page.getByText('剪辑建议 · 第 1 版 · 已定稿 · 匹配当前口播稿', { exact: true }).waitFor({ timeout: 60000 });
+    const packageStates = (await sql.query("select state from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%' order by created_at", [f.actor, work.sessionId])).rows.map(row => row.state);
+    expect(packageStates).toEqual(['completed']);
+  } finally { releasePrepare?.(); await browser.close(); }
+}, 240000);
+
+it.each([[2, "same"], [2, "draft"], [2, "published"], [3, "published"]] as const)("OPC: old v%i executed lost reply restores its original source across revision %s", async (version, revise) => {
+  const started=Date.now();let phase='fixture';
+  const pending=new Map<object,string>();
+  const mark=(next:string)=>{phase=next;console.info('U4_LEGACY_PHASE',JSON.stringify({version,revise,phase,ms:Date.now()-started,pending:[...pending.values()]}));};
+  mark('fixture');
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const envelope = planEnvelopeFor(f);
+  // The old client already admitted/executed this request; only its UI reply
+  // was lost. The compatibility link must never perform a fresh admission.
+  mark('browser-login');
+  const { browser, page, key } = await planBrowser(f, { envelope });
+  page.on('request',request=>pending.set(request,new URL(request.url()).pathname));
+  page.on('requestfinished',request=>pending.delete(request));
+  page.on('requestfailed',request=>pending.delete(request));
+  page.on('pageerror',error=>console.info('U4_LEGACY_PAGE_ERROR',error.name));
+  const heartbeat=setInterval(()=>mark(phase),15000);
+  mark('browser-ready');
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + f.d.draftId + '/plan');
+    await page.getByText('服务端没有这条请求的准入记录；没有开始新的生成。', {exact:true}).waitFor();
+    expect(await page.getByRole('button', {name:'继续这条原请求',exact:true}).isDisabled()).toBe(true);
+    expect((await planIdentity(f.actor, f.d.draftId)).planExecutions).toBe(0);
+    expect(JSON.parse((await page.evaluate(k=>sessionStorage.getItem(k),key))!)).toEqual(envelope);
+    mark('unadmitted-verified');
+    const prepared = await f.service.prepareStep(envelope.request);
+    const { runtimeExecutor } = await import("../runtime/execute");
+    await runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:process.env.V3_RUNTIME_LOCAL_ENDPOINT!}).execute(prepared.executionId);
+    mark('receipt-saved');
+    let resultLost = 0;
+    await page.route('**/api/trpc/opc.planResult*', async route => { await route.fetch(); await route.abort(); resultLost += 1; });
+    await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + f.d.draftId + '/plan');
+    await page.getByRole('button', {name:'继续这条原请求',exact:true}).click();
+    await page.getByText('这次生成的结果暂时无法确认。原请求与原始记录仍保留，请稍后按原身份恢复。', {exact:true}).waitFor();
+    mark('lost-result-visible');
+    const identity = await planIdentityRows(f.actor);
+    const counts = await planIdentity(f.actor, f.d.draftId);
+    expect(counts.planExecutions).toBe(1);
+    await expect.poll(() => resultLost, { timeout: 30000 }).toBeGreaterThan(0);
+    await page.unroute('**/api/trpc/opc.planResult*');
+    if (revise !== "same") {
+      const revised = await f.service.revise(f.d.draftId, randomUUID(), f.d.roundId);
+      const snap = await f.artifacts.read(f.d.projectId, revised.roundId);
+      if (revise === 'published') await f.artifacts.execute({ action: 'publish', projectId: f.d.projectId, roundId: revised.roundId,
+        requestId: randomUUID(), expectedSteps: Object.fromEntries(Object.entries(snap.steps).map(([id, st]) => [id, { version: st.version, reviewVersion: st.reviewVersion }])) });
+      expect((await f.service.read(f.d.draftId)).roundId).not.toBe(f.d.roundId);
+    }
+    mark('round-revised');
+    await page.evaluate(({ key, id, version }) => {
+      const old = JSON.parse(sessionStorage.getItem(key)!);
+      old.v = version; if (version === 2) delete old.consentedAt;
+      sessionStorage.setItem(key, JSON.stringify(old));
+      sessionStorage.removeItem('opc-edit:' + id);
+    }, { key, id: f.d.draftId, version });
+    mark('legacy-reload-start');
+    await page.reload();
+    mark('legacy-reload-loaded');
+    await page.getByRole('heading', { name: '本机保留了一条早先的生成请求', exact: true }).waitFor();
+    await expect.poll(async () => (await page.getByRole('status').allTextContents()).join(' ')).toContain('服务端已保存这条请求的完成结果');
+    expect(await planIdentityRows(f.actor)).toEqual(identity);
+    await page.getByRole('button', { name: '继续这条原请求', exact: true }).click();
+    await page.getByRole('heading', { name: revise !== "same" ? '原定位轮次的计划结果 · 已恢复' : CANDIDATE_HEADING, exact: true }).waitFor();
+    expect(await planIdentityRows(f.actor)).toEqual(identity);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(counts);
+    expect((await topicIdentity(f.actor)).binds).toBe(0);
+    const stored = JSON.parse((await page.evaluate(k => sessionStorage.getItem(k), key))!);
+    expect(stored.request).toEqual(envelope.request);
+    expect(stored.sourceRoundId).toBe(f.d.roundId);
+    const executionId = (await f.service.planRequestState(f.d.draftId, envelope.request.requestId)).executionId;
+    const result = await f.service.planResult(f.d.draftId, executionId);
+    expect(result.sourceVersionId).toBe(f.sourceVersionId);
+    expect(result.sourceRoundId).toBe(f.d.roundId);
+    mark('original-result-verified');
+    const other = await fixture(3);
+    await expect(other.service.planResult(f.d.draftId, executionId)).rejects.toThrow('OPC_RESULT_DENIED');
+    if (revise !== "same") {
+      mark('historical-reload-start');
+      await page.reload();
+      mark('historical-reload-loaded');
+      await page.getByRole('heading', { name: '原定位轮次的计划结果 · 已恢复', exact: true }).waitFor();
+      expect(await planIdentityRows(f.actor)).toEqual(identity);
+      expect(await page.getByRole('button', { name: '采用候选到计划工作稿', exact: true }).count()).toBe(0);
+    }
+    if (revise === 'published' && version === 2) {
+      mark('migration-repeat-start');
+      const { readFile } = await import('node:fs/promises');
+      await sql.query(await readFile(new URL('../../../../db/migrations/0115_opc_historical_plan_result.sql', import.meta.url), 'utf8'));
+      mark('migration-repeat-done');
+      expect((await f.service.planResult(f.d.draftId, executionId)).sourceVersionId).toBe(f.sourceVersionId);
+      const privileges = (await sql.query("select has_function_privilege('authenticated','opc_plan_result(uuid,uuid,uuid)','execute') client, has_function_privilege('service_role','opc_plan_result(uuid,uuid,uuid)','execute') server")).rows[0];
+      expect(privileges).toEqual({ client: false, server: true });
+      mark('revoke-start');
+      await sql.query('update bill2_drafts set revoked=true where id=$1', [f.d.draftId]);
+      await expect(f.service.planResult(f.d.draftId, executionId)).rejects.toThrow('OPC_RESULT_DENIED');
+      mark('revoked-reload-start');
+      await page.reload();
+      mark('revoked-reload-loaded');
+      // Wait for the authorization verdict, not the initial empty loading view.
+      await page.getByText('原请求来源已撤回，不能继续恢复。', {exact:true}).or(page.getByRole('alert').filter({hasText:'无法读取这份定位'})).waitFor();
+      mark('revoked-verdict-visible');
+      // The browser cannot reveal its cached candidate once access is revoked.
+      await expect.poll(async()=>await page.getByRole('heading', {name:'原定位轮次的计划结果 · 已恢复',exact:true}).count()).toBe(0);
+      mark('final-identity-start');
+      expect(await planIdentityRows(f.actor)).toEqual(identity);
+      mark('final-identity-verified');
+    }
+  } finally { mark('browser-close-start');try {await browser.close();mark('browser-closed');}finally{clearInterval(heartbeat);} }
+}, 300000);
+
+it("OPC: two topic pages explicitly consent concurrently and execute one first turn", async () => {
+  const f = await publishedDraft(6);
+  const modelId = await planFixtureModel(f.moduleId);
+  const { browser, context, page } = await planBrowser(f);
+  const path = '/positioning/' + f.d.draftId + '/topics';
+  const tab = await context.newPage();
+  try {
+    await Promise.all([page.goto(process.env.V3_LOCAL_APP + path), tab.goto(process.env.V3_LOCAL_APP + path)]);
+    const buttons = [page, tab].map(p => p.getByRole('button', { name: '开始选题工作对话', exact: true }));
+    await Promise.all(buttons.map(b => b.waitFor()));
+    expect((await topicIdentity(f.actor)).binds).toBe(0);
+    await Promise.all(buttons.map(b => b.click()));
+    await Promise.all([page, tab].map(p => p.getByRole('button', { name: '采用这个选题', exact: true }).first().waitFor()));
+    expect(await topicIdentity(f.actor)).toEqual({ binds: 1, turns: 1, topicExecutions: 1, topicRuns: 1, reserves: 1 });
+    const opening = (await f.service.topicRead(f.d.draftId)).opening;
+    const run = (await sql.query('select request_id::text, payload, state from runtime_executions where actor_id=$1', [f.actor])).rows;
+    expect(run).toHaveLength(1);
+    expect(run[0].request_id).toBe(opening.requestId);
+    expect(run[0].state).toBe('completed');
+    const privileges = (await sql.query("select has_function_privilege('authenticated','opc_topic_consent(uuid,uuid,uuid)','execute') client, has_function_privilege('service_role','opc_topic_consent(uuid,uuid,uuid)','execute') server, has_table_privilege('authenticated','opc_topic_openings','select') records")).rows[0];
+    expect(privileges).toEqual({ client: false, server: true, records: false });
+    await page.screenshot({ path: process.env.V3_WORKBENCH_OUTPUT + '/topic-conversation.png', fullPage: true });
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(process.env.V3_WORKBENCH_OUTPUT + '/opc-acceptance.json', JSON.stringify({
+      url: process.env.V3_LOCAL_APP + path, actor: f.actor,
+      credentials: { email: f.email, password: f.password }, sessionId: (await f.service.topicRead(f.d.draftId)).sessionId,
+      moduleId: f.moduleId, modelId, mode: 'Synthetic topic fixture only; no real model, research, payment or external account creation',
+    }), { mode: 0o600 });
+  } finally { await browser.close(); }
+}, 180000);
+
+
+it("OPC: topic invalid messages and legacy invalid pending records remain recoverable without dispatch", async () => {
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const { browser, page } = await planBrowser(f);
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + f.d.draftId + '/topics');
+    await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
+    await page.getByRole('button', { name: '采用这个选题', exact: true }).first().waitFor();
+    const workspace = await f.service.topicRead(f.d.draftId);
+    const key = 'opc-topic-operation:' + workspace.sessionId;
+    const identity = await topicIdentity(f.actor);
+    const input = page.getByRole('textbox', { name: '消息', exact: true });
+    await input.fill('a'.repeat(8001));
+    // The shared composer bounds typed input before dispatch; backend schema
+    // validation still protects restored legacy requests below.
+    expect((await input.inputValue()).length).toBe(8000);
+    expect(await topicIdentity(f.actor)).toEqual(identity);
+    expect(await input.isEnabled()).toBe(true);
+    // A record frozen by the earlier UI before its schema rejection is equally
+    // provable invalid; release it without dispatch while retaining the edit.
+    const invalidId = randomUUID();
+    await page.evaluate(({ key, id, requestId, sourceVersionId }) => {
+      const candidate = JSON.parse(localStorage.getItem('opc-topic-candidate:' + id)!);
+      localStorage.setItem(key, JSON.stringify({ kind: 'save', request: {
+        draftId: candidate.body.length ? location.pathname.split('/')[2] : '', requestId,
+        expectedVersion: 0, sourceVersionId, body: candidate.body.map((row: object) => ({ ...row, title: '' })),
+      } }));
+    }, { key, id: workspace.sessionId, requestId: invalidId, sourceVersionId: workspace.sourceVersionId });
+    await page.reload();
+    await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
+    await expect.poll(() => page.evaluate(k => localStorage.getItem(k), key), { timeout: 30000 }).toBeNull();
+    expect(await page.evaluate(k => localStorage.getItem(k), key + ':invalid:' + invalidId)).not.toBeNull();
+    await page.getByRole('button', { name: '采用这个选题', exact: true }).first().waitFor();
+    expect((await f.service.topicDraftRead(f.d.draftId)).version).toBe(1);
+    expect(await topicIdentity(f.actor)).toEqual(identity);
+    await input.fill('请修改第一条选题');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await expect.poll(async () => (await topicIdentity(f.actor)).topicExecutions, { timeout: 30000 }).toBe(2);
+  } finally { await browser.close(); }
+}, 300000);
+
+it.each([false, true])("OPC: mentor history preserves a saved empty edit after refresh across revision %s", async (reviseRound) => {
+  const f = await fixture(1);
+  await planFixtureModel(f.moduleId);
+  const d = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: 'mentor' });
+  const { browser, page } = await planBrowser({ ...f, d });
+  const path = '/positioning/' + d.draftId;
+  const read = () => f.service.read(d.draftId);
+  const title = f.flow.steps[0].information![0].title;
+  const reply = '我想帮助刚接触短视频的人';
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + path);
+    await page.getByRole('log', { name: '完整导师消息' }).getByText('导师主动引导 · 1.1', { exact: true }).waitFor();
+    const input = page.getByRole('textbox', { name: '给导师的回复', exact: true });
+    await expect.poll(() => input.isEnabled(), { timeout: 30000 }).toBe(true);
+    await input.fill(reply);
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await expect.poll(async () => (await read()).information['step-0'].values?.goal?.value, { timeout: 30000 }).toBe(reply);
+    await expect.poll(() => input.inputValue(), { timeout: 30000 }).toBe('');
+    const oldIdentity = await planIdentityRows(f.actor);
+    if (reviseRound) {
+      // Publish/revise via the real business operations, then clear the
+      // inherited field through the actual page in the new round.
+      let state = (await read()).snapshot.steps['step-0'];
+      await f.artifacts.execute({ action: 'save', projectId: d.projectId, roundId: d.roundId,
+        requestId: randomUUID(), stepId: 'step-0', expectedVersion: state.version, body: 'Owner confirmed positioning for recovery test', evidenceIds: [] });
+      state = (await read()).snapshot.steps['step-0'];
+      await f.service.information({ draftId: d.draftId, stepId: 'step-0', requestId: randomUUID(), expectedVersion: state.version,
+        values: { goal: { status: 'confirmed', nature: 'decision', value: reply } } });
+      state = (await read()).snapshot.steps['step-0'];
+      await f.artifacts.execute({ action: 'confirm', projectId: d.projectId, roundId: d.roundId, requestId: randomUUID(),
+        stepId: 'step-0', expectedVersion: state.version, expectedReviewVersion: state.reviewVersion });
+      state = (await read()).snapshot.steps['step-0'];
+      await f.artifacts.execute({ action: 'publish', projectId: d.projectId, roundId: d.roundId, requestId: randomUUID(),
+        expectedSteps: { 'step-0': { version: state.version, reviewVersion: state.reviewVersion } } });
+      await f.service.revise(d.draftId, randomUUID(), d.roundId);
+      await page.reload();
+    }
+    const field = page.getByRole('textbox', { name: title, exact: true });
+    await expect.poll(() => field.inputValue(), { timeout: 30000 }).toBe(reply);
+    const beforeClear = (await read()).snapshot.steps['step-0'].version;
+    await field.fill('');
+    await expect.poll(async () => {
+      const saved = await read();
+      return [saved.snapshot.steps['step-0'].version, saved.information['step-0'].values.goal.value];
+    }, { timeout: 30000 }).toEqual([beforeClear + 1, '']);
+    if (reviseRound) await expect.poll(async () => (await read()).turns.filter((t: { roundId: string; kind: string }) => t.roundId !== d.roundId && t.kind === 'opening').length, { timeout: 30000 }).toBe(1);
+    await page.reload();
+    await page.getByRole('log', { name: '完整导师消息' }).getByText(reply, { exact: true }).waitFor();
+    await page.getByRole('button', { name: '重新读取状态', exact: true }).click();
+    await expect.poll(() => field.inputValue(), { timeout: 30000 }).toBe('');
+    // Wait through the page's autosave interval after history hydration. This
+    // would allow the old reply to silently refill and persist the field.
+    await page.waitForTimeout(1500);
+    const after = await read();
+    expect(after.information['step-0'].values.goal.value).toBe('');
+    expect(after.snapshot.steps['step-0'].version).toBe(beforeClear + 1);
+    expect((await planIdentityRows(f.actor)).filter(row => oldIdentity.includes(row))).toEqual(oldIdentity);
+    if (!reviseRound) expect(await planIdentityRows(f.actor)).toEqual(oldIdentity);
+    expect(after.turns.find((t: { kind: string }) =>
+      ["mentor", "organizer"].includes(t.kind))?.informationVersion).toBe(0);
+    const { readFile } = await import('node:fs/promises');
+    await sql.query(await readFile(new URL('../../../../db/migrations/0116_opc_mentor_projection_basis.sql', import.meta.url), 'utf8'));
+    expect((await read()).turns).toEqual(after.turns);
+    const other = await fixture(1);
+    await expect(other.service.read(d.draftId)).rejects.toThrow('OPC_DENIED');
+  } finally { await browser.close(); }
+}, 240000);
+
+it("OPC: mentor lost reply still projects once from its unchanged frozen information basis", async () => {
+  const f = await fixture(1);
+  await planFixtureModel(f.moduleId);
+  const d = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: 'mentor' });
+  const { browser, page } = await planBrowser({ ...f, d });
+  const reply = '我想帮助刚接触短视频的人';
+  let lost = 0;
+  let release!:()=>void;
+  const held=new Promise<void>(resolve=>{release=resolve;});
+  let reached!:()=>void;
+  const intercepted=new Promise<void>(resolve=>{reached=resolve;});
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + d.draftId);
+    await page.getByRole('log', { name: '完整导师消息' }).getByText('导师主动引导 · 1.1', { exact: true }).waitFor();
+    const input = page.getByRole('textbox', { name: '给导师的回复', exact: true });
+    await expect.poll(() => input.isEnabled(), { timeout: 30000 }).toBe(true);
+    await page.route('**/api/trpc/runtime.view*', route => route.abort());
+    await page.route('**/api/trpc/runtime.execute*', async route => {
+      const response = await route.fetch(); expect(response.ok()).toBe(true);
+      reached(); await held;
+      await route.abort(); lost += 1;
+    });
+    await input.fill(reply);
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await Promise.race([intercepted,new Promise((_,reject)=>setTimeout(()=>reject(new Error('mentor response barrier not reached')),30000))]);
+    const recovery=page.getByRole('status',{name:'待恢复的导师请求',exact:true});
+    expect(await recovery.count()).toBe(0);
+    release();
+    await expect.poll(() => lost, { timeout: 30000 }).toBe(1);
+    await recovery.waitFor();
+    const identity = await planIdentityRows(f.actor);
+    expect(identity).toHaveLength(2);
+    expect((await f.service.read(d.draftId)).information['step-0'].values?.goal?.value ?? '').toBe('');
+    await page.unroute('**/api/trpc/runtime.execute*');
+    await page.unroute('**/api/trpc/runtime.view*');
+    await page.reload();
+    await page.getByRole('button', { name: '继续核对这条原请求', exact: true }).click();
+    await expect.poll(async () => (await f.service.read(d.draftId)).information['step-0'].values?.goal?.value, { timeout: 30000 }).toBe(reply);
+    await expect.poll(() => page.evaluate(id => sessionStorage.getItem('opc-step:' + id + ':step-0'), d.draftId), { timeout: 30000 }).toBeNull();
+    const savedVersion = (await f.service.read(d.draftId)).snapshot.steps['step-0'].version;
+    await page.reload();
+    await expect.poll(() => page.getByRole('textbox', { name: f.flow.steps[0].information![0].title, exact: true }).inputValue(), { timeout: 30000 }).toBe(reply);
+    expect((await f.service.read(d.draftId)).snapshot.steps['step-0'].version).toBe(savedVersion);
+    expect(await planIdentityRows(f.actor)).toEqual(identity);
+  } finally { release(); await browser.close(); }
+}, 240000);
+
+it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered preview completes the default entry and content journey after curation", async () => {
+  const {writeFileSync}=await import('node:fs');
+  // The delivered preview starts with the accepted six-stage Skill and a fresh
+  // local identity. Older synthetic drafts are deliberately not its baseline.
+  const f=await mergedPositioningFixture();
+  const modelId=await planFixtureModel(f.moduleId);
+  await sql.query('update modules set active=false where id<>$1',[f.moduleId]);
+  const saved={credentials:{email:f.email,password:f.password},actor:f.actor,moduleId:f.moduleId,modelId};
+  const {chromium}=await import('../../../../../apps/web/node_modules/@playwright/test');
+  const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+  const context=await browser.newContext();
+  await context.route('**/*',route=>['127.0.0.1','localhost'].includes(new URL(route.request().url()).hostname)?route.continue():route.abort());
+  const page=await context.newPage();page.setDefaultTimeout(60000);
+  try {
+    await page.setViewportSize({width:1600,height:900});
+    await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/');
+    await page.getByPlaceholder('name@example.com').fill(saved.credentials.email);
+    await page.getByPlaceholder('输入你的密码').fill(saved.credentials.password);
+    await page.getByRole('button',{name:'登录',exact:true}).last().click();
+    await page.waitForURL(url=>url.pathname==='/');
+    await page.getByRole('link',{name:'对话',exact:true}).click();
+    await page.waitForURL(url=>url.pathname==='/positioning');
+    await page.getByRole('heading',{name:'今天，想推进什么？',exact:true}).waitFor();
+    await expect.poll(()=>page.getByRole('link',{name:'搜索',exact:true}).count()).toBe(1);
+    await expect.poll(()=>page.getByRole('searchbox',{name:'查找账号或工作'}).count()).toBe(0);
+    await expect.poll(()=>page.locator('nav[aria-label="工作区功能"] img').evaluateAll(images=>images.length===5&&images.every(image=>image instanceof HTMLImageElement&&image.complete&&image.naturalWidth>0))).toBe(true);
+    await expect.poll(()=>page.locator('section[class*="discovery"] [class*="discoverGrid"] > *').count()).toBe(8);
+    await page.evaluate(()=>document.fonts.ready);
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-start-1600x900.png'});
+    await page.setViewportSize({width:390,height:844});
+    await page.getByRole('button',{name:'打开导航'}).first().click();
+    await expect.poll(()=>page.locator('aside[aria-label="工作区导航"]').evaluate(element=>{const bounds=element.getBoundingClientRect();return [bounds.x,bounds.y,bounds.width,bounds.height].map(Math.round).join(',');})).toBe('0,96,272,748');
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-mobile-nav-390x844.png'});
+    await page.getByRole('button',{name:'关闭导航'}).click();
+    await page.setViewportSize({width:1600,height:900});
+    await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-positioning-choice-1600x900.png'});
+    await page.getByRole('dialog',{name:'梳理账号定位'}).getByRole('button',{name:'从头分析新定位'}).click();
+    expect(await page.getByRole('combobox',{name:'定位方法'}).count()).toBe(0);
+    expect(await page.getByRole('combobox',{name:'所属业务'}).count()).toBe(0);
+    await page.getByLabel('业务名称',{exact:true}).fill('摄影课程 · 新手体验');
+    await page.getByRole('button',{name:'开始 Agent 引导',exact:true}).click();
+    await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname));
+    const mentorUrl=page.url();
+    const draftId=page.url().split('/positioning/')[1]?.split('?')[0]??'';
+    const steps=page.getByRole('navigation',{name:'定位步骤'}).getByRole('button');
+    await expect.poll(()=>steps.count()).toBe(6);
+    expect((await steps.allTextContents()).join(' ')).toContain('商业规划');
+    await page.getByRole('textbox',{name:'给导师的回复',exact:true}).fill('我帮助初学摄影的创作者，通过每周一次手机拍摄练习建立作品集。');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await expect.poll(()=>page.getByRole('textbox',{name:'产品与服务',exact:true}).inputValue(),{timeout:60000}).toContain('摄影');
+    await page.reload();
+    await expect.poll(()=>page.getByRole('textbox',{name:'产品与服务',exact:true}).inputValue(),{timeout:60000}).toContain('摄影');
+    const answers:[string,string][]=[
+      ['准备经营的平台','先做公众号和小红书，公众号解释判断，小红书展示练习。'],
+      ['每周可用时间','每周稳定投入 3 小时。'],
+      ['参考研究结论','借鉴同场景前后对照的讲解方式，不以器材评测为主。'],
+      ['优先服务的用户','会操作相机，但不知道如何整理画面的摄影新手。'],
+      ['价值与依据','曾带学员在同一街景中移动机位，用前后两张照片解释背景干扰。'],
+      ['内容表达与平台安排','公众号解释判断；小红书提供练习清单。'],
+      ['可持续的制作安排','每周先完成一个核心案例，再按时间选择平台版本。'],
+      ['内容如何支持业务','先帮助用户完成一次构图练习，再说明课程的系统训练。'],
+    ];
+    const confirm=page.getByRole('button',{name:'确认当前信息，继续',exact:true});
+    for(const [label,value] of answers){
+      await confirm.click();
+      await page.getByRole('textbox',{name:label,exact:true}).fill(value);
+      await page.getByText('已自动保存',{exact:true}).waitFor();
+      if(label==='优先服务的用户'){
+        await page.evaluate(()=>document.fonts.ready);
+        await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-positioning-stage3-1600x900.png'});
+      }
+    }
+    await confirm.click();
+    const positioningUrl=page.url();
+    const confirmed=await f.service.read(draftId);
+    expect(confirmed.snapshot.workflow.steps.map((step:{title:string})=>step.title)).toEqual(['需求确认','竞品研究','账号定位','内容策略','运营建议','商业规划']);
+    expect(Object.values(confirmed.information).flatMap((step:any)=>Object.values(step.values??{}))).toHaveLength(9);
+    await page.getByRole('button',{name:'确认正式定位',exact:true}).click();
+    await page.getByRole('dialog').getByRole('button',{name:'继续生成第一周选题',exact:true}).click();
+    await page.waitForURL(url=>url.pathname.endsWith('/topics'));
+    // Confirming the positioning binds the topic workspace and freezes one
+    // opening turn; the workspace recovers that turn on mount.
+    const second=page.getByRole('heading',{name:'2. 第二个账号选题',exact:true}).locator('..');
+    await second.waitFor();
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-topics-1600x900.png'});
+    await second.getByRole('button',{name:'采用这个选题',exact:true}).click();
+    await second.getByRole('link',{name:'继续这条内容工作',exact:true}).waitFor();
+    const adopted=await f.service.library({search:'',from:null,to:null});
+    expect(adopted.businesses.flatMap((business:{accounts:Array<{items:Array<{title:string}>}>})=>business.accounts.flatMap(account=>account.items.map(item=>item.title)))).toEqual(['第二个账号选题']);
+    await second.getByRole('link',{name:'继续这条内容工作',exact:true}).click();
+    await page.waitForURL(url=>url.pathname==='/runtime');
+    await page.getByLabel('消息',{exact:true}).fill('请根据这条选题给我一版文章正文建议，先不要定稿。');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    const adoptDraft=page.getByRole('button',{name:'采用为当前草稿',exact:true});
+    await adoptDraft.waitFor({timeout:60000});
+    await adoptDraft.click();
+    await page.getByRole('link',{name:'已采用为草稿 · 查看',exact:true}).waitFor();
+    await page.getByLabel('文章正文').fill('先讲真实场景，再说明取景判断，最后安排一次练习。');
+    await page.getByRole('status').filter({hasText:'已在服务端保存 v2'}).waitFor();
+    await page.getByRole('button',{name:'确认定稿文章',exact:true}).click();
+    await expect.poll(async()=>({statuses:await page.getByRole('status').allTextContents(),alerts:await page.getByRole('alert').allTextContents(),version:await page.locator('[class*=version]').allTextContents()}),{timeout:60000}).toMatchObject({statuses:expect.arrayContaining([expect.stringContaining('已定稿')])});
+    const contentUrl=page.url();
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-content-1600x900.png'});
+    await page.getByRole('link',{name:'资料库',exact:true}).click();
+    await page.waitForURL(url=>url.pathname==='/library');
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-library-1600x900.png'});
+    await page.getByRole('main').locator('section').filter({has:page.getByRole('heading',{name:'定位概览'})}).getByRole('button',{name:/proposed-account/}).click();
+    const positioningDetail=page.getByRole('dialog',{name:'定位详情'});
+    await expect.poll(()=>positioningDetail.locator('details').count()).toBe(6);
+    for(const title of ['需求确认','竞品研究','账号定位','内容策略','运营建议','商业规划'])
+      await expect.poll(()=>positioningDetail.locator('summary',{hasText:title}).count()).toBe(1);
+    await positioningDetail.getByRole('button',{name:'修改定位',exact:true}).click();
+    await expect.poll(()=>positioningDetail.getByRole('textbox').count()).toBe(9);
+    await positioningDetail.getByRole('button',{name:'关闭定位详情'}).click();
+    await page.getByRole('main').getByRole('button',{name:/第二个账号选题/}).first().click();
+    await page.getByText('先讲真实场景，再说明取景判断，最后安排一次练习。').waitFor();
+    await page.getByRole('button',{name:'关闭窗口',exact:true}).click();
+    await page.getByRole('link',{name:'返回当前工作',exact:true}).last().click();
+    await page.waitForURL(url=>url.pathname==='/runtime');
+    expect(page.url()).toBe(contentUrl);
+    await page.reload();
+    await page.getByLabel('文章正文').waitFor();
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/default-content-journey.png',fullPage:true});
+    writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/opc-acceptance.json',JSON.stringify({
+      url:process.env.V3_LOCAL_APP+'/positioning',actor:f.actor,credentials:saved.credentials,
+      sessionId:new URL(contentUrl).searchParams.get('session'),moduleId:f.moduleId,modelId,
+      mode:'Approved six-stage synthetic Skill; no real model, research, payment or external account creation',
+    }),{mode:0o600});
+    writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/default-journey.json',JSON.stringify({mentorUrl,positioningUrl,contentUrl,entry:process.env.V3_LOCAL_APP+'/positioning',mode:'synthetic only; all journey mutations through visible default UI'},null,2));
+  }finally{await browser.close();}
+},360000);
+
+it("OPC: entry projection stays actor-owned and repeatable without granting table access", async()=>{
+  const a=await publishedDraft(),b=await publishedDraft();
+  const before=await a.service.list();
+  expect(before.drafts.map((d:{draftId:string})=>d.draftId)).toContain(a.d.draftId);
+  expect(before.drafts.map((d:{draftId:string})=>d.draftId)).not.toContain(b.d.draftId);
+  expect(before.drafts.find((d:{draftId:string})=>d.draftId===a.d.draftId)).toMatchObject({state:'published',currentVersion:1});
+  const {readFileSync}=await import('node:fs');
+  await sql.query(readFileSync('../../packages/db/migrations/0120_opc_entry_projection.sql','utf8'));
+  expect(await a.service.list()).toEqual(before);
+  const privileges=(await sql.query("select has_function_privilege('authenticated','opc_query(uuid,uuid)','execute') client,has_table_privilege('service_role','opc_businesses','select') business_table,has_function_privilege('service_role','opc_query_before_entry_projection(uuid,uuid)','execute') predecessor")).rows[0];
+  expect(privileges).toEqual({client:false,business_table:false,predecessor:false});
+},60000);
+
+it('OPC: CAPACITY version counts use only current manuscript through browser and refresh after save',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const capture=process.env.V3_WORKBENCH_OUTPUT+'/capacity-requests.jsonl';
+ const all=()=>{try{return readFileSync(capture,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));}catch{return [];}};
+ const results:Array<Record<string,unknown>>=[];
+ for(const target of [1,60,100]){
+  const f=await publishedDraft();await planFixtureModel(f.moduleId);
+  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'capacity-'+target,title:'容量测试文章',brief:'隔离测试选题',day:'2026-09-25',contentType:'article'}]});
+  const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'capacity-'+target,expectedRevision:null}]});
+  let previous:{id:string}|null=null;
+  const marker=(n:number)=>'CAPACITY_'+target+'_V'+String(n).padStart(3,'0')+'_';
+  for(let version=1;version<=target;version++)previous=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:version-1,sourceContentId:previous?.id??null,kind:'brief',status:'final',title:'容量测试文章',body:marker(version)+'正文'.repeat(180)});
+  expect((await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='brief'",[work.workItemId])).rows[0].n).toBe(target);
+  const visible=(await f.service.library({search:'',from:null,to:null})).businesses.flatMap((business:any)=>business.accounts.flatMap((account:any)=>account.items)).find((item:any)=>item.workItemId===work.workItemId);
+  expect(visible.content).toHaveLength(target);
+  expect(visible.content.every((item:any)=>item.contentAvailable===true)).toBe(true);
+  const {browser,page}=await planBrowser(f);
+  try{
+   if(target===100){
+    await page.goto(process.env.V3_LOCAL_APP+'/library');
+    const card=page.locator('#item-'+work.workItemId);await card.getByRole('button').first().click();
+    await card.getByRole('button',{name:'编辑稿件',exact:true}).click();
+    const editor=page.getByRole('dialog',{name:'选题详情',exact:true});
+    await editor.getByRole('button',{name:'历史版本',exact:true}).click();
+    const history=page.getByRole('dialog',{name:'历史版本',exact:true});
+    await history.getByText('100 个已保存版本').waitFor();
+    await history.getByText('v1',{exact:true}).waitFor();
+    await history.getByRole('button',{name:'完成查看',exact:true}).click();
+    expect(await editor.getByLabel('文章正文',{exact:true}).inputValue()).toContain(marker(100));
+   }
+   await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+work.sessionId);
+   const offset=all().length;
+   await page.getByLabel('消息',{exact:true}).fill('请修改当前文章正文的开头，保留原有受众。');
+   await page.getByRole('button',{name:'发送',exact:true}).click();
+   await expect.poll(async()=>(await sql.query("select count(*)::int n from runtime_executions where session_id=$1 and state='completed'",[work.sessionId])).rows[0].n,{timeout:60000}).toBe(1);
+   const requests=all().slice(offset);expect(requests).toHaveLength(1);
+   const serialized=JSON.stringify(requests[0]);
+   expect(serialized).toContain(marker(target));
+   for(let version=1;version<target;version++)expect(serialized).not.toContain(marker(version));
+   results.push({storedVersions:target,inputVersions:[target],requestBytes:Buffer.byteLength(serialized),messages:requests[0].messages.length});
+   if(target===100){
+    await page.goto(process.env.V3_LOCAL_APP+'/library');
+    const card=page.locator('#item-'+work.workItemId);await card.getByRole('button').first().click();
+    await card.getByRole('button',{name:'编辑稿件',exact:true}).click();
+    const dialog=page.getByRole('dialog',{name:'选题详情',exact:true});
+    await dialog.getByLabel('文章正文',{exact:true}).fill(marker(101)+'界面保存后的新正文');
+    await dialog.getByRole('button',{name:'确认定稿文章',exact:true}).click();
+    await expect.poll(async()=>(await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='brief'",[work.workItemId])).rows[0].n,{timeout:30000}).toBe(101);
+    await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+work.sessionId);
+    const nextOffset=all().length;
+    await page.getByLabel('消息',{exact:true}).fill('再修改一处结尾，保持刚保存的正文。');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await expect.poll(async()=>(await sql.query("select count(*)::int n from runtime_executions where session_id=$1 and state='completed'",[work.sessionId])).rows[0].n,{timeout:60000}).toBe(2);
+    const next=all().slice(nextOffset);expect(next).toHaveLength(1);
+    const after=JSON.stringify(next[0]);expect(after).toContain(marker(101));expect(after).not.toContain(marker(100));
+    expect(after).toContain('保留原有受众');expect(after).toContain('再修改一处结尾');
+    const storedHistory=JSON.stringify((await sql.query('select item from runtime_session_history where session_id=$1 order by revision',[work.sessionId])).rows);
+    expect(storedHistory).toContain(marker(100));expect(storedHistory).toContain(marker(101));
+    const selected=(await sql.query("select selected_history from runtime_executions where session_id=$1 and state='completed' order by created_at desc,id desc limit 1",[work.sessionId])).rows[0].selected_history;
+    expect(selected).toHaveLength(2);
+    results.push({storedVersions:101,inputVersions:[101],requestBytes:Buffer.byteLength(after),messages:next[0].messages.length,uiSaved:true});
+    const compareOffset=all().length;
+    await page.getByLabel('消息',{exact:true}).fill('请比较第 100 版和当前稿的开头，不要直接改稿。');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await expect.poll(async()=>(await sql.query("select count(*)::int n from runtime_executions where session_id=$1 and state='completed'",[work.sessionId])).rows[0].n,{timeout:60000}).toBe(3);
+    const comparison=all().slice(compareOffset);expect(comparison).toHaveLength(1);
+    const compared=JSON.stringify(comparison[0]);expect(compared).toContain(marker(100));expect(compared).toContain(marker(101));
+    results.push({storedVersions:101,inputVersions:[100,101],requestBytes:Buffer.byteLength(compared),comparison:true});
+    const sameOffset=all().length;
+    await page.getByLabel('消息',{exact:true}).fill('我比较喜欢当前稿，请继续修改结尾，保留前面确认的受众。');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await expect.poll(async()=>(await sql.query("select count(*)::int n from runtime_executions where session_id=$1 and state='completed'",[work.sessionId])).rows[0].n,{timeout:60000}).toBe(4);
+    const same=all().slice(sameOffset);expect(same).toHaveLength(1);
+    const sameBody=JSON.stringify(same[0]);
+    expect(sameBody).not.toContain(marker(100));
+    expect(sameBody.split(marker(101))).toHaveLength(2);
+    expect(sameBody).toContain('我比较喜欢当前稿');
+    results.push({storedVersions:101,inputVersions:[101],requestBytes:Buffer.byteLength(sameBody),sameMaterialAgain:true});
+   }
+  }finally{await browser.close();}
+ }
+ console.info('CAPACITY_BROWSER_RESULTS',JSON.stringify(results));
+ const base=results.find(x=>x.storedVersions===1)!.requestBytes as number;
+ expect((results.find(x=>x.storedVersions===100)!.requestBytes as number)-base).toBeLessThan(3000);
+},300000);
+
+it('OPC: CAPACITY chat history projects superseded scope bodies without rewriting stored turns',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const capture=process.env.V3_WORKBENCH_OUTPUT+'/capacity-requests.jsonl';
+ const all=()=>{try{return readFileSync(capture,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));}catch{return [];}};
+ const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'capacity-history',title:'历史容量文章',brief:'隔离测试选题',day:'2026-09-25',contentType:'article'}]});
+ const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'capacity-history',expectedRevision:null}]});
+ const {browser,page}=await planBrowser(f);let previous:{id:string}|null=null;
+ const rows:Array<Record<string,unknown>>=[];
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+work.sessionId);
+  for(let version=1;version<=12;version++){
+   const marker='CHAT_OLD_V'+String(version).padStart(2,'0')+'_';
+   previous=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:version-1,sourceContentId:previous?.id??null,kind:'brief',status:'final',title:'历史容量文章',body:marker+'正文'.repeat(500)});
+   const offset=all().length;
+   await page.getByLabel('消息',{exact:true}).fill('请继续修改当前稿件第 '+version+' 次，保留核心约束。'+(version===1?'唯一受众约束：只写初学者。':''));
+   await page.getByRole('button',{name:'发送',exact:true}).click();
+   await expect.poll(async()=>(await sql.query("select count(*)::int n from runtime_executions where session_id=$1 and state='completed'",[work.sessionId])).rows[0].n,{timeout:60000}).toBe(version);
+   const request=all().slice(offset);expect(request).toHaveLength(1);
+   const body=JSON.stringify(request[0]);
+   expect(body).toContain(marker);expect(Buffer.byteLength(body)).toBeLessThanOrEqual(31000);
+   for(let old=1;old<version;old++)expect(body).not.toContain('CHAT_OLD_V'+String(old).padStart(2,'0')+'_');
+   if(version>1)expect(body).toContain('保留核心约束');
+   if(version===7)expect(body).toContain('唯一受众约束：只写初学者');
+   rows.push({version,bytes:Buffer.byteLength(body),messages:request[0].messages.length,markers:[...new Set([...body.matchAll(/CHAT_OLD_V\d{2}_/g)].map(m=>m[0]))]});
+  }
+  const history=(await sql.query('select count(*)::int n from runtime_session_history where session_id=$1',[work.sessionId])).rows[0].n;
+  console.info('CAPACITY_CHAT_RESULTS',JSON.stringify({rows,history}));
+  expect(history).toBe(24);
+  expect(rows.at(-1)!.messages).toBe(24);
+  expect((rows.at(-1)!.markers as string[])).toEqual(['CHAT_OLD_V12_']);
+  const persisted=JSON.stringify((await sql.query('select item from runtime_session_history where session_id=$1 order by revision',[work.sessionId])).rows);
+  expect(persisted).toContain('CHAT_OLD_V01_');expect(persisted).toContain('CHAT_OLD_V12_');
+ }finally{await browser.close();}
+},300000);
+
+it('OPC: rejected cross-business adoption recovers its original request and permits corrected account adoption', async()=>{
+ const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const seed=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'existing-account',title:'另一业务原工作',brief:'必须保留',day:'2026-09-20'}]});
+ const [original]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:seed.planId,accounts:[{platform:'x',account:'existing-account',expectedRevision:null}]});
+ const other=(await sql.query("insert into opc_businesses(actor_id,name) values($1,'另一业务') returning id",[f.actor])).rows[0].id;
+ await sql.query('update opc_accounts set business_id=$1 where project_id=$2',[other,original.projectId]);
+ const {browser,page}=await planBrowser(f);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+f.d.draftId+'/topics');
+  await page.getByRole('button',{name:'开始选题工作对话',exact:true}).click();
+  await page.getByLabel('选择 第二个账号选题').uncheck();
+  // Simulate the old client's unknown outcome; do not hand-edit or delete pending state.
+  await page.route('**/api/trpc/opc.adoptTopics*',async route=>{await route.fetch();await route.abort();});
+  await page.getByRole('button',{name:'采用所选并保存到资料库',exact:true}).click();
+  await page.getByRole('button',{name:'恢复原请求',exact:true}).waitFor();
+  await expect.poll(()=>page.getByRole('button',{name:'恢复原请求',exact:true}).isEnabled()).toBe(true);
+  const workspace=await f.service.topicRead(f.d.draftId),key='opc-topic-operation:'+workspace.sessionId;
+  const frozen=await page.evaluate(key=>localStorage.getItem(key),key);
+  await page.unroute('**/api/trpc/opc.adoptTopics*');
+  await page.getByRole('button',{name:'恢复原请求',exact:true}).click();
+  await page.getByText('这个账号已属于另一项业务，本次没有采用。请展开选题，修改为当前业务的账号后再采用；原请求已保留。',{exact:true}).waitFor();
+  expect(await page.evaluate(key=>localStorage.getItem(key),key)).toBeNull();
+  expect(await page.evaluate(key=>localStorage.getItem(key),key+':rejected:'+JSON.parse(frozen!).request.requestId)).toBe(frozen);
+  await page.getByText('修改平台或账号',{exact:true}).first().click();
+  await page.getByLabel('账号 首周选题',{exact:true}).fill('photography-account');
+  await page.reload();
+  await page.getByText('修改平台或账号',{exact:true}).first().click();
+  expect(await page.getByLabel('账号 首周选题',{exact:true}).inputValue()).toBe('photography-account');
+  await page.getByLabel('选择 第二个账号选题').uncheck();
+  await page.getByRole('button',{name:'采用所选并保存到资料库',exact:true}).click();
+  await page.getByText('已采用所选内容并保存到资料库。可从下方进入对应内容工作。',{exact:true}).waitFor();
+  expect((await sql.query('select business_id from opc_accounts where project_id=$1',[original.projectId])).rows[0].business_id).toBe(other);
+  const plans=(await f.service.read(f.d.draftId)).plans;
+  expect(plans[0].body).toHaveLength(1);expect(plans[0].body[0].account).toBe('photography-account');
+  await page.getByRole('link',{name:'打开内容资料库',exact:true}).click();
+  await page.getByRole('heading',{name:'资料库',exact:true}).waitFor();
+  await expect.poll(()=>page.locator('main').innerText()).toContain('photography-account');
+ }finally{await browser.close();}
+},180000);
+
+it('OPC: typed content uses a right panel, deep links and one proactive continuation across tabs',async()=>{
+ const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ await sql.query('update modules set title=$1 where id=$2',['U3 独立测试技能 '+f.moduleId,f.moduleId]);
+ const rows=[{id:randomUUID(),platform:'x',account:'typed-account',title:'文章细化',brief:'内容：摄影课；对象：新手；价值：改善构图；结构：案例与练习；假设：一次练习帮助理解。',day:'2026-09-22',contentType:'article'}, {id:randomUUID(),platform:'x',account:'typed-account',title:'视频选题',brief:'摄影构图示范视频，先讨论再起草。',day:'2026-09-23',contentType:'video'}, {id:randomUUID(),platform:'x',account:'typed-account',title:'旧类型未确认',brief:'旧选题简报保持可读',day:'2026-09-24'}];
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:rows});
+ const work=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'typed-account',expectedRevision:null}]});
+ const article=work.find((w:any)=>w.itemId===rows[0].id),video=work.find((w:any)=>w.itemId===rows[1].id),unknown=work.find((w:any)=>w.itemId===rows[2].id);
+ const privileges=await sql.query("select has_function_privilege('authenticated','opc_item_content_type(uuid)','execute') allowed,has_function_privilege('service_role','opc_item_content_type(uuid)','execute') service");
+ expect(privileges.rows[0]).toEqual({allowed:false,service:false});
+ const {browser,context,page}=await planBrowser(f);
+ const guideCount=async()=>Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_WORK_CONTINUE_V1]%'",[f.actor,article.sessionId])).rows[0].n);
+ let lostGuide=0;
+ await page.route('**/api/trpc/runtime.execute*',async route=>{if(lostGuide++)return route.continue();const response=await route.fetch();expect(response.ok()).toBe(true);await route.abort();});
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+article.sessionId+'&continue=1');
+  const second=await context.newPage();await second.goto(page.url());
+  await page.getByText('【主动引导合成示例，仅验证交互】我们先细化这条选题：你最希望读者看完后理解哪一个重点？',{exact:true}).waitFor({timeout:60000});
+  await expect.poll(guideCount).toBe(1);
+  expect(await page.getByRole('button',{name:'起草口播稿',exact:true}).count()).toBe(0);
+  expect(await page.getByRole('button',{name:'另存普通成果',exact:true}).count()).toBe(0);
+  await second.close();await page.reload();
+  const identityBefore=(await sql.query('select id,session_id,payload from runtime_executions where session_id=$1 order by created_at',[article.sessionId])).rows;
+  expect(identityBefore[0].payload.revisionId).toBe(f.pack.revisionId);
+  expect(identityBefore[0].payload.input).not.toContain('主动用一句话');
+  const skillTitle=(await sql.query('select title from modules where id=$1',[f.moduleId])).rows[0].title;
+  await page.getByRole('button',{name:'使用技能',exact:true}).click();
+  await page.getByRole('dialog',{name:'使用技能',exact:true}).getByRole('button').filter({hasText:skillTitle}).click();
+  expect(new URL(page.url()).searchParams.get('session')).toBe(article.sessionId);
+  expect((await sql.query('select id,session_id,payload from runtime_executions where session_id=$1 order by created_at',[article.sessionId])).rows).toEqual(identityBefore);
+
+  await page.getByLabel('消息',{exact:true}).fill('请细化构图的练习重点。');await page.getByRole('button',{name:'发送',exact:true}).click();
+  let lostContent=0;
+  await page.route('**/api/trpc/opc.saveContentResult*',async route=>{if(lostContent++)return route.continue();const response=await route.fetch();expect(response.ok()).toBe(true);await route.abort();});
+  const save=page.getByRole('button',{name:'采用为当前草稿',exact:true});await save.waitFor({timeout:60000});await save.click();
+  await page.getByRole('link',{name:'已采用为草稿 · 查看',exact:true}).waitFor({timeout:30000});
+  expect((await sql.query("select status from opc_content_versions where work_item_id=$1 and kind='brief'",[article.workItemId])).rows[0].status).toBe('draft');
+  await page.getByRole('button',{name:'收起成果面板',exact:true}).click();
+  await page.getByRole('button',{name:'展开成果',exact:true}).click();
+  await page.getByRole('button',{name:'收起成果面板',exact:true}).waitFor();
+  await page.getByRole('link',{name:'已采用为草稿 · 查看',exact:true}).click();
+  await page.waitForURL(url=>url.pathname==='/library'&&url.searchParams.get('item')===article.workItemId);
+  const card=page.locator('#item-'+article.workItemId);await card.getByText('文章细化',{exact:true}).waitFor();
+  expect(await card.innerText()).toContain('文章');
+  const saved=(await sql.query("select execution_id from opc_content_versions where work_item_id=$1 and kind='brief'",[article.workItemId])).rows[0];
+  await expect(f.service.contentFromExecution({workItemId:article.workItemId,requestId:randomUUID(),executionId:saved.execution_id,kind:'script',status:'final',expectedVersion:0})).rejects.toThrow('OPC_VIDEO_TYPE_REQUIRED');
+  // A service-role caller cannot bypass the type constraint at Runtime admission.
+  const previous=(await sql.query('select e.payload,b.payload billing from runtime_executions e join bill2_runs b on b.id=e.billing_run_id where e.id=$1',[saved.execution_id])).rows[0];
+  previous.payload.input='[OPC_SCRIPT_V1] 请求口播稿';previous.billing.input=previous.payload;
+  await expect(sql.query('select runtime_admit($1,$2,$3,$4,$5)',[f.actor,article.sessionId,randomUUID(),previous.payload,previous.billing])).rejects.toThrow('OPC_VIDEO_TYPE_REQUIRED');
+  // A saved article keeps its version stream visible; metadata cannot silently
+  // turn it into a video and hide the draft from the library.
+  await card.getByRole('dialog',{name:'选题详情'}).waitFor();
+  await card.getByRole('button',{name:'编辑稿件',exact:true}).click();
+  await card.getByRole('button',{name:/选题方向/}).click();
+  expect(await card.getByLabel('内容类型',{exact:true}).isDisabled()).toBe(true);
+  await expect(f.service.libraryEdit({requestId:randomUUID(),target:'item',targetId:article.workItemId,expectedRevision:1,
+    patch:{title:rows[0].title,brief:rows[0].brief,day:rows[0].day,contentType:'video'}})).rejects.toThrow('OPC_LIBRARY_INVALID');
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+article.sessionId);
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+unknown.sessionId+'&continue=1');
+  await page.getByRole('heading',{name:'这条选题准备做成什么内容？',exact:true}).waitFor();
+  await page.getByText('先在对话中确认这条选题的内容类型，再起草和保存稿件。已确认前不会创建内容版本。',{exact:true}).waitFor();
+  expect(await page.getByRole('button',{name:'保存稿件版本',exact:true}).count()).toBe(0);
+  expect(await page.getByRole('button',{name:'起草口播稿',exact:true}).count()).toBe(0);
+  let lostType=0;
+  await page.route('**/api/trpc/opc.editLibrary*',async route=>{if(lostType++)return route.continue();const response=await route.fetch();expect(response.ok()).toBe(true);await route.abort();});
+  await page.getByRole('button',{name:'图文',exact:true}).click();
+  await page.getByRole('button',{name:'恢复类型保存',exact:true}).waitFor();
+  await page.reload();
+  await page.getByRole('button',{name:'恢复类型保存',exact:true}).click();
+  await expect.poll(()=>page.getByRole('button',{name:'恢复类型保存',exact:true}).count()).toBe(0);
+  await page.getByText('【主动引导合成示例，仅验证交互】我们先细化这条选题：你最希望读者看完后理解哪一个重点？',{exact:true}).waitFor({timeout:60000});
+  expect((await sql.query('select opc_item_content_type($1) t',[unknown.workItemId])).rows[0].t).toBe('image_text');
+  await page.getByLabel('图文正文',{exact:true}).fill('图文 U3 合成正文');
+  await page.getByRole('status').filter({hasText:/已在服务端保存.*草稿/}).waitFor();
+  await page.getByRole('button',{name:'确认定稿图文',exact:true}).click();
+  await page.getByRole('status').filter({hasText:'已定稿'}).waitFor();
+  const imageVersions=async()=>(await sql.query('select id,status,body from opc_content_versions where work_item_id=$1 order by version',[unknown.workItemId])).rows;
+  const beforeView=await imageVersions();expect(beforeView.map((v:any)=>v.status)).toEqual(['draft','final']);
+  await page.getByRole('button',{name:'历史版本',exact:true}).click();
+  await page.getByRole('dialog',{name:'历史版本',exact:true}).getByText('仅查看已保存的版本，不会更改当前内容。',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'完成查看',exact:true}).click();
+  await page.goto(process.env.V3_LOCAL_APP+'/library?item='+unknown.workItemId);
+  const imageCard=page.locator('#item-'+unknown.workItemId);
+  expect(await imageCard.innerText()).toContain('图文');expect(await imageCard.innerText()).toContain('未发布');
+  await imageCard.getByRole('button',{name:'编辑稿件',exact:true}).click();
+  expect(await imageCard.getByLabel('图文正文',{exact:true}).inputValue()).toBe('图文 U3 合成正文');
+  expect(await imageVersions()).toEqual(beforeView);
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+video.sessionId);
+  await page.getByRole('button',{name:'起草口播稿',exact:true}).waitFor();
+  await page.getByRole('button',{name:'起草口播稿',exact:true}).click();
+  await page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true}).waitFor({timeout:60000});
+  const videoExecution=(await sql.query("select id from runtime_executions where session_id=$1 and state='completed' order by created_at desc limit 1",[video.sessionId])).rows[0];
+  await expect(f.service.contentFromExecution({workItemId:video.workItemId,requestId:randomUUID(),executionId:videoExecution.id,kind:'brief',status:'draft',expectedVersion:0})).rejects.toThrow('OPC_CONTENT_INVALID');
+  expect((await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='brief'",[video.workItemId])).rows[0].n).toBe(0);
+  // The current adopted-work panel resumes the exact session, not a title
+  // search or a new work item. The old "选题与版本" control is no longer UI.
+  await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+f.d.draftId+'/topics');
+  await page.getByRole('button',{name:'开始选题工作对话',exact:true}).click();
+  await page.getByRole('heading',{name:'已采用选题',exact:true}).waitFor();
+  await page.locator('a[href*="'+article.sessionId+'"]').first().click();
+  await page.waitForURL(url=>url.pathname==='/runtime'&&url.searchParams.get('session')===article.sessionId);
+  expect(await guideCount()).toBe(1);
+  expect((await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='brief'",[article.workItemId])).rows[0].n).toBe(1);
+ }finally{await browser.close();}
+},180000);
+
+it('OPC: Agent-first U1 sample preserves target, partial adoption, document edits and a narrow-screen return',async()=>{
+ const f=await publishedDraft();
+ const {browser,page}=await planBrowser(f);
+ try{
+  await page.setViewportSize({width:1440,height:1000});
+  await page.goto(process.env.V3_LOCAL_APP+'/workbench/agent-first-preview');
+  await page.getByRole('heading',{name:'正在做：本周选题',exact:true}).waitFor();
+  await page.getByRole('link',{name:'首页',exact:true}).waitFor();
+  await page.getByText('交互样片：操作仅保存在本机浏览器，不调用模型、不写入正式资料。',{exact:true}).waitFor();
+
+  // Previewing material does not silently change the operation target.
+  await page.getByRole('button',{name:'新手最常见的三种构图误区',exact:true}).click();
+  await page.getByRole('heading',{name:'正在做：本周选题',exact:true}).waitFor();
+  await page.getByText(/仅查看，操作目标未改变/).waitFor();
+
+  const article=page.getByRole('article').filter({hasText:'新手最常见的三种构图误区'});
+  await article.getByRole('button',{name:'继续这条',exact:true}).click();
+  await page.getByRole('heading',{name:'正在做：新手最常见的三种构图误区',exact:true}).waitFor();
+  await page.getByLabel('文章正文').fill('这是用户在原处修改并保存的文章样片。');
+  await page.getByRole('button',{name:'保存修改',exact:true}).click();
+  await page.getByRole('heading',{name:'文章草稿 · 第 2 版',exact:true}).waitFor();
+
+  // A result reads the latest view state when it arrives, rather than the view at send time.
+  const documentPanel=page.getByRole('complementary',{name:'当前资料文档'});
+  await page.getByLabel('消息').fill('请给我一版修改稿');
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.getByText('Agent 正在整理…',{exact:true}).waitFor();
+  await documentPanel.getByRole('button',{name:'关闭当前资料',exact:true}).click();
+  await page.getByText('Agent 正在整理…',{exact:true}).waitFor({state:'hidden'});
+  await page.getByRole('button',{name:'当前资料',exact:true}).click();
+  await documentPanel.getByText('新草稿已到达。当前视图受保护，点击查看新版本。',{exact:true}).click();
+
+  await page.getByLabel('消息').fill('再给我一版修改稿');
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  await documentPanel.getByText('版本',{exact:true}).click();
+  await documentPanel.getByRole('button',{name:'历史草稿 · v1',exact:true}).click();
+  await documentPanel.getByText('新草稿已到达。当前视图受保护，点击查看新版本。',{exact:true}).waitFor();
+  await documentPanel.getByRole('heading',{name:'文章草稿 · 第 1 版',exact:true}).waitFor();
+  await documentPanel.getByText('新草稿已到达。当前视图受保护，点击查看新版本。',{exact:true}).click();
+
+  await page.getByLabel('文章正文').fill('这是尚未保存、不能被迟到结果覆盖的修改。');
+  await page.getByLabel('消息').fill('请继续修改');
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  await documentPanel.getByText('新草稿已到达。当前视图受保护，点击查看新版本。',{exact:true}).waitFor();
+  expect(await page.getByLabel('文章正文').inputValue()).toBe('这是尚未保存、不能被迟到结果覆盖的修改。');
+
+  await page.getByRole('button',{name:'采用所选 1 条',exact:true}).click();
+  await page.getByText('已采用 2 条 · 草稿 1 条',{exact:true}).waitFor();
+  await page.getByText('所选内容已保存，剩余草稿仍可继续讨论。',{exact:true}).waitFor();
+  await page.getByRole('button',{name:/查看剩余草稿/}).click();
+  await page.getByRole('button',{name:'新手最常见的三种构图误区',exact:true}).waitFor();
+
+  const video=page.getByRole('article').filter({hasText:'一次实拍：把杂乱画面整理清楚'});
+  await video.getByRole('button',{name:'继续这条',exact:true}).click();
+  await documentPanel.getByRole('button',{name:'暂时结束',exact:true}).click();
+  await page.reload();
+  await page.getByText('本次视频工作已暂时结束',{exact:true}).first().waitFor();
+  await page.getByLabel('工作方法').selectOption('案例叙事方法');
+  await page.getByRole('heading',{name:'正在做：一次实拍：把杂乱画面整理清楚',exact:true}).waitFor();
+
+  // Narrow screens use a dismissible document sheet and return to the same composer.
+  await page.setViewportSize({width:390,height:844});
+  await page.getByRole('button',{name:'当前资料',exact:true}).click();
+  const sheet=page.getByRole('dialog');
+  await sheet.getByRole('heading',{name:'一次实拍：把杂乱画面整理清楚',exact:true}).waitFor();
+  await sheet.getByRole('button',{name:'关闭当前资料',exact:true}).click();
+  await page.getByLabel('消息').waitFor();
+
+  await page.getByRole('button',{name:'定位入口',exact:true}).click();
+  await page.getByRole('heading',{name:'从同一个 Agent 工作区开始',exact:true}).waitFor();
+  await page.getByRole('button',{name:/我是新手/}).click();
+  await page.getByRole('button',{name:'定位入口',exact:true}).click();
+  await page.getByText('当前入口：新手引导',{exact:true}).waitFor();
+ }finally{await browser.close();}
+},180000);
+
+it("OPC: library finalization closes only on success and account discussion switches ownership",async()=>{
+ const f=await publishedDraft();
+ const rows=['ux-account-a','ux-account-b'].map((account,index)=>({id:randomUUID(),platform:'x',account,title:'选题方向 '+index,brief:'讨论方向简报',day:'2026-09-25',contentType:'article' as const}));
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:rows});
+ const works=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:rows.map(row=>({platform:row.platform,account:row.account,expectedRevision:null}))});
+ const work=works[0];
+ await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:0,sourceContentId:null,kind:'brief',status:'draft',title:'独立正文标题',body:'需要定稿的正文'});
+ const {browser,page}=await planBrowser(f);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/');
+  expect(await page.getByRole('link',{name:'继续上次工作',exact:true}).count()).toBe(0);
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
+  const rail=page.getByRole('complementary',{name:'工作区导航'});
+  const thread=rail.getByRole('link',{name:/选题方向 0/});
+  await thread.waitFor();
+  const font=await thread.locator('span').evaluate(el=>getComputedStyle(el).fontSize);
+  const strategy=rail.getByRole('button',{name:/定位策略 当前/}).first();
+  expect(await strategy.evaluate(el=>getComputedStyle(el).fontSize)).toBe(font);
+  await thread.hover();
+  await rail.getByRole('button',{name:'选题方向 0的更多操作',exact:true}).click();
+  await rail.getByRole('menuitem',{name:'重命名',exact:true}).click();
+  const rename=page.getByLabel('重命名对话',{exact:true});
+  expect(await rename.evaluate(el=>getComputedStyle(el).fontSize)).toBe(font);
+  await rename.fill('改名后的选题方向');await rename.press('Enter');
+  await rail.getByRole('link',{name:/改名后的选题方向/}).waitFor();
+  const card=page.locator('#item-'+work.workItemId);
+  await card.getByRole('button').first().click();
+  await card.getByRole('button',{name:'编辑稿件',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'选题详情',exact:true});
+  expect(await dialog.getByLabel('稿件标题',{exact:true}).inputValue()).toBe('独立正文标题');
+  await dialog.getByRole('button',{name:/选题方向/}).filter({hasText:'改名后的选题方向'}).waitFor();
+  await page.route('**/api/trpc/opc.saveContentManual*',route=>route.abort());
+  await dialog.getByRole('button',{name:'确认定稿文章',exact:true}).click();
+  await dialog.getByRole('alert').filter({hasText:'保存结果待核实'}).waitFor();
+  expect(await dialog.isVisible()).toBe(true);
+  await page.unroute('**/api/trpc/opc.saveContentManual*');
+  await dialog.getByRole('button',{name:'恢复草稿同步',exact:true}).click();
+  await dialog.waitFor({state:'hidden'});
+  await page.getByText('正文稿件已定稿',{exact:true}).waitFor();
+  await card.getByRole('button').first().click();
+  await card.getByRole('button',{name:'编辑稿件',exact:true}).click();
+  await dialog.getByRole('button',{name:'确认定稿文章',exact:true}).click();
+  await dialog.waitFor({state:'hidden'});
+  expect((await sql.query('select count(*)::int n from opc_content_versions where work_item_id=$1',[work.workItemId])).rows[0].n).toBe(2);
+  // A delayed final response must not discard edits opened after submission.
+  await card.getByRole('button').first().click();
+  await card.getByRole('button',{name:'编辑稿件',exact:true}).click();
+  await dialog.getByLabel('文章正文',{exact:true}).fill('提交定稿的正文');
+  let release!:()=>void,arrived!:()=>void;
+  let held=new Promise<void>(resolve=>{release=resolve;});
+  let submitted=new Promise<void>(resolve=>{arrived=resolve;});
+  await page.route('**/api/trpc/opc.saveContentManual*',async route=>{arrived();await held;await route.continue();});
+  await dialog.getByRole('button',{name:'确认定稿文章',exact:true}).click();await submitted;
+  await dialog.getByRole('button',{name:'展开编辑',exact:true}).click();
+  await page.getByLabel('展开编辑正文',{exact:true}).fill('定稿等待期间的展开输入');
+  const refreshed=page.waitForResponse(response=>response.url().includes('opc.library')&&response.request().method()==='GET');
+  release();
+  // The foreground modal correctly hides background status from the accessibility tree.
+  await dialog.getByRole('status',{includeHidden:true}).filter({hasText:'已定稿'}).waitFor();
+  await (await refreshed).finished();
+  await page.waitForTimeout(500); // Let onSaved's continuation run before asserting or confirming later edits.
+  expect(await page.getByLabel('展开编辑正文',{exact:true}).inputValue()).toBe('定稿等待期间的展开输入');
+  expect(await dialog.isVisible()).toBe(true);
+  await page.unroute('**/api/trpc/opc.saveContentManual*');
+  await page.getByRole('button',{name:'确认修改',exact:true}).click();
+  await dialog.getByRole('alert').filter({hasText:'已有更新版本'}).waitFor();
+  expect(await dialog.getByLabel('文章正文',{exact:true}).inputValue()).toBe('定稿等待期间的展开输入');
+  await dialog.getByRole('button',{name:/已比较历史，基于服务端/}).click();
+  await dialog.getByRole('status').filter({hasText:/已在服务端保存.*草稿/}).waitFor();
+  await dialog.getByRole('button',{name:'← 返回详情',exact:true}).click();
+  held=new Promise<void>(resolve=>{release=resolve;});submitted=new Promise<void>(resolve=>{arrived=resolve;});
+  await page.route('**/api/trpc/opc.saveContentManual*',async route=>{arrived();await held;await route.continue();});
+  await dialog.getByRole('button',{name:'确认定稿当前稿件',exact:true}).click();await submitted;
+  await dialog.getByRole('button',{name:'编辑稿件',exact:true}).click();
+  await dialog.getByRole('button',{name:'展开编辑',exact:true}).click();
+  await page.getByLabel('展开编辑正文',{exact:true}).fill('从详情定稿之后开始的输入');
+  release();
+  await page.getByText('正文稿件已定稿，后续编辑已保留',{exact:true}).waitFor();
+  expect(await page.getByLabel('展开编辑正文',{exact:true}).inputValue()).toBe('从详情定稿之后开始的输入');
+  expect(await dialog.isVisible()).toBe(true);
+  await page.unroute('**/api/trpc/opc.saveContentManual*');
+  await page.getByRole('button',{name:'取消',exact:true}).click();
+  await dialog.getByRole('button',{name:'关闭窗口',exact:true}).click();
+  const destinations:string[]=[];
+  for(const name of ['ux-account-a','ux-account-b','ux-account-a']){
+   const account=rail.locator('details').filter({has:page.locator('summary').filter({hasText:name})}).last();
+   await account.getByRole('button',{name:/定位策略 当前/}).click();
+   const strategyDialog=page.getByRole('dialog',{name:'定位详情',exact:true});
+   await strategyDialog.getByRole('button',{name:'回到策略讨论',exact:true}).click();
+   await strategyDialog.waitFor({state:'hidden'});
+   await page.getByRole('heading',{name:name+' · 定位策略',exact:true}).waitFor();
+   destinations.push(new URL(page.url()).pathname);
+   if(name==='ux-account-a'&&destinations.length===1)await page.getByLabel('给导师的回复',{exact:true}).fill('只属于账号 A 的未发送消息');
+  }
+  expect(destinations[0]).not.toBe(destinations[1]);expect(destinations[2]).toBe(destinations[0]);
+  expect(await page.getByLabel('给导师的回复',{exact:true}).inputValue()).toBe('只属于账号 A 的未发送消息');
+  const accounts=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts;
+  expect(accounts.every((account:{sourceVersionId:string})=>account.sourceVersionId===f.sourceVersionId)).toBe(true);
+ }finally{await browser.close();}
+},240000);
+
+it('OPC: free start sends attachments without selecting account or direction and survives refresh once', async () => {
+  const f=await fixture(1);await planFixtureModel(f.moduleId);
+  const {chromium}=await import('../../../../../apps/web/node_modules/@playwright/test');
+  const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+  try {
+    const page=await browser.newPage();page.setDefaultTimeout(60000);
+    await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/positioning');
+    await page.getByPlaceholder('name@example.com').fill(f.email);await page.getByPlaceholder('输入你的密码').fill(f.password);
+    await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(url=>url.pathname==='/positioning');
+    const message='帮我规划三天成都旅行。';const input=page.getByRole('textbox',{name:'新任务内容'});
+    await input.fill(message);
+    await page.getByLabel('选择附件').setInputFiles({name:'preferences.txt',mimeType:'text/plain',buffer:Buffer.from('慢节奏，公共交通。')});
+    await expect.poll(()=>input.inputValue()).toContain('慢节奏，公共交通。');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await page.waitForURL(url=>url.pathname==='/runtime'&&url.searchParams.has('session'));
+    const sessionId=new URL(page.url()).searchParams.get('session');
+    await expect.poll(async()=>Number((await sql.query("select count(*) from runtime_executions where actor_id=$1 and session_id=$2 and state='completed'",[f.actor,sessionId])).rows[0].count),{timeout:60000}).toBe(1);
+    const stored=async()=>(await sql.query("select e.id,e.payload->>'input' input,s.scope from runtime_executions e join runtime_sessions s on s.id=e.session_id where e.actor_id=$1 and e.session_id=$2",[f.actor,sessionId])).rows;
+    const before=await stored();expect(before).toHaveLength(1);expect(before[0].input).toContain(message);expect(before[0].input).toContain('preferences.txt');expect(before[0].scope.kind).toBe('positioning_draft');expect(before[0].scope.projectId).toBeUndefined();expect(before[0].scope.workItemId).toBeUndefined();
+    await page.reload();await page.getByLabel('对话记录').getByText(/帮我规划三天成都旅行/).waitFor();expect(await stored()).toEqual(before);
+    expect((await sql.query('select count(*) from opc_drafts where actor_id=$1',[f.actor])).rows[0].count).toBe('0');
+    await page.getByRole('complementary',{name:'工作区导航'}).getByRole('link',{name:/帮我规划三天成都旅行/}).waitFor();
+  } finally {await browser.close();}
+},180000);
+
+it('OPC: free runtime reads owned context only on model tool request and rechecks source revocation',async()=>{
+ const {runtimeAdmissionService}=await import('../runtime/admission');
+ const {runtimeExecutor}=await import('../runtime/execute');
+ const {createServer}=await import('node:http');
+ const f=await completed(),secret='PRIVATE_TOPIC_'+randomUUID();
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'context-account',title:'Owned topic',brief:secret,day:'2026-09-25'}]});
+ const bound=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'context-account',expectedRevision:null}]});
+ const workId=bound[0].workItemId;
+ const modelId=(await sql.query('select model_id from modules where id=$1',[f.moduleId])).rows[0].model_id;
+ const rpc=async(name:string,args:Record<string,unknown>)=>{const result=await admin.rpc(name,args);if(result.error)throw result.error;return result.data;};
+ const admission=runtimeAdmissionService(f.user,admin,{account:'workspace-test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:200,inputBytes:32000,historyItems:50,workspaceContext:true});
+ const session=await admission.start(randomUUID(),{kind:'positioning_draft'});
+ expect(await rpc('runtime_workspace_session',{p_actor_id:f.actor,p_session_id:f.d.sessionId})).toBe(false);
+ expect(await rpc('runtime_workspace_session',{p_actor_id:f.actor,p_session_id:bound[0].sessionId})).toBe(false);
+ const other=await fixture();
+ await expect(rpc('runtime_workspace_source',{p_actor_id:other.actor,p_session_id:session.sessionId,p_query:workId})).rejects.toBeTruthy();
+ const otherSession=await rpc('runtime_start',{p_actor_id:other.actor,p_request_id:randomUUID(),p_payload:{scope:{kind:'positioning_draft'}}});
+ expect(await rpc('runtime_workspace_source',{p_actor_id:other.actor,p_session_id:otherSession.sessionId,p_query:workId})).toMatchObject({kind:'unavailable'});
+ let phase=0;const requests:Array<{messages:unknown[]}>=[];
+ const server=createServer(async(req,res)=>{
+  let raw='';for await(const chunk of req)raw+=chunk;const request=JSON.parse(JSON.parse(raw).input);requests.push(request);
+  const id='workspace-'+randomUUID();
+  const message=phase===1?{role:'assistant',content:null,tool_calls:[{id,type:'function',function:{name:'read_source',arguments:'{}'}}]}:phase===2?{role:'assistant',content:null,tool_calls:[{id,type:'function',function:{name:'read_source',arguments:JSON.stringify({query:workId})}}]}:{role:'assistant',content:phase===0?'Travel answer':'Relevant topic answer'};
+  phase++;
+  res.setHeader('content-type','application/json');res.end(JSON.stringify({id,model:'opc-fixture-default',final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:'opc-fixture-default',choices:[{index:0,message,finish_reason:message.tool_calls?'tool_calls':'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
+  const executor=runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
+  const unrelated=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'Give general travel packing tips',selection:{kind:'ordinary',modelId},network:'deny'});
+  expect(await executor.execute(unrelated.executionId)).toMatchObject({state:'completed'});
+  expect(JSON.stringify(requests[0])).not.toContain(secret);expect(JSON.stringify(requests[0])).not.toContain('context-account');
+  expect((await sql.query('select count(*)::int n from runtime_tool_calls where execution_id=$1',[unrelated.executionId])).rows[0].n).toBe(0);
+  const related=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'Use my saved topic brief to help plan content',selection:{kind:'ordinary',modelId},network:'deny'});
+  expect(await executor.execute(related.executionId)).toMatchObject({state:'completed'});
+  expect(requests).toHaveLength(4);expect(JSON.stringify(requests[1])).not.toContain(secret);
+  expect(JSON.stringify(requests[2])).toContain('context-account');expect(JSON.stringify(requests[2])).not.toContain(secret);
+  expect(JSON.stringify(requests[3])).toContain(secret);
+  expect((await sql.query('select count(*)::int n from runtime_tool_calls where execution_id=$1',[related.executionId])).rows[0].n).toBe(2);
+  expect(await executor.execute(related.executionId)).toMatchObject({state:'completed'});expect(requests).toHaveLength(4);
+  await sql.query('update bill2_drafts set revoked=true where id=$1',[f.d.draftId]);
+  expect((await sql.query('select runtime_history_available($1) allowed',[related.executionId])).rows[0].allowed).toBe(false);
+  expect(await rpc('runtime_workspace_source',{p_actor_id:f.actor,p_session_id:session.sessionId,p_query:workId})).toMatchObject({kind:'unavailable'});
+ }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+},60000);
+
+
+it('OPC: positioning entry creates a new business or edits only the selected existing account',async()=>{
+ const f=await publishedDraft();
+ const rows=['entry-account-a','entry-account-b'].map(account=>({id:randomUUID(),platform:'x',account,title:account+'选题',brief:'保留的选题来源',day:'2026-09-25'}));
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:rows});
+ await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:rows.map(row=>({platform:row.platform,account:row.account,expectedRevision:null}))});
+ const readAccounts=async()=>(await f.service.library({search:'',from:null,to:null})).businesses.flatMap((b:{accounts:Array<{projectId:string;account:string;sourceVersionId:string;pendingStrategyDraftId?:string|null}>})=>b.accounts);
+ const before=await readAccounts(),a=before.find((x:{account:string})=>x.account==='entry-account-a')!,b=before.find((x:{account:string})=>x.account==='entry-account-b')!;
+ expect(a.sourceVersionId).toBe(f.sourceVersionId);
+ expect(b.sourceVersionId).toBe(f.sourceVersionId);
+ const originalBusiness=(await sql.query('select business_id::text id from opc_draft_businesses where draft_id=$1',[f.d.draftId])).rows[0].id;
+ const {browser,page}=await planBrowser(f);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/positioning');
+  await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
+  await page.getByRole('dialog',{name:'梳理账号定位',exact:true}).getByRole('button',{name:'从头分析新定位',exact:true}).click();
+  expect(await page.getByRole('combobox').count()).toBe(0);
+  const start=page.getByRole('button',{name:'开始 Agent 引导',exact:true});
+  expect(await start.isDisabled()).toBe(true);
+  await page.getByLabel('业务名称',{exact:true}).fill('独立摄影服务');
+  await start.click();
+  await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname));
+  const createdDraft=new URL(page.url()).pathname.split('/').at(-1)!;
+  expect(createdDraft).not.toBe(f.d.draftId);
+  const created=(await sql.query('select b.id,b.name from opc_draft_businesses d join opc_businesses b on b.id=d.business_id where d.draft_id=$1',[createdDraft])).rows[0];
+  expect(created.name).toBe('独立摄影服务');expect(created.id).not.toBe(originalBusiness);
+  expect(await readAccounts()).toEqual(before);
+  await page.goto(process.env.V3_LOCAL_APP+'/positioning');
+  const draftCount=Number((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n);
+  await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
+  await page.getByRole('dialog',{name:'梳理账号定位',exact:true}).getByRole('button',{name:'整理另一份已有定位',exact:true}).click();
+  expect(await page.getByLabel('业务名称',{exact:true}).count()).toBe(0);
+  expect(await page.getByLabel('定位方法',{exact:true}).count()).toBe(0);
+  await page.waitForURL(url=>url.pathname==='/library');
+  expect(await page.getByRole('combobox',{name:'已有定位',exact:true}).count()).toBe(0);
+  expect(Number((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n)).toBe(draftCount);
+  expect(await readAccounts()).toEqual(before);
+  await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/^entry-account-a/}).click();
+  await page.getByRole('button',{name:'修改定位',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'定位详情',exact:true});
+  await dialog.getByRole('button',{name:'修改定位',exact:true}).click();
+  await dialog.getByRole('heading',{name:'修改定位',exact:true}).waitFor();
+  expect(Number((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n)).toBe(draftCount);
+  await dialog.locator('textarea').first().fill('只修订账号A的定位');
+  await dialog.getByRole('button',{name:'确认保存',exact:true}).click();
+  await dialog.getByRole('status').filter({hasText:'已保存到此账号的待确认定位草稿'}).waitFor();
+  const after=await readAccounts(),updated=after.find((x:{projectId:string})=>x.projectId===a.projectId)!;
+  expect(after.find((x:{projectId:string})=>x.projectId===b.projectId)).toEqual(b);
+  expect(updated.sourceVersionId).toBe(a.sourceVersionId);
+  expect(updated.pendingStrategyDraftId).toBeTruthy();
+  const changed=await f.service.read(updated.pendingStrategyDraftId!);
+  expect(changed.information['step-0'].values.goal.value).toBe('只修订账号A的定位');
+  await dialog.getByRole('button',{name:'关闭定位详情',exact:true}).click();
+  const savedAccounts=await readAccounts();
+  const savedCounts=(await sql.query('select (select count(*)::int from opc_drafts where actor_id=$1) drafts,(select count(*)::int from opc_businesses where actor_id=$1) businesses',[f.actor])).rows[0];
+  await page.getByRole('button',{name:'修改定位',exact:true}).click();
+  await dialog.getByRole('button',{name:'修改定位',exact:true}).click();
+  await dialog.getByRole('heading',{name:'修改定位',exact:true}).waitFor();
+  expect(await dialog.locator('textarea').first().inputValue()).toBe('只修订账号A的定位');
+  await dialog.locator('textarea').first().fill('取消时不得保存');
+  await dialog.getByRole('button',{name:'取消',exact:true}).click();
+  expect(await readAccounts()).toEqual(savedAccounts);
+  expect((await sql.query('select (select count(*)::int from opc_drafts where actor_id=$1) drafts,(select count(*)::int from opc_businesses where actor_id=$1) businesses',[f.actor])).rows[0]).toEqual(savedCounts);
+  expect((await f.service.read(updated.pendingStrategyDraftId!)).information['step-0'].values.goal.value).toBe('只修订账号A的定位');
+ }finally{await browser.close();}
+},180000);
+
+it('OPC: boundary browser freezes expanded edits across a delayed real adoption and concurrent saves',async()=>{
+ const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'boundary-article',title:'边界文章',brief:'讨论后采用',day:'2026-09-25',contentType:'article'}]});
+ const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'boundary-article',expectedRevision:null}]});
+ const {browser,page}=await planBrowser(f);page.setDefaultTimeout(30000);
+ let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});let adopted=false;
+ page.on('response',async response=>{if(response.url().includes('opc.saveContentManual')){console.info('BOUNDARY_EDITOR_SAVE',response.status(),await response.text());}});
+ const rows=async()=>(await sql.query("select id,version,body,source_content_id from opc_content_versions where work_item_id=$1 and kind='brief' order by version",[work.workItemId])).rows;
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+work.sessionId);
+  await page.getByLabel('消息',{exact:true}).fill('请给我第一版正文。');await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.getByRole('button',{name:'采用为当前草稿',exact:true}).waitFor({timeout:60000});
+  await page.route('**/api/trpc/opc.saveContentResult*',async route=>{const response=await route.fetch();expect(response.ok()).toBe(true);adopted=true;await held;await route.fulfill({response});});
+  await page.getByRole('button',{name:'采用为当前草稿',exact:true}).click();
+  await expect.poll(()=>adopted).toBe(true);expect(await rows()).toHaveLength(1);
+  await page.getByRole('button',{name:'展开编辑',exact:true}).click();
+  await page.getByLabel('展开编辑标题',{exact:true}).fill('我的展开标题');await page.getByLabel('展开编辑正文',{exact:true}).fill('响应到达前写下的正文');
+  release();await page.getByText('账号已保存 v1 · 草稿',{exact:true}).waitFor();
+  expect(await page.getByLabel('展开编辑正文',{exact:true}).inputValue()).toBe('响应到达前写下的正文');
+  await page.getByRole('button',{name:'确认修改',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'已有更新版本'}).waitFor();
+  expect(await rows()).toHaveLength(1);expect(await page.getByLabel('文章正文',{exact:true}).inputValue()).toBe('响应到达前写下的正文');
+  const savedDraft=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)!),`opc-content-draft:${work.workItemId}:brief`);
+  expect(savedDraft).toMatchObject({baseVersion:0,sourceContentId:null,title:'我的展开标题',body:'响应到达前写下的正文'});
+  await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/boundary-adoption-conflict.png'});
+  const {writeFileSync}=await import('node:fs');
+  writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/boundary-adoption.json',JSON.stringify({transport:'real local adoption response held after route.fetch',savedDraft,versions:await rows()}));
+  await page.getByRole('button',{name:/已比较历史，基于服务端 v1/}).click();
+  await expect.poll(async()=>(await rows()).length,{timeout:30000}).toBe(2);
+  await page.getByText('账号已保存 v2 · 草稿',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'展开编辑',exact:true}).click();await page.getByLabel('展开编辑正文',{exact:true}).fill('取消的正文');await page.getByRole('button',{name:'取消',exact:true}).click();
+  expect(await page.getByLabel('文章正文',{exact:true}).inputValue()).toBe('响应到达前写下的正文');
+  await page.getByRole('button',{name:'展开编辑',exact:true}).click();await page.getByLabel('展开编辑正文',{exact:true}).fill('普通保存正文');await page.getByRole('button',{name:'确认修改',exact:true}).click();
+  await page.getByText('账号已保存 v3 · 草稿',{exact:true}).waitFor();
+  const latest=(await rows()).at(-1);
+  await page.getByRole('button',{name:'展开编辑',exact:true}).click();await page.getByLabel('展开编辑正文',{exact:true}).fill('并发情况下保留的正文');
+  console.info('BOUNDARY_EDITOR_STAGE','concurrent service save starting');
+  await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:3,sourceContentId:latest.id,kind:'brief',status:'draft',title:'其他标签',body:'并发服务端正文'});console.info('BOUNDARY_EDITOR_STAGE','concurrent v4 saved');
+  await page.getByRole('button',{name:'确认修改',exact:true}).click();console.info('BOUNDARY_EDITOR_STAGE','concurrent confirm clicked');await page.getByRole('alert').filter({hasText:'已有更新版本'}).waitFor();console.info('BOUNDARY_EDITOR_STAGE','concurrent alert visible');
+  expect(await rows()).toHaveLength(4);expect(await page.getByLabel('文章正文',{exact:true}).inputValue()).toBe('并发情况下保留的正文');
+  console.info('BOUNDARY_EDITOR_STAGE','final assertions passed');
+  writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/boundary-editor-completed.json',JSON.stringify({passed:['delayed real adoption conflict','explicit rebase','cancel preserves input','ordinary save','concurrent conflict preserves input'],versions:await rows(),retainedInput:await page.getByLabel('文章正文',{exact:true}).inputValue()}));
+ }catch(error){
+  const {writeFileSync}=await import('node:fs');
+  writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/boundary-editor-failure.json',JSON.stringify({error:String(error),body:await page.locator('body').innerText(),versions:await rows()}));
+  await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/boundary-editor-failure.png'});
+  throw error;
+ }finally{release();console.info('BOUNDARY_EDITOR_STAGE','browser closing');await browser.close();console.info('BOUNDARY_EDITOR_STAGE','browser closed');}
+},180000);
+
+it.each([65,67])('OPC: boundary browser continues legitimate v%s video source history',async(targetVersion)=>{
+ const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'boundary-video',title:'长历史视频',brief:'合法原始执行与修订来源',day:'2026-09-25',contentType:'video'}]});
+ const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'boundary-video',expectedRevision:null}]});
+ const {browser,page}=await planBrowser(f);page.setDefaultTimeout(30000);
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+work.sessionId);
+  await page.getByRole('button',{name:'起草口播稿',exact:true}).click();
+  await page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true}).waitFor({timeout:60000});await page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true}).click();
+  await page.getByRole('heading',{name:'口播稿已定稿。要先制作分镜脚本吗？',exact:true}).waitFor();
+  let previous=(await sql.query("select id,version,execution_id from opc_content_versions where work_item_id=$1 and kind='script' and version=1",[work.workItemId])).rows[0];
+  expect(previous.execution_id).toBeTruthy();
+  const root=previous;
+  for(let version=2;version<=targetVersion;version++){
+   previous=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:version-1,sourceContentId:previous.id,kind:'script',status:'final',title:'長历史口播稿',body:'合法人工修订 '+version});
+   if(version!==targetVersion)continue;
+   await page.reload();await page.getByText('账号已保存 v'+version+' · 已定稿',{exact:true}).waitFor();
+   const checked=page.waitForResponse(response=>response.url().includes('opc.checkVideoExecution'));
+   await page.getByRole('button',{name:'只生成分镜',exact:true}).click();
+   const checkResponse=await checked;
+   if(!checkResponse.ok()){
+    const {writeFileSync}=await import('node:fs');
+    writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/boundary-video-v'+version+'-check-failure.json',JSON.stringify({version,rootExecution:root.execution_id,script:previous,status:checkResponse.status(),response:await checkResponse.json()}));
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/boundary-video-v'+version+'-check-failure.png'});
+    expect.soft(checkResponse.ok()).toBe(true);
+    continue; // Still verify original-source protection after recording this failure.
+   }
+   const storyboardVersion=1;
+   await page.getByText('分镜 · 第 '+storyboardVersion+' 版 · 已定稿 · 匹配当前口播稿',{exact:true}).waitFor({timeout:60000});
+   await page.getByRole('button',{name:'只生成剪辑建议',exact:true}).click();
+   await page.getByText('剪辑建议 · 第 '+storyboardVersion+' 版 · 已定稿 · 匹配当前口播稿',{exact:true}).waitFor({timeout:60000});
+   const derivatives=(await sql.query("select kind,source_content_id from opc_content_versions where work_item_id=$1 and kind in ('storyboard','editing') and version=$2",[work.workItemId,storyboardVersion])).rows;
+   expect(derivatives).toHaveLength(2);expect(derivatives.every(row=>row.source_content_id===previous.id)).toBe(true);
+   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/boundary-video-v'+version+'.png'});
+   const {writeFileSync}=await import('node:fs');
+   writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/boundary-video-v'+version+'.json',JSON.stringify({rootExecution:root.execution_id,script:previous,derivatives}));
+  }
+  expect((await sql.query("select execution_id from opc_content_versions where id=$1",[root.id])).rows[0].execution_id).toBe(root.execution_id);
+  expect((await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='script' and execution_id is not null",[work.workItemId])).rows[0].n).toBe(1);
+  await expect(f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:targetVersion,sourceContentId:null,kind:'script',status:'draft',title:'无来源',body:'不能断开原视频来源'})).rejects.toThrow('OPC_CONTENT_SOURCE');
+  const outsider=await publishedDraft();await expect(outsider.service.videoMaterialPrepare({workItemId:work.workItemId,requestId:randomUUID(),sourceScriptId:previous.id,choice:'storyboard',expectedStoryboardVersion:1,expectedEditingVersion:1})).rejects.toThrow('OPC_CONTENT_BINDING');
+  const effects=async()=>(await sql.query("select (select count(*)::int from runtime_executions where session_id=$1) executions,(select count(*)::int from opc_content_versions where work_item_id=$2 and kind in ('storyboard','editing')) derivatives",[work.sessionId,work.workItemId])).rows[0];
+  const beforeRevocation=await effects();
+  const generated=(await sql.query("select execution_id from opc_content_versions where work_item_id=$1 and kind='storyboard' and version=1",[work.workItemId])).rows[0];
+  if(generated){
+   const checkArgs=[f.actor,work.workItemId,generated.execution_id,previous.id];
+   const checkSql='select opc_video_execution_check($1,$2,$3,$4) result';
+   expect((await sql.query(checkSql,checkArgs)).rows[0].result.valid).toBe(true);
+   await expect(outsider.service.videoExecutionCheck({workItemId:work.workItemId,executionId:generated.execution_id,sourceScriptId:previous.id})).rejects.toThrow('OPC_CONTENT_BINDING');
+   // Corrupt only disposable rows inside rolled-back transactions. Public writes
+   // cannot create these shapes; the validator must still fail closed on them.
+   const denied: string[]=[];
+   const malformed=async(name:string,statement:string,values:unknown[])=>{
+    await sql.query('BEGIN');
+    try{
+     await sql.query("SET LOCAL session_replication_role='replica'");
+     await sql.query(statement,values);
+     await expect(sql.query(checkSql,checkArgs)).rejects.toThrow('OPC_CONTENT_BINDING');
+     denied.push(name);
+    }finally{await sql.query('ROLLBACK');}
+    expect((await sql.query(checkSql,checkArgs)).rows[0].result.valid).toBe(true);
+   };
+   await malformed('no admitted ancestor','update opc_content_versions set execution_id=null where id=$1',[root.id]);
+   await malformed('missing ancestor','update opc_content_versions set source_content_id=$2 where id=$1',[previous.id,randomUUID()]);
+   await malformed('self cycle','update opc_content_versions set source_content_id=id where id=$1',[previous.id]);
+   await malformed('cycle after admitted ancestor','update opc_content_versions set source_content_id=$2 where id=$1',[root.id,previous.id]);
+   await malformed('wrong kind ancestor',"update opc_content_versions set kind='brief' where id=$1",[root.id]);
+   await malformed('foreign actor ancestor','update opc_content_versions set actor_id=$2 where id=$1',[root.id,outsider.actor]);
+   await malformed('wrong work item ancestor','update opc_content_versions set work_item_id=$2 where id=$1',[root.id,randomUUID()]);
+   await malformed('unavailable original execution',"update runtime_executions set unavailable_reason='test revoked' where id=$1",[root.execution_id]);
+   await malformed('incomplete original execution',"update runtime_executions set state='prepared' where id=$1",[root.execution_id]);
+   await malformed('different execution session','update runtime_executions set session_id=$2 where id=$1',[root.execution_id,randomUUID()]);
+   await malformed('draft current source',"update opc_content_versions set status='draft' where id=$1",[previous.id]);
+   await malformed('wrong frozen hash',"update runtime_executions set payload=jsonb_set(payload,'{scopeMaterial,hash}','\"wrong\"') where id=$1",[generated.execution_id]);
+   await malformed('wrong frozen body',"update opc_content_versions set body='wrong body' where id=$1",[previous.id]);
+   const {readFileSync,writeFileSync}=await import('node:fs');
+   const old=readFileSync('../../packages/db/migrations/0117_opc_core_experience.sql','utf8');
+   const oldCheck=old.slice(old.indexOf('CREATE OR REPLACE FUNCTION opc_video_execution_check('),old.indexOf('CREATE OR REPLACE FUNCTION opc_video_package_from_execution('));
+   const upgrade=readFileSync('../../packages/db/migrations/0132_opc_video_execution_ancestry.sql','utf8').replace(/^BEGIN;$/m,'').replace(/^COMMIT;$/m,'');
+   const beforeRows=(await sql.query('select * from opc_content_versions where work_item_id=$1 order by id',[work.workItemId])).rows;
+   await sql.query('BEGIN');
+   try{
+    await sql.query(oldCheck);
+    await sql.query('SAVEPOINT legacy_check');
+    await expect(sql.query(checkSql,checkArgs)).rejects.toThrow('OPC_CONTENT_BINDING');
+    await sql.query('ROLLBACK TO SAVEPOINT legacy_check');
+    await sql.query(upgrade);await sql.query(upgrade);
+    expect((await sql.query(checkSql,checkArgs)).rows[0].result.valid).toBe(true);
+    expect((await sql.query('select * from opc_content_versions where work_item_id=$1 order by id',[work.workItemId])).rows).toEqual(beforeRows);
+    for(const role of ['anon','authenticated'])expect((await sql.query("select has_function_privilege($1,'opc_video_execution_check(uuid,uuid,uuid,uuid)','EXECUTE') allowed",[role])).rows[0].allowed).toBe(false);
+    expect((await sql.query("select has_function_privilege('service_role','opc_video_execution_check(uuid,uuid,uuid,uuid)','EXECUTE') allowed")).rows[0].allowed).toBe(true);
+   }finally{await sql.query('ROLLBACK');}
+   expect((await sql.query(checkSql,checkArgs)).rows[0].result.valid).toBe(true);
+   expect(await effects()).toEqual(beforeRevocation);
+   writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/boundary-video-v'+targetVersion+'-ancestry-check.json',JSON.stringify({denied,upgrade:'legacy failure reproduced; repeated upgrade passed with all content rows unchanged; rollback restored; grants checked',executionId:generated.execution_id}));
+  }
+  await sql.query('update bill2_drafts set revoked=true where id=$1',[f.d.draftId]);
+  if(generated)await expect(f.service.videoExecutionCheck({workItemId:work.workItemId,executionId:generated.execution_id,sourceScriptId:previous.id})).rejects.toThrow('OPC_CONTENT_BINDING');
+  expect((await sql.query('select runtime_history_available($1) allowed',[root.execution_id])).rows[0].allowed).toBe(false);
+  await expect(f.service.videoMaterialPrepare({workItemId:work.workItemId,requestId:randomUUID(),sourceScriptId:previous.id,choice:'storyboard',expectedStoryboardVersion:1,expectedEditingVersion:1})).rejects.toThrow('OPC_CONTENT_BINDING');
+  expect(await effects()).toEqual(beforeRevocation);
+  const {writeFileSync}=await import('node:fs');
+  writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/boundary-video-v'+targetVersion+'-source-guards.json',JSON.stringify({passed:['missing immediate source rejected','foreign actor rejected','revoked original execution unavailable','revoked source preparation rejected'],rootExecution:root.execution_id,version:targetVersion}));
+ }finally{await browser.close();}
+},240000);
+
+
+it.skipIf(!process.env.V3_LEGACY_ROOT)('OPC: U3 cross-code receipt recovery preserves old and filtered request identities',async()=>{
+ const legacy=process.env.V3_LEGACY_ROOT!;
+ if(!legacy.includes('graylum-bill2-legacy-'))throw new Error('isolated legacy runtime required');
+ const oldAdmission=(await import(/* @vite-ignore */ legacy+'/packages/api/src/services/runtime/admission.ts')).runtimeAdmissionService;
+ const oldExecutor=(await import(/* @vite-ignore */ legacy+'/packages/api/src/services/runtime/execute.ts')).runtimeExecutor;
+ const {runtimeExecutor}=await import('../runtime/execute');
+ const {runtimeAdmissionService}=await import('../runtime/admission');
+ const {createServer}=await import('node:http');
+ const requests:string[]=[],errors:string[]=[];let unknown=false;
+ const server=createServer(async(req,res)=>{
+  let raw='';for await(const chunk of req)raw+=chunk;const input=JSON.parse(raw).input;requests.push(input);
+  if(unknown){res.destroy();return;}
+  const request=JSON.parse(input),id='upgrade-'+randomUUID();res.setHeader('content-type','application/json');
+  res.end(JSON.stringify({id,model:request.model,final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:request.model,choices:[{index:0,message:{role:'assistant',content:'合成回复：保留初学者约束'},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));
+ });
+ await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('local fixture');const endpoint='http://127.0.0.1:'+address.port;
+  for(const mode of ['paid','unknown','marked'] as const){
+   errors.length=0;
+ const f=await publishedDraft();
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'upgrade',title:'升级恢复稿',brief:'合成测试',day:'2026-09-25',contentType:'article'}]});
+ const modelId=(await sql.query('select model_id from modules where id=$1',[f.moduleId])).rows[0].model_id;
+ const admission=(mode==='marked'?runtimeAdmissionService:oldAdmission)(f.user,admin,{account:'upgrade',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:200,inputBytes:32000,historyItems:20});
+
+   const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'upgrade',expectedRevision:null}]});
+   // Each case owns a separate real work and its persistent Session.
+   const session=work;
+   const latest=(await f.service.library({search:'',from:null,to:null})).businesses.flatMap((b:any)=>b.accounts.flatMap((a:any)=>a.items)).find((i:any)=>i.workItemId===work.workItemId);
+   let version=latest.content.length;let source=latest.content[0]?.id??null;
+   const first=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:version,sourceContentId:source,kind:'brief',status:'final',title:'升级恢复稿',body:'UPGRADE_OLD_BODY_'+mode});version++;
+   const request=(input:string)=>({sessionId:session.sessionId,requestId:randomUUID(),input,selection:{kind:'ordinary' as const,modelId},network:'deny' as const});
+   const seed=await admission.prepare(request('受众必须是初学者'));
+   expect(await (mode==='marked'?runtimeExecutor:oldExecutor)({database:admin,actor:async()=>f.actor,endpoint}).execute(seed.executionId)).toMatchObject({state:'completed'});
+   const second=await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:version,sourceContentId:first.id,kind:'brief',status:'final',title:'升级恢复稿',body:'UPGRADE_CURRENT_BODY_'+mode});version++;
+   const input=request('请修改当前稿结尾');const prepared=await admission.prepare(input);
+   // Lose the application continuation after the real response receipt commits,
+   // before SDK Session append or execution completion. No request/response mock.
+   const interruptedDb={rpc:async(name:string,args:Record<string,unknown>)=>{
+    if(name==='runtime_session_items'&&args.p_action==='append')return {data:null,error:{message:'synthetic process interruption'}};
+    return admin.rpc(name,args);
+   }};
+   unknown=mode==='unknown';const beforeDispatch=requests.length;
+   expect(await (mode==='marked'?runtimeExecutor:oldExecutor)({database:interruptedDb,actor:async()=>f.actor,endpoint}).execute(prepared.executionId)).toMatchObject({state:'pending'});
+   expect(requests.length).toBe(beforeDispatch+1);unknown=false;
+   const sent=requests.at(-1)!;expect(sent).toContain('UPGRADE_CURRENT_BODY_'+mode);expect(sent).toContain('受众必须是初学者');
+   expect(sent.includes('UPGRADE_OLD_BODY_'+mode)).toBe(mode!=='marked'&&process.env.V3_LEGACY_REF?.startsWith('6d70caf'));
+   const snapshot=async()=>({
+    execution:(await sql.query('select id,request_id,payload,candidate_history,selected_history,billing_run_id from runtime_executions where id=$1',[prepared.executionId])).rows,
+    calls:(await sql.query('select id,sequence,payload from bill2_calls where run_id=$1 order by sequence',[prepared.runId])).rows,
+    receipts:(await sql.query('select r.* from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1 order by r.id',[prepared.runId])).rows,
+    history:(await sql.query('select * from runtime_session_history where session_id=$1 order by revision',[session.sessionId])).rows,
+   });
+   const before=await snapshot();
+   expect(before.execution[0].payload.inputSelection).toBe(mode==='marked'?'scope-projection-v1':undefined);expect(before.calls[0].payload.requestHash).toBe(createHash('sha256').update(sent).digest('hex'));
+   if(mode!=='unknown')expect(JSON.stringify(before.receipts)).toContain('合成回复');
+   await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:version,sourceContentId:second.id,kind:'brief',status:'final',title:'升级恢复稿',body:'UPGRADE_AFTER_INTERRUPT_'+mode});
+   const observed={rpc:async(name:string,args:Record<string,unknown>)=>{const r=await admin.rpc(name,args);if(r.error)errors.push(r.error.message);return r;}};
+   const executor=runtimeExecutor({database:observed,actor:async()=>f.actor,endpoint});
+   const recovered=await executor.execute(prepared.executionId);
+   console.info('U3_UPGRADE_RESULT',JSON.stringify({legacyRef:process.env.V3_LEGACY_REF,mode,recovered,errors,dispatches:requests.length-beforeDispatch,requestBytes:Buffer.byteLength(sent),requestHash:before.calls[0].payload.requestHash}));
+   if(mode==='marked'||!process.env.V3_LEGACY_REF?.startsWith('6d70caf'))expect(errors).toEqual([]);
+   expect(recovered).toMatchObject({state:mode!=='unknown'?'completed':'pending'});
+   expect(requests.length).toBe(beforeDispatch+1);
+   const after=await snapshot();expect(after.execution).toEqual(before.execution);expect(after.calls).toEqual(before.calls);expect(after.receipts).toEqual(before.receipts);
+   expect(after.history.slice(0,before.history.length)).toEqual(before.history);expect(after.history.length-before.history.length).toBe(mode!=='unknown'?2:0);
+   expect(await executor.execute(prepared.executionId)).toEqual(recovered);expect(await snapshot()).toEqual(after);expect(requests.length).toBe(beforeDispatch+1);
+   const {writeFileSync}=await import('node:fs');
+   writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/upgrade-'+process.env.V3_LEGACY_REF?.slice(0,8)+'-'+mode+'.json',JSON.stringify({sent,before,after,recovered},null,2),{mode:0o600});
+  }
+ }finally{await new Promise<void>((resolve,reject)=>server.close(e=>e?reject(e):resolve()));}
+},180000);

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { unstable_doesMiddlewareMatch } from 'next/experimental/testing/server';
 import {
+  config,
   isAppDomain,
   isDevEnvironment,
   isLocalhost,
@@ -187,5 +189,17 @@ describe('proxy hostname classification', () => {
     expect(isDevEnvironment(normalizedHostname)).toBe(dev);
     expect(isPreviewDeployment(normalizedHostname)).toBe(preview);
     expect(isPublicSiteDomain(normalizedHostname)).toBe(publicSite);
+  });
+});
+
+
+describe('public font resources', () => {
+  it('bypasses auth only for the public MiSans resource directory', () => {
+    for (const url of ['/fonts/misans/abc.woff2', '/fonts/misans/misans-abc.css', '/fonts/misans/LICENSE.pdf']) {
+      expect(unstable_doesMiddlewareMatch({ config, url })).toBe(false);
+    }
+    for (const url of ['/positioning', '/profile', '/admin', '/fonts/private.woff2', '/fonts/misans-private/secret']) {
+      expect(unstable_doesMiddlewareMatch({ config, url })).toBe(true);
+    }
   });
 });

@@ -3,10 +3,12 @@
 import { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { parseWorkflowManifest, workflowManifestPath, type WorkflowManifest } from '@repo/api/skills/workflowManifest';
 
 export type SkillForm = {
   kind: 'document' | 'social'; directoryName: string; files: { path: string; base64: string }[];
-  steps: { title: string; resources: string[] }[]; reviewed: boolean;
+  planResources?: string[];
+  steps: { title: string; resources: string[]; information?: {id:string;title:string;required:boolean;profileKey?:string;elicitation?:'user_fact'|'agent_proposal'}[] }[]; reviewed: boolean;
 };
 export const emptySkillForm = (): SkillForm => ({ kind: 'document', directoryName: '', files: [],
   steps: [{ title: '', resources: ['SKILL.md'] }], reviewed: false });
@@ -19,32 +21,39 @@ export async function readSkillFiles(files: FileList | File[]) {
   const roots = new Set(selected.filter(f => f.webkitRelativePath).map(f => f.webkitRelativePath.split('/')[0]));
   if (roots.size > 1) throw new Error('一次只能导入一个 Skill 文件夹。');
   const result = [];
+  let workflow: WorkflowManifest | undefined;
   for (const file of selected) {
     const path = file.webkitRelativePath ? file.webkitRelativePath.split('/').slice(1).join('/') : file.name;
     if (!(/\.(md|ya?ml)$/.test(path)) || /(^|\/)scripts\//.test(path))
       throw new Error(`目前仅支持 Markdown 和 YAML 文本文件。请先移除不受支持的文件：${path}`);
     const bytes = new Uint8Array(await file.arrayBuffer());
-    try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { throw new Error('文件必须使用 UTF-8 编码。'); }
+    let source: string;
+    try { source = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { throw new Error('文件必须使用 UTF-8 编码。'); }
+    if (path === workflowManifestPath) workflow = parseWorkflowManifest(source);
     let binary = '';
     for (const byte of bytes) binary += String.fromCharCode(byte);
     result.push({ path, base64: btoa(binary) });
   }
   if (!result.some(f => f.path === 'SKILL.md')) throw new Error('所选文件夹需要包含 SKILL.md。');
-  return { directoryName: [...roots][0] ?? '', files: result };
+  return { directoryName: [...roots][0] ?? '', files: result, workflow };
 }
 
 export function ModuleSkillEditor({ value, onChange, error, onError, onReadingChange, disabled = false }: {
   value: SkillForm; onChange: (next: SkillForm) => void; error: string; onError: (message: string) => void; onReadingChange: (reading: boolean) => void; disabled?: boolean;
 }) {
   const [reading, setReading] = useState(false);
+  const declaredWorkflow = value.files.some(file=>file.path===workflowManifestPath);
   const patch = (next: Partial<SkillForm>) => onChange({ ...value, ...next, reviewed: false });
   const load = async (files: FileList | null) => {
     if (!files) return;
     setReading(true); onReadingChange(true);
     try {
       const result = await readSkillFiles(files);
-      patch({ ...result, directoryName: result.directoryName || value.directoryName,
-        steps: value.steps.map(step => ({ ...step, resources: step.resources.filter(p => result.files.some(f => f.path === p)) })) });
+      patch({ files:result.files, directoryName:result.directoryName || value.directoryName,
+        ...(result.workflow ? {...result.workflow,planResources:result.workflow.planResources} : {
+          steps:value.steps.map(step=>({ ...step,resources:step.resources.filter(path=>result.files.some(file=>file.path===path)) })),
+        }),
+      });
       onError('');
     } catch (e) { onError(e instanceof Error ? e.message : '读取文件失败'); } finally { setReading(false); onReadingChange(false); }
   };
@@ -72,21 +81,24 @@ export function ModuleSkillEditor({ value, onChange, error, onError, onReadingCh
       <Input aria-label="Skill 名称" value={value.directoryName} onChange={e => patch({ directoryName: e.target.value })} placeholder="如：social-media-commercial-strategist" />
     </label>
     {value.files.length > 0 && <details><summary>已载入 {value.files.length} 个文件</summary><ul className="text-xs break-all">{value.files.map(f => <li key={f.path}>{f.path}</li>)}</ul></details>}
-    <p className="text-sm text-[var(--text-secondary)]">按顺序设置步骤。每一步都会读取 SKILL.md；其他参考文件请按需要勾选。用户确认后才进入下一步。</p>
+    <p className="text-sm text-[var(--text-secondary)]">{declaredWorkflow
+      ? '步骤顺序、名称与问题由 Skill 包中的 workflow.yaml 声明。重新上传并发布后，新定位自动采用新版本。'
+      : '当前包没有 workflow.yaml：只重新上传 SKILL.md 不会改变步骤或问题。请在 Skill 包中加入 workflow.yaml；旧包仍可沿用原有手动步骤配置。'}</p>
     {value.steps.map((step, i) => <div key={i} className="space-y-2 rounded border border-[var(--border-primary)] p-3">
       <div className="flex gap-2 items-center"><span>{i + 1}.</span>
-        <Input aria-label={`步骤 ${i + 1} 名称`} value={step.title} onChange={e => patch({ steps: value.steps.map((s,j) => j === i ? { ...s, title: e.target.value } : s) })} />
-        <Button type="button" variant="outline" disabled={value.steps.length === 1} onClick={() => patch({ steps: value.steps.filter((_,j) => j !== i) })}>删除</Button>
+        <Input aria-label={`步骤 ${i + 1} 名称`} value={step.title} disabled={declaredWorkflow} onChange={e => patch({ steps: value.steps.map((s,j) => j === i ? { ...s, title: e.target.value } : s) })} />
+        {!declaredWorkflow && <Button type="button" variant="outline" disabled={value.steps.length === 1} onClick={() => patch({ steps: value.steps.filter((_,j) => j !== i) })}>删除</Button>}
       </div>
+      {declaredWorkflow && <ul className="pl-5 list-disc text-sm">{(step.information??[]).map(field=><li key={field.id}>{field.title}{field.required?' · 必需':''}</li>)}</ul>}
       <details><summary className="text-sm">本步骤给 AI 阅读的资料（{step.resources.filter(path => value.files.some(f => f.path === path)).length}）</summary>
         <p className="text-xs text-[var(--text-secondary)]">选择这个步骤需要的补充方法或模板，例如对标步骤用对标分析资料。只供 AI 阅读，不要求最终用户上传。SKILL.md 是各步骤共用的主说明。</p>
         {value.files.length === 0 && <p className="text-sm">请先导入 Skill 文件，导入后可在这里选择资料。</p>}
         {value.files.map(f => <label key={f.path} className="flex gap-2 text-sm py-1 break-all">
-          <input type="checkbox" checked={step.resources.includes(f.path)} onChange={e => patch({ steps: value.steps.map((s,j) => j === i ? { ...s, resources: e.target.checked ? [...s.resources,f.path] : s.resources.filter(p => p !== f.path) } : s) })} />{f.path}
+          <input type="checkbox" disabled={declaredWorkflow} checked={step.resources.includes(f.path)} onChange={e => patch({ steps: value.steps.map((s,j) => j === i ? { ...s, resources: e.target.checked ? [...s.resources,f.path] : s.resources.filter(p => p !== f.path) } : s) })} />{f.path}
         </label>)}
       </details>
     </div>)}
-    <Button type="button" variant="outline" disabled={value.steps.length >= 32} onClick={() => patch({ steps: [...value.steps, { title: '', resources: ['SKILL.md'] }] })}>添加步骤</Button>
+    {!declaredWorkflow && <Button type="button" variant="outline" disabled={value.steps.length >= 32} onClick={() => patch({ steps: [...value.steps, { title: '', resources: ['SKILL.md'] }] })}>添加步骤</Button>}
     <label className="flex gap-2 text-sm"><input type="checkbox" checked={value.reviewed} onChange={e => onChange({ ...value, reviewed: e.target.checked })} />我已检查步骤顺序和各步使用的参考文件</label>
     <p className="text-xs text-[var(--text-secondary)]">对话模型使用上方指定模型；整理成果使用 AI 模型页单独配置的汇总模型。</p>
     {error && <p role="alert" className="text-red-400">{error}</p>}

@@ -10,6 +10,14 @@ const sentryBuildUploadEnabled =
   );
 
 const nextConfig: NextConfig = {
+  devIndicators: false,
+  async headers() {
+    return [{
+      // Only content-addressed font resources are immutable, not the notices.
+      source: "/fonts/misans/:asset(.+\\.(?:woff2|css))",
+      headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+    }];
+  },
   transpilePackages: [
     "@repo/api",
     "@radix-ui/react-avatar",

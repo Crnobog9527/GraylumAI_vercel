@@ -1,0 +1,77 @@
+'use client';
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { trpc } from '@/trpc/client';
+import styles from './strategy-overview-dialog.module.css';
+import { useAccountDiscussion } from './use-account-discussion';
+
+type ProfileValue={label?:string;value?:string;status?:string};
+type Account={projectId:string;platform:string;account:string;strategyDraftId:string;sourceVersionId:string;pendingStrategyDraftId?:string|null;currentVersion?:number;sourceVersion?:number;profile?:Record<string,ProfileValue>|null};
+type Value={value:string;status:'unknown'|'unclear'|'provisional'|'confirmed'|'deferred';nature:'fact'|'decision'|'hypothesis'|'unknown'};
+type Step={id:string;title:string;information?:Array<{id:string;title:string;profileKey?:string}>};
+type Information={schema:Array<{id:string;title:string;profileKey?:string}>;values:Record<string,Value>|null};
+type Schema={registrationId:string;workflow:{steps:Step[]};information?:Record<string,Information>};
+type HistoryVersion={id:string;version:number;source:string;profile:Record<string,ProfileValue>;information?:Record<string,Information & {title:string}>};
+type Edits=Record<string,Record<string,string>>;
+type Frozen={accountProjectId:string;requestId:string;expectedSourceVersionId:string;expectedPendingDraftId:string|null;expectedRegistrationId?:string|null;expectedStepVersions?:Record<string,number>|null;edits:Edits};
+
+export function StrategyOverviewDialog({account,onClose,onSaved}:{account:Account;onClose:()=>void;onSaved:()=>Promise<unknown>}){
+ const discussion=useAccountDiscussion();
+ const draftId=account.pendingStrategyDraftId??account.strategyDraftId;
+ const read=trpc.opc.read.useQuery({draftId});
+ const latestSchema=trpc.opc.accountStrategySchema.useQuery({accountProjectId:account.projectId});
+ const [history,setHistory]=useState(false),[historyVersion,setHistoryVersion]=useState<string|null>(null);
+ const positionHistory=trpc.opc.accountStrategyHistory.useQuery({accountProjectId:account.projectId},{enabled:history});
+ const saveStrategy=trpc.opc.accountStrategySave.useMutation();
+ const [editing,setEditing]=useState(false),[editSchema,setEditSchema]=useState<Schema|null>(null),[edits,setEdits]=useState<Edits>({}),[stepVersions,setStepVersions]=useState<Record<string,number>|null>(null),[saving,setSaving]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState(''),[syncFailed,setSyncFailed]=useState(false),[recoverable,setRecoverable]=useState(false),[savedDraftId,setSavedDraftId]=useState<string|null>(null);
+ const key='opc-library-strategy-save:'+account.projectId;
+ useEffect(()=>{setRecoverable(Boolean(sessionStorage.getItem(key)));},[key]);
+ useEffect(()=>{function escape(event:KeyboardEvent){if(event.key==='Escape'&&!saving)onClose();}window.addEventListener('keydown',escape);return()=>window.removeEventListener('keydown',escape);},[onClose,saving]);
+ const data=read.data;
+ const viewedInformation=account.pendingStrategyDraftId?data?.information:(latestSchema.data as Schema|undefined)?.information;
+ const viewedEntries=Object.entries((viewedInformation??{}) as Record<string,Information>);
+ const versions=(positionHistory.data??[]) as HistoryVersion[];
+ const viewedVersion=versions.find(version=>version.id===(historyVersion??versions[0]?.id));
+ const officialVersion=account.currentVersion??account.sourceVersion;
+ const entries=editing&&editSchema?editSchema.workflow.steps.map(step=>[step.id,{schema:step.information??[],values:(viewedInformation as Record<string,{values:Record<string,Value>|null}>|undefined)?.[step.id]?.values??null}] as const):viewedEntries;
+ function baseValue(entry:{values:Record<string,Value>|null},field:{id:string;profileKey?:string}){
+  return entry.values?.[field.id]?.value??'';
+ }
+ const changed=entries.some(([stepId,entry])=>entry.schema.some(field=>Object.hasOwn(edits[stepId]??{},field.id)&&edits[stepId][field.id]!==baseValue(entry,field)));
+ function beginEdit(){const schema=latestSchema.data as Schema|undefined;if(!schema||data?.draftId!==draftId){setError('当前定位问题暂时无法读取，请稍后重试。');return;}const next:Edits={};for(const step of schema.workflow.steps){next[step.id]={};const values=(viewedInformation as Record<string,{values:Record<string,Value>|null}>|undefined)?.[step.id]?.values??null;for(const field of step.information??[])next[step.id][field.id]=baseValue({values},field);}const versions=data?.snapshot?.steps as Record<string,{version:number}>|undefined;if(account.pendingStrategyDraftId&&schema.workflow.steps.some(step=>!Number.isInteger(versions?.[step.id]?.version))){setError('当前定位版本暂时无法读取，请重新打开后再修改。');return;}setStepVersions(account.pendingStrategyDraftId?Object.fromEntries(schema.workflow.steps.map(step=>[step.id,versions![step.id].version])):null);setEditSchema(schema);setEdits(next);setError('');setSaved('');setEditing(true);}
+ async function save(){
+  if(!data||!editSchema||saving||!account.sourceVersionId)return;
+  setError('');setSaved('');setSaving(true);
+  try{await navigator.locks.request(key,async()=>{
+   let frozen:Frozen;
+   const raw=sessionStorage.getItem(key);
+   if(raw)frozen=JSON.parse(raw) as Frozen;
+   else{
+    const changes:Edits={};
+    for(const [stepId,entry] of entries)for(const field of entry.schema){const next=edits[stepId]?.[field.id];if(next!==undefined&&next!==baseValue(entry,field)){changes[stepId]??={};changes[stepId][field.id]=next;}}
+    if(!Object.keys(changes).length)return;
+    frozen={accountProjectId:account.projectId,requestId:crypto.randomUUID(),expectedSourceVersionId:account.sourceVersionId,expectedPendingDraftId:account.pendingStrategyDraftId??null,expectedRegistrationId:editSchema.registrationId,expectedStepVersions:stepVersions,edits:changes};
+    sessionStorage.setItem(key,JSON.stringify(frozen));setRecoverable(true);
+   }
+   const result=await saveStrategy.mutateAsync(frozen);
+   sessionStorage.removeItem(key);setRecoverable(false);
+   setSavedDraftId(result.draftId);
+   let refreshed=true;
+   try{await onSaved();if(result.draftId===draftId)refreshed=!(await read.refetch()).isError;}
+   catch{refreshed=false;}
+   setSyncFailed(!refreshed);setEditing(false);setEditSchema(null);setSaved('已保存到此账号的待确认定位草稿。原正式版本及已有选题、稿件来源保持不变；请核对修改及受影响部分后确认正式定位，生成下一正式版本。'+(refreshed?'':'页面暂未刷新，请重新打开定位详情核对。'));
+  });}
+  catch(cause){const code=cause instanceof Error?cause.message:'';if(['OPC_VERSION_CONFLICT','OPC_INFORMATION_CONFLICT','OPC_INFORMATION_INVALID','OPC_DENIED','OPC_REQUEST_CONFLICT','OPC_SOURCE_DENIED'].includes(code)){sessionStorage.removeItem(key);setRecoverable(false);await onSaved();setError('服务端拒绝保存（'+code+'）。输入仍保留，请核对账号的当前版本。');}else setError('保存结果暂不确定。原请求已保留；再次保存只会恢复同一请求。');}
+  finally{setSaving(false);}
+ }
+ return <div className={styles.backdrop} onMouseDown={event=>{if(event.target===event.currentTarget&&!saving)onClose();}}><section role="dialog" aria-modal="true" aria-label="定位详情" className={editing?`${styles.dialog} ${styles.editDialog}`:styles.dialog}>
+  <header><h2>{editing?'修改定位':'定位详情'}</h2><button type="button" aria-label="关闭定位详情" disabled={saving} onClick={onClose}>×</button></header>
+  <div className={styles.body}>{read.isLoading?<p>正在读取定位…</p>:read.error?<p role="alert">当前账号的定位无法读取。请确认登录状态后重试。</p>:<>
+   <div className={styles.meta}><span>{account.platform}</span><span>{account.account}</span><span>{officialVersion?`当前正式版本 v${officialVersion}`:'策略待确认'}</span>{account.pendingStrategyDraftId?<span>已保存但未定稿的修改</span>:null}</div>
+   {(editing||recoverable)&&<p className={styles.notice}>{recoverable?'上一次保存结果待核实。请先恢复原请求，再继续编辑。':'仅修改当前账号的定位草稿；取消不写入，自动保存不会增加正式版本；核对后通过“确认正式定位”更新。'}</p>}
+   {history?<div className={styles.history}><h3>正式版本历史</h3><p>自动保存的修改草稿不在正式版本中。{account.pendingStrategyDraftId&&<button type="button" disabled={discussion.opening} onClick={()=>void discussion.open(account.projectId,onClose)}>继续当前修改草稿</button>}</p><nav aria-label="定位版本">{versions.map(version=><button type="button" key={version.id} aria-current={viewedVersion?.id===version.id?'page':undefined} onClick={()=>setHistoryVersion(version.id)}>v{version.version} · {version.source==='account'?'账号修订':'共享来源'}</button>)}</nav><div className={styles.historyValues}>{positionHistory.isLoading?'正在读取实际历史版本…':positionHistory.error?<p role="alert">历史版本暂不可读。</p>:!versions.length?<p>暂无正式历史版本。</p>:viewedVersion?.information?Object.entries(viewedVersion.information).map(([id,part])=><section key={id}><h4>{part.title}</h4>{part.schema.map(field=><div key={field.id}><strong>{field.title}</strong><p>{part.values?.[field.id]?.value||'待补充'}</p></div>)}</section>):Object.entries(viewedVersion?.profile??{}).map(([key,field])=><div key={key}><strong>{field.label??key}</strong><p>{field.value||'待补充'}</p></div>)}</div></div>:<div className={styles.sections}>{entries.map(([stepId,entry],index)=><details key={stepId} open={index===0||editing}><summary><span><strong>{(editing&&editSchema?editSchema.workflow.steps:!account.pendingStrategyDraftId?(latestSchema.data as Schema|undefined)?.workflow.steps:data?.snapshot.workflow.steps)?.find((step:{id:string;title:string})=>step.id===stepId)?.title??'定位步骤'}</strong><small>{entry.schema.map(field=>field.title).join(' · ')}</small></span><span className={styles.chevron}>＋</span></summary><div className={styles.fields}>{entry.schema.map(field=><label key={field.id}><span>{field.title}</span>{editing?<textarea maxLength={400} value={edits[stepId]?.[field.id]??''} disabled={saving||recoverable} onChange={event=>setEdits(current=>({...current,[stepId]:{...current[stepId],[field.id]:event.target.value}}))}/>:<p>{baseValue(entry,field)||'待补充'}</p>}<small>{editing?'待确认修订':account.pendingStrategyDraftId?'待确认草稿':officialVersion?`正式 v${officialVersion}`:'待确认'}</small></label>)}</div></details>)}</div>}
+  </>}{discussion.error&&<p role="alert" className={styles.error}>{discussion.error}</p>}{error&&<p role="alert" className={styles.error}>{error}</p>}{saved&&<p role="status" className={styles.success}>{saved} {savedDraftId&&<Link href={'/positioning/'+savedDraftId}>继续确认定位 →</Link>}</p>}</div>
+  <footer>{history?<button type="button" onClick={()=>setHistory(false)}>返回当前定位</button>:editing?<><button type="button" disabled={saving} onClick={()=>{setEditing(false);setEditSchema(null);setError('');}}>取消</button><button type="button" className={styles.primary} disabled={saving||(!changed&&!recoverable)} onClick={save}>{saving?'保存中…':recoverable?'恢复原保存':'确认保存'}</button></>:<><button type="button" disabled={syncFailed||read.isFetching||data?.draftId!==draftId||!latestSchema.data||latestSchema.isLoading} onClick={beginEdit}>修改定位</button><button type="button" onClick={()=>setHistory(true)}>历史版本</button><button type="button" className={styles.primary} disabled={discussion.opening} onClick={()=>void discussion.open(account.projectId,onClose)}>{discussion.opening?'正在打开…':'回到策略讨论'}</button></>}</footer>
+ </section></div>;
+}

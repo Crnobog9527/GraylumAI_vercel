@@ -13,6 +13,7 @@ const uuid = z.string().uuid();
  */
 export class PostgresSession implements Session {
   private historyRevisions:number[]=[];
+  private historyItems:AgentInputItem[]=[];
   private batch = 0; // Deterministic SDK append ordinal, never authoritative history.
   private readonly binding: Readonly<{ actorId: string; sessionId: string; executionId: string }>;
   constructor(private readonly database: SessionRpc, binding: { actorId: string; sessionId: string; executionId: string }) {
@@ -39,11 +40,21 @@ export class PostgresSession implements Session {
     if (!Array.isArray(items)) throw new Error('RUNTIME_SESSION_UNAVAILABLE');
     const rows=z.array(z.object({revision:z.number().int().nonnegative(),item:z.unknown()})).parse(items);
     this.historyRevisions=rows.map(r=>r.revision);
-    return rows.map(r=>r.item) as AgentInputItem[];
+    this.historyItems=rows.map(r=>r.item) as AgentInputItem[];
+    return this.historyItems;
   }
   async freezeHistory(count:number):Promise<void>{
     if(!Number.isSafeInteger(count)||count<0||count>this.historyRevisions.length)throw new Error('RUNTIME_HISTORY_SELECTION');
     await this.request('freeze',count?this.historyRevisions.slice(-count):[]);
+  }
+  async freezeHistoryItems(items:unknown[]):Promise<void>{
+    const selected=items.map(item=>{
+      const index=this.historyItems.findIndex(candidate=>candidate===item);
+      if(index<0)return null;
+      return this.historyRevisions[index];
+    });
+    if(selected.some(revision=>revision===null)||new Set(selected).size!==selected.length)throw new Error('RUNTIME_HISTORY_SELECTION');
+    await this.request('freeze',selected as number[]);
   }
   async addItems(items: AgentInputItem[]): Promise<void> {
     await this.request('append', items);

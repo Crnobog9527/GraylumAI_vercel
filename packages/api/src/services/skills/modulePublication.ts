@@ -1,10 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import { isDeepStrictEqual } from 'node:util';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { packageHash, packageHashPayload, sha256, type PackageDescriptor } from './loader';
 import { validatePublication } from './publication';
-import { validateWorkflow } from '../artifacts/workflow';
+import { validateWorkflow,informationSchema } from '../artifacts/workflow';
 import { summaryModelOption } from '../artifacts/modelPolicy';
+import { parseWorkflowManifest, workflowManifestPath } from './workflowManifest';
 
 const label = z.string().trim().min(1).max(160).regex(/^[^\r\n\x00-\x1f]+$/);
 export const moduleSkillInput = z.object({
@@ -13,7 +15,8 @@ export const moduleSkillInput = z.object({
   kind: z.enum(['document', 'social']),
   directoryName: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(64),
   files: z.array(z.object({ path: z.string().max(240), base64: z.string().max(2_800_000) }).strict()).min(1).max(64),
-  steps: z.array(z.object({ title: label, resources: z.array(z.string().max(240)).min(1).max(64) }).strict()).min(1).max(32),
+  planResources:z.array(z.string().max(240)).min(1).max(64).optional(),
+  steps: z.array(z.object({ title: label, information:z.array(informationSchema).max(24).optional(), resources: z.array(z.string().max(240)).min(1).max(64) }).strict()).min(1).max(32),
   resourcePlanReviewed: z.literal(true),
   module: z.object({
     title: z.string().trim().min(1).max(100), description: z.string().max(500).nullable(),
@@ -32,6 +35,15 @@ export type ModuleSkillInput = z.infer<typeof moduleSkillInput>;
 
 export function prepareModuleSkill(value: ModuleSkillInput) {
   const input = moduleSkillInput.parse(value);
+  const manifestFile = input.files.find(file=>file.path===workflowManifestPath);
+  if (manifestFile) {
+    let manifestText: string;
+    try { manifestText = new TextDecoder('utf-8',{fatal:true}).decode(Buffer.from(manifestFile.base64,'base64')); }
+    catch { throw new Error('workflow.yaml 必须使用 UTF-8 编码'); }
+    const declared = parseWorkflowManifest(manifestText);
+    if (!isDeepStrictEqual(declared,JSON.parse(JSON.stringify({kind:input.kind,steps:input.steps,planResources:input.planResources}))))
+      throw new Error('workflow.yaml 与提交的步骤或问题不一致，请重新导入 Skill 文件夹');
+  }
   const descriptor: PackageDescriptor = {
     packageId: input.skillId, revisionId: input.revisionId, directoryName: input.directoryName,
     packageHash: '', tasks: {}, requiredCapabilities: ['documents.read'],
@@ -50,7 +62,7 @@ export function prepareModuleSkill(value: ModuleSkillInput) {
     requiresEvidence: false, requiredCapabilities: ['documents.read'],
   }));
   const workflow = validateWorkflow({ id: `module-${input.moduleId.replaceAll('-', '')}`,
-    version: input.expectedVersion + 1, kind: input.kind, steps,
+    version: input.expectedVersion + 1, kind: input.kind, steps,...(input.planResources?{planResources:input.planResources}:{}),
     report: { id: 'confirmed-report', version: input.expectedVersion + 1, title: input.module.title,
       sections: steps.map(step => ({ title: step.title, stepId: step.id })) },
   }, descriptor);

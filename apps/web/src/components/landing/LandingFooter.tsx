@@ -96,9 +96,17 @@ export default function LandingFooter({
 
         {/* Bottom Bar */}
         <div className="py-6 border-t border-[#333333] flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p className="text-sm text-[#808080]">
-            &copy; {new Date().getFullYear()} {siteName}. All rights reserved.
-          </p>
+          <div className="space-y-2 text-center sm:text-left">
+            <p className="text-sm text-[#808080]">
+              &copy; {new Date().getFullYear()} {siteName}. All rights reserved.
+            </p>
+            <p className="text-xs text-[#808080]">
+              本网站使用 MiSans 字体，版权归小米所有。{' '}
+              <a href="/fonts/misans/LICENSE.pdf" className="underline underline-offset-4 hover:text-[#B0B0B0]">
+                字体许可协议
+              </a>
+            </p>
+          </div>
           <div className="flex items-center gap-6">
             <Link
               href={buildAuthHref('/login')}

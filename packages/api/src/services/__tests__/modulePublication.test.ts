@@ -49,4 +49,54 @@ describe('administrator module publication', () => {
       p_actor_id: actor, p_metadata: input.module, p_expected_updated_at: null, p_request_id: input.requestId,
     }));
   });
+  it('carries an explicit per-field elicitation declaration into the published workflow', () => {
+    const input = moduleInput();
+    input.steps[0].information = [
+      { id: 'owned_fact', title: '用户自有事实', required: true, elicitation: 'user_fact' },
+      { id: 'agent_deliverable', title: '导师成果建议', required: true, elicitation: 'agent_proposal' },
+    ];
+    const published = prepareModuleSkill(input).workflow.steps[0].information;
+    // Both values survive identically, and nothing rewrites them.
+    expect(published).toEqual([
+      { id: 'owned_fact', title: '用户自有事实', required: true, elicitation: 'user_fact' },
+      { id: 'agent_deliverable', title: '导师成果建议', required: true, elicitation: 'agent_proposal' },
+    ]);
+  });
+  it('publishes exactly the steps and questions declared in the uploaded workflow file', () => {
+    const input = moduleInput();
+    input.kind = 'social';
+    input.steps = [
+      {title:'需求确认',resources:['SKILL.md'],information:[{id:'product',title:'产品与服务',required:true}]},
+      {title:'效果验证',resources:['SKILL.md'],information:[{id:'measure',title:'如何验证效果',required:true}]},
+    ];
+    input.files.push({path:'workflow.yaml',base64:Buffer.from(
+      'kind: social\nsteps:\n  - title: 需求确认\n    resources: [SKILL.md]\n    information:\n      - id: product\n        title: 产品与服务\n        required: true\n  - title: 效果验证\n    resources: [SKILL.md]\n    information:\n      - id: measure\n        title: 如何验证效果\n        required: true\n',
+    ).toString('base64')});
+    expect(prepareModuleSkill(input).workflow.steps.map(step=>step.title))
+      .toEqual(['需求确认','效果验证']);
+    input.steps[1].information![0].title='旧问题';
+    expect(()=>prepareModuleSkill(input)).toThrow('不一致');
+  });
+  it('keeps an older revision without the property valid and publishable', async () => {
+    const input = moduleInput();
+    input.steps[0].information = [{ id: 'legacy_fact', title: '旧版字段', required: true, profileKey: 'legacy_fact' }];
+    const published = prepareModuleSkill(input).workflow.steps[0].information;
+    expect(published).toEqual([{ id: 'legacy_fact', title: '旧版字段', required: true, profileKey: 'legacy_fact' }]);
+    expect(published?.[0]).not.toHaveProperty('elicitation');
+    const db = { from:()=>({select(){return this;},eq(){return this;},single:async()=>({data:{id:input.module.model_id,name:'Qwen',model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'LOCAL_ONLY',api_endpoint:''},error:null})}), rpc: vi.fn().mockResolvedValue({ data: { moduleId: input.moduleId }, error: null }) };
+    await expect(saveModuleSkill(db as any, randomUUID(), input)).resolves.toBeTruthy();
+    expect(db.rpc).toHaveBeenCalledOnce();
+  });
+  it('rejects an invalid elicitation value and unknown field properties before any write', async () => {
+    for (const change of [
+      (x: ModuleSkillInput) => { x.steps[0].information = [{ id: 'f', title: '字段', required: true, elicitation: 'proposal' as never }]; },
+      (x: ModuleSkillInput) => { x.steps[0].information = [{ id: 'f', title: '字段', required: true, elicitation: 'AGENT_PROPOSAL' as never }]; },
+      (x: ModuleSkillInput) => { x.steps[0].information = [{ id: 'f', title: '字段', required: true, inferred: true } as never]; },
+    ]) {
+      const db = { rpc: vi.fn() }, input = moduleInput(); change(input);
+      expect(() => prepareModuleSkill(input)).toThrow();
+      await expect(saveModuleSkill(db as any, randomUUID(), input)).rejects.toThrow();
+      expect(db.rpc).not.toHaveBeenCalled();
+    }
+  });
 });
