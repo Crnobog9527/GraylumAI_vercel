@@ -5,6 +5,7 @@ import { runtimeAdmissionService,runtimeAdmission,runtimeMaterialInput } from '.
 import {loadStagingPolicy,loadStagingRecoveryPolicy,assertStagingReadAccess} from '../services/runtime/stagingPolicy';
 import {StagingAccessError,stagingProcedureError} from '../services/runtime/stagingErrors';
 import {stagingTransport} from '../services/runtime/stagingTransport';
+import {retainedOutputReason} from '../services/runtime/view';
 import { runtimeExecutor } from '../services/runtime/execute';
 import { databaseSkillSource } from '../services/skills/databaseSource';
 import { discoverSkills } from '../services/skills/loader';
@@ -83,7 +84,12 @@ export const runtimeRouter=router({
  }),
  execute:maintenanceProcedure.input(z.object({executionId:z.string().uuid()}).strict()).mutation(async({ctx,input})=>{
   const actor=async()=>{const r=await ctx.userScopedSupabase.auth.getUser();if(r.error||r.data.user?.id!==ctx.user.id)throw new Error('RUNTIME_DENIED');return ctx.user.id;};
-  if(ctx.maintenanceEndpoint)return runtimeExecutor({database:ctx.supabaseAdmin!,actor,endpoint:ctx.maintenanceEndpoint,activateSkill:c=>activateRuntimeCandidate(ctx.userScopedSupabase,ctx.supabaseAdmin!,c)}).execute(input.executionId);
+  const outcome=async<T extends {state:string}>(result:T)=>{
+   if(!['cancelled','cost_pending'].includes(result.state))return result;
+   const reason=await retainedOutputReason(ctx.supabaseAdmin!,ctx.user.id,input.executionId);
+   return {...result,...(reason?{unavailable:reason}:{})};
+  };
+  if(ctx.maintenanceEndpoint)return outcome(await runtimeExecutor({database:ctx.supabaseAdmin!,actor,endpoint:ctx.maintenanceEndpoint,activateSkill:c=>activateRuntimeCandidate(ctx.userScopedSupabase,ctx.supabaseAdmin!,c)}).execute(input.executionId));
   try{await loadStagingPolicy(ctx.supabaseAdmin!,ctx.user.id,process.env);}catch{
    const original=await loadStagingRecoveryPolicy(ctx.supabaseAdmin!,ctx.user.id,input.executionId,process.env);
    // This branch never constructs/runs an SDK request. It only looks up the
@@ -96,12 +102,12 @@ export const runtimeRouter=router({
    }
    const adapter=stagingTransport(ctx.supabaseAdmin!,original);
    const state=await runtimeExecutor({database:ctx.supabaseAdmin!,actor,adapter:{dispatch:async()=>{throw new Error('RUNTIME_DISPATCH_DISABLED');},lookup:adapter.lookup}}).recoverFinancial(input.executionId);
-   return {state:state.state};
+   return outcome({state:state.state});
   }
   // Execution/recovery always uses its original quote and credential namespace,
   // even if a later test window is now selected in the host environment.
   const original=await loadStagingRecoveryPolicy(ctx.supabaseAdmin!,ctx.user.id,input.executionId,process.env);
-  return runtimeExecutor({database:ctx.supabaseAdmin!,actor,adapter:stagingTransport(ctx.supabaseAdmin!,original),activateSkill:c=>activateRuntimeCandidate(ctx.userScopedSupabase,ctx.supabaseAdmin!,c)}).execute(input.executionId);
+  return outcome(await runtimeExecutor({database:ctx.supabaseAdmin!,actor,adapter:stagingTransport(ctx.supabaseAdmin!,original),activateSkill:c=>activateRuntimeCandidate(ctx.userScopedSupabase,ctx.supabaseAdmin!,c)}).execute(input.executionId));
  }),
  view:maintenanceProcedure.input(z.object({sessionId:z.string().uuid()}).strict()).query(async({ctx,input})=>{
   const result=await ctx.supabaseAdmin!.rpc('runtime_view',{p_actor_id:ctx.user.id,p_session_id:input.sessionId});if(result.error)throw new Error('RUNTIME_VIEW_DENIED');return {...result.data,mode:ctx.maintenanceEndpoint?'isolated':'staging_test'};

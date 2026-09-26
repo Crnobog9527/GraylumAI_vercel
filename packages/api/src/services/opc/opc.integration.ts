@@ -10308,3 +10308,33 @@ it.skipIf(!process.env.V3_LEGACY_ROOT)('OPC: U3 cross-code receipt recovery pres
   }
  }finally{await new Promise<void>((resolve,reject)=>server.close(e=>e?reject(e):resolve()));}
 },180000);
+
+it.each(['cancelled','cost_pending'])('OPC: video truncation keeps accurate diagnosis and recovery envelope (%s)',async(state)=>{
+ const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'truncation-account',title:'截断恢复',brief:'本地页面恢复验证',day:'2026-09-26',contentType:'video'}]});
+ const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'truncation-account',expectedRevision:null}]});
+ const {browser,page}=await planBrowser(f);let executions=0;
+ const key='opc-video-operation:'+work.sessionId;
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+work.sessionId);
+  await page.getByLabel('消息',{exact:true}).fill('请给我第一版口播稿。');
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  const finalize=page.getByRole('button',{name:'将这条回复定稿为口播稿',exact:true});await finalize.waitFor({timeout:60000});await finalize.click();
+  await page.getByRole('heading',{name:'口播稿已定稿。要先制作分镜脚本吗？',exact:true}).waitFor();
+  // UI transport contract only. Real local SDK/SQL receipt recovery is covered
+  // by runtime.integration.ts; this synthetic response proves no model quality.
+  await page.route('**/api/trpc/runtime.execute*',async route=>{executions++;await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify([{result:{data:{state,unavailable:'output_truncated'}}}])});});
+  await page.getByRole('button',{name:'只生成分镜',exact:true}).click();
+  await expect.poll(async()=>(await page.getByRole('alert').allTextContents()).join(' '),{timeout:60000}).toContain('达到长度上限');
+  expect((await page.getByRole('alert').allTextContents()).join(' ')).not.toContain('OPC_CONTENT_DENIED');
+  expect(executions).toBe(1);
+  const frozen=await page.evaluate(k=>localStorage.getItem(k),key);
+  if(state==='cancelled')expect(frozen).toBeNull();else expect(JSON.parse(frozen!).followup.executionId).toBeTruthy();
+  await page.reload();
+  await page.getByLabel('消息',{exact:true}).waitFor();
+  if(state==='cost_pending')await expect.poll(()=>executions,{timeout:30000}).toBe(2);
+  else expect(executions).toBe(1);
+  expect((await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind='script'",[work.workItemId])).rows[0].n).toBe(1);
+  expect((await sql.query("select count(*)::int n from opc_content_versions where work_item_id=$1 and kind in ('storyboard','editing')",[work.workItemId])).rows[0].n).toBe(0);
+ }finally{await browser.close();}
+},120000);

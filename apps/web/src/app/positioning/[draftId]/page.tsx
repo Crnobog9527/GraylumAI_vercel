@@ -274,7 +274,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const discussionAccount = discussionAccounts.length===1?discussionAccounts[0]:undefined;
   const list = trpc.opc.list.useQuery();
   const prepareStep = trpc.opc.prepareStep.useMutation(),
-    execute = trpc.runtime.execute.useMutation();
+    execute = trpc.runtime.execute.useMutation({onSuccess(result){
+      if('unavailable' in result&&result.unavailable==='output_truncated')setError('本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。');
+    }});
   const information = trpc.opc.information.useMutation();
   const [infoEdits, setInfoEdits] = useState<
     Record<string, Record<string, Information>>
@@ -1731,6 +1733,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     kind: string;
   };
   type MentorExecution = {
+    unavailableReason?: string | null;
     executionId: string;
     input: string | null;
     body: string | null;
@@ -1990,11 +1993,14 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                             </span>
                             <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>
                               {parsed.message ||
-                                (execution.state === "cancelled"
+                                (execution.unavailableReason === "output_truncated"
+                                  ? "本次模型调用达到长度上限，未返回该阶段正文。原请求已保留，不会自动重试。"
+                                  : execution.state === "cancelled"
                                   ? "本次执行已取消，原记录已保留。你可以继续讨论当前问题。"
                                   : busy ? "正在回复…" : "回复暂未完成，请继续核对。")}
                             </p>
                           </div>
+                          {parsed.message && execution.unavailableReason === 'output_truncated' && <p role="status">本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。</p>}
                           {execution.state === "completed" && target && latestSuggestion.get(target.id) === execution.executionId && proposed.length > 0 && (
                             <div className={resultStyles.suggestionCard}>
                               <p className={resultStyles.suggestionTitle}>导师建议调整 · {target.title}</p>
