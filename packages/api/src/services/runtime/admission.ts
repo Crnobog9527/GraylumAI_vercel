@@ -8,6 +8,7 @@ import { activateSkill, identityOf } from '../skills/loader';
 import { summaryPolicy, assertSeparateSummaryModel } from '../artifacts/summaryPolicy';
 import { aggregateCredits, decimal } from '../bill2/decimal';
 import type {StagingPolicy} from './stagingPolicy';
+import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
 import type {FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
 import { discoverRuntimeCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
@@ -28,11 +29,20 @@ export type LocalRuntimePolicy={real?:StagingPolicy;account:string;costPerCall:s
 export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient,policy:LocalRuntimePolicy){
  policy=Object.freeze({...policy,...(policy.real?{real:structuredClone(policy.real),creditsPerUsd:policy.real.creditsPerUsd,multiplier:policy.real.multiplier}:{}),...(policy.skillResources?{skillResources:Object.freeze([...policy.skillResources])}:{})});
  z.number().int().min(1).max(32).parse(policy.maxCalls);
+ function unavailableModel(){return policy.real?new StagingAccessError('RUNTIME_STAGING_MODEL_DENIED'):new Error('RUNTIME_MODEL_CAPABILITY_UNVERIFIED');}
+ function modelConfiguration<T>(read:()=>T):T{
+  try{return read();}catch(cause){
+   if(policy.real&&cause instanceof Error&&['SUMMARY_MODEL_NOT_CONFIGURED','SUMMARY_MODEL_MUST_DIFFER','SUMMARY_OUTPUT_LIMIT_INVALID'].includes(cause.message))throw unavailableModel();
+   throw cause;
+  }
+ }
  function realModel(row:Record<string,unknown>){
   const quote=policy.real?.callPolicies.find(q=>q.modelId===row.id);
-  if(!quote||row.is_active!=='true'||quote.model!==row.model_id||!['openai','openrouter','anthropic'].includes(String(row.provider))||
-   !quote.providerLimits||Number(row.input_limit)<quote.providerLimits.contextTokens||Number(row.max_tokens)<quote.outputLimit)
-   throw new Error('RUNTIME_MODEL_CAPABILITY_UNVERIFIED');
+  if(!quote)throw new StagingAccessError('RUNTIME_STAGING_MODEL_NOT_APPROVED');
+  if(row.is_active!=='true'||quote.model!==row.model_id||!['openai','openrouter','anthropic'].includes(String(row.provider))||
+   !quote.providerLimits||!Number.isSafeInteger(Number(row.input_limit))||!Number.isSafeInteger(Number(row.max_tokens))||
+   Number(row.input_limit)<quote.providerLimits.contextTokens||Number(row.max_tokens)<quote.outputLimit)
+   throw unavailableModel();
   return quote;
  }
  function inputCapacity(row:Record<string,unknown>,output:number){
@@ -71,26 +81,28 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    }else{
     if(!session.dialogueModelId)throw new Error('RUNTIME_ORGANIZER_SOURCE_REQUIRED');
     const rows=await admin.from('system_settings').select('key,value').in('key',['v3_summary_model_id','v3_summary_max_tokens']);
-    if(rows.error)throw new Error('RUNTIME_ORGANIZER_DENIED');
-    const summary=summaryPolicy(Object.fromEntries(rows.data.map(row=>[row.key,row.value])),session.dialogueModelId);
+    if(rows.error){if(policy.real)stagingRpcFailure(rows.error);throw new Error('RUNTIME_ORGANIZER_DENIED');}
+    const summary=modelConfiguration(()=>summaryPolicy(Object.fromEntries(rows.data.map(row=>[row.key,row.value])),session.dialogueModelId));
     modelId=summary.modelId;organizerOutput=summary.maxTokens;
     instructions='Organize the provided current-session material. Preserve source references and uncertainties. Do not create new facts.';
    }
    const row=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit').eq('id',modelId).single();
    // Match the actual administrator model to the enabled protocol and exact quote. Never substitute a default model.
-   if(row.error||row.data?.is_active!=='true'||(!policy.real&&row.data.provider!=='fixture'))throw new Error('RUNTIME_MODEL_CAPABILITY_UNVERIFIED');
+   if(policy.real&&row.error){if(row.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(row.error);}
+   if(row.error||row.data?.is_active!=='true'||(!policy.real&&row.data.provider!=='fixture'))throw unavailableModel();
    if(policy.real)realModel(row.data);
-   if(input.selection.kind==='organizer')assertSeparateSummaryModel(session.dialogueModel,row.data.model_id);
+   if(input.selection.kind==='organizer')modelConfiguration(()=>assertSeparateSummaryModel(session.dialogueModel,row.data.model_id));
    let attachedOrganizer:{modelId:string;model:string;maxOutputTokens:number;instructions?:string;input?:string}|undefined;
    let attachedInputLimit:number|undefined;
    if(input.organizeAfter){
     if(input.selection.kind==='organizer'||policy.maxCalls<2)throw new Error('RUNTIME_ORGANIZER_BUDGET');
     const settings=await admin.from('system_settings').select('key,value').in('key',['v3_summary_model_id','v3_summary_max_tokens']);
-    if(settings.error)throw new Error('RUNTIME_ORGANIZER_DENIED');
-    const summary=summaryPolicy(Object.fromEntries(settings.data.map(r=>[r.key,r.value])),modelId);
+    if(settings.error){if(policy.real)stagingRpcFailure(settings.error);throw new Error('RUNTIME_ORGANIZER_DENIED');}
+    const summary=modelConfiguration(()=>summaryPolicy(Object.fromEntries(settings.data.map(r=>[r.key,r.value])),modelId));
     const model=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit').eq('id',summary.modelId).single();
-    if(model.error||model.data?.is_active!=='true'||(!policy.real&&model.data.provider!=='fixture'))throw new Error('RUNTIME_MODEL_CAPABILITY_UNVERIFIED');
-    assertSeparateSummaryModel(row.data.model_id,model.data.model_id);
+    if(policy.real&&model.error){if(model.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(model.error);}
+    if(model.error||model.data?.is_active!=='true'||(!policy.real&&model.data.provider!=='fixture'))throw unavailableModel();
+    modelConfiguration(()=>assertSeparateSummaryModel(row.data.model_id,model.data.model_id));
     const limit=Math.min(policy.maxOutputTokens,summary.maxTokens,Number(model.data.max_tokens),policy.real?realModel(model.data).outputLimit:Infinity);
     if(!Number.isSafeInteger(limit)||limit<1)throw new Error('RUNTIME_MODEL_CAPACITY');
     attachedInputLimit=inputCapacity(model.data,limit);
@@ -140,7 +152,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     limits:{costUsd:cost,credits,maxPreDeduct:credits,maxCalls:policy.maxCalls,deadline:new Date(Math.min(Date.now()+3600000,policy.real?Date.parse(policy.real.expiresAt):Infinity)).toISOString()}};
    if(attachedOrganizer)billing.callPolicy.push({...billing.callPolicy[0],modelId:attachedOrganizer.modelId,model:attachedOrganizer.model,inputLimit:attachedInputLimit!,outputLimit:attachedOrganizer.maxOutputTokens});
    for(const candidate of candidates){
-    if(attachedOrganizer)assertSeparateSummaryModel(candidate.model,attachedOrganizer.model);
+    if(attachedOrganizer)modelConfiguration(()=>assertSeparateSummaryModel(candidate.model,attachedOrganizer!.model));
     if(!billing.callPolicy.some(p=>p.modelId===candidate.modelId))billing.callPolicy.push({...billing.callPolicy[0],modelId:candidate.modelId,model:candidate.model,inputLimit:candidate.inputLimit,outputLimit:candidate.outputLimit});
    }
    if(realCalls)billing.callPolicy=realCalls;

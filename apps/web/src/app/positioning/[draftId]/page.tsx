@@ -12,6 +12,7 @@ import { PanelRightOpen, X } from "lucide-react";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 import { mergeInformation } from "./information-merge";
+import { admissionMessage } from "./admission-message";
 import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-response";
 import {
   confirmationActionIsRedundant,
@@ -862,10 +863,11 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       await read.refetch();
       await list.refetch();
       await history.refetch();
-    } catch {
-      setError(
+    } catch (cause) {
+      setError(admissionMessage(cause) ??
         "操作未完成或版本已变化。编辑已保留；请重新读取状态，确认当前版本后再操作。",
       );
+      return cause;
     } finally {
       setRunning(false);
     }
@@ -1062,13 +1064,13 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       }
       return;
     }
-    await run(async () => {
+    const failure = await run(async () => {
       await resumeStepEnvelope(step, envelope.parsed!);
     });
     // A mismatch or unknown outcome retains the original identity for a later
     // explicit retry instead of orphaning the request.
     if (sessionStorage.getItem(key))
-      setError("原请求仍未确认结果，已继续保留。请稍后再试“继续核对这条原请求”，不会重复发送或重复扣费。");
+      setError(admissionMessage(failure) ?? "原请求仍未确认结果，已继续保留。请稍后再试“继续核对这条原请求”，不会重复发送或重复扣费。");
   }
   function confirmEnvelopeState(stepId: string): ConfirmEnvelopeState {
     if (hydratedDraft !== draftId || typeof window === "undefined")
@@ -1799,7 +1801,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       {workInfoOpen&&<div className={resultStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setWorkInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={resultStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setWorkInfoOpen(false)}>×</button></header><p>当前工作：{manualEntry?'已有定位录入':'定位分析'}</p><p>状态：{snap.state==='published'?'定位已确认':'定位进行中'}</p><p>定位讨论、待确认修改与历史版本留在原工作；查看不会确认或保存。</p><footer><button type="button" onClick={()=>{void read.refetch();setWorkInfoOpen(false);}}>重新读取状态</button><Link href="/positioning">新任务与账号</Link></footer></section></div>}
       {!planView && <>{hasPendingStepRequest && !busy && (
         <section role="status" aria-label="待恢复的导师请求" className={resultStyles.requestRecovery}>
-          <p>上一条消息的结果暂未确认，请恢复后继续。</p>
+          <p>上一条请求已保留，请按原身份继续核对。</p>
           {pendingStepRequests.map(({ step, parsed }) => (
             <div key={step.id} className="space-y-2">
               <p className="text-sm">
