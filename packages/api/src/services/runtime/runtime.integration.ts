@@ -95,14 +95,15 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['legacy','serial-to
 it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['plain','reasoning','unsupported'])('RUNTIME: staging SDK assistant history across executions preserves %s and rejects unsupported metadata',async(shape)=>{
  const f=await fixture(),model=randomUUID(),windowId=randomUUID();
  await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic history','test/history','openrouter','true')",[model]);
- const policy={...f.billing.callPolicy[0],modelId:model,provider:'openrouter',model:'test/history',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
+ const policy={...f.billing.callPolicy[0],modelId:model,provider:'openrouter',model:'test/history',protocol:'openrouter-chat-v1',inputLimit:5000,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.10,3,now()+interval '2 hours')",[windowId,[f.actorId],JSON.stringify([policy])]);
  const bodies:string[]=[];
  const server=createServer(async(req,res)=>{
   let raw='';for await(const chunk of req)raw+=chunk;bodies.push(raw);
   const request=JSON.parse(raw),number=bodies.length;
+  expect(Buffer.byteLength(raw)).toBeLessThanOrEqual(policy.inputLimit);
   expect(request.messages.filter((m:{role:string})=>m.role==='assistant')).toEqual(Array.from({length:number-1},(_,index)=>({role:'assistant',content:'Synthetic history answer '+(index+1)})));
-  const extra=shape==='reasoning'?{refusal:null,reasoning:'SYNTHETIC_PRIVATE_REASONING',reasoning_details:[{type:'reasoning.text',format:'unknown',index:0,text:'SYNTHETIC_PRIVATE_REASONING'}]}:shape==='unsupported'?{plugins:[{id:'web',query:'SYNTHETIC_PRIVATE_BODY'}]}:{tool_calls:number===1?null:[]};
+  const extra=shape==='reasoning'?{refusal:null,reasoning:'SYNTHETIC_PRIVATE_REASONING'.repeat(600),reasoning_details:[{type:'reasoning.text',format:'unknown',index:0,text:'SYNTHETIC_PRIVATE_REASONING'.repeat(600)}]}:shape==='unsupported'?{plugins:[{id:'web',query:'SYNTHETIC_PRIVATE_BODY'}]}:{tool_calls:number===1?null:[]};
   res.setHeader('content-type','application/json');res.end(JSON.stringify({id:'gen-history-'+windowId+'-'+number,object:'chat.completion',created:1,model:'test/history',choices:[{index:0,message:{role:'assistant',content:'Synthetic history answer '+number,...extra},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}}));
  });
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -135,7 +136,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['plain','reasoning'
   }
   expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(shape==='unsupported'?97:91);
   const history=JSON.stringify((await db.query('select item from runtime_session_history where session_id=$1 order by revision',[f.s.sessionId])).rows);
-  expect(history).toContain('providerData');if(shape==='reasoning')expect(history).toContain('SYNTHETIC_PRIVATE_REASONING');
+  expect(history).toContain('providerData');if(shape==='reasoning'){expect(history).toContain('SYNTHETIC_PRIVATE_REASONING');expect(Buffer.byteLength(history)).toBeGreaterThan(policy.inputLimit*8);}
   if(shape!=='unsupported')expect(diagnostic.mock.calls.filter(call=>call[1]==='runtime_provider_preflight_failed')).toHaveLength(0);
  }finally{diagnostic.mockRestore();await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },30000);

@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import {logger} from '../../lib/logger';
-import {normalizeOpenRouterHistory} from './openRouterHistory';
+import {normalizeOpenRouterHistory,projectOpenRouterItemsForSizing} from './openRouterHistory';
 import { authoritativeBilling, type FrozenRun, type FrozenCall, type BillingTransport } from '../bill2/service';
 import {decimal} from '../bill2/decimal';
 import {openRouterBound} from '../bill2/openRouterPolicy';
@@ -193,16 +193,22 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
    const preserveHistoricalMaterial=Boolean(context.sources?.length)||requestsHistoricalComparison(context.input);
    const primarySequence=callSequence;
    const runPrimary=async(legacyInput=false)=>{
+   const sizing=context.providerRequestFormat==='serial-tools-v2'?{projectItemsForSizing:(items:unknown[],historyCount:number)=>{
+    try{return projectOpenRouterItemsForSizing(items,historyCount);}catch(error){
+     if(error instanceof Error&&error.message==='RUNTIME_PROVIDER_HISTORY_DENIED')logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});
+     throw error;
+    }
+   }}:{};
    let selectedHistoryCount=0;
    return runRuntime({...context,...effective,input:runtimeScopeInput(context.input,context.scopeMaterial),session,tools,selectHistory:async(history,incoming)=>{
-    const selected=selectRuntimeHistory(history,incoming,{instructions:effective.instructions,inputBytes:primaryPolicy.inputLimit,historyItems:context.historyItems,toolBytes,
+    const selected=selectRuntimeHistory(history,incoming,{instructions:effective.instructions,inputBytes:primaryPolicy.inputLimit,historyItems:context.historyItems,toolBytes,...sizing,
      projectHistoryItem:item=>legacyInput||preserveHistoricalMaterial?item:projectSupersededScopeItem(item,context.scopeMaterial)});
     selectedHistoryCount=selected.length-incoming.length;
     // Freeze the exact first-call history members. Later tool calls may use a
     // subset, but never acquire a new Session dependency during this execution.
     await session.freezeHistoryItems(selected.slice(0,selectedHistoryCount));return selected;
    },filterModelInput:legacyInput?undefined:(items,instructions)=>selectRuntimeCallInput(items,selectedHistoryCount,{
-    instructions,inputBytes:primaryPolicy.inputLimit,toolBytes,currentMaterial:context.scopeMaterial,preserveHistoricalMaterial,
+    instructions,inputBytes:primaryPolicy.inputLimit,toolBytes,currentMaterial:context.scopeMaterial,preserveHistoricalMaterial,...sizing,
    }) as typeof items,
     exchange:async(_sequence,request)=>{
      const envelope=await exchange(request,effective.role);
