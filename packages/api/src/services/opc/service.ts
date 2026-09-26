@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from "zod";
+import { DatabaseReadError } from "../../lib/databaseReadError";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isEmailVerified } from "../../lib/auth";
 import { runtimeAdmissionService } from "../runtime/admission";
@@ -82,14 +83,11 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
     const r = await admin
       .rpc(name, { ...args, p_actor_id: a.data.user.id })
       .abortSignal(AbortSignal.timeout(10000));
-    if (r.error)
-      // Our own bounded failure codes stay precise so a refused host action can
-      // be told apart from a transport failure. Anything else is masked.
-      throw new Error(
-        /^(?:OPC|RUNTIME)_[A-Z_]+$/.test(r.error.message)
-          ? r.error.message
-          : "OPC_UNAVAILABLE",
-      );
+    if (r.error) {
+      // Retain bounded business refusal codes used by request recovery.
+      if (/^(?:OPC|RUNTIME)_[A-Z_]+$/.test(r.error.message)) throw new Error(r.error.message);
+      throw new DatabaseReadError("OPC_UNAVAILABLE", r.error.code);
+    }
     return r.data;
   }
   return {
@@ -325,7 +323,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         p_actor_id: a,
         p_action: "catalog",
       });
-      if (raw.error) throw new Error("OPC_UNAVAILABLE");
+      if (raw.error) throw new DatabaseReadError("OPC_UNAVAILABLE", raw.error.code);
       return catalog.filter((c) =>
         raw.data.some(
           (r: any) =>

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
 import {loadStagingPolicy,assertStagingReadAccess} from '../services/runtime/stagingPolicy';
-import {StagingAccessError,stagingProcedureError} from '../services/runtime/stagingErrors';
+import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from '../services/runtime/stagingErrors';
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
 import {
   opcService,
@@ -108,7 +108,7 @@ export const opcRouter = router({
   conversations: readProcedure.query(async ({ ctx }) => {
     // Actor is always derived from the verified session, never supplied by input.
     const { data, error } = await ctx.supabaseAdmin.rpc('opc_free_conversations', { p_actor_id: ctx.user.id });
-    if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '对话记录暂时无法读取。' });
+    if (error) stagingRpcFailure(error);
     return z.array(z.object({ sessionId: z.string().uuid(), title: z.string(), lastActivityAt: z.string() })).parse(data);
   }),
   planRequestState: readProcedure

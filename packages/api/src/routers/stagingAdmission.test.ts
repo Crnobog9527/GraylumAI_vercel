@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
-const mocks = vi.hoisted(() => ({ catalog: vi.fn(), list: vi.fn(), library: vi.fn(), start: vi.fn(), info: vi.fn(), error: vi.fn() }));
+const mocks = vi.hoisted(() => ({ realOpc: false, catalog: vi.fn(), list: vi.fn(), library: vi.fn(), start: vi.fn(), info: vi.fn(), error: vi.fn() }));
 vi.mock('../lib/logger', () => ({ logger: { info: mocks.info, error: mocks.error, warn: vi.fn() } }));
-vi.mock('../services/opc/service', async original => ({ ...await original<typeof import('../services/opc/service')>(), opcService: () => ({ catalog: mocks.catalog, list: mocks.list, library: mocks.library }) }));
+vi.mock('../services/opc/service', async original => { const actual = await original<typeof import('../services/opc/service')>(); return { ...actual, opcService: (...args: Parameters<typeof actual.opcService>) => mocks.realOpc ? actual.opcService(...args) : ({ catalog: mocks.catalog, list: mocks.list, library: mocks.library }) }; });
 vi.mock('../services/runtime/admission', async original => ({ ...await original<typeof import('../services/runtime/admission')>(), runtimeAdmissionService: () => ({ start: mocks.start }) }));
 import { opcRouter } from './opc';
 import { runtimeRouter } from './runtime';
@@ -26,11 +26,11 @@ const policy = { id: windowId, expiresAt: '2099-01-01T00:00:00Z', creditsPerUsd:
 const rpc = vi.fn();
 function context(privileged = true) {
   const profile = { select() { return this; }, eq() { return this; }, single: async () => ({ data: { id: actor, role: 'user', status: 'active', nickname: 'Fixture', email: 'fixture@example.test', created_at: '2020-01-01', credits: 100 }, error: null }) };
-  const client = { from: () => profile, rpc, auth: { getUser: async () => ({ data: { user: { id: actor } }, error: null }) } };
+  const client = { from: () => profile, rpc, auth: { getUser: async () => ({ data: { user: { id: actor, email_confirmed_at: '2026-01-01T00:00:00Z' } }, error: null }) } };
   return { user: { id: actor, email: 'fixture@example.test' }, isEmailVerified: true, supabase: client, supabaseAuth: client, supabaseAdmin: client, hasSupabaseAdminPrivileges: privileged } as never;
 }
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.clearAllMocks(); mocks.realOpc = false;
   for (const [key, value] of Object.entries(remote)) vi.stubEnv(key, value);
   mocks.catalog.mockResolvedValue([]); mocks.list.mockResolvedValue({ drafts: [], accounts: [] }); mocks.library.mockResolvedValue({ businesses: [] }); mocks.start.mockResolvedValue({ sessionId: actor });
   rpc.mockImplementation(async (name: string) => ({ data: name === 'runtime_test_policy' ? policy : name === 'runtime_test_actor_access' ? true : [], error: null }));
@@ -102,4 +102,24 @@ describe('remote staging admission and HTTP error boundary', () => {
     expect(JSON.stringify(mocks.error.mock.calls)).toContain('opc.library');
     expect(JSON.stringify(mocks.error.mock.calls)).not.toContain('secret business');
   });
+});
+
+// Exercise actual OPC and shared catalog services, not their admission mocks.
+it.each(['catalog','list','library','conversations'] as const)('classifies downstream %s schema faults after successful admission', async route => {
+  mocks.realOpc = true;
+  rpc.mockImplementation((name: string) => Object.assign(Promise.resolve(
+    name === 'runtime_test_actor_access' ? {data:true,error:null} : name === 'runtime_test_policy' ? {data:policy,error:null}
+      : {data:null,error:{code:'PGRST202',message:'private SQL credential details'}}
+  ), {abortSignal() {return this;}}));
+  const caller = app.createCaller(context());
+  const request = route === 'library' ? caller.opc.library(libraryInput) : caller.opc[route]();
+  await expect(request).rejects.toMatchObject({code:'SERVICE_UNAVAILABLE',message:expect.stringContaining('尚未就绪')});
+  expect(JSON.stringify(mocks.error.mock.calls)).toContain('PGRST202');
+  expect(JSON.stringify(mocks.error.mock.calls)).not.toContain('private SQL');
+});
+it('preserves unexpected database faults as sanitized 500 rather than schema unavailability', async () => {
+  rpc.mockImplementation(async (name: string) => name === 'runtime_test_actor_access' ? {data:true,error:null} : {data:null,error:{code:'XX000',message:'private SQL body'}});
+  await expect(app.createCaller(context()).opc.conversations()).rejects.toMatchObject({code:'INTERNAL_SERVER_ERROR',message:expect.stringContaining('诊断编号')});
+  expect(JSON.stringify(mocks.error.mock.calls)).toContain('XX000');
+  expect(JSON.stringify(mocks.error.mock.calls)).not.toContain('private SQL');
 });

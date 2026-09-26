@@ -2,8 +2,10 @@
 import { randomUUID } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
 import { logger } from '../../lib/logger';
+import { DatabaseReadError } from '../../lib/databaseReadError';
 
 const failures = {
+  RUNTIME_STAGING_INTERNAL_ERROR: ['INTERNAL_SERVER_ERROR', '工作空间读取或操作失败，请稍后重试。'],
   RUNTIME_STAGING_NOT_CONFIGURED: ['PRECONDITION_FAILED', '当前工作空间尚未配置开放条件，请联系管理员。'],
   RUNTIME_STAGING_DISABLED: ['PRECONDITION_FAILED', '当前测试窗口尚未开放或已关闭。'],
   RUNTIME_STAGING_TARGET_DENIED: ['FORBIDDEN', '当前环境不允许访问此工作空间。'],
@@ -24,18 +26,23 @@ export class StagingAccessError extends Error {
 
 /** Only recognize the exact database-owned denial; permission/schema/transport
  * failures are operational failures, never proof that the actor was refused. */
-export function stagingRpcFailure(error: { code?: string; message?: string }, denial: string, reason: StagingFailure): never {
-  if (error.code === '42501' && error.message === denial) throw new StagingAccessError(reason);
-  const code = error.code && /^(?:[A-Z0-9]{5}|PGRST[0-9]{3})$/.test(error.code) ? error.code : undefined;
+function databaseFailure(error: {code?: string}): StagingAccessError {
+  const code = new DatabaseReadError('', error.code).databaseCode;
   if (['PGRST202', 'PGRST205', '42883', '42P01', '42703'].includes(code ?? ''))
-    throw new StagingAccessError('RUNTIME_STAGING_SCHEMA_UNAVAILABLE', code);
-  throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE', code);
+    return new StagingAccessError('RUNTIME_STAGING_SCHEMA_UNAVAILABLE', code);
+  const unavailable = !code || ['42501', '28000', '28P01', '57014', '57P01', '57P02', '57P03', 'PGRST301', 'PGRST302', 'PGRST303'].includes(code) || /^(08|53|PGRST0)/.test(code);
+  return new StagingAccessError(unavailable ? 'RUNTIME_STAGING_SERVICE_UNAVAILABLE' : 'RUNTIME_STAGING_INTERNAL_ERROR', code);
+}
+export function stagingRpcFailure(error: { code?: string; message?: string }, denial?: string, reason?: StagingFailure): never {
+  if (reason && denial && error.code === '42501' && error.message === denial) throw new StagingAccessError(reason);
+  throw databaseFailure(error);
 }
 
 /** No raw exception, credential, actor ID, SQL or business body reaches logs. */
 export function stagingProcedureError(cause: unknown, path: string): TRPCError {
-  const failure = cause instanceof StagingAccessError ? cause
-    : cause instanceof TRPCError && cause.cause instanceof StagingAccessError ? cause.cause : null;
+  const original = cause instanceof TRPCError ? cause.cause : cause;
+  const failure = original instanceof StagingAccessError ? original
+    : original instanceof DatabaseReadError ? databaseFailure({code: original.databaseCode}) : null;
   if (!failure && cause instanceof TRPCError && cause.code !== 'INTERNAL_SERVER_ERROR') return cause;
   const diagnosticId = randomUUID();
   const reason = failure?.reason ?? 'UNEXPECTED_SERVER_ERROR';
@@ -45,6 +52,7 @@ export function stagingProcedureError(cause: unknown, path: string): TRPCError {
   else logger.error('api', 'staging_service_failed', details);
   return new TRPCError({
     code: mapped?.[0] ?? 'INTERNAL_SERVER_ERROR',
-    message: mapped?.[1] ?? `工作空间读取或操作失败，请稍后重试。（诊断编号：${diagnosticId}）`,
+    message: mapped && (mapped[0] === 'PRECONDITION_FAILED' || mapped[0] === 'FORBIDDEN') ? mapped[1]
+      : `${mapped?.[1] ?? '工作空间读取或操作失败，请稍后重试。'}（诊断编号：${diagnosticId}）`,
   });
 }
