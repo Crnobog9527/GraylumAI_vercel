@@ -1989,7 +1989,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                             <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>
                               {parsed.message ||
                                 (execution.state === "cancelled"
-                                  ? "这条回复未发给模型，你可以直接重新描述问题。"
+                                  ? "本次执行已取消，原记录已保留。你可以继续讨论当前问题。"
                                   : busy ? "正在回复…" : "回复暂未完成，请继续核对。")}
                             </p>
                           </div>
