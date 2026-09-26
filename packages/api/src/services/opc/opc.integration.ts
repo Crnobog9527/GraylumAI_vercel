@@ -10343,13 +10343,13 @@ it.each(['cancelled','cost_pending'])('OPC: video truncation keeps accurate diag
  }finally{await browser.close();}
 },120000);
 
-it.each([true,false])('OPC: stopped pending cost unlocks the original browser only for its exact retained request (organize=%s)',async(organize)=>{
+it.each(['true','omitted','false'] as const)('OPC: stopped pending cost unlocks the original browser only for its exact retained request (organize=%s)',async(organize)=>{
  const {runtimeExecutor}=await import('../runtime/execute');
  const {createServer}=await import('node:http');
  const f=await fixture(2);await planFixtureModel(f.moduleId);
  const draft=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'mentor'});
  const field=(await f.service.read(draft.draftId)).information['step-0'].schema[0];
- const request={draftId:draft.draftId,stepId:'step-0',purpose:'mentor' as const,requestId:randomUUID(),input:'Original retained business answer',questionId:field.id,...(organize?{organizeAfter:true as const}:{})};
+ const request={draftId:draft.draftId,stepId:'step-0',purpose:'mentor' as const,requestId:randomUUID(),input:'Original retained business answer',questionId:field.id,...(organize==='omitted'?{}:{organizeAfter:organize==='true'})};
  const prepared=await f.service.prepareStep(request);let posts=0;
  const server=createServer(async(req,res)=>{for await(const _ of req){/* local only */}posts++;res.destroy();});
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -10365,7 +10365,7 @@ it.each([true,false])('OPC: stopped pending cost unlocks the original browser on
   expect((await executor.cancel(prepared.executionId)).state).toBe('cost_pending');
   const original=(await sql.query('select to_jsonb(r) row from bill2_runs r where id=(select billing_run_id from runtime_executions where id=$1)',[prepared.executionId])).rows;
   // Mismatched input or request identity must retain the local recovery lock.
-  for(const mismatch of [{...request,input:'Unsent different answer'},{...request,requestId:randomUUID()}]){
+  for(const mismatch of [{...request,input:'Unsent different answer'},{...request,requestId:randomUUID()},{...request,unexpected:'unrecognized key'},{...request,organizeAfter:'false'}]){
    await page.evaluate(({key,request})=>sessionStorage.setItem(key,JSON.stringify({request})),{key,request:mismatch});
    await page.reload();await composer.waitFor();await expect.poll(()=>composer.isDisabled()).toBe(true);
    expect(await page.evaluate(key=>sessionStorage.getItem(key),key)).not.toBeNull();
@@ -10390,6 +10390,7 @@ it.each([true,false])('OPC: stopped pending cost unlocks the original browser on
   await expect.poll(async()=>(await f.service.read(draft.draftId)).information['step-0'].values[field.id]?.value,{timeout:15000}).toBe('New business answer after the stopped request');
   await page.reload();await composer.waitFor();await expect.poll(()=>composer.isEnabled()).toBe(true);
   expect(await page.getByRole('textbox',{name:field.title,exact:true}).inputValue()).toBe('New business answer after the stopped request');
+  await page.locator('[data-execution-id="'+prepared.executionId+'"]').getByText('本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。').waitFor();
   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/stopped-pending-browser-'+organize+'.png',fullPage:true});
  }finally{await browser.close();await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },120000);

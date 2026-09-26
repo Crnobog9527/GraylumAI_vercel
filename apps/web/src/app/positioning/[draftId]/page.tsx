@@ -174,7 +174,7 @@ type MentorRequest = {
   requestId: string;
   input: string;
   questionId?: string;
-  organizeAfter?: true;
+  organizeAfter?: boolean;
 };
 type StepEnvelope = {
   request: MentorRequest;
@@ -345,7 +345,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       const raw = sessionStorage.getItem(key);
       const envelope = raw ? parseStepEnvelope(raw) : null;
       if (!envelope || envelope.request.draftId !== draftId || envelope.request.stepId !== stepId) continue;
-      const request = envelope.request;
+      const request = {...envelope.request};
+      // Runtime defaults an omitted organizer flag to false. Normalize only
+      // that legal representation; all other identity fields/extra keys stay exact.
+      if (request.organizeAfter === false) delete request.organizeAfter;
       const stopped = history.data.executions?.some((execution: {
         executionId: string; state: string; request?: MentorRequest;
         billing?: {closed?: boolean; cancelRequested?: boolean};
