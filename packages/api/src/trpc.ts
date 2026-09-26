@@ -3,6 +3,8 @@ import { createClient, type SupabaseClient, type User } from '@supabase/supabase
 import { getAuthProvider, isEmailVerified } from './lib/auth';
 import { ensureWorkspaceServerEnv } from './lib/serverEnv';
 import { logger } from './lib/logger';
+import {createRuntimeBudget,withRuntimeBudget,type RuntimeBudget} from './services/runtime/budget';
+export {createRuntimeBudget,withRuntimeBudget};
 
 type ApiSupabaseClient = SupabaseClient<any, 'public', any>;
 type ApiContext = Awaited<ReturnType<typeof createTRPCContext>>;
@@ -39,16 +41,19 @@ function deriveProfileNickname(user: User): string {
 
 export const createTRPCContext = async (opts: {
   headers: Headers;
+  runtimeBudget?: RuntimeBudget;
   user?: User | null;
   supabaseAuth?: ApiSupabaseClient | null;
 }) => {
+  const runtimeBudget=opts.runtimeBudget??createRuntimeBudget();
+  const budgetFetch=withRuntimeBudget(runtimeBudget,fetch,true);
   ensureWorkspaceServerEnv();
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   const hasSupabaseAdminPrivileges = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
-  const supabasePublic = createClient(supabaseUrl, supabaseAnonKey);
+  const supabasePublic = createClient(supabaseUrl, supabaseAnonKey, {global:{fetch:budgetFetch}});
   const supabaseAdmin = hasSupabaseAdminPrivileges
-    ? createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+    ? createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY!, {global:{fetch:budgetFetch}})
     : null;
 
   let user = opts.user ?? null;
@@ -62,6 +67,7 @@ export const createTRPCContext = async (opts: {
     if (token) {
       supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
         global: {
+          fetch:budgetFetch,
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -84,6 +90,7 @@ export const createTRPCContext = async (opts: {
 
   return {
     ...opts,
+    runtimeBudget,
     supabase: supabaseAuth ?? supabasePublic,
     supabasePublic,
     // Keep the admin writer absent when the service-role credential is absent.

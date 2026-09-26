@@ -3,12 +3,13 @@ import {createHash} from 'node:crypto';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {openRouterAdapter} from '../bill2/openRouterAdapter';
 import {isOpenRouterEndpoint,resolveOpenAICompatibleEndpoint} from '../providerUtils';
+import type {RuntimeBudget} from './budget';
 import type {StagingPolicy} from './stagingPolicy';
 /** Reuses the selected model's existing private credential, with no environment
  * key fallback. The namespace binds recovery to the exact original credential.
  */
-export function stagingTransport(admin:SupabaseClient,policy:StagingPolicy){
- return openRouterAdapter({allowWorkspaceRead:true,credential:async identity=>{
+export function stagingTransport(admin:SupabaseClient,policy:StagingPolicy,budget?:RuntimeBudget){
+ return openRouterAdapter({allowWorkspaceRead:true,budget,credential:async identity=>{
   const quotes=policy.callPolicies.filter(q=>q.account===identity.account&&q.model===identity.model);
   if(quotes.length!==1)throw new Error('RUNTIME_PROVIDER_BINDING_DENIED');
   const row=await admin.from('ai_models').select('id,model_id,provider,api_endpoint,api_key').eq('id',quotes[0]!.modelId).single();
