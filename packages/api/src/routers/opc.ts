@@ -3,6 +3,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
 import {loadStagingPolicy,assertStagingReadAccess} from '../services/runtime/stagingPolicy';
+import {StagingAccessError,stagingProcedureError} from '../services/runtime/stagingErrors';
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
 import {
   opcService,
@@ -24,29 +25,31 @@ import {
   opcVideoExecutionCheck,
   opcVideoMaterialPrepare,
 } from "../services/opc/service";
-const procedure = protectedProcedure.use(async ({ ctx, next }) => {
-  // Remote access requires the explicit Staging target and server-side actor window.
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!url || !ctx.supabaseAdmin || !ctx.hasSupabaseAdminPrivileges)
-    throw new TRPCError({
-      code: "PRECONDITION_FAILED",
-      message: "当前工作空间尚未开放。",
-    });
-  const u = new URL(url);
-  const local=u.protocol==='http:'&&['127.0.0.1','[::1]'].includes(u.hostname)&&!u.username&&!u.password;
+const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
   let real;
-  if(!local)try{real=await loadStagingPolicy(ctx.supabaseAdmin,ctx.user.id,process.env);}
-  catch{throw new TRPCError({code:'PRECONDITION_FAILED',message:'当前工作空间尚未开放。'});}
-  return next({
-    ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin,real) },
-  });
+  try {
+    if (!ctx.supabaseAdmin || !ctx.hasSupabaseAdminPrivileges)
+      throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!url) throw new StagingAccessError('RUNTIME_STAGING_NOT_CONFIGURED');
+    const u = new URL(url);
+    const local = u.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(u.hostname) && !u.username && !u.password;
+    if (!local) real = await loadStagingPolicy(ctx.supabaseAdmin, ctx.user.id, process.env);
+  } catch (cause) { throw stagingProcedureError(cause, path); }
+  return next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin, real) } });
 });
-const readProcedure=protectedProcedure.use(async({ctx,next})=>{
- if(!ctx.supabaseAdmin||!ctx.hasSupabaseAdminPrivileges)throw new TRPCError({code:'PRECONDITION_FAILED'});
- const u=new URL(process.env.NEXT_PUBLIC_SUPABASE_URL??'http://invalid.local');
- const local=u.protocol==='http:'&&['127.0.0.1','[::1]'].includes(u.hostname)&&!u.username&&!u.password;
- if(!local)await assertStagingReadAccess(ctx.supabaseAdmin,ctx.user.id,process.env);
- return next({ctx:{...ctx,opc:opcService(ctx.userScopedSupabase,ctx.supabaseAdmin),stagingRead:!local}});
+const readProcedure = protectedProcedure.use(async ({ ctx, next, path }) => {
+  let local = false;
+  try {
+    if (!ctx.supabaseAdmin || !ctx.hasSupabaseAdminPrivileges)
+      throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
+    const u = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'http://invalid.local');
+    local = u.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(u.hostname) && !u.username && !u.password;
+    if (!local) await assertStagingReadAccess(ctx.supabaseAdmin, ctx.user.id, process.env);
+  } catch (cause) { throw stagingProcedureError(cause, path); }
+  const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin), stagingRead: !local } });
+  if (!result.ok) throw stagingProcedureError(result.error, path);
+  return result;
 });
 export const opcRouter = router({
   information: procedure
@@ -98,7 +101,9 @@ export const opcRouter = router({
   workResults: readProcedure
     .input(z.object({ sessionId: z.string().uuid() }).strict())
     .query(({ ctx, input }) => ctx.opc.workResults(input.sessionId)),
-  catalog: procedure.query(({ ctx }) => ctx.opc.catalog()),
+  catalog: procedure.query(async ({ ctx, path }) => {
+    try { return await ctx.opc.catalog(); } catch (cause) { throw stagingProcedureError(cause, path); }
+  }),
   list: readProcedure.query(({ ctx }) => ctx.opc.list()),
   conversations: readProcedure.query(async ({ ctx }) => {
     // Actor is always derived from the verified session, never supplied by input.

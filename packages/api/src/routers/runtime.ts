@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
-import { TRPCError } from '@trpc/server';
 import { protectedProcedure,router } from '../trpc';
 import { runtimeAdmissionService,runtimeAdmission,runtimeMaterialInput } from '../services/runtime/admission';
 import {loadStagingPolicy,loadStagingRecoveryPolicy,assertStagingReadAccess} from '../services/runtime/stagingPolicy';
+import {StagingAccessError,stagingProcedureError} from '../services/runtime/stagingErrors';
 import {stagingTransport} from '../services/runtime/stagingTransport';
 import { runtimeExecutor } from '../services/runtime/execute';
 import { databaseSkillSource } from '../services/skills/databaseSource';
@@ -21,24 +21,26 @@ function localEndpoint(){
 }
 // Viewing original state, cancellation and receipt maintenance do not admit
 // new work. Source/actor checks still run in their existing SQL procedures.
-const maintenanceProcedure=protectedProcedure.use(async({ctx,next})=>{
- if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new TRPCError({code:'PRECONDITION_FAILED'});
+const maintenanceProcedure=protectedProcedure.use(async({ctx,next,path})=>{
  let maintenanceEndpoint:string|undefined;
- try{maintenanceEndpoint=localEndpoint();}catch{await assertStagingReadAccess(ctx.supabaseAdmin,ctx.user.id,process.env);}
+ try {
+  if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
+  try{maintenanceEndpoint=localEndpoint();}catch{await assertStagingReadAccess(ctx.supabaseAdmin,ctx.user.id,process.env);}
+ } catch(cause) { throw stagingProcedureError(cause,path); }
  return next({ctx:{...ctx,maintenanceEndpoint}});
 });
-const procedure=protectedProcedure.use(async({ctx,next})=>{
+const procedure=protectedProcedure.use(async({ctx,next,path})=>{
  try{
-  if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new Error('RUNTIME_DISABLED');
+  if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
   let endpoint:string|undefined,real;
   try{endpoint=localEndpoint();}catch{real=await loadStagingPolicy(ctx.supabaseAdmin,ctx.user.id,process.env);}
   const actor=async()=>{const a=await ctx.userScopedSupabase.auth.getUser();if(a.error||!a.data.user||a.data.user.id!==ctx.user.id)throw new Error('RUNTIME_DENIED');return a.data.user.id;};
   const admission=runtimeAdmissionService(ctx.userScopedSupabase,ctx.supabaseAdmin,{...(real?{real}:{}),account:'runtime-local',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:100,searchEnabled:!real,workspaceContext:true});
   const executor=runtimeExecutor({database:ctx.supabaseAdmin,actor,endpoint,...(real?{adapter:stagingTransport(ctx.supabaseAdmin,real)}:{}),activateSkill:c=>activateRuntimeCandidate(ctx.userScopedSupabase,ctx.supabaseAdmin!,c)});
   const result=await next({ctx:{...ctx,admission,executor,real}});
-  if(!result.ok)throw new Error('RUNTIME_UNAVAILABLE');
+  if(!result.ok)throw result.error;
   return result;
- }catch{throw new TRPCError({code:'PRECONDITION_FAILED',message:'当前执行不可用，请检查原任务状态；未发送的请求不会自动重试。'});}
+ }catch(cause){throw stagingProcedureError(cause,path);}
 });
 export const runtimeRouter=router({
  choices:procedure.input(z.object({sessionId:z.string().uuid().optional()}).optional()).query(async({ctx,input})=>{
