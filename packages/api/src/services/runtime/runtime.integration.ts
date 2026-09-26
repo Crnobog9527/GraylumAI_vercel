@@ -6,6 +6,7 @@ import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { PostgresSession } from './session';
 import { runRuntime } from './runner';
+import {readRuntimeView,retainedOutputReason} from './view';
 import { runtimeExecutor } from './execute';
 import { runtimeAdmissionService } from './admission';
 import { activateRuntimeCandidate } from './matching';
@@ -1521,6 +1522,9 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['complete','missing
  const policies=[[mentorId,'test/mentor'],[organizerId,'test/organizer']].map(([modelId,model])=>({...f.billing.callPolicy[0],modelId,model,provider:'openrouter',protocol:'openrouter-chat-v1',inputLimit:10000,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
  for(const p of policies)await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic truncation',$2,'openrouter','true')",[p.modelId,p.model]);
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.12,6,now()+interval '1 hour')",[windowId,[f.actorId],JSON.stringify(policies)]);
+ await rpc('runtime_material',{p_actor_id:f.actorId,p_session_id:f.s.sessionId,p_action:'save',p_request_id:randomUUID(),p_expected_revision:0,p_payload:{brief:'Synthetic truncation source',material:'local only',roundId:null}});
+ const material=(await rpc('runtime_session_context',{p_actor_id:f.actorId,p_session_id:f.s.sessionId})).scopeMaterial;
+ let firstExecutionId='';
  const bodies:string[]=[];let lookups=0;
  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_ONLY',transport:async(url,init)=>{
   if(String(url).includes('/generation')){lookups++;return new Response(JSON.stringify({data:{id:'gen-truncated-'+windowId,model:'test/mentor',finish_reason:'length',total_cost:0.003}}),{status:200});}
@@ -1534,22 +1538,35 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['complete','missing
  }};
  const host=runtimeExecutor({database,actor:async()=>f.actorId,adapter});
  for(let turn=0;turn<2;turn++){
-  const requestId=randomUUID(),context={version:'runtime.v1',sdkVersion:'0.18.0',providerRequestFormat:'serial-tools-v2',role:'ordinary',input:'Original synthetic request '+turn,instructions:'Answer',model:'test/mentor',modelId:mentorId,maxOutputTokens:1000,maxTurns:1,historyItems:10,network:'deny',tools:[],request:{sessionId:f.s.sessionId,requestId},attachedOrganizer:{modelId:organizerId,model:'test/organizer',maxOutputTokens:1000}};
+  const requestId=randomUUID(),context={scopeMaterial:material,version:'runtime.v1',sdkVersion:'0.18.0',providerRequestFormat:'serial-tools-v2',role:'ordinary',input:'Original synthetic request '+turn,instructions:'Answer',model:'test/mentor',modelId:mentorId,maxOutputTokens:1000,maxTurns:1,historyItems:10,network:'deny',tools:[],request:{sessionId:f.s.sessionId,requestId},attachedOrganizer:{modelId:organizerId,model:'test/organizer',maxOutputTokens:1000}};
   const billing={...f.billing,mode:'staging_test',testWindowId:windowId,modelId:mentorId,input:context,callPolicy:policies,rules:{...f.billing.rules,version:'runtime-staging-v1',quoteVersion:windowId},limits:{...f.billing.limits,costUsd:'0.04',credits:40,maxPreDeduct:40,maxCalls:2}};
   const e=await rpc('runtime_admit',{...f.admit,p_request_id:requestId,p_payload:context,p_billing:billing});
   let result=await host.execute(e.executionId);
-  if(turn===0){
+  if(turn===0){firstExecutionId=e.executionId;
    if(mode==='cancel-outage'){expect(result).toEqual({state:'pending'});expect(bodies).toHaveLength(1);result=await host.execute(e.executionId);}
    expect(result).toEqual({state:missingCost?'cost_pending':'cancelled',...(mode==='cancel-response-loss'?{}:{unavailable:'output_truncated'})});expect(bodies).toHaveLength(truncatedCall);
+   expect((await readRuntimeView(admin,f.actorId,f.s.sessionId)).executions.find(x=>x.executionId===e.executionId)?.unavailableReason).toBe('output_truncated');
    if(missingCost)expect((await host.recoverFinancial(e.executionId)).state).toBe('cancelled');
    expect(await host.execute(e.executionId)).toEqual({state:'cancelled'});expect(bodies).toHaveLength(truncatedCall);
+   expect(await retainedOutputReason(admin,f.actorId,e.executionId)).toBe('output_truncated');
+   await expect(readRuntimeView(admin,randomUUID(),f.s.sessionId)).rejects.toThrow('RUNTIME_VIEW_DENIED');
+   const foreign=await fixture();
+   await expect(retainedOutputReason(admin,foreign.actorId,e.executionId)).rejects.toThrow('RUNTIME_OUTCOME_UNAVAILABLE');
    const run=(await db.query('select state,closed,charged,provider_cost_usd::text cost from bill2_runs where id=$1',[e.runId])).rows[0];
    expect(run).toEqual({state:'settled',closed:true,charged:3*truncatedCall,cost:truncatedCall===2?'0.006':'0.003'});
    const saved=(await db.query('select payload,result,primary_result from runtime_executions where id=$1',[e.executionId])).rows[0];
    expect(saved).toEqual({payload:context,result:null,primary_result:mode==='organizer'?{body:'Usable answer',lastSequence:1}:null});
    expect(JSON.stringify((await db.query('select payload from bill2_receipts where call_id in (select id from bill2_calls where run_id=$1)',[e.runId])).rows)).toContain('SYNTHETIC_PRIVATE_REASONING');
-   expect((await rpc('runtime_view',{p_actor_id:f.actorId,p_session_id:f.s.sessionId})).executions.find((x:any)=>x.executionId===e.executionId)).toMatchObject({state:'cancelled',input:context.input,body:null,primaryBody:mode==='organizer'?'Usable answer':null});
+   expect((await rpc('runtime_view',{p_actor_id:f.actorId,p_session_id:f.s.sessionId})).executions.find((x:any)=>x.executionId===e.executionId)).toMatchObject({state:'cancelled',input:context.input,body:null,primaryBody:mode==='organizer'?'Usable answer':null,unavailableReason:'output_truncated'});
   }else{expect(result).toMatchObject({state:'completed',body:'Usable answer',summary:'Usable answer'});expect(bodies).toHaveLength(truncatedCall+2);expect(await host.execute(e.executionId)).toEqual(result);expect(bodies).toHaveLength(truncatedCall+2);}
  }
+ await rpc('runtime_material',{p_actor_id:f.actorId,p_session_id:f.s.sessionId,p_action:'revoke',p_expected_revision:1});
+ expect(await retainedOutputReason(admin,f.actorId,firstExecutionId)).toBeUndefined();
+ const revoked=(await readRuntimeView(admin,f.actorId,f.s.sessionId)).executions.find(x=>x.executionId===firstExecutionId);
+ expect(revoked?.unavailableReason).not.toBe('output_truncated');
+ expect(JSON.stringify(revoked)).not.toContain('SYNTHETIC_PRIVATE_REASONING');
+ await rpc('bill2_revoke_draft',{p_actor_id:f.actorId,p_draft_id:f.s.scope.draftId});
+ expect(await retainedOutputReason(admin,f.actorId,firstExecutionId)).toBeUndefined();
+ expect((await host.recoverFinancial(firstExecutionId)).state).toBe('cancelled');
  expect(lookups).toBe(missingCost?1:0);expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(94-3*truncatedCall);
 },30000);

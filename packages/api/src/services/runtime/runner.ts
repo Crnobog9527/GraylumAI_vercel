@@ -16,6 +16,15 @@ export type RuntimeRunnerInput = {
   signal?: AbortSignal;
 };
 
+/** Only the final empty-length protocol shape; reasoning is never an answer. */
+export function emptyTruncatedResponse(decoded:unknown):boolean{
+ if(!decoded||typeof decoded!=='object')return false;
+ const choices=(decoded as {choices?:Array<{finish_reason?:unknown;message?:{role?:unknown;content?:unknown;tool_calls?:unknown}}>}).choices;
+ if(!Array.isArray(choices)||choices.length!==1)return false;
+ const choice=choices[0],content=choice?.message?.content,calls=choice?.message?.tool_calls;
+ return choice?.message?.role==='assistant'&&choice.finish_reason==='length'&&(content===null||content===undefined||typeof content==='string'&&!content.trim())&&(calls===undefined||calls===null||Array.isArray(calls)&&calls.length===0);
+}
+
 /** One official SDK loop for all roles. No SDK trace, remote Session, fallback or retry. */
 export async function runRuntime(input: RuntimeRunnerInput) {
   let sequence=0,outputTruncated=false;
@@ -29,8 +38,7 @@ export async function runRuntime(input: RuntimeRunnerInput) {
     const decoded=JSON.parse(response),calls=decoded.choices?.[0]?.message?.tool_calls;
     if(!Array.isArray(decoded.choices)||decoded.choices.length!==1||
       (calls!==undefined&&calls!==null&&(!Array.isArray(calls)||calls.length>1)))throw new Error('RUNTIME_TOOL_BATCH_DENIED');
-    const choice=decoded.choices[0],content=choice.message?.content;
-    if(choice.finish_reason==='length'&&(content===null||content===undefined||typeof content==='string'&&!content.trim())&&(!calls||calls.length===0)){
+    if(emptyTruncatedResponse(decoded)){
       // A final, empty, length-limited response cannot be repaired by replaying it.
       // Never expose reasoning as an answer or let the SDK start another turn.
       outputTruncated=true;
