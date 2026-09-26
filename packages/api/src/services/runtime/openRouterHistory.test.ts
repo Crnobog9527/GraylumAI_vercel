@@ -135,3 +135,55 @@ it('keeps the existing safe discard for a SQL history window starting at a tool 
  expect(()=>selectRuntimeHistory([unsupported],incoming,{...sizing,historyItems:0})).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
  expect(()=>selectRuntimeCallInput([unsupported,...incoming],1,{...sizing,inputBytes:200})).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
 });
+
+// Synthetic opaque data only. No real provider reasoning is needed or decoded.
+const encryptedDetail={type:'reasoning.encrypted',format:'openai-responses-v1',id:'rs_synthetic',data:'SYNTHETIC_OPAQUE'.repeat(800),index:0};
+it.each([encryptedDetail,{...encryptedDetail,id:null,index:undefined}])('projects known opaque reasoning to text without mutating stored history %#',detail=>{
+ const metadata={role:'assistant',refusal:null,reasoning:null,reasoning_details:[detail]};
+ const item={type:'message',role:'assistant',content:[{type:'output_text',text:'Organizer result',providerData:metadata}]};
+ const history=[{role:'user',content:'First input'},item],incoming=[{role:'user',content:'Next mentor input'}],before=JSON.stringify(history);
+ for(const selected of [selectRuntimeHistory(history,incoming,sizing),selectRuntimeCallInput([...history,...incoming],history.length,sizing)]){
+  expect(selected).toHaveLength(3);expect(selected[1]).toBe(item);
+ }
+ expect(projectOpenRouterItemsForSizing(history)).toEqual([{role:'user',content:'First input'},{role:'assistant',content:'Organizer result'}]);
+ const request={messages:[{role:'assistant',content:[{type:'text',text:'Organizer result',...metadata}]}]};
+ normalizeOpenRouterHistory(request);expect(request.messages).toEqual([{role:'assistant',content:'Organizer result'}]);
+ const topLevel={messages:[{content:'Organizer result',...metadata}]};
+ normalizeOpenRouterHistory(topLevel);expect(topLevel.messages).toEqual([{role:'assistant',content:'Organizer result',refusal:null}]);
+ expect(JSON.stringify(history)).toBe(before);
+});
+it.each([
+ {...encryptedDetail,format:'anthropic-claude-v1'},
+ {...encryptedDetail,type:'reasoning.unknown'},
+ {...encryptedDetail,data:null},
+ {...encryptedDetail,data:''},
+ {...encryptedDetail,data:{url:'https://private.invalid'}},
+ {...encryptedDetail,id:23},
+ {...encryptedDetail,index:-1},
+ {...encryptedDetail,index:0.5},
+ {...encryptedDetail,extra:'hidden'},
+ {...encryptedDetail,data:'x'.repeat(65537)},
+])('rejects malformed opaque reasoning before sizing cuts or credential access %#',async(detail)=>{
+ const metadata={role:'assistant',reasoning_details:[detail]};
+ const item={type:'message',role:'assistant',content:[{type:'output_text',text:'Synthetic answer',providerData:metadata}]},incoming=[{role:'user',content:'Next'}];
+ expect(()=>selectRuntimeHistory([item],incoming,{...sizing,historyItems:0})).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+ expect(()=>selectRuntimeCallInput([item,...incoming],1,sizing)).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+ expect(()=>selectRuntimeCallInput([...incoming,item],0,sizing)).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+ const credential=vi.fn(),transport=vi.fn(),adapter=openRouterAdapter({credential,transport});
+ for(const message of [{content:'Synthetic answer',...metadata},{role:'assistant',content:[{type:'text',text:'Synthetic answer',...metadata}]}]){
+  const request={model:identity.model,stream:false,store:false,max_tokens:100,provider:routing,messages:[message]};
+  await expect((async()=>{normalizeOpenRouterHistory(request);await adapter.dispatch({input:JSON.stringify(request)},identity);})()).rejects.toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+ }
+ expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
+});
+it('does not extend opaque reasoning support to a tool continuation',async()=>{
+ const metadata={reasoning_details:[encryptedDetail],tool_calls:[sourceCall]};
+ const item={type:'message',role:'assistant',content:[{type:'output_text',text:'Synthetic prelude',providerData:{role:'assistant',...metadata}}]};
+ expect(()=>projectOpenRouterItemsForSizing([item,{type:'function_call',callId:sourceCall.id,name:'read_source',arguments:'{}'},{type:'function_call_result',callId:sourceCall.id,name:'read_source',output:'source'}])).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+ const credential=vi.fn(),transport=vi.fn(),adapter=openRouterAdapter({allowWorkspaceRead:true,credential,transport});
+ for(const message of [{role:'assistant',content:'Synthetic prelude',...metadata},{role:'assistant',content:[{type:'text',text:'Synthetic prelude',reasoning_details:[encryptedDetail]}],tool_calls:[sourceCall]}]){
+  const request={model:identity.model,stream:false,store:false,max_tokens:100,provider:routing,messages:[message]};
+  await expect((async()=>{normalizeOpenRouterHistory(request);await adapter.dispatch({input:JSON.stringify(request)},identity);})()).rejects.toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+ }
+ expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
+});

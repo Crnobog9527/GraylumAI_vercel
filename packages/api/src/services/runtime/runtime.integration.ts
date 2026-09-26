@@ -140,6 +140,63 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['plain','reasoning'
   if(shape!=='unsupported')expect(diagnostic.mock.calls.filter(call=>call[1]==='runtime_provider_preflight_failed')).toHaveLength(0);
  }finally{diagnostic.mockRestore();await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },30000);
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['valid','malformed','unknown-format'])('RUNTIME: attached Luna opaque history continues on a different mentor model (%s)',async(shape)=>{
+ const f=await fixture(),mentorId=randomUUID(),organizerId=randomUUID(),windowId=randomUUID();
+ const mentor='test/mentor',organizer='test/luna-organizer';
+ for(const [id,model] of [[mentorId,mentor],[organizerId,organizer]])await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic role history',$2,'openrouter','true')",[id,model]);
+ const policies=[[mentorId,mentor],[organizerId,organizer]].map(([modelId,model])=>({...f.billing.callPolicy[0],modelId,model,provider:'openrouter',protocol:'openrouter-chat-v1',inputLimit:5000,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
+ await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.10,4,now()+interval '2 hours')",[windowId,[f.actorId],JSON.stringify(policies)]);
+ const detail={type:'reasoning.encrypted',format:shape==='unknown-format'?'unknown':'openai-responses-v1',id:'rs_synthetic',data:shape==='malformed'?17:'SYNTHETIC_OPAQUE'.repeat(800),index:0};
+ const bodies:string[]=[];
+ const server=createServer(async(req,res)=>{
+  let raw='';for await(const chunk of req)raw+=chunk;bodies.push(raw);
+  const request=JSON.parse(raw),n=bodies.length,isOrganizer=request.model===organizer;
+  expect(Buffer.byteLength(raw)).toBeLessThanOrEqual(5000);
+  expect(raw).not.toContain('SYNTHETIC_OPAQUE');expect(raw).not.toContain('reasoning_details');
+  expect(request.model).toBe(n===2?organizer:mentor);
+  if(n===3)expect(request.messages.filter((m:{role:string})=>m.role==='assistant')).toEqual([{role:'assistant',content:'Mentor answer 1'},{role:'assistant',content:'Organizer result'}]);
+  res.setHeader('content-type','application/json');res.end(JSON.stringify({id:'gen-opaque-'+windowId+'-'+n,object:'chat.completion',created:1,model:request.model,choices:[{index:0,message:{role:'assistant',content:isOrganizer?'Organizer result':'Mentor answer '+n,...(isOrganizer?{refusal:null,reasoning:null,reasoning_details:[detail]}:{reasoning:'SYNTHETIC_QWEN_REASONING',reasoning_details:[{type:'reasoning.text',format:'unknown',index:0,text:'SYNTHETIC_QWEN_REASONING'}]})},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}}));
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const diagnostic=vi.spyOn(logger,'error'),credential=vi.fn(async()=> 'SYNTHETIC_LOCAL_ONLY');
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('local server');
+  const transport=vi.fn(async(_url:unknown,init?:RequestInit)=>fetch('http://127.0.0.1:'+address.port,init));
+  const adapter=openRouterAdapter({credential,transport});
+  let originalHistory:unknown[]=[],lastExecution='';
+  for(let turn=0;turn<2;turn++){
+   const requestId=randomUUID(),context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:'scope-projection-v1',providerRequestFormat:'serial-tools-v2',role:'ordinary',input:'Synthetic mentor input '+turn,instructions:'Synthetic mentor',model:mentor,modelId:mentorId,maxOutputTokens:100,maxTurns:1,historyItems:20,network:'deny',tools:[],request:{sessionId:f.s.sessionId,requestId},...(turn===0?{attachedOrganizer:{modelId:organizerId,model:organizer,maxOutputTokens:100,instructions:'Synthetic independent organizer',input:'Synthetic original user input'}}:{})};
+   const billing={...f.billing,mode:'staging_test',testWindowId:windowId,modelId:mentorId,input:context,callPolicy:turn===0?policies:[policies[0]],rules:{...f.billing.rules,version:'runtime-staging-v1',quoteVersion:windowId},limits:{...f.billing.limits,costUsd:turn===0?'0.04':'0.02',credits:turn===0?40:20,maxPreDeduct:turn===0?40:20,maxCalls:turn===0?2:1}};
+   const e=await rpc('runtime_admit',{...f.admit,p_request_id:requestId,p_payload:context,p_billing:billing});lastExecution=e.executionId;
+   const frozen=(await db.query('select payload from runtime_executions where id=$1',[e.executionId])).rows[0].payload;
+   let failCompletion=turn===1;const hashes:string[]=[];
+   const database={rpc:async(name:string,args:Record<string,unknown>)=>{
+    if(name==='runtime_response')hashes.push(String(args.p_request_hash));
+    if(name==='runtime_execution'&&args.p_action==='complete'&&failCompletion){failCompletion=false;return {data:null,error:{message:'synthetic completion failure'}};}
+    return admin.rpc(name,args);
+   }};
+   const host=runtimeExecutor({database,actor:async()=>f.actorId,adapter});
+   let result=await host.execute(e.executionId);
+   if(turn===1&&shape!=='valid'){
+    expect(result).toEqual({state:'cancelled'});expect(await host.execute(e.executionId)).toEqual(result);
+    expect(bodies).toHaveLength(2);expect(credential).toHaveBeenCalledTimes(2);expect(transport).toHaveBeenCalledTimes(2);
+    expect((await db.query('select state,charged from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual({state:'refunded',charged:0});
+    expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1',[e.runId])).rows[0].n).toBe(0);
+   }else{
+    if(turn===1){expect(result).toMatchObject({state:'pending'});result=await host.execute(e.executionId);expect(new Set(hashes)).toEqual(new Set([createHash('sha256').update(bodies[2]!).digest('hex')]));expect(hashes.length).toBeGreaterThanOrEqual(2);}
+    expect(result).toMatchObject({state:'completed',body:turn===0?'Mentor answer 1':'Mentor answer 3',...(turn===0?{summary:'Organizer result'}:{})});
+    expect(await host.execute(e.executionId)).toEqual(result);expect(bodies).toHaveLength(turn===0?2:3);
+    const calls=(await db.query('select payload from bill2_calls where run_id=$1 order by sequence',[e.runId])).rows;
+    expect(calls.map(row=>row.payload.requestHash)).toEqual((turn===0?bodies.slice(0,2):bodies.slice(2)).map(body=>createHash('sha256').update(body).digest('hex')));
+   }
+   expect((await db.query('select payload from runtime_executions where id=$1',[e.executionId])).rows[0].payload).toEqual(frozen);
+   const history=(await db.query('select item from runtime_session_history where session_id=$1 order by revision',[f.s.sessionId])).rows;
+   if(turn===0){originalHistory=history;expect(JSON.stringify(history)).toContain('reasoning.encrypted');expect(history.flatMap(row=>row.item.content??[]).find(part=>part.providerData?.reasoning_details?.[0]?.type==='reasoning.encrypted')?.providerData.reasoning_details).toEqual([detail]);}
+   else expect(history.slice(0,originalHistory.length)).toEqual(originalHistory);
+  }
+  expect(diagnostic.mock.calls.filter(call=>call[1]==='runtime_provider_preflight_failed')).toEqual(shape==='valid'?[]:[['api','runtime_provider_preflight_failed',{executionId:lastExecution,code:'RUNTIME_PROVIDER_HISTORY_DENIED'}]]);
+ }finally{diagnostic.mockRestore();await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+},30000);
 it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['disabled','expired','rollover'])('RUNTIME: staging temporary lookup failure recovers once after window %s',async(stopped)=>{
  const email='recovery-'+randomUUID()+'@example.test',password='Local-test-password-42!';
  const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;

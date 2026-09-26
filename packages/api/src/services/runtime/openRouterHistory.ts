@@ -3,9 +3,18 @@ import {isDeepStrictEqual} from 'node:util';
 import {z} from 'zod';
 import {sourceCall} from '../bill2/openRouterAdapter';
 
-const reasoningDetails=z.array(z.object({type:z.literal('reasoning.text'),text:z.string(),
- index:z.number().int().nonnegative(),format:z.literal('unknown'),
-}).strict()).nullish();
+const reasoningDetails=z.array(z.discriminatedUnion('type',[
+ z.object({type:z.literal('reasoning.text'),text:z.string(),
+  index:z.number().int().nonnegative(),format:z.literal('unknown'),
+ }).strict(),
+ // Known OpenRouter OpenAI response metadata only. This is opaque storage,
+ // never decoded or forwarded. The local adapter retains at most 64 KiB of
+ // response bytes; the string cap is a local bound, not a provider guarantee.
+ z.object({type:z.literal('reasoning.encrypted'),format:z.literal('openai-responses-v1'),
+  id:z.string().min(1).max(256).nullable(),data:z.string().min(1).max(65536),index:z.number().int().nonnegative().optional(),
+ }).strict(),
+])).nullish();
+const hasEncrypted=(details:unknown)=>Array.isArray(details)&&details.some(detail=>detail?.type==='reasoning.encrypted');
 const reasoning=z.string().nullish();
 const textParts=z.array(z.object({type:z.literal('text'),text:z.string(),role:z.literal('assistant').optional(),
  refusal:z.null().optional(),reasoning,reasoning_details:reasoningDetails,tool_calls:z.array(sourceCall).max(1).nullish(),
@@ -22,11 +31,13 @@ export function normalizeOpenRouterHistory(request:{messages?:unknown}):void {
   const normalized={...message};
   if(!reasoning.safeParse(message.reasoning).success||!reasoningDetails.safeParse(message.reasoning_details).success)
    throw new Error('RUNTIME_PROVIDER_HISTORY_DENIED');
+  let encrypted=hasEncrypted(message.reasoning_details);
   delete normalized.reasoning;delete normalized.reasoning_details;
   if(Array.isArray(message.content)){
    const parsed=textParts.safeParse(message.content);
    if(!parsed.success)throw new Error('RUNTIME_PROVIDER_HISTORY_DENIED');
    for(const part of parsed.data){
+    encrypted ||=hasEncrypted(part.reasoning_details);
     // A duplicated tool field is removable only when the actual top-level calls
     // are identical. Unknown or parallel calls remain for the adapter to reject.
     if(part.tool_calls?.length&&!isDeepStrictEqual(part.tool_calls,message.tool_calls))
@@ -34,6 +45,11 @@ export function normalizeOpenRouterHistory(request:{messages?:unknown}):void {
    }
    normalized.content=parsed.data.map(part=>part.text).join('');
   }
+  // This compatibility path is for completed text from the tool-free
+  // organizer. Encrypted tool continuations need their provider's original
+  // reasoning, which this text-only projection does not claim to support.
+  if(encrypted&&message.tool_calls!=null&&(!Array.isArray(message.tool_calls)||message.tool_calls.length>0))
+   throw new Error('RUNTIME_PROVIDER_HISTORY_DENIED');
   return normalized;
  });
 }
