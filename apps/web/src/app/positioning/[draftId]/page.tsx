@@ -174,7 +174,7 @@ type MentorRequest = {
   requestId: string;
   input: string;
   questionId?: string;
-  organizeAfter?: true;
+  organizeAfter?: boolean;
 };
 type StepEnvelope = {
   request: MentorRequest;
@@ -336,6 +336,35 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const free=useFreeConversation();
   const [manualMentorEnabled, setManualMentorEnabled] = useState(false);
   const [hydratedDraft, setHydratedDraft] = useState<string | null>(null);
+  const [, refreshStepEnvelopes] = useState(0);
+  useEffect(() => {
+    if (!read.data || !history.data || hydratedDraft !== draftId) return;
+    let removed = false;
+    for (const stepId of Object.keys(read.data.information ?? {})) {
+      const key = "opc-step:" + draftId + ":" + stepId;
+      const raw = sessionStorage.getItem(key);
+      const envelope = raw ? parseStepEnvelope(raw) : null;
+      if (!envelope || envelope.request.draftId !== draftId || envelope.request.stepId !== stepId) continue;
+      const request = {...envelope.request};
+      // Runtime defaults an omitted organizer flag to false. Normalize only
+      // that legal representation; all other identity fields/extra keys stay exact.
+      if (request.organizeAfter === false) delete request.organizeAfter;
+      const stopped = history.data.executions?.some((execution: {
+        executionId: string; state: string; request?: MentorRequest;
+        billing?: {closed?: boolean; cancelRequested?: boolean};
+      }) => execution.state === "cost_pending" && execution.billing?.closed === true &&
+        execution.billing.cancelRequested === true && execution.executionId !== history.data.activeExecution &&
+        execution.request && Object.keys(request).length === Object.keys(execution.request).length &&
+        Object.entries(request).every(([key, value]) => execution.request?.[key as keyof MentorRequest] === value));
+      // Only an exact server-persisted, stopped request retires this local lock.
+      // Original request, financial reservation and execution remain unchanged.
+      if (stopped && sessionStorage.getItem(key) === raw) {
+        sessionStorage.removeItem(key); removed = true;
+      }
+    }
+    if (removed) refreshStepEnvelopes(value => value + 1);
+  }, [read.data, history.data, hydratedDraft, draftId]);
+
   const [saveState, setSaveState] = useState<
     Record<string, "idle" | "saving" | "saved" | "error">
   >({});
@@ -1013,7 +1042,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     const interrupted = mentorExecutions.find(
       execution =>
         mentorTurns.get(execution.executionId)?.kind === "opening" &&
-        !["completed", "cancelled"].includes(execution.state),
+        execution.executionId === history.data?.activeExecution,
     );
     if (interrupted)
       await execute.mutateAsync({ executionId: interrupted.executionId });
@@ -1783,12 +1812,12 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     })
     .filter((entry): entry is { step: Step; raw: string; parsed: StepEnvelope | null } => Boolean(entry));
   const hasPendingStepRequest = pendingStepRequests.length > 0;
-  // Only a user-initiated mentor turn gates the page. The Agent's own opening
-  // is a convenience and must never block the form or the other controls.
+  // The server execution slot owns concurrency. A stopped historical call may
+  // still have pending cost without owning that slot; never infer busy from cost.
   const pendingMentor = mentorExecutions.find(
     (execution) =>
       ["mentor", "organizer"].includes(mentorTurns.get(execution.executionId)?.kind ?? "") &&
-      !["completed", "cancelled"].includes(execution.state),
+      execution.executionId === history.data?.activeExecution,
   );
   return (
     <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'本地模拟 · 回复、保存与交接均为演示'} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<div className={resultStyles.panel}><header><h2>{planView?'已采用选题':'已确认的定位'}</h2><p>{snap.state==='draft'?'已核对信息与当前问题':'当前策略与信息状态'}</p></header><div className={resultStyles.body} ref={setResultBodyNode}>{steps.filter(step=>snap.steps[step.id].valid).map((step,index)=><details key={step.id} open={step.id===selectedStep?.id}><summary><span>{index+1}. {step.title}</span><small>已确认</small></summary><div className={resultStyles.fields}>{(d.information[step.id]?.schema??[]).map((field:{id:string;title:string})=><div key={field.id}><strong>{field.title}</strong><p>{d.information[step.id]?.values?.[field.id]?.value||'待补充'}</p></div>)}</div></details>)}</div></div>}>
@@ -1995,6 +2024,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                               {parsed.message ||
                                 (execution.unavailableReason === "output_truncated"
                                   ? "本次模型调用达到长度上限，未返回该阶段正文。原请求已保留，不会自动重试。"
+                                  : execution.state === "cost_pending" && execution.executionId !== history.data?.activeExecution
+                                  ? "本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。"
                                   : execution.state === "cancelled"
                                   ? "本次执行已取消，原记录已保留。你可以继续讨论当前问题。"
                                   : busy ? "正在回复…" : "回复暂未完成，请继续核对。")}
@@ -2010,7 +2041,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                               <p className={resultStyles.suggestionNote}>原有内容在采用前保持不变。采用后请核对本步骤及受影响的后续结果。</p>
                             </div>
                           )}
-                          {!busy && !["completed", "cancelled"].includes(
+                          {!busy && execution.executionId === history.data?.activeExecution && !["completed", "cancelled"].includes(
                             execution.state,
                           ) && (
                             <Button

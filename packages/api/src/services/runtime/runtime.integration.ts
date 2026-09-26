@@ -1113,11 +1113,18 @@ it.each(['none','profile','draft','cancel'])('RUNTIME: pending cost with %s revo
   expect(posts).toBe(1);expect(lookups).toBe(1);
   expect((await db.query('select credits,(select sum(amount)::int from credit_transactions where user_id=$1) ledger from profiles where id=$1',[f.actorId])).rows[0]).toEqual({credits:80,ledger:80});
   expect((await db.query('select active_execution from runtime_sessions where id=$1',[f.s.sessionId])).rows[0].active_execution).toBe(e.executionId);
+  const nextArgs={...f.admit,p_request_id:randomUUID(),p_payload:{...context,input:'Later turn'},p_billing:{...f.billing,input:{...context,input:'Later turn'}}};
+  const next=revocation==='cancel'&&process.env.V3_LOCAL_STAGING_SCHEMA==='true'?await rpc('runtime_admit',nextArgs):null;
   finalCostAvailable=true;
   const competing=await Promise.all([recover(),recover()]);
   expect(competing.some(r=>r.state==='completed')).toBe(true);
   expect(await recover()).toEqual({state:'completed'});
   if(revocation==='cancel')expect(await runtimeExecutor(options).execute(e.executionId)).toEqual({state:'completed',body:'Saved before cost'});
+  if(next){
+   expect((await rpc('runtime_view',{p_actor_id:f.actorId,p_session_id:f.s.sessionId})).activeExecution).toBe(next.executionId);
+   await expect(rpc('runtime_session_items',{p_actor_id:f.actorId,p_session_id:f.s.sessionId,p_execution_id:e.executionId,p_action:'append',p_batch:2,p_items:[{role:'assistant',content:'Late duplicate'}]})).rejects.toThrow();
+   await runtimeExecutor(options).cancel(next.executionId);
+  }
   expect(posts).toBe(1);expect(lookups).toBeGreaterThanOrEqual(2);expect(lookups).toBeLessThanOrEqual(3);
   expect((await db.query('select b.id,b.pre_deduct_id,c.id call_id,c.provider_id from bill2_runs b join bill2_calls c on c.run_id=b.id where b.id=$1',[e.runId])).rows).toEqual(original);
   expect((await db.query('select credits,(select sum(amount)::int from credit_transactions where user_id=$1) ledger from profiles where id=$1',[f.actorId])).rows[0]).toEqual({credits:97,ledger:97});
@@ -1751,5 +1758,69 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: unstarted revoc
   expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(152);
   expect((await db.query('select reserved,charged,conflict from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual({reserved:848,charged:null,conflict:false});
   expect((await db.query("select count(*)::int n from credit_transactions where bill2_run_id=$1 and reason_code='bill2_release'",[e.runId])).rows[0].n).toBe(0);
+ }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+},30000);
+
+// This is local PostgreSQL + loopback transport proof, never provider-quality proof.
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: stopped unknown 848 reservation permits one next turn without rewriting history',async()=>{
+ const f=await fixture();
+ await db.query('update profiles set credits=1000 where id=$1',[f.actorId]);
+ await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,900,'addition','grant','opening_grant','system',$2,100,1000)",[f.actorId,randomUUID()]);
+ const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'Original unresolved request',instructions:'Synthetic local only',model:'runtime-m',maxOutputTokens:100,maxTurns:1,historyItems:20};
+ const billing={...f.billing,input:context,callPolicy:[{...f.billing.callPolicy[0],upperUsd:'0.848'}],limits:{...f.billing.limits,costUsd:'0.848',credits:848,maxPreDeduct:848}};
+ const originalArgs={...f.admit,p_payload:context,p_billing:billing};
+ const e=await rpc('runtime_admit',originalArgs);let posts=0;
+ const server=createServer(async(req,res)=>{for await(const _ of req){/* consume local request */}posts++;res.destroy();});
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
+  const host=()=>runtimeExecutor({database:admin,actor:async()=>f.actorId,endpoint:'http://127.0.0.1:'+address.port});
+  expect((await host().execute(e.executionId)).state).toBe('pending');expect(posts).toBe(1);
+  const nextContext={...context,input:'New independent turn'};
+  const nextArgs={...f.admit,p_request_id:randomUUID(),p_payload:nextContext,p_billing:{...f.billing,input:nextContext}};
+  await expect(rpc('runtime_admit',nextArgs)).rejects.toThrow('RUNTIME_SESSION_BUSY');
+  expect((await rpc('runtime_view',{p_actor_id:f.actorId,p_session_id:f.s.sessionId})).activeExecution).toBe(e.executionId);
+  expect((await host().cancel(e.executionId)).state).toBe('cost_pending');
+  const snapshot=async()=>({
+   run:(await db.query('select to_jsonb(r) row from bill2_runs r where id=$1',[e.runId])).rows,
+   calls:(await db.query('select to_jsonb(c) row from bill2_calls c where run_id=$1 order by id',[e.runId])).rows,
+   execution:(await db.query('select to_jsonb(e) row from runtime_executions e where id=$1',[e.executionId])).rows,
+   history:(await db.query('select to_jsonb(h) row from runtime_session_history h where execution_id=$1 order by revision',[e.executionId])).rows,
+   ledger:(await db.query('select to_jsonb(t) row from credit_transactions t where bill2_run_id=$1 order by id',[e.runId])).rows,
+  });
+  const original=await snapshot();expect(original.run[0].row).toMatchObject({reserved:848,charged:null,closed:true,cancel_requested:true,state:'unknown'});
+  const view=await rpc('runtime_view',{p_actor_id:f.actorId,p_session_id:f.s.sessionId});expect(view.activeExecution).toBeNull();
+  expect(await snapshot()).toEqual(original);
+  // Local malformed-state probes: no missing predicate may free the slot.
+  for(const [table,column,value] of [['bill2_runs','closed',false],['bill2_runs','cancel_requested',false],['runtime_executions','state','interrupted']] as const){
+   const id=table==='bill2_runs'?e.runId:e.executionId;
+   await db.query(`update ${table} set ${column}=$2 where id=$1`,[id,value]);
+   await expect(rpc('runtime_admit',nextArgs)).rejects.toThrow('RUNTIME_SESSION_BUSY');
+   expect((await rpc('runtime_view',{p_actor_id:f.actorId,p_session_id:f.s.sessionId})).activeExecution).toBe(e.executionId);
+   await db.query(`update ${table} set ${column}=$2 where id=$1`,[id,column==='state'?'cost_pending':true]);
+  }
+  const foreign=await fixture();const foreignExecution=await rpc('runtime_admit',foreign.admit);
+  await db.query('update runtime_sessions set active_execution=$2 where id=$1',[f.s.sessionId,foreignExecution.executionId]);
+  await expect(rpc('runtime_admit',nextArgs)).rejects.toThrow('RUNTIME_SESSION_BUSY');
+  expect((await rpc('runtime_view',{p_actor_id:f.actorId,p_session_id:f.s.sessionId})).activeExecution).toBe(foreignExecution.executionId);
+  await db.query('update runtime_sessions set active_execution=$2 where id=$1',[f.s.sessionId,e.executionId]);
+  const privileges=(await db.query("select has_function_privilege('anon','runtime_admit(uuid,uuid,uuid,jsonb,jsonb)','execute') a,has_function_privilege('authenticated','runtime_admit(uuid,uuid,uuid,jsonb,jsonb)','execute') u,has_function_privilege('service_role','runtime_admit(uuid,uuid,uuid,jsonb,jsonb)','execute') s")).rows[0];
+  expect(privileges).toEqual({a:false,u:false,s:true});
+  const candidates=await Promise.allSettled([rpc('runtime_admit',nextArgs),rpc('runtime_admit',{...nextArgs,p_request_id:randomUUID()})]);
+  expect(candidates.filter(c=>c.status==='fulfilled')).toHaveLength(1);
+  const next=(candidates.find(c=>c.status==='fulfilled') as PromiseFulfilledResult<{executionId:string}>).value;
+  expect(await snapshot()).toEqual(original);expect(posts).toBe(1);
+  expect((await rpc('runtime_admit',originalArgs)).executionId).toBe(e.executionId);
+  for(let i=0;i<2;i++)expect((await host().execute(e.executionId)).state).toBe('cost_pending');
+  // Existing explicit financial maintenance increments only the run version.
+  original.run[0].row.version += 2;
+  expect(posts).toBe(1);expect(await snapshot()).toEqual(original);
+  await expect(rpc('runtime_execution',{p_actor_id:f.actorId,p_execution_id:e.executionId,p_action:'complete',p_result:{kind:'usable_result',body:'Late old output'}})).rejects.toThrow();
+  await expect(rpc('runtime_session_items',{p_actor_id:f.actorId,p_session_id:f.s.sessionId,p_execution_id:e.executionId,p_action:'append',p_batch:1,p_items:[{role:'assistant',content:'Late old output'}]})).rejects.toThrow();
+  expect((await rpc('runtime_view',{p_actor_id:f.actorId,p_session_id:f.s.sessionId})).activeExecution).toBe(next.executionId);
+  expect(await snapshot()).toEqual(original);expect(posts).toBe(1);
+  await host().cancel(next.executionId);
+  expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(152);
+  expect(await snapshot()).toEqual(original);
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },30000);
