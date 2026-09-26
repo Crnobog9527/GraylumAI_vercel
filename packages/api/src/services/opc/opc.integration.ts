@@ -3095,32 +3095,38 @@ it('OPC: CAPACITY interrupted request retains frozen manuscript after a new save
   console.info('CAPACITY_RECOVERY_RESULTS',JSON.stringify({dispatches,requestBytes:Buffer.byteLength(frozenRequest),historyBefore,historyAfter,storedVersions:2,frozenVersion:1,foreignDenied:true}));
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },90000);
-it("OPC: independent extraction transports original context and applies only its structured result", async () => {
+for (const sample of [
+  { name: "A mixed current-session instructions", field: "time", title: "每周可投入时间", inputKind: "answer", input: "仅用于本轮验收：每周最多4小时，选题1小时、拍摄2小时、复盘1小时；请保留这条原请求。", value: "每周最多4小时，选题1小时、拍摄2小时、复盘1小时" },
+  { name: "B PR code review business", field: "topic", title: "内容主题", inputKind: "answer", input: "我的内容主要做 GitHub PR 代码审查。", value: "我的内容主要做 GitHub PR 代码审查。" },
+  { name: "C save and retry product features", field: "features", title: "核心功能", inputKind: "answer", input: "我的 SaaS 核心功能是自动保存和失败重试。", value: "我的 SaaS 核心功能是自动保存和失败重试。" },
+  { name: "D operational request without an answer", field: "goal", title: "业务目标", inputKind: "request", input: "请保存这条聊天并重试原请求。", value: null },
+  { name: "E retention and retry business limits", field: "policy", title: "产品使用约束", inputKind: "answer", input: "产品保留历史版本一个月，失败任务最多重试3次，暂不商业化", value: "产品保留历史版本一个月，失败任务最多重试3次，暂不商业化" },
+]) it(`OPC: independent extraction transports original context and applies only its structured result (${sample.name})`, async () => {
   const { runtimeExecutor } = await import("../runtime/execute");
   const { createServer } = await import("node:http");
   const { readWorkflowMentorExecution, applyMentorTurnRules } =
     await import("../../../../../apps/web/src/app/positioning/[draftId]/mentor-response");
   const f = await fixture(2, false, 0, flow => {
     flow.steps[0].information = [
-      { id: "time", title: "每周可投入时间", required: true, profileKey: "time", elicitation: "user_fact" },
+      { id: sample.field, title: sample.title, required: true, profileKey: sample.field, elicitation: "user_fact" },
       { id: "future", title: "尚未到达的问题", required: true, profileKey: "future" },
     ];
   });
   const primaryModelId = await planFixtureModel(f.moduleId);
   const draft = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: "mentor" });
-  const userInput = "仅用于本地恢复验证：每周最多4小时，选题1小时、拍摄2小时、复盘1小时；保留这条原请求。";
-  const primaryBody = JSON.stringify({ message: "【预设导师回复】请核对本题的时间分配。" });
+  const userInput = sample.input;
+  const primaryBody = JSON.stringify({ message: "【预设导师回复】请核对本题的业务内容。" });
   // Deliberately prewritten, not computed from userInput: this verifies the
   // transport/application contract, NOT a model's semantic extraction quality.
-  const extractedValue = "每周最多4小时，选题1小时、拍摄2小时、复盘1小时";
+  const extractedValue = sample.value;
   const extractionBody = JSON.stringify({
-    inputKind: "answer", targetStepId: "step-0",
-    informationPatch: {
-      time: { value: extractedValue, status: "provisional", nature: "decision", basis: "user_statement" },
+    inputKind: sample.inputKind, targetStepId: "step-0",
+    informationPatch: extractedValue === null ? {} : {
+      [sample.field]: { value: extractedValue, status: "provisional", nature: "decision", basis: "user_statement" },
     },
   });
   const request = {
-    draftId: draft.draftId, stepId: "step-0", questionId: "time", purpose: "mentor" as const,
+    draftId: draft.draftId, stepId: "step-0", questionId: sample.field, purpose: "mentor" as const,
     requestId: randomUUID(), input: userInput, organizeAfter: true,
   };
   const prepared = await f.service.prepareStep(request);
@@ -3133,7 +3139,7 @@ it("OPC: independent extraction transports original context and applies only its
     for await (const chunk of req) raw += chunk;
     const wire = JSON.parse(JSON.parse(raw).input);
     requests.push(wire);
-    const id = "extraction-contract-" + requests.length;
+    const id = "extraction-contract-" + request.requestId + "-" + requests.length;
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify({
       id, model: wire.model, final: true, cost: "0.003", currency: "USD", coverage: "request_total",
@@ -3156,6 +3162,8 @@ it("OPC: independent extraction transports original context and applies only its
     const system = requests[1].messages.filter(item => item.role === "system");
     expect(system).toEqual([{ role: "system", content: frozen.attachedOrganizer.instructions }]);
     expect(system[0].content).toContain("Separate business content from surrounding meta-instructions even within one sentence");
+    expect(system[0].content).toContain("Exclude a clause only when it describes the provenance or operation of this current Graylum conversation or request");
+    expect(system[0].content).toContain("Retain the same words, identifiers and actions when they express business content relevant to the allowed field");
     expect(system[0].content).toContain("Decide by meaning, never by deleting keywords");
     expect(system[0].content).toContain("Never return confirmed or deferred");
     const organizerMessage = requests[1].messages.filter(item => item.role === "user");
@@ -3164,8 +3172,8 @@ it("OPC: independent extraction transports original context and applies only its
     const context = JSON.parse(contextRaw);
     expect(context).toEqual({
       userInput, originalStepId: "step-0",
-      currentQuestion: { id: "time", title: "每周可投入时间", fields: [{ id: "time", title: "每周可投入时间", required: true, elicit: "user_fact" }] },
-      allowedWorkflow: [{ id: "step-0", title: f.flow.steps[0].title, confirmed: false, fields: [{ id: "time", title: "每周可投入时间" }] }],
+      currentQuestion: { id: sample.field, title: sample.title, fields: [{ id: sample.field, title: sample.title, required: true, elicit: "user_fact" }] },
+      allowedWorkflow: [{ id: "step-0", title: f.flow.steps[0].title, confirmed: false, fields: [{ id: sample.field, title: sample.title }] }],
     });
     expect(reply).toBe(primaryBody);
     const view = await admin.rpc("runtime_view", { p_actor_id: f.actor, p_session_id: draft.sessionId });
@@ -3179,20 +3187,31 @@ it("OPC: independent extraction transports original context and applies only its
     expect(accepted).toEqual(JSON.parse(extractionBody).informationPatch);
     // Use the same public projection as the page, then persist through the
     // actual information service. The UI event/autosave loop is not simulated.
-    const { value, status, nature } = accepted.time;
-    const untouched = { status: "unknown", nature: "unknown", value: "" };
-    await f.service.information({ draftId: draft.draftId, stepId: "step-0", requestId: randomUUID(), expectedVersion: before.snapshot.steps["step-0"].version, values: { time: { value, status, nature }, future: untouched } });
-    const saved = await f.service.read(draft.draftId);
-    expect(saved.information["step-0"].values.time).toEqual({ value: extractedValue, status: "provisional", nature: "decision" });
-    expect(saved.information["step-0"].values.time.value).not.toBe(userInput);
-    expect(saved.information["step-0"].values.future).toEqual(untouched);
-    expect(saved.snapshot.steps["step-0"].valid).toBe(false);
+    if (extractedValue !== null) {
+      const { value, status, nature } = accepted[sample.field];
+      const untouched = { status: "unknown", nature: "unknown", value: "" };
+      await f.service.information({ draftId: draft.draftId, stepId: "step-0", requestId: randomUUID(), expectedVersion: before.snapshot.steps["step-0"].version, values: { [sample.field]: { value, status, nature }, future: untouched } });
+      const saved = await f.service.read(draft.draftId);
+      expect(saved.information["step-0"].values[sample.field]).toEqual({ value: extractedValue, status: "provisional", nature: "decision" });
+      expect(saved.information["step-0"].values.future).toEqual(untouched);
+      expect(saved.snapshot.steps["step-0"].valid).toBe(false);
+    } else {
+      expect(accepted).toEqual({});
+      const saved = await f.service.read(draft.draftId);
+      expect(saved.information).toEqual(before.information);
+      expect(saved.snapshot.steps["step-0"].version).toBe(before.snapshot.steps["step-0"].version);
+      expect((await sql.query("select count(*)::int n from artifact_requests where project_id=$1 and action='opc_information'", [draft.projectId])).rows[0].n).toBe(0);
+    }
     // Refresh/replay must preserve the original wording and frozen prompt, with
     // no second model call or implicit confirmation after the form is saved.
     expect(await f.service.prepareStep(request)).toMatchObject({ executionId: prepared.executionId });
     expect(await executor.execute(prepared.executionId)).toEqual({ state: "completed", body: primaryBody, summary: extractionBody });
     expect(requests).toHaveLength(2);
     expect((await sql.query("select payload from runtime_executions where id=$1", [prepared.executionId])).rows[0].payload).toEqual(frozen);
+    const refreshed = await admin.rpc("runtime_view", { p_actor_id: f.actor, p_session_id: draft.sessionId });
+    expect(refreshed.error).toBeNull();
+    expect(refreshed.data.executions.find((item: { executionId: string }) => item.executionId === prepared.executionId))
+      .toMatchObject({ input: userInput, body: primaryBody, summary: extractionBody });
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
