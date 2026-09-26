@@ -1,6 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
 import {decimal} from './decimal';
+// Hard per-call deadlines: whitespace/keepalives never extend the body read.
+export const OPENROUTER_RESPONSE_TIMEOUT_MS=120_000;
+export const OPENROUTER_LOOKUP_TIMEOUT_MS=45_000;
 export const openRouterLimits=z.object({
  providerSlug:z.string().regex(/^[a-z0-9][a-z0-9._/-]{0,127}$/),
  contextTokens:z.number().int().min(1).max(1_050_000),

@@ -198,6 +198,62 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['valid','malformed'
   expect(diagnostic.mock.calls.filter(call=>call[1]==='runtime_provider_preflight_failed')).toEqual(shape==='valid'?[]:[['api','runtime_provider_preflight_failed',{executionId:lastExecution,code:'RUNTIME_PROVIDER_HISTORY_DENIED'}]]);
  }finally{diagnostic.mockRestore();await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },30000);
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['header','timeout','absent','response-mismatch','lookup-mismatch','lookup-pending'])('RUNTIME: interrupted OpenRouter body retains only authoritative recovery evidence (%s)',async(mode)=>{
+ const recovered=mode==='header'||mode==='timeout';
+ const nativeTimeout=AbortSignal.timeout.bind(AbortSignal);
+ // Exercise native fetch/body abort without a two-minute wall-clock sleep.
+ const timer=mode==='timeout'?vi.spyOn(AbortSignal,'timeout').mockImplementation(ms=>nativeTimeout(ms===120_000?50:ms)):null;
+ const f=await fixture(),model=randomUUID(),windowId=randomUUID(),providerId='gen-interrupted-'+windowId;
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic interrupted body','test/interrupted','openai',true)",[model]);
+ const policy={...f.billing.callPolicy[0],modelId:model,provider:'openrouter',model:'test/interrupted',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
+ await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",[windowId,[f.actorId],JSON.stringify([policy])]);
+ const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'Preserve this original request',instructions:'Synthetic interrupted response',model:policy.model,maxOutputTokens:100,maxTurns:1,historyItems:0,network:'deny',tools:[],providerRequestFormat:'serial-tools-v2'};
+ const billing={...f.billing,mode:'staging_test',testWindowId:windowId,modelId:model,input:context,callPolicy:[policy],rules:{...f.billing.rules,version:'runtime-staging-v1',quoteVersion:windowId}};
+ const e=await rpc('runtime_admit',{...f.admit,p_payload:context,p_billing:billing});
+ let posts=0,lookups=0,sentHash='';
+ const server=createServer(async(req,res)=>{
+  let raw='';for await(const chunk of req)raw+=chunk;
+  res.setHeader('content-type','application/json');
+  if(req.method==='POST'){
+   posts++;sentHash=createHash('sha256').update(raw).digest('hex');
+   if(mode!=='absent')res.setHeader('X-Generation-Id',providerId);
+   if(mode==='response-mismatch')res.end(JSON.stringify({id:'wrong-'+windowId,model:policy.model,choices:[{finish_reason:'stop',message:{role:'assistant',content:'Must not be delivered'}}],usage:{cost:0}}));
+   else{res.flushHeaders();res.write(' '.repeat(165));if(mode!=='timeout')setTimeout(()=>res.destroy(),20);}
+  }else{
+   lookups++;expect(req.url).toContain(encodeURIComponent(providerId));
+   if(mode==='lookup-pending'){res.statusCode=404;res.end('{"error":{"message":"Not ready"}}');}
+   else res.end(JSON.stringify({data:{id:mode==='lookup-mismatch'?'wrong-'+windowId:providerId,model:policy.model,finish_reason:'stop',total_cost:0.003}}));
+  }
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('local server');const endpoint='http://127.0.0.1:'+address.port;
+  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(url,init)=>fetch(endpoint+new URL(String(url)).pathname+new URL(String(url)).search,init)});
+  const host=()=>runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter});
+  expect(await host().execute(e.executionId)).toEqual({state:'pending'});
+  const original=(await db.query('select request_id,pre_deduct_id,payload from bill2_runs where id=$1',[e.runId])).rows[0];
+  const call=(await db.query('select id,payload,provider_id from bill2_calls where run_id=$1',[e.runId])).rows[0];
+  expect(call.payload.requestHash).toBe(sentHash);expect(call.provider_id).toBe(['absent','response-mismatch'].includes(mode)?null:providerId);
+  const receipt=(await db.query('select payload from bill2_receipts where call_id=$1',[call.id])).rows[0].payload;
+  expect(receipt).toMatchObject({cost:null,final:false});
+  if(mode!=='response-mismatch')expect(receipt.transport).toMatchObject({rawBody:' '.repeat(165),complete:false,transportIssue:mode==='timeout'?'body_timeout':'body_interrupted'});
+  const history=(await db.query('select revision,item from runtime_session_history where session_id=$1 order by revision',[f.s.sessionId])).rows;
+  expect(await host().execute(e.executionId)).toEqual({state:'pending'});expect(posts).toBe(1);expect(lookups).toBe(0);
+  await db.query('update runtime_test_windows set enabled=false where id=$1',[windowId]);
+  expect((await host().cancel(e.executionId)).state).toBe('cost_pending');
+  expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(80);
+  for(let i=0;i<4;i++)expect((await host().recoverFinancial(e.executionId)).state).toBe(recovered?'cancelled':'cost_pending');
+  const run=(await db.query('select state,charged,provider_cost_usd::text cost,conflict from bill2_runs where id=$1',[e.runId])).rows[0];
+  expect(run).toEqual(recovered?{state:'settled',charged:3,cost:'0.003',conflict:false}:{state:mode==='absent'?'unknown':mode==='response-mismatch'?'dispatched':'cost_pending',charged:null,cost:null,conflict:mode.endsWith('mismatch')});
+  expect(posts).toBe(1);expect(lookups).toBe(mode==='lookup-pending'?3:['header','timeout','lookup-mismatch'].includes(mode)?1:0);
+  expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(recovered?97:80);
+  expect((await db.query("select reason_code from credit_transactions where bill2_run_id=$1 order by reason_code",[e.runId])).rows.map(row=>row.reason_code)).toEqual(recovered?['bill2_release','bill2_reserve','bill2_spend']:['bill2_reserve']);
+  expect((await db.query('select request_id,pre_deduct_id,payload from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual(original);
+  expect((await db.query('select payload from bill2_calls where id=$1',[call.id])).rows[0].payload).toEqual(call.payload);
+  expect((await db.query('select revision,item from runtime_session_history where session_id=$1 order by revision',[f.s.sessionId])).rows).toEqual(history);
+  if(mode.endsWith('mismatch'))expect((await db.query("select count(*)::int n from bill2_provider_ids where provider_id=$1",['wrong-'+windowId])).rows[0].n).toBe(0);
+ }finally{timer?.mockRestore();await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+},30000);
 it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['disabled','expired','rollover'])('RUNTIME: staging temporary lookup failure recovers once after window %s',async(stopped)=>{
  const email='recovery-'+randomUUID()+'@example.test',password='Local-test-password-42!';
  const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;

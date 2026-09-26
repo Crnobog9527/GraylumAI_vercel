@@ -2,6 +2,9 @@
 import { createHash } from 'node:crypto';
 import { decimal, parseExactJson } from './decimal';
 import type { TransportObservation } from './fixtureAdapter';
+// A lookup identity only, never a cost receipt. Exclude whitespace, delimiters
+// and control characters (including combined duplicate HTTP header values).
+export const validGenerationId=(value:unknown):value is string=>typeof value==='string'&&/^[a-zA-Z0-9._:-]{1,256}$/.test(value);
 export type OpenRouterIdentity = {provider:'openrouter';account:string;model:string;protocol:'openrouter-chat-v1'};
 /** JSON may encode a small official cost with an exponent. Expand digits
  * exactly, never via Number; unsupported ledger precision stays unknown. */
@@ -26,6 +29,9 @@ export function openRouterEvidence(observation:TransportObservation, identity:Op
     source,sourceHash:createHash('sha256').update(Buffer.from(observation.rawBodyBase64,'base64')).digest('hex'),
     observedAt:new Date().toISOString(),rawBody:observation.rawBody,transport:observation,usage:null as Record<string,unknown>|null};
   const diagnostic=(reason:string)=>({...base,evidenceKind:'transport_observation' as const,rejectedReason:reason});
+  if(validGenerationId(observation.generationId))base.providerId=observation.generationId;
+  const mismatch=()=>({...base,providerId:null,rejectedReason:'identity_or_response_mismatch'});
+  if(expectedProviderId&&base.providerId&&expectedProviderId!==base.providerId)return mismatch();
   if(!observation.complete)return diagnostic('incomplete_transport');
   let root:Record<string,unknown>;
   try { root=parseExactJson(observation.rawBody) as Record<string,unknown>; }
@@ -33,11 +39,15 @@ export function openRouterEvidence(observation:TransportObservation, identity:Op
   if(!root || typeof root!=='object')return diagnostic('invalid_response');
   const data=(source==='lookup'?root.data:root) as Record<string,unknown>|undefined;
   if(!data || typeof data!=='object')return diagnostic('invalid_response');
-  if(typeof data.id==='string' && data.id.length>0 && data.id.length<=256)base.providerId=data.id;
+  const bodyId=typeof data.id==='string'&&data.id.length>0&&data.id.length<=256?data.id:null;
+  // Do not bind either disputed ID: SQL must latch its existing conflict flag
+  // before recovery or settlement can use contradictory evidence.
+  if(bodyId&&((base.providerId&&bodyId!==base.providerId)||(expectedProviderId&&bodyId!==expectedProviderId)))return mismatch();
+  if(bodyId)base.providerId=bodyId;
   if(observation.httpStatus<200||observation.httpStatus>=300)return diagnostic('http_observation_only');
-  if(root.error || data.error || !base.providerId || typeof data.model!=='string')return diagnostic('incomplete_response');
+  if(root.error || data.error || !bodyId || typeof data.model!=='string')return diagnostic('incomplete_response');
   if((expectedProviderId && expectedProviderId!==base.providerId) || data.model!==identity.model)
-    return {...base,rejectedReason:'identity_or_response_mismatch'};
+    return mismatch();
   const usage=data.usage as Record<string,unknown>|undefined;
   const cost=source==='lookup'?data.total_cost:usage?.cost;
   const choices=data.choices as Array<{finish_reason?:unknown}>|undefined;

@@ -2,6 +2,7 @@
 import { Agent, Runner, OpenAIChatCompletionsModel, tool, type Session, type AgentInputItem } from '@openai/agents';
 import OpenAI from 'openai';
 import { z } from 'zod';
+import {OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
 
 export type RuntimeTool = { name: string; description: string; execute: (arguments_: Record<string, unknown>, callId: string) => Promise<string> };
 export type RuntimeRunnerInput = {
@@ -46,7 +47,10 @@ export async function runRuntime(input: RuntimeRunnerInput) {
     }
     return new Response(response,{status:200,headers:{'content-type':'application/json'}});
   };
-  const client=new OpenAI({apiKey:'local-fixture-only',baseURL:'http://127.0.0.1/runtime',fetch:guardedFetch,maxRetries:0,timeout:45000});
+  // Align the SDK wrapper budget with the host's bounded read plus SQL.
+  // The host adapter owns the network deadline; guardedFetch does not forward
+  // the SDK signal or use it to interrupt durable evidence writes.
+  const client=new OpenAI({apiKey:'local-fixture-only',baseURL:'http://127.0.0.1/runtime',fetch:guardedFetch,maxRetries:0,timeout:OPENROUTER_RESPONSE_TIMEOUT_MS+30_000});
   const model=new OpenAIChatCompletionsModel(client,input.model,{strictFeatureValidation:true});
   const tools=input.tools.map(t=>tool({name:t.name,description:t.description,
     parameters:z.object({query:z.string().max(2000).optional()}).strict(),errorFunction:null,

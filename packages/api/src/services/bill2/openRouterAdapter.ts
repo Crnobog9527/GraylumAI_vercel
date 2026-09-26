@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
-import {openRouterBound} from './openRouterPolicy';
+import {openRouterBound,OPENROUTER_RESPONSE_TIMEOUT_MS,OPENROUTER_LOOKUP_TIMEOUT_MS} from './openRouterPolicy';
 import {decimal} from './decimal';
 import {createHash} from 'node:crypto';
-import {openRouterEvidence,type OpenRouterIdentity} from './openRouterEvidence';
+import {openRouterEvidence,validGenerationId,type OpenRouterIdentity} from './openRouterEvidence';
 import type {CallIdentity,TransportObservation} from './fixtureAdapter';
 const requestFields=new Set(['model','stream','store','messages','provider','max_tokens','max_completion_tokens','temperature','top_p','parallel_tool_calls','response_format']);
 export const sourceCall=z.object({id:z.string().min(1).max(256),type:z.literal('function'),function:z.object({name:z.literal('read_source'),arguments:z.string().max(4000)}).strict()}).strict();
@@ -18,17 +18,21 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
   return key;
  }
  async function request(path:string,key:string,body?:string):Promise<TransportObservation> {
+  const signal=AbortSignal.timeout(body===undefined?OPENROUTER_LOOKUP_TIMEOUT_MS:OPENROUTER_RESPONSE_TIMEOUT_MS);
   const response=await transport('https://openrouter.ai/api/v1/'+path,{method:body===undefined?'GET':'POST',redirect:'error',
-   headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body,signal:AbortSignal.timeout(45000)});
+   headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body,signal});
+  // This fixed official endpoint is the only source of the optional lookup ID.
+  const headerId=response.headers.get('x-generation-id');
+  const generationId=validGenerationId(headerId)?headerId:undefined;
   const reader=response.body?.getReader(),chunks:Uint8Array[]=[];let bytes=0,complete=!reader,transportIssue:string|null=null;
   if(reader)try{for(;;){const part=await reader.read();if(part.done){complete=true;break;}
    const keep=part.value.subarray(0,65536-bytes);chunks.push(keep);bytes+=keep.length;
    if(keep.length<part.value.length){transportIssue='body_limit';break;}
-  }}catch{transportIssue='body_interrupted';}finally{await reader.cancel().catch(()=>{});}
+  }}catch{transportIssue=signal.aborted?'body_timeout':'body_interrupted';}finally{await reader.cancel().catch(()=>{});}
   const buffer=Buffer.concat(chunks);let rawBody:string;
   try{rawBody=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(buffer);if(rawBody.includes('\0'))throw new Error('invalid_text');}
   catch{rawBody=buffer.toString('utf8').replaceAll('\0','\uFFFD');complete=false;transportIssue??='invalid_text';}
-  return {rawBody,rawBodyBase64:buffer.toString('base64'),sourceHash:createHash('sha256').update(buffer).digest('hex'),httpStatus:response.status,complete,transportIssue};
+  return {rawBody,rawBodyBase64:buffer.toString('base64'),sourceHash:createHash('sha256').update(buffer).digest('hex'),httpStatus:response.status,complete,transportIssue,...(generationId?{generationId}:{})};
  }
  async function prepareDispatch(input:unknown,identity:CallIdentity){
    if(identity.provider!=='openrouter'||identity.protocol!=='openrouter-chat-v1')throw new Error('BILL2_PROVIDER_IDENTITY_DENIED');

@@ -15,3 +15,12 @@ it.each(['stop','length'])('retains nonempty %s responses',async(finish_reason)=
 it('does not classify transport uncertainty as a final truncation',async()=>{
  await expect(runRuntime({model:'test/model',instructions:'Answer',input:'hello',session:session(),maxOutputTokens:1000,maxTurns:1,tools:[],selectHistory:async(_h,i)=>i,exchange:async()=>{throw new Error('unknown transport');}})).rejects.toThrow('RUNTIME_EXECUTION_PENDING');
 });
+it('original SDK waits for a slow bounded exchange once without a hidden retry',async()=>{
+ vi.useFakeTimers();const timer=vi.spyOn(globalThis,'setTimeout');let finish!:()=>void;
+ const exchange=vi.fn(async()=>{await new Promise<void>(resolve=>{finish=resolve;});return JSON.stringify({id:'late',object:'chat.completion',created:1,model:'test/model',choices:[{index:0,finish_reason:'stop',message:{role:'assistant',content:'Late answer'}}]});});
+ let ended=false;const pending=runRuntime({model:'test/model',instructions:'Answer',input:'hello',session:session(),maxOutputTokens:1000,maxTurns:1,tools:[],selectHistory:async(_h,i)=>i,exchange}).then(value=>{ended=true;return value;});
+ try{
+  await vi.advanceTimersByTimeAsync(120_000);expect(timer.mock.calls.some(([,ms])=>ms===150_000)).toBe(true);expect(exchange).toHaveBeenCalledTimes(1);expect(ended).toBe(false);
+  finish();expect(await pending).toBe('Late answer');expect(exchange).toHaveBeenCalledTimes(1);
+ }finally{timer.mockRestore();vi.useRealTimers();}
+});
