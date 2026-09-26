@@ -74,3 +74,16 @@ it.each(['100',null])('prevents SDK sleep after a slow retryable database body (
   expect(text).not.toHaveBeenCalled();expect(transport).toHaveBeenCalledTimes(1);
  }finally{vi.useRealTimers();}
 });
+it('binds the one-use not-started proof to the exact send capability, not another call with identical bytes',async()=>{
+ const {consumeOpenRouterNotStarted}=await import('../bill2/openRouterAdapter'),{createHash}=await import('node:crypto');
+ let elapsed=0;const budget=createRuntimeBudget(()=>elapsed),transport=vi.fn();
+ const adapter=openRouterAdapter({budget,credential:async()=> 'SYNTHETIC',transport});
+ const first=await adapter.prepareDispatch({input:body},identity),second=await adapter.prepareDispatch({input:body},identity);
+ elapsed=136_000;const error=await first().catch(error=>error),hash=createHash('sha256').update(body).digest('hex');
+ expect(consumeOpenRouterNotStarted(new Error('RUNTIME_TIME_BUDGET_EXHAUSTED'),hash,first)).toBe(false);
+ expect(consumeOpenRouterNotStarted(error,hash,second)).toBe(false);
+ expect(consumeOpenRouterNotStarted(error,'f'.repeat(64),first)).toBe(false);
+ expect(consumeOpenRouterNotStarted(error,hash,first)).toBe(true);
+ expect(consumeOpenRouterNotStarted(error,hash,first)).toBe(false);
+ expect(()=>first()).toThrow('CAPABILITY_CONSUMED');expect(transport).not.toHaveBeenCalled();
+});

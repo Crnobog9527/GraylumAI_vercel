@@ -6,6 +6,14 @@ import {decimal} from './decimal';
 import {createHash} from 'node:crypto';
 import {openRouterEvidence,validGenerationId,type OpenRouterIdentity} from './openRouterEvidence';
 import type {CallIdentity,TransportObservation} from './fixtureAdapter';
+// Only this adapter can mint this one-use proof, before invoking transport.
+// A timeout or identical Error message from a started transport is not proof.
+const unstarted=new WeakMap<object,{requestHash:string;send:()=>Promise<TransportObservation>}>();
+export function consumeOpenRouterNotStarted(error:unknown,requestHash:string,send:()=>Promise<TransportObservation>):boolean {
+ if(!error||typeof error!=='object')return false;
+ const proof=unstarted.get(error);if(proof?.requestHash!==requestHash||proof.send!==send)return false;
+ unstarted.delete(error);return true;
+}
 const requestFields=new Set(['model','stream','store','messages','provider','max_tokens','max_completion_tokens','temperature','top_p','parallel_tool_calls','response_format']);
 export const sourceCall=z.object({id:z.string().min(1).max(256),type:z.literal('function'),function:z.object({name:z.literal('read_source'),arguments:z.string().max(4000)}).strict()}).strict();
 const workspaceMessage=z.union([z.object({role:z.literal('assistant'),content:z.string().nullable(),tool_calls:z.array(sourceCall).min(1).max(1)}).strict(),z.object({role:z.literal('tool'),content:z.string(),tool_call_id:z.string().min(1).max(256)}).strict()]);
@@ -18,8 +26,13 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
   if(!key.trim() || /[\r\n]/.test(key))throw new Error('BILL2_PROVIDER_CREDENTIAL_UNAVAILABLE');
   return key;
  }
- async function request(path:string,key:string,body?:string):Promise<TransportObservation> {
-  options.budget?.assertCanStart(body===undefined?OPENROUTER_LOOKUP_TIMEOUT_MS:OPENROUTER_RESPONSE_TIMEOUT_MS);
+ async function request(path:string,key:string,body?:string,send?:()=>Promise<TransportObservation>):Promise<TransportObservation> {
+  try{options.budget?.assertCanStart(body===undefined?OPENROUTER_LOOKUP_TIMEOUT_MS:OPENROUTER_RESPONSE_TIMEOUT_MS);}
+  catch(error){
+   if(body===undefined||!send)throw error;
+   const proof=new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');
+   unstarted.set(proof,{requestHash:createHash('sha256').update(body).digest('hex'),send});throw proof;
+  }
   const signal=AbortSignal.timeout(body===undefined?OPENROUTER_LOOKUP_TIMEOUT_MS:OPENROUTER_RESPONSE_TIMEOUT_MS);
   const response=await transport('https://openrouter.ai/api/v1/'+path,{method:body===undefined?'GET':'POST',redirect:'error',
    headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body,signal});
@@ -69,10 +82,11 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    const key=await credential({...identity,provider:'openrouter',protocol:'openrouter-chat-v1'});
    options.budget?.assertCanStart(OPENROUTER_RESPONSE_TIMEOUT_MS);
    let used=false;
-   return ()=>{
+   const send:()=>Promise<TransportObservation>=()=>{
     if(used)throw new Error('BILL2_DISPATCH_CAPABILITY_CONSUMED');
-    used=true;return request('chat/completions',key,body);
+    used=true;return request('chat/completions',key,body,send);
    };
+   return send;
  }
  return {protocol:'openrouter-chat-v1' as const,lookupSupported:true,evidence:openRouterEvidence,prepareDispatch,
   async dispatch(input:unknown,identity:CallIdentity){return (await prepareDispatch(input,identity))();},

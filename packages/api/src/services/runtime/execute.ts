@@ -75,6 +75,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
   const policy=execution.billing.callPolicy.find(p=>p.model===context.model);
   if(!policy)throw new Error('RUNTIME_MODEL_DENIED');
   const session=new PostgresSession(options.database,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
+  let transportNotStarted=false;
   try{
    let callSequence=0;
    // The SDK wraps fetch errors; retain only this verified database verdict.
@@ -113,6 +114,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
       const claim=await billing.claimCall(execution.runId,sequence,call);
       budget.assertCanStart(selectedPolicy.protocol==='openrouter-chat-v1'?OPENROUTER_RESPONSE_TIMEOUT_MS:5000);
       const dispatch=await billing.dispatchOnce(claim.id,request);
+      if(dispatch.transportNotStarted){transportNotStarted=true;throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');}
       if(!dispatch.dispatched)throw new Error('RUNTIME_RESPONSE_PENDING');
       if(dispatch.pendingReceipt){
        // Keep the already obtained private observation while inspecting the
@@ -271,6 +273,12 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
     }catch{/* Inspect the original state through normal recovery after an outage. */}
    }
    const capacity=error instanceof Error&&['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY'].includes(error.message);
+   if(transportNotStarted&&execution.live){
+    // The original grant was atomically revoked and BILL2 finalized. Reuse
+    // normal cancellation to synchronize this execution and release Session.
+    const stopped=await rpc<{state:'cancelled'|'completed'|'cost_pending'}>('runtime_cancel',args).catch(()=>null);
+    if(stopped)return {state:stopped.state};
+   }
    // A replay has no authority to cancel or interrupt the still-live owner.
    // It may observe an unfinished response, but must leave shared state alone.
    if(!execution.live)return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{})};

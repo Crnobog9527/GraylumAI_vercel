@@ -5,6 +5,7 @@ import { transportEvidence, unknownEvidence, type CallIdentity, type TransportOb
 import {openRouterLimits,OPENROUTER_LOOKUP_TIMEOUT_MS} from './openRouterPolicy';
 import type {RuntimeBudget} from '../runtime/budget';
 import { openRouterEvidence } from './openRouterEvidence';
+import {consumeOpenRouterNotStarted} from './openRouterAdapter';
 import { aggregateCredits } from './decimal';
 import { applyInvitationRebateForSpend } from '../invitationRebate';
 const uuid = z.string().uuid();
@@ -130,7 +131,26 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       let evidence;
       let observation: TransportObservation | undefined;
       try { observation = await send(); evidence = providerEvidence(observation, identity, 'response'); }
-      catch { evidence = { ...unknownEvidence(identity), evidenceKind: 'transport_observation' }; }
+      catch(error) {
+       if(consumeOpenRouterNotStarted(error,capability.frozen.requestHash,send)){
+        const args={p_run_id:capability.runId,p_call_id:callId,p_token:capability.token,p_request_hash:capability.frozen.requestHash};
+        type Revocation={revoked:boolean;eligible:boolean};
+        let revoked=false;
+        try{revoked=(await rpc<Revocation>('bill2_revoke_unstarted_dispatch',args)).revoked;}
+        catch{
+         // Inspect an ambiguous durable result before the one bounded retry.
+         const prior=await rpc<Revocation>('bill2_revoke_unstarted_dispatch',{...args,p_inspect:true});
+         if(prior.revoked)revoked=true;
+         else if(prior.eligible){
+          try{revoked=(await rpc<Revocation>('bill2_revoke_unstarted_dispatch',args)).revoked;}
+          catch{revoked=(await rpc<Revocation>('bill2_revoke_unstarted_dispatch',{...args,p_inspect:true})).revoked;}
+         }
+        }
+        if(!revoked)throw new Error('BILL2_UNSTARTED_REVOKE_UNCONFIRMED');
+        return {dispatched:false,transportNotStarted:true as const};
+       }
+       evidence = { ...unknownEvidence(identity), evidenceKind: 'transport_observation' };
+      }
       try { await recordReceipt(capability.runId, callId, evidence); }
       catch { return { dispatched: true, pendingReceipt: { runId: capability.runId, callId, evidence } }; }
       return { dispatched: true, observation }; // Private server composition only; never a public route result.
