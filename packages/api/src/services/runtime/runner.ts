@@ -18,7 +18,7 @@ export type RuntimeRunnerInput = {
 
 /** One official SDK loop for all roles. No SDK trace, remote Session, fallback or retry. */
 export async function runRuntime(input: RuntimeRunnerInput) {
-  let sequence=0;
+  let sequence=0,outputTruncated=false;
   const guardedFetch: typeof fetch = async (url, init) => {
     if(String(url)!=='http://127.0.0.1/runtime/chat/completions') throw new Error('RUNTIME_TRANSPORT_DENIED');
     const body=JSON.parse(String(init?.body));
@@ -29,6 +29,13 @@ export async function runRuntime(input: RuntimeRunnerInput) {
     const decoded=JSON.parse(response),calls=decoded.choices?.[0]?.message?.tool_calls;
     if(!Array.isArray(decoded.choices)||decoded.choices.length!==1||
       (calls!==undefined&&calls!==null&&(!Array.isArray(calls)||calls.length>1)))throw new Error('RUNTIME_TOOL_BATCH_DENIED');
+    const choice=decoded.choices[0],content=choice.message?.content;
+    if(choice.finish_reason==='length'&&(content===null||content===undefined||typeof content==='string'&&!content.trim())&&(!calls||calls.length===0)){
+      // A final, empty, length-limited response cannot be repaired by replaying it.
+      // Never expose reasoning as an answer or let the SDK start another turn.
+      outputTruncated=true;
+      throw new Error('RUNTIME_OUTPUT_TRUNCATED');
+    }
     return new Response(response,{status:200,headers:{'content-type':'application/json'}});
   };
   const client=new OpenAI({apiKey:'local-fixture-only',baseURL:'http://127.0.0.1/runtime',fetch:guardedFetch,maxRetries:0,timeout:45000});
@@ -52,6 +59,7 @@ export async function runRuntime(input: RuntimeRunnerInput) {
     if(typeof result.finalOutput!=='string'||!result.finalOutput.trim())throw new Error('RUNTIME_EMPTY_RESULT');
     return result.finalOutput;
   }catch(error){
+    if(outputTruncated)throw new Error('RUNTIME_OUTPUT_TRUNCATED');
     if(error instanceof Error&&['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY'].includes(error.message))throw error;
     throw new Error('RUNTIME_EXECUTION_PENDING');
   }

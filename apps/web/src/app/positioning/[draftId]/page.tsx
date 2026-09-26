@@ -274,7 +274,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const discussionAccount = discussionAccounts.length===1?discussionAccounts[0]:undefined;
   const list = trpc.opc.list.useQuery();
   const prepareStep = trpc.opc.prepareStep.useMutation(),
-    execute = trpc.runtime.execute.useMutation();
+    execute = trpc.runtime.execute.useMutation({onSuccess(result){
+      if('unavailable' in result&&result.unavailable==='output_truncated')setError('模型达到回复长度上限，但未返回正文。本次未生成可用结果，原请求已保留；不会自动重试。');
+    }});
   const information = trpc.opc.information.useMutation();
   const [infoEdits, setInfoEdits] = useState<
     Record<string, Record<string, Information>>

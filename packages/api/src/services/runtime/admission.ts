@@ -45,6 +45,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    throw unavailableModel();
   return quote;
  }
+ // Only new admissions use current limits. Replays return their frozen context above.
+ // The local fixture default is not an additional ceiling on an approved real quote.
+ function outputCapacity(row:Record<string,unknown>,organizerLimit=Infinity){
+  return Math.min(policy.real?realModel(row).outputLimit:policy.maxOutputTokens,Number(row.max_tokens),organizerLimit,20000);
+ }
  function inputCapacity(row:Record<string,unknown>,output:number){
   return policy.real?Math.min(policy.inputBytes,realModel(row).inputLimit):fixtureInputCapacity(Number(row.input_limit),output,policy.inputBytes);
  }
@@ -103,7 +108,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     if(policy.real&&model.error){if(model.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(model.error);}
     if(model.error||model.data?.is_active!=='true'||(!policy.real&&model.data.provider!=='fixture'))throw unavailableModel();
     modelConfiguration(()=>assertSeparateSummaryModel(row.data.model_id,model.data.model_id));
-    const limit=Math.min(policy.maxOutputTokens,summary.maxTokens,Number(model.data.max_tokens),policy.real?realModel(model.data).outputLimit:Infinity);
+    const limit=outputCapacity(model.data,summary.maxTokens);
     if(!Number.isSafeInteger(limit)||limit<1)throw new Error('RUNTIME_MODEL_CAPACITY');
     attachedInputLimit=inputCapacity(model.data,limit);
     attachedOrganizer={
@@ -114,7 +119,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    }
    // SDK turns count model requests only. Paid search consumes another BILL2
    // call, and attached organization must remain inside this same frozen run.
-   const candidates=input.selection.kind==='auto'?await discoverRuntimeCandidates(user,admin,{...policy,...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(policy.inputBytes,q.inputLimit),outputLimit:Math.min(policy.maxOutputTokens,q.outputLimit)};}}:{})}):[];
+   const candidates=input.selection.kind==='auto'?await discoverRuntimeCandidates(user,admin,{...policy,...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(policy.inputBytes,q.inputLimit),outputLimit:outputCapacity(row)};}}:{})}):[];
    if(policy.additionalInstructions)instructions+='\n'+z.string().max(8000).parse(policy.additionalInstructions);
    const searchAllowed=Boolean(policy.searchEnabled&&input.network!=='deny');
    let workspaceContext=false;
@@ -127,7 +132,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    }
    const primaryTurns=policy.maxCalls-(attachedOrganizer?1:0)-(searchAllowed?1:0)-(candidates.length?1:0);
    if(primaryTurns<(searchAllowed||input.sources.length||workspaceContext?2:1))throw new Error('RUNTIME_CALL_BUDGET');
-   const maxOutputTokens=Math.min(policy.maxOutputTokens,organizerOutput??policy.maxOutputTokens,Number(row.data.max_tokens),policy.real?realModel(row.data).outputLimit:Infinity);
+   const maxOutputTokens=outputCapacity(row.data,organizerOutput);
    if(!Number.isSafeInteger(maxOutputTokens)||maxOutputTokens<1)throw new Error('RUNTIME_MODEL_CAPACITY');
    const inputLimit=inputCapacity(row.data,maxOutputTokens);
    if(candidates.length)selectRuntimeHistory([],[{role:'user',content:matchingInput(input.input,candidates)}],{instructions:MATCH_INSTRUCTIONS,inputBytes:inputLimit,historyItems:0,toolBytes:0});

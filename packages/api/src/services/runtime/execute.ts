@@ -254,6 +254,17 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
    const completed=await rpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
    return {body,...(summary!==undefined?{summary}:{}),state:completed.state};
   }catch(error){
+   if((execution.live||execution.state==='interrupted')&&error instanceof Error&&error.message==='RUNTIME_OUTPUT_TRUNCATED'){
+    logger.error('api','runtime_output_truncated',{executionId});
+    // Close the live owner or its already-interrupted replay, never a concurrent
+    // running owner, using the existing cancellation/settlement
+    // path. Retain its response receipt and charges; do not dispatch organizer.
+    // An uncertain cancellation response remains recoverable, never retried here.
+    try{
+     const stopped=await rpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
+     return {state:stopped.state,unavailable:'output_truncated' as const};
+    }catch{/* Inspect the original state through normal recovery after an outage. */}
+   }
    const capacity=error instanceof Error&&['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY'].includes(error.message);
    // A replay has no authority to cancel or interrupt the still-live owner.
    // It may observe an unfinished response, but must leave shared state alone.
