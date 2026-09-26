@@ -15,6 +15,7 @@ export const runtimeContext=z.object({
  input:z.string().min(1).max(20000),instructions:z.string().max(262144),model:z.string().min(1),
  maxOutputTokens:z.number().int().positive().max(20000),maxTurns:z.number().int().min(1).max(32),
  inputSelection:z.literal('scope-projection-v1').optional(),
+ providerRequestFormat:z.literal('serial-tools-v1').optional(),
  historyItems:z.number().int().min(0).max(1000),
  tools:z.array(z.enum(['search','read_source'])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
  modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
@@ -82,6 +83,10 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
      if(!selectedPolicy.providerLimits)throw new Error('RUNTIME_REAL_QUOTE_REQUIRED');
      const quoted=openRouterBound(selectedPolicy.providerLimits,selectedPolicy.outputLimit);
      if(decimal(quoted.upperUsd)!==decimal(selectedPolicy.upperUsd))throw new Error('RUNTIME_REAL_QUOTE_CONFLICT');
+     // This optional SDK hint excludes providers that otherwise support tools.
+     // New admissions freeze this format before hashing. Unmarked executions
+     // keep their original bytes for replay; the runner enforces one tool/turn.
+     if(context.providerRequestFormat==='serial-tools-v1')delete original.parallel_tool_calls;
      request=JSON.stringify({...original,stream:false,provider:quoted.routing});
     }
     assertRuntimeRequestCapacity(request,selectedPolicy.inputLimit);

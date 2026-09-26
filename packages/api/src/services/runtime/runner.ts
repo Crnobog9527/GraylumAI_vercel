@@ -24,6 +24,11 @@ export async function runRuntime(input: RuntimeRunnerInput) {
     const body=JSON.parse(String(init?.body));
     if(body.model!==input.model||body.stream||body.store!==false||++sequence>input.maxTurns) throw new Error('RUNTIME_CALL_DENIED');
     const response=await input.exchange(sequence,JSON.stringify(body));
+    // parallel_tool_calls is a provider hint, not an execution boundary. Reject
+    // an entire multi-tool response before the SDK can invoke any local tool.
+    const decoded=JSON.parse(response),calls=decoded.choices?.[0]?.message?.tool_calls;
+    if(!Array.isArray(decoded.choices)||decoded.choices.length!==1||
+      (calls!==undefined&&calls!==null&&(!Array.isArray(calls)||calls.length>1)))throw new Error('RUNTIME_TOOL_BATCH_DENIED');
     return new Response(response,{status:200,headers:{'content-type':'application/json'}});
   };
   const client=new OpenAI({apiKey:'local-fixture-only',baseURL:'http://127.0.0.1/runtime',fetch:guardedFetch,maxRetries:0,timeout:45000});

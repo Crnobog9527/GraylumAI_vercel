@@ -41,34 +41,48 @@ async function fixture(existingActor?:string){
  const admit={p_actor_id:actorId,p_session_id:s.sessionId,p_request_id:randomUUID(),p_payload:{text:'hello'},p_billing:billing};
  return {actorId,start,requestId,s,billing,admit};
 }
-it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: staging window runs official-protocol HTTP through original SDK and BILL2 once',async()=>{
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['legacy','serial-tools-v1'])('RUNTIME: staging window runs official-protocol HTTP through original SDK and BILL2 once (%s)',async(format)=>{
  const exists=await db.query("select to_regclass('public.runtime_test_windows') present");
  if(!exists.rows[0].present)throw new Error('requires --with-staging-schema');
  const f=await fixture(),realModel=randomUUID(),windowId=randomUUID();
  await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic official protocol','test/model','openai','true')",[realModel]);
  const policy={...f.billing.callPolicy[0],modelId:realModel,provider:'openrouter',model:'test/model',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
- const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'hello',instructions:'Only local synthetic input',model:'test/model',maxOutputTokens:100,maxTurns:1,historyItems:0,network:'deny',tools:[]};
+ const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'hello',instructions:'Only local synthetic input',model:'test/model',maxOutputTokens:100,maxTurns:1,historyItems:0,network:'deny',workspaceContext:true,tools:['read_source'],request:{sessionId:f.s.sessionId,requestId:f.admit.p_request_id},...(format==='serial-tools-v1'?{providerRequestFormat:format}:{})};
  const billing={...f.billing,mode:'staging_test',testWindowId:windowId,modelId:realModel,input:context,callPolicy:[policy],rules:{...f.billing.rules,version:'runtime-staging-v1',quoteVersion:windowId}};
  await db.query("insert into runtime_test_windows(id,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",[windowId,[f.actorId],JSON.stringify([policy])]);
  const args={...f.admit,p_payload:context,p_billing:billing};
  await expect(rpc('runtime_admit',args)).rejects.toThrow('TEST_WINDOW_DENIED');
  await db.query('update runtime_test_windows set enabled=true where id=$1',[windowId]);
  const e=await rpc('runtime_admit',args);expect(await rpc('runtime_admit',args)).toEqual(e);
- let requests=0;
+ let requests=0,sentHash='';
  const server=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;requests++;
-  expect(JSON.parse(raw).model).toBe('test/model');
-  res.setHeader('content-type','application/json');res.end(JSON.stringify({id:'gen-window-local',object:'chat.completion',created:1,model:'test/model',choices:[{index:0,message:{role:'assistant',content:'Local official-protocol answer'},finish_reason:'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7,cost:0.003}}));
+  const body=JSON.parse(raw);sentHash=createHash('sha256').update(raw).digest('hex');
+  expect(body.model).toBe('test/model');expect(body.tools).toHaveLength(1);
+  expect(body.parallel_tool_calls).toBe(format==='legacy'?false:undefined);
+  expect(body.provider).toMatchObject({require_parameters:true,allow_fallbacks:false,only:['synthetic']});
+  res.setHeader('content-type','application/json');res.end(JSON.stringify({id:'gen-window-local-'+windowId,object:'chat.completion',created:1,model:'test/model',choices:[{index:0,message:{role:'assistant',content:'Local official-protocol answer',tool_calls:null},finish_reason:'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7,cost:0.003}}));
  });
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{
   const address=server.address();if(!address||typeof address==='string')throw new Error('local server');
   const endpoint='http://127.0.0.1:'+address.port;
-  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(url,init)=>{
+  const adapter=openRouterAdapter({allowWorkspaceRead:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(url,init)=>{
    expect(String(url)).toBe('https://openrouter.ai/api/v1/chat/completions');return fetch(endpoint,init);
   }});
-  const host=runtimeExecutor({database:admin,actor:async()=>f.actorId,endpoint,adapter});
+  let failCompletion=true;const replayHashes:string[]=[];
+  const database={rpc:async(name:string,args:Record<string,unknown>)=>{
+   if(name==='runtime_response')replayHashes.push(String(args.p_request_hash));
+   if(name==='runtime_execution'&&args.p_action==='complete'&&failCompletion){failCompletion=false;return {data:null,error:{message:'synthetic completion write failure'}};}
+   return admin.rpc(name,args);
+  }};
+  const host=runtimeExecutor({database,actor:async()=>f.actorId,endpoint,adapter});
+  expect(await host.execute(e.executionId)).toMatchObject({state:'pending'});
+  const originalCall=(await db.query('select payload from bill2_calls where run_id=$1',[e.runId])).rows[0].payload;
+  expect(originalCall.requestHash).toBe(sentHash);
   const result=await host.execute(e.executionId);expect(result).toMatchObject({state:'completed',body:'Local official-protocol answer'});
   expect(await host.execute(e.executionId)).toEqual(result);expect(requests).toBe(1);
+  expect(replayHashes.length).toBeGreaterThanOrEqual(3);expect(new Set(replayHashes)).toEqual(new Set([sentHash]));
+  expect((await db.query('select payload from bill2_calls where run_id=$1',[e.runId])).rows[0].payload).toEqual(originalCall);
   const run=(await db.query('select state,charged,provider_cost_usd::text cost,test_window_id from bill2_runs where id=$1',[e.runId])).rows[0];
   expect(run).toMatchObject({state:'settled',charged:3,cost:'0.003',test_window_id:windowId});
   expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(97);

@@ -18,3 +18,29 @@ it('official SDK read_source roundtrip passes opt-in official transport without 
  }});
  expect(result).toBe('I used the relevant source.');expect(reads).toBe(1);expect(requests).toHaveLength(2);expect(JSON.stringify(requests[1])).toContain('owned source');
 });
+
+it('rejects multiple source calls before the SDK can execute any of them',async()=>{
+ let exchanges=0,reads=0;
+ const session:Session={getSessionId:async()=> 'synthetic-serial-session',getItems:async()=>[],addItems:async()=>{},popItem:async()=>undefined,clearSession:async()=>{}};
+ const result=runRuntime({model:'test/model',instructions:'Read one source at a time',input:'Use my topic',session,maxTurns:2,maxOutputTokens:100,
+  tools:[{name:'read_source',description:'Read relevant owned source',execute:async()=>{reads++;return 'owned source';}}],selectHistory:async(_history,incoming)=>incoming,
+  exchange:async()=>{
+   exchanges++;
+   const message=exchanges===1?{role:'assistant',content:null,tool_calls:[1,2].map(id=>({id:'source-'+id,type:'function',function:{name:'read_source',arguments:'{}'}}))}:{role:'assistant',content:'Unexpected parallel result'};
+   return JSON.stringify({id:'gen-'+exchanges,object:'chat.completion',created:1,model:'test/model',choices:[{index:0,message,finish_reason:exchanges===1?'tool_calls':'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}});
+  }});
+ await expect(result).rejects.toThrow('RUNTIME_EXECUTION_PENDING');
+ expect(reads).toBe(0);expect(exchanges).toBe(1);
+});
+
+it.each([null,undefined,[]])('accepts a text completion with no tool batch (%s)',async(toolCalls)=>{
+ let exchanges=0,reads=0;
+ const session:Session={getSessionId:async()=> 'synthetic-text-session',getItems:async()=>[],addItems:async()=>{},popItem:async()=>undefined,clearSession:async()=>{}};
+ const result=await runRuntime({model:'test/model',instructions:'Answer ordinary questions directly',input:'Say hello',session,maxTurns:1,maxOutputTokens:100,
+  tools:[{name:'read_source',description:'Read relevant owned source',execute:async()=>{reads++;return 'owned source';}}],selectHistory:async(_history,incoming)=>incoming,
+  exchange:async()=>{
+   exchanges++;
+   return JSON.stringify({id:'gen-text',object:'chat.completion',created:1,model:'test/model',choices:[{index:0,message:{role:'assistant',content:'Hello',tool_calls:toolCalls},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}});
+  }});
+ expect(result).toBe('Hello');expect(reads).toBe(0);expect(exchanges).toBe(1);
+});
