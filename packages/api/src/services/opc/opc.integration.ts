@@ -3095,6 +3095,109 @@ it('OPC: CAPACITY interrupted request retains frozen manuscript after a new save
   console.info('CAPACITY_RECOVERY_RESULTS',JSON.stringify({dispatches,requestBytes:Buffer.byteLength(frozenRequest),historyBefore,historyAfter,storedVersions:2,frozenVersion:1,foreignDenied:true}));
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },90000);
+it("OPC: independent extraction transports original context and applies only its structured result", async () => {
+  const { runtimeExecutor } = await import("../runtime/execute");
+  const { createServer } = await import("node:http");
+  const { readWorkflowMentorExecution, applyMentorTurnRules } =
+    await import("../../../../../apps/web/src/app/positioning/[draftId]/mentor-response");
+  const f = await fixture(2, false, 0, flow => {
+    flow.steps[0].information = [
+      { id: "time", title: "每周可投入时间", required: true, profileKey: "time", elicitation: "user_fact" },
+      { id: "future", title: "尚未到达的问题", required: true, profileKey: "future" },
+    ];
+  });
+  const primaryModelId = await planFixtureModel(f.moduleId);
+  const draft = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: "mentor" });
+  const userInput = "仅用于本地恢复验证：每周最多4小时，选题1小时、拍摄2小时、复盘1小时；保留这条原请求。";
+  const primaryBody = JSON.stringify({ message: "【预设导师回复】请核对本题的时间分配。" });
+  // Deliberately prewritten, not computed from userInput: this verifies the
+  // transport/application contract, NOT a model's semantic extraction quality.
+  const extractedValue = "每周最多4小时，选题1小时、拍摄2小时、复盘1小时";
+  const extractionBody = JSON.stringify({
+    inputKind: "answer", targetStepId: "step-0",
+    informationPatch: {
+      time: { value: extractedValue, status: "provisional", nature: "decision", basis: "user_statement" },
+    },
+  });
+  const request = {
+    draftId: draft.draftId, stepId: "step-0", questionId: "time", purpose: "mentor" as const,
+    requestId: randomUUID(), input: userInput, organizeAfter: true,
+  };
+  const prepared = await f.service.prepareStep(request);
+  const frozen = (await sql.query("select payload from runtime_executions where id=$1", [prepared.executionId])).rows[0].payload;
+  expect(frozen.modelId).toBe(primaryModelId);
+  expect(frozen.attachedOrganizer.modelId).not.toBe(primaryModelId);
+  const requests: Array<{ model: string; messages: Array<{ role: string; content: string }> }> = [];
+  const server = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const wire = JSON.parse(JSON.parse(raw).input);
+    requests.push(wire);
+    const id = "extraction-contract-" + requests.length;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({
+      id, model: wire.model, final: true, cost: "0.003", currency: "USD", coverage: "request_total",
+      usage: { sdkResponse: {
+        id, object: "chat.completion", created: 1, model: wire.model,
+        choices: [{ index: 0, message: { role: "assistant", content: requests.length === 1 ? primaryBody : extractionBody }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      } },
+    }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("local server");
+    const executor = runtimeExecutor({ database: admin, actor: async () => f.actor, endpoint: "http://127.0.0.1:" + address.port });
+    expect(await executor.execute(prepared.executionId)).toEqual({ state: "completed", body: primaryBody, summary: extractionBody });
+    expect(requests.map(item => item.model)).toEqual([frozen.model, frozen.attachedOrganizer.model]);
+    // Inspect the real SDK wire after admission, freezing and execution, not
+    // merely the service's string constant or a fake runtime invocation.
+    const system = requests[1].messages.filter(item => item.role === "system");
+    expect(system).toEqual([{ role: "system", content: frozen.attachedOrganizer.instructions }]);
+    expect(system[0].content).toContain("Separate business content from surrounding meta-instructions even within one sentence");
+    expect(system[0].content).toContain("Decide by meaning, never by deleting keywords");
+    expect(system[0].content).toContain("Never return confirmed or deferred");
+    const organizerMessage = requests[1].messages.filter(item => item.role === "user");
+    expect(organizerMessage).toHaveLength(1);
+    const [contextRaw, reply] = organizerMessage[0].content.split("\n\nPrimary assistant reply:\n");
+    const context = JSON.parse(contextRaw);
+    expect(context).toEqual({
+      userInput, originalStepId: "step-0",
+      currentQuestion: { id: "time", title: "每周可投入时间", fields: [{ id: "time", title: "每周可投入时间", required: true, elicit: "user_fact" }] },
+      allowedWorkflow: [{ id: "step-0", title: f.flow.steps[0].title, confirmed: false, fields: [{ id: "time", title: "每周可投入时间" }] }],
+    });
+    expect(reply).toBe(primaryBody);
+    const view = await admin.rpc("runtime_view", { p_actor_id: f.actor, p_session_id: draft.sessionId });
+    expect(view.error).toBeNull();
+    const execution = view.data.executions.find((item: { executionId: string }) => item.executionId === prepared.executionId);
+    expect(execution).toMatchObject({ input: userInput, body: primaryBody, summary: extractionBody });
+    const before = await f.service.read(draft.draftId);
+    const parsed = readWorkflowMentorExecution(execution.body, execution.summary, "step-0", before.information);
+    expect(parsed.message).toBe(JSON.parse(primaryBody).message);
+    const accepted = applyMentorTurnRules(parsed, execution.input);
+    expect(accepted).toEqual(JSON.parse(extractionBody).informationPatch);
+    // Use the same public projection as the page, then persist through the
+    // actual information service. The UI event/autosave loop is not simulated.
+    const { value, status, nature } = accepted.time;
+    const untouched = { status: "unknown", nature: "unknown", value: "" };
+    await f.service.information({ draftId: draft.draftId, stepId: "step-0", requestId: randomUUID(), expectedVersion: before.snapshot.steps["step-0"].version, values: { time: { value, status, nature }, future: untouched } });
+    const saved = await f.service.read(draft.draftId);
+    expect(saved.information["step-0"].values.time).toEqual({ value: extractedValue, status: "provisional", nature: "decision" });
+    expect(saved.information["step-0"].values.time.value).not.toBe(userInput);
+    expect(saved.information["step-0"].values.future).toEqual(untouched);
+    expect(saved.snapshot.steps["step-0"].valid).toBe(false);
+    // Refresh/replay must preserve the original wording and frozen prompt, with
+    // no second model call or implicit confirmation after the form is saved.
+    expect(await f.service.prepareStep(request)).toMatchObject({ executionId: prepared.executionId });
+    expect(await executor.execute(prepared.executionId)).toEqual({ state: "completed", body: primaryBody, summary: extractionBody });
+    expect(requests).toHaveLength(2);
+    expect((await sql.query("select payload from runtime_executions where id=$1", [prepared.executionId])).rows[0].payload).toEqual(frozen);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+}, 90000);
+
 it("OPC: the Agent opens the current question once per entry and plans without user-authored topic rows", async () => {
   const { runtimeExecutor } = await import("../runtime/execute");
   const { createServer } = await import("node:http");
