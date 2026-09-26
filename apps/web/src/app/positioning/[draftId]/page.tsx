@@ -275,7 +275,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const list = trpc.opc.list.useQuery();
   const prepareStep = trpc.opc.prepareStep.useMutation(),
     execute = trpc.runtime.execute.useMutation({onSuccess(result){
-      if('unavailable' in result&&result.unavailable==='output_truncated')setError('模型达到回复长度上限，但未返回正文。本次未生成可用结果，原请求已保留；不会自动重试。');
+      if('unavailable' in result&&result.unavailable==='output_truncated')setError('本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。');
     }});
   const information = trpc.opc.information.useMutation();
   const [infoEdits, setInfoEdits] = useState<

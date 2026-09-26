@@ -65,7 +65,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const [typePending,setTypePending]=useState(false);
  const editItem=trpc.opc.editLibrary.useMutation();
  const saveContent=trpc.opc.saveContentResult.useMutation(),prepareVideoMaterial=trpc.opc.prepareVideoMaterial.useMutation(),checkVideo=trpc.opc.checkVideoExecution.useMutation(),saveResults=trpc.opc.saveVideoResults.useMutation();
- const start=trpc.runtime.start.useMutation(),prepare=trpc.runtime.prepare.useMutation(),execute=trpc.runtime.execute.useMutation({onSuccess(result){if('unavailable' in result&&result.unavailable==='output_truncated')setError('模型达到回复长度上限，但未返回正文。本次未生成可用结果，原请求已保留；不会自动重试。');}}),cancel=trpc.runtime.cancel.useMutation();
+ const start=trpc.runtime.start.useMutation(),prepare=trpc.runtime.prepare.useMutation(),execute=trpc.runtime.execute.useMutation({onSuccess(result){if('unavailable' in result&&result.unavailable==='output_truncated')setError('本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。');}}),cancel=trpc.runtime.cancel.useMutation();
  const [videoBusy,setVideoBusy]=useState(false),[,setVideoUiRevision]=useState(0);
  const busy=start.isPending||prepare.isPending||execute.isPending||videoBusy||guiding;
  const ordinary=choices.data?.models[0]?.id??'';
