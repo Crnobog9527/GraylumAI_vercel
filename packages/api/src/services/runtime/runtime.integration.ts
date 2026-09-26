@@ -1515,8 +1515,8 @@ it('RUNTIME: opposite Skill history dependencies allow concurrent claim and disp
  }finally{await Promise.allSettled(clients.map(c=>c.query('ROLLBACK')));await Promise.all(clients.map(c=>c.end()));await new Promise<void>(r=>server.close(()=>r()));}
 },30000);
 
-it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['complete','missing-cost','cancel-outage'])('RUNTIME: empty truncated reply closes once and preserves receipt recovery (%s)',async(mode)=>{
- const missingCost=mode==='missing-cost';
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['complete','missing-cost','cancel-outage','cancel-response-loss','organizer'])('RUNTIME: empty truncated reply closes once and preserves receipt recovery (%s)',async(mode)=>{
+ const missingCost=mode==='missing-cost',truncatedCall=mode==='organizer'?2:1;
  const f=await fixture(),mentorId=randomUUID(),organizerId=randomUUID(),windowId=randomUUID();
  const policies=[[mentorId,'test/mentor'],[organizerId,'test/organizer']].map(([modelId,model])=>({...f.billing.callPolicy[0],modelId,model,provider:'openrouter',protocol:'openrouter-chat-v1',inputLimit:10000,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
  for(const p of policies)await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic truncation',$2,'openrouter','true')",[p.modelId,p.model]);
@@ -1524,12 +1524,12 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['complete','missing
  const bodies:string[]=[];let lookups=0;
  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_ONLY',transport:async(url,init)=>{
   if(String(url).includes('/generation')){lookups++;return new Response(JSON.stringify({data:{id:'gen-truncated-'+windowId,model:'test/mentor',finish_reason:'length',total_cost:0.003}}),{status:200});}
-  bodies.push(String(init?.body));const request=JSON.parse(bodies.at(-1)!);const truncated=bodies.length===1;
+  bodies.push(String(init?.body));const request=JSON.parse(bodies.at(-1)!);const truncated=bodies.length===truncatedCall;
   return new Response(JSON.stringify({id:truncated?'gen-truncated-'+windowId:'gen-valid-'+windowId+'-'+bodies.length,object:'chat.completion',created:1,model:request.model,choices:[{index:0,finish_reason:truncated?'length':'stop',message:{role:'assistant',content:truncated?null:'Usable answer',...(truncated?{reasoning:'SYNTHETIC_PRIVATE_REASONING'}:{})}}],usage:{prompt_tokens:10,completion_tokens:1000,total_tokens:1010,...(missingCost&&truncated?{}:{cost:0.003})}}),{status:200});
  }});
- let failCancel=mode==='cancel-outage';
+ let failCancel=mode==='cancel-outage'||mode==='cancel-response-loss';
  const database={rpc:async(name:string,args:Record<string,unknown>)=>{
-  if(name==='runtime_cancel'&&failCancel){failCancel=false;return {data:null,error:{message:'synthetic cancellation outage'}};}
+  if(name==='runtime_cancel'&&failCancel){failCancel=false;if(mode==='cancel-response-loss')await admin.rpc(name,args);return {data:null,error:{message:'synthetic cancellation outage'}};}
   return admin.rpc(name,args);
  }};
  const host=runtimeExecutor({database,actor:async()=>f.actorId,adapter});
@@ -1540,16 +1540,16 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['complete','missing
   let result=await host.execute(e.executionId);
   if(turn===0){
    if(mode==='cancel-outage'){expect(result).toEqual({state:'pending'});expect(bodies).toHaveLength(1);result=await host.execute(e.executionId);}
-   expect(result).toEqual({state:missingCost?'cost_pending':'cancelled',unavailable:'output_truncated'});expect(bodies).toHaveLength(1);
+   expect(result).toEqual({state:missingCost?'cost_pending':'cancelled',...(mode==='cancel-response-loss'?{}:{unavailable:'output_truncated'})});expect(bodies).toHaveLength(truncatedCall);
    if(missingCost)expect((await host.recoverFinancial(e.executionId)).state).toBe('cancelled');
-   expect(await host.execute(e.executionId)).toEqual({state:'cancelled'});expect(bodies).toHaveLength(1);
+   expect(await host.execute(e.executionId)).toEqual({state:'cancelled'});expect(bodies).toHaveLength(truncatedCall);
    const run=(await db.query('select state,closed,charged,provider_cost_usd::text cost from bill2_runs where id=$1',[e.runId])).rows[0];
-   expect(run).toEqual({state:'settled',closed:true,charged:3,cost:'0.003'});
+   expect(run).toEqual({state:'settled',closed:true,charged:3*truncatedCall,cost:truncatedCall===2?'0.006':'0.003'});
    const saved=(await db.query('select payload,result,primary_result from runtime_executions where id=$1',[e.executionId])).rows[0];
-   expect(saved).toEqual({payload:context,result:null,primary_result:null});
+   expect(saved).toEqual({payload:context,result:null,primary_result:mode==='organizer'?{body:'Usable answer',lastSequence:1}:null});
    expect(JSON.stringify((await db.query('select payload from bill2_receipts where call_id in (select id from bill2_calls where run_id=$1)',[e.runId])).rows)).toContain('SYNTHETIC_PRIVATE_REASONING');
-   expect((await rpc('runtime_view',{p_actor_id:f.actorId,p_session_id:f.s.sessionId})).executions.find((x:any)=>x.executionId===e.executionId)).toMatchObject({state:'cancelled',input:context.input,body:null});
-  }else{expect(result).toMatchObject({state:'completed',body:'Usable answer',summary:'Usable answer'});expect(bodies).toHaveLength(3);expect(await host.execute(e.executionId)).toEqual(result);expect(bodies).toHaveLength(3);}
+   expect((await rpc('runtime_view',{p_actor_id:f.actorId,p_session_id:f.s.sessionId})).executions.find((x:any)=>x.executionId===e.executionId)).toMatchObject({state:'cancelled',input:context.input,body:null,primaryBody:mode==='organizer'?'Usable answer':null});
+  }else{expect(result).toMatchObject({state:'completed',body:'Usable answer',summary:'Usable answer'});expect(bodies).toHaveLength(truncatedCall+2);expect(await host.execute(e.executionId)).toEqual(result);expect(bodies).toHaveLength(truncatedCall+2);}
  }
- expect(lookups).toBe(missingCost?1:0);expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(91);
+ expect(lookups).toBe(missingCost?1:0);expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(94-3*truncatedCall);
 },30000);
