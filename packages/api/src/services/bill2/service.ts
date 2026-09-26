@@ -2,7 +2,8 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { transportEvidence, unknownEvidence, type CallIdentity, type TransportObservation } from './fixtureAdapter';
-import {openRouterLimits} from './openRouterPolicy';
+import {openRouterLimits,OPENROUTER_LOOKUP_TIMEOUT_MS} from './openRouterPolicy';
+import type {RuntimeBudget} from '../runtime/budget';
 import { openRouterEvidence } from './openRouterEvidence';
 import { aggregateCredits } from './decimal';
 import { applyInvitationRebateForSpend } from '../invitationRebate';
@@ -49,7 +50,7 @@ function providerEvidence(observation:TransportObservation,identity:CallIdentity
 export type DispatchClaim = { id: string; state: string; dispatchToken: string | null };
 /** Trusted server composition only: actor comes from verified authentication, policy from the server.
  * No public route exposes raw RPC payloads or accepts a browser price/receipt. No env/fallback loading. */
-export function authoritativeBilling(deps: { admin: BillingRpc; actor: () => Promise<string>; adapter: BillingTransport;
+export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: BillingRpc; actor: () => Promise<string>; adapter: BillingTransport;
   /** Existing downstream rebate, explicitly enabled only by the trusted host. */
   rebateClient?: Parameters<typeof applyInvitationRebateForSpend>[0]['supabase'];
 }) {
@@ -80,6 +81,7 @@ export function authoritativeBilling(deps: { admin: BillingRpc; actor: () => Pro
   async function recoverReceipts(runId: string) {
       const calls = await rpc<string[]>('bill2_pending_calls', { p_run_id: uuid.parse(runId) });
       for (const callId of calls.slice(0, 32)) {
+        try{deps.budget?.assertCanStart(OPENROUTER_LOOKUP_TIMEOUT_MS);}catch{break;} // Do not spend a recovery claim when no lookup fits.
         const identity = await rpc<(CallIdentity & { providerId: string }) | null>('bill2_recovery_claim', { p_run_id: runId, p_call_id: callId });
         if (!identity) continue;
         let evidence;

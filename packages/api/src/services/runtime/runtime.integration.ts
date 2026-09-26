@@ -8,6 +8,7 @@ import { PostgresSession } from './session';
 import { runRuntime } from './runner';
 import {readRuntimeView,retainedOutputReason} from './view';
 import { runtimeExecutor } from './execute';
+import {createRuntimeBudget} from './budget';
 import { runtimeAdmissionService } from './admission';
 import { activateRuntimeCandidate } from './matching';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
@@ -197,6 +198,55 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['valid','malformed'
   }
   expect(diagnostic.mock.calls.filter(call=>call[1]==='runtime_provider_preflight_failed')).toEqual(shape==='valid'?[]:[['api','runtime_provider_preflight_failed',{executionId:lastExecution,code:'RUNTIME_PROVIDER_HISTORY_DENIED'}]]);
  }finally{diagnostic.mockRestore();await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+},30000);
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool-turn','fast-three','organizer','delayed-permission','early-db','history-delay'])('RUNTIME: invocation budget stops a third model or late dispatch without changing frozen identity (%s)',async(mode)=>{
+ const expectedPosts=mode==='fast-three'?3:['tool-turn','organizer'].includes(mode)?2:0;
+ const f=await fixture(),mentor=randomUUID(),organizer=randomUUID(),windowId=randomUUID();
+ const policies=[[mentor,'test/budget-mentor'],[organizer,'test/budget-organizer']].map(([modelId,model])=>({...f.billing.callPolicy[0],modelId,model,provider:'openrouter',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
+ for(const policy of policies)await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic budget',$2,'openai',true)",[policy.modelId,policy.model]);
+ await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.06,3,now()+interval '2 hours')",[windowId,[f.actorId],JSON.stringify(policies)]);
+ const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'Preserve original three-call request',request:{sessionId:f.s.sessionId,requestId:f.admit.p_request_id},maxToolCalls:2,instructions:'Use synthetic source',model:policies[0]!.model,maxOutputTokens:100,maxTurns:3,historyItems:0,network:'deny',workspaceContext:true,tools:['read_source'],providerRequestFormat:'serial-tools-v2',...(mode==='organizer'?{attachedOrganizer:{modelId:organizer,model:policies[1]!.model,maxOutputTokens:100}}:{})};
+ const billing={...f.billing,mode:'staging_test',testWindowId:windowId,modelId:mentor,input:context,callPolicy:policies,rules:{...f.billing.rules,version:'runtime-staging-v1',quoteVersion:windowId},limits:{...f.billing.limits,maxCalls:3,costUsd:'0.06',credits:60,maxPreDeduct:60}};
+ const e=await rpc('runtime_admit',{...f.admit,p_payload:context,p_billing:billing});
+ const original=(await db.query('select request_id,pre_deduct_id,payload from bill2_runs where id=$1',[e.runId])).rows[0];
+ let elapsed=0,posts=0;const budget=createRuntimeBudget(()=>elapsed),wireHashes:string[]=[];
+ const server=createServer(async(req,res)=>{
+  let raw='';for await(const chunk of req)raw+=chunk;posts++;wireHashes.push(createHash('sha256').update(raw).digest('hex'));elapsed+=mode==='fast-three'?30_000:110_000;
+  expect(JSON.parse(raw).model).toBe(policies[0]!.model);
+  const tool=posts===1||mode==='tool-turn'||mode==='fast-three'&&posts===2;
+  res.setHeader('content-type','application/json');res.end(JSON.stringify({id:'gen-budget-'+windowId+'-'+posts,object:'chat.completion',created:1,model:policies[0]!.model,choices:[{index:0,finish_reason:tool?'tool_calls':'stop',message:tool?{role:'assistant',content:null,tool_calls:[{id:'source-'+posts,type:'function',function:{name:'read_source',arguments:'{}'}}]}:{role:'assistant',content:'Preserved mentor result'}}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7,cost:0.003}}));
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('local server');const endpoint='http://127.0.0.1:'+address.port;
+  const database={rpc:async(name:string,args:Record<string,unknown>)=>{const result=await admin.rpc(name,args);
+   if(mode==='delayed-permission'&&name==='bill2_dispatch'&&result.data?.dispatch||mode==='early-db'&&name==='runtime_execution'&&args.p_action==='begin'||mode==='history-delay'&&name==='runtime_session_items'&&args.p_action==='freeze')elapsed=136_000;
+   return result;
+  }};
+  const adapter=openRouterAdapter({budget,allowWorkspaceRead:true,credential:async()=> 'SYNTHETIC',transport:async(_url,init)=>fetch(endpoint,init)});
+  const host=runtimeExecutor({database,actor:async()=>f.actorId,adapter,budget});
+  const result=await host.execute(e.executionId);
+  expect(result.state).toBe(['early-db','history-delay'].includes(mode)?'cancelled':mode==='fast-three'?'completed':'pending');
+  expect(posts).toBe(expectedPosts);
+  const calls=(await db.query('select payload,provider_id from bill2_calls where run_id=$1 order by sequence',[e.runId])).rows;
+  expect(calls).toHaveLength(mode==='delayed-permission'?1:posts);
+  if(posts)expect(calls.map(call=>call.payload.requestHash)).toEqual(wireHashes);
+  else if(mode==='delayed-permission')expect(calls[0].provider_id).toBeNull();
+  if(mode==='organizer')expect((await db.query('select primary_result from runtime_executions where id=$1',[e.executionId])).rows[0].primary_result.body).toBe('Preserved mentor result');
+  const history=(await db.query('select revision,item from runtime_session_history where session_id=$1 order by revision',[f.s.sessionId])).rows;
+  // A genuinely fresh adapter/budget must still replay only the original calls.
+  const recoveryAdapter=openRouterAdapter({allowWorkspaceRead:true,credential:async()=> 'SYNTHETIC',transport:async(_url,init)=>fetch(endpoint,init)});
+  const recovery=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter:recoveryAdapter});
+  expect((await recovery.execute(e.executionId)).state).toBe(result.state);expect(posts).toBe(expectedPosts);
+  await db.query('update runtime_test_windows set enabled=false where id=$1',[windowId]);
+  await host.cancel(e.executionId);
+  for(let i=0;i<2;i++)await recovery.execute(e.executionId);
+  expect(posts).toBe(expectedPosts);
+  expect((await db.query('select request_id,pre_deduct_id,payload from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual(original);
+  expect((await db.query('select revision,item from runtime_session_history where session_id=$1 order by revision',[f.s.sessionId])).rows).toEqual(history);
+  expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(posts?100-posts*3:mode==='delayed-permission'?40:100);
+  expect((await db.query('select charged,conflict from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual({charged:posts?posts*3:mode==='delayed-permission'?null:0,conflict:false});
+ }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },30000);
 it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['header','timeout','absent','response-mismatch','lookup-mismatch','lookup-pending'])('RUNTIME: interrupted OpenRouter body retains only authoritative recovery evidence (%s)',async(mode)=>{
  const recovered=mode==='header'||mode==='timeout';

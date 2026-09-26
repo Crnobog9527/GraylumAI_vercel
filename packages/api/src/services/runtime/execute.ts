@@ -5,13 +5,14 @@ import {logger} from '../../lib/logger';
 import {normalizeOpenRouterHistory,projectOpenRouterItemsForSizing} from './openRouterHistory';
 import { authoritativeBilling, type FrozenRun, type FrozenCall, type BillingTransport } from '../bill2/service';
 import {decimal} from '../bill2/decimal';
-import {openRouterBound} from '../bill2/openRouterPolicy';
+import {openRouterBound,OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
+import {createRuntimeBudget,type RuntimeBudget} from './budget';
 import { localFixtureAdapter } from '../bill2/fixtureAdapter';
 import { PostgresSession, type SessionRpc } from './session';
 import { runRuntime, type RuntimeTool } from './runner';
 import { selectRuntimeHistory, selectRuntimeCallInput, projectSupersededScopeItem, requestsHistoricalComparison, assertRuntimeRequestCapacity, runtimeScopeInput } from './context';
 import { matchingPlan, matchingInput, MATCH_INSTRUCTIONS, parseMatch, type MatchCandidate } from './matching';
-const preflightCodes=new Set(['RUNTIME_PROVIDER_HISTORY_DENIED','RUNTIME_PROVIDER_BINDING_DENIED','BILL2_PROVIDER_REQUEST_DENIED','BILL2_PROVIDER_CREDENTIAL_UNAVAILABLE','BILL2_PROVIDER_IDENTITY_DENIED','BILL2_PROVIDER_MODEL_DENIED','BILL2_PROVIDER_QUOTE_REQUIRED','BILL2_PROVIDER_QUOTE_CONFLICT']);
+const preflightCodes=new Set(['RUNTIME_TIME_BUDGET_EXHAUSTED','RUNTIME_PROVIDER_HISTORY_DENIED','RUNTIME_PROVIDER_BINDING_DENIED','BILL2_PROVIDER_REQUEST_DENIED','BILL2_PROVIDER_CREDENTIAL_UNAVAILABLE','BILL2_PROVIDER_IDENTITY_DENIED','BILL2_PROVIDER_MODEL_DENIED','BILL2_PROVIDER_QUOTE_REQUIRED','BILL2_PROVIDER_QUOTE_CONFLICT']);
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 export const runtimeContext=z.object({
  version:z.literal('runtime.v1'),sdkVersion:z.literal('0.18.0'),role:z.enum(['ordinary','skill','organizer']),
@@ -30,9 +31,10 @@ export const runtimeContext=z.object({
  * The default transport is local-only; the Staging host must explicitly supply
  * its allowlisted official adapter and frozen price policy.
  */
-export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<string>;endpoint?:string;adapter?:BillingTransport;activateSkill?:(candidate:MatchCandidate)=>Promise<string>}){
+export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionRpc;actor:()=>Promise<string>;endpoint?:string;adapter?:BillingTransport;activateSkill?:(candidate:MatchCandidate)=>Promise<string>}){
+ const budget=options.budget??createRuntimeBudget();
  const adapter=options.adapter ?? localFixtureAdapter(options.endpoint??'');
- const billing=authoritativeBilling({admin:options.database,actor:options.actor,adapter});
+ const billing=authoritativeBilling({admin:options.database,actor:options.actor,adapter,budget});
  async function rpc<T>(name:string,args:Record<string,unknown>):Promise<T>{
   const result=await options.database.rpc(name,{...args,p_actor_id:z.string().uuid().parse(await options.actor())});
   if(result.error){
@@ -104,10 +106,12 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
      if(!raw){
       // Recovery is replay-only, even when a later step had not yet been sent.
       if(!execution.live||existing?.state==='dispatched'||existing?.state==='unknown'||existing?.state==='responded')throw new Error('RUNTIME_RESPONSE_PENDING');
+      budget.assertCanStart(selectedPolicy.protocol==='openrouter-chat-v1'?OPENROUTER_RESPONSE_TIMEOUT_MS:5000);
       const call:FrozenCall={provider:selectedPolicy.provider,account:selectedPolicy.account,model:selectedPolicy.model,protocol:selectedPolicy.protocol,
        ...(selectedPolicy.providerLimits?{providerLimits:selectedPolicy.providerLimits}:{}),phase,requestHash,upperUsd:selectedPolicy.upperUsd,inputLimit:selectedPolicy.inputLimit,outputLimit:selectedPolicy.outputLimit,
        automaticRetry:false,hiddenTools:false,lookupSupported:selectedPolicy.lookupSupported};
       const claim=await billing.claimCall(execution.runId,sequence,call);
+      budget.assertCanStart(selectedPolicy.protocol==='openrouter-chat-v1'?OPENROUTER_RESPONSE_TIMEOUT_MS:5000);
       const dispatch=await billing.dispatchOnce(claim.id,request);
       if(!dispatch.dispatched)throw new Error('RUNTIME_RESPONSE_PENDING');
       if(dispatch.pendingReceipt){
@@ -162,6 +166,7 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
    if(context.network==='require_latest')effective.instructions+='\nThe user requires current information. Use the permitted search tool before answering; tool availability alone is not evidence that a search occurred. Do not claim verified current information without retrieved evidence.';
    const tools:RuntimeTool[]=context.tools.map(name=>({name,description:name==='search'?'Search current sources through the explicitly enabled local search adapter.':context.workspaceContext?'Read owned business context only when relevant. Omit query to list account/topic metadata; pass an exact returned id to read that source. Read-only; no internet access.':'Read the selected source only.',
     execute:async(arguments_,callId)=>{
+     budget.assertCanStart();
      const toolArgs={...args,p_call_id:callId,p_name:name,p_arguments:arguments_};
      const saved=await rpc<{execute:boolean;result:unknown}>('runtime_tool',{...toolArgs,p_action:'claim'});
      if(name==='read_source'){
