@@ -28,7 +28,7 @@ export async function runRuntime(input: RuntimeRunnerInput) {
     // an entire multi-tool response before the SDK can invoke any local tool.
     const decoded=JSON.parse(response),calls=decoded.choices?.[0]?.message?.tool_calls;
     if(!Array.isArray(decoded.choices)||decoded.choices.length!==1||
-      (calls!==undefined&&(!Array.isArray(calls)||calls.length>1)))throw new Error('RUNTIME_TOOL_BATCH_DENIED');
+      (calls!==undefined&&calls!==null&&(!Array.isArray(calls)||calls.length>1)))throw new Error('RUNTIME_TOOL_BATCH_DENIED');
     return new Response(response,{status:200,headers:{'content-type':'application/json'}});
   };
   const client=new OpenAI({apiKey:'local-fixture-only',baseURL:'http://127.0.0.1/runtime',fetch:guardedFetch,maxRetries:0,timeout:45000});

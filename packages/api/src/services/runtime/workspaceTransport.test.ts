@@ -32,3 +32,15 @@ it('rejects multiple source calls before the SDK can execute any of them',async(
  await expect(result).rejects.toThrow('RUNTIME_EXECUTION_PENDING');
  expect(reads).toBe(0);expect(exchanges).toBe(1);
 });
+
+it.each([null,undefined,[]])('accepts a text completion with no tool batch (%s)',async(toolCalls)=>{
+ let exchanges=0,reads=0;
+ const session:Session={getSessionId:async()=> 'synthetic-text-session',getItems:async()=>[],addItems:async()=>{},popItem:async()=>undefined,clearSession:async()=>{}};
+ const result=await runRuntime({model:'test/model',instructions:'Answer ordinary questions directly',input:'Say hello',session,maxTurns:1,maxOutputTokens:100,
+  tools:[{name:'read_source',description:'Read relevant owned source',execute:async()=>{reads++;return 'owned source';}}],selectHistory:async(_history,incoming)=>incoming,
+  exchange:async()=>{
+   exchanges++;
+   return JSON.stringify({id:'gen-text',object:'chat.completion',created:1,model:'test/model',choices:[{index:0,message:{role:'assistant',content:'Hello',tool_calls:toolCalls},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}});
+  }});
+ expect(result).toBe('Hello');expect(reads).toBe(0);expect(exchanges).toBe(1);
+});

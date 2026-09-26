@@ -60,7 +60,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['legacy','serial-to
   expect(body.model).toBe('test/model');expect(body.tools).toHaveLength(1);
   expect(body.parallel_tool_calls).toBe(format==='legacy'?false:undefined);
   expect(body.provider).toMatchObject({require_parameters:true,allow_fallbacks:false,only:['synthetic']});
-  res.setHeader('content-type','application/json');res.end(JSON.stringify({id:'gen-window-local-'+windowId,object:'chat.completion',created:1,model:'test/model',choices:[{index:0,message:{role:'assistant',content:'Local official-protocol answer'},finish_reason:'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7,cost:0.003}}));
+  res.setHeader('content-type','application/json');res.end(JSON.stringify({id:'gen-window-local-'+windowId,object:'chat.completion',created:1,model:'test/model',choices:[{index:0,message:{role:'assistant',content:'Local official-protocol answer',tool_calls:null},finish_reason:'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7,cost:0.003}}));
  });
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{
