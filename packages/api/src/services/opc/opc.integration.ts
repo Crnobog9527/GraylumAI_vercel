@@ -1643,9 +1643,9 @@ it.skipIf(!process.env.V3_REAL_SKILL_INPUT)(
         input.steps[index].information.map((field: any) => [
           field.id,
           {
-            status: "deferred",
-            nature: "unknown",
-            value: "隔离测试：真实研究与业务判断暂未验证，用户明确接受此局限。",
+            status: "confirmed",
+            nature: "decision",
+            value: "隔离测试手工确认项，不代表真实研究与业务判断通过。",
           },
         ]),
       );
@@ -1699,13 +1699,13 @@ it.skipIf(!process.env.V3_REAL_SKILL_INPUT)(
     const profile = (
       await sql.query("select opc_profile($1) as p", [report.id])
     ).rows[0].p;
-    expect(Object.keys(profile)).toHaveLength(23);
+    expect(Object.keys(profile)).toHaveLength(inputCounts.total);
     expect(
       Object.values(profile).every(
         (p: any) =>
           p.sourceVersionId === report.id &&
           p.confirmationId &&
-          p.status === "deferred",
+          p.status === "confirmed",
       ),
     ).toBe(true);
     const plan = await f.service.savePlan({
