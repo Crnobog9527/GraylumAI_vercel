@@ -9,6 +9,7 @@ import { runRuntime } from './runner';
 import {readRuntimeView,retainedOutputReason} from './view';
 import { runtimeExecutor } from './execute';
 import {createRuntimeBudget} from './budget';
+import {runtimeActor} from './actor';
 import { runtimeAdmissionService } from './admission';
 import { activateRuntimeCandidate } from './matching';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
@@ -199,8 +200,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['valid','malformed'
   expect(diagnostic.mock.calls.filter(call=>call[1]==='runtime_provider_preflight_failed')).toEqual(shape==='valid'?[]:[['api','runtime_provider_preflight_failed',{executionId:lastExecution,code:'RUNTIME_PROVIDER_HISTORY_DENIED'}]]);
  }finally{diagnostic.mockRestore();await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },30000);
-it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool-turn','fast-three','organizer','delayed-permission','early-db','history-delay'])('RUNTIME: invocation budget stops a third model or late dispatch without changing frozen identity (%s)',async(mode)=>{
- const expectedPosts=mode==='fast-three'?3:['tool-turn','organizer'].includes(mode)?2:0;
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool-turn','fast-three','organizer','delayed-permission','early-db','history-delay','late-receipt'])('RUNTIME: invocation budget stops a third model or late dispatch without changing frozen identity (%s)',async(mode)=>{
+ const expectedPosts=mode==='fast-three'?3:['tool-turn','organizer','late-receipt'].includes(mode)?2:0;
  const f=await fixture(),mentor=randomUUID(),organizer=randomUUID(),windowId=randomUUID();
  const policies=[[mentor,'test/budget-mentor'],[organizer,'test/budget-organizer']].map(([modelId,model])=>({...f.billing.callPolicy[0],modelId,model,provider:'openrouter',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
  for(const policy of policies)await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic budget',$2,'openai',true)",[policy.modelId,policy.model]);
@@ -211,23 +212,40 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool-turn','fast-t
  const original=(await db.query('select request_id,pre_deduct_id,payload from bill2_runs where id=$1',[e.runId])).rows[0];
  let elapsed=0,posts=0;const budget=createRuntimeBudget(()=>elapsed),wireHashes:string[]=[];
  const server=createServer(async(req,res)=>{
-  let raw='';for await(const chunk of req)raw+=chunk;posts++;wireHashes.push(createHash('sha256').update(raw).digest('hex'));elapsed+=mode==='fast-three'?30_000:110_000;
+  let raw='';for await(const chunk of req)raw+=chunk;posts++;wireHashes.push(createHash('sha256').update(raw).digest('hex'));elapsed+=mode==='fast-three'?30_000:mode==='late-receipt'?120_000:110_000;
   expect(JSON.parse(raw).model).toBe(policies[0]!.model);
-  const tool=posts===1||mode==='tool-turn'||mode==='fast-three'&&posts===2;
+  const tool=posts===1||mode==='tool-turn'||mode==='late-receipt'||mode==='fast-three'&&posts===2;
   res.setHeader('content-type','application/json');res.end(JSON.stringify({id:'gen-budget-'+windowId+'-'+posts,object:'chat.completion',created:1,model:policies[0]!.model,choices:[{index:0,finish_reason:tool?'tool_calls':'stop',message:tool?{role:'assistant',content:null,tool_calls:[{id:'source-'+posts,type:'function',function:{name:'read_source',arguments:'{}'}}]}:{role:'assistant',content:'Preserved mentor result'}}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7,cost:0.003}}));
  });
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{
   const address=server.address();if(!address||typeof address==='string')throw new Error('local server');const endpoint='http://127.0.0.1:'+address.port;
-  const database={rpc:async(name:string,args:Record<string,unknown>)=>{const result=await admin.rpc(name,args);
+  const persistence:Array<{name:string;time:number;action:unknown}>=[],authTimes:number[]=[];
+  const database={rpc:async(name:string,args:Record<string,unknown>)=>{persistence.push({name,time:elapsed,action:args.p_action});const result=await admin.rpc(name,args);
+   if(mode==='late-receipt'&&name==='bill2_record'&&posts===1)elapsed=134_000; // Include the first SQL/auth persistence wait.
+   if(mode==='late-receipt'&&name==='bill2_record'&&posts===2){elapsed=256_000;return {...result,error:{message:'Synthetic lost commit response'}};}
    if(mode==='delayed-permission'&&name==='bill2_dispatch'&&result.data?.dispatch||mode==='early-db'&&name==='runtime_execution'&&args.p_action==='begin'||mode==='history-delay'&&name==='runtime_session_items'&&args.p_action==='freeze')elapsed=136_000;
    return result;
   }};
   const adapter=openRouterAdapter({budget,allowWorkspaceRead:true,credential:async()=> 'SYNTHETIC',transport:async(_url,init)=>fetch(endpoint,init)});
-  const host=runtimeExecutor({database,actor:async()=>f.actorId,adapter,budget});
+  const authClient=createClient('http://127.0.0.1','SYNTHETIC',{auth:{persistSession:false,autoRefreshToken:false},global:{fetch:async(url)=>{expect(String(url)).toBe('http://127.0.0.1/auth/v1/user');authTimes.push(elapsed);return new Response(JSON.stringify({id:f.actorId}),{headers:{'content-type':'application/json'}});}}});
+  const actor=mode==='late-receipt'?runtimeActor(authClient.auth,f.actorId,budget,'Bearer e30.'+Buffer.from(JSON.stringify({exp:Math.floor(Date.now()/1000)+3600})).toString('base64url')+'.synthetic'):async()=>f.actorId;
+  const host=runtimeExecutor({database,actor,adapter,budget});
+  if(mode==='late-receipt'){
+   const shortJwt='e30.'+Buffer.from(JSON.stringify({exp:Math.floor(Date.now()/1000)+150})).toString('base64url')+'.synthetic';
+   const shortActor=runtimeActor(authClient.auth,f.actorId,budget,'Bearer '+shortJwt);
+   await expect(runtimeExecutor({database,actor:shortActor,adapter,budget}).execute(e.executionId)).rejects.toThrow('RUNTIME_STAGING_AUTH_REFRESH_REQUIRED');
+   expect(persistence).toEqual([]);expect(posts).toBe(0);expect(authTimes).toEqual([]);
+   expect((await db.query('select request_id,pre_deduct_id,payload from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual(original);
+  }
   const result=await host.execute(e.executionId);
   expect(result.state).toBe(['early-db','history-delay'].includes(mode)?'cancelled':mode==='fast-three'?'completed':'pending');
   expect(posts).toBe(expectedPosts);
+  if(mode==='late-receipt'){
+   expect(persistence).toContainEqual({name:'runtime_receipt_saved',time:256_000,action:undefined});
+   expect(persistence).toContainEqual({name:'runtime_execution',time:256_000,action:'interrupt'});
+   expect(authTimes.filter(time=>time>=256_000).length).toBeGreaterThan(2);
+  }
   const calls=(await db.query('select payload,provider_id from bill2_calls where run_id=$1 order by sequence',[e.runId])).rows;
   expect(calls).toHaveLength(mode==='delayed-permission'?1:posts);
   if(posts)expect(calls.map(call=>call.payload.requestHash)).toEqual(wireHashes);

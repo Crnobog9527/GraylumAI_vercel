@@ -7,6 +7,9 @@ export function createRuntimeBudget(now:()=>number=()=>performance.now()) {
  return Object.freeze({
   workDeadline,persistenceDeadline,
   remainingPersistence:()=>persistenceDeadline-now(),
+  assertCanPersist(durationMs=0){
+   if(now()+durationMs>=persistenceDeadline)throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');
+  },
   assertCanStart(durationMs=0){
    if(now()+durationMs>=workDeadline)throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');
   },
@@ -15,7 +18,7 @@ export function createRuntimeBudget(now:()=>number=()=>performance.now()) {
 export type RuntimeBudget=ReturnType<typeof createRuntimeBudget>;
 /** Native fetch cancellation also bounds response-body reads, including SQL.
  * An aborted database mutation is ambiguous; its original identity is retained. */
-export function withRuntimeBudget(budget:RuntimeBudget,transport:typeof fetch=fetch,boundDatabaseRetryAfter=false):typeof fetch {
+export function withRuntimeBudget(budget:RuntimeBudget,transport:typeof fetch=fetch,disableDatabaseRetry=false):typeof fetch {
  return async(input,init)=>{
   const remaining=Math.ceil(budget.remainingPersistence());
   if(remaining<=0)throw new DOMException('RUNTIME_TIME_BUDGET_EXHAUSTED','AbortError');
@@ -23,14 +26,14 @@ export function withRuntimeBudget(budget:RuntimeBudget,transport:typeof fetch=fe
   const deadline=AbortSignal.timeout(remaining);
   try{
    const response=await transport(input,{...init,signal:caller?AbortSignal.any([caller,deadline]):deadline});
-   // PostgREST GET retries honor Retry-After without a bound. Refuse a wait
-   // that cannot fit; AbortError is its existing non-retryable transport path.
+   // PostgREST sleeps after reading the error body, so even a short delay
+   // checked at headers can exceed the deadline. Disable its implicit read
+   // retries; AbortError is its existing non-retryable transport path. This
+   // flag is only for Supabase, never provider responses or their evidence.
    const method=init?.method??(input instanceof Request?input.method:'GET');
-   const retryAfter=response.headers.get('retry-after');
-   if(boundDatabaseRetryAfter&&['GET','HEAD','OPTIONS'].includes(method.toUpperCase())&&[503,520].includes(response.status)&&retryAfter!==null&&
-    Math.max(0,parseInt(retryAfter,10)||0)*1000>=budget.remainingPersistence()){
+   if(disableDatabaseRetry&&['GET','HEAD','OPTIONS'].includes(method.toUpperCase())&&[503,520].includes(response.status)){
     void response.body?.cancel().catch(()=>{});
-    throw new DOMException('RUNTIME_TIME_BUDGET_EXHAUSTED','AbortError');
+    throw new DOMException('RUNTIME_DATABASE_RETRY_DISABLED','AbortError');
    }
    return response;
   }catch(error){

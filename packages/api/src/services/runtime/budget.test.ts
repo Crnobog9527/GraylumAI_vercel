@@ -50,7 +50,7 @@ it.each([503,520])('does not let PostgREST Retry-After %s outlive the invocation
  const transport=vi.fn<typeof fetch>(async()=>new Response('{}',{status,headers:{'retry-after':'3600'}}));
  const client=createClient('http://127.0.0.1','SYNTHETIC',{auth:{persistSession:false},global:{fetch:withRuntimeBudget(createRuntimeBudget(),transport,true)}});
  const result=await client.from('synthetic').select('id');
- expect(result.error?.message).toContain('TIME_BUDGET');expect(transport).toHaveBeenCalledTimes(1);
+ expect(result.error?.message).toContain('RUNTIME_DATABASE_RETRY_DISABLED');expect(transport).toHaveBeenCalledTimes(1);
 });
 it('does not apply database retry policy to provider evidence',async()=>{
  const transport=vi.fn<typeof fetch>(async()=>new Response('{"error":"busy"}',{status:503,headers:{'retry-after':'3600','x-generation-id':'gen-busy'}}));
@@ -59,4 +59,18 @@ it('does not apply database retry policy to provider evidence',async()=>{
  expect(observation).toMatchObject({httpStatus:503,rawBody:'{"error":"busy"}',generationId:'gen-busy',complete:true});
  expect(adapter.evidence(observation,identity,'lookup','gen-busy')).toMatchObject({providerId:'gen-busy',cost:null,final:false});
  expect(transport).toHaveBeenCalledTimes(1);
+});
+it.each(['100',null])('prevents SDK sleep after a slow retryable database body (Retry-After %s)',async(retryAfter)=>{
+ vi.useFakeTimers();let elapsed=0;
+ try{
+  const {createClient}=await import('@supabase/supabase-js');
+  const budget=createRuntimeBudget(()=>elapsed);
+  const text=vi.fn(async()=>{elapsed=284_500;return '{}';});
+  const transport=vi.fn<typeof fetch>(async()=>{const response=new Response('{}',{status:503,headers:retryAfter?{'retry-after':retryAfter}:{}});response.text=text;return response;});
+  const client=createClient('http://127.0.0.1','SYNTHETIC',{auth:{persistSession:false},global:{fetch:withRuntimeBudget(budget,transport,true)}});
+  let done=false;const result=Promise.resolve(client.from('synthetic').select('id')).then(value=>{done=true;return value;});
+  await vi.advanceTimersByTimeAsync(0);
+  expect(done).toBe(true);expect((await result).error?.message).toContain('RUNTIME_DATABASE_RETRY_DISABLED');
+  expect(text).not.toHaveBeenCalled();expect(transport).toHaveBeenCalledTimes(1);
+ }finally{vi.useRealTimers();}
 });

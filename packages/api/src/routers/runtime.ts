@@ -7,6 +7,7 @@ import {StagingAccessError,stagingProcedureError} from '../services/runtime/stag
 import {stagingTransport} from '../services/runtime/stagingTransport';
 import {retainedOutputReason} from '../services/runtime/view';
 import { runtimeExecutor } from '../services/runtime/execute';
+import {runtimeActor} from '../services/runtime/actor';
 import { databaseSkillSource } from '../services/skills/databaseSource';
 import { discoverSkills } from '../services/skills/loader';
 import { activateRuntimeCandidate } from '../services/runtime/matching';
@@ -37,7 +38,7 @@ const procedure=protectedProcedure.use(async({ctx,next,path})=>{
   if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
   let endpoint:string|undefined,real;
   try{endpoint=localEndpoint();}catch{real=await loadStagingPolicy(ctx.supabaseAdmin,ctx.user.id,process.env);}
-  const actor=async()=>{ctx.runtimeBudget.assertCanStart();const a=await ctx.userScopedSupabase.auth.getUser();if(a.error||!a.data.user||a.data.user.id!==ctx.user.id)throw new Error('RUNTIME_DENIED');return a.data.user.id;};
+  const actor=runtimeActor(ctx.userScopedSupabase.auth,ctx.user.id,ctx.runtimeBudget,ctx.headers?.get('Authorization'));
   const admission=runtimeAdmissionService(ctx.userScopedSupabase,ctx.supabaseAdmin,{...(real?{real}:{}),account:'runtime-local',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:100,searchEnabled:!real,workspaceContext:true});
   const executor=runtimeExecutor({database:ctx.supabaseAdmin,budget:ctx.runtimeBudget,actor,endpoint,...(real?{adapter:stagingTransport(ctx.supabaseAdmin,real,ctx.runtimeBudget)}:{}),activateSkill:c=>activateRuntimeCandidate(ctx.userScopedSupabase,ctx.supabaseAdmin!,c)});
   const result=await next({ctx:{...ctx,admission,executor,real}});
@@ -83,7 +84,7 @@ export const runtimeRouter=router({
   if(r.error)throw new Error('RUNTIME_CANCEL_DENIED');return r.data;
  }),
  execute:maintenanceProcedure.input(z.object({executionId:z.string().uuid()}).strict()).mutation(async({ctx,input})=>{
-  const actor=async()=>{ctx.runtimeBudget.assertCanStart();const r=await ctx.userScopedSupabase.auth.getUser();if(r.error||r.data.user?.id!==ctx.user.id)throw new Error('RUNTIME_DENIED');return ctx.user.id;};
+  const actor=runtimeActor(ctx.userScopedSupabase.auth,ctx.user.id,ctx.runtimeBudget,ctx.headers?.get('Authorization'));
   const outcome=async<T extends {state:string}>(result:T)=>{
    if(!['cancelled','cost_pending'].includes(result.state))return result;
    const reason=await retainedOutputReason(ctx.supabaseAdmin!,ctx.user.id,input.executionId);

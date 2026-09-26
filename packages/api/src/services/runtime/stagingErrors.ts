@@ -9,6 +9,7 @@ const failures = {
   RUNTIME_STAGING_NOT_CONFIGURED: ['PRECONDITION_FAILED', '当前工作空间尚未配置开放条件，请联系管理员。'],
   RUNTIME_STAGING_DISABLED: ['PRECONDITION_FAILED', '当前测试窗口尚未开放或已关闭。'],
   RUNTIME_STAGING_TARGET_DENIED: ['FORBIDDEN', '当前环境不允许访问此工作空间。'],
+  RUNTIME_STAGING_AUTH_REFRESH_REQUIRED: ['PRECONDITION_FAILED', '登录会话剩余时间不足，请重新登录后继续原请求。'],
   RUNTIME_STAGING_ACTOR_DENIED: ['FORBIDDEN', '当前登录账号未获准访问此测试工作空间。'],
   RUNTIME_STAGING_POLICY_DENIED: ['PRECONDITION_FAILED', '当前账号没有可用的测试窗口：窗口未开放、已关闭、已过期或账号未获准。'],
   RUNTIME_STAGING_WINDOW_EXPIRED: ['PRECONDITION_FAILED', '当前测试窗口已过期。'],
