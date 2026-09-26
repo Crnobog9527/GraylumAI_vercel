@@ -7,6 +7,8 @@ import {
 } from '../contentModerator';
 
 function expectCompletesWithin(action: () => unknown, limitMs = 100): void {
+  // Exclude one-time regexp/JIT initialization from the wall-clock guard.
+  action();
   const startedAt = performance.now();
   action();
   expect(performance.now() - startedAt).toBeLessThan(limitMs);
@@ -117,7 +119,10 @@ describe('contentModerator', () => {
   it('keeps PII matching responsive on an adversarial email-shaped input', () => {
     const input = `${'a'.repeat(10_000)}@${'b'.repeat(10_000)}!`;
 
-    expectCompletesWithin(() => moderateOutput(input));
+    expectCompletesWithin(() => {
+      const result = moderateOutput(input);
+      expect(result.violations).toEqual([]);
+    });
   });
 
   it('keeps malicious-code matching responsive on an adversarial SQL-shaped input', () => {
@@ -129,6 +134,8 @@ describe('contentModerator', () => {
   it('keeps PII sanitization responsive on an adversarial email-shaped input', () => {
     const input = `${'a'.repeat(10_000)}@${'b'.repeat(10_000)}!`;
 
-    expectCompletesWithin(() => new ContentModerator().sanitize(input));
+    expectCompletesWithin(() => {
+      expect(new ContentModerator().sanitize(input)).toBe(input);
+    });
   });
 });
