@@ -27,7 +27,9 @@ const maintenanceProcedure=protectedProcedure.use(async({ctx,next,path})=>{
   if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
   try{maintenanceEndpoint=localEndpoint();}catch{await assertStagingReadAccess(ctx.supabaseAdmin,ctx.user.id,process.env);}
  } catch(cause) { throw stagingProcedureError(cause,path); }
- return next({ctx:{...ctx,maintenanceEndpoint}});
+ const result=await next({ctx:{...ctx,maintenanceEndpoint}});
+ if(!result.ok)throw stagingProcedureError(result.error,path);
+ return result;
 });
 const procedure=protectedProcedure.use(async({ctx,next,path})=>{
  try{

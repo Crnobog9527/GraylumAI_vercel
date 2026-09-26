@@ -36,7 +36,15 @@ const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
     const local = u.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(u.hostname) && !u.username && !u.password;
     if (!local) real = await loadStagingPolicy(ctx.supabaseAdmin, ctx.user.id, process.env);
   } catch (cause) { throw stagingProcedureError(cause, path); }
-  return next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin, real) } });
+  const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin, real) } });
+  if (!result.ok) {
+    // Existing bounded OPC refusal codes are part of client recovery. Preserve
+    // them; typed staging/database failures and unexpected exceptions are mapped.
+    const cause = result.error.cause;
+    if (!(cause instanceof Error && cause.constructor === Error && /^OPC_[A-Z_]+$/.test(cause.message)))
+      throw stagingProcedureError(result.error, path);
+  }
+  return result;
 });
 const readProcedure = protectedProcedure.use(async ({ ctx, next, path }) => {
   let local = false;

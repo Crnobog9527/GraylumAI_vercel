@@ -3,7 +3,7 @@ import {z} from 'zod';
 import {decimal} from './decimal';
 export const openRouterLimits=z.object({
  providerSlug:z.string().regex(/^[a-z0-9][a-z0-9._/-]{0,127}$/),
- contextTokens:z.number().int().min(1).max(1_000_000),
+ contextTokens:z.number().int().min(1).max(1_050_000),
  promptUsdPerMillion:z.string(),completionUsdPerMillion:z.string(),requestUsd:z.string(),
 }).strict();
 export type OpenRouterLimits=z.infer<typeof openRouterLimits>;

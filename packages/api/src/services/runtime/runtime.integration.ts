@@ -296,25 +296,26 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['missing','mismatch
  // follows an explicit local preflight rejection, not a network timeout.
  expect((await db.query('select count(*)::int n from bill2_receipts where call_id in(select id from bill2_calls where run_id=$1)',[e.runId])).rows[0].n).toBe(0);
 },30000);
-it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: staging authenticated original admission freezes the allowlisted quote',async()=>{
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RUNTIME: staging authenticated original admission freezes the allowlisted quote at context %i',async(contextTokens)=>{
  const email='window-'+randomUUID()+'@example.test',password='Local-test-password-42!';
  const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
  const actor=created.data.user.id,model=randomUUID(),windowId=randomUUID();
- await db.query('insert into profiles(id,credits) values($1,100) on conflict(id) do update set credits=100',[actor]);
+ await db.query('insert into profiles(id,credits) values($1,1000) on conflict(id) do update set credits=1000',[actor]);
  const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
  const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
- await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Synthetic quote','test/admission','openai','true',1000,10000)",[model]);
- const call={modelId:model,provider:'openrouter',account:'synthetic-account',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:8000,outputLimit:100,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
- await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",[windowId,[actor],JSON.stringify([call])]);
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Synthetic quote','test/admission','openai','true',1000,$2)",[model,contextTokens]);
+ const upperUsd=contextTokens===1050000?'0.4218':'0.02',outputLimit=contextTokens===1050000?1000:100;
+ const call={modelId:model,provider:'openrouter',account:'synthetic-account',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd,inputLimit:8000,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens,promptUsdPerMillion:contextTokens===1050000?'0.4':'2',completionUsdPerMillion:contextTokens===1050000?'1.8':'0',requestUsd:'0'}};
+ await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.9,1,now()+interval '2 hours')",[windowId,[actor],JSON.stringify([call])]);
  const env={V3_RUNTIME_STAGING_ENABLED:'true',VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'graylumai-staging.vercel.app',VERCEL_GIT_COMMIT_REF:'staging',VERCEL_GIT_REPO_OWNER:'Crnobog9527',VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',V3_RUNTIME_STAGING_PROJECT_ID:'synthetic-project',VERCEL_PROJECT_ID:'synthetic-project',NEXT_PUBLIC_SUPABASE_URL:'https://synthetic.supabase.co',V3_RUNTIME_STAGING_DATABASE_HOST:'synthetic.supabase.co',V3_RUNTIME_STAGING_WINDOW_ID:windowId};
  const real=await loadStagingPolicy(admin,actor,env);
- const admission=runtimeAdmissionService(user,admin,{real,account:'unused-local',costPerCall:'999',creditsPerUsd:'999',multiplier:'999',maxCalls:1,maxOutputTokens:100,inputBytes:8000,historyItems:0,searchEnabled:false});
+ const admission=runtimeAdmissionService(user,admin,{real,account:'unused-local',costPerCall:'999',creditsPerUsd:'999',multiplier:'999',maxCalls:1,maxOutputTokens:outputLimit,inputBytes:8000,historyItems:0,searchEnabled:false});
  const s=await admission.start(randomUUID(),{kind:'positioning_draft'});
  const request={sessionId:s.sessionId,requestId:randomUUID(),input:'User-provided local material',selection:{kind:'ordinary',modelId:model},network:'deny'} as const;
  await expect(admission.prepare({...request,network:'allow'})).rejects.toThrow('REAL_SEARCH_DISABLED');
  const e=await admission.prepare(request);expect(await admission.prepare(request)).toEqual(e);
  const saved=(await db.query('select payload,reserved from bill2_runs where id=$1',[e.runId])).rows[0];
- expect(saved.reserved).toBe(20);expect(saved.payload).toMatchObject({mode:'staging_test',testWindowId:windowId,callPolicy:[call],rules:{creditsPerUsd:'1000',multiplier:'1'}});
+ expect(saved.reserved).toBe(contextTokens===1050000?422:20);expect(saved.payload).toMatchObject({mode:'staging_test',testWindowId:windowId,callPolicy:[call],rules:{creditsPerUsd:'1000',multiplier:'1'}});
  // Actual protected router + real Auth/PostgREST: switching only the host
  // enablement off must preserve reads and cancel a definitely unsent request.
  const caller=runtimeRouter.createCaller(await createTRPCContext({headers:new Headers(),supabaseAuth:user}));
@@ -326,7 +327,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: staging authent
   await expect(caller.prepare({...request,requestId:randomUUID()})).rejects.toThrow();
   expect((await db.query('select enabled from runtime_test_windows where id=$1',[windowId])).rows[0].enabled).toBe(true);
   expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1',[e.runId])).rows[0].n).toBe(0);
-  expect((await db.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(100);
+  expect((await db.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(1000);
  }finally{for(const [key,value] of Object.entries(previous)){if(value===undefined)delete process.env[key];else process.env[key]=value;}}
  await user.auth.signOut();await expect(admission.prepare(request)).rejects.toThrow('AUTH_REQUIRED');
 },30000);
