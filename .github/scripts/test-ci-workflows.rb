@@ -51,6 +51,10 @@ class CIWorkflowsTest < Minitest::Test
     runs = steps.map { |step| step['run'] }.compact
     INTEGRATION_RUNS.each { |command| assert_equal 1, runs.count(command), command }
     assert_operator runs.index('pnpm install --frozen-lockfile'), :<, runs.index(INTEGRATION_RUNS.first)
+    pull = steps.index { |step| step['name'] == 'Pull pinned service images' }
+    refute_nil pull
+    assert_operator pull, :<, steps.index { |step| step['run'] == INTEGRATION_RUNS.first }
+    assert_includes steps[pull]['run'], 'packages/db/tests/v3/images.mjs'
     steps.each do |step|
       refute step.key?('if'), step['name']
       refute step.key?('continue-on-error'), step['name']

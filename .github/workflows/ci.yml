@@ -287,6 +287,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Anonymous registry pulls can be rate limited; pulls are read-only and
+      # digest-pinned, so a bounded retry cannot change what is tested.
+      - name: Pull pinned service images
+        run: |
+          set -euo pipefail
+          images="$(node --input-type=module -e 'const m = await import("./packages/db/tests/v3/images.mjs"); console.log(Object.values(m).join("\n"))')"
+          for image in $images; do
+            for attempt in 1 2 3 4 5; do
+              if docker pull --quiet "$image"; then break; fi
+              if [ "$attempt" -eq 5 ]; then echo "Failed to pull $image" >&2; exit 1; fi
+              sleep $((attempt * 15))
+            done
+          done
+
       # Disposable digest-pinned PostgreSQL, PostgREST and GoTrue containers with
       # per-run synthetic JWTs. No secrets, no provider network, no Next app or
       # browser; the runner lists and verifies the excluded app-only cases.
