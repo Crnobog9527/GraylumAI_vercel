@@ -9,21 +9,9 @@ import { parseProviderUsage } from '../services/providerUsage';
 import { router, protectedProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { randomUUID } from 'crypto';
-import { createSafeInternalError } from '../lib/publicError';
+import { type TokenUsage } from '../types/ai';
 import {
-  AIRequestSchema,
-  type AIResponse,
-  type TokenUsage,
-} from '../types/ai';
-import {
-  preAICallSecurityChecks,
-  checkInputSecurity,
-} from '../middleware/securityChecks';
-import {
-  filterAIOutput,
   BillingService,
-  ModelPricingUnavailableError,
   calculateTokenCostWithPricing,
   estimatePreDeductCredits,
   getBillingRuntimeSettings,
@@ -37,55 +25,11 @@ import {
   normalizeOpenAICompatibleEndpoint,
   usesOpenAICompatibleApi,
 } from '../services/providerUtils';
-import { countTokens, estimateTokensFromString } from '../services/tokenCounter';
+import { estimateTokensFromString } from '../services/tokenCounter';
 
 // ============================================
 // 辅助函数
 // ============================================
-
-/**
- * 获取或创建对话
- */
-async function getOrCreateConversation(
-  supabase: any,
-  userId: string,
-  conversationId?: string,
-  title?: string
-): Promise<{ id: string; isNew: boolean }> {
-  if (conversationId) {
-    // 验证对话存在且属于当前用户
-    const { data: existing } = await supabase
-      .from('conversations')
-      .select('*')
-      .eq('id', conversationId)
-      .eq('user_id', userId)
-      .single();
-
-    if (existing) {
-      if (existing.skill_mode === true || existing.agent_slice_mode === true || existing.module_id) throw new Error('请在对应 Skill 对话中发送，不能使用普通聊天生成。');
-      return { id: existing.id, isNew: false };
-    }
-  }
-
-  // 创建新对话
-  const { data: newConversation, error } = await supabase
-    .from('conversations')
-    .insert({
-      user_id: userId,
-      title: title ?? '新对话',
-    })
-    .select('id')
-    .single();
-
-  if (error || !newConversation) {
-    throw new TRPCError({
-      code: 'INTERNAL_SERVER_ERROR',
-      message: '创建对话失败',
-    });
-  }
-
-  return { id: newConversation.id, isNew: true };
-}
 
 /**
  * 获取对话历史
@@ -152,26 +96,6 @@ async function saveMessages(
     userMessageId: userMsg?.id ?? '',
     assistantMessageId: assistantMsg?.id ?? '',
   };
-}
-
-/**
- * 更新对话标题 (如果是新对话)
- */
-async function updateConversationTitle(
-  supabase: any,
-  conversationId: string,
-  firstMessage: string
-): Promise<void> {
-  // 取消息前 50 个字符作为标题
-  const title = firstMessage.length > 50
-    ? firstMessage.substring(0, 47) + '...'
-    : firstMessage;
-
-  await supabase
-    .from('conversations')
-    .update({ title })
-    .eq('id', conversationId)
-    .eq('title', '新对话');
 }
 
 /**
@@ -280,17 +204,8 @@ export async function callClaudeViaOpenRouter(params: {
   };
 }
 
-function getTokenCounterProvider(model: {
-  provider: 'anthropic' | 'openai' | 'google' | 'custom' | 'builtin';
-  tokenCountingMethod?: string;
-}): 'anthropic' | 'openai' | 'google' | 'custom' | 'builtin' {
-  if (model.tokenCountingMethod === 'anthropic_count_tokens') return 'anthropic';
-  if (model.tokenCountingMethod === 'gemini_count_tokens') return 'google';
-  if (model.tokenCountingMethod === 'verified_openai_tokenizer') return 'openai';
-  return model.provider;
-}
-
 const AI_BILLING_UNAVAILABLE_MESSAGE = 'AI 计费服务暂不可用，请稍后重试';
+const AI_SEND_MESSAGE_CLOSED_MESSAGE = 'ai.sendMessage 已关闭，请使用 /api/ai/stream + useStreamingChat。';
 
 function assertAiBillingAdminPrivileges(hasSupabaseAdminPrivileges: boolean) {
   if (hasSupabaseAdminPrivileges) {
@@ -309,296 +224,15 @@ function assertAiBillingAdminPrivileges(hasSupabaseAdminPrivileges: boolean) {
 
 export const aiRouter = router({
   /**
-   * 发送消息 (非流式)
+   * @deprecated 旧非流式对话入口，已关闭（P0-2）：没有调用方，却会预扣积分并调用模型供应商。
+   * 鉴权通过后立即拒绝，不做任何计费或供应商调用。请使用 /api/ai/stream + useStreamingChat。
    */
   sendMessage: protectedProcedure
-    .input(AIRequestSchema)
-    .mutation(async ({ ctx, input }): Promise<AIResponse> => {
-      const startTime = Date.now();
-      // 生成或使用客户端提供的 requestId (用于幂等性)
-      const requestId = input.requestId ?? randomUUID();
-      assertAiBillingAdminPrivileges(ctx.hasSupabaseAdminPrivileges);
-      const billingService = new BillingService({
-        supabase: ctx.supabaseAdmin,
-        userId: ctx.profileId,
+    .mutation(async () => {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: AI_SEND_MESSAGE_CLOSED_MESSAGE,
       });
-
-      // 0. 幂等性检查 - 如果请求已完成，直接返回缓存结果
-      const idempotencyCheck = await billingService.checkIdempotency(requestId);
-      if (idempotencyCheck.exists && idempotencyCheck.result) {
-        // 获取完整的缓存响应
-        const { data: cachedResponse } = await ctx.supabase
-          .from('messages')
-          .select('id, content, created_at')
-          .eq('id', idempotencyCheck.result.messageId)
-          .single();
-
-        if (cachedResponse) {
-          return {
-            messageId: cachedResponse.id,
-            conversationId: idempotencyCheck.result.conversationId,
-            content: cachedResponse.content,
-            modelUsed: 'cached',
-            usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
-            cost: { creditsDeducted: 0, costUsd: 0, costBreakdown: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, search: 0, total: 0 } },
-            stopReason: 'end_turn',
-            createdAt: cachedResponse.created_at,
-          };
-        }
-      }
-
-      // 1. 输入安全检查
-      checkInputSecurity(input.message);
-
-      // 2. 获取/创建对话
-      const conversation = await getOrCreateConversation(
-        ctx.supabase,
-        ctx.profileId,
-        input.conversationId
-      );
-
-      // 3. 获取对话历史
-      const history = await getConversationHistory(ctx.supabase, conversation.id);
-      const conversationTurns = history.length;
-
-      // 4. 模型路由
-      const { modelConfig, routingReason } = await selectModel({
-        supabase: ctx.supabase,
-        conversationId: conversation.id,
-        message: input.message,
-        conversationTurns,
-        userPreferredModel: input.modelId,
-      });
-
-      if (!modelConfig.tokenCountingSupported) {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'AI 服务暂时不可用，请稍后重试',
-        });
-      }
-
-      // 5. 估算成本
-      const countedInput = await countTokens({
-        model: modelConfig.modelId,
-        provider: getTokenCounterProvider(modelConfig),
-        apiKey: modelConfig.apiKey,
-        apiEndpoint: modelConfig.apiEndpoint,
-        tokenizerFamily: modelConfig.tokenizerFamily,
-        messages: [
-          ...history,
-          { role: 'user', content: input.message },
-        ],
-      }, {
-        useOfficial: modelConfig.tokenCountingMethod !== 'provider_usage',
-        fallbackToEstimate: true,
-      });
-      const estimatedInputTokens = countedInput.inputTokens;
-      const billingRuntimeSettings = await getBillingRuntimeSettings(ctx.supabase);
-      let pricing: Awaited<ReturnType<typeof getModelPricing>>;
-      try {
-        pricing = await getModelPricing(ctx.supabase, modelConfig.modelId, {
-          requireModelPricing: billingRuntimeSettings.requireModelPricing,
-        });
-      } catch (error) {
-        if (error instanceof ModelPricingUnavailableError) {
-          logger.warn('billing', 'ai_send_model_pricing_unavailable', {
-            modelId: modelConfig.modelId,
-            reason: error.reason,
-          });
-          throw new TRPCError({
-            code: 'SERVICE_UNAVAILABLE',
-            message: '模型计费价格未配置，请联系管理员',
-          });
-        }
-        throw error;
-      }
-      const estimatedUsage: TokenUsage = {
-        inputTokens: estimatedInputTokens,
-        outputTokens: 4096,
-        cacheReadTokens: 0,
-        cacheCreationTokens: 0,
-      };
-      const estimatedCostResult = calculateTokenCostWithPricing(
-        estimatedUsage,
-        pricing,
-        {},
-        billingRuntimeSettings,
-      );
-      const estimatedCost = estimatePreDeductCredits(estimatedCostResult.credits, billingRuntimeSettings);
-
-      // 6. 安全检查 (包括余额)
-      await preAICallSecurityChecks(
-        { supabase: ctx.supabase, userId: ctx.profileId },
-        estimatedCost
-      );
-
-      // 7. 预扣积分 (带幂等性 Key)
-      const preDeductResult = await billingService.preDeduct(estimatedCost, { requestId });
-
-      // 记录 AI 调用开始日志
-      logger.ai.callStart(
-        modelConfig.modelId,
-        estimatedInputTokens,
-        conversation.id,
-        requestId,
-        { userId: ctx.profileId }
-      );
-
-      try {
-        // 8. 构建消息
-        const messages = [
-          ...history,
-          { role: 'user' as const, content: input.message },
-        ];
-
-        // 9. 调用 AI
-        const aiResponse = await callClaudeViaOpenRouter({
-          model: modelConfig.modelId,
-          messages,
-          maxTokens: modelConfig.maxTokens,
-          apiKey: modelConfig.apiKey,
-          apiEndpoint: modelConfig.apiEndpoint,
-        });
-
-        // 9.5. 输出安全检查 (P1-4: 应用输出安全过滤)
-        const filteredOutput = filterAIOutput(aiResponse.content);
-        if (filteredOutput.blocked || filteredOutput.sanitized) {
-          logger.security.contentBlocked(
-            ctx.profileId,
-            filteredOutput.reasons.join(',') || 'output_filtered',
-            'output',
-            { requestId, conversationId: conversation.id }
-          );
-        }
-
-        const { credits: actualCredits, costUsd, breakdown } = calculateTokenCostWithPricing(
-          aiResponse.usage,
-          pricing,
-          {},
-          billingRuntimeSettings,
-        );
-        const pricingMetadata = {
-          inputPer1M: pricing.inputPer1M,
-          outputPer1M: pricing.outputPer1M,
-          searchPer1K: pricing.searchPer1K ?? 0,
-          pricingSource: 'ai_models',
-          modelId: modelConfig.modelId,
-        };
-
-        // 11. 原子化写消息、记账和统计
-        const latencyMs = Date.now() - startTime;
-        const ipAddress = ctx.headers?.get?.('x-forwarded-for')?.split(',')[0]?.trim()
-          ?? ctx.headers?.get?.('x-real-ip')
-          ?? 'unknown';
-        const userAgent = ctx.headers?.get?.('user-agent') ?? 'unknown';
-        const finalizeResult = await billingService.finalizeAISuccess({
-          conversationId: conversation.id,
-          userMessage: input.message,
-          assistantMessage: filteredOutput.content,
-          modelUsed: modelConfig.modelId,
-          usage: aiResponse.usage,
-          costUsd,
-          credits: actualCredits,
-          preDeductId: preDeductResult.preDeductId,
-          requestId,
-          inputLength: input.message.length,
-          latencyMs,
-          ipAddress,
-          userAgent,
-          tokenMetadata: {
-            count_method: modelConfig.tokenCountingMethod ?? countedInput.method,
-            count_source: 'provider_usage',
-            preflight_count_source: countedInput.countSource,
-            provider_usage: aiResponse.usageEvidence,
-            counter_version: countedInput.counterVersion,
-            pricing: pricingMetadata,
-            billingSettingsSnapshot: {
-              creditsPerUsd: billingRuntimeSettings.creditsPerUsd,
-              tokenPriceMultiplier: billingRuntimeSettings.tokenPriceMultiplier,
-              minPreDeduct: billingRuntimeSettings.minPreDeduct,
-              maxPreDeduct: billingRuntimeSettings.maxPreDeduct,
-              safetyMargin: billingRuntimeSettings.safetyMargin,
-            },
-          },
-          usageMetadata: {
-            routingReason,
-            pricing: pricingMetadata,
-            billingSettingsSnapshot: {
-              creditsPerUsd: billingRuntimeSettings.creditsPerUsd,
-              tokenPriceMultiplier: billingRuntimeSettings.tokenPriceMultiplier,
-              minPreDeduct: billingRuntimeSettings.minPreDeduct,
-              maxPreDeduct: billingRuntimeSettings.maxPreDeduct,
-              safetyMargin: billingRuntimeSettings.safetyMargin,
-            },
-          },
-        });
-
-        // 12. 如果是新对话，更新标题
-        if (conversation.isNew) {
-          await updateConversationTitle(
-            ctx.supabase,
-            conversation.id,
-            input.message
-          );
-        }
-
-        // 13. 记录 AI 调用完成日志
-        logger.ai.callComplete(
-          modelConfig.modelId,
-          aiResponse.usage.inputTokens,
-          aiResponse.usage.outputTokens,
-          latencyMs,
-          actualCredits,
-          requestId,
-          { userId: ctx.profileId, conversationId: conversation.id }
-        );
-
-        // 14. 返回响应
-        return {
-          messageId: finalizeResult.assistantMessageId ?? '',
-          conversationId: conversation.id,
-          content: filteredOutput.content,
-          modelUsed: modelConfig.modelId,
-          usage: aiResponse.usage,
-          cost: {
-            creditsDeducted: actualCredits,
-            costUsd,
-            costBreakdown: breakdown,
-          },
-          stopReason: aiResponse.stopReason as AIResponse['stopReason'],
-          createdAt: new Date().toISOString(),
-        };
-      } catch (error) {
-        // 记录 AI 调用失败日志
-        const failLatencyMs = Date.now() - startTime;
-        logger.ai.callFailed(
-          modelConfig.modelId,
-          'AI 调用失败，请查看服务端日志',
-          0,
-          requestId,
-          { userId: ctx.profileId, conversationId: conversation.id }
-        );
-
-        const failIpAddress = ctx.headers?.get?.('x-forwarded-for')?.split(',')[0]?.trim()
-          ?? ctx.headers?.get?.('x-real-ip')
-          ?? 'unknown';
-        const failUserAgent = ctx.headers?.get?.('user-agent') ?? 'unknown';
-
-        await billingService.finalizeAIFailure({
-          conversationId: conversation.id,
-          requestId,
-          modelUsed: modelConfig.modelId,
-          reason: 'AI 调用失败，请查看服务端日志',
-          preDeductId: preDeductResult.preDeductId,
-          inputLength: input.message.length,
-          latencyMs: failLatencyMs,
-          ipAddress: failIpAddress,
-          userAgent: failUserAgent,
-          usageMetadata: { routingReason },
-        });
-
-        throw error;
-      }
     }),
 
   /**
