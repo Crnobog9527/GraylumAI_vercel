@@ -9,7 +9,7 @@
 - [0. 一页总览](#overview)
 - [1. 现状](#status)
 - [2. 本版的新决定和被取代的旧规则](#changes)
-- [3. Agent 对话与定位分析（新交互）](#agent)
+- [3. Agent 对话与定位分析（新交互）](#agent)（第三方搜索和对标研究见 [3.7](#research)）
 - [4. Fusion 多模型](#fusion)
 - [5. 个人资料库与语料库](#library)
 - [6. Skill 的数据基础与未来"自我进化"](#learning)
@@ -30,7 +30,7 @@
 
 1. **马上**：合并已经修好的"导师不出字"问题（PR #446）；关掉一个没人用但仍可调用的旧付费接口，删掉会扣积分的临时脚本；把计费和恢复的集成测试放进 CI。
 2. **核心体验重做，分几次给你试**：先用真实模型验证"现在的模型能不能驱动提问卡"，做一个你能亲手试的样片；再做完整定位流程；最后推广到自由对话和其他 Skill。
-3. **上线基础**：正式环境能真实调用模型（含止损和统一的预扣估算）、后台配置模型思考强度、会员权限、限流修复、账号注销和数据删除。完成后先做 5–10 人的封闭内测。
+3. **上线基础**：正式环境能真实调用模型（含止损和统一的预扣估算）、后台配置模型思考强度、第三方搜索和对标研究（基于真实数据）、会员权限、限流修复、账号注销和数据删除。完成后先做 5–10 人的封闭内测。
 4. **差异化功能**：Fusion 多模型（定稿报告评审、多模型对比），个人资料库和语料库（学习用户文风），输入框的引用和附件。
 5. **收费和上线**：Waffo 支付、下线旧对话链路、完整验收、发布。
 6. **上线后**：飞书等连接器、社媒数据同步、Skill 的后续学习机制、资料库检索和图片音频。
@@ -78,6 +78,7 @@
 7. **评估后的补充决定**（Fable 5.1 评估之后，第 10 节 D6、D8–D12）：资料库第一版只支持 `.txt`、`.md`、`.docx`；上线基础完成后先做封闭内测；自由对话默认不自动整理；文字表达的明确同意等同于点击确认；后台可以读取并按模型自定义思考强度；Fusion 只用 Graylum 自己开发的，评审和对比两种模式都保留。
 8. **正式环境没有真实用户**（Owner 2026-09-27 确认的事实，不是 Agent 核实的结论）：正式环境（`main` 对应的生产项目）没有任何真实用户数据。发布因此不需要保护旧数据，按第 9.3 节执行。
 9. **条款由 Owner 另行生成**：隐私条款、服务条款、数据使用政策以及页面上的相关提示文字，由 Owner 用第三方专业软件生成。本规划和各实施说明只规定产品行为和技术保证（例如服务端强制不用于训练、删除和同意的功能），不规定条款文字；规划审查和实施审查都不审计条款文字。
+10. **第三方搜索和对标研究**（D13–D15）：接入第三方普通搜索和社媒数据 API，统一接口层，多家同时启用；搜索费用由用户承担；对标分析只基于真实取到的数据（第 3.7 节）。
 
 ### 2.2 被本版取代的旧规则
 
@@ -89,6 +90,8 @@
 | 输入框支持图片选择、图片附件和多模态处理 | v11 §6.3 UI-C | 本版不做：UI-C 只支持 D6 列出的文档类型；图片和多模态放到上线后的资料库扩展 |
 | v11 第 11–12 节的施工顺序、批次和状态 | v11 §11–12 | 由第 7 节取代；任务编号保留（第 7.5 节有对照） |
 | `V3-GOLD` 排在飞书之后 | v11 §11 | 改名 `FUSION`，不依赖飞书 |
+| 对标账号研究暂不实施；真实研究入口保持关闭（2026-09-14 Owner 决定） | v11 §8 | 由第 3.7 节取代：对标研究在上线前实施（RESEARCH-TOOLS）；"不许无限监控或规避平台限制"继续有效 |
+| 研究调用使用独立的 agentkey-credit 报价和计费 | BILL2 技术契约第 1 节（`research/store.ts`、迁移 0071） | 由第 3.7 节取代：各家计价换算成美元成本，登记在 BILL2 运行单上 |
 | 发布时"不能假设现网无用户"，以及为此要求的"schema 与旧 runtime 向后兼容""兼容回退" | v11 §13.3 | 由第 9.3 节取代：Owner 已确认正式环境没有真实用户（第 2.1 节第 8 项） |
 | 为保护现网数据而设的发布要求：迁移必须向后兼容旧代码（只扩不缩、"旧代码 × 新库"测试）、按"先库后代码"分步切换、旧数据迁移、针对旧数据的回滚 | v10.1 §9、§10 | 由第 9.3 节取代；v10.1 §9、§10 中其余要求（密钥和配置逐项核对、Stripe 正式配置核对、定时任务、验证码开关顺序、冒烟、同日对账、立即关站条件等）继续有效 |
 
@@ -158,6 +161,33 @@
   4. Owner 回复"同意合并"（高风险：改变发给供应商的请求字节）；
   5. 合并后需要 Owner 另外授权一次 staging 真实调用，确认 DeepInfra 确实按设置关闭了思考、首字延迟达标。
 - **之后**：由 MODEL-REASONING 的后台配置取代 #446 里写死的"模型 → 思考强度"对照表（#446 的档位列表也缺少 `max`）。
+
+<a id="research"></a>
+### 3.7 第三方搜索和对标研究
+
+Owner 2026-09-27 决定（D13–D15）：Agent 自带的联网搜索不够用，接入第三方搜索 API，分**普通搜索**和**社交媒体数据**两类，同时支持中国和海外的社交平台，多家社媒数据供应商同时启用。候选：普通搜索 AIsa、TinyFish；社媒数据 TikHub、SocialCrawl；monid 两类都支持。最终选择以 RESEARCH-0 的对比测试结果为准。搜索对接做成统一接口层，方便更换供应商。实现机制和必测项见 [实施说明](tasks/RESEARCH-TOOLS.md)。
+
+**必须保证的结果（RESEARCH-TOOLS）**
+
+- Agent 只决定查什么，宿主按规则表决定用哪家。规则表按"平台 + 查询类型"配置首选和备用，管理员在后台可改。
+- 后台维护"已验证可用的平台"清单；清单外的平台如实告知暂不支持。
+- 统一返回格式；供应商没给的字段标为"未提供"，不填零。
+- 各家计价统一换算成美元成本，接入 BILL2，不再走旧的研究积分接口。
+- 首选失败自动换备用；失败那次如果供应商仍收费，成本由平台承担。
+- 取数结果连同来源、取数时间存为证据，进入资料库，可以刷新，并接入账号注销。
+- 自由对话和带步骤的 Skill 都能用；用户明确禁止联网时不搜索；发生搜索时在对话里向用户展示。
+
+**搜索费用（D14）**：由用户承担，计入用户积分。搜索前不显示预计消耗，因为调用次数事先无法准确估算。保留三项兜底：每一步有调用次数上限；用户在消费记录里能看到每次搜索的实际扣费；搜索发生时在对话里展示。服务条款和价格页写明"联网搜索和数据查询会消耗积分"（条款文字由 Owner 按第 2.1 节第 9 项生成）。余额不足以完成搜索时明确告知用户，不静默失败。
+
+**对标研究流程（定位相关的必须保证的结果，D15）**
+
+- 对标分析必须基于真实取到的数据，禁止编造。
+- 用户已有对标链接：直接取该账号资料和最近 20–30 条作品数据。
+- 用户没有对标：Agent 生成 3–5 个关键词并请用户确认；按关键词搜近期作品，从作品反推作者；由代码筛选并分为头部参考、同量级可模仿、近期起号快三类，剔除 30 天未更新的账号；展示 8–12 个候选让用户挑 3–5 个；再对选中的账号取数。
+- 播放中位数、互动率、更新频率等指标由代码计算，模型只负责解读。
+- 对标表格里的数字栏目只能由取数结果填入，模型没有写入权限。
+- 取不到数据时必须明说，并请用户粘贴链接或跳过；不允许给示例账号。
+- RESEARCH-TOOLS 完成前，对标这一步按"取不到数据就明说"处理。
 
 <a id="fusion"></a>
 ## 4. Fusion 多模型
@@ -351,11 +381,13 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | CI-TRUST-1 | 集成测试进 CI（计费、恢复等关键路径） | — | 高 | 中 / 1–2 |
 | **1 核心体验重做** | AGENT-CORE | AC-0 可行性验证；AC-1 提问卡和纯文本流式；AC-2 后台整理、Skill 模板、右侧数据沉淀区；AC-3 每步确认、确定性报告、定稿、承接第一周选题；AC-4 通用工作区和旧入口改指；AC-5 数据基础补缺，包括 D5 数据使用同意（勾选、撤回、按同意状态过滤记录）。见 [实施说明](tasks/AGENT-CORE.md) | P0-1；AC-2 另外依赖 CI-TRUST-1 和 DATA-ERASURE 的删除规则设计 | 高 | 大 / 12–16 |
 | | AGENT-CORE-UI | 从 AGENT-CORE 拆出的纯前端部分：提问卡和本步小结卡的显示、流式文字显示、右侧面板和进度条的布局、旧入口链接改指。只改前端，沿用现有接口；需要改接口、工具、数据库或计费的部分一律留在 AGENT-CORE | 与对应的 AGENT-CORE 子任务配合 | 普通 | 中 / 3–4 |
+| | RESEARCH-0 | 第三方搜索供应商对比测试：同一组 10 个查询测每一家，记录平台覆盖、新鲜度、字段完整度、速度、单次成本、失败率、是否返回每次调用的官方成本（第 3.7 节，见 [实施说明](tasks/RESEARCH-TOOLS.md)）。需要 Owner 提供各家密钥并授权少量付费调用 | —（可与 AC-0 同期） | 高（真实付费调用） | 小 / 0–1 |
 | | CI-TRUST | 其余部分：ESLint 覆盖 TS/TSX；网站单测统一入口；API 独立类型检查；删除 `@repo/ui` 空壳和未接入的 ESLint 配置包；依赖升级机器人改发到 staging 并清理指向 `main` 的旧升级 PR（第 8.4 节第 1–3 项） | — | 高 | 中 / 3–4 |
 | | DEBT-QUICK | 第 8.3 节第 2 项的快速清理（只含普通改动）；关闭已解决和已废弃的问题单（第 8.4 节第 4–5 项，只是 GitHub 操作，不改代码） | — | 普通 | 小 / 2 |
 | **2 上线基础** | RUNTIME-PROD | 正式环境真实调用模型：① 模型报价的审批和开放机制；② 积分兑换比例和倍率配置；③ 后台界面；④ 预扣估算规则统一修订（按实际发送长度，普通调用和 Fusion 共用），上线前用真实账单核对估算和实际差距并留余量；⑤ 止损：每个用户每日上限、全站每日成本上限和告警、供应商余额告警、一键停止新调用的开关；⑥ 理清 `provider` 字段语义；⑦ 数据不用于训练由服务端强制：正式环境所有模型调用都发送 OpenRouter 的 `data_collection: deny`，只批准支持该设置的供应商线路，准入时拒绝不满足的线路；是否额外要求零数据保留（`zdr`）在实施时核对供应商能力后决定。验收包括一次有上限的真实小额对账 | AGENT-CORE 稳定 | 高 | 大 / 4–6 |
 | | MODEL-REASONING | ① 添加或编辑模型时，从 OpenRouter 公开模型目录读取该模型支持的思考档位、默认档位、能否关闭，保存快照并可"重新读取"；② 管理员按模型和用途（交互对话、整理、评审、写作）选择思考强度，选项只来自该模型支持的档位，外加"关闭"（允许时）和"用供应商默认"；③ 保存前检查所选供应商线路支持这个参数；④ 准入时把所选档位冻结进执行记录，重放用原值；⑤ 档位和回复长度上限联动校验；⑥ "试一次"按钮，用固定短问题真实调用一次，显示首字时间和是否有正文，费用由平台承担。取代 PR #446 里写死的对照表 | P0-1；和 RUNTIME-PROD 由同一个 writer 完成（同一个后台模型页） | 高 | 中 / 2–3 |
 | | ENTITLEMENTS | 会员权限配置：Fusion 两种模式的开关和上限、资料库总存储空间；服务端检查（系统级文件数量保护上限不属于会员权益，不在这里配置） | —；和 PAY-COMMON 由同一个 writer 先后完成 | 高 | 中 / 2 |
+| | RESEARCH-TOOLS | 第三方搜索统一接口层和对标研究（第 3.7 节，见 [实施说明](tasks/RESEARCH-TOOLS.md)）：规则表和已验证平台清单、统一返回格式、美元成本接入 BILL2、失败换备用、证据进资料库并接入账号注销、打开真实模型的搜索开关、对标流程的代码计算和表格写入限制。在封闭内测之前完成 | RESEARCH-0、AC-1、RUNTIME-PROD、DATA-ERASURE 删除规则设计 | 高 | 大 / 3–5 |
 | | SEC-RATELIMIT | 限流 fail-closed、Redis 超时放行、诊断计费探针 | — | 高 | 小 / 1–2 |
 | | DATA-ERASURE | 账号注销与数据删除，以及 D7 承诺的单条删除（对话回答、会话、已保存成果），都在公开上线前完成并列入验收。**设计先行**：在 AC-2 新建任何表之前先写出删除规则，实现在公开上线前完成。见 [实施说明](tasks/DATA-ERASURE.md)。之后任何新增保存用户私有内容的任务，都要把新数据接入注销流程并列入验收 | —（设计部分先于 AC-2） | 高 | 大 / 3–5 |
 | | COST-REPORT | 后台成本报表的金额、估算和查询修正（原清单 06） | — | 高 | 小 / 1 |
@@ -382,6 +414,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 P0-1、CI-TRUST-1 ─→ AGENT-CORE（AC-0 → AC-1 → AC-2、AC-3 → AC-5 → AC-4）
 DATA-ERASURE 删除规则设计 ─→ AC-2
 AGENT-CORE ─→ RUNTIME-PROD + MODEL-REASONING（同一 writer）
+RESEARCH-0 + AC-1 + RUNTIME-PROD ─→ RESEARCH-TOOLS ─→ 封闭内测
 ENTITLEMENTS ─→ PAY-COMMON ─→ PAY-WAFFO（同一 writer）
 RUNTIME-PROD + ENTITLEMENTS + DATA-ERASURE ─→ FUSION-REVIEW
 ENTITLEMENTS + DATA-ERASURE ─→ LIB-DOCS ─→ VOICE（另需 RUNTIME-PROD）
@@ -408,10 +441,10 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | 批次 | 范围 | 停在哪里 |
 | --- | --- | --- |
 | N1a 止血和保护 | P0-1、P0-2、P0-4、CI-TRUST-1 | 导师出字速度在 staging 实测达标；计费和恢复测试进入 CI |
-| N1b 体验样片 | AC-0、AC-1 及其对应的 AGENT-CORE-UI 部分 | Owner 在 staging 用真实模型走完定位第一步，决定继续、调整还是换模型；右侧整理这一阶段沿用旧做法 |
+| N1b 体验样片 | AC-0、AC-1 及其对应的 AGENT-CORE-UI 部分；RESEARCH-0（和 AC-0 同期） | Owner 在 staging 用真实模型走完定位第一步，决定继续、调整还是换模型；右侧整理这一阶段沿用旧做法 |
 | N1c 完整定位流程 | DATA-ERASURE 删除规则设计、AC-2、AC-3、AC-5 及其对应的 AGENT-CORE-UI 部分（本步小结卡、右侧面板和进度条） | Owner 从进入到定稿完整走通并验收 |
 | N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
-| N2 上线基础 | RUNTIME-PROD、MODEL-REASONING、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON | 上线基础完成；然后邀请 5–10 位真实用户**封闭内测**：只开放定位、周选题和写作，用赠送积分，不开放付费，反馈用于调整 N3 的优先级（D8，不改变 D1 的公开上线范围） |
+| N2 上线基础 | RUNTIME-PROD、MODEL-REASONING、RESEARCH-TOOLS、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON | 上线基础完成；然后邀请 5–10 位真实用户**封闭内测**：只开放定位、周选题和写作，用赠送积分，不开放付费，反馈用于调整 N3 的优先级（D8，不改变 D1 的公开上线范围） |
 | N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
 | N4 收口 | LEGACY-CLOSE、V3-M3 | 完整验收；REL-1 和生产另行批准 |
 
@@ -423,7 +456,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 - `V3-WORKBENCH` 的 SCOPE / AGENT / ENTRY / CONTENT：代码已随 #422 合并；未完成的 VERIFY 和 Owner 体验验收并入 AGENT-CORE。
 - `V3-OPC-UI` 的 A / B / C / FINISH：改称 UI-A / UI-B / UI-C / UI-FINISH，UI-C 改为复用 LIB-DOCS。
 - `V3-GOLD`：改名 FUSION，拆成 FUSION-REVIEW 和 FUSION-COMPARE。
-- 新增：AGENT-CORE（含 AC-0）、AGENT-CORE-UI（从 AGENT-CORE 拆出的纯前端部分）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的模型选择）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX（接手 PR #333）、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2。
+- 新增：AGENT-CORE（含 AC-0）、AGENT-CORE-UI（从 AGENT-CORE 拆出的纯前端部分）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的模型选择）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX（接手 PR #333）、RESEARCH-0、RESEARCH-TOOLS、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2。
 - 迁移编号在实际实施时分配，本文不预占。
 
 ### 7.6 Owner 需要提前启动的事项
@@ -434,6 +467,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | --- | --- |
 | Waffo 商户开通 | 商户审核、费率和结算条件要对方确认，PAY-WAFFO 依赖它 |
 | 隐私条款、服务条款和数据使用政策 | 由 Owner 用第三方专业软件生成；规划只规定产品行为，不规定条款文字 |
+| 第三方搜索服务 | 注册 AIsa、TinyFish、TikHub、SocialCrawl、monid 并准备密钥（RESEARCH-0 需要）；定稿隐私条款时一并咨询抓取类数据的合规问题 |
 | 正式环境的定价参数：1 美元换多少积分、加价倍数 | RUNTIME-PROD 需要这两个参数才能在正式环境计费；它们决定用户实际花多少积分，属于商业决定 |
 | 客服邮箱 | 上线发布条件之一（v11 §13.3） |
 | 封闭内测的 5–10 位用户 | 提前找好，N2 完成后就能开始 |
@@ -557,7 +591,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 <a id="decisions"></a>
 ## 10. Owner 决定事项
 
-Owner 于 2026-09-27 确认 D1–D12（D6 在 Fable 评估后改为不含 PDF）。会员权限和额度是后台可改的默认值，以后调整不需要改规划。
+Owner 于 2026-09-27 确认 D1–D15（D6 在 Fable 评估后改为不含 PDF）。会员权限和额度是后台可改的默认值，以后调整不需要改规划。
 
 | 编号 | 问题 | 已确认的决定 |
 | --- | --- | --- |
@@ -573,6 +607,9 @@ Owner 于 2026-09-27 确认 D1–D12（D6 在 Fable 评估后改为不含 PDF）
 | D10 | 文字确认 | 用户用文字表达的明确同意等同于点击确认，含糊回答不算 |
 | D11 | 模型思考强度 | 后台读取每个模型支持的思考档位，管理员按模型和用途自定义（MODEL-REASONING） |
 | D12 | Fusion 的来源 | 只用 Graylum 自己开发的 Fusion，不用 OpenRouter 的 Fusion；评审和对比两种模式都保留 |
+| D13 | 第三方搜索 | 接入第三方普通搜索和社媒数据 API，同时支持中国和海外平台，多家社媒数据供应商同时启用；候选 AIsa、TinyFish（普通搜索）、TikHub、SocialCrawl（社媒数据）、monid（两类），最终以 RESEARCH-0 对比结果为准；统一接口层，方便更换 |
+| D14 | 搜索费用 | 由用户承担，计入积分；搜索前不显示预计消耗；每一步有调用次数上限、消费记录显示每次实际扣费、搜索时在对话里展示；余额不足时明确告知 |
+| D15 | 对标研究 | 只基于真实取到的数据，禁止编造；指标由代码计算，表格数字只能由取数结果填入；取不到数据就明说，不给示例账号（第 3.7 节） |
 
 <a id="documents"></a><a id="cutover"></a><a id="sources"></a>
 ## 11. 文档地图
@@ -584,7 +621,7 @@ Owner 于 2026-09-27 确认 D1–D12（D6 在 Fable 评估后改为不含 PDF）
 | [AGENTS.md](../../AGENTS.md) | 仓库规则：权限、风险、审查、合并 |
 | [docs/ENGINEERING.md](../ENGINEERING.md) | 工程规范：技术栈、代码组织、大小限制、测试命令 |
 | [v11](Graylum_Master_Plan_v11.md)、[v10.2](Graylum_Master_Plan_v10.2_OPC_Growth_Agent_Amendment.md)、[v10.1](Graylum_Master_Plan_v10.1.md) | 历史版本；仍有效的部分见第 9 节 |
-| [AGENT-CORE](tasks/AGENT-CORE.md)、[FUSION](tasks/FUSION.md)、[LIB-DOCS 与 VOICE](tasks/LIBRARY-VOICE.md)、[DATA-ERASURE](tasks/DATA-ERASURE.md) 实施说明 | 实现机制、未定案的设计选择、开工前必读章节和必测项（含规划审查中 Codex 和 Fable 提出的全部意见） |
+| [AGENT-CORE](tasks/AGENT-CORE.md)、[FUSION](tasks/FUSION.md)、[LIB-DOCS 与 VOICE](tasks/LIBRARY-VOICE.md)、[DATA-ERASURE](tasks/DATA-ERASURE.md)、[RESEARCH-TOOLS](tasks/RESEARCH-TOOLS.md) 实施说明 | 实现机制、未定案的设计选择、开工前必读章节和必测项（含规划审查中 Codex 和 Fable 提出的全部意见） |
 | [plan-core](plan-core.md)、[OPC 实施映射](tasks/V3-OPC-implementation.md) | 历史任务表和映射，保留原任务编号和技术验收 |
 | `tasks/` 下其他规格 | 技术附录，见第 9.2 节 |
 | [docs/archive/](../archive/README.md) | 已归档的 2026 年 1 月旧计划、旧设计和旧开发规范 |
