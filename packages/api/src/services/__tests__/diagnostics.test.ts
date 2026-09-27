@@ -243,22 +243,26 @@ describe('diagnostics routed client contract', () => {
     expect(diagnosticInsert).toHaveBeenCalledTimes(1);
   });
 
-  it('locks the C7 routing and run_diag constructor wiring', () => {
+  it('locks the C7 routing and service-role constructor wiring', () => {
     const trpcSource = readFileSync(new URL('../../trpc.ts', import.meta.url), 'utf8');
     const routerSource = readFileSync(new URL('../../routers/diagnostics.ts', import.meta.url), 'utf8');
-    const runDiagSource = readFileSync(new URL('../../../run_diag.ts', import.meta.url), 'utf8');
+    const cronSource = readFileSync(
+      new URL('../../../../../apps/web/src/app/api/cron/diagnostics/route.ts', import.meta.url),
+      'utf8',
+    );
 
     expect(trpcSource).toContain('supabase: userScopedSupabase,\n      userScopedSupabase,');
     expect(trpcSource).toContain(
       'supabase: ctx.supabaseAdmin,\n      userScopedSupabase: ctx.userScopedSupabase,',
     );
     expect(routerSource.match(/supabase: ctx\.userScopedSupabase,/g) ?? []).toHaveLength(9);
+    expect(routerSource.match(/supabaseAdmin: ctx\.supabaseAdmin,/g) ?? []).toHaveLength(9);
     expect(routerSource).not.toContain('supabase: ctx.supabase,');
     expect(routerSource).toContain('getDiagnosticsHealthCheck(ctx.userScopedSupabase)');
     expect(routerSource).toContain('getRecentRunsData(ctx.userScopedSupabase');
     expect(routerSource).toContain("await ctx.userScopedSupabase\n        .from('diagnostic_results')");
-    expect(runDiagSource).toContain(
-      'supabase: supabase as any,\n        supabaseAdmin: supabase as any,',
+    expect(cronSource).toContain(
+      'new DiagnosticsService({\n      supabase,\n      supabaseAdmin: supabase,',
     );
   });
 });

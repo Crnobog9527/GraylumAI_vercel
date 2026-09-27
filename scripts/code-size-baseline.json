@@ -92,7 +92,6 @@
   "packages/api/src/middleware/securityChecks.ts": {"lines":577},
   "packages/api/src/routers/admin.ts": {"lines":3245},
   "packages/api/src/routers/agentSlice.ts": {"longLines":3},
-  "packages/api/src/routers/ai.ts": {"lines":834},
   "packages/api/src/routers/chat.ts": {"lines":607,"longLines":1},
   "packages/api/src/routers/costs.ts": {"lines":733},
   "packages/api/src/routers/credits.ts": {"lines":579},
