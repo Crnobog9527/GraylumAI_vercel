@@ -190,7 +190,7 @@ After relevant validation and required checks pass, broaden or repeat testing
 only for new changes, failures, or unresolved concrete concerns.
 
 Runtime or UI changes require appropriate preview, staging, smoke, or browser
-validation.
+validation. Interactive validation is routed under Section 12.
 
 Auth or permission changes must test both allowed and denied paths using
 non-production or test identities.
@@ -382,3 +382,18 @@ with results. Either agent may continue an existing task by reading its PR and
 branch. Switching agents is a writer handoff under Section 3: the previous
 writer stops mutating once the handoff is recorded, and the new writer resumes
 from current remote refs, not an older local checkout.
+
+Interactive validation is performed by Codex. This covers any check that drives
+a real browser or desktop the way a user would, such as computer use on the
+Owner's machine, manual browser checks of a preview or staging deployment, and
+product experience testing. Automated tests and CI remain with the implementer,
+and Owner product acceptance under Section 2 remains separate.
+When a candidate needs interactive validation, the implementer posts a
+`Validation handoff` comment on the PR for the exact head: preview or staging
+entry, test identity reference (never credentials), numbered steps with
+expected results, pass/fail criteria, and anything out of scope. Codex performs
+the validation without pushing to the task branch and posts results on the PR
+per step as passed, failed or blocked, with evidence and the exact head tested.
+Failures go back to the implementer as same-scope remediation. Interactive
+validation of an older head does not cover a new head; the implementer states
+in the next handoff whether the delta requires repeating it.
