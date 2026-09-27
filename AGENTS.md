@@ -382,3 +382,20 @@ with results. Either agent may continue an existing task by reading its PR and
 branch. Switching agents is a writer handoff under Section 3: the previous
 writer stops mutating once the handoff is recorded, and the new writer resumes
 from current remote refs, not an older local checkout.
+
+## 13. Engineering Conventions
+
+This policy adopts [docs/ENGINEERING.md](docs/ENGINEERING.md) as the engineering
+reference for every implementing agent and human contributor: stack, code
+layout, size and format limits, frontend, backend and AI-feature conventions,
+and validation commands. Read it before implementation and apply it to new or
+modified code. It does not change the governance, risk or approval rules in this
+file; on conflict, this file wins.
+
+`node scripts/check-code-size.mjs` enforces its file-size and line-width ratchet
+in CI. Splitting a file to stay within the limits is part of the smallest correct
+change under Section 5. Lowering baseline entries with `--update` is routine and
+does not by itself change risk classification. Raise or add a baseline entry only
+for a file on a high-risk surface when splitting it would expand that change's
+risk, and state the reason in the PR. Changes to `docs/ENGINEERING.md` or to the
+checker's limits or scope are governance changes under Section 9.
