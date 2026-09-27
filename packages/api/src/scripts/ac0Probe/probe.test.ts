@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
+import {chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -137,11 +137,11 @@ describe('limits', () => {
   });
 
   it('refuses a live run once the cumulative ledger is exhausted', async () => {
-    const ledgerPath = join(home, 'ledger.json');
-    writeFileSync(ledgerPath, JSON.stringify({calls: 200, nanoUsd: 0}));
+    mkdirSync(join(home, '.graylum', 'ac0'), {recursive: true});
+    writeFileSync(join(home, '.graylum', 'ac0', 'ledger.json'), JSON.stringify({calls: 200, nanoUsd: 0}));
     const id = await planId(base('--ask', '1'));
     const network = recording();
-    const outcome = await runProbe([...base('--ask', '1', '--live', '--ledger', ledgerPath), '--confirm', id], {[KEY_ENV]: KEY},
+    const outcome = await runProbe([...base('--ask', '1', '--live'), '--confirm', id], {[KEY_ENV]: KEY},
       deps(network.upstream));
     expect(outcome.exitCode).toBe(2);
     expect(out.join('')).toContain('PROBE_TOTAL_BUDGET_EXHAUSTED');
@@ -466,8 +466,8 @@ describe('real paths (review P2)', () => {
     expect((await runProbe(['--out-dir', join(link, 'results')], {}, deps())).exitCode).toBe(2);
     const id = await planId(base('--ask', '1'));
     const network = recording();
-    const ledger = await runProbe([...base('--ask', '1', '--live', '--ledger', join(link, 'ledger.json')), '--confirm', id],
-      {[KEY_ENV]: KEY}, deps(network.upstream));
+    const ledger = await runProbe([...base('--ask', '1', '--live'), '--confirm', id],
+      {[KEY_ENV]: KEY}, {...deps(network.upstream), ledgerPath: join(link, 'ledger.json')});
     expect(ledger.exitCode).toBe(2);
     expect(out.join('')).toContain('PROBE_LEDGER_INSIDE_REPOSITORY');
     expect(network.sent).toHaveLength(0);
@@ -534,5 +534,53 @@ describe('private content stays in the local results file', () => {
     expect(out.join('')).toContain('PROBE_SCENARIOS_INVALID');
     expect(out.join('')).toContain('PROBE_CONFIG_FILE_INVALID');
     expect(out.join('').toLowerCase()).not.toContain(INPUT_MARKER.toLowerCase());
+  });
+});
+
+describe('second review fixes', () => {
+  it('has no command-line ledger override and prints the real ledger path and totals on a live run', async () => {
+    const network = recording();
+    expect((await runProbe([...base('--ask', '1', '--live'), '--ledger', join(home, 'other.json')], {[KEY_ENV]: KEY},
+      deps(network.upstream))).exitCode).toBe(2);
+    expect((await runProbe(['--record-external-calls', '1', '--record-external-usd', '0.01', '--ledger', join(home, 'x.json')], {},
+      deps())).exitCode).toBe(2);
+    expect(existsSync(join(home, 'other.json')) || existsSync(join(home, 'x.json'))).toBe(false);
+    expect(parseProbeArgs([], home).ledger).toBe(join(home, '.graylum', 'ac0', 'ledger.json'));
+    const id = await planId(base('--ask', '1'));
+    out = [];
+    await runProbe([...base('--ask', '1', '--live'), '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
+    expect(out.join('')).toContain('Ledger file (real path): ' + join(realpathSync(home), '.graylum', 'ac0', 'ledger.json'));
+    expect(out.join('')).toContain('Cumulative ledger before this run: 0 calls');
+  });
+
+  it('creates results owner-only and refuses an existing output directory others can read', async () => {
+    const id = await planId(base('--ask', '1'));
+    const network = recording();
+    const outcome = await runProbe([...base('--ask', '1', '--live'), '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
+    const mode = (path: string) => statSync(path).mode & 0o777;
+    expect(mode(outcome.runDir!)).toBe(0o700);
+    for (const name of ['plan.json', 'results.jsonl', 'summary.json', 'summary.md']) expect(mode(join(outcome.runDir!, name))).toBe(0o600);
+    expect(mode(join(home, '.graylum', 'ac0', 'ledger.json'))).toBe(0o600);
+    chmodSync(outDir(), 0o755);
+    const sentBefore = network.sent.length;
+    const refused = await runProbe([...base('--ask', '1', '--live'), '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
+    expect(refused.exitCode).toBe(2);
+    expect(out.join('')).toContain('PROBE_OUTPUT_DIR_NOT_PRIVATE');
+    expect(network.sent).toHaveLength(sentBefore);
+    expect(mode(outDir())).toBe(0o755);
+  });
+
+  it('counts a trial whose SDK run failed after a provider response as sdk_error, not as measured', async () => {
+    const args = base('--ask', '0', '--reference', '1');
+    const id = await planId(args);
+    const respond: Upstream = async (_url, init) => sseResponse(JSON.parse(String(init.body)).model,
+      [{content: 'Let me check. '}, ...toolDeltas('read_reference', {file: 'wrong argument'}, 'call_bad')], {finish: 'tool_calls'});
+    const outcome = await runProbe([...args, '--live', '--confirm', id], {[KEY_ENV]: KEY}, deps(recording(respond).upstream));
+    const trial = outcome.results![0]!;
+    expect(trial.calls[0]!.status).toBe('ok');
+    expect(trial.stop).toBe('sdk_error');
+    const summary = JSON.parse(readFileSync(join(outcome.runDir!, 'summary.json'), 'utf8'));
+    expect(summary.configs[0].reference).toMatchObject({trials: 1, measured: 0, sdkErrors: 1});
+    expect(readFileSync(join(outcome.runDir!, 'summary.md'), 'utf8')).toContain('| qwen-deepinfra-none | reference | 0 / 1 | 1 |');
   });
 });

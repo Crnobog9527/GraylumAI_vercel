@@ -34,12 +34,13 @@ export const USAGE = `AC-0b model probe (dry run unless --live).
   --max-tokens <n>      output tokens per call (default 1024)
   --timeout-ms <n>      per-call deadline (default ${DEFAULT_TIMEOUT_MS})
   --out-dir <dir>       results directory outside the repository (default ~/.graylum/ac0/results)
-  --ledger <file>       cumulative call/spend ledger for live runs (default ~/.graylum/ac0/ledger.json)
   --live                send real requests; needs --confirm and AC0_OPENROUTER_API_KEY
   --confirm <plan-id>   the plan id printed by a dry run of the same options
 
   Record usage spent outside this script (e.g. browser measurement) in the ledger; sends nothing:
-  --record-external-calls <n> --record-external-usd <x> [--external-note <text>] [--ledger <file>]
+  --record-external-calls <n> --record-external-usd <x> [--external-note <text>]
+
+  The cumulative ledger is always ~/.graylum/ac0/ledger.json and cannot be changed from the command line.
 `;
 
 export type ProbeArgs = {
@@ -53,6 +54,7 @@ export type ProbeArgs = {
   maxTokens: number;
   timeoutMs: number;
   outDir: string;
+  /** Fixed at ~/.graylum/ac0/ledger.json; only code (tests) can inject another path. */
   ledger: string;
   live: boolean;
   confirm?: string;
@@ -74,7 +76,7 @@ export function parseProbeArgs(argv: string[], home: string): ProbeArgs {
     'skill-dir': {type: 'string'}, scenarios: {type: 'string'}, configs: {type: 'string'}, 'config-file': {type: 'string'},
     ask: {type: 'string'}, text: {type: 'string'}, reference: {type: 'string'},
     'max-calls': {type: 'string'}, 'max-usd': {type: 'string'}, 'max-tokens': {type: 'string'}, 'timeout-ms': {type: 'string'},
-    'out-dir': {type: 'string'}, ledger: {type: 'string'}, live: {type: 'boolean'}, confirm: {type: 'string'}, help: {type: 'boolean'},
+    'out-dir': {type: 'string'}, live: {type: 'boolean'}, confirm: {type: 'string'}, help: {type: 'boolean'},
     'record-external-calls': {type: 'string'}, 'record-external-usd': {type: 'string'}, 'external-note': {type: 'string'},
   }});
   const external = parseExternal(values['record-external-calls'], values['record-external-usd'], values['external-note']);
@@ -99,7 +101,7 @@ export function parseProbeArgs(argv: string[], home: string): ProbeArgs {
     maxTokens: integer(values['max-tokens'], 1024, 64, 8192, 'max-tokens'),
     timeoutMs: integer(values['timeout-ms'], DEFAULT_TIMEOUT_MS, 5_000, DEFAULT_TIMEOUT_MS, 'timeout-ms'),
     outDir: values['out-dir'] ?? join(home, '.graylum', 'ac0', 'results'),
-    ledger: values.ledger ?? join(home, '.graylum', 'ac0', 'ledger.json'),
+    ledger: join(home, '.graylum', 'ac0', 'ledger.json'),
     live: values.live ?? false,
     confirm: values.confirm,
     help: values.help ?? false,
@@ -172,7 +174,7 @@ export function buildPlan(args: ProbeArgs, skill: LoadedSkill, scenarios: Scenar
   };
 }
 
-export function describePlan(plan: ProbePlan, mode: 'dry-run' | 'live', ledger: {calls: number; usd: number}): string {
+export function describePlan(plan: ProbePlan, mode: 'dry-run' | 'live', ledger: {calls: number; usd: number; path?: string}): string {
   const lines = [
     `AC-0b probe plan ${plan.planId} (${mode})`,
     `Skill: ${plan.skillIsFixture ? 'synthetic repository fixture' : 'private directory'} digest ${plan.skillDigest}; ` +
@@ -184,8 +186,9 @@ export function describePlan(plan: ProbePlan, mode: 'dry-run' | 'live', ledger: 
       `max_price ${config.maxPrice.prompt}/${config.maxPrice.completion} USD per M tokens`),
     `Worst case: ${plan.plannedCalls} provider calls, $${plan.plannedUsdUpperBound.toFixed(4)} (bytes counted as tokens)`,
     `Run caps: ${plan.maxCalls} calls, $${plan.maxUsd}; the run stops before a call that would exceed either`,
-    `Cumulative ledger before this run: ${ledger.calls} calls, $${ledger.usd.toFixed(6)} of 200 calls / $3`,
+    `Cumulative ledger before this run: ${ledger.calls} calls, $${ledger.usd.toFixed(6)} booked of 200 calls / $3`,
   ];
+  if (ledger.path) lines.push(`Ledger file (real path): ${ledger.path}`);
   if (mode === 'dry-run') lines.push(`Dry run: no request leaves this machine. For real calls add: --live --confirm ${plan.planId}`);
   return lines.join('\n') + '\n';
 }

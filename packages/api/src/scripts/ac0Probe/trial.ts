@@ -145,7 +145,7 @@ export async function runTrial(options: {
   const stop = transport.state.budgetStop ? 'budget'
     : transport.state.stopped === 'provider_rejected' ? 'provider_rejected'
       : transport.state.stopped === 'unknown_result' ? 'unknown_result'
-        : sdkError && !calls.length ? 'sdk_error' : undefined;
+        : sdkError ? 'sdk_error' : undefined;
   return {
     configId: config.id, kind, scenarioId: scenario.id, index: options.index, startedAt: new Date().toISOString(),
     ...(kind === 'ask' ? {outcome: classifyAsk(calls, sdkError, stop)} : {}),

@@ -22,11 +22,13 @@ const tally = (values: string[]) => values.reduce<Record<string, number>>((count
   return counts;
 }, {});
 
+/** Timings come only from trials that ran to the end; others are counted, not hidden. */
 function kindSummary(trials: TrialResult[]) {
-  const measured = trials.filter(trial => trial.calls.some(call => call.status === 'ok'));
+  const measured = trials.filter(trial => !trial.stop && trial.calls.some(call => call.status === 'ok'));
   return {
     trials: trials.length,
     measured: measured.length,
+    sdkErrors: trials.filter(trial => trial.stop === 'sdk_error').length,
     firstContentMs: stats(measured.map(trial => trial.firstContentMs)),
     firstVisibleMs: stats(measured.map(trial => trial.firstVisibleMs)),
     firstSdkTextMs: stats(measured.map(trial => trial.firstSdkTextMs)),
@@ -97,11 +99,11 @@ export function summaryMarkdown(rows: ConfigSummary[], totals: {calls: number; c
       `${row.ask.counts.malformed} (${pct(row.ask.malformedRate)}) | ${row.ask.counts.text_question} | ${row.ask.counts.no_question} | ` +
       `${row.ask.counts.turn_not_ended} | ${row.ask.counts.provider_rejected} | ${row.ask.counts.unknown} | ${row.ask.verdict} |`),
     '', '## Latency and speed (median / p90 ms; chars per second median / p90)', '',
-    '| config | kind | first content | first visible | total | chars/s |',
-    '| --- | --- | --- | --- | --- | --- |',
+    '| config | kind | measured / trials | sdk errors | first content | first visible | total | chars/s |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- |',
     ...rows.flatMap(row => (['ask', 'text', 'reference'] as const).filter(kind => row[kind].trials).map(kind =>
-      `| ${row.configId} | ${kind} | ${ms(row[kind].firstContentMs)} | ${ms(row[kind].firstVisibleMs)} | ` +
-      `${ms(row[kind].totalMs)} | ${ms(row[kind].charsPerSecond)} |`)),
+      `| ${row.configId} | ${kind} | ${row[kind].measured} / ${row[kind].trials} | ${row[kind].sdkErrors} | ` +
+      `${ms(row[kind].firstContentMs)} | ${ms(row[kind].firstVisibleMs)} | ${ms(row[kind].totalMs)} | ${ms(row[kind].charsPerSecond)} |`)),
     '', '## Calls and cost', '',
     '| config | route reported | calls | statuses | reasoning seen | booked (USD) | provider-reported (USD) | cost source |',
     '| --- | --- | --- | --- | --- | --- | --- | --- |',

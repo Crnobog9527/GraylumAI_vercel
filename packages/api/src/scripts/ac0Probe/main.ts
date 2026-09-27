@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // AC-0b model probe (Master Plan v12 AC-0 items 2-6). Standalone script run by
 // hand; application code must never import it. Dry run unless --live.
-import {appendFileSync, mkdirSync, writeFileSync} from 'node:fs';
+import {appendFileSync, mkdirSync, statSync, writeFileSync} from 'node:fs';
 import {homedir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -23,6 +23,8 @@ export type ProbeDeps = {
   /** Network used only with --live. Tests pass a mock; a dry run never uses it. */
   fetch?: Upstream;
   home?: string;
+  /** Test-only ledger location. There is no command-line or environment override. */
+  ledgerPath?: string;
   clock?: () => number;
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
@@ -41,6 +43,17 @@ function readKey(env: Record<string, string | undefined>): string {
   return key;
 }
 
+/** Results hold model output derived from the private Skill: owner-only access.
+ * A live run refuses an existing directory that others can read and never
+ * changes permissions on a directory it did not create. */
+function privateDirectory(dir: string, live: boolean): string {
+  mkdirSync(dir, {recursive: true, mode: 0o700});
+  if (live && (statSync(dir).mode & 0o077) !== 0) {
+    throw new Error(`PROBE_OUTPUT_DIR_NOT_PRIVATE: ${dir} is accessible to other users; restrict it to its owner or choose another --out-dir`);
+  }
+  return dir;
+}
+
 export type ProbeOutcome = {exitCode: number; runDir?: string; plan?: ProbePlan; results?: TrialResult[]; stop?: string};
 
 export async function runProbe(argv: string[], env: Record<string, string | undefined>, deps: ProbeDeps = {}): Promise<ProbeOutcome> {
@@ -50,7 +63,8 @@ export async function runProbe(argv: string[], env: Record<string, string | unde
   let redact = redactor([]);
   let releaseLock = () => {};
   try {
-    const args = parseProbeArgs(argv, deps.home ?? homedir());
+    const parsed = parseProbeArgs(argv, deps.home ?? homedir());
+    const args = deps.ledgerPath ? {...parsed, ledger: deps.ledgerPath} : parsed;
     if (args.help) {
       stdout(USAGE);
       return {exitCode: 0};
@@ -77,7 +91,8 @@ export async function runProbe(argv: string[], env: Record<string, string | unde
       ledger = fileLedger(realPath(args.ledger));
     }
     const before = ledger.read();
-    stdout(describePlan(plan, mode, {calls: before.calls, usd: nanoToUsd(before.nanoUsd)}));
+    const ledgerPath = args.live ? realPath(args.ledger) : undefined;
+    stdout(describePlan(plan, mode, {calls: before.calls, usd: nanoToUsd(before.nanoUsd), ...(ledgerPath ? {path: ledgerPath} : {})}));
     let upstream: Upstream;
     let authorization: string;
     if (args.live) {
@@ -97,9 +112,10 @@ export async function runProbe(argv: string[], env: Record<string, string | unde
       authorization = 'Bearer dry-run';
     }
     const budget = createBudget({maxCalls: plan.maxCalls, maxUsd: plan.maxUsd, ledger});
-    const runDir = join(realPath(args.outDir), new Date().toISOString().replace(/[:.]/g, '-') + '-' + mode + '-' + plan.planId);
-    mkdirSync(runDir, {recursive: true});
-    const write = (name: string, text: string) => writeFileSync(join(runDir, name), redact(text));
+    const outDir = privateDirectory(realPath(args.outDir), args.live);
+    const runDir = join(outDir, new Date().toISOString().replace(/[:.]/g, '-') + '-' + mode + '-' + plan.planId);
+    mkdirSync(runDir, {mode: 0o700});
+    const write = (name: string, text: string) => writeFileSync(join(runDir, name), redact(text), {mode: 0o600});
     write('plan.json', JSON.stringify({...plan, mode}, null, 2) + '\n');
     const results: TrialResult[] = [];
     const skipped: Array<{configId: string; kind: string; count: number; reason: string}> = [];
@@ -118,7 +134,7 @@ export async function runProbe(argv: string[], env: Record<string, string | unde
             timeoutMs: plan.timeoutMs, budget, upstream, authorization, clock, redact,
           });
           results.push(result);
-          appendFileSync(join(runDir, 'results.jsonl'), redact(JSON.stringify(result)) + '\n');
+          appendFileSync(join(runDir, 'results.jsonl'), redact(JSON.stringify(result)) + '\n', {mode: 0o600});
           const label = result.outcome?.category ?? result.stop ?? 'measured';
           const first = result.firstVisibleMs === undefined ? '-' : Math.round(result.firstVisibleMs) + ' ms';
           stdout(`[${config.id}] ${kind} #${index + 1}: ${label}; first visible ${first}; total ${Math.round(result.totalMs)} ms\n`);

@@ -40,10 +40,10 @@ function readLedgerFile(path: string): LedgerFile {
 
 /** Written to a temporary file and renamed, so a crash never leaves half a ledger. */
 function writeLedgerFile(path: string, file: LedgerFile): void {
-  mkdirSync(dirname(path), {recursive: true});
+  mkdirSync(dirname(path), {recursive: true, mode: 0o700});
   const temporary = `${path}.${process.pid}.tmp`;
   const body = {...file, usd: nanoToUsd(file.nanoUsd), updatedAt: new Date().toISOString()};
-  writeFileSync(temporary, JSON.stringify(body, null, 2) + '\n');
+  writeFileSync(temporary, JSON.stringify(body, null, 2) + '\n', {mode: 0o600});
   renameSync(temporary, path);
 }
 
@@ -66,10 +66,10 @@ export function fileLedger(path: string): LedgerStore {
  * stays until a person confirms no run is active and deletes it. */
 export function acquireLedgerLock(ledgerPath: string): () => void {
   const lock = ledgerPath + '.lock';
-  mkdirSync(dirname(lock), {recursive: true});
+  mkdirSync(dirname(lock), {recursive: true, mode: 0o700});
   let descriptor: number;
   try {
-    descriptor = openSync(lock, 'wx');
+    descriptor = openSync(lock, 'wx', 0o600);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     throw new Error(`PROBE_LEDGER_LOCKED: ${lock} exists. Another live run may be active or ended abnormally; ` +
