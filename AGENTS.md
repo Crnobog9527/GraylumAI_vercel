@@ -106,8 +106,9 @@ changes to bindings or production/real-money effects.
 
 ## 5. Execution and Scope
 
-Use Codex native planning, implementation, testing and correction. Create a
-native Goal only when explicitly requested. Complete authorized implementation,
+Use the implementing agent's native planning, implementation, testing and
+correction (Claude Code or Codex; see Section 12). Create a native Goal only
+when explicitly requested. Complete authorized implementation,
 relevant validation, review/CI inspection and same-scope repairs through the
 requested handoff boundary. Preserve read-only/proposal-first/review-before-edit
 limits; status questions or corrections do not cancel ongoing work.
@@ -221,9 +222,11 @@ its affected safety boundary, external/production relevance, and recovery or
 compatibility considerations where applicable. Link a product specification or
 Issue only when it helps review. No fixed seven-section template is required.
 
-Independent Codex semantic review remains mandatory. Use a fresh context separate
-from implementation and independently verify the relevant live GitHub candidate
-and authoritative policy through a read-only API/CLI. Schedule final review after
+Independent semantic review remains mandatory. The reviewer is a context
+separate from the implementation writer, routed under Section 12; the
+implementer never reviews its own candidate. The reviewer independently verifies
+the relevant live GitHub candidate and authoritative policy through a read-only
+API/CLI or its native GitHub integration. Schedule final review after
 implementation and local fixes stabilize. One valid independent review is enough;
 do not add a second review merely because another native or cloud entry exists.
 
@@ -237,6 +240,16 @@ scope/architecture changes, or uncertain interactions require full review again.
 High-risk deltas must cover their security, data, or monetary implications; a
 small line count alone does not make a change low risk. The implementer cannot
 self-certify unchanged review coverage.
+
+When the Codex GitHub review bot (`chatgpt-codex-connector[bot]`) is the
+reviewer, its completed review of the exact current head with no unresolved P0
+or P1 finding is the passing independent conclusion, and its own PR review or
+summary is the attributed record. A P0/P1 finding is resolved only by a fix
+that the bot then reviews on a new head, or by explicit Owner acceptance with
+the stated reason. The implementer adds a short PR comment linking that review
+with exact base/head and how lower-priority findings were handled, without
+restating it as its own review. A pending, failed or stale-head bot review is
+not a pass; request a fresh one by commenting `@codex review`.
 
 Record the attributed conclusion, findings, validation limits, exact base/final
 head, and any reused review/previous head on the PR. A new candidate always
@@ -339,6 +352,33 @@ historical inspection, never to restore obsolete gates or approval stages.
 
 No separate Task Issue, Contract, Gate, receipt, Evaluator or Release Auditor
 pipeline is required. Do not create a duplicate execution/coordination framework
-unless a concrete current problem cannot be handled adequately by Codex native
-execution, GitHub controls and these rules, and the Owner explicitly authorizes
-that architecture work.
+unless a concrete current problem cannot be handled adequately by native agent
+execution (Claude Code or Codex), GitHub controls and these rules, and the Owner
+explicitly authorizes that architecture work.
+
+## 12. Implementing Agents, Review Routing and Handoff
+
+Claude Code and Codex are interchangeable implementing agents under these same
+rules. This file is the only repository policy for both; a tool-specific entry
+file such as `CLAUDE.md` may only point here and must not add or change rules.
+Tool-private memory and chat history are context only under Section 1.
+
+Default review routing:
+
+- Claude Code implements: Codex reviews, normally through the Codex GitHub
+  review bot, triggered by opening a non-draft PR, marking a draft ready for
+  review, or commenting `@codex review` on the current head.
+- Codex implements: a fresh-context Codex reviewer separate from the
+  implementation writer, the Codex GitHub review bot, or Claude Code in a
+  separate session.
+
+The implementer triggers review and reads its result from GitHub; the Owner
+does not relay prompts or reports between tools.
+
+Keep every task resumable from GitHub alone. Open a draft PR early on the task
+branch, push each coherent verified step, and keep a short `Handoff` section in
+the PR description: done, next step, open blockers, and validation actually run
+with results. Either agent may continue an existing task by reading its PR and
+branch. Switching agents is a writer handoff under Section 3: the previous
+writer stops mutating once the handoff is recorded, and the new writer resumes
+from current remote refs, not an older local checkout.
