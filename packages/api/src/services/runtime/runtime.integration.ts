@@ -875,6 +875,70 @@ it('RUNTIME: ordinary, document Skill without workflow, and separate organizer u
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 });
 
+// AC-0 baseline: the synthetic local round-trip counts per phase. A latency change
+// must lower these numbers deliberately; any other change here is a regression.
+// The protected router runs without the Next route prelude (route Auth and
+// maintenance reads) against a private loopback fixture; durations are not measured.
+it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill loading and execution',async()=>{
+ const password='Local-'+randomUUID()+'!',email=randomUUID()+'@example.test';
+ const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
+ const actor=created.data.user.id;await db.query("insert into profiles(id,email,credits,role) values($1,$2,500,'admin')",[actor,email]);
+ const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
+ const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
+ // Bearer credentials let the context build budgeted clients, as the route does.
+ const headers=()=>new Headers({Authorization:'Bearer '+login.data.session!.access_token});
+ const skillModel=randomUUID(),moduleId=randomUUID(),pack=makePackage();
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Timing Skill fixture','runtime-timing-skill','fixture','true')",[skillModel]);
+ await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[pack.id,'runtime-timing-'+pack.id,actor]);
+ await db.query("insert into modules(id,title,skill_id,active,model_id) values($1,'Timing Skill',$2,true,$3)",[moduleId,pack.id,skillModel]);
+ await publishSkillPackage(admin,actor,pack);
+ // A private fixture keeps the shared gateway's response sequence untouched.
+ const server=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;const input=JSON.parse(JSON.parse(raw).input);
+  const id='timing-'+randomUUID();res.setHeader('content-type','application/json');res.end(JSON.stringify({id,model:input.model,final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:input.model,choices:[{index:0,message:{role:'assistant',content:'Completed '+input.model},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
+ const previousEndpoint=process.env.V3_RUNTIME_LOCAL_ENDPOINT;process.env.V3_RUNTIME_LOCAL_ENDPOINT='http://127.0.0.1:'+address.port;
+ const logged=vi.spyOn(logger,'info');
+ type Caller=ReturnType<typeof runtimeRouter.createCaller>;
+ // One budget per call mirrors one HTTP invocation of the route.
+ async function measured<T>(call:(caller:Caller)=>Promise<T>){
+  const budget=createRuntimeBudget();
+  const result=await budget.timing.run(async()=>call(runtimeRouter.createCaller(await createTRPCContext({headers:headers(),runtimeBudget:budget}))));
+  return {result,summary:budget.timing.summary()};
+ }
+ const phases=(s:{phases:Record<string,{rt:number}>})=>Object.fromEntries(Object.entries(s.phases).map(([phase,v])=>[phase,v.rt]));
+ try{
+  const start=await measured(c=>c.start({requestId:randomUUID(),scope:{kind:'positioning_draft'}}));
+  const sessionId=(start.result as {sessionId:string}).sessionId;
+  const ordinary=await measured(c=>c.prepare({sessionId,requestId:randomUUID(),input:'Please work',selection:{kind:'ordinary',modelId},network:'deny'}));
+  const stream=await measured(async c=>{const events=[];for await(const event of await c.executeStream({executionId:ordinary.result.executionId}))events.push(event);return events;});
+  expect(stream.result.at(-1)).toMatchObject({type:'result',result:{state:'completed'}});
+  const skill=await measured(c=>c.prepare({sessionId,requestId:randomUUID(),input:'Please work',selection:{kind:'skill',moduleId,revisionId:pack.revisionId},network:'deny'}));
+  const execute=await measured(c=>c.execute({executionId:skill.result.executionId}));
+  expect(execute.result).toMatchObject({state:'completed'});
+  const all={start,ordinary,stream,skill,execute};
+  const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
+  expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
+   start:{prelude:2,policy:0,host:2},
+   ordinary:{prelude:2,policy:0,host:0,admission:10},
+   stream:{prelude:2,policy:0,host:0,execute:11,provider:7},
+   skill:{prelude:2,policy:0,host:0,admission:29},
+   execute:{prelude:2,policy:0,host:0,execute:11,provider:7},
+  });
+  // Auth verification before each RPC is the largest single label (AC-0 item 3).
+  expect(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary.labels['auth/v1/user']?.rt])))
+   .toEqual({start:2,ordinary:6,stream:9,skill:12,execute:9});
+  for(const m of [ordinary,skill])expect(m.summary.executionIds).toEqual([m.result.executionId]);
+  for(const m of [stream,execute])expect(m.summary.marks.providerPostMs).toBeGreaterThanOrEqual(0);
+  // Only the streamed procedure releases its own line; callers here skip the route.
+  expect(logged.mock.calls.filter(c=>c[1]==='runtime_request_timing')).toHaveLength(1);
+ }finally{
+  logged.mockRestore();
+  if(previousEndpoint===undefined)delete process.env.V3_RUNTIME_LOCAL_ENDPOINT;else process.env.V3_RUNTIME_LOCAL_ENDPOINT=previousEndpoint;
+  await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
+ }
+});
 it('RUNTIME: work item Session validates parent/actor and stays separate from draft',async()=>{
  const f=await fixture(),moduleId=randomUUID(),skillId=randomUUID(),parent=randomUUID(),work=randomUUID();
  await db.query("insert into modules(id,title) values($1,'Work fixture')",[moduleId]);await db.query('insert into skills(id,skill_key) values($1,$2)',[skillId,'work-'+skillId]);
