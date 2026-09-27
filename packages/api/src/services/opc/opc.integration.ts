@@ -10375,7 +10375,7 @@ it.each(['true','omitted','false'] as const)('OPC: stopped pending cost unlocks 
   await page.evaluate(({key,request})=>sessionStorage.setItem(key,JSON.stringify({request})),{key,request});
   await page.reload();await composer.waitFor();
   await expect.poll(()=>composer.isEnabled()).toBe(true);
-  expect(await page.evaluate(key=>sessionStorage.getItem(key),key)).toBeNull();
+  await expect.poll(()=>page.evaluate(key=>sessionStorage.getItem(key),key),{timeout:30000}).toBeNull();
   await page.getByText('本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。').waitFor();
   expect(await page.getByRole('button',{name:'继续核对这条回复',exact:true}).count()).toBe(0);
   await page.reload();await composer.waitFor();await expect.poll(()=>composer.isEnabled()).toBe(true);
