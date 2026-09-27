@@ -27,7 +27,7 @@
 | --- | --- | --- |
 | 用在哪里 | 定位、选题、工作会话、侧栏对话 | `/chat` 普通对话 |
 | 主要代码 | `packages/api/src/services/runtime`（官方 Agent SDK）、`services/bill2`（计费）、`routers/runtime.ts`、`routers/opc.ts`、`services/opc` | `apps/web/src/app/api/ai/stream/route.ts`、`services/modelRouter.ts`、`services/contextManager.ts`、`services/billing.ts` |
-| 计费 | BILL2：调用前预扣，按供应商官方成本结算，一次执行一次结算 | 旧的预扣 / 结算 / 退费 |
+| 计费 | BILL2：一次用户收费操作一个计费运行单，调用前预扣一次，按供应商官方成本汇总后只结算、取整一次（一个运行单可以包含多个调用，例如整理或 Fusion 的各模型） | 旧的预扣 / 结算 / 退费 |
 | 前途 | 所有新功能都接这里 | 新工作区接管自由对话后下线 |
 
 两套共用同一个积分余额和流水，没有第二个钱包。
