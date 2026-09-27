@@ -21,7 +21,7 @@ const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 async function rpc(name:string,args:Record<string,unknown>){const result=await admin.rpc(name,args);if(result.error)throw new Error(result.error.message);return result.data;}
 function latch(){let release!:()=>void;const promise=new Promise<void>(resolve=>{release=resolve;});return {promise,release};}
 async function until(test:()=>boolean){const deadline=Date.now()+5000;while(!test()){if(Date.now()>deadline)throw new Error('synthetic progress deadline');await new Promise(resolve=>setTimeout(resolve,10));}}
-async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream',organize=false,outputLimit=100,tool=false){
+async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial-tools-v4-stream',organize=false,outputLimit=100,tool=false){
  const actorId=randomUUID(),mentorId=randomUUID(),organizerId=randomUUID(),windowId=randomUUID(),requestId=randomUUID();
  await db.query('insert into profiles(id,credits) values($1,100)',[actorId]);
  await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,100,'addition','grant','opening_grant','system',$2,0,100)",[actorId,'stream-opening:'+actorId]);
@@ -29,7 +29,7 @@ async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream',organiz
  const policies=[[mentorId,'synthetic/mentor'],[organizerId,'synthetic/organizer']].map(([modelId,model])=>({modelId,model,provider:'openrouter',account:'synthetic-stream',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:10000,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
  for(const policy of policies)await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic streaming integration',$2,'openrouter','true')",[policy.modelId,policy.model]);
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.10,3,now()+interval '2 hours')",[windowId,[actorId],JSON.stringify(policies)]);
- const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',inputSelection:'scope-projection-v1',providerRequestFormat:format,input:'Synthetic original input',instructions:'Return the public mentor message in the message property; keep protocol fields private.',model:policies[0]!.model,modelId:mentorId,maxOutputTokens:outputLimit,maxTurns:1,historyItems:20,network:'deny',tools:tool?['read_source']:[],...(tool?{workspaceContext:true,maxToolCalls:1,maxTurns:2}:{}),request:{sessionId:session.sessionId,requestId},...(organize?{attachedOrganizer:{modelId:organizerId,model:policies[1]!.model,maxOutputTokens:100,instructions:'Synthetic organizer only',input:'Synthetic original input'}}:{})};
+ const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',inputSelection:'scope-projection-v1',providerRequestFormat:format,...(format==='serial-tools-v4-stream'?{reasoning:{effort:'none'}}:{}),input:'Synthetic original input',instructions:'Return the public mentor message in the message property; keep protocol fields private.',model:policies[0]!.model,modelId:mentorId,maxOutputTokens:outputLimit,maxTurns:1,historyItems:20,network:'deny',tools:tool?['read_source']:[],...(tool?{workspaceContext:true,maxToolCalls:1,maxTurns:2}:{}),request:{sessionId:session.sessionId,requestId},...(organize?{attachedOrganizer:{modelId:organizerId,model:policies[1]!.model,maxOutputTokens:100,instructions:'Synthetic organizer only',input:'Synthetic original input'}}:{})};
  const billing={contractVersion:'bill2.v1',mode:'staging_test',testWindowId:windowId,scope:session.scope,operation:'question',modelId:mentorId,sourceHash:hash('synthetic-stream'),input:context,callPolicy:organize?policies:[policies[0]],rules:{version:'runtime-staging-v1',quoteVersion:windowId,creditsPerUsd:'1000',multiplier:'1',fx:{}},limits:{costUsd:tool?'0.06':organize?'0.04':'0.02',credits:tool?60:organize?40:20,maxPreDeduct:tool?60:organize?40:20,maxCalls:tool?3:organize?2:1,deadline:new Date(Date.now()+3600000).toISOString()}};
  const execution=await rpc('runtime_admit',{p_actor_id:actorId,p_session_id:session.sessionId,p_request_id:requestId,p_payload:context,p_billing:billing});
  return {actorId,context,execution,session,billing};
@@ -42,8 +42,8 @@ function endStream(response:ServerResponse,id:string,model:string){
 }
 function completion(id:string,model:string,content:string){return JSON.stringify({id,object:'chat.completion',created:1,model,choices:[{index:0,message:{role:'assistant',content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}});}
 
-it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: streaming real SDK/executor/BILL2 delivers public text before model and organizer completion, preserving one dispatch and immutable request',async()=>{
- const f=await fixture('serial-tools-v3-stream',true),mentorGate=latch(),organizerGate=latch(),bodies:string[]=[],events:Array<{event:RuntimeProgress;at:number}>=[];
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['serial-tools-v3-stream','serial-tools-v4-stream'] as const)('RUNTIME: streaming %s real SDK/executor/BILL2 delivers public text before model and organizer completion, preserving one dispatch and immutable request',async(format)=>{
+ const f=await fixture(format,true),mentorGate=latch(),organizerGate=latch(),bodies:string[]=[],events:Array<{event:RuntimeProgress;at:number}>=[];
  const publicMessage='已经知道你的产品名称。请说说它主要帮助谁。',body=JSON.stringify({message:publicMessage,patches:[],privateProtocol:'PRIVATE_PROTOCOL'}),organizer='{"patches":[],"private":"PRIVATE_ORGANIZER"}';
  let mentorFinished=false,organizerStarted=false,organizerFinished=false,finished=false;
  const server=createServer(async(req,res)=>{
@@ -81,6 +81,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: streaming real 
   expect(await host.execute(f.execution.executionId)).toEqual({state:'completed',body,summary:organizer});
   expect(bodies).toHaveLength(2);expect(JSON.parse(bodies[0]!).stream).toBe(true);expect(JSON.parse(bodies[0]!).stream_options).toEqual({include_usage:true});
   expect(JSON.parse(bodies[1]!).stream).toBe(false);
+  // Only the primary mentor call carries the frozen reasoning policy; the organizer keeps its bytes.
+  expect(JSON.parse(bodies[0]!).reasoning_effort).toBe(format==='serial-tools-v4-stream'?'none':undefined);expect(bodies[1]).not.toMatch(/reasoning/);
   const calls=(await db.query('select id,payload,provider_id,state from bill2_calls where run_id=$1 order by sequence',[f.execution.runId])).rows;
   expect(calls).toHaveLength(2);expect(calls.map(call=>call.payload.requestHash)).toEqual(bodies.map(hash));
   expect(calls.map(call=>call.provider_id)).toEqual([1,2].map(n=>'gen-stream-'+f.execution.executionId+'-'+n));

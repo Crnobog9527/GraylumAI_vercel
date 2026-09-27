@@ -3,11 +3,14 @@ import { Agent, Runner, OpenAIChatCompletionsModel, tool, type Session, type Age
 import OpenAI from 'openai';
 import { z } from 'zod';
 import {OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
+import type {ReasoningPolicy} from './reasoningPolicy';
 
 export type RuntimeTool = { name: string; description: string; execute: (arguments_: Record<string, unknown>, callId: string) => Promise<string> };
 export type RuntimeRunnerInput = {
   model: string; instructions: string; input: string; session: Session;
   maxOutputTokens: number; maxTurns: number;
+  /** Frozen admission policy; the SDK emits it as Chat Completions reasoning_effort. */
+  reasoning?: ReasoningPolicy;
   /** Authenticated host rechecks frozen context, persists claim, and dispatches once.
    * During recovery this callback may only return the original stored response. */
   exchange: (sequence: number, body: string, onChunk?: (chunk: string) => void) => Promise<string>;
@@ -34,7 +37,7 @@ export async function runRuntime(input: RuntimeRunnerInput) {
   const guardedFetch: typeof fetch = async (url, init) => {
     if(String(url)!=='http://127.0.0.1/runtime/chat/completions') throw new Error('RUNTIME_TRANSPORT_DENIED');
     const body=JSON.parse(String(init?.body));
-    if(body.model!==input.model||Boolean(body.stream)!==Boolean(input.stream)||body.store!==false||++sequence>input.maxTurns) throw new Error('RUNTIME_CALL_DENIED');
+    if(body.model!==input.model||Boolean(body.stream)!==Boolean(input.stream)||body.store!==false||'reasoning' in body||body.reasoning_effort!==input.reasoning?.effort||++sequence>input.maxTurns) throw new Error('RUNTIME_CALL_DENIED');
     if(input.stream){
       const encoder=new TextEncoder();
       const stream=new ReadableStream<Uint8Array>({start(controller){
@@ -79,7 +82,7 @@ export async function runRuntime(input: RuntimeRunnerInput) {
       return t.execute(args,callId);
     }}));
   const agent=new Agent({name:'Graylum Runtime',model,instructions:input.instructions,tools,
-    modelSettings:{store:false,maxTokens:input.maxOutputTokens,parallelToolCalls:false,retry:{maxRetries:0}}});
+    modelSettings:{store:false,maxTokens:input.maxOutputTokens,parallelToolCalls:false,retry:{maxRetries:0},...(input.reasoning?{reasoning:{effort:input.reasoning.effort}}:{})}});
   const runner=new Runner({model,tracingDisabled:true,traceIncludeSensitiveData:false});
   try{
     const options={session:input.session,maxTurns:input.maxTurns,

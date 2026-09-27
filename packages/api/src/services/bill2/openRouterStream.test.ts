@@ -168,3 +168,22 @@ it.each(['\0','\ud800'])('keeps PostgreSQL-incompatible text as bounded diagnost
  expect(evidence).toMatchObject({providerId:'gen-stream',cost:null,final:false,rejectedReason:'invalid_receipt_text',transport:{rawBodyOmitted:'invalid_receipt_text'}});
  expect(evidence.rawBody).toBe('');expect(evidence.usage).toBeNull();
 });
+it('E1 shape: v4 reasoning-only frames up to the deadline stay incomplete, unpriced and dispatched once with frozen bytes',async()=>{
+ vi.useFakeTimers();const timeout=vi.spyOn(AbortSignal,'timeout').mockImplementation(ms=>{const c=new AbortController();setTimeout(()=>c.abort(),ms);return c.signal;});
+ const frozen=JSON.stringify({...JSON.parse(body),reasoning_effort:'none'}),observed:string[]=[];let ended=false;
+ const reasoningOnly=frame(chunk({role:'assistant',content:'',reasoning:'PRIVATE',reasoning_details:[{type:'reasoning.text',index:0,text:'PRIVATE'}]}));
+ const transport=vi.fn<typeof fetch>(async(_url,init)=>new Response(new ReadableStream({start(controller){
+  const encoder=new TextEncoder();controller.enqueue(encoder.encode(': OPENROUTER PROCESSING\n\n'));
+  const tick=setInterval(()=>controller.enqueue(encoder.encode(reasoningOnly)),1_000);
+  init!.signal!.addEventListener('abort',()=>{clearInterval(tick);controller.error(new Error('aborted'));},{once:true});
+ }}),{headers:{'x-generation-id':'gen-stream'}}));
+ try{
+  const adapter=adapterFor(transport),send=await adapter.prepareDispatch({input:frozen},identity,chunk=>observed.push(chunk)),pending=send().then(v=>{ended=true;return v;});
+  await vi.advanceTimersByTimeAsync(119_999);expect(ended).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);const result=await pending;
+  expect(result).toMatchObject({complete:false,transportIssue:'body_timeout',generationId:'gen-stream'});
+  expect(adapter.evidence(result,identity,'response')).toMatchObject({providerId:'gen-stream',cost:null,final:false});
+  expect(observed.length).toBeGreaterThan(100);expect(observed.every(data=>JSON.parse(data).choices[0].delta.content==='')).toBe(true);
+  expect(transport).toHaveBeenCalledOnce();expect(transport.mock.calls[0]![1]!.body).toBe(frozen);
+ }finally{timeout.mockRestore();vi.useRealTimers();}
+});
