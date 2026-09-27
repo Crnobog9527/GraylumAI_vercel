@@ -361,12 +361,12 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | PII-REGEX | 接手 PR #333（邮箱类个人信息匹配的性能加固，改的是安全过滤规则）：基于最新 staging 更新后重新审查、由 Owner 批准合并（第 8.4 节第 6 项） | — | 高 | 小 / 1 |
 | **3 差异化功能** | FUSION-REVIEW | 定稿报告多模型评审（第 4 节，见 [实施说明](tasks/FUSION.md)）；结果接入账号注销 | AC-3、RUNTIME-PROD、ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 |
 | | LIB-DOCS | 资料库上传、"我的文档 / 语料库"、真正删除、按会员等级的总存储空间和系统级文件数量保护上限（见 [实施说明](tasks/LIBRARY-VOICE.md)）；接入账号注销 | ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 |
-| | VOICE | 文风画像生成、确认和写作注入；接入账号注销 | LIB-DOCS、AGENT-CORE、DATA-ERASURE | 高 | 中 / 2–3 |
+| | VOICE | 文风画像生成、确认和写作注入；接入账号注销 | LIB-DOCS、AGENT-CORE、DATA-ERASURE、RUNTIME-PROD（资料内容发给模型前，"不用于训练"已由服务端强制） | 高 | 中 / 2–3 |
 | | UI-A | 输入框编辑内核（沿用 v11 §6.3，属于 `V3-OPC-UI`，不新建任务名）。需要编辑器依赖时（例如 Tiptap，先核实版本、许可和构建），第一个 PR 只引入这个依赖，按依赖变更由 Owner 批准合并；之后的 PR 只改前端并沿用现有请求接口 | AGENT-CORE | 高 | 中 / 3–4 |
 | | UI-MODEL | 输入框里的模型选择：可选范围来自管理员允许列表和会员权限，影响调用哪个模型和计费 | UI-A、ENTITLEMENTS | 高 | 小 / 1–2 |
 | | FUSION-COMPARE | 输入框里的多模型对比；结果接入账号注销 | UI-MODEL、FUSION-REVIEW、DATA-ERASURE | 高 | 中 / 2–3 |
-| | UI-B | 输入框 @ 引用资料库内容：把用户私有资料读进模型上下文，涉及权限和上下文 | UI-A、LIB-DOCS | 高 | 中 / 2 |
-| | UI-C | 输入框附件 = 上传进资料库再引用（不另建一套上传，只支持 D6 的文档类型） | UI-A、LIB-DOCS | 高 | 中 / 2 |
+| | UI-B | 输入框 @ 引用资料库内容：把用户私有资料读进模型上下文，涉及权限和上下文 | UI-A、LIB-DOCS、RUNTIME-PROD | 高 | 中 / 2 |
+| | UI-C | 输入框附件 = 上传进资料库再引用（不另建一套上传，只支持 D6 的文档类型） | UI-A、LIB-DOCS、RUNTIME-PROD | 高 | 中 / 2 |
 | | UI-FINISH | 导航、响应式、旧链接迁移、界面全验收（沿用 v11） | UI-B、UI-C | 普通 | 中 / 2–3 |
 | **4 收费和上线** | PAY-COMMON → PAY-WAFFO | 沿用 v11 §9 和第 11 节定义 | ENTITLEMENTS 之后，同一个 writer | 高 | 大 / 7–10 |
 | | LEGACY-CLOSE | 下线 `/chat`、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等；下线前提供旧对话历史的只读查看入口，旧链接跳转到它；旧对话不迁移、不删除 | AC-4 接管自由对话且入口已改指；UI-MODEL、UI-B、UI-C、UI-FINISH 已交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 |
@@ -383,9 +383,9 @@ DATA-ERASURE 删除规则设计 ─→ AC-2
 AGENT-CORE ─→ RUNTIME-PROD + MODEL-REASONING（同一 writer）
 ENTITLEMENTS ─→ PAY-COMMON ─→ PAY-WAFFO（同一 writer）
 RUNTIME-PROD + ENTITLEMENTS + DATA-ERASURE ─→ FUSION-REVIEW
-ENTITLEMENTS + DATA-ERASURE ─→ LIB-DOCS ─→ VOICE
+ENTITLEMENTS + DATA-ERASURE ─→ LIB-DOCS ─→ VOICE（另需 RUNTIME-PROD）
 AGENT-CORE ─→ UI-A ─→ UI-MODEL ─→ FUSION-COMPARE
-LIB-DOCS + UI-A ─→ UI-B、UI-C ─→ UI-FINISH
+LIB-DOCS + UI-A + RUNTIME-PROD ─→ UI-B、UI-C ─→ UI-FINISH
 SEC-RATELIMIT、COST-REPORT、PII-REGEX、CI-TRUST 其余部分、DEBT-QUICK（独立）
 AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLOSE ─→ V3-M3 ─→ REL-1
 ```
@@ -408,7 +408,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | --- | --- | --- |
 | N1a 止血和保护 | P0-1、P0-2、P0-4、CI-TRUST-1 | 导师出字速度在 staging 实测达标；计费和恢复测试进入 CI |
 | N1b 体验样片 | AC-0、AC-1 及其对应的 AGENT-CORE-UI 部分 | Owner 在 staging 用真实模型走完定位第一步，决定继续、调整还是换模型；右侧整理这一阶段沿用旧做法 |
-| N1c 完整定位流程 | DATA-ERASURE 删除规则设计、AC-2、AC-3、AC-5 | Owner 从进入到定稿完整走通并验收 |
+| N1c 完整定位流程 | DATA-ERASURE 删除规则设计、AC-2、AC-3、AC-5 及其对应的 AGENT-CORE-UI 部分（本步小结卡、右侧面板和进度条） | Owner 从进入到定稿完整走通并验收 |
 | N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
 | N2 上线基础 | RUNTIME-PROD、MODEL-REASONING、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON | 上线基础完成；然后邀请 5–10 位真实用户**封闭内测**：只开放定位、周选题和写作，用赠送积分，不开放付费，反馈用于调整 N3 的优先级（D8，不改变 D1 的公开上线范围） |
 | N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
