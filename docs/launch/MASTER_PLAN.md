@@ -364,7 +364,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | UI-C | 输入框附件 = 上传进资料库再引用（不另建一套上传，只支持 D6 的文档类型） | UI-A、LIB-DOCS | 高 | 中 / 2 |
 | | UI-FINISH | 导航、响应式、旧链接迁移、界面全验收（沿用 v11） | UI-B、UI-C | 普通 | 中 / 2–3 |
 | **4 收费和上线** | PAY-COMMON → PAY-WAFFO | 沿用 v11 §9 和第 11 节定义 | ENTITLEMENTS 之后，同一个 writer | 高 | 大 / 7–10 |
-| | LEGACY-CLOSE | 下线 `/chat`、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等；下线前提供旧对话历史的只读查看入口，旧链接跳转到它；旧对话不迁移、不删除 | AC-4 接管自由对话且入口已改指 | 高 | 中 / 3–4 |
+| | LEGACY-CLOSE | 下线 `/chat`、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等；下线前提供旧对话历史的只读查看入口，旧链接跳转到它；旧对话不迁移、不删除 | AC-4 接管自由对话且入口已改指；UI-MODEL、UI-B、UI-C、UI-FINISH 已交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 |
 | | V3-M3 → REL-1 | 完整验收和发布（第 9.3 节） | 以上全部 | 高；生产另行批准 | 大 |
 | **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | 沿用 v11 §8（C1 套餐式自动追踪已确认） | 上线 | 高 | 大 |
 | | LEARN-1、LEARN-2 | 第 6.3 节：读取用户数据、依赖数据使用同意 | 有真实用户 / SOCIAL-SYNC | 高 | 中 |
@@ -382,7 +382,7 @@ ENTITLEMENTS + DATA-ERASURE ─→ LIB-DOCS ─→ VOICE
 AGENT-CORE ─→ UI-A ─→ UI-MODEL ─→ FUSION-COMPARE
 LIB-DOCS + UI-A ─→ UI-B、UI-C ─→ UI-FINISH
 SEC-RATELIMIT、COST-REPORT、CI-TRUST 其余部分、DEBT-QUICK（独立）
-AC-4 ─→ LEGACY-CLOSE ─→ V3-M3 ─→ REL-1
+AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLOSE ─→ V3-M3 ─→ REL-1
 ```
 
 <a id="parallel"></a>
