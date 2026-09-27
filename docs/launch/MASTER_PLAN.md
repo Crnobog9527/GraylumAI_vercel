@@ -322,7 +322,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 
 | 阶段 | 要做的事 |
 | --- | --- |
-| **上线前必须做**（随 AGENT-CORE 和 DATA-ERASURE） | ① 选题采用记录关联到提出这些选题的执行（现在断了），保存"AI 原提议 vs 用户采用的文字"；② 整理出的信息保留来源（用户原话还是 AI 提议）和对应执行；③ 给缺少时间戳的记录补上创建时间；④ 记录"重写 / 放弃"事件（"有用 / 没用"按钮等封闭内测后再加）；⑤ 用户数据使用同意（写进隐私条款）：允许 Graylum 团队查看去除身份信息后的使用记录，用来人工改进产品；默认不参与，用户主动勾选才参与。现在不会用来训练模型，也不会自动修改 Skill。以后改进机制设计出来、用途发生变化时，必须重新征求用户同意；用户撤回同意后，尚未用于改进的记录从案例视图中移除；⑥ 用户数据删除办法（第 8 节 DATA-ERASURE） |
+| **上线前必须做**（随 AGENT-CORE 和 DATA-ERASURE） | ① 选题采用记录关联到提出这些选题的执行（现在断了），保存"AI 原提议 vs 用户采用的文字"；② 整理出的信息保留来源（用户原话还是 AI 提议）和对应执行；③ 给缺少时间戳的记录补上创建时间；④ 记录"重写 / 放弃"事件（"有用 / 没用"按钮等封闭内测后再加）；⑤ 用户数据使用同意（由 AC-5 实现勾选、撤回、按同意状态过滤和验收，并写进隐私条款）：允许 Graylum 团队查看去除身份信息后的使用记录，用来人工改进产品；默认不参与，用户主动勾选才参与。现在不会用来训练模型，也不会自动修改 Skill。以后改进机制设计出来、用途发生变化时，必须重新征求用户同意；用户撤回同意后，尚未用于改进的记录从案例视图中移除；⑥ 用户数据删除办法（第 8 节 DATA-ERASURE） |
 | 有真实用户后（LEARN-1） | 管理员"问题案例"视图（按 Skill 版本汇总采用率、修改量、差评理由）；从真实案例整理固定测试集，新 Skill 版本发布前先跑测试集对比 |
 | 有社媒数据后（LEARN-2，依赖 SOCIAL-SYNC） | 发布记录关联到具体内容版本和平台作品链接，定期记录指标；只对标题、封面这类能在平台上做 A/B 的变量做因果比较 |
 | 可能不值得做 | 自动改写 Skill、定位层面的结果归因、跨用户"全局自动学习"、每条案例的多种置信度打分 |
@@ -345,7 +345,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | P0-3 | 本规划（v12）审查合并 | — | 高 | 本 PR |
 | | P0-4 | 修复 #443 遗留的过期测试（它还在等已删除的"业务名称"弹窗） | — | 普通 | 小 / 1 |
 | | CI-TRUST-1 | 集成测试进 CI（计费、恢复等关键路径） | — | 高 | 中 / 1–2 |
-| **1 核心体验重做** | AGENT-CORE | AC-0 可行性验证；AC-1 提问卡和纯文本流式；AC-2 后台整理、Skill 模板、右侧数据沉淀区；AC-3 每步确认、确定性报告、定稿、承接第一周选题；AC-4 通用工作区和旧入口改指；AC-5 数据基础补缺。见 [实施说明](tasks/AGENT-CORE.md) | P0-1；AC-2 另外依赖 CI-TRUST-1 和 DATA-ERASURE 的删除规则设计 | 高 | 大 / 12–16 |
+| **1 核心体验重做** | AGENT-CORE | AC-0 可行性验证；AC-1 提问卡和纯文本流式；AC-2 后台整理、Skill 模板、右侧数据沉淀区；AC-3 每步确认、确定性报告、定稿、承接第一周选题；AC-4 通用工作区和旧入口改指；AC-5 数据基础补缺，包括 D5 数据使用同意（勾选、撤回、按同意状态过滤记录）。见 [实施说明](tasks/AGENT-CORE.md) | P0-1；AC-2 另外依赖 CI-TRUST-1 和 DATA-ERASURE 的删除规则设计 | 高 | 大 / 12–16 |
 | | AGENT-CORE-UI | 从 AGENT-CORE 拆出的纯前端部分：提问卡和本步小结卡的显示、流式文字显示、右侧面板和进度条的布局、旧入口链接改指。只改前端，沿用现有接口；需要改接口、工具、数据库或计费的部分一律留在 AGENT-CORE | 与对应的 AGENT-CORE 子任务配合 | 普通 | 中 / 3–4 |
 | | CI-TRUST | 其余部分：ESLint 覆盖 TS/TSX；网站单测统一入口；API 独立类型检查；删除 `@repo/ui` 空壳和未接入的 ESLint 配置包 | — | 高 | 中 / 3 |
 | | DEBT-QUICK | 第 8.3 节第 2 项的快速清理（只含普通改动） | — | 普通 | 小 / 2 |
@@ -358,7 +358,8 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | **3 差异化功能** | FUSION-REVIEW | 定稿报告多模型评审（第 4 节，见 [实施说明](tasks/FUSION.md)）；结果接入账号注销 | AC-3、RUNTIME-PROD、ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 |
 | | LIB-DOCS | 资料库上传、"我的文档 / 语料库"、真正删除、按会员等级的总存储空间和系统级文件数量保护上限（见 [实施说明](tasks/LIBRARY-VOICE.md)）；接入账号注销 | ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 |
 | | VOICE | 文风画像生成、确认和写作注入；接入账号注销 | LIB-DOCS、AGENT-CORE、DATA-ERASURE | 高 | 中 / 2–3 |
-| | UI-A | 输入框编辑内核（沿用 v11 §6.3），只改前端并沿用现有请求接口；引入编辑器依赖的那个 PR 属于高风险 | AGENT-CORE | 普通（依赖 PR 为高） | 中 / 2–3 |
+| | UI-A-DEP | 为输入框引入编辑器依赖（例如 Tiptap，先核实版本、许可和构建） | AGENT-CORE | 高 | 小 / 1 |
+| | UI-A | 输入框编辑内核（沿用 v11 §6.3），只改前端并沿用现有请求接口；不引入新依赖 | UI-A-DEP（如果需要编辑器依赖） | 普通 | 中 / 2–3 |
 | | UI-MODEL | 输入框里的模型选择：可选范围来自管理员允许列表和会员权限，影响调用哪个模型和计费 | UI-A、ENTITLEMENTS | 高 | 小 / 1–2 |
 | | FUSION-COMPARE | 输入框里的多模型对比；结果接入账号注销 | UI-MODEL、FUSION-REVIEW、DATA-ERASURE | 高 | 中 / 2–3 |
 | | UI-B | 输入框 @ 引用资料库内容：把用户私有资料读进模型上下文，涉及权限和上下文 | UI-A、LIB-DOCS | 高 | 中 / 2 |
@@ -380,7 +381,7 @@ AGENT-CORE ─→ RUNTIME-PROD + MODEL-REASONING（同一 writer）
 ENTITLEMENTS ─→ PAY-COMMON ─→ PAY-WAFFO（同一 writer）
 RUNTIME-PROD + ENTITLEMENTS + DATA-ERASURE ─→ FUSION-REVIEW
 ENTITLEMENTS + DATA-ERASURE ─→ LIB-DOCS ─→ VOICE
-AGENT-CORE ─→ UI-A ─→ UI-MODEL ─→ FUSION-COMPARE
+AGENT-CORE ─→ UI-A-DEP ─→ UI-A ─→ UI-MODEL ─→ FUSION-COMPARE
 LIB-DOCS + UI-A ─→ UI-B、UI-C ─→ UI-FINISH
 SEC-RATELIMIT、COST-REPORT、CI-TRUST 其余部分、DEBT-QUICK（独立）
 AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLOSE ─→ V3-M3 ─→ REL-1
@@ -407,7 +408,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | N1c 完整定位流程 | DATA-ERASURE 删除规则设计、AC-2、AC-3、AC-5 | Owner 从进入到定稿完整走通并验收 |
 | N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
 | N2 上线基础 | RUNTIME-PROD、MODEL-REASONING、ENTITLEMENTS、SEC-RATELIMIT、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON | 上线基础完成；然后邀请 5–10 位真实用户**封闭内测**：只开放定位、周选题和写作，用赠送积分，不开放付费，反馈用于调整 N3 的优先级（D8，不改变 D1 的公开上线范围） |
-| N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
+| N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A-DEP、UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
 | N4 收口 | LEGACY-CLOSE、V3-M3 | 完整验收；REL-1 和生产另行批准 |
 
 每批由 Owner 选定后开工，批次内由 Agent 自主排序、测试、修复，完成后停下，不自动开始下一批（AGENTS 第 5 节）。
@@ -418,7 +419,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 - `V3-WORKBENCH` 的 SCOPE / AGENT / ENTRY / CONTENT：代码已随 #422 合并；未完成的 VERIFY 和 Owner 体验验收并入 AGENT-CORE。
 - `V3-OPC-UI` 的 A / B / C / FINISH：改称 UI-A / UI-B / UI-C / UI-FINISH，UI-C 改为复用 LIB-DOCS。
 - `V3-GOLD`：改名 FUSION，拆成 FUSION-REVIEW 和 FUSION-COMPARE。
-- 新增：AGENT-CORE（含 AC-0）、AGENT-CORE-UI（从 AGENT-CORE 拆出的纯前端部分）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的模型选择）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2。
+- 新增：AGENT-CORE（含 AC-0）、AGENT-CORE-UI（从 AGENT-CORE 拆出的纯前端部分）、UI-A-DEP（从 UI-A 拆出的编辑器依赖）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的模型选择）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2。
 - 迁移编号在实际实施时分配，本文不预占。
 
 ### 7.6 Owner 需要提前启动的事项
