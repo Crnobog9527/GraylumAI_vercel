@@ -42,7 +42,7 @@ export function createRequestTiming(now:()=>number=()=>performance.now()){
  const origin=now();
  const phases=new Map<TimingPhase,PhaseTally>(),labels=new Map<string,Tally>();
  const marks:Partial<Record<TimingMark,number>>={},executions=new Set<string>();
- let procedures:string[]=[],phase:TimingPhase='prelude',since=origin,emitted=false;
+ let procedures:string[]=[],phase:TimingPhase='prelude',since=origin,holds=1,emitted=false;
  const slot=(p:TimingPhase)=>{let s=phases.get(p);if(!s){s={rt:0,rtMs:0,ms:0};phases.set(p,s);}return s;};
  const safe=(fn:()=>void)=>{try{fn();}catch{/* measurement only */}};
  const switchTo=(next:TimingPhase)=>{const t=now();slot(phase).ms+=t-since;since=t;phase=next;};
@@ -88,9 +88,11 @@ export function createRequestTiming(now:()=>number=()=>performance.now()){
   setProcedures:(paths:readonly unknown[])=>safe(()=>{
    procedures=paths.filter((p):p is string=>typeof p==='string'&&PROCEDURE.test(p)).slice(0,8);
   }),
-  /** Writes the summary line once. The route calls this when its Response is
-   * complete; a streamed procedure calls it instead when its execution settles. */
-  release:()=>safe(emit),
+  /** The route holds one reference and adds one per streamed procedure in its
+   * batch, since those settle after the Response. The line is written once,
+   * when the last reference is released. */
+  retain:(count:number)=>safe(()=>{if(Number.isSafeInteger(count)&&count>0)holds+=count;}),
+  release:()=>safe(()=>{if(--holds<=0)emit();}),
   summary,
   /** Makes this recorder current for services that do not receive the budget. */
   run:<T>(fn:()=>T):T=>scope.run(recorder,fn),

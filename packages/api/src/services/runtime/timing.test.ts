@@ -53,6 +53,17 @@ it('writes one line only for requests that reached a Runtime or positioning phas
  expect(info.mock.calls[0]!.slice(0,2)).toEqual(['api','runtime_request_timing']);
 });
 
+it('waits for every streamed procedure in a batch before writing the line',()=>{
+ const info=vi.spyOn(logger,'info').mockImplementation(()=>{});
+ const timing=createRequestTiming();timing.enter('policy');
+ // Route: two batched streams, then its own Response completes.
+ timing.retain(2);timing.release();
+ timing.release();expect(info).not.toHaveBeenCalled();
+ timing.mark('firstPublicText');timing.release();timing.release();
+ expect(info).toHaveBeenCalledTimes(1);
+ expect((info.mock.calls[0]![2] as {marks:object}).marks).toHaveProperty('firstPublicTextMs');
+});
+
 it('logs only labels, counts, milliseconds and internal identifiers',async()=>{
  const secrets=['user@example.com','eyJhbGciOiJIUzI1NiJ9.payload.sig','sk-or-v1-secret','service-role-key',
   '我想做一个摄影自媒体账号','SKILL.md instructions','mentor reply text','refresh_token','grant_type'];

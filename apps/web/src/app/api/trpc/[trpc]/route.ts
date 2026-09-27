@@ -49,24 +49,24 @@ async function isMaintenanceModeEnabled(budgetFetch:typeof fetch): Promise<boole
   return data?.value === true || data?.value === 'true';
 }
 
-// Streamed procedures keep running after the Response is returned; they release
-// their own timing hold when the execution settles.
+// Streamed procedures keep running after the Response is returned; each one
+// releases its own timing reference when its execution settles.
 const STREAMED_PROCEDURES = new Set(['runtime.executeStream']);
 
 const handler = async (req: NextRequest) => {
   // Before authentication/maintenance: batched procedures share this deadline.
   const runtimeBudget=createRuntimeBudget();
-  let procedurePaths: string[] = [];
   try {
-    procedurePaths = parseTrpcProcedurePaths(req.nextUrl.pathname);
+    const procedurePaths = parseTrpcProcedurePaths(req.nextUrl.pathname);
     runtimeBudget.timing.setProcedures(procedurePaths);
+    runtimeBudget.timing.retain(procedurePaths.filter((path) => STREAMED_PROCEDURES.has(path)).length);
   } catch {
     // Timing is measurement only; the maintenance check parses paths again.
   }
   try {
     return await runtimeBudget.timing.run(() => handleTrpc(req, runtimeBudget));
   } finally {
-    if (!procedurePaths.some((path) => STREAMED_PROCEDURES.has(path))) runtimeBudget.timing.release();
+    runtimeBudget.timing.release();
   }
 };
 

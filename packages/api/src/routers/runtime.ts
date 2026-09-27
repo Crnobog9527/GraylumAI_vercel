@@ -127,7 +127,7 @@ export const runtimeRouter=router({
   // authority. Disconnect discards display progress, not provider evidence.
   type Event=RuntimeProgress|{type:'result';result:Awaited<ReturnType<typeof executeOriginal>>};
   let textEvent:Event|undefined,phaseEvent:Event|undefined,resultEvent:Event|undefined,done=false,failure:unknown,wake:()=>void=()=>{};
-  // The route returns before this stream ends and leaves the timing line to it.
+  // The route returns before this stream ends; release this stream's reference.
   const timing=options.ctx.runtimeBudget?.timing;
   const pending=executeOriginal(options,event=>{if(event.type==='text')textEvent=event;else phaseEvent=event;wake();}).then(result=>{resultEvent={type:'result',result};},error=>{failure=error;}).finally(()=>{done=true;wake();});
   try{
