@@ -82,7 +82,8 @@ export async function runRuntime(input: RuntimeRunnerInput) {
       return t.execute(args,callId);
     }}));
   const agent=new Agent({name:'Graylum Runtime',model,instructions:input.instructions,tools,
-    modelSettings:{store:false,maxTokens:input.maxOutputTokens,parallelToolCalls:false,retry:{maxRetries:0},...(input.reasoning?{reasoning:{effort:input.reasoning.effort}}:{})}});
+    modelSettings:{store:false,maxTokens:input.maxOutputTokens,parallelToolCalls:false,retry:{maxRetries:0},
+      ...(input.reasoning?{reasoning:{effort:input.reasoning.effort}}:{})}});
   const runner=new Runner({model,tracingDisabled:true,traceIncludeSensitiveData:false});
   try{
     const options={session:input.session,maxTurns:input.maxTurns,

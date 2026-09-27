@@ -28,4 +28,5 @@ export function reasoningFor(target:RequestTarget,model:string):ReasoningPolicy{
 }
 
 /** Provider adapter allowlist: only values some verified policy can produce. */
-export const approvedReasoningEfforts:ReadonlySet<string>=new Set(Object.values(modelPolicies).flatMap(targets=>Object.values(targets).map(policy=>policy!.effort)));
+export const approvedReasoningEfforts:ReadonlySet<string>=new Set(
+ Object.values(modelPolicies).flatMap(targets=>Object.values(targets).map(policy=>policy!.effort)));
