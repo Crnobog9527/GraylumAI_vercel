@@ -200,7 +200,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 ### 4.6 前置依赖
 
 - 正式环境可以真实调用模型（RUNTIME-PROD）；
-- 新对话工作区（第 3 节）；对比模式还需要输入框里的模型选择（UI-A）；
+- 新对话工作区（第 3 节）；对比模式还需要输入框里的模型选择（UI-MODEL）；
 - 会员权限配置（ENTITLEMENTS）；
 - 真实小额对账通过后，才对外收费。
 
@@ -245,7 +245,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 
 1. 用户在语料库里点"学习我的文风"（或 Agent 提议、用户同意），系统先告知预计积分。
 2. 整理模型读取语料（总量有上限，超出时优先使用用户标记为"最像我"的篇目），生成一份文风画像：语气、句子长短、开头方式、观点强弱、常用表达、不喜欢的表达、各平台差异，并附 2–3 段最能代表本人的原文片段。
-3. 用户查看、修改、确认后生效。画像带版本，写入已确认偏好机制（需要放宽长度并接入 Runtime，不另建记忆系统）。
+3. 用户查看、修改、确认后生效。画像带版本，写入已确认偏好机制（需要放宽长度并接入 Runtime，不另建记忆系统）。**生成时冻结语料版本**（参与的文档及其版本）；保存和确认生效时比对当前语料版本，期间有文档被删除或修改，新画像不生效，直接标为"需要更新"，防止晚到的结果带着已删除文档的内容上线。
 4. 写作类 Skill（后台为 Skill 勾选"使用用户文风"）执行时，如果用户开着"使用我的文风"，Runtime 会在上下文里带上当前画像版本（约 2–3 千 token 以内），并在执行记录里冻结版本号。重放使用原版本，新请求使用新版本。
 5. 语料有增删时，旧画像标记为"需要更新"，由用户决定何时重新生成，不自动花积分。
 
@@ -315,7 +315,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 
 ### 7.1 阶段和任务
 
-"风险"一列按 AGENTS 第 4 节：**高** = 合并前需要 Owner 回复"同意合并"；**普通** = 质量达标后可按 staging 自动交付授权合并。
+"风险"一列按 AGENTS 第 4 节：**高** = 合并前需要 Owner 回复"同意合并"；**普通** = 质量达标后可按 staging 自动交付授权合并。每个任务只有一个风险级别；实施中如果普通任务需要出现高风险改动（依赖、权限、数据库、计费、金额、CI 等），把那部分拆成单独的高风险 PR，不混在普通 PR 里。
 
 | 阶段 | 任务 | 内容 | 依赖 | 风险 |
 | --- | --- | --- | --- | --- |
@@ -332,25 +332,26 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | SEC-RATELIMIT | 限流 fail-closed、Redis 超时放行、诊断计费探针 | — | 高 |
 | | DATA-ERASURE | 账号注销与数据删除：保留账务金额和编号，清除正文、原始响应和私有 Skill 文本副本；清理孤立文件；数据使用同意 | — | 高 |
 | **3 差异化功能** | FUSION-REVIEW | 定稿报告多模型评审（第 4 节） | AC-3、RUNTIME-PROD、ENTITLEMENTS | 高 |
-| | UI-A | 输入框内核（沿用 v11 §6.3）+ 模型选择 | AGENT-CORE | 普通 / 高 |
-| | FUSION-COMPARE | 输入框里的多模型对比（第 4 节） | UI-A、FUSION-REVIEW 的并行执行能力 | 高 |
+| | UI-A | 输入框编辑内核（沿用 v11 §6.3），只改前端并沿用现有请求接口 | AGENT-CORE | 普通 |
+| | UI-MODEL | 输入框里的模型选择：可选范围来自管理员允许列表和会员权限，影响调用哪个模型和计费 | UI-A、ENTITLEMENTS | 高 |
+| | FUSION-COMPARE | 输入框里的多模型对比（第 4 节） | UI-MODEL、FUSION-REVIEW 的并行执行能力 | 高 |
 | | LIB-DOCS | 资料库上传、"我的文档 / 语料库"、真正删除、额度 | ENTITLEMENTS | 高 |
 | | VOICE | 文风画像生成、确认和写作注入（第 5 节） | LIB-DOCS、AGENT-CORE | 高 |
-| | UI-B | 输入框 @ 引用资料库内容（沿用 v11 §6.3） | UI-A、LIB-DOCS | 普通 / 高 |
+| | UI-B | 输入框 @ 引用资料库内容（沿用 v11 §6.3）：把用户私有资料读进模型上下文，涉及权限和上下文 | UI-A、LIB-DOCS | 高 |
 | | UI-C | 输入框附件 = 上传进资料库再引用（不另建一套上传） | UI-A、LIB-DOCS | 高 |
 | | UI-FINISH | 导航、响应式、旧链接迁移、界面全验收（沿用 v11） | UI-B、UI-C | 普通 |
 | **4 收费和上线** | PAY-COMMON → PAY-WAFFO | 沿用 v11 §9 和第 11 节定义 | PAY-COMMON 在 ENTITLEMENTS 之后（都改会员计划） | 高 |
 | | LEGACY-CLOSE | 下线 `/chat`、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等 | AC-4 接管自由对话且入口已改指 | 高 |
 | | V3-M3 → REL-1 | 完整验收和发布（第 9.3 节） | 以上全部 | 高；生产另行批准 |
 | **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | 沿用 v11 §8（C1 套餐式自动追踪已确认） | 上线 | 高 |
-| | LEARN-1、LEARN-2 | 第 6.3 节 | 有真实用户 / SOCIAL-SYNC | 普通 / 高 |
+| | LEARN-1、LEARN-2 | 第 6.3 节：读取用户数据、依赖数据使用同意 | 有真实用户 / SOCIAL-SYNC | 高 |
 | | 资料库扩展 | 全文检索或 pgvector、图片和音频、Google Drive / Notion 导入 | LIB-DOCS | 高 |
 
 ### 7.2 依赖简图
 
 ```text
 P0-1 ─→ AGENT-CORE(AC-1…AC-5) ─→ RUNTIME-PROD ─┐
-CI-TRUST、DEBT-QUICK（与 AGENT-CORE 并行）      ├─→ FUSION-REVIEW ─→ FUSION-COMPARE ←─ UI-A
+CI-TRUST、DEBT-QUICK（与 AGENT-CORE 并行）      ├─→ FUSION-REVIEW ─→ FUSION-COMPARE ←─ UI-MODEL ←─ UI-A
 ENTITLEMENTS ────────────────────────────────┘                    ↑
 ENTITLEMENTS ─→ LIB-DOCS ─→ VOICE                                 AGENT-CORE
 LIB-DOCS + UI-A ─→ UI-B、UI-C ─→ UI-FINISH
@@ -377,7 +378,7 @@ AC-4 ─→ LEGACY-CLOSE ─→ V3-M3 ─→ REL-1
 | --- | --- | --- |
 | N1 | P0-1、P0-2、P0-4、DEBT-QUICK、COST-REPORT、CI-TRUST、AGENT-CORE | 新交互在 staging 真实可用，Owner 体验验收 |
 | N2 | RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、DATA-ERASURE、PAY-COMMON | 上线基础完成 |
-| N3 | FUSION-REVIEW、FUSION-COMPARE、UI-A/B/C/FINISH、LIB-DOCS、VOICE、PAY-WAFFO | 差异化功能完成 |
+| N3 | FUSION-REVIEW、FUSION-COMPARE、UI-A、UI-MODEL、UI-B、UI-C、UI-FINISH、LIB-DOCS、VOICE、PAY-WAFFO | 差异化功能完成 |
 | N4 | LEGACY-CLOSE、V3-M3 | 完整验收；REL-1 和生产另行批准 |
 
 每批由 Owner 选定后开工，批次内由 Agent 自主排序、测试、修复，完成后停下，不自动开始下一批（AGENTS 第 5 节）。
