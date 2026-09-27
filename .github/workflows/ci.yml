@@ -263,6 +263,39 @@ jobs:
 
       # Browser reports, storage state, traces, videos, and screenshots are intentionally not uploaded.
 
+  integration:
+    name: Run billing and recovery integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Disposable digest-pinned PostgreSQL, PostgREST and GoTrue containers with
+      # per-run synthetic JWTs. No secrets, no provider network, no Next app or
+      # browser; the runner lists and verifies the excluded app-only cases.
+      - name: Integration — BILL2 billing
+        run: node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app
+
+      - name: Integration — Runtime recovery and streaming
+        run: node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app
+
   lint-check:
     name: Lint & Type Check
     needs: [lint-and-type]
@@ -305,7 +338,7 @@ jobs:
 
   unit-check:
     name: Unit Tests
-    needs: [test]
+    needs: [test, integration]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -315,9 +348,10 @@ jobs:
       - name: Require successful worker validation
         env:
           WORK_RESULT: ${{ needs.test.result }}
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
         run: |
           set -euo pipefail
-          if [ "$WORK_RESULT" != success ]; then
+          if [ "$WORK_RESULT" != success ] || [ "$INTEGRATION_RESULT" != success ]; then
             echo 'Missing, failed, cancelled, or skipped validation.' >&2
             exit 1
           fi
