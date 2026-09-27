@@ -12,7 +12,7 @@
 | 施工顺序、依赖、并行线、授权批次 | [v12 §7](MASTER_PLAN.md#construction) |
 | 技术债核实结果与清理顺序 | [v12 §8](MASTER_PLAN.md#debt) |
 | 仍然有效的旧规则、技术规格、验收出口 | [v12 §9](MASTER_PLAN.md#rules) |
-| Owner 决定事项（D1–D6 已确认） | [v12 §10](MASTER_PLAN.md#decisions) |
+| Owner 决定事项（D1–D7 已确认） | [v12 §10](MASTER_PLAN.md#decisions) |
 | 仓库操作、风险分级、审查、合并、生产权限 | [AGENTS.md](../../AGENTS.md) |
 | 技术栈、代码组织、代码大小限制、测试命令 | [docs/ENGINEERING.md](../ENGINEERING.md) |
 
