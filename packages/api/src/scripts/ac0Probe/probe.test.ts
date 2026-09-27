@@ -476,3 +476,63 @@ describe('real paths (review P2)', () => {
     expect(out.join('')).toContain('PROBE_SKILL_INSIDE_REPOSITORY');
   });
 });
+
+describe('private content stays in the local results file', () => {
+  const SKILL_MARKER = 'SKILL-PRIVATE-MARKER-7d1f';
+  const REFERENCE_MARKER = 'REFERENCE-PRIVATE-MARKER-2b9c';
+  const INPUT_MARKER = 'USER-INPUT-MARKER-5e3a';
+  const REPLY_MARKER = 'MODEL-REPLY-MARKER-9a4d';
+  const PROMPT_TEXT = 'You are the Graylum mentor';
+
+  function privateInputs() {
+    const skillDir = join(home, 'skill');
+    mkdirSync(join(skillDir, 'references'), {recursive: true});
+    writeFileSync(join(skillDir, 'SKILL.md'), `# Private\n${SKILL_MARKER}\nRead [step](references/step.md).\n`);
+    writeFileSync(join(skillDir, 'references', 'step.md'), REFERENCE_MARKER + '\n');
+    const scenarios = join(home, 'scenarios.json');
+    writeFileSync(scenarios, JSON.stringify({scenarios: ['ask', 'text', 'reference'].map(kind =>
+      ({id: kind + '-1', kind, input: `${INPUT_MARKER} ${kind}`}))}));
+    return ['--skill-dir', skillDir, '--scenarios', scenarios];
+  }
+
+  it('prints and summarizes ids and numbers only', async () => {
+    const extra = privateInputs();
+    const args = base('--ask', '1', '--text', '1', '--reference', '1', ...extra);
+    const id = await planId(args);
+    const network = recording(async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      const names = (body.tools ?? []).map((tool: {function: {name: string}}) => tool.function.name);
+      const replied = body.messages.some((message: {role: string}) => message.role === 'tool');
+      if (names.includes('read_reference') && !replied) {
+        return sseResponse(body.model, toolDeltas('read_reference', {path: 'references/step.md'}, 'call_ref'), {finish: 'tool_calls'});
+      }
+      return sseResponse(body.model, textDeltas(`${REPLY_MARKER} Which audience?`));
+    });
+    out = [];
+    const outcome = await runProbe([...args, '--live', '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
+    expect(outcome.exitCode).toBe(0);
+    const sent = JSON.stringify(network.sent.map(call => call.body));
+    expect(sent).toContain(SKILL_MARKER);
+    expect(sent).toContain(REFERENCE_MARKER);
+    const visible = out.join('') + readFileSync(join(outcome.runDir!, 'summary.md'), 'utf8') +
+      readFileSync(join(outcome.runDir!, 'summary.json'), 'utf8') + readFileSync(join(outcome.runDir!, 'plan.json'), 'utf8');
+    for (const marker of [SKILL_MARKER, REFERENCE_MARKER, INPUT_MARKER, REPLY_MARKER, PROMPT_TEXT]) {
+      expect(visible).not.toContain(marker);
+    }
+    expect(readFileSync(join(outcome.runDir!, 'results.jsonl'), 'utf8')).toContain(REPLY_MARKER);
+  });
+
+  it('reports a malformed private file without quoting it', async () => {
+    const extra = privateInputs();
+    writeFileSync(extra[3]!, `{"scenarios": [${INPUT_MARKER}]}`);
+    expect((await runProbe(base('--ask', '1', ...extra), {}, deps())).exitCode).toBe(2);
+    writeFileSync(extra[3]!, JSON.stringify({scenarios: [{id: 'x', kind: 'ask', input: INPUT_MARKER, extra: INPUT_MARKER}]}));
+    expect((await runProbe(base('--ask', '1', ...extra), {}, deps())).exitCode).toBe(2);
+    const config = join(home, 'configs.json');
+    writeFileSync(config, JSON.stringify([{id: INPUT_MARKER.toLowerCase(), model: INPUT_MARKER}]));
+    expect((await runProbe([...base('--ask', '1'), '--config-file', config], {}, deps())).exitCode).toBe(2);
+    expect(out.join('')).toContain('PROBE_SCENARIOS_INVALID');
+    expect(out.join('')).toContain('PROBE_CONFIG_FILE_INVALID');
+    expect(out.join('').toLowerCase()).not.toContain(INPUT_MARKER.toLowerCase());
+  });
+});

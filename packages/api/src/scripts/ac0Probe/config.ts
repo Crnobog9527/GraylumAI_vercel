@@ -60,7 +60,12 @@ export function routing(config: ProbeConfig) {
 export function resolveConfigs(ids: string[], extra: unknown): ProbeConfig[] {
   const registry = new Map<string, ProbeConfig>(builtInConfigs.map(config => [config.id, config]));
   if (extra !== undefined) {
-    for (const config of z.array(probeConfig).max(32).parse(extra)) registry.set(config.id, config);
+    const parsed = z.array(probeConfig).max(32).safeParse(extra);
+    if (!parsed.success) {
+      const where = parsed.error.issues.slice(0, 5).map(issue => (issue.path.join('.') || '(root)') + ' ' + issue.code);
+      throw new Error('PROBE_CONFIG_FILE_INVALID: ' + where.join('; '));
+    }
+    for (const config of parsed.data) registry.set(config.id, config);
   }
   if (!ids.length || new Set(ids).size !== ids.length) throw new Error('PROBE_CONFIG_INVALID: list each config once');
   return ids.map(id => {

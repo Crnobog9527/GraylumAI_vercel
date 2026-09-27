@@ -4,9 +4,10 @@ import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {parseArgs} from 'node:util';
+import {z} from 'zod';
 import {DEFAULT_MAX_CALLS, DEFAULT_MAX_USD, validateCaps} from './budget.ts';
 import {callBoundUsd, DEFAULT_CONFIG_IDS, resolveConfigs, type ProbeConfig} from './config.ts';
-import {scenariosOf, type LoadedSkill, type Scenario} from './skill.ts';
+import {parsePrivateJson, scenariosOf, type LoadedSkill, type Scenario} from './skill.ts';
 import type {TrialKind} from './trial.ts';
 
 export const TRIAL_KINDS: readonly TrialKind[] = ['ask', 'text', 'reference'];
@@ -138,7 +139,7 @@ function scenarioBytes(scenario: Scenario): number {
 }
 
 export function buildPlan(args: ProbeArgs, skill: LoadedSkill, scenarios: Scenario[], scenarioDigest: string): ProbePlan {
-  const extra = args.configFile ? JSON.parse(readFileSync(args.configFile, 'utf8')) as unknown : undefined;
+  const extra = args.configFile ? parsePrivateJson(readFileSync(args.configFile, 'utf8'), z.unknown(), 'CONFIG_FILE') : undefined;
   const configs = resolveConfigs(args.configIds, extra);
   let plannedCalls = 0;
   let plannedUsd = 0;

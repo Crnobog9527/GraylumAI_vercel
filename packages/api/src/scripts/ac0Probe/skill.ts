@@ -101,9 +101,24 @@ const fixtureScenarios: Scenario[] = [
   {id: 'fixture-reference', kind: 'reference', history: [], input: 'Let us start the gather task. What do you need from me?'},
 ];
 
+/** Parses a private file. Errors name only the failing field and issue code:
+ * JSON and schema messages can quote file content, which must not reach a console. */
+export function parsePrivateJson<T>(text: string, schema: z.ZodType<T>, label: string): T {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new Error(`PROBE_${label}_INVALID: not valid JSON`);
+  }
+  const parsed = schema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  const where = parsed.error.issues.slice(0, 5).map(issue => (issue.path.join('.') || '(root)') + ' ' + issue.code);
+  throw new Error(`PROBE_${label}_INVALID: ${where.join('; ')}`);
+}
+
 export function loadScenarios(path: string | undefined, skill: LoadedSkill): {scenarios: Scenario[]; digest: string} {
   let scenarios: Scenario[];
-  if (path) scenarios = scenarioFile.parse(JSON.parse(readRegular(resolve(path)))).scenarios;
+  if (path) scenarios = parsePrivateJson(readRegular(resolve(path)), scenarioFile, 'SCENARIOS').scenarios;
   else if (skill.isFixture) scenarios = fixtureScenarios.map(scenario => scenarioSchema.parse(scenario));
   else throw new Error('PROBE_SCENARIOS_REQUIRED: a private --skill-dir needs --scenarios <file> outside the repository');
   if (new Set(scenarios.map(scenario => scenario.id)).size !== scenarios.length) throw new Error('PROBE_SCENARIO_ID_DUPLICATE');
