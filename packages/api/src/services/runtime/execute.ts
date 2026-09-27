@@ -13,6 +13,7 @@ import { PostgresSession, type SessionRpc } from './session';
 import { runRuntime, type RuntimeTool } from './runner';
 import { selectRuntimeHistory, selectRuntimeCallInput, projectSupersededScopeItem, requestsHistoricalComparison, assertRuntimeRequestCapacity, runtimeScopeInput } from './context';
 import { matchingPlan, matchingInput, MATCH_INSTRUCTIONS, parseMatch, type MatchCandidate } from './matching';
+import { reasoningPolicy } from './reasoningPolicy';
 const preflightCodes=new Set(['RUNTIME_TIME_BUDGET_EXHAUSTED','RUNTIME_PROVIDER_HISTORY_DENIED','RUNTIME_PROVIDER_BINDING_DENIED','BILL2_PROVIDER_REQUEST_DENIED','BILL2_PROVIDER_CREDENTIAL_UNAVAILABLE','BILL2_PROVIDER_IDENTITY_DENIED','BILL2_PROVIDER_MODEL_DENIED','BILL2_PROVIDER_QUOTE_REQUIRED','BILL2_PROVIDER_QUOTE_CONFLICT']);
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 export const runtimeContext=z.object({
@@ -20,7 +21,8 @@ export const runtimeContext=z.object({
  input:z.string().min(1).max(20000),instructions:z.string().max(262144),model:z.string().min(1),
  maxOutputTokens:z.number().int().positive().max(20000),maxTurns:z.number().int().min(1).max(32),
  inputSelection:z.literal('scope-projection-v1').optional(),
- providerRequestFormat:z.enum(['serial-tools-v1','serial-tools-v2','serial-tools-v3-stream']).optional(),
+ providerRequestFormat:z.enum(['serial-tools-v1','serial-tools-v2','serial-tools-v3-stream','serial-tools-v4-stream']).optional(),
+ reasoning:reasoningPolicy.optional(),
  historyItems:z.number().int().min(0).max(1000),
  tools:z.array(z.enum(['search','read_source'])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
  modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
@@ -73,12 +75,14 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
    return {body:execution.result.body,...(execution.result.summary!==undefined?{summary:execution.result.summary}:{}),state:recovered.state};
   }
   const context=runtimeContext.parse(execution.context);
+  // v4 is the only format that carries a frozen reasoning policy, and requires it.
+  if((context.providerRequestFormat==='serial-tools-v4-stream')!==Boolean(context.reasoning))throw new Error('RUNTIME_CONTEXT_INVALID');
   const policy=execution.billing.callPolicy.find(p=>p.model===context.model);
   if(!policy)throw new Error('RUNTIME_MODEL_DENIED');
   const session=new PostgresSession(options.database,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
   let transportNotStarted=false;
   let preflightFailure:string|undefined;
-  const streaming=context.providerRequestFormat==='serial-tools-v3-stream';
+  const streaming=context.providerRequestFormat==='serial-tools-v3-stream'||context.providerRequestFormat==='serial-tools-v4-stream';
   const progress=(event:RuntimeProgress)=>{try{onProgress?.(event);}catch{/* UI disconnect never interrupts receipt persistence. */}};
   try{
    let callSequence=0;
@@ -92,6 +96,10 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
      if(context.tools.some(name=>name!=='read_source'||!context.workspaceContext) || context.network!=='deny' || (original.tools??[]).some((tool:{type?:string;function?:{name?:string}})=>tool.type!=='function'||tool.function?.name!=='read_source'||!context.workspaceContext) || original.model!==selectedPolicy.model)
       throw new Error('RUNTIME_REAL_TOOLS_DISABLED');
      if(!selectedPolicy.providerLimits)throw new Error('RUNTIME_REAL_QUOTE_REQUIRED');
+     // Only the primary dialogue call carries the frozen reasoning policy.
+     // Matching and organizer calls keep their original bytes.
+     const reasoning=phase===effective.role&&selectedPolicy===primaryPolicy?context.reasoning?.effort:undefined;
+     if('reasoning' in original||original.reasoning_effort!==reasoning)throw new Error('RUNTIME_PROVIDER_BINDING_DENIED');
      const quoted=openRouterBound(selectedPolicy.providerLimits,selectedPolicy.outputLimit);
      if(decimal(quoted.upperUsd)!==decimal(selectedPolicy.upperUsd))throw new Error('RUNTIME_REAL_QUOTE_CONFLICT');
      // This optional SDK hint excludes providers that otherwise support tools.
@@ -204,6 +212,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
    const preserveHistoricalMaterial=Boolean(context.sources?.length)||requestsHistoricalComparison(context.input);
    const primarySequence=callSequence;
    const runPrimary=async(legacyInput=false)=>{
+   if(context.reasoning&&effective.model!==context.model)throw new Error('RUNTIME_MODEL_DENIED');
    const sizing=(context.providerRequestFormat==='serial-tools-v2'||streaming)?{projectItemsForSizing:(items:unknown[],historyCount:number)=>{
     try{return projectOpenRouterItemsForSizing(items,historyCount);}catch(error){
      if(error instanceof Error&&error.message==='RUNTIME_PROVIDER_HISTORY_DENIED'){preflightFailure=error.message;logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});}

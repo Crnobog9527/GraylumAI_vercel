@@ -11,7 +11,8 @@ const poll:typeof expect.poll=(callback,options)=>expect.poll(callback,{timeout:
 
 it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh'] as const)('OPC: MENTOR_STREAM real browser incremental HTTP, editable drafts, frozen input and persistence (%s)',async(scenario)=>{
  const f=await mergedPositioningFixture(),mentorId=randomUUID(),organizerId=randomUUID(),key='SYNTHETIC_BROWSER_'+randomUUID();
- const policies=[[mentorId,'synthetic/browser-mentor'],[organizerId,'synthetic/browser-organizer']].map(([modelId,model])=>({modelId,model,provider:'openrouter',account:'openrouter-key:'+createHash('sha256').update(key).digest('hex'),protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:32000,outputLimit:100,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
+ // Real mentor admission requires a verified reasoning policy; the gateway stays synthetic.
+ const policies=[[mentorId,'qwen/qwen3.8-27b'],[organizerId,'synthetic/browser-organizer']].map(([modelId,model])=>({modelId,model,provider:'openrouter',account:'openrouter-key:'+createHash('sha256').update(key).digest('hex'),protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:32000,outputLimit:100,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
  for(const p of policies)await sql.query("insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,api_key,max_tokens,input_limit) values($1,'Synthetic browser streaming',$2,'openai','true','https://openrouter.ai/api/v1',$3,1000,10000)",[p.modelId,p.model,key]);
  await sql.query('update modules set model_id=$1 where id=$2',[mentorId,f.moduleId]);
  await sql.query("insert into system_settings(key,value) values('v3_summary_model_id',$1),('v3_summary_max_tokens','128') on conflict(key) do update set value=excluded.value",[JSON.stringify(organizerId)]);
@@ -21,7 +22,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh'] a
  const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
  const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();page.setDefaultTimeout(60000);
  await page.addInitScript(()=>{const seen=new Set<string>();(window as unknown as {mentorTextTimes:number[]}).mentorTextTimes=[];new MutationObserver(()=>{for(const node of document.querySelectorAll('p')){const text=node.textContent??'';if(text.includes('本地流式导师正文：')&&!seen.has(text)){seen.add(text);(window as unknown as {mentorTextTimes:number[]}).mentorTextTimes.push(Date.now());}}}).observe(document,{childList:true,subtree:true,characterData:true});});
- type Call={index:number;id:string;model:string;stream:boolean;startedAt:number;firstAt:number|null;finishedAt:number|null};
+ type Call={index:number;id:string;model:string;stream:boolean;reasoningEffort:string|null;startedAt:number;firstAt:number|null;finishedAt:number|null};
  const control=async(release?:number):Promise<Call[]>=>{const r=await fetch(process.env.V3_LOCAL_REST+'/__mentor_stream',{method:release?'POST':'GET',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!},...(release?{body:JSON.stringify({release})}:{})});if(!r.ok)throw new Error('isolated gate failed');return r.json();};
  await fetch(process.env.V3_LOCAL_REST+'/__mentor_stream',{method:'POST',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!},body:JSON.stringify({reset:true})});
  let releasePrepare=()=>{};
@@ -75,6 +76,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh'] a
   await page.getByRole('link',{name:'资料库',exact:true}).click();await page.getByRole('link',{name:'返回当前工作',exact:true}).click();await page.waitForURL('**'+path);
   expect((await control()).length).toBe(4);expect((await sql.query('select id,state from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows).toEqual(before);
   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-persisted-return-'+scenario+'.png',fullPage:true});
+  // Mentor dialogue carries the frozen latency policy; the Luna organizer keeps its original bytes.
+  expect((await control()).map(call=>[call.stream,call.reasoningEffort])).toEqual((await control()).map(call=>call.stream?[true,'none']:[false,null]));expect((await control()).some(call=>!call.stream)).toBe(true);
   Object.assign(timings,{streamRequests,prepareRequests});await writeFile(process.env.V3_WORKBENCH_OUTPUT+'/mentor-stream-browser-evidence-'+scenario+'.json',JSON.stringify({synthetic:true,qualityProof:false,timings,prepares,calls:await control(),executionIds:before},null,2));
  }catch(error){await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-stream-failure.png',fullPage:true}).catch(()=>{});console.info('MENTOR_STREAM_FAILURE',error,await page.locator('body').innerText().catch(()=>''));throw error;}
  finally{releasePrepare();for(const call of await control())await control(call.index);await browser.close();}

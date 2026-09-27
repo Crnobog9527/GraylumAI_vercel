@@ -122,3 +122,18 @@ it('preserves the lookup identity even when a response exceeds the unchanged byt
  expect(Buffer.from(observation.rawBodyBase64,'base64')).toHaveLength(65536);
  expect(adapter.evidence(observation,identity,'response')).toMatchObject({providerId:'gen-limit',cost:null,final:false,evidenceKind:'transport_observation'});
 });
+
+it('forwards only an approved reasoning_effort byte-for-byte',async()=>{
+ const transport=vi.fn(async()=>new Response('{"id":"gen-reasoning"}',{status:200})),credential=vi.fn(async()=> 'LOCAL_SYNTHETIC_KEY');
+ const input=JSON.stringify({...JSON.parse(body),reasoning_effort:'none'});
+ await openRouterAdapter({credential,transport}).dispatch({input},identity);
+ expect(transport).toHaveBeenCalledTimes(1);expect((transport.mock.calls[0] as unknown as [string,RequestInit])[1].body).toBe(input);
+});
+it.each([
+ {reasoning_effort:'low'},{reasoning_effort:'xhigh'},{reasoning_effort:'max'},{reasoning_effort:''},{reasoning_effort:null},{reasoning_effort:0},{reasoning_effort:{effort:'none'}},
+ {reasoning:{effort:'none'}},{reasoning:{enabled:false}},{reasoning_effort:'none',reasoning:{exclude:true}},{include_reasoning:false},{verbosity:'low'},
+])('rejects unapproved reasoning parameters %# before credential access',async(patch)=>{
+ const transport=vi.fn(),credential=vi.fn();
+ await expect(openRouterAdapter({credential,transport}).dispatch({input:JSON.stringify({...JSON.parse(body),...patch})},identity)).rejects.toThrow('BILL2_PROVIDER_REQUEST_DENIED');
+ expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
+});

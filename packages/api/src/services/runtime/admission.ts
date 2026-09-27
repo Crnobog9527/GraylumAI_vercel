@@ -12,6 +12,7 @@ import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
 import type {FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
 import { discoverRuntimeCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
+import { reasoningFor, type ReasoningPolicy } from './reasoningPolicy';
 
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
@@ -137,7 +138,13 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const inputLimit=inputCapacity(row.data,maxOutputTokens);
    if(candidates.length)selectRuntimeHistory([],[{role:'user',content:matchingInput(input.input,candidates)}],{instructions:MATCH_INSTRUCTIONS,inputBytes:inputLimit,historyItems:0,toolBytes:0});
    selectRuntimeHistory([], [{role:'user',content:runtimeScopeInput(input.input,session.scopeMaterial)}],{instructions,inputBytes:inputLimit,historyItems:0,toolBytes:policy.searchEnabled?2048:0});
-   const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:'scope-projection-v1',...(policy.real?{providerRequestFormat:policy.opcTurnToken&&policy.mentorStream?'serial-tools-v3-stream':'serial-tools-v2'}:{}),role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
+   // Real mentor dialogue is latency-sensitive. New admissions freeze the
+   // model's verified reasoning policy; v3-stream contexts replay unchanged.
+   const mentorStream=Boolean(policy.real&&policy.opcTurnToken&&policy.mentorStream);
+   if(mentorStream&&candidates.length)throw new Error('RUNTIME_MODEL_DENIED');
+   let reasoning:ReasoningPolicy|undefined;
+   if(mentorStream){try{reasoning=reasoningFor('latency-sensitive',row.data.model_id);}catch{throw unavailableModel();}}
+   const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:'scope-projection-v1',...(policy.real?{providerRequestFormat:mentorStream?'serial-tools-v4-stream':'serial-tools-v2'}:{}),...(reasoning?{reasoning}:{}),role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
     ...(policy.opcTurnToken?{opcTurnToken:uuid.parse(policy.opcTurnToken)}:{}),...(candidates.length?{matching:{candidates}}:{}),...(session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...(workspaceContext?{workspaceContext:true}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems:policy.historyItems,network:input.network,
     tools:[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext?['read_source']:[])],maxToolCalls:(searchAllowed?1:0)+(workspaceContext?Math.min(2,primaryTurns-1):input.sources.length),
