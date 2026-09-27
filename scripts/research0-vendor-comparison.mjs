@@ -26,8 +26,10 @@ const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)
 export const DEFAULT_OUT_DIR = path.join(os.homedir(), '.graylum', 'research0');
 
 function pick(all, csv, label) {
-  if (!csv) return all;
+  if (csv === null) return all;
   const wanted = csv.split(',').map(value => value.trim()).filter(Boolean);
+  // An empty selector must never widen a paid run to everything.
+  if (wanted.length === 0) throw new Error(`RESEARCH0_EMPTY_${label.toUpperCase()}_SELECTOR`);
   const unknown = wanted.filter(id => !all.some(item => item.id === id));
   if (unknown.length > 0) throw new Error(`Unknown ${label}: ${unknown.join(', ')}`);
   return all.filter(item => wanted.includes(item.id));
@@ -40,12 +42,20 @@ export function parseArgs(argv) {
     if (arg === '--confirm-paid-calls') args.live = true;
     else if (arg === '--reanalyze') args.reanalyze = true;
     else if (arg === '--markdown') args.markdown = true;
-    else if (arg === '--vendors') args.vendors = argv[++index];
-    else if (arg === '--queries') args.queries = argv[++index];
-    else if (arg === '--out') args.outDir = path.resolve(argv[++index]);
+    else if (arg === '--vendors') args.vendors = value(argv, ++index, arg);
+    else if (arg === '--queries') args.queries = value(argv, ++index, arg);
+    else if (arg === '--out') args.outDir = path.resolve(value(argv, ++index, arg));
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return args;
+}
+
+function value(argv, index, flag) {
+  const found = argv[index];
+  if (typeof found !== 'string' || found.trim() === '' || found.startsWith('--')) {
+    throw new Error(`RESEARCH0_MISSING_VALUE_FOR_${flag.slice(2).toUpperCase()}`);
+  }
+  return found;
 }
 
 /** Raw responses and the ledger must never land inside the repository. */

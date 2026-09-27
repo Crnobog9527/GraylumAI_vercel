@@ -79,6 +79,10 @@ test('dry run sends nothing, books nothing and writes nothing', async () => with
 test('the CLI is a dry run unless --confirm-paid-calls is given', async () => withTemp(async dir => {
   assert.equal(parseArgs([]).live, false);
   assert.equal(parseArgs(['--confirm-paid-calls']).live, true);
+  assert.throws(() => parseArgs(['--confirm-paid-calls', '--vendors']), /MISSING_VALUE_FOR_VENDORS/);
+  assert.throws(() => parseArgs(['--queries', '', '--confirm-paid-calls']), /MISSING_VALUE_FOR_QUERIES/);
+  assert.throws(() => parseArgs(['--vendors', '--confirm-paid-calls']), /MISSING_VALUE_FOR_VENDORS/);
+  await assert.rejects(main(['--vendors', ',', '--out', dir], { env: {}, log: () => {} }), /EMPTY_VENDOR_SELECTOR/);
   let fetched = 0;
   const env = Object.fromEntries(VENDORS.map(vendor => [vendor.keyEnv, KEY]));
   const logs = [];
