@@ -40,8 +40,9 @@ export function formatReport(report) {
     lines.push(`- ${vendor.label} (${vendor.id}): ${key}${vendor.blockedReason ? `, blocked: ${vendor.blockedReason}` : ''}`);
     lines.push(...planLines(vendor));
     if (vendor.balance) {
-      const { beforeUsd, afterUsd, spentThisRunUsd } = vendor.balance;
-      lines.push(`  vendor balance: before ${usd(beforeUsd)}, after ${usd(afterUsd)}, spent this run ${usd(spentThisRunUsd)}`);
+      // The repository is public: only the change is printed, never the account balance itself.
+      const { spentThisRunUsd } = vendor.balance;
+      lines.push(`  vendor balance change this run: ${usd(spentThisRunUsd)}`);
     }
     if (vendor.usage) lines.push(`  ledger: ${vendor.usage.calls} calls, ${usd(vendor.usage.usd)} booked (all runs)`);
     for (const query of vendor.queries) if (query.status !== 'DRY_RUN') lines.push(queryLine(query));

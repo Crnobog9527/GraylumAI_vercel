@@ -122,7 +122,11 @@ export async function runMonidCatalog({ key, fetchImpl, ledger, outDir, now = ()
 
 export function formatMonidCatalog(report) {
   const lines = [`monid catalogue: ${report.steps.length} calls, stopped: ${report.stopped ? `${report.stopped.at} ${report.stopped.reason}` : 'no'}`];
-  for (const balance of report.balances) lines.push(`  ${balance.label} balance $${balance.balanceUsd} drop ${balance.dropSincePreviousUsd ?? '-'}`);
+  // Public output: balance drops and whether they were within the allowance, never the balance itself.
+  for (const balance of report.balances) {
+    if (balance.dropSincePreviousUsd === null) lines.push(`  ${balance.label} balance read (starting point)`);
+    else lines.push(`  ${balance.label} drop since previous read: ${balance.dropSincePreviousUsd} USD`);
+  }
   lines.push(`  measured spend: ${report.spentUsd ?? '未提供'} USD`);
   lines.push('| 来源 | provider | endpoint | 计价方式 | 单价 USD | 固定费 USD | 标签 |', '|---|---|---|---|---|---|---|');
   for (const tool of report.tools) {

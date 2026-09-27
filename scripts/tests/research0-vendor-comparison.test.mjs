@@ -260,6 +260,10 @@ test('free balance reads bracket the run and give the vendor-side spend', async 
   const { report, ledger } = await run(dir, { vendor, fetchImpl, qs: [queries[0], queries[1]] });
   assert.equal(calls.length, 4);
   assert.deepEqual(report.vendors[0].balance, { beforeUsd: 5, afterUsd: 4.5, spentThisRunUsd: 0.5 });
+  // The repository is public: printed output carries the change, never the balance itself.
+  const printed = formatReport(report) + formatMarkdown(report, [queries[0], queries[1]]);
+  assert.ok(!/\$5\.0000|\$4\.5000/.test(printed));
+  assert.match(printed, /\$0\.5000/);
   assert.equal(ledger.entries.filter(entry => entry.queryId.startsWith('BALANCE')).every(entry => entry.chargedUsd === 0), true);
 }));
 
@@ -337,6 +341,7 @@ test('monid catalogue measures spend, stays within 6 calls and cannot be rerun',
   assert.ok(ledger.entries.reduce((total, entry) => total + entry.chargedUsd, 0) <= MONID_CATALOG_LIMITS.maxUsd + 1e-9);
   for (const file of await filesUnder(dir)) assert.ok(!(await readFile(file, 'utf8')).includes(KEY), file);
   assert.ok(!formatMonidCatalog(report).includes(KEY));
+  assert.ok(!/0\.999\b|0\.997\b|balance \$/.test(formatMonidCatalog(report)), 'no absolute balance in public output');
   const again = monidFetch([1]);
   const rerun = await runMonidCatalog({ key: KEY, fetchImpl: again.fetchImpl, ledger, outDir: dir });
   assert.equal(again.calls.length, 0);
