@@ -2667,9 +2667,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       await page.getByRole('heading',{name:'六个环节，理解你的内容增长路径'}).waitFor();
       await page.getByRole('link',{name:'对话',exact:true}).click();
       await page.getByRole('button',{name:'梳理账号定位',exact:true}).click();
+      // Choosing a new positioning starts the mentor draft directly; there is no business-name form.
       await page.getByRole('button',{name:'从头分析新定位',exact:true}).click();
-      await page.getByRole('textbox',{name:'业务名称',exact:true}).fill('Staging local acceptance');
-      await page.getByRole('button',{name:'开始 Agent 引导',exact:true}).click();
       await page.waitForURL(url => /^\/positioning\/[a-f0-9-]{36}$/.test(url.pathname));
       const draftPath = new URL(page.url()).pathname;
       await page
@@ -9397,8 +9396,7 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
     await page.getByRole('dialog',{name:'梳理账号定位'}).getByRole('button',{name:'从头分析新定位'}).click();
     expect(await page.getByRole('combobox',{name:'定位方法'}).count()).toBe(0);
     expect(await page.getByRole('combobox',{name:'所属业务'}).count()).toBe(0);
-    await page.getByLabel('业务名称',{exact:true}).fill('摄影课程 · 新手体验');
-    await page.getByRole('button',{name:'开始 Agent 引导',exact:true}).click();
+    // The choice itself starts the mentor draft; there is no business-name form.
     await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname));
     const mentorUrl=page.url();
     const draftId=page.url().split('/positioning/')[1]?.split('?')[0]??'';
