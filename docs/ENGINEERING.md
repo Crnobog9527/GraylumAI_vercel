@@ -99,9 +99,8 @@
 
 ## 6. AI 与 Agent 功能
 
-以下原则来自已锁定的
-[Master Plan v10.2](launch/Graylum_Master_Plan_v10.2_OPC_Growth_Agent_Amendment.md)
-第 2、5 节：
+以下原则来自 [Master Plan v12](launch/MASTER_PLAN.md) 第 3、4 节（延续已锁定的
+[v10.2](launch/Graylum_Master_Plan_v10.2_OPC_Growth_Agent_Amendment.md) 第 2、5 节）：
 
 - 全站只保留一个基于官方 Agent SDK 的统一 Runtime（`packages/api/src/services/runtime`）。
   新的 AI 能力接到这里，不要在旧对话链路（`routers/ai.ts`、`app/api/ai/stream`、
@@ -110,7 +109,9 @@
   数据库代码不写死某个 Skill 的步骤或问题。
 - 应用（宿主）只负责权限、工具白名单、预算与计费（BILL2）、身份、持久化、版本和显示。
 - 模型分工：Skill 执行模型由管理员在 Skill 配置中绑定；信息汇总和整理使用管理员指定的
-  独立整理模型。
+  独立整理模型；Fusion 对比模式由用户在管理员允许的模型范围内自选。
+- 多模型（Fusion）由 Graylum 自己并行调用，不使用 OpenRouter 的 `openrouter/` 元模型。
+  具体做法见 Master Plan 第 4 节和 `docs/launch/tasks/FUSION.md`。
 - 不用关键词或正则表达式判断用户意图来代替模型判断。
 
 另外，用户资料、附件和检索到的内容对模型来说是数据，不是指令。
@@ -125,6 +126,7 @@
 | 代码大小检查 | `node scripts/check-code-size.mjs` |
 | 脚本和 CI 保护测试 | `pnpm test:ci:safeguards`、`ruby .github/scripts/test-ci-workflows.rb` |
 | 端到端测试 | `pnpm --filter web test:e2e`（Playwright） |
+| 部分集成测试（需要本地 Docker） | `node packages/db/tests/v3/run-workbench.mjs`：默认只跑 `workbench.integration.ts`；用 `--opc-only`、`--runtime-only`、`--ai-only` 等参数选择计费、Runtime、定位等其他集成测试。仓库里的 16 个 `*.integration.ts` 并非都能通过它运行，统一入口由 CI-TRUST 补齐 |
 
 - 新逻辑要配单元测试，放在源码旁边的 `*.test.ts`；已经使用 `__tests__/` 的目录沿用
   原来的写法。修 bug 时先写一个能复现问题的测试。
@@ -136,17 +138,22 @@
 - 新增或删除模块、改变数据流时，在同一个 PR 里更新相关文档。
 - [docs/ARCHITECTURE.md](ARCHITECTURE.md) 目前主要描述旧对话链路（`routers/ai.ts`、
   `modelRouter`、`contextManager`、`billing.ts` 三段式计费），还没有覆盖统一 Runtime、
-  BILL2 和定位（OPC）模块。在它更新之前，以本文件第 1、2、6 节和 `docs/launch` 为准。
+  BILL2 和定位（OPC）模块。在它更新之前，以本文件第 1、2、6 节、
+  [项目地图](PROJECT_MAP_FOR_OWNER.md) 和 `docs/launch` 为准。
 
 ## 9. 已知缺口
 
-以下问题已经确认，但不在本规范的范围内，需要单独立项：
+以下问题已经确认，但不在本规范的范围内，已列入 [Master Plan v12](launch/MASTER_PLAN.md)
+第 7、8 节的任务（主要是 CI-TRUST 和 LEGACY-CLOSE）：
 
 - ESLint 目前只检查 `apps/web` 下的 4 个 `.mjs` 文件，不检查任何 TS/TSX 业务代码。
   CI 的 "Lint & Type Check" 实际起作用的是类型检查和第 3 节的大小检查。补上
   TypeScript/React 规则需要新增依赖（例如 typescript-eslint），属于依赖变更。
+- 集成测试（`*.integration.ts`，约 2 万行，覆盖计费和恢复等关键路径）不在 CI 里运行；
+  `packages/api` 没有独立的类型检查，大部分 API 测试文件从未被类型检查；CI 只跑少数
+  网站单测。
 - 仓库没有安装代码格式化工具（Prettier）。
 - 基线里有 50 个文件超过 500 行、146 个文件含超长行。结合相关功能的改动逐步拆分；
   计费、支付等高风险大文件的拆分单独立项。
-- 对话功能有三套实现并存（`/chat` 旧链路、`/runtime`、`/positioning`），按 Master
-  Plan v10.2 第 4、5 节逐步合并。
+- 对话界面有三套（`/chat`、`/runtime`、`/positioning`），引擎两套（`/chat` 用旧引擎），
+  按 v12 第 3、8 节合并为一个工作区并下线旧链路。

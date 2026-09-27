@@ -50,7 +50,7 @@ No remaining direct runtime-style `console.error/warn/info` findings after clean
 
 ### Documentation / Generated Notes
 
-- `AI_REFACTOR_DESIGN_BRIEF.md`
+- `AI_REFACTOR_DESIGN_BRIEF.md`（已归档至 `docs/archive/2026-01/`）
 - `progress.md`
 
 ## Recommendation
