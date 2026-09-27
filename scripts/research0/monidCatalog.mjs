@@ -5,7 +5,7 @@
 
 import path from 'node:path';
 import { callOnce } from './runner.mjs';
-import { redactHeaders, redactText, redactUrl, refusal, reserve, settle, writeRedactedJson } from './safety.mjs';
+import { redactHeaders, redactText, redactUrl, refusal, requestKey, reserve, settle, writeRedactedJson } from './safety.mjs';
 
 const BASE = 'https://api.monid.ai/v1';
 export const MONID_CATALOG_LIMITS = { vendorId: 'monid', maxCalls: 6, maxUsd: 0.3 };
@@ -60,14 +60,20 @@ export async function runMonidCatalog({ key, fetchImpl, ledger, outDir, now = ()
   const secrets = [key];
   const report = { generatedAt: now().toISOString(), mode: 'monid-catalog', steps: [], balances: [], tools: [], stopped: null };
   let lastBalance = null;
+  const runId = `${report.generatedAt}#${process.pid}`;
   for (const step of MONID_CATALOG_PLAN) {
-    const refused = refusal(ledger, MONID_CATALOG_LIMITS, WORST_CASE_USD);
+    const { url, init } = request(step, key);
+    // Discover requests are keyed by substance; balance reads are scoped to this run.
+    const scope = step.kind === 'balance' ? `${step.label}@${runId}` : '';
+    const stepKey = requestKey('monid', { method: init.method, url, body: init.body }, scope);
+    const refused = refusal(ledger, MONID_CATALOG_LIMITS, WORST_CASE_USD, { key: stepKey });
     if (refused) {
       report.stopped = { at: step.label, reason: refused };
       break;
     }
-    const record = await reserve(ledger, { vendor: 'monid', queryId: step.label, step: 0, at: now().toISOString(), worstCaseUsd: WORST_CASE_USD });
-    const { url, init } = request(step, key);
+    const record = await reserve(ledger, {
+      vendor: 'monid', queryId: step.label, step: 0, at: now().toISOString(), worstCaseUsd: WORST_CASE_USD, requestKey: stepKey,
+    });
     const result = await callOnce(fetchImpl, { url, init }, timeoutMs);
     const json = parse(result.body);
     const ok = result.outcome === 'ok' && json !== undefined;

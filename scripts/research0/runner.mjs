@@ -9,6 +9,7 @@ import {
   redactText,
   redactUrl,
   refusal,
+  requestKey,
   reserve,
   settle,
   vendorUsage,
@@ -47,6 +48,14 @@ export async function callOnce(fetchImpl, { url, init }, timeoutMs) {
     return { outcome: 'unknown', reason, latencyMs: Math.round(performance.now() - started) };
   } finally {
     clearTimeout(timer);
+  }
+}
+
+function keyOf(vendorId, spec, scope) {
+  try {
+    return requestKey(vendorId, spec, scope);
+  } catch {
+    return null;
   }
 }
 
@@ -115,10 +124,13 @@ async function runQuery(context, vendor, query, key, secrets) {
   for (const [index, step] of planned.steps.entries()) {
     const spec = typeof step === 'function' ? step(previous) : step;
     if (spec?.skip) return { status: 'NOT_RUN', reason: spec.skip, calls, latencyMs };
-    const refused = refusal(context.ledger, limits, spec.worstCaseUsd, { documentedFree: spec.documentedFree === true });
+    const attemptKey = keyOf(vendor.id, spec);
+    const refused = refusal(context.ledger, limits, spec.worstCaseUsd, { documentedFree: spec.documentedFree === true, key: attemptKey });
+    if (refused === 'ALREADY_ATTEMPTED') return { status: 'NOT_RUN', reason: 'ALREADY_ATTEMPTED_NEEDS_RECONCILIATION', calls, latencyMs };
     if (refused) return { status: 'BUDGET_REFUSED', reason: refused, stopVendor: STOPPING_REFUSALS.has(refused), calls, latencyMs };
+    // Booked (and written to disk) before dispatch; a failed write throws and nothing is sent.
     const record = await reserve(context.ledger, {
-      vendor: vendor.id, queryId: query.id, step: index, at: context.now().toISOString(), worstCaseUsd: spec.worstCaseUsd,
+      vendor: vendor.id, queryId: query.id, step: index, at: context.now().toISOString(), worstCaseUsd: spec.worstCaseUsd, requestKey: attemptKey,
     });
     const result = await callOnce(context.fetchImpl, vendor.authorize(spec, key), vendor.timeoutMs ?? context.timeoutMs);
     const json = parseJson(result.body);
@@ -154,9 +166,11 @@ async function runQuery(context, vendor, query, key, secrets) {
 async function readBalance(context, vendor, key, secrets, label) {
   const spec = vendor.balance.spec();
   const limits = { vendorId: vendor.id, maxCalls: vendor.maxCalls, maxUsd: vendor.maxUsd ?? VENDOR_CAP_USD };
-  if (refusal(context.ledger, limits, spec.worstCaseUsd, { documentedFree: spec.documentedFree === true })) return null;
+  // Balance reads are repeatable per run by design, so the run id scopes their key.
+  const attemptKey = keyOf(vendor.id, spec, `${label}@${context.runId}`);
+  if (refusal(context.ledger, limits, spec.worstCaseUsd, { documentedFree: spec.documentedFree === true, key: attemptKey })) return null;
   const record = await reserve(context.ledger, {
-    vendor: vendor.id, queryId: label, step: 0, at: context.now().toISOString(), worstCaseUsd: spec.worstCaseUsd,
+    vendor: vendor.id, queryId: label, step: 0, at: context.now().toISOString(), worstCaseUsd: spec.worstCaseUsd, requestKey: attemptKey,
   });
   const result = await callOnce(context.fetchImpl, vendor.authorize(spec, key), vendor.timeoutMs ?? context.timeoutMs);
   const json = parseJson(result.body);
@@ -178,8 +192,9 @@ function balanceDelta(before, after) {
  */
 export async function runComparison({ vendors, queries, env, live, fetchImpl, ledger, outDir, now = () => new Date(), timeoutMs }) {
   const secrets = vendors.map(vendor => env[vendor.keyEnv]).filter(value => typeof value === 'string' && value.length > 0);
-  const context = { fetchImpl, ledger, outDir, now, timeoutMs: timeoutMs ?? DEFAULT_TIMEOUT_MS };
-  const report = { generatedAt: now().toISOString(), mode: live ? 'live' : 'dry-run', vendors: [] };
+  const generatedAt = now().toISOString();
+  const context = { fetchImpl, ledger, outDir, now, runId: `${generatedAt}#${process.pid}`, timeoutMs: timeoutMs ?? DEFAULT_TIMEOUT_MS };
+  const report = { generatedAt, mode: live ? 'live' : 'dry-run', vendors: [] };
   for (const vendor of vendors) {
     const key = env[vendor.keyEnv];
     const keyPresent = typeof key === 'string' && key.length > 0;

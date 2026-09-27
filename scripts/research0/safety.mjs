@@ -1,7 +1,8 @@
 // RESEARCH-0 spend ledger and secret redaction. Standalone tooling: never
 // imported by application code, no database, no credits, no dependencies.
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 /** Owner authorization 2026-09-28: at most 1 USD per vendor, 5 USD in total. */
@@ -80,15 +81,85 @@ export async function writeRedactedJson(file, value, secrets) {
  * with its worst-case charge *before* the request leaves, so a crash, timeout
  * or rerun can never forget money that may already be spent.
  */
-export async function loadLedger(file) {
+export async function loadLedger(file, { requireExisting = false } = {}) {
+  let text;
   try {
-    const data = JSON.parse(await readFile(file, 'utf8'));
-    if (!Array.isArray(data.entries)) throw new Error('RESEARCH0_LEDGER_INVALID');
-    return { file, entries: data.entries };
+    text = await readFile(file, 'utf8');
   } catch (error) {
-    if (error?.code === 'ENOENT') return { file, entries: [] };
+    // A paid run never treats a missing ledger as "nothing spent yet".
+    if (error?.code === 'ENOENT' && !requireExisting) return { file, entries: [] };
+    throw new Error(error?.code === 'ENOENT' ? 'RESEARCH0_LEDGER_MISSING' : 'RESEARCH0_LEDGER_UNREADABLE');
+  }
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
     throw new Error('RESEARCH0_LEDGER_UNREADABLE');
   }
+  if (data?.version !== 1 || !Array.isArray(data.entries)) throw new Error('RESEARCH0_LEDGER_UNREADABLE');
+  return { file, entries: data.entries };
+}
+
+/** Creates the empty ledger once; refuses to overwrite an existing one. */
+export async function initLedger(file) {
+  await mkdir(path.dirname(file), { recursive: true });
+  let handle;
+  try {
+    handle = await open(file, 'wx', 0o600);
+  } catch (error) {
+    throw new Error(error?.code === 'EEXIST' ? 'RESEARCH0_LEDGER_EXISTS' : 'RESEARCH0_LEDGER_UNWRITABLE');
+  }
+  try {
+    await handle.writeFile(`${JSON.stringify({ version: 1, entries: [] }, null, 2)}\n`);
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Exclusive run lock next to the ledger. An existing lock refuses the run;
+ * the lock is removed only after a clean finish, so a crash leaves it for a
+ * person to inspect (it records the pid and start time).
+ */
+export async function acquireLock(dir, now = () => new Date()) {
+  const file = path.join(dir, 'ledger.lock');
+  await mkdir(dir, { recursive: true });
+  let handle;
+  try {
+    handle = await open(file, 'wx', 0o600);
+  } catch (error) {
+    throw new Error(error?.code === 'EEXIST' ? `RESEARCH0_LEDGER_LOCKED: ${file}` : 'RESEARCH0_LOCK_UNWRITABLE');
+  }
+  try {
+    await handle.writeFile(`${JSON.stringify({ pid: process.pid, startedAt: now().toISOString() })}\n`);
+  } finally {
+    await handle.close();
+  }
+  return { file, release: () => rm(file) };
+}
+
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map(name => [name, canonical(value[name])]));
+  }
+  return value;
+}
+
+/**
+ * Identity of a request's substance: vendor, method, URL with sorted query
+ * parameters and canonical body. Renaming a query id cannot bypass it.
+ * `scope` separates deliberately repeatable reads (balance per run).
+ */
+export function requestKey(vendorId, spec, scope = '') {
+  const url = new URL(spec.url);
+  for (const name of [...url.searchParams.keys()]) {
+    if (SENSITIVE_PARAMS.has(name.toLowerCase())) url.searchParams.delete(name);
+  }
+  url.searchParams.sort();
+  const body = spec.body === undefined ? null : canonical(typeof spec.body === 'string' ? JSON.parse(spec.body) : spec.body);
+  const material = JSON.stringify([vendorId, (spec.method ?? 'GET').toUpperCase(), url.toString(), body, scope]);
+  return createHash('sha256').update(material).digest('hex');
 }
 
 async function saveLedger(ledger) {
@@ -112,7 +183,11 @@ function sum(values) {
  * Returns null when the call may be sent, otherwise the refusal reason. A zero
  * price is accepted only when the vendor documents the endpoint as free.
  */
-export function refusal(ledger, limits, worstCaseUsd, { documentedFree = false } = {}) {
+export function refusal(ledger, limits, worstCaseUsd, { documentedFree = false, key } = {}) {
+  if (typeof key !== 'string' || key.length === 0) return 'REQUEST_KEY_MISSING';
+  // Any earlier attempt (succeeded, failed, unknown or never settled) needs a
+  // person to reconcile it; the same paid request is never sent twice.
+  if (ledger.entries.some(entry => entry.requestKey === key)) return 'ALREADY_ATTEMPTED';
   if (!Number.isFinite(worstCaseUsd) || worstCaseUsd < 0) return 'PRICE_UNKNOWN';
   if (worstCaseUsd === 0 && !documentedFree) return 'PRICE_UNKNOWN';
   const used = vendorUsage(ledger, limits.vendorId);

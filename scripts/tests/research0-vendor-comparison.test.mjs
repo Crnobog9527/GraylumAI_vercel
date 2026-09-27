@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -9,7 +9,7 @@ import { count, summarize, timestamp } from '../research0/metrics.mjs';
 import { QUERIES } from '../research0/queries.mjs';
 import { formatReport } from '../research0/report.mjs';
 import { runComparison } from '../research0/runner.mjs';
-import { TOTAL_CAP_USD, loadLedger, redactUrl, refusal } from '../research0/safety.mjs';
+import { TOTAL_CAP_USD, acquireLock, initLedger, loadLedger, redactUrl, refusal, requestKey } from '../research0/safety.mjs';
 import { VENDORS } from '../research0/vendors.mjs';
 import { displayCount, normalizeTikhub, tikhubFailed } from '../research0/vendors/tikhubShapes.mjs';
 import { reanalyze } from '../research0/analyze.mjs';
@@ -111,7 +111,8 @@ test('USD cap counts worst case when no cost is reported and survives reruns', a
   const second = recordingFetch(() => okBody());
   const rerun = await run(dir, { vendor, fetchImpl: second.fetchImpl });
   assert.equal(second.calls.length, 0, 'a new process must read the persisted ledger');
-  assert.equal(rerun.report.vendors[0].queries[0].status, 'BUDGET_REFUSED');
+  assert.deepEqual(rerun.report.vendors[0].queries.map(query => query.reason),
+    ['ALREADY_ATTEMPTED_NEEDS_RECONCILIATION', 'ALREADY_ATTEMPTED_NEEDS_RECONCILIATION', 'VENDOR_USD_LIMIT_REACHED']);
 }));
 
 test('vendor-reported cost replaces the worst-case reserve', async () => withTemp(async dir => {
@@ -125,11 +126,14 @@ test('vendor-reported cost replaces the worst-case reserve', async () => withTem
 test('refusal rules: unknown price, undocumented zero price, total cap', () => {
   const ledger = { entries: [{ vendor: 'other', chargedUsd: TOTAL_CAP_USD - 0.05 }] };
   const limits = { vendorId: 'fake', maxCalls: 10, maxUsd: 1 };
-  assert.equal(refusal(ledger, limits, undefined), 'PRICE_UNKNOWN');
-  assert.equal(refusal(ledger, limits, 0), 'PRICE_UNKNOWN');
-  assert.equal(refusal(ledger, limits, 0, { documentedFree: true }), null);
-  assert.equal(refusal(ledger, limits, 0.1), 'TOTAL_USD_LIMIT_REACHED');
-  assert.equal(refusal({ entries: [] }, { ...limits, maxUsd: 5 }, 1.01), 'VENDOR_USD_LIMIT_REACHED');
+  const key = 'k1';
+  assert.equal(refusal(ledger, limits, 0.1), 'REQUEST_KEY_MISSING');
+  assert.equal(refusal(ledger, limits, undefined, { key }), 'PRICE_UNKNOWN');
+  assert.equal(refusal(ledger, limits, 0, { key }), 'PRICE_UNKNOWN');
+  assert.equal(refusal(ledger, limits, 0, { documentedFree: true, key }), null);
+  assert.equal(refusal(ledger, limits, 0.1, { key }), 'TOTAL_USD_LIMIT_REACHED');
+  assert.equal(refusal({ entries: [] }, { ...limits, maxUsd: 5 }, 1.01, { key }), 'VENDOR_USD_LIMIT_REACHED');
+  assert.equal(refusal({ entries: [{ vendor: 'fake', chargedUsd: 0, requestKey: key }] }, limits, 0.1, { key }), 'ALREADY_ATTEMPTED');
 });
 
 test('network errors are not retried and are booked as possibly charged', async () => withTemp(async dir => {
@@ -354,6 +358,88 @@ test('monid catalogue stops at the first failed lookup without retrying', async 
   assert.equal(calls.length, 2);
   assert.equal(report.stopped.at, 'DISCOVER_CN');
   assert.equal(ledger.entries[1].basis, 'estimate-worst-case');
+}));
+
+test('P1-1: an unknown outcome is never re-sent, even under another query id', async () => withTemp(async dir => {
+  const sameRequest = () => [{ method: 'GET', url: 'https://api.example.test/search?b=2&a=1', worstCaseUsd: 0.1 }];
+  const vendor = fakeVendor({ steps: sameRequest, maxCalls: 10 });
+  const first = recordingFetch(() => { throw new TypeError('socket hang up'); });
+  const once = await run(dir, { vendor, fetchImpl: first.fetchImpl, qs: [{ id: 'A' }] });
+  assert.equal(once.report.vendors[0].queries[0].status, 'UNKNOWN');
+  const second = recordingFetch(() => okBody());
+  const renamed = fakeVendor({ steps: () => [{ method: 'GET', url: 'https://api.example.test/search?a=1&b=2', worstCaseUsd: 0.1 }] });
+  const again = await run(dir, { vendor: renamed, fetchImpl: second.fetchImpl, qs: [{ id: 'B' }] });
+  assert.equal(second.calls.length, 0);
+  assert.equal(again.report.vendors[0].queries[0].reason, 'ALREADY_ATTEMPTED_NEEDS_RECONCILIATION');
+}));
+
+test('request keys follow request substance, not ids, parameter order or credentials', () => {
+  const base = { method: 'POST', url: 'https://x.test/a?q=1&api_key=one', body: { b: 1, a: [1, { d: 2, c: 3 }] } };
+  const same = { method: 'post', url: 'https://x.test/a?api_key=two&q=1', body: { a: [1, { c: 3, d: 2 }], b: 1 } };
+  assert.equal(requestKey('v', base), requestKey('v', same));
+  assert.equal(requestKey('v', { ...base, body: JSON.stringify(base.body) }), requestKey('v', base));
+  assert.notEqual(requestKey('v', base), requestKey('w', base));
+  assert.notEqual(requestKey('v', base), requestKey('v', { ...base, body: { b: 2, a: [1] } }));
+  assert.notEqual(requestKey('v', base, 'BALANCE@run1'), requestKey('v', base, 'BALANCE@run2'));
+});
+
+test('nothing is sent when the reservation cannot be written first', async () => withTemp(async dir => {
+  await writeFile(path.join(dir, 'blocker'), 'file, not a directory');
+  const ledger = { file: path.join(dir, 'blocker', 'ledger.json'), entries: [] };
+  const { calls, fetchImpl } = recordingFetch(() => okBody());
+  await assert.rejects(run(dir, { fetchImpl, ledger, qs: [queries[0]] }));
+  assert.equal(calls.length, 0);
+}));
+
+test('paid CLI runs require an initialized, readable ledger; dry runs do not', async () => withTemp(async dir => {
+  const env = { TINYFISH_API_KEY: KEY };
+  const args = ['--confirm-paid-calls', '--vendors', 'tinyfish', '--queries', 'Q01', '--out', dir];
+  const { calls, fetchImpl } = recordingFetch(() => new Response(JSON.stringify({ results: [] })));
+  await assert.rejects(main(args, { env, fetchImpl, log: () => {} }), /LEDGER_MISSING/);
+  await writeFile(path.join(dir, 'ledger.json'), '{"version":1,"entries":');
+  await rm(path.join(dir, 'ledger.lock'));
+  await assert.rejects(main(args, { env, fetchImpl, log: () => {} }), /LEDGER_UNREADABLE/);
+  assert.equal(calls.length, 0);
+  await rm(path.join(dir, 'ledger.json'));
+  await rm(path.join(dir, 'ledger.lock'));
+  await main(['--init-ledger', '--out', dir], { log: () => {} });
+  await assert.rejects(main(['--init-ledger', '--out', dir], { log: () => {} }), /LEDGER_EXISTS/);
+  await main(args, { env, fetchImpl, log: () => {} });
+  assert.equal(calls.length, 1);
+  assert.ok(!(await readdir(dir)).includes('ledger.lock'), 'a clean run releases the lock');
+  const dry = recordingFetch(() => okBody());
+  await main(['--out', path.join(dir, 'fresh')], { env, fetchImpl: dry.fetchImpl, log: () => {} });
+  assert.equal(dry.calls.length, 0);
+}));
+
+test('P1-2: a held lock refuses a second paid run; an aborted run keeps the lock', async () => withTemp(async dir => {
+  await initLedger(path.join(dir, 'ledger.json'));
+  const env = { TINYFISH_API_KEY: KEY };
+  const args = ['--confirm-paid-calls', '--vendors', 'tinyfish', '--queries', 'Q01', '--out', dir];
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let fetched = 0;
+  const slowFetch = async () => {
+    fetched += 1;
+    await gate;
+    return new Response(JSON.stringify({ results: [] }));
+  };
+  const firstRun = main(args, { env, fetchImpl: slowFetch, log: () => {} });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  await assert.rejects(main(args, { env, fetchImpl: slowFetch, log: () => {} }), /LEDGER_LOCKED/);
+  release();
+  await firstRun;
+  assert.equal(fetched, 1);
+  const held = await acquireLock(dir);
+  const lock = JSON.parse(await readFile(held.file, 'utf8'));
+  assert.equal(lock.pid, process.pid);
+  assert.ok(Date.parse(lock.startedAt) > 0);
+  await held.release();
+  await writeFile(path.join(dir, 'ledger.json'), 'not json');
+  const logs = [];
+  await assert.rejects(main(args, { env, fetchImpl: slowFetch, log: line => logs.push(line) }), /LEDGER_UNREADABLE/);
+  assert.ok((await readdir(dir)).includes('ledger.lock'), 'an aborted run leaves the lock for a person');
+  assert.ok(logs.some(line => line.includes('RUN_ABORTED')));
 }));
 
 test('application code never imports the comparison script', () => {

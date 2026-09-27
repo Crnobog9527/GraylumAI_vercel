@@ -5,6 +5,8 @@
 //
 // Dry run (default, sends nothing):
 //   node scripts/research0-vendor-comparison.mjs
+// Create the ledger once before the first paid run (paid runs refuse without it):
+//   node scripts/research0-vendor-comparison.mjs --init-ledger
 // Paid run, keys loaded from the Owner's file without printing it:
 //   node --env-file-if-exists="$HOME/.graylum/secrets/research0.env" \
 //     scripts/research0-vendor-comparison.mjs --confirm-paid-calls [--vendors tikhub] [--queries Q01,Q02]
@@ -22,7 +24,7 @@ import { MONID_CATALOG_PLAN, formatMonidCatalog, runMonidCatalog } from './resea
 import { QUERIES } from './research0/queries.mjs';
 import { formatReport } from './research0/report.mjs';
 import { runComparison } from './research0/runner.mjs';
-import { TOTAL_CAP_USD, VENDOR_CAP_USD, loadLedger } from './research0/safety.mjs';
+import { TOTAL_CAP_USD, VENDOR_CAP_USD, acquireLock, initLedger, loadLedger } from './research0/safety.mjs';
 import { VENDORS } from './research0/vendors.mjs';
 
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -39,13 +41,17 @@ function pick(all, csv, label) {
 }
 
 export function parseArgs(argv) {
-  const args = { live: false, reanalyze: false, markdown: false, monidCatalog: false, vendors: null, queries: null, outDir: DEFAULT_OUT_DIR };
+  const args = {
+    live: false, reanalyze: false, markdown: false, monidCatalog: false, initLedger: false,
+    vendors: null, queries: null, outDir: DEFAULT_OUT_DIR,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--confirm-paid-calls') args.live = true;
     else if (arg === '--reanalyze') args.reanalyze = true;
     else if (arg === '--markdown') args.markdown = true;
     else if (arg === '--monid-catalog') args.monidCatalog = true;
+    else if (arg === '--init-ledger') args.initLedger = true;
     else if (arg === '--vendors') args.vendors = value(argv, ++index, arg);
     else if (arg === '--queries') args.queries = value(argv, ++index, arg);
     else if (arg === '--out') args.outDir = path.resolve(value(argv, ++index, arg));
@@ -81,26 +87,56 @@ export async function main(argv = process.argv.slice(2), { env = process.env, fe
     log(args.markdown ? formatMarkdown(offline, queries) : formatReport(offline));
     return offline;
   }
-  const ledger = await loadLedger(path.join(args.outDir, 'ledger.json'));
-  if (args.monidCatalog) return monidCatalog(args, { env, fetchImpl, log, ledger });
-  log(`RESEARCH-0 ${args.live ? 'PAID RUN' : 'DRY RUN (nothing is sent)'}; caps ${VENDOR_CAP_USD} USD/vendor, ${TOTAL_CAP_USD} USD total`);
-  const report = await runComparison({ vendors, queries, env, live: args.live, fetchImpl, ledger, outDir: args.outDir });
-  log(args.markdown ? formatMarkdown(report, queries) : formatReport(report));
-  return report;
-}
-
-/** Owner-approved monid catalogue phase; a dry run only prints the six planned calls. */
-async function monidCatalog(args, { env, fetchImpl, log, ledger }) {
-  const key = env.MONID_API_KEY;
-  if (!args.live) {
-    log('monid catalogue DRY RUN (nothing is sent); planned calls, each booked at $0.05:');
-    for (const step of MONID_CATALOG_PLAN) log(`  ${step.label} ${step.kind === 'balance' ? 'GET /v1/wallet/balance' : `POST /v1/discover "${step.query}"`}`);
+  const ledgerFile = path.join(args.outDir, 'ledger.json');
+  if (args.initLedger) {
+    await initLedger(ledgerFile);
+    log(`RESEARCH-0 ledger created at ${ledgerFile}`);
     return null;
   }
-  if (typeof key !== 'string' || key.length === 0) throw new Error('RESEARCH0_MONID_KEY_MISSING');
-  const report = await runMonidCatalog({ key, fetchImpl, ledger, outDir: args.outDir });
-  log(formatMonidCatalog(report));
-  return report;
+  if (!args.live) {
+    // A dry run never reads, writes or locks the ledger.
+    if (args.monidCatalog) return monidCatalogPlan(log);
+    log(`RESEARCH-0 DRY RUN (nothing is sent); caps ${VENDOR_CAP_USD} USD/vendor, ${TOTAL_CAP_USD} USD total`);
+    const report = await runComparison({ vendors, queries, env, live: false, fetchImpl, ledger: { file: ledgerFile, entries: [] }, outDir: args.outDir });
+    log(args.markdown ? formatMarkdown(report, queries) : formatReport(report));
+    return report;
+  }
+  if (args.monidCatalog && !(typeof env.MONID_API_KEY === 'string' && env.MONID_API_KEY.length > 0)) {
+    throw new Error('RESEARCH0_MONID_KEY_MISSING');
+  }
+  return withLock(args.outDir, log, async () => {
+    // Read only after the lock is held; a missing or unreadable ledger refuses the paid run.
+    const ledger = await loadLedger(ledgerFile, { requireExisting: true });
+    if (args.monidCatalog) {
+      const catalogue = await runMonidCatalog({ key: env.MONID_API_KEY, fetchImpl, ledger, outDir: args.outDir });
+      log(formatMonidCatalog(catalogue));
+      return catalogue;
+    }
+    log(`RESEARCH-0 PAID RUN; caps ${VENDOR_CAP_USD} USD/vendor, ${TOTAL_CAP_USD} USD total`);
+    const report = await runComparison({ vendors, queries, env, live: true, fetchImpl, ledger, outDir: args.outDir });
+    log(args.markdown ? formatMarkdown(report, queries) : formatReport(report));
+    return report;
+  });
+}
+
+/** The lock is released only after a clean finish; an aborted run leaves it for a person. */
+async function withLock(outDir, log, run) {
+  const lock = await acquireLock(outDir);
+  let result;
+  try {
+    result = await run();
+  } catch (error) {
+    log(`RESEARCH0_RUN_ABORTED: lock kept at ${lock.file}; reconcile the ledger before deleting it`);
+    throw error;
+  }
+  await lock.release();
+  return result;
+}
+
+function monidCatalogPlan(log) {
+  log('monid catalogue DRY RUN (nothing is sent); planned calls, each booked at $0.05:');
+  for (const step of MONID_CATALOG_PLAN) log(`  ${step.label} ${step.kind === 'balance' ? 'GET /v1/wallet/balance' : `POST /v1/discover "${step.query}"`}`);
+  return null;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
