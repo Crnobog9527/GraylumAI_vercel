@@ -2,13 +2,12 @@
 // AC-0b model probe (Master Plan v12 AC-0 items 2-6). Standalone script run by
 // hand; application code must never import it. Dry run unless --live.
 import {appendFileSync, mkdirSync, statSync, writeFileSync} from 'node:fs';
-import {homedir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createBudget, HARD_MAX_CALLS, HARD_MAX_USD, memoryLedger, nanoToUsd, usdToNano, type LedgerStore} from './budget.ts';
 import {syntheticUpstream} from './dryRun.ts';
 import {acquireLedgerLock, fileLedger, recordExternalUsage} from './ledger.ts';
-import {assertOutsideRepository, realPath} from './paths.ts';
+import {accountHome, assertOutsideRepository, realPath} from './paths.ts';
 import {buildPlan, describePlan, parseProbeArgs, TRIAL_KINDS, USAGE, type ProbePlan} from './plan.ts';
 import {loadScenarios, loadSkill, scenariosOf} from './skill.ts';
 import {summarize, summaryMarkdown} from './summary.ts';
@@ -22,6 +21,7 @@ const RUN_FATAL_STATUSES = new Set([401, 402, 403]);
 export type ProbeDeps = {
   /** Network used only with --live. Tests pass a mock; a dry run never uses it. */
   fetch?: Upstream;
+  /** Test-only home directory. Real runs use accountHome(), never HOME. */
   home?: string;
   /** Test-only ledger location. There is no command-line or environment override. */
   ledgerPath?: string;
@@ -63,7 +63,7 @@ export async function runProbe(argv: string[], env: Record<string, string | unde
   let redact = redactor([]);
   let releaseLock = () => {};
   try {
-    const parsed = parseProbeArgs(argv, deps.home ?? homedir());
+    const parsed = parseProbeArgs(argv, deps.home ?? accountHome());
     const args = deps.ledgerPath ? {...parsed, ledger: deps.ledgerPath} : parsed;
     if (args.help) {
       stdout(USAGE);

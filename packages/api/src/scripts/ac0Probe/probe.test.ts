@@ -10,6 +10,7 @@ import {sseResponse, syntheticUpstream, textDeltas, toolDeltas} from './dryRun.t
 import {assertOutsideRepository, KEY_ENV, runProbe} from './main.ts';
 import {parseProbeArgs} from './plan.ts';
 import {FIXTURE_SKILL_DIR} from './skill.ts';
+import {accountHome} from './paths.ts';
 import {assertDataCollectionDenied, probeTransport, type Upstream} from './transport.ts';
 
 // Placeholder only; deliberately not shaped like a provider key.
@@ -582,5 +583,28 @@ describe('second review fixes', () => {
     const summary = JSON.parse(readFileSync(join(outcome.runDir!, 'summary.json'), 'utf8'));
     expect(summary.configs[0].reference).toMatchObject({trials: 1, measured: 0, sdkErrors: 1});
     expect(readFileSync(join(outcome.runDir!, 'summary.md'), 'utf8')).toContain('| qwen-deepinfra-none | reference | 0 / 1 | 1 |');
+  });
+});
+
+describe('ledger location (third review)', () => {
+  it('does not follow HOME', () => {
+    const original = process.env.HOME;
+    const expected = accountHome();
+    try {
+      process.env.HOME = join(home, 'elsewhere');
+      expect(accountHome()).toBe(expected);
+      expect(parseProbeArgs([], accountHome()).ledger).toBe(join(expected, '.graylum', 'ac0', 'ledger.json'));
+    } finally {
+      process.env.HOME = original;
+    }
+  });
+
+  it('locates ledger and results only through accountHome()', () => {
+    for (const name of readdirSync(__dirname).filter(file => file.endsWith('.ts') && !file.endsWith('.test.ts'))) {
+      const source = readFileSync(join(__dirname, name), 'utf8');
+      expect(source, name).not.toMatch(/homedir\(|env\.HOME|env\[['"]HOME/);
+      if (name !== 'paths.ts') expect(source, name).not.toMatch(/userInfo\(/);
+    }
+    expect(readFileSync(join(__dirname, 'main.ts'), 'utf8')).toContain('deps.home ?? accountHome()');
   });
 });
