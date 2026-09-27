@@ -1150,7 +1150,7 @@ it('RUNTIME: lost dispatch commit response preserves unknown identity without ne
   const snapshot=async()=>(await db.query('select b.id,b.pre_deduct_id,b.state,b.payload,c.id call_id,c.provider_id,c.dispatched_at,e.result,e.payload execution_input from bill2_runs b join bill2_calls c on c.run_id=b.id join runtime_executions e on e.billing_run_id=b.id where b.id=$1',[e.runId])).rows;
   const original=await snapshot();expect(original[0].dispatched_at).not.toBeNull();expect(original[0].provider_id).toBeNull();
   await Promise.all([runtimeExecutor(options).execute(e.executionId),runtimeExecutor(options).execute(e.executionId)]);
-  expect(await snapshot()).toEqual(original);expect(requests).toBe(0);
+  expect(await snapshot()).toEqual(original);expect(requests).toBe(1); // REVERSE-VALIDATION ONLY: deliberately wrong, reverted next commit
   expect(original[0].execution_input.input).toBe('original unknown input');
   expect((await db.query('select credits,(select sum(amount)::int from credit_transactions where user_id=$1) ledger from profiles where id=$1',[f.actorId])).rows[0]).toEqual({credits:80,ledger:80});
   expect((await db.query('select count(*)::int n from runtime_session_history where session_id=$1',[f.s.sessionId])).rows[0].n).toBe(0);
