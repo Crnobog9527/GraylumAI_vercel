@@ -126,7 +126,7 @@
 | 代码大小检查 | `node scripts/check-code-size.mjs` |
 | 脚本和 CI 保护测试 | `pnpm test:ci:safeguards`、`ruby .github/scripts/test-ci-workflows.rb` |
 | 端到端测试 | `pnpm --filter web test:e2e`（Playwright） |
-| 集成测试（`*.integration.ts`，需要本地 Docker） | `node packages/db/tests/v3/run-workbench.mjs`（按需加 `--opc-only` 等参数） |
+| 部分集成测试（需要本地 Docker） | `node packages/db/tests/v3/run-workbench.mjs`：默认只跑 `workbench.integration.ts`；用 `--opc-only`、`--runtime-only`、`--ai-only` 等参数选择计费、Runtime、定位等其他集成测试。仓库里的 16 个 `*.integration.ts` 并非都能通过它运行，统一入口由 CI-TRUST 补齐 |
 
 - 新逻辑要配单元测试，放在源码旁边的 `*.test.ts`；已经使用 `__tests__/` 的目录沿用
   原来的写法。修 bug 时先写一个能复现问题的测试。
