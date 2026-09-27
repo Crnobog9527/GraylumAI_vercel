@@ -26,20 +26,24 @@ function localEndpoint(){
 // Viewing original state, cancellation and receipt maintenance do not admit
 // new work. Source/actor checks still run in their existing SQL procedures.
 const maintenanceProcedure=protectedProcedure.use(async({ctx,next,path})=>{
+ ctx.runtimeBudget?.timing?.enter('policy');
  let maintenanceEndpoint:string|undefined;
  try {
   if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
   try{maintenanceEndpoint=localEndpoint();}catch{await assertStagingReadAccess(ctx.supabaseAdmin,ctx.user.id,process.env);}
  } catch(cause) { throw stagingProcedureError(cause,path); }
+ ctx.runtimeBudget?.timing?.enter('host');
  const result=await next({ctx:{...ctx,maintenanceEndpoint}});
  if(!result.ok)throw stagingProcedureError(result.error,path);
  return result;
 });
 const procedure=protectedProcedure.use(async({ctx,next,path})=>{
+ ctx.runtimeBudget?.timing?.enter('policy');
  try{
   if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
   let endpoint:string|undefined,real;
   try{endpoint=localEndpoint();}catch{real=await loadStagingPolicy(ctx.supabaseAdmin,ctx.user.id,process.env);}
+  ctx.runtimeBudget?.timing?.enter('host');
   const actor=runtimeActor(ctx.userScopedSupabase.auth,ctx.user.id,ctx.runtimeBudget,ctx.headers?.get('Authorization'));
   const admission=runtimeAdmissionService(ctx.userScopedSupabase,ctx.supabaseAdmin,{...(real?{real}:{}),account:'runtime-local',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:100,searchEnabled:!real,workspaceContext:true});
   const executor=runtimeExecutor({database:ctx.supabaseAdmin,budget:ctx.runtimeBudget,actor,endpoint,...(real?{adapter:stagingTransport(ctx.supabaseAdmin,real,ctx.runtimeBudget)}:{}),activateSkill:c=>activateRuntimeCandidate(ctx.userScopedSupabase,ctx.supabaseAdmin!,c)});
@@ -51,7 +55,9 @@ const procedure=protectedProcedure.use(async({ctx,next,path})=>{
 
 const executionProcedure=maintenanceProcedure.input(z.object({executionId:z.string().uuid()}).strict());
 async function executeOriginal({ctx,input}:inferProcedureBuilderResolverOptions<typeof executionProcedure>,onProgress?:(event:RuntimeProgress)=>void){
-
+  // Original test-window and recovery policy reads count as policy; the
+  // executor enters its own phase when it begins.
+  ctx.runtimeBudget?.timing?.tagExecution(input.executionId);ctx.runtimeBudget?.timing?.enter('policy');
   const actor=runtimeActor(ctx.userScopedSupabase.auth,ctx.user.id,ctx.runtimeBudget,ctx.headers?.get('Authorization'));
   const outcome=async<T extends {state:string}>(result:T)=>{
    if(!['cancelled','cost_pending'].includes(result.state))return result;
@@ -121,16 +127,18 @@ export const runtimeRouter=router({
   // authority. Disconnect discards display progress, not provider evidence.
   type Event=RuntimeProgress|{type:'result';result:Awaited<ReturnType<typeof executeOriginal>>};
   let textEvent:Event|undefined,phaseEvent:Event|undefined,resultEvent:Event|undefined,done=false,failure:unknown,wake:()=>void=()=>{};
+  // The route returns before this stream ends and leaves the timing line to it.
+  const timing=options.ctx.runtimeBudget?.timing;
   const pending=executeOriginal(options,event=>{if(event.type==='text')textEvent=event;else phaseEvent=event;wake();}).then(result=>{resultEvent={type:'result',result};},error=>{failure=error;}).finally(()=>{done=true;wake();});
   try{
    while(!done||textEvent||phaseEvent||resultEvent){
-    if(textEvent){const event=textEvent;textEvent=undefined;yield event;}
+    if(textEvent){const event=textEvent;textEvent=undefined;if(event.type==='text'&&event.text)timing?.mark('firstPublicText');yield event;}
     else if(phaseEvent){const event=phaseEvent;phaseEvent=undefined;yield event;}
     else if(resultEvent){const event=resultEvent;resultEvent=undefined;yield event;}
     else await new Promise<void>(resolve=>{wake=resolve;});
    }
    if(failure)throw stagingProcedureError(failure,'runtime.executeStream');
-  }finally{await pending;}
+  }finally{await pending;timing?.release();}
  }),
  view:maintenanceProcedure.input(z.object({sessionId:z.string().uuid()}).strict()).query(async({ctx,input})=>{
   const result=await ctx.supabaseAdmin!.rpc('runtime_view',{p_actor_id:ctx.user.id,p_session_id:input.sessionId});if(result.error)throw new Error('RUNTIME_VIEW_DENIED');return {...result.data,mode:ctx.maintenanceEndpoint?'isolated':'staging_test'};

@@ -59,6 +59,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
   async execute(executionId:string,onProgress?:(event:RuntimeProgress)=>void){
   type Execution={executionId:string;sessionId:string;runId:string;live:boolean;cancelRequested:boolean;state:string;context:unknown;billing:FrozenRun;result:{kind:string;evidenceRef:string;evidenceHash:string;body:string;summary?:string}|null};
   const args={p_execution_id:z.string().uuid().parse(executionId)};
+  budget.timing?.enter('execute');
   const execution=await rpc<Execution>('runtime_execution',{...args,p_action:'begin'});
   if(execution.state==='cancelled')return {state:'cancelled' as const};
   if(execution.cancelRequested){
@@ -221,7 +222,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
    }}:{};
    let selectedHistoryCount=0;
    let partial="";progress({type:"phase",phase:"mentor"});
-   return runRuntime({...context,...effective,stream:streaming,onText:delta=>{partial+=delta;const text=publicMentorText(partial);if(text)progress({type:"text",text});},input:runtimeScopeInput(context.input,context.scopeMaterial),session,tools,selectHistory:async(history,incoming)=>{
+   return runRuntime({...context,...effective,stream:streaming,onText:delta=>{if(delta)budget.timing?.mark('firstModelText');partial+=delta;const text=publicMentorText(partial);if(text)progress({type:"text",text});},input:runtimeScopeInput(context.input,context.scopeMaterial),session,tools,selectHistory:async(history,incoming)=>{
     const selected=selectRuntimeHistory(history,incoming,{instructions:effective.instructions,inputBytes:primaryPolicy.inputLimit,historyItems:context.historyItems,toolBytes,...sizing,
      projectHistoryItem:item=>legacyInput||preserveHistoricalMaterial?item:projectSupersededScopeItem(item,context.scopeMaterial)});
     selectedHistoryCount=selected.length-incoming.length;
