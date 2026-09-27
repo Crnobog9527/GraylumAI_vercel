@@ -21,7 +21,7 @@ it.each(['PGRST202','42883','42501','PGRST301','XX000',null].flatMap(code=>[fals
  else{await promise;expect(frozen?.inputSelection).toBe('scope-projection-v1');expect(frozen?.providerRequestFormat).toBe(real?'serial-tools-v2':undefined);expect(frozen?.workspaceContext).toBe(code?undefined:true);expect(frozen?.scopeMaterial).toBeUndefined();expect(frozen?.sources).toEqual([]);}
 });
 
-it.each([false,true])('new admission respects %s real quote and summary limits without changing replay',async(real)=>{
+it.each([false,true].flatMap(real=>[false,true].map(mentorStream=>({real,mentorStream}))))('new admission preserves quote, protocol and replay (real=$real, mentor=$mentorStream)',async({real,mentorStream})=>{
  const organizerId='10000000-0000-4000-8000-000000000005';let frozen:any,billing:any,replay:any=null,modelReads=0;
  const models=[{id:modelId,model_id:'test/mentor'},{id:organizerId,model_id:'test/organizer'}].map(m=>({...m,provider:real?'openrouter':'fixture',is_active:'true',max_tokens:4096,input_limit:32000}));
  const rpc=vi.fn(async(name:string,args:any)=>{
@@ -37,9 +37,9 @@ it.each([false,true])('new admission respects %s real quote and summary limits w
  const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
  const quotes=models.map(m=>({modelId:m.id,provider:'openrouter',account:'test',model:m.model_id,protocol:'openrouter-chat-v1' as const,providerLimits:{providerSlug:'synthetic',contextTokens:32000,promptUsdPerMillion:'0.1',completionUsdPerMillion:'0.1',requestUsd:'0'},upperUsd:'0.004',inputLimit:32000,outputLimit:4096,automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true}));
  const policy={...(real?{real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01',callPolicies:quotes}}:{}),account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:1000,inputBytes:32000,historyItems:10};
- const service=runtimeAdmissionService(user,admin,policy);
+ const service=runtimeAdmissionService(user,admin,{...policy,opcTurnToken:requestId,mentorStream});
  const input={sessionId,requestId,input:'Real business facts',selection:{kind:'ordinary',modelId},network:'deny',organizeAfter:true};
- await service.prepare(input);expect(frozen.maxOutputTokens).toBe(real?4096:1000);expect(frozen.attachedOrganizer.maxOutputTokens).toBe(real?2048:1000);
+ await service.prepare(input);expect(frozen.providerRequestFormat).toBe(real?(mentorStream?'serial-tools-v3-stream':'serial-tools-v2'):undefined);expect(frozen.maxOutputTokens).toBe(real?4096:1000);expect(frozen.attachedOrganizer.maxOutputTokens).toBe(real?2048:1000);
  if(real)expect(billing.callPolicy).toEqual(quotes);
  replay={executionId:requestId};const reads=modelReads;models[0]!.max_tokens=512;
  expect(await service.prepare(input)).toEqual(replay);expect(modelReads).toBe(reads);expect(frozen.maxOutputTokens).toBe(real?4096:1000);

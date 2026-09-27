@@ -7,6 +7,11 @@ const reasoningDetails=z.array(z.discriminatedUnion('type',[
  z.object({type:z.literal('reasoning.text'),text:z.string(),
   index:z.number().int().nonnegative(),format:z.literal('unknown'),
  }).strict(),
+ // OpenRouter's summary schema permits an omitted/null id. Accept only the
+ // observed OpenAI format; summaries stay private alongside encrypted data.
+ z.object({type:z.literal('reasoning.summary'),format:z.literal('openai-responses-v1'),
+  summary:z.string().max(65536),id:z.string().min(1).max(256).nullish(),index:z.number().int().nonnegative().optional(),
+ }).strict(),
  // Known OpenRouter OpenAI response metadata only. This is opaque storage,
  // never decoded or forwarded. The local adapter retains at most 64 KiB of
  // response bytes; the string cap is a local bound, not a provider guarantee.
@@ -14,13 +19,16 @@ const reasoningDetails=z.array(z.discriminatedUnion('type',[
   id:z.string().min(1).max(256).nullable(),data:z.string().min(1).max(65536),index:z.number().int().nonnegative().optional(),
  }).strict(),
 ])).nullish();
-const hasEncrypted=(details:unknown)=>Array.isArray(details)&&details.some(detail=>detail?.type==='reasoning.encrypted');
+const hasOpenAIReasoning=(details:unknown)=>Array.isArray(details)&&details.some(detail=>detail?.type==='reasoning.encrypted'||detail?.type==='reasoning.summary');
 const reasoning=z.string().nullish();
 const textParts=z.array(z.object({type:z.literal('text'),text:z.string(),role:z.literal('assistant').optional(),
+ // SDK 0.18 streaming always attaches an empty annotations list. Only this
+ // empty shape is supported; citations/research metadata remain denied.
+ annotations:z.array(z.never()).length(0).optional(),
  refusal:z.null().optional(),reasoning,reasoning_details:reasoningDetails,tool_calls:z.array(sourceCall).max(1).nullish(),
 }).strict());
 
-/** Only the v2 frozen format uses this projection before request hashing.
+/** Versioned v2/v3 frozen formats use this projection before request hashing.
  * SDK 0.18 carries response metadata into assistant text parts on later turns.
  * Preserve text and top-level tool semantics; unknown metadata/content fails closed.
  * The original adapter still validates tools, message roles and routing. */
@@ -31,13 +39,13 @@ export function normalizeOpenRouterHistory(request:{messages?:unknown}):void {
   const normalized={...message};
   if(!reasoning.safeParse(message.reasoning).success||!reasoningDetails.safeParse(message.reasoning_details).success)
    throw new Error('RUNTIME_PROVIDER_HISTORY_DENIED');
-  let encrypted=hasEncrypted(message.reasoning_details);
+  let openAIReasoning=hasOpenAIReasoning(message.reasoning_details);
   delete normalized.reasoning;delete normalized.reasoning_details;
   if(Array.isArray(message.content)){
    const parsed=textParts.safeParse(message.content);
    if(!parsed.success)throw new Error('RUNTIME_PROVIDER_HISTORY_DENIED');
    for(const part of parsed.data){
-    encrypted ||=hasEncrypted(part.reasoning_details);
+    openAIReasoning ||=hasOpenAIReasoning(part.reasoning_details);
     // A duplicated tool field is removable only when the actual top-level calls
     // are identical. Unknown or parallel calls remain for the adapter to reject.
     if(part.tool_calls?.length&&!isDeepStrictEqual(part.tool_calls,message.tool_calls))
@@ -46,9 +54,9 @@ export function normalizeOpenRouterHistory(request:{messages?:unknown}):void {
    normalized.content=parsed.data.map(part=>part.text).join('');
   }
   // This compatibility path is for completed text from the tool-free
-  // organizer. Encrypted tool continuations need their provider's original
+  // organizer. OpenAI reasoning tool continuations need their provider's original
   // reasoning, which this text-only projection does not claim to support.
-  if(encrypted&&message.tool_calls!=null&&(!Array.isArray(message.tool_calls)||message.tool_calls.length>0))
+  if(openAIReasoning&&message.tool_calls!=null&&(!Array.isArray(message.tool_calls)||message.tool_calls.length>0))
    throw new Error('RUNTIME_PROVIDER_HISTORY_DENIED');
   return normalized;
  });

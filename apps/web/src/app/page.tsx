@@ -1,6 +1,7 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import Link from 'next/link';
+import { useRef } from 'react';
 import { trpc } from '@/trpc/client';
 import { useCreditsBalance } from '@/hooks/use-credits';
 import styles from './home.module.css';
@@ -10,6 +11,7 @@ type HomeAccount={strategyDraftId?:string|null};
 type HomeBusiness={accounts:HomeAccount[]};
 
 export default function HomePage(){
+ const startIntent=useRef<string|null>(null);
  const profile=trpc.user.getUserProfile.useQuery();
  const library=trpc.opc.library.useQuery({search:'',from:null,to:null},{retry:false});
  const catalog=trpc.opc.catalog.useQuery(undefined,{retry:false});
@@ -27,7 +29,7 @@ export default function HomePage(){
    <section className={styles.account}><div><strong>欢迎回来，{name}</strong><span>{profile.data?.membership_level==='free'?'普通会员':'会员账户'}</span></div><Link href="/profile?tab=subscription">账户与积分 →</Link></section>
    <section className={styles.value}><h1>让你的业务，<br/>拥有清楚的内容方向</h1><p>从找到自己的位置，到持续做出有价值的内容。<br/>Graylum 和你一起分析、判断和创作，让每一步都有依据。</p></section>
    <section className={styles.method}><div className={styles.sectionIntro}><h2>{methodTitle||`${stepCount}个环节，理解你的内容增长路径`}</h2><p>Agent 提供分析与建议，你核对真实情况、作出关键决定。</p></div><QueryNotice error={catalog.error} label="定位方法" retry={()=>catalog.refetch()}/>{catalog.isSuccess&&!catalog.error&&steps.length>0&&<ol>{steps.map((step,index)=><li key={step.id}><span>{String(index+1).padStart(2,'0')}</span><h3>{step.title}</h3><p>具体问题将在进入定位工作后呈现。</p></li>)}</ol>}</section>
-   <section className={styles.entry}><div><Link className={styles.primary} href="/positioning">{!libraryReady||hasStrategy?'进入对话':'开始新手引导'}</Link><Link href={!libraryReady||hasStrategy?'/library':'/positioning'}>{!libraryReady?'查看资料库':hasStrategy?'查看正式定位':'我已有定位'}</Link></div><QueryNotice error={library.error} loading={library.isPending} label="账号与资料" retry={()=>library.refetch()}/>{libraryReady&&<p>{hasStrategy?'已有定位和工作会保留；你可以继续原对话。':'先一起确认定位，再开展选题和内容创作。已有资料可以直接带入。'}</p>}</section>
+   <section className={styles.entry}><div><Link className={styles.primary} href="/positioning" onClick={event=>{if(libraryReady&&!hasStrategy){event.preventDefault();if(startIntent.current)return;startIntent.current=crypto.randomUUID();location.assign('/positioning?start=mentor&intent='+startIntent.current);}}}>{!libraryReady||hasStrategy?'进入对话':'开始新手引导'}</Link><Link href={!libraryReady||hasStrategy?'/library':'/positioning'}>{!libraryReady?'查看资料库':hasStrategy?'查看正式定位':'我已有定位'}</Link></div><QueryNotice error={library.error} loading={library.isPending} label="账号与资料" retry={()=>library.refetch()}/>{libraryReady&&<p>{hasStrategy?'已有定位和工作会保留；你可以继续原对话。':'先一起确认定位，再开展选题和内容创作。已有资料可以直接带入。'}</p>}</section>
    <section className={styles.capabilities}><h2>从策略，继续走向实际创作</h2><div>{[['AI 对话','持续讨论，获得建议'],['内容创作','选题、起草、修改与定稿'],['功能广场','探索工具与方法'],['个人成长','回看自己的创作历程']].map(([title,description])=><article key={title}><h3>{title}</h3><p>{description}</p></article>)}</div></section>
   </main>
  </div>;

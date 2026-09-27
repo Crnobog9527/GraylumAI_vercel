@@ -1,11 +1,39 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
+import {gunzipSync} from 'node:zlib';
 import { decimal, parseExactJson } from './decimal';
+import {openRouterStream,OPENROUTER_STREAM_BYTE_LIMIT} from './openRouterStream';
 import type { TransportObservation } from './fixtureAdapter';
 // A lookup identity only, never a cost receipt. Exclude whitespace, delimiters
 // and control characters (including combined duplicate HTTP header values).
 export const validGenerationId=(value:unknown):value is string=>typeof value==='string'&&/^[a-zA-Z0-9._:-]{1,256}$/.test(value);
 export type OpenRouterIdentity = {provider:'openrouter';account:string;model:string;protocol:'openrouter-chat-v1'};
+/** Only streaming observations use reversible compression. Decode before parsing,
+ * with an independent allocation bound and hashes over original provider bytes. */
+export function decodeOpenRouterStreamObservation(observation:TransportObservation):Buffer {
+ const encoded=observation.rawBodyBase64;
+ if(observation.rawBodyOmitted||encoded.length>Math.ceil((OPENROUTER_STREAM_BYTE_LIMIT+2048)/3)*4||
+   encoded.length%4!==0||!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))throw new Error('invalid_stream_encoding');
+ const packed=Buffer.from(encoded,'base64');
+ if(packed.toString('base64')!==encoded)throw new Error('invalid_stream_encoding');
+ if(observation.rawBodyEncoding!=='gzip-base64')throw new Error('invalid_stream_encoding');
+ const bytes=gunzipSync(packed,{maxOutputLength:OPENROUTER_STREAM_BYTE_LIMIT});
+ const hash=createHash('sha256').update(bytes).digest('hex');
+ if(observation.rawBody!==''||bytes.length!==observation.rawBodyByteLength||hash!==observation.rawBodySha256||
+   !Number.isSafeInteger(observation.observedByteLength)||observation.observedByteLength!<bytes.length||
+   !/^[a-f0-9]{64}$/.test(observation.sourceHash)||
+   (observation.complete&&(observation.observedByteLength!==bytes.length||observation.sourceHash!==hash)))throw new Error('invalid_stream_encoding');
+ return bytes;
+}
+// PostgreSQL jsonb adds spaces and expands exponent-form numbers. Count every
+// colon/comma (even in strings) and reserve 400 bytes per finite JS number plus
+// 16 KiB for SQL-added identity metadata. This deliberately overestimates size.
+function receiptIssue(value:unknown):'invalid_receipt_text'|'receipt_size_limit'|null {
+ let numbers=0,invalidText=false;
+ const json=JSON.stringify(value,(_key,item)=>{if(typeof item==='number')numbers++;if(typeof item==='string'&&(item.includes('\0')||!item.isWellFormed()))invalidText=true;return item;});
+ if(invalidText)return 'invalid_receipt_text';
+ return Buffer.byteLength(json)+(json.match(/[:,]/g)?.length??0)+numbers*400<=524288-16384?null:'receipt_size_limit';
+}
 /** JSON may encode a small official cost with an exponent. Expand digits
  * exactly, never via Number; unsupported ledger precision stays unknown. */
 function officialCost(value:unknown):string {
@@ -24,18 +52,34 @@ function officialCost(value:unknown):string {
  * https://openrouter.ai/docs/cookbook/administration/usage-accounting
  * Cost finality is separate from whether a usable answer was delivered.
  */
-export function openRouterEvidence(observation:TransportObservation, identity:OpenRouterIdentity, source:'response'|'lookup', expectedProviderId?:string) {
+function projectOpenRouterEvidence(observation:TransportObservation, identity:OpenRouterIdentity, source:'response'|'lookup', expectedProviderId?:string) {
   const base={...identity,providerId:null as string|null,cost:null as string|null,currency:'USD',final:false,coverage:'request_total',
-    source,sourceHash:createHash('sha256').update(Buffer.from(observation.rawBodyBase64,'base64')).digest('hex'),
+    source,sourceHash:observation.stream?observation.sourceHash:createHash('sha256').update(Buffer.from(observation.rawBodyBase64,'base64')).digest('hex'),
     observedAt:new Date().toISOString(),rawBody:observation.rawBody,transport:observation,usage:null as Record<string,unknown>|null};
   const diagnostic=(reason:string)=>({...base,evidenceKind:'transport_observation' as const,rejectedReason:reason});
   if(validGenerationId(observation.generationId))base.providerId=observation.generationId;
   const mismatch=()=>({...base,providerId:null,rejectedReason:'identity_or_response_mismatch'});
   if(expectedProviderId&&base.providerId&&expectedProviderId!==base.providerId)return mismatch();
-  if(!observation.complete)return diagnostic('incomplete_transport');
-  let root:Record<string,unknown>;
-  try { root=parseExactJson(observation.rawBody) as Record<string,unknown>; }
-  catch{return diagnostic('invalid_json');}
+  let root:Record<string,unknown>;let sdkResponse:unknown;
+  if(observation.stream&&source==='response'){
+   let wire:string;
+   try{wire=new TextDecoder('utf-8',{fatal:true}).decode(decodeOpenRouterStreamObservation(observation));}catch{return diagnostic('invalid_stream_encoding');}
+   const stream=openRouterStream(identity.model,base.providerId??undefined);stream.push(wire);const result=stream.result();
+   if(result.identityConflict)return mismatch();
+   if(result.providerId)base.providerId=result.providerId;
+   if(expectedProviderId&&base.providerId&&expectedProviderId!==base.providerId)return mismatch();
+   if(!observation.complete)return diagnostic('incomplete_transport');
+   if(result.error||!result.sdkResponse)return diagnostic(result.error??'invalid_stream');
+   sdkResponse=result.sdkResponse;
+   root={...result.sdkResponse,usage:result.exactUsage};
+   // runtime_response replays a normal SDK completion. Original SSE bytes and
+   // their hash remain in transport; never hash this synthesized projection.
+   base.rawBody=JSON.stringify(sdkResponse);
+  }else{
+   if(!observation.complete)return diagnostic('incomplete_transport');
+   try { root=parseExactJson(observation.rawBody) as Record<string,unknown>;sdkResponse=JSON.parse(observation.rawBody); }
+   catch{return diagnostic('invalid_json');}
+  }
   if(!root || typeof root!=='object')return diagnostic('invalid_response');
   const data=(source==='lookup'?root.data:root) as Record<string,unknown>|undefined;
   if(!data || typeof data!=='object')return diagnostic('invalid_response');
@@ -56,9 +100,28 @@ export function openRouterEvidence(observation:TransportObservation, identity:Op
   // A terminal response can carry a usable answer while cost is unresolved.
   // Keep the original response available to Runtime; only financial finality
   // waits for an official lookup. Diagnostics do not establish zero cost.
-  const responseUsage=source==='response'?{sdkResponse:JSON.parse(observation.rawBody)}:null;
+  const responseUsage=source==='response'?{sdkResponse}:null;
   if(typeof cost!=='string')return {...base,usage:responseUsage,costIssue:'missing_cost'};
   let exactCost:string;
   try { exactCost=officialCost(cost); } catch{return {...base,usage:responseUsage,costIssue:'invalid_cost'};}
   return {...base,cost:exactCost,final:true,usage:responseUsage};
+}
+
+/** Bound the durable receipt, not the accepted SSE stream. Extreme entropy may
+ * prevent reversible storage; retain only observed identity/hash diagnostics in
+ * that case. No terminal/cost assertion survives omission of provider bytes. */
+export function openRouterEvidence(observation:TransportObservation,identity:OpenRouterIdentity,source:'response'|'lookup',expectedProviderId?:string){
+ const evidence=projectOpenRouterEvidence(observation,identity,source,expectedProviderId);
+ if(!observation.stream)return evidence;
+ const issue=receiptIssue(evidence);if(!issue)return evidence;
+ const conflict='rejectedReason' in evidence&&evidence.rejectedReason==='identity_or_response_mismatch';
+ return {...evidence,rawBody:'',usage:null,cost:null,final:false,
+  // SQL's ordinary rejected-receipt branch latches identity conflicts; do not
+  // downgrade one to a transport-only observation during size reduction.
+  ...(!conflict?{evidenceKind:'transport_observation' as const}:{}),
+  rejectedReason:conflict?'identity_or_response_mismatch':issue,
+  transport:{rawBody:'',rawBodyBase64:'',rawBodyOmitted:issue,
+   rawBodyByteLength:observation.rawBodyByteLength,rawBodySha256:observation.rawBodySha256,
+   observedByteLength:observation.observedByteLength,sourceHash:observation.sourceHash,
+   httpStatus:observation.httpStatus,complete:observation.complete,transportIssue:observation.transportIssue,stream:true as const}};
 }

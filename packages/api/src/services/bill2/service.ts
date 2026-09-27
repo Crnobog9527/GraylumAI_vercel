@@ -37,7 +37,7 @@ export interface BillingRpc { rpc(name: string, args: Record<string, unknown>): 
 export interface BillingTransport {
  /** Private no-HTTP validation before persistent dispatch; returned capability
   * encloses the exact validated request and credential for one send. */
- prepareDispatch?(body:unknown,identity:CallIdentity):Promise<()=>Promise<TransportObservation>>;
+ prepareDispatch?(body:unknown,identity:CallIdentity,onChunk?:(chunk:string)=>void):Promise<()=>Promise<TransportObservation>>;
  dispatch(body:unknown, identity:CallIdentity):Promise<TransportObservation>;
  lookup(providerId:string, identity:CallIdentity):Promise<TransportObservation>;
 }
@@ -115,7 +115,7 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       if (rotated.dispatchToken) capabilities.set(callId, { token: rotated.dispatchToken, frozen: parsed, runId });
       return Boolean(rotated.dispatchToken);
     },
-    async dispatchOnce(callId: string, body: string) {
+    async dispatchOnce(callId: string, body: string, onChunk?:(chunk:string)=>void) {
       const capability = capabilities.get(callId);
       if (!capability) return { dispatched: false };
       if (createHash('sha256').update(body).digest('hex') !== capability.frozen.requestHash) throw new Error('BILL2_REQUEST_CONFLICT');
@@ -125,7 +125,7 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       const input={input:body,maxOutputTokens:capability.frozen.outputLimit,automaticRetry:false,hiddenTools:false};
       // A known local preflight failure leaves the SQL call prepared, so the
       // existing Runtime fail-before-dispatch path can safely release it.
-      const send=deps.adapter.prepareDispatch?await deps.adapter.prepareDispatch(input,identity):()=>deps.adapter.dispatch(input,identity);
+      const send=deps.adapter.prepareDispatch?await deps.adapter.prepareDispatch(input,identity,onChunk):()=>deps.adapter.dispatch(input,identity);
       const permission = await rpc<{ dispatch: boolean }>('bill2_dispatch', { p_run_id: capability.runId, p_call_id: callId, p_token: capability.token });
       if (!permission.dispatch) return { dispatched: false };
       let evidence;

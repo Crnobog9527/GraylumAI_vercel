@@ -138,8 +138,12 @@ it('keeps the existing safe discard for a SQL history window starting at a tool 
 
 // Synthetic opaque data only. No real provider reasoning is needed or decoded.
 const encryptedDetail={type:'reasoning.encrypted',format:'openai-responses-v1',id:'rs_synthetic',data:'SYNTHETIC_OPAQUE'.repeat(800),index:0};
-it.each([encryptedDetail,{...encryptedDetail,id:null,index:undefined}])('projects known opaque reasoning to text without mutating stored history %#',detail=>{
- const metadata={role:'assistant',refusal:null,reasoning:null,reasoning_details:[detail]};
+const summaryDetail={type:'reasoning.summary',format:'openai-responses-v1',summary:'Synthetic private summary',index:0};
+it.each([[encryptedDetail],[{...encryptedDetail,id:null,index:undefined}],[summaryDetail],
+ [{...summaryDetail,id:null,index:undefined}],[{...summaryDetail,id:'rs_summary'}],
+ [summaryDetail,{...encryptedDetail,index:1}],
+].map(details=>({details})))('projects known OpenAI reasoning to text without mutating stored history %#',({details})=>{
+ const metadata={role:'assistant',refusal:null,reasoning:null,reasoning_details:details};
  const item={type:'message',role:'assistant',content:[{type:'output_text',text:'Organizer result',providerData:metadata}]};
  const history=[{role:'user',content:'First input'},item],incoming=[{role:'user',content:'Next mentor input'}],before=JSON.stringify(history);
  for(const selected of [selectRuntimeHistory(history,incoming,sizing),selectRuntimeCallInput([...history,...incoming],history.length,sizing)]){
@@ -176,14 +180,116 @@ it.each([
  }
  expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
 });
-it('does not extend opaque reasoning support to a tool continuation',async()=>{
- const metadata={reasoning_details:[encryptedDetail],tool_calls:[sourceCall]};
+it.each([[encryptedDetail],[summaryDetail],[summaryDetail,{...encryptedDetail,index:1}]].map(details=>({details})))('does not extend OpenAI reasoning support to a tool continuation %#',async({details})=>{
+ const metadata={reasoning_details:details,tool_calls:[sourceCall]};
  const item={type:'message',role:'assistant',content:[{type:'output_text',text:'Synthetic prelude',providerData:{role:'assistant',...metadata}}]};
  expect(()=>projectOpenRouterItemsForSizing([item,{type:'function_call',callId:sourceCall.id,name:'read_source',arguments:'{}'},{type:'function_call_result',callId:sourceCall.id,name:'read_source',output:'source'}])).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
  const credential=vi.fn(),transport=vi.fn(),adapter=openRouterAdapter({allowWorkspaceRead:true,credential,transport});
- for(const message of [{role:'assistant',content:'Synthetic prelude',...metadata},{role:'assistant',content:[{type:'text',text:'Synthetic prelude',reasoning_details:[encryptedDetail]}],tool_calls:[sourceCall]}]){
+ for(const message of [{role:'assistant',content:'Synthetic prelude',...metadata},{role:'assistant',content:[{type:'text',text:'Synthetic prelude',reasoning_details:details}],tool_calls:[sourceCall]}]){
   const request={model:identity.model,stream:false,store:false,max_tokens:100,provider:routing,messages:[message]};
   await expect((async()=>{normalizeOpenRouterHistory(request);await adapter.dispatch({input:JSON.stringify(request)},identity);})()).rejects.toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
  }
  expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
+});
+
+it.each([
+ {...summaryDetail,type:'reasoning.unknown'},
+ {...summaryDetail,format:'unknown'},
+ {...summaryDetail,format:'anthropic-claude-v1'},
+ {...summaryDetail,summary:undefined},
+ {...summaryDetail,summary:null},
+ {...summaryDetail,summary:23},
+ {...summaryDetail,summary:{text:'hidden'}},
+ {...summaryDetail,summary:'x'.repeat(65537)},
+ {...summaryDetail,id:23},
+ {...summaryDetail,id:''},
+ {...summaryDetail,id:'x'.repeat(257)},
+ {...summaryDetail,index:-1},
+ {...summaryDetail,index:0.5},
+ {...summaryDetail,index:null},
+ {...summaryDetail,extra:'hidden'},
+])('rejects malformed summaries before sizing cuts and wire dispatch %#',async(detail)=>{
+ const metadata={role:'assistant',reasoning_details:[detail]};
+ const item={type:'message',role:'assistant',content:[{type:'output_text',text:'Synthetic answer',providerData:metadata}]},incoming=[{role:'user',content:'Next'}];
+ expect(()=>selectRuntimeHistory([item],incoming,{...sizing,historyItems:0})).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+ expect(()=>selectRuntimeCallInput([item,...incoming],1,sizing)).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+ const credential=vi.fn(),transport=vi.fn(),adapter=openRouterAdapter({credential,transport});
+ for(const message of [{content:'Synthetic answer',...metadata},{role:'assistant',content:[{type:'text',text:'Synthetic answer',...metadata}]}]){
+  const request={model:identity.model,stream:false,store:false,max_tokens:100,provider:routing,messages:[message]};
+  await expect((async()=>{normalizeOpenRouterHistory(request);await adapter.dispatch({input:JSON.stringify(request)},identity);})()).rejects.toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+ }
+ expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
+});
+
+it('does not accept summary metadata from user content or hide unknown metadata beside a valid summary',()=>{
+ for(const metadata of [{reasoning_details:[summaryDetail]}, {reasoning_details:[summaryDetail,{type:'reasoning.unknown'}]}]){
+  const item={role:'user',content:[{type:'input_text',text:'Synthetic input',providerData:metadata}]};
+  expect(()=>projectOpenRouterItemsForSizing([item])).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+ }
+ expect(()=>normalizeOpenRouterHistory({messages:[{role:'assistant',content:'answer',reasoning_details:[summaryDetail,{type:'reasoning.unknown'}]}]})).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+});
+
+it('locked SDK continues alternating Qwen/Luna turns with summary plus encrypted history without mutating stored items',async()=>{
+ const {history,session}=memorySession(),sent:Record<string,unknown>[]=[];
+ const models=['synthetic/qwen','synthetic/luna','synthetic/qwen','synthetic/luna','synthetic/qwen'];
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_ONLY',transport:async(_url,init)=>{
+  const request=JSON.parse(String(init?.body));sent.push(request);
+  const details=request.model==='synthetic/luna'?[summaryDetail,{...encryptedDetail,index:1}]:reasoning.reasoning_details;
+  return new Response(response('gen-'+sent.length,{role:'assistant',content:'Answer '+sent.length,reasoning_details:details}));
+ }});
+ for(const model of models){
+  let historyCount=0;
+  const before=JSON.stringify(history),oldLength=history.length;
+  expect(await runRuntime({model,instructions:sizing.instructions,input:'Next synthetic turn',session,maxTurns:1,maxOutputTokens:100,tools:[],
+   selectHistory:async(old,incoming)=>{const selected=selectRuntimeHistory(old,incoming,sizing);historyCount=selected.length-incoming.length;return selected;},
+   filterModelInput:items=>selectRuntimeCallInput(items,historyCount,sizing) as typeof items,
+   exchange:async(_sequence,body)=>{
+    const request={...JSON.parse(body),provider:routing};normalizeOpenRouterHistory(request);assertRuntimeRequestCapacity(JSON.stringify(request),sizing.inputBytes);
+    return (await adapter.dispatch({input:JSON.stringify(request)},{...identity,model})).rawBody;
+   },
+  })).toBe('Answer '+sent.length);
+  expect(JSON.stringify(history.slice(0,oldLength))).toBe(before);
+ }
+ expect(sent.map(request=>request.model)).toEqual(models);
+ expect(JSON.stringify(history)).toContain('reasoning.summary');
+ expect(JSON.stringify(history)).toContain('reasoning.encrypted');
+ expect(JSON.stringify(sent)).not.toContain('Synthetic private summary');
+ expect(JSON.stringify(sent)).not.toContain('SYNTHETIC_OPAQUE');
+ expect((sent[4]!.messages as {role:string;content:unknown}[]).filter(message=>message.role==='assistant')).toEqual([1,2,3,4].map(turn=>({role:'assistant',content:'Answer '+turn})));
+});
+
+it.each([null,{},['citation'],[{type:'url_citation',url:'https://private.invalid'}]])('rejects non-empty or malformed streaming annotations in sizing and wire %#',annotations=>{
+ const item={role:'assistant',content:[{type:'output_text',text:'Public answer',providerData:{annotations}}]};
+ expect(()=>projectOpenRouterItemsForSizing([item])).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+ expect(()=>normalizeOpenRouterHistory({messages:[{role:'assistant',content:[{type:'text',text:'Public answer',annotations}]}]})).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+});
+it('does not accept even empty assistant annotations on user content',()=>{
+ expect(()=>projectOpenRouterItemsForSizing([{role:'user',content:[{type:'input_text',text:'Input',providerData:{annotations:[]}}]}])).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+});
+it('locked SDK streaming history with empty annotations continues through Luna and the next mentor without rewriting stored items',async()=>{
+ const {history,session}=memorySession(),sent:Record<string,unknown>[]=[];
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_ONLY',transport:async(_url,init)=>{
+  const request=JSON.parse(String(init?.body));sent.push(request);const id='gen-stream-history-'+sent.length;
+  if(!request.stream)return new Response(response(id,{role:'assistant',content:'Answer '+sent.length,reasoning_details:[summaryDetail,{...encryptedDetail,index:1}]}));
+  const frame=(delta:unknown,finish:string|null=null)=>'data: '+JSON.stringify({id,object:'chat.completion.chunk',created:1,model:request.model,choices:[{index:0,delta,finish_reason:finish}]})+'\n\n';
+  return new Response(frame({role:'assistant',reasoning:'PRIVATE_STREAM_REASONING'})+frame({content:'Answer '})+frame({content:String(sent.length)},'stop')+
+   'data: '+JSON.stringify({id,object:'chat.completion.chunk',created:1,model:request.model,choices:[],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.001}})+'\n\ndata: [DONE]\n\n');
+ }});
+ for(const stream of [true,false,true]){
+  let historyCount=0;const before=JSON.stringify(history),oldLength=history.length;
+  const result=await runRuntime({model:identity.model,stream,instructions:sizing.instructions,input:'Next turn',session,maxTurns:1,maxOutputTokens:100,tools:[],
+   selectHistory:async(old,incoming)=>{const selected=selectRuntimeHistory(old,incoming,sizing);historyCount=selected.length-incoming.length;return selected;},
+   filterModelInput:items=>selectRuntimeCallInput(items,historyCount,sizing) as typeof items,
+   exchange:async(_sequence,body,onChunk)=>{
+    const request={...JSON.parse(body),provider:routing};normalizeOpenRouterHistory(request);
+    const send=await adapter.prepareDispatch({input:JSON.stringify(request)},identity,onChunk);
+    const observed=await send();return adapter.evidence(observed,identity,'response').rawBody;
+   },
+  });
+  expect(result).toBe('Answer '+sent.length);expect(JSON.stringify(history.slice(0,oldLength))).toBe(before);
+ }
+ expect(sent).toHaveLength(3);expect(JSON.stringify(history)).toContain('"annotations":[]');
+ expect(JSON.stringify(history)).toContain('reasoning.summary');expect(JSON.stringify(history)).toContain('reasoning.encrypted');
+ expect(JSON.stringify(sent)).not.toMatch(/PRIVATE_STREAM_REASONING|Synthetic private summary|SYNTHETIC_OPAQUE|annotations/);
+ expect((sent[2]!.messages as {role:string;content:unknown}[]).filter(item=>item.role==='assistant')).toEqual([{role:'assistant',content:'Answer 1'},{role:'assistant',content:'Answer 2'}]);
 });
