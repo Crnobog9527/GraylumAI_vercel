@@ -121,10 +121,11 @@ export function probeTransport(options: {
     settle(nano);
   }
 
-  function costSource(facts: StreamFacts, fallback: CostSource): CostSource {
+  /** Provider cost first; token counts only for a completed call; else the bound. */
+  function costSource(facts: StreamFacts, completed: boolean): CostSource {
     if (facts.usage?.costUsd !== undefined) return 'provider';
-    if (fallback !== 'upper_bound' && facts.usage?.promptTokens !== undefined) return 'tokens_at_max_price';
-    return fallback;
+    if (completed && facts.usage?.promptTokens !== undefined) return 'tokens_at_max_price';
+    return 'upper_bound';
   }
 
   async function probeFetch(url: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -163,7 +164,7 @@ export function probeTransport(options: {
       if (error instanceof Error) record.errorMessage = options.redact(error.message).slice(0, 300);
       record.totalMs = options.clock() - started;
       state.stopped = 'unknown_result';
-      settleRecord(record, settle, 'unknown', costSource(facts.facts, 'upper_bound'));
+      settleRecord(record, settle, 'unknown', costSource(facts.facts, false));
     };
     abandon.set(record, unknown);
     let response: Response;
@@ -209,7 +210,7 @@ export function probeTransport(options: {
             unknown(final.streamError ? 'provider_stream_error' : 'incomplete_stream');
           } else {
             record.totalMs = options.clock() - started;
-            settleRecord(record, settle, 'ok', costSource(final, 'tokens_at_max_price'));
+            settleRecord(record, settle, 'ok', costSource(final, true));
           }
           controller.close();
           return;

@@ -236,6 +236,16 @@ describe('no retry and unknown results', () => {
     expect(network.sent).toHaveLength(1);
   });
 
+  it('charges the full bound when a completed stream reports no usage', async () => {
+    const t = transport(async () => sseResponse(config.model, textDeltas('hi'), {usage: {}}));
+    await (await post(t, 'no usage')).text();
+    expect(t.records[0]).toMatchObject({status: 'ok', costSource: 'upper_bound'});
+    expect(t.records[0]!.costUsd).toBe(t.records[0]!.boundUsd);
+    const priced = transport(async () => sseResponse(config.model, textDeltas('hi'), {usage: {prompt_tokens: 1000, completion_tokens: 100}}));
+    await (await post(priced, 'tokens')).text();
+    expect(priced.records[0]).toMatchObject({costSource: 'tokens_at_max_price', costUsd: (1000 * 0.3 + 100 * 3.75) / 1_000_000});
+  });
+
   it('denies an identical request body inside one trial', async () => {
     const network = recording(async () => sseResponse(config.model, textDeltas('hi')));
     const t = transport(network.upstream);
