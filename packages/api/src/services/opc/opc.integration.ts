@@ -2869,7 +2869,7 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     });
     async function send(text:string){await composer().fill(text);await page.getByRole("button",{name:"发送",exact:true}).click();try{await expect.poll(()=>composer().inputValue(),{timeout:30000}).toBe("");}catch(error){console.info('QUESTION_SEND_FAILURE',{alerts:await page.getByRole('alert').allTextContents(),admissions:admissions.length});await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/question-send-failure.png'});throw error;}}
     await send("我做 AI 赛道");
-    await expect.poll(()=>first().inputValue()).toBe("我做 AI 赛道");
+    await expect.poll(()=>first().inputValue(),{timeout:30000}).toBe("我做 AI 赛道");
     // Autosave includes a 700ms debounce plus a fresh read and the write.
     await expect.poll(async()=>(await f.service.read(draft.draftId)).information["step-0"].values?.goal?.status,{timeout:30000}).toBe("provisional");
     expect(await second().count()).toBe(0);
@@ -7749,20 +7749,20 @@ it("OPC: new business start restores the complete frozen request before another 
   try{
     await page.goto(process.env.V3_LOCAL_APP+'/positioning');
     await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
-    await page.getByRole('dialog',{name:'梳理账号定位'}).getByRole('button',{name:'从头分析新定位'}).click();
-    expect(await page.getByRole('combobox').count()).toBe(0);
-    await page.getByLabel('业务名称',{exact:true}).fill('独立新业务');
     let lost=0;
     await page.route('**/api/trpc/opc.start*',async route=>{const response=await route.fetch();expect(response.ok()).toBe(true);lost+=1;await route.abort();});
-    await page.getByRole('button',{name:'开始 Agent 引导',exact:true}).click();
+    await page.getByRole('dialog',{name:'梳理账号定位'}).getByRole('button',{name:'从头分析新定位'}).click();
+    expect(await page.getByLabel('业务名称',{exact:true}).count()).toBe(0);
     await page.getByRole('button',{name:'恢复上次开始请求',exact:true}).waitFor({timeout:60000});
     await expect.poll(()=>lost,{timeout:60000}).toBe(1);
     const startKey='opc-start-operation:'+f.actor;
     const frozen=JSON.parse((await page.evaluate(key=>sessionStorage.getItem(key),startKey))!);
-    expect(frozen).toMatchObject({actorId:f.actor,mode:'mentor',businessName:'独立新业务'});
+    expect(frozen).toMatchObject({actorId:f.actor,mode:'mentor'});
     expect(frozen.businessId).toBeNull();
-    await page.getByLabel('业务名称',{exact:true}).fill('另一个新业务');
-    expect(await page.getByRole('button',{name:'开始 Agent 引导',exact:true}).isDisabled()).toBe(true);
+    expect(frozen.businessName).toBeUndefined();
+    await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
+    expect(await page.getByRole('dialog',{name:'梳理账号定位'}).getByRole('button',{name:'从头分析新定位'}).isDisabled()).toBe(true);
+    expect(lost).toBe(1);
     await page.context().clearCookies();
     await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/positioning');
     await page.getByPlaceholder('name@example.com').fill(otherActor.email);
@@ -7786,7 +7786,7 @@ it("OPC: new business start restores the complete frozen request before another 
     const restoredDraft=page.url().split('/').at(-1)!;
     const restoredBusiness=(await sql.query('select business_id::text id from opc_draft_businesses where draft_id=$1',[restoredDraft])).rows[0].id;
     expect(restoredBusiness).not.toBe(originalBusiness);
-    expect((await sql.query('select name from opc_businesses where id=$1',[restoredBusiness])).rows[0].name).toBe('独立新业务');
+    expect((await sql.query('select name from opc_businesses where id=$1',[restoredBusiness])).rows[0].name).toBe('未命名业务');
     expect(await page.evaluate(key=>sessionStorage.getItem(key),startKey)).toBeNull();
   }finally{await browser.close();}
 },180000);
@@ -8537,7 +8537,7 @@ it("OPC: approved six-stage guided positioning keeps one editable conversation a
     const draftId=page.url().split('/positioning/')[1]?.split('?')[0]??'';
     expect(draftId).toBeTruthy();
     const phases=page.getByRole('navigation',{name:'定位步骤'}).getByRole('button');
-    await expect.poll(()=>phases.count()).toBe(6);
+    await expect.poll(()=>phases.count(),{timeout:30000}).toBe(6);
     for(const [index,title] of ['需求确认','竞品研究','账号定位','内容策略','运营建议','商业规划'].entries())
       expect((await phases.nth(index).innerText()).replace(/\s+/g,' ')).toContain(`${index+1} ${title}`);
     const answer=page.getByRole('textbox',{name:'产品与服务',exact:true});
@@ -8547,6 +8547,9 @@ it("OPC: approved six-stage guided positioning keeps one editable conversation a
     await mentor.fill('我想先聊真实的学员困境。');
     await page.getByRole('button',{name:'发送',exact:true}).click();
     await page.getByRole('log',{name:'完整导师消息'}).getByText('我想先聊真实的学员困境。',{exact:true}).waitFor();
+    // The optimistic bubble is immediate; wait for the separate execution and
+    // organizer phase before this happy-path refresh/confirmation traversal.
+    await expect.poll(()=>page.evaluate(id=>sessionStorage.getItem('opc-step:'+id+':step-0'),draftId),{timeout:30000}).toBeNull();
     await page.evaluate(()=>document.fonts.ready);
     console.error('SIX_STAGE_METRICS',JSON.stringify(await page.evaluate(()=>{
       const entries:[string,string][]=[['rail','[aria-label="工作区导航"]'],['center','main'],['right','[aria-label="当前成果"]'],['composer','[aria-label="给导师的回复"]']];
@@ -9286,7 +9289,8 @@ it.each([false, true])("OPC: mentor history preserves a saved empty edit after r
     if (reviseRound) await expect.poll(async () => (await read()).turns.filter((t: { roundId: string; kind: string }) => t.roundId !== d.roundId && t.kind === 'opening').length, { timeout: 30000 }).toBe(1);
     await page.reload();
     await page.getByRole('log', { name: '完整导师消息' }).getByText(reply, { exact: true }).waitFor();
-    await page.getByRole('button', { name: '重新读取状态', exact: true }).click();
+    await page.getByRole('button', { name: '工作信息', exact: true }).click();
+    await page.getByRole('dialog', { name: '工作信息', exact: true }).getByRole('button', { name: '重新读取状态', exact: true }).click();
     await expect.poll(() => field.inputValue(), { timeout: 30000 }).toBe('');
     // Wait through the page's autosave interval after history hydration. This
     // would allow the old reply to silently refill and persist the field.
@@ -10033,15 +10037,13 @@ it('OPC: positioning entry creates a new business or edits only the selected exi
   await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
   await page.getByRole('dialog',{name:'梳理账号定位',exact:true}).getByRole('button',{name:'从头分析新定位',exact:true}).click();
   expect(await page.getByRole('combobox').count()).toBe(0);
-  const start=page.getByRole('button',{name:'开始 Agent 引导',exact:true});
-  expect(await start.isDisabled()).toBe(true);
-  await page.getByLabel('业务名称',{exact:true}).fill('独立摄影服务');
-  await start.click();
+  expect(await page.getByLabel('业务名称',{exact:true}).count()).toBe(0);
+  expect(await page.getByRole('button',{name:'开始 Agent 引导',exact:true}).count()).toBe(0);
   await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname));
   const createdDraft=new URL(page.url()).pathname.split('/').at(-1)!;
   expect(createdDraft).not.toBe(f.d.draftId);
   const created=(await sql.query('select b.id,b.name from opc_draft_businesses d join opc_businesses b on b.id=d.business_id where d.draft_id=$1',[createdDraft])).rows[0];
-  expect(created.name).toBe('独立摄影服务');expect(created.id).not.toBe(originalBusiness);
+  expect(created.name).toBe('未命名业务');expect(created.id).not.toBe(originalBusiness);
   expect(await readAccounts()).toEqual(before);
   await page.goto(process.env.V3_LOCAL_APP+'/positioning');
   const draftCount=Number((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n);
@@ -10361,19 +10363,19 @@ it.each(['true','omitted','false'] as const)('OPC: stopped pending cost unlocks 
   expect((await executor.execute(prepared.executionId)).state).toBe('pending');expect(posts).toBe(1);
   await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+draft.draftId);
   const composer=page.getByRole('textbox',{name:'给导师的回复',exact:true});
-  await composer.waitFor();await expect.poll(()=>composer.isDisabled()).toBe(true);
+  await composer.waitFor();expect(await composer.isEnabled()).toBe(true);await composer.fill('Editable next draft while recovery is pending');await expect.poll(()=>page.getByRole('button',{name:'发送',exact:true}).isDisabled()).toBe(true);
   expect((await executor.cancel(prepared.executionId)).state).toBe('cost_pending');
   const original=(await sql.query('select to_jsonb(r) row from bill2_runs r where id=(select billing_run_id from runtime_executions where id=$1)',[prepared.executionId])).rows;
   // Mismatched input or request identity must retain the local recovery lock.
   for(const mismatch of [{...request,input:'Unsent different answer'},{...request,requestId:randomUUID()},{...request,unexpected:'unrecognized key'},{...request,organizeAfter:'false'}]){
    await page.evaluate(({key,request})=>sessionStorage.setItem(key,JSON.stringify({request})),{key,request:mismatch});
-   await page.reload();await composer.waitFor();await expect.poll(()=>composer.isDisabled()).toBe(true);
+   await page.reload();await composer.waitFor();expect(await composer.isEnabled()).toBe(true);await composer.fill('Editable next draft while recovery is pending');await expect.poll(()=>page.getByRole('button',{name:'发送',exact:true}).isDisabled()).toBe(true);
    expect(await page.evaluate(key=>sessionStorage.getItem(key),key)).not.toBeNull();
   }
   await page.evaluate(({key,request})=>sessionStorage.setItem(key,JSON.stringify({request})),{key,request});
   await page.reload();await composer.waitFor();
   await expect.poll(()=>composer.isEnabled()).toBe(true);
-  expect(await page.evaluate(key=>sessionStorage.getItem(key),key)).toBeNull();
+  await expect.poll(()=>page.evaluate(key=>sessionStorage.getItem(key),key),{timeout:30000}).toBeNull();
   await page.getByText('本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。').waitFor();
   expect(await page.getByRole('button',{name:'继续核对这条回复',exact:true}).count()).toBe(0);
   await page.reload();await composer.waitFor();await expect.poll(()=>composer.isEnabled()).toBe(true);
@@ -10393,4 +10395,195 @@ it.each(['true','omitted','false'] as const)('OPC: stopped pending cost unlocks 
   await page.locator('[data-execution-id="'+prepared.executionId+'"]').getByText('本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。').waitFor();
   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/stopped-pending-browser-'+organize+'.png',fullPage:true});
  }finally{await browser.close();await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+},120000);
+
+it("OPC: mentor freezes actor-bound business identity and existing material without rewriting retained requests", async () => {
+  const f = await fixture(2);
+  await planFixtureModel(f.moduleId);
+  const draft = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: "mentor", businessName: "graylum ai" });
+  const before = await f.service.read(draft.draftId);
+  await f.service.information({ draftId: draft.draftId, stepId: "step-0", requestId: randomUUID(), expectedVersion: before.snapshot.steps["step-0"].version,
+    values: { goal: { value: "我自己开发的 AI Agent", status: "provisional", nature: "fact" } } });
+  const request = { draftId: draft.draftId, stepId: "step-0", purpose: "mentor" as const, questionId: "goal", requestId: randomUUID(), input: "我不确定，帮我判断" };
+  const prepared = await f.service.prepareStep(request);
+  const frozen = (await sql.query("select payload from runtime_executions where id=$1", [prepared.executionId])).rows[0].payload;
+  expect(frozen.scopeMaterial.content.work.businessContext).toMatchObject({version: "opc-business-context.v1", name: "graylum ai", businessId: draft.businessId, source: null});
+  expect(frozen.instructions).toContain("A known name is not a product description");
+  expect(frozen.instructions).toContain("most consequential missing purpose, intended user or delivery form");
+  expect(frozen.instructions).toContain("relate it to their preceding options");
+  expect(frozen.instructions).toContain("do not include process numbers");
+  expect(frozen.instructions).not.toContain("When you name the question, use exactly that label");
+  expect(frozen.instructions).not.toContain("Reflect the current answer and invite clarification");
+  expect(frozen.instructions).not.toContain("one short paragraph");
+  expect(JSON.stringify(frozen.scopeMaterial)).toContain("我自己开发的 AI Agent");
+  expect(frozen.scopeMaterial.content.work.steps["step-0"].information.goal.status).toBe("provisional");
+  // A library rename is allowed, but cannot replace a retained request's name,
+  // material, billing hash or question identity on replay.
+  await f.service.libraryEdit({ requestId: randomUUID(), target: "business", targetId: draft.businessId, expectedRevision: 1, patch: { name: "Renamed after admission" } });
+  expect((await f.service.prepareStep(request)).executionId).toBe(prepared.executionId);
+  expect((await sql.query("select payload from runtime_executions where id=$1", [prepared.executionId])).rows[0].payload).toEqual(frozen);
+  const other = await fixture(2);
+  await expect(other.service.prepareStep({ ...request, requestId: randomUUID() })).rejects.toThrow("OPC_DENIED");
+  expect((await sql.query("select count(*)::int n from runtime_executions where session_id=$1", [draft.sessionId])).rows[0].n).toBe(1);
+  expect((await sql.query("select count(*)::int n from bill2_calls where run_id=(select billing_run_id from runtime_executions where id=$1)", [prepared.executionId])).rows[0].n).toBe(0);
+});
+
+it("OPC: unnamed entry requires no business modal and never imports another business as mentor context", async () => {
+  const f = await fixture(2);
+  await planFixtureModel(f.moduleId);
+  const unrelated = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: "mentor", businessName: "Other business PRIVATE sentinel" });
+  const start = { requestId: randomUUID(), registration: f.registration, mode: "mentor" as const };
+  const draft = await f.service.start(start);
+  expect((await f.service.start(start)).draftId).toBe(draft.draftId);
+  expect(draft.businessName).toBe("未命名业务");
+  expect(draft.businessId).not.toBe(unrelated.businessId);
+  const prepared = await f.service.prepareStep({ draftId: draft.draftId, stepId: "step-0", purpose: "mentor", questionId: "goal", requestId: randomUUID(), input: OPENING_INPUT });
+  const frozen = (await sql.query("select payload from runtime_executions where id=$1", [prepared.executionId])).rows[0].payload;
+  expect(frozen.scopeMaterial.content.work.businessContext).toMatchObject({version: "opc-business-context.v1", name: null, businessId: draft.businessId, source: null});
+  expect(frozen.instructions).not.toContain("未命名业务");
+  expect(JSON.stringify(frozen)).not.toContain("PRIVATE sentinel");
+  expect((await sql.query("select count(*)::int n from opc_drafts where actor_id=$1", [f.actor])).rows[0].n).toBe(2);
+});
+
+it("OPC: business source context is frozen to the matching business and fails closed on source revocation", async () => {
+  const f = await completed(2);
+  await planFixtureModel(f.moduleId);
+  const draft = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: "mentor", businessId: f.d.businessId });
+  const request = { draftId: draft.draftId, stepId: "step-0", purpose: "mentor" as const, questionId: "goal", requestId: randomUUID(), input: OPENING_INPUT };
+  const prepared = await f.service.prepareStep(request);
+  const frozen = (await sql.query("select payload from runtime_executions where id=$1", [prepared.executionId])).rows[0].payload;
+  const context = frozen.scopeMaterial.content.work.businessContext;
+  expect(context.businessId).toBe(f.d.businessId);
+  expect(context.source.versionId).toBe(f.sourceVersionId);
+  expect(Object.values(context.source.profile).every((field: any) => field.value === "A concrete user decision" && field.status === "confirmed" && field.sourceVersionId === f.sourceVersionId)).toBe(true);
+  expect(Object.keys(context.source.profile).length).toBeGreaterThan(0);
+  const unrelated = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: "mentor", businessName: "Different business" });
+  const other = await f.service.prepareStep({ ...request, draftId: unrelated.draftId, requestId: randomUUID() });
+  const otherFrozen = (await sql.query("select payload from runtime_executions where id=$1", [other.executionId])).rows[0].payload;
+  expect(otherFrozen.scopeMaterial.content.work.businessContext.source).toBeNull();
+  expect(JSON.stringify(otherFrozen.scopeMaterial)).not.toContain(f.sourceVersionId);
+  // Context is not flattened into untracked prompt prose: dispatch rechecks
+  // the actual frozen source permission and profile via existing material rules.
+  expect(frozen.instructions).not.toContain("A concrete user decision");
+  await sql.query("select runtime_material_allowed($1,$2)", [f.actor, frozen.scopeMaterial]);
+  // Even a malformed stored fixture must not use the new key as a blanket
+  // escape from the original work identity checks. These are new test-only
+  // material rows; the real frozen row is never edited.
+  const corruptions = [
+    (content: any) => { content.work.businessContext.version = "unknown.v9"; },
+    (content: any) => { content.work.businessContext.unrecognized = true; },
+    (content: any) => { content.work.businessContext.businessId = unrelated.businessId; },
+    (content: any) => { content.work.businessContext.source.versionId = randomUUID(); },
+    (content: any) => { content.work.businessContext.source.profile = {}; },
+    (content: any) => { content.work.packageHash = "a".repeat(64); },
+  ];
+  for (const [index, corrupt] of corruptions.entries()) {
+    const content = structuredClone(frozen.scopeMaterial.content);
+    corrupt(content);
+    const row = (await sql.query("insert into runtime_scope_material(session_id,revision,request_id,request,content,content_hash) values($1,$2,$3,'{}',$4,encode(sha256(convert_to($4::jsonb::text,'UTF8')),'hex')) returning session_id,revision,content,content_hash", [draft.sessionId, 100 + index, randomUUID(), content])).rows[0];
+    await expect(sql.query("select runtime_material_allowed($1,$2)", [f.actor, { sessionId: row.session_id, revision: Number(row.revision), content: row.content, hash: row.content_hash }])).rejects.toThrow("RUNTIME_MATERIAL_UNAVAILABLE");
+  }
+  await sql.query("update bill2_drafts set revoked=true where id=$1", [f.d.draftId]);
+  await expect(sql.query("select runtime_material_allowed($1,$2)", [f.actor, frozen.scopeMaterial])).rejects.toThrow("RUNTIME_MATERIAL_UNAVAILABLE");
+  expect((await sql.query("select payload from runtime_executions where id=$1", [prepared.executionId])).rows[0].payload).toEqual(frozen);
+  expect((await sql.query("select count(*)::int n from bill2_calls where run_id=$1", [prepared.runId])).rows[0].n).toBe(0);
+});
+
+it("OPC: business context migration retains legacy material hashes and private helper privileges", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { resolve } = await import("node:path");
+  const previous = readFileSync(resolve(process.cwd(), "../../packages/db/migrations/0107_opc_workbench.sql"), "utf8");
+  const next = readFileSync(resolve(process.cwd(), "../../packages/db/migrations/0139_opc_business_context.sql"), "utf8");
+  const functionText = (text: string) => text.match(/CREATE OR REPLACE FUNCTION runtime_work_projection\([\s\S]*?END \$\$;/)![0];
+  const f = await fixture(2);
+  const draft = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: "mentor", businessName: "Legacy business" });
+  // Transaction-local DDL only, invisible to the browser/REST connection. Make
+  // the old material through the actual old projection, then validate it with
+  // the new projection and original immutable row hash.
+  let legacyBefore: unknown;
+  await sql.query("BEGIN");
+  try {
+    await sql.query(functionText(previous));
+    await sql.query("select opc_step_material($1,$2,$3,'step-0','mentor','legacy retained input')", [f.actor, draft.draftId, randomUUID()]);
+    const before = (await sql.query("select content,content_hash from runtime_scope_material where session_id=$1", [draft.sessionId])).rows[0];
+    expect(before.content.work.businessContext).toBeUndefined();
+    const material = (await sql.query("select runtime_session_context($1,$2) as context", [f.actor, draft.sessionId])).rows[0].context.scopeMaterial;
+    await sql.query(functionText(next));
+    await sql.query("select runtime_material_allowed($1,$2)", [f.actor, material]);
+    expect((await sql.query("select content,content_hash from runtime_scope_material where session_id=$1", [draft.sessionId])).rows[0]).toEqual(before);
+    legacyBefore = before;
+    await sql.query("COMMIT");
+  } catch (error) { await sql.query("ROLLBACK"); throw error; }
+  await sql.query(next);
+  await sql.query(next);
+  expect((await sql.query("select content,content_hash from runtime_scope_material where session_id=$1", [draft.sessionId])).rows[0]).toEqual(legacyBefore);
+  const permissions = (await sql.query("select role, has_function_privilege(role,'opc_business_context(uuid,uuid,uuid)','EXECUTE') as allowed from unnest(array['anon','authenticated','service_role']) role")).rows;
+  expect(permissions.every(row => row.allowed === false)).toBe(true);
+});
+
+// Shared disposable-harness helpers; importing this file registers its cases,
+// which the runner's exact case pattern still filters before execution.
+export { mergedPositioningFixture, planBrowser, planFixtureModel, sql, admin };
+
+it("OPC: account mentor inherits only its account steps and never another account business profile", async () => {
+ const f=await publishedDraft(2);await planFixtureModel(f.moduleId);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+  body:['own-a','other-b'].map(account=>({id:randomUUID(),platform:'x',account,title:account,brief:'Account isolation',day:'2026-09-27'}))});
+ await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:['own-a','other-b'].map(account=>({platform:'x',account,expectedRevision:null}))});
+ const accounts=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts;
+ const drafts:Record<string,string>={};
+ for(const account of accounts){
+  const saved=await f.service.accountStrategySave({accountProjectId:account.projectId,requestId:randomUUID(),expectedSourceVersionId:f.sourceVersionId,expectedPendingDraftId:null,expectedRegistrationId:f.registration,
+   edits:{'step-0':{goal:account.account==='own-a'?'OWN_ACCOUNT_FACT':'OTHER_ACCOUNT_PRIVATE'}}});
+  drafts[account.account]=saved.draftId;
+ }
+ const prepared=await f.service.prepareStep({draftId:drafts['own-a'],stepId:'step-0',purpose:'mentor',questionId:'goal',requestId:randomUUID(),input:'请分析当前账号的方向'});
+ const frozen=(await sql.query('select payload from runtime_executions where id=$1',[prepared.executionId])).rows[0].payload;
+ expect(frozen.scopeMaterial.content.work.businessContext.source).toBeNull();
+ expect(JSON.stringify(frozen.scopeMaterial)).toContain('OWN_ACCOUNT_FACT');
+ expect(JSON.stringify(frozen.scopeMaterial)).not.toContain('OTHER_ACCOUNT_PRIVATE');
+ expect((await sql.query('select current_source_version_id from opc_businesses where id=$1',[f.d.businessId])).rows[0].current_source_version_id).toBe(f.sourceVersionId);
+ await sql.query('select runtime_material_allowed($1,$2)',[f.actor,frozen.scopeMaterial]);
+ // Even a correctly shaped shared profile cannot be spliced into an account
+ // draft: its own inherited, revocable steps are the authoritative source.
+ const content=structuredClone(frozen.scopeMaterial.content);
+ content.work.businessContext.source={versionId:f.sourceVersionId,profile:(await sql.query('select opc_profile($1) profile',[f.sourceVersionId])).rows[0].profile};
+ const row=(await sql.query("insert into runtime_scope_material(session_id,revision,request_id,request,content,content_hash) values($1,100,$2,'{}',$3,encode(sha256(convert_to($3::jsonb::text,'UTF8')),'hex')) returning session_id,revision,content,content_hash",[frozen.sessionId??frozen.scopeMaterial.sessionId,randomUUID(),content])).rows[0];
+ await expect(sql.query('select runtime_material_allowed($1,$2)',[f.actor,{sessionId:row.session_id,revision:Number(row.revision),content:row.content,hash:row.content_hash}])).rejects.toThrow('RUNTIME_MATERIAL_UNAVAILABLE');
+});
+
+it("OPC: homepage guide starts one unnamed mentor task and replays its exact intent after refresh",async()=>{
+ const {chromium}=await import('../../../../../apps/web/node_modules/@playwright/test');
+ const f=await mergedPositioningFixture();await planFixtureModel(f.moduleId);
+ // This disposable database has earlier test registrations; expose only the
+ // intended six-step method to the normal catalog-driven home entry.
+ await sql.query('update artifact_workflows set enabled=false where id<>$1',[f.registration]);
+ const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+ const context=await browser.newContext({viewport:{width:1440,height:1000}});
+ await context.route('**/*',route=>{const u=new URL(route.request().url());return ['127.0.0.1','localhost'].includes(u.hostname)||['data:','blob:'].includes(u.protocol)?route.continue():route.abort();});
+ const page=await context.newPage();page.setDefaultTimeout(60000);let intentUrl='';
+ page.on('request',request=>{const u=new URL(request.url());if(u.pathname==='/positioning'&&u.searchParams.get('start')==='mentor')intentUrl=u.href;});
+ const counts=async()=>(await sql.query('select (select count(*)::int from opc_drafts where actor_id=$1) drafts,(select count(*)::int from runtime_executions where actor_id=$1) executions,(select count(*)::int from bill2_calls c join bill2_runs r on r.id=c.run_id where r.actor_id=$1) calls',[f.actor])).rows[0];
+ try{
+  await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/');await page.getByPlaceholder('name@example.com').fill(f.email);await page.getByPlaceholder('输入你的密码').fill(f.password);await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/');
+  const guide=page.getByRole('link',{name:'开始新手引导',exact:true});await guide.waitFor();await guide.hover();
+  expect(await counts()).toEqual({drafts:0,executions:0,calls:0});
+  await guide.evaluate(node=>{(node as HTMLElement).click();(node as HTMLElement).click();});
+  await page.waitForURL(u=>/^\/positioning\/[^/]+$/.test(u.pathname));
+  const draftId=new URL(page.url()).pathname.split('/')[2];
+  expect((await f.service.read(draftId)).snapshot.workflow.steps).toHaveLength(6);
+  await page.getByRole('textbox',{name:'给导师的回复',exact:true}).waitFor();
+  await expect.poll(async()=>(await f.service.read(draftId)).snapshot.steps['step-0'].version,{timeout:30000}).toBeGreaterThanOrEqual(0);
+  await expect.poll(async()=>(await counts()).calls,{timeout:30000}).toBe(1);
+  expect(await page.getByRole('dialog').count()).toBe(0);
+  expect(await page.getByRole('textbox',{name:'产品/服务/品牌名称'}).count()).toBe(0);
+  expect(new URL(intentUrl).searchParams.get('intent')).toMatch(/^[0-9a-f-]{36}$/);
+  const frozen=(await sql.query('select payload from runtime_executions where actor_id=$1',[f.actor])).rows[0].payload;
+  expect(frozen.scopeMaterial.content.work.businessContext.name).toBeNull();
+  await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-home-direct.png',fullPage:true});
+  await page.goto(intentUrl);await page.waitForURL('**/positioning/'+draftId);await page.getByRole('textbox',{name:'给导师的回复',exact:true}).waitFor();
+  await page.reload();await page.getByRole('textbox',{name:'给导师的回复',exact:true}).waitFor();
+  expect(await counts()).toEqual({drafts:1,executions:1,calls:1});
+  expect((await sql.query('select b.name from opc_businesses b join opc_draft_businesses d on d.business_id=b.id where d.draft_id=$1',[draftId])).rows[0].name).toBe('未命名业务');
+ }finally{await browser.close();}
 },120000);

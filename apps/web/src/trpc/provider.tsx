@@ -1,7 +1,7 @@
 'use client';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { httpBatchLink, httpLink, splitLink } from '@trpc/client';
+import { httpBatchLink, httpBatchStreamLink, httpLink, splitLink } from '@trpc/client';
 import React, { useEffect, useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
@@ -81,7 +81,7 @@ export default function Provider({ children }: { children: React.ReactNode }) {
       // Entry must not wait for unrelated sidebar statistics in the same batch.
       condition: op => op.path === 'workbench.chatLocate' || op.path === 'workbench.chatOpen',
       true: httpLink(options),
-      false: httpBatchLink(options),
+      false: splitLink({condition:op=>op.path==='runtime.executeStream',true:httpBatchStreamLink(options),false:httpBatchLink(options)}),
     })] });
   });
 

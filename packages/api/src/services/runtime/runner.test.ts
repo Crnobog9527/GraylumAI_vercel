@@ -24,3 +24,18 @@ it('original SDK waits for a slow bounded exchange once without a hidden retry',
   finish();expect(await pending).toBe('Late answer');expect(exchange).toHaveBeenCalledTimes(1);
  }finally{timer.mockRestore();vi.useRealTimers();}
 });
+it('streams actual SDK deltas before the exchange finishes and makes exactly one POST',async()=>{
+ let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});
+ let first!:()=>void;const visible=new Promise<void>(resolve=>{first=resolve;});
+ const chunks:string[]=[];let completed=false;
+ const exchange=vi.fn(async(_sequence:number,body:string,onChunk?:((chunk:string)=>void))=>{
+  expect(JSON.parse(body).stream).toBe(true);
+  onChunk!(JSON.stringify({id:'stream-one',object:'chat.completion.chunk',created:1,model:'test/model',choices:[{index:0,delta:{role:'assistant',content:'First '},finish_reason:null}]}));
+  await gate;
+  onChunk!(JSON.stringify({id:'stream-one',object:'chat.completion.chunk',created:1,model:'test/model',choices:[{index:0,delta:{content:'answer'},finish_reason:'stop'}],usage:{prompt_tokens:1,completion_tokens:2,total_tokens:3}}));
+  return JSON.stringify({id:'stream-one',object:'chat.completion',created:1,model:'test/model',choices:[{index:0,message:{role:'assistant',content:'First answer'},finish_reason:'stop'}],usage:{prompt_tokens:1,completion_tokens:2,total_tokens:3}});
+ });
+ const pending=runRuntime({model:'test/model',instructions:'Answer',input:'hello',session:session(),maxOutputTokens:4096,maxTurns:1,tools:[],selectHistory:async(_h,i)=>i,exchange,stream:true,onText:text=>{chunks.push(text);first();}}).then(value=>{completed=true;return value;});
+ await visible;expect(chunks.join('')).toBe('First ');expect(completed).toBe(false);release();
+ expect(await pending).toBe('First answer');expect(chunks.join('')).toBe('First answer');expect(exchange).toHaveBeenCalledTimes(1);
+});

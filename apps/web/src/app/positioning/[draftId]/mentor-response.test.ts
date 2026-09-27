@@ -134,3 +134,9 @@ it("keeps the public mentor reply separate from the extractor patch", () => {
   expect(turn.informationPatch.goal.value).toBe("帮助独立开发者");
   expect(turn.targetStepId).toBe("first");
 });
+
+it.each(['{"reasoning":"PRIVATE","informationPatch":{}}','{"message":null,"private":"PRIVATE"}','[{"private":"PRIVATE"}]','{"message":"unterminated PRIVATE','```json\n{"private":"PRIVATE"}\n```'])('does not display an internal or malformed protocol as public prose: %s',raw=>{
+ const result=readMentorTurn(raw,new Set());
+ expect(result.message).not.toContain('PRIVATE');
+ expect(result.message).toContain('回复格式不完整');
+});

@@ -342,6 +342,7 @@ try {
   if(stagingSchema&&!upgradeMode){apply('packages/db/migrations/0108_runtime_staging_window.sql');apply('packages/db/migrations/0108_runtime_staging_window.sql');}
   if(runtimeSchema&&!upgradeMode){apply('packages/db/migrations/0137_bill2_unstarted_dispatch.sql');apply('packages/db/migrations/0137_bill2_unstarted_dispatch.sql');}
   if(opcSchema&&!upgradeMode){apply('packages/db/migrations/0138_runtime_stopped_pending.sql');apply('packages/db/migrations/0138_runtime_stopped_pending.sql');}
+  if(opcSchema&&!upgradeMode){apply('packages/db/migrations/0139_opc_business_context.sql');apply('packages/db/migrations/0139_opc_business_context.sql');}
   console.log("SQL additive migration and repeat application PASS; runtime schema="+runtimeSchema+"; deferred upgrade="+upgradeMode);
   docker(
     "run",
@@ -433,9 +434,16 @@ try {
   const documentCalls=[];
   const receiptFile=resolve(evidenceDirectory,'synthetic-receipts.jsonl');
   const runtimeCalls=[];const runtimeReceipts=new Map(existsSync(receiptFile)?readFileSync(receiptFile,'utf8').trim().split('\n').filter(Boolean).map(line=>{const entry=JSON.parse(line);return [entry.id,{model:entry.model}];}):[]);let runtimeFinal=!runtimeUpgrade,holdRuntime=false;const heldRuntime=[];
+  const mentorStreamTest=stagingHost&&casePattern?.includes('MENTOR_STREAM');
+  const mentorStreamCalls=[],mentorStreamHeld=new Map();
   let rateLimitFixtureRejected = false;
   let summaryRateLimitFixtureRejected = false;
   gateway = createServer(async (req, res) => {
+    if(mentorStreamTest&&req.url==='/__mentor_stream'){
+      if(req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
+      if(req.method==='POST'){let raw='';for await(const part of req)raw+=part;const command=JSON.parse(raw);if(command.reset===true){if(mentorStreamHeld.size){res.writeHead(409).end();return;}mentorStreamCalls.length=0;}const release=mentorStreamHeld.get(command.release);if(release){mentorStreamHeld.delete(command.release);release();}}
+      res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify(mentorStreamCalls));return;
+    }
     if((opcMode||runtimeMode||runtimeUpgrade) && (req.url==='/call'||(stagingHost&&req.url==='/__official_chat'))){
       let raw='';for await(const chunk of req)raw+=chunk;
       const request=req.url==='/__official_chat'?JSON.parse(raw):JSON.parse(JSON.parse(raw).input);runtimeCalls.push(request);
@@ -535,6 +543,19 @@ try {
       const response=JSON.stringify({id,model:request.model,final:runtimeFinal,cost:runtimeFinal?'0.003':null,currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:request.model,choices:[{index:0,message:{role:'assistant',content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:5,total_tokens:15}}}});
       const official=JSON.parse(response).usage.sdkResponse;
       if(runtimeFinal)official.usage.cost=0.003;
+      if(mentorStreamTest&&req.url==='/__official_chat'){
+        const index=mentorStreamCalls.length+1,entry={index,id,model:request.model,stream:request.stream===true,startedAt:Date.now(),firstAt:null,finishedAt:null};mentorStreamCalls.push(entry);
+        res.setHeader('x-generation-id',id);
+        if(request.stream===true){
+          res.setHeader('content-type','text/event-stream');
+          const parsed=JSON.parse(content);parsed.message='本地流式导师正文：'+parsed.message;
+          content=JSON.stringify(parsed);official.choices[0].message.content=content;
+          const write=(delta,finish=null)=>res.write('data: '+JSON.stringify({id,object:'chat.completion.chunk',created:1,model:request.model,choices:[{index:0,delta,finish_reason:finish}]})+'\n\n');
+          write({role:'assistant',reasoning:'PRIVATE_STREAM_REASONING'});write({content:content.slice(0,Math.min(content.length-1,35))});entry.firstAt=Date.now();
+          mentorStreamHeld.set(index,()=>{write({content:content.slice(Math.min(content.length-1,35))});write({},'stop');res.write('data: '+JSON.stringify({id,model:request.model,choices:[],usage:{prompt_tokens:10,completion_tokens:5,total_tokens:15,cost:0.003}})+'\n\n');entry.finishedAt=Date.now();res.end('data: [DONE]\n\n');});
+        }else mentorStreamHeld.set(index,()=>{entry.finishedAt=Date.now();res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify(official));});
+        return;
+      }
       const send=()=>res.writeHead(200,{'content-type':'application/json'}).end(req.url==='/__official_chat'?JSON.stringify(official):response);
       if(holdRuntime){holdRuntime=false;heldRuntime.push(send);}else send();return;
     }
@@ -853,8 +874,8 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
         "vitest.integration.config.ts",
         ...(runtimeUpgrade ? ["src/services/runtime/upgrade.integration.ts"] : upgradeMode ? ["src/services/bill2/upgrade.integration.ts"] : ["src/services/__tests__/workbench.integration.ts"]),
         ...(bill2Mode ? ['src/services/bill2/billing.integration.ts'] : []),
-        ...(runtimeMode ? ['src/services/runtime/runtime.integration.ts'] : []),
-        ...(opcMode ? ['src/services/opc/opc.integration.ts'] : []),
+        ...(runtimeMode ? ['src/services/runtime/runtime.integration.ts', 'src/services/runtime/streaming.integration.ts'] : []),
+        ...(opcMode ? ['src/services/opc/opc.integration.ts',...(mentorStreamTest?['src/services/opc/mentor-browser.integration.ts']:[])] : []),
         "--reporter",
         "verbose",
         ...(patternOverride ? ["--testNamePattern",patternOverride] : env.V3_WORKBENCH_PHASE === "restore"

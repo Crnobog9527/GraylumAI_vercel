@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {publicMentorText,type RuntimeProgress} from './progress';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import {logger} from '../../lib/logger';
@@ -19,7 +20,7 @@ export const runtimeContext=z.object({
  input:z.string().min(1).max(20000),instructions:z.string().max(262144),model:z.string().min(1),
  maxOutputTokens:z.number().int().positive().max(20000),maxTurns:z.number().int().min(1).max(32),
  inputSelection:z.literal('scope-projection-v1').optional(),
- providerRequestFormat:z.enum(['serial-tools-v1','serial-tools-v2']).optional(),
+ providerRequestFormat:z.enum(['serial-tools-v1','serial-tools-v2','serial-tools-v3-stream']).optional(),
  historyItems:z.number().int().min(0).max(1000),
  tools:z.array(z.enum(['search','read_source'])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
  modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
@@ -53,7 +54,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
    await billing.recoverReceipts(current.runId);
    return rpc<{executionId:string;runId:string;state:string;billing:unknown}>('runtime_financial_recovery',{...args,p_finish:true});
   },
-  async execute(executionId:string){
+  async execute(executionId:string,onProgress?:(event:RuntimeProgress)=>void){
   type Execution={executionId:string;sessionId:string;runId:string;live:boolean;cancelRequested:boolean;state:string;context:unknown;billing:FrozenRun;result:{kind:string;evidenceRef:string;evidenceHash:string;body:string;summary?:string}|null};
   const args={p_execution_id:z.string().uuid().parse(executionId)};
   const execution=await rpc<Execution>('runtime_execution',{...args,p_action:'begin'});
@@ -76,12 +77,15 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
   if(!policy)throw new Error('RUNTIME_MODEL_DENIED');
   const session=new PostgresSession(options.database,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
   let transportNotStarted=false;
+  let preflightFailure:string|undefined;
+  const streaming=context.providerRequestFormat==='serial-tools-v3-stream';
+  const progress=(event:RuntimeProgress)=>{try{onProgress?.(event);}catch{/* UI disconnect never interrupts receipt persistence. */}};
   try{
    let callSequence=0;
    // The SDK wraps fetch errors; retain only this verified database verdict.
    let responseConflict=false;
    let primaryPolicy=policy;
-   const exchange=async(request:string,phase:string,selectedPolicy=primaryPolicy)=>{
+   const exchange=async(request:string,phase:string,selectedPolicy=primaryPolicy,onChunk?: (chunk:string)=>void)=>{
     try{
     if(selectedPolicy.protocol==='openrouter-chat-v1') {
      const original=JSON.parse(request);
@@ -94,8 +98,8 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
      // New admissions freeze this format before hashing. Unmarked executions
      // keep their original bytes for replay; the runner enforces one tool/turn.
      if(context.providerRequestFormat)delete original.parallel_tool_calls;
-     if(context.providerRequestFormat==='serial-tools-v2')normalizeOpenRouterHistory(original);
-     request=JSON.stringify({...original,stream:false,provider:quoted.routing});
+     if((context.providerRequestFormat==='serial-tools-v2'||streaming))normalizeOpenRouterHistory(original);
+     request=JSON.stringify({...original,stream:streaming&&phase!=='attached_organizer'&&Boolean(original.stream),provider:quoted.routing});
     }
     assertRuntimeRequestCapacity(request,selectedPolicy.inputLimit);
     const sequence=++callSequence;
@@ -113,7 +117,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
        automaticRetry:false,hiddenTools:false,lookupSupported:selectedPolicy.lookupSupported};
       const claim=await billing.claimCall(execution.runId,sequence,call);
       budget.assertCanStart(selectedPolicy.protocol==='openrouter-chat-v1'?OPENROUTER_RESPONSE_TIMEOUT_MS:5000);
-      const dispatch=await billing.dispatchOnce(claim.id,request);
+      const dispatch=await billing.dispatchOnce(claim.id,request,onChunk);
       if(dispatch.transportNotStarted){transportNotStarted=true;throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');}
       if(!dispatch.dispatched)throw new Error('RUNTIME_RESPONSE_PENDING');
       if(dispatch.pendingReceipt){
@@ -138,7 +142,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
      // These exact codes originate before provider dispatch. The SDK wraps the
      // exception later; retain a bounded diagnostic without request/error data.
      if(selectedPolicy.protocol==='openrouter-chat-v1'&&error instanceof Error&&preflightCodes.has(error.message))
-      logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});
+      {preflightFailure=error.message;logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});}
      throw error;
     }
    };
@@ -200,14 +204,15 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
    const preserveHistoricalMaterial=Boolean(context.sources?.length)||requestsHistoricalComparison(context.input);
    const primarySequence=callSequence;
    const runPrimary=async(legacyInput=false)=>{
-   const sizing=context.providerRequestFormat==='serial-tools-v2'?{projectItemsForSizing:(items:unknown[],historyCount:number)=>{
+   const sizing=(context.providerRequestFormat==='serial-tools-v2'||streaming)?{projectItemsForSizing:(items:unknown[],historyCount:number)=>{
     try{return projectOpenRouterItemsForSizing(items,historyCount);}catch(error){
-     if(error instanceof Error&&error.message==='RUNTIME_PROVIDER_HISTORY_DENIED')logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});
+     if(error instanceof Error&&error.message==='RUNTIME_PROVIDER_HISTORY_DENIED'){preflightFailure=error.message;logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});}
      throw error;
     }
    }}:{};
    let selectedHistoryCount=0;
-   return runRuntime({...context,...effective,input:runtimeScopeInput(context.input,context.scopeMaterial),session,tools,selectHistory:async(history,incoming)=>{
+   let partial="";progress({type:"phase",phase:"mentor"});
+   return runRuntime({...context,...effective,stream:streaming,onText:delta=>{partial+=delta;const text=publicMentorText(partial);if(text)progress({type:"text",text});},input:runtimeScopeInput(context.input,context.scopeMaterial),session,tools,selectHistory:async(history,incoming)=>{
     const selected=selectRuntimeHistory(history,incoming,{instructions:effective.instructions,inputBytes:primaryPolicy.inputLimit,historyItems:context.historyItems,toolBytes,...sizing,
      projectHistoryItem:item=>legacyInput||preserveHistoricalMaterial?item:projectSupersededScopeItem(item,context.scopeMaterial)});
     selectedHistoryCount=selected.length-incoming.length;
@@ -217,8 +222,9 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
    },filterModelInput:legacyInput?undefined:(items,instructions)=>selectRuntimeCallInput(items,selectedHistoryCount,{
     instructions,inputBytes:primaryPolicy.inputLimit,toolBytes,currentMaterial:context.scopeMaterial,preserveHistoricalMaterial,...sizing,
    }) as typeof items,
-    exchange:async(_sequence,request)=>{
-     const envelope=await exchange(request,effective.role);
+    exchange:async(_sequence,request,onChunk)=>{
+     partial="";
+     const envelope=await exchange(request,effective.role,primaryPolicy,onChunk);
      // Local fixture carries the SDK response as private usage evidence. It is
      // not an OpenRouter protocol capability or proof of real supplier costs.
      const response=envelope.usage?.sdkResponse;
@@ -242,8 +248,10 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
     const latest=await rpc<{state:'cancelled'|'cost_pending';unavailable?:boolean}>('runtime_execution',{...args,p_action:'check_latest'});
     if(latest.unavailable)return {state:latest.state,unavailable:'latest' as const};
    }
+   const publicBody=publicMentorText(body);if(publicBody)progress({type:'text',text:publicBody});
    let summary:string|undefined;
    if(context.attachedOrganizer){
+    progress({type:"phase",phase:"organizer"});
     await rpc('runtime_execution',{...args,p_action:'checkpoint_primary',p_result:{body,lastSequence:callSequence}});
     const organizer=context.attachedOrganizer,organizerPolicy=execution.billing.callPolicy.find(p=>p.modelId===organizer.modelId&&p.model===organizer.model);
     if(!organizerPolicy)throw new Error('RUNTIME_ORGANIZER_DENIED');
@@ -258,6 +266,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
      }});
    }
    const result={kind:'usable_result',evidenceRef:executionId,evidenceHash:hash(JSON.stringify({body,summary})),body,...(summary?{summary}:{})};
+   progress({type:'phase',phase:'saving'});
    const completed=await rpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
    return {body,...(summary!==undefined?{summary}:{}),state:completed.state};
   }catch(error){
@@ -284,7 +293,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
    if(!execution.live)return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{})};
    // A lost durable response is inspected by later recovery, never a network retry.
    const failed=await rpc<{state:string}>('runtime_execution',{...args,p_action:'fail_before_dispatch'}).catch(()=>null);
-   if(failed?.state==='cancelled')return {state:'cancelled' as const};
+   if(failed?.state==='cancelled')return {state:'cancelled' as const,...(preflightFailure?{unavailable:preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?'provider_history' as const:'preflight' as const}:capacity?{unavailable:'capacity' as const}:{})};
    await rpc('runtime_execution',{...args,p_action:'interrupt'}).catch(()=>{});
    return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{})};
   }

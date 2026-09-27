@@ -273,10 +273,30 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const discussionAccounts = ((library.data?.businesses??[]) as Array<{accounts:Array<{strategyDraftId?:string;pendingStrategyDraftId?:string|null;displayName?:string;account:string;platform:string}>}>).flatMap(business=>business.accounts).filter(account=>account.pendingStrategyDraftId===draftId||account.strategyDraftId===draftId);
   const discussionAccount = discussionAccounts.length===1?discussionAccounts[0]:undefined;
   const list = trpc.opc.list.useQuery();
-  const prepareStep = trpc.opc.prepareStep.useMutation(),
-    execute = trpc.runtime.execute.useMutation({onSuccess(result){
-      if('unavailable' in result&&result.unavailable==='output_truncated')setError('本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。');
-    }});
+  const prepareStep = trpc.opc.prepareStep.useMutation();
+  const [liveReply,setLiveReply]=useState<{executionId:string;text:string;phase:string}|null>(null);
+  const [pendingBubble,setPendingBubble]=useState<MentorRequest|null>(null);
+  const mentorSendInFlight=useRef(false);
+  const execute={mutateAsync:async(input:{executionId:string})=>{
+    setLiveReply({executionId:input.executionId,text:'',phase:'mentor'});
+    let result;
+    try{
+    const events=await utils.client.runtime.executeStream.mutate(input);
+    for await(const event of events){
+      if(event.type==='text')setLiveReply(old=>old?.executionId===input.executionId?{...old,text:event.text}:old);
+      else if(event.type==='phase')setLiveReply(old=>old?.executionId===input.executionId?{...old,phase:event.phase}:old);
+      else result=event.result;
+    }
+    if(!result)throw new Error('OPC_EXECUTION_STREAM_INTERRUPTED');
+    if('unavailable' in result&&result.unavailable==='output_truncated')setError('本次模型调用达到长度上限，原请求已保留，不会自动重试。');
+    if('unavailable' in result&&result.unavailable==='provider_history')setError('历史消息格式暂不兼容，本次执行已停止。原记录已保留；请联系支持检查历史兼容性，不要重复发送这条请求。');
+    else if('unavailable' in result&&result.unavailable==='preflight')setError('本次执行在模型派发前检查失败，已停止并保留原记录。请核对服务状态后再继续，不会自动重放。');
+    return result;
+    }finally{
+      // A failed/unfinished transport must not leave an endless generating label.
+      if(result?.state!=='completed')setLiveReply(old=>old?.executionId===input.executionId?{...old,phase:'incomplete'}:old);
+    }
+  }};
   const information = trpc.opc.information.useMutation();
   const [infoEdits, setInfoEdits] = useState<
     Record<string, Record<string, Information>>
@@ -364,6 +384,15 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     }
     if (removed) refreshStepEnvelopes(value => value + 1);
   }, [read.data, history.data, hydratedDraft, draftId]);
+
+  useEffect(()=>{
+    if(!read.data||hydratedDraft!==draftId)return;
+    const retained=Object.keys(read.data.information??{}).map(stepId=>{
+      const raw=sessionStorage.getItem("opc-step:"+draftId+":"+stepId);
+      return raw?parseStepEnvelope(raw)?.request:null;
+    }).find(request=>request?.draftId===draftId&&request.input?.trim());
+    setPendingBubble(retained??null);
+  },[read.data,hydratedDraft,draftId]);
 
   const [saveState, setSaveState] = useState<
     Record<string, "idle" | "saving" | "saved" | "error">
@@ -553,7 +582,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       chatFollow.current=node.scrollHeight-node.clientHeight-node.scrollTop<64;
       chatRestored.current=true;
     }else if(chatFollow.current) node.scrollTop=node.scrollHeight;
-  }, [history.data,chatKey]);
+  }, [history.data,chatKey,pendingBubble,liveReply]);
   function captureInformationBase(stepId: string) {
     const key = "opc-information-base:" + draftId + ":" + stepId;
     if (!sessionStorage.getItem(key)) sessionStorage.setItem(key, JSON.stringify(d.information[stepId].values ?? {}));
@@ -873,7 +902,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         if (draftRead.error || !draftRead.data || historyRead.error || !historyRead.data)
           throw new Error("OPC_OPENING_READBACK_UNAVAILABLE");
         sessionStorage.removeItem(key);
-        setNotice("");
+        setNotice("");setLiveReply(null);
       } catch {
         // The Agent's opening is a convenience, never a gate on the form. The
         // entry identity is deterministic, so a later retry reuses the same
@@ -1031,8 +1060,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if (draftRead.error || !draftRead.data || historyRead.error || !historyRead.data)
       throw new Error('OPC_MENTOR_READBACK_UNAVAILABLE');
     sessionStorage.removeItem(key);
-    // A newer typed message is not overwritten; only an exact match is cleared.
-    setMentorInput((old) => (old.trim() === request.input.trim() ? "" : old));
+    // Retire only this pending bubble; never touch the next editable draft.
+    setPendingBubble(old=>old?.requestId===request.requestId?null:old);
+    setLiveReply(null);
   }
   async function resumeInterruptedOpening() {
     // An Agent opening interrupted by a reload can still own the session's
@@ -1048,6 +1078,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       await execute.mutateAsync({ executionId: interrupted.executionId });
   }
   async function ask(step: Step, questionId: string, inputOverride?: string) {
+    if(mentorSendInFlight.current)return;
     const key = "opc-step:" + draftId + ":" + step.id;
     if (sessionStorage.getItem(key)) {
       // A retained envelope still owns this step. Never create a second
@@ -1055,24 +1086,19 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       setError("上一条发给导师的内容仍在核对。请先用“继续核对这条原请求”恢复，不会重复发送。");
       return;
     }
-    chatFollow.current = true;
-    await run(async () => {
-      await resumeInterruptedOpening();
-      await flushInformation(step.id);
-      const fixed: StepEnvelope = {
-        request: {
-          draftId, stepId: step.id, purpose: "mentor", requestId: crypto.randomUUID(),
-          input: (inputOverride ?? mentorInput).trim(), questionId, organizeAfter: true,
-        },
-      };
-      sessionStorage.setItem(key, JSON.stringify(fixed));
-      // Reserve the user's turn before enabling the mentor. Otherwise the
-      // automatic opening effect races this send and both try to admit work on
-      // the same Session.
-      if (manualEntry) setManualMentorEnabled(true);
-      await resumeStepEnvelope(step, fixed);
-    });
+    if(running||openingInFlight.current.size||history.data?.activeExecution)return;
+    const input=(inputOverride??mentorInput).trim();if(!input)return;
+    const fixed:StepEnvelope={request:{draftId,stepId:step.id,purpose:'mentor',requestId:crypto.randomUUID(),input,questionId,organizeAfter:true}};
+    // Freeze identity synchronously before any preparation/network await.
+    sessionStorage.setItem(key,JSON.stringify(fixed));
+    mentorSendInFlight.current=true;
+    setPendingBubble(fixed.request);if(inputOverride===undefined)setMentorInput('');
+    chatFollow.current=true;
+    if(manualEntry)setManualMentorEnabled(true);
+    try{await run(async()=>{await flushInformation(step.id);await resumeStepEnvelope(step,fixed);});}
+    finally{mentorSendInFlight.current=false;}
   }
+
   async function recoverStep(step: Step) {
     const key = "opc-step:" + draftId + ":" + step.id;
     const envelope = stepEnvelopeFor(step.id);
@@ -1762,6 +1788,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     kind: string;
   };
   type MentorExecution = {
+    request?: MentorRequest | null;
     unavailableReason?: string | null;
     executionId: string;
     input: string | null;
@@ -2021,13 +2048,13 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                               {turnLabel ? ` · ${turnLabel}` : turnStep ? ` · ${turnStep.title}` : ""}
                             </span>
                             <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>
-                              {parsed.message ||
+                              {(liveReply?.executionId===execution.executionId?liveReply.text:'') || parsed.message ||
                                 (execution.unavailableReason === "output_truncated"
                                   ? "本次模型调用达到长度上限，未返回该阶段正文。原请求已保留，不会自动重试。"
                                   : execution.state === "cost_pending" && execution.executionId !== history.data?.activeExecution
                                   ? "本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。"
                                   : execution.state === "cancelled"
-                                  ? "本次执行已取消，原记录已保留。你可以继续讨论当前问题。"
+                                  ? "本次执行已停止，未取得可用回复。原记录已保留；请查看错误提示或继续讨论，系统不会自动重放这条请求。"
                                   : busy ? "正在回复…" : "回复暂未完成，请继续核对。")}
                             </p>
                           </div>
@@ -2061,6 +2088,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                         </div>
                       );
                     })}
+                    {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<div data-message-role="user" data-request-id={pendingBubble.requestId} className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3"><span>你 · {d.information[pendingBubble.stepId]?.schema.find((f:{id:string;title:string})=>f.id===pendingBubble.questionId)?.title}</span><p className="whitespace-pre-wrap">{pendingBubble.input}</p><small role="status">{running?'发送中 · 等待服务器确认':'尚未确认保存 · 原请求已保留'}</small></div>}
+                  {liveReply&&!mentorExecutions.some(e=>e.executionId===liveReply.executionId)&&<div data-message-role="assistant" aria-label="导师正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>导师</span><p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>{liveReply.text||'导师正在思考…'}</p></div>}
+                  {liveReply&&<p role="status">{liveReply.phase==='organizer'?'正文已返回，正在整理待核对信息…':liveReply.phase==='saving'?'正在保存结果并核对费用…':liveReply.phase==='incomplete'?'回复尚未完成；原请求已保留，请按当前状态继续核对，不会自动重发。':'正在生成；部分正文尚未完成，费用尚未结算。'}</p>}
                   {!manualEntry && snap.state === "draft" && !reviewOnly && <section className={resultStyles.currentAction} aria-label="当前问题操作">
                     <strong>当前核对：{activeQuestion.title}</strong>
                     <p>{(infoEdits[step.id]?.[activeQuestion.id] ?? d.information[step.id].values?.[activeQuestion.id])?.value || '先讨论当前问题，或在右侧填写答案。'}</p>
@@ -2070,7 +2100,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     </div>
                   </section>}
                   </div>
-                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" note={busy && hasPendingStepRequest ? "正在回复…" : undefined} maxLength={8000} disabled={busy||openingSteps.includes(step.id)||Boolean(pendingMentor)||hasPendingConfirmation||hasPendingStepRequest||snap.state!=="draft"||reviewOnly||free.busy} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step,activeQuestion.id);}}/>
+                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" note={busy && hasPendingStepRequest ? "正在回复…" : undefined} maxLength={8000} disabled={snap.state!=="draft"||reviewOnly} sendDisabled={busy||Boolean(history.data?.activeExecution)||openingSteps.includes(step.id)||Boolean(pendingMentor)||hasPendingConfirmation||hasPendingStepRequest||free.busy} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step,activeQuestion.id);}}/>
                   {free.error&&<p role="alert">{free.error}</p>}
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}

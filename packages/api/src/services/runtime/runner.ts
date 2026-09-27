@@ -10,7 +10,9 @@ export type RuntimeRunnerInput = {
   maxOutputTokens: number; maxTurns: number;
   /** Authenticated host rechecks frozen context, persists claim, and dispatches once.
    * During recovery this callback may only return the original stored response. */
-  exchange: (sequence: number, body: string) => Promise<string>;
+  exchange: (sequence: number, body: string, onChunk?: (chunk: string) => void) => Promise<string>;
+  stream?: boolean;
+  onText?: (delta:string)=>void;
   selectHistory: (history: unknown[], incoming: unknown[]) => Promise<unknown[]>;
   filterModelInput?: (items: AgentInputItem[], instructions: string) => AgentInputItem[];
   tools: RuntimeTool[];
@@ -32,7 +34,24 @@ export async function runRuntime(input: RuntimeRunnerInput) {
   const guardedFetch: typeof fetch = async (url, init) => {
     if(String(url)!=='http://127.0.0.1/runtime/chat/completions') throw new Error('RUNTIME_TRANSPORT_DENIED');
     const body=JSON.parse(String(init?.body));
-    if(body.model!==input.model||body.stream||body.store!==false||++sequence>input.maxTurns) throw new Error('RUNTIME_CALL_DENIED');
+    if(body.model!==input.model||Boolean(body.stream)!==Boolean(input.stream)||body.store!==false||++sequence>input.maxTurns) throw new Error('RUNTIME_CALL_DENIED');
+    if(input.stream){
+      const encoder=new TextEncoder();
+      const stream=new ReadableStream<Uint8Array>({start(controller){
+        let open=true,received=false;
+        const emit=(chunk:string)=>{if(open)try{controller.enqueue(encoder.encode('data: '+chunk+'\n\n'));}catch{open=false;}};
+        void input.exchange(sequence,JSON.stringify(body),chunk=>{received=true;emit(chunk);}).then(raw=>{
+          const response=JSON.parse(raw);
+          const calls=response.choices?.[0]?.message?.tool_calls;
+          if(response.choices?.length!==1||(calls!=null&&(!Array.isArray(calls)||calls.length>1)))throw new Error('RUNTIME_TOOL_BATCH_DENIED');
+          if(emptyTruncatedResponse(response)){outputTruncated=true;throw new Error('RUNTIME_OUTPUT_TRUNCATED');}
+          // Replay streams only already-persisted output, never redispatches.
+          if(!received){const choice=response.choices[0];emit(JSON.stringify({...response,object:'chat.completion.chunk',choices:[{index:0,delta:choice.message,finish_reason:choice.finish_reason}]}));}
+          if(open){controller.enqueue(encoder.encode('data: [DONE]\n\n'));controller.close();open=false;}
+        }).catch(error=>{if(open){controller.error(error);open=false;}});
+      }});
+      return new Response(stream,{status:200,headers:{'content-type':'text/event-stream'}});
+    }
     const response=await input.exchange(sequence,JSON.stringify(body));
     // parallel_tool_calls is a provider hint, not an execution boundary. Reject
     // an entire multi-tool response before the SDK can invoke any local tool.
@@ -63,11 +82,17 @@ export async function runRuntime(input: RuntimeRunnerInput) {
     modelSettings:{store:false,maxTokens:input.maxOutputTokens,parallelToolCalls:false,retry:{maxRetries:0}}});
   const runner=new Runner({model,tracingDisabled:true,traceIncludeSensitiveData:false});
   try{
-    const result=await runner.run(agent,input.input,{session:input.session,maxTurns:input.maxTurns,
-      signal:input.signal,sessionInputCallback:async(history,incoming)=>await input.selectHistory(history,incoming) as typeof history,
+    const options={session:input.session,maxTurns:input.maxTurns,
+      signal:input.signal,sessionInputCallback:async(history:AgentInputItem[],incoming:AgentInputItem[])=>await input.selectHistory(history,incoming) as typeof history,
       ...(input.filterModelInput?{callModelInputFilter:({modelData}:{modelData:{input:AgentInputItem[];instructions?:string}})=>({
         ...modelData,input:input.filterModelInput!(modelData.input,modelData.instructions??input.instructions),
-      })}:{})});
+      })}:{})};
+    const result=input.stream?await runner.run(agent,input.input,{...options,stream:true}):await runner.run(agent,input.input,options);
+    if(input.stream){
+      const streamed=result as Awaited<ReturnType<typeof runner.run>> & {toTextStream():ReadableStream<string>;completed:Promise<void>};
+      for await(const text of streamed.toTextStream())input.onText?.(text);
+      await streamed.completed;
+    }
     if(typeof result.finalOutput!=='string'||!result.finalOutput.trim())throw new Error('RUNTIME_EMPTY_RESULT');
     return result.finalOutput;
   }catch(error){

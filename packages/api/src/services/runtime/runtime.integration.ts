@@ -126,7 +126,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['plain','reasoning'
    const host=runtimeExecutor({database,actor:async()=>f.actorId,adapter});
    let result=await host.execute(e.executionId);
    if(shape==='unsupported'&&turn===1){
-    expect(result).toEqual({state:'cancelled'});expect(await host.execute(e.executionId)).toEqual(result);expect(bodies).toHaveLength(1);
+    expect(result).toEqual({state:'cancelled',unavailable:'provider_history'});expect(await host.execute(e.executionId)).toEqual({state:'cancelled'});expect(bodies).toHaveLength(1);
     expect((await db.query('select state,charged from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual({state:'refunded',charged:0});
     expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1',[e.runId])).rows[0].n).toBe(0);
     expect(diagnostic.mock.calls.filter(call=>call[1]==='runtime_provider_preflight_failed')).toEqual([['api','runtime_provider_preflight_failed',{executionId:e.executionId,code:'RUNTIME_PROVIDER_HISTORY_DENIED'}]]);
@@ -181,7 +181,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['valid','malformed'
    const host=runtimeExecutor({database,actor:async()=>f.actorId,adapter});
    let result=await host.execute(e.executionId);
    if(turn===1&&shape!=='valid'){
-    expect(result).toEqual({state:'cancelled'});expect(await host.execute(e.executionId)).toEqual(result);
+    expect(result).toEqual({state:'cancelled',unavailable:'provider_history'});expect(await host.execute(e.executionId)).toEqual({state:'cancelled'});
     expect(bodies).toHaveLength(2);expect(credential).toHaveBeenCalledTimes(2);expect(transport).toHaveBeenCalledTimes(2);
     expect((await db.query('select state,charged from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual({state:'refunded',charged:0});
     expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1',[e.runId])).rows[0].n).toBe(0);
@@ -496,7 +496,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['missing','mismatch
  const result=await runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter}).execute(e.executionId);
  const recorded=diagnostic.mock.calls.filter(call=>call[1]==='runtime_provider_preflight_failed');diagnostic.mockRestore();
  expect(recorded).toEqual([['api','runtime_provider_preflight_failed',{executionId:e.executionId,code:'RUNTIME_PROVIDER_BINDING_DENIED'}]]);
- expect(result).toEqual({state:'cancelled'});
+ expect(result).toEqual({state:'cancelled',unavailable:'preflight'});
  expect((await db.query('select dispatched_at,provider_id from bill2_calls where run_id=$1',[e.runId])).rows).toEqual([{dispatched_at:null,provider_id:null}]);
  expect((await db.query('select state,charged,conflict from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual({state:'refunded',charged:0,conflict:false});
  expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(100);

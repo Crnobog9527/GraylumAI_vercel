@@ -1,0 +1,135 @@
+[
+  {
+    "path": "EVALS.md",
+    "beforeSha256": "c8c595a808b5908c91ca8af33833fe8356326f794e306b92015ac3e3d3ae0f10",
+    "sha256": "689df319e420d6cbcb3042bff4ba91f7efbf9e528b352f0bd1e94f544dd1e130",
+    "bytes": 3595,
+    "changed": true
+  },
+  {
+    "path": "README.md",
+    "beforeSha256": "be9e7998ff52554df82d4bb7ebba2b983de2f947c0b212f6021cca25ed88200c",
+    "sha256": "be9e7998ff52554df82d4bb7ebba2b983de2f947c0b212f6021cca25ed88200c",
+    "bytes": 1600,
+    "changed": false
+  },
+  {
+    "path": "SKILL.md",
+    "beforeSha256": "a7b9a8a7c7c2a3385976b9b888444fe779b8093ec145739ed4c43aa94c658641",
+    "sha256": "760a1b5e096125454f5aabadbf5504faa98c18f832e6ff738193b7ec8b45b4ef",
+    "bytes": 14162,
+    "changed": true
+  },
+  {
+    "path": "VALIDATION.md",
+    "beforeSha256": "73c0bf91348b10dff3a81609b270691561a8c29b113a7b18a2aad2b9c60a62c4",
+    "sha256": "73c0bf91348b10dff3a81609b270691561a8c29b113a7b18a2aad2b9c60a62c4",
+    "bytes": 235,
+    "changed": false
+  },
+  {
+    "path": "assets/benchmark-table-template.md",
+    "beforeSha256": "84df806da512c5e7593a885352898f32878824a3f16cc71e0f5a192a43defe58",
+    "sha256": "84df806da512c5e7593a885352898f32878824a3f16cc71e0f5a192a43defe58",
+    "bytes": 476,
+    "changed": false
+  },
+  {
+    "path": "assets/content-plan-template.md",
+    "beforeSha256": "161287524ce9db5ba8dd18d266a0f47520903b69482a190eb722d2e5fe29f528",
+    "sha256": "161287524ce9db5ba8dd18d266a0f47520903b69482a190eb722d2e5fe29f528",
+    "bytes": 529,
+    "changed": false
+  },
+  {
+    "path": "assets/report-template.md",
+    "beforeSha256": "d39c2e4806e56d961012ea881cfff1a4b2ec9c56c20c32c9647813f1757a5809",
+    "sha256": "d39c2e4806e56d961012ea881cfff1a4b2ec9c56c20c32c9647813f1757a5809",
+    "bytes": 836,
+    "changed": false
+  },
+  {
+    "path": "assets/session-state-template.yaml",
+    "beforeSha256": "e15ee07c78e0078ea4b0fe01acd4417f05867718ffe1fbef2e3e2e84028b2f21",
+    "sha256": "e15ee07c78e0078ea4b0fe01acd4417f05867718ffe1fbef2e3e2e84028b2f21",
+    "bytes": 1105,
+    "changed": false
+  },
+  {
+    "path": "references/01-intake.md",
+    "beforeSha256": "d343d6e22e49019ee1448a57cd8eb8b5bf22c1b3b27110385109821360f67649",
+    "sha256": "5e353cd189a3453acbacc9cfb44f626fe0bd387d98384c3cbd4e130b9fb8db4b",
+    "bytes": 2870,
+    "changed": true
+  },
+  {
+    "path": "references/02-benchmark-analysis.md",
+    "beforeSha256": "f34bdbc24252d0fc7d8de2c450dcd247d86450fd477de035cf43e1aff63edc70",
+    "sha256": "f34bdbc24252d0fc7d8de2c450dcd247d86450fd477de035cf43e1aff63edc70",
+    "bytes": 3266,
+    "changed": false
+  },
+  {
+    "path": "references/03-positioning.md",
+    "beforeSha256": "c9ac5a6c372749a3b1273748c48c92d4f981c9f71615c66505b2b65e049752e3",
+    "sha256": "c9ac5a6c372749a3b1273748c48c92d4f981c9f71615c66505b2b65e049752e3",
+    "bytes": 1933,
+    "changed": false
+  },
+  {
+    "path": "references/04-content-planning.md",
+    "beforeSha256": "bbda20d589e7f50d0aefa0f0b99e9ebcf30b88cc8b9289333bfc414b70302fa2",
+    "sha256": "bbda20d589e7f50d0aefa0f0b99e9ebcf30b88cc8b9289333bfc414b70302fa2",
+    "bytes": 2793,
+    "changed": false
+  },
+  {
+    "path": "references/05-operations.md",
+    "beforeSha256": "56baeb71cef38bad7b6c979b0d70db815cabd01b8242efbdff38874fc5639067",
+    "sha256": "56baeb71cef38bad7b6c979b0d70db815cabd01b8242efbdff38874fc5639067",
+    "bytes": 2530,
+    "changed": false
+  },
+  {
+    "path": "references/06-monetization.md",
+    "beforeSha256": "ca8bb551bfd79a618c9fbf9b0e4c8093c91a5a5a6aadcd4ae1f59676db7c78e5",
+    "sha256": "ca8bb551bfd79a618c9fbf9b0e4c8093c91a5a5a6aadcd4ae1f59676db7c78e5",
+    "bytes": 2559,
+    "changed": false
+  },
+  {
+    "path": "references/legacy-prompt-map.md",
+    "beforeSha256": "a2c90bc60066449bbe7c13f3fe70e2f50efcfb67bc60e1f13230bc850f261eca",
+    "sha256": "a2c90bc60066449bbe7c13f3fe70e2f50efcfb67bc60e1f13230bc850f261eca",
+    "bytes": 1509,
+    "changed": false
+  },
+  {
+    "path": "references/metrics.md",
+    "beforeSha256": "944bdcadfbdde85e86813ac445800b2e288f10ae2de96bdac640d2a6b1894c41",
+    "sha256": "944bdcadfbdde85e86813ac445800b2e288f10ae2de96bdac640d2a6b1894c41",
+    "bytes": 1571,
+    "changed": false
+  },
+  {
+    "path": "references/reporting.md",
+    "beforeSha256": "d546db8f1fc99a9d159794e91c5cc21e61b0668ba65db857cacf7de80907ee80",
+    "sha256": "d546db8f1fc99a9d159794e91c5cc21e61b0668ba65db857cacf7de80907ee80",
+    "bytes": 1387,
+    "changed": false
+  },
+  {
+    "path": "references/research-policy.md",
+    "beforeSha256": "ce60014d560d69de54f262fc149f5b09f2406d219364be176129c2729cb053c1",
+    "sha256": "ce60014d560d69de54f262fc149f5b09f2406d219364be176129c2729cb053c1",
+    "bytes": 1692,
+    "changed": false
+  },
+  {
+    "path": "workflow.yaml",
+    "beforeSha256": "9f53a1be0d21cbade5daaa9c54c1930b1d2e8e336455c92021df61b6a5b0ab02",
+    "sha256": "9f53a1be0d21cbade5daaa9c54c1930b1d2e8e336455c92021df61b6a5b0ab02",
+    "bytes": 2979,
+    "changed": false
+  }
+]

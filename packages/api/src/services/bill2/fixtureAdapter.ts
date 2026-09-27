@@ -35,7 +35,7 @@ export function unknownEvidence(identity: CallIdentity) {
     source: 'transport_unknown', sourceHash: createHash('sha256').update('transport_unknown').digest('hex'), observedAt: new Date().toISOString() };
 }
 /** Private bounded HTTP observation; receiving a response is not a receipt or delivery verdict. */
-export type TransportObservation = { rawBody: string; rawBodyBase64: string; sourceHash: string; httpStatus: number; complete: boolean; transportIssue: string | null; generationId?: string };
+export type TransportObservation = { rawBody: string; rawBodyBase64: string; sourceHash: string; httpStatus: number; complete: boolean; transportIssue: string | null; generationId?: string; stream?: true; rawBodyEncoding?: 'gzip-base64'; rawBodyByteLength?: number; rawBodySha256?: string; observedByteLength?: number; rawBodyOmitted?: 'receipt_size_limit' | 'invalid_receipt_text' };
 export function transportEvidence(observation: TransportObservation, identity: CallIdentity, source: 'response' | 'lookup') {
   if (observation.httpStatus >= 200 && observation.httpStatus < 300 && observation.complete) {
     return { ...observedFixtureEvidence(observation.rawBody, identity, source), transport: { httpStatus: observation.httpStatus, complete: observation.complete, transportIssue: observation.transportIssue } };

@@ -42,6 +42,7 @@ const inputKinds = new Set<MentorInputKind>([
 ]);
 /** Missing classification stays permissive so already saved replies keep working. */
 const DEFAULT_INPUT_KIND: MentorInputKind = "answer";
+const INVALID_PUBLIC_REPLY = "本次回复格式不完整，暂时无法展示正文。原记录已保留，请核对执行状态。";
 
 function normalizeUtterance(value: string) {
   return value
@@ -69,7 +70,7 @@ export function readMentorTurn(
     const message =
       typeof parsed.message === "string" && parsed.message.trim()
         ? parsed.message.trim().slice(0, 4000)
-        : raw;
+        : INVALID_PUBLIC_REPLY;
     const inputKind =
       typeof parsed.inputKind === "string" && inputKinds.has(parsed.inputKind as MentorInputKind)
         ? (parsed.inputKind as MentorInputKind)
@@ -118,7 +119,7 @@ export function readMentorTurn(
       targetStepId: typeof target === "string" && target ? target : null,
     };
   } catch {
-    return { message: raw, inputKind: DEFAULT_INPUT_KIND, informationPatch: {}, targetStepId: null };
+    return { message: /^[\s]*[\[{`]/.test(raw) ? INVALID_PUBLIC_REPLY : raw, inputKind: DEFAULT_INPUT_KIND, informationPatch: {}, targetStepId: null };
   }
 }
 
