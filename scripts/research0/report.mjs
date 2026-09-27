@@ -7,6 +7,7 @@ function usd(value) {
 }
 
 function planLines(vendor) {
+  if (vendor.plan.lines.length === 0) return [];
   const lines = [`  plan: worst case ${usd(vendor.plan.worstCaseUsd)} for the selected queries`];
   for (const line of vendor.plan.lines) {
     if (line.notSupported) lines.push(`    ${line.queryId} NOT_SUPPORTED ${line.notSupported}`);
@@ -38,6 +39,10 @@ export function formatReport(report) {
     const key = vendor.keyPresent ? 'key present' : 'key missing';
     lines.push(`- ${vendor.label} (${vendor.id}): ${key}${vendor.blockedReason ? `, blocked: ${vendor.blockedReason}` : ''}`);
     lines.push(...planLines(vendor));
+    if (vendor.balance) {
+      const { beforeUsd, afterUsd, spentThisRunUsd } = vendor.balance;
+      lines.push(`  vendor balance: before ${usd(beforeUsd)}, after ${usd(afterUsd)}, spent this run ${usd(spentThisRunUsd)}`);
+    }
     if (vendor.usage) lines.push(`  ledger: ${vendor.usage.calls} calls, ${usd(vendor.usage.usd)} booked (all runs)`);
     for (const query of vendor.queries) if (query.status !== 'DRY_RUN') lines.push(queryLine(query));
   }

@@ -68,6 +68,7 @@ function stepsFor(vendor, query) {
 export function planVendor(vendor, queries, secrets = []) {
   const lines = [];
   let worstCaseUsd = 0;
+  if (vendor.blockedReason) return { vendor: vendor.id, lines, worstCaseUsd };
   for (const query of queries) {
     const planned = stepsFor(vendor, query);
     if (planned.notSupported) {
@@ -122,7 +123,7 @@ async function runQuery(context, vendor, query, key, secrets) {
     const result = await callOnce(context.fetchImpl, vendor.authorize(spec, key), vendor.timeoutMs ?? context.timeoutMs);
     const json = parseJson(result.body);
     let outcome = result.outcome;
-    if (outcome === 'ok' && (json === undefined || vendor.isFailure?.(json))) outcome = 'failed';
+    if (outcome === 'ok' && (json === undefined || vendor.isFailure?.(json, query))) outcome = 'failed';
     const reportedUsd = json === undefined ? null : vendor.reportedCostUsd?.(json, result.headers) ?? null;
     await settle(context.ledger, record, { outcome, reportedUsd });
     const rawFile = await saveRaw(context, { vendor, query, stepIndex: index, spec, result, secrets });
@@ -147,6 +148,31 @@ async function runQuery(context, vendor, query, key, secrets) {
 }
 
 /**
+ * Reads a documented-free account balance so the actual charge can be taken
+ * from the vendor's own books. Booked in the ledger like any call.
+ */
+async function readBalance(context, vendor, key, secrets, label) {
+  const spec = vendor.balance.spec();
+  const limits = { vendorId: vendor.id, maxCalls: vendor.maxCalls, maxUsd: vendor.maxUsd ?? VENDOR_CAP_USD };
+  if (refusal(context.ledger, limits, spec.worstCaseUsd, { documentedFree: spec.documentedFree === true })) return null;
+  const record = await reserve(context.ledger, {
+    vendor: vendor.id, queryId: label, step: 0, at: context.now().toISOString(), worstCaseUsd: spec.worstCaseUsd,
+  });
+  const result = await callOnce(context.fetchImpl, vendor.authorize(spec, key), vendor.timeoutMs ?? context.timeoutMs);
+  const json = parseJson(result.body);
+  await settle(context.ledger, record, { outcome: result.outcome, reportedUsd: 0 });
+  await saveRaw(context, { vendor, query: { id: label }, stepIndex: 0, spec, result, secrets });
+  if (result.outcome !== 'ok' || json === undefined) return null;
+  const value = vendor.balance.read(json);
+  return Number.isFinite(value) ? value : null;
+}
+
+function balanceDelta(before, after) {
+  if (before === null || after === null) return null;
+  return Math.round((before - after) * 1e6) / 1e6;
+}
+
+/**
  * Runs the selected vendors. Without `live` nothing is sent, no ledger entry
  * is written and no file is saved; the plan is returned for printing.
  */
@@ -161,6 +187,8 @@ export async function runComparison({ vendors, queries, env, live, fetchImpl, le
     const entry = { id: vendor.id, label: vendor.label, keyPresent, blockedReason: vendor.blockedReason ?? null, plan, queries: [] };
     report.vendors.push(entry);
     let stopReason = null;
+    const measureBalance = live && keyPresent && !vendor.blockedReason && vendor.balance;
+    const before = measureBalance ? await readBalance(context, vendor, key, secrets, 'BALANCE_BEFORE') : null;
     for (const query of queries) {
       if (!live) entry.queries.push({ queryId: query.id, status: 'DRY_RUN' });
       else if (vendor.blockedReason) entry.queries.push({ queryId: query.id, status: 'NOT_RUN', reason: vendor.blockedReason });
@@ -172,6 +200,10 @@ export async function runComparison({ vendors, queries, env, live, fetchImpl, le
         delete result.stopVendor;
         entry.queries.push({ queryId: query.id, ...result });
       }
+    }
+    if (measureBalance) {
+      const after = await readBalance(context, vendor, key, secrets, 'BALANCE_AFTER');
+      entry.balance = { beforeUsd: before, afterUsd: after, spentThisRunUsd: balanceDelta(before, after) };
     }
     entry.usage = live ? vendorUsage(ledger, vendor.id) : null;
   }

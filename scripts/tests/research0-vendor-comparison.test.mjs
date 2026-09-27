@@ -11,6 +11,8 @@ import { formatReport } from '../research0/report.mjs';
 import { runComparison } from '../research0/runner.mjs';
 import { TOTAL_CAP_USD, loadLedger, redactUrl, refusal } from '../research0/safety.mjs';
 import { VENDORS } from '../research0/vendors.mjs';
+import { displayCount, normalizeTikhub, tikhubFailed } from '../research0/vendors/tikhubShapes.mjs';
+import { reanalyze } from '../research0/analyze.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 const KEY = 'sk-test-SECRET-7f3a9c2e5b1d';
@@ -211,7 +213,72 @@ test('the query set covers both regions and all three query types', () => {
   assert.equal(QUERIES.length, 10);
   assert.deepEqual(new Set(QUERIES.map(query => query.region)), new Set(['cn', 'global']));
   for (const type of ['profile', 'posts', 'keyword']) assert.ok(QUERIES.some(query => query.type === type), type);
-  for (const vendor of VENDORS) assert.ok(vendor.maxCalls > 0 && (vendor.maxUsd ?? 1) <= 1, vendor.id);
+  for (const vendor of VENDORS) {
+    assert.ok((vendor.blockedReason || vendor.maxCalls > 0) && (vendor.maxUsd ?? 1) <= 1, vendor.id);
+    const plan = QUERIES.flatMap(query => {
+      const steps = vendor.steps(query);
+      return Array.isArray(steps) ? steps.filter(step => typeof step !== 'function') : [];
+    });
+    const worst = plan.reduce((total, step) => total + step.worstCaseUsd, 0);
+    assert.ok(worst <= (vendor.maxUsd ?? 1), `${vendor.id} planned worst case ${worst} exceeds its cap`);
+    assert.ok(plan.length <= vendor.maxCalls, `${vendor.id} plans more calls than its cap`);
+  }
+});
+
+test('a blocked vendor is never called even with a key and confirmation', async () => withTemp(async dir => {
+  const { calls, fetchImpl } = recordingFetch(() => okBody());
+  const vendor = fakeVendor({ blockedReason: 'PRICE_NOT_BOUNDABLE' });
+  const { report } = await run(dir, { vendor, fetchImpl });
+  assert.equal(calls.length, 0);
+  assert.ok(report.vendors[0].queries.every(query => query.status === 'NOT_RUN' && query.reason === 'PRICE_NOT_BOUNDABLE'));
+}));
+
+test('free balance reads bracket the run and give the vendor-side spend', async () => withTemp(async dir => {
+  let balance = 5;
+  const vendor = fakeVendor({
+    balance: {
+      spec: () => ({ method: 'GET', url: 'https://api.example.test/balance', worstCaseUsd: 0, documentedFree: true }),
+      read: json => json.balance,
+    },
+  });
+  const { calls, fetchImpl } = recordingFetch(url => {
+    if (url.endsWith('/balance')) return new Response(JSON.stringify({ balance }), { status: 200 });
+    balance -= 0.25;
+    return okBody();
+  });
+  const { report, ledger } = await run(dir, { vendor, fetchImpl, qs: [queries[0], queries[1]] });
+  assert.equal(calls.length, 4);
+  assert.deepEqual(report.vendors[0].balance, { beforeUsd: 5, afterUsd: 4.5, spentThisRunUsd: 0.5 });
+  assert.equal(ledger.entries.filter(entry => entry.queryId.startsWith('BALANCE')).every(entry => entry.chargedUsd === 0), true);
+}));
+
+test('reanalyze recomputes metrics from saved responses without any request', async () => withTemp(async dir => {
+  const live = recordingFetch(() => okBody());
+  await run(dir, { fetchImpl: live.fetchImpl, qs: [queries[0]] });
+  const vendor = fakeVendor({ normalize: json => json.items.map(item => ({ ...item, views: 7 })) });
+  const report = await reanalyze({ vendors: [vendor], queries: [queries[0], queries[1]], outDir: dir });
+  assert.equal(live.calls.length, 1);
+  assert.equal(report.vendors[0].queries[0].status, 'OK');
+  assert.ok(report.vendors[0].queries[0].metrics.provided.includes('views'));
+  assert.equal(report.vendors[0].queries[1].status, 'NO_SAVED_RESPONSE');
+  await assert.rejects(main(['--reanalyze', '--confirm-paid-calls', '--out', dir], { log: () => {} }), /OFFLINE_ONLY/);
+}));
+
+test('TikHub-shaped items keep missing counts missing and vendor zeros as zero', () => {
+  const json = { code: 200, data: { aweme_list: [
+    { aweme_id: '1', create_time: 1_700_000_000, desc: 'a', statistics: { digg_count: 3, play_count: 0 }, author: { unique_id: 'x' } },
+    { aweme_id: '2', create_time: 1_700_000_100, statistics: { digg_count: 1 } },
+  ] } };
+  const items = normalizeTikhub(json, { type: 'keyword', platform: 'tiktok' });
+  assert.equal(items.length, 2);
+  assert.equal(items[0].views, 0);
+  assert.equal(items[1].views, undefined);
+  assert.equal(items[0].url, 'https://www.tiktok.com/@x/video/1');
+  assert.equal(summarize('keyword', items).byField.comments.present, 0);
+  assert.equal(tikhubFailed({ detail: { code: 400 } }), true);
+  assert.equal(tikhubFailed(json), false);
+  assert.equal(displayCount({ view_count: '343,369 views' }, ['view_count']), 343369);
+  assert.equal(displayCount({ view_count: '1.2M views' }, ['view_count']), undefined);
 });
 
 test('application code never imports the comparison script', () => {
