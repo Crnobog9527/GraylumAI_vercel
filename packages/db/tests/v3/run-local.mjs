@@ -3,6 +3,7 @@ import { randomUUID, createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createServer } from 'node:http';
+import { POSTGRES_IMAGE, POSTGREST_IMAGE } from './images.mjs';
 const root=resolve(import.meta.dirname,'../../../..');
 const selected=process.argv.slice(2);
 if(selected.length && (selected.length!==1||!['--research-only','--artifacts-only','--agent-slice-only'].includes(selected[0])))throw new Error('only --research-only or --artifacts-only is supported');
@@ -15,7 +16,7 @@ const jwt=(role)=>{const a=Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).
 const apply=(path)=>execFileSync('docker',['exec','-i',db,'psql','-U','postgres','-d','v3_disposable','-v','ON_ERROR_STOP=1'],{input:readFileSync(resolve(root,path)),stdio:['pipe','pipe','pipe']});
 try {
   docker('network','create',tag);
-  docker('run','-d','--name',db,'--network',tag,'-p','127.0.0.1::5432','-e','POSTGRES_DB=v3_disposable','-e','POSTGRES_HOST_AUTH_METHOD=trust','postgres:17-alpine');
+  docker('run','-d','--name',db,'--network',tag,'-p','127.0.0.1::5432','-e','POSTGRES_DB=v3_disposable','-e','POSTGRES_HOST_AUTH_METHOD=trust',POSTGRES_IMAGE);
   for(let i=0;i<50;i++){try{docker('exec',db,'pg_isready','-h','127.0.0.1','-U','postgres');break;}catch{await new Promise(r=>setTimeout(r,200));}}
   apply('packages/db/tests/v3/bootstrap.sql');
   apply('packages/db/migrations/0039_normalize_module_policy_shape.sql');
@@ -31,7 +32,7 @@ try {
     apply('packages/db/migrations/0081_agent_slice_preferences.sql');
   }
   console.log('SQL migrations: applied including repeat application');
-  docker('run','-d','--name',rest,'--network',tag,'-p','127.0.0.1::3000','-e',`PGRST_DB_URI=postgres://authenticator@${db}:5432/v3_disposable`,'-e','PGRST_DB_SCHEMAS=public','-e','PGRST_DB_ANON_ROLE=anon','-e',`PGRST_JWT_SECRET=${secret}`,'public.ecr.aws/supabase/postgrest:v14.13');
+  docker('run','-d','--name',rest,'--network',tag,'-p','127.0.0.1::3000','-e',`PGRST_DB_URI=postgres://authenticator@${db}:5432/v3_disposable`,'-e','PGRST_DB_SCHEMAS=public','-e','PGRST_DB_ANON_ROLE=anon','-e',`PGRST_JWT_SECRET=${secret}`,POSTGREST_IMAGE);
   const port=(name,internal)=>docker('port',name,internal).split(':').at(-1);
   const restUrl=`http://127.0.0.1:${port(rest,'3000')}`;
   for(let i=0;i<50;i++){try {if((await fetch(restUrl)).ok)break;}catch{}await new Promise(r=>setTimeout(r,200));}

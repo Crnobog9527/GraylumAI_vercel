@@ -12,8 +12,11 @@ class CIWorkflowsTest < Minitest::Test
     @security = YAML.safe_load(File.read("#{ROOT}/workflows/security.yml"))
   end
   GATES = {'lint-check'=>['Lint & Type Check','lint-and-type'], 'typecheck'=>['TypeScript Check','lint-and-type'],
-           'unit-check'=>['Unit Tests','test'], 'security-unit-tests'=>['Security Unit Tests','test'],
+           'unit-check'=>['Unit Tests',{'WORK_RESULT'=>'test','INTEGRATION_RESULT'=>'integration'}],
+           'security-unit-tests'=>['Security Unit Tests','test'],
            'build'=>['Build Check','build-and-e2e'], 'security-e2e-tests'=>['Security E2E Tests','build-and-e2e']}.freeze
+  INTEGRATION_RUNS = ['node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app',
+                      'node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app'].freeze
   def test_required_context_names_unique
     names = [@ci, @security].flat_map { |w| w.fetch('jobs').values.map { |j| j.fetch('name') } }
     (GATES.values.map(&:first) + ['Dependency Audit','Code Security Scan','Workflow Policy Check','Secret Scan']).each do |name|
@@ -21,21 +24,47 @@ class CIWorkflowsTest < Minitest::Test
     end
   end
   def test_gate_real_shell_truth_table_and_needs_contract
-    GATES.each do |id, (name, worker)|
+    GATES.each do |id, (name, workers)|
+      workers = {'WORK_RESULT'=>workers} if workers.is_a?(String)
       job=@ci.fetch('jobs').fetch(id)
       assert_equal name, job.fetch('name'); assert_equal 'always()', job.fetch('if')
-      assert_equal [worker], job.fetch('needs')
+      assert_equal workers.values, job.fetch('needs')
       assert_equal 1, job.fetch('steps').length
       step=job['steps'].first
-      assert_equal({'WORK_RESULT'=>"${{ needs.#{worker}.result }}"}, step.fetch('env'))
-      ['success', 'failure', 'cancelled', 'skipped', '', 'invalid'].each do |result|
-        _,_,status=Open3.capture3({'WORK_RESULT'=>result},'bash','-c',step.fetch('run'))
-        assert_equal result == 'success',status.success?,"#{id}: #{result.inspect}"
+      assert_equal(workers.transform_values { |worker| "${{ needs.#{worker}.result }}" }, step.fetch('env'))
+      results = ['success', 'failure', 'cancelled', 'skipped', '', 'invalid']
+      results.product(*Array.new(workers.length - 1, results)).each do |combination|
+        env = workers.keys.zip(combination).to_h
+        _,_,status=Open3.capture3(env,'bash','-c',step.fetch('run'))
+        assert_equal combination.all?('success'),status.success?,"#{id}: #{env.inspect}"
       end
-      work=@ci['jobs'].fetch(worker)
-      refute work.key?('needs')
-      refute work.key?('if')
-      refute work.key?('continue-on-error')
+      workers.each_value do |worker|
+        work=@ci['jobs'].fetch(worker)
+        refute work.key?('needs')
+        refute work.key?('if')
+        refute work.key?('continue-on-error')
+      end
+    end
+  end
+  def test_integration_worker_runs_billing_and_recovery_without_secrets
+    steps = @ci.fetch('jobs').fetch('integration').fetch('steps')
+    runs = steps.map { |step| step['run'] }.compact
+    INTEGRATION_RUNS.each { |command| assert_equal 1, runs.count(command), command }
+    assert_operator runs.index('pnpm install --frozen-lockfile'), :<, runs.index(INTEGRATION_RUNS.first)
+    pull = steps.index { |step| step['name'] == 'Pull pinned service images' }
+    refute_nil pull
+    assert_operator pull, :<, steps.index { |step| step['run'] == INTEGRATION_RUNS.first }
+    assert_includes steps[pull]['run'], 'packages/db/tests/v3/images.mjs'
+    steps.each do |step|
+      refute step.key?('if'), step['name']
+      refute step.key?('continue-on-error'), step['name']
+      refute step.key?('env'), step['name']
+    end
+    images = File.read(File.expand_path('../packages/db/tests/v3/images.mjs', ROOT), encoding: 'UTF-8')
+    assert_equal 3, images.scan(/"[^"@]+:[^"@]+@sha256:[0-9a-f]{64}"/).length
+    %w[run-workbench.mjs run-local.mjs].each do |runner|
+      source = File.read(File.expand_path("../packages/db/tests/v3/#{runner}", ROOT), encoding: "UTF-8")
+      refute_match(/postgres:\d|postgrest:v|gotrue:v/, source, runner)
     end
   end
   def test_scans_always_and_no_event_path_filters

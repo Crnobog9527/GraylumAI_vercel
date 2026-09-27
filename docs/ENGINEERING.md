@@ -127,6 +127,7 @@
 | 脚本和 CI 保护测试 | `pnpm test:ci:safeguards`、`ruby .github/scripts/test-ci-workflows.rb` |
 | 端到端测试 | `pnpm --filter web test:e2e`（Playwright） |
 | 部分集成测试（需要本地 Docker） | `node packages/db/tests/v3/run-workbench.mjs`：默认只跑 `workbench.integration.ts`；用 `--opc-only`、`--runtime-only`、`--ai-only` 等参数选择计费、Runtime、定位等其他集成测试。仓库里的 16 个 `*.integration.ts` 并非都能通过它运行，统一入口由 CI-TRUST 补齐 |
+| 计费和恢复集成测试（CI 同款，需要本地 Docker，不启动网站和浏览器） | `node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app`；`node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app`。CI 的 "Unit Tests" 必需检查依赖这两条；需要网站或浏览器而被排除的用例列在 `packages/db/tests/v3/without-app.mjs` |
 
 - 新逻辑要配单元测试，放在源码旁边的 `*.test.ts`；已经使用 `__tests__/` 的目录沿用
   原来的写法。修 bug 时先写一个能复现问题的测试。
@@ -149,7 +150,9 @@
 - ESLint 目前只检查 `apps/web` 下的 4 个 `.mjs` 文件，不检查任何 TS/TSX 业务代码。
   CI 的 "Lint & Type Check" 实际起作用的是类型检查和第 3 节的大小检查。补上
   TypeScript/React 规则需要新增依赖（例如 typescript-eslint），属于依赖变更。
-- 集成测试（`*.integration.ts`，约 2 万行，覆盖计费和恢复等关键路径）不在 CI 里运行；
+- 集成测试（`*.integration.ts`，约 2 万行）只有计费（`bill2/billing.integration.ts`）和 Runtime 恢复与流式
+  （`runtime/runtime.integration.ts`、`runtime/streaming.integration.ts`）在 CI 里运行，其中需要网站或浏览器的
+  5 个用例被明确排除（见 `packages/db/tests/v3/without-app.mjs`）；定位（OPC）、工作台等其余集成测试仍不在 CI 里；
   `packages/api` 没有独立的类型检查，大部分 API 测试文件从未被类型检查；CI 只跑少数
   网站单测。
 - 仓库没有安装代码格式化工具（Prettier）。
