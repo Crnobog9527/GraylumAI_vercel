@@ -1,0 +1,183 @@
+// RESEARCH-0 runner: dry run by default, one attempt per request, spend caps
+// checked and booked before every dispatch.
+
+import path from 'node:path';
+import { summarize } from './metrics.mjs';
+import {
+  VENDOR_CAP_USD,
+  redactHeaders,
+  redactText,
+  redactUrl,
+  refusal,
+  reserve,
+  settle,
+  vendorUsage,
+  writeRedactedJson,
+} from './safety.mjs';
+
+export const DEFAULT_TIMEOUT_MS = 60_000;
+const STOPPING_REFUSALS = new Set(['CALL_LIMIT_REACHED', 'VENDOR_USD_LIMIT_REACHED', 'TOTAL_USD_LIMIT_REACHED']);
+
+function describeSpec(spec, secrets) {
+  return {
+    method: spec.method ?? 'GET',
+    url: redactUrl(spec.url, secrets),
+    headers: redactHeaders(spec.headers, secrets),
+    body: spec.body === undefined ? undefined : JSON.parse(redactText(JSON.stringify(spec.body), secrets)),
+  };
+}
+
+/**
+ * Exactly one fetch. Timeouts, aborted connections and unreadable bodies are
+ * "unknown": the request may have been billed and is never re-sent.
+ * Error messages are dropped because they can echo the request URL.
+ */
+export async function callOnce(fetchImpl, { url, init }, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const started = performance.now();
+  try {
+    const response = await fetchImpl(url, { ...init, signal: controller.signal, redirect: 'manual' });
+    const body = await response.text();
+    const headers = Object.fromEntries(response.headers?.entries?.() ?? []);
+    const outcome = response.status >= 200 && response.status < 300 ? 'ok' : 'failed';
+    return { outcome, httpStatus: response.status, body, headers, latencyMs: Math.round(performance.now() - started) };
+  } catch (error) {
+    const reason = error?.name === 'AbortError' ? 'TIMEOUT' : 'NETWORK_OR_READ_ERROR';
+    return { outcome: 'unknown', reason, latencyMs: Math.round(performance.now() - started) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function parseJson(body) {
+  if (typeof body !== 'string') return undefined;
+  try {
+    return JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+}
+
+function stepsFor(vendor, query) {
+  const steps = vendor.steps(query);
+  if (!Array.isArray(steps)) return { notSupported: steps?.notSupported ?? 'NOT_SUPPORTED' };
+  return { steps };
+}
+
+export function planVendor(vendor, queries, secrets = []) {
+  const lines = [];
+  let worstCaseUsd = 0;
+  for (const query of queries) {
+    const planned = stepsFor(vendor, query);
+    if (planned.notSupported) {
+      lines.push({ queryId: query.id, notSupported: planned.notSupported });
+      continue;
+    }
+    for (const step of planned.steps) {
+      if (typeof step === 'function') {
+        lines.push({ queryId: query.id, dependent: true, worstCaseUsd: vendor.dependentWorstCaseUsd ?? null });
+        worstCaseUsd += vendor.dependentWorstCaseUsd ?? 0;
+      } else {
+        lines.push({ queryId: query.id, ...describeSpec(step, secrets), worstCaseUsd: step.worstCaseUsd });
+        worstCaseUsd += step.worstCaseUsd ?? 0;
+      }
+    }
+  }
+  return { vendor: vendor.id, lines, worstCaseUsd: Math.round(worstCaseUsd * 1e6) / 1e6 };
+}
+
+async function saveRaw(context, { vendor, query, stepIndex, spec, result, secrets }) {
+  const stamp = context.now().toISOString().replace(/[:.]/g, '-');
+  const file = path.join(context.outDir, 'raw', vendor.id, `${query.id}-step${stepIndex}-${stamp}.json`);
+  const parsed = parseJson(result.body);
+  const body = parsed === undefined ? redactText(result.body ?? '', secrets) : JSON.parse(redactText(JSON.stringify(parsed), secrets));
+  const record = {
+    vendor: vendor.id,
+    queryId: query.id,
+    request: describeSpec(spec, secrets),
+    response: { outcome: result.outcome, reason: result.reason, httpStatus: result.httpStatus, headers: redactHeaders(result.headers, secrets), body },
+    latencyMs: result.latencyMs,
+  };
+  await writeRedactedJson(file, record, secrets);
+  return path.relative(context.outDir, file);
+}
+
+async function runQuery(context, vendor, query, key, secrets) {
+  const planned = stepsFor(vendor, query);
+  if (planned.notSupported) return { status: 'NOT_SUPPORTED', reason: planned.notSupported };
+  const limits = { vendorId: vendor.id, maxCalls: vendor.maxCalls, maxUsd: vendor.maxUsd ?? VENDOR_CAP_USD };
+  let previous;
+  let last;
+  let latencyMs = 0;
+  const calls = [];
+  for (const [index, step] of planned.steps.entries()) {
+    const spec = typeof step === 'function' ? step(previous) : step;
+    if (spec?.skip) return { status: 'NOT_RUN', reason: spec.skip, calls, latencyMs };
+    const refused = refusal(context.ledger, limits, spec.worstCaseUsd, { documentedFree: spec.documentedFree === true });
+    if (refused) return { status: 'BUDGET_REFUSED', reason: refused, stopVendor: STOPPING_REFUSALS.has(refused), calls, latencyMs };
+    const record = await reserve(context.ledger, {
+      vendor: vendor.id, queryId: query.id, step: index, at: context.now().toISOString(), worstCaseUsd: spec.worstCaseUsd,
+    });
+    const result = await callOnce(context.fetchImpl, vendor.authorize(spec, key), vendor.timeoutMs ?? context.timeoutMs);
+    const json = parseJson(result.body);
+    let outcome = result.outcome;
+    if (outcome === 'ok' && (json === undefined || vendor.isFailure?.(json))) outcome = 'failed';
+    const reportedUsd = json === undefined ? null : vendor.reportedCostUsd?.(json, result.headers) ?? null;
+    await settle(context.ledger, record, { outcome, reportedUsd });
+    const rawFile = await saveRaw(context, { vendor, query, stepIndex: index, spec, result, secrets });
+    latencyMs += result.latencyMs;
+    const reportedRaw = json === undefined ? null : vendor.reportedRaw?.(json, result.headers) ?? null;
+    calls.push({ outcome, httpStatus: result.httpStatus, reason: result.reason, latencyMs: result.latencyMs,
+      reportedRaw, reportedCostUsd: reportedUsd, chargedUsd: record.chargedUsd, costBasis: record.basis, rawFile });
+    // No retry and no fallback: a failed or unknown step ends this query.
+    if (outcome !== 'ok') {
+      return { status: outcome === 'unknown' ? 'UNKNOWN' : 'FAILED', reason: result.reason ?? vendor.failureReason?.(json), calls, latencyMs };
+    }
+    previous = json;
+    last = json;
+  }
+  const kind = vendor.kind(query);
+  try {
+    return { status: 'OK', calls, latencyMs, kind, metrics: summarize(kind, vendor.normalize(last, query)) };
+  } catch {
+    // The call succeeded and is booked; only our field mapping did not fit.
+    return { status: 'OK', calls, latencyMs, kind, metrics: summarize(kind, []), normalizeError: 'SHAPE_NOT_RECOGNIZED' };
+  }
+}
+
+/**
+ * Runs the selected vendors. Without `live` nothing is sent, no ledger entry
+ * is written and no file is saved; the plan is returned for printing.
+ */
+export async function runComparison({ vendors, queries, env, live, fetchImpl, ledger, outDir, now = () => new Date(), timeoutMs }) {
+  const secrets = vendors.map(vendor => env[vendor.keyEnv]).filter(value => typeof value === 'string' && value.length > 0);
+  const context = { fetchImpl, ledger, outDir, now, timeoutMs: timeoutMs ?? DEFAULT_TIMEOUT_MS };
+  const report = { generatedAt: now().toISOString(), mode: live ? 'live' : 'dry-run', vendors: [] };
+  for (const vendor of vendors) {
+    const key = env[vendor.keyEnv];
+    const keyPresent = typeof key === 'string' && key.length > 0;
+    const plan = planVendor(vendor, queries, secrets);
+    const entry = { id: vendor.id, label: vendor.label, keyPresent, blockedReason: vendor.blockedReason ?? null, plan, queries: [] };
+    report.vendors.push(entry);
+    let stopReason = null;
+    for (const query of queries) {
+      if (!live) entry.queries.push({ queryId: query.id, status: 'DRY_RUN' });
+      else if (vendor.blockedReason) entry.queries.push({ queryId: query.id, status: 'NOT_RUN', reason: vendor.blockedReason });
+      else if (!keyPresent) entry.queries.push({ queryId: query.id, status: 'NOT_RUN', reason: 'MISSING_KEY' });
+      else if (stopReason) entry.queries.push({ queryId: query.id, status: 'BUDGET_REFUSED', reason: stopReason });
+      else {
+        const result = await runQuery(context, vendor, query, key, secrets);
+        if (result.stopVendor) stopReason = result.reason;
+        delete result.stopVendor;
+        entry.queries.push({ queryId: query.id, ...result });
+      }
+    }
+    entry.usage = live ? vendorUsage(ledger, vendor.id) : null;
+  }
+  if (live) {
+    const stamp = now().toISOString().replace(/[:.]/g, '-');
+    await writeRedactedJson(path.join(outDir, `summary-${stamp}.json`), report, secrets);
+  }
+  return report;
+}
