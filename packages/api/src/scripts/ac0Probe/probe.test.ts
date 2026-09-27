@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -9,6 +9,7 @@ import {resolveConfigs} from './config.ts';
 import {sseResponse, syntheticUpstream, textDeltas, toolDeltas} from './dryRun.ts';
 import {assertOutsideRepository, KEY_ENV, runProbe} from './main.ts';
 import {parseProbeArgs} from './plan.ts';
+import {FIXTURE_SKILL_DIR} from './skill.ts';
 import {assertDataCollectionDenied, probeTransport, type Upstream} from './transport.ts';
 
 // Placeholder only; deliberately not shaped like a provider key.
@@ -351,5 +352,127 @@ describe('isolation and reasoning evidence', () => {
     };
     roots.forEach(walk);
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('cumulative ledger (review P1-1)', () => {
+  const ledgerPath = () => join(home, '.graylum', 'ac0', 'ledger.json');
+  beforeEach(() => mkdirSync(join(home, '.graylum', 'ac0'), {recursive: true}));
+
+  it('refuses to start while a lock exists and never removes that lock itself', async () => {
+    const id = await planId(base('--ask', '1'));
+    writeFileSync(ledgerPath() + '.lock', '{"pid":1}\n', {flag: 'w'});
+    const network = recording();
+    const outcome = await runProbe([...base('--ask', '1', '--live'), '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
+    expect(outcome.exitCode).toBe(2);
+    expect(out.join('')).toContain('PROBE_LEDGER_LOCKED');
+    expect(network.sent).toHaveLength(0);
+    expect(existsSync(ledgerPath() + '.lock')).toBe(true);
+  });
+
+  it('lets only one of two concurrent live runs send, then releases its lock', async () => {
+    const id = await planId(base('--ask', '3'));
+    const network = recording();
+    const run = () => runProbe([...base('--ask', '3', '--live'), '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
+    const outcomes = await Promise.all([run(), run()]);
+    expect(outcomes.map(outcome => outcome.exitCode).sort()).toEqual([0, 2]);
+    expect(out.join('')).toContain('PROBE_LEDGER_LOCKED');
+    expect(network.sent).toHaveLength(3);
+    expect(JSON.parse(readFileSync(ledgerPath(), 'utf8')).calls).toBe(3);
+    expect(existsSync(ledgerPath() + '.lock')).toBe(false);
+  });
+
+  it('creates a missing ledger but refuses a damaged one instead of starting from zero', async () => {
+    const id = await planId(base('--ask', '1'));
+    const network = recording();
+    for (const damaged of ['not json', 'null', '{"calls":-1,"nanoUsd":0}']) {
+      writeFileSync(ledgerPath(), damaged);
+      const outcome = await runProbe([...base('--ask', '1', '--live'), '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
+      expect(outcome.exitCode).toBe(2);
+    }
+    expect(out.join('')).toContain('PROBE_LEDGER_INVALID');
+    expect(network.sent).toHaveLength(0);
+    rmSync(ledgerPath());
+    expect((await runProbe([...base('--ask', '1', '--live'), '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream))).exitCode).toBe(0);
+    expect(JSON.parse(readFileSync(ledgerPath(), 'utf8'))).toMatchObject({calls: 1, external: []});
+  });
+
+  it('records external usage without sending and counts it against the total', async () => {
+    const network = recording();
+    const record = ['--record-external-calls', '199', '--record-external-usd', '0.5', '--external-note', 'browser measurement'];
+    expect((await runProbe(record, {[KEY_ENV]: KEY}, deps(network.upstream))).exitCode).toBe(0);
+    const ledger = JSON.parse(readFileSync(ledgerPath(), 'utf8'));
+    expect(ledger).toMatchObject({calls: 199, nanoUsd: 500_000_000, external: [{calls: 199, usd: 0.5, note: 'browser measurement'}]});
+    expect((await runProbe([...record, '--live'], {}, deps(network.upstream))).exitCode).toBe(2);
+    const id = await planId(base('--ask', '2'));
+    const outcome = await runProbe([...base('--ask', '2', '--live'), '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
+    expect(outcome.stop).toBe('budget:total_call_cap');
+    expect(network.sent).toHaveLength(1);
+    expect(JSON.parse(readFileSync(ledgerPath(), 'utf8'))).toMatchObject({calls: 200, external: [{calls: 199}]});
+  });
+});
+
+describe('cost booking (review P1-2)', () => {
+  const config = resolveConfigs(['qwen-deepinfra-none'], undefined)[0]!;
+  const run = async (usage: Record<string, unknown>) => {
+    const t = probeTransport({
+      config, maxTokens: 64, timeoutMs: 1000, budget: createBudget({maxCalls: 10, maxUsd: 1, ledger: memoryLedger()}),
+      upstream: async () => sseResponse(config.model, textDeltas('hi'), {usage}), authorization: 'Bearer test',
+      clock: () => performance.now(), trialStart: performance.now(), redact: text => text,
+    });
+    const body = JSON.stringify({model: config.model, messages: [{role: 'user', content: 'x'}], stream: true,
+      stream_options: {include_usage: true}, store: false, reasoning_effort: 'none', max_tokens: 64});
+    await (await t.fetch('http://127.0.0.1/ac0/chat/completions', {method: 'POST', body})).text();
+    return t.records[0]!;
+  };
+
+  it('keeps the full bound when a token count is missing and no cost is reported', async () => {
+    const record = await run({prompt_tokens: 1000});
+    expect(record).toMatchObject({costSource: 'upper_bound', costUsd: record.boundUsd});
+  });
+
+  it('books the larger of reported cost and token cost and flags the difference', async () => {
+    const tokens = (1000 * 0.3 + 100 * 3.75) / 1_000_000;
+    const low = await run({prompt_tokens: 1000, completion_tokens: 100, cost: 0.0001});
+    expect(low).toMatchObject({costSource: 'tokens_at_max_price', costUsd: tokens, providerCostUsd: 0.0001, costDisagreement: true});
+    const high = await run({prompt_tokens: 1000, completion_tokens: 100, cost: 0.01});
+    expect(high).toMatchObject({costSource: 'provider', costUsd: 0.01, costDisagreement: true});
+    const reportedOnly = await run({prompt_tokens: 1000, cost: 0.0002});
+    expect(reportedOnly).toMatchObject({costSource: 'provider', costUsd: 0.0002});
+    expect(reportedOnly.costDisagreement).toBeUndefined();
+  });
+
+  it('keeps the full bound for an incomplete stream even when a cost was reported', async () => {
+    const t = probeTransport({
+      config, maxTokens: 64, timeoutMs: 1000, budget: createBudget({maxCalls: 10, maxUsd: 1, ledger: memoryLedger()}),
+      upstream: async () => new Response('data: {"choices":[],"usage":{"cost":0.00001}}\n\n'), authorization: 'Bearer test',
+      clock: () => performance.now(), trialStart: performance.now(), redact: text => text,
+    });
+    const body = JSON.stringify({model: config.model, messages: [{role: 'user', content: 'y'}], stream: true,
+      stream_options: {include_usage: true}, store: false, reasoning_effort: 'none', max_tokens: 64});
+    await (await t.fetch('http://127.0.0.1/ac0/chat/completions', {method: 'POST', body})).text();
+    expect(t.records[0]).toMatchObject({status: 'unknown', errorCode: 'incomplete_stream', costSource: 'upper_bound'});
+    expect(t.records[0]!.costUsd).toBe(t.records[0]!.boundUsd);
+  });
+});
+
+describe('real paths (review P2)', () => {
+  const repoDir = join(__dirname, '..');
+
+  it('refuses output, ledger or Skill paths that reach a repository through a symlink', async () => {
+    const link = join(home, 'looks-outside');
+    symlinkSync(repoDir, link);
+    expect(() => assertOutsideRepository(join(link, 'results'))).toThrow('PROBE_OUTPUT_INSIDE_REPOSITORY');
+    expect((await runProbe(['--out-dir', join(link, 'results')], {}, deps())).exitCode).toBe(2);
+    const id = await planId(base('--ask', '1'));
+    const network = recording();
+    const ledger = await runProbe([...base('--ask', '1', '--live', '--ledger', join(link, 'ledger.json')), '--confirm', id],
+      {[KEY_ENV]: KEY}, deps(network.upstream));
+    expect(ledger.exitCode).toBe(2);
+    expect(out.join('')).toContain('PROBE_LEDGER_INSIDE_REPOSITORY');
+    expect(network.sent).toHaveLength(0);
+    const skill = await runProbe(base('--ask', '1', '--skill-dir', FIXTURE_SKILL_DIR), {}, deps());
+    expect(skill.exitCode).toBe(2);
+    expect(out.join('')).toContain('PROBE_SKILL_INSIDE_REPOSITORY');
   });
 });

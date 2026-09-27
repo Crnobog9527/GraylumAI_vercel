@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // AC-0b model probe. Standalone script: application code must never import it.
 import {createHash} from 'node:crypto';
-import {lstatSync, readdirSync, readFileSync} from 'node:fs';
+import {lstatSync, readdirSync, readFileSync, realpathSync} from 'node:fs';
 import {join, posix, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {z} from 'zod';
@@ -31,7 +31,7 @@ function readRegular(path: string): string {
 
 /** Reads SKILL.md and references/ (two levels, no symlinks) once at start. */
 export function loadSkill(dir: string | undefined): LoadedSkill {
-  const root = resolve(dir ?? FIXTURE_SKILL_DIR);
+  const root = realpathSync(resolve(dir ?? FIXTURE_SKILL_DIR));
   if (!lstatSync(root).isDirectory()) throw new Error('PROBE_SKILL_DIR_INVALID');
   const instructions = readRegular(join(root, 'SKILL.md'));
   const references = new Map<string, string>();

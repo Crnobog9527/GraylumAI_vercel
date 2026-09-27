@@ -36,6 +36,9 @@ export const USAGE = `AC-0b model probe (dry run unless --live).
   --ledger <file>       cumulative call/spend ledger for live runs (default ~/.graylum/ac0/ledger.json)
   --live                send real requests; needs --confirm and AC0_OPENROUTER_API_KEY
   --confirm <plan-id>   the plan id printed by a dry run of the same options
+
+  Record usage spent outside this script (e.g. browser measurement) in the ledger; sends nothing:
+  --record-external-calls <n> --record-external-usd <x> [--external-note <text>] [--ledger <file>]
 `;
 
 export type ProbeArgs = {
@@ -53,6 +56,8 @@ export type ProbeArgs = {
   live: boolean;
   confirm?: string;
   help: boolean;
+  /** Manual ledger entry instead of a probe run. */
+  external?: {calls: number; usd: number; note?: string};
 };
 
 function integer(value: string | undefined, fallback: number, min: number, max: number, name: string): number {
@@ -69,7 +74,10 @@ export function parseProbeArgs(argv: string[], home: string): ProbeArgs {
     ask: {type: 'string'}, text: {type: 'string'}, reference: {type: 'string'},
     'max-calls': {type: 'string'}, 'max-usd': {type: 'string'}, 'max-tokens': {type: 'string'}, 'timeout-ms': {type: 'string'},
     'out-dir': {type: 'string'}, ledger: {type: 'string'}, live: {type: 'boolean'}, confirm: {type: 'string'}, help: {type: 'boolean'},
+    'record-external-calls': {type: 'string'}, 'record-external-usd': {type: 'string'}, 'external-note': {type: 'string'},
   }});
+  const external = parseExternal(values['record-external-calls'], values['record-external-usd'], values['external-note']);
+  if (external && values.live) throw new Error('PROBE_ARGUMENT_INVALID: --record-external-* never sends; do not combine with --live');
   const maxUsdText = values['max-usd'];
   if (maxUsdText !== undefined && !/^\d+(\.\d+)?$/.test(maxUsdText)) throw new Error('PROBE_ARGUMENT_INVALID: --max-usd');
   // Cap validation reads the raw request before any default could hide it.
@@ -94,7 +102,20 @@ export function parseProbeArgs(argv: string[], home: string): ProbeArgs {
     live: values.live ?? false,
     confirm: values.confirm,
     help: values.help ?? false,
+    ...(external ? {external} : {}),
   };
+}
+
+function parseExternal(calls: string | undefined, usd: string | undefined, note: string | undefined) {
+  if (calls === undefined && usd === undefined && note === undefined) return undefined;
+  if (calls === undefined || usd === undefined) {
+    throw new Error('PROBE_ARGUMENT_INVALID: give both --record-external-calls and --record-external-usd');
+  }
+  if (!/^\d+(\.\d+)?$/.test(usd) || Number(usd) > 1000) throw new Error('PROBE_ARGUMENT_INVALID: --record-external-usd');
+  if (note !== undefined && (note.length > 200 || /[\r\n]/.test(note))) throw new Error('PROBE_ARGUMENT_INVALID: --external-note');
+  const entry = {calls: integer(calls, 0, 0, 10_000, 'record-external-calls'), usd: Number(usd)};
+  if (entry.calls === 0 && entry.usd === 0) throw new Error('PROBE_ARGUMENT_INVALID: nothing to record');
+  return note ? {...entry, note} : entry;
 }
 
 export type ProbePlan = {

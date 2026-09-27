@@ -1,12 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // AC-0b model probe (Master Plan v12 AC-0 items 2-6). Standalone script run by
 // hand; application code must never import it. Dry run unless --live.
-import {appendFileSync, existsSync, mkdirSync, writeFileSync} from 'node:fs';
+import {appendFileSync, mkdirSync, writeFileSync} from 'node:fs';
 import {homedir} from 'node:os';
-import {dirname, join, resolve} from 'node:path';
+import {join, resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {createBudget, fileLedger, HARD_MAX_CALLS, HARD_MAX_USD, memoryLedger, nanoToUsd, usdToNano, type LedgerStore} from './budget.ts';
+import {createBudget, HARD_MAX_CALLS, HARD_MAX_USD, memoryLedger, nanoToUsd, usdToNano, type LedgerStore} from './budget.ts';
 import {syntheticUpstream} from './dryRun.ts';
+import {acquireLedgerLock, fileLedger, recordExternalUsage} from './ledger.ts';
+import {assertOutsideRepository, realPath} from './paths.ts';
 import {buildPlan, describePlan, parseProbeArgs, TRIAL_KINDS, USAGE, type ProbePlan} from './plan.ts';
 import {loadScenarios, loadSkill, scenariosOf} from './skill.ts';
 import {summarize, summaryMarkdown} from './summary.ts';
@@ -26,16 +28,7 @@ export type ProbeDeps = {
   stderr?: (text: string) => void;
 };
 
-/** Results may contain Skill text and model output, so they never go into a repository. */
-export function assertOutsideRepository(path: string): void {
-  let current = resolve(path);
-  for (;;) {
-    if (existsSync(join(current, '.git'))) throw new Error('PROBE_OUTPUT_INSIDE_REPOSITORY: choose a directory outside any git checkout');
-    const parent = dirname(current);
-    if (parent === current) return;
-    current = parent;
-  }
-}
+export {assertOutsideRepository};
 
 export function redactor(secrets: string[]) {
   const values = secrets.filter(secret => secret.length >= 8);
@@ -55,21 +48,33 @@ export async function runProbe(argv: string[], env: Record<string, string | unde
   const stderr = deps.stderr ?? (text => process.stderr.write(text));
   const clock = deps.clock ?? (() => performance.now());
   let redact = redactor([]);
+  let releaseLock = () => {};
   try {
     const args = parseProbeArgs(argv, deps.home ?? homedir());
     if (args.help) {
       stdout(USAGE);
       return {exitCode: 0};
     }
+    if (args.external) {
+      assertOutsideRepository(args.ledger, 'ledger');
+      releaseLock = acquireLedgerLock(realPath(args.ledger));
+      const totals = recordExternalUsage(realPath(args.ledger), args.external);
+      stdout(`Recorded external usage: ${args.external.calls} calls, $${args.external.usd}. ` +
+        `Ledger now ${totals.calls} calls, $${nanoToUsd(totals.nanoUsd).toFixed(6)} of 200 calls / $3. No request was sent.\n`);
+      return {exitCode: 0};
+    }
     assertOutsideRepository(args.outDir);
+    if (args.skillDir) assertOutsideRepository(args.skillDir, 'skill');
     const skill = loadSkill(args.skillDir);
     const {scenarios, digest} = loadScenarios(args.scenarios, skill);
     const plan = buildPlan(args, skill, scenarios, digest);
     const mode = args.live ? 'live' : 'dry-run';
     let ledger: LedgerStore = memoryLedger();
     if (args.live) {
-      assertOutsideRepository(args.ledger);
-      ledger = fileLedger(args.ledger);
+      assertOutsideRepository(args.ledger, 'ledger');
+      // Held for the whole run: reservations are read, checked and written under it.
+      releaseLock = acquireLedgerLock(realPath(args.ledger));
+      ledger = fileLedger(realPath(args.ledger));
     }
     const before = ledger.read();
     stdout(describePlan(plan, mode, {calls: before.calls, usd: nanoToUsd(before.nanoUsd)}));
@@ -92,7 +97,7 @@ export async function runProbe(argv: string[], env: Record<string, string | unde
       authorization = 'Bearer dry-run';
     }
     const budget = createBudget({maxCalls: plan.maxCalls, maxUsd: plan.maxUsd, ledger});
-    const runDir = join(args.outDir, new Date().toISOString().replace(/[:.]/g, '-') + '-' + mode + '-' + plan.planId);
+    const runDir = join(realPath(args.outDir), new Date().toISOString().replace(/[:.]/g, '-') + '-' + mode + '-' + plan.planId);
     mkdirSync(runDir, {recursive: true});
     const write = (name: string, text: string) => writeFileSync(join(runDir, name), redact(text));
     write('plan.json', JSON.stringify({...plan, mode}, null, 2) + '\n');
@@ -146,6 +151,8 @@ export async function runProbe(argv: string[], env: Record<string, string | unde
   } catch (error) {
     stderr(redact(error instanceof Error ? error.message : String(error)) + '\n');
     return {exitCode: 2};
+  } finally {
+    releaseLock();
   }
 }
 

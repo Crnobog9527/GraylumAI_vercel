@@ -74,6 +74,8 @@ export function summarize(configs: ProbeConfig[], results: TrialResult[]) {
       errorCodes: tally(calls.map(call => call.errorCode).filter((code): code is string => Boolean(code))),
       stops: tally(mine.map(result => result.stop).filter((stop): stop is NonNullable<TrialResult['stop']> => Boolean(stop))),
       costUsd: Math.round(cost * 1e9) / 1e9,
+      providerReportedUsd: Math.round(calls.reduce((sum, call) => sum + (call.providerCostUsd ?? 0), 0) * 1e9) / 1e9,
+      costDisagreements: calls.filter(call => call.costDisagreement).length,
       costSources: tally(calls.map(call => call.costSource ?? 'upper_bound')),
     };
   });
@@ -101,12 +103,14 @@ export function summaryMarkdown(rows: ConfigSummary[], totals: {calls: number; c
       `| ${row.configId} | ${kind} | ${ms(row[kind].firstContentMs)} | ${ms(row[kind].firstVisibleMs)} | ` +
       `${ms(row[kind].totalMs)} | ${ms(row[kind].charsPerSecond)} |`)),
     '', '## Calls and cost', '',
-    '| config | route reported | calls | statuses | reasoning seen | spend (USD) | cost source |',
-    '| --- | --- | --- | --- | --- | --- | --- |',
+    '| config | route reported | calls | statuses | reasoning seen | booked (USD) | provider-reported (USD) | cost source |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- |',
     ...rows.map(row => `| ${row.configId} | ${row.reportedProviders.join(', ') || '-'} | ${row.calls.sent} | ` +
       `${JSON.stringify(row.httpStatuses)} | ${row.reasoning.trialsWithReasoning} | ${row.costUsd.toFixed(6)} | ` +
-      `${JSON.stringify(row.costSources)} |`),
+      `${row.providerReportedUsd.toFixed(6)} | ${JSON.stringify(row.costSources)} |`),
     '',
+    'Booked cost is the larger of the provider-reported cost and both token counts at max_price (about twice the listed',
+    'price), or the full bound when neither is available or the outcome is unknown; caps and the ledger use the booked cost.',
     'text_question / no_question use a question-mark heuristic; review results.jsonl for step-completion labels.',
   ];
   return lines.join('\n') + '\n';

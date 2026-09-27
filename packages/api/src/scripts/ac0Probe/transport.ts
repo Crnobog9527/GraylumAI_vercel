@@ -28,8 +28,15 @@ export type CallRecord = {
   requestBytes: number;
   dataCollection: 'deny';
   boundUsd: number;
+  /** Amount booked against the caps. */
   costUsd?: number;
   costSource?: CostSource;
+  /** OpenRouter's reported usage.cost, when present. */
+  providerCostUsd?: number;
+  /** Both token counts priced at max_price, when both are present. */
+  tokenCostUsd?: number;
+  /** providerCostUsd and tokenCostUsd differ; the larger one was booked. */
+  costDisagreement?: boolean;
   facts: StreamFacts;
 };
 
@@ -105,15 +112,7 @@ export function probeTransport(options: {
     stopped: null, budgetStop: null, httpStatus: null,
   };
 
-  function settleRecord(record: CallRecord, settle: (nano: number) => void, status: CallStatus, source: CostSource) {
-    const usage = record.facts.usage;
-    let usd = record.boundUsd;
-    if (source === 'not_billed') usd = 0;
-    else if (source === 'provider' && usage?.costUsd !== undefined) usd = usage.costUsd;
-    else if (source === 'tokens_at_max_price' && usage) {
-      const {prompt, completion} = options.config.maxPrice;
-      usd = ((usage.promptTokens ?? 0) * prompt + (usage.completionTokens ?? 0) * completion) / 1_000_000;
-    }
+  function settleRecord(record: CallRecord, settle: (nano: number) => void, status: CallStatus, source: CostSource, usd: number) {
     record.status = status;
     record.costSource = source;
     const nano = usdToNano(usd);
@@ -121,11 +120,24 @@ export function probeTransport(options: {
     settle(nano);
   }
 
-  /** Provider cost first; token counts only for a completed call; else the bound. */
-  function costSource(facts: StreamFacts, completed: boolean): CostSource {
-    if (facts.usage?.costUsd !== undefined) return 'provider';
-    if (completed && facts.usage?.promptTokens !== undefined) return 'tokens_at_max_price';
-    return 'upper_bound';
+  /** Booked cost of a completed call: the larger of OpenRouter's reported cost
+   * and both token counts at max_price; one of them alone; otherwise the bound.
+   * An unknown or unfinished call always keeps its full bound. */
+  function completedCost(record: CallRecord): {usd: number; source: CostSource} {
+    const usage = record.facts.usage;
+    const provider = usage?.costUsd;
+    const {prompt, completion} = options.config.maxPrice;
+    const tokens = usage?.promptTokens !== undefined && usage.completionTokens !== undefined
+      ? (usage.promptTokens * prompt + usage.completionTokens * completion) / 1_000_000 : undefined;
+    if (provider !== undefined) record.providerCostUsd = provider;
+    if (tokens !== undefined) record.tokenCostUsd = nanoToUsd(usdToNano(tokens));
+    if (provider !== undefined && tokens !== undefined) {
+      if (usdToNano(provider) !== usdToNano(tokens)) record.costDisagreement = true;
+      return provider >= tokens ? {usd: provider, source: 'provider'} : {usd: tokens, source: 'tokens_at_max_price'};
+    }
+    if (provider !== undefined) return {usd: provider, source: 'provider'};
+    if (tokens !== undefined) return {usd: tokens, source: 'tokens_at_max_price'};
+    return {usd: record.boundUsd, source: 'upper_bound'};
   }
 
   async function probeFetch(url: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -164,7 +176,8 @@ export function probeTransport(options: {
       if (error instanceof Error) record.errorMessage = options.redact(error.message).slice(0, 300);
       record.totalMs = options.clock() - started;
       state.stopped = 'unknown_result';
-      settleRecord(record, settle, 'unknown', costSource(facts.facts, false));
+      if (facts.facts.usage?.costUsd !== undefined) record.providerCostUsd = facts.facts.usage.costUsd;
+      settleRecord(record, settle, 'unknown', 'upper_bound', record.boundUsd);
     };
     abandon.set(record, unknown);
     let response: Response;
@@ -187,7 +200,7 @@ export function probeTransport(options: {
         record.errorCode = 'http_' + response.status;
         record.totalMs = options.clock() - started;
         state.stopped = 'provider_rejected';
-        settleRecord(record, settle, 'rejected', 'not_billed');
+        settleRecord(record, settle, 'rejected', 'not_billed', 0);
       } else {
         unknown('http_' + response.status);
       }
@@ -210,7 +223,8 @@ export function probeTransport(options: {
             unknown(final.streamError ? 'provider_stream_error' : 'incomplete_stream');
           } else {
             record.totalMs = options.clock() - started;
-            settleRecord(record, settle, 'ok', costSource(final, true));
+            const cost = completedCost(record);
+            settleRecord(record, settle, 'ok', cost.source, cost.usd);
           }
           controller.close();
           return;

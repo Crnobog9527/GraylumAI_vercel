@@ -14,7 +14,8 @@ export function sseResponse(model: string, deltas: Delta[], options: {finish?: s
     ...deltas.map((delta, index) => chunk(index === 0 ? {role: 'assistant', ...delta} : delta, null)),
     chunk({}, options.finish ?? 'stop'),
     {id: 'gen-dry-run', provider: 'dry-run', model, object: 'chat.completion.chunk', created: 0, choices: [],
-      usage: options.usage ?? {prompt_tokens: 10, completion_tokens: 10, total_tokens: 20, cost: 0}},
+      // No token counts: a dry run books exactly the reported cost of zero.
+      usage: options.usage ?? {cost: 0}},
   ];
   const text = frames.map(frame => 'data: ' + JSON.stringify(frame) + '\n\n').join('') + 'data: [DONE]\n\n';
   return new Response(new TextEncoder().encode(text), {status: 200, headers: {'content-type': 'text/event-stream'}});

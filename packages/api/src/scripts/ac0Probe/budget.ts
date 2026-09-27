@@ -1,7 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // AC-0b model probe. Standalone script: application code must never import it.
-import {existsSync, mkdirSync, readFileSync, renameSync, writeFileSync} from 'node:fs';
-import {dirname} from 'node:path';
 
 /** Owner decision 2026-09-28: the whole AC-0 feasibility measurement may not
  * exceed 200 provider calls or 3 USD. No flag can raise these. */
@@ -37,30 +35,6 @@ export function validateCaps(maxCalls: number, maxUsd: number): void {
 export function memoryLedger(initial: LedgerTotals = {calls: 0, nanoUsd: 0}): LedgerStore {
   let totals = {...initial};
   return {read: () => ({...totals}), write: next => { totals = {...next}; }};
-}
-
-/** Cumulative totals across live runs, stored outside the repository. Each call
- * is written as a reservation before it is sent, so a crash cannot hide spend. */
-export function fileLedger(path: string): LedgerStore {
-  return {
-    read() {
-      if (!existsSync(path)) return {calls: 0, nanoUsd: 0};
-      const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<LedgerTotals>;
-      const calls = Number(parsed.calls);
-      const nanoUsd = Number(parsed.nanoUsd);
-      if (!Number.isSafeInteger(calls) || calls < 0 || !Number.isSafeInteger(nanoUsd) || nanoUsd < 0) {
-        throw new Error('PROBE_LEDGER_INVALID: fix or remove ' + path);
-      }
-      return {calls, nanoUsd};
-    },
-    write(totals) {
-      mkdirSync(dirname(path), {recursive: true});
-      const temporary = path + '.tmp';
-      const usd = nanoToUsd(totals.nanoUsd);
-      writeFileSync(temporary, JSON.stringify({...totals, usd, updatedAt: new Date().toISOString()}, null, 2) + '\n');
-      renameSync(temporary, path);
-    },
-  };
 }
 
 export type Settle = (actualNano: number) => void;
