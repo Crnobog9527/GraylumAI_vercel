@@ -30,6 +30,7 @@
 | [OPC 详细架构](tasks/V3-OPC-growth-agent-architecture.md)、[V3 标准 Skill](tasks/V3-standard-skills.md)、[BILL2 技术契约](tasks/V3-BILL-2-provider-authoritative-billing.md) | 技术附录；与 v12 §2.2 冲突的部分以 v12 为准 |
 | [docs/archive/](../archive/README.md) | 已归档的旧计划、旧设计和旧开发规范，不作为当前依据 |
 
+<a id="discovery-protocol"></a>
 ## 开工前的核对
 
 先按当前 AGENTS.md 核对仓库、目标分支、适用规则、相关 PR 和 writer；再读 v12 中与任务相关的章节。判断就绪只看实时代码和验证证据，不看旧文档里的完成文案或某个 PR 的绿灯。
