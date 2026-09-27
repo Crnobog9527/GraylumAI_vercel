@@ -10,12 +10,15 @@
 //     scripts/research0-vendor-comparison.mjs --confirm-paid-calls [--vendors tikhub] [--queries Q01,Q02]
 // Recompute metrics from saved responses (offline, sends nothing):
 //   node scripts/research0-vendor-comparison.mjs --reanalyze [--markdown]
+// monid catalogue phase only (Owner option a; add --confirm-paid-calls to send):
+//   node scripts/research0-vendor-comparison.mjs --monid-catalog
 
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reanalyze } from './research0/analyze.mjs';
 import { formatMarkdown } from './research0/markdown.mjs';
+import { MONID_CATALOG_PLAN, formatMonidCatalog, runMonidCatalog } from './research0/monidCatalog.mjs';
 import { QUERIES } from './research0/queries.mjs';
 import { formatReport } from './research0/report.mjs';
 import { runComparison } from './research0/runner.mjs';
@@ -36,12 +39,13 @@ function pick(all, csv, label) {
 }
 
 export function parseArgs(argv) {
-  const args = { live: false, reanalyze: false, markdown: false, vendors: null, queries: null, outDir: DEFAULT_OUT_DIR };
+  const args = { live: false, reanalyze: false, markdown: false, monidCatalog: false, vendors: null, queries: null, outDir: DEFAULT_OUT_DIR };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--confirm-paid-calls') args.live = true;
     else if (arg === '--reanalyze') args.reanalyze = true;
     else if (arg === '--markdown') args.markdown = true;
+    else if (arg === '--monid-catalog') args.monidCatalog = true;
     else if (arg === '--vendors') args.vendors = value(argv, ++index, arg);
     else if (arg === '--queries') args.queries = value(argv, ++index, arg);
     else if (arg === '--out') args.outDir = path.resolve(value(argv, ++index, arg));
@@ -78,9 +82,24 @@ export async function main(argv = process.argv.slice(2), { env = process.env, fe
     return offline;
   }
   const ledger = await loadLedger(path.join(args.outDir, 'ledger.json'));
+  if (args.monidCatalog) return monidCatalog(args, { env, fetchImpl, log, ledger });
   log(`RESEARCH-0 ${args.live ? 'PAID RUN' : 'DRY RUN (nothing is sent)'}; caps ${VENDOR_CAP_USD} USD/vendor, ${TOTAL_CAP_USD} USD total`);
   const report = await runComparison({ vendors, queries, env, live: args.live, fetchImpl, ledger, outDir: args.outDir });
   log(args.markdown ? formatMarkdown(report, queries) : formatReport(report));
+  return report;
+}
+
+/** Owner-approved monid catalogue phase; a dry run only prints the six planned calls. */
+async function monidCatalog(args, { env, fetchImpl, log, ledger }) {
+  const key = env.MONID_API_KEY;
+  if (!args.live) {
+    log('monid catalogue DRY RUN (nothing is sent); planned calls, each booked at $0.05:');
+    for (const step of MONID_CATALOG_PLAN) log(`  ${step.label} ${step.kind === 'balance' ? 'GET /v1/wallet/balance' : `POST /v1/discover "${step.query}"`}`);
+    return null;
+  }
+  if (typeof key !== 'string' || key.length === 0) throw new Error('RESEARCH0_MONID_KEY_MISSING');
+  const report = await runMonidCatalog({ key, fetchImpl, ledger, outDir: args.outDir });
+  log(formatMonidCatalog(report));
   return report;
 }
 

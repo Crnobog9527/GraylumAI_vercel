@@ -14,6 +14,7 @@ import { VENDORS } from '../research0/vendors.mjs';
 import { displayCount, normalizeTikhub, tikhubFailed } from '../research0/vendors/tikhubShapes.mjs';
 import { reanalyze } from '../research0/analyze.mjs';
 import { formatMarkdown } from '../research0/markdown.mjs';
+import { MONID_CATALOG_LIMITS, formatMonidCatalog, runMonidCatalog } from '../research0/monidCatalog.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 // Synthetic placeholder assembled at runtime so secret scanners see no key-like literal.
@@ -298,6 +299,61 @@ test('markdown tables show missing data as not provided and never contain the ke
   assert.match(markdown, /FAILED/);
   assert.match(markdown, /\| Fake \| OK 1, FAILED 1 \| 2 \| 1\/2 \|/);
   assert.match(markdown, /部分（1\/2）/);
+}));
+
+function monidFetch(balances, { discoverStatus = 200 } = {}) {
+  let next = 0;
+  return recordingFetch(url => {
+    if (url.endsWith('/wallet/balance')) {
+      return new Response(JSON.stringify({ balance: { value: balances[next++], currency: 'USD' }, held: { value: 0, currency: 'USD' } }));
+    }
+    const body = { results: [{ provider: 'tikhub', endpoint: '/api/v1/douyin/x', price: { type: 'PER_CALL', amount: { value: 0.0015, currency: 'USD' } } }] };
+    return new Response(JSON.stringify(body), { status: discoverStatus });
+  });
+}
+
+test('monid catalogue dry run sends nothing', async () => withTemp(async dir => {
+  let fetched = 0;
+  const logs = [];
+  await main(['--monid-catalog', '--out', dir], { env: { MONID_API_KEY: KEY }, fetchImpl: async () => { fetched += 1; }, log: line => logs.push(line) });
+  assert.equal(fetched, 0);
+  assert.deepEqual(await filesUnder(dir), []);
+  assert.equal(logs.filter(line => line.includes('/v1/')).length, 6);
+}));
+
+test('monid catalogue measures spend, stays within 6 calls and cannot be rerun', async () => withTemp(async dir => {
+  const ledger = await loadLedger(path.join(dir, 'ledger.json'));
+  const first = monidFetch([1, 0.999, 0.997]);
+  const report = await runMonidCatalog({ key: KEY, fetchImpl: first.fetchImpl, ledger, outDir: dir });
+  assert.equal(first.calls.length, 6);
+  assert.equal(report.stopped, null);
+  assert.equal(report.spentUsd, 0.003);
+  assert.equal(report.tools.length, 3);
+  assert.equal(ledger.entries.length, 6);
+  assert.ok(ledger.entries.reduce((total, entry) => total + entry.chargedUsd, 0) <= MONID_CATALOG_LIMITS.maxUsd + 1e-9);
+  for (const file of await filesUnder(dir)) assert.ok(!(await readFile(file, 'utf8')).includes(KEY), file);
+  assert.ok(!formatMonidCatalog(report).includes(KEY));
+  const again = monidFetch([1]);
+  const rerun = await runMonidCatalog({ key: KEY, fetchImpl: again.fetchImpl, ledger, outDir: dir });
+  assert.equal(again.calls.length, 0);
+  assert.equal(rerun.stopped.reason, 'CALL_LIMIT_REACHED');
+}));
+
+test('monid catalogue stops when the first lookup costs more than allowed', async () => withTemp(async dir => {
+  const ledger = await loadLedger(path.join(dir, 'ledger.json'));
+  const { calls, fetchImpl } = monidFetch([1, 0.9]);
+  const report = await runMonidCatalog({ key: KEY, fetchImpl, ledger, outDir: dir });
+  assert.equal(calls.length, 3);
+  assert.deepEqual(report.stopped, { at: 'BALANCE_1', reason: 'CHARGE_ABOVE_ALLOWED' });
+}));
+
+test('monid catalogue stops at the first failed lookup without retrying', async () => withTemp(async dir => {
+  const ledger = await loadLedger(path.join(dir, 'ledger.json'));
+  const { calls, fetchImpl } = monidFetch([1], { discoverStatus: 500 });
+  const report = await runMonidCatalog({ key: KEY, fetchImpl, ledger, outDir: dir });
+  assert.equal(calls.length, 2);
+  assert.equal(report.stopped.at, 'DISCOVER_CN');
+  assert.equal(ledger.entries[1].basis, 'estimate-worst-case');
 }));
 
 test('application code never imports the comparison script', () => {
