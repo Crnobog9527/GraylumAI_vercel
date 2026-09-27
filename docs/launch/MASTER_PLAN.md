@@ -76,6 +76,7 @@
 5. **技术债**：重新核实 ChatGPT 的清单，并排出清理顺序（第 8 节）。
 6. **D1–D7 按推荐确认**：上线范围、Fusion 计费、对比模型上限、会员默认权限和资料库额度、数据使用同意、文件类型、删除文档时保留用户已有的回答和成果（第 10 节）。
 7. **评估后的补充决定**（Fable 5.1 评估之后，第 10 节 D6、D8–D12）：资料库第一版只支持 `.txt`、`.md`、`.docx`；上线基础完成后先做封闭内测；自由对话默认不自动整理；文字表达的明确同意等同于点击确认；后台可以读取并按模型自定义思考强度；Fusion 只用 Graylum 自己开发的，评审和对比两种模式都保留。
+8. **正式环境没有真实用户**（Owner 2026-09-27 确认的事实，不是 Agent 核实的结论）：正式环境（`main` 对应的生产项目）没有任何真实用户数据。发布因此不需要保护旧数据，按第 9.3 节执行。
 
 ### 2.2 被本版取代的旧规则
 
@@ -87,6 +88,8 @@
 | 输入框支持图片选择、图片附件和多模态处理 | v11 §6.3 UI-C | 本版不做：UI-C 只支持 D6 列出的文档类型；图片和多模态放到上线后的资料库扩展 |
 | v11 第 11–12 节的施工顺序、批次和状态 | v11 §11–12 | 由第 7 节取代；任务编号保留（第 7.5 节有对照） |
 | `V3-GOLD` 排在飞书之后 | v11 §11 | 改名 `FUSION`，不依赖飞书 |
+| 发布时"不能假设现网无用户"，以及为此要求的"schema 与旧 runtime 向后兼容""兼容回退" | v11 §13.3 | 由第 9.3 节取代：Owner 已确认正式环境没有真实用户（第 2.1 节第 8 项） |
+| 为保护现网数据而设的发布要求：迁移必须向后兼容旧代码（只扩不缩、"旧代码 × 新库"测试）、按"先库后代码"分步切换、旧数据迁移、针对旧数据的回滚 | v10.1 §9、§10 | 由第 9.3 节取代；v10.1 §9、§10 中其余要求（密钥和配置逐项核对、Stripe 正式配置核对、定时任务、验证码开关顺序、冒烟、同日对账、立即关站条件等）继续有效 |
 
 除上表外，v11 和更早文档中不冲突的要求继续有效（第 9 节）。
 
@@ -347,14 +350,15 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | CI-TRUST-1 | 集成测试进 CI（计费、恢复等关键路径） | — | 高 | 中 / 1–2 |
 | **1 核心体验重做** | AGENT-CORE | AC-0 可行性验证；AC-1 提问卡和纯文本流式；AC-2 后台整理、Skill 模板、右侧数据沉淀区；AC-3 每步确认、确定性报告、定稿、承接第一周选题；AC-4 通用工作区和旧入口改指；AC-5 数据基础补缺，包括 D5 数据使用同意（勾选、撤回、按同意状态过滤记录）。见 [实施说明](tasks/AGENT-CORE.md) | P0-1；AC-2 另外依赖 CI-TRUST-1 和 DATA-ERASURE 的删除规则设计 | 高 | 大 / 12–16 |
 | | AGENT-CORE-UI | 从 AGENT-CORE 拆出的纯前端部分：提问卡和本步小结卡的显示、流式文字显示、右侧面板和进度条的布局、旧入口链接改指。只改前端，沿用现有接口；需要改接口、工具、数据库或计费的部分一律留在 AGENT-CORE | 与对应的 AGENT-CORE 子任务配合 | 普通 | 中 / 3–4 |
-| | CI-TRUST | 其余部分：ESLint 覆盖 TS/TSX；网站单测统一入口；API 独立类型检查；删除 `@repo/ui` 空壳和未接入的 ESLint 配置包 | — | 高 | 中 / 3 |
-| | DEBT-QUICK | 第 8.3 节第 2 项的快速清理（只含普通改动） | — | 普通 | 小 / 2 |
+| | CI-TRUST | 其余部分：ESLint 覆盖 TS/TSX；网站单测统一入口；API 独立类型检查；删除 `@repo/ui` 空壳和未接入的 ESLint 配置包；依赖升级机器人改发到 staging 并清理指向 `main` 的旧升级 PR（第 8.4 节第 1–3 项） | — | 高 | 中 / 3–4 |
+| | DEBT-QUICK | 第 8.3 节第 2 项的快速清理（只含普通改动）；关闭已解决和已废弃的问题单（第 8.4 节第 4–5 项，只是 GitHub 操作，不改代码） | — | 普通 | 小 / 2 |
 | **2 上线基础** | RUNTIME-PROD | 正式环境真实调用模型：① 模型报价的审批和开放机制；② 积分兑换比例和倍率配置；③ 后台界面；④ 预扣估算规则统一修订（按实际发送长度，普通调用和 Fusion 共用），上线前用真实账单核对估算和实际差距并留余量；⑤ 止损：每个用户每日上限、全站每日成本上限和告警、供应商余额告警、一键停止新调用的开关；⑥ 理清 `provider` 字段语义；⑦ 数据不用于训练由服务端强制：正式环境所有模型调用都发送 OpenRouter 的 `data_collection: deny`，只批准支持该设置的供应商线路，准入时拒绝不满足的线路；是否额外要求零数据保留（`zdr`）在实施时核对供应商能力后决定；结果写进隐私条款。验收包括一次有上限的真实小额对账 | AGENT-CORE 稳定 | 高 | 大 / 4–6 |
 | | MODEL-REASONING | ① 添加或编辑模型时，从 OpenRouter 公开模型目录读取该模型支持的思考档位、默认档位、能否关闭，保存快照并可"重新读取"；② 管理员按模型和用途（交互对话、整理、评审、写作）选择思考强度，选项只来自该模型支持的档位，外加"关闭"（允许时）和"用供应商默认"；③ 保存前检查所选供应商线路支持这个参数；④ 准入时把所选档位冻结进执行记录，重放用原值；⑤ 档位和回复长度上限联动校验；⑥ "试一次"按钮，用固定短问题真实调用一次，显示首字时间和是否有正文，费用由平台承担。取代 PR #446 里写死的对照表 | P0-1；和 RUNTIME-PROD 由同一个 writer 完成（同一个后台模型页） | 高 | 中 / 2–3 |
 | | ENTITLEMENTS | 会员权限配置：Fusion 两种模式的开关和上限、资料库总存储空间；服务端检查（系统级文件数量保护上限不属于会员权益，不在这里配置） | —；和 PAY-COMMON 由同一个 writer 先后完成 | 高 | 中 / 2 |
 | | SEC-RATELIMIT | 限流 fail-closed、Redis 超时放行、诊断计费探针 | — | 高 | 小 / 1–2 |
 | | DATA-ERASURE | 账号注销与数据删除，以及 D7 承诺的单条删除（对话回答、会话、已保存成果），都在公开上线前完成并列入验收。**设计先行**：在 AC-2 新建任何表之前先写出删除规则，实现在公开上线前完成。见 [实施说明](tasks/DATA-ERASURE.md)。之后任何新增保存用户私有内容的任务，都要把新数据接入注销流程并列入验收 | —（设计部分先于 AC-2） | 高 | 大 / 3–5 |
 | | COST-REPORT | 后台成本报表的金额、估算和查询修正（原清单 06） | — | 高 | 小 / 1 |
+| | PII-REGEX | 接手 PR #333（邮箱类个人信息匹配的性能加固，改的是安全过滤规则）：基于最新 staging 更新后重新审查、由 Owner 批准合并（第 8.4 节第 6 项） | — | 高 | 小 / 1 |
 | **3 差异化功能** | FUSION-REVIEW | 定稿报告多模型评审（第 4 节，见 [实施说明](tasks/FUSION.md)）；结果接入账号注销 | AC-3、RUNTIME-PROD、ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 |
 | | LIB-DOCS | 资料库上传、"我的文档 / 语料库"、真正删除、按会员等级的总存储空间和系统级文件数量保护上限（见 [实施说明](tasks/LIBRARY-VOICE.md)）；接入账号注销 | ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 |
 | | VOICE | 文风画像生成、确认和写作注入；接入账号注销 | LIB-DOCS、AGENT-CORE、DATA-ERASURE | 高 | 中 / 2–3 |
@@ -366,7 +370,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | UI-FINISH | 导航、响应式、旧链接迁移、界面全验收（沿用 v11） | UI-B、UI-C | 普通 | 中 / 2–3 |
 | **4 收费和上线** | PAY-COMMON → PAY-WAFFO | 沿用 v11 §9 和第 11 节定义 | ENTITLEMENTS 之后，同一个 writer | 高 | 大 / 7–10 |
 | | LEGACY-CLOSE | 下线 `/chat`、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等；下线前提供旧对话历史的只读查看入口，旧链接跳转到它；旧对话不迁移、不删除 | AC-4 接管自由对话且入口已改指；UI-MODEL、UI-B、UI-C、UI-FINISH 已交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 |
-| | V3-M3 → REL-1 | 完整验收和发布（第 9.3 节） | 以上全部 | 高；生产另行批准 | 大 |
+| | V3-M3 → REL-1 | 完整验收和发布（第 9.3 节；正式环境没有真实用户，按新建环境发布，不做旧数据兼容和迁移） | 以上全部 | 高；生产另行批准 | 大 |
 | **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | 沿用 v11 §8（C1 套餐式自动追踪已确认） | 上线 | 高 | 大 |
 | | LEARN-1、LEARN-2 | 第 6.3 节：读取用户数据、依赖数据使用同意 | 有真实用户 / SOCIAL-SYNC | 高 | 中 |
 | | 资料库扩展 | PDF 等其他格式、全文检索或 pgvector、图片和音频、Google Drive / Notion 导入 | LIB-DOCS | 高 | 大 |
@@ -382,7 +386,7 @@ RUNTIME-PROD + ENTITLEMENTS + DATA-ERASURE ─→ FUSION-REVIEW
 ENTITLEMENTS + DATA-ERASURE ─→ LIB-DOCS ─→ VOICE
 AGENT-CORE ─→ UI-A ─→ UI-MODEL ─→ FUSION-COMPARE
 LIB-DOCS + UI-A ─→ UI-B、UI-C ─→ UI-FINISH
-SEC-RATELIMIT、COST-REPORT、CI-TRUST 其余部分、DEBT-QUICK（独立）
+SEC-RATELIMIT、COST-REPORT、PII-REGEX、CI-TRUST 其余部分、DEBT-QUICK（独立）
 AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLOSE ─→ V3-M3 ─→ REL-1
 ```
 
@@ -406,7 +410,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | N1b 体验样片 | AC-0、AC-1 及其对应的 AGENT-CORE-UI 部分 | Owner 在 staging 用真实模型走完定位第一步，决定继续、调整还是换模型；右侧整理这一阶段沿用旧做法 |
 | N1c 完整定位流程 | DATA-ERASURE 删除规则设计、AC-2、AC-3、AC-5 | Owner 从进入到定稿完整走通并验收 |
 | N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
-| N2 上线基础 | RUNTIME-PROD、MODEL-REASONING、ENTITLEMENTS、SEC-RATELIMIT、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON | 上线基础完成；然后邀请 5–10 位真实用户**封闭内测**：只开放定位、周选题和写作，用赠送积分，不开放付费，反馈用于调整 N3 的优先级（D8，不改变 D1 的公开上线范围） |
+| N2 上线基础 | RUNTIME-PROD、MODEL-REASONING、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON | 上线基础完成；然后邀请 5–10 位真实用户**封闭内测**：只开放定位、周选题和写作，用赠送积分，不开放付费，反馈用于调整 N3 的优先级（D8，不改变 D1 的公开上线范围） |
 | N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
 | N4 收口 | LEGACY-CLOSE、V3-M3 | 完整验收；REL-1 和生产另行批准 |
 
@@ -418,7 +422,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 - `V3-WORKBENCH` 的 SCOPE / AGENT / ENTRY / CONTENT：代码已随 #422 合并；未完成的 VERIFY 和 Owner 体验验收并入 AGENT-CORE。
 - `V3-OPC-UI` 的 A / B / C / FINISH：改称 UI-A / UI-B / UI-C / UI-FINISH，UI-C 改为复用 LIB-DOCS。
 - `V3-GOLD`：改名 FUSION，拆成 FUSION-REVIEW 和 FUSION-COMPARE。
-- 新增：AGENT-CORE（含 AC-0）、AGENT-CORE-UI（从 AGENT-CORE 拆出的纯前端部分）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的模型选择）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2。
+- 新增：AGENT-CORE（含 AC-0）、AGENT-CORE-UI（从 AGENT-CORE 拆出的纯前端部分）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的模型选择）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX（接手 PR #333）、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2。
 - 迁移编号在实际实施时分配，本文不预占。
 
 ### 7.6 Owner 需要提前启动的事项
@@ -492,6 +496,25 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 
 原则：不为清理做一轮全站重构；已应用的迁移、原请求 ID、收据、预留和恢复兼容，不能当"旧文件"删除；每一项都要有能证明行为不变的测试。
 
+### 8.4 GitHub 遗留项清理（Fable 2026-09-27 逐项核实）
+
+下列操作只写进规划；**等对应批次被 Owner 选定后再执行**，本规划合并本身不关闭任何 PR 或问题单，也不改配置。
+
+放进 CI-TRUST（高风险，改的是依赖更新配置）：
+
+1. 修改 `.github/dependabot.yml`，为每个更新项指定 `target-branch: staging`。原因：依赖升级机器人没有指定目标分支，一直往 `main` 发 PR，而 `main` 落后 staging 448 个提交（2026-09-27）。
+2. 关闭指向 `main` 的 12 个依赖升级 PR，不直接合并：#420、#411、#410、#385、#384、#383、#381、#332、#325、#323、#194、#193。其中 #410、#411 已过期，staging 的 Next 已是 16.3.3。
+3. 配置生效后，对机器人重新发到 staging 的升级逐个评估；vitest 5 和 `@vercel/speed-insights` 2 是大版本升级，单独处理。
+
+放进 DEBT-QUICK（普通，只是 GitHub 操作，不改代码）：
+
+4. 关闭已解决的问题单并写明依据：#361、#285（fast-uri 已锁定 3.1.6，依赖审计通过）；#276（`settings.ts` 和前端已判断金额大于零）。
+5. 关闭已废弃的治理和控制面问题单：#359、#354、#348、#336、#320、#319、#317、#314、#287、#278、#277、#270、#268、#267、#263，以及 #413。关闭说明统一写"已被现行 AGENTS.md 和 Master Plan v12 取代"。
+
+新增小任务 PII-REGEX（高风险，改的是安全过滤规则）：
+
+6. 接手 PR #333，基于最新 staging 更新后重新审查，由 Owner 批准合并。
+
 <a id="rules"></a>
 ## 9. 继续有效的规则与验收出口
 
@@ -517,7 +540,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 - [BILL2 技术契约](tasks/V3-BILL-2-provider-authoritative-billing.md)：精确成本、锁序、原子结算、原请求与未知恢复。
 - [V3 标准 Skill 规格](tasks/V3-standard-skills.md)：私有包、固定版本、3 / 6 / 8 步和无步骤 Skill、确定性报告、隔离与恢复。
 - [OPC 详细架构](tasks/V3-OPC-growth-agent-architecture.md)：业务归属、版本、会话、权限、账务和恢复契约；与本文第 2.2 节冲突的部分以本文为准。
-- [Master Plan v10.1](Graylum_Master_Plan_v10.1.md)：钱路、认证、安全、年付、退款、cron、完整验收和发布 / 回退要求。
+- [Master Plan v10.1](Graylum_Master_Plan_v10.1.md)：钱路、认证、安全、年付、退款、cron、完整验收和发布 / 回退要求（其中为保护现网数据而设的部分由第 9.3 节取代，见第 2.2 节）。
 - [v10.2 修订](Graylum_Master_Plan_v10.2_OPC_Growth_Agent_Amendment.md)：OPC 产品依据，冲突部分以本文为准。
 
 <a id="acceptance"></a>
@@ -525,7 +548,10 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 
 - v11 §13 的完整验收矩阵继续适用（认证权限、钱路年付退款、BILL2 / Runtime、Skill 与成果、编辑器与资料、后台、支付、集成与社媒、多模型、运维与历史），外加本文第 3.5 节（新交互）、第 4 节（Fusion 的五条底线和计费规则）、第 5 节（上传、删除传播、额度、文风画像冻结与重放）和 DATA-ERASURE（注销与删除）。
 - 证据层次：隔离测试验证行为、权限、并发和账务恢复；真实模型质量、真实延迟、供应商协议和真实成本需要各自的 staging 实测证据；没有实测的项目标记为 NOT_RUN，不能当作通过。
-- REL-1 发布仍需满足 v11 §13.3 的全部发布条件，并另行取得生产批准。
+- REL-1 发布仍需满足 v11 §13.3 的发布条件（"不能假设现网无用户"以及与旧 runtime 向后兼容、兼容回退的要求除外，见下一条），并另行取得生产批准。
+- **正式环境没有真实用户（第 2.1 节第 8 项，Owner 确认的事实）**：取代 v11 §13.3 "不能假设现网无用户"，以及 v10.1 §9、§10 中为保护现网数据而设的要求，包括新旧代码兼容、分步切换、旧数据迁移和针对旧数据的回滚。发布前如果发现正式环境已有真实用户数据，这一条失效，停止发布并请 Owner 重新决定。
+- **正式库的建法**：由迁移文件建出结构，再导入配置类数据（例如套餐、模型报价、已发布的 Skill 和模块配置）；不复制 staging 的测试账号、对话、订单、流水、支付沙盒编号和测试窗口。
+- **仍然保留**：正式环境密钥和配置逐项确认；上线当天有上限的真实小额支付、退款、模型调用和同日对账；AGENTS 第 10 节要求的上线前 Owner 明确批准。
 
 <a id="decisions"></a>
 ## 10. Owner 决定事项

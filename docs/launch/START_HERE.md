@@ -26,7 +26,7 @@
 | 文档 | 现在的用途 |
 | --- | --- |
 | [Master Plan v11](Graylum_Master_Plan_v11.md) | 历史版本；§3、§4.1–4.3、§5–§10、§13 中未被 v12 取代的要求继续有效（范围见 [v12 §9](MASTER_PLAN.md#rules)） |
-| [OPC v10.2 修订](Graylum_Master_Plan_v10.2_OPC_Growth_Agent_Amendment.md)、[Master Plan v10.1](Graylum_Master_Plan_v10.1.md) | 历史依据；不冲突的钱路、认证、安全、年付、退款、cron、验收和发布要求继续有效 |
+| [OPC v10.2 修订](Graylum_Master_Plan_v10.2_OPC_Growth_Agent_Amendment.md)、[Master Plan v10.1](Graylum_Master_Plan_v10.1.md) | 历史依据；不冲突的钱路、认证、安全、年付、退款、cron、验收和发布要求继续有效（为保护现网数据而设的发布要求已由 v12 第 9.3 节取代） |
 | [plan-core](plan-core.md)、[OPC 实施映射](tasks/V3-OPC-implementation.md) | 历史任务表；任务编号对照见 [v12 §7.5](MASTER_PLAN.md#construction) |
 | [OPC 详细架构](tasks/V3-OPC-growth-agent-architecture.md)、[V3 标准 Skill](tasks/V3-standard-skills.md)、[BILL2 技术契约](tasks/V3-BILL-2-provider-authoritative-billing.md) | 技术附录；与 v12 §2.2 冲突的部分以 v12 为准 |
 | [docs/archive/](../archive/README.md) | 已归档的旧计划、旧设计和旧开发规范，不作为当前依据 |
