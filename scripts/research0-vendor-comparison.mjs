@@ -9,12 +9,13 @@
 //   node --env-file-if-exists="$HOME/.graylum/secrets/research0.env" \
 //     scripts/research0-vendor-comparison.mjs --confirm-paid-calls [--vendors tikhub] [--queries Q01,Q02]
 // Recompute metrics from saved responses (offline, sends nothing):
-//   node scripts/research0-vendor-comparison.mjs --reanalyze
+//   node scripts/research0-vendor-comparison.mjs --reanalyze [--markdown]
 
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reanalyze } from './research0/analyze.mjs';
+import { formatMarkdown } from './research0/markdown.mjs';
 import { QUERIES } from './research0/queries.mjs';
 import { formatReport } from './research0/report.mjs';
 import { runComparison } from './research0/runner.mjs';
@@ -33,11 +34,12 @@ function pick(all, csv, label) {
 }
 
 export function parseArgs(argv) {
-  const args = { live: false, reanalyze: false, vendors: null, queries: null, outDir: DEFAULT_OUT_DIR };
+  const args = { live: false, reanalyze: false, markdown: false, vendors: null, queries: null, outDir: DEFAULT_OUT_DIR };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--confirm-paid-calls') args.live = true;
     else if (arg === '--reanalyze') args.reanalyze = true;
+    else if (arg === '--markdown') args.markdown = true;
     else if (arg === '--vendors') args.vendors = argv[++index];
     else if (arg === '--queries') args.queries = argv[++index];
     else if (arg === '--out') args.outDir = path.resolve(argv[++index]);
@@ -62,13 +64,13 @@ export async function main(argv = process.argv.slice(2), { env = process.env, fe
   if (args.live && args.reanalyze) throw new Error('RESEARCH0_REANALYZE_IS_OFFLINE_ONLY');
   if (args.reanalyze) {
     const offline = await reanalyze({ vendors, queries, outDir: args.outDir });
-    log(formatReport(offline));
+    log(args.markdown ? formatMarkdown(offline, queries) : formatReport(offline));
     return offline;
   }
   const ledger = await loadLedger(path.join(args.outDir, 'ledger.json'));
   log(`RESEARCH-0 ${args.live ? 'PAID RUN' : 'DRY RUN (nothing is sent)'}; caps ${VENDOR_CAP_USD} USD/vendor, ${TOTAL_CAP_USD} USD total`);
   const report = await runComparison({ vendors, queries, env, live: args.live, fetchImpl, ledger, outDir: args.outDir });
-  log(formatReport(report));
+  log(args.markdown ? formatMarkdown(report, queries) : formatReport(report));
   return report;
 }
 

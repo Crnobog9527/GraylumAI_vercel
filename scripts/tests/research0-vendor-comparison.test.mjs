@@ -13,6 +13,7 @@ import { TOTAL_CAP_USD, loadLedger, redactUrl, refusal } from '../research0/safe
 import { VENDORS } from '../research0/vendors.mjs';
 import { displayCount, normalizeTikhub, tikhubFailed } from '../research0/vendors/tikhubShapes.mjs';
 import { reanalyze } from '../research0/analyze.mjs';
+import { formatMarkdown } from '../research0/markdown.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 // Synthetic placeholder assembled at runtime so secret scanners see no key-like literal.
@@ -281,6 +282,19 @@ test('TikHub-shaped items keep missing counts missing and vendor zeros as zero',
   assert.equal(displayCount({ view_count: '343,369 views' }, ['view_count']), 343369);
   assert.equal(displayCount({ view_count: '1.2M views' }, ['view_count']), undefined);
 });
+
+test('markdown tables show missing data as not provided and never contain the key', async () => withTemp(async dir => {
+  const { fetchImpl } = recordingFetch((url, init, n) => (n === 1 ? okBody({ cost: 0.002 }) : new Response('{}', { status: 502 })));
+  const qs = [{ id: 'T1', platform: 'tiktok', type: 'posts' }, { id: 'T2', platform: 'tiktok', type: 'posts' }];
+  const { report } = await run(dir, { fetchImpl, qs });
+  const markdown = formatMarkdown(report, qs);
+  assert.ok(!markdown.includes(KEY));
+  assert.match(markdown, /发布时间未提供/);
+  assert.match(markdown, /未提供：[^|]*views/);
+  assert.match(markdown, /FAILED/);
+  assert.match(markdown, /\| Fake \| OK 1, FAILED 1 \| 2 \| 1\/2 \|/);
+  assert.match(markdown, /部分（1\/2）/);
+}));
 
 test('application code never imports the comparison script', () => {
   const result = spawnSync('git', ['grep', '-l', '-i', '-e', 'research0', '--', 'apps', 'packages'], { cwd: repositoryRoot, encoding: 'utf8' });
