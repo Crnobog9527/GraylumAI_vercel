@@ -346,7 +346,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | P0-4 | 修复 #443 遗留的过期测试（它还在等已删除的"业务名称"弹窗） | — | 普通 | 小 / 1 |
 | | CI-TRUST-1 | 集成测试进 CI（计费、恢复等关键路径） | — | 高 | 中 / 1–2 |
 | **1 核心体验重做** | AGENT-CORE | AC-0 可行性验证；AC-1 提问卡和纯文本流式；AC-2 后台整理、Skill 模板、右侧数据沉淀区；AC-3 每步确认、确定性报告、定稿、承接第一周选题；AC-4 通用工作区和旧入口改指；AC-5 数据基础补缺。见 [实施说明](tasks/AGENT-CORE.md) | P0-1；AC-2 另外依赖 CI-TRUST-1 和 DATA-ERASURE 的删除规则设计 | 高 | 大 / 12–16 |
-| | AGENT-UI | 从 AGENT-CORE 拆出的纯前端部分：提问卡和本步小结卡的显示、流式文字显示、右侧面板和进度条的布局、旧入口链接改指。只改前端，沿用现有接口；需要改接口、工具、数据库或计费的部分一律留在 AGENT-CORE | 与对应的 AGENT-CORE 子任务配合 | 普通 | 中 / 3–4 |
+| | AGENT-CORE-UI | 从 AGENT-CORE 拆出的纯前端部分：提问卡和本步小结卡的显示、流式文字显示、右侧面板和进度条的布局、旧入口链接改指。只改前端，沿用现有接口；需要改接口、工具、数据库或计费的部分一律留在 AGENT-CORE | 与对应的 AGENT-CORE 子任务配合 | 普通 | 中 / 3–4 |
 | | CI-TRUST | 其余部分：ESLint 覆盖 TS/TSX；网站单测统一入口；API 独立类型检查；删除 `@repo/ui` 空壳和未接入的 ESLint 配置包 | — | 高 | 中 / 3 |
 | | DEBT-QUICK | 第 8.3 节第 2 项的快速清理（只含普通改动） | — | 普通 | 小 / 2 |
 | **2 上线基础** | RUNTIME-PROD | 正式环境真实调用模型：① 模型报价的审批和开放机制；② 积分兑换比例和倍率配置；③ 后台界面；④ 预扣估算规则统一修订（按实际发送长度，普通调用和 Fusion 共用），上线前用真实账单核对估算和实际差距并留余量；⑤ 止损：每个用户每日上限、全站每日成本上限和告警、供应商余额告警、一键停止新调用的开关；⑥ 理清 `provider` 字段语义；⑦ 数据不用于训练由服务端强制：正式环境所有模型调用都发送 OpenRouter 的 `data_collection: deny`，只批准支持该设置的供应商线路，准入时拒绝不满足的线路；是否额外要求零数据保留（`zdr`）在实施时核对供应商能力后决定；结果写进隐私条款。验收包括一次有上限的真实小额对账 | AGENT-CORE 稳定 | 高 | 大 / 4–6 |
@@ -403,9 +403,9 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | 批次 | 范围 | 停在哪里 |
 | --- | --- | --- |
 | N1a 止血和保护 | P0-1、P0-2、P0-4、CI-TRUST-1 | 导师出字速度在 staging 实测达标；计费和恢复测试进入 CI |
-| N1b 体验样片 | AC-0、AC-1 及其对应的 AGENT-UI 部分 | Owner 在 staging 用真实模型走完定位第一步，决定继续、调整还是换模型；右侧整理这一阶段沿用旧做法 |
+| N1b 体验样片 | AC-0、AC-1 及其对应的 AGENT-CORE-UI 部分 | Owner 在 staging 用真实模型走完定位第一步，决定继续、调整还是换模型；右侧整理这一阶段沿用旧做法 |
 | N1c 完整定位流程 | DATA-ERASURE 删除规则设计、AC-2、AC-3、AC-5 | Owner 从进入到定稿完整走通并验收 |
-| N1d 推广 | AC-4 及其对应的 AGENT-UI 部分；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
+| N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
 | N2 上线基础 | RUNTIME-PROD、MODEL-REASONING、ENTITLEMENTS、SEC-RATELIMIT、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON | 上线基础完成；然后邀请 5–10 位真实用户**封闭内测**：只开放定位、周选题和写作，用赠送积分，不开放付费，反馈用于调整 N3 的优先级（D8，不改变 D1 的公开上线范围） |
 | N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
 | N4 收口 | LEGACY-CLOSE、V3-M3 | 完整验收；REL-1 和生产另行批准 |
@@ -418,7 +418,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 - `V3-WORKBENCH` 的 SCOPE / AGENT / ENTRY / CONTENT：代码已随 #422 合并；未完成的 VERIFY 和 Owner 体验验收并入 AGENT-CORE。
 - `V3-OPC-UI` 的 A / B / C / FINISH：改称 UI-A / UI-B / UI-C / UI-FINISH，UI-C 改为复用 LIB-DOCS。
 - `V3-GOLD`：改名 FUSION，拆成 FUSION-REVIEW 和 FUSION-COMPARE。
-- 新增：AGENT-CORE（含 AC-0）、AGENT-UI（从 AGENT-CORE 拆出的纯前端部分）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的模型选择）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2。
+- 新增：AGENT-CORE（含 AC-0）、AGENT-CORE-UI（从 AGENT-CORE 拆出的纯前端部分）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的模型选择）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2。
 - 迁移编号在实际实施时分配，本文不预占。
 
 ### 7.6 Owner 需要提前启动的事项
