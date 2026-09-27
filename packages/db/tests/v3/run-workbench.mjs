@@ -544,7 +544,7 @@ try {
       const official=JSON.parse(response).usage.sdkResponse;
       if(runtimeFinal)official.usage.cost=0.003;
       if(mentorStreamTest&&req.url==='/__official_chat'){
-        const index=mentorStreamCalls.length+1,entry={index,id,model:request.model,stream:request.stream===true,startedAt:Date.now(),firstAt:null,finishedAt:null};mentorStreamCalls.push(entry);
+        const index=mentorStreamCalls.length+1,entry={index,id,model:request.model,stream:request.stream===true,reasoningEffort:request.reasoning_effort??null,startedAt:Date.now(),firstAt:null,finishedAt:null};mentorStreamCalls.push(entry);
         res.setHeader('x-generation-id',id);
         if(request.stream===true){
           res.setHeader('content-type','text/event-stream');
