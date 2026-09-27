@@ -167,6 +167,9 @@ const appLog = [];
 const cleanEnv = {
   PATH: process.env.PATH,
   HOME: process.env.HOME,
+  // pnpm derives its default store from PNPM_HOME when set (GitHub runners);
+  // the offline install must use the store the source checkout was installed from.
+  ...(process.env.PNPM_HOME ? { PNPM_HOME: process.env.PNPM_HOME } : {}),
   CI: "true",
   // Opt-in browser lifecycle diagnostics only; never forward API/input debug logs.
   ...(process.env.DEBUG === "pw:browser" ? { DEBUG: "pw:browser" } : {}),
