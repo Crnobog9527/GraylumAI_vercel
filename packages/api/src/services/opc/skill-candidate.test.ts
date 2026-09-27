@@ -25,9 +25,11 @@ function candidate() {
 }
 
 describe("unpublished positioning mentor Skill candidate", () => {
-  it("records a bounded two-file candidate without exposing private content in CI", () => {
+  it("records a bounded three-file candidate without exposing private content in CI", () => {
     expect(inventory).toHaveLength(19);
-    expect(inventory.filter(file => file.changed).map(file => file.path)).toEqual(["SKILL.md", "references/01-intake.md"]);
+    expect(inventory.filter(file => file.changed).map(file => file.path)).toEqual(["EVALS.md", "SKILL.md", "references/01-intake.md"]);
+    expect(inventory.filter(file => !file.changed)).toHaveLength(16);
+    expect(inventory.find(file => file.path === "EVALS.md")!.beforeSha256).toBe("c8c595a808b5908c91ca8af33833fe8356326f794e306b92015ac3e3d3ae0f10");
     expect(inventory.filter(file => !file.changed).every(file => file.sha256 === file.beforeSha256)).toBe(true);
     expect(inventory.find(file => file.path === "workflow.yaml")!.sha256).toBe("9f53a1be0d21cbade5daaa9c54c1930b1d2e8e336455c92021df61b6a5b0ab02");
   });
@@ -48,8 +50,31 @@ describe("unpublished positioning mentor Skill candidate", () => {
     expect(prompt).toContain("不自动确认或进入下一题");
     // These are instruction/transport contracts, not proof of model quality.
   });
+  it.skipIf(!privateRoot)("loads the revised E1 contract consistently with mentor resources and host confirmation", async () => {
+    const p = candidate();
+    const loaded = await activateSkill({ list: async () => [p.descriptor], state: async () => "enabled",
+      read: async ({ path }) => files.find(file => file.path === path)!.bytes }, identityOf(p.descriptor),
+    { resources: ["EVALS.md", "references/01-intake.md"], maxContextBytes: 64000 });
+    const resources = JSON.parse(loaded.forModel()).resources as { path: string; content: string }[];
+    const text = (path: string) => resources.find(resource => resource.path === path)!.content;
+    const evals = text("EVALS.md"), e1 = evals.slice(evals.indexOf("## E1 "), evals.indexOf("## E2 "));
+    expect(e1).toContain("我想做一个摄影自媒体账号，帮我从0规划。");
+    expect(e1).not.toContain("一次性收集核心需求");
+    for (const clause of ["Current information question", "workflow.yaml", "不一次性展示五题问卷", "不把辅助分析维度变成额外必填题",
+      "信息不足时自然追问", "不作为业务答案，不视为确认，不自动进入下一题", "保存和确认由宿主处理", "confirmed/deferred",
+      "正文不主动带步骤编号", "也一次讨论一个关键缺口"]) expect(e1).toContain(clause);
+    expect(sha256(Buffer.from(evals.slice(evals.indexOf("## E2 "))))).toBe("807a6288d603d8121a1fdab48848ffd9858925fa905b4928490bba9bf7b9b882");
+    expect(text("SKILL.md")).toContain("宿主提供 `Current information question`");
+    expect(text("SKILL.md")).toContain("当前字段与当前步骤的完成状态只由宿主的用户确认流程决定");
+    expect(text("references/01-intake.md")).toContain("已知名称不要再问");
+    expect(text("references/01-intake.md")).toContain("信息尚不充分时自然追问；充分时简洁归纳");
+    const host = readFileSync(resolve(import.meta.dirname, "service.ts"), "utf8");
+    expect(host).toContain("The host owns question navigation and confirmation");
+    expect(host).toContain("A help request is not a field answer or consent to advance");
+    // Text/resource contracts only; real E1 model behavior remains NOT_RUN.
+  });
   it.skipIf(!privateRoot)("preserves all other original files and the six-step nine-question workflow", () => {
-    expect(inventory.filter(file => file.changed).map(file => file.path)).toEqual(["SKILL.md", "references/01-intake.md"]);
+    expect(inventory.filter(file => file.changed).map(file => file.path)).toEqual(["EVALS.md", "SKILL.md", "references/01-intake.md"]);
     for (const file of files) {
       const recorded = inventory.find(item => item.path === file.path)!;
       expect(sha256(file.bytes)).toBe(recorded.sha256);
