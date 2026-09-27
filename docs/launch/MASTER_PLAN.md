@@ -249,7 +249,9 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 4. 写作类 Skill（后台为 Skill 勾选"使用用户文风"）执行时，如果用户开着"使用我的文风"，Runtime 会在上下文里带上当前画像版本（约 2–3 千 token 以内），并在执行记录里冻结版本号。重放使用原版本，新请求使用新版本。
 5. 语料有增删时，旧画像标记为"需要更新"，由用户决定何时重新生成，不自动花积分。
 
-**检索（以后再做）**：第一版 Agent 通过用户的明确引用（输入框 @ 引用，UI-B）读取资料库文档，不做自动检索。文档多到需要检索时，先用 Postgres 自带的全文检索，再视需要在同一个 Supabase 数据库里加 pgvector，都不引入第二家存储供应商。
+**大文档怎么读**：Runtime 单次请求只有几十 KB 的预算，而文档最大 10 MB，所以引用或附件永远不会把全文一次塞进请求。上传时把提取出的文字按章节 / 页切成有序的段，并保存目录；Agent 先读目录，再用只读工具按段读取（每次读取有字节上限，每轮读取次数有上限，读过的段冻结进执行记录，重放不变）。文风学习同样只抽取有上限的样本。
+
+**检索（以后再做）**：第一版 Agent 通过用户的明确引用（输入框 @ 引用，UI-B）和上面的分段读取使用资料库文档，不做自动检索。文档多到需要检索时，先用 Postgres 自带的全文检索，再视需要在同一个 Supabase 数据库里加 pgvector，都不引入第二家存储供应商。
 
 ### 5.4 成本核算（2026-09-27 官方价格）
 
@@ -324,6 +326,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | **1 核心体验重做** | AGENT-CORE | AC-1 提问卡、纯文本流式、交互推理策略、读取 Skill 文件、上下文容量复核；AC-2 附属会话（第 3.3 节，Fusion 也复用）、后台整理、Skill 模板、右侧数据沉淀区；AC-3 每步确认、确定性报告、定稿、承接第一周选题；AC-4 通用工作区（其他 Skill、自由对话）和入口链接改指；AC-5 数据基础补缺（第 6.3 节上线前 ①–④） | P0-1 | 高 |
 | | CI-TRUST | ESLint 覆盖 TS/TSX；网站单测统一入口；API 独立类型检查；集成测试进 CI；删除 `@repo/ui` 空壳和未接入的 ESLint 配置包 | — | 高 |
 | | DEBT-QUICK | 第 8.3 节第 2 项的快速清理（只含普通改动） | — | 普通 |
+| | COST-REPORT | 后台成本报表的金额、估算和查询修正（原清单 06） | — | 高 |
 | **2 上线基础** | RUNTIME-PROD | 正式环境真实调用模型：模型报价和开放机制、积分兑换比例和倍率配置、后台界面；同时理清 `provider` 字段语义 | AGENT-CORE 稳定 | 高 |
 | | ENTITLEMENTS | 会员权限配置：Fusion 两种模式的开关和上限、资料库额度；服务端检查 | — | 高 |
 | | SEC-RATELIMIT | 限流 fail-closed、Redis 超时放行、诊断计费探针 | — | 高 |
@@ -372,7 +375,7 @@ AC-4 ─→ LEGACY-CLOSE ─→ V3-M3 ─→ REL-1
 
 | 批次 | 范围 | 停在哪里 |
 | --- | --- | --- |
-| N1 | P0-1、P0-2、P0-4、DEBT-QUICK、CI-TRUST、AGENT-CORE | 新交互在 staging 真实可用，Owner 体验验收 |
+| N1 | P0-1、P0-2、P0-4、DEBT-QUICK、COST-REPORT、CI-TRUST、AGENT-CORE | 新交互在 staging 真实可用，Owner 体验验收 |
 | N2 | RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、DATA-ERASURE、PAY-COMMON | 上线基础完成 |
 | N3 | FUSION-REVIEW、FUSION-COMPARE、UI-A/B/C/FINISH、LIB-DOCS、VOICE、PAY-WAFFO | 差异化功能完成 |
 | N4 | LEGACY-CLOSE、V3-M3 | 完整验收；REL-1 和生产另行批准 |
@@ -385,7 +388,7 @@ AC-4 ─→ LEGACY-CLOSE ─→ V3-M3 ─→ REL-1
 - `V3-WORKBENCH` 的 SCOPE / AGENT / ENTRY / CONTENT：代码已随 #422 合并；未完成的 VERIFY 和 Owner 体验验收并入 AGENT-CORE。
 - `V3-OPC-UI` 的 A / B / C / FINISH：改称 UI-A / UI-B / UI-C / UI-FINISH，UI-C 改为复用 LIB-DOCS。
 - `V3-GOLD`：改名 FUSION，拆成 FUSION-REVIEW 和 FUSION-COMPARE。
-- 新增：AGENT-CORE、CI-TRUST、DEBT-QUICK、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2。
+- 新增：AGENT-CORE、CI-TRUST、DEBT-QUICK、COST-REPORT、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2。
 - 迁移编号在实际实施时分配，本文不预占。
 
 <a id="debt"></a>
@@ -420,7 +423,7 @@ AC-4 ─→ LEGACY-CLOSE ─→ V3-M3 ─→ REL-1
 | 03 | ESLint 没检查 TS/TSX | 属实（只检查 4 个 `.mjs` 文件） | P2 | CI-TRUST（需要新增依赖） |
 | 04 | 网站单测入口分散 | 属实：CI 只跑 26 个网站单测中的 4 个，根目录 `pnpm test` 很可能无效 | P2 | CI-TRUST |
 | 05 | 模型配置失败被硬编码默认模型掩盖 | 属实，发生在 `/chat` | P2 | 随 LEGACY-CLOSE 解决；如果下线推迟再单独修 |
-| 06 | 成本报表金额和查询问题 | 属实，例如美元均价被取整成 0 | P2 | DEBT-QUICK |
+| 06 | 成本报表金额和查询问题 | 属实，例如美元均价被取整成 0 | P2 | COST-REPORT（改变金额展示，属于高风险） |
 | 07 | 临时诊断脚本 | 属实，而且更危险（见 8.1） | **P1** | P0-2 |
 | 08–11 | 旧 costCalculator、StreamHandler、useStreamResponse、promptCache | 属实，都没有生产调用 | P3 | DEBT-QUICK 删除 |
 | 12 | `@repo/ui` 空壳包 | 属实 | P3 | 删除会改动工作区依赖和锁文件，属于高风险，放进 CI-TRUST（它本来就要删除未接入的 `eslint-config-custom` 依赖） |
@@ -439,7 +442,7 @@ AC-4 ─→ LEGACY-CLOSE ─→ V3-M3 ─→ REL-1
 ### 8.3 清理顺序
 
 1. **立即（P0-2，高风险）**：关闭 `ai.sendMessage` 接口；删除两个会扣积分的临时脚本。
-2. **快速清理（DEBT-QUICK，普通）**：成本报表修正、诊断报告修正、死代码和无引用组件删除、头像上传（复现后修）。只包含普通改动：凡是动到依赖或锁文件、鉴权权限、存储策略、计费或 CI 的部分，一律移到对应的高风险任务，不走 staging 自动交付授权。
+2. **快速清理（DEBT-QUICK，普通）**：诊断报告修正、死代码和无引用组件删除、头像上传（复现后修）。只包含普通改动：凡是动到依赖或锁文件、鉴权权限、存储策略、计费、金额展示或 CI 的部分，一律移到对应的高风险任务（成本报表修正单独为 COST-REPORT），不走 staging 自动交付授权。
 3. **CI 可信度（CI-TRUST，高风险）**：ESLint 覆盖 TS/TSX、网站单测统一入口、API 独立类型检查、集成测试进 CI，以及删除 `@repo/ui` 空壳包和未接入的 `eslint-config-custom`（都改依赖和锁文件）。**在 AGENT-CORE 改 Runtime 之前或同时完成**，让计费和恢复的关键测试先保护起来。
 4. **安全修复（SEC-RATELIMIT，高风险）**：限流 fail-closed、Redis 超时、诊断计费探针。
 5. **随主线处理**：`provider` 语义随 RUNTIME-PROD；定位页随 AGENT-CORE 替换；`/chat` 等旧链路在 AC-4 接管自由对话、入口改指之后由 LEGACY-CLOSE 统一下线；集成测试大文件在 AGENT-CORE 完成后拆分。
