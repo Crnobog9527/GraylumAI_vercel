@@ -72,6 +72,26 @@ function modesFor(catalog: CatalogSnapshot | null, route: string | null, current
   const modes: Draft['mode'][] = ['unset', ...allowedModes(catalog, route)];
   return modes.includes(current) ? modes : [...modes, current];
 }
+type TryOutcome = {
+  ok: boolean; httpStatus: number | null; firstTextMs: number | null; totalMs: number; hasText: boolean; truncated: boolean;
+  reasoningTokens: number | null; costUsd: number | null; maxTokens: number; error: string | null; providerMessage: string | null;
+};
+/** Measurements only; the reply text never reaches the page. */
+function describeTry(result: TryOutcome): string {
+  if (!result.ok) {
+    const status = result.httpStatus ? `，HTTP ${result.httpStatus}` : '';
+    return `调用失败（${result.error ?? '未知'}${status}）${result.providerMessage ? `：${result.providerMessage}` : ''}`;
+  }
+  const parts = [
+    `首字 ${result.firstTextMs === null ? '无' : `${result.firstTextMs} ms`}`,
+    `总耗时 ${result.totalMs} ms`,
+    result.hasText ? '有正文' : '没有正文',
+    `思考 token ${result.reasoningTokens ?? '未报告'}`,
+    `费用 ${result.costUsd === null ? '未报告' : `$${result.costUsd}`}`,
+  ];
+  if (result.truncated) parts.push(`被输出上限（${result.maxTokens}）截断，思考可能用完了额度`);
+  return parts.join('；');
+}
 
 /** A choice the form cannot save yet, before asking the server. */
 function draftProblem(drafts: Record<ReasoningPurpose, Draft>): string | null {
@@ -118,6 +138,15 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
       void utils.settings.getSummaryModels.invalidate();
     },
   });
+  const tryOnce = trpc.modelReasoning.tryOnce.useMutation();
+  const [tried, setTried] = useState<{ purpose: ReasoningPurpose; text: string; failed: boolean } | null>(null);
+  const runTry = (purpose: ReasoningPurpose) => {
+    setTried(null);
+    tryOnce.mutate({ modelId, purpose }, {
+      onSuccess: result => setTried({ purpose, failed: !result.ok, text: describeTry(result) }),
+      onError: error => setTried({ purpose, failed: true, text: error.message }),
+    });
+  };
   const catalog = view.data?.config.catalog ?? null;
   const [route, setRoute] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<ReasoningPurpose, Draft> | null>(null);
@@ -233,6 +262,15 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
                         ))}
                       </SelectContent>
                     </Select>
+                  ) : null}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => runTry(purpose)} disabled={tryOnce.isPending}>
+                      {tryOnce.isPending && tryOnce.variables?.purpose === purpose ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}试一次
+                    </Button>
+                    <span className="text-xs text-[var(--text-tertiary)]">用已保存的设置真实调用一次，费用由平台承担</span>
+                  </div>
+                  {tried?.purpose === purpose ? (
+                    <p role="status" className={tried.failed ? 'text-rose-400' : 'text-emerald-400'}>{tried.text}</p>
                   ) : null}
                   {draft.mode === 'budget' ? (
                     <Input

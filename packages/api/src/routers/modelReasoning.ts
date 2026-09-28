@@ -5,10 +5,16 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { router, adminProcedure } from '../trpc';
 import { logger } from '../lib/logger';
 import { readOpenRouterCatalog } from '../services/models/openRouterCatalog';
-import { checkReasoningConfig, purposeSettings, readReasoningConfig, type ReasoningConfig } from '../shared/modelReasoning';
+import { RUNTIME_MODEL_COLUMNS } from '../services/models/runtimeEligibility';
+import { TryRefused, tryReasoning } from '../services/models/tryReasoning';
+import { REASONING_PURPOSES, checkReasoningConfig, purposeSettings, readReasoningConfig, type ReasoningConfig } from '../shared/modelReasoning';
 
 /** Administrator reasoning settings (MODEL-REASONING). Only these procedures
  * write `ai_models.config.reasoning`; the Runtime does not read it yet. */
+/** One "try once" per model per 30 s on this server instance: a guard against
+ * repeated clicks, not a spending control (each try is one short call). */
+export const TRY_INTERVAL_MS = 30_000;
+const lastTry = new Map<string, number>();
 const modelInput = z.object({ modelId: z.string().uuid() }).strict();
 const catalogMessages: Record<string, string> = {
   MODEL_CATALOG_ID_INVALID: '模型 ID 格式不受支持，无法读取目录',
@@ -42,6 +48,29 @@ async function writeReasoning(db: SupabaseClient, modelId: string, update: (curr
 }
 
 export const modelReasoningRouter = router({
+  /** One real call with a fixed short question (⑥). Platform-paid, not billed through BILL2. */
+  tryOnce: adminProcedure
+    .input(z.object({ modelId: z.string().uuid(), purpose: z.enum(REASONING_PURPOSES) }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const { data, error } = await ctx.supabase.from('ai_models').select(RUNTIME_MODEL_COLUMNS).eq('id', input.modelId).maybeSingle();
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '无法读取模型配置，请稍后重试' });
+      if (!data) throw new TRPCError({ code: 'NOT_FOUND', message: '模型不存在，请刷新列表' });
+      const now = Date.now(), previous = lastTry.get(input.modelId);
+      if (previous !== undefined && now - previous < TRY_INTERVAL_MS)
+        throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: `同一个模型 ${TRY_INTERVAL_MS / 1000} 秒内只能试一次，请稍后再试` });
+      try {
+        lastTry.set(input.modelId, now);
+        const result = await tryReasoning(data, input.purpose);
+        logger.info('api', 'model_reasoning_try', { modelId: input.modelId, purpose: input.purpose, ok: result.ok, httpStatus: result.httpStatus,
+          firstTextMs: result.firstTextMs, totalMs: result.totalMs, reasoningTokens: result.reasoningTokens, costUsd: result.costUsd,
+          finishReason: result.finishReason, error: result.error });
+        return result;
+      } catch (cause) {
+        if (cause instanceof TryRefused) { lastTry.delete(input.modelId); throw new TRPCError({ code: 'BAD_REQUEST', message: cause.message }); }
+        throw cause;
+      }
+    }),
+
   get: adminProcedure.input(modelInput).query(async ({ ctx, input }) => view(await readModel(ctx.supabase, input.modelId))),
 
   /** Reads the public catalog for this model and stores the snapshot; route and purposes are kept. */
