@@ -167,10 +167,10 @@ async function runQuery(context, vendor, query, key, secrets) {
       reportedRaw, reportedCostUsd: reportedUsd, chargedUsd: record.chargedUsd, costBasis: record.basis, rawFile });
     // No retry and no fallback: a failed or unknown step ends this query.
     if (outcome !== 'ok') {
-      // A rejected key will reject every other request too, so the vendor stops here.
-      const authRejected = result.httpStatus === 401 || result.httpStatus === 403;
+      // A rejected key (401/403) or an empty account (402) will reject every other request too.
+      const accountRejected = [401, 402, 403].includes(result.httpStatus);
       return { status: outcome === 'unknown' ? 'UNKNOWN' : 'FAILED', reason: result.reason ?? vendor.failureReason?.(json), calls, latencyMs,
-        ...(authRejected ? { stopVendor: true, stopReason: `AUTH_REJECTED_HTTP_${result.httpStatus}` } : {}) };
+        ...(accountRejected ? { stopVendor: true, stopReason: `ACCOUNT_REJECTED_HTTP_${result.httpStatus}` } : {}) };
     }
     previous = json;
     last = json;
@@ -235,7 +235,7 @@ export async function runComparison({ vendors, queries, env, live, fetchImpl, le
       else if (vendor.blockedReason) entry.queries.push({ queryId: query.id, status: 'NOT_RUN', reason: vendor.blockedReason });
       else if (!keyPresent) entry.queries.push({ queryId: query.id, status: 'NOT_RUN', reason: 'MISSING_KEY' });
       else if (stopReason) {
-        const status = stopReason.startsWith(UNRECONCILED) || stopReason.startsWith('AUTH_REJECTED') ? 'NOT_RUN' : 'BUDGET_REFUSED';
+        const status = stopReason.startsWith(UNRECONCILED) || stopReason.startsWith('ACCOUNT_REJECTED') ? 'NOT_RUN' : 'BUDGET_REFUSED';
         entry.queries.push({ queryId: query.id, status, reason: stopReason });
       }
       else {

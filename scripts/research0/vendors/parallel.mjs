@@ -12,7 +12,8 @@ export const parallel = {
   id: 'parallel',
   label: 'Parallel',
   keyEnv: 'PARALLEL_API_KEY',
-  maxCalls: 25,
+  // 20 rejected calls (401), 5 more (402 no credit) before the stop rule; 15 queries remain to test.
+  maxCalls: 40,
   maxUsd: 1,
   timeoutMs: 60_000,
   steps(query) {

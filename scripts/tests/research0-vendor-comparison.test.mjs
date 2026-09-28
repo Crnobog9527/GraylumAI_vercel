@@ -738,14 +738,14 @@ test('Parallel requests, mapping and the Chinese summary', () => {
   assert.equal(parallel.reportedRaw({ usage: [{ name: 'sku_search', count: 1 }] }), 'sku_search=1');
 });
 
-test('a rejected key (401/403) stops the vendor after the first request', async () => withTemp(async dir => {
-  for (const status of [401, 403]) {
+test('a rejected key or empty account (401/402/403) stops the vendor after the first request', async () => withTemp(async dir => {
+  for (const status of [401, 402, 403]) {
     const vendor = fakeVendor({ id: `auth${status}` });
     const { calls, fetchImpl } = recordingFetch(() => new Response('{"error":"Invalid API key"}', { status }));
     const { report } = await run(dir, { vendor, fetchImpl });
     assert.equal(calls.length, 1, `HTTP ${status}`);
     assert.deepEqual(report.vendors[0].queries.map(query => query.status), ['FAILED', 'NOT_RUN', 'NOT_RUN']);
-    assert.equal(report.vendors[0].queries[1].reason, `AUTH_REJECTED_HTTP_${status}`);
+    assert.equal(report.vendors[0].queries[1].reason, `ACCOUNT_REJECTED_HTTP_${status}`);
   }
 }));
 
