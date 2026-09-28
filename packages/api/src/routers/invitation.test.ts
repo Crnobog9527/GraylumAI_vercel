@@ -1,4 +1,3 @@
-import { TRPCError } from '@trpc/server';
 import { describe, expect, it, vi } from 'vitest';
 import { invitationRouter, validateInvitationCodeExists } from './invitation';
 
@@ -224,7 +223,7 @@ describe('validateInvitationCodeExists', () => {
       },
     } as any;
 
-    await expect(validateInvitationCodeExists(supabase, 'missing')).rejects.toMatchObject<Partial<TRPCError>>({
+    await expect(validateInvitationCodeExists(supabase, 'missing')).rejects.toMatchObject({
       code: 'NOT_FOUND',
       message: 'Invalid or used invitation code.',
     });
@@ -265,7 +264,7 @@ describe('invitationRouter error sanitization', () => {
 
     const caller = createProtectedCaller(supabase);
 
-    await expect(caller.claimInvitationCode({ code: 'ABC123' })).rejects.toMatchObject<Partial<TRPCError>>({
+    await expect(caller.claimInvitationCode({ code: 'ABC123' })).rejects.toMatchObject({
       code: 'INTERNAL_SERVER_ERROR',
       message: '读取邀请码失败，请稍后重试',
     });
@@ -338,7 +337,7 @@ describe('invitationRouter error sanitization', () => {
     });
     const caller = createProtectedCaller(supabase);
 
-    await expect(caller.claimInvitationCode({ code: 'ABC123' })).rejects.toMatchObject<Partial<TRPCError>>({
+    await expect(caller.claimInvitationCode({ code: 'ABC123' })).rejects.toMatchObject({
       code: 'NOT_FOUND',
       message: '邀请码无效或已使用。',
     });
@@ -359,7 +358,7 @@ describe('invitationRouter error sanitization', () => {
     });
     const caller = createProtectedCaller(supabase);
 
-    await expect(caller.claimInvitationCode({ code: 'SELF123' })).rejects.toMatchObject<Partial<TRPCError>>({
+    await expect(caller.claimInvitationCode({ code: 'SELF123' })).rejects.toMatchObject({
       code: 'BAD_REQUEST',
       message: '不能使用自己的邀请码。',
     });
@@ -442,7 +441,7 @@ describe('invitationRouter error sanitization', () => {
 
     const caller = createProtectedCaller(supabase);
 
-    await expect(caller.getMyInvitationDashboard()).rejects.toMatchObject<Partial<TRPCError>>({
+    await expect(caller.getMyInvitationDashboard()).rejects.toMatchObject({
       code: 'INTERNAL_SERVER_ERROR',
       message: '读取邀请码面板失败，请稍后重试',
     });
@@ -551,4 +550,110 @@ describe('invitationRouter error sanitization', () => {
       expect.objectContaining({ name: '高风险', value: 1 }),
     ]);
   });
+});
+
+describe('inviter record visibility', () => {
+  const visibleFields = ['id', 'created_at', 'invitee_email', 'inviter_reward', 'status'];
+  const ownRecords = ['rewarded', 'pending', 'registered', 'rejected'].map((status, index) => ({
+    id: `synthetic-record-${index}`,
+    created_at: `2026-09-${29 - index}T00:00:00.000Z`,
+    invitee_email: 'redacted-test-value',
+    inviter_reward: status === 'rewarded' ? 50 : 0,
+    status,
+    inviter_id: 'user-1',
+    invitee_id: 'synthetic-invitee',
+    inviter_email: 'internal-test-value',
+    invite_code: 'SYNTHETIC',
+    invitee_reward: 30,
+    rewarded_at: null,
+    ip_address: '192.0.2.1',
+    user_agent: 'Synthetic test browser',
+    risk_level: 'high',
+    block_reason: 'synthetic-internal-reason',
+    future_internal_field: 'must-remain-private',
+  }));
+
+  function createVisibilityCaller() {
+    const rows = [
+      ...ownRecords,
+      { ...ownRecords[0], id: 'foreign-record', inviter_id: 'other-inviter', invitee_id: 'user-1' },
+    ];
+    let columns = '*';
+    const filters: Array<[string, unknown]> = [];
+    const query = {
+      select: vi.fn((value: string) => {
+        columns = value;
+        return query;
+      }),
+      eq: vi.fn((key: string, value: unknown) => {
+        filters.push([key, value]);
+        return query;
+      }),
+      order: vi.fn(() => query),
+      limit: vi.fn(() => query),
+      then(resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) {
+        const filtered = rows.filter((row) => filters.every(([key, value]) => (
+          row[key as keyof typeof row] === value
+        )));
+        const data = columns === '*' ? filtered : filtered.map((row) => Object.fromEntries(
+          columns.split(',').map((field) => field.trim()).map((field) => [field, row[field as keyof typeof row]]),
+        ));
+        return Promise.resolve({ data, error: null }).then(resolve, reject);
+      },
+    };
+    const supabase = {
+      from(table: string) {
+        if (table === 'invitation_records') return query;
+        if (table === 'profiles') return createClaimSupabase({}).supabase.from(table);
+        if (table === 'invitations') return createThenableQueryBuilder({
+          data: { code: 'SYNTHETIC', created_at: ownRecords[0].created_at }, error: null,
+        });
+        if (table === 'system_settings') return createThenableQueryBuilder({
+          data: [
+            { key: 'invite_inviter_reward', value: 50 },
+            { key: 'invite_invitee_reward', value: 30 },
+          ],
+          error: null,
+        });
+        throw new Error(`Unexpected table ${table}`);
+      },
+    };
+    return { caller: createProtectedCaller(supabase), query };
+  }
+
+  it.each(['getMyInvitationRecords', 'getMyInvitationDashboard'] as const)(
+    '%s returns the current inviter records with all display fields', async (procedure) => {
+      const { caller, query } = createVisibilityCaller();
+      const result = await caller[procedure]();
+      const records = Array.isArray(result) ? result : result.records;
+      expect(records).toEqual(ownRecords.map(({ id, created_at, invitee_email, inviter_reward, status }) => ({
+        id, created_at, invitee_email, inviter_reward, status,
+      })));
+      expect(query.eq).toHaveBeenCalledExactlyOnceWith('inviter_id', 'user-1');
+      expect(query.order).toHaveBeenCalledExactlyOnceWith('created_at', { ascending: false });
+      if (!Array.isArray(result)) {
+        expect(query.limit).toHaveBeenCalledExactlyOnceWith(10);
+        expect(result.summary).toEqual({ totalInvites: 4, rewardedInvites: 1, pendingInvites: 2 });
+        expect(result.rewards).toEqual({ inviterReward: 50, inviteeReward: 30 });
+        expect(result.invitationCode).toBe('SYNTHETIC');
+      }
+    },
+  );
+
+  it.each(['getMyInvitationRecords', 'getMyInvitationDashboard'] as const)(
+    '%s excludes foreign records and every non-allowlisted field', async (procedure) => {
+      const { caller, query } = createVisibilityCaller();
+      const result = await caller[procedure]();
+      const records = Array.isArray(result) ? result : result.records;
+      expect(query.select).toHaveBeenCalledExactlyOnceWith(visibleFields.join(', '));
+      expect(records.some((record) => record.id === 'foreign-record')).toBe(false);
+      expect(records).toHaveLength(4);
+      for (const record of records) {
+        expect(Object.keys(record).sort()).toEqual([...visibleFields].sort());
+        for (const field of ['ip_address', 'user_agent', 'risk_level', 'block_reason', 'future_internal_field']) {
+          expect(record).not.toHaveProperty(field);
+        }
+      }
+    },
+  );
 });
