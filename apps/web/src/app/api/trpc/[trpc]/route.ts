@@ -49,9 +49,28 @@ async function isMaintenanceModeEnabled(budgetFetch:typeof fetch): Promise<boole
   return data?.value === true || data?.value === 'true';
 }
 
+// Streamed procedures keep running after the Response is returned; each one
+// releases its own timing reference when its execution settles.
+const STREAMED_PROCEDURES = new Set(['runtime.executeStream']);
+
 const handler = async (req: NextRequest) => {
   // Before authentication/maintenance: batched procedures share this deadline.
   const runtimeBudget=createRuntimeBudget();
+  try {
+    const procedurePaths = parseTrpcProcedurePaths(req.nextUrl.pathname);
+    runtimeBudget.timing.setProcedures(procedurePaths);
+    runtimeBudget.timing.retain(procedurePaths.filter((path) => STREAMED_PROCEDURES.has(path)).length);
+  } catch {
+    // Timing is measurement only; the maintenance check parses paths again.
+  }
+  try {
+    return await runtimeBudget.timing.run(() => handleTrpc(req, runtimeBudget));
+  } finally {
+    runtimeBudget.timing.release();
+  }
+};
+
+async function handleTrpc(req: NextRequest, runtimeBudget: ReturnType<typeof createRuntimeBudget>) {
   const budgetFetch=withRuntimeBudget(runtimeBudget,fetch,true);
   const hostname = new URL(req.url).hostname.toLowerCase();
   const authClient = createServerClient(
@@ -120,6 +139,6 @@ const handler = async (req: NextRequest) => {
       supabaseAuth: authClient,
     }),
   });
-};
+}
 
 export { handler as GET, handler as POST };

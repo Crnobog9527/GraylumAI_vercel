@@ -26,6 +26,7 @@ import {
   opcVideoMaterialPrepare,
 } from "../services/opc/service";
 const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
+  ctx.runtimeBudget?.timing?.enter('policy');
   let real;
   try {
     if (!ctx.supabaseAdmin || !ctx.hasSupabaseAdminPrivileges)
@@ -36,6 +37,7 @@ const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
     const local = u.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(u.hostname) && !u.username && !u.password;
     if (!local) real = await loadStagingPolicy(ctx.supabaseAdmin, ctx.user.id, process.env);
   } catch (cause) { throw stagingProcedureError(cause, path); }
+  ctx.runtimeBudget?.timing?.enter('host');
   const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin, real) } });
   if (!result.ok) {
     // Existing bounded OPC refusal codes are part of client recovery. Preserve
@@ -47,6 +49,7 @@ const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
   return result;
 });
 const readProcedure = protectedProcedure.use(async ({ ctx, next, path }) => {
+  ctx.runtimeBudget?.timing?.enter('policy');
   let local = false;
   try {
     if (!ctx.supabaseAdmin || !ctx.hasSupabaseAdminPrivileges)
@@ -55,6 +58,7 @@ const readProcedure = protectedProcedure.use(async ({ ctx, next, path }) => {
     local = u.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(u.hostname) && !u.username && !u.password;
     if (!local) await assertStagingReadAccess(ctx.supabaseAdmin, ctx.user.id, process.env);
   } catch (cause) { throw stagingProcedureError(cause, path); }
+  ctx.runtimeBudget?.timing?.enter('host');
   const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin), stagingRead: !local } });
   if (!result.ok) throw stagingProcedureError(result.error, path);
   return result;
