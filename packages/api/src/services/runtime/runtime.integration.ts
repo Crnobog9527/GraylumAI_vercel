@@ -919,7 +919,8 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   expect(execute.result).toMatchObject({state:'completed'});
   // Each further prepare uses its own new Session, since a prepared execution is never run here.
   const newSession=async()=>((await measured(c=>c.start({requestId:randomUUID(),scope:{kind:'positioning_draft'}}))).result as {sessionId:string}).sessionId;
-  const prepareIn=(id:string)=>measured(c=>c.prepare({sessionId:id,requestId:randomUUID(),input:'Please work',selection:{kind:'skill',moduleId,revisionId:pack.revisionId},network:'deny'}));
+  const prepareIn=(id:string,module=moduleId,revision=pack.revisionId)=>
+   measured(c=>c.prepare({sessionId:id,requestId:randomUUID(),input:'Please work',selection:{kind:'skill',moduleId:module,revisionId:revision},network:'deny'}));
   const skillPrepare=async()=>prepareIn(await newSession());
   // The same verified revision again: package files now come from the process cache.
   const skillWarm=await skillPrepare();
@@ -946,7 +947,6 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   // in the very next request, and the same warm request succeeds once restored.
   const denials:[string,string,string][]=[
    ['update modules set active=false where id=$1','update modules set active=true where id=$1',moduleId],
-   ["update skills set status='draft' where id=$1","update skills set status='published' where id=$1",pack.id],
    ["update profiles set status='disabled' where id=$1","update profiles set status='active' where id=$1",actor],
   ];
   // The service role still sees the module, but the user-scoped (RLS) read does not.
@@ -958,6 +958,14 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
    try{await expect(prepareIn(pending)).rejects.toThrow();}finally{await db.query(restore,id?[id]:[]);}
    await prepareIn(pending);
   }
+  // Terminal cases: republishing needs a new revision, so unpublishing uses its own warm package.
+  const unpublished=makePackage(),unpublishedModule=randomUUID();
+  await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[unpublished.id,'runtime-timing-'+unpublished.id,actor]);
+  await db.query("insert into modules(id,title,skill_id,active,model_id) values($1,'Timing Skill 2',$2,true,$3)",[unpublishedModule,unpublished.id,skillModel]);
+  await publishSkillPackage(admin,actor,unpublished);
+  await prepareIn(await newSession(),unpublishedModule,unpublished.revisionId);
+  await db.query("update skills set status='archived',archived_at=now(),archived_by=$2 where id=$1",[unpublished.id,actor]);
+  await expect(prepareIn(await newSession(),unpublishedModule,unpublished.revisionId)).rejects.toThrow();
   await db.query('select revoke_skill_revision($1,$2)',[pack.revisionId,actor]);
   await expect(skillPrepare()).rejects.toThrow();
   for(const m of [ordinary,skill])expect(m.summary.executionIds).toEqual([m.result.executionId]);
