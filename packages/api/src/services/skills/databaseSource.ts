@@ -2,6 +2,18 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { isEmailVerified } from '../../lib/auth';
 import { fail, sameIdentity, validateDescriptor, type PackageDescriptor, type PackageIdentity, type SkillSource } from './loader';
 
+declare const userScopedRead: unique symbol;
+/** A module row from the user-scoped (RLS-governed) read. Only userVisibleModules()
+ * produces it, so a service-role or hand-built row cannot be passed at compile time. */
+export type UserVisibleModule = { readonly id: string; readonly active: true; readonly [userScopedRead]: true };
+/** The request's user-scoped read of active modules, subject to RLS. */
+export async function userVisibleModules(userClient: SupabaseClient, options: { limit: number; orderById?: boolean }):
+  Promise<{ data: UserVisibleModule[]; error: null } | { data: null; error: object }> {
+  const active = userClient.from('modules').select('id,active').eq('active', true);
+  const result = await (options.orderById ? active.order('id') : active).limit(options.limit);
+  if (result.error) return { data: null, error: result.error };
+  return { data: result.data.filter(row => typeof row.id === 'string' && row.active === true) as unknown as UserVisibleModule[], error: null };
+}
 /** Request-local only. The authenticated client verifies identity and public module
  * admission before the narrowly scoped service RPC can return private content.
  * No browser route exports this source or accepts a caller-supplied actor ID.
@@ -15,7 +27,7 @@ import { fail, sameIdentity, validateDescriptor, type PackageDescriptor, type Pa
 export function databaseSkillSource(options: {
   userClient: SupabaseClient; privateClient: SupabaseClient | null;
   moduleId: string; skillId: string; revisionId?: string;
-  userVisibleModule?: { id: unknown; active: unknown };
+  userVisibleModule?: UserVisibleModule;
 }): SkillSource {
   options = { ...options };
   if (typeof window !== 'undefined') fail('UNAVAILABLE');

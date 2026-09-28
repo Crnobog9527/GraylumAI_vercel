@@ -917,7 +917,10 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   const skill=await measured(c=>c.prepare({sessionId,requestId:randomUUID(),input:'Please work',selection:{kind:'skill',moduleId,revisionId:pack.revisionId},network:'deny'}));
   const execute=await measured(c=>c.execute({executionId:skill.result.executionId}));
   expect(execute.result).toMatchObject({state:'completed'});
-  const skillPrepare=()=>measured(c=>c.prepare({sessionId,requestId:randomUUID(),input:'Please work',selection:{kind:'skill',moduleId,revisionId:pack.revisionId},network:'deny'}));
+  // Each further prepare uses its own new Session, since a prepared execution is never run here.
+  const newSession=async()=>((await measured(c=>c.start({requestId:randomUUID(),scope:{kind:'positioning_draft'}}))).result as {sessionId:string}).sessionId;
+  const prepareIn=(id:string)=>measured(c=>c.prepare({sessionId:id,requestId:randomUUID(),input:'Please work',selection:{kind:'skill',moduleId,revisionId:pack.revisionId},network:'deny'}));
+  const skillPrepare=async()=>prepareIn(await newSession());
   // The same verified revision again: package files now come from the process cache.
   const skillWarm=await skillPrepare();
   const all={start,ordinary,stream,skill,execute,skillWarm};
@@ -946,15 +949,15 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
    ["update skills set status='draft' where id=$1","update skills set status='published' where id=$1",pack.id],
    ["update profiles set status='disabled' where id=$1","update profiles set status='active' where id=$1",actor],
   ];
-  for(const [deny,restore,id] of denials){
-   await db.query(deny,[id]);
-   try{await expect(skillPrepare()).rejects.toThrow();}finally{await db.query(restore,[id]);}
-   await skillPrepare();
-  }
   // The service role still sees the module, but the user-scoped (RLS) read does not.
-  await db.query('create policy ac0c_user_hidden on public.modules as restrictive for select to authenticated using (id<>$$'+moduleId+'$$::uuid)');
-  try{await expect(skillPrepare()).rejects.toThrow();}finally{await db.query('drop policy ac0c_user_hidden on public.modules');}
-  await skillPrepare();
+  const hidden='create policy ac0c_user_hidden on public.modules as restrictive for select to authenticated using (id<>$$'+moduleId+'$$::uuid)';
+  denials.push([hidden,'drop policy ac0c_user_hidden on public.modules','']);
+  for(const [deny,restore,id] of denials){
+   const pending=await newSession();
+   await db.query(deny,id?[id]:[]);
+   try{await expect(prepareIn(pending)).rejects.toThrow();}finally{await db.query(restore,id?[id]:[]);}
+   await prepareIn(pending);
+  }
   await db.query('select revoke_skill_revision($1,$2)',[pack.revisionId,actor]);
   await expect(skillPrepare()).rejects.toThrow();
   for(const m of [ordinary,skill])expect(m.summary.executionIds).toEqual([m.result.executionId]);

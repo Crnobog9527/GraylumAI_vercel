@@ -10,7 +10,7 @@ import {stagingTransport} from '../services/runtime/stagingTransport';
 import {retainedOutputReason} from '../services/runtime/view';
 import { runtimeExecutor } from '../services/runtime/execute';
 import {runtimeActor} from '../services/runtime/actor';
-import { databaseSkillSource } from '../services/skills/databaseSource';
+import { databaseSkillSource, userVisibleModules } from '../services/skills/databaseSource';
 import { discoverSkills } from '../services/skills/loader';
 import { activateRuntimeCandidate } from '../services/runtime/matching';
 
@@ -94,7 +94,7 @@ export const runtimeRouter=router({
   const modelQuery=ctx.supabaseAdmin!.from('ai_models').select('id,name').eq('is_active','true');
   const models=await (ctx.real?modelQuery.in('id',ctx.real.callPolicies.map(q=>q.modelId)):modelQuery.eq('provider','fixture').eq('name','Runtime local'));
   if(models.error)throw new Error('RUNTIME_MODELS_UNAVAILABLE');
-  const visible=await ctx.userScopedSupabase.from('modules').select('id,active').eq('active',true).limit(64);
+  const visible=await userVisibleModules(ctx.userScopedSupabase,{limit:64});
   if(visible.error)throw new Error('RUNTIME_SKILLS_UNAVAILABLE');
   // Respect the narrow public column grant; private metadata is fetched only
   // for visible modules and the loader independently rechecks current access.
