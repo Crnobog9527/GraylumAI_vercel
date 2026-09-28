@@ -12,8 +12,12 @@ import { PanelRightOpen, X } from "lucide-react";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 import { mergeInformation } from "./information-merge";
+import { readPlanEnvelope, type PlanEnvelope, type PlanRequest } from "./plan-envelope";
 import { admissionMessage } from "./admission-message";
 import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-response";
+import { liveReplyAfter, livePhaseNotice, mentorReplyDisplay, questionCardStatus, startLiveReply, type LiveReply } from "./agent-turn-display";
+import { QuestionCardView } from "@/components/opc/question-card";
+import type { AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
 import {
   confirmationActionIsRedundant,
   confirmQuestionValues,
@@ -45,77 +49,6 @@ type Item = {
   brief: string;
   day: string;
 };
-/**
- * The retained plan-generation envelope is the only thing that authorizes an
- * automatic first-week plan generation. It freezes the exact request so a
- * refresh, a re-login or a lost reply replays the same identity instead of
- * paying twice. `sourceRoundId` is client recovery metadata only: the request
- * itself stays the strict server shape.
- */
-type PlanRequest = {
-  draftId: string;
-  requestId: string;
-  purpose: "plan";
-  stepId: string;
-  input: string;
-};
-/**
- * `consentedAt` records the user's explicit "继续生成第一周选题" choice. It is
- * the only thing that authorizes an automatic first-week topic generation: an
- * envelope without it (a pre-upgrade `v:2`, or a bare legacy request) stays
- * recoverable with its own identity, but is never dispatched on its own.
- */
-type PlanEnvelope = { v: 3; sourceRoundId: string | null; consentedAt: string; request: PlanRequest };
-type RetainedPlan =
-  | { kind: "envelope"; envelope: PlanEnvelope }
-  | { kind: "unconsented"; request: PlanRequest; sourceRoundId: string | null }
-  | { kind: "legacy"; request: PlanRequest }
-  | { kind: "invalid" };
-function planRequestShape(value: unknown): PlanRequest | null {
-  if (!value || typeof value !== "object") return null;
-  const candidate = value as Record<string, unknown>;
-  if (
-    typeof candidate.draftId !== "string" ||
-    typeof candidate.requestId !== "string" ||
-    candidate.purpose !== "plan" ||
-    typeof candidate.stepId !== "string" ||
-    typeof candidate.input !== "string"
-  )
-    return null;
-  return candidate as unknown as PlanRequest;
-}
-/**
- * Read the retained value defensively. A pre-upgrade value stored the bare
- * request; it is kept and reused by an explicit generation, but it carries no
- * `sourceRoundId`, so it can never authorize an automatic one. Malformed data
- * is reported as invalid instead of being reinterpreted.
- */
-function readPlanEnvelope(raw: string | null): RetainedPlan | null {
-  if (!raw) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return { kind: "invalid" };
-  }
-  if (parsed && typeof parsed === "object" && "request" in parsed) {
-    const request = planRequestShape((parsed as { request: unknown }).request);
-    if (!request) return { kind: "invalid" };
-    const round = (parsed as { sourceRoundId?: unknown }).sourceRoundId;
-    const consentedAt = (parsed as { consentedAt?: unknown }).consentedAt;
-    const sourceRoundId = typeof round === "string" ? round : null;
-    // Only an envelope that recorded the user's explicit consent may run by
-    // itself. Anything else keeps its identity for an explicit continue.
-    if (typeof consentedAt !== "string" || !consentedAt)
-      return { kind: "unconsented", request, sourceRoundId };
-    return {
-      kind: "envelope",
-      envelope: { v: 3, sourceRoundId, consentedAt, request },
-    };
-  }
-  const legacy = planRequestShape(parsed);
-  return legacy ? { kind: "legacy", request: legacy } : { kind: "invalid" };
-}
 type ConfirmStepEnvelope = {
   phase: "information" | "save" | "confirm";
   questionId?: string;
@@ -274,18 +207,17 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const discussionAccount = discussionAccounts.length===1?discussionAccounts[0]:undefined;
   const list = trpc.opc.list.useQuery();
   const prepareStep = trpc.opc.prepareStep.useMutation();
-  const [liveReply,setLiveReply]=useState<{executionId:string;text:string;phase:string}|null>(null);
+  const [liveReply,setLiveReply]=useState<LiveReply|null>(null);
   const [pendingBubble,setPendingBubble]=useState<MentorRequest|null>(null);
   const mentorSendInFlight=useRef(false);
   const execute={mutateAsync:async(input:{executionId:string})=>{
-    setLiveReply({executionId:input.executionId,text:'',phase:'mentor'});
+    setLiveReply(startLiveReply(input.executionId));
     let result;
     try{
     const events=await utils.client.runtime.executeStream.mutate(input);
     for await(const event of events){
-      if(event.type==='text')setLiveReply(old=>old?.executionId===input.executionId?{...old,text:event.text}:old);
-      else if(event.type==='phase')setLiveReply(old=>old?.executionId===input.executionId?{...old,phase:event.phase}:old);
-      else result=event.result;
+      if(event.type==='result')result=event.result;
+      else setLiveReply(old=>liveReplyAfter(old,input.executionId,event as AgentTurnEvent));
     }
     if(!result)throw new Error('OPC_EXECUTION_STREAM_INTERRUPTED');
     if('unavailable' in result&&result.unavailable==='output_truncated')setError('本次模型调用达到长度上限，原请求已保留，不会自动重试。');
@@ -1781,12 +1713,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const selectedStep =
     steps.find((step) => step.id === activeStep) ??
     steps[Math.max(0, firstPending)];
-  type MentorTurn = {
-    executionId: string;
-    stepId: string;
-    questionId: string | null;
-    kind: string;
-  };
+  type MentorTurn = { executionId: string; roundId?: string | null; stepId: string; questionId: string | null; kind: string };
   type MentorExecution = {
     request?: MentorRequest | null;
     unavailableReason?: string | null;
@@ -1829,6 +1756,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       })
       .filter((value) => Boolean(value));
   const hasPendingConfirmation = steps.some(step => Boolean(pendingConfirmationFor(step.id)));
+  /** A streaming reply whose execution is not in history yet. */
+  const liveOnly = liveReply && !mentorExecutions.some(e => e.executionId === liveReply.executionId) ? liveReply : null;
   // A retained mentor envelope can exist before its execution is visible in
   // history (or after a lost reply), so recovery is driven by the envelope
   // itself rather than the execution list.
@@ -1964,6 +1893,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
               activeQuestion.id,
               snap.steps[step.id].valid,
             );
+          const sendLocked = busy || Boolean(history.data?.activeExecution) || openingSteps.includes(step.id) || Boolean(pendingMentor) ||
+            hasPendingConfirmation || hasPendingStepRequest || free.busy;
           const questionConfirmed =
             questionIsConfirmed(d.information[step.id].values?.[activeQuestion.id]) &&
             !infoEdits[step.id];
@@ -2011,7 +1942,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                         {d.accountRevision ? "已保留原正式定位的全部步骤。请选择需要修改的部分；未变化且已确认的内容无需重新填写。修改保存为草稿，核对后可更新正式版本。" : "我会在同一个对话里陪你完成全部步骤，一次问一个问题，并把从回答中梳理出的信息放到右侧对应表单，供你核对。"}
                       </p>
                     </div>}
-                    {mentorExecutions.map((execution) => {
+                    {mentorExecutions.map((execution, executionIndex) => {
                       const turn = mentorTurns.get(execution.executionId);
                       const turnStep = steps.find(
                         (candidate) => candidate.id === turn?.stepId,
@@ -2026,6 +1957,16 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                       const accepted = applyMentorTurnRules(parsed, execution.input ?? "");
                       const openingTurn = turn?.kind === "opening" || isOpeningInput(execution.input);
                       const target = steps.find(candidate => candidate.id === parsed.targetStepId);
+                      const live = liveReply?.executionId === execution.executionId ? liveReply : null;
+                      const reply = mentorReplyDisplay({ body: execution.body ?? execution.primaryBody, legacyMessage: parsed.message,
+                        liveText: live?.text, liveCard: live?.card, state: execution.state, unavailableReason: execution.unavailableReason,
+                        active: execution.executionId === history.data?.activeExecution, busy });
+                      const next = mentorExecutions[executionIndex + 1];
+                      const cardStatus = questionCardStatus({ isLatest: !next, turn,
+                        shown: { roundId: d.roundId, stepId: step.id, questionId: activeQuestion.id },
+                        reply: next ? { ...mentorTurns.get(next.executionId), input: isOpeningInput(next.input) ? null : next.input }
+                          : pendingBubble && { ...pendingBubble, roundId: d.roundId } });
+                      const cardLocked = !cardStatus.onShownQuestion || execution.state !== "completed" || sendLocked || snap.state !== "draft" || reviewOnly;
                       const proposed = Object.entries(accepted).filter(([id, value]) =>
                         reachedQuestions(d.information[parsed.targetStepId]?.schema ?? [], d.information[parsed.targetStepId]?.values).some(f => f.id === id) &&
                         value.value !== (infoEdits[parsed.targetStepId]?.[id] ?? d.information[parsed.targetStepId]?.values?.[id])?.value);
@@ -2042,22 +1983,15 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                               </p>
                             </div>
                           )}
-                          <div data-message-role="assistant" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
+                          {reply.text && <div data-message-role="assistant" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
                             <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>
                               {openingTurn ? "导师主动引导" : "导师"}
                               {turnLabel ? ` · ${turnLabel}` : turnStep ? ` · ${turnStep.title}` : ""}
                             </span>
-                            <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>
-                              {(liveReply?.executionId===execution.executionId?liveReply.text:'') || parsed.message ||
-                                (execution.unavailableReason === "output_truncated"
-                                  ? "本次模型调用达到长度上限，未返回该阶段正文。原请求已保留，不会自动重试。"
-                                  : execution.state === "cost_pending" && execution.executionId !== history.data?.activeExecution
-                                  ? "本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。"
-                                  : execution.state === "cancelled"
-                                  ? "本次执行已停止，未取得可用回复。原记录已保留；请查看错误提示或继续讨论，系统不会自动重放这条请求。"
-                                  : busy ? "正在回复…" : "回复暂未完成，请继续核对。")}
-                            </p>
-                          </div>
+                            <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>{reply.text}</p>
+                          </div>}
+                          {reply.card && <QuestionCardView card={reply.card} answered={cardStatus.answered} answer={cardStatus.answer}
+                            disabled={cardLocked} onAnswer={input => { void ask(step, activeQuestion.id, input); }}/>}
                           {parsed.message && execution.unavailableReason === 'output_truncated' && <p role="status">本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。</p>}
                           {execution.state === "completed" && target && latestSuggestion.get(target.id) === execution.executionId && proposed.length > 0 && (
                             <div className={resultStyles.suggestionCard}>
@@ -2089,8 +2023,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                       );
                     })}
                     {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<div data-message-role="user" data-request-id={pendingBubble.requestId} className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3"><span>你 · {d.information[pendingBubble.stepId]?.schema.find((f:{id:string;title:string})=>f.id===pendingBubble.questionId)?.title}</span><p className="whitespace-pre-wrap">{pendingBubble.input}</p><small role="status">{running?'发送中 · 等待服务器确认':'尚未确认保存 · 原请求已保留'}</small></div>}
-                  {liveReply&&!mentorExecutions.some(e=>e.executionId===liveReply.executionId)&&<div data-message-role="assistant" aria-label="导师正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>导师</span><p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>{liveReply.text||'导师正在思考…'}</p></div>}
-                  {liveReply&&<p role="status">{liveReply.phase==='organizer'?'正文已返回，正在整理待核对信息…':liveReply.phase==='saving'?'正在保存结果并核对费用…':liveReply.phase==='incomplete'?'回复尚未完成；原请求已保留，请按当前状态继续核对，不会自动重发。':'正在生成；部分正文尚未完成，费用尚未结算。'}</p>}
+                  {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="导师正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>导师</span><p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>{liveOnly.text||'导师正在思考…'}</p></div>}
+                  {liveOnly?.card&&<QuestionCardView card={liveOnly.card} answered={false} disabled/>}
+                  {liveReply&&<p role="status">{livePhaseNotice(liveReply.phase)}</p>}
                   {!manualEntry && snap.state === "draft" && !reviewOnly && <section className={resultStyles.currentAction} aria-label="当前问题操作">
                     <strong>当前核对：{activeQuestion.title}</strong>
                     <p>{(infoEdits[step.id]?.[activeQuestion.id] ?? d.information[step.id].values?.[activeQuestion.id])?.value || '先讨论当前问题，或在右侧填写答案。'}</p>
@@ -2100,7 +2035,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     </div>
                   </section>}
                   </div>
-                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" note={busy && hasPendingStepRequest ? "正在回复…" : undefined} maxLength={8000} disabled={snap.state!=="draft"||reviewOnly} sendDisabled={busy||Boolean(history.data?.activeExecution)||openingSteps.includes(step.id)||Boolean(pendingMentor)||hasPendingConfirmation||hasPendingStepRequest||free.busy} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step,activeQuestion.id);}}/>
+                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" note={busy && hasPendingStepRequest ? "正在回复…" : undefined} maxLength={8000} disabled={snap.state!=="draft"||reviewOnly} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step,activeQuestion.id);}}/>
                   {free.error&&<p role="alert">{free.error}</p>}
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}

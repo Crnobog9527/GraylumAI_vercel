@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {beforeAll,afterAll,it,expect} from 'vitest';
+import {beforeAll,afterAll,it,expect,vi} from 'vitest';
+import {logger} from '../../lib/logger';
 import {randomUUID,createHash} from 'node:crypto';
 import {createServer,type ServerResponse} from 'node:http';
 import pg from 'pg';
@@ -21,7 +22,7 @@ const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 async function rpc(name:string,args:Record<string,unknown>){const result=await admin.rpc(name,args);if(result.error)throw new Error(result.error.message);return result.data;}
 function latch(){let release!:()=>void;const promise=new Promise<void>(resolve=>{release=resolve;});return {promise,release};}
 async function until(test:()=>boolean){const deadline=Date.now()+5000;while(!test()){if(Date.now()>deadline)throw new Error('synthetic progress deadline');await new Promise(resolve=>setTimeout(resolve,10));}}
-async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial-tools-v4-stream',organize=false,outputLimit=100,tool=false){
+async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial-tools-v4-stream'|'agent-turn-v5-stream',organize=false,outputLimit=100,tool=false){
  const actorId=randomUUID(),mentorId=randomUUID(),organizerId=randomUUID(),windowId=randomUUID(),requestId=randomUUID();
  await db.query('insert into profiles(id,credits) values($1,100)',[actorId]);
  await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,100,'addition','grant','opening_grant','system',$2,0,100)",[actorId,'stream-opening:'+actorId]);
@@ -29,7 +30,7 @@ async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial
  const policies=[[mentorId,'synthetic/mentor'],[organizerId,'synthetic/organizer']].map(([modelId,model])=>({modelId,model,provider:'openrouter',account:'synthetic-stream',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:10000,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
  for(const policy of policies)await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic streaming integration',$2,'openrouter','true')",[policy.modelId,policy.model]);
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.10,3,now()+interval '2 hours')",[windowId,[actorId],JSON.stringify(policies)]);
- const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',inputSelection:'scope-projection-v1',providerRequestFormat:format,...(format==='serial-tools-v4-stream'?{reasoning:{effort:'none'}}:{}),input:'Synthetic original input',instructions:'Return the public mentor message in the message property; keep protocol fields private.',model:policies[0]!.model,modelId:mentorId,maxOutputTokens:outputLimit,maxTurns:1,historyItems:20,network:'deny',tools:tool?['read_source']:[],...(tool?{workspaceContext:true,maxToolCalls:1,maxTurns:2}:{}),request:{sessionId:session.sessionId,requestId},...(organize?{attachedOrganizer:{modelId:organizerId,model:policies[1]!.model,maxOutputTokens:100,instructions:'Synthetic organizer only',input:'Synthetic original input'}}:{})};
+ const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',inputSelection:'scope-projection-v1',providerRequestFormat:format,...(format==='serial-tools-v4-stream'||format==='agent-turn-v5-stream'?{reasoning:{effort:'none'}}:{}),input:'Synthetic original input',instructions:'Return the public mentor message in the message property; keep protocol fields private.',model:policies[0]!.model,modelId:mentorId,maxOutputTokens:outputLimit,maxTurns:1,historyItems:20,network:'deny',tools:format==='agent-turn-v5-stream'?['ask_question']:tool?['read_source']:[],...(tool?{workspaceContext:true,maxToolCalls:1,maxTurns:2}:{}),request:{sessionId:session.sessionId,requestId},...(organize?{attachedOrganizer:{modelId:organizerId,model:policies[1]!.model,maxOutputTokens:100,instructions:'Synthetic organizer only',input:'Synthetic original input'}}:{})};
  const billing={contractVersion:'bill2.v1',mode:'staging_test',testWindowId:windowId,scope:session.scope,operation:'question',modelId:mentorId,sourceHash:hash('synthetic-stream'),input:context,callPolicy:organize?policies:[policies[0]],rules:{version:'runtime-staging-v1',quoteVersion:windowId,creditsPerUsd:'1000',multiplier:'1',fx:{}},limits:{costUsd:tool?'0.06':organize?'0.04':'0.02',credits:tool?60:organize?40:20,maxPreDeduct:tool?60:organize?40:20,maxCalls:tool?3:organize?2:1,deadline:new Date(Date.now()+3600000).toISOString()}};
  const execution=await rpc('runtime_admit',{p_actor_id:actorId,p_session_id:session.sessionId,p_request_id:requestId,p_payload:context,p_billing:billing});
  return {actorId,context,execution,session,billing};
@@ -245,4 +246,52 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: streaming tool 
   expect((await db.query('select state,closed,charged,actual_restore,provider_cost_usd::text cost from bill2_runs where id=$1',[f.execution.runId])).rows[0]).toEqual({state:'settled',closed:true,charged:9,actual_restore:51,cost:'0.009'});
   expect(await host.execute(f.execution.executionId)).toEqual({state:'completed',body,summary:organizer});expect(bodies).toHaveLength(3);
  }finally{gate.release();await running;server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+
+// AC-1 tool plumbing: the Agent turn format is dormant (no admission produces
+// it), so this frozen context is admitted directly, as the fixture does above.
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool_calls','length'] as const)('RUNTIME: streaming Agent turn keeps the first of two question cards, bills one call and replays without POST (finish %s)',async(finish)=>{
+ const f=await fixture('agent-turn-v5-stream'),bodies:string[]=[],events:RuntimeProgress[]=[],id='gen-agent-'+f.execution.executionId,model='synthetic/mentor';
+ const card={question:'你现在主要在哪个平台发内容？',options:['小红书','抖音']};
+ const call=(index:number,callId:string,args:unknown)=>({tool_calls:[{index,id:callId,type:'function',function:{name:'ask_question',arguments:JSON.stringify(args)}}]});
+ const server=createServer(async(req,res)=>{
+  let raw='';for await(const part of req)raw+=part;bodies.push(raw);
+  res.setHeader('content-type','text/event-stream');res.setHeader('x-generation-id',id);
+  chunk(res,id,model,{role:'assistant',reasoning:'PRIVATE_AGENT_REASONING'});chunk(res,id,model,{content:'先了解一下你的情况。'});
+  chunk(res,id,model,call(0,'call_first',card));chunk(res,id,model,call(1,'call_second',{question:'SECOND_CARD',options:['x','y']}));
+  chunk(res,id,model,{},finish);
+  res.write('data: '+JSON.stringify({id,object:'chat.completion.chunk',created:1,model,choices:[],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}})+'\n\n');
+  res.end('data: [DONE]\n\n');
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const address=server.address();if(!address||typeof address==='string')throw new Error('isolated listener required');
+ const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>fetch('http://127.0.0.1:'+address.port,init)});
+ const warned=vi.spyOn(logger,'warn');
+ try{
+  const host=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter}),result=await host.execute(f.execution.executionId,event=>{events.push(event);});
+  const request=JSON.parse(bodies[0]!);
+  expect(bodies).toHaveLength(1);expect(request).not.toHaveProperty('parallel_tool_calls');expect(request).not.toHaveProperty('tool_choice');
+  expect(request).toMatchObject({stream:true,reasoning_effort:'none'});expect(request.tools.map((t:{function:{name:string}})=>t.function.name)).toEqual(['ask_question']);
+  expect(JSON.stringify(events)).not.toMatch(/PRIVATE_|SECOND_CARD/);
+  expect(events.filter(event=>event.type==='text').at(-1)).toEqual({type:'text',text:'先了解一下你的情况。'});
+  const call=(await db.query('select id,payload,provider_id from bill2_calls where run_id=$1',[f.execution.runId])).rows;
+  expect(call).toHaveLength(1);expect(call[0].payload.requestHash).toBe(hash(bodies[0]!));
+  // The provider response stays whole as evidence, including the dropped call.
+  const receipt=(await db.query('select payload from bill2_receipts where call_id=$1',[call[0].id])).rows[0].payload;
+  expect(decodeOpenRouterStreamObservation(receipt.transport).toString()).toContain('call_second');
+  if(finish==='tool_calls'){
+   expect(result).toEqual({state:'completed',body:JSON.stringify({card:'question',...card})});
+   expect(warned.mock.calls.filter(c=>c[1]==='runtime_tool_calls_dropped')).toEqual([['api','runtime_tool_calls_dropped',{executionId:f.execution.executionId,dropped:1}]]);
+   const history=JSON.stringify((await db.query('select item from runtime_session_history where session_id=$1 order by revision',[f.session.sessionId])).rows);
+   expect(history).toContain('call_first');expect(history).not.toContain('call_second');
+   expect((await db.query('select state,charged from bill2_runs where id=$1',[f.execution.runId])).rows[0]).toEqual({state:'settled',charged:3});
+  }else{
+   // A tool call cut off by the output limit is never executed or shown.
+   expect(result).toMatchObject({unavailable:'output_truncated'});
+   expect(JSON.stringify((await db.query('select item from runtime_session_history where session_id=$1',[f.session.sessionId])).rows)).not.toContain('call_first');
+  }
+  // Replay after the outcome: the stored result, no further provider POST.
+  expect(await runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId)).toMatchObject({state:result.state});
+  expect(bodies).toHaveLength(1);
+ }finally{warned.mockRestore();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });
