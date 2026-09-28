@@ -109,3 +109,36 @@ describe('Agent turn receipt projection',()=>{
   expect(observation.agentTools).toBeUndefined();expect(evidence.rejectedReason).toBeTruthy();
  });
 });
+
+describe('Agent turn history without tools on the current turn (Codex P2 on 3be620c8)',()=>{
+ const history=[{role:'user',content:'hello'},{role:'assistant',content:'先问一个问题',tool_calls:[call('ask_question')]},
+  {role:'tool',tool_call_id:'call_1',content:'{"card":"question"}'},{role:'user',content:'小红书'}];
+ it('accepts a question card round when the current turn offers no tools',async()=>{
+  for(const patch of [{tools:undefined,messages:history},{tools:[],messages:history}]){
+   const a=adapter();await a.adapter.dispatch({input:request(patch)},identity);expect(a.transport).toHaveBeenCalledTimes(1);
+  }
+ });
+ // Without an Agent call in history and without Agent tools, a request is an
+ // older one; its rules (which never paired tool results) are unchanged.
+ const both=[undefined,[tool('ask_question')]],offered=[[tool('ask_question')]];
+ it.each([
+  ['a call whose result is missing',[history[0],history[1],history[3]],both],
+  ['a result for a different call',[history[0],history[1],{...history[2],tool_call_id:'call_other'},history[3]],both],
+  ['a result without its call',[history[0],history[2],history[3]],offered],
+  ['a call answered only later',[history[0],history[1],history[3],history[2]],both],
+ ])('rejects %s before credential access',async(_name,messages,toolSets)=>{
+  for(const tools of toolSets){
+   const a=adapter();
+   await expect(a.adapter.dispatch({input:request({tools,messages})},identity)).rejects.toThrow('BILL2_PROVIDER_REQUEST_DENIED');
+   expect(a.credential).not.toHaveBeenCalled();
+  }
+ });
+ it('without Agent tools allowed, the same history keeps the older rules and is refused',async()=>{
+  const a=adapter({allowWorkspaceRead:true});
+  await expect(a.adapter.dispatch({input:request({tools:undefined,messages:history})},identity)).rejects.toThrow('DENIED');
+ });
+ it('a request with no tools and no tool history keeps the older rules, including parallel_tool_calls false',async()=>{
+  const a=adapter();await a.adapter.dispatch({input:request({tools:undefined,parallel_tool_calls:false,reasoning_effort:undefined})},identity);
+  expect(a.transport).toHaveBeenCalledTimes(1);
+ });
+});

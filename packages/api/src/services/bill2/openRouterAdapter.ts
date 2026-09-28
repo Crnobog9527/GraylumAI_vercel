@@ -35,6 +35,25 @@ const agentMessage=z.union([
  z.object({role:z.literal('assistant'),content:z.string().nullable(),tool_calls:z.array(agentCall).min(1).max(1)}).strict(),
  z.object({role:z.literal('tool'),content:z.string(),tool_call_id:z.string().min(1).max(256)}).strict(),
 ]);
+type RequestMessage={role?:unknown;tool_calls?:unknown;tool_call_id?:unknown};
+/** An Agent turn request offers only the interactive tools, or offers none and
+ * replays history whose tool calls (at least one) all use them. */
+function agentTurnRequest(parsed:{tools?:unknown;messages?:unknown}):boolean{
+ if(parsed.tools!==undefined&&!(Array.isArray(parsed.tools)&&parsed.tools.length===0))return agentTools.safeParse(parsed.tools).success;
+ if(!Array.isArray(parsed.messages))return false;
+ const calls=(parsed.messages as RequestMessage[]).flatMap(m=>Array.isArray(m?.tool_calls)?m.tool_calls as unknown[]:[]);
+ return calls.length>0&&calls.every(call=>agentCall.safeParse(call).success);
+}
+/** Each Agent tool call is answered by the very next message, a tool result
+ * with its id, and every tool result answers the call just before it. */
+function agentHistoryPaired(messages:RequestMessage[]):boolean{
+ return messages.every((m,i)=>{
+  const callId=(message:RequestMessage|undefined)=>Array.isArray(message?.tool_calls)?(message.tool_calls[0] as {id?:unknown})?.id:undefined;
+  if(m?.role==='assistant'&&Array.isArray(m.tool_calls))return messages[i+1]?.role==='tool'&&messages[i+1]?.tool_call_id===callId(m);
+  if(m?.role==='tool')return messages[i-1]?.role==='assistant'&&callId(messages[i-1])===m.tool_call_id;
+  return true;
+ });
+}
 /** Private trusted composition. No environment fallback, browser endpoint or automatic retry.
  * `allowAgentTools` admits the interactive Agent turn tools; the frozen Runtime
  * context separately decides which format and tools one execution may use. */
@@ -94,13 +113,14 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    if(!identity.providerLimits || !identity.outputLimit || !identity.upperUsd)throw new Error('BILL2_PROVIDER_QUOTE_REQUIRED');
    const quote=openRouterBound(identity.providerLimits,identity.outputLimit);
    if(decimal(quote.upperUsd)!==decimal(identity.upperUsd))throw new Error('BILL2_PROVIDER_QUOTE_CONFLICT');
-   // An Agent turn request carries only the interactive tools and never the
-   // optional parallel_tool_calls hint; older requests keep their rules.
-   const agentTurn=Boolean(options.allowAgentTools&&parsed&&typeof parsed==='object'&&agentTools.safeParse(parsed.tools).success);
+   // An Agent turn request carries only the interactive tools (or none, when it
+   // replays their history) and never the optional parallel_tool_calls hint;
+   // older requests keep their rules.
+   const agentTurn=Boolean(options.allowAgentTools&&parsed&&typeof parsed==='object'&&!Array.isArray(parsed)&&agentTurnRequest(parsed));
    // These routing constraints must already be in the frozen request bytes.
    if(!parsed || typeof parsed!=='object' || Array.isArray(parsed) || Object.keys(parsed).some(key=>!requestFields.has(key)&&!((options.allowWorkspaceRead||agentTurn)&&key==='tools')) ||
      (parsed.tools!==undefined&&!agentTurn&&!workspaceTools.safeParse(parsed.tools).success) ||
-     (agentTurn&&parsed.parallel_tool_calls!==undefined) ||
+     (agentTurn&&(parsed.parallel_tool_calls!==undefined||!Array.isArray(parsed.messages)||!agentHistoryPaired(parsed.messages))) ||
      parsed.model!==identity.model || !((parsed.stream===false&&parsed.stream_options===undefined)||(parsed.stream===true&&JSON.stringify(parsed.stream_options)===JSON.stringify({include_usage:true}))) || parsed.store!==false || !Array.isArray(parsed.messages) ||
      parsed.provider?.allow_fallbacks!==false || parsed.provider?.require_parameters!==true ||
      JSON.stringify(parsed.provider)!==JSON.stringify(quote.routing) ||
