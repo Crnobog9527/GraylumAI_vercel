@@ -6,6 +6,7 @@ import {join, posix, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {z} from 'zod';
 import {parseWorkflowManifest, type WorkflowManifest} from '../../services/skills/workflowManifest.ts';
+import {elicitFieldSpecs} from '../../shared/opcMethodPolicy.ts';
 import {askQuestionArgs} from './classify.ts';
 
 /** Synthetic repository fixture used when no private Skill directory is given. */
@@ -123,12 +124,17 @@ export function stepRules(skill: LoadedSkill, step: number | undefined): string 
   if (step === undefined) return '';
   const current = skill.workflow?.[step];
   if (!current) throw new Error('PROBE_SCENARIO_STEP_UNAVAILABLE');
-  const required = (current.information ?? []).filter(item => item.required).map(item => item.title);
+  // Roles follow the application's policy: an undeclared role is a user fact.
+  const required = elicitFieldSpecs(current.information ?? []).filter(field => field.required);
+  const facts = required.filter(field => field.elicit === 'user_fact').map(field => field.title);
+  const proposals = required.filter(field => field.elicit === 'agent_proposal').map(field => field.title);
   return [
     `Current step: ${current.title}.`,
-    `Required information for this step: ${required.join(', ') || 'none'}.`,
-    'The step is complete when the user has provided or explicitly deferred every required item.',
-    'When it is complete, briefly summarize what the user gave and ask them to confirm this step.',
+    `Facts only the user can provide (ask for them; the user may also defer them): ${facts.join(', ') || 'none'}.`,
+    `Items you must propose yourself from what is known, for the user to confirm, edit or defer: ${proposals.join(', ') || 'none'}.` +
+      ' Never ask the user to write these, and do not treat a missing user answer as leaving them open.',
+    'The step is complete when every fact has been provided or deferred and every proposal has been confirmed or deferred.',
+    'When it is complete, briefly summarize the step and ask the user to confirm it.',
   ].join('\n');
 }
 const scenarioFile = z.object({scenarios: z.array(scenarioSchema).min(1).max(100)}).strict();

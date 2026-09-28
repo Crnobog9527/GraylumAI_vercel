@@ -666,11 +666,11 @@ describe('ledger location (third review)', () => {
 describe('question-card history and step fields', () => {
   const workflowYaml = [
     'kind: social', 'steps:', '  - title: Basics', '    resources:', '      - references/step-1.md', '    information:',
-    '      - {id: offer, title: Offer, required: true}', '      - {id: channel, title: Channel, required: true}',
+    '      - {id: offer, title: Offer, required: true}', '      - {id: channel, title: Channel, required: true, elicitation: agent_proposal}',
     '      - {id: notes, title: Notes, required: false}', '',
   ].join('\n');
   const workflowJson = JSON.stringify({kind: 'social', steps: [{title: 'Basics', resources: ['references/step-1.md'], information: [
-    {id: 'offer', title: 'Offer', required: true}, {id: 'channel', title: 'Channel', required: true},
+    {id: 'offer', title: 'Offer', required: true}, {id: 'channel', title: 'Channel', required: true, elicitation: 'agent_proposal'},
     {id: 'notes', title: 'Notes', required: false},
   ]}]});
   function privateSkill(workflow: string | false = workflowYaml) {
@@ -717,7 +717,10 @@ describe('question-card history and step fields', () => {
     const system = messages[0]!;
     expect(system.role).toBe('system');
     expect(system.content).toContain('Current step: Basics.');
-    expect(system.content).toContain('Required information for this step: Offer, Channel.');
+    // Offer declares no role, so it is a user fact; Channel is a proposal the mentor writes.
+    expect(system.content).toContain('Facts only the user can provide (ask for them; the user may also defer them): Offer.');
+    expect(system.content).toContain('Items you must propose yourself from what is known, for the user to confirm, edit or defer: Channel.');
+    expect(system.content).toContain('Never ask the user to write these');
     expect(system.content).not.toContain('Notes');
     expect(outcome.results![0]).toMatchObject({expectStepComplete: true, outcome: {category: 'correct'}});
     // Step fields and history stay in the request; summaries carry none of them.
@@ -750,7 +753,7 @@ describe('question-card history and step fields', () => {
       return network.sent[0]!.body.messages[0].content as string;
     };
     const fromYaml = await systemFor(workflowYaml);
-    expect(fromYaml).toContain('Required information for this step: Offer, Channel.');
+    expect(fromYaml).toContain('for the user to confirm, edit or defer: Channel.');
     expect(await systemFor(workflowJson)).toBe(fromYaml);
     out = [];
     const broken = 'kind: social\nsteps: [secret-private-marker\n';
