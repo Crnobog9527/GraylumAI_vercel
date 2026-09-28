@@ -20,15 +20,21 @@ ORM: Drizzle
 
 ### Running Migrations
 
-```bash
-# Check pending migrations
-ls packages/db/migrations/
+For a routine incremental migration, follow only the current task's reviewed,
+environment-specific migration plan under [AGENTS.md](../../AGENTS.md): identify
+the exact target and pending files from `packages/db/migrations/`, obtain the
+required approval, apply only the approved migration scope, and verify its
+postconditions. Record execution evidence in the
+[raw SQL migration ledger](./RAW_SQL_MIGRATION_LEDGER.md) where applicable.
+Do not treat this section as approval to paste arbitrary SQL into SQL Editor.
 
-# Apply via Supabase Dashboard
-# 1. Go to SQL Editor
-# 2. Paste migration content
-# 3. Execute
-```
+[`STAGING_REPRODUCIBILITY.md`](./STAGING_REPRODUCIBILITY.md) is a separate checklist
+for an explicitly scoped fresh staging rebuild or drift recovery, not the routine
+incremental migration procedure. Its schema-push and seed steps must not be run
+as implicit prerequisites to an incremental migration. Table structure is
+authoritative in `packages/db/migrations/`, not `schema.ts`; any rebuild or repair
+still needs its own reviewed scope and applicable approval. The staging checklist
+is not a production procedure.
 
 ### User Management
 
@@ -40,26 +46,29 @@ WHERE email = 'user@example.com';
 ```
 
 #### Adjust User Credits
-```sql
--- Add credits (e.g., support compensation)
-UPDATE profiles
-SET credits = credits + 100
-WHERE id = 'USER_UUID';
 
--- Log the adjustment
-INSERT INTO credit_transactions (user_id, amount, type, description)
-VALUES ('USER_UUID', 100, 'addition', 'Support compensation');
+Use the credit adjustment control in `/admin/users`, with the adjustment amount
+and reason. The UI calls `admin.adjustUserCredits`, which uses
+`atomic_apply_credit_ledger_entry` for the balance and ledger mutation. The later
+admin activity insert is best-effort: the router does not check its returned error,
+so a successful adjustment response does not guarantee an admin audit record.
+Verify the expected activity record separately; do not repeat a successful credit
+adjustment just to recover a missing log. Do not update `profiles.credits` and
+insert a ledger row as separate manual SQL operations.
 
--- Log admin action
-INSERT INTO user_activity_logs (user_id, admin_id, action, action_type, details)
-VALUES (
-  'USER_UUID',
-  'ADMIN_UUID',
-  'Added 100 credits for support compensation',
-  'credit_adjustment',
-  '{"amount": 100, "reason": "Support compensation"}'::jsonb
-);
-```
+After a timeout, connection error, or other ambiguous response, inspect the actual
+user balance and credit ledger before any retry. The UI currently sends no
+`idempotencyKey`, and the router supplies an RPC key only when the caller provides
+one; resubmitting can apply the same credit delta twice. If the ledger confirms
+success, do not resubmit. If the outcome remains uncertain, stop and investigate
+rather than retrying. Sources: `apps/web/src/app/admin/users/page.tsx:178`–`:182`
+and `packages/api/src/routers/admin.ts:1061`–`:1063`.
+
+Code: `apps/web/src/app/admin/users/page.tsx:141`,
+`packages/api/src/routers/admin.ts:1029` (RPC call at line 1066; separate activity
+insert at lines 1083–1095).
+Production or real-user adjustments still require the applicable approval in
+[AGENTS.md](../../AGENTS.md).
 
 #### Change User Role
 ```sql
@@ -95,12 +104,17 @@ WHERE user_id = 'USER_UUID'
 ```
 
 #### Hard Delete Old Soft-Deleted Data
-```sql
--- Delete conversations older than 30 days
-DELETE FROM conversations
-WHERE is_deleted = 'true'
-  AND deleted_at < now() - interval '30 days';
-```
+
+A direct `DELETE FROM conversations` does not guarantee that matching rows are
+removed. The `artifact_chat_delete` and `ordinary_chat_delete` BEFORE DELETE
+triggers can return `NULL`, silently skipping a row: artifact conversations with
+a project row that cannot be locked (busy or missing), or active/uncertain generations, and ordinary
+conversations with nonterminal requests, are protected. A successful SQL command
+alone is not evidence of completed deletion; verify affected rows and retained
+context. Do not disable these guards to force cleanup.
+
+Sources: `packages/db/migrations/0069_v3_chat_skill.sql:43` and
+`packages/db/migrations/0078_ordinary_chat_requests.sql:30`.
 
 ### Analytics Queries
 
@@ -164,7 +178,7 @@ DELETE FROM application_logs
 WHERE created_at < now() - interval '30 days';
 
 -- Diagnostics results (30 days)
-DELETE FROM diagnostics_results
+DELETE FROM diagnostic_results
 WHERE created_at < now() - interval '30 days';
 ```
 
@@ -265,8 +279,12 @@ SELECT pg_terminate_backend(PID_HERE);
 
 | Task | Schedule | Function |
 |------|----------|----------|
-| Log cleanup | Daily | `cleanup_old_logs()` |
-| Diagnostics | Hourly | `/api/cron/diagnostics` |
+| Log cleanup | Not scheduled by repository configuration | `cleanup_old_logs()` exists; no scheduled caller is configured |
+| Diagnostics | Daily at 10:00 UTC (`0 10 * * *`) | `/api/cron/diagnostics` |
+
+`cleanup_old_logs()` is defined in `packages/db/migrations/0006_application_logs.sql:58`.
+The repository schedule is in `apps/web/vercel.json`; function existence does not
+prove that a remote scheduler is configured. No remote scheduler was inspected.
 
 ## Supabase Dashboard Links
 

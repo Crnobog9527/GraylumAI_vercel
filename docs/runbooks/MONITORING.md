@@ -1,5 +1,7 @@
 # Monitoring & Alerts Runbook
 
+> RUNTIME-PROD 完成后重写。本手册仍含旧链路的监控与排障内容，不构成统一 Runtime 的生产验收证据。Anthropic 官方 API 已停用，统一 Runtime 使用 OpenRouter。仍在运行的旧 `/api/ai/stream` 可按模型配置直连其他兼容接口或 Gemini；排障先确认失败请求的实际 provider、endpoint 与凭据来源，以当前代码和目标环境证据为准。
+
 ## Monitoring Stack Overview
 
 ```
@@ -48,7 +50,7 @@ Action: Check request payload and auth state
 #### Network Error
 ```
 Cause: API timeout, network issues
-Action: Check Anthropic API status, retry logic
+Action: Identify the failing request path and actual model provider/endpoint, then check that provider's status and retry logic. Check OpenRouter when it is the actual endpoint; legacy streams may use a configured compatible endpoint or Gemini directly.
 ```
 
 #### Hydration Error
@@ -205,8 +207,8 @@ GROUP BY model_id;
 - **Critical**: < 80% pass rate
 
 ### Automated Checks
-- Vercel Cron runs diagnostics hourly
-- Results stored in `diagnostics_results` table
+- Repository Vercel Cron configuration runs diagnostics daily at 10:00 UTC (`apps/web/vercel.json`, `0 10 * * *`)
+- Results stored in `diagnostic_results` table
 
 ## Alert Response Procedures
 
@@ -260,4 +262,4 @@ GROUP BY model_id;
 | Sentry | https://sentry.io/organizations/grayscale-luminary-llc/ |
 | Vercel | https://vercel.com/dashboard |
 | Supabase | https://supabase.com/dashboard |
-| Anthropic Status | https://status.anthropic.com |
+| OpenRouter | https://openrouter.ai |

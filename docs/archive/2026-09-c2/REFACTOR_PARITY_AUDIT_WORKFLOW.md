@@ -85,7 +85,7 @@ E2E_ADMIN_EMAIL=...
 E2E_ADMIN_PASSWORD=...
 ```
 
-Playwright 现在会自动从根目录 [`.env.local`](/Volumes/灰度映画/灰度映画/美国怀俄明州-Grayscale Luminary LLC/Graylum_AI/GraylumAI_vercel/.env.local) 读取这些变量。
+Playwright 现在会自动从根目录 `.env.local`（仓库根目录的本机配置，不提交到 Git） 读取这些变量。
 
 如果这些测试账号缺失，相关 Playwright 流程会跳过。跳过不等于通过，必须在最终验收里标记为“证据不足”。
 
@@ -125,7 +125,7 @@ Playwright 现在会自动从根目录 [`.env.local`](/Volumes/灰度映画/灰�
 对非开发者更友好的做法，是把本轮人工填写内容同步到仓库内的可见目录：
 
 ```text
-docs/refactor-parity/current-audit/
+docs/archive/2026-09-c2/refactor-parity/current-audit/
 ```
 
 建议至少维护这 3 份文件：

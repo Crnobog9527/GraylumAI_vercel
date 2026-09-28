@@ -2,7 +2,7 @@
 
 ## Overview
 
-GraylumAI uses Supabase PostgreSQL with Drizzle ORM. This page is a core-table overview, not the complete migration ledger. Consult [schema.ts](../packages/db/schema.ts), [SQL migrations](../packages/db/migrations/) and live catalogs for the target environment.
+GraylumAI uses Supabase PostgreSQL. 表结构以 [packages/db/migrations](../packages/db/migrations/) 为准；`schema.ts` 不是权威结构来源。本页仅为早期核心表概览，未覆盖 V3 表；下方初始迁移列表只列到 0007，不代表当前完整结构或迁移状态。目标环境是否已应用迁移，需另行核对该环境的有效证据。
 
 ## Entity Relationship Diagram
 
@@ -40,7 +40,7 @@ User accounts linked to Supabase Auth.
 | role | text (typed values) | 'user' \| 'admin' |
 | status | text (typed values) | 'active' \| 'disabled' \| 'banned' |
 | membership_level | text (typed values) | 'free' \| 'pro' \| 'gold' |
-| credits | integer | Available credits (default: 100) |
+| credits | integer | Available credits (default: 0; migration 0051) |
 | last_login_at | timestamp | Last login time |
 | is_deleted | text | Soft delete flag |
 | created_at | timestamp | Account creation time |
@@ -115,7 +115,7 @@ Three-phase billing audit trail.
 | id | uuid (PK) | Record identifier |
 | user_id | uuid (FK) | User account |
 | transaction_id | uuid (FK) | Related credit transaction |
-| operation_type | enum | 'pre_deduct' \| 'settle' \| 'refund' |
+| operation_type | enum | 'pre_deduct' \| 'settle' \| 'refund' \| 'abort_settle' |
 | amount | integer | Credit change (negative for deduct) |
 | reason | text | Operation description |
 | metadata | jsonb | Additional data (usage info, etc.) |
@@ -245,7 +245,7 @@ Structured application logs.
 | user_id | uuid | Related user |
 | created_at | timestamp | Log time |
 
-### diagnostics_results
+### diagnostic_results
 System health check results.
 
 | Column | Type | Description |
@@ -261,7 +261,7 @@ System health check results.
 
 ## Migrations
 
-The table below lists the initial migrations only. Later migrations remain in the [migration directory](../packages/db/migrations/); schema push alone does not reproduce grants, triggers or RPCs.
+The table below lists only initial migrations 0001–0007 and does not cover V3 tables. Later migrations remain in the [migration directory](../packages/db/migrations/); schema push alone does not reproduce grants, triggers or RPCs.
 
 | File | Description |
 |------|-------------|

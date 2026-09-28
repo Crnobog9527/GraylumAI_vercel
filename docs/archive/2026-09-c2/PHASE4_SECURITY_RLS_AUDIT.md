@@ -18,7 +18,7 @@ Hosted runtime acceptance for the deployed Vercel preview is tracked separately 
 ## Supabase Security Advisor Status
 
 The repo-backed Security Advisor findings shown in Supabase have now been addressed in
-[`packages/db/migrations/0015_security_advisor_hardening.sql`](../packages/db/migrations/0015_security_advisor_hardening.sql)
+[`packages/db/migrations/0015_security_advisor_hardening.sql`](../../../packages/db/migrations/0015_security_advisor_hardening.sql)
 and that migration has been applied to the hosted Supabase database.
 
 This hardening batch covers:
@@ -34,7 +34,7 @@ Two important follow-ups remain outside the repo migration itself:
 2. Any Security Advisor warnings that still reference objects not present in this repo's migrations should be treated as live-database drift and cleaned up directly in the database or brought back into versioned migrations first.
 
 The first hosted drift cleanup batch has also now been applied through
-[`packages/db/migrations/0016_live_db_drift_security_cleanup.sql`](../packages/db/migrations/0016_live_db_drift_security_cleanup.sql),
+[`packages/db/migrations/0016_live_db_drift_security_cleanup.sql`](../../../packages/db/migrations/0016_live_db_drift_security_cleanup.sql),
 which removes stale blanket INSERT policies on `invitation_records` and `user_activity_logs`
 and locks `search_path` on the legacy hosted functions `deduct_credits_atomic()` and
 `update_updated_at_column()`.
