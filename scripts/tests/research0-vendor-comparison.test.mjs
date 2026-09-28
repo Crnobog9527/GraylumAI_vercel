@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -15,6 +15,7 @@ import { displayCount, normalizeTikhub, tikhubFailed } from '../research0/vendor
 import { reanalyze } from '../research0/analyze.mjs';
 import { formatMarkdown } from '../research0/markdown.mjs';
 import { MONID_CATALOG_LIMITS, formatMonidCatalog, runMonidCatalog } from '../research0/monidCatalog.mjs';
+import { runMonidResults } from '../research0/monidResults.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 // Synthetic placeholder assembled at runtime so secret scanners see no key-like literal.
@@ -451,6 +452,29 @@ test('P1-2: a held lock refuses a second paid run; an aborted run keeps the lock
   await assert.rejects(main(args, { env, fetchImpl: slowFetch, log: line => logs.push(line) }), /LEDGER_UNREADABLE/);
   assert.ok((await readdir(dir)).includes('ledger.lock'), 'an aborted run leaves the lock for a person');
   assert.ok(logs.some(line => line.includes('RUN_ABORTED')));
+}));
+
+test('monid result retrieval reads each accepted run once and saves it as step 1', async () => withTemp(async dir => {
+  const raw = path.join(dir, 'raw', 'monid');
+  await mkdir(raw, { recursive: true });
+  for (const [query, status, runId] of [['Q02', 202, 'run_aaaaaaaa'], ['Q03', 202, 'run_bbbbbbbb'], ['Q01', 400, undefined]]) {
+    await writeFile(path.join(raw, `${query}-step0-2026.json`), JSON.stringify({ response: { httpStatus: status, body: { runId, status: 'RUNNING' } } }));
+  }
+  const ledger = await loadLedger(path.join(dir, 'ledger.json'));
+  const { calls, fetchImpl } = recordingFetch(url => new Response(JSON.stringify(
+    url.includes('/runs/') ? { status: 'COMPLETED', output: { code: 200, data: {} }, echo: KEY } : { balance: { value: 1, currency: 'USD' } },
+  )));
+  const report = await runMonidResults({ key: KEY, fetchImpl, ledger, outDir: dir, webQuery: 'q' });
+  assert.deepEqual(calls.map(call => new URL(call.url).pathname), ['/v1/runs/run_aaaaaaaa', '/v1/runs/run_bbbbbbbb', '/v1/run', '/v1/wallet/balance']);
+  assert.deepEqual(JSON.parse(calls[2].init.body).input, { queryParams: { query: 'q', language: 'zh' } });
+  assert.equal(report.steps.length, 4);
+  assert.ok((await readdir(raw)).some(name => name.startsWith('Q02-step1-')));
+  for (const file of await filesUnder(dir)) assert.ok(!(await readFile(file, 'utf8')).includes(KEY), file);
+  const again = recordingFetch(() => okBody());
+  const rerun = await runMonidResults({ key: KEY, fetchImpl: again.fetchImpl, ledger, outDir: dir, webQuery: 'q' });
+  assert.equal(again.calls.length, 0, 'a rerun sends nothing');
+  assert.ok(rerun.steps.every(step => step.reason === 'ALREADY_ATTEMPTED'));
+  await assert.rejects(main(['--monid-results', '--out', dir], { log: () => {} }), /NEEDS_CONFIRMATION/);
 }));
 
 test('application code never imports the comparison script', () => {

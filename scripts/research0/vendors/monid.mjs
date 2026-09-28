@@ -40,7 +40,8 @@ export const monid = {
   maxUsd: 1,
   timeoutMs: 90_000,
   steps(query) {
-    if (query.id === 'Q01') return [run('tinyfish', '/search', { query: query.webQuery, language: 'zh' }, WEB_WORST_USD)];
+    // The docs describe a flat input, but the TinyFish tool rejects it and wants queryParams (400 on 2026-09-28).
+    if (query.id === 'Q01') return [run('tinyfish', '/search', { queryParams: { query: query.webQuery, language: 'zh' } }, WEB_WORST_USD)];
     const [, pathname, params] = TIKHUB_PATHS[query.id];
     return [run('tikhub', `/api/v1${pathname}`, params, LISTED[query.id] * MARGIN)];
   },

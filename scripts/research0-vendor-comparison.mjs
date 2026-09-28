@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { reanalyze } from './research0/analyze.mjs';
 import { formatMarkdown } from './research0/markdown.mjs';
 import { MONID_CATALOG_PLAN, formatMonidCatalog, runMonidCatalog } from './research0/monidCatalog.mjs';
+import { runMonidResults } from './research0/monidResults.mjs';
 import { QUERIES } from './research0/queries.mjs';
 import { formatReport } from './research0/report.mjs';
 import { runComparison } from './research0/runner.mjs';
@@ -43,7 +44,7 @@ function pick(all, csv, label) {
 
 export function parseArgs(argv) {
   const args = {
-    live: false, reanalyze: false, markdown: false, monidCatalog: false, initLedger: false, aisaAlternates: false,
+    live: false, reanalyze: false, markdown: false, monidCatalog: false, initLedger: false, aisaAlternates: false, monidResults: false,
     vendors: null, queries: null, outDir: DEFAULT_OUT_DIR,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -54,6 +55,7 @@ export function parseArgs(argv) {
     else if (arg === '--monid-catalog') args.monidCatalog = true;
     else if (arg === '--init-ledger') args.initLedger = true;
     else if (arg === '--aisa-alternates') args.aisaAlternates = true;
+    else if (arg === '--monid-results') args.monidResults = true;
     else if (arg === '--vendors') args.vendors = value(argv, ++index, arg);
     else if (arg === '--queries') args.queries = value(argv, ++index, arg);
     else if (arg === '--out') args.outDir = path.resolve(value(argv, ++index, arg));
@@ -80,6 +82,8 @@ export function assertOutsideRepository(outDir, root = REPOSITORY_ROOT) {
 
 export async function main(argv = process.argv.slice(2), { env = process.env, fetchImpl = globalThis.fetch, log = console.log } = {}) {
   const args = parseArgs(argv);
+  // Result retrieval only follows runs that were already paid; it has no dry-run meaning.
+  if (args.monidResults && !args.live) throw new Error('RESEARCH0_MONID_RESULTS_NEEDS_CONFIRMATION');
   assertOutsideRepository(args.outDir);
   // --aisa-alternates swaps the vendor list for AIsa's second-round alternate endpoints only.
   const vendors = args.aisaAlternates ? [aisaAlternates] : pick(VENDORS, args.vendors, 'vendor');
@@ -104,12 +108,18 @@ export async function main(argv = process.argv.slice(2), { env = process.env, fe
     log(args.markdown ? formatMarkdown(report, queries) : formatReport(report));
     return report;
   }
-  if (args.monidCatalog && !(typeof env.MONID_API_KEY === 'string' && env.MONID_API_KEY.length > 0)) {
+  if ((args.monidCatalog || args.monidResults) && !(typeof env.MONID_API_KEY === 'string' && env.MONID_API_KEY.length > 0)) {
     throw new Error('RESEARCH0_MONID_KEY_MISSING');
   }
   return withLock(args.outDir, log, async () => {
     // Read only after the lock is held; a missing or unreadable ledger refuses the paid run.
     const ledger = await loadLedger(ledgerFile, { requireExisting: true });
+    if (args.monidResults) {
+      const webQuery = QUERIES.find(query => query.id === 'Q01').webQuery;
+      const results = await runMonidResults({ key: env.MONID_API_KEY, fetchImpl, ledger, outDir: args.outDir, webQuery });
+      for (const step of results.steps) log(`  ${step.label} ${step.status} http=${step.httpStatus ?? '-'} ${step.reason ?? ''}`);
+      return results;
+    }
     if (args.monidCatalog) {
       const catalogue = await runMonidCatalog({ key: env.MONID_API_KEY, fetchImpl, ledger, outDir: args.outDir });
       log(formatMonidCatalog(catalogue));
