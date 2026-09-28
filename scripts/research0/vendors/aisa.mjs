@@ -41,7 +41,6 @@ export const aisa = {
   timeoutMs: 60_000,
   steps(query) {
     if (UNSUPPORTED[query.id]) return { notSupported: UNSUPPORTED[query.id] };
-    if (query.id !== 'Q01' && !TIKHUB_PATHS[query.id]) return { notSupported: 'not in the AIsa test plan' };
     return [spec(query)];
   },
   authorize(requestSpec, key) {

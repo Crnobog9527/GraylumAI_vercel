@@ -54,20 +54,3 @@ export const QUERIES = [
     webQuery: 'National Geographic Instagram @natgeo latest posts',
   },
 ];
-
-// Supplemental round (Owner, 2026-09-28): TikHub after top-up covers the query
-// types the first round did not reach, plus public-page fetches for Firecrawl.
-export const SUPPLEMENTAL_QUERIES = [
-  { id: 'S01', region: 'cn', platform: 'douyin', type: 'keyword', keyword: '露营装备' },
-  { id: 'S02', region: 'global', platform: 'tiktok', type: 'posts', account: { name: 'National Geographic', handle: 'natgeo' } },
-  { id: 'S03', region: 'global', platform: 'youtube', type: 'profile', account: { name: 'NASA', youtubeChannelId: 'UCLA_DiR1FfKNvjuUpBHmylQ' } },
-  { id: 'S04', region: 'global', platform: 'youtube', type: 'keyword', keyword: 'camping gear' },
-  { id: 'S05', region: 'global', platform: 'instagram', type: 'profile', account: { name: 'National Geographic', handle: 'natgeo' } },
-  { id: 'S06', region: 'global', platform: 'instagram', type: 'keyword', keyword: 'camping gear' },
-  { id: 'S07', region: 'global', platform: 'x', type: 'posts', account: { name: 'NASA', handle: 'NASA' } },
-  { id: 'S08', region: 'global', platform: 'x', type: 'keyword', keyword: 'camping gear' },
-  { id: 'S09', region: 'global', platform: 'instagram', type: 'posts', account: { name: 'National Geographic', handle: 'natgeo' } },
-  { id: 'F01', region: 'cn', platform: 'web', type: 'fetch', url: 'https://www.gov.cn/' },
-  { id: 'F02', region: 'global', platform: 'web', type: 'fetch', url: 'https://en.wikipedia.org/wiki/Creator_economy' },
-  { id: 'F03', region: 'global', platform: 'web', type: 'fetch', url: 'https://www.nasa.gov/news/' },
-];
