@@ -8,6 +8,7 @@ import { authoritativeBilling, type FrozenRun, type FrozenCall, type BillingTran
 import {decimal} from '../bill2/decimal';
 import {openRouterBound,OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
 import {createRuntimeBudget,type RuntimeBudget} from './budget';
+import {expiringAuthAfterProvider} from './authReuse';
 import { localFixtureAdapter } from '../bill2/fixtureAdapter';
 import { PostgresSession, type SessionRpc } from './session';
 import { runRuntime, type RuntimeTool } from './runner';
@@ -36,7 +37,7 @@ export const runtimeContext=z.object({
  */
 export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionRpc;actor:()=>Promise<string>;endpoint?:string;adapter?:BillingTransport;activateSkill?:(candidate:MatchCandidate)=>Promise<string>}){
  const budget=options.budget??createRuntimeBudget();
- const adapter=options.adapter ?? localFixtureAdapter(options.endpoint??'');
+ const adapter=expiringAuthAfterProvider(options.adapter ?? localFixtureAdapter(options.endpoint??''),budget.auth);
  const billing=authoritativeBilling({admin:options.database,actor:options.actor,adapter,budget});
  async function rpc<T>(name:string,args:Record<string,unknown>):Promise<T>{
   const result=await options.database.rpc(name,{...args,p_actor_id:z.string().uuid().parse(await options.actor())});
