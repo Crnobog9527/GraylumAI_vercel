@@ -62,6 +62,11 @@ export function parseArgs(argv) {
     else if (arg === '--out') args.outDir = path.resolve(value(argv, ++index, arg));
     else throw new Error(`Unknown argument: ${arg}`);
   }
+  // Modes with a fixed call plan ignore selectors; accepting them would silently widen a paid run.
+  if ((args.monidResults || args.monidCatalog) && (args.vendors !== null || args.queries !== null)) {
+    throw new Error('RESEARCH0_SELECTORS_NOT_SUPPORTED_IN_THIS_MODE');
+  }
+  if (args.aisaAlternates && args.vendors !== null) throw new Error('RESEARCH0_SELECTORS_NOT_SUPPORTED_IN_THIS_MODE');
   return args;
 }
 

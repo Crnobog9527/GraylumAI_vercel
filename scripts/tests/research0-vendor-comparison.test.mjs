@@ -84,6 +84,11 @@ test('the CLI is a dry run unless --confirm-paid-calls is given', async () => wi
   assert.throws(() => parseArgs(['--confirm-paid-calls', '--vendors']), /MISSING_VALUE_FOR_VENDORS/);
   assert.throws(() => parseArgs(['--queries', '', '--confirm-paid-calls']), /MISSING_VALUE_FOR_QUERIES/);
   assert.throws(() => parseArgs(['--vendors', '--confirm-paid-calls']), /MISSING_VALUE_FOR_VENDORS/);
+  for (const argv of [
+    ['--monid-results', '--queries', 'Q02', '--confirm-paid-calls'], ['--monid-results', '--vendors', 'monid'],
+    ['--monid-catalog', '--queries', 'Q01'], ['--aisa-alternates', '--vendors', 'tikhub', '--queries', 'Q02'],
+  ]) assert.throws(() => parseArgs(argv), /SELECTORS_NOT_SUPPORTED/, argv.join(' '));
+  assert.equal(parseArgs(['--aisa-alternates', '--queries', 'Q02']).queries, 'Q02');
   await assert.rejects(main(['--vendors', ',', '--out', dir], { env: {}, log: () => {} }), /EMPTY_VENDOR_SELECTOR/);
   let fetched = 0;
   const env = Object.fromEntries(VENDORS.map(vendor => [vendor.keyEnv, KEY]));
