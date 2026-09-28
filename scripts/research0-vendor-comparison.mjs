@@ -111,6 +111,17 @@ async function canonical(target) {
   }
 }
 
+// Owner decisions (2026-09-28): monid and TinyFish are excluded, and AIsa and SocialCrawl are not
+// called again unless named. Without --vendors only these run; others must be listed explicitly.
+export const DEFAULT_VENDOR_IDS = ['tikhub', 'tavily', 'firecrawl'];
+export const DEFAULT_SUPPLEMENTAL_VENDOR_IDS = ['tikhub', 'firecrawl'];
+
+function selectVendors(args) {
+  if (args.vendors !== null) return pick(VENDORS, args.vendors, 'vendor');
+  const ids = args.supplemental ? DEFAULT_SUPPLEMENTAL_VENDOR_IDS : DEFAULT_VENDOR_IDS;
+  return VENDORS.filter(vendor => ids.includes(vendor.id));
+}
+
 /** Raw responses and the ledger must never land inside the repository, also not through a symlink. */
 export async function assertOutsideRepository(outDir, root = REPOSITORY_ROOT) {
   if (inside(root, path.resolve(outDir)) || inside(await realpath(root), await canonical(outDir))) {
@@ -124,7 +135,7 @@ export async function main(argv = process.argv.slice(2), { env = process.env, fe
   if (args.monidResults && !args.live) throw new Error('RESEARCH0_MONID_RESULTS_NEEDS_CONFIRMATION');
   await assertOutsideRepository(args.outDir);
   // --aisa-alternates swaps the vendor list for AIsa's second-round alternate endpoints only.
-  const vendors = args.aisaAlternates ? [aisaAlternates] : pick(VENDORS, args.vendors, 'vendor');
+  const vendors = args.aisaAlternates ? [aisaAlternates] : selectVendors(args);
   const queries = pick(args.supplemental ? SUPPLEMENTAL_QUERIES : QUERIES, args.queries, 'query');
   if (args.live && args.reanalyze) throw new Error('RESEARCH0_REANALYZE_IS_OFFLINE_ONLY');
   if (args.reanalyze) {

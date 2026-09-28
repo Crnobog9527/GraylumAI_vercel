@@ -648,6 +648,14 @@ test('confirmed failures may be re-sent only with an explicit reason; anything e
   await runComparison({ vendors: [twice], queries: [queries[0]], env: { FAKE_KEY: KEY }, live: true, fetchImpl: secondRetry.fetchImpl,
     ledger, outDir: dir, timeoutMs: 200, retryReason: 'retry 2' });
   assert.deepEqual([firstRetry.calls.length, secondRetry.calls.length], [1, 0], 'at most one re-send per request through the switch');
+  const fresh = fakeVendor({ id: 'fresh', steps: () => [{ method: 'GET', url: 'https://api.example.test/fresh', worstCaseUsd: 0.1 }] });
+  await runComparison({ vendors: [fresh], queries: [queries[0]], env: { FAKE_KEY: KEY }, live: true, fetchImpl: failing().fetchImpl,
+    ledger, outDir: dir, timeoutMs: 200, retryReason: 'switch on for a first attempt' });
+  assert.equal(ledger.entries.at(-1).retryReason, undefined, 'a first attempt is not a re-send');
+  const freshRetry = failing();
+  await runComparison({ vendors: [fresh], queries: [queries[0]], env: { FAKE_KEY: KEY }, live: true, fetchImpl: freshRetry.fetchImpl,
+    ledger, outDir: dir, timeoutMs: 200, retryReason: 'real retry' });
+  assert.equal(freshRetry.calls.length, 1, 'the promised single re-send is still available');
   const shaky = fakeVendor({ id: 'shaky', steps: () => [{ method: 'GET', url: 'https://api.example.test/x', worstCaseUsd: 0.1 }] });
   const lost = recordingFetch(() => { throw new TypeError('reset'); });
   await run(dir, { vendor: shaky, fetchImpl: lost.fetchImpl, qs: [queries[0]], ledger });
@@ -679,6 +687,30 @@ test('supplemental plans stay within every vendor cap and never touch social pla
     assert.ok(!/tiktok|douyin|instagram|x\.com|twitter|youtube|xiaohongshu|weibo|bilibili/.test(query.url), query.url);
   }
 });
+
+test('a paid run sends exactly the requests its dry-run plan lists, balance reads included', async () => withTemp(async dir => {
+  const balance = { spec: () => ({ method: 'GET', url: 'https://api.example.test/balance', worstCaseUsd: 0, documentedFree: true }), read: () => 1 };
+  const busy = fakeVendor({ id: 'busy', balance, steps: query => [{ method: 'GET', url: `https://api.example.test/q/${query.id}`, worstCaseUsd: 0.1 }] });
+  const idle = fakeVendor({ id: 'idle', keyEnv: 'IDLE_KEY', balance, steps: () => ({ notSupported: 'nothing to run' }) });
+  const env = { FAKE_KEY: KEY, IDLE_KEY: 'k2' };
+  const planned = (await runComparison({ vendors: [busy, idle], queries, env, live: false, ledger: { entries: [] }, outDir: dir }))
+    .vendors.flatMap(vendor => vendor.plan.lines.filter(line => !line.notSupported).map(line => `${line.method} ${line.url}`));
+  const { calls, fetchImpl } = recordingFetch(url => (url.endsWith('/balance') ? new Response('{}') : okBody()));
+  await run(dir, { vendor: busy, fetchImpl, env, qs: queries });
+  const idleRun = recordingFetch(() => okBody());
+  await runComparison({ vendors: [idle], queries, env, live: true, fetchImpl: idleRun.fetchImpl,
+    ledger: await loadLedger(path.join(dir, 'ledger.json')), outDir: dir, timeoutMs: 200 });
+  assert.deepEqual(calls.map(call => `${call.init.method} ${call.url}`), planned);
+  assert.equal(idleRun.calls.length, 0, 'a vendor with nothing runnable sends nothing, not even a balance read');
+}));
+
+test('without --vendors only the Owner-kept vendors run; excluded ones must be named', async () => withTemp(async dir => {
+  const ids = async argv => (await main([...argv, '--out', dir], { env: {}, fetchImpl: async () => { throw new Error('no network'); }, log: () => {} }))
+    .vendors.map(vendor => vendor.id);
+  assert.deepEqual(await ids([]), ['tikhub', 'tavily', 'firecrawl']);
+  assert.deepEqual(await ids(['--supplemental']), ['tikhub', 'firecrawl']);
+  assert.deepEqual(await ids(['--vendors', 'monid,tinyfish']), ['tinyfish', 'monid']);
+}));
 
 test('application code never imports the comparison script', () => {
   const result = spawnSync('git', ['grep', '-l', '-i', '-e', 'research0', '--', 'apps', 'packages'], { cwd: repositoryRoot, encoding: 'utf8' });

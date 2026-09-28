@@ -102,7 +102,16 @@ export function planVendor(vendor, queries, secrets = []) {
       }
     }
   }
-  return { vendor: vendor.id, lines, worstCaseUsd: Math.round(worstCaseUsd * 1e6) / 1e6 };
+  // A vendor with nothing runnable sends nothing at all, balance reads included.
+  const runnable = lines.some(line => !line.notSupported);
+  if (runnable && vendor.balance && !vendor.blockedReason) {
+    // Balance reads are real requests too, so the plan lists them where the run sends them.
+    const balance = { ...describeSpec(vendor.balance.spec(), secrets), worstCaseUsd: vendor.balance.spec().worstCaseUsd };
+    lines.unshift({ queryId: 'BALANCE_BEFORE', ...balance });
+    lines.push({ queryId: 'BALANCE_AFTER', ...balance });
+    worstCaseUsd += 2 * (balance.worstCaseUsd ?? 0);
+  }
+  return { vendor: vendor.id, lines, runnable, worstCaseUsd: Math.round(worstCaseUsd * 1e6) / 1e6 };
 }
 
 async function saveRaw(context, { vendor, query, stepIndex, spec, result, secrets }) {
@@ -141,7 +150,9 @@ async function runQuery(context, vendor, query, key, secrets) {
     // Booked (and written to disk) before dispatch; a failed write throws and nothing is sent.
     const record = await reserve(context.ledger, {
       vendor: vendor.id, queryId: query.id, step: index, at: context.now().toISOString(), worstCaseUsd: spec.worstCaseUsd, requestKey: attemptKey,
-      ...(context.retryReason ? { retryReason: context.retryReason } : {}),
+      // Only an actual re-send (an earlier attempt exists) consumes the one retry the switch allows.
+      ...(context.retryReason && context.ledger.entries.some(entry => entry.requestKey === attemptKey)
+        ? { retryReason: context.retryReason } : {}),
     });
     const result = await callOnce(context.fetchImpl, vendor.authorize(spec, key), vendor.timeoutMs ?? context.timeoutMs);
     const json = parseJson(result.body);
@@ -214,7 +225,7 @@ export async function runComparison({ vendors, queries, env, live, fetchImpl, le
     const entry = { id: vendor.id, label: vendor.label, keyPresent, blockedReason: vendor.blockedReason ?? null, plan, queries: [] };
     report.vendors.push(entry);
     let stopReason = null;
-    const measureBalance = live && keyPresent && !vendor.blockedReason && vendor.balance;
+    const measureBalance = live && keyPresent && !vendor.blockedReason && vendor.balance && plan.runnable;
     const before = measureBalance ? await readBalance(context, vendor, key, secrets, 'BALANCE_BEFORE') : null;
     for (const query of queries) {
       if (!live) entry.queries.push({ queryId: query.id, status: 'DRY_RUN' });
