@@ -99,6 +99,9 @@ export const STREAM_INTERRUPTED = "OPC_EXECUTION_STREAM_INTERRUPTED";
  * caller can retain it before any text arrives. A stream that ends without a
  * result was interrupted: the caller resumes by execution id or resends the
  * same request, never a new one.
+ *
+ * `onFinished` runs once when the stream ends for any reason, for example to
+ * re-read the credit balance: a finished turn may have settled a charge.
  */
 export async function readAgentTurn(
   events: AsyncIterable<AgentTurnEvent>,
@@ -106,17 +109,22 @@ export async function readAgentTurn(
     executionId?: string;
     onAdmitted?: (executionId: string) => void;
     onProgress: (executionId: string, event: AgentTurnEvent) => void;
+    onFinished?: () => void;
   },
 ): Promise<{ executionId: string; result: AgentTurnOutcome }> {
   let executionId = handlers.executionId;
   let result: AgentTurnOutcome | undefined;
-  for await (const event of events) {
-    if (event.type === "admitted") {
-      if (executionId) continue;
-      executionId = event.executionId;
-      handlers.onAdmitted?.(executionId);
-    } else if (event.type === "result") result = event.result;
-    else if (executionId) handlers.onProgress(executionId, event);
+  try {
+    for await (const event of events) {
+      if (event.type === "admitted") {
+        if (executionId) continue;
+        executionId = event.executionId;
+        handlers.onAdmitted?.(executionId);
+      } else if (event.type === "result") result = event.result;
+      else if (executionId) handlers.onProgress(executionId, event);
+    }
+  } finally {
+    handlers.onFinished?.();
   }
   if (!executionId || !result) throw new Error(STREAM_INTERRUPTED);
   return { executionId, result };

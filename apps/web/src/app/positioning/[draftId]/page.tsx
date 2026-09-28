@@ -176,7 +176,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if(executionId)setLiveReply(startLiveReply(executionId));
     try{
       ({result}=await readAgentTurn(await open(),{executionId,onAdmitted:id=>{current=id;setLiveReply(startLiveReply(id));onAdmitted?.(id);},
-        onProgress:(id,event)=>setLiveReply(old=>liveReplyAfter(old,id,event))}));
+        onProgress:(id,event)=>setLiveReply(old=>liveReplyAfter(old,id,event)),onFinished:()=>void utils.credits.getBalance.invalidate()}));
       const notice=turnResultNotice(result);if(notice)setError(notice);
       return result;
     }finally{

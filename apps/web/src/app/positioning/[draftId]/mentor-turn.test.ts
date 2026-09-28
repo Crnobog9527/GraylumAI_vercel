@@ -113,6 +113,40 @@ describe("readAgentTurn", () => {
   });
 });
 
+describe("readAgentTurn onFinished", () => {
+  it("runs exactly once after a completed turn, an interrupted stream and a transport error", async () => {
+    const completed = vi.fn();
+    await readAgentTurn(stream([{ type: "admitted", executionId }, { type: "result", result: { state: "completed" } }]), {
+      onProgress: () => {},
+      onFinished: completed,
+    });
+    expect(completed).toHaveBeenCalledTimes(1);
+
+    const interrupted = vi.fn();
+    await expect(readAgentTurn(stream([{ type: "admitted", executionId }]), { onProgress: () => {}, onFinished: interrupted })).rejects.toThrow(
+      STREAM_INTERRUPTED,
+    );
+    expect(interrupted).toHaveBeenCalledTimes(1);
+
+    const failed = vi.fn();
+    async function* broken(): AsyncGenerator<AgentTurnEvent> {
+      yield { type: "admitted", executionId };
+      throw new Error("network");
+    }
+    await expect(readAgentTurn(broken(), { onProgress: () => {}, onFinished: failed })).rejects.toThrow("network");
+    expect(failed).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs after the result has been read, so a settled charge is visible to the refresh", async () => {
+    const order: string[] = [];
+    await readAgentTurn(
+      stream([{ type: "admitted", executionId }, { type: "result", result: { state: "completed" } }]),
+      { onAdmitted: () => order.push("admitted"), onProgress: () => {}, onFinished: () => order.push("finished") },
+    );
+    expect(order).toEqual(["admitted", "finished"]);
+  });
+});
+
 describe("parseStepEnvelope", () => {
   it("reads the current envelope, a pre-upgrade bare request and an admitted envelope", () => {
     expect(parseStepEnvelope(JSON.stringify({ request }))).toEqual({ request, information: undefined, editingSnapshot: undefined });
