@@ -6,7 +6,7 @@ import {z} from 'zod';
 import type {Budget} from './budget.ts';
 import type {ProbeConfig} from './config.ts';
 import {askQuestionArgs, classifyAsk, type AskOutcome} from './classify.ts';
-import {readReference, type LoadedSkill, type Scenario} from './skill.ts';
+import {readReference, stepRules, type LoadedSkill, type Scenario} from './skill.ts';
 import {LOCAL_BASE_URL, probeTransport, type CallRecord, type Upstream} from './transport.ts';
 
 const readReferenceArgs = z.object({path: z.string().min(1).max(512)}).strict();
@@ -53,10 +53,29 @@ export type TrialResult = {
   calls: CallRecord[];
 };
 
-function historyItems(scenario: Scenario): AgentInputItem[] {
-  const items: AgentInputItem[] = scenario.history.map(message => message.role === 'user'
-    ? {role: 'user', content: message.content}
-    : {role: 'assistant', status: 'completed', content: [{type: 'output_text', text: message.content}]});
+/** What the ask_question tool returns; history replays the same result. */
+const askCard = (args: z.infer<typeof askQuestionArgs>) => JSON.stringify({card: 'question', ...args});
+
+export function historyItems(scenario: Scenario): AgentInputItem[] {
+  const items: AgentInputItem[] = [];
+  scenario.history.forEach((message, position) => {
+    if (message.role === 'user') {
+      items.push({role: 'user', content: message.content});
+      return;
+    }
+    if (message.content) {
+      items.push({role: 'assistant', status: 'completed', content: [{type: 'output_text', text: message.content}]});
+    }
+    if ('askQuestion' in message) {
+      // The chat converter merges this into the preceding assistant message as tool_calls,
+      // then sends the result as a tool message: the shape a stored question card has.
+      const callId = `call_history_${position}`;
+      items.push({type: 'function_call', callId, name: 'ask_question', arguments: JSON.stringify(message.askQuestion),
+        status: 'completed'});
+      items.push({type: 'function_call_result', callId, name: 'ask_question', status: 'completed',
+        output: askCard(message.askQuestion)});
+    }
+  });
   items.push({role: 'user', content: scenario.input});
   return items;
 }
@@ -92,7 +111,7 @@ export async function runTrial(options: {
     parameters: askQuestionArgs, errorFunction: null,
     execute: async args => {
       askExecutions += 1;
-      return JSON.stringify({card: 'question', ...args});
+      return askCard(args);
     },
   });
   const read = tool({
@@ -105,8 +124,8 @@ export async function runTrial(options: {
     },
   });
   const tools = kind === 'text' ? [] : kind === 'ask' ? [ask] : [read, ask];
-  const instructions = [HOST_RULES, kind === 'reference' ? REFERENCE_RULE : '', '# Skill', options.skill.instructions]
-    .filter(Boolean).join('\n\n');
+  const instructions = [HOST_RULES, kind === 'reference' ? REFERENCE_RULE : '', stepRules(options.skill, scenario.step),
+    '# Skill', options.skill.instructions].filter(Boolean).join('\n\n');
   const agent = new Agent({
     name: 'AC-0 probe mentor', model, instructions, tools,
     toolUseBehavior: kind === 'text' ? 'run_llm_again' : {stopAtToolNames: ['ask_question']},

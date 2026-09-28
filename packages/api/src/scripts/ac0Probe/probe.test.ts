@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {classifyAsk} from './classify.ts';
-import {createBudget, HARD_MAX_CALLS, memoryLedger, usdToNano, validateCaps} from './budget.ts';
+import {createBudget, HARD_MAX_CALLS, HARD_MAX_USD, memoryLedger, usdToNano, validateCaps} from './budget.ts';
 import {resolveConfigs} from './config.ts';
 import {sseResponse, syntheticUpstream, textDeltas, toolDeltas} from './dryRun.ts';
 import {assertOutsideRepository, KEY_ENV, runProbe} from './main.ts';
@@ -91,10 +91,12 @@ describe('dry run', () => {
 });
 
 describe('limits', () => {
-  it('refuses caps above the hard total of 200 calls and 3 USD', async () => {
+  it('refuses caps above the hard total of 350 calls and 3 USD', async () => {
+    expect(HARD_MAX_CALLS).toBe(350);
+    expect(HARD_MAX_USD).toBe(3);
     expect(() => validateCaps(HARD_MAX_CALLS + 1, 1)).toThrow('PROBE_CAP_REFUSED');
     expect(() => validateCaps(10, 3.01)).toThrow('PROBE_CAP_REFUSED');
-    expect(() => parseProbeArgs(['--max-calls', '201'], home)).toThrow('PROBE_CAP_REFUSED');
+    expect(() => parseProbeArgs(['--max-calls', String(HARD_MAX_CALLS + 1)], home)).toThrow('PROBE_CAP_REFUSED');
     expect(() => parseProbeArgs(['--max-usd', '3.5'], home)).toThrow('PROBE_CAP_REFUSED');
     expect(parseProbeArgs([], home)).toMatchObject({maxCalls: 60, maxUsd: 1, live: false});
     const network = recording();
@@ -117,7 +119,7 @@ describe('limits', () => {
     const usd = createBudget({maxCalls: 10, maxUsd: 0.01, ledger: memoryLedger()});
     usd.reserve(usdToNano(0.006));
     expect(() => usd.reserve(usdToNano(0.006))).toThrow('run_usd_cap');
-    const total = createBudget({maxCalls: 10, maxUsd: 1, ledger: memoryLedger({calls: 200, nanoUsd: 0})});
+    const total = createBudget({maxCalls: 10, maxUsd: 1, ledger: memoryLedger({calls: HARD_MAX_CALLS, nanoUsd: 0})});
     expect(() => total.reserve(1)).toThrow('total_call_cap');
     const spent = createBudget({maxCalls: 10, maxUsd: 1, ledger: memoryLedger({calls: 0, nanoUsd: usdToNano(2.999999)})});
     expect(() => spent.reserve(usdToNano(0.01))).toThrow('total_usd_cap');
@@ -139,7 +141,7 @@ describe('limits', () => {
 
   it('refuses a live run once the cumulative ledger is exhausted', async () => {
     mkdirSync(join(home, '.graylum', 'ac0'), {recursive: true});
-    writeFileSync(join(home, '.graylum', 'ac0', 'ledger.json'), JSON.stringify({calls: 200, nanoUsd: 0}));
+    writeFileSync(join(home, '.graylum', 'ac0', 'ledger.json'), JSON.stringify({calls: HARD_MAX_CALLS, nanoUsd: 0}));
     const id = await planId(base('--ask', '1'));
     const network = recording();
     const outcome = await runProbe([...base('--ask', '1', '--live'), '--confirm', id], {[KEY_ENV]: KEY},
@@ -452,16 +454,16 @@ describe('cumulative ledger (review P1-1)', () => {
 
   it('records external usage without sending and counts it against the total', async () => {
     const network = recording();
-    const record = ['--record-external-calls', '199', '--record-external-usd', '0.5', '--external-note', 'browser measurement'];
+    const record = ['--record-external-calls', String(HARD_MAX_CALLS - 1), '--record-external-usd', '0.5', '--external-note', 'browser measurement'];
     expect((await runProbe(record, {[KEY_ENV]: KEY}, deps(network.upstream))).exitCode).toBe(0);
     const ledger = JSON.parse(readFileSync(ledgerPath(), 'utf8'));
-    expect(ledger).toMatchObject({calls: 199, nanoUsd: 500_000_000, external: [{calls: 199, usd: 0.5, note: 'browser measurement'}]});
+    expect(ledger).toMatchObject({calls: HARD_MAX_CALLS - 1, nanoUsd: 500_000_000, external: [{calls: HARD_MAX_CALLS - 1, usd: 0.5, note: 'browser measurement'}]});
     expect((await runProbe([...record, '--live'], {}, deps(network.upstream))).exitCode).toBe(2);
     const id = await planId(base('--ask', '2'));
     const outcome = await runProbe([...base('--ask', '2', '--live'), '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
     expect(outcome.stop).toBe('budget:total_call_cap');
     expect(network.sent).toHaveLength(1);
-    expect(JSON.parse(readFileSync(ledgerPath(), 'utf8'))).toMatchObject({calls: 200, external: [{calls: 199}]});
+    expect(JSON.parse(readFileSync(ledgerPath(), 'utf8'))).toMatchObject({calls: HARD_MAX_CALLS, external: [{calls: HARD_MAX_CALLS - 1}]});
   });
 });
 
@@ -658,5 +660,87 @@ describe('ledger location (third review)', () => {
       if (name !== 'paths.ts') expect(source, name).not.toMatch(/userInfo\(/);
     }
     expect(readFileSync(join(__dirname, 'main.ts'), 'utf8')).toContain('deps.home ?? accountHome()');
+  });
+});
+
+describe('question-card history and step fields', () => {
+  function privateSkill(workflow = true) {
+    const dir = join(home, 'skill');
+    mkdirSync(join(dir, 'references'), {recursive: true});
+    writeFileSync(join(dir, 'SKILL.md'), '# Synthetic Skill\nGuide the user one question at a time.\n');
+    writeFileSync(join(dir, 'references', 'step-1.md'), 'Synthetic reference.\n');
+    if (workflow) {
+      writeFileSync(join(dir, 'workflow.yaml'), JSON.stringify({steps: [{title: 'Basics', information: [
+        {id: 'a', title: 'Offer', required: true}, {id: 'b', title: 'Channel', required: true}, {id: 'c', title: 'Notes', required: false},
+      ]}]}));
+    }
+    return dir;
+  }
+  const card = {question: 'Which channel first?', options: ['Channel A', 'Channel B']};
+  function scenarios(list: unknown[]) {
+    const path = join(home, 'scenarios.json');
+    writeFileSync(path, JSON.stringify({scenarios: list}));
+    return path;
+  }
+  const withHistory = {
+    id: 'tool-history', kind: 'ask', step: 0, expectStepComplete: true,
+    history: [
+      {role: 'user', content: 'I sell handmade cups.'},
+      {role: 'assistant', content: 'Nice, cups travel well.', askQuestion: card},
+      {role: 'user', content: 'Channel A'},
+    ],
+    input: 'That is all I can say about it for now.',
+  };
+
+  it('replays a question card as a tool call and its result, and gives the model the step fields', async () => {
+    const args = ['--out-dir', outDir(), '--configs', 'qwen-deepinfra-none', '--skill-dir', privateSkill(),
+      '--scenarios', scenarios([withHistory]), '--ask', '1'];
+    const id = await planId(args);
+    const network = recording(askResponse({question: 'Anything else?', options: ['Yes', 'No']}));
+    const outcome = await runProbe([...args, '--live', '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
+    expect(outcome.exitCode).toBe(0);
+    const messages = network.sent[0]!.body.messages as Array<Record<string, any>>;
+    const assistant = messages.find(message => message.role === 'assistant')!;
+    expect(assistant.content).toEqual([{type: 'text', text: 'Nice, cups travel well.'}]);
+    expect(assistant.tool_calls).toHaveLength(1);
+    expect(assistant.tool_calls[0].function).toEqual({name: 'ask_question', arguments: JSON.stringify(card)});
+    const tool = messages[messages.indexOf(assistant) + 1]!;
+    expect(tool).toMatchObject({role: 'tool', tool_call_id: assistant.tool_calls[0].id});
+    expect(JSON.parse(tool.content)).toEqual({card: 'question', ...card});
+    expect(messages.slice(-2).map(message => message.role)).toEqual(['user', 'user']);
+    const system = messages[0]!;
+    expect(system.role).toBe('system');
+    expect(system.content).toContain('Current step: Basics.');
+    expect(system.content).toContain('Required information for this step: Offer, Channel.');
+    expect(system.content).not.toContain('Notes');
+    expect(outcome.results![0]).toMatchObject({expectStepComplete: true, outcome: {category: 'correct'}});
+    // Step fields and history stay in the request; summaries carry none of them.
+    const summary = readFileSync(join(outcome.runDir!, 'summary.json'), 'utf8') + readFileSync(join(outcome.runDir!, 'summary.md'), 'utf8');
+    for (const text of ['Basics', 'Offer', 'Channel A', 'handmade']) expect(summary).not.toContain(text);
+  });
+
+  it('refuses tool history in text scenarios and steps the Skill does not declare', async () => {
+    const text = {...withHistory, id: 'text-history', kind: 'text', step: undefined};
+    let outcome = await runProbe(['--out-dir', outDir(), '--skill-dir', privateSkill(), '--scenarios', scenarios([text]),
+      '--ask', '0', '--text', '1'], {}, deps());
+    expect(outcome.exitCode).toBe(2);
+    expect(out.join('')).toContain('PROBE_SCENARIO_TOOL_HISTORY_UNSUPPORTED');
+    outcome = await runProbe(['--out-dir', outDir(), '--skill-dir', privateSkill(), '--scenarios',
+      scenarios([{...withHistory, step: 3}]), '--ask', '1'], {}, deps());
+    expect(outcome.exitCode).toBe(2);
+    expect(out.join('')).toContain('PROBE_SCENARIO_STEP_UNAVAILABLE');
+    rmSync(join(home, 'skill'), {recursive: true});
+    outcome = await runProbe(['--out-dir', outDir(), '--skill-dir', privateSkill(false), '--scenarios',
+      scenarios([withHistory]), '--ask', '1'], {}, deps());
+    expect(outcome.exitCode).toBe(2);
+  });
+
+  it('changes the Skill digest only when workflow.yaml is present', async () => {
+    const args = (dir: string) => ['--out-dir', outDir(), '--skill-dir', dir, '--scenarios',
+      scenarios([{...withHistory, step: undefined}]), '--ask', '1'];
+    const withWorkflow = (await runProbe(args(privateSkill()), {}, deps())).plan!.skillDigest;
+    rmSync(join(home, 'skill'), {recursive: true});
+    const without = (await runProbe(args(privateSkill(false)), {}, deps())).plan!.skillDigest;
+    expect(withWorkflow).not.toBe(without);
   });
 });
