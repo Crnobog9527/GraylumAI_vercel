@@ -118,6 +118,8 @@ export const DEFAULT_SUPPLEMENTAL_VENDOR_IDS = ['tikhub', 'firecrawl'];
 
 function selectVendors(args) {
   if (args.vendors !== null) return pick(VENDORS, args.vendors, 'vendor');
+  // Offline re-analysis sends nothing, so it covers every vendor's saved results by default.
+  if (args.reanalyze) return VENDORS;
   const ids = args.supplemental ? DEFAULT_SUPPLEMENTAL_VENDOR_IDS : DEFAULT_VENDOR_IDS;
   return VENDORS.filter(vendor => ids.includes(vendor.id));
 }
