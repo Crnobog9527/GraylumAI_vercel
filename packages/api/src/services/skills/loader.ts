@@ -94,13 +94,18 @@ async function enabled(source: SkillSource, identity: PackageIdentity): Promise<
  * revision's files never change, and the validated packageHash binds each
  * path to its sha256, so an entry keyed by that whole identity can only hold
  * the exact verified bytes. Authorization is never cached: every activation
- * still checks state before use and again before returning. */
-const RESOURCE_CACHE_ENTRIES = 256, RESOURCE_CACHE_BYTES = 16 * 1024 * 1024;
+ * still checks state before use and again before returning.
+ * Limits: at most 256 files and 16 MiB in total, least recently used evicted
+ * first; a file above 1 MiB is never cached and is read on every use. Entries
+ * are immutable strings, so no caller can change cached content. The cache is
+ * per process: each server instance keeps its own and nothing is shared. */
+const RESOURCE_CACHE_ENTRIES = 256, RESOURCE_CACHE_BYTES = 16 * 1024 * 1024, RESOURCE_CACHE_FILE_BYTES = 1024 * 1024;
 const resourceCache = new Map<string, { text: string; bytes: number }>();
 let resourceCacheBytes = 0;
 /** Test isolation only. */
 export function clearSkillResourceCache(): void { resourceCache.clear(); resourceCacheBytes = 0; }
 function cacheResource(key: string, text: string, bytes: number) {
+  if (bytes > RESOURCE_CACHE_FILE_BYTES) return;
   resourceCache.set(key, { text, bytes }); resourceCacheBytes += bytes;
   for (const [oldest, entry] of resourceCache) {
     if (resourceCache.size <= RESOURCE_CACHE_ENTRIES && resourceCacheBytes <= RESOURCE_CACHE_BYTES) break;

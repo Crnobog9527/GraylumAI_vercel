@@ -102,9 +102,9 @@ export const runtimeRouter=router({
   if(modules.error)throw new Error('RUNTIME_SKILLS_UNAVAILABLE');
   const skills:Array<{moduleId:string;revisionId:string;name:string}>=[];
   for(const m of modules.data){if(!m.skill_id||(ctx.real&&!ctx.real.callPolicies.some(q=>q.modelId===m.model_id)))continue;try{
-   // AC-0c: this request's user-scoped read above already admitted the module.
-   const activeModule=visible.data.find(v=>v.id===m.id);
-   const source=databaseSkillSource({userClient:ctx.userScopedSupabase,privateClient:ctx.supabaseAdmin,moduleId:m.id,skillId:m.skill_id,activeModule,...(m.id===workModuleId&&workRevisionId?{revisionId:workRevisionId}:{})});
+   // AC-0c: reuse this request's user-scoped (RLS) read above, never the service-role row.
+   const userVisibleModule=visible.data.find(v=>v.id===m.id);
+   const source=databaseSkillSource({userClient:ctx.userScopedSupabase,privateClient:ctx.supabaseAdmin,moduleId:m.id,skillId:m.skill_id,userVisibleModule,...(m.id===workModuleId&&workRevisionId?{revisionId:workRevisionId}:{})});
    const descriptors=await source.list();
    const list=await discoverSkills(source);
    for(const s of list.filter(()=>ctx.real||work||models.data.some(model=>model.id===m.model_id))){

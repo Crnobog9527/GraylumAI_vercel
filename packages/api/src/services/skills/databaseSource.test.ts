@@ -2,7 +2,7 @@
 import {it,expect,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {databaseSkillSource} from './databaseSource';
-import {packageHash,sha256} from './loader';
+import {activateSkill,clearSkillResourceCache,discoverSkills,identityOf,packageHash,sha256} from './loader';
 
 const moduleId='00000000-0000-4000-8000-0000000000a1',skillId='00000000-0000-4000-8000-0000000000b1',revisionId='00000000-0000-4000-8000-0000000000c1';
 const entry='---\nname: demo\ndescription: Demo.\n---\nBody\n';
@@ -51,12 +51,25 @@ it('never reuses a denied module admission and denies a revoked revision on the 
 
 it('accepts only an already-read row proving this exact module active',async()=>{
  const c=clients();
- await databaseSkillSource({userClient:c.user,privateClient:c.admin,moduleId,skillId,revisionId,activeModule:{id:moduleId,active:true}}).list();
+ await databaseSkillSource({userClient:c.user,privateClient:c.admin,moduleId,skillId,revisionId,userVisibleModule:{id:moduleId,active:true}}).list();
  expect(c.moduleReads).not.toHaveBeenCalled();expect(c.rpc).toHaveBeenCalledTimes(1);
- for(const activeModule of [{id:moduleId,active:false},{id:'00000000-0000-4000-8000-0000000000a2',active:true},{id:moduleId,active:'true'}])
-  expect(()=>databaseSkillSource({userClient:c.user,privateClient:c.admin,moduleId,skillId,revisionId,activeModule})).toThrow('UNAVAILABLE');
+ for(const userVisibleModule of [{id:moduleId,active:false},{id:'00000000-0000-4000-8000-0000000000a2',active:true},{id:moduleId,active:'true'}])
+  expect(()=>databaseSkillSource({userClient:c.user,privateClient:c.admin,moduleId,skillId,revisionId,userVisibleModule})).toThrow('UNAVAILABLE');
  // The service RPC still independently denies a module that became inactive.
  c.state.serviceAllowed=false;
- await expect(databaseSkillSource({userClient:c.user,privateClient:c.admin,moduleId,skillId,revisionId,activeModule:{id:moduleId,active:true}}).list())
+ await expect(databaseSkillSource({userClient:c.user,privateClient:c.admin,moduleId,skillId,revisionId,userVisibleModule:{id:moduleId,active:true}}).list())
   .rejects.toMatchObject({code:'UNAVAILABLE'});
+});
+
+it('reuses a listing only where the loader checks state immediately after it',async()=>{
+ for(const reach of ['activate','discover'] as const){
+  clearSkillResourceCache();
+  const c=clients(),source=databaseSkillSource({userClient:c.user,privateClient:c.admin,moduleId,skillId,revisionId});
+  const [descriptor]=await source.list();
+  // Revoked between the checked first listing and the loader's reuse of it.
+  c.state.serviceAllowed=false;
+  if(reach==='activate')await expect(activateSkill(source,identityOf(descriptor),{maxContextBytes:10000})).rejects.toMatchObject({code:'UNAVAILABLE'});
+  else expect(await discoverSkills(source)).toEqual([]);
+  expect(c.rpc).toHaveBeenCalledTimes(2);
+ }
 });

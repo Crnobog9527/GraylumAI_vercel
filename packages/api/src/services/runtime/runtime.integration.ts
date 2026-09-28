@@ -926,22 +926,35 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
    start:{prelude:2,policy:0,host:1},
    ordinary:{prelude:2,policy:0,host:0,admission:5},
    stream:{prelude:2,policy:0,host:0,execute:6,provider:5},
-   skill:{prelude:2,policy:0,host:0,admission:11},
+   skill:{prelude:2,policy:0,host:0,admission:12},
    execute:{prelude:2,policy:0,host:0,execute:6,provider:5},
-   skillWarm:{prelude:2,policy:0,host:0,admission:9},
+   skillWarm:{prelude:2,policy:0,host:0,admission:10},
   });
   // AC-0c: Auth verifies once per invocation and credential, plus once again
   // after the provider response (AC-0 baseline was 2/6/9/12/9).
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
   expect(label('auth/v1/user')).toEqual({start:1,ordinary:1,stream:2,skill:1,execute:2,skillWarm:1});
-  // AC-0c: one module read per request (AC-0 baseline 7 for the Skill prepare);
-  // package checks before use and before delivery remain on every request.
-  expect(label('rest/modules')).toMatchObject({skill:1,skillWarm:1});
+  // AC-0c: one service-role and one user-scoped (RLS) module read per request
+  // (AC-0 baseline 7 for the Skill prepare); package checks before use and
+  // before delivery remain on every request.
+  expect(label('rest/modules')).toMatchObject({skill:2,skillWarm:2});
   expect(label('rpc/read_skill_package')).toMatchObject({skill:5,skillWarm:3});
-  // A warm cache never bypasses the per-request checks.
-  await db.query('update modules set active=false where id=$1',[moduleId]);
-  await expect(skillPrepare()).rejects.toThrow();
-  await db.query('update modules set active=true where id=$1',[moduleId]);
+  // A warm cache never bypasses the per-request checks: each of these is denied
+  // in the very next request, and the same warm request succeeds once restored.
+  const denials:[string,string,string][]=[
+   ['update modules set active=false where id=$1','update modules set active=true where id=$1',moduleId],
+   ["update skills set status='draft' where id=$1","update skills set status='published' where id=$1",pack.id],
+   ["update profiles set status='disabled' where id=$1","update profiles set status='active' where id=$1",actor],
+  ];
+  for(const [deny,restore,id] of denials){
+   await db.query(deny,[id]);
+   try{await expect(skillPrepare()).rejects.toThrow();}finally{await db.query(restore,[id]);}
+   await skillPrepare();
+  }
+  // The service role still sees the module, but the user-scoped (RLS) read does not.
+  await db.query('create policy ac0c_user_hidden on public.modules as restrictive for select to authenticated using (id<>$$'+moduleId+'$$::uuid)');
+  try{await expect(skillPrepare()).rejects.toThrow();}finally{await db.query('drop policy ac0c_user_hidden on public.modules');}
+  await skillPrepare();
   await db.query('select revoke_skill_revision($1,$2)',[pack.revisionId,actor]);
   await expect(skillPrepare()).rejects.toThrow();
   for(const m of [ordinary,skill])expect(m.summary.executionIds).toEqual([m.result.executionId]);

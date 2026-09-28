@@ -6,23 +6,24 @@ import { fail, sameIdentity, validateDescriptor, type PackageDescriptor, type Pa
  * admission before the narrowly scoped service RPC can return private content.
  * No browser route exports this source or accepts a caller-supplied actor ID.
  *
- * AC-0c: public module admission (RLS: the module is active) is read once per
- * source, i.e. once per request. A trusted server caller that has already read
- * this exact module row as active in the same request may pass it instead.
+ * AC-0c: the user-scoped module admission (subject to RLS) is read once per
+ * source, i.e. once per request. A caller that already made that same
+ * user-scoped read of active modules in this request may pass the row it got.
+ * A service-role read must never be passed: RLS may later differ per user.
  * Every service RPC still independently checks actor, module, publication and
  * revocation; nothing here survives the request. */
 export function databaseSkillSource(options: {
   userClient: SupabaseClient; privateClient: SupabaseClient | null;
   moduleId: string; skillId: string; revisionId?: string;
-  activeModule?: { id: unknown; active: unknown };
+  userVisibleModule?: { id: unknown; active: unknown };
 }): SkillSource {
   options = { ...options };
   if (typeof window !== 'undefined') fail('UNAVAILABLE');
   let selected: PackageDescriptor | undefined;
   let admitted: Promise<void> | undefined;
-  if (options.activeModule) {
-    // Fail closed on a row that does not prove this exact module is active.
-    if (options.activeModule.id !== options.moduleId || options.activeModule.active !== true) fail('UNAVAILABLE');
+  if (options.userVisibleModule) {
+    // Fail closed on a row that does not prove this exact module is visible and active.
+    if (options.userVisibleModule.id !== options.moduleId || options.userVisibleModule.active !== true) fail('UNAVAILABLE');
     admitted = Promise.resolve();
   }
   const moduleAdmission = () => {
@@ -52,7 +53,8 @@ export function databaseSkillSource(options: {
   };
   return {
     // The first listing is itself a full service check. Repeated listings return
-    // the same immutable descriptor; the loader checks state before any use.
+    // the same immutable descriptor; callers reach them only through the loader,
+    // which checks state immediately after (discoverSkills, activateSkill).
     async list() {
       if (!selected) selected = validateDescriptor(await read());
       return [structuredClone(selected)];

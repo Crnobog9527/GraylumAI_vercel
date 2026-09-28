@@ -80,8 +80,9 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     const module=await admin.from('modules').select('id,active,skill_id,model_id').eq('id',input.selection.moduleId).single();
     if(module.error||module.data?.active!==true)throw new Error('RUNTIME_SKILL_DENIED');
     moduleId=uuid.parse(module.data.id);skillId=uuid.parse(module.data.skill_id);modelId=uuid.parse(module.data.model_id);revisionId=input.selection.revisionId;
-    // The row above already proved this module active in this request (AC-0c).
-    const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId,skillId,revisionId,activeModule:module.data});
+    // The service-role row above never substitutes for the user-scoped admission
+    // the source performs once for this request (AC-0c).
+    const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId,skillId,revisionId});
     const descriptors=await source.list();const descriptor=descriptors.find(d=>d.revisionId===revisionId);
     if(!descriptor)throw new Error('RUNTIME_REVISION_DENIED');
     const loaded=await activateSkill(source,identityOf(descriptor),{...(policy.skillResources?{resources:policy.skillResources}:{task:input.selection.task}),maxContextBytes:policy.inputBytes});

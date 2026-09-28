@@ -32,16 +32,17 @@ export async function discoverRuntimeCandidates(user:SupabaseClient,admin:Supaba
  const candidates:MatchCandidate[]=[];
  for(const row of rows.data){
   if(!row.skill_id||!row.model_id)continue;
-  // AC-0c: the user-scoped read above already admitted this module in this request.
-  const activeModule=visible.data.find(m=>m.id===row.id);
-  const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId:row.id,skillId:row.skill_id,activeModule});
-  let found;try{found=await discoverSkills(source);}catch{continue;}
+  // AC-0c: reuse this request's user-scoped (RLS) read above, never the service-role row.
+  const userVisibleModule=visible.data.find(m=>m.id===row.id);
+  const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId:row.id,skillId:row.skill_id,userVisibleModule});
+  // The first listing is the checked read; discovery's repeated listing is then
+  // immediately followed by its state check.
+  let found,descriptors;try{descriptors=await source.list();found=await discoverSkills(source);}catch{continue;}
   const model=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit').eq('id',row.model_id).single();
   if(model.error||model.data.is_active!=='true'||(!limits.resolveCapacity&&model.data.provider!=='fixture'))continue;
   let capacity;try{capacity=limits.resolveCapacity?.(model.data);}catch{continue;}
   const outputLimit=capacity?.outputLimit??Math.min(limits.maxOutputTokens,Number(model.data.max_tokens));
   const inputLimit=capacity?.inputLimit??fixtureInputCapacity(Number(model.data.input_limit),outputLimit,limits.inputBytes);
-  const descriptors=await source.list();
   for(const item of found){
    const descriptor=descriptors.find(d=>d.revisionId===item.selection.revisionId);
    if(!descriptor)throw new Error('RUNTIME_CATALOG_CHANGED');

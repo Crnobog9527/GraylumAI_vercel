@@ -300,9 +300,14 @@ describe('AC-0c verified resource cache', () => {
     await activate(descriptors[0]); expect(reads.length).toBeGreaterThan(0);
   });
   it('bounds the cached bytes', async () => {
-    const { descriptors, reads, activate } = memory(Array.from({ length: 9 }, (_, i) => `cache-bytes-${i}`), 2, 1_900_000);
+    const { descriptors, reads, activate } = memory(Array.from({ length: 17 }, (_, i) => `cache-bytes-${i}`), 2, 1_000_000);
     for (const p of descriptors) await activate(p);
-    reads.length = 0; await activate(descriptors[8]); expect(reads).toEqual([]);
+    reads.length = 0; await activate(descriptors[16]); expect(reads).toEqual([]);
     await activate(descriptors[0]); expect(reads).toContain('cache-bytes-0/references/r1.md');
+  });
+  it('never caches a single file above 1 MiB', async () => {
+    const { descriptors, reads, activate } = memory(['cache-large'], 2, 1024 * 1024 + 1);
+    await activate(descriptors[0]); reads.length = 0;
+    await activate(descriptors[0]); expect(reads).toEqual(['cache-large/references/r1.md']);
   });
 });
