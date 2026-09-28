@@ -29,23 +29,29 @@ export async function acceptedRuns(outDir) {
   return runs;
 }
 
-function plan(runs, webQuery) {
-  const steps = runs.map(run => ({
+export function plan(runs, webQuery) {
+  // Q01 is re-sent only when it has no accepted run of its own to read.
+  const resendQ01 = !runs.some(run => run.queryId === 'Q01');
+  // The final slot always stays reserved for the balance read that checks this phase's charges.
+  const retrievals = runs.slice(0, MONID_RESULT_MAX_CALLS - 1 - (resendQ01 ? 1 : 0));
+  const steps = retrievals.map(run => ({
     label: run.queryId,
     spec: { method: 'GET', url: `${BASE}/runs/${run.runId}` },
     scope: `result:${run.runId}`,
   }));
-  steps.push({
-    label: 'Q01',
-    spec: {
-      method: 'POST',
-      url: `${BASE}/run`,
-      body: { provider: 'tinyfish', endpoint: '/search', input: { queryParams: { query: webQuery, language: 'zh' } } },
-    },
-    scope: '',
-  });
+  if (resendQ01) {
+    steps.push({
+      label: 'Q01',
+      spec: {
+        method: 'POST',
+        url: `${BASE}/run`,
+        body: { provider: 'tinyfish', endpoint: '/search', input: { queryParams: { query: webQuery, language: 'zh' } } },
+      },
+      scope: '',
+    });
+  }
   steps.push({ label: 'BALANCE_RESULTS', spec: { method: 'GET', url: `${BASE}/wallet/balance` }, scope: 'balance:results' });
-  return steps.slice(0, MONID_RESULT_MAX_CALLS);
+  return steps;
 }
 
 function init(spec, key) {

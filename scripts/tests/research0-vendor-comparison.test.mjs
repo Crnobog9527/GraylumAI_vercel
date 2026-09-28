@@ -15,7 +15,7 @@ import { displayCount, normalizeTikhub, tikhubFailed } from '../research0/vendor
 import { reanalyze } from '../research0/analyze.mjs';
 import { formatMarkdown } from '../research0/markdown.mjs';
 import { MONID_CATALOG_LIMITS, formatMonidCatalog, runMonidCatalog } from '../research0/monidCatalog.mjs';
-import { runMonidResults } from '../research0/monidResults.mjs';
+import { plan as monidResultPlan, runMonidResults } from '../research0/monidResults.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 // Synthetic placeholder assembled at runtime so secret scanners see no key-like literal.
@@ -540,6 +540,20 @@ test('reanalyze is read-only and rebuilds call metadata instead of reporting zer
     globalThis.fetch = originalFetch;
   }
 }));
+
+test('monid result plan always keeps the last slot for the balance read', () => {
+  const ids = ['Q01', 'Q02', 'Q03', 'Q04', 'Q05', 'Q06', 'Q07', 'Q08', 'Q09', 'Q10'];
+  const allAccepted = monidResultPlan(ids.map((queryId, index) => ({ queryId, runId: `run_${index}xxxxxxx` })), 'q');
+  assert.equal(allAccepted.length, 11);
+  assert.equal(allAccepted.at(-1).label, 'BALANCE_RESULTS');
+  assert.ok(!allAccepted.some(step => step.spec.method === 'POST'), 'Q01 has its own run, so it is read, not re-sent');
+  const noQ01 = monidResultPlan(ids.slice(1).map((queryId, index) => ({ queryId, runId: `run_${index}xxxxxxx` })), 'q');
+  assert.deepEqual(noQ01.slice(-2).map(step => step.label), ['Q01', 'BALANCE_RESULTS']);
+  assert.equal(noQ01.length, 11);
+  const tooMany = monidResultPlan([...ids, 'Q11', 'Q12'].map((queryId, index) => ({ queryId, runId: `run_${index}xxxxxxx` })), 'q');
+  assert.equal(tooMany.length, 11);
+  assert.equal(tooMany.at(-1).label, 'BALANCE_RESULTS');
+});
 
 test('application code never imports the comparison script', () => {
   const result = spawnSync('git', ['grep', '-l', '-i', '-e', 'research0', '--', 'apps', 'packages'], { cwd: repositoryRoot, encoding: 'utf8' });
