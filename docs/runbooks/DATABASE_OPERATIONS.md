@@ -56,6 +56,14 @@ Verify the expected activity record separately; do not repeat a successful credi
 adjustment just to recover a missing log. Do not update `profiles.credits` and
 insert a ledger row as separate manual SQL operations.
 
+After a timeout, connection error, or other ambiguous response, inspect the actual
+user balance and credit ledger before any retry. The UI currently sends no
+`idempotencyKey`, and the router supplies an RPC key only when the caller provides
+one; resubmitting can apply the same credit delta twice. If the ledger confirms
+success, do not resubmit. If the outcome remains uncertain, stop and investigate
+rather than retrying. Sources: `apps/web/src/app/admin/users/page.tsx:178`–`:182`
+and `packages/api/src/routers/admin.ts:1061`–`:1063`.
+
 Code: `apps/web/src/app/admin/users/page.tsx:141`,
 `packages/api/src/routers/admin.ts:1029` (RPC call at line 1066; separate activity
 insert at lines 1083–1095).
