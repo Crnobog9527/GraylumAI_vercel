@@ -24,6 +24,8 @@ import { authoritativeBilling } from '../bill2/service';
 import {loadStagingPolicy,loadStagingRecoveryPolicy,assertStagingReadAccess} from './stagingPolicy';
 import {stagingTransport} from './stagingTransport';
 import {runtimeRouter} from '../../routers/runtime';
+import {opcRouter} from '../../routers/opc';
+import {OPENING_INPUT} from '../../shared/opcQuestions';
 import {createTRPCContext} from '../../trpc';
 const connectionString=process.env.V3_LOCAL_DB!;
 if(!connectionString?.startsWith('postgres://postgres@127.0.0.1:')||!connectionString.endsWith('/v3_disposable')) throw new Error('isolated runner required');
@@ -977,6 +979,162 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   if(previousEndpoint===undefined)delete process.env.V3_RUNTIME_LOCAL_ENDPOINT;else process.env.V3_RUNTIME_LOCAL_ENDPOINT=previousEndpoint;
   await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
  }
+});
+/** AC-1: a mentor draft on a published three-step positioning Skill, run
+ * through the real routers with Bearer credentials and a private fixture
+ * provider that can hold one response. */
+async function mentorTurnFixture(){
+ const password='Local-'+randomUUID()+'!',email=randomUUID()+'@example.test';
+ const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
+ const actor=created.data.user.id;await db.query("insert into profiles(id,email,credits,role) values($1,$2,1000,'user')",[actor,email]);
+ await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,1000,'addition','grant','opening_grant','system',$2,0,1000)",[actor,'ac1-opening:'+actor]);
+ const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
+ const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
+ const owner=randomUUID();await db.query("insert into profiles(id,role) values($1,'admin')",[owner]);
+ const pack=makePackage(),moduleId=randomUUID(),registration='ac1-'+randomUUID(),flow=makeWorkflow(3),mentorModel=randomUUID(),organizerModel=randomUUID();
+ flow.steps.forEach((step,index)=>{step.information=[{id:'goal',title:'目标 '+index,required:true,profileKey:'goal_'+index}];});
+ await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[pack.id,registration,owner]);
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'AC-1 mentor','ac1-mentor','fixture','true',1000,32000),($2,'AC-1 organizer','ac1-organizer','fixture','true',1000,32000)",[mentorModel,organizerModel]);
+ await db.query('insert into modules(id,title,skill_id,model_id,active) values($1,$2,$3,$4,true)',[moduleId,'AC-1 定位',pack.id,mentorModel]);
+ await publishSkillPackage(admin,owner,pack);
+ await db.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',[registration,moduleId,pack.id,pack.revisionId,flow,'AC-1 定位']);
+ await db.query("insert into system_settings(key,value) values('v3_summary_model_id',to_jsonb($1::text)) on conflict(key) do update set value=excluded.value",[organizerModel]);
+ const bearer='Bearer '+login.data.session!.access_token;
+ const context=async(budget=createRuntimeBudget(),authorization:string|null=bearer)=>createTRPCContext({headers:new Headers(authorization?{Authorization:authorization}:{}),runtimeBudget:budget});
+ const draft=async()=>(await opcRouter.createCaller(await context()).start({requestId:randomUUID(),registration,mode:'mentor',businessName:'Graylum AI'})) as {draftId:string};
+ return {actor,context,draft};
+}
+type ProviderCall={model:string;release:()=>void};
+async function heldProvider(){
+ const calls:ProviderCall[]=[];let hold=false;
+ const server=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;const input=JSON.parse(JSON.parse(raw).input);
+  let release=()=>{};const gate=hold?new Promise<void>(resolve=>{release=resolve;}):Promise.resolve();calls.push({model:input.model,release});await gate;
+  const id='ac1-'+randomUUID(),content=input.model==='ac1-organizer'?'{"inputKind":"answer","informationPatch":{}}':JSON.stringify({message:'导师回复 '+calls.length});
+  res.setHeader('content-type','application/json');
+  res.end(JSON.stringify({id,model:input.model,final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:input.model,choices:[{index:0,message:{role:'assistant',content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
+ const previous=process.env.V3_RUNTIME_LOCAL_ENDPOINT;process.env.V3_RUNTIME_LOCAL_ENDPOINT='http://127.0.0.1:'+address.port;
+ return {calls,setHold:(value:boolean)=>{hold=value;},close:async()=>{
+  if(previous===undefined)delete process.env.V3_RUNTIME_LOCAL_ENDPOINT;else process.env.V3_RUNTIME_LOCAL_ENDPOINT=previous;
+  await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
+ }};
+}
+async function requestEffects(requestId:string){
+ return (await db.query('select e.id::text execution,e.state,r.id::text run,(select count(*)::int from bill2_calls c where c.run_id=r.id) calls from runtime_executions e join bill2_runs r on r.id=e.billing_run_id where e.request_id=$1',[requestId])).rows;
+}
+it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one invocation with the same effects as prepareStep then executeStream',async()=>{
+ const f=await mentorTurnFixture(),provider=await heldProvider();
+ const phases=(s:{phases:Record<string,{rt:number}>})=>Object.fromEntries(Object.entries(s.phases).map(([phase,v])=>[phase,v.rt]));
+ async function measured<T>(call:(ctx:Awaited<ReturnType<typeof f.context>>)=>Promise<T>){
+  const budget=createRuntimeBudget();
+  const result=await budget.timing.run(async()=>call(await f.context(budget)));
+  return {result,summary:budget.timing.summary()};
+ }
+ try{
+  const turn=(draftId:string,input:string,organizeAfter=false)=>({draftId,stepId:'step-0',purpose:'mentor' as const,requestId:randomUUID(),input,questionId:'goal',organizeAfter});
+  // Before: prepareStep, then executeStream: two invocations per turn.
+  const before=await f.draft(),oldOpening=turn(before.draftId,OPENING_INPUT),oldAnswer=turn(before.draftId,'我做摄影入门课程',true);
+  const oldPrepareOpening=await measured(ctx=>opcRouter.createCaller(ctx).prepareStep(oldOpening));
+  const oldStreamOpening=await measured(async ctx=>collectTurn(await runtimeRouter.createCaller(ctx).executeStream({executionId:(oldPrepareOpening.result as {executionId:string}).executionId})));
+  const oldPrepareAnswer=await measured(ctx=>opcRouter.createCaller(ctx).prepareStep(oldAnswer));
+  const oldStreamAnswer=await measured(async ctx=>collectTurn(await runtimeRouter.createCaller(ctx).executeStream({executionId:(oldPrepareAnswer.result as {executionId:string}).executionId})));
+  // After: one streamed invocation per turn.
+  const after=await f.draft(),newOpening=turn(after.draftId,OPENING_INPUT),newAnswer=turn(after.draftId,'我做摄影入门课程',true);
+  const opening=await measured(async ctx=>collectTurn(await opcRouter.createCaller(ctx).mentorTurnStream(newOpening)));
+  const answer=await measured(async ctx=>collectTurn(await opcRouter.createCaller(ctx).mentorTurnStream(newAnswer)));
+  for(const [events,request] of [[opening.result,newOpening],[answer.result,newAnswer]] as const){
+   expect(events[0]).toEqual({type:'admitted',executionId:expect.any(String)});
+   expect(events.at(-1)).toMatchObject({type:'result',result:{state:'completed'}});
+   expect(events.filter(e=>e.type==='admitted')).toHaveLength(1);
+   const effects=await requestEffects(request.requestId);
+   // One execution, one billing run; the organizer call stays in the same run.
+   expect(effects).toEqual([{execution:events[0]!.executionId,state:'completed',run:expect.any(String),calls:request.organizeAfter?2:1}]);
+  }
+  for(const request of [oldOpening,oldAnswer])expect((await requestEffects(request.requestId)).map(e=>[e.state,e.calls])).toEqual([['completed',request.organizeAfter?2:1]]);
+  expect(opening.result.at(-1)!.result!.body).toBe(JSON.stringify({message:'导师回复 4'}));
+  expect(oldStreamOpening.result.at(-1)!.result!.body).toBe(JSON.stringify({message:'导师回复 1'}));
+  expect(provider.calls.map(c=>c.model)).toEqual(['ac1-mentor','ac1-mentor','ac1-organizer','ac1-mentor','ac1-mentor','ac1-organizer']);
+  const all={oldPrepareOpening,oldStreamOpening,oldPrepareAnswer,oldStreamAnswer,opening,answer};
+  const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
+  expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
+   // The first prepare of this new package misses the Skill file cache (AC-0c).
+   oldPrepareOpening:{prelude:2,policy:0,host:5,admission:13},
+   oldStreamOpening:{prelude:2,policy:0,host:0,execute:6,provider:5},
+   oldPrepareAnswer:{prelude:2,policy:0,host:5,admission:11},
+   oldStreamAnswer:{prelude:2,policy:0,host:0,execute:6,provider:14},
+   // One invocation: one prelude instead of two; admission and execution unchanged.
+   opening:{prelude:2,policy:0,host:5,admission:9,execute:6,provider:5},
+   answer:{prelude:2,policy:0,host:5,admission:11,execute:6,provider:14},
+  });
+  const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
+  // Auth verifies once per invocation, and again after each provider response.
+  expect(label('auth/v1/user')).toEqual({oldPrepareOpening:1,oldStreamOpening:2,oldPrepareAnswer:1,oldStreamAnswer:3,opening:2,answer:3});
+  expect(label('rest/profiles')).toEqual({oldPrepareOpening:1,oldStreamOpening:1,oldPrepareAnswer:1,oldStreamAnswer:1,opening:1,answer:1});
+  for(const m of [opening,answer])expect(m.summary.executionIds).toEqual([m.result[0]!.executionId]);
+ }finally{await provider.close();}
+});
+async function collectTurn(events:AsyncIterable<unknown>){const all=[];for await(const event of events)all.push(event);return all as Array<{type:string;executionId?:string;result?:{state:string;body?:string}}>;}
+it('RUNTIME: AC-1 mentorTurnStream disconnect, concurrent resend and later resend never dispatch twice',async()=>{
+ const f=await mentorTurnFixture(),provider=await heldProvider();
+ try{
+  const {draftId}=await f.draft(),request={draftId,stepId:'step-0',purpose:'mentor' as const,requestId:randomUUID(),input:OPENING_INPUT,questionId:'goal'};
+  provider.setHold(true);
+  const first=(await opcRouter.createCaller(await f.context()).mentorTurnStream(request))[Symbol.asyncIterator]();
+  const admitted=(await first.next()).value as {type:string;executionId:string};
+  expect(admitted).toEqual({type:'admitted',executionId:expect.any(String)});
+  expect((await first.next()).value).toEqual({type:'phase',phase:'mentor'});
+  const deadline=Date.now()+4000;while(provider.calls.length<1){if(Date.now()>deadline)throw new Error('no dispatch');await new Promise(r=>setTimeout(r,10));}
+  // The reader disconnects: display progress stops, the execution does not.
+  let closed=false;const closing=first.return(undefined).then(()=>{closed=true;});
+  // The page resends the same request while the original is still in flight.
+  const concurrent=await collectTurn(await opcRouter.createCaller(await f.context()).mentorTurnStream(request));
+  expect(concurrent[0]).toEqual({type:'admitted',executionId:admitted.executionId});
+  expect(concurrent.at(-1)).toEqual({type:'result',result:{state:'pending'}});
+  expect(closed).toBe(false);expect(provider.calls).toHaveLength(1);
+  provider.calls[0]!.release();await closing;
+  // Later resends and resume by execution id return the stored reply.
+  const later=await collectTurn(await opcRouter.createCaller(await f.context()).mentorTurnStream(request));
+  expect(later[0]).toEqual({type:'admitted',executionId:admitted.executionId});
+  expect(later.at(-1)).toEqual({type:'result',result:{state:'completed',body:JSON.stringify({message:'导师回复 1'})}});
+  const resumed=await collectTurn(await runtimeRouter.createCaller(await f.context()).executeStream({executionId:admitted.executionId}));
+  expect(resumed.at(-1)).toEqual(later.at(-1));
+  expect(provider.calls).toHaveLength(1);
+  expect(await requestEffects(request.requestId)).toEqual([{execution:admitted.executionId,state:'completed',run:expect.any(String),calls:1}]);
+ }finally{await provider.close();}
+});
+it('RUNTIME: AC-1 mentorTurnStream refuses before admission like prepareStep does',async()=>{
+ const f=await mentorTurnFixture(),provider=await heldProvider();
+ try{
+  const {draftId}=await f.draft(),turn=(extra:{purpose?:'step'|'mentor'|'plan';questionId?:undefined}={})=>
+   ({draftId,stepId:'step-0',purpose:'mentor' as 'step'|'mentor'|'plan',requestId:randomUUID(),input:OPENING_INPUT,questionId:'goal' as string|undefined,...extra});
+  const admissions=async()=>Number((await db.query('select count(*)::int n from runtime_executions where actor_id=$1',[f.actor])).rows[0].n)+
+   Number((await db.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actor])).rows[0].n);
+  // Not signed in: refused by the procedure itself, before any stream exists.
+  await expect(opcRouter.createCaller(await f.context(createRuntimeBudget(),null)).mentorTurnStream(turn())).rejects.toMatchObject({code:'UNAUTHORIZED'});
+  // Bounded OPC refusal codes reach the client unchanged, as from prepareStep.
+  for(const [input,code] of [[turn({purpose:'step'}),'OPC_STEP_DENIED'],[turn({questionId:undefined}),'OPC_QUESTION_NOT_REACHED']] as const){
+   await expect(collectTurn(await opcRouter.createCaller(await f.context()).mentorTurnStream(input))).rejects.toThrow(code);
+  }
+  await expect(opcRouter.createCaller(await f.context()).prepareStep(turn({questionId:undefined}))).rejects.toThrow('OPC_QUESTION_NOT_REACHED');
+  expect(await admissions()).toBe(0);
+  if(process.env.V3_LOCAL_STAGING_SCHEMA==='true'){
+   // A Staging host whose enabled test window does not list this actor.
+   const env={V3_RUNTIME_STAGING_ENABLED:'true',VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'graylumai-staging.vercel.app',VERCEL_GIT_COMMIT_REF:'staging',VERCEL_GIT_REPO_OWNER:'Crnobog9527',VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',V3_RUNTIME_STAGING_PROJECT_ID:'synthetic-project',VERCEL_PROJECT_ID:'synthetic-project',NEXT_PUBLIC_SUPABASE_URL:'https://synthetic.supabase.co',V3_RUNTIME_STAGING_DATABASE_HOST:'synthetic.supabase.co',V3_RUNTIME_STAGING_WINDOW_ID:randomUUID()};
+   const other=randomUUID();
+   const policy={modelId:randomUUID(),model:'synthetic/mentor',provider:'openrouter',account:'synthetic-ac1',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:10000,outputLimit:100,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
+   await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,1,1,now()+interval '1 hour')",[env.V3_RUNTIME_STAGING_WINDOW_ID,[other],JSON.stringify([policy])]);
+   const ctx=await f.context(),saved=Object.fromEntries(Object.keys(env).map(key=>[key,process.env[key]]));
+   Object.assign(process.env,env);
+   try{
+    for(const call of [()=>opcRouter.createCaller(ctx).mentorTurnStream(turn()),()=>opcRouter.createCaller(ctx).prepareStep(turn())])
+     await expect(call()).rejects.toMatchObject({code:'PRECONDITION_FAILED',message:'当前账号没有可用的测试窗口：窗口未开放、已关闭、已过期或账号未获准。'});
+   }finally{for(const [key,value] of Object.entries(saved)){if(value===undefined)delete process.env[key];else process.env[key]=value;}}
+   expect(await admissions()).toBe(0);
+  }
+  expect(provider.calls).toHaveLength(0);
+ }finally{await provider.close();}
 });
 it('RUNTIME: AC-0c real Auth verdict reuse ends at a provider response; a revoked session is then denied',async()=>{
  const password='Local-'+randomUUID()+'!',email=randomUUID()+'@example.test';

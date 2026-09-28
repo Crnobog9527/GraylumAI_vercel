@@ -51,7 +51,7 @@ async function isMaintenanceModeEnabled(budgetFetch:typeof fetch): Promise<boole
 
 // Streamed procedures keep running after the Response is returned; each one
 // releases its own timing reference when its execution settles.
-const STREAMED_PROCEDURES = new Set(['runtime.executeStream']);
+const STREAMED_PROCEDURES = new Set(['runtime.executeStream', 'opc.mentorTurnStream']);
 
 const handler = async (req: NextRequest) => {
   // Before authentication/maintenance: batched procedures share this deadline.

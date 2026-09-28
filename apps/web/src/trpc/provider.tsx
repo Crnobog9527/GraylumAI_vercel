@@ -81,7 +81,13 @@ export default function Provider({ children }: { children: React.ReactNode }) {
       // Entry must not wait for unrelated sidebar statistics in the same batch.
       condition: op => op.path === 'workbench.chatLocate' || op.path === 'workbench.chatOpen',
       true: httpLink(options),
-      false: splitLink({condition:op=>op.path==='runtime.executeStream',true:httpBatchStreamLink(options),false:httpBatchLink(options)}),
+      // Streamed procedures deliver events as they happen; one mentor turn is
+      // one streamed request (admission, then execution progress).
+      false: splitLink({
+        condition: op => op.path === 'runtime.executeStream' || op.path === 'opc.mentorTurnStream',
+        true: httpBatchStreamLink(options),
+        false: httpBatchLink(options),
+      }),
     })] });
   });
 
