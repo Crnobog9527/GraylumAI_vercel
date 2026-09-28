@@ -22,14 +22,35 @@
 
 ### 非支付发布准备
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `NEXT_PUBLIC_APP_URL`
-- `NEXT_PUBLIC_SITE_NAME`
-- `NEXT_PUBLIC_SUPPORT_EMAIL`
-- `NEXT_PUBLIC_SENTRY_DSN`
-- `OPENROUTER_API_KEY`（Claude 与 OpenAI-compatible 模型统一入口）
+值和注释占位见 [`.env.example`](../.env.example)。新增示例不代表已配置目标环境，
+也不授权修改密钥、外部配置或开启真实调用。仅报告变量是否存在，不公开值。
+
+| 变量 | 当前用途与读取位置 |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 客户端连接；`apps/web/src/lib/supabase.ts` |
+| `SUPABASE_SERVICE_ROLE_KEY` | 服务端 Supabase 客户端；`packages/api/src/trpc.ts` |
+| `NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL` | 站点与认证回跳地址；`apps/web/src/lib/site-config.ts` |
+| `UPSTASH_REDIS_REST_URL`、`UPSTASH_REDIS_REST_TOKEN` | Redis 分布式限流；`packages/api/src/services/redisRateLimiter.ts`、`apps/web/src/proxy.ts` |
+| `RATE_LIMIT_FAIL_CLOSED` | 值为 `true` 时，限流服务不可用则拒绝请求；上述限流实现及 `apps/web/src/lib/rateLimit.ts` |
+| `NEXT_PUBLIC_HCAPTCHA_SITEKEY` | 前端 hCaptcha sitekey；`apps/web/src/lib/authCaptcha.ts` |
+| `NEXT_PUBLIC_SITE_NAME`、`NEXT_PUBLIC_SUPPORT_EMAIL` | 站点显示与支持入口；`apps/web/src/lib/site-config.ts` |
+| `NEXT_PUBLIC_APP_NAME` | OpenRouter 请求标题的回退名称；`packages/api/src/services/providerUtils.ts` |
+| `NEXT_PUBLIC_SENTRY_DSN` | Sentry 错误上报；`apps/web/sentry.server.config.ts` 等 |
+| `SENTRY_ENVIRONMENT`、`APP_ENV`、`NEXT_PUBLIC_APP_ENV` | Sentry 环境标签依次回退；`apps/web/sentry.server.config.ts`、`sentry.edge.config.ts`、`src/instrumentation-client.ts` |
+| `LOG_LEVEL` | 服务端日志级别；`packages/api/src/lib/logger.ts` |
+| `OPENROUTER_API_KEY` | 当前模型提供商密钥入口；`packages/api/src/services/providerUtils.ts` |
+| `V3_RUNTIME_STAGING_ENABLED` | Runtime staging 入口开关之一；`packages/api/src/services/runtime/stagingEnvironment.ts`。设为 `true` 仍须通过项目、数据库和窗口校验；不代表生产配置或调用授权 |
+
+限流实现没有读取 `KV_*`，也没有内存存储回退。未配置 Redis 或 Redis 不可用时的行为
+取决于 `RATE_LIMIT_FAIL_CLOSED`，不能把缺少 Redis 当作有效的本地限流。
+
+### 保留但未生效的示例变量
+
+| 变量 | 状态与依据 |
+| --- | --- |
+| `RATE_LIMIT_AI_MAX_REQUESTS`、`RATE_LIMIT_AI_STREAM_MAX_REQUESTS` | 目前代码没有读取或没有生效：仅在 `envValidator.ts` 声明；`redisRateLimiter.ts` 使用固定限额 |
+| `CIRCUIT_BREAKER_HOURLY_LIMIT`、`CIRCUIT_BREAKER_DAILY_LIMIT` | 目前代码没有读取或没有生效：仅在 `envValidator.ts` 声明；`middleware/securityChecks.ts` 使用固定阈值 |
+| `REQUIRE_API_SIGNATURE`、`API_SIGNATURE_SECRET` | 辅助函数读取，但 `checkRequestSignature` 未接入生产请求路径；仅配置变量不会启用签名校验 |
 
 ### Stripe 阶段
 

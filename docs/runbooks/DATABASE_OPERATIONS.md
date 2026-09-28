@@ -20,15 +20,11 @@ ORM: Drizzle
 
 ### Running Migrations
 
-```bash
-# Check pending migrations
-ls packages/db/migrations/
-
-# Apply via Supabase Dashboard
-# 1. Go to SQL Editor
-# 2. Paste migration content
-# 3. Execute
-```
+Follow the reviewed staging rebuild and migration procedure in
+[`STAGING_REPRODUCIBILITY.md`](./STAGING_REPRODUCIBILITY.md).
+The migration source is `packages/db/migrations/`; do not apply migrations by
+pasting individual files into SQL Editor without that procedure and the required
+environment-specific approval. The staging runbook is not a production procedure.
 
 ### User Management
 
@@ -40,26 +36,17 @@ WHERE email = 'user@example.com';
 ```
 
 #### Adjust User Credits
-```sql
--- Add credits (e.g., support compensation)
-UPDATE profiles
-SET credits = credits + 100
-WHERE id = 'USER_UUID';
 
--- Log the adjustment
-INSERT INTO credit_transactions (user_id, amount, type, description)
-VALUES ('USER_UUID', 100, 'addition', 'Support compensation');
+Use the credit adjustment control in `/admin/users`, with the adjustment amount
+and reason. The UI calls `admin.adjustUserCredits`, which uses
+`atomic_apply_credit_ledger_entry` for the balance and ledger mutation and then
+records the admin activity. Do not update `profiles.credits` and insert a ledger
+row as separate manual SQL operations.
 
--- Log admin action
-INSERT INTO user_activity_logs (user_id, admin_id, action, action_type, details)
-VALUES (
-  'USER_UUID',
-  'ADMIN_UUID',
-  'Added 100 credits for support compensation',
-  'credit_adjustment',
-  '{"amount": 100, "reason": "Support compensation"}'::jsonb
-);
-```
+Code: `apps/web/src/app/admin/users/page.tsx:141`,
+`packages/api/src/routers/admin.ts:1029` (RPC call at line 1066).
+Production or real-user adjustments still require the applicable approval in
+[AGENTS.md](../../AGENTS.md).
 
 #### Change User Role
 ```sql
@@ -95,12 +82,17 @@ WHERE user_id = 'USER_UUID'
 ```
 
 #### Hard Delete Old Soft-Deleted Data
-```sql
--- Delete conversations older than 30 days
-DELETE FROM conversations
-WHERE is_deleted = 'true'
-  AND deleted_at < now() - interval '30 days';
-```
+
+A direct `DELETE FROM conversations` does not guarantee that matching rows are
+removed. The `artifact_chat_delete` and `ordinary_chat_delete` BEFORE DELETE
+triggers can return `NULL`, silently skipping a row: artifact conversations with
+a project row that cannot be locked (busy or missing), or active/uncertain generations, and ordinary
+conversations with nonterminal requests, are protected. A successful SQL command
+alone is not evidence of completed deletion; verify affected rows and retained
+context. Do not disable these guards to force cleanup.
+
+Sources: `packages/db/migrations/0069_v3_chat_skill.sql:43` and
+`packages/db/migrations/0078_ordinary_chat_requests.sql:30`.
 
 ### Analytics Queries
 
@@ -164,7 +156,7 @@ DELETE FROM application_logs
 WHERE created_at < now() - interval '30 days';
 
 -- Diagnostics results (30 days)
-DELETE FROM diagnostics_results
+DELETE FROM diagnostic_results
 WHERE created_at < now() - interval '30 days';
 ```
 
@@ -265,8 +257,12 @@ SELECT pg_terminate_backend(PID_HERE);
 
 | Task | Schedule | Function |
 |------|----------|----------|
-| Log cleanup | Daily | `cleanup_old_logs()` |
-| Diagnostics | Hourly | `/api/cron/diagnostics` |
+| Log cleanup | Not scheduled by repository configuration | `cleanup_old_logs()` exists; no scheduled caller is configured |
+| Diagnostics | Daily at 10:00 UTC (`0 10 * * *`) | `/api/cron/diagnostics` |
+
+`cleanup_old_logs()` is defined in `packages/db/migrations/0006_application_logs.sql:58`.
+The repository schedule is in `apps/web/vercel.json`; function existence does not
+prove that a remote scheduler is configured. No remote scheduler was inspected.
 
 ## Supabase Dashboard Links
 

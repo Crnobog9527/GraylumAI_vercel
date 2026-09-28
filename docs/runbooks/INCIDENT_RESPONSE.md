@@ -1,5 +1,7 @@
 # Incident Response Runbook
 
+> RUNTIME-PROD 完成后重写。本手册仍含旧链路的监控与排障内容，不构成统一 Runtime 的生产验收证据。Anthropic 官方 API 已停用，当前模型请求经 OpenRouter；以当前代码和目标环境证据为准。
+
 ## Quick Reference
 
 | Severity | Response Time | Examples |
@@ -122,13 +124,13 @@ ORDER BY minute DESC;
 ```
 
 **Common Causes**:
-1. Anthropic API issues → Check status.anthropic.com
-2. Invalid API key → Verify ANTHROPIC_API_KEY
+1. OpenRouter API issues → Check the OpenRouter service status
+2. Invalid API key → Verify OPENROUTER_API_KEY presence without exposing its value
 3. Rate limiting → Check rate limiter logs
 
 **Resolution**:
 - If API issue: Wait for upstream fix
-- If key issue: Rotate key in Vercel env vars
+- If key issue: Obtain the credential/environment change approval required by AGENTS.md before rotating the key in Vercel env vars
 - If rate limit: Adjust limits in rateLimiter.ts
 
 ### Issue: Billing Discrepancies
