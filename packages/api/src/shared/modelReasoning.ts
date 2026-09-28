@@ -8,11 +8,11 @@
  *
  * - `catalog` is a snapshot of OpenRouter's public model catalog for this
  *   model: its reasoning metadata and each provider route's parameters.
- * - `route` is the administrator's chosen provider: the OpenRouter provider
- *   slug (`deepinfra`), which is what a quote's `provider.only` names and which
- *   matches every endpoint of that provider (`deepinfra/fp8`, …). Checks require
- *   every one of those endpoints to support what is chosen, and a Runtime quote
- *   must use the same slug.
+ * - `route` is the administrator's chosen route, written as a quote's
+ *   `provider.only` writes it: one endpoint tag (`deepinfra/fp8`), or a provider
+ *   slug (`deepinfra`) that reaches every endpoint of that provider. Checks
+ *   require every reachable endpoint to support what is chosen, and a Runtime
+ *   quote must name the same route.
  * - `purposes` holds one setting per purpose. `interactive` must be set for a
  *   model to serve interactive dialogue; an unset `organize` means the
  *   provider's default (no reasoning field is sent). `review` and `writing`
@@ -139,9 +139,16 @@ export function catalogProviders(catalog: CatalogSnapshot | null): Array<{ slug:
   }
   return [...providers.values()];
 }
+/** The endpoints a route reaches: the exact tag, or every endpoint of a provider slug. */
+export function routeEndpoints(catalog: CatalogSnapshot | null, route: string | null): CatalogSnapshot["endpoints"] {
+  if (!route) return [];
+  const endpoints = catalog?.endpoints ?? [];
+  const exact = endpoints.filter(endpoint => endpoint.tag === route);
+  return exact.length || route.includes("/") ? exact : endpoints.filter(endpoint => providerSlug(endpoint.tag) === route);
+}
 /** Whether every endpoint the route can reach supports a parameter. */
 export function routeSupports(catalog: CatalogSnapshot | null, route: string | null, parameter: string): boolean {
-  const endpoints = catalogProviders(catalog).find(provider => provider.slug === route)?.endpoints ?? [];
+  const endpoints = routeEndpoints(catalog, route);
   return endpoints.length > 0 && endpoints.every(endpoint => endpoint.supportedParameters.includes(parameter));
 }
 
@@ -169,7 +176,7 @@ export function checkReasoningConfig(config: ReasoningConfig, model: { maxTokens
     add(null, "CATALOG_STALE", "模型 ID 已变化，目录快照属于旧的模型，请重新读取目录");
     return issues;
   }
-  const known = catalogProviders(catalog).some(provider => provider.slug === config.route);
+  const known = routeEndpoints(catalog, config.route).length > 0;
   const supported = (parameter: string) => !known || routeSupports(catalog, config.route, parameter);
   if (!config.route) add(null, "ROUTE_REQUIRED", "请选择供应商线路");
   else if (!known) add(null, "ROUTE_UNKNOWN", "所选线路不在当前目录里，请重新读取目录后再选");

@@ -70,6 +70,13 @@ function draftProblem(drafts: Record<ReasoningPurpose, Draft>): string | null {
   }
   return null;
 }
+/** Each endpoint tag, then each provider with more than one endpoint as a whole. */
+function routeChoices(catalog: CatalogSnapshot | null) {
+  const exact = (catalog?.endpoints ?? []).map(endpoint => ({ route: endpoint.tag, label: `${endpoint.providerName}（${endpoint.tag}）` }));
+  const providers = catalogProviders(catalog).filter(provider => provider.endpoints.length > 1 && provider.slug !== provider.endpoints[0]!.tag)
+    .map(provider => ({ route: provider.slug, label: `${provider.name}（${provider.slug}，全部 ${provider.endpoints.length} 条线路）` }));
+  return [...exact, ...providers];
+}
 function supports(catalog: CatalogSnapshot | null, route: string | null, parameter: string) {
   return routeSupports(catalog, route, parameter);
 }
@@ -172,18 +179,18 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
               <Select value={route ?? ''} onValueChange={value => setRoute(value || null)} disabled={!catalog}>
                 <SelectTrigger aria-label="供应商线路"><SelectValue placeholder="选择线路" /></SelectTrigger>
                 <SelectContent>
-                  {catalogProviders(catalog).map(provider => (
-                    <SelectItem key={provider.slug} value={provider.slug}>
-                      {provider.name}（{provider.slug}，{provider.endpoints.length} 条线路）
-                      {` · 工具${supports(catalog, provider.slug, 'tools') ? '✓' : '✗'}`}
-                      {` · reasoning_effort${supports(catalog, provider.slug, 'reasoning_effort') ? '✓' : '✗'}`}
-                      {` · reasoning${supports(catalog, provider.slug, 'reasoning') ? '✓' : '✗'}`}
+                  {routeChoices(catalog).map(choice => (
+                    <SelectItem key={choice.route} value={choice.route}>
+                      {choice.label}
+                      {` · 工具${supports(catalog, choice.route, 'tools') ? '✓' : '✗'}`}
+                      {` · reasoning_effort${supports(catalog, choice.route, 'reasoning_effort') ? '✓' : '✗'}`}
+                      {` · reasoning${supports(catalog, choice.route, 'reasoning') ? '✓' : '✗'}`}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className="text-xs text-[var(--text-tertiary)]">
-                按供应商选择；✓ 表示这家供应商的每条线路都支持。测试窗口或正式报价必须使用同一个供应商。
+                填写方式和报价的 providerSlug 一致：选具体线路（例如 deepinfra/fp8），或选整个供应商（✓ 表示它的每条线路都支持）。
               </p>
             </section>
 

@@ -51,7 +51,7 @@ describe("checkReasoningConfig", () => {
     expect(codes(value)).toEqual(expected);
   });
 
-  it("routes by provider slug and requires every endpoint of that provider to support the choice", () => {
+  it("accepts an endpoint tag or a provider slug, requiring every reachable endpoint to support the choice", () => {
     const variants = catalog({ endpoints: [
       { tag: "deepinfra/fp8", providerName: "DeepInfra", supportedParameters: ["tools", "reasoning_effort"], contextLength: 1, maxCompletionTokens: 1 },
       { tag: "deepinfra/bf16", providerName: "DeepInfra", supportedParameters: ["tools"], contextLength: 1, maxCompletionTokens: 1 },
@@ -59,9 +59,12 @@ describe("checkReasoningConfig", () => {
     ] });
     const off = { interactive: { mode: "off", wire: "reasoning_effort" } } as const;
     expect(codes(config({ catalog: variants, route: "sail-research", purposes: off }))).toEqual([]);
+    // The staging quote names the exact endpoint (deepinfra/fp8); only that endpoint is checked.
+    expect(codes(config({ catalog: variants, route: "deepinfra/fp8", purposes: off }))).toEqual([]);
+    // The provider slug reaches both endpoints; one of them lacks reasoning_effort.
     expect(codes(config({ catalog: variants, route: "deepinfra", purposes: off }))).toEqual(["ROUTE_PARAMETER_UNSUPPORTED"]);
-    // A quote names the provider, so an endpoint tag is not a route.
-    expect(codes(config({ catalog: variants, route: "deepinfra/fp8", purposes: off }))).toEqual(["ROUTE_UNKNOWN"]);
+    expect(codes(config({ catalog: variants, route: "deepinfra/int4", purposes: off }))).toEqual(["ROUTE_UNKNOWN"]);
+    expect(codes(config({ catalog: variants, route: "deep", purposes: off }))).toEqual(["ROUTE_UNKNOWN"]);
   });
 
   it("refuses to disable thinking where the catalog marks it mandatory", () => {
