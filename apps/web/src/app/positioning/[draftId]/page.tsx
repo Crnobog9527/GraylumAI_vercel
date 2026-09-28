@@ -1967,8 +1967,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                         liveText: live?.text, liveCard: live?.card, state: execution.state, unavailableReason: execution.unavailableReason,
                         active: execution.executionId === history.data?.activeExecution, busy });
                       const next = mentorExecutions[executionIndex + 1];
-                      const nextInput = next ? (isOpeningInput(next.input) ? null : next.input) : pendingBubble?.input ?? null;
-                      const cardStatus = questionCardStatus({ isLatest: !next, nextInput, turn, shown: { stepId: step.id, questionId: activeQuestion.id } });
+                      const cardStatus = questionCardStatus({ isLatest: !next, turn, shown: { stepId: step.id, questionId: activeQuestion.id }, reply: next
+                        ? { ...mentorTurns.get(next.executionId), input: isOpeningInput(next.input) ? null : next.input } : pendingBubble });
                       const cardLocked = !cardStatus.onShownQuestion || execution.state !== "completed" || sendLocked || snap.state !== "draft" || reviewOnly;
                       const proposed = Object.entries(accepted).filter(([id, value]) =>
                         reachedQuestions(d.information[parsed.targetStepId]?.schema ?? [], d.information[parsed.targetStepId]?.values).some(f => f.id === id) &&
