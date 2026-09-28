@@ -39,7 +39,7 @@ function callFrom(vendor, query, record) {
   };
 }
 
-export async function reanalyze({ vendors, queries, outDir }) {
+export async function reanalyze({ vendors, queries, outDir, keepItems = false }) {
   const report = { generatedAt: new Date().toISOString(), mode: 'reanalyze', vendors: [] };
   let ledger = null;
   try {
@@ -77,7 +77,8 @@ export async function reanalyze({ vendors, queries, outDir }) {
       } catch {
         normalizeError = 'SHAPE_NOT_RECOGNIZED';
       }
-      entry.queries.push({ queryId: query.id, status: 'OK', latencyMs: record.latencyMs, kind, metrics: summarize(kind, items), normalizeError, calls });
+      entry.queries.push({ queryId: query.id, status: 'OK', latencyMs: record.latencyMs, kind, metrics: summarize(kind, items), normalizeError, calls,
+        ...(keepItems ? { items } : {}) });
     }
   }
   return report;

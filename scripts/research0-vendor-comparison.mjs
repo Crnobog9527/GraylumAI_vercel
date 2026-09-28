@@ -26,9 +26,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reanalyze } from './research0/analyze.mjs';
 import { formatMarkdown } from './research0/markdown.mjs';
+import { formatZhTable } from './research0/zh.mjs';
 import { MONID_CATALOG_PLAN, formatMonidCatalog, runMonidCatalog } from './research0/monidCatalog.mjs';
 import { runMonidResults } from './research0/monidResults.mjs';
-import { QUERIES, SUPPLEMENTAL_QUERIES } from './research0/queries.mjs';
+import { QUERIES, SUPPLEMENTAL_QUERIES, ZH_QUERIES } from './research0/queries.mjs';
 import { formatReport } from './research0/report.mjs';
 import { runComparison } from './research0/runner.mjs';
 import {
@@ -53,7 +54,7 @@ function pick(all, csv, label) {
 export function parseArgs(argv) {
   const args = {
     live: false, reanalyze: false, markdown: false, monidCatalog: false, initLedger: false, aisaAlternates: false, monidResults: false,
-    reconcile: null, actualUsd: null, note: null, supplemental: false, retryReason: null,
+    reconcile: null, actualUsd: null, note: null, supplemental: false, retryReason: null, zh: false,
     vendors: null, queries: null, outDir: DEFAULT_OUT_DIR,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -67,6 +68,7 @@ export function parseArgs(argv) {
     else if (arg === '--monid-results') args.monidResults = true;
     else if (arg === '--reconcile') args.reconcile = value(argv, ++index, arg);
     else if (arg === '--supplemental') args.supplemental = true;
+    else if (arg === '--zh') args.zh = true;
     else if (arg === '--retry-confirmed-failures') args.retryReason = value(argv, ++index, arg);
     else if (arg === '--actual-usd') args.actualUsd = Number(value(argv, ++index, arg));
     else if (arg === '--note') args.note = value(argv, ++index, arg);
@@ -111,16 +113,17 @@ async function canonical(target) {
   }
 }
 
-// Owner decisions (2026-09-28): monid and TinyFish are excluded, and AIsa and SocialCrawl are not
-// called again unless named. Without --vendors only these run; others must be listed explicitly.
-export const DEFAULT_VENDOR_IDS = ['tikhub', 'tavily', 'firecrawl'];
+// Owner decisions (2026-09-28): social data TikHub, web search Parallel, page fetch Firecrawl.
+// Without --vendors only these run; every other vendor (Tavily included) must be named explicitly.
+export const DEFAULT_VENDOR_IDS = ['tikhub', 'parallel', 'firecrawl'];
 export const DEFAULT_SUPPLEMENTAL_VENDOR_IDS = ['tikhub', 'firecrawl'];
+export const DEFAULT_ZH_VENDOR_IDS = ['parallel'];
 
 function selectVendors(args) {
   if (args.vendors !== null) return pick(VENDORS, args.vendors, 'vendor');
   // Offline re-analysis sends nothing, so it covers every vendor's saved results by default.
   if (args.reanalyze) return VENDORS;
-  const ids = args.supplemental ? DEFAULT_SUPPLEMENTAL_VENDOR_IDS : DEFAULT_VENDOR_IDS;
+  const ids = args.zh ? DEFAULT_ZH_VENDOR_IDS : args.supplemental ? DEFAULT_SUPPLEMENTAL_VENDOR_IDS : DEFAULT_VENDOR_IDS;
   return VENDORS.filter(vendor => ids.includes(vendor.id));
 }
 
@@ -139,12 +142,13 @@ export async function main(argv = process.argv.slice(2), { env = process.env, fe
   // --aisa-alternates swaps the vendor list for AIsa's second-round alternate endpoints only.
   const vendors = args.aisaAlternates ? [aisaAlternates] : selectVendors(args);
   // Offline re-analysis sends nothing, so by default it covers both query sets' saved results.
-  const querySet = args.supplemental ? SUPPLEMENTAL_QUERIES : args.reanalyze ? [...QUERIES, ...SUPPLEMENTAL_QUERIES] : QUERIES;
+  const querySet = args.zh ? ZH_QUERIES : args.supplemental ? SUPPLEMENTAL_QUERIES
+    : args.reanalyze ? [...QUERIES, ...SUPPLEMENTAL_QUERIES, ...ZH_QUERIES] : QUERIES;
   const queries = pick(querySet, args.queries, 'query');
   if (args.live && args.reanalyze) throw new Error('RESEARCH0_REANALYZE_IS_OFFLINE_ONLY');
   if (args.reanalyze) {
-    const offline = await reanalyze({ vendors, queries, outDir: args.outDir });
-    log(args.markdown ? formatMarkdown(offline, queries) : formatReport(offline));
+    const offline = await reanalyze({ vendors, queries, outDir: args.outDir, keepItems: args.zh });
+    log(args.zh ? formatZhTable(offline) : args.markdown ? formatMarkdown(offline, queries) : formatReport(offline));
     return offline;
   }
   const ledgerFile = path.join(args.outDir, 'ledger.json');

@@ -5,9 +5,10 @@
 import { aisa } from './vendors/aisa.mjs';
 import { firecrawl } from './vendors/firecrawl.mjs';
 import { monid } from './vendors/monid.mjs';
+import { parallel } from './vendors/parallel.mjs';
 import { socialcrawl } from './vendors/socialcrawl.mjs';
 import { tavily } from './vendors/tavily.mjs';
 import { tikhub } from './vendors/tikhub.mjs';
 import { tinyfish } from './vendors/tinyfish.mjs';
 
-export const VENDORS = [aisa, tinyfish, tikhub, socialcrawl, monid, tavily, firecrawl];
+export const VENDORS = [aisa, tinyfish, tikhub, socialcrawl, monid, tavily, firecrawl, parallel];

@@ -6,7 +6,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { assertOutsideRepository, main, parseArgs } from '../research0-vendor-comparison.mjs';
 import { count, summarize, timestamp } from '../research0/metrics.mjs';
-import { QUERIES, SUPPLEMENTAL_QUERIES } from '../research0/queries.mjs';
+import { QUERIES, SUPPLEMENTAL_QUERIES, ZH_QUERIES } from '../research0/queries.mjs';
+import { zhStats } from '../research0/zh.mjs';
+import { parallel } from '../research0/vendors/parallel.mjs';
 import { formatReport } from '../research0/report.mjs';
 import { keyFor, runComparison } from '../research0/runner.mjs';
 import { TOTAL_CAP_USD, acquireLock, initLedger, loadLedger, reconcileAttempt, redactUrl, refusal, requestKey } from '../research0/safety.mjs';
@@ -707,16 +709,34 @@ test('a paid run sends exactly the requests its dry-run plan lists, balance read
 test('without --vendors only the Owner-kept vendors run; excluded ones must be named', async () => withTemp(async dir => {
   const ids = async argv => (await main([...argv, '--out', dir], { env: {}, fetchImpl: async () => { throw new Error('no network'); }, log: () => {} }))
     .vendors.map(vendor => vendor.id);
-  assert.deepEqual(await ids([]), ['tikhub', 'tavily', 'firecrawl']);
+  assert.deepEqual(await ids([]), ['tikhub', 'firecrawl', 'parallel']);
+  assert.deepEqual(await ids(['--zh']), ['parallel']);
   assert.deepEqual(await ids(['--supplemental']), ['tikhub', 'firecrawl']);
   assert.deepEqual(await ids(['--vendors', 'monid,tinyfish']), ['tinyfish', 'monid']);
   assert.deepEqual(await ids(['--reanalyze']), VENDORS.map(vendor => vendor.id), 'offline reanalysis keeps every vendor');
   const offline = await main(['--reanalyze', '--out', dir], { log: () => {} });
   assert.deepEqual(offline.vendors[0].queries.map(query => query.queryId),
-    [...QUERIES, ...SUPPLEMENTAL_QUERIES].map(query => query.id), 'offline reanalysis keeps both query sets');
+    [...QUERIES, ...SUPPLEMENTAL_QUERIES, ...ZH_QUERIES].map(query => query.id), 'offline reanalysis keeps every query set');
   const scoped = await main(['--reanalyze', '--supplemental', '--out', dir], { log: () => {} });
   assert.deepEqual(scoped.vendors[0].queries.map(query => query.queryId), SUPPLEMENTAL_QUERIES.map(query => query.id));
 }));
+
+test('Parallel requests, mapping and the Chinese summary', () => {
+  const [step] = parallel.steps(ZH_QUERIES[0]);
+  assert.equal(step.body.mode, 'advanced');
+  assert.deepEqual(step.body.search_queries, [ZH_QUERIES[0].webQuery]);
+  assert.ok(ZH_QUERIES.reduce((total, query) => total + parallel.steps(query)[0].worstCaseUsd, 0) <= 1);
+  assert.equal(ZH_QUERIES.length, 20);
+  const items = parallel.normalize({ results: [
+    { url: 'https://www.zhihu.com/q/1', title: '标题', publish_date: '2026-09-20', excerpts: ['x'] },
+    { url: 'https://example.com/a', title: 'English', publish_date: null, excerpts: [] },
+  ] });
+  assert.equal(items[1].publishedAt, undefined);
+  assert.equal(items[1].snippet, undefined);
+  assert.deepEqual(zhStats(items), { results: 2, chineseTitlePct: 50, chineseSitePct: 50, datedPct: 50,
+    newest: '2026-09-20T00:00:00.000Z', distinctSites: 2 });
+  assert.equal(parallel.reportedRaw({ usage: [{ name: 'sku_search', count: 1 }] }), 'sku_search=1');
+});
 
 test('application code never imports the comparison script', () => {
   const result = spawnSync('git', ['grep', '-l', '-i', '-e', 'research0', '--', 'apps', 'packages'], { cwd: repositoryRoot, encoding: 'utf8' });

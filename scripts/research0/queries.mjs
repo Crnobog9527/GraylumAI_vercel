@@ -71,3 +71,15 @@ export const SUPPLEMENTAL_QUERIES = [
   { id: 'F02', region: 'global', platform: 'web', type: 'fetch', url: 'https://en.wikipedia.org/wiki/Creator_economy' },
   { id: 'F03', region: 'global', platform: 'web', type: 'fetch', url: 'https://www.nasa.gov/news/' },
 ];
+
+// Chinese web-search quality round (Owner, 2026-09-28): typical questions of
+// Chinese creators, plus two freshness probes. Generic topics only.
+export const ZH_QUERIES = [
+  '小红书 爆款笔记 标题 技巧 2026', '抖音 推荐算法 最新变化', '视频号 直播带货 2026 趋势', 'B站 UP主 涨粉 方法',
+  '公众号 打开率 下降 原因', '知识付费 课程 定价 策略', '短剧 出海 市场规模 2026', '露营经济 消费趋势 报告',
+  '国潮品牌 营销案例', 'AI数字人 直播带货 效果', '小红书 KOC 种草 投放 成本', '抖音电商 2026 上半年 GMV',
+  '淄博烧烤 爆火 原因 分析', '2026年9月 热点事件', '华为 新品发布会 2026', '新能源汽车 9月 销量 排行',
+  '中国网络视听发展研究报告 2026', '微信视频号 创作者 分成 政策', '快手 磁力金牛 投放 教程', '母婴博主 变现 方式',
+].map((keyword, index) => ({
+  id: `C${String(index + 1).padStart(2, '0')}`, region: 'cn', platform: 'web', type: 'keyword', keyword, webQuery: keyword,
+}));
