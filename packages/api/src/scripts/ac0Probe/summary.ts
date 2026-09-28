@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // AC-0b model probe. Standalone script: application code must never import it.
 import {askCategories, type AskCategory} from './classify.ts';
-import type {ProbeConfig} from './config.ts';
+import {thinkingLabel, type ProbeConfig} from './config.ts';
 import type {TrialKind, TrialResult} from './trial.ts';
 
 /** Owner decision 2026-09-28 for ask_question. */
@@ -71,7 +71,8 @@ export function summarize(configs: ProbeConfig[], results: TrialResult[]) {
     const calls = mine.flatMap(result => result.calls);
     const cost = calls.reduce((sum, call) => sum + (call.costUsd ?? call.boundUsd), 0);
     return {
-      configId: config.id, model: config.model, route: config.route, effort: config.effort,
+      configId: config.id, model: config.model, route: config.route, thinking: thinkingLabel(config),
+      dataCollection: config.dataCollection === 'omit' ? 'omitted' : 'deny',
       ask: askSummary(of('ask')),
       text: kindSummary(of('text')),
       reference: {...kindSummary(of('reference')), readsPerTrial: stats(of('reference').map(trial => trial.referenceReads))},

@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // AC-0b model probe. Standalone script: application code must never import it.
 import {createHash} from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
 import {BudgetStop, usdToNano, nanoToUsd, type Budget} from './budget.ts';
 import {callBoundUsd, routing, type ProbeConfig} from './config.ts';
 import {streamObserver, type StreamFacts} from './sse.ts';
@@ -26,7 +27,7 @@ export type CallRecord = {
   errorCode?: string;
   errorMessage?: string;
   requestBytes: number;
-  dataCollection: 'deny';
+  dataCollection: 'deny' | 'omitted';
   boundUsd: number;
   /** Amount booked against the caps. */
   costUsd?: number;
@@ -46,6 +47,14 @@ export function assertDataCollectionDenied(body: unknown): void {
   if (provider?.data_collection !== 'deny') throw new Error('PROBE_DATA_COLLECTION_NOT_DENIED');
 }
 
+/** The data_collection check for one config: deny unless the config explicitly
+ * omits it (built-in only, Owner decision 2026-09-28), and then no field at all. */
+export function assertDataCollection(body: unknown, config: ProbeConfig): void {
+  if (config.dataCollection !== 'omit') return assertDataCollectionDenied(body);
+  const provider = (body as {provider?: Record<string, unknown>} | null)?.provider;
+  if (!provider || 'data_collection' in provider) throw new Error('PROBE_DATA_COLLECTION_NOT_OMITTED');
+}
+
 function denied(reason: string): never {
   throw new Error('PROBE_REQUEST_DENIED:' + reason);
 }
@@ -54,7 +63,12 @@ function checkBody(body: Record<string, unknown>, config: ProbeConfig, maxTokens
   if (body.model !== config.model) denied('model');
   if (body.stream !== true || (body.stream_options as {include_usage?: unknown})?.include_usage !== true) denied('stream');
   if (body.store !== false) denied('store');
-  if ('reasoning' in body || body.reasoning_effort !== config.effort) denied('reasoning');
+  // Thinking is sent exactly as configured, in exactly one of the two forms.
+  if (config.reasoning) {
+    if ('reasoning_effort' in body || !isDeepStrictEqual(body.reasoning, config.reasoning)) denied('reasoning');
+  } else if ('reasoning' in body || body.reasoning_effort !== config.effort) {
+    denied('reasoning');
+  }
   if (body.max_tokens !== maxTokens || 'max_completion_tokens' in body) denied('max_tokens');
   // Routing is added here only, so nothing upstream can weaken it.
   if ('provider' in body) denied('provider');
@@ -149,7 +163,7 @@ export function probeTransport(options: {
     checkBody(body, options.config, options.maxTokens);
     body.provider = routing(options.config);
     const bytes = JSON.stringify(body);
-    assertDataCollectionDenied(JSON.parse(bytes));
+    assertDataCollection(JSON.parse(bytes), options.config);
     const hash = createHash('sha256').update(bytes).digest('hex');
     // With retries disabled every request is a new turn; an identical body is a resend.
     if (sentHashes.has(hash)) denied('duplicate');
@@ -168,7 +182,7 @@ export function probeTransport(options: {
     const facts = streamObserver(() => options.clock() - started);
     const record: CallRecord = {
       sequence: records.length + 1, status: 'in_flight', sentAtMs: started - options.trialStart, requestBytes,
-      dataCollection: 'deny', boundUsd: nanoToUsd(usdToNano(boundUsd)), facts: facts.facts,
+      dataCollection: options.config.dataCollection === 'omit' ? 'omitted' : 'deny', boundUsd: nanoToUsd(usdToNano(boundUsd)), facts: facts.facts,
     };
     records.push(record);
     const signal = AbortSignal.timeout(options.timeoutMs);

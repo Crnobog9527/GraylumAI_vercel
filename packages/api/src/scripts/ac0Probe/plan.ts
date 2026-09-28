@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {parseArgs} from 'node:util';
 import {z} from 'zod';
 import {DEFAULT_MAX_CALLS, DEFAULT_MAX_USD, HARD_MAX_CALLS, HARD_MAX_USD, validateCaps} from './budget.ts';
-import {callBoundUsd, DEFAULT_CONFIG_IDS, resolveConfigs, type ProbeConfig} from './config.ts';
+import {callBoundUsd, DEFAULT_CONFIG_IDS, resolveConfigs, thinkingLabel, type ProbeConfig} from './config.ts';
 import {parsePrivateJson, scenariosOf, stepRules, type LoadedSkill, type Scenario} from './skill.ts';
 import type {TrialKind} from './trial.ts';
 
@@ -25,7 +25,7 @@ export const USAGE = `AC-0b model probe (dry run unless --live).
   --skill-dir <dir>     private Skill directory with SKILL.md and references/ (default: synthetic repo fixture)
   --scenarios <file>    scenario JSON; required with --skill-dir (keep it outside the repository)
   --configs <ids>       comma-separated config ids (default: ${DEFAULT_CONFIG_IDS.join(',')})
-  --config-file <file>  JSON array of extra configs {id, model, route, effort, maxPrice:{prompt, completion}}
+  --config-file <file>  JSON array of extra configs {id, model, route, effort | reasoning, maxPrice:{prompt, completion}}
   --ask <n>             ask_question trials per config (default 30)
   --text <n>            plain-text streaming trials per config (default 0)
   --reference <n>       reference-first trials per config (default 0)
@@ -184,8 +184,9 @@ export function describePlan(plan: ProbePlan, mode: 'dry-run' | 'live', ledger: 
       `scenarios digest ${plan.scenarioDigest}`,
     `Trials per config: ask ${plan.counts.ask}, text ${plan.counts.text}, reference ${plan.counts.reference}; ` +
       `max_tokens ${plan.maxTokens}; timeout ${plan.timeoutMs} ms`,
-    'Configs (every call: only=<route>, allow_fallbacks=false, require_parameters=true, data_collection=deny, max_price):',
-    ...plan.configs.map(config => `  ${config.id}: ${config.model} via ${config.route}, reasoning_effort=${config.effort}, ` +
+    'Configs (every call: only=<route>, allow_fallbacks=false, require_parameters=true, max_price):',
+    ...plan.configs.map(config => `  ${config.id}: ${config.model} via ${config.route}, ${thinkingLabel(config)}, ` +
+      `data_collection=${config.dataCollection === 'omit' ? 'omitted' : 'deny'}, ` +
       `max_price ${config.maxPrice.prompt}/${config.maxPrice.completion} USD per M tokens`),
     `Worst case: ${plan.plannedCalls} provider calls, $${plan.plannedUsdUpperBound.toFixed(4)} (bytes counted as tokens)`,
     `Run caps: ${plan.maxCalls} calls, $${plan.maxUsd}; the run stops before a call that would exceed either`,
