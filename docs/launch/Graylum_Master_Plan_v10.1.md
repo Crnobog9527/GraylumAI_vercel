@@ -407,7 +407,7 @@ progress_refresh_v10_1:
 8. **部署后冒烟（CAPTCHA 强制\*仍未开\*）**：登录、聊天一轮（走 pre-deduct/finalize）、套餐页渲染，均正常——**确认新 runtime（含 hCaptcha 前端接入）已实际接管生产**。
 8b. **开启 Supabase 生产 CAPTCHA 强制（D12 时序，v8）**：确认第 8 步的新 runtime（前端已传 `captchaToken`）生效后，才在 Supabase 生产 Auth 设置里打开 hCaptcha 强制 → 立刻用真实邮箱注册一次验证"带 captcha 能过、伪造/缺失被拒"。**顺序不可颠倒**：开关早于前端接入会立即打断所有邮箱注册/登录。
 9. **设置并冻结 `launch_baseline_at`（F5：新 runtime 生效之后）**：设为本步骤执行时刻 → **读回确认非空且等于预期值** → 记录到 rollout packet，此后不得再改（如需修改属单独 Owner gate）。<br>**为何在此**：baseline 必须晚于"新 runtime 生效"（第 7 步合并部署）——否则第 5–7 步窗口内旧 runtime 经 cron/webhook 产生的、按旧语义记账的行会被划入"baseline 之后"，污染新语义观测层并可能误报 G2。移到此处后，baseline 干净地把"旧世界（含建库窗口）"与"canary 起的新世界"分开；第 8 步冒烟属 Owner 自测流量，落在 baseline 之前（历史侧），符合预期。
-10. **创建生产 Skill 与模块**：在生产 admin（`graylum.com/admin`；**操作前先确认所连数据库 ref = `正式项目`**）创建并发布 Owner 批准的 Skill → 新建模块并绑定 → 保持 inactive → admin 冒烟 → 置为 active。
+10. **创建生产 Skill 与模块**：在生产 admin（`graylum.com/admin`；**操作前，将所连数据库的实际 project ref 与仓库外受控配置中 Owner 批准的正式项目预期 ref 做精确比对；预期值缺失、实际值无法确认或两者不一致时停止。不得把“正式项目”字样当作预期 ref；只记录匹配/不匹配，不在公开文档、PR 或日志输出原值**）创建并发布 Owner 批准的 Skill → 新建模块并绑定 → 保持 inactive → admin 冒烟 → 置为 active。
 11. **D9 停用 8 个旧模块**，按 id 逐行复验（§4-C）。
 12. **G4 复验**：`active 且 bound 的模块数 ≥1` 且 `active 且 unbound 的模块数 =0`。
 13. **Stripe live 核对**：商品/价格/webhook endpoint 与 secret/Customer Portal 配置逐项；**live 模式已启用 alipay 支付方式**；**live webhook 事件订阅须含 `checkout.session.completed`（支付宝履约主路径）、`refund.updated`/`refund.failed`（支付宝异步退款）**，async_payment_* 若已订阅保留但非必需（v9 F5 更正）。
