@@ -167,7 +167,10 @@ async function runQuery(context, vendor, query, key, secrets) {
       reportedRaw, reportedCostUsd: reportedUsd, chargedUsd: record.chargedUsd, costBasis: record.basis, rawFile });
     // No retry and no fallback: a failed or unknown step ends this query.
     if (outcome !== 'ok') {
-      return { status: outcome === 'unknown' ? 'UNKNOWN' : 'FAILED', reason: result.reason ?? vendor.failureReason?.(json), calls, latencyMs };
+      // A rejected key (401/403) or an empty account (402) will reject every other request too.
+      const accountRejected = [401, 402, 403].includes(result.httpStatus);
+      return { status: outcome === 'unknown' ? 'UNKNOWN' : 'FAILED', reason: result.reason ?? vendor.failureReason?.(json), calls, latencyMs,
+        ...(accountRejected ? { stopVendor: true, stopReason: `ACCOUNT_REJECTED_HTTP_${result.httpStatus}` } : {}) };
     }
     previous = json;
     last = json;
@@ -190,7 +193,7 @@ async function readBalance(context, vendor, key, secrets, label) {
   const limits = { vendorId: vendor.id, maxCalls: vendor.maxCalls, maxUsd: vendor.maxUsd ?? VENDOR_CAP_USD };
   // Balance reads are repeatable per run by design, so the run id scopes their key.
   const attemptKey = keyOf(vendor.id, spec, `${label}@${context.runId}`);
-  if (refusal(context.ledger, limits, spec.worstCaseUsd, { documentedFree: spec.documentedFree === true, key: attemptKey })) return null;
+  if (refusal(context.ledger, limits, spec.worstCaseUsd, { documentedFree: spec.documentedFree === true, key: attemptKey })) return { value: null };
   const record = await reserve(context.ledger, {
     vendor: vendor.id, queryId: label, step: 0, at: context.now().toISOString(), worstCaseUsd: spec.worstCaseUsd, requestKey: attemptKey,
   });
@@ -199,9 +202,11 @@ async function readBalance(context, vendor, key, secrets, label) {
   // Only a documented-free balance read books zero; otherwise its worst case stays booked.
   await settle(context.ledger, record, { outcome: result.outcome, reportedUsd: spec.documentedFree === true ? 0 : null });
   await saveRaw(context, { vendor, query: { id: label }, stepIndex: 0, spec, result, secrets });
-  if (result.outcome !== 'ok' || json === undefined) return null;
+  // A rejected key or empty account stops the vendor before any query, like a rejected query would.
+  if ([401, 402, 403].includes(result.httpStatus)) return { value: null, stopReason: `ACCOUNT_REJECTED_HTTP_${result.httpStatus}` };
+  if (result.outcome !== 'ok' || json === undefined) return { value: null };
   const value = vendor.balance.read(json);
-  return Number.isFinite(value) ? value : null;
+  return { value: Number.isFinite(value) ? value : null };
 }
 
 function balanceDelta(before, after) {
@@ -226,23 +231,28 @@ export async function runComparison({ vendors, queries, env, live, fetchImpl, le
     report.vendors.push(entry);
     let stopReason = null;
     const measureBalance = live && keyPresent && !vendor.blockedReason && vendor.balance && plan.runnable;
-    const before = measureBalance ? await readBalance(context, vendor, key, secrets, 'BALANCE_BEFORE') : null;
+    const opening = measureBalance ? await readBalance(context, vendor, key, secrets, 'BALANCE_BEFORE') : { value: null };
+    const before = opening.value;
+    if (opening.stopReason) stopReason = opening.stopReason;
     for (const query of queries) {
       if (!live) entry.queries.push({ queryId: query.id, status: 'DRY_RUN' });
       else if (vendor.blockedReason) entry.queries.push({ queryId: query.id, status: 'NOT_RUN', reason: vendor.blockedReason });
       else if (!keyPresent) entry.queries.push({ queryId: query.id, status: 'NOT_RUN', reason: 'MISSING_KEY' });
       else if (stopReason) {
-        entry.queries.push({ queryId: query.id, status: stopReason.startsWith(UNRECONCILED) ? 'NOT_RUN' : 'BUDGET_REFUSED', reason: stopReason });
+        const status = stopReason.startsWith(UNRECONCILED) || stopReason.startsWith('ACCOUNT_REJECTED') ? 'NOT_RUN' : 'BUDGET_REFUSED';
+        entry.queries.push({ queryId: query.id, status, reason: stopReason });
       }
       else {
         const result = await runQuery(context, vendor, query, key, secrets);
-        if (result.stopVendor) stopReason = result.reason;
+        if (result.stopVendor) stopReason = result.stopReason ?? result.reason;
         delete result.stopVendor;
+        delete result.stopReason;
         entry.queries.push({ queryId: query.id, ...result });
       }
     }
-    if (measureBalance) {
-      const after = await readBalance(context, vendor, key, secrets, 'BALANCE_AFTER');
+    // Once the account is known to reject requests, the closing balance read is skipped too.
+    if (measureBalance && !stopReason?.startsWith('ACCOUNT_REJECTED')) {
+      const after = (await readBalance(context, vendor, key, secrets, 'BALANCE_AFTER')).value;
       entry.balance = { beforeUsd: before, afterUsd: after, spentThisRunUsd: balanceDelta(before, after) };
     }
     entry.usage = live ? vendorUsage(ledger, vendor.id) : null;

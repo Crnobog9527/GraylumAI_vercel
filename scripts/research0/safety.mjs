@@ -146,11 +146,12 @@ export function checkReconcileArgs({ keyPrefix, actualUsd, note }) {
 export async function reconcileAttempt(ledger, { keyPrefix, actualUsd, note, now = () => new Date() }) {
   checkReconcileArgs({ keyPrefix, actualUsd, note });
   const matches = ledger.entries.filter(entry => entry.requestKey.startsWith(keyPrefix));
-  if (matches.length !== 1) throw new Error(`RESEARCH0_RECONCILE_MATCHES_${matches.length}_ENTRIES`);
-  const [entry] = matches;
-  if (entry.reconciled || !(entry.state === 'dispatched' || entry.outcome === 'unknown')) {
-    throw new Error('RESEARCH0_RECONCILE_ENTRY_NOT_UNRECONCILED');
-  }
+  if (matches.length === 0) throw new Error('RESEARCH0_RECONCILE_MATCHES_0_ENTRIES');
+  // A re-sent request shares its key with earlier settled attempts; only the open one can be reconciled.
+  const open = matches.filter(entry => !entry.reconciled && (entry.state === 'dispatched' || entry.outcome === 'unknown'));
+  if (open.length === 0) throw new Error('RESEARCH0_RECONCILE_ENTRY_NOT_UNRECONCILED');
+  if (open.length !== 1) throw new Error(`RESEARCH0_RECONCILE_MATCHES_${open.length}_OPEN_ENTRIES`);
+  const [entry] = open;
   entry.reconciled = { at: now().toISOString(), actualUsd, note: note.trim(), bookedBeforeUsd: entry.chargedUsd };
   entry.state = 'settled';
   entry.chargedUsd = actualUsd;

@@ -6,7 +6,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { assertOutsideRepository, main, parseArgs } from '../research0-vendor-comparison.mjs';
 import { count, summarize, timestamp } from '../research0/metrics.mjs';
-import { QUERIES, SUPPLEMENTAL_QUERIES } from '../research0/queries.mjs';
+import { QUERIES, SUPPLEMENTAL_QUERIES, ZH_QUERIES } from '../research0/queries.mjs';
+import { formatZhTable, newestAgeDays, zhStats } from '../research0/zh.mjs';
+import { parallel } from '../research0/vendors/parallel.mjs';
 import { formatReport } from '../research0/report.mjs';
 import { keyFor, runComparison } from '../research0/runner.mjs';
 import { TOTAL_CAP_USD, acquireLock, initLedger, loadLedger, reconcileAttempt, redactUrl, refusal, requestKey } from '../research0/safety.mjs';
@@ -608,6 +610,16 @@ test('reconcile marks exactly one ambiguous entry, sends nothing and validates i
   await assert.rejects(cli(['--reconcile', key.slice(0, 12), '--actual-usd', '-1', '--note', 'x']), /AMOUNT_INVALID/);
   await assert.rejects(cli(['--reconcile', key.slice(0, 12), '--actual-usd', '0']), /NOTE_REQUIRED/);
   await assert.rejects(cli(['--reconcile', 'cd'.repeat(6), '--actual-usd', '0', '--note', 'x']), /MATCHES_0_ENTRIES/);
+  const retried = path.join(dir, 'retried');
+  const sameKey = 'ef'.repeat(32);
+  await initLedger(path.join(retried, 'ledger.json'));
+  await writeFile(path.join(retried, 'ledger.json'), JSON.stringify({ version: 1, entries: [
+    { vendor: 'fake', requestKey: sameKey, chargedUsd: 0.1, worstCaseUsd: 0.1, state: 'settled', outcome: 'failed', at: 't1' },
+    { vendor: 'fake', requestKey: sameKey, chargedUsd: 0.1, worstCaseUsd: 0.1, state: 'settled', outcome: 'unknown', at: 't2', retryReason: 'r' },
+  ] }));
+  await main(['--reconcile', sameKey.slice(0, 12), '--actual-usd', '0', '--note', 'retry of a confirmed failure', '--out', retried], { log: () => {} });
+  const retriedLedger = await loadLedger(path.join(retried, 'ledger.json'), { requireExisting: true });
+  assert.deepEqual(retriedLedger.entries.map(entry => Boolean(entry.reconciled)), [false, true], 'only the open attempt of a re-sent request is reconciled');
   assert.ok(!(await readdir(dir)).includes('ledger.lock'), 'a failed reconcile never leaves the lock');
   await cli(['--reconcile', key.slice(0, 12), '--actual-usd', '0.004', '--note', 'dashboard shows 0.004']);
   const after = await loadLedger(file, { requireExisting: true });
@@ -707,15 +719,63 @@ test('a paid run sends exactly the requests its dry-run plan lists, balance read
 test('without --vendors only the Owner-kept vendors run; excluded ones must be named', async () => withTemp(async dir => {
   const ids = async argv => (await main([...argv, '--out', dir], { env: {}, fetchImpl: async () => { throw new Error('no network'); }, log: () => {} }))
     .vendors.map(vendor => vendor.id);
-  assert.deepEqual(await ids([]), ['tikhub', 'tavily', 'firecrawl']);
+  assert.deepEqual(await ids([]), ['tikhub', 'firecrawl', 'parallel']);
+  assert.deepEqual(await ids(['--zh']), ['parallel']);
   assert.deepEqual(await ids(['--supplemental']), ['tikhub', 'firecrawl']);
   assert.deepEqual(await ids(['--vendors', 'monid,tinyfish']), ['tinyfish', 'monid']);
   assert.deepEqual(await ids(['--reanalyze']), VENDORS.map(vendor => vendor.id), 'offline reanalysis keeps every vendor');
   const offline = await main(['--reanalyze', '--out', dir], { log: () => {} });
   assert.deepEqual(offline.vendors[0].queries.map(query => query.queryId),
-    [...QUERIES, ...SUPPLEMENTAL_QUERIES].map(query => query.id), 'offline reanalysis keeps both query sets');
+    [...QUERIES, ...SUPPLEMENTAL_QUERIES, ...ZH_QUERIES].map(query => query.id), 'offline reanalysis keeps every query set');
   const scoped = await main(['--reanalyze', '--supplemental', '--out', dir], { log: () => {} });
   assert.deepEqual(scoped.vendors[0].queries.map(query => query.queryId), SUPPLEMENTAL_QUERIES.map(query => query.id));
+}));
+
+test('Parallel requests, mapping and the Chinese summary', () => {
+  const [step] = parallel.steps(ZH_QUERIES[0]);
+  assert.equal(step.body.mode, 'advanced');
+  assert.deepEqual(step.body.search_queries, [ZH_QUERIES[0].webQuery]);
+  assert.ok(ZH_QUERIES.reduce((total, query) => total + parallel.steps(query)[0].worstCaseUsd, 0) <= 1);
+  assert.equal(ZH_QUERIES.length, 20);
+  const items = parallel.normalize({ results: [
+    { url: 'https://www.zhihu.com/q/1', title: '标题', publish_date: '2026-09-20', excerpts: ['x'] },
+    { url: 'https://example.com/a', title: 'English', publish_date: null, excerpts: [] },
+  ] });
+  assert.equal(items[1].publishedAt, undefined);
+  assert.equal(items[1].snippet, undefined);
+  assert.deepEqual(zhStats(items), { results: 2, chineseTitlePct: 50, chineseSitePct: 50, datedPct: 50,
+    newest: '2026-09-20T00:00:00.000Z', distinctSites: 2 });
+  assert.equal(parallel.reportedRaw({ usage: [{ name: 'sku_search', count: 1 }] }), 'sku_search=1');
+  assert.equal(newestAgeDays(zhStats(items), '2026-09-28T08:00:00.000Z'), 8);
+  const table = formatZhTable({ generatedAt: '2026-09-28T08:00:00.000Z', vendors: [{ label: 'P', queries: [
+    { status: 'OK', latencyMs: 100, items }, { status: 'OK', latencyMs: 1000, items: [items[1]] },
+  ] }] });
+  assert.match(table, /\| 550 ms \|$/m, 'even counts use the mean of the two middle latencies');
+  assert.match(table, /\| 8 \| 550 ms \|/, 'recency column shows the median age of the newest dated result');
+});
+
+test('a rejected key or empty account (401/402/403) stops the vendor after the first request', async () => withTemp(async dir => {
+  for (const status of [401, 402, 403]) {
+    const vendor = fakeVendor({ id: `auth${status}` });
+    const { calls, fetchImpl } = recordingFetch(() => new Response('{"error":"Invalid API key"}', { status }));
+    const { report } = await run(dir, { vendor, fetchImpl });
+    assert.equal(calls.length, 1, `HTTP ${status}`);
+    assert.deepEqual(report.vendors[0].queries.map(query => query.status), ['FAILED', 'NOT_RUN', 'NOT_RUN']);
+    assert.equal(report.vendors[0].queries[1].reason, `ACCOUNT_REJECTED_HTTP_${status}`);
+  }
+}));
+
+test('a rejected balance read stops the vendor; a rejected query skips the closing balance read', async () => withTemp(async dir => {
+  const balance = { spec: () => ({ method: 'GET', url: 'https://api.example.test/balance', worstCaseUsd: 0, documentedFree: true }), read: () => 1 };
+  const early = fakeVendor({ id: 'early', balance });
+  const first = recordingFetch(() => new Response('{"error":"Invalid API key"}', { status: 401 }));
+  const one = await run(dir, { vendor: early, fetchImpl: first.fetchImpl });
+  assert.equal(first.calls.length, 1, 'only the opening balance read is sent');
+  assert.ok(one.report.vendors[0].queries.every(query => query.status === 'NOT_RUN' && query.reason === 'ACCOUNT_REJECTED_HTTP_401'));
+  const late = fakeVendor({ id: 'late', balance });
+  const second = recordingFetch(url => (url.endsWith('/balance') ? new Response('{}') : new Response('{}', { status: 402 })));
+  await run(dir, { vendor: late, fetchImpl: second.fetchImpl });
+  assert.deepEqual(second.calls.map(call => new URL(call.url).pathname), ['/balance', '/search'], 'no closing balance read after a 402');
 }));
 
 test('application code never imports the comparison script', () => {
