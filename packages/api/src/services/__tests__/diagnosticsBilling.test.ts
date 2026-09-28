@@ -8,7 +8,7 @@ function context(error: unknown = null) {
   const select = vi.fn(() => ({ limit }));
   const from = vi.fn(() => ({ select }));
   const rpc = vi.fn(() => { throw new Error('Mutating RPC forbidden'); });
-  return { ctx: { supabase: { from, rpc }, supabaseAdmin: { rpc }, userId: 'real-admin-id' } as any,
+  return { ctx: { supabase: { from, rpc }, supabaseAdmin: { from, rpc }, userId: 'real-admin-id' } as any,
     from, select, limit, rpc };
 }
 
@@ -59,4 +59,24 @@ describe('read-only billing diagnostics', () => {
     expect(result.status).toBe('failed');
     expect(result.message).toContain('无法完整读取');
   });
+});
+
+
+it('respects the authenticated 0079 and service-role 0103 column grants', async () => {
+  const allowed = new Set(['user_id', 'operation_type', 'amount', 'created_at']);
+  const userSelect = vi.fn((columns: string) => ({ limit: async () => ({
+    data: [], error: columns.split(',').some(column => !allowed.has(column.trim()))
+      ? { code: '42501' } : null,
+  }) }));
+  const adminSelect = vi.fn((columns: string) => ({ limit: async (count: number) => ({
+    data: [], error: columns !== 'id, metadata' || count !== 0 ? { code: '42501' } : null,
+  }) }));
+  const rpc = vi.fn(() => { throw new Error('No billing mutations'); });
+  const ctx = { supabase: { from: () => ({ select: userSelect }), rpc },
+    supabaseAdmin: { from: () => ({ select: adminSelect }), rpc } } as any;
+  expect((await testBillingPrededuct(ctx)).status).toBe('warning');
+  expect((await testBillingIdempotency(ctx)).status).toBe('warning');
+  expect(userSelect).toHaveBeenCalledTimes(1);
+  expect(adminSelect).toHaveBeenCalledWith('id, metadata');
+  expect(rpc).not.toHaveBeenCalled();
 });

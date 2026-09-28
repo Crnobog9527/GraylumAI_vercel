@@ -289,7 +289,7 @@ describe('billing diagnostic service uses only real read paths', () => {
     });
     const adminRpc = vi.fn(() => { throw new Error('No privileged billing mutations allowed'); });
     const service = new DiagnosticsService({ supabase: { from, rpc } as never,
-      supabaseAdmin: { rpc: adminRpc } as never, userId: 'synthetic-admin' });
+      supabaseAdmin: { from, rpc: adminRpc } as never, userId: 'synthetic-admin' });
     const result = await service.runCategoryTests('billing');
     expect(result.results.map(r => r.status)).toEqual(mode === 'query failure'
       ? ['failed', 'failed', 'failed'] : ['warning', 'warning', mode === 'mismatch' ? 'failed' : 'passed']);

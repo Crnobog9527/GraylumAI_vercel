@@ -99,7 +99,15 @@ const envSchema = z.object({
     .regex(/^sntrys_/, 'SENTRY_AUTH_TOKEN 必须以 sntrys_ 开头')
     .optional(),
 
-  // Rate Limiting (可选)
+  // Distributed admission is fail-closed in every environment. Both are required.
+  UPSTASH_REDIS_REST_URL: rejectDuplicatedEnvPrefix('UPSTASH_REDIS_REST_URL')
+    .url('UPSTASH_REDIS_REST_URL 必须是有效的 HTTP(S) URL')
+    .regex(/^https?:\/\//, 'UPSTASH_REDIS_REST_URL 必须使用 HTTP(S)'),
+  UPSTASH_REDIS_REST_TOKEN: rejectDuplicatedEnvPrefix('UPSTASH_REDIS_REST_TOKEN')
+    .min(1, 'UPSTASH_REDIS_REST_TOKEN 不能为空')
+    .regex(/^\S+$/, 'UPSTASH_REDIS_REST_TOKEN 不能包含空白字符'),
+
+  // Rate limit overrides (optional)
   RATE_LIMIT_AI_MAX_REQUESTS: z.coerce.number().min(1).max(1000).optional(),
   RATE_LIMIT_AI_STREAM_MAX_REQUESTS: z.coerce.number().min(1).max(500).optional(),
 
@@ -287,6 +295,8 @@ export function getSafeEnvSummary(): Record<string, string> {
     DATABASE_URL_SET: process.env.DATABASE_URL ? '✓' : '✗',
     ANTHROPIC_KEY_RETIRED_SET: process.env.ANTHROPIC_API_KEY ? '⚠' : '✗',
     OPENROUTER_KEY_SET: process.env.OPENROUTER_API_KEY ? '✓' : '✗',
+    UPSTASH_REDIS_URL_SET: process.env.UPSTASH_REDIS_REST_URL ? '✓' : '✗',
+    UPSTASH_REDIS_TOKEN_SET: process.env.UPSTASH_REDIS_REST_TOKEN ? '✓' : '✗',
     STRIPE_SECRET_KEY_SET: process.env.STRIPE_SECRET_KEY ? '✓' : '✗',
     STRIPE_PUBLISHABLE_KEY_SET: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ? '✓' : '✗',
     STRIPE_WEBHOOK_SECRET_SET: process.env.STRIPE_WEBHOOK_SECRET ? '✓' : '✗',

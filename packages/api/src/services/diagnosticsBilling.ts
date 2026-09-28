@@ -1,15 +1,16 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { DiagnosticContext, DiagnosticTestResult } from './diagnostics';
 import { runDailyBillingReconciliation } from './billingReconciliation';
 
 // These probes only inspect readable schema. A SELECT cannot prove atomic
 // deduction or concurrent idempotency; those require isolated integration tests.
 async function inspectBillingSchema(
-  ctx: DiagnosticContext, testId: string, testName: string, columns: string,
+  client: SupabaseClient, testId: string, testName: string, columns: string,
 ): Promise<DiagnosticTestResult> {
   const started = Date.now();
   const base = { testId, testName, category: 'billing' as const };
   try {
-    const { error } = await ctx.supabase.from('billing_history').select(columns).limit(0);
+    const { error } = await client.from('billing_history').select(columns).limit(0);
     if (error) throw error;
     return {
       ...base, status: 'warning', latencyMs: Date.now() - started,
@@ -26,12 +27,14 @@ async function inspectBillingSchema(
 }
 
 export function testBillingPrededuct(ctx: DiagnosticContext) {
-  return inspectBillingSchema(ctx, 'billing_prededuct', '预扣记录只读检查',
-    'id, user_id, operation_type, amount');
+  return inspectBillingSchema(ctx.supabase, 'billing_prededuct', '预扣记录只读检查',
+    'user_id, operation_type, amount, created_at');
 }
 
 export function testBillingIdempotency(ctx: DiagnosticContext) {
-  return inspectBillingSchema(ctx, 'billing_idempotency', '幂等字段只读检查', 'id, metadata');
+  // Migration 0103 grants service_role read access to id/metadata; 0079 excludes
+  // these columns from authenticated reads. LIMIT 0 never returns billing rows.
+  return inspectBillingSchema(ctx.supabaseAdmin, 'billing_idempotency', '幂等字段只读检查', 'id, metadata');
 }
 
 export async function testBillingReconcile(ctx: DiagnosticContext): Promise<DiagnosticTestResult> {
