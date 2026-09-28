@@ -8,8 +8,11 @@
  *
  * - `catalog` is a snapshot of OpenRouter's public model catalog for this
  *   model: its reasoning metadata and each provider route's parameters.
- * - `route` is the administrator's chosen provider route (the endpoint tag).
- *   Checks run against it, and a Runtime quote must use the same route.
+ * - `route` is the administrator's chosen provider: the OpenRouter provider
+ *   slug (`deepinfra`), which is what a quote's `provider.only` names and which
+ *   matches every endpoint of that provider (`deepinfra/fp8`, …). Checks require
+ *   every one of those endpoints to support what is chosen, and a Runtime quote
+ *   must use the same slug.
  * - `purposes` holds one setting per purpose. `interactive` must be set for a
  *   model to serve interactive dialogue; an unset `organize` means the
  *   provider's default (no reasoning field is sent). `review` and `writing`
@@ -121,6 +124,27 @@ export function readReasoningConfig(config: unknown): ReasoningConfig {
 
 export type ReasoningIssue = { purpose: ReasoningPurpose | null; code: string; message: string };
 
+/** The provider slug of an endpoint tag (`deepinfra/fp8` → `deepinfra`). */
+export function providerSlug(tag: string): string {
+  return tag.split("/")[0]!;
+}
+/** The distinct providers of a snapshot, in catalog order. */
+export function catalogProviders(catalog: CatalogSnapshot | null): Array<{ slug: string; name: string; endpoints: CatalogSnapshot["endpoints"] }> {
+  const providers = new Map<string, { slug: string; name: string; endpoints: CatalogSnapshot["endpoints"] }>();
+  for (const endpoint of catalog?.endpoints ?? []) {
+    const slug = providerSlug(endpoint.tag);
+    const entry = providers.get(slug) ?? { slug, name: endpoint.providerName, endpoints: [] };
+    entry.endpoints.push(endpoint);
+    providers.set(slug, entry);
+  }
+  return [...providers.values()];
+}
+/** Whether every endpoint the route can reach supports a parameter. */
+export function routeSupports(catalog: CatalogSnapshot | null, route: string | null, parameter: string): boolean {
+  const endpoints = catalogProviders(catalog).find(provider => provider.slug === route)?.endpoints ?? [];
+  return endpoints.length > 0 && endpoints.every(endpoint => endpoint.supportedParameters.includes(parameter));
+}
+
 /** Whether a setting enables thinking. */
 export function thinkingEnabled(setting: PurposeSetting): boolean {
   return setting.mode === "budget" || (setting.mode === "effort" && setting.effort !== "none");
@@ -145,10 +169,11 @@ export function checkReasoningConfig(config: ReasoningConfig, model: { maxTokens
     add(null, "CATALOG_STALE", "模型 ID 已变化，目录快照属于旧的模型，请重新读取目录");
     return issues;
   }
-  const endpoint = catalog.endpoints.find(item => item.tag === config.route);
+  const known = catalogProviders(catalog).some(provider => provider.slug === config.route);
+  const supported = (parameter: string) => !known || routeSupports(catalog, config.route, parameter);
   if (!config.route) add(null, "ROUTE_REQUIRED", "请选择供应商线路");
-  else if (!endpoint) add(null, "ROUTE_UNKNOWN", "所选线路不在当前目录里，请重新读取目录后再选");
-  if (config.purposes.interactive && endpoint && !endpoint.supportedParameters.includes("tools"))
+  else if (!known) add(null, "ROUTE_UNKNOWN", "所选线路不在当前目录里，请重新读取目录后再选");
+  if (config.purposes.interactive && config.route && !supported("tools"))
     add("interactive", "ROUTE_TOOLS_UNSUPPORTED", "所选线路不支持工具调用，不能用于交互对话");
   for (const purpose of configured) {
     const setting = config.purposes[purpose]!;
@@ -160,7 +185,7 @@ export function checkReasoningConfig(config: ReasoningConfig, model: { maxTokens
       continue;
     }
     const field = setting.mode === "budget" ? "reasoning" : setting.wire;
-    if (endpoint && !endpoint.supportedParameters.includes(field))
+    if (config.route && !supported(field))
       add(purpose, "ROUTE_PARAMETER_UNSUPPORTED", `所选线路不支持 ${field} 参数，"${label}"请换一种写法或换线路`);
     if (setting.mode === "off" && reasoning.mandatory)
       add(purpose, "THINKING_MANDATORY", `这个模型不能关闭思考，"${label}"请选择一个档位`);

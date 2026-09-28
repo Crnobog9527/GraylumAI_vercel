@@ -51,6 +51,19 @@ describe("checkReasoningConfig", () => {
     expect(codes(value)).toEqual(expected);
   });
 
+  it("routes by provider slug and requires every endpoint of that provider to support the choice", () => {
+    const variants = catalog({ endpoints: [
+      { tag: "deepinfra/fp8", providerName: "DeepInfra", supportedParameters: ["tools", "reasoning_effort"], contextLength: 1, maxCompletionTokens: 1 },
+      { tag: "deepinfra/bf16", providerName: "DeepInfra", supportedParameters: ["tools"], contextLength: 1, maxCompletionTokens: 1 },
+      { tag: "sail-research/fp4", providerName: "Sail", supportedParameters: ["tools", "reasoning_effort"], contextLength: 1, maxCompletionTokens: 1 },
+    ] });
+    const off = { interactive: { mode: "off", wire: "reasoning_effort" } } as const;
+    expect(codes(config({ catalog: variants, route: "sail-research", purposes: off }))).toEqual([]);
+    expect(codes(config({ catalog: variants, route: "deepinfra", purposes: off }))).toEqual(["ROUTE_PARAMETER_UNSUPPORTED"]);
+    // A quote names the provider, so an endpoint tag is not a route.
+    expect(codes(config({ catalog: variants, route: "deepinfra/fp8", purposes: off }))).toEqual(["ROUTE_UNKNOWN"]);
+  });
+
   it("refuses to disable thinking where the catalog marks it mandatory", () => {
     const mandatory = catalog({ reasoning: { ...catalog().reasoning!, mandatory: true } });
     expect(codes(config({ catalog: mandatory, purposes: { interactive: { mode: "off", wire: "reasoning" } } }))).toEqual(["THINKING_MANDATORY"]);

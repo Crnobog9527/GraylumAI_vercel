@@ -11,6 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   PURPOSE_LABELS,
   REASONING_PURPOSES,
+  catalogProviders,
+  routeSupports,
   type CatalogSnapshot,
   type PurposeSetting,
   type PurposeSettings,
@@ -69,7 +71,7 @@ function draftProblem(drafts: Record<ReasoningPurpose, Draft>): string | null {
   return null;
 }
 function supports(catalog: CatalogSnapshot | null, route: string | null, parameter: string) {
-  return Boolean(catalog?.endpoints.find(endpoint => endpoint.tag === route)?.supportedParameters.includes(parameter));
+  return routeSupports(catalog, route, parameter);
 }
 
 /** Per-row entry to the reasoning settings of one model (MODEL-REASONING). */
@@ -170,17 +172,19 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
               <Select value={route ?? ''} onValueChange={value => setRoute(value || null)} disabled={!catalog}>
                 <SelectTrigger aria-label="供应商线路"><SelectValue placeholder="选择线路" /></SelectTrigger>
                 <SelectContent>
-                  {(catalog?.endpoints ?? []).map(endpoint => (
-                    <SelectItem key={endpoint.tag} value={endpoint.tag}>
-                      {endpoint.providerName}（{endpoint.tag}）
-                      {` · 工具${endpoint.supportedParameters.includes('tools') ? '✓' : '✗'}`}
-                      {` · reasoning_effort${endpoint.supportedParameters.includes('reasoning_effort') ? '✓' : '✗'}`}
-                      {` · reasoning${endpoint.supportedParameters.includes('reasoning') ? '✓' : '✗'}`}
+                  {catalogProviders(catalog).map(provider => (
+                    <SelectItem key={provider.slug} value={provider.slug}>
+                      {provider.name}（{provider.slug}，{provider.endpoints.length} 条线路）
+                      {` · 工具${supports(catalog, provider.slug, 'tools') ? '✓' : '✗'}`}
+                      {` · reasoning_effort${supports(catalog, provider.slug, 'reasoning_effort') ? '✓' : '✗'}`}
+                      {` · reasoning${supports(catalog, provider.slug, 'reasoning') ? '✓' : '✗'}`}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-[var(--text-tertiary)]">测试窗口或正式报价必须使用同一条线路。</p>
+              <p className="text-xs text-[var(--text-tertiary)]">
+                按供应商选择；✓ 表示这家供应商的每条线路都支持。测试窗口或正式报价必须使用同一个供应商。
+              </p>
             </section>
 
             {REASONING_PURPOSES.map(purpose => {
