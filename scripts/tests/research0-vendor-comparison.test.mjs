@@ -610,6 +610,16 @@ test('reconcile marks exactly one ambiguous entry, sends nothing and validates i
   await assert.rejects(cli(['--reconcile', key.slice(0, 12), '--actual-usd', '-1', '--note', 'x']), /AMOUNT_INVALID/);
   await assert.rejects(cli(['--reconcile', key.slice(0, 12), '--actual-usd', '0']), /NOTE_REQUIRED/);
   await assert.rejects(cli(['--reconcile', 'cd'.repeat(6), '--actual-usd', '0', '--note', 'x']), /MATCHES_0_ENTRIES/);
+  const retried = path.join(dir, 'retried');
+  const sameKey = 'ef'.repeat(32);
+  await initLedger(path.join(retried, 'ledger.json'));
+  await writeFile(path.join(retried, 'ledger.json'), JSON.stringify({ version: 1, entries: [
+    { vendor: 'fake', requestKey: sameKey, chargedUsd: 0.1, worstCaseUsd: 0.1, state: 'settled', outcome: 'failed', at: 't1' },
+    { vendor: 'fake', requestKey: sameKey, chargedUsd: 0.1, worstCaseUsd: 0.1, state: 'settled', outcome: 'unknown', at: 't2', retryReason: 'r' },
+  ] }));
+  await main(['--reconcile', sameKey.slice(0, 12), '--actual-usd', '0', '--note', 'retry of a confirmed failure', '--out', retried], { log: () => {} });
+  const retriedLedger = await loadLedger(path.join(retried, 'ledger.json'), { requireExisting: true });
+  assert.deepEqual(retriedLedger.entries.map(entry => Boolean(entry.reconciled)), [false, true], 'only the open attempt of a re-sent request is reconciled');
   assert.ok(!(await readdir(dir)).includes('ledger.lock'), 'a failed reconcile never leaves the lock');
   await cli(['--reconcile', key.slice(0, 12), '--actual-usd', '0.004', '--note', 'dashboard shows 0.004']);
   const after = await loadLedger(file, { requireExisting: true });
