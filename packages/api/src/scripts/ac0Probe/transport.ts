@@ -63,7 +63,9 @@ function checkBody(body: Record<string, unknown>, config: ProbeConfig, maxTokens
   for (const tool of tools as Array<{function?: {name?: unknown}}>) {
     if (!PROBE_TOOL_NAMES.includes(String(tool?.function?.name))) denied('tool_name');
   }
-  if (tools.length && body.parallel_tool_calls !== false) denied('parallel_tool_calls');
+  // Routes that do not declare parallel_tool_calls are excluded under
+  // require_parameters, so the field must never be sent (trial.ts).
+  if ('parallel_tool_calls' in body) denied('parallel_tool_calls');
 }
 
 async function boundedText(response: Response, limit: number): Promise<string> {

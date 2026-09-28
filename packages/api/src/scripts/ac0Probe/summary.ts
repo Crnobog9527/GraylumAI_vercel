@@ -42,16 +42,25 @@ function askSummary(trials: TrialResult[]) {
   const counts = Object.fromEntries(askCategories.map(category => [category, 0])) as Record<AskCategory, number>;
   for (const trial of trials) if (trial.outcome) counts[trial.outcome.category] += 1;
   // Only trials where the provider actually answered can judge the model.
-  const answered = counts.correct + counts.malformed + counts.text_question + counts.no_question + counts.turn_not_ended;
+  const answered = counts.correct + counts.malformed + counts.multiple_calls + counts.text_question + counts.no_question +
+    counts.turn_not_ended;
   const correctRate = answered ? counts.correct / answered : undefined;
   const malformedRate = answered ? counts.malformed / answered : undefined;
   const called = trials.filter(trial => trial.outcome?.toolCalled && trial.outcome.argsValid);
+  const multiple = trials.filter(trial => trial.outcome?.category === 'multiple_calls');
   const verdict = answered < ASK_PASS.minTrials ? 'insufficient_trials'
     : correctRate! >= ASK_PASS.minCorrect && malformedRate! <= ASK_PASS.maxMalformed ? 'pass' : 'fail';
   return {
     ...kindSummary(trials), counts, answered, correctRate, malformedRate, verdict,
     turnEndedAfterValidCall: {ended: called.filter(trial => trial.outcome?.turnEnded).length, total: called.length},
     textBeforeTool: trials.filter(trial => trial.outcome?.textBeforeTool).length,
+    multipleCalls: {
+      trials: multiple.length,
+      callsPerTrial: tally(multiple.map(trial => String(trial.outcome!.toolCallCount))),
+      firstCallValidAsk: multiple.filter(trial => trial.outcome!.firstCallValidAsk).length,
+      turnEnded: multiple.filter(trial => trial.outcome!.turnEnded).length,
+      askExecutions: tally(multiple.map(trial => String(trial.askExecutions))),
+    },
   };
 }
 
@@ -93,11 +102,19 @@ export function summaryMarkdown(rows: ConfigSummary[], totals: {calls: number; c
     `# AC-0b probe summary (${totals.mode})`, '',
     `Provider calls: ${totals.calls}; spend: $${totals.costUsd.toFixed(6)}${totals.stop ? '; stopped: ' + totals.stop : ''}`, '',
     '## ask_question', '',
-    '| config | answered | correct | malformed | text question | no question | turn not ended | rejected | unknown | verdict |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| config | answered | correct | malformed | multiple calls | text question | no question | turn not ended | rejected | ' +
+      'unknown | verdict |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ...rows.map(row => `| ${row.configId} | ${row.ask.answered} | ${row.ask.counts.correct} (${pct(row.ask.correctRate)}) | ` +
-      `${row.ask.counts.malformed} (${pct(row.ask.malformedRate)}) | ${row.ask.counts.text_question} | ${row.ask.counts.no_question} | ` +
+      `${row.ask.counts.malformed} (${pct(row.ask.malformedRate)}) | ${row.ask.counts.multiple_calls} | ` +
+      `${row.ask.counts.text_question} | ${row.ask.counts.no_question} | ` +
       `${row.ask.counts.turn_not_ended} | ${row.ask.counts.provider_rejected} | ${row.ask.counts.unknown} | ${row.ask.verdict} |`),
+    '', '## Several tool calls in one turn', '',
+    '| config | trials | calls per trial | first call valid ask_question | turn ended | ask_question executions |',
+    '| --- | --- | --- | --- | --- | --- |',
+    ...rows.map(row => `| ${row.configId} | ${row.ask.multipleCalls.trials} | ${JSON.stringify(row.ask.multipleCalls.callsPerTrial)} | ` +
+      `${row.ask.multipleCalls.firstCallValidAsk} | ${row.ask.multipleCalls.turnEnded} | ` +
+      `${JSON.stringify(row.ask.multipleCalls.askExecutions)} |`),
     '', '## Latency and speed (median / p90 ms; chars per second median / p90)', '',
     '| config | kind | measured / trials | sdk errors | first content | first visible | total | chars/s |',
     '| --- | --- | --- | --- | --- | --- | --- | --- |',
