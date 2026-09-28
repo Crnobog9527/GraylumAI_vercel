@@ -100,7 +100,7 @@ function instagramPost(item) {
   return {
     id: text(item, ['id', 'pk']),
     url: code ? `https://www.instagram.com/p/${code}/` : undefined,
-    title: text(item, ['caption.text']),
+    title: text(item, ['caption.text', 'caption_text']),
     author: text(item, ['user.username', 'owner.username']),
     publishedAt: timestamp(item, ['taken_at', 'taken_at_timestamp']),
     views: count(item, ['play_count', 'ig_play_count', 'view_count', 'video_view_count']),
@@ -153,8 +153,11 @@ export function normalizeTikhub(json, query) {
       return findAll(data, object => has(object, 'video_id', 'videoId') && has(object, 'title'))
         .map(item => ({ ...youtubeVideo(item), author: text(item, ['author', 'channel_name']) ?? channel }));
     }
-    case 'instagram':
-      return findAll(data, object => has(object, 'taken_at', 'taken_at_timestamp') && has(object, 'code', 'shortcode', 'id')).map(instagramPost);
+    case 'instagram': {
+      // Some routes return the same posts twice (flat list and GraphQL edges).
+      const posts = findAll(data, object => has(object, 'taken_at', 'taken_at_timestamp') && has(object, 'code', 'shortcode', 'id')).map(instagramPost);
+      return posts.filter((post, index) => post.id === undefined || posts.findIndex(other => other.id === post.id) === index);
+    }
     default:
       return [];
   }

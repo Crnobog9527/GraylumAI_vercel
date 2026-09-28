@@ -293,6 +293,12 @@ test('TikHub-shaped items keep missing counts missing and vendor zeros as zero',
   assert.equal(tikhubFailed({ detail: { code: 400 } }), true);
   assert.equal(tikhubFailed(json), false);
   assert.equal(displayCount({ view_count: '343,369 views' }, ['view_count']), 343369);
+  assert.equal(displayCount({ view_count: '50万次观看' }, ['view_count']), undefined, 'rounded counts stay missing');
+  const post = { id: 'p1', code: 'c1', taken_at: null, caption_text: 't', like_count: 0 };
+  const ig = normalizeTikhub({ code: 200, data: { items: [post], data: { edges: [{ node: post }] } } }, { type: 'posts', platform: 'instagram' });
+  assert.equal(ig.length, 1);
+  assert.equal(ig[0].publishedAt, undefined);
+  assert.equal(ig[0].likes, 0);
   assert.equal(displayCount({ view_count: '1.2M views' }, ['view_count']), undefined);
 });
 
