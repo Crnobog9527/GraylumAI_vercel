@@ -70,7 +70,7 @@
 
 以下材料可用于查找历史证据与技术要求，不能替代当前候选的验证、授权或完成判断；当前执行流程以 `AGENTS.md` 为准：
 
-- `docs/STRICT_SIGNOFF_STATUS.md`
+- `docs/archive/2026-09-c2/STRICT_SIGNOFF_STATUS.md`
 - `docs/RELEASE_PREP_CHECKLIST.md`
 - `docs/runbooks/PRE_RELEASE_REHEARSAL.md`
 - `docs/STRIPE_ENABLEMENT_CHECKLIST.md`

@@ -93,27 +93,27 @@
   - 本地静态检查：`pnpm --dir apps/web exec tsc --noEmit`
   - 用例已纳入预发布编排：`pnpm --dir apps/web exec playwright test tests/e2e/chat.spec.ts --list`
   - 2026-03-30 锁定 preview 首次实跑：
-    - 命令：`PLAYWRIGHT_BASE_URL='https://graylum-ai-vercel-v1-ee9tpol9k-simons-projects-bfe3e99f.vercel.app' pnpm --dir apps/web exec playwright test tests/e2e/chat.spec.ts --project=chromium --grep "persist chat runtime evidence"`
+    - 命令：`PLAYWRIGHT_BASE_URL='<staging 项目部署 URL>' pnpm --dir apps/web exec playwright test tests/e2e/chat.spec.ts --project=chromium --grep "persist chat runtime evidence"`
     - 结果：失败。`/api/trpc/settings.getSystemSettings`、`credits.getBalance`、`model.getActiveModels` 等初始化请求在该 preview 上批量返回 `503`，聊天页显示 `0 积分 已用完`，发送按钮保持 disabled，闭环 smoke 无法进入 `/api/ai/stream`。
     - 证据：`apps/web/test-results/artifacts/chat-AI-Chat-should-persis-f9733-its-for-a-live-preview-send-chromium/`
-    - 辅助日志：`vercel logs https://graylum-ai-vercel-v1-ee9tpol9k-simons-projects-bfe3e99f.vercel.app --since 15m --status-code 503 --no-follow --json`
+    - 辅助日志：`vercel logs <staging 项目部署 URL> --since 15m --status-code 503 --no-follow --json`
   - 根因核查：
     - preview 与本地指向同一 Supabase 项目，且 `maintenance_mode=false`
     - 真正阻塞来自 preview 上 rate-limit / maintenance fail-closed 守门逻辑误把 `NODE_ENV=production` 的 preview 当成 production
   - 2026-03-30 修复后锁定 preview 二次验收：
-    - 定向 smoke：`PLAYWRIGHT_BASE_URL='https://graylum-ai-vercel-v1-7wmlf92aa-simons-projects-bfe3e99f.vercel.app' pnpm --dir apps/web exec playwright test tests/e2e/chat.spec.ts --project=chromium --grep "persist chat runtime evidence"`
+    - 定向 smoke：`PLAYWRIGHT_BASE_URL='<staging 项目部署 URL>' pnpm --dir apps/web exec playwright test tests/e2e/chat.spec.ts --project=chromium --grep "persist chat runtime evidence"`
     - 结果：通过
   - 2026-03-30 预发布验收包：
-    - 命令：`pnpm release:preflight:preview -- --preview-url 'https://graylum-ai-vercel-v1-7wmlf92aa-simons-projects-bfe3e99f.vercel.app' --bypass-cookie <placeholder> --skip-local-build`
+    - 命令：`pnpm release:preflight:preview -- --preview-url '<staging 项目部署 URL>' --bypass-cookie <placeholder> --skip-local-build`
     - 结果：`preview-chat: passed`
     - 证据目录：`.release-output/preflight/20260330-020359/`
     - 关键日志：`.release-output/preflight/20260330-020359/logs/preview-chat.log`
   - 2026-03-30 代理修正后的二次预发布验收包：
-    - 命令：`pnpm release:preflight:preview -- --preview-url 'https://graylum-ai-vercel-v1-rlirdsdsi-simons-projects-bfe3e99f.vercel.app' --bypass-cookie <placeholder> --skip-local-build`
+    - 命令：`pnpm release:preflight:preview -- --preview-url '<staging 项目部署 URL>' --bypass-cookie <placeholder> --skip-local-build`
     - 结果：`preview-auth`、`preview-chat`、`preview-admin`、`preview-admin-ops`、`preview-security` 全部通过
     - 证据目录：`.release-output/preflight/20260330-021726/`
   - 2026-03-30 全量 preview 预发布验收包：
-    - 命令：`pnpm release:preflight:preview -- --preview-url 'https://graylum-ai-vercel-v1-ra0wk8t1e-simons-projects-bfe3e99f.vercel.app' --bypass-cookie <placeholder> --skip-local-build`
+    - 命令：`pnpm release:preflight:preview -- --preview-url '<staging 项目部署 URL>' --bypass-cookie <placeholder> --skip-local-build`
     - 结果：`preview-auth`、`preview-chat`、`preview-admin`、`preview-admin-config`、`preview-admin-ops`、`preview-security`、`preview-user-extended`、`preview-user-supplemental` 全部通过
     - 证据目录：`.release-output/preflight/20260330-031226/`
   - 备注：
@@ -176,7 +176,7 @@
   - `apps/web/src` 与 `packages/api/src` 不再存在业务代码层面的裸 `console.error/warn/info`
   - 剩余例外仅限日志封装文件本身、测试支撑文件与文档片段
 - 验证：
-  - 盘点文档：[`LOGGING_EXCEPTION_REVIEW.md`](./LOGGING_EXCEPTION_REVIEW.md)
+  - 盘点文档：[`LOGGING_EXCEPTION_REVIEW.md`](LOGGING_EXCEPTION_REVIEW.md)
   - 扫描命令：`rg -n "console\\.(error|warn|info)\\(" apps/web/src packages/api/src`
   - 回归：`pnpm --filter web exec tsc --noEmit`、`pnpm test:api`
 

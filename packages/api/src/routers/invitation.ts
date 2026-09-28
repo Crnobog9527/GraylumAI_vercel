@@ -520,7 +520,7 @@ export const invitationRouter = router({
     .query(async ({ ctx }) => {
       const { data, error } = await ctx.supabase
         .from('invitation_records')
-        .select('*')
+        .select('id, created_at, invitee_email, inviter_reward, status')
         .eq('inviter_id', ctx.profileId)
         .order('created_at', { ascending: false });
 
@@ -572,7 +572,7 @@ export const invitationRouter = router({
       const [recordsResult, settingsResult] = await Promise.all([
         ctx.supabase
           .from('invitation_records')
-          .select('*')
+          .select('id, created_at, invitee_email, inviter_reward, status')
           .eq('inviter_id', ctx.profileId)
           .order('created_at', { ascending: false })
           .limit(10),

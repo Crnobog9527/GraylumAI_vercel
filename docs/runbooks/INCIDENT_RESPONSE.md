@@ -1,5 +1,7 @@
 # Incident Response Runbook
 
+> RUNTIME-PROD 完成后重写。本手册仍含旧链路的监控与排障内容，不构成统一 Runtime 的生产验收证据。Anthropic 官方 API 已停用，统一 Runtime 使用 OpenRouter。仍在运行的旧 `/api/ai/stream` 可按模型配置直连其他兼容接口或 Gemini；排障先确认失败请求的实际 provider、endpoint 与凭据来源，以当前代码和目标环境证据为准。
+
 ## Quick Reference
 
 | Severity | Response Time | Examples |
@@ -122,13 +124,18 @@ ORDER BY minute DESC;
 ```
 
 **Common Causes**:
-1. Anthropic API issues → Check status.anthropic.com
-2. Invalid API key → Verify ANTHROPIC_API_KEY
+1. Provider API issues → Identify the failed request path and selected model's actual provider/endpoint, then check that provider's service status. OpenRouter applies to the unified Runtime; legacy `/api/ai/stream` may use a configured OpenAI-compatible endpoint or Gemini directly.
+2. Invalid API key → Verify presence and validity at the actual credential source without exposing the value. OpenRouter requests can use the model's database key or `OPENROUTER_API_KEY`; legacy direct requests must be checked against their selected provider and model configuration, not assumed to use that environment variable.
 3. Rate limiting → Check rate limiter logs
+
+Code: `apps/web/src/app/api/ai/stream/route.ts:192` (model configuration),
+`:254` (legacy direct credential fallback), `:616`–`:620` (provider/key/endpoint
+selection), `:953` (Gemini branch); `packages/api/src/services/providerUtils.ts:36`
+(model key / OpenRouter key selection).
 
 **Resolution**:
 - If API issue: Wait for upstream fix
-- If key issue: Rotate key in Vercel env vars
+- If key issue: Obtain the credential/configuration change approval required by AGENTS.md before changing the actual key source (model configuration or environment); do not rotate an unrelated OpenRouter key for a direct-provider failure.
 - If rate limit: Adjust limits in rateLimiter.ts
 
 ### Issue: Billing Discrepancies

@@ -1,0 +1,19 @@
+/* The mentor's question card. Visual family of the suggestion card in positioning-result.module.css. */
+.card{display:flex;flex-direction:column;gap:12px;margin-right:16px;padding:16px 18px;border:1px solid #e5e5e5;border-radius:12px;background:#fafafa}
+.head{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#929292;font-size:12px;line-height:20px}
+.status{padding:1px 8px;border-radius:999px;background:#efefef;color:#777;font-size:11px;line-height:18px;white-space:nowrap}
+.question{margin:0;color:#262626;font-size:15px;font-weight:500;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}
+.options{display:grid;gap:8px;margin:0;padding:0;list-style:none}
+/* Beats the chat log's generic button rule and the Button component's centring. */
+.card .options button.option,.card .foot button.unsure{height:auto;min-height:38px;white-space:normal;overflow-wrap:anywhere}
+.card .options button.option{display:flex;width:100%;justify-content:flex-start;padding:9px 12px;text-align:left;font-size:13px;line-height:1.6;color:#262626}
+.historyItem{padding:9px 12px;border:1px solid #ececec;border-radius:8px;background:#fff;color:#999;font-size:13px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.chosen{border-color:#262626;color:#262626}
+.chosenTag{margin-left:8px;color:#777;font-size:11px;white-space:nowrap}
+.foot{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding-top:12px;border-top:1px solid #ececec}
+.hint{margin:0;color:#858585;font-size:12px;line-height:18px}
+@media(max-width:480px){
+  .card{margin-right:0;padding:14px}
+  .card .options button.option,.card .foot button.unsure{min-height:44px}
+  .card .foot button.unsure{width:100%}
+}
