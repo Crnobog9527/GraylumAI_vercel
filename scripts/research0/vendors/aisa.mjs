@@ -35,7 +35,8 @@ export const aisa = {
   id: 'aisa',
   label: 'AIsa',
   keyEnv: 'AISA_API_KEY',
-  maxCalls: 10,
+  // 9 planned calls plus the two alternate-endpoint attempts below.
+  maxCalls: 11,
   maxUsd: 1,
   timeoutMs: 60_000,
   steps(query) {
@@ -60,5 +61,27 @@ export const aisa = {
       snippet: text(item, ['content']),
       publishedAt: timestamp(item, ['published_date', 'publishedDate']),
     }));
+  },
+};
+
+// Second-round alternates for the two routes AIsa rejected with an uncharged
+// 400. A different endpoint (new hypothesis), never a resend of the original.
+const ALTERNATES = {
+  Q02: { method: 'POST', path: '/douyin/search/fetch_general_search_v3', listed: 0.0145,
+    body: { keyword: '露营装备', offset: 0, page: 1, search_id: '', backtrace: '' } },
+  Q10: { method: 'GET', path: '/instagram/v3/get_user_posts', listed: 0.0116, params: { username: 'natgeo', first: 12 } },
+};
+
+export const aisaAlternates = {
+  ...aisa,
+  label: 'AIsa（备选接口）',
+  steps(query) {
+    const route = ALTERNATES[query.id];
+    if (!route) return { notSupported: 'no alternate route for this query' };
+    const worstCaseUsd = route.listed * MARGIN;
+    if (route.method === 'POST') return [{ method: 'POST', url: `${BASE}/tikhub${route.path}`, body: route.body, worstCaseUsd }];
+    const url = new URL(`${BASE}/tikhub${route.path}`);
+    for (const [name, value] of Object.entries(route.params)) url.searchParams.set(name, String(value));
+    return [{ method: 'GET', url: url.toString(), worstCaseUsd }];
   },
 };

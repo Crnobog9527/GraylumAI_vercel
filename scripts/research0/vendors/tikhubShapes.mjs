@@ -120,8 +120,14 @@ function profile(object) {
     postsCount: count(object, ['aweme_count', 'statuses_count', 'archive_count', 'video_count', 'legacy.statuses_count']),
     likesTotal: count(object, ['total_favorited', 'likes', 'favourites_count']),
     bio: text(object, ['signature', 'sign', 'description', 'legacy.description']),
-    verified: bool(object, ['verified', 'is_verified', 'is_blue_verified']),
+    verified: bool(object, ['verified', 'is_verified', 'is_blue_verified']) ?? bilibiliVerified(object),
   };
+}
+
+/** Bilibili marks verification as official.type (-1 = none). */
+function bilibiliVerified(object) {
+  const type = object?.official?.type;
+  return typeof type === 'number' ? type >= 0 : undefined;
 }
 
 const PROFILE_KEYS = ['follower_count', 'followers_count', 'unique_id', 'screen_name', 'mid', 'sign', 'legacy'];
@@ -141,8 +147,12 @@ export function normalizeTikhub(json, query) {
       return findAll(data, object => has(object, 'liked_count') && has(object, 'id', 'note_id')).map(xhsNote);
     case 'weibo':
       return findAll(data, object => has(object, 'attitudes_count') && has(object, 'created_at')).map(weiboPost);
-    case 'youtube':
-      return findAll(data, object => has(object, 'video_id', 'videoId') && has(object, 'title')).map(youtubeVideo);
+    case 'youtube': {
+      // The channel name sits once at the top, not on each video.
+      const channel = text(data, ['channel.name']);
+      return findAll(data, object => has(object, 'video_id', 'videoId') && has(object, 'title'))
+        .map(item => ({ ...youtubeVideo(item), author: text(item, ['author', 'channel_name']) ?? channel }));
+    }
     case 'instagram':
       return findAll(data, object => has(object, 'taken_at', 'taken_at_timestamp') && has(object, 'code', 'shortcode', 'id')).map(instagramPost);
     default:

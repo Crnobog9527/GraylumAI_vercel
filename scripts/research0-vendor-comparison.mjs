@@ -26,6 +26,7 @@ import { formatReport } from './research0/report.mjs';
 import { runComparison } from './research0/runner.mjs';
 import { TOTAL_CAP_USD, VENDOR_CAP_USD, acquireLock, initLedger, loadLedger } from './research0/safety.mjs';
 import { VENDORS } from './research0/vendors.mjs';
+import { aisaAlternates } from './research0/vendors/aisa.mjs';
 
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DEFAULT_OUT_DIR = path.join(os.homedir(), '.graylum', 'research0');
@@ -42,7 +43,7 @@ function pick(all, csv, label) {
 
 export function parseArgs(argv) {
   const args = {
-    live: false, reanalyze: false, markdown: false, monidCatalog: false, initLedger: false,
+    live: false, reanalyze: false, markdown: false, monidCatalog: false, initLedger: false, aisaAlternates: false,
     vendors: null, queries: null, outDir: DEFAULT_OUT_DIR,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -52,6 +53,7 @@ export function parseArgs(argv) {
     else if (arg === '--markdown') args.markdown = true;
     else if (arg === '--monid-catalog') args.monidCatalog = true;
     else if (arg === '--init-ledger') args.initLedger = true;
+    else if (arg === '--aisa-alternates') args.aisaAlternates = true;
     else if (arg === '--vendors') args.vendors = value(argv, ++index, arg);
     else if (arg === '--queries') args.queries = value(argv, ++index, arg);
     else if (arg === '--out') args.outDir = path.resolve(value(argv, ++index, arg));
@@ -79,7 +81,8 @@ export function assertOutsideRepository(outDir, root = REPOSITORY_ROOT) {
 export async function main(argv = process.argv.slice(2), { env = process.env, fetchImpl = globalThis.fetch, log = console.log } = {}) {
   const args = parseArgs(argv);
   assertOutsideRepository(args.outDir);
-  const vendors = pick(VENDORS, args.vendors, 'vendor');
+  // --aisa-alternates swaps the vendor list for AIsa's second-round alternate endpoints only.
+  const vendors = args.aisaAlternates ? [aisaAlternates] : pick(VENDORS, args.vendors, 'vendor');
   const queries = pick(QUERIES, args.queries, 'query');
   if (args.live && args.reanalyze) throw new Error('RESEARCH0_REANALYZE_IS_OFFLINE_ONLY');
   if (args.reanalyze) {
