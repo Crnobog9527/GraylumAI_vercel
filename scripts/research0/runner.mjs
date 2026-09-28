@@ -167,7 +167,10 @@ async function runQuery(context, vendor, query, key, secrets) {
       reportedRaw, reportedCostUsd: reportedUsd, chargedUsd: record.chargedUsd, costBasis: record.basis, rawFile });
     // No retry and no fallback: a failed or unknown step ends this query.
     if (outcome !== 'ok') {
-      return { status: outcome === 'unknown' ? 'UNKNOWN' : 'FAILED', reason: result.reason ?? vendor.failureReason?.(json), calls, latencyMs };
+      // A rejected key will reject every other request too, so the vendor stops here.
+      const authRejected = result.httpStatus === 401 || result.httpStatus === 403;
+      return { status: outcome === 'unknown' ? 'UNKNOWN' : 'FAILED', reason: result.reason ?? vendor.failureReason?.(json), calls, latencyMs,
+        ...(authRejected ? { stopVendor: true, stopReason: `AUTH_REJECTED_HTTP_${result.httpStatus}` } : {}) };
     }
     previous = json;
     last = json;
@@ -232,12 +235,14 @@ export async function runComparison({ vendors, queries, env, live, fetchImpl, le
       else if (vendor.blockedReason) entry.queries.push({ queryId: query.id, status: 'NOT_RUN', reason: vendor.blockedReason });
       else if (!keyPresent) entry.queries.push({ queryId: query.id, status: 'NOT_RUN', reason: 'MISSING_KEY' });
       else if (stopReason) {
-        entry.queries.push({ queryId: query.id, status: stopReason.startsWith(UNRECONCILED) ? 'NOT_RUN' : 'BUDGET_REFUSED', reason: stopReason });
+        const status = stopReason.startsWith(UNRECONCILED) || stopReason.startsWith('AUTH_REJECTED') ? 'NOT_RUN' : 'BUDGET_REFUSED';
+        entry.queries.push({ queryId: query.id, status, reason: stopReason });
       }
       else {
         const result = await runQuery(context, vendor, query, key, secrets);
-        if (result.stopVendor) stopReason = result.reason;
+        if (result.stopVendor) stopReason = result.stopReason ?? result.reason;
         delete result.stopVendor;
+        delete result.stopReason;
         entry.queries.push({ queryId: query.id, ...result });
       }
     }
