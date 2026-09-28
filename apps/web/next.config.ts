@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
+import { PHASE_PRODUCTION_BUILD } from "next/constants";
+import { validateRedisEnvForBuild } from "../../packages/api/src/lib/envValidator";
 
 const sentryBuildUploadEnabled =
   process.env.ENABLE_SENTRY_BUILD_UPLOAD === "true" &&
@@ -49,4 +51,7 @@ const sentryWebpackPluginOptions = {
   hideSourceMaps: true,
 };
 
-export default withSentryConfig(nextConfig, sentryWebpackPluginOptions);
+export default withSentryConfig((phase: string) => {
+  if (phase === PHASE_PRODUCTION_BUILD) validateRedisEnvForBuild();
+  return nextConfig;
+}, sentryWebpackPluginOptions);

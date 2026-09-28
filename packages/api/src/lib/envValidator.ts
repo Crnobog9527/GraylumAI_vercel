@@ -116,6 +116,22 @@ const envSchema = z.object({
   CIRCUIT_BREAKER_DAILY_LIMIT: z.coerce.number().min(1000).max(1000000).optional(),
 });
 
+/** Only Redis is in this task's deployment preflight; reuse the same schema. */
+export function validateRedisEnvForBuild(): void {
+  // Vercel builds (including custom staging environments) must have Redis.
+  // Local/secretless CI builds do not deploy; request checks still fail closed.
+  if (!process.env.VERCEL && !process.env.VERCEL_ENV && !process.env.VERCEL_TARGET_ENV) return;
+  const result = envSchema.pick({
+    UPSTASH_REDIS_REST_URL: true,
+    UPSTASH_REDIS_REST_TOKEN: true,
+  }).safeParse(process.env);
+  if (!result.success) {
+    const fields = [...new Set(result.error.issues.map(issue => issue.path.join('.')))];
+    // Never include submitted values (including malformed credentials) in build logs.
+    throw new Error(`Redis deployment configuration missing or invalid: ${fields.join(', ')}`);
+  }
+}
+
 // ============================================
 // 验证结果类型
 // ============================================
