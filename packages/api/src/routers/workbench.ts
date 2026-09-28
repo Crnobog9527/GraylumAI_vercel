@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { RateLimitError } from '../lib/rateLimitError';
 import { saveVersionConflictMessage, candidateInvalidatedMessage, saveRoundClosedMessage } from "../services/artifacts/public";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -29,6 +30,7 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
     },
   });
   if (!result.ok) {
+    if (result.error instanceof RateLimitError) throw result.error;
     // These existing preflight errors already carry safe, actionable messages.
     if (result.error.code === 'TOO_MANY_REQUESTS' || result.error.code === 'PRECONDITION_FAILED' || result.error.code === 'FORBIDDEN' || result.error.code === 'BAD_REQUEST') throw result.error;
     const message =

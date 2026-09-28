@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { RateLimitError } from '../lib/rateLimitError';
 import {continueSliceWork,continueWorkInput} from '../services/agentSlice/continueWork';
 import {sliceEntry,sliceOpenInput,readSliceTarget,sliceTargetInput} from '../services/agentSlice/entry';
 import {readSliceConversation,sliceConversationInput} from '../services/agentSlice/conversation';
@@ -14,6 +15,7 @@ import {sliceLinks,sliceLinkInput,sliceLinkScope} from '../services/agentSlice/l
 const procedure=protectedProcedure.use(async({ctx,next})=>{
  const result=await next({ctx:{...ctx,preferences:confirmedPreferences(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null)}});
  if(!result.ok) {
+  if (result.error instanceof RateLimitError) throw result.error;
   const reason=result.error.cause instanceof Error?result.error.cause.message:result.error.message;
   if(reason==='SLICE_DENIED')throw new TRPCError({code:'FORBIDDEN',message:'无法访问这次对话。'});
   if(reason?.startsWith('SLICE_')||['OUTCOME_UNKNOWN','TRUNCATED','CALL_LIMIT','MODEL_NOT_ALLOWED'].includes(reason))throw new TRPCError({code:'CONFLICT',message:'本轮尚未完成，请重试以查看原请求状态。'});

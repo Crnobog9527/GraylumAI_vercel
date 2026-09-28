@@ -8,6 +8,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 const networkFetch = globalThis.fetch;
+const redisAdmission = vi.hoisted(() => ({ limit: vi.fn() }));
+vi.mock('@upstash/redis', () => ({ Redis: class {} }));
+vi.mock('@upstash/ratelimit', () => ({ Ratelimit: class {
+  static slidingWindow = () => 'window';
+  limit = redisAdmission.limit;
+} }));
+
 
 const routeMocks = vi.hoisted(() => ({
   skillMode: vi.fn(),
@@ -772,6 +779,35 @@ describe('ordinary HTTP handler admission regression', () => {
     if (options.rate !== undefined) routeMocks.checkRateLimit.mockResolvedValue({success:options.rate===true,limit:20,remaining:0,reset:Date.now()+60000,retryAfter:60,reason:options.rate==='unavailable'?'unavailable':'rate_limited'});
     return {events};
   }
+  it.each(['over limit', 'backend error', 'timeout', 'missing config', 'SDK timeout'] as const)(
+    'SEC-RATELIMIT: real limiter rejects %s before billing/provider calls', async fault => {
+      vi.resetModules();
+      admissionFixture();
+      process.env.UPSTASH_REDIS_REST_URL = fault === 'missing config' ? '' : 'https://redis.invalid';
+      process.env.UPSTASH_REDIS_REST_TOKEN = 'synthetic';
+      process.env.RATE_LIMIT_FAIL_CLOSED = 'false';
+      redisAdmission.limit.mockImplementation(async () => ({ success: false, limit: 20, remaining: 0, reset: Date.now() + 60000 }));
+      if (fault === 'backend error') redisAdmission.limit.mockRejectedValue(new Error('synthetic failure'));
+      if (fault === 'SDK timeout') redisAdmission.limit.mockResolvedValue({ success: true, reason: 'timeout' });
+      if (fault === 'timeout') {
+        vi.useFakeTimers();
+        redisAdmission.limit.mockImplementation(() => new Promise(() => {}));
+      }
+      try {
+        const actual = await vi.importActual<typeof import('@/lib/rateLimit')>('@/lib/rateLimit');
+        routeMocks.checkRateLimit.mockImplementation(actual.checkRateLimit as never);
+        const pending = POST(makeAuthenticatedStreamRequest({ message: 'synthetic request' }) as any);
+        if (fault === 'timeout') await vi.advanceTimersByTimeAsync(500);
+        const response = await pending;
+        expect(response.status).toBe(fault === 'over limit' ? 429 : 503);
+        expect(response.headers.get('Retry-After')).toBe('60');
+        expect(await response.json()).toMatchObject({ retryAfter: 60 });
+        expect(routeMocks.billingPreDeduct).not.toHaveBeenCalled();
+        expect(routeMocks.countTokens).not.toHaveBeenCalled();
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally { vi.useRealTimers(); }
+    },
+  );
   it('rejects an unauthenticated direct HTTP request before model or reservation',async()=>{
     const {events}=admissionFixture();
     const response=await requestOverHTTP(null);

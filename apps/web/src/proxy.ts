@@ -1,8 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
-import { Ratelimit } from '@upstash/ratelimit';
-import { Redis } from '@upstash/redis';
+import { checkRateLimit } from '@/lib/rateLimit';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { logServerError } from '@/lib/server-log';
 import { resolveAuthAppUrl, resolveSupabaseCookieOptions } from '@/lib/site-config';
@@ -149,13 +148,7 @@ function getClientIP(request: NextRequest): string {
   return 'unknown';
 }
 
-// 创建 Redis 速率限制器 (懒加载)
-let rateLimiter: Ratelimit | null = null;
 let maintenanceCache: { enabled: boolean; expiresAt: number } | null = null;
-
-function shouldFailClosedRateLimit(): boolean {
-  return process.env.RATE_LIMIT_FAIL_CLOSED === 'true';
-}
 
 function shouldFailClosedMaintenance(): boolean {
   if (process.env.VERCEL_ENV) {
@@ -169,7 +162,8 @@ function createRateLimitUnavailableResponse(): NextResponse {
   return new NextResponse(
     JSON.stringify({
       error: 'Service Unavailable',
-      message: '速率限制服务暂时不可用，请稍后再试',
+      message: '服务暂时繁忙，请稍后再试',
+      retryAfter: 60,
     }),
     {
       status: 503,
@@ -227,31 +221,6 @@ async function isMaintenanceModeEnabled(
   }
 }
 
-function getRateLimiter(): Ratelimit | null {
-  if (rateLimiter) return rateLimiter;
-
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-
-  if (!url || !token) {
-    // 未配置 Redis，跳过速率限制
-    return null;
-  }
-
-  try {
-    const redis = new Redis({ url, token });
-    rateLimiter = new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(60, '1 m'), // 60 requests per minute
-      prefix: 'graylum:middleware:',
-      analytics: true,
-    });
-    return rateLimiter;
-  } catch {
-    return null;
-  }
-}
-
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hostname = request.nextUrl.hostname || request.headers.get('host') || '';
@@ -261,46 +230,23 @@ export async function proxy(request: NextRequest) {
   // 速率限制检查 (API 路径)
   // ========================================
   if (needsRateLimit(pathname)) {
-    const limiter = getRateLimiter();
-    if (!limiter && shouldFailClosedRateLimit()) {
-      return createRateLimitUnavailableResponse();
-    }
-
-    if (limiter) {
-      const ip = getClientIP(request);
-      const identifier = ip;
-
-      try {
-        const result = await limiter.limit(identifier);
-
-        if (!result.success) {
-          const retryAfter = Math.ceil((result.reset - Date.now()) / 1000);
-          return new NextResponse(
-            JSON.stringify({
-              error: 'Too Many Requests',
-              message: `请求过于频繁，请在 ${retryAfter} 秒后重试`,
-              retryAfter,
-            }),
-            {
-              status: 429,
-              headers: {
-                'Content-Type': 'application/json',
-                'X-RateLimit-Limit': result.limit.toString(),
-                'X-RateLimit-Remaining': result.remaining.toString(),
-                'X-RateLimit-Reset': result.reset.toString(),
-                'Retry-After': retryAfter.toString(),
-              },
-            }
-          );
-        }
-      } catch {
-        if (shouldFailClosedRateLimit()) {
-          logServerError('security', 'proxy_rate_limit_check_failed_denying_request');
-          return createRateLimitUnavailableResponse();
-        }
-
-        logServerError('security', 'proxy_rate_limit_check_failed_allowing_request');
-      }
+    const result = await checkRateLimit(getClientIP(request), 'ip');
+    if (result.reason === 'unavailable') return createRateLimitUnavailableResponse();
+    if (!result.success) {
+      const retryAfter = result.retryAfter ?? 60;
+      return NextResponse.json({
+        error: 'Too Many Requests',
+        message: `请求过于频繁，请在 ${retryAfter} 秒后重试`,
+        retryAfter,
+      }, {
+        status: 429,
+        headers: {
+          'X-RateLimit-Limit': result.limit.toString(),
+          'X-RateLimit-Remaining': result.remaining.toString(),
+          'X-RateLimit-Reset': result.reset.toString(),
+          'Retry-After': retryAfter.toString(),
+        },
+      });
     }
   }
 
