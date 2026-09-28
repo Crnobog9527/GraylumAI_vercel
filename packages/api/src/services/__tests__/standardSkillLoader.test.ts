@@ -305,6 +305,13 @@ describe('AC-0c verified resource cache', () => {
     reads.length = 0; await activate(descriptors[16]); expect(reads).toEqual([]);
     await activate(descriptors[0]); expect(reads).toContain('cache-bytes-0/references/r1.md');
   });
+  it('counts concurrent fills of the same resource once', async () => {
+    const { descriptors, reads, activate } = memory(['cache-concurrent'], 2, 1_000_000);
+    // Twenty concurrent misses each verify and fill the same key (Codex P2 on #470).
+    await Promise.all(Array.from({ length: 20 }, () => activate(descriptors[0])));
+    expect(reads).toHaveLength(40);
+    reads.length = 0; await activate(descriptors[0]); expect(reads).toEqual([]);
+  });
   it('never caches a single file above 1 MiB', async () => {
     const { descriptors, reads, activate } = memory(['cache-large'], 2, 1024 * 1024 + 1);
     await activate(descriptors[0]); reads.length = 0;

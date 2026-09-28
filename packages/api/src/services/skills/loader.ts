@@ -106,6 +106,9 @@ let resourceCacheBytes = 0;
 export function clearSkillResourceCache(): void { resourceCache.clear(); resourceCacheBytes = 0; }
 function cacheResource(key: string, text: string, bytes: number) {
   if (bytes > RESOURCE_CACHE_FILE_BYTES) return;
+  // Concurrent misses may fill the same key; count its bytes only once.
+  const replaced = resourceCache.get(key);
+  if (replaced) { resourceCache.delete(key); resourceCacheBytes -= replaced.bytes; }
   resourceCache.set(key, { text, bytes }); resourceCacheBytes += bytes;
   for (const [oldest, entry] of resourceCache) {
     if (resourceCache.size <= RESOURCE_CACHE_ENTRIES && resourceCacheBytes <= RESOURCE_CACHE_BYTES) break;
