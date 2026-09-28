@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { trpc } from '@/trpc/client';
+import { ModelReasoningButton } from '@/components/admin/ModelReasoningDialog';
 import {
   Bot, Plus, Pencil, Trash2, Sparkles, Brain, Zap,
   Check, X, Loader2, Globe, RefreshCw, AlertTriangle, HelpCircle
@@ -545,17 +546,9 @@ export default function AdminModelsPage() {
                           }
                           onClick={() => handleToggleActive(model)}
                         >
-                          {model.is_active === 'true' ? (
-                            <>
-                              <Check className="h-3 w-3 mr-1" />
-                              已启用
-                            </>
-                          ) : (
-                            <>
-                              <X className="h-3 w-3 mr-1" />
-                              已禁用
-                            </>
-                          )}
+                          {model.is_active === 'true'
+                            ? <><Check className="h-3 w-3 mr-1" />已启用</>
+                            : <><X className="h-3 w-3 mr-1" />已禁用</>}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -575,6 +568,7 @@ export default function AdminModelsPage() {
                               <RefreshCw className="h-4 w-4" />
                             )}
                           </Button>
+                          <ModelReasoningButton modelId={model.id} name={model.name} />
                           <Button
                             variant="ghost"
                             size="icon"
