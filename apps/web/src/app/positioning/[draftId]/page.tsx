@@ -1967,9 +1967,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                         liveText: live?.text, liveCard: live?.card, state: execution.state, unavailableReason: execution.unavailableReason,
                         active: execution.executionId === history.data?.activeExecution, busy });
                       const next = mentorExecutions[executionIndex + 1];
-                      const cardStatus = questionCardStatus({ isLatest: !next, nextInput: next
-                        ? (isOpeningInput(next.input) ? null : next.input)
-                        : pendingBubble?.input ?? null });
+                      const nextInput = next ? (isOpeningInput(next.input) ? null : next.input) : pendingBubble?.input ?? null;
+                      const cardStatus = questionCardStatus({ isLatest: !next, nextInput, turn, shown: { stepId: step.id, questionId: activeQuestion.id } });
+                      const cardLocked = !cardStatus.onShownQuestion || execution.state !== "completed" || sendLocked || snap.state !== "draft" || reviewOnly;
                       const proposed = Object.entries(accepted).filter(([id, value]) =>
                         reachedQuestions(d.information[parsed.targetStepId]?.schema ?? [], d.information[parsed.targetStepId]?.values).some(f => f.id === id) &&
                         value.value !== (infoEdits[parsed.targetStepId]?.[id] ?? d.information[parsed.targetStepId]?.values?.[id])?.value);
@@ -1994,8 +1994,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                             <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>{reply.text}</p>
                           </div>}
                           {reply.card && <QuestionCardView card={reply.card} answered={cardStatus.answered} answer={cardStatus.answer}
-                            disabled={execution.state !== "completed" || sendLocked || snap.state !== "draft" || reviewOnly}
-                            onAnswer={input => { void ask(step, activeQuestion.id, input); }}/>}
+                            disabled={cardLocked} onAnswer={input => { void ask(step, activeQuestion.id, input); }}/>}
                           {parsed.message && execution.unavailableReason === 'output_truncated' && <p role="status">本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。</p>}
                           {execution.state === "completed" && target && latestSuggestion.get(target.id) === execution.executionId && proposed.length > 0 && (
                             <div className={resultStyles.suggestionCard}>

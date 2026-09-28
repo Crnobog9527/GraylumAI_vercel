@@ -183,13 +183,29 @@ describe("livePhaseNotice", () => {
 });
 
 describe("questionCardStatus", () => {
+  const turn = { stepId: "audience", questionId: "who" };
+  const shown = { stepId: "audience", questionId: "who" };
+
   it("is open only on the newest turn without a pending reply", () => {
-    expect(questionCardStatus({ isLatest: true, nextInput: null })).toEqual({ answered: false, answer: null });
+    expect(questionCardStatus({ isLatest: true, nextInput: null, turn, shown })).toEqual({
+      answered: false,
+      answer: null,
+      onShownQuestion: true,
+    });
   });
 
   it("becomes history once the user replied or a later turn exists", () => {
-    expect(questionCardStatus({ isLatest: true, nextInput: "刚入行的新人" })).toEqual({ answered: true, answer: "刚入行的新人" });
-    expect(questionCardStatus({ isLatest: false, nextInput: "自己写的回答" })).toEqual({ answered: true, answer: "自己写的回答" });
-    expect(questionCardStatus({ isLatest: false, nextInput: null })).toEqual({ answered: true, answer: null });
+    expect(questionCardStatus({ isLatest: true, nextInput: "刚入行的新人", turn, shown })).toMatchObject({ answered: true, answer: "刚入行的新人" });
+    expect(questionCardStatus({ isLatest: false, nextInput: "自己写的回答", turn, shown })).toMatchObject({ answered: true, answer: "自己写的回答" });
+    expect(questionCardStatus({ isLatest: false, nextInput: null, turn, shown })).toMatchObject({ answered: true, answer: null });
+  });
+
+  it("is sendable only while its own question is on screen", () => {
+    const status = (t: { stepId: string; questionId: string | null } | undefined, s = shown) => questionCardStatus({ isLatest: true, nextInput: null, turn: t, shown: s }).onShownQuestion;
+    expect(status(turn)).toBe(true);
+    expect(status(turn, { stepId: "positioning", questionId: "who" })).toBe(false);
+    expect(status(turn, { stepId: "audience", questionId: "pain" })).toBe(false);
+    expect(status({ stepId: "audience", questionId: null })).toBe(false);
+    expect(status(undefined)).toBe(false);
   });
 });

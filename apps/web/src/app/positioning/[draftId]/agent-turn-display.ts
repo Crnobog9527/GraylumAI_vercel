@@ -91,7 +91,20 @@ export function mentorReplyDisplay(source: MentorReplySource): { text: string; c
  * that is still waiting for the server, turns it into read-only history.
  * `nextInput` is the user's reply to it, or null when there was none (for
  * example a host-opened step).
+ *
+ * A reply is recorded against the question on screen, so the card is only
+ * sendable while that is the question its turn was asked under; after the
+ * user navigates to another step or question it stays visible but locked.
  */
-export function questionCardStatus(input: { isLatest: boolean; nextInput: string | null }) {
-  return { answered: !input.isLatest || input.nextInput !== null, answer: input.nextInput };
+export function questionCardStatus(input: {
+  isLatest: boolean;
+  nextInput: string | null;
+  turn: { stepId: string; questionId: string | null } | undefined;
+  shown: { stepId: string; questionId: string };
+}) {
+  return {
+    answered: !input.isLatest || input.nextInput !== null,
+    answer: input.nextInput,
+    onShownQuestion: input.turn?.stepId === input.shown.stepId && input.turn.questionId === input.shown.questionId,
+  };
 }
