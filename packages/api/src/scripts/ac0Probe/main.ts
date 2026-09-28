@@ -74,7 +74,8 @@ export async function runProbe(argv: string[], env: Record<string, string | unde
       releaseLock = acquireLedgerLock(realPath(args.ledger));
       const totals = recordExternalUsage(realPath(args.ledger), args.external);
       stdout(`Recorded external usage: ${args.external.calls} calls, $${args.external.usd}. ` +
-        `Ledger now ${totals.calls} calls, $${nanoToUsd(totals.nanoUsd).toFixed(6)} of 200 calls / $3. No request was sent.\n`);
+        `Ledger now ${totals.calls} calls, $${nanoToUsd(totals.nanoUsd).toFixed(6)} of ${HARD_MAX_CALLS} calls / $${HARD_MAX_USD}. ` +
+        'No request was sent.\n');
       return {exitCode: 0};
     }
     assertOutsideRepository(args.outDir);
@@ -100,7 +101,7 @@ export async function runProbe(argv: string[], env: Record<string, string | unde
         throw new Error(`PROBE_CONFIRM_REQUIRED: review the plan above, then rerun with --live --confirm ${plan.planId}`);
       }
       if (before.calls >= HARD_MAX_CALLS || before.nanoUsd >= usdToNano(HARD_MAX_USD)) {
-        throw new Error('PROBE_TOTAL_BUDGET_EXHAUSTED: the ledger has reached 200 calls or $3');
+        throw new Error(`PROBE_TOTAL_BUDGET_EXHAUSTED: the ledger has reached ${HARD_MAX_CALLS} calls or $${HARD_MAX_USD}`);
       }
       const key = readKey(env);
       redact = redactor([key]);

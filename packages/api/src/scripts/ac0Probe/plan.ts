@@ -5,9 +5,9 @@ import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {parseArgs} from 'node:util';
 import {z} from 'zod';
-import {DEFAULT_MAX_CALLS, DEFAULT_MAX_USD, validateCaps} from './budget.ts';
+import {DEFAULT_MAX_CALLS, DEFAULT_MAX_USD, HARD_MAX_CALLS, HARD_MAX_USD, validateCaps} from './budget.ts';
 import {callBoundUsd, DEFAULT_CONFIG_IDS, resolveConfigs, type ProbeConfig} from './config.ts';
-import {parsePrivateJson, scenariosOf, type LoadedSkill, type Scenario} from './skill.ts';
+import {parsePrivateJson, scenariosOf, stepRules, type LoadedSkill, type Scenario} from './skill.ts';
 import type {TrialKind} from './trial.ts';
 
 export const TRIAL_KINDS: readonly TrialKind[] = ['ask', 'text', 'reference'];
@@ -29,8 +29,8 @@ export const USAGE = `AC-0b model probe (dry run unless --live).
   --ask <n>             ask_question trials per config (default 30)
   --text <n>            plain-text streaming trials per config (default 0)
   --reference <n>       reference-first trials per config (default 0)
-  --max-calls <n>       provider call cap for this run (default ${DEFAULT_MAX_CALLS}, at most 200)
-  --max-usd <x>         spend cap for this run in USD (default ${DEFAULT_MAX_USD}, at most 3)
+  --max-calls <n>       provider call cap for this run (default ${DEFAULT_MAX_CALLS}, at most ${HARD_MAX_CALLS})
+  --max-usd <x>         spend cap for this run in USD (default ${DEFAULT_MAX_USD}, at most ${HARD_MAX_USD})
   --max-tokens <n>      output tokens per call (default 1024)
   --timeout-ms <n>      per-call deadline (default ${DEFAULT_TIMEOUT_MS})
   --out-dir <dir>       results directory outside the repository (default ~/.graylum/ac0/results)
@@ -136,8 +136,11 @@ export type ProbePlan = {
   plannedUsdUpperBound: number;
 };
 
-function scenarioBytes(scenario: Scenario): number {
-  return Buffer.byteLength(scenario.input) + scenario.history.reduce((sum, item) => sum + Buffer.byteLength(item.content), 0);
+/** Upper estimate of what a scenario adds to a request: history items as JSON
+ * (question cards appear twice, as the call and its result) and step host text. */
+function scenarioBytes(scenario: Scenario, skill: LoadedSkill): number {
+  return Buffer.byteLength(scenario.input) + Buffer.byteLength(stepRules(skill, scenario.step)) +
+    scenario.history.reduce((sum, item) => sum + 2 * Buffer.byteLength(JSON.stringify(item)), 0);
 }
 
 export function buildPlan(args: ProbeArgs, skill: LoadedSkill, scenarios: Scenario[], scenarioDigest: string): ProbePlan {
@@ -151,7 +154,7 @@ export function buildPlan(args: ProbeArgs, skill: LoadedSkill, scenarios: Scenar
     if (!count) continue;
     const pool = scenariosOf(scenarios, kind);
     if (!pool.length) throw new Error(`PROBE_SCENARIOS_MISSING: no "${kind}" scenario for --${kind} ${count}`);
-    const largest = Math.max(...pool.map(scenarioBytes));
+    const largest = Math.max(...pool.map(scenario => scenarioBytes(scenario, skill)));
     const bytes = Buffer.byteLength(skill.instructions) + largest + REQUEST_OVERHEAD_BYTES +
       (kind === 'reference' ? referenceBytes : 0);
     for (const config of configs) {
@@ -186,7 +189,7 @@ export function describePlan(plan: ProbePlan, mode: 'dry-run' | 'live', ledger: 
       `max_price ${config.maxPrice.prompt}/${config.maxPrice.completion} USD per M tokens`),
     `Worst case: ${plan.plannedCalls} provider calls, $${plan.plannedUsdUpperBound.toFixed(4)} (bytes counted as tokens)`,
     `Run caps: ${plan.maxCalls} calls, $${plan.maxUsd}; the run stops before a call that would exceed either`,
-    `Cumulative ledger before this run: ${ledger.calls} calls, $${ledger.usd.toFixed(6)} booked of 200 calls / $3`,
+    `Cumulative ledger before this run: ${ledger.calls} calls, $${ledger.usd.toFixed(6)} booked of ${HARD_MAX_CALLS} calls / $${HARD_MAX_USD}`,
   ];
   if (ledger.path) lines.push(`Ledger file (real path): ${ledger.path}`);
   if (mode === 'dry-run') lines.push(`Dry run: no request leaves this machine. For real calls add: --live --confirm ${plan.planId}`);

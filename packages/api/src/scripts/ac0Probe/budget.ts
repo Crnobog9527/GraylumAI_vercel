@@ -1,9 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // AC-0b model probe. Standalone script: application code must never import it.
 
-/** Owner decision 2026-09-28: the whole AC-0 feasibility measurement may not
- * exceed 200 provider calls or 3 USD. No flag can raise these. */
-export const HARD_MAX_CALLS = 200;
+/** Owner decisions 2026-09-28: the whole AC-0 feasibility measurement may not
+ * exceed 3 USD; the call total was raised from 200 to 350 ("同意追加到 350 次，
+ * 金额上限 3 美元不变"). No flag can raise these. */
+export const HARD_MAX_CALLS = 350;
 export const HARD_MAX_USD = 3;
 export const DEFAULT_MAX_CALLS = 60;
 export const DEFAULT_MAX_USD = 1;
