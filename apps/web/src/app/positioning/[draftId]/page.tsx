@@ -1713,12 +1713,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const selectedStep =
     steps.find((step) => step.id === activeStep) ??
     steps[Math.max(0, firstPending)];
-  type MentorTurn = {
-    executionId: string;
-    stepId: string;
-    questionId: string | null;
-    kind: string;
-  };
+  type MentorTurn = { executionId: string; roundId?: string | null; stepId: string; questionId: string | null; kind: string };
   type MentorExecution = {
     request?: MentorRequest | null;
     unavailableReason?: string | null;
@@ -1967,8 +1962,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                         liveText: live?.text, liveCard: live?.card, state: execution.state, unavailableReason: execution.unavailableReason,
                         active: execution.executionId === history.data?.activeExecution, busy });
                       const next = mentorExecutions[executionIndex + 1];
-                      const cardStatus = questionCardStatus({ isLatest: !next, turn, shown: { stepId: step.id, questionId: activeQuestion.id }, reply: next
-                        ? { ...mentorTurns.get(next.executionId), input: isOpeningInput(next.input) ? null : next.input } : pendingBubble });
+                      const cardStatus = questionCardStatus({ isLatest: !next, turn,
+                        shown: { roundId: d.roundId, stepId: step.id, questionId: activeQuestion.id },
+                        reply: next ? { ...mentorTurns.get(next.executionId), input: isOpeningInput(next.input) ? null : next.input }
+                          : pendingBubble && { ...pendingBubble, roundId: d.roundId } });
                       const cardLocked = !cardStatus.onShownQuestion || execution.state !== "completed" || sendLocked || snap.state !== "draft" || reviewOnly;
                       const proposed = Object.entries(accepted).filter(([id, value]) =>
                         reachedQuestions(d.information[parsed.targetStepId]?.schema ?? [], d.information[parsed.targetStepId]?.values).some(f => f.id === id) &&

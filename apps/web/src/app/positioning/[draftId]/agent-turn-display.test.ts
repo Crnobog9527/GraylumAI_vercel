@@ -183,9 +183,10 @@ describe("livePhaseNotice", () => {
 });
 
 describe("questionCardStatus", () => {
-  const turn = { stepId: "audience", questionId: "who" };
-  const shown = { stepId: "audience", questionId: "who" };
-  const reply = (input: string | null, binding: { stepId?: string; questionId?: string | null } = turn) => ({ ...binding, input });
+  type Binding = { roundId?: string | null; stepId?: string; questionId?: string | null };
+  const turn = { roundId: "round-1", stepId: "audience", questionId: "who" };
+  const shown = { roundId: "round-1", stepId: "audience", questionId: "who" };
+  const reply = (input: string | null, binding: Binding = turn) => ({ ...binding, input });
 
   it("is open only on the newest turn without a pending reply", () => {
     expect(questionCardStatus({ isLatest: true, reply: null, turn, shown })).toEqual({
@@ -207,10 +208,12 @@ describe("questionCardStatus", () => {
     expect(questionCardStatus({ isLatest: false, reply: reply(null), turn, shown })).toMatchObject({ answered: true, answer: null });
   });
 
-  it("never takes a turn sent under another step or question as its answer", () => {
+  it("never takes a turn sent under another round, step or question as its answer", () => {
     const elsewhere = [
-      reply("刚入行的新人", { stepId: "positioning", questionId: "who" }),
-      reply("刚入行的新人", { stepId: "audience", questionId: "pain" }),
+      reply("刚入行的新人", { ...turn, roundId: "round-2" }),
+      reply("刚入行的新人", { ...turn, stepId: "positioning" }),
+      reply("刚入行的新人", { ...turn, questionId: "pain" }),
+      reply("刚入行的新人", { stepId: "audience", questionId: "who" }),
       reply("刚入行的新人", {}),
     ];
     for (const next of elsewhere) {
@@ -220,13 +223,15 @@ describe("questionCardStatus", () => {
     }
   });
 
-  it("is sendable only while its own question is on screen", () => {
-    const status = (t: { stepId: string; questionId: string | null } | undefined, s = shown) =>
+  it("is sendable only while its own question is on screen in its own round", () => {
+    const status = (t: Binding | undefined, s = shown) =>
       questionCardStatus({ isLatest: true, reply: null, turn: t, shown: s }).onShownQuestion;
     expect(status(turn)).toBe(true);
-    expect(status(turn, { stepId: "positioning", questionId: "who" })).toBe(false);
-    expect(status(turn, { stepId: "audience", questionId: "pain" })).toBe(false);
-    expect(status({ stepId: "audience", questionId: null })).toBe(false);
+    expect(status(turn, { ...shown, roundId: "round-2" })).toBe(false);
+    expect(status(turn, { ...shown, stepId: "positioning" })).toBe(false);
+    expect(status(turn, { ...shown, questionId: "pain" })).toBe(false);
+    expect(status({ ...turn, questionId: null })).toBe(false);
+    expect(status({ stepId: "audience", questionId: "who" })).toBe(false);
     expect(status(undefined)).toBe(false);
   });
 });
