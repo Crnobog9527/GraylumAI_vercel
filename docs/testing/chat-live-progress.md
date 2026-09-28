@@ -1,4 +1,5 @@
 # Ordinary chat live progress and delivery
+该脚本已于 2026-09-29 删除（已失效）
 
 Bounded repair from staging `ce9b98f2ad2ecd0ee3c334e0abae0993ecc1053b`.
 Risk: high (output security and the boundary between delivery and accounting).

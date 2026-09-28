@@ -1,4 +1,5 @@
 # Skill/search consumption protection
+该脚本已于 2026-09-29 删除（已失效）
 
 The shared AI consumption guard now always requires a complete, valid read.
 Skill generation and controlled workbench search pass the authenticated user's
