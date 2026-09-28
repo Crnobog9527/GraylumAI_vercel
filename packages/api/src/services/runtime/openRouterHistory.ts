@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {isDeepStrictEqual} from 'node:util';
 import {z} from 'zod';
-import {sourceCall} from '../bill2/openRouterAdapter';
+import {toolCallFor} from '../bill2/openRouterAdapter';
+import {SOURCE_TOOL_NAMES} from './agentTools';
 
 const reasoningDetails=z.array(z.discriminatedUnion('type',[
  z.object({type:z.literal('reasoning.text'),text:z.string(),
@@ -21,18 +22,19 @@ const reasoningDetails=z.array(z.discriminatedUnion('type',[
 ])).nullish();
 const hasOpenAIReasoning=(details:unknown)=>Array.isArray(details)&&details.some(detail=>detail?.type==='reasoning.encrypted'||detail?.type==='reasoning.summary');
 const reasoning=z.string().nullish();
-const textParts=z.array(z.object({type:z.literal('text'),text:z.string(),role:z.literal('assistant').optional(),
+const textParts=(toolNames:ReadonlySet<string>)=>z.array(z.object({type:z.literal('text'),text:z.string(),role:z.literal('assistant').optional(),
  // SDK 0.18 streaming always attaches an empty annotations list. Only this
  // empty shape is supported; citations/research metadata remain denied.
  annotations:z.array(z.never()).length(0).optional(),
- refusal:z.null().optional(),reasoning,reasoning_details:reasoningDetails,tool_calls:z.array(sourceCall).max(1).nullish(),
+ refusal:z.null().optional(),reasoning,reasoning_details:reasoningDetails,tool_calls:z.array(toolCallFor(toolNames)).max(1).nullish(),
 }).strict());
 
 /** Versioned v2/v3 frozen formats use this projection before request hashing.
  * SDK 0.18 carries response metadata into assistant text parts on later turns.
  * Preserve text and top-level tool semantics; unknown metadata/content fails closed.
- * The original adapter still validates tools, message roles and routing. */
-export function normalizeOpenRouterHistory(request:{messages?:unknown}):void {
+ * The original adapter still validates tools, message roles and routing.
+ * `toolNames` is the format's tool allowlist; older formats keep `read_source`. */
+export function normalizeOpenRouterHistory(request:{messages?:unknown},toolNames:ReadonlySet<string>=SOURCE_TOOL_NAMES):void {
  if(!Array.isArray(request.messages))return;
  request.messages=request.messages.map(message=>{
   if(!message||typeof message!=='object'||Array.isArray(message)||message.role!=='assistant')return message;
@@ -42,7 +44,7 @@ export function normalizeOpenRouterHistory(request:{messages?:unknown}):void {
   let openAIReasoning=hasOpenAIReasoning(message.reasoning_details);
   delete normalized.reasoning;delete normalized.reasoning_details;
   if(Array.isArray(message.content)){
-   const parsed=textParts.safeParse(message.content);
+   const parsed=textParts(toolNames).safeParse(message.content);
    if(!parsed.success)throw new Error('RUNTIME_PROVIDER_HISTORY_DENIED');
    for(const part of parsed.data){
     openAIReasoning ||=hasOpenAIReasoning(part.reasoning_details);
@@ -67,9 +69,10 @@ const reasoningItem=z.object({type:z.literal('reasoning'),content:z.array(z.neve
 }).strict();
 /** Sizing-only projection of the locked SDK's items. Validate all candidates
  * before any cut; preserve original Session objects and tool-call boundaries. */
-export function projectOpenRouterItemsForSizing(items:unknown[],historyCount=0):unknown[] {
+export function projectOpenRouterItemsForSizing(items:unknown[],historyCount=0,toolNames:ReadonlySet<string>=SOURCE_TOOL_NAMES):unknown[] {
+ const toolCall=toolCallFor(toolNames);
  const denied=()=>{throw new Error('RUNTIME_PROVIDER_HISTORY_DENIED');};
- let pendingCall:unknown,expectedCalls:unknown;
+ let pendingCall:unknown,pendingName:unknown,expectedCalls:unknown;
  const projected=items.map((item,index)=>{
   if(!item||typeof item!=='object'||Array.isArray(item))return denied();
   const value=item as Record<string,unknown>;
@@ -81,10 +84,10 @@ export function projectOpenRouterItemsForSizing(items:unknown[],historyCount=0):
   }
   if(value.type==='function_call'){
    const call={id:value.callId,type:'function',function:{name:value.name,arguments:value.arguments}};
-   if(pendingCall||!keys(['id','type','callId','name','arguments','status','providerData'])||!sourceCall.safeParse(call).success)return denied();
+   if(pendingCall||!keys(['id','type','callId','name','arguments','status','providerData'])||!toolCall.safeParse(call).success)return denied();
    if(value.providerData!==undefined&&!isDeepStrictEqual({...value.providerData as object,id:value.callId},call))return denied();
    if(expectedCalls&&!isDeepStrictEqual(expectedCalls,[call]))return denied();
-   expectedCalls=undefined;pendingCall=value.callId;
+   expectedCalls=undefined;pendingCall=value.callId;pendingName=value.name;
    return {role:'assistant',content:null,tool_calls:[call]};
   }
   if(value.type==='function_call_result'){
@@ -93,7 +96,8 @@ export function projectOpenRouterItemsForSizing(items:unknown[],historyCount=0):
    if(!keys(['id','type','callId','name','output','status','providerData'])||
     !z.string().min(1).max(256).safeParse(value.callId).success||
     (pendingCall===undefined?index!==0||historyCount===0:value.callId!==pendingCall)||
-    value.name!==undefined&&value.name!=='read_source'||!emptyMetadata(value.providerData))return denied();
+    value.name!==undefined&&(!toolNames.has(String(value.name))||pendingCall!==undefined&&value.name!==pendingName)||
+    !emptyMetadata(value.providerData))return denied();
    if(typeof value.output!=='string'&&!z.object({type:z.literal('text'),text:z.string()}).strict().safeParse(value.output).success)return denied();
    pendingCall=undefined;return {role:'tool',tool_call_id:value.callId,content:typeof value.output==='string'?value.output:(value.output as {text:string}).text};
   }
@@ -115,7 +119,7 @@ export function projectOpenRouterItemsForSizing(items:unknown[],historyCount=0):
   // following actual SDK function_call; no unknown/parallel tool can be cut away.
   expectedCalls=parts.find(part=>Array.isArray(part.tool_calls)&&part.tool_calls.length)?.tool_calls;
   const request={messages:[{role:'assistant',content:parts,...(expectedCalls?{tool_calls:expectedCalls}:{})}]};
-  normalizeOpenRouterHistory(request);
+  normalizeOpenRouterHistory(request,toolNames);
   return {role:'assistant',content:request.messages[0]!.content};
  });
  if(pendingCall||expectedCalls)return denied();
