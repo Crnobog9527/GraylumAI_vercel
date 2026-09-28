@@ -482,6 +482,60 @@ test('monid result retrieval reads each accepted run once and saves it as step 1
   await assert.rejects(main(['--monid-results', '--out', dir], { log: () => {} }), /NEEDS_CONFIRMATION/);
 }));
 
+test('a ledger with any malformed entry refuses paid runs before any request', async () => withTemp(async dir => {
+  const good = { vendor: 'tinyfish', requestKey: 'k0', chargedUsd: 0.1, worstCaseUsd: 0.1, state: 'settled' };
+  const bad = [
+    { ...good, chargedUsd: undefined }, { ...good, chargedUsd: '0.1' }, { ...good, chargedUsd: -0.5 },
+    { ...good, chargedUsd: Number.MAX_VALUE }, { ...good, worstCaseUsd: null }, { ...good, requestKey: '' },
+    { ...good, vendor: 7 }, { ...good, state: 'reconciled' }, null,
+  ];
+  const file = path.join(dir, 'ledger.json');
+  for (const entry of bad) {
+    const entries = entry?.chargedUsd === Number.MAX_VALUE ? [entry, { ...entry, requestKey: 'k1' }] : [good, entry];
+    await writeFile(file, JSON.stringify({ version: 1, entries }));
+    await assert.rejects(loadLedger(file, { requireExisting: true }), /LEDGER_UNREADABLE/, JSON.stringify(entry));
+  }
+  const { calls, fetchImpl } = recordingFetch(() => okBody());
+  const args = ['--confirm-paid-calls', '--vendors', 'tinyfish', '--queries', 'Q01', '--out', dir];
+  await assert.rejects(main(args, { env: { TINYFISH_API_KEY: KEY }, fetchImpl, log: () => {} }), /LEDGER_UNREADABLE/);
+  assert.equal(calls.length, 0);
+  const limits = { vendorId: 'fake', maxCalls: 10, maxUsd: 1 };
+  assert.equal(refusal({ entries: [{ vendor: 'fake', chargedUsd: Number.NaN }] }, limits, 0.1, { key: 'k' }), 'LEDGER_TOTAL_INVALID');
+  assert.equal(refusal({ entries: [{ vendor: 'fake', chargedUsd: -1 }] }, limits, 0.1, { key: 'k' }), 'LEDGER_TOTAL_INVALID');
+}));
+
+test('reanalyze is read-only and rebuilds call metadata instead of reporting zero', async () => withTemp(async dir => {
+  const live = recordingFetch((url, init, n) => (n === 1 ? okBody({ cost: 0.002 }) : new Response('{"error":"x"}', { status: 500 })));
+  await run(dir, { fetchImpl: live.fetchImpl, qs: [queries[0], queries[1]] });
+  const accepted = path.join(dir, 'raw', 'fake', 'T3-step0-2026.json');
+  await writeFile(accepted, JSON.stringify({ response: { outcome: 'ok', httpStatus: 202, body: { status: 'RUNNING' } }, latencyMs: 900 }));
+  await initLedger(path.join(dir, 'other', 'ledger.json'));
+  const ledgerPath = path.join(dir, 'ledger.json');
+  await writeFile(ledgerPath, JSON.stringify({ version: 1, entries: (await loadLedger(ledgerPath)).entries }));
+  const before = { text: await readFile(ledgerPath, 'utf8'), mtime: (await stat(ledgerPath)).mtimeMs };
+  const originalFetch = globalThis.fetch;
+  let networkCalls = 0;
+  globalThis.fetch = async () => { networkCalls += 1; throw new Error('network is forbidden during reanalyze'); };
+  try {
+    const report = await reanalyze({ vendors: [fakeVendor()], queries, outDir: dir });
+    const markdown = formatMarkdown(report, queries);
+    assert.equal(networkCalls, 0);
+    assert.equal(await readFile(ledgerPath, 'utf8'), before.text);
+    assert.equal((await stat(ledgerPath)).mtimeMs, before.mtime);
+    assert.ok(!(await readdir(dir)).includes('ledger.lock'));
+    const calls = report.vendors[0].queries.flatMap(query => query.calls ?? []);
+    assert.deepEqual(calls.map(call => call.outcome), ['ok', 'failed', 'accepted']);
+    assert.equal(calls[0].reportedCostUsd, 0.002);
+    assert.equal(report.vendors[0].usage.calls, 2);
+    assert.match(markdown, /\| Fake \| OK 1, SAVED_FAILURE 1, ACCEPTED_NO_RESULT 1 \| 3 \| 1\/3 \|/);
+    assert.match(markdown, /离线重算不适用/);
+    const noLedger = await reanalyze({ vendors: [fakeVendor()], queries, outDir: path.join(dir, 'raw') });
+    assert.equal(formatMarkdown(noLedger, queries).split('\n')[4].split('|').filter(cell => cell.includes('离线重算不适用')).length, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}));
+
 test('application code never imports the comparison script', () => {
   const result = spawnSync('git', ['grep', '-l', '-i', '-e', 'research0', '--', 'apps', 'packages'], { cwd: repositoryRoot, encoding: 'utf8' });
   assert.equal(result.status, 1, `unexpected references:\n${result.stdout}`);

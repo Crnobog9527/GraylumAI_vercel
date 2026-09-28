@@ -25,8 +25,8 @@ export const tinyfish = {
   },
   isFailure: json => !Array.isArray(json?.results),
   failureReason: json => text(json, ['error.code', 'error', 'code', 'message']) ?? 'NO_RESULTS_ARRAY',
-  // Search responses carry no cost field; the endpoint is documented as free.
-  reportedCostUsd: () => 0,
+  // Search responses carry no cost field (the endpoint is documented as free), so nothing is "reported".
+  reportedCostUsd: () => null,
   kind: () => 'web',
   normalize: json => list(json, ['results']).map(item => ({
     url: text(item, ['url']),

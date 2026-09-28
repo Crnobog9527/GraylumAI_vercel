@@ -97,7 +97,24 @@ export async function loadLedger(file, { requireExisting = false } = {}) {
     throw new Error('RESEARCH0_LEDGER_UNREADABLE');
   }
   if (data?.version !== 1 || !Array.isArray(data.entries)) throw new Error('RESEARCH0_LEDGER_UNREADABLE');
+  const bad = data.entries.findIndex(entry => !validEntry(entry));
+  if (bad !== -1) throw new Error(`RESEARCH0_LEDGER_UNREADABLE: entry ${bad} is malformed`);
+  if (!validTotal(data.entries)) throw new Error('RESEARCH0_LEDGER_UNREADABLE: total is not a finite non-negative amount');
   return { file, entries: data.entries };
+}
+
+const nonNegative = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+const nonEmpty = value => typeof value === 'string' && value.length > 0;
+
+/** Every entry must carry its identity and finite, non-negative amounts, or no cap check can be trusted. */
+export function validEntry(entry) {
+  return Boolean(entry) && nonEmpty(entry.vendor) && nonEmpty(entry.requestKey)
+    && nonNegative(entry.chargedUsd) && nonNegative(entry.worstCaseUsd)
+    && (entry.state === 'dispatched' || entry.state === 'settled');
+}
+
+function validTotal(entries) {
+  return nonNegative(entries.reduce((total, entry) => total + entry.chargedUsd, 0));
 }
 
 /** Creates the empty ledger once; refuses to overwrite an existing one. */
@@ -185,6 +202,8 @@ function sum(values) {
  */
 export function refusal(ledger, limits, worstCaseUsd, { documentedFree = false, key } = {}) {
   if (typeof key !== 'string' || key.length === 0) return 'REQUEST_KEY_MISSING';
+  // Re-checked here as well: an in-memory ledger with a broken amount must never pass a cap check.
+  if (!validTotal(ledger.entries) || ledger.entries.some(entry => !nonNegative(entry.chargedUsd))) return 'LEDGER_TOTAL_INVALID';
   // Any earlier attempt (succeeded, failed, unknown or never settled) needs a
   // person to reconcile it; the same paid request is never sent twice.
   if (ledger.entries.some(entry => entry.requestKey === key)) return 'ALREADY_ATTEMPTED';
