@@ -37,6 +37,7 @@
     "./src/shared/opcRequests": "./src/shared/opcRequests.ts",
     "./src/shared/opcQuestions": "./src/shared/opcQuestions.ts",
     "./src/shared/opcMethodPolicy": "./src/shared/opcMethodPolicy.ts",
+    "./src/shared/agentTurn": "./src/shared/agentTurn.ts",
     "./src/services/streamingOutput": "./src/services/streamingOutput.ts",
     "./src/services/providerUsage": "./src/services/providerUsage.ts",
     "./src/services/modelCapabilities": "./src/services/modelCapabilities.ts",
