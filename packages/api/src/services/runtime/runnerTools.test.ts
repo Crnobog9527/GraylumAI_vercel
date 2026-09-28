@@ -1,0 +1,152 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {describe,it,expect,vi} from 'vitest';
+import {createHash} from 'node:crypto';
+import type {AgentInputItem,Session} from '@openai/agents';
+import {askQuestionTool,INVALID_CARD_RESULT,questionCardFromResult} from './agentTools';
+import {runRuntime,type RuntimeTool} from './runner';
+
+const session=():Session=>({getSessionId:async()=> 'synthetic',getItems:async()=>[],addItems:async()=>{},popItem:async()=>undefined,clearSession:async()=>{}});
+const sha=(value:string)=>createHash('sha256').update(value).digest('hex');
+const completion=(message:Record<string,unknown>,finish='stop')=>({id:'local',object:'chat.completion',created:1,model:'m/x',choices:[{index:0,message:{role:'assistant',...message},finish_reason:finish}]});
+const sourceCall={id:'call_source_1',type:'function',function:{name:'read_source',arguments:'{}'}};
+
+/** Old-format request bytes with the only existing tool: a read, then an answer. */
+async function legacyToolBodies(stream:boolean,reasoning?:{effort:'none'}){
+ const bodies:string[]=[];
+ const responses=[completion({content:null,tool_calls:[sourceCall]},'tool_calls'),completion({content:'ok'})];
+ const exchange=vi.fn(async(_sequence:number,request:string,onChunk?:(chunk:string)=>void)=>{
+  bodies.push(request);const response=responses[bodies.length-1]!;
+  onChunk?.(JSON.stringify({...response,object:'chat.completion.chunk',choices:[{index:0,delta:response.choices[0]!.message,finish_reason:response.choices[0]!.finish_reason}]}));
+  return JSON.stringify(response);
+ });
+ const tools:RuntimeTool[]=[{name:'read_source',description:'Read the selected source only.',execute:async()=>JSON.stringify({body:'SOURCE'})}];
+ const output=await runRuntime({model:'m/x',instructions:'系统说明',input:'hello',session:session(),maxOutputTokens:4096,maxTurns:2,tools,selectHistory:async(_h,i)=>i,exchange,stream,...(reasoning?{reasoning}:{})});
+ expect(output).toBe('ok');expect(exchange).toHaveBeenCalledTimes(2);
+ return bodies;
+}
+
+it.each([
+ ['serial-tools-v2 (non-streaming)',false,undefined],
+ ['serial-tools-v3-stream',true,undefined],
+ ['serial-tools-v4-stream',true,{effort:'none' as const}],
+])('keeps %s SDK request bytes with the read_source tool unchanged',async(_format,stream,reasoning)=>{
+ const bodies=await legacyToolBodies(stream,reasoning);
+ expect(bodies.map(sha)).toEqual(GOLDEN[`${stream}:${reasoning?.effort??''}`]);
+});
+
+// Recorded by the locked SDK on the AC1-2 base before AC1-3 changed runner.ts.
+const GOLDEN:Record<string,string[]>={
+ 'false:':['9c9feac9184d627bb0b37ba8f9edec048295c5c2452deb9ea27fda61efd99208','b5fcbf0f19b242d08cc1f2e40e494cc58db0275c4b2cd09572e0310982299525'],
+ 'true:':['d3dd9ff8bf9697e21e86b27f55863b82f0c753ba7afab2b7e301f1d910ab2016','962196fc6db1e37b7f109881d85c66f6f8175d5b40a8c3c70e9780c41500e56b'],
+ 'true:none':['5a87f930683951fbe9aae99819b001769ea3c00baa1dd63995b662ab0a21822e','960ee071168850b6fdd88ca3f098a4499ded99e6ea49b6793222548b85afd5a5'],
+};
+
+// ---------------------------------------------------------------------------
+// Agent turn format (AC-1): dormant until an admission produces it.
+// ---------------------------------------------------------------------------
+
+const card={question:'你主要在哪个平台？',options:['小红书','抖音']};
+const askCall=(id:string,args:unknown=card)=>({id,type:'function',function:{name:'ask_question',arguments:JSON.stringify(args)}});
+const frames=(response:ReturnType<typeof completion>)=>{
+ const message=response.choices[0]!.message as {content?:string|null;tool_calls?:Array<{id:string;type:string;function:{name:string;arguments:string}}>};
+ return [
+  {...response,object:'chat.completion.chunk',choices:[{index:0,delta:{role:'assistant',content:message.content??''},finish_reason:null}]},
+  ...(message.tool_calls??[]).map((call,index)=>({...response,object:'chat.completion.chunk',choices:[{index:0,delta:{tool_calls:[{index,...call}]},finish_reason:null}]})),
+  {...response,object:'chat.completion.chunk',choices:[{index:0,delta:{},finish_reason:response.choices[0]!.finish_reason}]},
+ ].map(frame=>JSON.stringify(frame));
+};
+type Mode='non-stream'|'stream'|'replay';
+async function agentTurn(mode:Mode,response:ReturnType<typeof completion>,options:{firstToolCallOnly?:boolean}={firstToolCallOnly:true}){
+ const bodies:string[]=[],added:AgentInputItem[]=[],shown:string[]=[],dropped:number[]=[];
+ const executed=vi.fn(askQuestionTool().execute);
+ const exchange=vi.fn(async(_sequence:number,request:string,onChunk?:(chunk:string)=>void)=>{
+  bodies.push(request);if(mode==='stream')for(const frame of frames(response))onChunk!(frame);
+  return JSON.stringify(response);
+ });
+ const store:Session={...session(),addItems:async items=>{added.push(...items);}};
+ const run=runRuntime({model:'m/x',instructions:'I',input:'hello',session:store,maxOutputTokens:4096,maxTurns:1,exchange,
+  tools:[{...askQuestionTool(),execute:executed}],selectHistory:async(_h,i)=>i,stream:mode!=='non-stream',reasoning:{effort:'none'},
+  stopAtToolNames:['ask_question'],...options,onToolCallsDropped:count=>dropped.push(count),onText:text=>shown.push(text)});
+ return {run,bodies,added,shown,dropped,executed,exchange};
+}
+const modes:Mode[]=['non-stream','stream','replay'];
+
+describe('Agent turn format',()=>{
+ it('sends per-tool parameters and neither parallel_tool_calls nor tool_choice',async()=>{
+  const t=await agentTurn('stream',completion({content:'好的'}));await t.run;
+  const sent=JSON.parse(t.bodies[0]!);
+  expect(sent).not.toHaveProperty('parallel_tool_calls');expect(sent).not.toHaveProperty('tool_choice');
+  expect(sent.tools[0].function.name).toBe('ask_question');
+  expect(Object.keys(sent.tools[0].function.parameters.properties)).toEqual(['question','options']);
+ });
+
+ it.each(modes)('ends the turn at the question card (%s)',async mode=>{
+  const t=await agentTurn(mode,completion({content:'先了解一下。',tool_calls:[askCall('call_a')]},'tool_calls'));
+  const output=await t.run;expect(JSON.parse(output)).toEqual({card:'question',...card});expect(questionCardFromResult(output)).toEqual(card);
+  expect(t.exchange).toHaveBeenCalledTimes(1);expect(t.executed).toHaveBeenCalledTimes(1);expect(t.dropped).toEqual([]);
+  if(mode!=='non-stream')expect(t.shown.join('')).toBe('先了解一下。');
+  // The SDK stores the call and its result, so history replays the card as a tool round.
+  expect(t.added.map(item=>'type' in item?item.type:undefined)).toEqual(expect.arrayContaining(['function_call','function_call_result']));
+ });
+
+ it.each(modes)('keeps only the first of several calls (%s)',async mode=>{
+  const t=await agentTurn(mode,completion({content:'先了解一下。',tool_calls:[askCall('call_a'),askCall('call_b',{question:'另一个',options:['x','y']})]},'tool_calls'));
+  expect(JSON.parse(await t.run)).toEqual({card:'question',...card});
+  expect(t.executed).toHaveBeenCalledTimes(1);expect(t.exchange).toHaveBeenCalledTimes(1);expect(t.dropped).toEqual([1]);
+  expect(JSON.stringify(t.added)).not.toContain('call_b');
+ });
+
+ it.each(modes)('an older format still rejects several calls (%s)',async mode=>{
+  const t=await agentTurn(mode,completion({content:null,tool_calls:[askCall('call_a'),askCall('call_b')]},'tool_calls'),{firstToolCallOnly:false});
+  await expect(t.run).rejects.toThrow('RUNTIME_EXECUTION_PENDING');expect(t.executed).not.toHaveBeenCalled();
+ });
+
+ it.each(modes)('never runs a tool call cut off by the output limit (%s)',async mode=>{
+  const t=await agentTurn(mode,completion({content:'先了解',tool_calls:[askCall('call_a')]},'length'));
+  await expect(t.run).rejects.toThrow('RUNTIME_OUTPUT_TRUNCATED');
+  expect(t.executed).not.toHaveBeenCalled();expect(t.exchange).toHaveBeenCalledTimes(1);
+ });
+
+ it.each(modes)('stops an empty length-limited reply as truncated (%s)',async mode=>{
+  const t=await agentTurn(mode,completion({content:null},'length'));
+  await expect(t.run).rejects.toThrow('RUNTIME_OUTPUT_TRUNCATED');expect(t.exchange).toHaveBeenCalledTimes(1);
+ });
+
+ it.each(modes)('keeps a length-limited reply that has text and no tool call (%s)',async mode=>{
+  const t=await agentTurn(mode,completion({content:'很长的回答'},'length'));
+  expect(await t.run).toBe('很长的回答');
+ });
+});
+
+describe('question card tool definition and invalid cards',()=>{
+ it('sends a strict JSON Schema without the host-only card rules',async()=>{
+  const t=await agentTurn('stream',completion({content:'好的'}));await t.run;
+  expect(JSON.parse(t.bodies[0]!).tools).toEqual([{type:'function',function:{name:'ask_question',
+   description:'Show the user one question card with 2 to 5 short suggested answers. Ends your turn.',strict:true,parameters:{
+    $schema:'http://json-schema.org/draft-07/schema#',type:'object',additionalProperties:false,required:['question','options'],properties:{
+     question:{type:'string',minLength:1,maxLength:500},
+     options:{type:'array',minItems:2,maxItems:5,items:{type:'string',minLength:1,maxLength:200}},
+    }}}}]);
+ });
+
+ it.each([
+  ['one option',{question:'问题',options:['只有一个']}],
+  ['duplicate options',{question:'问题',options:['小红书',' 小红书 ']}],
+  ['a control character',{question:'问\u0007题',options:['a','b']}],
+  ['an extra field',{...card,allowFreeText:true}],
+  ['arguments that are not JSON','{"question":'],
+ ])('ends the turn without a card for %s, keeping the paid text (stream)',async(_name,args)=>{
+  const call={id:'call_bad',type:'function',function:{name:'ask_question',arguments:typeof args==='string'?args:JSON.stringify(args)}};
+  const t=await agentTurn('stream',completion({content:'先了解一下。',tool_calls:[call]},'tool_calls'));
+  const output=await t.run;
+  expect(questionCardFromResult(output)).toBeNull();if(typeof args!=='string')expect(output).toBe(INVALID_CARD_RESULT);
+  expect(t.shown.join('')).toBe('先了解一下。');expect(t.exchange).toHaveBeenCalledTimes(1);expect(t.executed.mock.results.length).toBeLessThanOrEqual(1);
+ });
+});
+
+it.each(modes)('an invalid card with no text at all is detectable, so AC1-4 can show a fixed notice (%s)',async mode=>{
+ // AC-0 never saw this (65/65 calls wrote text first); the host must still not show a blank reply.
+ const t=await agentTurn(mode,completion({content:null,tool_calls:[askCall('call_bad',{question:'问题',options:['只有一个']})]},'tool_calls'));
+ const output=await t.run;
+ expect(questionCardFromResult(output)).toBeNull();expect(t.shown.join('')).toBe('');expect(t.exchange).toHaveBeenCalledTimes(1);
+});

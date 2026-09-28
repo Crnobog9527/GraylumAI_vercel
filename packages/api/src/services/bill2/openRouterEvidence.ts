@@ -4,6 +4,7 @@ import {gunzipSync} from 'node:zlib';
 import { decimal, parseExactJson } from './decimal';
 import {openRouterStream,OPENROUTER_STREAM_BYTE_LIMIT} from './openRouterStream';
 import type { TransportObservation } from './fixtureAdapter';
+import {AGENT_STREAM_TOOLS} from '../runtime/agentTools';
 // A lookup identity only, never a cost receipt. Exclude whitespace, delimiters
 // and control characters (including combined duplicate HTTP header values).
 export const validGenerationId=(value:unknown):value is string=>typeof value==='string'&&/^[a-zA-Z0-9._:-]{1,256}$/.test(value);
@@ -64,7 +65,9 @@ function projectOpenRouterEvidence(observation:TransportObservation, identity:Op
   if(observation.stream&&source==='response'){
    let wire:string;
    try{wire=new TextDecoder('utf-8',{fatal:true}).decode(decodeOpenRouterStreamObservation(observation));}catch{return diagnostic('invalid_stream_encoding');}
-   const stream=openRouterStream(identity.model,base.providerId??undefined);stream.push(wire);const result=stream.result();
+   // An Agent turn response (AC-1) keeps its own tool rules; older bytes carry no flag.
+   const stream=openRouterStream(identity.model,base.providerId??undefined,undefined,observation.agentTools?AGENT_STREAM_TOOLS:undefined);
+   stream.push(wire);const result=stream.result();
    if(result.identityConflict)return mismatch();
    if(result.providerId)base.providerId=result.providerId;
    if(expectedProviderId&&base.providerId&&expectedProviderId!==base.providerId)return mismatch();

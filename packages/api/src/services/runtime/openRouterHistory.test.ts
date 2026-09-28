@@ -3,6 +3,7 @@ import {it,expect,vi} from 'vitest';
 import type {AgentInputItem,Session} from '@openai/agents';
 import {normalizeOpenRouterHistory,projectOpenRouterItemsForSizing} from './openRouterHistory';
 import {runRuntime} from './runner';
+import {AGENT_TOOL_NAMES} from './agentTools';
 import {selectRuntimeHistory,selectRuntimeCallInput,assertRuntimeRequestCapacity} from './context';
 import {openRouterAdapter} from '../bill2/openRouterAdapter';
 import {openRouterBound} from '../bill2/openRouterPolicy';
@@ -292,4 +293,26 @@ it('locked SDK streaming history with empty annotations continues through Luna a
  expect(JSON.stringify(history)).toContain('reasoning.summary');expect(JSON.stringify(history)).toContain('reasoning.encrypted');
  expect(JSON.stringify(sent)).not.toMatch(/PRIVATE_STREAM_REASONING|Synthetic private summary|SYNTHETIC_OPAQUE|annotations/);
  expect((sent[2]!.messages as {role:string;content:unknown}[]).filter(item=>item.role==='assistant')).toEqual([{role:'assistant',content:'Answer 1'},{role:'assistant',content:'Answer 2'}]);
+});
+
+// AC-1: question card rounds in history, accepted only with the Agent turn allowlist.
+const askCall={id:'ask-1',type:'function',function:{name:'ask_question',arguments:'{"question":"q","options":["a","b"]}'}};
+const askHistory=()=>[
+ {type:'message',role:'user',content:'hello'},
+ {id:'m1',type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:'先问一下',providerData:{role:'assistant',tool_calls:[askCall]}}]},
+ {type:'function_call',callId:'ask-1',name:'ask_question',arguments:askCall.function.arguments,status:'completed',providerData:{type:'function',function:askCall.function}},
+ {type:'function_call_result',callId:'ask-1',name:'ask_question',status:'completed',output:{type:'text',text:'{"card":"question"}'}},
+ {type:'message',role:'user',content:'a'},
+];
+it('replays a question card round only under the Agent turn allowlist',()=>{
+ expect(()=>projectOpenRouterItemsForSizing(askHistory())).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+ expect(projectOpenRouterItemsForSizing(askHistory(),0,AGENT_TOOL_NAMES).map(item=>(item as {role?:string}).role)).toEqual(['user','assistant','assistant','tool','user']);
+ const request={messages:[{role:'assistant',content:[{type:'text',text:'先问一下',role:'assistant',tool_calls:[askCall]}],tool_calls:[askCall]}]};
+ expect(()=>normalizeOpenRouterHistory(structuredClone(request))).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+ const normalized=structuredClone(request);normalizeOpenRouterHistory(normalized,AGENT_TOOL_NAMES);
+ expect(normalized.messages[0]).toEqual({role:'assistant',content:'先问一下',tool_calls:[askCall]});
+});
+it('rejects a tool result whose name differs from its call',()=>{
+ const items=askHistory();(items[3] as {name:string}).name='read_skill_file';
+ expect(()=>projectOpenRouterItemsForSizing(items,0,AGENT_TOOL_NAMES)).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
 });
