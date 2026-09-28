@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {createRequestTiming,timingLabel} from './timing';
+import {createAuthReuse} from './authReuse';
 /** One server-created HTTP invocation budget, shared by every batched Runtime.
  * It is neither a frozen execution field nor an authority to retry/settle. */
 export function createRuntimeBudget(now:()=>number=()=>performance.now()) {
@@ -9,6 +10,8 @@ export function createRuntimeBudget(now:()=>number=()=>performance.now()) {
   workDeadline,persistenceDeadline,
   // AC-0 measurement of this invocation's round trips; never an authority.
   timing:createRequestTiming(now),
+  // AC-0c: this invocation's reuse of Auth's own verdict (see authReuse.ts).
+  auth:createAuthReuse(now),
   remainingPersistence:()=>persistenceDeadline-now(),
   assertCanPersist(durationMs=0){
    if(now()+durationMs>=persistenceDeadline)throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');
@@ -22,6 +25,16 @@ export type RuntimeBudget=ReturnType<typeof createRuntimeBudget>;
 /** Native fetch cancellation also bounds response-body reads, including SQL.
  * An aborted database mutation is ambiguous; its original identity is retained. */
 export function withRuntimeBudget(budget:RuntimeBudget,transport:typeof fetch=fetch,disableDatabaseRetry=false):typeof fetch {
+ const send=budgeted(budget,transport,disableDatabaseRetry);
+ return async(input,init)=>{
+  if(Math.ceil(budget.remainingPersistence())<=0)throw new DOMException('RUNTIME_TIME_BUDGET_EXHAUSTED','AbortError');
+  // Provider responses end Auth verdict reuse: the next operation verifies again.
+  if(!disableDatabaseRetry){try{return await send(input,init);}finally{budget.auth?.expire();}}
+  const key=budget.auth?.keyOf(input,init);
+  return key?budget.auth.fetch(key,()=>send(input,init)):send(input,init);
+ };
+}
+function budgeted(budget:RuntimeBudget,transport:typeof fetch,disableDatabaseRetry:boolean):typeof fetch {
  return async(input,init)=>{
   const remaining=Math.ceil(budget.remainingPersistence());
   if(remaining<=0)throw new DOMException('RUNTIME_TIME_BUDGET_EXHAUSTED','AbortError');

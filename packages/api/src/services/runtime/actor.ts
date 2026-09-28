@@ -3,8 +3,11 @@ import type {SupabaseClient} from '@supabase/supabase-js';
 import type {RuntimeBudget} from './budget';
 import {StagingAccessError} from './stagingErrors';
 /** Capture only the credential, never the authorization verdict. Every operation
- * still verifies the original user with Auth. Explicit JWT verification avoids
- * a new implicit session refresh/backoff during the persistence-only margin. */
+ * still verifies the original user with Auth. Within one HTTP invocation the
+ * budgeted transport may answer an identical verification from Auth's earlier
+ * response until a provider call returns or 30s pass (authReuse.ts, AC-0c).
+ * Explicit JWT verification avoids a new implicit session refresh/backoff
+ * during the persistence-only margin. */
 export function runtimeActor(auth:Pick<SupabaseClient['auth'],'getSession'|'getUser'>,userId:string,budget:RuntimeBudget,authorization?:string|null){
  const coversPersistence=(jwt:string)=>{
   try{const exp=JSON.parse(Buffer.from(jwt.split('.')[1]??'','base64url').toString()).exp;return Number.isSafeInteger(exp)&&exp*1000-Date.now()>budget.remainingPersistence();}

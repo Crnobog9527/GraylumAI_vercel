@@ -22,10 +22,17 @@ it.each(['cookie','bearer'])('uses the original %s credential without late SDK r
  expect(await actor()).toBe(id);
  // A session within the SDK's 90s expiry margin would refresh on getUser().
  vi.spyOn(Date,'now').mockReturnValue((now+550)*1000);elapsed=256_000;
- expect(await actor()).toBe(id);expect(getSession).toHaveBeenCalledTimes(1);
- mismatch=true;await expect(actor()).rejects.toThrow('RUNTIME_DENIED');mismatch=false;denied=true;
+ // The first verdict is older than the 30s reuse limit, so Auth is asked again.
+ expect(await actor()).toBe(id);expect(getSession).toHaveBeenCalledTimes(1);expect(transport).toHaveBeenCalledTimes(2);
+ // AC-0c: the same invocation reuses Auth's verdict for this exact credential
+ // until a provider call returns; the next operation then verifies again.
+ mismatch=true;expect(await actor()).toBe(id);expect(transport).toHaveBeenCalledTimes(2);
+ budget.auth.expire();await expect(actor()).rejects.toThrow('RUNTIME_DENIED');expect(transport).toHaveBeenCalledTimes(3);
+ mismatch=false;denied=true;budget.auth.expire();
  await expect(actor()).rejects.toThrow('RUNTIME_DENIED');expect(transport).toHaveBeenCalledTimes(4);
- elapsed=285_000;await expect(actor()).rejects.toThrow('TIME_BUDGET');expect(transport).toHaveBeenCalledTimes(4);
+ // A rejected verdict is never reused.
+ await expect(actor()).rejects.toThrow('RUNTIME_DENIED');expect(transport).toHaveBeenCalledTimes(5);
+ elapsed=285_000;await expect(actor()).rejects.toThrow('TIME_BUDGET');expect(transport).toHaveBeenCalledTimes(5);
 });
 it('leaves room for refresh on first use and refuses new auth after persistence expires',async()=>{
  let elapsed=0;const budget=createRuntimeBudget(()=>elapsed),getUser=vi.fn();
