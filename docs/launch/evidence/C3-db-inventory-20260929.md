@@ -146,4 +146,4 @@ ROLLBACK;
 
 本机重放已实际执行，结果见§1；用户数据、遗留和索引均是静态事实/候选，未看执行计划。不得把文档完成等同基线修复、DATA-ERASURE实现或正式发布就绪。
 
-PR保持draft、目标staging。CI全绿后停在总控审查；总控通过后才ready并请求独立机器人审查。合并仍需Owner在本会话亲手发送“允许合并”，最终使用squash与head匹配保护。本次未申请或执行合并。
+本任务交付流程来自Owner的C3原始指令：先draft到staging，CI全绿后停在总控审查；总控通过后ready并请求独立机器人审查。Owner另行明确要求：“合并只在 Owner 于本会话亲手发送‘允许合并’后进行，用 --squash --match-head-commit。”这是当前任务的明确限制，不是文档新增治理规则，也不修改AGENTS.md §9对其他合格普通变更的常设授权。当前PR状态以GitHub Handoff为准；本次未执行合并。
