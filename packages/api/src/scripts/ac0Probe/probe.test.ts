@@ -91,13 +91,14 @@ describe('dry run', () => {
 });
 
 describe('limits', () => {
-  it('refuses caps above the hard total of 350 calls and 3 USD', async () => {
-    expect(HARD_MAX_CALLS).toBe(350);
-    expect(HARD_MAX_USD).toBe(3);
+  it('refuses caps above the hard total of 420 calls and 3.5 USD', async () => {
+    expect(HARD_MAX_CALLS).toBe(420);
+    expect(HARD_MAX_USD).toBe(3.5);
     expect(() => validateCaps(HARD_MAX_CALLS + 1, 1)).toThrow('PROBE_CAP_REFUSED');
-    expect(() => validateCaps(10, 3.01)).toThrow('PROBE_CAP_REFUSED');
+    expect(() => validateCaps(10, 3.51)).toThrow('PROBE_CAP_REFUSED');
+    expect(validateCaps(HARD_MAX_CALLS, 3.5)).toBeUndefined();
     expect(() => parseProbeArgs(['--max-calls', String(HARD_MAX_CALLS + 1)], home)).toThrow('PROBE_CAP_REFUSED');
-    expect(() => parseProbeArgs(['--max-usd', '3.5'], home)).toThrow('PROBE_CAP_REFUSED');
+    expect(() => parseProbeArgs(['--max-usd', '4'], home)).toThrow('PROBE_CAP_REFUSED');
     expect(parseProbeArgs([], home)).toMatchObject({maxCalls: 60, maxUsd: 1, live: false});
     const network = recording();
     const outcome = await runProbe(base('--max-calls', '500', '--live'), {[KEY_ENV]: KEY}, deps(network.upstream));
@@ -121,7 +122,7 @@ describe('limits', () => {
     expect(() => usd.reserve(usdToNano(0.006))).toThrow('run_usd_cap');
     const total = createBudget({maxCalls: 10, maxUsd: 1, ledger: memoryLedger({calls: HARD_MAX_CALLS, nanoUsd: 0})});
     expect(() => total.reserve(1)).toThrow('total_call_cap');
-    const spent = createBudget({maxCalls: 10, maxUsd: 1, ledger: memoryLedger({calls: 0, nanoUsd: usdToNano(2.999999)})});
+    const spent = createBudget({maxCalls: 10, maxUsd: 1, ledger: memoryLedger({calls: 0, nanoUsd: usdToNano(HARD_MAX_USD - 0.000001)})});
     expect(() => spent.reserve(usdToNano(0.01))).toThrow('total_usd_cap');
   });
 
