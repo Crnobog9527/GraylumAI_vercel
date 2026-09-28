@@ -32,10 +32,23 @@ export function zhStats(items) {
   };
 }
 
+function median(values) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (sorted.length === 0) return null;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : Math.round((sorted[middle - 1] + sorted[middle]) / 2);
+}
+
+/** Days between the newest dated result of a query and the report time; null when nothing is dated. */
+export function newestAgeDays(stats, reportTime) {
+  if (!stats.newest) return null;
+  return Math.max(0, Math.floor((Date.parse(reportTime) - Date.parse(stats.newest)) / 86_400_000));
+}
+
 /** One row per vendor: averages over its successful queries, plus how many succeeded. */
 export function formatZhTable(report) {
-  const lines = ['| 供应商 | 成功查询 | 平均结果数 | 中文标题占比 | 中国网站占比 | 带发布日期 | 平均不同网站数 | 响应时间中位数 |',
-    '|---|---|---|---|---|---|---|---|'];
+  const lines = ['| 供应商 | 成功查询 | 平均结果数 | 中文标题占比 | 中国网站占比 | 带发布日期 | 平均不同网站数 | 最新结果距今（中位数，天） | 响应时间中位数 |',
+    '|---|---|---|---|---|---|---|---|---|'];
   for (const vendor of report.vendors) {
     const ok = vendor.queries.filter(query => query.status === 'OK' && Array.isArray(query.items));
     const stats = ok.map(query => zhStats(query.items));
@@ -43,10 +56,10 @@ export function formatZhTable(report) {
       const values = stats.map(stat => stat[key]).filter(Number.isFinite);
       return values.length === 0 ? '未提供' : `${Math.round(values.reduce((a, b) => a + b, 0) / values.length)}`;
     };
-    const latencies = ok.map(query => query.latencyMs).filter(Number.isFinite).sort((a, b) => a - b);
-    const median = latencies.length === 0 ? '未提供' : `${latencies[Math.floor(latencies.length / 2)]} ms`;
+    const age = median(stats.map(stat => newestAgeDays(stat, report.generatedAt)));
+    const latency = median(ok.map(query => query.latencyMs));
     lines.push(`| ${vendor.label} | ${ok.length}/${vendor.queries.length} | ${mean('results')} | ${mean('chineseTitlePct')}% | ${mean('chineseSitePct')}% | `
-      + `${mean('datedPct')}% | ${mean('distinctSites')} | ${median} |`);
+      + `${mean('datedPct')}% | ${mean('distinctSites')} | ${age === null ? '未提供' : age} | ${latency === null ? '未提供' : `${latency} ms`} |`);
   }
   return lines.join('\n');
 }

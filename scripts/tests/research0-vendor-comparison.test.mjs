@@ -7,7 +7,7 @@ import test from 'node:test';
 import { assertOutsideRepository, main, parseArgs } from '../research0-vendor-comparison.mjs';
 import { count, summarize, timestamp } from '../research0/metrics.mjs';
 import { QUERIES, SUPPLEMENTAL_QUERIES, ZH_QUERIES } from '../research0/queries.mjs';
-import { zhStats } from '../research0/zh.mjs';
+import { formatZhTable, newestAgeDays, zhStats } from '../research0/zh.mjs';
 import { parallel } from '../research0/vendors/parallel.mjs';
 import { formatReport } from '../research0/report.mjs';
 import { keyFor, runComparison } from '../research0/runner.mjs';
@@ -746,6 +746,12 @@ test('Parallel requests, mapping and the Chinese summary', () => {
   assert.deepEqual(zhStats(items), { results: 2, chineseTitlePct: 50, chineseSitePct: 50, datedPct: 50,
     newest: '2026-09-20T00:00:00.000Z', distinctSites: 2 });
   assert.equal(parallel.reportedRaw({ usage: [{ name: 'sku_search', count: 1 }] }), 'sku_search=1');
+  assert.equal(newestAgeDays(zhStats(items), '2026-09-28T08:00:00.000Z'), 8);
+  const table = formatZhTable({ generatedAt: '2026-09-28T08:00:00.000Z', vendors: [{ label: 'P', queries: [
+    { status: 'OK', latencyMs: 100, items }, { status: 'OK', latencyMs: 1000, items: [items[1]] },
+  ] }] });
+  assert.match(table, /\| 550 ms \|$/m, 'even counts use the mean of the two middle latencies');
+  assert.match(table, /\| 8 \| 550 ms \|/, 'recency column shows the median age of the newest dated result');
 });
 
 test('a rejected key or empty account (401/402/403) stops the vendor after the first request', async () => withTemp(async dir => {
