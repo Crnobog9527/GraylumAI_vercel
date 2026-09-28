@@ -317,10 +317,10 @@ progress_refresh_v10_1:
 > Resend 已注册验证，B-3 的 DNS 风险已提前消化，剩余只需一次真实投递实测。
 
 **C. 生产数据操作（§9 gate 内，零成本）**
-6. **D9 执行**：在**生产** Supabase（project `正式项目`）停用 8 个旧模块。
+6. **D9 执行**：在**生产** Supabase 停用 8 个旧模块。**操作前，将当前连接的实际 project ref 与仓库外受控配置中 Owner 批准的正式项目预期 ref 做精确比对；预期值缺失、实际值无法确认或不一致时停止。不得把“正式项目”字样当作预期 ref；只公开匹配结果，不公开原值。**
    - 执行前先记录 8 行 id：`select id, title, active from modules order by created_at;`
    - 停用后复验（**按 id 逐行，不用 count**）：`select id, title, active from modules;` → 8 个旧 id 全部 `active=false`，且新建的 Skill 模块 `active=true`。
-   - 另需确认操作对象是生产：`select current_database(), (select count(*) from profiles);` 应与 EXT-0 记录一致（5 profiles）。
+   - `select current_database(), (select count(*) from profiles);` 仅供比对 EXT-0 的历史快照（当时为 5 profiles），不能证明 Supabase 项目身份，也不能替代上述实际 ref 与批准预期值的核对。
 7. **生产 Skill 与模块创建**（§9 必经步骤，见下）。
 
 **COM-1 商业内容**：正式商品名/USD/credits/周期定稿且 DB=Stripe Price 一致；terms/privacy/acceptable-use/退款政策文本审定；自动续费披露、cancel-at-period-end、原则不退款+Owner 审核例外、refund 后当期扣回+未来停发、其他来源不动；support 邮箱实测可收件；payment stuck/cancel/refund/chargeback/账号数据请求 SOP；seller identity。编码代理只落地 Owner 批准文本。

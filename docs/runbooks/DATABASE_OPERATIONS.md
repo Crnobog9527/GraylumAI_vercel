@@ -39,12 +39,16 @@ WHERE email = 'user@example.com';
 
 Use the credit adjustment control in `/admin/users`, with the adjustment amount
 and reason. The UI calls `admin.adjustUserCredits`, which uses
-`atomic_apply_credit_ledger_entry` for the balance and ledger mutation and then
-records the admin activity. Do not update `profiles.credits` and insert a ledger
-row as separate manual SQL operations.
+`atomic_apply_credit_ledger_entry` for the balance and ledger mutation. The later
+admin activity insert is best-effort: the router does not check its returned error,
+so a successful adjustment response does not guarantee an admin audit record.
+Verify the expected activity record separately; do not repeat a successful credit
+adjustment just to recover a missing log. Do not update `profiles.credits` and
+insert a ledger row as separate manual SQL operations.
 
 Code: `apps/web/src/app/admin/users/page.tsx:141`,
-`packages/api/src/routers/admin.ts:1029` (RPC call at line 1066).
+`packages/api/src/routers/admin.ts:1029` (RPC call at line 1066; separate activity
+insert at lines 1083–1095).
 Production or real-user adjustments still require the applicable approval in
 [AGENTS.md](../../AGENTS.md).
 
