@@ -765,6 +765,19 @@ test('a rejected key or empty account (401/402/403) stops the vendor after the f
   }
 }));
 
+test('a rejected balance read stops the vendor; a rejected query skips the closing balance read', async () => withTemp(async dir => {
+  const balance = { spec: () => ({ method: 'GET', url: 'https://api.example.test/balance', worstCaseUsd: 0, documentedFree: true }), read: () => 1 };
+  const early = fakeVendor({ id: 'early', balance });
+  const first = recordingFetch(() => new Response('{"error":"Invalid API key"}', { status: 401 }));
+  const one = await run(dir, { vendor: early, fetchImpl: first.fetchImpl });
+  assert.equal(first.calls.length, 1, 'only the opening balance read is sent');
+  assert.ok(one.report.vendors[0].queries.every(query => query.status === 'NOT_RUN' && query.reason === 'ACCOUNT_REJECTED_HTTP_401'));
+  const late = fakeVendor({ id: 'late', balance });
+  const second = recordingFetch(url => (url.endsWith('/balance') ? new Response('{}') : new Response('{}', { status: 402 })));
+  await run(dir, { vendor: late, fetchImpl: second.fetchImpl });
+  assert.deepEqual(second.calls.map(call => new URL(call.url).pathname), ['/balance', '/search'], 'no closing balance read after a 402');
+}));
+
 test('application code never imports the comparison script', () => {
   const result = spawnSync('git', ['grep', '-l', '-i', '-e', 'research0', '--', 'apps', 'packages'], { cwd: repositoryRoot, encoding: 'utf8' });
   assert.equal(result.status, 1, `unexpected references:\n${result.stdout}`);
