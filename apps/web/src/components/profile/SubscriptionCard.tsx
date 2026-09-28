@@ -488,7 +488,6 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
         features.push(`购买加油包享受${discountPercent}折`);
       }
     }
-    features.push(`对话历史保存${plan.historyRetentionDays ?? 7}天`);
     return features;
   }
 

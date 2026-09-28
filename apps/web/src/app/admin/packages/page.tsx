@@ -720,11 +720,11 @@ export default function AdminPackagesPage() {
               style={{ background: 'var(--bg-tertiary)', borderColor: 'var(--border-primary)' }}
             >
               <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                会员价格（USD）、上下架和 Stripe Price ID 在本页维护；历史保留、导出权限和批量导出策略在
+                会员价格（USD）、上下架和 Stripe Price ID 在本页维护；导出权限和批量导出策略在
                 <a href="/admin/settings" className="ml-1 underline hover:no-underline" style={{ color: 'var(--color-primary)' }}>
                   系统设置 / 会员权限
                 </a>
-                中统一配置。本页解决“卖什么、卖多少钱、是否上架”，设置页解决“买完后拥有哪些历史保留与导出权限”。
+                中统一配置。本页解决“卖什么、卖多少钱、是否上架”，设置页解决“买完后拥有哪些导出权限”。
               </p>
             </div>
             <div className="flex justify-end">

@@ -1,34 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const cleanupState = vi.hoisted(() => ({
-  run: vi.fn(),
-  getCleanupStats: vi.fn(),
-  startScheduledJobRun: vi.fn(),
-  finishScheduledJobRun: vi.fn(),
-  getLatestScheduledJobRun: vi.fn(),
-}));
-
-vi.mock('../services/conversationCleanup', () => {
-  class ConversationCleanupService {
-    run = cleanupState.run;
-    getCleanupStats = cleanupState.getCleanupStats;
-  }
-
-  return {
-    ConversationCleanupService,
-  };
-});
-
-vi.mock('../services/scheduledJobRuns', () => ({
-  SCHEDULED_JOB_KEYS: {
-    conversationCleanup: 'conversation_cleanup',
-  },
-  startScheduledJobRun: cleanupState.startScheduledJobRun,
-  finishScheduledJobRun: cleanupState.finishScheduledJobRun,
-  getLatestScheduledJobRun: cleanupState.getLatestScheduledJobRun,
-}));
-
 import { adminRouter } from './admin';
 
 function createAwaitableQueryBuilder(result: Promise<unknown>) {
@@ -135,8 +107,6 @@ function createAdminCaller(
 describe('adminRouter error sanitization', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    cleanupState.startScheduledJobRun.mockResolvedValue('run-1');
-    cleanupState.finishScheduledJobRun.mockResolvedValue(undefined);
   });
 
   it('sanitizes getUsers query failures', async () => {
@@ -162,20 +132,6 @@ describe('adminRouter error sanitization', () => {
       code: 'INTERNAL_SERVER_ERROR',
       message: '读取用户列表失败，请稍后重试',
     });
-  });
-
-  it('sanitizes cleanupExpiredConversations failures while preserving job logging', async () => {
-    cleanupState.run.mockRejectedValueOnce(new Error('delete from conversations failed'));
-
-    const caller = createAdminCaller({});
-
-    await expect(caller.cleanupExpiredConversations()).rejects.toMatchObject<Partial<TRPCError>>({
-      code: 'INTERNAL_SERVER_ERROR',
-      message: '对话清理失败，请稍后重试',
-    });
-
-    expect(cleanupState.startScheduledJobRun).toHaveBeenCalledOnce();
-    expect(cleanupState.finishScheduledJobRun).toHaveBeenCalledOnce();
   });
 });
 
@@ -1675,20 +1631,6 @@ describe('adminRouter credit adjustments', () => {
 describe('adminRouter lightweight admin dashboards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    cleanupState.getCleanupStats.mockResolvedValue({
-      stats: [
-        { level: 'free', retentionDays: 7, expiredCount: 2 },
-        { level: 'pro', retentionDays: 30, expiredCount: 1 },
-      ],
-      totalExpired: 3,
-    });
-    cleanupState.getLatestScheduledJobRun.mockResolvedValue({
-      id: 'run-1',
-      status: 'success',
-      started_at: '2026-03-29T10:00:00.000Z',
-      summary: { deletedCount: 3 },
-      error: null,
-    });
   });
 
   it('searches users without loading the paginated admin user list', async () => {
@@ -1893,7 +1835,6 @@ describe('adminRouter lightweight admin dashboards', () => {
                 id: 'plan-1',
                 name: 'Pro',
                 level: 'pro',
-                history_retention_days: 30,
                 allow_export: 'true',
                 allow_batch_export: 'false',
               }],
@@ -1938,14 +1879,11 @@ describe('adminRouter lightweight admin dashboards', () => {
         id: 'plan-1',
         name: 'Pro',
         level: 'pro',
-        history_retention_days: 30,
         allow_export: 'true',
         allow_batch_export: 'false',
       }],
     });
     expect(adminQueries).toEqual(['system_settings', 'membership_plans']);
-    expect(cleanupState.getCleanupStats).not.toHaveBeenCalled();
-    expect(cleanupState.getLatestScheduledJobRun).not.toHaveBeenCalled();
   });
 
   it('fails the settings dashboard instead of rendering defaults when either query fails', async () => {
@@ -2010,8 +1948,7 @@ describe('adminRouter lightweight admin dashboards', () => {
       id: 'plan-1',
       name: 'Pro',
       level: 'pro',
-      history_retention_days: null,
-      allow_export: 'true',
+      allow_export: 'maybe',
       allow_batch_export: 'false',
     }]],
   ])('fails the settings dashboard for a %s', async (_caseName, invalidTable, invalidData) => {
@@ -2023,7 +1960,6 @@ describe('adminRouter lightweight admin dashboards', () => {
               id: 'plan-1',
               name: 'Pro',
               level: 'pro',
-              history_retention_days: 30,
               allow_export: 'true',
               allow_batch_export: 'false',
             }];

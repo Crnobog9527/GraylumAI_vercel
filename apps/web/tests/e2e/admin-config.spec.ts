@@ -329,24 +329,20 @@ test.describe('Admin Config Flows', () => {
       const membershipPlanCount = await membershipPlan.count();
       if (membershipPlanCount > 0) {
         const planId = (await membershipPlan.getAttribute('data-testid'))?.replace('membership-plan-', '') ?? '';
-        const historyInput = page.getByTestId(`membership-plan-history-${planId}`);
         const exportSwitch = page.getByTestId(`membership-plan-allow-export-${planId}`);
         const planSaveButton = page.getByTestId(`membership-plan-save-${planId}`);
 
-        const originalHistoryValue = await historyInput.inputValue();
-        const updatedHistoryValue = String(Number(originalHistoryValue || '30') + 1);
         const originalExportChecked = await exportSwitch.getAttribute('data-state');
+        const updatedExportChecked = originalExportChecked === 'checked' ? 'unchecked' : 'checked';
 
-        steps.push('Update membership retention and export permission, then verify persistence');
-        await historyInput.fill(updatedHistoryValue);
+        steps.push('Update membership export permission, then verify persistence');
         await exportSwitch.click();
         await planSaveButton.click();
         await expect(planSaveButton).toBeEnabled({ timeout: 30000 });
         await page.reload();
-        await expect(historyInput).toHaveValue(updatedHistoryValue, { timeout: 15000 });
+        await expect(exportSwitch).toHaveAttribute('data-state', updatedExportChecked, { timeout: 15000 });
 
-        steps.push('Restore the original membership retention and export permission values');
-        await historyInput.fill(originalHistoryValue);
+        steps.push('Restore the original membership export permission value');
         const currentExportChecked = await exportSwitch.getAttribute('data-state');
         if (currentExportChecked !== originalExportChecked) {
           await exportSwitch.click();

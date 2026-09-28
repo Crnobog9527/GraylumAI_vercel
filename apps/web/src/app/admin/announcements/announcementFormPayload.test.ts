@@ -7,24 +7,9 @@ import {
 } from './announcementFormPayload';
 
 describe('admin announcement presentation payload', () => {
-  it('submits a non-empty homepage link without banner styling', () => {
+  it('submits the banner link and style', () => {
     expect(
       buildAnnouncementPresentationPayload({
-        announcementType: 'homepage',
-        bannerStyle: 'promo',
-        bannerLink: '  https://example.com/homepage  ',
-      }),
-    ).toEqual({
-      bannerStyle: undefined,
-      bannerLink: 'https://example.com/homepage',
-    });
-    expect(ANNOUNCEMENT_LINK_LABEL).toBe('跳转链接（可选）');
-  });
-
-  it('preserves the existing banner link and style behavior', () => {
-    expect(
-      buildAnnouncementPresentationPayload({
-        announcementType: 'banner',
         bannerStyle: 'warning',
         bannerLink: '  https://example.com/banner  ',
       }),
@@ -32,53 +17,51 @@ describe('admin announcement presentation payload', () => {
       bannerStyle: 'warning',
       bannerLink: 'https://example.com/banner',
     });
+    expect(ANNOUNCEMENT_LINK_LABEL).toBe('跳转链接（可选）');
   });
 
   it('normalizes a blank link to null when creating an announcement', () => {
     expect(
       buildAnnouncementPresentationPayload({
-        announcementType: 'homepage',
         bannerStyle: 'info',
         bannerLink: '   ',
       }),
     ).toEqual({
-      bannerStyle: undefined,
+      bannerStyle: 'info',
       bannerLink: null,
     });
   });
 
-  it('submits null when an existing homepage link is cleared', () => {
+  it('submits null when an existing banner link is cleared', () => {
     const bannerLink = getAnnouncementLinkFormValue(
-      'https://example.com/existing-homepage',
+      'https://example.com/existing-banner',
     );
 
-    expect(bannerLink).toBe('https://example.com/existing-homepage');
+    expect(bannerLink).toBe('https://example.com/existing-banner');
     expect(
       buildAnnouncementPresentationPayload({
-        announcementType: 'homepage',
         bannerStyle: 'info',
         bannerLink: '   ',
       }),
     ).toEqual({
-      bannerStyle: undefined,
+      bannerStyle: 'info',
       bannerLink: null,
     });
   });
 
-  it('keeps an existing homepage link when editing and saving', () => {
+  it('keeps an existing banner link when editing and saving', () => {
     const bannerLink = getAnnouncementLinkFormValue(
-      'https://example.com/existing-homepage',
+      'https://example.com/existing-banner',
     );
 
     expect(
       buildAnnouncementPresentationPayload({
-        announcementType: 'homepage',
-        bannerStyle: 'info',
+        bannerStyle: 'promo',
         bannerLink,
       }),
     ).toEqual({
-      bannerStyle: undefined,
-      bannerLink: 'https://example.com/existing-homepage',
+      bannerStyle: 'promo',
+      bannerLink: 'https://example.com/existing-banner',
     });
   });
 

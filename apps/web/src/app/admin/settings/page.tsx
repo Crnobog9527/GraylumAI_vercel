@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { trpc } from '@/trpc/client';
 import {
   Save, RefreshCw, Settings, CreditCard, Gift, Users, Sliders, Crown,
-  Trash2, Download, Clock, AlertTriangle, CheckCircle, MessageSquare
+  Download, AlertTriangle, MessageSquare
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -106,7 +106,6 @@ interface MembershipPlan {
   id: string;
   name: string;
   level: 'free' | 'pro' | 'gold';
-  history_retention_days: number;
   allow_export: string;
   allow_batch_export: string;
 }
@@ -124,9 +123,7 @@ export function AdminSettingsLoadError({
 export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<Record<string, SettingData>>({});
   const [saving, setSaving] = useState(false);
-  const [cleaningUp, setCleaningUp] = useState(false);
-  const [cleanupMessage, setCleanupMessage] = useState('');
-  const [membershipSettings, setMembershipSettings] = useState<Record<string, { historyRetentionDays: number; allowExport: boolean; allowBatchExport: boolean }>>({});
+  const [membershipSettings, setMembershipSettings] = useState<Record<string, { allowExport: boolean; allowBatchExport: boolean }>>({});
 
   const {
     data: dashboard,
@@ -134,11 +131,6 @@ export default function AdminSettingsPage() {
     isLoading,
     refetch: refetchDashboard,
   } = trpc.admin.getSettingsDashboard.useQuery();
-  const {
-    data: cleanupStats,
-    isLoading: cleanupStatsLoading,
-    refetch: refetchCleanupStats,
-  } = trpc.admin.getCleanupStats.useQuery();
   const summaryModels = trpc.settings.getSummaryModels.useQuery();
   const routingModels = trpc.settings.getRoutingModels.useQuery();
   const savedSettings = dashboard?.systemSettings;
@@ -156,25 +148,12 @@ export default function AdminSettingsPage() {
     },
   });
 
-  const cleanupConversations = trpc.admin.cleanupExpiredConversations.useMutation({
-    onSuccess: (result) => {
-      setCleanupMessage(result.message);
-      toast.success(result.message);
-      void refetchCleanupStats();
-    },
-    onError: () => {
-      setCleanupMessage('清理失败，请稍后重试');
-      toast.error('清理失败');
-    },
-  });
-
   // Initialize membership settings from plans
   useEffect(() => {
     if (membershipPlans) {
-      const newSettings: Record<string, { historyRetentionDays: number; allowExport: boolean; allowBatchExport: boolean }> = {};
+      const newSettings: Record<string, { allowExport: boolean; allowBatchExport: boolean }> = {};
       (membershipPlans as MembershipPlan[]).forEach((plan: MembershipPlan) => {
         newSettings[plan.id] = {
-          historyRetentionDays: plan.history_retention_days || 30,
           allowExport: plan.allow_export === 'true',
           allowBatchExport: plan.allow_batch_export === 'true',
         };
@@ -189,19 +168,9 @@ export default function AdminSettingsPage() {
 
     await updateMembershipPlan.mutateAsync({
       id: planId,
-      historyRetentionDays: setting.historyRetentionDays,
       allowExport: setting.allowExport ? 'true' : 'false',
       allowBatchExport: setting.allowBatchExport ? 'true' : 'false',
     });
-  };
-
-  const handleCleanup = async () => {
-    setCleaningUp(true);
-    try {
-      await cleanupConversations.mutateAsync();
-    } finally {
-      setCleaningUp(false);
-    }
   };
 
   // 合并默认设置和已保存的设置
@@ -563,7 +532,7 @@ export default function AdminSettingsPage() {
                   会员等级权限配置
                 </CardTitle>
                 <CardDescription style={{ color: 'var(--text-tertiary)' }}>
-                  配置不同会员等级的对话历史保存时间和导出权限
+                  配置不同会员等级的导出权限
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -576,7 +545,7 @@ export default function AdminSettingsPage() {
                     <a href="/admin/packages" className="ml-1 underline hover:no-underline" style={{ color: 'var(--color-primary)' }}>
                       套餐管理
                     </a>
-                    维护；这里仅负责会员历史保留、导出权限和批量导出策略。运营调整价格或上下架时，请返回套餐管理页面，不要在本页寻找计费入口。
+                    维护；这里仅负责会员导出权限和批量导出策略。运营调整价格或上下架时，请返回套餐管理页面，不要在本页寻找计费入口。
                   </p>
                 </div>
                 {!membershipPlans || (membershipPlans as MembershipPlan[]).length === 0 ? (
@@ -592,7 +561,7 @@ export default function AdminSettingsPage() {
                 ) : (
                   <div className="space-y-6">
                     {(membershipPlans as MembershipPlan[]).map((plan: MembershipPlan) => {
-                      const setting = membershipSettings[plan.id] || { historyRetentionDays: 30, allowExport: false, allowBatchExport: false };
+                      const setting = membershipSettings[plan.id] || { allowExport: false, allowBatchExport: false };
                       const levelColors: Record<string, string> = {
                         free: 'bg-gray-500/20 text-gray-400',
                         pro: 'bg-blue-500/20 text-blue-400',
@@ -625,30 +594,7 @@ export default function AdminSettingsPage() {
                               保存
                             </Button>
                           </div>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                              <Label className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                                <Clock className="h-4 w-4 inline mr-1" />
-                                对话历史保存天数
-                              </Label>
-                              <Input
-                                data-testid={`membership-plan-history-${plan.level}`}
-                                type="number"
-                                min={1}
-                                max={365}
-                                value={setting.historyRetentionDays}
-                                onChange={(e) => {
-                                  setMembershipSettings(prev => ({
-                                    ...prev,
-                                    [plan.id]: { ...prev[plan.id], historyRetentionDays: parseInt(e.target.value) || 30 }
-                                  }));
-                                }}
-                                className="mt-1 bg-[var(--bg-secondary)] border-[var(--border-primary)] text-[var(--text-primary)]"
-                              />
-                              <p className="text-xs mt-1" style={{ color: 'var(--text-disabled)' }}>
-                                超过此天数的对话将被自动清理
-                              </p>
-                            </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                               <Label className="text-sm" style={{ color: 'var(--text-secondary)' }}>
                                 <Download className="h-4 w-4 inline mr-1" />
@@ -695,141 +641,6 @@ export default function AdminSettingsPage() {
                         </div>
                       );
                     })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Cleanup Section */}
-            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                  <Trash2 className="h-5 w-5 text-red-400" />
-                  对话历史清理
-                </CardTitle>
-                <CardDescription style={{ color: 'var(--text-tertiary)' }}>
-                  手动清理超过保存期限的对话历史记录
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div
-                  className="p-4 rounded-lg mb-4"
-                  style={{ background: 'var(--warning-bg)', border: '1px solid var(--warning)' }}
-                >
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className="h-5 w-5 text-amber-400 mt-0.5" />
-                    <div>
-                      <p className="text-sm font-medium" style={{ color: 'var(--warning)' }}>
-                        清理操作不可恢复
-                      </p>
-                      <p className="text-xs mt-1" style={{ color: 'var(--warning)', opacity: 0.8 }}>
-                        此操作将根据各会员等级设置的保存天数，删除所有用户超期的对话及其消息记录
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Stats */}
-                {cleanupStats && (
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-                    {cleanupStats.stats.map((stat) => (
-                      <div
-                        key={stat.level}
-                        className="p-3 rounded-lg"
-                        style={{ background: 'var(--bg-tertiary)' }}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <Badge className={
-                            stat.level === 'free' ? 'bg-gray-500/20 text-gray-400' :
-                            stat.level === 'pro' ? 'bg-blue-500/20 text-blue-400' :
-                            'bg-amber-500/20 text-amber-400'
-                          }>
-                            {stat.level.toUpperCase()}
-                          </Badge>
-                          <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                            {stat.retentionDays}天
-                          </span>
-                        </div>
-                        <p className="text-lg font-bold" style={{ color: stat.expiredCount > 0 ? 'var(--warning)' : 'var(--text-primary)' }}>
-                          {stat.expiredCount} 个过期
-                        </p>
-                      </div>
-                    ))}
-                    <div
-                      className="p-3 rounded-lg border-2"
-                      style={{ background: 'var(--bg-tertiary)', borderColor: cleanupStats.totalExpired > 0 ? 'var(--warning)' : 'var(--border-primary)' }}
-                    >
-                      <p className="text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>待清理总数</p>
-                      <p className="text-2xl font-bold" style={{ color: cleanupStats.totalExpired > 0 ? 'var(--warning)' : 'var(--success)' }}>
-                        {cleanupStats.totalExpired}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex items-center gap-4">
-                  <Button
-                    variant="destructive"
-                    data-testid="admin-settings-cleanup-trigger"
-                    onClick={handleCleanup}
-                    disabled={cleaningUp || cleanupStatsLoading || (cleanupStats?.totalExpired === 0)}
-                    className="bg-red-600 hover:bg-red-700"
-                  >
-                    {cleaningUp ? (
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4 mr-2" />
-                    )}
-                    {cleaningUp ? '清理中...' : '执行清理'}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => void refetchCleanupStats()}
-                    className="border-[var(--border-primary)] text-[var(--text-secondary)]"
-                  >
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    刷新统计
-                  </Button>
-                  {cleanupStatsLoading && (
-                    <div className="flex items-center gap-2 text-[var(--text-tertiary)]">
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      <span className="text-sm">正在加载清理统计...</span>
-                    </div>
-                  )}
-                  {cleanupStats?.totalExpired === 0 && (
-                    <div className="flex items-center gap-2 text-emerald-400">
-                      <CheckCircle className="h-4 w-4" />
-                      <span className="text-sm">暂无需要清理的对话</span>
-                    </div>
-                  )}
-                </div>
-                <div className="mt-3 text-sm" data-testid="admin-settings-cleanup-status" style={{ color: 'var(--text-secondary)' }}>
-                  {cleanupMessage || '尚未执行清理'}
-                </div>
-                {cleanupStats?.latestRun && (
-                  <div
-                    className="mt-2 rounded-lg border px-3 py-3 text-sm"
-                    style={{ background: 'var(--bg-primary)', borderColor: 'rgba(255,255,255,0.08)' }}
-                  >
-                    <div className="flex flex-wrap items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                      <span>最近自动清理：</span>
-                      <Badge className={cleanupStats.latestRun.status === 'success' ? 'bg-emerald-500/20 text-emerald-400' : cleanupStats.latestRun.status === 'error' ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'}>
-                        {cleanupStats.latestRun.status === 'success' ? '成功' : cleanupStats.latestRun.status === 'error' ? '失败' : '执行中'}
-                      </Badge>
-                      <span style={{ color: 'var(--text-tertiary)' }}>
-                        {new Date(cleanupStats.latestRun.started_at).toLocaleString('zh-CN')}
-                      </span>
-                    </div>
-                    {cleanupStats.latestRun.summary?.deletedCount != null && (
-                      <div className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                        自动清理删除了 {cleanupStats.latestRun.summary.deletedCount} 个对话记录
-                      </div>
-                    )}
-                    {cleanupStats.latestRun.error && (
-                      <div className="mt-1 text-red-400">
-                        {getSafeErrorMessage(cleanupStats.latestRun.error, '自动清理失败，请稍后重试。')}
-                      </div>
-                    )}
                   </div>
                 )}
               </CardContent>

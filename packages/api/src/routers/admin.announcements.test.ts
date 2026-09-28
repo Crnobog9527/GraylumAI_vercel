@@ -94,15 +94,34 @@ describe('adminRouter announcement link writes', () => {
     const caller = createAdminCaller(onMutation);
 
     await caller.createAnnouncement({
-      title: 'Homepage announcement',
+      title: 'Banner announcement',
       content: 'Content',
-      announcementType: 'homepage',
       bannerLink: '   ',
     });
 
     expect(onMutation).toHaveBeenCalledWith(
-      expect.objectContaining({ banner_link: null }),
+      expect.objectContaining({ banner_link: null, announcement_type: 'banner' }),
     );
+  });
+
+  it('rejects the retired homepage announcement type', async () => {
+    const onMutation = vi.fn();
+    const caller = createAdminCaller(onMutation);
+
+    await expect(
+      caller.createAnnouncement({
+        title: 'Homepage announcement',
+        content: 'Content',
+        announcementType: 'homepage' as never,
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.updateAnnouncement({
+        id: announcementId,
+        announcementType: 'homepage' as never,
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(onMutation).not.toHaveBeenCalled();
   });
 
   it('writes banner_link as null when explicitly clearing a link', async () => {

@@ -74,7 +74,7 @@ export default function PricingSection({
             </span>
           </h2>
           <p className="mx-auto max-w-3xl text-lg text-[#B0B0B0]">
-            套餐价格与权益直接同步后台会员配置。按月或按年订阅，不同等级对应不同积分额度、历史保留时长和导出能力。
+            套餐价格与权益直接同步后台会员配置。按月或按年订阅，不同等级对应不同积分额度和导出能力。
           </p>
         </div>
 

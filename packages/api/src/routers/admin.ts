@@ -6,17 +6,10 @@ import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
 import { BILLING_CONSTANTS } from '../types/billing';
 import { issueSignedAttachmentUrlsByBatch } from '../lib/ticketAttachments';
-import { ConversationCleanupService } from '../services/conversationCleanup';
 import {
   resolveMembershipEligibility,
   type MembershipEligibilityResult,
 } from '../services/membershipEligibility';
-import {
-  finishScheduledJobRun,
-  getLatestScheduledJobRun,
-  SCHEDULED_JOB_KEYS,
-  startScheduledJobRun,
-} from '../services/scheduledJobRuns';
 
 const promptCategorySchema = z.enum(['writing', 'marketing', 'video', 'business', 'education', 'coding', 'analysis', 'creative', 'other']);
 const promptPlatformSchema = z.enum(['all', 'web', 'mobile', 'desktop', 'api']);
@@ -152,7 +145,6 @@ const adminSettingsMembershipPlanRowSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   level: z.enum(['free', 'pro', 'gold']),
-  history_retention_days: z.number().finite(),
   allow_export: z.enum(['true', 'false']),
   allow_batch_export: z.enum(['true', 'false']),
 }).passthrough();
@@ -1615,9 +1607,11 @@ export const adminRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       const startedAt = Date.now();
+      // Only the site-wide banner is managed; retired homepage rows stay stored but unlisted.
       let query = ctx.supabase
         .from('announcements')
         .select('*', { count: 'planned' })
+        .eq('announcement_type', 'banner')
         .order('priority', { ascending: false })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
@@ -1635,7 +1629,8 @@ export const adminRouter = router({
       // Get stats
       const statsQuery = await ctx.supabase
         .from('announcements')
-        .select('active, type');
+        .select('active, type')
+        .eq('announcement_type', 'banner');
 
       const stats = {
         total: statsQuery.data?.length ?? 0,
@@ -1674,7 +1669,7 @@ export const adminRouter = router({
       title: z.string().min(1).max(200),
       content: z.string().min(1).max(5000),
       type: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).default('info'),
-      announcementType: z.enum(['homepage', 'banner']).default('homepage'),
+      announcementType: z.literal('banner').default('banner'),
       bannerStyle: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
       bannerLink: announcementLinkInputSchema,
       icon: z.string().default('Megaphone'),
@@ -1724,7 +1719,7 @@ export const adminRouter = router({
       title: z.string().min(1).max(200).optional(),
       content: z.string().min(1).max(5000).optional(),
       type: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
-      announcementType: z.enum(['homepage', 'banner']).optional(),
+      announcementType: z.literal('banner').optional(),
       bannerStyle: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
       bannerLink: announcementLinkInputSchema,
       icon: z.string().optional(),
@@ -1787,29 +1782,6 @@ export const adminRouter = router({
       }
 
       return { success: true };
-    }),
-
-  /**
-   * Get active announcements (public, but could be used by admin preview too)
-   */
-  getActiveAnnouncements: adminProcedure
-    .query(async ({ ctx }) => {
-      const now = new Date().toISOString();
-
-      const { data, error } = await ctx.supabase
-        .from('announcements')
-        .select('*')
-        .eq('active', 'true')
-        .lte('start_date', now)
-        .or(`end_date.is.null,end_date.gt.${now}`)
-        .order('priority', { ascending: false })
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        throw createAdminOperationError('读取有效公告', error);
-      }
-
-      return data ?? [];
     }),
 
   // ============================================
@@ -2737,7 +2709,6 @@ export const adminRouter = router({
       monthlyBonusCredits: z.number().int().min(0).optional(),
       packageDiscount: z.number().int().min(0).max(100).optional(),
       features: z.array(z.string()).optional(),
-      historyRetentionDays: z.number().int().min(1).max(365).optional(),
       maxContextMessages: z.number().int().min(5).max(100).optional(), // 上下文消息数限制
       allowExport: z.enum(['true', 'false']).optional(),
       allowBatchExport: z.enum(['true', 'false']).optional(),
@@ -2759,7 +2730,6 @@ export const adminRouter = router({
       if (input.monthlyBonusCredits !== undefined) updateData.monthly_bonus_credits = input.monthlyBonusCredits;
       if (input.packageDiscount !== undefined) updateData.package_discount = input.packageDiscount;
       if (input.features !== undefined) updateData.features = input.features;
-      if (input.historyRetentionDays !== undefined) updateData.history_retention_days = input.historyRetentionDays;
       if (input.maxContextMessages !== undefined) updateData.max_context_messages = input.maxContextMessages;
       if (input.allowExport !== undefined) updateData.allow_export = input.allowExport;
       if (input.allowBatchExport !== undefined) updateData.allow_batch_export = input.allowBatchExport;
@@ -2798,67 +2768,6 @@ export const adminRouter = router({
       }
 
       return { success: true };
-    }),
-
-  /**
-   * Clean up expired conversations based on membership retention settings
-   */
-  cleanupExpiredConversations: adminProcedure
-    .mutation(async ({ ctx }) => {
-      const runId = await startScheduledJobRun({
-        supabase: ctx.supabase,
-        jobKey: SCHEDULED_JOB_KEYS.conversationCleanup,
-        triggerSource: 'manual',
-      });
-
-      try {
-        const service = new ConversationCleanupService({ supabase: ctx.supabase });
-        const result = await service.run();
-
-        await finishScheduledJobRun({
-          supabase: ctx.supabase,
-          runId,
-          status: 'success',
-          summary: {
-            deletedCount: result.deletedCount,
-            stats: result.stats,
-          },
-        });
-
-        return {
-          success: true,
-          deletedCount: result.deletedCount,
-          stats: result.stats,
-          message: `清理完成，已删除 ${result.deletedCount} 个过期对话`,
-        };
-      } catch (error) {
-        await finishScheduledJobRun({
-          supabase: ctx.supabase,
-          runId,
-          status: 'error',
-          error: '自动清理失败，请稍后重试',
-        });
-
-        throw createSafeInternalError(error, '对话清理失败，请稍后重试');
-      }
-    }),
-
-  /**
-   * Get conversation cleanup statistics
-   */
-  getCleanupStats: adminProcedure
-    .query(async ({ ctx }) => {
-      const service = new ConversationCleanupService({ supabase: ctx.supabase });
-      const [{ stats, totalExpired }, latestRun] = await Promise.all([
-        service.getCleanupStats(),
-        getLatestScheduledJobRun(ctx.supabase, SCHEDULED_JOB_KEYS.conversationCleanup),
-      ]);
-
-      return {
-        stats,
-        totalExpired,
-        latestRun,
-      };
     }),
 
   // ============================================

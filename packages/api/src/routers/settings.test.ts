@@ -84,7 +84,6 @@ const validMembershipPlan = {
   monthly_bonus_credits: 100,
   yearly_credits: 12000,
   package_discount: 90,
-  history_retention_days: 30,
   features: ['Feature A'],
   stripe_monthly_price_id: 'price_test_monthly',
   stripe_yearly_price_id: 'price_test_yearly',
