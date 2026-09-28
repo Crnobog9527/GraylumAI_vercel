@@ -77,7 +77,6 @@ function stepsFor(vendor, query) {
 export function planVendor(vendor, queries, secrets = []) {
   const lines = [];
   let worstCaseUsd = 0;
-  if (vendor.blockedReason) return { vendor: vendor.id, lines, worstCaseUsd };
   for (const query of queries) {
     const planned = stepsFor(vendor, query);
     if (planned.notSupported) {
@@ -174,7 +173,8 @@ async function readBalance(context, vendor, key, secrets, label) {
   });
   const result = await callOnce(context.fetchImpl, vendor.authorize(spec, key), vendor.timeoutMs ?? context.timeoutMs);
   const json = parseJson(result.body);
-  await settle(context.ledger, record, { outcome: result.outcome, reportedUsd: 0 });
+  // Only a documented-free balance read books zero; otherwise its worst case stays booked.
+  await settle(context.ledger, record, { outcome: result.outcome, reportedUsd: spec.documentedFree === true ? 0 : null });
   await saveRaw(context, { vendor, query: { id: label }, stepIndex: 0, spec, result, secrets });
   if (result.outcome !== 'ok' || json === undefined) return null;
   const value = vendor.balance.read(json);
