@@ -129,8 +129,8 @@ ORDER BY minute DESC;
 3. Rate limiting → Check rate limiter logs
 
 Code: `apps/web/src/app/api/ai/stream/route.ts:192` (model configuration),
-`:252` (legacy direct credential fallback), `:616`–`:620` (provider/key/endpoint
-selection), `:953` (Gemini branch); `packages/api/src/services/providerUtils.ts:25`
+`:254` (legacy direct credential fallback), `:616`–`:620` (provider/key/endpoint
+selection), `:953` (Gemini branch); `packages/api/src/services/providerUtils.ts:36`
 (model key / OpenRouter key selection).
 
 **Resolution**:
