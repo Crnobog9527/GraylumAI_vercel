@@ -52,6 +52,14 @@ export async function callOnce(fetchImpl, { url, init }, timeoutMs) {
   }
 }
 
+/** The documented variable first, then an explicitly listed alias (e.g. a lower-case name). */
+export function keyFor(vendor, env) {
+  for (const name of [vendor.keyEnv, ...(vendor.keyEnvAliases ?? [])]) {
+    if (typeof env[name] === 'string' && env[name].length > 0) return env[name];
+  }
+  return undefined;
+}
+
 function keyOf(vendorId, spec, scope) {
   try {
     return requestKey(vendorId, spec, scope);
@@ -125,13 +133,15 @@ async function runQuery(context, vendor, query, key, secrets) {
     const spec = typeof step === 'function' ? step(previous) : step;
     if (spec?.skip) return { status: 'NOT_RUN', reason: spec.skip, calls, latencyMs };
     const attemptKey = keyOf(vendor.id, spec);
-    const refused = refusal(context.ledger, limits, spec.worstCaseUsd, { documentedFree: spec.documentedFree === true, key: attemptKey });
+    const refused = refusal(context.ledger, limits, spec.worstCaseUsd,
+      { documentedFree: spec.documentedFree === true, key: attemptKey, retryConfirmedFailures: Boolean(context.retryReason) });
     if (refused === 'ALREADY_ATTEMPTED') return { status: 'NOT_RUN', reason: 'ALREADY_ATTEMPTED_NEEDS_RECONCILIATION', calls, latencyMs };
     if (refused?.startsWith(UNRECONCILED)) return { status: 'NOT_RUN', reason: refused, stopVendor: true, calls, latencyMs };
     if (refused) return { status: 'BUDGET_REFUSED', reason: refused, stopVendor: STOPPING_REFUSALS.has(refused), calls, latencyMs };
     // Booked (and written to disk) before dispatch; a failed write throws and nothing is sent.
     const record = await reserve(context.ledger, {
       vendor: vendor.id, queryId: query.id, step: index, at: context.now().toISOString(), worstCaseUsd: spec.worstCaseUsd, requestKey: attemptKey,
+      ...(context.retryReason ? { retryReason: context.retryReason } : {}),
     });
     const result = await callOnce(context.fetchImpl, vendor.authorize(spec, key), vendor.timeoutMs ?? context.timeoutMs);
     const json = parseJson(result.body);
@@ -192,13 +202,13 @@ function balanceDelta(before, after) {
  * Runs the selected vendors. Without `live` nothing is sent, no ledger entry
  * is written and no file is saved; the plan is returned for printing.
  */
-export async function runComparison({ vendors, queries, env, live, fetchImpl, ledger, outDir, now = () => new Date(), timeoutMs }) {
-  const secrets = vendors.map(vendor => env[vendor.keyEnv]).filter(value => typeof value === 'string' && value.length > 0);
+export async function runComparison({ vendors, queries, env, live, fetchImpl, ledger, outDir, now = () => new Date(), timeoutMs, retryReason = null }) {
+  const secrets = vendors.map(vendor => keyFor(vendor, env)).filter(value => typeof value === 'string' && value.length > 0);
   const generatedAt = now().toISOString();
-  const context = { fetchImpl, ledger, outDir, now, runId: `${generatedAt}#${process.pid}`, timeoutMs: timeoutMs ?? DEFAULT_TIMEOUT_MS };
+  const context = { fetchImpl, ledger, outDir, now, runId: `${generatedAt}#${process.pid}`, timeoutMs: timeoutMs ?? DEFAULT_TIMEOUT_MS, retryReason };
   const report = { generatedAt, mode: live ? 'live' : 'dry-run', vendors: [] };
   for (const vendor of vendors) {
-    const key = env[vendor.keyEnv];
+    const key = keyFor(vendor, env);
     const keyPresent = typeof key === 'string' && key.length > 0;
     const plan = planVendor(vendor, queries, secrets);
     const entry = { id: vendor.id, label: vendor.label, keyPresent, blockedReason: vendor.blockedReason ?? null, plan, queries: [] };

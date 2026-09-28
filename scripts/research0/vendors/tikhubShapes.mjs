@@ -110,16 +110,35 @@ function instagramPost(item) {
   };
 }
 
+function tweet(item) {
+  const legacy = item.legacy ?? item;
+  const id = text(item, ['tweet_id', 'rest_id', 'id_str']) ?? text(legacy, ['id_str']);
+  const handle = text(item, ['author.screen_name', 'user_info.screen_name', 'core.user_results.result.legacy.screen_name', 'screen_name']);
+  return {
+    id,
+    url: id && handle ? `https://x.com/${handle}/status/${id}` : undefined,
+    title: text(item, ['text', 'full_text']) ?? text(legacy, ['full_text', 'text']),
+    author: handle,
+    publishedAt: timestamp(item, ['created_at']) ?? timestamp(legacy, ['created_at']),
+    views: count(item, ['views', 'view_count', 'views.count']),
+    likes: count(item, ['favorites', 'favorite_count', 'likes']) ?? count(legacy, ['favorite_count']),
+    comments: count(item, ['replies', 'reply_count']) ?? count(legacy, ['reply_count']),
+    shares: count(item, ['retweets', 'retweet_count']) ?? count(legacy, ['retweet_count']),
+  };
+}
+
 function profile(object) {
   return {
     id: text(object, ['uid', 'mid', 'rest_id', 'id', 'idstr', 'user_id']),
-    name: text(object, ['nickname', 'name', 'screen_name']),
+    name: text(object, ['nickname', 'name', 'full_name', 'title', 'screen_name']),
     handle: text(object, ['unique_id', 'screen_name', 'username', 'profile']),
-    followers: count(object, ['follower_count', 'followers_count', 'fans', 'follower', 'sub_count', 'legacy.followers_count']),
-    following: count(object, ['following_count', 'friends_count', 'following', 'attention', 'friends', 'legacy.friends_count']),
-    postsCount: count(object, ['aweme_count', 'statuses_count', 'archive_count', 'video_count', 'legacy.statuses_count']),
+    followers: count(object, ['follower_count', 'followers_count', 'fans', 'follower', 'sub_count', 'legacy.followers_count', 'edge_followed_by.count'])
+      ?? displayCount(object, ['subscriber_count']),
+    following: count(object, ['following_count', 'friends_count', 'following', 'attention', 'friends', 'legacy.friends_count', 'edge_follow.count']),
+    postsCount: count(object, ['aweme_count', 'statuses_count', 'archive_count', 'legacy.statuses_count', 'edge_owner_to_timeline_media.count', 'media_count'])
+      ?? displayCount(object, ['video_count']),
     likesTotal: count(object, ['total_favorited', 'likes', 'favourites_count']),
-    bio: text(object, ['signature', 'sign', 'description', 'desc', 'legacy.description']),
+    bio: text(object, ['signature', 'sign', 'description', 'desc', 'biography', 'legacy.description']),
     verified: bool(object, ['verified', 'is_verified', 'is_blue_verified', 'blue_verified']) ?? bilibiliVerified(object),
   };
 }
@@ -130,7 +149,8 @@ function bilibiliVerified(object) {
   return typeof type === 'number' ? type >= 0 : undefined;
 }
 
-const PROFILE_KEYS = ['follower_count', 'followers_count', 'unique_id', 'screen_name', 'mid', 'sign', 'legacy', 'sub_count'];
+const PROFILE_KEYS = ['follower_count', 'followers_count', 'unique_id', 'screen_name', 'mid', 'sign', 'legacy', 'sub_count',
+  'edge_followed_by', 'subscriber_count'];
 
 /** Maps a TikHub-envelope response for one of the RESEARCH-0 queries to normalized items. */
 export function normalizeTikhub(json, query) {
@@ -158,6 +178,8 @@ export function normalizeTikhub(json, query) {
       const posts = findAll(data, object => has(object, 'taken_at', 'taken_at_timestamp') && has(object, 'code', 'shortcode', 'id')).map(instagramPost);
       return posts.filter((post, index) => post.id === undefined || posts.findIndex(other => other.id === post.id) === index);
     }
+    case 'x':
+      return findAll(data, object => has(object, 'tweet_id', 'rest_id', 'id_str') && has(object, 'created_at', 'legacy', 'text')).map(tweet);
     default:
       return [];
   }

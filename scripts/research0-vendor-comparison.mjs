@@ -12,6 +12,9 @@
 // Paid run, keys loaded from the Owner's file without printing it:
 //   node --env-file-if-exists="$HOME/.graylum/secrets/research0.env" \
 //     scripts/research0-vendor-comparison.mjs --confirm-paid-calls [--vendors tikhub] [--queries Q01,Q02]
+// Supplemental query set, and an explicit re-send of confirmed failures (e.g. 402 before a top-up):
+//   ... --confirm-paid-calls --supplemental [--vendors tikhub]
+//   ... --confirm-paid-calls --vendors tikhub --queries Q03 --retry-confirmed-failures "topped up 2026-09-28"
 // Recompute metrics from saved responses (offline, sends nothing):
 //   node scripts/research0-vendor-comparison.mjs --reanalyze [--markdown]
 // monid catalogue phase only (Owner option a; add --confirm-paid-calls to send):
@@ -25,7 +28,7 @@ import { reanalyze } from './research0/analyze.mjs';
 import { formatMarkdown } from './research0/markdown.mjs';
 import { MONID_CATALOG_PLAN, formatMonidCatalog, runMonidCatalog } from './research0/monidCatalog.mjs';
 import { runMonidResults } from './research0/monidResults.mjs';
-import { QUERIES } from './research0/queries.mjs';
+import { QUERIES, SUPPLEMENTAL_QUERIES } from './research0/queries.mjs';
 import { formatReport } from './research0/report.mjs';
 import { runComparison } from './research0/runner.mjs';
 import {
@@ -50,7 +53,7 @@ function pick(all, csv, label) {
 export function parseArgs(argv) {
   const args = {
     live: false, reanalyze: false, markdown: false, monidCatalog: false, initLedger: false, aisaAlternates: false, monidResults: false,
-    reconcile: null, actualUsd: null, note: null,
+    reconcile: null, actualUsd: null, note: null, supplemental: false, retryReason: null,
     vendors: null, queries: null, outDir: DEFAULT_OUT_DIR,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -63,6 +66,8 @@ export function parseArgs(argv) {
     else if (arg === '--aisa-alternates') args.aisaAlternates = true;
     else if (arg === '--monid-results') args.monidResults = true;
     else if (arg === '--reconcile') args.reconcile = value(argv, ++index, arg);
+    else if (arg === '--supplemental') args.supplemental = true;
+    else if (arg === '--retry-confirmed-failures') args.retryReason = value(argv, ++index, arg);
     else if (arg === '--actual-usd') args.actualUsd = Number(value(argv, ++index, arg));
     else if (arg === '--note') args.note = value(argv, ++index, arg);
     else if (arg === '--vendors') args.vendors = value(argv, ++index, arg);
@@ -120,7 +125,7 @@ export async function main(argv = process.argv.slice(2), { env = process.env, fe
   await assertOutsideRepository(args.outDir);
   // --aisa-alternates swaps the vendor list for AIsa's second-round alternate endpoints only.
   const vendors = args.aisaAlternates ? [aisaAlternates] : pick(VENDORS, args.vendors, 'vendor');
-  const queries = pick(QUERIES, args.queries, 'query');
+  const queries = pick(args.supplemental ? SUPPLEMENTAL_QUERIES : QUERIES, args.queries, 'query');
   if (args.live && args.reanalyze) throw new Error('RESEARCH0_REANALYZE_IS_OFFLINE_ONLY');
   if (args.reanalyze) {
     const offline = await reanalyze({ vendors, queries, outDir: args.outDir });
@@ -160,7 +165,7 @@ export async function main(argv = process.argv.slice(2), { env = process.env, fe
       return catalogue;
     }
     log(`RESEARCH-0 PAID RUN; caps ${VENDOR_CAP_USD} USD/vendor, ${TOTAL_CAP_USD} USD total`);
-    const report = await runComparison({ vendors, queries, env, live: true, fetchImpl, ledger, outDir: args.outDir });
+    const report = await runComparison({ vendors, queries, env, live: true, fetchImpl, ledger, outDir: args.outDir, retryReason: args.retryReason });
     log(args.markdown ? formatMarkdown(report, queries) : formatReport(report));
     return report;
   });
