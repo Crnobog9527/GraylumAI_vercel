@@ -132,7 +132,9 @@ export async function runTrial(options: {
     // No parallelToolCalls: no catalogued route of the probed models declares
     // parallel_tool_calls, so with require_parameters every route was ineligible
     // (404). Several tool calls in one turn are counted instead (classify.ts).
-    modelSettings: {store: false, maxTokens: options.maxTokens, retry: {maxRetries: 0}, reasoning: {effort: config.effort}},
+    // A reasoning object travels as provider data; the SDK sends only effort itself.
+    modelSettings: {store: false, maxTokens: options.maxTokens, retry: {maxRetries: 0},
+      ...(config.reasoning ? {providerData: {reasoning: config.reasoning}} : {reasoning: {effort: config.effort}})},
   });
   const runner = new Runner({model, tracingDisabled: true, traceIncludeSensitiveData: false});
   // One turn for ask trials: if the SDK tried to continue after ask_question,
