@@ -51,20 +51,21 @@ describe("checkReasoningConfig", () => {
     expect(codes(value)).toEqual(expected);
   });
 
-  it("accepts an endpoint tag or a provider slug, requiring every reachable endpoint to support the choice", () => {
+  it("uses the full endpoint tag as the route, exactly as a quote's providerSlug writes it", () => {
+    // Staging quotes name one endpoint, e.g. deepseek on deepinfra/fp8 (#475, STG-CONFIG).
     const variants = catalog({ endpoints: [
       { tag: "deepinfra/fp8", providerName: "DeepInfra", supportedParameters: ["tools", "reasoning_effort"], contextLength: 1, maxCompletionTokens: 1 },
       { tag: "deepinfra/bf16", providerName: "DeepInfra", supportedParameters: ["tools"], contextLength: 1, maxCompletionTokens: 1 },
-      { tag: "sail-research/fp4", providerName: "Sail", supportedParameters: ["tools", "reasoning_effort"], contextLength: 1, maxCompletionTokens: 1 },
     ] });
     const off = { interactive: { mode: "off", wire: "reasoning_effort" } } as const;
-    expect(codes(config({ catalog: variants, route: "sail-research", purposes: off }))).toEqual([]);
-    // The staging quote names the exact endpoint (deepinfra/fp8); only that endpoint is checked.
-    expect(codes(config({ catalog: variants, route: "deepinfra/fp8", purposes: off }))).toEqual([]);
-    // The provider slug reaches both endpoints; one of them lacks reasoning_effort.
-    expect(codes(config({ catalog: variants, route: "deepinfra", purposes: off }))).toEqual(["ROUTE_PARAMETER_UNSUPPORTED"]);
-    expect(codes(config({ catalog: variants, route: "deepinfra/int4", purposes: off }))).toEqual(["ROUTE_UNKNOWN"]);
-    expect(codes(config({ catalog: variants, route: "deep", purposes: off }))).toEqual(["ROUTE_UNKNOWN"]);
+    const quote = { providerSlug: "deepinfra/fp8" };
+    const value = config({ catalog: variants, route: quote.providerSlug, purposes: off });
+    expect(codes(value)).toEqual([]);
+    expect(value.route === quote.providerSlug).toBe(true);
+    // Checks read only the chosen endpoint; another variant of the same provider is its own route.
+    expect(codes(config({ catalog: variants, route: "deepinfra/bf16", purposes: off }))).toEqual(["ROUTE_PARAMETER_UNSUPPORTED"]);
+    // A base provider name is not an endpoint tag.
+    expect(codes(config({ catalog: variants, route: "deepinfra", purposes: off }))).toEqual(["ROUTE_UNKNOWN"]);
   });
 
   it("refuses to disable thinking where the catalog marks it mandatory", () => {
