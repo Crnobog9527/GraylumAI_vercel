@@ -73,6 +73,7 @@ describe('diagnostics privileged client separation', () => {
     const userFrom = vi.fn(() => ({
       select: vi.fn(() => ({
         order: vi.fn().mockResolvedValue({ data: [], error: null }),
+        limit: vi.fn().mockResolvedValue({ data: [], error: null }),
       })),
       insert: vi.fn().mockResolvedValue({ error: null }),
     }));
@@ -96,12 +97,10 @@ describe('diagnostics privileged client separation', () => {
     await service.getLatestResults();
     const billingResult = await service.runSingleTest('billing_prededuct');
 
-    expect(billingResult?.status).toBe('passed');
+    expect(billingResult?.status).toBe('warning');
     expect(adminRpc.mock.calls.map(([name]) => name)).toEqual([
       'get_test_history',
       'get_diagnostic_summary',
-      'atomic_pre_deduct',
-      'atomic_refund',
     ]);
     expect(userRpc).not.toHaveBeenCalled();
     expect(userFrom).toHaveBeenCalledWith('diagnostic_latest_results');
@@ -153,6 +152,10 @@ function createRoutedDiagnosticsCaller() {
 
     if (table === 'diagnostic_latest_results') {
       return createLatestResultsQueryBuilder();
+    }
+
+    if (table === 'billing_history') {
+      return { select: () => ({ limit: async () => ({ data: [], error: null }) }) };
     }
 
     if (table === 'diagnostic_results') {
@@ -228,7 +231,7 @@ describe('diagnostics routed client contract', () => {
 
     await expect(caller.getLatestResults()).resolves.toEqual([]);
     await expect(caller.runSingleTest({ testId: 'billing_prededuct' })).resolves.toMatchObject({
-      status: 'passed',
+      status: 'warning',
     });
 
     expect(userFrom).toHaveBeenCalledWith('profiles');
@@ -237,8 +240,6 @@ describe('diagnostics routed client contract', () => {
     expect(userRpc).not.toHaveBeenCalled();
     expect(adminFrom).not.toHaveBeenCalled();
     expect(adminRpc.mock.calls.map(([name]) => name)).toEqual([
-      'atomic_pre_deduct',
-      'atomic_refund',
     ]);
     expect(diagnosticInsert).toHaveBeenCalledTimes(1);
   });
@@ -264,5 +265,37 @@ describe('diagnostics routed client contract', () => {
     expect(cronSource).toContain(
       'new DiagnosticsService({\n      supabase,\n      supabaseAdmin: supabase,',
     );
+  });
+});
+
+describe('billing diagnostic service uses only real read paths', () => {
+  it.each(['healthy', 'query failure', 'mismatch'] as const)('runs all three probes: %s', async mode => {
+    const writes: string[] = [];
+    const rpc = vi.fn(async (name: string) => {
+      if (name !== 'research_billing_summary') throw new Error('Mutating RPC is forbidden');
+      return { data: { count: 0, credits: 0 }, error: null };
+    });
+    const from = vi.fn((table: string) => {
+      if (table === 'diagnostic_results') return { insert: async () => { writes.push(table); return { error: null }; } };
+      const response = { data: mode === 'mismatch' && table === 'ai_usage_logs' ? [{ status: 'success' }] : [],
+        error: mode === 'query failure' && table === 'billing_history' ? { message: 'synthetic read failure' } : null };
+      const builder = {
+        select() { return this; }, eq() { return this; }, gte() { return this; }, lt() { return this; },
+        limit() { return Promise.resolve(response); },
+        maybeSingle() { return Promise.resolve({ data: { value: '2026-01-01T00:00:00Z' }, error: null }); },
+        then(resolve: (value: unknown) => unknown) { return Promise.resolve(response).then(resolve); },
+      };
+      return builder;
+    });
+    const adminRpc = vi.fn(() => { throw new Error('No privileged billing mutations allowed'); });
+    const service = new DiagnosticsService({ supabase: { from, rpc } as never,
+      supabaseAdmin: { from, rpc: adminRpc } as never, userId: 'synthetic-admin' });
+    const result = await service.runCategoryTests('billing');
+    expect(result.results.map(r => r.status)).toEqual(mode === 'query failure'
+      ? ['failed', 'failed', 'failed'] : ['warning', 'warning', mode === 'mismatch' ? 'failed' : 'passed']);
+    expect(adminRpc).not.toHaveBeenCalled();
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual(['research_billing_summary']);
+    expect(writes).toEqual(['diagnostic_results']);
+    expect(result.saveStatus?.saved).toBe(true);
   });
 });

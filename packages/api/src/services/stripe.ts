@@ -3,13 +3,13 @@
  * All rights reserved.
  * This code is proprietary and confidential.
  */
-
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
 import { isIP } from 'node:net';
 import { TRPCError } from '@trpc/server';
 import { ensureWorkspaceServerEnv } from '../lib/serverEnv';
 import { checkRateLimit } from './redisRateLimiter';
+import { RateLimitError } from '../lib/rateLimitError';
 
 // Reuse the existing distributed windows with checkout-specific key namespaces:
 // 5 per user / 5 minutes, 20 per IP / minute. No in-memory fallback for payments.
@@ -37,14 +37,14 @@ async function assertPaymentRateLimit(userId: string, headers: Headers, namespac
     [`${namespace}:ip:${normalizedIp}`, 'anonymous'],
   ] as const) {
     const result = await checkRateLimit(key, type).catch(() => {
-      throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: '支付限流服务暂不可用，请稍后重试' });
+      throw new RateLimitError('unavailable');
     });
-    // The shared service reports limit=0 when it falls back to fail-open.
+    // Invalid allowance data cannot authorize payment requests.
     if (!Number.isFinite(result.limit) || result.limit <= 0 || result.reason === 'unavailable') {
-      throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: '支付限流服务暂不可用，请稍后重试' });
+      throw new RateLimitError('unavailable', result.retryAfter);
     }
     if (!result.success) {
-      throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: '支付请求过于频繁，请稍后重试' });
+      throw new RateLimitError('rate_limited', result.retryAfter);
     }
   }
 }

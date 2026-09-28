@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import { TRPCError } from '@trpc/server';
+import { RateLimitError } from '../lib/rateLimitError';
 const mocked = vi.hoisted(() => ({ quote: vi.fn() }));
 vi.mock('../services/artifacts/generation', async importOriginal => ({
   ...await importOriginal<typeof import('../services/artifacts/generation')>(),
@@ -23,4 +24,10 @@ describe('workbench preflight error transport',()=>{
     mocked.quote.mockRejectedValueOnce(new Error('private internal diagnostic'));
     await expect(caller().generationQuote(input)).rejects.toMatchObject({code:'SERVICE_UNAVAILABLE',message:'工作台服务未配置或暂时不可用，请稍后重试。'});
   });
+});
+
+it('preserves a rate-limit backend failure and retry hint', async () => {
+  const error = new RateLimitError('unavailable', 60);
+  mocked.quote.mockRejectedValueOnce(error);
+  await expect(caller().generationQuote(input)).rejects.toBe(error);
 });
