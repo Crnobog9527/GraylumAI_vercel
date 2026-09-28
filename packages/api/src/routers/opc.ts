@@ -3,6 +3,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
 import {loadStagingPolicy,assertStagingReadAccess} from '../services/runtime/stagingPolicy';
+import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} from '../services/runtime/executionStream';
 import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from '../services/runtime/stagingErrors';
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
 import {
@@ -38,16 +39,15 @@ const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
     if (!local) real = await loadStagingPolicy(ctx.supabaseAdmin, ctx.user.id, process.env);
   } catch (cause) { throw stagingProcedureError(cause, path); }
   ctx.runtimeBudget?.timing?.enter('host');
-  const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin, real) } });
-  if (!result.ok) {
-    // Existing bounded OPC refusal codes are part of client recovery. Preserve
-    // them; typed staging/database failures and unexpected exceptions are mapped.
-    const cause = result.error.cause;
-    if (!(cause instanceof Error && cause.constructor === Error && /^OPC_[A-Z_]+$/.test(cause.message)))
-      throw stagingProcedureError(result.error, path);
-  }
+  const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin, real), stagingPolicy: real } });
+  if (!result.ok && !isOpcRefusal(result.error.cause)) throw stagingProcedureError(result.error, path);
   return result;
 });
+// Existing bounded OPC refusal codes are part of client recovery. Preserve
+// them; typed staging/database failures and unexpected exceptions are mapped.
+function isOpcRefusal(cause: unknown): cause is Error {
+  return cause instanceof Error && cause.constructor === Error && /^OPC_[A-Z_]+$/.test(cause.message);
+}
 const readProcedure = protectedProcedure.use(async ({ ctx, next, path }) => {
   ctx.runtimeBudget?.timing?.enter('policy');
   let local = false;
@@ -70,6 +70,42 @@ export const opcRouter = router({
   prepareStep: procedure
     .input(opcGenerate)
     .mutation(({ ctx, input }) => ctx.opc.prepareStep(input)),
+  // One streamed request per mentor turn (AC-1): the unchanged prepareStep
+  // admission, an `admitted` event with the execution id, then the same
+  // original execution and progress delivery as runtime.executeStream.
+  // Replay, reservation and replay-only recovery are those two paths'.
+  mentorTurnStream: procedure
+    .input(opcGenerate)
+    .mutation(async function* ({ ctx, input, path }) {
+      // The route returns before this stream ends; release this stream's reference.
+      const timing = ctx.runtimeBudget?.timing;
+      try {
+        let admitted: { executionId: string };
+        let maintenanceEndpoint: string | undefined;
+        try {
+          if (input.purpose !== "mentor") throw new Error("OPC_STEP_DENIED");
+          // Same executor host as runtime.executeStream, resolved before any
+          // admission exists. A loaded Staging policy already proved enabled
+          // window access for this actor, which implies the read access check.
+          if (!ctx.stagingPolicy) {
+            try { maintenanceEndpoint = runtimeLocalEndpoint(); }
+            catch { await assertStagingReadAccess(ctx.supabaseAdmin, ctx.user.id, process.env); }
+          }
+          const prepare = () => ctx.opc.prepareStep(input);
+          admitted = z.object({ executionId: z.string().uuid() }).passthrough()
+            .parse(timing ? await timing.run(prepare) : await prepare());
+        } catch (cause) {
+          throw isOpcRefusal(cause) ? cause : stagingProcedureError(cause, path);
+        }
+        yield { type: "admitted" as const, executionId: admitted.executionId };
+        yield* streamOriginalExecution((onProgress) => executeOriginalExecution({
+          admin: ctx.supabaseAdmin, user: ctx.userScopedSupabase, actorId: ctx.user.id, budget: ctx.runtimeBudget,
+          authorization: ctx.headers?.get("Authorization"), maintenanceEndpoint,
+        }, admitted.executionId, onProgress), timing, path);
+      } finally {
+        timing?.release();
+      }
+    }),
   saveResult: procedure
     .input(opcSaveResult)
     .mutation(({ ctx, input }) => ctx.opc.saveResult(input)),
