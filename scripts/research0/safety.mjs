@@ -260,7 +260,9 @@ export function refusal(ledger, limits, worstCaseUsd, { documentedFree = false, 
   // An explicit retry is allowed only when every earlier attempt was a confirmed,
   // settled failure (e.g. HTTP 402 before a top-up); anything else stays blocked.
   const onlyConfirmedFailures = earlier.every(entry => entry.state === 'settled' && entry.outcome === 'failed' && !entry.reconciled);
-  if (earlier.length > 0 && !(retryConfirmedFailures && onlyConfirmedFailures)) return 'ALREADY_ATTEMPTED';
+  // Each request may be re-sent through the switch at most once.
+  const alreadyRetried = earlier.some(entry => entry.retryReason !== undefined);
+  if (earlier.length > 0 && !(retryConfirmedFailures && onlyConfirmedFailures && !alreadyRetried)) return 'ALREADY_ATTEMPTED';
   if (!Number.isFinite(worstCaseUsd) || worstCaseUsd < 0) return 'PRICE_UNKNOWN';
   if (worstCaseUsd === 0 && !documentedFree) return 'PRICE_UNKNOWN';
   const used = vendorUsage(ledger, limits.vendorId);

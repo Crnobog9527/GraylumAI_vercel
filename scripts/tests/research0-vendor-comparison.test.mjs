@@ -638,6 +638,16 @@ test('confirmed failures may be re-sent only with an explicit reason; anything e
   await runComparison({ vendors: [vendor], queries: [queries[0]], env: { FAKE_KEY: KEY }, live: true, fetchImpl: again.fetchImpl,
     ledger, outDir: dir, timeoutMs: 200, retryReason: 'again' });
   assert.equal(again.calls.length, 0, 'a request that has succeeded is never re-sent');
+  const twice = fakeVendor({ id: 'twice', steps: () => [{ method: 'GET', url: 'https://api.example.test/twice', worstCaseUsd: 0.1 }] });
+  const failing = () => recordingFetch(() => new Response('{"code":400}', { status: 400 }));
+  await run(dir, { vendor: twice, fetchImpl: failing().fetchImpl, qs: [queries[0]], ledger });
+  const firstRetry = failing();
+  await runComparison({ vendors: [twice], queries: [queries[0]], env: { FAKE_KEY: KEY }, live: true, fetchImpl: firstRetry.fetchImpl,
+    ledger, outDir: dir, timeoutMs: 200, retryReason: 'retry 1' });
+  const secondRetry = failing();
+  await runComparison({ vendors: [twice], queries: [queries[0]], env: { FAKE_KEY: KEY }, live: true, fetchImpl: secondRetry.fetchImpl,
+    ledger, outDir: dir, timeoutMs: 200, retryReason: 'retry 2' });
+  assert.deepEqual([firstRetry.calls.length, secondRetry.calls.length], [1, 0], 'at most one re-send per request through the switch');
   const shaky = fakeVendor({ id: 'shaky', steps: () => [{ method: 'GET', url: 'https://api.example.test/x', worstCaseUsd: 0.1 }] });
   const lost = recordingFetch(() => { throw new TypeError('reset'); });
   await run(dir, { vendor: shaky, fetchImpl: lost.fetchImpl, qs: [queries[0]], ledger });
