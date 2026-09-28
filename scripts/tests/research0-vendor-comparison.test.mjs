@@ -6,9 +6,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { assertOutsideRepository, main, parseArgs } from '../research0-vendor-comparison.mjs';
 import { count, summarize, timestamp } from '../research0/metrics.mjs';
-import { QUERIES } from '../research0/queries.mjs';
+import { QUERIES, SUPPLEMENTAL_QUERIES } from '../research0/queries.mjs';
 import { formatReport } from '../research0/report.mjs';
-import { runComparison } from '../research0/runner.mjs';
+import { keyFor, runComparison } from '../research0/runner.mjs';
 import { TOTAL_CAP_USD, acquireLock, initLedger, loadLedger, reconcileAttempt, redactUrl, refusal, requestKey } from '../research0/safety.mjs';
 import { VENDORS } from '../research0/vendors.mjs';
 import { displayCount, normalizeTikhub, tikhubFailed } from '../research0/vendors/tikhubShapes.mjs';
@@ -618,6 +618,104 @@ test('reconcile marks exactly one ambiguous entry, sends nothing and validates i
   await assert.rejects(cli(['--reconcile', key.slice(0, 12), '--actual-usd', '0', '--note', 'x', '--confirm-paid-calls']), /SENDS_NOTHING/);
   assert.equal(fetched, 0);
   assert.ok(logs.some(line => line.includes('reconciled vendor=fake')));
+}));
+
+test('confirmed failures may be re-sent only with an explicit reason; anything else stays blocked', async () => withTemp(async dir => {
+  const vendor = fakeVendor({ steps: query => [{ method: 'GET', url: `https://api.example.test/${query.id}`, worstCaseUsd: 0.1 }] });
+  const first = recordingFetch(() => new Response('{"code":402}', { status: 402 }));
+  const { ledger } = await run(dir, { vendor, fetchImpl: first.fetchImpl, qs: [queries[0]] });
+  const plain = recordingFetch(() => okBody());
+  const blocked = await run(dir, { vendor, fetchImpl: plain.fetchImpl, qs: [queries[0]], ledger });
+  assert.equal(plain.calls.length, 0);
+  assert.equal(blocked.report.vendors[0].queries[0].reason, 'ALREADY_ATTEMPTED_NEEDS_RECONCILIATION');
+  const retry = recordingFetch(() => okBody());
+  const retried = await runComparison({ vendors: [vendor], queries: [queries[0]], env: { FAKE_KEY: KEY }, live: true, fetchImpl: retry.fetchImpl,
+    ledger, outDir: dir, timeoutMs: 200, retryReason: 'topped up' });
+  assert.equal(retry.calls.length, 1);
+  assert.equal(retried.vendors[0].queries[0].status, 'OK');
+  assert.equal(ledger.entries.at(-1).retryReason, 'topped up');
+  const again = recordingFetch(() => okBody());
+  await runComparison({ vendors: [vendor], queries: [queries[0]], env: { FAKE_KEY: KEY }, live: true, fetchImpl: again.fetchImpl,
+    ledger, outDir: dir, timeoutMs: 200, retryReason: 'again' });
+  assert.equal(again.calls.length, 0, 'a request that has succeeded is never re-sent');
+  const twice = fakeVendor({ id: 'twice', steps: () => [{ method: 'GET', url: 'https://api.example.test/twice', worstCaseUsd: 0.1 }] });
+  const failing = () => recordingFetch(() => new Response('{"code":400}', { status: 400 }));
+  await run(dir, { vendor: twice, fetchImpl: failing().fetchImpl, qs: [queries[0]], ledger });
+  const firstRetry = failing();
+  await runComparison({ vendors: [twice], queries: [queries[0]], env: { FAKE_KEY: KEY }, live: true, fetchImpl: firstRetry.fetchImpl,
+    ledger, outDir: dir, timeoutMs: 200, retryReason: 'retry 1' });
+  const secondRetry = failing();
+  await runComparison({ vendors: [twice], queries: [queries[0]], env: { FAKE_KEY: KEY }, live: true, fetchImpl: secondRetry.fetchImpl,
+    ledger, outDir: dir, timeoutMs: 200, retryReason: 'retry 2' });
+  assert.deepEqual([firstRetry.calls.length, secondRetry.calls.length], [1, 0], 'at most one re-send per request through the switch');
+  const fresh = fakeVendor({ id: 'fresh', steps: () => [{ method: 'GET', url: 'https://api.example.test/fresh', worstCaseUsd: 0.1 }] });
+  await runComparison({ vendors: [fresh], queries: [queries[0]], env: { FAKE_KEY: KEY }, live: true, fetchImpl: failing().fetchImpl,
+    ledger, outDir: dir, timeoutMs: 200, retryReason: 'switch on for a first attempt' });
+  assert.equal(ledger.entries.at(-1).retryReason, undefined, 'a first attempt is not a re-send');
+  const freshRetry = failing();
+  await runComparison({ vendors: [fresh], queries: [queries[0]], env: { FAKE_KEY: KEY }, live: true, fetchImpl: freshRetry.fetchImpl,
+    ledger, outDir: dir, timeoutMs: 200, retryReason: 'real retry' });
+  assert.equal(freshRetry.calls.length, 1, 'the promised single re-send is still available');
+  const shaky = fakeVendor({ id: 'shaky', steps: () => [{ method: 'GET', url: 'https://api.example.test/x', worstCaseUsd: 0.1 }] });
+  const lost = recordingFetch(() => { throw new TypeError('reset'); });
+  await run(dir, { vendor: shaky, fetchImpl: lost.fetchImpl, qs: [queries[0]], ledger });
+  const after = recordingFetch(() => okBody());
+  await runComparison({ vendors: [shaky], queries: [queries[0]], env: { FAKE_KEY: KEY }, live: true, fetchImpl: after.fetchImpl,
+    ledger, outDir: dir, timeoutMs: 200, retryReason: 'nope' });
+  assert.equal(after.calls.length, 0, 'unknown outcomes are never covered by the retry switch');
+}));
+
+test('a documented alias key is used and redacted like the primary name', async () => withTemp(async dir => {
+  const vendor = fakeVendor({ keyEnv: 'PRIMARY_KEY', keyEnvAliases: ['primary_alias'] });
+  assert.equal(keyFor(vendor, { primary_alias: KEY }), KEY);
+  assert.equal(keyFor(vendor, { PRIMARY_KEY: 'p', primary_alias: KEY }), 'p');
+  const { fetchImpl } = recordingFetch(url => new Response(JSON.stringify({ items: [], echo: url })));
+  const { report } = await run(dir, { vendor, fetchImpl, env: { primary_alias: KEY }, qs: [queries[0]] });
+  assert.equal(report.vendors[0].keyPresent, true);
+  for (const file of await filesUnder(dir)) assert.ok(!(await readFile(file, 'utf8')).includes(KEY), file);
+}));
+
+test('supplemental plans stay within every vendor cap and never touch social platforms with fetch', () => {
+  for (const vendor of VENDORS) {
+    const steps = SUPPLEMENTAL_QUERIES.flatMap(query => {
+      const planned = vendor.steps(query);
+      return Array.isArray(planned) ? planned : [];
+    });
+    assert.ok(steps.reduce((total, step) => total + step.worstCaseUsd, 0) <= 1, vendor.id);
+  }
+  for (const query of SUPPLEMENTAL_QUERIES.filter(item => item.type === 'fetch')) {
+    assert.ok(!/tiktok|douyin|instagram|x\.com|twitter|youtube|xiaohongshu|weibo|bilibili/.test(query.url), query.url);
+  }
+});
+
+test('a paid run sends exactly the requests its dry-run plan lists, balance reads included', async () => withTemp(async dir => {
+  const balance = { spec: () => ({ method: 'GET', url: 'https://api.example.test/balance', worstCaseUsd: 0, documentedFree: true }), read: () => 1 };
+  const busy = fakeVendor({ id: 'busy', balance, steps: query => [{ method: 'GET', url: `https://api.example.test/q/${query.id}`, worstCaseUsd: 0.1 }] });
+  const idle = fakeVendor({ id: 'idle', keyEnv: 'IDLE_KEY', balance, steps: () => ({ notSupported: 'nothing to run' }) });
+  const env = { FAKE_KEY: KEY, IDLE_KEY: 'k2' };
+  const planned = (await runComparison({ vendors: [busy, idle], queries, env, live: false, ledger: { entries: [] }, outDir: dir }))
+    .vendors.flatMap(vendor => vendor.plan.lines.filter(line => !line.notSupported).map(line => `${line.method} ${line.url}`));
+  const { calls, fetchImpl } = recordingFetch(url => (url.endsWith('/balance') ? new Response('{}') : okBody()));
+  await run(dir, { vendor: busy, fetchImpl, env, qs: queries });
+  const idleRun = recordingFetch(() => okBody());
+  await runComparison({ vendors: [idle], queries, env, live: true, fetchImpl: idleRun.fetchImpl,
+    ledger: await loadLedger(path.join(dir, 'ledger.json')), outDir: dir, timeoutMs: 200 });
+  assert.deepEqual(calls.map(call => `${call.init.method} ${call.url}`), planned);
+  assert.equal(idleRun.calls.length, 0, 'a vendor with nothing runnable sends nothing, not even a balance read');
+}));
+
+test('without --vendors only the Owner-kept vendors run; excluded ones must be named', async () => withTemp(async dir => {
+  const ids = async argv => (await main([...argv, '--out', dir], { env: {}, fetchImpl: async () => { throw new Error('no network'); }, log: () => {} }))
+    .vendors.map(vendor => vendor.id);
+  assert.deepEqual(await ids([]), ['tikhub', 'tavily', 'firecrawl']);
+  assert.deepEqual(await ids(['--supplemental']), ['tikhub', 'firecrawl']);
+  assert.deepEqual(await ids(['--vendors', 'monid,tinyfish']), ['tinyfish', 'monid']);
+  assert.deepEqual(await ids(['--reanalyze']), VENDORS.map(vendor => vendor.id), 'offline reanalysis keeps every vendor');
+  const offline = await main(['--reanalyze', '--out', dir], { log: () => {} });
+  assert.deepEqual(offline.vendors[0].queries.map(query => query.queryId),
+    [...QUERIES, ...SUPPLEMENTAL_QUERIES].map(query => query.id), 'offline reanalysis keeps both query sets');
+  const scoped = await main(['--reanalyze', '--supplemental', '--out', dir], { log: () => {} });
+  assert.deepEqual(scoped.vendors[0].queries.map(query => query.queryId), SUPPLEMENTAL_QUERIES.map(query => query.id));
 }));
 
 test('application code never imports the comparison script', () => {

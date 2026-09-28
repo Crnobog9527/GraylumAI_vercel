@@ -33,6 +33,20 @@ export const TIKHUB_PATHS = {
   Q10: ['GET', '/instagram/v2/fetch_user_posts', { username: 'natgeo' }],
 };
 
+// Supplemental round after the Owner's top-up (2026-09-28). Prices from TikHub's price list.
+export const TIKHUB_SUPPLEMENTAL = {
+  S01: ['POST', '/douyin/search/fetch_video_search_v2', { keyword: '露营装备', cursor: 0, sort_type: '0', publish_time: '0',
+    filter_duration: '0', content_type: '0', search_id: '', backtrace: '' }, 0.01],
+  S02: ['GET', '/tiktok/app/v3/fetch_user_post_videos', { unique_id: 'natgeo', max_cursor: 0, count: 20, sort_type: 0 }, 0.001],
+  S03: ['GET', '/youtube/web_v2/get_channel_description', { channel_id: 'UCLA_DiR1FfKNvjuUpBHmylQ', language_code: 'en', country_code: 'US' }, 0.001],
+  S04: ['GET', '/youtube/web_v2/get_general_search_v2', { keyword: 'camping gear', type: 'video' }, 0.002],
+  S05: ['GET', '/instagram/v1/fetch_user_info_by_username', { username: 'natgeo' }, 0.001],
+  S06: ['GET', '/instagram/v2/search_reels', { keyword: 'camping gear' }, 0.002],
+  S07: ['GET', '/twitter/web/fetch_user_post_tweet', { screen_name: 'NASA' }, 0.001],
+  S08: ['GET', '/twitter/web/fetch_search_timeline', { keyword: 'camping gear', search_type: 'Latest' }, 0.001],
+  S09: ['GET', '/instagram/v3/get_user_posts', { username: 'natgeo', first: 12 }, 0.008],
+};
+
 // Listed TikHub prices (USD per successful call). Q02 v5 and Q06 app/v3 are not
 // in the list we read; AIsa's resale price / 1.45 gives 0.01 and 0.001, and a
 // larger margin covers that inference.
@@ -43,10 +57,17 @@ export const tikhub = {
   id: 'tikhub',
   label: 'TikHub',
   keyEnv: 'TIKHUB_API_KEY',
-  maxCalls: 12,
+  // 9 + 2 balance reads in the first round; the supplemental round adds up to 9 + 5 retries + 2 balance reads.
+  maxCalls: 30,
   maxUsd: 1,
   timeoutMs: 60_000,
   steps(query) {
+    const extra = TIKHUB_SUPPLEMENTAL[query.id];
+    if (extra) {
+      const [method, pathname, params, listed] = extra;
+      return [method === 'POST' ? post(`/api/v1${pathname}`, params, listed, 3) : get(`/api/v1${pathname}`, params, listed, 3)];
+    }
+    if (query.type === 'fetch') return { notSupported: 'TikHub has no web page fetch endpoint' };
     const route = TIKHUB_PATHS[query.id];
     if (!route) return { notSupported: 'TikHub has no general web search endpoint' };
     const [method, pathname, params] = route;

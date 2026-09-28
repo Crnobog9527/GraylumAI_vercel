@@ -15,6 +15,7 @@ export const tinyfish = {
   maxUsd: 1,
   timeoutMs: 30_000,
   steps(query) {
+    if (!query.webQuery) return { notSupported: 'not in the TinyFish test plan' };
     const url = new URL(SEARCH);
     url.searchParams.set('query', query.webQuery);
     if (query.region === 'cn') url.searchParams.set('language', 'zh');
