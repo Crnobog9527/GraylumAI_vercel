@@ -138,7 +138,9 @@ export async function main(argv = process.argv.slice(2), { env = process.env, fe
   await assertOutsideRepository(args.outDir);
   // --aisa-alternates swaps the vendor list for AIsa's second-round alternate endpoints only.
   const vendors = args.aisaAlternates ? [aisaAlternates] : selectVendors(args);
-  const queries = pick(args.supplemental ? SUPPLEMENTAL_QUERIES : QUERIES, args.queries, 'query');
+  // Offline re-analysis sends nothing, so by default it covers both query sets' saved results.
+  const querySet = args.supplemental ? SUPPLEMENTAL_QUERIES : args.reanalyze ? [...QUERIES, ...SUPPLEMENTAL_QUERIES] : QUERIES;
+  const queries = pick(querySet, args.queries, 'query');
   if (args.live && args.reanalyze) throw new Error('RESEARCH0_REANALYZE_IS_OFFLINE_ONLY');
   if (args.reanalyze) {
     const offline = await reanalyze({ vendors, queries, outDir: args.outDir });

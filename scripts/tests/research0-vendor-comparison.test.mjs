@@ -711,6 +711,11 @@ test('without --vendors only the Owner-kept vendors run; excluded ones must be n
   assert.deepEqual(await ids(['--supplemental']), ['tikhub', 'firecrawl']);
   assert.deepEqual(await ids(['--vendors', 'monid,tinyfish']), ['tinyfish', 'monid']);
   assert.deepEqual(await ids(['--reanalyze']), VENDORS.map(vendor => vendor.id), 'offline reanalysis keeps every vendor');
+  const offline = await main(['--reanalyze', '--out', dir], { log: () => {} });
+  assert.deepEqual(offline.vendors[0].queries.map(query => query.queryId),
+    [...QUERIES, ...SUPPLEMENTAL_QUERIES].map(query => query.id), 'offline reanalysis keeps both query sets');
+  const scoped = await main(['--reanalyze', '--supplemental', '--out', dir], { log: () => {} });
+  assert.deepEqual(scoped.vendors[0].queries.map(query => query.queryId), SUPPLEMENTAL_QUERIES.map(query => query.id));
 }));
 
 test('application code never imports the comparison script', () => {
