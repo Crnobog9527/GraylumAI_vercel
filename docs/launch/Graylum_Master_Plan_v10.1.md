@@ -113,7 +113,7 @@ progress_refresh_v10_1:
 - 生产 `modules`=8 全 active 全空 prompt（→D9）；**staging 库缺 `claim_daily_checkin` 函数、`application_logs` 与 `diagnostic_results` 表**（→STG-FIX）。
 - 计费类 Vercel cron 在生产**零执行记录**；Vercel、Supabase 均免费版；泄露密码保护关闭；SMTP 高度疑似默认。
 - Stripe live 已完成商业验证可收款；域名 graylum.com/app/www 绑生产项目；Node 24.x 两端一致。
-- **生产与 staging 是两个独立数据库**（fhmshnqjjnnlvplojktv / gvcpmcunmfrbxuwimxfa）：staging 建的任何数据不会出现在生产。
+- **生产与 staging 是两个独立数据库**（正式项目 / staging 项目）：staging 建的任何数据不会出现在生产。
 
 ---
 
@@ -317,7 +317,7 @@ progress_refresh_v10_1:
 > Resend 已注册验证，B-3 的 DNS 风险已提前消化，剩余只需一次真实投递实测。
 
 **C. 生产数据操作（§9 gate 内，零成本）**
-6. **D9 执行**：在**生产** Supabase（project `fhmshnqjjnnlvplojktv`）停用 8 个旧模块。
+6. **D9 执行**：在**生产** Supabase（project `正式项目`）停用 8 个旧模块。
    - 执行前先记录 8 行 id：`select id, title, active from modules order by created_at;`
    - 停用后复验（**按 id 逐行，不用 count**）：`select id, title, active from modules;` → 8 个旧 id 全部 `active=false`，且新建的 Skill 模块 `active=true`。
    - 另需确认操作对象是生产：`select current_database(), (select count(*) from profiles);` 应与 EXT-0 记录一致（5 profiles）。
@@ -407,7 +407,7 @@ progress_refresh_v10_1:
 8. **部署后冒烟（CAPTCHA 强制\*仍未开\*）**：登录、聊天一轮（走 pre-deduct/finalize）、套餐页渲染，均正常——**确认新 runtime（含 hCaptcha 前端接入）已实际接管生产**。
 8b. **开启 Supabase 生产 CAPTCHA 强制（D12 时序，v8）**：确认第 8 步的新 runtime（前端已传 `captchaToken`）生效后，才在 Supabase 生产 Auth 设置里打开 hCaptcha 强制 → 立刻用真实邮箱注册一次验证"带 captcha 能过、伪造/缺失被拒"。**顺序不可颠倒**：开关早于前端接入会立即打断所有邮箱注册/登录。
 9. **设置并冻结 `launch_baseline_at`（F5：新 runtime 生效之后）**：设为本步骤执行时刻 → **读回确认非空且等于预期值** → 记录到 rollout packet，此后不得再改（如需修改属单独 Owner gate）。<br>**为何在此**：baseline 必须晚于"新 runtime 生效"（第 7 步合并部署）——否则第 5–7 步窗口内旧 runtime 经 cron/webhook 产生的、按旧语义记账的行会被划入"baseline 之后"，污染新语义观测层并可能误报 G2。移到此处后，baseline 干净地把"旧世界（含建库窗口）"与"canary 起的新世界"分开；第 8 步冒烟属 Owner 自测流量，落在 baseline 之前（历史侧），符合预期。
-10. **创建生产 Skill 与模块**：在生产 admin（`graylum.com/admin`；**操作前先确认所连数据库 ref = `fhmshnqjjnnlvplojktv`**）创建并发布 Owner 批准的 Skill → 新建模块并绑定 → 保持 inactive → admin 冒烟 → 置为 active。
+10. **创建生产 Skill 与模块**：在生产 admin（`graylum.com/admin`；**操作前先确认所连数据库 ref = `正式项目`**）创建并发布 Owner 批准的 Skill → 新建模块并绑定 → 保持 inactive → admin 冒烟 → 置为 active。
 11. **D9 停用 8 个旧模块**，按 id 逐行复验（§4-C）。
 12. **G4 复验**：`active 且 bound 的模块数 ≥1` 且 `active 且 unbound 的模块数 =0`。
 13. **Stripe live 核对**：商品/价格/webhook endpoint 与 secret/Customer Portal 配置逐项；**live 模式已启用 alipay 支付方式**；**live webhook 事件订阅须含 `checkout.session.completed`（支付宝履约主路径）、`refund.updated`/`refund.failed`（支付宝异步退款）**，async_payment_* 若已订阅保留但非必需（v9 F5 更正）。
