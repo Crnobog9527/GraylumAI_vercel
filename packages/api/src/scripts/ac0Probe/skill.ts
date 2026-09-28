@@ -5,6 +5,7 @@ import {lstatSync, readdirSync, readFileSync, realpathSync} from 'node:fs';
 import {join, posix, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {z} from 'zod';
+import {parseWorkflowManifest, type WorkflowManifest} from '../../services/skills/workflowManifest.ts';
 import {askQuestionArgs} from './classify.ts';
 
 /** Synthetic repository fixture used when no private Skill directory is given. */
@@ -14,14 +15,8 @@ export const FIXTURE_SKILL_DIR = fileURLToPath(new URL(
 const FILE_LIMIT = 262_144;
 const REFERENCE_LIMIT = 64;
 
-/** Step fields from the Skill's workflow.yaml (JSON), which the real host supplies per turn. */
-const workflowSchema = z.object({
-  steps: z.array(z.object({
-    title: z.string().min(1).max(200),
-    information: z.array(z.object({title: z.string().min(1).max(200), required: z.boolean()}).passthrough()).default([]),
-  }).passthrough()).min(1).max(20),
-}).passthrough();
-export type WorkflowStep = z.infer<typeof workflowSchema>['steps'][number];
+/** One step of the Skill's workflow.yaml, which the real host supplies per turn. */
+export type WorkflowStep = WorkflowManifest['steps'][number];
 
 export type LoadedSkill = {
   /** Full SKILL.md text. Kept in memory only; never summarized or logged. */
@@ -69,8 +64,16 @@ export function loadSkill(dir: string | undefined): LoadedSkill {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  const workflow = workflowText === undefined ? undefined
-    : parsePrivateJson(workflowText, workflowSchema, 'SKILL_WORKFLOW').steps;
+  let workflow: WorkflowStep[] | undefined;
+  if (workflowText !== undefined) {
+    // The application's own parser (YAML, so JSON too). Its errors are fixed text,
+    // and so is this one: private file content never reaches the console.
+    try {
+      workflow = parseWorkflowManifest(workflowText).steps;
+    } catch {
+      throw new Error('PROBE_SKILL_WORKFLOW_INVALID: workflow.yaml is not a valid workflow manifest');
+    }
+  }
   const hash = createHash('sha256').update('SKILL.md\0' + instructions);
   let bytes = Buffer.byteLength(instructions);
   for (const [path, text] of references) {
@@ -120,7 +123,7 @@ export function stepRules(skill: LoadedSkill, step: number | undefined): string 
   if (step === undefined) return '';
   const current = skill.workflow?.[step];
   if (!current) throw new Error('PROBE_SCENARIO_STEP_UNAVAILABLE');
-  const required = current.information.filter(item => item.required).map(item => item.title);
+  const required = (current.information ?? []).filter(item => item.required).map(item => item.title);
   return [
     `Current step: ${current.title}.`,
     `Required information for this step: ${required.join(', ') || 'none'}.`,

@@ -664,16 +664,22 @@ describe('ledger location (third review)', () => {
 });
 
 describe('question-card history and step fields', () => {
-  function privateSkill(workflow = true) {
+  const workflowYaml = [
+    'kind: social', 'steps:', '  - title: Basics', '    resources:', '      - references/step-1.md', '    information:',
+    '      - {id: offer, title: Offer, required: true}', '      - {id: channel, title: Channel, required: true}',
+    '      - {id: notes, title: Notes, required: false}', '',
+  ].join('\n');
+  const workflowJson = JSON.stringify({kind: 'social', steps: [{title: 'Basics', resources: ['references/step-1.md'], information: [
+    {id: 'offer', title: 'Offer', required: true}, {id: 'channel', title: 'Channel', required: true},
+    {id: 'notes', title: 'Notes', required: false},
+  ]}]});
+  function privateSkill(workflow: string | false = workflowYaml) {
     const dir = join(home, 'skill');
+    rmSync(dir, {recursive: true, force: true});
     mkdirSync(join(dir, 'references'), {recursive: true});
     writeFileSync(join(dir, 'SKILL.md'), '# Synthetic Skill\nGuide the user one question at a time.\n');
     writeFileSync(join(dir, 'references', 'step-1.md'), 'Synthetic reference.\n');
-    if (workflow) {
-      writeFileSync(join(dir, 'workflow.yaml'), JSON.stringify({steps: [{title: 'Basics', information: [
-        {id: 'a', title: 'Offer', required: true}, {id: 'b', title: 'Channel', required: true}, {id: 'c', title: 'Notes', required: false},
-      ]}]}));
-    }
+    if (workflow !== false) writeFileSync(join(dir, 'workflow.yaml'), workflow);
     return dir;
   }
   const card = {question: 'Which channel first?', options: ['Channel A', 'Channel B']};
@@ -729,17 +735,35 @@ describe('question-card history and step fields', () => {
       scenarios([{...withHistory, step: 3}]), '--ask', '1'], {}, deps());
     expect(outcome.exitCode).toBe(2);
     expect(out.join('')).toContain('PROBE_SCENARIO_STEP_UNAVAILABLE');
-    rmSync(join(home, 'skill'), {recursive: true});
     outcome = await runProbe(['--out-dir', outDir(), '--skill-dir', privateSkill(false), '--scenarios',
       scenarios([withHistory]), '--ask', '1'], {}, deps());
     expect(outcome.exitCode).toBe(2);
+  });
+
+  it('parses workflow.yaml written as YAML or as JSON, and refuses a broken one without quoting it', async () => {
+    const args = ['--out-dir', outDir(), '--configs', 'qwen-deepinfra-none', '--scenarios', scenarios([withHistory]), '--ask', '1'];
+    const systemFor = async (workflow: string) => {
+      const withSkill = [...args, '--skill-dir', privateSkill(workflow)];
+      const id = await planId(withSkill);
+      const network = recording(askResponse({question: 'Anything else?', options: ['Yes', 'No']}));
+      await runProbe([...withSkill, '--live', '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
+      return network.sent[0]!.body.messages[0].content as string;
+    };
+    const fromYaml = await systemFor(workflowYaml);
+    expect(fromYaml).toContain('Required information for this step: Offer, Channel.');
+    expect(await systemFor(workflowJson)).toBe(fromYaml);
+    out = [];
+    const broken = 'kind: social\nsteps: [secret-private-marker\n';
+    const outcome = await runProbe([...args, '--skill-dir', privateSkill(broken)], {}, deps());
+    expect(outcome.exitCode).toBe(2);
+    expect(out.join('')).toContain('PROBE_SKILL_WORKFLOW_INVALID');
+    expect(out.join('')).not.toContain('secret-private-marker');
   });
 
   it('changes the Skill digest only when workflow.yaml is present', async () => {
     const args = (dir: string) => ['--out-dir', outDir(), '--skill-dir', dir, '--scenarios',
       scenarios([{...withHistory, step: undefined}]), '--ask', '1'];
     const withWorkflow = (await runProbe(args(privateSkill()), {}, deps())).plan!.skillDigest;
-    rmSync(join(home, 'skill'), {recursive: true});
     const without = (await runProbe(args(privateSkill(false)), {}, deps())).plan!.skillDigest;
     expect(withWorkflow).not.toBe(without);
   });
