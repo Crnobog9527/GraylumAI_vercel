@@ -114,13 +114,13 @@ function profile(object) {
   return {
     id: text(object, ['uid', 'mid', 'rest_id', 'id', 'idstr', 'user_id']),
     name: text(object, ['nickname', 'name', 'screen_name']),
-    handle: text(object, ['unique_id', 'screen_name', 'username']),
+    handle: text(object, ['unique_id', 'screen_name', 'username', 'profile']),
     followers: count(object, ['follower_count', 'followers_count', 'fans', 'follower', 'sub_count', 'legacy.followers_count']),
-    following: count(object, ['following_count', 'friends_count', 'following', 'attention', 'legacy.friends_count']),
+    following: count(object, ['following_count', 'friends_count', 'following', 'attention', 'friends', 'legacy.friends_count']),
     postsCount: count(object, ['aweme_count', 'statuses_count', 'archive_count', 'video_count', 'legacy.statuses_count']),
     likesTotal: count(object, ['total_favorited', 'likes', 'favourites_count']),
-    bio: text(object, ['signature', 'sign', 'description', 'legacy.description']),
-    verified: bool(object, ['verified', 'is_verified', 'is_blue_verified']) ?? bilibiliVerified(object),
+    bio: text(object, ['signature', 'sign', 'description', 'desc', 'legacy.description']),
+    verified: bool(object, ['verified', 'is_verified', 'is_blue_verified', 'blue_verified']) ?? bilibiliVerified(object),
   };
 }
 
@@ -130,7 +130,7 @@ function bilibiliVerified(object) {
   return typeof type === 'number' ? type >= 0 : undefined;
 }
 
-const PROFILE_KEYS = ['follower_count', 'followers_count', 'unique_id', 'screen_name', 'mid', 'sign', 'legacy'];
+const PROFILE_KEYS = ['follower_count', 'followers_count', 'unique_id', 'screen_name', 'mid', 'sign', 'legacy', 'sub_count'];
 
 /** Maps a TikHub-envelope response for one of the RESEARCH-0 queries to normalized items. */
 export function normalizeTikhub(json, query) {

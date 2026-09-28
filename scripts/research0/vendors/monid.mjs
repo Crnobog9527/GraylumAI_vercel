@@ -10,7 +10,7 @@
 
 import { count, list, text, timestamp } from '../metrics.mjs';
 import { TIKHUB_PATHS } from './tikhub.mjs';
-import { normalizeTikhub, tikhubFailed } from './tikhubShapes.mjs';
+import { normalizeTikhub } from './tikhubShapes.mjs';
 
 const BASE = 'https://api.monid.ai/v1';
 const MARGIN = 3;
@@ -59,20 +59,25 @@ export const monid = {
     if (json?.status !== 'COMPLETED') return true;
     const providerStatus = count(json, ['providerResponse.httpStatus']);
     if (providerStatus !== undefined && providerStatus !== 200) return true;
-    return query?.platform === 'web' ? !Array.isArray(json?.output?.results) : tikhubFailed(json?.output);
+    // TikHub tools hand back TikHub's `data` payload itself (no {code} envelope); success is the provider status.
+    if (query?.platform === 'web') return !Array.isArray(json?.output?.results);
+    return providerStatus !== 200 || json?.output === undefined || json?.output === null;
   },
   failureReason: json => text(json, ['status', 'error.code', 'code']) ?? 'VENDOR_ERROR',
+  // GET /v1/runs/:id returns the actual charge as cost {value USD}; sync runs carry billing in micro-dollars.
   reportedCostUsd(json) {
+    if (json?.cost?.currency === 'USD' && Number.isFinite(json.cost.value)) return json.cost.value;
     const found = costs(json);
     return found.length === 0 ? null : Math.max(...found.map(cost => cost.value)) / 1e6;
   },
   reportedRaw(json) {
+    if (json?.cost?.currency === 'USD' && Number.isFinite(json.cost.value)) return `cost ${json.cost.value} USD`;
     const found = costs(json);
     return found.length === 0 ? null : `billing micro-USD ${found.map(cost => cost.value).join('/')}`;
   },
   kind: query => (query.platform === 'web' ? 'web' : query.type),
   normalize(json, query) {
-    if (query.platform !== 'web') return normalizeTikhub(json?.output, query);
+    if (query.platform !== 'web') return normalizeTikhub({ data: json?.output }, query);
     return list(json, ['output.results']).map(item => ({
       url: text(item, ['url']),
       title: text(item, ['title']),
