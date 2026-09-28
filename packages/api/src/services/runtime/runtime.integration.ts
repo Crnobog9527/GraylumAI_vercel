@@ -8,7 +8,7 @@ import { PostgresSession } from './session';
 import { runRuntime } from './runner';
 import {readRuntimeView,retainedOutputReason} from './view';
 import { runtimeExecutor } from './execute';
-import {createRuntimeBudget} from './budget';
+import {createRuntimeBudget,withRuntimeBudget} from './budget';
 import {runtimeActor} from './actor';
 import { runtimeAdmissionService } from './admission';
 import { activateRuntimeCandidate } from './matching';
@@ -920,15 +920,16 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   const all={start,ordinary,stream,skill,execute};
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
-   start:{prelude:2,policy:0,host:2},
-   ordinary:{prelude:2,policy:0,host:0,admission:10},
-   stream:{prelude:2,policy:0,host:0,execute:11,provider:7},
-   skill:{prelude:2,policy:0,host:0,admission:29},
-   execute:{prelude:2,policy:0,host:0,execute:11,provider:7},
+   start:{prelude:2,policy:0,host:1},
+   ordinary:{prelude:2,policy:0,host:0,admission:5},
+   stream:{prelude:2,policy:0,host:0,execute:6,provider:5},
+   skill:{prelude:2,policy:0,host:0,admission:18},
+   execute:{prelude:2,policy:0,host:0,execute:6,provider:5},
   });
-  // Auth verification before each RPC is the largest single label (AC-0 item 3).
+  // AC-0c: Auth verifies once per invocation and credential, plus once again
+  // after the provider response (AC-0 baseline was 2/6/9/12/9).
   expect(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary.labels['auth/v1/user']?.rt])))
-   .toEqual({start:2,ordinary:6,stream:9,skill:12,execute:9});
+   .toEqual({start:1,ordinary:1,stream:2,skill:1,execute:2});
   for(const m of [ordinary,skill])expect(m.summary.executionIds).toEqual([m.result.executionId]);
   for(const m of [stream,execute])expect(m.summary.marks.providerPostMs).toBeGreaterThanOrEqual(0);
   // Only the streamed procedure releases its own line; callers here skip the route.
@@ -938,6 +939,31 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   if(previousEndpoint===undefined)delete process.env.V3_RUNTIME_LOCAL_ENDPOINT;else process.env.V3_RUNTIME_LOCAL_ENDPOINT=previousEndpoint;
   await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
  }
+});
+it('RUNTIME: AC-0c real Auth verdict reuse ends at a provider response; a revoked session is then denied',async()=>{
+ const password='Local-'+randomUUID()+'!',email=randomUUID()+'@example.test';
+ const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
+ const actor=created.data.user.id;await db.query('insert into profiles(id,email,credits) values($1,$2,100)',[actor,email]);
+ const other=await admin.auth.admin.createUser({email:randomUUID()+'@example.test',password,email_confirm:true});if(other.error)throw other.error;
+ const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
+ const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
+ const bearer='Bearer '+login.data.session!.access_token,headers=()=>new Headers({Authorization:bearer});
+ const budget=createRuntimeBudget(),ctx=await createTRPCContext({headers:headers(),runtimeBudget:budget});
+ expect(ctx.user?.id).toBe(actor);
+ const verified=runtimeActor(ctx.supabaseAuth!.auth,actor,budget,bearer);
+ // Another actor id never matches this credential, even with a reused verdict.
+ const foreign=runtimeActor(ctx.supabaseAuth!.auth,other.data.user.id,budget,bearer);
+ expect(await verified()).toBe(actor);await expect(foreign()).rejects.toThrow('RUNTIME_DENIED');
+ expect(budget.timing.summary().labels['auth/v1/user'].rt).toBe(1);
+ // Real server-side revocation of this session.
+ expect((await user.auth.signOut()).error).toBeNull();
+ // Accepted AC-0c boundary: until the next provider response, the verdict is reused.
+ expect(await verified()).toBe(actor);
+ await withRuntimeBudget(budget,async()=>new Response('{}'))('http://127.0.0.1/provider',{method:'POST'});
+ await expect(verified()).rejects.toThrow('RUNTIME_DENIED');
+ expect(budget.timing.summary().labels['auth/v1/user'].rt).toBe(2);
+ // A new invocation never inherits the earlier verdict.
+ expect((await createTRPCContext({headers:headers(),runtimeBudget:createRuntimeBudget()})).user).toBeNull();
 });
 it('RUNTIME: work item Session validates parent/actor and stays separate from draft',async()=>{
  const f=await fixture(),moduleId=randomUUID(),skillId=randomUUID(),parent=randomUUID(),work=randomUUID();
