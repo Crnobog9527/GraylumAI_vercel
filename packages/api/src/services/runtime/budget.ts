@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {createRequestTiming,timingLabel} from './timing';
 /** One server-created HTTP invocation budget, shared by every batched Runtime.
  * It is neither a frozen execution field nor an authority to retry/settle. */
 export function createRuntimeBudget(now:()=>number=()=>performance.now()) {
@@ -6,6 +7,8 @@ export function createRuntimeBudget(now:()=>number=()=>performance.now()) {
  const workDeadline=startedAt+255_000,persistenceDeadline=startedAt+285_000;
  return Object.freeze({
   workDeadline,persistenceDeadline,
+  // AC-0 measurement of this invocation's round trips; never an authority.
+  timing:createRequestTiming(now),
   remainingPersistence:()=>persistenceDeadline-now(),
   assertCanPersist(durationMs=0){
    if(now()+durationMs>=persistenceDeadline)throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');
@@ -24,6 +27,7 @@ export function withRuntimeBudget(budget:RuntimeBudget,transport:typeof fetch=fe
   if(remaining<=0)throw new DOMException('RUNTIME_TIME_BUDGET_EXHAUSTED','AbortError');
   const caller=init?.signal??(input instanceof Request?input.signal:undefined);
   const deadline=AbortSignal.timeout(remaining);
+  const done=startTiming(budget,input,disableDatabaseRetry);
   try{
    const response=await transport(input,{...init,signal:caller?AbortSignal.any([caller,deadline]):deadline});
    // PostgREST sleeps after reading the error body, so even a short delay
@@ -39,6 +43,13 @@ export function withRuntimeBudget(budget:RuntimeBudget,transport:typeof fetch=fe
   }catch(error){
    if(deadline.aborted)throw new DOMException('RUNTIME_TIME_BUDGET_EXHAUSTED','AbortError');
    throw error;
-  }
+  }finally{done();}
  };
+}
+/** Measurement only: a failing recorder never reaches the transport call. */
+function startTiming(budget:RuntimeBudget,input:RequestInfo|URL,database:boolean):()=>void{
+ try{
+  const done=budget.timing?.begin(timingLabel(input,database));
+  return ()=>{try{done?.();}catch{/* measurement only */}};
+ }catch{return ()=>{};}
 }

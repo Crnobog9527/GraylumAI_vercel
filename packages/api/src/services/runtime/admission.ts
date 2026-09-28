@@ -13,6 +13,7 @@ import type {FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
 import { discoverRuntimeCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
 import { reasoningFor, type ReasoningPolicy } from './reasoningPolicy';
+import {currentRequestTiming} from './timing';
 
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
@@ -61,7 +62,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
   start:(requestId:string,scope:unknown)=>query('runtime_start',{p_request_id:uuid.parse(requestId),p_payload:{scope:z.discriminatedUnion('kind',[z.object({kind:z.literal('positioning_draft')}).strict(),z.object({kind:z.literal('work_item'),projectId:uuid,workItemId:uuid}).strict()]).parse(scope)}}),
   saveMaterial(value:unknown){const v=runtimeMaterialInput.parse(value);return query('runtime_material',{p_session_id:v.sessionId,p_action:'save',p_request_id:v.requestId,p_expected_revision:v.expectedRevision,p_payload:{brief:v.brief,material:v.material,roundId:v.roundId}});},
   revokeMaterial(sessionId:string,revision:number){return query('runtime_material',{p_session_id:uuid.parse(sessionId),p_action:'revoke',p_expected_revision:z.number().int().positive().parse(revision)});},
-  async prepare(value:unknown){
+  prepare:(value:unknown)=>timedAdmission(async()=>{
    const input=runtimeAdmission.parse(value);await actor();
    if(policy.real&&(input.network!=='deny'||policy.searchEnabled))throw new Error('RUNTIME_REAL_SEARCH_DISABLED');
    if(input.network==='require_latest'&&!policy.searchEnabled)throw new Error('RUNTIME_SEARCH_UNAVAILABLE');
@@ -177,6 +178,15 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     if(committed)return committed;
     throw error;
    }
-  },
+  }),
  };
+}
+/** AC-0 measurement: admission and Skill loading form their own timing phase. */
+async function timedAdmission<T>(run:()=>Promise<T>):Promise<T>{
+ const timing=currentRequestTiming(),leave=timing?.enter('admission');
+ try{
+  const result=await run();
+  timing?.tagExecution((result as {executionId?:unknown}|null)?.executionId);
+  return result;
+ }finally{leave?.();}
 }
