@@ -110,9 +110,9 @@ export const scenarioSchema = z.object({
   kind: z.enum(['ask', 'text', 'reference']),
   history: z.array(z.union([message, askTurn])).max(20).default([]),
   input: z.string().min(1).max(8000),
-  /** Index into the Skill's workflow.yaml steps; the probe then gives the model
+  /** Index into the Skill's workflow.yaml steps (bounded by the loaded manifest); the probe then gives the model
    * that step's required information, as the real host would. */
-  step: z.number().int().min(0).max(19).optional(),
+  step: z.number().int().min(0).optional(),
   /** Operator's expectation for later manual labelling of step completion. */
   expectStepComplete: z.boolean().optional(),
 }).strict();

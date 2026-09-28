@@ -763,6 +763,15 @@ describe('question-card history and step fields', () => {
     expect(out.join('')).not.toContain('secret-private-marker');
   });
 
+  it('accepts any step the loaded manifest declares, beyond the first twenty', async () => {
+    const steps = Array.from({length: 21}, (_, index) => ({title: 'Step ' + (index + 1), resources: ['references/step-1.md'],
+      information: [{id: 'fact', title: 'Fact ' + (index + 1), required: true}]}));
+    const skill = privateSkill(JSON.stringify({kind: 'social', steps}));
+    const outcome = await runProbe(['--out-dir', outDir(), '--skill-dir', skill, '--scenarios',
+      scenarios([{...withHistory, step: 20}]), '--ask', '1'], {}, deps());
+    expect(outcome.exitCode).toBe(0);
+  });
+
   it('changes the Skill digest only when workflow.yaml is present', async () => {
     const args = (dir: string) => ['--out-dir', outDir(), '--skill-dir', dir, '--scenarios',
       scenarios([{...withHistory, step: undefined}]), '--ask', '1'];
