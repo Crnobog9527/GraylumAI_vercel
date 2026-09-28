@@ -5,8 +5,8 @@
 // costs in micro-dollars, but the docs do not say which of the three fields is
 // the charge, so the largest is booked. Wallet balance reads (measured free in
 // the catalogue phase, undocumented) bracket the run.
-// The comparison queries need a second Owner approval (option a); until then
-// `blockedReason` keeps every request unsent.
+// The Owner approved these comparison runs in the executor window on
+// 2026-09-28 ("同意 monid 正式查询"), after the catalogue phase priced them.
 
 import { count, list, text, timestamp } from '../metrics.mjs';
 import { TIKHUB_PATHS } from './tikhub.mjs';
@@ -39,7 +39,6 @@ export const monid = {
   maxCalls: 18,
   maxUsd: 1,
   timeoutMs: 90_000,
-  blockedReason: 'AWAITING_APPROVAL: comparison queries need Owner approval after the catalogue phase prices them',
   steps(query) {
     if (query.id === 'Q01') return [run('tinyfish', '/search', { query: query.webQuery, language: 'zh' }, WEB_WORST_USD)];
     const [, pathname, params] = TIKHUB_PATHS[query.id];
