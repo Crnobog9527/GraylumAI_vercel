@@ -917,19 +917,33 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   const skill=await measured(c=>c.prepare({sessionId,requestId:randomUUID(),input:'Please work',selection:{kind:'skill',moduleId,revisionId:pack.revisionId},network:'deny'}));
   const execute=await measured(c=>c.execute({executionId:skill.result.executionId}));
   expect(execute.result).toMatchObject({state:'completed'});
-  const all={start,ordinary,stream,skill,execute};
+  const skillPrepare=()=>measured(c=>c.prepare({sessionId,requestId:randomUUID(),input:'Please work',selection:{kind:'skill',moduleId,revisionId:pack.revisionId},network:'deny'}));
+  // The same verified revision again: package files now come from the process cache.
+  const skillWarm=await skillPrepare();
+  const all={start,ordinary,stream,skill,execute,skillWarm};
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    start:{prelude:2,policy:0,host:1},
    ordinary:{prelude:2,policy:0,host:0,admission:5},
    stream:{prelude:2,policy:0,host:0,execute:6,provider:5},
-   skill:{prelude:2,policy:0,host:0,admission:18},
+   skill:{prelude:2,policy:0,host:0,admission:11},
    execute:{prelude:2,policy:0,host:0,execute:6,provider:5},
+   skillWarm:{prelude:2,policy:0,host:0,admission:9},
   });
   // AC-0c: Auth verifies once per invocation and credential, plus once again
   // after the provider response (AC-0 baseline was 2/6/9/12/9).
-  expect(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary.labels['auth/v1/user']?.rt])))
-   .toEqual({start:1,ordinary:1,stream:2,skill:1,execute:2});
+  const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
+  expect(label('auth/v1/user')).toEqual({start:1,ordinary:1,stream:2,skill:1,execute:2,skillWarm:1});
+  // AC-0c: one module read per request (AC-0 baseline 7 for the Skill prepare);
+  // package checks before use and before delivery remain on every request.
+  expect(label('rest/modules')).toMatchObject({skill:1,skillWarm:1});
+  expect(label('rpc/read_skill_package')).toMatchObject({skill:5,skillWarm:3});
+  // A warm cache never bypasses the per-request checks.
+  await db.query('update modules set active=false where id=$1',[moduleId]);
+  await expect(skillPrepare()).rejects.toThrow();
+  await db.query('update modules set active=true where id=$1',[moduleId]);
+  await db.query('select revoke_skill_revision($1,$2)',[pack.revisionId,actor]);
+  await expect(skillPrepare()).rejects.toThrow();
   for(const m of [ordinary,skill])expect(m.summary.executionIds).toEqual([m.result.executionId]);
   for(const m of [stream,execute])expect(m.summary.marks.providerPostMs).toBeGreaterThanOrEqual(0);
   // Only the streamed procedure releases its own line; callers here skip the route.

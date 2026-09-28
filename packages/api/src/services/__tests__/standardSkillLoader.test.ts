@@ -1,16 +1,18 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { cp, link, mkdtemp, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
 import { inspectSkillFormat } from '../skills/format';
-import { activateSkill, discoverSkills, identityOf, packageHash, sha256, validateDescriptor, type ExecutionState, type PackageDescriptor, type SkillSource } from '../skills/loader';
+import { activateSkill, clearSkillResourceCache, discoverSkills, identityOf, packageHash, sha256, validateDescriptor, type ExecutionState, type PackageDescriptor, type SkillSource } from '../skills/loader';
 import { LocalSkillSource, type LocalPackage } from '../skills/localSource';
 
 const fixtureRoot = fileURLToPath(new URL('./fixtures/standard-skills/', import.meta.url));
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
+// Each case below exercises the source's own reads, so it starts with a cold resource cache.
+beforeEach(() => clearSkillResourceCache());
 async function packages(root = fixtureRoot): Promise<LocalPackage[]> {
   const catalog = JSON.parse(await readFile(join(root, 'catalog.json'), 'utf8')) as LocalPackage[];
   return catalog.map(p => ({ root: join(root, p.root), descriptor: p.descriptor }));
@@ -46,7 +48,8 @@ describe('standard Skill real filesystem loading', () => {
     expect(JSON.stringify(catalog)).not.toMatch(/ENTRY_END|manifest|requires|GATHER/);
     reads.length = 0;
     const loaded = await activateSkill(port, catalog[0].selection, options);
-    expect(reads).toEqual(['workshop-notes/v1/SKILL.md', 'workshop-notes/v1/references/gather.md', 'workshop-notes/v1/assets/worksheet.md']);
+    // AC-0c: SKILL.md was verified during discovery and is served from the cache.
+    expect(reads).toEqual(['workshop-notes/v1/references/gather.md', 'workshop-notes/v1/assets/worksheet.md']);
     const resources = JSON.parse(loaded.forModel()).resources as { path: string; content: string }[];
     for (const r of resources) expect(r.content).toBe(await readFile(join(items[0].root, r.path), 'utf8'));
     expect(loaded.forModel()).toContain('GATHER_V1_END');
@@ -103,7 +106,8 @@ describe('standard Skill real filesystem loading', () => {
     const items = await editable();
     await replace(items, 'SKILL.md', '---\nname: workshop-notes\ndescription: Not valid: YAML\n---\n');
     await expect(discoverSkills(source(items).port)).rejects.toMatchObject({ code: 'INVALID_FORMAT' });
-    await unlink(join(items[0].root, 'SKILL.md'));
+    // This step checks the filesystem source itself, not the verified cache.
+    await unlink(join(items[0].root, 'SKILL.md')); clearSkillResourceCache();
     await expect(discoverSkills(source(items).port)).rejects.toMatchObject({ code: 'RESOURCE_MISSING' });
   });
   it('rejects a descriptor hash mismatch before reading resources', async () => {
@@ -218,5 +222,87 @@ describe('standard validation vs host compatibility diagnostics', () => {
   it('does not emit parser warning values or accept unresolved custom tags', () => {
     const report = inspectSkillFormat(entry('name: demo\ndescription: !private PRIVATE_BODY_SENTINEL'), 'demo');
     expect(report.compatibility.supported).toBe(false); expect(JSON.stringify(report)).not.toContain('PRIVATE_BODY_SENTINEL');
+  });
+});
+describe('AC-0c verified resource cache', () => {
+  function counted(items: LocalPackage[], state: () => Promise<ExecutionState> = async () => 'enabled') {
+    let checks = 0;
+    const s = source(items, async () => { checks++; return state(); });
+    return { ...s, checks: () => checks };
+  }
+  it('serves a warm activation without source reads while still checking state before use and before delivery', async () => {
+    const items = await packages();
+    await activateSkill(source(items).port, identityOf(items[0].descriptor), options);
+    const { port, reads, checks } = counted(items);
+    const loaded = await activateSkill(port, identityOf(items[0].descriptor), options);
+    expect(reads).toEqual([]);
+    expect(checks()).toBe(2);
+    expect(loaded.forModel()).toContain('WORKSHEET_END');
+  });
+  it.each(['disabled', 'archived', 'revoked', 'denied'] as const)('refuses a warm activation once the revision is %s', async state => {
+    const items = await packages();
+    await activateSkill(source(items).port, identityOf(items[0].descriptor), options);
+    const { port, reads } = counted(items, async () => state);
+    await expect(activateSkill(port, identityOf(items[0].descriptor), options)).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+    expect(await discoverSkills(port)).toEqual([]);
+    expect(reads).toEqual([]);
+  });
+  it('refuses a warm activation revoked after its start check, before delivery', async () => {
+    const items = await packages();
+    await activateSkill(source(items).port, identityOf(items[0].descriptor), options);
+    let calls = 0;
+    const { port } = counted(items, async () => (++calls > 1 ? 'revoked' : 'enabled'));
+    await expect(activateSkill(port, identityOf(items[0].descriptor), options)).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+  });
+  it('never caches content that failed verification', async () => {
+    const items = await editable();
+    const path = join(items[0].root, 'references/gather.md'), original = await readFile(path, 'utf8');
+    await writeFile(path, original.replace('V1', 'V2'));
+    for (let i = 0; i < 2; i++) {
+      await expect(activateSkill(source(items).port, identityOf(items[0].descriptor), options)).rejects.toMatchObject({ code: 'INTEGRITY_MISMATCH' });
+    }
+    await writeFile(path, original);
+    const { port, reads } = source(items);
+    expect((await activateSkill(port, identityOf(items[0].descriptor), options)).forModel()).toContain('GATHER_V1_END');
+    expect(reads).toContain('workshop-notes/v1/references/gather.md');
+  });
+  it('does not share entries across revisions or package hashes', async () => {
+    const items = await packages();
+    const v1 = items.find(p => p.descriptor.packageId === 'workshop-notes' && p.descriptor.revisionId === 'v1')!;
+    const v2 = items.find(p => p.descriptor.packageId === 'workshop-notes' && p.descriptor.revisionId !== 'v1')!;
+    await activateSkill(source(items).port, identityOf(v1.descriptor), options);
+    const { port, reads } = source(items);
+    expect((await activateSkill(port, identityOf(v2.descriptor), options)).forModel()).toContain('GATHER_V2_END');
+    expect(reads.every(r => r.startsWith(`workshop-notes/${v2.descriptor.revisionId}/`))).toBe(true);
+    expect(reads.length).toBeGreaterThan(0);
+  });
+  function memory(ids: string[], files: number, bytes: number) {
+    const texts = new Map<string, string>(), reads: string[] = [];
+    const descriptors = ids.map(id => {
+      const entries: [string, string][] = [['SKILL.md', `---\nname: ${id}\ndescription: Synthetic cache package.\n---\nBody\n`]];
+      for (let i = 1; i < files; i++) entries.push([`references/r${i}.md`, `${id}-${i}-`.padEnd(bytes, 'x')]);
+      for (const [path, text] of entries) texts.set(`${id}/${path}`, text);
+      const p = { packageId: id, revisionId: 'v1', directoryName: id, packageHash: '', tasks: {}, requiredCapabilities: [],
+        files: entries.map(([path, text]) => ({ path, bytes: Buffer.byteLength(text), sha256: sha256(text), mediaType: 'text/markdown' as const, requires: [] })) };
+      rehash(p); return p;
+    });
+    const port: SkillSource = {
+      list: async () => descriptors, state: async () => 'enabled',
+      read: async id => { reads.push(`${id.packageId}/${id.path}`); return Buffer.from(texts.get(`${id.packageId}/${id.path}`)!); },
+    };
+    const activate = (p: PackageDescriptor) => activateSkill(port, identityOf(p), { resources: p.files.slice(1).map(f => f.path), maxContextBytes: 2 * 1024 * 1024 });
+    return { descriptors, reads, activate };
+  }
+  it('bounds the number of cached resources', async () => {
+    const { descriptors, reads, activate } = memory(['cache-a', 'cache-b', 'cache-c', 'cache-d', 'cache-e'], 64, 16);
+    for (const p of descriptors) await activate(p);
+    reads.length = 0; await activate(descriptors[4]); expect(reads).toEqual([]);
+    await activate(descriptors[0]); expect(reads.length).toBeGreaterThan(0);
+  });
+  it('bounds the cached bytes', async () => {
+    const { descriptors, reads, activate } = memory(Array.from({ length: 9 }, (_, i) => `cache-bytes-${i}`), 2, 1_900_000);
+    for (const p of descriptors) await activate(p);
+    reads.length = 0; await activate(descriptors[8]); expect(reads).toEqual([]);
+    await activate(descriptors[0]); expect(reads).toContain('cache-bytes-0/references/r1.md');
   });
 });

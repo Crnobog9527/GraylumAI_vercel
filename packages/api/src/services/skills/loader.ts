@@ -90,14 +90,38 @@ export function validateDescriptor(input: unknown): PackageDescriptor {
 async function enabled(source: SkillSource, identity: PackageIdentity): Promise<void> {
   if (await guarded(() => source.state(identity)) !== 'enabled') fail('UNAVAILABLE');
 }
+/** AC-0c: process-local, bounded cache of verified resource text. A published
+ * revision's files never change, and the validated packageHash binds each
+ * path to its sha256, so an entry keyed by that whole identity can only hold
+ * the exact verified bytes. Authorization is never cached: every activation
+ * still checks state before use and again before returning. */
+const RESOURCE_CACHE_ENTRIES = 256, RESOURCE_CACHE_BYTES = 16 * 1024 * 1024;
+const resourceCache = new Map<string, { text: string; bytes: number }>();
+let resourceCacheBytes = 0;
+/** Test isolation only. */
+export function clearSkillResourceCache(): void { resourceCache.clear(); resourceCacheBytes = 0; }
+function cacheResource(key: string, text: string, bytes: number) {
+  resourceCache.set(key, { text, bytes }); resourceCacheBytes += bytes;
+  for (const [oldest, entry] of resourceCache) {
+    if (resourceCache.size <= RESOURCE_CACHE_ENTRIES && resourceCacheBytes <= RESOURCE_CACHE_BYTES) break;
+    resourceCache.delete(oldest); resourceCacheBytes -= entry.bytes;
+  }
+}
 async function readVerified(source: SkillSource, p: PackageDescriptor, path: string): Promise<string> {
   const file = p.files.find(f => f.path === path);
   if (!file) fail('RESOURCE_MISSING');
+  const key = JSON.stringify([p.packageId, p.revisionId, p.packageHash, path, file.sha256, file.bytes]);
+  const cached = resourceCache.get(key);
+  if (cached) { resourceCache.delete(key); resourceCache.set(key, cached); return cached.text; }
+  // A source read still requires current access immediately before it.
   await enabled(source, p);
   const bytes = await guarded(() => source.read({ ...identityOf(p), path }, file.bytes));
   if (bytes.byteLength !== file.bytes || sha256(bytes) !== file.sha256) fail('INTEGRITY_MISMATCH');
-  try { return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); }
+  let text: string;
+  try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); }
   catch { return fail('INVALID_FORMAT'); }
+  cacheResource(key, text, bytes.byteLength);
+  return text;
 }
 function metadataFor(entry: string, p: PackageDescriptor) {
   const parsed = parseSkillEntry(entry, p.directoryName);

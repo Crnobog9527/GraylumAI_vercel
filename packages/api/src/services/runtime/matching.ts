@@ -32,7 +32,9 @@ export async function discoverRuntimeCandidates(user:SupabaseClient,admin:Supaba
  const candidates:MatchCandidate[]=[];
  for(const row of rows.data){
   if(!row.skill_id||!row.model_id)continue;
-  const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId:row.id,skillId:row.skill_id});
+  // AC-0c: the user-scoped read above already admitted this module in this request.
+  const activeModule=visible.data.find(m=>m.id===row.id);
+  const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId:row.id,skillId:row.skill_id,activeModule});
   let found;try{found=await discoverSkills(source);}catch{continue;}
   const model=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit').eq('id',row.model_id).single();
   if(model.error||model.data.is_active!=='true'||(!limits.resolveCapacity&&model.data.provider!=='fixture'))continue;
