@@ -1,24 +1,60 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isEmailVerified } from '../../lib/auth';
-import { fail, identityOf, sameIdentity, validateDescriptor, type PackageDescriptor, type PackageIdentity, type SkillSource } from './loader';
+import { fail, sameIdentity, validateDescriptor, type PackageDescriptor, type PackageIdentity, type SkillSource } from './loader';
 
+declare const userScopedRead: unique symbol;
+/** A module row from the user-scoped (RLS-governed) read. Only userVisibleModules()
+ * produces it, so a service-role or hand-built row cannot be passed at compile time. */
+export type UserVisibleModule = { readonly id: string; readonly active: true; readonly [userScopedRead]: true };
+/** The request's user-scoped read of active modules, subject to RLS. */
+export async function userVisibleModules(userClient: SupabaseClient, options: { limit: number; orderById?: boolean }):
+  Promise<{ data: UserVisibleModule[]; error: null } | { data: null; error: object }> {
+  const active = userClient.from('modules').select('id,active').eq('active', true);
+  const result = await (options.orderById ? active.order('id') : active).limit(options.limit);
+  if (result.error) return { data: null, error: result.error };
+  return { data: result.data.filter(row => typeof row.id === 'string' && row.active === true) as unknown as UserVisibleModule[], error: null };
+}
 /** Request-local only. The authenticated client verifies identity and public module
  * admission before the narrowly scoped service RPC can return private content.
- * No browser route exports this source or accepts a caller-supplied actor ID. */
+ * No browser route exports this source or accepts a caller-supplied actor ID.
+ *
+ * AC-0c: the user-scoped module admission (subject to RLS) is read once per
+ * source, i.e. once per request. A caller that already made that same
+ * user-scoped read of active modules in this request may pass the row it got.
+ * A service-role read must never be passed: RLS may later differ per user.
+ * Every service RPC still independently checks actor, module, publication and
+ * revocation; nothing here survives the request. */
 export function databaseSkillSource(options: {
   userClient: SupabaseClient; privateClient: SupabaseClient | null;
   moduleId: string; skillId: string; revisionId?: string;
+  userVisibleModule?: UserVisibleModule;
 }): SkillSource {
   options = { ...options };
   if (typeof window !== 'undefined') fail('UNAVAILABLE');
   let selected: PackageDescriptor | undefined;
+  let admitted: Promise<void> | undefined;
+  if (options.userVisibleModule) {
+    // Fail closed on a row that does not prove this exact module is visible and active.
+    if (options.userVisibleModule.id !== options.moduleId || options.userVisibleModule.active !== true) fail('UNAVAILABLE');
+    admitted = Promise.resolve();
+  }
+  const moduleAdmission = () => {
+    if (!admitted) {
+      const check = (async () => {
+        const visible = await options.userClient.from('modules').select('id,active').eq('id', options.moduleId).eq('active', true).single();
+        if (visible.error || visible.data?.id !== options.moduleId) fail('UNAVAILABLE');
+      })();
+      // A denied or failed admission is never reused; the next read checks again.
+      admitted = check.catch(error => { admitted = undefined; throw error; });
+    }
+    return admitted;
+  };
   const read = async (identity?: PackageIdentity, path: string | null = null, maxBytes = 2097152) => {
     if (!options.privateClient) fail('UNAVAILABLE');
     const auth = await options.userClient.auth.getUser();
     const user = auth.data.user;
     if (auth.error || !user || !isEmailVerified(user)) fail('UNAVAILABLE');
-    const visible = await options.userClient.from('modules').select('id,active').eq('id',options.moduleId).eq('active',true).single();
-    if (visible.error || visible.data?.id !== options.moduleId) fail('UNAVAILABLE');
+    await moduleAdmission();
     const { data, error } = await options.privateClient.rpc('read_skill_package', {
       p_actor_id: user.id, p_module_id: options.moduleId, p_skill_id: options.skillId,
       p_revision_id: identity?.revisionId ?? options.revisionId ?? null,
@@ -28,9 +64,11 @@ export function databaseSkillSource(options: {
     return data;
   };
   return {
+    // The first listing is itself a full service check. Repeated listings return
+    // the same immutable descriptor; callers reach them only through the loader,
+    // which checks state immediately after (discoverSkills, activateSkill).
     async list() {
       if (!selected) selected = validateDescriptor(await read());
-      else await read(identityOf(selected), '');
       return [structuredClone(selected)];
     },
     async state(identity) {

@@ -917,19 +917,57 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   const skill=await measured(c=>c.prepare({sessionId,requestId:randomUUID(),input:'Please work',selection:{kind:'skill',moduleId,revisionId:pack.revisionId},network:'deny'}));
   const execute=await measured(c=>c.execute({executionId:skill.result.executionId}));
   expect(execute.result).toMatchObject({state:'completed'});
-  const all={start,ordinary,stream,skill,execute};
+  // Each further prepare uses its own new Session, since a prepared execution is never run here.
+  const newSession=async()=>((await measured(c=>c.start({requestId:randomUUID(),scope:{kind:'positioning_draft'}}))).result as {sessionId:string}).sessionId;
+  const prepareIn=(id:string,module=moduleId,revision=pack.revisionId)=>
+   measured(c=>c.prepare({sessionId:id,requestId:randomUUID(),input:'Please work',selection:{kind:'skill',moduleId:module,revisionId:revision},network:'deny'}));
+  const skillPrepare=async()=>prepareIn(await newSession());
+  // The same verified revision again: package files now come from the process cache.
+  const skillWarm=await skillPrepare();
+  const all={start,ordinary,stream,skill,execute,skillWarm};
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    start:{prelude:2,policy:0,host:1},
    ordinary:{prelude:2,policy:0,host:0,admission:5},
    stream:{prelude:2,policy:0,host:0,execute:6,provider:5},
-   skill:{prelude:2,policy:0,host:0,admission:18},
+   skill:{prelude:2,policy:0,host:0,admission:12},
    execute:{prelude:2,policy:0,host:0,execute:6,provider:5},
+   skillWarm:{prelude:2,policy:0,host:0,admission:10},
   });
   // AC-0c: Auth verifies once per invocation and credential, plus once again
   // after the provider response (AC-0 baseline was 2/6/9/12/9).
-  expect(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary.labels['auth/v1/user']?.rt])))
-   .toEqual({start:1,ordinary:1,stream:2,skill:1,execute:2});
+  const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
+  expect(label('auth/v1/user')).toEqual({start:1,ordinary:1,stream:2,skill:1,execute:2,skillWarm:1});
+  // AC-0c: one service-role and one user-scoped (RLS) module read per request
+  // (AC-0 baseline 7 for the Skill prepare); package checks before use and
+  // before delivery remain on every request.
+  expect(label('rest/modules')).toMatchObject({skill:2,skillWarm:2});
+  expect(label('rpc/read_skill_package')).toMatchObject({skill:5,skillWarm:3});
+  // A warm cache never bypasses the per-request checks: each of these is denied
+  // in the very next request, and the same warm request succeeds once restored.
+  const denials:[string,string,string][]=[
+   ['update modules set active=false where id=$1','update modules set active=true where id=$1',moduleId],
+   ["update profiles set status='disabled' where id=$1","update profiles set status='active' where id=$1",actor],
+  ];
+  // The service role still sees the module, but the user-scoped (RLS) read does not.
+  const hidden='create policy ac0c_user_hidden on public.modules as restrictive for select to authenticated using (id<>$$'+moduleId+'$$::uuid)';
+  denials.push([hidden,'drop policy ac0c_user_hidden on public.modules','']);
+  for(const [deny,restore,id] of denials){
+   const pending=await newSession();
+   await db.query(deny,id?[id]:[]);
+   try{await expect(prepareIn(pending)).rejects.toThrow();}finally{await db.query(restore,id?[id]:[]);}
+   await prepareIn(pending);
+  }
+  // Terminal cases: republishing needs a new revision, so unpublishing uses its own warm package.
+  const unpublished=makePackage(),unpublishedModule=randomUUID();
+  await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[unpublished.id,'runtime-timing-'+unpublished.id,actor]);
+  await db.query("insert into modules(id,title,skill_id,active,model_id) values($1,'Timing Skill 2',$2,true,$3)",[unpublishedModule,unpublished.id,skillModel]);
+  await publishSkillPackage(admin,actor,unpublished);
+  await prepareIn(await newSession(),unpublishedModule,unpublished.revisionId);
+  await db.query("update skills set status='archived',archived_at=now(),archived_by=$2 where id=$1",[unpublished.id,actor]);
+  await expect(prepareIn(await newSession(),unpublishedModule,unpublished.revisionId)).rejects.toThrow();
+  await db.query('select revoke_skill_revision($1,$2)',[pack.revisionId,actor]);
+  await expect(skillPrepare()).rejects.toThrow();
   for(const m of [ordinary,skill])expect(m.summary.executionIds).toEqual([m.result.executionId]);
   for(const m of [stream,execute])expect(m.summary.marks.providerPostMs).toBeGreaterThanOrEqual(0);
   // Only the streamed procedure releases its own line; callers here skip the route.
