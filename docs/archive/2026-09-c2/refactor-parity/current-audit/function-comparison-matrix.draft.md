@@ -7,7 +7,7 @@
 > - 2026-03-07 Vercel Preview 定向验证：
 >   `parity-extended 6/6`、`user-extended 7/7`、`admin-config 6/6`、`admin-ops 6/6`、`user-supplemental 6/6`
 > - 预览地址：
->   `https://graylum-ai-vercel-v1-4natgwj9o-simons-projects-bfe3e99f.vercel.app`
+>   `<staging 项目部署 URL>`
 
 | 模块 | 功能 | 旧版本结果 | 新站结果 | 是否一致 | 严重级别 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -53,12 +53,12 @@
 
 - 首轮关键回归 `15/15` 通过，第二轮扩展回归 `6/6` 通过
 - 第三轮新增定向回归已通过：`user-extended 7/7`、`admin-config 6/6`、`admin-ops 6/6`
-- 2026-03-09 对最新 Vercel Preview `https://graylum-ai-vercel-v1-4natgwj9o-simons-projects-bfe3e99f.vercel.app` 的管理员工单闭环定向复测结果：`admin-ops ticket flow 1/1`
-- 2026-03-09 对最新 Vercel Preview `https://graylum-ai-vercel-v1-17cq55n1b-simons-projects-bfe3e99f.vercel.app` 的工单自动关闭 route 验证结果：`/api/cron/tickets/auto-close -> 200`
+- 2026-03-09 对最新 Vercel Preview `<staging 项目部署 URL>` 的管理员工单闭环定向复测结果：`admin-ops ticket flow 1/1`
+- 2026-03-09 对最新 Vercel Preview `<staging 项目部署 URL>` 的工单自动关闭 route 验证结果：`/api/cron/tickets/auto-close -> 200`
 - 2026-03-09 对目标 Supabase 数据库的只读验证结果：`auto_close_stale_tickets` 已存在，`cron.job.ticket-auto-close-hourly` 已注册且 `active=true`
 - 第三轮用户补充回归结果为 `user-supplemental 6/6`
-- 2026-03-08 对最新 Vercel Preview `https://graylum-ai-vercel-v1-cnpxb452f-simons-projects-bfe3e99f.vercel.app` 的直连复测结果：`critical 18/18`、`parity-extended 6/6`、`user-extended 7/7`
-- 2026-03-09 对最新 Vercel Preview `https://graylum-ai-vercel-v1-d7i5kvk9w-simons-projects-bfe3e99f.vercel.app` 的危险操作回归结果：`admin-destructive 12/12`
+- 2026-03-08 对最新 Vercel Preview `<staging 项目部署 URL>` 的直连复测结果：`critical 18/18`、`parity-extended 6/6`、`user-extended 7/7`
+- 2026-03-09 对最新 Vercel Preview `<staging 项目部署 URL>` 的危险操作回归结果：`admin-destructive 12/12`
 - 核心结论已经改为“必须以 Vercel 预览环境作为验收基线”，本地地域限制不再作为产品缺陷证据
 - 当前未发现登录、聊天、后台三条主路径的线上阻塞性故障
 - 已确认的结构性差异有 1 项：旧版是 Base44 托管登录入口，新版改为 `graylum.com/www.graylum.com` 公开落地页 + `app.graylum.com` 应用后台

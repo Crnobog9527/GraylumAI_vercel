@@ -22,14 +22,40 @@
 
 ### 非支付发布准备
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `NEXT_PUBLIC_APP_URL`
-- `NEXT_PUBLIC_SITE_NAME`
-- `NEXT_PUBLIC_SUPPORT_EMAIL`
-- `NEXT_PUBLIC_SENTRY_DSN`
-- `OPENROUTER_API_KEY`（Claude 与 OpenAI-compatible 模型统一入口）
+值和注释占位见 [`.env.example`](../.env.example)。新增示例不代表已配置目标环境，
+也不授权修改密钥、外部配置或开启真实调用。仅报告变量是否存在，不公开值。
+
+| 变量 | 当前用途与读取位置 |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 客户端连接；`apps/web/src/lib/supabase.ts` |
+| `SUPABASE_SERVICE_ROLE_KEY` | 服务端 Supabase 客户端；`packages/api/src/trpc.ts` |
+| `NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL` | 站点与认证回跳地址；`apps/web/src/lib/site-config.ts` |
+| `UPSTASH_REDIS_REST_URL`、`UPSTASH_REDIS_REST_TOKEN` | Redis 分布式限流；`packages/api/src/services/redisRateLimiter.ts`、`apps/web/src/proxy.ts` |
+| `RATE_LIMIT_FAIL_CLOSED` | 控制 Redis 不可用时的返回结果；Web helper / proxy 支持拒绝请求，但 API `checkRateLimitAsync` 的内存回退会绕过该失败结果，详见下文 |
+| `NEXT_PUBLIC_HCAPTCHA_SITEKEY` | 前端 hCaptcha sitekey；`apps/web/src/lib/authCaptcha.ts` |
+| `NEXT_PUBLIC_SITE_NAME`、`NEXT_PUBLIC_SUPPORT_EMAIL` | 站点显示与支持入口；`apps/web/src/lib/site-config.ts` |
+| `NEXT_PUBLIC_APP_NAME` | OpenRouter 请求标题的回退名称；`packages/api/src/services/providerUtils.ts` |
+| `NEXT_PUBLIC_SENTRY_DSN` | Sentry 错误上报；`apps/web/sentry.server.config.ts` 等 |
+| `SENTRY_ENVIRONMENT`、`APP_ENV`、`NEXT_PUBLIC_APP_ENV` | Sentry 环境标签依次回退；`apps/web/sentry.server.config.ts`、`sentry.edge.config.ts`、`src/instrumentation-client.ts` |
+| `LOG_LEVEL` | 服务端日志级别；`packages/api/src/lib/logger.ts` |
+| `OPENROUTER_API_KEY` | 当前模型提供商密钥入口；`packages/api/src/services/providerUtils.ts` |
+| `V3_RUNTIME_STAGING_ENABLED` | Runtime staging 入口开关之一；`packages/api/src/services/runtime/stagingEnvironment.ts`。设为 `true` 仍须通过项目、数据库和窗口校验；不代表生产配置或调用授权 |
+
+限流实现没有读取 `KV_*`。Redis 缺失或不可用时，必须按调用路径判断：
+
+- Web helper（`apps/web/src/lib/rateLimit.ts:150` 起）及 proxy（`apps/web/src/proxy.ts:264` 起）在 `RATE_LIMIT_FAIL_CLOSED=true` 时返回失败/拒绝；否则放行，不提供内存限流。
+- API Redis helper（`packages/api/src/services/redisRateLimiter.ts:166` 起）按该变量返回成功或失败，但两者的 `limit` 均为 0。
+- API `checkRateLimitAsync`（`packages/api/src/middleware/securityChecks.ts:147`–`:153`）先检查 `limit=0` 并回退到 `getRateLimiter()`，之后才检查 Redis 的成功状态。因此即使设置 `RATE_LIMIT_FAIL_CLOSED=true`，这些 API 路径仍可能使用进程内存限流；多个实例不共享限额。不能把这个变量描述为全站保证拒绝请求的开关。
+
+本次只准确记录现状，不修改限流实现；后续限流行为变更须同步更新本表与 `.env.example`。
+
+### 保留但未生效的示例变量
+
+| 变量 | 状态与依据 |
+| --- | --- |
+| `RATE_LIMIT_AI_MAX_REQUESTS`、`RATE_LIMIT_AI_STREAM_MAX_REQUESTS` | 目前代码没有读取或没有生效：仅在 `envValidator.ts` 声明；`redisRateLimiter.ts` 使用固定限额 |
+| `CIRCUIT_BREAKER_HOURLY_LIMIT`、`CIRCUIT_BREAKER_DAILY_LIMIT` | 目前代码没有读取或没有生效：仅在 `envValidator.ts` 声明；`middleware/securityChecks.ts` 使用固定阈值 |
+| `REQUIRE_API_SIGNATURE`、`API_SIGNATURE_SECRET` | 辅助函数读取，但 `checkRequestSignature` 未接入生产请求路径；仅配置变量不会启用签名校验 |
 
 ### Stripe 阶段
 

@@ -2,9 +2,9 @@
 
 ## Summary
 
-This review focuses on the remaining admin and reporting paths that still perform frequent filtering or sorting on large tables. Existing coverage in [0007_performance_indexes.sql](/Volumes/灰度映画/灰度映画/美国怀俄明州-Grayscale Luminary LLC/Graylum_AI/GraylumAI_vercel/packages/db/migrations/0007_performance_indexes.sql) is solid for conversations, messages, credit transactions, tickets, and invitation basics, but admin-facing filters still leave several gaps.
+This review focuses on the remaining admin and reporting paths that still perform frequent filtering or sorting on large tables. Existing coverage in [0007_performance_indexes.sql](../../../packages/db/migrations/0007_performance_indexes.sql) is solid for conversations, messages, credit transactions, tickets, and invitation basics, but admin-facing filters still leave several gaps.
 
-The follow-up migration [0020_admin_query_indexes.sql](/Volumes/灰度映画/灰度映画/美国怀俄明州-Grayscale Luminary LLC/Graylum_AI/GraylumAI_vercel/packages/db/migrations/0020_admin_query_indexes.sql) adds the lowest-risk indexes that directly match current query patterns.
+The follow-up migration [0020_admin_query_indexes.sql](../../../packages/db/migrations/0020_admin_query_indexes.sql) adds the lowest-risk indexes that directly match current query patterns.
 
 ## Confirmed high-frequency query paths
 

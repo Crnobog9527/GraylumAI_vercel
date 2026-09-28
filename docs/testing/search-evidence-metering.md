@@ -1,4 +1,5 @@
 # Search intent, execution evidence and metering
+该脚本已于 2026-09-29 删除（已失效）
 
 Bounded repair from staging `1482a9f4185358711c7d6913a196e6c5e22e23c0`
 (actual merge of #405). Risk: **high** (search admission, billing evidence and

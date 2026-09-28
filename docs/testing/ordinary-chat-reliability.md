@@ -1,4 +1,5 @@
 # Ordinary chat request reliability
+该脚本已于 2026-09-29 删除（已失效）
 
 This bounded repair starts at admission-protected staging
 `cba14c40499d3f770f7a91b14e211b130278f6c6` (#403). Risk: **high** (request
