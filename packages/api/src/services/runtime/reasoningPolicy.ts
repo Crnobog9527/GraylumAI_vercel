@@ -19,6 +19,9 @@ const modelPolicies:Readonly<Record<string,Readonly<Partial<Record<RequestTarget
  // default_enabled=true, default_effort=xhigh. Omitting the field kept xhigh
  // thinking, which produced no public text within the 120s response bound.
  'qwen/qwen3.8-27b':Object.freeze({'latency-sensitive':Object.freeze({effort:'none' as const})}),
+ // Owner 2026-09-28/29: mentor model. AC-0 probe on the DeepInfra route with
+ // reasoning_effort "none": 84 provider responses, each reporting 0 reasoning tokens.
+ 'deepseek/deepseek-v4.1-flash':Object.freeze({'latency-sensitive':Object.freeze({effort:'none' as const})}),
 });
 
 export function reasoningFor(target:RequestTarget,model:string):ReasoningPolicy{
