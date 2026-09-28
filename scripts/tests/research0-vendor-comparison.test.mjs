@@ -6,9 +6,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { assertOutsideRepository, main, parseArgs } from '../research0-vendor-comparison.mjs';
 import { count, summarize, timestamp } from '../research0/metrics.mjs';
-import { QUERIES } from '../research0/queries.mjs';
+import { QUERIES, SUPPLEMENTAL_QUERIES } from '../research0/queries.mjs';
 import { formatReport } from '../research0/report.mjs';
-import { runComparison } from '../research0/runner.mjs';
+import { keyFor, runComparison } from '../research0/runner.mjs';
 import { TOTAL_CAP_USD, acquireLock, initLedger, loadLedger, reconcileAttempt, redactUrl, refusal, requestKey } from '../research0/safety.mjs';
 import { VENDORS } from '../research0/vendors.mjs';
 import { displayCount, normalizeTikhub, tikhubFailed } from '../research0/vendors/tikhubShapes.mjs';
@@ -619,6 +619,56 @@ test('reconcile marks exactly one ambiguous entry, sends nothing and validates i
   assert.equal(fetched, 0);
   assert.ok(logs.some(line => line.includes('reconciled vendor=fake')));
 }));
+
+test('confirmed failures may be re-sent only with an explicit reason; anything else stays blocked', async () => withTemp(async dir => {
+  const vendor = fakeVendor({ steps: query => [{ method: 'GET', url: `https://api.example.test/${query.id}`, worstCaseUsd: 0.1 }] });
+  const first = recordingFetch(() => new Response('{"code":402}', { status: 402 }));
+  const { ledger } = await run(dir, { vendor, fetchImpl: first.fetchImpl, qs: [queries[0]] });
+  const plain = recordingFetch(() => okBody());
+  const blocked = await run(dir, { vendor, fetchImpl: plain.fetchImpl, qs: [queries[0]], ledger });
+  assert.equal(plain.calls.length, 0);
+  assert.equal(blocked.report.vendors[0].queries[0].reason, 'ALREADY_ATTEMPTED_NEEDS_RECONCILIATION');
+  const retry = recordingFetch(() => okBody());
+  const retried = await runComparison({ vendors: [vendor], queries: [queries[0]], env: { FAKE_KEY: KEY }, live: true, fetchImpl: retry.fetchImpl,
+    ledger, outDir: dir, timeoutMs: 200, retryReason: 'topped up' });
+  assert.equal(retry.calls.length, 1);
+  assert.equal(retried.vendors[0].queries[0].status, 'OK');
+  assert.equal(ledger.entries.at(-1).retryReason, 'topped up');
+  const again = recordingFetch(() => okBody());
+  await runComparison({ vendors: [vendor], queries: [queries[0]], env: { FAKE_KEY: KEY }, live: true, fetchImpl: again.fetchImpl,
+    ledger, outDir: dir, timeoutMs: 200, retryReason: 'again' });
+  assert.equal(again.calls.length, 0, 'a request that has succeeded is never re-sent');
+  const shaky = fakeVendor({ id: 'shaky', steps: () => [{ method: 'GET', url: 'https://api.example.test/x', worstCaseUsd: 0.1 }] });
+  const lost = recordingFetch(() => { throw new TypeError('reset'); });
+  await run(dir, { vendor: shaky, fetchImpl: lost.fetchImpl, qs: [queries[0]], ledger });
+  const after = recordingFetch(() => okBody());
+  await runComparison({ vendors: [shaky], queries: [queries[0]], env: { FAKE_KEY: KEY }, live: true, fetchImpl: after.fetchImpl,
+    ledger, outDir: dir, timeoutMs: 200, retryReason: 'nope' });
+  assert.equal(after.calls.length, 0, 'unknown outcomes are never covered by the retry switch');
+}));
+
+test('a documented alias key is used and redacted like the primary name', async () => withTemp(async dir => {
+  const vendor = fakeVendor({ keyEnv: 'PRIMARY_KEY', keyEnvAliases: ['primary_alias'] });
+  assert.equal(keyFor(vendor, { primary_alias: KEY }), KEY);
+  assert.equal(keyFor(vendor, { PRIMARY_KEY: 'p', primary_alias: KEY }), 'p');
+  const { fetchImpl } = recordingFetch(url => new Response(JSON.stringify({ items: [], echo: url })));
+  const { report } = await run(dir, { vendor, fetchImpl, env: { primary_alias: KEY }, qs: [queries[0]] });
+  assert.equal(report.vendors[0].keyPresent, true);
+  for (const file of await filesUnder(dir)) assert.ok(!(await readFile(file, 'utf8')).includes(KEY), file);
+}));
+
+test('supplemental plans stay within every vendor cap and never touch social platforms with fetch', () => {
+  for (const vendor of VENDORS) {
+    const steps = SUPPLEMENTAL_QUERIES.flatMap(query => {
+      const planned = vendor.steps(query);
+      return Array.isArray(planned) ? planned : [];
+    });
+    assert.ok(steps.reduce((total, step) => total + step.worstCaseUsd, 0) <= 1, vendor.id);
+  }
+  for (const query of SUPPLEMENTAL_QUERIES.filter(item => item.type === 'fetch')) {
+    assert.ok(!/tiktok|douyin|instagram|x\.com|twitter|youtube|xiaohongshu|weibo|bilibili/.test(query.url), query.url);
+  }
+});
 
 test('application code never imports the comparison script', () => {
   const result = spawnSync('git', ['grep', '-l', '-i', '-e', 'research0', '--', 'apps', 'packages'], { cwd: repositoryRoot, encoding: 'utf8' });

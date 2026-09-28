@@ -6,6 +6,7 @@ export const FIELDS = {
   posts: ['id', 'url', 'title', 'author', 'publishedAt', 'views', 'likes', 'comments', 'shares'],
   keyword: ['id', 'url', 'title', 'author', 'publishedAt', 'views', 'likes', 'comments', 'shares'],
   web: ['url', 'title', 'snippet', 'publishedAt'],
+  fetch: ['url', 'title', 'publishedAt', 'language', 'contentChars'],
 };
 
 export const NOT_PROVIDED = '未提供';

@@ -246,7 +246,7 @@ function sum(values) {
  * Returns null when the call may be sent, otherwise the refusal reason. A zero
  * price is accepted only when the vendor documents the endpoint as free.
  */
-export function refusal(ledger, limits, worstCaseUsd, { documentedFree = false, key } = {}) {
+export function refusal(ledger, limits, worstCaseUsd, { documentedFree = false, key, retryConfirmedFailures = false } = {}) {
   if (typeof key !== 'string' || key.length === 0) return 'REQUEST_KEY_MISSING';
   // Re-checked here as well: an in-memory ledger with a broken amount must never pass a cap check.
   if (!validTotal(ledger.entries) || ledger.entries.some(entry => !nonNegative(entry.chargedUsd))) return 'LEDGER_TOTAL_INVALID';
@@ -256,7 +256,11 @@ export function refusal(ledger, limits, worstCaseUsd, { documentedFree = false, 
   if (blocking) return `VENDOR_HAS_UNRECONCILED_ATTEMPT ${describeAttempt(blocking)}`;
   // Any earlier attempt (succeeded, failed, unknown or never settled) needs a
   // person to reconcile it; the same paid request is never sent twice.
-  if (ledger.entries.some(entry => entry.requestKey === key)) return 'ALREADY_ATTEMPTED';
+  const earlier = ledger.entries.filter(entry => entry.requestKey === key);
+  // An explicit retry is allowed only when every earlier attempt was a confirmed,
+  // settled failure (e.g. HTTP 402 before a top-up); anything else stays blocked.
+  const onlyConfirmedFailures = earlier.every(entry => entry.state === 'settled' && entry.outcome === 'failed' && !entry.reconciled);
+  if (earlier.length > 0 && !(retryConfirmedFailures && onlyConfirmedFailures)) return 'ALREADY_ATTEMPTED';
   if (!Number.isFinite(worstCaseUsd) || worstCaseUsd < 0) return 'PRICE_UNKNOWN';
   if (worstCaseUsd === 0 && !documentedFree) return 'PRICE_UNKNOWN';
   const used = vendorUsage(ledger, limits.vendorId);
