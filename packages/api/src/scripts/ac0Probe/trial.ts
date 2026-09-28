@@ -46,6 +46,8 @@ export type TrialResult = {
   reasoningSeen: boolean;
   reasoningTokens?: number;
   referenceReads: number;
+  /** ask_question executions by the SDK; above 1 shows what stopAtToolNames did with several calls in one turn. */
+  askExecutions: number;
   finalOutput?: string;
   expectStepComplete?: boolean;
   calls: CallRecord[];
@@ -83,11 +85,15 @@ export async function runTrial(options: {
   });
   const model = new OpenAIChatCompletionsModel(client, config.model, {strictFeatureValidation: true});
   let referenceReads = 0;
+  let askExecutions = 0;
   const ask = tool({
     name: 'ask_question',
     description: 'Show the user one question card with suggested answers. Ends your turn.',
     parameters: askQuestionArgs, errorFunction: null,
-    execute: async args => JSON.stringify({card: 'question', ...args}),
+    execute: async args => {
+      askExecutions += 1;
+      return JSON.stringify({card: 'question', ...args});
+    },
   });
   const read = tool({
     name: 'read_reference',
@@ -104,10 +110,10 @@ export async function runTrial(options: {
   const agent = new Agent({
     name: 'AC-0 probe mentor', model, instructions, tools,
     toolUseBehavior: kind === 'text' ? 'run_llm_again' : {stopAtToolNames: ['ask_question']},
-    modelSettings: {
-      store: false, maxTokens: options.maxTokens, retry: {maxRetries: 0}, reasoning: {effort: config.effort},
-      ...(tools.length ? {parallelToolCalls: false} : {}),
-    },
+    // No parallelToolCalls: no catalogued route of the probed models declares
+    // parallel_tool_calls, so with require_parameters every route was ineligible
+    // (404). Several tool calls in one turn are counted instead (classify.ts).
+    modelSettings: {store: false, maxTokens: options.maxTokens, retry: {maxRetries: 0}, reasoning: {effort: config.effort}},
   });
   const runner = new Runner({model, tracingDisabled: true, traceIncludeSensitiveData: false});
   // One turn for ask trials: if the SDK tried to continue after ask_question,
@@ -159,7 +165,7 @@ export async function runTrial(options: {
     charsPerSecond: window > 0 ? chars / (window / 1000) : undefined,
     reasoningSeen: calls.some(call => call.facts.firstReasoningMs !== undefined) || reasoningTokens > 0,
     reasoningTokens: calls.some(call => call.facts.usage?.reasoningTokens !== undefined) ? reasoningTokens : undefined,
-    referenceReads, finalOutput,
+    referenceReads, askExecutions, finalOutput,
     ...(scenario.expectStepComplete !== undefined ? {expectStepComplete: scenario.expectStepComplete} : {}),
     calls,
   };

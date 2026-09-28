@@ -182,6 +182,9 @@ describe('live confirmation and key', () => {
       });
       expect(call.body.reasoning_effort).toBe('none');
       expect(call.body.store).toBe(false);
+      // Tool requests carry tools but never parallel_tool_calls, which no probed route declares.
+      expect(call.body.tools?.length).toBeGreaterThan(0);
+      expect('parallel_tool_calls' in call.body).toBe(false);
       expect(new Headers(call.init.headers).get('authorization')).toBe('Bearer ' + KEY);
     }
     const reference = outcome.results!.find(result => result.kind === 'reference')!;
@@ -248,6 +251,15 @@ describe('no retry and unknown results', () => {
     expect(priced.records[0]).toMatchObject({costSource: 'tokens_at_max_price', costUsd: (1000 * 0.3 + 100 * 3.75) / 1_000_000});
   });
 
+  it('refuses a body that carries parallel_tool_calls before any request', async () => {
+    const network = recording(async () => sseResponse(config.model, textDeltas('hi')));
+    const t = transport(network.upstream);
+    const withFlag = JSON.stringify({...JSON.parse(body('flag')), parallel_tool_calls: false});
+    await expect(t.fetch('http://127.0.0.1/ac0/chat/completions', {method: 'POST', body: withFlag}))
+      .rejects.toThrow('PROBE_REQUEST_DENIED:parallel_tool_calls');
+    expect(network.sent).toHaveLength(0);
+  });
+
   it('denies an identical request body inside one trial', async () => {
     const network = recording(async () => sseResponse(config.model, textDeltas('hi')));
     const t = transport(network.upstream);
@@ -290,8 +302,48 @@ describe('ask_question classification', () => {
     const valid = [{id: 'c', name: 'ask_question', arguments: '{"question":"Q?","options":["A","B"]}'}];
     expect(classifyAsk([call(valid), call([])], undefined, undefined)).toMatchObject({category: 'turn_not_ended', argsValid: true});
     expect(classifyAsk([call(valid)], 'MaxTurnsExceededError: Max turns (1) exceeded', undefined).category).toBe('turn_not_ended');
-    expect(classifyAsk([call([...valid, ...valid])], undefined, undefined)).toMatchObject({category: 'malformed', detail: 'multiple_tool_calls'});
     expect(classifyAsk([], undefined, 'budget').category).toBe('not_run');
+  });
+
+  it('counts several tool calls in one turn apart from malformed and checks the first call', () => {
+    const call = (toolCalls: Array<{id: string; name: string; arguments: string}>) => ({
+      sequence: 1, status: 'ok' as const, sentAtMs: 0, requestBytes: 1, dataCollection: 'deny' as const, boundUsd: 0,
+      facts: {content: '', reasoningChars: 0, toolCalls, done: true, malformedFrames: 0},
+    });
+    const valid = {id: 'c', name: 'ask_question', arguments: '{"question":"Q?","options":["A","B"]}'};
+    const broken = {id: 'd', name: 'ask_question', arguments: '{"question":"Q?"'};
+    expect(classifyAsk([call([valid, valid])], undefined, undefined)).toEqual({
+      category: 'multiple_calls', toolCalled: true, argsValid: false, turnEnded: true, textBeforeTool: false,
+      toolCallCount: 2, firstCallValidAsk: true,
+    });
+    expect(classifyAsk([call([broken, valid, valid])], undefined, undefined)).toMatchObject({
+      category: 'multiple_calls', toolCallCount: 3, firstCallValidAsk: false, detail: 'invalid_json',
+    });
+    expect(classifyAsk([call([valid])], undefined, undefined)).toMatchObject({category: 'correct', toolCallCount: 1});
+  });
+
+  it('runs a two-call turn through the SDK and records what stopAtToolNames did', async () => {
+    const id = await planId(base('--ask', '1'));
+    const args = {question: 'Who is it for?', options: ['Friends', 'Clients']};
+    const respond: Upstream = async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      const second = toolDeltas('ask_question', args, 'call_b').map(delta =>
+        ({tool_calls: (delta.tool_calls as Array<Record<string, unknown>>).map(part => ({...part, index: 1}))}));
+      return sseResponse(body.model, [...toolDeltas('ask_question', args, 'call_a'), ...second], {finish: 'tool_calls'});
+    };
+    const network = recording(respond);
+    const outcome = await runProbe([...base('--ask', '1', '--live'), '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
+    const result = outcome.results![0]!;
+    expect(result.outcome).toMatchObject({category: 'multiple_calls', toolCallCount: 2, firstCallValidAsk: true, turnEnded: true});
+    expect(result.calls).toHaveLength(1);
+    expect(network.sent).toHaveLength(1);
+    // @openai/agents 0.18.0 executes both calls, then stops with one card and no second provider call.
+    expect(result.askExecutions).toBe(2);
+    expect(JSON.parse(result.finalOutput!)).toMatchObject({card: 'question'});
+    const summary = JSON.parse(readFileSync(join(outcome.runDir!, 'summary.json'), 'utf8'));
+    expect(summary.configs[0].ask.counts).toMatchObject({multiple_calls: 1, malformed: 0, correct: 0});
+    expect(summary.configs[0].ask.multipleCalls).toMatchObject({trials: 1, callsPerTrial: {2: 1}, firstCallValidAsk: 1, turnEnded: 1});
+    expect(readFileSync(join(outcome.runDir!, 'summary.md'), 'utf8')).toContain('## Several tool calls in one turn');
   });
 
   async function classify(respond: Upstream) {
