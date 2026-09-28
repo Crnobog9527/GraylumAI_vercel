@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -215,11 +215,16 @@ test('missing fields are reported as not provided, never as zero', () => {
   assert.equal(metrics.newestPublishedAt, '未提供');
 });
 
-test('raw results must stay outside the repository', () => {
-  assert.throws(() => assertOutsideRepository(path.join(repositoryRoot, 'tmp')), /INSIDE_REPOSITORY/);
-  assert.throws(() => assertOutsideRepository(repositoryRoot), /INSIDE_REPOSITORY/);
-  assertOutsideRepository(path.join(os.homedir(), '.graylum', 'research0'));
-});
+test('raw results must stay outside the repository, also through symlinks', async () => withTemp(async dir => {
+  await assert.rejects(assertOutsideRepository(path.join(repositoryRoot, 'tmp')), /INSIDE_REPOSITORY/);
+  await assert.rejects(assertOutsideRepository(repositoryRoot), /INSIDE_REPOSITORY/);
+  const link = path.join(dir, 'looks-outside');
+  await symlink(repositoryRoot, link);
+  await assert.rejects(assertOutsideRepository(link), /INSIDE_REPOSITORY/);
+  await assert.rejects(assertOutsideRepository(path.join(link, 'new', 'results')), /INSIDE_REPOSITORY/);
+  await assertOutsideRepository(path.join(dir, 'not-yet-created', 'results'));
+  await assertOutsideRepository(path.join(os.homedir(), '.graylum', 'research0'));
+}));
 
 test('the query set covers both regions and all three query types', () => {
   assert.equal(QUERIES.length, 10);

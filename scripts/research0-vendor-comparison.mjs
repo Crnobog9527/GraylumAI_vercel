@@ -15,6 +15,7 @@
 // monid catalogue phase only (Owner option a; add --confirm-paid-calls to send):
 //   node scripts/research0-vendor-comparison.mjs --monid-catalog
 
+import { realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,10 +73,29 @@ function value(argv, index, flag) {
   return found;
 }
 
-/** Raw responses and the ledger must never land inside the repository. */
-export function assertOutsideRepository(outDir, root = REPOSITORY_ROOT) {
-  const relative = path.relative(root, path.resolve(outDir));
-  if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
+function inside(root, target) {
+  const relative = path.relative(root, target);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+/** Resolves symlinks through the nearest existing ancestor; a not-yet-created tail is appended as is. */
+async function canonical(target) {
+  let existing = path.resolve(target);
+  const tail = [];
+  for (;;) {
+    try {
+      return path.join(await realpath(existing), ...tail);
+    } catch (error) {
+      if (error?.code !== 'ENOENT' || path.dirname(existing) === existing) throw new Error('RESEARCH0_OUT_DIR_UNRESOLVABLE');
+      tail.unshift(path.basename(existing));
+      existing = path.dirname(existing);
+    }
+  }
+}
+
+/** Raw responses and the ledger must never land inside the repository, also not through a symlink. */
+export async function assertOutsideRepository(outDir, root = REPOSITORY_ROOT) {
+  if (inside(root, path.resolve(outDir)) || inside(await realpath(root), await canonical(outDir))) {
     throw new Error('RESEARCH0_OUT_DIR_INSIDE_REPOSITORY');
   }
 }
@@ -84,7 +104,7 @@ export async function main(argv = process.argv.slice(2), { env = process.env, fe
   const args = parseArgs(argv);
   // Result retrieval only follows runs that were already paid; it has no dry-run meaning.
   if (args.monidResults && !args.live) throw new Error('RESEARCH0_MONID_RESULTS_NEEDS_CONFIRMATION');
-  assertOutsideRepository(args.outDir);
+  await assertOutsideRepository(args.outDir);
   // --aisa-alternates swaps the vendor list for AIsa's second-round alternate endpoints only.
   const vendors = args.aisaAlternates ? [aisaAlternates] : pick(VENDORS, args.vendors, 'vendor');
   const queries = pick(QUERIES, args.queries, 'query');
