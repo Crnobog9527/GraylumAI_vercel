@@ -20,11 +20,21 @@ ORM: Drizzle
 
 ### Running Migrations
 
-Follow the reviewed staging rebuild and migration procedure in
-[`STAGING_REPRODUCIBILITY.md`](./STAGING_REPRODUCIBILITY.md).
-The migration source is `packages/db/migrations/`; do not apply migrations by
-pasting individual files into SQL Editor without that procedure and the required
-environment-specific approval. The staging runbook is not a production procedure.
+For a routine incremental migration, follow only the current task's reviewed,
+environment-specific migration plan under [AGENTS.md](../../AGENTS.md): identify
+the exact target and pending files from `packages/db/migrations/`, obtain the
+required approval, apply only the approved migration scope, and verify its
+postconditions. Record execution evidence in the
+[raw SQL migration ledger](./RAW_SQL_MIGRATION_LEDGER.md) where applicable.
+Do not treat this section as approval to paste arbitrary SQL into SQL Editor.
+
+[`STAGING_REPRODUCIBILITY.md`](./STAGING_REPRODUCIBILITY.md) is a separate checklist
+for an explicitly scoped fresh staging rebuild or drift recovery, not the routine
+incremental migration procedure. Its schema-push and seed steps must not be run
+as implicit prerequisites to an incremental migration. Table structure is
+authoritative in `packages/db/migrations/`, not `schema.ts`; any rebuild or repair
+still needs its own reviewed scope and applicable approval. The staging checklist
+is not a production procedure.
 
 ### User Management
 
