@@ -9,7 +9,7 @@ import { count, summarize, timestamp } from '../research0/metrics.mjs';
 import { QUERIES } from '../research0/queries.mjs';
 import { formatReport } from '../research0/report.mjs';
 import { runComparison } from '../research0/runner.mjs';
-import { TOTAL_CAP_USD, acquireLock, initLedger, loadLedger, redactUrl, refusal, requestKey } from '../research0/safety.mjs';
+import { TOTAL_CAP_USD, acquireLock, initLedger, loadLedger, reconcileAttempt, redactUrl, refusal, requestKey } from '../research0/safety.mjs';
 import { VENDORS } from '../research0/vendors.mjs';
 import { displayCount, normalizeTikhub, tikhubFailed } from '../research0/vendors/tikhubShapes.mjs';
 import { reanalyze } from '../research0/analyze.mjs';
@@ -392,7 +392,14 @@ test('P1-1: an unknown outcome is never re-sent, even under another query id', a
   const renamed = fakeVendor({ steps: () => [{ method: 'GET', url: 'https://api.example.test/search?a=1&b=2', worstCaseUsd: 0.1 }] });
   const again = await run(dir, { vendor: renamed, fetchImpl: second.fetchImpl, qs: [{ id: 'B' }] });
   assert.equal(second.calls.length, 0);
-  assert.equal(again.report.vendors[0].queries[0].reason, 'ALREADY_ATTEMPTED_NEEDS_RECONCILIATION');
+  assert.match(again.report.vendors[0].queries[0].reason, /^VENDOR_HAS_UNRECONCILED_ATTEMPT vendor=fake at=\S+ key=[0-9a-f]{12}$/);
+  // After a person reconciles it, other requests may go out, but this one stays blocked.
+  const ledger = await loadLedger(path.join(dir, 'ledger.json'), { requireExisting: true });
+  await reconcileAttempt(ledger, { keyPrefix: ledger.entries[0].requestKey.slice(0, 12), actualUsd: 0, note: 'not billed per dashboard' });
+  const third = recordingFetch(() => okBody());
+  const after = await run(dir, { vendor: renamed, fetchImpl: third.fetchImpl, qs: [{ id: 'B' }], ledger });
+  assert.equal(third.calls.length, 0);
+  assert.equal(after.report.vendors[0].queries[0].reason, 'ALREADY_ATTEMPTED_NEEDS_RECONCILIATION');
 }));
 
 test('request keys follow request substance, not ids, parameter order or credentials', () => {
@@ -554,6 +561,64 @@ test('monid result plan always keeps the last slot for the balance read', () => 
   assert.equal(tooMany.length, 11);
   assert.equal(tooMany.at(-1).label, 'BALANCE_RESULTS');
 });
+
+test('an ambiguous attempt blocks the whole vendor, balance reads included, but not other vendors', async () => withTemp(async dir => {
+  const balance = { spec: () => ({ method: 'GET', url: 'https://api.example.test/balance', worstCaseUsd: 0, documentedFree: true }), read: () => 1 };
+  const shaky = fakeVendor({ balance });
+  const other = fakeVendor({ id: 'other', keyEnv: 'OTHER_KEY' });
+  const { calls, fetchImpl } = recordingFetch((url, init) => {
+    if (url.includes('q=T1') && init.headers['x-api-key'] === KEY) throw new TypeError('socket hang up');
+    return url.endsWith('/balance') ? new Response('{"b":1}') : okBody();
+  });
+  const book = await loadLedger(path.join(dir, 'ledger.json'));
+  const report = await runComparison({ vendors: [shaky, other], queries, env: { FAKE_KEY: KEY, OTHER_KEY: 'k2' }, live: true,
+    fetchImpl, ledger: book, outDir: dir, timeoutMs: 200 });
+  const sentForFake = calls.filter(call => call.url.includes('example.test') && !call.init.headers.Authorization.includes('k2'));
+  assert.deepEqual(sentForFake.map(call => new URL(call.url).pathname + new URL(call.url).search).slice(0, 2), ['/balance', '/search?q=T1&api_key=' + KEY]);
+  assert.equal(sentForFake.length, 2, 'no further query and no closing balance read for the blocked vendor');
+  assert.deepEqual(report.vendors[0].queries.map(query => query.status), ['UNKNOWN', 'NOT_RUN', 'NOT_RUN']);
+  assert.match(report.vendors[0].queries[1].reason, /^VENDOR_HAS_UNRECONCILED_ATTEMPT vendor=fake /);
+  assert.ok(!report.vendors[0].queries[1].reason.includes(KEY));
+  assert.deepEqual(report.vendors[1].queries.map(query => query.status), ['OK', 'OK', 'OK']);
+}));
+
+test('monid catalogue: a timed-out balance read blocks every rerun until reconciled', async () => withTemp(async dir => {
+  const ledger = await loadLedger(path.join(dir, 'ledger.json'));
+  const hang = recordingFetch((url, init) => new Promise((resolve, reject) => {
+    init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+  }));
+  const first = await runMonidCatalog({ key: KEY, fetchImpl: hang.fetchImpl, ledger, outDir: dir, timeoutMs: 50 });
+  assert.equal(hang.calls.length, 1);
+  assert.equal(first.stopped.at, 'BALANCE_0');
+  const again = recordingFetch(() => okBody());
+  const rerun = await runMonidCatalog({ key: KEY, fetchImpl: again.fetchImpl, ledger, outDir: dir, timeoutMs: 50 });
+  assert.equal(again.calls.length, 0, 'a new run id must not bypass the unknown balance read');
+  assert.match(rerun.stopped.reason, /^VENDOR_HAS_UNRECONCILED_ATTEMPT vendor=monid /);
+}));
+
+test('reconcile marks exactly one ambiguous entry, sends nothing and validates its input', async () => withTemp(async dir => {
+  const file = path.join(dir, 'ledger.json');
+  const key = 'ab'.repeat(32);
+  const entries = [{ vendor: 'fake', requestKey: key, chargedUsd: 0.1, worstCaseUsd: 0.1, state: 'settled', outcome: 'unknown', at: 't' }];
+  await writeFile(file, JSON.stringify({ version: 1, entries }));
+  const logs = [];
+  let fetched = 0;
+  const cli = argv => main([...argv, '--out', dir], { fetchImpl: async () => { fetched += 1; }, log: line => logs.push(line) });
+  await assert.rejects(cli(['--reconcile', 'abab', '--actual-usd', '0', '--note', 'x']), /KEY_PREFIX_INVALID/);
+  await assert.rejects(cli(['--reconcile', key.slice(0, 12), '--actual-usd', '-1', '--note', 'x']), /AMOUNT_INVALID/);
+  await assert.rejects(cli(['--reconcile', key.slice(0, 12), '--actual-usd', '0']), /NOTE_REQUIRED/);
+  await assert.rejects(cli(['--reconcile', 'cd'.repeat(6), '--actual-usd', '0', '--note', 'x']), /MATCHES_0_ENTRIES/);
+  assert.ok(!(await readdir(dir)).includes('ledger.lock'), 'a failed reconcile never leaves the lock');
+  await cli(['--reconcile', key.slice(0, 12), '--actual-usd', '0.004', '--note', 'dashboard shows 0.004']);
+  const after = await loadLedger(file, { requireExisting: true });
+  assert.equal(after.entries[0].chargedUsd, 0.004);
+  assert.equal(after.entries[0].reconciled.bookedBeforeUsd, 0.1);
+  assert.equal(after.entries[0].basis, 'reconciled');
+  await assert.rejects(cli(['--reconcile', key.slice(0, 12), '--actual-usd', '0', '--note', 'again']), /NOT_UNRECONCILED/);
+  await assert.rejects(cli(['--reconcile', key.slice(0, 12), '--actual-usd', '0', '--note', 'x', '--confirm-paid-calls']), /SENDS_NOTHING/);
+  assert.equal(fetched, 0);
+  assert.ok(logs.some(line => line.includes('reconciled vendor=fake')));
+}));
 
 test('application code never imports the comparison script', () => {
   const result = spawnSync('git', ['grep', '-l', '-i', '-e', 'research0', '--', 'apps', 'packages'], { cwd: repositoryRoot, encoding: 'utf8' });

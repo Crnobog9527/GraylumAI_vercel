@@ -18,6 +18,7 @@ import {
 
 export const DEFAULT_TIMEOUT_MS = 60_000;
 const STOPPING_REFUSALS = new Set(['CALL_LIMIT_REACHED', 'VENDOR_USD_LIMIT_REACHED', 'TOTAL_USD_LIMIT_REACHED']);
+const UNRECONCILED = 'VENDOR_HAS_UNRECONCILED_ATTEMPT';
 
 function describeSpec(spec, secrets) {
   return {
@@ -126,6 +127,7 @@ async function runQuery(context, vendor, query, key, secrets) {
     const attemptKey = keyOf(vendor.id, spec);
     const refused = refusal(context.ledger, limits, spec.worstCaseUsd, { documentedFree: spec.documentedFree === true, key: attemptKey });
     if (refused === 'ALREADY_ATTEMPTED') return { status: 'NOT_RUN', reason: 'ALREADY_ATTEMPTED_NEEDS_RECONCILIATION', calls, latencyMs };
+    if (refused?.startsWith(UNRECONCILED)) return { status: 'NOT_RUN', reason: refused, stopVendor: true, calls, latencyMs };
     if (refused) return { status: 'BUDGET_REFUSED', reason: refused, stopVendor: STOPPING_REFUSALS.has(refused), calls, latencyMs };
     // Booked (and written to disk) before dispatch; a failed write throws and nothing is sent.
     const record = await reserve(context.ledger, {
@@ -208,7 +210,9 @@ export async function runComparison({ vendors, queries, env, live, fetchImpl, le
       if (!live) entry.queries.push({ queryId: query.id, status: 'DRY_RUN' });
       else if (vendor.blockedReason) entry.queries.push({ queryId: query.id, status: 'NOT_RUN', reason: vendor.blockedReason });
       else if (!keyPresent) entry.queries.push({ queryId: query.id, status: 'NOT_RUN', reason: 'MISSING_KEY' });
-      else if (stopReason) entry.queries.push({ queryId: query.id, status: 'BUDGET_REFUSED', reason: stopReason });
+      else if (stopReason) {
+        entry.queries.push({ queryId: query.id, status: stopReason.startsWith(UNRECONCILED) ? 'NOT_RUN' : 'BUDGET_REFUSED', reason: stopReason });
+      }
       else {
         const result = await runQuery(context, vendor, query, key, secrets);
         if (result.stopVendor) stopReason = result.reason;

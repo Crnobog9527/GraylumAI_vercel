@@ -5,6 +5,8 @@
 //
 // Dry run (default, sends nothing):
 //   node scripts/research0-vendor-comparison.mjs
+// After a person checks an ambiguous attempt in the vendor's books (sends nothing):
+//   node scripts/research0-vendor-comparison.mjs --reconcile <key prefix> --actual-usd 0.01 --note "checked in dashboard"
 // Create the ledger once before the first paid run (paid runs refuse without it):
 //   node scripts/research0-vendor-comparison.mjs --init-ledger
 // Paid run, keys loaded from the Owner's file without printing it:
@@ -26,7 +28,9 @@ import { runMonidResults } from './research0/monidResults.mjs';
 import { QUERIES } from './research0/queries.mjs';
 import { formatReport } from './research0/report.mjs';
 import { runComparison } from './research0/runner.mjs';
-import { TOTAL_CAP_USD, VENDOR_CAP_USD, acquireLock, initLedger, loadLedger } from './research0/safety.mjs';
+import {
+  TOTAL_CAP_USD, VENDOR_CAP_USD, acquireLock, checkReconcileArgs, describeAttempt, initLedger, loadLedger, reconcileAttempt,
+} from './research0/safety.mjs';
 import { VENDORS } from './research0/vendors.mjs';
 import { aisaAlternates } from './research0/vendors/aisa.mjs';
 
@@ -46,6 +50,7 @@ function pick(all, csv, label) {
 export function parseArgs(argv) {
   const args = {
     live: false, reanalyze: false, markdown: false, monidCatalog: false, initLedger: false, aisaAlternates: false, monidResults: false,
+    reconcile: null, actualUsd: null, note: null,
     vendors: null, queries: null, outDir: DEFAULT_OUT_DIR,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -57,6 +62,9 @@ export function parseArgs(argv) {
     else if (arg === '--init-ledger') args.initLedger = true;
     else if (arg === '--aisa-alternates') args.aisaAlternates = true;
     else if (arg === '--monid-results') args.monidResults = true;
+    else if (arg === '--reconcile') args.reconcile = value(argv, ++index, arg);
+    else if (arg === '--actual-usd') args.actualUsd = Number(value(argv, ++index, arg));
+    else if (arg === '--note') args.note = value(argv, ++index, arg);
     else if (arg === '--vendors') args.vendors = value(argv, ++index, arg);
     else if (arg === '--queries') args.queries = value(argv, ++index, arg);
     else if (arg === '--out') args.outDir = path.resolve(value(argv, ++index, arg));
@@ -120,6 +128,7 @@ export async function main(argv = process.argv.slice(2), { env = process.env, fe
     return offline;
   }
   const ledgerFile = path.join(args.outDir, 'ledger.json');
+  if (args.reconcile !== null) return reconcile(args, ledgerFile, log);
   if (args.initLedger) {
     await initLedger(ledgerFile);
     log(`RESEARCH-0 ledger created at ${ledgerFile}`);
@@ -155,6 +164,25 @@ export async function main(argv = process.argv.slice(2), { env = process.env, fe
     log(args.markdown ? formatMarkdown(report, queries) : formatReport(report));
     return report;
   });
+}
+
+/**
+ * Marks one ambiguous ledger entry as reconciled after a person checked the
+ * vendor's books. Sends nothing; runs under the ledger lock like a paid run.
+ */
+async function reconcile(args, ledgerFile, log) {
+  if (args.live) throw new Error('RESEARCH0_RECONCILE_SENDS_NOTHING');
+  const request = { keyPrefix: args.reconcile, actualUsd: args.actualUsd, note: args.note };
+  checkReconcileArgs(request);
+  // No request is sent and the ledger is replaced atomically, so the lock is always released.
+  const lock = await acquireLock(args.outDir);
+  try {
+    const entry = await reconcileAttempt(await loadLedger(ledgerFile, { requireExisting: true }), request);
+    log(`RESEARCH-0 reconciled ${describeAttempt(entry)} actual=${entry.chargedUsd} USD`);
+    return entry;
+  } finally {
+    await lock.release();
+  }
 }
 
 /** The lock is released only after a clean finish; an aborted run leaves it for a person. */

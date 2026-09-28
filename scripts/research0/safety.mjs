@@ -110,7 +110,53 @@ const nonEmpty = value => typeof value === 'string' && value.length > 0;
 export function validEntry(entry) {
   return Boolean(entry) && nonEmpty(entry.vendor) && nonEmpty(entry.requestKey)
     && nonNegative(entry.chargedUsd) && nonNegative(entry.worstCaseUsd)
-    && (entry.state === 'dispatched' || entry.state === 'settled');
+    && (entry.state === 'dispatched' || entry.state === 'settled')
+    && (entry.reconciled === undefined || validReconciliation(entry.reconciled));
+}
+
+function validReconciliation(value) {
+  return Boolean(value) && nonEmpty(value.at) && nonNegative(value.actualUsd) && nonEmpty(value.note);
+}
+
+/**
+ * An attempt whose outcome is not known (unknown result, or dispatched and
+ * never settled) until a person reconciles it with --reconcile.
+ */
+export function unreconciledAttempt(ledger, vendorId) {
+  return ledger.entries.find(entry => entry.vendor === vendorId && !entry.reconciled
+    && (entry.state === 'dispatched' || entry.outcome === 'unknown')) ?? null;
+}
+
+/** Names the blocking entry for a person: vendor, time and key prefix, never the request itself. */
+export function describeAttempt(entry) {
+  return `vendor=${entry.vendor} at=${entry.at ?? '?'} key=${String(entry.requestKey).slice(0, 12)}`;
+}
+
+/**
+ * The only way to release a vendor after an ambiguous attempt: mark exactly
+ * one unreconciled entry, identified by a key prefix, with the checked real
+ * charge and a note. Sends nothing; the same request stays ALREADY_ATTEMPTED.
+ */
+export function checkReconcileArgs({ keyPrefix, actualUsd, note }) {
+  if (typeof keyPrefix !== 'string' || !/^[0-9a-f]{12,64}$/.test(keyPrefix)) throw new Error('RESEARCH0_RECONCILE_KEY_PREFIX_INVALID');
+  if (!nonNegative(actualUsd)) throw new Error('RESEARCH0_RECONCILE_AMOUNT_INVALID');
+  if (!nonEmpty(note) || note.trim() === '') throw new Error('RESEARCH0_RECONCILE_NOTE_REQUIRED');
+}
+
+export async function reconcileAttempt(ledger, { keyPrefix, actualUsd, note, now = () => new Date() }) {
+  checkReconcileArgs({ keyPrefix, actualUsd, note });
+  const matches = ledger.entries.filter(entry => entry.requestKey.startsWith(keyPrefix));
+  if (matches.length !== 1) throw new Error(`RESEARCH0_RECONCILE_MATCHES_${matches.length}_ENTRIES`);
+  const [entry] = matches;
+  if (entry.reconciled || !(entry.state === 'dispatched' || entry.outcome === 'unknown')) {
+    throw new Error('RESEARCH0_RECONCILE_ENTRY_NOT_UNRECONCILED');
+  }
+  entry.reconciled = { at: now().toISOString(), actualUsd, note: note.trim(), bookedBeforeUsd: entry.chargedUsd };
+  entry.state = 'settled';
+  entry.chargedUsd = actualUsd;
+  entry.basis = 'reconciled';
+  await saveLedger(ledger);
+  return entry;
 }
 
 function validTotal(entries) {
@@ -204,6 +250,10 @@ export function refusal(ledger, limits, worstCaseUsd, { documentedFree = false, 
   if (typeof key !== 'string' || key.length === 0) return 'REQUEST_KEY_MISSING';
   // Re-checked here as well: an in-memory ledger with a broken amount must never pass a cap check.
   if (!validTotal(ledger.entries) || ledger.entries.some(entry => !nonNegative(entry.chargedUsd))) return 'LEDGER_TOTAL_INVALID';
+  // An ambiguous attempt blocks every new request to that vendor, balance reads
+  // included, until a person reconciles it; other vendors are unaffected.
+  const blocking = unreconciledAttempt(ledger, limits.vendorId);
+  if (blocking) return `VENDOR_HAS_UNRECONCILED_ATTEMPT ${describeAttempt(blocking)}`;
   // Any earlier attempt (succeeded, failed, unknown or never settled) needs a
   // person to reconcile it; the same paid request is never sent twice.
   if (ledger.entries.some(entry => entry.requestKey === key)) return 'ALREADY_ATTEMPTED';
