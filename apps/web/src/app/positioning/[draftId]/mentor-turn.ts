@@ -91,6 +91,58 @@ export function openingRequest(draftId: string, roundId: string, stepId: string,
   };
 }
 
+/**
+ * True once the execution will not change any more. `pending` means another
+ * reader (for example the interrupted first stream) still owns a running
+ * execution: its result is not known yet.
+ */
+export function isTerminalTurn(result: AgentTurnOutcome) {
+  return result.state !== "pending";
+}
+
+/**
+ * What happens to the retained envelope after a resumed or resent turn
+ * returns. A terminal outcome releases it. A still-running execution keeps it,
+ * with its execution id, so the next explicit "继续核对这条原请求" resumes that
+ * execution; the page never polls or retries by itself.
+ */
+export function envelopeAfterTurn(
+  raw: string | null,
+  requestId: string,
+  executionId: string | undefined,
+  result: AgentTurnOutcome,
+): { release: true } | { release: false; next: string | null } {
+  if (isTerminalTurn(result)) return { release: true };
+  return { release: false, next: executionId ? envelopeWithExecution(raw, requestId, executionId) : null };
+}
+
+type EnvelopeStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+/** Record the admitted execution id in the envelope stored under `key`, if it is still this request's. */
+export function retainExecution(storage: EnvelopeStorage, key: string, requestId: string, executionId: string) {
+  const next = envelopeWithExecution(storage.getItem(key), requestId, executionId);
+  if (next) storage.setItem(key, next);
+}
+
+/**
+ * Apply `envelopeAfterTurn` to the stored envelope. Returns true when the turn
+ * is terminal; only this request's envelope (or an unreadable one) is removed.
+ */
+export function settleEnvelope(
+  storage: EnvelopeStorage,
+  key: string,
+  requestId: string,
+  executionId: string | undefined,
+  result: AgentTurnOutcome,
+) {
+  const raw = storage.getItem(key);
+  const after = envelopeAfterTurn(raw, requestId, executionId, result);
+  const owner = raw === null ? null : parseStepEnvelope(raw)?.request.requestId;
+  if (after.release && (owner === requestId || owner === undefined)) storage.removeItem(key);
+  else if (!after.release && after.next) storage.setItem(key, after.next);
+  return after.release;
+}
+
 export const STREAM_INTERRUPTED = "OPC_EXECUTION_STREAM_INTERRUPTED";
 
 /**

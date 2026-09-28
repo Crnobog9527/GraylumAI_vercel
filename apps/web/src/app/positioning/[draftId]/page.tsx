@@ -18,7 +18,7 @@ import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-resp
 import { liveReplyAfter, livePhaseNotice, mentorReplyDisplay, questionCardStatus, startLiveReply, type LiveReply } from "./agent-turn-display";
 import { QuestionCardView } from "@/components/opc/question-card";
 import type { AgentTurnEvent, AgentTurnOutcome } from "@repo/api/src/shared/agentTurn";
-import { envelopeWithExecution, openingRequest, parseStepEnvelope, readAgentTurn, turnResultNotice } from "./mentor-turn";
+import { openingRequest, parseStepEnvelope, readAgentTurn, retainExecution, settleEnvelope, turnResultNotice } from "./mentor-turn";
 import type { MentorRequest, MentorStepEnvelope } from "./mentor-turn";
 import {
   confirmationActionIsRedundant,
@@ -937,18 +937,17 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if (!request.input?.trim()) throw new Error("OPC_INPUT_REQUIRED");
     // An admitted request resumes its execution; otherwise the same request is
     // resent and the server replays its admission. Neither dispatches twice.
-    if (fixed.executionId) await execute.mutateAsync({ executionId: fixed.executionId });
-    else await mentorTurn(request, executionId => {
-      const next = envelopeWithExecution(sessionStorage.getItem(key), request.requestId, executionId);
-      if (next) sessionStorage.setItem(key, next);
-    });
+    let executionId = fixed.executionId;
+    const result = executionId ? await execute.mutateAsync({ executionId })
+      : await mentorTurn(request, id => { executionId = id; retainExecution(sessionStorage, key, request.requestId, id); });
     // Read the turn binding and its execution together while the retained
     // envelope still blocks automatic opening. Clearing the envelope first
     // lets that effect race an explicit first message on a manual draft.
     const [draftRead, historyRead] = await Promise.all([read.refetch(), history.refetch()]);
     if (draftRead.error || !draftRead.data || historyRead.error || !historyRead.data)
       throw new Error('OPC_MENTOR_READBACK_UNAVAILABLE');
-    sessionStorage.removeItem(key);
+    // A still-running execution keeps its envelope and pending bubble until an explicit resume sees a terminal result.
+    if (!settleEnvelope(sessionStorage, key, request.requestId, executionId, result)) return;
     // Retire only this pending bubble; never touch the next editable draft.
     setPendingBubble(old=>old?.requestId===request.requestId?null:old);
     setLiveReply(null);

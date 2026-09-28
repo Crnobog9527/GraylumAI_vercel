@@ -4,10 +4,14 @@ import type { AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
 import { OPENING_INPUT, openingRequestId } from "@repo/api/src/shared/opcQuestions";
 import {
   STREAM_INTERRUPTED,
+  envelopeAfterTurn,
   envelopeWithExecution,
+  isTerminalTurn,
   openingRequest,
   parseStepEnvelope,
   readAgentTurn,
+  retainExecution,
+  settleEnvelope,
   turnResultNotice,
   type MentorRequest,
 } from "./mentor-turn";
@@ -187,6 +191,71 @@ describe("envelopeWithExecution", () => {
     expect(envelopeWithExecution(JSON.stringify({ request: { ...request, requestId: "other" } }), request.requestId, executionId)).toBeNull();
     expect(envelopeWithExecution("{broken", request.requestId, executionId)).toBeNull();
     expect(envelopeWithExecution(JSON.stringify({ request }), request.requestId, "not-an-id")).toBeNull();
+  });
+});
+
+function memoryStorage(initial: Record<string, string> = {}) {
+  const values = new Map(Object.entries(initial));
+  return {
+    values,
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => void values.set(key, value),
+    removeItem: (key: string) => void values.delete(key),
+  };
+}
+
+describe("isTerminalTurn and envelopeAfterTurn", () => {
+  it("treats only pending as still running", () => {
+    expect(isTerminalTurn({ state: "pending" })).toBe(false);
+    for (const state of ["completed", "cancelled", "cost_pending"] as const) expect(isTerminalTurn({ state })).toBe(true);
+  });
+
+  it("releases on a terminal outcome and keeps, with the execution id, on pending", () => {
+    const stored = JSON.stringify({ request });
+    expect(envelopeAfterTurn(stored, request.requestId, executionId, { state: "completed", body: "{}" })).toEqual({ release: true });
+    expect(envelopeAfterTurn(stored, request.requestId, executionId, { state: "cost_pending" })).toEqual({ release: true });
+    const kept = envelopeAfterTurn(stored, request.requestId, executionId, { state: "pending" });
+    expect(kept.release).toBe(false);
+    expect(JSON.parse((kept as { next: string }).next)).toEqual({ request, executionId });
+  });
+
+  it("keeps a pending envelope unchanged when the execution id is unknown or the envelope is someone else's", () => {
+    const stored = JSON.stringify({ request });
+    expect(envelopeAfterTurn(stored, request.requestId, undefined, { state: "pending" })).toEqual({ release: false, next: null });
+    expect(envelopeAfterTurn(stored, "other", executionId, { state: "pending" })).toEqual({ release: false, next: null });
+  });
+});
+
+describe("retainExecution and settleEnvelope", () => {
+  const key = "opc-step:" + draftId + ":audience";
+
+  it("records the admitted id, keeps the envelope while the execution runs, and releases it at a terminal result", () => {
+    const storage = memoryStorage({ [key]: JSON.stringify({ request, editingSnapshot: "x" }) });
+    retainExecution(storage, key, request.requestId, executionId);
+    expect(JSON.parse(storage.getItem(key)!)).toEqual({ request, editingSnapshot: "x", executionId });
+
+    expect(settleEnvelope(storage, key, request.requestId, executionId, { state: "pending" })).toBe(false);
+    expect(JSON.parse(storage.getItem(key)!)).toEqual({ request, editingSnapshot: "x", executionId });
+    // The next explicit resume reads the id back and resumes that execution.
+    expect(parseStepEnvelope(storage.getItem(key)!)?.executionId).toBe(executionId);
+
+    expect(settleEnvelope(storage, key, request.requestId, executionId, { state: "completed", body: "{}" })).toBe(true);
+    expect(storage.getItem(key)).toBeNull();
+  });
+
+  it("writes the id on pending even when the admitted event was never stored", () => {
+    const storage = memoryStorage({ [key]: JSON.stringify({ request }) });
+    expect(settleEnvelope(storage, key, request.requestId, executionId, { state: "pending" })).toBe(false);
+    expect(parseStepEnvelope(storage.getItem(key)!)?.executionId).toBe(executionId);
+  });
+
+  it("never touches an envelope that belongs to another request", () => {
+    const other = JSON.stringify({ request: { ...request, requestId: "other" } });
+    const storage = memoryStorage({ [key]: other });
+    retainExecution(storage, key, request.requestId, executionId);
+    expect(settleEnvelope(storage, key, request.requestId, executionId, { state: "pending" })).toBe(false);
+    expect(settleEnvelope(storage, key, request.requestId, executionId, { state: "completed" })).toBe(true);
+    expect(storage.getItem(key)).toBe(other);
   });
 });
 
