@@ -13,13 +13,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { classifyTask, classifyTaskComplexity, selectModel, needsRealtimeData } from './modelRouter';
 import { countTokens, quickEstimate } from './tokenCounter';
 import { getRateLimiter, DEFAULT_RATE_LIMIT_CONFIGS } from './rateLimiter';
-import { BillingService, calculateTokenCost, estimateRequestCost } from './billing';
-import { runDailyBillingReconciliation } from './billingReconciliation';
+import { testBillingPrededuct, testBillingIdempotency, testBillingReconcile } from './diagnosticsBilling';
 import { buildCachedPrompt } from './promptCacheBuilder';
 import { getChatRuntimeSettings } from './chatRuntime';
 import { getConfiguredProviderApiKeySource } from './providerUtils';
 import { logger } from '../lib/logger';
-import type { TokenUsage } from '../types/ai';
 
 // ============================================
 // 类型定义
@@ -98,8 +96,8 @@ const TEST_DEFINITIONS = [
   { id: 'ai_live_runtime_proof', name: '真实运行证据测试', category: 'ai' as DiagnosticCategory },
 
   // 计费功能测试 (3项)
-  { id: 'billing_prededuct', name: '预扣计费测试', category: 'billing' as DiagnosticCategory },
-  { id: 'billing_idempotency', name: '幂等性检查测试', category: 'billing' as DiagnosticCategory },
+  { id: 'billing_prededuct', name: '预扣记录只读检查', category: 'billing' as DiagnosticCategory },
+  { id: 'billing_idempotency', name: '幂等字段只读检查', category: 'billing' as DiagnosticCategory },
   { id: 'billing_reconcile', name: '余额对账测试', category: 'billing' as DiagnosticCategory },
 
   // 安全功能测试 (3项)
@@ -765,173 +763,6 @@ async function testAILiveRuntimeProof(ctx: DiagnosticContext): Promise<Diagnosti
 // ============================================
 // 计费功能测试
 // ============================================
-
-/**
- * 测试 6: 预扣计费测试 (修复 #26 - 验证实际 RPC 调用)
- */
-async function testBillingPrededuct(ctx: DiagnosticContext): Promise<DiagnosticTestResult> {
-  const testId = 'billing_prededuct';
-  const testName = '预扣计费测试';
-  const category: DiagnosticCategory = 'billing';
-
-  if (!ctx.userId) {
-    return {
-      testId, testName, category,
-      status: 'skipped',
-      message: '跳过: 未提供用户 ID',
-      latencyMs: 0
-    };
-  }
-
-  try {
-    const { result, latencyMs } = await measureLatency(async () => {
-      const testAmount = 1;
-      const requestId = crypto.randomUUID();
-
-      // 实际调用数据库 RPC
-      const { data, error } = await ctx.supabaseAdmin.rpc('atomic_pre_deduct', {
-        p_user_id: ctx.userId,
-        p_amount: testAmount,
-        p_reason: '诊断测试预扣',
-        p_request_id: requestId
-      });
-
-      if (error) throw error;
-
-      const deductResult = Array.isArray(data) ? data[0] : data;
-
-      // 立即退款以保持积分平衡
-      if (deductResult && deductResult.pre_deduct_id) {
-        await ctx.supabaseAdmin.rpc('atomic_refund', {
-          p_user_id: ctx.userId,
-          p_pre_deduct_id: deductResult.pre_deduct_id,
-          p_reason: '诊断测试自动退费'
-        });
-      }
-
-      return {
-        deductResult,
-        testAmount,
-        reconciled: true
-      };
-    });
-
-    return {
-      testId,
-      testName,
-      category,
-      status: 'passed',
-      message: `RPC 调用成功: 预扣 ${result.testAmount} 积分已自动退还`,
-      details: result,
-      latencyMs,
-    };
-  } catch (error) {
-    return {
-      testId,
-      testName,
-      category,
-      status: 'failed',
-      message: createDiagnosticFailureMessage('RPC 预扣失败'),
-      latencyMs: 0,
-    };
-  }
-}
-
-
-/**
- * 测试 7: 幂等性检查测试
- */
-async function testBillingIdempotency(ctx: DiagnosticContext): Promise<DiagnosticTestResult> {
-  const testId = 'billing_idempotency';
-  const testName = '幂等性检查测试';
-  const category: DiagnosticCategory = 'billing';
-
-  try {
-    const { result, latencyMs } = await measureLatency(async () => {
-      // 检查 RPC 函数是否存在
-      const { data: rpcCheck, error: rpcError } = await ctx.supabaseAdmin.rpc('atomic_pre_deduct', {
-        p_user_id: '00000000-0000-0000-0000-000000000000',
-        p_amount: 0,
-        p_reason: 'test',
-        p_request_id: 'test_idempotency_check',
-      });
-
-      // 如果 RPC 不存在会返回 404 错误
-      const rpcExists = !rpcError || !rpcError.message.includes('not exist');
-
-      return {
-        rpcExists,
-        rpcError: rpcError?.message,
-        idempotencySupported: rpcExists,
-      };
-    });
-
-    return {
-      testId,
-      testName,
-      category,
-      status: result.idempotencySupported ? 'passed' : 'warning',
-      message: result.idempotencySupported
-        ? '原子化 RPC 函数可用，支持幂等性'
-        : '原子化 RPC 不可用，使用乐观锁回退',
-      details: result,
-      latencyMs,
-    };
-  } catch (error) {
-    return {
-      testId,
-      testName,
-      category,
-      status: 'warning',
-      message: 'RPC 检查异常，使用乐观锁回退',
-      details: { hint: '请查看服务端日志' },
-      latencyMs: 0,
-    };
-  }
-}
-
-/**
- * 测试 8: 余额对账测试
- */
-async function testBillingReconcile(ctx: DiagnosticContext): Promise<DiagnosticTestResult> {
-  const testId = 'billing_reconcile';
-  const testName = '余额对账测试';
-  const category: DiagnosticCategory = 'billing';
-
-  try {
-    const { result, latencyMs } = await measureLatency(async () => {
-      const reconciliation = await runDailyBillingReconciliation(ctx.supabase);
-      return {
-        reconcileValid: reconciliation.success,
-        mismatches: reconciliation.mismatches,
-        summary: reconciliation.summary,
-        periodStart: reconciliation.periodStart,
-        periodEnd: reconciliation.periodEnd,
-      };
-    });
-
-    return {
-      testId,
-      testName,
-      category,
-      status: result.reconcileValid ? 'passed' : 'warning',
-      message: result.reconcileValid
-        ? `对账通过: 成功请求 ${result.summary.successfulAiRequests}, Token 统计 ${result.summary.tokenStatsCount}`
-        : `发现 ${result.mismatches.length} 条对账异常`,
-      details: result,
-      latencyMs,
-    };
-  } catch (error) {
-    return {
-      testId,
-      testName,
-      category,
-      status: 'error',
-      message: createDiagnosticFailureMessage(),
-      latencyMs: 0,
-    };
-  }
-}
 
 // ============================================
 // 安全功能测试

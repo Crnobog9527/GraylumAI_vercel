@@ -4,6 +4,7 @@ import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { router, adminProcedure } from '../trpc';
 import { logger } from '../lib/logger';
+import { createSafeInternalError } from '../lib/publicError';
 import { readOpenRouterCatalog } from '../services/models/openRouterCatalog';
 import { RUNTIME_MODEL_COLUMNS } from '../services/models/runtimeEligibility';
 import { TryRefused, tryReasoning } from '../services/models/tryReasoning';
@@ -67,7 +68,7 @@ export const modelReasoningRouter = router({
         return result;
       } catch (cause) {
         if (cause instanceof TryRefused) { lastTry.delete(input.modelId); throw new TRPCError({ code: 'BAD_REQUEST', message: cause.message }); }
-        throw cause;
+        throw createSafeInternalError(cause, '试用失败，请稍后重试');
       }
     }),
 

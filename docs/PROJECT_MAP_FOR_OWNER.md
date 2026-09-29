@@ -21,6 +21,13 @@
 | 旧对话 | `/chat` | 旧引擎，主导航已不再指向它，但落地页、个人中心历史和后台还有链接；计划下线（v12 第 8 节） |
 | 管理后台 | `/admin/*` | 用户、模型、成本、Skill（模块）、会员计划、设置、诊断等 |
 
+模型管理的“思考设置”中，“试一次”通过 `modelReasoning.tryOnce` 调用
+`services/models/tryReasoning.ts`，使用已保存的用途设置和固定线路发送一个短问题，
+仅返回耗时、正文是否存在及供应商报告的用量/费用。该诊断由平台付费，不扣用户积分；
+仅管理员可用，同模型每个服务实例 30 秒一次，无自动重试，输出最多 4096 token，
+同时受模型和线路上限约束。预算不能在此上限内留足回答空间时直接拒绝。
+它不验证真实交互的工具调用；真实 staging 验证须另行批准。
+
 ## 3) 两套对话引擎（新功能只接新的）
 
 | | 新：统一 Runtime | 旧：`/chat` 链路 |
@@ -70,7 +77,7 @@
 
 以下材料可用于查找历史证据与技术要求，不能替代当前候选的验证、授权或完成判断；当前执行流程以 `AGENTS.md` 为准：
 
-- `docs/STRICT_SIGNOFF_STATUS.md`
+- `docs/archive/2026-09-c2/STRICT_SIGNOFF_STATUS.md`
 - `docs/RELEASE_PREP_CHECKLIST.md`
 - `docs/runbooks/PRE_RELEASE_REHEARSAL.md`
 - `docs/STRIPE_ENABLEMENT_CHECKLIST.md`

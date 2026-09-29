@@ -27,7 +27,8 @@ export type RateLimitType =
   | 'ai_stream'
   | 'api'
   | 'auth'
-  | 'anonymous';
+  | 'anonymous'
+  | 'ip';
 
 // ============================================
 // Redis 客户端
@@ -35,8 +36,25 @@ export type RateLimitType =
 
 let redis: Redis | null = null;
 
-function shouldFailClosedRateLimit(): boolean {
-  return process.env.RATE_LIMIT_FAIL_CLOSED === 'true';
+// All environments fail closed. Offline tests must explicitly mock Redis.
+// 500ms bounds admission latency during outages; it is not a provider timeout.
+const RATE_LIMIT_TIMEOUT_MS = 500;
+
+async function limitWithDeadline(limiter: Ratelimit, identifier: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      limiter.limit(identifier),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('RATE_LIMIT_TIMEOUT')), RATE_LIMIT_TIMEOUT_MS);
+      }),
+    ]);
+    // Upstash can report a timeout as success. Never treat that as admission.
+    if (result.reason === 'timeout') throw new Error('RATE_LIMIT_TIMEOUT');
+    return result;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function getRedis(): Redis | null {
@@ -50,7 +68,10 @@ function getRedis(): Redis | null {
   }
 
   try {
-    redis = new Redis({ url, token });
+    redis = new Redis({
+      url, token, retry: { retries: 0 },
+      signal: () => AbortSignal.timeout(RATE_LIMIT_TIMEOUT_MS),
+    });
     return redis;
   } catch {
     return null;
@@ -72,12 +93,23 @@ function getRateLimiter(type: RateLimitType): Ratelimit | null {
   let limiter: Ratelimit;
 
   switch (type) {
+    case 'ip':
+      limiter = new Ratelimit({
+        redis,
+        limiter: Ratelimit.slidingWindow(60, '1 m'),
+        prefix: 'graylum:middleware:',
+        analytics: true,
+        timeout: 0,
+      });
+      break;
+
     case 'ai':
       limiter = new Ratelimit({
         redis,
         limiter: Ratelimit.slidingWindow(30, '1 m'),
         prefix: 'graylum:ratelimit:ai:',
         analytics: true,
+        timeout: 0, // Disable SDK fail-open timer; use the deadline above.
       });
       break;
 
@@ -87,6 +119,7 @@ function getRateLimiter(type: RateLimitType): Ratelimit | null {
         limiter: Ratelimit.slidingWindow(20, '1 m'),
         prefix: 'graylum:ratelimit:ai_stream:',
         analytics: true,
+        timeout: 0, // Disable SDK fail-open timer; use the deadline above.
       });
       break;
 
@@ -96,6 +129,7 @@ function getRateLimiter(type: RateLimitType): Ratelimit | null {
         limiter: Ratelimit.slidingWindow(100, '1 m'),
         prefix: 'graylum:ratelimit:api:',
         analytics: true,
+        timeout: 0, // Disable SDK fail-open timer; use the deadline above.
       });
       break;
 
@@ -105,6 +139,7 @@ function getRateLimiter(type: RateLimitType): Ratelimit | null {
         limiter: Ratelimit.slidingWindow(5, '5 m'),
         prefix: 'graylum:ratelimit:auth:',
         analytics: true,
+        timeout: 0, // Disable SDK fail-open timer; use the deadline above.
       });
       break;
 
@@ -114,6 +149,7 @@ function getRateLimiter(type: RateLimitType): Ratelimit | null {
         limiter: Ratelimit.slidingWindow(20, '1 m'),
         prefix: 'graylum:ratelimit:anon:',
         analytics: true,
+        timeout: 0, // Disable SDK fail-open timer; use the deadline above.
       });
       break;
 
@@ -139,55 +175,27 @@ export async function checkRateLimit(
   try {
     const limiter = getRateLimiter(type);
 
-    if (!limiter) {
-      if (shouldFailClosedRateLimit()) {
-        return {
-          success: false,
-          limit: 0,
-          remaining: 0,
-          reset: Date.now() + 60_000,
-          retryAfter: 60,
-          reason: 'unavailable',
-        };
-      }
+    if (!limiter) throw new Error('RATE_LIMIT_UNCONFIGURED');
 
-      return {
-        success: true,
-        limit: 0,
-        remaining: 0,
-        reset: 0,
-      };
-    }
-
-    const result = await limiter.limit(identifier);
+    const result = await limitWithDeadline(limiter, identifier);
 
     return {
       success: result.success,
       limit: result.limit,
       remaining: result.remaining,
       reset: result.reset,
-      retryAfter: result.success ? undefined : Math.ceil((result.reset - Date.now()) / 1000),
+      retryAfter: result.success ? undefined : Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)),
       reason: result.success ? undefined : 'rate_limited',
     };
   } catch {
-    if (shouldFailClosedRateLimit()) {
-      logServerError('security', 'web_rate_limit_backend_unavailable_denying_request');
-      return {
-        success: false,
-        limit: 0,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-        retryAfter: 60,
-        reason: 'unavailable',
-      };
-    }
-
-    logServerError('security', 'web_rate_limit_backend_unavailable_allowing_request');
+    logServerError('security', 'web_rate_limit_backend_unavailable_denying_request');
     return {
-      success: true,
+      success: false,
       limit: 0,
       remaining: 0,
-      reset: 0,
+      reset: Date.now() + 60_000,
+      retryAfter: 60,
+      reason: 'unavailable',
     };
   }
 }

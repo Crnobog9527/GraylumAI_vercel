@@ -31,9 +31,27 @@ describe('tryRequest', () => {
     expect(tryMaxTokens({ mode: 'off', wire: 'reasoning' }, true, 8192)).toBe(256);
     expect(tryMaxTokens({ mode: 'effort', effort: 'high', wire: 'reasoning_effort' }, true, 8192)).toBe(4096);
     expect(tryMaxTokens({ mode: 'budget', maxTokens: 2000 }, true, 8192)).toBe(3024);
+    expect(tryMaxTokens({ mode: 'budget', maxTokens: 6000 }, true, 8192)).toBe(4096);
     expect(tryMaxTokens({ mode: 'provider_default' }, true, 8192)).toBe(4096);
     expect(tryMaxTokens({ mode: 'provider_default' }, false, 8192)).toBe(256);
     expect(tryMaxTokens({ mode: 'effort', effort: 'high', wire: 'reasoning_effort' }, true, 3000)).toBe(3000);
+  });
+
+  it.each([['off', 128], ['provider_default', 1024]])('honors the selected endpoint limit for %s', (mode, cap) => {
+    const purposes = { interactive: mode === 'off' ? { mode, wire: 'reasoning' } : { mode } };
+    const config = reasoning(purposes);
+    config.catalog.endpoints[0]!.maxCompletionTokens = Number(cap);
+    expect(tryRequest(row(purposes, { config: { reasoning: config } }), 'interactive').maxTokens).toBe(cap);
+  });
+
+  it('refuses an over-budget try before transport without rewriting the saved setting', async () => {
+    const value = row({ interactive: { mode: 'budget', maxTokens: 6000 } });
+    const transport = vi.fn();
+    await expect(tryReasoning(value, 'interactive', transport)).rejects.toThrow('4096');
+    expect(transport).not.toHaveBeenCalled();
+    expect(value.config.reasoning.purposes.interactive).toEqual({ mode: 'budget', maxTokens: 6000 });
+    expect(tryRequest(row({ interactive: { mode: 'budget', maxTokens: 3072 } }), 'interactive').body)
+      .toMatchObject({ max_tokens: 4096, reasoning: { max_tokens: 3072 } });
   });
 
   it('uses the provider default for an unset organizer and refuses other unset purposes', () => {
@@ -74,11 +92,11 @@ describe('tryReasoning', () => {
     expect(result).toMatchObject({ ok: true, hasText: false, truncated: true, reasoningTokens: 4096, maxTokens: 4096, firstTextMs: null });
   });
 
-  it('reports a provider refusal with its bounded message and never retries', async () => {
-    const transport = vi.fn(async () => new Response(JSON.stringify({ error: { message: 'No endpoints found that can handle the requested parameters.' } }), { status: 404 }));
+  it('reports a provider refusal without exposing raw diagnostics and never retries', async () => {
+    const transport = vi.fn(async () => new Response(JSON.stringify({ error: { message: 'SECRET_CANARY provider diagnostic' } }), { status: 404 }));
     const result = await tryReasoning(row(off), 'interactive', transport as unknown as typeof fetch);
     expect(transport).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({ ok: false, httpStatus: 404, error: 'HTTP_404', providerMessage: 'No endpoints found that can handle the requested parameters.' });
+    expect(result).toMatchObject({ ok: false, httpStatus: 404, error: 'HTTP_404', providerMessage: null });
   });
 
   it('reports a transport failure without a retry', async () => {

@@ -1,4 +1,5 @@
 # V3-BILL-2 — Provider-authoritative 统一计费开工契约
+该脚本已于 2026-09-29 删除（已失效）
 
 任务身份：`V3-BILL-2`；依赖：`BILL-1`；后继：`V3-RUNTIME`。任务映射见 [OPC 实施映射](V3-OPC-implementation.md)，产品规则来自[架构 §11](V3-OPC-growth-agent-architecture.md#11-provider-authoritative-聚合计费)与 [Master Plan 修订 §7](../Graylum_Master_Plan_v10.2_OPC_Growth_Agent_Amendment.md#7-provider-authoritative-原子计费)。
 

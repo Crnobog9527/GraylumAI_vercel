@@ -39,7 +39,7 @@ function harness(role: 'admin' | 'user', config: Record<string, unknown> | null)
 const deepseekOff = { interactive: { mode: 'off', wire: 'reasoning_effort' } } as const;
 
 describe('modelReasoning router', () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it('is administrator only', async () => {
     const t = harness('user', null);
@@ -98,6 +98,7 @@ describe('modelReasoning router', () => {
   });
 
   it('tries once per model within the interval, admin only, and a refusal does not use the slot', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(100000);
     const stored = { reasoning: { catalog: { ...catalog, endpoints: [{ ...catalog.endpoints[0]!, tag: 'deepinfra/fp8' }] }, route: 'deepinfra/fp8', purposes: deepseekOff } };
     const sse = 'data: ' + JSON.stringify({ id: 'g', model: 'deepseek/deepseek-v4.1-flash', choices: [{ index: 0, delta: { content: '你好' }, finish_reason: 'stop' }] }) + '\n\n' +
       'data: ' + JSON.stringify({ id: 'g', model: 'deepseek/deepseek-v4.1-flash', choices: [], usage: { completion_tokens: 2 } }) + '\n\ndata: [DONE]\n\n';
@@ -114,6 +115,9 @@ describe('modelReasoning router', () => {
     await expect(t.caller.tryOnce({ modelId, purpose: 'organize' })).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(t.updates).toEqual([]);
+    now.mockReturnValue(130000);
+    await expect(t.caller.tryOnce({ modelId, purpose: 'organize' })).resolves.toMatchObject({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

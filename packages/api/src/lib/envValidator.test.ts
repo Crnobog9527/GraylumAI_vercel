@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { validateEnv } from './envValidator';
+import { validateEnv, getSafeEnvSummary } from './envValidator';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -7,6 +7,8 @@ function applyBaseEnv(): void {
   process.env = {
     ...ORIGINAL_ENV,
     NODE_ENV: 'development',
+    UPSTASH_REDIS_REST_URL: 'https://redis.example.invalid',
+    UPSTASH_REDIS_REST_TOKEN: 'synthetic-redis-token',
     NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co',
     NEXT_PUBLIC_SUPABASE_ANON_KEY: 'a'.repeat(100),
     NEXT_PUBLIC_APP_URL: 'https://app.example.com',
@@ -109,5 +111,52 @@ describe('validateEnv', () => {
 
     expect(result.valid).toBe(false);
     expect(result.errors).toContain('启用 Stripe 时必须配置 SUPABASE_SERVICE_ROLE_KEY');
+  });
+});
+
+
+describe('fail-closed Redis configuration preflight', () => {
+  beforeEach(applyBaseEnv);
+  afterEach(() => { process.env = { ...ORIGINAL_ENV }; });
+  for (const environment of ['development', 'staging', 'production'] as const) {
+    it.each(['both', 'url', 'token'] as const)(`${environment}: rejects missing %s`, missing => {
+      process.env.NODE_ENV = environment;
+      process.env.RATE_LIMIT_FAIL_CLOSED = 'false';
+      if (missing !== 'token') delete process.env.UPSTASH_REDIS_REST_URL;
+      if (missing !== 'url') delete process.env.UPSTASH_REDIS_REST_TOKEN;
+      const result = validateEnv();
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(error => error.startsWith('UPSTASH_REDIS_REST_'))).toBe(true);
+    });
+    it(`${environment}: accepts the configured pair`, () => {
+      process.env.NODE_ENV = environment;
+      expect(validateEnv().valid).toBe(true);
+    });
+  }
+  it('Preview cannot bypass missing Redis with development NODE_ENV', () => {
+    process.env.VERCEL_ENV = 'preview';
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    expect(validateEnv().valid).toBe(false);
+  });
+  it.each([
+    ['UPSTASH_REDIS_REST_URL', 'not-a-url'],
+    ['UPSTASH_REDIS_REST_URL', 'redis://example.invalid'],
+    ['UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_URL=https://redis.invalid'],
+    ['UPSTASH_REDIS_REST_TOKEN', ''],
+    ['UPSTASH_REDIS_REST_TOKEN', '  '],
+    ['UPSTASH_REDIS_REST_TOKEN', 'UPSTASH_REDIS_REST_TOKEN=private-value'],
+  ])('rejects invalid %s without exposing its value', (key, value) => {
+    process.env[key] = value;
+    const result = validateEnv();
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(error => error.startsWith(key))).toBe(true);
+    expect(JSON.stringify(result)).not.toContain('private-value');
+  });
+  it('only exposes presence in the safe summary', () => {
+    const summary = getSafeEnvSummary();
+    expect(summary.UPSTASH_REDIS_URL_SET).toBe('✓');
+    expect(summary.UPSTASH_REDIS_TOKEN_SET).toBe('✓');
+    expect(JSON.stringify(summary)).not.toContain('synthetic-redis-token');
+    expect(JSON.stringify(summary)).not.toContain('redis.example.invalid');
   });
 });

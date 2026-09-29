@@ -130,7 +130,13 @@ export function allowedWires(catalog: CatalogSnapshot | null, route: string | nu
   return (["reasoning_effort", "reasoning"] as const).filter(wire => routeSupports(catalog, route, wire));
 }
 /** Modes a menu may offer for this catalog and route; the others would fail the checks. */
-export function allowedModes(catalog: CatalogSnapshot | null, route: string | null): Array<PurposeSetting["mode"]> {
+export function allowedModes(
+  catalog: CatalogSnapshot | null,
+  route: string | null,
+  purpose: ReasoningPurpose,
+): Array<PurposeSetting["mode"]> {
+  const endpoint = catalog?.endpoints.find(item => item.tag === route);
+  if (!endpoint || (purpose === "interactive" && !endpoint.supportedParameters.includes("tools"))) return [];
   const reasoning = catalog?.reasoning, modes: Array<PurposeSetting["mode"]> = ["provider_default"];
   const wire = allowedWires(catalog, route).length > 0;
   if (reasoning && wire && !reasoning.mandatory) modes.push("off");
@@ -164,6 +170,10 @@ export function checkReasoningConfig(config: ReasoningConfig, model: { maxTokens
     return issues;
   }
   const endpoint = catalog.endpoints.find(item => item.tag === config.route);
+  const routeLimit = endpoint?.maxCompletionTokens;
+  const limitedByRoute = routeLimit != null && routeLimit < model.maxTokens;
+  const outputLimit = limitedByRoute ? routeLimit : model.maxTokens;
+  const limitLabel = limitedByRoute ? "所选线路的输出上限" : "模型的输出上限";
   if (!config.route) add(null, "ROUTE_REQUIRED", "请选择供应商线路");
   else if (!endpoint) add(null, "ROUTE_UNKNOWN", "所选线路不在当前目录里，请重新读取目录后再选");
   if (config.purposes.interactive && endpoint && !endpoint.supportedParameters.includes("tools"))
@@ -188,10 +198,10 @@ export function checkReasoningConfig(config: ReasoningConfig, model: { maxTokens
       add(purpose, "THINKING_MANDATORY", `这个模型不能关闭思考，"${label}"请选择一个档位`);
     if (setting.mode === "budget" && !reasoning.supportsMaxTokens)
       add(purpose, "BUDGET_UNSUPPORTED", `这个模型不支持思考预算，"${label}"请改用档位`);
-    if (setting.mode === "budget" && setting.maxTokens + MIN_ANSWER_TOKENS_AFTER_BUDGET > model.maxTokens)
-      add(purpose, "BUDGET_TOO_LARGE", `思考预算加上至少 ${MIN_ANSWER_TOKENS_AFTER_BUDGET} 个回答 token 超过了模型的输出上限（${model.maxTokens}）`);
-    if (thinkingEnabled(setting) && model.maxTokens < MIN_MAX_TOKENS_WITH_THINKING)
-      add(purpose, "OUTPUT_LIMIT_TOO_SMALL", `开启思考时，模型的输出上限至少要 ${MIN_MAX_TOKENS_WITH_THINKING}（现在是 ${model.maxTokens}）`);
+    if (setting.mode === "budget" && setting.maxTokens + MIN_ANSWER_TOKENS_AFTER_BUDGET > outputLimit)
+      add(purpose, "BUDGET_TOO_LARGE", `思考预算加上至少 ${MIN_ANSWER_TOKENS_AFTER_BUDGET} 个回答 token 超过了${limitLabel}（${outputLimit}）`);
+    if (thinkingEnabled(setting) && outputLimit < MIN_MAX_TOKENS_WITH_THINKING)
+      add(purpose, "OUTPUT_LIMIT_TOO_SMALL", `开启思考时，${limitLabel}至少要 ${MIN_MAX_TOKENS_WITH_THINKING}（现在是 ${outputLimit}）`);
   }
   return issues;
 }

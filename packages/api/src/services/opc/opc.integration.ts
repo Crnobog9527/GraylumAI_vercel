@@ -2861,7 +2861,8 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     const admissions:any[]=[];const informationWrites:string[]=[];
     page.on('response',async response=>{if(response.status()>=400&&response.url().includes('/api/trpc/'))console.info('QUESTION_HTTP_FAILURE',response.status(),(await response.json()).map((item:any)=>item.error?.message));});
     page.on("request",r=>{
-      if(r.method()==="POST"&&r.url().includes("opc.prepareStep")){const body=r.postDataJSON();const v=body[0]??body;admissions.push(v.json??v);}
+      // U2: mentor turns are admitted through opc.mentorTurnStream (same opcGenerate input as prepareStep).
+      if(r.method()==="POST"&&r.url().includes("opc.mentorTurnStream")){const body=r.postDataJSON();const v=body[0]??body;admissions.push(v.json??v);}
       if(r.method()==="POST"&&r.url().includes("opc.information")) {
         informationWrites.push(r.postData()??"");
       }
@@ -5386,7 +5387,8 @@ it("OPC: a legally reached question keeps its explicit confirm and mentor send w
     )).rows[0];
     const submittedRequestIds: string[] = [];
     page.on("request", request => {
-      if (request.method() !== "POST" || !request.url().includes("opc.prepareStep")) return;
+      // U2: a mentor send is one opc.mentorTurnStream request.
+      if (request.method() !== "POST" || !request.url().includes("opc.mentorTurnStream")) return;
       const match = /"requestId":"([0-9a-f-]{36})"/.exec(request.postData() ?? "");
       if (match) submittedRequestIds.push(match[1]);
     });
@@ -5512,7 +5514,8 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
     await page.getByPlaceholder("输入你的密码").fill(f.password);
     await page.getByRole("button", {name:"登录", exact:true}).last().click();
     await page.waitForURL(process.env.V3_LOCAL_APP + path);
-    await page.route("**/api/trpc/opc.prepareStep*", async route => {
+    // U2: openings are opc.mentorTurnStream requests; refusing extra2's keeps it unopened.
+    await page.route("**/api/trpc/opc.mentorTurnStream*", async route => {
       const raw = route.request().postData() ?? "";
       return raw.includes("extra2") ? route.abort() : route.continue();
     });

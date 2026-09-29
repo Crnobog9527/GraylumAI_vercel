@@ -332,9 +332,9 @@ instead of being inferred.
 
 ### Environment Coverage
 
-- Staging Supabase project ref: `gvcpmcunmfrbxuwimxfa`
+- Staging Supabase project ref: `staging 项目`
   (`owner-provided`; repo-visible evidence not found in PR #203).
-- Production Supabase project ref: `fhmshnqjjnnlvplojktv`
+- Production Supabase project ref: `正式项目`
   (`owner-provided`; repo-visible evidence not found in PR #203).
 - Production app host: `app.graylum.com`
   (`owner-provided`; repo-visible evidence not found in PR #203).

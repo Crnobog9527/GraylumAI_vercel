@@ -14,6 +14,8 @@ export const TRY_URL = 'https://openrouter.ai/api/v1/chat/completions';
 export const TRY_TIMEOUT_MS = 60_000;
 /** Output allowance with thinking off or at the provider's non-thinking default. */
 export const TRY_PLAIN_MAX_TOKENS = 256;
+/** Hard ceiling for this platform-paid diagnostic call. */
+export const TRY_MAX_TOKENS = 4096;
 
 export type TryResult = {
   ok: boolean;
@@ -30,8 +32,8 @@ export type TryResult = {
   costUsd: number | null;
   maxTokens: number;
   error: string | null;
-  /** The provider's own error text, bounded; never request data or credentials. */
-  providerMessage: string | null;
+  /** Raw provider diagnostics are never exposed. */
+  providerMessage: null;
 };
 
 /** The setting a purpose uses: an unset organizer means the provider default. */
@@ -46,7 +48,7 @@ export function tryMaxTokens(setting: PurposeSetting, defaultThinking: boolean, 
     : setting.mode === 'effort' && setting.effort !== 'none' ? MIN_MAX_TOKENS_WITH_THINKING
     : setting.mode === 'provider_default' && defaultThinking ? MIN_MAX_TOKENS_WITH_THINKING
     : TRY_PLAIN_MAX_TOKENS;
-  return Math.min(wanted, modelMaxTokens);
+  return Math.min(wanted, modelMaxTokens, TRY_MAX_TOKENS);
 }
 
 export class TryRefused extends Error {}
@@ -61,7 +63,11 @@ export function tryRequest(row: RuntimeModelRow, purpose: ReasoningPurpose) {
   if (!config.route) throw new TryRefused('请先选择供应商线路');
   const setting = purposeSettingFor(purpose, config.purposes[purpose]);
   if (!setting) throw new TryRefused(`"${PURPOSE_LABELS[purpose]}"还没有设置思考方式`);
-  const limit = tryMaxTokens(setting, config.catalog?.reasoning?.defaultEnabled !== false, maxTokens);
+  const endpoint = config.catalog?.endpoints.find(item => item.tag === config.route);
+  const outputLimit = Math.min(maxTokens, endpoint?.maxCompletionTokens ?? maxTokens);
+  const limit = tryMaxTokens(setting, config.catalog?.reasoning?.defaultEnabled !== false, outputLimit);
+  if (setting.mode === 'budget' && setting.maxTokens + MIN_ANSWER_TOKENS_AFTER_BUDGET > limit)
+    throw new TryRefused(`本次试用最多输出 ${TRY_MAX_TOKENS} token；当前思考预算无法留出至少 ${MIN_ANSWER_TOKENS_AFTER_BUDGET} 个回答 token`);
   const body = {
     model: row.model_id,
     messages: [{ role: 'user', content: TRY_PROMPT }],
@@ -94,13 +100,10 @@ export async function tryReasoning(row: RuntimeModelRow, purpose: ReasoningPurpo
     return { ...base, ok: false, httpStatus: null, totalMs: Math.round(clock() - started), error: 'TRANSPORT_FAILED', providerMessage: null };
   }
   if (!response.ok) {
-    let providerMessage: string | null = null;
-    try {
-      const text = (await response.text()).slice(0, 65536);
-      const message = (JSON.parse(text) as { error?: { message?: unknown } }).error?.message;
-      providerMessage = typeof message === 'string' ? message.slice(0, 300) : null;
-    } catch { /* The status alone is reported. */ }
-    return { ...base, ok: false, httpStatus: response.status, totalMs: Math.round(clock() - started), error: 'HTTP_' + response.status, providerMessage };
+    // Do not read or echo an untrusted error body, which may include credentials or request data.
+    await response.body?.cancel().catch(() => {});
+    return { ...base, ok: false, httpStatus: response.status, totalMs: Math.round(clock() - started),
+      error: 'HTTP_' + response.status, providerMessage: null };
   }
   const stream = openRouterStream(String(body.model), response.headers.get('x-generation-id') ?? undefined, chunk => {
     if (firstTextMs !== null) return;
