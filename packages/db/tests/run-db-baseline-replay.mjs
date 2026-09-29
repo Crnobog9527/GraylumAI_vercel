@@ -13,7 +13,7 @@ import { POSTGRES_IMAGE } from './v3/images.mjs';
 const args = process.argv.slice(2);
 if (args[0] !== '--local-only' || process.env.CI) {
   throw new Error('Usage: node packages/db/tests/run-db-baseline-replay.mjs --local-only'
-    + ' [--staging <snapshot.json>] [--out <local.json>] [--on-fail <catalog SQL>] [--query <catalog SQL>]');
+    + ' [--staging <snapshot.json>] [--out <local.json>] [--after <a.sql,b.sql>] [--on-fail <SQL>] [--query <SQL>]');
 }
 const option = name => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
 const root = resolve(import.meta.dirname, '../../..');
@@ -165,6 +165,13 @@ try {
       if (JSON.stringify(removed) !== JSON.stringify(guardKeys) || changedByRollback.length > 0 || !restored) {
         report.failed = { step: 'rollback / re-apply simulation' };
       }
+    }
+    // Optional local SQL checks on the finished database, e.g. baseline/credit-guard-paths.sql.
+    for (const file of option('--after')?.split(',') ?? []) {
+      if (report.failed) break;
+      const result = psql(readFileSync(resolve(root, file), 'utf8'));
+      (report.after ??= []).push({ file: file.split('/').at(-1), output: result.stdout.trim().split('\n') });
+      if (result.status !== 0 || result.error) report.failed = { step: file, error: errorLines(result) };
     }
   }
 } finally {
