@@ -31,7 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import AdminErrorState from '@/components/admin/AdminErrorState';
-import { formatUsd } from '@/lib/currency';
+import { formatReportUsd } from '@/lib/currency';
 import {
   LineChart,
   Line,
@@ -50,16 +50,12 @@ const COLORS = ['#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#ec4899'
 type CostMetric = 'credits' | 'usd';
 
 function formatCredits(credits: number): string {
-  if (credits >= 10000) {
-    return `${(credits / 1000).toFixed(1)}K`;
-  }
-  return credits.toLocaleString();
+  return credits.toLocaleString('en-US', { maximumFractionDigits: 6 });
 }
 
 function formatMetricValue(metric: CostMetric, value: number): string {
   if (metric === 'usd') {
-    if (value < 0.01) return formatUsd(value);
-    return formatUsd(value);
+    return formatReportUsd(value);
   }
 
   return formatCredits(value);
@@ -229,7 +225,7 @@ function CostOverviewTab({ metric }: { metric: CostMetric }) {
   const isInitialLoading = dashboardLoading && !dashboard;
   const metricLabel = metric === 'usd' ? '美元成本' : '积分消耗';
   const metricUnit = metric === 'usd' ? 'USD' : '积分';
-  const cacheSavingsText = metric === 'usd'
+  const cacheSavingsText = cacheEfficiency?.savedValue === null ? '无法估算' : metric === 'usd'
     ? formatMetricValue(metric, cacheEfficiency?.savedValue ?? 0)
     : `${formatMetricValue(metric, cacheEfficiency?.savedValue ?? 0)} 积分`;
 
@@ -252,7 +248,7 @@ function CostOverviewTab({ metric }: { metric: CostMetric }) {
           subValue={
             metric === 'usd'
               ? `${overview?.todayCalls ?? 0} 次调用 · ${formatCredits(overview?.todayCredits ?? 0)} 积分`
-              : `${overview?.todayCalls ?? 0} 次调用 · ${formatUsd(overview?.todayUsd ?? 0)}`
+              : `${overview?.todayCalls ?? 0} 次调用 · ${formatReportUsd(overview?.todayUsd ?? 0)}`
           }
           icon={DollarSign}
         />
@@ -262,7 +258,7 @@ function CostOverviewTab({ metric }: { metric: CostMetric }) {
           subValue={
             metric === 'usd'
               ? `${overview?.monthCalls ?? 0} 次调用 · ${formatCredits(overview?.monthCredits ?? 0)} 积分`
-              : `${overview?.monthCalls ?? 0} 次调用 · ${formatUsd(overview?.monthUsd ?? 0)}`
+              : `${overview?.monthCalls ?? 0} 次调用 · ${formatReportUsd(overview?.monthUsd ?? 0)}`
           }
           icon={TrendingUp}
         />
@@ -273,8 +269,8 @@ function CostOverviewTab({ metric }: { metric: CostMetric }) {
         />
         <StatCard
           title="缓存命中率"
-          value={`${cacheEfficiency?.hitRate ?? 0}%`}
-          subValue={`节省 ${cacheSavingsText}`}
+          value={cacheEfficiency?.hitRate === null ? '未知' : `${cacheEfficiency?.hitRate ?? 0}%`}
+          subValue={`估算节省 ${cacheSavingsText}`}
           icon={Zap}
           trend="up"
         />

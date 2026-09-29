@@ -5,6 +5,10 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
+import { readAllReportRows } from '../services/reportRows';
+import { buildPerformanceCostStats, estimateCacheSavings } from '../services/performanceCostReport';
+import { buildFinanceUsdOverview } from '../services/financeReport';
+import { picoToUsd, usdToPico } from '../services/reportUsd';
 import { BILLING_CONSTANTS } from '../types/billing';
 import { issueSignedAttachmentUrlsByBatch } from '../lib/ticketAttachments';
 import {
@@ -2186,10 +2190,10 @@ export const adminRouter = router({
    */
   getFinanceStats: adminProcedure
     .query(async ({ ctx }) => {
-      const { data: creditTransactions, error: creditTransactionsError } = await ctx.supabase
+      const { data: creditTransactions, error: creditTransactionsError } = await readAllReportRows((from, to) => ctx.supabase
         .from('credit_transactions')
         .select('amount, type, created_at, description')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }).order('id').range(from, to));
 
       if (creditTransactionsError) {
         throw createAdminOperationError('读取财务统计', creditTransactionsError);
@@ -2202,9 +2206,9 @@ export const adminRouter = router({
         'credit transactions',
       );
 
-      const { data: packages, error: packagesError } = await ctx.supabase
+      const { data: packages, error: packagesError } = await readAllReportRows((from, to) => ctx.supabase
         .from('credit_packages')
-        .select('*');
+        .select('*').order('id').range(from, to));
 
       if (packagesError) {
         throw createAdminOperationError('读取积分包财务统计', packagesError);
@@ -2217,9 +2221,9 @@ export const adminRouter = router({
         'credit packages',
       );
 
-      const { data: users, error: usersError } = await ctx.supabase
+      const { data: users, error: usersError } = await readAllReportRows((from, to) => ctx.supabase
         .from('profiles')
-        .select('credits, created_at');
+        .select('credits, created_at').order('id').range(from, to));
 
       if (usersError) {
         throw createAdminOperationError('读取财务统计', usersError);
@@ -2232,10 +2236,10 @@ export const adminRouter = router({
         'profiles',
       );
 
-      const { data: models, error: modelsError } = await ctx.supabase
+      const { data: models, error: modelsError } = await readAllReportRows((from, to) => ctx.supabase
         .from('ai_models')
         .select('*')
-        .order('name', { ascending: true });
+        .order('name', { ascending: true }).order('id').range(from, to));
 
       if (modelsError) {
         throw createAdminOperationError('读取财务统计', modelsError);
@@ -2248,9 +2252,9 @@ export const adminRouter = router({
         'AI models',
       );
 
-      const { data: conversations, error: conversationsError } = await ctx.supabase
+      const { data: conversations, error: conversationsError } = await readAllReportRows((from, to) => ctx.supabase
         .from('conversations')
-        .select('id, model_id, created_at');
+        .select('id, model_id, created_at').order('id').range(from, to));
 
       if (conversationsError) {
         throw createAdminOperationError('读取财务统计', conversationsError);
@@ -2263,9 +2267,10 @@ export const adminRouter = router({
         'conversations',
       );
 
-      const { data: tokenStats, error: tokenStatsError } = await ctx.supabase
+      const { data: tokenStats, error: tokenStatsError } = await readAllReportRows((from, to) => ctx.supabase
         .from('token_stats')
-        .select('model_used, total_credits, total_cost_usd, cached_tokens, created_at');
+        .select('model_used, total_credits, total_cost_usd, cached_tokens, created_at')
+        .order('id').range(from, to));
 
       if (tokenStatsError) {
         throw createAdminOperationError('读取财务统计', tokenStatsError);
@@ -2278,9 +2283,10 @@ export const adminRouter = router({
         'token stats',
       );
 
-      const { data: paymentOrders, error: paymentOrdersError } = await ctx.supabase
+      const { data: paymentOrders, error: paymentOrdersError } = await readAllReportRows((from, to) => ctx.supabase
         .from('payment_orders')
-        .select('amount_total, currency, status, payment_status, created_at');
+        .select('amount_total, currency, status, payment_status, created_at')
+        .order('id').range(from, to));
 
       if (paymentOrdersError) {
         throw createAdminOperationError('读取财务统计', paymentOrdersError);
@@ -2293,9 +2299,9 @@ export const adminRouter = router({
         'payment orders',
       );
 
-      const { data: usageLogs, error: usageLogsError } = await ctx.supabase
+      const { data: usageLogs, error: usageLogsError } = await readAllReportRows((from, to) => ctx.supabase
         .from('ai_usage_logs')
-        .select('status, created_at');
+        .select('status, created_at').order('id').range(from, to));
 
       if (usageLogsError) {
         throw createAdminOperationError('读取财务统计', usageLogsError);
@@ -2308,9 +2314,9 @@ export const adminRouter = router({
         'AI usage logs',
       );
 
-      const { data: billingHistory, error: billingHistoryError } = await ctx.supabase
+      const { data: billingHistory, error: billingHistoryError } = await readAllReportRows((from, to) => ctx.supabase
         .from('billing_history')
-        .select('operation_type, amount, created_at, metadata');
+        .select('operation_type, amount, created_at, metadata').order('id').range(from, to));
 
       if (billingHistoryError) {
         throw createAdminOperationError('读取财务统计', billingHistoryError);
@@ -2323,7 +2329,7 @@ export const adminRouter = router({
         'billing history',
       );
 
-      const { data: settings, error: settingsError } = await ctx.supabase
+      const { data: settings, error: settingsError } = await readAllReportRows((from, to) => ctx.supabase
         .from('system_settings')
         .select('*')
         .in('key', [
@@ -2331,7 +2337,7 @@ export const adminRouter = router({
           'search_surcharge_credits',
           'billing_credits_per_usd',
           'billing_token_price_multiplier',
-        ]);
+        ]).order('key').range(from, to));
 
       if (settingsError) {
         throw createAdminOperationError('读取财务统计', settingsError);
@@ -2463,14 +2469,14 @@ export const adminRouter = router({
         }
       });
 
-      const modelUsageByToken: Record<string, { requests: number; credits: number; costUsd: number }> = {};
+      const modelUsageByToken: Record<string, { requests: number; credits: number; costPico: bigint }> = {};
       tokenStats.forEach((stat) => {
         const key = stat.model_used;
         if (!key) return;
-        const current = modelUsageByToken[key] ?? { requests: 0, credits: 0, costUsd: 0 };
+        const current = modelUsageByToken[key] ?? { requests: 0, credits: 0, costPico: 0n };
         current.requests += 1;
         current.credits += stat.total_credits;
-        current.costUsd += Number(stat.total_cost_usd);
+        current.costPico += usdToPico(stat.total_cost_usd);
         modelUsageByToken[key] = current;
       });
 
@@ -2489,18 +2495,11 @@ export const adminRouter = router({
         conversationCount: modelUsageByConversation[model.id] || 0,
         requestCount: modelUsageByToken[model.model_id]?.requests || 0,
         creditsConsumed: modelUsageByToken[model.model_id]?.credits || 0,
-        costUsd: parseFloat((modelUsageByToken[model.model_id]?.costUsd || 0).toFixed(6)),
+        costUsd: picoToUsd(modelUsageByToken[model.model_id]?.costPico ?? 0n),
       }));
 
-      const actualRevenue = paymentOrders.reduce((sum, order) => {
-        if (order.status !== 'completed') return sum;
-        if (order.payment_status !== 'paid' && order.payment_status !== 'no_payment_required') return sum;
-        if (order.currency && order.currency.toLowerCase() !== 'usd') return sum;
-        return sum + (order.amount_total ?? 0);
-      }, 0);
-
       const financeOverview = {
-        estimatedRevenue: actualRevenue,
+        ...buildFinanceUsdOverview(paymentOrders, tokenStats),
         creditsConsumed: transactionStats.totalDeductions,
         creditsPurchased: transactionStats.totalPurchases,
         creditsGiven: transactionStats.totalAdditions,
@@ -2841,10 +2840,10 @@ export const adminRouter = router({
         ctx.supabase
           .from('ai_models')
           .select('id, name, model_id, provider, input_token_cost, output_token_cost, web_search_cost, is_active'),
-        ctx.supabase
+        readAllReportRows((from, to) => ctx.supabase
           .from('token_stats')
           .select('model_used, total_credits, total_cost_usd, input_tokens, output_tokens, cached_tokens, cache_creation_tokens, created_at')
-          .gte('created_at', rangeStartIso),
+          .gte('created_at', rangeStartIso).order('id').range(from, to)),
         ctx.supabase
           .from('ai_usage_logs')
           .select('status, latency_ms, created_at')
@@ -2905,7 +2904,7 @@ export const adminRouter = router({
       const modelUsageByToken = new Map<string, {
         requestCount: number;
         credits: number;
-        costUsd: number;
+        costPico: bigint;
         inputTokens: number;
         outputTokens: number;
         cachedTokens: number;
@@ -2915,14 +2914,14 @@ export const adminRouter = router({
         const current = modelUsageByToken.get(stat.model_used) ?? {
           requestCount: 0,
           credits: 0,
-          costUsd: 0,
+          costPico: 0n,
           inputTokens: 0,
           outputTokens: 0,
           cachedTokens: 0,
         };
         current.requestCount += 1;
         current.credits += stat.total_credits ?? 0;
-        current.costUsd += parseFloat(stat.total_cost_usd ?? '0');
+        current.costPico += usdToPico(stat.total_cost_usd);
         current.inputTokens += stat.input_tokens ?? 0;
         current.outputTokens += stat.output_tokens ?? 0;
         current.cachedTokens += stat.cached_tokens ?? 0;
@@ -2986,7 +2985,7 @@ export const adminRouter = router({
         const usage = modelUsageByToken.get(model.model_id) ?? {
           requestCount: 0,
           credits: 0,
-          costUsd: 0,
+          costPico: 0n,
           inputTokens: 0,
           outputTokens: 0,
           cachedTokens: 0,
@@ -3000,7 +2999,7 @@ export const adminRouter = router({
           conversationCount: conversationsByModel.get(model.model_id) ?? 0,
           requestCount: usage.requestCount,
           creditsConsumed: usage.credits,
-          totalCostUsd: parseFloat(usage.costUsd.toFixed(6)),
+          totalCostUsd: picoToUsd(usage.costPico),
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
           cachedTokens: usage.cachedTokens,
@@ -3063,16 +3062,7 @@ export const adminRouter = router({
       const cacheReadTokens = tokenStatsInRange.reduce((sum, stat) => sum + (stat.cached_tokens ?? 0), 0);
       const cacheCreationTokens = tokenStatsInRange.reduce((sum, stat) => sum + (stat.cache_creation_tokens ?? 0), 0);
 
-      const totalCost = tokenStatsInRange.reduce(
-        (sum, stat) => sum + parseFloat(stat.total_cost_usd ?? '0'),
-        0
-      );
-      const avgCostPerRequest = rangeRequests > 0 ? totalCost / rangeRequests : 0;
-      const cacheSavings = tokenStatsInRange.reduce((sum, stat) => {
-        const model = models.find((item) => item.model_id === stat.model_used);
-        if (!model) return sum;
-        return sum + (((stat.cached_tokens ?? 0) * (model.input_token_cost ?? 0) * 0.9) / 1_000_000_000_000);
-      }, 0);
+      const cacheSavings = estimateCacheSavings(tokenStatsInRange, models);
 
       const successLogs = usageLogs.filter((log) => log.status === 'success');
       const failedLogs = usageLogs.filter((log) => log.status !== 'success');
@@ -3120,12 +3110,7 @@ export const adminRouter = router({
         cacheCreationTokens,
       };
 
-      const costStats = {
-        totalCost: parseFloat(totalCost.toFixed(4)),
-        avgCostPerRequest: parseFloat(avgCostPerRequest.toFixed(6)),
-        cacheSavings: parseFloat(cacheSavings.toFixed(4)),
-        estimatedMonthly: parseFloat((totalCost * (30 / days)).toFixed(2)),
-      };
+      const costStats = buildPerformanceCostStats(tokenStatsInRange, days, cacheSavings);
 
       const result = {
         timeRange: input.timeRange,
