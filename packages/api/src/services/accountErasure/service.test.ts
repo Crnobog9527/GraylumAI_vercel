@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 const limit = vi.hoisted(() => ({ check: vi.fn() }));
 vi.mock('../redisRateLimiter', () => ({ checkRateLimitOrThrow: limit.check }));
@@ -36,7 +37,7 @@ function adminClient(options: {
 
 function confirm(admin: ReturnType<typeof adminClient>, auth: unknown, headers = new Headers()) {
   return confirmAccountErasure({
-    admin: admin as any, authClient: auth as any, headers, userId: USER, requestId: REQUEST, nowMs: NOW_MS,
+    admin: admin as unknown as SupabaseClient, authClient: auth as SupabaseClient | null, headers, userId: USER, requestId: REQUEST, nowMs: NOW_MS,
   });
 }
 
@@ -125,10 +126,10 @@ describe('account erasure preview', () => {
       pendingPayments: 0, runsInFlight: 1, closed: false,
     };
     const admin = { rpc: vi.fn().mockResolvedValue({ data: facts, error: null }) };
-    await expect(loadAccountErasurePreview(admin as any, USER)).resolves.toEqual(facts);
+    await expect(loadAccountErasurePreview(admin as unknown as SupabaseClient, USER)).resolves.toEqual(facts);
     expect(admin.rpc).toHaveBeenCalledWith('account_erasure_preview', { p_profile_id: USER });
 
     admin.rpc.mockResolvedValueOnce({ data: { credits: '40' }, error: null });
-    await expect(loadAccountErasurePreview(admin as any, USER)).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+    await expect(loadAccountErasurePreview(admin as unknown as SupabaseClient, USER)).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
   });
 });

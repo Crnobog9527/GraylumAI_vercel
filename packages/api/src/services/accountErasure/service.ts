@@ -5,7 +5,7 @@ import { logger } from '../../lib/logger';
 import { checkRateLimitOrThrow } from '../redisRateLimiter';
 import { assertRecentAuthTime, readVerifiedAuthTime } from './reauth';
 
-type Client = SupabaseClient<any, any, any>;
+type Client = SupabaseClient;
 
 /** Auth ban long enough to outlive the account; the Auth user itself is deleted by PR-C. */
 const AUTH_BAN_DURATION = '876000h';

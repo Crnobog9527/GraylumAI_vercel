@@ -21,7 +21,7 @@ function bearerToken(headers: Headers | undefined): string | undefined {
  * verifies the JWT signature (or asks Auth for legacy keys); an unverified token is never decoded.
  */
 export async function readVerifiedAuthTime(input: {
-  authClient: SupabaseClient<any, any, any> | null;
+  authClient: SupabaseClient | null;
   headers?: Headers;
   userId: string;
 }): Promise<number | null> {

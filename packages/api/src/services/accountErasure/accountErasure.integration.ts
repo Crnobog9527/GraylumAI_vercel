@@ -23,7 +23,7 @@ const localFetch: typeof fetch = (input, init) => {
   const next = new URL(target.pathname.replace(/^\/(auth|rest)\/v1/, '') + target.search, service);
   return nativeFetch(next, init);
 };
-type Client = SupabaseClient<any, any, any>;
+type Client = SupabaseClient;
 const client = (key: string): Client => createClient(restUrl, key, {
   auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: localFetch },
 });
@@ -54,7 +54,7 @@ function caller(userId: string, session: Client) {
     headers: new Headers(), user: { id: userId, email_confirmed_at: '2026-09-30T00:00:00Z', app_metadata: {} },
     isEmailVerified: true, authProvider: 'email', supabase: session, supabaseAuth: session, supabasePublic: session,
     supabaseAdmin: admin, hasSupabaseAdminPrivileges: true,
-  } as any);
+  } as unknown as Parameters<typeof accountRouter.createCaller>[0]);
 }
 
 it('T09/T11: renewal blocks, fresh password re-auth closes, Auth access and client reads end', async () => {
