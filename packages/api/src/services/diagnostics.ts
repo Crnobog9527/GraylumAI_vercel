@@ -1123,7 +1123,7 @@ export class DiagnosticsService {
    * 获取最新测试结果
    */
   async getLatestResults(): Promise<DiagnosticTestResult[]> {
-    return (await readLatestDiagnosticResults(this.supabase, TEST_DEFINITIONS.map((test) => test.id))).map((row) => ({
+    return (await readLatestDiagnosticResults(this.supabaseAdmin, TEST_DEFINITIONS.map((test) => test.id))).map((row) => ({
       testId: row.test_id,
       testName: row.test_name,
       category: row.category as DiagnosticCategory,
@@ -1199,7 +1199,7 @@ export class DiagnosticsService {
       batch_id: batchId,
     }));
 
-    const { error } = await this.supabase.from('diagnostic_results').insert(records);
+    const { error } = await this.supabaseAdmin.from('diagnostic_results').insert(records);
 
     if (error) {
       logger.error('system', 'diagnostics_results_save_failed', {
@@ -1211,7 +1211,7 @@ export class DiagnosticsService {
   }
 
   private async saveSingleResult(result: DiagnosticTestResult) {
-    const { error } = await this.supabase.from('diagnostic_results').insert({
+    const { error } = await this.supabaseAdmin.from('diagnostic_results').insert({
       test_id: result.testId,
       test_name: result.testName,
       category: result.category,

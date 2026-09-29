@@ -2,6 +2,7 @@
 // Diagnostics history read straight from diagnostic_results. The 0005 view
 // diagnostic_latest_results and RPCs get_diagnostic_summary / get_test_history /
 // cleanup_old_diagnostic_results do not exist on staging; these keep their semantics without them.
+// Since 0146 clients have no access to diagnostic_results: every read and write uses service_role.
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 // PostgREST caps a response at 1000 rows; the summary pages through the window up to this bound.
