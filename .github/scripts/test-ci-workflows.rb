@@ -88,6 +88,17 @@ class CIWorkflowsTest < Minitest::Test
       assert_includes runs, "pnpm test:ci:#{suite}"
     end
     assert_includes runs, 'pnpm --filter web exec vitest run src/app/api/cron/billing-reconcile/route.test.ts'
+    web_command = 'pnpm --filter web test:unit'
+    assert_equal 1, runs.count(web_command)
+    web_scripts = JSON.parse(File.read(File.expand_path('../apps/web/package.json', ROOT))).fetch('scripts')
+    assert_equal 'vitest run --config vitest.config.ts', web_scripts.fetch('test:unit')
+    browser_steps = @ci.fetch('jobs').fetch('build-and-e2e').fetch('steps')
+    browser_install = browser_steps.index { |step| step['name'] == 'Install Playwright browser' }
+    web_test = browser_steps.index { |step| step['run'] == web_command }
+    refute_nil browser_install
+    refute_nil web_test
+    assert_operator browser_install, :<, web_test
+    assert_operator web_test, :<, browser_steps.index { |step| step['name'] == 'Build application' }
     %w[auth-bootstrap checkout-cancellation skill-runtime year-calendar refund-race billing-cron].each do |suite|
       refute_includes runs, "pnpm test:ci:#{suite}"
     end

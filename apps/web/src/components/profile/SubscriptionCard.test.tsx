@@ -211,11 +211,12 @@ describe('SubscriptionCard catalog availability', () => {
     expect(markup).toContain('disabled=""');
   });
 
-  it.skipIf(!existsSync('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'))('validates disabled plan/package actions and the Portal entry in a local browser', async () => {
+  it('validates disabled plan/package actions and the Portal entry in a local browser', async () => {
     componentState.plansQuery = queryState({ data: [plan] });
     componentState.eligibilityQuery = queryState({ data: { entries: [{ planId: plan.id, billingCycle: 'monthly', action: 'changeSubscriptionPlan', allowed: true, state: 'active' }] } });
     componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 10, bonus_credits: 0, price: 0, checkout_ready: true }] });
-    const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
+    const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    const browser = await chromium.launch({ executablePath: existsSync(chrome) ? chrome : undefined, headless: true });
     try {
       const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
       await page.setContent(renderSubscription() + renderToStaticMarkup(createElement(CreditPackagesSection, {})));
