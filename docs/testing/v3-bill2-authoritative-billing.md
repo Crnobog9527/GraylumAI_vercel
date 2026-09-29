@@ -1,4 +1,5 @@
 # V3-BILL-2 unified billing service
+该脚本已于 2026-09-29 删除（已失效）
 
 Implementation of [the merged BILL-2 specification](../launch/tasks/V3-BILL-2-provider-authoritative-billing.md). This is a server service and an additive migration, with no public route or new screen. Current public chat, workbench, research, Stripe and account lifecycle entrypoints retain their existing contracts.
 

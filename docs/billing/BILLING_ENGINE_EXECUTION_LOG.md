@@ -62,7 +62,7 @@ D packages/db/tests/atomic_reconcile_stripe_refund.sql
 
 ### Blueprint 归档
 
-- 来源：`/Users/simon/Downloads/graylum_billing_engine_v1_5_blueprint.md`
+- 来源：Owner 提供的 Blueprint；仓库副本见 `docs/billing/BILLING_ENGINE_V1_5_BLUEPRINT.md`
 - 目标：`docs/billing/BILLING_ENGINE_V1_5_BLUEPRINT.md`
 - 来源行数：951
 - 来源 SHA-256：`2a5e48efeadc56210d271804c62d5a0b2b0c2b07b5de66c83bbcadf9e144ea81`
@@ -893,10 +893,10 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 ### Supabase staging target
 
-- Supabase project ref：`gvcpmcunmfrbxuwimxfa`。
+- Supabase project ref：`staging 项目`。
 - Supabase project name：`GraylumAI Staging`。
-- Supabase database host metadata：`db.gvcpmcunmfrbxuwimxfa.supabase.co`。
-- Production project `fhmshnqjjnnlvplojktv` 未作为目标。
+- Supabase database host metadata：`staging 项目数据库主机`。
+- Production project `正式项目` 未作为目标。
 
 ### 0044 执行前 credit_transactions 状态
 
@@ -1158,7 +1158,7 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 ### Supabase staging target
 
-- Supabase project ref：`gvcpmcunmfrbxuwimxfa`。
+- Supabase project ref：`staging 项目`。
 - Supabase project name：`GraylumAI Staging`。
 - App host：`graylumai-staging.vercel.app`。
 - Safety check：`NEXT_PUBLIC_SUPABASE_URL` project ref 与 `EXPECTED_SUPABASE_PROJECT_REF` 匹配；未发现 production-like target。
@@ -3445,9 +3445,9 @@ Latest-head Codex review：
 ### Validation
 
 - Targeted PR250/PR251 profile bootstrap, migration static, user/profile, credits, and credit ledger tests：`corepack pnpm --filter @repo/api exec vitest run src/trpc.test.ts src/profileBootstrapMigration.test.ts src/routers/user.test.ts src/routers/credits.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts` passed；6 files / 81 tests。
-- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm test:api`：passed；49 files / 644 tests。
-- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm lint`：passed。
-- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm --filter web typecheck`：passed。
+- `pnpm test:api`（使用 Node 24）：passed；49 files / 644 tests。
+- `pnpm lint`（使用 Node 24）：passed。
+- `pnpm --filter web typecheck`（使用 Node 24）：passed。
 - `git diff --check`：passed。
 
 ### Remaining gates
@@ -3530,9 +3530,9 @@ Latest-head Codex review：
 ### Validation
 
 - Targeted PR250/PR251 profile bootstrap, migration static, user/profile, credits, and credit ledger tests：`corepack pnpm --filter @repo/api exec vitest run src/trpc.test.ts src/profileBootstrapMigration.test.ts src/routers/user.test.ts src/routers/credits.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts` passed；6 files / 75 tests。
-- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm test:api`：passed；49 files / 638 tests。
-- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm lint`：passed。
-- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm --filter web typecheck`：passed。
+- `pnpm test:api`（使用 Node 24）：passed；49 files / 638 tests。
+- `pnpm lint`（使用 Node 24）：passed。
+- `pnpm --filter web typecheck`（使用 Node 24）：passed。
 - `git diff --check`：passed。
 
 ### Remaining gates
@@ -3601,9 +3601,9 @@ Latest-head Codex review：
 ### Validation
 
 - Targeted PR250/PR251 profile bootstrap, migration static, user/profile, credits, and credit ledger tests：`corepack pnpm --filter @repo/api exec vitest run src/trpc.test.ts src/profileBootstrapMigration.test.ts src/routers/user.test.ts src/routers/credits.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts` passed；6 files / 77 tests。
-- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm test:api`：passed；49 files / 640 tests。
-- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm lint`：passed。
-- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm --filter web typecheck`：passed。
+- `pnpm test:api`（使用 Node 24）：passed；49 files / 640 tests。
+- `pnpm lint`（使用 Node 24）：passed。
+- `pnpm --filter web typecheck`（使用 Node 24）：passed。
 - `git diff --check`：passed。
 
 ### Remaining gates
@@ -3839,7 +3839,7 @@ Latest-head Codex review：
 
 ### Failure context
 
-- Owner completed exactly one staging Stripe test-mode yearly checkout for `test04@qq.com`.
+- Owner completed exactly one staging Stripe test-mode yearly checkout for `[个人邮箱已脱敏]`.
 - Runtime evidence showed one `payments.createCheckoutSession` 200, two Stripe webhook POSTs 200, and one `payments.syncCheckoutSession` 500.
 - Postflight showed duplicated billing mirror rows: `payment_orders +3` with two invoice-backed rows for the same masked invoice, and `user_subscriptions +2` active yearly rows for the same masked Stripe subscription.
 - The grant and ledger paths remained idempotent: `subscription_credit_grants +1`, `credit_transactions +1`, and profile credit delta equaled the ledger delta.

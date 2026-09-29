@@ -1,11 +1,11 @@
 import { initTRPC, TRPCError } from '@trpc/server';
+import { rateLimitErrorFormatter } from './lib/rateLimitError';
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
 import { getAuthProvider, isEmailVerified } from './lib/auth';
 import { ensureWorkspaceServerEnv } from './lib/serverEnv';
 import { logger } from './lib/logger';
 import {createRuntimeBudget,withRuntimeBudget,type RuntimeBudget} from './services/runtime/budget';
 export {createRuntimeBudget,withRuntimeBudget};
-
 type ApiSupabaseClient = SupabaseClient<any, 'public', any>;
 type ApiContext = Awaited<ReturnType<typeof createTRPCContext>>;
 type ProfileBootstrapFailureReason =
@@ -104,7 +104,7 @@ export const createTRPCContext = async (opts: {
   };
 };
 
-const t = initTRPC.context<typeof createTRPCContext>().create();
+const t = initTRPC.context<typeof createTRPCContext>().create({ errorFormatter: rateLimitErrorFormatter });
 
 export const router = t.router;
 export const publicProcedure = t.procedure;

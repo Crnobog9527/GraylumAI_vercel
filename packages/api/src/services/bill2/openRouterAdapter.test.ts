@@ -129,6 +129,13 @@ it('forwards only an approved reasoning_effort byte-for-byte',async()=>{
  await openRouterAdapter({credential,transport}).dispatch({input},identity);
  expect(transport).toHaveBeenCalledTimes(1);expect((transport.mock.calls[0] as unknown as [string,RequestInit])[1].body).toBe(input);
 });
+it('forwards reasoning_effort none for the DeepSeek mentor model byte-for-byte',async()=>{
+ const deepseek={...identity,model:'deepseek/deepseek-v4.1-flash'};
+ const transport=vi.fn(async()=>new Response('{"id":"gen-deepseek"}',{status:200})),credential=vi.fn(async()=> 'LOCAL_SYNTHETIC_KEY');
+ const input=JSON.stringify({...JSON.parse(body),model:deepseek.model,reasoning_effort:'none'});
+ await openRouterAdapter({credential,transport}).dispatch({input},deepseek);
+ expect(transport).toHaveBeenCalledTimes(1);expect((transport.mock.calls[0] as unknown as [string,RequestInit])[1].body).toBe(input);
+});
 it.each([
  {reasoning_effort:'low'},{reasoning_effort:'xhigh'},{reasoning_effort:'max'},{reasoning_effort:''},{reasoning_effort:null},{reasoning_effort:0},{reasoning_effort:{effort:'none'}},
  {reasoning:{effort:'none'}},{reasoning:{enabled:false}},{reasoning_effort:'none',reasoning:{exclude:true}},{include_reasoning:false},{verbosity:'low'},

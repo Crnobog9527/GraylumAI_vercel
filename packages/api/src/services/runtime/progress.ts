@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {AGENT_TURN_MESSAGE_LIMIT} from '../../shared/agentTurn';
 export type RuntimeProgress={type:'text';text:string}|{type:'phase';phase:'mentor'|'organizer'|'saving'};
 /** Only the leading public message string of the OPC JSON protocol may leave
  * the server. Partial escapes wait for the next provider chunk. Never forward
@@ -15,4 +16,9 @@ export function publicMentorText(raw:string):string {
   }else{if(c.charCodeAt(0)<32)return '';encoded+=c;}
  }
  try{return (JSON.parse('"'+encoded+'"') as string).trimStart().slice(0,4000);}catch{return '';}
+}
+/** Agent turn (AC-1) replies are plain text: the SDK's public text deltas,
+ * never reasoning or tool arguments, bounded like a stored message. */
+export function publicAgentText(raw:string):string {
+ return raw.trimStart().slice(0,AGENT_TURN_MESSAGE_LIMIT);
 }

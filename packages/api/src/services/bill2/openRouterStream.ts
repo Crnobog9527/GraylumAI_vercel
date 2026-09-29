@@ -9,7 +9,11 @@ const finishes=new Set(['stop','length','content_filter','tool_calls']);
  * receives validated data frames and the browser receives only SDK text deltas.
  * https://openrouter.ai/docs/api/reference/streaming
  */
-export function openRouterStream(model:string,headerId?:string,onChunk?:(chunk:string)=>void){
+/** `tools` widens tool-call parsing for an Agent turn request (AC-1): its
+ * allowlisted names and up to `maxCalls` indexed calls, all kept as evidence.
+ * Without it only one `read_source` call at index 0 is accepted. */
+export function openRouterStream(model:string,headerId?:string,onChunk?:(chunk:string)=>void,
+ tools:{toolNames:ReadonlySet<string>;maxCalls:number}={toolNames:new Set(['read_source']),maxCalls:1}){
  let pending='',frame:string[]=[],done=false,finish:string|null=null,providerId=headerId,failed:string|null=null,identityConflict=false;
  let content='',reasoning='',refusal='',usage:Record<string,unknown>|undefined,exactUsage:Record<string,unknown>|undefined;
  let frameCount=0,usageSeen=false;
@@ -62,16 +66,17 @@ export function openRouterStream(model:string,headerId?:string,onChunk?:(chunk:s
    if(content.length+refusal.length+reasoning.length>65536)return reject();
    if(delta.reasoning_details!==undefined&&delta.reasoning_details!==null)mergeDetails(delta.reasoning_details);
    if(delta.tool_calls!==undefined&&delta.tool_calls!==null){
-    if(!Array.isArray(delta.tool_calls)||delta.tool_calls.length>1)return reject();
+    if(!Array.isArray(delta.tool_calls)||delta.tool_calls.length>tools.maxCalls)return reject();
     for(const part of delta.tool_calls){
-     if(!object(part)||part.index!==0||Object.keys(part).some(k=>!['index','id','type','function'].includes(k)))return reject();
-     const call=calls.get(0)??{id:'',type:'function',function:{name:'',arguments:''}};
+     if(!object(part)||!Number.isSafeInteger(part.index)||Number(part.index)<0||Number(part.index)>=tools.maxCalls||
+      Object.keys(part).some(k=>!['index','id','type','function'].includes(k)))return reject();
+     const index=Number(part.index),call=calls.get(index)??{id:'',type:'function',function:{name:'',arguments:''}};
      if(part.id!==undefined){if(!id(part.id)||call.id&&call.id!==part.id)return reject();call.id=part.id;}
      if(part.type!==undefined&&part.type!=='function')return reject();
      if(part.function!==undefined){if(!object(part.function)||Object.keys(part.function).some(k=>!['name','arguments'].includes(k)))return reject();
       for(const key of ['name','arguments'] as const){if(part.function[key]!==undefined){if(typeof part.function[key]!=='string')return reject();call.function[key]+=part.function[key];}}
      }
-     if(call.function.name.length>256||call.function.arguments.length>4000)return reject();calls.set(0,call);
+     if(call.function.name.length>256||call.function.arguments.length>4000)return reject();calls.set(index,call);
     }
    }
    const terminal=choice.finish_reason;
@@ -95,10 +100,13 @@ export function openRouterStream(model:string,headerId?:string,onChunk?:(chunk:s
  function result(){
   if(pending.trim()||frame.length||!done)failed??='incomplete_stream';
   if(!finish)failed??='nonterminal_stream';
-  for(const call of calls.values())if(!call.id||call.function.name!=='read_source')failed??='invalid_stream';
+  for(const call of calls.values())if(!call.id||!tools.toolNames.has(call.function.name))failed??='invalid_stream';
+  // Calls are numbered from 0 without gaps; the Agent turn keeps index 0.
+  if([...calls.keys()].some(index=>index>=calls.size))failed??='invalid_stream';
   if(failed)return {providerId,identityConflict,error:failed};
   const message={role:'assistant',content:content||null,...(reasoning?{reasoning}:{}),...(refusal?{refusal}:{}),
-   ...(details.size?{reasoning_details:[...details.entries()].sort(([a],[b])=>a-b).map(([,v])=>v)}:{}),...(calls.size?{tool_calls:[...calls.values()]}:{})};
+   ...(details.size?{reasoning_details:[...details.entries()].sort(([a],[b])=>a-b).map(([,v])=>v)}:{}),
+   ...(calls.size?{tool_calls:[...calls.entries()].sort(([a],[b])=>a-b).map(([,call])=>call)}:{})};
   const sdkResponse={id:providerId,object:'chat.completion',model,choices:[{index:0,message,finish_reason:finish}],...(usage?{usage}:{})};
   if(Buffer.byteLength(JSON.stringify(sdkResponse))>65536)return {providerId,identityConflict,error:'aggregate_limit'};
   return {providerId,identityConflict,sdkResponse,exactUsage};

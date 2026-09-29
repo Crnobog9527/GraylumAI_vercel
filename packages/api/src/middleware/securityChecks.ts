@@ -137,29 +137,13 @@ import {
 /**
  * 检查速率限制 (异步版本)
  *
- * 优先使用 Redis (Upstash)，未配置时回退到内存限制器
+ * 使用 Redis (Upstash)，故障或未配置时拒绝，不回退到内存
  */
 export async function checkRateLimitAsync(
   userId: string,
   type: RateLimitType = 'ai'
 ): Promise<void> {
-  // 尝试使用 Redis 速率限制
-  const result = await checkRedisRateLimit(userId, type);
-
-  // 如果 Redis 返回 limit=0 说明未配置，回退到内存限制器
-  if (result.limit === 0) {
-    const limiter = getRateLimiter();
-    limiter.checkOrThrow(userId, type);
-    return;
-  }
-
-  // Redis 结果检查
-  if (!result.success) {
-    throw new TRPCError({
-      code: 'TOO_MANY_REQUESTS',
-      message: `请求过于频繁，请在 ${result.retryAfter} 秒后重试`,
-    });
-  }
+  await checkRedisRateLimitOrThrow(userId, type);
 }
 
 /**
