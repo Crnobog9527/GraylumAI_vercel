@@ -105,7 +105,12 @@ class CIWorkflowsTest < Minitest::Test
     end
     refute @ci['jobs'].key?('scope')
     assert_equal 1, runs.count('node scripts/check-code-size.mjs')
-    assert_includes @ci['jobs']['lint-and-type']['steps'].map { |step| step['run'] }, 'node scripts/check-code-size.mjs'
+    lint_runs = @ci['jobs']['lint-and-type']['steps'].map { |step| step['run'] }
+    assert_includes lint_runs, 'node scripts/check-code-size.mjs'
+    ['pnpm --filter web lint', 'pnpm --filter @repo/api lint', 'pnpm --filter @repo/api typecheck'].each do |command|
+      assert_equal 1, runs.count(command), command
+      assert_includes lint_runs, command
+    end
     steps = @ci['jobs']['test']['steps']
     contract_index = steps.index { |step| step['run'] == 'ruby .github/scripts/test-ci-workflows.rb' }
     install_index = steps.index { |step| step['run'] == 'pnpm install --frozen-lockfile' }

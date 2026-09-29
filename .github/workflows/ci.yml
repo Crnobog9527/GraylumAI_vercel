@@ -50,6 +50,13 @@ jobs:
       - name: Run TypeScript check
         run: pnpm --filter web typecheck
 
+      # ESLint bulk-suppression and tsconfig exclusion baselines only shrink.
+      - name: Run API ESLint
+        run: pnpm --filter @repo/api lint
+
+      - name: Run API TypeScript check
+        run: pnpm --filter @repo/api typecheck
+
   test:
     name: Run unit and regression tests
     runs-on: ubuntu-latest

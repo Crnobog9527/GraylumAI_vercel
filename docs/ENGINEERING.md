@@ -121,14 +121,23 @@
 | 内容 | 命令 |
 | --- | --- |
 | API 单元测试 | `pnpm test:api` |
-| 网站单元测试 | `pnpm --filter web exec vitest run <文件>` |
-| 类型检查 | `pnpm --filter web typecheck` |
+| 网站单元测试 | `pnpm --filter web test:unit`（全部）；`pnpm --filter web exec vitest run <文件>`（单个） |
+| 类型检查 | `pnpm --filter web typecheck`、`pnpm --filter @repo/api typecheck` |
+| 代码检查（ESLint） | `pnpm --filter web lint`、`pnpm --filter @repo/api lint` |
 | 代码大小检查 | `node scripts/check-code-size.mjs` |
 | 脚本和 CI 保护测试 | `pnpm test:ci:safeguards`、`ruby .github/scripts/test-ci-workflows.rb` |
 | 端到端测试 | `pnpm --filter web test:e2e`（Playwright） |
 | 部分集成测试（需要本地 Docker） | `node packages/db/tests/v3/run-workbench.mjs`：默认只跑 `workbench.integration.ts`；用 `--opc-only`、`--runtime-only`、`--ai-only` 等参数选择计费、Runtime、定位等其他集成测试。仓库里的 16 个 `*.integration.ts` 并非都能通过它运行，统一入口由 CI-TRUST 补齐 |
 | 计费和恢复集成测试（CI 同款，需要本地 Docker，不启动网站和浏览器） | `node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app`；`node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app`。CI 的 "Unit Tests" 必需检查依赖这两条；需要网站或浏览器而被排除的用例列在 `packages/db/tests/v3/without-app.mjs` |
 
+- ESLint 用 typescript-eslint 推荐规则检查 TS/TSX，网站另加 React Hooks 的
+  `rules-of-hooks` 和 `exhaustive-deps`。已有问题记在各包的 `eslint-suppressions.json`
+  （ESLint 批量抑制），只许变少：新问题直接报错；修掉旧问题后运行
+  `pnpm exec eslint --prune-suppressions`（在对应包目录下）把基线一起提交，否则检查会因
+  "有未使用的抑制"失败。不要用 `--suppress-all` 或手工增加条目来放过新问题。文件改名或
+  移动会让原来的抑制失效，要在同一个 PR 里修掉或按原样迁移。
+- `packages/api/tsconfig.json` 的 `exclude` 列出了加入独立类型检查时已有类型错误的测试
+  文件，也只许变少：修好一个就删掉一条，不新增。
 - 新逻辑要配单元测试，放在源码旁边的 `*.test.ts`；已经使用 `__tests__/` 的目录沿用
   原来的写法。修 bug 时先写一个能复现问题的测试。
 - 运行时或界面改动还需要浏览器验证；数据库、权限、支付等改动的验证要求见 AGENTS.md
@@ -147,14 +156,13 @@
 以下问题已经确认，但不在本规范的范围内，已列入 [Master Plan v12](launch/MASTER_PLAN.md)
 第 7、8 节的任务（主要是 CI-TRUST 和 LEGACY-CLOSE）：
 
-- ESLint 目前只检查 `apps/web` 下的 4 个 `.mjs` 文件，不检查任何 TS/TSX 业务代码。
-  CI 的 "Lint & Type Check" 实际起作用的是类型检查和第 3 节的大小检查。补上
-  TypeScript/React 规则需要新增依赖（例如 typescript-eslint），属于依赖变更。
+- ESLint 和 API 类型检查已经打开，但靠第 7 节的基线放过了已有问题（ESLint：网站 57 个
+  文件 133 处、API 103 个文件 597 处；API 类型检查：35 个测试文件共 686 处，排除在外）。
+  结合相关功能的改动逐步修掉。
 - 集成测试（`*.integration.ts`，约 2 万行）只有计费（`bill2/billing.integration.ts`）和 Runtime 恢复与流式
   （`runtime/runtime.integration.ts`、`runtime/streaming.integration.ts`）在 CI 里运行，其中需要网站或浏览器的
   5 个用例被明确排除（见 `packages/db/tests/v3/without-app.mjs`）；定位（OPC）、工作台等其余集成测试仍不在 CI 里；
-  `packages/api` 没有独立的类型检查，大部分 API 测试文件从未被类型检查；CI 只跑少数
-  网站单测。
+  网站单元和组件测试已全部在 CI 里运行（`pnpm --filter web test:unit`）。
 - 仓库没有安装代码格式化工具（Prettier）。
 - 基线里有 50 个文件超过 500 行、146 个文件含超长行。结合相关功能的改动逐步拆分；
   计费、支付等高风险大文件的拆分单独立项。
