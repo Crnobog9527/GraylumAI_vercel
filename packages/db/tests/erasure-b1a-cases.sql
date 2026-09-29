@@ -11,7 +11,7 @@ INSERT INTO ids SELECT k, gen_random_uuid() FROM unnest(ARRAY[
   'closed', 'open', 'module', 'skill', 'revision',
   'c_project', 'c_round', 'c_evidence', 'c_version', 'c_conv', 'c_turn', 'c_gen_done', 'c_gen_live',
   'c_plan', 'c_op_done', 'c_op_live', 'c_draft', 'c_session', 'c_opc_plan', 'c_item', 'c_business',
-  'o_project', 'o_round', 'o_evidence', 'o_draft', 'o_opc_plan', 'o_item', 'o_gen', 'o_business']) k;
+  'o_project', 'o_round', 'o_evidence', 'n_project', 'n_round', 'o_draft', 'o_opc_plan', 'o_item', 'o_gen', 'o_business']) k;
 CREATE TEMP VIEW i AS SELECT (SELECT v FROM ids WHERE k='closed') closed, (SELECT v FROM ids WHERE k='open') open;
 
 INSERT INTO profiles(id, email, nickname, role, status, membership_level, credits, is_deleted)
@@ -23,10 +23,10 @@ INSERT INTO account_erasure_requests(profile_id, request_id) SELECT closed, gen_
 INSERT INTO artifact_projects(id, actor_id, module_id, skill_id, account, current_version, work_kind, work_title)
 SELECT (SELECT v FROM ids WHERE k=p||'_project'), (SELECT v FROM ids WHERE k=o), (SELECT v FROM ids WHERE k='module'),
   (SELECT v FROM ids WHERE k='skill'), 'handle-' || p, 1, 'legacy', 'secret title ' || p
-FROM (VALUES ('c', 'closed'), ('o', 'open')) x(p, o);
+FROM (VALUES ('c', 'closed'), ('o', 'open'), ('n', 'open')) x(p, o);
 INSERT INTO artifact_rounds(id, project_id, revision_id, package_hash, workflow, workflow_hash, template_hash, state, steps)
 SELECT (SELECT v FROM ids WHERE k=p||'_round'), (SELECT v FROM ids WHERE k=p||'_project'), (SELECT v FROM ids WHERE k='revision'),
-  'pkg', '{}', 'wf', 'tpl', st, '[{"body":"private step"}]' FROM (VALUES ('c', 'published'), ('o', 'draft')) x(p, st);
+  'pkg', '{}', 'wf', 'tpl', st, '[{"body":"private step"}]' FROM (VALUES ('c', 'published'), ('o', 'draft'), ('n', 'draft')) x(p, st);
 INSERT INTO artifact_evidence(id, project_id, kind, payload, content_hash)
 SELECT (SELECT v FROM ids WHERE k=p||'_evidence'), (SELECT v FROM ids WHERE k=p||'_project'), 'user', '{"text":"private"}', 'h'
 FROM unnest(ARRAY['c', 'o']) p;
@@ -248,8 +248,9 @@ BEGIN
   IF (SELECT display_name FROM opc_work_ui WHERE work_item_id = (SELECT v FROM ids WHERE k='o_item')) <> 'new title' THEN
     RAISE EXCEPTION 'C7 title sync broken';
   END IF;
-  UPDATE artifact_projects SET work_title = 'renamed work' WHERE actor_id = (SELECT open FROM i);
+  UPDATE artifact_projects SET work_title = 'renamed work' WHERE id = (SELECT v FROM ids WHERE k='o_project');
 END $$;
 SELECT 'PASS C7 real research_transition create/cancel and ordinary updates still work';
+
 
 ROLLBACK;

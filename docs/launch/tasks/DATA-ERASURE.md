@@ -224,7 +224,7 @@ PR-B1a（0149，artifact / agent / research / opc 表）的擦除通道：
 - 做法：26 张表加 `erased_at`；按目录动态找出引用可擦除列的 CHECK，改写成"已擦除或满足原规则"；NOT NULL 的正文列改成可空，加"未擦除必须有值""已擦除必须为空"两条约束。`artifact_immutable` 和另外三个保护函数通过触发器参数拿到每张表的白名单，只放行"未擦除 → 已擦除、白名单列清空（或改成规定的占位值）、其他列一字不变"这一种 UPDATE；已擦除的行不能再改，DELETE 仍然一律拒绝。可变表加 `erased_row_guard`。`packages/db/tests/erasure-constraint-audit.sql` 是只读审计，应返回 0 行。
 - 壳里保留：id、时间、归属主体、状态、版本号、平台 Skill 的 package / workflow / template hash（这些不是用户内容）。账务键保留：成果生成 result 里的 credits / inputTokens / outputTokens / costUsd，研究调用 result 里的 cost；`provider_observations` 由 PR-B2 按账务白名单处理。账号类唯一值（opc_accounts.account_key、artifact_projects.account）改为 `erased:<id>`，不会互相冲突。
 - **由正文算出来的 hash 一并清除**：content_hash、report_hash、source_hash、input_hash、agent_preference_requests.payload_hash（整行删除）。短文本的 hash 可以用猜测去比对原文，按附录 A 属于"可关联内容指纹"，不能保留。唯一保留的是 `research_operations.identity_hash`：它是研究调用计费的幂等键，按 §3.1 属于受限财务证据，客户端不能读取，保留到 T_fin 到期；它不是用来恢复内容的，也不公开。
-- 在途的行不清：成果生成不是 succeeded/refunded 的、研究调用不是 succeeded/failed/cancelled 的，以及还有未清调用的研究计划，都先跳过并计数，由 PR-C 的重试任务在结算后再清。
+- 在途的行不清：成果生成不是 succeeded/refunded 的、研究调用不是 succeeded/failed/cancelled 的，以及还有未清调用的研究计划，都先跳过并计数。**这些行要等 PR-B2**：现有的结算函数（artifact_generation、artifact_reject_generation、artifact_observe_generation、research_transition、research_user_charge、research_cancel）一开头就检查 `status='active' AND is_deleted='false'`，所以已注销账号的在途生成和研究调用现在无法结算，也无法退款，要靠 PR-B2 的受限结算路径才能走到终态。PR-C 的重试任务在这之后才清得掉这些行，**所以 PR-C 必须排在 PR-B2 之后**。
 - 界面状态类、偏好、账号绑定这 6 张没有被任何外键引用的表，直接删行（opc_work_ui / opc_account_ui / opc_publication_ui / agent_confirmed_preferences / agent_preference_requests / artifact_accounts）。其余表只留下没有正文的壳，物理删除由 PR-C 做。
 - runtime_* 和旧对话表在 PR-B1b。
 
