@@ -17,7 +17,9 @@ import { admissionMessage } from "./admission-message";
 import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-response";
 import { liveReplyAfter, livePhaseNotice, mentorReplyDisplay, questionCardStatus, startLiveReply, type LiveReply } from "./agent-turn-display";
 import { QuestionCardView } from "@/components/opc/question-card";
-import type { AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
+import type { AgentTurnEvent, AgentTurnOutcome } from "@repo/api/src/shared/agentTurn";
+import { openingRequest, parseStepEnvelope, readAgentTurn, retainExecution, settleEnvelope, turnResultNotice } from "./mentor-turn";
+import type { MentorRequest, MentorStepEnvelope } from "./mentor-turn";
 import {
   confirmationActionIsRedundant,
   confirmQuestionValues,
@@ -26,9 +28,7 @@ import {
   isReviewOnlySelection,
   navigatorRows,
   nextInformationQuestion,
-  OPENING_INPUT,
   openingEntryKey,
-  openingRequestId,
   questionIsConfirmed,
   questionLabel,
   questionStatusLabel,
@@ -100,20 +100,7 @@ function isDefiniteConfirmConflict(cause: unknown) {
     "ARTIFACT_REVIEW_REQUIRED",
   ].some((code) => cause.message.includes(code));
 }
-type MentorRequest = {
-  draftId: string;
-  stepId: string;
-  purpose: "mentor";
-  requestId: string;
-  input: string;
-  questionId?: string;
-  organizeAfter?: boolean;
-};
-type StepEnvelope = {
-  request: MentorRequest;
-  information?: ConfirmStepEnvelope["information"];
-  editingSnapshot?: string;
-};
+type StepEnvelope = MentorStepEnvelope<ConfirmStepEnvelope["information"]>;
 type ConfirmEnvelopeState =
   | { kind: "none" }
   | { kind: "valid"; envelope: ConfirmStepEnvelope; raw: string }
@@ -161,33 +148,6 @@ const definiteHandoffRejections = new Set([
   "OPC_DENIED",
 ]);
 /** The retained mentor request is either wrapped in `request` or legacy top-level. */
-function parseStepEnvelope(raw: string): StepEnvelope | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!isRecord(parsed)) return null;
-  const candidate = isRecord(parsed.request) ? parsed.request : parsed;
-  if (
-    typeof candidate.draftId !== "string" ||
-    typeof candidate.stepId !== "string" ||
-    typeof candidate.requestId !== "string" ||
-    typeof candidate.input !== "string"
-  )
-    return null;
-  return {
-    request: candidate as MentorRequest,
-    information: isRecord(parsed.information)
-      ? (parsed.information as ConfirmStepEnvelope["information"])
-      : undefined,
-    editingSnapshot:
-      typeof parsed.editingSnapshot === "string"
-        ? parsed.editingSnapshot
-        : undefined,
-  };
-}
 export default function PositioningDraft({
   params,
 }: {
@@ -210,25 +170,25 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [liveReply,setLiveReply]=useState<LiveReply|null>(null);
   const [pendingBubble,setPendingBubble]=useState<MentorRequest|null>(null);
   const mentorSendInFlight=useRef(false);
-  const execute={mutateAsync:async(input:{executionId:string})=>{
-    setLiveReply(startLiveReply(input.executionId));
-    let result;
+  /** One turn's events: a resumed execution passes its id, a new turn learns it from `admitted`. */
+  const streamTurn=async(open:()=>Promise<AsyncIterable<AgentTurnEvent>>,executionId?:string,onAdmitted?:(id:string)=>void)=>{
+    let current=executionId,result:AgentTurnOutcome|undefined;
+    if(executionId)setLiveReply(startLiveReply(executionId));
     try{
-    const events=await utils.client.runtime.executeStream.mutate(input);
-    for await(const event of events){
-      if(event.type==='result')result=event.result;
-      else setLiveReply(old=>liveReplyAfter(old,input.executionId,event as AgentTurnEvent));
-    }
-    if(!result)throw new Error('OPC_EXECUTION_STREAM_INTERRUPTED');
-    if('unavailable' in result&&result.unavailable==='output_truncated')setError('本次模型调用达到长度上限，原请求已保留，不会自动重试。');
-    if('unavailable' in result&&result.unavailable==='provider_history')setError('历史消息格式暂不兼容，本次执行已停止。原记录已保留；请联系支持检查历史兼容性，不要重复发送这条请求。');
-    else if('unavailable' in result&&result.unavailable==='preflight')setError('本次执行在模型派发前检查失败，已停止并保留原记录。请核对服务状态后再继续，不会自动重放。');
-    return result;
+      ({result}=await readAgentTurn(await open(),{executionId,onAdmitted:id=>{current=id;setLiveReply(startLiveReply(id));onAdmitted?.(id);},
+        onProgress:(id,event)=>setLiveReply(old=>liveReplyAfter(old,id,event)),onFinished:()=>void utils.credits.getBalance.invalidate()}));
+      const notice=turnResultNotice(result);if(notice)setError(notice);
+      return result;
     }finally{
       // A failed/unfinished transport must not leave an endless generating label.
-      if(result?.state!=='completed')setLiveReply(old=>old?.executionId===input.executionId?{...old,phase:'incomplete'}:old);
+      const id=current;
+      if(result?.state!=='completed'&&id)setLiveReply(old=>old?.executionId===id?{...old,phase:'incomplete'}:old);
     }
-  }};
+  };
+  const execute={mutateAsync:(input:{executionId:string})=>streamTurn(()=>utils.client.runtime.executeStream.mutate(input),input.executionId)};
+  /** A mentor turn in one request: admission, then the same execution stream (AC-1). */
+  const mentorTurn=(request:MentorRequest,onAdmitted?:(id:string)=>void)=>
+    streamTurn(()=>utils.client.opc.mentorTurnStream.mutate(request),undefined,onAdmitted);
   const information = trpc.opc.information.useMutation();
   const [infoEdits, setInfoEdits] = useState<
     Record<string, Record<string, Information>>
@@ -364,8 +324,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const d = read.data,
     snap = d?.snapshot,
     latest = d?.plans?.[0];
-  // `prepareStep`/`execute` are deliberately excluded: the Agent's own opening
-  // uses them, and it must never disable the form the user is filling in. Every
+  // `prepareStep`/`execute`/`mentorTurn` are deliberately excluded: the Agent's own
+  // opening uses them, and it must never disable the form the user is filling in. Every
   // user-initiated use of them runs inside `run()` (or a named flag), which is
   // what actually gates the controls.
   const busy = bindTopic.isPending ||
@@ -815,15 +775,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         // a new one: a busy session would refuse it, and the user's question
         // would stay unopened.
         await resumeInterruptedOpening();
-        const admitted = await prepareStep.mutateAsync({
-          draftId,
-          stepId: step.id,
-          purpose: "mentor",
-          requestId: openingRequestId(draftId, d.roundId, step.id, question.id),
-          input: OPENING_INPUT,
-          questionId: question.id,
-        });
-        await execute.mutateAsync({ executionId: admitted.executionId });
+        await mentorTurn(openingRequest(draftId, d.roundId, step.id, question.id));
         // The chat joins the execution history to opc.read's turn/question
         // bindings. Refresh both projections; history alone leaves a completed
         // opening invisible until an unrelated user action refreshes the draft.
@@ -983,15 +935,19 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if (request.questionId)
       setActiveQuestions((old) => ({ ...old, [step.id]: request.questionId! }));
     if (!request.input?.trim()) throw new Error("OPC_INPUT_REQUIRED");
-    const admitted = await prepareStep.mutateAsync(request);
-    await execute.mutateAsync({ executionId: admitted.executionId });
+    // An admitted request resumes its execution; otherwise the same request is
+    // resent and the server replays its admission. Neither dispatches twice.
+    let executionId = fixed.executionId;
+    const result = executionId ? await execute.mutateAsync({ executionId })
+      : await mentorTurn(request, id => { executionId = id; retainExecution(sessionStorage, key, request.requestId, id); });
     // Read the turn binding and its execution together while the retained
     // envelope still blocks automatic opening. Clearing the envelope first
     // lets that effect race an explicit first message on a manual draft.
     const [draftRead, historyRead] = await Promise.all([read.refetch(), history.refetch()]);
     if (draftRead.error || !draftRead.data || historyRead.error || !historyRead.data)
       throw new Error('OPC_MENTOR_READBACK_UNAVAILABLE');
-    sessionStorage.removeItem(key);
+    // A still-running execution keeps its envelope and pending bubble until an explicit resume sees a terminal result.
+    if (!settleEnvelope(sessionStorage, key, request.requestId, executionId, result)) return;
     // Retire only this pending bubble; never touch the next editable draft.
     setPendingBubble(old=>old?.requestId===request.requestId?null:old);
     setLiveReply(null);

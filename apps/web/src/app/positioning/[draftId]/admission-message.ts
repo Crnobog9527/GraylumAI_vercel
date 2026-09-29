@@ -4,7 +4,7 @@
 export function admissionMessage(cause:unknown):string|null {
  if(!(cause instanceof Error)||!('data' in cause)||!cause.data||typeof cause.data!=='object')return null;
  const data=cause.data as {code?:unknown;path?:unknown};
- if(!['opc.prepareStep','runtime.prepare'].includes(String(data.path))||
+ if(!['opc.prepareStep','opc.mentorTurnStream','runtime.prepare'].includes(String(data.path))||
   !['PRECONDITION_FAILED','FORBIDDEN','SERVICE_UNAVAILABLE'].includes(String(data.code)))return null;
  return cause.message+' 原请求与输入已保留；条件恢复后可继续核对同一请求。';
 }
