@@ -1,7 +1,7 @@
 # Graylum Master Plan v12 — 产品全貌、现状与施工顺序
 
 > 整理日期：2026-09-27，依据 staging `d2b42e7258876af318cf6814cd94edc161854c4e` 的代码和 GitHub 实时状态。
-> 进度同步：2026-09-29，依据 staging `83f417bf` 和 GitHub 实时状态更新第 0、1、2.1、7、8、10 节的进度和 Owner 新决定（见第 7.0 节）；产品规则和验收标准除第 2.1 节新增决定外不变。
+> 进度同步：2026-09-29，依据 staging `1cf461c1`（含 #510）和 GitHub 实时状态更新第 0、1、2.1、7、8、10 节的进度和 Owner 新决定（见第 7.0 节）；产品规则和验收标准除第 2.1 节新增决定外不变。
 > 本文是**唯一的当前产品规划**，取代 [v11](Graylum_Master_Plan_v11.md) 的施工顺序和状态描述。v11 及更早文档中仍然有效的详细要求，由第 9 节逐项列明继续适用。
 > 本文不授予任何执行权限。仓库操作、风险分级、审查和合并只按 [AGENTS.md](../../AGENTS.md)；具体功能要等 Owner 选定批次后才开工（第 7.4 节）。
 
@@ -95,6 +95,8 @@
 15. **旧聊天完全关闭**（#507）：staging 和正式环境都没有真实用户、上线前清空数据，所以不再提供旧对话只读查看入口，旧链接直接跳到 `/positioning`。
 16. **新交互的开场也调用整理模型**（AC1-4）：导师开场给出的建议，由整理模型作为"待核对"填进右侧，体验和旧方式一致；每次开场多一次整理调用。
 17. **接受一项旧链路影响**（#480）：整理模型选了旧名单之外的模型时，旧成果生成和 agentSlice 会报"整理模型未配置"，不会用错模型或多扣费；这些旧链路随 LEGACY-CLOSE 删除。
+18. **数据库结构只由迁移文件决定**（C3 方案 B，#510）：`db:push` 退役，`schema.ts` 只作类型参考；新增 DB-BASELINE 任务补齐基线并做空库建库验证，必须在 V3-M3 / REL-1 之前完成（第 7.1 节、第 9.3 节）。
+19. **内容审核改用 OpenAI Moderation**（#510）：新导师引擎接入，被拦截的消息不收积分，违规记录进后台由管理员人工处理；新增 MODERATION 任务，封闭内测前完成。旧的自研内容检查随 LEGACY-CLOSE 删除。
 
 ### 2.2 被本版取代的旧规则
 
@@ -405,7 +407,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | N1b 体验样片 | **只差 AC1-4；Owner 2026-09-29 决定主线暂缓** | AC-0：计时 #454、模型对比脚本 #456/#473/#477、减少往返 #469/#470，结论"调整后可以"，导师换成 deepseek（#481）。RESEARCH-0：#457/#465/#466。AC1-1 #472、AC1-2 #475、AC1-3 #479。AGENT-CORE-UI：U1 #476、U2 #490。MODEL-REASONING：#480、#494、#495（staging 已配置并实测）。AC1-4：方案 #497（开场带整理，第 2.1 节第 16 项），实现暂缓；启用前的真实测试和合并后的 staging 验证各需 Owner 批准。AC1-5（读 Skill 文件的工具）未开始，是否纳入样片待定 |
 | N1c 完整定位流程 | 未开始 | 前置条件已满足：DATA-ERASURE 删除规则设计 #474（E1–E11 已决定）、CI-TRUST-1 |
 | N1d 推广 | 未开始 | DEBT-QUICK 已做一部分：删除失效脚本 #482、文档纠错和脱敏 #483 |
-| N2 上线基础 | 部分提前完成 | SEC-RATELIMIT #488（本机预览限流 #492）；PII-REGEX #500（关闭 #333）；DATA-ERASURE 仍待实现 |
+| N2 上线基础 | 部分提前完成 | SEC-RATELIMIT #488（本机预览限流 #492）；PII-REGEX #500（关闭 #333）；DATA-ERASURE 仍待实现；#510 新增 DB-BASELINE、MODERATION，未开始 |
 | N4 收口 | 部分提前完成 | LEGACY-CLOSE 的关入口 #507（标注 #508） |
 
 **已知问题和风险**：
@@ -432,6 +434,8 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | CI-TRUST | 其余部分：ESLint 覆盖 TS/TSX；网站单测统一入口；API 独立类型检查；删除 `@repo/ui` 空壳和未接入的 ESLint 配置包；依赖升级机器人改发到 staging 并清理指向 `main` 的旧升级 PR（第 8.4 节第 1–3 项） | — | 高 | 中 / 3–4 |
 | | DEBT-QUICK | 第 8.3 节第 2 项的快速清理（只含普通改动）；关闭已解决和已废弃的问题单（第 8.4 节第 4–5 项，只是 GitHub 操作，不改代码） | — | 普通 | 小 / 2 |
 | **2 上线基础** | RUNTIME-PROD | 正式环境真实调用模型：① 模型报价的审批和开放机制；② 收费公式的两个参数（1 美元换多少积分、加价倍数）做成后台随时可改，大模型和搜索共用，发起收费时冻结（第 2.1 节第 11 项、D16）；③ 后台界面；④ 预扣估算规则统一修订（按实际发送长度，普通调用和 Fusion 共用），上线前用真实账单核对估算和实际差距并留余量；⑤ 止损：每个用户每日上限、全站每日成本上限和告警、供应商余额告警、一键停止新调用的开关；⑥ 理清 `provider` 字段语义；⑦ 数据不用于训练由服务端强制：正式环境所有模型调用都发送 OpenRouter 的 `data_collection: deny`，只批准支持该设置的供应商线路，准入时拒绝不满足的线路；是否额外要求零数据保留（`zdr`）在实施时核对供应商能力后决定（DATA-ERASURE E10 已决定非 ZDR 线路可以启用；第 ⑦ 项本身是否保留待 Owner 确认，见第 10 节"待确认事项"）。验收包括一次有上限的真实小额对账 | AGENT-CORE 稳定 | 高 | 大 / 4–6 |
+| | DB-BASELINE | 按 Owner 2026-09-29 选择的 C3 方案 B（第 9.3 节）：① 先修完 S1（#498）查出的 staging 权限漂移；引入 `0000` 前，先完成与现有追加式迁移账本、检查器及 CI 的兼容过渡，涉及的治理变更单独按受保护流程先行交付，不得在新增基线的同一 PR 中修改检查器来放行自身；② 从 staging 导出只有结构的建库脚本作为核对来源，整理成只补缺失前置对象的 `0000` 基线，补上 16 张核心表及缺失的相关函数、触发器、扩展、存储桶、授权；已有迁移负责创建的 75 张表及其对象仍由原文件创建，不把完整 staging 结构直接放进 `0000`；③ 用空库按顺序跑完全部迁移，并跑完整测试；④ 退役 `db:push`，更新 `docs/ENGINEERING.md` 和 `docs/runbooks/STAGING_REPRODUCIBILITY.md`，这部分属于治理变更，按受保护流程走。必须在 V3-M3 / REL-1 之前完成 | S1 的权限修复 | 高 | 待实施方案细化 |
+| | MODERATION | 按 Owner 2026-09-29 决定，新导师引擎接入 OpenAI Moderation：① 输入检查和导师调用同时进行，违规立即中断；② AI 回复生成完再检查，违规就隐藏；③ 被拦截的消息不收积分；④ 违规记录进后台，多次违规的账号由管理员人工处理；⑤ “被拦截”有单独的终止状态，不能被 runner 改写成 `pending`；⑥ 需要单独的 OpenAI 密钥，由 Owner 提供；⑦ 实施前先核实接口价格和数据保留政策。必须在封闭内测之前完成 | AGENT-CORE 稳定 | 高 | 待实施方案细化 |
 | | MODEL-REASONING | ① 添加或编辑模型时，从 OpenRouter 公开模型目录读取该模型支持的思考档位、默认档位、能否关闭，保存快照并可"重新读取"；② 管理员按模型和用途（交互对话、整理、评审、写作）选择思考强度，选项只来自该模型支持的档位，外加"关闭"（允许时）和"用供应商默认"；③ 保存前检查所选供应商线路支持这个参数；④ 准入时把所选档位冻结进执行记录，重放用原值；⑤ 档位和回复长度上限联动校验；⑥ "试一次"按钮，用固定短问题真实调用一次，显示首字时间和是否有正文，费用由平台承担。取代 PR #446 里写死的对照表。**按 Owner 2026-09-28 决定，MODEL-REASONING 提前到 N1b，在 AC1-4 之前完成**（Owner 要求模型在后台随时切换、不绑在代码里）。**已完成**（#480、#494、#495，2026-09-29） | P0-1；和 RUNTIME-PROD 由同一个 writer 完成（同一个后台模型页） | 高 | 中 / 2–3 |
 | | ENTITLEMENTS | 会员权限配置：Fusion 两种模式的开关和上限、资料库总存储空间；服务端检查（系统级文件数量保护上限不属于会员权益，不在这里配置） | —；和 PAY-COMMON 由同一个 writer 先后完成 | 高 | 中 / 2 |
 | | RESEARCH-TOOLS | 第三方搜索统一接口层和对标研究（第 3.7 节，见 [实施说明](tasks/RESEARCH-TOOLS.md)）：规则表和已验证平台清单、统一返回格式、美元成本接入 BILL2、确认失败时如实告知取不到数据（以后经批准增加备用线路后才换备用）、证据进资料库并接入账号注销、打开真实模型的搜索开关、对标流程的代码计算和表格写入限制。在封闭内测之前完成 | RESEARCH-0、AC-1、RUNTIME-PROD、DATA-ERASURE | 高 | 大 / 3–5 |
@@ -449,7 +453,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | UI-C | 输入框附件 = 上传进资料库再引用（不另建一套上传，只支持 D6 的文档类型） | UI-A、LIB-DOCS、RUNTIME-PROD | 高 | 中 / 2 |
 | | UI-FINISH | 导航、响应式、旧链接迁移、界面全验收（沿用 v11） | UI-B、UI-C | 普通 | 中 / 2–3 |
 | **4 收费和上线** | PAY-COMMON → PAY-WAFFO | 沿用 v11 §9 和第 11 节定义；按 D17，PAY-COMMON 提供后台"新购买使用的渠道"设置（Waffo / Stripe，手动切换），订单记录成交渠道，续费、退款和凭证按原渠道处理 | ENTITLEMENTS 之后，同一个 writer | 高 | 大 / 7–10 |
-| | LEGACY-CLOSE | 关入口已由 #507 提前完成（2026-09-29）：`/chat` 临时跳转 `/positioning`，`/api/ai/stream` 对新请求返回 410，8 处入口改指或禁用；本任务剩余工作是删除旧代码（`/chat` 页面与组件、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等）和功能对照检查记录。按 Owner 2026-09-29 决定不再提供旧对话只读查看入口（staging 和正式环境都没有真实用户，上线前清空数据），旧链接直接跳到 `/positioning`；旧对话不迁移、不删除 | AC-4 接管自由对话；入口改指已由 #507 满足；UI-MODEL、UI-B、UI-C、UI-FINISH 已交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 |
+| | LEGACY-CLOSE | 关入口已由 #507 提前完成（2026-09-29）：`/chat` 临时跳转 `/positioning`，`/api/ai/stream` 对新请求返回 410，8 处入口改指或禁用；本任务剩余工作是删除旧代码（`/chat` 页面与组件、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等；自研内容检查 `contentModerator.ts`、`aiOutputFilter.ts`、`streamingOutput.ts`，以及它们在 `agentSlice` 和旧 `workbench` 生成里的调用，不单独开任务）和功能对照检查记录。旧检查文件随 LEGACY-CLOSE 删除；删除前核实必要的凭证保护和用户数据隔离不受影响，不要求迁移旧的通用 PII 正则过滤。按 Owner 2026-09-29 决定不再提供旧对话只读查看入口（staging 和正式环境都没有真实用户，上线前清空数据），旧链接直接跳到 `/positioning`；旧对话不迁移、不删除 | AC-4 接管自由对话；入口改指已由 #507 满足；UI-MODEL、UI-B、UI-C、UI-FINISH 已交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 |
 | | V3-M3 → REL-1 | 完整验收和发布（第 9.3 节；正式环境没有真实用户，按新建环境发布，不做旧数据兼容和迁移） | 以上全部 | 高；生产另行批准 | 大 |
 | **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | 沿用 v11 §8（C1 套餐式自动追踪已确认） | 上线 | 高 | 大 |
 | | LEARN-1、LEARN-2 | 第 6.3 节：读取用户数据、依赖数据使用同意 | 有真实用户 / SOCIAL-SYNC | 高 | 中 |
@@ -462,6 +466,8 @@ P0-1、CI-TRUST-1 ─→ AGENT-CORE（AC-0 → AC-1 → AC-2、AC-3 → AC-5 →
 DATA-ERASURE 删除规则设计 ─→ AC-2
 AGENT-CORE ─→ RUNTIME-PROD + MODEL-REASONING（同一 writer）
 RESEARCH-0 + AC-1 + RUNTIME-PROD + DATA-ERASURE ─→ RESEARCH-TOOLS ─→ 封闭内测
+AGENT-CORE 稳定 ─→ MODERATION ─→ 封闭内测
+S1 权限修复 ─→ DB-BASELINE ─→ V3-M3 ─→ REL-1
 ENTITLEMENTS ─→ PAY-COMMON ─→ PAY-WAFFO（同一 writer）
 RUNTIME-PROD + ENTITLEMENTS + DATA-ERASURE ─→ FUSION-REVIEW
 ENTITLEMENTS + DATA-ERASURE ─→ LIB-DOCS ─→ VOICE（另需 RUNTIME-PROD）
@@ -491,7 +497,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | N1b 体验样片 | AC-0、AC-1 及其对应的 AGENT-CORE-UI 部分；RESEARCH-0（和 AC-0 同期）；MODEL-REASONING（按 Owner 2026-09-28 决定提前，在 AC1-4 之前完成） | Owner 在 staging 用真实模型走完定位第一步，决定继续、调整还是换模型；右侧整理这一阶段沿用旧做法 |
 | N1c 完整定位流程 | DATA-ERASURE 删除规则设计、AC-2、AC-3、AC-5 及其对应的 AGENT-CORE-UI 部分（本步小结卡、右侧面板和进度条） | Owner 从进入到定稿完整走通并验收 |
 | N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
-| N2 上线基础 | RUNTIME-PROD、RESEARCH-TOOLS、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON | 上线基础完成；然后邀请 5–10 位真实用户**封闭内测**：只开放定位、周选题和写作，用赠送积分，不开放付费，反馈用于调整 N3 的优先级（D8，不改变 D1 的公开上线范围） |
+| N2 上线基础 | RUNTIME-PROD、DB-BASELINE、RESEARCH-TOOLS、MODERATION、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON | 上线基础完成；然后邀请 5–10 位真实用户**封闭内测**：只开放定位、周选题和写作，用赠送积分，不开放付费，反馈用于调整 N3 的优先级（D8，不改变 D1 的公开上线范围） |
 | N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
 | N4 收口 | LEGACY-CLOSE、V3-M3 | 完整验收；REL-1 和生产另行批准 |
 
@@ -612,7 +618,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 
 **后续事项**：
 1. **共享 Storage 的授权**（`storage.objects`、`storage.buckets`）：是 Supabase 的默认授权，RLS 已开且没有策略；REST 不暴露 storage schema，匿名用户列不出任何对象（2026-09-29 只读核查，见 #506 评论）。在 LIB-DOCS 或 UI-C 设计上传权限时一并整理，最晚在上线前的安全检查中和正式环境核对一起做。如果以后把 storage 加入 REST 暴露范围或新建公开桶，要先重新评估。
-2. **正式环境的数据库权限**：staging 上发现的问题（模型密钥列、工单、邀请、Storage）在正式环境是否同样存在，上线准备阶段经 Owner 批准后只读核对，并按迁移对齐。
+2. **正式环境的数据库权限**：staging 上发现的问题（模型密钥列、工单、邀请、Storage）在正式环境是否同样存在，上线准备阶段经 Owner 批准后只读核对；按第 2.1 节第 18 项，正式库由迁移文件建出，这些权限要先进入迁移和 DB-BASELINE 的基线，由空库建库验证覆盖。
 3. 诊断页的"智能路由""实时关键词"两项期望值和 #406 之后的规则不一致，只服务旧 `/chat`，随 LEGACY-CLOSE 删除。
 4. 部分网页组件测试（例如模型思考设置的草稿和对话框测试）只在本机运行，纳入 CI-TRUST。
 5. 定位集成测试基线问题（#478，包括过时的"定位摘要"定位方式）；MR-1 之后本机有 3 个后台用例需要补模型思考配置的测试数据。
@@ -653,7 +659,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 - 证据层次：隔离测试验证行为、权限、并发和账务恢复；真实模型质量、真实延迟、供应商协议和真实成本需要各自的 staging 实测证据；没有实测的项目标记为 NOT_RUN，不能当作通过。
 - REL-1 发布仍需满足 v11 §13.3 的发布条件（"不能假设现网无用户"以及与旧 runtime 向后兼容、兼容回退的要求除外，见下一条），并另行取得生产批准。
 - **正式环境没有真实用户（第 2.1 节第 8 项，Owner 确认的事实）**：取代 v11 §13.3 "不能假设现网无用户"，以及 v10.1 §9、§10 中为保护现网数据而设的要求，包括新旧代码兼容、分步切换、旧数据迁移和针对旧数据的回滚。发布前如果发现正式环境已有真实用户数据，这一条失效，停止发布并请 Owner 重新决定。
-- **正式库的建法**：由迁移文件建出结构，再导入配置类数据（例如套餐、模型报价、已发布的 Skill 和模块配置）；不复制 staging 的测试账号、对话、订单、流水、支付沙盒编号和测试窗口。
+- **正式库的建法**：Owner 2026-09-29 已选择 [C3 数据库盘点](evidence/C3-db-inventory-20260929.md)第 5 节的方案 B：数据库结构只由迁移文件决定，`db:push` 退役，`schema.ts` 只作类型参考；由 DB-BASELINE 补齐基线和建库验证。由迁移文件建出结构，再导入配置类数据（例如套餐、模型报价、已发布的 Skill 和模块配置）；不复制 staging 的测试账号、对话、订单、流水、支付沙盒编号和测试窗口。
 - **仍然保留**：正式环境密钥和配置逐项确认；上线当天有上限的真实小额支付、退款、模型调用和同日对账；AGENTS 第 10 节要求的上线前 Owner 明确批准。
 
 <a id="decisions"></a>
@@ -705,4 +711,4 @@ Owner 于 2026-09-27 确认 D1–D17（D6 在 Fable 评估后改为不含 PDF；
 | `tasks/` 下其他规格 | 技术附录，见第 9.2 节 |
 | [docs/archive/](../archive/README.md) | 已归档的 2026 年 1 月旧计划、旧设计和旧开发规范 |
 
-本版依据：Owner 的决定（第 2.1、10 节；D13 的 2026-09-28 修订依据 RESEARCH-0 的 #457、#465、#466）；Fable 5.1 的独立评估（PR #448 评论）；2026-09-27 对 staging `d2b42e72` 的代码核实；GitHub 上 PR #422、#434–#447 的实时状态；OpenRouter、Supabase、OpenAI 官方文档和价格页面（2026-09-27 读取）。2026-09-29 进度同步依据：staging `83f417bf` 和 GitHub 上 #446—#508 的实时状态，以及各 PR 评论中记录的 Owner 原话。
+本版依据：Owner 的决定（第 2.1、10 节；D13 的 2026-09-28 修订依据 RESEARCH-0 的 #457、#465、#466）；Fable 5.1 的独立评估（PR #448 评论）；2026-09-27 对 staging `d2b42e72` 的代码核实；GitHub 上 PR #422、#434–#447 的实时状态；OpenRouter、Supabase、OpenAI 官方文档和价格页面（2026-09-27 读取）。2026-09-29 进度同步依据：staging `1cf461c1` 和 GitHub 上 #446—#510 的实时状态，以及各 PR 评论中记录的 Owner 原话。
