@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { resolveAnnouncementLink } from '../../../../../packages/api/src/shared/announcementLink';
 import { X, AlertTriangle, CheckCircle, Info, ChevronRight, Gift, Megaphone } from 'lucide-react';
 
 /**
@@ -119,6 +120,7 @@ export default function GlobalBanner({ banners = [] }: GlobalBannerProps) {
   if (visibleBanners.length === 0) return null;
 
   const banner = visibleBanners[0];
+  const link = resolveAnnouncementLink(banner.banner_link);
   const style = bannerStyles[banner.banner_style] || bannerStyles.announcement;
   const IconComponent = style.icon;
 
@@ -211,10 +213,10 @@ export default function GlobalBanner({ banners = [] }: GlobalBannerProps) {
 
         {/* 内容区域 */}
         <div className="relative max-w-7xl mx-auto flex items-center gap-3">
-          {banner.banner_link ? (
-            banner.banner_link.startsWith('http') ? (
+          {link ? (
+            link.isExternal ? (
               <a
-                href={banner.banner_link}
+                href={link.href}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={wrapperClass}
@@ -222,7 +224,7 @@ export default function GlobalBanner({ banners = [] }: GlobalBannerProps) {
                 <BannerContent clickable />
               </a>
             ) : (
-              <Link href={banner.banner_link} className={wrapperClass}>
+              <Link href={link.href} className={wrapperClass}>
                 <BannerContent clickable />
               </Link>
             )

@@ -1,5 +1,5 @@
 {
-  "apps/web/src/app/admin/announcements/page.tsx": {"lines":710},
+  "apps/web/src/app/admin/announcements/page.tsx": {"lines":705},
   "apps/web/src/app/admin/costs/page.tsx": {"lines":821},
   "apps/web/src/app/admin/diagnostics/page.tsx": {"lines":988},
   "apps/web/src/app/admin/finance/page.tsx": {"lines":773},
@@ -89,7 +89,7 @@
   "apps/web/src/hooks/use-credits.tsx": {"lines":507},
   "apps/web/src/hooks/useStreamingChat.ts": {"longLines":18},
   "packages/api/src/middleware/securityChecks.ts": {"lines":561},
-  "packages/api/src/routers/admin.ts": {"lines":3154},
+  "packages/api/src/routers/admin.ts": {"lines":3153},
   "packages/api/src/routers/agentSlice.ts": {"longLines":3},
   "packages/api/src/routers/chat.ts": {"lines":607,"longLines":1},
   "packages/api/src/routers/costs.ts": {"lines":733},
