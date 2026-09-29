@@ -97,6 +97,7 @@ class CIWorkflowsTest < Minitest::Test
     web_test = browser_steps.index { |step| step['run'] == web_command }
     refute_nil browser_install
     refute_nil web_test
+    assert_equal 'https://app.graylum.com', browser_steps[web_test].fetch('env').fetch('NEXT_PUBLIC_AUTH_APP_URL')
     assert_operator browser_install, :<, web_test
     assert_operator web_test, :<, browser_steps.index { |step| step['name'] == 'Build application' }
     %w[auth-bootstrap checkout-cancellation skill-runtime year-calendar refund-race billing-cron].each do |suite|
