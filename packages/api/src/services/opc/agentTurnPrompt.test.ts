@@ -30,19 +30,41 @@ describe('pinned generic Agent turn prompt',()=>{
  });
  it('requires substantive answers and analysis before an unsure user is asked to choose',()=>{
   const prompt=agentTurnInstructions(input);
-  expect(prompt).toContain('Output only public natural-language text.');
-  expect(prompt).toContain('call ask_question once');
-  expect(prompt).toContain('A vague, non-committal response is not a substantive field value or confirmation.');
-  expect(prompt).toContain('我不确定，帮我分析');
-  expect(prompt).toContain('analyse the available information and explain a useful recommendation before asking');
+  expect(prompt).toContain('Output only public natural-language text');
+  expect(prompt).toContain('call ask_question once, after your prose');
+  expect(prompt).toContain('A vague reply is not a field value or confirmation');
+  expect(prompt).toContain('When the user is not sure, first analyse the available information');
+  expect(prompt).toContain('An acknowledgement, help request or uncertainty is neither an answer nor permission to advance');
   expect(prompt).toContain('every required user_fact');expect(prompt).toContain('every required agent_proposal');
-  expect(prompt).toContain('Missing, unclear or merely provisional values do not prove confirmation.');
+  expect(prompt).toContain('Missing, unclear or provisional values do not prove confirmation.');
+ });
+ // Owner 2026-09-29: the card is an aid for sorting out known material, never a guess.
+ it('states when a card is used and when prose is used instead',()=>{
+  const prompt=agentTurnInstructions(input);
+  expect(prompt).toContain('it never guesses the user\'s situation, and most turns need no card');
+  expect(prompt).toContain('1. Choice card: the current field is a choice between approaches');
+  expect(prompt).toContain('set recommended to the index you recommend, and explain why in prose');
+  expect(prompt).toContain('2. Neutral card');expect(prompt).toContain('Set recommended to null.');
+  expect(prompt).toContain('No option may assert an experience, strength, result or number about the user.');
+  expect(prompt).toContain('a few general ranges or categories (such as weekly hours or platform types) that can be listed without knowing the user');
+  expect(prompt).toContain("3. Socratic prose: the answer is open personal content (the user's experience, strengths, stories or goals)");
+  expect(prompt).toContain('or the information is not enough for a professional judgement. No card');
+  expect(prompt).toContain('4. Labelled guess');
+  expect(prompt).toContain('in prose only, never as a card, saying that these are your guesses for the user to decide, '+
+   'made because the information is not yet enough for a professional judgement');
+  expect(prompt).toContain('5. Clear answer: no card');
+  expect(prompt).toContain('must not list the options again, and must recommend the same option as recommended');
+  expect(prompt).toContain('The host adds an Other entry with free-text input; never add other, not-sure, skip, defer or continue options');
+  expect(prompt).toContain('For user_fact, use a neutral card only for general ranges or categories and Socratic prose for open personal content');
+  expect(prompt).toContain('never offer guesses as options');
+  expect(prompt).not.toContain('我不确定，帮我分析');
  });
  it('adds host-opening instructions only for openings and never fabricates user speech',()=>{
   expect(agentTurnInstructions(input)).not.toContain('This turn is opened by the host');
   const prompt=agentTurnInstructions({...input,opening:true});
-  expect(prompt).toContain('the user has not spoken yet');
-  expect(prompt).toContain('first present one concrete draft recommendation');
+  expect(prompt).toContain('the user has not spoken and no question card is available');
+  expect(prompt).toContain('ask one useful question in prose');
+  expect(prompt).toContain('first give one grounded, tentative draft recommendation');
   expect(OPENING_EXTRACTION_RULE).toContain('only if that field has elicit agent_proposal');
   expect(OPENING_EXTRACTION_RULE).toContain('Set status to provisional, basis to agent_proposal and nature to decision');
   expect(OPENING_EXTRACTION_RULE).toContain('any user_fact field as an answer');
@@ -50,15 +72,14 @@ describe('pinned generic Agent turn prompt',()=>{
  });
  it.each([false,true])('keeps generic evidence, constraint and no-question boundaries for opening=%s',opening=>{
   const prompt=agentTurnInstructions({...input,opening});
-  expect(prompt).toContain('A status alone supplies no missing value');
-  expect(prompt).toContain('Preserve corrections without strengthening their meaning');
-  expect(prompt).toContain('Mark all other suggestions and assumptions as tentative');
+  expect(prompt).toContain('A status supplies no value');
+  expect(prompt).toContain('Preserve corrections without strengthening them');
+  expect(prompt).toContain('Never invent the user\'s experience, strengths, customers, prices, results, numbers or research findings');
   expect(prompt).toContain('total time across combined activities');
-  expect(prompt).toContain('A maximum or occasional allowance is not a sustainable commitment');
-  expect(prompt).toContain('This overrides clarification and opening-question defaults');
-  expect(prompt).toContain('no ask_question, follow-up question, request for confirmation or next-topic invitation');
-  expect(prompt).toContain('a card must resolve only the current field');
-  expect(prompt).toContain('never not-sure, skip, defer, continue, free-text or other host controls');
+  expect(prompt).toContain('an occasional maximum is not a sustainable commitment');
+  expect(prompt).toContain('this overrides every case');
+  expect(prompt).toContain('with no card, follow-up question, confirmation request or next-topic invitation');
+  expect(prompt).toContain('options resolving only the current field');
   expect(prompt).toContain('acknowledge briefly without reopening it or offering to advance');
  });
  it('handles a revision without a current question',()=>{

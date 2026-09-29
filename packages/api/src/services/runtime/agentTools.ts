@@ -19,12 +19,14 @@ export const MAX_AGENT_TOOLS=2;
 export const AGENT_STREAM_TOOLS=Object.freeze({toolNames:AGENT_TOOL_NAMES,maxCalls:8,retainUnknownNames:true});
 
 /** Parameters the model sees. Kept to plain JSON Schema limits (the locked
- * SDK sends strict schemas, so `recommended` is required and may be null); the
- * stricter card rules, including an in-range index, apply on execution. */
+ * SDK sends strict schemas, so `recommended` is required and may be null). It
+ * carries no bounds: the SDK would send zod's integer check as safe-integer
+ * minimum/maximum, and a provider may reject an unsupported keyword (AC-0).
+ * The stricter card rules, including an integer in-range index, apply on execution. */
 export const askQuestionParameters=z.object({
  question:z.string().min(1).max(QUESTION_MAX_CHARS),
  options:z.array(z.string().min(1).max(OPTION_MAX_CHARS)).min(MIN_OPTIONS).max(MAX_OPTIONS),
- recommended:z.number().int().min(0).max(MAX_OPTIONS-1).nullable(),
+ recommended:z.number().nullable(),
 }).strict();
 
 /** The tool result for a card the host refuses to show (arguments outside

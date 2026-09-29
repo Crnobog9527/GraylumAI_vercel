@@ -61,8 +61,8 @@ function planInstructions(opening:boolean){
 }
 
 it.each([
- {opening:false,golden:'c6c3cb18a093cb0c7c3fd67b3f17aab519da6cbf070f86bc55587cd2b7884043'},
- {opening:true,golden:'13199dd79e575027b0cd93a0c73c28fcb2977f4fbb4abda59796b8120cde0097'},
+ {opening:false,golden:'090f85077cec58c3932239e6dfd990deeb9cf9283468c82e13bc911338e7f7b0'},
+ {opening:true,golden:'a7ed5c498dfbba2981452b196b0ac715cabd1031e79c646e016b3f1a597a6a2e'},
 ])('freezes full v5 host prompt, pinned fields and wire request (opening=$opening)',async({opening,golden})=>{
  const instructions=agentTurnInstructions({step,question,questionLabel:'3.2',workflowContext,opening});
  expect(instructions).toBe(planInstructions(opening));
@@ -90,7 +90,7 @@ it.each([
   expect(sent.tools[0].function).toMatchObject({strict:true,parameters:{additionalProperties:false,
    required:['question','options','recommended'],properties:{question:{minLength:1,maxLength:500},
     options:{minItems:2,maxItems:5,items:{minLength:1,maxLength:200}},
-    recommended:{anyOf:[{type:'integer',minimum:0,maximum:4},{type:'null'}]}}}});
+    recommended:{anyOf:[{type:'number'},{type:'null'}]}}}});
  }
  expect(sent).not.toHaveProperty('parallel_tool_calls');expect(sent).not.toHaveProperty('tool_choice');
  expect(sha(requests[0]!)).toBe(golden);

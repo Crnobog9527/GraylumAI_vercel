@@ -128,7 +128,7 @@ describe('question card tool definition and invalid cards',()=>{
     $schema:'http://json-schema.org/draft-07/schema#',type:'object',additionalProperties:false,required:['question','options','recommended'],properties:{
      question:{type:'string',minLength:1,maxLength:500},
      options:{type:'array',minItems:2,maxItems:5,items:{type:'string',minLength:1,maxLength:200}},
-     recommended:{anyOf:[{type:'integer',minimum:0,maximum:4},{type:'null'}]},
+     recommended:{anyOf:[{type:'number'},{type:'null'}]},
     }}}}]);
  });
 
@@ -137,6 +137,8 @@ describe('question card tool definition and invalid cards',()=>{
   ['a missing question',{options:['小红书','抖音'],recommended:null}],
   ['a missing recommended field',{question:'问题',options:['小红书','抖音']}],
   ['a recommended index past the options',{...card,recommended:2}],
+  ['a fractional recommended index',{...card,recommended:0.5}],
+  ['a negative recommended index',{...card,recommended:-1}],
   ['duplicate options',{question:'问题',options:['小红书',' 小红书 '],recommended:null}],
   ['a control character',{question:'问\u0007题',options:['a','b'],recommended:null}],
   ['an extra field',{...card,allowFreeText:true}],
@@ -167,7 +169,7 @@ it('freezes exact v5 provider request bytes including the exported strict tool s
   providerLimits:{providerSlug:'deepinfra/fp8',contextTokens:32000,
    promptUsdPerMillion:'0.1',completionUsdPerMillion:'0.1',requestUsd:'0'}};
  const wire=openRouterRequestBody(t.bodies[0]!,{context,policy,phase:'skill',primaryDialogue:true});
- expect(sha(wire)).toBe('572f101a67bd6a2b2981964dcae6d08b05885415639ef77e3b0af95650bcc689');
+ expect(sha(wire)).toBe('50d1722ae999281dee6566f1c10ae78463a90f772738cd2416505c7f2224ae49');
  const sent=JSON.parse(wire);
  expect(sent.tools).toHaveLength(1);expect(sent.tools[0].function.strict).toBe(true);
  expect(askQuestionToolBytes()).toBeGreaterThanOrEqual(Buffer.byteLength(JSON.stringify(sent.tools)));
