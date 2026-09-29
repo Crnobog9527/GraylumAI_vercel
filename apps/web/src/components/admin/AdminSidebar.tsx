@@ -117,7 +117,7 @@ export default function AdminSidebar({
         className="p-4 space-y-2"
         style={{ borderTop: '1px solid var(--border-primary)' }}
       >
-        <Link href="/chat" onClick={onNavigate}>
+        <Link href="/" onClick={onNavigate}>
           <Button
             variant="outline"
             className="w-full justify-start gap-3 border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"

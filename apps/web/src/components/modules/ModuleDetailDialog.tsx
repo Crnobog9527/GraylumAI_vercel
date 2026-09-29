@@ -63,6 +63,9 @@ export default function ModuleDetailDialog({
   onUse,
 }: ModuleDetailDialogProps) {
   const router = useRouter();
+  const positioning = trpc.opc.catalog.useQuery(undefined, { enabled: open && !!module, retry: false });
+  const canUse = !!module && !positioning.isError &&
+    !!positioning.data?.some(entry => entry.moduleId === module.id);
   const incrementUsage = trpc.modules.incrementUsage.useMutation();
 
   if (!module) return null;
@@ -71,6 +74,7 @@ export default function ModuleDetailDialog({
   const iconColor = module.icon ? getIconColor(module.icon) : '#FFD700';
 
   const handleUse = () => {
+    if (!canUse) return;
     // Increment usage count
     incrementUsage.mutate({ moduleId: module.id });
 
@@ -79,8 +83,8 @@ export default function ModuleDetailDialog({
       onUse(module);
     }
 
-    // Navigate to chat with module context
-    router.push(`/chat?module=${module.id}`);
+    // Use the same published positioning catalog as the new entry.
+    router.push('/positioning');
     onOpenChange(false);
   };
 
@@ -328,6 +332,8 @@ export default function ModuleDetailDialog({
           </Button>
           <Button
             onClick={handleUse}
+            disabled={!canUse}
+            aria-describedby={!canUse ? "legacy-skill-disabled" : undefined}
             className="flex-1 h-11 rounded-xl font-semibold transition-all duration-300 hover:scale-[1.02]"
             style={{
               background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
@@ -339,6 +345,9 @@ export default function ModuleDetailDialog({
             立即使用
           </Button>
         </div>
+        {!canUse && <p id="legacy-skill-disabled" className="mt-3 text-sm" style={{ color: 'var(--text-secondary)' }}>
+          该技能将在新工作区上线后开放
+        </p>}
       </DialogContent>
     </Dialog>
   );

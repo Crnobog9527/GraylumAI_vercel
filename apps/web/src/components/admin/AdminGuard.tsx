@@ -164,7 +164,7 @@ export default function AdminGuard({ children }: AdminGuardProps) {
             type="button"
             variant="ghost"
             className="shrink-0 px-2 text-sm text-[var(--text-secondary)]"
-            onClick={() => router.push('/chat')}
+            onClick={() => router.push('/')}
           >
             返回应用
           </Button>
