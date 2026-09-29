@@ -164,7 +164,7 @@
 第 7、8 节的任务（主要是 CI-TRUST 和 LEGACY-CLOSE）：
 
 - ESLint 和 API 类型检查已经打开，但靠第 7 节的基线放过了已有问题（ESLint：网站 57 个
-  文件 130 处、API 102 个文件 587 处；API 类型检查：35 个测试文件共 685 处，排除在外）。
+  文件 130 处、API 102 个文件 587 处；API 类型检查：35 个测试文件共 683 处，排除在外）。
   结合相关功能的改动逐步修掉。
 - 集成测试（`*.integration.ts`，约 2 万行）只有计费（`bill2/billing.integration.ts`）和 Runtime 恢复与流式
   （`runtime/runtime.integration.ts`、`runtime/streaming.integration.ts`）在 CI 里运行，其中需要网站或浏览器的
