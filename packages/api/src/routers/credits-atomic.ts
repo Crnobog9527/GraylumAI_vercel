@@ -1,1 +1,0 @@
-export { creditsRouter } from './credits';
