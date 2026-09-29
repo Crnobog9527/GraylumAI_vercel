@@ -57,7 +57,7 @@ export default function AdminFinancePage() {
   const dailyChart = data?.dailyChart ?? [];
   const apiStats = data?.apiStats ?? { totalRequests: 0, totalConversations: 0, messagesThisMonth: 0, messagesThisWeek: 0 };
   const modelStats = data?.modelStats ?? [];
-  const financeOverview = data?.financeOverview ?? { paidRevenueCents: 0, recordedCostUsd: 0,
+  const financeOverview = data?.financeOverview ?? { paidRevenueCents: 0, recordedCostUsd: 0, estimatedProfitUsd: 0,
     creditsConsumed: 0, creditsPurchased: 0, creditsGiven: 0, netCreditsFlow: 0 };
   const runtimeBilling = data?.runtimeBilling ?? {
     creditsPerUsd: 1000,
@@ -70,8 +70,8 @@ export default function AdminFinancePage() {
     newUserCredits: 100,
   };
 
-  // Paid USD revenue minus recorded provider cost; other operating expenses are excluded.
-  const estimatedProfitUsd = financeOverview.paidRevenueCents / 100 - financeOverview.recordedCostUsd;
+  // Paid USD revenue minus recorded provider cost, computed exactly on the server.
+  const { estimatedProfitUsd } = financeOverview;
   return (
     <div className="space-y-6 p-4 md:p-8" data-testid="admin-finance-page">
       {/* Page Header */}

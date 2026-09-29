@@ -7,6 +7,8 @@ import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
 import { readAllReportRows } from '../services/reportRows';
 import { buildPerformanceCostStats, estimateCacheSavings } from '../services/performanceCostReport';
+import { buildFinanceUsdOverview } from '../services/financeReport';
+import { picoToUsd, usdToPico } from '../services/reportUsd';
 import { BILLING_CONSTANTS } from '../types/billing';
 import { issueSignedAttachmentUrlsByBatch } from '../lib/ticketAttachments';
 import {
@@ -2467,14 +2469,14 @@ export const adminRouter = router({
         }
       });
 
-      const modelUsageByToken: Record<string, { requests: number; credits: number; costUsd: number }> = {};
+      const modelUsageByToken: Record<string, { requests: number; credits: number; costPico: bigint }> = {};
       tokenStats.forEach((stat) => {
         const key = stat.model_used;
         if (!key) return;
-        const current = modelUsageByToken[key] ?? { requests: 0, credits: 0, costUsd: 0 };
+        const current = modelUsageByToken[key] ?? { requests: 0, credits: 0, costPico: 0n };
         current.requests += 1;
         current.credits += stat.total_credits;
-        current.costUsd += Number(stat.total_cost_usd);
+        current.costPico += usdToPico(stat.total_cost_usd);
         modelUsageByToken[key] = current;
       });
 
@@ -2493,19 +2495,11 @@ export const adminRouter = router({
         conversationCount: modelUsageByConversation[model.id] || 0,
         requestCount: modelUsageByToken[model.model_id]?.requests || 0,
         creditsConsumed: modelUsageByToken[model.model_id]?.credits || 0,
-        costUsd: modelUsageByToken[model.model_id]?.costUsd ?? 0,
+        costUsd: picoToUsd(modelUsageByToken[model.model_id]?.costPico ?? 0n),
       }));
 
-      const paidRevenueCents = paymentOrders.reduce((sum, order) => {
-        if (order.status !== 'completed') return sum;
-        if (order.payment_status !== 'paid' && order.payment_status !== 'no_payment_required') return sum;
-        if (order.currency && order.currency.toLowerCase() !== 'usd') return sum;
-        return sum + (order.amount_total ?? 0);
-      }, 0);
-
       const financeOverview = {
-        paidRevenueCents,
-        recordedCostUsd: tokenStats.reduce((sum, stat) => sum + Number(stat.total_cost_usd), 0),
+        ...buildFinanceUsdOverview(paymentOrders, tokenStats),
         creditsConsumed: transactionStats.totalDeductions,
         creditsPurchased: transactionStats.totalPurchases,
         creditsGiven: transactionStats.totalAdditions,
@@ -2910,7 +2904,7 @@ export const adminRouter = router({
       const modelUsageByToken = new Map<string, {
         requestCount: number;
         credits: number;
-        costUsd: number;
+        costPico: bigint;
         inputTokens: number;
         outputTokens: number;
         cachedTokens: number;
@@ -2920,14 +2914,14 @@ export const adminRouter = router({
         const current = modelUsageByToken.get(stat.model_used) ?? {
           requestCount: 0,
           credits: 0,
-          costUsd: 0,
+          costPico: 0n,
           inputTokens: 0,
           outputTokens: 0,
           cachedTokens: 0,
         };
         current.requestCount += 1;
         current.credits += stat.total_credits ?? 0;
-        current.costUsd += parseFloat(stat.total_cost_usd ?? '0');
+        current.costPico += usdToPico(stat.total_cost_usd);
         current.inputTokens += stat.input_tokens ?? 0;
         current.outputTokens += stat.output_tokens ?? 0;
         current.cachedTokens += stat.cached_tokens ?? 0;
@@ -2991,7 +2985,7 @@ export const adminRouter = router({
         const usage = modelUsageByToken.get(model.model_id) ?? {
           requestCount: 0,
           credits: 0,
-          costUsd: 0,
+          costPico: 0n,
           inputTokens: 0,
           outputTokens: 0,
           cachedTokens: 0,
@@ -3005,7 +2999,7 @@ export const adminRouter = router({
           conversationCount: conversationsByModel.get(model.model_id) ?? 0,
           requestCount: usage.requestCount,
           creditsConsumed: usage.credits,
-          totalCostUsd: usage.costUsd,
+          totalCostUsd: picoToUsd(usage.costPico),
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
           cachedTokens: usage.cachedTokens,

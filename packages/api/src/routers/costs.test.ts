@@ -187,6 +187,27 @@ it('labels a BILL2 aggregate as a run summary rather than a single model', () =>
     .toBe('BILL2 汇总（非单一模型）');
 });
 
+function callerWithAdminClient(admin: unknown, role = 'admin') {
+  const scoped = {
+    from() {
+      return {
+        select() { return this; },
+        eq() { return this; },
+        single: async () => ({ data: { id: 'admin-user', role, status: 'active',
+          nickname: 'Admin', email: 'admin@example.com' }, error: null }),
+      };
+    },
+  };
+  return costsRouter.createCaller({
+    headers: new Headers(),
+    user: { id: 'admin-user', email: 'admin@example.com',
+      app_metadata: { provider: 'email' }, user_metadata: { email_verified: true } },
+    isEmailVerified: true, authProvider: 'email', supabase: scoped,
+    supabaseAuth: scoped, supabasePublic: {}, supabaseAdmin: admin,
+    hasSupabaseAdminPrivileges: true,
+  } as any);
+}
+
 describe('cost report dashboard query', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -195,16 +216,6 @@ describe('cost report dashboard query', () => {
   afterEach(() => vi.useRealTimers());
 
   function caller(rows: Array<Record<string, unknown>>, queryError: unknown = null, role = 'admin') {
-    const scoped = {
-      from() {
-        return {
-          select() { return this; },
-          eq() { return this; },
-          single: async () => ({ data: { id: 'admin-user', role, status: 'active',
-            nickname: 'Admin', email: 'admin@example.com' }, error: null }),
-        };
-      },
-    };
     const admin = {
       from(table: string) {
         if (table === 'profiles') {
@@ -226,14 +237,7 @@ describe('cost report dashboard query', () => {
         return builder;
       },
     };
-    return costsRouter.createCaller({
-      headers: new Headers(),
-      user: { id: 'admin-user', email: 'admin@example.com',
-        app_metadata: { provider: 'email' }, user_metadata: { email_verified: true } },
-      isEmailVerified: true, authProvider: 'email', supabase: scoped,
-      supabaseAuth: scoped, supabasePublic: {}, supabaseAdmin: admin,
-      hasSupabaseAdminPrivileges: true,
-    } as any);
+    return callerWithAdminClient(admin, role);
   }
 
   it('sums all pages and keeps a sub-cent average visible to the client', async () => {
@@ -258,5 +262,44 @@ describe('cost report dashboard query', () => {
   it('denies non-admin access to report values', async () => {
     await expect(caller([], null, 'user').getDashboard({ days: 7 }))
       .rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('rejects an invalid timezone before querying', async () => {
+    await expect(caller([]).getDashboard({ days: 7, timezone: 'Mars/Olympus_Mons' }))
+      .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+});
+
+describe('cost report usage logs query', () => {
+  function usageLogsCaller(rows: Array<Record<string, unknown>>) {
+    const calls = { select: '', filters: [] as string[] };
+    const builder = {
+      select(columns: string) { calls.select = columns; return builder; },
+      order() { return builder; },
+      range() { return builder; },
+      eq(column: string, value: string) { calls.filters.push(`eq:${column}:${value}`); return builder; },
+      neq(column: string, value: string) { calls.filters.push(`neq:${column}:${value}`); return builder; },
+      then(resolve: (value: unknown) => void) { resolve({ data: rows, count: rows.length, error: null }); },
+    };
+    return { calls, caller: callerWithAdminClient({ from: () => builder }) };
+  }
+
+  it('keeps logs without a profile via a left join and shows them as unknown', async () => {
+    const { calls, caller } = usageLogsCaller([{ id: 'log-1', user_id: 'deleted-user',
+      model_id: 'model-a', status: 'success', created_at: '2026-03-29T08:00:00.000Z', profiles: null }]);
+    const result = await caller.getUsageLogs({});
+    expect(calls.select).toMatch(/profiles\s*\(/);
+    expect(calls.select).not.toContain('!inner');
+    expect(calls.filters).toEqual([]);
+    expect(result.logs[0]).toMatchObject({ userId: 'deleted-user', userEmail: 'unknown' });
+  });
+
+  it('treats every non-success status as failed', async () => {
+    const failed = usageLogsCaller([]);
+    await failed.caller.getUsageLogs({ status: 'failed' });
+    expect(failed.calls.filters).toEqual(['neq:status:success']);
+    const success = usageLogsCaller([]);
+    await success.caller.getUsageLogs({ status: 'success' });
+    expect(success.calls.filters).toEqual(['eq:status:success']);
   });
 });

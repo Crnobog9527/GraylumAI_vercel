@@ -17,6 +17,7 @@ export function formatUsd(amount: number) {
 
 /** Keep recorded micro-dollar costs visible without changing ordinary price formatting. */
 export function formatReportUsd(amount: number) {
+  if (!Number.isFinite(amount)) return '—';
   if (amount !== 0 && Math.abs(amount) < 1e-12) {
     return `${amount < 0 ? '-' : ''}<$0.000000000001`;
   }

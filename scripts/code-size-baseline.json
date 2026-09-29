@@ -89,7 +89,7 @@
   "apps/web/src/hooks/use-credits.tsx": {"lines":507},
   "apps/web/src/hooks/useStreamingChat.ts": {"longLines":18},
   "packages/api/src/middleware/securityChecks.ts": {"lines":561},
-  "packages/api/src/routers/admin.ts": {"lines":3144},
+  "packages/api/src/routers/admin.ts": {"lines":3138},
   "packages/api/src/routers/agentSlice.ts": {"longLines":3},
   "packages/api/src/routers/chat.ts": {"lines":607,"longLines":1},
   "packages/api/src/routers/credits.ts": {"lines":579},

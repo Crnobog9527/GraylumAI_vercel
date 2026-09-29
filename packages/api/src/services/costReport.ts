@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { divRoundPico, picoToUsd, usdToPico } from './reportUsd';
 
 export const costMetricSchema = z.enum(['credits', 'usd']);
 export type CostMetric = z.infer<typeof costMetricSchema>;
@@ -115,12 +116,6 @@ export interface TopUserProfile {
   nickname: string | null;
 }
 
-function parseUsd(value: string | null | undefined): number {
-  const amount = Number(value ?? 0);
-  if (!Number.isFinite(amount)) throw new Error('Invalid recorded USD cost');
-  return amount;
-}
-
 function dateParts(date: Date, timezone: string) {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
@@ -166,14 +161,14 @@ export function buildCostOverviewFromRows(
   metric: CostMetric,
 ): CostOverview {
   let todayCredits = 0;
-  let todayUsd = 0;
+  let todayUsd = 0n;
   let todayCalls = 0;
   let monthCredits = 0;
-  let monthUsd = 0;
+  let monthUsd = 0n;
 
   for (const row of rows) {
     const credits = row.total_credits ?? 0;
-    const usd = parseUsd(row.total_cost_usd);
+    const usd = usdToPico(row.total_cost_usd);
     monthCredits += credits;
     monthUsd += usd;
 
@@ -185,20 +180,20 @@ export function buildCostOverviewFromRows(
   }
 
   const monthCalls = rows.length;
-  const todayCost = metric === 'usd' ? todayUsd : todayCredits;
-  const monthCost = metric === 'usd' ? monthUsd : monthCredits;
+  const avgUsd = monthCalls > 0 ? picoToUsd(divRoundPico(monthUsd, BigInt(monthCalls))) : 0;
+  const avgCredits = monthCalls > 0 ? monthCredits / monthCalls : 0;
 
   return {
     metric,
-    todayCost,
+    todayCost: metric === 'usd' ? picoToUsd(todayUsd) : todayCredits,
     todayCalls,
-    monthCost,
+    monthCost: metric === 'usd' ? picoToUsd(monthUsd) : monthCredits,
     monthCalls,
-    avgCostPerCall: monthCalls > 0 ? monthCost / monthCalls : 0,
+    avgCostPerCall: metric === 'usd' ? avgUsd : avgCredits,
     todayCredits,
-    todayUsd,
+    todayUsd: picoToUsd(todayUsd),
     monthCredits,
-    monthUsd,
+    monthUsd: picoToUsd(monthUsd),
   };
 }
 
@@ -208,44 +203,40 @@ export function buildTopUsersFromRows(
   metric: CostMetric,
   limit: number,
 ): TopUser[] {
-  const aggregates = new Map<string, Omit<TopUser, 'email' | 'nickname' | 'userId'> & { email?: string; nickname?: string }>();
+  const aggregates = new Map<string, { totalCalls: number; totalCredits: number; totalUsd: bigint }>();
 
   for (const row of rows) {
     if (!row.user_id) {
       continue;
     }
 
-    const existing = aggregates.get(row.user_id) ?? {
-      totalCost: 0,
-      totalCalls: 0,
-      totalCredits: 0,
-      totalUsd: 0,
-    };
-    const totalCredits = existing.totalCredits + (row.total_credits ?? 0);
-    const totalUsd = existing.totalUsd + parseUsd(row.total_cost_usd);
-
+    const existing = aggregates.get(row.user_id) ?? { totalCalls: 0, totalCredits: 0, totalUsd: 0n };
     aggregates.set(row.user_id, {
       totalCalls: existing.totalCalls + 1,
-      totalCredits,
-      totalUsd,
-      totalCost: metric === 'usd' ? totalUsd : totalCredits,
+      totalCredits: existing.totalCredits + (row.total_credits ?? 0),
+      totalUsd: existing.totalUsd + usdToPico(row.total_cost_usd),
     });
   }
 
   const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
 
   return Array.from(aggregates.entries())
-    .map(([userId, aggregate]) => ({
-      userId,
-      email: profileMap.get(userId)?.email ?? '',
-      nickname: profileMap.get(userId)?.nickname ?? '',
-      totalCost: aggregate.totalCost,
-      totalCalls: aggregate.totalCalls,
-      totalCredits: aggregate.totalCredits,
-      totalUsd: aggregate.totalUsd,
-    }))
-    .sort((a, b) => b.totalCost - a.totalCost)
-    .slice(0, limit);
+    .sort(([, a], [, b]) => metric === 'usd'
+      ? Number(b.totalUsd > a.totalUsd) - Number(b.totalUsd < a.totalUsd)
+      : b.totalCredits - a.totalCredits)
+    .slice(0, limit)
+    .map(([userId, aggregate]) => {
+      const totalUsd = picoToUsd(aggregate.totalUsd);
+      return {
+        userId,
+        email: profileMap.get(userId)?.email ?? '',
+        nickname: profileMap.get(userId)?.nickname ?? '',
+        totalCost: metric === 'usd' ? totalUsd : aggregate.totalCredits,
+        totalCalls: aggregate.totalCalls,
+        totalCredits: aggregate.totalCredits,
+        totalUsd,
+      };
+    });
 }
 
 export function buildCostTrendFromRows(
@@ -255,13 +246,13 @@ export function buildCostTrendFromRows(
   now: Date,
   timezone = 'Asia/Shanghai',
 ): DailyCost[] {
-  const dailyMap = new Map<string, { credits: number; usd: number; calls: number }>();
+  const dailyMap = new Map<string, { credits: number; usd: bigint; calls: number }>();
 
   for (let i = 0; i < days; i++) {
     const local = dateParts(now, timezone);
     const date = new Date(Date.UTC(local.year, local.month - 1, local.day - i));
     const dateStr = date.toISOString().split('T')[0];
-    dailyMap.set(dateStr!, { credits: 0, usd: 0, calls: 0 });
+    dailyMap.set(dateStr!, { credits: 0, usd: 0n, calls: 0 });
   }
 
   for (const record of rows) {
@@ -270,7 +261,7 @@ export function buildCostTrendFromRows(
     if (!existing) continue;
     dailyMap.set(dateStr, {
       credits: existing.credits + (record.total_credits ?? 0),
-      usd: existing.usd + parseUsd(record.total_cost_usd),
+      usd: existing.usd + usdToPico(record.total_cost_usd),
       calls: existing.calls + 1,
     });
   }
@@ -280,8 +271,8 @@ export function buildCostTrendFromRows(
       date,
       calls: data.calls,
       credits: data.credits,
-      usd: data.usd,
-      cost: metric === 'usd' ? data.usd : data.credits,
+      usd: picoToUsd(data.usd),
+      cost: metric === 'usd' ? picoToUsd(data.usd) : data.credits,
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
 }
@@ -290,33 +281,38 @@ export function buildModelDistributionFromRows(
   rows: Pick<DashboardRow, 'model_used' | 'total_credits' | 'total_cost_usd'>[],
   metric: CostMetric,
 ): ModelDistribution[] {
-  const modelMap = new Map<string, { calls: number; credits: number; usd: number }>();
-  let totalCost = 0;
+  const modelMap = new Map<string, { calls: number; credits: number; usd: bigint }>();
+  let totalCredits = 0;
+  let totalUsd = 0n;
 
   for (const record of rows) {
     const modelId = record.model_used ?? 'unknown';
-    const existing = modelMap.get(modelId) ?? { calls: 0, credits: 0, usd: 0 };
+    const existing = modelMap.get(modelId) ?? { calls: 0, credits: 0, usd: 0n };
     const credits = record.total_credits ?? 0;
-    const usd = parseUsd(record.total_cost_usd);
+    const usd = usdToPico(record.total_cost_usd);
     modelMap.set(modelId, {
       calls: existing.calls + 1,
       credits: existing.credits + credits,
       usd: existing.usd + usd,
     });
-    totalCost += metric === 'usd' ? usd : credits;
+    totalCredits += credits;
+    totalUsd += usd;
   }
+
+  const percentage = (data: { credits: number; usd: bigint }) => {
+    if (metric === 'usd') return totalUsd > 0n ? Number(divRoundPico(data.usd * 100n, totalUsd)) : 0;
+    return totalCredits > 0 ? Math.round((data.credits / totalCredits) * 100) : 0;
+  };
 
   return Array.from(modelMap.entries())
     .map(([modelId, data]) => ({
       modelId,
       modelName: getModelDisplayName(modelId),
       calls: data.calls,
-      cost: metric === 'usd' ? data.usd : data.credits,
+      cost: metric === 'usd' ? picoToUsd(data.usd) : data.credits,
       credits: data.credits,
-      usd: data.usd,
-      percentage: totalCost > 0
-        ? Math.round((((metric === 'usd' ? data.usd : data.credits) / totalCost) * 100))
-        : 0,
+      usd: picoToUsd(data.usd),
+      percentage: percentage(data),
     }))
     .sort((a, b) => b.cost - a.cost);
 }
@@ -330,7 +326,7 @@ export function buildCacheEfficiencyFromRows(
   let totalCachedTokens = 0;
   let totalInputTokens = 0;
   let totalCredits = 0;
-  let totalUsd = 0;
+  let totalUsd = 0n;
   let unknownCacheUsage = false;
   let unknownSavings = false;
 
@@ -347,14 +343,14 @@ export function buildCacheEfficiencyFromRows(
     totalCachedTokens += cachedTokens;
     totalInputTokens += inputTokens;
     totalCredits += record.total_credits ?? 0;
-    totalUsd += parseUsd(record.total_cost_usd);
+    totalUsd += usdToPico(record.total_cost_usd);
   }
 
   const savedCredits = unknownSavings ? null : totalInputTokens > 0
     ? (totalCachedTokens / totalInputTokens) * 0.9 * totalCredits
     : 0;
   const savedUsd = unknownSavings ? null : totalInputTokens > 0
-    ? (totalCachedTokens / totalInputTokens) * 0.9 * totalUsd
+    ? picoToUsd(divRoundPico(totalUsd * BigInt(totalCachedTokens) * 9n, BigInt(totalInputTokens) * 10n))
     : 0;
 
   return {
