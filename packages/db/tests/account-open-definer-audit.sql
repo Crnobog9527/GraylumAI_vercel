@@ -6,7 +6,7 @@
 SELECT p.oid::regprocedure AS function_signature,
   p.provolatile AS volatility,
   pg_get_userbyid(p.proowner) AS owner,
-  p.prosrc ~* 'current_account_is_closed' AS checks_closed_account,
+  p.prosrc ~* 'current_account_is_closed|account_erasure_requests' AS checks_closed_account,
   p.prosrc ~* 'status\s*=\s*''active''' AS checks_active_status,
   p.prosrc ~* '\m(insert|update|delete)\M' AS has_write_statement
 FROM pg_proc p

@@ -42,7 +42,7 @@ const snapshot = () => JSON.parse(sql(`SELECT jsonb_build_object(
   'tables', (SELECT jsonb_agg(tablename ORDER BY tablename) FROM pg_tables WHERE schemaname = 'public'),
   'policies', (SELECT jsonb_agg(jsonb_build_array(tablename, policyname, permissive, roles::text, qual, with_check)
     ORDER BY tablename, policyname) FROM pg_policies WHERE schemaname = 'public'),
-  'functions', (SELECT jsonb_agg(jsonb_build_array(p.oid::regprocedure::text, p.proacl::text, p.prosecdef)
+  'functions', (SELECT jsonb_agg(jsonb_build_array(p.oid::regprocedure::text, p.proacl::text, p.prosecdef, md5(p.prosrc))
     ORDER BY p.oid::regprocedure::text) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace),
   'triggers', (SELECT jsonb_agg(tgname ORDER BY tgname) FROM pg_trigger
     WHERE tgrelid = 'public.profiles'::regclass AND NOT tgisinternal));`));
@@ -67,7 +67,7 @@ try {
   apply(migration);
   assert.deepEqual(snapshot(), once, 'migration idempotency');
   const restrictive = once.policies.filter(p => p[1] === 'account_open_required').map(p => p[0]).sort();
-  assert.deepEqual(restrictive, ['fixture_column_notes', 'fixture_notes', 'payment_orders', 'user_subscriptions'],
+  assert.deepEqual(restrictive, ['fixture_column_notes', 'fixture_notes', 'payment_orders', 'user_checkins', 'user_subscriptions'],
     'restrictive policy on every client-accessible RLS table except profiles');
   assert.ok(once.policies.filter(p => p[1] === 'account_open_required').every(p => p[2] === 'RESTRICTIVE'));
   const acl = name => once.functions.find(f => f[0].startsWith(`${name}(`));
@@ -103,7 +103,15 @@ try {
   sql('DROP TABLE audit_probe;');
   // Definer triage audit runs; in this fixture only the caller-scoped closed check is client-executable.
   const definers = sql(readFileSync(resolve(root, 'packages/db/tests/account-open-definer-audit.sql'), 'utf8'));
-  assert.deepEqual(definers.split('\n').map(line => line.split('|')[0]), ['current_account_is_closed()']);
+  // Staging (2026-09-30) has four: the two writers now check closure; validate_invitation_code (read-only,
+  // checks status) and rls_auto_enable (event trigger) are exempt and not part of this fixture.
+  const triage = Object.fromEntries(definers.split('\n').map(line => line.split('|'))
+    .map(([name, , owner, closed, active, writes]) => [name, { owner, closed, active, writes }]));
+  assert.deepEqual(Object.keys(triage).sort(),
+    ['claim_daily_checkin(uuid)', 'current_account_is_closed()', 'soft_delete_conversation(uuid,uuid)']);
+  for (const name of ['claim_daily_checkin(uuid)', 'soft_delete_conversation(uuid,uuid)']) {
+    assert.deepEqual(triage[name], { owner: 'postgres', closed: 't', active: 'f', writes: 't' }, name);
+  }
   console.log('PASS migration: idempotent; restrictive RLS coverage; function ACLs; §6 audit');
 
   docker('run', '-d', '--pull=never', '--name', rest, '--network', tag, '-p', '127.0.0.1::3000',

@@ -221,7 +221,7 @@ PR-A 封闭账号 → B1 内容擦除通道 → B2 账务擦除通道与受限�
 
 PR-A 留给后续 PR 的必做事项：
 - **在途预扣（PR-B2 必须处理）**：注销时仍在途的 BILL2 run 可以照常结算（record/close/cancel/finalize 不检查账号状态），但 0137 的 `bill2_revoke_unstarted_dispatch` 会先调用 `bill2_actor`，已注销账号会被拒。所以"已授权派发但从未发出"的预扣，要等 PR-B2 的受限结算路径才能释放；在此之前只是占着，不会丢失。
-- **SECURITY DEFINER 函数（PR-A 起逐个分拣）**：这类函数以属主身份执行，绕过 RLS，`account_open_required` 拦不住已注销账号未过期的 JWT。`packages/db/tests/account-open-definer-audit.sql` 列出客户端可执行的这类函数：会写用户数据或改积分的，要在函数里加"已注销则拒绝"；只读或本身已检查 `status='active'` 的，要写明理由。以后新增的这类函数，同样要遵守这条。延后另立：A.1 第 8 步财务到期清理、T16 备份恢复演练、附录 B/C 的日志/备份保留期核对与第三方删除申请、Waffo 接入后的"先取消续费"规则。
+- **SECURITY DEFINER 函数（PR-A 起逐个分拣）**：这类函数以属主身份执行，绕过 RLS，`account_open_required` 拦不住已注销账号未过期的 JWT。`packages/db/tests/account-open-definer-audit.sql` 列出客户端可执行的这类函数：会写用户数据或改积分的，要在函数里加"已注销则拒绝"；只读或本身已检查 `status='active'` 的，要写明理由。以后新增的这类函数，同样要遵守这条。2026-09-30 在 staging 只读执行的结果：客户端能执行的共 4 个，属主都是 postgres。`claim_daily_checkin(uuid)`（加积分）和 `soft_delete_conversation(uuid,uuid)`（改会话）已在 0147 加检查，函数体以 staging 原文为准，只加了检查；`validate_invitation_code(text)` 只读，且已检查 `status='active'`，豁免；`rls_auto_enable()` 是平台的事件触发器函数，不能直接调用，豁免。延后另立：A.1 第 8 步财务到期清理、T16 备份恢复演练、附录 B/C 的日志/备份保留期核对与第三方删除申请、Waffo 接入后的"先取消续费"规则。
 
 ## 附录 A：逐表清单与外键删除顺序
 
