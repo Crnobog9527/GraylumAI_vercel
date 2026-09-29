@@ -1,11 +1,19 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 "use client";
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useId, useRef, useState, type ReactNode} from 'react';
 import {trpc} from '@/trpc/client';
 import {Button} from '@/components/ui/button';
 import type {ArtifactReport} from '@repo/api/src/services/artifacts/public';
 
-/** Real report entry: uses the existing authenticated artifact and chat routes. */
+export function LegacyChatDisabledButton({children}: {children: ReactNode}) {
+  const hintId = useId();
+  return <div className="mb-5">
+    <Button disabled aria-describedby={hintId}>{children}</Button>
+    <p id={hintId} className="mt-2 text-sm text-zinc-400">旧对话已停用</p>
+  </div>;
+}
+
+/** Legacy report entry is retained, but cannot open a chat or create a work. */
 export function ReportWorkActions({report}:{report:ArtifactReport}) {
   const api=trpc.useUtils().client.workbench;
   const [choices,setChoices]=useState<Array<{id:string;label:string}>>([]);
@@ -25,19 +33,7 @@ export function ReportWorkActions({report}:{report:ArtifactReport}) {
     {loading?<p>正在读取可用脚本…</p>:error&&!choices.length?null:!choices.length?<p className="text-sm text-zinc-400">尚无可用的脚本引用配置。</p>:<>
       <label className="block">脚本功能<select aria-label="脚本功能" value={config} disabled={busy} onChange={e=>{setConfig(e.target.value);pending.current=null;}} className="mt-2 block max-w-full bg-zinc-900">{choices.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}</select></label>
       <input aria-label="新作品名称" placeholder="为这份脚本起个名字" value={title} maxLength={160} disabled={busy} onChange={e=>{setTitle(e.target.value);pending.current=null;}} className="w-full rounded border border-white/20 bg-transparent p-2"/>
-      <Button disabled={busy||!title.trim()} onClick={()=>{void (async()=>{
-        if(locked.current)return;locked.current=true;const scopeId=scope.current;setBusy(true);setError('');
-        try{
-          if(!pending.current){const id=crypto.randomUUID();pending.current={projectId:id,roundId:id,requestId:id,sourceVersionId:report.id!,configId:config,title:title.trim()};}
-          const operation=pending.current;
-          const created=await api.createWork.mutate(operation);
-          if(scopeId!==scope.current)return;
-          const binding=await api.chatEnter.mutate({...created,requestId:operation.requestId});
-          if(scopeId!==scope.current)return;
-          window.location.assign(`/chat?conversation=${binding.conversationId}`);
-        }catch{if(scopeId===scope.current)setError('暂未完成，请重试；会继续同一份作品。');}
-        finally{locked.current=false;setBusy(false);}
-      })();}}>{busy?'正在打开…':'基于此定位创作脚本'}</Button>
+      <LegacyChatDisabledButton>基于此定位创作脚本</LegacyChatDisabledButton>
     </>}
   </section>;
 }

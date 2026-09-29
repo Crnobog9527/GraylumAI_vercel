@@ -82,7 +82,7 @@ export const UsageHistoryCard = memo(function UsageHistoryCard({ user }: { user:
     >
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>使用历史</h3>
-        <Link href="/chat">
+        <Link href="/positioning">
           <Button
             variant="outline"
             size="sm"

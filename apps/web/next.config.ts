@@ -35,6 +35,10 @@ const reportOnlyCsp = [
 
 const nextConfig: NextConfig = {
   devIndicators: false,
+  // Temporary redirect runs before authentication and retains the legacy page code.
+  async redirects() {
+    return [{ source: "/chat", destination: "/positioning", permanent: false }];
+  },
   async headers() {
     return [{
       source: "/:path*",

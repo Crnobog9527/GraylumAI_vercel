@@ -3,13 +3,7 @@ import { ChatRequestError, claimChatRequest, ordinaryChatRequest, publicChatRequ
 import { assertChatRecoveryAccess } from '@/lib/ordinary-chat-access';
 import { withTokenCountingMetadata } from '@repo/api/src/services/modelCapabilities';
 import { parseProviderUsage, readOpenAIUsageStream, readGeminiUsageStream, nativeSearchCapability, openRouterSearchCapability, openRouterSearchParameters, type SearchEvidence } from '@repo/api/src/services/providerUsage';
-/**
- * AI Streaming API Route
- *
- * This is the production chat runtime used by the web app. It shares the
- * same runtime settings, prompt resolution, model routing, and provider
- * detection logic as the admin tools and diagnostics surface.
- */
+import { LEGACY_CHAT_DISABLED } from '@/lib/legacy-chat';
 
 import { NextRequest } from 'next/server';
 import { TRPCError } from '@trpc/server';
@@ -275,6 +269,10 @@ function mapTaskTypeToOutputEstimate(taskType: TaskType): Parameters<typeof esti
 const MAX_CONTEXT_MESSAGES = 100;
 
 export async function POST(request: NextRequest) {
+  if (LEGACY_CHAT_DISABLED) {
+    return Response.json({ code: 'LEGACY_CHAT_DISABLED', error: '旧聊天已停用，请前往定位分析。' },
+      { status: 410, headers: { 'Cache-Control': 'no-store' } });
+  }
   const encoder = new TextEncoder();
   let lifecycle: ReturnType<typeof ordinaryChatRequest> | null = null;
   let dispatchStarted = false;
