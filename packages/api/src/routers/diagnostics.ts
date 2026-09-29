@@ -176,7 +176,7 @@ export const diagnosticsRouter = router({
           logDiagnosticsFallback('diagnostics_runtime_proof_failed', { hours: runtimeHours });
           return createRuntimeProofFallback(runtimeHours);
         }),
-        getRecentRunsData(ctx.userScopedSupabase, recentRunsLimit),
+        getRecentRunsData(ctx.supabaseAdmin, recentRunsLimit),
       ]);
 
       return {
@@ -369,7 +369,7 @@ export const diagnosticsRouter = router({
     .input(z.object({
       limit: z.number().min(1).max(20).default(5),
     }).optional())
-    .query(async ({ ctx, input }) => getRecentRunsData(ctx.userScopedSupabase, input?.limit ?? 5)),
+    .query(async ({ ctx, input }) => getRecentRunsData(ctx.supabaseAdmin, input?.limit ?? 5)),
 
   /**
    * 获取指定批次的结果
@@ -379,7 +379,7 @@ export const diagnosticsRouter = router({
       batchId: z.string(),
     }))
     .query(async ({ ctx, input }) => {
-      const { data, error } = await ctx.userScopedSupabase
+      const { data, error } = await ctx.supabaseAdmin
         .from('diagnostic_results')
         .select('*')
         .eq('batch_id', input.batchId)
