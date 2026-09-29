@@ -140,39 +140,32 @@ export default function AdminUsersPage() {
   // Mutations
   const utils = trpc.useUtils();
 
+  // 主操作成功后刷新；操作日志没写上时单独提示，不重做主操作。
+  const onUserChanged = (result: { auditRecorded?: boolean }) => {
+    if (result.auditRecorded === false) toast.warning('操作已生效，但操作日志未记录');
+    utils.admin.getAllUsers.invalidate();
+    utils.admin.getUserDetails.invalidate();
+  };
+
   const updateCredits = trpc.admin.adjustUserCredits.useMutation({
-    onSuccess: () => {
-      utils.admin.getAllUsers.invalidate();
-      utils.admin.getUserDetails.invalidate();
+    onSuccess: (result) => {
+      onUserChanged(result);
       setCreditDialogOpen(false);
       setCreditAdjustment({ amount: 0, reason: '' });
       setSelectedUser(null);
     }
   });
 
-  const updateStatus = trpc.admin.updateUserStatus.useMutation({
-    onSuccess: () => {
-      utils.admin.getAllUsers.invalidate();
-      utils.admin.getUserDetails.invalidate();
-    }
-  });
+  const updateStatus = trpc.admin.updateUserStatus.useMutation({ onSuccess: onUserChanged });
 
   const updateMembership = trpc.admin.updateUserMembership.useMutation({
-    onSuccess: () => {
-      utils.admin.getAllUsers.invalidate();
-      utils.admin.getUserDetails.invalidate();
-    },
+    onSuccess: onUserChanged,
     onError: (error) => {
       toast.error(getSafeErrorMessage(error, '会员等级更新失败，请稍后重试'));
     },
   });
 
-  const updateRole = trpc.admin.updateUserRole.useMutation({
-    onSuccess: () => {
-      utils.admin.getAllUsers.invalidate();
-      utils.admin.getUserDetails.invalidate();
-    }
-  });
+  const updateRole = trpc.admin.updateUserRole.useMutation({ onSuccess: onUserChanged });
 
   // Handlers
   const handleAdjustCredits = async () => {

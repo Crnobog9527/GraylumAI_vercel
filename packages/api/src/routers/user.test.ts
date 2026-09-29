@@ -153,33 +153,8 @@ describe('userRouter error sanitization', () => {
     expect(tables).not.toContain('ai_usage_logs');
   });
 
-  it('keeps the deprecated duplicate balance endpoint aligned for real zero', async () => {
-    const caller = createUserCaller({ data: { credits: 0 }, error: null });
-
-    await expect(caller.getUserCredits()).resolves.toBe(0);
-  });
-
-  it.each([
-    ['query error', { data: null, error: { code: '42501', message: 'private database detail' } }],
-    ['profile missing', { data: null, error: null }],
-    ['null balance', { data: { credits: null }, error: null }],
-    ['invalid balance', { data: { credits: '0' }, error: null }],
-  ])('makes getUserCredits unavailable for %s', async (_name, result) => {
-    const caller = createUserCaller(result);
-
-    await expect(caller.getUserCredits()).rejects.toMatchObject<Partial<TRPCError>>({
-      code: 'SERVICE_UNAVAILABLE',
-      message: '余额暂时无法验证，请稍后重试',
-    });
-  });
-
-  it('makes getUserCredits unavailable when the balance query throws', async () => {
-    const caller = createUserCaller(Promise.reject(new TypeError('private network detail')));
-
-    await expect(caller.getUserCredits()).rejects.toMatchObject<Partial<TRPCError>>({
-      code: 'SERVICE_UNAVAILABLE',
-      message: '余额暂时无法验证，请稍后重试',
-    });
+  it('no longer exposes the duplicate getUserCredits balance endpoint', () => {
+    expect(Object.keys(userRouter._def.procedures)).not.toContain('getUserCredits');
   });
 
   it.each([

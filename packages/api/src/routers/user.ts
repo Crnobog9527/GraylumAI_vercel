@@ -4,11 +4,6 @@ import { TRPCError } from '@trpc/server';
 import { logger } from '../lib/logger';
 import { createSafeInternalError, createSafeServiceUnavailableError } from '../lib/publicError';
 import { countsAsCreditSpend } from '../services/creditLedger';
-import {
-  CREDIT_BALANCE_UNAVAILABLE_MESSAGE,
-  classifyCreditBalanceFailure,
-  readCreditBalance,
-} from '../services/creditBalance';
 
 export const userRouter = router({
   getUserProfile: protectedProcedure.query(async ({ ctx }) => {
@@ -69,17 +64,6 @@ export const userRouter = router({
 
       return data;
     }),
-
-  getUserCredits: protectedProcedure.query(async ({ ctx }) => {
-    try {
-      return await readCreditBalance(ctx.supabase, ctx.profileId);
-    } catch (error) {
-      logger.error('billing', 'user_credits_fetch_failed', {
-        reason: classifyCreditBalanceFailure(error),
-      });
-      throw createSafeServiceUnavailableError(error, CREDIT_BALANCE_UNAVAILABLE_MESSAGE);
-    }
-  }),
 
   /**
    * 获取用户使用统计
