@@ -4,14 +4,22 @@ import {tool} from '@openai/agents';
 import {createRequire, registerHooks} from 'node:module';
 import type * as Tools from '../../services/runtime/agentTools.ts';
 import type * as Prompt from '../../services/opc/agentTurnPrompt.ts';
+import type * as History from '../../services/runtime/openRouterHistory.ts';
 
-let loaded: {tools: typeof Tools; prompt: typeof Prompt} | undefined;
+let loaded: {tools: typeof Tools; prompt: typeof Prompt; history?: typeof History} | undefined;
 /** Node's standalone strip-types entry needs explicit filenames. Resolve only
- * the two known pure dependencies, then immediately remove the temporary hook. */
-function runtime() {
-  if (loaded) return loaded;
+ * the fixed module graph below, then immediately remove the temporary hook.
+ * History normalization is loaded only for candidate wire-byte alignment. */
+function runtime(includeHistory = false) {
+  if (loaded && (!includeHistory || loaded.history)) return loaded;
   const root = new URL('../../', import.meta.url);
-  const known = new Map(['shared/agentTurn', 'shared/opcMethodPolicy'].map(path =>
+  const known = new Map([
+    'shared/agentTurn', 'shared/opcMethodPolicy', 'shared/modelReasoning', 'lib/logger',
+    'services/runtime/agentTools', 'services/runtime/openRouterHistory', 'services/runtime/reasoningPolicy',
+    'services/runtime/budget', 'services/runtime/timing', 'services/runtime/authReuse',
+    'services/bill2/openRouterAdapter', 'services/bill2/openRouterStream', 'services/bill2/openRouterPolicy',
+    'services/bill2/openRouterEvidence', 'services/bill2/decimal',
+  ].map(path =>
     [new URL(path, root).href, new URL(path + '.ts', root).href]));
   const hook = registerHooks({resolve(specifier, context, next) {
     const mapped = context.parentURL && known.get(new URL(specifier, context.parentURL).href);
@@ -19,7 +27,8 @@ function runtime() {
   }});
   try {
     const require = createRequire(import.meta.url);
-    loaded = {tools: require('../../services/runtime/agentTools.ts'), prompt: require('../../services/opc/agentTurnPrompt.ts')};
+    loaded ??= {tools: require('../../services/runtime/agentTools.ts'), prompt: require('../../services/opc/agentTurnPrompt.ts')};
+    if (includeHistory) loaded.history ??= require('../../services/runtime/openRouterHistory.ts');
     return loaded;
   } finally { hook.deregister(); }
 }
@@ -32,6 +41,24 @@ export const AGENT_TURN_CONFIG: ProbeConfig = {
   id: 'ac14-deepseek-deepinfra-fp8-off', model: 'deepseek/deepseek-v4.1-flash',
   route: 'deepinfra/fp8', effort: 'none', maxPrice: {prompt: 0.3, completion: 0.9},
 };
+
+export type AgentTurnCandidate = 'c1' | 'c2';
+export const AGENT_TURN_CANDIDATE_MAX_TOKENS = 8192;
+/** Offline preparation only; parse/buildPlan refuse --live for these fixed candidates. */
+export const AGENT_TURN_CANDIDATES: Record<AgentTurnCandidate, ProbeConfig> = {
+  c1: {id: 'ac14-c1-deepseek-deepinfra-low', model: 'deepseek/deepseek-v4.1-flash',
+    route: 'deepinfra/fp8', effort: 'low', maxPrice: {prompt: 0.14, completion: 0.42},
+    dataCollection: 'omit', runtimeRouting: true},
+  c2: {id: 'ac14-c2-gemini-vertex-low', model: 'google/gemini-3.8-flash',
+    route: 'google-vertex/global', effort: 'low', maxPrice: {prompt: 0.75, completion: 3.75},
+    dataCollection: 'omit', runtimeRouting: true},
+};
+
+/** Candidate-only byte alignment with the real v5 provider request; baseline probe history stays frozen. */
+export function normalizeCandidateRequestHistory(request: {messages?: unknown}): void {
+  const dependencies = runtime(true);
+  dependencies.history!.normalizeOpenRouterHistory(request, dependencies.tools.AGENT_TOOL_NAMES);
+}
 
 export function agentTurnPrompt(skill: LoadedSkill, scenario: Scenario): string {
   const current = scenario.step === undefined ? undefined : skill.workflow?.[scenario.step];

@@ -29,6 +29,8 @@ export const probeConfig = z.object({
   /** 'omit' sends no data_collection field; absent means deny. Only built-in
    * configs may set it (resolveConfigs refuses it from --config-file). */
   dataCollection: z.literal('omit').optional(),
+  /** Fixed preparation candidates mirror the runtime routing bytes, including the zero per-request price ceiling. */
+  runtimeRouting: z.literal(true).optional(),
 }).strict().refine(config => (config.effort === undefined) !== (config.reasoning === undefined),
   {message: 'set exactly one of effort or reasoning'});
 export type ProbeConfig = z.infer<typeof probeConfig>;
@@ -87,6 +89,10 @@ export const DEFAULT_CONFIG_IDS = ['qwen-deepinfra-none', 'qwen-deepinfra-low'];
  * data_collection deny, which the real path does not send yet (RUNTIME-PROD),
  * unless the config explicitly omits it. */
 export function routing(config: ProbeConfig) {
+  if (config.runtimeRouting) return {
+    allow_fallbacks: false as const, require_parameters: true as const, only: [config.route],
+    max_price: {prompt: config.maxPrice.prompt, completion: config.maxPrice.completion, request: 0},
+  };
   return {
     only: [config.route],
     allow_fallbacks: false as const,
@@ -106,6 +112,7 @@ export function resolveConfigs(ids: string[], extra: unknown): ProbeConfig[] {
     }
     for (const config of parsed.data) {
       if (config.dataCollection !== undefined) throw new Error('PROBE_CONFIG_FILE_INVALID: dataCollection is built-in only');
+      if (config.runtimeRouting !== undefined) throw new Error('PROBE_CONFIG_FILE_INVALID: runtimeRouting is built-in only');
       registry.set(config.id, config);
     }
   }
