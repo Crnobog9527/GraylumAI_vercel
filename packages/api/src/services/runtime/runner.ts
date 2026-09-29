@@ -3,7 +3,7 @@ import { Agent, Runner, OpenAIChatCompletionsModel, tool, type Session, type Age
 import OpenAI from 'openai';
 import { z } from 'zod';
 import {OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
-import type {ReasoningPolicy} from './reasoningPolicy';
+import {matchesFrozenReasoning,type ReasoningPolicy} from './reasoningPolicy';
 
 export type RuntimeTool = {
   name: string; description: string; execute: (arguments_: Record<string, unknown>, callId: string) => Promise<string>;
@@ -17,7 +17,7 @@ const defaultToolParameters=z.object({query:z.string().max(2000).optional()}).st
 export type RuntimeRunnerInput = {
   model: string; instructions: string; input: string; session: Session;
   maxOutputTokens: number; maxTurns: number;
-  /** Frozen admission policy; the SDK emits it as Chat Completions reasoning_effort. */
+  /** Frozen admission policy; SDK providerData carries either exact wire form. */
   reasoning?: ReasoningPolicy;
   /** Authenticated host rechecks frozen context, persists claim, and dispatches once.
    * During recovery this callback may only return the original stored response. */
@@ -78,7 +78,7 @@ export async function runRuntime(input: RuntimeRunnerInput) {
   const guardedFetch: typeof fetch = async (url, init) => {
     if(String(url)!=='http://127.0.0.1/runtime/chat/completions') throw new Error('RUNTIME_TRANSPORT_DENIED');
     const body=JSON.parse(String(init?.body));
-    if(body.model!==input.model||Boolean(body.stream)!==Boolean(input.stream)||body.store!==false||'reasoning' in body||body.reasoning_effort!==input.reasoning?.effort||
+    if(body.model!==input.model||Boolean(body.stream)!==Boolean(input.stream)||body.store!==false||!matchesFrozenReasoning(body,input.reasoning)||
       'tool_choice' in body||input.firstToolCallOnly&&'parallel_tool_calls' in body||++sequence>input.maxTurns) throw new Error('RUNTIME_CALL_DENIED');
     if(input.stream){
       const encoder=new TextEncoder();
@@ -128,7 +128,8 @@ export async function runRuntime(input: RuntimeRunnerInput) {
   const agent=new Agent({name:'Graylum Runtime',model,instructions:input.instructions,tools,
     ...(input.stopAtToolNames?.length?{toolUseBehavior:{stopAtToolNames:[...input.stopAtToolNames]}}:{}),
     modelSettings:{store:false,maxTokens:input.maxOutputTokens,...(input.firstToolCallOnly?{}:{parallelToolCalls:false}),retry:{maxRetries:0},
-      ...(input.reasoning?{reasoning:{effort:input.reasoning.effort}}:{})}});
+      ...(input.reasoning&&'effort' in input.reasoning?{providerData:{reasoning_effort:input.reasoning.effort}}:
+       input.reasoning?.parameter==='reasoning'?{providerData:{reasoning:input.reasoning.value}}:{})}});
   const runner=new Runner({model,tracingDisabled:true,traceIncludeSensitiveData:false});
   try{
     const options={session:input.session,maxTurns:input.maxTurns,

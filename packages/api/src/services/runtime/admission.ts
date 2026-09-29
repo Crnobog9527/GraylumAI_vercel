@@ -12,7 +12,8 @@ import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
 import type {FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
 import { discoverRuntimeCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
-import { reasoningFor, type ReasoningPolicy } from './reasoningPolicy';
+import { type ReasoningPolicy } from './reasoningPolicy';
+import { admitReasoning } from './reasoningAdmission';
 import {currentRequestTiming} from './timing';
 
 const uuid=z.string().uuid();
@@ -95,20 +96,20 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     modelId=summary.modelId;organizerOutput=summary.maxTokens;
     instructions='Organize the provided current-session material. Preserve source references and uncertainties. Do not create new facts.';
    }
-   const row=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit').eq('id',modelId).single();
+   const row=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,config').eq('id',modelId).single();
    // Match the actual administrator model to the enabled protocol and exact quote. Never substitute a default model.
    if(policy.real&&row.error){if(row.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(row.error);}
    if(row.error||row.data?.is_active!=='true'||(!policy.real&&row.data.provider!=='fixture'))throw unavailableModel();
    if(policy.real)realModel(row.data);
    if(input.selection.kind==='organizer')modelConfiguration(()=>assertSeparateSummaryModel(session.dialogueModel,row.data.model_id));
-   let attachedOrganizer:{modelId:string;model:string;maxOutputTokens:number;instructions?:string;input?:string}|undefined;
+   let attachedOrganizer:{modelId:string;model:string;maxOutputTokens:number;reasoning?:ReasoningPolicy;instructions?:string;input?:string}|undefined;
    let attachedInputLimit:number|undefined;
    if(input.organizeAfter){
     if(input.selection.kind==='organizer'||policy.maxCalls<2)throw new Error('RUNTIME_ORGANIZER_BUDGET');
     const settings=await admin.from('system_settings').select('key,value').in('key',['v3_summary_model_id','v3_summary_max_tokens']);
     if(settings.error){if(policy.real)stagingRpcFailure(settings.error);throw new Error('RUNTIME_ORGANIZER_DENIED');}
     const summary=modelConfiguration(()=>summaryPolicy(Object.fromEntries(settings.data.map(r=>[r.key,r.value])),modelId));
-    const model=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit').eq('id',summary.modelId).single();
+    const model=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,config').eq('id',summary.modelId).single();
     if(policy.real&&model.error){if(model.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(model.error);}
     if(model.error||model.data?.is_active!=='true'||(!policy.real&&model.data.provider!=='fixture'))throw unavailableModel();
     modelConfiguration(()=>assertSeparateSummaryModel(row.data.model_id,model.data.model_id));
@@ -117,6 +118,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     attachedInputLimit=inputCapacity(model.data,limit);
     attachedOrganizer={
      modelId:summary.modelId,model:model.data.model_id,maxOutputTokens:limit,
+     ...(policy.real?{reasoning:admitReasoning(model.data,'organize',realModel(model.data).providerLimits!.providerSlug,limit)}:{}),
      ...(policy.organizerInstructions?{instructions:z.string().max(12000).parse(policy.organizerInstructions)}:{}),
      ...(policy.organizerInput?{input:z.string().max(24000).parse(policy.organizerInput)}:{}),
     };
@@ -141,13 +143,18 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const inputLimit=inputCapacity(row.data,maxOutputTokens);
    if(candidates.length)selectRuntimeHistory([],[{role:'user',content:matchingInput(input.input,candidates)}],{instructions:MATCH_INSTRUCTIONS,inputBytes:inputLimit,historyItems:0,toolBytes:0});
    selectRuntimeHistory([], [{role:'user',content:runtimeScopeInput(input.input,session.scopeMaterial)}],{instructions,inputBytes:inputLimit,historyItems:0,toolBytes:policy.searchEnabled?2048:0});
-   // Real mentor dialogue is latency-sensitive. New admissions freeze the
-   // model's verified reasoning policy; v3-stream contexts replay unchanged.
+   // Only mentor dialogue is interactive in MR-2; AC1-4 extends that scope later.
    const mentorStream=Boolean(policy.real&&policy.opcTurnToken&&policy.mentorStream);
    if(mentorStream&&candidates.length)throw new Error('RUNTIME_MODEL_DENIED');
    let reasoning:ReasoningPolicy|undefined;
-   if(mentorStream){try{reasoning=reasoningFor('latency-sensitive',row.data.model_id);}catch{throw unavailableModel();}}
-   const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:'scope-projection-v1',...(policy.real?{providerRequestFormat:mentorStream?'serial-tools-v4-stream':'serial-tools-v2'}:{}),...(reasoning?{reasoning}:{}),role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
+   const organize=input.selection.kind==='organizer';
+   if(policy.real&&(mentorStream||organize))
+    reasoning=admitReasoning(row.data,organize?'organize':'interactive',realModel(row.data).providerLimits!.providerSlug,maxOutputTokens);
+   const organizerFormat=Boolean(policy.real&&!mentorStream&&(organize||attachedOrganizer));
+   if(organizerFormat&&!reasoning)reasoning={parameter:'none'};
+   const providerRequestFormat=mentorStream?'serial-tools-v4-stream':organizerFormat?'serial-tools-v6-reasoning':'serial-tools-v2';
+   const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:'scope-projection-v1',
+    ...(policy.real?{providerRequestFormat}:{}),...(reasoning?{reasoning}:{}),role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
     ...(policy.opcTurnToken?{opcTurnToken:uuid.parse(policy.opcTurnToken)}:{}),...(candidates.length?{matching:{candidates}}:{}),...(session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...(workspaceContext?{workspaceContext:true}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems:policy.historyItems,network:input.network,
     tools:[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext?['read_source']:[])],maxToolCalls:(searchAllowed?1:0)+(workspaceContext?Math.min(2,primaryTurns-1):input.sources.length),

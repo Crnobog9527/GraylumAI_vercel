@@ -8,6 +8,7 @@ import {createClient} from '@supabase/supabase-js';
 import {runtimeExecutor} from './execute';
 import type {RuntimeProgress} from './progress';
 import {openRouterAdapter} from '../bill2/openRouterAdapter';
+import type {ReasoningPolicy} from './reasoningPolicy';
 import {decodeOpenRouterStreamObservation} from '../bill2/openRouterEvidence';
 
 // Deliberately no remote fallback, application credentials or real model keys.
@@ -22,7 +23,7 @@ const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 async function rpc(name:string,args:Record<string,unknown>){const result=await admin.rpc(name,args);if(result.error)throw new Error(result.error.message);return result.data;}
 function latch(){let release!:()=>void;const promise=new Promise<void>(resolve=>{release=resolve;});return {promise,release};}
 async function until(test:()=>boolean){const deadline=Date.now()+5000;while(!test()){if(Date.now()>deadline)throw new Error('synthetic progress deadline');await new Promise(resolve=>setTimeout(resolve,10));}}
-async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial-tools-v4-stream'|'agent-turn-v5-stream',organize=false,outputLimit=100,tool=false){
+async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial-tools-v4-stream'|'agent-turn-v5-stream'|'serial-tools-v6-reasoning',organize=false,outputLimit=100,tool=false,reasoning?:{primary:ReasoningPolicy;organizer:ReasoningPolicy}){
  const actorId=randomUUID(),mentorId=randomUUID(),organizerId=randomUUID(),windowId=randomUUID(),requestId=randomUUID();
  await db.query('insert into profiles(id,credits) values($1,100)',[actorId]);
  await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,100,'addition','grant','opening_grant','system',$2,0,100)",[actorId,'stream-opening:'+actorId]);
@@ -30,7 +31,7 @@ async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial
  const policies=[[mentorId,'synthetic/mentor'],[organizerId,'synthetic/organizer']].map(([modelId,model])=>({modelId,model,provider:'openrouter',account:'synthetic-stream',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:10000,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
  for(const policy of policies)await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic streaming integration',$2,'openrouter','true')",[policy.modelId,policy.model]);
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.10,3,now()+interval '2 hours')",[windowId,[actorId],JSON.stringify(policies)]);
- const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',inputSelection:'scope-projection-v1',providerRequestFormat:format,...(format==='serial-tools-v4-stream'||format==='agent-turn-v5-stream'?{reasoning:{effort:'none'}}:{}),input:'Synthetic original input',instructions:'Return the public mentor message in the message property; keep protocol fields private.',model:policies[0]!.model,modelId:mentorId,maxOutputTokens:outputLimit,maxTurns:1,historyItems:20,network:'deny',tools:format==='agent-turn-v5-stream'?['ask_question']:tool?['read_source']:[],...(tool?{workspaceContext:true,maxToolCalls:1,maxTurns:2}:{}),request:{sessionId:session.sessionId,requestId},...(organize?{attachedOrganizer:{modelId:organizerId,model:policies[1]!.model,maxOutputTokens:100,instructions:'Synthetic organizer only',input:'Synthetic original input'}}:{})};
+ const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',inputSelection:'scope-projection-v1',providerRequestFormat:format,...(reasoning?{reasoning:reasoning.primary}:format==='serial-tools-v4-stream'||format==='agent-turn-v5-stream'?{reasoning:{effort:'none'}}:{}),input:'Synthetic original input',instructions:'Return the public mentor message in the message property; keep protocol fields private.',model:policies[0]!.model,modelId:mentorId,maxOutputTokens:outputLimit,maxTurns:1,historyItems:20,network:'deny',tools:format==='agent-turn-v5-stream'?['ask_question']:tool?['read_source']:[],...(tool?{workspaceContext:true,maxToolCalls:1,maxTurns:2}:{}),request:{sessionId:session.sessionId,requestId},...(organize?{attachedOrganizer:{modelId:organizerId,model:policies[1]!.model,maxOutputTokens:reasoning?outputLimit:100,...(reasoning?{reasoning:reasoning.organizer}:{}),instructions:'Synthetic organizer only',input:'Synthetic original input'}}:{})};
  const billing={contractVersion:'bill2.v1',mode:'staging_test',testWindowId:windowId,scope:session.scope,operation:'question',modelId:mentorId,sourceHash:hash('synthetic-stream'),input:context,callPolicy:organize?policies:[policies[0]],rules:{version:'runtime-staging-v1',quoteVersion:windowId,creditsPerUsd:'1000',multiplier:'1',fx:{}},limits:{costUsd:tool?'0.06':organize?'0.04':'0.02',credits:tool?60:organize?40:20,maxPreDeduct:tool?60:organize?40:20,maxCalls:tool?3:organize?2:1,deadline:new Date(Date.now()+3600000).toISOString()}};
  const execution=await rpc('runtime_admit',{p_actor_id:actorId,p_session_id:session.sessionId,p_request_id:requestId,p_payload:context,p_billing:billing});
  return {actorId,context,execution,session,billing};
@@ -294,4 +295,47 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool_calls','lengt
   expect(await runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId)).toMatchObject({state:result.state});
   expect(bodies).toHaveLength(1);
  }finally{warned.mockRestore();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([
+ {format:'serial-tools-v4-stream',primary:{parameter:'reasoning',value:{enabled:false}},organizer:{parameter:'reasoning',value:{max_tokens:2048}}},
+ {format:'serial-tools-v4-stream',primary:{effort:'none'},organizer:{parameter:'none'}},
+ {format:'serial-tools-v6-reasoning',primary:{parameter:'none'},organizer:{effort:'max'}},
+] as const)('RUNTIME: MR-2 $format frozen primary/organizer bytes replay after config changes with one settlement',async settings=>{
+ const f=await fixture(settings.format,true,4096,false,settings),bodies:string[]=[],replayed:string[]=[];
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  const raw=String(init!.body);bodies.push(raw);const request=JSON.parse(raw);
+  const id='gen-mr2-'+f.execution.executionId+'-'+bodies.length;
+  if(request.stream){
+   const frame={id,object:'chat.completion.chunk',created:1,model:request.model,choices:[{index:0,delta:{role:'assistant',content:'Synthetic answer'},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}};
+   return new Response('data: '+JSON.stringify(frame)+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
+  }
+  return new Response(completion(id,request.model,'Synthetic answer'),{headers:{'content-type':'application/json'}});
+ }});
+ let failComplete=true;
+ const database={rpc:async(name:string,args:Record<string,unknown>)=>{
+  if(name==='runtime_response')replayed.push(String(args.p_request_hash));
+  if(name==='runtime_execution'&&args.p_action==='complete'&&failComplete){failComplete=false;return {data:null,error:{message:'Synthetic completion write failure'}};}
+  return admin.rpc(name,args);
+ }};
+ const host=runtimeExecutor({database,actor:async()=>f.actorId,adapter});
+ expect(await host.execute(f.execution.executionId)).toMatchObject({state:'pending'});
+ const frozen=(await db.query('select payload from runtime_executions where id=$1',[f.execution.executionId])).rows[0].payload;
+ // Deliberately replace live configuration after both paid responses were retained.
+ await db.query('update ai_models set config=$1 where id=any($2::uuid[])',[JSON.stringify({reasoning:{purposes:{}}}),f.billing.callPolicy.map(p=>p!.modelId)]);
+ expect(await host.execute(f.execution.executionId)).toMatchObject({state:'completed',body:'Synthetic answer',summary:'Synthetic answer'});
+ expect(await host.execute(f.execution.executionId)).toMatchObject({state:'completed'});
+ expect(bodies).toHaveLength(2);
+ const fields=(policy:ReasoningPolicy)=>'effort' in policy?{reasoning_effort:policy.effort}:policy.parameter==='reasoning'?{reasoning:policy.value}:{};
+ for(const [index,policy] of [settings.primary,settings.organizer].entries()){
+  const request=JSON.parse(bodies[index]!);
+  expect(Object.fromEntries(Object.entries(request).filter(([key])=>['reasoning','reasoning_effort'].includes(key)))).toEqual(fields(policy));
+ }
+ const calls=(await db.query('select id,payload from bill2_calls where run_id=$1 order by sequence',[f.execution.runId])).rows;
+ expect(calls.map(call=>call.payload.requestHash)).toEqual(bodies.map(hash));
+ expect(new Set(replayed)).toEqual(new Set(bodies.map(hash)));expect(replayed.length).toBeGreaterThan(4);
+ expect((await db.query('select payload from runtime_executions where id=$1',[f.execution.executionId])).rows[0].payload).toEqual(frozen);
+ expect((await db.query('select count(*)::int n from bill2_receipts where call_id=any($1::uuid[])',[calls.map(c=>c.id)])).rows[0].n).toBe(2);
+ expect((await db.query('select state,charged,provider_cost_usd::text cost from bill2_runs where id=$1',[f.execution.runId])).rows[0]).toEqual({state:'settled',charged:6,cost:'0.006'});
+ expect((await db.query("select count(*)::int n from credit_transactions where bill2_run_id=$1 and reason_code='bill2_spend'",[f.execution.runId])).rows[0].n).toBe(1);
 });

@@ -4,7 +4,8 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import {logger} from '../../lib/logger';
 import {projectOpenRouterItemsForSizing} from './openRouterHistory';
-import {AGENT_TURN_REQUEST_FORMAT,PROVIDER_REQUEST_FORMATS,REASONING_FORMATS,STREAMING_FORMATS,historyToolNames,openRouterRequestBody} from './providerRequest';
+import {AGENT_TURN_REQUEST_FORMAT,PROVIDER_REQUEST_FORMATS,validReasoningFormat,
+ STREAMING_FORMATS,historyToolNames,openRouterRequestBody} from './providerRequest';
 import {askQuestionTool} from './agentTools';
 import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
 import { authoritativeBilling, type FrozenRun, type FrozenCall, type BillingTransport } from '../bill2/service';
@@ -29,7 +30,7 @@ export const runtimeContext=z.object({
  historyItems:z.number().int().min(0).max(1000),
  tools:z.array(z.enum(['search','read_source',ASK_QUESTION_TOOL])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
  modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
- attachedOrganizer:z.object({modelId:z.string().uuid(),model:z.string().min(1),maxOutputTokens:z.number().int().positive(),instructions:z.string().max(12000).optional(),input:z.string().max(24000).optional()}).strict().optional(),
+ attachedOrganizer:z.object({modelId:z.string().uuid(),model:z.string().min(1),maxOutputTokens:z.number().int().positive(),reasoning:reasoningPolicy.optional(),instructions:z.string().max(12000).optional(),input:z.string().max(24000).optional()}).strict().optional(),
  workspaceContext:z.boolean().optional(),opcTurnToken:z.string().uuid().optional(),matching:matchingPlan.optional(),scopeMaterial:z.unknown().optional(),
  request:z.unknown().optional(),moduleId:z.string().uuid().optional(),skillId:z.string().uuid().optional(),revisionId:z.string().uuid().optional(),sources:z.array(z.unknown()).optional(),
 }).strict();
@@ -79,8 +80,8 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
    return {body:execution.result.body,...(execution.result.summary!==undefined?{summary:execution.result.summary}:{}),state:recovered.state};
   }
   const context=runtimeContext.parse(execution.context);
-  // v4 and v5 are the only formats that carry a frozen reasoning policy, and require it.
-  if(REASONING_FORMATS.has(context.providerRequestFormat??'')!==Boolean(context.reasoning))throw new Error('RUNTIME_CONTEXT_INVALID');
+  // Validate both primary and attached settings before any SDK or billed call.
+  if(!validReasoningFormat(context))throw new Error('RUNTIME_CONTEXT_INVALID');
   // The Agent turn format (AC-1) is interactive dialogue only: no automatic
   // Skill matching or workspace reads, and its only tool is the question card.
   const agentTurn=context.providerRequestFormat===AGENT_TURN_REQUEST_FORMAT;
@@ -205,8 +206,10 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
    const preserveHistoricalMaterial=Boolean(context.sources?.length)||requestsHistoricalComparison(context.input);
    const primarySequence=callSequence;
    const runPrimary=async(legacyInput=false)=>{
-   if(context.reasoning&&effective.model!==context.model)throw new Error('RUNTIME_MODEL_DENIED');
-   const sizing=(context.providerRequestFormat==='serial-tools-v2'||streaming)?{projectItemsForSizing:(items:unknown[],historyCount:number)=>{
+   if(context.reasoning&&('effort' in context.reasoning||context.reasoning.parameter!=='none')&&effective.model!==context.model)
+    throw new Error('RUNTIME_MODEL_DENIED');
+   const normalized=context.providerRequestFormat==='serial-tools-v2'||context.providerRequestFormat==='serial-tools-v6-reasoning'||streaming;
+   const sizing=normalized?{projectItemsForSizing:(items:unknown[],historyCount:number)=>{
     try{return projectOpenRouterItemsForSizing(items,historyCount,historyToolNames(context.providerRequestFormat));}catch(error){
      if(error instanceof Error&&error.message==='RUNTIME_PROVIDER_HISTORY_DENIED'){preflightFailure=error.message;logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});}
      throw error;
@@ -264,6 +267,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
     const instructions=organizer.instructions ?? 'Organize this operation result. Preserve provenance and uncertainty. Do not add new facts.';
     const organizerInput=organizer.input ? organizer.input+'\n\nPrimary assistant reply:\n'+body : body;
     summary=await runRuntime({model:organizer.model,instructions,input:organizerInput,session,maxOutputTokens:organizer.maxOutputTokens,maxTurns:1,tools:[],
+     reasoning:organizer.reasoning,
      selectHistory:async(_history,incoming)=>selectRuntimeHistory([],incoming,{instructions,inputBytes:organizerPolicy.inputLimit,historyItems:0,toolBytes:0}),
      exchange:async(_sequence,request)=>{
       const envelope=await exchange(request,'attached_organizer',organizerPolicy),response=envelope.usage?.sdkResponse;

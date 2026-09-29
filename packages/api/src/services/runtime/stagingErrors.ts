@@ -5,6 +5,9 @@ import { logger } from '../../lib/logger';
 import { DatabaseReadError } from '../../lib/databaseReadError';
 
 const failures = {
+  RUNTIME_REASONING_NOT_CONFIGURED: ['PRECONDITION_FAILED', '请在后台为这个模型设置“交互对话”的思考方式。'],
+  RUNTIME_REASONING_ROUTE_MISMATCH: ['PRECONDITION_FAILED', '后台思考设置的供应商线路与测试窗口报价不一致，请管理员核对完整线路。'],
+  RUNTIME_REASONING_CONFIG_INVALID: ['PRECONDITION_FAILED', '模型思考设置不可用，请管理员核对目录、用途、线路能力与输出上限。'],
   RUNTIME_STAGING_INTERNAL_ERROR: ['INTERNAL_SERVER_ERROR', '工作空间读取或操作失败，请稍后重试。'],
   RUNTIME_STAGING_NOT_CONFIGURED: ['PRECONDITION_FAILED', '当前工作空间尚未配置开放条件，请联系管理员。'],
   RUNTIME_STAGING_DISABLED: ['PRECONDITION_FAILED', '当前测试窗口尚未开放或已关闭。'],

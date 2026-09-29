@@ -8,7 +8,7 @@ import {decimal} from './decimal';
 import {createHash} from 'node:crypto';
 import {openRouterEvidence,validGenerationId,type OpenRouterIdentity} from './openRouterEvidence';
 import type {CallIdentity,TransportObservation} from './fixtureAdapter';
-import {approvedReasoningEfforts} from '../runtime/reasoningPolicy';
+import {approvedReasoningEfforts,reasoningObject} from '../runtime/reasoningPolicy';
 import {AGENT_STREAM_TOOLS,AGENT_TOOL_NAMES,MAX_AGENT_TOOLS} from '../runtime/agentTools';
 // Only this adapter can mint this one-use proof, before invoking transport.
 // A timeout or identical Error message from a started transport is not proof.
@@ -18,7 +18,7 @@ export function consumeOpenRouterNotStarted(error:unknown,requestHash:string,sen
  const proof=unstarted.get(error);if(proof?.requestHash!==requestHash||proof.send!==send)return false;
  unstarted.delete(error);return true;
 }
-const requestFields=new Set(['model','stream','stream_options','store','messages','provider','max_tokens','max_completion_tokens','temperature','top_p','parallel_tool_calls','response_format','reasoning_effort']);
+const requestFields=new Set(['model','stream','stream_options','store','messages','provider','max_tokens','max_completion_tokens','temperature','top_p','parallel_tool_calls','response_format','reasoning_effort','reasoning']);
 export const sourceCall=z.object({id:z.string().min(1).max(256),type:z.literal('function'),function:z.object({name:z.literal('read_source'),arguments:z.string().max(4000)}).strict()}).strict();
 /** One tool call whose name is in a request format's allowlist. */
 export const toolCallFor=(names:ReadonlySet<string>)=>z.object({id:z.string().min(1).max(256),type:z.literal('function'),
@@ -128,8 +128,10 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
      (parsed.max_tokens??parsed.max_completion_tokens)>identity.outputLimit ||
      (parsed.max_tokens!==undefined && parsed.max_completion_tokens!==undefined) ||
      (parsed.parallel_tool_calls!==undefined && parsed.parallel_tool_calls!==false) ||
-     // Only a verified Graylum reasoning policy; never a free-form reasoning object.
+     // Structural validation only; Runtime binds values to the frozen context.
      (parsed.reasoning_effort!==undefined && (typeof parsed.reasoning_effort!=='string' || !approvedReasoningEfforts.has(parsed.reasoning_effort))) ||
+     (parsed.reasoning!==undefined&&!reasoningObject.safeParse(parsed.reasoning).success) ||
+     ('reasoning_effort' in parsed&&'reasoning' in parsed) ||
      parsed.messages.some((message:unknown)=>{
       if(!message || typeof message!=='object' || Array.isArray(message))return true;
       const m=message as Record<string,unknown>;

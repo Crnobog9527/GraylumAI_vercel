@@ -3,6 +3,9 @@ import {it,expect,vi} from 'vitest';
 import {createHash} from 'node:crypto';
 import type {Session} from '@openai/agents';
 import {runRuntime} from './runner';
+import type {ReasoningPolicy} from './reasoningPolicy';
+import {admitReasoning} from './reasoningAdmission';
+import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 const session=():Session=>({getSessionId:async()=> 'synthetic',getItems:async()=>[],addItems:async()=>{},popItem:async()=>undefined,clearSession:async()=>{}});
 it.each([null,'','  '])('stops final truncated empty output (%s) without a second SDK turn',async(content)=>{
  const exchange=vi.fn(async()=>JSON.stringify({id:'local',object:'chat.completion',created:1,model:'test/model',choices:[{index:0,finish_reason:'length',message:{role:'assistant',content,reasoning:'PRIVATE_REASONING'}}],usage:{prompt_tokens:1,completion_tokens:1000,total_tokens:1001}}));
@@ -41,14 +44,14 @@ it('streams actual SDK deltas before the exchange finishes and makes exactly one
  expect(await pending).toBe('First answer');expect(chunks.join('')).toBe('First answer');expect(exchange).toHaveBeenCalledTimes(1);
 });
 
-async function generatedBody(stream:boolean,reasoning?:{effort:'none'}){
+async function generatedBody(stream:boolean,reasoning?:ReasoningPolicy,model='m/x'){
  let body='';
  const exchange=vi.fn(async(_sequence:number,request:string,onChunk?:(chunk:string)=>void)=>{
-  body=request;const response={id:'local',object:'chat.completion',created:1,model:'m/x',choices:[{index:0,message:{role:'assistant',content:'ok'},finish_reason:'stop'}]};
+  body=request;const response={id:'local',object:'chat.completion',created:1,model,choices:[{index:0,message:{role:'assistant',content:'ok'},finish_reason:'stop'}]};
   onChunk?.(JSON.stringify({...response,object:'chat.completion.chunk',choices:[{index:0,delta:{role:'assistant',content:'ok'},finish_reason:'stop'}]}));
   return JSON.stringify(response);
  });
- await runRuntime({model:'m/x',instructions:'系统说明 "quoted"\n第二行',input:'HOST_OPEN_CURRENT_QUESTION',session:session(),maxOutputTokens:4096,maxTurns:1,tools:[],selectHistory:async(_h,i)=>i,exchange,stream,...(reasoning?{reasoning}:{})});
+ await runRuntime({model,instructions:'系统说明 "quoted"\n第二行',input:'HOST_OPEN_CURRENT_QUESTION',session:session(),maxOutputTokens:4096,maxTurns:1,tools:[],selectHistory:async(_h,i)=>i,exchange,stream,...(reasoning?{reasoning}:{})});
  expect(exchange).toHaveBeenCalledTimes(1);return body;
 }
 it.each([false,true])('keeps pre-policy SDK request bytes when no reasoning policy is frozen (stream=%s)',async(stream)=>{
@@ -72,4 +75,22 @@ it('never shows reasoning-only stream frames and leaves an interrupted exchange 
  });
  await expect(runRuntime({model:'m/x',instructions:'Answer',input:'hello',session:session(),maxOutputTokens:4096,maxTurns:1,tools:[],selectHistory:async(_h,i)=>i,exchange,stream:true,reasoning:{effort:'none'},onText:text=>shown.push(text)})).rejects.toThrow('RUNTIME_EXECUTION_PENDING');
  expect(shown.join('')).toBe('');expect(exchange).toHaveBeenCalledTimes(1);
+});
+
+it.each([false,true])('provider default keeps exact pre-policy SDK bytes (stream=%s)',async stream=>{
+ expect(await generatedBody(stream,{parameter:'none'})).toBe(await generatedBody(stream));
+});
+it.each([{enabled:false},{effort:'max'},{max_tokens:2048}])('sends frozen reasoning object through SDK providerData %#',async value=>{
+ for(const stream of [false,true]){
+  const before=await generatedBody(stream);
+  const sent=await generatedBody(stream,{parameter:'reasoning',value} as ReasoningPolicy);
+  expect(sent).toBe(JSON.stringify({...JSON.parse(before),reasoning:value}));
+ }
+});
+it('current staging mentor configuration generates exactly the previous v4 SDK bytes',async()=>{
+ const model='deepseek/deepseek-v4.1-flash';
+ const config=configuredReasoning(model);config.reasoning.route='deepinfra/fp8';config.reasoning.catalog!.endpoints[0]!.tag='deepinfra/fp8';
+ const frozen=admitReasoning({model_id:model,config},'interactive','deepinfra/fp8',4096);
+ expect(frozen).toEqual({effort:'none'});
+ expect(await generatedBody(true,frozen,model)).toBe(await generatedBody(true,{effort:'none'},model));
 });
