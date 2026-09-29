@@ -100,7 +100,8 @@ describe('admin user access projections (0144 column grants)', () => {
     const { supabase, calls } = createRecordingSupabase();
     const caller = createCaller(supabase) as any;
 
-    await caller[name]({ userId: '11111111-1111-4111-8111-111111111111', ...input });
+    await expect(caller[name]({ userId: '11111111-1111-4111-8111-111111111111', ...input }))
+      .resolves.toMatchObject({ auditRecorded: true });
 
     expect(calls.filter((call) => call.op === 'update').map((call) => call.args[0])).toEqual([update]);
     const insert = calls.find((call) => call.table === 'user_activity_logs' && call.op === 'insert');
@@ -117,12 +118,30 @@ describe('admin user access projections (0144 column grants)', () => {
 
     await expect(caller.updateUserStatus({
       userId: '11111111-1111-4111-8111-111111111111', status: 'banned',
-    })).resolves.toMatchObject({ id: 'u1' });
+    })).resolves.toMatchObject({ id: 'u1', auditRecorded: false });
 
     expect(calls.filter((call) => call.op === 'update')).toHaveLength(1);
     expect(calls.filter((call) => call.op === 'insert')).toHaveLength(1);
     expect(loggerError).toHaveBeenCalledWith('security', 'admin_activity_log_write_failed', {
       actionType: 'status_change', code: '42501',
+    });
+  });
+
+  it('reports a thrown audit write as not recorded instead of failing the completed action', async () => {
+    const { supabase } = createRecordingSupabase();
+    const from = supabase.from;
+    supabase.from = (table: string) => {
+      const builder = from(table) as Record<string, unknown>;
+      if (table === 'user_activity_logs') builder.insert = () => { throw new TypeError('network down'); };
+      return builder;
+    };
+    const caller = createCaller(supabase);
+
+    await expect(caller.updateUserRole({
+      userId: '11111111-1111-4111-8111-111111111111', role: 'user',
+    })).resolves.toMatchObject({ auditRecorded: false });
+    expect(loggerError).toHaveBeenCalledWith('security', 'admin_activity_log_write_failed', {
+      actionType: 'role_change', code: 'thrown',
     });
   });
 });

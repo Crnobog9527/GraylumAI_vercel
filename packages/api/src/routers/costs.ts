@@ -11,12 +11,8 @@ import { createSafeInternalError } from '../lib/publicError';
 import { readAllReportRows } from '../services/reportRows';
 
 import {
-  costMetricSchema, getCostWindow, buildCostOverviewFromRows, buildCostsDashboardFromRows,
-  buildTopUsersFromRows, buildCostTrendFromRows, buildModelDistributionFromRows,
-  buildCacheEfficiencyFromRows, type CostOverview, type CostsDashboard, type DailyCost,
-  type ModelDistribution, type TopUser, type UsageLog, type TokenStat,
-  type CacheEfficiencySummary, type CostRow, type DashboardRow, type TopUserAggregateRow,
-  type TopUserProfile,
+  costMetricSchema, getCostWindow, buildCostsDashboardFromRows, buildTopUsersFromRows,
+  type CostsDashboard, type UsageLog, type TokenStat, type DashboardRow, type TopUserProfile,
 } from '../services/costReport';
 export { buildCostOverviewFromRows, buildCostsDashboardFromRows, buildTopUsersFromRows } from '../services/costReport';
 
@@ -82,117 +78,6 @@ export const costsRouter = router({
         timezone: input.timezone,
         ...window,
       });
-    }),
-
-  /**
-   * 获取成本概览
-   */
-  getOverview: adminProcedure
-    .input(z.object({
-      timezone: timezoneSchema,
-      metric: costMetricSchema.optional().default('usd'),
-    }))
-    .query(async ({ ctx, input }): Promise<CostOverview> => {
-      const now = new Date();
-      const window = getCostWindow(now, 1, input.timezone);
-      const monthData = await requireReportRows<CostRow>((from, to) => ctx.supabase
-        .from('token_stats')
-        .select('total_credits, total_cost_usd, created_at')
-        .gte('created_at', window.monthStartIso)
-        .order('created_at').order('id').range(from, to));
-
-      return buildCostOverviewFromRows(
-        monthData,
-        window.todayStartIso,
-        input.metric,
-      );
-    }),
-
-  /**
-   * 获取成本趋势
-   */
-  getCostTrend: adminProcedure
-    .input(z.object({
-      days: z.number().min(1).max(90).default(7),
-      timezone: timezoneSchema,
-      metric: costMetricSchema.optional().default('usd'),
-    }))
-    .query(async ({ ctx, input }): Promise<DailyCost[]> => {
-      const now = new Date();
-      const { rangeStartIso } = getCostWindow(now, input.days, input.timezone);
-      const rows = await requireReportRows<CostRow>((from, to) => ctx.supabase
-        .from('token_stats')
-        .select('total_credits, total_cost_usd, created_at')
-        .gte('created_at', rangeStartIso)
-        .order('created_at').order('id').range(from, to));
-      return buildCostTrendFromRows(rows, input.days, input.metric, now, input.timezone);
-    }),
-
-  /**
-   * 获取模型分布
-   */
-  getModelDistribution: adminProcedure
-    .input(z.object({
-      days: z.number().min(1).max(90).default(30),
-      timezone: timezoneSchema,
-      metric: costMetricSchema.optional().default('usd'),
-    }))
-    .query(async ({ ctx, input }): Promise<ModelDistribution[]> => {
-      const { rangeStartIso } = getCostWindow(new Date(), input.days, input.timezone);
-      const rows = await requireReportRows<Pick<DashboardRow,
-        'model_used' | 'total_credits' | 'total_cost_usd'>>((from, to) => ctx.supabase
-        .from('token_stats')
-        .select('model_used, total_credits, total_cost_usd')
-        .gte('created_at', rangeStartIso)
-        .order('created_at').order('id').range(from, to));
-      return buildModelDistributionFromRows(rows, input.metric);
-    }),
-
-  /**
-   * 获取高消耗用户
-   */
-  getTopUsers: adminProcedure
-    .input(z.object({
-      days: z.number().min(1).max(90).default(30),
-      limit: z.number().min(1).max(50).default(10),
-      timezone: timezoneSchema,
-      metric: costMetricSchema.optional().default('usd'),
-    }))
-    .query(async ({ ctx, input }): Promise<TopUser[]> => {
-      const { rangeStartIso } = getCostWindow(new Date(), input.days, input.timezone);
-      const rows = await requireReportRows<TopUserAggregateRow>((from, to) => ctx.supabase
-        .from('token_stats')
-        .select('user_id, total_credits, total_cost_usd')
-        .gte('created_at', rangeStartIso)
-        .order('created_at').order('id').range(from, to));
-
-      const topUserIds = Array.from(
-        new Set(
-          buildTopUsersFromRows(
-            rows,
-            [],
-            input.metric,
-            input.limit,
-          ).map((user) => user.userId),
-        ),
-      );
-
-      const { data: profileData, error: profileError } = topUserIds.length
-        ? await ctx.supabase
-            .from('profiles')
-            .select('id, email, nickname')
-            .in('id', topUserIds)
-        : { data: [], error: null };
-      if (profileError || !profileData) {
-        throw createSafeInternalError(profileError ?? new Error('Invalid profiles'), '读取成本报表失败，请稍后重试');
-      }
-
-      return buildTopUsersFromRows(
-        rows,
-        profileData as TopUserProfile[],
-        input.metric,
-        input.limit,
-      );
     }),
 
   /**
@@ -293,23 +178,4 @@ export const costsRouter = router({
       return { stats, total: count ?? 0 };
     }),
 
-  /**
-   * 获取缓存效率
-   */
-  getCacheEfficiency: adminProcedure
-    .input(z.object({
-      days: z.number().min(1).max(90).default(7),
-      timezone: timezoneSchema,
-      metric: costMetricSchema.optional().default('usd'),
-    }))
-    .query(async ({ ctx, input }): Promise<CacheEfficiencySummary> => {
-      const { rangeStartIso } = getCostWindow(new Date(), input.days, input.timezone);
-      const rows = await requireReportRows<Pick<DashboardRow,
-        'cached_tokens' | 'input_tokens' | 'total_credits' | 'total_cost_usd'>>((from, to) => ctx.supabase
-        .from('token_stats')
-        .select('cached_tokens, input_tokens, total_credits, total_cost_usd')
-        .gte('created_at', rangeStartIso)
-        .order('created_at').order('id').range(from, to));
-      return buildCacheEfficiencyFromRows(rows, input.metric);
-    }),
 });
