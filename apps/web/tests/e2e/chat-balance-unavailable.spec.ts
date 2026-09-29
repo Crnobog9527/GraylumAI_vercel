@@ -105,41 +105,26 @@ test('fails closed on an unavailable refetch and retries without losing the prom
     });
   });
 
-  const conversationId = '00000000-0000-4000-8000-000000000002';
-  let streamedRequestId = '';
   await page.route('**/api/ai/stream', async (route) => {
     streamRequestCount += 1;
-    // The client only accepts events carrying its own requestId (useStreamingChat).
-    const requestId = String((route.request().postDataJSON() as { requestId?: string }).requestId ?? '');
-    streamedRequestId = requestId;
     await route.fulfill({
       status: 200,
       contentType: 'text/event-stream',
       body: [
-        `data: ${JSON.stringify({ type: 'init', requestId, conversationId, modelUsed: 'local-test-model' })}`,
+        `data: ${JSON.stringify({
+          type: 'init',
+          conversationId: '00000000-0000-4000-8000-000000000002',
+          modelUsed: 'local-test-model',
+        })}`,
         '',
-        `data: ${JSON.stringify({ type: 'content', requestId, content: '本地测试回复', final: true })}`,
+        `data: ${JSON.stringify({ type: 'delta', content: '本地测试回复' })}`,
         '',
-        `data: ${JSON.stringify({ type: 'complete', requestId, conversationId })}`,
+        `data: ${JSON.stringify({
+          type: 'complete',
+          conversationId: '00000000-0000-4000-8000-000000000002',
+        })}`,
         '',
       ].join('\n'),
-    });
-  });
-
-  // After the stream completes the client confirms the saved result (publicChatRequest shape).
-  await page.route('**/api/ai/requests**', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        request: {
-          requestId: streamedRequestId, conversationId, createdAt: new Date().toISOString(),
-          input: { message: TEST_PROMPT }, state: 'succeeded', stopped: false, retryable: false,
-          content: '本地测试回复', modelUsed: 'local-test-model', usage: null, search: null,
-          billing: { state: 'settled', estimatedCredits: 0, credits: 1, refunded: null },
-          userMessageId: null, assistantMessageId: null,
-        },
-      }),
     });
   });
 
