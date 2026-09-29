@@ -56,7 +56,9 @@ describe('pinned generic Agent turn prompt',()=>{
    'made because the information is not yet enough for a professional judgement');
   expect(prompt).toContain('5. Clear answer: no card');
   expect(prompt).toContain('Do not list the options again in prose, and recommend the same option as recommended');
-  expect(prompt).toContain('The host adds an Other entry with free-text input; never add other, not-sure, skip, defer or continue options');
+  expect(prompt).toContain('The host adds an Other entry; never add other, not-sure, skip, defer or continue options');
+  // Owner rule 4 (locked): a neutral card never asserts facts about the user.
+  expect(prompt).toContain('Set recommended to null. Options must not assert facts about the user.');
   expect(prompt).toContain('For user_fact, use a neutral card only for general ranges or categories and Socratic prose for open personal content');
   expect(prompt).toContain('never offer guesses as options');
   expect(prompt).not.toContain('我不确定，帮我分析');

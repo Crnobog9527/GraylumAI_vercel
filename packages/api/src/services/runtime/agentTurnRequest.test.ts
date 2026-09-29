@@ -61,8 +61,8 @@ function planInstructions(opening:boolean){
 }
 
 it.each([
- {opening:false,golden:'fc7986159c027ed44c9955f27401fd4c6cffd98ea5b0a46ac2e9a1f4c403b29c'},
- {opening:true,golden:'018a49190b13427d60c6b511f74e81ae7c535b5022b3e3bc344d0018032b83b0'},
+ {opening:false,golden:'4b71be834cef8ffef9cb8746a664171861b06cce3007066c485d2696f7423fc4'},
+ {opening:true,golden:'edd640d6f3fb0b28a1708904baf6eaa48bd0e51f539723b66644e67aab37dec8'},
 ])('freezes full v5 host prompt, pinned fields and wire request (opening=$opening)',async({opening,golden})=>{
  const instructions=agentTurnInstructions({step,question,questionLabel:'3.2',workflowContext,opening});
  expect(instructions).toBe(planInstructions(opening));
