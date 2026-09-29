@@ -1,6 +1,6 @@
 # AC1-4 实施方案：纯文字导师回复与提问卡
 
-状态：**第二轮 40 次 probe 未达标；本次仅准备 C1/C2 固定候选与离线预算，等待总控审查及 Owner 批准具体次数/金额。累计硬上限仍为 493 次 / $3.5；未发起候选真实请求，未合并。**
+状态：**Owner 已批准 C1/C2 各 40 次，上限分别 $0.40/$2.61，累计 573 次/$6。先推送解除限制提交、等待新 head CI 全通过，再只读核对密钥额度并执行。**
 
 审查依据：[总控对 `15cd6cd0` 的意见](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5885333399)。第 3.1 节保留发现过程；其暂停结论由下面 Owner 决定取代。
 
@@ -397,3 +397,20 @@ C1/C2 真实结果目前均 NOT_RUN。首字只算公开文字，不能用思考
 候选请求字节、准备期 live 拒绝、旧 baseline 不变及盲评隐藏测试通过。两个最终 Node dry-run 各 40/40，均无 stop。
 本次只改 probe，不重复运行 Runtime/BILL2/MENTOR_STREAM；这些实现检查沿用 5417f18f 的已有记录，
 新 head 的仓库 CI 独立执行，不能将旧 head CI 当作本次通过。候选真实测试均 NOT_RUN。
+
+
+## 13. Owner 批准候选实测（2026-09-29）
+
+[批准原文](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5890566676)
+与[总控限定范围](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5890530163)
+取代第 12 节准备期禁用 live / 待批上限的当前状态；第 12 节其他配置、预算、盲评标准不变。
+本次仅解除候选 live 拒绝、将 HARD_MAX_CALLS/HARD_MAX_USD 改为 573/6，并同步测试与说明。
+不改变提示词、模型/线路/low 档、8192 输出上限、请求字节或真实路径。
+
+推送后先在 PR 写 diff 摘要，核实新 head 全部 CI 成功。随后只读查询 OpenRouter 测试 key 信息，
+核对剩余额度足够预计 $0.62，公开只写“够/不够”；不够就停止，不自行调额度。
+C1 明确传 --max-usd 0.40，C2 明确传 --max-usd 2.61，各 30 卡片 + 10 文字，max_tokens=8192。
+沿用现有账本、预留与不可知结果停机保护；遇到结果不明停止，不补样本。
+两轮原样盲评，判定锁定后揭盲；公开第二轮基线/C1/C2 三列，包括首字 median/p95、
+思考 token 总量及最大值、观察到的最大 completion token、实际费用。
+完成后停下来报总控，不改提示词、不改 Runtime/staging、不请求机器人审查、不合并。

@@ -1,7 +1,4 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {existsSync, mkdtempSync, rmSync} from 'node:fs';
-import {tmpdir} from 'node:os';
-import {join} from 'node:path';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {openRouterBound} from '../../services/bill2/openRouterPolicy';
 import {openRouterRequestBody} from '../../services/runtime/providerRequest';
@@ -10,7 +7,6 @@ import {AGENT_TURN_CANDIDATES, AGENT_TURN_CONFIG, type AgentTurnCandidate} from 
 import {createBudget, HARD_MAX_CALLS, HARD_MAX_USD, memoryLedger} from './budget.ts';
 import {resolveConfigs, routing, type ProbeConfig} from './config.ts';
 import {sseResponse, toolDeltas} from './dryRun.ts';
-import {runProbe} from './main.ts';
 import {buildPlan, describePlan, parseProbeArgs} from './plan.ts';
 import type {LoadedSkill, Scenario} from './skill.ts';
 import {runTrial} from './trial.ts';
@@ -43,20 +39,20 @@ async function capture(config: ProbeConfig, kind: 'ask' | 'text' = 'ask') {
   return {body: JSON.parse(bodies[0]!), bytes: bodies[0]!};
 }
 
-describe('fixed AC1-4 candidates: offline preparation only', () => {
+describe('fixed AC1-4 candidates: approved live caps', () => {
   it.each(['c1', 'c2'] as const)('fixes %s to forty distinct trials, 8192 output tokens and offline defaults', candidate => {
     const parsed = args(candidate);
     expect(parsed).toMatchObject({agentTurn: true, agentTurnCandidate: candidate, live: false,
-      counts: {ask: 30, text: 10, reference: 0}, maxCalls: 40, maxUsd: 3.5, maxTokens: 8192});
+      counts: {ask: 30, text: 10, reference: 0}, maxCalls: 40, maxUsd: 6, maxTokens: 8192});
     expect(args(candidate, '--max-tokens', '8192').maxTokens).toBe(8192);
     const plan = buildPlan(parsed, skill, scenarios, 'candidate-scenarios');
     expect(plan).toMatchObject({agentTurnCandidate: candidate, plannedCalls: 40, configs: [AGENT_TURN_CANDIDATES[candidate]]});
     expect(() => buildPlan({...parsed, counts: {...parsed.counts, ask: 29}}, skill, scenarios, 's')).toThrow('PLAN_FIXED');
     expect(() => buildPlan(parsed, skill, scenarios.slice(1), 's')).toThrow('DISTINCT_SCENARIOS');
     expect(() => buildPlan({...parsed, maxTokens: 1024}, skill, scenarios, 's')).toThrow('MAX_TOKENS_FIXED');
-    expect(() => buildPlan({...parsed, live: true}, skill, scenarios, 's')).toThrow('PREPARATION_ONLY');
+    expect(buildPlan({...parsed, live: true}, skill, scenarios, 's').plannedCalls).toBe(40);
     const description = describePlan(plan, 'dry-run', {calls: 0, usd: 0});
-    expect(description).toContain('Preparation only');
+    expect(description).toContain('Owner-approved caps');
     expect(description).not.toContain('For real calls add:');
   });
 
@@ -68,44 +64,34 @@ describe('fixed AC1-4 candidates: offline preparation only', () => {
         effort: 'low', maxPrice: {prompt: 0.75, completion: 3.75}, dataCollection: 'omit', runtimeRouting: true},
     });
     expect(buildPlan(args('c1'), skill, scenarios, 's').planId).not.toBe(buildPlan(args('c2'), skill, scenarios, 's').planId);
-    expect(HARD_MAX_CALLS).toBe(493);
-    expect(HARD_MAX_USD).toBe(3.5);
+    expect(HARD_MAX_CALLS).toBe(573);
+    expect(HARD_MAX_USD).toBe(6);
   });
 
   it.each([
     ['--agent-turn-candidate', 'c1'], ['--agent-turn', '--agent-turn-candidate', 'other'],
     argv('c1', '--configs', 'qwen-deepinfra-low'), argv('c1', '--configs', ''), argv('c2', '--config-file', '/unused'),
     argv('c1', '--max-tokens', '1024'), argv('c2', '--max-tokens', '8191'), argv('c2', '--max-tokens', '8193'),
-    argv('c1', '--max-usd', '3.51'), argv('c1', '--max-calls', '494'),
+    argv('c1', '--max-usd', '6.01'), argv('c1', '--max-calls', '574'),
     argv('c2', '--record-external-calls', '1', '--record-external-usd', '0.1'),
   ])('refuses conflicting candidate arguments %j', (...input) => {
     expect(() => parseProbeArgs(input, '/synthetic-home')).toThrow();
   });
 
-  it.each(['c1', 'c2'] as const)('rejects %s live before reading Skill, creating results or opening a ledger', async candidate => {
-    const home = mkdtempSync(join(tmpdir(), 'ac14-candidate-refused-'));
-    try {
-      const upstream = vi.fn();
-      const globalFetch = vi.spyOn(globalThis, 'fetch');
-      const errors: string[] = [];
-      const outcome = await runProbe(argv(candidate, '--live', '--confirm', 'anything', '--skill-dir', '/does-not-exist'), {},
-        {home, fetch: upstream, stdout: () => {}, stderr: text => errors.push(text)});
-      expect(outcome.exitCode).toBe(2);
-      expect(errors.join('')).toContain('PROBE_AGENT_TURN_CANDIDATE_PREPARATION_ONLY');
-      expect(upstream).not.toHaveBeenCalled();
-      expect(globalFetch).not.toHaveBeenCalled();
-      expect(existsSync(join(home, '.graylum'))).toBe(false);
-    } finally { rmSync(home, {recursive: true, force: true}); }
+  it.each([['c1', '0.40'], ['c2', '2.61']] as const)('accepts %s live with the approved run cap', (candidate, cap) => {
+    const parsed = args(candidate, '--live', '--max-usd', cap);
+    expect(parsed.live).toBe(true);
+    expect(buildPlan(parsed, skill, scenarios, 's')).toMatchObject({maxUsd: Number(cap), plannedCalls: 40, maxTokens: 8192});
   });
 
   it('reports over-cap candidate estimates without changing or bypassing execution caps', () => {
     const plan = buildPlan(args('c2'), {...skill, instructions: 'x'.repeat(200_000)}, scenarios, 's');
-    expect(plan.plannedUsdUpperBound).toBeGreaterThan(3.5);
-    expect(plan.maxUsd).toBe(3.5);
+    expect(plan.plannedUsdUpperBound).toBeGreaterThan(6);
+    expect(plan.maxUsd).toBe(6);
     expect(describePlan(plan, 'dry-run', {calls: 493, usd: 3.5})).toContain('estimate is not executable');
-    expect(() => buildPlan({...args('c2'), live: true}, skill, scenarios, 's')).toThrow('PREPARATION_ONLY');
-    const ledger = memoryLedger({calls: 493, nanoUsd: 0});
-    expect(() => createBudget({maxCalls: 40, maxUsd: 3.5, ledger}).reserve(1)).toThrow('total_call_cap');
+    expect(buildPlan({...args('c2'), live: true}, skill, scenarios, 's').plannedCalls).toBe(40);
+    const ledger = memoryLedger({calls: 573, nanoUsd: 0});
+    expect(() => createBudget({maxCalls: 40, maxUsd: 6, ledger}).reserve(1)).toThrow('total_call_cap');
   });
 
   it('preserves baseline identity, routing bytes, token default and USD 1 behavior', () => {

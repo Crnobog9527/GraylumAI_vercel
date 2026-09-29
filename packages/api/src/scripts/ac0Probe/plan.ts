@@ -25,7 +25,7 @@ export const USAGE = `AC-0b model probe (dry run unless --live).
   node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON packages/api/src/scripts/ac0Probe/main.ts [options]
 
   --agent-turn          AC1-4: fixed DeepSeek deepinfra/fp8, thinking off; exactly 30 ask + 10 text, no references
-  --agent-turn-candidate <c1|c2>  offline-only fixed candidate; requires --agent-turn, max_tokens 8192, default cap USD 3.5
+  --agent-turn-candidate <c1|c2>  fixed candidate; requires --agent-turn, max_tokens 8192; pass the approved --max-usd
   --skill-dir <dir>     private Skill directory with SKILL.md and references/ (default: synthetic repo fixture)
   --scenarios <file>    scenario JSON; required with --skill-dir (keep it outside the repository)
   --configs <ids>       comma-separated config ids (default: ${DEFAULT_CONFIG_IDS.join(',')})
@@ -92,7 +92,6 @@ export function parseProbeArgs(argv: string[], home: string): ProbeArgs {
   const candidate = values['agent-turn-candidate'];
   if (candidate !== undefined && !agentTurn) throw new Error('PROBE_AGENT_TURN_CANDIDATE_REQUIRES_AGENT_TURN');
   if (candidate !== undefined && candidate !== 'c1' && candidate !== 'c2') throw new Error('PROBE_AGENT_TURN_CANDIDATE_INVALID');
-  if (candidate && values.live) throw new Error('PROBE_AGENT_TURN_CANDIDATE_PREPARATION_ONLY');
   if (candidate && values['max-tokens'] !== undefined && values['max-tokens'] !== String(AGENT_TURN_CANDIDATE_MAX_TOKENS)) {
     throw new Error('PROBE_AGENT_TURN_CANDIDATE_MAX_TOKENS_FIXED');
   }
@@ -169,7 +168,6 @@ export function buildPlan(args: ProbeArgs, skill: LoadedSkill, scenarios: Scenar
   const candidate = args.agentTurnCandidate;
   if (candidate && !args.agentTurn) throw new Error('PROBE_AGENT_TURN_CANDIDATE_REQUIRES_AGENT_TURN');
   if (candidate && candidate !== 'c1' && candidate !== 'c2') throw new Error('PROBE_AGENT_TURN_CANDIDATE_INVALID');
-  if (candidate && args.live) throw new Error('PROBE_AGENT_TURN_CANDIDATE_PREPARATION_ONLY');
   if (candidate && args.maxTokens !== AGENT_TURN_CANDIDATE_MAX_TOKENS) throw new Error('PROBE_AGENT_TURN_CANDIDATE_MAX_TOKENS_FIXED');
   const extra = args.configFile ? parsePrivateJson(readFileSync(args.configFile, 'utf8'), z.unknown(), 'CONFIG_FILE') : undefined;
   const configs = args.agentTurn ? [candidate ? AGENT_TURN_CANDIDATES[candidate] : AGENT_TURN_CONFIG] : resolveConfigs(args.configIds, extra);
@@ -194,7 +192,7 @@ export function buildPlan(args: ProbeArgs, skill: LoadedSkill, scenarios: Scenar
       plannedUsd += count * CALLS_PER_TRIAL[kind] * callBoundUsd(config, bytes, args.maxTokens);
     }
   }
-  // Offline candidates may expose an over-cap estimate; no live execution is available.
+  // Candidates may expose an over-cap estimate; execution still reserves against both caps.
   if (args.agentTurn && !candidate && plannedUsd > args.maxUsd) throw new Error('PROBE_AGENT_TURN_RUN_BUDGET_INSUFFICIENT');
   if (plannedCalls === 0) throw new Error('PROBE_PLAN_EMPTY');
   if (plannedCalls > args.maxCalls) {
@@ -230,7 +228,7 @@ export function describePlan(plan: ProbePlan, mode: 'dry-run' | 'live', ledger: 
   ];
   if (ledger.path) lines.push(`Ledger file (real path): ${ledger.path}`);
   if (plan.agentTurnCandidate) {
-    lines.push('Preparation only: candidate --live is disabled. Estimates do not authorize spending or raise cumulative caps.');
+    lines.push('Candidate live use requires Owner-approved caps and the confirmed plan id; estimates alone do not authorize spending.');
     if (plan.plannedUsdUpperBound > plan.maxUsd) lines.push('Estimated upper bound exceeds this cap; the dry-run estimate is not executable.');
   } else if (mode === 'dry-run') {
     lines.push(`Dry run: no request leaves this machine. For real calls add: --live --confirm ${plan.planId}`);
