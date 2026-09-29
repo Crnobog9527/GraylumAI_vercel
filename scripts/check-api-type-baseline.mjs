@@ -2,8 +2,10 @@
 
 // Ratchet check for the standalone API type check (docs/ENGINEERING.md).
 // packages/api/tsconfig.json excludes test files that already had type errors
-// when the check was added. That list must equal packages/api/type-check-baseline.json
-// and may only shrink: a baselined file that now compiles must be removed from both.
+// when the check was added. That list must equal packages/api/type-check-baseline.json,
+// and a baselined file that now compiles must be removed from both. The list may only
+// shrink, but this check does not compare with the base branch: adding a file to both
+// lists raises the baseline and is a review blocker, as for the code-size baseline.
 
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';

@@ -134,12 +134,17 @@
   `rules-of-hooks` 和 `exhaustive-deps`。已有问题记在各包的 `eslint-suppressions.json`
   （ESLint 批量抑制），只许变少：新问题直接报错；修掉旧问题后运行
   `pnpm exec eslint --prune-suppressions`（在对应包目录下）把基线一起提交，否则检查会因
-  "有未使用的抑制"失败。不要用 `--suppress-all` 或手工增加条目来放过新问题。文件改名或
-  移动会让原来的抑制失效，要在同一个 PR 里修掉或按原样迁移。
+  "有未使用的抑制"失败。文件改名或移动会让原来的抑制失效，要在同一个 PR 里修掉或按原样
+  迁移。
 - `packages/api/tsconfig.json` 的 `exclude` 列出了加入独立类型检查时已有类型错误的测试
   文件，也只许变少，并且必须和 `packages/api/type-check-baseline.json` 完全一致。
-  `node scripts/check-api-type-baseline.mjs`（CI 同款）会拒绝新增的排除；某个被排除的文件
-  已经没有类型错误时也会失败，这时要把它从两处一起删掉。
+  `node scripts/check-api-type-baseline.mjs`（CI 同款）只能发现两种情况：两处不一致；某个
+  被排除的文件已经没有类型错误（这时要把它从两处一起删掉）。
+- 这两个基线和第 3 节的代码大小基线一样，自动检查不和目标分支比较：用 `--suppress-all`
+  或手工调大计数来放过新的 ESLint 问题，或者把新文件同时加进 `exclude` 和
+  `type-check-baseline.json`，CI 都发现不了。这些都等于调高基线，是审查阻断项。
+- typescript-eslint 8.71.0 要求 TypeScript 低于 6.1.0。以后把 TypeScript 升到 6.1 或更高时，
+  要同时升级 typescript-eslint（`apps/web` 和 `packages/api` 两处）。
 - 新逻辑要配单元测试，放在源码旁边的 `*.test.ts`；已经使用 `__tests__/` 的目录沿用
   原来的写法。修 bug 时先写一个能复现问题的测试。
 - 运行时或界面改动还需要浏览器验证；数据库、权限、支付等改动的验证要求见 AGENTS.md

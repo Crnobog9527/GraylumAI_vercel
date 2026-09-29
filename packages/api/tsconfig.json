@@ -1,9 +1,10 @@
 {
   // Standalone API type check (CI "Lint & Type Check"). Production code is fully
   // checked. Test files that already had type errors when this check was added
-  // are excluded below as a shrinking baseline. The list must equal
-  // type-check-baseline.json; scripts/check-api-type-baseline.mjs fails when a file
-  // is added or when an excluded file compiles and should be removed from both.
+  // are excluded below as a shrinking baseline. scripts/check-api-type-baseline.mjs
+  // fails when this list differs from type-check-baseline.json or when an excluded
+  // file compiles and should be removed from both. It cannot tell when a file is
+  // added to both lists; that raises the baseline and is a review blocker.
   // apps/web/tsconfig.json still checks the API files it lists.
   "extends": "../tsconfig/base.json",
   "compilerOptions": {
