@@ -3,6 +3,7 @@ import {
   allowedModes,
   allowedWires,
   REASONING_PURPOSES,
+  REASONING_EFFORTS,
   type CatalogSnapshot,
   type PurposeSetting,
   type ReasoningPurpose,
@@ -35,6 +36,12 @@ export function fromDraft(draft: Draft): PurposeSetting | undefined {
       return { mode: 'budget', maxTokens: Number(draft.budget) };
   }
 }
+/** Catalog-listed, schema-valid effort choices that do not disable mandatory thinking. */
+export function catalogEfforts(catalog: CatalogSnapshot | null): string[] {
+  return (catalog?.reasoning?.supportedEfforts ?? []).filter(value =>
+    REASONING_EFFORTS.some(effort => effort === value) && (value !== 'none' || !catalog?.reasoning?.mandatory));
+}
+
 /** Reconcile editable values on initial load and route/catalog changes. */
 export function normalizeDrafts(
   drafts: Record<ReasoningPurpose, Draft>,
@@ -42,15 +49,23 @@ export function normalizeDrafts(
   route: string | null,
 ): Record<ReasoningPurpose, Draft> {
   const wires = allowedWires(catalog, route);
+  const efforts = catalogEfforts(catalog);
+  const defaultEffort = catalog?.reasoning?.defaultEffort;
   let next = drafts;
   for (const purpose of REASONING_PURPOSES) {
     const draft = drafts[purpose];
-    const mode = draft.mode === 'unset' || allowedModes(catalog, route, purpose).includes(draft.mode)
+    let mode = draft.mode === 'unset' || allowedModes(catalog, route, purpose).includes(draft.mode)
       ? draft.mode : 'unset';
     const wire = wires.includes(draft.wire) ? draft.wire : (wires[0] ?? draft.wire);
-    if (mode !== draft.mode || wire !== draft.wire) {
+    let effort = draft.effort;
+    const validEffort = effort === 'none' ? !catalog?.reasoning?.mandatory : efforts.includes(effort);
+    if (mode === 'effort' && !validEffort) {
+      effort = defaultEffort && efforts.includes(defaultEffort) ? defaultEffort : (efforts[0] ?? '');
+      if (!effort) mode = 'unset';
+    }
+    if (mode !== draft.mode || wire !== draft.wire || effort !== draft.effort) {
       if (next === drafts) next = { ...drafts };
-      next[purpose] = { ...draft, mode, wire };
+      next[purpose] = { ...draft, mode, wire, effort };
     }
   }
   return next;

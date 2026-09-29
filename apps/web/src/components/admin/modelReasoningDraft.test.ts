@@ -111,3 +111,29 @@ describe('reasoning draft capability changes', () => {
     expect(saved(normalizeDrafts(drafts(), noReasoning, 'effort'))).toEqual({});
   });
 });
+
+describe('reasoning effort changes', () => {
+  it.each([
+    ['low', ['minimal', 'low'], false, 'high', 'effort', 'low'],
+    ['gone', ['low', 'minimal'], false, 'high', 'effort', 'low'],
+    [null, [], false, 'high', 'unset', ''],
+    ['low', ['low'], false, 'none', 'effort', 'none'],
+    ['none', ['none', 'low'], true, 'none', 'effort', 'low'],
+    ['none', ['none'], true, 'none', 'unset', ''],
+  ] as const)('reconciles effort with default %s and efforts %j', (defaultEffort, efforts, mandatory, current, mode, expected) => {
+    const snapshot: CatalogSnapshot = {
+      ...catalog,
+      reasoning: { ...catalog.reasoning!, supportedEfforts: [...efforts], defaultEffort, mandatory },
+    };
+    const initial = drafts('effort');
+    for (const purpose of REASONING_PURPOSES) initial[purpose].effort = current;
+    const next = normalizeDrafts(initial, snapshot, 'effort');
+    for (const purpose of REASONING_PURPOSES) {
+      expect(next[purpose].mode).toBe(mode);
+      if (mode === 'effort') expect(next[purpose].effort).toBe(expected);
+      expect(initial[purpose].effort).toBe(current);
+    }
+    expect(normalizeDrafts(next, snapshot, 'effort')).toBe(next);
+    expectSavable(next, snapshot, 'effort');
+  });
+});

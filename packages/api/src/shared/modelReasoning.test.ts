@@ -160,3 +160,43 @@ describe("menu choices", () => {
     }
   });
 });
+
+describe("selected endpoint output limits", () => {
+  const limited = (maxCompletionTokens: number | null, setting: unknown) => config({
+    catalog: catalog({
+      reasoning: { ...catalog().reasoning!, supportsMaxTokens: true },
+      endpoints: catalog().endpoints.map(endpoint => endpoint.tag === "deepinfra"
+        ? { ...endpoint, maxCompletionTokens } : endpoint),
+    }),
+    purposes: { organize: purposeSetting.parse(setting) },
+  });
+
+  it("rejects a budget above the route cap and identifies the limiting source", () => {
+    const issues = checkReasoningConfig(limited(2000, { mode: "budget", maxTokens: 1000 }), model);
+    expect(issues.map(issue => issue.code)).toEqual(["BUDGET_TOO_LARGE", "OUTPUT_LIMIT_TOO_SMALL"]);
+    for (const issue of issues) {
+      expect(issue.message).toContain("所选线路的输出上限");
+      expect(issue.message).toContain("2000");
+    }
+  });
+
+  it("rejects enabled thinking below the route minimum but permits disabled thinking", () => {
+    expect(codes(limited(4095, { mode: "effort", effort: "low", wire: "reasoning" }))).toEqual(["OUTPUT_LIMIT_TOO_SMALL"]);
+    expect(codes(limited(4096, { mode: "effort", effort: "low", wire: "reasoning" }))).toEqual([]);
+    expect(codes(limited(2000, { mode: "off", wire: "reasoning" }))).toEqual([]);
+  });
+
+  it("accepts the exact route budget boundary and rejects one extra token", () => {
+    expect(codes(limited(4096, { mode: "budget", maxTokens: 4096 - MIN_ANSWER_TOKENS_AFTER_BUDGET }))).toEqual([]);
+    expect(codes(limited(4096, { mode: "budget", maxTokens: 4096 - MIN_ANSWER_TOKENS_AFTER_BUDGET + 1 })))
+      .toEqual(["BUDGET_TOO_LARGE"]);
+  });
+
+  it.each([null, 16000])("keeps the model limit when the route cap is %s", cap => {
+    expect(codes(limited(cap, { mode: "budget", maxTokens: model.maxTokens - MIN_ANSWER_TOKENS_AFTER_BUDGET }))).toEqual([]);
+    const issues = checkReasoningConfig(limited(cap, { mode: "budget", maxTokens: model.maxTokens }), model);
+    expect(issues.map(issue => issue.code)).toEqual(["BUDGET_TOO_LARGE"]);
+    expect(issues[0].message).toContain("模型的输出上限");
+    expect(issues[0].message).toContain(String(model.maxTokens));
+  });
+});

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Brain, Loader2, RefreshCw } from 'lucide-react';
 import { trpc } from '@/trpc/client';
+import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,7 +20,7 @@ import {
   type ReasoningPurpose,
 } from '@repo/api/src/shared/modelReasoning';
 
-import { fromDraft, normalizeDrafts, toDraft, type Draft, type Wire } from './modelReasoningDraft';
+import { catalogEfforts, fromDraft, normalizeDrafts, toDraft, type Draft, type Wire } from './modelReasoningDraft';
 
 const PURPOSE_NOTES: Record<ReasoningPurpose, string> = {
   interactive: '导师和日常对话。必须设置，没设置的模型不能用作 Skill 模型。',
@@ -34,6 +35,11 @@ const MODE_LABELS: Record<Draft['mode'], string> = {
   effort: '指定档位',
   budget: '思考预算（token）',
 };
+
+/** These procedures use BAD_REQUEST for their administrator-readable validation messages. */
+function reasoningErrorMessage(error: { message: string; data?: { code?: string } | null }, fallback: string): string {
+  return error.data?.code === 'BAD_REQUEST' ? error.message : getSafeErrorMessage(error, fallback);
+}
 
 /** A choice the form cannot save yet, before asking the server. */
 function draftProblem(drafts: Record<ReasoningPurpose, Draft>): string | null {
@@ -122,7 +128,12 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
             按用途设置调用这个模型时的思考方式。可选项来自 OpenRouter 公开目录；保存前会按所选线路检查。
           </DialogDescription>
         </DialogHeader>
-        {view.isLoading || !drafts ? (
+        {view.error ? (
+          <div className="space-y-2">
+            <p role="alert" className="text-rose-400">{reasoningErrorMessage(view.error, '无法读取思考设置，请稍后重试')}</p>
+            <Button variant="outline" size="sm" onClick={() => void view.refetch()} disabled={view.isFetching}>重试</Button>
+          </div>
+        ) : view.isLoading || !drafts ? (
           <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]"><Loader2 className="h-4 w-4 animate-spin" />读取中</div>
         ) : (
           <div className="space-y-5 text-sm">
@@ -145,7 +156,7 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
               ) : (
                 <p className="text-[var(--text-secondary)]">还没有读取目录。</p>
               )}
-              {refresh.error ? <p role="alert" className="text-rose-400">{refresh.error.message}</p> : null}
+              {refresh.error ? <p role="alert" className="text-rose-400">{reasoningErrorMessage(refresh.error, '暂时无法读取模型目录，请稍后重试')}</p> : null}
             </section>
 
             <section className="space-y-2">
@@ -170,6 +181,9 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
 
             {REASONING_PURPOSES.map(purpose => {
               const draft = drafts[purpose];
+              const efforts = catalogEfforts(catalog);
+              // The server also accepts an existing non-mandatory "none" omitted by the catalog.
+              if (draft.effort === 'none' && !reasoning?.mandatory && !efforts.includes('none')) efforts.push('none');
               return (
                 <section key={purpose} className="space-y-2 rounded-md border border-[var(--border-primary)] p-3">
                   <div>
@@ -188,7 +202,7 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
                     <Select value={draft.effort} onValueChange={value => update(purpose, { effort: value })}>
                       <SelectTrigger aria-label={`${PURPOSE_LABELS[purpose]}的档位`}><SelectValue placeholder="选择档位" /></SelectTrigger>
                       <SelectContent>
-                        {(reasoning?.supportedEfforts ?? []).map(effort => <SelectItem key={effort} value={effort}>{effort}</SelectItem>)}
+                        {efforts.map(effort => <SelectItem key={effort} value={effort}>{effort}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   ) : null}
@@ -221,13 +235,13 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
               </ul>
             ) : null}
             {problem ? <p role="status" className="text-amber-400">{problem}</p> : null}
-            {save.error ? <p role="alert" className="text-rose-400">{save.error.message}</p> : null}
+            {save.error ? <p role="alert" className="text-rose-400">{reasoningErrorMessage(save.error, '保存思考设置失败，请稍后重试')}</p> : null}
             {save.isSuccess ? <p role="status" className="text-emerald-400">已保存</p> : null}
           </div>
         )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>关闭</Button>
-          <Button onClick={submit} disabled={!drafts || Boolean(problem) || save.isPending || refresh.isPending}>
+          <Button onClick={submit} disabled={!drafts || Boolean(view.error) || Boolean(problem) || save.isPending || refresh.isPending}>
             {save.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}保存
           </Button>
         </DialogFooter>
