@@ -822,6 +822,40 @@ describe('question-card history and step fields', () => {
     expect(withWorkflow).not.toBe(without);
   });
 
+  it.each([true, false])('scores a whole card-design run end to end from synthetic replies (all correct=%s)', async allCorrect => {
+    const cases = Object.entries(CARD_CATEGORIES).flatMap(([category, {kind, count}]) => Array.from({length: count}, (_, index) => ({
+      id: `${category}-${index}`, kind, category, step: 0, currentStepId: 'step-1', questionId: 'offer',
+      history: [], input: `Sample for category ${category} number ${index}`,
+    })));
+    const args = ['--agent-turn', '--out-dir', outDir(), '--skill-dir', privateSkill(),
+      '--scenarios', scenarios(cases), '--max-calls', '40', '--max-usd', '1'];
+    const id = await planId(args);
+    const network = recording(async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      const category = /Sample for category ([A-E])/.exec(JSON.stringify(body.messages))![1]!;
+      const wantsCard = (category === 'A' || category === 'B') === allCorrect;
+      if (!wantsCard) return sseResponse(body.model, textDeltas('What would you like to share first?'));
+      const newCard = {question: 'Which channel first?', options: ['Channel A', 'Channel B'],
+        recommended: category === 'A' ? 1 : null};
+      return sseResponse(body.model, [...textDeltas('Channel B fits what you said. '),
+        ...toolDeltas('ask_question', newCard, 'call_' + body.messages.length)], {finish: 'tool_calls'});
+    });
+    const outcome = await runProbe([...args, '--live', '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
+    expect(outcome.exitCode).toBe(0);
+    expect(network.sent).toHaveLength(40);
+    const summary = JSON.parse(readFileSync(join(outcome.runDir!, 'agent-turn-summary.json'), 'utf8'));
+    if (allCorrect) {
+      expect(summary).toMatchObject({completed: 40, formatErrors: 0, cardDecisionCorrect: 40, recommendationCorrect: 18,
+        verdict: 'manual_review_required'});
+      // The per-trial record classifies a valid new-format card as valid too.
+      for (const result of outcome.results!.filter(item => item.kind === 'ask')) {
+        expect(result.outcome).toMatchObject({category: 'correct', argsValid: true});
+      }
+    } else {
+      expect(summary).toMatchObject({completed: 40, formatErrors: 0, cardDecisionCorrect: 0, recommendationCorrect: 0, verdict: 'fail'});
+    }
+  });
+
   it('preloads only the assets/ files a workflow step names, as the real host does', () => {
     const plain = loadSkill(privateSkill());
     const dir = privateSkill(workflowYaml.replace('      - references/step-1.md', '      - references/step-1.md\n      - assets/plan.md'));

@@ -130,6 +130,14 @@ export function firstCallOnly(response: Response): Response {
   return new Response(stream, {status: response.status, headers: response.headers});
 }
 
+/** The v5 card rules (including `recommended`) for the per-trial ask classification. */
+export function agentTurnCardArgsValid(args: unknown): boolean {
+  try {
+    runtime().tools.questionCardToolResult(args);
+    return true;
+  } catch { return false; }
+}
+
 /** Called only after the SDK turn completes, never on a partial tool delta. */
 export function agentTurnCardAvailable(output: string | undefined): boolean {
   return Boolean(runtime().tools.questionCardFromResult(output ?? ''));

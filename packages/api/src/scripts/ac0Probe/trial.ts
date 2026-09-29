@@ -2,7 +2,7 @@
 // AC-0b model probe. Standalone script: application code must never import it.
 import {Agent, OpenAIChatCompletionsModel, Runner, tool, type AgentInputItem} from '@openai/agents';
 import OpenAI from 'openai';
-import {agentTurnCardAvailable, agentTurnPrompt, agentTurnTool, firstCallOnly} from './agentTurn.ts';
+import {agentTurnCardArgsValid, agentTurnCardAvailable, agentTurnPrompt, agentTurnTool, firstCallOnly} from './agentTurn.ts';
 import {z} from 'zod';
 import type {Budget} from './budget.ts';
 import type {ProbeConfig} from './config.ts';
@@ -188,7 +188,8 @@ export async function runTrial(options: {
         : sdkError ? 'sdk_error' : undefined;
   return {
     configId: config.id, kind, scenarioId: scenario.id, index: options.index, startedAt: new Date().toISOString(),
-    ...(kind === 'ask' ? {outcome: classifyAsk(calls, sdkError, stop)} : {}),
+    // Agent turns check the v5 card (with `recommended`); older probes keep the AC-0 card shape.
+    ...(kind === 'ask' ? {outcome: classifyAsk(calls, sdkError, stop, options.agentTurn ? agentTurnCardArgsValid : undefined)} : {}),
     ...(stop ? {stop} : {}),
     ...(transport.state.budgetStop ? {budgetStop: transport.state.budgetStop} : {}),
     ...(transport.state.httpStatus !== null ? {httpStatus: transport.state.httpStatus} : {}),

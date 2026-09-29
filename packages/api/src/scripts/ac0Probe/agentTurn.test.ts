@@ -54,6 +54,16 @@ describe('AC1-4 prepared probe (synthetic transport only)', () => {
     expect(text.result.cardAvailableMs).toBeUndefined();
   });
 
+  it('classifies a valid new-format card as argsValid and an out-of-range recommendation as malformed', async () => {
+    const valid = (await trial('ask', [...textDeltas('B fits.'), ...toolDeltas('ask_question', card)], 'tool_calls')).result;
+    expect(valid.outcome).toMatchObject({category: 'correct', argsValid: true});
+    const neutral = (await trial('ask', toolDeltas('ask_question', {...card, recommended: null}), 'tool_calls')).result;
+    expect(neutral.outcome).toMatchObject({category: 'correct', argsValid: true});
+    const outOfRange = (await trial('ask', toolDeltas('ask_question', {...card, recommended: 2}), 'tool_calls')).result;
+    expect(outOfRange.outcome).toMatchObject({category: 'malformed', argsValid: false, detail: 'schema_mismatch'});
+    expect(agentTurnMeasurement(outOfRange)).toMatchObject({formatError: true, validCardCandidate: false});
+  });
+
   it('scores the Owner card design by category: card decision, recommendation and fixed denominators', async () => {
     const recommended = (await trial('ask', [...textDeltas('B fits best.'), ...toolDeltas('ask_question', card)], 'tool_calls')).result;
     const neutral = (await trial('ask', [...textDeltas('Place yourself.'),
