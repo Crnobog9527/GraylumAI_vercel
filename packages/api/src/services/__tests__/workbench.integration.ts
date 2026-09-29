@@ -8,6 +8,7 @@ import { createClient } from "@supabase/supabase-js";
 import { saveModuleSkill, type ModuleSkillInput } from '../skills/modulePublication';
 import { publishSkillPackage } from "../skills/publication";
 import { makePackage, makeWorkflow } from "./fixtures/artifacts";
+import { configuredReasoning } from "./fixtures/runtimeReasoning";
 import { packageHash, packageHashPayload, sha256 } from "../skills/loader";
 import { databaseArtifactStore } from "../artifacts/store";
 import { webCommandSchema, workbenchService } from "../artifacts/workbench";
@@ -3625,7 +3626,7 @@ function adminModuleInput(): ModuleSkillInput {
 }
 it('ADMIN: atomic package, YAML template, workflow and module publication with replay, rollback and stale-write protection', async () => {
   const input = adminModuleInput();
-  await sql.query("insert into ai_models(id,model_id,name,provider,api_key,max_tokens,input_limit) values($1,'qwen/qwen3.8-27b','Admin fixture model','openai','LOCAL_ONLY',4096,800000)", [input.module.model_id]);
+  await sql.query("insert into ai_models(id,model_id,name,provider,api_key,max_tokens,input_limit,config) values($1,'qwen/qwen3.8-27b','Admin fixture model','openai','LOCAL_ONLY',4096,800000,$2)", [input.module.model_id, configuredReasoning('qwen/qwen3.8-27b')]);
   const result = await saveModuleSkill(db, owner, input);
   expect(result.version).toBe(1);
   expect(await saveModuleSkill(db, owner, input)).toEqual(result);
@@ -3676,7 +3677,7 @@ it('ADMIN: browser imports a Skill folder, configures steps, publishes and opens
   await sql.query("update profiles set role='admin' where id=$1", [admin.id]);
   writeFileSync(output + '/admin-preview.json', JSON.stringify({ url: app, email: admin.email, password: admin.password }), { mode: 0o600 });
   const input = adminModuleInput();
-  await sql.query("insert into ai_models(id,model_id,name,provider,api_key,max_tokens,input_limit) values($1,'qwen/qwen3.8-27b','Browser admin model','openai','LOCAL_ONLY',4096,800000)", [input.module.model_id]);
+  await sql.query("insert into ai_models(id,model_id,name,provider,api_key,max_tokens,input_limit,config) values($1,'qwen/qwen3.8-27b','Browser admin model','openai','LOCAL_ONLY',4096,800000,$2)", [input.module.model_id, configuredReasoning('qwen/qwen3.8-27b')]);
   const directory = output + '/synthetic-method'; mkdirSync(directory, { recursive: true });
   for (const f of input.files) {
     const target = directory + '/' + f.path; mkdirSync(target.slice(0,target.lastIndexOf('/')), { recursive: true });
@@ -3915,7 +3916,7 @@ it('ADMIN: re-uploading a declared Skill updates the active steps and questions 
   const administrator=await newUser();
   await sql.query("update profiles set role='admin' where id=$1",[administrator.id]);
   const input=adminModuleInput();
-  await sql.query("insert into ai_models(id,model_id,name,provider,api_key,max_tokens,input_limit) values($1,'qwen/qwen3.8-27b','Workflow upload fixture','openai','LOCAL_ONLY',4096,800000)",[input.module.model_id]);
+  await sql.query("insert into ai_models(id,model_id,name,provider,api_key,max_tokens,input_limit,config) values($1,'qwen/qwen3.8-27b','Workflow upload fixture','openai','LOCAL_ONLY',4096,800000,$2)",[input.module.model_id, configuredReasoning('qwen/qwen3.8-27b')]);
   const directory=output+'/synthetic-method';mkdirSync(directory,{recursive:true});
   for(const file of input.files){
     const target=directory+'/'+file.path;mkdirSync(target.slice(0,target.lastIndexOf('/')),{recursive:true});

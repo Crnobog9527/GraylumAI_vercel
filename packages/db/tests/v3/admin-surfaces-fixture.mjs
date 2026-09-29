@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Disposable admin-preview scaffolding for announcements, membership plans and
-// credit packages, whose base tables predate the repository migrations. Columns
+// credit packages and check-in status. Columns
 // follow packages/db/schema.ts; public read policies are copied byte-for-byte
 // from the authoritative migration. Synthetic rows only: no real account,
 // Stripe price, provider or money state.
@@ -13,9 +13,9 @@ const PUBLIC_READ_POLICIES = [
   'credit_packages_select_active_public',
 ];
 
-function authoritativePolicy(source, name) {
+function authoritativePolicy(source, name, terminator = '$policy$') {
   const start = source.indexOf(`CREATE POLICY "${name}"`);
-  const end = source.indexOf('$policy$', start);
+  const end = source.indexOf(terminator, start);
   if (start < 0 || end < 0) throw new Error('missing authoritative policy ' + name);
   return source.slice(start, end).trim() + ';';
 }
@@ -23,6 +23,10 @@ function authoritativePolicy(source, name) {
 export function installAdminSurfacesPreview(sql, root) {
   const policies = readFileSync(
     resolve(root, 'packages/db/migrations/0032_admin_policy_shape_reconciliation.sql'),
+    'utf8',
+  );
+  const checkinPolicies = readFileSync(
+    resolve(root, 'packages/db/migrations/0013_checkin_rewards.sql'),
     'utf8',
   );
   // Admin suites may already have created minimal versions of these tables.
@@ -50,6 +54,14 @@ ALTER TABLE membership_plans ALTER COLUMN id SET DEFAULT gen_random_uuid(), ADD 
 CREATE TABLE IF NOT EXISTS credit_packages(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text NOT NULL,price integer NOT NULL,
  credits_amount integer NOT NULL,bonus_credits integer NOT NULL DEFAULT 0,stripe_price_id text,sort_order integer NOT NULL DEFAULT 0,
  is_popular text NOT NULL DEFAULT 'false',active text NOT NULL DEFAULT 'true',created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS user_checkins(
+ user_id uuid NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, checkin_date text NOT NULL, month_key text NOT NULL,
+ streak_day integer NOT NULL, reward_credits integer NOT NULL DEFAULT 0, monthly_bonus_credits integer NOT NULL DEFAULT 0,
+ created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(user_id,checkin_date));
+ALTER TABLE user_checkins ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON user_checkins FROM PUBLIC,anon,authenticated;
+GRANT SELECT ON user_checkins TO authenticated;
+GRANT ALL ON user_checkins TO service_role;
 ALTER TABLE announcements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE membership_plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE credit_packages ENABLE ROW LEVEL SECURITY;
@@ -57,6 +69,7 @@ REVOKE ALL ON announcements,membership_plans,credit_packages FROM PUBLIC,anon,au
 GRANT SELECT ON announcements,membership_plans,credit_packages TO anon,authenticated;
 GRANT ALL ON announcements,membership_plans,credit_packages TO service_role;
 `);
+  sql(authoritativePolicy(checkinPolicies, 'users_own_user_checkins_select', ';'));
   sql(PUBLIC_READ_POLICIES.map((name) => authoritativePolicy(policies, name)).join('\n'));
   // Free and Pro carry no feature list so the profile card falls back to its
   // generated defaults; the homepage row is retired data that must stay unlisted.

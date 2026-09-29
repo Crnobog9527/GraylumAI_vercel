@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { summarizeRateLimitCases } from "../../packages/db/tests/v3/local-rate-limit-case-report.mjs";
 
 test("case reports separate request count, rolling-minute pressure and actual denied responses", () => {
@@ -32,7 +33,7 @@ test("legacy execution keeps its Vitest config and dependency context with candi
   const legacy = mkdtempSync(resolve(tmpdir(), "rate-limit-legacy-test-"));
   try {
     mkdirSync(resolve(legacy, "packages/api"), { recursive: true });
-    const candidate = new URL("../../", import.meta.url).pathname;
+    const candidate = fileURLToPath(new URL("../../", import.meta.url));
     const installed = installLocalRateLimitCases(candidate, legacy);
     assert.ok(installed.config.startsWith(legacy));
     assert.match(readFileSync(installed.config, "utf8"), /import original from '.\/vitest.integration.config.ts'/);
