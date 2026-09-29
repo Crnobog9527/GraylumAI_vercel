@@ -82,7 +82,10 @@ export const checkinRouter = router({
   getCheckinStatus: protectedProcedure.query(async ({ ctx }) => {
     const { dateKey: todayKey, monthKey } = getChinaDateKey();
     const { dateKey: yesterdayKey } = getChinaDateKey(-1);
-    const { cycleRewards, monthlyBonusCredits } = await loadCheckinSettings(ctx.supabase);
+    // Check-in keys are outside the public settings allowlist; read the fixed keys server-side,
+    // the same system_settings source claim_daily_checkin uses.
+    const settingsClient = ctx.hasSupabaseAdminPrivileges ? ctx.supabaseAdmin : ctx.supabase;
+    const { cycleRewards, monthlyBonusCredits } = await loadCheckinSettings(settingsClient);
 
     const [{ data: todayRecord, error: todayError }, { data: recentRecords, error: recentError }, { count: monthCount, error: monthCountError }] =
       await Promise.all([

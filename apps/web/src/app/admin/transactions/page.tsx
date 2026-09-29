@@ -51,7 +51,7 @@ interface Transaction {
   created_at: string;
   profiles: {
     id: string;
-    email: string;
+    email: string | null;
     nickname: string | null;
     avatar_url?: string | null;
   } | null;

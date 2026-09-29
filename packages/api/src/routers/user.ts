@@ -62,11 +62,15 @@ export const userRouter = router({
   }),
 
   updateUserProfile: protectedProcedure
-    .input(z.object({ nickname: z.string().optional(), avatarUrl: z.string().optional() }))
+    .input(z.object({ nickname: z.string().trim().min(1).max(80).optional(), avatarUrl: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
+      // Only nickname is user-writable (0144). /api/upload returns private paths, not avatar URLs.
+      if (input.avatarUrl !== undefined || input.nickname === undefined) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '目前只支持修改昵称' });
+      }
       const { data, error } = await ctx.supabase
         .from('profiles')
-        .update({ nickname: input.nickname, avatar_url: input.avatarUrl })
+        .update({ nickname: input.nickname })
         .eq('id', ctx.profileId)
         .select('id, email, nickname, avatar_url, role, credits, membership_level, status, created_at')
         .single();
@@ -105,7 +109,7 @@ export const userRouter = router({
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-    const [conversationsResult, monthlyTransactionsResult, usageLogsResult, messageCountResult] = await Promise.all([
+    const [conversationsResult, monthlyTransactionsResult, messageCountResult] = await Promise.all([
       ctx.supabase
         .from('conversations')
         .select('created_at')
@@ -115,10 +119,6 @@ export const userRouter = router({
         .select('*')
         .eq('user_id', ctx.profileId)
         .gte('created_at', monthStart),
-      ctx.supabase
-        .from('ai_usage_logs')
-        .select('module_name')
-        .eq('user_id', ctx.profileId),
       ctx.supabase
         .from('messages')
         .select('id, conversations!inner(user_id)', { count: 'exact', head: true })
@@ -130,26 +130,15 @@ export const userRouter = router({
     const convError = conversationsResult.error;
     const monthlyTransactions = monthlyTransactionsResult.data ?? [];
     const txError = monthlyTransactionsResult.error;
-    const usageLogs = usageLogsResult.data ?? [];
-    const logsError = usageLogsResult.error;
     const messageCount = messageCountResult.count ?? 0;
     const msgError = messageCountResult.error;
 
     // 4. 计算使用天数（有对话的天数）
     const uniqueDays = new Set(conversations.map(c => new Date(c.created_at).toDateString()));
 
-    // 统计模块使用次数
-    const moduleUsage: Record<string, number> = {};
-    usageLogs.forEach((log: any) => {
-      const moduleName = log.module_name || 'AI 智能对话';
-      moduleUsage[moduleName] = (moduleUsage[moduleName] || 0) + 1;
-    });
-
-    // 排序获取 Top 3
-    const topModules = Object.entries(moduleUsage)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([name, count]) => ({ name, count }));
+    // ai_usage_logs has no module_name column and no writer records modules, so there is no
+    // per-user module source to rank; keep the placeholder instead of a query that always fails.
+    const topModules: Array<{ name: string; count: number }> = [];
 
     // 计算本月消耗积分总和
     const monthlyCreditsUsed = monthlyTransactions.reduce(

@@ -11,6 +11,10 @@ import {
   resolveMembershipEligibility,
   type MembershipEligibilityResult,
 } from '../services/membershipEligibility';
+import {
+  ADMIN_ACTIVITY_COLUMNS, ADMIN_ACTIVITY_WITH_PROFILES, ADMIN_PROFILE_COLUMNS, ADMIN_PROFILE_LIST_COLUMNS,
+  ADMIN_TRANSACTION_COLUMNS, recordAdminActivity, withUnrecordedLoginFields,
+} from '../services/adminUserAccess';
 
 const promptCategorySchema = z.enum(['writing', 'marketing', 'video', 'business', 'education', 'coding', 'analysis', 'creative', 'other']);
 const promptPlatformSchema = z.enum(['all', 'web', 'mobile', 'desktop', 'api']);
@@ -573,7 +577,7 @@ export const adminRouter = router({
       const startedAt = Date.now();
       let query = ctx.supabase
         .from('profiles')
-        .select('id, email, nickname, avatar_url, role, status, membership_level, credits, last_login_at, last_ip, created_at', { count: 'planned' })
+        .select(ADMIN_PROFILE_LIST_COLUMNS, { count: 'planned' })
         .eq('is_deleted', false)
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
@@ -605,7 +609,7 @@ export const adminRouter = router({
       }
 
       const result = {
-        users: data ?? [],
+        users: (data ?? []).map(withUnrecordedLoginFields),
         total: count ?? 0,
         hasMore: (count ?? 0) > input.offset + input.limit,
       };
@@ -671,7 +675,7 @@ export const adminRouter = router({
         .from('profiles')
         .update({ role: input.role })
         .eq('id', input.userId)
-        .select()
+        .select(ADMIN_PROFILE_COLUMNS)
         .single();
 
       if (error) {
@@ -679,7 +683,7 @@ export const adminRouter = router({
       }
 
       // Log the activity
-      await ctx.supabase.from('user_activity_logs').insert({
+      await recordAdminActivity(ctx.supabase, {
         user_id: input.userId,
         admin_id: ctx.profileId,
         action: `角色变更: ${previousRole} → ${input.role}`,
@@ -913,7 +917,7 @@ export const adminRouter = router({
     .query(async ({ ctx, input }) => {
       let query = ctx.supabase
         .from('credit_transactions')
-        .select('*', { count: 'exact' })
+        .select(ADMIN_TRANSACTION_COLUMNS, { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
@@ -1071,7 +1075,7 @@ export const adminRouter = router({
       }
 
       // Log the activity
-      await ctx.supabase.from('user_activity_logs').insert({
+      await recordAdminActivity(ctx.supabase, {
         user_id: input.userId,
         admin_id: ctx.profileId,
         action: `积分调整: ${appliedAdjustment > 0 ? '+' : ''}${appliedAdjustment}`,
@@ -1108,7 +1112,7 @@ export const adminRouter = router({
       // Get user profile with all fields
       const { data: profile, error: profileError } = await ctx.supabase
         .from('profiles')
-        .select('*')
+        .select(ADMIN_PROFILE_COLUMNS)
         .eq('id', input.userId)
         .single();
 
@@ -1143,7 +1147,7 @@ export const adminRouter = router({
 
         ctx.supabase
           .from('user_activity_logs')
-          .select('*')
+          .select(ADMIN_ACTIVITY_COLUMNS)
           .eq('user_id', input.userId)
           .order('created_at', { ascending: false })
           .limit(10),
@@ -1180,7 +1184,7 @@ export const adminRouter = router({
       }
 
       const result = {
-        profile,
+        profile: withUnrecordedLoginFields(profile),
         stats: {
           totalConversations: conversationsResult.data?.length ?? 0,
           totalMessages: messageCountResult.count ?? 0,
@@ -1228,7 +1232,7 @@ export const adminRouter = router({
         .from('profiles')
         .update({ status: input.status })
         .eq('id', input.userId)
-        .select()
+        .select(ADMIN_PROFILE_COLUMNS)
         .single();
 
       if (error) {
@@ -1236,7 +1240,7 @@ export const adminRouter = router({
       }
 
       // Log the activity
-      await ctx.supabase.from('user_activity_logs').insert({
+      await recordAdminActivity(ctx.supabase, {
         user_id: input.userId,
         admin_id: ctx.profileId,
         action: `账号状态变更: ${previousStatus} → ${input.status}`,
@@ -1324,7 +1328,7 @@ export const adminRouter = router({
         .from('profiles')
         .update({ membership_level: input.membershipLevel })
         .eq('id', input.userId)
-        .select()
+        .select(ADMIN_PROFILE_COLUMNS)
         .single();
 
       if (error) {
@@ -1361,7 +1365,7 @@ export const adminRouter = router({
       }
 
       // Log the activity
-      await ctx.supabase.from('user_activity_logs').insert({
+      await recordAdminActivity(ctx.supabase, {
         user_id: input.userId,
         admin_id: ctx.profileId,
         action: `会员等级变更: ${previousLevel} → ${input.membershipLevel}`,
@@ -1390,11 +1394,7 @@ export const adminRouter = router({
       const startedAt = Date.now();
       let query = ctx.supabase
         .from('user_activity_logs')
-        .select(`
-          *,
-          user:profiles!user_activity_logs_user_id_fkey(id, email, nickname, avatar_url),
-          admin:profiles!user_activity_logs_admin_id_fkey(id, email, nickname, avatar_url)
-        `, { count: 'planned' })
+        .select(ADMIN_ACTIVITY_WITH_PROFILES, { count: 'planned' })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
