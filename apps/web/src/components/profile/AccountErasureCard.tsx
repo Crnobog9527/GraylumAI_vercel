@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { DialogCaptcha } from '@/components/auth/DialogCaptcha';
 import { buildErasureImpactLines, type ImpactLine } from '@/lib/account-erasure';
 import { useAccountErasure } from '@/hooks/use-account-erasure';
 
@@ -86,6 +87,12 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
 
           {erasure.step === 'verify' && (
             <div className="space-y-3 py-2">
+              <DialogCaptcha
+                key={erasure.captchaKey}
+                onToken={erasure.setCaptchaToken}
+                onExpired={erasure.captchaExpired}
+                onUnavailable={erasure.captchaUnavailable}
+              />
               {!usesPassword && (
                 <Button variant="outline" size="sm" disabled={erasure.busy} onClick={erasure.sendCode} style={ghostStyle}>
                   {erasure.codeSent ? '重新发送验证码' : '发送验证码'}
