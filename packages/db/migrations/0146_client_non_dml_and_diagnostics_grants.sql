@@ -76,6 +76,16 @@ BEGIN
     CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) p(privilege)
     WHERE c.oid IN ('public.diagnostic_results'::regclass, 'public.application_logs'::regclass)
       AND has_table_privilege(r.role_name, c.oid, p.privilege)
+  ) OR EXISTS (
+    -- Column privileges are invisible to has_table_privilege (e.g. inherited through membership).
+    SELECT 1 FROM pg_class c
+    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+    CROSS JOIN (VALUES ('anon'), ('authenticated')) r(role_name)
+    CROSS JOIN (VALUES ('REFERENCES'), ('SELECT'), ('INSERT'), ('UPDATE')) p(privilege)
+    WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+      AND (p.privilege = 'REFERENCES'
+        OR c.oid IN ('public.diagnostic_results'::regclass, 'public.application_logs'::regclass))
+      AND has_column_privilege(r.role_name, c.oid, a.attnum, p.privilege)
   ) THEN
     RAISE EXCEPTION 'S1-FIX-3: a client privilege survived; inspect ownership/ACL before applying';
   END IF;

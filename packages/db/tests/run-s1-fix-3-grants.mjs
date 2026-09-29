@@ -201,6 +201,21 @@ try {
   assert.ok(failedClosed, 'migration must fail closed when it cannot revoke a client privilege');
   assert.deepEqual(snapshot().tables.diagnostic_results, repaired.tables.diagnostic_results);
   console.log('PASS 0146 fails closed (whole transaction) when a client non-DML privilege survives');
+  // Inherited column grants: REFERENCES on any table, SELECT/INSERT/UPDATE on the closed tables.
+  sql('REVOKE TRUNCATE ON opc_accounts FROM s1f3_other;');
+  apply(migration);
+  for (const grant of ['REFERENCES (id) ON modules', 'SELECT (message) ON diagnostic_results',
+    'INSERT (level) ON application_logs', 'UPDATE (status) ON diagnostic_results']) {
+    sql(`GRANT ${grant} TO s1f3_other;`);
+    failedClosed = false;
+    try { apply(migration); } catch (error) { failedClosed = /S1-FIX-3: a client privilege survived/.test(String(error.stderr)); }
+    assert.ok(failedClosed, `migration must fail closed on inherited column grant ${grant}`);
+    assert.deepEqual(snapshot().tables.diagnostic_results.acl, repaired.tables.diagnostic_results.acl);
+    sql(`REVOKE ${grant} FROM s1f3_other;`);
+  }
+  apply(migration);
+  assert.deepEqual(snapshot(), repaired);
+  console.log('PASS 0146 fails closed on inherited column REFERENCES and closed-table column SELECT/INSERT/UPDATE');
 } catch (error) {
   // Only synthetic assertion information; never print connection strings or JWTs.
   console.error('FAIL S1-FIX-3 diagnostic:', error.code ?? error.name, error.operator ?? '');
