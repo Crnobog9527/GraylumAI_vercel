@@ -31,6 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import AdminErrorState from '@/components/admin/AdminErrorState';
+import { CostStatCard } from '@/components/admin/CostStatCard';
 import { formatReportUsd } from '@/lib/currency';
 import {
   LineChart,
@@ -162,47 +163,6 @@ function QueryStatusBadge({
   );
 }
 
-function StatCard({
-  title,
-  value,
-  subValue,
-  icon: Icon,
-  trend,
-}: {
-  title: string;
-  value: string;
-  subValue?: string;
-  icon: React.ElementType;
-  trend?: 'up' | 'down' | 'neutral';
-}) {
-  return (
-    <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-      <CardContent className="p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{title}</p>
-            <p className="text-2xl font-bold mt-1" style={{ color: 'var(--text-primary)' }}>{value}</p>
-            {subValue && (
-              <p className="text-xs mt-1" style={{ color: 'var(--text-disabled)' }}>{subValue}</p>
-            )}
-          </div>
-          <div className={`p-3 rounded-xl ${
-            trend === 'up' ? 'bg-emerald-500/20' :
-            trend === 'down' ? 'bg-red-500/20' :
-            'bg-[var(--color-primary-20)]'
-          }`}>
-            <Icon className={`h-6 w-6 ${
-              trend === 'up' ? 'text-emerald-400' :
-              trend === 'down' ? 'text-red-400' :
-              'text-[var(--color-primary)]'
-            }`} />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 function CostOverviewTab({ metric }: { metric: CostMetric }) {
   const [days, setDays] = useState<number>(7);
 
@@ -241,10 +201,11 @@ function CostOverviewTab({ metric }: { metric: CostMetric }) {
         />
       </div>
       {/* 统计卡片 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+        <CostStatCard
           title={`今日${metric === 'usd' ? '成本' : '消耗'}`}
           value={formatMetricValue(metric, overview?.todayCost ?? 0)}
+          usdAmount={metric === 'usd' ? overview?.todayCost : undefined}
           subValue={
             metric === 'usd'
               ? `${overview?.todayCalls ?? 0} 次调用 · ${formatCredits(overview?.todayCredits ?? 0)} 积分`
@@ -252,9 +213,10 @@ function CostOverviewTab({ metric }: { metric: CostMetric }) {
           }
           icon={DollarSign}
         />
-        <StatCard
+        <CostStatCard
           title={`本月${metric === 'usd' ? '累计成本' : '累计消耗'}`}
           value={formatMetricValue(metric, overview?.monthCost ?? 0)}
+          usdAmount={metric === 'usd' ? overview?.monthCost : undefined}
           subValue={
             metric === 'usd'
               ? `${overview?.monthCalls ?? 0} 次调用 · ${formatCredits(overview?.monthCredits ?? 0)} 积分`
@@ -262,12 +224,13 @@ function CostOverviewTab({ metric }: { metric: CostMetric }) {
           }
           icon={TrendingUp}
         />
-        <StatCard
+        <CostStatCard
           title={metric === 'usd' ? '平均成本/次' : '平均积分/次'}
           value={formatMetricValue(metric, overview?.avgCostPerCall ?? 0)}
+          usdAmount={metric === 'usd' ? overview?.avgCostPerCall : undefined}
           icon={Activity}
         />
-        <StatCard
+        <CostStatCard
           title="缓存命中率"
           value={cacheEfficiency?.hitRate === null ? '未知' : `${cacheEfficiency?.hitRate ?? 0}%`}
           subValue={`估算节省 ${cacheSavingsText}`}
@@ -353,7 +316,7 @@ function CostOverviewTab({ metric }: { metric: CostMetric }) {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
               <PieChart className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
-              模型${metric === 'usd' ? '成本' : '积分'}分布
+              模型{metric === 'usd' ? '成本' : '积分'}分布
             </CardTitle>
           </CardHeader>
           <CardContent>

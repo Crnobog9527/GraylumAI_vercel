@@ -41,3 +41,19 @@ export function buildPerformanceCostStats(
     estimatedMonthly: picoToUsd(divRoundPico(totalPico * 30n, BigInt(days))),
   };
 }
+
+interface CacheTokenRow {
+  input_tokens: number | null;
+  cached_tokens: number | null;
+}
+
+/**
+ * Share of input tokens served from cache, in percent. Returns null (unknown) when any row
+ * did not record cache usage or input usage, since either gap leaves the ratio undetermined.
+ */
+export function calculateTokenCacheHitRate(rows: CacheTokenRow[]): number | null {
+  if (rows.some((row) => row.cached_tokens === null || row.input_tokens === null)) return null;
+  const cachedTokens = rows.reduce((sum, row) => sum + (row.cached_tokens ?? 0), 0);
+  const totalInputTokens = rows.reduce((sum, row) => sum + (row.input_tokens ?? 0), 0) + cachedTokens;
+  return totalInputTokens > 0 ? parseFloat(((cachedTokens / totalInputTokens) * 100).toFixed(1)) : 0;
+}

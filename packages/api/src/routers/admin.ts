@@ -6,7 +6,11 @@ import { TRPCError } from '@trpc/server';
 import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
 import { readAllReportRows } from '../services/reportRows';
-import { buildPerformanceCostStats, estimateCacheSavings } from '../services/performanceCostReport';
+import {
+  buildPerformanceCostStats,
+  calculateTokenCacheHitRate,
+  estimateCacheSavings,
+} from '../services/performanceCostReport';
 import { buildFinanceUsdOverview } from '../services/financeReport';
 import { picoToUsd, usdToPico } from '../services/reportUsd';
 import { BILLING_CONSTANTS } from '../types/billing';
@@ -3083,11 +3087,6 @@ export const adminRouter = router({
         ? latencies[p95Index] ?? latencies[latencies.length - 1]
         : 0;
 
-      const totalInputWithoutCache = inputTokens + cacheReadTokens;
-      const cacheHitRate = totalInputWithoutCache > 0
-        ? (cacheReadTokens / totalInputWithoutCache) * 100
-        : 0;
-
       let healthStatus: 'healthy' | 'warning' | 'critical' = 'healthy';
       if (errorRate > 2 || avgResponseTime > 2000) healthStatus = 'critical';
       else if (errorRate > 1 || avgResponseTime > 1500) healthStatus = 'warning';
@@ -3098,7 +3097,7 @@ export const adminRouter = router({
         avgResponseTime: Math.round(avgResponseTime),
         p95ResponseTime: Math.round(p95ResponseTime),
         errorRate: parseFloat(errorRate.toFixed(2)),
-        cacheHitRate: parseFloat(cacheHitRate.toFixed(1)),
+        cacheHitRate: calculateTokenCacheHitRate(tokenStatsInRange),
         healthStatus,
       };
 
