@@ -606,6 +606,7 @@ describe('adminRouter performance stats aggregation', () => {
       avgResponseTime: 200,
       p95ResponseTime: 300,
       errorRate: 33.33,
+      cacheHitRate: 7.7,
       healthStatus: 'critical',
     });
     expect(result.modelUsage).toEqual(

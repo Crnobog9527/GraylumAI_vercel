@@ -21,7 +21,8 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AdminErrorState from '@/components/admin/AdminErrorState';
-import { formatReportUsd, formatUsdFromCents } from '@/lib/currency';
+import { formatUsdFromCents } from '@/lib/currency';
+import { ReportUsdValue } from '@/components/admin/ReportUsdValue';
 
 function formatCreditsRange(range: { min: number; max: number } | null, suffix: string) {
   if (!range) {
@@ -72,6 +73,7 @@ export default function AdminFinancePage() {
 
   // Paid USD revenue minus recorded provider cost, computed exactly on the server.
   const { estimatedProfitUsd } = financeOverview;
+  const profitTone = estimatedProfitUsd >= 0 ? 'text-emerald-400' : 'text-rose-400';
   return (
     <div className="space-y-6 p-4 md:p-8" data-testid="admin-finance-page">
       {/* Page Header */}
@@ -133,14 +135,14 @@ export default function AdminFinancePage() {
         {/* Overview Tab */}
         <TabsContent value="overview" className="space-y-6">
           {/* Finance Overview Cards */}
-          <div data-testid="admin-finance-api-summary" className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <div data-testid="admin-finance-api-summary" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
             <Card data-testid="admin-finance-overview-revenue" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center gap-4">
-                  <div className="p-3 rounded-xl bg-emerald-500/20">
+                  <div className="shrink-0 p-3 rounded-xl bg-emerald-500/20">
                     <PiggyBank className="h-6 w-6 text-emerald-400" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>已支付收入 (USD)</p>
                     <p className="text-2xl font-bold text-emerald-400">
                       {formatUsdFromCents(financeOverview.paidRevenueCents)}
@@ -153,10 +155,10 @@ export default function AdminFinancePage() {
             <Card data-testid="admin-finance-overview-consumed" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center gap-4">
-                  <div className="p-3 rounded-xl bg-rose-500/20">
+                  <div className="shrink-0 p-3 rounded-xl bg-rose-500/20">
                     <TrendingDown className="h-6 w-6 text-rose-400" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>积分消耗</p>
                     <p className="text-2xl font-bold text-rose-400">
                       {financeOverview.creditsConsumed.toLocaleString()}
@@ -169,10 +171,10 @@ export default function AdminFinancePage() {
             <Card data-testid="admin-finance-overview-purchased" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center gap-4">
-                  <div className="p-3 rounded-xl bg-blue-500/20">
+                  <div className="shrink-0 p-3 rounded-xl bg-blue-500/20">
                     <ShoppingCart className="h-6 w-6 text-blue-400" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>积分购买</p>
                     <p className="text-2xl font-bold text-blue-400">
                       {financeOverview.creditsPurchased.toLocaleString()}
@@ -185,14 +187,12 @@ export default function AdminFinancePage() {
             <Card data-testid="admin-finance-overview-profit" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center gap-4">
-                  <div className={`p-3 rounded-xl ${estimatedProfitUsd >= 0 ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`}>
-                    <DollarSign className={`h-6 w-6 ${estimatedProfitUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`} />
+                  <div className={`shrink-0 p-3 rounded-xl ${estimatedProfitUsd >= 0 ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`}>
+                    <DollarSign className={`h-6 w-6 ${profitTone}`} />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>预估毛利 (USD)</p>
-                    <p className={`text-2xl font-bold ${estimatedProfitUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {formatReportUsd(estimatedProfitUsd)}
-                    </p>
+                    <ReportUsdValue amount={estimatedProfitUsd} className={profitTone} />
                   </div>
                 </div>
               </CardContent>

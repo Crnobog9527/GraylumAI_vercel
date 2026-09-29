@@ -34,6 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import AdminErrorState from '@/components/admin/AdminErrorState';
+import { ReportUsdValue } from '@/components/admin/ReportUsdValue';
 import { formatReportUsd } from '@/lib/currency';
 
 type TimeRange = '7d' | '14d' | '30d';
@@ -88,6 +89,7 @@ export default function AdminPerformancePage() {
   };
 
   const healthInfo = healthConfig[aiPerformance.healthStatus];
+  const cacheHitRateText = aiPerformance.cacheHitRate === null ? '未知' : `${aiPerformance.cacheHitRate}%`;
   const HealthIcon = healthInfo.icon;
 
   return (
@@ -213,12 +215,14 @@ export default function AdminPerformancePage() {
                   <div>
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>缓存命中率</p>
                     <p className="text-2xl font-bold mt-1" style={{ color: 'var(--text-primary)' }}>
-                      {aiPerformance.cacheHitRate}%
+                      {cacheHitRateText}
                     </p>
-                    <div className="flex items-center gap-1 mt-1">
-                      <ArrowUpRight className="h-3 w-3 text-emerald-400" />
-                      <span className="text-xs text-emerald-400">节省成本</span>
-                    </div>
+                    {(aiPerformance.cacheHitRate ?? 0) > 0 && (
+                      <div className="flex items-center gap-1 mt-1">
+                        <ArrowUpRight className="h-3 w-3 text-emerald-400" />
+                        <span className="text-xs text-emerald-400">节省成本</span>
+                      </div>
+                    )}
                   </div>
                   <div className="p-3 rounded-xl bg-emerald-500/20">
                     <HardDrive className="h-6 w-6 text-emerald-400" />
@@ -533,20 +537,18 @@ export default function AdminPerformancePage() {
 
         {/* Cost Stats Tab */}
         <TabsContent value="costs" className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>已记录总成本</p>
-                    <p className="text-2xl font-bold mt-1" style={{ color: 'var(--text-primary)' }}>
-                      {formatCost(costStats.totalCost)}
-                    </p>
+                    <ReportUsdValue amount={costStats.totalCost} className="mt-1" style={{ color: 'var(--text-primary)' }} />
                     <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
                       {timeRange === '7d' ? '近7天' : timeRange === '14d' ? '近14天' : '近30天'}
                     </p>
                   </div>
-                  <div className="p-3 rounded-xl bg-[var(--color-primary-20)]">
+                  <div className="shrink-0 p-3 rounded-xl bg-[var(--color-primary-20)]">
                     <DollarSign className="h-6 w-6 text-[var(--color-primary)]" />
                   </div>
                 </div>
@@ -555,14 +557,12 @@ export default function AdminPerformancePage() {
 
             <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>已记录成本/次</p>
-                    <p className="text-2xl font-bold mt-1" style={{ color: 'var(--text-primary)' }}>
-                      {formatCost(costStats.avgCostPerRequest)}
-                    </p>
+                    <ReportUsdValue amount={costStats.avgCostPerRequest} className="mt-1" style={{ color: 'var(--text-primary)' }} />
                   </div>
-                  <div className="p-3 rounded-xl bg-blue-500/20">
+                  <div className="shrink-0 p-3 rounded-xl bg-blue-500/20">
                     <Coins className="h-6 w-6 text-blue-400" />
                   </div>
                 </div>
@@ -571,14 +571,16 @@ export default function AdminPerformancePage() {
 
             <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>估算缓存节省</p>
-                    <p className="text-2xl font-bold mt-1 text-emerald-400">
-                      {costStats.cacheSavings === null ? '无法估算' : `-${formatCost(costStats.cacheSavings)}`}
-                    </p>
+                    {costStats.cacheSavings === null ? (
+                      <p className="text-2xl font-bold mt-1 text-emerald-400">无法估算</p>
+                    ) : (
+                      <ReportUsdValue amount={-costStats.cacheSavings} className="mt-1 text-emerald-400" />
+                    )}
                   </div>
-                  <div className="p-3 rounded-xl bg-emerald-500/20">
+                  <div className="shrink-0 p-3 rounded-xl bg-emerald-500/20">
                     <TrendingUp className="h-6 w-6 text-emerald-400" />
                   </div>
                 </div>
@@ -587,14 +589,12 @@ export default function AdminPerformancePage() {
 
             <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>预估月成本</p>
-                    <p className="text-2xl font-bold mt-1" style={{ color: 'var(--text-primary)' }}>
-                      {formatCost(costStats.estimatedMonthly)}
-                    </p>
+                    <ReportUsdValue amount={costStats.estimatedMonthly} className="mt-1" style={{ color: 'var(--text-primary)' }} />
                   </div>
-                  <div className="p-3 rounded-xl bg-purple-500/20">
+                  <div className="shrink-0 p-3 rounded-xl bg-purple-500/20">
                     <Calendar className="h-6 w-6 text-purple-400" />
                   </div>
                 </div>
@@ -644,7 +644,7 @@ export default function AdminPerformancePage() {
                     </div>
                     <div>
                       <p className="font-medium text-emerald-400">估算缓存节省</p>
-                      <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>命中率 {aiPerformance.cacheHitRate}%</p>
+                      <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>命中率 {cacheHitRateText}</p>
                     </div>
                   </div>
                   <span className="font-mono text-lg text-emerald-400">
