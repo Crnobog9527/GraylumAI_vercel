@@ -503,7 +503,7 @@ test.describe('Admin Config Flows', () => {
       await expect(chatWelcomeInput).toHaveValue(updatedChatWelcome, { timeout: 15000 });
       await expect(chatBillingHintInput).toHaveValue(updatedBillingHint, { timeout: 15000 });
 
-      steps.push('Verify chat and home surfaces consume the updated page-experience settings');
+      steps.push('Verify the chat surface consumes the updated page-experience settings');
       await gotoWithBypass(page, '/chat');
       await expect(page.getByText(updatedChatWelcome)).toBeVisible({ timeout: 15000 });
       await expect(page.locator(`textarea[placeholder="${updatedChatPrompt}"]`)).toBeVisible({ timeout: 10000 });
@@ -514,17 +514,8 @@ test.describe('Admin Config Flows', () => {
         await expect(page.getByTestId('chat-model-selector-trigger')).toBeVisible({ timeout: 10000 });
       }
 
-      await gotoWithBypass(page, '/');
-      if (originalOnboardingState) {
-        await expect(page.getByTestId('home-onboarding-guide')).toHaveCount(0);
-      } else {
-        await expect(page.getByTestId('home-onboarding-guide')).toBeVisible({ timeout: 10000 });
-      }
-      if (originalFeaturedState) {
-        await expect(page.getByTestId('featured-modules-section')).toHaveCount(0);
-      } else {
-        await expect(page.getByTestId('featured-modules-section')).toBeVisible({ timeout: 10000 });
-      }
+      // The new home page (/) no longer renders the onboarding guide or featured modules; these
+      // toggles now only affect /landing, so the stale home-page assertions were removed.
 
       steps.push('Open /admin/announcements and verify CRUD remains isolated to announcement management');
       await gotoWithBypass(page, '/admin/announcements');
@@ -1233,10 +1224,9 @@ test.describe('Admin Config Flows', () => {
       }).not.toBe(originalStatus);
 
       steps.push('Soft-disable the temporary function module');
+      // Soft-disable is the status toggle; the row's delete button is now a hard delete behind an in-app dialog.
       if (!((await editedRow.getByText(/展示中|已下架/).first().textContent()) ?? '').includes('已下架')) {
-        const deletePromptDialogPromise = acceptNextDialog(page);
-        await editedRow.getByRole('button').nth(1).click();
-        await deletePromptDialogPromise;
+        await editedRow.getByText('展示中').first().click();
       }
       await expect(editedRow).toBeVisible({ timeout: 15000 });
       await expect(editedRow.getByText('已下架')).toBeVisible({ timeout: 15000 });

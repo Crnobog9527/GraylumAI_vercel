@@ -31,12 +31,50 @@ function toIsoOrUndefined(
   return new Date(formValue).toISOString();
 }
 
+function endDateForPayload(
+  formValue: string,
+  originalIso: string | null | undefined,
+): string | null | undefined {
+  // null clears a stored end date on update; create never has an original, so it stays undefined.
+  if (!formValue) return originalIso ? null : undefined;
+  return toIsoOrUndefined(formValue, originalIso);
+}
+
 export function buildAnnouncementSchedulePayload(
   form: AnnouncementScheduleForm,
-  original?: AnnouncementScheduleOriginal | null,
-): { startDate?: string; endDate?: string } {
+): { startDate?: string; endDate?: string };
+export function buildAnnouncementSchedulePayload(
+  form: AnnouncementScheduleForm,
+  original: AnnouncementScheduleOriginal,
+): { startDate?: string; endDate?: string | null };
+export function buildAnnouncementSchedulePayload(
+  form: AnnouncementScheduleForm,
+  original?: AnnouncementScheduleOriginal,
+): { startDate?: string; endDate?: string | null } {
   return {
     startDate: toIsoOrUndefined(form.startDate, original?.start_date),
-    endDate: toIsoOrUndefined(form.endDate, original?.end_date),
+    endDate: endDateForPayload(form.endDate, original?.end_date),
   };
+}
+
+export const START_DATE_REQUIRED = '开始时间必填';
+
+type Schedule = { startDate?: string; endDate?: string };
+type UpdateSchedule = { startDate?: string; endDate?: string | null };
+
+// Validates the schedule before any request; returns the message to show, or null once sent.
+export function submitAnnouncementSchedule<Base>({ form, editing, base, create, update }: {
+  form: AnnouncementScheduleForm;
+  editing: (AnnouncementScheduleOriginal & { id: string }) | null;
+  base: Base;
+  create: (input: Base & Schedule) => void;
+  update: (input: Base & UpdateSchedule & { id: string }) => void;
+}): string | null {
+  if (!form.startDate) return START_DATE_REQUIRED;
+  if (editing) {
+    update({ ...base, id: editing.id, ...buildAnnouncementSchedulePayload(form, editing) });
+  } else {
+    create({ ...base, ...buildAnnouncementSchedulePayload(form) });
+  }
+  return null;
 }

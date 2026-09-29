@@ -26,6 +26,7 @@ import {
 import { logClientDevError } from '@/lib/client-log';
 import { createClient } from '@/lib/supabase';
 import { buildAppHref, resolveSiteName } from '@/lib/site-config';
+import { profileTabHref } from '@/lib/profile-tabs';
 import { useCreditsBalance, CREDIT_THRESHOLDS } from '@/hooks/use-credits';
 import { trpc } from '@/trpc/client';
 import { AlertTriangle } from 'lucide-react';
@@ -262,7 +263,7 @@ export function AppHeader() {
                   </DropdownMenuItem>
                 </Link>
               )}
-              <Link href="/profile?tab=settings">
+              <Link href={profileTabHref('security')}>
                 <DropdownMenuItem
                   className="gap-2 rounded-lg cursor-pointer"
                   style={{ color: 'var(--text-secondary)' }}
