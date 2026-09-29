@@ -2,6 +2,7 @@
 // Real local Auth + Next HTTP + PostgREST + disposable SQL, with a credential-free source copy.
 import { legacyRuntime, instrumentLegacy, copyLegacyTests, patchLegacyFinanceReader } from './legacy-runtime.mjs';
 import { installWorkbenchBilling } from "./billing-fixture.mjs";
+import { installAdminSurfacesPreview } from "./admin-surfaces-fixture.mjs";
 import { GOTRUE_IMAGE, POSTGRES_IMAGE, POSTGREST_IMAGE } from "./images.mjs";
 import { verifyWithoutAppResults, withoutAppPattern, WITHOUT_APP_SUITES } from "./without-app.mjs";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -953,6 +954,8 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
       if(![actor,sample.sourceModule,sample.sourceSkill].every(value=>/^[a-f0-9-]{36}$/.test(value)))throw new Error('invalid reuse preview identity');
       sql(`INSERT INTO artifact_accounts VALUES('${actor}','${sample.sourceModule}','${sample.sourceSkill}','synthetic:local-account') ON CONFLICT DO NOTHING;`);
     }
+    // Admin surfaces absent from the disposable schema, added after all assertions.
+    if(args.includes('--admin-only'))installAdminSurfacesPreview(sql, root);
     const saved=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'restore.json'),'utf8'));
     const demoIds=saved.fixtures.map(f=>f.moduleId);
     if(![saved.actor,...demoIds].every(value=>/^[a-f0-9-]{36}$/.test(value)))throw new Error('invalid local acceptance identity');
