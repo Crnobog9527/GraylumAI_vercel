@@ -107,7 +107,8 @@ class CIWorkflowsTest < Minitest::Test
     assert_equal 1, runs.count('node scripts/check-code-size.mjs')
     lint_runs = @ci['jobs']['lint-and-type']['steps'].map { |step| step['run'] }
     assert_includes lint_runs, 'node scripts/check-code-size.mjs'
-    ['pnpm --filter web lint', 'pnpm --filter @repo/api lint', 'pnpm --filter @repo/api typecheck'].each do |command|
+    ['pnpm --filter web lint', 'pnpm --filter @repo/api lint', 'pnpm --filter @repo/api typecheck',
+     'node scripts/check-api-type-baseline.mjs'].each do |command|
       assert_equal 1, runs.count(command), command
       assert_includes lint_runs, command
     end

@@ -57,6 +57,9 @@ jobs:
       - name: Run API TypeScript check
         run: pnpm --filter @repo/api typecheck
 
+      - name: Check API type-check exclusion baseline
+        run: node scripts/check-api-type-baseline.mjs
+
   test:
     name: Run unit and regression tests
     runs-on: ubuntu-latest
