@@ -14,7 +14,7 @@
   "apps/web/src/app/admin/skills/skills.browser.mjs": {"longLines":1},
   "apps/web/src/app/admin/tickets/page.tsx": {"lines":728,"longLines":5},
   "apps/web/src/app/admin/transactions/page.tsx": {"lines":705,"longLines":1},
-  "apps/web/src/app/admin/users/page.tsx": {"lines":855,"longLines":2},
+  "apps/web/src/app/admin/users/page.tsx": {"lines":853,"longLines":2},
   "apps/web/src/app/api/ai/stream/route.ts": {"lines":1278,"longLines":10},
   "apps/web/src/app/chat/agent-slice-artifact.tsx": {"longLines":18},
   "apps/web/src/app/chat/agent-slice-conversation.tsx": {"longLines":24},
@@ -159,7 +159,7 @@
   "packages/api/src/services/skills/modulePublication.ts": {"longLines":2},
   "packages/api/src/services/stripeFulfillment.ts": {"lines":3128},
   "packages/api/src/services/subscriptionCreditGrants.ts": {"lines":3631,"longLines":6},
-  "packages/api/src/trpc.ts": {"lines":515},
+  "packages/api/src/trpc.ts": {"lines":514},
   "packages/db/schema.ts": {"lines":594},
   "scripts/check-staging-db-readiness.mjs": {"lines":789},
   "scripts/check-stripe-readiness.mjs": {"lines":678}
