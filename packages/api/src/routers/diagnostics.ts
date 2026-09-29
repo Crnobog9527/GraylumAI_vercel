@@ -10,6 +10,7 @@ import { getConfiguredProviderApiKeySource } from '../services/providerUtils';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { DiagnosticsService, type DiagnosticCategory } from '../services/diagnostics';
+import { deleteOldDiagnosticResults } from '../services/diagnosticsResults';
 import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
 
@@ -410,17 +411,16 @@ export const diagnosticsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const daysToKeep = input?.daysToKeep ?? 30;
 
-      const { data, error } = await ctx.supabaseAdmin.rpc('cleanup_old_diagnostic_results', {
-        p_days_to_keep: daysToKeep,
-      });
-
-      if (error) {
+      let deletedCount: number;
+      try {
+        deletedCount = await deleteOldDiagnosticResults(ctx.supabaseAdmin, daysToKeep);
+      } catch (error) {
         throw createSafeInternalError(error, DIAGNOSTICS_CLEANUP_FAILURE_MESSAGE);
       }
 
       return {
         success: true,
-        deletedCount: data ?? 0,
+        deletedCount,
         message: `已清理 ${daysToKeep} 天前的诊断记录`,
       };
     }),

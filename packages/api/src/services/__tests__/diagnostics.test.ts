@@ -65,18 +65,31 @@ describe('diagnostics helpers', () => {
   });
 });
 
+// Chainable, awaitable PostgREST stand-in that records the table and returns fixed rows.
+function createResultsBuilder(rows: unknown[] = [], count = 0) {
+  const result = { data: rows, error: null, count };
+  const builder: Record<string, unknown> = {};
+  for (const method of ['select', 'eq', 'gte', 'lt', 'order', 'limit', 'range', 'delete']) {
+    builder[method] = vi.fn(() => builder);
+  }
+  builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve(result).then(resolve);
+  return builder;
+}
+
 describe('diagnostics privileged client separation', () => {
   it('routes privileged RPCs through the service-role client and keeps reads user-scoped', async () => {
     const userRpc = vi.fn(() => {
       throw new Error('privileged RPC dispatched through the user client');
     });
-    const userFrom = vi.fn(() => ({
-      select: vi.fn(() => ({
-        order: vi.fn().mockResolvedValue({ data: [], error: null }),
-        limit: vi.fn().mockResolvedValue({ data: [], error: null }),
-      })),
-      insert: vi.fn().mockResolvedValue({ error: null }),
-    }));
+    const userFrom = vi.fn((table: string) => (table === 'diagnostic_results'
+      ? Object.assign(createResultsBuilder(), { insert: vi.fn().mockResolvedValue({ error: null }) })
+      : {
+        select: vi.fn(() => ({
+          order: vi.fn().mockResolvedValue({ data: [], error: null }),
+          limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+        })),
+        insert: vi.fn().mockResolvedValue({ error: null }),
+      }));
     const adminRpc = vi.fn(async (name: string) => {
       if (name === 'atomic_pre_deduct') {
         return { data: [{ pre_deduct_id: 'pre-deduct-1' }], error: null };
@@ -84,7 +97,7 @@ describe('diagnostics privileged client separation', () => {
 
       return { data: [], error: null };
     });
-    const adminFrom = vi.fn();
+    const adminFrom = vi.fn(() => createResultsBuilder());
 
     const service = new DiagnosticsService({
       supabase: { rpc: userRpc, from: userFrom } as any,
@@ -98,13 +111,15 @@ describe('diagnostics privileged client separation', () => {
     const billingResult = await service.runSingleTest('billing_prededuct');
 
     expect(billingResult?.status).toBe('warning');
-    expect(adminRpc.mock.calls.map(([name]) => name)).toEqual([
-      'get_test_history',
-      'get_diagnostic_summary',
-    ]);
+    // The 0005 view/RPCs are absent on staging: history and summary read diagnostic_results through
+    // the service role (as the RPCs did), latest results stay on the user-scoped admin client.
+    expect(adminRpc.mock.calls.map(([name]) => name)).not.toEqual(expect.arrayContaining([
+      'get_test_history', 'get_diagnostic_summary',
+    ]));
     expect(userRpc).not.toHaveBeenCalled();
-    expect(userFrom).toHaveBeenCalledWith('diagnostic_latest_results');
-    expect(adminFrom).not.toHaveBeenCalled();
+    expect(userFrom).toHaveBeenCalledWith('diagnostic_results');
+    expect(userFrom).not.toHaveBeenCalledWith('diagnostic_latest_results');
+    expect(new Set(adminFrom.mock.calls.map(([table]) => table))).toEqual(new Set(['diagnostic_results']));
   });
 });
 
@@ -131,18 +146,6 @@ function createProfileQueryBuilder() {
   return builder;
 }
 
-function createLatestResultsQueryBuilder() {
-  const builder = {
-    select: vi.fn(),
-    order: vi.fn(),
-  };
-
-  builder.select.mockReturnValue(builder);
-  builder.order.mockResolvedValue({ data: [], error: null });
-
-  return builder;
-}
-
 function createRoutedDiagnosticsCaller() {
   const diagnosticInsert = vi.fn().mockResolvedValue({ error: null });
   const userFrom = vi.fn((table: string) => {
@@ -150,16 +153,12 @@ function createRoutedDiagnosticsCaller() {
       return createProfileQueryBuilder();
     }
 
-    if (table === 'diagnostic_latest_results') {
-      return createLatestResultsQueryBuilder();
-    }
-
     if (table === 'billing_history') {
       return { select: () => ({ limit: async () => ({ data: [], error: null }) }) };
     }
 
     if (table === 'diagnostic_results') {
-      return { insert: diagnosticInsert };
+      return Object.assign(createResultsBuilder(), { insert: diagnosticInsert });
     }
 
     throw new Error(`Unexpected user-scoped table ${table}`);
@@ -235,7 +234,7 @@ describe('diagnostics routed client contract', () => {
     });
 
     expect(userFrom).toHaveBeenCalledWith('profiles');
-    expect(userFrom).toHaveBeenCalledWith('diagnostic_latest_results');
+    expect(userFrom).not.toHaveBeenCalledWith('diagnostic_latest_results');
     expect(userFrom).toHaveBeenCalledWith('diagnostic_results');
     expect(userRpc).not.toHaveBeenCalled();
     expect(adminFrom).not.toHaveBeenCalled();
