@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   buildAnnouncementSchedulePayload,
   toDateTimeLocalValue,
+  type AnnouncementScheduleForm,
   type AnnouncementScheduleOriginal,
 } from './announcementSchedule';
 
@@ -13,16 +14,20 @@ function restoreTimeZone() {
   else process.env.TZ = originalTz;
 }
 
-function reopenAndSave(stored: AnnouncementScheduleOriginal): AnnouncementScheduleOriginal {
+function reopenAndSave(
+  stored: AnnouncementScheduleOriginal,
+  edits: Partial<AnnouncementScheduleForm> = {},
+): AnnouncementScheduleOriginal {
   const form = {
     startDate: toDateTimeLocalValue(stored.start_date),
     endDate: toDateTimeLocalValue(stored.end_date),
+    ...edits,
   };
   const payload = buildAnnouncementSchedulePayload(form, stored);
-  // Mirrors the update route: undefined keeps the stored value.
+  // Mirrors the update route: undefined keeps the stored value, null clears it.
   return {
     start_date: payload.startDate ?? stored.start_date,
-    end_date: payload.endDate ?? stored.end_date,
+    end_date: payload.endDate === undefined ? stored.end_date : payload.endDate,
   };
 }
 
@@ -98,5 +103,59 @@ describe('announcement schedule in a non-UTC zone', () => {
     expect(toDateTimeLocalValue(null)).toBe('');
     expect(toDateTimeLocalValue(undefined)).toBe('');
     expect(toDateTimeLocalValue('not a date')).toBe('');
+  });
+});
+
+describe('announcement end date clearing', () => {
+  beforeEach(() => {
+    process.env.TZ = 'Asia/Shanghai';
+  });
+
+  afterEach(() => {
+    restoreTimeZone();
+  });
+
+  const stored: AnnouncementScheduleOriginal = {
+    start_date: '2026-09-29T02:00:00+00:00',
+    end_date: '2026-10-05T15:45:00+00:00',
+  };
+
+  it('sends null when an existing end date is cleared', () => {
+    const payload = buildAnnouncementSchedulePayload(
+      { startDate: toDateTimeLocalValue(stored.start_date), endDate: '' },
+      stored,
+    );
+
+    expect(payload).toEqual({ startDate: stored.start_date, endDate: null });
+  });
+
+  it('omits the end date when it was already empty', () => {
+    const payload = buildAnnouncementSchedulePayload(
+      { startDate: toDateTimeLocalValue(stored.start_date), endDate: '' },
+      { ...stored, end_date: null },
+    );
+
+    expect(payload.endDate).toBeUndefined();
+  });
+
+  it('keeps an untouched end date instant', () => {
+    const payload = buildAnnouncementSchedulePayload(
+      { startDate: toDateTimeLocalValue(stored.start_date), endDate: toDateTimeLocalValue(stored.end_date) },
+      stored,
+    );
+
+    expect(payload.endDate).toBe(stored.end_date);
+  });
+
+  it('omits an empty end date when creating', () => {
+    expect(buildAnnouncementSchedulePayload({ startDate: '2026-10-01T09:30', endDate: '' }).endDate)
+      .toBeUndefined();
+  });
+
+  it('stays cleared after reopening and saving again', () => {
+    const cleared = reopenAndSave(stored, { endDate: '' });
+
+    expect(cleared.end_date).toBeNull();
+    expect(reopenAndSave(cleared)).toEqual(cleared);
   });
 });

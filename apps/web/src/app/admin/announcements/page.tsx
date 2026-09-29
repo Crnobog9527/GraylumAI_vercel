@@ -206,16 +206,16 @@ export default function AdminAnnouncementsPage() {
       tag: formData.tag || undefined,
       tagColor: formData.tag ? formData.tagColor : undefined,
       priority,
-      ...buildAnnouncementSchedulePayload(formData, editingAnnouncement),
     };
 
     if (editingAnnouncement) {
       updateAnnouncement.mutate({
         id: editingAnnouncement.id,
         ...payload,
+        ...buildAnnouncementSchedulePayload(formData, editingAnnouncement),
       });
     } else {
-      createAnnouncement.mutate(payload);
+      createAnnouncement.mutate({ ...payload, ...buildAnnouncementSchedulePayload(formData) });
     }
   };
 
