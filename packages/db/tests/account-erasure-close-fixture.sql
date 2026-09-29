@@ -88,3 +88,10 @@ CREATE POLICY fixture_column_notes_own ON fixture_column_notes FOR SELECT TO aut
 
 -- Test seeding only (the integration test has no SQL access).
 GRANT SELECT, INSERT, UPDATE ON user_subscriptions, payment_orders, fixture_notes TO service_role;
+
+-- Worst-case Supabase-style defaults: tables/functions the migration creates would be granted to every client role.
+-- The migration must still end with only the explicit grants it writes.
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+  GRANT ALL ON TABLES TO PUBLIC, anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+  GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;

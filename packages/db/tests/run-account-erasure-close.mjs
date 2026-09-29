@@ -77,6 +77,11 @@ try {
   }
   assert.match(acl('current_account_is_closed')[1], /authenticated=X/);
   assert.doesNotMatch(acl('current_account_is_closed')[1], /(^|[{,])(anon)?=X/);
+  const tableAcl = sql(`SELECT array_to_string(relacl, ',') FROM pg_class
+    WHERE oid = 'public.account_erasure_requests'::regclass;`).split(',').filter(x => !x.startsWith('postgres='));
+  assert.deepEqual(tableAcl.map(x => x.split('/')[0]), ['service_role=r'], 'progress table: service_role SELECT only');
+  assert.equal(sql(`SELECT count(*) FROM pg_attribute WHERE attrelid = 'public.account_erasure_requests'::regclass
+    AND attacl IS NOT NULL;`), '0', 'no column ACLs');
   console.log('PASS migration: idempotent; restrictive RLS coverage; function ACLs');
 
   docker('run', '-d', '--pull=never', '--name', rest, '--network', tag, '-p', '127.0.0.1::3000',
