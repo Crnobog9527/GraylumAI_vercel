@@ -129,12 +129,16 @@ const report = { image: POSTGRES_IMAGE, steps: steps.length, passed: 0, bridges:
 try {
   ok(docker(['run', '-d', '--pull=never', '--name', name, '-e', 'POSTGRES_DB=dbb',
     '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', POSTGRES_IMAGE]), 'Local container start');
+  // The image's init step first runs a temporary socket-only server, then restarts. Probe over TCP
+  // (like run-workbench.mjs) so only the final server counts, then require one real query.
   let ready = false;
-  for (let i = 0; i < 150 && !ready; i++) {
-    ready = docker(['exec', name, 'pg_isready', '-U', 'postgres', '-d', 'dbb']).status === 0;
+  for (let i = 0; i < 300 && !ready; i++) {
+    ready = docker(['exec', name, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres', '-d', 'dbb']).status === 0
+      && docker(['exec', name, 'psql', '-X', '-h', '127.0.0.1', '-U', 'postgres', '-d', 'dbb', '-tAc', 'SELECT 1'])
+        .stdout?.trim() === '1';
     if (!ready) await new Promise(done => setTimeout(done, 200));
   }
-  if (!ready) throw new Error('Local container readiness timeout');
+  if (!ready) throw new Error('Local container readiness timeout (60 s)');
   // pg_cron stand-in (0010 runs CREATE EXTENSION pg_cron; the plain image has no such extension).
   const shareDir = ok(docker(['exec', name, 'pg_config', '--sharedir']), 'Share dir');
   ok(docker(['exec', '-i', '-u', 'root', name, 'sh', '-c', `cat > ${shareDir}/extension/pg_cron.control`],
