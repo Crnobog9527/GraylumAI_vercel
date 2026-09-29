@@ -419,7 +419,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | UI-C | 输入框附件 = 上传进资料库再引用（不另建一套上传，只支持 D6 的文档类型） | UI-A、LIB-DOCS、RUNTIME-PROD | 高 | 中 / 2 |
 | | UI-FINISH | 导航、响应式、旧链接迁移、界面全验收（沿用 v11） | UI-B、UI-C | 普通 | 中 / 2–3 |
 | **4 收费和上线** | PAY-COMMON → PAY-WAFFO | 沿用 v11 §9 和第 11 节定义；按 D17，PAY-COMMON 提供后台"新购买使用的渠道"设置（Waffo / Stripe，手动切换），订单记录成交渠道，续费、退款和凭证按原渠道处理 | ENTITLEMENTS 之后，同一个 writer | 高 | 大 / 7–10 |
-| | LEGACY-CLOSE | 下线 `/chat`、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等；下线前提供旧对话历史的只读查看入口，旧链接跳转到它；旧对话不迁移、不删除 | AC-4 接管自由对话且入口已改指；UI-MODEL、UI-B、UI-C、UI-FINISH 已交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 |
+| | LEGACY-CLOSE | 关入口已由 #507 提前完成（2026-09-29）：`/chat` 临时跳转 `/positioning`，`/api/ai/stream` 对新请求返回 410，8 处入口改指或禁用；本任务剩余工作是删除旧代码（`/chat` 页面与组件、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等）和功能对照检查记录。按 Owner 2026-09-29 决定不再提供旧对话只读查看入口（staging 和正式环境都没有真实用户，上线前清空数据），旧链接直接跳到 `/positioning`；旧对话不迁移、不删除 | AC-4 接管自由对话；入口改指已由 #507 满足；UI-MODEL、UI-B、UI-C、UI-FINISH 已交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 |
 | | V3-M3 → REL-1 | 完整验收和发布（第 9.3 节；正式环境没有真实用户，按新建环境发布，不做旧数据兼容和迁移） | 以上全部 | 高；生产另行批准 | 大 |
 | **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | 沿用 v11 §8（C1 套餐式自动追踪已确认） | 上线 | 高 | 大 |
 | | LEARN-1、LEARN-2 | 第 6.3 节：读取用户数据、依赖数据使用同意 | 有真实用户 / SOCIAL-SYNC | 高 | 中 |
@@ -544,7 +544,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 2. **快速清理（DEBT-QUICK，普通）**：诊断报告修正、死代码和无引用组件删除、头像上传（复现后修）。只包含普通改动：凡是动到依赖或锁文件、鉴权权限、存储策略、计费、金额展示或 CI 的部分，一律移到对应的高风险任务（成本报表修正单独为 COST-REPORT），不走 staging 自动交付授权。
 3. **CI 可信度（CI-TRUST-1 先行，其余随后，高风险）**：ESLint 覆盖 TS/TSX、网站单测统一入口、API 独立类型检查、集成测试进 CI，以及删除 `@repo/ui` 空壳包和未接入的 `eslint-config-custom`（都改依赖和锁文件）。**在 AGENT-CORE 改 Runtime 之前或同时完成**，让计费和恢复的关键测试先保护起来。
 4. **安全修复（SEC-RATELIMIT，高风险，上线前必须）**：限流 fail-closed、Redis 超时、诊断计费探针。
-5. **随主线处理**：`provider` 语义随 RUNTIME-PROD；定位页随 AGENT-CORE 替换；`/chat` 等旧链路在 AC-4 接管自由对话、入口改指之后由 LEGACY-CLOSE 统一下线；集成测试大文件在 AGENT-CORE 完成后拆分。
+5. **随主线处理**：`provider` 语义随 RUNTIME-PROD；定位页随 AGENT-CORE 替换；`/chat` 的入口和发送接口已由 #507 提前关闭；旧代码在 AC-4 接管自由对话之后由 LEGACY-CLOSE 统一删除；集成测试大文件在 AGENT-CORE 完成后拆分。
 6. **公开上线前必须**：DATA-ERASURE。
 
 原则：不为清理做一轮全站重构；已应用的迁移、原请求 ID、收据、预留和恢复兼容，不能当"旧文件"删除；每一项都要有能证明行为不变的测试。
