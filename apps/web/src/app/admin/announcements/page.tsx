@@ -44,6 +44,7 @@ import {
   getAnnouncementLinkFormValue,
 } from './announcementFormPayload';
 import AnnouncementLinkField from './AnnouncementLinkField';
+import { buildAnnouncementSchedulePayload, toDateTimeLocalValue } from './announcementSchedule';
 
 type AnnouncementType = 'info' | 'warning' | 'success' | 'error' | 'promo' | 'announcement';
 type BannerStyle = 'info' | 'warning' | 'success' | 'error' | 'promo' | 'announcement';
@@ -154,7 +155,7 @@ export default function AdminAnnouncementsPage() {
       tag: '',
       tagColor: 'blue',
       priority: '0',
-      startDate: new Date().toISOString().slice(0, 16),
+      startDate: toDateTimeLocalValue(new Date().toISOString()),
       endDate: '',
     });
     createAnnouncement.reset();
@@ -175,8 +176,8 @@ export default function AdminAnnouncementsPage() {
       tag: announcement.tag || '',
       tagColor: announcement.tag_color || 'blue',
       priority: announcement.priority.toString(),
-      startDate: announcement.start_date ? new Date(announcement.start_date).toISOString().slice(0, 16) : '',
-      endDate: announcement.end_date ? new Date(announcement.end_date).toISOString().slice(0, 16) : '',
+      startDate: toDateTimeLocalValue(announcement.start_date),
+      endDate: toDateTimeLocalValue(announcement.end_date),
     });
     createAnnouncement.reset();
     updateAnnouncement.reset();
@@ -205,8 +206,7 @@ export default function AdminAnnouncementsPage() {
       tag: formData.tag || undefined,
       tagColor: formData.tag ? formData.tagColor : undefined,
       priority,
-      startDate: formData.startDate ? new Date(formData.startDate).toISOString() : undefined,
-      endDate: formData.endDate ? new Date(formData.endDate).toISOString() : undefined,
+      ...buildAnnouncementSchedulePayload(formData, editingAnnouncement),
     };
 
     if (editingAnnouncement) {
