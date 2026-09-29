@@ -5,9 +5,7 @@
  * 检测输入/输出中的敏感内容、Prompt 注入攻击等
  */
 
-// ============================================
 // 常量
-// ============================================
 
 /**
  * 审核严格程度
@@ -35,13 +33,9 @@ export const ViolationType = {
 
 export type ViolationType = typeof ViolationType[keyof typeof ViolationType];
 
-// ============================================
 // 检测规则
-// ============================================
 
-/**
- * Prompt 注入检测模式
- */
+// Prompt 注入检测模式
 const PROMPT_INJECTION_PATTERNS = [
   // 直接指令覆盖
   /忽略[之前所有|以上|上述|前面的?][指令|提示|规则|约束]/i,
@@ -68,9 +62,7 @@ const PROMPT_INJECTION_PATTERNS = [
   /###\s*(System|User|Assistant)\s*:/i,
 ];
 
-/**
- * 有害内容检测模式
- */
+// 有害内容检测模式
 const HARMFUL_CONTENT_PATTERNS = [
   // 暴力相关
   /如何[制作|制造|组装][炸弹|武器|枪支|毒品]/i,
@@ -99,7 +91,7 @@ const PII_PATTERNS = [
   /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/,
 
   // 邮箱 (输出时可能需要脱敏)
-  /[\w.-]{1,254}@[\w.-]{1,254}\.\w{2,63}/i,
+  findEmail,
 
   // API Key 模式
   /\b(sk-|pk-|api[_-]?key|secret[_-]?key)[a-zA-Z0-9]{20,}\b/i,
@@ -108,12 +100,10 @@ const PII_PATTERNS = [
   /eyJ[a-zA-Z0-9_-]{1,8192}\.eyJ[a-zA-Z0-9_-]{1,8192}\.[a-zA-Z0-9_-]{1,8192}/,
 ];
 
-/**
- * 恶意代码检测模式
- */
+// 恶意代码检测模式
 const JAVASCRIPT_PATTERN = /javascript:/i;
 
-const MALICIOUS_CODE_PATTERNS: RegExp[] = [
+const MALICIOUS_CODE_PATTERNS = [
   // SQL 注入
   /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION)\b.{0,100000}\b(FROM|INTO|SET|WHERE)\b)/i,
   /(['"];\s*(DROP|DELETE|UPDATE|INSERT)\s)/i,
@@ -124,8 +114,40 @@ const MALICIOUS_CODE_PATTERNS: RegExp[] = [
 
   // 命令注入
   /[;&|]\s*(rm|del|format|shutdown|reboot)\s/i,
-  /\$\([^)]+\)|\`[^`]+\`/,
+  findCommandSubstitution,
 ];
+
+type ContentMatch = { 0: string; index: number };
+
+function findEmail(content: string): ContentMatch | null {
+  // Each @ is visited once; both sides retain the legacy bounds and partial matches.
+  for (let at = content.indexOf('@'); at !== -1; at = content.indexOf('@', at + 1)) {
+    let start = at;
+    while (start > 0 && at - start < 254 && /[\w.-]/.test(content[start - 1])) start--;
+    if (start === at) continue;
+    // Anchoring and the 318-character window bound backtracking independently of input size.
+    const domain = /^[\w.-]{1,254}\.\w{2,63}/i.exec(content.slice(at + 1, at + 319));
+    if (domain) return { 0: content.slice(start, at + 1 + domain[0].length), index: start };
+  }
+  return null;
+}
+
+function findCommandSubstitution(content: string): ContentMatch | null {
+  // Skip empty pairs and never rescan an unterminated suffix for each nested $(.
+  let dollar: ContentMatch | null = null;
+  for (let start = content.indexOf('$('); start !== -1; start = content.indexOf('$(', start + 3)) {
+    const end = content.indexOf(')', start + 2);
+    if (end === -1) break;
+    if (end > start + 2) {
+      dollar = { 0: content.slice(start, end + 1), index: start };
+      break;
+    }
+  }
+  // Backtick bodies cannot contain a competing start, so this alternative is linear.
+  const backtick = /`[^`]+`/.exec(content);
+  if (!dollar) return backtick;
+  return backtick && backtick.index < dollar.index ? backtick : dollar;
+}
 
 function findScriptElement(content: string): { match: string; index: number } | undefined {
   const lowerContent = content.replace(/[A-Z]/g, (character) => character.toLowerCase());
@@ -153,9 +175,7 @@ function findScriptElement(content: string): { match: string; index: number } | 
   }
 }
 
-// ============================================
 // 类型定义
-// ============================================
 
 export interface ModerationResult {
   passed: boolean;
@@ -186,9 +206,7 @@ export interface ModerationConfig {
   }>;
 }
 
-// ============================================
 // Content Moderator 类
-// ============================================
 
 export class ContentModerator {
   private config: ModerationConfig;
@@ -204,9 +222,7 @@ export class ContentModerator {
     };
   }
 
-  /**
-   * 审核输入内容
-   */
+  // 审核输入内容
   moderateInput(content: string): ModerationResult {
     const violations: Violation[] = [];
 
@@ -231,9 +247,7 @@ export class ContentModerator {
     return this.buildResult(violations);
   }
 
-  /**
-   * 审核输出内容
-   */
+  // 审核输出内容
   moderateOutput(content: string): ModerationResult {
     const violations: Violation[] = [];
 
@@ -253,9 +267,7 @@ export class ContentModerator {
     return this.buildResult(violations);
   }
 
-  /**
-   * 检测 Prompt 注入
-   */
+  // 检测 Prompt 注入
   private checkPromptInjection(content: string): Violation[] {
     const violations: Violation[] = [];
 
@@ -277,9 +289,7 @@ export class ContentModerator {
     return violations;
   }
 
-  /**
-   * 检测有害内容
-   */
+  // 检测有害内容
   private checkHarmfulContent(content: string): Violation[] {
     const violations: Violation[] = [];
 
@@ -301,14 +311,12 @@ export class ContentModerator {
     return violations;
   }
 
-  /**
-   * 检测 PII 泄露
-   */
+  // 检测 PII 泄露
   private checkPIILeak(content: string): Violation[] {
     const violations: Violation[] = [];
 
     for (const pattern of PII_PATTERNS) {
-      const match = content.match(pattern);
+      const match = typeof pattern === 'function' ? pattern(content) : content.match(pattern);
       if (match) {
         violations.push({
           type: ViolationType.PII_LEAK,
@@ -325,9 +333,7 @@ export class ContentModerator {
     return violations;
   }
 
-  /**
-   * 检测恶意代码
-   */
+  // 检测恶意代码
   private checkMaliciousCode(content: string): Violation[] {
     const scriptMatch = findScriptElement(content);
     const violations: Violation[] = [];
@@ -343,7 +349,7 @@ export class ContentModerator {
         });
       }
 
-      const match = content.match(pattern);
+      const match = typeof pattern === 'function' ? pattern(content) : content.match(pattern);
       if (match) {
         violations.push({
           type: ViolationType.MALICIOUS_CODE,
@@ -360,9 +366,7 @@ export class ContentModerator {
     return violations;
   }
 
-  /**
-   * 检查自定义规则
-   */
+  // 检查自定义规则
   private checkCustomPatterns(content: string): Violation[] {
     const violations: Violation[] = [];
 
@@ -384,9 +388,7 @@ export class ContentModerator {
     return violations;
   }
 
-  /**
-   * 构建审核结果
-   */
+  // 构建审核结果
   private buildResult(violations: Violation[]): ModerationResult {
     // 计算风险分数
     const riskScore = this.calculateRiskScore(violations);
@@ -405,9 +407,7 @@ export class ContentModerator {
     };
   }
 
-  /**
-   * 计算风险分数
-   */
+  // 计算风险分数
   private calculateRiskScore(violations: Violation[]): number {
     if (violations.length === 0) return 0;
 
@@ -426,9 +426,7 @@ export class ContentModerator {
     return Math.min(100, totalScore);
   }
 
-  /**
-   * 判断是否通过审核
-   */
+  // 判断是否通过审核
   private shouldPass(violations: Violation[], riskScore: number): boolean {
     // 有任何严重违规直接不通过
     if (violations.some((v) => v.severity === 'critical')) {
@@ -448,9 +446,7 @@ export class ContentModerator {
     }
   }
 
-  /**
-   * 生成改进建议
-   */
+  // 生成改进建议
   private generateSuggestions(violations: Violation[]): string[] {
     const suggestions: string[] = [];
 
@@ -473,23 +469,27 @@ export class ContentModerator {
     return suggestions;
   }
 
-  /**
-   * 脱敏 PII
-   */
+  // 脱敏 PII
   private maskPII(pii: string): string {
     if (pii.length <= 4) return '****';
     return pii.substring(0, 2) + '*'.repeat(pii.length - 4) + pii.substring(pii.length - 2);
   }
 
-  /**
-   * 清理内容中的敏感信息
-   */
+  // 清理内容中的敏感信息
   sanitize(content: string): string {
     let sanitized = content;
 
     // 清理 PII
     for (const pattern of PII_PATTERNS) {
-      sanitized = sanitized.replace(pattern, (match) => this.maskPII(match));
+      if (typeof pattern !== 'function') {
+        sanitized = sanitized.replace(pattern, (match) => this.maskPII(match));
+        continue;
+      }
+      const match = pattern(sanitized);
+      if (match) {
+        sanitized = sanitized.slice(0, match.index) + this.maskPII(match[0])
+          + sanitized.slice(match.index + match[0].length);
+      }
     }
 
     return sanitized;
