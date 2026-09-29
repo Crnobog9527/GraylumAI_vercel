@@ -111,12 +111,15 @@ export const userRouter = router({
         .eq('conversations.user_id', ctx.profileId),
     ]);
 
+    // 任一查询失败时报错，不返回 0 冒充真实统计
+    const readError = conversationsResult.error ?? monthlyTransactionsResult.error ?? messageCountResult.error;
+    if (readError) {
+      logger.error('auth', 'user_usage_stats_fetch_failed', { code: readError.code ?? null });
+      throw createSafeServiceUnavailableError(readError, '使用统计暂时无法读取，请稍后重试');
+    }
     const conversations = conversationsResult.data ?? [];
-    const convError = conversationsResult.error;
     const monthlyTransactions = monthlyTransactionsResult.data ?? [];
-    const txError = monthlyTransactionsResult.error;
     const messageCount = messageCountResult.count ?? 0;
-    const msgError = messageCountResult.error;
 
     // 4. 计算使用天数（有对话的天数）
     const uniqueDays = new Set(conversations.map(c => new Date(c.created_at).toDateString()));

@@ -23,7 +23,12 @@ function createQueryBuilder(result: Promise<unknown>) {
   };
 }
 
-function createUserCaller(profileUpdateResult: unknown, updates: unknown[] = [], tables: string[] = []) {
+function createUserCaller(
+  profileUpdateResult: unknown,
+  updates: unknown[] = [],
+  tables: string[] = [],
+  tableErrors: Record<string, unknown> = {},
+) {
   let profilesSingleCallCount = 0;
 
   const supabase = {
@@ -62,7 +67,8 @@ function createUserCaller(profileUpdateResult: unknown, updates: unknown[] = [],
       }
 
       if (['conversations', 'credit_transactions', 'messages'].includes(table)) {
-        const result = Promise.resolve({ data: [], error: null, count: 0 });
+        const error = tableErrors[table] ?? null;
+        const result = Promise.resolve({ data: error ? null : [], error, count: error ? null : 0 });
         return { ...createQueryBuilder(result), gte() { return this; } };
       }
 
@@ -205,4 +211,22 @@ describe('userRouter error sanitization', () => {
       membership_level: 'pro',
     });
   });
+
+  it.each(['conversations', 'credit_transactions', 'messages'])(
+    'reports usage stats as unavailable instead of zeros when %s cannot be read',
+    async (table) => {
+      const logSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+      const caller = createUserCaller({ data: null, error: null }, [], [], {
+        [table]: { code: '42501', message: 'private detail for user@example.com' },
+      });
+
+      await expect(caller.getUserUsageStats()).rejects.toMatchObject<Partial<TRPCError>>({
+        code: 'SERVICE_UNAVAILABLE',
+        message: '使用统计暂时无法读取，请稍后重试',
+      });
+      expect(logSpy).toHaveBeenCalledWith('auth', 'user_usage_stats_fetch_failed', { code: '42501' });
+      expect(JSON.stringify(logSpy.mock.calls)).not.toContain('user@example.com');
+      logSpy.mockRestore();
+    },
+  );
 });
