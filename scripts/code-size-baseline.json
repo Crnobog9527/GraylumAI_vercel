@@ -94,7 +94,7 @@
   "packages/api/src/routers/chat.ts": {"lines":607,"longLines":1},
   "packages/api/src/routers/costs.ts": {"lines":733},
   "packages/api/src/routers/credits.ts": {"lines":579},
-  "packages/api/src/routers/invitation.ts": {"lines":614},
+  "packages/api/src/routers/invitation.ts": {"lines":611},
   "packages/api/src/routers/model.ts": {"lines":514,"longLines":4},
   "packages/api/src/routers/opc.ts": {"longLines":5},
   "packages/api/src/routers/payments.ts": {"lines":2107},

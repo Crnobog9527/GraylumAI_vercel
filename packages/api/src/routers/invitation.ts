@@ -533,7 +533,10 @@ export const invitationRouter = router({
   // User: Get or create a reusable invitation dashboard
   getMyInvitationDashboard: protectedProcedure
     .query(async ({ ctx }) => {
-      const { data: existingInvitation, error: existingInvitationError } = await ctx.supabase
+      if (!ctx.hasSupabaseAdminPrivileges) {
+        throw createInvitationOperationError('读取邀请码面板', new Error('Service role unavailable'));
+      }
+      const { data: existingInvitation, error: existingInvitationError } = await ctx.supabaseAdmin
         .from('invitations')
         .select('code, created_at')
         .eq('created_by', ctx.profileId)
@@ -549,7 +552,7 @@ export const invitationRouter = router({
 
       if (!invitationCode) {
         const code = generateInviteCode();
-        const { data: newInvitation, error: createInvitationError } = await ctx.supabase
+        const { data: newInvitation, error: createInvitationError } = await ctx.supabaseAdmin
           .from('invitations')
           .insert({
             code,
@@ -557,6 +560,7 @@ export const invitationRouter = router({
             status: 'active',
           })
           .select('code')
+          .eq('created_by', ctx.profileId)
           .single();
 
         if (createInvitationError || !newInvitation) {
@@ -569,32 +573,25 @@ export const invitationRouter = router({
         invitationCode = newInvitation.code;
       }
 
-      const [recordsResult, settingsResult] = await Promise.all([
+      const [recordsResult, settings] = await Promise.all([
         ctx.supabase
           .from('invitation_records')
           .select('id, created_at, invitee_email, inviter_reward, status')
           .eq('inviter_id', ctx.profileId)
           .order('created_at', { ascending: false })
           .limit(10),
-        ctx.supabase
-          .from('system_settings')
-          .select('key, value')
-          .in('key', ['invite_inviter_reward', 'invite_invitee_reward']),
+        loadInvitationRuntimeSettings(ctx.supabaseAdmin).catch((error) => {
+          throw createInvitationOperationError('读取邀请码面板', error);
+        }),
       ]);
 
       if (recordsResult.error) {
         throw createInvitationOperationError('读取邀请码面板', recordsResult.error);
       }
 
-      if (settingsResult.error) {
-        throw createInvitationOperationError('读取邀请码面板', settingsResult.error);
-      }
-
       const records = recordsResult.data ?? [];
       const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-      const settingsMap = new Map((settingsResult.data ?? []).map((setting) => [setting.key, setting.value]));
-      const inviterReward = Number(settingsMap.get('invite_inviter_reward') ?? 50) || 50;
-      const inviteeReward = Number(settingsMap.get('invite_invitee_reward') ?? 30) || 30;
+      const { inviterReward, inviteeReward } = settings;
 
       return {
         invitationCode,
