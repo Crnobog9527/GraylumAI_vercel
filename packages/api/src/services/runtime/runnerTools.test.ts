@@ -2,8 +2,9 @@
 import {describe,it,expect,vi} from 'vitest';
 import {createHash} from 'node:crypto';
 import type {AgentInputItem,Session} from '@openai/agents';
-import {askQuestionTool,INVALID_CARD_RESULT,questionCardFromResult} from './agentTools';
+import {askQuestionTool,askQuestionToolBytes,INVALID_CARD_RESULT,questionCardFromResult} from './agentTools';
 import {runRuntime,type RuntimeTool} from './runner';
+import {openRouterRequestBody} from './providerRequest';
 
 const session=():Session=>({getSessionId:async()=> 'synthetic',getItems:async()=>[],addItems:async()=>{},popItem:async()=>undefined,clearSession:async()=>{}});
 const sha=(value:string)=>createHash('sha256').update(value).digest('hex');
@@ -42,7 +43,7 @@ const GOLDEN:Record<string,string[]>={
 };
 
 // ---------------------------------------------------------------------------
-// Agent turn format (AC-1): dormant until an admission produces it.
+// Agent turn format (AC-1): used by new mentor admissions.
 // ---------------------------------------------------------------------------
 
 const card={question:'你主要在哪个平台？',options:['小红书','抖音']};
@@ -56,7 +57,7 @@ const frames=(response:ReturnType<typeof completion>)=>{
  ].map(frame=>JSON.stringify(frame));
 };
 type Mode='non-stream'|'stream'|'replay';
-async function agentTurn(mode:Mode,response:ReturnType<typeof completion>,options:{firstToolCallOnly?:boolean}={firstToolCallOnly:true}){
+async function agentTurn(mode:Mode,response:ReturnType<typeof completion>,options:{firstToolCallOnly?:boolean;allowEmptyResult?:boolean;commitSessionOnSuccess?:boolean}={firstToolCallOnly:true}){
  const bodies:string[]=[],added:AgentInputItem[]=[],shown:string[]=[],dropped:number[]=[];
  const executed=vi.fn(askQuestionTool().execute);
  const exchange=vi.fn(async(_sequence:number,request:string,onChunk?:(chunk:string)=>void)=>{
@@ -149,4 +150,133 @@ it.each(modes)('an invalid card with no text at all is detectable, so AC1-4 can 
  const t=await agentTurn(mode,completion({content:null,tool_calls:[askCall('call_bad',{question:'问题',options:['只有一个']})]},'tool_calls'));
  const output=await t.run;
  expect(questionCardFromResult(output)).toBeNull();expect(t.shown.join('')).toBe('');expect(t.exchange).toHaveBeenCalledTimes(1);
+});
+
+it('freezes exact v5 provider request bytes including the exported strict tool schema',async()=>{
+ const t=await agentTurn('stream',completion({content:'自然语言'}));await t.run;
+ const context={providerRequestFormat:'agent-turn-v5-stream' as const,tools:['ask_question'],
+  network:'deny',reasoning:{effort:'none' as const}};
+ const policy={modelId:'10000000-0000-4000-8000-000000000001',provider:'openrouter',account:'synthetic',
+  model:'m/x',protocol:'openrouter-chat-v1' as const,upperUsd:'0.0036096',inputLimit:32000,outputLimit:4096,
+  automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true,
+  providerLimits:{providerSlug:'deepinfra/fp8',contextTokens:32000,
+   promptUsdPerMillion:'0.1',completionUsdPerMillion:'0.1',requestUsd:'0'}};
+ const wire=openRouterRequestBody(t.bodies[0]!,{context,policy,phase:'skill',primaryDialogue:true});
+ expect(sha(wire)).toBe('8272157bd7e9a9eb6a6edc03c3ab801414de59d051b87bc322a1c52f640edad7');
+ const sent=JSON.parse(wire);
+ expect(sent.tools).toHaveLength(1);expect(sent.tools[0].function.strict).toBe(true);
+ expect(askQuestionToolBytes()).toBeGreaterThanOrEqual(Buffer.byteLength(JSON.stringify(sent.tools)));
+ expect(sent.tools[0].function.parameters.properties.question.maxLength).toBe(500);
+ expect(sent.tools[0].function.parameters.properties.options.maxItems).toBe(5);
+ expect(sent.provider.only).toEqual(['deepinfra/fp8']);
+ expect(sent).not.toHaveProperty('parallel_tool_calls');expect(sent).not.toHaveProperty('tool_choice');
+});
+it.each(modes.flatMap(mode=>['',null,'   '].map(content=>({mode,content}))))(
+ 'successful empty output reaches v5 fallback only when enabled ($mode, $content)',async({mode,content})=>{
+ const allowed=await agentTurn(mode,completion({content}),{firstToolCallOnly:true,allowEmptyResult:true});
+ expect((await allowed.run).trim()).toBe('');expect(allowed.exchange).toHaveBeenCalledTimes(1);
+ const legacy=await agentTurn(mode,completion({content}));
+ await expect(legacy.run).rejects.toThrow('RUNTIME_EXECUTION_PENDING');
+});
+
+it('v5 empty-result allowance never turns an exchange failure into a completed reply',async()=>{
+ const failed=runRuntime({model:'m/x',instructions:'I',input:'hello',session:session(),
+  maxOutputTokens:100,maxTurns:1,tools:[askQuestionTool()],stream:true,allowEmptyResult:true,
+  firstToolCallOnly:true,stopAtToolNames:['ask_question'],reasoning:{parameter:'none'},
+  selectHistory:async(_history,incoming)=>incoming,exchange:async()=>{throw new Error('synthetic network failure');}});
+ await expect(failed).rejects.toThrow('RUNTIME_EXECUTION_PENDING');
+});
+
+it.each(modes.flatMap(mode=>['content_filter','stop'].map(finish=>({mode,finish}))))(
+ 'v5 fallback never converts refusal into success ($mode, $finish)',async({mode,finish})=>{
+ const refused=await agentTurn(mode,completion({content:null,refusal:'Synthetic refusal'},finish),
+  {firstToolCallOnly:true,allowEmptyResult:true});
+ await expect(refused.run).rejects.toThrow('RUNTIME_EXECUTION_PENDING');
+ expect(refused.exchange).toHaveBeenCalledTimes(1);
+});
+
+it.each(modes)('v5 rejects content_filter even without a refusal text (%s)',async mode=>{
+ const blocked=await agentTurn(mode,completion({content:''},'content_filter'),
+  {firstToolCallOnly:true,allowEmptyResult:true});
+ await expect(blocked.run).rejects.toThrow('RUNTIME_EXECUTION_PENDING');
+});
+
+describe('v5 one-turn Session writes commit only after SDK success',()=>{
+ it('discards the SDK input-only append on a pending exchange; legacy persistence stays unchanged',async()=>{
+  for(const buffered of [false,true]){
+   const added:AgentInputItem[][]=[];
+   const store:Session={...session(),addItems:async items=>{added.push(items);}};
+   await expect(runRuntime({model:'m/x',instructions:'I',input:'hello',session:store,
+    maxOutputTokens:100,maxTurns:1,tools:[askQuestionTool()],stream:true,
+    firstToolCallOnly:true,commitSessionOnSuccess:buffered,stopAtToolNames:['ask_question'],
+    selectHistory:async(_history,incoming)=>incoming,
+    exchange:async()=>{throw new Error('RUNTIME_RESPONSE_PENDING');},
+   })).rejects.toThrow('RUNTIME_EXECUTION_PENDING');
+   if(buffered)expect(added).toEqual([]);
+   else expect(added).toEqual([[{type:'message',role:'user',content:'hello'}]]);
+  }
+ });
+ it('does not flush after completed exchange whose output fails validation',async()=>{
+  const turn=await agentTurn('stream',completion({content:'   '}),
+   {firstToolCallOnly:true,commitSessionOnSuccess:true});
+  await expect(turn.run).rejects.toThrow('RUNTIME_EXECUTION_PENDING');expect(turn.added).toEqual([]);
+ });
+ it('successful terminal card flushes complete batches identically on saved-response replay',async()=>{
+  const prior:AgentInputItem={role:'user',content:'Frozen previous turn'};
+  const response=completion({content:'先分析。',tool_calls:[askCall('saved_card')]},'tool_calls');
+  const histories:AgentInputItem[][][]=[];const requests:string[]=[];
+  for(const live of [true,false]){
+   let toolFinished=false;
+   const batches:AgentInputItem[][]=[];
+   const store:Session={...session(),getItems:async()=>[prior],addItems:async items=>{
+    expect(toolFinished).toBe(true);batches.push(structuredClone(items));
+   }};
+   const output=await runRuntime({model:'m/x',instructions:'I',input:'hello',session:store,
+    maxOutputTokens:100,maxTurns:1,stream:true,firstToolCallOnly:true,commitSessionOnSuccess:true,
+    stopAtToolNames:['ask_question'],tools:[{...askQuestionTool(),execute:async args=>{
+     toolFinished=true;return askQuestionTool().execute(args,'saved_card');
+    }}],selectHistory:async(history,incoming)=>{
+     expect(history[0]).toBe(prior);return [...history,...incoming];
+    },exchange:async(_sequence,request,onChunk)=>{
+     expect(batches).toEqual([]);requests.push(request);
+     if(live)for(const frame of frames(response))onChunk!(frame);
+     return JSON.stringify(response);
+    }});
+   expect(JSON.parse(output)).toEqual({card:'question',...card});
+   expect(batches).toHaveLength(1);
+   expect(batches[0]!.map(item=>'type' in item?item.type:undefined))
+    .toEqual(expect.arrayContaining(['function_call','function_call_result']));
+   histories.push(batches);
+  }
+  expect(histories[1]).toEqual(histories[0]);expect(requests[1]).toBe(requests[0]);
+ });
+ it('a lost successful append response is retried as the same full batch',async()=>{
+  const saved:AgentInputItem[][]=[];let loseReply=true;const requests:string[]=[];
+  const response=completion({content:'已收到完整回执。'});
+  async function run(){
+   let batch=0;
+   const store:Session={...session(),addItems:async items=>{
+    if(saved[batch])expect(items).toEqual(saved[batch]);else saved[batch]=structuredClone(items);
+    batch++;
+    if(loseReply){loseReply=false;throw new Error('Synthetic lost append acknowledgement');}
+   }};
+   return runRuntime({model:'m/x',instructions:'I',input:'hello',session:store,
+    maxOutputTokens:100,maxTurns:1,stream:true,tools:[askQuestionTool()],
+    firstToolCallOnly:true,commitSessionOnSuccess:true,stopAtToolNames:['ask_question'],
+    selectHistory:async(_history,incoming)=>incoming,
+    exchange:async(_sequence,request)=>{requests.push(request);return JSON.stringify(response);}});
+  }
+  await expect(run()).rejects.toThrow('RUNTIME_EXECUTION_PENDING');
+  const persisted=structuredClone(saved);
+  expect(await run()).toBe('已收到完整回执。');
+  expect(saved).toEqual(persisted);expect(saved).toHaveLength(1);expect(requests[1]).toBe(requests[0]);
+ });
+ it.each([{maxTurns:2,firstToolCallOnly:true},{maxTurns:1,firstToolCallOnly:false}])(
+  'refuses buffered persistence outside a v5 one-call turn %#',async limits=>{
+   const exchange=vi.fn();
+   await expect(runRuntime({model:'m/x',instructions:'I',input:'hello',session:session(),
+    ...limits,maxOutputTokens:100,tools:[],stream:true,commitSessionOnSuccess:true,
+    selectHistory:async(_history,incoming)=>incoming,exchange,
+   })).rejects.toThrow('RUNTIME_CONTEXT_INVALID');expect(exchange).not.toHaveBeenCalled();
+  });
 });

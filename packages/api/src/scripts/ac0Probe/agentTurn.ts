@@ -1,0 +1,182 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+// AC1-4 preparation only. Live execution still requires separate Owner approval.
+import {tool} from '@openai/agents';
+import {createRequire, registerHooks} from 'node:module';
+import type * as Tools from '../../services/runtime/agentTools.ts';
+import type * as Prompt from '../../services/opc/agentTurnPrompt.ts';
+
+let loaded: {tools: typeof Tools; prompt: typeof Prompt} | undefined;
+/** Node's standalone strip-types entry needs explicit filenames. Resolve only
+ * the two known pure dependencies, then immediately remove the temporary hook. */
+function runtime() {
+  if (loaded) return loaded;
+  const root = new URL('../../', import.meta.url);
+  const known = new Map(['shared/agentTurn', 'shared/opcMethodPolicy'].map(path =>
+    [new URL(path, root).href, new URL(path + '.ts', root).href]));
+  const hook = registerHooks({resolve(specifier, context, next) {
+    const mapped = context.parentURL && known.get(new URL(specifier, context.parentURL).href);
+    return next(mapped || specifier, context);
+  }});
+  try {
+    const require = createRequire(import.meta.url);
+    loaded = {tools: require('../../services/runtime/agentTools.ts'), prompt: require('../../services/opc/agentTurnPrompt.ts')};
+    return loaded;
+  } finally { hook.deregister(); }
+}
+import type {LoadedSkill, Scenario} from './skill.ts';
+import type {ProbeConfig} from './config.ts';
+import type {TrialResult} from './trial.ts';
+import {stats} from './summary.ts';
+
+export const AGENT_TURN_CONFIG: ProbeConfig = {
+  id: 'ac14-deepseek-deepinfra-fp8-off', model: 'deepseek/deepseek-v4.1-flash',
+  route: 'deepinfra/fp8', reasoning: {enabled: false}, maxPrice: {prompt: 0.3, completion: 0.9},
+};
+
+export function agentTurnPrompt(skill: LoadedSkill, scenario: Scenario): string {
+  const current = scenario.step === undefined ? undefined : skill.workflow?.[scenario.step];
+  if (!current || !scenario.currentStepId || !scenario.questionId) throw new Error('PROBE_AGENT_TURN_CONTEXT_REQUIRED');
+  const question = current.information?.find(field => field.id === scenario.questionId);
+  if (!question) throw new Error('PROBE_AGENT_TURN_QUESTION_INVALID');
+  const resources = current.resources.map(path => {
+    const content = skill.references.get(path);
+    if (content === undefined) throw new Error('PROBE_AGENT_TURN_RESOURCE_UNAVAILABLE');
+    return {path, content};
+  });
+  return [skill.instructions, JSON.stringify({scopedMaterial: resources}), runtime().prompt.agentTurnInstructions({
+    step: {id: scenario.currentStepId, title: current.title, schema: current.information ?? [], values: scenario.fieldValues},
+    question, questionLabel: null, opening: scenario.opening ?? false,
+    workflowContext: skill.workflow?.map((step, index) => ({index, title: step.title, information: step.information ?? []})),
+  })].join('\n\n');
+}
+
+/** The runtime definition, including strict schema and invalid-result behavior. */
+export function agentTurnTool(onExecute: () => void) {
+  const definition = runtime().tools.askQuestionTool();
+  return tool({name: definition.name, description: definition.description, parameters: definition.parameters!,
+    errorFunction: () => definition.invalidResult!, execute: async (args, _context, details) => {
+      onExecute();
+      try { return await definition.execute(args, details?.toolCall?.callId ?? 'probe'); }
+      catch { return definition.invalidResult!; }
+    }});
+}
+
+/** Only SDK-visible bytes are filtered. The probe transport retains every original
+ * tool call as evidence, exactly as the v5 runtime's first-call-only boundary does. */
+export function firstCallOnly(response: Response): Response {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let pending = '';
+  let hasTool = false;
+  let truncated = false;
+  let done = false;
+  const filter = (line: string) => {
+    if (!line.startsWith('data:')) return line;
+    if (line.slice(5).trim() === '[DONE]') { done = true; return ''; }
+    const frame = JSON.parse(line.slice(5));
+    const delta = frame.choices?.[0]?.delta;
+    hasTool ||= Boolean(delta?.tool_calls?.length);
+    truncated ||= frame.choices?.[0]?.finish_reason === 'length';
+    if (Array.isArray(delta?.tool_calls)) {
+      delta.tool_calls = delta.tool_calls.filter((call: {index: number}) => call.index === 0);
+      if (!delta.tool_calls.length) delete delta.tool_calls;
+    }
+    // A cut-off tool response is never accepted as a valid card.
+    return 'data: ' + JSON.stringify(frame);
+  };
+  const stream = response.body!.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+    transform(bytes, controller) {
+      pending += decoder.decode(bytes, {stream: true});
+      let end: number;
+      while ((end = pending.indexOf('\n')) >= 0) {
+        controller.enqueue(encoder.encode(filter(pending.slice(0, end).replace(/\r$/, '')) + '\n'));
+        pending = pending.slice(end + 1);
+      }
+    },
+    flush(controller) {
+      pending += decoder.decode();
+      if (pending) controller.enqueue(encoder.encode(filter(pending)));
+      if (hasTool && truncated) throw new Error('RUNTIME_OUTPUT_TRUNCATED');
+      if (done) controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+    },
+  }));
+  return new Response(stream, {status: response.status, headers: response.headers});
+}
+
+/** Called only after the SDK turn completes, never on a partial tool delta. */
+export function agentTurnCardAvailable(output: string | undefined): boolean {
+  return Boolean(runtime().tools.questionCardFromResult(output ?? ''));
+}
+
+/** AC1-4 latency contract; the older AC-0 summary keeps its existing statistics. */
+export function agentTurnStats(values: Array<number | undefined>) {
+  const sorted = values.filter((value): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0).sort((a, b) => a - b);
+  const rounded = (value: number | undefined) => value === undefined ? undefined : Math.round(value * 10) / 10;
+  return {...stats(sorted), p95: rounded(sorted[Math.ceil(sorted.length * 0.95) - 1]),
+    min: rounded(sorted[0]), max: rounded(sorted.at(-1))};
+}
+
+export function agentTurnMeasurement(result: TrialResult) {
+  const call = result.calls[0];
+  const raw = call?.facts.toolCalls ?? [];
+  const card = runtime().tools.questionCardFromResult(result.finalOutput ?? '');
+  const content = call?.facts.content.trim() ?? '';
+  let oldEnvelope = false;
+  try {
+    const candidate = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(content)?.[1] ?? content;
+    const value = JSON.parse(candidate);
+    oldEnvelope = Boolean(value && typeof value === 'object' && ('message' in value || 'informationPatch' in value));
+  } catch { /* public prose */ }
+  const completed = (!result.stop || result.stop === 'sdk_error') && result.calls.length === 1 && call?.status === 'ok';
+  const malformed = Boolean(result.sdkError) || raw.some(item => item.name !== 'ask_question') || raw.length > 0 && !card ||
+    !content && !card || oldEnvelope || call?.facts.finishReason === 'length' && raw.length > 0;
+  return {completed, formatError: completed && malformed,
+    validCardCandidate: completed && !malformed && raw.length === 1 && Boolean(card),
+    // Semantic relevance and recommendation quality require manual labels.
+    semanticReview: 'pending' as const};
+}
+
+export function agentTurnSummary(results: TrialResult[]) {
+  const measured = results.map(result => ({result, measurement: agentTurnMeasurement(result)}));
+  const completed = measured.filter(item => item.measurement.completed);
+  const text = completed.filter(item => item.result.kind === 'text');
+  const plainTextOnly = text.filter(item => !item.measurement.formatError &&
+    !item.result.calls[0]!.facts.toolCalls.length).length;
+  const unexpectedToolCalls = text.filter(item => item.result.calls[0]!.facts.toolCalls.length > 0).length;
+  const errors = completed.filter(item => item.measurement.formatError).length;
+  const askCandidates = measured.filter(item => item.result.kind === 'ask' && item.measurement.validCardCandidate).length;
+  return {plannedAsk: 30, plannedTotal: 40, completed: completed.length, formatErrors: errors,
+    // Diagnostic only: a valid card is displayable but violates a text sample's expectation.
+    textCompliance: {planned: 10, completed: text.length, plainTextOnly, unexpectedToolCalls},
+    formatErrorRate: errors / 40, validCardCandidates: askCandidates, candidateRate: askCandidates / 30,
+    verdict: completed.length !== 40 ? 'incomplete' : errors > 1 || askCandidates < 27 ? 'fail' : 'manual_review_required',
+    semanticReview: 'Required: label each of the 30 ask samples for relevance and useful grounded options; at least 27 must pass.',
+    firstContentMs: agentTurnStats(completed.map(item => item.result.firstContentMs)),
+    firstSdkTextMs: agentTurnStats(completed.map(item => item.result.firstSdkTextMs)),
+    cardAvailableMs: agentTurnStats(completed.map(item => item.result.cardAvailableMs)),
+    cardOnlyAvailableMs: agentTurnStats(completed.filter(item => item.result.firstSdkTextMs === undefined)
+      .map(item => item.result.cardAvailableMs)),
+    cardOnlyTrials: completed.filter(item => item.result.firstSdkTextMs === undefined &&
+      item.result.cardAvailableMs !== undefined).length,
+    firstTextMetric: 'firstSdkTextMs; card-only trials have no first text and stay counted separately'};
+}
+
+export function agentTurnMarkdown(results: TrialResult[], mode: string) {
+  const summary = agentTurnSummary(results);
+  const latency = (value: ReturnType<typeof agentTurnStats>) =>
+    [value.median, value.p95, value.min, value.max].map(item => item ?? 'N/A').join(' / ') + ` (n=${value.n})`;
+  return [
+    `# AC1-4 probe (${mode})`, '',
+    `Completed: ${summary.completed}/40; valid card candidates: ${summary.validCardCandidates}/30 (semantic review pending).`,
+    `Format errors: ${summary.formatErrors}/40; verdict: ${summary.verdict}.`,
+    `Text samples: ${summary.textCompliance.plainTextOnly}/10 plain text only; ` +
+      `${summary.textCompliance.unexpectedToolCalls} unexpected tool calls (diagnostic, no additional gate).`,
+    `First provider content, median / p95 / min / max ms: ${latency(summary.firstContentMs)}.`,
+    `First SDK public text, median / p95 / min / max ms: ${latency(summary.firstSdkTextMs)}.`,
+    `Complete card available, median / p95 / min / max ms: ${latency(summary.cardAvailableMs)}.`,
+    `Card-only trials: ${summary.cardOnlyTrials}; first text N/A; complete card timing: ${latency(summary.cardOnlyAvailableMs)}.`, '',
+    summary.semanticReview,
+    'Rejections, timeouts and unknown results never reduce the fixed denominators. No semantic pass is automatic.', '',
+  ].join('\n');
+}

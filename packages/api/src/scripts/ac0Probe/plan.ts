@@ -5,6 +5,7 @@ import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {parseArgs} from 'node:util';
 import {z} from 'zod';
+import {AGENT_TURN_CONFIG, agentTurnPrompt} from './agentTurn.ts';
 import {DEFAULT_MAX_CALLS, DEFAULT_MAX_USD, HARD_MAX_CALLS, HARD_MAX_USD, validateCaps} from './budget.ts';
 import {callBoundUsd, DEFAULT_CONFIG_IDS, resolveConfigs, thinkingLabel, type ProbeConfig} from './config.ts';
 import {parsePrivateJson, scenariosOf, stepRules, type LoadedSkill, type Scenario} from './skill.ts';
@@ -22,6 +23,7 @@ export const USAGE = `AC-0b model probe (dry run unless --live).
 
   node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON packages/api/src/scripts/ac0Probe/main.ts [options]
 
+  --agent-turn          AC1-4: fixed DeepSeek deepinfra/fp8, thinking off; exactly 30 ask + 10 text, no references
   --skill-dir <dir>     private Skill directory with SKILL.md and references/ (default: synthetic repo fixture)
   --scenarios <file>    scenario JSON; required with --skill-dir (keep it outside the repository)
   --configs <ids>       comma-separated config ids (default: ${DEFAULT_CONFIG_IDS.join(',')})
@@ -44,6 +46,7 @@ export const USAGE = `AC-0b model probe (dry run unless --live).
 `;
 
 export type ProbeArgs = {
+  agentTurn?: boolean;
   skillDir?: string;
   scenarios?: string;
   configIds: string[];
@@ -73,7 +76,7 @@ function integer(value: string | undefined, fallback: number, min: number, max: 
 
 export function parseProbeArgs(argv: string[], home: string): ProbeArgs {
   const {values} = parseArgs({args: argv, strict: true, allowPositionals: false, options: {
-    'skill-dir': {type: 'string'}, scenarios: {type: 'string'}, configs: {type: 'string'}, 'config-file': {type: 'string'},
+    'agent-turn': {type: 'boolean'}, 'skill-dir': {type: 'string'}, scenarios: {type: 'string'}, configs: {type: 'string'}, 'config-file': {type: 'string'},
     ask: {type: 'string'}, text: {type: 'string'}, reference: {type: 'string'},
     'max-calls': {type: 'string'}, 'max-usd': {type: 'string'}, 'max-tokens': {type: 'string'}, 'timeout-ms': {type: 'string'},
     'out-dir': {type: 'string'}, live: {type: 'boolean'}, confirm: {type: 'string'}, help: {type: 'boolean'},
@@ -81,20 +84,23 @@ export function parseProbeArgs(argv: string[], home: string): ProbeArgs {
   }});
   const external = parseExternal(values['record-external-calls'], values['record-external-usd'], values['external-note']);
   if (external && values.live) throw new Error('PROBE_ARGUMENT_INVALID: --record-external-* never sends; do not combine with --live');
+  const agentTurn = values['agent-turn'] ?? false;
+  if (agentTurn && (values.configs || values['config-file'] || external)) throw new Error('PROBE_AGENT_TURN_CONFIG_FIXED');
   const maxUsdText = values['max-usd'];
   if (maxUsdText !== undefined && !/^\d+(\.\d+)?$/.test(maxUsdText)) throw new Error('PROBE_ARGUMENT_INVALID: --max-usd');
   // Cap validation reads the raw request before any default could hide it.
   const maxCalls = integer(values['max-calls'], DEFAULT_MAX_CALLS, 1, Number.MAX_SAFE_INTEGER, 'max-calls');
-  const maxUsd = maxUsdText === undefined ? DEFAULT_MAX_USD : Number(maxUsdText);
+  const maxUsd = maxUsdText === undefined ? (agentTurn ? 1 : DEFAULT_MAX_USD) : Number(maxUsdText);
   validateCaps(maxCalls, maxUsd);
   return {
+    ...(agentTurn ? {agentTurn: true} : {}),
     skillDir: values['skill-dir'],
     scenarios: values.scenarios,
     configIds: (values.configs ?? DEFAULT_CONFIG_IDS.join(',')).split(',').map(id => id.trim()).filter(Boolean),
     configFile: values['config-file'],
     counts: {
       ask: integer(values.ask, 30, 0, 100, 'ask'),
-      text: integer(values.text, 0, 0, 100, 'text'),
+      text: integer(values.text, agentTurn ? 10 : 0, 0, 100, 'text'),
       reference: integer(values.reference, 0, 0, 100, 'reference'),
     },
     maxCalls, maxUsd,
@@ -122,6 +128,7 @@ function parseExternal(calls: string | undefined, usd: string | undefined, note:
 }
 
 export type ProbePlan = {
+  agentTurn?: boolean;
   planId: string;
   configs: ProbeConfig[];
   counts: Record<TrialKind, number>;
@@ -145,7 +152,10 @@ function scenarioBytes(scenario: Scenario, skill: LoadedSkill): number {
 
 export function buildPlan(args: ProbeArgs, skill: LoadedSkill, scenarios: Scenario[], scenarioDigest: string): ProbePlan {
   const extra = args.configFile ? parsePrivateJson(readFileSync(args.configFile, 'utf8'), z.unknown(), 'CONFIG_FILE') : undefined;
-  const configs = resolveConfigs(args.configIds, extra);
+  const configs = args.agentTurn ? [AGENT_TURN_CONFIG] : resolveConfigs(args.configIds, extra);
+  if (args.agentTurn && (args.counts.ask !== 30 || args.counts.text !== 10 || args.counts.reference !== 0 || args.maxUsd > 1)) {
+    throw new Error('PROBE_AGENT_TURN_PLAN_FIXED: 30 ask + 10 text, no references, at most USD 1');
+  }
   let plannedCalls = 0;
   let plannedUsd = 0;
   const referenceBytes = [...skill.references.values()].reduce((sum, text) => sum + Buffer.byteLength(text), 0);
@@ -154,7 +164,9 @@ export function buildPlan(args: ProbeArgs, skill: LoadedSkill, scenarios: Scenar
     if (!count) continue;
     const pool = scenariosOf(scenarios, kind);
     if (!pool.length) throw new Error(`PROBE_SCENARIOS_MISSING: no "${kind}" scenario for --${kind} ${count}`);
-    const largest = Math.max(...pool.map(scenario => scenarioBytes(scenario, skill)));
+    if (args.agentTurn && pool.length < count) throw new Error('PROBE_AGENT_TURN_DISTINCT_SCENARIOS_REQUIRED');
+    const largest = Math.max(...pool.map(scenario => scenarioBytes(scenario, skill) +
+      (args.agentTurn ? Buffer.byteLength(agentTurnPrompt(skill, scenario)) : 0)));
     const bytes = Buffer.byteLength(skill.instructions) + largest + REQUEST_OVERHEAD_BYTES +
       (kind === 'reference' ? referenceBytes : 0);
     for (const config of configs) {
@@ -162,11 +174,13 @@ export function buildPlan(args: ProbeArgs, skill: LoadedSkill, scenarios: Scenar
       plannedUsd += count * CALLS_PER_TRIAL[kind] * callBoundUsd(config, bytes, args.maxTokens);
     }
   }
+  if (args.agentTurn && plannedUsd > args.maxUsd) throw new Error('PROBE_AGENT_TURN_RUN_BUDGET_INSUFFICIENT');
   if (plannedCalls === 0) throw new Error('PROBE_PLAN_EMPTY');
   if (plannedCalls > args.maxCalls) {
     throw new Error(`PROBE_PLAN_REFUSED: worst case ${plannedCalls} calls exceeds --max-calls ${args.maxCalls}`);
   }
   const identity = {
+    ...(args.agentTurn ? {agentTurn: true} : {}),
     configs, counts: args.counts, maxCalls: args.maxCalls, maxUsd: args.maxUsd, maxTokens: args.maxTokens,
     timeoutMs: args.timeoutMs, skillDigest: skill.digest, scenarioDigest,
   };

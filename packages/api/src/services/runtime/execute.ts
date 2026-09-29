@@ -6,7 +6,8 @@ import {logger} from '../../lib/logger';
 import {projectOpenRouterItemsForSizing} from './openRouterHistory';
 import {AGENT_TURN_REQUEST_FORMAT,PROVIDER_REQUEST_FORMATS,validReasoningFormat,
  STREAMING_FORMATS,historyToolNames,openRouterRequestBody} from './providerRequest';
-import {askQuestionTool} from './agentTools';
+import {agentTurnResult} from './agentTurnResult';
+import {askQuestionTool,askQuestionToolBytes} from './agentTools';
 import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
 import { authoritativeBilling, type FrozenRun, type FrozenCall, type BillingTransport } from '../bill2/service';
 import {OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
@@ -202,10 +203,15 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
      // the next SDK request bytes after recovery despite identical tool data.
      return JSON.stringify(committed.result);
     }});
-   const toolBytes=Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description}))));
+   const toolBytes=agentTurn?askQuestionToolBytes():
+    Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description}))));
    const preserveHistoricalMaterial=Boolean(context.sources?.length)||requestsHistoricalComparison(context.input);
    const primarySequence=callSequence;
+   let agentText="";
+   let agentToolCalled=false;
    const runPrimary=async(legacyInput=false)=>{
+   agentText="";
+   agentToolCalled=false;
    if(context.reasoning&&('effort' in context.reasoning||context.reasoning.parameter!=='none')&&effective.model!==context.model)
     throw new Error('RUNTIME_MODEL_DENIED');
    const normalized=context.providerRequestFormat==='serial-tools-v2'||context.providerRequestFormat==='serial-tools-v6-reasoning'||streaming;
@@ -217,8 +223,15 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
    }}:{};
    let selectedHistoryCount=0;
    let partial="";progress({type:"phase",phase:"mentor"});
-   return runRuntime({...context,...effective,stream:streaming,onText:delta=>{if(delta)budget.timing?.mark('firstModelText');partial+=delta;const text=agentTurn?publicAgentText(partial):publicMentorText(partial);if(text)progress({type:"text",text});},
-    ...(agentTurn?{firstToolCallOnly:true,onToolCallsDropped:(dropped:number)=>logger.warn('api','runtime_tool_calls_dropped',{executionId,dropped}),
+   return runRuntime({...context,...effective,stream:streaming,onText:delta=>{
+    if(delta)budget.timing?.mark('firstModelText');
+    partial+=delta;
+    if(agentTurn)agentText+=delta;
+    const text=agentTurn?publicAgentText(partial):publicMentorText(partial);
+    if(text)progress({type:"text",text});
+   },
+    ...(agentTurn?{allowEmptyResult:true,commitSessionOnSuccess:true,firstToolCallOnly:true,
+     onToolCallsDropped:(dropped:number)=>logger.warn('api','runtime_tool_calls_dropped',{executionId,dropped}),
      ...(context.tools.includes(ASK_QUESTION_TOOL)?{stopAtToolNames:[ASK_QUESTION_TOOL]}:{})}:{}),
     input:runtimeScopeInput(context.input,context.scopeMaterial),session,tools,selectHistory:async(history,incoming)=>{
     const selected=selectRuntimeHistory(history,incoming,{instructions:effective.instructions,inputBytes:primaryPolicy.inputLimit,historyItems:context.historyItems,toolBytes,...sizing,
@@ -237,6 +250,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
      // not an OpenRouter protocol capability or proof of real supplier costs.
      const response=envelope.usage?.sdkResponse;
      if(!response||response.model!==effective.model||response.choices?.length!==1)throw new Error('RUNTIME_RESPONSE_INVALID');
+     if(agentTurn)agentToolCalled=Boolean(response.choices[0]?.message?.tool_calls?.length);
      return JSON.stringify(response);
     }});
    };
@@ -256,12 +270,18 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
     const latest=await rpc<{state:'cancelled'|'cost_pending';unavailable?:boolean}>('runtime_execution',{...args,p_action:'check_latest'});
     if(latest.unavailable)return {state:latest.state,unavailable:'latest' as const};
    }
-   // An Agent turn already streamed its plain text; its stored body is built by AC1-4.
+   const turn=agentTurn?agentTurnResult(agentText,body,agentToolCalled):null;
+   if(turn){
+    body=turn.body;
+    if(turn.message)progress({type:'text',text:turn.message});
+    if(turn.card)progress({type:'card',card:turn.card});
+   }
+   const turnMetadata=turn?{truncated:turn.truncated}:{};
    const publicBody=agentTurn?'':publicMentorText(body);if(publicBody)progress({type:'text',text:publicBody});
    let summary:string|undefined;
    if(context.attachedOrganizer){
     progress({type:"phase",phase:"organizer"});
-    await rpc('runtime_execution',{...args,p_action:'checkpoint_primary',p_result:{body,lastSequence:callSequence}});
+    await rpc('runtime_execution',{...args,p_action:'checkpoint_primary',p_result:{body,lastSequence:callSequence,...turnMetadata}});
     const organizer=context.attachedOrganizer,organizerPolicy=execution.billing.callPolicy.find(p=>p.modelId===organizer.modelId&&p.model===organizer.model);
     if(!organizerPolicy)throw new Error('RUNTIME_ORGANIZER_DENIED');
     const instructions=organizer.instructions ?? 'Organize this operation result. Preserve provenance and uncertainty. Do not add new facts.';
@@ -275,7 +295,8 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
       return JSON.stringify(response);
      }});
    }
-   const result={kind:'usable_result',evidenceRef:executionId,evidenceHash:hash(JSON.stringify({body,summary})),body,...(summary?{summary}:{})};
+   const result={kind:'usable_result',evidenceRef:executionId,
+    evidenceHash:hash(JSON.stringify({body,summary,...turnMetadata})),body,...turnMetadata,...(summary?{summary}:{})};
    progress({type:'phase',phase:'saving'});
    const completed=await rpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
    return {body,...(summary!==undefined?{summary}:{}),state:completed.state};

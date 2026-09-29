@@ -14,6 +14,9 @@ import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from '.
 import { discoverRuntimeCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
 import { type ReasoningPolicy } from './reasoningPolicy';
 import { admitReasoning } from './reasoningAdmission';
+import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
+import {isOpeningInput} from '../../shared/opcQuestions';
+import {askQuestionToolBytes} from './agentTools';
 import {currentRequestTiming} from './timing';
 
 const uuid=z.string().uuid();
@@ -28,7 +31,13 @@ export const runtimeAdmission=z.object({sessionId:uuid,requestId:uuid,input:z.st
  ]),sources:z.array(z.object({projectId:uuid,roundId:uuid,sourceVersionId:uuid,hash:z.string().regex(/^[a-f0-9]{64}$/)}).strict()).max(1).default([]),network:z.enum(['deny','allow','require_latest']).default('allow')}).strict();
 /** Deployment policy is server configuration, never request input.
  * Real admission requires the separately loaded, enabled Staging window. */
-export type LocalRuntimePolicy={real?:StagingPolicy;account:string;costPerCall:string;creditsPerUsd:string;multiplier:string;maxCalls:number;maxOutputTokens:number;inputBytes:number;historyItems:number;expectedMaterialRevision?:number;opcTurnToken?:string;mentorStream?:boolean;additionalInstructions?:string;skillResources?:readonly string[];searchEnabled?:boolean;workspaceContext?:boolean;organizerInstructions?:string;organizerInput?:string};
+export type LocalRuntimePolicy={
+ real?:StagingPolicy;account:string;costPerCall:string;creditsPerUsd:string;multiplier:string;
+ maxCalls:number;maxOutputTokens:number;inputBytes:number;historyItems:number;
+ expectedMaterialRevision?:number;opcTurnToken?:string;mentorStream?:boolean;organizeOpening?:boolean;
+ additionalInstructions?:string;skillResources?:readonly string[];searchEnabled?:boolean;workspaceContext?:boolean;
+ organizerInstructions?:string;organizerInput?:string;
+};
 export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient,policy:LocalRuntimePolicy){
  policy=Object.freeze({...policy,...(policy.real?{real:structuredClone(policy.real),creditsPerUsd:policy.real.creditsPerUsd,multiplier:policy.real.multiplier}:{}),...(policy.skillResources?{skillResources:Object.freeze([...policy.skillResources])}:{})});
  z.number().int().min(1).max(32).parse(policy.maxCalls);
@@ -71,6 +80,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // Resolve replay before model or revision freshness changes produce another budget.
    const replay=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:input});
    if(replay)return replay;
+   const mentorStream=Boolean(policy.opcTurnToken&&policy.mentorStream);
+   if(policy.organizeOpening&&(!mentorStream||!isOpeningInput(input.input)))throw new Error('RUNTIME_CONTEXT_INVALID');
+   const organizeAfter=input.organizeAfter||Boolean(policy.organizeOpening);
+   if(mentorStream&&(input.network!=='deny'||input.sources.length||input.selection.kind==='auto'||policy.workspaceContext))
+    throw new Error('RUNTIME_CONTEXT_INVALID');
    if(policy.expectedMaterialRevision!==undefined&&session.materialRevision!==policy.expectedMaterialRevision)throw new Error('RUNTIME_MATERIAL_CONFLICT');
    for(const source of input.sources)await query('runtime_source',{p_source:source});
    let organizerOutput:number|undefined;
@@ -104,7 +118,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(input.selection.kind==='organizer')modelConfiguration(()=>assertSeparateSummaryModel(session.dialogueModel,row.data.model_id));
    let attachedOrganizer:{modelId:string;model:string;maxOutputTokens:number;reasoning?:ReasoningPolicy;instructions?:string;input?:string}|undefined;
    let attachedInputLimit:number|undefined;
-   if(input.organizeAfter){
+   if(organizeAfter){
     if(input.selection.kind==='organizer'||policy.maxCalls<2)throw new Error('RUNTIME_ORGANIZER_BUDGET');
     const settings=await admin.from('system_settings').select('key,value').in('key',['v3_summary_model_id','v3_summary_max_tokens']);
     if(settings.error){if(policy.real)stagingRpcFailure(settings.error);throw new Error('RUNTIME_ORGANIZER_DENIED');}
@@ -142,22 +156,22 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(!Number.isSafeInteger(maxOutputTokens)||maxOutputTokens<1)throw new Error('RUNTIME_MODEL_CAPACITY');
    const inputLimit=inputCapacity(row.data,maxOutputTokens);
    if(candidates.length)selectRuntimeHistory([],[{role:'user',content:matchingInput(input.input,candidates)}],{instructions:MATCH_INSTRUCTIONS,inputBytes:inputLimit,historyItems:0,toolBytes:0});
-   selectRuntimeHistory([], [{role:'user',content:runtimeScopeInput(input.input,session.scopeMaterial)}],{instructions,inputBytes:inputLimit,historyItems:0,toolBytes:policy.searchEnabled?2048:0});
-   // Only mentor dialogue is interactive in MR-2; AC1-4 extends that scope later.
-   const mentorStream=Boolean(policy.real&&policy.opcTurnToken&&policy.mentorStream);
+   selectRuntimeHistory([], [{role:'user',content:runtimeScopeInput(input.input,session.scopeMaterial)}],{instructions,inputBytes:inputLimit,historyItems:0,toolBytes:mentorStream?askQuestionToolBytes():policy.searchEnabled?2048:0});
+   // New mentor turns use the interactive format; replays returned before this branch.
    if(mentorStream&&candidates.length)throw new Error('RUNTIME_MODEL_DENIED');
    let reasoning:ReasoningPolicy|undefined;
    const organize=input.selection.kind==='organizer';
+   if(mentorStream&&!policy.real)reasoning={parameter:'none'};
    if(policy.real&&(mentorStream||organize))
     reasoning=admitReasoning(row.data,organize?'organize':'interactive',realModel(row.data).providerLimits!.providerSlug,maxOutputTokens);
    const organizerFormat=Boolean(policy.real&&!mentorStream&&(organize||attachedOrganizer));
    if(organizerFormat&&!reasoning)reasoning={parameter:'none'};
-   const providerRequestFormat=mentorStream?'serial-tools-v4-stream':organizerFormat?'serial-tools-v6-reasoning':'serial-tools-v2';
+   const providerRequestFormat=mentorStream?'agent-turn-v5-stream':organizerFormat?'serial-tools-v6-reasoning':'serial-tools-v2';
    const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:'scope-projection-v1',
-    ...(policy.real?{providerRequestFormat}:{}),...(reasoning?{reasoning}:{}),role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
+    ...(policy.real||mentorStream?{providerRequestFormat}:{}),...(reasoning?{reasoning}:{}),role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
     ...(policy.opcTurnToken?{opcTurnToken:uuid.parse(policy.opcTurnToken)}:{}),...(candidates.length?{matching:{candidates}}:{}),...(session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...(workspaceContext?{workspaceContext:true}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems:policy.historyItems,network:input.network,
-    tools:[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext?['read_source']:[])],maxToolCalls:(searchAllowed?1:0)+(workspaceContext?Math.min(2,primaryTurns-1):input.sources.length),
+    tools:mentorStream?[ASK_QUESTION_TOOL]:[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext?['read_source']:[])],maxToolCalls:mentorStream?1:(searchAllowed?1:0)+(workspaceContext?Math.min(2,primaryTurns-1):input.sources.length),
     request:input,...(revisionId?{moduleId,skillId,revisionId}:{}),sources:input.sources};
    const selectedIds=new Set([modelId,...(attachedOrganizer?[attachedOrganizer.modelId]:[]),...candidates.map(c=>c.modelId)]);
    const realCalls=policy.real?.callPolicies.filter(c=>selectedIds.has(c.modelId));

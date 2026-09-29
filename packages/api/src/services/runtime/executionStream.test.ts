@@ -79,6 +79,19 @@ describe('streamOriginalExecution',()=>{
  });
 });
 
+it('delivers the first card after final text even when organizer/saving arrive before the reader resumes',async()=>{
+ const c=controlled(),stream=streamOriginalExecution(c.run,undefined,'opc.mentorTurnStream');
+ const first=stream.next();c.emit({type:'text',text:'先分析'});await first;
+ const card={question:'下一步？',options:['甲','乙']};
+ c.emit({type:'text',text:'先分析，再选择。'});c.emit({type:'card',card});
+ c.emit({type:'phase',phase:'organizer'});
+ c.emit({type:'card',card:{question:'不应显示的第二张',options:['丙','丁']}});
+ c.emit({type:'phase',phase:'saving'});c.finish({state:'completed',body:'saved-envelope'});
+ const events=[];for await(const event of stream)events.push(event);
+ expect(events).toEqual([{type:'text',text:'先分析，再选择。'},{type:'card',card},
+  {type:'phase',phase:'saving'},{type:'result',result:{state:'completed',body:'saved-envelope'}}]);
+});
+
 describe('runtimeLocalEndpoint',()=>{
  it('accepts only loopback HTTP for both the endpoint and the database',()=>{
   const saved={endpoint:process.env.V3_RUNTIME_LOCAL_ENDPOINT,database:process.env.NEXT_PUBLIC_SUPABASE_URL};

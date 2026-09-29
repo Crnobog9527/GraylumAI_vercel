@@ -83,15 +83,17 @@ export const TEXT_EVENT_INTERVAL_MS=100;
 export async function* streamOriginalExecution(run:(onProgress:(event:RuntimeProgress)=>void)=>Promise<OriginalExecutionOutcome>,
  timing:RuntimeBudget['timing']|undefined,path:string,now:()=>number=()=>performance.now()):AsyncGenerator<ExecutionStreamEvent>{
  let textEvent:ExecutionStreamEvent|undefined,phaseEvent:ExecutionStreamEvent|undefined,resultEvent:ExecutionStreamEvent|undefined;
+ let cardEvent:ExecutionStreamEvent|undefined,cardSeen=false;
  let done=false,failure:unknown,wake:()=>void=()=>{},lastText:number|undefined;
- const pending=run(event=>{if(event.type==='text')textEvent=event;else phaseEvent=event;wake();})
+ const pending=run(event=>{if(event.type==='text')textEvent=event;
+  else if(event.type==='card'){if(!cardSeen){cardSeen=true;cardEvent=event;}}else phaseEvent=event;wake();})
   .then(result=>{resultEvent={type:'result',result};},error=>{failure=error;}).finally(()=>{done=true;wake();});
  const idle=(ms?:number)=>new Promise<void>(resolve=>{
   const timer=ms===undefined?undefined:setTimeout(resolve,ms);
   wake=()=>{if(timer!==undefined)clearTimeout(timer);resolve();};
  });
  try{
-  while(!done||textEvent||phaseEvent||resultEvent){
+  while(!done||textEvent||cardEvent||phaseEvent||resultEvent){
    if(textEvent){
     const wait=done||lastText===undefined?0:lastText+TEXT_EVENT_INTERVAL_MS-now();
     if(wait>0){await idle(wait);continue;}
@@ -99,6 +101,7 @@ export async function* streamOriginalExecution(run:(onProgress:(event:RuntimePro
     if(event.type==='text'&&event.text)timing?.mark('firstPublicText');
     yield event;
    }
+   else if(cardEvent){const event=cardEvent;cardEvent=undefined;yield event;}
    else if(phaseEvent){const event=phaseEvent;phaseEvent=undefined;yield event;}
    else if(resultEvent){const event=resultEvent;resultEvent=undefined;yield event;}
    else await idle();

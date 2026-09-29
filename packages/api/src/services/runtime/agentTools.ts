@@ -56,3 +56,10 @@ export function askQuestionTool():RuntimeTool{
   description:'Show the user one question card with 2 to 5 short suggested answers. Ends your turn.',
   invalidResult:INVALID_CARD_RESULT,execute:async args=>questionCardToolResult(args)};
 }
+
+/** Conservative serialized-tool allowance; the full SDK request is checked again before dispatch. */
+export function askQuestionToolBytes():number {
+ const tool=askQuestionTool();
+ return Buffer.byteLength(JSON.stringify([{type:'function',function:{name:tool.name,description:tool.description,
+  strict:true,parameters:z.toJSONSchema(askQuestionParameters)}}]));
+}

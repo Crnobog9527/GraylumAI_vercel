@@ -219,7 +219,7 @@ async function fixture(
 // The approved merged workspace currently illustrates these six positioning
 // stages. This is test data, not the production Skill definition: the latter
 // is read from each draft's pinned workflow revision.
-async function mergedPositioningFixture() {
+async function mergedPositioningFixture(configure?: (flow: ReturnType<typeof makeWorkflow>) => void) {
   const titles = ['需求确认','竞品研究','账号定位','内容策略','运营建议','商业规划'];
   const questions = [
     [['product','产品与服务'],['platforms','准备经营的平台'],['time','每周可用时间']],
@@ -236,6 +236,7 @@ async function mergedPositioningFixture() {
       step.information=questions[index].map(([id,title])=>({id,title,required:true,profileKey:id,elicitation:['reference','audience','roles','cadence','offer'].includes(id)?'agent_proposal' as const:'user_fact' as const}));
       flow.report.sections[index].title=titles[index];
     });
+    configure?.(flow);
   },'梳理账号定位 · 六步');
   return result;
 }

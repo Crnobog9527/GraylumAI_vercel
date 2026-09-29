@@ -1,12 +1,28 @@
 # AC1-4 实施方案：纯文字导师回复与提问卡
 
-状态：**总控认可方向，三项 A 类补充已写入；字段对照发现用户可见行为变化，按 Owner 指令暂停代码实现。未运行真实模型、未修改调用上限。**
+状态：**Owner 已选择开场方案 A，总控六点调整已实现；本机检查已完成，交总控审实现。真实 probe/staging 未获授权，调用上限保持 420。**
 
-审查依据：[总控对 `15cd6cd0` 的意见](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5885333399)。本次仅补方案；第 3.1 节是待决定的兼容缺口，不能用本方案原文推导已经接受该行为变化。
+审查依据：[总控对 `15cd6cd0` 的意见](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5885333399)。第 3.1 节保留发现过程；其暂停结论由下面 Owner 决定取代。
 
 目标：新导师开场和回答使用 `agent-turn-v5-stream`，模型输出自然语言、通过 `ask_question` 提问，由宿主构造可持久化信封，消除旧协议依赖模型手写 JSON 的问题。
 
 风险：**high**。涉及准入、提示词、供应商请求字节、冻结重放及付费结果持久化。BILL2 的运行单、预扣公式、回执和最终结算机制沿用。无前端、依赖、迁移、环境配置或生产改动。
+
+## Owner 决定后的六点实施调整
+
+依据：[Owner 选择 A 与总控范围](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5885469701)。此节优先于第 3.1 节历史对照中的原方案假设。
+
+1. **开场自动整理**：新 v5 导师开场由服务端强制附属整理，预留导师 1 + 整理 1，同一执行、运行单、一次最终结算；回答按原 organizeAfter。旧冻结 v4 开场仍为 1 次且无整理。新开场若独立整理配置缺失或不可用，准入拒绝，不静默退回单调用。
+2. **采用服务端做法一，apps/web 零改动**：保留调用方原始 request（含 organizeAfter 默认 false）作为 admission replay 身份，先按原请求查重；只有未命中新准入才通过可信宿主 policy 要求 opening organizer。context.attachedOrganizer 与两次调用预算共同冻结，绝不把原 request.organizeAfter 改成 true。这样现有 openingRequest 省略该字段仍能恢复旧/新执行，requestId 不变；同 requestId 若调用方实际改变原请求仍冲突。页面能从 summary 取得提取字段，SQL 仍按原 request/task 将回合标作 opening。不开前端并行 PR，无上线顺序依赖。若选做法二才需另改 `openingRequest`、对应 opening 单测和页面/恢复 envelope 的请求一致性；本次不采用，也不修改这些文件。
+3. **仅开场追加整理指令全文**（保留原整理指令，最后追加本规则）：
+
+```text
+This is a host-opened turn: the user has not spoken yet. Do not treat the host marker as a user statement. For this opening, extract only a concrete draft recommendation explicitly made in the primary mentor reply for the current question, and only if that field has elicit agent_proposal. Set status to provisional, basis to agent_proposal and nature to decision. Use inputKind answer and targetStepId equal to originalStepId. Do not extract a question, general analysis, a suggested choice that is not a recommendation, or any user_fact field as an answer. If there is no eligible recommendation, return an empty informationPatch. Never confirm or defer a field on the user's behalf.
+```
+
+4. **新增验收**：本机 MENTOR_STREAM 验证 agent_proposal 开场整理后自动填入待核对值，开场两次预留、同一运行单一次 spend；整理失败/结果未知后按原 execution 恢复且不重复派发/扣费；旧 v4 开场的 request/SDK/provider golden 不改。
+5. **无整理回答**：API 仍允许 organizeAfter=false，不自动加调用；v5 这类回合**没有结构化提取**，仅保留正文/卡片，已有字段不删除。此限制现按总控决定明确记录；正常页面回答固定请求整理。整理失败维持原恢复语义，不追加调用或伪造 patch。开场则总是附属整理。
+6. **预算重新计算**：新开场预留 2 次，本机 fixture 20 → 40 积分。总控提供的当前 staging 报价下约 **298 测试积分/开场**，这是本次已接受的预扣变化，执行时以冻结报价为准（本任务未读取/修改报价）。staging 表开场变为 2 次，正常合计 **12 次 = 2 + 5×2**；刷新/断网各最多补一次时上限 **16 次**，等待另行批准。probe 仍为 40 次、累计 453、累计美元 3.5 不变，不把 staging 记入 AC-0 账本。
 
 ## 1. 基线与范围
 
@@ -41,16 +57,16 @@
 2. 对公共文字先 trim，再截到 `AGENT_TURN_MESSAGE_LIMIT`（20000）。依据截断前长度计算 `truncated`，然后调用 `agentTurnBody(message, card)`；绝不把超长原文直接送进会抛错的信封构造函数。
 3. **截断标记放在现有执行结果 JSON 的元数据里**：v5 的 primary checkpoint 和最终 usable_result 保存 `truncated: boolean`。它不进入共享信封类型，不改变 `AgentTurnEnvelope`、`AgentTurnOutcome` 或 `readAgentTurnBody` 的导出形状。回执保留完整原文，重放确定性重建同一正文和标记；cost_pending 的恢复使用已存的完整结果。此标记用于持久化核验，本次不新增 UI 截断提示。已有 JSON 结果允许附加该元数据，无需 SQL 变更。
 4. 卡片只由 `questionCardFromResult(finalOutput)` 提取。合法才发送 card；非法卡片、重复选项、控制字符、额外字段、错误 JSON 不显示卡片，但仍保留有效文字和已付费证据。有效的纯卡片回合允许 message 为空。
-5. 文字为空且没有合法卡片时，用 `INVALID_REPLY_NOTICE` 作 message 再构造信封，让终态完成并正常释放输入/发送锁。当前 runner 会把空 finalOutput 转成 pending，因此需增加仅对 v5 生效的窄分支：仅在供应商交换和 SDK 完成成功、结果为空时允许归一化；不能把网络失败、未知成本、SDK 异常或安全拒绝伪装成完成。
+5. 文字为空且没有合法卡片时，用 `INVALID_REPLY_NOTICE` 作 message 再构造信封，让终态完成并正常释放输入/发送锁。当前 runner 会把空 finalOutput 转成 pending，因此需增加仅对 v5 生效的窄分支：仅在供应商交换成功、finish=stop 且无工具/拒绝内容的空响应时，适配器给 SDK 一个临时空白文本项，防止 SDK 因零 output item 再请求一轮；非流 null 同样归一为空字符串。原回执不改，SDK 正常收尾后再归一化；不能把网络失败、未知成本、SDK 异常或安全拒绝伪装成完成。
 6. v5 多工具调用沿用 #479：只执行第一个，多余调用只留原始证据并记录诊断，不二次派发；旧格式仍拒绝多工具。无工具的自然语言提问也合法显示。
 7. `RuntimeProgress` 增加现有共享 contract 已定义的 card 事件；`streamOriginalExecution` 增加独立、至多一个的 card 槽位。不能让 card 和 phase 共用槽位，导致紧随其后的 organizer/saving 覆盖卡片。先清空最后一条 text，再交付 card，最后 result；正常结果、恢复及消费端断开均须测试。
-8. 在 attached organizer 的 primary checkpoint **之前**生成信封，整理仍处于同一执行和同一运行单，输入继续使用 primary body（现在为宿主信封，包含文字和卡片），不新增整理轮次。checkpoint 与最终 body 完全相同，避免恢复冲突。终态恢复以已存信封显示卡片；无需再次调用模型或重放一个新请求。
+8. 在 attached organizer 的 primary checkpoint **之前**生成信封，整理仍处于同一执行和同一运行单，输入继续使用 primary body（现在为宿主信封，包含文字和卡片），不新增整理轮次。checkpoint 与最终 body 完全相同，避免恢复冲突。终态恢复以已存信封显示卡片；无需再次调用模型或重放一个新请求。v5 单回合的 SDK 历史追加先缓存在本次执行内存，只有 SDK 成功完成并校验输出后才按原批次提交；失败时不保存仅含输入的批次，避免与原执行者冲突。仍允许运行中执行重放已有完整回执，因此服务器进程中断后也能沿用原执行恢复；无成功回执的观察者不重新派发。旧格式保持原路径。
 9. 上述显示长度截断与供应商 `finish_reason=length` 的安全收尾不同：#479 已有的空回复/残缺工具参数 `RUNTIME_OUTPUT_TRUNCATED` 路径保持，禁止执行不完整工具参数，仍保留已付费回执。不能把真正中断的工具伪装成有效卡片。
 
-前端判断（经 A1 核对修正）：U1/U2 的正文/卡片显示与恢复已支持信封，但这不等于旧结构化字段的用户行为完全兼容。下表确认无整理的回合存在可见变化，因此目前不能直接开始实现。不修改页面、组件、样式或 shared/agentTurn.ts；若兼容方案需要前端改变，交总控另派 Claude 窗口；shared 导出形状改变也须先报总控。
+历史前端判断（现由上方服务端做法一解决）：U1/U2 的正文/卡片显示与恢复已支持信封，但这不等于旧结构化字段的用户行为完全兼容。下表确认无整理的回合存在可见变化，因此目前不能直接开始实现。不修改页面、组件、样式或 shared/agentTurn.ts；若兼容方案需要前端改变，交总控另派 Claude 窗口；shared 导出形状改变也须先报总控。
 
 
-### 3.1 A1：旧 JSON 字段去向及实施阻断
+### 3.1 A1：旧 JSON 字段去向及原方案缺口（历史；处理决定见上方）
 
 核对对象为方案 head `15cd6cd009499eeb9f9fbbc0a9e155efaff06066` 的现有代码。另已读取最新 staging `f3b7d6d08bfbe5d9f120e8e89a5432bb8b462522`，相关 `services/opc`、`services/runtime`、定位页面、AGENTS.md 和 ENGINEERING.md 与方案基线无差异。以下是源码与合成输入的本机核对，不是 staging 实测。
 
@@ -67,9 +83,9 @@
 | `summary`（执行结果字段，非导师 body 字段） | attached organizer 单独生成，同一个执行/运行单保存；`readWorkflowMentorExecution` 有 summary 时取其结构化字段、无 summary 才回退 primary | 沿用同一整理调用、同一 summary；v5 primary 仅是正文/卡片信封 | 不能把“没有 summary”理解为总能从 v5 primary 恢复旧字段；非空但无效 summary 也不会触发 primary fallback |
 | `questionId`、step/round/version 等宿主绑定 | 页面请求、固定修订及已有执行/turn 投影提供；决定卡片可否作答、建议是否属于当前问题/版本 | 继续由宿主提供，不是从模型信封补造 | 无计划变化；这些身份只能定位回合，不能代替 informationPatch 的内容或 targetStepId 的语义 |
 
-**必须区分的实际路径：**
+**方案审查时的路径对照（开场缺口现由上方 A 方案解决；无整理回答限制已接受）：**
 
-1. **开场（已确认的阻断项）**：`openingRequest` 不带 organizeAfter，服务端还显式拒绝 `opening && organizeAfter`。旧提示要求 agent_proposal 开场给出建议并输出 patch；页面会在满足上述版本/编辑条件时填入当前空字段。v5 同样只用 1 次调用却删除这些字段后，建议只留在对话正文/卡片中，当前信息值可能仍为空，“确认当前信息，继续”可继续处于禁用状态，需用户额外回答触发整理或手动填写。这是现有体验变化，尚未获批。
+1. **开场（已确认的阻断项）**：`openingRequest` 不带 organizeAfter，服务端还显式拒绝 `opening && organizeAfter`。旧提示要求 agent_proposal 开场给出建议并输出 patch；页面会在满足上述版本/编辑条件时填入当前空字段。v5 同样只用 1 次调用却删除这些字段后，建议只留在对话正文/卡片中，当前信息值可能仍为空，“确认当前信息，继续”可继续处于禁用状态，需用户额外回答触发整理或手动填写。这是当时方案的体验变化；现已批准开场附属整理，保留自动填值体验。
 2. **当前页面普通回答 + 整理模型缺失/无效**：`page.tsx:979` 固定发送 `organizeAfter:true`；`admission.ts:107–124` 在模型/配置验证阶段拒绝，早于 runtime_admit 和供应商调用。当前并没有“整理没配置就降级成导师 patch”的页面流程；既有信息保持，新信息不写入。v5 保持该拒绝行为，无新增降级或调用。
 3. **API 允许的不带整理回答**：`opcGenerate` 的 organizeAfter 默认 false。旧导师负责结构化字段，v5 下只有正文/卡片。页面当前正常发送不选该分支，但 API 可达；该分支的自动填值、待核对建议、非答案分类和跨步目标均有兼容损失，不能以正常页面总带整理为由忽略。
 4. **整理调用失败/结果未知**：现有执行器先 checkpoint 主回复，整理失败走现有中断/取消/cost_pending 等恢复路径，不伪造成功 summary；页面自动填表要求 completed。此前带整理的导师本来就被要求只回 message，因此不能宣称旧 v4 在这条正常路径保证有 patch 兜底。v5 信息栏继续保留已存内容，不自动补出新信息；重放/恢复的付款和状态语义不改变。若 primary 偶然含额外旧字段，旧 parser 在无 summary 时能读取它，但这不构成可靠的失败恢复协议。
@@ -88,7 +104,7 @@
 
 证据位置（行号对应上述方案 head）：`mentor-response.ts:61–122,130–148,171–239`；`page.tsx:630–715,979,1101–1140,1695–1712,1912–1958,1989`；`mentor-turn.ts:83–91`；`services/opc/service.ts:128–131,209–217,231–253`；`services/runtime/admission.ts:107–124`、`execute.ts:261–308`。
 
-**结论及推荐：暂停实现并交总控处理。** 推荐保留现有自动填入待核对信息与跨步建议体验，不把它们静默删掉；由总控确认兼容方案再启用 v5。增加开场整理会改变目前 1 次调用/预扣和“开场禁止整理”的规则；要求用户额外回答才能填表则是产品行为变化；从文字猜字段、硬编码规则或让导师重新输出 JSON 都不应作为未经批准的修补。本次不采用其中任何一种，也不预先承诺无需前端修改。需要前端变化时，由总控另派 Claude 窗口。
+**当时的结论及推荐（已被上方 Owner 决定取代）：暂停实现并交总控处理。** 推荐保留现有自动填入待核对信息与跨步建议体验，不把它们静默删掉；由总控确认兼容方案再启用 v5。增加开场整理会改变目前 1 次调用/预扣和“开场禁止整理”的规则；要求用户额外回答才能填表则是产品行为变化；从文字猜字段、硬编码规则或让导师重新输出 JSON 都不应作为未经批准的修补。此段仅保留发现过程；当前实施采用上方已批准的服务端开场附属整理，前端不改。需要前端变化时，由总控另派 Claude 窗口。
 
 ## 4. 步骤信息与提示词全文
 
@@ -96,7 +112,7 @@
 
 传入：当前步骤 id/title、所有声明字段的 id/title/required/elicit/status（缺值为 missing）、当前 questionId、现有可用 workflowContext。旧修订未声明 elicitation 时依现有约定取 user_fact，不根据标题、字段名、位置或关键词猜角色。保留当前步骤资源预加载，不加 read_skill_file。
 
-完整替换**新导师准入专属的宿主指令**如下。原 Skill 本文和当前步骤资源继续由已校验 loader 加载并位于该段之前；不在此公开复制私有 Skill。非导师及整理提示词本轮不改。`{{...}}` 均为 builder 按固定 key 顺序 JSON.stringify 后插入的数据，不是额外模型调用；最后的 OPENING 段仅开场追加。
+完整替换**新导师准入专属的宿主指令**如下。原 Skill 本文和当前步骤资源继续由已校验 loader 加载并位于该段之前；不在此公开复制私有 Skill。非导师提示词不改；整理提示词仅在开场追加上方已批准规则。`{{...}}` 均为 builder 按固定 key 顺序 JSON.stringify 后插入的数据，不是额外模型调用；最后的 OPENING 段仅开场追加。
 
 ```text
 Act as the single continuous mentor for the supplied workflow. Follow its pinned Skill and keep continuity across steps. Answer the user's actual message first, then focus on the current information question and the most consequential missing substance. Reply in the user's language.
@@ -132,20 +148,21 @@ This turn is opened by the host; the user has not spoken yet. Do not invent, quo
 
 ## 5. 调用数和预扣
 
-| 回合 | 旧预留 | 新预留 | 正常供应商调用 |
-| --- | --- | --- | --- |
-| 导师开场 | 1 | 1 | 导师 1 |
-| 导师回答，不带整理 | 1 | 1 | 导师 1 |
-| 导师回答，带整理 | 2 | 2 | 导师 1 + 整理 1 |
-| 同一请求恢复/重放 | 沿用原运行单 | 沿用原运行单 | 已有成功回执不重新派发 |
+| 回合 | 旧预留 | 新预留 | 正常供应商调用 | 预扣变化 |
+| --- | --- | --- | --- | --- |
+| 新 v5 导师开场 | 1 | 2 | 导师 1 + 整理 1 | 本机 20 → 40；总控提供的 staging 报价约 298 测试积分 |
+| 已冻结 v4 开场重放 | 1 | 1 | 原冻结导师 1，不增加整理 | 沿用原冻结值 |
+| 导师回答，不带整理 | 1 | 1 | 导师 1 | 不变 |
+| 导师回答，带整理 | 2 | 2 | 导师 1 + 整理 1 | 不变 |
+| 同一请求恢复/重放 | 沿用原运行单 | 沿用原运行单 | 已有成功回执不重新派发 | 不新增预扣 |
 
 ask_question 是当前响应内的确定性宿主工具，不触发第二次模型调用；`maxTurns` 主调用仍为 1。AC1-5 将来增加的参考文件调用不在这里预留。
 
-预扣继续使用现有公式：`ceil(maxCalls × 所选调用报价中最大的 upperUsd × creditsPerUsd × multiplier)`，因此在相同报价与配置下增量为 **0 积分、0 次预留调用**。本机固定 fixture 的每次上界 0.02 美元、1000 积分/美元、倍率 1，对照为开场 20、带整理回答 40 积分，两者均不变；这些是合成测试值，不是 staging 当前报价或账号余额。staging 绝对预扣由执行时有效报价决定，本次不更改报价或配置。指令和 schema 增长可能改变实际 token 成本，不等于增加预扣上界；每条消息仍一个运行单，汇总实际成本后只结算一次。
+预扣继续使用现有公式：`ceil(maxCalls × 所选调用报价中最大的 upperUsd × creditsPerUsd × multiplier)`，回答的预扣不变；新开场增加 **1 次整理预留**。本机固定 fixture 的每次上界 0.02 美元、1000 积分/美元、倍率 1，开场从 20 变为 40，带整理回答仍为 40 积分；这些是合成测试值，不是 staging 当前报价或账号余额。staging 绝对预扣由执行时有效报价决定，本次不更改报价或配置。指令和 schema 增长可能改变实际 token 成本，不等于增加预扣上界；每条消息仍一个运行单，汇总实际成本后只结算一次。
 
 ## 6. 实施文件与最小改动
 
-- `services/opc/service.ts` 和小的 `agentTurnPrompt.ts`：替换导师宿主指令，生成固定修订的步骤材料；保留非导师、整理、导航、确认规则及现有资源加载。
+- `services/opc/service.ts` 和小的 `agentTurnPrompt.ts`：替换导师宿主指令，生成固定修订的步骤材料；保留非导师、导航、确认规则及现有资源加载；整理仅追加开场规则。
 - `services/runtime/admission.ts`：只切换新导师准入格式、工具和容量计算，复用 MR-2。
 - `services/runtime/execute.ts` 和小的结果归一化 helper：公共文字、合法卡片、信封、截断元数据、兜底、checkpoint/完成一致性。
 - `services/runtime/runner.ts`：仅处理 v5 已成功完成却没有正文/卡片的窄边界，保持旧格式异常和请求字节。
@@ -199,7 +216,7 @@ node packages/db/tests/v3/run-workbench.mjs --opc-only --staging-host --with-sta
 
 | 场景 | 验收 | 正常真实调用 |
 | --- | --- | --- |
-| 新草稿开场 | 新页面加载前安装能跨跳转保留的观察；记录第一步首字；文字/卡片正确、questionId 非空 | 1 |
+| 新草稿开场 | 新页面加载前安装能跨跳转保留的观察；记录第一步首字；文字/卡片正确、questionId 非空；agent_proposal 建议整理后自动填入 | 2 |
 | 卡片选项作答 | 选项文字作为下一条输入、回答与当前问题对应、出现可读正文/合法卡片 | 2 |
 | 我不确定 | 点击固定控件后导师先分析再建议，不把这句话当字段答案 | 2 |
 | 自由文字回答 | Codex 用带时间戳的 DOM 记录加截图确认同一回复至少 3 次变长、无重复片段；左侧积分无需离页更新 | 2 |
@@ -207,7 +224,7 @@ node packages/db/tests/v3/run-workbench.mjs --opc-only --staging-host --with-sta
 | 真正断网 | 流进行中让浏览器网络确实离线至少 5 秒，留下失败请求/断流证据，再恢复原请求 | 2 |
 | 非名单测试身份 | 已登录仍被准入拒绝、输入/原请求保留；没有新执行、运行单、spend 或供应商调用 | 0 |
 
-预计 **11 次**（1 + 5×2）；只为刷新/断网错过进行中窗口允许最多各补一次，共 **最多 15 次**。补测前先只读确认上次终态，未知结果不重试。恢复本身不能额外发出已经有成功回执的调用。任何重复执行/派发/扣费立即停止。
+预计 **12 次**（2 + 5×2）；只为刷新/断网错过进行中窗口允许最多各补一次，共 **最多 16 次**。补测前先只读确认上次终态，未知结果不重试。恢复本身不能额外发出已经有成功回执的调用。任何重复执行/派发/扣费立即停止。
 
 每条合法消息核对：只有一次 opc.mentorTurnStream 正常发起；只有一个 execution、一个 BILL2 run、一条最终 spend。回答的导师和整理两次调用属于同一运行单，不能误认为两次扣费。记录恢复使用 runtime.executeStream 还是原 requestId 的 mentorTurnStream、完整卡片与正文持久化、积分即时刷新。
 
@@ -217,7 +234,7 @@ node packages/db/tests/v3/run-workbench.mjs --opc-only --staging-host --with-sta
 
 ## 10. 交付、审查与恢复
 
-1. Draft PR 已创建。总控方向审查通过，三项 A 类已补；由于 A1 确认了用户可见行为变化，先推送方案并给 Owner PR/head，暂停代码实现，等待总控/Owner 对兼容方案作出决定。
+1. Owner 已选 A、总控六点已补；直接实现，不再审方案。完成实现与本机检查后以 draft PR/head 交总控，未通过前不标 ready、不请求机器人审查。
 2. 方案通过后按范围实现、完成本机验证与同范围修复；实际 probe 和 staging 调用分别另获 Owner 批准，绝不由“允许实现”推导调用许可。
 3. 推送稳定实现后交付 PR/head 给总控；总控通过才标 ready 并评论 `@codex review`。机器人结论回报 Owner；有 P0/P1 或新的 P2 先报告，遵守本任务要求不直接修。
 4. 仅 Owner 说“允许合并#本PR号”才执行。立即刷新 exact head/base、全部必需检查、完整语义审查、所有讨论解决、mergeability 及相关 writer，使用 squash 和 match-head-commit；不自动合并，不操作 main/production。
@@ -225,10 +242,12 @@ node packages/db/tests/v3/run-workbench.mjs --opc-only --staging-host --with-sta
 
 ## Handoff
 
-- Done：原方案及总控要求的 A1 字段去向表、A2 本机累计上限 453、A3 真实浏览器 DOM 时间戳加截图观察方式均已补齐；只读核对字段消费路径并用合成输入复现无整理时的行为差异。
-- 当前修改：仅本方案文档，没有功能代码、工具 schema、提示词运行实现、预算常量或配置修改。
-- Next：Owner 转总控查看 A1 行为差异，先确定兼容处理，再开始实现。不是要求重审没有问题的方案内容。
-- Blocker：无整理的开场/回答丢失 patch 与分类/跨步目标，属于用户可见行为变化；按 Owner 本轮明确条件停止代码实现。
-- 待决定/授权：上述行为兼容方案；总控通过实现后的 40 次启用前 probe（累计上限 420 → 453、累计美元上限 3.5 不变）；合并后最多 15 次 staging 调用；最终 exact candidate 合并。上述互不替代。
-- 验证状态：源码/交接核对与上述 5 个合成输入只读对照完成；文档检查按本次修订执行。本机实现测试、真实 probe、staging 交互、独立代码审查均 **NOT_RUN**。原方案 head `15cd6cd0` 的 10 项必需检查均通过；本次文档新 head 的 CI 单独触发，不能继承原通过结论。
-- 本 PR 是计划候选，尚不是可合并的功能候选。
+- Done：A1 字段去向对照、A2 未来 probe 上限 453、A3 真实浏览器 DOM 时间戳加截图观察方式，以及 Owner 选择 A 后的六点全部纳入；新导师准入 v5、宿主信封/截断/兜底、卡片事件、开场附属整理、MR-2 冻结设置与旧 v4 重放已实现。
+- 兼容和计费：保留原 request.organizeAfter/requestId 身份；新开场预留两次但同一执行/运行单一次结算；无整理回答仅文字/卡片。v5 SDK 成功后才提交历史批次，失败不写入仅含输入的批次；运行中及中断后的恢复仍可复用原回执。
+- Probe 仅准备脚本和合成测试：使用真实导出的 strict schema、固定 30 卡片 + 10 文字样本、首字 median/p95/min/max、完整卡可用时间与固定分母统计；卡片语义仍需人工判定。累计调用代码上限仍为 420，未发出真实请求。
+- 范围：apps/web、共享 agentTurn 导出、依赖、迁移、环境配置均未改。浏览器所需改动只在本机测试夹具与启动脚本内。
+- 本机 PASS：web typecheck、web lint；全量 API 133 个文件、2895 通过 / 3 跳过（使用 `pnpm test:api --maxWorkers=2`）；code-size（416 源文件）、diff-check；runtime without-app 107 通过 / 5 按既定模式排除；BILL2 without-app 78 通过 / 0 跳过。API 首次默认并行运行触发现有 contentModerator 时间阈值失败，单文件及限制并行后的全量复跑通过，未修改无关实现。
+- 本机浏览器 PASS：MENTOR_STREAM 的 normal / refresh 两项在完整筛选运行中通过；proposal 在修正夹具与等待保存的断言后单项通过（其余 416 项为 pattern 排除）。三个场景均有 DOM 时间戳和截图：开场正文至少 4 次累计增长；卡片显示/作答、开场建议自动填入待核对、原执行恢复及每条消息一个执行/运行单/最终 spend 均通过。运行使用本机合成传输；不是 staging 或真实模型质量证明。启动预载修复另有 3 项 Node 子进程回归通过。
+- Next：推送并交付 draft PR/head 给总控审实现；总控通过后才标 ready 并请求机器人审查。CI 以新 head 单独核对，不继承先前文档 head 的通过结论。
+- NOT_RUN / 待单独授权：40 次启用前真实 probe（累计上限拟 420 → 453，累计美元上限 3.5 不变）、合并后正常 12 / 最多 16 次真实 staging 调用、独立代码审查、合并。上述授权互不替代。
+- 当前不能宣称真实模型质量通过或 staging 验收通过，也尚未满足合并条件。

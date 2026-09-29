@@ -115,6 +115,10 @@ export const scenarioSchema = z.object({
   step: z.number().int().min(0).optional(),
   /** Operator's expectation for later manual labelling of step completion. */
   expectStepComplete: z.boolean().optional(),
+  currentStepId: z.string().min(1).max(100).optional(),
+  questionId: z.string().min(1).max(100).optional(),
+  opening: z.boolean().optional(),
+  fieldValues: z.record(z.string(), z.object({status: z.enum(['missing', 'provisional', 'confirmed', 'deferred'])}).strict()).optional(),
 }).strict();
 export type Scenario = z.infer<typeof scenarioSchema>;
 
@@ -177,7 +181,7 @@ export function parsePrivateJson<T>(text: string, schema: z.ZodType<T>, label: s
   throw new Error(`PROBE_${label}_INVALID: ${where.join('; ')}`);
 }
 
-export function loadScenarios(path: string | undefined, skill: LoadedSkill): {scenarios: Scenario[]; digest: string} {
+export function loadScenarios(path: string | undefined, skill: LoadedSkill, agentTurn = false): {scenarios: Scenario[]; digest: string} {
   let scenarios: Scenario[];
   if (path) scenarios = parsePrivateJson(readRegular(resolve(path)), scenarioFile, 'SCENARIOS').scenarios;
   else if (skill.isFixture) scenarios = fixtureScenarios.map(scenario => scenarioSchema.parse(scenario));
@@ -185,7 +189,7 @@ export function loadScenarios(path: string | undefined, skill: LoadedSkill): {sc
   if (new Set(scenarios.map(scenario => scenario.id)).size !== scenarios.length) throw new Error('PROBE_SCENARIO_ID_DUPLICATE');
   for (const scenario of scenarios) {
     // Text trials run without tools, so a replayed tool call would have no definition.
-    if (scenario.kind === 'text' && scenario.history.some(item => 'askQuestion' in item)) {
+    if (!agentTurn && scenario.kind === 'text' && scenario.history.some(item => 'askQuestion' in item)) {
       throw new Error(`PROBE_SCENARIO_TOOL_HISTORY_UNSUPPORTED: ${scenario.id} is a text scenario`);
     }
     if (scenario.step !== undefined && !skill.workflow?.[scenario.step]) {

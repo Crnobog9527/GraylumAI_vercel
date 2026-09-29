@@ -2,6 +2,7 @@
 // AC-0b model probe. Standalone script: application code must never import it.
 import {Agent, OpenAIChatCompletionsModel, Runner, tool, type AgentInputItem} from '@openai/agents';
 import OpenAI from 'openai';
+import {agentTurnCardAvailable, agentTurnPrompt, agentTurnTool, firstCallOnly} from './agentTurn.ts';
 import {z} from 'zod';
 import type {Budget} from './budget.ts';
 import type {ProbeConfig} from './config.ts';
@@ -38,6 +39,8 @@ export type TrialResult = {
   firstContentMs?: number;
   /** First text delta the SDK emitted to the caller, from trial start. */
   firstSdkTextMs?: number;
+  /** AC1-4 only: valid complete card after SDK completion, not tool-argument start. */
+  cardAvailableMs?: number;
   /** First visible element (text or tool-call start), from trial start. */
   firstVisibleMs?: number;
   contentChars: number;
@@ -83,6 +86,7 @@ export function historyItems(scenario: Scenario): AgentInputItem[] {
 const codePoints = (text: string) => [...text].length;
 
 export async function runTrial(options: {
+  agentTurn?: boolean;
   kind: TrialKind;
   scenario: Scenario;
   index: number;
@@ -100,7 +104,9 @@ export async function runTrial(options: {
   const trialStart = options.clock();
   const transport = probeTransport({...options, trialStart});
   const client = new OpenAI({
-    apiKey: 'ac0-local-only', baseURL: LOCAL_BASE_URL, fetch: transport.fetch, maxRetries: 0, timeout: options.timeoutMs + 5_000,
+    apiKey: 'ac0-local-only', baseURL: LOCAL_BASE_URL,
+    fetch: options.agentTurn ? async (url, init) => firstCallOnly(await transport.fetch(url, init)) : transport.fetch,
+    maxRetries: 0, timeout: options.timeoutMs + 5_000,
   });
   const model = new OpenAIChatCompletionsModel(client, config.model, {strictFeatureValidation: true});
   let referenceReads = 0;
@@ -123,12 +129,14 @@ export async function runTrial(options: {
       return readReference(options.skill, args.path);
     },
   });
-  const tools = kind === 'text' ? [] : kind === 'ask' ? [ask] : [read, ask];
-  const instructions = [HOST_RULES, kind === 'reference' ? REFERENCE_RULE : '', stepRules(options.skill, scenario.step),
-    '# Skill', options.skill.instructions].filter(Boolean).join('\n\n');
+  const tools = options.agentTurn ? [agentTurnTool(() => { askExecutions += 1; })]
+    : kind === 'text' ? [] : kind === 'ask' ? [ask] : [read, ask];
+  const instructions = options.agentTurn ? agentTurnPrompt(options.skill, scenario)
+    : [HOST_RULES, kind === 'reference' ? REFERENCE_RULE : '', stepRules(options.skill, scenario.step),
+      '# Skill', options.skill.instructions].filter(Boolean).join('\n\n');
   const agent = new Agent({
     name: 'AC-0 probe mentor', model, instructions, tools,
-    toolUseBehavior: kind === 'text' ? 'run_llm_again' : {stopAtToolNames: ['ask_question']},
+    toolUseBehavior: !options.agentTurn && kind === 'text' ? 'run_llm_again' : {stopAtToolNames: ['ask_question']},
     // No parallelToolCalls: no catalogued route of the probed models declares
     // parallel_tool_calls, so with require_parameters every route was ineligible
     // (404). Several tool calls in one turn are counted instead (classify.ts).
@@ -141,6 +149,7 @@ export async function runTrial(options: {
   // maxTurns stops it before a second provider call and the trial records it.
   const maxTurns = kind === 'reference' ? 3 : 1;
   let firstSdkTextMs: number | undefined;
+  let cardAvailableMs: number | undefined;
   let finalOutput: string | undefined;
   let sdkError: string | undefined;
   try {
@@ -150,6 +159,7 @@ export async function runTrial(options: {
     }
     await result.completed;
     finalOutput = typeof result.finalOutput === 'string' ? result.finalOutput : undefined;
+    if (options.agentTurn && agentTurnCardAvailable(finalOutput)) cardAvailableMs = options.clock() - trialStart;
   } catch (error) {
     sdkError = error instanceof Error ? error.constructor.name + ': ' + options.redact(error.message).slice(0, 200) : 'unknown';
   } finally {
@@ -165,7 +175,8 @@ export async function runTrial(options: {
   // read_reference is invisible to the user; only text or the question card count.
   const askCall = calls.find(call => call.facts.toolCalls.some(toolCall => toolCall.name === 'ask_question'));
   const firstAskMs = askCall?.facts.firstToolMs !== undefined ? askCall.sentAtMs + askCall.facts.firstToolMs : undefined;
-  const firstVisible = [firstContentMs, firstAskMs].filter((value): value is number => value !== undefined);
+  const visibleTimes = options.agentTurn ? [firstSdkTextMs, cardAvailableMs] : [firstContentMs, firstAskMs];
+  const firstVisible = visibleTimes.filter((value): value is number => value !== undefined);
   const chars = codePoints(content);
   const window = firstContentMs !== undefined && lastContentMs !== undefined ? lastContentMs - firstContentMs : 0;
   const reasoningTokens = calls.reduce((sum, call) => sum + (call.facts.usage?.reasoningTokens ?? 0), 0);
@@ -181,6 +192,7 @@ export async function runTrial(options: {
     ...(transport.state.httpStatus !== null ? {httpStatus: transport.state.httpStatus} : {}),
     ...(sdkError ? {sdkError} : {}),
     totalMs, firstContentMs, firstSdkTextMs,
+    ...(options.agentTurn && cardAvailableMs !== undefined ? {cardAvailableMs} : {}),
     firstVisibleMs: firstVisible.length ? Math.min(...firstVisible) : undefined,
     contentChars: chars,
     charsPerSecond: window > 0 ? chars / (window / 1000) : undefined,

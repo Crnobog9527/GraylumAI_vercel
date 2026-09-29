@@ -3,6 +3,7 @@ import {it,expect,vi} from 'vitest';
 import {createHash} from 'node:crypto';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {runtimeAdmissionService} from './admission';
+import {OPENING_INPUT} from '../../shared/opcQuestions';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 const actor='10000000-0000-4000-8000-000000000001',sessionId='10000000-0000-4000-8000-000000000002';
 const first='10000000-0000-4000-8000-000000000003',second='10000000-0000-4000-8000-000000000004',organizer='10000000-0000-4000-8000-000000000005';
@@ -31,7 +32,7 @@ function fixture(){
  const policy={real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01',callPolicies:quotes},account:'synthetic',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:8192,inputBytes:32000,historyItems:10,opcTurnToken:requestId,mentorStream:true};
  const service=runtimeAdmissionService(user,admin,policy);
  const input={sessionId,requestId,input:'Synthetic facts',selection:{kind:'ordinary' as const,modelId:first},network:'deny',organizeAfter:true};
- return {models,service,input,reads:()=>reads,selectedColumns,rpc,policy,user,admin};
+ return {models,service,input,frozen,reads:()=>reads,selectedColumns,rpc,policy,user,admin};
 }
 it('new model selection reads that model setting; replay bypasses changed config and preserves hash',async()=>{
  const f=fixture();
@@ -59,7 +60,7 @@ it.each([false,true])('freezes independent organizer settings (standalone=%s)',a
  const result=await service.prepare({...f.input,...(standalone?{selection:{kind:'organizer'},organizeAfter:false}:{})});
  const context=standalone?result.context:result.context.attachedOrganizer;
  expect(context.reasoning).toEqual({parameter:'reasoning',value:{effort:'max'}});
- expect(result.context.providerRequestFormat).toBe(standalone?'serial-tools-v6-reasoning':'serial-tools-v4-stream');
+ expect(result.context.providerRequestFormat).toBe(standalone?'serial-tools-v6-reasoning':'agent-turn-v5-stream');
  if(!standalone)expect(result.context.reasoning).toEqual({effort:'none'});
 });
 it.each(['missing','route','organizer-route'] as const)('denies %s before admission/BILL2 reservation',async kind=>{
@@ -80,4 +81,53 @@ it('reasoning alone changes sourceHash, including independent organizer defaults
  const before=await original.service.prepare(original.input),after=await changed.service.prepare(changed.input);
  expect(after.context).toEqual({...before.context,attachedOrganizer:{...before.context.attachedOrganizer,reasoning:{parameter:'reasoning',value:{enabled:false}}}});
  expect(after.billing.sourceHash).not.toBe(before.billing.sourceHash);
+});
+
+it.each([false,true])('new openings attach an organizer, preserving caller request (real=%s)',async real=>{
+ const f=fixture();
+ if(!real)for(const model of f.models)model.provider='fixture';
+ const service=runtimeAdmissionService(f.user,f.admin,{...f.policy,real:real?f.policy.real:undefined,organizeOpening:true});
+ const input={...f.input,input:OPENING_INPUT,organizeAfter:false};
+ const result=await service.prepare(input);
+ expect(result.context.request).toEqual({...input,sources:[]});
+ expect(result.context).toMatchObject({providerRequestFormat:'agent-turn-v5-stream',
+  tools:['ask_question'],network:'deny',sources:[],maxToolCalls:1,maxTurns:1,
+  reasoning:real?{effort:'none'}:{parameter:'none'},
+  attachedOrganizer:{modelId:organizer,...(real?{reasoning:{parameter:'none'}}:{})},
+ });
+ expect(result.context).not.toHaveProperty('matching');expect(result.context).not.toHaveProperty('workspaceContext');
+ expect(result.billing.limits).toMatchObject({maxCalls:2,credits:real?8:40,maxPreDeduct:real?8:40});
+ expect(result.billing.callPolicy).toHaveLength(2);
+ const reads=f.reads();f.models[0]!.config.reasoning.purposes={};f.models[2]!.is_active='false';
+ expect(await service.prepare(input)).toEqual(result);expect(f.reads()).toBe(reads);
+ expect(f.rpc.mock.calls.filter(([name])=>name==='runtime_admit')).toHaveLength(1);
+ expect(f.rpc.mock.calls.filter(([name])=>name==='runtime_admission_replay')
+  .every(([,args])=>args.p_request.organizeAfter===false)).toBe(true);
+});
+it('an answer without organizer remains one call and contains no fabricated extraction',async()=>{
+ const f=fixture(),service=runtimeAdmissionService(f.user,f.admin,{...f.policy,maxCalls:1});
+ const result=await service.prepare({...f.input,organizeAfter:false});
+ expect(result.context.providerRequestFormat).toBe('agent-turn-v5-stream');
+ expect(result.context).not.toHaveProperty('attachedOrganizer');
+ expect(result.context).not.toHaveProperty('informationPatch');expect(result.billing.limits.maxCalls).toBe(1);
+});
+it('old v4 opening replay bypasses new organizer and current reasoning reads with byte-identical payload',async()=>{
+ const f=fixture(),input={...f.input,input:OPENING_INPUT,organizeAfter:false};
+ const context={providerRequestFormat:'serial-tools-v4-stream',request:{...input,sources:[]},
+  tools:[],reasoning:{effort:'none'},instructions:'Frozen legacy JSON instructions',maxTurns:1};
+ const old={executionId:requestId,context,billing:{limits:{maxCalls:1},
+  sourceHash:createHash('sha256').update(JSON.stringify(context)).digest('hex')}};
+ const bytes=JSON.stringify(old);f.frozen.set(requestId,old);
+ f.models[0]!.config.reasoning.purposes={};f.models[2]!.is_active='false';
+ const service=runtimeAdmissionService(f.user,f.admin,{...f.policy,organizeOpening:true});
+ expect(JSON.stringify(await service.prepare(input))).toBe(bytes);expect(f.reads()).toBe(0);
+ expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
+});
+it.each(['auto','workspace','sources'] as const)('v5 refuses %s before reserving any money',async kind=>{
+ const f=fixture(),service=runtimeAdmissionService(f.user,f.admin,
+  {...f.policy,...(kind==='workspace'?{workspaceContext:true}:{})});
+ const input={...f.input,...(kind==='auto'?{selection:{kind:'auto',modelId:first}}:{}),
+  ...(kind==='sources'?{sources:[{projectId:first,roundId:second,sourceVersionId:organizer,hash:'a'.repeat(64)}]}:{})};
+ await expect(service.prepare(input)).rejects.toThrow('RUNTIME_CONTEXT_INVALID');
+ expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
 });

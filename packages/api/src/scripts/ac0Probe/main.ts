@@ -5,6 +5,7 @@ import {appendFileSync, mkdirSync, statSync, writeFileSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createBudget, HARD_MAX_CALLS, HARD_MAX_USD, memoryLedger, nanoToUsd, usdToNano, type LedgerStore} from './budget.ts';
+import {agentTurnMarkdown, agentTurnMeasurement, agentTurnSummary} from './agentTurn.ts';
 import {syntheticUpstream} from './dryRun.ts';
 import {acquireLedgerLock, fileLedger, recordExternalUsage} from './ledger.ts';
 import {accountHome, assertOutsideRepository, realPath} from './paths.ts';
@@ -81,7 +82,7 @@ export async function runProbe(argv: string[], env: Record<string, string | unde
     assertOutsideRepository(args.outDir);
     if (args.skillDir) assertOutsideRepository(args.skillDir, 'skill');
     const skill = loadSkill(args.skillDir);
-    const {scenarios, digest} = loadScenarios(args.scenarios, skill);
+    const {scenarios, digest} = loadScenarios(args.scenarios, skill, args.agentTurn);
     const plan = buildPlan(args, skill, scenarios, digest);
     const mode = args.live ? 'live' : 'dry-run';
     let ledger: LedgerStore = memoryLedger();
@@ -102,6 +103,10 @@ export async function runProbe(argv: string[], env: Record<string, string | unde
       }
       if (before.calls >= HARD_MAX_CALLS || before.nanoUsd >= usdToNano(HARD_MAX_USD)) {
         throw new Error(`PROBE_TOTAL_BUDGET_EXHAUSTED: the ledger has reached ${HARD_MAX_CALLS} calls or $${HARD_MAX_USD}`);
+      }
+      if (plan.agentTurn && (before.calls + plan.plannedCalls > HARD_MAX_CALLS ||
+        before.nanoUsd + usdToNano(plan.plannedUsdUpperBound) > usdToNano(HARD_MAX_USD))) {
+        throw new Error('PROBE_AGENT_TURN_CUMULATIVE_CAPACITY_INSUFFICIENT');
       }
       const key = readKey(env);
       redact = redactor([key]);
@@ -131,11 +136,12 @@ export async function runProbe(argv: string[], env: Record<string, string | unde
             break;
           }
           const result = await runTrial({
-            kind, scenario: pool[index % pool.length]!, index, config, skill, maxTokens: plan.maxTokens,
+            agentTurn: plan.agentTurn, kind, scenario: pool[index % pool.length]!, index, config, skill, maxTokens: plan.maxTokens,
             timeoutMs: plan.timeoutMs, budget, upstream, authorization, clock, redact,
           });
           results.push(result);
-          appendFileSync(join(runDir, 'results.jsonl'), redact(JSON.stringify(result)) + '\n', {mode: 0o600});
+          const recorded = {...result, ...(plan.agentTurn ? {agentTurn: agentTurnMeasurement(result)} : {})};
+          appendFileSync(join(runDir, 'results.jsonl'), redact(JSON.stringify(recorded)) + '\n', {mode: 0o600});
           const label = result.outcome?.category ?? result.stop ?? 'measured';
           const first = result.firstVisibleMs === undefined ? '-' : Math.round(result.firstVisibleMs) + ' ms';
           stdout(`[${config.id}] ${kind} #${index + 1}: ${label}; first visible ${first}; total ${Math.round(result.totalMs)} ms\n`);
@@ -158,9 +164,10 @@ export async function runProbe(argv: string[], env: Record<string, string | unde
     const costUsd = nanoToUsd(budget.run.nanoUsd);
     const totals = {mode, calls, costUsd, ...(runStop ? {stop: runStop} : {})};
     const after = ledger.read();
+    if (plan.agentTurn) write('agent-turn-summary.json', JSON.stringify(agentTurnSummary(results), null, 2) + '\n');
     write('summary.json', JSON.stringify({planId: plan.planId, ...totals, skipped,
-      ledgerAfter: args.live ? {calls: after.calls, usd: nanoToUsd(after.nanoUsd)} : undefined, configs: rows}, null, 2) + '\n');
-    const markdown = summaryMarkdown(rows, totals);
+      ledgerAfter: args.live ? {calls: after.calls, usd: nanoToUsd(after.nanoUsd)} : undefined, configs: plan.agentTurn ? undefined : rows}, null, 2) + '\n');
+    const markdown = plan.agentTurn ? agentTurnMarkdown(results, mode) : summaryMarkdown(rows, totals);
     write('summary.md', markdown);
     stdout(redact(markdown));
     stdout(`Results: ${runDir}\n`);
