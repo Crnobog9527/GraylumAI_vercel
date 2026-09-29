@@ -88,7 +88,7 @@
   "apps/web/src/components/ui/toggle.tsx": {"longLines":1},
   "apps/web/src/hooks/use-credits.tsx": {"lines":507},
   "apps/web/src/hooks/useStreamingChat.ts": {"longLines":18},
-  "packages/api/src/middleware/securityChecks.ts": {"lines":561},
+  "packages/api/src/middleware/securityChecks.ts": {"lines":552},
   "packages/api/src/routers/admin.ts": {"lines":3137},
   "packages/api/src/routers/agentSlice.ts": {"longLines":3},
   "packages/api/src/routers/chat.ts": {"lines":607,"longLines":1},
@@ -159,7 +159,7 @@
   "packages/api/src/services/skills/modulePublication.ts": {"longLines":2},
   "packages/api/src/services/stripeFulfillment.ts": {"lines":3128},
   "packages/api/src/services/subscriptionCreditGrants.ts": {"lines":3631,"longLines":6},
-  "packages/api/src/trpc.ts": {"lines":514},
+  "packages/api/src/trpc.ts": {"lines":501},
   "packages/db/schema.ts": {"lines":594},
   "scripts/check-staging-db-readiness.mjs": {"lines":789},
   "scripts/check-stripe-readiness.mjs": {"lines":678}

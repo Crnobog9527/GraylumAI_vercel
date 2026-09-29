@@ -316,6 +316,7 @@ PR-A 封闭账号 → B1 内容擦除通道 → B2 账务擦除通道与受限�
 | system_settings ([0002][m0002]) | P 共享系统配置；不保留用户内容 | 基线定义缺失，须补证；审计引用脱敏后保留配置 |
 | credit_packages ([0002][m0002]、[0012][m0012]) | P 套餐定价；不是私人内容 | payment_orders 套餐引用保留；不因注销删除共享套餐 |
 | membership_plans ([0002][m0002]、[0009][m0009]、[0012][m0012]) | P 会员共享配置 | 订阅引用保留；不因注销删除共享权益，基线仍须补证 |
+| account_erasure_requests（PR-A 新增） | M 注销进度：请求 ID、阶段、时间、错误码、重试次数；不含正文、邮箱、文件名 | 引用 profiles（RESTRICT）；随财务占位到期、在 profiles 之前删除；存在时 profiles 的 status/is_deleted/deleted_at 不可回退 |
 
 
 ### A.1 可以据此实施的分阶段顺序

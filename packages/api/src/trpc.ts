@@ -4,6 +4,7 @@ import { createClient, type SupabaseClient, type User } from '@supabase/supabase
 import { getAuthProvider, isEmailVerified } from './lib/auth';
 import { ensureWorkspaceServerEnv } from './lib/serverEnv';
 import { logger } from './lib/logger';
+import { assertUsableUserStatus, normalizeUserStatus } from './lib/accountStatus';
 import {createRuntimeBudget,withRuntimeBudget,type RuntimeBudget} from './services/runtime/budget';
 export {createRuntimeBudget,withRuntimeBudget};
 type ApiSupabaseClient = SupabaseClient<any, 'public', any>;
@@ -129,14 +130,6 @@ function getErrorMessage(error: unknown): string {
 
 function normalizeUserRole(role: unknown): 'user' | 'admin' {
   return role === 'admin' ? 'admin' : 'user';
-}
-
-function normalizeUserStatus(status: unknown): 'active' | 'disabled' | 'banned' {
-  if (status === 'disabled' || status === 'banned') {
-    return status;
-  }
-
-  return 'active';
 }
 
 function createProfileBootstrapError(reason: ProfileBootstrapFailureReason) {
@@ -305,6 +298,12 @@ async function ensureProfile(ctx: ApiContext) {
   }
 
   if (profile && !profileError) {
+    // A closed account is rejected by the caller; never re-sync identity or grant credits to it.
+    if (normalizeUserStatus(profile.status) === 'deleted') {
+      return { profileId: profile.id, userRole: normalizeUserRole(profile.role), userStatus: 'deleted' as const,
+        userScopedSupabase };
+    }
+
     await recoverOpeningGrantIfRecoverableBootstrapProfile(ctx, userId, profile, normalizedEmail);
 
     const shouldBackfillNickname = !profile.nickname?.trim();
@@ -458,19 +457,7 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
 
   const { profileId, userRole, userStatus, userScopedSupabase } = await ensureProfile(ctx);
 
-  if (userStatus === 'disabled') {
-    throw new TRPCError({
-      code: 'FORBIDDEN',
-      message: '账号已被禁用，请联系管理员',
-    });
-  }
-
-  if (userStatus === 'banned') {
-    throw new TRPCError({
-      code: 'FORBIDDEN',
-      message: '账号已被封禁',
-    });
-  }
+  assertUsableUserStatus(userStatus);
 
   return next({
     ctx: {
