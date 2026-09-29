@@ -137,9 +137,30 @@ it('forwards reasoning_effort none for the DeepSeek mentor model byte-for-byte',
  expect(transport).toHaveBeenCalledTimes(1);expect((transport.mock.calls[0] as unknown as [string,RequestInit])[1].body).toBe(input);
 });
 it.each([
- {reasoning_effort:'low'},{reasoning_effort:'xhigh'},{reasoning_effort:'max'},{reasoning_effort:''},{reasoning_effort:null},{reasoning_effort:0},{reasoning_effort:{effort:'none'}},
- {reasoning:{effort:'none'}},{reasoning:{enabled:false}},{reasoning_effort:'none',reasoning:{exclude:true}},{include_reasoning:false},{verbosity:'low'},
+ {reasoning_effort:''},{reasoning_effort:null},{reasoning_effort:0},{reasoning_effort:{effort:'none'}},
+ {reasoning:{effort:'unknown'}},{reasoning:{enabled:true}},{reasoning_effort:'none',reasoning:{exclude:true}},{include_reasoning:false},{verbosity:'low'},
 ])('rejects unapproved reasoning parameters %# before credential access',async(patch)=>{
+ const transport=vi.fn(),credential=vi.fn();
+ await expect(openRouterAdapter({credential,transport}).dispatch({input:JSON.stringify({...JSON.parse(body),...patch})},identity)).rejects.toThrow('BILL2_PROVIDER_REQUEST_DENIED');
+ expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
+});
+
+it.each([
+ ...['none','minimal','low','medium','high','xhigh','max'].flatMap(effort=>[{reasoning_effort:effort},{reasoning:{effort}}]),
+ {reasoning:{enabled:false}},{reasoning:{max_tokens:1}},{reasoning:{max_tokens:128000}},
+])('forwards documented reasoning structure byte-for-byte %#',async(patch)=>{
+ const transport=vi.fn<typeof fetch>(async()=>new Response('{}')),credential=vi.fn(async()=> 'LOCAL_SYNTHETIC_KEY');
+ const input=JSON.stringify({...JSON.parse(body),...patch});
+ await openRouterAdapter({credential,transport}).dispatch({input},identity);
+ expect(transport).toHaveBeenCalledTimes(1);expect(transport.mock.calls[0]![1]!.body).toBe(input);
+});
+it.each([
+ {reasoning:{enabled:false,effort:'none'}},{reasoning:{effort:'high',max_tokens:1}},
+ {reasoning:{max_tokens:0}},{reasoning:{max_tokens:-1}},{reasoning:{max_tokens:1.5}},
+ {reasoning:{max_tokens:128001}},{reasoning:{max_tokens:'100'}},
+ {reasoning:{}},{reasoning:[]},{reasoning:null},{reasoning:{exclude:false}},
+ {reasoning_effort:'none',reasoning:{enabled:false}},
+])('rejects ambiguous or unbounded reasoning before credentials %#',async(patch)=>{
  const transport=vi.fn(),credential=vi.fn();
  await expect(openRouterAdapter({credential,transport}).dispatch({input:JSON.stringify({...JSON.parse(body),...patch})},identity)).rejects.toThrow('BILL2_PROVIDER_REQUEST_DENIED');
  expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();

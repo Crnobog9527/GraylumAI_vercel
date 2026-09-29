@@ -1,16 +1,26 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {it,expect} from 'vitest';
-import {reasoningFor,reasoningPolicy,approvedReasoningEfforts} from './reasoningPolicy';
-it('maps the latency-sensitive target through the verified model table only',()=>{
- expect(reasoningFor('latency-sensitive','qwen/qwen3.8-27b')).toEqual({effort:'none'});
- expect(reasoningFor('latency-sensitive','deepseek/deepseek-v4.1-flash')).toEqual({effort:'none'});
- for(const model of ['qwen/qwen3.8-27b:free','qwen/qwen3.8-flash','deepseek/deepseek-v4.1-flash:free','deepseek/deepseek-v4.1','test/model','constructor','__proto__','toString',''])
-  expect(()=>reasoningFor('latency-sensitive',model)).toThrow('RUNTIME_REASONING_POLICY_UNVERIFIED');
- expect([...approvedReasoningEfforts]).toEqual(['none']);
+import {reasoningPolicy,approvedReasoningEfforts,frozenReasoningFields,matchesFrozenReasoning} from './reasoningPolicy';
+import {REASONING_EFFORTS,MAX_REASONING_BUDGET} from '../../shared/modelReasoning';
+it.each(REASONING_EFFORTS)('accepts documented effort %s structurally, without model names',effort=>{
+ expect(approvedReasoningEfforts.has(effort)).toBe(true);
+ expect(reasoningPolicy.parse({effort})).toEqual({effort});
+ expect(frozenReasoningFields({effort})).toEqual({reasoning_effort:effort});
+ expect(frozenReasoningFields({parameter:'reasoning',value:{effort}})).toEqual({reasoning:{effort}});
 });
-it('returns a detached copy and accepts only the exact effort structure',()=>{
- const first=reasoningFor('latency-sensitive','qwen/qwen3.8-27b');first.effort='xhigh';
- expect(reasoningFor('latency-sensitive','qwen/qwen3.8-27b')).toEqual({effort:'none'});
- for(const value of [{effort:'max'},{effort:'none',max_tokens:1},{effort:'none',exclude:true},{enabled:false},{effort:null},'none'])
-  expect(reasoningPolicy.safeParse(value).success).toBe(false);
+it.each([{enabled:false},{effort:'max'},{max_tokens:1},{max_tokens:MAX_REASONING_BUDGET}])('accepts strict object %#',value=>{
+ const policy=reasoningPolicy.parse({parameter:'reasoning',value});
+ expect(matchesFrozenReasoning({reasoning:structuredClone(value)},policy)).toBe(true);
+ expect(matchesFrozenReasoning({reasoning:{...value,exclude:true}},policy)).toBe(false);
+ expect(matchesFrozenReasoning({reasoning:value,reasoning_effort:'none'},policy)).toBe(false);
+});
+it.each([{enabled:true},{exclude:true},{effort:'unknown'},{effort:'none',max_tokens:1},{max_tokens:0},{max_tokens:1.5},{max_tokens:MAX_REASONING_BUDGET+1},null,[],{}])('rejects malformed object %#',value=>{
+ expect(reasoningPolicy.safeParse({parameter:'reasoning',value}).success).toBe(false);
+});
+it('represents provider default explicitly without sending either field',()=>{
+ expect(frozenReasoningFields({parameter:'none'})).toEqual({});
+ expect(matchesFrozenReasoning({}, {parameter:'none'})).toBe(true);
+ for(const value of [{reasoning:null},{reasoning_effort:null},{reasoning:{enabled:false}}])
+  expect(matchesFrozenReasoning(value,{parameter:'none'})).toBe(false);
+ expect(reasoningPolicy.safeParse({parameter:'none',value:{enabled:false}}).success).toBe(false);
 });
