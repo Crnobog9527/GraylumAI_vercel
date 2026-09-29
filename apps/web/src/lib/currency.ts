@@ -15,7 +15,16 @@ export function formatUsd(amount: number) {
   return usdFormatter.format(amount);
 }
 
+/** Keep recorded micro-dollar costs visible without changing ordinary price formatting. */
+export function formatReportUsd(amount: number) {
+  if (amount !== 0 && Math.abs(amount) < 1e-12) {
+    return `${amount < 0 ? '-' : ''}<$0.000000000001`;
+  }
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 12,
+  }).format(amount);
+}
+
 export function formatUsdFromCents(amountInCents: number) {
   return formatUsd(amountInCents / 100);
 }
-

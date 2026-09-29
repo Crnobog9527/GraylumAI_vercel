@@ -4,343 +4,35 @@
  * 提供 AI 成本追踪和监控的 tRPC 端点
  */
 
-import { router, protectedProcedure, adminProcedure } from '../trpc';
+import { router, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { logger } from '../lib/logger';
+import { createSafeInternalError } from '../lib/publicError';
+import { readAllReportRows } from '../services/reportRows';
 
-const costMetricSchema = z.enum(['credits', 'usd']);
-type CostMetric = z.infer<typeof costMetricSchema>;
+import {
+  costMetricSchema, getCostWindow, buildCostOverviewFromRows, buildCostsDashboardFromRows,
+  buildTopUsersFromRows, buildCostTrendFromRows, buildModelDistributionFromRows,
+  buildCacheEfficiencyFromRows, type CostOverview, type CostsDashboard, type DailyCost,
+  type ModelDistribution, type TopUser, type UsageLog, type TokenStat,
+  type CacheEfficiencySummary, type CostRow, type DashboardRow, type TopUserAggregateRow,
+  type TopUserProfile,
+} from '../services/costReport';
+export { buildCostOverviewFromRows, buildCostsDashboardFromRows, buildTopUsersFromRows } from '../services/costReport';
 
-// ============================================
-// 类型定义
-// ============================================
+const timezoneSchema = z.string().refine((timezone) => {
+  try { new Intl.DateTimeFormat('en-US', { timeZone: timezone }); return true; }
+  catch { return false; }
+}, 'Invalid timezone').default('Asia/Shanghai');
 
-export interface CostOverview {
-  metric: CostMetric;
-  todayCost: number;
-  todayCalls: number;
-  monthCost: number;
-  monthCalls: number;
-  avgCostPerCall: number;
-  todayCredits: number;
-  todayUsd: number;
-  monthCredits: number;
-  monthUsd: number;
-}
-
-export interface ModelDistribution {
-  modelId: string;
-  modelName: string;
-  calls: number;
-  cost: number;
-  percentage: number;
-  credits: number;
-  usd: number;
-}
-
-export interface DailyCost {
-  date: string;
-  cost: number;
-  calls: number;
-  credits: number;
-  usd: number;
-}
-
-export interface TopUser {
-  userId: string;
-  email: string;
-  nickname: string;
-  totalCost: number;
-  totalCalls: number;
-  totalCredits: number;
-  totalUsd: number;
-}
-
-export interface UsageLog {
-  id: string;
-  requestId: string | null;
-  userId: string;
-  userEmail: string;
-  modelId: string;
-  status: string;
-  inputLength: number;
-  latencyMs: number;
-  routingReason: string | null;
-  promptName: string | null;
-  createdAt: string;
-}
-
-export interface TokenStat {
-  id: string;
-  conversationId: string;
-  modelUsed: string;
-  inputTokens: number;
-  outputTokens: number;
-  cachedTokens: number;
-  totalCredits: number;
-  createdAt: string;
-}
-
-export interface CacheEfficiencySummary {
-  totalRequests: number;
-  cacheHits: number;
-  hitRate: number;
-  savedCredits: number;
-  savedUsd: number;
-  savedValue: number;
-}
-
-export interface CostsDashboard {
-  overview: CostOverview;
-  trend: DailyCost[];
-  distribution: ModelDistribution[];
-  topUsers: TopUser[];
-  cacheEfficiency: CacheEfficiencySummary;
-}
-
-interface CostRow {
-  total_credits: number | null;
-  total_cost_usd: string | null;
-  created_at: string;
-}
-
-interface DashboardRow extends CostRow {
-  model_used: string | null;
-  user_id: string | null;
-  cached_tokens: number | null;
-  input_tokens: number | null;
-}
-
-interface TopUserAggregateRow {
-  user_id: string | null;
-  total_credits: number | null;
-  total_cost_usd: string | null;
-}
-
-interface TopUserProfile {
-  id: string;
-  email: string | null;
-  nickname: string | null;
-}
-
-function parseUsd(value: string | null | undefined): number {
-  return Number.parseFloat(value ?? '0') || 0;
-}
-
-export function buildCostOverviewFromRows(
-  rows: CostRow[],
-  todayStartIso: string,
-  metric: CostMetric,
-): CostOverview {
-  let todayCredits = 0;
-  let todayUsd = 0;
-  let todayCalls = 0;
-  let monthCredits = 0;
-  let monthUsd = 0;
-
-  for (const row of rows) {
-    const credits = row.total_credits ?? 0;
-    const usd = parseUsd(row.total_cost_usd);
-    monthCredits += credits;
-    monthUsd += usd;
-
-    if (row.created_at >= todayStartIso) {
-      todayCredits += credits;
-      todayUsd += usd;
-      todayCalls += 1;
-    }
+async function requireReportRows<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<T[]> {
+  const result = await readAllReportRows(page);
+  if (result.error || !result.data) {
+    throw createSafeInternalError(result.error ?? new Error('Invalid report rows'), '读取成本报表失败，请稍后重试');
   }
-
-  const monthCalls = rows.length;
-  const todayCost = metric === 'usd' ? todayUsd : todayCredits;
-  const monthCost = metric === 'usd' ? monthUsd : monthCredits;
-
-  return {
-    metric,
-    todayCost,
-    todayCalls,
-    monthCost,
-    monthCalls,
-    avgCostPerCall: monthCalls > 0 ? Math.round(monthCost / monthCalls) : 0,
-    todayCredits,
-    todayUsd,
-    monthCredits,
-    monthUsd,
-  };
-}
-
-export function buildTopUsersFromRows(
-  rows: TopUserAggregateRow[],
-  profiles: TopUserProfile[],
-  metric: CostMetric,
-  limit: number,
-): TopUser[] {
-  const aggregates = new Map<string, Omit<TopUser, 'email' | 'nickname' | 'userId'> & { email?: string; nickname?: string }>();
-
-  for (const row of rows) {
-    if (!row.user_id) {
-      continue;
-    }
-
-    const existing = aggregates.get(row.user_id) ?? {
-      totalCost: 0,
-      totalCalls: 0,
-      totalCredits: 0,
-      totalUsd: 0,
-    };
-    const totalCredits = existing.totalCredits + (row.total_credits ?? 0);
-    const totalUsd = existing.totalUsd + parseUsd(row.total_cost_usd);
-
-    aggregates.set(row.user_id, {
-      totalCalls: existing.totalCalls + 1,
-      totalCredits,
-      totalUsd,
-      totalCost: metric === 'usd' ? totalUsd : totalCredits,
-    });
-  }
-
-  const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
-
-  return Array.from(aggregates.entries())
-    .map(([userId, aggregate]) => ({
-      userId,
-      email: profileMap.get(userId)?.email ?? '',
-      nickname: profileMap.get(userId)?.nickname ?? '',
-      totalCost: aggregate.totalCost,
-      totalCalls: aggregate.totalCalls,
-      totalCredits: aggregate.totalCredits,
-      totalUsd: aggregate.totalUsd,
-    }))
-    .sort((a, b) => b.totalCost - a.totalCost)
-    .slice(0, limit);
-}
-
-export function buildCostTrendFromRows(
-  rows: CostRow[],
-  days: number,
-  metric: CostMetric,
-  now: Date,
-): DailyCost[] {
-  const dailyMap = new Map<string, { credits: number; usd: number; calls: number }>();
-
-  for (let i = 0; i < days; i++) {
-    const date = new Date(now);
-    date.setDate(now.getDate() - i);
-    const dateStr = date.toISOString().split('T')[0];
-    dailyMap.set(dateStr!, { credits: 0, usd: 0, calls: 0 });
-  }
-
-  for (const record of rows) {
-    const dateStr = new Date(record.created_at).toISOString().split('T')[0];
-    const existing = dailyMap.get(dateStr!) ?? { credits: 0, usd: 0, calls: 0 };
-    dailyMap.set(dateStr!, {
-      credits: existing.credits + (record.total_credits ?? 0),
-      usd: existing.usd + parseUsd(record.total_cost_usd),
-      calls: existing.calls + 1,
-    });
-  }
-
-  return Array.from(dailyMap.entries())
-    .map(([date, data]) => ({
-      date,
-      calls: data.calls,
-      credits: data.credits,
-      usd: data.usd,
-      cost: metric === 'usd' ? data.usd : data.credits,
-    }))
-    .sort((a, b) => a.date.localeCompare(b.date));
-}
-
-export function buildModelDistributionFromRows(
-  rows: Pick<DashboardRow, 'model_used' | 'total_credits' | 'total_cost_usd'>[],
-  metric: CostMetric,
-): ModelDistribution[] {
-  const modelMap = new Map<string, { calls: number; credits: number; usd: number }>();
-  let totalCost = 0;
-
-  for (const record of rows) {
-    const modelId = record.model_used ?? 'unknown';
-    const existing = modelMap.get(modelId) ?? { calls: 0, credits: 0, usd: 0 };
-    const credits = record.total_credits ?? 0;
-    const usd = parseUsd(record.total_cost_usd);
-    modelMap.set(modelId, {
-      calls: existing.calls + 1,
-      credits: existing.credits + credits,
-      usd: existing.usd + usd,
-    });
-    totalCost += metric === 'usd' ? usd : credits;
-  }
-
-  return Array.from(modelMap.entries())
-    .map(([modelId, data]) => ({
-      modelId,
-      modelName: getModelDisplayName(modelId),
-      calls: data.calls,
-      cost: metric === 'usd' ? data.usd : data.credits,
-      credits: data.credits,
-      usd: data.usd,
-      percentage: totalCost > 0
-        ? Math.round((((metric === 'usd' ? data.usd : data.credits) / totalCost) * 100))
-        : 0,
-    }))
-    .sort((a, b) => b.cost - a.cost);
-}
-
-export function buildCacheEfficiencyFromRows(
-  rows: Pick<DashboardRow, 'cached_tokens' | 'input_tokens' | 'total_credits' | 'total_cost_usd'>[],
-  metric: CostMetric,
-): CacheEfficiencySummary {
-  const totalRequests = rows.length;
-  let cacheHits = 0;
-  let totalCachedTokens = 0;
-  let totalInputTokens = 0;
-  let totalCredits = 0;
-  let totalUsd = 0;
-
-  for (const record of rows) {
-    const cachedTokens = record.cached_tokens ?? 0;
-    const inputTokens = record.input_tokens ?? 0;
-    if (cachedTokens > 0) {
-      cacheHits += 1;
-    }
-    totalCachedTokens += cachedTokens;
-    totalInputTokens += inputTokens;
-    totalCredits += record.total_credits ?? 0;
-    totalUsd += parseUsd(record.total_cost_usd);
-  }
-
-  const savedCredits = totalInputTokens > 0
-    ? Math.round((totalCachedTokens / totalInputTokens) * 0.9 * totalCredits)
-    : 0;
-  const savedUsd = totalInputTokens > 0
-    ? (totalCachedTokens / totalInputTokens) * 0.9 * totalUsd
-    : 0;
-
-  return {
-    totalRequests,
-    cacheHits,
-    hitRate: totalRequests > 0 ? Math.round((cacheHits / totalRequests) * 100) : 0,
-    savedCredits,
-    savedUsd,
-    savedValue: metric === 'usd' ? savedUsd : savedCredits,
-  };
-}
-
-export function buildCostsDashboardFromRows(
-  rows: DashboardRow[],
-  profiles: TopUserProfile[],
-  input: { metric: CostMetric; days: number; limit: number; now: Date; todayStartIso: string; monthStartIso: string },
-): CostsDashboard {
-  const rangeRows = rows.filter((row) => row.created_at >= new Date(input.now.getTime() - input.days * 24 * 60 * 60 * 1000).toISOString());
-  const monthRows = rows.filter((row) => row.created_at >= input.monthStartIso);
-
-  return {
-    overview: buildCostOverviewFromRows(monthRows, input.todayStartIso, input.metric),
-    trend: buildCostTrendFromRows(rangeRows, input.days, input.metric, input.now),
-    distribution: buildModelDistributionFromRows(rangeRows, input.metric),
-    topUsers: buildTopUsersFromRows(rangeRows, profiles, input.metric, input.limit),
-    cacheEfficiency: buildCacheEfficiencyFromRows(rangeRows, input.metric),
-  };
+  return result.data;
 }
 
 // ============================================
@@ -352,44 +44,43 @@ export const costsRouter = router({
     .input(z.object({
       days: z.number().min(1).max(90).default(7),
       limit: z.number().min(1).max(50).default(10),
-      timezone: z.string().optional().default('Asia/Shanghai'),
+      timezone: timezoneSchema,
       metric: costMetricSchema.optional().default('usd'),
     }))
     .query(async ({ ctx, input }): Promise<CostsDashboard> => {
       const now = new Date();
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      const rangeStart = new Date(now);
-      rangeStart.setDate(rangeStart.getDate() - input.days);
-
-      const queryStartIso = (rangeStart < monthStart ? rangeStart : monthStart).toISOString();
-      const { data } = await ctx.supabase
+      const window = getCostWindow(now, input.days, input.timezone);
+      const queryStartIso = window.rangeStartIso < window.monthStartIso
+        ? window.rangeStartIso : window.monthStartIso;
+      const rows = await requireReportRows<DashboardRow>((from, to) => ctx.supabase
         .from('token_stats')
         .select('user_id, model_used, total_credits, total_cost_usd, cached_tokens, input_tokens, created_at')
-        .gte('created_at', queryStartIso);
-
-      const rows = (data ?? []) as DashboardRow[];
+        .gte('created_at', queryStartIso)
+        .order('created_at').order('id').range(from, to));
       const topUserIds = buildTopUsersFromRows(
-        rows.filter((row) => row.created_at >= rangeStart.toISOString()),
+        rows.filter((row) => row.created_at >= window.rangeStartIso),
         [],
         input.metric,
         input.limit,
       ).map((user) => user.userId);
 
-      const { data: profileData } = topUserIds.length
+      const { data: profileData, error: profileError } = topUserIds.length
         ? await ctx.supabase
             .from('profiles')
             .select('id, email, nickname')
             .in('id', topUserIds)
-        : { data: [] };
+        : { data: [], error: null };
+      if (profileError || !profileData) {
+        throw createSafeInternalError(profileError ?? new Error('Invalid profiles'), '读取成本报表失败，请稍后重试');
+      }
 
       return buildCostsDashboardFromRows(rows, (profileData ?? []) as TopUserProfile[], {
         metric: input.metric,
         days: input.days,
         limit: input.limit,
         now,
-        todayStartIso: todayStart.toISOString(),
-        monthStartIso: monthStart.toISOString(),
+        timezone: input.timezone,
+        ...window,
       });
     }),
 
@@ -398,22 +89,21 @@ export const costsRouter = router({
    */
   getOverview: adminProcedure
     .input(z.object({
-      timezone: z.string().optional().default('Asia/Shanghai'),
+      timezone: timezoneSchema,
       metric: costMetricSchema.optional().default('usd'),
     }))
     .query(async ({ ctx, input }): Promise<CostOverview> => {
       const now = new Date();
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
-      const { data: monthData } = await ctx.supabase
+      const window = getCostWindow(now, 1, input.timezone);
+      const monthData = await requireReportRows<CostRow>((from, to) => ctx.supabase
         .from('token_stats')
         .select('total_credits, total_cost_usd, created_at')
-        .gte('created_at', monthStart.toISOString());
+        .gte('created_at', window.monthStartIso)
+        .order('created_at').order('id').range(from, to));
 
       return buildCostOverviewFromRows(
-        (monthData ?? []) as CostRow[],
-        todayStart.toISOString(),
+        monthData,
+        window.todayStartIso,
         input.metric,
       );
     }),
@@ -424,49 +114,18 @@ export const costsRouter = router({
   getCostTrend: adminProcedure
     .input(z.object({
       days: z.number().min(1).max(90).default(7),
+      timezone: timezoneSchema,
       metric: costMetricSchema.optional().default('usd'),
     }))
     .query(async ({ ctx, input }): Promise<DailyCost[]> => {
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - input.days);
-
-      const { data } = await ctx.supabase
+      const now = new Date();
+      const { rangeStartIso } = getCostWindow(now, input.days, input.timezone);
+      const rows = await requireReportRows<CostRow>((from, to) => ctx.supabase
         .from('token_stats')
         .select('total_credits, total_cost_usd, created_at')
-        .gte('created_at', startDate.toISOString())
-        .order('created_at', { ascending: true });
-
-      // 按日期分组
-      const dailyMap = new Map<string, { credits: number; usd: number; calls: number }>();
-
-      // 初始化所有日期
-      for (let i = 0; i < input.days; i++) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        const dateStr = date.toISOString().split('T')[0];
-        dailyMap.set(dateStr!, { credits: 0, usd: 0, calls: 0 });
-      }
-
-      // 聚合数据
-      data?.forEach(record => {
-        const dateStr = new Date(record.created_at).toISOString().split('T')[0];
-        const existing = dailyMap.get(dateStr!) ?? { credits: 0, usd: 0, calls: 0 };
-        dailyMap.set(dateStr!, {
-          credits: existing.credits + (record.total_credits ?? 0),
-          usd: existing.usd + parseFloat(record.total_cost_usd ?? '0'),
-          calls: existing.calls + 1,
-        });
-      });
-
-      return Array.from(dailyMap.entries())
-        .map(([date, data]) => ({
-          date,
-          calls: data.calls,
-          credits: data.credits,
-          usd: data.usd,
-          cost: input.metric === 'usd' ? data.usd : data.credits,
-        }))
-        .sort((a, b) => a.date.localeCompare(b.date));
+        .gte('created_at', rangeStartIso)
+        .order('created_at').order('id').range(from, to));
+      return buildCostTrendFromRows(rows, input.days, input.metric, now, input.timezone);
     }),
 
   /**
@@ -475,46 +134,18 @@ export const costsRouter = router({
   getModelDistribution: adminProcedure
     .input(z.object({
       days: z.number().min(1).max(90).default(30),
+      timezone: timezoneSchema,
       metric: costMetricSchema.optional().default('usd'),
     }))
     .query(async ({ ctx, input }): Promise<ModelDistribution[]> => {
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - input.days);
-
-      const { data } = await ctx.supabase
+      const { rangeStartIso } = getCostWindow(new Date(), input.days, input.timezone);
+      const rows = await requireReportRows<Pick<DashboardRow,
+        'model_used' | 'total_credits' | 'total_cost_usd'>>((from, to) => ctx.supabase
         .from('token_stats')
         .select('model_used, total_credits, total_cost_usd')
-        .gte('created_at', startDate.toISOString());
-
-      // 按模型分组
-      const modelMap = new Map<string, { calls: number; credits: number; usd: number }>();
-      let totalCost = 0;
-
-      data?.forEach(record => {
-        const modelId = record.model_used ?? 'unknown';
-        const existing = modelMap.get(modelId) ?? { calls: 0, credits: 0, usd: 0 };
-        const credits = record.total_credits ?? 0;
-        const usd = parseFloat(record.total_cost_usd ?? '0');
-        const cost = input.metric === 'usd' ? usd : credits;
-        modelMap.set(modelId, {
-          calls: existing.calls + 1,
-          credits: existing.credits + credits,
-          usd: existing.usd + usd,
-        });
-        totalCost += cost;
-      });
-
-      return Array.from(modelMap.entries())
-        .map(([modelId, data]) => ({
-          modelId,
-          modelName: getModelDisplayName(modelId),
-          calls: data.calls,
-          cost: input.metric === 'usd' ? data.usd : data.credits,
-          credits: data.credits,
-          usd: data.usd,
-          percentage: totalCost > 0 ? Math.round(((input.metric === 'usd' ? data.usd : data.credits) / totalCost) * 100) : 0,
-        }))
-        .sort((a, b) => b.cost - a.cost);
+        .gte('created_at', rangeStartIso)
+        .order('created_at').order('id').range(from, to));
+      return buildModelDistributionFromRows(rows, input.metric);
     }),
 
   /**
@@ -524,21 +155,21 @@ export const costsRouter = router({
     .input(z.object({
       days: z.number().min(1).max(90).default(30),
       limit: z.number().min(1).max(50).default(10),
+      timezone: timezoneSchema,
       metric: costMetricSchema.optional().default('usd'),
     }))
     .query(async ({ ctx, input }): Promise<TopUser[]> => {
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - input.days);
-
-      const { data } = await ctx.supabase
+      const { rangeStartIso } = getCostWindow(new Date(), input.days, input.timezone);
+      const rows = await requireReportRows<TopUserAggregateRow>((from, to) => ctx.supabase
         .from('token_stats')
         .select('user_id, total_credits, total_cost_usd')
-        .gte('created_at', startDate.toISOString());
+        .gte('created_at', rangeStartIso)
+        .order('created_at').order('id').range(from, to));
 
       const topUserIds = Array.from(
         new Set(
           buildTopUsersFromRows(
-            (data ?? []) as TopUserAggregateRow[],
+            rows,
             [],
             input.metric,
             input.limit,
@@ -546,16 +177,19 @@ export const costsRouter = router({
         ),
       );
 
-      const { data: profileData } = topUserIds.length
+      const { data: profileData, error: profileError } = topUserIds.length
         ? await ctx.supabase
             .from('profiles')
             .select('id, email, nickname')
             .in('id', topUserIds)
-        : { data: [] };
+        : { data: [], error: null };
+      if (profileError || !profileData) {
+        throw createSafeInternalError(profileError ?? new Error('Invalid profiles'), '读取成本报表失败，请稍后重试');
+      }
 
       return buildTopUsersFromRows(
-        (data ?? []) as TopUserAggregateRow[],
-        (profileData ?? []) as TopUserProfile[],
+        rows,
+        profileData as TopUserProfile[],
         input.metric,
         input.limit,
       );
@@ -585,16 +219,15 @@ export const costsRouter = router({
           latency_ms,
           metadata,
           created_at,
-          profiles!inner (
+          profiles (
             email
           )
         `, { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(offset, offset + input.pageSize - 1);
 
-      if (input.status !== 'all') {
-        query = query.eq('status', input.status);
-      }
+      if (input.status === 'success') query = query.eq('status', 'success');
+      if (input.status === 'failed') query = query.neq('status', 'success');
 
       const { data, count, error } = await query;
 
@@ -602,7 +235,7 @@ export const costsRouter = router({
         logger.error('ai', 'costs_usage_logs_fetch_failed', {
           code: error.code,
         });
-        return { logs: [], total: 0 };
+        throw createSafeInternalError(error, '读取 AI 调用日志失败，请稍后重试');
       }
 
       const logs: UsageLog[] = (data ?? []).map((record: any) => ({
@@ -643,7 +276,7 @@ export const costsRouter = router({
         logger.error('billing', 'costs_token_stats_fetch_failed', {
           code: error.code,
         });
-        return { stats: [], total: 0 };
+        throw createSafeInternalError(error, '读取 Token 统计失败，请稍后重试');
       }
 
       const stats: TokenStat[] = (data ?? []).map((record: any) => ({
@@ -666,68 +299,17 @@ export const costsRouter = router({
   getCacheEfficiency: adminProcedure
     .input(z.object({
       days: z.number().min(1).max(90).default(7),
+      timezone: timezoneSchema,
       metric: costMetricSchema.optional().default('usd'),
     }))
-    .query(async ({ ctx, input }): Promise<{
-      totalRequests: number;
-      cacheHits: number;
-      hitRate: number;
-      savedCredits: number;
-      savedUsd: number;
-      savedValue: number;
-    }> => {
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - input.days);
-
-      const { data } = await ctx.supabase
+    .query(async ({ ctx, input }): Promise<CacheEfficiencySummary> => {
+      const { rangeStartIso } = getCostWindow(new Date(), input.days, input.timezone);
+      const rows = await requireReportRows<Pick<DashboardRow,
+        'cached_tokens' | 'input_tokens' | 'total_credits' | 'total_cost_usd'>>((from, to) => ctx.supabase
         .from('token_stats')
         .select('cached_tokens, input_tokens, total_credits, total_cost_usd')
-        .gte('created_at', startDate.toISOString());
-
-      const totalRequests = data?.length ?? 0;
-      let cacheHits = 0;
-      let totalCachedTokens = 0;
-      let totalInputTokens = 0;
-
-      data?.forEach(record => {
-        const cachedTokens = record.cached_tokens ?? 0;
-        const inputTokens = record.input_tokens ?? 0;
-        if (cachedTokens > 0) {
-          cacheHits++;
-        }
-        totalCachedTokens += cachedTokens;
-        totalInputTokens += inputTokens;
-      });
-
-      // 估算节省的成本 (缓存读取成本约为正常成本的 10%)
-      const savedCredits = totalInputTokens > 0
-        ? Math.round((totalCachedTokens / totalInputTokens) * 0.9 * (data?.reduce((sum, r) => sum + (r.total_credits ?? 0), 0) ?? 0))
-        : 0;
-      const savedUsd = totalInputTokens > 0
-        ? (totalCachedTokens / totalInputTokens) * 0.9 * (data?.reduce((sum, r) => sum + parseFloat(r.total_cost_usd ?? '0'), 0) ?? 0)
-        : 0;
-
-      return {
-        totalRequests,
-        cacheHits,
-        hitRate: totalRequests > 0 ? Math.round((cacheHits / totalRequests) * 100) : 0,
-        savedCredits,
-        savedUsd,
-        savedValue: input.metric === 'usd' ? savedUsd : savedCredits,
-      };
+        .gte('created_at', rangeStartIso)
+        .order('created_at').order('id').range(from, to));
+      return buildCacheEfficiencyFromRows(rows, input.metric);
     }),
 });
-
-// ============================================
-// 辅助函数
-// ============================================
-
-function getModelDisplayName(modelId: string): string {
-  const modelNames: Record<string, string> = {
-    'claude-3-5-haiku-20241022': 'Claude 3.5 Haiku',
-    'claude-sonnet-4-20250514': 'Claude 4 Sonnet',
-    'claude-3-5-sonnet-20241022': 'Claude 3.5 Sonnet',
-    'claude-3-opus-20240229': 'Claude 3 Opus',
-  };
-  return modelNames[modelId] ?? modelId;
-}

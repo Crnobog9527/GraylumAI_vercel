@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AdminErrorState from '@/components/admin/AdminErrorState';
-import { formatUsd, formatUsdFromCents } from '@/lib/currency';
+import { formatReportUsd, formatUsdFromCents } from '@/lib/currency';
 
 function formatCreditsRange(range: { min: number; max: number } | null, suffix: string) {
   if (!range) {
@@ -57,7 +57,8 @@ export default function AdminFinancePage() {
   const dailyChart = data?.dailyChart ?? [];
   const apiStats = data?.apiStats ?? { totalRequests: 0, totalConversations: 0, messagesThisMonth: 0, messagesThisWeek: 0 };
   const modelStats = data?.modelStats ?? [];
-  const financeOverview = data?.financeOverview ?? { estimatedRevenue: 0, creditsConsumed: 0, creditsPurchased: 0, creditsGiven: 0, netCreditsFlow: 0 };
+  const financeOverview = data?.financeOverview ?? { paidRevenueCents: 0, recordedCostUsd: 0,
+    creditsConsumed: 0, creditsPurchased: 0, creditsGiven: 0, netCreditsFlow: 0 };
   const runtimeBilling = data?.runtimeBilling ?? {
     creditsPerUsd: 1000,
     tokenPriceMultiplier: 1.5,
@@ -69,9 +70,8 @@ export default function AdminFinancePage() {
     newUserCredits: 100,
   };
 
-  // Calculate profit (revenue - estimated cost based on consumption)
-  const estimatedProfit = financeOverview.estimatedRevenue - (financeOverview.creditsConsumed * 0.01); // Rough cost estimation
-
+  // Paid USD revenue minus recorded provider cost; other operating expenses are excluded.
+  const estimatedProfitUsd = financeOverview.paidRevenueCents / 100 - financeOverview.recordedCostUsd;
   return (
     <div className="space-y-6 p-4 md:p-8" data-testid="admin-finance-page">
       {/* Page Header */}
@@ -141,9 +141,9 @@ export default function AdminFinancePage() {
                     <PiggyBank className="h-6 w-6 text-emerald-400" />
                   </div>
                   <div>
-                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>预估收入 (USD)</p>
+                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>已支付收入 (USD)</p>
                     <p className="text-2xl font-bold text-emerald-400">
-                      {formatUsdFromCents(financeOverview.estimatedRevenue)}
+                      {formatUsdFromCents(financeOverview.paidRevenueCents)}
                     </p>
                   </div>
                 </div>
@@ -185,13 +185,13 @@ export default function AdminFinancePage() {
             <Card data-testid="admin-finance-overview-profit" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center gap-4">
-                  <div className={`p-3 rounded-xl ${estimatedProfit >= 0 ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`}>
-                    <DollarSign className={`h-6 w-6 ${estimatedProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`} />
+                  <div className={`p-3 rounded-xl ${estimatedProfitUsd >= 0 ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`}>
+                    <DollarSign className={`h-6 w-6 ${estimatedProfitUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`} />
                   </div>
                   <div>
-                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>预估盈利 (USD)</p>
-                    <p className={`text-2xl font-bold ${estimatedProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {formatUsd(estimatedProfit / 100)}
+                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>预估毛利 (USD)</p>
+                    <p className={`text-2xl font-bold ${estimatedProfitUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {formatReportUsd(estimatedProfitUsd)}
                     </p>
                   </div>
                 </div>
