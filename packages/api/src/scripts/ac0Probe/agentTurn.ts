@@ -30,7 +30,7 @@ import {stats} from './summary.ts';
 
 export const AGENT_TURN_CONFIG: ProbeConfig = {
   id: 'ac14-deepseek-deepinfra-fp8-off', model: 'deepseek/deepseek-v4.1-flash',
-  route: 'deepinfra/fp8', reasoning: {enabled: false}, maxPrice: {prompt: 0.3, completion: 0.9},
+  route: 'deepinfra/fp8', effort: 'none', maxPrice: {prompt: 0.3, completion: 0.9},
 };
 
 export function agentTurnPrompt(skill: LoadedSkill, scenario: Scenario): string {

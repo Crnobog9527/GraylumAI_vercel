@@ -699,6 +699,46 @@ describe('question-card history and step fields', () => {
     input: 'That is all I can say about it for now.',
   };
 
+  it.each(['http_502', 'disconnected_stream'] as const)(
+    'stops the entire forty-scenario agent-turn run after the first %s without replacement calls', async failure => {
+      const cases = (['ask', 'text'] as const).flatMap(kind => Array.from({length: kind === 'ask' ? 30 : 10}, (_, index) => ({
+        ...withHistory, id: `${kind}-${index}`, kind, currentStepId: 'step-1', questionId: 'offer',
+      })));
+      const args = ['--agent-turn', '--out-dir', outDir(), '--skill-dir', privateSkill(),
+        '--scenarios', scenarios(cases), '--max-calls', '40', '--max-usd', '1'];
+      const id = await planId(args);
+      const globalFetch = vi.spyOn(globalThis, 'fetch');
+      const network = recording(async () => {
+        if (failure === 'http_502') return new Response('upstream unavailable', {status: 502});
+        let first = true;
+        return new Response(new ReadableStream<Uint8Array>({pull(controller) {
+          if (first) {
+            first = false;
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"index":0,"delta":{"content":"Partial"}}]}\n\n'));
+          } else controller.error(new Error('synthetic disconnected stream'));
+        }}), {headers: {'content-type': 'text/event-stream'}});
+      });
+      const outcome = await runProbe([...args, '--live', '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
+      expect(outcome.exitCode).toBe(0);
+      expect(outcome.plan).toMatchObject({plannedCalls: 40, counts: {ask: 30, text: 10, reference: 0}});
+      expect(outcome.stop).toBe('unknown_result');
+      expect(network.sent).toHaveLength(1);
+      expect(globalFetch).not.toHaveBeenCalled();
+      expect(outcome.results).toHaveLength(1);
+      const result = outcome.results![0]!;
+      expect(result).toMatchObject({scenarioId: 'ask-0', stop: 'unknown_result'});
+      expect(result.calls).toHaveLength(1);
+      expect(result.calls[0]).toMatchObject({status: 'unknown', costSource: 'upper_bound'});
+      expect(result.calls[0]!.costUsd).toBe(result.calls[0]!.boundUsd);
+      const ledger = JSON.parse(readFileSync(join(home, '.graylum', 'ac0', 'ledger.json'), 'utf8'));
+      expect(ledger).toMatchObject({calls: 1, nanoUsd: usdToNano(result.calls[0]!.boundUsd)});
+      const summary = JSON.parse(readFileSync(join(outcome.runDir!, 'summary.json'), 'utf8'));
+      expect(summary).toMatchObject({calls: 1, stop: 'unknown_result', ledgerAfter: {calls: 1}});
+      const records = readFileSync(join(outcome.runDir!, 'results.jsonl'), 'utf8').trim().split('\n');
+      expect(records).toHaveLength(1);
+    },
+  );
+
   it('replays a question card as a tool call and its result, and gives the model the step fields', async () => {
     const args = ['--out-dir', outDir(), '--configs', 'qwen-deepinfra-none', '--skill-dir', privateSkill(),
       '--scenarios', scenarios([withHistory]), '--ask', '1'];

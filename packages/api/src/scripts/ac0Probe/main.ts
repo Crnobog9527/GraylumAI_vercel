@@ -145,6 +145,10 @@ export async function runProbe(argv: string[], env: Record<string, string | unde
           const label = result.outcome?.category ?? result.stop ?? 'measured';
           const first = result.firstVisibleMs === undefined ? '-' : Math.round(result.firstVisibleMs) + ' ms';
           stdout(`[${config.id}] ${kind} #${index + 1}: ${label}; first visible ${first}; total ${Math.round(result.totalMs)} ms\n`);
+          if (plan.agentTurn && result.stop === 'unknown_result') {
+            runStop = 'unknown_result';
+            break outer;
+          }
           if (result.stop === 'budget') {
             runStop = 'budget:' + (result.budgetStop ?? 'stopped');
             break outer;

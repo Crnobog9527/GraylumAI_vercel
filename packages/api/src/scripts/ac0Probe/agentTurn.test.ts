@@ -53,7 +53,7 @@ describe('AC1-4 prepared probe (synthetic transport only)', () => {
     expect(text.result.cardAvailableMs).toBeUndefined();
   });
 
-  it('keeps the old cumulative cap and fixes forty calls, exact route, thinking off and a USD 1 run cap', () => {
+  it('uses the Owner-approved cumulative cap and fixes forty calls, exact route, thinking off and a USD 1 run cap', () => {
     const args = parseProbeArgs(['--agent-turn'], '/synthetic-home');
     const scenarios = ['ask', 'text'].flatMap(kind => Array.from({length: kind === 'ask' ? 30 : 10}, (_, i) =>
       ({...scenario, id: kind + i, kind: kind as 'ask' | 'text'})));
@@ -83,7 +83,8 @@ describe('AC1-4 prepared probe (synthetic transport only)', () => {
     await output.completed;
     expect(JSON.stringify(ask.bodies[0].tools)).toBe(JSON.stringify(actualTools));
     expect(JSON.stringify(text.bodies[0].tools)).toBe(JSON.stringify(actualTools));
-    expect(text.bodies[0]).toMatchObject({reasoning: {enabled: false}, provider: {only: ['deepinfra/fp8']}});
+    expect(text.bodies[0]).toMatchObject({reasoning_effort: 'none', provider: {only: ['deepinfra/fp8']}});
+    expect(text.bodies[0]).not.toHaveProperty('reasoning');
     expect(text.bodies[0]).not.toHaveProperty('parallel_tool_calls');
     expect(ask.result.askExecutions).toBe(1);
     expect(agentTurnMeasurement(ask.result)).toMatchObject({completed: true, validCardCandidate: true, formatError: false});

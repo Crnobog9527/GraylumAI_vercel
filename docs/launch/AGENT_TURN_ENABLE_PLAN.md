@@ -285,3 +285,7 @@ Owner 已明确授权：先只读核对 staging 整理模型和测试窗口，�
 本轮本机：API 2929通过/4跳过；typecheck、lint、code-size与diff-check通过；runtime without-app 127通过/5项明确排除；BILL2 without-app 78通过。新head推送后先报总控增量审查，再请求机器人复核，当前不自行关闭新P2讨论。
 
 本轮 MENTOR_STREAM normal / refresh / proposal 同一次运行3项全部通过，414项按pattern排除；三个场景正文均有4次严格增长的可见DOM更新，卡片与建议保存、恢复及一次结算断言通过。所有本机runner已退出并清理。
+
+真实probe执行前修正：专用配置使用 `reasoning_effort: none`；专用模式收到 unknown_result 后立即停止整轮并保留费用/调用记录，不尝试补齐样本。仍使用同一 strict ask_question 和宿主提示词；40次独立场景，本轮实际硬预算设0.75美元（低于Owner批准的1美元）。B2只读核对：不通过，2026-09-29T10:13:20.728Z。
+
+执行前probe修正后的最终API全量2931通过/4跳过，typecheck、lint、代码大小通过；新增502和断流合成回归均证明第一笔未知结果后不再发送后续样本。Runtime/BILL2/浏览器生产路径未再改变，沿用本轮127/78/3项验证证据。
