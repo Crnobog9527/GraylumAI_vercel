@@ -47,6 +47,7 @@ export default defineConfig({
       command: 'node ../../packages/db/tests/v3/run-with-local-rate-limit.mjs pnpm exec next dev --webpack -p 3127',
       url: 'http://localhost:3127',
       env: LOCAL_NEXT_ENV,
+      gracefulShutdown: { signal: 'SIGTERM', timeout: 15_000 },
       reuseExistingServer: false,
       timeout: 120_000,
     },
