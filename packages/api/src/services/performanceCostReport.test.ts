@@ -48,4 +48,14 @@ describe('calculateTokenCacheHitRate', () => {
       { input_tokens: 200, cached_tokens: null },
     ])).toBeNull();
   });
+
+  it('returns unknown when any row did not record input usage', () => {
+    // Would otherwise read as 100%.
+    expect(calculateTokenCacheHitRate([{ input_tokens: null, cached_tokens: 100 }])).toBeNull();
+    // Another row's cache hits would otherwise be measured against an incomplete denominator.
+    expect(calculateTokenCacheHitRate([
+      { input_tokens: 100, cached_tokens: 100 },
+      { input_tokens: null, cached_tokens: 0 },
+    ])).toBeNull();
+  });
 });
