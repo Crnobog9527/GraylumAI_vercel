@@ -139,12 +139,17 @@ try {
     const localDetail = JSON.parse(ok(psql(detailSql), 'Local detail'));
     report.groups = Object.keys(local).length;
     if (option('--query')) report.query = psql(option('--query')).stdout.trim().split('\n');
+    // DATA-ERASURE §6: every table a signed-in client can reach carries account_open_required
+    // (checked on the database exactly as the files built it, before any re-apply below).
+    const audit = ok(psql(read('packages/db/tests/account-open-policy-audit.sql')), 'Account-open audit');
+    report.accountOpenAudit = audit ? audit.split('\n') : [];
+    if (report.accountOpenAudit.length > 0) report.failed = { step: 'account-open-policy-audit' };
     if (option('--out')) writeFileSync(option('--out'), JSON.stringify({ groups: local, objects: localDetail }, null, 1));
     const snapshot = option('--staging') ? JSON.parse(readFileSync(option('--staging'), 'utf8'))
       : readJson('packages/db/tests/baseline/staging-fingerprint.json');
     report.comparison = compare(local, localDetail, snapshot,
       readJson('packages/db/tests/baseline/expected-differences.json'));
-    if (report.comparison.unexpected.length > 0) report.failed = { step: 'staging comparison' };
+    if (report.comparison.unexpected.length > 0) report.failed ??= { step: 'staging comparison' };
     // The convergence migration must be a no-op once its target state is reached (as on staging).
     const convergence = 'packages/db/migrations/0148_db_baseline_convergence.sql';
     const again = psql(read(convergence));
