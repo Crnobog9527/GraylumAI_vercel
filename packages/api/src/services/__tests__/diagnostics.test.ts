@@ -259,7 +259,7 @@ describe('diagnostics routed client contract', () => {
     expect(routerSource.match(/supabase: ctx\.userScopedSupabase,/g) ?? []).toHaveLength(9);
     expect(routerSource.match(/supabaseAdmin: ctx\.supabaseAdmin,/g) ?? []).toHaveLength(9);
     expect(routerSource).not.toContain('supabase: ctx.supabase,');
-    expect(routerSource).toContain('getDiagnosticsHealthCheck(ctx.userScopedSupabase)');
+    expect(routerSource).toContain('getDiagnosticsHealthCheck(ctx.userScopedSupabase, ctx.supabaseAdmin)');
     expect(routerSource).toContain('getRecentRunsData(ctx.userScopedSupabase');
     expect(routerSource).toContain("await ctx.userScopedSupabase\n        .from('diagnostic_results')");
     expect(cronSource).toContain(
