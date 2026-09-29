@@ -42,8 +42,12 @@ export const AGENT_TURN_CONFIG: ProbeConfig = {
   route: 'deepinfra/fp8', effort: 'none', maxPrice: {prompt: 0.3, completion: 0.9},
 };
 
-export type AgentTurnCandidate = 'c1' | 'c2';
+export type AgentTurnCandidate = 'c1' | 'c2' | 'c3' | 'c4';
+/** C1/C2 (2026-09-29 comparison) keep 8192; C3/C4 leave room for low thinking at 4096. */
 export const AGENT_TURN_CANDIDATE_MAX_TOKENS = 8192;
+export const AGENT_TURN_CANDIDATE_TOKENS: Record<AgentTurnCandidate, number> = {c1: 8192, c2: 8192, c3: 4096, c4: 4096};
+/** Candidates measured with the Owner card design (A12 B6 C12 D5 E5); C1/C2 keep their 30 + 10 design. */
+export const CARD_DESIGN_CANDIDATES: ReadonlySet<AgentTurnCandidate> = new Set(['c3', 'c4']);
 /** Offline preparation only; parse/buildPlan refuse --live for these fixed candidates. */
 export const AGENT_TURN_CANDIDATES: Record<AgentTurnCandidate, ProbeConfig> = {
   c1: {id: 'ac14-c1-deepseek-deepinfra-low', model: 'deepseek/deepseek-v4.1-flash',
@@ -51,6 +55,14 @@ export const AGENT_TURN_CANDIDATES: Record<AgentTurnCandidate, ProbeConfig> = {
     dataCollection: 'omit', runtimeRouting: true},
   c2: {id: 'ac14-c2-gemini-vertex-low', model: 'google/gemini-3.8-flash',
     route: 'google-vertex/global', effort: 'low', maxPrice: {prompt: 0.75, completion: 3.75},
+    dataCollection: 'omit', runtimeRouting: true},
+  // Catalog read 2026-09-29T16:10:25Z. Owner: compare these two, thinking on (lowest effort).
+  // Sonnet 5.5 thinking is mandatory (low..max); GPT-6 Sol lists none..max.
+  c3: {id: 'ac14-c3-claude-sonnet-anthropic-low', model: 'anthropic/claude-sonnet-5.5',
+    route: 'anthropic', effort: 'low', maxPrice: {prompt: 2, completion: 10},
+    dataCollection: 'omit', runtimeRouting: true},
+  c4: {id: 'ac14-c4-gpt-sol-openai-low', model: 'openai/gpt-6-sol',
+    route: 'openai', effort: 'low', maxPrice: {prompt: 2, completion: 10},
     dataCollection: 'omit', runtimeRouting: true},
 };
 

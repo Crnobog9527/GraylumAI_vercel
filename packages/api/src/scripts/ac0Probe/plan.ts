@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {parseArgs} from 'node:util';
 import {z} from 'zod';
-import {AGENT_TURN_CONFIG, AGENT_TURN_CANDIDATES, AGENT_TURN_CANDIDATE_MAX_TOKENS,
+import {AGENT_TURN_CONFIG, AGENT_TURN_CANDIDATES, AGENT_TURN_CANDIDATE_TOKENS, CARD_DESIGN_CANDIDATES,
   agentTurnPrompt, assertCardDesignScenarios, type AgentTurnCandidate} from './agentTurn.ts';
 import {DEFAULT_MAX_CALLS, DEFAULT_MAX_USD, HARD_MAX_CALLS, HARD_MAX_USD, validateCaps} from './budget.ts';
 import {callBoundUsd, DEFAULT_CONFIG_IDS, resolveConfigs, thinkingLabel, type ProbeConfig} from './config.ts';
@@ -26,7 +26,8 @@ export const USAGE = `AC-0b model probe (dry run unless --live).
 
   --agent-turn          AC1-4: fixed DeepSeek deepinfra/fp8, thinking off; Owner card design: 18 card (A12 B6) +
                         22 prose (C12 D5 E5) categorized scenarios, no openings, no references
-  --agent-turn-candidate <c1|c2>  fixed candidate; requires --agent-turn, max_tokens 8192; pass the approved --max-usd
+  --agent-turn-candidate <c1|c2|c3|c4>  fixed candidate; requires --agent-turn; c1/c2 max_tokens 8192 (30 + 10),
+                        c3/c4 max_tokens 4096 with the card design samples; pass the approved --max-usd
   --skill-dir <dir>     private Skill directory with SKILL.md and references/ (default: synthetic repo fixture)
   --scenarios <file>    scenario JSON; required with --skill-dir (keep it outside the repository)
   --configs <ids>       comma-separated config ids (default: ${DEFAULT_CONFIG_IDS.join(',')})
@@ -92,8 +93,10 @@ export function parseProbeArgs(argv: string[], home: string): ProbeArgs {
   const agentTurn = values['agent-turn'] ?? false;
   const candidate = values['agent-turn-candidate'];
   if (candidate !== undefined && !agentTurn) throw new Error('PROBE_AGENT_TURN_CANDIDATE_REQUIRES_AGENT_TURN');
-  if (candidate !== undefined && candidate !== 'c1' && candidate !== 'c2') throw new Error('PROBE_AGENT_TURN_CANDIDATE_INVALID');
-  if (candidate && values['max-tokens'] !== undefined && values['max-tokens'] !== String(AGENT_TURN_CANDIDATE_MAX_TOKENS)) {
+  if (candidate !== undefined && !Object.hasOwn(AGENT_TURN_CANDIDATES, candidate)) throw new Error('PROBE_AGENT_TURN_CANDIDATE_INVALID');
+  const fixedTokens = candidate ? AGENT_TURN_CANDIDATE_TOKENS[candidate as AgentTurnCandidate] : undefined;
+  const cardDesign = agentTurn && (!candidate || CARD_DESIGN_CANDIDATES.has(candidate as AgentTurnCandidate));
+  if (candidate && values['max-tokens'] !== undefined && values['max-tokens'] !== String(fixedTokens)) {
     throw new Error('PROBE_AGENT_TURN_CANDIDATE_MAX_TOKENS_FIXED');
   }
   if (agentTurn && (values.configs !== undefined || values['config-file'] !== undefined || external)) {
@@ -113,13 +116,13 @@ export function parseProbeArgs(argv: string[], home: string): ProbeArgs {
     configIds: (values.configs ?? DEFAULT_CONFIG_IDS.join(',')).split(',').map(id => id.trim()).filter(Boolean),
     configFile: values['config-file'],
     counts: {
-      // Agent-turn baseline follows the Owner card design (A+B cards, C+D+E prose); candidates keep 30 + 10.
-      ask: integer(values.ask, agentTurn && !candidate ? 18 : 30, 0, 100, 'ask'),
-      text: integer(values.text, agentTurn ? (candidate ? 10 : 22) : 0, 0, 100, 'text'),
+      // The baseline and C3/C4 follow the Owner card design (A+B cards, C+D+E prose); C1/C2 keep 30 + 10.
+      ask: integer(values.ask, cardDesign ? 18 : 30, 0, 100, 'ask'),
+      text: integer(values.text, agentTurn ? (cardDesign ? 22 : 10) : 0, 0, 100, 'text'),
       reference: integer(values.reference, 0, 0, 100, 'reference'),
     },
     maxCalls, maxUsd,
-    maxTokens: integer(values['max-tokens'], candidate ? AGENT_TURN_CANDIDATE_MAX_TOKENS : 1024, 64, 8192, 'max-tokens'),
+    maxTokens: integer(values['max-tokens'], fixedTokens ?? 1024, 64, 8192, 'max-tokens'),
     timeoutMs: integer(values['timeout-ms'], DEFAULT_TIMEOUT_MS, 5_000, DEFAULT_TIMEOUT_MS, 'timeout-ms'),
     outDir: values['out-dir'] ?? join(home, '.graylum', 'ac0', 'results'),
     ledger: join(home, '.graylum', 'ac0', 'ledger.json'),
@@ -169,15 +172,16 @@ function scenarioBytes(scenario: Scenario, skill: LoadedSkill): number {
 export function buildPlan(args: ProbeArgs, skill: LoadedSkill, scenarios: Scenario[], scenarioDigest: string): ProbePlan {
   const candidate = args.agentTurnCandidate;
   if (candidate && !args.agentTurn) throw new Error('PROBE_AGENT_TURN_CANDIDATE_REQUIRES_AGENT_TURN');
-  if (candidate && candidate !== 'c1' && candidate !== 'c2') throw new Error('PROBE_AGENT_TURN_CANDIDATE_INVALID');
-  if (candidate && args.maxTokens !== AGENT_TURN_CANDIDATE_MAX_TOKENS) throw new Error('PROBE_AGENT_TURN_CANDIDATE_MAX_TOKENS_FIXED');
+  if (candidate && !Object.hasOwn(AGENT_TURN_CANDIDATES, candidate)) throw new Error('PROBE_AGENT_TURN_CANDIDATE_INVALID');
+  if (candidate && args.maxTokens !== AGENT_TURN_CANDIDATE_TOKENS[candidate]) throw new Error('PROBE_AGENT_TURN_CANDIDATE_MAX_TOKENS_FIXED');
+  const cardDesign = args.agentTurn && (!candidate || CARD_DESIGN_CANDIDATES.has(candidate));
   const extra = args.configFile ? parsePrivateJson(readFileSync(args.configFile, 'utf8'), z.unknown(), 'CONFIG_FILE') : undefined;
   const configs = args.agentTurn ? [candidate ? AGENT_TURN_CANDIDATES[candidate] : AGENT_TURN_CONFIG] : resolveConfigs(args.configIds, extra);
-  if (candidate && (args.counts.ask !== 30 || args.counts.text !== 10 || args.counts.reference !== 0)) {
-    throw new Error('PROBE_AGENT_TURN_PLAN_FIXED: candidates keep 30 ask + 10 text, no references');
+  if (candidate && !cardDesign && (args.counts.ask !== 30 || args.counts.text !== 10 || args.counts.reference !== 0)) {
+    throw new Error('PROBE_AGENT_TURN_PLAN_FIXED: C1/C2 keep 30 ask + 10 text, no references');
   }
-  if (args.agentTurn && !candidate) {
-    if (args.counts.ask !== 18 || args.counts.text !== 22 || args.counts.reference !== 0 || args.maxUsd > 1) {
+  if (cardDesign) {
+    if (args.counts.ask !== 18 || args.counts.text !== 22 || args.counts.reference !== 0 || !candidate && args.maxUsd > 1) {
       throw new Error('PROBE_AGENT_TURN_PLAN_FIXED: 18 card + 22 prose samples (A12 B6 C12 D5 E5), no references, at most USD 1');
     }
     assertCardDesignScenarios(scenarios);

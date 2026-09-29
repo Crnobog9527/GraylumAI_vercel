@@ -3,7 +3,8 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import {openRouterBound} from '../../services/bill2/openRouterPolicy';
 import {openRouterRequestBody} from '../../services/runtime/providerRequest';
 import {frozenReasoningFields} from '../../services/runtime/reasoningPolicy';
-import {AGENT_TURN_CANDIDATES, AGENT_TURN_CONFIG, CARD_CATEGORIES, type AgentTurnCandidate} from './agentTurn.ts';
+import {AGENT_TURN_CANDIDATES, AGENT_TURN_CANDIDATE_TOKENS, AGENT_TURN_CONFIG, CARD_CATEGORIES,
+  type AgentTurnCandidate} from './agentTurn.ts';
 import {createBudget, HARD_MAX_CALLS, HARD_MAX_USD, memoryLedger} from './budget.ts';
 import {resolveConfigs, routing, type ProbeConfig} from './config.ts';
 import {sseResponse, toolDeltas} from './dryRun.ts';
@@ -23,11 +24,11 @@ const args = (candidate: AgentTurnCandidate, ...extra: string[]) => parseProbeAr
 const card = {question: 'Which audience?', options: ['Neighbours', 'Volunteers'], recommended: null};
 afterEach(() => vi.restoreAllMocks());
 
-async function capture(config: ProbeConfig, kind: 'ask' | 'text' = 'ask') {
+async function capture(config: ProbeConfig, kind: 'ask' | 'text' = 'ask', maxTokens = 8192) {
   const bodies: string[] = [];
   const result = await runTrial({agentTurn: true, kind, scenario: {...scenarios[0]!, kind, history: [
     {role: 'assistant', content: 'A prior suggestion.', askQuestion: card}, {role: 'user', content: 'Neighbours'},
-  ]}, index: 0, skill, config, maxTokens: 8192, timeoutMs: 5000,
+  ]}, index: 0, skill, config, maxTokens, timeoutMs: 5000,
   budget: createBudget({maxCalls: 1, maxUsd: 3.5, ledger: memoryLedger()}),
   upstream: async (_url, init) => {
     bodies.push(String(init.body));
@@ -62,6 +63,10 @@ describe('fixed AC1-4 candidates: approved live caps', () => {
         effort: 'low', maxPrice: {prompt: 0.14, completion: 0.42}, dataCollection: 'omit', runtimeRouting: true},
       c2: {id: 'ac14-c2-gemini-vertex-low', model: 'google/gemini-3.8-flash', route: 'google-vertex/global',
         effort: 'low', maxPrice: {prompt: 0.75, completion: 3.75}, dataCollection: 'omit', runtimeRouting: true},
+      c3: {id: 'ac14-c3-claude-sonnet-anthropic-low', model: 'anthropic/claude-sonnet-5.5', route: 'anthropic',
+        effort: 'low', maxPrice: {prompt: 2, completion: 10}, dataCollection: 'omit', runtimeRouting: true},
+      c4: {id: 'ac14-c4-gpt-sol-openai-low', model: 'openai/gpt-6-sol', route: 'openai',
+        effort: 'low', maxPrice: {prompt: 2, completion: 10}, dataCollection: 'omit', runtimeRouting: true},
     });
     expect(buildPlan(args('c1'), skill, scenarios, 's').planId).not.toBe(buildPlan(args('c2'), skill, scenarios, 's').planId);
     expect(HARD_MAX_CALLS).toBe(613);
@@ -76,6 +81,19 @@ describe('fixed AC1-4 candidates: approved live caps', () => {
     argv('c2', '--record-external-calls', '1', '--record-external-usd', '0.1'),
   ])('refuses conflicting candidate arguments %j', (...input) => {
     expect(() => parseProbeArgs(input, '/synthetic-home')).toThrow();
+  });
+
+  it.each(['c3', 'c4'] as const)('fixes %s to the Owner card design samples with 4096 output tokens', candidate => {
+    const parsed = args(candidate);
+    expect(parsed).toMatchObject({agentTurnCandidate: candidate, counts: {ask: 18, text: 22, reference: 0}, maxCalls: 40, maxTokens: 4096});
+    const categorized: Scenario[] = Object.entries(CARD_CATEGORIES).flatMap(([category, {kind, count}]) =>
+      Array.from({length: count}, (_, index) => ({id: category + index, kind, category: category as Scenario['category'],
+        history: [], input: 'Synthetic ' + index, step: 0, currentStepId: 'step-1', questionId: 'audience'})));
+    expect(buildPlan(parsed, skill, categorized, 's')).toMatchObject({agentTurnCandidate: candidate, plannedCalls: 40, maxTokens: 4096,
+      configs: [AGENT_TURN_CANDIDATES[candidate]]});
+    expect(() => buildPlan(parsed, skill, scenarios, 's')).toThrow('CARD_CATEGORY_INVALID');
+    expect(() => args(candidate, '--max-tokens', '8192')).toThrow('MAX_TOKENS_FIXED');
+    expect(() => buildPlan({...parsed, counts: {ask: 30, text: 10, reference: 0}}, skill, categorized, 's')).toThrow('PLAN_FIXED');
   });
 
   it.each([['c1', '0.40'], ['c2', '2.61']] as const)('accepts %s live with the approved run cap', (candidate, cap) => {
@@ -112,28 +130,29 @@ describe('fixed AC1-4 candidates: approved live caps', () => {
       maxPrice: {prompt: 1, completion: 1}, runtimeRouting: true}])).toThrow('runtimeRouting is built-in only');
   });
 
-  it.each(['c1', 'c2'] as const)('matches %s real frozen provider/reasoning and full normalized request bytes', async candidate => {
+  it.each(['c1', 'c2', 'c3', 'c4'] as const)('matches %s real frozen provider/reasoning and full normalized request bytes', async candidate => {
+    const tokens = AGENT_TURN_CANDIDATE_TOKENS[candidate];
     const globalFetch = vi.spyOn(globalThis, 'fetch');
     const config = AGENT_TURN_CANDIDATES[candidate];
     const baseline = await capture(AGENT_TURN_CONFIG);
     expect(Array.isArray(baseline.body.messages.find((message: any) => message.role === 'assistant').content)).toBe(true);
     const providerLimits = {providerSlug: config.route, contextTokens: 100_000,
       promptUsdPerMillion: String(config.maxPrice.prompt), completionUsdPerMillion: String(config.maxPrice.completion), requestUsd: '0'};
-    const quoted = openRouterBound(providerLimits, 8192);
+    const quoted = openRouterBound(providerLimits, tokens);
     for (const kind of ['ask', 'text'] as const) {
-      const actual = await capture(config, kind);
+      const actual = await capture(config, kind, tokens);
       expect(JSON.stringify(actual.body.provider)).toBe(JSON.stringify(quoted.routing));
       const reasoning = Object.fromEntries(Object.entries(actual.body).filter(([key]) => key === 'reasoning_effort' || key === 'reasoning'));
       expect(JSON.stringify(reasoning)).toBe(JSON.stringify(frozenReasoningFields({effort: 'low'})));
       expect(JSON.stringify(actual.body.tools)).toBe(JSON.stringify(baseline.body.tools));
       expect(actual.body.tools).toHaveLength(1);
       expect(actual.body.tools[0].function).toMatchObject({name: 'ask_question', strict: true});
-      expect(actual.body.max_tokens).toBe(8192);
+      expect(actual.body.max_tokens).toBe(tokens);
       expect(actual.body.provider).not.toHaveProperty('data_collection');
       expect(actual.body).not.toHaveProperty('parallel_tool_calls');
       const policy = {modelId: '00000000-0000-4000-8000-000000000001', provider: 'openrouter', account: 'synthetic',
         model: config.model, protocol: 'openrouter-chat-v1' as const, providerLimits, upperUsd: quoted.upperUsd,
-        inputLimit: 100_000, outputLimit: 8192, automaticRetry: false as const, hiddenTools: false as const, lookupSupported: true};
+        inputLimit: 100_000, outputLimit: tokens, automaticRetry: false as const, hiddenTools: false as const, lookupSupported: true};
       expect(openRouterRequestBody(actual.bytes, {context: {providerRequestFormat: 'agent-turn-v5-stream',
         tools: ['ask_question'], network: 'deny', reasoning: {effort: 'low'}}, policy, phase: 'primary', primaryDialogue: true}))
         .toBe(actual.bytes);
