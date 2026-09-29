@@ -4,11 +4,6 @@ import { TRPCError } from '@trpc/server';
 import { logger } from '../lib/logger';
 import { createSafeInternalError, createSafeServiceUnavailableError } from '../lib/publicError';
 import { countsAsCreditSpend } from '../services/creditLedger';
-import {
-  CREDIT_BALANCE_UNAVAILABLE_MESSAGE,
-  classifyCreditBalanceFailure,
-  readCreditBalance,
-} from '../services/creditBalance';
 
 export const userRouter = router({
   getUserProfile: protectedProcedure.query(async ({ ctx }) => {
@@ -27,27 +22,12 @@ export const userRouter = router({
       return email.split('@')[0] || '用户';
     };
 
-    // 对于任何错误都返回默认值，确保页面能正常加载
+    // 读不到资料时报错，不返回默认会员等级或用户名冒充真实数据
     if (error || !userProfile) {
       logger.error('auth', 'user_profile_fetch_failed', {
         code: error?.code ?? null,
       });
-      const email = ctx.user?.email ?? '';
-      const displayName = getDisplayName(email);
-      return {
-        id: ctx.profileId,
-        email,
-        nickname: displayName,
-        full_name: displayName,
-        avatar_url: null,
-        role: 'user',
-        credits: null,
-        membership_level: 'free',
-        status: 'active',
-        auth_provider: ctx.authProvider,
-        email_verified: ctx.isEmailVerified,
-        created_at: new Date().toISOString(),
-      };
+      throw createSafeServiceUnavailableError(error, '个人资料暂时无法读取，请稍后重试');
     }
 
     // 返回实际数据，nickname 为空时使用 email 前缀作为显示名称
@@ -85,17 +65,6 @@ export const userRouter = router({
       return data;
     }),
 
-  getUserCredits: protectedProcedure.query(async ({ ctx }) => {
-    try {
-      return await readCreditBalance(ctx.supabase, ctx.profileId);
-    } catch (error) {
-      logger.error('billing', 'user_credits_fetch_failed', {
-        reason: classifyCreditBalanceFailure(error),
-      });
-      throw createSafeServiceUnavailableError(error, CREDIT_BALANCE_UNAVAILABLE_MESSAGE);
-    }
-  }),
-
   /**
    * 获取用户使用统计
    * - 累计对话次数
@@ -126,12 +95,15 @@ export const userRouter = router({
         .eq('conversations.user_id', ctx.profileId),
     ]);
 
+    // 任一查询失败时报错，不返回 0 冒充真实统计
+    const readError = conversationsResult.error ?? monthlyTransactionsResult.error ?? messageCountResult.error;
+    if (readError) {
+      logger.error('auth', 'user_usage_stats_fetch_failed', { code: readError.code ?? null });
+      throw createSafeServiceUnavailableError(readError, '使用统计暂时无法读取，请稍后重试');
+    }
     const conversations = conversationsResult.data ?? [];
-    const convError = conversationsResult.error;
     const monthlyTransactions = monthlyTransactionsResult.data ?? [];
-    const txError = monthlyTransactionsResult.error;
     const messageCount = messageCountResult.count ?? 0;
-    const msgError = messageCountResult.error;
 
     // 4. 计算使用天数（有对话的天数）
     const uniqueDays = new Set(conversations.map(c => new Date(c.created_at).toDateString()));

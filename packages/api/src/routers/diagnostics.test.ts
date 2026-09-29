@@ -130,12 +130,6 @@ function createAdminCaller(options?: {
         );
       }
 
-      if (table === 'diagnostic_results') {
-        return options?.batchResult
-          ? createBatchResultsQueryBuilder(Promise.resolve(options.batchResult))
-          : createRecentRunsQueryBuilder(Promise.resolve(options?.recentRunsResult ?? { data: [], error: null }));
-      }
-
       if (table === 'ai_models') {
         aiModelsCallCount += 1;
         const result = aiModelsCallCount === 1
@@ -161,7 +155,11 @@ function createAdminCaller(options?: {
             return Promise.resolve(result);
           },
         };
-        return { delete: (opts: unknown) => { cleanupCalls.push(['delete', opts]); return deleteBuilder; } };
+        // Since 0146 diagnostic_results is service_role-only; reads also go through this client.
+        const readBuilder = options?.batchResult
+          ? createBatchResultsQueryBuilder(Promise.resolve(options.batchResult))
+          : createRecentRunsQueryBuilder(Promise.resolve(options?.recentRunsResult ?? { data: [], error: null }));
+        return { ...readBuilder, delete: (opts: unknown) => { cleanupCalls.push(['delete', opts]); return deleteBuilder; } };
       }
       throw new Error(`Unexpected admin-scoped table ${table}`);
     },

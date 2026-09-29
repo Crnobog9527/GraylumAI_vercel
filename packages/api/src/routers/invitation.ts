@@ -146,26 +146,6 @@ export const invitationRouter = router({
   // Invitation Codes Management
   // ============================================
 
-  // Admin only: Generate new invitation code
-  generateInvitationCode: adminProcedure
-    .mutation(async ({ ctx }) => {
-      const code = generateInviteCode();
-      const { data, error } = await ctx.supabase
-        .from('invitations')
-        .insert({
-          code,
-          created_by: ctx.profileId,
-          status: 'active',
-        })
-        .select()
-        .single();
-
-      if (error) {
-        throw createInvitationOperationError('生成邀请码', error);
-      }
-      return data;
-    }),
-
   // Public: Validate invitation code (for registration)
   validateInvitationCode: publicProcedure
     .input(z.object({ code: z.string() }))
@@ -358,20 +338,6 @@ export const invitationRouter = router({
       };
     }),
 
-  // Admin only: View invitation codes history
-  getInvitationHistory: adminProcedure
-    .query(async ({ ctx }) => {
-      const { data, error } = await ctx.supabase
-        .from('invitations')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        throw createInvitationOperationError('读取邀请码历史', error);
-      }
-      return data;
-    }),
-
   // ============================================
   // Invitation Records Management
   // ============================================
@@ -409,20 +375,6 @@ export const invitationRouter = router({
         throw createInvitationOperationError('读取邀请记录', error);
       }
       return data ?? [];
-    }),
-
-  // Admin only: Get invitation statistics
-  getInvitationStats: adminProcedure
-    .query(async ({ ctx }) => {
-      const { data: allRecords, error } = await ctx.supabase
-        .from('invitation_records')
-        .select('status, risk_level, inviter_reward, created_at');
-
-      if (error) {
-        throw createInvitationOperationError('读取邀请统计', error);
-      }
-
-      return buildInvitationStats(allRecords ?? []);
     }),
 
   // Admin only: Get invitation page bootstrap data
@@ -481,39 +433,6 @@ export const invitationRouter = router({
       });
 
       return result;
-    }),
-
-  // Admin only: Update invitation record status
-  updateInvitationRecord: adminProcedure
-    .input(z.object({
-      id: z.string().uuid(),
-      status: z.enum(['pending', 'registered', 'rewarded', 'rejected']).optional(),
-      riskLevel: z.enum(['low', 'medium', 'high']).optional(),
-      blockReason: z.string().optional(),
-    }))
-    .mutation(async ({ ctx, input }) => {
-      const updateData: Record<string, unknown> = {};
-
-      if (input.status !== undefined) {
-        updateData.status = input.status;
-        if (input.status === 'rewarded') {
-          updateData.rewarded_at = new Date().toISOString();
-        }
-      }
-      if (input.riskLevel !== undefined) updateData.risk_level = input.riskLevel;
-      if (input.blockReason !== undefined) updateData.block_reason = input.blockReason;
-
-      const { data, error } = await ctx.supabase
-        .from('invitation_records')
-        .update(updateData)
-        .eq('id', input.id)
-        .select()
-        .single();
-
-      if (error) {
-        throw createInvitationOperationError('更新邀请记录', error);
-      }
-      return data;
     }),
 
   // User: Get my invitation records

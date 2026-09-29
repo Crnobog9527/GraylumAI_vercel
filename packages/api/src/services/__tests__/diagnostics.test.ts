@@ -77,19 +77,21 @@ function createResultsBuilder(rows: unknown[] = [], count = 0) {
 }
 
 describe('diagnostics privileged client separation', () => {
-  it('routes privileged RPCs through the service-role client and keeps reads user-scoped', async () => {
+  it('routes privileged RPCs and every diagnostic_results access through the service-role client', async () => {
     const userRpc = vi.fn(() => {
       throw new Error('privileged RPC dispatched through the user client');
     });
-    const userFrom = vi.fn((table: string) => (table === 'diagnostic_results'
-      ? Object.assign(createResultsBuilder(), { insert: vi.fn().mockResolvedValue({ error: null }) })
-      : {
+    const userFrom = vi.fn((table: string) => {
+      // 0146: clients have no privileges on diagnostic_results.
+      if (table === 'diagnostic_results') throw new Error('diagnostic_results dispatched through the user client');
+      return {
         select: vi.fn(() => ({
           order: vi.fn().mockResolvedValue({ data: [], error: null }),
           limit: vi.fn().mockResolvedValue({ data: [], error: null }),
         })),
         insert: vi.fn().mockResolvedValue({ error: null }),
-      }));
+      };
+    });
     const adminRpc = vi.fn(async (name: string) => {
       if (name === 'atomic_pre_deduct') {
         return { data: [{ pre_deduct_id: 'pre-deduct-1' }], error: null };
@@ -97,7 +99,8 @@ describe('diagnostics privileged client separation', () => {
 
       return { data: [], error: null };
     });
-    const adminFrom = vi.fn(() => createResultsBuilder());
+    const adminInsert = vi.fn().mockResolvedValue({ error: null });
+    const adminFrom = vi.fn(() => Object.assign(createResultsBuilder(), { insert: adminInsert }));
 
     const service = new DiagnosticsService({
       supabase: { rpc: userRpc, from: userFrom } as any,
@@ -111,15 +114,16 @@ describe('diagnostics privileged client separation', () => {
     const billingResult = await service.runSingleTest('billing_prededuct');
 
     expect(billingResult?.status).toBe('warning');
-    // The 0005 view/RPCs are absent on staging: history and summary read diagnostic_results through
-    // the service role (as the RPCs did), latest results stay on the user-scoped admin client.
+    // The 0005 view/RPCs are absent on staging: history, summary, latest results and the result
+    // write all use diagnostic_results through the service role (clients have no access since 0146).
     expect(adminRpc.mock.calls.map(([name]) => name)).not.toEqual(expect.arrayContaining([
       'get_test_history', 'get_diagnostic_summary',
     ]));
     expect(userRpc).not.toHaveBeenCalled();
-    expect(userFrom).toHaveBeenCalledWith('diagnostic_results');
+    expect(userFrom).not.toHaveBeenCalledWith('diagnostic_results');
     expect(userFrom).not.toHaveBeenCalledWith('diagnostic_latest_results');
     expect(new Set(adminFrom.mock.calls.map(([table]) => table))).toEqual(new Set(['diagnostic_results']));
+    expect(adminInsert).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -157,10 +161,6 @@ function createRoutedDiagnosticsCaller() {
       return { select: () => ({ limit: async () => ({ data: [], error: null }) }) };
     }
 
-    if (table === 'diagnostic_results') {
-      return Object.assign(createResultsBuilder(), { insert: diagnosticInsert });
-    }
-
     throw new Error(`Unexpected user-scoped table ${table}`);
   });
   const userRpc = vi.fn(() => {
@@ -169,6 +169,9 @@ function createRoutedDiagnosticsCaller() {
   const userSupabase = { from: userFrom, rpc: userRpc };
 
   const adminFrom = vi.fn((table: string) => {
+    if (table === 'diagnostic_results') {
+      return Object.assign(createResultsBuilder(), { insert: diagnosticInsert });
+    }
     throw new Error(`ordinary read dispatched through admin client: ${table}`);
   });
   const adminRpc = vi.fn(async (name: string) => {
@@ -214,7 +217,7 @@ function createRoutedDiagnosticsCaller() {
 }
 
 describe('diagnostics routed client contract', () => {
-  it('preserves the user-scoped client through adminProcedure and keeps privileged RPCs admin-only', async () => {
+  it('keeps user-scoped reads user-scoped and diagnostic_results on the service-role client', async () => {
     const {
       caller,
       userSupabase,
@@ -235,9 +238,9 @@ describe('diagnostics routed client contract', () => {
 
     expect(userFrom).toHaveBeenCalledWith('profiles');
     expect(userFrom).not.toHaveBeenCalledWith('diagnostic_latest_results');
-    expect(userFrom).toHaveBeenCalledWith('diagnostic_results');
+    expect(userFrom).not.toHaveBeenCalledWith('diagnostic_results');
     expect(userRpc).not.toHaveBeenCalled();
-    expect(adminFrom).not.toHaveBeenCalled();
+    expect(new Set(adminFrom.mock.calls.map(([table]) => table))).toEqual(new Set(['diagnostic_results']));
     expect(adminRpc.mock.calls.map(([name]) => name)).toEqual([
     ]);
     expect(diagnosticInsert).toHaveBeenCalledTimes(1);
@@ -259,8 +262,10 @@ describe('diagnostics routed client contract', () => {
     expect(routerSource.match(/supabaseAdmin: ctx\.supabaseAdmin,/g) ?? []).toHaveLength(9);
     expect(routerSource).not.toContain('supabase: ctx.supabase,');
     expect(routerSource).toContain('getDiagnosticsHealthCheck(ctx.userScopedSupabase, ctx.supabaseAdmin)');
-    expect(routerSource).toContain('getRecentRunsData(ctx.userScopedSupabase');
-    expect(routerSource).toContain("await ctx.userScopedSupabase\n        .from('diagnostic_results')");
+    expect(routerSource).toContain('getRecentRunsData(ctx.supabaseAdmin');
+    expect(routerSource).not.toContain('getRecentRunsData(ctx.userScopedSupabase');
+    expect(routerSource).toContain("await ctx.supabaseAdmin\n        .from('diagnostic_results')");
+    expect(routerSource).not.toContain("await ctx.userScopedSupabase\n        .from('diagnostic_results')");
     expect(cronSource).toContain(
       'new DiagnosticsService({\n      supabase,\n      supabaseAdmin: supabase,',
     );
