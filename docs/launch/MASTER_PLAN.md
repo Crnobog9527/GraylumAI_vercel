@@ -435,6 +435,7 @@ DATA-ERASURE 删除规则设计 ─→ AC-2
 AGENT-CORE ─→ RUNTIME-PROD + MODEL-REASONING（同一 writer）
 RESEARCH-0 + AC-1 + RUNTIME-PROD + DATA-ERASURE ─→ RESEARCH-TOOLS ─→ 封闭内测
 AGENT-CORE 稳定 ─→ MODERATION ─→ 封闭内测
+S1 权限修复 ─→ DB-BASELINE ─→ V3-M3 ─→ REL-1
 ENTITLEMENTS ─→ PAY-COMMON ─→ PAY-WAFFO（同一 writer）
 RUNTIME-PROD + ENTITLEMENTS + DATA-ERASURE ─→ FUSION-REVIEW
 ENTITLEMENTS + DATA-ERASURE ─→ LIB-DOCS ─→ VOICE（另需 RUNTIME-PROD）
@@ -464,7 +465,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | N1b 体验样片 | AC-0、AC-1 及其对应的 AGENT-CORE-UI 部分；RESEARCH-0（和 AC-0 同期）；MODEL-REASONING（按 Owner 2026-09-28 决定提前，在 AC1-4 之前完成） | Owner 在 staging 用真实模型走完定位第一步，决定继续、调整还是换模型；右侧整理这一阶段沿用旧做法 |
 | N1c 完整定位流程 | DATA-ERASURE 删除规则设计、AC-2、AC-3、AC-5 及其对应的 AGENT-CORE-UI 部分（本步小结卡、右侧面板和进度条） | Owner 从进入到定稿完整走通并验收 |
 | N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
-| N2 上线基础 | RUNTIME-PROD、RESEARCH-TOOLS、MODERATION、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON | 上线基础完成；然后邀请 5–10 位真实用户**封闭内测**：只开放定位、周选题和写作，用赠送积分，不开放付费，反馈用于调整 N3 的优先级（D8，不改变 D1 的公开上线范围） |
+| N2 上线基础 | RUNTIME-PROD、DB-BASELINE、RESEARCH-TOOLS、MODERATION、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON | 上线基础完成；然后邀请 5–10 位真实用户**封闭内测**：只开放定位、周选题和写作，用赠送积分，不开放付费，反馈用于调整 N3 的优先级（D8，不改变 D1 的公开上线范围） |
 | N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
 | N4 收口 | LEGACY-CLOSE、V3-M3 | 完整验收；REL-1 和生产另行批准 |
 
