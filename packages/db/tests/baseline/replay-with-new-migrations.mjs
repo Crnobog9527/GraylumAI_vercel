@@ -11,7 +11,7 @@
 //          --new 0149_x.sql[,0150_y.sql] [--after a.sql,b.sql] [--before-after c.sql]
 // --before-after runs checks on the build WITHOUT the new migrations (e.g. a structure fingerprint).
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -23,6 +23,16 @@ if (args[0] !== '--local-only' || !option('--new') || process.env.CI) {
 }
 const root = resolve(import.meta.dirname, '../../../..');
 const migrations = resolve(root, 'packages/db/migrations');
+const holdDir = resolve(root, 'packages/db');
+const HOLD_PREFIX = '.replay-held-';
+// A previous run that died between hold and restore leaves '.replay-held-<file>' behind: put it
+// back when the migration is missing, refuse to guess when both copies exist.
+for (const leftover of readdirSync(holdDir).filter(name => name.startsWith(HOLD_PREFIX))) {
+  const original = resolve(migrations, leftover.slice(HOLD_PREFIX.length));
+  if (existsSync(original)) throw new Error(`Both ${original} and packages/db/${leftover} exist; resolve by hand`);
+  renameSync(resolve(holdDir, leftover), original);
+  console.error(`Restored leftover ${leftover} from an interrupted run`);
+}
 const newFiles = option('--new').split(',');
 for (const file of newFiles) {
   if (!/^\d{4}_[A-Za-z0-9._-]+\.sql$/.test(file) || !existsSync(resolve(migrations, file))) {
@@ -46,14 +56,24 @@ try {
   const after = resolve(temp, 'after.json');
   const overlay = resolve(temp, 'overlay.json');
   // Held on the same volume as the checkout (rename across devices fails), outside migrations/.
-  const held = newFiles.map(file => [resolve(migrations, file), resolve(root, 'packages/db', `.replay-held-${file}`)]);
+  const held = newFiles.map(file => [resolve(migrations, file), resolve(holdDir, `${HOLD_PREFIX}${file}`)]);
+  const restore = () => {
+    for (const [from, to] of held) if (existsSync(to) && !existsSync(from)) renameSync(to, from);
+  };
+  // The replay runs synchronously: a terminal Ctrl+C also stops that child, the run then throws and
+  // `finally` restores. The handlers cover a signal that arrives outside the synchronous replay.
+  const onSignal = signal => { restore(); process.exit(signal === 'SIGINT' ? 130 : 143); };
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
   try {
     for (const [from, to] of held) renameSync(from, to);
     const base = replay(['--out', before, ...(option('--before-after') ? ['--after', option('--before-after')] : [])]);
     summary.before = base.after;
     if (base.failed) throw new Error(`Build without the new migrations failed: ${JSON.stringify(base.failed)}`);
   } finally {
-    for (const [from, to] of held) if (existsSync(to)) renameSync(to, from);
+    restore();
+    process.removeListener('SIGINT', onSignal);
+    process.removeListener('SIGTERM', onSignal);
   }
   const built = replay(['--out', after]);
   if (built.failed?.step !== 'staging comparison' && built.failed) {
