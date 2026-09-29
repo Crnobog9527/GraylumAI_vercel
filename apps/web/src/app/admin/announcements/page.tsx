@@ -5,7 +5,7 @@ import { trpc } from '@/trpc/client';
 import {
   Megaphone, Plus, Pencil, Trash2, Check, X,
   Info, AlertTriangle, CheckCircle, XCircle,
-  Calendar, RefreshCw, Globe, Home,
+  Calendar, RefreshCw, Globe,
   Link2, Palette, Tag, ArrowUpDown, Sparkles
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,6 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -47,7 +46,6 @@ import {
 } from './announcementFormPayload';
 
 type AnnouncementType = 'info' | 'warning' | 'success' | 'error' | 'promo' | 'announcement';
-type AnnouncementAreaType = 'homepage' | 'banner';
 type BannerStyle = 'info' | 'warning' | 'success' | 'error' | 'promo' | 'announcement';
 
 interface Announcement {
@@ -55,7 +53,7 @@ interface Announcement {
   title: string;
   content: string;
   type: AnnouncementType;
-  announcement_type: AnnouncementAreaType;
+  announcement_type: 'banner';
   banner_style: BannerStyle | null;
   banner_link: string | null;
   icon: string | null;
@@ -102,14 +100,12 @@ const tagColorOptions = [
 ];
 
 export default function AdminAnnouncementsPage() {
-  const [activeTab, setActiveTab] = useState<'banner' | 'homepage'>('banner');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
   const [formData, setFormData] = useState({
     title: '',
     content: '',
     type: 'info' as AnnouncementType,
-    announcementType: 'banner' as AnnouncementAreaType,
     bannerStyle: 'info' as BannerStyle,
     bannerLink: '',
     icon: 'Megaphone',
@@ -145,13 +141,12 @@ export default function AdminAnnouncementsPage() {
     }
   });
 
-  const openCreateDialog = (type: AnnouncementAreaType) => {
+  const openCreateDialog = () => {
     setEditingAnnouncement(null);
     setFormData({
       title: '',
       content: '',
       type: 'info',
-      announcementType: type,
       bannerStyle: 'info',
       bannerLink: '',
       icon: 'Megaphone',
@@ -171,7 +166,6 @@ export default function AdminAnnouncementsPage() {
       title: announcement.title,
       content: announcement.content,
       type: announcement.type,
-      announcementType: announcement.announcement_type,
       bannerStyle: (announcement.banner_style || 'info') as BannerStyle,
       bannerLink: getAnnouncementLinkFormValue(announcement.banner_link),
       icon: announcement.icon || 'Megaphone',
@@ -197,9 +191,8 @@ export default function AdminAnnouncementsPage() {
       title: formData.title,
       content: formData.content,
       type: formData.type,
-      announcementType: formData.announcementType,
+      announcementType: 'banner' as const,
       ...buildAnnouncementPresentationPayload({
-        announcementType: formData.announcementType,
         bannerStyle: formData.bannerStyle,
         bannerLink: formData.bannerLink,
       }),
@@ -245,28 +238,25 @@ export default function AdminAnnouncementsPage() {
     return <AdminErrorState error={error} onRetry={() => refetch()} />;
   }
 
-  const announcements = data?.announcements ?? [];
-  const bannerAnnouncements = announcements.filter((a: Announcement) => a.announcement_type === 'banner');
-  const homepageAnnouncements = announcements.filter((a: Announcement) => a.announcement_type === 'homepage');
+  // The list endpoint only returns banner rows; retired homepage rows stay in the table unseen.
+  const bannerAnnouncements: Announcement[] = data?.announcements ?? [];
 
   const stats = {
     totalBanner: bannerAnnouncements.length,
     activeBanner: bannerAnnouncements.filter((a: Announcement) => a.active === 'true').length,
-    totalHomepage: homepageAnnouncements.length,
-    activeHomepage: homepageAnnouncements.filter((a: Announcement) => a.active === 'true').length,
   };
 
-  const renderAnnouncementTable = (items: Announcement[], areaType: AnnouncementAreaType) => (
+  const renderAnnouncementTable = (items: Announcement[]) => (
     <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-          {areaType === 'banner' ? <Globe className="h-5 w-5" /> : <Home className="h-5 w-5" />}
-          {areaType === 'banner' ? '横幅公告' : '首页公告'}
+          <Globe className="h-5 w-5" />
+          横幅公告
         </CardTitle>
         <Button
-          onClick={() => openCreateDialog(areaType)}
+          onClick={openCreateDialog}
           size="sm"
-          data-testid={`admin-announcement-create-${areaType}`}
+          data-testid="admin-announcement-create-banner"
           className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
         >
           <Plus className="h-4 w-4 mr-1" />
@@ -279,7 +269,7 @@ export default function AdminAnnouncementsPage() {
             <TableRow>
               <TableHead>标题</TableHead>
               <TableHead>类型</TableHead>
-              {areaType === 'banner' && <TableHead>样式</TableHead>}
+              <TableHead>样式</TableHead>
               <TableHead>标签</TableHead>
               <TableHead>优先级</TableHead>
               <TableHead>状态</TableHead>
@@ -307,7 +297,7 @@ export default function AdminAnnouncementsPage() {
                         <p className="text-xs truncate max-w-[200px]" style={{ color: 'var(--text-tertiary)' }}>
                           {announcement.content}
                         </p>
-                        {areaType === 'banner' && announcement.banner_link && (
+                        {announcement.banner_link && (
                           <div className="flex items-center gap-1 mt-1">
                             <Link2 className="h-3 w-3 text-blue-400" />
                             <span className="text-xs text-blue-400 truncate max-w-[150px]">
@@ -324,18 +314,16 @@ export default function AdminAnnouncementsPage() {
                       {config.label}
                     </Badge>
                   </TableCell>
-                  {areaType === 'banner' && (
-                    <TableCell>
-                      {announcement.banner_style && (
-                        <div className="flex items-center gap-2">
-                          <div className={`w-3 h-3 rounded ${bannerStyleConfig[announcement.banner_style as BannerStyle]?.color || 'bg-gray-400'}`} />
-                          <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                            {bannerStyleConfig[announcement.banner_style as BannerStyle]?.label || announcement.banner_style}
-                          </span>
-                        </div>
-                      )}
-                    </TableCell>
-                  )}
+                  <TableCell>
+                    {announcement.banner_style && (
+                      <div className="flex items-center gap-2">
+                        <div className={`w-3 h-3 rounded ${bannerStyleConfig[announcement.banner_style as BannerStyle]?.color || 'bg-gray-400'}`} />
+                        <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                          {bannerStyleConfig[announcement.banner_style as BannerStyle]?.label || announcement.banner_style}
+                        </span>
+                      </div>
+                    )}
+                  </TableCell>
                   <TableCell>
                     {announcement.tag ? (
                       <Badge className={`bg-${announcement.tag_color || 'blue'}-500/20 text-${announcement.tag_color || 'blue'}-400`}>
@@ -402,8 +390,8 @@ export default function AdminAnnouncementsPage() {
             })}
             {items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={areaType === 'banner' ? 7 : 6} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
-                  暂无{areaType === 'banner' ? '横幅' : '首页'}公告
+                <TableCell colSpan={7} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
+                  暂无横幅公告
                 </TableCell>
               </TableRow>
             )}
@@ -422,7 +410,7 @@ export default function AdminAnnouncementsPage() {
             公告管理
           </h1>
           <p className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
-            管理横幅公告和首页公告
+            管理全站顶部横幅公告
           </p>
         </div>
         <Button
@@ -436,7 +424,7 @@ export default function AdminAnnouncementsPage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
         <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
           <CardContent className="p-6">
             <div className="flex items-center gap-4">
@@ -468,70 +456,9 @@ export default function AdminAnnouncementsPage() {
             </div>
           </CardContent>
         </Card>
-
-        <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-xl bg-purple-500/20">
-                <Home className="h-6 w-6 text-purple-400" />
-              </div>
-              <div>
-                <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>首页公告</p>
-                <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-                  {stats.totalHomepage}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-xl bg-amber-500/20">
-                <Check className="h-6 w-6 text-amber-400" />
-              </div>
-              <div>
-                <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>首页已启用</p>
-                <p className="text-2xl font-bold text-amber-400">
-                  {stats.activeHomepage}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
-      {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
-        <TabsList
-          className="mb-6"
-          style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
-        >
-          <TabsTrigger
-            value="banner"
-            className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
-          >
-            <Globe className="h-4 w-4 mr-2" />
-            横幅公告
-          </TabsTrigger>
-          <TabsTrigger
-            value="homepage"
-            className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
-          >
-            <Home className="h-4 w-4 mr-2" />
-            首页公告
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="banner">
-          {renderAnnouncementTable(bannerAnnouncements, 'banner')}
-        </TabsContent>
-
-        <TabsContent value="homepage">
-          {renderAnnouncementTable(homepageAnnouncements, 'homepage')}
-        </TabsContent>
-      </Tabs>
+      {renderAnnouncementTable(bannerAnnouncements)}
 
       {/* Create/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -541,10 +468,10 @@ export default function AdminAnnouncementsPage() {
         >
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--text-primary)' }}>
-              {editingAnnouncement ? '编辑公告' : `发布${formData.announcementType === 'banner' ? '横幅' : '首页'}公告`}
+              {editingAnnouncement ? '编辑公告' : '发布横幅公告'}
             </DialogTitle>
             <DialogDescription className="sr-only">
-              配置公告的标题、内容、展示类型、样式和生效时间。
+              配置横幅公告的标题、内容、样式和生效时间。
             </DialogDescription>
           </DialogHeader>
 
@@ -613,37 +540,33 @@ export default function AdminAnnouncementsPage() {
               </div>
             </div>
 
-            <div
-              className={`grid gap-4 ${formData.announcementType === 'banner' ? 'grid-cols-2' : 'grid-cols-1'}`}
-            >
-              {formData.announcementType === 'banner' && (
-                <div className="space-y-2">
-                  <Label style={{ color: 'var(--text-secondary)' }}>
-                    <div className="flex items-center gap-2">
-                      <Palette className="h-4 w-4" />
-                      横幅样式
-                    </div>
-                  </Label>
-                  <Select
-                    value={formData.bannerStyle}
-                    onValueChange={(v) => setFormData({ ...formData, bannerStyle: v as BannerStyle })}
-                  >
-                    <SelectTrigger className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-                      {Object.entries(bannerStyleConfig).map(([key, config]) => (
-                        <SelectItem key={key} value={key}>
-                          <div className="flex items-center gap-2">
-                            <div className={`w-3 h-3 rounded ${config.color}`} />
-                            {config.label}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label style={{ color: 'var(--text-secondary)' }}>
+                  <div className="flex items-center gap-2">
+                    <Palette className="h-4 w-4" />
+                    横幅样式
+                  </div>
+                </Label>
+                <Select
+                  value={formData.bannerStyle}
+                  onValueChange={(v) => setFormData({ ...formData, bannerStyle: v as BannerStyle })}
+                >
+                  <SelectTrigger className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                    {Object.entries(bannerStyleConfig).map(([key, config]) => (
+                      <SelectItem key={key} value={key}>
+                        <div className="flex items-center gap-2">
+                          <div className={`w-3 h-3 rounded ${config.color}`} />
+                          {config.label}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
               <div className="space-y-2">
                 <Label style={{ color: 'var(--text-secondary)' }}>

@@ -56,7 +56,6 @@ const membershipPlanCatalogRowSchema = z.object({
   monthly_bonus_credits: z.number().int().nonnegative().nullable(),
   yearly_credits: z.number().int().nonnegative().nullable(),
   package_discount: z.number().int().min(0).max(100).nullable(),
-  history_retention_days: z.number().int().positive().nullable(),
   features: z.array(z.string()).nullable(),
   stripe_monthly_price_id: z.string().nullable(),
   stripe_yearly_price_id: z.string().nullable(),
@@ -180,46 +179,6 @@ export const settingsRouter = router({
     if(error)throw new TRPCError({code:'INTERNAL_SERVER_ERROR',message:'无法读取整理模型列表'});
     // Credentials participate only in server eligibility checks and never leave this projection.
     return (data??[]).map(row=>runtimeModelOption(row,input?.use??'organizer'));
-  }),
-
-  /**
-   * 获取首页公告 (公开接口)
-   * 返回 announcement_type = 'homepage' 的活跃公告列表
-   */
-  getActiveAnnouncements: publicProcedure.query(async ({ ctx }) => {
-    const now = new Date().toISOString();
-    const readClient = getPublicReadClient(ctx);
-
-    const { data, error } = await readClient
-      .from('announcements')
-      .select('id, title, content, type, icon, icon_color, tag, tag_color, banner_link, priority, start_date, end_date, created_at')
-      .eq('active', 'true')  // active 是字符串类型
-      .eq('announcement_type', 'homepage')  // 首页公告
-      .lte('start_date', now)
-      .or(`end_date.is.null,end_date.gt.${now}`)
-      .order('priority', { ascending: false })
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      logger.warn('system', 'settings_homepage_announcements_fetch_failed', {
-        code: error.code,
-      });
-      return [];
-    }
-
-    // 映射字段名以兼容前端
-    return (data ?? []).map(item => ({
-      id: item.id,
-      title: item.title,
-      description: item.content,  // content -> description
-      type: item.type,
-      icon: item.icon,
-      tag: item.tag,
-      tag_color: item.tag_color,
-      link_url: item.banner_link,
-      priority: item.priority,
-      created_at: item.created_at,
-    }));
   }),
 
   /**
@@ -432,7 +391,6 @@ export const settingsRouter = router({
       },
       // package_discount: 100 = no discount, 95 = 5% off
       discount: plan.package_discount ? (100 - plan.package_discount) / 100 : 0,
-      historyRetentionDays: plan.history_retention_days ?? 7,
       features: Array.isArray(plan.features) ? plan.features : [],
       // 使用 level 判断推荐：gold 为推荐/高亮
       recommended: plan.level === 'gold',

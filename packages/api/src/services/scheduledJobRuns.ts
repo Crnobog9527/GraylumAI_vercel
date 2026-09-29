@@ -3,7 +3,6 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 type MinimalSupabaseClient = Pick<SupabaseClient, 'from'>;
 
 export const SCHEDULED_JOB_KEYS = {
-  conversationCleanup: 'conversation_cleanup',
   ticketAutoClose: 'ticket_auto_close',
 } as const;
 

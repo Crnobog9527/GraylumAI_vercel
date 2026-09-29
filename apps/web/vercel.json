@@ -27,10 +27,6 @@
       "schedule": "0 2 * * *"
     },
     {
-      "path": "/api/cron/conversations/cleanup",
-      "schedule": "30 2 * * *"
-    },
-    {
       "path": "/api/cron/release-subscription-credits",
       "schedule": "0 3 * * *"
     },

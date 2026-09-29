@@ -37,9 +37,8 @@ Covered batch removal cases: three fixtures deleted through one request, referen
 | Flow | Route | Fixture required | Execute | Verify changed state | Rollback | Verify restored state | Current automation |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Diagnostics cleanup | `/admin/diagnostics` | Existing old result rows | Cleanup old results | Row count/status changes | Re-seed not required if preview disposable | Dashboard remains usable after cleanup | `admin-destructive.spec.ts` |
-| Expired conversation cleanup | `/admin/settings` | Expired conversation/history rows | Trigger cleanup | Cleanup status + row count changes | Re-seed fixture | History counts recover | `admin-destructive.spec.ts` |
 | Model disable/restore | `/admin/models` + `/chat` | At least one active model | Toggle inactive | User model selector/runtime reflects removal | Re-enable model | User model selector/runtime reflects restoration | `admin-destructive.spec.ts` |
-| Announcement publish/unpublish | `/admin/announcements` + user surfaces | Fixture announcement | Toggle active/publish state | Banner/homepage visibility changes | Restore original active state | User surface returns to baseline | `admin-destructive.spec.ts` |
+| Announcement publish/unpublish | `/admin/announcements` + user surfaces | Fixture announcement | Toggle active/publish state | Site-wide banner visibility changes | Restore original active state | User surface returns to baseline | `admin-destructive.spec.ts` |
 | Credit package publish/unpublish | `/admin/packages` + `/profile` | Fixture package | Toggle active | User subscription page visibility changes | Restore active state | User subscription page returns to baseline | `admin-destructive.spec.ts` |
 | Membership plan disable/restore | `/admin/packages` + `/profile` | Fixture membership plan | Toggle active | User subscription page visibility changes | Restore active state | User subscription page returns to baseline | `admin-destructive.spec.ts` |
 | User role promote/restore | `/admin/users` + `/admin` | Dedicated test user | Change role | Admin access granted | Restore role | Admin access removed | `admin-destructive.spec.ts` |
