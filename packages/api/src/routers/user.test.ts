@@ -22,17 +22,19 @@ function createQueryBuilder(result: Promise<unknown>) {
   };
 }
 
-function createUserCaller(profileUpdateResult: unknown) {
+function createUserCaller(profileUpdateResult: unknown, updates: unknown[] = [], tables: string[] = []) {
   let profilesSingleCallCount = 0;
 
   const supabase = {
     from(table: string) {
+      tables.push(table);
       if (table === 'profiles') {
         return {
           select() {
             return this;
           },
-          update() {
+          update(value: unknown) {
+            updates.push(value);
             return this;
           },
           eq() {
@@ -56,6 +58,11 @@ function createUserCaller(profileUpdateResult: unknown) {
             return Promise.resolve(profileUpdateResult);
           },
         };
+      }
+
+      if (['conversations', 'credit_transactions', 'messages'].includes(table)) {
+        const result = Promise.resolve({ data: [], error: null, count: 0 });
+        return { ...createQueryBuilder(result), gte() { return this; } };
       }
 
       throw new Error(`Unexpected table ${table}`);
@@ -88,14 +95,55 @@ describe('userRouter error sanitization', () => {
     });
 
     await expect(
-      caller.updateUserProfile({
-        nickname: 'New Name',
-        avatarUrl: 'https://example.com/avatar.png',
-      }),
+      caller.updateUserProfile({ nickname: 'New Name' }),
     ).rejects.toMatchObject<Partial<TRPCError>>({
       code: 'INTERNAL_SERVER_ERROR',
       message: '更新个人资料失败，请稍后重试',
     });
+  });
+
+  it('writes only the trimmed nickname column', async () => {
+    const updates: unknown[] = [];
+    const caller = createUserCaller({ data: { id: 'user-1', nickname: 'New Name' }, error: null }, updates);
+
+    await expect(caller.updateUserProfile({ nickname: '  New Name  ' })).resolves.toMatchObject({
+      nickname: 'New Name',
+    });
+    expect(updates).toEqual([{ nickname: 'New Name' }]);
+  });
+
+  it.each([
+    ['avatar URL', { avatarUrl: 'https://example.com/avatar.png' }],
+    ['nickname with avatar URL', { nickname: 'New Name', avatarUrl: 'https://example.com/a.png' }],
+    ['empty input', {}],
+  ])('rejects %s before any profile write', async (_name, input) => {
+    const updates: unknown[] = [];
+    const caller = createUserCaller({ data: null, error: null }, updates);
+
+    await expect(caller.updateUserProfile(input)).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'BAD_REQUEST',
+    });
+    expect(updates).toEqual([]);
+  });
+
+  it('rejects blank or overlong nicknames before any profile write', async () => {
+    const updates: unknown[] = [];
+
+    for (const nickname of ['   ', 'x'.repeat(81)]) {
+      const caller = createUserCaller({ data: null, error: null }, updates);
+      await expect(caller.updateUserProfile({ nickname })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    }
+    expect(updates).toEqual([]);
+  });
+
+  it('builds usage stats without querying the module-less ai_usage_logs table', async () => {
+    const tables: string[] = [];
+    const caller = createUserCaller({ data: null, error: null }, [], tables);
+
+    await expect(caller.getUserUsageStats()).resolves.toMatchObject({
+      topModules: [{ name: 'AI 智能对话', count: 0 }],
+    });
+    expect(tables).not.toContain('ai_usage_logs');
   });
 
   it('keeps the deprecated duplicate balance endpoint aligned for real zero', async () => {
