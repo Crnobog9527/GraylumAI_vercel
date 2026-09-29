@@ -47,16 +47,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('role, status')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    // Closed, disabled or banned accounts must not create storage objects.
+    if (profileError || !profile) {
+      return NextResponse.json({ error: '账号状态暂时无法验证，请稍后重试' }, { status: 503 });
+    }
+    if (profile.status !== 'active') {
+      return NextResponse.json({ error: '当前账号不能上传附件' }, { status: 403 });
+    }
+
     const maintenanceModeEnabled = await isMaintenanceModeEnabled(supabaseAdmin);
 
     if (maintenanceModeEnabled) {
-      const { data: profile } = await supabaseAdmin
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      if (profile?.role !== 'admin') {
+      if (profile.role !== 'admin') {
         return NextResponse.json(
           { error: '系统维护中，暂时无法上传附件' },
           { status: 503 }
