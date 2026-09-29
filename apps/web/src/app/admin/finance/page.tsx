@@ -190,7 +190,7 @@ export default function AdminFinancePage() {
                   <div className={`shrink-0 p-3 rounded-xl ${estimatedProfitUsd >= 0 ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`}>
                     <DollarSign className={`h-6 w-6 ${profitTone}`} />
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>预估毛利 (USD)</p>
                     <ReportUsdValue amount={estimatedProfitUsd} className={profitTone} />
                   </div>
@@ -420,7 +420,7 @@ export default function AdminFinancePage() {
 
         {/* API Statistics Tab */}
         <TabsContent value="api" className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
             <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center gap-4">

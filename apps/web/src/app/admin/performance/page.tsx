@@ -170,7 +170,7 @@ export default function AdminPerformancePage() {
         {/* Overview Tab */}
         <TabsContent value="overview" className="space-y-6">
           {/* Performance Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             <Card data-testid="admin-performance-overview-requests" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
@@ -421,7 +421,7 @@ export default function AdminPerformancePage() {
 
         {/* Token Usage Tab */}
         <TabsContent value="tokens" className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
@@ -541,7 +541,7 @@ export default function AdminPerformancePage() {
             <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>已记录总成本</p>
                     <ReportUsdValue amount={costStats.totalCost} className="mt-1" style={{ color: 'var(--text-primary)' }} />
                     <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
@@ -558,7 +558,7 @@ export default function AdminPerformancePage() {
             <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>已记录成本/次</p>
                     <ReportUsdValue amount={costStats.avgCostPerRequest} className="mt-1" style={{ color: 'var(--text-primary)' }} />
                   </div>
@@ -572,7 +572,7 @@ export default function AdminPerformancePage() {
             <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>估算缓存节省</p>
                     {costStats.cacheSavings === null ? (
                       <p className="text-2xl font-bold mt-1 text-emerald-400">无法估算</p>
@@ -590,7 +590,7 @@ export default function AdminPerformancePage() {
             <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>预估月成本</p>
                     <ReportUsdValue amount={costStats.estimatedMonthly} className="mt-1" style={{ color: 'var(--text-primary)' }} />
                   </div>

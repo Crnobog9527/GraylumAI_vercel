@@ -8,9 +8,13 @@ import type { CSSProperties } from 'react';
 import { formatReportUsd, formatReportUsdShort } from '@/lib/currency';
 import { cn } from '@/lib/utils';
 
+/** Approximate bold glyph width in em, used to fit the headline to its column. */
+const HEADLINE_GLYPH_EM = 0.62;
+
 /**
  * Stat card amount: a compact headline value, with the exact report amount below it
- * whenever the headline had to be shortened.
+ * whenever the headline had to be shortened. The headline never wraps; it only shrinks
+ * below 1.5rem when its column is too narrow. Place it in a column that fills the card.
  */
 export function ReportUsdValue({
   amount,
@@ -26,17 +30,21 @@ export function ReportUsdValue({
   const exact = formatReportUsd(amount);
   const short = formatReportUsdShort(amount);
   const shortened = short !== exact;
+  const headline = shortened ? `≈ ${short}` : exact;
+  const fitWidth = (100 / (headline.length * HEADLINE_GLYPH_EM)).toFixed(2);
 
   return (
     <>
-      <p
-        className={cn('text-2xl font-bold [overflow-wrap:anywhere]', className)}
-        style={style}
-        title={shortened ? exact : undefined}
-        data-testid={testId}
-      >
-        {shortened ? `≈ ${short}` : exact}
-      </p>
+      <div className="@container">
+        <p
+          className={cn('font-bold leading-8 whitespace-nowrap', className)}
+          style={{ ...style, fontSize: `min(1.5rem, ${fitWidth}cqi)` }}
+          title={shortened ? exact : undefined}
+          data-testid={testId}
+        >
+          {headline}
+        </p>
+      </div>
       {shortened && (
         <p
           className="text-xs tabular-nums [overflow-wrap:anywhere]"

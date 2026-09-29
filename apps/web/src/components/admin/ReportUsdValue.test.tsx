@@ -12,6 +12,9 @@ describe('ReportUsdValue', () => {
     expect(html).toContain('title="-$0.0406667806"');
     expect(html).toContain('data-testid="profit">≈ -$0.04067</p>');
     expect(html).toContain('data-testid="profit-exact">-$0.0406667806</p>');
+    // The headline stays on one line and only shrinks to fit a narrow column.
+    expect(html).toContain('whitespace-nowrap');
+    expect(html).toMatch(/font-size:min\(1\.5rem, [\d.]+cqi\)/);
   });
 
   it('shows a single exact value when nothing was shortened', () => {
@@ -31,7 +34,7 @@ describe('CostStatCard', () => {
     expect(html).toContain('≈ $0.001627');
     expect(html).toContain('>$0.001626671224</p>');
     expect(html).not.toContain('unused');
-    expect(html).toContain('class="min-w-0"');
+    expect(html).toContain('class="min-w-0 flex-1"');
     expect(html).toContain('shrink-0 p-3 rounded-xl');
   });
 

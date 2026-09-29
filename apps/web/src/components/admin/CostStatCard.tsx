@@ -36,7 +36,7 @@ export function CostStatCard({
     <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
       <CardContent className="p-6">
         <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{title}</p>
             {usdAmount === undefined ? (
               <p className="text-2xl font-bold mt-1" style={{ color: 'var(--text-primary)' }}>{value}</p>
