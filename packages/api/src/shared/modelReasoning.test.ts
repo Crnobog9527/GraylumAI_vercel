@@ -2,6 +2,8 @@
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_REASONING_CONFIG,
+  allowedModes,
+  allowedWires,
   MIN_ANSWER_TOKENS_AFTER_BUDGET,
   MIN_MAX_TOKENS_WITH_THINKING,
   checkReasoningConfig,
@@ -120,3 +122,27 @@ describe("purpose settings and request fields", () => {
     for (const value of [null, undefined, "x", [], {}, { reasoning: { route: 1 } }]) expect(readReasoningConfig(value)).toEqual(EMPTY_REASONING_CONFIG);
   });
 });
+
+describe("menu choices (Codex P2 on 88398c40)", () => {
+  const sample = (mode: string, wire: "reasoning_effort" | "reasoning", effort: string) =>
+    mode === "off" ? { mode, wire } : mode === "effort" ? { mode, effort, wire } : mode === "budget" ? { mode, maxTokens: 1000 } : { mode };
+  it.each([
+    ["the DeepSeek route", catalog(), "deepinfra", ["provider_default", "off", "effort"], ["reasoning_effort", "reasoning"]],
+    ["a route with only the reasoning object", catalog(), "alibaba", ["provider_default", "off", "effort"], ["reasoning"]],
+    ["no reasoning in the catalog", catalog({ reasoning: null }), "deepinfra", ["provider_default"], ["reasoning_effort", "reasoning"]],
+    ["mandatory thinking with budgets", catalog({ reasoning: { ...catalog().reasoning!, mandatory: true, supportsMaxTokens: true } }), "alibaba",
+      ["provider_default", "effort", "budget"], ["reasoning"]],
+    ["no route yet", catalog(), null, ["provider_default"], []],
+  ] as const)("offers only choices that pass the checks for %s", (_name, snapshot, route, modes, wires) => {
+    expect(allowedModes(snapshot, route)).toEqual(modes);
+    expect(allowedWires(snapshot, route)).toEqual(wires);
+    const effort = snapshot.reasoning?.supportedEfforts[0] ?? "low";
+    // Without a route every saved setting is refused with ROUTE_REQUIRED; the dialog asks for a route first.
+    if (route === null) return;
+    for (const mode of modes) {
+      const setting = purposeSetting.parse(sample(mode, wires[0] ?? "reasoning", effort));
+      expect(codes(config({ catalog: snapshot, route, purposes: { organize: setting } }), { ...model, maxTokens: 8192 })).toEqual([]);
+    }
+  });
+});
+

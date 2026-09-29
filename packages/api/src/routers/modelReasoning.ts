@@ -28,9 +28,13 @@ function view(row: { model_id: string; max_tokens: number | null; config: unknow
   const maxTokens = Number(row.max_tokens) || 0;
   return { model: row.model_id, maxTokens, config, issues: checkReasoningConfig(config, { maxTokens, modelId: row.model_id }) };
 }
-/** Replaces only the `reasoning` key, on the row's current config. */
-async function writeReasoning(db: SupabaseClient, modelId: string, reasoning: ReasoningConfig) {
+type ModelRow = Awaited<ReturnType<typeof readModel>>;
+/** Replaces only the `reasoning` key. The update is computed from the row as
+ * read right before the write, so a slow catalog read never writes back a
+ * config that an intervening save has changed. */
+async function writeReasoning(db: SupabaseClient, modelId: string, update: (current: ReasoningConfig, row: ModelRow) => ReasoningConfig) {
   const current = await readModel(db, modelId);
+  const reasoning = update(readReasoningConfig(current.config), current);
   const base = current.config && typeof current.config === 'object' && !Array.isArray(current.config) ? current.config as Record<string, unknown> : {};
   const { error } = await db.from('ai_models').update({ config: { ...base, reasoning }, updated_at: new Date().toISOString() }).eq('id', modelId);
   if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '保存思考设置失败，请稍后重试' });
@@ -51,17 +55,16 @@ export const modelReasoningRouter = router({
       logger.warn('api', 'model_catalog_read_failed', { modelId: row.id, code: catalogMessages[code] ? code : 'MODEL_CATALOG_UNAVAILABLE' });
       throw new TRPCError({ code: 'BAD_REQUEST', message: catalogMessages[code] ?? '暂时无法读取 OpenRouter 目录，请稍后重试' });
     }
-    return writeReasoning(ctx.supabase, row.id, { ...readReasoningConfig(row.config), catalog });
+    return writeReasoning(ctx.supabase, row.id, current => ({ ...current, catalog }));
   }),
 
   /** Saves the route and purpose settings after checking them against the stored catalog. */
   save: adminProcedure
     .input(z.object({ modelId: z.string().uuid(), route: z.string().min(1).max(128).nullable(), purposes: purposeSettings }).strict())
-    .mutation(async ({ ctx, input }) => {
-      const row = await readModel(ctx.supabase, input.modelId);
-      const next: ReasoningConfig = { catalog: readReasoningConfig(row.config).catalog, route: input.route, purposes: input.purposes };
+    .mutation(({ ctx, input }) => writeReasoning(ctx.supabase, input.modelId, (current, row) => {
+      const next: ReasoningConfig = { catalog: current.catalog, route: input.route, purposes: input.purposes };
       const issues = checkReasoningConfig(next, { maxTokens: Number(row.max_tokens) || 0, modelId: row.model_id });
       if (issues.length) throw new TRPCError({ code: 'BAD_REQUEST', message: issues.map(issue => issue.message).join('；') });
-      return writeReasoning(ctx.supabase, row.id, next);
-    }),
+      return next;
+    })),
 });

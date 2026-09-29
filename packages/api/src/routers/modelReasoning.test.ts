@@ -33,7 +33,7 @@ function harness(role: 'admin' | 'user', config: Record<string, unknown> | null)
     headers: new Headers(), user: { id: 'actor', email: 'admin@example.test', app_metadata: { provider: 'email' }, user_metadata: { email_verified: true } },
     isEmailVerified: true, authProvider: 'email', supabase: db, supabaseAuth: db, supabasePublic: {}, supabaseAdmin: db, hasSupabaseAdminPrivileges: true,
   } as never);
-  return { caller, updates, tables };
+  return { caller, updates, tables, set: (value: Record<string, unknown>) => { stored = value; } };
 }
 const deepseekOff = { interactive: { mode: 'off', wire: 'reasoning_effort' } } as const;
 
@@ -82,4 +82,18 @@ describe('modelReasoning router', () => {
     await expect(t.caller.refreshCatalog({ modelId })).rejects.toMatchObject({ code: 'BAD_REQUEST', message: '暂时无法读取 OpenRouter 目录，请稍后重试' });
     expect(t.updates).toEqual([]);
   });
+
+  it('keeps a save made while the catalog read is in flight (Codex P2 on 88398c40)', async () => {
+    const t = harness('admin', { reasoning: { catalog: null, route: null, purposes: {} } });
+    const list = { data: [{ id: 'deepseek/deepseek-v4.1-flash', reasoning: { mandatory: false, supported_efforts: ['low'] } }] };
+    const endpoints = { data: { id: 'deepseek/deepseek-v4.1-flash', endpoints: [{ tag: 'deepinfra/fp8', provider_name: 'DeepInfra', supported_parameters: ['tools'] }] } };
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
+      // Another request saves a route and purposes before the catalog arrives.
+      t.set({ connection_status: 'connected', reasoning: { catalog, route: 'deepinfra', purposes: deepseekOff } });
+      return new Response(JSON.stringify(String(url).endsWith('/endpoints') ? endpoints : list));
+    }));
+    await t.caller.refreshCatalog({ modelId });
+    expect(t.updates[0]!.config).toMatchObject({ connection_status: 'connected', reasoning: { route: 'deepinfra', purposes: deepseekOff } });
+  });
 });
+

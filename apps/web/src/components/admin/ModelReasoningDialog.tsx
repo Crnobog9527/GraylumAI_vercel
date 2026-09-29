@@ -11,6 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   PURPOSE_LABELS,
   REASONING_PURPOSES,
+  allowedModes,
+  allowedWires,
+  routeSupports,
   type CatalogSnapshot,
   type PurposeSetting,
   type PurposeSettings,
@@ -58,6 +61,18 @@ function fromDraft(draft: Draft): PurposeSetting | undefined {
       return { mode: 'budget', maxTokens: Number(draft.budget) };
   }
 }
+/** Parameter forms the chosen route supports (plus the current one, so it stays visible). */
+function wiresFor(catalog: CatalogSnapshot | null, route: string | null, current: Wire): Wire[] {
+  const wires = allowedWires(catalog, route);
+  return wires.includes(current) ? wires : [...wires, current];
+}
+/** Modes the catalog and route allow, so the menu never offers a choice the server
+ * will refuse; the current mode stays listed so a stored setting remains visible. */
+function modesFor(catalog: CatalogSnapshot | null, route: string | null, current: Draft['mode']): Draft['mode'][] {
+  const modes: Draft['mode'][] = ['unset', ...allowedModes(catalog, route)];
+  return modes.includes(current) ? modes : [...modes, current];
+}
+
 /** A choice the form cannot save yet, before asking the server. */
 function draftProblem(drafts: Record<ReasoningPurpose, Draft>): string | null {
   for (const purpose of REASONING_PURPOSES) {
@@ -69,7 +84,7 @@ function draftProblem(drafts: Record<ReasoningPurpose, Draft>): string | null {
   return null;
 }
 function supports(catalog: CatalogSnapshot | null, route: string | null, parameter: string) {
-  return Boolean(catalog?.endpoints.find(endpoint => endpoint.tag === route)?.supportedParameters.includes(parameter));
+  return routeSupports(catalog, route, parameter);
 }
 
 /** Per-row entry to the reasoning settings of one model (MODEL-REASONING). */
@@ -180,7 +195,9 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-[var(--text-tertiary)]">测试窗口或正式报价必须使用同一条线路。</p>
+              <p className="text-xs text-[var(--text-tertiary)]">
+                测试窗口或正式报价必须使用同一条线路。先选线路，才会列出这条线路支持的思考方式。
+              </p>
             </section>
 
             {REASONING_PURPOSES.map(purpose => {
@@ -194,7 +211,7 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
                   <Select value={draft.mode} onValueChange={value => update(purpose, { mode: value as Draft['mode'] })}>
                     <SelectTrigger aria-label={`${PURPOSE_LABELS[purpose]}的思考方式`}><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {(Object.keys(MODE_LABELS) as Draft['mode'][]).map(mode => (
+                      {modesFor(catalog, route, draft.mode).map(mode => (
                         <SelectItem key={mode} value={mode}>{MODE_LABELS[mode]}</SelectItem>
                       ))}
                     </SelectContent>
@@ -211,8 +228,9 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
                     <Select value={draft.wire} onValueChange={value => update(purpose, { wire: value as Wire })}>
                       <SelectTrigger aria-label={`${PURPOSE_LABELS[purpose]}的参数写法`}><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="reasoning_effort">reasoning_effort 参数</SelectItem>
-                        <SelectItem value="reasoning">reasoning 对象</SelectItem>
+                        {wiresFor(catalog, route, draft.wire).map(wire => (
+                          <SelectItem key={wire} value={wire}>{wire === 'reasoning' ? 'reasoning 对象' : 'reasoning_effort 参数'}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   ) : null}
@@ -241,7 +259,7 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
         )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>关闭</Button>
-          <Button onClick={submit} disabled={!drafts || Boolean(problem) || save.isPending}>
+          <Button onClick={submit} disabled={!drafts || Boolean(problem) || save.isPending || refresh.isPending}>
             {save.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}保存
           </Button>
         </DialogFooter>
