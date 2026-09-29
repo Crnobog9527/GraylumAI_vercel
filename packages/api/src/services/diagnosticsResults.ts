@@ -4,8 +4,9 @@
 // cleanup_old_diagnostic_results do not exist on staging; these keep their semantics without them.
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-// Runs write ~20 rows, so the newest window comfortably covers every test id.
-const LATEST_WINDOW = 1000;
+// PostgREST caps a response at 1000 rows; the summary pages through the window up to this bound.
+const PAGE_SIZE = 1000;
+const MAX_SUMMARY_PAGES = 50;
 const RESULT_COLUMNS = 'test_id, test_name, category, status, message, details, latency_ms, created_at';
 
 type ResultRow = {
@@ -23,16 +24,20 @@ function fail(operation: string, error: { code?: string } | null): never {
   throw new Error(`diagnostic_results ${operation} failed${error?.code ? ` (${error.code})` : ''}`);
 }
 
-/** Newest row per test_id, newest first (the old diagnostic_latest_results view). */
-export async function readLatestDiagnosticResults(client: SupabaseClient) {
-  const { data, error } = await client.from('diagnostic_results').select(RESULT_COLUMNS)
-    .order('created_at', { ascending: false }).limit(LATEST_WINDOW);
-  if (error) fail('latest read', error);
-  const latest = new Map<string, ResultRow>();
-  for (const row of (data ?? []) as ResultRow[]) {
-    if (!latest.has(row.test_id)) latest.set(row.test_id, row);
-  }
-  return [...latest.values()];
+/**
+ * Newest row of each defined test, newest first (the old diagnostic_latest_results view, limited to
+ * tests the page defines; retired test ids are no longer listed). One bounded query per test, so a
+ * frequently re-run test can never hide another test's latest result.
+ */
+export async function readLatestDiagnosticResults(client: SupabaseClient, testIds: readonly string[]) {
+  const rows = await Promise.all(testIds.map(async (testId) => {
+    const { data, error } = await client.from('diagnostic_results').select(RESULT_COLUMNS)
+      .eq('test_id', testId).order('created_at', { ascending: false }).limit(1);
+    if (error) fail('latest read', error);
+    return ((data ?? []) as ResultRow[])[0] ?? null;
+  }));
+  return rows.filter((row): row is ResultRow => row !== null)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
 /** Newest results of one test (the old get_test_history RPC). */
@@ -45,34 +50,37 @@ export async function readDiagnosticTestHistory(client: SupabaseClient, testId: 
     latency_ms: number | null; created_at: string }>;
 }
 
-/** Window statistics (the old get_diagnostic_summary RPC): exact counts, latency from the newest rows. */
+/**
+ * Window statistics (the old get_diagnostic_summary RPC). Every field comes from one paged read of
+ * the whole window, so counts, pass rate and latency are always mutually consistent. Paging runs
+ * oldest-first so rows written meanwhile land after the pages already read; a window larger than the
+ * page bound fails instead of returning partial statistics.
+ */
 export async function readDiagnosticSummary(client: SupabaseClient, hours: number) {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-  const count = async (status?: string) => {
-    let query = client.from('diagnostic_results').select('id', { count: 'exact', head: true })
-      .gte('created_at', since);
-    if (status) query = query.eq('status', status);
-    const { count: value, error } = await query;
-    if (error) fail('summary count', error);
-    return value ?? 0;
-  };
-  const [total, passed, failed, warning, recent] = await Promise.all([
-    count(), count('passed'), count('failed'), count('warning'),
-    client.from('diagnostic_results').select('latency_ms, created_at').gte('created_at', since)
-      .order('created_at', { ascending: false }).limit(LATEST_WINDOW),
-  ]);
-  if (recent.error) fail('summary latency read', recent.error);
-  const rows = (recent.data ?? []) as Array<{ latency_ms: number | null; created_at: string }>;
+  const rows: Array<{ status: string; latency_ms: number | null; created_at: string }> = [];
+  for (let page = 0; ; page += 1) {
+    if (page === MAX_SUMMARY_PAGES) fail('summary window too large', null);
+    const { data, error } = await client.from('diagnostic_results').select('status, latency_ms, created_at')
+      .gte('created_at', since).order('created_at', { ascending: true }).order('id', { ascending: true })
+      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+    if (error) fail('summary read', error);
+    rows.push(...((data ?? []) as typeof rows));
+    if ((data ?? []).length < PAGE_SIZE) break;
+  }
+  const byStatus = (status: string) => rows.filter(row => row.status === status).length;
   const latencies = rows.map(row => row.latency_ms).filter((value): value is number => value !== null);
   const round2 = (value: number) => Math.round(value * 100) / 100;
+  const total = rows.length;
+  const passed = byStatus('passed');
   return {
     total_tests: total,
     passed_tests: passed,
-    failed_tests: failed,
-    warning_tests: warning,
+    failed_tests: byStatus('failed'),
+    warning_tests: byStatus('warning'),
     pass_rate: total > 0 ? round2((passed / total) * 100) : 0,
     avg_latency_ms: latencies.length > 0 ? round2(latencies.reduce((a, b) => a + b, 0) / latencies.length) : 0,
-    last_run: rows[0]?.created_at ?? null,
+    last_run: rows.at(-1)?.created_at ?? null,
   };
 }
 

@@ -1123,7 +1123,7 @@ export class DiagnosticsService {
    * 获取最新测试结果
    */
   async getLatestResults(): Promise<DiagnosticTestResult[]> {
-    return (await readLatestDiagnosticResults(this.supabase)).map((row) => ({
+    return (await readLatestDiagnosticResults(this.supabase, TEST_DEFINITIONS.map((test) => test.id))).map((row) => ({
       testId: row.test_id,
       testName: row.test_name,
       category: row.category as DiagnosticCategory,

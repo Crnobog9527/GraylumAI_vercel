@@ -69,7 +69,7 @@ describe('diagnostics helpers', () => {
 function createResultsBuilder(rows: unknown[] = [], count = 0) {
   const result = { data: rows, error: null, count };
   const builder: Record<string, unknown> = {};
-  for (const method of ['select', 'eq', 'gte', 'lt', 'order', 'limit', 'delete']) {
+  for (const method of ['select', 'eq', 'gte', 'lt', 'order', 'limit', 'range', 'delete']) {
     builder[method] = vi.fn(() => builder);
   }
   builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve(result).then(resolve);
