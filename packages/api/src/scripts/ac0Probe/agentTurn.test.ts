@@ -87,7 +87,11 @@ describe('AC1-4 prepared probe (synthetic transport only)', () => {
     expect(agentTurnSummary(passing)).toMatchObject({cardDecisionCorrect: 40, recommendationCorrect: 18, verdict: 'manual_review_required'});
     const fiveWrong = passing.map((row, index) => index >= 18 && index < 23 ? {...unwantedCard, index, category: row.category} : row);
     expect(agentTurnSummary(fiveWrong)).toMatchObject({cardDecisionCorrect: 35, verdict: 'fail'});
-    expect(agentTurnMarkdown(passing, 'dry-run')).toContain('Card decision correct: 40/40 (at least 36).');
+    expect(agentTurnMarkdown(passing, 'dry-run')).toContain('Card decision correct: 40/40 (at least 36)');
+    // A card without any prose fails the card decision even when the card itself is valid.
+    const cardOnly = (await trial('ask', toolDeltas('ask_question', card), 'tool_calls')).result;
+    const withCardOnly = passing.map((row, index) => index === 0 ? {...cardOnly, index, category: 'A' as const} : row);
+    expect(agentTurnSummary(withCardOnly)).toMatchObject({cardDecisionCorrect: 39, cardWithoutProse: 1, recommendationCorrect: 18});
   });
 
   it('uses the Owner-approved cumulative cap and fixes forty calls, exact route, thinking off and a USD 1 run cap', () => {

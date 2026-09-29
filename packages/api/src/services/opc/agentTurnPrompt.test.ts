@@ -31,7 +31,7 @@ describe('pinned generic Agent turn prompt',()=>{
  it('requires substantive answers and analysis before an unsure user is asked to choose',()=>{
   const prompt=agentTurnInstructions(input);
   expect(prompt).toContain('Output only public natural-language text');
-  expect(prompt).toContain('call ask_question once, after your prose');
+  expect(prompt).toContain('make exactly one ask_question call');
   expect(prompt).toContain('A vague reply is not a field value or confirmation');
   expect(prompt).toContain('When the user is not sure, first analyse the available information');
   expect(prompt).toContain('An acknowledgement, help request or uncertainty is neither an answer nor permission to advance');
@@ -42,18 +42,20 @@ describe('pinned generic Agent turn prompt',()=>{
  it('states when a card is used and when prose is used instead',()=>{
   const prompt=agentTurnInstructions(input);
   expect(prompt).toContain('it never guesses the user\'s situation, and most turns need no card');
-  expect(prompt).toContain('1. Choice card: the current field is a choice between approaches');
-  expect(prompt).toContain('set recommended to the index you recommend, and explain why in prose');
+  expect(prompt).toContain('1. Choice card: your prose compares concrete alternatives built from the user\'s own material');
+  expect(prompt).toContain('options they named or asked you to decide between, or plans computed from their stated constraints');
+  expect(prompt).toContain('recommended set to that pick; the prose says which and why');
   expect(prompt).toContain('2. Neutral card');expect(prompt).toContain('Set recommended to null.');
-  expect(prompt).toContain('No option may assert an experience, strength, result or number about the user.');
-  expect(prompt).toContain('a few general ranges or categories (such as weekly hours or platform types) that can be listed without knowing the user');
-  expect(prompt).toContain("3. Socratic prose: the answer is open personal content (the user's experience, strengths, stories or goals)");
+  expect(prompt).toContain('A card always follows prose; never reply with a card alone.');
+  expect(prompt).toContain('Categories you supply for the user\'s customers, audience, strengths, story or offer are guesses and never card options');
+  expect(prompt).toContain('a few general ranges or categories (such as weekly hours or platform types) listable without knowing the user');
+  expect(prompt).toContain("3. Socratic prose: the answer is open personal content (the user's experience, strengths, stories, goals or customers)");
   expect(prompt).toContain('or the information is not enough for a professional judgement. No card');
   expect(prompt).toContain('4. Labelled guess');
-  expect(prompt).toContain('in prose only, never as a card, saying that these are your guesses for the user to decide, '+
+  expect(prompt).toContain('Give examples in prose only, saying they are your guesses for the user to decide, '+
    'made because the information is not yet enough for a professional judgement');
   expect(prompt).toContain('5. Clear answer: no card');
-  expect(prompt).toContain('must not list the options again, and must recommend the same option as recommended');
+  expect(prompt).toContain('Do not list the options again in prose, and recommend the same option as recommended');
   expect(prompt).toContain('The host adds an Other entry with free-text input; never add other, not-sure, skip, defer or continue options');
   expect(prompt).toContain('For user_fact, use a neutral card only for general ranges or categories and Socratic prose for open personal content');
   expect(prompt).toContain('never offer guesses as options');

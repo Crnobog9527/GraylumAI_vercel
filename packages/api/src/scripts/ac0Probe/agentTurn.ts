@@ -211,12 +211,14 @@ function cardDesignSummary(results: TrialResult[]) {
     const measurement = agentTurnMeasurement(result);
     const card = runtime().tools.questionCardFromResult(result.finalOutput ?? '');
     const toolCalled = Boolean(result.calls[0]?.facts.toolCalls.length);
+    // Owner rule: a card always follows prose; a card-only reply fails the card decision.
+    const cardWithoutProse = toolCalled && !result.calls[0]!.facts.content.trim();
     const expectsCard = result.category === 'A' || result.category === 'B';
     const usable = measurement.completed && !measurement.formatError;
-    const cardDecisionCorrect = usable && (expectsCard ? measurement.validCardCandidate : !toolCalled);
+    const cardDecisionCorrect = usable && !cardWithoutProse && (expectsCard ? measurement.validCardCandidate : !toolCalled);
     const recommendationCorrect = expectsCard && measurement.validCardCandidate && Boolean(card) &&
       (result.category === 'A' ? card!.recommended !== null : card!.recommended === null);
-    return {result, measurement, cardDecisionCorrect, recommendationCorrect};
+    return {result, measurement, cardWithoutProse, cardDecisionCorrect, recommendationCorrect};
   });
   const completed = rows.filter(row => row.measurement.completed);
   const formatErrors = completed.filter(row => row.measurement.formatError).length;
@@ -227,10 +229,11 @@ function cardDesignSummary(results: TrialResult[]) {
       ...(category === 'A' || category === 'B' ? {recommendationCorrect: own.filter(row => row.recommendationCorrect).length} : {})}];
   }));
   const cardDecisionCorrect = rows.filter(row => row.cardDecisionCorrect).length;
+  const cardWithoutProse = rows.filter(row => row.cardWithoutProse).length;
   const recommendationCorrect = rows.filter(row => row.recommendationCorrect).length;
   const failed = formatErrors > 1 || cardDecisionCorrect < 36 || recommendationCorrect < 17;
   return {design: 'owner-card-2026-09-29' as const, plannedTotal: 40, completed: completed.length, formatErrors,
-    formatErrorRate: formatErrors / 40, cardDecisionCorrect, cardDecisionThreshold: 36,
+    formatErrorRate: formatErrors / 40, cardDecisionCorrect, cardDecisionThreshold: 36, cardWithoutProse,
     recommendationCorrect, recommendationDenominator: 18, recommendationThreshold: 17, byCategory,
     verdict: completed.length !== 40 ? 'incomplete' : failed ? 'fail' : 'manual_review_required',
     semanticReview: 'Required (blind): 0 fabrications (invented user facts, unlabelled guesses) and 0 prose/card inconsistencies.',
@@ -276,7 +279,7 @@ export function agentTurnMarkdown(results: TrialResult[], mode: string) {
       [value.median, value.p95, value.min, value.max].map(item => item ?? 'N/A').join(' / ') + ` (n=${value.n})`;
     return [`# AC1-4 card design probe (${mode})`, '',
       `Completed: ${summary.completed}/40; format errors: ${summary.formatErrors}/40 (max 1); verdict: ${summary.verdict}.`,
-      `Card decision correct: ${summary.cardDecisionCorrect}/40 (at least 36).`,
+      `Card decision correct: ${summary.cardDecisionCorrect}/40 (at least 36); card-only replies without prose: ${summary.cardWithoutProse} (each fails).`,
       `Recommendation correct (A recommends, B neutral): ${summary.recommendationCorrect}/18 (at least 17).`,
       ...Object.entries(summary.byCategory).map(([category, value]) => `  ${category}: ${JSON.stringify(value)}`),
       `First SDK public text, median / p95 / min / max ms: ${latency(summary.firstSdkTextMs)}.`, '',

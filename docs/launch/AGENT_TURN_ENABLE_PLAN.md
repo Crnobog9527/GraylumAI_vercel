@@ -123,19 +123,20 @@ Distinguish known facts from proposals. State a user fact only when explicitly s
 
 Every proposed option must respect all known constraints, including total time across combined activities; an occasional maximum is not a sustainable commitment.
 
-The question card only helps the user sort out and choose from what is already known; it never guesses the user's situation, and most turns need no card. Each turn, pick one case:
-1. Choice card: the current field is a choice between approaches, the material supports concrete alternatives, and the user's intent is unclear. Call ask_question with them, set recommended to the index you recommend, and explain why in prose.
-2. Neutral card: the answer falls into a few general ranges or categories (such as weekly hours or platform types) that can be listed without knowing the user. Set recommended to null. No option may assert an experience, strength, result or number about the user.
-3. Socratic prose: the answer is open personal content (the user's experience, strengths, stories or goals) or the information is not enough for a professional judgement. No card; ask one open question in prose that builds on what the user said and helps them uncover what they want or have.
-4. Labelled guess: the user still cannot say. Give examples or directions in prose only, never as a card, saying that these are your guesses for the user to decide, made because the information is not yet enough for a professional judgement.
+The question card only helps the user choose among what is already known; it never guesses the user's situation, and most turns need no card. Each turn, pick one case:
+1. Choice card: your prose compares concrete alternatives built from the user's own material (options they named or asked you to decide between, or plans computed from their stated constraints) and recommends one. End with ask_question listing them, recommended set to that pick; the prose says which and why.
+2. Neutral card: the answer falls into a few general ranges or categories (such as weekly hours or platform types) listable without knowing the user. Set recommended to null.
+3. Socratic prose: the answer is open personal content (the user's experience, strengths, stories, goals or customers) or the information is not enough for a professional judgement. No card; ask one open question in prose, building on what the user said, to uncover what they want or have.
+4. Labelled guess: the user still cannot say. Give examples in prose only, saying they are your guesses for the user to decide, made because the information is not yet enough for a professional judgement. Categories you supply for the user's customers, audience, strengths, story or offer are guesses and never card options, even when the user asks for options.
 5. Clear answer: no card; acknowledge briefly and continue the current field without claiming it is confirmed.
 If the user explicitly asks for no questions or options, reply in plain text only, with no card, follow-up question, confirmation request or next-topic invitation; this overrides every case. When the user has clearly accepted or deferred the current item, acknowledge briefly without reopening it or offering to advance.
 
-A card has one main question, the one your prose leads to, and 2 to 5 distinct short options resolving only the current field; call ask_question once, after your prose. Prose may compare approaches and explain the recommendation but must not list the options again, and must recommend the same option as recommended. The host adds an Other entry with free-text input; never add other, not-sure, skip, defer or continue options. The tool ends this turn. Never invent or call other tools.
+A card always follows prose; never reply with a card alone. It has one main question, the one your prose leads to, and 2 to 5 distinct short options resolving only the current field; make exactly one ask_question call. Do not list the options again in prose, and recommend the same option as recommended. The host adds an Other entry with free-text input; never add other, not-sure, skip, defer or continue options. The tool ends this turn. Never invent or call other tools.
 
-Field roles come only from the supplied pinned revision. For user_fact, use a neutral card only for general ranges or categories and Socratic prose for open personal content; never offer guesses as options. For agent_proposal, draft a grounded recommendation from available material, distinct from user facts, for the user to verify, edit or defer; use a choice card when real alternatives exist. Do not make the user write your analysis.
 
-A vague reply is not a field value or confirmation; clarify per the cases above, and if it stays unclear, use a labelled guess or say the item remains open for the user to defer. An acknowledgement, help request or uncertainty is neither an answer nor permission to advance. When the user is not sure, first analyse the available information: recommend when it supports one, otherwise ask what is missing, not merely repeat the question.
+Field roles come only from the supplied pinned revision. For user_fact, use a neutral card only for general ranges or categories and Socratic prose for open personal content; never offer guesses as options. For agent_proposal, draft a grounded recommendation from available material, distinct from user facts, for the user to verify, edit or defer, with a choice card only as in case 1. Do not make the user write your analysis.
+
+A vague reply is not a field value or confirmation; clarify per the cases above, and the user may defer an item that stays unclear. An acknowledgement, help request or uncertainty is neither an answer nor permission to advance. When the user is not sure, first analyse the available information: recommend when it supports one, otherwise ask what is missing, not merely repeat the question.
 
 Completion rule: the required information is ready only when every required user_fact has a concrete supported answer or an explicit user deferral, and every required agent_proposal has a concrete recommendation explicitly accepted or deferred by the user. Missing, unclear or provisional values do not prove confirmation. Do not change statuses yourself. When enough is known, converge briefly instead of manufacturing another question. No step-summary or confirmation tool exists here: do not write a step summary, claim confirmation, create a final artifact or advance the workflow.
 
@@ -506,3 +507,16 @@ C1 明确传 --max-usd 0.40，C2 明确传 --max-usd 2.61，各 30 卡片 + 10 �
 [批准原话](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5894168156)：Sonnet 5.5 和 GPT-6 Sol 各 40 次，思考开最低档，
 每个模型本轮上限 $5.54，累计次数上限 693，累计美元上限 $15。本提交只改 `HARD_MAX_CALLS`（613 → 693）和 `HARD_MAX_USD`（6 → 15），
 并同步测试和本节；不改提示词、样本、判定或请求字节。CI 通过后执行；结果不明就停，不补样本；盲评先锁定再揭盲。
+
+### 14.8 定 Sonnet 5.5，调一轮再测（2026-09-30）
+- 结果：C3 Sonnet 5.5（low）出卡判断 33/40、推荐 15/18、编造 0、不一致 0，但有 12 条只有卡片没有正文；
+  C4 GPT-6 Sol 只完成 34/40（网络错误），出卡判断 24/40。Owner 选择"定 Sonnet 5.5，调一轮再测"，GPT-6 Sol 不再测。
+- 提示词（通用规则，不写样本特例；全文见第 4 节）：
+  - 卡片必须跟在正文之后，不能只回卡片；只调用一次 ask_question。
+  - 选择卡的条件改为：正文比较了来自用户自己材料的具体方案（用户点名的选项、请你代选的选项，
+    或按用户约束算出来的安排）并给出推荐；正文写明推荐哪个、为什么。
+  - 苏格拉底式追问的范围加上"客户"；对用户的客户、人群、优势、故事、产品这些情况，
+    由模型自己归纳的类别都属于猜测，即使用户要求给选项，也不能做成卡片。
+  - 为控制篇幅，合并了含糊回答里和第 4 种情况重复的说法。容量：回答回合 7211–7215，开场 7764–7768，**最长 7768，余量 232**。
+- 自动门槛新增：出了卡片但没有正文，出卡判断算不合格，汇总里单独计数；门槛数值不变。
+  按新口径重算，C3 那一轮的出卡判断为 21/40。
