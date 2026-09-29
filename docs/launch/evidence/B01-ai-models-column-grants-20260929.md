@@ -29,7 +29,11 @@
 - PASS：本机最小 PostgreSQL 17 + PostgREST 数据库；按 S1 ACL-02 复现迁移前 authenticated 可读合成密钥、anon 不可读；迁移后 SQL 和 REST 的密钥/星号读取为 42501，安全列可读，停用行仍不可见，service_role 可读两行。
 - PASS：重复迁移、PUBLIC/anon/authenticated 残留列授权清理、精确 ACL/列授权回退；RLS、数据和 service_role ACL 未变；临时容器已清理。
 - 本地命令：`node packages/db/tests/run-ai-models-column-grants.mjs --local-only`。这是有来源的最小权限夹具，不是全历史迁移重放或远端 staging 验证。
-- 完整 API 单测、类型检查、浏览器及 CI：进行中，最终结果在 PR Handoff 更新。
+- PASS：完整 API 单测 130 文件，2851 通过、3 个既有跳过；网站类型检查、代码大小检查、指定当前 staging base 的迁移账本检查。
+- PASS：`node packages/db/tests/run-ai-models-preview.mjs --local-only`，2 项定向集成测试通过；其余 284 项按范围过滤，未运行。实际浏览器登录并选择模型；真实 HTTP 模型列表、成本估算、整理模型列表、后台模型列表/更新正常且无密钥字段或片段；REST 直接读密钥仍为 42501，service role 可读取。导师准入覆盖并发、重放与越权拒绝。只用本地合成 transport，未调用真实模型。
+- 预览适配器只归档已提交 HEAD，在临时副本里复用 run-workbench，追加 B01 迁移和独立测试文件；不修改共享 runner、已有 workbench 测试或受保护服务目录。测试后清理本轮容器/应用，保留本地截图和日志。新测试脚本无产品基础设施或新数据权威。
+- 扩展验证 FAIL/未归因：较宽的既有 `ADMIN: model edits and unused-module deletion` 在 20 秒超时；`OPC: browser manual positioning` 在后段读取“定位摘要”时超时。未将其算作通过，也未据此宣称既有基线必然失败。该轮应用日志未发现 42501；未扩大 B01 范围修改这些测试/页面。B01 自有浏览器夹具的首次选择器超时，已通过补齐用户资料与显示开关修正并重跑通过。
+- 远端必需 CI/Security：以 PR 当前 head 的 Checks 和 Handoff 为准；独立语义审查按 Owner 流程等待总控审查后再触发。远端迁移、生产和真实 provider 验证均未运行。
 
 ## 合并后应用 staging
 
