@@ -122,7 +122,7 @@ Auth 账号在对象已删、关系已安全处理后通过受控 Auth 删除接
 | 删除标记 | 需防晚到写入/被财务引用的对象有 `deleted_at timestamptz NULL`、`deletion_request_id` 和单调 `version`（复用已有版本字段）；默认未删。deleted_at 一经写入不可恢复，子任务创建及提交均检查父对象和来源删除状态 |
 | 内容约束 | `deleted_at IS NOT NULL` 时普通正文列必须 NULL/约定空值；未决最小证据只能放在受限核对载荷，不留在普通内容列。父 tombstone 保留到全部工作进程失效且依赖清完，随后可物理删除 |
 | 写入与读取 | RLS + 服务端所有权；新建、读、搜索、导出、采用、重放、整理写回与结果提交同样检查删除。不存在的父对象和已删除对象均 fail closed，旧 request ID 返回“已删除”而非重建 |
-| 注销封闭（PR-A 起） | 凡是给 `authenticated` 授权（表级或列级）的新 public 表，必须开 RLS，并在同一迁移里加限制性策略 `account_open_required`（`AS RESTRICTIVE FOR ALL TO authenticated USING/WITH CHECK (NOT (SELECT public.current_account_is_closed())))`）；以后才对已有表授权的迁移同样要加。`packages/db/tests/account-open-policy-audit.sql` 是只读审计，应返回 0 行，本机随 `run-account-erasure-close.mjs` 运行，也可在 staging 只读执行；DB-BASELINE 的空库建库验证应纳入它。`profiles` 例外，因为服务端要读出已注销状态 |
+| 注销封闭（PR-A 起） | 凡是给 `authenticated` 授权（表级或列级）的新 public 表，必须开 RLS，并在同一迁移里加限制性策略 `account_open_required`（`AS RESTRICTIVE FOR ALL TO authenticated USING/WITH CHECK (NOT (SELECT public.current_account_is_closed())))`）；以后才对已有表授权的迁移同样要加：凡是后续迁移才给 `authenticated` 授权的表，都必须在同一个迁移里补上 `account_open_required`。0148 第 8b 步就是一例：从文件建库时，有 8 张表的 `authenticated` 授权晚于 0147 才到位，0148 在授权之后按 0147 的同一规则补上。`packages/db/tests/account-open-policy-audit.sql` 是只读审计，应返回 0 行，本机随 `run-account-erasure-close.mjs` 运行，也可在 staging 只读执行；DB-BASELINE 的空库重放（`packages/db/tests/run-db-baseline-replay.mjs`）最后会运行它，结果不是 0 行就失败。`profiles` 例外，因为服务端要读出已注销状态 |
 | 历史保护 | 不加整表永不允许 DELETE 的触发器。正常历史不可变可用列级保护，但保留窄擦除和到期清理通道；不能让 UPDATE 清正文仍被不可变 guard 阻挡 |
 | 衍生引用 | 记录所用源对象/版本 ID，不只存副本/hash。多源笔记/画像任一来源删除，原系统副本停用并清除；以后重新整理须在新的有效来源上，不自动收费重建 |
 | 同意用途 | AC-5 的 consent version、purpose、granted/revoked_at 与案例来源 ID 可审计，正文独立；默认 false；进入案例时、读取时、消费时服务端复核当前同意及未删除状态 |
