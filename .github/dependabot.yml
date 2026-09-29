@@ -9,6 +9,8 @@ updates:
   # =====================================================
   - package-ecosystem: "npm"
     directory: "/"
+    # 发到 staging（默认分支 main 落后于 staging）
+    target-branch: "staging"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -79,6 +81,7 @@ updates:
   # =====================================================
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "staging"
     schedule:
       interval: "weekly"
       day: "monday"
