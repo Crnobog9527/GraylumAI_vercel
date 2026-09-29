@@ -1,10 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Diagnostic evidence for B02's explicit RLS stop condition, NOT a migration test.
+// B02: observed baseline, grant-only regression, 0143 repair and exact rollback.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID, createHmac } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { verifyTicketRepair } from './ticket-grants-cases.mjs';
 import { POSTGRES_IMAGE, POSTGREST_IMAGE } from './v3/images.mjs';
 
 if (process.argv.slice(2).join(' ') !== '--local-only') throw new Error('Require --local-only');
@@ -49,7 +50,10 @@ const snapshot = () => JSON.parse(sql(`SELECT jsonb_agg(jsonb_build_object(
   'policies',(SELECT jsonb_agg(to_jsonb(p) ORDER BY p.policyname) FROM pg_policies p WHERE p.tablename=c.relname),
   'columns',(SELECT jsonb_agg(jsonb_build_array(attname,atttypid,attacl) ORDER BY attnum)
     FROM pg_attribute WHERE attrelid=c.oid AND attnum>0 AND NOT attisdropped)) ORDER BY c.relname)
-  FROM pg_class c WHERE c.oid IN ('public.tickets'::regclass,'public.ticket_replies'::regclass);`));
+  FROM pg_class c WHERE c.oid IN ('public.tickets'::regclass,'public.ticket_replies'::regclass);`)).map(row => ({
+    ...row, acl: row.acl?.sort(),
+    columns: row.columns.map(([name, type, acl]) => [name, type, acl?.sort() ?? null]),
+  }));
 const rows = () => sql(`SELECT jsonb_build_object(
   'tickets',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM tickets t),
   'replies',(SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM ticket_replies r));`);
@@ -168,7 +172,53 @@ try {
   assert.deepEqual(snapshot(), before);
   assert.equal(rows(), dataBefore);
   console.log('PASS diagnostic probe rollback: exact table/column ACL, RLS and data restored');
-  console.log('BLOCKED B02 repair: missing own-row policies; no deployable migration produced');
+  const apply = path => sql(readFileSync(resolve(root, path), 'utf8'));
+  const migration = 'packages/db/migrations/0143_ticket_grants_and_own_rls.sql';
+  const rollback = 'packages/db/tests/ticket-grants-rollback.sql';
+  // Unexpected permissive policies must prevent any partial grant changes.
+  sql('CREATE POLICY unexpected_ticket_access ON tickets FOR SELECT USING (true)');
+  const drift = snapshot();
+  let driftBlocked = false;
+  try { apply(migration); } catch (error) { driftBlocked = String(error.stderr).includes('unexpected ticket policy'); }
+  assert.equal(driftBlocked, true);
+  assert.deepEqual(snapshot(), drift);
+  sql('DROP POLICY unexpected_ticket_access ON tickets');
+  apply(migration);
+  assert.equal(rows(), dataBefore, 'migration must not change any row');
+  const repaired = snapshot();
+  apply(migration);
+  assert.deepEqual(snapshot(), repaired, 'migration idempotency');
+  await verifyTicketRepair({ sql, http, denied, owner, other, admin, ticket, otherTicket });
+  const afterOperations = rows();
+  apply(rollback);
+  assert.deepEqual(snapshot(), before, 'exact baseline ACL and policies restored');
+  assert.equal(rows(), afterOperations, 'rollback does not touch data');
+  console.log('PASS 0143: idempotency, fail-closed policy drift, exact ACL/policy rollback and data preservation');
+  // Old column grants and PUBLIC must not provide a bypass after reapplication.
+  sql(`GRANT SELECT(deleted_at), UPDATE(user_id), INSERT(is_deleted), REFERENCES(id)
+    ON tickets TO PUBLIC,anon,authenticated;
+    GRANT SELECT(deleted_at), INSERT(is_admin), UPDATE(content), REFERENCES(id)
+    ON ticket_replies TO PUBLIC,anon,authenticated;`);
+  apply(migration);
+  assert.deepEqual(snapshot(), repaired);
+  console.log('PASS 0143: historical PUBLIC/client column ACLs cleared');
+  // Runtime helpers below deliberately stand in for unrelated profile permissions.
+  sql(`ALTER TABLE profiles ADD COLUMN credits integer DEFAULT 100,
+    ADD COLUMN nickname text DEFAULT 'fixture', ADD COLUMN email text,
+    ADD COLUMN membership_level text DEFAULT 'free', ADD COLUMN created_at timestamptz DEFAULT now(),
+    ADD COLUMN avatar_url text;
+    GRANT SELECT ON profiles TO authenticated,service_role;
+    NOTIFY pgrst, 'reload schema';`);
+  await new Promise(done => setTimeout(done, 500));
+  execFileSync('pnpm', ['--filter', '@repo/api', 'exec', 'vitest', 'run',
+    '--config', 'vitest.integration.config.ts', 'src/routers/ticketGrants.integration.ts'], {
+    cwd: root, stdio: 'inherit', env: { PATH: process.env.PATH, HOME: process.env.HOME,
+      B02_LOCAL_REST: restUrl, B02_OWNER_JWT: jwt('authenticated', owner),
+      B02_OTHER_JWT: jwt('authenticated', other), B02_ADMIN_JWT: jwt('authenticated', admin),
+      B02_SERVICE_JWT: jwt('service_role', admin),
+    },
+  });
+  console.log('PASS B02: real user/admin router and auto-close service integration');
 } catch (error) {
   // Only synthetic assertion information; never print connection strings or JWTs.
   console.error('FAIL B02 diagnostic:', error.code ?? error.name, error.operator ?? '');
