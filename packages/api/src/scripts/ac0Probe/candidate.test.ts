@@ -44,7 +44,7 @@ describe('fixed AC1-4 candidates: approved live caps', () => {
   it.each(['c1', 'c2'] as const)('fixes %s to forty distinct trials, 8192 output tokens and offline defaults', candidate => {
     const parsed = args(candidate);
     expect(parsed).toMatchObject({agentTurn: true, agentTurnCandidate: candidate, live: false,
-      counts: {ask: 30, text: 10, reference: 0}, maxCalls: 40, maxUsd: 6, maxTokens: 8192});
+      counts: {ask: 30, text: 10, reference: 0}, maxCalls: 40, maxUsd: 15, maxTokens: 8192});
     expect(args(candidate, '--max-tokens', '8192').maxTokens).toBe(8192);
     const plan = buildPlan(parsed, skill, scenarios, 'candidate-scenarios');
     expect(plan).toMatchObject({agentTurnCandidate: candidate, plannedCalls: 40, configs: [AGENT_TURN_CANDIDATES[candidate]]});
@@ -69,15 +69,15 @@ describe('fixed AC1-4 candidates: approved live caps', () => {
         effort: 'low', maxPrice: {prompt: 2, completion: 10}, dataCollection: 'omit', runtimeRouting: true},
     });
     expect(buildPlan(args('c1'), skill, scenarios, 's').planId).not.toBe(buildPlan(args('c2'), skill, scenarios, 's').planId);
-    expect(HARD_MAX_CALLS).toBe(613);
-    expect(HARD_MAX_USD).toBe(6);
+    expect(HARD_MAX_CALLS).toBe(693);
+    expect(HARD_MAX_USD).toBe(15);
   });
 
   it.each([
     ['--agent-turn-candidate', 'c1'], ['--agent-turn', '--agent-turn-candidate', 'other'],
     argv('c1', '--configs', 'qwen-deepinfra-low'), argv('c1', '--configs', ''), argv('c2', '--config-file', '/unused'),
     argv('c1', '--max-tokens', '1024'), argv('c2', '--max-tokens', '8191'), argv('c2', '--max-tokens', '8193'),
-    argv('c1', '--max-usd', '6.01'), argv('c1', '--max-calls', '614'),
+    argv('c1', '--max-usd', '15.01'), argv('c1', '--max-calls', '694'),
     argv('c2', '--record-external-calls', '1', '--record-external-usd', '0.1'),
   ])('refuses conflicting candidate arguments %j', (...input) => {
     expect(() => parseProbeArgs(input, '/synthetic-home')).toThrow();
@@ -103,13 +103,13 @@ describe('fixed AC1-4 candidates: approved live caps', () => {
   });
 
   it('reports over-cap candidate estimates without changing or bypassing execution caps', () => {
-    const plan = buildPlan(args('c2'), {...skill, instructions: 'x'.repeat(200_000)}, scenarios, 's');
-    expect(plan.plannedUsdUpperBound).toBeGreaterThan(6);
-    expect(plan.maxUsd).toBe(6);
+    const plan = buildPlan(args('c2'), {...skill, instructions: 'x'.repeat(600_000)}, scenarios, 's');
+    expect(plan.plannedUsdUpperBound).toBeGreaterThan(15);
+    expect(plan.maxUsd).toBe(15);
     expect(describePlan(plan, 'dry-run', {calls: 493, usd: 3.5})).toContain('estimate is not executable');
     expect(buildPlan({...args('c2'), live: true}, skill, scenarios, 's').plannedCalls).toBe(40);
-    const ledger = memoryLedger({calls: 613, nanoUsd: 0});
-    expect(() => createBudget({maxCalls: 40, maxUsd: 6, ledger}).reserve(1)).toThrow('total_call_cap');
+    const ledger = memoryLedger({calls: 693, nanoUsd: 0});
+    expect(() => createBudget({maxCalls: 40, maxUsd: 15, ledger}).reserve(1)).toThrow('total_call_cap');
   });
 
   it('preserves baseline identity, routing bytes, token default and USD 1 behavior', () => {

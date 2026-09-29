@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // AC-0b model probe. Standalone script: application code must never import it.
 
-/** Owner approval, PR #497 issuecomment-5893685727: card design probe 40 calls
- * (run cap USD 0.70); cumulative 613 calls / USD 6. No flag can raise these. */
-export const HARD_MAX_CALLS = 613;
-export const HARD_MAX_USD = 6;
+/** Owner approval, PR #497 issuecomment-5894168156: C3 and C4 40 calls each
+ * (run cap USD 5.54 each); cumulative 693 calls / USD 15. No flag can raise these. */
+export const HARD_MAX_CALLS = 693;
+export const HARD_MAX_USD = 15;
 export const DEFAULT_MAX_CALLS = 60;
 export const DEFAULT_MAX_USD = 1;
 
