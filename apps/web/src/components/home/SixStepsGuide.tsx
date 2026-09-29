@@ -180,7 +180,7 @@ export default function SixStepsGuide({ onStartAnalysis }: SixStepsGuideProps) {
           开始分析
         </button>
 
-        <Link href="/chat">
+        <Link href="/positioning">
           <button
             className="btn btn-secondary btn-lg"
             style={{

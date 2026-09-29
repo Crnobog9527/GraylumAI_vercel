@@ -4,15 +4,16 @@
  * This code is proprietary and confidential.
  */
 
+import { isAllowedHttpsUrl } from '../../src/lib/safe-url';
 import { expect, test } from '@playwright/test';
 import { authStatePaths } from './support/auth';
 import { gotoWithBypass } from './support/deploymentProtection';
 
 test.describe('production-only stripe smoke', () => {
   const productionBaseUrl = process.env.PLAYWRIGHT_BASE_URL ?? '';
-  const isProductionTarget =
-    productionBaseUrl.includes('www.graylum.com') ||
-    productionBaseUrl.includes('graylum.com');
+  const isProductionTarget = isAllowedHttpsUrl(productionBaseUrl, [
+    'https://graylum.com', 'https://www.graylum.com',
+  ]);
 
   test.skip(!isProductionTarget, 'Production-only Stripe smoke.');
 

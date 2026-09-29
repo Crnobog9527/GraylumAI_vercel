@@ -11,6 +11,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
 import { Client as PgClient } from 'pg';
+import { isSupabaseLikeHost } from './staging-db-host.mjs';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -202,8 +203,8 @@ function getSafeEnvironmentMetadata() {
     }
   }
 
-  if (!appHost.includes(expectedAppHost.toLowerCase())) {
-    productionSignals.push(`app host does not include expected staging host ${expectedAppHost}`);
+  if (appHost !== expectedAppHost.toLowerCase()) {
+    productionSignals.push(`app host does not match expected staging host ${expectedAppHost}`);
   }
 
   if (!isSupabaseLikeHost(supabaseHost)) {
@@ -232,12 +233,6 @@ function getSafeEnvironmentMetadata() {
   };
 }
 
-function isSupabaseLikeHost(hostname) {
-  return hostname.endsWith('.supabase.co')
-    || hostname.endsWith('.supabase.com')
-    || hostname.includes('.pooler.supabase.com')
-    || hostname.includes('supabase');
-}
 
 class SafetyError extends Error {
   constructor(message) {

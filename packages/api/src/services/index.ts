@@ -48,6 +48,5 @@ export * from './diagnostics';
 // 工单自动关闭服务
 export * from './ticketAutoClose';
 
-// 对话清理与定时任务运行审计
-export * from './conversationCleanup';
+// 定时任务运行审计
 export * from './scheduledJobRuns';

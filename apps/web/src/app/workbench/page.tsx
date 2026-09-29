@@ -2,7 +2,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ReportWorkActions, WorkSource } from "./report-work-actions";
+import { LegacyChatDisabledButton, ReportWorkActions, WorkSource } from "./report-work-actions";
 import { GenerationPanel } from "./generation-panel";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
@@ -412,7 +412,7 @@ export default function WorkbenchPage() {
         </Link>
         <nav className="flex gap-5 text-sm">
           <Link href="/marketplace">功能广场</Link>
-          <Link href="/chat">普通对话</Link>
+          <Link href="/positioning">普通对话</Link>
           <Link href="/profile">个人中心</Link>
         </nav>
       </header>
@@ -434,7 +434,7 @@ export default function WorkbenchPage() {
           </Button>
         </div>
         {snapshot && currentProject?.workKind === "script" && <WorkSource projectId={snapshot.projectId} roundId={snapshot.roundId} title={currentProject.title} canRevise={!busy && !unsaved && snapshot.state === "published" && !rounds.some(r=>r.state === "draft")} onRevised={async roundId=>{await load(snapshot.projectId,roundId);applyDiscovery(await discover());}}/> }
-        {snapshot && <Button className="mb-5" disabled={busy || unsaved} onClick={() => { const selected=snapshot; const requestId=crypto.randomUUID(); void run(async()=>{ const binding=await api.chatEnter.mutate({projectId:selected.projectId,roundId:selected.roundId,requestId});window.location.assign(`/chat?conversation=${binding.conversationId}`); }); }}>在聊天中继续此轮次</Button>}
+        {snapshot && <LegacyChatDisabledButton>在聊天中继续此轮次</LegacyChatDisabledButton>}
         {catalogError && <p role="status" className="mb-4 text-sm text-amber-300">{catalogError}</p>}
         {error && (
           <div

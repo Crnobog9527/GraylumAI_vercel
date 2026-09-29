@@ -4,6 +4,7 @@ import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
+import { loadInvitationSummary } from '../services/invitationSummary';
 import {
   evaluateInvitationClaimDecision,
   getChinaDayStartIso,
@@ -573,7 +574,7 @@ export const invitationRouter = router({
         invitationCode = newInvitation.code;
       }
 
-      const [recordsResult, settings] = await Promise.all([
+      const [recordsResult, settings, summary] = await Promise.all([
         ctx.supabase
           .from('invitation_records')
           .select('id, created_at, invitee_email, inviter_reward, status')
@@ -581,6 +582,9 @@ export const invitationRouter = router({
           .order('created_at', { ascending: false })
           .limit(10),
         loadInvitationRuntimeSettings(ctx.supabaseAdmin).catch((error) => {
+          throw createInvitationOperationError('读取邀请码面板', error);
+        }),
+        loadInvitationSummary(ctx.supabase, ctx.profileId).catch((error) => {
           throw createInvitationOperationError('读取邀请码面板', error);
         }),
       ]);
@@ -600,11 +604,7 @@ export const invitationRouter = router({
           inviterReward,
           inviteeReward,
         },
-        summary: {
-          totalInvites: records.length,
-          rewardedInvites: records.filter((record) => record.status === 'rewarded').length,
-          pendingInvites: records.filter((record) => record.status === 'pending' || record.status === 'registered').length,
-        },
+        summary,
         records,
       };
     }),

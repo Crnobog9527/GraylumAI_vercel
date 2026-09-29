@@ -7,6 +7,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
+// Preserve the retained handler's regression coverage with a test-only override.
+// Production has no environment, request or user override for this constant.
+const legacySwitch = vi.hoisted(() => ({ disabled: false }));
+vi.mock('@/lib/legacy-chat', () => ({ get LEGACY_CHAT_DISABLED() { return legacySwitch.disabled; } }));
 const networkFetch = globalThis.fetch;
 const redisAdmission = vi.hoisted(() => ({ limit: vi.fn() }));
 vi.mock('@upstash/redis', () => ({ Redis: class {} }));
@@ -183,6 +187,7 @@ let fetchSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  legacySwitch.disabled = false;
   routeMocks.decideWebSearch.mockReturnValue({shouldSearch:false,confidence:1,estimatedSearchCount:0,reasonCodes:['no_realtime_signals']});
   routeMocks.skillMode.mockResolvedValue({guided:false});
   fetchSpy = vi.spyOn(globalThis, 'fetch');
@@ -868,4 +873,37 @@ describe('ordinary HTTP handler admission regression', () => {
     expect(routeMocks.checkRateLimit.mock.calls.length).toBeLessThanOrEqual(1);
   });
 
+});
+
+
+describe('LEGACY-CHAT-OFF production admission', () => {
+  it.each([{}, { requestId: '00000000-0000-4000-8000-000000000099' }])(
+    'rejects new and replayed requests before reading the body or touching money', async body => {
+      const actual = await vi.importActual<typeof import('../../../../apps/web/src/lib/legacy-chat')>('@/lib/legacy-chat');
+      expect(actual.LEGACY_CHAT_DISABLED).toBe(true);
+      legacySwitch.disabled = actual.LEGACY_CHAT_DISABLED;
+      const request = makeAuthenticatedStreamRequest(body);
+      const readBody = vi.spyOn(request, 'json');
+      const { claimChatRequest, readChatRequest } = await import('@/lib/ordinary-chat-request');
+      const response = await POST(request as any);
+      expect(response.status).toBe(410);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(await response.json()).toEqual({ code: 'LEGACY_CHAT_DISABLED', error: '旧聊天已停用，请前往定位分析。' });
+      expect(readBody).not.toHaveBeenCalled();
+      expect(routeMocks.createClient).not.toHaveBeenCalled();
+      expect(readChatRequest).not.toHaveBeenCalled();
+      expect(claimChatRequest).not.toHaveBeenCalled();
+      expect(routeMocks.billingServiceConstructor).not.toHaveBeenCalled();
+      expect(routeMocks.billingPreDeduct).not.toHaveBeenCalled();
+      expect(routeMocks.selectModel).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    },
+  );
+  it('also rejects unauthenticated malformed requests without parsing them', async () => {
+    legacySwitch.disabled = true;
+    const request = new Request('https://graylum.test/api/ai/stream', { method: 'POST', body: '{' });
+    expect((await POST(request as any)).status).toBe(410);
+    expect(routeMocks.createClient).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });

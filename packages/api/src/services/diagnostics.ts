@@ -672,7 +672,7 @@ async function testAIModelStatus(ctx: DiagnosticContext): Promise<DiagnosticTest
   try {
     const { result, latencyMs } = await measureLatency(async () => {
       // 获取所有启用的模型
-      const { data: models, error } = await ctx.supabase
+      const { data: models, error } = await ctx.supabaseAdmin
         .from('ai_models')
         .select('id, name, model_id, provider, is_active, api_key, config')
         .eq('is_active', 'true');

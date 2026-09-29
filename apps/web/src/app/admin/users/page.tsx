@@ -49,6 +49,7 @@ import { RoleBadge } from '@/components/ui/status-badge';
 import { TableEmptyState } from '@/components/ui/empty-state';
 import { toast } from '@/components/ui/sonner';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
+import { formatLastLogin } from './lastLogin';
 
 type UserStatus = 'active' | 'disabled' | 'banned';
 type MembershipLevel = 'free' | 'pro' | 'gold';
@@ -65,6 +66,7 @@ interface User {
   credits: number;
   last_login_at: string | null;
   last_ip: string | null;
+  login_record_status?: 'unrecorded';
   created_at: string;
 }
 
@@ -481,9 +483,7 @@ export default function AdminUsersPage() {
                     </TableCell>
                     <TableCell>
                       <div style={{ color: 'var(--text-tertiary)' }}>
-                        {user.last_login_at
-                          ? new Date(user.last_login_at).toLocaleString('zh-CN')
-                          : '从未登录'}
+                        {formatLastLogin(user)}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -752,9 +752,7 @@ export default function AdminUsersPage() {
                         <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>最后登录</span>
                       </div>
                       <p className="mt-1 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                        {userDetails.profile.last_login_at
-                          ? new Date(userDetails.profile.last_login_at).toLocaleString('zh-CN')
-                          : '从未登录'}
+                        {formatLastLogin(userDetails.profile)}
                       </p>
                     </div>
                   </div>

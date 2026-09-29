@@ -310,14 +310,13 @@ async function ensureProfile(ctx: ApiContext) {
     const shouldBackfillNickname = !profile.nickname?.trim();
     const shouldSyncEmail = normalizedEmail && profile.email !== normalizedEmail;
 
-    if (shouldBackfillNickname || shouldSyncEmail) {
-      await userScopedSupabase
-        .from('profiles')
-        .update({
-          ...(shouldBackfillNickname ? { nickname: derivedNickname } : {}),
-          ...(shouldSyncEmail ? { email: normalizedEmail } : {}),
-        })
-        .eq('id', userId);
+    // Users may write only nickname (0144); email is synced from the auth user via service_role.
+    const nicknameSync = shouldBackfillNickname
+      ? await userScopedSupabase.from('profiles').update({ nickname: derivedNickname }).eq('id', userId) : null;
+    const emailSync = shouldSyncEmail && ctx.hasSupabaseAdminPrivileges
+      ? await ctx.supabaseAdmin.from('profiles').update({ email: normalizedEmail }).eq('id', userId) : null;
+    if (nicknameSync?.error || emailSync?.error) {
+      logger.warn('auth', 'profile_sync_failed', { nickname: !!nicknameSync?.error, email: !!emailSync?.error });
     }
 
     return {

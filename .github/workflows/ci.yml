@@ -217,6 +217,11 @@ jobs:
       - name: Install Playwright browser
         run: cd apps/web && pnpm exec playwright install --with-deps --only-shell chromium
 
+      - name: Run web unit and component tests
+        env:
+          NEXT_PUBLIC_AUTH_APP_URL: https://app.graylum.com
+        run: pnpm --filter web test:unit
+
       - name: Build application
         run: pnpm build
 

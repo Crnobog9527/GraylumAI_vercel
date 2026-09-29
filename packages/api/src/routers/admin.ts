@@ -1,22 +1,24 @@
+import { ANNOUNCEMENT_LINK_ERROR, resolveAnnouncementLink } from '../shared/announcementLink';
 import { parseSearchSurcharge } from '../services/searchPricing';
 import { router, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
+import { readAllReportRows } from '../services/reportRows';
+import { buildPerformanceCostStats, estimateCacheSavings } from '../services/performanceCostReport';
+import { buildFinanceUsdOverview } from '../services/financeReport';
+import { picoToUsd, usdToPico } from '../services/reportUsd';
 import { BILLING_CONSTANTS } from '../types/billing';
 import { issueSignedAttachmentUrlsByBatch } from '../lib/ticketAttachments';
-import { ConversationCleanupService } from '../services/conversationCleanup';
 import {
   resolveMembershipEligibility,
   type MembershipEligibilityResult,
 } from '../services/membershipEligibility';
 import {
-  finishScheduledJobRun,
-  getLatestScheduledJobRun,
-  SCHEDULED_JOB_KEYS,
-  startScheduledJobRun,
-} from '../services/scheduledJobRuns';
+  ADMIN_ACTIVITY_COLUMNS, ADMIN_ACTIVITY_WITH_PROFILES, ADMIN_PROFILE_COLUMNS, ADMIN_PROFILE_LIST_COLUMNS,
+  ADMIN_TRANSACTION_COLUMNS, recordAdminActivity, withUnrecordedLoginFields,
+} from '../services/adminUserAccess';
 
 const promptCategorySchema = z.enum(['writing', 'marketing', 'video', 'business', 'education', 'coding', 'analysis', 'creative', 'other']);
 const promptPlatformSchema = z.enum(['all', 'web', 'mobile', 'desktop', 'api']);
@@ -152,16 +154,13 @@ const adminSettingsMembershipPlanRowSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   level: z.enum(['free', 'pro', 'gold']),
-  history_retention_days: z.number().finite(),
   allow_export: z.enum(['true', 'false']),
   allow_batch_export: z.enum(['true', 'false']),
 }).passthrough();
-const announcementLinkInputSchema = z
-  .string()
-  .trim()
-  .transform((value) => value || null)
-  .nullable()
-  .optional();
+const announcementLinkInputSchema = z.string()
+  .refine(value => resolveAnnouncementLink(value) !== null, ANNOUNCEMENT_LINK_ERROR)
+  .transform(value => resolveAnnouncementLink(value)!.href)
+  .nullable().optional();
 const promptBatchPatchSchema = z.object({
   description: z.string().max(500).nullable().optional(),
   fullDescription: z.string().max(5000).nullable().optional(),
@@ -582,7 +581,7 @@ export const adminRouter = router({
       const startedAt = Date.now();
       let query = ctx.supabase
         .from('profiles')
-        .select('id, email, nickname, avatar_url, role, status, membership_level, credits, last_login_at, last_ip, created_at', { count: 'planned' })
+        .select(ADMIN_PROFILE_LIST_COLUMNS, { count: 'planned' })
         .eq('is_deleted', false)
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
@@ -614,7 +613,7 @@ export const adminRouter = router({
       }
 
       const result = {
-        users: data ?? [],
+        users: (data ?? []).map(withUnrecordedLoginFields),
         total: count ?? 0,
         hasMore: (count ?? 0) > input.offset + input.limit,
       };
@@ -680,7 +679,7 @@ export const adminRouter = router({
         .from('profiles')
         .update({ role: input.role })
         .eq('id', input.userId)
-        .select()
+        .select(ADMIN_PROFILE_COLUMNS)
         .single();
 
       if (error) {
@@ -688,7 +687,7 @@ export const adminRouter = router({
       }
 
       // Log the activity
-      await ctx.supabase.from('user_activity_logs').insert({
+      await recordAdminActivity(ctx.supabase, {
         user_id: input.userId,
         admin_id: ctx.profileId,
         action: `角色变更: ${previousRole} → ${input.role}`,
@@ -922,7 +921,7 @@ export const adminRouter = router({
     .query(async ({ ctx, input }) => {
       let query = ctx.supabase
         .from('credit_transactions')
-        .select('*', { count: 'exact' })
+        .select(ADMIN_TRANSACTION_COLUMNS, { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
@@ -1080,7 +1079,7 @@ export const adminRouter = router({
       }
 
       // Log the activity
-      await ctx.supabase.from('user_activity_logs').insert({
+      await recordAdminActivity(ctx.supabase, {
         user_id: input.userId,
         admin_id: ctx.profileId,
         action: `积分调整: ${appliedAdjustment > 0 ? '+' : ''}${appliedAdjustment}`,
@@ -1117,7 +1116,7 @@ export const adminRouter = router({
       // Get user profile with all fields
       const { data: profile, error: profileError } = await ctx.supabase
         .from('profiles')
-        .select('*')
+        .select(ADMIN_PROFILE_COLUMNS)
         .eq('id', input.userId)
         .single();
 
@@ -1152,7 +1151,7 @@ export const adminRouter = router({
 
         ctx.supabase
           .from('user_activity_logs')
-          .select('*')
+          .select(ADMIN_ACTIVITY_COLUMNS)
           .eq('user_id', input.userId)
           .order('created_at', { ascending: false })
           .limit(10),
@@ -1189,7 +1188,7 @@ export const adminRouter = router({
       }
 
       const result = {
-        profile,
+        profile: withUnrecordedLoginFields(profile),
         stats: {
           totalConversations: conversationsResult.data?.length ?? 0,
           totalMessages: messageCountResult.count ?? 0,
@@ -1237,7 +1236,7 @@ export const adminRouter = router({
         .from('profiles')
         .update({ status: input.status })
         .eq('id', input.userId)
-        .select()
+        .select(ADMIN_PROFILE_COLUMNS)
         .single();
 
       if (error) {
@@ -1245,7 +1244,7 @@ export const adminRouter = router({
       }
 
       // Log the activity
-      await ctx.supabase.from('user_activity_logs').insert({
+      await recordAdminActivity(ctx.supabase, {
         user_id: input.userId,
         admin_id: ctx.profileId,
         action: `账号状态变更: ${previousStatus} → ${input.status}`,
@@ -1333,7 +1332,7 @@ export const adminRouter = router({
         .from('profiles')
         .update({ membership_level: input.membershipLevel })
         .eq('id', input.userId)
-        .select()
+        .select(ADMIN_PROFILE_COLUMNS)
         .single();
 
       if (error) {
@@ -1370,7 +1369,7 @@ export const adminRouter = router({
       }
 
       // Log the activity
-      await ctx.supabase.from('user_activity_logs').insert({
+      await recordAdminActivity(ctx.supabase, {
         user_id: input.userId,
         admin_id: ctx.profileId,
         action: `会员等级变更: ${previousLevel} → ${input.membershipLevel}`,
@@ -1399,11 +1398,7 @@ export const adminRouter = router({
       const startedAt = Date.now();
       let query = ctx.supabase
         .from('user_activity_logs')
-        .select(`
-          *,
-          user:profiles!user_activity_logs_user_id_fkey(id, email, nickname, avatar_url),
-          admin:profiles!user_activity_logs_admin_id_fkey(id, email, nickname, avatar_url)
-        `, { count: 'planned' })
+        .select(ADMIN_ACTIVITY_WITH_PROFILES, { count: 'planned' })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
@@ -1615,9 +1610,11 @@ export const adminRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       const startedAt = Date.now();
+      // Only the site-wide banner is managed; retired homepage rows stay stored but unlisted.
       let query = ctx.supabase
         .from('announcements')
         .select('*', { count: 'planned' })
+        .eq('announcement_type', 'banner')
         .order('priority', { ascending: false })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
@@ -1635,7 +1632,8 @@ export const adminRouter = router({
       // Get stats
       const statsQuery = await ctx.supabase
         .from('announcements')
-        .select('active, type');
+        .select('active, type')
+        .eq('announcement_type', 'banner');
 
       const stats = {
         total: statsQuery.data?.length ?? 0,
@@ -1674,7 +1672,7 @@ export const adminRouter = router({
       title: z.string().min(1).max(200),
       content: z.string().min(1).max(5000),
       type: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).default('info'),
-      announcementType: z.enum(['homepage', 'banner']).default('homepage'),
+      announcementType: z.literal('banner').default('banner'),
       bannerStyle: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
       bannerLink: announcementLinkInputSchema,
       icon: z.string().default('Megaphone'),
@@ -1724,7 +1722,7 @@ export const adminRouter = router({
       title: z.string().min(1).max(200).optional(),
       content: z.string().min(1).max(5000).optional(),
       type: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
-      announcementType: z.enum(['homepage', 'banner']).optional(),
+      announcementType: z.literal('banner').optional(),
       bannerStyle: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
       bannerLink: announcementLinkInputSchema,
       icon: z.string().optional(),
@@ -1758,7 +1756,7 @@ export const adminRouter = router({
       const { data, error } = await ctx.supabase
         .from('announcements')
         .update(updateData)
-        .eq('id', input.id)
+        .eq('id', input.id).eq('announcement_type', 'banner')
         .select()
         .single();
 
@@ -1780,36 +1778,13 @@ export const adminRouter = router({
       const { error } = await ctx.supabase
         .from('announcements')
         .delete()
-        .eq('id', input.id);
+        .eq('id', input.id).eq('announcement_type', 'banner');
 
       if (error) {
         throw createAdminOperationError('删除公告', error);
       }
 
       return { success: true };
-    }),
-
-  /**
-   * Get active announcements (public, but could be used by admin preview too)
-   */
-  getActiveAnnouncements: adminProcedure
-    .query(async ({ ctx }) => {
-      const now = new Date().toISOString();
-
-      const { data, error } = await ctx.supabase
-        .from('announcements')
-        .select('*')
-        .eq('active', 'true')
-        .lte('start_date', now)
-        .or(`end_date.is.null,end_date.gt.${now}`)
-        .order('priority', { ascending: false })
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        throw createAdminOperationError('读取有效公告', error);
-      }
-
-      return data ?? [];
     }),
 
   // ============================================
@@ -2215,10 +2190,10 @@ export const adminRouter = router({
    */
   getFinanceStats: adminProcedure
     .query(async ({ ctx }) => {
-      const { data: creditTransactions, error: creditTransactionsError } = await ctx.supabase
+      const { data: creditTransactions, error: creditTransactionsError } = await readAllReportRows((from, to) => ctx.supabase
         .from('credit_transactions')
         .select('amount, type, created_at, description')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }).order('id').range(from, to));
 
       if (creditTransactionsError) {
         throw createAdminOperationError('读取财务统计', creditTransactionsError);
@@ -2231,9 +2206,9 @@ export const adminRouter = router({
         'credit transactions',
       );
 
-      const { data: packages, error: packagesError } = await ctx.supabase
+      const { data: packages, error: packagesError } = await readAllReportRows((from, to) => ctx.supabase
         .from('credit_packages')
-        .select('*');
+        .select('*').order('id').range(from, to));
 
       if (packagesError) {
         throw createAdminOperationError('读取积分包财务统计', packagesError);
@@ -2246,9 +2221,9 @@ export const adminRouter = router({
         'credit packages',
       );
 
-      const { data: users, error: usersError } = await ctx.supabase
+      const { data: users, error: usersError } = await readAllReportRows((from, to) => ctx.supabase
         .from('profiles')
-        .select('credits, created_at');
+        .select('credits, created_at').order('id').range(from, to));
 
       if (usersError) {
         throw createAdminOperationError('读取财务统计', usersError);
@@ -2261,10 +2236,10 @@ export const adminRouter = router({
         'profiles',
       );
 
-      const { data: models, error: modelsError } = await ctx.supabase
+      const { data: models, error: modelsError } = await readAllReportRows((from, to) => ctx.supabase
         .from('ai_models')
         .select('*')
-        .order('name', { ascending: true });
+        .order('name', { ascending: true }).order('id').range(from, to));
 
       if (modelsError) {
         throw createAdminOperationError('读取财务统计', modelsError);
@@ -2277,9 +2252,9 @@ export const adminRouter = router({
         'AI models',
       );
 
-      const { data: conversations, error: conversationsError } = await ctx.supabase
+      const { data: conversations, error: conversationsError } = await readAllReportRows((from, to) => ctx.supabase
         .from('conversations')
-        .select('id, model_id, created_at');
+        .select('id, model_id, created_at').order('id').range(from, to));
 
       if (conversationsError) {
         throw createAdminOperationError('读取财务统计', conversationsError);
@@ -2292,9 +2267,10 @@ export const adminRouter = router({
         'conversations',
       );
 
-      const { data: tokenStats, error: tokenStatsError } = await ctx.supabase
+      const { data: tokenStats, error: tokenStatsError } = await readAllReportRows((from, to) => ctx.supabase
         .from('token_stats')
-        .select('model_used, total_credits, total_cost_usd, cached_tokens, created_at');
+        .select('model_used, total_credits, total_cost_usd, cached_tokens, created_at')
+        .order('id').range(from, to));
 
       if (tokenStatsError) {
         throw createAdminOperationError('读取财务统计', tokenStatsError);
@@ -2307,9 +2283,10 @@ export const adminRouter = router({
         'token stats',
       );
 
-      const { data: paymentOrders, error: paymentOrdersError } = await ctx.supabase
+      const { data: paymentOrders, error: paymentOrdersError } = await readAllReportRows((from, to) => ctx.supabase
         .from('payment_orders')
-        .select('amount_total, currency, status, payment_status, created_at');
+        .select('amount_total, currency, status, payment_status, created_at')
+        .order('id').range(from, to));
 
       if (paymentOrdersError) {
         throw createAdminOperationError('读取财务统计', paymentOrdersError);
@@ -2322,9 +2299,9 @@ export const adminRouter = router({
         'payment orders',
       );
 
-      const { data: usageLogs, error: usageLogsError } = await ctx.supabase
+      const { data: usageLogs, error: usageLogsError } = await readAllReportRows((from, to) => ctx.supabase
         .from('ai_usage_logs')
-        .select('status, created_at');
+        .select('status, created_at').order('id').range(from, to));
 
       if (usageLogsError) {
         throw createAdminOperationError('读取财务统计', usageLogsError);
@@ -2337,9 +2314,9 @@ export const adminRouter = router({
         'AI usage logs',
       );
 
-      const { data: billingHistory, error: billingHistoryError } = await ctx.supabase
+      const { data: billingHistory, error: billingHistoryError } = await readAllReportRows((from, to) => ctx.supabase
         .from('billing_history')
-        .select('operation_type, amount, created_at, metadata');
+        .select('operation_type, amount, created_at, metadata').order('id').range(from, to));
 
       if (billingHistoryError) {
         throw createAdminOperationError('读取财务统计', billingHistoryError);
@@ -2352,7 +2329,7 @@ export const adminRouter = router({
         'billing history',
       );
 
-      const { data: settings, error: settingsError } = await ctx.supabase
+      const { data: settings, error: settingsError } = await readAllReportRows((from, to) => ctx.supabase
         .from('system_settings')
         .select('*')
         .in('key', [
@@ -2360,7 +2337,7 @@ export const adminRouter = router({
           'search_surcharge_credits',
           'billing_credits_per_usd',
           'billing_token_price_multiplier',
-        ]);
+        ]).order('key').range(from, to));
 
       if (settingsError) {
         throw createAdminOperationError('读取财务统计', settingsError);
@@ -2492,14 +2469,14 @@ export const adminRouter = router({
         }
       });
 
-      const modelUsageByToken: Record<string, { requests: number; credits: number; costUsd: number }> = {};
+      const modelUsageByToken: Record<string, { requests: number; credits: number; costPico: bigint }> = {};
       tokenStats.forEach((stat) => {
         const key = stat.model_used;
         if (!key) return;
-        const current = modelUsageByToken[key] ?? { requests: 0, credits: 0, costUsd: 0 };
+        const current = modelUsageByToken[key] ?? { requests: 0, credits: 0, costPico: 0n };
         current.requests += 1;
         current.credits += stat.total_credits;
-        current.costUsd += Number(stat.total_cost_usd);
+        current.costPico += usdToPico(stat.total_cost_usd);
         modelUsageByToken[key] = current;
       });
 
@@ -2518,18 +2495,11 @@ export const adminRouter = router({
         conversationCount: modelUsageByConversation[model.id] || 0,
         requestCount: modelUsageByToken[model.model_id]?.requests || 0,
         creditsConsumed: modelUsageByToken[model.model_id]?.credits || 0,
-        costUsd: parseFloat((modelUsageByToken[model.model_id]?.costUsd || 0).toFixed(6)),
+        costUsd: picoToUsd(modelUsageByToken[model.model_id]?.costPico ?? 0n),
       }));
 
-      const actualRevenue = paymentOrders.reduce((sum, order) => {
-        if (order.status !== 'completed') return sum;
-        if (order.payment_status !== 'paid' && order.payment_status !== 'no_payment_required') return sum;
-        if (order.currency && order.currency.toLowerCase() !== 'usd') return sum;
-        return sum + (order.amount_total ?? 0);
-      }, 0);
-
       const financeOverview = {
-        estimatedRevenue: actualRevenue,
+        ...buildFinanceUsdOverview(paymentOrders, tokenStats),
         creditsConsumed: transactionStats.totalDeductions,
         creditsPurchased: transactionStats.totalPurchases,
         creditsGiven: transactionStats.totalAdditions,
@@ -2737,7 +2707,6 @@ export const adminRouter = router({
       monthlyBonusCredits: z.number().int().min(0).optional(),
       packageDiscount: z.number().int().min(0).max(100).optional(),
       features: z.array(z.string()).optional(),
-      historyRetentionDays: z.number().int().min(1).max(365).optional(),
       maxContextMessages: z.number().int().min(5).max(100).optional(), // 上下文消息数限制
       allowExport: z.enum(['true', 'false']).optional(),
       allowBatchExport: z.enum(['true', 'false']).optional(),
@@ -2759,7 +2728,6 @@ export const adminRouter = router({
       if (input.monthlyBonusCredits !== undefined) updateData.monthly_bonus_credits = input.monthlyBonusCredits;
       if (input.packageDiscount !== undefined) updateData.package_discount = input.packageDiscount;
       if (input.features !== undefined) updateData.features = input.features;
-      if (input.historyRetentionDays !== undefined) updateData.history_retention_days = input.historyRetentionDays;
       if (input.maxContextMessages !== undefined) updateData.max_context_messages = input.maxContextMessages;
       if (input.allowExport !== undefined) updateData.allow_export = input.allowExport;
       if (input.allowBatchExport !== undefined) updateData.allow_batch_export = input.allowBatchExport;
@@ -2798,67 +2766,6 @@ export const adminRouter = router({
       }
 
       return { success: true };
-    }),
-
-  /**
-   * Clean up expired conversations based on membership retention settings
-   */
-  cleanupExpiredConversations: adminProcedure
-    .mutation(async ({ ctx }) => {
-      const runId = await startScheduledJobRun({
-        supabase: ctx.supabase,
-        jobKey: SCHEDULED_JOB_KEYS.conversationCleanup,
-        triggerSource: 'manual',
-      });
-
-      try {
-        const service = new ConversationCleanupService({ supabase: ctx.supabase });
-        const result = await service.run();
-
-        await finishScheduledJobRun({
-          supabase: ctx.supabase,
-          runId,
-          status: 'success',
-          summary: {
-            deletedCount: result.deletedCount,
-            stats: result.stats,
-          },
-        });
-
-        return {
-          success: true,
-          deletedCount: result.deletedCount,
-          stats: result.stats,
-          message: `清理完成，已删除 ${result.deletedCount} 个过期对话`,
-        };
-      } catch (error) {
-        await finishScheduledJobRun({
-          supabase: ctx.supabase,
-          runId,
-          status: 'error',
-          error: '自动清理失败，请稍后重试',
-        });
-
-        throw createSafeInternalError(error, '对话清理失败，请稍后重试');
-      }
-    }),
-
-  /**
-   * Get conversation cleanup statistics
-   */
-  getCleanupStats: adminProcedure
-    .query(async ({ ctx }) => {
-      const service = new ConversationCleanupService({ supabase: ctx.supabase });
-      const [{ stats, totalExpired }, latestRun] = await Promise.all([
-        service.getCleanupStats(),
-        getLatestScheduledJobRun(ctx.supabase, SCHEDULED_JOB_KEYS.conversationCleanup),
-      ]);
-
-      return {
-        stats,
-        totalExpired,
-        latestRun,
-      };
     }),
 
   // ============================================
@@ -2933,10 +2840,10 @@ export const adminRouter = router({
         ctx.supabase
           .from('ai_models')
           .select('id, name, model_id, provider, input_token_cost, output_token_cost, web_search_cost, is_active'),
-        ctx.supabase
+        readAllReportRows((from, to) => ctx.supabase
           .from('token_stats')
           .select('model_used, total_credits, total_cost_usd, input_tokens, output_tokens, cached_tokens, cache_creation_tokens, created_at')
-          .gte('created_at', rangeStartIso),
+          .gte('created_at', rangeStartIso).order('id').range(from, to)),
         ctx.supabase
           .from('ai_usage_logs')
           .select('status, latency_ms, created_at')
@@ -2997,7 +2904,7 @@ export const adminRouter = router({
       const modelUsageByToken = new Map<string, {
         requestCount: number;
         credits: number;
-        costUsd: number;
+        costPico: bigint;
         inputTokens: number;
         outputTokens: number;
         cachedTokens: number;
@@ -3007,14 +2914,14 @@ export const adminRouter = router({
         const current = modelUsageByToken.get(stat.model_used) ?? {
           requestCount: 0,
           credits: 0,
-          costUsd: 0,
+          costPico: 0n,
           inputTokens: 0,
           outputTokens: 0,
           cachedTokens: 0,
         };
         current.requestCount += 1;
         current.credits += stat.total_credits ?? 0;
-        current.costUsd += parseFloat(stat.total_cost_usd ?? '0');
+        current.costPico += usdToPico(stat.total_cost_usd);
         current.inputTokens += stat.input_tokens ?? 0;
         current.outputTokens += stat.output_tokens ?? 0;
         current.cachedTokens += stat.cached_tokens ?? 0;
@@ -3078,7 +2985,7 @@ export const adminRouter = router({
         const usage = modelUsageByToken.get(model.model_id) ?? {
           requestCount: 0,
           credits: 0,
-          costUsd: 0,
+          costPico: 0n,
           inputTokens: 0,
           outputTokens: 0,
           cachedTokens: 0,
@@ -3092,7 +2999,7 @@ export const adminRouter = router({
           conversationCount: conversationsByModel.get(model.model_id) ?? 0,
           requestCount: usage.requestCount,
           creditsConsumed: usage.credits,
-          totalCostUsd: parseFloat(usage.costUsd.toFixed(6)),
+          totalCostUsd: picoToUsd(usage.costPico),
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
           cachedTokens: usage.cachedTokens,
@@ -3155,16 +3062,7 @@ export const adminRouter = router({
       const cacheReadTokens = tokenStatsInRange.reduce((sum, stat) => sum + (stat.cached_tokens ?? 0), 0);
       const cacheCreationTokens = tokenStatsInRange.reduce((sum, stat) => sum + (stat.cache_creation_tokens ?? 0), 0);
 
-      const totalCost = tokenStatsInRange.reduce(
-        (sum, stat) => sum + parseFloat(stat.total_cost_usd ?? '0'),
-        0
-      );
-      const avgCostPerRequest = rangeRequests > 0 ? totalCost / rangeRequests : 0;
-      const cacheSavings = tokenStatsInRange.reduce((sum, stat) => {
-        const model = models.find((item) => item.model_id === stat.model_used);
-        if (!model) return sum;
-        return sum + (((stat.cached_tokens ?? 0) * (model.input_token_cost ?? 0) * 0.9) / 1_000_000_000_000);
-      }, 0);
+      const cacheSavings = estimateCacheSavings(tokenStatsInRange, models);
 
       const successLogs = usageLogs.filter((log) => log.status === 'success');
       const failedLogs = usageLogs.filter((log) => log.status !== 'success');
@@ -3212,12 +3110,7 @@ export const adminRouter = router({
         cacheCreationTokens,
       };
 
-      const costStats = {
-        totalCost: parseFloat(totalCost.toFixed(4)),
-        avgCostPerRequest: parseFloat(avgCostPerRequest.toFixed(6)),
-        cacheSavings: parseFloat(cacheSavings.toFixed(4)),
-        estimatedMonthly: parseFloat((totalCost * (30 / days)).toFixed(2)),
-      };
+      const costStats = buildPerformanceCostStats(tokenStatsInRange, days, cacheSavings);
 
       const result = {
         timeRange: input.timeRange,

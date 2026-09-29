@@ -15,8 +15,8 @@ Sentry.init({
   // Environment identification
   environment: getSentryEnvironment(),
 
-  // Adjust this value in production, or use tracesSampler for greater control
-  tracesSampleRate: process.env.NODE_ENV === "production" ? 1.0 : 0,
+  // Sample 10% of production traces to reduce event volume and monitoring cost.
+  tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 0,
 
   // Setting this option to true will print useful information to the console while you're setting up Sentry.
   debug: false,

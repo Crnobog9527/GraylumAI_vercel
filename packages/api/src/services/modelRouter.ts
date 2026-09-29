@@ -1,5 +1,6 @@
 import { withTokenCountingMetadata } from './modelCapabilities';
 import { resolveOpenAICompatibleEndpoint } from './providerUtils';
+import { ROUTING_MODEL_COLUMNS } from './models/publicColumns';
 /**
  * Model Router Service
  *
@@ -301,7 +302,7 @@ async function getModelConfigFromDb(supabase: SupabaseClient, modelId?: string):
 
   const { data } = await supabase
     .from('ai_models')
-    .select('*')
+    .select(ROUTING_MODEL_COLUMNS)
     .eq('id', modelId)
     .eq('is_active', 'true')
     .single();
@@ -319,7 +320,7 @@ async function getModelConfigFromDb(supabase: SupabaseClient, modelId?: string):
     enableWebSearch: data.enable_web_search === 'true',
     inputTokenCost: data.input_token_cost,
     outputTokenCost: data.output_token_cost,
-    apiKey: data.api_key ?? null,
+    apiKey: null,
     apiEndpoint: resolveOpenAICompatibleEndpoint(data.provider, data.api_endpoint),
     isActive: data.is_active === 'true',
     tokenCountingSupported: effective.token_counting_supported === 'true',
@@ -332,7 +333,7 @@ async function getModelConfigFromDb(supabase: SupabaseClient, modelId?: string):
 async function getActiveModelConfigs(supabase: SupabaseClient): Promise<ModelConfig[]> {
   const { data, error } = await supabase
     .from('ai_models')
-    .select('*')
+    .select(ROUTING_MODEL_COLUMNS)
     .eq('is_active', 'true')
     .order('name');
 
@@ -348,7 +349,7 @@ async function getActiveModelConfigs(supabase: SupabaseClient): Promise<ModelCon
     enableWebSearch: model.enable_web_search === 'true',
     inputTokenCost: model.input_token_cost,
     outputTokenCost: model.output_token_cost,
-    apiKey: model.api_key ?? null,
+    apiKey: null,
     apiEndpoint: resolveOpenAICompatibleEndpoint(model.provider, model.api_endpoint),
     isActive: model.is_active === 'true',
     tokenCountingSupported: model.token_counting_supported === 'true',

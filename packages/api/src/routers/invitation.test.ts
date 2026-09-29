@@ -578,32 +578,42 @@ describe('inviter record visibility', () => {
       ...ownRecords,
       { ...ownRecords[0], id: 'foreign-record', inviter_id: 'other-inviter', invitee_id: 'user-1' },
     ];
-    let columns = '*';
-    const filters: Array<[string, unknown]> = [];
-    const query = {
-      select: vi.fn((value: string) => {
-        columns = value;
-        return query;
-      }),
-      eq: vi.fn((key: string, value: unknown) => {
-        filters.push([key, value]);
-        return query;
-      }),
-      order: vi.fn(() => query),
-      limit: vi.fn(() => query),
-      then(resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) {
-        const filtered = rows.filter((row) => filters.every(([key, value]) => (
-          row[key as keyof typeof row] === value
-        )));
-        const data = columns === '*' ? filtered : filtered.map((row) => Object.fromEntries(
-          columns.split(',').map((field) => field.trim()).map((field) => [field, row[field as keyof typeof row]]),
-        ));
-        return Promise.resolve({ data, error: null }).then(resolve, reject);
-      },
-    };
+    function buildQuery() {
+      let columns = '*';
+      const inclusions: Array<[string, unknown[]]> = [];
+      const filters: Array<[string, unknown]> = [];
+      const query = {
+        select: vi.fn((value: string) => {
+          columns = value;
+          return query;
+        }),
+        eq: vi.fn((key: string, value: unknown) => {
+          filters.push([key, value]);
+          return query;
+        }),
+        in: vi.fn((key: string, values: unknown[]) => {
+          inclusions.push([key, values]);
+          return query;
+        }),
+        order: vi.fn(() => query),
+        limit: vi.fn(() => query),
+        then(resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) {
+          const filtered = rows.filter((row) => filters.every(([key, value]) => (
+            row[key as keyof typeof row] === value
+          )) && inclusions.every(([key, values]) => values.includes(row[key as keyof typeof row])));
+          const data = columns === '*' ? filtered : filtered.map((row) => Object.fromEntries(
+            columns.split(',').map((field) => field.trim()).map((field) => [field, row[field as keyof typeof row]]),
+          ));
+          return Promise.resolve({ data, count: filtered.length, error: null }).then(resolve, reject);
+        },
+      };
+      return query;
+    }
+    const query = buildQuery();
+    let recordQueryCount = 0;
     const supabase = {
       from(table: string) {
-        if (table === 'invitation_records') return query;
+        if (table === 'invitation_records') return recordQueryCount++ === 0 ? query : buildQuery();
         if (table === 'profiles') return createClaimSupabase({}).supabase.from(table);
         if (table === 'invitations') return createThenableQueryBuilder({
           data: { code: 'SYNTHETIC', created_at: ownRecords[0].created_at }, error: null,

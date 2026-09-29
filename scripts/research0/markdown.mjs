@@ -1,14 +1,11 @@
 // Markdown tables for the PR from a run or reanalyze report. Only derived
 // metrics: no raw bodies, no URLs with parameters, no keys.
 
+import { markdownCell as cell } from './markdownCell.mjs';
 import { NOT_PROVIDED } from './metrics.mjs';
 
 function usd(value) {
   return Number.isFinite(value) ? `$${value.toFixed(4)}` : NOT_PROVIDED;
-}
-
-function cell(value) {
-  return String(value ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 }
 
 function median(values) {

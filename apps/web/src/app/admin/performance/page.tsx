@@ -34,7 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import AdminErrorState from '@/components/admin/AdminErrorState';
-import { formatUsd } from '@/lib/currency';
+import { formatReportUsd } from '@/lib/currency';
 
 type TimeRange = '7d' | '14d' | '30d';
 type HealthStatus = 'healthy' | 'warning' | 'critical';
@@ -52,9 +52,7 @@ const formatNumber = (num: number) => {
 };
 
 const formatCost = (cost: number) => {
-  if (cost < 0.01) return `$${cost.toFixed(6)}`;
-  if (cost < 1) return `$${cost.toFixed(4)}`;
-  return formatUsd(cost);
+  return formatReportUsd(cost);
 };
 
 export default function AdminPerformancePage() {
@@ -540,7 +538,7 @@ export default function AdminPerformancePage() {
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>总成本</p>
+                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>已记录总成本</p>
                     <p className="text-2xl font-bold mt-1" style={{ color: 'var(--text-primary)' }}>
                       {formatCost(costStats.totalCost)}
                     </p>
@@ -559,7 +557,7 @@ export default function AdminPerformancePage() {
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>平均每次请求</p>
+                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>已记录成本/次</p>
                     <p className="text-2xl font-bold mt-1" style={{ color: 'var(--text-primary)' }}>
                       {formatCost(costStats.avgCostPerRequest)}
                     </p>
@@ -575,9 +573,9 @@ export default function AdminPerformancePage() {
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>缓存节省</p>
+                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>估算缓存节省</p>
                     <p className="text-2xl font-bold mt-1 text-emerald-400">
-                      -{formatCost(costStats.cacheSavings)}
+                      {costStats.cacheSavings === null ? '无法估算' : `-${formatCost(costStats.cacheSavings)}`}
                     </p>
                   </div>
                   <div className="p-3 rounded-xl bg-emerald-500/20">
@@ -617,7 +615,7 @@ export default function AdminPerformancePage() {
                       <ArrowUpRight className="h-4 w-4 text-blue-400" />
                     </div>
                     <div>
-                      <p className="font-medium" style={{ color: 'var(--text-primary)' }}>输入 Token 成本</p>
+                      <p className="font-medium" style={{ color: 'var(--text-primary)' }}>输入 Token 成本（按 30% 估算）</p>
                       <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{formatNumber(tokenUsage.inputTokens)} tokens</p>
                     </div>
                   </div>
@@ -631,7 +629,7 @@ export default function AdminPerformancePage() {
                       <ArrowDownRight className="h-4 w-4 text-purple-400" />
                     </div>
                     <div>
-                      <p className="font-medium" style={{ color: 'var(--text-primary)' }}>输出 Token 成本</p>
+                      <p className="font-medium" style={{ color: 'var(--text-primary)' }}>输出 Token 成本（按 70% 估算）</p>
                       <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{formatNumber(tokenUsage.outputTokens)} tokens</p>
                     </div>
                   </div>
@@ -645,12 +643,12 @@ export default function AdminPerformancePage() {
                       <HardDrive className="h-4 w-4 text-emerald-400" />
                     </div>
                     <div>
-                      <p className="font-medium text-emerald-400">缓存节省</p>
+                      <p className="font-medium text-emerald-400">估算缓存节省</p>
                       <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>命中率 {aiPerformance.cacheHitRate}%</p>
                     </div>
                   </div>
                   <span className="font-mono text-lg text-emerald-400">
-                    -{formatCost(costStats.cacheSavings)}
+                    {costStats.cacheSavings === null ? '无法估算' : `-${formatCost(costStats.cacheSavings)}`}
                   </span>
                 </div>
               </div>

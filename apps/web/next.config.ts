@@ -11,10 +11,50 @@ const sentryBuildUploadEnabled =
     process.env.SENTRY_PROJECT
   );
 
+// Observe resource violations before enforcing CSP. Checkout/portal navigation is
+// a top-level redirect, not an embedded resource. MiSans is served from /fonts.
+const reportOnlyCsp = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "script-src 'self' 'unsafe-inline' https://hcaptcha.com https://*.hcaptcha.com",
+  "style-src 'self' 'unsafe-inline' https://hcaptcha.com https://*.hcaptcha.com",
+  "img-src 'self' data: blob: https://*.supabase.co https://hcaptcha.com https://*.hcaptcha.com",
+  "font-src 'self'",
+  "media-src 'self' blob: https://*.supabase.co",
+  [
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
+    "https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.ingest.de.sentry.io",
+    "https://hcaptcha.com https://*.hcaptcha.com https://vitals.vercel-insights.com",
+  ].join(" "),
+  "frame-src https://hcaptcha.com https://*.hcaptcha.com",
+  // Session Replay uses a compression worker.
+  "worker-src 'self' blob:",
+].join("; ");
+
 const nextConfig: NextConfig = {
   devIndicators: false,
+  // Temporary redirect runs before authentication and retains the legacy page code.
+  async redirects() {
+    return [{ source: "/chat", destination: "/positioning", permanent: false }];
+  },
   async headers() {
     return [{
+      source: "/:path*",
+      headers: [
+        { key: "X-Content-Type-Options", value: "nosniff" },
+        { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        { key: "X-Frame-Options", value: "DENY" },
+        {
+          key: "Permissions-Policy",
+          value: "camera=(), microphone=(), geolocation=(), accelerometer=(), gyroscope=(), magnetometer=(), usb=(), serial=(), hid=()",
+        },
+        // Start with 30 days on this host only; preload is difficult to undo.
+        { key: "Strict-Transport-Security", value: "max-age=2592000" },
+        { key: "Content-Security-Policy-Report-Only", value: reportOnlyCsp },
+      ],
+    }, {
       // Only content-addressed font resources are immutable, not the notices.
       source: "/fonts/misans/:asset(.+\\.(?:woff2|css))",
       headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
@@ -48,7 +88,6 @@ const sentryWebpackPluginOptions = {
     finalize: sentryBuildUploadEnabled,
   },
   tunnelRoute: "/monitoring",
-  hideSourceMaps: true,
 };
 
 export default withSentryConfig((phase: string) => {

@@ -1,34 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const cleanupState = vi.hoisted(() => ({
-  run: vi.fn(),
-  getCleanupStats: vi.fn(),
-  startScheduledJobRun: vi.fn(),
-  finishScheduledJobRun: vi.fn(),
-  getLatestScheduledJobRun: vi.fn(),
-}));
-
-vi.mock('../services/conversationCleanup', () => {
-  class ConversationCleanupService {
-    run = cleanupState.run;
-    getCleanupStats = cleanupState.getCleanupStats;
-  }
-
-  return {
-    ConversationCleanupService,
-  };
-});
-
-vi.mock('../services/scheduledJobRuns', () => ({
-  SCHEDULED_JOB_KEYS: {
-    conversationCleanup: 'conversation_cleanup',
-  },
-  startScheduledJobRun: cleanupState.startScheduledJobRun,
-  finishScheduledJobRun: cleanupState.finishScheduledJobRun,
-  getLatestScheduledJobRun: cleanupState.getLatestScheduledJobRun,
-}));
-
 import { adminRouter } from './admin';
 
 function createAwaitableQueryBuilder(result: Promise<unknown>) {
@@ -135,8 +107,6 @@ function createAdminCaller(
 describe('adminRouter error sanitization', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    cleanupState.startScheduledJobRun.mockResolvedValue('run-1');
-    cleanupState.finishScheduledJobRun.mockResolvedValue(undefined);
   });
 
   it('sanitizes getUsers query failures', async () => {
@@ -162,20 +132,6 @@ describe('adminRouter error sanitization', () => {
       code: 'INTERNAL_SERVER_ERROR',
       message: '读取用户列表失败，请稍后重试',
     });
-  });
-
-  it('sanitizes cleanupExpiredConversations failures while preserving job logging', async () => {
-    cleanupState.run.mockRejectedValueOnce(new Error('delete from conversations failed'));
-
-    const caller = createAdminCaller({});
-
-    await expect(caller.cleanupExpiredConversations()).rejects.toMatchObject<Partial<TRPCError>>({
-      code: 'INTERNAL_SERVER_ERROR',
-      message: '对话清理失败，请稍后重试',
-    });
-
-    expect(cleanupState.startScheduledJobRun).toHaveBeenCalledOnce();
-    expect(cleanupState.finishScheduledJobRun).toHaveBeenCalledOnce();
   });
 });
 
@@ -602,6 +558,8 @@ describe('adminRouter performance stats aggregation', () => {
             state.gteValue = value;
             return builder;
           },
+          order() { return builder; },
+          range() { return builder; },
           then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
             return execute().then(onFulfilled, onRejected);
           },
@@ -1028,7 +986,12 @@ describe('adminRouter finance stats runtime billing summary', () => {
         const data = Object.prototype.hasOwnProperty.call(overrides, table)
           ? overrides[table as FinanceTable]
           : defaultData[table as FinanceTable];
-        const result = Promise.resolve({ data, error: null });
+        let from = 0;
+        let to = Number.MAX_SAFE_INTEGER;
+        const result = () => Promise.resolve({
+          data: Array.isArray(data) ? data.slice(from, to + 1) : data,
+          error: null,
+        });
         const builder = {
           select() {
             return builder;
@@ -1039,14 +1002,19 @@ describe('adminRouter finance stats runtime billing summary', () => {
           in() {
             return builder;
           },
+          range(start: number, end: number) {
+            from = start;
+            to = end;
+            return builder;
+          },
           then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
-            return result.then(onFulfilled, onRejected);
+            return result().then(onFulfilled, onRejected);
           },
           catch(onRejected: (reason: unknown) => unknown) {
-            return result.catch(onRejected);
+            return result().catch(onRejected);
           },
           finally(onFinally: () => void) {
-            return result.finally(onFinally);
+            return result().finally(onFinally);
           },
         };
 
@@ -1208,7 +1176,8 @@ describe('adminRouter finance stats runtime billing summary', () => {
         totalConversations: 1,
       },
       financeOverview: {
-        estimatedRevenue: 1500,
+        paidRevenueCents: 1500,
+        recordedCostUsd: 0.125,
         creditsConsumed: 5,
         creditsGiven: 25,
       },
@@ -1219,6 +1188,28 @@ describe('adminRouter finance stats runtime billing summary', () => {
         newUserCredits: 120,
       },
     });
+  });
+
+  it('includes later pages of recorded cost and paid USD orders without converting another currency', async () => {
+    const created_at = '2026-03-29T08:00:00.000Z';
+    const tokenRows = Array.from({ length: 1001 }, () => ({
+      model_used: 'model-a', total_credits: 1, total_cost_usd: '0.000001',
+      cached_tokens: 0, created_at,
+    }));
+    const usdOrders = Array.from({ length: 1001 }, () => ({
+      amount_total: 1, currency: 'usd', status: 'completed', payment_status: 'paid', created_at,
+    }));
+    const otherCurrencyOrder = {
+      amount_total: 100000, currency: 'cny', status: 'completed', payment_status: 'paid', created_at,
+    };
+    const result = await createAdminCaller(createFinanceStatsSupabase({
+      token_stats: tokenRows,
+      payment_orders: [...usdOrders, otherCurrencyOrder],
+    })).getFinanceStats();
+
+    expect(result.financeOverview.paidRevenueCents).toBe(1001);
+    expect(result.financeOverview.recordedCostUsd).toBeCloseTo(0.001001, 9);
+    expect(result.financeOverview.creditsConsumed).toBe(1001);
   });
 
   it('derives runtime billing ranges from active model pricing instead of retired system token settings', async () => {
@@ -1315,6 +1306,9 @@ describe('adminRouter finance stats runtime billing summary', () => {
             return builder;
           },
           in() {
+            return builder;
+          },
+          range() {
             return builder;
           },
           then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
@@ -1675,20 +1669,6 @@ describe('adminRouter credit adjustments', () => {
 describe('adminRouter lightweight admin dashboards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    cleanupState.getCleanupStats.mockResolvedValue({
-      stats: [
-        { level: 'free', retentionDays: 7, expiredCount: 2 },
-        { level: 'pro', retentionDays: 30, expiredCount: 1 },
-      ],
-      totalExpired: 3,
-    });
-    cleanupState.getLatestScheduledJobRun.mockResolvedValue({
-      id: 'run-1',
-      status: 'success',
-      started_at: '2026-03-29T10:00:00.000Z',
-      summary: { deletedCount: 3 },
-      error: null,
-    });
   });
 
   it('searches users without loading the paginated admin user list', async () => {
@@ -1893,7 +1873,6 @@ describe('adminRouter lightweight admin dashboards', () => {
                 id: 'plan-1',
                 name: 'Pro',
                 level: 'pro',
-                history_retention_days: 30,
                 allow_export: 'true',
                 allow_batch_export: 'false',
               }],
@@ -1938,14 +1917,11 @@ describe('adminRouter lightweight admin dashboards', () => {
         id: 'plan-1',
         name: 'Pro',
         level: 'pro',
-        history_retention_days: 30,
         allow_export: 'true',
         allow_batch_export: 'false',
       }],
     });
     expect(adminQueries).toEqual(['system_settings', 'membership_plans']);
-    expect(cleanupState.getCleanupStats).not.toHaveBeenCalled();
-    expect(cleanupState.getLatestScheduledJobRun).not.toHaveBeenCalled();
   });
 
   it('fails the settings dashboard instead of rendering defaults when either query fails', async () => {
@@ -2010,8 +1986,7 @@ describe('adminRouter lightweight admin dashboards', () => {
       id: 'plan-1',
       name: 'Pro',
       level: 'pro',
-      history_retention_days: null,
-      allow_export: 'true',
+      allow_export: 'maybe',
       allow_batch_export: 'false',
     }]],
   ])('fails the settings dashboard for a %s', async (_caseName, invalidTable, invalidData) => {
@@ -2023,7 +1998,6 @@ describe('adminRouter lightweight admin dashboards', () => {
               id: 'plan-1',
               name: 'Pro',
               level: 'pro',
-              history_retention_days: 30,
               allow_export: 'true',
               allow_batch_export: 'false',
             }];

@@ -541,7 +541,7 @@ test('reanalyze is read-only and rebuilds call metadata instead of reporting zer
     assert.deepEqual(calls.map(call => call.outcome), ['ok', 'failed', 'accepted']);
     assert.equal(calls[0].reportedCostUsd, 0.002);
     assert.equal(report.vendors[0].usage.calls, 2);
-    assert.match(markdown, /\| Fake \| OK 1, SAVED_FAILURE 1, ACCEPTED_NO_RESULT 1 \| 3 \| 1\/3 \|/);
+    assert.match(markdown, /\| Fake \| OK 1, SAVED&#95;FAILURE 1, ACCEPTED&#95;NO&#95;RESULT 1 \| 3 \| 1\/3 \|/);
     assert.match(markdown, /离线重算不适用/);
     const noLedger = await reanalyze({ vendors: [fakeVendor()], queries, outDir: path.join(dir, 'raw') });
     assert.equal(formatMarkdown(noLedger, queries).split('\n')[4].split('|').filter(cell => cell.includes('离线重算不适用')).length, 3);

@@ -142,6 +142,7 @@ describe('protectedProcedure profile bootstrap', () => {
     const userProfileInserts: unknown[] = [];
     const userProfileSelects: Array<{ field: string; value: unknown } | undefined> = [];
     const profileUpdates: unknown[] = [];
+    const adminProfileUpdates: unknown[] = [];
     const adminTableCalls: string[] = [];
     const profileDeletes: Array<{
       filters: Array<{ field: string; value: unknown }>;
@@ -282,6 +283,10 @@ describe('protectedProcedure profile bootstrap', () => {
             state.operation = 'delete';
             return builder;
           },
+          update(payload: Record<string, unknown>) {
+            adminProfileUpdates.push(payload);
+            return builder;
+          },
           eq(field: string, value: unknown) {
             state.eq = { field, value };
             state.filters.push(state.eq);
@@ -364,6 +369,7 @@ describe('protectedProcedure profile bootstrap', () => {
       userProfileInserts,
       userProfileSelects,
       profileUpdates,
+      adminProfileUpdates,
       adminTableCalls,
       profileDeletes,
       creditTransactions,
@@ -526,6 +532,24 @@ describe('protectedProcedure profile bootstrap', () => {
       userRole: 'user',
       userStatus: 'active',
     });
+  });
+
+  it('backfills nickname with the user client and syncs email only through the server client', async () => {
+    const existingProfile = {
+      id: user.id, role: 'user', credits: 100, status: 'active', nickname: '', email: 'old@example.com',
+      created_at: legacyProfileCreatedAt,
+    };
+    const supabaseMocks = createProfilesSupabase({ existingProfile });
+
+    await callProtectedProcedure(supabaseMocks);
+
+    expect(supabaseMocks.profileUpdates).toEqual([{ nickname: 'New User' }]);
+    expect(supabaseMocks.adminProfileUpdates).toEqual([{ email: user.email }]);
+
+    const withoutServerClient = createProfilesSupabase({ existingProfile });
+    await callProtectedProcedure(withoutServerClient, { hasSupabaseAdminPrivileges: false });
+    expect(withoutServerClient.profileUpdates).toEqual([{ nickname: 'New User' }]);
+    expect(withoutServerClient.adminProfileUpdates).toEqual([]);
   });
 
   it('does not issue an opening grant when server-side profile creation fails', async () => {
