@@ -19,6 +19,7 @@ import { diagnosticsRouter } from './routers/diagnostics';
 import { costsRouter } from './routers/costs';
 import { paymentsRouter } from './routers/payments';
 import { skillsRouter } from './routers/skills';
+import { accountRouter } from './routers/account';
 
 /**
  * 主路由器
@@ -46,6 +47,7 @@ export const appRouter = router({
   agentSlice: agentSliceRouter,
   runtime: runtimeRouter,
   opc: opcRouter,
+  account: accountRouter,
 });
 
 /**

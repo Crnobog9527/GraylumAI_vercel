@@ -6,6 +6,7 @@
  */
 
 import { TRPCError } from '@trpc/server';
+import { assertUsableUserStatus, normalizeUserStatus } from '../lib/accountStatus';
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../lib/logger';
@@ -265,18 +266,8 @@ export async function checkUserStatus(ctx: SecurityContext): Promise<{ role: 'us
     });
   }
 
-  if (profile.status === 'disabled') {
-    throw new TRPCError({
-      code: 'FORBIDDEN',
-      message: '账号已被禁用，请联系管理员',
-    });
-  }
-
-  if (profile.status === 'banned') {
-    throw new TRPCError({
-      code: 'FORBIDDEN',
-      message: '账号已被封禁',
-    });
+  if (['disabled', 'banned', 'deleted'].includes(profile.status)) {
+    assertUsableUserStatus(normalizeUserStatus(profile.status));
   }
   if (profile.status !== 'active') {
     throw createSafeServiceUnavailableError(undefined, '账号状态暂时无法验证，请稍后重试');

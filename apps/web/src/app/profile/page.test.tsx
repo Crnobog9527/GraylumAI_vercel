@@ -40,6 +40,7 @@ vi.mock('@/components/profile/BillingRecordsCard', () => ({ default: () => null 
 vi.mock('@/components/profile/CreditRecordsCard', () => ({ CreditRecordsCard: () => null }));
 vi.mock('@/components/profile/UsageHistoryCard', () => ({ UsageHistoryCard: () => null }));
 vi.mock('@/components/profile/SecuritySettingsCard', () => ({ SecuritySettingsCard: () => <p>security-card</p> }));
+vi.mock('@/components/profile/AccountErasureCard', () => ({ AccountErasureCard: () => <p>account-erasure-card</p> }));
 vi.mock('@/components/profile/TicketsPanel', () => ({ default: () => null }));
 
 import ProfilePage from './page';
@@ -67,7 +68,8 @@ describe('profile page', () => {
     state.params = new URLSearchParams('tab=security');
     state.profile = { data: undefined, isLoading: false, error: { message: 'boom' }, isFetching: false, refetch: vi.fn() };
     const html = renderToStaticMarkup(<ProfilePage />);
-    expect(html).toContain('个人资料读取失败');
+    expect(html).not.toContain('security-card');
+    expect(html).not.toContain('account-erasure-card');
     expect(html).not.toContain('security-card');
   });
 
@@ -82,6 +84,7 @@ describe('profile page', () => {
     const html = renderToStaticMarkup(<ProfilePage />);
     expect(html).toContain('data-active-tab="security"');
     expect(html).toContain('security-card');
+    expect(html).toContain('account-erasure-card');
   });
 
   it('falls back to the profile tab for unknown tabs', () => {
