@@ -8,9 +8,9 @@ it.each([false,true])('classifies terminal refusal and filtered output in either
  expect(terminalAgentReplyFailure(reply({content:'Partial'},'content_filter'),organizer)).toBe(true);
 });
 it('honors only the first question tool and rejects every organizer tool',()=>{
- expect(terminalAgentReplyFailure(reply({tool_calls:[call('unknown'),call('ask_question')]}))).toBe(true);
- expect(terminalAgentReplyFailure(reply({tool_calls:[call('ask_question'),call('unknown')]}))).toBe(false);
- expect(terminalAgentReplyFailure(reply({tool_calls:[call('ask_question')]},'tool_calls'),true)).toBe(true);
+ expect(terminalAgentReplyFailure(reply({content:null,tool_calls:[call('unknown'),call('ask_question')]}))).toBe(true);
+ expect(terminalAgentReplyFailure(reply({content:null,tool_calls:[call('ask_question'),call('unknown')]}))).toBe(false);
+ expect(terminalAgentReplyFailure(reply({content:null,tool_calls:[call('ask_question')]},'tool_calls'),true)).toBe(true);
 });
 it.each([null,'','  \n'])('only empty successful organizer output is terminal (%j)',content=>{
  expect(terminalAgentReplyFailure(reply({content}))).toBe(false);
@@ -22,4 +22,20 @@ it('does not classify incomplete or malformed transport evidence as a terminal r
  for(const value of [null,{}, {choices:[]},{choices:[{}]}, {choices:[{},{}]}])
   expect(terminalAgentReplyFailure(value,true)).toBe(false);
  expect(terminalAgentReplyFailure(reply({content:'Kept proposal'}),true)).toBe(false);
+});
+
+it.each([false,true].flatMap(organizer=>['stop','length','tool_calls','content_filter'].map(finish=>({organizer,finish}))))(
+ 'complete malformed replies are terminal in both phases ($organizer, $finish)',({organizer,finish})=>{
+  for(const message of [undefined,null,[],false,'text',{}, {content:[]},{content:1},
+   {content:{}},{content:'kept',tool_calls:{}},{content:null,tool_calls:null}])
+   expect(terminalAgentReplyFailure(reply(message,finish),organizer)).toBe(true);
+ });
+it.each([false,true])('unknown or absent finish never turns partial evidence into cancellation (%s)',organizer=>{
+ for(const finish_reason of [undefined,null,'','unknown']){
+  for(const message of [undefined,[],{content:[]},{content:null,refusal:'Refused'},
+   {content:null,tool_calls:[call('unknown')]}])
+   expect(terminalAgentReplyFailure({choices:[{message,finish_reason}]},organizer)).toBe(false);
+ }
+ expect(terminalAgentReplyFailure(reply({content:null},'length'),organizer)).toBe(false);
+ expect(terminalAgentReplyFailure(reply({content:''},'length'),organizer)).toBe(false);
 });

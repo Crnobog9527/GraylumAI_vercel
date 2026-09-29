@@ -272,3 +272,16 @@ node packages/db/tests/v3/run-workbench.mjs --opc-only --staging-host --with-sta
 本轮 MENTOR_STREAM 三场景（normal / refresh / proposal）同一次运行全部通过，414 项为 case-pattern 排除。同一正文各有 4 次可见 DOM 更新；卡片显示/作答、刷新恢复、开场建议保存为待核对、每运行单只有 1 个 spend 均通过。合成测试不替代人观察真实模型逐步显示的验收。
 
 本轮 BILL2 without-app 全量 78 项通过、0 跳过；本机运行结束且临时应用/数据库已关闭。全部验证使用合成供应商，没有访问真实模型或 staging。
+
+
+## 12. 格式异常终态修复与 Owner 新授权
+
+依据 [总控 P2 决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5887942303)，在 `execute` 已核验持久化响应的模型身份和单 choice 后，导师、整理两个阶段共用的判定现在先检查已知终止原因 `stop/length/tool_calls/content_filter`。若 message 缺失或不是对象，content 不是字符串/null，或者 tool_calls 存在但不是数组，走既有取消结算路径。缺少或未知 finish_reason 仍不据此取消；合法空 length 保持原截断处理。没有改变请求字节、前端、共享契约或数据库结构。
+
+新增单测覆盖两阶段、四种终止原因、畸形字段及未知/缺失终止原因；数据库矩阵新增四类非流式整理异常，各覆盖正常取消和首次取消/interrupt 丢失后的恢复，证明回执与主回复保留、一次结算、零重复派发、下一消息可准入。
+
+Owner 已明确授权：先只读核对 staging 整理模型和测试窗口，公开记录仅通过/不通过和时间；合并前做40次真实probe，本轮费用不超过1美元，本机累计调用上限453。代码上限已按授权由420调整至453，原累计美元上限3.5不变。合并部署后允许最多16次staging真实调用，验证完整定位导师与定位摘要（含 #504 未完成项）。Owner 同时明确“staging 密钥不更换”，替代此前等待换密钥/更新指纹的前置要求。上述测试授权不包含合并授权，合并仍须Owner单独批准。
+
+本轮本机：API 2929通过/4跳过；typecheck、lint、code-size与diff-check通过；runtime without-app 127通过/5项明确排除；BILL2 without-app 78通过。新head推送后先报总控增量审查，再请求机器人复核，当前不自行关闭新P2讨论。
+
+本轮 MENTOR_STREAM normal / refresh / proposal 同一次运行3项全部通过，414项按pattern排除；三个场景正文均有4次严格增长的可见DOM更新，卡片与建议保存、恢复及一次结算断言通过。所有本机runner已退出并清理。

@@ -72,10 +72,14 @@ async function fixture(organize: boolean) {
 }
 
 type Failure = 'mentor-refusal' | 'mentor-content-filter' | 'mentor-unknown-tool' |
-  'organizer-empty' | 'organizer-refusal' | 'organizer-tool';
+  'organizer-empty' | 'organizer-refusal' | 'organizer-tool' |
+  'organizer-missing-message' | 'organizer-array-message' |
+  'organizer-array-content' | 'organizer-object-tools';
 const failures: Failure[] = [
   'mentor-refusal', 'mentor-content-filter', 'mentor-unknown-tool',
   'organizer-empty', 'organizer-refusal', 'organizer-tool',
+  'organizer-missing-message', 'organizer-array-message',
+  'organizer-array-content', 'organizer-object-tools',
 ];
 const cases = failures.flatMap(failure => [false, true].map(cancelLost => ({failure, cancelLost})));
 const primaryText = '这是一条已付费并可核对的开场建议。';
@@ -115,8 +119,18 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA === 'true').each(cases)(
             headers: {'content-type': 'text/event-stream'},
           });
         }
+        // Complete non-streaming receipts can still contain a malformed message.
+        // Keep the identity, sole choice, terminal finish and paid usage valid.
+        const malformedResponses: Partial<Record<Failure, {message: unknown; finish: string}>> = {
+          'organizer-missing-message': {message: undefined, finish: 'stop'},
+          'organizer-array-message': {message: [], finish: 'content_filter'},
+          'organizer-array-content': {message: {...message, content: []}, finish: 'length'},
+          'organizer-object-tools': {message: {...message, tool_calls: {}}, finish: 'tool_calls'},
+        };
+        const malformed = failing ? malformedResponses[failure] : undefined;
         return new Response(JSON.stringify({id, object: 'chat.completion', created: 1, model: request.model,
-          choices: [{index: 0, message, finish_reason: finish}], usage}), {
+          choices: [{index: 0, message: malformed ? malformed.message : message,
+            finish_reason: malformed?.finish ?? finish}], usage}), {
           headers: {'content-type': 'application/json'},
         });
       },
