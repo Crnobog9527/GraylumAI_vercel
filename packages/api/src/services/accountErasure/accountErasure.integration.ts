@@ -6,6 +6,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 vi.mock('../redisRateLimiter', () => ({ checkRateLimitOrThrow: vi.fn().mockResolvedValue({ success: true }) }));
 
 import { accountRouter } from '../../routers/account';
+import { userRouter } from '../../routers/user';
 import { confirmAccountErasure, loadAccountErasurePreview } from './service';
 import { REAUTH_REQUIRED_MESSAGE, readVerifiedAuthTime } from './reauth';
 
@@ -31,12 +32,12 @@ const admin = client(process.env.ERASURE_SERVICE_JWT!);
 const anonKey = process.env.ERASURE_ANON_JWT!;
 const PASSWORD = 'fixture-password-1';
 
-async function createAccount(label: string, role: 'user' | 'admin' = 'user') {
+async function createAccount(label: string, role: 'user' | 'admin' = 'user', nickname: string = label) {
   const email = `${label}-${crypto.randomUUID().slice(0, 8)}@example.test`;
   const { data, error } = await admin.auth.admin.createUser({ email, password: PASSWORD, email_confirm: true });
   if (error || !data.user) throw error ?? new Error('createUser');
   const { error: profileError } = await admin.from('profiles').insert({
-    id: data.user.id, email, nickname: label, role, status: 'active', membership_level: 'free', credits: 40,
+    id: data.user.id, email, nickname, role, status: 'active', membership_level: 'free', credits: 40,
   });
   if (profileError) throw profileError;
   return { id: data.user.id, email };
@@ -49,13 +50,30 @@ async function signIn(email: string) {
   return { session, tokens: data.session };
 }
 
-function caller(userId: string, session: Client) {
-  return accountRouter.createCaller({
+function context(userId: string, session: Client) {
+  return {
     headers: new Headers(), user: { id: userId, email_confirmed_at: '2026-09-30T00:00:00Z', app_metadata: {} },
     isEmailVerified: true, authProvider: 'email', supabase: session, supabaseAuth: session, supabasePublic: session,
     supabaseAdmin: admin, hasSupabaseAdminPrivileges: true,
-  } as unknown as Parameters<typeof accountRouter.createCaller>[0]);
+  } as unknown as Parameters<typeof accountRouter.createCaller>[0];
 }
+const caller = (userId: string, session: Client) => accountRouter.createCaller(context(userId, session));
+const userCaller = (userId: string, session: Client) => userRouter.createCaller(context(userId, session));
+const nicknameOf = async (id: string) =>
+  (await admin.from('profiles').select('nickname').eq('id', id).single()).data?.nickname;
+
+it('P1 regression: after the migration a signed-in user still updates their own profile', async () => {
+  const user = await createAccount('renamer', 'user', '');
+  const { session } = await signIn(user.email);
+  // ensureProfile backfills an empty nickname with the user's own JWT (profiles UPDATE trigger path).
+  await expect(userCaller(user.id, session).getUserProfile()).resolves.toMatchObject({ id: user.id });
+  expect(await nicknameOf(user.id)).toMatch(/^user-/);
+  await expect(userCaller(user.id, session).updateUserProfile({ nickname: '新名字' }))
+    .resolves.toMatchObject({ nickname: '新名字' });
+  const direct = await session.from('profiles').update({ nickname: '直接改' }).eq('id', user.id).select('nickname');
+  expect(direct.error).toBeNull();
+  expect(direct.data).toEqual([{ nickname: '直接改' }]);
+});
 
 it('T09/T11: renewal blocks, fresh password re-auth closes, Auth access and client reads end', async () => {
   const owner = await createAccount('owner');
@@ -91,6 +109,10 @@ it('T09/T11: renewal blocks, fresh password re-auth closes, Auth access and clie
   expect(refresh.error).not.toBeNull();
   await expect(signIn(owner.email)).rejects.toBeTruthy();
   await expect(account.erasurePreview()).rejects.toMatchObject({ code: 'FORBIDDEN', message: 'ACCOUNT_CLOSED: 账号已注销' });
+  // Own profile edits no longer apply; status cannot be revived.
+  const renamed = await session.from('profiles').update({ nickname: 'after-close' }).eq('id', owner.id).select('id');
+  expect(renamed.data ?? []).toEqual([]);
+  expect(await nicknameOf(owner.id)).toBe('owner');
   // Irreversible and idempotent.
   const revive = await admin.from('profiles').update({ status: 'active' }).eq('id', owner.id);
   expect(revive.error?.message).toContain('ACCOUNT_ERASURE_IRREVERSIBLE');

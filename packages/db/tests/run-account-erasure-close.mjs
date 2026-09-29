@@ -82,6 +82,13 @@ try {
   assert.deepEqual(tableAcl.map(x => x.split('/')[0]), ['service_role=r'], 'progress table: service_role SELECT only');
   assert.equal(sql(`SELECT count(*) FROM pg_attribute WHERE attrelid = 'public.account_erasure_requests'::regclass
     AND attacl IS NOT NULL;`), '0', 'no column ACLs');
+  // Normal path after the migration: a user edits their own nickname through the profiles trigger.
+  const probeUser = randomUUID();
+  sql(`INSERT INTO profiles(id, nickname) VALUES ('${probeUser}', 'before');`);
+  assert.equal(sql(`BEGIN; SET LOCAL request.jwt.claims = '{"sub":"${probeUser}"}'; SET LOCAL ROLE authenticated;
+    UPDATE profiles SET nickname = 'after' WHERE id = '${probeUser}' RETURNING nickname; COMMIT;`)
+    .split('\n').filter(line => line === 'after').length, 1, 'own nickname update succeeds after migration');
+  sql(`DELETE FROM profiles WHERE id = '${probeUser}';`);
   const audit = () => sql(readFileSync(resolve(root, 'packages/db/tests/account-open-policy-audit.sql'), 'utf8'));
   assert.equal(audit(), '', '§6 audit: every client-accessible table carries account_open_required');
   // A table granted to clients after the migration must be caught until it adds the policy.
@@ -94,6 +101,9 @@ try {
     AS RESTRICTIVE FOR ALL TO authenticated USING (NOT (SELECT public.current_account_is_closed()));`);
   assert.equal(audit(), '');
   sql('DROP TABLE audit_probe;');
+  // Definer triage audit runs; in this fixture only the caller-scoped closed check is client-executable.
+  const definers = sql(readFileSync(resolve(root, 'packages/db/tests/account-open-definer-audit.sql'), 'utf8'));
+  assert.deepEqual(definers.split('\n').map(line => line.split('|')[0]), ['current_account_is_closed()']);
   console.log('PASS migration: idempotent; restrictive RLS coverage; function ACLs; §6 audit');
 
   docker('run', '-d', '--pull=never', '--name', rest, '--network', tag, '-p', '127.0.0.1::3000',

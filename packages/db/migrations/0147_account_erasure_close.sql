@@ -29,8 +29,10 @@ $$;
 
 -- A closed profile keeps status/is_deleted/deleted_at forever; credits and identity columns stay
 -- writable for settlement and the later scrub. Deleting the row is blocked by the FK above.
+-- SECURITY DEFINER: the trigger also fires for a user's own nickname update, and clients have no
+-- privilege on account_erasure_requests (trigger firing does not check EXECUTE).
 CREATE OR REPLACE FUNCTION public.account_erasure_profile_guard() RETURNS trigger
-LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 BEGIN
   IF EXISTS (SELECT 1 FROM public.account_erasure_requests WHERE profile_id = OLD.id)
     AND (NEW.id IS DISTINCT FROM OLD.id OR NEW.status IS DISTINCT FROM 'deleted'
