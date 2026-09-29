@@ -75,6 +75,14 @@ export function loadSkill(dir: string | undefined): LoadedSkill {
       throw new Error('PROBE_SKILL_WORKFLOW_INVALID: workflow.yaml is not a valid workflow manifest');
     }
   }
+  // The real host preloads each step's resources, which may also name assets/ files.
+  // Only those named files are read, so a Skill whose steps name none keeps its digest.
+  for (const path of new Set(workflow?.flatMap(step => step.resources) ?? [])) {
+    const normalized = posix.normalize(path);
+    if (references.has(normalized) || !normalized.startsWith('assets/') || normalized.split('/').length > 3) continue;
+    references.set(normalized, readRegular(join(root, normalized)));
+    if (references.size > REFERENCE_LIMIT) throw new Error('PROBE_SKILL_TOO_MANY_REFERENCES');
+  }
   const hash = createHash('sha256').update('SKILL.md\0' + instructions);
   let bytes = Buffer.byteLength(instructions);
   for (const [path, text] of references) {
@@ -102,7 +110,8 @@ const message = z.object({role: z.enum(['user', 'assistant']), content: z.string
 const askTurn = z.object({
   role: z.literal('assistant'),
   content: z.string().min(1).max(8000).optional(),
-  askQuestion: askQuestionArgs,
+  // Cards shown under the 2026-09-29 design may carry the recommended index.
+  askQuestion: askQuestionArgs.extend({recommended: z.number().int().min(0).max(4).nullable().optional()}).strict(),
 }).strict();
 export type HistoryItem = z.infer<typeof message> | z.infer<typeof askTurn>;
 export const scenarioSchema = z.object({
@@ -118,6 +127,9 @@ export const scenarioSchema = z.object({
   currentStepId: z.string().min(1).max(100).optional(),
   questionId: z.string().min(1).max(100).optional(),
   opening: z.boolean().optional(),
+  /** Card design category (agent-turn baseline only): A choice card with a recommendation, B neutral card,
+   * C Socratic prose, D labelled guess in prose, E clear answer without a card. */
+  category: z.enum(['A', 'B', 'C', 'D', 'E']).optional(),
   fieldValues: z.record(z.string(), z.object({status: z.enum(['missing', 'provisional', 'confirmed', 'deferred'])}).strict()).optional(),
 }).strict();
 export type Scenario = z.infer<typeof scenarioSchema>;

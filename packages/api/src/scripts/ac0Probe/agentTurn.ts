@@ -164,7 +164,67 @@ export function agentTurnMeasurement(result: TrialResult) {
     semanticReview: 'pending' as const};
 }
 
+/** Owner card design (2026-09-29): fixed categories of the agent-turn baseline probe.
+ * A and B expect a valid card (A recommends an option, B is neutral); C, D and E expect prose only. */
+export const CARD_CATEGORIES = {
+  A: {kind: 'ask', count: 12}, B: {kind: 'ask', count: 6},
+  C: {kind: 'text', count: 12}, D: {kind: 'text', count: 5}, E: {kind: 'text', count: 5},
+} as const;
+export type CardCategory = keyof typeof CARD_CATEGORIES;
+
+/** Fixed denominators: exactly the planned categories, no openings (they are admitted without the card tool). */
+export function assertCardDesignScenarios(scenarios: readonly Scenario[]): void {
+  for (const scenario of scenarios) {
+    const category = scenario.category;
+    if (!category || CARD_CATEGORIES[category].kind !== scenario.kind) throw new Error('PROBE_CARD_CATEGORY_INVALID: ' + scenario.id);
+    if (scenario.opening) throw new Error('PROBE_CARD_OPENING_UNSUPPORTED: ' + scenario.id);
+  }
+  for (const [category, {count}] of Object.entries(CARD_CATEGORIES)) {
+    if (scenarios.filter(scenario => scenario.category === category).length !== count) {
+      throw new Error('PROBE_CARD_CATEGORY_COUNTS_FIXED: A12 B6 C12 D5 E5');
+    }
+  }
+}
+
+function cardDesignSummary(results: TrialResult[]) {
+  const rows = results.map(result => {
+    const measurement = agentTurnMeasurement(result);
+    const card = runtime().tools.questionCardFromResult(result.finalOutput ?? '');
+    const toolCalled = Boolean(result.calls[0]?.facts.toolCalls.length);
+    const expectsCard = result.category === 'A' || result.category === 'B';
+    const usable = measurement.completed && !measurement.formatError;
+    const cardDecisionCorrect = usable && (expectsCard ? measurement.validCardCandidate : !toolCalled);
+    const recommendationCorrect = expectsCard && measurement.validCardCandidate && Boolean(card) &&
+      (result.category === 'A' ? card!.recommended !== null : card!.recommended === null);
+    return {result, measurement, cardDecisionCorrect, recommendationCorrect};
+  });
+  const completed = rows.filter(row => row.measurement.completed);
+  const formatErrors = completed.filter(row => row.measurement.formatError).length;
+  const byCategory = Object.fromEntries(Object.entries(CARD_CATEGORIES).map(([category, {count}]) => {
+    const own = rows.filter(row => row.result.category === category);
+    return [category, {planned: count, completed: own.filter(row => row.measurement.completed).length,
+      cardDecisionCorrect: own.filter(row => row.cardDecisionCorrect).length,
+      ...(category === 'A' || category === 'B' ? {recommendationCorrect: own.filter(row => row.recommendationCorrect).length} : {})}];
+  }));
+  const cardDecisionCorrect = rows.filter(row => row.cardDecisionCorrect).length;
+  const recommendationCorrect = rows.filter(row => row.recommendationCorrect).length;
+  const failed = formatErrors > 1 || cardDecisionCorrect < 36 || recommendationCorrect < 17;
+  return {design: 'owner-card-2026-09-29' as const, plannedTotal: 40, completed: completed.length, formatErrors,
+    formatErrorRate: formatErrors / 40, cardDecisionCorrect, cardDecisionThreshold: 36,
+    recommendationCorrect, recommendationDenominator: 18, recommendationThreshold: 17, byCategory,
+    verdict: completed.length !== 40 ? 'incomplete' : failed ? 'fail' : 'manual_review_required',
+    semanticReview: 'Required (blind): 0 fabrications (invented user facts, unlabelled guesses) and 0 prose/card inconsistencies.',
+    firstContentMs: agentTurnStats(completed.map(row => row.result.firstContentMs)),
+    firstSdkTextMs: agentTurnStats(completed.map(row => row.result.firstSdkTextMs)),
+    cardAvailableMs: agentTurnStats(completed.map(row => row.result.cardAvailableMs))};
+}
+
 export function agentTurnSummary(results: TrialResult[]) {
+  return results.some(result => result.category) ? cardDesignSummary(results) : legacySummary(results);
+}
+
+/** The earlier 30 ask + 10 text design (rounds 1 and 2, candidates C1 and C2). */
+function legacySummary(results: TrialResult[]) {
   const measured = results.map(result => ({result, measurement: agentTurnMeasurement(result)}));
   const completed = measured.filter(item => item.measurement.completed);
   const text = completed.filter(item => item.result.kind === 'text');
@@ -190,7 +250,19 @@ export function agentTurnSummary(results: TrialResult[]) {
 }
 
 export function agentTurnMarkdown(results: TrialResult[], mode: string) {
-  const summary = agentTurnSummary(results);
+  if (results.some(result => result.category)) {
+    const summary = cardDesignSummary(results);
+    const latency = (value: ReturnType<typeof agentTurnStats>) =>
+      [value.median, value.p95, value.min, value.max].map(item => item ?? 'N/A').join(' / ') + ` (n=${value.n})`;
+    return [`# AC1-4 card design probe (${mode})`, '',
+      `Completed: ${summary.completed}/40; format errors: ${summary.formatErrors}/40 (max 1); verdict: ${summary.verdict}.`,
+      `Card decision correct: ${summary.cardDecisionCorrect}/40 (at least 36).`,
+      `Recommendation correct (A recommends, B neutral): ${summary.recommendationCorrect}/18 (at least 17).`,
+      ...Object.entries(summary.byCategory).map(([category, value]) => `  ${category}: ${JSON.stringify(value)}`),
+      `First SDK public text, median / p95 / min / max ms: ${latency(summary.firstSdkTextMs)}.`, '',
+      summary.semanticReview, 'Rejections, timeouts and unknown results never reduce the fixed denominators.', ''].join('\n');
+  }
+  const summary = legacySummary(results);
   const latency = (value: ReturnType<typeof agentTurnStats>) =>
     [value.median, value.p95, value.min, value.max].map(item => item ?? 'N/A').join(' / ') + ` (n=${value.n})`;
   return [

@@ -140,9 +140,12 @@ export async function runProbe(argv: string[], env: Record<string, string | unde
             timeoutMs: plan.timeoutMs, budget, upstream, authorization, clock, redact,
           });
           results.push(result);
-          const recorded = {...result, ...(plan.agentTurn ? {agentTurn: agentTurnMeasurement(result)} : {})};
+          const measured = plan.agentTurn ? agentTurnMeasurement(result) : undefined;
+          const recorded = {...result, ...(measured ? {agentTurn: measured} : {})};
           appendFileSync(join(runDir, 'results.jsonl'), redact(JSON.stringify(recorded)) + '\n', {mode: 0o600});
-          const label = result.outcome?.category ?? result.stop ?? 'measured';
+          // Agent turns use the v5 card rules; the older AC-0 classifier does not know the recommended field.
+          const label = measured ? result.stop ?? (measured.formatError ? 'format_error' : measured.validCardCandidate ? 'card' : 'prose')
+            : result.outcome?.category ?? result.stop ?? 'measured';
           const first = result.firstVisibleMs === undefined ? '-' : Math.round(result.firstVisibleMs) + ' ms';
           stdout(`[${config.id}] ${kind} #${index + 1}: ${label}; first visible ${first}; total ${Math.round(result.totalMs)} ms\n`);
           if (plan.agentTurn && result.stop === 'unknown_result') {

@@ -3,7 +3,8 @@ import {describe, expect, it} from 'vitest';
 import {Agent, OpenAIChatCompletionsModel, Runner, tool} from '@openai/agents';
 import OpenAI from 'openai';
 import {askQuestionTool} from '../../services/runtime/agentTools';
-import {AGENT_TURN_CONFIG, agentTurnMeasurement, agentTurnPrompt, agentTurnSummary, agentTurnStats, agentTurnMarkdown} from './agentTurn.ts';
+import {AGENT_TURN_CONFIG, CARD_CATEGORIES, agentTurnMeasurement, agentTurnPrompt, agentTurnSummary, agentTurnStats,
+  agentTurnMarkdown} from './agentTurn.ts';
 import {createBudget, HARD_MAX_CALLS, memoryLedger} from './budget.ts';
 import {buildPlan, parseProbeArgs} from './plan.ts';
 import {sseResponse, textDeltas, toolDeltas} from './dryRun.ts';
@@ -53,16 +54,49 @@ describe('AC1-4 prepared probe (synthetic transport only)', () => {
     expect(text.result.cardAvailableMs).toBeUndefined();
   });
 
+  it('scores the Owner card design by category: card decision, recommendation and fixed denominators', async () => {
+    const recommended = (await trial('ask', [...textDeltas('B fits best.'), ...toolDeltas('ask_question', card)], 'tool_calls')).result;
+    const neutral = (await trial('ask', [...textDeltas('Place yourself.'),
+      ...toolDeltas('ask_question', {...card, recommended: null})], 'tool_calls')).result;
+    const prose = (await trial('text', textDeltas('What made you start?'))).result;
+    const unwantedCard = (await trial('text', [...textDeltas('Pick one.'), ...toolDeltas('ask_question', card)], 'tool_calls')).result;
+    const rows = [{...recommended, category: 'A' as const}, {...neutral, category: 'A' as const},
+      {...neutral, category: 'B' as const}, {...recommended, category: 'B' as const},
+      {...prose, category: 'C' as const}, {...unwantedCard, category: 'D' as const}];
+    const summary = agentTurnSummary(rows);
+    expect(summary).toMatchObject({design: 'owner-card-2026-09-29', completed: 6, formatErrors: 0,
+      cardDecisionCorrect: 5, recommendationCorrect: 2, recommendationDenominator: 18, verdict: 'incomplete'});
+    expect((summary as {byCategory: Record<string, unknown>}).byCategory).toMatchObject({
+      A: {planned: 12, completed: 2, cardDecisionCorrect: 2, recommendationCorrect: 1},
+      B: {planned: 6, cardDecisionCorrect: 2, recommendationCorrect: 1},
+      C: {planned: 12, cardDecisionCorrect: 1}, D: {planned: 5, cardDecisionCorrect: 0}, E: {planned: 5, completed: 0}});
+    const full = (count: number, row: TrialResult, category: TrialResult['category']) =>
+      Array.from({length: count}, (_, index) => ({...row, index, category}));
+    const passing = [...full(12, recommended, 'A'), ...full(6, neutral, 'B'),
+      ...full(12, prose, 'C'), ...full(5, prose, 'D'), ...full(5, prose, 'E')];
+    expect(agentTurnSummary(passing)).toMatchObject({cardDecisionCorrect: 40, recommendationCorrect: 18, verdict: 'manual_review_required'});
+    const fiveWrong = passing.map((row, index) => index >= 18 && index < 23 ? {...unwantedCard, index, category: row.category} : row);
+    expect(agentTurnSummary(fiveWrong)).toMatchObject({cardDecisionCorrect: 35, verdict: 'fail'});
+    expect(agentTurnMarkdown(passing, 'dry-run')).toContain('Card decision correct: 40/40 (at least 36).');
+  });
+
   it('uses the Owner-approved cumulative cap and fixes forty calls, exact route, thinking off and a USD 1 run cap', () => {
     const args = parseProbeArgs(['--agent-turn'], '/synthetic-home');
-    const scenarios = ['ask', 'text'].flatMap(kind => Array.from({length: kind === 'ask' ? 30 : 10}, (_, i) =>
-      ({...scenario, id: kind + i, kind: kind as 'ask' | 'text'})));
+    const scenarios = Object.entries(CARD_CATEGORIES).flatMap(([category, {kind, count}]) => Array.from({length: count}, (_, i) =>
+      ({...scenario, id: category + i, kind, category: category as keyof typeof CARD_CATEGORIES})));
     const plan = buildPlan(args, skill, scenarios, 'synthetic');
+    expect(plan.counts).toEqual({ask: 18, text: 22, reference: 0});
+    expect(() => buildPlan(args, skill, scenarios.map((item, i) => i ? item : {...item, category: 'C' as const}), 's'))
+      .toThrow('CARD_CATEGORY_INVALID');
+    expect(() => buildPlan(args, skill, scenarios.map((item, i) => i ? item : {...item, category: 'B' as const}), 's'))
+      .toThrow('CARD_CATEGORY_COUNTS_FIXED');
+    expect(() => buildPlan(args, skill, scenarios.map((item, i) => i ? item : {...item, opening: true}), 's'))
+      .toThrow('CARD_OPENING_UNSUPPORTED');
     expect(HARD_MAX_CALLS).toBe(573);
     expect(plan).toMatchObject({agentTurn: true, plannedCalls: 40, maxUsd: 1, configs: [AGENT_TURN_CONFIG]});
     expect(() => parseProbeArgs(['--agent-turn', '--configs', 'other'], '/synthetic')).toThrow('CONFIG_FIXED');
-    expect(() => buildPlan({...args, counts: {...args.counts, text: 9}}, skill, scenarios, 's')).toThrow('PLAN_FIXED');
-    expect(() => buildPlan(args, skill, [scenario], 's')).toThrow('DISTINCT_SCENARIOS');
+    expect(() => buildPlan({...args, counts: {...args.counts, text: 21}}, skill, scenarios, 's')).toThrow('PLAN_FIXED');
+    expect(() => buildPlan(args, skill, [scenario], 's')).toThrow('CARD_CATEGORY_INVALID');
     expect(agentTurnPrompt(skill, scenario)).toContain('Field roles for the current question:');
     expect(agentTurnPrompt(skill, scenario)).toContain('user_fact');
   });

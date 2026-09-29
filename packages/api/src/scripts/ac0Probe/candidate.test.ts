@@ -3,7 +3,7 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import {openRouterBound} from '../../services/bill2/openRouterPolicy';
 import {openRouterRequestBody} from '../../services/runtime/providerRequest';
 import {frozenReasoningFields} from '../../services/runtime/reasoningPolicy';
-import {AGENT_TURN_CANDIDATES, AGENT_TURN_CONFIG, type AgentTurnCandidate} from './agentTurn.ts';
+import {AGENT_TURN_CANDIDATES, AGENT_TURN_CONFIG, CARD_CATEGORIES, type AgentTurnCandidate} from './agentTurn.ts';
 import {createBudget, HARD_MAX_CALLS, HARD_MAX_USD, memoryLedger} from './budget.ts';
 import {resolveConfigs, routing, type ProbeConfig} from './config.ts';
 import {sseResponse, toolDeltas} from './dryRun.ts';
@@ -97,13 +97,17 @@ describe('fixed AC1-4 candidates: approved live caps', () => {
   it('preserves baseline identity, routing bytes, token default and USD 1 behavior', () => {
     const parsed = parseProbeArgs(['--agent-turn'], '/synthetic-home');
     expect(parsed).toMatchObject({maxCalls: 60, maxUsd: 1, maxTokens: 1024});
-    const plan = buildPlan(parsed, skill, scenarios, 'candidate-scenarios');
-    expect(plan.planId).toBe('ff2e859e22ad');
+    // The baseline now follows the Owner card design: 18 card + 22 prose samples in five categories.
+    const baseline: Scenario[] = Object.entries(CARD_CATEGORIES).flatMap(([category, {kind, count}]) =>
+      Array.from({length: count}, (_, index) => ({id: category + index, kind, category: category as Scenario['category'],
+        history: [], input: 'Synthetic ' + index, step: 0, currentStepId: 'step-1', questionId: 'audience'})));
+    const plan = buildPlan(parsed, skill, baseline, 'candidate-scenarios');
+    expect(plan.planId).toBe('28f69b6c4db3');
     expect(plan).not.toHaveProperty('agentTurnCandidate');
     expect(JSON.stringify(routing(AGENT_TURN_CONFIG))).toBe(
       '{"only":["deepinfra/fp8"],"allow_fallbacks":false,"require_parameters":true,"data_collection":"deny","max_price":{"prompt":0.3,"completion":0.9}}');
-    expect(() => buildPlan({...parsed, maxUsd: 1.01}, skill, scenarios, 's')).toThrow('PLAN_FIXED');
-    expect(() => buildPlan(parsed, {...skill, instructions: 'x'.repeat(200_000)}, scenarios, 's')).toThrow('RUN_BUDGET_INSUFFICIENT');
+    expect(() => buildPlan({...parsed, maxUsd: 1.01}, skill, baseline, 's')).toThrow('PLAN_FIXED');
+    expect(() => buildPlan(parsed, {...skill, instructions: 'x'.repeat(200_000)}, baseline, 's')).toThrow('RUN_BUDGET_INSUFFICIENT');
     expect(() => resolveConfigs(['custom'], [{id: 'custom', model: 'm/x', route: 'r', effort: 'low',
       maxPrice: {prompt: 1, completion: 1}, runtimeRouting: true}])).toThrow('runtimeRouting is built-in only');
   });

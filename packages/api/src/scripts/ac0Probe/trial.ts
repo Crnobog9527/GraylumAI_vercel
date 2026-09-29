@@ -53,11 +53,13 @@ export type TrialResult = {
   askExecutions: number;
   finalOutput?: string;
   expectStepComplete?: boolean;
+  /** The scenario's card design category, when it has one. */
+  category?: Scenario['category'];
   calls: CallRecord[];
 };
 
 /** What the ask_question tool returns; history replays the same result. */
-const askCard = (args: z.infer<typeof askQuestionArgs>) => JSON.stringify({card: 'question', ...args});
+const askCard = (args: z.infer<typeof askQuestionArgs> & {recommended?: number | null}) => JSON.stringify({card: 'question', ...args});
 
 export function historyItems(scenario: Scenario): AgentInputItem[] {
   const items: AgentInputItem[] = [];
@@ -200,6 +202,7 @@ export async function runTrial(options: {
     reasoningTokens: calls.some(call => call.facts.usage?.reasoningTokens !== undefined) ? reasoningTokens : undefined,
     referenceReads, askExecutions, finalOutput,
     ...(scenario.expectStepComplete !== undefined ? {expectStepComplete: scenario.expectStepComplete} : {}),
+    ...(scenario.category ? {category: scenario.category} : {}),
     calls,
   };
 }

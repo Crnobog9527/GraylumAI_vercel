@@ -24,6 +24,16 @@ const inputs = () => [configuration('PRIVATE_CONFIG_A'), configuration('PRIVATE_
 const seed = (value: number) => new Uint8Array(32).fill(value);
 
 describe('probe-local blind review material (offline only)', () => {
+  it('also hides the identity, cost and latency of a single configuration (card design baseline)', () => {
+    const output = blindReview([configuration('PRIVATE_CONFIG_A')], seed(3));
+    expect(output.items).toHaveLength(40);
+    expect(new Set(output.privateMapping.map(entry => entry.configId))).toEqual(new Set(['PRIVATE_CONFIG_A']));
+    const text = JSON.stringify(output.items);
+    for (const secret of ['PRIVATE_CONFIG_A', 'PRIVATE_TIME', '654321.98', '876543.21', 'PRIVATE_SDK_OUTPUT']) {
+      expect(text).not.toContain(secret);
+    }
+  });
+
   it('keeps all 80 samples and exposes only review fields, never identity, performance or automatic verdicts', () => {
     const results = inputs();
     const network = vi.spyOn(globalThis, 'fetch').mockImplementation(() => { throw new Error('NO_NETWORK'); });
@@ -99,5 +109,7 @@ describe('probe-local blind review material (offline only)', () => {
     expect(() => blindReview(mismatch, seed(1))).toThrow('CONFIGURATION_MISMATCH');
     const same = configuration('PRIVATE_CONFIG_A');
     expect(() => blindReview([same, same], seed(1))).toThrow('CONFIGURATION_MISMATCH');
+    expect(() => blindReview([], seed(1))).toThrow('CONFIGURATION_COUNT');
+    expect(() => blindReview([...inputs(), configuration('PRIVATE_CONFIG_C')], seed(1))).toThrow('CONFIGURATION_COUNT');
   });
 });

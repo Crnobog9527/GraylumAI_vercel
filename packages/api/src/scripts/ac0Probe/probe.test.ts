@@ -3,13 +3,14 @@ import {chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {CARD_CATEGORIES} from './agentTurn.ts';
 import {classifyAsk} from './classify.ts';
 import {createBudget, HARD_MAX_CALLS, HARD_MAX_USD, memoryLedger, usdToNano, validateCaps} from './budget.ts';
 import {resolveConfigs} from './config.ts';
 import {sseResponse, syntheticUpstream, textDeltas, toolDeltas} from './dryRun.ts';
 import {assertOutsideRepository, KEY_ENV, runProbe} from './main.ts';
 import {parseProbeArgs} from './plan.ts';
-import {FIXTURE_SKILL_DIR} from './skill.ts';
+import {FIXTURE_SKILL_DIR, loadSkill} from './skill.ts';
 import {accountHome} from './paths.ts';
 import {assertDataCollectionDenied, probeTransport, type Upstream} from './transport.ts';
 
@@ -701,8 +702,8 @@ describe('question-card history and step fields', () => {
 
   it.each(['http_502', 'disconnected_stream'] as const)(
     'stops the entire forty-scenario agent-turn run after the first %s without replacement calls', async failure => {
-      const cases = (['ask', 'text'] as const).flatMap(kind => Array.from({length: kind === 'ask' ? 30 : 10}, (_, index) => ({
-        ...withHistory, id: `${kind}-${index}`, kind, currentStepId: 'step-1', questionId: 'offer',
+      const cases = Object.entries(CARD_CATEGORIES).flatMap(([category, {kind, count}]) => Array.from({length: count}, (_, index) => ({
+        ...withHistory, id: `${kind}-${category}-${index}`, kind, category, currentStepId: 'step-1', questionId: 'offer',
       })));
       const args = ['--agent-turn', '--out-dir', outDir(), '--skill-dir', privateSkill(),
         '--scenarios', scenarios(cases), '--max-calls', '40', '--max-usd', '1'];
@@ -720,13 +721,13 @@ describe('question-card history and step fields', () => {
       });
       const outcome = await runProbe([...args, '--live', '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
       expect(outcome.exitCode).toBe(0);
-      expect(outcome.plan).toMatchObject({plannedCalls: 40, counts: {ask: 30, text: 10, reference: 0}});
+      expect(outcome.plan).toMatchObject({plannedCalls: 40, counts: {ask: 18, text: 22, reference: 0}});
       expect(outcome.stop).toBe('unknown_result');
       expect(network.sent).toHaveLength(1);
       expect(globalFetch).not.toHaveBeenCalled();
       expect(outcome.results).toHaveLength(1);
       const result = outcome.results![0]!;
-      expect(result).toMatchObject({scenarioId: 'ask-0', stop: 'unknown_result'});
+      expect(result).toMatchObject({scenarioId: 'ask-A-0', category: 'A', stop: 'unknown_result'});
       expect(result.calls).toHaveLength(1);
       expect(result.calls[0]).toMatchObject({status: 'unknown', costSource: 'upper_bound'});
       expect(result.calls[0]!.costUsd).toBe(result.calls[0]!.boundUsd);
@@ -819,5 +820,20 @@ describe('question-card history and step fields', () => {
     const withWorkflow = (await runProbe(args(privateSkill()), {}, deps())).plan!.skillDigest;
     const without = (await runProbe(args(privateSkill(false)), {}, deps())).plan!.skillDigest;
     expect(withWorkflow).not.toBe(without);
+  });
+
+  it('preloads only the assets/ files a workflow step names, as the real host does', () => {
+    const plain = loadSkill(privateSkill());
+    const dir = privateSkill(workflowYaml.replace('      - references/step-1.md', '      - references/step-1.md\n      - assets/plan.md'));
+    mkdirSync(join(dir, 'assets'), {recursive: true});
+    writeFileSync(join(dir, 'assets', 'plan.md'), 'Synthetic template.\n');
+    writeFileSync(join(dir, 'assets', 'unused.md'), 'Never loaded.\n');
+    const named = loadSkill(dir);
+    expect(named.references.get('assets/plan.md')).toBe('Synthetic template.\n');
+    expect(named.references.has('assets/unused.md')).toBe(false);
+    expect(named.digest).not.toBe(plain.digest);
+    // A Skill whose steps name no asset keeps its earlier digest.
+    writeFileSync(join(privateSkill(), 'unused.txt'), 'x');
+    expect(loadSkill(join(home, 'skill')).digest).toBe(plain.digest);
   });
 });
