@@ -27,12 +27,20 @@ beforeAll(async () => {
     const state = window.__mr1 = {
       data, initialError: true, refetches: 0, saved: [], refreshError: null, saveError: null,
       queryError: { message: 'fetch failed: internal transport token', data: { code: 'INTERNAL_SERVER_ERROR' } },
-      refreshCatalog: null,
+      refreshCatalog: null, tried: [], tryPending: false, tryError: null,
+      tryResult: { ok: true, firstTextMs: 123, totalMs: 456, hasText: true, reasoningTokens: 0, costUsd: 0.00001, truncated: false },
     };
     const setData = (_, value) => { state.data = value; window.rerender(); };
     export const trpc = {
       useUtils: () => ({ modelReasoning: { get: { setData } }, settings: { getSummaryModels: { invalidate() {} } } }),
       modelReasoning: {
+        tryOnce: { useMutation: () => ({ isPending: state.tryPending,
+          mutate: (input, options) => {
+            state.tried.push(input);
+            if (state.tryError) options.onError(state.tryError);
+            else options.onSuccess(state.tryResult);
+          }
+        }) },
         get: { useQuery: () => ({
           data: state.initialError ? undefined : state.data, error: state.initialError ? state.queryError : null,
           isLoading: false, isFetching: false,
@@ -135,6 +143,34 @@ describe('reasoning dialog local browser regression', () => {
       if (target === 'saveError') expect(message.length).toBeGreaterThan(180);
       await page.evaluate(`window.__mr1.${target} = ${JSON.stringify({ message, data: { code: 'BAD_REQUEST' } })}; window.rerender();`);
       await browserExpect(page.getByRole('alert')).toHaveText(message);
+    });
+  });
+
+  it('tries the saved setting and shows measurements without submitting unsaved drafts', async () => {
+    await withDialog(async page => {
+      await loadSettings(page);
+      await page.getByRole('combobox', { name: '交互对话的档位', exact: true }).click();
+      await page.getByRole('option', { name: 'low', exact: true }).click();
+      await page.getByRole('button', { name: '试一次', exact: true }).first().click();
+      expect(await page.evaluate('window.__mr1.tried')).toEqual([{ modelId: 'model-fixture', purpose: 'interactive' }]);
+      expect(await page.evaluate('window.__mr1.saved')).toEqual([]);
+      await browserExpect(page.getByRole('status')).toContainText('首字 123 ms');
+      await browserExpect(page.getByRole('status')).toContainText('有正文');
+      await page.evaluate('window.__mr1.tryPending = true; window.rerender();');
+      for (const button of await page.getByRole('button', { name: '试一次', exact: true }).all())
+        await browserExpect(button).toBeDisabled();
+    });
+  });
+
+  it('shows safe try errors and preserves the administrator validation reason', async () => {
+    await withDialog(async page => {
+      await loadSettings(page);
+      await page.evaluate(`window.__mr1.tryError = { message: 'fetch failed SECRET_CANARY' };`);
+      await page.getByRole('button', { name: '试一次', exact: true }).first().click();
+      await browserExpect(page.getByRole('status')).toHaveText('试用失败，请稍后重试');
+      await page.evaluate(`window.__mr1.tryError = { message: '当前思考预算超过试用上限', data: { code: 'BAD_REQUEST' } };`);
+      await page.getByRole('button', { name: '试一次', exact: true }).first().click();
+      await browserExpect(page.getByRole('status')).toHaveText('当前思考预算超过试用上限');
     });
   });
 

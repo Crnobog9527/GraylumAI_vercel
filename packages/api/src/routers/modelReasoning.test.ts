@@ -21,7 +21,8 @@ function harness(role: 'admin' | 'user', config: Record<string, unknown> | null)
       if (table !== 'ai_models') throw new Error('unexpected table ' + table);
       return {
         select() { return this; }, eq() { return this; },
-        maybeSingle: async () => ({ data: { id: modelId, model_id: 'deepseek/deepseek-v4.1-flash', max_tokens: 8192, config: stored }, error: null }),
+        maybeSingle: async () => ({ data: { id: modelId, name: 'DeepSeek', model_id: 'deepseek/deepseek-v4.1-flash', max_tokens: 8192, input_limit: 100000,
+          provider: 'openai', is_active: 'true', api_key: 'SECRET_CANARY', api_endpoint: '', config: stored }, error: null }),
         update(payload: Record<string, unknown>) {
           updates.push(payload); stored = payload.config as Record<string, unknown>;
           return { eq: async () => ({ error: null }) };
@@ -38,7 +39,7 @@ function harness(role: 'admin' | 'user', config: Record<string, unknown> | null)
 const deepseekOff = { interactive: { mode: 'off', wire: 'reasoning_effort' } } as const;
 
 describe('modelReasoning router', () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it('is administrator only', async () => {
     const t = harness('user', null);
@@ -94,6 +95,29 @@ describe('modelReasoning router', () => {
     }));
     await t.caller.refreshCatalog({ modelId });
     expect(t.updates[0]!.config).toMatchObject({ connection_status: 'connected', reasoning: { route: 'deepinfra', purposes: deepseekOff } });
+  });
+
+  it('tries once per model within the interval, admin only, and a refusal does not use the slot', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(100000);
+    const stored = { reasoning: { catalog: { ...catalog, endpoints: [{ ...catalog.endpoints[0]!, tag: 'deepinfra/fp8' }] }, route: 'deepinfra/fp8', purposes: deepseekOff } };
+    const sse = 'data: ' + JSON.stringify({ id: 'g', model: 'deepseek/deepseek-v4.1-flash', choices: [{ index: 0, delta: { content: '你好' }, finish_reason: 'stop' }] }) + '\n\n' +
+      'data: ' + JSON.stringify({ id: 'g', model: 'deepseek/deepseek-v4.1-flash', choices: [], usage: { completion_tokens: 2 } }) + '\n\ndata: [DONE]\n\n';
+    const fetchMock = vi.fn(async () => new Response(sse));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(harness('user', stored).caller.tryOnce({ modelId, purpose: 'interactive' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    const t = harness('admin', stored);
+    // An unset review purpose is refused before any call and leaves the slot free.
+    await expect(t.caller.tryOnce({ modelId, purpose: 'review' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    const result = await t.caller.tryOnce({ modelId, purpose: 'interactive' });
+    expect(result).toMatchObject({ ok: true, hasText: true });
+    expect(JSON.stringify(result)).not.toMatch(/你好|SECRET_CANARY/);
+    await expect(t.caller.tryOnce({ modelId, purpose: 'organize' })).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(t.updates).toEqual([]);
+    now.mockReturnValue(130000);
+    await expect(t.caller.tryOnce({ modelId, purpose: 'organize' })).resolves.toMatchObject({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
