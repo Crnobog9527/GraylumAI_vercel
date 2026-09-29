@@ -218,12 +218,11 @@ export function isReviewOnlySelection(
 }
 /** Same normalization for stored utterances and candidate answers. */
 function normalizeUtterance(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[\s\u3000]+/gu, " ")
-    .replace(/[。.!！?？,，、~～…]+$/u, "")
-    .trim();
+  const characters = Array.from(value.trim().toLowerCase().replace(/[\s\u3000]+/gu, " "));
+  let end = characters.length;
+  // Walk code points once from the end; an unanchored regex can retry every prefix.
+  while (end > 0 && "。.!！?？,，、~～…".includes(characters[end - 1])) end--;
+  return characters.slice(0, end).join("").trim();
 }
 /**
  * The Agent opens the current question itself. The turn carries a host-authored
