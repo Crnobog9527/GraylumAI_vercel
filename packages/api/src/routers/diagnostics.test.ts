@@ -76,9 +76,10 @@ function createRecentRunsQueryBuilder(result: Promise<unknown>) {
   };
 }
 
-function createHealthQueryBuilder(result: Promise<unknown>) {
+function createHealthQueryBuilder(result: Promise<unknown>, admin = false) {
   return {
-    select() {
+    select(columns: string) {
+      if (!admin && (columns.includes('api_key') || columns === '*')) throw new Error('42501');
       return this;
     },
     eq() {
@@ -148,7 +149,7 @@ function createAdminCaller(options?: {
   const adminSupabase = {
     from(table: string) {
       if (table === 'ai_models') return createHealthQueryBuilder(Promise.resolve(
-        options?.aiModelsKeyResult ?? { data: [{ api_key: 'synthetic' }], error: null }));
+        options?.aiModelsKeyResult ?? { data: [{ api_key: 'synthetic' }], error: null }), true);
       throw new Error(`Unexpected admin-scoped table ${table}`);
     },
     rpc(fn: string) {
@@ -221,7 +222,7 @@ function createAdminHealthCaller(options?: {
   const adminSupabase = {
     from(table: string) {
       if (table === 'ai_models') return createHealthQueryBuilder(Promise.resolve(
-        options?.aiModelsKeyResult ?? { data: [{ api_key: 'synthetic' }], error: null }));
+        options?.aiModelsKeyResult ?? { data: [{ api_key: 'synthetic' }], error: null }), true);
       throw new Error(`Unexpected admin table ${table}`);
     },
   };
