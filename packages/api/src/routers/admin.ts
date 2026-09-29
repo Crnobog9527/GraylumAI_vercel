@@ -691,7 +691,7 @@ export const adminRouter = router({
       }
 
       // Log the activity
-      await recordAdminActivity(ctx.supabase, {
+      const auditRecorded = await recordAdminActivity(ctx.supabase, {
         user_id: input.userId,
         admin_id: ctx.profileId,
         action: `角色变更: ${previousRole} → ${input.role}`,
@@ -703,7 +703,7 @@ export const adminRouter = router({
         },
       });
 
-      return data;
+      return { ...data, auditRecorded };
     }),
 
   /**
@@ -1083,7 +1083,7 @@ export const adminRouter = router({
       }
 
       // Log the activity
-      await recordAdminActivity(ctx.supabase, {
+      const auditRecorded = await recordAdminActivity(ctx.supabase, {
         user_id: input.userId,
         admin_id: ctx.profileId,
         action: `积分调整: ${appliedAdjustment > 0 ? '+' : ''}${appliedAdjustment}`,
@@ -1101,6 +1101,7 @@ export const adminRouter = router({
         previousCredits,
         newCredits: appliedNewCredits,
         adjustment: appliedAdjustment,
+        auditRecorded,
       };
     }),
 
@@ -1248,7 +1249,7 @@ export const adminRouter = router({
       }
 
       // Log the activity
-      await recordAdminActivity(ctx.supabase, {
+      const auditRecorded = await recordAdminActivity(ctx.supabase, {
         user_id: input.userId,
         admin_id: ctx.profileId,
         action: `账号状态变更: ${previousStatus} → ${input.status}`,
@@ -1260,7 +1261,7 @@ export const adminRouter = router({
         },
       });
 
-      return data;
+      return { ...data, auditRecorded };
     }),
 
   /**
@@ -1373,7 +1374,7 @@ export const adminRouter = router({
       }
 
       // Log the activity
-      await recordAdminActivity(ctx.supabase, {
+      const auditRecorded = await recordAdminActivity(ctx.supabase, {
         user_id: input.userId,
         admin_id: ctx.profileId,
         action: `会员等级变更: ${previousLevel} → ${input.membershipLevel}`,
@@ -1385,7 +1386,7 @@ export const adminRouter = router({
         },
       });
 
-      return data;
+      return { ...data, auditRecorded };
     }),
 
   /**
