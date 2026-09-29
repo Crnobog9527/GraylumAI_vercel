@@ -28,7 +28,10 @@ function fixture({ failRun = 0, ready = true } = {}) {
     assert.match(init.headers.authorization, /^Bearer [a-f0-9]{64}$/);
     return { ok: ready, json: async () => ({ result: "PONG" }) };
   };
-  const service = createLocalRateLimit({ tag, ownerId: "unit-owner", execute, request, readinessTimeoutMs: 1 });
+  // Success paths need a real readiness window: a 1 ms deadline can expire before
+  // the first probe on a loaded runner. Only the not-ready case wants it short.
+  const readinessTimeoutMs = ready ? 5000 : 1;
+  const service = createLocalRateLimit({ tag, ownerId: "unit-owner", execute, request, readinessTimeoutMs });
   return { service, objects, calls, tag, execute };
 }
 
