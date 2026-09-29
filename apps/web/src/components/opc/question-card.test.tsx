@@ -3,7 +3,7 @@ import { createElement, isValidElement, type ReactElement, type ReactNode } from
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { UNSURE_INPUT } from "@repo/api/src/shared/agentTurn";
-import { QuestionCardView } from "./question-card";
+import { OTHER_LABEL, QuestionCardView } from "./question-card";
 
 const card = { question: "你的内容主要写给谁？", options: ["刚入行的新人", "有经验的同行", "想转行的人"], recommended: null };
 type Props = Parameters<typeof QuestionCardView>[0];
@@ -19,13 +19,14 @@ function clickables(node: ReactNode): Array<{ label: string; click: () => void }
 }
 
 describe("QuestionCardView: open card", () => {
-  it("shows the question, every option, the fixed unsure button and the free-input hint", () => {
+  it("shows the question, every option and the fixed Other entry, without the old unsure button", () => {
     const html = render({ card, answered: false, onAnswer: () => {} });
     expect(html).toContain('aria-label="导师提问"');
     expect(html).toContain(card.question);
     for (const option of card.options) expect(html).toContain(`>${option}</button>`);
-    expect(html).toContain(`>${UNSURE_INPUT}</button>`);
-    expect(html).toContain("也可以在下方输入框直接回答");
+    expect(html).toContain(`>${OTHER_LABEL}</button>`);
+    expect(html).not.toContain(UNSURE_INPUT);
+    expect(html).not.toContain("推荐");
     expect(html).not.toContain("<textarea");
   });
 
@@ -34,13 +35,21 @@ describe("QuestionCardView: open card", () => {
     expect(html.match(/<button[^>]*type="button"/g)).toHaveLength(card.options.length + 1);
   });
 
-  it("sends the option text itself, or UNSURE_INPUT for the fixed button", () => {
+  it("marks only the recommended option", () => {
+    const html = render({ card: { ...card, recommended: 1 }, answered: false, onAnswer: () => {} });
+    expect(html.match(/推荐/g)).toHaveLength(1);
+    expect(html).toMatch(/有经验的同行<span[^>]*>推荐<\/span><\/button>/);
+  });
+
+  it("sends the option text itself; Other sends nothing and asks the page to focus its message box", () => {
     const onAnswer = vi.fn();
-    const buttons = clickables(QuestionCardView({ card, answered: false, onAnswer }));
-    expect(buttons.map(button => button.label)).toEqual([...card.options, UNSURE_INPUT]);
+    const onOther = vi.fn();
+    const buttons = clickables(QuestionCardView({ card: { ...card, recommended: 0 }, answered: false, onAnswer, onOther }));
+    expect(buttons).toHaveLength(card.options.length + 1);
     buttons[1].click();
     buttons[3].click();
-    expect(onAnswer.mock.calls).toEqual([["有经验的同行"], [UNSURE_INPUT]]);
+    expect(onAnswer.mock.calls).toEqual([["有经验的同行"]]);
+    expect(onOther).toHaveBeenCalledTimes(1);
   });
 
   it("disables every choice while sending is not possible", () => {
@@ -66,7 +75,13 @@ describe("QuestionCardView: answered card", () => {
     expect(clickables(QuestionCardView({ card, answered: true, answer: "想转行的人", onAnswer: vi.fn() }))).toEqual([]);
   });
 
-  it("records an unsure reply and a free-text reply", () => {
+  it("keeps the recommended tag in history next to the user's choice", () => {
+    const html = render({ card: { ...card, recommended: 2 }, answered: true, answer: "刚入行的新人" });
+    expect(html).toMatch(/想转行的人<span[^>]*>推荐<\/span>/);
+    expect(html).toMatch(/刚入行的新人<span[^>]*>你的选择<\/span>/);
+  });
+
+  it("records a free-text reply, and an unsure reply sent by an older page", () => {
     expect(render({ card, answered: true, answer: UNSURE_INPUT })).toContain(`你选择了“${UNSURE_INPUT}”`);
     const free = render({ card, answered: true, answer: "都不是，我写给自己看" });
     expect(free).toContain("你用自己的话回答了这个问题");

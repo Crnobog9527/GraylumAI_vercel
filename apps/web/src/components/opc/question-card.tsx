@@ -4,14 +4,19 @@ import { cn } from "@/lib/utils";
 import { UNSURE_INPUT, type QuestionCard } from "@repo/api/src/shared/agentTurn";
 import styles from "./question-card.module.css";
 
+/** Label of the fixed last entry; the message box placeholder uses the same wording. */
+export const OTHER_LABEL = "其他";
+export const OTHER_PLACEHOLDER = "其他：自己补充";
+
 /**
- * One mentor question with suggested answers. A choice is sent as the next
- * turn's plain user input: an option sends its own text, the fixed button
- * sends `UNSURE_INPUT`. The card never locks the message box below it; the
- * user can always type a free answer there instead.
+ * One mentor question with suggested answers. A clicked option is sent as the
+ * next turn's plain user input. The option the mentor recommends carries a
+ * "推荐" tag. The fixed "其他" entry sends nothing: it moves focus to the
+ * message box below, where the user answers in their own words. The card
+ * never locks that box.
  *
  * Once answered the card is history: the options are shown as text, the
- * chosen one marked, and nothing is clickable.
+ * chosen and recommended ones marked, and nothing is clickable.
  */
 export function QuestionCardView({
   card,
@@ -19,6 +24,7 @@ export function QuestionCardView({
   answer = null,
   disabled = false,
   onAnswer,
+  onOther,
 }: {
   card: QuestionCard;
   answered: boolean;
@@ -27,8 +33,12 @@ export function QuestionCardView({
   /** Temporarily not sendable, for example while another reply is running. */
   disabled?: boolean;
   onAnswer?: (input: string) => void;
+  /** Called by the fixed "其他" entry; the page focuses its message box. */
+  onOther?: () => void;
 }) {
   const status = answered ? (answer === null ? "已结束" : "已回答") : null;
+  const recommended = (index: number) =>
+    index === card.recommended && <span className={styles.chosenTag}>推荐</span>;
   return (
     <section aria-label="导师提问" data-question-card={answered ? "answered" : "open"} className={styles.card}>
       <div className={styles.head}>
@@ -39,9 +49,10 @@ export function QuestionCardView({
       {answered ? (
         <>
           <ul className={styles.options} aria-label="建议选项">
-            {card.options.map(option => (
+            {card.options.map((option, index) => (
               <li key={option} className={cn(styles.historyItem, option === answer && styles.chosen)}>
                 {option}
+                {recommended(index)}
                 {option === answer && <span className={styles.chosenTag}>你的选择</span>}
               </li>
             ))}
@@ -53,34 +64,24 @@ export function QuestionCardView({
           )}
         </>
       ) : (
-        <>
-          <div role="group" aria-label="建议选项" className={styles.options}>
-            {card.options.map(option => (
-              <Button
-                key={option}
-                type="button"
-                variant="outline"
-                className={styles.option}
-                disabled={disabled}
-                onClick={() => onAnswer?.(option)}
-              >
-                {option}
-              </Button>
-            ))}
-          </div>
-          <div className={styles.foot}>
+        <div role="group" aria-label="建议选项" className={styles.options}>
+          {card.options.map((option, index) => (
             <Button
+              key={option}
               type="button"
               variant="outline"
-              className={styles.unsure}
+              className={styles.option}
               disabled={disabled}
-              onClick={() => onAnswer?.(UNSURE_INPUT)}
+              onClick={() => onAnswer?.(option)}
             >
-              {UNSURE_INPUT}
+              {option}
+              {recommended(index)}
             </Button>
-            <p className={styles.hint}>也可以在下方输入框直接回答</p>
-          </div>
-        </>
+          ))}
+          <Button type="button" variant="outline" className={styles.option} disabled={disabled} onClick={() => onOther?.()}>
+            {OTHER_LABEL}
+          </Button>
+        </div>
       )}
     </section>
   );

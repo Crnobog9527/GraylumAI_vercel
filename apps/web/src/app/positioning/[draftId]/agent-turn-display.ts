@@ -10,6 +10,14 @@ import {
 /** Shown instead of a body above the contract's parse limit. */
 export const OVERSIZED_REPLY_NOTICE = "本次回复内容过长，页面暂时无法展示。原记录已保留，你可以继续对话。";
 
+/** Accessible name of the positioning page's message box; the card's "其他" entry focuses it. */
+export const MENTOR_REPLY_LABEL = "给导师的回复";
+
+/** The card's fixed "其他" entry: move focus to the message box so the user answers in their own words. */
+export function focusReply() {
+  document.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${MENTOR_REPLY_LABEL}"]`)?.focus();
+}
+
 /** Display-only progress of one streaming execution. Never business state. */
 export type LiveReply = { executionId: string; text: string; phase: string; card: QuestionCard | null };
 

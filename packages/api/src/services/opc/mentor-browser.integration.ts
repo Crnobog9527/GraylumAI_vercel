@@ -92,6 +92,14 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   await poll(()=>send.isEnabled()).toBe(true);expect(await composer.inputValue()).toBe('这是下一条尚未发送的新草稿');
   // An answer turn is offered the card tool; the synthetic gateway then returns a card.
   await poll(()=>page.getByText('请选择当前问题最接近的答案：',{exact:true}).isVisible()).toBe(true);
+  // Owner card design: recommended tag, fixed Other entry that focuses the message box, no unsure buttons.
+  const card=page.getByRole('region',{name:'导师提问'}).last();
+  await poll(()=>card.getByText('推荐',{exact:true}).isVisible()).toBe(true);
+  expect(await page.getByRole('button',{name:/我不确定/}).count()).toBe(0);
+  expect(await composer.getAttribute('placeholder')).toBe('其他：自己补充');
+  await card.getByRole('button',{name:'其他',exact:true}).click();
+  await poll(()=>composer.evaluate(element=>element===document.activeElement)).toBe(true);
+  expect(await composer.inputValue()).toBe('这是下一条尚未发送的新草稿');
   await poll(async()=>(await f.service.read(d.draftId)).information['step-0'].values?.product?.status).toBe('provisional');timings.mentorCompleteToFieldReadMs=Date.now()-(await control())[2]!.finishedAt!;expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1',[f.actor])).rows[0].n).toBe(2);expect((await sql.query('select count(*)::int n from opc_turns where draft_id=$1',[d.draftId])).rows[0].n).toBe(2);
   const calls=(await sql.query('select c.id,c.state,c.provider_id,c.payload from bill2_calls c join bill2_runs r on r.id=c.run_id where r.actor_id=$1 order by c.created_at',[f.actor])).rows;expect(calls).toHaveLength(4);expect(new Set(calls.map(c=>c.provider_id)).size).toBe(4);
   await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).click();await poll(async()=>(await control()).length).toBe(5);expect((await control())[4]!.stream).toBe(true);await control(5);await poll(async()=>(await control()).length).toBe(6);await control(6);await poll(()=>send.isEnabled()).toBe(true);

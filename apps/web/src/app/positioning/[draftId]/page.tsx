@@ -15,8 +15,8 @@ import { mergeInformation } from "./information-merge";
 import { readPlanEnvelope, type PlanEnvelope, type PlanRequest } from "./plan-envelope";
 import { admissionMessage } from "./admission-message";
 import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-response";
-import { liveReplyAfter, livePhaseNotice, mentorReplyDisplay, questionCardStatus, startLiveReply, type LiveReply } from "./agent-turn-display";
-import { QuestionCardView } from "@/components/opc/question-card";
+import { focusReply, liveReplyAfter, livePhaseNotice, mentorReplyDisplay, questionCardStatus, startLiveReply, type LiveReply } from "./agent-turn-display";
+import { OTHER_PLACEHOLDER, QuestionCardView } from "@/components/opc/question-card";
 import type { AgentTurnEvent, AgentTurnOutcome } from "@repo/api/src/shared/agentTurn";
 import { openingRequest, parseStepEnvelope, readAgentTurn, retainExecution, settleEnvelope, turnResultNotice } from "./mentor-turn";
 import type { MentorRequest, MentorStepEnvelope } from "./mentor-turn";
@@ -1947,7 +1947,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                             <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>{reply.text}</p>
                           </div>}
                           {reply.card && <QuestionCardView card={reply.card} answered={cardStatus.answered} answer={cardStatus.answer}
-                            disabled={cardLocked} onAnswer={input => { void ask(step, activeQuestion.id, input); }}/>}
+                            disabled={cardLocked} onAnswer={input => { void ask(step, activeQuestion.id, input); }} onOther={focusReply}/>}
                           {parsed.message && execution.unavailableReason === 'output_truncated' && <p role="status">本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。</p>}
                           {execution.state === "completed" && target && latestSuggestion.get(target.id) === execution.executionId && proposed.length > 0 && (
                             <div className={resultStyles.suggestionCard}>
@@ -1987,11 +1987,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     <p>{(infoEdits[step.id]?.[activeQuestion.id] ?? d.information[step.id].values?.[activeQuestion.id])?.value || '先讨论当前问题，或在右侧填写答案。'}</p>
                     <div>
                       <Button disabled={busy || hasPendingStepRequest || Boolean(pendingMentor) || confirmationState.kind === "malformed" || confirmationRedundant(step.id, activeQuestion.id, false) || !(infoEdits[step.id]?.[activeQuestion.id] ?? d.information[step.id].values?.[activeQuestion.id])?.value?.trim()} onClick={() => confirmStep(step, index, activeQuestion.id, false, nonAnswersFor(step.id, activeQuestion.id), false)}>{pendingConfirmation ? '继续核对本题确认' : '确认当前信息，继续'}</Button>
-                      <Button variant="outline" disabled={busy || openingSteps.includes(step.id) || hasPendingConfirmation || hasPendingStepRequest || Boolean(pendingMentor)} onClick={() => { void ask(step, activeQuestion.id, '我不确定，帮我判断。'); }}>我不确定，帮我判断</Button>
                     </div>
                   </section>}
                   </div>
-                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" note={busy && hasPendingStepRequest ? "正在回复…" : undefined} maxLength={8000} disabled={snap.state!=="draft"||reviewOnly} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step,activeQuestion.id);}}/>
+                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} note={busy && hasPendingStepRequest ? "正在回复…" : undefined} maxLength={8000} disabled={snap.state!=="draft"||reviewOnly} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step,activeQuestion.id);}}/>
                   {free.error&&<p role="alert">{free.error}</p>}
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
