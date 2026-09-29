@@ -9,6 +9,7 @@ import { creditsRouter } from './routers/credits';
 import { ticketRouter } from './routers/ticket';
 import { settingsRouter } from './routers/settings';
 import { modelRouter } from './routers/model';
+import { modelReasoningRouter } from './routers/modelReasoning';
 import { invitationRouter } from './routers/invitation';
 import { checkinRouter } from './routers/checkin';
 import { adminRouter } from './routers/admin';
@@ -31,6 +32,7 @@ export const appRouter = router({
   ticket: ticketRouter,
   settings: settingsRouter,
   model: modelRouter,
+  modelReasoning: modelReasoningRouter,
   invitation: invitationRouter,
   checkin: checkinRouter,
   admin: adminRouter,

@@ -183,7 +183,7 @@ function stringToArray(value: string): string[] {
 export default function AdminPromptsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [mode, setMode] = useState<'prompt' | 'skill'>('prompt');
-  const skillModels = trpc.settings.getSummaryModels.useQuery(undefined,{enabled:mode==='skill'});
+  const skillModels = trpc.settings.getSummaryModels.useQuery({use:'skill'},{enabled:mode==='skill'});
   const [skillForm, setSkillForm] = useState<SkillForm>(emptySkillForm);
   const [skillIdentity, setSkillIdentity] = useState<{ moduleId: string; skillId: string; revisionId: string; requestId: string; expectedVersion: number } | null>(null);
   const [skillError, setSkillError] = useState('');
