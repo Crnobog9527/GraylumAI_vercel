@@ -1010,7 +1010,7 @@ async function heldProvider(){
  const calls:ProviderCall[]=[];let hold=false;
  const server=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;const input=JSON.parse(JSON.parse(raw).input);
   let release=()=>{};const gate=hold?new Promise<void>(resolve=>{release=resolve;}):Promise.resolve();calls.push({model:input.model,release});await gate;
-  const id='ac1-'+randomUUID(),content=input.model==='ac1-organizer'?'{"inputKind":"answer","informationPatch":{}}':input.tools?.some((t:{function?:{name?:string}})=>t.function?.name==='ask_question')?'导师回复 '+calls.length:JSON.stringify({message:'导师回复 '+calls.length});
+  const id='ac1-'+randomUUID(),content=input.model==='ac1-organizer'?'{"inputKind":"answer","informationPatch":{}}':input.messages?.some((m:{role?:string;content?:unknown})=>m.role==='system'&&String(m.content).includes('Act as the single continuous mentor'))?'导师回复 '+calls.length:JSON.stringify({message:'导师回复 '+calls.length});
   res.setHeader('content-type','application/json');
   res.end(JSON.stringify({id,model:input.model,final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:input.model,choices:[{index:0,message:{role:'assistant',content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));
  });

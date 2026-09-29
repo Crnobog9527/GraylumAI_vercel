@@ -15,25 +15,43 @@ import {
   type AgentTurnEvent,
 } from "./agentTurn";
 
-const card = { question: "你现在主要在哪个平台发内容？", options: ["小红书", "抖音", "还没开始"] };
+const card = { question: "你现在主要在哪个平台发内容？", options: ["小红书", "抖音", "还没开始"], recommended: null };
 
 describe("question card", () => {
   it("accepts one question with 2 to 5 distinct options and trims them", () => {
-    expect(parseQuestionCard({ question: "  问题  ", options: [" A ", "B"] })).toEqual({ question: "问题", options: ["A", "B"] });
-    expect(parseQuestionCard({ question: "问题", options: ["1", "2", "3", "4", "5"] })?.options).toHaveLength(MAX_OPTIONS);
+    expect(parseQuestionCard({ question: "  问题  ", options: [" A ", "B"], recommended: null }))
+      .toEqual({ question: "问题", options: ["A", "B"], recommended: null });
+    expect(parseQuestionCard({ question: "问题", options: ["1", "2", "3", "4", "5"], recommended: 4 })?.options).toHaveLength(MAX_OPTIONS);
   });
 
+  it("keeps a recommended option index, or null for a neutral card", () => {
+    expect(parseQuestionCard({ question: "问题", options: ["A", "B", "C"], recommended: 1 })?.recommended).toBe(1);
+    expect(parseQuestionCard({ question: "问题", options: ["A", "B"], recommended: null })?.recommended).toBeNull();
+  });
+
+  it("reads a card stored before recommended existed as having no recommendation", () => {
+    expect(parseQuestionCard({ question: "问题", options: ["A", "B"] })).toEqual({ question: "问题", options: ["A", "B"], recommended: null });
+    // The tool and the stored shape still require the field.
+    expect(questionCardSchema.safeParse({ question: "问题", options: ["A", "B"] }).success).toBe(false);
+  });
+
+  const base = { question: "问题", options: ["A", "B"], recommended: null };
   it.each([
-    ["one option", { question: "问题", options: ["A"] }],
-    ["six options", { question: "问题", options: ["1", "2", "3", "4", "5", "6"] }],
-    ["duplicate after trim", { question: "问题", options: ["A", " A "] }],
-    ["empty question", { question: "   ", options: ["A", "B"] }],
-    ["empty option", { question: "问题", options: ["A", " "] }],
-    ["long question", { question: "问".repeat(501), options: ["A", "B"] }],
-    ["long option", { question: "问题", options: ["A", "项".repeat(201)] }],
-    ["control character", { question: "问\u0007题", options: ["A", "B"] }],
-    ["extra field", { question: "问题", options: ["A", "B"], allowFreeText: true }],
-    ["unsure option is host UI, but a model may still not add unknown fields", { question: "问题", options: ["A", "B"], unsure: true }],
+    ["one option", { ...base, options: ["A"] }],
+    ["six options", { ...base, options: ["1", "2", "3", "4", "5", "6"] }],
+    ["duplicate after trim", { ...base, options: ["A", " A "] }],
+    ["empty question", { ...base, question: "   " }],
+    ["empty option", { ...base, options: ["A", " "] }],
+    ["long question", { ...base, question: "问".repeat(501) }],
+    ["long option", { ...base, options: ["A", "项".repeat(201)] }],
+    ["control character", { ...base, question: "问\u0007题" }],
+    ["extra field", { ...base, allowFreeText: true }],
+    ["unsure option is host UI, but a model may still not add unknown fields", { ...base, unsure: true }],
+    ["recommended past the last option", { ...base, recommended: 2 }],
+    ["recommended past the option limit", { ...base, options: ["1", "2", "3", "4", "5"], recommended: 5 }],
+    ["negative recommended", { ...base, recommended: -1 }],
+    ["fractional recommended", { ...base, recommended: 0.5 }],
+    ["recommended as text", { ...base, recommended: "A" }],
     ["not an object", "问题"],
     ["null", null],
   ])("rejects %s", (_name, value) => {
@@ -42,7 +60,7 @@ describe("question card", () => {
   });
 
   it("allows line breaks inside a question", () => {
-    expect(parseQuestionCard({ question: "第一行\n第二行", options: ["A", "B"] })?.question).toBe("第一行\n第二行");
+    expect(parseQuestionCard({ question: "第一行\n第二行", options: ["A", "B"], recommended: null })?.question).toBe("第一行\n第二行");
   });
 });
 

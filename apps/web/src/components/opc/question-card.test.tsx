@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { UNSURE_INPUT } from "@repo/api/src/shared/agentTurn";
 import { QuestionCardView } from "./question-card";
 
-const card = { question: "你的内容主要写给谁？", options: ["刚入行的新人", "有经验的同行", "想转行的人"] };
+const card = { question: "你的内容主要写给谁？", options: ["刚入行的新人", "有经验的同行", "想转行的人"], recommended: null };
 type Props = Parameters<typeof QuestionCardView>[0];
 const render = (props: Props) => renderToStaticMarkup(createElement(QuestionCardView, props));
 
@@ -49,7 +49,7 @@ describe("QuestionCardView: open card", () => {
   });
 
   it("keeps long questions and options as wrapping text", () => {
-    const long = { question: "问".repeat(500), options: ["甲".repeat(200), "乙"] };
+    const long = { question: "问".repeat(500), options: ["甲".repeat(200), "乙"], recommended: null };
     const html = render({ card: long, answered: false, onAnswer: () => {} });
     expect(html).toContain("问".repeat(500));
     expect(html).toContain("甲".repeat(200));

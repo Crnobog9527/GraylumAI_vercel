@@ -46,7 +46,7 @@ const GOLDEN:Record<string,string[]>={
 // Agent turn format (AC-1): used by new mentor admissions.
 // ---------------------------------------------------------------------------
 
-const card={question:'你主要在哪个平台？',options:['小红书','抖音']};
+const card={question:'你主要在哪个平台？',options:['小红书','抖音'],recommended:null};
 const askCall=(id:string,args:unknown=card)=>({id,type:'function',function:{name:'ask_question',arguments:JSON.stringify(args)}});
 const frames=(response:ReturnType<typeof completion>)=>{
  const message=response.choices[0]!.message as {content?:string|null;tool_calls?:Array<{id:string;type:string;function:{name:string;arguments:string}}>};
@@ -78,7 +78,7 @@ describe('Agent turn format',()=>{
   const sent=JSON.parse(t.bodies[0]!);
   expect(sent).not.toHaveProperty('parallel_tool_calls');expect(sent).not.toHaveProperty('tool_choice');
   expect(sent.tools[0].function.name).toBe('ask_question');
-  expect(Object.keys(sent.tools[0].function.parameters.properties)).toEqual(['question','options']);
+  expect(Object.keys(sent.tools[0].function.parameters.properties)).toEqual(['question','options','recommended']);
  });
 
  it.each(modes)('ends the turn at the question card (%s)',async mode=>{
@@ -91,7 +91,7 @@ describe('Agent turn format',()=>{
  });
 
  it.each(modes)('keeps only the first of several calls (%s)',async mode=>{
-  const t=await agentTurn(mode,completion({content:'先了解一下。',tool_calls:[askCall('call_a'),askCall('call_b',{question:'另一个',options:['x','y']})]},'tool_calls'));
+  const t=await agentTurn(mode,completion({content:'先了解一下。',tool_calls:[askCall('call_a'),askCall('call_b',{question:'另一个',options:['x','y'],recommended:0})]},'tool_calls'));
   expect(JSON.parse(await t.run)).toEqual({card:'question',...card});
   expect(t.executed).toHaveBeenCalledTimes(1);expect(t.exchange).toHaveBeenCalledTimes(1);expect(t.dropped).toEqual([1]);
   expect(JSON.stringify(t.added)).not.toContain('call_b');
@@ -123,17 +123,22 @@ describe('question card tool definition and invalid cards',()=>{
  it('sends a strict JSON Schema without the host-only card rules',async()=>{
   const t=await agentTurn('stream',completion({content:'好的'}));await t.run;
   expect(JSON.parse(t.bodies[0]!).tools).toEqual([{type:'function',function:{name:'ask_question',
-   description:'Show the user one question card with 2 to 5 short suggested answers. Ends your turn.',strict:true,parameters:{
-    $schema:'http://json-schema.org/draft-07/schema#',type:'object',additionalProperties:false,required:['question','options'],properties:{
+   description:'Show the user one question card with 2 to 5 short suggested answers. recommended is the index of the option you '+
+    'recommend, or null for neutral ranges or categories. The host adds an Other entry. Ends your turn.',strict:true,parameters:{
+    $schema:'http://json-schema.org/draft-07/schema#',type:'object',additionalProperties:false,required:['question','options','recommended'],properties:{
      question:{type:'string',minLength:1,maxLength:500},
      options:{type:'array',minItems:2,maxItems:5,items:{type:'string',minLength:1,maxLength:200}},
+     recommended:{anyOf:[{type:'integer',minimum:0,maximum:4},{type:'null'}]},
     }}}}]);
  });
 
  it.each([
-  ['one option',{question:'问题',options:['只有一个']}],
-  ['duplicate options',{question:'问题',options:['小红书',' 小红书 ']}],
-  ['a control character',{question:'问\u0007题',options:['a','b']}],
+  ['one option',{question:'问题',options:['只有一个'],recommended:null}],
+  ['a missing question',{options:['小红书','抖音'],recommended:null}],
+  ['a missing recommended field',{question:'问题',options:['小红书','抖音']}],
+  ['a recommended index past the options',{...card,recommended:2}],
+  ['duplicate options',{question:'问题',options:['小红书',' 小红书 '],recommended:null}],
+  ['a control character',{question:'问\u0007题',options:['a','b'],recommended:null}],
   ['an extra field',{...card,allowFreeText:true}],
   ['arguments that are not JSON','{"question":'],
  ])('ends the turn without a card for %s, keeping the paid text (stream)',async(_name,args)=>{
@@ -162,7 +167,7 @@ it('freezes exact v5 provider request bytes including the exported strict tool s
   providerLimits:{providerSlug:'deepinfra/fp8',contextTokens:32000,
    promptUsdPerMillion:'0.1',completionUsdPerMillion:'0.1',requestUsd:'0'}};
  const wire=openRouterRequestBody(t.bodies[0]!,{context,policy,phase:'skill',primaryDialogue:true});
- expect(sha(wire)).toBe('8272157bd7e9a9eb6a6edc03c3ab801414de59d051b87bc322a1c52f640edad7');
+ expect(sha(wire)).toBe('572f101a67bd6a2b2981964dcae6d08b05885415639ef77e3b0af95650bcc689');
  const sent=JSON.parse(wire);
  expect(sent.tools).toHaveLength(1);expect(sent.tools[0].function.strict).toBe(true);
  expect(askQuestionToolBytes()).toBeGreaterThanOrEqual(Buffer.byteLength(JSON.stringify(sent.tools)));

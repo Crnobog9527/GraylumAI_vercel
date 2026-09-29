@@ -32,11 +32,13 @@ export const MIN_OPTIONS = 2;
 export const MAX_OPTIONS = 5;
 
 /**
- * Fixed page controls, never model arguments. Every card also shows a
- * "not sure" button and a free-text box; neither locks the input field.
- * The button sends `UNSURE_INPUT` as the next turn's plain user input, and a
- * clicked option sends the option text itself. The server-side prompt treats
- * `UNSURE_INPUT` as a request for analysis, never as an answer.
+ * Fixed page control, never a model argument. Every card ends with a fixed
+ * "其他" entry that moves focus to the message box, where the user answers in
+ * their own words; the box never locks. A clicked option sends the option text
+ * itself as the next turn's plain user input.
+ *
+ * `UNSURE_INPUT` was the reply of an earlier "not sure" button. New pages no
+ * longer send it; it stays so history cards answered with it read correctly.
  */
 export const UNSURE_INPUT = "我不确定，帮我分析";
 
@@ -46,7 +48,10 @@ const cardText = (max: number) =>
 /**
  * One main question and 2–5 short suggested answers. This schema is the
  * `ask_question` tool's parameter schema and the stored card shape.
- * Options must be distinct after trimming.
+ * Options must be distinct after trimming. `recommended` is the index of the
+ * option the mentor recommends, or null for a neutral card (ranges or
+ * categories the user places themselves in); an index outside the options
+ * makes the card invalid.
  */
 export const questionCardSchema = z
   .object({
@@ -56,13 +61,20 @@ export const questionCardSchema = z
       .min(MIN_OPTIONS)
       .max(MAX_OPTIONS)
       .refine(options => new Set(options).size === options.length, "duplicate option"),
+    recommended: z.number().int().min(0).max(MAX_OPTIONS - 1).nullable(),
   })
-  .strict();
+  .strict()
+  .refine(card => card.recommended === null || card.recommended < card.options.length, "recommended out of range");
 export type QuestionCard = z.infer<typeof questionCardSchema>;
 
-/** Validated card or null. Never throws; invalid model output shows no card. */
+/**
+ * Validated card or null. Never throws; invalid model output shows no card.
+ * Cards stored before `recommended` existed (local test data only; v5 was
+ * never enabled before it) read as having no recommendation.
+ */
 export function parseQuestionCard(value: unknown): QuestionCard | null {
-  const parsed = questionCardSchema.safeParse(value);
+  const legacy = value && typeof value === "object" && !Array.isArray(value) && !("recommended" in value);
+  const parsed = questionCardSchema.safeParse(legacy ? { ...value, recommended: null } : value);
   return parsed.success ? parsed.data : null;
 }
 
@@ -136,7 +148,7 @@ export const AGENT_TURN_BODY_LIMIT = 262144;
 /**
  * The stored body of a new-format turn:
  *
- *   {"format":"agent-turn.v1","message":"…","card":{"question":"…","options":[…]}|null}
+ *   {"format":"agent-turn.v1","message":"…","card":{"question":"…","options":[…],"recommended":0|null}|null}
  *
  * It is still a JSON object with a top-level `message` string, so the legacy
  * mentor parser keeps showing the text of new turns without a migration.

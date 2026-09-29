@@ -19,10 +19,12 @@ export const MAX_AGENT_TOOLS=2;
 export const AGENT_STREAM_TOOLS=Object.freeze({toolNames:AGENT_TOOL_NAMES,maxCalls:8,retainUnknownNames:true});
 
 /** Parameters the model sees. Kept to plain JSON Schema limits (the locked
- * SDK sends strict schemas); the stricter card rules apply on execution. */
+ * SDK sends strict schemas, so `recommended` is required and may be null); the
+ * stricter card rules, including an in-range index, apply on execution. */
 export const askQuestionParameters=z.object({
  question:z.string().min(1).max(QUESTION_MAX_CHARS),
  options:z.array(z.string().min(1).max(OPTION_MAX_CHARS)).min(MIN_OPTIONS).max(MAX_OPTIONS),
+ recommended:z.number().int().min(0).max(MAX_OPTIONS-1).nullable(),
 }).strict();
 
 /** The tool result for a card the host refuses to show (arguments outside
@@ -53,7 +55,8 @@ export function questionCardFromResult(output:string):QuestionCard|null{
  * the arguments, so replay returns identical bytes without persistence. */
 export function askQuestionTool():RuntimeTool{
  return {name:ASK_QUESTION_TOOL,parameters:askQuestionParameters,
-  description:'Show the user one question card with 2 to 5 short suggested answers. Ends your turn.',
+  description:'Show the user one question card with 2 to 5 short suggested answers. recommended is the index of '+
+   'the option you recommend, or null for neutral ranges or categories. The host adds an Other entry. Ends your turn.',
   invalidResult:INVALID_CARD_RESULT,execute:async args=>questionCardToolResult(args)};
 }
 

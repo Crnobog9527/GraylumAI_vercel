@@ -30,7 +30,8 @@ const policy={modelId:'10000000-0000-4000-8000-000000000001',provider:'openroute
  automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true,
  providerLimits:{providerSlug:'deepinfra/fp8',contextTokens:32000,
   promptUsdPerMillion:'0.1',completionUsdPerMillion:'0.1',requestUsd:'0'}};
-const context={providerRequestFormat:'agent-turn-v5-stream' as const,tools:['ask_question'],network:'deny',reasoning};
+const context=(opening:boolean)=>({providerRequestFormat:'agent-turn-v5-stream' as const,
+ tools:opening?[]:['ask_question'],network:'deny',reasoning});
 const session=():Session=>({getSessionId:async()=> 'synthetic-pinned-revision',getItems:async()=>[],
  addItems:async()=>{},popItem:async()=>undefined,clearSession:async()=>{}});
 const sha=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -60,18 +61,19 @@ function planInstructions(opening:boolean){
 }
 
 it.each([
- {opening:false,golden:'4acb60aa46dfbe95c438794a1829bb622ae90c0cbbd5239f119ede6f48072a6c'},
- {opening:true,golden:'15aed4d1b04d7a9e01703ab7fa6663e13590edb38ca6ca4fb06c8884f001fb02'},
+ {opening:false,golden:'c6c3cb18a093cb0c7c3fd67b3f17aab519da6cbf070f86bc55587cd2b7884043'},
+ {opening:true,golden:'13199dd79e575027b0cd93a0c73c28fcb2977f4fbb4abda59796b8120cde0097'},
 ])('freezes full v5 host prompt, pinned fields and wire request (opening=$opening)',async({opening,golden})=>{
  const instructions=agentTurnInstructions({step,question,questionLabel:'3.2',workflowContext,opening});
  expect(instructions).toBe(planInstructions(opening));
  const requests:string[]=[];
  await runRuntime({model,instructions,input:opening?OPENING_INPUT:UNSURE_INPUT,session:session(),
-  maxOutputTokens:4096,maxTurns:1,tools:[askQuestionTool()],stream:true,reasoning,
-  firstToolCallOnly:true,stopAtToolNames:['ask_question'],allowEmptyResult:true,commitSessionOnSuccess:true,
+  // A host-opened turn is admitted without the card tool (see admission.ts).
+  maxOutputTokens:4096,maxTurns:1,tools:opening?[]:[askQuestionTool()],stream:true,reasoning,
+  firstToolCallOnly:true,...(opening?{}:{stopAtToolNames:['ask_question']}),allowEmptyResult:true,commitSessionOnSuccess:true,
   selectHistory:async(_history,incoming)=>incoming,
   exchange:async(_sequence,body)=>{
-   requests.push(openRouterRequestBody(body,{context,policy,phase:'skill',primaryDialogue:true}));
+   requests.push(openRouterRequestBody(body,{context:context(opening),policy,phase:'skill',primaryDialogue:true}));
    return JSON.stringify({id:'synthetic-reply',object:'chat.completion',created:1,model,
     choices:[{index:0,message:{role:'assistant',content:'先依据已有证据提出一个待核对建议。'},finish_reason:'stop'}]});
   },
@@ -82,10 +84,14 @@ it.each([
  expect(sent.messages[1]).toEqual({role:'user',content:opening?OPENING_INPUT:UNSURE_INPUT});
  expect(sent.reasoning).toEqual({enabled:false});expect(sent).not.toHaveProperty('reasoning_effort');
  expect(sent.provider.only).toEqual(['deepinfra/fp8']);
- expect(sent.tools.map((tool:{function:{name:string}})=>tool.function.name)).toEqual(['ask_question']);
- expect(sent.tools[0].function).toMatchObject({strict:true,parameters:{additionalProperties:false,
-  required:['question','options'],properties:{question:{minLength:1,maxLength:500},
-   options:{minItems:2,maxItems:5,items:{minLength:1,maxLength:200}}}}});
+ if(opening)expect(sent).not.toHaveProperty('tools');
+ else{
+  expect(sent.tools.map((tool:{function:{name:string}})=>tool.function.name)).toEqual(['ask_question']);
+  expect(sent.tools[0].function).toMatchObject({strict:true,parameters:{additionalProperties:false,
+   required:['question','options','recommended'],properties:{question:{minLength:1,maxLength:500},
+    options:{minItems:2,maxItems:5,items:{minLength:1,maxLength:200}},
+    recommended:{anyOf:[{type:'integer',minimum:0,maximum:4},{type:'null'}]}}}});
+ }
  expect(sent).not.toHaveProperty('parallel_tool_calls');expect(sent).not.toHaveProperty('tool_choice');
  expect(sha(requests[0]!)).toBe(golden);
 });

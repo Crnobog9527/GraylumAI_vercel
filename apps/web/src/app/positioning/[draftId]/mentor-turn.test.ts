@@ -28,7 +28,7 @@ const request: MentorRequest = {
   questionId: "who",
   organizeAfter: true,
 };
-const card = { question: "你的读者是谁？", options: ["新人", "同行"] };
+const card = { question: "你的读者是谁？", options: ["新人", "同行"], recommended: null };
 
 async function* stream(events: AgentTurnEvent[]) {
   for (const event of events) yield event;

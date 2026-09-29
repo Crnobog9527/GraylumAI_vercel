@@ -92,7 +92,7 @@ it.each([false,true])('new openings attach an organizer, preserving caller reque
  const result=await service.prepare(input);
  expect(result.context.request).toEqual({...input,sources:[]});
  expect(result.context).toMatchObject({providerRequestFormat:'agent-turn-v5-stream',
-  tools:['ask_question'],network:'deny',sources:[],maxToolCalls:1,maxTurns:1,
+  tools:[],network:'deny',sources:[],maxToolCalls:0,maxTurns:1,
   reasoning:real?{effort:'none'}:{parameter:'none'},
   attachedOrganizer:{modelId:organizer,...(real?{reasoning:{parameter:'none'}}:{})},
  });
@@ -109,6 +109,7 @@ it('an answer without organizer remains one call and contains no fabricated extr
  const f=fixture(),service=runtimeAdmissionService(f.user,f.admin,{...f.policy,maxCalls:1});
  const result=await service.prepare({...f.input,organizeAfter:false});
  expect(result.context.providerRequestFormat).toBe('agent-turn-v5-stream');
+ expect(result.context).toMatchObject({tools:['ask_question'],maxToolCalls:1});
  expect(result.context).not.toHaveProperty('attachedOrganizer');
  expect(result.context).not.toHaveProperty('informationPatch');expect(result.billing.limits.maxCalls).toBe(1);
 });

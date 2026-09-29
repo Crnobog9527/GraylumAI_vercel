@@ -4,7 +4,7 @@ import {AGENT_TURN_MESSAGE_LIMIT,INVALID_REPLY_NOTICE} from '../../shared/agentT
 import {agentTurnResult} from './agentTurnResult';
 import {INVALID_CARD_RESULT,questionCardToolResult} from './agentTools';
 
-const card={question:'下一步优先做什么？',options:['验证需求','完善样品']};
+const card={question:'下一步优先做什么？',options:['验证需求','完善样品'],recommended:0};
 const output=questionCardToolResult(card);
 describe('host-owned Agent turn envelope',()=>{
  it('keeps natural text with quotes and line breaks without asking the model for JSON',()=>{
@@ -22,8 +22,9 @@ describe('host-owned Agent turn envelope',()=>{
  });
  it.each([
   INVALID_CARD_RESULT,'{broken','Error parsing tool arguments',
-  JSON.stringify({card:'question',question:'问题',options:['相同',' 相同 ']}),
-  JSON.stringify({card:'question',question:'问\u0007题',options:['甲','乙']}),
+  JSON.stringify({card:'question',question:'问题',options:['相同',' 相同 '],recommended:null}),
+  JSON.stringify({card:'question',...card,recommended:2}),
+  JSON.stringify({card:'question',question:'问\u0007题',options:['甲','乙'],recommended:null}),
   JSON.stringify({card:'question',...card,unexpected:true}),
  ])('never exposes invalid tool output as prose (%s)',toolResult=>{
   const result=agentTurnResult('仍保留已付费的分析。',toolResult,true);

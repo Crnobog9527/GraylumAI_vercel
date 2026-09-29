@@ -12,6 +12,11 @@ it('honors only the first question tool and rejects every organizer tool',()=>{
  expect(terminalAgentReplyFailure(reply({content:null,tool_calls:[call('ask_question'),call('unknown')]}))).toBe(false);
  expect(terminalAgentReplyFailure(reply({content:null,tool_calls:[call('ask_question')]},'tool_calls'),true)).toBe(true);
 });
+it('a host-opened mentor turn offered no card tool cannot run even ask_question',()=>{
+ expect(terminalAgentReplyFailure(reply({content:'先聊聊',tool_calls:[call('ask_question')]},'tool_calls'),false,false)).toBe(true);
+ expect(terminalAgentReplyFailure(reply({content:'先聊聊'}),false,false)).toBe(false);
+ expect(terminalAgentReplyFailure(reply({content:'先聊聊',tool_calls:[]}),false,false)).toBe(false);
+});
 it.each([null,'','  \n'])('only empty successful organizer output is terminal (%j)',content=>{
  expect(terminalAgentReplyFailure(reply({content}))).toBe(false);
  expect(terminalAgentReplyFailure(reply({content}),true)).toBe(true);

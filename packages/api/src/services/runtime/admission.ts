@@ -158,6 +158,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(candidates.length)selectRuntimeHistory([],[{role:'user',content:matchingInput(input.input,candidates)}],{instructions:MATCH_INSTRUCTIONS,inputBytes:inputLimit,historyItems:0,toolBytes:0});
    selectRuntimeHistory([], [{role:'user',content:runtimeScopeInput(input.input,session.scopeMaterial)}],{instructions,inputBytes:inputLimit,historyItems:0,toolBytes:mentorStream?askQuestionToolBytes():policy.searchEnabled?2048:0});
    // New mentor turns use the interactive format; replays returned before this branch.
+   // A host-opened mentor turn (the user has not spoken) never gets a question card.
+   const opening=Boolean(mentorStream&&isOpeningInput(input.input));
    if(mentorStream&&candidates.length)throw new Error('RUNTIME_MODEL_DENIED');
    let reasoning:ReasoningPolicy|undefined;
    const organize=input.selection.kind==='organizer';
@@ -171,7 +173,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     ...(policy.real||mentorStream?{providerRequestFormat}:{}),...(reasoning?{reasoning}:{}),role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
     ...(policy.opcTurnToken?{opcTurnToken:uuid.parse(policy.opcTurnToken)}:{}),...(candidates.length?{matching:{candidates}}:{}),...(session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...(workspaceContext?{workspaceContext:true}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems:policy.historyItems,network:input.network,
-    tools:mentorStream?[ASK_QUESTION_TOOL]:[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext?['read_source']:[])],maxToolCalls:mentorStream?1:(searchAllowed?1:0)+(workspaceContext?Math.min(2,primaryTurns-1):input.sources.length),
+    tools:mentorStream?(opening?[]:[ASK_QUESTION_TOOL]):[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext?['read_source']:[])],maxToolCalls:mentorStream?(opening?0:1):(searchAllowed?1:0)+(workspaceContext?Math.min(2,primaryTurns-1):input.sources.length),
     request:input,...(revisionId?{moduleId,skillId,revisionId}:{}),sources:input.sources};
    const selectedIds=new Set([modelId,...(attachedOrganizer?[attachedOrganizer.modelId]:[]),...candidates.map(c=>c.modelId)]);
    const realCalls=policy.real?.callPolicies.filter(c=>selectedIds.has(c.modelId));

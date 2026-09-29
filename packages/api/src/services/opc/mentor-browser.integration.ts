@@ -47,7 +47,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-opening-incremental-'+scenario+'.png',fullPage:true});
   await poll(async()=>(await page.evaluate(()=>(window as unknown as {mentorTextTimes:number[]}).mentorTextTimes)).length).toBeGreaterThanOrEqual(3);
   await control(1);await poll(async()=>(await control()).length).toBe(2);await control(2);await poll(()=>send.isEnabled()).toBe(true);
-  await poll(()=>page.getByText('请选择当前问题最接近的答案：',{exact:true}).isVisible()).toBe(true);
+  // A host-opened turn is admitted without the card tool: text only.
+  expect(await page.getByText('请选择当前问题最接近的答案：',{exact:true}).count()).toBe(0);
   if(scenario==='proposal')await poll(async()=>(await f.service.read(d.draftId)).information['step-0'].values?.product).toMatchObject({status:'provisional',nature:'decision',value:'借鉴同场景前后对照的讲解方式，不以器材评测为主。'});
   const openingValue=(await f.service.read(d.draftId)).information['step-0'].values?.product;
   if(scenario==='proposal'){
@@ -67,10 +68,9 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   await composer.dispatchEvent('compositionstart');await composer.dispatchEvent('keydown',{key:'Enter',code:'Enter',isComposing:true,keyCode:229});expect((await control()).length).toBe(2);await composer.dispatchEvent('compositionend');
   const prepareGate=new Promise<void>(resolve=>{releasePrepare=resolve;});await page.route('**/api/trpc/opc.mentorTurnStream**',async route=>{await prepareGate;await route.continue();});
   await page.evaluate(text=>{const started=performance.now();(window as unknown as {mentorTiming:unknown}).mentorTiming={started};const observer=new MutationObserver(()=>{const bubbles=[...document.querySelectorAll('[data-message-role="user"][data-request-id]')];if(bubbles.some(b=>b.textContent?.includes(text))){(window as unknown as {mentorTiming:unknown}).mentorTiming={started,bubble:performance.now()};observer.disconnect();}});observer.observe(document.body,{subtree:true,childList:true,characterData:true});},input);
-  if(scenario==='proposal')await page.getByRole('button',{name:input,exact:true}).click();
-  else await send.evaluate(button=>{(button as HTMLButtonElement).click();(button as HTMLButtonElement).click();});
+  await send.evaluate(button=>{(button as HTMLButtonElement).click();(button as HTMLButtonElement).click();});
   await poll(()=>page.getByText(input,{exact:true}).count()).toBeGreaterThan(0);
-  const feedback=await page.evaluate(()=>(window as unknown as {mentorTiming:{started:number;bubble:number}}).mentorTiming);timings.clickToBubbleMs=feedback.bubble-feedback.started;expect(timings.clickToBubbleMs).toBeLessThan(200);expect(await page.getByText('发送中 · 等待服务器确认',{exact:true}).isVisible()).toBe(true);expect(await page.getByText('上一条发给导师的内容仍在核对。请先用“继续核对这条原请求”恢复，不会重复发送。',{exact:true}).count()).toBe(0);expect(await composer.inputValue()).toBe(scenario==='proposal'?input:'');await composer.fill('这是下一条尚未发送的新草稿');releasePrepare();
+  const feedback=await page.evaluate(()=>(window as unknown as {mentorTiming:{started:number;bubble:number}}).mentorTiming);timings.clickToBubbleMs=feedback.bubble-feedback.started;expect(timings.clickToBubbleMs).toBeLessThan(200);expect(await page.getByText('发送中 · 等待服务器确认',{exact:true}).isVisible()).toBe(true);expect(await page.getByText('上一条发给导师的内容仍在核对。请先用“继续核对这条原请求”恢复，不会重复发送。',{exact:true}).count()).toBe(0);expect(await composer.inputValue()).toBe('');await composer.fill('这是下一条尚未发送的新草稿');releasePrepare();
   await poll(async()=>(await control()).length).toBe(3);
   const second=(await control())[2]!;expect(second.finishedAt).toBeNull();expect([turnRequests,prepareRequests,streamRequests]).toEqual([2,0,0]);
   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-user-incremental-'+scenario+'.png',fullPage:true});
@@ -90,6 +90,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    expect((await control()).length).toBe(4);expect((await sql.query('select id,request_id from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows).toEqual(executions);
   }else await control(4);
   await poll(()=>send.isEnabled()).toBe(true);expect(await composer.inputValue()).toBe('这是下一条尚未发送的新草稿');
+  // An answer turn is offered the card tool; the synthetic gateway then returns a card.
+  await poll(()=>page.getByText('请选择当前问题最接近的答案：',{exact:true}).isVisible()).toBe(true);
   await poll(async()=>(await f.service.read(d.draftId)).information['step-0'].values?.product?.status).toBe('provisional');timings.mentorCompleteToFieldReadMs=Date.now()-(await control())[2]!.finishedAt!;expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1',[f.actor])).rows[0].n).toBe(2);expect((await sql.query('select count(*)::int n from opc_turns where draft_id=$1',[d.draftId])).rows[0].n).toBe(2);
   const calls=(await sql.query('select c.id,c.state,c.provider_id,c.payload from bill2_calls c join bill2_runs r on r.id=c.run_id where r.actor_id=$1 order by c.created_at',[f.actor])).rows;expect(calls).toHaveLength(4);expect(new Set(calls.map(c=>c.provider_id)).size).toBe(4);
   await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).click();await poll(async()=>(await control()).length).toBe(5);expect((await control())[4]!.stream).toBe(true);await control(5);await poll(async()=>(await control()).length).toBe(6);await control(6);await poll(()=>send.isEnabled()).toBe(true);

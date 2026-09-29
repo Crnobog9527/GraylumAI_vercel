@@ -95,7 +95,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
   let transportNotStarted=false;
   let terminalReplyFailure=false;
   const checkAgentReply=(response:unknown,organizer=false)=>{
-   if(agentTurn&&terminalAgentReplyFailure(response,organizer)){
+   if(agentTurn&&terminalAgentReplyFailure(response,organizer,context.tools.includes(ASK_QUESTION_TOOL))){
     // Only inspect a complete response returned from durable runtime_response.
     // Keep this verdict outside the SDK, which wraps provider/tool exceptions.
     terminalReplyFailure=true;

@@ -253,7 +253,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: streaming tool 
 // Exercise the frozen v5 context through the real SDK, transport and database.
 it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool_calls','length'] as const)('RUNTIME: streaming Agent turn keeps the first of two question cards, bills one call and replays without POST (finish %s)',async(finish)=>{
  const f=await fixture('agent-turn-v5-stream'),bodies:string[]=[],events:RuntimeProgress[]=[],id='gen-agent-'+f.execution.executionId,model='synthetic/mentor';
- const card={question:'你现在主要在哪个平台发内容？',options:['小红书','抖音']};
+ const card={question:'你现在主要在哪个平台发内容？',options:['小红书','抖音'],recommended:null};
  const call=(index:number,callId:string,args:unknown)=>({tool_calls:[{index,id:callId,type:'function',function:{name:'ask_question',arguments:JSON.stringify(args)}}]});
  const server=createServer(async(req,res)=>{
   let raw='';for await(const part of req)raw+=part;bodies.push(raw);

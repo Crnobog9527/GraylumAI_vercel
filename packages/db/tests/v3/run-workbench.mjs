@@ -468,7 +468,10 @@ try {
       runtimeReceipts.set(id,request);
       appendFileSync(receiptFile,JSON.stringify({id,model:request.model})+'\n',{mode:0o600});
       let content='Saved runtime answer '+runtimeCalls.length,agentCard;
-      const agentTurn=request.tools?.some(tool=>tool.function?.name==='ask_question');
+      // A v5 mentor turn is recognised by its host prompt; host-opened turns carry no card tool.
+      const offersCard=request.tools?.some(tool=>tool.function?.name==='ask_question');
+      const agentTurn=offersCard||(request.messages??[]).some(m=>m.role==='system'&&typeof m.content==='string'&&
+        m.content.includes('Act as the single continuous mentor'));
       if(opcMode){
         content='【固定模拟回复，仅验证流程】你最想帮助哪类人解决一个什么具体问题？';
         try{
@@ -508,7 +511,7 @@ try {
               const {mentorQuestionFixture}=await import('./opc-mentor-fixture.mjs');
               const reply=mentorQuestionFixture(mentorInstructions,input.userRequest,stepIndex);
               content=agentTurn?reply.message:JSON.stringify(reply);
-              if(agentTurn)agentCard={question:'请选择当前问题最接近的答案：',options:['我提供摄影入门练习课程，帮助相机初学者完成每周练习。','我提供设计咨询服务。']};
+              if(offersCard)agentCard={question:'请选择当前问题最接近的答案：',options:['我提供摄影入门练习课程，帮助相机初学者完成每周练习。','我提供设计咨询服务。'],recommended:0};
             }else content='【分步模拟，仅验证流程】第 '+(stepIndex+1)+' 步示例：'+(questions[stepIndex] ?? '这一步你最想确认什么？')+'\n你可以继续回复，也可以在表单里补充想法。此示例不会理解或评估你的答案。';
           }
           if(brief==='topic:first-week') {

@@ -20,7 +20,7 @@ const scenarios: Scenario[] = (['ask', 'text'] as const).flatMap(kind =>
     input: 'Synthetic ' + index, step: 0, currentStepId: 'step-1', questionId: 'audience'})));
 const argv = (candidate: AgentTurnCandidate, ...extra: string[]) => ['--agent-turn', '--agent-turn-candidate', candidate, ...extra];
 const args = (candidate: AgentTurnCandidate, ...extra: string[]) => parseProbeArgs(argv(candidate, ...extra), '/synthetic-home');
-const card = {question: 'Which audience?', options: ['Neighbours', 'Volunteers']};
+const card = {question: 'Which audience?', options: ['Neighbours', 'Volunteers'], recommended: null};
 afterEach(() => vi.restoreAllMocks());
 
 async function capture(config: ProbeConfig, kind: 'ask' | 'text' = 'ask') {

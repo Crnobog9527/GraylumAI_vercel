@@ -15,7 +15,7 @@ const skill: LoadedSkill = {instructions: 'Synthetic workshop mentor', reference
     information: [{id: 'audience', title: 'Audience', required: true, elicitation: 'user_fact'}]}]};
 const scenario: Scenario = {id: 'ask-1', kind: 'ask', history: [], input: 'I am not sure. Help me analyse.',
   step: 0, currentStepId: 'workshop-audience', questionId: 'audience'};
-const card = {question: 'Which group do you want to help?', options: ['Neighbours', 'New volunteers']};
+const card = {question: 'Which group do you want to help?', options: ['Neighbours', 'New volunteers'], recommended: 0};
 async function trial(kind: 'ask' | 'text', deltas: Record<string, unknown>[], finish = 'stop', clock = () => performance.now()) {
   const bodies: any[] = [];
   const result = await runTrial({agentTurn: true, kind, scenario: {...scenario, kind}, index: 0, skill,
