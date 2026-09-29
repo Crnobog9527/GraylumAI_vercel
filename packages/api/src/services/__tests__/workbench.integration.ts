@@ -3672,7 +3672,7 @@ it('ADMIN: unauthorized users cannot read private configuration or publish, incl
   const privilege = await sql.query("select has_function_privilege('anon','public.admin_read_skill_module(uuid,uuid)','EXECUTE') as anon, has_function_privilege('authenticated','public.admin_publish_skill_module(uuid,uuid,timestamptz,jsonb,uuid,uuid,uuid,integer,jsonb,text,jsonb,jsonb)','EXECUTE') as authenticated");
   expect(privilege.rows[0]).toEqual({ anon: false, authenticated: false });
 });
-it('ADMIN: browser imports a Skill folder, configures steps, publishes and opens the resulting conversation', async () => {
+it('ADMIN: browser imports a Skill folder, configures steps, publishes the configured steps and routes the legacy module link to positioning', async () => {
   const admin = await newUser();
   await sql.query("update profiles set role='admin' where id=$1", [admin.id]);
   writeFileSync(output + '/admin-preview.json', JSON.stringify({ url: app, email: admin.email, password: admin.password }), { mode: 0o600 });
@@ -3718,11 +3718,13 @@ it('ADMIN: browser imports a Skill folder, configures steps, publishes and opens
     await expect.poll(() => page.getByRole('dialog').count(), { timeout: 30000 }).toBe(0);
     const module = (await sql.query('select id,skill_id from modules where title=$1', [input.module.title])).rows[0];
     expect(module.skill_id).toBeTruthy();
-    await page.goto(app + '/chat?module=' + module.id);
-    await page.getByRole('heading', { name: input.module.title, exact: true }).waitFor({ timeout: 30000 });
-    await page.getByRole('button', { name: /^1\. 需求确认/ }).waitFor();
-    await page.screenshot({ path: output + '/admin-skill-conversation.png' });
+    // LEGACY-CHAT-OFF (#507): /chat no longer opens module conversations. The browser-configured
+    // steps must still be the published workflow, and the old module link must land on positioning.
     const configured = (await sql.query('select workflow from artifact_workflows where module_id=$1 and enabled',[module.id])).rows[0].workflow;
+    expect(configured.steps.map((step: any) => step.title)).toEqual(['需求确认', '定位成果']);
+    await page.goto(app + '/chat?module=' + module.id);
+    await page.waitForURL(u => u.pathname === '/positioning', { timeout: 30000 });
+    await page.screenshot({ path: output + '/admin-skill-legacy-entry.png' });
     configured.planResources=['SKILL.md'];
     configured.steps.forEach((step: any,i:number)=>{step.information=[{id:'goal',title:'Goal '+i,required:true,profileKey:'goal_'+i}];});
     const original = await db.rpc('admin_read_skill_module',{p_actor_id:admin.id,p_module_id:module.id});
