@@ -16,6 +16,8 @@ Use repository Node 24 and pnpm 10.28.1, install the lockfile dependencies, and
 make Docker Desktop plus the runner's images available. The credential-free
 application copy uses the local pnpm cache. All application fetches remain
 loopback-only. Do not copy a production `.env` into the preview.
+When starting the website, the preview automatically starts local Redis plus the Upstash-compatible SRH service; `--without-app` does not.
+Its temporary token, counters, two containers and private network are discarded on application exit/failure or preview stop/destroy; rate-limit errors still deny requests.
 
 ## Start and keep the same preview
 

@@ -177,3 +177,28 @@ test("shipped runner wires the lifecycle gates, named mount and renewable signer
   assert.equal(runner.includes('docker("volume", "rm"'), false);
   assert.equal(runner.includes('app.once(\'exit\',resolve)'), false);
 });
+
+test("stop/destroy also remove owned ephemeral rate-limit services and their network", (t) => {
+  for (const action of ["stop", "destroy"]) {
+    const { env, state } = setup(t); writePreviewState(state, env);
+    const fake = fakeDocker(state);
+    const label = { "io.graylum.local-rate-limit": state.ownerId };
+    for (const name of [`${state.names.tag}-srh`, `${state.names.tag}-redis`, `${state.names.tag}-rate-limit`]) {
+      fake.objects.set(name, { Labels: label });
+    }
+    controlPreview(options(action), state, fake.docker, env);
+    assert.deepEqual(fake.mutations.slice(0, 3), [
+      ["rm", "-f", "-v", `${state.names.tag}-srh`],
+      ["rm", "-f", "-v", `${state.names.tag}-redis`],
+      ["network", "rm", `${state.names.tag}-rate-limit`],
+    ]);
+  }
+});
+
+test("foreign rate-limit ownership blocks all preview control mutations", (t) => {
+  const { env, state } = setup(t);
+  const fake = fakeDocker(state);
+  fake.objects.set(`${state.names.tag}-redis`, { Labels: { "io.graylum.local-rate-limit": "someone-else" } });
+  assert.throws(() => controlPreview(options("stop"), state, fake.docker, env), /NOT_OWNED/);
+  assert.equal(fake.mutations.length, 0);
+});
