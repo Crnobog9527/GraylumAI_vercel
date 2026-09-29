@@ -14,6 +14,13 @@ export function moduleInput(): ModuleSkillInput {
       features: null, examples: null, preparation_questions: null },
   };
 }
+
+// MODEL-REASONING: a Skill model needs a checked "interactive" reasoning setting.
+const configuredReasoning={reasoning:{route:'deepinfra',purposes:{interactive:{mode:'off',wire:'reasoning_effort'}},catalog:{
+ fetchedAt:'2026-09-29T00:00:00.000Z',model:'qwen/qwen3.8-27b',
+ reasoning:{mandatory:false,defaultEnabled:true,supportedEfforts:['low'],defaultEffort:'low',supportsMaxTokens:false},
+ endpoints:[{tag:'deepinfra',providerName:'DeepInfra',supportedParameters:['tools','reasoning_effort'],contextLength:10000,maxCompletionTokens:4096}]}}};
+
 describe('administrator module publication', () => {
   it('preserves exact files and creates sequential dependencies and report sections', () => {
     const input = moduleInput(), result = prepareModuleSkill(input);
@@ -43,11 +50,30 @@ describe('administrator module publication', () => {
       await expect(saveModuleSkill(db as any, randomUUID(), input)).rejects.toThrow(); expect(db.rpc).not.toHaveBeenCalled(); }
   });
   it('writes package, binding, workflow and visibility through one atomic RPC with server actor', async () => {
-    const input = moduleInput(), actor = randomUUID(), db = { from:()=>({select(){return this;},eq(){return this;},single:async()=>({data:{id:input.module.model_id,name:'Qwen',model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'LOCAL_ONLY',api_endpoint:''},error:null})}), rpc: vi.fn().mockResolvedValue({ data: { moduleId: input.moduleId }, error: null }) };
+    const input = moduleInput(), actor = randomUUID(), db = { from:()=>({select(){return this;},eq(){return this;},single:async()=>({data:{id:input.module.model_id,name:'Qwen',model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'LOCAL_ONLY',api_endpoint:'',config:configuredReasoning},error:null})}), rpc: vi.fn().mockResolvedValue({ data: { moduleId: input.moduleId }, error: null }) };
     await saveModuleSkill(db as any, actor, input);
     expect(db.rpc).toHaveBeenCalledExactlyOnceWith('admin_publish_skill_module', expect.objectContaining({
       p_actor_id: actor, p_metadata: input.module, p_expected_updated_at: null, p_request_id: input.requestId,
     }));
+  });
+  it.each([
+    ['no reasoning config', undefined, '请先在模型管理的"思考设置"里设置"交互对话"'],
+    ['only an organizer setting', {reasoning:{...configuredReasoning.reasoning,purposes:{organize:{mode:'provider_default'}}}}, '请先在模型管理的"思考设置"里设置"交互对话"'],
+    ['a route without tools', {reasoning:{...configuredReasoning.reasoning,catalog:{...configuredReasoning.reasoning.catalog,
+      endpoints:[{...configuredReasoning.reasoning.catalog.endpoints[0],supportedParameters:['reasoning_effort']}]}}}, '不支持工具调用'],
+    // A model outside the old fixed list (artifacts/modelPolicy.ts) is publishable once configured.
+  ])('refuses a Skill model with %s before publishing', async (_name, config, message) => {
+    const input = moduleInput(), db = { from:()=>({select(){return this;},eq(){return this;},single:async()=>({data:{id:input.module.model_id,name:'Qwen',
+      model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'LOCAL_ONLY',api_endpoint:'',config},error:null})}),
+      rpc: vi.fn() };
+    await expect(saveModuleSkill(db as any, randomUUID(), input)).rejects.toThrow(message); expect(db.rpc).not.toHaveBeenCalled();
+  });
+  it('publishes a configured model that the old fixed model list never allowed', async () => {
+    const input = moduleInput(), config = {reasoning:{...configuredReasoning.reasoning,catalog:{...configuredReasoning.reasoning.catalog,model:'deepseek/deepseek-v4.1-flash'}}};
+    const db = { from:()=>({select(){return this;},eq(){return this;},single:async()=>({data:{id:input.module.model_id,name:'DeepSeek',
+      model_id:'deepseek/deepseek-v4.1-flash',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'LOCAL_ONLY',api_endpoint:'',config},error:null})}),
+      rpc: vi.fn().mockResolvedValue({ data: { moduleId: input.moduleId }, error: null }) };
+    await saveModuleSkill(db as any, randomUUID(), input); expect(db.rpc).toHaveBeenCalledOnce();
   });
   it('carries an explicit per-field elicitation declaration into the published workflow', () => {
     const input = moduleInput();
@@ -83,7 +109,7 @@ describe('administrator module publication', () => {
     const published = prepareModuleSkill(input).workflow.steps[0].information;
     expect(published).toEqual([{ id: 'legacy_fact', title: '旧版字段', required: true, profileKey: 'legacy_fact' }]);
     expect(published?.[0]).not.toHaveProperty('elicitation');
-    const db = { from:()=>({select(){return this;},eq(){return this;},single:async()=>({data:{id:input.module.model_id,name:'Qwen',model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'LOCAL_ONLY',api_endpoint:''},error:null})}), rpc: vi.fn().mockResolvedValue({ data: { moduleId: input.moduleId }, error: null }) };
+    const db = { from:()=>({select(){return this;},eq(){return this;},single:async()=>({data:{id:input.module.model_id,name:'Qwen',model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'LOCAL_ONLY',api_endpoint:'',config:configuredReasoning},error:null})}), rpc: vi.fn().mockResolvedValue({ data: { moduleId: input.moduleId }, error: null }) };
     await expect(saveModuleSkill(db as any, randomUUID(), input)).resolves.toBeTruthy();
     expect(db.rpc).toHaveBeenCalledOnce();
   });

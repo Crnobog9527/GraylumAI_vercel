@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { packageHash, packageHashPayload, sha256, type PackageDescriptor } from './loader';
 import { validatePublication } from './publication';
 import { validateWorkflow,informationSchema } from '../artifacts/workflow';
-import { summaryModelOption } from '../artifacts/modelPolicy';
+import { RUNTIME_MODEL_COLUMNS, runtimeModelOption } from '../models/runtimeEligibility';
 import { parseWorkflowManifest, workflowManifestPath } from './workflowManifest';
 
 const label = z.string().trim().min(1).max(160).regex(/^[^\r\n\x00-\x1f]+$/);
@@ -71,9 +71,9 @@ export function prepareModuleSkill(value: ModuleSkillInput) {
 
 export async function saveModuleSkill(db: SupabaseClient, actorId: string, value: ModuleSkillInput) {
   const prepared = prepareModuleSkill(value);
-  const model = await db.from('ai_models').select('id,name,model_id,provider,is_active,max_tokens,input_limit,api_key,api_endpoint,token_counting_supported,tokenizer_family').eq('id',value.module.model_id).single();
+  const model = await db.from('ai_models').select(RUNTIME_MODEL_COLUMNS).eq('id',value.module.model_id).single();
   if(model.error || !model.data) throw new Error('请选择已配置的对话模型');
-  const option=summaryModelOption(model.data);
+  const option=runtimeModelOption(model.data,'skill');
   if(!option.available) throw new Error(option.reason ?? '对话模型配置不完整');
   const { descriptor, files, workflow } = prepared;
   const { data, error } = await db.rpc('admin_publish_skill_module', {

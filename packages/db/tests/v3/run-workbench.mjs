@@ -3,6 +3,9 @@
 import { legacyRuntime, instrumentLegacy, copyLegacyTests, patchLegacyFinanceReader } from './legacy-runtime.mjs';
 import { installWorkbenchBilling } from "./billing-fixture.mjs";
 import { installAdminSurfacesPreview } from "./admin-surfaces-fixture.mjs";
+import { writeRateLimitCaseReport } from "./local-rate-limit-case-report.mjs";
+import { installLocalRateLimitCases } from "./local-rate-limit-cases.mjs";
+import { createLocalRateLimit } from "./local-rate-limit.mjs";
 import { GOTRUE_IMAGE, POSTGRES_IMAGE, POSTGREST_IMAGE } from "./images.mjs";
 import { verifyWithoutAppResults, withoutAppPattern, WITHOUT_APP_SUITES } from "./without-app.mjs";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -106,6 +109,8 @@ const tag = previewState?.names.tag ?? `graylum-wb-${randomUUID().slice(0, 8)}`,
   db = previewState?.names.db ?? `${tag}-db`,
   rest = previewState?.names.rest ?? `${tag}-rest`,
   auth = previewState?.names.auth ?? `${tag}-auth`;
+const localRateLimit = withoutApp ? null : createLocalRateLimit({ tag, ownerId: previewState?.ownerId });
+const redactRateLimit = (text) => localRateLimit?.redact(text) ?? text;
 const labels = previewState ? previewLabelArgs(previewState) : [];
 const secret = previewState?.secret ?? randomUUID() + randomUUID();
 const jwt = (role) => signPreviewJwt(secret, role);
@@ -769,13 +774,15 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
     appPort = listener.address().port;
     await new Promise((resolve) => listener.close(resolve));
   }
+  const rateLimitCases = withoutApp ? null : installLocalRateLimitCases(root, legacyRoot&&!upgradeMode&&!opcMode?legacyRoot:root);
   const env = {
     ...cleanEnv,
+    ...(await localRateLimit?.start()),
     ...(args.includes('--reuse-only') ? {V3_REUSE_TEST:'1'} : {}),
     ...((args.includes('--real-skill-only')||opcMode) ? {V3_REAL_SKILL_INPUT:process.env.V3_REAL_SKILL_INPUT} : {}),
     V3_LEGACY_ROOT:legacyRoot??'', V3_LEGACY_REF:legacyRef??'',
     NODE_ENV: serve ? "production" : "development",
-    NODE_OPTIONS:`--require=${networkGuard}`,
+    NODE_OPTIONS:`--require=${networkGuard}${rateLimitCases?.nodeOptions ?? ""}`,
     NEXT_PUBLIC_SUPABASE_URL: stagingHost?'https://'+syntheticStagingHost:apiUrl,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: anon,
     SUPABASE_SERVICE_ROLE_KEY: service,
@@ -831,11 +838,10 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
     console.log('APPLICATION_PROCESS '+JSON.stringify({pid:app.pid,root:applicationRoot,legacyRef:applicationRoot===legacyRoot?legacyRef:null}));
     for (const output of [app.stdout, app.stderr])
       output.on("data", (x) => {
-        appLog.push(x.toString());
+        appLog.push(redactRateLimit(x.toString()));
         writeFileSync(
           resolve(env.V3_WORKBENCH_OUTPUT, "app-progress.log"),
-          appLog
-            .join("")
+          redactRateLimit(appLog.join(""))
             .replaceAll(secret, "[LOCAL_SECRET]")
             .replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, "[LOCAL_TOKEN]"),
         );
@@ -886,7 +892,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
         "vitest",
         "run",
         "--config",
-        "vitest.integration.config.ts",
+        rateLimitCases?.config ?? "vitest.integration.config.ts",
         ...(runtimeUpgrade ? ["src/services/runtime/upgrade.integration.ts"] : upgradeMode ? ["src/services/bill2/upgrade.integration.ts"] : withoutApp ? [] : ["src/services/__tests__/workbench.integration.ts"]),
         ...(bill2Mode ? ['src/services/bill2/billing.integration.ts'] : []),
         ...(runtimeMode ? ['src/services/runtime/runtime.integration.ts', 'src/services/runtime/streaming.integration.ts'] : []),
@@ -900,7 +906,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
               : "^restores all projects in a new browser login after a real application process restart$"]
           : primaryTestArgs),
       ],
-      { cwd: legacyRoot&&!upgradeMode&&!opcMode?legacyRoot:root, env, detached: true, stdio: "inherit" },
+      { cwd: legacyRoot&&!upgradeMode&&!opcMode?legacyRoot:root, env: { ...env, ...localRateLimit?.caseEnvironment }, detached: true, stdio: "inherit" },
     );
   await runPreviewPhase(previewOptions, "runTests", async () => {
   await childExit(runTests());
@@ -926,8 +932,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
     throw new Error("private method leaked in application logs");
   writeFileSync(
     resolve(env.V3_WORKBENCH_OUTPUT, "app.log"),
-    appLog
-      .join("")
+    redactRateLimit(appLog.join(""))
       .replaceAll(service, "[LOCAL_SERVICE]")
       .replaceAll(anon, "[LOCAL_ANON]"),
   );
@@ -985,13 +990,12 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
     );
   } catch {}
   console.error(
-    appLog
-      .join("")
+    redactRateLimit(appLog.join(""))
       .replaceAll(secret, "[LOCAL_SECRET]")
       .replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, "[LOCAL_TOKEN]"),
   );
   console.error(
-    String(error.stderr ?? error.message)
+    redactRateLimit(String(error.stderr ?? error.message))
       .replaceAll(secret, "[LOCAL_SECRET]")
       .replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, "[LOCAL_TOKEN]"),
   );
@@ -1002,6 +1006,10 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
   process.removeListener("SIGTERM", stopServing);
   stoppingApplication = true;
   await stopLocalApplication(app);
+  try { if (localRateLimit) writeRateLimitCaseReport(evidenceDirectory); }
+  catch { process.exitCode = 1; console.error("LOCAL_RATE_LIMIT_REPORT_FAILED"); }
+  try { localRateLimit?.cleanup(); }
+  catch (error) { process.exitCode = 1; console.error(error.message); }
   if (gateway) {
     gateway.closeAllConnections();
     await new Promise((r) => gateway.close(r));

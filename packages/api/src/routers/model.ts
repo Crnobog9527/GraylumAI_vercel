@@ -10,6 +10,7 @@ import {
   normalizeOpenAICompatibleEndpoint,
   usesOpenAICompatibleApi as usesOpenAICompatibleProvider,
 } from '../services/providerUtils';
+import { withStoredReasoning } from '../services/models/modelConfig';
 
 type PersistedModel = {
   id: string;
@@ -362,7 +363,7 @@ export const modelRouter = router({
     .mutation(async ({ ctx, input }) => {
       const currentModel = await ctx.supabase
         .from('ai_models')
-        .select('provider, model_id, api_endpoint')
+        .select('provider, model_id, api_endpoint, config')
         .eq('id', input.id)
         .single();
 
@@ -385,7 +386,7 @@ export const modelRouter = router({
       if (input.outputTokenCostAbove200k !== undefined) updateData.output_token_cost_above_200k = Math.round(input.outputTokenCostAbove200k * MICRO_DOLLARS_PER_USD);
       if (input.webSearchCost !== undefined) updateData.web_search_cost = Math.round(input.webSearchCost * MICRO_DOLLARS_PER_USD);
       if (input.isActive !== undefined) updateData.is_active = input.isActive ? 'true' : 'false';
-      if (input.config !== undefined) updateData.config = input.config;
+      if (input.config !== undefined) updateData.config = withStoredReasoning(input.config, currentModel.data?.config);
 
       const nextProvider = input.provider ?? currentModel.data?.provider ?? 'custom';
       const nextModelId = input.modelId ?? currentModel.data?.model_id;
@@ -448,17 +449,14 @@ export const modelRouter = router({
 
   // Legacy: Update AI model configuration (kept for backwards compatibility)
   updateModelConfig: adminProcedure
-    .input(z.object({ id: z.string().uuid(), config: z.any() }))
+    .input(z.object({ id: z.string().uuid(), config: z.record(z.string(), z.unknown()) }))
     .mutation(async ({ ctx, input }) => {
-      const { data, error } = await ctx.supabase
-        .from('ai_models')
-        .update({ config: input.config, updated_at: new Date().toISOString() })
+      const current = await ctx.supabase.from('ai_models').select('config').eq('id', input.id).maybeSingle();
+      const { data, error } = await ctx.supabase.from('ai_models')
+        .update({ config: withStoredReasoning(input.config, current.data?.config), updated_at: new Date().toISOString() })
         .eq('id', input.id)
         .select();
-
-      if (error) {
-        throw createModelOperationError('更新模型配置', error);
-      }
+      if (error) throw createModelOperationError('更新模型配置', error);
       return data;
     }),
 
