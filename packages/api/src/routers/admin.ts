@@ -1441,24 +1441,6 @@ export const adminRouter = router({
   // ============================================
 
   /**
-   * Get all credit packages
-   */
-  getAllPackages: adminProcedure
-    .query(async ({ ctx }) => {
-      const { data, error } = await ctx.supabase
-        .from('credit_packages')
-        .select('*')
-        .order('sort_order', { ascending: true })
-        .order('price', { ascending: true });
-
-      if (error) {
-        throw createAdminOperationError('读取积分包列表', error);
-      }
-
-      return data ?? [];
-    }),
-
-  /**
    * Get packages page bootstrap data
    */
   getPackagesDashboard: adminProcedure
@@ -1797,61 +1779,6 @@ export const adminRouter = router({
   // the owner-confirmed feature module management entry.
   // ============================================
 
-  getAllPrompts: adminProcedure
-    .input(z.object({
-      limit: z.number().min(1).max(100).default(50),
-      offset: z.number().min(0).default(0),
-      category: promptCategorySchema.optional(),
-      activeOnly: z.boolean().default(false),
-    }))
-    .query(async ({ ctx, input }) => {
-      const startedAt = Date.now();
-      let query = ctx.supabase
-        .from('modules')
-        .select('*', { count: 'planned' })
-        .order('sort_order', { ascending: false })
-        .order('created_at', { ascending: false })
-        .range(input.offset, input.offset + input.limit - 1);
-
-      if (input.category) {
-        query = query.eq('category', input.category);
-      }
-
-      if (input.activeOnly) {
-        query = query.eq('active', true);
-      }
-
-      const { data, error, count } = await query;
-      if (error) {
-        throw createAdminOperationError('读取功能模块列表', error);
-      }
-
-      const statsQuery = await ctx.supabase
-        .from('modules')
-        .select('active, category, is_featured');
-
-      if (statsQuery.error) {
-        throw createAdminOperationError('读取功能模块统计', statsQuery.error);
-      }
-
-      const result = {
-        prompts: data ?? [],
-        modules: data ?? [],
-        total: count ?? 0,
-        hasMore: (count ?? 0) > input.offset + input.limit,
-        stats: summarizeModules(statsQuery.data ?? []),
-      };
-
-      logAdminEndpointMetric('admin.getAllPrompts', startedAt, {
-        queryCount: 2,
-        countStrategy: 'planned',
-        pageSize: input.limit,
-        returnedCount: result.modules.length,
-      });
-
-      return result;
-    }),
-
   getPromptsDashboard: adminProcedure
     .input(z.object({
       limit: z.number().min(1).max(100).default(50),
@@ -2134,28 +2061,6 @@ export const adminRouter = router({
         disabledIds: (data ?? []).map((module) => module.id),
         disabledCount: data?.length ?? 0,
       };
-    }),
-
-  deletePrompt: adminProcedure
-    .input(z.object({
-      id: z.string().uuid(),
-    }))
-    .mutation(async ({ ctx, input }) => {
-      const { data, error } = await ctx.supabase
-        .from('modules')
-        .update({
-          active: false,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', input.id)
-        .select('id')
-        .single();
-
-      if (error) {
-        throw createAdminOperationError('下架功能模块', error);
-      }
-
-      return { success: true, disabledId: data?.id ?? input.id };
     }),
 
   removePrompts: adminProcedure
@@ -2586,23 +2491,6 @@ export const adminRouter = router({
 // ============================================
   // Membership Plans Management
   // ============================================
-
-  /**
-   * Get all membership plans
-   */
-  getAllMembershipPlans: adminProcedure
-    .query(async ({ ctx }) => {
-      const { data, error } = await ctx.supabase
-        .from('membership_plans')
-        .select('*')
-        .order('sort_order', { ascending: true });
-
-      if (error) {
-        throw createAdminOperationError('读取会员方案列表', error);
-      }
-
-      return data ?? [];
-    }),
 
   /**
    * Get settings page bootstrap data
