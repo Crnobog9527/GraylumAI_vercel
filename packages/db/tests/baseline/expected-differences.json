@@ -19,14 +19,6 @@
    "fnacl:rls_auto_enable()"
   ]
  },
- "addedToStagingBy0148": {
-  "_why": "0148 re-installs the 0027 profile credit guard that staging lost; after 0148 is applied to staging these disappear from the diff and must be removed here.",
-  "keys": [
-   "fn:prevent_client_profile_credit_write()",
-   "fnacl:prevent_client_profile_credit_write()",
-   "trg:profiles.trg_prevent_client_profile_credit_write"
-  ]
- },
  "stricterInFiles": {
   "_why": "CHECK/UNIQUE constraints and indexes that repository migrations define but staging never received (its tables pre-dated those CREATE TABLE IF NOT EXISTS migrations). Kept: they only reject invalid rows or speed up reads.",
   "keys": [
@@ -121,5 +113,9 @@
    "idx:user_subscriptions.idx_user_subscriptions_user_id",
    "idx:user_subscriptions.user_subscriptions_stripe_subscription_id_key"
   ]
+ },
+ "pendingOnStaging": {
+  "_why": "Objects of migrations merged but not yet applied to staging (group or object keys). Empty whenever staging is up to date; list them only while comparing across such a gap.",
+  "keys": []
  }
 }
