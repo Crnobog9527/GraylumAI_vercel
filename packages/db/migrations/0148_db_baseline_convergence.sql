@@ -2,9 +2,13 @@
 -- DB-BASELINE: converge a database built from files (platform -> packages/db/baseline -> every
 -- migration) to the staging structure, which drifted outside the repository over time.
 -- Every step is guarded or idempotent: on staging (already in the target state) the only effects
--- are re-creating 14 policies with identical definitions and GRANTs it already has.
+-- are re-creating 15 policies with identical definitions, GRANTs it already has, and the 0027
+-- profile credit guard staging lost (step 9).
 -- No table rows are read or changed. Apply remotely only with Owner approval.
 BEGIN;
+-- Step 4 takes ACCESS EXCLUSIVE locks on about ten tables; give up rather than queue behind a
+-- long transaction and block live requests.
+SET LOCAL lock_timeout = '5s';
 
 -- 1. Ticket auto-close runs only as the Vercel cron (#506). 0010 schedules a second, database-side
 --    job through pg_cron on a new database; staging has no pg_cron. Remove the job, its function
@@ -279,6 +283,7 @@ END $$;
 CREATE OR REPLACE FUNCTION public.prevent_client_profile_credit_write()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $$
 BEGIN
   IF current_user IN ('anon', 'authenticated') THEN
