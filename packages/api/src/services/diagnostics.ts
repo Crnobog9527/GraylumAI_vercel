@@ -18,6 +18,7 @@ import { buildCachedPrompt } from './promptCacheBuilder';
 import { getChatRuntimeSettings } from './chatRuntime';
 import { getConfiguredProviderApiKeySource } from './providerUtils';
 import { logger } from '../lib/logger';
+import { readDiagnosticSummary, readDiagnosticTestHistory, readLatestDiagnosticResults } from './diagnosticsResults';
 
 // ============================================
 // 类型定义
@@ -212,7 +213,9 @@ export async function loadLatestRuntimeProof(
 ): Promise<LatestRuntimeProof> {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
-  const { data: usageLog } = await supabase
+  // LEGACY-CLOSE: this proof only reads legacy-chat data (ai_usage_logs, token_stats, billing_history,
+  // context snapshots). The legacy chat is closed (#507); delete this check with LEGACY-CLOSE.
+  const { data: usageLog, error: usageLogError } = await supabase
     .from('ai_usage_logs')
     .select('id, user_id, conversation_id, request_id, model_id, latency_ms, created_at, metadata')
     .eq('status', 'success')
@@ -220,6 +223,15 @@ export async function loadLatestRuntimeProof(
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
+
+  if (usageLogError) {
+    return {
+      found: false,
+      status: 'warning',
+      message: '旧聊天运行证据不可用：旧聊天已关闭，此项随 LEGACY-CLOSE 删除',
+      checkedAt: new Date().toISOString(),
+    };
+  }
 
   if (!usageLog) {
     return {
@@ -1111,12 +1123,7 @@ export class DiagnosticsService {
    * 获取最新测试结果
    */
   async getLatestResults(): Promise<DiagnosticTestResult[]> {
-    const { data } = await this.supabase
-      .from('diagnostic_latest_results')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    return (data ?? []).map((row) => ({
+    return (await readLatestDiagnosticResults(this.supabase)).map((row) => ({
       testId: row.test_id,
       testName: row.test_name,
       category: row.category as DiagnosticCategory,
@@ -1131,12 +1138,7 @@ export class DiagnosticsService {
    * 获取测试历史
    */
   async getTestHistory(testId: string, limit: number = 10): Promise<DiagnosticTestResult[]> {
-    const { data } = await this.supabaseAdmin.rpc('get_test_history', {
-      p_test_id: testId,
-      p_limit: limit,
-    });
-
-    return (data ?? []).map((row: { id: string; status: string; message: string; latency_ms: number; created_at: string }) => ({
+    return (await readDiagnosticTestHistory(this.supabaseAdmin, testId, limit)).map((row) => ({
       testId,
       testName: TEST_DEFINITIONS.find((t) => t.id === testId)?.name ?? testId,
       category: TEST_DEFINITIONS.find((t) => t.id === testId)?.category ?? 'ai',
@@ -1150,23 +1152,7 @@ export class DiagnosticsService {
    * 获取诊断摘要统计
    */
   async getSummaryStats(hours: number = 24) {
-    const { data } = await this.supabaseAdmin.rpc('get_diagnostic_summary', {
-      p_hours: hours,
-    });
-
-    if (data && data.length > 0) {
-      return data[0];
-    }
-
-    return {
-      total_tests: 0,
-      passed_tests: 0,
-      failed_tests: 0,
-      warning_tests: 0,
-      pass_rate: 0,
-      avg_latency_ms: 0,
-      last_run: null,
-    };
+    return readDiagnosticSummary(this.supabaseAdmin, hours);
   }
 
   async getLatestRuntimeProof(hours: number = 72): Promise<LatestRuntimeProof> {
