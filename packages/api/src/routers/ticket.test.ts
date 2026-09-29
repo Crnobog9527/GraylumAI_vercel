@@ -2,21 +2,28 @@ import { TRPCError } from '@trpc/server';
 import { describe, expect, it } from 'vitest';
 import { getTicketsForProfile, ticketRouter } from './ticket';
 
-function createQueryBuilder(result: Promise<unknown>) {
+type QueryCall = { table: string; operation: string; value: unknown };
+
+function createQueryBuilder(result: Promise<unknown>, calls: QueryCall[] = [], table = '') {
   return {
-    insert() {
+    insert(value: unknown) {
+      calls.push({ table, operation: 'insert', value });
       return this;
     },
     update() {
       return this;
     },
-    select() {
+    select(value?: unknown) {
+      calls.push({ table, operation: 'select', value });
       return this;
     },
     eq() {
       return this;
     },
     order() {
+      return result;
+    },
+    maybeSingle() {
       return result;
     },
     single() {
@@ -32,6 +39,7 @@ function createTicketCaller(options: {
   ticketResult?: { data: unknown; error: unknown };
   ticketReplyResult?: { data: unknown; error: unknown };
   closeTicketResult?: { data: unknown; error: unknown };
+  calls?: QueryCall[];
 }) {
   const authProfile = {
     id: 'user-1',
@@ -49,17 +57,17 @@ function createTicketCaller(options: {
 
       if (table === 'tickets') {
         if (options.ticketResult) {
-          return createQueryBuilder(Promise.resolve(options.ticketResult));
+          return createQueryBuilder(Promise.resolve(options.ticketResult), options.calls, 'tickets');
         }
 
-        return createQueryBuilder(Promise.resolve({ data: { id: 'ticket-1' }, error: null }));
+        return createQueryBuilder(Promise.resolve({ data: { id: 'ticket-1' }, error: null }), options.calls, 'tickets');
       }
 
       if (table === 'ticket_replies') {
         return createQueryBuilder(Promise.resolve(options.ticketReplyResult ?? {
           data: { id: 'reply-1', content: 'ok', created_at: '2026-03-27T00:00:00.000Z' },
           error: null,
-        }));
+        }), options.calls, 'ticket_replies');
       }
 
       throw new Error(`Unexpected table ${table}`);
@@ -215,5 +223,40 @@ describe('ticketRouter error sanitization', () => {
       code: 'INTERNAL_SERVER_ERROR',
       message: '关闭工单失败，请稍后重试',
     });
+  });
+});
+
+describe('ticketRouter column grant contract', () => {
+  const ticketId = '11111111-1111-4111-8111-111111111111';
+
+  it('creates using the caller identity and database-controlled initial status', async () => {
+    const calls: QueryCall[] = [];
+    const caller = createTicketCaller({ calls });
+    await caller.createTicket({ title: 'fixture', description: 'fixture', category: 'bug_report', attachments: [] });
+    expect(calls.find(x => x.operation === 'insert')?.value).toEqual({
+      user_id: 'user-1', title: 'fixture', description: 'fixture', category: 'bug', attachments: [],
+    });
+    const projection = calls.find(x => x.operation === 'select')?.value;
+    expect(projection).toEqual(expect.any(String));
+    expect(projection).not.toContain('*');
+    expect(projection).not.toContain('deleted_at');
+  });
+
+  it('replies without requesting write access to the administrator flag', async () => {
+    const calls: QueryCall[] = [];
+    const caller = createTicketCaller({ calls });
+    await caller.replyToTicket({ ticketId, content: 'fixture' });
+    expect(calls.find(x => x.table === 'ticket_replies' && x.operation === 'insert')?.value).toEqual({
+      ticket_id: ticketId, user_id: 'user-1', content: 'fixture',
+    });
+    const projection = calls.find(x => x.table === 'ticket_replies' && x.operation === 'select')?.value;
+    expect(projection).toEqual(expect.any(String));
+    expect(projection).not.toContain('*');
+    expect(projection).not.toContain('deleted_at');
+  });
+
+  it('does not report a successful close when RLS matches no ticket', async () => {
+    const caller = createTicketCaller({ ticketResult: { data: null, error: null } });
+    await expect(caller.closeTicket({ ticketId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 });

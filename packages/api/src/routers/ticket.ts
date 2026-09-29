@@ -9,6 +9,12 @@ import {
   issueSignedAttachmentUrlsByBatch,
 } from '../lib/ticketAttachments';
 
+// Keep in sync with 0143 authenticated SELECT grants; never return deleted_at.
+export const TICKET_COLUMNS =
+  'id,user_id,title,description,category,priority,attachments,status,is_deleted,created_at,updated_at';
+export const TICKET_REPLY_COLUMNS = 'id,ticket_id,user_id,content,is_admin,attachments,created_at';
+const TICKET_WITH_REPLIES = `${TICKET_COLUMNS},ticket_replies(${TICKET_REPLY_COLUMNS})`;
+
 // 前端分类到数据库分类的映射
 const categoryToDbMap: Record<string, string> = {
   technical_support: 'question',
@@ -92,7 +98,7 @@ export async function getTicketsForProfile(ctx: {
 }) {
   const { data, error } = await ctx.supabase
     .from('tickets')
-    .select('*, ticket_replies(*)')
+    .select(TICKET_WITH_REPLIES)
     .eq('user_id', ctx.profileId)
     .eq('is_deleted', 'false')
     .order('created_at', { ascending: false });
@@ -138,10 +144,9 @@ export const ticketRouter = router({
           title: input.title,
           description: input.description,
           category: dbCategory,
-          status: 'open',
           attachments: ownedAttachments,
         })
-        .select()
+        .select(TICKET_COLUMNS)
         .single();
 
       if (ticketError || !newTicket) {
@@ -164,7 +169,7 @@ export const ticketRouter = router({
     .query(async ({ ctx, input }) => {
       const { data: ticket, error } = await ctx.supabase
         .from('tickets')
-        .select('*, ticket_replies(*)')
+        .select(TICKET_WITH_REPLIES)
         .eq('id', input.ticketId)
         .eq('user_id', ctx.profileId)
         .single();
@@ -202,9 +207,8 @@ export const ticketRouter = router({
           ticket_id: input.ticketId,
           user_id: ctx.profileId,
           content: input.content,
-          is_admin: 'false',
         })
-        .select()
+        .select(TICKET_REPLY_COLUMNS)
         .single();
 
       if (replyError) {
@@ -223,14 +227,20 @@ export const ticketRouter = router({
   closeTicket: protectedProcedure
     .input(z.object({ ticketId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const { error } = await ctx.supabase
+      const { data, error } = await ctx.supabase
         .from('tickets')
         .update({ status: 'closed' })
         .eq('id', input.ticketId)
-        .eq('user_id', ctx.profileId);
+        .eq('user_id', ctx.profileId)
+        .select('id')
+        .maybeSingle();
 
       if (error) {
         throw createSafeInternalError(error, '关闭工单失败，请稍后重试');
+      }
+
+      if (!data) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Ticket not found.' });
       }
 
       return { success: true };
