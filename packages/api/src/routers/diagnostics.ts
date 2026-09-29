@@ -80,7 +80,7 @@ async function getRecentRunsData(
   return Array.from(batches.values()).slice(0, limit);
 }
 
-async function getDiagnosticsHealthCheck(supabase: any) {
+async function getDiagnosticsHealthCheck(supabase: any, supabaseAdmin: any) {
   const checks: Record<string, { ok: boolean; message: string }> = {};
 
   try {
@@ -113,7 +113,7 @@ async function getDiagnosticsHealthCheck(supabase: any) {
   const hasEnvApiKey = Boolean(configuredKeySource?.startsWith('env:'));
   let hasDbApiKey = false;
   try {
-    const { data: modelsWithKey } = await supabase
+    const { data: modelsWithKey } = await supabaseAdmin
       .from('ai_models')
       .select('api_key')
       .eq('is_active', 'true')
@@ -170,7 +170,7 @@ export const diagnosticsRouter = router({
           logDiagnosticsFallback('diagnostics_summary_stats_failed', { hours: summaryHours });
           return createSummaryStatsFallback();
         }),
-        getDiagnosticsHealthCheck(ctx.userScopedSupabase),
+        getDiagnosticsHealthCheck(ctx.userScopedSupabase, ctx.supabaseAdmin),
         service.getLatestRuntimeProof(runtimeHours).catch(() => {
           logDiagnosticsFallback('diagnostics_runtime_proof_failed', { hours: runtimeHours });
           return createRuntimeProofFallback(runtimeHours);
@@ -430,7 +430,7 @@ export const diagnosticsRouter = router({
    * 不运行完整测试，只检查关键状态
    */
   healthCheck: adminProcedure
-    .query(async ({ ctx }) => getDiagnosticsHealthCheck(ctx.userScopedSupabase)),
+    .query(async ({ ctx }) => getDiagnosticsHealthCheck(ctx.userScopedSupabase, ctx.supabaseAdmin)),
 });
 
 export default diagnosticsRouter;
