@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { DialogCaptcha } from '@/components/auth/DialogCaptcha';
-import { CAPTCHA_EXPIRED_MESSAGE, captchaOptionsFromToken } from '@/lib/dialogCaptcha';
+import { CAPTCHA_EXPIRED_MESSAGE, captchaOptionsFromToken, keepDialogOpenForCaptcha } from '@/lib/dialogCaptcha';
 import {
   Dialog,
   DialogContent,
@@ -287,6 +287,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
       <Dialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
         <DialogContent
+          onInteractOutside={keepDialogOpenForCaptcha}
           className="sm:max-w-md"
           style={{
             background: 'var(--bg-secondary)',

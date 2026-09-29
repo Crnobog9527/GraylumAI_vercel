@@ -3,6 +3,9 @@ import type { HCaptchaClient, HCaptchaRenderOptions } from '@/lib/authCaptcha';
 import {
   CAPTCHA_REQUIRED_MESSAGE,
   captchaOptionsFromToken,
+  isCaptchaChallengeTarget,
+  isHCaptchaSource,
+  keepDialogOpenForCaptcha,
   loadHCaptcha,
   renderDialogCaptcha,
 } from './dialogCaptcha';
@@ -142,5 +145,77 @@ describe('loadHCaptcha', () => {
     await expect(a).rejects.toThrow('hCaptcha unavailable');
     await expect(b).rejects.toThrow('hCaptcha unavailable');
     expect(fake.attached()).toBe(0);
+  });
+});
+
+// Minimal element tree (no DOM library in this workspace): tag, attributes, children.
+type FakeEl = {
+  tagName: string; parentElement: FakeEl | null; ownerDocument: { body: FakeEl | null };
+  attrs: Record<string, string>; children: FakeEl[];
+  getAttribute: (name: string) => string | null;
+  querySelector: (selector: string) => FakeEl | null;
+  querySelectorAll: (selector: string) => FakeEl[];
+};
+function el(tag: string, attrs: Record<string, string> = {}, children: FakeEl[] = []): FakeEl {
+  const node: FakeEl = {
+    tagName: tag.toUpperCase(), parentElement: null, ownerDocument: { body: null }, attrs, children,
+    getAttribute: name => attrs[name] ?? null,
+    querySelector: selector => node.querySelectorAll(selector)[0] ?? null,
+    querySelectorAll: selector => {
+      const all: FakeEl[] = [];
+      const walk = (n: FakeEl) => n.children.forEach(child => { all.push(child); walk(child); });
+      walk(node);
+      if (selector === 'iframe') return all.filter(n => n.tagName === 'IFRAME');
+      if (selector === '[role="dialog"]') return all.filter(n => n.attrs.role === 'dialog');
+      throw new Error(`unsupported selector ${selector}`);
+    },
+  };
+  children.forEach(child => { child.parentElement = node; });
+  return node;
+}
+function page() {
+  const challengeBackdrop = el('div');
+  const challengeFrame = el('iframe', { src: 'https://newassets.hcaptcha.com/captcha/v1/abc/static/hcaptcha.html#frame=challenge' });
+  const challenge = el('div', {}, [challengeBackdrop, el('div', {}, [challengeFrame])]);
+  const checkboxFrame = el('iframe', { src: 'https://newassets.hcaptcha.com/captcha/v1/abc/static/hcaptcha.html#frame=checkbox' });
+  const overlay = el('div', { 'data-state': 'open' });
+  const dialog = el('div', { role: 'dialog' }, [el('div', { 'data-dialog-captcha': '' }, [checkboxFrame])]);
+  const portal = el('div', {}, [overlay, dialog]);
+  const other = el('button');
+  const app = el('main', {}, [other, el('iframe', { src: 'https://www.youtube.com/embed/x' })]);
+  const body = el('body', {}, [app, portal, challenge]);
+  const all = [body, app, other, portal, overlay, dialog, checkboxFrame, challenge, challengeBackdrop, challengeFrame];
+  const walk = (n: FakeEl) => { n.ownerDocument = { body }; n.children.forEach(walk); };
+  walk(body);
+  return { all, challengeBackdrop, challengeFrame, overlay, other, app };
+}
+
+describe('keeping a dialog open for the hCaptcha challenge', () => {
+  it('recognises hCaptcha frames by host only', () => {
+    expect(isHCaptchaSource('https://newassets.hcaptcha.com/captcha/v1/x.html')).toBe(true);
+    expect(isHCaptchaSource('https://hcaptcha.com/1/api.js')).toBe(true);
+    expect(isHCaptchaSource('https://hcaptcha.com.evil.example/x')).toBe(false);
+    expect(isHCaptchaSource('https://evil.example/?u=hcaptcha.com')).toBe(false);
+    expect(isHCaptchaSource(null)).toBe(false);
+  });
+
+  it('keeps the dialog open for pointer or focus events inside the challenge', () => {
+    const { challengeBackdrop, challengeFrame } = page();
+    expect(isCaptchaChallengeTarget(challengeBackdrop as unknown as EventTarget)).toBe(true);
+    expect(isCaptchaChallengeTarget(challengeFrame as unknown as EventTarget)).toBe(true);
+    const preventDefault = vi.fn();
+    keepDialogOpenForCaptcha({ target: challengeFrame as unknown as EventTarget, preventDefault });
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it('still closes on the overlay, elsewhere on the page, and for non-element targets', () => {
+    const { overlay, other, app } = page();
+    for (const target of [overlay, other, app]) {
+      const preventDefault = vi.fn();
+      keepDialogOpenForCaptcha({ target: target as unknown as EventTarget, preventDefault });
+      expect(preventDefault).not.toHaveBeenCalled();
+    }
+    expect(isCaptchaChallengeTarget(null)).toBe(false);
+    expect(isCaptchaChallengeTarget({} as EventTarget)).toBe(false);
   });
 });

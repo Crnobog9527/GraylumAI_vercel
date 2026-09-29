@@ -83,3 +83,39 @@ export function captchaOptionsFromToken(
   }
   return { captchaToken: token };
 }
+
+export function isHCaptchaSource(src: string | null | undefined): boolean {
+  if (!src) return false;
+  try {
+    const host = new URL(src, 'https://invalid.local').hostname;
+    return host === 'hcaptcha.com' || host.endsWith('.hcaptcha.com');
+  } catch {
+    return false;
+  }
+}
+
+const isHCaptchaFrame = (el: Element) => el.tagName === 'IFRAME' && isHCaptchaSource(el.getAttribute('src'));
+
+/**
+ * hCaptcha mounts its image challenge outside the dialog (a direct child of <body>). A pointer or
+ * focus event there must not dismiss the dialog, or the widget unmounts mid-challenge. Matched by
+ * the hCaptcha frame source, never by element ids; the dialog's own portal (overlay + content)
+ * is excluded so a click on the overlay still closes the dialog.
+ */
+export function isCaptchaChallengeTarget(target: EventTarget | null): boolean {
+  if (!target || typeof (target as Element).tagName !== 'string') return false;
+  let top = target as Element;
+  const body = top.ownerDocument?.body ?? null;
+  if (isHCaptchaFrame(top)) return true;
+  while (top.parentElement && top.parentElement !== body) {
+    top = top.parentElement;
+    if (isHCaptchaFrame(top)) return true;
+  }
+  if (top.querySelector('[role="dialog"]')) return false;
+  return Array.from(top.querySelectorAll('iframe')).some(isHCaptchaFrame);
+}
+
+/** Pass as onInteractOutside of a dialog that renders DialogCaptcha. */
+export function keepDialogOpenForCaptcha(event: { target: EventTarget | null; preventDefault: () => void }) {
+  if (isCaptchaChallengeTarget(event.target)) event.preventDefault();
+}
