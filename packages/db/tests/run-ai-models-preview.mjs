@@ -10,7 +10,7 @@ if (process.argv.slice(2).join(' ') !== '--local-only') throw new Error('Require
 const root = resolve(import.meta.dirname, '../../..');
 const scratch = mkdtempSync(resolve(tmpdir(), 'b01-preview-source-'));
 const run = (cmd, args, cwd = root, input) => execFileSync(cmd, args, {
-  cwd, input, stdio: ['pipe', 'pipe', 'pipe'],
+  cwd, input, maxBuffer: 64 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'],
 });
 let child;
 const stop = () => { if (child?.pid) child.kill('SIGTERM'); };
