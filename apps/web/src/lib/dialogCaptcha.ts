@@ -28,12 +28,18 @@ export function loadHCaptcha(env: LoaderEnv = { doc: document, win: window }): P
       script.async = true;
       env.doc.head.appendChild(script);
     }
-    script.addEventListener('load', () => {
+    const loading = script;
+    // A failed element never fires again; remove it so the next call inserts and loads afresh.
+    const fail = () => {
+      loading.remove();
+      reject(new Error('hCaptcha unavailable'));
+    };
+    loading.addEventListener('load', () => {
       const client = ready();
       if (client) resolve(client);
-      else reject(new Error('hCaptcha unavailable'));
+      else fail();
     }, { once: true });
-    script.addEventListener('error', () => reject(new Error('hCaptcha unavailable')), { once: true });
+    loading.addEventListener('error', fail, { once: true });
   });
 }
 

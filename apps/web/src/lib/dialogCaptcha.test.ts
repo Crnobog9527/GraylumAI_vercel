@@ -21,21 +21,37 @@ function fakeClient() {
   return { client, options: () => options! };
 }
 
+type FakeScript = {
+  id: string; src: string; async: boolean;
+  listeners: Record<string, Array<() => void>>;
+  addEventListener: (event: string, handler: () => void) => void;
+  remove: () => void;
+};
+
 function fakeDocument() {
-  const listeners: Record<string, Array<() => void>> = {};
-  const script = {
-    id: '', src: '', async: false,
-    addEventListener: vi.fn((event: string, handler: () => void) => {
-      (listeners[event] ??= []).push(handler);
-    }),
-  };
-  const byId = new Map<string, typeof script>();
+  const byId = new Map<string, FakeScript>();
+  const scripts: FakeScript[] = [];
+  const createElement = vi.fn(() => {
+    const script: FakeScript = {
+      id: '', src: '', async: false, listeners: {},
+      addEventListener(event, handler) { (this.listeners[event] ??= []).push(handler); },
+      remove() { if (byId.get(this.id) === this) byId.delete(this.id); },
+    };
+    scripts.push(script);
+    return script;
+  });
   const doc = {
     getElementById: vi.fn((id: string) => byId.get(id) ?? null),
-    createElement: vi.fn(() => script),
-    head: { appendChild: vi.fn(() => { byId.set(script.id, script); }) },
+    createElement,
+    head: { appendChild: vi.fn((script: FakeScript) => { byId.set(script.id, script); }) },
   };
-  return { doc: doc as unknown as Document, script, fire: (event: string) => listeners[event]?.forEach((handler) => handler()) };
+  const latest = () => scripts[scripts.length - 1];
+  return {
+    doc: doc as unknown as Document,
+    get script() { return latest(); },
+    fire: (event: string) => latest().listeners[event]?.forEach((handler) => handler()),
+    attached: () => byId.size,
+  };
 }
 
 describe('captchaOptionsFromToken', () => {
@@ -89,22 +105,42 @@ describe('loadHCaptcha', () => {
 
   it('loads the explicit-render script once and resolves when it is ready', async () => {
     const { client } = fakeClient();
-    const { doc, script, fire } = fakeDocument();
+    const fake = fakeDocument();
     const win = {} as Window;
-    const first = loadHCaptcha({ doc, win });
-    const second = loadHCaptcha({ doc, win });
-    expect(doc.createElement).toHaveBeenCalledTimes(1);
-    expect(script.src).toBe('https://js.hcaptcha.com/1/api.js?render=explicit');
+    const first = loadHCaptcha({ doc: fake.doc, win });
+    const second = loadHCaptcha({ doc: fake.doc, win });
+    expect(fake.doc.createElement).toHaveBeenCalledTimes(1);
+    expect(fake.script.src).toBe('https://js.hcaptcha.com/1/api.js?render=explicit');
     (win as { hcaptcha?: HCaptchaClient }).hcaptcha = client;
-    fire('load');
+    fake.fire('load');
     await expect(first).resolves.toBe(client);
     await expect(second).resolves.toBe(client);
   });
 
-  it('rejects when the script fails to load', async () => {
-    const { doc, fire } = fakeDocument();
-    const pending = loadHCaptcha({ doc, win: {} as Window });
-    fire('error');
-    await expect(pending).rejects.toThrow('hCaptcha unavailable');
+  it('rejects when the script fails to load and loads afresh on the next call', async () => {
+    const fake = fakeDocument();
+    const win = {} as Window;
+    const first = loadHCaptcha({ doc: fake.doc, win });
+    fake.fire('error');
+    await expect(first).rejects.toThrow('hCaptcha unavailable');
+    expect(fake.attached()).toBe(0);
+
+    const { client } = fakeClient();
+    const second = loadHCaptcha({ doc: fake.doc, win });
+    expect(fake.doc.createElement).toHaveBeenCalledTimes(2);
+    (win as { hcaptcha?: HCaptchaClient }).hcaptcha = client;
+    fake.fire('load');
+    await expect(second).resolves.toBe(client);
+  });
+
+  it('settles every caller of a failed load and removes a script that loads without a client', async () => {
+    const fake = fakeDocument();
+    const win = {} as Window;
+    const a = loadHCaptcha({ doc: fake.doc, win });
+    const b = loadHCaptcha({ doc: fake.doc, win });
+    fake.fire('load');
+    await expect(a).rejects.toThrow('hCaptcha unavailable');
+    await expect(b).rejects.toThrow('hCaptcha unavailable');
+    expect(fake.attached()).toBe(0);
   });
 });
