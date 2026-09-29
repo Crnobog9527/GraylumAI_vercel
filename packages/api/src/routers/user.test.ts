@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { logger } from '../lib/logger';
 import { userRouter } from './user';
 
 function createQueryBuilder(result: Promise<unknown>) {
@@ -175,14 +176,33 @@ describe('userRouter error sanitization', () => {
     });
   });
 
-  it('does not put a fabricated zero balance on the synthetic profile fallback', async () => {
+  it.each([
+    ['query error', { data: null, error: { code: '57014', message: 'private timeout detail' } }],
+    ['profile missing', { data: null, error: null }],
+  ])('reports the profile as unavailable instead of default membership or name on %s', async (_name, result) => {
+    const logSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    const caller = createUserCaller(result);
+
+    await expect(caller.getUserProfile()).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'SERVICE_UNAVAILABLE',
+      message: '个人资料暂时无法读取，请稍后重试',
+    });
+    const logged = JSON.stringify(logSpy.mock.calls);
+    expect(logSpy).toHaveBeenCalledWith('auth', 'user_profile_fetch_failed', expect.any(Object));
+    expect(logged).not.toContain('user@example.com');
+    expect(logged).not.toContain('private timeout detail');
+    logSpy.mockRestore();
+  });
+
+  it('returns the real profile when the read succeeds', async () => {
     const caller = createUserCaller({
-      data: null,
-      error: { code: '57014', message: 'private timeout detail' },
+      data: { id: 'user-1', email: 'user@example.com', nickname: '', membership_level: 'pro', role: 'user' },
+      error: null,
     });
 
     await expect(caller.getUserProfile()).resolves.toMatchObject({
-      credits: null,
+      nickname: 'user',
+      membership_level: 'pro',
     });
   });
 });

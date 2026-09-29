@@ -485,18 +485,12 @@ export const creditsRouter = router({
 
       const { data: transactions, error } = await query;
 
-      // 如果查询失败（可能是表不存在），返回默认值而不是抛出错误
+      // 查询失败时报错，不返回全 0 冒充真实汇总
       if (error) {
         logger.error('billing', 'credits_summary_query_failed', {
           code: error.code,
         });
-        return {
-          totalEarned: 0,
-          totalSpent: 0,
-          transactionCount: 0,
-          byType: {},
-          byLedgerType: {},
-        };
+        throw createSafeServiceUnavailableError(error, '积分汇总暂时无法读取，请稍后重试');
       }
 
       // 计算统计数据

@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { logger } from '../lib/logger';
 import { checkIdempotency, creditsRouter } from './credits';
 
 function createProfileSupabase(role: 'user' | 'admin', credits = 123) {
@@ -98,11 +99,14 @@ function createBalanceSupabase(options: {
   };
 }
 
-function createCreditTransactionsSupabase(rows: Array<Record<string, unknown>> = []) {
+function createCreditTransactionsSupabase(
+  rows: Array<Record<string, unknown>> = [],
+  error: Record<string, unknown> | null = null,
+) {
   const result = Promise.resolve({
-    data: rows,
-    error: null,
-    count: rows.length,
+    data: error ? null : rows,
+    error,
+    count: error ? null : rows.length,
   });
 
   return {
@@ -537,5 +541,29 @@ describe('checkIdempotency', () => {
       code: 'INTERNAL_SERVER_ERROR',
       message: '积分操作校验失败，请稍后重试',
     });
+  });
+
+  it('reports the summary as unavailable instead of fabricated zeros when the ledger read fails', async () => {
+    const logSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    const supabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createProfileSupabase('user').from(table);
+        }
+        return createCreditTransactionsSupabase([], {
+          code: '57014',
+          message: 'private timeout detail for user@example.com',
+        }).from(table);
+      },
+    };
+    const caller = createCreditsCaller({ role: 'user', supabase });
+
+    await expect(caller.getCreditsSummary({ period: 'month' })).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'SERVICE_UNAVAILABLE',
+      message: '积分汇总暂时无法读取，请稍后重试',
+    });
+    expect(logSpy).toHaveBeenCalledWith('billing', 'credits_summary_query_failed', { code: '57014' });
+    expect(JSON.stringify(logSpy.mock.calls)).not.toContain('user@example.com');
+    logSpy.mockRestore();
   });
 });

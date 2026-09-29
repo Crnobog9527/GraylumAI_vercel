@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, Suspense, useMemo, useEffect } from 'react';
+import { useState, Suspense, useMemo, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AlertTriangle, Loader2, Menu, RefreshCw } from 'lucide-react';
 import { logClientDevError } from '@/lib/client-log';
@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/sheet';
 import { AppHeader } from '@/components/layout/AppHeader';
 import GlobalBanner from '@/components/layout/GlobalBanner';
-import ProfileSidebar, { ProfileTab } from '@/components/profile/ProfileSidebar';
+import ProfileSidebar from '@/components/profile/ProfileSidebar';
 import {
   UserProfileHeader,
   CreditsAndSubscriptionCards,
@@ -29,25 +29,29 @@ import TicketsPanel from '@/components/profile/TicketsPanel';
 import { trpc } from '@/trpc/client';
 import { useBanner } from '@/hooks/use-banner';
 import { useCreditsBalance } from '@/hooks/use-credits';
+import { isProfileTab, withProfileTab, type ProfileTab } from '@/lib/profile-tabs';
+import { ProfileLoadError } from '@/components/profile/ProfileLoadError';
 
 function ProfilePageContent() {
   const searchParams = useSearchParams();
   const { banners } = useBanner();
 
-  // 从 URL 参数读取初始 tab
-  const getInitialTab = (): ProfileTab => {
-    const tab = searchParams.get('tab');
-    if (tab && ['profile', 'subscription', 'credits', 'history', 'security', 'tickets'].includes(tab)) {
-      return tab as ProfileTab;
-    }
-    return 'profile';
-  };
-
-  const [activeTab, setActiveTab] = useState<ProfileTab>(getInitialTab);
+  // 当前分页以地址里的 tab 为准，这样已经在个人中心时点顶部菜单的链接也能切换分页
+  const requestedTab = searchParams.get('tab');
+  const activeTab: ProfileTab = isProfileTab(requestedTab) ? requestedTab : 'profile';
+  const setActiveTab = useCallback((tab: ProfileTab) => {
+    window.history.replaceState(window.history.state, '', withProfileTab(window.location.href, tab));
+  }, []);
   const [ticketInitialView, setTicketInitialView] = useState<'list' | 'create'>('list');
 
   // tRPC queries for real data (only enabled after auth check)
-  const { data: userProfile, isLoading: isProfileLoading, error: profileError } = trpc.user.getUserProfile.useQuery();
+  const {
+    data: userProfile,
+    isLoading: isProfileLoading,
+    error: profileError,
+    isFetching: isProfileFetching,
+    refetch: refetchProfile,
+  } = trpc.user.getUserProfile.useQuery();
   const {
     credits,
     status: creditsStatus,
@@ -77,8 +81,8 @@ function ProfilePageContent() {
     full_name: userProfile?.full_name ?? userProfile?.nickname ?? '用户',
     avatar_url: userProfile?.avatar_url ?? '',
     credits: creditsStatus === 'ready' && credits !== null ? credits : undefined,
-    total_credits_used: creditsSummary?.totalSpent ?? 0,
-    total_credits_purchased: creditsSummary?.totalEarned ?? 0,
+    total_credits_used: creditsSummary?.totalSpent,
+    total_credits_purchased: creditsSummary?.totalEarned,
     subscription_tier: (userProfile as any)?.membership_level ?? 'free',
     auth_provider: (userProfile as any)?.auth_provider ?? 'email',
     email_verified: (userProfile as any)?.email_verified ?? false,
@@ -215,7 +219,15 @@ function ProfilePageContent() {
 
           {/* Main Content */}
           <div className="flex-1 min-w-0">
-            {activeTab === 'profile' && (
+            {!userProfile && (
+              <ProfileLoadError
+                hasError={Boolean(profileError)}
+                isRetrying={isProfileFetching}
+                onRetry={() => void refetchProfile()}
+              />
+            )}
+
+            {userProfile && activeTab === 'profile' && (
               <>
                 <UserProfileHeader user={effectiveUser} onUserUpdate={handleUserUpdate} />
                 <CreditsAndSubscriptionCards
@@ -232,7 +244,7 @@ function ProfilePageContent() {
               </>
             )}
 
-            {activeTab === 'subscription' && (
+            {userProfile && activeTab === 'subscription' && (
               <>
                 <SubscriptionCard user={effectiveUser} />
                 <BillingRecordsCard />
@@ -240,13 +252,13 @@ function ProfilePageContent() {
               </>
             )}
 
-            {activeTab === 'credits' && <CreditRecordsCard user={effectiveUser} />}
+            {userProfile && activeTab === 'credits' && <CreditRecordsCard user={effectiveUser} />}
 
-            {activeTab === 'history' && <UsageHistoryCard user={effectiveUser} />}
+            {userProfile && activeTab === 'history' && <UsageHistoryCard user={effectiveUser} />}
 
-            {activeTab === 'security' && <SecuritySettingsCard user={effectiveUser} />}
+            {userProfile && activeTab === 'security' && <SecuritySettingsCard user={effectiveUser} />}
 
-            {activeTab === 'tickets' && (
+            {userProfile && activeTab === 'tickets' && (
               <TicketsPanel
                 user={effectiveUser}
                 key={`${activeTab}-${ticketInitialView}`}

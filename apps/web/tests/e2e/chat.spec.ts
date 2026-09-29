@@ -719,12 +719,12 @@ test.describe('AI Chat', () => {
       }
 
       steps.push('Wait for stop control and click it');
-      const stopButton = page.getByRole('button', { name: '停止' });
+      const stopButton = page.getByRole('button', { name: '停止等待' });
       await expect(stopButton).toBeVisible({ timeout: 15000 });
       await stopButton.click();
 
-      steps.push('Verify interrupted marker is rendered');
-      await expect(page.getByText('[已中断]')).toBeVisible({ timeout: 10000 });
+      steps.push('Verify the stopped-waiting status is rendered');
+      await expect(page.getByRole('status').filter({ hasText: '已停止等待' })).toBeVisible({ timeout: 10000 });
 
       // Stopping a stream intentionally aborts the underlying fetch request.
       monitor.removeIssues(
@@ -748,7 +748,7 @@ test.describe('AI Chat', () => {
           title: 'chat-abort-stream',
           role: 'user',
           route: '/chat',
-          expected: 'Long-running chat responses expose the stop control and render an interrupted marker after abort.',
+          expected: 'Long-running chat responses expose the stop control and show the stopped-waiting status after abort.',
         },
         actual,
         steps,
@@ -785,7 +785,8 @@ test.describe('AI Chat', () => {
       steps.push('Verify the user prompt remains visible and an error banner is rendered');
       await expectUserMessageVisible(page, prompt);
       await expect(page.getByText('Injected parity failure')).toBeVisible({ timeout: 10000 });
-      await expect(page.getByRole('button', { name: '发送' })).toBeVisible({ timeout: 10000 });
+      // The request is kept for recovery instead of silently re-enabling send.
+      await expect(page.getByRole('button', { name: '恢复原请求' })).toBeVisible({ timeout: 10000 });
 
       monitor.removeIssues(
         (issue) =>

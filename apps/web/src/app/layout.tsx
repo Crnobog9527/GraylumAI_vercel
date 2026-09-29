@@ -30,7 +30,7 @@ export default function RootLayout({
     (process.env.VERCEL === '1' || Boolean(process.env.VERCEL_URL));
 
   return (
-    <html lang="en">
+    <html lang="zh-CN">
       <body className="antialiased">
         <MiSansFont />
         <Provider>{children}</Provider>

@@ -27,27 +27,12 @@ export const userRouter = router({
       return email.split('@')[0] || '用户';
     };
 
-    // 对于任何错误都返回默认值，确保页面能正常加载
+    // 读不到资料时报错，不返回默认会员等级或用户名冒充真实数据
     if (error || !userProfile) {
       logger.error('auth', 'user_profile_fetch_failed', {
         code: error?.code ?? null,
       });
-      const email = ctx.user?.email ?? '';
-      const displayName = getDisplayName(email);
-      return {
-        id: ctx.profileId,
-        email,
-        nickname: displayName,
-        full_name: displayName,
-        avatar_url: null,
-        role: 'user',
-        credits: null,
-        membership_level: 'free',
-        status: 'active',
-        auth_provider: ctx.authProvider,
-        email_verified: ctx.isEmailVerified,
-        created_at: new Date().toISOString(),
-      };
+      throw createSafeServiceUnavailableError(error, '个人资料暂时无法读取，请稍后重试');
     }
 
     // 返回实际数据，nickname 为空时使用 email 前缀作为显示名称

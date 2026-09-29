@@ -69,7 +69,7 @@ test.describe('production-only stripe smoke', () => {
         response.url().includes('/api/trpc/payments.createCheckoutSession'),
       );
 
-      await targetPlan.getByRole('button', { name: '选择' }).click();
+      await targetPlan.getByRole('button', { name: '立即订阅' }).click();
 
       const response = await responsePromise;
       expect(response.status()).toBe(200);
