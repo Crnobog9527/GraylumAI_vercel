@@ -15,7 +15,8 @@ BEGIN
         ('profiles', 'profiles_select_own'), ('profiles', 'profiles_update_own'),
         ('announcements', 'announcements_select_active_public'),
         ('announcements', 'announcements_select_admin'),
-        ('user_activity_logs', 'user_activity_logs_select_admin'))
+        ('user_activity_logs', 'user_activity_logs_select_admin'),
+        ('user_activity_logs', 'user_activity_logs_select_own'))
   ) OR EXISTS (
     SELECT 1 FROM pg_policies
     WHERE schemaname = 'public' AND policyname <> 'profiles_update_own' AND cmd <> 'SELECT'
@@ -61,6 +62,10 @@ BEGIN
     );
   END LOOP;
 END $$;
+
+-- 0002 created an own-row activity policy that later migrations never dropped (absent on staging).
+-- Audit history is server-only, so remove it wherever a replayed database still has it.
+DROP POLICY IF EXISTS user_activity_logs_select_own ON public.user_activity_logs;
 
 -- A-01: users edit only their own nickname; role, credits, membership and email stay server-owned.
 GRANT UPDATE (nickname) ON TABLE public.profiles TO authenticated;

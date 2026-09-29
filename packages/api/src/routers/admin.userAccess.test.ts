@@ -88,8 +88,9 @@ describe('admin user access projections (0144 column grants)', () => {
     expect(selectedColumns(calls, 'user_activity_logs')).toContainEqual(
       expect.stringContaining('user:profiles!user_id(id, email, nickname, avatar_url)'),
     );
-    expect(list.users[0]).toMatchObject({ last_login_at: null, last_ip: null });
-    expect(details.profile).toMatchObject({ id: 'u1', last_login_at: null, last_ip: null });
+    const unrecorded = { last_login_at: null, last_ip: null, login_record_status: 'unrecorded' };
+    expect(list.users[0]).toMatchObject(unrecorded);
+    expect(details.profile).toMatchObject({ id: 'u1', ...unrecorded });
   });
 
   it.each([

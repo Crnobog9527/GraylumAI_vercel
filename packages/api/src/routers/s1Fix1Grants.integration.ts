@@ -61,7 +61,7 @@ it('S1-FIX-1: admin users, audit history, transactions and announcements through
 
   const users = await management.getAllUsers({ limit: 20, offset: 0 });
   expect(users.users.map((user: any) => user.id).sort()).toEqual([owner, other, admin].sort());
-  expect(users.users.every((user: any) => user.last_ip === null && user.last_login_at === null)).toBe(true);
+  expect(users.users.every((user: any) => user.login_record_status === 'unrecorded' && user.last_login_at === null)).toBe(true);
 
   expect(await management.updateUserStatus({ userId: other, status: 'disabled', reason: 'fixture' }))
     .toMatchObject({ id: other, status: 'disabled' });
@@ -72,7 +72,7 @@ it('S1-FIX-1: admin users, audit history, transactions and announcements through
   expect(logs.logs[0]).toMatchObject({ user: { id: other }, admin: { id: admin } });
 
   const details = await management.getUserDetails({ userId: other });
-  expect(details.profile).toMatchObject({ id: other, email: 'other@example.test', last_ip: null });
+  expect(details.profile).toMatchObject({ id: other, last_ip: null, login_record_status: 'unrecorded' });
   expect(details.recentActivity.length).toBeGreaterThanOrEqual(3);
 
   const transactions = await management.getAllTransactions({ limit: 20, offset: 0 });

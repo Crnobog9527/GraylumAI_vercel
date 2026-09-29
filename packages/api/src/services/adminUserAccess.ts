@@ -3,7 +3,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../lib/logger';
 
-// last_login_at / last_ip have no writer and are not granted to service_role.
+// last_login_at / last_ip have no writer and are not granted to service_role; responses mark them
+// as unrecorded so the admin UI never presents a null as "never logged in".
 export const ADMIN_PROFILE_COLUMNS =
   'id, email, nickname, avatar_url, role, status, membership_level, credits, is_deleted, created_at';
 export const ADMIN_PROFILE_LIST_COLUMNS =
@@ -17,7 +18,7 @@ export const ADMIN_ACTIVITY_WITH_PROFILES = 'id, user_id, admin_id, action, acti
   + 'user:profiles!user_id(id, email, nickname, avatar_url), admin:profiles!admin_id(id, email, nickname, avatar_url)';
 
 export function withUnrecordedLoginFields<T extends object>(profile: T) {
-  return { ...profile, last_login_at: null, last_ip: null };
+  return { ...profile, last_login_at: null, last_ip: null, login_record_status: 'unrecorded' as const };
 }
 
 export type AdminActivityEntry = {

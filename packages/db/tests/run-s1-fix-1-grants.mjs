@@ -136,8 +136,12 @@ try {
   assert.deepEqual(snapshot(), before, 'exact baseline ACL and policies restored');
   assert.equal(rows(), afterOperations, 'rollback does not touch data');
   console.log('PASS exact rollback to the 13:18:38 UTC catalog with data preserved');
-  // Old PUBLIC/client column grants must not survive a (re)application.
+  // Replayed databases still carry the 0002 own-row activity policy that staging no longer has.
+  sql('CREATE POLICY user_activity_logs_select_own ON user_activity_logs FOR SELECT USING (auth.uid() = user_id)');
   apply(migration);
+  assert.deepEqual(snapshot(), repaired, 'legacy 0002 policy is accepted and dropped');
+  console.log('PASS 0144 accepts and drops the legacy 0002 user_activity_logs_select_own policy');
+  // Old PUBLIC/client column grants must not survive a (re)application.
   sql(`GRANT SELECT(last_ip), UPDATE(credits), INSERT(role), REFERENCES(id) ON profiles TO PUBLIC, anon;
     GRANT UPDATE(role), INSERT(credits) ON profiles TO authenticated;
     GRANT SELECT(icon), UPDATE(title), INSERT(title) ON announcements TO PUBLIC, anon, authenticated;
