@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- DB-BASELINE (0148) rollback ONLY for staging as fingerprinted on 2026-09-30.
--- On staging 0148 re-creates 14 policies with identical definitions, re-issues GRANTs it already
+-- On staging 0148 re-creates 15 policies with identical definitions, re-issues GRANTs it already
 -- holds and installs the 0027 profile credit guard; only the guard is new, so only it is removed.
 -- Separately authorize remote use.
 BEGIN;

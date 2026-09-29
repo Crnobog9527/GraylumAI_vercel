@@ -18,6 +18,11 @@ fingerprint that `packages/db/tests/baseline/expected-differences.json` does not
 
 - New structure belongs in a new migration, never in the baseline. Change the baseline only when an
   existing migration cannot run on an empty database, and say why in the PR.
+- Baseline and bridge files bypass the migration ledger, so their rules are enforced in code
+  (`packages/db/tests/baseline/file-rules.mjs`, used by the safeguard test and by the replay before
+  anything runs): no psql meta-command lines, no dollar-quoted blocks, and the replay sends them to
+  the server with `psql -c` so psql never interprets `\!`, `\i` or `\gexec` in them. Apply them the
+  same way (as one server-side string) when building a real environment.
 - Bridges reproduce a deletion staging went through outside the repository, where no baseline
   shape can make a later migration's fail-closed precondition pass. They may only
   `DROP ... IF EXISTS` (enforced by `scripts/tests/db-baseline-bridges.test.mjs`). **Adding a

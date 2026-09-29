@@ -9,6 +9,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { POSTGRES_IMAGE } from './v3/images.mjs';
+import { baselineViolations, bridgeViolations } from './baseline/file-rules.mjs';
 
 const args = process.argv.slice(2);
 if (args[0] !== '--local-only' || process.env.CI) {
@@ -33,6 +34,10 @@ ok(docker(['image', 'inspect', POSTGRES_IMAGE]), 'Pinned local image');
 const name = `graylum-dbb-${randomUUID().slice(0, 8)}`;
 const psql = input => docker(['exec', '-i', name, 'psql', '-X', '-q', '-A', '-t', '-U', 'postgres', '-d', 'dbb',
   '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=verbose', '-f', '/dev/stdin'], { input });
+// Files outside the migration ledger go to the server as one string (-c): psql does not
+// interpret meta-commands such as \! or \i in them.
+const psqlServerOnly = sql => docker(['exec', name, 'psql', '-X', '-q', '-A', '-t', '-U', 'postgres', '-d', 'dbb',
+  '-c', sql]);
 const read = path => readFileSync(resolve(root, path), 'utf8');
 const readJson = path => JSON.parse(read(path));
 const sqlFiles = dir => readdirSync(resolve(root, dir)).filter(file => /^\d{4}_.+\.sql$/.test(file)).sort()
@@ -48,6 +53,12 @@ const bridges = new Set(readdirSync(resolve(root, bridgeDir)).filter(file => fil
 const migrationNames = new Set(sqlFiles('packages/db/migrations').map(step => step.split('/').at(-1)));
 for (const bridge of bridges) {
   if (!migrationNames.has(bridge)) throw new Error(`Bridge without a migration of the same name: ${bridge}`);
+  const problems = bridgeViolations(read(`${bridgeDir}/${bridge}`));
+  if (problems.length > 0) throw new Error(`Bridge ${bridge} breaks the bridge rules: ${problems.join('; ')}`);
+}
+for (const step of steps.filter(path => path.startsWith('packages/db/baseline/'))) {
+  const problems = baselineViolations(read(step));
+  if (problems.length > 0) throw new Error(`Baseline ${step} breaks the baseline rules: ${problems.join('; ')}`);
 }
 
 // Compares the local build with a staging snapshot; returns the unexpected differences.
@@ -115,14 +126,14 @@ try {
   for (const step of steps) {
     const file = step.split('/').at(-1);
     if (step.startsWith('packages/db/migrations/') && bridges.has(file)) {
-      const bridged = psql(read(`${bridgeDir}/${file}`));
+      const bridged = psqlServerOnly(read(`${bridgeDir}/${file}`));
       if (bridged.status !== 0 || bridged.error) {
         report.failed = { step: `${bridgeDir}/${file}`, error: errorLines(bridged) };
         break;
       }
       report.bridges.push(file);
     }
-    const result = psql(read(step));
+    const result = step.startsWith('packages/db/baseline/') ? psqlServerOnly(read(step)) : psql(read(step));
     if (result.status !== 0 || result.error) {
       report.failed = { step, error: errorLines(result) };
       // Optional catalog query to explain a failure (diagnostics only).
