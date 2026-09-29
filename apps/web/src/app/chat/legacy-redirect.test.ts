@@ -1,7 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import { unstable_getResponseFromNextConfig } from 'next/experimental/testing/server';
-vi.mock('@sentry/nextjs', () => ({ withSentryConfig: (config: unknown) => config }));
+vi.mock('@sentry/nextjs', () => ({
+  // Resolve the phase callback explicitly; do not depend on the test helper's
+  // support for functional Next configs or invoke production env validation.
+  withSentryConfig: (config: unknown) =>
+    typeof config === 'function' ? config('phase-development-server', { defaultConfig: {} }) : config,
+}));
 import config from '../../../next.config';
 
 describe('legacy chat redirect before page/authentication', () => {
