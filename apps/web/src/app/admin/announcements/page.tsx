@@ -6,7 +6,7 @@ import {
   Megaphone, Plus, Pencil, Trash2, Check, X,
   Info, AlertTriangle, CheckCircle, XCircle,
   Calendar, RefreshCw, Globe,
-  Palette, Tag, ArrowUpDown, Sparkles
+  Link2, Palette, Tag, ArrowUpDown, Sparkles
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
