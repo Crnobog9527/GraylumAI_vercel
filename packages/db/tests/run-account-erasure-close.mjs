@@ -82,7 +82,19 @@ try {
   assert.deepEqual(tableAcl.map(x => x.split('/')[0]), ['service_role=r'], 'progress table: service_role SELECT only');
   assert.equal(sql(`SELECT count(*) FROM pg_attribute WHERE attrelid = 'public.account_erasure_requests'::regclass
     AND attacl IS NOT NULL;`), '0', 'no column ACLs');
-  console.log('PASS migration: idempotent; restrictive RLS coverage; function ACLs');
+  const audit = () => sql(readFileSync(resolve(root, 'packages/db/tests/account-open-policy-audit.sql'), 'utf8'));
+  assert.equal(audit(), '', '§6 audit: every client-accessible table carries account_open_required');
+  // A table granted to clients after the migration must be caught until it adds the policy.
+  sql(`CREATE TABLE audit_probe(id int PRIMARY KEY); ALTER TABLE audit_probe ENABLE ROW LEVEL SECURITY;
+    GRANT SELECT ON audit_probe TO authenticated;`);
+  assert.equal(audit(), 'audit_probe|policy_missing');
+  sql('ALTER TABLE audit_probe DISABLE ROW LEVEL SECURITY;');
+  assert.equal(audit(), 'audit_probe|rls_disabled');
+  sql(`ALTER TABLE audit_probe ENABLE ROW LEVEL SECURITY; CREATE POLICY account_open_required ON audit_probe
+    AS RESTRICTIVE FOR ALL TO authenticated USING (NOT (SELECT public.current_account_is_closed()));`);
+  assert.equal(audit(), '');
+  sql('DROP TABLE audit_probe;');
+  console.log('PASS migration: idempotent; restrictive RLS coverage; function ACLs; §6 audit');
 
   docker('run', '-d', '--pull=never', '--name', rest, '--network', tag, '-p', '127.0.0.1::3000',
     '-e', `PGRST_DB_URI=postgres://authenticator@${db}:5432/erasure`, '-e', 'PGRST_DB_SCHEMAS=public',
