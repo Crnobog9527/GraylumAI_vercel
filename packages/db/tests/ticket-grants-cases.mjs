@@ -34,6 +34,35 @@ export async function verifyTicketRepair({ sql, http, denied, owner, other, admi
       }
     }
   }
+  // P1/P2 regression: call PostgREST directly, bypassing the tRPC input filters.
+  for (const category of ['unexpected', '', 'BUG', '__proto__', 'constructor']) {
+    await deniedHttp('authenticated', owner, 'tickets?select=id', 'POST', {
+      user_id: owner, title: 'fixture', category,
+    });
+  }
+  const allowedPath = `${owner}/fixture.png`;
+  const invalidAttachments = [
+    ['https://tracker.example.invalid/image.png'], ['http://tracker.example.invalid/image.png'],
+    [`${other}/fixture.png`], [`/${owner}/fixture.png`], [`${owner}/../fixture.png`],
+    [`${owner}/folder/../../fixture.png`], [allowedPath, 'https://tracker.example.invalid/image.png'],
+    [null], [1], [true], [{}], [[allowedPath]], [''], [' '], null, {}, 'https://tracker.example.invalid/image.png',
+  ];
+  for (const attachments of invalidAttachments) {
+    await deniedHttp('authenticated', owner, 'tickets?select=id', 'POST', {
+      user_id: owner, title: 'fixture', attachments,
+    });
+  }
+  for (const category of ['bug', 'feature', 'question', 'account', 'billing', 'other']) {
+    const attachments = [allowedPath, `${owner}/folder/fixture.webp`, `${owner}/a..b.png`];
+    const accepted = await http('authenticated', owner, 'tickets?select=id,category,attachments', 'POST', {
+      user_id: owner, title: 'fixture', category, attachments,
+    });
+    assert.equal(accepted.status, 201);
+    assert.equal(accepted.body[0].category, category);
+    assert.deepEqual(accepted.body[0].attachments, attachments);
+    sql(`DELETE FROM tickets WHERE id='${accepted.body[0].id}'`);
+  }
+  console.log('PASS direct-write regression: category allowlist and owned string-array attachments');
   const created = await http('authenticated', owner, `tickets?select=${ticketColumns}`, 'POST', {
     user_id: owner, title: 'fixture', description: 'fixture', category: 'other', attachments: [],
   });

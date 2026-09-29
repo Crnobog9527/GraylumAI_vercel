@@ -63,7 +63,15 @@ DROP POLICY IF EXISTS tickets_update_own ON public.tickets;
 CREATE POLICY tickets_select_own ON public.tickets FOR SELECT TO authenticated
   USING (user_id = (SELECT auth.uid()) AND is_deleted = 'false');
 CREATE POLICY tickets_insert_own ON public.tickets FOR INSERT TO authenticated
-  WITH CHECK (user_id = (SELECT auth.uid()) AND is_deleted = 'false' AND status = 'open');
+  WITH CHECK (user_id = (SELECT auth.uid()) AND is_deleted = 'false' AND status = 'open'
+    AND category IN ('bug', 'feature', 'question', 'account', 'billing', 'other')
+    AND CASE WHEN jsonb_typeof(attachments) = 'array' THEN NOT EXISTS (
+      SELECT 1 FROM jsonb_array_elements(attachments) AS attachment(value)
+      WHERE jsonb_typeof(attachment.value) <> 'string'
+        OR NOT starts_with(attachment.value #>> '{}', (SELECT auth.uid())::text || '/')
+        OR (attachment.value #>> '{}') ~ '(^|/)\.\.(/|$)'
+    ) ELSE false END
+  );
 CREATE POLICY tickets_update_own ON public.tickets FOR UPDATE TO authenticated
   USING (user_id = (SELECT auth.uid()) AND is_deleted = 'false')
   WITH CHECK (user_id = (SELECT auth.uid()) AND is_deleted = 'false' AND status = 'closed');

@@ -92,7 +92,7 @@ FK 中的 ON DELETE 行为属于结构关系，不是额外客户端 DELETE 需�
 | 对象 | 最终客户端能力 / 规则 |
 | --- | --- |
 | tickets SELECT | authenticated 仅 id/user_id/title/description/category/priority/attachments/status/is_deleted/created_at/updated_at；本人且未删除 |
-| tickets INSERT | 仅 user_id/title/description/category/attachments；WITH CHECK 本人、未删除、初始 status=open；状态走已有默认值 |
+| tickets INSERT | 仅 user_id/title/description/category/attachments；WITH CHECK 本人、未删除、初始 status=open、分类白名单、附件为本人路径字符串数组；状态走已有默认值 |
 | tickets UPDATE | 仅 status；USING 本人且未删除，WITH CHECK 本人且未删除且 status=closed；不能重开或改他人/标题/作者/删除标记 |
 | ticket_replies SELECT | 仅 id/ticket_id/user_id/content/is_admin/attachments/created_at；回复未删除且父工单属于本人、未删除；可以读客服回复 |
 | ticket_replies INSERT | 仅 ticket_id/user_id/content；WITH CHECK 父工单本人且未删除、作者本人、is_admin=false、回复未删除；管理员标记走已有默认值 |
@@ -110,6 +110,18 @@ FK 中的 ON DELETE 行为属于结构关系，不是额外客户端 DELETE 需�
 - Storage、profiles、scheduled_job_runs、账务、依赖、前端 UI、生产配置均未修改。
   管理员关联资料查询及 cron 任务记账的既有权限缺口不因工单迁移自动消失，需要按各自任务处理。
 
+## 机器人 P1 / P2 修复
+
+Owner 已批准修复[本轮机器人发现](https://github.com/Crnobog9527/GraylumAI_vercel/pull/506#pullrequestreview-5350529988)。
+在 `tickets_insert_own` 内增加约束，不新增函数、表结构或前端改动：
+
+- P1：category 只允许 bug、feature、question、account、billing、other，直接 PostgREST 写入也受约束。
+- P2：attachments 必须是 JSON 字符串数组；每项必须以当前用户 UUID 加 `/` 开头，且不能包含 `..` 路径段。
+  拒绝外部 URL、他人路径、绝对路径、非数组、非字符串元素和混合恶意数组；默认空数组及本人嵌套路径仍可写。
+  既有历史附件数据与读取兼容行为不变；service_role 继续使用已有后台路径。
+- 新测试先在旧迁移上复现非法分类返回 201，再在修复后验证全部非法输入返回 403/42501、六类合法分类与本人路径返回 201。
+- 精确回退 SQL 不变：恢复原三条策略时同时移除本次新增的 INSERT 检查。
+
 ## 本机验证
 
 入口：`node packages/db/tests/run-ticket-grants.mjs --local-only`。
@@ -122,6 +134,7 @@ FK 中的 ON DELETE 行为属于结构关系，不是额外客户端 DELETE 需�
 - PASS：拒绝伪造作者、管理员回复、任意初始状态/优先级/时间戳、删除标记、重开工单、改回复正文；两表 TRUNCATE 拒绝。
 - PASS：已删除回复/已删除父工单下的回复不可见，已删除工单不能新增回复或关闭。
 - PASS：service_role 读回复、客服/系统回复写入、工单状态与更新时间更新；非必要标题/回复正文更新仍拒绝。
+- PASS：直接 PostgREST 分类白名单与附件归属/类型/路径校验，全部合法分类和本人路径成功。
 - PASS：迁移重复执行一致；未知策略触发事务回滚；历史 PUBLIC/anon/authenticated 列 ACL 清除。
 - PASS：精确回退恢复原表/列 ACL 和原三条策略，RLS/数据保留；权限数组比较按语义排序，不依赖 ACL 项排列顺序。
 - PASS：`packages/api/src/routers/ticketGrants.integration.ts` **2 项**，真实 Supabase 客户端 → 本机 PostgREST → PostgreSQL，
@@ -132,7 +145,7 @@ FK 中的 ON DELETE 行为属于结构关系，不是额外客户端 DELETE 需�
 - PASS：`pnpm --filter web typecheck`、`pnpm --filter web lint`、代码大小检查。
   lint 仍只有仓库现有的 web mjs 覆盖，不声称覆盖全部业务 TS/TSX。
 - PENDING：最终候选必需 CI/Security，后续准确结果写入 PR Handoff。
-- NOT_RUN：远端迁移、staging 登录账号/浏览器验收、Storage 上传签名全链路、完整 cron 调度、生产访问、独立机器人审查、合并。
+- NOT_RUN：远端迁移、staging 登录账号/浏览器验收、Storage 上传签名全链路、完整 cron 调度、生产访问、合并。
 
 ## 精确回退与应用顺序
 
@@ -149,10 +162,10 @@ FK 中的 ON DELETE 行为属于结构关系，不是额外客户端 DELETE 需�
 ## Handoff 与合并后计划
 
 - Done：0143、精确回退、最小路由改动、全部调用盘点、本机 SQL/REST 及真实路由/服务正反向验证。
-- Next：最终 CI/Security 通过后保持 draft 交总控重新审查；此前的阻断报告审查不等于本次实现审查。
-- Blockers：无已知本机工单修复阻断；最终 CI 待完成，独立审查/合并/staging 应用均未获准或未执行。
+- Next：Owner 已批准 ready 及机器人审查；获准修复 P1/P2 后，推送修复并重新请求当前 head 的机器人审查。
+- Blockers：P1/P2 已补修复及本机回归，仍待新 head 的 CI 和机器人复审；合并及 staging 应用未授权。
 - Remaining risk：工单相关表原始建表迁移仍缺失；不覆盖 profiles、任务记账、Storage 的独立缺权；未做远端运行时验收。
-- 总控通过后才 ready 并评论 `@codex review`；P0/P1 或新 P2 先报告，不直接修改。
+- 复审如有 P0/P1 或新 P2，先报告，不直接修改。
 - 只有 Owner 说“允许合并#506”后才重新核对 head/CI/审查/讨论/合并性，以 squash + match-head-commit 合并。
 - 合并后：另行批准 staging 迁移 → 确认兼容代码已部署 → 保存/核对应用前目录 → 应用 0143 → 读回权限与策略 →
   Codex 用 staging 测试账号验证 /profile?tab=tickets 的列表、新建、回复、关闭及 /admin/tickets 的回复/状态变更，
