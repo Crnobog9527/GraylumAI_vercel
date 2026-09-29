@@ -4,6 +4,7 @@
 // failure, unreadable balance or larger-than-allowed drop stops the phase.
 
 import path from 'node:path';
+import { markdownCell } from './markdownCell.mjs';
 import { callOnce } from './runner.mjs';
 import { redactHeaders, redactText, redactUrl, refusal, requestKey, reserve, settle, writeRedactedJson } from './safety.mjs';
 
@@ -131,7 +132,7 @@ export function formatMonidCatalog(report) {
   lines.push('| 来源 | provider | endpoint | 计价方式 | 单价 USD | 固定费 USD | 标签 |', '|---|---|---|---|---|---|---|');
   for (const tool of report.tools) {
     const cells = [tool.from, tool.provider, tool.endpoint, tool.priceType, tool.priceUsd ?? '未提供', tool.flatFeeUsd ?? '未提供', (tool.tags ?? []).join(' ')];
-    lines.push(`| ${cells.map(value => String(value ?? '未提供').replace(/\|/g, '\\|')).join(' | ')} |`);
+    lines.push(`| ${cells.map(value => markdownCell(value ?? '未提供')).join(' | ')} |`);
   }
   return lines.join('\n');
 }
