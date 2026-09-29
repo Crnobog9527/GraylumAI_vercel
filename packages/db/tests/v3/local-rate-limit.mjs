@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { execFileSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { REDIS_IMAGE, SRH_IMAGE } from "./images.mjs";
+import { REDIS_IMAGE, SRH_IMAGE } from "./local-rate-limit-images.mjs";
 
 const OWNER_LABEL = "io.graylum.local-rate-limit";
 const executeDocker = (args, env) => execFileSync("docker", args, {
@@ -38,6 +38,16 @@ export function cleanLocalRateLimit(tag, ownerId, docker) {
   }
 }
 
+// Only the disposable Vitest beforeEach hook calls this; no website control endpoint.
+export function resetLocalRateLimit(tag, ownerId, execute = executeDocker) {
+  const names = localRateLimitNames(tag);
+  if (!ownerId) throw new Error("LOCAL_RATE_LIMIT_NOT_OWNED");
+  const resources = inspectLocalRateLimit(tag, ownerId, (...args) => execute(args));
+  if (resources.length !== 3) throw new Error("LOCAL_RATE_LIMIT_NOT_READY");
+  if (execute(["exec", names.redis, "redis-cli", "FLUSHDB"]) !== "OK")
+    throw new Error("LOCAL_RATE_LIMIT_RESET_FAILED");
+}
+
 export function createLocalRateLimit({ tag, ownerId = randomUUID(), execute = executeDocker,
   request = fetch, readinessTimeoutMs = 15000 } = {}) {
   const names = localRateLimitNames(tag);
@@ -52,6 +62,7 @@ export function createLocalRateLimit({ tag, ownerId = randomUUID(), execute = ex
   return {
     redact,
     cleanup,
+    caseEnvironment: { V3_RATE_LIMIT_TAG: tag, V3_RATE_LIMIT_OWNER: ownerId },
     async start() {
       // A persistent preview lease protects this owner; each run gets fresh counters/token.
       cleanup();

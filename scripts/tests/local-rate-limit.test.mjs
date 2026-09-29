@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createLocalRateLimit, localRateLimitNames } from "../../packages/db/tests/v3/local-rate-limit.mjs";
+import { createLocalRateLimit, localRateLimitNames, resetLocalRateLimit } from "../../packages/db/tests/v3/local-rate-limit.mjs";
 
 function fixture({ failRun = 0, ready = true } = {}) {
   const objects = new Map(), calls = [], tag = "graylum-unit-rate-limit";
@@ -21,7 +21,7 @@ function fixture({ failRun = 0, ready = true } = {}) {
       // Model an ambiguous create result: object exists despite a CLI failure.
       if (args[0] === "run" && ++runs === failRun) throw new Error("synthetic launch failure");
     }
-    return args[0] === "port" ? "127.0.0.1:32000" : "ok";
+    return args[0] === "port" ? "127.0.0.1:32000" : args[0] === "exec" ? "OK" : "ok";
   };
   const request = async (_url, init) => {
     assert.equal(init.body, '["PING"]');
@@ -29,7 +29,7 @@ function fixture({ failRun = 0, ready = true } = {}) {
     return { ok: ready, json: async () => ({ result: "PONG" }) };
   };
   const service = createLocalRateLimit({ tag, ownerId: "unit-owner", execute, request, readinessTimeoutMs: 1 });
-  return { service, objects, calls, tag };
+  return { service, objects, calls, tag, execute };
 }
 
 test("real service arguments isolate Redis, bind REST to loopback and keep random tokens out of argv", async () => {
@@ -75,4 +75,19 @@ test("runner skips local Redis in without-app mode and always cleans it outside 
   assert.ok(runner.includes("withoutApp ? null : createLocalRateLimit"));
   assert.ok(runner.includes("...(await localRateLimit?.start())"));
   assert.ok(runner.indexOf("localRateLimit?.cleanup()") < runner.indexOf('runPreviewPhase(previewOptions, "destroyBackendsOnFinally"'));
+});
+
+
+test("case boundary reset targets only the fully owned disposable Redis", async () => {
+  const f = fixture();
+  await f.service.start();
+  resetLocalRateLimit(f.tag, "unit-owner", f.execute);
+  assert.deepEqual(f.calls.at(-1).args, ["exec", localRateLimitNames(f.tag).redis, "redis-cli", "FLUSHDB"]);
+  const count = () => f.calls.filter(({ args }) => args[0] === "exec").length;
+  f.objects.get(localRateLimitNames(f.tag).rest).Labels = {};
+  assert.throws(() => resetLocalRateLimit(f.tag, "unit-owner", f.execute), /NOT_OWNED/);
+  assert.equal(count(), 1);
+  f.objects.delete(localRateLimitNames(f.tag).rest);
+  assert.throws(() => resetLocalRateLimit(f.tag, "unit-owner", f.execute), /NOT_READY/);
+  assert.equal(count(), 1);
 });

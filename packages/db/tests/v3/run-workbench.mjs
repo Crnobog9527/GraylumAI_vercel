@@ -2,6 +2,8 @@
 // Real local Auth + Next HTTP + PostgREST + disposable SQL, with a credential-free source copy.
 import { legacyRuntime, instrumentLegacy, copyLegacyTests, patchLegacyFinanceReader } from './legacy-runtime.mjs';
 import { installWorkbenchBilling } from "./billing-fixture.mjs";
+import { writeRateLimitCaseReport } from "./local-rate-limit-case-report.mjs";
+import { installLocalRateLimitCases } from "./local-rate-limit-cases.mjs";
 import { createLocalRateLimit } from "./local-rate-limit.mjs";
 import { GOTRUE_IMAGE, POSTGRES_IMAGE, POSTGREST_IMAGE } from "./images.mjs";
 import { verifyWithoutAppResults, withoutAppPattern, WITHOUT_APP_SUITES } from "./without-app.mjs";
@@ -771,6 +773,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
     appPort = listener.address().port;
     await new Promise((resolve) => listener.close(resolve));
   }
+  const rateLimitCases = withoutApp ? null : installLocalRateLimitCases(root, legacyRoot&&!upgradeMode&&!opcMode?legacyRoot:root);
   const env = {
     ...cleanEnv,
     ...(await localRateLimit?.start()),
@@ -778,7 +781,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
     ...((args.includes('--real-skill-only')||opcMode) ? {V3_REAL_SKILL_INPUT:process.env.V3_REAL_SKILL_INPUT} : {}),
     V3_LEGACY_ROOT:legacyRoot??'', V3_LEGACY_REF:legacyRef??'',
     NODE_ENV: serve ? "production" : "development",
-    NODE_OPTIONS:`--require=${networkGuard}`,
+    NODE_OPTIONS:`--require=${networkGuard}${rateLimitCases?.nodeOptions ?? ""}`,
     NEXT_PUBLIC_SUPABASE_URL: stagingHost?'https://'+syntheticStagingHost:apiUrl,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: anon,
     SUPABASE_SERVICE_ROLE_KEY: service,
@@ -888,7 +891,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
         "vitest",
         "run",
         "--config",
-        "vitest.integration.config.ts",
+        rateLimitCases?.config ?? "vitest.integration.config.ts",
         ...(runtimeUpgrade ? ["src/services/runtime/upgrade.integration.ts"] : upgradeMode ? ["src/services/bill2/upgrade.integration.ts"] : withoutApp ? [] : ["src/services/__tests__/workbench.integration.ts"]),
         ...(bill2Mode ? ['src/services/bill2/billing.integration.ts'] : []),
         ...(runtimeMode ? ['src/services/runtime/runtime.integration.ts', 'src/services/runtime/streaming.integration.ts'] : []),
@@ -902,7 +905,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
               : "^restores all projects in a new browser login after a real application process restart$"]
           : primaryTestArgs),
       ],
-      { cwd: legacyRoot&&!upgradeMode&&!opcMode?legacyRoot:root, env, detached: true, stdio: "inherit" },
+      { cwd: legacyRoot&&!upgradeMode&&!opcMode?legacyRoot:root, env: { ...env, ...localRateLimit?.caseEnvironment }, detached: true, stdio: "inherit" },
     );
   await runPreviewPhase(previewOptions, "runTests", async () => {
   await childExit(runTests());
@@ -1000,6 +1003,8 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
   process.removeListener("SIGTERM", stopServing);
   stoppingApplication = true;
   await stopLocalApplication(app);
+  try { if (localRateLimit) writeRateLimitCaseReport(evidenceDirectory); }
+  catch { process.exitCode = 1; console.error("LOCAL_RATE_LIMIT_REPORT_FAILED"); }
   try { localRateLimit?.cleanup(); }
   catch (error) { process.exitCode = 1; console.error(error.message); }
   if (gateway) {
