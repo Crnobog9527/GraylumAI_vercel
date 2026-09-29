@@ -77,11 +77,11 @@ describe('PricingSection catalog availability', () => {
     expect(markup).not.toContain('action=signup');
   });
 
-  it.skipIf(!existsSync(localChromePath))(
+  it(
     'keeps the unavailable state safe in a local mobile browser',
     async () => {
       const browser = await chromium.launch({
-        executablePath: localChromePath,
+        executablePath: existsSync(localChromePath) ? localChromePath : undefined,
         headless: true,
       });
 
@@ -100,6 +100,6 @@ describe('PricingSection catalog availability', () => {
       } finally {
         await browser.close();
       }
-    },
+    }, 30_000,
   );
 });
