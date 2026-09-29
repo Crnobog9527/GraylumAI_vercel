@@ -44,7 +44,8 @@ import {
   getAnnouncementLinkFormValue,
 } from './announcementFormPayload';
 import AnnouncementLinkField from './AnnouncementLinkField';
-import { buildAnnouncementSchedulePayload, toDateTimeLocalValue } from './announcementSchedule';
+import AnnouncementScheduleFields from './AnnouncementScheduleFields';
+import { submitAnnouncementSchedule, toDateTimeLocalValue } from './announcementSchedule';
 
 type AnnouncementType = 'info' | 'warning' | 'success' | 'error' | 'promo' | 'announcement';
 type BannerStyle = 'info' | 'warning' | 'success' | 'error' | 'promo' | 'announcement';
@@ -103,6 +104,7 @@ const tagColorOptions = [
 export default function AdminAnnouncementsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
+  const [startDateError, setStartDateError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     title: '',
     content: '',
@@ -160,6 +162,7 @@ export default function AdminAnnouncementsPage() {
     });
     createAnnouncement.reset();
     updateAnnouncement.reset();
+    setStartDateError(null);
     setDialogOpen(true);
   };
 
@@ -181,6 +184,7 @@ export default function AdminAnnouncementsPage() {
     });
     createAnnouncement.reset();
     updateAnnouncement.reset();
+    setStartDateError(null);
     setDialogOpen(true);
   };
 
@@ -208,15 +212,13 @@ export default function AdminAnnouncementsPage() {
       priority,
     };
 
-    if (editingAnnouncement) {
-      updateAnnouncement.mutate({
-        id: editingAnnouncement.id,
-        ...payload,
-        ...buildAnnouncementSchedulePayload(formData, editingAnnouncement),
-      });
-    } else {
-      createAnnouncement.mutate({ ...payload, ...buildAnnouncementSchedulePayload(formData) });
-    }
+    setStartDateError(submitAnnouncementSchedule({
+      form: formData,
+      editing: editingAnnouncement,
+      base: payload,
+      create: createAnnouncement.mutate,
+      update: updateAnnouncement.mutate,
+    }));
   };
 
   const handleToggleActive = (announcement: Announcement) => {
@@ -658,27 +660,11 @@ export default function AdminAnnouncementsPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label style={{ color: 'var(--text-secondary)' }}>开始时间</Label>
-                <Input
-                  type="datetime-local"
-                  value={formData.startDate}
-                  onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
-                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label style={{ color: 'var(--text-secondary)' }}>结束时间 (可选)</Label>
-                <Input
-                  type="datetime-local"
-                  value={formData.endDate}
-                  onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
-                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
-                />
-              </div>
-            </div>
+            <AnnouncementScheduleFields
+              value={formData}
+              onChange={(schedule) => setFormData({ ...formData, ...schedule })}
+              startError={startDateError}
+            />
           </div>
 
           <DialogFooter>

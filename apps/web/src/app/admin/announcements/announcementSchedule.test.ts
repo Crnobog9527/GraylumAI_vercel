@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildAnnouncementSchedulePayload,
+  START_DATE_REQUIRED,
+  submitAnnouncementSchedule,
   toDateTimeLocalValue,
   type AnnouncementScheduleForm,
   type AnnouncementScheduleOriginal,
@@ -157,5 +159,54 @@ describe('announcement end date clearing', () => {
 
     expect(cleared.end_date).toBeNull();
     expect(reopenAndSave(cleared)).toEqual(cleared);
+  });
+});
+
+describe('announcement schedule submit guard', () => {
+  const editing = {
+    id: 'announcement-1',
+    start_date: '2026-09-29T02:00:00+00:00',
+    end_date: '2026-10-05T15:45:00+00:00',
+  };
+
+  function submit(form: AnnouncementScheduleForm, original: typeof editing | null) {
+    const create = vi.fn();
+    const update = vi.fn();
+    const error = submitAnnouncementSchedule({ form, editing: original, base: { title: 't' }, create, update });
+    return { error, create, update };
+  }
+
+  it('does not send a request when the start time is cleared while editing', () => {
+    const { error, create, update } = submit({ startDate: '', endDate: '' }, editing);
+
+    expect(error).toBe(START_DATE_REQUIRED);
+    expect(update).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('does not send a request when the start time is empty while creating', () => {
+    const { error, create, update } = submit({ startDate: '', endDate: '2026-10-02T18:45' }, null);
+
+    expect(error).toBe(START_DATE_REQUIRED);
+    expect(create).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('updates with a cleared end date as null', () => {
+    const form = { startDate: toDateTimeLocalValue(editing.start_date), endDate: '' };
+    const { error, update } = submit(form, editing);
+
+    expect(error).toBeNull();
+    expect(update).toHaveBeenCalledWith({
+      title: 't', id: editing.id, startDate: editing.start_date, endDate: null,
+    });
+  });
+
+  it('creates without an end date field when it is empty', () => {
+    const { error, create, update } = submit({ startDate: '2026-10-01T09:30', endDate: '' }, null);
+
+    expect(error).toBeNull();
+    expect(update).not.toHaveBeenCalled();
+    expect(create.mock.calls[0][0].endDate).toBeUndefined();
   });
 });
