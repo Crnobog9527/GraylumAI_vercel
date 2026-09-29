@@ -1,7 +1,6 @@
 'use client';
 
 import { memo, useState } from 'react';
-import Script from 'next/script';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle2,
@@ -15,12 +14,8 @@ import { buildAuthHref } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  getAuthCaptchaOptions,
-  getAuthCaptchaSiteKey,
-  HCAPTCHA_SCRIPT_SRC,
-  runAuthCaptchaAttempt,
-} from '@/lib/authCaptcha';
+import { DialogCaptcha } from '@/components/auth/DialogCaptcha';
+import { CAPTCHA_EXPIRED_MESSAGE, captchaOptionsFromToken } from '@/lib/dialogCaptcha';
 import {
   Dialog,
   DialogContent,
@@ -43,6 +38,8 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [statusTone, setStatusTone] = useState<'info' | 'success' | 'error'>('info');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaKey, setCaptchaKey] = useState(0);
   const [passwordForm, setPasswordForm] = useState({
     current_password: '',
     new_password: '',
@@ -51,7 +48,6 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
   const authProvider = user?.auth_provider || 'email';
   const isEmailPasswordAccount = authProvider === 'email';
-  const captchaSiteKey = getAuthCaptchaSiteKey();
   const registerDate = user?.created_date
     ? new Date(user.created_date).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
     : '-';
@@ -86,21 +82,22 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
     try {
       const supabase = createClient();
-      let captchaOptions: ReturnType<typeof getAuthCaptchaOptions>;
+      let captchaOptions: ReturnType<typeof captchaOptionsFromToken>;
       try {
-        captchaOptions = getAuthCaptchaOptions();
+        captchaOptions = captchaOptionsFromToken(captchaToken);
       } catch (error) {
         setStatusTone('error');
         setStatusMessage(getSafeErrorMessage(error, '请完成人机验证后重试。'));
         return;
       }
-      const { error: reauthError } = await runAuthCaptchaAttempt(captchaOptions, (options) =>
-        supabase.auth.signInWithPassword({
-          email: userEmail,
-          password: passwordForm.current_password,
-          options,
-        }),
-      );
+      // A CAPTCHA token is single use: drop it and remount the widget whatever the outcome.
+      setCaptchaToken(null);
+      setCaptchaKey((key) => key + 1);
+      const { error: reauthError } = await supabase.auth.signInWithPassword({
+        email: userEmail,
+        password: passwordForm.current_password,
+        options: captchaOptions,
+      });
 
       if (reauthError) {
         setStatusTone('error');
@@ -133,12 +130,6 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
   return (
     <>
-      {captchaSiteKey ? (
-        <>
-          <Script src={HCAPTCHA_SCRIPT_SRC} strategy="afterInteractive" />
-          <div className="h-captcha" data-sitekey={captchaSiteKey} />
-        </>
-      ) : null}
       <div
         className="rounded-2xl p-6"
         style={{
@@ -239,7 +230,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setShowPasswordDialog(true)}
+                  onClick={() => { setStatusMessage(null); setShowPasswordDialog(true); }}
                   style={{
                     background: 'transparent',
                     borderColor: 'rgba(255, 215, 0, 0.3)',
@@ -367,6 +358,25 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                 }}
               />
             </div>
+            {showPasswordDialog && (
+              <DialogCaptcha
+                key={captchaKey}
+                onToken={setCaptchaToken}
+                onExpired={() => {
+                  setStatusTone('error');
+                  setStatusMessage(CAPTCHA_EXPIRED_MESSAGE);
+                }}
+                onUnavailable={() => {
+                  setStatusTone('error');
+                  setStatusMessage('人机验证暂不可用，请稍后重试。');
+                }}
+              />
+            )}
+            {statusTone === 'error' && statusMessage && (
+              <p className="text-sm" role="alert" style={{ color: '#fca5a5' }}>
+                {statusMessage}
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button
