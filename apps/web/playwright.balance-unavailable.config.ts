@@ -12,9 +12,6 @@ const LOCAL_NEXT_ENV = {
   SUPABASE_SERVICE_ROLE_KEY: 'local-balance-test-service-role-key',
   NEXT_PUBLIC_APP_URL: 'http://localhost:3127',
   VERCEL_ENV: 'development',
-  RATE_LIMIT_FAIL_CLOSED: 'false',
-  UPSTASH_REDIS_REST_URL: '',
-  UPSTASH_REDIS_REST_TOKEN: '',
   NEXT_TELEMETRY_DISABLED: '1',
 } satisfies Record<string, string>;
 
@@ -46,9 +43,11 @@ export default defineConfig({
       timeout: 10_000,
     },
     {
-      command: 'pnpm exec next dev --webpack -p 3127',
+      // Real local rate limiting; unavailable Redis still rejects requests.
+      command: 'node ../../packages/db/tests/v3/run-with-local-rate-limit.mjs pnpm exec next dev --webpack -p 3127',
       url: 'http://localhost:3127',
       env: LOCAL_NEXT_ENV,
+      gracefulShutdown: { signal: 'SIGTERM', timeout: 15_000 },
       reuseExistingServer: false,
       timeout: 120_000,
     },

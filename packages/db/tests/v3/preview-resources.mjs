@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { isAbsolute, relative, resolve } from "node:path";
 import { previewNames, previewStatePath, removePreviewState } from "./preview-lifecycle.mjs";
 
+import { cleanLocalRateLimit, inspectLocalRateLimit } from "./local-rate-limit.mjs";
+
 const OWNER_LABEL = "io.graylum.workbench-preview";
 const resourceList = (names) => [["container", names.auth], ["container", names.rest], ["container", names.db], ["network", names.tag], ["volume", names.volume]];
 
@@ -73,6 +75,8 @@ export function assertPreviewResources(state, docker, { requireAll = true, mustB
 export function controlPreview(options, state, docker, env = process.env) {
   if (!options.persistent || options.id !== state.id || !["stop", "destroy"].includes(options.action) || (options.action === "destroy" && options.confirmDestroy !== state.id)) throw new Error("PREVIEW_CONTROL_DENIED");
   const found = assertPreviewResources(state, docker, { requireAll: false });
+  inspectLocalRateLimit(state.names.tag, state.ownerId, docker);
+  cleanLocalRateLimit(state.names.tag, state.ownerId, docker);
   for (const name of [state.names.auth, state.names.rest, state.names.db]) {
     if (found.has(name)) {
       if (options.action === "stop") docker("stop", "--time", "10", name);
