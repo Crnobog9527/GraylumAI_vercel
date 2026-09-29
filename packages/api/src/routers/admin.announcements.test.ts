@@ -18,7 +18,7 @@ function createSingleQueryBuilder(result: Promise<unknown>) {
   };
 }
 
-function createAdminCaller(onMutation: (payload: unknown) => void) {
+function createAdminCaller(onMutation: (payload: unknown) => void, storedBuilder?: unknown) {
   const userScopedSupabase = {
     from(table: string) {
       if (table === 'profiles') {
@@ -63,7 +63,7 @@ function createAdminCaller(onMutation: (payload: unknown) => void) {
   const adminSupabase = {
     from(table: string) {
       if (table === 'announcements') {
-        return announcementMutationBuilder;
+        return storedBuilder ?? announcementMutationBuilder;
       }
 
       throw new Error(`Unexpected admin table ${table}`);
@@ -150,5 +150,73 @@ describe('adminRouter announcement link writes', () => {
     const payload = onMutation.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(payload).toMatchObject({ title: 'Updated title' });
     expect(payload).not.toHaveProperty('banner_link');
+  });
+});
+
+// Model PostgREST equality filters against stored rows so regressions exercise
+// the row that is actually changed, including callers omitting the type input.
+function storedAnnouncement(type: 'homepage' | 'banner') {
+  const rows: Record<string, unknown>[] = [{
+    id: announcementId, announcement_type: type, title: 'Original', active: 'true',
+  }];
+  const filters = new Map<string, unknown>();
+  let payload: Record<string, unknown> = {};
+  let deleting = false;
+  const execute = () => {
+    const index = rows.findIndex(row => [...filters].every(([key, value]) => row[key] === value));
+    if (index < 0) return { data: null, error: deleting ? null : { code: 'PGRST116' } };
+    if (deleting) rows.splice(index, 1);
+    else Object.assign(rows[index], payload);
+    return { data: rows[index] ?? null, error: null };
+  };
+  const builder = {
+    update(value: Record<string, unknown>) {
+      payload = value;
+      return this;
+    },
+    delete() {
+      deleting = true;
+      return this;
+    },
+    eq(key: string, value: unknown) {
+      filters.set(key, value);
+      return this;
+    },
+    select() { return this; },
+    single() { return Promise.resolve(execute()); },
+    then(resolve: (value: ReturnType<typeof execute>) => unknown) {
+      return Promise.resolve(execute()).then(resolve);
+    },
+  };
+  return { rows, caller: createAdminCaller(vi.fn(), builder) };
+}
+
+describe('retired homepage announcement rows', () => {
+  it.each([undefined, 'banner'] as const)('cannot update or convert a homepage row with type %s', async type => {
+    const { rows, caller } = storedAnnouncement('homepage');
+    const original = structuredClone(rows);
+    await expect(caller.updateAnnouncement({
+      id: announcementId, title: 'Changed', active: 'false', announcementType: type,
+    })).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+    expect(rows).toEqual(original);
+  });
+
+  it('does not delete a homepage row using its retained ID', async () => {
+    const { rows, caller } = storedAnnouncement('homepage');
+    const original = structuredClone(rows);
+    await caller.deleteAnnouncement({ id: announcementId });
+    expect(rows).toEqual(original);
+  });
+
+  it('still updates banner rows', async () => {
+    const { rows, caller } = storedAnnouncement('banner');
+    await caller.updateAnnouncement({ id: announcementId, title: 'Updated', active: 'false' });
+    expect(rows[0]).toMatchObject({ title: 'Updated', active: 'false', announcement_type: 'banner' });
+  });
+
+  it('still deletes banner rows', async () => {
+    const { rows, caller } = storedAnnouncement('banner');
+    await caller.deleteAnnouncement({ id: announcementId });
+    expect(rows).toEqual([]);
   });
 });

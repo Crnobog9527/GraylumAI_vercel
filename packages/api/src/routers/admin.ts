@@ -1753,7 +1753,7 @@ export const adminRouter = router({
       const { data, error } = await ctx.supabase
         .from('announcements')
         .update(updateData)
-        .eq('id', input.id)
+        .eq('id', input.id).eq('announcement_type', 'banner')
         .select()
         .single();
 
@@ -1775,7 +1775,7 @@ export const adminRouter = router({
       const { error } = await ctx.supabase
         .from('announcements')
         .delete()
-        .eq('id', input.id);
+        .eq('id', input.id).eq('announcement_type', 'banner');
 
       if (error) {
         throw createAdminOperationError('删除公告', error);

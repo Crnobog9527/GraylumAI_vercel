@@ -528,8 +528,7 @@ test.describe('Admin Config Flows', () => {
 
       steps.push('Open /admin/announcements and verify CRUD remains isolated to announcement management');
       await gotoWithBypass(page, '/admin/announcements');
-      await page.getByRole('tab', { name: '横幅公告' }).click();
-      await page.getByRole('button', { name: '添加' }).first().click();
+      await page.getByTestId('admin-announcement-create-banner').click();
       await page.getByTestId('announcement-title-input').fill(title);
       await page.getByTestId('announcement-content-input').fill(`Parity announcement body ${Date.now()}`);
       await page.getByRole('button', { name: '保存' }).click();

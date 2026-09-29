@@ -527,7 +527,6 @@ test.describe('Admin Destructive Flows', () => {
       steps.push('Open /admin/announcements and create an isolated banner announcement');
       await gotoWithBypass(page, '/admin/announcements');
       await expect(page).toHaveURL(/\/admin\/announcements/);
-      await page.getByRole('tab', { name: '横幅公告' }).click();
       await page.getByTestId('admin-announcement-create-banner').click();
       await page.getByTestId('announcement-title-input').fill(announcementTitle);
       await page.getByTestId('announcement-content-input').fill('Parity destructive banner visibility verification');
