@@ -91,8 +91,8 @@ describe('dry run', () => {
 });
 
 describe('limits', () => {
-  it('refuses caps above the hard total of 453 calls and 3.5 USD', async () => {
-    expect(HARD_MAX_CALLS).toBe(453);
+  it('refuses caps above the hard total of 493 calls and 3.5 USD', async () => {
+    expect(HARD_MAX_CALLS).toBe(493);
     expect(HARD_MAX_USD).toBe(3.5);
     expect(() => validateCaps(HARD_MAX_CALLS + 1, 1)).toThrow('PROBE_CAP_REFUSED');
     expect(() => validateCaps(10, 3.51)).toThrow('PROBE_CAP_REFUSED');

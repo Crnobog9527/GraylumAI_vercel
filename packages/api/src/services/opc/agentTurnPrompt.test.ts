@@ -48,6 +48,19 @@ describe('pinned generic Agent turn prompt',()=>{
   expect(OPENING_EXTRACTION_RULE).toContain('any user_fact field as an answer');
   expect(OPENING_EXTRACTION_RULE).toContain('Never confirm or defer a field');
  });
+ it.each([false,true])('keeps generic evidence, constraint and no-question boundaries for opening=%s',opening=>{
+  const prompt=agentTurnInstructions({...input,opening});
+  expect(prompt).toContain('A status alone supplies no missing value');
+  expect(prompt).toContain('Preserve corrections without strengthening their meaning');
+  expect(prompt).toContain('Mark all other suggestions and assumptions as tentative');
+  expect(prompt).toContain('total time across combined activities');
+  expect(prompt).toContain('A maximum or occasional allowance is not a sustainable commitment');
+  expect(prompt).toContain('This overrides clarification and opening-question defaults');
+  expect(prompt).toContain('no ask_question, follow-up question, request for confirmation or next-topic invitation');
+  expect(prompt).toContain('a card must resolve only the current field');
+  expect(prompt).toContain('never not-sure, skip, defer, continue, free-text or other host controls');
+  expect(prompt).toContain('acknowledge briefly without reopening it or offering to advance');
+ });
  it('handles a revision without a current question',()=>{
   const prompt=agentTurnInstructions({...input,question:null,questionLabel:null});
   expect(lineJson(prompt,'Current information question: ')).toBeNull();

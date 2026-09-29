@@ -80,6 +80,12 @@ it.each([false,true].flatMap(opening=>['missing','provisional','confirmed','defe
   expect(complete).toBe(direct);
   expect(complete).toContain('Current workflow step: step-6');
   expect(complete).toContain('Steps and allowed fields: '+JSON.stringify(expectedWorkflow));
+  expect(complete).toContain('A status alone supplies no missing value');
+  expect(complete).toContain('This overrides clarification and opening-question defaults');
+  expect(complete).toContain('total time across combined activities');
+  const statusLengths={missing:7,provisional:11,confirmed:9,deferred:8};
+  const expectedLength=(opening?7312:6818)+statusLengths[status as keyof typeof statusLengths];
+  expect(complete.length).toBe(expectedLength);
   expect(complete.length).toBeLessThanOrEqual(8000);
   expect(z.string().max(8000).safeParse(complete).success).toBe(true);
   console.info('Synthetic final-step prompt capacity',JSON.stringify({opening,status,

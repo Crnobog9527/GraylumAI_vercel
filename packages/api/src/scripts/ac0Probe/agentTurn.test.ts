@@ -58,7 +58,7 @@ describe('AC1-4 prepared probe (synthetic transport only)', () => {
     const scenarios = ['ask', 'text'].flatMap(kind => Array.from({length: kind === 'ask' ? 30 : 10}, (_, i) =>
       ({...scenario, id: kind + i, kind: kind as 'ask' | 'text'})));
     const plan = buildPlan(args, skill, scenarios, 'synthetic');
-    expect(HARD_MAX_CALLS).toBe(453);
+    expect(HARD_MAX_CALLS).toBe(493);
     expect(plan).toMatchObject({agentTurn: true, plannedCalls: 40, maxUsd: 1, configs: [AGENT_TURN_CONFIG]});
     expect(() => parseProbeArgs(['--agent-turn', '--configs', 'other'], '/synthetic')).toThrow('CONFIG_FIXED');
     expect(() => buildPlan({...args, counts: {...args.counts, text: 9}}, skill, scenarios, 's')).toThrow('PLAN_FIXED');

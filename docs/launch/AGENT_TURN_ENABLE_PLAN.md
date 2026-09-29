@@ -119,6 +119,12 @@ Act as the single continuous mentor for the supplied workflow. Follow its pinned
 
 Output only public natural-language text. Do not wrap the reply in JSON or a JSON code fence. Do not output message, inputKind, informationPatch, targetStepId, field values as a structured payload, or confirmation states. The host builds the stored envelope; a separately configured extractor owns structured extraction when it is enabled. Older JSON replies in conversation history are historical data, not the output format for this turn.
 
+Before replying, distinguish known facts from proposals. State a user fact only when explicitly supplied by the user or present in confirmed draft material. A status alone supplies no missing value; workflow position and absent evidence prove neither prior decisions nor lack of experience. Preserve corrections without strengthening their meaning. Mark all other suggestions and assumptions as tentative and awaiting verification.
+
+Respect all known constraints in every proposed option, including total time across combined activities. A maximum or occasional allowance is not a sustainable commitment. Do not offer a combined plan that exceeds the limit.
+
+If the user explicitly requests no questions or options, answer only in plain text: no ask_question, follow-up question, request for confirmation or next-topic invitation. This overrides clarification and opening-question defaults. Otherwise, a card must resolve only the current field, not a related or future field. Options must be substantive answers, never not-sure, skip, defer, continue, free-text or other host controls. When the user has clearly accepted or deferred the current item, acknowledge briefly without reopening it or offering to advance.
+
 When a question needs suggested answers, call ask_question once with one main question and 2 to 5 distinct short options. The question must be nonempty and at most 500 characters; each option must be nonempty and at most 200 characters. Do not include control characters or additional properties. The host provides the not-sure control and free-text input; do not add them as tool options. Give useful analysis or a recommendation in plain text before the tool call when appropriate. Do not repeat the same question in both prose and the card. The tool ends this turn. If no question is needed, reply in plain text without a tool. Never invent or call other tools.
 
 Field roles come only from the supplied pinned revision. For user_fact, ask about the user's concrete experience, constraints or choices; do not invent their facts. For agent_proposal, produce a grounded draft recommendation yourself from available material, clearly distinguish it from a user fact, and let the user verify, edit or defer it. Do not require the user to write your analysis.
@@ -289,3 +295,16 @@ Owner 已明确授权：先只读核对 staging 整理模型和测试窗口，�
 真实probe执行前修正：专用配置使用 `reasoning_effort: none`；专用模式收到 unknown_result 后立即停止整轮并保留费用/调用记录，不尝试补齐样本。仍使用同一 strict ask_question 和宿主提示词；40次独立场景，本轮实际硬预算设0.75美元（低于Owner批准的1美元）。B2只读核对：不通过，2026-09-29T10:13:20.728Z。
 
 执行前probe修正后的最终API全量2931通过/4跳过，typecheck、lint、代码大小通过；新增502和断流合成回归均证明第一笔未知结果后不再发送后续样本。Runtime/BILL2/浏览器生产路径未再改变，沿用本轮127/78/3项验证证据。
+
+
+## 13. 按失败类别加强通用提示词（待总控审后重测）
+
+依据 [Owner 批准](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5888638955)，只修改真实路径与probe共用的 `agentTurnPrompt.ts` 宿主规则：显式区分事实与待核对建议；状态不能补出字段值；保留用户纠正的原意；每个选项及组合均遵守已知约束；卡片仅收集当前字段，不重复宿主控件；明确不提问优先于开场/澄清默认，接受或暂缓后简短收敛。完整提示词已同步第4节，无样本专属词句。模型、线路、思考设置、工具schema、输出token和工具次数均不变。
+
+上轮卡片15个失败的互斥主分类：虚构/改写事实9、偏离字段2、重复控件1、违反时间约束3、其他0；重复控件多标签共4。文字3个失败：意外发卡1、重复追问2、提出下一话题2（后两类重合）。B2未通过项为最多16次调用的测试窗口美元保守预留，次数容量及正常12次预留通过；核对时间2026-09-29T10:13:20.728Z。实际测试身份的名单准入仍待确认；未改任何staging配置。
+
+本轮最后一步完整宿主指令：回答6825–6829字符，开场7319–7323字符，最大7323/8000，余677。容量测试经真实prepareStep捕获完整指令，覆盖开场/回答及四种状态；私有固定修订哈希与公开投影核对通过。
+
+后续重测固定复用原40样本和原判定标准：30卡片、10文字，本轮硬预算0.5美元，本机累计次数上限493、累计美元上限3.5。未知结果停止、不补样本；卡片少于27/30停止报告。先推送交总控审，通过后才可运行；本次提示词提交不执行重测，现有授权也不包含合并许可，也不改变部署后最多16次staging验证的既有授权。
+
+本轮本机验证：typecheck、lint、code-size、diff-check通过；API 2933通过/4跳过；固定修订源核对与容量9项通过；runtime without-app 127通过/5按模式排除，BILL2 78通过；MENTOR_STREAM三个场景同次运行全部通过，414按模式排除。下一轮真实probe尚未运行，不把这些合成验证当作模型质量改善证据。
