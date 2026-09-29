@@ -147,6 +147,8 @@ function createAdminCaller(options?: {
 
   const adminSupabase = {
     from(table: string) {
+      if (table === 'ai_models') return createHealthQueryBuilder(Promise.resolve(
+        options?.aiModelsKeyResult ?? { data: [{ api_key: 'synthetic' }], error: null }));
       throw new Error(`Unexpected admin-scoped table ${table}`);
     },
     rpc(fn: string) {
@@ -218,6 +220,8 @@ function createAdminHealthCaller(options?: {
 
   const adminSupabase = {
     from(table: string) {
+      if (table === 'ai_models') return createHealthQueryBuilder(Promise.resolve(
+        options?.aiModelsKeyResult ?? { data: [{ api_key: 'synthetic' }], error: null }));
       throw new Error(`Unexpected admin table ${table}`);
     },
   };

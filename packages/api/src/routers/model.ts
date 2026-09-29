@@ -334,7 +334,7 @@ export const modelRouter = router({
 
       const connectionCheck = await verifyAndPersistConnection(ctx.supabase, data as PersistedModel);
       return {
-        ...data,
+        ...stripSensitiveModelFields(data),
         connectionCheck,
       };
     }),
@@ -425,7 +425,7 @@ export const modelRouter = router({
         : null;
 
       return {
-        ...data,
+        ...stripSensitiveModelFields(data),
         connectionCheck,
       };
     }),
@@ -457,7 +457,7 @@ export const modelRouter = router({
         .eq('id', input.id)
         .select();
       if (error) throw createModelOperationError('更新模型配置', error);
-      return data;
+      return data?.map(stripSensitiveModelFields) ?? data;
     }),
 
   // Admin only: Test API connection for a model
