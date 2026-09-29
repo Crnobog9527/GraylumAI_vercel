@@ -8,6 +8,8 @@ const ownCode = { code: 'OWNCODE', created_by: profileId, status: 'active' };
 type Row = Record<string, unknown>;
 function fixture(options: {
   invitations?: Row[];
+  records?: Row[];
+  countErrorAt?: number;
   settings?: Row[];
   privileged?: boolean;
   insertError?: { code: string; message: string };
@@ -18,30 +20,41 @@ function fixture(options: {
     { ...ownCode, code: 'INACTIVE', status: 'used' },
     ownCode,
   ];
-  const records = [
+  const records = options.records ?? [
     { id: 'record-own', created_at: '2026-09-29', invitee_email: 'synthetic',
       inviter_reward: 70, status: 'rewarded', inviter_id: profileId, risk_level: 'private' },
     { id: 'record-foreign', inviter_id: 'synthetic-other' },
   ];
   function query(rows: Row[], error: unknown = null) {
     let columns: string | undefined;
+    let head = false;
+    let rowLimit = Infinity;
+    let orderKey: string | undefined;
+    let ascending = true;
+    const inclusions: Array<[string, unknown[]]> = [];
     const filters: Array<[string, unknown]> = [];
     let inserted: Row | undefined;
     const result = () => {
       const selected = (inserted ? [inserted] : rows).filter(row => (
         filters.every(([key, value]) => row[key] === value)
+        && inclusions.every(([key, values]) => values.includes(row[key]))
       ));
-      const data = selected.map(row => columns ? Object.fromEntries(
+      if (orderKey) selected.sort((a, b) => String(a[orderKey!]).localeCompare(String(b[orderKey!])) * (ascending ? 1 : -1));
+      const data = selected.slice(0, rowLimit).map(row => columns ? Object.fromEntries(
         columns.split(',').map(key => key.trim()).map(key => [key, row[key]]),
       ) : row);
-      return { data, error: inserted ? options.insertError ?? null : error };
+      return { data, count: head ? selected.length : null, error: inserted ? options.insertError ?? null : error };
     };
     const builder = {
-      select: vi.fn((value?: string) => { columns = value; return builder; }),
+      select: vi.fn((value?: string, config?: { head?: boolean }) => {
+        columns = value; head = config?.head ?? false; return builder;
+      }),
       eq: vi.fn((key: string, value: unknown) => { filters.push([key, value]); return builder; }),
-      order: vi.fn(() => builder),
-      limit: vi.fn(() => builder),
-      in: vi.fn(() => builder),
+      order: vi.fn((key: string, config: { ascending: boolean }) => {
+        orderKey = key; ascending = config.ascending; return builder;
+      }),
+      limit: vi.fn((value: number) => { rowLimit = value; return builder; }),
+      in: vi.fn((key: string, values: unknown[]) => { inclusions.push([key, values]); return builder; }),
       insert: vi.fn((value: Row) => { inserted = value; return builder; }),
       maybeSingle: vi.fn(async () => ({ ...result(), data: result().data[0] ?? null })),
       single: vi.fn(async () => ({ ...result(), data: result().data[0] ?? null })),
@@ -52,14 +65,20 @@ function fixture(options: {
     return builder;
   }
   const invitationQueries: ReturnType<typeof query>[] = [];
-  const recordQuery = query(records);
+  const recordQueries: ReturnType<typeof query>[] = [];
   const settingsQuery = query(options.settings ?? []);
   const supabase = {
     from: vi.fn((table: string) => {
       if (table === 'profiles') return query([
         { id: profileId, role: 'user', status: 'active', nickname: 'Synthetic' },
       ]);
-      if (table === 'invitation_records') return recordQuery;
+      if (table === 'invitation_records') {
+        const error = recordQueries.length === options.countErrorAt
+          ? { code: '42501', message: 'private count details' } : null;
+        const builder = query(records, error);
+        recordQueries.push(builder);
+        return builder;
+      }
       throw new Error(`User client must not access ${table}`);
     }),
   };
@@ -81,7 +100,7 @@ function fixture(options: {
     supabase, supabaseAuth: supabase, supabaseAdmin,
     hasSupabaseAdminPrivileges: options.privileged ?? true,
   } as any);
-  return { caller, supabase, supabaseAdmin, invitationQueries, recordQuery, settingsQuery };
+  return { caller, supabase, supabaseAdmin, invitationQueries, recordQueries, settingsQuery };
 }
 
 describe('getMyInvitationDashboard privileged boundary', () => {
@@ -135,9 +154,9 @@ describe('getMyInvitationDashboard privileged boundary', () => {
     expect(result.records).toHaveLength(1);
     expect(Object.keys(result.records[0]).sort()).toEqual([...visibleFields].sort());
     expect(result.records[0].id).toBe('record-own');
-    expect(f.recordQuery.select).toHaveBeenCalledExactlyOnceWith(visibleFields.join(', '));
-    expect(f.recordQuery.eq).toHaveBeenCalledExactlyOnceWith('inviter_id', profileId);
-    expect(f.recordQuery.limit).toHaveBeenCalledExactlyOnceWith(10);
+    expect(f.recordQueries[0].select).toHaveBeenCalledExactlyOnceWith(visibleFields.join(', '));
+    expect(f.recordQueries[0].eq).toHaveBeenCalledExactlyOnceWith('inviter_id', profileId);
+    expect(f.recordQueries[0].limit).toHaveBeenCalledExactlyOnceWith(10);
     expect(f.supabaseAdmin.from).not.toHaveBeenCalledWith('invitation_records');
   });
 
@@ -157,5 +176,46 @@ describe('getMyInvitationDashboard privileged boundary', () => {
     });
     expect(f.invitationQueries).toHaveLength(1);
     expect(f.invitationQueries[0].insert).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('getMyInvitationDashboard complete summary', () => {
+  it('counts every own record while returning only the latest ten display rows', async () => {
+    const records = Array.from({ length: 16 }, (_, i) => ({
+      id: `record-${i}`, created_at: new Date(Date.UTC(2026, 8, i + 1)).toISOString(),
+      status: ['rewarded', 'pending', 'registered', 'rejected'][i % 4],
+      inviter_id: profileId, invitee_email: 'synthetic', inviter_reward: 50,
+      ip_address: 'private', user_agent: 'private', risk_level: 'private', block_reason: 'private',
+    }));
+    const f = fixture({ records: [
+      ...records,
+      ...records.map(row => ({ ...row, inviter_id: 'synthetic-other' })),
+    ] });
+    const result = await f.caller.getMyInvitationDashboard();
+    expect(result.summary).toEqual({ totalInvites: 16, rewardedInvites: 4, pendingInvites: 8 });
+    expect(result.records.map(row => row.id)).toEqual(records.slice(6).reverse().map(row => row.id));
+    for (const row of result.records) expect(Object.keys(row).sort()).toEqual([...visibleFields].sort());
+    expect(f.recordQueries).toHaveLength(4);
+    for (const query of f.recordQueries.slice(1)) {
+      expect(query.select).toHaveBeenCalledExactlyOnceWith('status', { count: 'exact', head: true });
+      expect(query.eq).toHaveBeenCalledWith('inviter_id', profileId);
+      expect(query.limit).not.toHaveBeenCalled();
+    }
+    expect(f.supabaseAdmin.from).not.toHaveBeenCalledWith('invitation_records');
+  });
+
+  it('returns zero counts for an empty invitation history', async () => {
+    const f = fixture({ records: [] });
+    const result = await f.caller.getMyInvitationDashboard();
+    expect(result.summary).toEqual({ totalInvites: 0, rewardedInvites: 0, pendingInvites: 0 });
+    expect(result.records).toEqual([]);
+  });
+
+  it.each([1, 2, 3])('throws a sanitized error when count query %s fails', async countErrorAt => {
+    const f = fixture({ countErrorAt });
+    await expect(f.caller.getMyInvitationDashboard()).rejects.toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR', message: '读取邀请码面板失败，请稍后重试',
+    });
   });
 });
