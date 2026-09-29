@@ -15,14 +15,11 @@ import {
   allowedWires,
   routeSupports,
   type CatalogSnapshot,
-  type PurposeSetting,
   type PurposeSettings,
   type ReasoningPurpose,
 } from '@repo/api/src/shared/modelReasoning';
 
-type Wire = 'reasoning_effort' | 'reasoning';
-/** One purpose's form state; `unset` stores nothing for that purpose. */
-type Draft = { mode: 'unset' | PurposeSetting['mode']; effort: string; wire: Wire; budget: string };
+import { fromDraft, normalizeDrafts, toDraft, type Draft, type Wire } from './modelReasoningDraft';
 
 const PURPOSE_NOTES: Record<ReasoningPurpose, string> = {
   interactive: '导师和日常对话。必须设置，没设置的模型不能用作 Skill 模型。',
@@ -37,41 +34,6 @@ const MODE_LABELS: Record<Draft['mode'], string> = {
   effort: '指定档位',
   budget: '思考预算（token）',
 };
-
-function toDraft(setting: PurposeSetting | undefined, defaultWire: Wire): Draft {
-  if (!setting) return { mode: 'unset', effort: '', wire: defaultWire, budget: '' };
-  return {
-    mode: setting.mode,
-    effort: setting.mode === 'effort' ? setting.effort : '',
-    wire: setting.mode === 'off' || setting.mode === 'effort' ? setting.wire : defaultWire,
-    budget: setting.mode === 'budget' ? String(setting.maxTokens) : '',
-  };
-}
-function fromDraft(draft: Draft): PurposeSetting | undefined {
-  switch (draft.mode) {
-    case 'unset':
-      return undefined;
-    case 'provider_default':
-      return { mode: 'provider_default' };
-    case 'off':
-      return { mode: 'off', wire: draft.wire };
-    case 'effort':
-      return { mode: 'effort', effort: draft.effort as Extract<PurposeSetting, { mode: 'effort' }>['effort'], wire: draft.wire };
-    case 'budget':
-      return { mode: 'budget', maxTokens: Number(draft.budget) };
-  }
-}
-/** Parameter forms the chosen route supports (plus the current one, so it stays visible). */
-function wiresFor(catalog: CatalogSnapshot | null, route: string | null, current: Wire): Wire[] {
-  const wires = allowedWires(catalog, route);
-  return wires.includes(current) ? wires : [...wires, current];
-}
-/** Modes the catalog and route allow, so the menu never offers a choice the server
- * will refuse; the current mode stays listed so a stored setting remains visible. */
-function modesFor(catalog: CatalogSnapshot | null, route: string | null, current: Draft['mode']): Draft['mode'][] {
-  const modes: Draft['mode'][] = ['unset', ...allowedModes(catalog, route)];
-  return modes.includes(current) ? modes : [...modes, current];
-}
 
 /** A choice the form cannot save yet, before asking the server. */
 function draftProblem(drafts: Record<ReasoningPurpose, Draft>): string | null {
@@ -120,15 +82,21 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
   });
   const catalog = view.data?.config.catalog ?? null;
   const [route, setRoute] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<ReasoningPurpose, Draft> | null>(null);
+  const [rawDrafts, setDrafts] = useState<Record<ReasoningPurpose, Draft> | null>(null);
+
+  const drafts = rawDrafts ? normalizeDrafts(rawDrafts, catalog, route) : null;
 
   useEffect(() => {
-    if (!view.data || drafts) return;
+    if (!view.data || rawDrafts) return;
     const stored = view.data.config;
     const wire: Wire = supports(stored.catalog, stored.route, 'reasoning_effort') ? 'reasoning_effort' : 'reasoning';
     setRoute(stored.route);
     setDrafts(Object.fromEntries(REASONING_PURPOSES.map(purpose => [purpose, toDraft(stored.purposes[purpose], wire)])) as Record<ReasoningPurpose, Draft>);
-  }, [view.data, drafts]);
+  }, [view.data, rawDrafts]);
+
+  useEffect(() => {
+    if (drafts !== rawDrafts) setDrafts(drafts);
+  }, [drafts, rawDrafts]);
 
   const update = (purpose: ReasoningPurpose, patch: Partial<Draft>) =>
     setDrafts(old => (old ? { ...old, [purpose]: { ...old[purpose], ...patch } } : old));
@@ -211,7 +179,7 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
                   <Select value={draft.mode} onValueChange={value => update(purpose, { mode: value as Draft['mode'] })}>
                     <SelectTrigger aria-label={`${PURPOSE_LABELS[purpose]}的思考方式`}><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {modesFor(catalog, route, draft.mode).map(mode => (
+                      {(['unset', ...allowedModes(catalog, route, purpose)] as Draft['mode'][]).map(mode => (
                         <SelectItem key={mode} value={mode}>{MODE_LABELS[mode]}</SelectItem>
                       ))}
                     </SelectContent>
@@ -228,7 +196,7 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
                     <Select value={draft.wire} onValueChange={value => update(purpose, { wire: value as Wire })}>
                       <SelectTrigger aria-label={`${PURPOSE_LABELS[purpose]}的参数写法`}><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {wiresFor(catalog, route, draft.wire).map(wire => (
+                        {allowedWires(catalog, route).map(wire => (
                           <SelectItem key={wire} value={wire}>{wire === 'reasoning' ? 'reasoning 对象' : 'reasoning_effort 参数'}</SelectItem>
                         ))}
                       </SelectContent>

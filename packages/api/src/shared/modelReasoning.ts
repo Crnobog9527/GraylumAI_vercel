@@ -130,7 +130,13 @@ export function allowedWires(catalog: CatalogSnapshot | null, route: string | nu
   return (["reasoning_effort", "reasoning"] as const).filter(wire => routeSupports(catalog, route, wire));
 }
 /** Modes a menu may offer for this catalog and route; the others would fail the checks. */
-export function allowedModes(catalog: CatalogSnapshot | null, route: string | null): Array<PurposeSetting["mode"]> {
+export function allowedModes(
+  catalog: CatalogSnapshot | null,
+  route: string | null,
+  purpose: ReasoningPurpose,
+): Array<PurposeSetting["mode"]> {
+  const endpoint = catalog?.endpoints.find(item => item.tag === route);
+  if (!endpoint || (purpose === "interactive" && !endpoint.supportedParameters.includes("tools"))) return [];
   const reasoning = catalog?.reasoning, modes: Array<PurposeSetting["mode"]> = ["provider_default"];
   const wire = allowedWires(catalog, route).length > 0;
   if (reasoning && wire && !reasoning.mandatory) modes.push("off");
