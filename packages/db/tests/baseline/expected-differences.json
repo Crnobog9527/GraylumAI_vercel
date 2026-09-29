@@ -20,12 +20,8 @@
   ]
  },
  "addedToStagingBy0148": {
-  "_why": "0148 re-installs the 0027 profile credit guard that staging lost; after 0148 is applied to staging these disappear from the diff and must be removed here.",
-  "keys": [
-   "fn:prevent_client_profile_credit_write()",
-   "fnacl:prevent_client_profile_credit_write()",
-   "trg:profiles.trg_prevent_client_profile_credit_write"
-  ]
+  "_why": "0148 re-installed the 0027 profile credit guard; applied to staging 2026-09-29 20:08 UTC (ledger 20260929200810), so these no longer differ and the list is empty.",
+  "keys": []
  },
  "stricterInFiles": {
   "_why": "CHECK/UNIQUE constraints and indexes that repository migrations define but staging never received (its tables pre-dated those CREATE TABLE IF NOT EXISTS migrations). Kept: they only reject invalid rows or speed up reads.",
