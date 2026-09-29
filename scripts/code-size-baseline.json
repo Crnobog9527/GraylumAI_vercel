@@ -162,6 +162,6 @@
   "packages/api/src/services/subscriptionCreditGrants.ts": {"lines":3631,"longLines":6},
   "packages/api/src/trpc.ts": {"lines":515},
   "packages/db/schema.ts": {"lines":594},
-  "scripts/check-staging-db-readiness.mjs": {"lines":794},
+  "scripts/check-staging-db-readiness.mjs": {"lines":789},
   "scripts/check-stripe-readiness.mjs": {"lines":678}
 }

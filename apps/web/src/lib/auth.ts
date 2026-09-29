@@ -1,3 +1,4 @@
+import { isSafeRelativePath } from './safe-url';
 import type { User } from '@supabase/supabase-js';
 
 export type AppAuthProvider = 'email' | 'google' | 'unknown';
@@ -40,7 +41,7 @@ export function isEmailVerified(user: User | null | undefined): boolean {
 }
 
 export function sanitizeRedirectTarget(redirect: string | null | undefined) {
-  if (!redirect || !redirect.startsWith('/') || redirect.startsWith('//')) {
+  if (!redirect || !isSafeRelativePath(redirect)) {
     return '/profile';
   }
 
