@@ -64,7 +64,7 @@ describe('fixed AC1-4 candidates: approved live caps', () => {
         effort: 'low', maxPrice: {prompt: 0.75, completion: 3.75}, dataCollection: 'omit', runtimeRouting: true},
     });
     expect(buildPlan(args('c1'), skill, scenarios, 's').planId).not.toBe(buildPlan(args('c2'), skill, scenarios, 's').planId);
-    expect(HARD_MAX_CALLS).toBe(573);
+    expect(HARD_MAX_CALLS).toBe(613);
     expect(HARD_MAX_USD).toBe(6);
   });
 
@@ -72,7 +72,7 @@ describe('fixed AC1-4 candidates: approved live caps', () => {
     ['--agent-turn-candidate', 'c1'], ['--agent-turn', '--agent-turn-candidate', 'other'],
     argv('c1', '--configs', 'qwen-deepinfra-low'), argv('c1', '--configs', ''), argv('c2', '--config-file', '/unused'),
     argv('c1', '--max-tokens', '1024'), argv('c2', '--max-tokens', '8191'), argv('c2', '--max-tokens', '8193'),
-    argv('c1', '--max-usd', '6.01'), argv('c1', '--max-calls', '574'),
+    argv('c1', '--max-usd', '6.01'), argv('c1', '--max-calls', '614'),
     argv('c2', '--record-external-calls', '1', '--record-external-usd', '0.1'),
   ])('refuses conflicting candidate arguments %j', (...input) => {
     expect(() => parseProbeArgs(input, '/synthetic-home')).toThrow();
@@ -90,7 +90,7 @@ describe('fixed AC1-4 candidates: approved live caps', () => {
     expect(plan.maxUsd).toBe(6);
     expect(describePlan(plan, 'dry-run', {calls: 493, usd: 3.5})).toContain('estimate is not executable');
     expect(buildPlan({...args('c2'), live: true}, skill, scenarios, 's').plannedCalls).toBe(40);
-    const ledger = memoryLedger({calls: 573, nanoUsd: 0});
+    const ledger = memoryLedger({calls: 613, nanoUsd: 0});
     expect(() => createBudget({maxCalls: 40, maxUsd: 6, ledger}).reserve(1)).toThrow('total_call_cap');
   });
 
