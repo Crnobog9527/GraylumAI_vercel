@@ -77,7 +77,9 @@ function compare(local, localDetail, snapshot, expected) {
         const stagingValue = snapshot.objects[item];
         const localValue = localDetail[item];
         if (stagingValue === undefined) {
-          if (!allow('stricterInFiles', item)) unexpected.push(`only in files: ${item} :: ${localValue}`);
+          if (!allow('stricterInFiles', item) && !allow('addedToStagingBy0148', item)) {
+            unexpected.push(`only in files: ${item} :: ${localValue}`);
+          }
         } else if (localValue === undefined) {
           unexpected.push(`only on staging: ${item}`);
         } else if (/^(acl|defacl):/.test(item) ? localValue !== stagingValue : !md5(localValue).startsWith(stagingValue)) {
@@ -139,7 +141,7 @@ try {
     if (option('--query')) report.query = psql(option('--query')).stdout.trim().split('\n');
     if (option('--out')) writeFileSync(option('--out'), JSON.stringify({ groups: local, objects: localDetail }, null, 1));
     const snapshot = option('--staging') ? JSON.parse(readFileSync(option('--staging'), 'utf8'))
-      : readJson('packages/db/tests/baseline/staging-fingerprint-20260930.json');
+      : readJson('packages/db/tests/baseline/staging-fingerprint.json');
     report.comparison = compare(local, localDetail, snapshot,
       readJson('packages/db/tests/baseline/expected-differences.json'));
     if (report.comparison.unexpected.length > 0) report.failed = { step: 'staging comparison' };
@@ -154,11 +156,11 @@ try {
       // Staging simulation: the rollback removes exactly what 0148 adds on staging (the credit
       // guard); applying 0148 again restores the converged structure.
       const guardKeys = ['fn:prevent_client_profile_credit_write()', 'fnacl:prevent_client_profile_credit_write()',
-        'trg:profiles'];
+        'trg:profiles.trg_prevent_client_profile_credit_write'];
       ok(psql(read('packages/db/tests/db-baseline-0148-rollback.sql')), 'Rollback');
-      const rolledBack = JSON.parse(ok(psql(fingerprintSql), 'Rollback fingerprint'));
-      const removed = Object.keys(local).filter(key => !(key in rolledBack)).sort();
-      const changedByRollback = Object.keys(rolledBack).filter(key => rolledBack[key] !== local[key]);
+      const rolledBack = JSON.parse(ok(psql(detailSql), 'Rollback detail'));
+      const removed = Object.keys(localDetail).filter(key => !(key in rolledBack)).sort();
+      const changedByRollback = Object.keys(rolledBack).filter(key => rolledBack[key] !== localDetail[key]);
       ok(psql(read(convergence)), 'Apply after rollback');
       const restored = JSON.stringify(JSON.parse(ok(psql(fingerprintSql), 'Restored fingerprint'))) === JSON.stringify(local);
       report.rollback = { removed, changedByRollback, restored };

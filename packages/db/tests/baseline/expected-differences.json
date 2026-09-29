@@ -24,7 +24,7 @@
   "keys": [
    "fn:prevent_client_profile_credit_write()",
    "fnacl:prevent_client_profile_credit_write()",
-   "trg:profiles"
+   "trg:profiles.trg_prevent_client_profile_credit_write"
   ]
  },
  "stricterInFiles": {

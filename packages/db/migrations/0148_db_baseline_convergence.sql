@@ -250,6 +250,29 @@ GRANT SELECT ON TABLE public.conversations, public.credit_transactions, public.m
   public.profiles, public.token_stats, public.user_checkins TO authenticated;
 GRANT INSERT, UPDATE ON TABLE public.conversations TO authenticated;
 
+-- 8b. 0147 guards every table authenticated can reach with the RESTRICTIVE account_open_required
+--     policy, chosen by the privileges held when 0147 ran. On a database built from files some of
+--     those privileges only arrive in step 8, so apply the same rule again for tables still missing
+--     it (same definition as 0147; existing policies are left untouched).
+DO $$
+DECLARE
+  rel record;
+BEGIN
+  FOR rel IN
+    SELECT c.oid, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relrowsecurity
+      AND c.relname NOT IN ('profiles', 'account_erasure_requests')
+      AND (has_table_privilege('authenticated', c.oid, 'SELECT, INSERT, UPDATE, DELETE')
+        OR has_any_column_privilege('authenticated', c.oid, 'SELECT, INSERT, UPDATE'))
+      AND NOT EXISTS (SELECT 1 FROM pg_policies p
+        WHERE p.schemaname = 'public' AND p.tablename = c.relname AND p.policyname = 'account_open_required')
+  LOOP
+    EXECUTE format('CREATE POLICY account_open_required ON public.%I AS RESTRICTIVE FOR ALL'
+      ' TO authenticated USING (NOT (SELECT public.current_account_is_closed()))'
+      ' WITH CHECK (NOT (SELECT public.current_account_is_closed()))', rel.relname);
+  END LOOP;
+END $$;
+
 -- 9. Defence in depth from 0027 that staging lost: client roles cannot write profile credits or
 --    bootstrap a privileged profile. Column grants already deny this; the trigger keeps it denied
 --    if a future grant widens. Service role and SECURITY DEFINER functions are unaffected.
