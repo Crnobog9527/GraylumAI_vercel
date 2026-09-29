@@ -1,3 +1,4 @@
+import { ANNOUNCEMENT_LINK_ERROR, resolveAnnouncementLink } from '../shared/announcementLink';
 import { parseSearchSurcharge } from '../services/searchPricing';
 import { router, adminProcedure } from '../trpc';
 import { z } from 'zod';
@@ -148,12 +149,10 @@ const adminSettingsMembershipPlanRowSchema = z.object({
   allow_export: z.enum(['true', 'false']),
   allow_batch_export: z.enum(['true', 'false']),
 }).passthrough();
-const announcementLinkInputSchema = z
-  .string()
-  .trim()
-  .transform((value) => value || null)
-  .nullable()
-  .optional();
+const announcementLinkInputSchema = z.string()
+  .refine(value => resolveAnnouncementLink(value) !== null, ANNOUNCEMENT_LINK_ERROR)
+  .transform(value => resolveAnnouncementLink(value)!.href)
+  .nullable().optional();
 const promptBatchPatchSchema = z.object({
   description: z.string().max(500).nullable().optional(),
   fullDescription: z.string().max(5000).nullable().optional(),

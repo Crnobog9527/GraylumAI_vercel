@@ -40,10 +40,10 @@ import {
 import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
 import {
-  ANNOUNCEMENT_LINK_LABEL,
   buildAnnouncementPresentationPayload,
   getAnnouncementLinkFormValue,
 } from './announcementFormPayload';
+import AnnouncementLinkField from './AnnouncementLinkField';
 
 type AnnouncementType = 'info' | 'warning' | 'success' | 'error' | 'promo' | 'announcement';
 type BannerStyle = 'info' | 'warning' | 'success' | 'error' | 'promo' | 'announcement';
@@ -157,6 +157,8 @@ export default function AdminAnnouncementsPage() {
       startDate: new Date().toISOString().slice(0, 16),
       endDate: '',
     });
+    createAnnouncement.reset();
+    updateAnnouncement.reset();
     setDialogOpen(true);
   };
 
@@ -176,6 +178,8 @@ export default function AdminAnnouncementsPage() {
       startDate: announcement.start_date ? new Date(announcement.start_date).toISOString().slice(0, 16) : '',
       endDate: announcement.end_date ? new Date(announcement.end_date).toISOString().slice(0, 16) : '',
     });
+    createAnnouncement.reset();
+    updateAnnouncement.reset();
     setDialogOpen(true);
   };
 
@@ -568,20 +572,11 @@ export default function AdminAnnouncementsPage() {
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label style={{ color: 'var(--text-secondary)' }}>
-                  <div className="flex items-center gap-2">
-                    <Link2 className="h-4 w-4" />
-                    {ANNOUNCEMENT_LINK_LABEL}
-                  </div>
-                </Label>
-                <Input
-                  value={formData.bannerLink}
-                  onChange={(e) => setFormData({ ...formData, bannerLink: e.target.value })}
-                  placeholder="https://example.com 或 /marketplace"
-                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
-                />
-              </div>
+              <AnnouncementLinkField
+                value={formData.bannerLink}
+                onChange={bannerLink => setFormData({ ...formData, bannerLink })}
+                error={editingAnnouncement ? updateAnnouncement.error : createAnnouncement.error}
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-4">

@@ -89,14 +89,43 @@ function createAdminCaller(onMutation: (payload: unknown) => void, storedBuilder
 }
 
 describe('adminRouter announcement link writes', () => {
-  it('normalizes a blank create link to banner_link null', async () => {
+  it.each([
+    'javascript:alert(1)', 'data:text/html,test', 'vbscript:msgbox(1)',
+    '//example.com', '/\\example.com', 'https:example.com',
+    'http://example.com', 'ftp://example.com', '', '   ',
+  ])('rejects %j on both create and update before a write', async bannerLink => {
+    const onMutation = vi.fn();
+    const caller = createAdminCaller(onMutation);
+    for (const request of [
+      () => caller.createAnnouncement({ title: 'Banner', content: 'Content', bannerLink }),
+      () => caller.updateAnnouncement({ id: announcementId, bannerLink }),
+    ]) {
+      await expect(request()).rejects.toMatchObject({
+        code: 'BAD_REQUEST', message: expect.stringContaining('跳转链接'),
+      });
+    }
+    expect(onMutation).not.toHaveBeenCalled();
+  });
+
+  it.each(['https://example.com/news', '/marketplace'])('saves %s on create and update', async bannerLink => {
+    const onMutation = vi.fn();
+    const caller = createAdminCaller(onMutation);
+    await caller.createAnnouncement({ title: 'Banner', content: 'Content', bannerLink });
+    await caller.updateAnnouncement({ id: announcementId, bannerLink });
+    expect(onMutation).toHaveBeenCalledTimes(2);
+    for (const [payload] of onMutation.mock.calls) {
+      expect(payload).toMatchObject({ banner_link: bannerLink });
+    }
+  });
+
+  it('allows creating a banner without a link', async () => {
     const onMutation = vi.fn();
     const caller = createAdminCaller(onMutation);
 
     await caller.createAnnouncement({
       title: 'Banner announcement',
       content: 'Content',
-      bannerLink: '   ',
+      bannerLink: null,
     });
 
     expect(onMutation).toHaveBeenCalledWith(

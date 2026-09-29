@@ -15,16 +15,16 @@ describe('admin announcement presentation payload', () => {
       }),
     ).toEqual({
       bannerStyle: 'warning',
-      bannerLink: 'https://example.com/banner',
+      bannerLink: '  https://example.com/banner  ',
     });
     expect(ANNOUNCEMENT_LINK_LABEL).toBe('跳转链接（可选）');
   });
 
-  it('normalizes a blank link to null when creating an announcement', () => {
+  it('uses null only when the link field is completely empty', () => {
     expect(
       buildAnnouncementPresentationPayload({
         bannerStyle: 'info',
-        bannerLink: '   ',
+        bannerLink: '',
       }),
     ).toEqual({
       bannerStyle: 'info',
@@ -41,7 +41,7 @@ describe('admin announcement presentation payload', () => {
     expect(
       buildAnnouncementPresentationPayload({
         bannerStyle: 'info',
-        bannerLink: '   ',
+        bannerLink: '',
       }),
     ).toEqual({
       bannerStyle: 'info',
@@ -63,6 +63,10 @@ describe('admin announcement presentation payload', () => {
       bannerStyle: 'promo',
       bannerLink: 'https://example.com/existing-banner',
     });
+  });
+
+  it('preserves whitespace-only input for server rejection', () => {
+    expect(buildAnnouncementPresentationPayload({ bannerStyle: 'info', bannerLink: '   ' }).bannerLink).toBe('   ');
   });
 
   it('maps absent database links to an empty form value', () => {

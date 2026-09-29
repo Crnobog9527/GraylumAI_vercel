@@ -22,11 +22,9 @@ export function buildAnnouncementPresentationPayload({
   bannerStyle,
   bannerLink,
 }: AnnouncementPresentationInput): AnnouncementPresentationPayload {
-  const normalizedLink = bannerLink.trim();
-
   return {
     bannerStyle,
-    bannerLink: normalizedLink || null,
+    bannerLink: bannerLink === '' ? null : bannerLink,
   };
 }
 
