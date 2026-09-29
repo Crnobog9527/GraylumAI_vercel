@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({
   params: new URLSearchParams(),
   profile: {} as Record<string, unknown>,
+  onTabChange: undefined as undefined | ((tab: string) => void),
 }));
 
 vi.mock('next/navigation', () => ({ useSearchParams: () => state.params }));
@@ -21,7 +22,10 @@ vi.mock('@/hooks/use-banner', () => ({ useBanner: () => ({ banners: [] }) }));
 vi.mock('@/components/layout/AppHeader', () => ({ AppHeader: () => null }));
 vi.mock('@/components/layout/GlobalBanner', () => ({ default: () => null }));
 vi.mock('@/components/profile/ProfileSidebar', () => ({
-  default: ({ activeTab }: { activeTab: string }) => <nav data-active-tab={activeTab} />,
+  default: ({ activeTab, onTabChange }: { activeTab: string; onTabChange: (tab: string) => void }) => {
+    state.onTabChange = onTabChange;
+    return <nav data-active-tab={activeTab} />;
+  },
 }));
 vi.mock('@/components/profile/PersonalInfoCard', () => ({
   UserProfileHeader: ({ user }: { user: { nickname: string; subscription_tier: string } }) => (
@@ -83,5 +87,21 @@ describe('profile page', () => {
   it('falls back to the profile tab for unknown tabs', () => {
     state.params = new URLSearchParams('tab=settings');
     expect(renderToStaticMarkup(<ProfilePage />)).toContain('data-active-tab="profile"');
+  });
+
+  it('switches tab through Next-synced history so the page follows the address', () => {
+    renderToStaticMarkup(<ProfilePage />);
+    const replaceState = vi.fn();
+    vi.stubGlobal('window', {
+      location: { href: 'https://x.test/profile?tab=subscription&checkout=success' },
+      history: { state: { __NA: true }, replaceState },
+    });
+    try {
+      state.onTabChange?.('security');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    // Passing Next's own state (with __NA) makes its patched replaceState skip the useSearchParams sync.
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/profile?tab=security&checkout=success');
   });
 });

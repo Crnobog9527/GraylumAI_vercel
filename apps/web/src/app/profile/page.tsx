@@ -40,7 +40,8 @@ function ProfilePageContent() {
   const requestedTab = searchParams.get('tab');
   const activeTab: ProfileTab = isProfileTab(requestedTab) ? requestedTab : 'profile';
   const setActiveTab = useCallback((tab: ProfileTab) => {
-    window.history.replaceState(window.history.state, '', withProfileTab(window.location.href, tab));
+    // state 传 null：Next 只在非内部调用时同步 useSearchParams，传回它自己的 state 会跳过同步
+    window.history.replaceState(null, '', withProfileTab(window.location.href, tab));
   }, []);
   const [ticketInitialView, setTicketInitialView] = useState<'list' | 'create'>('list');
 
