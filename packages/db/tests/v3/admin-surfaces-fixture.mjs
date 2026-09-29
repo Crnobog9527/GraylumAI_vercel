@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Disposable admin-preview scaffolding for announcements, membership plans and
-// credit packages and check-in status. Columns
-// follow packages/db/schema.ts; public read policies are copied byte-for-byte
-// from the authoritative migration. Synthetic rows only: no real account,
-// Stripe price, provider or money state.
+// Disposable admin-preview scaffolding with synthetic rows only.
+// Legacy announcement, membership-plan and credit-package columns follow schema.ts.
+// Check-in DDL (including constraints and indexes) comes directly from migration 0013;
+// read policies also come from authoritative migrations. No reward functions,
+// real accounts, Stripe prices, providers or money state are installed.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -13,10 +13,10 @@ const PUBLIC_READ_POLICIES = [
   'credit_packages_select_active_public',
 ];
 
-function authoritativePolicy(source, name, terminator = '$policy$') {
-  const start = source.indexOf(`CREATE POLICY "${name}"`);
+function authoritativeStatement(source, marker, terminator = ';') {
+  const start = source.indexOf(marker);
   const end = source.indexOf(terminator, start);
-  if (start < 0 || end < 0) throw new Error('missing authoritative policy ' + name);
+  if (start < 0 || end < 0) throw new Error('missing authoritative statement ' + marker);
   return source.slice(start, end).trim() + ';';
 }
 
@@ -25,10 +25,15 @@ export function installAdminSurfacesPreview(sql, root) {
     resolve(root, 'packages/db/migrations/0032_admin_policy_shape_reconciliation.sql'),
     'utf8',
   );
-  const checkinPolicies = readFileSync(
+  const checkinMigration = readFileSync(
     resolve(root, 'packages/db/migrations/0013_checkin_rewards.sql'),
     'utf8',
   );
+  sql([
+    'CREATE TABLE IF NOT EXISTS user_checkins (',
+    'CREATE INDEX IF NOT EXISTS idx_user_checkins_user_month ',
+    'CREATE INDEX IF NOT EXISTS idx_user_checkins_created_at ',
+  ].map((marker) => authoritativeStatement(checkinMigration, marker)).join('\n'));
   // Admin suites may already have created minimal versions of these tables.
   sql(`
 CREATE TABLE IF NOT EXISTS announcements(id uuid PRIMARY KEY DEFAULT gen_random_uuid());
@@ -54,10 +59,6 @@ ALTER TABLE membership_plans ALTER COLUMN id SET DEFAULT gen_random_uuid(), ADD 
 CREATE TABLE IF NOT EXISTS credit_packages(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text NOT NULL,price integer NOT NULL,
  credits_amount integer NOT NULL,bonus_credits integer NOT NULL DEFAULT 0,stripe_price_id text,sort_order integer NOT NULL DEFAULT 0,
  is_popular text NOT NULL DEFAULT 'false',active text NOT NULL DEFAULT 'true',created_at timestamptz NOT NULL DEFAULT now());
-CREATE TABLE IF NOT EXISTS user_checkins(
- user_id uuid NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, checkin_date text NOT NULL, month_key text NOT NULL,
- streak_day integer NOT NULL, reward_credits integer NOT NULL DEFAULT 0, monthly_bonus_credits integer NOT NULL DEFAULT 0,
- created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(user_id,checkin_date));
 ALTER TABLE user_checkins ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON user_checkins FROM PUBLIC,anon,authenticated;
 GRANT SELECT ON user_checkins TO authenticated;
@@ -69,8 +70,9 @@ REVOKE ALL ON announcements,membership_plans,credit_packages FROM PUBLIC,anon,au
 GRANT SELECT ON announcements,membership_plans,credit_packages TO anon,authenticated;
 GRANT ALL ON announcements,membership_plans,credit_packages TO service_role;
 `);
-  sql(authoritativePolicy(checkinPolicies, 'users_own_user_checkins_select', ';'));
-  sql(PUBLIC_READ_POLICIES.map((name) => authoritativePolicy(policies, name)).join('\n'));
+  sql(authoritativeStatement(checkinMigration, 'CREATE POLICY "users_own_user_checkins_select"'));
+  sql(PUBLIC_READ_POLICIES.map((name) =>
+    authoritativeStatement(policies, `CREATE POLICY "${name}"`, '$policy$')).join('\n'));
   // Free and Pro carry no feature list so the profile card falls back to its
   // generated defaults; the homepage row is retired data that must stay unlisted.
   sql(`
