@@ -10,10 +10,11 @@ const finishes=new Set(['stop','length','content_filter','tool_calls']);
  * https://openrouter.ai/docs/api/reference/streaming
  */
 /** `tools` widens tool-call parsing for an Agent turn request (AC-1): its
- * allowlisted names and up to `maxCalls` indexed calls, all kept as evidence.
+ * up to `maxCalls` indexed calls, with bounded unknown names retained only
+ * when requested for terminal host handling. This never authorizes tool execution.
  * Without it only one `read_source` call at index 0 is accepted. */
 export function openRouterStream(model:string,headerId?:string,onChunk?:(chunk:string)=>void,
- tools:{toolNames:ReadonlySet<string>;maxCalls:number}={toolNames:new Set(['read_source']),maxCalls:1}){
+ tools:{toolNames:ReadonlySet<string>;maxCalls:number;retainUnknownNames?:boolean}={toolNames:new Set(['read_source']),maxCalls:1}){
  let pending='',frame:string[]=[],done=false,finish:string|null=null,providerId=headerId,failed:string|null=null,identityConflict=false;
  let content='',reasoning='',refusal='',usage:Record<string,unknown>|undefined,exactUsage:Record<string,unknown>|undefined;
  let frameCount=0,usageSeen=false;
@@ -100,7 +101,14 @@ export function openRouterStream(model:string,headerId?:string,onChunk?:(chunk:s
  function result(){
   if(pending.trim()||frame.length||!done)failed??='incomplete_stream';
   if(!finish)failed??='nonterminal_stream';
-  for(const call of calls.values())if(!call.id||!tools.toolNames.has(call.function.name))failed??='invalid_stream';
+  // v5 preserves syntactically valid unknown names as paid response evidence;
+  // the host terminates an unknown first call without executing it. The older
+  // parser still rejects every non-allowlisted name.
+  for(const call of calls.values()){
+   const validName=tools.toolNames.has(call.function.name)||
+    tools.retainUnknownNames&&/^[a-zA-Z0-9_-]{1,256}$/.test(call.function.name);
+   if(!call.id||!validName)failed??='invalid_stream';
+  }
   // Calls are numbered from 0 without gaps; the Agent turn keeps index 0.
   if([...calls.keys()].some(index=>index>=calls.size))failed??='invalid_stream';
   if(failed)return {providerId,identityConflict,error:failed};

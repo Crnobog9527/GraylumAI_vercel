@@ -16,7 +16,7 @@ export const SOURCE_TOOL_NAMES:ReadonlySet<string>=new Set(['read_source']);
 export const MAX_AGENT_TOOLS=2;
 /** Stream parsing for an Agent turn response: its tool names, and up to eight
  * indexed calls kept as evidence (the Runtime executes only the first). */
-export const AGENT_STREAM_TOOLS=Object.freeze({toolNames:AGENT_TOOL_NAMES,maxCalls:8});
+export const AGENT_STREAM_TOOLS=Object.freeze({toolNames:AGENT_TOOL_NAMES,maxCalls:8,retainUnknownNames:true});
 
 /** Parameters the model sees. Kept to plain JSON Schema limits (the locked
  * SDK sends strict schemas); the stricter card rules apply on execution. */

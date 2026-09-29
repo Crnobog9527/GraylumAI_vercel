@@ -7,6 +7,7 @@ import {projectOpenRouterItemsForSizing} from './openRouterHistory';
 import {AGENT_TURN_REQUEST_FORMAT,PROVIDER_REQUEST_FORMATS,validReasoningFormat,
  STREAMING_FORMATS,historyToolNames,openRouterRequestBody} from './providerRequest';
 import {agentTurnResult} from './agentTurnResult';
+import {terminalAgentReplyFailure} from './terminalAgentReply';
 import {askQuestionTool,askQuestionToolBytes} from './agentTools';
 import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
 import { authoritativeBilling, type FrozenRun, type FrozenCall, type BillingTransport } from '../bill2/service';
@@ -92,6 +93,15 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
   if(!policy)throw new Error('RUNTIME_MODEL_DENIED');
   const session=new PostgresSession(options.database,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
   let transportNotStarted=false;
+  let terminalReplyFailure=false;
+  const checkAgentReply=(response:unknown,organizer=false)=>{
+   if(agentTurn&&terminalAgentReplyFailure(response,organizer)){
+    // Only inspect a complete response returned from durable runtime_response.
+    // Keep this verdict outside the SDK, which wraps provider/tool exceptions.
+    terminalReplyFailure=true;
+    throw new Error('RUNTIME_TERMINAL_REPLY');
+   }
+  };
   let preflightFailure:string|undefined;
   const streaming=STREAMING_FORMATS.has(context.providerRequestFormat??'');
   const progress=(event:RuntimeProgress)=>{try{onProgress?.(event);}catch{/* UI disconnect never interrupts receipt persistence. */}};
@@ -250,6 +260,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
      // not an OpenRouter protocol capability or proof of real supplier costs.
      const response=envelope.usage?.sdkResponse;
      if(!response||response.model!==effective.model||response.choices?.length!==1)throw new Error('RUNTIME_RESPONSE_INVALID');
+     checkAgentReply(response);
      if(agentTurn)agentToolCalled=Boolean(response.choices[0]?.message?.tool_calls?.length);
      return JSON.stringify(response);
     }});
@@ -292,6 +303,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
      exchange:async(_sequence,request)=>{
       const envelope=await exchange(request,'attached_organizer',organizerPolicy),response=envelope.usage?.sdkResponse;
       if(!response||response.model!==organizer.model||response.choices?.length!==1)throw new Error('RUNTIME_RESPONSE_INVALID');
+      checkAgentReply(response,true);
       return JSON.stringify(response);
      }});
    }
@@ -301,6 +313,15 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
    const completed=await rpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
    return {body,...(summary!==undefined?{summary}:{}),state:completed.state};
   }catch(error){
+   if(terminalReplyFailure){
+    // The persisted reply proves this execution cannot continue, including a
+    // replay after owner loss. Cancellation retains receipts/checkpoints and
+    // settles known costs once; unknown transport outcomes never reach here.
+    try{
+     const stopped=await rpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
+     return {state:stopped.state};
+    }catch{/* Reconcile the original execution on recovery; never redispatch. */}
+   }
    if((execution.live||execution.state==='interrupted')&&error instanceof Error&&error.message==='RUNTIME_OUTPUT_TRUNCATED'){
     logger.error('api','runtime_output_truncated',{executionId});
     // Close the live owner or its already-interrupted replay, never a concurrent

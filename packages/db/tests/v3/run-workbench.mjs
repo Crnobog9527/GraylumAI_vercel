@@ -908,7 +908,7 @@ try {
         rateLimitCases?.config ?? "vitest.integration.config.ts",
         ...(runtimeUpgrade ? ["src/services/runtime/upgrade.integration.ts"] : upgradeMode ? ["src/services/bill2/upgrade.integration.ts"] : withoutApp ? [] : ["src/services/__tests__/workbench.integration.ts"]),
         ...(bill2Mode ? ['src/services/bill2/billing.integration.ts'] : []),
-        ...(runtimeMode ? ['src/services/runtime/runtime.integration.ts', 'src/services/runtime/streaming.integration.ts'] : []),
+        ...(runtimeMode ? ['src/services/runtime/runtime.integration.ts', 'src/services/runtime/streaming.integration.ts', 'src/services/runtime/terminalReply.integration.ts'] : []),
         ...(opcMode ? ['src/services/opc/opc.integration.ts',...(mentorStreamTest?['src/services/opc/mentor-browser.integration.ts']:[])] : []),
         "--reporter",
         "verbose",
