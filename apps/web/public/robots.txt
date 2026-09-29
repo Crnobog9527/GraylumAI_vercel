@@ -1,4 +1,2 @@
 User-agent: *
 Allow: /
-
-Sitemap: https://app.graylum.com/sitemap.xml

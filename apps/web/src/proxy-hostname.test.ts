@@ -203,3 +203,17 @@ describe('public font resources', () => {
     }
   });
 });
+
+
+describe('public crawler resources', () => {
+  it('serves robots directly on every host without bypassing neighboring paths', () => {
+    for (const host of ['app.graylum.com', 'www.graylum.com', 'preview.vercel.app', 'localhost']) {
+      for (const path of ['/robots.txt', '/robots.txt?crawler=1']) {
+        expect(unstable_doesMiddlewareMatch({ config, url: `https://${host}${path}` })).toBe(false);
+      }
+    }
+    for (const url of ['/robotsXtxt', '/robots.txt/private', '/robots.txt-backup', '/profile', '/admin']) {
+      expect(unstable_doesMiddlewareMatch({ config, url })).toBe(true);
+    }
+  });
+});
