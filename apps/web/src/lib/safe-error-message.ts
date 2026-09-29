@@ -34,8 +34,24 @@ export function getErrorMessageText(error: unknown) {
   return '';
 }
 
+// Auth errors worth a specific Chinese message. A closed and a disabled account read the same,
+// so the message never reveals which one it is.
+export const ACCOUNT_UNAVAILABLE_MESSAGE = '该账号已注销或已被停用，无法登录';
+
+function translateKnownAuthError(error: unknown, message: string): string | null {
+  const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+  if (code === 'user_banned' || /\buser is banned\b/i.test(message)) {
+    return ACCOUNT_UNAVAILABLE_MESSAGE;
+  }
+  return null;
+}
+
 export function getSafeErrorMessage(error: unknown, fallback: string) {
   const message = getErrorMessageText(error).trim();
+  const translated = translateKnownAuthError(error, message);
+  if (translated) {
+    return translated;
+  }
 
   if (!message) {
     return fallback;

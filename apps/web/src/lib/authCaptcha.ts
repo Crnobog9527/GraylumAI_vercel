@@ -1,8 +1,17 @@
 export const HCAPTCHA_SCRIPT_SRC = 'https://js.hcaptcha.com/1/api.js';
 
-type HCaptchaClient = {
+export type HCaptchaRenderOptions = {
+  sitekey: string;
+  callback?: (token: string) => void;
+  'expired-callback'?: () => void;
+  'error-callback'?: () => void;
+};
+
+export type HCaptchaClient = {
   getResponse: (widgetId?: number) => string;
   reset: (widgetId?: number) => void;
+  render?: (container: HTMLElement, options: HCaptchaRenderOptions) => number;
+  remove?: (widgetId: number) => void;
 };
 
 export type AuthCaptchaOptions = {
