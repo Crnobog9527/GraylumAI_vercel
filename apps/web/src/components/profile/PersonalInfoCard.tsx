@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { trpc } from '@/trpc/client';
+import { summaryStat } from './summaryStat';
 import { logClientDevError } from '@/lib/client-log';
 import { createClient } from '@/lib/supabase';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
@@ -294,8 +295,8 @@ export const CreditsAndSubscriptionCards = memo(function CreditsAndSubscriptionC
   const hasVerifiedBalance = credits !== null;
 
   // 从 API 获取本月消耗数据
-  const { data: creditsSummary } = trpc.credits.getCreditsSummary.useQuery({ period: 'month' });
-  const monthlyUsed = creditsSummary?.totalSpent ?? 0;
+  const monthlySummary = trpc.credits.getCreditsSummary.useQuery({ period: 'month' });
+  const monthlyUsed = summaryStat(monthlySummary, (summary) => summary.totalSpent);
 
   const tierLabels: Record<string, string> = {
     free: '免费用户',
@@ -332,7 +333,7 @@ export const CreditsAndSubscriptionCards = memo(function CreditsAndSubscriptionC
           {formatCreditsBalance(hasVerifiedBalance ? 'ready' : 'unavailable', credits)}
         </div>
         <div className="text-sm mb-4 flex-1" style={{ color: 'var(--text-tertiary)' }}>
-          {hasVerifiedBalance ? `本月已消耗 ${monthlyUsed.toLocaleString()} 积分` : '余额暂不可用'}
+          {hasVerifiedBalance ? (monthlySummary.isError ? '本月消耗暂时无法读取' : `本月已消耗 ${monthlyUsed} 积分`) : '余额暂不可用'}
         </div>
         {hasVerifiedBalance && (
           <Button
@@ -395,18 +396,16 @@ export const CreditsAndSubscriptionCards = memo(function CreditsAndSubscriptionC
 
 // 使用统计卡片
 export const UsageStatsCard = memo(function UsageStatsCard({ user }: { user: MockUser }) {
-  // 从 API 获取使用统计数据
-  const { data: usageStats, isLoading } = trpc.user.getUserUsageStats.useQuery();
-
-  // 使用 API 数据或默认值
+  // 从 API 获取使用统计数据；只显示真正读到的数字，读取失败时不显示 0
+  const usageQuery = trpc.user.getUserUsageStats.useQuery();
   const stats = [
-    { label: '累计对话次数', value: usageStats?.totalConversations?.toLocaleString() ?? '0' },
-    { label: '累计消息数', value: usageStats?.totalMessages?.toLocaleString() ?? '0' },
-    { label: '本月消耗积分', value: usageStats?.monthlyCreditsUsed?.toLocaleString() ?? '0' },
-    { label: '使用天数', value: usageStats?.usageDays?.toLocaleString() ?? '0' },
+    { label: '累计对话次数', value: summaryStat(usageQuery, (data) => data.totalConversations) },
+    { label: '累计消息数', value: summaryStat(usageQuery, (data) => data.totalMessages) },
+    { label: '本月消耗积分', value: summaryStat(usageQuery, (data) => data.monthlyCreditsUsed) },
+    { label: '使用天数', value: summaryStat(usageQuery, (data) => data.usageDays) },
   ];
 
-  const topModules = usageStats?.topModules ?? [
+  const topModules = usageQuery.data?.topModules ?? [
     { name: 'AI 智能对话', count: 0 },
   ];
 

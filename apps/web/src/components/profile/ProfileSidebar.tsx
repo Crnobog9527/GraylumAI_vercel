@@ -7,8 +7,9 @@ import {
 import { logClientDevError } from '@/lib/client-log';
 import { createClient } from '@/lib/supabase';
 import { buildAppHref } from '@/lib/site-config';
+import type { ProfileTab } from '@/lib/profile-tabs';
 
-export type ProfileTab = 'profile' | 'subscription' | 'credits' | 'history' | 'security' | 'tickets';
+export type { ProfileTab };
 
 interface ProfileSidebarProps {
   activeTab: ProfileTab;

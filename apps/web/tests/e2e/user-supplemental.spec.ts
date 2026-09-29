@@ -173,18 +173,12 @@ test.describe('User Supplemental Flows', () => {
         await expect(page.getByText(getCredentials('user').email)).toBeVisible({ timeout: 10000 });
         await expect(page.getByText('登录方式')).toBeVisible({ timeout: 10000 });
 
-        const resendVerificationButton = page.getByRole('button', { name: '重发验证邮件' });
-        if (await resendVerificationButton.isVisible({ timeout: 3000 }).catch(() => false)) {
-          steps.push('Record that the current E2E user still requires email verification support');
-          await expect(page.getByText('未验证')).toBeVisible({ timeout: 10000 });
-          await expect(page.getByRole('button', { name: '查看说明' })).toBeVisible({ timeout: 10000 });
-        } else {
-          steps.push('Record that the current E2E user is already email-verified');
-          await expect(
-            page.getByText(/已验证|Google 账户默认已完成邮箱验证/)
-          ).toBeVisible({ timeout: 10000 });
-          actual = 'Security settings interactions completed; email verification requirements already satisfied for current E2E user';
-        }
+        // auth.setup.ts rejects unverified accounts, so the E2E user is always verified here.
+        steps.push('Record that the current E2E user is already email-verified');
+        await expect(
+          page.getByText(/已验证|Google 账户默认已完成邮箱验证/)
+        ).toBeVisible({ timeout: 10000 });
+        actual = 'Security settings interactions completed; email verification requirements already satisfied for current E2E user';
 
         steps.push('Open the password dialog and verify invalid input is rejected without closing the dialog');
         await page.getByRole('button', { name: '修改' }).click();
@@ -316,10 +310,19 @@ test.describe('User Supplemental Flows', () => {
         await expect(detailDialog).toBeVisible({ timeout: 10000 });
         await expect(detailDialog.getByText('功能介绍')).toBeVisible({ timeout: 10000 });
 
-        steps.push('Use the selected module and confirm routing into chat with module context');
-        await detailDialog.getByRole('button', { name: '立即使用' }).click();
-        await expect(page).toHaveURL(/\/chat\?module=/, { timeout: 10000 });
-        await expect(page.getByRole('button', { name: '发送' })).toBeVisible({ timeout: 10000 });
+        // Modules now open the positioning workspace, and only modules in the published catalog are usable.
+        const dialogUseButton = detailDialog.getByRole('button', { name: '立即使用' });
+        await expect.poll(async () => (await dialogUseButton.isEnabled()) || (await detailDialog
+          .getByText('该技能将在新工作区上线后开放').isVisible()), { timeout: 10000 }).toBe(true);
+        if (await dialogUseButton.isEnabled()) {
+          steps.push('Use the selected module and confirm routing into the positioning workspace');
+          await dialogUseButton.click();
+          await expect(page).toHaveURL(/\/positioning/, { timeout: 10000 });
+        } else {
+          steps.push('Record that the selected module is not in the published positioning catalog');
+          await expect(detailDialog.getByText('该技能将在新工作区上线后开放')).toBeVisible();
+          actual = 'Marketplace detail rendered; the selected module is not yet available in the positioning workspace';
+        }
 
         const blockingIssues = monitor.getIssues('P1');
         expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
@@ -334,7 +337,7 @@ test.describe('User Supplemental Flows', () => {
             title: 'marketplace-filter-detail-use',
             role: 'user',
             route: '/marketplace',
-            expected: 'Authenticated users can filter marketplace modules, change sort order, inspect module detail, and route into chat with the chosen module.',
+            expected: 'Authenticated users can filter marketplace modules, change sort order, inspect module detail, and route into the positioning workspace when the module is published.',
           },
           actual,
           steps,

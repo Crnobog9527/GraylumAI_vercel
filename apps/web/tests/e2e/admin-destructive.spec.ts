@@ -1204,14 +1204,15 @@ test.describe('Admin Destructive Flows', () => {
         if (await moduleToggle.isVisible().catch(() => false)) {
           const deleteButton = page.getByTestId(`admin-prompt-delete-${targetModuleId}`);
           if (await deleteButton.isVisible().catch(() => false)) {
-            page.once('dialog', (dialog) => dialog.accept());
+            // Deletion is confirmed in the in-app dialog and calls admin.removePrompts.
             const deleteResponsePromise = page.waitForResponse(
               (response) =>
-                response.url().includes('/api/trpc/admin.deletePrompt') &&
+                response.url().includes('/api/trpc/admin.removePrompts') &&
                 response.request().method() === 'POST',
               { timeout: 30000 },
             ).catch(() => undefined);
             await deleteButton.click().catch(() => undefined);
+            await page.getByTestId('admin-module-confirm').click().catch(() => undefined);
             await deleteResponsePromise;
           }
         }
