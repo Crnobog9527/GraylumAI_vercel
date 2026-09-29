@@ -45,6 +45,7 @@ const TABLES = [...CHANGED_TABLES, 'credit_transactions', 'system_settings'];
 const snapshot = () => JSON.parse(sql(`SELECT jsonb_agg(jsonb_build_object(
   'table',c.relname,'acl',c.relacl,'rls',c.relrowsecurity,'force',c.relforcerowsecurity,
   'policies',(SELECT jsonb_agg(to_jsonb(p) ORDER BY p.policyname) FROM pg_policies p WHERE p.tablename=c.relname),
+  'policy_comments',(SELECT jsonb_object_agg(polname, obj_description(oid, 'pg_policy')) FROM pg_policy WHERE polrelid=c.oid),
   'columns',(SELECT jsonb_agg(jsonb_build_array(attname,atttypid,attacl) ORDER BY attnum)
     FROM pg_attribute WHERE attrelid=c.oid AND attnum>0 AND NOT attisdropped)) ORDER BY c.relname)
   FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -141,6 +142,23 @@ try {
   apply(migration);
   assert.deepEqual(snapshot(), repaired, 'legacy 0002 policy is accepted and dropped');
   console.log('PASS 0144 accepts and drops the legacy 0002 user_activity_logs_select_own policy');
+  // Same-name edits to retained policies must not survive: 0144 recreates their known definitions.
+  apply(rollback);
+  sql(`ALTER POLICY announcements_select_active_public ON announcements USING (true);
+    ALTER POLICY profiles_select_own ON profiles TO PUBLIC USING (true);
+    ALTER POLICY user_activity_logs_select_admin ON user_activity_logs USING (true);
+    COMMENT ON POLICY profiles_select_own ON profiles IS 'tampered';`);
+  apply(migration);
+  assert.deepEqual(snapshot(), repaired, 'retained policies recreated from known definitions');
+  const publicTitles = (await http(null, null, 'announcements?select=title')).body.map(x => x.title);
+  assert.deepEqual(publicTitles, ['live'], 'inactive and expired announcements stay hidden');
+  const ownRows = (await http('authenticated', owner, 'profiles?select=id')).body.map(x => x.id);
+  assert.deepEqual(ownRows, [owner]);
+  assert.equal(sql(`SELECT roles::text || '|' || obj_description(p.oid, 'pg_policy') FROM pg_policies r
+    JOIN pg_policy p ON p.polname = r.policyname AND p.polrelid = 'profiles'::regclass
+    WHERE r.policyname = 'profiles_select_own'`),
+    '{authenticated}|Users may read their own profile; missing profile bootstrap is handled server-side by service_role grants in 0046.');
+  console.log('PASS 0144 recreates tampered retained policies (banner USING true, profile PUBLIC) with staging roles/comment');
   // Old PUBLIC/client column grants must not survive a (re)application.
   sql(`GRANT SELECT(last_ip), UPDATE(credits), INSERT(role), REFERENCES(id) ON profiles TO PUBLIC, anon;
     GRANT UPDATE(role), INSERT(credits) ON profiles TO authenticated;

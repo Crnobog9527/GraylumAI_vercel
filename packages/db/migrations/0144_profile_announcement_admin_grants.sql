@@ -63,6 +63,54 @@ BEGIN
   END LOOP;
 END $$;
 
+-- Recreate every retained policy from its known definition so a same-name edit cannot widen
+-- the grants below. 0032 originals, except profiles_select_own: 0002 created it for PUBLIC, while
+-- the staging baseline has it TO authenticated (out-of-repo drift); keep that equal-or-stricter form
+-- and its 0046 comment.
+DROP POLICY IF EXISTS profiles_select_own ON public.profiles;
+CREATE POLICY "profiles_select_own"
+  ON public.profiles FOR SELECT
+  TO authenticated
+  USING (auth.uid() = id);
+COMMENT ON POLICY "profiles_select_own" ON public.profiles
+  IS 'Users may read their own profile; missing profile bootstrap is handled server-side by service_role grants in 0046.';
+DROP POLICY IF EXISTS announcements_select_active_public ON public.announcements;
+CREATE POLICY "announcements_select_active_public"
+  ON public.announcements FOR SELECT
+  TO anon, authenticated
+  USING (
+    active = 'true'
+    AND is_deleted = 'false'
+    AND (start_date IS NULL OR start_date <= now())
+    AND (end_date IS NULL OR end_date >= now())
+  );
+DROP POLICY IF EXISTS announcements_select_admin ON public.announcements;
+CREATE POLICY "announcements_select_admin"
+  ON public.announcements FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.profiles p
+      WHERE p.id = auth.uid()
+        AND p.role = 'admin'
+        AND p.status = 'active'
+    )
+  );
+DROP POLICY IF EXISTS user_activity_logs_select_admin ON public.user_activity_logs;
+CREATE POLICY "user_activity_logs_select_admin"
+  ON public.user_activity_logs FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.profiles p
+      WHERE p.id = auth.uid()
+        AND p.role = 'admin'
+        AND p.status = 'active'
+    )
+  );
+
 -- 0002 created an own-row activity policy that later migrations never dropped (absent on staging).
 -- Audit history is server-only, so remove it wherever a replayed database still has it.
 DROP POLICY IF EXISTS user_activity_logs_select_own ON public.user_activity_logs;

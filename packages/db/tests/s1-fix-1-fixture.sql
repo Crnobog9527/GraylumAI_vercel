@@ -39,6 +39,9 @@ GRANT INSERT (id, email, nickname, role, status, membership_level, credits),
   SELECT (id, email, nickname, role, status, membership_level, credits, is_deleted, created_at),
   UPDATE (membership_level) ON profiles TO service_role;
 CREATE POLICY profiles_select_own ON profiles FOR SELECT TO authenticated USING ((auth.uid() = id));
+-- Staging comment (pg_description, read-only check 2026-09-29) equals 0046's text.
+COMMENT ON POLICY profiles_select_own ON profiles
+  IS 'Users may read their own profile; missing profile bootstrap is handled server-side by service_role grants in 0046.';
 
 CREATE TABLE announcements(
   id uuid DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
