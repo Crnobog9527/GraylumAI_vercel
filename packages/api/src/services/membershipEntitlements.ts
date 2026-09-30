@@ -2,7 +2,7 @@
 import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { hasFullRefundSignal } from './membershipEligibility';
+import { evaluateAction, getState, loadLatestMembershipFacts } from './membershipEligibility';
 import {
   entitlementRowShape, FUSION_COMPARE_SETTING, fusionCompareLimitSchema, membershipLevelSchema,
   type MembershipLevel,
@@ -13,21 +13,7 @@ const profileSchema = z.object({
   status: z.literal('active'),
   is_deleted: z.literal('false'),
 });
-const subscriptionSchema = z.object({
-  membership_plan_id: z.string().nullable(),
-  status: z.string(),
-  current_period_end: z.string().nullable(),
-});
-const orderSchema = z.object({
-  status: z.string().nullable(),
-  payment_status: z.string().nullable(),
-  metadata: z.unknown(),
-});
 const planSchema = z.object({ id: z.string(), level: membershipLevelSchema, ...entitlementRowShape });
-const ENDED_STATUSES = ['canceled', 'cancelled', 'incomplete_expired'];
-const HISTORICAL_STATUSES = [...ENDED_STATUSES, 'admin_override'];
-const PAYMENT_ATTENTION = ['past_due', 'incomplete', 'unpaid', 'paused'];
-type State = 'free' | 'active' | 'admin_override' | 'expired' | 'payment_attention' | 'inconsistent';
 
 function unavailable(): never {
   throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: 'ENTITLEMENTS_UNAVAILABLE' });
@@ -45,20 +31,14 @@ async function readPlan(client: SupabaseClient, level: MembershipLevel) {
 // A fresh read for a NEW action. This projection is not a Runtime admission token: consumers
 // must recheck inside their creation/reservation transaction and freeze the resulting allowance.
 // client is server-owned; the public route binds profileId exclusively to authenticated context.
-export async function readMembershipEntitlements(client: SupabaseClient, profileId: string, now = Date.now()) {
+export async function readMembershipEntitlements(client: SupabaseClient, profileId: string) {
   try {
-    const [profileResult, currentResult, orderResult, settingResult] = await Promise.all([
+    const [profileResult, facts, settingResult] = await Promise.all([
       client.from('profiles').select('membership_level,status,is_deleted').eq('id', profileId).single(),
-      // Inspect current candidates, capped at two only to detect ambiguity. An older
-      // admin_override is historical when a current subscription exists; otherwise the
-      // latest-row fallback below preserves the existing explicit admin-grant behavior.
-      client.from('user_subscriptions').select('membership_plan_id,status,current_period_end')
-        .eq('user_id', profileId).not('status', 'in', `(${HISTORICAL_STATUSES.join(',')})`).limit(2),
-      client.from('payment_orders').select('status,payment_status,metadata').eq('user_id', profileId)
-        .eq('item_type', 'membership_plan').order('updated_at', { ascending: false }).limit(1).maybeSingle(),
+      loadLatestMembershipFacts(client, profileId),
       client.from('system_settings').select('value').eq('key', FUSION_COMPARE_SETTING).single(),
     ]);
-    if (profileResult.error || currentResult.error || orderResult.error || settingResult.error) unavailable();
+    if (profileResult.error || facts.error || settingResult.error) unavailable();
     const profile = profileSchema.safeParse(profileResult.data);
     if (!profile.success) {
       if (profileResult.data && (profileResult.data.status !== 'active' || profileResult.data.is_deleted !== 'false')) {
@@ -66,71 +46,27 @@ export async function readMembershipEntitlements(client: SupabaseClient, profile
       }
       unavailable();
     }
-    const candidates = z.array(subscriptionSchema).safeParse(currentResult.data);
-    const order = orderSchema.nullable().safeParse(orderResult.data);
     const limit = fusionCompareLimitSchema.safeParse(settingResult.data?.value);
-    if (!candidates.success || !order.success || !limit.success) unavailable();
-
-    let subscription: z.infer<typeof subscriptionSchema> | undefined = candidates.data[0];
-    if (candidates.data.length === 0) {
-      const latest = await client.from('user_subscriptions').select('membership_plan_id,status,current_period_end')
-        .eq('user_id', profileId).order('updated_at', { ascending: false }).limit(1).maybeSingle();
-      const parsed = subscriptionSchema.nullable().safeParse(latest.data);
-      if (latest.error || !parsed.success) unavailable();
-      subscription = parsed.data ?? undefined;
-    }
-    let level = profile.data.membership_level;
-    let state: State = level === 'free' ? 'free' : 'admin_override';
-    const paymentStatuses = [order.data?.status, order.data?.payment_status].filter(value => value != null);
-    const knownOrderStatuses = ['completed', 'paid', 'succeeded', 'failed', 'canceled', 'cancelled', 'expired'];
-    const paymentUncertain = hasFullRefundSignal(order.data)
-      || paymentStatuses.some(status => !knownOrderStatuses.includes(status));
-    if (candidates.data.length > 1) {
-      level = 'free';
-      state = 'inconsistent';
-    } else if (paymentUncertain || (subscription && PAYMENT_ATTENTION.includes(subscription.status))) {
-      level = 'free';
-      state = 'payment_attention';
-    } else if (subscription) {
-      if (ENDED_STATUSES.includes(subscription.status)) {
-        level = 'free';
-        state = 'expired';
-      } else if (subscription.status === 'admin_override') {
-        state = level === 'free' ? 'free' : 'admin_override';
-      } else if (['active', 'trialing'].includes(subscription.status)) {
-        const end = Date.parse(subscription.current_period_end ?? '');
-        if (!Number.isFinite(end)) {
-          level = 'free';
-          state = 'inconsistent';
-        } else if (end <= now) {
-          level = 'free';
-          state = 'expired';
-        } else if (level === 'free') {
-          state = 'inconsistent';
-        } else {
-          state = 'active';
-        }
-      } else {
-        level = 'free';
-        state = 'inconsistent';
-      }
-    }
-    if (!subscription && order.data && state === 'admin_override') {
-      level = 'free';
-      state = 'inconsistent';
-    }
+    if (!limit.success) unavailable();
+    const snapshot = getState({ profileLevel: profile.data.membership_level, ...facts });
+    let state = snapshot.state;
+    let level: MembershipLevel = ['active', 'cancel_at_period_end', 'admin_override'].includes(state)
+      ? snapshot.level : 'free';
     let plan = await readPlan(client, level);
-    if (state === 'active' && subscription?.membership_plan_id !== plan.id) {
+    if (['active', 'cancel_at_period_end'].includes(state) && facts.latestSubscription?.membership_plan_id !== plan.id) {
       level = 'free';
       state = 'inconsistent';
       plan = await readPlan(client, level);
     }
-    const needsAttention = state === 'payment_attention' || state === 'inconsistent';
+    // Reuse the existing reasons/messages, never the checkout allowed flag as a feature permission.
+    const needsAttention = ['payment_attention', 'refunded_requires_policy', 'inconsistent'].includes(state);
+    const decision = evaluateAction({ ...snapshot, state, action: 'create_membership_checkout',
+      targetLevel: null, targetBillingCycle: null });
     return Object.freeze({
       level,
       state,
-      reasonCode: needsAttention ? 'ENTITLEMENTS_PAYMENT_OR_SUPPORT_REQUIRED' : 'ENTITLEMENTS_RESOLVED',
-      safeMessage: needsAttention ? '请先解决付款问题或联系支持，确认后即可恢复会员功能。' : '',
+      reasonCode: needsAttention ? decision.reasonCode : 'ENTITLEMENTS_RESOLVED',
+      safeMessage: needsAttention ? decision.safeMessage : '',
       allowFusionReview: plan.allow_fusion_review,
       allowFusionCompare: plan.allow_fusion_compare,
       libraryStorageBytes: plan.library_storage_bytes,

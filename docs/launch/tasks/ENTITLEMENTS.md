@@ -119,6 +119,8 @@
 最小可选数量按第 7 节已确认 P4 为 2。
 D3 是对比参与模型数量，不是评审模型数、工具调用次数、SDK turns 或预扣调用预算。
 当前 D3 对获准使用对比的等级统一生效，不引入未规定的 Pro/Gold 数量差异。
+`fusion_compare_max_models` 有意加入公开设置白名单，供界面展示选择上限；数值不敏感，
+公开读取不授予 Fusion 使用或配置写权限，实际准入仍由服务端检查。
 
 **系统级文件数量保护**不属于会员权益，不添加到本表/会员页/套餐文案；具体数值和原子占用
 由 LIB-DOCS 的 host 限制决定，与会员总空间分别检查。
@@ -150,7 +152,8 @@ D3 是对比参与模型数量，不是评审模型数、工具调用次数、SD
 不得调用购买 action 后把 `allowed` 当功能开关：已订阅用户的重复购买被拒，不能据此拒绝使用。
 
 读取用户身份只来自现有认证上下文，重新查服务端当前事实；不接受客户端 level/权益/bytesUsed。
-配置缺失、多行歧义、未知等级、读取错误或会员事实冲突返回稳定的 `ENTITLEMENTS_*` 错误，
+配置缺失、多行歧义、未知等级和读取错误返回稳定的 `ENTITLEMENTS_*` 错误；
+会员事实冲突映射为 free 并沿用会员判定原 reasonCode 和安全提示，
 通过现有 publicError/前端安全提示；失败不产生预扣或模型/存储调用。
 读取自己的既有资料与创建新增收费/上传动作分别授权，不能因 fail-closed 或降级锁住删除入口。
 到期/退款/欠费的精确判定按第 7 节 P2 答案；不新建到期 cron、不擅改付费业务政策。
@@ -358,14 +361,20 @@ WHERE key = 'fusion_compare_max_models';
 
 - `membershipEntitlementConfig.ts`：强类型输入、仅创建时使用的 D4 默认值及局部补丁；
   `membershipEntitlements.ts`：当前用户权益读取和 Fusion 判定；只读现有事实，不触发支付同步。
-- 复用 `membershipEligibility.ts` 的退款信号识别；不使用购买 `allowed` 做功能许可。
-  购买读取器只看最近十条并任取 managed 订阅，不能证明准入唯一性，因此新判定直接查询
-  所有当前订阅（最多取二条用于检出歧义），没有当前记录时才看最新历史记录；
-  旧 admin_override 与已终止记录留在历史回退，不把旧人工授予误判成第二份当前订阅。
-  这只是同一事实表的本地读取逻辑，不增加持久化来源或状态机。
-- 付费 profile 无任何订阅/订单时沿既有人工授予路径；有支付记录而缺少订阅、未知状态、
-  多个未终止订阅、缺失周期、计划不匹配均不给新付费权益。明确终止或周期到期使用 free；
-  past_due/incomplete/unpaid、待履约订单和退款核对走 payment_attention，提供安全提示。
+- 按[总控实现审查](https://github.com/Crnobog9527/GraylumAI_vercel/pull/540#issuecomment-5918757896)
+  直接复用 `membershipEligibility.ts` 的 `loadLatestMembershipFacts` / `getState`，
+  并复用 `evaluateAction` 的原拒绝原因与提示；不使用购买 `allowed` 做功能许可。
+  现有购买/后台判定算法不变，仅导出这些函数；删除本任务独立的订阅挑选、状态白名单和周期规则。
+- `active` / `cancel_at_period_end` / `admin_override` 按对应等级给权益；
+  `payment_attention` / `refunded_requires_policy` / `inconsistent` 按 free 配置，保留原状态、
+  reasonCode 和提示；`canceled` / `free` 给 free。有效订阅的计划 ID 须匹配对应等级唯一计划，
+  不匹配则 `inconsistent`；读取失败、计划缺失/重复及非法配置仍拒绝。
+- Owner P2 的“付款未完成”按总控澄清对应订阅 `incomplete`，与 `past_due` / `unpaid`
+  及退款核对一起拒绝新付费功能；不将另一次结账/升级中的订单当作当前会员异常。
+  `pending/active`、`pending/trialing` 等新订单不撤销现有正常会员，付款恢复后按现有判定恢复。
+- `membershipEntitlementsOrders.test.ts` 按订单写入边界列出升级、Checkout、发票、退款和历史别名
+  的 56 组 status/payment_status 情况；测试正常会员允许与退款拒绝两种模式。
+  主服务测试覆盖 P2 三类拒绝/恢复、到期取消、人工授予及计划不匹配。
 - `user.getEntitlements` 身份只来自 protectedProcedure；无 service-role 读取能力则拒绝，
   用户输入不能提供 ID/等级/额度。输出不含订阅、订单或后台内部数据。
 - 计划 create/update 沿原 admin API，局部拆到 `adminMembershipPlans.ts`；实际变更等级

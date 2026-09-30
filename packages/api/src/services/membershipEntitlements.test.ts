@@ -40,61 +40,71 @@ describe('new-action membership entitlements', () => {
     }
     expect(() => assertFusionEntitlement(updated, 'review', 20)).not.toThrow();
   });
-  it.each(['past_due', 'incomplete', 'unpaid', 'paused', 'unknown', 'canceled', 'incomplete_expired'])
-  ('does not grant new paid features for %s', async status => {
+  it.each(['past_due', 'incomplete', 'unpaid'])('denies new paid features for subscription %s', async status => {
     const f = fixture();
     f.rows.user_subscriptions = [subscription(status)];
     const result = await readMembershipEntitlements(f.client, actorId);
-    expect(result).toMatchObject({ level: 'free', libraryStorageBytes: 50_000_000, allowFusionReview: false });
-    expect(() => assertFusionEntitlement(result, 'compare', 2)).toThrow('ENTITLEMENTS_FUSION_FORBIDDEN');
+    expect(result).toMatchObject({ level: 'free', state: 'payment_attention', reasonCode: 'PAYMENT_ATTENTION_REQUIRED',
+      safeMessage: '当前订阅存在付款异常，请先处理付款问题后再切换套餐。', libraryStorageBytes: 50_000_000 });
+    for (const mode of ['review', 'compare'] as const) {
+      expect(() => assertFusionEntitlement(result, mode, 2)).toThrow('ENTITLEMENTS_FUSION_FORBIDDEN');
+    }
+    f.rows.user_subscriptions = [subscription()];
+    const restored = await readMembershipEntitlements(f.client, actorId);
+    expect(restored).toMatchObject({ level: 'pro', state: 'active' });
+    expect(() => assertFusionEntitlement(restored, 'compare', 2)).not.toThrow();
     expect(f.writes).toEqual([]);
   });
-  it.each([null, 'invalid', '2020-01-01T00:00:00Z'])('fails paid admission at missing/expired end %s', async end => {
-    const f = fixture();
-    f.rows.user_subscriptions = [subscription('active', end)];
-    expect(await readMembershipEntitlements(f.client, actorId)).toMatchObject({ level: 'free', allowFusionCompare: false });
-  });
-  it.each(['pending', 'refunded', 'partially_refunded', 'unknown'])('fails closed on order %s', async status => {
+  it('denies refund reconciliation on a completed paid order and restores after resolution', async () => {
     const f = fixture();
     f.rows.user_subscriptions = [subscription()];
-    f.rows.payment_orders = [{ user_id: actorId, item_type: 'membership_plan', status, payment_status: null, metadata: {} }];
-    expect(await readMembershipEntitlements(f.client, actorId)).toMatchObject({ level: 'free', state: 'payment_attention' });
-    f.rows.payment_orders[0]!.status = 'completed';
-    f.rows.payment_orders[0]!.payment_status = 'paid';
-    expect(await readMembershipEntitlements(f.client, actorId)).toMatchObject({ level: 'pro', state: 'active' });
-  });
-  it('honors refund reviewRequired on an otherwise completed order', async () => {
-    const f = fixture();
     f.rows.payment_orders = [{ user_id: actorId, item_type: 'membership_plan', status: 'completed', payment_status: 'paid',
       metadata: { refundReconciliation: { reviewRequired: true } } }];
-    expect(await readMembershipEntitlements(f.client, actorId)).toMatchObject({ level: 'free', state: 'payment_attention' });
+    const result = await readMembershipEntitlements(f.client, actorId);
+    expect(result).toMatchObject({ level: 'free', state: 'refunded_requires_policy',
+      reasonCode: 'REFUNDED_ORDER_REQUIRES_POLICY', safeMessage: '该会员订单存在退款状态，需要人工确认后再操作。' });
+    for (const mode of ['review', 'compare'] as const) {
+      expect(() => assertFusionEntitlement(result, mode, 2)).toThrow('ENTITLEMENTS_FUSION_FORBIDDEN');
+    }
+    f.rows.payment_orders[0]!.metadata = {};
+    expect(await readMembershipEntitlements(f.client, actorId)).toMatchObject({ level: 'pro', state: 'active' });
   });
-  it('does not mistake an order without a subscription for an admin grant', async () => {
+  it.each([true, 'true'])('preserves cancel_at_period_end=%s until the period ends', async cancel => {
     const f = fixture();
-    f.rows.payment_orders = [{ user_id: actorId, item_type: 'membership_plan', status: 'completed', payment_status: 'paid', metadata: {} }];
-    expect(await readMembershipEntitlements(f.client, actorId)).toMatchObject({ level: 'free', state: 'inconsistent' });
+    f.rows.user_subscriptions = [{ ...subscription(), cancel_at_period_end: cancel }];
+    const result = await readMembershipEntitlements(f.client, actorId);
+    expect(result).toMatchObject({ level: 'pro', state: 'cancel_at_period_end' });
+    for (const mode of ['review', 'compare'] as const) {
+      expect(() => assertFusionEntitlement(result, mode, 2)).not.toThrow();
+    }
+    f.rows.user_subscriptions[0]!.current_period_end = '2020-01-01T00:00:00Z';
+    expect(await readMembershipEntitlements(f.client, actorId))
+      .toMatchObject({ level: 'free', state: 'inconsistent', reasonCode: 'ENTITLEMENT_CONFLICT' });
   });
-  it('preserves explicit admin grants and paid cancel-at-period-end until the actual end', async () => {
+  it.each(['canceled', 'cancelled'])('maps ended %s to free and preserves a stale paid profile conflict', async status => {
+    const f = fixture('free');
+    f.rows.user_subscriptions = [subscription(status)];
+    expect(await readMembershipEntitlements(f.client, actorId)).toMatchObject({ level: 'free', state: 'canceled' });
+    f.rows.profiles![0]!.membership_level = 'pro';
+    expect(await readMembershipEntitlements(f.client, actorId))
+      .toMatchObject({ level: 'free', state: 'inconsistent', reasonCode: 'ENTITLEMENT_CONFLICT' });
+  });
+  it('preserves the existing admin override rule even with an older payment order', async () => {
     const f = fixture();
     f.rows.user_subscriptions = [subscription('admin_override', null)];
+    f.rows.payment_orders = [{ user_id: actorId, item_type: 'membership_plan', status: 'completed', payment_status: 'paid', metadata: {} }];
     expect(await readMembershipEntitlements(f.client, actorId)).toMatchObject({ level: 'pro', state: 'admin_override' });
-    f.rows.user_subscriptions = [{ ...subscription(), cancel_at_period_end: 'true' }];
-    expect(await readMembershipEntitlements(f.client, actorId)).toMatchObject({ level: 'pro', state: 'active' });
-    f.rows.user_subscriptions[0]!.current_period_end = '2026-09-30T00:00:00Z';
-    expect(await readMembershipEntitlements(f.client, actorId, Date.parse('2026-09-30T00:00:00Z')))
-      .toMatchObject({ level: 'free', state: 'expired' });
   });
   it('allows the current paid subscription after an older manual grant or canceled subscription', async () => {
     const f = fixture();
     f.rows.user_subscriptions = [subscription('admin_override', null), subscription('canceled'), subscription()];
     expect(await readMembershipEntitlements(f.client, actorId)).toMatchObject({ level: 'pro', state: 'active' });
   });
-  it('does not choose between conflicting current subscriptions or mismatched plans', async () => {
+  it.each(['active', 'cancel_at_period_end'])('rejects a mismatched plan for %s', async state => {
     const f = fixture();
-    f.rows.user_subscriptions = [subscription(), subscription('trialing')];
-    expect(await readMembershipEntitlements(f.client, actorId)).toMatchObject({ level: 'free', state: 'inconsistent' });
-    f.rows.user_subscriptions = [{ ...subscription(), membership_plan_id: 'other-plan' }];
-    expect(await readMembershipEntitlements(f.client, actorId)).toMatchObject({ level: 'free', state: 'inconsistent' });
+    f.rows.user_subscriptions = [{ ...subscription(), membership_plan_id: 'other-plan', cancel_at_period_end: state === 'cancel_at_period_end' }];
+    expect(await readMembershipEntitlements(f.client, actorId))
+      .toMatchObject({ level: 'free', state: 'inconsistent', reasonCode: 'ENTITLEMENT_CONFLICT' });
   });
   it('new reads see downgrade and edits, previous values remain unchanged (consumer integration still required)', async () => {
     const f = fixture();

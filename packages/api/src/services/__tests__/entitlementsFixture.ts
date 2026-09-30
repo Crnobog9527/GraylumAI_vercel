@@ -84,5 +84,6 @@ export function fixture(level: 'free' | 'pro' | 'gold' = 'pro') {
   return { rows, failures, reads, writes, client, context };
 }
 export function subscription(status = 'active', end: string | null = '2099-01-01T00:00:00Z') {
-  return { user_id: actorId, membership_plan_id: planIds.pro, status, current_period_end: end };
+  return { user_id: actorId, membership_plan_id: planIds.pro, stripe_subscription_id: 'sub_entitlements_test',
+    status, current_period_end: end, cancel_at_period_end: false, billing_cycle: 'monthly', metadata: {} };
 }

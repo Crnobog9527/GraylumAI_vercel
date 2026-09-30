@@ -204,7 +204,7 @@ function selectEntitlementSubscription(candidates: SubscriptionRow[]) {
   return candidates.find(isManagedCurrentSubscription) ?? candidates[0] ?? null;
 }
 
-export function hasFullRefundSignal(order: PaymentOrderRow | null) {
+function hasFullRefundSignal(order: PaymentOrderRow | null) {
   if (!order) {
     return false;
   }
@@ -362,7 +362,7 @@ function classifyPlanTransition(input: {
   return 'current';
 }
 
-function getState(input: {
+export function getState(input: {
   profileLevel: MembershipLevel;
   latestSubscription: SubscriptionRow | null;
   latestMembershipOrder: PaymentOrderRow | null;
@@ -476,7 +476,7 @@ function getState(input: {
   };
 }
 
-async function loadLatestMembershipFacts(supabase: SupabaseLikeClient, userId: string) {
+export async function loadLatestMembershipFacts(supabase: SupabaseLikeClient, userId: string) {
   const subscriptionQuery = supabase
     .from('user_subscriptions')
     .select('id, membership_plan_id, stripe_subscription_id, status, cancel_at_period_end, billing_cycle, current_period_end, metadata')
@@ -526,7 +526,7 @@ async function executeSubscriptionCandidatesQuery(query: any): Promise<{
   return limitedQuery;
 }
 
-function evaluateAction(input: {
+export function evaluateAction(input: {
   action: MembershipEligibilityAction;
   state: EntitlementState;
   level: MembershipLevel;
