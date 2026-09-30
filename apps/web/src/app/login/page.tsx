@@ -510,7 +510,7 @@ function LoginPageContent() {
                     </p>
                     <div className="mt-3 flex flex-wrap items-center gap-3">
                       <Link
-                        href={buildAuthHref(`/verify-email?email=${encodeURIComponent(email)}&redirect=${encodeURIComponent(redirectTarget)}`)}
+                        href={buildVerifyEmailPath(email, redirectTarget)}
                         className="text-[#f2c94c] underline-offset-4 hover:underline"
                       >
                         打开验证状态页
