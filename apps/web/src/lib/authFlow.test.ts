@@ -6,7 +6,8 @@ import {
   loginErrorMessage,
   parseVerifyReason,
   routeCallbackError,
-  routeFragmentError,
+  readAuthFragment,
+  EMAIL_VERIFIED_LOGIN_MESSAGE,
   VERIFY_REASON_MESSAGES,
 } from './authFlow';
 
@@ -81,16 +82,27 @@ describe('routeCallbackError', () => {
   });
 });
 
-describe('routeFragmentError', () => {
-  it('reads the same whitelist from a URL fragment', () => {
-    expect(routeFragmentError('#error=access_denied&error_code=otp_expired&error_description=x&sb='))
+describe('readAuthFragment', () => {
+  it('reads the same error whitelist from a URL fragment', () => {
+    expect(readAuthFragment('#error=access_denied&error_code=otp_expired&error_description=x&sb='))
       .toEqual({ to: 'verify-expired' });
-    expect(routeFragmentError('#error=access_denied')).toEqual({ to: 'login-error' });
+    expect(readAuthFragment('#error=access_denied')).toEqual({ to: 'login-error' });
+  });
+
+  it('turns a confirmed sign-up fragment into the fixed log-in text, never a session', () => {
+    expect(readAuthFragment('#access_token=a&refresh_token=r&expires_in=3600&token_type=bearer&type=signup'))
+      .toEqual({ to: 'verified' });
+    expect(EMAIL_VERIFIED_LOGIN_MESSAGE).toBe('邮箱已验证，请登录。');
+  });
+
+  it('only discards other token fragments', () => {
+    expect(readAuthFragment('#access_token=a&refresh_token=r&type=magiclink')).toEqual({ to: 'discard' });
+    expect(readAuthFragment('#refresh_token=r')).toEqual({ to: 'discard' });
   });
 
   it('ignores an empty or unrelated fragment', () => {
-    expect(routeFragmentError('')).toBeNull();
-    expect(routeFragmentError('#pricing')).toBeNull();
+    expect(readAuthFragment('')).toBeNull();
+    expect(readAuthFragment('#pricing')).toBeNull();
   });
 });
 

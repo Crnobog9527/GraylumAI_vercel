@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { describe, expect, it, vi } from 'vitest';
-import { classifyLoginError, INVALID_CREDENTIALS_MESSAGE, routeFragmentError } from './authFlow';
+import { classifyLoginError, INVALID_CREDENTIALS_MESSAGE, readAuthFragment } from './authFlow';
 
 vi.mock('@supabase/ssr', () => ({ createServerClient: () => ({ auth: { getUser: async () => ({ data: { user: null } }) } }) }));
 vi.mock('@repo/api/src/root', () => ({ appRouter: { createCaller: vi.fn() } }));
@@ -113,6 +113,32 @@ describe.skipIf(!authUrl || !mailUrl)('unconfirmed email sign-in against local G
     const resentTo = await route(resentLanding);
     expect(resentTo.pathname).toBe('/login');
     expect(Object.fromEntries(resentTo.searchParams)).toEqual({ redirect: '/profile' });
-    expect(routeFragmentError(resentLanding.hash)).toEqual({ to: 'verify-expired' });
+    expect(readAuthFragment(resentLanding.hash)).toEqual({ to: 'verify-expired' });
   }, 30_000);
+
+  it('lands a valid resent link on the login page with "please log in", never a session from the fragment', async () => {
+    const confirmEmail = `v-${email}`;
+    await client().auth.signUp({ email: confirmEmail, password, options: { emailRedirectTo } });
+    const resentAt = Date.now() - 1000;
+    await client().auth.resend({ type: 'signup', email: confirmEmail, options: { emailRedirectTo } });
+    const link = await latestLink(confirmEmail, resentAt);
+    const response = await fetch(`${authUrl}/verify${new URL(link).search}`, { redirect: 'manual' });
+    const landing = new URL(response.headers.get('location')!);
+    // Resent links are not PKCE: GoTrue confirms the email and puts implicit tokens in the fragment.
+    expect(landing.searchParams.has('code')).toBe(false);
+    expect(new URLSearchParams(landing.hash.slice(1)).get('type')).toBe('signup');
+
+    process.env.NEXT_PUBLIC_SUPABASE_URL ??= 'http://gotrue.local';
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??= 'local-anon';
+    const { GET } = await import('@/app/auth/callback/route');
+    const to = new URL((await GET(new NextRequest(landing.toString()))).headers.get('location')!);
+    expect(to.pathname).toBe('/login');
+    expect(Object.fromEntries(to.searchParams)).toEqual({ redirect: '/profile' });
+    expect(readAuthFragment(landing.hash)).toEqual({ to: 'verified' });
+
+    // The email really is confirmed: the same password now signs in.
+    const signIn = await client().auth.signInWithPassword({ email: confirmEmail, password });
+    expect(signIn.error).toBeNull();
+    expect(signIn.data.user?.email_confirmed_at).toBeTruthy();
+  });
 });

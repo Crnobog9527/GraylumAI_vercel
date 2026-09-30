@@ -12,7 +12,8 @@ import {
 import { createClient } from '@/lib/supabase';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import {
-  buildVerifyEmailPath, classifyLoginError, LOGIN_ERROR_MESSAGES, loginErrorMessage, routeFragmentError,
+  buildVerifyEmailPath, classifyLoginError, EMAIL_VERIFIED_LOGIN_MESSAGE, LOGIN_ERROR_MESSAGES,
+  loginErrorMessage, readAuthFragment,
 } from '@/lib/authFlow';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildAuthHref, resolveAuthAppUrl, resolveSiteName } from '@/lib/site-config';
@@ -98,9 +99,7 @@ function LoginPageContent() {
     setRedirectTarget(redirect);
     setSelectedPlan(planParam ?? '');
 
-    if (emailParam) {
-      setEmail(emailParam);
-    }
+    if (emailParam) setEmail(emailParam);
 
     if (inviteParam) {
       setInviteCode(inviteParam);
@@ -112,15 +111,15 @@ function LoginPageContent() {
     const errorMessage = loginErrorMessage(error);
     if (errorMessage) setStatus({ tone: 'error', message: errorMessage });
 
-    const fragmentError = routeFragmentError(window.location.hash);
-    if (fragmentError) {
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
-      if (fragmentError.to === 'verify-expired') {
-        window.location.replace(buildAuthHref(buildVerifyEmailPath(emailParam ?? '', redirect, 'expired')));
-        return;
-      }
-      setStatus({ tone: 'error', message: LOGIN_ERROR_MESSAGES.callback_failed });
+    // Errors or tokens from an email link: drop them from the address bar and history first.
+    const fragment = readAuthFragment(window.location.hash);
+    if (fragment) window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    if (fragment?.to === 'verify-expired') {
+      window.location.replace(buildAuthHref(buildVerifyEmailPath(emailParam ?? '', redirect, 'expired')));
+      return;
     }
+    if (fragment?.to === 'login-error') setStatus({ tone: 'error', message: LOGIN_ERROR_MESSAGES.callback_failed });
+    if (fragment?.to === 'verified') setStatus({ tone: 'success', message: EMAIL_VERIFIED_LOGIN_MESSAGE });
   }, [searchParams]);
 
   const handleLogin = async () => {

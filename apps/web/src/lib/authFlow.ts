@@ -62,9 +62,23 @@ export function routeCallbackError(params: URLSearchParams): CallbackErrorRoute 
   return null;
 }
 
-// The same errors when GoTrue puts them in the URL fragment (links sent without PKCE).
-export function routeFragmentError(hash: string): CallbackErrorRoute {
-  return hash.startsWith('#') ? routeCallbackError(new URLSearchParams(hash.slice(1))) : null;
+// What a URL fragment from an email link means. Links sent without PKCE (resent confirmations)
+// put either an error or implicit-grant tokens there. The app's clients use PKCE, which rejects
+// such tokens, and they are never turned into a session here: a crafted link could otherwise sign
+// the visitor into someone else's account. A confirmed sign-up only gets a fixed "please log in".
+export type FragmentOutcome = CallbackErrorRoute | { to: 'verified' } | { to: 'discard' };
+
+export const EMAIL_VERIFIED_LOGIN_MESSAGE = '邮箱已验证，请登录。';
+
+export function readAuthFragment(hash: string): FragmentOutcome {
+  if (!hash.startsWith('#')) return null;
+  const params = new URLSearchParams(hash.slice(1));
+  const error = routeCallbackError(params);
+  if (error) return error;
+  if (params.has('access_token') || params.has('refresh_token')) {
+    return params.get('type') === 'signup' ? { to: 'verified' } : { to: 'discard' };
+  }
+  return null;
 }
 
 // /login?error=<code>. The page shows fixed text for known codes and ignores any other value, so a

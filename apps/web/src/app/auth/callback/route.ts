@@ -62,7 +62,8 @@ export async function GET(request: NextRequest) {
 
   // No session: a link GoTrue answered in the URL fragment (resent links do not use PKCE), which
   // the server never sees. The browser keeps that fragment across this redirect and the login
-  // page reads it, so an expired resent link still reaches the resend page.
+  // page reads it (readAuthFragment): an expired link goes to the resend page, a confirmed one
+  // shows "please log in", and the fragment is cleared either way.
   if (!user) {
     const loginUrl = new URL('/login', authOrigin);
     loginUrl.searchParams.set('redirect', next);
