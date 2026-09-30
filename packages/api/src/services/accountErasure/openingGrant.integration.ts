@@ -162,6 +162,59 @@ it('old key version still matches after rotation and denial survives later email
   }
 });
 
+it('0150 scrubs wait for the digest-and-close commit, preserve facts and retain parent/claim guards', async () => {
+  const actor = await account();
+  expect(await bootstrap(actor.user, actor.session)).toBe(100);
+  const conversation = randomUUID();
+  await db.query('INSERT INTO conversations(id,user_id,title) VALUES($1,$2,$3)',
+    [conversation, actor.user.id, 'Synthetic content before erasure']);
+  await db.query("INSERT INTO messages(conversation_id,role,content) VALUES($1,'assistant',$2)",
+    [conversation, 'Synthetic private message']);
+  const digests = openingGrantDigests(actor.user);
+  const facts = async () => (await db.query(
+    'SELECT * FROM opening_grant_identity_digests WHERE digest=ANY($1) ORDER BY key_version,digest',
+    [digests.map(item => item.digest)],
+  )).rows;
+  const before = await facts();
+  await db.query('BEGIN; SET LOCAL ROLE service_role');
+  try {
+    const closed = await db.query('SELECT account_erasure_confirm_with_digests($1,$2,$3) AS result',
+      [actor.user.id, randomUUID(), JSON.stringify(digests)]);
+    expect(closed.rows[0].result.created).toBe(true);
+    for (const name of ['account_erasure_scrub_runtime', 'account_erasure_scrub_content']) {
+      const sameTransaction = await db.query(`SELECT ${name}($1) AS result`, [actor.user.id]);
+      expect(sameTransaction.rows[0].result).toEqual({ retry: true, reason: 'transactions_pending' });
+    }
+    await db.query('COMMIT');
+  } finally {
+    await db.query('ROLLBACK');
+  }
+  expect((await db.query('SELECT erased_at FROM conversations WHERE id=$1', [conversation])).rows[0].erased_at).toBeNull();
+  for (const name of ['account_erasure_scrub_runtime', 'account_erasure_scrub_content']) {
+    const scrubbed = await admin.rpc(name, { p_profile_id: actor.user.id });
+    expect(scrubbed.error).toBeNull();
+    expect(scrubbed.data.retry).toBeUndefined();
+    if (name === 'account_erasure_scrub_runtime') {
+      expect(scrubbed.data).toMatchObject({ conversations: 1, messages: 1 });
+    }
+  }
+  const content = (await db.query('SELECT title,erased_at FROM conversations WHERE id=$1', [conversation])).rows[0];
+  expect(content.title).toBeNull();
+  expect(content.erased_at).not.toBeNull();
+  expect(await facts()).toEqual(before);
+  expect(await balance(actor.user.id)).toBe(100);
+  await expect(db.query("INSERT INTO messages(conversation_id,role,content) VALUES($1,'assistant','late')",
+    [conversation])).rejects.toMatchObject({ code: '42501', message: 'ERASURE_PARENT_CLEARED' });
+  await expect(db.query("UPDATE conversations SET title='refill' WHERE id=$1", [conversation]))
+    .rejects.toMatchObject({ code: '42501' });
+  expect((await db.query("SELECT has_function_privilege('service_role',"
+    + "'ordinary_chat_claim(uuid,uuid,jsonb,uuid)','EXECUTE') AS allowed")).rows[0].allowed).toBe(false);
+  await db.query('UPDATE profiles SET email=NULL,nickname=NULL WHERE id=$1', [actor.user.id]);
+  expect((await admin.auth.admin.deleteUser(actor.user.id)).error).toBeNull();
+  const again = await account(actor.user.email);
+  expect(await bootstrap(again.user, again.session)).toBe(0);
+});
+
 it('a real two-session advisory-lock barrier allows exactly one grant across new account IDs', async () => {
   const ids = [randomUUID(), randomUUID()];
   for (const id of ids) await db.query('INSERT INTO profiles(id) VALUES($1)', [id]);

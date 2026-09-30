@@ -56,43 +56,49 @@ active 必须在 keys 内。新增版本时保留所有仍有摘要的旧版本�
 总控配置时必须保留原版本和值。已在 Vercel 的环境拒绝明显的 test-only 测试密钥。
 开户赠送规则取消后，停止赠送并清除此用途摘要；没有自动猜测到期或后台画像。
 
-## 并行范围与迁移编号
+## 同步基线、迁移编号与 0150 兼容性
 
-当前 #537 head `1b67501392513c743884c6e44f669875d791a31c` 已包含 0150，并写入
-`built-fingerprint.json` 与 `DATA-ERASURE.md`。这两个文件暂停写入，PR 已记录实际重叠。
-本任务暂用 0151；当前 base 只有 0149，因此 migration ledger 报缺 0150。
-总控已在 [PR 留言](https://github.com/Crnobog9527/GraylumAI_vercel/pull/538#issuecomment-5907196539)
-明确顺序 #537 → #538 → #539；其他实现/测试可继续，两个共享文件等 #537 合并后的通知再写。
-收到通知后更新分支，
-按合并时 staging 核对编号，并在同一 PR 重跑 --local-only --write-built。不能放虚构迁移补空号。
-总控已明确 `scripts/code-size-baseline.json` 按条目并行写入：#538 只删除 `trpc.ts`
+已按[总控通知](https://github.com/Crnobog9527/GraylumAI_vercel/pull/538#issuecomment-5913886441)
+同步 staging `6ba5611e9d302aedd7b2b6a8b11ff5b6ab5ce73f`，其中包含 #537 的 0150。
+0150 已应用是总控提供的事实，本任务未连接远程库核验。E 保持 **0151**；
+已重新执行 `--local-only --write-built`，并补齐 DATA-ERASURE 的实施说明与新表附录。
+后续若合并前编号改变，必须改号并重新生成指纹，不能以虚构迁移补空号。
+
+0151 保留 0150 的屏障、父对象 guard、`erased_at` 单向规则和 `ordinary_chat_claim` 撤权。
+摘要写入与账号封闭原子提交；C 的正文擦除必须另开事务。相同事务调用两个擦除入口均返回
+`transactions_pending`，不会提前擦除。E 不在持有 profile / 摘要锁时调用擦除，
+不改变 0150 的父对象锁序，也不增加与正文表的外键或清理顺序依赖。
+新增集成用例验证提交后两条擦除路径成功、正文清空、摘要保留、父对象不能新增正文、
+已擦除行不能填回、旧 claim 权限仍撤销；实际删除 Auth 后，同邮箱注册仍不发赠送。
+完整 catalog 指纹相对新 base 只增加 E 对象和修改旧确认函数的执行权限，0150 对象不变。
+
+`scripts/code-size-baseline.json` 按总控指定的条目并行写入：#538 只删除 `trpc.ts`
 已不必要的 501 行条目（当前 496 行），不改其他条目，也不运行整体 `--update`。
-若后合并时冲突，只保留各 PR 各自条目的改动。
-#540 ENTITLEMENTS 与 #539 约束预检当前无业务文件重叠；不修改 #537 的擦除通道/审计文件。
+同步保留 staging 的其他条目变化。#540 ENTITLEMENTS 与 #539 约束预检无业务文件重叠；
+本 PR 不修改 0150 或 B1b 的实现、审计文件。
 
 ## 验证与交接
 
 本地候选验证（从上述 staging 完整文件构建的可销毁容器）：
 
-- PASS：frozen install；完整 API 141 个文件，3098 通过、3 个既有用例跳过；API/Web lint 与类型检查。
-- PASS：`node packages/db/tests/run-erasure-e.mjs --local-only`：5 项 PR-A 回归、8 项 E 集成测试。
+- PASS：`node packages/db/tests/run-erasure-e.mjs --local-only`：5 项 PR-A 回归、9 项 E 集成测试。
   覆盖邮箱/Google 同主体重注册、独立身份、大小写/空白/别名、无原文、旧版本轮换、忘旧版本拒绝、
   新会话角色读写/RPC 拒绝、并发只一次、封闭拒绝、赠送/注销摘要故障事务回滚和 PR-A 前置拒绝；
   缺密钥/错误格式分别验证启动拒绝，以及实际开户拒绝赠送、无流水/摘要、无日志回显。
-  Google 使用本机 Auth 身份夹具，不代表外部 Google 登录验收；限频依赖在夹具中明确 mock。
+  另覆盖上述 0150 事务屏障与擦除兼容性。Google 使用本机 Auth 身份夹具，
+  不代表外部 Google 登录验收；限频依赖在夹具中明确 mock。
 - PASS：迁移连续两次、完整 catalog 回退/重应用一致、两类注销审计 0 问题；
   有摘要时回退拒绝，防止恢复重复领取。回退必须和旧 API 同步，不能丢弃线上防刷事实。
-- PASS：API 类型排除基线 35 个旧文件仍需排除。
-- PASS：定点删除 trpc 条目后，代码大小检查覆盖 449 个源码文件通过；其余基线条目逐项一致。
-  完整基线重放 153 步、84 个重复迁移、1169 个 catalog 分组，account-open 审计 0 问题；
-  收敛迁移重应用不变、回退再恢复通过；`--after baseline/credit-guard-paths.sql` 的 8 条
-  钱包/封闭/服务角色路径均通过。当前仅 `--out` 独立证据，不算更新 built-fingerprint。
-- FAIL / BLOCKED：safeguards / migration ledger 缺 0150。
-  原因是上述明确的并行 writer / 顺序依赖，未通过就是未通过。
-- FAIL：已提交实现候选的 Ruby CI 合约 7 项、296 断言、1 失败，也因缺 0150。
-  准备稿 HEAD 的 7 项/301 断言曾通过，不能沿用为实现候选通过证据。
-- BLOCKED：同 PR 的 `--write-built` 与新表附录登记等待共享文件写入协调，尚未执行。
-- NOT_RUN：总控审、最终候选远程 CI 全绿、独立语义审查、浏览器/staging 验收、真实密钥配置、应用迁移。
+- PASS：`node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built`，
+  154 步、85 个重复迁移、1187 个 catalog 分组，指纹已写入；account-open 审计 0 问题，
+  收敛迁移重应用不变、回退再恢复通过，本机容器清理通过。
+- PASS：API/Web lint 与类型检查；API 类型排除基线 35 个旧文件仍需排除。
+- PASS：safeguards 128 项；Ruby CI 合约 7 项、302 断言；代码大小检查 454 个源码文件。
+- PASS：完整 API 串行执行，145 个文件、3136 通过、3 个既有用例跳过。
+  初次并发全量及单文件复跑曾出现既有 MCP 夹具 200ms 连接超时；串行执行通过，
+  未改动该夹具或放宽断言。最终远程 CI 结果以 PR 当前 head 的验证记录为准。
+- PASS：再次完整重放与已写入指纹一致，附加的 8 条钱包/封闭/服务角色基线路径通过。
+- NOT_RUN：总控审、独立语义审查、浏览器/staging 验收、真实密钥配置、远程应用迁移。
 
 总控 staging 只读事实：执行 `erasure-e-staging-source.sql`，只贴聚合结果。
 如 PR-E 前已有领过赠送的封闭账号，必须在 PR-C 删除 Auth 身份前补存其摘要；
@@ -100,8 +106,8 @@ active 必须在 keys 内。新增版本时保留所有仍有摘要的旧版本�
 应用后只读权限检查为 `erasure-e-audit.sql`；期望 0 行，仅代表权限检查，不代表完整验收。
 到期清除和备份恢复按 §8/E3：规则取消才删除此用途事实；恢复服务前先恢复防刷事实。
 
-Handoff：done = HMAC/环境校验、原子赠送与封闭、回退/审计及本地证明；
-next = 等 #537 合并通知 → 更新分支/编号/指纹/附录 → 相关验证及 CI 全绿
-→ 总控先审 → ready/Codex 机器人 → Owner 批准后总控合并/配置/应用；
-blockers = 指纹/附录等 #537 合并通知、缺 0150、历史封闭账号事实未取得。
-当前保持 draft，不是 clean；本 writer 不合并、不配置真实环境、不应用远程迁移。
+Handoff：done = HMAC/环境校验、原子赠送与封闭、回退/审计、本地证明、
+同步 0150/0151 编号、重生成指纹和任务文档；
+next = 最终候选 CI 全绿 → 总控先审 → ready / 独立审查 → Owner 批准后总控合并及应用；
+blockers = 历史封闭账号聚合事实未取得、真实 staging 密钥尚未由 Owner 配置。
+当前保持 draft，独立审查尚未完成，不是 clean；本 writer 不合并、不配置真实环境、不应用远程迁移。
