@@ -43,6 +43,8 @@ export function MentorBudgetTabTrigger() {
 
 /** Switches to the features tab, then focuses the summary output limit once it is mounted. */
 export function MentorBudgetTabContent({ onOpenFeatures }: { onOpenFeatures: () => void }) {
+  // Held outside TabsContent: Radix unmounts inactive tabs, and unsaved edits must survive a tab switch.
+  const [draft, setDraft] = useState<BudgetDraft | null>(null);
   const openSummaryLimit = () => {
     onOpenFeatures();
     window.setTimeout(() => {
@@ -51,22 +53,27 @@ export function MentorBudgetTabContent({ onOpenFeatures }: { onOpenFeatures: () 
   };
   return (
     <TabsContent value={MENTOR_BUDGET_TAB}>
-      <MentorBudgetSettings onOpenSummaryLimit={openSummaryLimit} />
+      <MentorBudgetSettings draft={draft} onDraftChange={setDraft} onOpenSummaryLimit={openSummaryLimit} />
     </TabsContent>
   );
 }
 
-export function MentorBudgetSettings({ onOpenSummaryLimit }: { onOpenSummaryLimit: () => void }) {
+type SettingsProps = {
+  draft: BudgetDraft | null;
+  onDraftChange: (draft: BudgetDraft | null) => void;
+  onOpenSummaryLimit: () => void;
+};
+
+export function MentorBudgetSettings({ draft, onDraftChange, onOpenSummaryLimit }: SettingsProps) {
   const utils = trpc.useUtils();
   // Always re-read on mount: the summary output limit may have just been saved on another tab.
   const view = trpc.mentorBudget.get.useQuery(undefined, { refetchOnMount: 'always' });
-  const [draft, setDraft] = useState<BudgetDraft | null>(null);
   const [saved, setSaved] = useState(false);
   const save = trpc.mentorBudget.update.useMutation({
     onSuccess: async data => {
       utils.mentorBudget.get.setData(undefined, data);
       await utils.mentorBudget.get.invalidate();
-      setDraft(null);
+      onDraftChange(null);
       setSaved(true);
     },
   });
@@ -90,7 +97,7 @@ export function MentorBudgetSettings({ onOpenSummaryLimit }: { onOpenSummaryLimi
       onChange={(purpose, field, value) => {
         setSaved(false);
         if (save.error) save.reset();
-        setDraft({ ...current, [purpose]: { ...current[purpose], [field]: value } });
+        onDraftChange({ ...current, [purpose]: { ...current[purpose], [field]: value } });
       }}
       onSave={() => save.mutate(toBudgetInput(current))}
       saving={save.isPending}
@@ -191,7 +198,7 @@ function SourceNote({ view }: { view: BudgetView }) {
   );
 }
 
-function PurposeGroup({ purpose, view, draft, onChange, onOpenSummaryLimit }: PanelProps & { purpose: BudgetPurpose }) {
+function PurposeGroup({ purpose, view, draft, onChange, saving, onOpenSummaryLimit }: PanelProps & { purpose: BudgetPurpose }) {
   return (
     <section className="space-y-3" data-testid={`mentor-budget-${purpose}`}>
       <div>
@@ -202,7 +209,7 @@ function PurposeGroup({ purpose, view, draft, onChange, onOpenSummaryLimit }: Pa
       </div>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         {fieldsOf(purpose).map(field => (
-          <BudgetInputField key={field} purpose={purpose} field={field} view={view} draft={draft} onChange={onChange} />
+          <BudgetInputField key={field} purpose={purpose} field={field} view={view} draft={draft} onChange={onChange} saving={saving} />
         ))}
         {purpose === 'organize' && <OrganizeOutput view={view} onOpenSummaryLimit={onOpenSummaryLimit} />}
       </div>
@@ -210,9 +217,10 @@ function PurposeGroup({ purpose, view, draft, onChange, onOpenSummaryLimit }: Pa
   );
 }
 
-function BudgetInputField({ purpose, field, view, draft, onChange }: {
+/** Disabled while saving so a late edit cannot be overwritten when the saved values are reloaded. */
+function BudgetInputField({ purpose, field, view, draft, onChange, saving }: {
   purpose: BudgetPurpose; field: BudgetField; view: BudgetView; draft: BudgetDraft;
-  onChange: PanelProps['onChange'];
+  onChange: PanelProps['onChange']; saving: boolean;
 }) {
   const id = `mentor-budget-${purpose}-${field}`;
   const [min, max] = fieldRange(view, purpose, field);
@@ -232,6 +240,7 @@ function BudgetInputField({ purpose, field, view, draft, onChange }: {
         step={1}
         value={value}
         placeholder="未设置"
+        disabled={saving}
         aria-invalid={problem ? true : undefined}
         onChange={event => onChange(purpose, field, event.target.value)}
         className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
