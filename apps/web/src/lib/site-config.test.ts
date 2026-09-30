@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { resolveAuthAppUrl, resolveAuthCallbackOrigin } from './site-config';
+import {
+  legacyParentCookieNames,
+  resolveAppUrl,
+  resolveAuthAppUrl,
+  resolveAuthCallbackOrigin,
+  resolveSupabaseCookieOptions,
+} from './site-config';
 
 describe('auth origin resolution', () => {
   afterEach(() => {
@@ -41,5 +47,72 @@ describe('auth origin resolution', () => {
 
     expect(resolveAuthAppUrl('https://www.graylum.com')).toBe('https://app.graylum.com');
     expect(resolveAuthAppUrl('https://app.graylum.com')).toBe('https://app.graylum.com');
+  });
+});
+
+describe('staging app host', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps login, callback and verify links on the staging domain', () => {
+    vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', '');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://graylumai-staging.vercel.app');
+
+    expect(resolveAuthAppUrl('https://auth-staging.graylum.com')).toBe('https://auth-staging.graylum.com');
+    vi.stubGlobal('window', { location: { origin: 'https://auth-staging.graylum.com' } });
+    expect(resolveAuthAppUrl()).toBe('https://auth-staging.graylum.com');
+    expect(resolveAppUrl()).toBe('https://auth-staging.graylum.com');
+  });
+
+  it('does not trust an unknown graylum.com host as an auth origin', () => {
+    vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', '');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
+
+    expect(resolveAuthAppUrl('https://other.graylum.com')).toBe('https://app.graylum.com');
+    expect(resolveAuthAppUrl('https://evilgraylum.com')).toBe('https://app.graylum.com');
+  });
+});
+
+describe('session cookie scope', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('shares the parent-domain cookie only on the production hosts', () => {
+    for (const host of ['graylum.com', 'www.graylum.com', 'app.graylum.com']) {
+      expect(resolveSupabaseCookieOptions(host)).toMatchObject({ domain: '.graylum.com', secure: true });
+    }
+  });
+
+  it('keeps staging and other hosts on a host-only cookie', () => {
+    expect(resolveSupabaseCookieOptions('auth-staging.graylum.com')).toMatchObject({ domain: undefined, secure: true });
+    expect(resolveSupabaseCookieOptions('x.app.graylum.com')).toMatchObject({ domain: undefined, secure: true });
+    expect(resolveSupabaseCookieOptions('evilgraylum.com')).toMatchObject({ domain: undefined, secure: false });
+    expect(resolveSupabaseCookieOptions('graylumai-staging.vercel.app')).toMatchObject({ domain: undefined });
+    expect(resolveSupabaseCookieOptions('localhost')).toMatchObject({ domain: undefined, secure: false });
+  });
+
+  it('lists only this project\'s old parent-domain session cookies for cleanup on a staging host', () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://stagingref.supabase.co');
+    const names = [
+      'sb-stagingref-auth-token.0',
+      'sb-stagingref-auth-token-code-verifier',
+      'sb-prodref-auth-token',
+      'other',
+    ];
+
+    expect(legacyParentCookieNames(names, 'auth-staging.graylum.com')).toEqual([
+      'sb-stagingref-auth-token.0',
+      'sb-stagingref-auth-token-code-verifier',
+    ]);
+    expect(legacyParentCookieNames(names, 'app.graylum.com')).toEqual([]);
+    expect(legacyParentCookieNames(names, 'graylumai-staging.vercel.app')).toEqual([]);
+  });
+
+  it('cleans nothing when the project URL is missing', () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', '');
+    expect(legacyParentCookieNames(['sb--auth-token'], 'auth-staging.graylum.com')).toEqual([]);
   });
 });
