@@ -26,6 +26,10 @@ BEGIN
     ('b562bbc4c69d1be9f73e22511aadb1fa', 'b21b622b3d45ababefa4254d2ec41e84') THEN
     RAISE EXCEPTION 'ERASURE_SOURCE_MISMATCH: artifact_chat_message_guard()';
   END IF;
+  IF md5(pg_get_functiondef('public.account_erasure_scrub_content(uuid)'::regprocedure)) NOT IN
+    ('3029c14ab84580323acba88565786281', '8e265cafaa36ba3735ea75897d210c0c') THEN
+    RAISE EXCEPTION 'ERASURE_SOURCE_MISMATCH: account_erasure_scrub_content(uuid)';
+  END IF;
 END $$;
 
 -- Staging originals supplied by the controller in PR #537; locally verified before rewriting.
@@ -200,6 +204,70 @@ BEGIN
   END LOOP;
 END $$;
 
+-- No-active legacy finalizers may still INSERT after the admission barrier. Serialize these
+-- inserts with the scrubber's parent FOR UPDATE, then reject an erased parent. Existing
+-- in-flight conversations remain writable until eligible for scrub; no billing code changes.
+-- Do not lock parents on ordinary content UPDATEs (the existing erased-row guard handles
+-- those): child->parent locking there would invert the scrubber's parent->child lock order.
+CREATE OR REPLACE FUNCTION public.erasure_conversation_child_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE parent_erased_at timestamptz;
+BEGIN
+  IF TG_OP = 'INSERT' AND NEW.erased_at IS NOT NULL THEN
+    RAISE EXCEPTION 'ERASURE_INSERT_DENIED' USING ERRCODE = '42501';
+  END IF;
+  IF TG_OP = 'UPDATE' AND NEW.conversation_id IS NOT DISTINCT FROM OLD.conversation_id THEN
+    RETURN NEW;
+  END IF;
+  SELECT erased_at INTO parent_erased_at FROM public.conversations
+    WHERE id = NEW.conversation_id FOR SHARE;
+  IF parent_erased_at IS NOT NULL THEN
+    RAISE EXCEPTION 'ERASURE_PARENT_CLEARED' USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.erasure_conversation_child_guard() FROM PUBLIC, anon, authenticated, service_role;
+DROP TRIGGER IF EXISTS b_erasure_parent_guard ON public.messages;
+CREATE TRIGGER b_erasure_parent_guard BEFORE INSERT OR UPDATE OF conversation_id ON public.messages
+  FOR EACH ROW EXECUTE FUNCTION public.erasure_conversation_child_guard();
+DROP TRIGGER IF EXISTS b_erasure_parent_guard ON public.conversation_context_snapshots;
+CREATE TRIGGER b_erasure_parent_guard BEFORE INSERT OR UPDATE OF conversation_id ON public.conversation_context_snapshots
+  FOR EACH ROW EXECUTE FUNCTION public.erasure_conversation_child_guard();
+
+-- Drain transactions that could have observed an active account before closure. Call only
+-- AFTER verifying the erasure request. This is a read-only check, not a wait or cancellation.
+-- Keep SQL-capable/unknown workers (including pg_net, pg_cron jobs, parallel and logical
+-- replication workers). Only core maintenance/launcher processes and pg_cron's scheduler
+-- are excluded; cron job SQL executes in a separate client backend or pg_cron job worker.
+CREATE OR REPLACE FUNCTION public.account_erasure_barrier() RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE cutoff timestamptz := clock_timestamp();
+BEGIN
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'ACCOUNT_ERASURE_ISOLATION_DENIED' USING ERRCODE = '25000';
+  END IF;
+  IF NOT pg_has_role(current_user, 'pg_read_all_stats', 'USAGE')
+    OR current_setting('track_activities') <> 'on' THEN RETURN false; END IF;
+  PERFORM pg_stat_clear_snapshot();
+  IF EXISTS (
+    SELECT 1 FROM pg_stat_activity a WHERE a.pid <> pg_backend_pid()
+      AND (a.backend_type IS NULL OR a.backend_type NOT IN (
+        'archiver', 'autovacuum launcher', 'autovacuum worker', 'background writer',
+        'checkpointer', 'logical replication launcher', 'walwriter', 'pg_cron launcher'))
+      AND NOT (
+        -- NULL is safe only for a visible, explicitly transaction-free idle connection.
+        (a.state IS NOT DISTINCT FROM 'idle' AND a.xact_start IS NULL)
+        OR (coalesce(a.state IN ('active', 'idle in transaction',
+          'idle in transaction (aborted)', 'fastpath function call'), false)
+          AND a.xact_start IS NOT NULL AND a.xact_start > cutoff)
+      )
+  ) THEN RETURN false; END IF;
+  -- A transaction can leave activity via PREPARE, so check prepared transactions LAST.
+  -- Other databases cannot write this database's tables; retain every prepared xact here.
+  RETURN NOT EXISTS (SELECT 1 FROM pg_prepared_xacts WHERE database = current_database());
+END $$;
+REVOKE ALL ON FUNCTION public.account_erasure_barrier() FROM PUBLIC, anon, authenticated, service_role;
+
 -- Service-only; no broader table grants or mutable cleanup switch. No deletes (PR-C).
 CREATE OR REPLACE FUNCTION public.account_erasure_scrub_runtime(p_profile_id uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
@@ -210,6 +278,16 @@ BEGIN
   IF p_profile_id IS NULL OR NOT EXISTS (
     SELECT 1 FROM account_erasure_requests WHERE profile_id = p_profile_id) THEN
     RAISE EXCEPTION 'ACCOUNT_ERASURE_NOT_CLOSED' USING ERRCODE = '42501';
+  END IF;
+  IF NOT public.account_erasure_barrier() THEN
+    RETURN jsonb_build_object('retry', true, 'reason', 'transactions_pending');
+  END IF;
+  -- confirm and scrub must use separate transactions. The service cannot backdate confirmed_at.
+  -- Conservatively also retry a caller whose transaction predates a concurrent confirmation;
+  -- this is not the barrier cutoff or proof of commit (the activity/prepared checks remain).
+  IF EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_profile_id
+    AND confirmed_at >= transaction_timestamp()) THEN
+    RETURN jsonb_build_object('retry', true, 'reason', 'transactions_pending');
   END IF;
   -- Runtime writers lock session before execution. Never hold profile/run/project locks here.
   -- Do not wait on a busy session/conversation; counters include the omitted rows.
@@ -304,4 +382,161 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.account_erasure_scrub_runtime(uuid) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.account_erasure_scrub_runtime(uuid) TO service_role;
+-- Exact staging original verified by server MD5 3029c14ab84580323acba88565786281.
+-- Only the early read-only barrier is added; ownership and ACL remain unchanged.
+CREATE OR REPLACE FUNCTION public.account_erasure_scrub_content(p_profile_id uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  now_at timestamptz := clock_timestamp(); counts jsonb := '{}'; n bigint;
+BEGIN
+  IF p_profile_id IS NULL OR NOT EXISTS (
+    SELECT 1 FROM account_erasure_requests WHERE profile_id = p_profile_id) THEN
+    RAISE EXCEPTION 'ACCOUNT_ERASURE_NOT_CLOSED' USING ERRCODE = '42501';
+  END IF;
+  IF NOT public.account_erasure_barrier() THEN
+    RETURN jsonb_build_object('retry', true, 'reason', 'transactions_pending');
+  END IF;
+  -- confirm and scrub must use separate transactions. The service cannot backdate confirmed_at.
+  -- Conservatively also retry a caller whose transaction predates a concurrent confirmation;
+  -- this is not the barrier cutoff or proof of commit (the activity/prepared checks remain).
+  IF EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_profile_id
+    AND confirmed_at >= transaction_timestamp()) THEN
+    RETURN jsonb_build_object('retry', true, 'reason', 'transactions_pending');
+  END IF;
+
+  CREATE TEMP TABLE IF NOT EXISTS erasure_scope(kind text, id uuid) ON COMMIT DROP;
+  DELETE FROM pg_temp.erasure_scope;
+  INSERT INTO pg_temp.erasure_scope SELECT 'project', id FROM artifact_projects WHERE actor_id = p_profile_id;
+  INSERT INTO pg_temp.erasure_scope SELECT 'round', r.id FROM artifact_rounds r
+    JOIN pg_temp.erasure_scope s ON s.kind = 'project' AND s.id = r.project_id;
+  INSERT INTO pg_temp.erasure_scope SELECT 'draft', draft_id FROM opc_drafts WHERE actor_id = p_profile_id;
+  INSERT INTO pg_temp.erasure_scope SELECT 'plan', p.id FROM opc_plans p
+    JOIN pg_temp.erasure_scope s ON s.kind = 'draft' AND s.id = p.draft_id;
+  INSERT INTO pg_temp.erasure_scope SELECT 'item', i.work_item_id FROM opc_items i
+    JOIN pg_temp.erasure_scope s ON s.kind = 'plan' AND s.id = i.plan_id;
+
+  -- artifact chat turns first: the generation guard compares a live instruction with its turn.
+  UPDATE artifact_chat_turns t SET body = NULL, erased_at = now_at
+  FROM artifact_chats c JOIN pg_temp.erasure_scope s ON s.kind = 'project' AND s.id = c.project_id
+  WHERE t.conversation_id = c.conversation_id AND t.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('artifact_chat_turns', n);
+
+  -- Result keeps only its money keys; provider_observations is financial evidence (PR-B2).
+  UPDATE artifact_generations g SET input = NULL, erased_at = now_at,
+    result = (SELECT jsonb_object_agg(e.key, e.value) FROM jsonb_each(
+      CASE WHEN jsonb_typeof(g.result) = 'object' THEN g.result ELSE '{}'::jsonb END) e
+      WHERE e.key IN ('credits', 'inputTokens', 'outputTokens', 'costUsd'))
+  FROM pg_temp.erasure_scope s WHERE s.kind = 'project' AND s.id = g.project_id AND g.erased_at IS NULL
+    AND g.state IN ('succeeded', 'refunded');
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('artifact_generations', n);
+  SELECT count(*) INTO n FROM artifact_generations g JOIN pg_temp.erasure_scope s ON s.kind = 'project' AND s.id = g.project_id
+  WHERE g.erased_at IS NULL;
+  counts := counts || jsonb_build_object('artifact_generations_skipped', n);
+
+  UPDATE artifact_rounds r SET steps = NULL, erased_at = now_at
+  FROM pg_temp.erasure_scope s WHERE s.kind = 'round' AND s.id = r.id AND r.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('artifact_rounds', n);
+  UPDATE artifact_evidence e SET payload = NULL, content_hash = NULL, erased_at = now_at
+  FROM pg_temp.erasure_scope s WHERE s.kind = 'project' AND s.id = e.project_id AND e.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('artifact_evidence', n);
+  UPDATE artifact_confirmations c SET body = NULL, erased_at = now_at
+  FROM pg_temp.erasure_scope s WHERE s.kind = 'round' AND s.id = c.round_id AND c.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('artifact_confirmations', n);
+  UPDATE artifact_candidates c SET body = NULL, erased_at = now_at
+  FROM pg_temp.erasure_scope s WHERE s.kind = 'round' AND s.id = c.round_id AND c.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('artifact_candidates', n);
+  UPDATE artifact_versions v SET report = NULL, report_hash = NULL, erased_at = now_at
+  FROM pg_temp.erasure_scope s WHERE s.kind = 'project' AND s.id = v.project_id AND v.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('artifact_versions', n);
+  UPDATE artifact_requests q SET response = NULL, erased_at = now_at,
+    payload = (SELECT jsonb_object_agg(e.key, e.value) FROM jsonb_each(
+      CASE WHEN jsonb_typeof(q.payload) = 'object' THEN q.payload ELSE '{}'::jsonb END) e
+      WHERE e.key IN ('sliceExecution', 'slicePhase'))
+  FROM pg_temp.erasure_scope s WHERE s.kind = 'project' AND s.id = q.project_id AND q.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('artifact_requests', n);
+  UPDATE artifact_work_references w SET creation_payload = NULL, source_hash = NULL, erased_at = now_at
+  FROM pg_temp.erasure_scope s WHERE s.kind = 'project' AND s.id = w.project_id AND w.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('artifact_work_references', n);
+  UPDATE agent_slice_links l SET source_hash = NULL, erased_at = now_at
+  FROM pg_temp.erasure_scope s WHERE s.kind = 'round' AND s.id = l.round_id AND l.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('agent_slice_links', n);
+  UPDATE agent_slice_executions x SET preference_refs = NULL, discussion_refs = NULL, input_hash = NULL, erased_at = now_at
+  FROM pg_temp.erasure_scope s WHERE s.kind = 'project' AND s.id = x.project_id AND x.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('agent_slice_executions', n);
+  UPDATE artifact_projects p SET work_title = NULL, erased_at = now_at,
+    account = CASE WHEN p.account IS NULL THEN NULL ELSE 'erased:' || p.id END
+  WHERE p.actor_id = p_profile_id AND p.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('artifact_projects', n);
+
+  UPDATE research_operations o SET erased_at = now_at,
+    result = (SELECT jsonb_object_agg(e.key, e.value) FROM jsonb_each(
+      CASE WHEN jsonb_typeof(o.result) = 'object' THEN o.result ELSE '{}'::jsonb END) e WHERE e.key = 'cost')
+  FROM research_plans p WHERE p.actor_id = p_profile_id AND o.plan_id = p.id AND o.erased_at IS NULL
+    AND o.state IN ('succeeded', 'failed', 'cancelled');
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('research_operations', n);
+  SELECT count(*) INTO n FROM research_operations o JOIN research_plans p ON p.id = o.plan_id
+  WHERE p.actor_id = p_profile_id AND o.erased_at IS NULL;
+  counts := counts || jsonb_build_object('research_operations_skipped', n);
+  UPDATE research_plans p SET operations = NULL, erased_at = now_at
+  WHERE p.actor_id = p_profile_id AND p.erased_at IS NULL AND NOT EXISTS (
+    SELECT 1 FROM research_operations o WHERE o.plan_id = p.id AND o.erased_at IS NULL);
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('research_plans', n);
+
+  UPDATE opc_turns t SET input_hash = NULL, erased_at = now_at
+  FROM pg_temp.erasure_scope s WHERE s.kind = 'draft' AND s.id = t.draft_id AND t.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('opc_turns', n);
+  UPDATE opc_plans p SET request = NULL, body = NULL, erased_at = now_at
+  FROM pg_temp.erasure_scope s WHERE s.kind = 'draft' AND s.id = p.draft_id AND p.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('opc_plans', n);
+  UPDATE opc_items i SET brief = NULL, erased_at = now_at
+  FROM pg_temp.erasure_scope s WHERE s.kind = 'item' AND s.id = i.work_item_id AND i.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('opc_items', n);
+  UPDATE opc_item_edits e SET title = NULL, brief = NULL, erased_at = now_at
+  FROM pg_temp.erasure_scope s WHERE s.kind = 'item' AND s.id = e.work_item_id AND e.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('opc_item_edits', n);
+  UPDATE opc_handoffs h SET payload = NULL, result = NULL, erased_at = now_at
+  WHERE h.actor_id = p_profile_id AND h.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('opc_handoffs', n);
+  UPDATE opc_topic_openings o SET input = NULL, erased_at = now_at
+  FROM opc_topic_workspaces w WHERE w.actor_id = p_profile_id AND o.draft_id = w.draft_id AND o.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('opc_topic_openings', n);
+  UPDATE opc_topic_workspaces w SET source_hash = NULL, erased_at = now_at
+  WHERE w.actor_id = p_profile_id AND w.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('opc_topic_workspaces', n);
+  UPDATE opc_topic_draft_versions v SET request = NULL, body = NULL, erased_at = now_at
+  WHERE v.actor_id = p_profile_id AND v.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('opc_topic_draft_versions', n);
+  UPDATE opc_library_requests r SET payload = NULL, result = NULL, erased_at = now_at
+  WHERE r.actor_id = p_profile_id AND r.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('opc_library_requests', n);
+  UPDATE opc_content_versions c SET body = NULL, title = NULL, erased_at = now_at
+  WHERE c.actor_id = p_profile_id AND c.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('opc_content_versions', n);
+  UPDATE opc_accounts a SET account_key = 'erased:' || a.project_id, erased_at = now_at
+  WHERE a.actor_id = p_profile_id AND a.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('opc_accounts', n);
+  UPDATE opc_businesses b SET name = NULL, erased_at = now_at
+  WHERE b.actor_id = p_profile_id AND b.erased_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('opc_businesses', n);
+
+  -- Private settings with no inbound references are removed outright.
+  DELETE FROM opc_work_ui WHERE actor_id = p_profile_id;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('opc_work_ui_deleted', n);
+  DELETE FROM opc_account_ui WHERE actor_id = p_profile_id;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('opc_account_ui_deleted', n);
+  DELETE FROM opc_publication_ui WHERE actor_id = p_profile_id;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('opc_publication_ui_deleted', n);
+  DELETE FROM agent_confirmed_preferences WHERE actor_id = p_profile_id;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('agent_confirmed_preferences_deleted', n);
+  DELETE FROM agent_preference_requests WHERE actor_id = p_profile_id;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('agent_preference_requests_deleted', n);
+  DELETE FROM artifact_accounts WHERE actor_id = p_profile_id;
+  GET DIAGNOSTICS n = ROW_COUNT; counts := counts || jsonb_build_object('artifact_accounts_deleted', n);
+  RETURN counts;
+END $function$;
+
 COMMIT;

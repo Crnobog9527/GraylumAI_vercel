@@ -16,9 +16,10 @@ Both matched the actual migration-before replay database after receipt:
 | --- | --- | --- |
 | `artifact_chat_message_guard()` | `b562bbc4c69d1be9f73e22511aadb1fa` | Only a validator-approved message-erasure UPDATE returns early |
 | `erasure_update_allowed(jsonb,jsonb,text[])` | `c020123940c8b3772b008f8cde8f38c6` | Explicit singleton `marker-only` rule; NULL/empty/mixed lists still refuse |
+| `account_erasure_scrub_content(uuid)` | `3029c14ab84580323acba88565786281` | Early transaction barrier, original body otherwise unchanged |
 
-0150 rejects source drift before rewriting either function; exact new definitions are also accepted
-for idempotent reapplication. CREATE OR REPLACE retains owners/ACLs. The rollback contains both
+0150 rejects source drift before rewriting any of these functions; exact new definitions are also accepted
+for idempotent reapplication. CREATE OR REPLACE retains owners/ACLs. The rollback contains all three
 staging originals and refuses before any mutation if any B1b table has an erased row.
 Before rollback, stop all scrub callers and let their in-flight transactions finish. Its erased-row
 check takes no table lock, so it is not safe to run concurrently with scrubs. Keep callers stopped
@@ -42,8 +43,8 @@ Following the controller's [P1/P2 decision](https://github.com/Crnobog9527/Grayl
 0150 revokes service_role EXECUTE on `ordinary_chat_claim(uuid,uuid,jsonb,uuid)`; rollback restores
 its original grant. Its function body and `ordinary_chat_transition` are unchanged. The legacy
 HTTP entry is already disabled; this closes new service-role admission at the database boundary.
-REVOKE does not cancel calls already executing: the controller must keep the legacy entry disabled
-and drain any pre-migration claim transactions before running scrubs. Existing requests retain
+REVOKE does not cancel calls already executing: the controller must keep the legacy entry disabled.
+Both scrubs now require the transaction barrier below to drain earlier writers. Existing requests retain
 transition access and follow the in-flight eligibility rules below.
 Terminal ordinary requests lose `writer_token` during erasure. Live requests still require and
 preserve it; erased rows cannot refill it. It is a dispatch credential, not retained identity.
@@ -51,9 +52,9 @@ preserve it; erased rows cannot refill it. It is a dispatch credential, not reta
 Runtime eligibility requires completed/cancelled executions and either no billing run or a closed,
 settled/refunded run. Session/material content waits for every execution; child rows wait for their
 execution; dependency edges wait for both ends. Ordinary requests require succeeded/failed; shared
-conversation/message/snapshot content waits for ordinary and artifact requests. All eleven tables
+conversation/message/snapshot content waits for ordinary and artifact requests. On barrier success, all eleven tables
 return processed and skipped counts. Busy parent locks are skipped for PR-C retry; session locks
-precede execution locks. No profile/BILL2 run/artifact project lock or definer temporary table is added.
+precede execution locks. No profile/BILL2 run/artifact project lock is added to the Runtime scrub. The B1a scrub retains its existing temporary scope table.
 
 Conversations retain client UPDATE permission: a definer trigger checks closure without widening
 client table grants. Every INSERT with non-NULL `erased_at` is rejected before any closure lookup,
@@ -70,6 +71,59 @@ possible" comment in immutable migration 0149; 0150 carries the clarification wi
 B2/C must also move interrupted/cost_pending executions to completed/cancelled after run settlement;
 a terminal run alone does not make the execution or its session eligible for scrubbing.
 
+## Transaction barrier and no-active writers
+
+The controller approved the final contract in
+[the Runtime P1 decision](https://github.com/Crnobog9527/GraylumAI_vercel/pull/537#issuecomment-5911038432).
+Both scrub functions first verify the erasure request, then call the internal-only
+`account_erasure_barrier()`. There is no new table, queue, scheduler or admission lock.
+The only missing capability was draining transactions which had already passed an active check;
+existing row guards cannot see their uncommitted inserts. The existing erasure request remains
+the closure authority. `runtime_start`, other admission helpers and financial functions are unchanged.
+
+The barrier only allows READ COMMITTED (`ACCOUNT_ERASURE_ISOLATION_DENIED` otherwise). It records
+`clock_timestamp()` after closure verification, checks its definer's `pg_read_all_stats` privilege
+and activity tracking, clears the statistics snapshot, checks other backends, then checks prepared
+transactions in the current database. Only a visible `idle` backend with NULL `xact_start` is
+known to have no transaction; hidden, disabled or unknown states fail closed. Other ongoing
+transactions at/before the cutoff block. Clearing the snapshot matters even when a long caller
+transaction inspected statistics earlier. The barrier cutoff is the call, not BEGIN. A separate conservative check returns retry when
+the request confirmation is at/after the caller transaction start: confirm and scrub must not be
+combined in one transaction (including subtransactions). A transaction predating a concurrently
+committed confirmation also retries in a fresh transaction. Service callers cannot backdate the
+confirmation timestamp. This timestamp check is not used as proof that another transaction committed. Prepared transactions are checked last to cover sessions
+which leave activity through PREPARE.
+
+Excluded exact types: archiver, autovacuum launcher/worker, background writer, checkpointer,
+logical replication launcher, walwriter, and pg_cron launcher. These are maintenance/scheduling
+processes, not arbitrary content-SQL job executors. pg_cron jobs run in separate client/job workers.
+pg_net, pg_cron job workers, parallel/logical replication workers and unknown types remain checked.
+pg_net performs queue/response DML and can hold a transaction while waiting for HTTP; long workers
+can delay cleanup. The barrier never cancels them or claims cleanup completed.
+
+When blocked, either scrub returns exactly `{"retry":true,"reason":"transactions_pending"}` before
+any content mutation (including B1a temporary scope setup). This is not a skipped-row count and must
+not be treated as successful/empty cleanup. PR-C must retry in a later transaction; success retains
+the existing table/count response. No private backend details are exposed. A lack of statistics
+visibility also returns retry rather than proceeding.
+
+Messages and context snapshots additionally reject new rows under an erased conversation through
+`erasure_conversation_child_guard`. INSERT takes parent FOR SHARE, conflicting with scrub's parent
+FOR UPDATE, then checks the current erasure marker. New rows cannot supply a non-NULL marker.
+Changed conversation references are checked too; ordinary content UPDATEs use the existing row guard.
+This closes the no-active legacy success/abort INSERT route without rewriting money functions.
+Snapshots retain their existing service-role DML denial; permission and trigger rejection are tested
+separately. Closed-account requests still in flight keep their token and writable conversation,
+are counted as skipped, and can complete before the next scrub.
+
+**B2/C mandatory sequencing test:** direct legacy finalizers need not have an ordinary request.
+If such a finalizer targets an already erased conversation, the parent guard aborts its entire atomic
+transaction, leaving its pre-deduction pending. B2/C must reconcile/finish eligible legacy financial
+work before erasing its conversation, and prove failure leaves no partial financial changes. Neither
+silently dropping the message INSERT nor treating this path as automatically skipped is valid.
+The legacy HTTP entry and claim admission are closed, so no new legacy requests should originate.
+B1b does not implement the restricted financial recovery path.
+
 ## Reproduction (local Docker only)
 
 After #532, `--out` exports without comparing built fingerprints; the preparatory 0149 check passed.
@@ -85,13 +139,14 @@ session, and verifies existing transitions. No production RPC is replaced or re-
 ```sh
 node packages/db/tests/baseline/replay-with-new-migrations.mjs --local-only \
   --new 0150_erasure_content_channel_runtime_chat.sql \
-  --after packages/db/tests/erasure-b1a-cases.sql,packages/db/tests/erasure-b1a-nonowner.sql,packages/db/tests/erasure-b1b-cases.sql,packages/db/tests/erasure-b1b-nonowner.sql,packages/db/tests/erasure-b1b-client.sql,packages/db/tests/erasure-b1b-definer.sql,packages/db/tests/erasure-constraint-audit.sql
+  --after packages/db/tests/erasure-b1a-cases.sql,packages/db/tests/erasure-b1a-nonowner.sql,packages/db/tests/erasure-b1b-cases.sql,packages/db/tests/erasure-b1b-nonowner.sql,packages/db/tests/erasure-b1b-client.sql,packages/db/tests/erasure-b1b-definer.sql,packages/db/tests/erasure-b1b-parent.sql,packages/db/tests/erasure-constraint-audit.sql
 node packages/db/tests/baseline/replay-with-new-migrations.mjs --local-only \
   --new 0150_erasure_content_channel_runtime_chat.sql \
   --before-after packages/db/tests/erasure-structure-fingerprint.sql \
   --after packages/db/tests/erasure-structure-fingerprint.sql,packages/db/tests/erasure-b1b-rollback.sql,packages/db/tests/erasure-structure-fingerprint.sql,packages/db/migrations/0150_erasure_content_channel_runtime_chat.sql,packages/db/tests/erasure-structure-fingerprint.sql
 node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built
 node packages/db/tests/run-erasure-b1b-locks.mjs --local-only
+node packages/db/tests/run-erasure-b1b-barrier.mjs --local-only
 node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files
 ```
 
@@ -102,37 +157,41 @@ The runner compares every migration's immediate second application object by obj
 Do not refresh staging snapshots before application; the controller refreshes those afterwards.
 The C12 runner reuses the file-built schema and committed B1b fixtures. One live connection holds
 a Runtime session lock, then a conversation lock. A stdout barrier confirms acquisition before
-a distinct service-role session scrubs under a 3-second statement timeout. It checks all 22 counts
-while locked and again after release; every scrub assertion rolls back to preserve the same fixture.
+a distinct service-role session scrubs under a 3-second statement timeout. It checks retry with no count keys
+while locked and all 22 counts after release; every scrub assertion rolls back to preserve the same fixture.
 
-## Verified results
+## Verified local results for the transaction-barrier increment
 
-- PASS: received staging source MD5s match actual local replay before either rewrite.
-- PASS: file build 153 steps; 84 migrations repeat with identical catalog objects; built fingerprint updated.
-- PASS: B1a C1–C8 regression and B1b C1–C11 (eleven-table counts/content/hash, idempotency,
-  in-flight retry, replacements/refills/non-whitelist columns, both silent delete guards,
-  fresh non-owner/client sessions, real definer writes and disabled legacy admission).
-  Account-open/constraint audits: 0 rows.
-- PASS: C9 fresh service-role claim call is denied with its permission error; real Runtime
-  writes and existing ordinary dispatch/unknown/stop transitions still work, including stop for a
-  closed account's in-flight request. C2/C4/C6/C10 clear terminal tokens, preserve live/in-flight
-  values, require live tokens and reject refills. Both new regressions failed on the old migration.
-- PASS: C11 non-NULL erasure-marker INSERTs fail uniformly for self, other open/closed and absent
-  accounts before closure lookup; normal owner INSERT succeeds. The new test fails on the old guard.
-- PASS: C12 holds actual Runtime/conversation parent locks in one connection; a distinct service-role
-  connection skips them, returns all 22 expected counts, and scrubs successfully after release.
-- PASS: audit probes detect NOT NULL, live-only CHECK, missing-argument guard and a new private
-  column on the marker-only table. With validator EXECUTE revoked, fresh C8 fails specifically
-  with `permission denied for function erasure_update_allowed`; this is the expected negative result.
-- PASS: rollback/reapply fingerprint `6a504112eadbfba26d1962173071a11d` →
-  `4afb151f0e649311ba14861ad345c0c9` (matches the independently recorded pre-0150 fingerprint) →
-  `6a504112eadbfba26d1962173071a11d` → same after immediate repeat.
-- PASS: with erased rows rollback fails specifically at its initial check with
-  `ERASURE_ROLLBACK_REFUSED`; changed staging-source definition is refused before schema mutation.
-- PASS: Runtime integration against repository-built schema: 100 passed; 5 explicitly skipped
-  browser/application cases. Private canary absent from application logs. This is local evidence.
-- PASS: frozen install; API 140 files / 3079 tests (3 skipped); both packages' lint/typecheck;
-  API type baseline; safeguards 136; workflow contracts 7 runs / 301 assertions; code-size and ledger.
+- PASS: original scrub_content MD5 `3029c14ab84580323acba88565786281`; new definition
+  `8e265cafaa36ba3735ea75897d210c0c`, with the barrier and separate-confirmation-transaction check.
+- PASS: 153 file-build steps; 84 immediate repeat migrations; final built fingerprint updated.
+  Staging-snapshot overlay has no unexpected differences; account-open and content audits return 0 rows.
+- PASS: B1a C1–C8 and B1b C1–C11 regression, plus C12 transaction retry/22 counters after release.
+  Fresh service/authenticated/anon sessions retain allowed/denied behavior; NULL complete/checkpoint
+  and tool result refill, replacement, non-whitelist changes and protected deletion still fail.
+- PASS: five real entry representatives (runtime_start, artifact_chat, agent_preference,
+  research_transition, opc_account_ui_change): normal admission, deterministic late write after
+  active check, unchanged data on retry, erase after late commit, and new admission denied after close.
+  Existing advisory locks or disposable test INSERT triggers pause the writer; production functions
+  are not replaced and foreign keys remain enabled. This is representative coverage, not every RPC.
+- PASS: both scrubs distinguish transaction-free idle from idle-in-transaction; disabled/hidden
+  statistics and insufficient statistics privilege fail closed. REPEATABLE READ is refused;
+  a real prepared transaction blocks until resolved. Old transaction/cached statistics use the new
+  call cutoff; direct and successful-subtransaction confirmations cannot be scrubbed before commit.
+- PASS: exact eight maintenance/launcher exclusions as a catalog safety contract. The local image
+  has no real pg_net or pg_cron job worker; their live integration is NOT_RUN, not implied by this check.
+- PASS: real legacy success/abort refuse an erased parent and roll back all attempted financial
+  changes; normal finalizers succeed. An existing closed-account ordinary request finishes while
+  skipped, then loses content/token on retry. Snapshot ACL denial is separate from trigger denial.
+- PASS: both parent-lock orders for real legacy finalizer and snapshot INSERT: writer-first causes
+  scrub retry then erasure; scrub-first makes INSERT wait, then reject without creating content.
+- PASS: structure round-trip `4afb151f0e649311ba14861ad345c0c9` (pre-0150) →
+  `d10dcd986d79fa38a3537d793c868f16` → original → new; immediate repeat unchanged.
+- PASS (expected refusal): erased rows reject rollback before any structure change; a changed
+  scrub_content definition rejects migration before schema/ACL mutation. Local containers cleaned.
+- PASS: Runtime integration 100 tests, with 5 browser/application cases explicitly skipped; private
+  log canary absent. API 140 files / 3079 tests passed, 3 skipped. Frozen install, both package
+  lint/typecheck, API type baseline, safeguards 136, workflow contracts 7 runs / 301 assertions.
 
 Remote final-candidate CI and controller/independent review are recorded by exact head in the PR.
 Staging application/acceptance remain NOT_RUN by this writer. PR-E reserves 0151; after B1b merge,

@@ -95,26 +95,18 @@ try {
   });
   assert.equal(built.failed, null, JSON.stringify(built.failed));
   ok(sql(readFileSync(resolve(root, 'packages/db/tests/erasure-b1b-cases.sql'), 'utf8')), 'Committed fixtures and C1-C10');
+  ok(sql(readFileSync(resolve(root, 'packages/db/tests/erasure-b1b-parent.sql'), 'utf8')), 'Parent guard and real finalizers');
   const cases = [
-    {
-      label: 'Runtime session',
-      lock: "SELECT 1 FROM runtime_sessions WHERE scope->>'privateScope'='c_session' FOR UPDATE",
-      expected: { ...normal, runtime_sessions: [0, 2], runtime_executions: [0, 4], runtime_history_dependencies: [0, 3],
-        runtime_session_batches: [0, 4], runtime_session_history: [0, 4], runtime_tool_calls: [0, 4], runtime_scope_material: [0, 2] },
-    },
-    {
-      label: 'Legacy conversation',
-      lock: "SELECT 1 FROM conversations WHERE title='b1b-c_conv' FOR UPDATE",
-      expected: { ...normal, conversations: [1, 3], messages: [1, 3], conversation_context_snapshots: [1, 3],
-        ordinary_chat_requests: [1, 2] },
-    },
+    { label: 'Runtime session', lock: "SELECT 1 FROM runtime_sessions WHERE scope->>'privateScope'='c_session' FOR UPDATE" },
+    { label: 'Legacy conversation', lock: "SELECT 1 FROM conversations WHERE title='b1b-c_conv' FOR UPDATE" },
   ];
   for (const test of cases) {
     const pid = await hold(test.lock);
-    counts(scrub(pid), test.expected);
+    assert.deepEqual(scrub(pid), { retry: true, reason: 'transactions_pending' });
+    assert.equal(ok(sql("SELECT count(*) FROM runtime_sessions WHERE erased_at IS NOT NULL"), 'No partial erasure'), '0');
     await release();
     counts(scrub(pid), normal);
-    console.log(`PASS C12 ${test.label}: second-session scrub skips held lock, counts every table, retries after release`);
+    console.log(`PASS C12 ${test.label}: older transaction blocks scrub without partial counters; all counts verified after release`);
   }
 } finally {
   try { await release(); } finally { ok(docker(['rm', '-f', '-v', name]), 'Local cleanup'); }
