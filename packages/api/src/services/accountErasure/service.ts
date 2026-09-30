@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { logger } from '../../lib/logger';
 import { checkRateLimitOrThrow } from '../redisRateLimiter';
 import { assertRecentAuthTime, readVerifiedAuthTime } from './reauth';
+import { loadOpeningGrantDigests } from './openingGrantIdentity';
 
 type Client = SupabaseClient;
 
@@ -67,9 +68,18 @@ export async function confirmAccountErasure(input: {
   await checkRateLimitOrThrow(`account-erasure:${input.userId}`, 'auth');
   assertRecentAuthTime(await readVerifiedAuthTime(input), input.nowMs);
 
-  const { data, error } = await input.admin.rpc('account_erasure_confirm', {
+  let digests;
+  try {
+    digests = await loadOpeningGrantDigests(input.admin, input.userId);
+  } catch {
+    logger.error('auth', 'account_erasure_identity_digest_failed');
+    throw unavailable();
+  }
+
+  const { data, error } = await input.admin.rpc('account_erasure_confirm_with_digests', {
     p_profile_id: input.userId,
     p_request_id: input.requestId,
+    p_digests: digests,
   });
   if (error) {
     const known = Object.keys(DB_ERRORS).find((key) => error.message?.includes(key));

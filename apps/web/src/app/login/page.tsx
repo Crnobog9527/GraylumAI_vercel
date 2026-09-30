@@ -1,19 +1,20 @@
 "use client";
 
 import Link from 'next/link';
-import Script from 'next/script';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   ArrowRight,
-  CheckCircle2,
   Gift,
   Loader2,
-  Mail,
   ShieldCheck,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
-import { getErrorMessageText, getSafeErrorMessage } from '@/lib/safe-error-message';
+import { getSafeErrorMessage } from '@/lib/safe-error-message';
+import {
+  buildVerifyEmailPath, classifyLoginError, EMAIL_VERIFIED_LOGIN_MESSAGE, LOGIN_ERROR_MESSAGES,
+  loginErrorMessage, readAuthFragment,
+} from '@/lib/authFlow';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildAuthHref, resolveAuthAppUrl, resolveSiteName } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
@@ -21,20 +22,10 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { trpc } from '@/trpc/client';
-import {
-  getAuthCaptchaOptions,
-  getAuthCaptchaSiteKey,
-  HCAPTCHA_SCRIPT_SRC,
-  runAuthCaptchaAttempt,
-} from '@/lib/authCaptcha';
+import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
+import { AuthStatusBanner, type AuthStatus } from '@/components/auth/AuthStatusBanner';
 
 type AuthMode = 'login' | 'signup';
-type StatusTone = 'error' | 'success' | 'info';
-
-interface AuthStatus {
-  tone: StatusTone;
-  message: string;
-}
 
 const heroPoints = [
   'Google 一键授权直接进入应用',
@@ -108,9 +99,7 @@ function LoginPageContent() {
     setRedirectTarget(redirect);
     setSelectedPlan(planParam ?? '');
 
-    if (emailParam) {
-      setEmail(emailParam);
-    }
+    if (emailParam) setEmail(emailParam);
 
     if (inviteParam) {
       setInviteCode(inviteParam);
@@ -119,57 +108,53 @@ function LoginPageContent() {
       }
     }
 
-    if (error) {
-      setStatus({
-        tone: 'error',
-        message: decodeURIComponent(error),
-      });
+    const errorMessage = loginErrorMessage(error);
+    if (errorMessage) setStatus({ tone: 'error', message: errorMessage });
+
+    // Errors or tokens from an email link: drop them from the address bar and history first.
+    const fragment = readAuthFragment(window.location.hash);
+    if (fragment) window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    if (fragment?.to === 'verify-expired') {
+      window.location.replace(buildAuthHref(buildVerifyEmailPath(emailParam ?? '', redirect, 'expired')));
+      return;
     }
+    if (fragment?.to === 'login-error') setStatus({ tone: 'error', message: LOGIN_ERROR_MESSAGES.callback_failed });
+    if (fragment?.to === 'verified') setStatus({ tone: 'success', message: EMAIL_VERIFIED_LOGIN_MESSAGE });
   }, [searchParams]);
 
   const handleLogin = async () => {
     setPendingAction('login');
     setStatus(null);
 
-    let captchaOptions: ReturnType<typeof getAuthCaptchaOptions>;
+    let captchaOptions: Awaited<ReturnType<typeof invisibleCaptchaOptions>>;
     try {
-      captchaOptions = getAuthCaptchaOptions();
+      captchaOptions = await invisibleCaptchaOptions();
     } catch (error) {
-      setStatus({ tone: 'error', message: getSafeErrorMessage(error, '请完成人机验证后重试。') });
+      setStatus({ tone: 'error', message: getSafeErrorMessage(error, '人机验证未完成，请重试。') });
       setPendingAction(null);
       return;
     }
 
     const supabase = createClient();
-    const { data, error } = await runAuthCaptchaAttempt(captchaOptions, (options) =>
-      supabase.auth.signInWithPassword({
-        email,
-        password,
-        options,
-      }),
-    );
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+      options: captchaOptions,
+    });
 
     if (error) {
-      const shouldRouteToVerify = /confirm|verified|verification|email/i.test(getErrorMessageText(error));
-      if (shouldRouteToVerify) {
-        window.location.assign(
-          buildAuthHref(`/verify-email?email=${encodeURIComponent(email)}&redirect=${encodeURIComponent(redirectTarget)}`)
-        );
+      const failure = classifyLoginError(error, '登录失败，请检查账号信息后重试。');
+      if (failure.kind === 'unconfirmed') {
+        window.location.assign(buildAuthHref(buildVerifyEmailPath(email, redirectTarget)));
         return;
       }
-
-      setStatus({
-        tone: 'error',
-        message: getSafeErrorMessage(error, '登录失败，请检查账号信息后重试。'),
-      });
+      setStatus({ tone: 'error', message: failure.message, offerResend: failure.offerResend });
       setPendingAction(null);
       return;
     }
 
     if (!isEmailVerified(data.user)) {
-      window.location.assign(
-        buildAuthHref(`/verify-email?email=${encodeURIComponent(email)}&redirect=${encodeURIComponent(redirectTarget)}`)
-      );
+      window.location.assign(buildAuthHref(buildVerifyEmailPath(email, redirectTarget)));
       return;
     }
 
@@ -197,30 +182,28 @@ function LoginPageContent() {
 
     const supabase = createClient();
     const emailRedirectTo = getEmailConfirmRedirect(redirectTarget);
-    let captchaOptions: ReturnType<typeof getAuthCaptchaOptions>;
+    let captchaOptions: Awaited<ReturnType<typeof invisibleCaptchaOptions>>;
     try {
-      captchaOptions = getAuthCaptchaOptions();
+      captchaOptions = await invisibleCaptchaOptions();
     } catch (error) {
-      setStatus({ tone: 'error', message: getSafeErrorMessage(error, '请完成人机验证后重试。') });
+      setStatus({ tone: 'error', message: getSafeErrorMessage(error, '人机验证未完成，请重试。') });
       setPendingAction(null);
       return;
     }
 
-    const { data, error } = await runAuthCaptchaAttempt(captchaOptions, (options) =>
-      supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo,
-          ...options,
-          data: {
-            nickname: nickname.trim() || undefined,
-            display_name: nickname.trim() || undefined,
-            invite_code: trimmedInviteCode || undefined,
-          },
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo,
+        ...captchaOptions,
+        data: {
+          nickname: nickname.trim() || undefined,
+          display_name: nickname.trim() || undefined,
+          invite_code: trimmedInviteCode || undefined,
         },
-      }),
-    );
+      },
+    });
 
     if (error) {
       setStatus({
@@ -239,9 +222,7 @@ function LoginPageContent() {
           : '注册成功，验证邮件已发送。请先完成邮箱验证。',
     });
 
-    window.location.assign(
-      buildAuthHref(`/verify-email?email=${encodeURIComponent(email)}&redirect=${encodeURIComponent(redirectTarget)}`)
-    );
+    window.location.assign(buildAuthHref(buildVerifyEmailPath(email, redirectTarget, 'signup')));
   };
 
   const handleGoogleLogin = async () => {
@@ -278,7 +259,6 @@ function LoginPageContent() {
   };
 
   const isBusy = pendingAction !== null;
-  const captchaSiteKey = getAuthCaptchaSiteKey();
   const submitLabel = mode === 'signup' ? '创建账户' : '登录';
   const submitBusyLabel = mode === 'signup' ? '创建中...' : '登录中...';
   const siteName =
@@ -431,12 +411,6 @@ function LoginPageContent() {
                   </div>
 
                   <form className="space-y-4" onSubmit={handleSubmit}>
-                    {captchaSiteKey ? (
-                      <>
-                        <Script src={HCAPTCHA_SCRIPT_SRC} strategy="afterInteractive" />
-                        <div className="h-captcha" data-sitekey={captchaSiteKey} />
-                      </>
-                    ) : null}
                     {mode === 'signup' && (
                       <>
                         <div className="space-y-2">
@@ -506,39 +480,10 @@ function LoginPageContent() {
                     </div>
 
                     {status && (
-                      <div
-                        className="rounded-2xl border px-4 py-3 text-sm leading-6"
-                        aria-live="polite"
-                        style={{
-                          borderColor:
-                            status.tone === 'error'
-                              ? 'rgba(248,113,113,0.24)'
-                              : status.tone === 'success'
-                                ? 'rgba(74,222,128,0.24)'
-                                : 'rgba(255,215,0,0.24)',
-                          background:
-                            status.tone === 'error'
-                              ? 'rgba(127,29,29,0.2)'
-                              : status.tone === 'success'
-                                ? 'rgba(20,83,45,0.2)'
-                                : 'rgba(120,53,15,0.2)',
-                          color:
-                            status.tone === 'error'
-                              ? '#fecaca'
-                              : status.tone === 'success'
-                                ? '#bbf7d0'
-                                : '#fde68a',
-                        }}
-                      >
-                        <div className="flex items-start gap-2">
-                          {status.tone === 'success' ? (
-                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                          ) : (
-                            <Mail className="mt-0.5 h-4 w-4 shrink-0" />
-                          )}
-                          <span>{status.message}</span>
-                        </div>
-                      </div>
+                      <AuthStatusBanner
+                        status={status}
+                        resendHref={buildAuthHref(buildVerifyEmailPath(email, redirectTarget))}
+                      />
                     )}
 
                     <Button

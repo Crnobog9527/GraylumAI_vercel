@@ -9,7 +9,7 @@ import {
 // sees them; they are rendered explicitly into the dialog instead.
 export const CAPTCHA_REQUIRED_MESSAGE = '请完成人机验证后重试。';
 export const CAPTCHA_EXPIRED_MESSAGE = '人机验证已过期，请重新验证。';
-const SCRIPT_ID = 'graylum-hcaptcha-explicit';
+export const HCAPTCHA_SCRIPT_ID = 'graylum-hcaptcha-explicit';
 
 type LoaderEnv = { doc: Document; win: Window };
 
@@ -20,10 +20,10 @@ export function loadHCaptcha(env: LoaderEnv = { doc: document, win: window }): P
     return Promise.resolve(loaded);
   }
   return new Promise((resolve, reject) => {
-    let script = env.doc.getElementById(SCRIPT_ID) as HTMLScriptElement | null;
+    let script = env.doc.getElementById(HCAPTCHA_SCRIPT_ID) as HTMLScriptElement | null;
     if (!script) {
       script = env.doc.createElement('script');
-      script.id = SCRIPT_ID;
+      script.id = HCAPTCHA_SCRIPT_ID;
       script.src = `${HCAPTCHA_SCRIPT_SRC}?render=explicit`;
       script.async = true;
       env.doc.head.appendChild(script);
@@ -82,4 +82,80 @@ export function captchaOptionsFromToken(
     throw new Error(CAPTCHA_REQUIRED_MESSAGE);
   }
   return { captchaToken: token };
+}
+
+export function isHCaptchaSource(src: string | null | undefined): boolean {
+  if (!src) return false;
+  try {
+    const host = new URL(src, 'https://invalid.local').hostname;
+    return host === 'hcaptcha.com' || host.endsWith('.hcaptcha.com');
+  } catch {
+    return false;
+  }
+}
+
+const isHCaptchaFrame = (el: Element) => el.tagName === 'IFRAME' && isHCaptchaSource(el.getAttribute('src'));
+
+/**
+ * hCaptcha mounts its image challenge outside the dialog (a direct child of <body>). A pointer or
+ * focus event there must not dismiss the dialog, or the widget unmounts mid-challenge. Matched by
+ * the hCaptcha frame source, never by element ids; the dialog's own portal (overlay + content)
+ * is excluded so a click on the overlay still closes the dialog.
+ */
+export function isCaptchaChallengeTarget(target: EventTarget | null): boolean {
+  if (!target || typeof (target as Element).tagName !== 'string') return false;
+  let top = target as Element;
+  const body = top.ownerDocument?.body ?? null;
+  // Anything inside the dialog (including the checkbox frame) is the dialog's own business.
+  for (let node: Element | null = top; node && node !== body; node = node.parentElement) {
+    if (node.getAttribute('role') === 'dialog') return false;
+  }
+  if (isHCaptchaFrame(top)) return true;
+  while (top.parentElement && top.parentElement !== body) {
+    top = top.parentElement;
+    if (isHCaptchaFrame(top)) return true;
+  }
+  if (top.querySelector('[role="dialog"]')) return false;
+  return Array.from(top.querySelectorAll('iframe')).some(isHCaptchaFrame);
+}
+
+/** Pass as onInteractOutside of a dialog that renders DialogCaptcha. */
+export function keepDialogOpenForCaptcha(event: { target: EventTarget | null; preventDefault: () => void }) {
+  if (isCaptchaChallengeTarget(event.target)) event.preventDefault();
+}
+
+/**
+ * A modal dialog sets `pointer-events: none` on <body>; hCaptcha's challenge layer is a direct child
+ * of <body> and would inherit it unless hCaptcha sets `auto` itself. globals.css applies this
+ * selector (kept identical, checked by a test) so the challenge stays clickable: top-level
+ * children holding an hCaptcha frame, except the dialog itself. The overlay and the rest of the
+ * page keep inheriting `none`.
+ */
+export const HCAPTCHA_LAYER_SELECTOR =
+  'body > :has(iframe[src*="hcaptcha.com"]):not([role="dialog"]):not(:has([role="dialog"]))';
+
+/**
+ * Keeps keyboard focus in hCaptcha's challenge while a modal dialog is open. Radix Dialog traps
+ * focus with FocusScope (react-focus-scope 1.1.7, pinned via react-dialog 1.1.15): its focusin /
+ * focusout listeners sit on `document` in the bubble phase and pull focus back into the dialog,
+ * but hCaptcha focuses its challenge frame, mounted on <body>, when the challenge opens.
+ * Capture-phase listeners on `window` run first and stop only events whose focus target
+ * (focusin: target, focusout: relatedTarget) is the challenge. hCaptcha's api.js registers no
+ * focus/blur/focusin/focusout listeners in the host page, so stopping these events there does not
+ * affect it. Returns the cleanup; call it when the widget unmounts. Re-check on Radix upgrades.
+ */
+export function guardCaptchaFocus(win: Pick<Window, 'addEventListener' | 'removeEventListener'>): () => void {
+  const onFocusIn = (event: Event) => {
+    if (isCaptchaChallengeTarget(event.target)) event.stopImmediatePropagation();
+  };
+  const onFocusOut = (event: Event) => {
+    const next = (event as FocusEvent).relatedTarget;
+    if (next && isCaptchaChallengeTarget(next)) event.stopImmediatePropagation();
+  };
+  win.addEventListener('focusin', onFocusIn, true);
+  win.addEventListener('focusout', onFocusOut, true);
+  return () => {
+    win.removeEventListener('focusin', onFocusIn, true);
+    win.removeEventListener('focusout', onFocusOut, true);
+  };
 }

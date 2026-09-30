@@ -14,8 +14,8 @@ import { buildAuthHref } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { DialogCaptcha } from '@/components/auth/DialogCaptcha';
-import { CAPTCHA_EXPIRED_MESSAGE, captchaOptionsFromToken } from '@/lib/dialogCaptcha';
+import { keepDialogOpenForCaptcha } from '@/lib/dialogCaptcha';
+import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
 import {
   Dialog,
   DialogContent,
@@ -38,8 +38,6 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [statusTone, setStatusTone] = useState<'info' | 'success' | 'error'>('info');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
-  const [captchaKey, setCaptchaKey] = useState(0);
   const [passwordForm, setPasswordForm] = useState({
     current_password: '',
     new_password: '',
@@ -82,17 +80,15 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
     try {
       const supabase = createClient();
-      let captchaOptions: ReturnType<typeof captchaOptionsFromToken>;
+      // Invisible hCaptcha: a fresh single-use token per attempt; a challenge appears only if needed.
+      let captchaOptions: Awaited<ReturnType<typeof invisibleCaptchaOptions>>;
       try {
-        captchaOptions = captchaOptionsFromToken(captchaToken);
+        captchaOptions = await invisibleCaptchaOptions();
       } catch (error) {
         setStatusTone('error');
-        setStatusMessage(getSafeErrorMessage(error, '请完成人机验证后重试。'));
+        setStatusMessage(getSafeErrorMessage(error, '人机验证未完成，请重试。'));
         return;
       }
-      // A CAPTCHA token is single use: drop it and remount the widget whatever the outcome.
-      setCaptchaToken(null);
-      setCaptchaKey((key) => key + 1);
       const { error: reauthError } = await supabase.auth.signInWithPassword({
         email: userEmail,
         password: passwordForm.current_password,
@@ -287,6 +283,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
       <Dialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
         <DialogContent
+          onInteractOutside={keepDialogOpenForCaptcha}
           className="sm:max-w-md"
           style={{
             background: 'var(--bg-secondary)',
@@ -358,20 +355,6 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                 }}
               />
             </div>
-            {showPasswordDialog && (
-              <DialogCaptcha
-                key={captchaKey}
-                onToken={setCaptchaToken}
-                onExpired={() => {
-                  setStatusTone('error');
-                  setStatusMessage(CAPTCHA_EXPIRED_MESSAGE);
-                }}
-                onUnavailable={() => {
-                  setStatusTone('error');
-                  setStatusMessage('人机验证暂不可用，请稍后重试。');
-                }}
-              />
-            )}
             {statusTone === 'error' && statusMessage && (
               <p className="text-sm" role="alert" style={{ color: '#fca5a5' }}>
                 {statusMessage}

@@ -91,9 +91,9 @@ it.each(['complete','timeout'])('bounds the full response, not each keepalive (%
   const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport});
   const pending=adapter.dispatch({input:body},identity).then(v=>{ended=true;return v;});
   await vi.advanceTimersByTimeAsync(45_001);expect(ended).toBe(false);expect(signal?.aborted).toBe(false);
-  await vi.advanceTimersByTimeAsync(mode==='complete'?14_999:74_999);
+  await vi.advanceTimersByTimeAsync(mode==='complete'?14_999:194_999);
   const observed=await pending;expect(observed).toMatchObject({generationId:'gen-late',complete:mode==='complete',transportIssue:mode==='complete'?null:'body_timeout'});
-  expect(timeout).toHaveBeenCalledWith(120_000);expect(transport).toHaveBeenCalledTimes(1);
+  expect(timeout).toHaveBeenCalledWith(240_000);expect(transport).toHaveBeenCalledTimes(1);
   expect(adapter.evidence(observed,identity,'response')).toMatchObject({providerId:'gen-late',cost:null,final:false});
  }finally{timeout.mockRestore();vi.useRealTimers();}
 });

@@ -1,12 +1,17 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import { StagingAccessError } from './stagingErrors';
+/** Exact production domains of the separate staging project. Vercel reports
+ * the project's custom production domain (not the vercel.app one) as
+ * VERCEL_PROJECT_PRODUCTION_URL once one is added, so both names are listed.
+ * Exact match only: no suffix or wildcard, so a new domain needs a code change. */
+const STAGING_PRODUCTION_URLS: ReadonlySet<string> = new Set(['graylumai-staging.vercel.app', 'auth-staging.graylum.com']);
 /** Server environment only. The separate staging project uses Vercel's
  * production class; project, source branch and database bind the target. */
 export function stagingRuntimeWindow(env: Record<string, string | undefined>, maintenance = false): string {
   if (!env.V3_RUNTIME_STAGING_PROJECT_ID || !env.V3_RUNTIME_STAGING_DATABASE_HOST || !env.V3_RUNTIME_STAGING_WINDOW_ID)
     throw new StagingAccessError('RUNTIME_STAGING_NOT_CONFIGURED');
-  if (env.VERCEL !== '1' || env.VERCEL_PROJECT_PRODUCTION_URL !== 'graylumai-staging.vercel.app' ||
+  if (env.VERCEL !== '1' || !STAGING_PRODUCTION_URLS.has(env.VERCEL_PROJECT_PRODUCTION_URL ?? '') ||
       env.VERCEL_GIT_COMMIT_REF !== 'staging' || env.VERCEL_GIT_REPO_OWNER !== 'Crnobog9527' ||
       env.VERCEL_GIT_REPO_SLUG !== 'GraylumAI_vercel' || env.VERCEL_PROJECT_ID !== env.V3_RUNTIME_STAGING_PROJECT_ID)
     throw new StagingAccessError('RUNTIME_STAGING_TARGET_DENIED');
