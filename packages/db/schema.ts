@@ -1,6 +1,6 @@
+// 只作类型参考；数据库结构以 migrations/ 和 baseline/ 为准。
 import { sql } from 'drizzle-orm';
 import { pgTable, text, uuid, integer, timestamp, jsonb, primaryKey, decimal, uniqueIndex, boolean, customType, bigint } from 'drizzle-orm/pg-core';
-
 // --- 核心表 ---
 
 export const profiles = pgTable('profiles', {
