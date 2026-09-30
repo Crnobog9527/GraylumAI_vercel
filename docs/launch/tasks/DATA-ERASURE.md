@@ -219,6 +219,15 @@ AC-2 实现须引用最终审查通过的本文版本；本设计不是运行注
 
 PR-A 封闭账号 → B1 内容擦除通道 → B2 账务擦除通道与受限结算 → C 清除执行与外键改造 → D 单条删除；E 防刷在 A 之后并行。
 
+PR-B1a（0149，artifact / agent / research / opc 表）的擦除通道：
+- **只用于已注销账号**：`account_erasure_scrub_content(p_profile_id)` 要求账号已经在 `account_erasure_requests` 里，否则拒绝执行（`ACCOUNT_ERASURE_NOT_CLOSED`）。正文清成 NULL 之后，有十几处重放和冲突检查用 `<>` 比较，结果会被 NULL 跳过；runtime 的"只在已有值时拒绝"会被重新写入；还有若干读取路径会"返回空内容"而不是"拒绝读取"。这些只有在账号还能使用时才会被触发。**单条删除（D7）上线前，PR-D 必须先把这些改成对 `erased_at` 显式拒绝。**
+- 做法：26 张表加 `erased_at`；按目录动态找出引用可擦除列的 CHECK，改写成"已擦除或满足原规则"；NOT NULL 的正文列改成可空，加"未擦除必须有值""已擦除必须为空"两条约束。`artifact_immutable` 和另外三个保护函数通过触发器参数拿到每张表的白名单，只放行"未擦除 → 已擦除、白名单列清空（或改成规定的占位值）、其他列一字不变"这一种 UPDATE；已擦除的行不能再改，DELETE 仍然一律拒绝。可变表加 `erased_row_guard`。`packages/db/tests/erasure-constraint-audit.sql` 是只读审计，应返回 0 行。
+- 壳里保留：id、时间、归属主体、状态、版本号、平台 Skill 的 package / workflow / template hash（这些不是用户内容）。账务键保留：成果生成 result 里的 credits / inputTokens / outputTokens / costUsd，研究调用 result 里的 cost；`provider_observations` 由 PR-B2 按账务白名单处理。账号类唯一值（opc_accounts.account_key、artifact_projects.account）改为 `erased:<id>`，不会互相冲突。
+- **由正文算出来的 hash 一并清除**：content_hash、report_hash、source_hash、input_hash、agent_preference_requests.payload_hash（整行删除）。短文本的 hash 可以用猜测去比对原文，按附录 A 属于"可关联内容指纹"，不能保留。唯一保留的是 `research_operations.identity_hash`：它是研究调用计费的幂等键，按 §3.1 属于受限财务证据，客户端不能读取，保留到 T_fin 到期；它不是用来恢复内容的，也不公开。
+- 在途的行不清：成果生成不是 succeeded/refunded 的、研究调用不是 succeeded/failed/cancelled 的，以及还有未清调用的研究计划，都先跳过并计数。**这些行要等 PR-B2**：现有的结算函数（artifact_generation、artifact_reject_generation、artifact_observe_generation、research_transition、research_user_charge、research_cancel）一开头就检查 `status='active' AND is_deleted='false'`，所以已注销账号的在途生成和研究调用现在无法结算，也无法退款，要靠 PR-B2 的受限结算路径才能走到终态。PR-C 的重试任务在这之后才清得掉这些行，**所以 PR-C 必须排在 PR-B2 之后**。
+- 界面状态类、偏好、账号绑定这 6 张没有被任何外键引用的表，直接删行（opc_work_ui / opc_account_ui / opc_publication_ui / agent_confirmed_preferences / agent_preference_requests / artifact_accounts）。其余表只留下没有正文的壳，物理删除由 PR-C 做。
+- runtime_* 和旧对话表在 PR-B1b。
+
 PR-A 留给后续 PR 的必做事项：
 - **在途预扣（PR-B2 必须处理）**：注销时仍在途的 BILL2 run 可以照常结算（record/close/cancel/finalize 不检查账号状态），但 0137 的 `bill2_revoke_unstarted_dispatch` 会先调用 `bill2_actor`，已注销账号会被拒。所以"已授权派发但从未发出"的预扣，要等 PR-B2 的受限结算路径才能释放；在此之前只是占着，不会丢失。
 - **SECURITY DEFINER 函数（PR-A 起逐个分拣）**：这类函数以属主身份执行，绕过 RLS，`account_open_required` 拦不住已注销账号未过期的 JWT。`packages/db/tests/account-open-definer-audit.sql` 列出客户端可执行的这类函数：会写用户数据或改积分的，要在函数里加"已注销则拒绝"；只读或本身已检查 `status='active'` 的，要写明理由。以后新增的这类函数，同样要遵守这条。2026-09-30 在 staging 只读执行的结果：客户端能执行的共 4 个，属主都是 postgres。`claim_daily_checkin(uuid)`（加积分）和 `soft_delete_conversation(uuid,uuid)`（改会话）已在 0147 加检查，函数体以 staging 原文为准，只加了检查；`validate_invitation_code(text)` 只读，且已检查 `status='active'`，豁免；`rls_auto_enable()` 是平台的事件触发器函数，不能直接调用，豁免。延后另立：A.1 第 8 步财务到期清理、T16 备份恢复演练、附录 B/C 的日志/备份保留期核对与第三方删除申请、Waffo 接入后的"先取消续费"规则。

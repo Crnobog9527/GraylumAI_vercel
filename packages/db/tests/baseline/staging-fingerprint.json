@@ -1,5 +1,5 @@
 {
- "_about": "Structural fingerprint of staging schema public after migration 0147, read in a READ ONLY transaction from the system catalogs only (no table rows) at 2026-09-29 19:23 UTC by packages/db/tests/baseline/fingerprint.sql. groups: group -> md5 prefix; objects: per-object md5 prefix (ACL text verbatim) for the groups the replay compares object by object.",
+ "_about": "Structural fingerprint of staging schema public after migration 0148 (ledger 20260929200810), read in a READ ONLY transaction from the system catalogs only (no table rows) at 2026-09-29 20:10 UTC by packages/db/tests/baseline/fingerprint.sql. groups: group -> md5 prefix; objects: per-object md5 prefix (ACL text verbatim) for the groups the replay compares object by object.",
  "groups": {
   "acl:account_erasure_requests": "f9039ad689",
   "acl:agent_confirmed_preferences": "43f5fb440d",
@@ -509,6 +509,7 @@
   "fn:ordinary_chat_claim(uuid,uuid,jsonb,uuid)": "592fe4ecf8",
   "fn:ordinary_chat_delete_guard()": "8363f2643f",
   "fn:ordinary_chat_transition(uuid,uuid,uuid,text,jsonb)": "893affcaa6",
+  "fn:prevent_client_profile_credit_write()": "2365d6cbb6",
   "fn:prevent_skill_revision_mutation()": "9a9e4aff96",
   "fn:purge_deleted_records(integer)": "838ec736a1",
   "fn:read_skill_package(uuid,uuid,uuid,uuid,text,text,integer)": "e4817a5f1a",
@@ -759,6 +760,7 @@
   "fnacl:ordinary_chat_claim(uuid,uuid,jsonb,uuid)": "0ffa440a29",
   "fnacl:ordinary_chat_delete_guard()": "bf7d3d6137",
   "fnacl:ordinary_chat_transition(uuid,uuid,uuid,text,jsonb)": "d75981afe7",
+  "fnacl:prevent_client_profile_credit_write()": "4d27f22724",
   "fnacl:prevent_skill_revision_mutation()": "534d50a202",
   "fnacl:purge_deleted_records(integer)": "997cb2785a",
   "fnacl:read_skill_package(uuid,uuid,uuid,uuid,text,text,integer)": "f4addd4245",
@@ -1147,7 +1149,7 @@
   "trg:opc_topic_workspaces": "9d0f6469d5",
   "trg:opc_turns": "6159a42c7b",
   "trg:opc_video_material_bindings": "52bc80f05e",
-  "trg:profiles": "6576bc9d64",
+  "trg:profiles": "f70d509744",
   "trg:runtime_executions": "03b08fcc96",
   "trg:skill_package_files": "412a5fa334",
   "trg:skill_packages": "822aeb0978",
@@ -1245,7 +1247,6 @@
   "pol:user_checkins.account_open_required": "68ef78b3b2",
   "pol:user_checkins.admin_all_user_checkins": "b6276c1966",
   "pol:user_checkins.users_own_user_checkins_insert": "96d8dee30a",
-  "pol:user_checkins.users_own_user_checkins_select": "779e02327c",
-  "trg:profiles.account_erasure_profile_guard": "28dd05e924"
+  "pol:user_checkins.users_own_user_checkins_select": "779e02327c"
  }
 }
