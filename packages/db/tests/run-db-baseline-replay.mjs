@@ -4,7 +4,8 @@
 // order, where packages/db/baseline/bridges/<migration file> (if any) runs immediately before the
 // migration of the same name. Fails on any build error and on any difference from the committed
 // built fingerprint (baseline/built-fingerprint.json; refresh it with --write-built in the PR that
-// changes the structure). With --staging <snapshot> it instead compares with a staging snapshot,
+// changes the structure; --out only dumps the structure). With --staging <snapshot> it instead
+// compares with a staging snapshot,
 // allowing only baseline/expected-differences.json. --ci runs the same checks in CI (no network,
 // no secrets, digest-pinned image already pulled by the workflow).
 import { spawnSync } from 'node:child_process';
@@ -182,6 +183,10 @@ try {
       report.comparison = compare(local, localDetail, JSON.parse(readFileSync(option('--staging'), 'utf8')),
         readJson('packages/db/tests/baseline/expected-differences.json'));
       if (report.comparison.unexpected.length > 0) report.failed ??= { step: 'staging comparison' };
+    } else if (option('--out')) {
+      // Dump mode (used by baseline/replay-with-new-migrations.mjs): the structure is written to
+      // --out and judged by the caller, so the built fingerprint is not compared here.
+      report.builtFingerprint = 'not compared (--out)';
     } else if (args.includes('--write-built')) {
       writeFileSync(resolve(root, BUILT), `${JSON.stringify({
         _about: 'Structure of an empty database built from repository files by run-db-baseline-replay.mjs '
