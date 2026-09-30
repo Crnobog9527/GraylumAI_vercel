@@ -119,3 +119,13 @@ export function isCaptchaChallengeTarget(target: EventTarget | null): boolean {
 export function keepDialogOpenForCaptcha(event: { target: EventTarget | null; preventDefault: () => void }) {
   if (isCaptchaChallengeTarget(event.target)) event.preventDefault();
 }
+
+/**
+ * A modal dialog sets `pointer-events: none` on <body>; hCaptcha's challenge layer is a direct child
+ * of <body> and would inherit it unless hCaptcha sets `auto` itself. globals.css applies this
+ * selector (kept identical, checked by a test) so the challenge stays clickable: top-level
+ * children holding an hCaptcha frame, except the dialog itself. The overlay and the rest of the
+ * page keep inheriting `none`.
+ */
+export const HCAPTCHA_LAYER_SELECTOR =
+  'body > :has(iframe[src*="hcaptcha.com"]):not([role="dialog"]):not(:has([role="dialog"]))';

@@ -1,7 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { HCaptchaClient, HCaptchaRenderOptions } from '@/lib/authCaptcha';
 import {
   CAPTCHA_REQUIRED_MESSAGE,
+  HCAPTCHA_LAYER_SELECTOR,
   captchaOptionsFromToken,
   isCaptchaChallengeTarget,
   isHCaptchaSource,
@@ -217,5 +220,24 @@ describe('keeping a dialog open for the hCaptcha challenge', () => {
     }
     expect(isCaptchaChallengeTarget(null)).toBe(false);
     expect(isCaptchaChallengeTarget({} as EventTarget)).toBe(false);
+  });
+});
+
+describe('hCaptcha layer stays clickable under a modal dialog', () => {
+  it('globals.css applies exactly HCAPTCHA_LAYER_SELECTOR with pointer-events: auto', () => {
+    const css = readFileSync(resolve(import.meta.dirname, '../app/globals.css'), 'utf8');
+    const rule = css.slice(css.indexOf(HCAPTCHA_LAYER_SELECTOR));
+    expect(css.includes(HCAPTCHA_LAYER_SELECTOR)).toBe(true);
+    expect(rule.slice(HCAPTCHA_LAYER_SELECTOR.length, rule.indexOf('}')).replace(/\s+/g, ' ').trim())
+      .toBe('{ pointer-events: auto;');
+    expect(css.split('hcaptcha.com').length - 1).toBe(1); // no other rule touches the hCaptcha layer
+  });
+
+  it('targets top-level body children holding an hCaptcha frame, never the dialog itself', () => {
+    expect(HCAPTCHA_LAYER_SELECTOR.startsWith('body > ')).toBe(true);
+    expect(HCAPTCHA_LAYER_SELECTOR).toContain(':has(iframe[src*="hcaptcha.com"])');
+    expect(HCAPTCHA_LAYER_SELECTOR).toContain(':not([role="dialog"])');
+    expect(HCAPTCHA_LAYER_SELECTOR).toContain(':not(:has([role="dialog"]))');
+    expect(HCAPTCHA_LAYER_SELECTOR).not.toMatch(/#/);
   });
 });
