@@ -1,3 +1,6 @@
+import {
+  entitlementRowShape, FUSION_COMPARE_SETTING, fusionCompareLimitSchema,
+} from '../services/membershipEntitlementConfig';
 import { parseSearchSurcharge } from '../services/searchPricing';
 import { RUNTIME_MODEL_COLUMNS, runtimeModelOption } from "../services/models/runtimeEligibility";
 import { router, publicProcedure, adminProcedure } from '../trpc';
@@ -14,6 +17,7 @@ import { createSafeInternalError, createSafeServiceUnavailableError } from '../l
 import { logger } from '../lib/logger';
 
 const USER_FACING_SYSTEM_SETTING_KEYS = [
+  FUSION_COMPARE_SETTING,
   'site_name',
   'support_email',
   'maintenance_mode',
@@ -46,6 +50,7 @@ const creditPackageCatalogRowSchema = z.object({
 });
 
 const membershipPlanCatalogRowSchema = z.object({
+  ...entitlementRowShape,
   id: z.string().uuid(),
   name: z.string().trim().min(1),
   level: z.enum(['free', 'pro', 'gold']),
@@ -67,6 +72,9 @@ const systemSettingInputSchema = z.object({
   key: z.string().trim().min(1),
   value: z.any(),
 }).superRefine((setting, ctx) => {
+  if (setting.key === FUSION_COMPARE_SETTING && !fusionCompareLimitSchema.safeParse(setting.value).success) {
+    ctx.addIssue({ code: 'custom', path: ['value'], message: '对比模型上限须为 2 至 8 的整数' });
+  }
   if (setting.key === 'search_surcharge_credits' && parseSearchSurcharge(setting.value) === null) {
     ctx.addIssue({code:'custom',path:['value'],message:'联网附加积分须为0至999999的整数；受控Skill搜索仍须配置正数'});
   }
@@ -379,6 +387,9 @@ export const settingsRouter = router({
       id: plan.id,
       name: plan.name,
       level: plan.level,
+      allowFusionReview: plan.allow_fusion_review,
+      allowFusionCompare: plan.allow_fusion_compare,
+      libraryStorageBytes: plan.library_storage_bytes,
       price: {
         monthly: (plan.monthly_price ?? 0) / 100, // 从分转换为美元
         yearly: (plan.yearly_price ?? 0) / 100,

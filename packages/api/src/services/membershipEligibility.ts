@@ -204,7 +204,7 @@ function selectEntitlementSubscription(candidates: SubscriptionRow[]) {
   return candidates.find(isManagedCurrentSubscription) ?? candidates[0] ?? null;
 }
 
-function hasFullRefundSignal(order: PaymentOrderRow | null) {
+export function hasFullRefundSignal(order: PaymentOrderRow | null) {
   if (!order) {
     return false;
   }

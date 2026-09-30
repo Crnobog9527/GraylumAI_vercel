@@ -1880,6 +1880,9 @@ describe('adminRouter lightweight admin dashboards', () => {
                 level: 'pro',
                 allow_export: 'true',
                 allow_batch_export: 'false',
+        allow_fusion_review: true,
+        allow_fusion_compare: true,
+        library_storage_bytes: 500_000_000,
               }],
               error: null,
             };
@@ -1924,6 +1927,9 @@ describe('adminRouter lightweight admin dashboards', () => {
         level: 'pro',
         allow_export: 'true',
         allow_batch_export: 'false',
+        allow_fusion_review: true,
+        allow_fusion_compare: true,
+        library_storage_bytes: 500_000_000,
       }],
     });
     expect(adminQueries).toEqual(['system_settings', 'membership_plans']);
@@ -1993,6 +1999,9 @@ describe('adminRouter lightweight admin dashboards', () => {
       level: 'pro',
       allow_export: 'maybe',
       allow_batch_export: 'false',
+        allow_fusion_review: true,
+        allow_fusion_compare: true,
+        library_storage_bytes: 500_000_000,
     }]],
   ])('fails the settings dashboard for a %s', async (_caseName, invalidTable, invalidData) => {
     const adminSupabase = {
@@ -2005,6 +2014,9 @@ describe('adminRouter lightweight admin dashboards', () => {
               level: 'pro',
               allow_export: 'true',
               allow_batch_export: 'false',
+        allow_fusion_review: true,
+        allow_fusion_compare: true,
+        library_storage_bytes: 500_000_000,
             }];
         return createAwaitableQueryBuilder(Promise.resolve({
           data: table === invalidTable ? invalidData : validData,

@@ -74,6 +74,9 @@ const validCreditPackage = {
 };
 
 const validMembershipPlan = {
+  allow_fusion_review: true,
+  allow_fusion_compare: true,
+  library_storage_bytes: 500_000_000,
   id: '123e4567-e89b-42d3-a456-426614174111',
   name: 'Pro',
   level: 'pro',
