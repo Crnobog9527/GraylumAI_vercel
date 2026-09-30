@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { openingGrantDigests } from './services/accountErasure/openingGrantIdentity';
+import type { User } from '@supabase/supabase-js';
 
 const createClientMock = vi.fn();
 
@@ -119,6 +121,10 @@ describe('protectedProcedure profile bootstrap', () => {
     email_confirmed_at: '2026-03-11T00:00:00.000Z',
     user_metadata: { full_name: 'New User' },
   };
+  beforeEach(() => {
+    process.env.OPENING_GRANT_HMAC_KEYS = JSON.stringify({ active: 'test-v1',
+      keys: { 'test-v1': Buffer.from('test-only-opening-grant-key-00001').toString('base64') } });
+  });
   const recentBootstrapCreatedAt = '2026-06-26T00:00:00.000Z';
   const legacyProfileCreatedAt = '2026-06-24T23:59:59.000Z';
 
@@ -174,11 +180,14 @@ describe('protectedProcedure profile bootstrap', () => {
 
       return transaction;
     };
-    const rpc = vi.fn().mockImplementation(async (_functionName: string, args: {
+    const rpc = vi.fn().mockImplementation(async (_functionName: string, claim: {
+      p_profile_id?: string;
       p_user_id?: string;
       p_amount?: number;
       p_idempotency_key?: string;
     }) => {
+      const args = { ...claim, p_user_id: claim.p_profile_id, p_amount: 100,
+        p_idempotency_key: `opening_grant:${claim.p_profile_id}` };
       const sequencedError = options.rpcErrorSequence?.[rpcCallIndex];
       rpcCallIndex += 1;
       const rpcError = sequencedError === undefined ? options.rpcError : sequencedError;
@@ -191,16 +200,10 @@ describe('protectedProcedure profile bootstrap', () => {
         return { data: null, error: rpcError };
       }
 
-      const transaction = writeOpeningGrantLedger(args);
+      writeOpeningGrantLedger(args);
 
       return {
-        data: [{
-          transaction_id: transaction.id,
-          balance_before: transaction.balance_before,
-          balance_after: transaction.balance_after,
-          amount: transaction.amount,
-          is_idempotent: false,
-        }],
+        data: { granted: true },
         error: null,
       };
     });
@@ -427,12 +430,8 @@ describe('protectedProcedure profile bootstrap', () => {
       }),
     ]);
     expect(supabaseMocks.userProfileInserts).toEqual([]);
-    expect(supabaseMocks.rpc).toHaveBeenCalledWith('atomic_apply_credit_ledger_entry', {
-      p_user_id: user.id,
-      p_amount: 100,
-      p_type: 'addition',
-      p_description: 'Opening grant for new user profile bootstrap',
-      p_idempotency_key: `opening_grant:${user.id}`,
+    expect(supabaseMocks.rpc).toHaveBeenCalledWith('opening_grant_claim', {
+      p_profile_id: user.id, p_digests: openingGrantDigests(user as unknown as User),
     });
     expect(result).toEqual({
       profileId: user.id,
@@ -491,7 +490,7 @@ describe('protectedProcedure profile bootstrap', () => {
       ...user,
       app_metadata: { provider: 'google', providers: ['google'] },
       email_confirmed_at: null,
-      identities: [],
+      identities: [{ provider: 'google', identity_data: { sub: 'synthetic-google-sub' } }],
     };
     const { isEmailVerified } = await import('./lib/auth');
 
@@ -643,10 +642,7 @@ describe('protectedProcedure profile bootstrap', () => {
       }),
     ]);
     expect(supabaseMocks.rpc).toHaveBeenCalledTimes(1);
-    expect(supabaseMocks.rpc).toHaveBeenCalledWith('atomic_apply_credit_ledger_entry', expect.objectContaining({
-      p_user_id: user.id,
-      p_idempotency_key: `opening_grant:${user.id}`,
-    }));
+    expect(supabaseMocks.rpc).toHaveBeenCalledWith('opening_grant_claim', expect.objectContaining({ p_profile_id: user.id }));
     expect(supabaseMocks.creditTransactions).toEqual([
       expect.objectContaining({
         user_id: user.id,
@@ -766,10 +762,7 @@ describe('protectedProcedure profile bootstrap', () => {
       code: 'INTERNAL_SERVER_ERROR',
       message: expect.stringContaining('profile_bootstrap_failed'),
     });
-    expect(supabaseMocks.rpc).toHaveBeenCalledWith('atomic_apply_credit_ledger_entry', expect.objectContaining({
-      p_type: 'addition',
-      p_idempotency_key: `opening_grant:${user.id}`,
-    }));
+    expect(supabaseMocks.rpc).toHaveBeenCalledWith('opening_grant_claim', expect.objectContaining({ p_profile_id: user.id }));
     expect(supabaseMocks.profileDeletes).toEqual([
       {
         deleted: true,

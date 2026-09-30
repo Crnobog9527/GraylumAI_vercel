@@ -219,6 +219,14 @@ AC-2 实现须引用最终审查通过的本文版本；本设计不是运行注
 
 PR-A 封闭账号 → B1 内容擦除通道 → B2 账务擦除通道与受限结算 → C 清除执行与外键改造 → D 单条删除；E 防刷在 A 之后并行。
 
+PR-E（0151）开户赠送防刷：
+- `opening_grant_identity_digests` 只保存 E3 用途、身份类型、密钥版本、HMAC、首次开户赠送决定月份（UTC 月初）和“开户赠送规则取消”到期条件；无身份原文或账号外键。只允许 service_role 读取，经服务端专用 RPC 写入，接入 `account_open_required`。财务余额和流水仍以原 profiles / credit_transactions 为权威。
+- 注册的 `opening_grant_claim` 锁 profile，再按固定顺序锁摘要，在同一事务中匹配身份和调用原账务 RPC；匹配旧事实则不赠送，在原账本记金额 0 的拒绝决定，避免零余额恢复路径在改邮箱后补发。封闭账号直接拒绝，购买和退款继续走原路径。
+- API 从已验证的 Auth 身份生成摘要；`account_erasure_confirm_with_digests` 先保存开户赠送决定的身份摘要（含精确幂等键下的 0 元拒赠），再在同一事务调用 0147 确认；摘要失败则整体回滚，不封闭账号。旧确认入口的 service_role 直接执行权限撤销，注销请求仍是唯一封闭审计依据。
+- 与 0150 兼容：确认事务提交后，C 才能在新事务调用正文擦除；同事务调用会按 0150 的屏障返回重试。0151 不改屏障、父对象 guard、`erased_at` 规则或 `ordinary_chat_claim` 撤权，不在持有 profile/摘要锁时调用擦除。正文擦除及删除 Auth 身份后，E3 事实仍保留用于相等匹配。
+- 服务端变量 `OPENING_GRANT_HMAC_KEYS` 使用多版本独立密钥，envValidator 能识别缺失或错误配置，但 `validateEnvOnStartup` 没有生产调用方，不会阻止应用启动；实际建档赠送和注销确认路径会拒绝操作。旧版本及对应密钥须保留；数据库拒绝漏掉已有版本，同版本错误替换密钥不能从摘要自动发现。真实 staging 值由 Owner 亲自配置，不在公开记录中展示；规则取消后才清除此用途事实，备份恢复开放服务前须恢复防刷事实。
+- 部署前总控执行 PR-E 的聚合 SELECT；[Owner 已接受历史 staging 账号缺口](https://github.com/Crnobog9527/GraylumAI_vercel/pull/538#issuecomment-5916532310)，本次不回填。0151 前已赠账号不用于验收；迁移后尽快部署配套 API，空档不做防刷测试。正式库由迁移全新建立、不迁移已有用户数据；若此前提改变，接受失效，回到回填方案。历史封闭补存仅作参考；验证和回退入口见 `packages/db/tests/erasure-e-README.md`，有摘要事实时回退拒绝。
+
 PR-B1a（0149，artifact / agent / research / opc 表）的擦除通道：
 - **只用于已注销账号**：`account_erasure_scrub_content(p_profile_id)` 要求账号已经在 `account_erasure_requests` 里，否则拒绝执行（`ACCOUNT_ERASURE_NOT_CLOSED`）。正文清成 NULL 之后，有十几处重放和冲突检查用 `<>` 比较，结果会被 NULL 跳过；runtime 的"只在已有值时拒绝"会被重新写入；还有若干读取路径会"返回空内容"而不是"拒绝读取"。这些只有在账号还能使用时才会被触发。**单条删除（D7）上线前，PR-D 必须先把这些改成对 `erased_at` 显式拒绝。**
 - 做法：26 张表加 `erased_at`；按目录动态找出引用可擦除列的 CHECK，改写成"已擦除或满足原规则"；NOT NULL 的正文列改成可空，加"未擦除必须有值""已擦除必须为空"两条约束。`artifact_immutable` 和另外三个保护函数通过触发器参数拿到每张表的白名单，只放行"未擦除 → 已擦除、白名单列清空（或改成规定的占位值）、其他列一字不变"这一种 UPDATE；已擦除的行不能再改，DELETE 仍然一律拒绝。可变表加 `erased_row_guard`。`packages/db/tests/erasure-constraint-audit.sql` 是只读审计，应返回 0 行。
@@ -246,7 +254,7 @@ PR-A 留给后续 PR 的必做事项：
 
 ## 附录 A：逐表清单与外键删除顺序
 
-覆盖迁移中全部 **75 个不同 CREATE TABLE 对象**，另列只被迁移引用的基线表；包括平台配置是为了交代发布者等用户引用，不能把共享配置误删。表名对应当前基线的迁移名称，链接直达文件。未列当前列的完整定义，不等于准许保留未列字段：未知/自由文本默认按私有正文查明并清除。
+初版盘点覆盖迁移中 **75 个不同 CREATE TABLE 对象**，后续 PR-A/PR-E 新表在下表追加，另列只被迁移引用的基线表；包括平台配置是为了交代发布者等用户引用，不能把共享配置误删。表名对应当前基线的迁移名称，链接直达文件。未列当前列的完整定义，不等于准许保留未列字段：未知/自由文本默认按私有正文查明并清除。
 
 处理代码：**D = 删除正文及用户行**（有存活引用则留无正文 tombstone）；**M = 清正文/身份，保留 §3 财务白名单**；**P = 保留共享配置，清用户归属和私文**。D 在 `T_online` 内处理；M 在核对结束后清最少隔离正文、财务留 `T_fin`；P 无用户内容的共享定义持续服务期间保留。每行的“前/后”均指物理删行的相对次序；正文和读权限先清，不等财务父表到期。M 行原 FK 有 CASCADE 的，须先按 §3.3 改造，不能照旧 FK 删除。
 
@@ -344,6 +352,7 @@ PR-A 留给后续 PR 的必做事项：
 | credit_packages ([0002][m0002]、[0012][m0012]) | P 套餐定价；不是私人内容 | payment_orders 套餐引用保留；不因注销删除共享套餐 |
 | membership_plans ([0002][m0002]、[0009][m0009]、[0012][m0012]) | P 会员共享配置 | 订阅引用保留；不因注销删除共享权益，基线仍须补证 |
 | account_erasure_requests（PR-A 新增） | M 注销进度：请求 ID、阶段、时间、错误码、重试次数；不含正文、邮箱、文件名 | 引用 profiles（RESTRICT）；随财务占位到期、在 profiles 之前删除；存在时 profiles 的 status/is_deleted/deleted_at 不可回退 |
+| opening_grant_identity_digests（[0151](../../../packages/db/migrations/0151_opening_grant_identity_digests.sql)，PR-E 新增） | E3 防刷：仅用途、类型、密钥版本、HMAC、首次开户赠送决定月份（UTC 月初）、到期条件；无原文，不用于画像 | 无账号 FK；独立于正文、Auth 身份和财务占位删除顺序，开户赠送规则取消后清除；仅 service_role 读取/经专用 RPC 写入，恢复服务前须保留防重事实 |
 
 
 ### A.1 可以据此实施的分阶段顺序
