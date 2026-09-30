@@ -799,3 +799,9 @@ pre {
 .bg-info-subtle {
   background-color: var(--info-bg);
 }
+
+/* hCaptcha's challenge layer is mounted on <body>, outside the modal dialog that disables pointer
+   events on <body>; keep it clickable. Must equal HCAPTCHA_LAYER_SELECTOR (lib/dialogCaptcha.ts). */
+body > :has(iframe[src*="hcaptcha.com"]):not([role="dialog"]):not(:has([role="dialog"])) {
+  pointer-events: auto;
+}

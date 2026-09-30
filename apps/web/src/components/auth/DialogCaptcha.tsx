@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { getAuthCaptchaSiteKey } from '@/lib/authCaptcha';
-import { loadHCaptcha, renderDialogCaptcha } from '@/lib/dialogCaptcha';
+import { guardCaptchaFocus, loadHCaptcha, renderDialogCaptcha } from '@/lib/dialogCaptcha';
 
 type Props = {
   onToken: (token: string | null) => void;
@@ -27,6 +27,8 @@ export function DialogCaptcha({ onToken, onExpired, onUnavailable }: Props) {
     const target = container.current;
     let cancelled = false;
     let remove: (() => void) | undefined;
+    // Only while this widget is mounted: let focus enter hCaptcha's challenge despite the trap.
+    const releaseFocus = guardCaptchaFocus(window);
     loadHCaptcha()
       .then((client) => {
         if (cancelled) return;
@@ -40,6 +42,7 @@ export function DialogCaptcha({ onToken, onExpired, onUnavailable }: Props) {
       });
     return () => {
       cancelled = true;
+      releaseFocus();
       remove?.();
       handlers.current.onToken(null);
     };
