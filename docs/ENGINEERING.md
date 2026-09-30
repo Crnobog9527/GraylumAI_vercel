@@ -110,9 +110,7 @@
 - 应用（宿主）只负责权限、工具白名单、预算与计费（BILL2）、身份、持久化、版本和显示。
 - 模型分工：Skill 执行模型由管理员在 Skill 配置中绑定；信息汇总和整理使用管理员指定的
   独立整理模型；Fusion 对比模式由用户在管理员允许的模型范围内自选。
-- 多模型对比（Fusion 对比模式）由 Graylum 自己并行调用，不使用 OpenRouter 的 `openrouter/` 元模型；
-  定稿报告评审（Fusion 评审模式）使用 OpenRouter 的 Fusion 服务端工具（`openrouter:fusion`），
-  多轮评审和达成共识的流程由 Graylum 控制。
+- 多模型（Fusion）由 Graylum 自己并行调用，不使用 OpenRouter 的 `openrouter/` 元模型。
   具体做法见 Master Plan 第 4 节和 `docs/launch/tasks/FUSION.md`。
 - 不用关键词或正则表达式判断用户意图来代替模型判断。
 
