@@ -11,6 +11,8 @@ import { buildAuthHref, resolveAuthAppUrl } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
+import { parseVerifyReason, VERIFY_REASON_MESSAGES } from '@/lib/authFlow';
+import { Input } from '@/components/ui/input';
 
 type VerifyTone = 'info' | 'success' | 'error';
 
@@ -26,6 +28,8 @@ function VerifyEmailPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
+  // The expired-link landing has no email in the URL; the visitor types it to get a new link.
+  const [emailEditable, setEmailEditable] = useState(false);
   const [redirectTarget, setRedirectTarget] = useState('/profile');
   const [checking, setChecking] = useState(true);
   const [resending, setResending] = useState(false);
@@ -40,6 +44,7 @@ function VerifyEmailPageContent() {
     const boot = async () => {
       const nextEmail = searchParams.get('email') ?? '';
       const nextRedirect = sanitizeRedirectTarget(searchParams.get('redirect'));
+      const reason = parseVerifyReason(searchParams.get('reason'));
 
       setEmail(nextEmail);
       setRedirectTarget(nextRedirect);
@@ -50,6 +55,7 @@ function VerifyEmailPageContent() {
       if (data.user?.email) {
         setEmail(data.user.email);
       }
+      setEmailEditable(!data.user?.email && !nextEmail);
 
       if (isEmailVerified(data.user)) {
         router.replace(nextRedirect);
@@ -58,8 +64,10 @@ function VerifyEmailPageContent() {
 
       setChecking(false);
       setMessage({
-        tone: 'info',
-        text: '邮箱账户必须完成验证后，才能进入聊天、个人中心和其他受保护功能。',
+        tone: reason === 'expired' ? 'error' : 'info',
+        text: reason
+          ? VERIFY_REASON_MESSAGES[reason]
+          : '邮箱账户必须完成验证后，才能进入聊天、个人中心和其他受保护功能。',
       });
     };
 
@@ -100,7 +108,7 @@ function VerifyEmailPageContent() {
     if (!email) {
       setMessage({
         tone: 'error',
-        text: '当前没有可用邮箱地址，请返回登录页重新发起注册。',
+        text: emailEditable ? '请先填写注册时使用的邮箱。' : '当前没有可用邮箱地址，请返回登录页重新发起注册。',
       });
       return;
     }
@@ -185,8 +193,20 @@ function VerifyEmailPageContent() {
 
             <div className="rounded-2xl border px-4 py-4 text-sm text-[#f3f3f3]" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
               <div className="flex items-center justify-between gap-4">
-                <span className="text-[#a8a8a8]">当前邮箱</span>
-                <span className="break-all text-right">{email || '未提供'}</span>
+                <span className="shrink-0 text-[#a8a8a8]">当前邮箱</span>
+                {emailEditable ? (
+                  <Input
+                    type="email"
+                    autoComplete="email"
+                    aria-label="注册时使用的邮箱"
+                    placeholder="name@example.com"
+                    value={email}
+                    onChange={event => setEmail(event.target.value.trim())}
+                    className="h-10 max-w-xs rounded-xl border-[#333] bg-transparent text-right text-white"
+                  />
+                ) : (
+                  <span className="break-all text-right">{email || '未提供'}</span>
+                )}
               </div>
             </div>
 

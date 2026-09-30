@@ -5,14 +5,15 @@ import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   ArrowRight,
-  CheckCircle2,
   Gift,
   Loader2,
-  Mail,
   ShieldCheck,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
-import { getErrorMessageText, getSafeErrorMessage } from '@/lib/safe-error-message';
+import { getSafeErrorMessage } from '@/lib/safe-error-message';
+import {
+  buildVerifyEmailPath, classifyLoginError, LOGIN_ERROR_MESSAGES, loginErrorMessage, routeFragmentError,
+} from '@/lib/authFlow';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildAuthHref, resolveAuthAppUrl, resolveSiteName } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
@@ -21,14 +22,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { trpc } from '@/trpc/client';
 import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
+import { AuthStatusBanner, type AuthStatus } from '@/components/auth/AuthStatusBanner';
 
 type AuthMode = 'login' | 'signup';
-type StatusTone = 'error' | 'success' | 'info';
-
-interface AuthStatus {
-  tone: StatusTone;
-  message: string;
-}
 
 const heroPoints = [
   'Google 一键授权直接进入应用',
@@ -113,11 +109,17 @@ function LoginPageContent() {
       }
     }
 
-    if (error) {
-      setStatus({
-        tone: 'error',
-        message: decodeURIComponent(error),
-      });
+    const errorMessage = loginErrorMessage(error);
+    if (errorMessage) setStatus({ tone: 'error', message: errorMessage });
+
+    const fragmentError = routeFragmentError(window.location.hash);
+    if (fragmentError) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      if (fragmentError.to === 'verify-expired') {
+        window.location.replace(buildAuthHref(buildVerifyEmailPath(emailParam ?? '', redirect, 'expired')));
+        return;
+      }
+      setStatus({ tone: 'error', message: LOGIN_ERROR_MESSAGES.callback_failed });
     }
   }, [searchParams]);
 
@@ -142,26 +144,18 @@ function LoginPageContent() {
     });
 
     if (error) {
-      const shouldRouteToVerify = /confirm|verified|verification|email/i.test(getErrorMessageText(error));
-      if (shouldRouteToVerify) {
-        window.location.assign(
-          buildAuthHref(`/verify-email?email=${encodeURIComponent(email)}&redirect=${encodeURIComponent(redirectTarget)}`)
-        );
+      const failure = classifyLoginError(error, '登录失败，请检查账号信息后重试。');
+      if (failure.kind === 'unconfirmed') {
+        window.location.assign(buildAuthHref(buildVerifyEmailPath(email, redirectTarget)));
         return;
       }
-
-      setStatus({
-        tone: 'error',
-        message: getSafeErrorMessage(error, '登录失败，请检查账号信息后重试。'),
-      });
+      setStatus({ tone: 'error', message: failure.message, offerResend: failure.offerResend });
       setPendingAction(null);
       return;
     }
 
     if (!isEmailVerified(data.user)) {
-      window.location.assign(
-        buildAuthHref(`/verify-email?email=${encodeURIComponent(email)}&redirect=${encodeURIComponent(redirectTarget)}`)
-      );
+      window.location.assign(buildAuthHref(buildVerifyEmailPath(email, redirectTarget)));
       return;
     }
 
@@ -229,9 +223,7 @@ function LoginPageContent() {
           : '注册成功，验证邮件已发送。请先完成邮箱验证。',
     });
 
-    window.location.assign(
-      buildAuthHref(`/verify-email?email=${encodeURIComponent(email)}&redirect=${encodeURIComponent(redirectTarget)}`)
-    );
+    window.location.assign(buildAuthHref(buildVerifyEmailPath(email, redirectTarget, 'signup')));
   };
 
   const handleGoogleLogin = async () => {
@@ -489,39 +481,10 @@ function LoginPageContent() {
                     </div>
 
                     {status && (
-                      <div
-                        className="rounded-2xl border px-4 py-3 text-sm leading-6"
-                        aria-live="polite"
-                        style={{
-                          borderColor:
-                            status.tone === 'error'
-                              ? 'rgba(248,113,113,0.24)'
-                              : status.tone === 'success'
-                                ? 'rgba(74,222,128,0.24)'
-                                : 'rgba(255,215,0,0.24)',
-                          background:
-                            status.tone === 'error'
-                              ? 'rgba(127,29,29,0.2)'
-                              : status.tone === 'success'
-                                ? 'rgba(20,83,45,0.2)'
-                                : 'rgba(120,53,15,0.2)',
-                          color:
-                            status.tone === 'error'
-                              ? '#fecaca'
-                              : status.tone === 'success'
-                                ? '#bbf7d0'
-                                : '#fde68a',
-                        }}
-                      >
-                        <div className="flex items-start gap-2">
-                          {status.tone === 'success' ? (
-                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                          ) : (
-                            <Mail className="mt-0.5 h-4 w-4 shrink-0" />
-                          )}
-                          <span>{status.message}</span>
-                        </div>
-                      </div>
+                      <AuthStatusBanner
+                        status={status}
+                        resendHref={buildAuthHref(buildVerifyEmailPath(email, redirectTarget))}
+                      />
                     )}
 
                     <Button
