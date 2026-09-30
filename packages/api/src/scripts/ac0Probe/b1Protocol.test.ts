@@ -12,7 +12,7 @@ const scenario:Scenario={id:'b1-test',kind:'ask',category:'B',input:'Give me cat
  history:[{role:'user',content:'I want to categorize my work.'}],step:0,currentStepId:'step-1',questionId:'choice'};
 const usage={prompt_tokens:100,completion_tokens:10,total_tokens:110,cost:0.0003};
 const args={question:'Which?',options:['Option A','Option B'],recommended:null};
-function setup(mode:'ok'|'http'|'unknown'|'no-card'|'long-args'|'sse-error'|'partial-error'='ok'){
+function setup(mode:'ok'|'http'|'unknown'|'no-card'|'long-args'|'sse-error'|'partial-error'|'no-reasoning'|'token-only'='ok'){
  const requests:B1Request[]=[];const ledger=memoryLedger();
  const budget=createBudget({maxCalls:6,maxUsd:1.5,ledger});
  const transport:typeof fetch=async(_url,init)=>{
@@ -20,6 +20,8 @@ function setup(mode:'ok'|'http'|'unknown'|'no-card'|'long-args'|'sse-error'|'par
   if(requests.length===1){
    if(mode==='unknown')throw new TypeError('SYNTHETIC_NETWORK_FAILURE');
    if(mode==='no-card')return sseResponse(request.model,textDeltas('A text reply.'),{usage});
+   if(mode==='no-reasoning'||mode==='token-only')return sseResponse(request.model,toolDeltas('ask_question',args),
+    {finish:'tool_calls',usage:{...usage,completion_tokens_details:{reasoning_tokens:mode==='token-only'?128:0}}});
    return sseResponse(request.model,[{reasoning:'Private thinking',reasoning_details:[
     {type:'reasoning.text',format:'anthropic-claude-v1',index:0,text:'Private thinking',signature:'synthetic-signature'},
    ]},...textDeltas('Choose a category.'),...toolDeltas('ask_question',
@@ -73,4 +75,17 @@ it('keeps an incomplete second-turn error frame unknown and stops all further re
  expect(result.verdict).toBe('UNKNOWN');expect(f.requests).toHaveLength(2);
  expect(f.budget.stopped).toBe('B1_UNKNOWN_RESULT');
  expect(result.turns[1]?.bookedUsd).toBe(result.turns[1]?.boundUsd);
+});
+
+it('requires actual first-turn reasoning payload before the directed second request',async()=>{
+ const f=setup();const result=await runB1Pair({...f,skill,scenario,requireReasoning:true,credential:async()=> 'offline',save:()=>{}});
+ expect(result.verdict).toBe('PASS');expect(f.requests).toHaveLength(2);
+ expect(result.turns[0]?.reasoning).toMatchObject({hasPayload:true,detailTypes:['reasoning.text'],hasSignature:true});
+ expect(f.requests[1]?.messages.find(message=>message.tool_calls)).not.toHaveProperty('reasoning_details');
+});
+it.each(['no-reasoning','token-only'] as const)('does not spend a second call for %s',async mode=>{
+ const f=setup(mode);const result=await runB1Pair({...f,skill,scenario,requireReasoning:true,credential:async()=> 'offline',save:()=>{}});
+ expect(result).toMatchObject({verdict:'PREREQUISITE_NOT_MET',prerequisiteMissing:'reasoning_payload'});
+ expect(result.turns[0]).toMatchObject({card:true,reasoning:{hasPayload:false}});
+ expect(f.requests).toHaveLength(1);expect(f.ledger.read().calls).toBe(1);
 });

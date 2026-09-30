@@ -565,3 +565,38 @@ turn without a valid card is a missing prerequisite, never a replacement sample.
 No robot review, merge, deployment, product-rule repair, or paused implementation is
 authorized by this evidence run. The whole PR remains high risk; this increment adds
 only a test harness and the explicitly approved local measurement limit.
+
+
+### 14.10 B1 directed reasoning follow-up (2026-09-30)
+
+[Owner approval](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5912345087)
+authorizes one new fixed reasoning-trigger sample, at most two primary calls and
+USD 0.30. This is a separate batch from section 14.9, which ended with five calls,
+two successful pairs, and one first-turn no-card prerequisite failure. Its unused
+call is not reused or added. The existing cumulative ledger starts at exactly 734;
+the cumulative call ceiling is 736 and the USD 15 ceiling is unchanged.
+
+The same single-use `b1Main.ts` entry is rebound to one private sample digest and
+`--confirm B1-THINKING-2-calls-USD-0.30`. The old three-sample entry is no longer
+runnable; its exact implementation and evidence remain in the earlier commit and
+PR record. No application prompt, Skill, schema, model, route, reasoning setting,
+output ceiling, timeout, or product history code changes. Only the user sample
+adds a constrained time-allocation calculation with user-provided choices.
+
+The byte guard is tightened to 52,000 per request. At the same input USD 2/output
+USD 10 per million, adding 2,048 input tokens and reserving all 4,096 output tokens
+bounds two calls at USD 0.298112. Oversize requests stop without trimming.
+
+The first live response must both execute a valid card and contain nonempty
+reasoning or reasoning_details payload in its retained raw stream before turn two
+is allowed. Record detail types, signature presence, reported reasoning tokens,
+and the actual second-request history shape; never publish private reasoning text.
+A token count alone does not prove that an actual block was available to replay.
+Missing either prerequisite stops this one sample as INCOMPLETE; do not replace
+it. A second-turn rejection/history denial is FAIL, an unknown result stops, and
+a normal second turn is a pass for this observed directed case only. It does not
+retroactively change the original three-pair result or establish universal safety.
+
+The test scaffold remains temporary and must be removed or moved out before any
+future staging merge, as noted in the audit. This run does not authorize that merge
+or resume the paused product implementation.

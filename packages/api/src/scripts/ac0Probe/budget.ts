@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // AC-0b model probe. Standalone script: application code must never import it.
 
-/** Owner B1 approval, PR #497 issuecomment-5911114620: at most 6 calls / USD 1.50
- * from 729 used; cumulative 735 calls / USD 15. No flag can raise these. */
-export const HARD_MAX_CALLS = 735;
+/** Owner follow-up approval, PR #497 issuecomment-5912345087: at most 2 calls / USD 0.30
+ * from 734 used; cumulative 736 calls / USD 15. No flag can raise these. */
+export const HARD_MAX_CALLS = 736;
 export const HARD_MAX_USD = 15;
 export const DEFAULT_MAX_CALLS = 60;
 export const DEFAULT_MAX_USD = 1;

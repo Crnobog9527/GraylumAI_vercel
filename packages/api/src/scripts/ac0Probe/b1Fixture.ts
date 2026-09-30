@@ -12,7 +12,7 @@ import type {LoadedSkill, Scenario} from './skill.ts';
 
 export const B1_MODEL = 'anthropic/claude-sonnet-5.5';
 export const B1_MAX_TOKENS = 4096;
-export const B1_REQUEST_BYTE_STOP = 100000;
+export const B1_REQUEST_BYTE_STOP = 52000;
 
 /** Actual admission and Skill loader, backed only by isolated in-memory ports.
  * Recreates each PostgresSession with the same sessionId across the two runs.

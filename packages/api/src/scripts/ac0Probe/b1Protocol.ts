@@ -18,12 +18,13 @@ export type B1Message={role:string;content?:unknown;
   tool_calls?:Array<{id:string;function:{arguments:string;name?:string}}>};
 export type B1Request={model:string;messages:B1Message[];max_tokens:number;reasoning_effort:string};
 type B1Response={choices?:Array<{message?:B1Message;finish_reason?:string}>;
-  usage?:{prompt_tokens:number;completion_tokens:number;[key:string]:unknown}};
+  usage?:{prompt_tokens:number;completion_tokens:number;completion_tokens_details?:{reasoning_tokens?:number};[key:string]:unknown}};
 
 export type B1Turn={turn:number;request?:string;sdkRequest?:string;history?:unknown[];httpStatus?:number;
   normalization:'not_reached'|'accepted'|'denied';error?:string;observation?:TransportObservation;
   response?:B1Response;card?:boolean;toolArgumentChars?:number;toolArgumentCodePoints?:number;
   bookedUsd?:number;providerCostUsd?:number;boundUsd?:number;requestBytes?:number;
+  reasoning?:{hasPayload:boolean;detailTypes:string[];hasSignature:boolean;reportedTokens?:number};
   state:'not_sent'|'sent'|'complete'|'provider_rejected'|'history_denied'|'unknown'|'local_error';
 };
 /** Only an observed, complete SSE error frame proves a provider rejection.
@@ -41,14 +42,38 @@ function explicitStreamError(observation:TransportObservation):string|undefined{
   }
 }
 
+/** Inspect the retained wire, not the SDK projection that discards reasoning. */
+function reasoningEvidence(observation:TransportObservation,reportedTokens:number|undefined){
+  let hasPayload=false,hasSignature=false;
+  const detailTypes=new Set<string>();
+  const wire=decodeOpenRouterStreamObservation(observation).toString('utf8');
+  for(const frame of wire.replaceAll('\r\n','\n').split('\n\n').slice(0,-1)){
+    const data=frame.split('\n').filter(line=>line.startsWith('data:')).map(line=>line.slice(5).trimStart()).join('\n');
+    try{
+      const value=JSON.parse(data);
+      for(const choice of value.choices??[]){
+        const delta=choice.delta??{};
+        if(typeof delta.reasoning==='string'&&delta.reasoning.trim())hasPayload=true;
+        for(const detail of Array.isArray(delta.reasoning_details)?delta.reasoning_details:[]){
+          if(typeof detail.type==='string')detailTypes.add(detail.type);
+          if(typeof detail.signature==='string'&&detail.signature.length>0)hasSignature=true;
+          if(['text','summary','data'].some(key=>typeof detail[key]==='string'&&detail[key].trim()))hasPayload=true;
+        }
+      }
+    }catch{/* Non-JSON frames do not prove reasoning content. */}
+  }
+  return {hasPayload,detailTypes:[...detailTypes],hasSignature,reportedTokens};
+}
+
 export type B1Pair={scenarioId:string;turns:B1Turn[];secondInput?:string;
+  prerequisiteMissing?:'card'|'reasoning_payload';
   verdict:'PASS'|'FAIL'|'UNKNOWN'|'PREREQUISITE_NOT_MET'|'NOT_RUN';};
 
 /** Each actual network request is owned by the production adapter. The hook only
  * reserves the existing AC0 ledger and saves evidence; it never changes bytes.
  */
 export async function runB1Pair(options:{skill:LoadedSkill;scenario:Scenario;budget:Budget;
-  transport:typeof fetch;credential:()=>Promise<string>;save:(pair:B1Pair)=>void}){
+  transport:typeof fetch;requireReasoning?:boolean;credential:()=>Promise<string>;save:(pair:B1Pair)=>void}){
   const fixture=b1Fixture(options.skill,options.scenario);
   const pair:B1Pair={scenarioId:options.scenario.id,turns:[],verdict:'NOT_RUN'};
   let input=options.scenario.input;
@@ -110,6 +135,7 @@ export async function runB1Pair(options:{skill:LoadedSkill;scenario:Scenario;bud
           const evidence=adapter.evidence(observation,fixture.quote,'response');
           const response=evidence.usage?.sdkResponse as B1Response|undefined;
           record.response=response;
+          if(observation.stream)record.reasoning=reasoningEvidence(observation,response?.usage?.completion_tokens_details?.reasoning_tokens);
           const rawArgs=response?.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
           if(typeof rawArgs==='string'){
             record.toolArgumentChars=rawArgs.length;record.toolArgumentCodePoints=[...rawArgs].length;
@@ -137,7 +163,10 @@ export async function runB1Pair(options:{skill:LoadedSkill;scenario:Scenario;bud
       const args=record.response?.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
       if(typeof args==='string'){record.toolArgumentChars=args.length;record.toolArgumentCodePoints=[...args].length;}
       if(turn===1){
-        if(!card){pair.verdict='PREREQUISITE_NOT_MET';options.save(pair);break;}
+        if(!card){pair.verdict='PREREQUISITE_NOT_MET';pair.prerequisiteMissing='card';options.save(pair);break;}
+        if(options.requireReasoning&&!record.reasoning?.hasPayload){
+          pair.verdict='PREREQUISITE_NOT_MET';pair.prerequisiteMissing='reasoning_payload';options.save(pair);break;
+        }
         pair.secondInput=card.options[0]!;input=pair.secondInput;
       }else pair.verdict='PASS';
     }catch(error){
