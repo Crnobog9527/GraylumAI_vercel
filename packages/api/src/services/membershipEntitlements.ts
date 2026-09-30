@@ -25,6 +25,7 @@ const orderSchema = z.object({
 });
 const planSchema = z.object({ id: z.string(), level: membershipLevelSchema, ...entitlementRowShape });
 const ENDED_STATUSES = ['canceled', 'cancelled', 'incomplete_expired'];
+const HISTORICAL_STATUSES = [...ENDED_STATUSES, 'admin_override'];
 const PAYMENT_ATTENTION = ['past_due', 'incomplete', 'unpaid', 'paused'];
 type State = 'free' | 'active' | 'admin_override' | 'expired' | 'payment_attention' | 'inconsistent';
 
@@ -48,10 +49,11 @@ export async function readMembershipEntitlements(client: SupabaseClient, profile
   try {
     const [profileResult, currentResult, orderResult, settingResult] = await Promise.all([
       client.from('profiles').select('membership_level,status,is_deleted').eq('id', profileId).single(),
-      // Unlike the checkout reader's last-ten heuristic, inspect all non-ended candidates,
-      // capped at two only to detect ambiguity (never arbitrarily choose the first).
+      // Inspect current candidates, capped at two only to detect ambiguity. An older
+      // admin_override is historical when a current subscription exists; otherwise the
+      // latest-row fallback below preserves the existing explicit admin-grant behavior.
       client.from('user_subscriptions').select('membership_plan_id,status,current_period_end')
-        .eq('user_id', profileId).not('status', 'in', `(${ENDED_STATUSES.join(',')})`).limit(2),
+        .eq('user_id', profileId).not('status', 'in', `(${HISTORICAL_STATUSES.join(',')})`).limit(2),
       client.from('payment_orders').select('status,payment_status,metadata').eq('user_id', profileId)
         .eq('item_type', 'membership_plan').order('updated_at', { ascending: false }).limit(1).maybeSingle(),
       client.from('system_settings').select('value').eq('key', FUSION_COMPARE_SETTING).single(),

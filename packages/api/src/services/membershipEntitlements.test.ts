@@ -84,6 +84,11 @@ describe('new-action membership entitlements', () => {
     expect(await readMembershipEntitlements(f.client, actorId, Date.parse('2026-09-30T00:00:00Z')))
       .toMatchObject({ level: 'free', state: 'expired' });
   });
+  it('allows the current paid subscription after an older manual grant or canceled subscription', async () => {
+    const f = fixture();
+    f.rows.user_subscriptions = [subscription('admin_override', null), subscription('canceled'), subscription()];
+    expect(await readMembershipEntitlements(f.client, actorId)).toMatchObject({ level: 'pro', state: 'active' });
+  });
   it('does not choose between conflicting current subscriptions or mismatched plans', async () => {
     const f = fixture();
     f.rows.user_subscriptions = [subscription(), subscription('trialing')];
