@@ -6,5 +6,9 @@ SELECT p.oid::regprocedure AS signature,
   md5(pg_get_functiondef(p.oid)) AS definition_md5,
   pg_get_functiondef(p.oid) AS definition
 FROM pg_proc p
-WHERE p.oid = 'public.artifact_chat_message_guard()'::regprocedure;
+WHERE p.oid IN (
+  'public.artifact_chat_message_guard()'::regprocedure,
+  'public.erasure_update_allowed(jsonb,jsonb,text[])'::regprocedure
+)
+ORDER BY p.oid::regprocedure::text;
 COMMIT;
