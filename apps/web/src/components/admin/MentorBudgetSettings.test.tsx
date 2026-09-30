@@ -3,30 +3,14 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-type MutationOptions = { onSuccess: (data: BudgetView) => Promise<void> };
-const trpcState = vi.hoisted(() => ({
-  view: undefined as unknown,
-  pending: false,
-  mutationOptions: undefined as MutationOptions | undefined,
-}));
+const trpcState = vi.hoisted(() => ({ view: undefined as unknown }));
 
 vi.mock('@/trpc/client', () => ({
-  trpc: {
-    useUtils: () => ({ mentorBudget: { get: { setData: vi.fn(), invalidate: vi.fn(async () => undefined) } } }),
-    mentorBudget: {
-      get: { useQuery: () => ({ data: trpcState.view, error: null, refetch: vi.fn() }) },
-      update: {
-        useMutation: (options: MutationOptions) => {
-          trpcState.mutationOptions = options;
-          return { mutate: vi.fn(), reset: vi.fn(), isPending: trpcState.pending, error: null };
-        },
-      },
-    },
-  },
+  trpc: { mentorBudget: { get: { useQuery: () => ({ data: trpcState.view, error: null, refetch: vi.fn() }) } } },
 }));
 
-import { MentorBudgetPanel, MentorBudgetSettings } from './MentorBudgetSettings';
-import { toBudgetDraft, type BudgetDraft, type BudgetView } from './mentorBudgetDraft';
+import { MentorBudgetPanel, MentorBudgetSettings, type BudgetEditor } from './MentorBudgetSettings';
+import { toBudgetDraft, type BudgetView } from './mentorBudgetDraft';
 import { configuredView, legacyView } from './mentorBudgetFixtures';
 
 function render(view: BudgetView, extra: { saveError?: string | null; saved?: boolean; saving?: boolean } = {}) {
@@ -86,22 +70,25 @@ describe('MentorBudgetPanel', () => {
 });
 
 describe('MentorBudgetSettings', () => {
-  function renderSettings(draft: BudgetDraft | null, onDraftChange = vi.fn()) {
+  function renderSettings(editor: Partial<BudgetEditor>) {
     trpcState.view = configuredView;
-    return renderToStaticMarkup(createElement(MentorBudgetSettings, { draft, onDraftChange, onOpenSummaryLimit: vi.fn() }));
+    const full: BudgetEditor = { draft: null, saving: false, saveError: null, saved: false, onEdit: vi.fn(), onSave: vi.fn(), ...editor };
+    return renderToStaticMarkup(createElement(MentorBudgetSettings, { editor: full, onOpenSummaryLimit: vi.fn() }));
   }
 
   it('shows the draft held by the parent over the server values, so edits survive a tab switch', () => {
     const base = toBudgetDraft(configuredView);
     const draft = { ...base, interactive: { ...base.interactive, inputBytes: '50000' } };
-    expect(renderSettings(null)).toMatch(/data-testid="mentor-budget-interactive-inputBytes"[^>]*value="64000"/);
-    expect(renderSettings(draft)).toMatch(/data-testid="mentor-budget-interactive-inputBytes"[^>]*value="50000"/);
+    expect(renderSettings({})).toMatch(/data-testid="mentor-budget-interactive-inputBytes"[^>]*value="64000"/);
+    expect(renderSettings({ draft })).toMatch(/data-testid="mentor-budget-interactive-inputBytes"[^>]*value="50000"/);
   });
 
-  it('clears the parent draft after a successful save', async () => {
-    const onDraftChange = vi.fn();
-    renderSettings(toBudgetDraft(configuredView), onDraftChange);
-    await trpcState.mutationOptions?.onSuccess(configuredView);
-    expect(onDraftChange).toHaveBeenCalledWith(null);
+  it('keeps inputs and the save button disabled when remounted while the parent save is still pending', () => {
+    const markup = renderSettings({ saving: true });
+    const inputs = markup.match(/<input[^>]*data-testid="mentor-budget-[a-z]+-[a-zA-Z]+"[^>]*>/g) ?? [];
+    expect(inputs).toHaveLength(8);
+    for (const input of inputs) expect(input).toMatch(/ disabled=""/);
+    expect(markup).toMatch(/<button[^>]*data-testid="mentor-budget-save"[^>]*disabled=""/);
+    expect(markup).toContain('保存中...');
   });
 });

@@ -41,10 +41,35 @@ export function MentorBudgetTabTrigger() {
   );
 }
 
-/** Switches to the features tab, then focuses the summary output limit once it is mounted. */
+/**
+ * Owns the draft and the save request outside TabsContent: Radix unmounts inactive tabs, and both unsaved
+ * edits and an in-flight save (inputs stay disabled, success clears the draft) must survive a tab switch.
+ * Opening the summary limit switches to the features tab, then focuses that input once it is mounted.
+ */
 export function MentorBudgetTabContent({ onOpenFeatures }: { onOpenFeatures: () => void }) {
-  // Held outside TabsContent: Radix unmounts inactive tabs, and unsaved edits must survive a tab switch.
+  const utils = trpc.useUtils();
   const [draft, setDraft] = useState<BudgetDraft | null>(null);
+  const [saved, setSaved] = useState(false);
+  const save = trpc.mentorBudget.update.useMutation({
+    onSuccess: async data => {
+      utils.mentorBudget.get.setData(undefined, data);
+      await utils.mentorBudget.get.invalidate();
+      setDraft(null);
+      setSaved(true);
+    },
+  });
+  const editor: BudgetEditor = {
+    draft,
+    saving: save.isPending,
+    saveError: save.error ? budgetErrorMessage(save.error, '无法保存导师预算，请稍后重试') : null,
+    saved,
+    onEdit: next => {
+      setSaved(false);
+      if (save.error) save.reset();
+      setDraft(next);
+    },
+    onSave: current => save.mutate(toBudgetInput(current)),
+  };
   const openSummaryLimit = () => {
     onOpenFeatures();
     window.setTimeout(() => {
@@ -53,30 +78,23 @@ export function MentorBudgetTabContent({ onOpenFeatures }: { onOpenFeatures: () 
   };
   return (
     <TabsContent value={MENTOR_BUDGET_TAB}>
-      <MentorBudgetSettings draft={draft} onDraftChange={setDraft} onOpenSummaryLimit={openSummaryLimit} />
+      <MentorBudgetSettings editor={editor} onOpenSummaryLimit={openSummaryLimit} />
     </TabsContent>
   );
 }
 
-type SettingsProps = {
+export type BudgetEditor = {
   draft: BudgetDraft | null;
-  onDraftChange: (draft: BudgetDraft | null) => void;
-  onOpenSummaryLimit: () => void;
+  saving: boolean;
+  saveError: string | null;
+  saved: boolean;
+  onEdit: (draft: BudgetDraft) => void;
+  onSave: (draft: BudgetDraft) => void;
 };
 
-export function MentorBudgetSettings({ draft, onDraftChange, onOpenSummaryLimit }: SettingsProps) {
-  const utils = trpc.useUtils();
+export function MentorBudgetSettings({ editor, onOpenSummaryLimit }: { editor: BudgetEditor; onOpenSummaryLimit: () => void }) {
   // Always re-read on mount: the summary output limit may have just been saved on another tab.
   const view = trpc.mentorBudget.get.useQuery(undefined, { refetchOnMount: 'always' });
-  const [saved, setSaved] = useState(false);
-  const save = trpc.mentorBudget.update.useMutation({
-    onSuccess: async data => {
-      utils.mentorBudget.get.setData(undefined, data);
-      await utils.mentorBudget.get.invalidate();
-      onDraftChange(null);
-      setSaved(true);
-    },
-  });
 
   if (view.error && !view.data) {
     return <AdminErrorState error={{ message: budgetErrorMessage(view.error, '无法读取导师预算，请稍后重试') }}
@@ -89,20 +107,18 @@ export function MentorBudgetSettings({ draft, onDraftChange, onOpenSummaryLimit 
       </div>
     );
   }
-  const current = draft ?? toBudgetDraft(view.data);
+  const current = editor.draft ?? toBudgetDraft(view.data);
   return (
     <MentorBudgetPanel
       view={view.data}
       draft={current}
       onChange={(purpose, field, value) => {
-        setSaved(false);
-        if (save.error) save.reset();
-        onDraftChange({ ...current, [purpose]: { ...current[purpose], [field]: value } });
+        editor.onEdit({ ...current, [purpose]: { ...current[purpose], [field]: value } });
       }}
-      onSave={() => save.mutate(toBudgetInput(current))}
-      saving={save.isPending}
-      saveError={save.error ? budgetErrorMessage(save.error, '无法保存导师预算，请稍后重试') : null}
-      saved={saved}
+      onSave={() => editor.onSave(current)}
+      saving={editor.saving}
+      saveError={editor.saveError}
+      saved={editor.saved}
       onOpenSummaryLimit={onOpenSummaryLimit}
     />
   );
