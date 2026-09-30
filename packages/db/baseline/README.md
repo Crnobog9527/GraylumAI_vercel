@@ -10,9 +10,25 @@ Building a database from repository files only (a new environment, a local check
    like a migration runs immediately before that migration.
 
 Nothing here is ever applied to staging or any database that already exists. Migration 0148
-converges the result to the staging structure; `node packages/db/tests/run-db-baseline-replay.mjs
---local-only` builds an empty database this way and fails on any difference from the staging
-fingerprint that `packages/db/tests/baseline/expected-differences.json` does not list.
+converged the result to the staging structure.
+
+## Checks
+
+- `node packages/db/tests/run-db-baseline-replay.mjs --local-only` builds an empty database this way
+  and fails on any difference from `packages/db/tests/baseline/built-fingerprint.json`, on a non-empty
+  `account-open-policy-audit.sql`, or if 0148 is not idempotent. CI runs the same build with `--ci`
+  in the integration job (pinned image, no network, no secrets), plus `credit-guard-paths.sql`.
+- The replay also applies every migration from 0067 on a second time right after its first
+  application (as the old workbench fixture did for 0067-0139) and requires the catalog to stay
+  identical, so each new migration must be re-runnable at its own point in history. A migration
+  that genuinely cannot run twice is listed in `NOT_REPEATABLE` in `build-from-files.mjs` with the
+  reason (none today).
+- **A PR that changes the database structure (a new migration, a baseline or bridge change) must
+  regenerate the built fingerprint** with `--local-only --write-built` and commit it; its diff lists
+  exactly which objects the change adds, drops or alters.
+- Before a migration is applied to staging, take a fresh READ ONLY staging fingerprint and run
+  `--local-only --staging <snapshot>`: only `expected-differences.json` may differ (platform objects,
+  constraints and indexes staging never received, and objects of migrations not yet applied there).
 
 ## Rules
 

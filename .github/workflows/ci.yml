@@ -317,13 +317,20 @@ jobs:
           done
 
       # Disposable digest-pinned PostgreSQL, PostgREST and GoTrue containers with
-      # per-run synthetic JWTs. No secrets, no provider network, no Next app or
+      # per-run synthetic JWTs; the schema is built from repository files only
+      # (--schema-from-files: platform stand-in -> packages/db/baseline -> every migration). No secrets, no provider network, no Next app or
       # browser; the runner lists and verifies the excluded app-only cases.
       - name: Integration — BILL2 billing
-        run: node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app
+        run: node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files
 
       - name: Integration — Runtime recovery and streaming
-        run: node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app
+        run: node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files
+
+      # DB-BASELINE: build an empty database from repository files only (platform stand-in ->
+      # packages/db/baseline -> every migration) in the pinned PostgreSQL image and require the
+      # committed built fingerprint, the account-open audit and the credit-guard paths to hold.
+      - name: Integration — Empty-database build from files
+        run: node packages/db/tests/run-db-baseline-replay.mjs --ci --after packages/db/tests/baseline/credit-guard-paths.sql
 
   lint-check:
     name: Lint & Type Check
