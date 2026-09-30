@@ -139,11 +139,65 @@ and independent review (the list is currently empty).
 
 Before and after an approved migration application to staging, capture a fresh
 catalog-only fingerprint with `packages/db/tests/baseline/fingerprint.sql`
-inside a `BEGIN READ ONLY` transaction. Verify `transaction_read_only = on`
-and end with `ROLLBACK`. Retain the snapshot in the existing comparison format
-(`groups` and per-object `objects`, as in `staging-fingerprint.json`), without
-connection strings, credentials, project identifiers or business rows. Compare
-each snapshot against a local file-built database:
+inside a `BEGIN READ ONLY` transaction and end with `ROLLBACK`. From the repository
+root, after installing the locked dependencies, use the command below. Supply
+`DATABASE_URL` through the approved target's private environment; this command
+does not load an environment file or print connection details. Set `SNAPSHOT_OUT`
+to a new filename for each before/after capture (default: `snapshot.json`); it
+refuses to overwrite an existing file. Remote use still requires the applicable
+approval; use a local database for local validation.
+
+The command reuses the existing CTE and group query from `fingerprint.sql`.
+It exports `groups` and per-object `objects`: `acl:` / `defacl:` values remain
+verbatim, while all other object definitions become MD5 hashes. It reads only
+catalogs, checks read-only mode, rolls back before writing the file, and omits
+connection information and business rows from the snapshot and console output.
+
+```bash
+node --input-type=module <<'JS'
+import { readFileSync, writeFileSync } from 'node:fs';
+import pg from 'pg';
+
+let client;
+try {
+  if (!process.env.DATABASE_URL) throw new Error('Missing connection configuration');
+  const source = readFileSync('packages/db/tests/baseline/fingerprint.sql', 'utf8');
+  const marker = source.indexOf('-- FINAL');
+  if (marker < 0) throw new Error('Missing fingerprint query boundary');
+  const cte = source.slice(0, marker);
+  const groupsQuery = source.slice(marker).trim().replace(/;$/, '');
+  const sql = `${cte}
+    SELECT jsonb_build_object(
+      'groups', (${groupsQuery}),
+      'objects', (SELECT jsonb_object_agg(k,
+        CASE WHEN k ~ '^(acl|defacl):' THEN d
+             ELSE md5(coalesce(d, '<null>')) END ORDER BY k)
+        FROM grouped)
+    ) AS snapshot;`;
+  client = new pg.Client({
+    connectionString: process.env.DATABASE_URL,
+    connectionTimeoutMillis: 10000,
+  });
+  await client.connect();
+  await client.query('BEGIN READ ONLY');
+  const mode = await client.query('SHOW transaction_read_only');
+  if (mode.rows[0].transaction_read_only !== 'on') throw new Error('Not read-only');
+  const result = await client.query(sql);
+  await client.query('ROLLBACK');
+  writeFileSync(process.env.SNAPSHOT_OUT || 'snapshot.json',
+    JSON.stringify(result.rows[0].snapshot, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+  console.log('Read-only fingerprint snapshot written.');
+} catch {
+  if (client) await client.query('ROLLBACK').catch(() => {});
+  console.error('Snapshot export failed; no successful capture. Check configuration and output filename privately.');
+  process.exitCode = 1;
+} finally {
+  if (client) await client.end().catch(() => {});
+}
+JS
+```
+
+Compare each exported snapshot against a local file-built database:
 
 ```bash
 node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <read-only-snapshot.json>
