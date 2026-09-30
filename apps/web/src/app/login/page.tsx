@@ -12,8 +12,8 @@ import {
 import { createClient } from '@/lib/supabase';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import {
-  buildVerifyEmailPath, classifyLoginError, EMAIL_VERIFIED_LOGIN_MESSAGE, LOGIN_ERROR_MESSAGES,
-  loginErrorMessage, readAuthFragment,
+  buildAuthCallbackUrl, buildVerifyEmailPath, classifyLoginError, EMAIL_VERIFIED_LOGIN_MESSAGE,
+  LOGIN_ERROR_MESSAGES, loginErrorMessage, readAuthFragment,
 } from '@/lib/authFlow';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildAuthHref, resolveAuthAppUrl, resolveSiteName } from '@/lib/site-config';
@@ -57,9 +57,7 @@ function GoogleIcon({ className }: { className?: string }) {
 }
 
 function getEmailConfirmRedirect(redirectTarget: string) {
-  const callbackUrl = new URL('/auth/callback', resolveAuthAppUrl());
-  callbackUrl.searchParams.set('next', redirectTarget);
-  return callbackUrl.toString();
+  return buildAuthCallbackUrl(resolveAuthAppUrl(), redirectTarget);
 }
 
 export default function LoginPage() {
@@ -109,7 +107,8 @@ function LoginPageContent() {
     }
 
     const errorMessage = loginErrorMessage(error);
-    if (errorMessage) setStatus({ tone: 'error', message: errorMessage });
+    // After a verifier mismatch the email is usually already confirmed: guide, do not alarm.
+    if (errorMessage) setStatus({ tone: error === 'link_needs_login' ? 'info' : 'error', message: errorMessage });
 
     // Errors or tokens from an email link: drop them from the address bar and history first.
     const fragment = readAuthFragment(window.location.hash);

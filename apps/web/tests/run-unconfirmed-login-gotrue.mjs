@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Local only: starts a disposable Postgres + GoTrue (staging's version) + mail catcher, runs
-// src/lib/authFlow.gotrue.test.ts against them, then removes everything.
+// src/lib/authFlow.gotrue.test.ts and src/lib/authLanding.gotrue.test.ts against them, then removes everything.
 // Usage: node apps/web/tests/run-unconfirmed-login-gotrue.mjs --local-only
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -57,7 +57,7 @@ try {
   const mailUrl = `http://127.0.0.1:${port(mail, '8025')}`;
   await waitFor(async () => (await fetch(`${authUrl}/health`)).ok);
   await waitFor(async () => (await fetch(`${mailUrl}/api/v1/info`)).ok);
-  execFileSync('pnpm', ['exec', 'vitest', 'run', 'src/lib/authFlow.gotrue.test.ts'], {
+  execFileSync('pnpm', ['exec', 'vitest', 'run', 'src/lib/authFlow.gotrue.test.ts', 'src/lib/authLanding.gotrue.test.ts'], {
     cwd: web, stdio: 'inherit',
     env: { PATH: process.env.PATH, HOME: process.env.HOME,
       UNCONFIRMED_LOGIN_GOTRUE_URL: authUrl, UNCONFIRMED_LOGIN_MAIL_URL: mailUrl },

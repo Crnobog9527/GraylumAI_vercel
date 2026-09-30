@@ -11,10 +11,24 @@ import { buildAuthHref, resolveAuthAppUrl } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
-import { parseVerifyReason, VERIFY_REASON_MESSAGES } from '@/lib/authFlow';
+import {
+  buildAuthCallbackUrl,
+  parseVerifyReason,
+  readAuthFragment,
+  resendErrorMessage,
+  VERIFY_NEEDS_LOGIN_MESSAGE,
+  VERIFY_REASON_MESSAGES,
+} from '@/lib/authFlow';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 
 type VerifyTone = 'info' | 'success' | 'error';
+
+const REDIRECT_DISPLAY_LIMIT = 48;
+
+function displayRedirect(target: string) {
+  return target.length > REDIRECT_DISPLAY_LIMIT ? `${target.slice(0, REDIRECT_DISPLAY_LIMIT - 1)}…` : target;
+}
 
 export default function VerifyEmailPage() {
   return (
@@ -48,6 +62,10 @@ function VerifyEmailPageContent() {
 
       setEmail(nextEmail);
       setRedirectTarget(nextRedirect);
+      // An email link may carry its error (or tokens) in the fragment; keep it out of the address bar.
+      if (readAuthFragment(window.location.hash)) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
 
       const supabase = createClient();
       const { data } = await supabase.auth.getUser();
@@ -67,7 +85,9 @@ function VerifyEmailPageContent() {
         tone: reason === 'expired' ? 'error' : 'info',
         text: reason
           ? VERIFY_REASON_MESSAGES[reason]
-          : '邮箱账户必须完成验证后，才能进入聊天、个人中心和其他受保护功能。',
+          : data.user
+            ? '邮箱账户必须完成验证后，才能进入聊天、个人中心和其他受保护功能。'
+            : VERIFY_NEEDS_LOGIN_MESSAGE,
       });
     };
 
@@ -97,9 +117,12 @@ function VerifyEmailPageContent() {
       return;
     }
 
+    // Without a session here the status is unknown: the link may have been confirmed elsewhere.
     setMessage({
       tone: 'info',
-      text: '还没有检测到验证完成。请点击邮件中的确认链接，然后再刷新状态。',
+      text: data.user
+        ? '还没有检测到验证完成。请点击邮件中的确认链接，然后再刷新状态。'
+        : VERIFY_NEEDS_LOGIN_MESSAGE,
     });
     setRefreshing(false);
   };
@@ -124,14 +147,11 @@ function VerifyEmailPageContent() {
       return;
     }
 
-    const emailRedirectTo = new URL('/auth/callback', resolveAuthAppUrl());
-    emailRedirectTo.searchParams.set('next', redirectTarget);
-
     const { error } = await supabase.auth.resend({
       type: 'signup',
       email,
       options: {
-        emailRedirectTo: emailRedirectTo.toString(),
+        emailRedirectTo: buildAuthCallbackUrl(resolveAuthAppUrl(), redirectTarget),
         ...captchaOptions,
       },
     });
@@ -139,7 +159,7 @@ function VerifyEmailPageContent() {
     if (error) {
       setMessage({
         tone: 'error',
-        text: getSafeErrorMessage(error, '验证邮件发送失败，请稍后重试。'),
+        text: resendErrorMessage(error),
       });
       setResending(false);
       return;
@@ -281,12 +301,24 @@ function VerifyEmailPageContent() {
               </Button>
             </div>
 
-            <div className="flex flex-col gap-3 rounded-2xl border px-4 py-4 text-sm text-[#b4b4b4] sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
-              <div>
-                验证成功后将进入 <span className="font-mono text-[#f2f2f2]">{redirectTarget}</span>
+            <div
+              className={cn(
+                'flex flex-col gap-3 rounded-2xl border px-4 py-4 text-sm text-[#b4b4b4]',
+                'sm:flex-row sm:items-center sm:justify-between',
+              )}
+              style={{ borderColor: 'rgba(255,255,255,0.08)' }}
+            >
+              <div className="min-w-0">
+                验证成功后将进入{' '}
+                <span className="break-all font-mono text-[#f2f2f2]" title={redirectTarget}>
+                  {displayRedirect(redirectTarget)}
+                </span>
               </div>
-              <div className="flex items-center gap-3">
-                <Link href={buildAuthHref(`/login?email=${encodeURIComponent(email)}`)} className="text-[#f2c94c] underline-offset-4 hover:underline">
+              <div className="flex shrink-0 flex-wrap items-center gap-3 whitespace-nowrap">
+                <Link
+                  href={buildAuthHref(`/login?email=${encodeURIComponent(email)}`)}
+                  className="text-[#f2c94c] underline-offset-4 hover:underline"
+                >
                   返回登录页
                 </Link>
                 <button

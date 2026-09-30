@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
+import { buildVerifyEmailPath, routeCallbackError } from '@/lib/authFlow';
 import { logServerError } from '@/lib/server-log';
 import { resolveAuthAppUrl, resolveSupabaseCookieOptions } from '@/lib/site-config';
 
@@ -148,6 +149,32 @@ function getClientIP(request: NextRequest): string {
   return 'unknown';
 }
 
+// GoTrue sends email and OAuth links to /auth/callback, or to the Site URL root when it did not
+// accept the requested redirect. A code landing anywhere else goes to the server callback, which
+// exchanges it with the verifier cookie this request carries (with duplicate cookie names the browser
+// client reads the older one first). Only the expired-link error code on the root is routed here;
+// other errors keep their existing handling.
+export function routeAuthLanding(request: NextRequest): NextResponse | null {
+  const { pathname, searchParams } = request.nextUrl;
+  if (pathname === '/auth/callback' || pathname.startsWith('/api') || pathname.startsWith('/_next')) {
+    return null;
+  }
+
+  const code = searchParams.get('code');
+  if (code) {
+    const callbackUrl = new URL('/auth/callback', request.url);
+    callbackUrl.searchParams.set('code', code);
+    callbackUrl.searchParams.set('next', sanitizeRedirectTarget(`${pathname}${request.nextUrl.search}`));
+    return NextResponse.redirect(callbackUrl);
+  }
+
+  if (pathname === '/' && routeCallbackError(searchParams)?.to === 'verify-expired') {
+    return NextResponse.redirect(new URL(buildVerifyEmailPath('', '/profile', 'expired'), request.url));
+  }
+
+  return null;
+}
+
 let maintenanceCache: { enabled: boolean; expiresAt: number } | null = null;
 
 function shouldFailClosedMaintenance(): boolean {
@@ -248,6 +275,11 @@ export async function proxy(request: NextRequest) {
         },
       });
     }
+  }
+
+  const authLandingRedirect = routeAuthLanding(request);
+  if (authLandingRedirect) {
+    return authLandingRedirect;
   }
 
   // 判断域名类型

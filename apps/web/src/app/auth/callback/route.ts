@@ -3,7 +3,12 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { appRouter } from '@repo/api/src/root';
 import { createTRPCContext } from '@repo/api/src/trpc';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
-import { buildVerifyEmailPath, routeCallbackError } from '@/lib/authFlow';
+import {
+  buildVerifyEmailPath,
+  classifyCodeExchangeError,
+  routeCallbackError,
+  type LoginErrorCode,
+} from '@/lib/authFlow';
 import { logServerError } from '@/lib/server-log';
 import { resolveAuthCallbackOrigin, resolveSupabaseCookieOptions } from '@/lib/site-config';
 
@@ -34,9 +39,9 @@ export async function GET(request: NextRequest) {
     }
   );
 
-  const loginError = () => {
+  const loginError = (reason: LoginErrorCode = 'callback_failed') => {
     const loginUrl = new URL('/login', authOrigin);
-    loginUrl.searchParams.set('error', 'callback_failed');
+    loginUrl.searchParams.set('error', reason);
     loginUrl.searchParams.set('redirect', next);
     return NextResponse.redirect(loginUrl);
   };
@@ -54,8 +59,11 @@ export async function GET(request: NextRequest) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (error) {
-      logServerError('auth', 'auth_callback_session_exchange_failed');
-      return loginError();
+      const reason = classifyCodeExchangeError(error);
+      logServerError('auth', 'auth_callback_session_exchange_failed', { reason });
+      // A verifier mismatch usually means the email link was opened where this sign-up did not
+      // start; /verify has already confirmed the email, so the visitor should just log in.
+      return loginError(reason);
     }
   }
 

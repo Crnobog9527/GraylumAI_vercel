@@ -1,3 +1,4 @@
+import { sanitizeRedirectTarget } from '@/lib/auth';
 import { getErrorMessageText, getSafeErrorMessage } from '@/lib/safe-error-message';
 
 // Email sign-in outcomes the login page acts on. GoTrue answers a wrong password and an unknown
@@ -48,6 +49,14 @@ export function buildVerifyEmailPath(email: string, redirect: string, reason?: V
   return `/verify-email?${params.toString()}`;
 }
 
+// Where GoTrue sends an email or OAuth link back to. `next` goes through the same sanitizer the
+// callback applies, so a landing's error or code parameters never ride along to the next page.
+export function buildAuthCallbackUrl(origin: string, next: string) {
+  const url = new URL('/auth/callback', origin);
+  url.searchParams.set('next', sanitizeRedirectTarget(next));
+  return url.toString();
+}
+
 // Errors GoTrue appends to the email-link redirect. Only error_code values listed here route to the
 // resend page; the provider's error_description is never shown. access_denied alone (for example a
 // declined Google consent) is not an expired link, so it takes the generic login error instead.
@@ -83,12 +92,42 @@ export function readAuthFragment(hash: string): FragmentOutcome {
 
 // /login?error=<code>. The page shows fixed text for known codes and ignores any other value, so a
 // crafted link cannot put its own words on the login page.
-export type LoginErrorCode = 'callback_failed';
+export type LoginErrorCode = 'callback_failed' | 'link_needs_login';
 
 export const LOGIN_ERROR_MESSAGES: Record<LoginErrorCode, string> = {
   callback_failed: '登录验证失败，请稍后重试。',
+  // /verify already confirmed the email before the code exchange failed in this browser.
+  link_needs_login: '如果你刚点击了验证邮件，邮箱可能已经验证成功，请直接用密码登录。',
 };
 
 export function loginErrorMessage(value: string | null): string | null {
-  return value === 'callback_failed' ? LOGIN_ERROR_MESSAGES.callback_failed : null;
+  return value === 'callback_failed' || value === 'link_needs_login' ? LOGIN_ERROR_MESSAGES[value] : null;
 }
+
+// A PKCE code exchange that failed because this browser does not hold the verifier the link was
+// issued for: opened in another browser or device, or a newer flow replaced the verifier here.
+const VERIFIER_EXCHANGE_ERROR_CODES = new Set([
+  'pkce_code_verifier_not_found',
+  'bad_code_verifier',
+  'flow_state_not_found',
+  'flow_state_expired',
+]);
+
+export function classifyCodeExchangeError(error: unknown): LoginErrorCode {
+  const code = errorCode(error);
+  if (VERIFIER_EXCHANGE_ERROR_CODES.has(code)) return 'link_needs_login';
+  if (!code && /code verifier|code challenge/i.test(getErrorMessageText(error))) return 'link_needs_login';
+  return 'callback_failed';
+}
+
+export const RESEND_RATE_LIMIT_MESSAGE = '发送太频繁，请稍后再试。';
+const RATE_LIMIT_ERROR_CODES = new Set(['over_email_send_rate_limit', 'over_request_rate_limit']);
+
+export function resendErrorMessage(error: unknown) {
+  const status = error && typeof error === 'object' && 'status' in error ? error.status : null;
+  if (status === 429 || RATE_LIMIT_ERROR_CODES.has(errorCode(error))) return RESEND_RATE_LIMIT_MESSAGE;
+  return getSafeErrorMessage(error, '验证邮件发送失败，请稍后重试。');
+}
+
+// The verify page cannot read verification status without a session in this browser.
+export const VERIFY_NEEDS_LOGIN_MESSAGE = '请登录后查看验证状态。';
