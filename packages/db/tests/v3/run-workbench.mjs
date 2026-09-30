@@ -2,6 +2,7 @@
 // Real local Auth + Next HTTP + PostgREST + disposable SQL, with a credential-free source copy.
 import { legacyRuntime, instrumentLegacy, copyLegacyTests, patchLegacyFinanceReader } from './legacy-runtime.mjs';
 import { installWorkbenchBilling } from "./billing-fixture.mjs";
+import { buildFromFiles, installPgCronStub } from "../baseline/build-from-files.mjs";
 import { installAdminSurfacesPreview } from "./admin-surfaces-fixture.mjs";
 import { writeRateLimitCaseReport } from "./local-rate-limit-case-report.mjs";
 import { installLocalRateLimitCases } from "./local-rate-limit-cases.mjs";
@@ -44,7 +45,7 @@ if (previewOptions.persistent) {
 // Resume defaults to the original schema/mode; it never guesses a new bootstrap.
 const args = previewState && !lifecycle.bootstrap && !structuralPreviewArgs(initialArgs).length
   ? [...initialArgs, ...previewState.structuralArgs] : initialArgs;
-if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!arg.startsWith('--case-pattern=')&&!arg.startsWith('--preview-id=')&&!arg.startsWith('--preview-action=')&&!arg.startsWith('--confirm-destroy=')&&!['--staging-host','--with-staging-schema','--with-opc-schema','--opc-only','--runtime-upgrade-only','--with-runtime-schema','--runtime-only','--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--bill2-core-only','--without-app','--bill2-only','--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
+if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!arg.startsWith('--case-pattern=')&&!arg.startsWith('--preview-id=')&&!arg.startsWith('--preview-action=')&&!arg.startsWith('--confirm-destroy=')&&!['--staging-host','--with-staging-schema','--with-opc-schema','--opc-only','--runtime-upgrade-only','--with-runtime-schema','--runtime-only','--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--bill2-core-only','--without-app','--bill2-only','--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve','--schema-from-files'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
 if (lifecycle.controlOnly) { controlPreview(previewOptions, previewState, docker); return; }
 if (previewState && !lifecycle.bootstrap) validateResumeState(previewState, structuralPreviewArgs(args));
 if(args.includes('--real-skill-only')&&lifecycle.runTests&&!process.env.V3_REAL_SKILL_INPUT)throw new Error('V3_REAL_SKILL_INPUT is required for real Skill acceptance');
@@ -72,6 +73,10 @@ const casePattern=args.find(arg=>arg.startsWith('--case-pattern='))?.slice(15);
 const withoutApp=args.includes('--without-app');
 const withoutAppSuite=!withoutApp?null:args.includes('--bill2-core-only')?'bill2':runtimeMode&&stagingSchema&&!opcMode?'runtime':null;
 if(withoutApp&&(!withoutAppSuite||serve||legacyRef||casePattern))throw new Error('--without-app requires --bill2-core-only or --runtime-only --with-staging-schema, without preview, legacy ref or case pattern');
+// DB-BASELINE: build the schema from repository files only (baseline/build-from-files.mjs) instead of
+// the local fixture; limited to the two database/API suites until the other modes are migrated.
+const schemaFromFiles=args.includes('--schema-from-files');
+if(schemaFromFiles&&!withoutAppSuite)throw new Error('--schema-from-files is only supported with the --without-app suites');
 if(casePattern){if(casePattern.length>1000)throw new Error('case pattern too long');new RegExp(casePattern);}
 const testPattern=casePattern??(stagingHost?'^OPC: staging host':opcMode?'^OPC:':runtimeUpgrade?'^RUNTIME UPGRADE:':runtimeMode?'^RUNTIME:':upgradeMode?'^UPGRADE:':args.includes('--bill2-compat-only')?'^(AI:|SLICE:|CHAT: (free and document UI|ordinary init persists|provider usage is persisted|HTTP 429|summary HTTP 429|dual model stages|prepared replay|missing summary configuration|summary dispatched|a summary rejected|server-only summary recovery))':args.includes('--bill2-core-only')?'^BILL2:':args.includes('--bill2-only')?'^(BILL2:|AI:)':args.includes('--workbench-restart-only')?'^runs every configured workflow through browser login':args.includes('--agent-slice-only')?'^SLICE:':args.includes('--ordinary-only')?'^CHAT: (free and document UI|ordinary init persists|provider usage is persisted)':args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:');
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
@@ -235,6 +240,17 @@ try {
     POSTGRES_IMAGE,
   );
   await waitForDb();
+  if (schemaFromFiles) {
+    installPgCronStub(root, db, (argv, input) => execFileSync("docker", ["exec", ...argv], { input, encoding: "utf8" }));
+    const outcome = (run) => { try { run(); return { ok: true }; } catch (error) { return { ok: false, error: String(error.stderr ?? error.message).split("\n").slice(0, 12) }; } };
+    const build = buildFromFiles(root, {
+      applyFile: (path) => outcome(() => apply(path)),
+      applyServerOnly: (text) => outcome(() => execFileSync("docker", ["exec", db, "psql", "-X", "-U", "postgres", "-d", "v3_disposable", "-c", text], { stdio: ["pipe", "pipe", "pipe"] })),
+    });
+    if (build.failed) throw new Error(`schema from files failed at ${build.failed.step}: ${build.failed.error.join(" | ")}`);
+    sql("CREATE ROLE workbench_auth LOGIN SUPERUSER; ALTER ROLE workbench_auth SET search_path=auth,public; INSERT INTO system_settings VALUES ('maintenance_mode','false') ON CONFLICT (key) DO NOTHING;");
+    console.log(`Schema built from repository files: ${build.passed}/${build.steps} steps, bridges ${build.bridges.join(",") || "none"}`);
+  } else {
   apply("packages/db/tests/v3/bootstrap.sql");
   sql(
     "CREATE ROLE workbench_auth LOGIN SUPERUSER; ALTER ROLE workbench_auth SET search_path=auth,public; CREATE TABLE system_settings(key text PRIMARY KEY,value jsonb); INSERT INTO system_settings VALUES ('maintenance_mode','false'); GRANT SELECT ON system_settings TO service_role,anon,authenticated;",
@@ -358,6 +374,7 @@ try {
   if(runtimeSchema&&!upgradeMode){apply('packages/db/migrations/0137_bill2_unstarted_dispatch.sql');apply('packages/db/migrations/0137_bill2_unstarted_dispatch.sql');}
   if(opcSchema&&!upgradeMode){apply('packages/db/migrations/0138_runtime_stopped_pending.sql');apply('packages/db/migrations/0138_runtime_stopped_pending.sql');}
   if(opcSchema&&!upgradeMode){apply('packages/db/migrations/0139_opc_business_context.sql');apply('packages/db/migrations/0139_opc_business_context.sql');}
+  }
   console.log("SQL additive migration and repeat application PASS; runtime schema="+runtimeSchema+"; deferred upgrade="+upgradeMode);
   docker(
     "run",

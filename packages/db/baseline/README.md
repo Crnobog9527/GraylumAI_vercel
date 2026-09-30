@@ -18,6 +18,11 @@ converged the result to the staging structure.
   and fails on any difference from `packages/db/tests/baseline/built-fingerprint.json`, on a non-empty
   `account-open-policy-audit.sql`, or if 0148 is not idempotent. CI runs the same build with `--ci`
   in the integration job (pinned image, no network, no secrets), plus `credit-guard-paths.sql`.
+- The replay also applies every migration from 0067 on a second time right after its first
+  application (as the old workbench fixture did for 0067-0139) and requires the catalog to stay
+  identical, so each new migration must be re-runnable at its own point in history. A migration
+  that genuinely cannot run twice is listed in `NOT_REPEATABLE` in `build-from-files.mjs` with the
+  reason (none today).
 - **A PR that changes the database structure (a new migration, a baseline or bridge change) must
   regenerate the built fingerprint** with `--local-only --write-built` and commit it; its diff lists
   exactly which objects the change adds, drops or alters.

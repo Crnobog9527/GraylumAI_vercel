@@ -884,7 +884,7 @@ it('RUNTIME: ordinary, document Skill without workflow, and separate organizer u
 it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill loading and execution',async()=>{
  const password='Local-'+randomUUID()+'!',email=randomUUID()+'@example.test';
  const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
- const actor=created.data.user.id;await db.query("insert into profiles(id,email,credits,role) values($1,$2,500,'admin')",[actor,email]);
+ const actor=created.data.user.id;await db.query("insert into profiles(id,email,credits,role,nickname) values($1,$2,500,'admin','Fixture')",[actor,email]);
  const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
  const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
  // Bearer credentials let the context build budgeted clients, as the route does.
