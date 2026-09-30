@@ -48,7 +48,7 @@ describe('validateEnv', () => {
     expect(getSafeEnvSummary().OPENING_GRANT_HMAC_KEYS_SET).toBe('✓');
   });
 
-  it('startup refuses a missing or malformed HMAC keyring without logging its value', () => {
+  it('explicit validator invocation rejects a missing or malformed HMAC keyring without logging its value', () => {
     process.env.NODE_ENV = 'production';
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {

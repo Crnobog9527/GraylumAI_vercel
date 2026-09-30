@@ -220,12 +220,12 @@ AC-2 实现须引用最终审查通过的本文版本；本设计不是运行注
 PR-A 封闭账号 → B1 内容擦除通道 → B2 账务擦除通道与受限结算 → C 清除执行与外键改造 → D 单条删除；E 防刷在 A 之后并行。
 
 PR-E（0151）开户赠送防刷：
-- `opening_grant_identity_digests` 只保存 E3 用途、身份类型、密钥版本、HMAC、首次赠送时间和“开户赠送规则取消”到期条件；无身份原文或账号外键。只允许 service_role 读取，经服务端专用 RPC 写入，接入 `account_open_required`。财务余额和流水仍以原 profiles / credit_transactions 为权威。
+- `opening_grant_identity_digests` 只保存 E3 用途、身份类型、密钥版本、HMAC、首次赠送月份（UTC 月初）和“开户赠送规则取消”到期条件；无身份原文或账号外键。只允许 service_role 读取，经服务端专用 RPC 写入，接入 `account_open_required`。财务余额和流水仍以原 profiles / credit_transactions 为权威。
 - 注册的 `opening_grant_claim` 锁 profile，再按固定顺序锁摘要，在同一事务中匹配身份和调用原账务 RPC；匹配旧事实则不赠送，在原账本记金额 0 的拒绝决定，避免零余额恢复路径在改邮箱后补发。封闭账号直接拒绝，购买和退款继续走原路径。
 - API 从已验证的 Auth 身份生成摘要；`account_erasure_confirm_with_digests` 先保存首次赠送事实，再在同一事务调用 0147 确认；摘要失败则整体回滚，不封闭账号。旧确认入口的 service_role 直接执行权限撤销，注销请求仍是唯一封闭审计依据。
 - 与 0150 兼容：确认事务提交后，C 才能在新事务调用正文擦除；同事务调用会按 0150 的屏障返回重试。0151 不改屏障、父对象 guard、`erased_at` 规则或 `ordinary_chat_claim` 撤权，不在持有 profile/摘要锁时调用擦除。正文擦除及删除 Auth 身份后，E3 事实仍保留用于相等匹配。
-- 服务端变量 `OPENING_GRANT_HMAC_KEYS` 使用多版本独立密钥，envValidator 与赠送运行路径均拒绝缺失或错误配置。旧版本及对应密钥须保留；数据库拒绝漏掉已有版本，同版本错误替换密钥不能从摘要自动发现。真实 staging 值由 Owner 亲自配置，不在公开记录中展示；规则取消后才清除此用途事实，备份恢复开放服务前须恢复防刷事实。
-- 部署前总控执行 PR-E 的聚合 SELECT，核对 E 之前已领赠送的封闭账号。若仍有 Auth 身份，C 删除之前必须补摘要；原身份已丢失则不能逆向补出。验证和回退入口见 `packages/db/tests/erasure-e-README.md`；有摘要事实时回退拒绝，避免恢复重复领取。
+- 服务端变量 `OPENING_GRANT_HMAC_KEYS` 使用多版本独立密钥，envValidator 能识别缺失或错误配置，但 `validateEnvOnStartup` 没有生产调用方，不会阻止应用启动；实际建档赠送和注销确认路径会拒绝操作。旧版本及对应密钥须保留；数据库拒绝漏掉已有版本，同版本错误替换密钥不能从摘要自动发现。真实 staging 值由 Owner 亲自配置，不在公开记录中展示；规则取消后才清除此用途事实，备份恢复开放服务前须恢复防刷事实。
+- 部署前总控执行 PR-E 的聚合 SELECT，核对 E 之前已领赠送的封闭账号。若仍有 Auth 身份，C 删除之前必须补摘要：在授权维护会话中复用已验证 Auth 身份和全部保留密钥版本生成摘要，以原 `request_id` 重放 `account_erasure_confirm_with_digests`；幂等返回原注销进度且不改余额，详细步骤见下述 README；原身份已丢失则不能逆向补出。验证和回退入口见 `packages/db/tests/erasure-e-README.md`；有摘要事实时回退拒绝，避免恢复重复领取。
 
 PR-B1a（0149，artifact / agent / research / opc 表）的擦除通道：
 - **只用于已注销账号**：`account_erasure_scrub_content(p_profile_id)` 要求账号已经在 `account_erasure_requests` 里，否则拒绝执行（`ACCOUNT_ERASURE_NOT_CLOSED`）。正文清成 NULL 之后，有十几处重放和冲突检查用 `<>` 比较，结果会被 NULL 跳过；runtime 的"只在已有值时拒绝"会被重新写入；还有若干读取路径会"返回空内容"而不是"拒绝读取"。这些只有在账号还能使用时才会被触发。**单条删除（D7）上线前，PR-D 必须先把这些改成对 `erased_at` 显式拒绝。**
@@ -352,7 +352,7 @@ PR-A 留给后续 PR 的必做事项：
 | credit_packages ([0002][m0002]、[0012][m0012]) | P 套餐定价；不是私人内容 | payment_orders 套餐引用保留；不因注销删除共享套餐 |
 | membership_plans ([0002][m0002]、[0009][m0009]、[0012][m0012]) | P 会员共享配置 | 订阅引用保留；不因注销删除共享权益，基线仍须补证 |
 | account_erasure_requests（PR-A 新增） | M 注销进度：请求 ID、阶段、时间、错误码、重试次数；不含正文、邮箱、文件名 | 引用 profiles（RESTRICT）；随财务占位到期、在 profiles 之前删除；存在时 profiles 的 status/is_deleted/deleted_at 不可回退 |
-| opening_grant_identity_digests（[0151](../../../packages/db/migrations/0151_opening_grant_identity_digests.sql)，PR-E 新增） | E3 防刷：仅用途、类型、密钥版本、HMAC、首次赠送时间、到期条件；无原文，不用于画像 | 无账号 FK；独立于正文、Auth 身份和财务占位删除顺序，开户赠送规则取消后清除；仅 service_role 读取/经专用 RPC 写入，恢复服务前须保留防重事实 |
+| opening_grant_identity_digests（[0151](../../../packages/db/migrations/0151_opening_grant_identity_digests.sql)，PR-E 新增） | E3 防刷：仅用途、类型、密钥版本、HMAC、首次赠送月份（UTC 月初）、到期条件；无原文，不用于画像 | 无账号 FK；独立于正文、Auth 身份和财务占位删除顺序，开户赠送规则取消后清除；仅 service_role 读取/经专用 RPC 写入，恢复服务前须保留防重事实 |
 
 
 ### A.1 可以据此实施的分阶段顺序

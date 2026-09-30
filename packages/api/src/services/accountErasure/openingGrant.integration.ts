@@ -126,13 +126,52 @@ it('legacy ledger facts are remembered before closing; never fabricate a grant f
   await close(legacy.user, legacy.session);
   const digest = openingGrantDigests(legacy.user)[0];
   const stored = (await db.query('SELECT first_granted_at FROM opening_grant_identity_digests WHERE digest=$1', [digest.digest])).rows[0];
-  expect(stored.first_granted_at).toEqual(grantedAt);
+  expect(stored.first_granted_at).toEqual(new Date(Date.UTC(grantedAt.getUTCFullYear(), grantedAt.getUTCMonth(), 1)));
+  expect(stored.first_granted_at).not.toEqual(grantedAt);
+  await expect(db.query("UPDATE opening_grant_identity_digests SET first_granted_at='2026-02-15T12:34:56Z' WHERE digest=$1",
+    [digest.digest])).rejects.toMatchObject({ code: '23514' });
   const none = await account();
   await db.query('INSERT INTO profiles(id,email) VALUES($1,$2)', [none.user.id, none.user.email]);
   await close(none.user, none.session);
   const empty = await db.query('SELECT count(*) FROM opening_grant_identity_digests WHERE digest=$1',
     [openingGrantDigests(none.user)[0].digest]);
   expect(Number(empty.rows[0].count)).toBe(0);
+});
+
+it('backfills a previously closed account using its original request id without changing audit or money', async () => {
+  const legacy = await account();
+  await db.query('INSERT INTO profiles(id,email) VALUES($1,$2)', [legacy.user.id, legacy.user.email]);
+  await db.query("SELECT * FROM atomic_apply_credit_ledger_entry($1::uuid,100,'addition','Synthetic prior gift',"
+    + "'opening_grant:'||($1::uuid)::text)", [legacy.user.id]);
+  const requestId = randomUUID();
+  // Superuser fixture models a closure before 0151 revoked the original service_role entry point.
+  await db.query('SELECT account_erasure_confirm($1,$2)', [legacy.user.id, requestId]);
+  const audit = async () => (await db.query('SELECT * FROM account_erasure_requests WHERE profile_id=$1', [legacy.user.id])).rows;
+  const before = await audit();
+  const digests = openingGrantDigests((await admin.auth.admin.getUserById(legacy.user.id)).data.user!);
+  const facts = async () => (await db.query('SELECT * FROM opening_grant_identity_digests WHERE digest=ANY($1)',
+    [digests.map(item => item.digest)])).rows;
+  expect(await facts()).toHaveLength(0);
+  const replay = () => admin.rpc('account_erasure_confirm_with_digests', {
+    p_profile_id: legacy.user.id, p_request_id: requestId, p_digests: digests,
+  });
+  const first = await replay();
+  expect(first.error).toBeNull();
+  expect(first.data).toMatchObject({ requestId, created: false });
+  const saved = await facts();
+  expect(saved).toHaveLength(digests.length);
+  expect(saved.every(row => row.first_granted_at.getUTCDate() === 1 && row.first_granted_at.getUTCHours() === 0)).toBe(true);
+  const again = await replay();
+  expect(again.error).toBeNull();
+  expect(again.data).toEqual(first.data);
+  expect(await facts()).toEqual(saved);
+  expect(await audit()).toEqual(before);
+  expect(await balance(legacy.user.id)).toBe(100);
+  expect(await decisionCount(legacy.user.id)).toBe(1);
+  await db.query('UPDATE profiles SET email=NULL,nickname=NULL WHERE id=$1', [legacy.user.id]);
+  expect((await admin.auth.admin.deleteUser(legacy.user.id)).error).toBeNull();
+  const registered = await account(legacy.user.email);
+  expect(await bootstrap(registered.user, registered.session)).toBe(0);
 });
 
 it('old key version still matches after rotation and denial survives later email changes', async () => {

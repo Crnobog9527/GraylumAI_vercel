@@ -8,7 +8,9 @@ CREATE TABLE IF NOT EXISTS public.opening_grant_identity_digests (
   kind text NOT NULL CHECK (kind IN ('email', 'oauth')),
   key_version text NOT NULL CHECK (key_version ~ '^[A-Za-z0-9_-]{1,32}$'),
   digest text NOT NULL CHECK (digest ~ '^[0-9a-f]{64}$'),
-  first_granted_at timestamptz NOT NULL,
+  -- UTC month only: never retain the ledger timestamp as an identity linkage.
+  first_granted_at timestamptz NOT NULL
+    CHECK (first_granted_at = date_trunc('month', first_granted_at, 'UTC')),
   expires_when text NOT NULL DEFAULT 'opening_grant_rule_removed'
     CHECK (expires_when = 'opening_grant_rule_removed'),
   PRIMARY KEY (purpose, kind, key_version, digest)
@@ -97,7 +99,7 @@ BEGIN
   END IF;
   IF first_grant IS NOT NULL THEN
     INSERT INTO public.opening_grant_identity_digests(kind, key_version, digest, first_granted_at)
-    SELECT DISTINCT i->>'kind', i->>'key_version', i->>'digest', first_grant
+    SELECT DISTINCT i->>'kind', i->>'key_version', i->>'digest', date_trunc('month', first_grant, 'UTC')
     FROM jsonb_array_elements(p_digests) i ON CONFLICT DO NOTHING;
   END IF;
   RETURN issued;
