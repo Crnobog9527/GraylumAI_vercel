@@ -25,13 +25,19 @@
 
 现有 profiles 在注销后清身份；账本只按账号 ID 防重，且财务保留期限不同于 E3。
 注销审计只存进度，不能混放身份匹配用途。三者均不能独立保证身份擦除后的相等匹配。
-新增一张 `opening_grant_identity_digests`，只存用途、身份类型、密钥版本、HMAC、首次赠送月份（UTC 月初，数据库 CHECK 拒绝更细精度）、
+新增一张 `opening_grant_identity_digests`，只存用途、身份类型、密钥版本、HMAC、首次开户赠送决定月份（UTC 月初，数据库 CHECK 拒绝更细精度）、
 规则取消即清除的到期条件；没有邮箱、issuer、subject、昵称、账号 FK 或内容。
 注册校验与现有账务 RPC 同一事务，用有序事务锁防并发重复赠送；不新增钱包、调度器、队列或运行平台。
-余额/流水仍以 profiles / credit_transactions 为权威；摘要表只证明该身份曾领过开户赠送。
+余额/流水仍以 profiles / credit_transactions 为权威；摘要表只用于判断该身份已有开户赠送决定，不代表每项摘要都对应正金额获赠。
 新 RPC 只授予 service_role，赠送前拒绝封闭账号。新表 RLS、account_open_required 策略和现有注销审计接入。
 摘要匹配导致不赠送时，在既有账本写金额 0 的防重决定；不改变余额，防止零余额资料后来
-换邮箱或遇到响应丢失时被旧恢复流程补发。首次赠送事实只来自正金额原流水或已有摘要事实。
+换邮箱或遇到响应丢失时被旧恢复流程补发。只有本账号在精确幂等键 `opening_grant:<profile_id>` 下已有决定（含 0 元拒赠），才保留当前身份摘要。
+`first_granted_at` 表示首次开户赠送决定所在月份：优先首次正金额赠送；没有正金额时取决定流水，
+再与匹配的 `prior_grant` 取较早者，统一截断到 UTC 月初。完全没有决定的账号不记录摘要。
+版本检查使用 `(purpose, key_version)` 索引和递归 CTE，每次仅跳查一个不同版本；
+主键的 kind 位于 key_version 前，不能满足此跳查，因此新增这一索引是最小必要改动。
+不加版本登记表，不增加权限入口；遗漏任何已保留版本仍拒绝领取和注销。
+本地 10 万行、三个版本的 EXPLAIN 对比见 [性能证据](erasure-e-version-plan.md)。
 
 旧确认入口调用盘点：生产只有 `services/accountErasure/service.ts`，已改为带摘要的包装函数；
 `service.test.ts`、`accountErasure.integration.ts` 同步改调用。E 权限测试以新 SQL 会话证明
@@ -107,6 +113,16 @@ active 必须在 keys 内。新增版本时保留所有仍有摘要的旧版本�
 - 总控已审 cdc201a2，无 P0/P1，要求本轮修四项 P2；新候选复核及独立审查待进行。
   NOT_RUN：浏览器/staging 验收、真实密钥配置、远程应用迁移。
 
+### 第三轮修复验证（2026-10-01）
+
+- 本机完整建库：5 项 PR-A + 13 项 E 集成用例通过。新增拒赠后改邮箱/换 OAuth 主体，
+  注销并删除 Auth 后重注册仍为单笔 +0；新身份仍获 100；重复确认摘要不重复；
+  拒赠月份回退、正金额月份、prior 更早月份、精确幂等键及无决定不写入均覆盖。
+- 版本性能夹具：10 万行/3 版本，前后 EXPLAIN、空集合/全版本、逐一漏版本对两个 RPC 的拒绝均通过。
+- 0151 连续两次、权限及 account-open 审计、完整 catalog 回退/重应用、有摘要拒绝回退均通过。
+- `--local-only --write-built` 154 步、85 次重复迁移通过；指纹仅变更 helper 函数体与新增索引。
+  API lint/typecheck、代码大小、diff check 通过。当前 head 的 CI 与独立复审状态以 PR Handoff 为准。
+
 ## staging 防刷验收边界（Owner 已接受）
 
 依据[Owner 接受记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/538#issuecomment-5916532310)
@@ -147,7 +163,7 @@ Owner 先配置真实密钥 → 总控取得批准后读聚合事实、应用 01
 
    这是维护补存，不调用需用户重新登录的 `confirmAccountErasure` HTTP/service 流程，
    不解除账号封闭，不重复撤销 Auth，也不触发 C 擦除。RPC 在 profile 锁内先补事实，再返回原注销记录。
-   `p_allow_grant=false`，只从正金额既有流水/已有摘要取事实，不新增赠送或 0 值决定；月份统一为 UTC 月初。
+   `p_allow_grant=false`，只从精确开户决定流水（含 0 元）及已有摘要取事实，不新增赠送或 0 值决定；月份统一为 UTC 月初。
 4. 要求无 error、`created=false`、返回原 requestId；在受限会话按全部预期 kind/version/digest
    相等查询，确认记录齐全、到期条件正确，再比对原注销行、余额和开户流水笔数均未改变。
    只输出成功/缺失/失败数量。超时或结果不明先查上述事实，不盲目重复其他注销副作用；
@@ -163,11 +179,11 @@ Owner 先配置真实密钥 → 总控取得批准后读聚合事实、应用 01
 ### 已知限制（总控 P3，当前不扩范围）
 
 - 点号和加号别名不合并，沿用 §8 已接受的身份规则；keyring 的 active 字段目前只做校验。
-- 被拒账号记英文 +0 决定；后续请求仍可能走 recover 查询并记录 warn；版本检查每次扫描摘要表。
+- 被拒账号记英文 +0 决定；后续请求仍可能走 recover 查询并记录 warn；版本检查已按第三轮 P2 改为索引跳查。
 - 邀请奖励重复领取不属于 E3，本 PR 不处理，由总控另立任务。
 
 Handoff：done = HMAC/环境校验、原子赠送与封闭、回退/审计、本地证明、
 同步 0150/0151 编号、重生成指纹和任务文档；
 next = 修复候选 CI 全绿 → 总控复核 → ready / 独立审查 → 依上述批准顺序配置、迁移和合并；
-blockers = 历史封闭账号聚合事实未取得、真实 staging 密钥尚未由 Owner 配置。
+blockers = 第三轮修复待当前 head CI、总控增量审和独立复审；远程预检/验收未执行。
 当前保持 draft，独立审查尚未完成，不是 clean；本 writer 不合并、不配置真实环境、不应用远程迁移。

@@ -15,6 +15,11 @@ CREATE TABLE IF NOT EXISTS public.opening_grant_identity_digests (
     CHECK (expires_when = 'opening_grant_rule_removed'),
   PRIMARY KEY (purpose, kind, key_version, digest)
 );
+-- The primary key places kind before key_version, so it cannot seek distinct versions directly.
+CREATE INDEX IF NOT EXISTS opening_grant_identity_versions_idx
+  ON public.opening_grant_identity_digests (purpose, key_version);
+COMMENT ON COLUMN public.opening_grant_identity_digests.first_granted_at IS
+  'UTC month of the first opening-grant decision: earliest positive grant if any, otherwise earliest decision (including denial); use an earlier matched identity fact when present';
 ALTER TABLE public.opening_grant_identity_digests ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.opening_grant_identity_digests FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT ON TABLE public.opening_grant_identity_digests TO service_role;
@@ -59,8 +64,18 @@ BEGIN
     END IF;
   END LOOP;
   -- Forgetting a retained version must fail closed instead of silently making old facts invisible.
-  IF EXISTS (SELECT 1 FROM public.opening_grant_identity_digests d WHERE d.purpose = 'opening_grant'
-    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(p_digests) i WHERE i->>'key_version' = d.key_version)) THEN
+  -- Seek one row per distinct version, never walk all identities for the all-versions-present case.
+  IF EXISTS (WITH RECURSIVE retained_versions(key_version) AS (
+    (SELECT key_version FROM public.opening_grant_identity_digests
+      WHERE purpose = 'opening_grant' ORDER BY key_version LIMIT 1)
+    UNION ALL
+    SELECT next_version.key_version FROM retained_versions v CROSS JOIN LATERAL (
+      SELECT key_version FROM public.opening_grant_identity_digests
+      WHERE purpose = 'opening_grant' AND key_version > v.key_version ORDER BY key_version LIMIT 1
+    ) next_version
+  ) SELECT 1 FROM retained_versions v
+    WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements(p_digests) i
+      WHERE i->>'key_version' = v.key_version)) THEN
     RAISE EXCEPTION 'OPENING_GRANT_KEY_VERSION_MISSING' USING ERRCODE = '22023';
   END IF;
   FOR lock_key IN SELECT DISTINCT 'opening_grant:' || (value->>'kind') || ':'
@@ -69,11 +84,11 @@ BEGIN
     PERFORM pg_advisory_xact_lock(hashtextextended(lock_key, 0));
   END LOOP;
 
-  -- The existing ledger is the authority for whether THIS account received an opening grant.
-  SELECT min(created_at) INTO first_grant FROM public.credit_transactions
-    WHERE user_id = p_profile_id AND idempotency_key = 'opening_grant:' || p_profile_id::text AND amount > 0;
-  SELECT EXISTS (SELECT 1 FROM public.credit_transactions WHERE user_id = p_profile_id
-    AND idempotency_key = 'opening_grant:' || p_profile_id::text) INTO decided;
+  -- The exact account ledger decision is authoritative, including a zero-value denial.
+  -- Prefer its earliest positive grant; only accounts without one fall back to the decision time.
+  SELECT coalesce(min(created_at) FILTER (WHERE amount > 0), min(created_at)), count(*) > 0
+    INTO first_grant, decided FROM public.credit_transactions
+    WHERE user_id = p_profile_id AND idempotency_key = 'opening_grant:' || p_profile_id::text;
   SELECT min(d.first_granted_at) INTO prior_grant
     FROM public.opening_grant_identity_digests d JOIN jsonb_array_elements(p_digests) i
       ON d.purpose = 'opening_grant' AND d.kind = i->>'kind'
@@ -87,6 +102,7 @@ BEGIN
       WHERE user_id = p_profile_id AND idempotency_key = 'opening_grant:' || p_profile_id::text;
     IF first_grant IS NULL THEN RAISE EXCEPTION 'OPENING_GRANT_LEDGER_MISSING'; END IF;
     issued := true;
+    decided := true;
   END IF;
   IF p_allow_grant AND NOT issued AND NOT decided THEN
     -- A zero-value decision in the existing ledger prevents bootstrap recovery after an email
@@ -96,8 +112,9 @@ BEGIN
       balance_before, balance_after, ledger_type, reason_code, source_type)
     VALUES (p_profile_id, 0, 'addition', 'Opening grant already claimed by this identity',
       'opening_grant:' || p_profile_id::text, balance, balance, 'adjustment', 'opening_grant_ineligible', 'system');
+    decided := true;
   END IF;
-  IF first_grant IS NOT NULL THEN
+  IF decided AND first_grant IS NOT NULL THEN
     INSERT INTO public.opening_grant_identity_digests(kind, key_version, digest, first_granted_at)
     SELECT DISTINCT i->>'kind', i->>'key_version', i->>'digest', date_trunc('month', first_grant, 'UTC')
     FROM jsonb_array_elements(p_digests) i ON CONFLICT DO NOTHING;

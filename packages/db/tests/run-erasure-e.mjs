@@ -6,6 +6,7 @@ import { createHmac, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildFromFiles, installPgCronStub } from './baseline/build-from-files.mjs';
+import { checkVersionPlan } from './erasure-e-version-plan.mjs';
 import { POSTGRES_IMAGE, POSTGREST_IMAGE, GOTRUE_IMAGE } from './v3/images.mjs';
 
 if (process.argv.slice(2).join(' ') !== '--local-only' || process.env.CI) throw new Error('Require local-only');
@@ -79,6 +80,8 @@ try {
   assert.equal(sql(read('packages/db/tests/erasure-e-audit.sql')), '');
   assert.equal(sql(read('packages/db/tests/account-open-policy-audit.sql')), '');
   console.log('PASS full file build, migration twice, exact catalog rollback/reapply, both audits');
+
+  checkVersionPlan(sql);
 
   // Supplementary synthetic table for the original PR-A column-grant RLS regression; the
   // authoritative product schema above is never replaced by this fixture. Drop before snapshots.

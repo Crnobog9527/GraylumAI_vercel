@@ -10,6 +10,7 @@ END $$;
 DROP FUNCTION public.account_erasure_confirm_with_digests(uuid, uuid, jsonb);
 DROP FUNCTION public.opening_grant_claim(uuid, jsonb);
 DROP FUNCTION public.opening_grant_remember(uuid, jsonb, boolean);
+DROP INDEX public.opening_grant_identity_versions_idx;
 DROP TABLE public.opening_grant_identity_digests;
 GRANT EXECUTE ON FUNCTION public.account_erasure_confirm(uuid, uuid) TO service_role;
 COMMIT;

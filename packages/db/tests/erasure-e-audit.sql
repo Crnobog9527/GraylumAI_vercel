@@ -13,4 +13,18 @@ WHERE p.pronamespace = 'public'::regnamespace
   AND (has_function_privilege('anon', p.oid, 'EXECUTE') OR has_function_privilege('authenticated', p.oid, 'EXECUTE'))
 UNION ALL
 SELECT 'account_erasure_confirm(uuid,uuid)', 'digest_step_bypass'
-WHERE has_function_privilege('service_role', 'public.account_erasure_confirm(uuid,uuid)', 'EXECUTE');
+WHERE has_function_privilege('service_role', 'public.account_erasure_confirm(uuid,uuid)', 'EXECUTE')
+UNION ALL
+SELECT 'opening_grant_remember(uuid,jsonb,boolean)', 'service_private_helper_access'
+WHERE has_function_privilege('service_role', 'public.opening_grant_remember(uuid,jsonb,boolean)', 'EXECUTE')
+UNION ALL
+SELECT 'digest_table', 'service_access'
+WHERE NOT has_table_privilege('service_role', 'public.opening_grant_identity_digests', 'SELECT')
+  OR has_table_privilege('service_role', 'public.opening_grant_identity_digests', 'INSERT,UPDATE,DELETE')
+UNION ALL
+SELECT 'opening_grant_identity_versions_idx', 'missing_or_invalid_version_index'
+WHERE NOT EXISTS (SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
+  WHERE c.relnamespace='public'::regnamespace AND c.relname='opening_grant_identity_versions_idx'
+    AND i.indrelid='public.opening_grant_identity_digests'::regclass AND i.indisvalid AND i.indisready
+    AND pg_get_indexdef(i.indexrelid,1,true)='purpose'
+    AND pg_get_indexdef(i.indexrelid,2,true)='key_version' AND i.indnkeyatts=2);

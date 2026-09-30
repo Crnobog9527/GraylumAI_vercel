@@ -174,6 +174,104 @@ it('backfills a previously closed account using its original request id without 
   expect(await bootstrap(registered.user, registered.session)).toBe(0);
 });
 
+it.each(['email', 'oauth'])('denial then changed %s survives closure, replay and re-registration', async kind => {
+  const oldSubject = `test-old-subject-${randomUUID()}`, subject = `test-subject-${randomUUID()}`;
+  const google = async (user: User, sub = subject) => {
+    // GoTrue may add an email identity on email change; replace only the synthetic Google identity.
+    const updated = await db.query("UPDATE auth.identities SET provider='google',provider_id=$2,identity_data="
+      + "jsonb_build_object('sub',$2::text,'iss','https://accounts.google.com','email',$3::text)"
+      + " WHERE id=(SELECT id FROM auth.identities WHERE user_id=$1 ORDER BY (provider='google') DESC LIMIT 1)",
+    [user.id, sub, user.email]);
+    expect(updated.rowCount).toBe(1);
+    const found = await admin.auth.admin.getUserById(user.id);
+    expect(found.error).toBeNull();
+    return found.data.user!;
+  };
+  const first = await account();
+  const original = kind === 'oauth' ? await google(first.user, oldSubject) : first.user;
+  expect(await bootstrap(original, first.session)).toBe(100);
+  await close(original, first.session);
+  const denied = await account(first.user.email);
+  const deniedUser = kind === 'oauth' ? await google(denied.user, oldSubject) : denied.user;
+  expect(await bootstrap(deniedUser, denied.session)).toBe(0);
+  // Only the exact zero-value decision exists; use a past non-month-boundary fixture timestamp.
+  await db.query("UPDATE credit_transactions SET created_at='2025-04-19T17:23:45Z' WHERE user_id=$1"
+    + " AND idempotency_key='opening_grant:'||$1::text", [denied.user.id]);
+  const email = `test-changed-${randomUUID()}@example.test`;
+  const changed = await admin.auth.admin.updateUserById(denied.user.id, { email, email_confirm: true });
+  expect(changed.error).toBeNull();
+  const user = kind === 'oauth' ? await google(changed.data.user!) : changed.data.user!;
+  const digests = openingGrantDigests(user), requestId = randomUUID();
+  const facts = async () => (await db.query('SELECT * FROM opening_grant_identity_digests WHERE digest=ANY($1)',
+    [digests.map(d => d.digest)])).rows;
+  expect(await facts()).toHaveLength(0);
+  const closeRpc = () => admin.rpc('account_erasure_confirm_with_digests', {
+    p_profile_id: user.id, p_request_id: requestId, p_digests: digests,
+  });
+  const closed = await closeRpc();
+  expect(closed.error).toBeNull();
+  expect(closed.data).toMatchObject({ created: true, requestId });
+  const saved = await facts();
+  expect(saved).toHaveLength(digests.length);
+  expect(saved.every(row => row.first_granted_at.toISOString() === '2025-04-01T00:00:00.000Z')).toBe(true);
+  const replay = await closeRpc();
+  expect(replay.error).toBeNull();
+  expect(replay.data).toMatchObject({ created: false, requestId });
+  expect(await facts()).toEqual(saved);
+  expect(await balance(user.id)).toBe(0);
+  expect(await decisionCount(user.id)).toBe(1);
+  await db.query('UPDATE profiles SET email=NULL,nickname=NULL WHERE id=$1', [user.id]);
+  expect((await admin.auth.admin.deleteUser(user.id)).error).toBeNull();
+  // OAuth uses a different email, proving that the changed subject alone prevents the grant.
+  const again = await account(kind === 'email' ? email : undefined);
+  expect(await bootstrap(kind === 'oauth' ? await google(again.user) : again.user, again.session)).toBe(0);
+  expect((await db.query('SELECT amount FROM credit_transactions WHERE user_id=$1', [again.user.id])).rows)
+    .toEqual([{ amount: 0 }]);
+  const fresh = await account();
+  expect(await bootstrap(fresh.user, fresh.session)).toBe(100);
+});
+
+it('decision month uses exact ledger keys and the earlier prior fact; no decision stores nothing', async () => {
+  const earlier = await account();
+  expect(await bootstrap(earlier.user, earlier.session)).toBe(100);
+  const prior = openingGrantDigests(earlier.user);
+  await db.query("UPDATE opening_grant_identity_digests SET first_granted_at='2024-02-01' WHERE digest=ANY($1)",
+    [prior.map(d => d.digest)]);
+  for (const amount of [0, 100]) {
+    const actor = await account();
+    await db.query('INSERT INTO profiles(id,email) VALUES($1,$2)', [actor.user.id, actor.user.email]);
+    if (amount === 0) {
+      const denied = await admin.rpc('opening_grant_claim', { p_profile_id: actor.user.id, p_digests: prior });
+      expect(denied.error).toBeNull();
+      expect(denied.data).toEqual({ granted: false });
+    } else {
+      await db.query("SELECT * FROM atomic_apply_credit_ledger_entry($1::uuid,100,'addition','Synthetic decision',"
+        + "'opening_grant:'||($1::uuid)::text)", [actor.user.id]);
+    }
+    await db.query("UPDATE credit_transactions SET created_at='2025-08-17T12:34:56Z' WHERE user_id=$1", [actor.user.id]);
+    const current = openingGrantDigests(actor.user);
+    const result = await admin.rpc('account_erasure_confirm_with_digests', {
+      p_profile_id: actor.user.id, p_request_id: randomUUID(), p_digests: [...prior, ...current],
+    });
+    expect(result.error).toBeNull();
+    const rows = (await db.query('SELECT first_granted_at FROM opening_grant_identity_digests WHERE digest=ANY($1)',
+      [current.map(d => d.digest)])).rows;
+    expect(rows).toHaveLength(current.length);
+    expect(rows.every(row => row.first_granted_at.toISOString() === '2024-02-01T00:00:00.000Z')).toBe(true);
+  }
+  const none = await account();
+  await db.query('INSERT INTO profiles(id,email) VALUES($1,$2)', [none.user.id, none.user.email]);
+  await db.query("SELECT * FROM atomic_apply_credit_ledger_entry($1::uuid,100,'addition','Unrelated purchase',"
+    + "'opening_grant:'||($1::uuid)::text||':other')", [none.user.id]);
+  const current = openingGrantDigests(none.user);
+  const result = await admin.rpc('account_erasure_confirm_with_digests', {
+    p_profile_id: none.user.id, p_request_id: randomUUID(), p_digests: [...prior, ...current],
+  });
+  expect(result.error).toBeNull();
+  expect(Number((await db.query('SELECT count(*) FROM opening_grant_identity_digests WHERE digest=ANY($1)',
+    [current.map(d => d.digest)])).rows[0].count)).toBe(0);
+});
+
 it('old key version still matches after rotation and denial survives later email changes', async () => {
   const first = await account();
   expect(await bootstrap(first.user, first.session)).toBe(100);
