@@ -370,7 +370,7 @@ WHERE key = 'fusion_compare_max_models';
   用户输入不能提供 ID/等级/额度。输出不含订阅、订单或后台内部数据。
 - 计划 create/update 沿原 admin API，局部拆到 `adminMembershipPlans.ts`；实际变更等级
   必须显式给出三项权益，并用读取到的原 level 作为写入条件防止并发绕过。只改单项不重置其余字段。
-- 追加迁移暂用 `0153_membership_entitlements.sql`，不动 RLS/grant/旧 text 字段、不新增表/唯一约束。
+- 追加迁移使用 `0153_membership_entitlements.sql`（紧随 staging 的 0152），不动 RLS/grant/旧 text 字段、不新增表/唯一约束。
   先迁移后发布新 API；迁移前新 API fail closed。迁移后、API 发布前旧创建接口不能创建新计划，
   因此该短暂窗口暂停后台新增计划；旧读取/购买使用的字段不变。回退先退 API，再由总控按审批备份
   三列/D3 配置后决定是否回退结构；回退会丢失这四项新配置，不能说成无损。
@@ -378,12 +378,17 @@ WHERE key = 'fusion_compare_max_models';
   用隔离 Docker、合成身份、新 psql 会话验证默认值、越界拒绝、管理员值重复应用保留、
   ACL/RLS 允许/拒绝及结构回退；临时指纹不写共享 built 文件。
 - API/SQL 单测不替代消费者原子事务。Fusion/LIB-DOCS 实际并发准入、恢复与冻结仍按第 8 节交付。
-- #497 也修改 `scripts/code-size-baseline.json`；本次 admin.ts 缩小后需降低对应条目，
-  该共享文件暂不修改，已在 PR Handoff 请总控协调。前序 #537/#538/#539 和 built 指纹继续按第 7 节顺序。
+- 按总控条目级共享写入决定，仅降低 `scripts/code-size-baseline.json` 的 admin.ts 条目；
+  同步 staging 时保留其他 writer 的条目，不运行整体 `--update`。
+- 2026-10-01 按 Owner 通知以普通 merge 同步 staging `0470e7a7`，保留 #542 通用设置禁写
+  `runtime_purpose_budgets` 的分支及 `mentorBudget.test.ts` 单条/批量拒绝用例；
+  `settings.test.ts` 没有文本冲突，仅叠加本任务的权益 fixture 字段。
+  本任务业务和测试增删内容与同步前保持一致；额外更新文档和本地重建的 built 指纹。
 
 ## 11. 当前交接状态
 
 - 已完成：方案、staging 事实及 P1–P5 审查结论归档；PR-1 获准开始。
 - PR-1 实施和验证结果以 PR Handoff 的当前 head 为准，本文不静态宣称 CI 全绿。
-- 共享指纹等待前序合并；本地测试限 local-only，不应用远程迁移。
+- 前序 0150–0152 已随 staging 同步；按授权本地完整建库并以 `--write-built` 更新共享指纹。
+  本地测试限 local-only，不连接远程数据库、不应用远程迁移。
 - 下一步：完成 PR-1 及完整 CI 后交总控审；保持 draft，不自行标 ready、触发机器人审或合并。

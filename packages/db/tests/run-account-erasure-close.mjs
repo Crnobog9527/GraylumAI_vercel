@@ -11,6 +11,12 @@ import { GOTRUE_IMAGE, POSTGRES_IMAGE, POSTGREST_IMAGE } from './v3/images.mjs';
 if (process.argv.slice(2).join(' ') !== '--local-only') throw new Error('Require --local-only');
 if (process.env.CI) throw new Error('Diagnostic fixture is local-only');
 const root = resolve(import.meta.dirname, '../../..');
+// PR-E changes the confirmation entry point; use its complete file-built fixture for current API
+// coverage, including all original PR-A cases. The historical PR-A-only diagnostic remains below.
+if (readdirSync(resolve(root, 'packages/db/migrations')).some(name => name.endsWith('_opening_grant_identity_digests.sql'))) {
+  await import('./run-erasure-e.mjs');
+  process.exit(process.exitCode ?? 0);
+}
 for (const path of ['.env', '.env.local', 'apps/web/.env.local', 'packages/api/.env.local']) {
   if (existsSync(resolve(root, path))) throw new Error('Use a credential-free worktree');
 }

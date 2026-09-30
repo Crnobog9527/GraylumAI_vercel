@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { appRouter } from '@repo/api/src/root';
 import { createTRPCContext } from '@repo/api/src/trpc';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
+import { buildVerifyEmailPath, routeCallbackError } from '@/lib/authFlow';
 import { logServerError } from '@/lib/server-log';
 import { resolveAuthCallbackOrigin, resolveSupabaseCookieOptions } from '@/lib/site-config';
 
@@ -33,32 +34,53 @@ export async function GET(request: NextRequest) {
     }
   );
 
+  const loginError = () => {
+    const loginUrl = new URL('/login', authOrigin);
+    loginUrl.searchParams.set('error', 'callback_failed');
+    loginUrl.searchParams.set('redirect', next);
+    return NextResponse.redirect(loginUrl);
+  };
+
+  // An email link that failed (expired, already used) arrives with error params and no code.
+  const linkError = routeCallbackError(requestUrl.searchParams);
+  if (linkError) {
+    logServerError('auth', 'auth_callback_link_error');
+    return linkError.to === 'verify-expired'
+      ? NextResponse.redirect(new URL(buildVerifyEmailPath('', next, 'expired'), authOrigin))
+      : loginError();
+  }
+
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (error) {
       logServerError('auth', 'auth_callback_session_exchange_failed');
-      const loginUrl = new URL('/login', authOrigin);
-      loginUrl.searchParams.set('error', '登录验证失败，请稍后重试');
-      return NextResponse.redirect(loginUrl);
+      return loginError();
     }
   }
 
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (user && !isEmailVerified(user)) {
-    const verifyUrl = new URL('/verify-email', authOrigin);
-    verifyUrl.searchParams.set('email', user.email ?? '');
-    verifyUrl.searchParams.set('redirect', next);
-    return NextResponse.redirect(verifyUrl);
+  // No session: a link GoTrue answered in the URL fragment (resent links do not use PKCE), which
+  // the server never sees. The browser keeps that fragment across this redirect and the login
+  // page reads it (readAuthFragment): an expired link goes to the resend page, a confirmed one
+  // shows "please log in", and the fragment is cleared either way.
+  if (!user) {
+    const loginUrl = new URL('/login', authOrigin);
+    loginUrl.searchParams.set('redirect', next);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  if (!isEmailVerified(user)) {
+    return NextResponse.redirect(new URL(buildVerifyEmailPath(user.email ?? '', next), authOrigin));
   }
 
   const pendingInviteCode =
-    user?.user_metadata && typeof user.user_metadata.invite_code === 'string'
+    user.user_metadata && typeof user.user_metadata.invite_code === 'string'
       ? user.user_metadata.invite_code.trim()
       : '';
 
-  if (user && pendingInviteCode) {
+  if (pendingInviteCode) {
     try {
       const ctx = await createTRPCContext({
         headers: request.headers,

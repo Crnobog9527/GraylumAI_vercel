@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { DialogCaptcha } from '@/components/auth/DialogCaptcha';
+import { keepDialogOpenForCaptcha } from '@/lib/dialogCaptcha';
 import { buildErasureImpactLines, type ImpactLine } from '@/lib/account-erasure';
 import { useAccountErasure } from '@/hooks/use-account-erasure';
 
@@ -62,7 +63,7 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
       </div>
 
       <Dialog open={erasure.open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-lg" style={panelStyle}>
+        <DialogContent className="sm:max-w-lg" style={panelStyle} onInteractOutside={keepDialogOpenForCaptcha}>
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--text-primary)' }}>
               {erasure.step === 'done' ? '账号已注销' : '注销账号'}

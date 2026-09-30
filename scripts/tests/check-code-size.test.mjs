@@ -26,7 +26,7 @@ test('measures lines and overlong lines in code points', () => {
 });
 
 test('checks production source files only', () => {
-  for (const file of ['apps/web/src/app/page.tsx', 'packages/api/src/trpc.ts', 'scripts/db-push-guard.mjs']) assert.ok(isCheckedFile(file), file);
+  for (const file of ['apps/web/src/app/page.tsx', 'packages/api/src/trpc.ts', 'scripts/check-migration-ledger.mjs']) assert.ok(isCheckedFile(file), file);
   for (const file of [
     'packages/api/src/routers/ai.test.ts',
     'packages/api/src/services/runtime/runtime.integration.ts',

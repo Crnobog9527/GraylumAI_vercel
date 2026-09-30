@@ -172,7 +172,7 @@ jobs:
       - name: Launch regression — proxy hostname behavior
         run: pnpm test:ci:proxy-hostname
 
-      - name: CI safeguards — migration ledger and db push guard
+      - name: CI safeguards — migration ledger and database baseline
         run: pnpm test:ci:safeguards
 
   build-and-e2e:
