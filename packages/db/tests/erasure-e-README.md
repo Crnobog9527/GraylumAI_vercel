@@ -33,6 +33,14 @@
 摘要匹配导致不赠送时，在既有账本写金额 0 的防重决定；不改变余额，防止零余额资料后来
 换邮箱或遇到响应丢失时被旧恢复流程补发。首次赠送事实只来自正金额原流水或已有摘要事实。
 
+旧确认入口调用盘点：生产只有 `services/accountErasure/service.ts`，已改为带摘要的包装函数；
+`service.test.ts`、`accountErasure.integration.ts` 同步改调用。E 权限测试以新 SQL 会话证明
+service_role 直接调用旧入口被拒绝。`baseline/credit-guard-paths.sql` 的 service_role 调用
+也改为优先使用带摘要入口，仅在旧基线不存在 E 函数时保留原路径。
+`run-account-erasure-close.mjs` 已在当前 E 存在时
+转到完整基线 runner；其旧 0147-only 夹具/ACL 核验只保留作历史分支诊断。
+`account-erasure-close-rollback.sql` 是历史结构回退，E 回退脚本只在无摘要事实时恢复旧权限。
+
 ## 密钥配置（总控向 Owner 请求，尚未执行）
 
 变量名 `OPENING_GRANT_HMAC_KEYS`，仅服务端：JSON 格式
@@ -53,7 +61,9 @@ active 必须在 keys 内。新增版本时保留所有仍有摘要的旧版本�
 当前 #537 head `1b67501392513c743884c6e44f669875d791a31c` 已包含 0150，并写入
 `built-fingerprint.json` 与 `DATA-ERASURE.md`。这两个文件暂停写入，PR 已记录实际重叠。
 本任务暂用 0151；当前 base 只有 0149，因此 migration ledger 报缺 0150。
-推荐总控先让 #537 合入 staging，再确认本 writer 独占 E 的指纹/附录更新；随后更新分支，
+总控已在 [PR 留言](https://github.com/Crnobog9527/GraylumAI_vercel/pull/538#issuecomment-5907196539)
+明确顺序 #537 → #538 → #539；其他实现/测试可继续，两个共享文件等 #537 合并后的通知再写。
+收到通知后更新分支，
 按合并时 staging 核对编号，并在同一 PR 重跑 --local-only --write-built。不能放虚构迁移补空号。
 `scripts/code-size-baseline.json` 在 #497 的范围内；本次 trpc.ts 从 501 行降到 496 行，
 检查要求删除已不必要条目。该文件也暂停，等待总控把本次缩减明确交给单一 writer。
@@ -63,18 +73,22 @@ active 必须在 keys 内。新增版本时保留所有仍有摘要的旧版本�
 
 本地候选验证（从上述 staging 完整文件构建的可销毁容器）：
 
-- PASS：frozen install；完整 API 141 个文件，3097 通过、3 个既有用例跳过；API/Web lint 与类型检查。
-- PASS：`node packages/db/tests/run-erasure-e.mjs --local-only`：5 项 PR-A 回归、7 项 E 集成测试。
+- PASS：frozen install；完整 API 141 个文件，3098 通过、3 个既有用例跳过；API/Web lint 与类型检查。
+- PASS：`node packages/db/tests/run-erasure-e.mjs --local-only`：5 项 PR-A 回归、8 项 E 集成测试。
   覆盖邮箱/Google 同主体重注册、独立身份、大小写/空白/别名、无原文、旧版本轮换、忘旧版本拒绝、
-  新会话角色读写/RPC 拒绝、并发只一次、封闭拒绝、赠送/注销摘要故障事务回滚和 PR-A 前置拒绝。
+  新会话角色读写/RPC 拒绝、并发只一次、封闭拒绝、赠送/注销摘要故障事务回滚和 PR-A 前置拒绝；
+  缺密钥/错误格式分别验证启动拒绝，以及实际开户拒绝赠送、无流水/摘要、无日志回显。
   Google 使用本机 Auth 身份夹具，不代表外部 Google 登录验收；限频依赖在夹具中明确 mock。
 - PASS：迁移连续两次、完整 catalog 回退/重应用一致、两类注销审计 0 问题；
   有摘要时回退拒绝，防止恢复重复领取。回退必须和旧 API 同步，不能丢弃线上防刷事实。
-- PASS：API 类型排除基线 35 个旧文件仍需排除；Ruby CI 合约 7 项、301 断言。
+- PASS：API 类型排除基线 35 个旧文件仍需排除。
   完整基线重放 153 步、84 个重复迁移、1169 个 catalog 分组，account-open 审计 0 问题；
-  收敛迁移重应用不变、回退再恢复通过。当前仅 `--out` 独立证据，不算更新 built-fingerprint。
+  收敛迁移重应用不变、回退再恢复通过；`--after baseline/credit-guard-paths.sql` 的 8 条
+  钱包/封闭/服务角色路径均通过。当前仅 `--out` 独立证据，不算更新 built-fingerprint。
 - FAIL / BLOCKED_CONTEXT_NOT_VERIFIED：safeguards / migration ledger 缺 0150；代码大小基线条目已过时。
   原因是上述明确的并行 writer / 顺序依赖，未通过就是未通过。
+- FAIL：已提交实现候选的 Ruby CI 合约 7 项、296 断言、1 失败，也因缺 0150。
+  准备稿 HEAD 的 7 项/301 断言曾通过，不能沿用为实现候选通过证据。
 - BLOCKED：同 PR 的 `--write-built` 与新表附录登记等待共享文件写入协调，尚未执行。
 - NOT_RUN：总控审、最终候选远程 CI 全绿、独立语义审查、浏览器/staging 验收、真实密钥配置、应用迁移。
 

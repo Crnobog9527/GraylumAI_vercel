@@ -76,9 +76,19 @@ BEGIN
 END $$;
 SELECT to_regprocedure('public.account_erasure_confirm(uuid,uuid)') IS NOT NULL AS has_erasure \gset
 \if :has_erasure
+SELECT to_regprocedure('public.account_erasure_confirm_with_digests(uuid,uuid,jsonb)') IS NOT NULL AS has_erasure_digests \gset
+\if :has_erasure_digests
+-- Synthetic prehashed fixture only. Actual identity derivation is covered by the PR-E Auth runner.
+SET ROLE service_role;
+SELECT public.account_erasure_confirm_with_digests(
+  '00000000-0000-4000-8000-00000000c003', '00000000-0000-4000-8000-0000000000e1',
+  jsonb_build_array(jsonb_build_object('kind', 'email', 'key_version', 'test-v1', 'digest', repeat('e',64))));
+RESET ROLE;
+\else
 SET ROLE service_role;
 SELECT public.account_erasure_confirm('00000000-0000-4000-8000-00000000c003', '00000000-0000-4000-8000-0000000000e1');
 RESET ROLE;
+\endif
 INSERT INTO guard_results SELECT 'account erasure confirm (#526) via service_role', status = 'deleted' AND credits = 0
   FROM public.profiles WHERE id = '00000000-0000-4000-8000-00000000c003';
 \endif

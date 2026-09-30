@@ -192,6 +192,27 @@ it('a real two-session advisory-lock barrier allows exactly one grant across new
   } finally { await a.query('ROLLBACK'); await b.query('ROLLBACK'); await a.end(); await b.end(); }
 });
 
+it('missing or malformed HMAC configuration refuses actual bootstrap without issuing credits', async () => {
+  const configured = process.env.OPENING_GRANT_HMAC_KEYS;
+  const factsBefore = Number((await db.query('SELECT count(*) FROM opening_grant_identity_digests')).rows[0].count);
+  try {
+    for (const invalid of [undefined, 'test-only-malformed-keyring']) {
+      const actor = await account();
+      if (invalid === undefined) delete process.env.OPENING_GRANT_HMAC_KEYS;
+      else process.env.OPENING_GRANT_HMAC_KEYS = invalid;
+      await expect(bootstrap(actor.user, actor.session)).rejects.toMatchObject({
+        code: 'INTERNAL_SERVER_ERROR', message: expect.stringContaining('profile_bootstrap_failed'),
+      });
+      expect(await decisionCount(actor.user.id)).toBe(0);
+      expect(await balance(actor.user.id)).toBeUndefined();
+      expect(Number((await db.query('SELECT count(*) FROM opening_grant_identity_digests')).rows[0].count))
+        .toBe(factsBefore);
+    }
+  } finally {
+    process.env.OPENING_GRANT_HMAC_KEYS = configured;
+  }
+});
+
 it('digest write failures roll back both grant and closure; failed PR-A prerequisites leave no digest', async () => {
   await db.query("CREATE FUNCTION erasure_e_test_fail() RETURNS trigger LANGUAGE plpgsql AS $$"
     + "BEGIN RAISE EXCEPTION 'TEST_DIGEST_WRITE_FAILED'; END $$;"

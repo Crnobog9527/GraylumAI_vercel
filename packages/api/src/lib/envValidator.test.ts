@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { validateEnv, getSafeEnvSummary } from './envValidator';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { validateEnv, validateEnvOnStartup, getSafeEnvSummary } from './envValidator';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -46,6 +46,20 @@ describe('validateEnv', () => {
     expect(result.valid).toBe(false);
     expect(JSON.stringify(result)).not.toContain('private-invalid-value');
     expect(getSafeEnvSummary().OPENING_GRANT_HMAC_KEYS_SET).toBe('✓');
+  });
+
+  it('startup refuses a missing or malformed HMAC keyring without logging its value', () => {
+    process.env.NODE_ENV = 'production';
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      delete process.env.OPENING_GRANT_HMAC_KEYS;
+      expect(() => validateEnvOnStartup()).toThrow(/OPENING_GRANT_HMAC_KEYS/);
+      process.env.OPENING_GRANT_HMAC_KEYS = 'test-only-malformed-keyring';
+      expect(() => validateEnvOnStartup()).toThrow(/OPENING_GRANT_HMAC_KEYS/);
+      expect(JSON.stringify(log.mock.calls)).not.toContain('test-only-malformed-keyring');
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('rejects DATABASE_URL values polluted with a duplicated key prefix', () => {
