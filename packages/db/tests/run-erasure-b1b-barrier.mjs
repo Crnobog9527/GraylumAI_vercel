@@ -2,6 +2,8 @@
 // Local-only deterministic sessions test the real migrated functions, never a replacement scrub.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { backgroundWorker } from './erasure-b1b-worker.mjs';
 import { parentLocks } from './erasure-b1b-parent-locks.mjs';
 import { localDatabase } from './erasure-b1b-barrier-local.mjs';
 import { actorFixture, artifactFixture, pauseInsert } from './erasure-b1b-barrier-fixtures.mjs';
@@ -114,6 +116,9 @@ async function lateWriter(kind, oldScrubTransaction = false) {
   }
 }
 try {
+  q(readFileSync(new URL('./erasure-b1b-activity.sql', import.meta.url), 'utf8'));
+  console.log('PASS pure activity predicate constructed rows and private function contract');
+  await backgroundWorker(db);
   // Catalog safety contract, not extension integration: this local image has no real pg_net
   // or pg_cron job workers. Only the controller-approved maintenance/launcher types may bypass.
   const definition = q("SELECT pg_get_functiondef('public.account_erasure_barrier()'::regprocedure)");

@@ -74,7 +74,8 @@ a terminal run alone does not make the execution or its session eligible for scr
 ## Transaction barrier and no-active writers
 
 The controller approved the final contract in
-[the Runtime P1 decision](https://github.com/Crnobog9527/GraylumAI_vercel/pull/537#issuecomment-5911038432).
+[the Runtime P1 decision](https://github.com/Crnobog9527/GraylumAI_vercel/pull/537#issuecomment-5911038432),
+with the [NULL-state worker correction](https://github.com/Crnobog9527/GraylumAI_vercel/pull/537#issuecomment-5912107334).
 Both scrub functions first verify the erasure request, then call the internal-only
 `account_erasure_barrier()`. There is no new table, queue, scheduler or admission lock.
 The only missing capability was draining transactions which had already passed an active check;
@@ -84,8 +85,14 @@ the closure authority. `runtime_start`, other admission helpers and financial fu
 The barrier only allows READ COMMITTED (`ACCOUNT_ERASURE_ISOLATION_DENIED` otherwise). It records
 `clock_timestamp()` after closure verification, checks its definer's `pg_read_all_stats` privilege
 and activity tracking, clears the statistics snapshot, checks other backends, then checks prepared
-transactions in the current database. Only a visible `idle` backend with NULL `xact_start` is
-known to have no transaction; hidden, disabled or unknown states fail closed. Other ongoing
+transactions in the current database. The internal six-argument IMMUTABLE SQL predicate
+`account_erasure_activity_safe(backend_type,state,xact_start,backend_xid,backend_xmin,cutoff)`
+has no statistics or clock reads. Client rules remain unchanged: a visible `idle` backend with NULL
+`xact_start` passes. A named non-client worker with NULL state is only a candidate when
+`xact_start`, `backend_xid` and `backend_xmin` are all NULL. After capturing candidate PIDs,
+the barrier separately reads `pg_locks`; any granted `virtualxid` `ExclusiveLock` on a candidate
+causes retry. Two NULL transaction IDs alone do not prove the transaction ended. No worker-name
+exemption is added. Invisible types, disabled and other unrecognized states fail closed. Other ongoing
 transactions at/before the cutoff block. Clearing the snapshot matters even when a long caller
 transaction inspected statistics earlier. The barrier cutoff is the call, not BEGIN. A separate conservative check returns retry when
 the request confirmation is at/after the caller transaction start: confirm and scrub must not be
@@ -160,6 +167,42 @@ a Runtime session lock, then a conversation lock. A stdout barrier confirms acqu
 a distinct service-role session scrubs under a 3-second statement timeout. It checks retry with no count keys
 while locked and all 22 counts after release; every scrub assertion rolls back to preserve the same fixture.
 
+## Mandatory staging read-only preflight before application
+
+The controller, not the implementation writer, runs this before applying 0150. The controller's
+[two-sample preliminary observation](https://github.com/Crnobog9527/GraylumAI_vercel/pull/537#issuecomment-5912107334)
+found no virtual-XID lock on the idle pg_net worker; it does not replace this exact-candidate check.
+
+1. Use the exact reviewed head's 0150 predicate and barrier. In `BEGIN READ ONLY ISOLATION LEVEL
+   READ COMMITTED` ... `ROLLBACK`, inline the pure predicate expression; do not install functions,
+   invoke either scrub, or apply any migration for this test.
+2. Check the intended definer's statistics visibility and activity tracking, record a call-time
+   `clock_timestamp()` cutoff, and clear the statistics snapshot. Apply the exact eight existing
+   maintenance/launcher exclusions; do not exclude pg_net or SQL workers by name.
+3. Evaluate activity rows with the six-argument predicate and retain the NULL-state candidate PIDs
+   in the same connection. In a subsequent query, check those exact PIDs' granted `virtualxid`
+   `ExclusiveLock` entries. Finally check prepared transactions in the current database.
+4. Report only backend types, states, NULL/non-NULL indicator flags and blocker counts. Do not
+   collect query text, account/project identifiers, credentials, or publish PIDs/connection details.
+   Require zero blocking items, or only explained temporary transactions that disappear on a
+   fresh read-only sample. A permanent worker blocker or unknown result is a failed prerequisite;
+   do not cancel transactions, weaken the predicate, or treat retry as success.
+5. Record the head and preflight outcome in the PR. This check is not migration-application
+   authorization; the controller still follows Owner approval and before/after fingerprint steps.
+
+## NULL-state worker regression
+
+`run-erasure-b1b-barrier.mjs --local-only` also runs the 45-row pure-predicate/ACL matrix and a real
+C background worker from `erasure-b1b-worker.c`, compiled only in its disposable local container
+(`apk add gcc musl-dev` needs package-network access; no host dependency or lockfile is changed).
+The worker reads a real fixture profile's active status, releases statement/catalog snapshots,
+then pauses before writing preference/Runtime content. With tracking on and off, xid/xmin are NULL
+while the transaction still holds its virtual-XID lock; tracking off also leaves xact_start NULL,
+so this case proves the outer lock check matters. Both scrubs must retry. After commit, the same
+worker stays alive and idle: no virtual-XID lock, both scrubs pass and clear both content channels.
+This is a real PostgreSQL background-worker test, not a pg_net/pg_cron extension integration test.
+Existing client and five real admission-entry late-write tests still run unchanged.
+
 ## Verified local results for the transaction-barrier increment
 
 - PASS: original scrub_content MD5 `3029c14ab84580323acba88565786281`; new definition
@@ -178,6 +221,9 @@ while locked and all 22 counts after release; every scrub assertion rolls back t
   statistics and insufficient statistics privilege fail closed. REPEATABLE READ is refused;
   a real prepared transaction blocks until resolved. Old transaction/cached statistics use the new
   call cutoff; direct and successful-subtransaction confirmations cannot be scrubbed before commit.
+- PASS: 45 constructed activity rows and private helper ACL/IMMUTABLE contract; real NULL-state
+  background transactions with tracking on/off block both scrubs, while the same worker after
+  commit passes and both late preference/Runtime content channels clear.
 - PASS: exact eight maintenance/launcher exclusions as a catalog safety contract. The local image
   has no real pg_net or pg_cron job worker; their live integration is NOT_RUN, not implied by this check.
 - PASS: real legacy success/abort refuse an erased parent and roll back all attempted financial
@@ -186,11 +232,14 @@ while locked and all 22 counts after release; every scrub assertion rolls back t
 - PASS: both parent-lock orders for real legacy finalizer and snapshot INSERT: writer-first causes
   scrub retry then erasure; scrub-first makes INSERT wait, then reject without creating content.
 - PASS: structure round-trip `4afb151f0e649311ba14861ad345c0c9` (pre-0150) →
-  `d10dcd986d79fa38a3537d793c868f16` → original → new; immediate repeat unchanged.
+  `fa4ada3b765c459a2e03ce8332231597` → original → new; immediate repeat unchanged.
 - PASS (expected refusal): erased rows reject rollback before any structure change; a changed
   scrub_content definition rejects migration before schema/ACL mutation. Local containers cleaned.
-- PASS: Runtime integration 100 tests, with 5 browser/application cases explicitly skipped; private
-  log canary absent. API 140 files / 3079 tests passed, 3 skipped. Frozen install, both package
+- Prior PASS at `8d05f5d5`: Runtime integration 100 tests, with 5 browser/application cases explicitly
+  skipped; private log canary absent. This suite is also required by final-head CI.
+- PASS for this delta: API 140 files / 3079 tests, 3 skipped. The first sandboxed attempt could not
+  bind its local HTTP fixtures (EPERM); a full rerun with local listening allowed passed without
+  test changes. Frozen install, both package
   lint/typecheck, API type baseline, safeguards 136, workflow contracts 7 runs / 301 assertions.
 
 Remote final-candidate CI and controller/independent review are recorded by exact head in the PR.

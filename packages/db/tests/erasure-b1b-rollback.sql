@@ -243,4 +243,5 @@ BEGIN
 END $function$;
 
 DROP FUNCTION public.account_erasure_barrier();
+DROP FUNCTION public.account_erasure_activity_safe(text,text,timestamptz,xid,xid,timestamptz);
 COMMIT;

@@ -234,14 +234,32 @@ DROP TRIGGER IF EXISTS b_erasure_parent_guard ON public.conversation_context_sna
 CREATE TRIGGER b_erasure_parent_guard BEFORE INSERT OR UPDATE OF conversation_id ON public.conversation_context_snapshots
   FOR EACH ROW EXECUTE FUNCTION public.erasure_conversation_child_guard();
 
+-- Pure row predicate: true for a NULL-state worker only means a candidate for the
+-- later virtual-XID check, never proof that its transaction has ended. No stats or clocks here.
+CREATE OR REPLACE FUNCTION public.account_erasure_activity_safe(
+  p_backend_type text, p_state text, p_xact_start timestamptz,
+  p_backend_xid xid, p_backend_xmin xid, p_cutoff timestamptz
+) RETURNS boolean LANGUAGE sql IMMUTABLE PARALLEL SAFE SET search_path = pg_catalog, pg_temp AS $$
+  SELECT coalesce(p_backend_type <> '' AND p_cutoff IS NOT NULL AND (
+    (p_state IS NOT DISTINCT FROM 'idle' AND p_xact_start IS NULL)
+    OR (p_state IN ('active', 'idle in transaction', 'idle in transaction (aborted)', 'fastpath function call')
+      AND p_xact_start IS NOT NULL AND p_xact_start > p_cutoff)
+    OR (p_backend_type <> 'client backend' AND p_state IS NULL AND p_xact_start IS NULL
+      AND p_backend_xid IS NULL AND p_backend_xmin IS NULL)
+  ), false)
+$$;
+REVOKE ALL ON FUNCTION public.account_erasure_activity_safe(text,text,timestamptz,xid,xid,timestamptz)
+  FROM PUBLIC, anon, authenticated, service_role;
+
 -- Drain transactions that could have observed an active account before closure. Call only
 -- AFTER verifying the erasure request. This is a read-only check, not a wait or cancellation.
--- Keep SQL-capable/unknown workers (including pg_net, pg_cron jobs, parallel and logical
--- replication workers). Only core maintenance/launcher processes and pg_cron's scheduler
--- are excluded; cron job SQL executes in a separate client backend or pg_cron job worker.
+-- Only core maintenance/launcher processes and pg_cron's scheduler are excluded. SQL-capable
+-- workers (including pg_net) must pass the row predicate and, if NULL-state, the lock check.
 CREATE OR REPLACE FUNCTION public.account_erasure_barrier() RETURNS boolean
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
-DECLARE cutoff timestamptz := clock_timestamp();
+DECLARE
+  cutoff timestamptz := clock_timestamp();
+  activity_safe boolean; candidate_pids integer[];
 BEGIN
   IF current_setting('transaction_isolation') <> 'read committed' THEN
     RAISE EXCEPTION 'ACCOUNT_ERASURE_ISOLATION_DENIED' USING ERRCODE = '25000';
@@ -249,19 +267,20 @@ BEGIN
   IF NOT pg_has_role(current_user, 'pg_read_all_stats', 'USAGE')
     OR current_setting('track_activities') <> 'on' THEN RETURN false; END IF;
   PERFORM pg_stat_clear_snapshot();
-  IF EXISTS (
-    SELECT 1 FROM pg_stat_activity a WHERE a.pid <> pg_backend_pid()
+  SELECT coalesce(bool_and(public.account_erasure_activity_safe(
+      a.backend_type, a.state, a.xact_start, a.backend_xid, a.backend_xmin, cutoff)), true),
+    array_agg(a.pid) FILTER (WHERE a.backend_type <> 'client backend' AND a.state IS NULL)
+    INTO activity_safe, candidate_pids
+    FROM pg_stat_activity a WHERE a.pid <> pg_backend_pid()
       AND (a.backend_type IS NULL OR a.backend_type NOT IN (
         'archiver', 'autovacuum launcher', 'autovacuum worker', 'background writer',
-        'checkpointer', 'logical replication launcher', 'walwriter', 'pg_cron launcher'))
-      AND NOT (
-        -- NULL is safe only for a visible, explicitly transaction-free idle connection.
-        (a.state IS NOT DISTINCT FROM 'idle' AND a.xact_start IS NULL)
-        OR (coalesce(a.state IN ('active', 'idle in transaction',
-          'idle in transaction (aborted)', 'fastpath function call'), false)
-          AND a.xact_start IS NOT NULL AND a.xact_start > cutoff)
-      )
-  ) THEN RETURN false; END IF;
+        'checkpointer', 'logical replication launcher', 'walwriter', 'pg_cron launcher'));
+  IF NOT activity_safe THEN RETURN false; END IF;
+  -- A read-only statement can release its snapshot before the transaction ends: xid/xmin
+  -- may both be NULL. Query locks AFTER capturing candidate PIDs; a still-running older
+  -- transaction retains its virtual-XID lock. New post-cutoff transactions cannot pass admission.
+  IF EXISTS (SELECT 1 FROM pg_locks WHERE pid = ANY(candidate_pids)
+    AND locktype = 'virtualxid' AND mode = 'ExclusiveLock' AND granted) THEN RETURN false; END IF;
   -- A transaction can leave activity via PREPARE, so check prepared transactions LAST.
   -- Other databases cannot write this database's tables; retain every prepared xact here.
   RETURN NOT EXISTS (SELECT 1 FROM pg_prepared_xacts WHERE database = current_database());

@@ -78,7 +78,7 @@ export async function localDatabase() {
       applyServerOnly: input => outcome(sql(input)),
     });
     assert.equal(built.failed, null, JSON.stringify(built.failed));
-    return { q, sql, Session, cleanup };
+    return { q, sql, Session, cleanup, exec: (argv, input) => ok(docker(['exec', '-i', name, ...argv], input)) };
   } catch (error) {
     await cleanup();
     throw error;
