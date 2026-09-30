@@ -9,7 +9,9 @@ some database bootstrap, RLS, grants, and non-secret seed steps were still
 manual.
 
 Use this document as the owner-facing checklist for rebuilding or auditing
-staging. Do not use it as a production procedure.
+staging. The REL-1 section records file-built release database prerequisites;
+it does not authorize production access, database writes or deployment. Those
+effects still require the approvals in AGENTS.md sections 9 and 10.
 
 ## Scope
 
@@ -62,13 +64,24 @@ any step points at production or requires unapproved writes.
 4. Configure owner-provided secrets manually.
    - Do not commit, paste, or log secret values.
    - Codex may only report variable presence yes/no and safe host/ref metadata.
-5. Run the schema push against staging.
-   - `db:push` updates schema shape from Drizzle.
-   - It is not a complete staging bootstrap by itself.
-6. Apply raw SQL migrations or future bootstrap SQL against staging only.
-   - This step requires explicit owner approval because it writes to the DB.
-   - Prefer reviewed, idempotent repo-owned SQL over ad-hoc SQL copied from
-     chat history.
+5. Verify the platform prerequisites on PostgreSQL 17.
+   - Supabase supplies the roles, `auth.uid()`, extensions, and the `extensions`
+     and `storage` schemas. The local stand-in is
+     `packages/db/tests/baseline/platform-local.sql`; never apply it to staging
+     or a release database.
+6. Build a fresh empty database from repository files, after explicit owner
+   approval for the database writes.
+   - Apply `packages/db/baseline/*.sql` in filename order (currently
+     `0000_core_prerequisites.sql`), then every file in
+     `packages/db/migrations` in filename order.
+   - Apply `packages/db/baseline/bridges/<migration filename>.sql`, when present,
+     immediately before the migration with the same filename.
+   - Baseline and bridges are for empty databases only. For an existing staging
+     database, apply only reviewed pending migrations after the before-write
+     fingerprint check below; never re-bootstrap it with baseline or bridges.
+   - Send each complete SQL file to the server as one string; see REL-1 below.
+   - After building, capture a read-only fingerprint and compare it as described
+     below before proceeding to seed or smoke checks.
 7. Apply non-secret staging seed data.
    - This step requires explicit owner approval because it writes to the DB.
    - Seeds must be idempotent and must not contain real API keys or production
@@ -95,23 +108,86 @@ any step points at production or requires unapproved writes.
     - This writes chat, billing, and user-data evidence rows.
     - This can spend provider credits.
 
-## Why `db:push` Alone Is Not Enough
+## File-Built Structure And Fingerprint Checks
 
-The root `db:push` script runs Drizzle schema push. It is useful for schema
-shape, but it is not the whole database readiness story.
+`db:push` is retired. `packages/db/schema.ts` is a type reference only. Repository
+baseline and migrations define the application structure, including RLS,
+grants, functions and triggers. The shared local/CI builder is
+`packages/db/tests/baseline/build-from-files.mjs`; its order is platform
+prerequisites, baseline, then all migrations with same-name bridges immediately
+before their migrations. See [the baseline rules](../../packages/db/baseline/README.md)
+and [the engineering requirements](../ENGINEERING.md#数据库文件建库与指纹).
 
-Raw SQL migrations contain important behavior that schema push does not fully
-represent:
+Run the empty-database check locally (local Docker only):
 
-- RLS enablement and policies.
-- Grants and role-specific access posture.
-- `SECURITY DEFINER` RPC/functions.
-- Atomic billing/finalize functions.
-- Payment, invitation, and credit ledger helpers.
-- Supabase Security Advisor hardening.
+```bash
+node packages/db/tests/run-db-baseline-replay.mjs --local-only
+```
 
-Seed data is separate as well. A staging rebuild must not depend on manual SQL
-from chat history, screenshots, or one-off dashboard actions.
+Any PR changing structure through a new migration, baseline or bridge must
+regenerate and commit `packages/db/tests/baseline/built-fingerprint.json`:
+
+```bash
+node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built
+```
+
+CI compares this fingerprint object by object. New migrations must run twice
+consecutively at their own position in history without changing the structure
+on the second run. The shared builder checks every migration from 0067 on;
+any genuine exception needs a documented reason in its `NOT_REPEATABLE` list
+and independent review (the list is currently empty).
+
+Before and after an approved migration application to staging, capture a fresh
+catalog-only fingerprint with `packages/db/tests/baseline/fingerprint.sql`
+inside a `BEGIN READ ONLY` transaction. Verify `transaction_read_only = on`
+and end with `ROLLBACK`. Retain the snapshot in the existing comparison format
+(`groups` and per-object `objects`, as in `staging-fingerprint.json`), without
+connection strings, credentials, project identifiers or business rows. Compare
+each snapshot against a local file-built database:
+
+```bash
+node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <read-only-snapshot.json>
+```
+
+`--staging` reads a snapshot file; it does not connect to staging. Only differences
+listed in `packages/db/tests/baseline/expected-differences.json` are allowed.
+Merged but unapplied migration objects may be temporarily listed in
+`pendingOnStaging`; after application, update the committed
+`staging-fingerprint.json` and expected differences in the relevant structure PR.
+An unexplained difference blocks the next write; it does not authorize repair.
+
+Seed data is separate. A rebuild must not depend on manual SQL from chat history,
+screenshots, or one-off dashboard actions.
+
+## REL-1 File-Built Release Database
+
+These are requirements for a separately approved REL-1 execution, not an
+instruction to connect to or write a release database during documentation work.
+
+- Use **PostgreSQL 17**. The built fingerprint, `MAINTAIN` privilege and pinned
+  CI PostgreSQL image target version 17.
+- A fresh Supabase project supplies platform roles, `auth.uid()`, extensions,
+  and the `extensions` and `storage` schemas. Confirm those prerequisites before
+  the application SQL runs; the local `platform-local.sql` is a test substitute.
+- `rls_auto_enable` and the `ensure_rls` event trigger belong to Supabase project
+  settings, outside the repository's application schema. Confirm the intended
+  setting separately; never infer it from a successful local replay.
+- Apply platform prerequisites → `packages/db/baseline` → all migrations, with
+  each same-name bridge immediately before its migration. For **every file**,
+  send the entire SQL text to the server in one call (for example `psql -X -c`
+  with `ON_ERROR_STOP=1`, or one driver submission). **Do not use `psql -f` or
+  split the file into client-interpreted commands**: psql can interpret
+  metacommands embedded in file input. This is especially relevant to baseline
+  and bridge files outside the append-only migration ledger.
+- Migration 0010 creates `pg_cron`; migration **0148 removes it**. Confirm the
+  target project permits that sequence before applying SQL. If removal is
+  prohibited, stop for an approved resolution rather than skipping or rewriting
+  migrations. Ticket auto-close uses the Vercel scheduled task (#506).
+- After the build, capture a catalog fingerprint read-only and compare the
+  snapshot using the `--local-only --staging <snapshot>` command above against
+  the built structure and `expected-differences.json`. Resolve unexplained
+  differences before proceeding; a passed build alone does not prove remote
+  equivalence or product acceptance.
 
 ## Required Non-Secret Staging Seed Categories
 

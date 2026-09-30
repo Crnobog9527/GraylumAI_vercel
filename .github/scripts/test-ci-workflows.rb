@@ -114,6 +114,8 @@ class CIWorkflowsTest < Minitest::Test
       assert_includes lint_runs, command
     end
     steps = @ci['jobs']['test']['steps']
+    safeguards = steps.find { |step| step['run'] == 'pnpm test:ci:safeguards' }
+    assert_equal 'CI safeguards — migration ledger and database baseline', safeguards.fetch('name')
     contract_index = steps.index { |step| step['run'] == 'ruby .github/scripts/test-ci-workflows.rb' }
     install_index = steps.index { |step| step['run'] == 'pnpm install --frozen-lockfile' }
     refute_nil contract_index
