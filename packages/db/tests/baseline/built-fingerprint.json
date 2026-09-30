@@ -1761,7 +1761,7 @@
   "ext:plpgsql": "31648562b5d9",
   "ext:uuid-ossp": "2ac737d240fc",
   "fn:account_erasure_activity_safe(text,text,timestamp with time zone,xid,xid,timestamp with time zone)": "db5d3d433b38",
-  "fn:account_erasure_barrier()": "ea8b3d295bb0",
+  "fn:account_erasure_barrier()": "514d51749c33",
   "fn:account_erasure_confirm(uuid,uuid)": "55bb89ab9b01",
   "fn:account_erasure_note_error(uuid,text)": "cedefb39681c",
   "fn:account_erasure_preview(uuid)": "e8be322e0f21",

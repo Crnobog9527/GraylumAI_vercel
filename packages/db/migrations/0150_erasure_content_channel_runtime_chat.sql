@@ -272,6 +272,7 @@ BEGIN
     array_agg(a.pid) FILTER (WHERE a.backend_type <> 'client backend' AND a.state IS NULL)
     INTO activity_safe, candidate_pids
     FROM pg_stat_activity a WHERE a.pid <> pg_backend_pid()
+      AND (a.datid IS NULL OR a.datid = (SELECT oid FROM pg_database WHERE datname = current_database()))
       AND (a.backend_type IS NULL OR a.backend_type NOT IN (
         'archiver', 'autovacuum launcher', 'autovacuum worker', 'background writer',
         'checkpointer', 'logical replication launcher', 'walwriter', 'pg_cron launcher'));

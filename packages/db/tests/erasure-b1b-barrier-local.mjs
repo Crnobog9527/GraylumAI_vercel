@@ -24,9 +24,10 @@ export async function localDatabase() {
   const q = input => ok(sql(input));
   const sessions = new Set();
   class Session {
-    constructor(label) {
+    constructor(label, database = 'dbb') {
+      assert.match(database, /^[a-z][a-z0-9_]*$/, 'Local database name only');
       this.label = label;
-      this.child = spawn('docker', ['--host', endpoint, ...args], { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] });
+      this.child = spawn('docker', ['--host', endpoint, ...args, '-d', database], { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] });
       this.output = '';
       this.error = '';
       this.sequence = 0;

@@ -84,13 +84,14 @@ the closure authority. `runtime_start`, other admission helpers and financial fu
 
 The barrier only allows READ COMMITTED (`ACCOUNT_ERASURE_ISOLATION_DENIED` otherwise). It records
 `clock_timestamp()` after closure verification, checks its definer's `pg_read_all_stats` privilege
-and activity tracking, clears the statistics snapshot, checks other backends, then checks prepared
-transactions in the current database. The internal six-argument IMMUTABLE SQL predicate
+and activity tracking, clears the statistics snapshot, checks other backends in the current database
+or with NULL datid, then checks prepared transactions in the current database. The internal six-argument IMMUTABLE SQL predicate
 `account_erasure_activity_safe(backend_type,state,xact_start,backend_xid,backend_xmin,cutoff)`
 has no statistics or clock reads. Client rules remain unchanged: a visible `idle` backend with NULL
 `xact_start` passes. A named non-client worker with NULL state is only a candidate when
-`xact_start`, `backend_xid` and `backend_xmin` are all NULL. After capturing candidate PIDs,
-the barrier separately reads `pg_locks`; any granted `virtualxid` `ExclusiveLock` on a candidate
+`xact_start`, `backend_xid` and `backend_xmin` are all NULL. Candidate PIDs come from that same
+database-filtered scan. The barrier separately reads `pg_locks`; any granted `virtualxid`
+`ExclusiveLock` on a candidate
 causes retry. Two NULL transaction IDs alone do not prove the transaction ended. No worker-name
 exemption is added. Invisible types, disabled and other unrecognized states fail closed. Other ongoing
 transactions at/before the cutoff block. Clearing the snapshot matters even when a long caller
@@ -178,7 +179,8 @@ found no virtual-XID lock on the idle pg_net worker; it does not replace this ex
    invoke either scrub, or apply any migration for this test.
 2. Check the intended definer's statistics visibility and activity tracking, record a call-time
    `clock_timestamp()` cutoff, and clear the statistics snapshot. Apply the exact eight existing
-   maintenance/launcher exclusions; do not exclude pg_net or SQL workers by name.
+   maintenance/launcher exclusions; do not exclude pg_net or SQL workers by name. Keep activity
+   only where datid is the current database OID or NULL; capture candidate PIDs from the same rows.
 3. Evaluate activity rows with the six-argument predicate and retain the NULL-state candidate PIDs
    in the same connection. In a subsequent query, check those exact PIDs' granted `virtualxid`
    `ExclusiveLock` entries. Finally check prepared transactions in the current database.
@@ -203,7 +205,29 @@ worker stays alive and idle: no virtual-XID lock, both scrubs pass and clear bot
 This is a real PostgreSQL background-worker test, not a pg_net/pg_cron extension integration test.
 Existing client and five real admission-entry late-write tests still run unchanged.
 
-## Verified local results for the transaction-barrier increment
+## Database-scope regression
+
+Following the [current-database P2 decision](https://github.com/Crnobog9527/GraylumAI_vercel/pull/537#issuecomment-5912851543),
+the activity decision and candidate PIDs share one filtered scan: current database OID or NULL
+`datid`. Other databases' client transactions cannot block this database's erasure. NULL-datid
+workers keep the prior conservative handling, then the same virtual-XID and prepared checks run.
+The six-argument pure function, scrub bodies, admission and financial functions are unchanged.
+
+`erasure-b1b-database-scope.mjs` runs inside the existing local barrier suite. It holds a real old
+transaction in a second database while both scrubs succeed and clear Runtime content, then proves
+an old transaction in the current database still makes both retry. The other database transaction
+stays open throughout. Constructed database-less rows run through the actual extracted scan SQL:
+the named worker remains a candidate, the invisible backend type remains unsafe. This last check
+is a scan contract, not a live database-less worker integration test. Real connected-worker,
+client, prepared and late-write regressions still run in the same suite.
+
+Local PASS for this scope increment: the pre-fix two-database case reproduced the erroneous retry;
+the fixed barrier suite has 31 PASS groups. File build: 153 steps and 84 immediate repeats.
+B1a/B1b overlay regression and audits pass with no unexpected differences. Structure round-trip:
+`4afb151f0e649311ba14861ad345c0c9` → `1681aaa519f95c5304f5a4528b4f8c80` → original → new.
+The built fingerprint changes only the barrier function definition.
+
+## Verified local results for the earlier transaction/worker increments
 
 - PASS: original scrub_content MD5 `3029c14ab84580323acba88565786281`; new definition
   `8e265cafaa36ba3735ea75897d210c0c`, with the barrier and separate-confirmation-transaction check.
