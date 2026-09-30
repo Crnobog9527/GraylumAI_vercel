@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // One isolated local Docker replay. Never uses DB URLs, env files, or remote connections.
 import { spawnSync } from 'node:child_process';
+import { installAdminSurfacesPreview } from '../v3/admin-surfaces-fixture.mjs';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -55,8 +56,23 @@ try {
     SELECT set_config('request.jwt.claims',
       '{"sub":"00000000-0000-4000-8000-00000000e001","role":"${role}"}',false);
     ${read(`${dir}/client.sql`)}`));
+  // Exercise the existing disposable preview fixture after the ACL tests; remove only
+  // this runner's synthetic plans and its already-installed public read policies first.
+  const previewStatements = [`SET client_min_messages = warning;
+    DELETE FROM public.membership_plans;
+    DROP POLICY IF EXISTS users_own_user_checkins_select ON public.user_checkins;
+    DROP POLICY IF EXISTS announcements_select_active_public ON public.announcements;
+    DROP POLICY IF EXISTS membership_plans_select_active_public ON public.membership_plans;
+    DROP POLICY IF EXISTS credit_packages_select_active_public ON public.credit_packages;`];
+  installAdminSurfacesPreview(sql => previewStatements.push(sql), root);
+  previewStatements.push(`DO $$ BEGIN
+    IF (SELECT count(*) FROM membership_plans WHERE library_storage_bytes > 0) <> 3
+      THEN RAISE EXCEPTION 'preview fixture entitlement defaults missing'; END IF;
+  END $$;`);
+  const preview = write('preview-fixture.sql', previewStatements.join('\n'));
   const result = spawnSync('node', ['packages/db/tests/run-db-baseline-replay.mjs', '--local-only',
-    '--out', resolve(temp, 'fingerprint.json'), '--after', [cases, ...clients, `${dir}/service.sql`, `${dir}/closed-client.sql`].join(',')], {
+    '--out', resolve(temp, 'fingerprint.json'), '--after', [cases, ...clients, `${dir}/service.sql`, `${dir}/closed-client.sql`, preview,
+      'packages/db/tests/atomic_downgrade_canceled_subscription_profile.sql'].join(',')], {
     cwd: root, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME }, maxBuffer: 64 * 1024 * 1024,
   });
   process.stdout.write(result.stdout);

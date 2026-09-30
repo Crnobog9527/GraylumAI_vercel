@@ -252,7 +252,13 @@ it('BILL2: receipt database outage retains server-private evidence and recovery 
 async function period(actor:string,credits=100) {
  const grant=randomUUID(),subscription='sub_'+randomUUID(),plan=randomUUID(),invoice='in_'+randomUUID(),start=new Date(Date.now()-86400000).toISOString(),end=new Date(Date.now()+86400000).toISOString();
  // Rows satisfy the real schema too (--schema-from-files): plan FK, NOT NULL status and idempotency key.
- await db.query("insert into membership_plans(id,name) values($1,'Synthetic plan')",[plan]);
+ const entitlements = (await db.query("select exists(select 1 from information_schema.columns where table_schema='public' and table_name='membership_plans' and column_name='allow_fusion_review') as present")).rows[0].present;
+ if (entitlements) {
+  await db.query("insert into membership_plans(id,name,allow_fusion_review,allow_fusion_compare,library_storage_bytes) values($1,'Synthetic plan',true,true,500000000)",[plan]);
+ } else {
+  // Older minimal fixtures intentionally predate membership entitlement configuration.
+  await db.query("insert into membership_plans(id,name) values($1,'Synthetic plan')",[plan]);
+ }
  await db.query("insert into user_subscriptions(user_id,stripe_subscription_id,membership_plan_id,billing_cycle,current_period_start,current_period_end,status) values($1,$2,$3,'monthly',$4,$5,'active')",[actor,subscription,plan,start,end]);
  await db.query("insert into subscription_credit_grants(id,user_id,stripe_subscription_id,membership_plan_id,billing_cycle,grant_type,grant_period_key,period_start,period_end,total_periods,stripe_invoice_id,credits_granted,idempotency_key) values($1,$2,$3,$4,'monthly','monthly_invoice',$5,$6,$7,1,$8,$9,$10)",[grant,actor,subscription,plan,'invoice:'+invoice,start,end,invoice,credits,'grant:'+invoice]);return {grant,subscription};
 }

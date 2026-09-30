@@ -22,8 +22,8 @@ BEGIN
   INSERT INTO profiles (id, email, credits, membership_level)
   VALUES (v_user_id, 'subscription-downgrade@example.test', 777, 'pro');
 
-  INSERT INTO membership_plans (id, name, level)
-  VALUES (v_plan_id, 'Downgrade Smoke Pro', 'pro');
+  INSERT INTO membership_plans (id, name, level, allow_fusion_review, allow_fusion_compare, library_storage_bytes)
+  VALUES (v_plan_id, 'Downgrade Smoke Pro', 'pro', true, true, 500000000);
 
   INSERT INTO user_subscriptions (
     id,

@@ -12,6 +12,7 @@
 - 严格字段类型、NOT NULL、非负安全整数；D3 的 2/8 允许与 1/9/小数/字符串/空值拒绝。
 - 重复迁移保留管理员改值，前后完整结构指纹相等。
 - 回退演练保留计划数据且旧结构前后相等；恢复后再跑客户端权限测试。
+- 已有后台 preview fixture 安装和取消订阅降级 SQL smoke 与新必填列兼容。
 - baseline runner 的 account-open audit、通用重复应用与回退检查同时执行。
 
 API 测试见 `services/membershipEntitlements.test.ts` 和 `routers/entitlements.test.ts`；
