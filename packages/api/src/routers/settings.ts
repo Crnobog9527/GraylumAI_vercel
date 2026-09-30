@@ -67,6 +67,9 @@ const systemSettingInputSchema = z.object({
   key: z.string().trim().min(1),
   value: z.any(),
 }).superRefine((setting, ctx) => {
+  if (setting.key === 'runtime_purpose_budgets') {
+    ctx.addIssue({ code: 'custom', path: ['key'], message: '用途预算请通过专用管理接口保存' });
+  }
   if (setting.key === 'search_surcharge_credits' && parseSearchSurcharge(setting.value) === null) {
     ctx.addIssue({code:'custom',path:['value'],message:'联网附加积分须为0至999999的整数；受控Skill搜索仍须配置正数'});
   }

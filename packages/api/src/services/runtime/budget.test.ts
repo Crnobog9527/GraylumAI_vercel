@@ -18,13 +18,13 @@ it('shares one monotonic budget across adapters and never sends a third slow req
 });
 it.each(['credential','dispatch-permission'])('rechecks elapsed %s waits before any POST',async(stage)=>{
  let elapsed=0;const budget=createRuntimeBudget(()=>elapsed),transport=vi.fn<typeof fetch>(async()=>new Response('{}'));
- const adapter=openRouterAdapter({budget,transport,credential:async()=>{if(stage==='credential')elapsed=136_000;return 'SYNTHETIC';}});
+ const adapter=openRouterAdapter({budget,transport,credential:async()=>{if(stage==='credential')elapsed=206_000;return 'SYNTHETIC';}});
  if(stage==='credential')await expect(adapter.prepareDispatch({input:body},identity)).rejects.toThrow('TIME_BUDGET');
- else{const send=await adapter.prepareDispatch({input:body},identity);elapsed=136_000;await expect(send()).rejects.toThrow('TIME_BUDGET');}
+ else{const send=await adapter.prepareDispatch({input:body},identity);elapsed=206_000;await expect(send()).rejects.toThrow('TIME_BUDGET');}
  expect(transport).not.toHaveBeenCalled();
 });
 it('lookup needs its full 45 seconds inside the shared work budget',async()=>{
- let time=0;const shared=createRuntimeBudget(()=>time);time=210_000;
+ let time=0;const shared=createRuntimeBudget(()=>time);time=220_000;
  const credential=vi.fn(),transport=vi.fn();
  await expect(openRouterAdapter({budget:shared,credential,transport}).lookup('gen-original',identity)).rejects.toThrow('TIME_BUDGET');
  expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
@@ -79,11 +79,21 @@ it('binds the one-use not-started proof to the exact send capability, not anothe
  let elapsed=0;const budget=createRuntimeBudget(()=>elapsed),transport=vi.fn();
  const adapter=openRouterAdapter({budget,credential:async()=> 'SYNTHETIC',transport});
  const first=await adapter.prepareDispatch({input:body},identity),second=await adapter.prepareDispatch({input:body},identity);
- elapsed=136_000;const error=await first().catch(error=>error),hash=createHash('sha256').update(body).digest('hex');
+ elapsed=206_000;const error=await first().catch(error=>error),hash=createHash('sha256').update(body).digest('hex');
  expect(consumeOpenRouterNotStarted(new Error('RUNTIME_TIME_BUDGET_EXHAUSTED'),hash,first)).toBe(false);
  expect(consumeOpenRouterNotStarted(error,hash,second)).toBe(false);
  expect(consumeOpenRouterNotStarted(error,'f'.repeat(64),first)).toBe(false);
  expect(consumeOpenRouterNotStarted(error,hash,first)).toBe(true);
  expect(consumeOpenRouterNotStarted(error,hash,first)).toBe(false);
  expect(()=>first()).toThrow('CAPABILITY_CONSUMED');expect(transport).not.toHaveBeenCalled();
+});
+
+it('caps model work at 240s, shrinks to the shared deadline and accepts exactly 60s only',()=>{
+ let elapsed=0;const budget=createRuntimeBudget(()=>elapsed);
+ expect(budget.modelCallTimeout(240000)).toBe(240000);
+ elapsed=120000;expect(budget.modelCallTimeout(240000)).toBe(145000);
+ elapsed=205000;expect(budget.modelCallTimeout(240000)).toBe(60000);
+ elapsed=205001;expect(()=>budget.modelCallTimeout(240000)).toThrow('TIME_BUDGET');
+ expect(budget.persistenceDeadline-budget.workDeadline).toBe(20000);
+ expect(300000-budget.persistenceDeadline).toBe(15000);
 });

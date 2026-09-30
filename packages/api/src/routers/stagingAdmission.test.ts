@@ -31,7 +31,7 @@ function context(privileged = true) {
   const profile = { select() { return this; }, eq() { return this; }, single: async () => ({ data: { id: actor, role: 'user', status: 'active', nickname: 'Fixture', email: 'fixture@example.test', created_at: '2020-01-01', credits: 100 }, error: null }) };
   const client = { from: (table:string) => {
     if(!mocks.realAdmission||table==='profiles')return profile;
-    if(table==='system_settings')return {select(){return this;},in:async()=>({data:[{key:'v3_summary_model_id',value:summaryModel},{key:'v3_summary_max_tokens',value:128}],error:null})};
+    if(table==='system_settings')return {select(){return this;},eq(){return this;},maybeSingle:async()=>({data:null,error:null}),in:async()=>({data:[{key:'v3_summary_model_id',value:summaryModel},{key:'v3_summary_max_tokens',value:128}],error:null})};
     let id=actor;const query={select(){return this;},eq(_key:string,value:string){id=value;return this;},single:async()=>({data:{id,model_id:id===actor?'test/model':'test/summary',provider:'openrouter',is_active:modelFault==='inactive'?'false':'true',input_limit:10000,max_tokens:1000},error:modelFault&&modelFault!=='inactive'?{code:modelFault,message:'SYNTHETIC_PRIVATE_DATABASE_BODY'}:null})};return query;
   }, rpc, auth: { getUser: async () => ({ data: { user: { id: actor, email_confirmed_at: '2026-01-01T00:00:00Z' } }, error: null }) } };
   return { user: { id: actor, email: 'fixture@example.test' }, isEmailVerified: true, supabase: client, supabaseAuth: client, supabaseAdmin: client, hasSupabaseAdminPrivileges: privileged } as never;
