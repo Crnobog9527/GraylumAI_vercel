@@ -3,7 +3,7 @@
 // The existing replay owns the local-only Docker boundary and container cleanup.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -11,15 +11,16 @@ assert.deepEqual(process.argv.slice(2), ['--local-only']);
 assert.ok(!process.env.CI, 'This synthetic fixture is local only');
 const root = resolve(import.meta.dirname, '../../../..');
 const read = file => readFileSync(resolve(root, file), 'utf8');
-const keys = JSON.parse(read('packages/db/tests/baseline/expected-differences.json')).stricterInFiles.keys;
-assert.equal(keys.length, 90);
-assert.equal(keys.filter(key => key.startsWith('con:')).length, 13);
 const sql = read('packages/db/tests/baseline/stricter-precheck.sql').replace(/^--.*$/gm, '').trim();
+// Keep testing this fixed precheck after its entries move to pendingOnStaging and are retired.
+const keys = [...sql.matchAll(/'((?:con|idx):[^']+)'/g)].map(match => match[1]);
+assert.equal(keys.length, 90);
+assert.equal(new Set(keys).size, 90);
+assert.equal(keys.filter(key => key.startsWith('con:')).length, 13);
 const masked = sql.replace(/'(?:''|[^'])*'/g, "''");
 assert.equal(masked.split(';').filter(part => part.trim()).length, 2);
 assert.ok(masked.split(';').filter(part => part.trim()).every(part => /^\s*SELECT\b/.test(part)));
 assert.doesNotMatch(masked, /\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE|DO|CALL|COPY|SET|INTO)\b|\\/i);
-assert.deepEqual([...sql.matchAll(/'((?:con|idx):[^']+)'/g)].map(match => match[1]).sort(), [...keys].sort());
 const [gate, objects] = sql.split(';').filter(part => part.trim());
 const capture = `BEGIN READ ONLY;
 SELECT row_to_json(gate) FROM (${gate}) gate;
@@ -46,6 +47,26 @@ const checkColumns = [
 ];
 const invalidRows = checkColumns.map(([table, column, valid]) =>
   `INSERT INTO public.${table} (${column}) VALUES ('invalid'), ('${valid}'), (NULL), (NULL);`);
+const migrationFiles = readdirSync(resolve(root, 'packages/db/migrations'))
+  .filter(name => /^\d{4}_db_baseline_stricter_objects\.sql$/.test(name));
+assert.equal(migrationFiles.length, 1);
+// The exception subtransaction replaces the migration's outer transaction for refusal tests.
+const migrationBody = read(`packages/db/migrations/${migrationFiles[0]}`)
+  .replace(/^BEGIN;$/m, '').replace(/^COMMIT;$/m, '');
+const refusal = error => `DO $test$
+BEGIN
+  BEGIN
+    EXECUTE $migration$${migrationBody}$migration$;
+    RAISE EXCEPTION 'migration should have rejected ${error}';
+  EXCEPTION WHEN ${error} THEN NULL;
+  END;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE connamespace = 'public'::regnamespace)
+    OR EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public') THEN
+    RAISE EXCEPTION 'rejected migration left partial objects';
+  END IF;
+END $test$;`;
+const validChecks = checkColumns.map(([table, column, valid]) =>
+  `UPDATE public.${table} SET ${column} = '${valid}' WHERE ${column} = 'invalid';`).join('\n');
 const fixture = `${capture}
 -- The following writes run ONLY in the disposable local replay container.
 BEGIN;
@@ -69,6 +90,14 @@ INSERT INTO public.user_subscriptions (billing_cycle, stripe_subscription_id) VA
   ('monthly', 'duplicate-subscription'), (NULL, NULL), (NULL, NULL);
 COMMIT;
 ${captureObjects}
+BEGIN;
+${refusal('check_violation')}
+${validChecks}
+UPDATE public.profiles SET credits = 0 WHERE credits < 0;
+UPDATE public.payment_orders SET billing_cycle = 'monthly', item_type = 'credit_package', mode = 'payment';
+UPDATE public.user_subscriptions SET billing_cycle = 'monthly';
+${refusal('unique_violation')}
+ROLLBACK;
 BEGIN;
 ALTER TABLE public.ai_usage_logs ADD CONSTRAINT ai_usage_logs_status_check
   CHECK (status = 'unexpected') NOT VALID;
@@ -124,6 +153,7 @@ try {
   }
   console.log('PASS: SELECT-only; exact 90 keys; existing/missing objects; NULL CHECK semantics;');
   console.log('duplicate groups (NULL excluded); predicate columns; definition drift; NOT VALID; count-only output.');
+  console.log('PASS: migration rejects CHECK and UNIQUE violations without leaving partial objects.');
   console.log(`PASS: file-built fingerprint unchanged; ${report.repeated} repeated migrations; cleanup.`);
 } finally {
   rmSync(temporary, { recursive: true, force: true });
