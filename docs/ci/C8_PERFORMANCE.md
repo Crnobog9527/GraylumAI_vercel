@@ -1,6 +1,6 @@
 # C8 CI 提速测量
 
-状态：实现完成，远程前后测量进行中；高风险（CI），仅 draft PR，不合并或删除现有 Actions 缓存。
+状态：实现及首轮完整 CI 已通过；高风险（CI），仅 draft PR，不合并或删除现有 Actions 缓存。
 
 ## 改动前核实（2026-10-01，Asia/Shanghai）
 
@@ -44,6 +44,44 @@
 [cache v4.2.4](https://github.com/actions/cache/blob/v4.2.4/README.md)、
 [pnpm audit](https://pnpm.io/cli/audit)。
 
+## 同 PR 前后测量
+
+对比同一 PR、同一 staging 基线、相同依赖锁文件和业务代码。
+改动前为仅文档提交 `ebb2282622d5a8331643f44ab9503a8594e7e6ac`：
+[CI 36770257403](https://github.com/Crnobog9527/GraylumAI_vercel/actions/runs/36770257403)、
+[Security 36770257616](https://github.com/Crnobog9527/GraylumAI_vercel/actions/runs/36770257616)。
+改动后首轮为 `13405b8fd86c2712e2e074e9dc11bede1be9e60a`：
+[CI 36770960689](https://github.com/Crnobog9527/GraylumAI_vercel/actions/runs/36770960689)、
+[Security 36770960671](https://github.com/Crnobog9527/GraylumAI_vercel/actions/runs/36770960671)。
+两轮完整 CI/Security 都成功（15 项检查，其中 10 项必需）。
+
+| 指标（秒） | 改动前 | 改动后首轮 | 说明 |
+| --- | ---: | ---: | --- |
+| Dependency Audit 完整任务 | 32 | 10 | 去掉安装与初始 pnpm setup |
+| Audit 全仓依赖安装 | 10 | 未运行（已移除） | 实际审计仍执行；锁文件输入不变 |
+| 实际 audit 命令 | 1 | 1 | 同版本、同阈值 |
+| 单元/回归依赖安装 | 7 | 3 | 前：578 下载/0 复用；后：0 下载/578 复用 |
+| 单元/回归 Node 设置（含 store 恢复） | 1 | 5 | 缓存恢复不是免费操作 |
+| 单元/回归 Node 设置＋安装 | 8 | 8 | 本轮合计无缩短 |
+| 单元/回归完整任务 | 63 | 62 | 包含新增契约断言，不据此承诺稳定提速 |
+| 构建命令 | 91 | 91 | 两轮均为当前 key 首次冷构建 |
+| 构建/E2E 完整任务 | 163 | 165 | 无省略测试；首轮未因缓存加快 |
+| 集成完整任务 | 217 | 221 | 本任务没有改集成逻辑，是主要耗时路径 |
+| lint/type 完整任务 | 92 | 57 | 未修改该 worker；差异说明 runner 波动，不计为本次优化收益 |
+
+时间来自 GitHub jobs API 的 started_at/completed_at，按整秒差计算，含 job 收尾但不含排队。
+不要用单步骤或未修改 worker 的随机差异宣称端到端固定提速。
+
+首轮构建日志确认 v2 未命中，编译缓存目录 315,040 KiB（约 307.7 MiB），低于 1 GiB 上限；
+保存缓存 ID `8332167394`，归档大小 240,303,579 bytes（240.30 MB）。
+后续最终文档提交的完整 CI 会验证相同 key 命中、缓存不再逐提交新增；最终 head、运行链接、
+热缓存耗时及总控交接结论记录在本 PR 中，避免将旧 head 的绿色状态误写成新候选结果。
+
+本地：frozen-lockfile 安装成功；工作流契约 9 测试/341 断言、政策回归 232 cases、
+CI safeguards 128/128、代码大小和 diff 检查通过。最初新 worktree 缺依赖导致 safeguards
+4 项失败；离线安装发现 store 缺包，改为锁文件联网安装后全过。未改依赖版本或放宽断言。
+独立审查已覆盖首轮完整候选，无阻断发现；一处表格排版已在后续文档修正，最终候选仍需对应审查结论。
+
 ## 现有缓存删除建议（未执行，待单独批准）
 
 建议等 C8 策略获批采用后，再清理下列核实时已存在的 **38 条 `secretless-next-v1-` 缓存**，
@@ -54,7 +92,6 @@
 
 | Cache ID | ref | key 末尾提交 | bytes |
 | --- | --- | --- | ---: |
-
 | 8315482462 | `refs/pull/497/merge` | `9bc90625b8ecee2e55faa404e866d8c40cefbcf7` | 244175134 |
 | 8318937389 | `refs/heads/staging` | `6ba5611e9d302aedd7b2b6a8b11ff5b6ab5ce73f` | 306877464 |
 | 8319902583 | `refs/pull/538/merge` | `2e5ce76eda0b2e86fdcaf66480206944d9fb11f3` | 240323107 |
