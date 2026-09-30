@@ -1,95 +1,102 @@
-# DATA-ERASURE B1b local preparation
+# DATA-ERASURE B1b local verification and handoff
 
-**Incomplete; not a migration or a clean delivery candidate.** The implementation writer must not
-connect to a remote database. The controller supplies the staging `pg_get_functiondef` originals
-and `md5(pg_get_functiondef)` for:
+0150 extends 0149's one-way erasure channel to Runtime and legacy conversations. Only a closed
+account recorded in `account_erasure_requests` can call the service-only
+`account_erasure_scrub_runtime(uuid)`. The implementation writer never connects to a remote DB.
+The PR remains draft until the controller reviews the complete candidate; only afterwards may it
+be marked ready and the Codex bot requested. The controller handles merge/application after Owner approval.
 
-- `public.artifact_chat_message_guard()` — add only a legal one-way message-erasure UPDATE return.
-- `public.erasure_update_allowed(jsonb,jsonb,text[])` — accept an empty allow-list for the identity-only
-  dependency edge. A NULL list, an already-erased row, or changes outside the list remain refused.
+## Source evidence and safety boundary
 
-The controller's catalog-only extraction is [erasure-b1b-staging-source.sql](erasure-b1b-staging-source.sql).
-Check both originals against a database built from the exact branch's files **before rewriting them**;
-put those originals verbatim in the final rollback script. Current local source hashes are only
-local evidence and do not substitute for the controller's staging evidence.
+The controller supplied staging originals and server MD5s in
+[PR #537](https://github.com/Crnobog9527/GraylumAI_vercel/pull/537#issuecomment-5905941158).
+Both matched the actual migration-before replay database after receipt:
 
-## Prepared parts
+| Existing function | Staging and local server MD5 | Minimal change |
+| --- | --- | --- |
+| `artifact_chat_message_guard()` | `b562bbc4c69d1be9f73e22511aadb1fa` | Only a validator-approved message-erasure UPDATE returns early |
+| `erasure_update_allowed(jsonb,jsonb,text[])` | `c020123940c8b3772b008f8cde8f38c6` | Explicit singleton `marker-only` rule; NULL/empty/mixed lists still refuse |
 
-`erasure-b1b-preparation.sql` contains the independently prepared schema, guard wiring, and the new
-service-role-only `account_erasure_scrub_runtime(uuid)` (B1a's scrub is retained). The two existing
-functions are deliberately not rewritten yet. `erasure-b1b-rollback-preparation.sql` reverses only
-those prepared parts. Both are local test artifacts, outside the migration ledger.
+0150 rejects source drift before rewriting either function; exact new definitions are also accepted
+for idempotent reapplication. CREATE OR REPLACE retains owners/ACLs. The rollback contains both
+staging originals and refuses before any mutation if any B1b table has an erased row.
 
 | Table | Content cleared | Preserved identity / financial boundary |
 | --- | --- | --- |
-| runtime_sessions | scope, start_payload | actor, session/start request ID, revision, active execution, creation time |
-| runtime_executions | payload, result, primary_result, match_result | owner/session/request/run, state, history revisions, diagnostic code |
+| runtime_sessions | scope, start_payload | actor, session/start request ID, revision, active execution, time |
+| runtime_executions | payload, result, primary_result, match_result | actor/session/request/run, state, history revisions, diagnostic code |
 | runtime_history_dependencies | marker only; no content columns | both execution identity keys |
 | runtime_session_batches | items | session/execution, batch and revision numbers |
 | runtime_session_history | item | session/execution, revision, internal_control |
 | runtime_tool_calls | arguments, result | execution/call ID, registered tool name |
 | runtime_scope_material | request, content, content_hash | session/revision/request, revoked |
-| conversations | title, summary, summary_metadata | owner/IDs, summary counters/time, skill/agent mode, is_deleted/deleted_at |
+| conversations | title, summary, summary_metadata | IDs, summary counters/time, skill/agent mode, is_deleted/deleted_at |
 | messages | content | conversation/message IDs, role, times, soft-delete facts |
 | conversation_context_snapshots | content, metadata | source message IDs, type, count, times |
-| ordinary_chat_requests | input, response_params, partial_content, failure_reason; nonfinancial JSON keys | IDs, state/times/token; reservation and billing_result keep only named money/transaction/message identity keys |
+| ordinary_chat_requests | input, response_params, partial_content, failure_reason; nonfinancial JSON keys | IDs, state/times/token; only named financial/transaction/message keys remain in reservation/billing_result |
 
-Runtime eligibility requires a completed/cancelled execution **and** either no billing run or a closed,
-settled/refunded run. Session-level content waits for all executions to reach that state. Child rows
-wait for their execution; dependency edges wait for both ends. Ordinary requests require succeeded/
-failed; shared conversation/message/snapshot content waits for ordinary and artifact requests.
-Each of the eleven tables returns separate processed and skipped counts, including busy parents.
+Runtime eligibility requires completed/cancelled executions and either no billing run or a closed,
+settled/refunded run. Session/material content waits for every execution; child rows wait for their
+execution; dependency edges wait for both ends. Ordinary requests require succeeded/failed; shared
+conversation/message/snapshot content waits for ordinary and artifact requests. All eleven tables
+return processed and skipped counts. Busy parent locks are skipped for PR-C retry; session locks
+precede execution locks. No profile/BILL2 run/artifact project lock or definer temporary table is added.
 
-The scrub takes session locks before execution locks, matching Runtime. It does not take profile,
-BILL2 run, or artifact project locks, and uses `SKIP LOCKED` for session/conversation parents. It
-uses no temporary scope table inside the definer function. A separate definer trigger on conversations
-prevents ordinary owner UPDATE/INSERT from marking an open account's row erased without access to
-the protected request table. Table grants remain unchanged. `a_erased_row_guard` runs before existing
-message guards so rewrites of erased skill messages are refused by the erasure guard itself.
+Conversations retain client UPDATE permission: a definer trigger checks closure without widening
+client table grants. `a_erased_row_guard` executes before the existing skill-message guard and freezes
+all erased rows, including late complete/checkpoint/tool results whose old values are NULL.
+No physical DELETE is added; tests verify existing busy-conversation DELETE refusals by row existence.
+`bill2_runs` (including `session_ref`) stays unchanged. B2 supplies restricted settlement; C retries
+and removes shells after B2. D must harden read/replay paths before enabling single-item erasure.
 
-No physical deletion is performed. The existing DELETE/financial boundaries remain: a busy conversation
-may produce zero affected rows and still exist; tests verify both facts. Runtime/service DELETE is
-still denied by table privileges. Physical removal is PR-C; `bill2_runs.session_ref` is PR-B2.
+## Reproduction (local Docker only)
 
-## Local checks and completion steps
+After #532, `--out` exports without comparing built fingerprints; the preparatory 0149 check passed.
+The full 0150 check exposed a separate overlay issue: copying a whole group hash hid unchanged
+file-only objects (the snapshot-type CHECK). The wrapper now compares every object in changed groups
+with correctly hashed object definitions, retaining the existing staging snapshot/expected differences.
+Fixtures seed under replica only, commit, then assert in a new transaction with real guards/FKs.
+Each subsequent `--after` file runs in a fresh connection: C8 exercises service_role first, C11
+exercises authenticated/anon, and C9 calls actual post-migration definer functions without mocks.
 
-The current staging wrapper was run unchanged with 0149 as `--new`: PASS, no unexpected differences,
-account-open and erasure constraint audits both 0 rows. #532's `--out` mode works; no wrapper patch.
+```sh
+node packages/db/tests/baseline/replay-with-new-migrations.mjs --local-only \
+  --new 0150_erasure_content_channel_runtime_chat.sql \
+  --after packages/db/tests/erasure-b1a-cases.sql,packages/db/tests/erasure-b1a-nonowner.sql,packages/db/tests/erasure-b1b-cases.sql,packages/db/tests/erasure-b1b-nonowner.sql,packages/db/tests/erasure-b1b-client.sql,packages/db/tests/erasure-b1b-definer.sql,packages/db/tests/erasure-constraint-audit.sql
+node packages/db/tests/baseline/replay-with-new-migrations.mjs --local-only \
+  --new 0150_erasure_content_channel_runtime_chat.sql \
+  --before-after packages/db/tests/erasure-structure-fingerprint.sql \
+  --after packages/db/tests/erasure-structure-fingerprint.sql,packages/db/tests/erasure-b1b-rollback.sql,packages/db/tests/erasure-structure-fingerprint.sql,packages/db/migrations/0150_erasure_content_channel_runtime_chat.sql,packages/db/tests/erasure-structure-fingerprint.sql
+node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built
+node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files
+```
 
-Prepared fixtures commit before assertions. `erasure-b1b-nonowner.sql` must run in its own new
-connection/transaction after the fixture, with service_role as the first role to exercise the guards;
-its temporary table grants roll back. `erasure-b1b-client.sql` starts a separate authenticated/anon
-connection so no owner-initialised validator expression can hide a client EXECUTE permission bug. `erasure-b1b-definer.sql` uses the actual post-migration definer
-functions, not replacement mocks. `cases` rolls assertions back; `refusal` commits an actual erased row
-so the subsequent final rollback must stop with `ERASURE_ROLLBACK_REFUSED`.
+For rollback refusal, use the wrapper with `--after` cases,refusal,rollback (the corresponding
+`erasure-b1b-*.sql` paths). Require failure at rollback with `ERASURE_ROLLBACK_REFUSED`, not an
+unrelated earlier failure. Structure fingerprints must match before=rollback and after=reapply.
+The runner compares every migration's immediate second application object by object.
+Do not refresh staging snapshots before application; the controller refreshes those afterwards.
 
-After receiving and matching both staging sources:
+## Verified results
 
-1. Insert only the two planned minimal function edits into the prepared forward SQL. Recheck the
-   next available migration number on staging and move the completed SQL into `migrations/` (0150
-   is currently available). Bind the old/new function identities so reapplication remains idempotent.
-2. Insert the staging originals into the rollback; preserve their ACLs. Remove these two incomplete
-   preparation files. Update DATA-ERASURE's implementation notes with the final behavior.
-3. Run the wrapper with the new migration and `--after` fixture,cases,nonowner,client,definer,audit; run B1a
-   cases/nonowner too because its validator is affected. Require no unexpected differences and audits
-   with 0 rows. Test empty-list non-whitelist changes and NULL-list rejection as well.
-4. Prove pre/after/rollback/reapply catalog fingerprints match pairwise; reapply twice with no change.
-   With an erased fixture row, rollback must refuse before mutation. Run the configured Runtime
-   integration suite against the file-built schema for complete/checkpoint/tool paths.
-5. Run `node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built` and commit the
-   built fingerprint in this same PR. Do not rewrite staging snapshots without an applied migration.
-6. Finish local/remote checks and same-scope repairs. CI green → controller full review while draft →
-   only after controller review, mark ready and request Codex bot review. No implementer merge or
-   remote migration. Controller handles both after Owner approval, and refreshes staging snapshots.
+- PASS: received staging source MD5s match actual local replay before either rewrite.
+- PASS: file build 153 steps; 84 migrations repeat with identical catalog objects; built fingerprint updated.
+- PASS: B1a C1–C8 regression and B1b C1–C11 (eleven-table counts/content/hash, idempotency,
+  in-flight retry, replacements/refills/non-whitelist columns, both silent delete guards,
+  fresh non-owner/client sessions, real definer writes). Account-open/constraint audits: 0 rows.
+- PASS: audit probes detect NOT NULL, live-only CHECK, missing-argument guard and a new private
+  column on the marker-only table. With validator EXECUTE revoked, fresh C8 fails specifically
+  with `permission denied for function erasure_update_allowed`; this is the expected negative result.
+- PASS: rollback/reapply fingerprint `34a07d637b40321a3f52b2a6a5229bc3` →
+  `4afb151f0e649311ba14861ad345c0c9` (matches the independently recorded pre-0150 fingerprint) →
+  `34a07d637b40321a3f52b2a6a5229bc3` → same after immediate repeat.
+- PASS: with erased rows rollback fails specifically at its initial check with
+  `ERASURE_ROLLBACK_REFUSED`; changed staging-source definition is refused before schema mutation.
+- PASS: Runtime integration against repository-built schema: 100 passed; 5 explicitly skipped
+  browser/application cases. Private canary absent from application logs. This is local evidence.
+- PASS: frozen install; API 140 files / 3079 tests (3 skipped); both packages' lint/typecheck;
+  API type baseline; safeguards 136; workflow contracts 7 runs / 301 assertions; code-size and ledger.
 
-All B1b full-channel, final-source, built-fingerprint, full rollback, and independent-review results
-remain **NOT_RUN / blocked on staging source evidence** until step 1. Local preparation validation is
-not final-candidate validation or staging acceptance.
-
-Independent preparation checks completed locally (existing functions not rewritten): schema/new-function
-creation PASS, C9 real definer writes PASS, constraint audit 0 rows; catalog fingerprint round trip
-`4afb151f… → b44c30c4… → 4afb151f… → b44c30c4…` PASS. These are preparation results only.
-Generic local checks: frozen install PASS; API 140 files/3079 cases PASS (3 skipped); Web/API lint and
-typecheck PASS; API type baseline PASS; safeguards 136 PASS; workflow contracts 7 runs/301 assertions
-PASS; code-size and exact-base migration-ledger checks PASS. The initial sandbox API run failed only
-because local fixtures could not listen on 127.0.0.1 (EPERM); the local-socket-enabled rerun passed.
+Remote final-candidate CI and controller/independent review are recorded by exact head in the PR.
+Staging application/acceptance remain NOT_RUN by this writer. PR-E reserves 0151; after B1b merge,
+its writer must regenerate its own built fingerprint on updated staging rather than merge JSON by hand.

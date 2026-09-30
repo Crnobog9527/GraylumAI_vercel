@@ -12,19 +12,19 @@ WITH marked AS (
   WHERE t.tgnargs > 0 AND t.tgfoid IN ('public.artifact_immutable()'::regprocedure,
     'public.artifact_chat_history_immutable()'::regprocedure, 'public.artifact_round_identity()'::regprocedure,
     'public.erased_row_guard()'::regprocedure)
-  UNION ALL
-  -- B1b dependency edges carry no content: an empty allow-list protects only their marker.
-  SELECT t.tgrelid, NULL::text FROM pg_trigger t
-  WHERE t.tgrelid = 'public.runtime_history_dependencies'::regclass AND t.tgnargs = 0
-    AND t.tgfoid = 'public.erased_row_guard()'::regprocedure
-    AND NOT EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = t.tgrelid AND a.attnum > 0
-      AND NOT a.attisdropped AND a.attname NOT IN ('execution_id', 'dependency_id', 'erased_at'))
 ), cols AS (
   SELECT DISTINCT g.tgrelid, split_part(g.spec, '=', 1) AS col, g.spec LIKE '%=erased:%' AS sentinel FROM guards g
-  WHERE g.spec IS NOT NULL
+  WHERE g.spec <> 'marker-only'
 )
 SELECT m.relname, 'no_guard' AS problem, NULL AS detail FROM marked m
 WHERE NOT EXISTS (SELECT 1 FROM guards g WHERE g.tgrelid = m.oid)
+UNION ALL
+-- Marker-only is valid only for the dependency table, with no unlisted content columns.
+SELECT m.relname, 'invalid_marker_only', g.spec FROM guards g JOIN marked m ON m.oid = g.tgrelid
+WHERE g.spec = 'marker-only' AND (m.relname <> 'runtime_history_dependencies'
+  OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = g.tgrelid AND a.attnum > 0
+    AND NOT a.attisdropped AND a.attname NOT IN ('execution_id', 'dependency_id', 'erased_at'))
+  OR EXISTS (SELECT 1 FROM guards other WHERE other.tgrelid = g.tgrelid AND other.spec <> 'marker-only'))
 UNION ALL
 SELECT m.relname, 'not_null_blocks_erasure', c.col FROM cols c JOIN marked m ON m.oid = c.tgrelid
 JOIN pg_attribute a ON a.attrelid = c.tgrelid AND a.attname = c.col

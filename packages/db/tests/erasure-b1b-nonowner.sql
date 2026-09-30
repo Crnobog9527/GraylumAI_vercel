@@ -7,17 +7,29 @@ DO $$ BEGIN
   PERFORM set_config('b1b.open',(SELECT id::text FROM profiles WHERE nickname='b1b-open'),true);
   PERFORM set_config('b1b.conv',(SELECT id::text FROM conversations WHERE title='b1b-o_conv'),true);
 END $$;
-GRANT SELECT,UPDATE ON runtime_sessions,runtime_executions,runtime_history_dependencies,runtime_scope_material,messages TO service_role;
+-- A no-argument trigger must never accept a marker, even on a content-free row.
+CREATE TABLE public.b1b_no_args_probe(id int, erased_at timestamptz);
+INSERT INTO public.b1b_no_args_probe VALUES (1,NULL);
+CREATE TRIGGER b1b_probe BEFORE UPDATE ON public.b1b_no_args_probe
+  FOR EACH ROW EXECUTE FUNCTION public.erased_row_guard();
+GRANT SELECT,UPDATE ON runtime_sessions,runtime_executions,runtime_history_dependencies,
+  runtime_scope_material,messages,b1b_no_args_probe TO service_role;
 SET LOCAL ROLE service_role;
 DO $$ BEGIN
   IF current_user <> 'service_role' OR (SELECT rolsuper FROM pg_roles WHERE rolname=current_user) THEN
     RAISE EXCEPTION 'B1b C8 requires a non-owner, non-superuser service_role'; END IF;
-  -- Both empty and non-empty allow-lists execute as the non-owner for the first time here.
-  IF erasure_update_allowed('{"erased_at":null}', '{"erased_at":"fixture"}', NULL) THEN
-    RAISE EXCEPTION 'B1b C8 NULL allow-list accepted'; END IF;
+  -- Initialise both trigger and validator as this non-owner, never as postgres first.
+  BEGIN
+    UPDATE b1b_no_args_probe SET erased_at=now();
+    RAISE EXCEPTION 'B1b C8 no-argument guard accepted a marker';
+  EXCEPTION WHEN insufficient_privilege THEN IF SQLERRM<>'erasure outside allow-list' THEN RAISE; END IF; END;
+  IF erasure_update_allowed('{"erased_at":null}', '{"erased_at":"fixture"}', NULL)
+    OR erasure_update_allowed('{"erased_at":null}', '{"erased_at":"fixture"}', ARRAY[]::text[])
+    OR erasure_update_allowed('{"erased_at":null}', '{"erased_at":"fixture"}', ARRAY['marker-only','content']) THEN
+    RAISE EXCEPTION 'B1b C8 NULL/empty/mixed marker allow-list accepted'; END IF;
   BEGIN
     UPDATE runtime_history_dependencies SET dependency_id=execution_id,erased_at=now();
-    RAISE EXCEPTION 'B1b C8 empty allow-list changed an identity key';
+    RAISE EXCEPTION 'B1b C8 marker-only changed an identity key';
   EXCEPTION WHEN insufficient_privilege THEN IF SQLERRM<>'erasure outside allow-list' THEN RAISE; END IF; END;
   UPDATE runtime_history_dependencies SET erased_at=now();
   UPDATE runtime_scope_material m SET request=NULL,content=NULL,content_hash=NULL,erased_at=now()

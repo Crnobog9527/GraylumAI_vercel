@@ -1,6 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- INCOMPLETE LOCAL PREPARATION ONLY. Not a migration; do not apply remotely.
--- Waiting for the controller-provided staging definitions of the two existing functions.
+-- Apply remotely only with Owner approval; implementation tests use local Docker only.
 -- DATA-ERASURE B1b: closed-account-only, one-way runtime / legacy chat content erasure.
 -- Only content-free shells remain. Money, state, identities and bill2_runs.session_ref stay.
 -- In-flight rows / locked sessions and conversations are skipped and counted for PR-C retry.
@@ -8,7 +7,77 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
--- SOURCE-BOUND FUNCTION REWRITES MUST BE INSERTED HERE AFTER CONTROLLER EVIDENCE.
+-- Refuse drift before any rewrite; both exact originals and exact reapplication are valid.
+DO $$
+BEGIN
+  IF md5(pg_get_functiondef('public.erasure_update_allowed(jsonb,jsonb,text[])'::regprocedure)) NOT IN
+    ('c020123940c8b3772b008f8cde8f38c6', '9b7020d74229529e6dba8340179cd38d') THEN
+    RAISE EXCEPTION 'ERASURE_SOURCE_MISMATCH: erasure_update_allowed(jsonb,jsonb,text[])';
+  END IF;
+  IF md5(pg_get_functiondef('public.artifact_chat_message_guard()'::regprocedure)) NOT IN
+    ('b562bbc4c69d1be9f73e22511aadb1fa', 'b21b622b3d45ababefa4254d2ec41e84') THEN
+    RAISE EXCEPTION 'ERASURE_SOURCE_MISMATCH: artifact_chat_message_guard()';
+  END IF;
+END $$;
+
+-- Staging originals supplied by the controller in PR #537; locally verified before rewriting.
+-- artifact_chat_message_guard(): b562bbc4c69d1be9f73e22511aadb1fa
+-- erasure_update_allowed(jsonb,jsonb,text[]): c020123940c8b3772b008f8cde8f38c6
+-- CREATE OR REPLACE retains their existing owners and EXECUTE ACLs.
+CREATE OR REPLACE FUNCTION public.erasure_update_allowed(o jsonb, n jsonb, specs text[])
+ RETURNS boolean
+ LANGUAGE plpgsql
+ IMMUTABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  spec text; col text; rule text; cols text[] := '{}'; oldv jsonb; newv jsonb; kept jsonb;
+BEGIN
+  IF specs IS NULL OR cardinality(specs) = 0
+    OR nullif(o -> 'erased_at', 'null'::jsonb) IS NOT NULL
+    OR nullif(n -> 'erased_at', 'null'::jsonb) IS NULL THEN
+    RETURN false;
+  END IF;
+  -- Explicit marker-only mode; omitted arguments still fail closed. No mixed rules.
+  IF 'marker-only' = ANY (specs) THEN
+    RETURN cardinality(specs) = 1 AND (o - 'erased_at') = (n - 'erased_at');
+  END IF;
+  FOREACH spec IN ARRAY specs LOOP
+    col := split_part(spec, '=', 1);
+    rule := nullif(substr(spec, length(col) + 2), '');
+    cols := cols || col;
+    oldv := nullif(o -> col, 'null'::jsonb);
+    newv := nullif(n -> col, 'null'::jsonb);
+    IF rule IS NULL THEN
+      IF newv IS NOT NULL THEN RETURN false; END IF;
+    ELSIF rule LIKE 'erased:%' THEN
+      IF NOT ((oldv IS NULL AND newv IS NULL)
+        OR newv = to_jsonb('erased:' || (n ->> substr(rule, 8)))) THEN RETURN false; END IF;
+    ELSIF rule LIKE 'keys:%' THEN
+      SELECT jsonb_object_agg(e.key, e.value) INTO kept
+      FROM jsonb_each(CASE WHEN jsonb_typeof(oldv) = 'object' THEN oldv ELSE '{}'::jsonb END) e
+      WHERE e.key = ANY (string_to_array(substr(rule, 6), ','));
+      IF newv IS DISTINCT FROM kept THEN RETURN false; END IF;
+    ELSE
+      RETURN false;
+    END IF;
+  END LOOP;
+  RETURN (o - cols - 'erased_at') = (n - cols - 'erased_at');
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.artifact_chat_message_guard()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+ IF TG_OP = 'UPDATE' AND erasure_update_allowed(to_jsonb(OLD), to_jsonb(NEW), ARRAY['content']) THEN
+   RETURN NEW;
+ END IF;
+ IF EXISTS(SELECT 1 FROM conversations WHERE id=NEW.conversation_id AND skill_mode) THEN RAISE EXCEPTION 'guided messages require artifact turn' USING ERRCODE='42501'; END IF;
+ RETURN NEW;
+END $function$;
 
 CREATE TEMP TABLE b1b_erasure_columns(tbl text, col text, keeps_keys boolean) ON COMMIT DROP;
 INSERT INTO b1b_erasure_columns VALUES
@@ -41,7 +110,9 @@ INSERT INTO b1b_erasure_columns VALUES
 DO $$
 DECLARE t text; r record; c record;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['runtime_sessions', 'runtime_executions', 'runtime_history_dependencies', 'runtime_session_batches', 'runtime_session_history', 'runtime_tool_calls', 'runtime_scope_material', 'conversations', 'messages', 'conversation_context_snapshots', 'ordinary_chat_requests'] LOOP
+  FOREACH t IN ARRAY ARRAY['runtime_sessions', 'runtime_executions', 'runtime_history_dependencies',
+    'runtime_session_batches', 'runtime_session_history', 'runtime_tool_calls', 'runtime_scope_material',
+    'conversations', 'messages', 'conversation_context_snapshots', 'ordinary_chat_requests'] LOOP
     EXECUTE format('ALTER TABLE public.%I ADD COLUMN IF NOT EXISTS erased_at timestamptz', t);
   END LOOP;
   FOR r IN SELECT ec.tbl, ec.col, a.attnotnull FROM pg_temp.b1b_erasure_columns ec
@@ -90,14 +161,14 @@ CREATE TRIGGER erasure_closed_account_guard BEFORE INSERT OR UPDATE ON public.co
   FOR EACH ROW EXECUTE FUNCTION public.erasure_closed_conversation_guard();
 
 -- 0149 guards compare all columns outside their allow-list and freeze every erased row.
--- Empty TG_ARGV on the dependency edge allows only the marker, never its two identity keys.
+-- The explicit marker-only rule on dependency edges allows no identity changes.
 DO $$
 DECLARE g record; args text;
 BEGIN
   FOR g IN SELECT * FROM (VALUES
     ('runtime_sessions', ARRAY['scope', 'start_payload']::text[]),
     ('runtime_executions', ARRAY['payload', 'result', 'primary_result', 'match_result']::text[]),
-    ('runtime_history_dependencies', ARRAY[]::text[]),
+    ('runtime_history_dependencies', ARRAY['marker-only']::text[]),
     ('runtime_session_batches', ARRAY['items']::text[]),
     ('runtime_session_history', ARRAY['item']::text[]),
     ('runtime_tool_calls', ARRAY['arguments', 'result']::text[]),
@@ -105,7 +176,10 @@ BEGIN
     ('conversations', ARRAY['title', 'summary', 'summary_metadata']::text[]),
     ('messages', ARRAY['content']::text[]),
     ('conversation_context_snapshots', ARRAY['content', 'metadata']::text[]),
-    ('ordinary_chat_requests', ARRAY['input', 'response_params', 'partial_content', 'failure_reason', 'reservation=keys:pre_deduct_id,balance_before,balance_after,is_idempotent', 'billing_result=keys:user_message_id,assistant_message_id,transaction_id,settle_id,refund_id,balance_after,refunded_credits,refund_amount']::text[])
+    ('ordinary_chat_requests', ARRAY['input', 'response_params', 'partial_content', 'failure_reason',
+      'reservation=keys:pre_deduct_id,balance_before,balance_after,is_idempotent',
+      'billing_result=keys:user_message_id,assistant_message_id,transaction_id,settle_id,refund_id,'
+      'balance_after,refunded_credits,refund_amount']::text[])
   ) v(tbl, specs) LOOP
     SELECT string_agg(quote_literal(spec), ', ' ORDER BY n) INTO args FROM unnest(g.specs) WITH ORDINALITY x(spec, n);
     EXECUTE format('DROP TRIGGER IF EXISTS a_erased_row_guard ON public.%I', g.tbl);

@@ -11,6 +11,7 @@
 //          --new 0149_x.sql[,0150_y.sql] [--after a.sql,b.sql] [--before-after c.sql]
 // --before-after runs checks on the build WITHOUT the new migrations (e.g. a structure fingerprint).
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -82,12 +83,30 @@ try {
   const pre = JSON.parse(readFileSync(before, 'utf8'));
   const post = JSON.parse(readFileSync(after, 'utf8'));
   const snapshot = JSON.parse(readFileSync(resolve(root, 'packages/db/tests/baseline/staging-fingerprint.json'), 'utf8'));
+  const objectValue = (key, value) => /^(acl|defacl):/.test(key) ? value
+    : createHash('md5').update(value ?? '<null>').digest('hex').slice(0, 12);
+  // The staging snapshot stores individual objects only for differing groups. Hydrate an
+  // affected matching group from the before-build: its exact group hash proves those objects.
+  // Differing groups keep staging's original objects and all their expected differences.
+  for (const key of Object.keys(pre.groups)) {
+    if (pre.groups[key] === post.groups[key] || !snapshot.groups[key]
+      || !pre.groups[key].startsWith(snapshot.groups[key])) continue;
+    for (const [item, value] of Object.entries(pre.objects)) {
+      if (item.split('.')[0] === key) snapshot.objects[item] = objectValue(item, value);
+    }
+  }
   let changed = 0;
   for (const part of ['groups', 'objects']) {
     for (const key of new Set([...Object.keys(pre[part]), ...Object.keys(post[part])])) {
       if (pre[part][key] === post[part][key]) continue;
       changed += 1;
-      if (key in post[part]) snapshot[part][key] = post[part][key];
+      if (key in post[part]) {
+        // A changed group can still contain unchanged file-only objects. Never copy its local
+        // group hash: that would skip those objects and make a valid expected difference stale.
+        // Force the replay's object comparison; snapshot objects use hashes except ACL text.
+        snapshot[part][key] = part === 'groups' ? 'compare-overlaid-objects'
+          : objectValue(key, post[part][key]);
+      }
       else delete snapshot[part][key];
     }
   }
