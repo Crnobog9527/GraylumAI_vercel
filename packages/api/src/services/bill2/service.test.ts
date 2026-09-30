@@ -31,7 +31,7 @@ it.each(['confirmed','lost-commit','not-committed','inspect-unavailable','starte
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>):Promise<{data:unknown;error:unknown}>=>{
   if(name==='bill2_claim')return {data:{id:callId,state:'prepared',dispatchToken:token},error:null};
   if(name==='bill2_dispatch'){elapsed=mode==='started-error'?0:206_000;return {data:{dispatch:true},error:null};}
-  if(name==='bill2_record'||name==='bill2_read')return {data:{state:'unknown'},error:null};
+  if(name==='bill2_record')return {data:{state:'unknown'},error:null};
   expect(name).toBe('bill2_revoke_unstarted_dispatch');expect(args).toMatchObject({p_actor_id:actor,p_run_id:runId,p_call_id:callId,p_token:token,p_request_hash:frozen.requestHash});
   if(args.p_inspect)return mode==='inspect-unavailable'?{data:null,error:{code:'offline'}}:{data:{revoked:mode==='lost-commit',eligible:mode==='not-committed'},error:null};
   attempts++;if(attempts===1&&mode!=='confirmed')return {data:null,error:{code:'lost'}};

@@ -120,6 +120,7 @@ export async function cases(db,report){
  report.checks.push('typed nested financial whitelist rejects disguised content and drops malformed usage');
  const banned=await fixture(db);await db.query("UPDATE profiles SET status='suspended' WHERE id=$1",[banned.actor]);
  await assert.rejects(rpc(db,'bill2_read',banned.actor,banned.run),/ACTOR_DENIED/);
- await assert.rejects(rpc(db,'bill2_close',banned.actor,banned.run,'delivered',outcome),/ACTOR_DENIED/);
+ assert.equal((await rpc(db,'bill2_close',banned.actor,banned.run,'delivered',outcome)).accountClosed,undefined);
+ await assert.rejects(rpc(db,'bill2_revoke_unstarted_dispatch',banned.actor,banned.run,randomUUID(),randomUUID(),'b'.repeat(64),true),/ACTOR_DENIED/);
  report.checks.push('ordinary suspension without erasure cannot use the new exception');
 }

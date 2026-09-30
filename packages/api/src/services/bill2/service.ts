@@ -156,11 +156,8 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
         if (saved.accountClosed) return { dispatched: true, accountClosed: true as const };
       }
       catch { return { dispatched: true, pendingReceipt: { runId: capability.runId, callId, evidence } }; }
-      // Receipt insertion and account confirmation can commit in either order.
-      // The host must still recheck immediately before SDK/history/stream delivery.
-      if ((await readRun(capability.runId)).accountClosed) {
-        return { dispatched: true, accountClosed: true as const };
-      }
+      // The host must recheck before SDK/history/stream delivery: confirmation
+      // can commit after receipt insertion. Host integration follows PR #497.
       return { dispatched: true, observation }; // Private server composition only; never a public route result.
     },
     closeRun: (runId: string, outcome: 'delivered' | 'confirmed_failure' | 'cancelled' | 'unknown', result: unknown = null) =>

@@ -12,7 +12,8 @@
 18 个函数的 MD5/长度与 #544 的 Q1 一致（PR #550 表格保留核验记录）。
 本切片只重写 B2a 的五个函数，`source-md5.json` 固定它们的来源。
 迁移在任何持久修改前逐个检查旧原文或本切片精确新原文；来源漂移立即失败。
-已有 owner、SECURITY DEFINER、search_path、ACL 保持；两种客户端角色均无调用权。
+已有 owner、SECURITY DEFINER、search_path、ACL 保持；两种客户端角色均无调用权。封闭判断只是谓词；普通停用账号原有受限财务恢复继续保留，
+但不能借注销例外越过原 read/未发送撤权的 actor 门槛。
 
 没有新表、账本或恢复状态机。原 run/call/预扣仍为计费权威，原注销请求/封闭 profile
 决定受限例外。四个私有 helper 只复用封闭判断和递归白名单，不增加服务可调用 RPC。
@@ -47,15 +48,18 @@ node packages/db/tests/erasure-b2a/run-local.mjs --local-only
 `tests/v3/run-workbench.mjs` 为同目录临时文件，仅在成功 `buildFromFiles` 后插入
 `apply("packages/db/migrations/PENDING_erasure_b2a.sql")`，运行原
 `--bill2-core-only --without-app --schema-from-files` 套件，随后删除临时入口。
-原入口和 Runtime 集成文件没有改动，不分配测试迁移编号。
+同一临时入口也运行原 `--runtime-only --with-staging-schema --without-app --schema-from-files`
+套件。原入口和 Runtime 集成文件没有改动，不分配测试迁移编号。
 
-本地结果：API 145 文件、3122 通过/3 跳过；BILL2 集成 79/79 通过；API lint/typecheck 通过。
+本地结果：API 145 文件、3120 通过/3 跳过；BILL2 集成 79/79 通过；
+现有 Runtime 集成 103 通过/5 个原入口明确排除的浏览器/应用进程用例跳过；API lint/typecheck 通过。
+两个集成库都显式应用了开发 SQL，Runtime 测试/固定 RPC 次数断言未改。
 迁移账本实测失败：`Malformed migration filename: PENDING_erasure_b2a.sql`（协调中的预期阻塞）。
 
 ## 仍未完成
 
 #497 合并前不改 execute.ts、executionStream.ts、Runtime 集成测试。
-当前服务层成功落收据后再次检查封闭状态并抑制 observation；这不足以证明整个宿主安全。
+当前服务层依据 record 在锁内确认的封闭状态抑制 observation，不额外增加 RPC；这不足以证明整个宿主安全。
 SDK history、成果/研究副本以及 stream/最终回包前的封闭竞争，需要后续宿主接入和集成验证。
 调用失败后保留的 pendingReceipt 仍是仅限可信宿主的内存恢复证据，不能进入公开响应。
 当前 SQL 功能可独立验证；完整 Runtime/浏览器验收、CI 全绿、总控实施审阅及最终独立审查尚未完成。

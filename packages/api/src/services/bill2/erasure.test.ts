@@ -6,7 +6,7 @@ const rawBody=JSON.stringify({id:'receipt',model:'m',cost:'0.001',currency:'USD'
  coverage:'request_total',usage:{sdkResponse:{choices:[{message:{content:'PRIVATE_CANARY'}}]}}});
 const observation={rawBody,rawBodyBase64:Buffer.from(rawBody).toString('base64'),sourceHash:'a'.repeat(64),
  httpStatus:200,complete:true,transportIssue:null};
-it.each(['at-record','after-record','open','read-error'] as const)(
+it.each(['at-record','open'] as const)(
  'does not return provider content after account confirmation: %s',async mode=>{
   const actor=randomUUID(),run=randomUUID(),callId=randomUUID(),token=randomUUID();
   const body='synthetic request';
@@ -18,14 +18,12 @@ it.each(['at-record','after-record','open','read-error'] as const)(
    if(name==='bill2_claim')return {data:{id:callId,state:'prepared',dispatchToken:token},error:null};
    if(name==='bill2_dispatch')return {data:{dispatch:true},error:null};
    if(name==='bill2_record')return {data:{accountClosed:mode==='at-record'},error:null};
-   expect(name).toBe('bill2_read');
-   return mode==='read-error'?{data:null,error:{code:'offline'}}:{data:{accountClosed:mode==='after-record'},error:null};
+   throw new Error('Unexpected RPC: '+name);
   });
   const adapter={dispatch:vi.fn(async()=>observation),lookup:vi.fn()};
   const billing=authoritativeBilling({admin:{rpc},actor:async()=>actor,adapter});
   await billing.claimCall(run,1,frozen);
-  if(mode==='read-error')await expect(billing.dispatchOnce(callId,body)).rejects.toThrow('DATABASE_UNAVAILABLE');
-  else {
+  {
    const result=await billing.dispatchOnce(callId,body);
    if(mode==='open')expect(result.observation).toEqual(observation);
    else {expect(result).toEqual({dispatched:true,accountClosed:true});expect(JSON.stringify(result)).not.toContain('PRIVATE_CANARY');}

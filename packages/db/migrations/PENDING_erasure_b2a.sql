@@ -5,7 +5,7 @@ BEGIN;
 SET LOCAL lock_timeout = '5s';
 DO $$
 BEGIN
- IF md5(pg_get_functiondef('public.bill2_read(uuid,uuid)'::regprocedure)) NOT IN ('a15230d1b76e914de934909d4094a07b','2c349657dcc196ac5ed4f69f94b318e1') THEN
+ IF md5(pg_get_functiondef('public.bill2_read(uuid,uuid)'::regprocedure)) NOT IN ('a15230d1b76e914de934909d4094a07b','b7a41ced1962f8ba453f67f4a2542e50') THEN
   RAISE EXCEPTION 'ERASURE_SOURCE_MISMATCH: bill2_read(uuid,uuid)';END IF;
  IF md5(pg_get_functiondef('public.bill2_close(uuid,uuid,text,jsonb)'::regprocedure)) NOT IN ('d446f8c9a4cadeb4f0d1345d3dba7479','cdd624f5aba3b08481c2e9f0ddfcaad0') THEN
   RAISE EXCEPTION 'ERASURE_SOURCE_MISMATCH: bill2_close(uuid,uuid,text,jsonb)';END IF;
@@ -13,22 +13,17 @@ BEGIN
   RAISE EXCEPTION 'ERASURE_SOURCE_MISMATCH: bill2_record(uuid,uuid,uuid,jsonb)';END IF;
  IF md5(pg_get_functiondef('public.runtime_financial_recovery(uuid,uuid,boolean)'::regprocedure)) NOT IN ('97bf2f1859bc1019146cafd7e1418ae7','d24b8d6aa4eac6ccae0269dd52a73c7d') THEN
   RAISE EXCEPTION 'ERASURE_SOURCE_MISMATCH: runtime_financial_recovery(uuid,uuid,boolean)';END IF;
- IF md5(pg_get_functiondef('public.bill2_revoke_unstarted_dispatch(uuid,uuid,uuid,uuid,text,boolean)'::regprocedure)) NOT IN ('86107967a3d5bf30ec1737459a606eec','c682e3961564ad5a22745249884c0015') THEN
+ IF md5(pg_get_functiondef('public.bill2_revoke_unstarted_dispatch(uuid,uuid,uuid,uuid,text,boolean)'::regprocedure)) NOT IN ('86107967a3d5bf30ec1737459a606eec','df0b57cbf4ad7cbb890afb056925f951') THEN
   RAISE EXCEPTION 'ERASURE_SOURCE_MISMATCH: bill2_revoke_unstarted_dispatch(uuid,uuid,uuid,uuid,text,boolean)';END IF;
 END $$;
 -- No new admission authority: the original erasure request and pre-deduction remain authoritative.
 CREATE OR REPLACE FUNCTION public.bill2_erasure_closed(a uuid, pre uuid) RETURNS boolean
 LANGUAGE plpgsql STABLE SET search_path = public, pg_temp AS $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM profiles WHERE id = a AND status = 'active' AND is_deleted = 'false') THEN
-    RETURN false;
-  END IF;
-  IF a IS NOT NULL AND EXISTS (SELECT 1 FROM profiles p JOIN account_erasure_requests e ON e.profile_id = p.id
+  -- A predicate, not a new grant: callers retain their original non-erasure authorization.
+  RETURN a IS NOT NULL AND EXISTS (SELECT 1 FROM profiles p JOIN account_erasure_requests e ON e.profile_id = p.id
       WHERE p.id = a AND p.status = 'deleted' AND p.is_deleted = 'true')
-    AND EXISTS (SELECT 1 FROM billing_history WHERE id = pre AND user_id = a AND operation_type = 'pre_deduct') THEN
-    RETURN true;
-  END IF;
-  RAISE EXCEPTION 'BILL2_ACTOR_DENIED' USING ERRCODE = '42501';
+    AND EXISTS (SELECT 1 FROM billing_history WHERE id = pre AND user_id = a AND operation_type = 'pre_deduct');
 END $$;
 
 CREATE OR REPLACE FUNCTION public.bill2_erasure_view(r public.bill2_runs, is_closed boolean) RETURNS jsonb
@@ -136,6 +131,7 @@ AS $function$
 DECLARE r bill2_runs;erasing boolean;BEGIN SELECT * INTO r FROM bill2_runs WHERE id=p_run_id AND actor_id=p_actor_id;
  IF r.id IS NULL THEN RAISE EXCEPTION 'BILL2_RUN_DENIED' USING ERRCODE='42501';END IF;
  erasing:=bill2_erasure_closed(p_actor_id,r.pre_deduct_id);
+ IF NOT erasing THEN PERFORM bill2_actor(p_actor_id);END IF;
  RETURN bill2_erasure_view(r,erasing)||jsonb_build_object('calls',(SELECT coalesce(jsonb_agg(jsonb_build_object('id',id,'sequence',sequence,'state',state,'providerId',provider_id,'costUsd',selected_cost_usd::text,'recoveryAttempts',recovery_attempts) ORDER BY sequence),'[]') FROM bill2_calls WHERE run_id=r.id));END $function$;
 
 CREATE OR REPLACE FUNCTION public.bill2_close(p_actor_id uuid, p_run_id uuid, p_outcome text, p_result jsonb)
@@ -336,6 +332,7 @@ BEGIN
  SELECT * INTO r FROM bill2_runs WHERE id=p_run_id AND actor_id=p_actor_id FOR UPDATE;
  IF r.id IS NULL THEN RAISE EXCEPTION 'BILL2_RUN_DENIED' USING ERRCODE='42501';END IF;
  erasing:=bill2_erasure_closed(p_actor_id,r.pre_deduct_id);
+ IF NOT erasing THEN PERFORM bill2_actor(p_actor_id);END IF;
  IF NOT erasing AND NOT coalesce(bill2_scope_allowed(p_actor_id,r.scope),false) THEN RAISE EXCEPTION 'BILL2_RUN_DENIED' USING ERRCODE='42501';END IF;
  SELECT * INTO c FROM bill2_calls WHERE id=p_call_id AND run_id=r.id FOR UPDATE;
  IF c.id IS NULL OR p_token IS NULL OR c.token IS DISTINCT FROM p_token

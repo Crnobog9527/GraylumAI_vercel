@@ -33,7 +33,7 @@
   },
   "fn:bill2_erasure_closed(uuid,uuid)": {
     "before": null,
-    "after": "d63869779b6e"
+    "after": "005b38646ee0"
   },
   "fn:bill2_erasure_view(bill2_runs,boolean)": {
     "before": null,
@@ -49,7 +49,7 @@
   },
   "fn:bill2_read(uuid,uuid)": {
     "before": "a15230d1b76e",
-    "after": "2c349657dcc1"
+    "after": "b7a41ced1962"
   },
   "fn:bill2_record(uuid,uuid,uuid,jsonb)": {
     "before": "87f1ca11a951",
@@ -57,7 +57,7 @@
   },
   "fn:bill2_revoke_unstarted_dispatch(uuid,uuid,uuid,uuid,text,boolean)": {
     "before": "86107967a3d5",
-    "after": "c682e3961564"
+    "after": "df0b57cbf4ad"
   },
   "fn:runtime_financial_recovery(uuid,uuid,boolean)": {
     "before": "97bf2f1859bc",
