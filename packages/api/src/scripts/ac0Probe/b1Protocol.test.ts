@@ -1,19 +1,19 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it} from 'vitest';
-import {runB1Pair} from './b1Protocol';
+import {runB1Pair,type B1Request} from './b1Protocol';
 import {createBudget,memoryLedger} from './budget';
 import {sseResponse,textDeltas,toolDeltas} from './dryRun';
 import type {LoadedSkill,Scenario} from './skill';
 const resource='references/step.md';
 const skill:LoadedSkill={instructions:'---\nname: b1-test\ndescription: Offline B1 test skill.\n---\nAsk one choice.',
  references:new Map([[resource,'Use only provided facts.']]),digest:'synthetic',bytes:100,isFixture:true,
- workflow:[{id:'step-1',title:'Test step',resources:[resource],information:[{id:'choice',title:'Choice',required:true}]}] as any};
+ workflow:[{title:'Test step',resources:[resource],information:[{id:'choice',title:'Choice',required:true}]}]};
 const scenario:Scenario={id:'b1-test',kind:'ask',category:'B',input:'Give me categories.',
  history:[{role:'user',content:'I want to categorize my work.'}],step:0,currentStepId:'step-1',questionId:'choice'};
 const usage={prompt_tokens:100,completion_tokens:10,total_tokens:110,cost:0.0003};
 const args={question:'Which?',options:['Option A','Option B'],recommended:null};
 function setup(mode:'ok'|'http'|'unknown'|'no-card'|'long-args'|'sse-error'|'partial-error'='ok'){
- const requests:any[]=[];const ledger=memoryLedger();
+ const requests:B1Request[]=[];const ledger=memoryLedger();
  const budget=createBudget({maxCalls:6,maxUsd:1.5,ledger});
  const transport:typeof fetch=async(_url,init)=>{
   const request=JSON.parse(String(init?.body));requests.push(request);
@@ -36,8 +36,8 @@ it('runs both admissions and original SDK history through the real transformer a
  const f=setup();const result=await runB1Pair({...f,skill,scenario,credential:async()=> 'offline-only',save:()=>{}});
  expect(result.verdict).toBe('PASS');expect(f.requests).toHaveLength(2);
  expect(result.secondInput).toBe('Option A');
- const messages=f.requests[1].messages,assistant=messages.find((m:any)=>m.tool_calls);
- expect(assistant.tool_calls[0].function.arguments).toBe(JSON.stringify(args));
+ const messages=f.requests[1].messages,assistant=messages.find(m=>m.tool_calls);
+ expect(assistant?.tool_calls?.[0]?.function.arguments).toBe(JSON.stringify(args));
  expect(assistant).not.toHaveProperty('reasoning');expect(assistant).not.toHaveProperty('reasoning_details');
  expect(messages.at(-1)).toEqual({role:'user',content:'Option A'});
  expect(f.requests[1].reasoning_effort).toBe('low');expect(f.requests[1].max_tokens).toBe(4096);

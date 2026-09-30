@@ -18,7 +18,7 @@ const scenario: Scenario = {id: 'ask-1', kind: 'ask', history: [], input: 'I am 
   step: 0, currentStepId: 'workshop-audience', questionId: 'audience'};
 const card = {question: 'Which group do you want to help?', options: ['Neighbours', 'New volunteers'], recommended: 0};
 async function trial(kind: 'ask' | 'text', deltas: Record<string, unknown>[], finish = 'stop', clock = () => performance.now()) {
-  const bodies: any[] = [];
+  const bodies: Record<string, unknown>[] = [];
   const result = await runTrial({agentTurn: true, kind, scenario: {...scenario, kind}, index: 0, skill,
     config: AGENT_TURN_CONFIG, maxTokens: 1024, timeoutMs: 5000,
     budget: createBudget({maxCalls: 1, maxUsd: 1, ledger: memoryLedger()}),
@@ -127,7 +127,7 @@ describe('AC1-4 prepared probe (synthetic transport only)', () => {
     const agent = new Agent({name: 'schema golden', model, tools: [tool({name: definition.name,
       description: definition.description, parameters: definition.parameters!, execute: async () => ''})]});
     const output = await new Runner({model, tracingDisabled: true}).run(agent, 'synthetic', {stream: true, maxTurns: 1});
-    for await (const _ of output.toTextStream()) { /* drain synthetic stream */ }
+    for await (const chunk of output.toTextStream()) { void chunk; /* drain synthetic stream */ }
     await output.completed;
     expect(JSON.stringify(ask.bodies[0].tools)).toBe(JSON.stringify(actualTools));
     expect(JSON.stringify(text.bodies[0].tools)).toBe(JSON.stringify(actualTools));

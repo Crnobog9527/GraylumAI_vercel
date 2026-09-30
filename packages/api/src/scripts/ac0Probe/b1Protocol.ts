@@ -14,9 +14,15 @@ import {callBoundUsd} from './config.ts';
 import {usdToNano,type Budget} from './budget.ts';
 import type {LoadedSkill,Scenario} from './skill.ts';
 
+export type B1Message={role:string;content?:unknown;
+  tool_calls?:Array<{id:string;function:{arguments:string;name?:string}}>};
+export type B1Request={model:string;messages:B1Message[];max_tokens:number;reasoning_effort:string};
+type B1Response={choices?:Array<{message?:B1Message;finish_reason?:string}>;
+  usage?:{prompt_tokens:number;completion_tokens:number;[key:string]:unknown}};
+
 export type B1Turn={turn:number;request?:string;sdkRequest?:string;history?:unknown[];httpStatus?:number;
   normalization:'not_reached'|'accepted'|'denied';error?:string;observation?:TransportObservation;
-  response?:Record<string,any>;card?:boolean;toolArgumentChars?:number;toolArgumentCodePoints?:number;
+  response?:B1Response;card?:boolean;toolArgumentChars?:number;toolArgumentCodePoints?:number;
   bookedUsd?:number;providerCostUsd?:number;boundUsd?:number;requestBytes?:number;
   state:'not_sent'|'sent'|'complete'|'provider_rejected'|'history_denied'|'unknown'|'local_error';
 };
@@ -91,18 +97,18 @@ export async function runB1Pair(options:{skill:LoadedSkill;scenario:Scenario;bud
             record.request=openRouterRequestBody(body,{context,policy:fixture.quote,phase:'skill',primaryDialogue:true});
             record.normalization='accepted';
           }catch(error){record.normalization='denied';record.error=(error as Error).message;throw error;}
-          const sent=JSON.parse(record.request);
+          const sent: B1Request=JSON.parse(record.request);
           if(turn===2){
             const first=pair.turns[0]!.response?.choices?.[0]?.message?.tool_calls?.[0];
-            const assistant=sent.messages.find((m:any)=>m.role==='assistant'&&m.tool_calls?.[0]?.id===first?.id);
-            if(!first||!assistant||assistant.tool_calls[0].function.arguments!==first.function.arguments||
+            const assistant=sent.messages.find(m=>m.role==='assistant'&&m.tool_calls?.[0]?.id===first?.id);
+            if(!first||!assistant||assistant.tool_calls?.[0]?.function.arguments!==first.function.arguments||
               sent.messages.at(-1)?.content!==pair.secondInput)throw new Error('B1_REAL_TOOL_HISTORY_MISSING');
           }
           options.save(pair);
           const send=await adapter.prepareDispatch({input:record.request},fixture.quote,onChunk);
           const observation=await send();record.observation=observation;record.httpStatus=observation.httpStatus;
           const evidence=adapter.evidence(observation,fixture.quote,'response');
-          const response=evidence.usage?.sdkResponse as Record<string,any>|undefined;
+          const response=evidence.usage?.sdkResponse as B1Response|undefined;
           record.response=response;
           const rawArgs=response?.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
           if(typeof rawArgs==='string'){
@@ -120,7 +126,7 @@ export async function runB1Pair(options:{skill:LoadedSkill;scenario:Scenario;bud
           if(!response){record.state='unknown';throw new Error('B1_RESPONSE_UNRESOLVED');}
           const usage=response.usage;
           // Same conservative settlement rule as ac0Probe: never assume absent cost is zero.
-          if(record.providerCostUsd!==undefined&&Number.isFinite(usage?.prompt_tokens)&&Number.isFinite(usage?.completion_tokens)){
+          if(record.providerCostUsd!==undefined&&usage&&Number.isFinite(usage.prompt_tokens)&&Number.isFinite(usage.completion_tokens)){
             record.bookedUsd=Math.max(record.providerCostUsd,(usage.prompt_tokens*2+usage.completion_tokens*10)/1e6);
             settle!(usdToNano(record.bookedUsd));
           }

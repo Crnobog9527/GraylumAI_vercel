@@ -135,7 +135,7 @@ describe('fixed AC1-4 candidates: approved live caps', () => {
     const globalFetch = vi.spyOn(globalThis, 'fetch');
     const config = AGENT_TURN_CANDIDATES[candidate];
     const baseline = await capture(AGENT_TURN_CONFIG);
-    expect(Array.isArray(baseline.body.messages.find((message: any) => message.role === 'assistant').content)).toBe(true);
+    expect(Array.isArray(baseline.body.messages.find((message: {role: string; content: unknown}) => message.role === 'assistant').content)).toBe(true);
     const providerLimits = {providerSlug: config.route, contextTokens: 100_000,
       promptUsdPerMillion: String(config.maxPrice.prompt), completionUsdPerMillion: String(config.maxPrice.completion), requestUsd: '0'};
     const quoted = openRouterBound(providerLimits, tokens);
