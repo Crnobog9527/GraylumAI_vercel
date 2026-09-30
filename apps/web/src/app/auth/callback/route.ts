@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
   const loginError = () => {
     const loginUrl = new URL('/login', authOrigin);
     loginUrl.searchParams.set('error', 'callback_failed');
+    loginUrl.searchParams.set('redirect', next);
     return NextResponse.redirect(loginUrl);
   };
 

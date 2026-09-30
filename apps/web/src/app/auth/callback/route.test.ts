@@ -49,17 +49,27 @@ describe('auth callback link errors', () => {
   });
 
   it('sends other link errors to the login page with a code, never the provider text', async () => {
-    const to = await callback('error=access_denied&error_description=Pay+here&next=%2F');
+    const to = await callback('error=access_denied&error_description=Pay+here&next=%2Fworkbench%3Ftab%3Da');
     expect(to.pathname).toBe('/login');
-    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'callback_failed' });
+    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'callback_failed', redirect: '/workbench?tab=a' });
   });
 
   it('uses the same login error code when the code exchange fails', async () => {
     auth.exchangeCodeForSession.mockResolvedValue({ error: new Error('bad code') });
     const to = await callback('code=abc&next=%2F');
     expect(to.pathname).toBe('/login');
-    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'callback_failed' });
+    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'callback_failed', redirect: '/' });
   });
+
+  it.each(['//evil.example', 'https://evil.example/x', '/\\evil.example', 'javascript:alert(1)'])(
+    'keeps only the default destination when next is unsafe (%s)',
+    async unsafe => {
+      const to = await callback(`error=access_denied&next=${encodeURIComponent(unsafe)}`);
+      expect(to.hostname).not.toContain('evil');
+      expect(to.pathname).toBe('/login');
+      expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'callback_failed', redirect: '/profile' });
+    },
+  );
 
   it('sends a visit without session to the login page, where a fragment error is read', async () => {
     const to = await callback('next=%2Fprofile');
