@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { HCaptchaClient, HCaptchaRenderOptions } from '@/lib/authCaptcha';
 import {
   CAPTCHA_REQUIRED_MESSAGE,
   HCAPTCHA_LAYER_SELECTOR,
   captchaOptionsFromToken,
+  guardCaptchaFocus,
   isCaptchaChallengeTarget,
   isHCaptchaSource,
   keepDialogOpenForCaptcha,
@@ -190,7 +192,7 @@ function page() {
   const all = [body, app, other, portal, overlay, dialog, checkboxFrame, challenge, challengeBackdrop, challengeFrame];
   const walk = (n: FakeEl) => { n.ownerDocument = { body }; n.children.forEach(walk); };
   walk(body);
-  return { all, challengeBackdrop, challengeFrame, overlay, other, app };
+  return { all, challengeBackdrop, challengeFrame, checkboxFrame, overlay, other, app };
 }
 
 describe('keeping a dialog open for the hCaptcha challenge', () => {
@@ -221,6 +223,11 @@ describe('keeping a dialog open for the hCaptcha challenge', () => {
     expect(isCaptchaChallengeTarget(null)).toBe(false);
     expect(isCaptchaChallengeTarget({} as EventTarget)).toBe(false);
   });
+
+  it('does not treat the checkbox frame inside the dialog as the outside challenge', () => {
+    const { checkboxFrame } = page();
+    expect(isCaptchaChallengeTarget(checkboxFrame as unknown as EventTarget)).toBe(false);
+  });
 });
 
 describe('hCaptcha layer stays clickable under a modal dialog', () => {
@@ -239,5 +246,66 @@ describe('hCaptcha layer stays clickable under a modal dialog', () => {
     expect(HCAPTCHA_LAYER_SELECTOR).toContain(':not([role="dialog"])');
     expect(HCAPTCHA_LAYER_SELECTOR).toContain(':not(:has([role="dialog"]))');
     expect(HCAPTCHA_LAYER_SELECTOR).not.toMatch(/#/);
+  });
+});
+
+describe('focus stays in the hCaptcha challenge under the dialog focus trap', () => {
+  function fakeWindow() {
+    const listeners: Array<{ type: string; handler: (event: Event) => void; capture: unknown }> = [];
+    return {
+      listeners,
+      addEventListener: vi.fn((type: string, handler: (event: Event) => void, capture?: unknown) => {
+        listeners.push({ type, handler, capture });
+      }),
+      removeEventListener: vi.fn((type: string, handler: (event: Event) => void, capture?: unknown) => {
+        const i = listeners.findIndex(l => l.type === type && l.handler === handler && l.capture === capture);
+        if (i >= 0) listeners.splice(i, 1);
+      }),
+    };
+  }
+  const fire = (win: ReturnType<typeof fakeWindow>, type: string, init: { target?: unknown; relatedTarget?: unknown }) => {
+    const event = { type, target: init.target ?? null, relatedTarget: init.relatedTarget ?? null,
+      stopImmediatePropagation: vi.fn() };
+    win.listeners.filter(l => l.type === type).forEach(l => l.handler(event as unknown as Event));
+    return event.stopImmediatePropagation;
+  };
+
+  it('listens on window in the capture phase and stops only challenge focus moves', () => {
+    const { challengeFrame, checkboxFrame, overlay, other } = page();
+    const win = fakeWindow();
+    guardCaptchaFocus(win as unknown as Window);
+    expect(win.listeners.map(l => [l.type, l.capture])).toEqual([['focusin', true], ['focusout', true]]);
+
+    expect(fire(win, 'focusin', { target: challengeFrame })).toHaveBeenCalledTimes(1);
+    expect(fire(win, 'focusout', { target: other, relatedTarget: challengeFrame })).toHaveBeenCalledTimes(1);
+
+    for (const target of [other, overlay, checkboxFrame, null]) {
+      expect(fire(win, 'focusin', { target })).not.toHaveBeenCalled();
+    }
+    // focusout decides by where focus goes next (relatedTarget), never by the element left.
+    for (const relatedTarget of [null, checkboxFrame, other, overlay]) {
+      expect(fire(win, 'focusout', { target: challengeFrame, relatedTarget })).not.toHaveBeenCalled();
+    }
+  });
+
+  it('removes both listeners when the widget unmounts', () => {
+    const { challengeFrame } = page();
+    const win = fakeWindow();
+    const release = guardCaptchaFocus(win as unknown as Window);
+    release();
+    expect(win.listeners).toEqual([]);
+    expect(fire(win, 'focusin', { target: challengeFrame })).not.toHaveBeenCalled();
+  });
+
+  it('matches the pinned Radix focus trap: document listeners in the bubble phase', () => {
+    // Re-verify guardCaptchaFocus whenever this fails after a Radix upgrade.
+    const dialogEntry = createRequire(import.meta.url).resolve('@radix-ui/react-dialog');
+    const requireFromDialog = createRequire(dialogEntry);
+    const scopeEntry = requireFromDialog.resolve('@radix-ui/react-focus-scope');
+    const scopePackage = JSON.parse(readFileSync(resolve(dirname(dirname(scopeEntry)), 'package.json'), 'utf8'));
+    expect(scopePackage.version).toBe('1.1.7');
+    const source = readFileSync(scopeEntry.replace(/index\.js$/, 'index.mjs'), 'utf8');
+    expect(source).toMatch(/document\.addEventListener\("focusin", handleFocusIn2?\);/);
+    expect(source).toMatch(/document\.addEventListener\("focusout", handleFocusOut2?\);/);
   });
 });
