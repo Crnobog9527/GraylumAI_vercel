@@ -466,7 +466,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | P0-3 | 本规划（v12）审查合并 | — | 高 | 本 PR |
 | | P0-4 | 修复 #443 遗留的过期测试（它还在等已删除的"业务名称"弹窗） | — | 普通 | 小 / 1 |
 | | CI-TRUST-1 | 集成测试进 CI（计费、恢复等关键路径） | — | 高 | 中 / 1–2 |
-| **1 核心体验重做** | AGENT-CORE | AC-0 可行性验证；AC-1 提问卡和纯文本流式；AC-2 后台整理、Skill 模板、右侧数据沉淀区；AC-3 每步确认、模型根据全部信息写完整报告（第 2.1 节第 22 项，由 REPORT-GEN 实现）、定稿、承接第一周选题；AC-4 通用工作区和旧入口改指；AC-5 数据基础补缺，包括 D5 数据使用同意（勾选、撤回、按同意状态过滤记录）。见 [实施说明](tasks/AGENT-CORE.md) | P0-1；AC-2 另外依赖 CI-TRUST-1 和 DATA-ERASURE 的删除规则设计 | 高 | 大 / 12–16 |
+| **1 核心体验重做** | AGENT-CORE | AC-0 可行性验证；AC-1 提问卡和纯文本流式；AC-2 后台整理、Skill 模板、右侧数据沉淀区；AC-3 每步确认、模型根据全部信息写完整报告（第 2.1 节第 22 项；分工：REPORT-GEN 负责报告生成能力，AC-3 负责每步确认、定稿，并把报告接进流程）、定稿、承接第一周选题；AC-4 通用工作区和旧入口改指；AC-5 数据基础补缺，包括 D5 数据使用同意（勾选、撤回、按同意状态过滤记录）。见 [实施说明](tasks/AGENT-CORE.md) | P0-1；AC-2 另外依赖 CI-TRUST-1 和 DATA-ERASURE 的删除规则设计；AC-3 的报告部分依赖 REPORT-GEN | 高 | 大 / 12–16 |
 | | AGENT-CORE-UI | 从 AGENT-CORE 拆出的纯前端部分：提问卡和本步小结卡的显示、流式文字显示、右侧面板和进度条的布局、旧入口链接改指。只改前端，沿用现有接口；需要改接口、工具、数据库或计费的部分一律留在 AGENT-CORE | 与对应的 AGENT-CORE 子任务配合 | 普通 | 中 / 3–4 |
 | | MENTOR-BUDGET | Owner 2026-09-30 立项（第 2.1 节第 23 项）：导师每一轮的输入和输出预算按用途（交互对话、整理、报告）在后台配置，准入时冻结，不再写死在代码里；放宽我们代码里的单次模型调用超时和每次请求的时间预算（上限受 Vercel 免费套餐 300 秒约束）；评估提示缓存。**在途**（[#542](https://github.com/Crnobog9527/GraylumAI_vercel/pull/542)，方案和容量推导见该 PR 的实施说明）。可以先于 #497 修改重叠的文件，#497 恢复时同步 | —（Owner 批准先于 #497） | 高 | 中 / 1–2 |
 | | REPORT-GEN | Owner 2026-09-30 立项：所有步骤确认后，由模型根据全部信息写完整报告，结构由各自 Skill 的模板规定（第 2.1 节第 22 项）。先实现定位 Skill（当前 13 个部分、正文最多 12000 字），报告生成能力按通用方式设计，其他带步骤的 Skill 复用同一套能力；无步骤的 Skill 不受影响。使用单独的报告预算。先用真实模型实测生成时间，超时就分章节生成或改为后台生成。立项时要一并解决 Vercel 免费套餐函数最长 300 秒、冻结载荷 262144 字节、响应 65536 字节等限制；收费按第 2.1 节第 25 项：扣费逻辑和正常对话一样，不做运行前预告。FUSION-REVIEW 评审的就是这份报告 | MENTOR-BUDGET | 高 | 待实施方案细化 |
@@ -511,6 +511,7 @@ AGENT-CORE 稳定 ─→ MODERATION ─→ 封闭内测
 S1 权限修复 ─→ DB-BASELINE ─→ V3-M3 ─→ REL-1
 ENTITLEMENTS ─→ PAY-COMMON ─→ PAY-WAFFO（同一 writer）
 MENTOR-BUDGET ─→ REPORT-GEN ─→ FUSION-REVIEW
+REPORT-GEN ─→ AC-3（报告部分）
 RUNTIME-PROD + ENTITLEMENTS + DATA-ERASURE ─→ FUSION-REVIEW
 ENTITLEMENTS + DATA-ERASURE ─→ LIB-DOCS ─→ VOICE（另需 RUNTIME-PROD）
 AGENT-CORE ─→ UI-A ─→ UI-MODEL ─→ FUSION-COMPARE
