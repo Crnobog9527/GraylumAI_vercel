@@ -162,14 +162,19 @@ function supabaseAuthCookiePrefix() {
   }
 }
 
+// Links for moving around the site. In the browser they point at the app or auth origin. On the
+// server there is no request origin here, so they stay relative: the current host serves them, and on
+// the public site the proxy forwards non-public paths such as /login to the app domain. URLs that
+// must be absolute (email and OAuth redirects, payment return URLs) do not use these helpers; they
+// pass an explicit origin to resolveAuthAppUrl or build from the request.
 export function buildAppHref(path: string) {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  return `${resolveAppUrl()}${normalizedPath}`;
+  return typeof window === 'undefined' ? normalizedPath : `${resolveAppUrl()}${normalizedPath}`;
 }
 
 export function buildAuthHref(path: string) {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  return `${resolveAuthAppUrl()}${normalizedPath}`;
+  return typeof window === 'undefined' ? normalizedPath : `${resolveAuthAppUrl()}${normalizedPath}`;
 }
 
 export {

@@ -52,4 +52,15 @@ describe('proxy login requirement by host', () => {
       location: 'https://evilgraylum.com/login?redirect=%2Fprofile',
     });
   });
+
+  it('sends relative auth links on the public site to the app domain, query included', async () => {
+    expect(await get('https://www.graylum.com/login?action=signup')).toEqual({
+      status: 307,
+      location: 'https://app.graylum.com/login?action=signup',
+    });
+    expect(await get('https://www.graylum.com/register')).toEqual({
+      status: 307,
+      location: 'https://app.graylum.com/register',
+    });
+  });
 });

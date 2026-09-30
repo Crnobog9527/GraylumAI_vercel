@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  buildAppHref,
+  buildAuthHref,
   legacyParentCookieNames,
   resolveAppUrl,
   resolveAuthAppUrl,
@@ -114,5 +116,37 @@ describe('session cookie scope', () => {
   it('cleans nothing when the project URL is missing', () => {
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', '');
     expect(legacyParentCookieNames(['sb--auth-token'], 'auth-staging.graylum.com')).toEqual([]);
+  });
+});
+
+describe('site links on the server and in the browser', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('stays relative on the server, where no request origin is known', () => {
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://graylumai-staging.vercel.app');
+    expect(buildAuthHref('/login?action=signup')).toBe('/login?action=signup');
+    expect(buildAppHref('landing')).toBe('/landing');
+  });
+
+  it('points at the auth origin in the browser', () => {
+    vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', '');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://graylumai-staging.vercel.app');
+    vi.stubGlobal('window', { location: { origin: 'https://auth-staging.graylum.com', hostname: 'auth-staging.graylum.com' } });
+    expect(buildAuthHref('/login')).toBe('https://auth-staging.graylum.com/login');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
+    vi.stubGlobal('window', { location: { origin: 'https://www.graylum.com', hostname: 'www.graylum.com' } });
+    expect(buildAuthHref('/login')).toBe('https://app.graylum.com/login');
+  });
+
+  it('keeps redirect URLs sent to GoTrue absolute when built from an explicit origin on the server', () => {
+    vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', '');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://graylumai-staging.vercel.app');
+    expect(new URL('/auth/callback', resolveAuthAppUrl('https://auth-staging.graylum.com')).toString())
+      .toBe('https://auth-staging.graylum.com/auth/callback');
+    expect(resolveAuthAppUrl()).toBe('https://graylumai-staging.vercel.app');
+    expect(resolveAuthCallbackOrigin('https://www.graylum.com')).toBe('https://graylumai-staging.vercel.app');
   });
 });

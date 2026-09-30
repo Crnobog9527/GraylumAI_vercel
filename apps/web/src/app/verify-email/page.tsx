@@ -124,7 +124,7 @@ function VerifyEmailPageContent() {
       return;
     }
 
-    const emailRedirectTo = new URL('/auth/callback', resolveAuthAppUrl());
+    const emailRedirectTo = new URL('/auth/callback', resolveAuthAppUrl(window.location.origin));
     emailRedirectTo.searchParams.set('next', redirectTarget);
 
     const { error } = await supabase.auth.resend({

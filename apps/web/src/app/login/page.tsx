@@ -57,7 +57,7 @@ function GoogleIcon({ className }: { className?: string }) {
 }
 
 function getEmailConfirmRedirect(redirectTarget: string) {
-  const callbackUrl = new URL('/auth/callback', resolveAuthAppUrl());
+  const callbackUrl = new URL('/auth/callback', resolveAuthAppUrl(window.location.origin));
   callbackUrl.searchParams.set('next', redirectTarget);
   return callbackUrl.toString();
 }
