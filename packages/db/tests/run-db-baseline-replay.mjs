@@ -1,9 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// DB-BASELINE: build an empty local database from repository files only and compare its structure
-// with the staging fingerprint. Order: local platform stand-in -> packages/db/baseline/*.sql ->
-// every migration in file-name order, where packages/db/baseline/bridges/<migration file> (if any)
-// runs immediately before the migration of the same name. Fails on any build error and on any
-// structural difference not listed in baseline/expected-differences.json (and on stale entries).
+// DB-BASELINE: build an empty database from repository files only and check its structure.
+// Order: local platform stand-in -> packages/db/baseline/*.sql -> every migration in file-name
+// order, where packages/db/baseline/bridges/<migration file> (if any) runs immediately before the
+// migration of the same name. Fails on any build error and on any difference from the committed
+// built fingerprint (baseline/built-fingerprint.json; refresh it with --write-built in the PR that
+// changes the structure; --out only dumps the structure). With --staging <snapshot> it instead
+// compares with a staging snapshot,
+// allowing only baseline/expected-differences.json. --ci runs the same checks in CI (no network,
+// no secrets, digest-pinned image already pulled by the workflow).
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -12,9 +16,12 @@ import { POSTGRES_IMAGE } from './v3/images.mjs';
 import { baselineViolations, bridgeViolations } from './baseline/file-rules.mjs';
 
 const args = process.argv.slice(2);
-if (args[0] !== '--local-only' || process.env.CI) {
-  throw new Error('Usage: node packages/db/tests/run-db-baseline-replay.mjs --local-only'
-    + ' [--staging <snapshot.json>] [--out <local.json>] [--after <a.sql,b.sql>] [--on-fail <SQL>] [--query <SQL>]');
+const usage = 'Usage: node packages/db/tests/run-db-baseline-replay.mjs --local-only|--ci [--write-built]'
+  + ' [--staging <snapshot.json>] [--out <local.json>] [--after <a.sql,b.sql>] [--on-fail <SQL>] [--query <SQL>]';
+const ci = args[0] === '--ci';
+if (!(ci ? process.env.CI : args[0] === '--local-only' && !process.env.CI)) throw new Error(usage);
+if (ci && ['--write-built', '--staging', '--out', '--on-fail', '--query'].some(flag => args.includes(flag))) {
+  throw new Error('CI mode only builds and checks; it never writes files or takes diagnostics');
 }
 const option = name => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
 const root = resolve(import.meta.dirname, '../../..');
@@ -61,13 +68,25 @@ for (const step of steps.filter(path => path.startsWith('packages/db/baseline/')
   if (problems.length > 0) throw new Error(`Baseline ${step} breaks the baseline rules: ${problems.join('; ')}`);
 }
 
+const BUILT = 'packages/db/tests/baseline/built-fingerprint.json';
+const md5 = text => createHash('md5').update(text ?? '<null>').digest('hex');
+const builtObjects = localDetail => Object.fromEntries(Object.keys(localDetail).sort()
+  .map(key => [key, md5(localDetail[key]).slice(0, 12)]));
+// Compares the build with the committed built fingerprint, object by object.
+function compareBuilt(localDetail, built) {
+  const local = builtObjects(localDetail);
+  const keys = [...new Set([...Object.keys(local), ...Object.keys(built.objects)])].sort();
+  return keys.filter(key => local[key] !== built.objects[key]).map(key => (key in built.objects
+    ? (key in local ? `differs: ${key} :: ${localDetail[key]}` : `missing from the build: ${key}`)
+    : `new in the build: ${key} :: ${localDetail[key]}`).slice(0, 400));
+}
+
 // Compares the local build with a staging snapshot; returns the unexpected differences.
 function compare(local, localDetail, snapshot, expected) {
-  const md5 = text => createHash('md5').update(text ?? '<null>').digest('hex');
   const same = key => key in local && key in snapshot.groups && local[key].startsWith(snapshot.groups[key]);
   const keys = [...new Set([...Object.keys(local), ...Object.keys(snapshot.groups)])].sort();
   const differing = keys.filter(key => !same(key));
-  const seen = { platformOnlyOnStaging: [], addedToStagingBy0148: [], stricterInFiles: [] };
+  const seen = { platformOnlyOnStaging: [], pendingOnStaging: [], stricterInFiles: [] };
   const unexpected = [];
   const allow = (list, key) => {
     if (!expected[list].keys.includes(key)) return false;
@@ -78,7 +97,7 @@ function compare(local, localDetail, snapshot, expected) {
     if (!(key in local)) {
       if (!allow('platformOnlyOnStaging', key)) unexpected.push(`only on staging: ${key}`);
     } else if (!(key in snapshot.groups)) {
-      if (!allow('addedToStagingBy0148', key)) unexpected.push(`only in files: ${key}`);
+      if (!allow('pendingOnStaging', key)) unexpected.push(`only in files: ${key}`);
     } else {
       // Object-by-object: ACL text verbatim, everything else by md5 prefix.
       const objects = Object.keys(localDetail).filter(item => item.split('.')[0] === key);
@@ -88,7 +107,7 @@ function compare(local, localDetail, snapshot, expected) {
         const stagingValue = snapshot.objects[item];
         const localValue = localDetail[item];
         if (stagingValue === undefined) {
-          if (!allow('stricterInFiles', item) && !allow('addedToStagingBy0148', item)) {
+          if (!allow('stricterInFiles', item) && !allow('pendingOnStaging', item)) {
             unexpected.push(`only in files: ${item} :: ${localValue}`);
           }
         } else if (localValue === undefined) {
@@ -111,12 +130,16 @@ const report = { image: POSTGRES_IMAGE, steps: steps.length, passed: 0, bridges:
 try {
   ok(docker(['run', '-d', '--pull=never', '--name', name, '-e', 'POSTGRES_DB=dbb',
     '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', POSTGRES_IMAGE]), 'Local container start');
+  // The image's init step first runs a temporary socket-only server, then restarts. Probe over TCP
+  // (like run-workbench.mjs) so only the final server counts, then require one real query.
   let ready = false;
-  for (let i = 0; i < 150 && !ready; i++) {
-    ready = docker(['exec', name, 'pg_isready', '-U', 'postgres', '-d', 'dbb']).status === 0;
+  for (let i = 0; i < 300 && !ready; i++) {
+    ready = docker(['exec', name, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres', '-d', 'dbb']).status === 0
+      && docker(['exec', name, 'psql', '-X', '-h', '127.0.0.1', '-U', 'postgres', '-d', 'dbb', '-tAc', 'SELECT 1'])
+        .stdout?.trim() === '1';
     if (!ready) await new Promise(done => setTimeout(done, 200));
   }
-  if (!ready) throw new Error('Local container readiness timeout');
+  if (!ready) throw new Error('Local container readiness timeout (60 s)');
   // pg_cron stand-in (0010 runs CREATE EXTENSION pg_cron; the plain image has no such extension).
   const shareDir = ok(docker(['exec', name, 'pg_config', '--sharedir']), 'Share dir');
   ok(docker(['exec', '-i', '-u', 'root', name, 'sh', '-c', `cat > ${shareDir}/extension/pg_cron.control`],
@@ -156,11 +179,26 @@ try {
     report.accountOpenAudit = audit ? audit.split('\n') : [];
     if (report.accountOpenAudit.length > 0) report.failed = { step: 'account-open-policy-audit' };
     if (option('--out')) writeFileSync(option('--out'), JSON.stringify({ groups: local, objects: localDetail }, null, 1));
-    const snapshot = option('--staging') ? JSON.parse(readFileSync(option('--staging'), 'utf8'))
-      : readJson('packages/db/tests/baseline/staging-fingerprint.json');
-    report.comparison = compare(local, localDetail, snapshot,
-      readJson('packages/db/tests/baseline/expected-differences.json'));
-    if (report.comparison.unexpected.length > 0) report.failed ??= { step: 'staging comparison' };
+    if (option('--staging')) {
+      report.comparison = compare(local, localDetail, JSON.parse(readFileSync(option('--staging'), 'utf8')),
+        readJson('packages/db/tests/baseline/expected-differences.json'));
+      if (report.comparison.unexpected.length > 0) report.failed ??= { step: 'staging comparison' };
+    } else if (option('--out')) {
+      // Dump mode (used by baseline/replay-with-new-migrations.mjs): the structure is written to
+      // --out and judged by the caller, so the built fingerprint is not compared here.
+      report.builtFingerprint = 'not compared (--out)';
+    } else if (args.includes('--write-built')) {
+      writeFileSync(resolve(root, BUILT), `${JSON.stringify({
+        _about: 'Structure of an empty database built from repository files by run-db-baseline-replay.mjs '
+          + '(catalog fingerprint, object -> md5 prefix). Regenerate with --write-built in every PR that '
+          + 'changes the structure; the diff lists exactly which objects the change adds, drops or alters.',
+        objects: builtObjects(localDetail),
+      }, null, 1)}\n`);
+      report.builtFingerprint = 'written';
+    } else {
+      report.builtDifferences = compareBuilt(localDetail, readJson(BUILT));
+      if (report.builtDifferences.length > 0) report.failed ??= { step: 'built fingerprint (run with --write-built and commit)' };
+    }
     // The convergence migration must be a no-op once its target state is reached (as on staging).
     const convergence = 'packages/db/migrations/0148_db_baseline_convergence.sql';
     const again = psql(read(convergence));
