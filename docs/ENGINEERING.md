@@ -16,7 +16,7 @@
 | 接口 | tRPC 11 + zod 4，前端缓存用 TanStack Query 5 | `packages/api`；前端客户端在 `apps/web/src/trpc` |
 | 界面 | Tailwind CSS 4 + CSS Modules；shadcn（new-york）基础组件，基于 Radix UI；图标 lucide-react；图表 recharts | `apps/web/src/components/ui`；视觉规范见 [DESIGN.md](../DESIGN.md) |
 | 前端本地状态 | zustand 5 | `apps/web/src/stores` |
-| 数据库与登录 | Supabase（Postgres + Auth），`@supabase/supabase-js` 2、`@supabase/ssr` | 结构只由 `packages/db/migrations` 定义 |
+| 数据库与登录 | Supabase（PostgreSQL 17 + Auth），`@supabase/supabase-js` 2、`@supabase/ssr` | 结构以 `packages/db/baseline` 和 `packages/db/migrations` 为准 |
 | AI | `@openai/agents` 0.18.0（精确锁定）+ `openai` 7；模型经 OpenRouter 调用，计费走 BILL2 | `packages/api/src/services/runtime`、`services/bill2` |
 | 支付 | Stripe | `packages/api/src/services/stripe*.ts`、`routers/payments.ts` |
 | 限流 | Upstash Redis（`@upstash/ratelimit`） | `packages/api` |
@@ -36,7 +36,8 @@
 | `packages/api/src/services/<领域>` | 业务逻辑，按领域分目录（runtime、bill2、opc、skills、artifacts……） |
 | `packages/api/src/shared` | 前后端共用、不依赖服务器的纯逻辑 |
 | `packages/api/src/lib` | 基础设施：日志、鉴权、环境变量、错误包装 |
-| `packages/db/migrations` | 数据库结构的唯一来源，文件名 `NNNN_名称.sql`，只能追加 |
+| `packages/db/baseline` | 空库缺失的迁移前提；`bridges/` 的衔接脚本在同名迁移之前执行，规则见该目录 README |
+| `packages/db/migrations` | 后续数据库结构变更，文件名 `NNNN_名称.sql`，只能追加 |
 | `scripts` | 仓库工具和 CI 检查；测试在 `scripts/tests` |
 | `docs/launch` | 产品规划和已锁定的产品决策（Master Plan） |
 
@@ -90,12 +91,50 @@
 - 权限、金额和状态一致性必须在服务端保证（服务里的检查和数据库 RPC 函数），不能只靠
   前端按钮限制。
 - 数据库结构只能通过在 `packages/db/migrations` 新增迁移文件来修改，不改已有的迁移
-  （CI 的 migration ledger 检查会拦截）。生产代码不引用 `packages/db/schema.ts`，不要
-  把它当作结构来源。数据库改动属于高风险（AGENTS.md 第 4 节）。
+  （CI 的 migration ledger 检查会拦截）。`packages/db/baseline` 只补空库缺失的前提，
+  不承载新的业务结构；基线和衔接脚本的例外规则见
+  [baseline/README.md](../packages/db/baseline/README.md)。`db:push` 已退役。
+  `packages/db/schema.ts` 只作类型参考，生产代码不引用它；结构以 `migrations/` 和
+  `baseline/` 为准。数据库改动属于高风险（AGENTS.md 第 4 节）。
 - 对外返回稳定的错误码（例如 `OPC_*`、`RUNTIME_*`），由前端映射成用户能看懂的提示；
   内部异常用 `packages/api/src/lib/publicError.ts` 包装，不把原始错误返回给前端。
 - 服务端日志用 `packages/api/src/lib/logger.ts`。新增必需的环境变量要加到
   `packages/api/src/lib/envValidator.ts` 的校验里。
+
+### 数据库文件建库与指纹
+
+空库使用 PostgreSQL 17，按以下顺序建库；共享实现是
+`packages/db/tests/baseline/build-from-files.mjs`：
+
+1. 平台前提：Supabase 提供角色、`auth.uid()`、扩展以及 `extensions`、`storage` schema；
+   本机用 `packages/db/tests/baseline/platform-local.sql` 替代，不能把替身应用到正式环境。
+2. 按文件名顺序执行 `packages/db/baseline/*.sql`，目前为 `0000_core_prerequisites.sql`。
+3. 按文件名顺序执行 `packages/db/migrations` 的全部迁移；
+   `packages/db/baseline/bridges/<迁移同名>.sql` 紧接在同名迁移之前执行。
+
+基线和衔接脚本仅用于空库，不能应用到已有 staging 库。结构变更 PR（新迁移、基线或
+衔接脚本变化）必须运行下面的命令，更新并提交
+`packages/db/tests/baseline/built-fingerprint.json`；CI 会逐对象比对：
+
+```bash
+node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built
+```
+
+新迁移必须在它自己的历史位置连续执行两次且结构不变。回放目前检查从 0067 起的全部
+迁移；确实不能重复执行的例外须在 `build-from-files.mjs` 的 `NOT_REPEATABLE` 中注明原因，
+并随高风险 PR 独立审查，当前没有例外。
+
+经批准向 staging 应用迁移前后，都要在 READ ONLY 事务中用
+`packages/db/tests/baseline/fingerprint.sql` 抓取只读结构指纹，并分别运行：
+
+```bash
+node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读快照.json>
+```
+
+只允许 `expected-differences.json` 中列出的差异；已合并但未应用的迁移对象可临时列入
+`pendingOnStaging`，应用后更新 `staging-fingerprint.json` 和差异清单。`--staging` 只读取
+快照文件并与本机建库比对，不连接远程数据库。正式建库的整段 SQL 执行、平台设置和
+建库后比对要求见 [REL-1 注意事项](runbooks/STAGING_REPRODUCIBILITY.md#rel-1-file-built-release-database)。
 
 ## 6. AI 与 Agent 功能
 
@@ -121,14 +160,31 @@
 | 内容 | 命令 |
 | --- | --- |
 | API 单元测试 | `pnpm test:api` |
-| 网站单元测试 | `pnpm --filter web exec vitest run <文件>` |
-| 类型检查 | `pnpm --filter web typecheck` |
+| 网站单元测试 | `pnpm --filter web test:unit`（全部）；`pnpm --filter web exec vitest run <文件>`（单个） |
+| 类型检查 | `pnpm --filter web typecheck`、`pnpm --filter @repo/api typecheck` |
+| 代码检查（ESLint） | `pnpm --filter web lint`、`pnpm --filter @repo/api lint` |
 | 代码大小检查 | `node scripts/check-code-size.mjs` |
 | 脚本和 CI 保护测试 | `pnpm test:ci:safeguards`、`ruby .github/scripts/test-ci-workflows.rb` |
+| 空库文件建库与逐对象指纹检查（需要本地 Docker） | `node packages/db/tests/run-db-baseline-replay.mjs --local-only` |
 | 端到端测试 | `pnpm --filter web test:e2e`（Playwright） |
 | 部分集成测试（需要本地 Docker） | `node packages/db/tests/v3/run-workbench.mjs`：默认只跑 `workbench.integration.ts`；用 `--opc-only`、`--runtime-only`、`--ai-only` 等参数选择计费、Runtime、定位等其他集成测试。仓库里的 16 个 `*.integration.ts` 并非都能通过它运行，统一入口由 CI-TRUST 补齐 |
-| 计费和恢复集成测试（CI 同款，需要本地 Docker，不启动网站和浏览器） | `node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app`；`node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app`。CI 的 "Unit Tests" 必需检查依赖这两条；需要网站或浏览器而被排除的用例列在 `packages/db/tests/v3/without-app.mjs` |
+| 计费和恢复集成测试（CI 同款，需要本地 Docker，不启动网站和浏览器） | `node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files`；`node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files`。CI 的 "Unit Tests" 必需检查依赖这两条及空库文件建库检查；需要网站或浏览器而被排除的用例列在 `packages/db/tests/v3/without-app.mjs` |
 
+- ESLint 用 typescript-eslint 推荐规则检查 TS/TSX，网站另加 React Hooks 的
+  `rules-of-hooks` 和 `exhaustive-deps`。已有问题记在各包的 `eslint-suppressions.json`
+  （ESLint 批量抑制），只许变少：新问题直接报错；修掉旧问题后运行
+  `pnpm exec eslint --prune-suppressions`（在对应包目录下）把基线一起提交，否则检查会因
+  "有未使用的抑制"失败。文件改名或移动会让原来的抑制失效，要在同一个 PR 里修掉或按原样
+  迁移。
+- `packages/api/tsconfig.json` 的 `exclude` 列出了加入独立类型检查时已有类型错误的测试
+  文件，也只许变少，并且必须和 `packages/api/type-check-baseline.json` 完全一致。
+  `node scripts/check-api-type-baseline.mjs`（CI 同款）只能发现两种情况：两处不一致；某个
+  被排除的文件已经没有类型错误（这时要把它从两处一起删掉）。
+- 这两个基线和第 3 节的代码大小基线一样，自动检查不和目标分支比较：用 `--suppress-all`
+  或手工调大计数来放过新的 ESLint 问题，或者把新文件同时加进 `exclude` 和
+  `type-check-baseline.json`，CI 都发现不了。这些都等于调高基线，是审查阻断项。
+- typescript-eslint 8.71.0 要求 TypeScript 低于 6.1.0。以后把 TypeScript 升到 6.1 或更高时，
+  要同时升级 typescript-eslint（`apps/web` 和 `packages/api` 两处）。
 - 新逻辑要配单元测试，放在源码旁边的 `*.test.ts`；已经使用 `__tests__/` 的目录沿用
   原来的写法。修 bug 时先写一个能复现问题的测试。
 - 运行时或界面改动还需要浏览器验证；数据库、权限、支付等改动的验证要求见 AGENTS.md
@@ -147,14 +203,13 @@
 以下问题已经确认，但不在本规范的范围内，已列入 [Master Plan v12](launch/MASTER_PLAN.md)
 第 7、8 节的任务（主要是 CI-TRUST 和 LEGACY-CLOSE）：
 
-- ESLint 目前只检查 `apps/web` 下的 4 个 `.mjs` 文件，不检查任何 TS/TSX 业务代码。
-  CI 的 "Lint & Type Check" 实际起作用的是类型检查和第 3 节的大小检查。补上
-  TypeScript/React 规则需要新增依赖（例如 typescript-eslint），属于依赖变更。
+- ESLint 和 API 类型检查已经打开，但靠第 7 节的基线放过了已有问题（ESLint：网站 57 个
+  文件 130 处、API 102 个文件 587 处；API 类型检查：35 个测试文件共 683 处，排除在外）。
+  结合相关功能的改动逐步修掉。
 - 集成测试（`*.integration.ts`，约 2 万行）只有计费（`bill2/billing.integration.ts`）和 Runtime 恢复与流式
   （`runtime/runtime.integration.ts`、`runtime/streaming.integration.ts`）在 CI 里运行，其中需要网站或浏览器的
   5 个用例被明确排除（见 `packages/db/tests/v3/without-app.mjs`）；定位（OPC）、工作台等其余集成测试仍不在 CI 里；
-  `packages/api` 没有独立的类型检查，大部分 API 测试文件从未被类型检查；CI 只跑少数
-  网站单测。
+  网站单元和组件测试已全部在 CI 里运行（`pnpm --filter web test:unit`）。
 - 仓库没有安装代码格式化工具（Prettier）。
 - 基线里有 50 个文件超过 500 行、146 个文件含超长行。结合相关功能的改动逐步拆分；
   计费、支付等高风险大文件的拆分单独立项。

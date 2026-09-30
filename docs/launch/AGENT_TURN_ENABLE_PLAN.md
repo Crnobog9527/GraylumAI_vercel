@@ -525,7 +525,12 @@ C1 明确传 --max-usd 0.40，C2 明确传 --max-usd 2.61，各 30 卡片 + 10 �
   累计美元 $15 不变），同步测试和本节。CI 通过后按 C3 配置跑 40 次，本轮上限 $5.54；结果不明就停。
 
 
-### 14.9 B1: selected-route two-turn protocol evidence only (2026-09-30)
+### 14.9 Historical B1: selected-route two-turn protocol evidence (2026-09-30)
+
+The one-use B1 entry and its fixture/protocol files were removed when implementation
+resumed after #542. The commands below describe the historical run only and are not
+current execution instructions. Its code remains available at `f9ebf6b3`; results
+are linked from the PR Handoff. No real calls are authorized by the implementation task.
 
 [Owner approval](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5911114620):
 three fixed pairs, at most six primary requests, USD 1.50 for this run; no organizer,

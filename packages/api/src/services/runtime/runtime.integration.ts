@@ -10,8 +10,10 @@ import {readRuntimeView,retainedOutputReason} from './view';
 import { runtimeExecutor } from './execute';
 import {createRuntimeBudget,withRuntimeBudget} from './budget';
 import {runtimeActor} from './actor';
+import {postgresJsonbBytes,assertFrozenPayloads} from './payloadSize';
 import { runtimeAdmissionService } from './admission';
 import { activateRuntimeCandidate } from './matching';
+import {packageHash,sha256} from '../skills/loader';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
 import { workbenchService } from '../artifacts/workbench';
 import { artifactReuse } from '../artifacts/reuse';
@@ -237,7 +239,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool-turn','fast-t
    }
    if(mode==='late-receipt'&&name==='bill2_record'&&posts===1)elapsed=134_000; // Include the first SQL/auth persistence wait.
    if(mode==='late-receipt'&&name==='bill2_record'&&posts===2){elapsed=256_000;return {...result,error:{message:'Synthetic lost commit response'}};}
-   if(mode.startsWith('delayed-')&&name==='bill2_dispatch'&&result.data?.dispatch||mode==='early-db'&&name==='runtime_execution'&&args.p_action==='begin'||mode==='history-delay'&&name==='runtime_session_items'&&args.p_action==='freeze')elapsed=136_000;
+   if(mode.startsWith('delayed-')&&name==='bill2_dispatch'&&result.data?.dispatch||mode==='early-db'&&name==='runtime_execution'&&args.p_action==='begin'||mode==='history-delay'&&name==='runtime_session_items'&&args.p_action==='freeze')elapsed=206_000;
    return result;
   }};
   const adapter=openRouterAdapter({budget,allowWorkspaceRead:true,credential:async()=> 'SYNTHETIC',transport:async(_url,init)=>fetch(endpoint,init)});
@@ -299,7 +301,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['header','timeout',
  const recovered=mode==='header'||mode==='timeout';
  const nativeTimeout=AbortSignal.timeout.bind(AbortSignal);
  // Exercise native fetch/body abort without a two-minute wall-clock sleep.
- const timer=mode==='timeout'?vi.spyOn(AbortSignal,'timeout').mockImplementation(ms=>nativeTimeout(ms===120_000?50:ms)):null;
+ const timer=mode==='timeout'?vi.spyOn(AbortSignal,'timeout').mockImplementation(ms=>nativeTimeout(ms===240_000?50:ms)):null;
  const f=await fixture(),model=randomUUID(),windowId=randomUUID(),providerId='gen-interrupted-'+windowId;
  await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic interrupted body','test/interrupted','openai',true)",[model]);
  const policy={...f.billing.callPolicy[0],modelId:model,provider:'openrouter',model:'test/interrupted',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
@@ -885,7 +887,7 @@ it('RUNTIME: ordinary, document Skill without workflow, and separate organizer u
 it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill loading and execution',async()=>{
  const password='Local-'+randomUUID()+'!',email=randomUUID()+'@example.test';
  const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
- const actor=created.data.user.id;await db.query("insert into profiles(id,email,credits,role) values($1,$2,500,'admin')",[actor,email]);
+ const actor=created.data.user.id;await db.query("insert into profiles(id,email,credits,role,nickname) values($1,$2,500,'admin','Fixture')",[actor,email]);
  const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
  const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
  // Bearer credentials let the context build budgeted clients, as the route does.
@@ -931,11 +933,11 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    start:{prelude:2,policy:0,host:1},
-   ordinary:{prelude:2,policy:0,host:0,admission:5},
+   ordinary:{prelude:2,policy:0,host:0,admission:6},
    stream:{prelude:2,policy:0,host:0,execute:6,provider:5},
-   skill:{prelude:2,policy:0,host:0,admission:12},
+   skill:{prelude:2,policy:0,host:0,admission:13},
    execute:{prelude:2,policy:0,host:0,execute:6,provider:5},
-   skillWarm:{prelude:2,policy:0,host:0,admission:10},
+   skillWarm:{prelude:2,policy:0,host:0,admission:11},
   });
   // AC-0c: Auth verifies once per invocation and credential, plus once again
   // after the provider response (AC-0 baseline was 2/6/9/12/9).
@@ -1061,13 +1063,13 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    // The first prepare of this new package misses the Skill file cache (AC-0c).
-   oldPrepareOpening:{prelude:2,policy:0,host:5,admission:15},
+   oldPrepareOpening:{prelude:2,policy:0,host:5,admission:16},
    oldStreamOpening:{prelude:2,policy:0,host:0,execute:6,provider:14},
-   oldPrepareAnswer:{prelude:2,policy:0,host:5,admission:11},
+   oldPrepareAnswer:{prelude:2,policy:0,host:5,admission:12},
    oldStreamAnswer:{prelude:2,policy:0,host:0,execute:6,provider:14},
    // One invocation: one prelude instead of two; admission and execution unchanged.
-   opening:{prelude:2,policy:0,host:5,admission:11,execute:6,provider:14},
-   answer:{prelude:2,policy:0,host:5,admission:11,execute:6,provider:14},
+   opening:{prelude:2,policy:0,host:5,admission:12,execute:6,provider:14},
+   answer:{prelude:2,policy:0,host:5,admission:12,execute:6,provider:14},
   });
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
   // Auth verifies once per invocation, and again after each provider response.
@@ -1648,28 +1650,56 @@ it.each([{searchEnabled:false,stopAfterPrimary:false},{searchEnabled:true,stopAf
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 });
 
-it.each(['selected','none','checkpoint_loss','none_checkpoint','result_loss','invalid'])('RUNTIME: automatic public Skill matching %s shares one run and preserves control history',async mode=>{
+it.each(['selected','none','checkpoint_loss','none_checkpoint','result_loss','invalid','purpose-budget'])('RUNTIME: automatic public Skill matching %s shares one run and preserves control history',async mode=>{
  const email=randomUUID()+'@example.test',password='Local-'+randomUUID()+'!';
  const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;const actor=created.data.user.id;
  await db.query("insert into profiles(id,email,credits,role) values($1,$2,100,'admin')",[actor,email]);
  await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,100,'adjustment','adjustment','opening','system',$2,0,100)",[actor,randomUUID()]);
  const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});expect((await user.auth.signInWithPassword({email,password})).error).toBeNull();
  const pack=makePackage(),moduleId=randomUUID(),skillModel=randomUUID();
+ if(mode==='purpose-budget'){
+  const text=Buffer.from(pack.files[0].base64,'base64').toString()+'x'.repeat(70000);
+  pack.files[0].base64=Buffer.from(text).toString('base64');
+  Object.assign(pack.descriptor.files[0],{bytes:Buffer.byteLength(text),sha256:sha256(text)});
+  pack.descriptor.packageHash=packageHash(pack.descriptor);
+ }
  await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Auto Skill fixture',$2,'fixture','true')",[skillModel,'auto-'+skillModel]);
  await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[pack.id,'auto-'+pack.id,actor]);
  await db.query("insert into modules(id,title,skill_id,active,model_id) values($1,'Automatic document Skill',$2,true,$3)",[moduleId,pack.id,skillModel]);
  await publishSkillPackage(admin,actor,pack);
- const admission=runtimeAdmissionService(user,admin,{account:'sandbox',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:200,inputBytes:30000,historyItems:30});
+ const admission=runtimeAdmissionService(user,admin,{purposeBudgets:mode==='purpose-budget',account:'sandbox',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:200,inputBytes:30000,historyItems:30});
  const s=await admission.start(randomUUID(),{kind:'positioning_draft'});
  const oldCapacity=(await db.query('select input_limit from ai_models where id=$1',[modelId])).rows[0].input_limit;
  if(mode==='none_checkpoint'){
   await db.query('update ai_models set input_limit=10200 where id=$1',[modelId]);
   await db.query("update ai_models set model_id='runtime-m' where id=$1",[skillModel]);
  }
- const e=await admission.prepare({sessionId:s.sessionId,requestId:randomUUID(),input:'Use the appropriate method for this request',selection:{kind:'auto',modelId},network:'deny'});
- await db.query('update ai_models set input_limit=$2 where id=$1',[modelId,oldCapacity]);
+ const priorBudget=(await db.query("select value from system_settings where key='runtime_purpose_budgets'")).rows[0];
+ if(mode==='purpose-budget'){
+  const config={version:1,interactive:{inputBytes:90000,maxOutputTokens:200,historyItems:30},
+   organize:{inputBytes:64000,historyItems:0},report:{inputBytes:90000,maxOutputTokens:200,historyItems:0}};
+  await db.query("insert into system_settings(key,value) values('runtime_purpose_budgets',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(JSON.stringify(config))]);
+  await db.query('update ai_models set input_limit=64200 where id=$1',[modelId]);
+  await db.query('update ai_models set input_limit=90200 where id=$1',[skillModel]);
+ }
+ let e;
+ try{
+  e=await admission.prepare({sessionId:s.sessionId,requestId:randomUUID(),input:'Use the appropriate method for this request',selection:{kind:'auto',modelId},network:'deny'});
+ }finally{
+  if(mode==='purpose-budget'){
+   if(priorBudget)await db.query("update system_settings set value=$1 where key='runtime_purpose_budgets'",[JSON.stringify(priorBudget.value)]);
+   else await db.query("delete from system_settings where key='runtime_purpose_budgets'");
+  }
+  await db.query('update ai_models set input_limit=$2 where id=$1',[modelId,oldCapacity]);
+ }
  const payload=(await db.query('select payload from runtime_executions where id=$1',[e.executionId])).rows[0].payload;
  const chosen=payload.matching.candidates.find((c:any)=>c.moduleId===moduleId);expect(chosen).toBeTruthy();
+ if(mode==='purpose-budget'){
+  expect(payload.purposeBudget.inputBytes).toBe(90000);
+  expect(chosen.inputLimit).toBe(90000);
+  const frozen=(await db.query('select payload from bill2_runs where id=$1',[e.runId])).rows[0].payload;
+  expect(frozen.callPolicy.find((p:{modelId:string;inputLimit:number})=>p.modelId===modelId).inputLimit).toBe(64000);
+ }
  const requests:any[]=[];let injected=false;
  const server=createServer(async(req,res)=>{
   let raw='';for await(const chunk of req)raw+=chunk;const input=JSON.parse(JSON.parse(raw).input);requests.push(input);
@@ -1703,6 +1733,7 @@ it.each(['selected','none','checkpoint_loss','none_checkpoint','result_loss','in
   }else{
    expect(result).toEqual({body:'Auto matched answer',state:'completed'});expect(requests).toHaveLength(2);
    expect(requests[1].model).toBe(mode==='none'?'runtime-m':'auto-'+skillModel);
+   if(mode==='purpose-budget')expect(Buffer.byteLength(JSON.stringify(requests[1]))).toBeGreaterThan(64000);
    if(mode!=='none')expect(JSON.stringify(requests[1])).toContain('METHOD_CANARY');
    else expect(JSON.stringify(requests[1])).not.toContain('METHOD_CANARY');
    await executor.execute(e.executionId);expect(requests).toHaveLength(2);
@@ -1965,7 +1996,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['complete','missing
  const f=await fixture(),mentorId=randomUUID(),organizerId=randomUUID(),windowId=randomUUID();
  const policies=[[mentorId,'test/mentor'],[organizerId,'test/organizer']].map(([modelId,model])=>({...f.billing.callPolicy[0],modelId,model,provider:'openrouter',protocol:'openrouter-chat-v1',inputLimit:10000,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
  for(const p of policies)await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic truncation',$2,'openrouter','true')",[p.modelId,p.model]);
- await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.12,6,now()+interval '1 hour')",[windowId,[f.actorId],JSON.stringify(policies)]);
+ await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.12,6,now()+interval '2 hours')",[windowId,[f.actorId],JSON.stringify(policies)]);
  await rpc('runtime_material',{p_actor_id:f.actorId,p_session_id:f.s.sessionId,p_action:'save',p_request_id:randomUUID(),p_expected_revision:0,p_payload:{brief:'Synthetic truncation source',material:'local only',roundId:null}});
  const material=(await rpc('runtime_session_context',{p_actor_id:f.actorId,p_session_id:f.s.sessionId})).scopeMaterial;
  let firstExecutionId='';
@@ -2111,3 +2142,31 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: stopped unknown
   expect(await snapshot()).toEqual(original);
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },30000);
+
+it('RUNTIME: MENTOR-BUDGET: PostgreSQL oracle agrees on JSONB size and exact storage boundary',async()=>{
+ const samples:unknown[]=[null,{},[],{text:'中😀\n\t\b\f\r\u0001"\\,:',nested:[true,false,null,1e-7,1e21,-1.2e-10,1.23e30]},
+  ...[262144,262145].map(n=>({x:'x'.repeat(n-9)}))];
+ for(const value of samples){
+  const actual=(await db.query('select octet_length($1::jsonb::text)::int n',[JSON.stringify(value)])).rows[0].n;
+  expect(postgresJsonbBytes(value)).toBe(actual);
+  if(actual<=262144)expect(()=>assertFrozenPayloads(value,value)).not.toThrow();
+  else expect(()=>assertFrozenPayloads(value,value)).toThrow('RUNTIME_FROZEN_PAYLOAD_TOO_LARGE');
+ }
+});
+it('RUNTIME: MENTOR-BUDGET: only the service role can write and read back the existing settings table',async()=>{
+ const c=new pg.Client({connectionString});await c.connect();
+ try{
+  for(const role of ['anon','authenticated']){
+   for(const statement of ["insert into system_settings(key,value) values('runtime_purpose_budgets','{}')",
+    "update system_settings set value='{}' where key='runtime_purpose_budgets'"]){
+    await c.query('begin');await c.query('set local role '+role);
+    try{await expect(c.query(statement)).rejects.toMatchObject({code:'42501'});}finally{await c.query('rollback');}
+   }
+  }
+  await c.query('begin');await c.query('set local role service_role');
+  try{
+   await c.query("insert into system_settings(key,value) values('runtime_purpose_budgets','{}') on conflict(key) do update set value=excluded.value");
+   expect((await c.query("select value from system_settings where key='runtime_purpose_budgets'")).rows[0].value).toEqual({});
+  }finally{await c.query('rollback');}
+ }finally{await c.end();}
+});

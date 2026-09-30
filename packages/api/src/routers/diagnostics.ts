@@ -10,6 +10,7 @@ import { getConfiguredProviderApiKeySource } from '../services/providerUtils';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { DiagnosticsService, type DiagnosticCategory } from '../services/diagnostics';
+import { deleteOldDiagnosticResults } from '../services/diagnosticsResults';
 import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
 
@@ -175,7 +176,7 @@ export const diagnosticsRouter = router({
           logDiagnosticsFallback('diagnostics_runtime_proof_failed', { hours: runtimeHours });
           return createRuntimeProofFallback(runtimeHours);
         }),
-        getRecentRunsData(ctx.userScopedSupabase, recentRunsLimit),
+        getRecentRunsData(ctx.supabaseAdmin, recentRunsLimit),
       ]);
 
       return {
@@ -368,7 +369,7 @@ export const diagnosticsRouter = router({
     .input(z.object({
       limit: z.number().min(1).max(20).default(5),
     }).optional())
-    .query(async ({ ctx, input }) => getRecentRunsData(ctx.userScopedSupabase, input?.limit ?? 5)),
+    .query(async ({ ctx, input }) => getRecentRunsData(ctx.supabaseAdmin, input?.limit ?? 5)),
 
   /**
    * 获取指定批次的结果
@@ -378,7 +379,7 @@ export const diagnosticsRouter = router({
       batchId: z.string(),
     }))
     .query(async ({ ctx, input }) => {
-      const { data, error } = await ctx.userScopedSupabase
+      const { data, error } = await ctx.supabaseAdmin
         .from('diagnostic_results')
         .select('*')
         .eq('batch_id', input.batchId)
@@ -410,17 +411,16 @@ export const diagnosticsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const daysToKeep = input?.daysToKeep ?? 30;
 
-      const { data, error } = await ctx.supabaseAdmin.rpc('cleanup_old_diagnostic_results', {
-        p_days_to_keep: daysToKeep,
-      });
-
-      if (error) {
+      let deletedCount: number;
+      try {
+        deletedCount = await deleteOldDiagnosticResults(ctx.supabaseAdmin, daysToKeep);
+      } catch (error) {
         throw createSafeInternalError(error, DIAGNOSTICS_CLEANUP_FAILURE_MESSAGE);
       }
 
       return {
         success: true,
-        deletedCount: data ?? 0,
+        deletedCount,
         message: `已清理 ${daysToKeep} 天前的诊断记录`,
       };
     }),

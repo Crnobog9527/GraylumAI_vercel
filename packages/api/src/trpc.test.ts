@@ -534,6 +534,24 @@ describe('protectedProcedure profile bootstrap', () => {
     });
   });
 
+  it('rejects a closed account without re-syncing identity or granting credits', async () => {
+    const supabaseMocks = createProfilesSupabase({
+      existingProfile: {
+        id: user.id, role: 'user', credits: 40, status: 'deleted', nickname: '', email: 'old@example.com',
+        created_at: '2026-09-01T00:00:00.000Z', membership_level: 'free',
+      },
+    });
+
+    await expect(callProtectedProcedure(supabaseMocks)).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+      message: 'ACCOUNT_CLOSED: 账号已注销',
+    });
+    expect(supabaseMocks.profileInserts).toEqual([]);
+    expect(supabaseMocks.profileUpdates).toEqual([]);
+    expect(supabaseMocks.adminProfileUpdates).toEqual([]);
+    expect(supabaseMocks.rpc).not.toHaveBeenCalled();
+  });
+
   it('backfills nickname with the user client and syncs email only through the server client', async () => {
     const existingProfile = {
       id: user.id, role: 'user', credits: 100, status: 'active', nickname: '', email: 'old@example.com',

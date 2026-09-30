@@ -12,6 +12,7 @@ import {askQuestionTool,askQuestionToolBytes} from './agentTools';
 import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
 import { authoritativeBilling, type FrozenRun, type FrozenCall, type BillingTransport } from '../bill2/service';
 import {OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
+import {frozenPurposeBudget,FROZEN_OUTPUT_CAP} from './purposeBudgets';
 import {createRuntimeBudget,type RuntimeBudget} from './budget';
 import {expiringAuthAfterProvider} from './authReuse';
 import { localFixtureAdapter } from '../bill2/fixtureAdapter';
@@ -25,14 +26,17 @@ const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 export const runtimeContext=z.object({
  version:z.literal('runtime.v1'),sdkVersion:z.literal('0.18.0'),role:z.enum(['ordinary','skill','organizer']),
  input:z.string().min(1).max(20000),instructions:z.string().max(262144),model:z.string().min(1),
- maxOutputTokens:z.number().int().positive().max(20000),maxTurns:z.number().int().min(1).max(32),
+ maxOutputTokens:z.number().int().positive().max(FROZEN_OUTPUT_CAP),maxTurns:z.number().int().min(1).max(32),
  inputSelection:z.literal('scope-projection-v1').optional(),
  providerRequestFormat:z.enum(PROVIDER_REQUEST_FORMATS).optional(),
  reasoning:reasoningPolicy.optional(),
- historyItems:z.number().int().min(0).max(1000),
+ historyItems:z.number().int().min(0).max(1000),purposeBudget:frozenPurposeBudget.optional(),
  tools:z.array(z.enum(['search','read_source',ASK_QUESTION_TOOL])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
  modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
- attachedOrganizer:z.object({modelId:z.string().uuid(),model:z.string().min(1),maxOutputTokens:z.number().int().positive(),reasoning:reasoningPolicy.optional(),instructions:z.string().max(12000).optional(),input:z.string().max(24000).optional()}).strict().optional(),
+ attachedOrganizer:z.object({
+  modelId:z.string().uuid(),model:z.string().min(1),
+  maxOutputTokens:z.number().int().positive(),inputBytes:z.number().int().positive().optional(),
+  historyItems:z.number().int().min(0).max(1000).optional(),reasoning:reasoningPolicy.optional(),instructions:z.string().max(12000).optional(),input:z.string().max(24000).optional()}).strict().optional(),
  workspaceContext:z.boolean().optional(),opcTurnToken:z.string().uuid().optional(),matching:matchingPlan.optional(),scopeMaterial:z.unknown().optional(),
  request:z.unknown().optional(),moduleId:z.string().uuid().optional(),skillId:z.string().uuid().optional(),revisionId:z.string().uuid().optional(),sources:z.array(z.unknown()).optional(),
 }).strict();
@@ -114,7 +118,8 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
     try{
     if(selectedPolicy.protocol==='openrouter-chat-v1')
      request=openRouterRequestBody(request,{context,policy:selectedPolicy,phase,primaryDialogue:phase===effective.role&&selectedPolicy===primaryPolicy});
-    assertRuntimeRequestCapacity(request,selectedPolicy.inputLimit);
+    const configuredInput=phase==='attached_organizer'?context.attachedOrganizer?.inputBytes:context.purposeBudget?.inputBytes;
+    assertRuntimeRequestCapacity(request,Math.min(selectedPolicy.inputLimit,configuredInput??Infinity));
     const sequence=++callSequence;
      const requestHash=hash(request);
      const existing=await rpc<{callId:string;state:string;rawBody:string|null}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash}).catch(error=>{
@@ -124,12 +129,14 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
      if(!raw){
       // Recovery is replay-only, even when a later step had not yet been sent.
       if(!execution.live||existing?.state==='dispatched'||existing?.state==='unknown'||existing?.state==='responded')throw new Error('RUNTIME_RESPONSE_PENDING');
-      budget.assertCanStart(selectedPolicy.protocol==='openrouter-chat-v1'?OPENROUTER_RESPONSE_TIMEOUT_MS:5000);
+      if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
+      else budget.assertCanStart(5000);
       const call:FrozenCall={provider:selectedPolicy.provider,account:selectedPolicy.account,model:selectedPolicy.model,protocol:selectedPolicy.protocol,
        ...(selectedPolicy.providerLimits?{providerLimits:selectedPolicy.providerLimits}:{}),phase,requestHash,upperUsd:selectedPolicy.upperUsd,inputLimit:selectedPolicy.inputLimit,outputLimit:selectedPolicy.outputLimit,
        automaticRetry:false,hiddenTools:false,lookupSupported:selectedPolicy.lookupSupported};
       const claim=await billing.claimCall(execution.runId,sequence,call);
-      budget.assertCanStart(selectedPolicy.protocol==='openrouter-chat-v1'?OPENROUTER_RESPONSE_TIMEOUT_MS:5000);
+      if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
+      else budget.assertCanStart(5000);
       const dispatch=await billing.dispatchOnce(claim.id,request,onChunk);
       if(dispatch.transportNotStarted){transportNotStarted=true;throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');}
       if(!dispatch.dispatched)throw new Error('RUNTIME_RESPONSE_PENDING');
@@ -244,14 +251,16 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
      onToolCallsDropped:(dropped:number)=>logger.warn('api','runtime_tool_calls_dropped',{executionId,dropped}),
      ...(context.tools.includes(ASK_QUESTION_TOOL)?{stopAtToolNames:[ASK_QUESTION_TOOL]}:{})}:{}),
     input:runtimeScopeInput(context.input,context.scopeMaterial),session,tools,selectHistory:async(history,incoming)=>{
-    const selected=selectRuntimeHistory(history,incoming,{instructions:effective.instructions,inputBytes:primaryPolicy.inputLimit,historyItems:context.historyItems,toolBytes,...sizing,
+    const selected=selectRuntimeHistory(history,incoming,{instructions:effective.instructions,inputBytes:Math.min(primaryPolicy.inputLimit,context.purposeBudget?.inputBytes??Infinity),
+     historyItems:context.historyItems,toolBytes,...sizing,
      projectHistoryItem:item=>legacyInput||preserveHistoricalMaterial?item:projectSupersededScopeItem(item,context.scopeMaterial)});
     selectedHistoryCount=selected.length-incoming.length;
     // Freeze the exact first-call history members. Later tool calls may use a
     // subset, but never acquire a new Session dependency during this execution.
     await session.freezeHistoryItems(selected.slice(0,selectedHistoryCount));return selected;
    },filterModelInput:legacyInput?undefined:(items,instructions)=>selectRuntimeCallInput(items,selectedHistoryCount,{
-    instructions,inputBytes:primaryPolicy.inputLimit,toolBytes,currentMaterial:context.scopeMaterial,preserveHistoricalMaterial,...sizing,
+    instructions,inputBytes:Math.min(primaryPolicy.inputLimit,context.purposeBudget?.inputBytes??Infinity),
+    toolBytes,currentMaterial:context.scopeMaterial,preserveHistoricalMaterial,...sizing,
    }) as typeof items,
     exchange:async(_sequence,request,onChunk)=>{
      partial="";
@@ -299,7 +308,10 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
     const organizerInput=organizer.input ? organizer.input+'\n\nPrimary assistant reply:\n'+body : body;
     summary=await runRuntime({model:organizer.model,instructions,input:organizerInput,session,maxOutputTokens:organizer.maxOutputTokens,maxTurns:1,tools:[],
      reasoning:organizer.reasoning,
-     selectHistory:async(_history,incoming)=>selectRuntimeHistory([],incoming,{instructions,inputBytes:organizerPolicy.inputLimit,historyItems:0,toolBytes:0}),
+     // Session reads now contain only the primary call's frozen dependencies.
+     selectHistory:async(history,incoming)=>selectRuntimeHistory(history,incoming,{
+      instructions,inputBytes:Math.min(organizerPolicy.inputLimit,organizer.inputBytes??Infinity),
+      historyItems:organizer.historyItems??0,toolBytes:0}),
      exchange:async(_sequence,request)=>{
       const envelope=await exchange(request,'attached_organizer',organizerPolicy),response=envelope.usage?.sdkResponse;
       if(!response||response.model!==organizer.model||response.choices?.length!==1)throw new Error('RUNTIME_RESPONSE_INVALID');

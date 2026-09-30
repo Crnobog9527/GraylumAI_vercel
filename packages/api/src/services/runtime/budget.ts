@@ -1,11 +1,17 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {createRequestTiming,timingLabel} from './timing';
 import {createAuthReuse} from './authReuse';
+// Within the 300s function: 20s after model work for persistence/settlement,
+// then 15s for the HTTP response and platform shutdown.
+export const RUNTIME_WORK_MS = 265_000;
+export const RUNTIME_PERSISTENCE_MS = 285_000;
+// Do not start a costly model call with too little time to produce a result.
+export const MIN_MODEL_DISPATCH_MS = 60_000;
 /** One server-created HTTP invocation budget, shared by every batched Runtime.
  * It is neither a frozen execution field nor an authority to retry/settle. */
 export function createRuntimeBudget(now:()=>number=()=>performance.now()) {
  const startedAt=now();
- const workDeadline=startedAt+255_000,persistenceDeadline=startedAt+285_000;
+ const workDeadline=startedAt+RUNTIME_WORK_MS,persistenceDeadline=startedAt+RUNTIME_PERSISTENCE_MS;
  return Object.freeze({
   workDeadline,persistenceDeadline,
   // AC-0 measurement of this invocation's round trips; never an authority.
@@ -13,6 +19,11 @@ export function createRuntimeBudget(now:()=>number=()=>performance.now()) {
   // AC-0c: this invocation's reuse of Auth's own verdict (see authReuse.ts).
   auth:createAuthReuse(now),
   remainingPersistence:()=>persistenceDeadline-now(),
+  modelCallTimeout(maximum:number){
+   const remaining=Math.floor(workDeadline-now());
+   if(remaining<MIN_MODEL_DISPATCH_MS)throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');
+   return Math.min(maximum,remaining);
+  },
   assertCanPersist(durationMs=0){
    if(now()+durationMs>=persistenceDeadline)throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');
   },

@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server';
-import { describe, expect, it } from 'vitest';
-import { checkIdempotency, creditsRouter } from './credits';
+import { describe, expect, it, vi } from 'vitest';
+import { logger } from '../lib/logger';
+import { creditsRouter } from './credits';
 
 function createProfileSupabase(role: 'user' | 'admin', credits = 123) {
   return {
@@ -98,11 +99,14 @@ function createBalanceSupabase(options: {
   };
 }
 
-function createCreditTransactionsSupabase(rows: Array<Record<string, unknown>> = []) {
+function createCreditTransactionsSupabase(
+  rows: Array<Record<string, unknown>> = [],
+  error: Record<string, unknown> | null = null,
+) {
   const result = Promise.resolve({
-    data: rows,
-    error: null,
-    count: rows.length,
+    data: error ? null : rows,
+    error,
+    count: error ? null : rows.length,
   });
 
   return {
@@ -141,72 +145,6 @@ function createCreditTransactionsSupabase(rows: Array<Record<string, unknown>> =
   };
 }
 
-function createAdminMutationSupabase(options: { startingCredits?: number } = {}) {
-  const startingCredits = options.startingCredits ?? 100;
-  const creditTransactionInserts: Array<Record<string, unknown>> = [];
-
-  return {
-    creditTransactionInserts,
-    from(table: string) {
-      if (table === 'profiles') {
-        return {
-          select() {
-            return this;
-          },
-          eq() {
-            return this;
-          },
-          single() {
-            return Promise.resolve({
-              data: { credits: startingCredits, updated_at: '2026-05-09T00:00:00.000Z' },
-              error: null,
-            });
-          },
-          update() {
-            return this;
-          },
-        };
-      }
-
-      if (table === 'credit_transactions') {
-        return {
-          select() {
-            return this;
-          },
-          eq() {
-            return this;
-          },
-          maybeSingle() {
-            return Promise.resolve({
-              data: null,
-              error: null,
-            });
-          },
-          insert(payload: { amount: number } & Record<string, unknown>) {
-            creditTransactionInserts.push(payload);
-            return {
-              select() {
-                return this;
-              },
-              single() {
-                return Promise.resolve({
-                  data: {
-                    id: 'txn-1',
-                    amount: payload.amount,
-                  },
-                  error: null,
-                });
-              },
-            };
-          },
-        };
-      }
-
-      throw new Error(`Unexpected admin table ${table}`);
-    },
-  };
-}
-
 function createCreditsCaller(args: {
   role?: 'user' | 'admin';
   supabase?: any;
@@ -234,80 +172,11 @@ function createCreditsCaller(args: {
 }
 
 describe('creditsRouter permissions', () => {
-  it('rejects ordinary users calling addCredits', async () => {
-    const caller = createCreditsCaller({ role: 'user' });
-
-    await expect(caller.addCredits({ amount: 10 })).rejects.toMatchObject<Partial<TRPCError>>({
-      code: 'FORBIDDEN',
-    });
-  });
-
-  it('rejects ordinary users calling deductCredits', async () => {
-    const caller = createCreditsCaller({ role: 'user' });
-
-    await expect(caller.deductCredits({ amount: 10 })).rejects.toMatchObject<Partial<TRPCError>>({
-      code: 'FORBIDDEN',
-    });
-  });
-
-  it('allows admins to call addCredits and enter the existing mutation logic', async () => {
-    const adminSupabase = createAdminMutationSupabase({ startingCredits: 100 });
-    const caller = createCreditsCaller({
-      role: 'admin',
-      supabaseAdmin: adminSupabase,
-    });
-
-    await expect(caller.addCredits({ amount: 25, reason: 'Admin top-up' })).resolves.toMatchObject({
-      success: true,
-      previousCredits: 100,
-      newCredits: 125,
-      amountAdded: 25,
-    });
-  });
-
-  it('allows admins to call deductCredits and enter the existing mutation logic', async () => {
-    const adminSupabase = createAdminMutationSupabase({ startingCredits: 100 });
-    const caller = createCreditsCaller({
-      role: 'admin',
-      supabaseAdmin: adminSupabase,
-    });
-
-    await expect(caller.deductCredits({ amount: 25, reason: 'Admin deduction' })).resolves.toMatchObject({
-      success: true,
-      previousCredits: 100,
-      newCredits: 75,
-      amountDeducted: 25,
-    });
-    expect(adminSupabase.creditTransactionInserts).toEqual([
-      expect.objectContaining({
-        type: 'deduction',
-        amount: -25,
-        description: 'Admin deduction',
-      }),
-    ]);
-  });
-
-  it('writes a stable admin adjustment signal for default deductCredits reasons', async () => {
-    const adminSupabase = createAdminMutationSupabase({ startingCredits: 100 });
-    const caller = createCreditsCaller({
-      role: 'admin',
-      supabaseAdmin: adminSupabase,
-    });
-
-    await expect(caller.deductCredits({ amount: 25, idempotencyKey: 'manual-1' })).resolves.toMatchObject({
-      success: true,
-      previousCredits: 100,
-      newCredits: 75,
-      amountDeducted: 25,
-    });
-    expect(adminSupabase.creditTransactionInserts).toEqual([
-      expect.objectContaining({
-        type: 'deduction',
-        amount: -25,
-        description: '[Admin] 积分消费',
-        idempotency_key: 'admin_credit_deduction:admin-1:manual-1',
-      }),
-    ]);
+  it('does not expose balance writes that bypass the credit ledger function', () => {
+    const procedures = Object.keys(creditsRouter._def.procedures);
+    for (const name of ['addCredits', 'deductCredits', 'checkSufficientCredits']) {
+      expect(procedures).not.toContain(name);
+    }
   });
 
   it('allows ordinary users to read their balance', async () => {
@@ -346,17 +215,6 @@ describe('creditsRouter permissions', () => {
       message: '余额暂时无法验证，请稍后重试',
     });
     expect(error.message).not.toMatch(/private database detail|private network detail/);
-  });
-
-  it('does not fabricate a zero shortfall when the sufficiency balance read fails', async () => {
-    const caller = createCreditsCaller({
-      supabase: createBalanceSupabase({ error: { code: '57014', message: 'statement timeout' } }),
-    });
-
-    await expect(caller.checkSufficientCredits({ amount: 1 })).rejects.toMatchObject<Partial<TRPCError>>({
-      code: 'SERVICE_UNAVAILABLE',
-      message: '余额暂时无法验证，请稍后重试',
-    });
   });
 
   it('allows ordinary users to read their credit transactions', async () => {
@@ -450,92 +308,28 @@ describe('creditsRouter permissions', () => {
       },
     });
   });
-});
 
-describe('checkIdempotency', () => {
-  it('returns an existing transaction when the idempotency key is already recorded', async () => {
+  it('reports the summary as unavailable instead of fabricated zeros when the ledger read fails', async () => {
+    const logSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
     const supabase = {
       from(table: string) {
-        expect(table).toBe('credit_transactions');
-        return {
-          select(selection: string) {
-            expect(selection).toBe('id');
-            return this;
-          },
-          eq(column: string, value: string) {
-            expect(['user_id', 'idempotency_key']).toContain(column);
-            if (column === 'user_id') {
-              expect(value).toBe('user-1');
-            }
-            if (column === 'idempotency_key') {
-              expect(value).toBe('idem-1');
-            }
-            return this;
-          },
-          maybeSingle() {
-            return Promise.resolve({
-              data: { id: 'txn-1' },
-              error: null,
-            });
-          },
-        };
+        if (table === 'profiles') {
+          return createProfileSupabase('user').from(table);
+        }
+        return createCreditTransactionsSupabase([], {
+          code: '57014',
+          message: 'private timeout detail for user@example.com',
+        }).from(table);
       },
     };
+    const caller = createCreditsCaller({ role: 'user', supabase });
 
-    await expect(checkIdempotency(supabase, 'user-1', 'idem-1')).resolves.toEqual({
-      exists: true,
-      transactionId: 'txn-1',
+    await expect(caller.getCreditsSummary({ period: 'month' })).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'SERVICE_UNAVAILABLE',
+      message: '积分汇总暂时无法读取，请稍后重试',
     });
-  });
-
-  it('returns exists false when no transaction is recorded for the idempotency key', async () => {
-    const supabase = {
-      from() {
-        return {
-          select() {
-            return this;
-          },
-          eq() {
-            return this;
-          },
-          maybeSingle() {
-            return Promise.resolve({
-              data: null,
-              error: null,
-            });
-          },
-        };
-      },
-    };
-
-    await expect(checkIdempotency(supabase, 'user-1', 'idem-miss')).resolves.toEqual({
-      exists: false,
-    });
-  });
-
-  it('sanitizes storage errors during idempotency checks', async () => {
-    const supabase = {
-      from() {
-        return {
-          select() {
-            return this;
-          },
-          eq() {
-            return this;
-          },
-          maybeSingle() {
-            return Promise.resolve({
-              data: null,
-              error: { message: 'column idempotency_key does not exist' },
-            });
-          },
-        };
-      },
-    };
-
-    await expect(checkIdempotency(supabase, 'user-1', 'idem-fail')).rejects.toMatchObject<Partial<TRPCError>>({
-      code: 'INTERNAL_SERVER_ERROR',
-      message: '积分操作校验失败，请稍后重试',
-    });
+    expect(logSpy).toHaveBeenCalledWith('billing', 'credits_summary_query_failed', { code: '57014' });
+    expect(JSON.stringify(logSpy.mock.calls)).not.toContain('user@example.com');
+    logSpy.mockRestore();
   });
 });

@@ -26,6 +26,20 @@ export function formatReportUsd(amount: number) {
   }).format(amount);
 }
 
+/**
+ * Compact form of a report amount for stat cards: 2 decimals from $1, otherwise 4 significant digits.
+ * Returns the exact report string when shortening would not change it.
+ */
+export function formatReportUsdShort(amount: number) {
+  const magnitude = Math.abs(amount);
+  if (!Number.isFinite(amount) || magnitude < 1e-12) return formatReportUsd(amount);
+  if (magnitude >= 1) return formatUsd(amount);
+  const fractionDigits = Math.min(12, Math.max(2, 3 - Math.floor(Math.log10(magnitude))));
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: fractionDigits,
+  }).format(amount);
+}
+
 export function formatUsdFromCents(amountInCents: number) {
   return formatUsd(amountInCents / 100);
 }

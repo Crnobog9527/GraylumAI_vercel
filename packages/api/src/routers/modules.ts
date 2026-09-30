@@ -2,6 +2,14 @@ import { router, publicProcedure, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { logger } from '../lib/logger';
+
+const MODULE_USAGE_MAX_ATTEMPTS = 3;
+
+function moduleUsageError(error: { code?: string }) {
+  logger.error('api', 'module_usage_increment_failed', { code: error.code ?? null });
+  return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '暂时无法记录使用次数' });
+}
 
 export const PUBLIC_MODULE_SELECT = [
   'id',
@@ -209,31 +217,28 @@ export const modulesRouter = router({
     }),
 
   /**
-   * Increment module usage count (protected endpoint)
+   * Increment an active module's usage count by exactly one.
+   * Users never write usage_count; the server does a compare-and-swap with service_role, which
+   * already owns modules writes (the old increment_module_usage RPC never existed on staging).
    */
   incrementUsage: protectedProcedure
     .input(z.object({ moduleId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const { error } = await ctx.supabase.rpc('increment_module_usage', {
-        module_id: input.moduleId,
-      });
-
-      // If RPC doesn't exist, fall back to manual increment
-      if (error) {
-        const { data: module } = await ctx.supabase
-          .from('modules')
-          .select('usage_count')
-          .eq('id', input.moduleId)
-          .single();
-
-        if (module) {
-          await ctx.supabase
-            .from('modules')
-            .update({ usage_count: (module.usage_count ?? 0) + 1 })
-            .eq('id', input.moduleId);
-        }
+      if (!ctx.hasSupabaseAdminPrivileges) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '暂时无法记录使用次数' });
       }
-
-      return { success: true };
+      for (let attempt = 0; attempt < MODULE_USAGE_MAX_ATTEMPTS; attempt += 1) {
+        const { data: module, error } = await ctx.supabaseAdmin
+          .from('modules').select('usage_count').eq('id', input.moduleId).eq('active', true).maybeSingle();
+        if (error) throw moduleUsageError(error);
+        if (!module) throw new TRPCError({ code: 'NOT_FOUND', message: '模块不存在' });
+        const current = Number(module.usage_count ?? 0);
+        const { data: updated, error: updateError } = await ctx.supabaseAdmin
+          .from('modules').update({ usage_count: current + 1 })
+          .eq('id', input.moduleId).eq('active', true).eq('usage_count', current).select('id');
+        if (updateError) throw moduleUsageError(updateError);
+        if ((updated ?? []).length === 1) return { success: true };
+      }
+      throw new TRPCError({ code: 'CONFLICT', message: '使用次数更新冲突，请稍后重试' });
     }),
 });

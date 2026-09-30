@@ -1,7 +1,6 @@
 'use client';
 
 import { memo, useState } from 'react';
-import Script from 'next/script';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle2,
@@ -15,12 +14,8 @@ import { buildAuthHref } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  getAuthCaptchaOptions,
-  getAuthCaptchaSiteKey,
-  HCAPTCHA_SCRIPT_SRC,
-  runAuthCaptchaAttempt,
-} from '@/lib/authCaptcha';
+import { keepDialogOpenForCaptcha } from '@/lib/dialogCaptcha';
+import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
 import {
   Dialog,
   DialogContent,
@@ -51,7 +46,6 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
   const authProvider = user?.auth_provider || 'email';
   const isEmailPasswordAccount = authProvider === 'email';
-  const captchaSiteKey = getAuthCaptchaSiteKey();
   const registerDate = user?.created_date
     ? new Date(user.created_date).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
     : '-';
@@ -86,21 +80,20 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
     try {
       const supabase = createClient();
-      let captchaOptions: ReturnType<typeof getAuthCaptchaOptions>;
+      // Invisible hCaptcha: a fresh single-use token per attempt; a challenge appears only if needed.
+      let captchaOptions: Awaited<ReturnType<typeof invisibleCaptchaOptions>>;
       try {
-        captchaOptions = getAuthCaptchaOptions();
+        captchaOptions = await invisibleCaptchaOptions();
       } catch (error) {
         setStatusTone('error');
-        setStatusMessage(getSafeErrorMessage(error, '请完成人机验证后重试。'));
+        setStatusMessage(getSafeErrorMessage(error, '人机验证未完成，请重试。'));
         return;
       }
-      const { error: reauthError } = await runAuthCaptchaAttempt(captchaOptions, (options) =>
-        supabase.auth.signInWithPassword({
-          email: userEmail,
-          password: passwordForm.current_password,
-          options,
-        }),
-      );
+      const { error: reauthError } = await supabase.auth.signInWithPassword({
+        email: userEmail,
+        password: passwordForm.current_password,
+        options: captchaOptions,
+      });
 
       if (reauthError) {
         setStatusTone('error');
@@ -133,12 +126,6 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
   return (
     <>
-      {captchaSiteKey ? (
-        <>
-          <Script src={HCAPTCHA_SCRIPT_SRC} strategy="afterInteractive" />
-          <div className="h-captcha" data-sitekey={captchaSiteKey} />
-        </>
-      ) : null}
       <div
         className="rounded-2xl p-6"
         style={{
@@ -239,7 +226,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setShowPasswordDialog(true)}
+                  onClick={() => { setStatusMessage(null); setShowPasswordDialog(true); }}
                   style={{
                     background: 'transparent',
                     borderColor: 'rgba(255, 215, 0, 0.3)',
@@ -296,6 +283,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
       <Dialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
         <DialogContent
+          onInteractOutside={keepDialogOpenForCaptcha}
           className="sm:max-w-md"
           style={{
             background: 'var(--bg-secondary)',
@@ -367,6 +355,11 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                 }}
               />
             </div>
+            {statusTone === 'error' && statusMessage && (
+              <p className="text-sm" role="alert" style={{ color: '#fca5a5' }}>
+                {statusMessage}
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button

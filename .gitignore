@@ -22,3 +22,7 @@ tests/.auth/user.json
 .audit-output/
 .release-output/
 .agent/skills/
+
+# next dev 自动生成的 AI 说明文件；仓库规则只以根目录 AGENTS.md 为准（AGENTS.md 第 12 节）
+apps/web/AGENTS.md
+apps/web/CLAUDE.md

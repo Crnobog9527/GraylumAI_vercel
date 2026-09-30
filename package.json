@@ -22,8 +22,7 @@
     "test:ci:refund-race": "pnpm --filter @repo/api exec vitest run src/services/__tests__/refund1bConsumedAmount.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts",
     "test:ci:billing-cron": "pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/billingReconciliationPermissions.test.ts && pnpm --filter web exec vitest run src/app/api/cron/billing-reconcile/route.test.ts",
     "test:ci:proxy-hostname": "pnpm --filter web exec vitest run src/proxy-hostname.test.ts",
-    "test:ci:safeguards": "node --test scripts/tests/*.test.mjs",
-    "db:push": "node scripts/db-push-guard.mjs"
+    "test:ci:safeguards": "node --test scripts/tests/*.test.mjs"
   },
   "keywords": [],
   "author": "",
@@ -38,22 +37,22 @@
       "@eslint/eslintrc>minimatch": "3.1.4",
       "@sentry/node>minimatch": "9.0.7",
       "ajv@8.17.1": "8.18.0",
-      "brace-expansion@1.1.13": "1.1.18",
-      "brace-expansion@5.0.4": "5.0.9",
+      "brace-expansion@1.1.13": "1.1.21",
+      "brace-expansion@5.0.4": "5.0.12",
       "flatted": "3.4.2",
       "fast-uri": "3.1.8",
       "nanoid": "3.3.18",
-      "postcss": "8.5.18",
+      "postcss": "8.5.23",
       "@esbuild-kit/core-utils>esbuild": "0.25.12",
       "eslint>minimatch": "3.1.4",
       "glob>minimatch": "9.0.7",
-      "next>postcss": "8.5.23",
       "picomatch@2.3.1": "2.3.2",
       "picomatch@4.0.3": "4.0.4",
       "sharp": "0.35.4",
       "terser-webpack-plugin>serialize-javascript": "7.0.3",
       "rollup": "4.59.0",
-      "browserslist": "4.28.7"
+      "browserslist": "4.28.7",
+      "@opentelemetry/instrumentation-http>@opentelemetry/core": "2.8.0"
     }
   },
   "devDependencies": {

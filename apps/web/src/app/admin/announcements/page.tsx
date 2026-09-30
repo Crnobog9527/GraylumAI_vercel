@@ -44,6 +44,8 @@ import {
   getAnnouncementLinkFormValue,
 } from './announcementFormPayload';
 import AnnouncementLinkField from './AnnouncementLinkField';
+import AnnouncementScheduleFields from './AnnouncementScheduleFields';
+import { submitAnnouncementSchedule, toDateTimeLocalValue } from './announcementSchedule';
 
 type AnnouncementType = 'info' | 'warning' | 'success' | 'error' | 'promo' | 'announcement';
 type BannerStyle = 'info' | 'warning' | 'success' | 'error' | 'promo' | 'announcement';
@@ -102,6 +104,7 @@ const tagColorOptions = [
 export default function AdminAnnouncementsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
+  const [startDateError, setStartDateError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     title: '',
     content: '',
@@ -154,11 +157,12 @@ export default function AdminAnnouncementsPage() {
       tag: '',
       tagColor: 'blue',
       priority: '0',
-      startDate: new Date().toISOString().slice(0, 16),
+      startDate: toDateTimeLocalValue(new Date().toISOString()),
       endDate: '',
     });
     createAnnouncement.reset();
     updateAnnouncement.reset();
+    setStartDateError(null);
     setDialogOpen(true);
   };
 
@@ -175,11 +179,12 @@ export default function AdminAnnouncementsPage() {
       tag: announcement.tag || '',
       tagColor: announcement.tag_color || 'blue',
       priority: announcement.priority.toString(),
-      startDate: announcement.start_date ? new Date(announcement.start_date).toISOString().slice(0, 16) : '',
-      endDate: announcement.end_date ? new Date(announcement.end_date).toISOString().slice(0, 16) : '',
+      startDate: toDateTimeLocalValue(announcement.start_date),
+      endDate: toDateTimeLocalValue(announcement.end_date),
     });
     createAnnouncement.reset();
     updateAnnouncement.reset();
+    setStartDateError(null);
     setDialogOpen(true);
   };
 
@@ -205,18 +210,15 @@ export default function AdminAnnouncementsPage() {
       tag: formData.tag || undefined,
       tagColor: formData.tag ? formData.tagColor : undefined,
       priority,
-      startDate: formData.startDate ? new Date(formData.startDate).toISOString() : undefined,
-      endDate: formData.endDate ? new Date(formData.endDate).toISOString() : undefined,
     };
 
-    if (editingAnnouncement) {
-      updateAnnouncement.mutate({
-        id: editingAnnouncement.id,
-        ...payload,
-      });
-    } else {
-      createAnnouncement.mutate(payload);
-    }
+    setStartDateError(submitAnnouncementSchedule({
+      form: formData,
+      editing: editingAnnouncement,
+      base: payload,
+      create: createAnnouncement.mutate,
+      update: updateAnnouncement.mutate,
+    }));
   };
 
   const handleToggleActive = (announcement: Announcement) => {
@@ -658,27 +660,11 @@ export default function AdminAnnouncementsPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label style={{ color: 'var(--text-secondary)' }}>开始时间</Label>
-                <Input
-                  type="datetime-local"
-                  value={formData.startDate}
-                  onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
-                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label style={{ color: 'var(--text-secondary)' }}>结束时间 (可选)</Label>
-                <Input
-                  type="datetime-local"
-                  value={formData.endDate}
-                  onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
-                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
-                />
-              </div>
-            </div>
+            <AnnouncementScheduleFields
+              value={formData}
+              onChange={(schedule) => setFormData({ ...formData, ...schedule })}
+              startError={startDateError}
+            />
           </div>
 
           <DialogFooter>

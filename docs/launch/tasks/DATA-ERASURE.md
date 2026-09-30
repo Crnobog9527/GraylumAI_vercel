@@ -122,6 +122,7 @@ Auth 账号在对象已删、关系已安全处理后通过受控 Auth 删除接
 | 删除标记 | 需防晚到写入/被财务引用的对象有 `deleted_at timestamptz NULL`、`deletion_request_id` 和单调 `version`（复用已有版本字段）；默认未删。deleted_at 一经写入不可恢复，子任务创建及提交均检查父对象和来源删除状态 |
 | 内容约束 | `deleted_at IS NOT NULL` 时普通正文列必须 NULL/约定空值；未决最小证据只能放在受限核对载荷，不留在普通内容列。父 tombstone 保留到全部工作进程失效且依赖清完，随后可物理删除 |
 | 写入与读取 | RLS + 服务端所有权；新建、读、搜索、导出、采用、重放、整理写回与结果提交同样检查删除。不存在的父对象和已删除对象均 fail closed，旧 request ID 返回“已删除”而非重建 |
+| 注销封闭（PR-A 起） | 凡是给 `authenticated` 授权（表级或列级）的新 public 表，必须开 RLS，并在同一迁移里加限制性策略 `account_open_required`（`AS RESTRICTIVE FOR ALL TO authenticated USING/WITH CHECK (NOT (SELECT public.current_account_is_closed())))`）；以后才对已有表授权的迁移同样要加：凡是后续迁移才给 `authenticated` 授权的表，都必须在同一个迁移里补上 `account_open_required`。0148 第 8b 步就是一例：从文件建库时，有 8 张表的 `authenticated` 授权晚于 0147 才到位，0148 在授权之后按 0147 的同一规则补上。`packages/db/tests/account-open-policy-audit.sql` 是只读审计，应返回 0 行，本机随 `run-account-erasure-close.mjs` 运行，也可在 staging 只读执行；DB-BASELINE 的空库重放（`packages/db/tests/run-db-baseline-replay.mjs`）最后会运行它，结果不是 0 行就失败。`profiles` 例外，因为服务端要读出已注销状态 |
 | 历史保护 | 不加整表永不允许 DELETE 的触发器。正常历史不可变可用列级保护，但保留窄擦除和到期清理通道；不能让 UPDATE 清正文仍被不可变 guard 阻挡 |
 | 衍生引用 | 记录所用源对象/版本 ID，不只存副本/hash。多源笔记/画像任一来源删除，原系统副本停用并清除；以后重新整理须在新的有效来源上，不自动收费重建 |
 | 同意用途 | AC-5 的 consent version、purpose、granted/revoked_at 与案例来源 ID 可审计，正文独立；默认 false；进入案例时、读取时、消费时服务端复核当前同意及未删除状态 |
@@ -143,7 +144,7 @@ Auth 账号在对象已删、关系已安全处理后通过受控 Auth 删除接
 
 **防刷**：原要求的“不可逆账号标识”不应实现为裸 SHA256(email)，可被猜测。采用独立密钥的 HMAC 对规范化邮箱及 `issuer + subject` 生成摘要（有哪类身份就记录哪类），记录用途、密钥版本、首次赠送事实和到期条件；只做相等匹配，不保存原文、不用于画像。邮箱标准化沿认证规则，不擅自合并点号/别名；OAuth 不用昵称作身份。E3 已批准两类标识在开户赠送规则存在期间保留，规则取消后清除；密钥部署属于以后另批配置。摘要仍可关联，密钥持有者可验证候选，**不能承诺绝对不可逆或完全匿名**。注册赠送在同一原子边界查摘要与发放，重注册并发也只能领一次；不改变其他合法购买/退款权利。
 
-**订阅与未完成退款**：展示有效订阅、续费状态、在途支付/退款和未决预扣。允许申请注销；二次确认后立即不能登录和使用，包括剩余已付权益。若订阅仍生效，先在原渠道停止续费并核实成功，再在未决账务处理完后完成注销；Waffo 订单不送 Stripe 重试（Master Plan D17）。停止续费结果不明时先核对远端状态，不能把本地标记当成功，也不能盲目重复请求。无关私有内容仍按二次确认起 24 小时清除。
+**订阅与未完成退款**：展示有效订阅、续费状态、在途支付/退款和未决预扣。**Owner 2026-09-30 决定（见 E4）：账号有自动续费订阅时不允许提交注销**，页面提示先在客户门户自行取消续费，服务端确认时再次检查；不新增服务端取消订阅的调用。已取消续费的订阅允许申请注销；二次确认后立即不能登录和使用，包括剩余已付权益。若订阅仍生效，先在原渠道停止续费并核实成功，再在未决账务处理完后完成注销；Waffo 订单不送 Stripe 重试（Master Plan D17）。停止续费结果不明时先核对远端状态，不能把本地标记当成功，也不能盲目重复请求。无关私有内容仍按二次确认起 24 小时清除。
 
 **积分作废与手动退款**：Owner 2026-09-29 决定及同日补充：订阅和积分包付费成功后默认不退款；注销前必须提示剩余积分作废。Owner 可逐笔人工判定并批准手动退款；本设计不新增自动退款、不代 Owner 判断例外。手动退款沿用既有退款、账务和原支付渠道，结果不明先核对、不重试；注销前已获批准且仍在处理的退款属于 E4 未决账务，完成后才完成注销。余额原数字作为不可消费的财务占位按 E2 留 3 年，实际退款照既有流水记录。购买退款的商业规则不取消 BILL2 对已证实故障/未派发调用的预扣恢复和对账义务，也不把注销或未知结果当故障退款理由。条款文字、法律适用及例外个案判断仍由 Owner 另行处理；本文不引用其他应用条款。
 
@@ -158,7 +159,7 @@ Auth 账号在对象已删、关系已安全处理后通过受控 Auth 删除接
 | E1 | 二次确认后立即注销 / 3、7、14 天冷静期；原提案推荐 7 天 | 原提案为防误删；Owner 改选二次确认，§2/§8 按最新决定执行 | 重新验证身份并二次确认后立即封闭登录和使用，进入清除流程；无冷静期、无撤销 |
 | E2 | 3 年 / 原提案暂拟 7 年 / 专业意见指定其他期限 | BILL2 要求可对账；[S10] 列不同记录期限，不能套成 Graylum 法定义务；[S5/S6] 支付商期限也不等于我方期限 | `T_fin` 为对应交易年度结束起 3 年；具体单笔保全按 §3.3 记录并复核 |
 | E3 | 邮箱摘要 / 推荐邮箱 + OAuth issuer/subject 摘要；1 年 / 推荐开户赠送存在期间 | 覆盖两类登录、防反复注销领赠送；摘要仍可关联；原防刷要求及 §8 技术边界 | 采用邮箱和第三方登录加密摘要，在开户赠送规则存在期间保留 |
-| E4 | 完全阻止申请 / 推荐允许申请，停止续费并清未决账务后完成 / 立即终止订阅 | 避免继续扣费及丢失未决账务；原渠道按 Master Plan D17，外部保留见 [S5/S6] | 允许申请，确认后立即封闭账号；原渠道停止续费、处理完未决账务后完成注销，无关私文照删 |
+| E4 | 完全阻止申请 / 推荐允许申请，停止续费并清未决账务后完成 / 立即终止订阅 | 避免继续扣费及丢失未决账务；原渠道按 Master Plan D17，外部保留见 [S5/S6] | 允许申请，确认后立即封闭账号；原渠道停止续费、处理完未决账务后完成注销，无关私文照删。**Owner 2026-09-30 决定：有自动续费时须先自行取消**——有自动续费订阅时不允许提交注销，影响预览提示并给出现有客户门户入口，服务端确认时再检查；不新增 Stripe 服务端调用。Waffo 接入时按同一规则 |
 | E5 | 总控补列：推荐注销前提示积分作废、可退范围先申请 / 其他退费方案 | 注销后积分不可消费，须明确结果；[0044][m0044]、[0053][m0053]、[0057][m0057] 与 BILL2 保护原来源/一次终态；不作法律判断 | 注销前提示积分作废；付费订阅及积分包默认不退款，**同日补充：Owner 可逐笔批准手动退款**。原渠道处理，不新增自动退款；已批准未完成退款先处理。余额原数字不可使用，留至 E2 到期 |
 | E6 | 只删未使用案例 / 推荐连可定位的已使用案例也删；审计 90 天 / 推荐 1 年 / 专业意见指定 | D5 默认不参与、人工改进；减少私有副本，审计仅时间/用途/状态，无正文 | 可定位到个人的已使用案例也删；同意审计在撤回或注销触发撤回后留 1 年；不可回溯的通用经验/汇总可留 |
 | E7 | 日志 7 / 推荐 30 天；备份 7 / 推荐最多 30 天 | [S7/S8/S9] 平台窗口有差异；当前套餐、转存、SMTP 未核验，不能把公开说明当配置证据 | 日志最多 30 天、备份最多 30 天，实施时逐副本确认；超出再请 Owner 决定 |
@@ -200,6 +201,48 @@ AC-2 实现须引用最终审查通过的本文版本；本设计不是运行注
 | T18 | 全部入口与访问者 | owner/跨用户/anon/后台普通角色/服务端清理角色分别测试；列表、详情、搜索、导出、历史、重放、采用、下载、财务恢复和新派发权限分开验证 |
 
 实现 PR 记录 exact head、命令、测试环境和 PASS/FAIL/BLOCKED/NOT_RUN；文件检查/CI 不等于上表产品功能验收。正式供应商删除/对账、真实费用、生产执行须各自授权；本设计不借测试名义执行。最终需要相关验证、全部 required CI/Security、总控及最终 head Codex 审查，并完成第 9 节决定。
+
+## 实施核对（2026-09-30，staging `cbc5ccdc`，迁移至 0145）
+
+实现开始前按当前 staging 代码、迁移和总控 2026-09-30 只读核对的 staging 目录重新核对，以下更正优先于正文和附录 A 的旧描述：
+
+- 0140–0145 只改授权/RLS，没有新表、外键或触发器；第 4 节列的保护触发器函数均未改动。`artifact_immutable` 现挂在 0066、0069、0070、0080、0082、0083、0107（3 处）、0113、0114、0117（4 处）、0126，实现须全部覆盖。
+- 指向 `profiles` 的外键（staging 实际）：**CASCADE** = billing_history、conversations、invitations.created_by、subscription_credit_grants、token_stats、user_checkins、user_subscriptions；**SET NULL** = ai_usage_logs、announcements.created_by、application_logs、credit_transactions、invitation_records（两端）、invitations.used_by、modules.created_by、payment_orders、prompts.created_by、ticket_replies、tickets、user_activity_logs（两端）；其余均为 NO ACTION。**payment_orders 不会随 profile 级联删除**（0012 只有 user_subscriptions 级联）；credit_transactions、payment_orders 删 profile 会丢失账号关联，同样不可接受。
+- `profiles` 没有指向 `auth.users` 的外键；`auth.users` 和 `profiles` 上都没有自定义触发器（无 handle_new_user）。资料由 API `ensureProfile` 创建并发放开户积分。
+- 16 张核心表仍无迁移 CREATE，由 DB-BASELINE 补 `0000` 基线；在它完成前 **T01 为 BLOCKED**，外键改造按数据库目录动态查找约束，不按名称猜测。
+- 服务端角色现无清除所需的表级权限（工单、邀请、行为日志、资料列等）；清除统一走只授予服务端执行的 SECURITY DEFINER 函数，不放宽表授权。
+- 现有代码：无注销/擦除功能；`profiles` 已有 `status`、`is_deleted`、`deleted_at`；BILL2 prepare/dispatch 与 OPC/成果多数入口已要求 `status='active' AND is_deleted='false'`，而 record/close/cancel/finalize 不要求，注销后在途调用仍可结算。存储桶只有 `ticket-attachments`，头像无存储对象。支付代码无 Waffo；Stripe 取消续费只经客户门户，退款人工处理后由 webhook 对账。
+- 旧 `/chat` 不再新做单条删除入口（总控 2026-09-30 同意），其数据由账号注销覆盖。
+- Storage（2026-09-30 核对）：客户端代码没有任何 Storage 调用；上传只经服务端 `/api/upload`（PR-A 起拒绝非 active 账号），读取只经服务端生成的 30 分钟签名地址，而签名地址只在登录后接口里生成（已注销账号被拒）。`storage.objects`/`storage.buckets` 开了 RLS 且策略数为 0（总控 2026-09-29 只读核查，#506），客户端用 JWT 直接调 Storage API 会被默认拒绝，所以 PR-A 不在 `storage.objects` 上加策略；该表属于 `supabase_storage_admin`，迁移角色也不该改它。注销前已签发的地址最长 30 分钟后失效，附件对象由 PR-C 删除。以后如果给 Storage 加客户端策略（LIB-DOCS），必须同时加注销限制条件。
+
+### 实现拆分与后续事项
+
+PR-A 封闭账号 → B1 内容擦除通道 → B2 账务擦除通道与受限结算 → C 清除执行与外键改造 → D 单条删除；E 防刷在 A 之后并行。
+
+PR-B1a（0149，artifact / agent / research / opc 表）的擦除通道：
+- **只用于已注销账号**：`account_erasure_scrub_content(p_profile_id)` 要求账号已经在 `account_erasure_requests` 里，否则拒绝执行（`ACCOUNT_ERASURE_NOT_CLOSED`）。正文清成 NULL 之后，有十几处重放和冲突检查用 `<>` 比较，结果会被 NULL 跳过；runtime 的"只在已有值时拒绝"会被重新写入；还有若干读取路径会"返回空内容"而不是"拒绝读取"。这些只有在账号还能使用时才会被触发。**单条删除（D7）上线前，PR-D 必须先把这些改成对 `erased_at` 显式拒绝。**
+- 做法：26 张表加 `erased_at`；按目录动态找出引用可擦除列的 CHECK，改写成"已擦除或满足原规则"；NOT NULL 的正文列改成可空，加"未擦除必须有值""已擦除必须为空"两条约束。`artifact_immutable` 和另外三个保护函数通过触发器参数拿到每张表的白名单，只放行"未擦除 → 已擦除、白名单列清空（或改成规定的占位值）、其他列一字不变"这一种 UPDATE；已擦除的行不能再改，DELETE 仍然一律拒绝。可变表加 `erased_row_guard`。`packages/db/tests/erasure-constraint-audit.sql` 是只读审计，应返回 0 行。
+- 壳里保留：id、时间、归属主体、状态、版本号、平台 Skill 的 package / workflow / template hash（这些不是用户内容）。账务键保留：成果生成 result 里的 credits / inputTokens / outputTokens / costUsd，研究调用 result 里的 cost；`provider_observations` 由 PR-B2 按账务白名单处理。账号类唯一值（opc_accounts.account_key、artifact_projects.account）改为 `erased:<id>`，不会互相冲突。
+- **由正文算出来的 hash 一并清除**：content_hash、report_hash、source_hash、input_hash、agent_preference_requests.payload_hash（整行删除）。短文本的 hash 可以用猜测去比对原文，按附录 A 属于"可关联内容指纹"，不能保留。唯一保留的是 `research_operations.identity_hash`：它是研究调用计费的幂等键，按 §3.1 属于受限财务证据，客户端不能读取，保留到 T_fin 到期；它不是用来恢复内容的，也不公开。
+- 在途的行不清：成果生成不是 succeeded/refunded 的、研究调用不是 succeeded/failed/cancelled 的，以及还有未清调用的研究计划，都先跳过并计数。**这些行要等 PR-B2**：现有的结算函数（artifact_generation、artifact_reject_generation、artifact_observe_generation、research_transition、research_user_charge、research_cancel）一开头就检查 `status='active' AND is_deleted='false'`，所以已注销账号的在途生成和研究调用现在无法结算，也无法退款，要靠 PR-B2 的受限结算路径才能走到终态。PR-C 的重试任务在这之后才清得掉这些行，**所以 PR-C 必须排在 PR-B2 之后**。
+- 界面状态类、偏好、账号绑定这 6 张没有被任何外键引用的表，直接删行（opc_work_ui / opc_account_ui / opc_publication_ui / agent_confirmed_preferences / agent_preference_requests / artifact_accounts）。其余表只留下没有正文的壳，物理删除由 PR-C 做。
+- runtime_* 和旧对话表在 PR-B1b。
+
+PR-B1b（0150，runtime / 旧对话表）的擦除通道：
+- 复用 0149 的 `erased_row_guard` 和目录约束改写，覆盖 7 张 runtime 表以及 conversations、messages、conversation_context_snapshots、ordinary_chat_requests；服务端调用 `account_erasure_scrub_runtime(p_profile_id)`，同样要求 `account_erasure_requests` 已有记录。依赖边没有正文，用显式 `marker-only` 规则只写 `erased_at`；空白名单仍拒绝，其他列及已擦除行不可改。
+- runtime 的 payload、结果、历史、工具参数和结果、scope/material 全清，`runtime_scope_material.content_hash` 一并清掉。complete / checkpoint / tool complete 会尝试回填 NULL，守卫拒绝这种写入。`bill2_runs` 全部列（包含 `session_ref`）不动；解绑归 PR-B2。只有 completed/cancelled 且对应 run 已 closed、settled/refunded（或没有 run）的执行可清；依赖边等两端，会话和 material 等该会话全部执行，锁忙的父行也跳过并计数。
+- 旧对话的标题、摘要、消息正文及上下文快照清空；`is_deleted` / `deleted_at` 软删除事实不变。skill 模式消息的已有 guard 仅给合法单向擦除放行；conversations 的客户端 UPDATE 写入 `erased_at` 时要求账号已注销，INSERT 一律不能直接创建已擦除行。ordinary 请求只清 succeeded/failed，正文和 `writer_token` 派发凭证一并清空，未擦除请求仍须保留凭证；reservation / billing_result 仅保留迁移列明的财务键；共享会话内容等普通请求及成果生成都到终态。
+- 不做物理删除，不放宽表授权。两个 conversation DELETE guard 返回 NULL 时，必须检查行仍存在，不能把影响 0 行当成功。回退含总控给出的 staging 函数原文；已有擦除行就拒绝执行。PR-C 仍排在 PR-B2 之后；PR-D 仍须先补读取和重放对 `erased_at` 的显式拒绝，不能把账号注销通道直接用于单条删除。
+- **旧对话准入关闭**：按总控在 #537 的 P1 决定，0150 撤销 `service_role` 对 `ordinary_chat_claim(uuid,uuid,jsonb,uuid)` 的执行权限，回退恢复；不改函数体，不影响已有请求的 `ordinary_chat_transition`。应用层继续保持旧聊天关闭；REVOKE 不终止已进入函数的事务，擦除前由下述事务屏障确认旧事务排空，不能把一次正文扫描当成阻止晚到写入。
+- **事务屏障（总控 #537 决定）**：0150 同时给 `account_erasure_scrub_runtime` 和已合并的 `account_erasure_scrub_content` 加前置只读屏障，不改 0149 文件、不改准入或财务函数。在确认已注销后，以调用屏障时的 `clock_timestamp()` 为 cutoff，仅允许 READ COMMITTED；自检统计权限、清统计快照，仅从 datid 为当前库或 NULL 的 activity 行检查其他事务并提取候选 pid，再按原顺序检查虚拟事务锁及本库 prepared transactions。其他数据库的长事务不能阻塞本库清除，datid NULL 的 worker 保留保守判断。client 仍只放行有统计权限且明确 `idle + xact_start NULL` 的事务外连接（开始于 cutoff 之后的已知状态事务沿用原规则）。对具名非 client 且 state NULL 的后台进程，六参数纯函数只在 xact_start/xid/xmin 全空时列为候选；取得候选 pid 后再查 `pg_locks`，仍持有 granted virtualxid ExclusiveLock 就拒绝，不能仅凭两个空标识认定事务结束。其他未知、disabled 或不可见均拒绝。排除纯维护进程和 pg_cron launcher，保留 pg_net、cron job、parallel、逻辑复制工作进程及未知类型。未通过返回 `{"retry":true,"reason":"transactions_pending"}`，不改内容也不返回 skipped 计数；PR-C 必须稍后新事务重试，不能将其视为成功。另保守拒绝 confirmed_at 不早于调用事务起点的请求，保证同事务（含子事务）注销不能立即擦除；比并发确认更早开始的调用也须重开事务重试。该时间比较不是提交证明，不能替代 activity/prepared 屏障。长事务/后台 worker 可能延迟清除，不能取消它们来假造完成。
+- **无 active 检查的晚到 INSERT**：0150 的父对象 guard 对 messages/context snapshots 的新 INSERT 取 conversation SHARE 锁，与擦除的 UPDATE 锁互斥；父会话已擦除则拒绝。既有擦除行仍禁止回填；snapshots ACL 不变，权限拒绝和 guard 拒绝分别测试。在途 ordinary 请求仍保留 token、共享内容计 skipped，完成后再清除。
+- **PR-B2/C 必测：旧结算与内容擦除顺序**：直接 `atomic_finalize_ai_success/abort` 不强制关联 ordinary request，不能宣称现有 skipped 规则已覆盖。向已擦除会话插消息会被父 guard 拒绝，整个原子结算回滚，预扣保留 pending。B2/C 必须验证先完成/核对适用的旧账务再擦除会话，并验证拒绝时没有部分扣费或退款；不能吞掉 INSERT 后继续结算。本 PR 不改财务函数，不实现受限结算。旧 HTTP 聊天和 claim 新准入均已关闭，不应再产生新 legacy 请求；failure 不写 messages，仍按 B2 财务/日志路径处理。
+- **PR-C/PR-D 删除顺序**：`conversation_context_snapshots.source_message_start_id/end_id` 的 ON DELETE SET NULL 会内部执行 UPDATE，被已擦除快照的 guard 拒绝。须先删快照再单独删消息，或者只按整个会话删除；两条路径都要验证实际删除结果。0149 注释的“DELETE stays possible”仅指 guard 本身不拦 DELETE，并不保证外键引发的 UPDATE 能通过；历史迁移保持原文，此处及 0150 注释予以澄清。
+- **PR-B2/C 终态推进**：即使对应 run 已 settled/refunded 且 closed，仍停在 interrupted/cost_pending 的执行及其会话也会一直被跳过。B2 的受限恢复须把执行推进 completed/cancelled，C 随后重试清除；不能仅凭 run 已结算就报告内容清除完成。
+
+PR-A 留给后续 PR 的必做事项：
+- **在途预扣（PR-B2 必须处理）**：注销时仍在途的 BILL2 run 可以照常结算（record/close/cancel/finalize 不检查账号状态），但 0137 的 `bill2_revoke_unstarted_dispatch` 会先调用 `bill2_actor`，已注销账号会被拒。所以"已授权派发但从未发出"的预扣，要等 PR-B2 的受限结算路径才能释放；在此之前只是占着，不会丢失。
+- **SECURITY DEFINER 函数（PR-A 起逐个分拣）**：这类函数以属主身份执行，绕过 RLS，`account_open_required` 拦不住已注销账号未过期的 JWT。`packages/db/tests/account-open-definer-audit.sql` 列出客户端可执行的这类函数：会写用户数据或改积分的，要在函数里加"已注销则拒绝"；只读或本身已检查 `status='active'` 的，要写明理由。以后新增的这类函数，同样要遵守这条。2026-09-30 在 staging 只读执行的结果：客户端能执行的共 4 个，属主都是 postgres。`claim_daily_checkin(uuid)`（加积分）和 `soft_delete_conversation(uuid,uuid)`（改会话）已在 0147 加检查，函数体以 staging 原文为准，只加了检查；`validate_invitation_code(text)` 只读，且已检查 `status='active'`，豁免；`rls_auto_enable()` 是平台的事件触发器函数，不能直接调用，豁免。延后另立：A.1 第 8 步财务到期清理、T16 备份恢复演练、附录 B/C 的日志/备份保留期核对与第三方删除申请、Waffo 接入后的"先取消续费"规则。
 
 ## 附录 A：逐表清单与外键删除顺序
 
@@ -300,6 +343,7 @@ AC-2 实现须引用最终审查通过的本文版本；本设计不是运行注
 | system_settings ([0002][m0002]) | P 共享系统配置；不保留用户内容 | 基线定义缺失，须补证；审计引用脱敏后保留配置 |
 | credit_packages ([0002][m0002]、[0012][m0012]) | P 套餐定价；不是私人内容 | payment_orders 套餐引用保留；不因注销删除共享套餐 |
 | membership_plans ([0002][m0002]、[0009][m0009]、[0012][m0012]) | P 会员共享配置 | 订阅引用保留；不因注销删除共享权益，基线仍须补证 |
+| account_erasure_requests（PR-A 新增） | M 注销进度：请求 ID、阶段、时间、错误码、重试次数；不含正文、邮箱、文件名 | 引用 profiles（RESTRICT）；随财务占位到期、在 profiles 之前删除；存在时 profiles 的 status/is_deleted/deleted_at 不可回退 |
 
 
 ### A.1 可以据此实施的分阶段顺序

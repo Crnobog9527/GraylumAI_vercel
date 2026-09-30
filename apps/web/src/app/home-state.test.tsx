@@ -1,11 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-const state = vi.hoisted(() => ({ catalog: {} as Record<string, unknown>, library: {} as Record<string, unknown> }));
-vi.mock('@/trpc/client', () => ({trpc:{user:{getUserProfile:{useQuery:()=>({data:{nickname:'Fixture',membership_level:'free'}})}},opc:{catalog:{useQuery:()=>state.catalog},library:{useQuery:()=>state.library}}}}));
+const state = vi.hoisted(() => ({ catalog: {} as Record<string, unknown>, library: {} as Record<string, unknown>, profile: {} as Record<string, unknown> }));
+vi.mock('@/trpc/client', () => ({trpc:{user:{getUserProfile:{useQuery:()=>state.profile}},opc:{catalog:{useQuery:()=>state.catalog},library:{useQuery:()=>state.library}}}}));
 vi.mock('@/hooks/use-credits',()=>({useCreditsBalance:()=>({status:'ready',credits:100})}));
 import HomePage from './page';
 beforeEach(()=>{
+ state.profile={data:{nickname:'Fixture',membership_level:'free'},isError:false};
  state.catalog={isSuccess:true,isPending:false,data:[],error:null,refetch:vi.fn()};
  state.library={isSuccess:true,isPending:false,data:{businesses:[]},error:null,refetch:vi.fn()};
 });
@@ -30,4 +31,13 @@ it.each(['PRECONDITION_FAILED','FORBIDDEN','SERVICE_UNAVAILABLE','INTERNAL_SERVE
 it('renders workflow steps only from a successful catalog response',()=>{
  state.catalog={...state.catalog,data:[{workflow:{steps:[{id:'one',title:'认识自己'},{id:'two',title:'找到受众'}]}}]};
  const html=renderToStaticMarkup(<HomePage/>);expect(html).toContain('二个环节');expect(html).toContain('认识自己');expect(html).toContain('找到受众');
+});
+it('does not claim a membership level or placeholder name when the profile read fails',()=>{
+ state.profile={data:undefined,isError:true};
+ const html=renderToStaticMarkup(<HomePage/>);
+ expect(html).toContain('账户信息读取失败');expect(html).not.toContain('普通会员');expect(html).not.toContain('会员账户');expect(html).not.toContain('欢迎回来，用户');
+});
+it('shows the real name and membership when the profile is read',()=>{
+ const html=renderToStaticMarkup(<HomePage/>);
+ expect(html).toContain('欢迎回来，Fixture');expect(html).toContain('普通会员');
 });

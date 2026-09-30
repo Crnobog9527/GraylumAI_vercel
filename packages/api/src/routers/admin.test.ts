@@ -606,6 +606,7 @@ describe('adminRouter performance stats aggregation', () => {
       avgResponseTime: 200,
       p95ResponseTime: 300,
       errorRate: 33.33,
+      cacheHitRate: 7.7,
       healthStatus: 'critical',
     });
     expect(result.modelUsage).toEqual(
@@ -1470,6 +1471,7 @@ describe('adminRouter credit adjustments', () => {
       previousCredits: 100,
       newCredits: 125,
       adjustment: 25,
+      auditRecorded: true,
     });
   });
 
@@ -1517,6 +1519,7 @@ describe('adminRouter credit adjustments', () => {
       previousCredits: 100,
       newCredits: 60,
       adjustment: -40,
+      auditRecorded: true,
     });
   });
 
@@ -1557,6 +1560,7 @@ describe('adminRouter credit adjustments', () => {
       previousCredits: 30,
       newCredits: 0,
       adjustment: -30,
+      auditRecorded: true,
     });
   });
 
@@ -1612,6 +1616,7 @@ describe('adminRouter credit adjustments', () => {
       previousCredits: 0,
       newCredits: 0,
       adjustment: 0,
+      auditRecorded: true,
     });
   });
 

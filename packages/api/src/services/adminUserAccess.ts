@@ -31,17 +31,23 @@ export type AdminActivityEntry = {
 
 /**
  * Best-effort audit record written after the primary admin action succeeded.
- * A failure is logged and never retried by repeating the primary action.
+ * A failure is logged and reported to the caller as `false`; the primary action is never repeated.
  */
 export async function recordAdminActivity(
   client: SupabaseClient<any, 'public', any>,
   entry: AdminActivityEntry,
-) {
-  const { error } = await client.from('user_activity_logs').insert(entry);
-  if (error) {
-    logger.error('security', 'admin_activity_log_write_failed', {
-      actionType: entry.action_type,
-      code: error.code ?? null,
-    });
+): Promise<boolean> {
+  let code: string | null = null;
+  try {
+    const { error } = await client.from('user_activity_logs').insert(entry);
+    if (!error) return true;
+    code = error.code ?? null;
+  } catch {
+    code = 'thrown';
   }
+  logger.error('security', 'admin_activity_log_write_failed', {
+    actionType: entry.action_type,
+    code,
+  });
+  return false;
 }

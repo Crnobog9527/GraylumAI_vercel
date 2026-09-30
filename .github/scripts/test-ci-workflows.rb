@@ -15,8 +15,9 @@ class CIWorkflowsTest < Minitest::Test
            'unit-check'=>['Unit Tests',{'WORK_RESULT'=>'test','INTEGRATION_RESULT'=>'integration'}],
            'security-unit-tests'=>['Security Unit Tests','test'],
            'build'=>['Build Check','build-and-e2e'], 'security-e2e-tests'=>['Security E2E Tests','build-and-e2e']}.freeze
-  INTEGRATION_RUNS = ['node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app',
-                      'node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app'].freeze
+  INTEGRATION_RUNS = ['node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files',
+                      'node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files',
+                      'node packages/db/tests/run-db-baseline-replay.mjs --ci --after packages/db/tests/baseline/credit-guard-paths.sql'].freeze
   def test_required_context_names_unique
     names = [@ci, @security].flat_map { |w| w.fetch('jobs').values.map { |j| j.fetch('name') } }
     (GATES.values.map(&:first) + ['Dependency Audit','Code Security Scan','Workflow Policy Check','Secret Scan']).each do |name|
@@ -53,7 +54,7 @@ class CIWorkflowsTest < Minitest::Test
     assert_operator runs.index('pnpm install --frozen-lockfile'), :<, runs.index(INTEGRATION_RUNS.first)
     pull = steps.index { |step| step['name'] == 'Pull pinned service images' }
     refute_nil pull
-    assert_operator pull, :<, steps.index { |step| step['run'] == INTEGRATION_RUNS.first }
+    INTEGRATION_RUNS.each { |command| assert_operator pull, :<, steps.index { |step| step['run'] == command }, command }
     assert_includes steps[pull]['run'], 'packages/db/tests/v3/images.mjs'
     steps.each do |step|
       refute step.key?('if'), step['name']
@@ -62,8 +63,8 @@ class CIWorkflowsTest < Minitest::Test
     end
     images = File.read(File.expand_path('../packages/db/tests/v3/images.mjs', ROOT), encoding: 'UTF-8')
     assert_equal 3, images.scan(/"[^"@]+:[^"@]+@sha256:[0-9a-f]{64}"/).length
-    %w[run-workbench.mjs run-local.mjs].each do |runner|
-      source = File.read(File.expand_path("../packages/db/tests/v3/#{runner}", ROOT), encoding: "UTF-8")
+    %w[v3/run-workbench.mjs v3/run-local.mjs run-db-baseline-replay.mjs].each do |runner|
+      source = File.read(File.expand_path("../packages/db/tests/#{runner}", ROOT), encoding: "UTF-8")
       refute_match(/postgres:\d|postgrest:v|gotrue:v/, source, runner)
     end
   end
@@ -105,8 +106,16 @@ class CIWorkflowsTest < Minitest::Test
     end
     refute @ci['jobs'].key?('scope')
     assert_equal 1, runs.count('node scripts/check-code-size.mjs')
-    assert_includes @ci['jobs']['lint-and-type']['steps'].map { |step| step['run'] }, 'node scripts/check-code-size.mjs'
+    lint_runs = @ci['jobs']['lint-and-type']['steps'].map { |step| step['run'] }
+    assert_includes lint_runs, 'node scripts/check-code-size.mjs'
+    ['pnpm --filter web lint', 'pnpm --filter @repo/api lint', 'pnpm --filter @repo/api typecheck',
+     'node scripts/check-api-type-baseline.mjs'].each do |command|
+      assert_equal 1, runs.count(command), command
+      assert_includes lint_runs, command
+    end
     steps = @ci['jobs']['test']['steps']
+    safeguards = steps.find { |step| step['run'] == 'pnpm test:ci:safeguards' }
+    assert_equal 'CI safeguards — migration ledger and database baseline', safeguards.fetch('name')
     contract_index = steps.index { |step| step['run'] == 'ruby .github/scripts/test-ci-workflows.rb' }
     install_index = steps.index { |step| step['run'] == 'pnpm install --frozen-lockfile' }
     refute_nil contract_index

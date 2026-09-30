@@ -22,7 +22,7 @@
 | `admin.getPromptsDashboard` | 模块列表、统计与分页数据 | 模块页读取入口 |
 | `admin.removePrompts` | `{ids: UUID[]}` → `{success: true, deletedIds: UUID[]}` | 1–100 个输入 ID，去重，一条原子 DELETE；返回实际删除的 ID |
 | `admin.removePrompt` | `{id: UUID}` | 保留的单条删除兼容接口 |
-| `admin.deletePrompt` / `admin.batchDeletePrompts` | 单条/批量 ID | 历史命名，实际执行下架 |
+| `admin.batchDeletePrompts` | 批量 ID | 历史命名，实际执行下架；模块页的单条删除调用 `admin.removePrompts` |
 
 空的主力/辅助模型值 `''` 表示清除该覆盖配置；非空值必须为启用的 `ai_models.id`。`ai_models.model_id` 是供应商标识，不可替代数据库 ID。整理模型还需满足独立可用性校验；未配置或运行时不可用时保留原成果，不改用主力模型。整理输出上限为 128–4096 tokens。
 

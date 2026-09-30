@@ -3,6 +3,7 @@ import { runtimeRouter } from './routers/runtime';
 import { workbenchRouter } from './routers/workbench';
 import { agentSliceRouter } from './routers/agentSlice';
 import { router } from './trpc';
+import { mentorBudgetRouter } from './routers/mentorBudget';
 import { chatRouter } from './routers/chat';
 import { userRouter } from './routers/user';
 import { creditsRouter } from './routers/credits';
@@ -19,6 +20,7 @@ import { diagnosticsRouter } from './routers/diagnostics';
 import { costsRouter } from './routers/costs';
 import { paymentsRouter } from './routers/payments';
 import { skillsRouter } from './routers/skills';
+import { accountRouter } from './routers/account';
 
 /**
  * 主路由器
@@ -33,6 +35,7 @@ export const appRouter = router({
   settings: settingsRouter,
   model: modelRouter,
   modelReasoning: modelReasoningRouter,
+  mentorBudget: mentorBudgetRouter,
   invitation: invitationRouter,
   checkin: checkinRouter,
   admin: adminRouter,
@@ -46,6 +49,7 @@ export const appRouter = router({
   agentSlice: agentSliceRouter,
   runtime: runtimeRouter,
   opc: opcRouter,
+  account: accountRouter,
 });
 
 /**

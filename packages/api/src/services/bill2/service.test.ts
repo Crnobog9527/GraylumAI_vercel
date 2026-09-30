@@ -17,7 +17,7 @@ it.each([{state:'refunded',chargedCredits:0},{state:'settled',chargedCredits:0},
  const api=authoritativeBilling({admin:{rpc:async()=>({data:state,error:null})},actor:async()=>randomUUID(),adapter:localFixtureAdapter('http://127.0.0.1:1'),rebateClient:{}});await api.finalizeRun(randomUUID());expect(rebate).not.toHaveBeenCalled();
 });
 it('does not consume a bounded recovery claim when its full lookup cannot fit',async()=>{
- const {createRuntimeBudget}=await import('../runtime/budget');let clock=0;const budget=createRuntimeBudget(()=>clock);clock=211_000;
+ const {createRuntimeBudget}=await import('../runtime/budget');let clock=0;const budget=createRuntimeBudget(()=>clock);clock=221_000;
  const rpc=vi.fn(async(_name:string,_args:Record<string,unknown>)=>({data:[randomUUID()],error:null})),lookup=vi.fn();
  await authoritativeBilling({admin:{rpc},actor:async()=>randomUUID(),adapter:{dispatch:vi.fn(),lookup},budget}).recoverReceipts(randomUUID());
  expect(rpc.mock.calls.map(call=>call[0])).toEqual(['bill2_pending_calls']);expect(lookup).not.toHaveBeenCalled();
@@ -30,7 +30,7 @@ it.each(['confirmed','lost-commit','not-committed','inspect-unavailable','starte
  const frozen={provider:'openrouter',account:'synthetic',model:'test/model',protocol:'openrouter-chat-v1' as const,providerLimits:limits,inputLimit:8000,outputLimit:100,requestHash:createHash('sha256').update(body).digest('hex'),upperUsd:'0.02',phase:'ordinary',automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true};
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>):Promise<{data:unknown;error:unknown}>=>{
   if(name==='bill2_claim')return {data:{id:callId,state:'prepared',dispatchToken:token},error:null};
-  if(name==='bill2_dispatch'){elapsed=mode==='started-error'?0:136_000;return {data:{dispatch:true},error:null};}
+  if(name==='bill2_dispatch'){elapsed=mode==='started-error'?0:206_000;return {data:{dispatch:true},error:null};}
   if(name==='bill2_record')return {data:{state:'unknown'},error:null};
   expect(name).toBe('bill2_revoke_unstarted_dispatch');expect(args).toMatchObject({p_actor_id:actor,p_run_id:runId,p_call_id:callId,p_token:token,p_request_hash:frozen.requestHash});
   if(args.p_inspect)return mode==='inspect-unavailable'?{data:null,error:{code:'offline'}}:{data:{revoked:mode==='lost-commit',eligible:mode==='not-committed'},error:null};

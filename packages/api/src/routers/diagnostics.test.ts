@@ -97,10 +97,12 @@ function createHealthQueryBuilder(result: Promise<unknown>, admin = false) {
   };
 }
 
+const cleanupCalls: Array<[string, unknown]> = [];
+
 function createAdminCaller(options?: {
   batchResult?: { data: unknown; error: unknown };
   recentRunsResult?: { data: unknown; error: unknown };
-  cleanupResult?: { data: unknown; error: unknown };
+  cleanupResult?: { count: number | null; error: unknown };
   profilesResult?: { data: unknown; error: unknown };
   aiModelsResult?: { data: unknown; error: unknown };
   aiModelsKeyResult?: { data: unknown; error: unknown };
@@ -128,12 +130,6 @@ function createAdminCaller(options?: {
         );
       }
 
-      if (table === 'diagnostic_results') {
-        return options?.batchResult
-          ? createBatchResultsQueryBuilder(Promise.resolve(options.batchResult))
-          : createRecentRunsQueryBuilder(Promise.resolve(options?.recentRunsResult ?? { data: [], error: null }));
-      }
-
       if (table === 'ai_models') {
         aiModelsCallCount += 1;
         const result = aiModelsCallCount === 1
@@ -150,13 +146,24 @@ function createAdminCaller(options?: {
     from(table: string) {
       if (table === 'ai_models') return createHealthQueryBuilder(Promise.resolve(
         options?.aiModelsKeyResult ?? { data: [{ api_key: 'synthetic' }], error: null }), true);
+      if (table === 'diagnostic_results') {
+        // cleanupOldResults deletes directly; the 0005 cleanup RPC is absent on staging.
+        const result = options?.cleanupResult ?? { count: 0, error: null };
+        const deleteBuilder = {
+          lt: (column: string, value: string) => {
+            cleanupCalls.push([column, value]);
+            return Promise.resolve(result);
+          },
+        };
+        // Since 0146 diagnostic_results is service_role-only; reads also go through this client.
+        const readBuilder = options?.batchResult
+          ? createBatchResultsQueryBuilder(Promise.resolve(options.batchResult))
+          : createRecentRunsQueryBuilder(Promise.resolve(options?.recentRunsResult ?? { data: [], error: null }));
+        return { ...readBuilder, delete: (opts: unknown) => { cleanupCalls.push(['delete', opts]); return deleteBuilder; } };
+      }
       throw new Error(`Unexpected admin-scoped table ${table}`);
     },
     rpc(fn: string) {
-      if (fn === 'cleanup_old_diagnostic_results') {
-        return Promise.resolve(options?.cleanupResult ?? { data: 0, error: null });
-      }
-
       throw new Error(`Unexpected rpc ${fn}`);
     },
   };
@@ -291,11 +298,25 @@ describe('diagnosticsRouter error sanitization', () => {
     });
   });
 
-  it('sanitizes cleanup rpc errors', async () => {
+  it('deletes results older than the retention window and reports the count', async () => {
+    cleanupCalls.length = 0;
+    const caller = createAdminCaller({ cleanupResult: { count: 7, error: null } });
+    const before = Date.now();
+
+    await expect(caller.cleanupOldResults({ daysToKeep: 30 })).resolves.toMatchObject({
+      success: true, deletedCount: 7,
+    });
+    expect(cleanupCalls[0]).toEqual(['delete', { count: 'exact' }]);
+    const cutoff = Date.parse(cleanupCalls[1][1] as string);
+    expect(cleanupCalls[1][0]).toBe('created_at');
+    expect(Math.abs(before - 30 * 24 * 60 * 60 * 1000 - cutoff)).toBeLessThan(5000);
+  });
+
+  it('sanitizes cleanup errors', async () => {
     const caller = createAdminCaller({
       cleanupResult: {
-        data: null,
-        error: { message: 'cleanup_old_diagnostic_results failed: permission denied' },
+        count: null,
+        error: { message: 'permission denied for table diagnostic_results', code: '42501' },
       },
     });
 

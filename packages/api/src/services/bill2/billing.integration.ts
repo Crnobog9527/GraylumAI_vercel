@@ -7,6 +7,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import { authoritativeBilling, type FrozenRun, type FrozenCall } from './service';
+import {fullBudgetText,outputUnit} from '../__tests__/fixtures/mentorOutput';
 import { fixtureEvidence, localFixtureAdapter } from './fixtureAdapter';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
 import { publishSkillPackage } from '../skills/publication';
@@ -251,8 +252,10 @@ it('BILL2: receipt database outage retains server-private evidence and recovery 
 });
 async function period(actor:string,credits=100) {
  const grant=randomUUID(),subscription='sub_'+randomUUID(),plan=randomUUID(),invoice='in_'+randomUUID(),start=new Date(Date.now()-86400000).toISOString(),end=new Date(Date.now()+86400000).toISOString();
- await db.query("insert into user_subscriptions(user_id,stripe_subscription_id,membership_plan_id,billing_cycle,current_period_start,current_period_end) values($1,$2,$3,'monthly',$4,$5)",[actor,subscription,plan,start,end]);
- await db.query("insert into subscription_credit_grants(id,user_id,stripe_subscription_id,membership_plan_id,billing_cycle,grant_type,grant_period_key,period_start,period_end,total_periods,stripe_invoice_id,credits_granted) values($1,$2,$3,$4,'monthly','monthly_invoice',$5,$6,$7,1,$8,$9)",[grant,actor,subscription,plan,'invoice:'+invoice,start,end,invoice,credits]);return {grant,subscription};
+ // Rows satisfy the real schema too (--schema-from-files): plan FK, NOT NULL status and idempotency key.
+ await db.query("insert into membership_plans(id,name) values($1,'Synthetic plan')",[plan]);
+ await db.query("insert into user_subscriptions(user_id,stripe_subscription_id,membership_plan_id,billing_cycle,current_period_start,current_period_end,status) values($1,$2,$3,'monthly',$4,$5,'active')",[actor,subscription,plan,start,end]);
+ await db.query("insert into subscription_credit_grants(id,user_id,stripe_subscription_id,membership_plan_id,billing_cycle,grant_type,grant_period_key,period_start,period_end,total_periods,stripe_invoice_id,credits_granted,idempotency_key) values($1,$2,$3,$4,'monthly','monthly_invoice',$5,$6,$7,1,$8,$9,$10)",[grant,actor,subscription,plan,'invoice:'+invoice,start,end,invoice,credits,'grant:'+invoice]);return {grant,subscription};
 }
 it.each(['normal','cross-period','reversed','terminated'])('BILL2: %s source allocation preserves original grant and actual restoration',async state=>{
  const f=await fixture(),g=await period(f.actor,12),r=await f.prepare(),id=await call(f.actor,r.id);expect((await db.query('select consumed_amount from subscription_credit_grants where id=$1',[g.grant])).rows[0].consumed_amount).toBe(12);
@@ -266,7 +269,7 @@ it.each(['normal','cross-period','reversed','terminated'])('BILL2: %s source all
 });
 it('BILL2: refunded source never resurrects subscription credits; quarantine blocks new admission',async()=>{
  const f=await fixture(),g=await period(f.actor,12),r=await f.prepare();await db.query("update subscription_credit_grants set status='reversed' where id=$1",[g.grant]);await sqlRpc('bill2_cancel',[f.actor,r.id]);expect((await sqlRpc('bill2_finalize',[f.actor,r.id])).actualRestoredCredits).toBe(8);expect((await conservation(f.actor)).credits).toBe(88);
- const q=await fixture(),h=await period(q.actor);await db.query("update subscription_credit_grants set accounting_state='review_required',period_end=now()-interval '1 hour' where id=$1",[h.grant]);await expect(q.prepare()).rejects.toThrow();expect((await snapshot(q.actor)).credits).toBe(100);
+ const q=await fixture(),h=await period(q.actor);await db.query("update subscription_credit_grants set accounting_state='review_required',accounting_review_reason='synthetic review',period_end=now()-interval '1 hour' where id=$1",[h.grant]);await expect(q.prepare()).rejects.toThrow();expect((await snapshot(q.actor)).credits).toBe(100);
 });
 it('BILL2: concurrent subscription termination takes the legacy profile/grant order before settlement',async()=>{
  const f=await fixture(),g=await period(f.actor,12),r=await f.prepare(),id=await call(f.actor,r.id);await receipt(f.actor,r.id,id);await close(f.actor,r.id);
@@ -406,4 +409,17 @@ it('BILL2: a later network failure cannot invalidate an earlier authoritative re
  beforeHttpReply=async()=>{await receipt(f.actor,r.id,c.id,'0.007');};httpDisconnect=true;
  try{await s.dispatchOnce(c.id,'hello');}finally{beforeHttpReply=undefined;httpDisconnect=false;}
  expect((await s.readRun(r.id)).conflict).toBe(false);await s.closeRun(r.id,'delivered',result());await s.finalizeRun(r.id);expect(await conservation(f.actor)).toMatchObject({credits:93,terminals:1});expect(providerCount-before).toBe(1);
+});
+
+it('BILL2: configured maximum output and attached summary survive jsonb close and one settlement',async()=>{
+ const f=await fixture(),run=await f.prepare(),cid=await call(f.actor,run.id);
+ await receipt(f.actor,run.id,cid);
+ const saved={...result(),body:fullBudgetText,summary:outputUnit.repeat(4096)};
+ const bytes=(await db.query('select octet_length($1::jsonb::text) bytes',[JSON.stringify(saved)])).rows[0].bytes;
+ expect(bytes).toBeLessThan(262144-8192);
+ await sqlRpc('bill2_close',[f.actor,run.id,'delivered',saved]);
+ expect((await db.query('select result from bill2_runs where id=$1',[run.id])).rows[0].result).toEqual(saved);
+ expect(await sqlRpc('bill2_finalize',[f.actor,run.id])).toMatchObject({state:'settled'});
+ await sqlRpc('bill2_finalize',[f.actor,run.id]);
+ expect(await conservation(f.actor)).toMatchObject({credits:93,terminals:1,usage:1});
 });

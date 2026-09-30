@@ -574,6 +574,10 @@ describe('public AI consumption admission fails closed', () => {
     await expect(checkConsumptionCircuitBreaker(context([{data:[{amount:-9999}],error:null,count:1},{data:[{amount:-50000}],error:null,count:1}]))).resolves.toMatchObject({allowed:false,limit:50000});
     await expect(checkConsumptionCircuitBreaker(context([{data:[{amount:-10000}],error:null,count:1}]))).resolves.toMatchObject({allowed:false,limit:10000});
   });
+  it('rejects a closed account as closed, not as a transient failure',async()=>{
+    const ctx={userId:'synthetic-user',supabase:{from:()=>({select(){return this},eq(){return this},single:async()=>({data:{status:'deleted',role:'user'},error:null})})}} as unknown as Parameters<typeof checkUserStatus>[0];
+    await expect(checkUserStatus(ctx)).rejects.toMatchObject({code:'FORBIDDEN',message:'ACCOUNT_CLOSED: 账号已注销'});
+  });
   it.each([null,'pending',undefined])('rejects unknown profile status %s',async status=>{
     const ctx={userId:'synthetic-user',supabase:{from:()=>({select(){return this},eq(){return this},single:async()=>({data:{status,role:'user'},error:null})})}} as any;
     await expect(checkUserStatus(ctx)).rejects.toMatchObject({code:'SERVICE_UNAVAILABLE'});
