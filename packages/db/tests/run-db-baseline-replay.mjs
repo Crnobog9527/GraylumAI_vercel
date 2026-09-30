@@ -1,8 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// DB-BASELINE: build an empty database from repository files only and check its structure.
-// Order: local platform stand-in -> packages/db/baseline/*.sql -> every migration in file-name
-// order, where packages/db/baseline/bridges/<migration file> (if any) runs immediately before the
-// migration of the same name. Fails on any build error and on any difference from the committed
+// DB-BASELINE: build an empty database from repository files only (baseline/build-from-files.mjs)
+// and check its structure. Fails on any build error and on any difference from the committed
 // built fingerprint (baseline/built-fingerprint.json; refresh it with --write-built in the PR that
 // changes the structure; --out only dumps the structure). With --staging <snapshot> it instead
 // compares with a staging snapshot,
@@ -10,10 +8,10 @@
 // no secrets, digest-pinned image already pulled by the workflow).
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { POSTGRES_IMAGE } from './v3/images.mjs';
-import { baselineViolations, bridgeViolations } from './baseline/file-rules.mjs';
+import { buildFromFiles, buildPlan, installPgCronStub } from './baseline/build-from-files.mjs';
 
 const args = process.argv.slice(2);
 const usage = 'Usage: node packages/db/tests/run-db-baseline-replay.mjs --local-only|--ci [--write-built]'
@@ -47,26 +45,8 @@ const psqlServerOnly = sql => docker(['exec', name, 'psql', '-X', '-q', '-A', '-
   '-c', sql]);
 const read = path => readFileSync(resolve(root, path), 'utf8');
 const readJson = path => JSON.parse(read(path));
-const sqlFiles = dir => readdirSync(resolve(root, dir)).filter(file => /^\d{4}_.+\.sql$/.test(file)).sort()
-  .map(file => `${dir}/${file}`);
 const errorLines = result => (result.stderr || '').split('\n').filter(Boolean).slice(0, 12);
-const steps = [
-  'packages/db/tests/baseline/platform-local.sql',
-  ...sqlFiles('packages/db/baseline'),
-  ...sqlFiles('packages/db/migrations'),
-];
-const bridgeDir = 'packages/db/baseline/bridges';
-const bridges = new Set(readdirSync(resolve(root, bridgeDir)).filter(file => file.endsWith('.sql')));
-const migrationNames = new Set(sqlFiles('packages/db/migrations').map(step => step.split('/').at(-1)));
-for (const bridge of bridges) {
-  if (!migrationNames.has(bridge)) throw new Error(`Bridge without a migration of the same name: ${bridge}`);
-  const problems = bridgeViolations(read(`${bridgeDir}/${bridge}`));
-  if (problems.length > 0) throw new Error(`Bridge ${bridge} breaks the bridge rules: ${problems.join('; ')}`);
-}
-for (const step of steps.filter(path => path.startsWith('packages/db/baseline/'))) {
-  const problems = baselineViolations(read(step));
-  if (problems.length > 0) throw new Error(`Baseline ${step} breaks the baseline rules: ${problems.join('; ')}`);
-}
+buildPlan(root); // rules for baseline and bridge files are checked before anything starts
 
 const BUILT = 'packages/db/tests/baseline/built-fingerprint.json';
 const md5 = text => createHash('md5').update(text ?? '<null>').digest('hex');
@@ -126,7 +106,7 @@ function compare(local, localDetail, snapshot, expected) {
   return { differingGroups: differing.length, unexpected };
 }
 
-const report = { image: POSTGRES_IMAGE, steps: steps.length, passed: 0, bridges: [], failed: null };
+let report = { image: POSTGRES_IMAGE, failed: null };
 try {
   ok(docker(['run', '-d', '--pull=never', '--name', name, '-e', 'POSTGRES_DB=dbb',
     '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', POSTGRES_IMAGE]), 'Local container start');
@@ -140,31 +120,13 @@ try {
     if (!ready) await new Promise(done => setTimeout(done, 200));
   }
   if (!ready) throw new Error('Local container readiness timeout (60 s)');
-  // pg_cron stand-in (0010 runs CREATE EXTENSION pg_cron; the plain image has no such extension).
-  const shareDir = ok(docker(['exec', name, 'pg_config', '--sharedir']), 'Share dir');
-  ok(docker(['exec', '-i', '-u', 'root', name, 'sh', '-c', `cat > ${shareDir}/extension/pg_cron.control`],
-    { input: "default_version = '1.0'\nrelocatable = false\nsuperuser = true\ncomment = 'local stub'\n" }), 'pg_cron control');
-  ok(docker(['exec', '-i', '-u', 'root', name, 'sh', '-c', `cat > ${shareDir}/extension/pg_cron--1.0.sql`],
-    { input: read('packages/db/tests/baseline/pg_cron_stub.sql') }), 'pg_cron script');
-  for (const step of steps) {
-    const file = step.split('/').at(-1);
-    if (step.startsWith('packages/db/migrations/') && bridges.has(file)) {
-      const bridged = psqlServerOnly(read(`${bridgeDir}/${file}`));
-      if (bridged.status !== 0 || bridged.error) {
-        report.failed = { step: `${bridgeDir}/${file}`, error: errorLines(bridged) };
-        break;
-      }
-      report.bridges.push(file);
-    }
-    const result = step.startsWith('packages/db/baseline/') ? psqlServerOnly(read(step)) : psql(read(step));
-    if (result.status !== 0 || result.error) {
-      report.failed = { step, error: errorLines(result) };
-      // Optional catalog query to explain a failure (diagnostics only).
-      if (option('--on-fail')) report.failed.inspect = psql(option('--on-fail')).stdout.trim().split('\n');
-      break;
-    }
-    report.passed += 1;
-  }
+  installPgCronStub(root, name, (argv, input) => ok(docker(['exec', ...argv], { input }), 'pg_cron stand-in'));
+  const outcome = result => ({ ok: result.status === 0 && !result.error, error: errorLines(result) });
+  report = { ...report, ...buildFromFiles(root, {
+    applyFile: path => outcome(psql(read(path))),
+    applyServerOnly: sql => outcome(psqlServerOnly(sql)),
+    onFail: option('--on-fail') ? () => psql(option('--on-fail')).stdout.trim().split('\n') : undefined,
+  }) };
   if (!report.failed) {
     const fingerprintSql = read('packages/db/tests/baseline/fingerprint.sql');
     const local = JSON.parse(ok(psql(fingerprintSql), 'Local fingerprint'));
