@@ -136,6 +136,11 @@ describe.skipIf(!authUrl || !mailUrl)('unconfirmed email sign-in against local G
     expect(Object.fromEntries(to.searchParams)).toEqual({ redirect: '/profile' });
     expect(readAuthFragment(landing.hash)).toEqual({ to: 'verified' });
 
+    // Opening the same link again (how staging checks the expired landing without waiting a day)
+    // is answered like an expired link.
+    const reused = await fetch(`${authUrl}/verify${new URL(link).search}`, { redirect: 'manual' });
+    expect(readAuthFragment(new URL(reused.headers.get('location')!).hash)).toEqual({ to: 'verify-expired' });
+
     // The email really is confirmed: the same password now signs in.
     const signIn = await client().auth.signInWithPassword({ email: confirmEmail, password });
     expect(signIn.error).toBeNull();
