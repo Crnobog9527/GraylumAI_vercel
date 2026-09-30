@@ -523,3 +523,45 @@ C1 明确传 --max-usd 0.40，C2 明确传 --max-usd 2.61，各 30 卡片 + 10 �
   按新口径重算，C3 那一轮的出卡判断为 21/40。
 - 执行：总控审过 `b330b151` 后，本提交只把 `HARD_MAX_CALLS` 从 693 调到 733（[Owner 决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5894518467)，
   累计美元 $15 不变），同步测试和本节。CI 通过后按 C3 配置跑 40 次，本轮上限 $5.54；结果不明就停。
+
+
+### 14.9 B1: selected-route two-turn protocol evidence only (2026-09-30)
+
+[Owner approval](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5911114620):
+three fixed pairs, at most six primary requests, USD 1.50 for this run; no organizer,
+retry, replacement sample, or continuation after an unknown result. From 729 used,
+the local cumulative ceiling becomes 735 calls; USD 15 remains unchanged.
+
+The standalone `ac0Probe/b1Main.ts` uses the existing A01/B01/B03 samples and private
+Skill digests. It connects unchanged admission/Skill loading, SDK/PostgresSession,
+context selection, request/history normalization, and OpenRouter adapter code.
+Only storage/auth ports are local in-memory fixtures. Each pair reuses one Session;
+the second request's assistant/tool history must originate from the first live SDK
+response, and its user input is the first option verbatim. This is local protocol
+evidence, not staging, SQL/RLS, billing integration, or product acceptance.
+
+Sonnet 5.5 / anthropic / low / 4096 and all application prompts, tools, schema,
+product rules, timeouts, and provider configuration remain unchanged. The fixture
+loads the existing Skill through the production loader; it does not rewrite its
+contents or reuse ac0Probe's approximate Skill wrapper. Context capacity in the
+isolated test ports is sufficient to retain the full two-turn history. A separate
+100,000-byte pre-send measurement guard stops without trimming or dispatching an
+oversized request. Six full-output reservations at the frozen USD 2/10 per million
+prices plus 2,048 input-token margin are bounded by USD 1.470336.
+
+Run offline first with Node's `--experimental-transform-types` and explicit
+`--skill-dir`, `--scenarios`, and private `--out-dir` paths. Live additionally requires
+`--live --confirm B1-6-calls-USD-1.50` and the existing capped AC0 test key. The fixed
+ledger must still have exactly 729 prior calls, preventing a second invocation from
+silently restarting a partially completed live batch. Each dispatch reserves the
+existing locked ledger before sending; unknown/rejected costs keep the conservative
+reservation unless verified usage establishes the settled cost. Private artifacts
+retain request/response bytes and errors; public evidence excludes Skill/sample text.
+
+B1 passes only if all three second requests return normally; a second-turn supplier
+rejection (including an explicit complete HTTP 200 SSE error frame) or history denial
+fails B1. An incomplete stream/error frame stays unknown and stops the batch. A first
+turn without a valid card is a missing prerequisite, never a replacement sample.
+No robot review, merge, deployment, product-rule repair, or paused implementation is
+authorized by this evidence run. The whole PR remains high risk; this increment adds
+only a test harness and the explicitly approved local measurement limit.

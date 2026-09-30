@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // AC-0b model probe. Standalone script: application code must never import it.
 
-/** Owner approval, PR #497 issuecomment-5894518467: one more Sonnet 5.5 round of
- * 40 calls (run cap USD 5.54); cumulative 733 calls / USD 15. No flag can raise these. */
-export const HARD_MAX_CALLS = 733;
+/** Owner B1 approval, PR #497 issuecomment-5911114620: at most 6 calls / USD 1.50
+ * from 729 used; cumulative 735 calls / USD 15. No flag can raise these. */
+export const HARD_MAX_CALLS = 735;
 export const HARD_MAX_USD = 15;
 export const DEFAULT_MAX_CALLS = 60;
 export const DEFAULT_MAX_USD = 1;
