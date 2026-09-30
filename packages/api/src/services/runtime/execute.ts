@@ -10,7 +10,7 @@ import {askQuestionTool} from './agentTools';
 import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
 import { authoritativeBilling, type FrozenRun, type FrozenCall, type BillingTransport } from '../bill2/service';
 import {OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
-import {frozenPurposeBudget,PURPOSE_OUTPUT_CAP} from './purposeBudgets';
+import {frozenPurposeBudget,FROZEN_OUTPUT_CAP} from './purposeBudgets';
 import {createRuntimeBudget,type RuntimeBudget} from './budget';
 import {expiringAuthAfterProvider} from './authReuse';
 import { localFixtureAdapter } from '../bill2/fixtureAdapter';
@@ -24,7 +24,7 @@ const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 export const runtimeContext=z.object({
  version:z.literal('runtime.v1'),sdkVersion:z.literal('0.18.0'),role:z.enum(['ordinary','skill','organizer']),
  input:z.string().min(1).max(20000),instructions:z.string().max(262144),model:z.string().min(1),
- maxOutputTokens:z.number().int().positive().max(PURPOSE_OUTPUT_CAP),maxTurns:z.number().int().min(1).max(32),
+ maxOutputTokens:z.number().int().positive().max(FROZEN_OUTPUT_CAP),maxTurns:z.number().int().min(1).max(32),
  inputSelection:z.literal('scope-projection-v1').optional(),
  providerRequestFormat:z.enum(PROVIDER_REQUEST_FORMATS).optional(),
  reasoning:reasoningPolicy.optional(),

@@ -4,7 +4,7 @@ import { writeFileSync } from 'node:fs';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { runtimeAdmissionService } from './admission';
 import { postgresJsonbBytes } from './payloadSize';
-import { PURPOSE_INPUT_CAPS, type PurposeBudgets } from './purposeBudgets';
+import { PURPOSE_INPUT_CAPS, PURPOSE_OUTPUT_CAP, type PurposeBudgets } from './purposeBudgets';
 import { packageHash, sha256, type SkillSource } from '../skills/loader';
 
 const source = vi.hoisted(() => ({ current: undefined as SkillSource | undefined }));
@@ -75,9 +75,9 @@ async function fixture(resourceBytes: number, worst = false, budgets?: PurposeBu
     replay: (value: unknown) => { replay = value; } };
 }
 const config: PurposeBudgets = { version: 1,
-  interactive: { inputBytes: PURPOSE_INPUT_CAPS.interactive, maxOutputTokens: 128000, historyItems: 1000 },
+  interactive: { inputBytes: PURPOSE_INPUT_CAPS.interactive, maxOutputTokens: PURPOSE_OUTPUT_CAP, historyItems: 1000 },
   organize: { inputBytes: PURPOSE_INPUT_CAPS.organize, historyItems: 1000 },
-  report: { inputBytes: PURPOSE_INPUT_CAPS.report, maxOutputTokens: 128000, historyItems: 1000 } };
+  report: { inputBytes: PURPOSE_INPUT_CAPS.report, maxOutputTokens: PURPOSE_OUTPUT_CAP, historyItems: 1000 } };
 function sizedInput(context: Record<string, unknown>) {
   return Buffer.byteLength(JSON.stringify({ instructions: context.instructions,
     messages: [{ role: 'user', content: context.input }] })) + 1024;

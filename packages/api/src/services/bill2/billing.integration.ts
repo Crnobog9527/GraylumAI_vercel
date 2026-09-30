@@ -7,6 +7,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import { authoritativeBilling, type FrozenRun, type FrozenCall } from './service';
+import {fullBudgetText,outputUnit} from '../__tests__/fixtures/mentorOutput';
 import { fixtureEvidence, localFixtureAdapter } from './fixtureAdapter';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
 import { publishSkillPackage } from '../skills/publication';
@@ -408,4 +409,17 @@ it('BILL2: a later network failure cannot invalidate an earlier authoritative re
  beforeHttpReply=async()=>{await receipt(f.actor,r.id,c.id,'0.007');};httpDisconnect=true;
  try{await s.dispatchOnce(c.id,'hello');}finally{beforeHttpReply=undefined;httpDisconnect=false;}
  expect((await s.readRun(r.id)).conflict).toBe(false);await s.closeRun(r.id,'delivered',result());await s.finalizeRun(r.id);expect(await conservation(f.actor)).toMatchObject({credits:93,terminals:1});expect(providerCount-before).toBe(1);
+});
+
+it('BILL2: configured maximum output and attached summary survive jsonb close and one settlement',async()=>{
+ const f=await fixture(),run=await f.prepare(),cid=await call(f.actor,run.id);
+ await receipt(f.actor,run.id,cid);
+ const saved={...result(),body:fullBudgetText,summary:outputUnit.repeat(4096)};
+ const bytes=(await db.query('select octet_length($1::jsonb::text) bytes',[JSON.stringify(saved)])).rows[0].bytes;
+ expect(bytes).toBeLessThan(262144-8192);
+ await sqlRpc('bill2_close',[f.actor,run.id,'delivered',saved]);
+ expect((await db.query('select result from bill2_runs where id=$1',[run.id])).rows[0].result).toEqual(saved);
+ expect(await sqlRpc('bill2_finalize',[f.actor,run.id])).toMatchObject({state:'settled'});
+ await sqlRpc('bill2_finalize',[f.actor,run.id]);
+ expect(await conservation(f.actor)).toMatchObject({credits:93,terminals:1,usage:1});
 });

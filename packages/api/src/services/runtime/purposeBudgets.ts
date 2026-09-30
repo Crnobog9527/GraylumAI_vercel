@@ -6,7 +6,11 @@ export const PURPOSE_BUDGET_KEY = 'runtime_purpose_budgets';
 // Derived from full frozen payload measurements, including duplicated input,
 // attached organization and JSON escaping. See MENTOR-BUDGET.md.
 export const PURPOSE_INPUT_CAPS = { interactive: 90000, organize: 112000, report: 90000 } as const;
-export const PURPOSE_OUTPUT_CAP = 128000;
+// 2 * 3584 * 8 serialized bytes + 8192 envelope bytes = 65536.
+// The second copy reserves reasoning duplicated in reasoning_details.
+export const PURPOSE_OUTPUT_CAP = 3584;
+// Reader compatibility only: never use this to admit a new configured budget.
+export const FROZEN_OUTPUT_CAP = 128000;
 export const PURPOSE_HISTORY_CAP = 1000;
 const base = (max: number) => z.object({
   inputBytes: z.number().int().min(1024).max(max),

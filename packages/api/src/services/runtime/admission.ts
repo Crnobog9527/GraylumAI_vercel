@@ -15,7 +15,7 @@ import { discoverRuntimeCandidates, matchingInput, MATCH_INSTRUCTIONS } from './
 import { type ReasoningPolicy } from './reasoningPolicy';
 import { admitReasoning } from './reasoningAdmission';
 import {currentRequestTiming} from './timing';
-import {readPurposeBudgets,PURPOSE_OUTPUT_CAP} from './purposeBudgets';
+import {readPurposeBudgets} from './purposeBudgets';
 import {assertFrozenPayloads} from './payloadSize';
 
 const uuid=z.string().uuid();
@@ -54,7 +54,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
  // The local fixture default is not an additional ceiling on an approved real quote.
  function outputCapacity(row:Record<string,unknown>,organizerLimit=Infinity,configuredOutput?:number){
   return Math.min(policy.real?realModel(row).outputLimit:configuredOutput??policy.maxOutputTokens,
-   Number(row.max_tokens),organizerLimit,configuredOutput??20000,PURPOSE_OUTPUT_CAP);
+   Number(row.max_tokens),organizerLimit,configuredOutput??20000);
  }
  function inputCapacity(row:Record<string,unknown>,output:number,bytes=policy.inputBytes){
   return policy.real?Math.min(bytes,realModel(row).inputLimit):fixtureInputCapacity(Number(row.input_limit),output,bytes);

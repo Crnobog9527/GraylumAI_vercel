@@ -2,11 +2,11 @@
 import { expect, it } from 'vitest';
 import { mentorBudgetRouter } from './mentorBudget';
 import { settingsRouter } from './settings';
-import { PURPOSE_BUDGET_KEY, PURPOSE_INPUT_CAPS } from '../services/runtime/purposeBudgets';
+import { PURPOSE_BUDGET_KEY, PURPOSE_INPUT_CAPS, PURPOSE_OUTPUT_CAP } from '../services/runtime/purposeBudgets';
 const config = { version: 1 as const,
-  interactive: { inputBytes: 80000, maxOutputTokens: 32000, historyItems: 100 },
+  interactive: { inputBytes: 80000, maxOutputTokens: PURPOSE_OUTPUT_CAP, historyItems: 100 },
   organize: { inputBytes: 64000, historyItems: 0 },
-  report: { inputBytes: 80000, maxOutputTokens: 64000, historyItems: 0 } };
+  report: { inputBytes: 80000, maxOutputTokens: PURPOSE_OUTPUT_CAP, historyItems: 0 } };
 function harness(role: 'admin' | 'user' | 'anonymous') {
   const stored = new Map<string, unknown>();
   const writes: unknown[] = [];
@@ -47,7 +47,8 @@ it.each([
   { ...config, organize: { ...config.organize, inputBytes: PURPOSE_INPUT_CAPS.organize + 1 } },
   { ...config, report: { ...config.report, inputBytes: PURPOSE_INPUT_CAPS.report + 1 } },
   { ...config, organize: { ...config.organize, maxOutputTokens: 3000 } },
-  { ...config, interactive: { ...config.interactive, maxOutputTokens: 128001 } },
+  { ...config, interactive: { ...config.interactive, maxOutputTokens: PURPOSE_OUTPUT_CAP + 1 } },
+  { ...config, report: { ...config.report, maxOutputTokens: PURPOSE_OUTPUT_CAP + 1 } },
   { ...config, report: { ...config.report, historyItems: -1 } },
   { ...config, interactive: { ...config.interactive, inputBytes: 2.5 } },
   { ...config, unknown: true },
