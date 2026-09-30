@@ -9,13 +9,17 @@
 - `packages/api/src/trpc.ts:113–180`：100 积分开户赠送；`opening_grant:<userId>` 防重；调用
   `atomic_apply_credit_ledger_entry`。`:202–264` 恢复零余额新资料，`:346–390` 创建资料后赠送。
 - `packages/db/migrations/0051_auth_opening_grant_profile_defaults.sql:11`：新资料默认 0，不靠 Auth 触发器赠送。
-- `packages/db/migrations/0024_atomic_apply_credit_ledger_entry.sql:48–113`：锁 profile、防重、改余额和写账本同事务。
+- 管理界面虽显示 `new_user_credits` 配置，现有开户路径实际固定为 100；本任务保持原赠送额度。
+- `packages/db/migrations/0028_restore_staging_helper_functions.sql:419–524`：当前有效账务函数，
+  锁 profile、防重、改余额和写账本同事务；0024 为其早期版本。
 - `packages/api/src/services/accountErasure/service.ts:67–73`：限频、重验身份后调用注销确认。
 - `packages/db/migrations/0147_account_erasure_close.sql:80–126`：锁 profile，检查续费/角色，封闭账号、写注销请求。
   PR-E 增加 service-only 包装函数，先写摘要，再在同一事务调用既有确认函数；撤掉旧函数的服务端直调权限。
   不重写旧函数正文，不改 PR-A 已有迁移。
 - `packages/api/src/lib/auth.ts:3–39`：当前身份类型为邮箱和 Google；身份来自 Auth 验证结果，不能用昵称。
-  邮箱按 Auth 的大小写及首尾空白规则处理，保留点号与加号。OAuth 用验证过的 issuer/subject。
+  Auth 将邮箱转为小写，拒绝原始首尾空白；摘要另外 trim 输入空白，保留点号与加号。
+  本地运行实际 Auth 版本的规则见 [mail.go](https://github.com/supabase/auth/blob/v2.190.0/internal/api/mail.go)。
+  OAuth 用 Auth 验证过的 subject；Google 用固定 provider 对应 issuer，忽略昵称/user_metadata。
 
 ## 最小必要变更（AGENTS §5）
 
@@ -26,38 +30,62 @@
 注册校验与现有账务 RPC 同一事务，用有序事务锁防并发重复赠送；不新增钱包、调度器、队列或运行平台。
 余额/流水仍以 profiles / credit_transactions 为权威；摘要表只证明该身份曾领过开户赠送。
 新 RPC 只授予 service_role，赠送前拒绝封闭账号。新表 RLS、account_open_required 策略和现有注销审计接入。
+摘要匹配导致不赠送时，在既有账本写金额 0 的防重决定；不改变余额，防止零余额资料后来
+换邮箱或遇到响应丢失时被旧恢复流程补发。首次赠送事实只来自正金额原流水或已有摘要事实。
 
 ## 密钥配置（总控向 Owner 请求，尚未执行）
 
 变量名 `OPENING_GRANT_HMAC_KEYS`，仅服务端：JSON 格式
 `{"active":"v2","keys":{"v1":"<base64-32-byte-key>","v2":"<base64-32-byte-key>"}}`。
-版本为 1–32 字符的字母/数字/下划线/短横线；每个值为规范 Base64 编码的至少 32 字节独立密钥。
+版本为 1–32 字符的字母/数字/下划线/短横线；1–8 个版本，每个值为规范 Base64 编码的
+32–64 字节独立密钥，不与 Auth、支付或其他签名密钥复用。
 active 必须在 keys 内。新增版本时保留所有仍有摘要的旧版本及密钥，读时对全部版本生成匹配摘要。
 版本值和已有版本对应的密钥不可复用或替换；旧版本不能在 E3 到期之前移除。
 只在本机及 secretless CI 用明显的 test-only 常量，不生成、打印或提交真实值。
 部署前总控需取得 Owner 对 staging 配置的明确批准；本 PR 不授权修改真实环境。
 密钥遗失无法恢复旧摘要匹配；轮换必须保留旧密钥。摘要不是完全匿名或绝对不可逆。
+数据库会拒绝缺少已留存版本的请求；同一版本错误换成另一密钥无法从摘要自动发现，
+总控配置时必须保留原版本和值。已在 Vercel 的环境拒绝明显的 test-only 测试密钥。
 开户赠送规则取消后，停止赠送并清除此用途摘要；没有自动猜测到期或后台画像。
 
 ## 并行范围与迁移编号
 
-开工时 #537 仅有 B1b 准备文件，正式 0150/built-fingerprint 尚未提交，交接保留 0150。
-本任务暂用 0151，合并前按最新 staging 重核；撞号由总控交回本 writer 改号并重跑 --write-built。
-#536 治理文档、#533 UI、#497 Runtime 与本任务业务文件不重叠。
-ENTITLEMENTS 当前只写独立方案；约束补齐当前只写 SELECT 预检，要求 built-fingerprint 不变。
-`packages/db/tests/baseline/built-fingerprint.json` 是后续迁移共同产物，不能沿用其他候选的结果。
-一旦对方开始改同一文件，暂停该文件写入并在 PR 记录，待总控确定顺序后重放生成。
-不修改 #537 的 erasure-constraint-audit.sql 或准备材料。
+当前 #537 head `1b67501392513c743884c6e44f669875d791a31c` 已包含 0150，并写入
+`built-fingerprint.json` 与 `DATA-ERASURE.md`。这两个文件暂停写入，PR 已记录实际重叠。
+本任务暂用 0151；当前 base 只有 0149，因此 migration ledger 报缺 0150。
+推荐总控先让 #537 合入 staging，再确认本 writer 独占 E 的指纹/附录更新；随后更新分支，
+按合并时 staging 核对编号，并在同一 PR 重跑 --local-only --write-built。不能放虚构迁移补空号。
+`scripts/code-size-baseline.json` 在 #497 的范围内；本次 trpc.ts 从 501 行降到 496 行，
+检查要求删除已不必要条目。该文件也暂停，等待总控把本次缩减明确交给单一 writer。
+#540 ENTITLEMENTS 与 #539 约束预检当前无业务文件重叠；不修改 #537 的擦除通道/审计文件。
 
 ## 验证与交接
 
-待实现/验证：相同邮箱或 issuer+subject 的注销重注册拒绝赠送；不同身份赠送；并发只一次；
-大小写/空白/别名边界；新表无原文；轮换旧版本仍匹配；新会话非 service_role 读写及 RPC 拒绝；
-封闭账号拒绝赠送；摘要写失败不封闭；迁移连续两次；回退后完整结构比对/重新应用；
-有防刷事实时回退拒绝，避免恢复可重复领取；frozen install/API/类型/lint/safeguards/迁移账本/CI。
-同 PR 执行 `node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built` 更新指纹。
-所有结果按 PASS/FAIL/BLOCKED/NOT_RUN 区分，尚未运行项不计通过。
+本地候选验证（从上述 staging 完整文件构建的可销毁容器）：
 
-Handoff：done = 规范、live staging/保护检查、writer/开放 PR 盘点及技术方案；
-next = 实现、全套本地验证和 CI，再交总控；blockers = 尚无业务阻塞，部署需要 Owner 密钥配置批准。
-当前功能、数据库验证、独立审查均 NOT_RUN；不得称 clean 或 staging 验收。
+- PASS：frozen install；完整 API 141 个文件，3097 通过、3 个既有用例跳过；API/Web lint 与类型检查。
+- PASS：`node packages/db/tests/run-erasure-e.mjs --local-only`：5 项 PR-A 回归、7 项 E 集成测试。
+  覆盖邮箱/Google 同主体重注册、独立身份、大小写/空白/别名、无原文、旧版本轮换、忘旧版本拒绝、
+  新会话角色读写/RPC 拒绝、并发只一次、封闭拒绝、赠送/注销摘要故障事务回滚和 PR-A 前置拒绝。
+  Google 使用本机 Auth 身份夹具，不代表外部 Google 登录验收；限频依赖在夹具中明确 mock。
+- PASS：迁移连续两次、完整 catalog 回退/重应用一致、两类注销审计 0 问题；
+  有摘要时回退拒绝，防止恢复重复领取。回退必须和旧 API 同步，不能丢弃线上防刷事实。
+- PASS：API 类型排除基线 35 个旧文件仍需排除；Ruby CI 合约 7 项、301 断言。
+  完整基线重放 153 步、84 个重复迁移、1169 个 catalog 分组，account-open 审计 0 问题；
+  收敛迁移重应用不变、回退再恢复通过。当前仅 `--out` 独立证据，不算更新 built-fingerprint。
+- FAIL / BLOCKED_CONTEXT_NOT_VERIFIED：safeguards / migration ledger 缺 0150；代码大小基线条目已过时。
+  原因是上述明确的并行 writer / 顺序依赖，未通过就是未通过。
+- BLOCKED：同 PR 的 `--write-built` 与新表附录登记等待共享文件写入协调，尚未执行。
+- NOT_RUN：总控审、最终候选远程 CI 全绿、独立语义审查、浏览器/staging 验收、真实密钥配置、应用迁移。
+
+总控 staging 只读事实：执行 `erasure-e-staging-source.sql`，只贴聚合结果。
+如 PR-E 前已有领过赠送的封闭账号，必须在 PR-C 删除 Auth 身份前补存其摘要；
+身份已删除则历史摘要无法逆向补出，需报告总控，不能假称已覆盖。当前未取得远程事实。
+应用后只读权限检查为 `erasure-e-audit.sql`；期望 0 行，仅代表权限检查，不代表完整验收。
+到期清除和备份恢复按 §8/E3：规则取消才删除此用途事实；恢复服务前先恢复防刷事实。
+
+Handoff：done = HMAC/环境校验、原子赠送与封闭、回退/审计及本地证明；
+next = 总控协调共享文件与 #537 顺序 → 更新分支/编号/指纹/附录/基线 → 相关验证及 CI 全绿
+→ 总控先审 → ready/Codex 机器人 → Owner 批准后总控合并/配置/应用；
+blockers = 三个共享文件写入未协调、缺 0150、历史封闭账号事实未取得。
+当前保持 draft，不是 clean；本 writer 不合并、不配置真实环境、不应用远程迁移。

@@ -7,6 +7,8 @@ function applyBaseEnv(): void {
   process.env = {
     ...ORIGINAL_ENV,
     NODE_ENV: 'development',
+    OPENING_GRANT_HMAC_KEYS: JSON.stringify({ active: 'test-v1',
+      keys: { 'test-v1': Buffer.from('test-only-opening-grant-key-00001').toString('base64') } }),
     UPSTASH_REDIS_REST_URL: 'https://redis.example.invalid',
     UPSTASH_REDIS_REST_TOKEN: 'synthetic-redis-token',
     NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co',
@@ -34,6 +36,16 @@ describe('validateEnv', () => {
 
     expect(result.valid).toBe(true);
     expect(result.errors).toEqual([]);
+  });
+
+  it('requires the independent HMAC keyring and never echoes its submitted value', () => {
+    delete process.env.OPENING_GRANT_HMAC_KEYS;
+    expect(validateEnv().errors.some(error => error.startsWith('OPENING_GRANT_HMAC_KEYS'))).toBe(true);
+    process.env.OPENING_GRANT_HMAC_KEYS = 'private-invalid-value';
+    const result = validateEnv();
+    expect(result.valid).toBe(false);
+    expect(JSON.stringify(result)).not.toContain('private-invalid-value');
+    expect(getSafeEnvSummary().OPENING_GRANT_HMAC_KEYS_SET).toBe('✓');
   });
 
   it('rejects DATABASE_URL values polluted with a duplicated key prefix', () => {

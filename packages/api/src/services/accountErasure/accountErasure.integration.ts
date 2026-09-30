@@ -9,6 +9,7 @@ import { accountRouter } from '../../routers/account';
 import { userRouter } from '../../routers/user';
 import { confirmAccountErasure, loadAccountErasurePreview } from './service';
 import { REAUTH_REQUIRED_MESSAGE, readVerifiedAuthTime } from './reauth';
+import { loadOpeningGrantDigests } from './openingGrantIdentity';
 
 const restUrl = process.env.ERASURE_LOCAL_REST!;
 const authUrl = process.env.ERASURE_LOCAL_AUTH!;
@@ -82,7 +83,9 @@ it('P1 regression: after the migration a signed-in user still updates their own 
   expect(await creditsOf(user.id)).toBe(45);
   const serviceCheckin = await admin.rpc('claim_daily_checkin', { p_user_id: user.id });
   expect(serviceCheckin.data).toMatchObject([{ already_claimed: true }]);
-  const { data: convo } = await admin.from('conversations').insert({ user_id: user.id }).select('id').single();
+  const { data: convo, error: convoError } = await session.from('conversations')
+    .insert({ user_id: user.id, title: 'Synthetic PR-A conversation' }).select('id').single();
+  expect(convoError).toBeNull();
   expect((await session.rpc('soft_delete_conversation', { p_conversation_id: convo?.id, p_user_id: user.id })).data)
     .toBe(true);
 });
@@ -94,6 +97,9 @@ it('T09/T11: renewal blocks, fresh password re-auth closes, Auth access and clie
   const other = await signIn(bystander.email);
   expect((await session.from('fixture_notes').insert({ user_id: owner.id, body: 'mine' })).error).toBeNull();
   expect((await other.session.from('fixture_notes').insert({ user_id: bystander.id, body: 'theirs' })).error).toBeNull();
+  const { data: convo, error: convoError } = await session.from('conversations')
+    .insert({ user_id: owner.id, title: 'Synthetic PR-A conversation' }).select('id').single();
+  expect(convoError).toBeNull();
   await admin.from('user_subscriptions').insert({
     user_id: owner.id, stripe_subscription_id: `sub_${owner.id}`, status: 'active', current_period_end: '2026-10-30T00:00:00Z',
   });
@@ -122,7 +128,6 @@ it('T09/T11: renewal blocks, fresh password re-auth closes, Auth access and clie
   await expect(signIn(owner.email)).rejects.toBeTruthy();
   await expect(account.erasurePreview()).rejects.toMatchObject({ code: 'FORBIDDEN', message: 'ACCOUNT_CLOSED: 账号已注销' });
   // SECURITY DEFINER RPCs bypass RLS, so they check closure themselves (P2).
-  const { data: convo } = await admin.from('conversations').insert({ user_id: owner.id }).select('id').single();
   const checkinClosed = await session.rpc('claim_daily_checkin', { p_user_id: owner.id });
   expect(checkinClosed.error?.message).toBe('ACCOUNT_CLOSED');
   expect((await admin.rpc('claim_daily_checkin', { p_user_id: owner.id })).error?.message).toBe('ACCOUNT_CLOSED');
@@ -138,7 +143,9 @@ it('T09/T11: renewal blocks, fresh password re-auth closes, Auth access and clie
   // Irreversible and idempotent.
   const revive = await admin.from('profiles').update({ status: 'active' }).eq('id', owner.id);
   expect(revive.error?.message).toContain('ACCOUNT_ERASURE_IRREVERSIBLE');
-  const again = await admin.rpc('account_erasure_confirm', { p_profile_id: owner.id, p_request_id: crypto.randomUUID() });
+  const again = await admin.rpc('account_erasure_confirm_with_digests', {
+    p_profile_id: owner.id, p_request_id: crypto.randomUUID(), p_digests: await loadOpeningGrantDigests(admin, owner.id),
+  });
   expect(again.data).toMatchObject({ requestId, created: false });
   await expect(loadAccountErasurePreview(admin, owner.id)).resolves.toMatchObject({ closed: true });
 });
@@ -190,8 +197,11 @@ it('admins are refused and concurrent confirmations create exactly one closure',
     .rejects.toMatchObject({ code: 'FORBIDDEN' });
 
   const user = await createAccount('race');
+  const digests = await loadOpeningGrantDigests(admin, user.id);
   const results = await Promise.all([1, 2, 3].map(() =>
-    admin.rpc('account_erasure_confirm', { p_profile_id: user.id, p_request_id: crypto.randomUUID() })));
+    admin.rpc('account_erasure_confirm_with_digests', {
+      p_profile_id: user.id, p_request_id: crypto.randomUUID(), p_digests: digests,
+    })));
   expect(results.map((r) => r.error)).toEqual([null, null, null]);
   expect(results.filter((r) => r.data?.created === true)).toHaveLength(1);
   expect(new Set(results.map((r) => r.data?.requestId)).size).toBe(1);
