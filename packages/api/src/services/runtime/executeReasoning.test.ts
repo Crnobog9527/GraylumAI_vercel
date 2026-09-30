@@ -22,3 +22,7 @@ it.each([{parameter:'reasoning',value:{enabled:true}},{parameter:'reasoning',val
  expect(runtimeContext.safeParse({...base,reasoning}).success).toBe(false);
  expect(runtimeContext.safeParse({...base,attachedOrganizer:{modelId:id,model:'o/x',maxOutputTokens:4096,reasoning}}).success).toBe(false);
 });
+it.each([20000,128000])('reads existing frozen output %s without applying the new configuration cap',maxOutputTokens=>{
+ const frozen={...base,maxOutputTokens,purposeBudget:{purpose:'interactive',inputBytes:64000,historyItems:0}};
+ expect(runtimeContext.parse(frozen)).toEqual({...frozen,maxToolCalls:0});
+});

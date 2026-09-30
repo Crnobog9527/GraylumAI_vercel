@@ -3,11 +3,12 @@ import {it,expect,vi} from 'vitest';
 import {createHash} from 'node:crypto';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {runtimeAdmissionService} from './admission';
+import {PURPOSE_OUTPUT_CAP} from './purposeBudgets';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 const actor='10000000-0000-4000-8000-000000000001',sessionId='10000000-0000-4000-8000-000000000002';
 const first='10000000-0000-4000-8000-000000000003',second='10000000-0000-4000-8000-000000000004',organizer='10000000-0000-4000-8000-000000000005';
 const requestId='10000000-0000-4000-8000-000000000006',nextId='10000000-0000-4000-8000-000000000007';
-function fixture(){
+function fixture(budgetConfig?:unknown){
  const models=[{id:first,model_id:'synthetic/first'}, {id:second,model_id:'synthetic/second'}, {id:organizer,model_id:'synthetic/organizer'}].map(m=>({...m,provider:'openrouter',is_active:'true',max_tokens:8192,input_limit:32000,config:configuredReasoning(m.model_id)}));
  models[1]!.config=configuredReasoning(models[1]!.model_id,{mode:'budget',maxTokens:2048});
  const frozen=new Map<string,any>();let reads=0;
@@ -23,6 +24,7 @@ function fixture(){
  const selectedColumns:string[]=[];
  const admin={rpc,from:(table:string)=>{
   let id='';const q={select:(columns:string)=>{if(table==='ai_models')selectedColumns.push(columns);return q;},eq:(_key:string,value:string)=>{id=value;return q;},
+   maybeSingle:async()=>({data:budgetConfig?{value:JSON.stringify(budgetConfig)}:null,error:null}),
    single:async()=>{reads++;return {data:models.find(m=>m.id===id),error:null};},
    in:async()=>({data:[{key:'v3_summary_model_id',value:organizer},{key:'v3_summary_max_tokens',value:'4096'}],error:null})};return q;
  }} as unknown as SupabaseClient;
@@ -80,4 +82,40 @@ it('reasoning alone changes sourceHash, including independent organizer defaults
  const before=await original.service.prepare(original.input),after=await changed.service.prepare(changed.input);
  expect(after.context).toEqual({...before.context,attachedOrganizer:{...before.context.attachedOrganizer,reasoning:{parameter:'reasoning',value:{enabled:false}}}});
  expect(after.billing.sourceHash).not.toBe(before.billing.sourceHash);
+});
+
+it('configured budgets freeze separately from unchanged quotes and reservation arithmetic',async()=>{
+ const config={version:1,interactive:{inputBytes:24000,maxOutputTokens:2000,historyItems:7},
+  organize:{inputBytes:16000,historyItems:3},report:{inputBytes:64000,maxOutputTokens:1000,historyItems:100}};
+ const f=fixture(config);
+ for(const m of f.models){m.max_tokens=64000;m.input_limit=128000;}
+ for(const q of f.policy.real.callPolicies){q.outputLimit=40000;q.providerLimits.contextTokens=128000;q.inputLimit=90000;}
+ const service=runtimeAdmissionService(f.user,f.admin,{...f.policy,purposeBudgets:true});
+ const original=await service.prepare(f.input);
+ expect(original.context.maxOutputTokens).toBe(2000);
+ expect(original.context.purposeBudget).toEqual({purpose:'interactive',inputBytes:24000,historyItems:7});
+ expect(original.context.attachedOrganizer).toMatchObject({maxOutputTokens:4096,inputBytes:16000,historyItems:3});
+ expect(original.billing.callPolicy).toEqual(f.policy.real.callPolicies.filter(q=>q.modelId!==second));
+ expect(original.billing.limits).toMatchObject({costUsd:'0.008000000000',credits:8,maxPreDeduct:8,maxCalls:2});
+ config.interactive.maxOutputTokens=PURPOSE_OUTPUT_CAP;config.interactive.historyItems=2;
+ const next=await service.prepare({...f.input,requestId:nextId});
+ expect(next.context.maxOutputTokens).toBe(PURPOSE_OUTPUT_CAP); // New configuration ceiling; quote arithmetic is unchanged.
+ expect(next.context.historyItems).toBe(2);
+ expect(next.billing.limits).toEqual({...original.billing.limits,deadline:expect.any(String)});
+ expect(await service.prepare(f.input)).toEqual(original);
+});
+
+it('legacy admission retains its old ceiling and replay ignores newly invalid configuration',async()=>{
+ const config={version:1,interactive:{inputBytes:24000,maxOutputTokens:2000,historyItems:7},
+  organize:{inputBytes:16000,historyItems:3},report:{inputBytes:64000,maxOutputTokens:1000,historyItems:100}};
+ const f=fixture(config),service=runtimeAdmissionService(f.user,f.admin,{...f.policy,purposeBudgets:true});
+ const admitted=await service.prepare(f.input);
+ config.interactive.maxOutputTokens=128000;
+ expect(await service.prepare(f.input)).toEqual(admitted);
+ await expect(service.prepare({...f.input,requestId:nextId})).rejects.toThrow('RUNTIME_BUDGET_CONFIG_INVALID');
+ const legacy=fixture();
+ for(const m of legacy.models)m.max_tokens=64000;
+ for(const q of legacy.policy.real.callPolicies)q.outputLimit=40000;
+ const legacyService=runtimeAdmissionService(legacy.user,legacy.admin,legacy.policy);
+ expect((await legacyService.prepare(legacy.input)).context.maxOutputTokens).toBe(20000);
 });

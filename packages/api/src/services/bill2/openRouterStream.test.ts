@@ -128,9 +128,9 @@ it('uses the same full-generation deadline for streaming keepalives with no POST
  }})));
  try{
   const adapter=adapterFor(transport),send=await adapter.prepareDispatch({input:body},identity,observe),pending=send().then(v=>{ended=true;return v;});
-  await vi.advanceTimersByTimeAsync(119_999);expect(ended).toBe(false);expect(observe).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(239_999);expect(ended).toBe(false);expect(observe).toHaveBeenCalledOnce();
   await vi.advanceTimersByTimeAsync(1);const result=await pending;expect(result).toMatchObject({complete:false,transportIssue:'body_timeout'});
-  expect(adapter.evidence(result,identity,'response')).toMatchObject({providerId:'gen-stream',cost:null,final:false});expect(transport).toHaveBeenCalledOnce();expect(timeout).toHaveBeenCalledWith(120_000);
+  expect(adapter.evidence(result,identity,'response')).toMatchObject({providerId:'gen-stream',cost:null,final:false});expect(transport).toHaveBeenCalledOnce();expect(timeout).toHaveBeenCalledWith(240_000);
  }finally{timeout.mockRestore();vi.useRealTimers();}
 });
 
@@ -179,7 +179,7 @@ it('E1 shape: v4 reasoning-only frames up to the deadline stay incomplete, unpri
  }}),{headers:{'x-generation-id':'gen-stream'}}));
  try{
   const adapter=adapterFor(transport),send=await adapter.prepareDispatch({input:frozen},identity,chunk=>observed.push(chunk)),pending=send().then(v=>{ended=true;return v;});
-  await vi.advanceTimersByTimeAsync(119_999);expect(ended).toBe(false);
+  await vi.advanceTimersByTimeAsync(239_999);expect(ended).toBe(false);
   await vi.advanceTimersByTimeAsync(1);const result=await pending;
   expect(result).toMatchObject({complete:false,transportIssue:'body_timeout',generationId:'gen-stream'});
   expect(adapter.evidence(result,identity,'response')).toMatchObject({providerId:'gen-stream',cost:null,final:false});

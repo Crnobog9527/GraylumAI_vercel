@@ -19,7 +19,7 @@ it('starts the shared batch budget before auth and pins the platform limit to 30
  mocks.handle.mockImplementation(async({createContext})=>{
   const first=await createContext();clock+=100_000;const second=await createContext();
   expect(first.runtimeBudget).toBe(second.runtimeBudget);
-  expect(first.runtimeBudget.workDeadline).toBe(255_010);
+  expect(first.runtimeBudget.workDeadline).toBe(265_010);
   expect(second.runtimeBudget.remainingPersistence()).toBe(135_000);
   expect(()=>second.runtimeBudget.assertCanStart(120_000)).toThrow('TIME_BUDGET');
   return new Response('bounded');
