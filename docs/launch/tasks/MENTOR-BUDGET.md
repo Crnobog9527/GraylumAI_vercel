@@ -1,77 +1,133 @@
-# MENTOR-BUDGET 实施方案（总控已审；容量预检阻断）
+# MENTOR-BUDGET 实施方案与交接
 
-基于 staging `314fde20ec73be1e4f08cae50d10caaaa859334b`；风险 high。
-总控审阅决定：[2026-09-30 审查评论](https://github.com/Crnobog9527/GraylumAI_vercel/pull/542#issuecomment-5910051123)。已接受下列修订；第一步容量预检复现超限，按 Owner 停止条件报告。尚未修改生产服务代码、数据库、配置或真实模型请求。
+风险 high；继续 PR #542 的既有分支，原始起点 staging `314fde20`。
+按[方案审查](https://github.com/Crnobog9527/GraylumAI_vercel/pull/542#issuecomment-5910051123)和
+[容量决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/542#issuecomment-5911038927)实施。
+只改服务端、管理 API 和相关测试；没有 SQL、载荷去重、后台页面、staging 配置写入或真实模型调用。
 
-## 配置、冻结与管理 API
+## 配置与管理 API 契约
 
-- 优先复用 `system_settings`：一个版本化的 `runtime_purpose_budgets` 配置，包含 `interactive`、`organize`、`report` 三种用途。报告只预留配置，不启用 B 的生成入口。
-- interactive/report 保存 `inputBytes`、`maxOutputTokens`、`historyItems`；organize 只保存 `inputBytes`、`historyItems`，回答上限唯一来源仍为 `v3_summary_max_tokens`，get 标明来源，不复制一份可写值。回答长度单位是 token，不把 token 当字数。用途由服务端判定，不能由普通调用者提供预算。
-- 不建表、不新增 RPC；复用管理员校验、service-role 设置写入和既有客户端禁止 DML 的权限。JSON 可序列化为设置字符串，兼容当前只接受标量的设置面板读取契约。
-- 拟新增 `mentorBudget.get` / `mentorBudget.update` 管理接口（均使用 `adminProcedure`）。get 返回 schemaVersion、三用途配置、来源（legacy/configured）、有效限制和安全硬上限；update 接收完整三用途配置，严格拒绝未知字段、非整数、负数及越界值，保存后读回；同时仅在 settings.ts 现有按 key 校验函数增加一个 if 分支，拒绝通用设置接口写该 key；不碰 admin.ts，settings.test.ts 只追加用例。
-- 新执行完成 replay 查找后再读取配置，并冻结用途及解析后的预算到既有 Runtime payload/BILL2 input；执行和恢复只读快照。旧快照继续按原规则解释。
-- 初始无配置时完全沿用旧路径：OPC 输入 64000 bytes、历史 100；fixture 输出 1000；真实输出实际是 min(报价输出、模型输出、20000)，不是固定 1000；整理沿用现有 `v3_summary_max_tokens`（默认 2048）及原历史策略。get 明确展示继承来源，不自动落库或把所有真实输出改成 1000。
-- 显式配置后统一联动模型容量、报价、安全硬上限及 MODEL-REASONING 校验；移除 admission/execute 中重复的 20000 输出截断，并统一 additionalInstructions 的 UTF-8 容量校验。保留原“先裁历史；必需内容装不下则拒绝”的处理。
-- 建议系统硬上限：输入 1,000,000 bytes、输出 128,000 tokens、历史 1000 条；有效值仍不能越过模型和批准报价。执行 payload 现有 262144-byte 数据库限制单独检查，不能靠输入上限掩盖。具体边界须经本地既有表约束验证；若目标必须修改 SQL，停下报总控。
+复用 `system_settings` 的字符串 JSON 值 `runtime_purpose_budgets`、`adminProcedure` 和现有服务端写入权限。
+MODEL-REASONING 配置仍负责模型/用途的思考参数和线路能力；预算是宿主用途设置，准入再与具体模型和批准报价求交集。
+没有新表、RPC、账本或配置权威。专用 `mentorBudget` router 是既有管理 API 下的两个过程，复用原权限，避免通用设置接口绕过结构校验。
+`settings.ts` 只在既有按 key 校验函数加一个 if；没有改 `admin.ts`。
 
-## 超时方案
+`mentorBudget.get`：无参数，管理员 query。返回：
 
-- 函数 `maxDuration=300` 保持不变。拟将单次模型上限从 120s 放宽至 240s，工作截止从 255s 放宽至 265s，持久化截止保持 285s：保留 20s 结算/持久化、15s HTTP 收尾余量。
-- 调用实际超时取 `min(240s, 剩余工作时间)`，而不是要求新调用必须还剩完整 240s；最低派发余量改为 60s，命名常量；剩余时间不足时不派发，避免人为制造未知结果和冻结预扣。该值必须覆盖取凭证、claim、真正发送和响应体读取；每次发送前重新核对截止，keepalive 不续期。
-- 官方费用查询最多 45s，且不能越过请求剩余截止；不为了等回执挤占持久化余量。无足够时间时保留待恢复状态。
-- 已派发超时仍为结果未知，不伪装为未发送、不自动重发、不重复扣费；未派发证明和现有原身份恢复机制保留。外部系统不可用时，只能保证请求有界退出并保留恢复语义，不能承诺每次都能在截止前成功写库。
+- `version: 1`、`source: legacy | configured`、`config: null | 配置对象`。
+- `limits: { inputBytes: { interactive: 90000, organize: 112000, report: 90000 }, maxOutputTokens: 128000, historyItems: 1000 }`。
+- `organizeOutput: { source: "v3_summary_max_tokens", maxOutputTokens }`，仍只读原设置，合法 128–4096，未设置默认 2048。
+- `legacy` 描述原行为：OPC 输入 64000 bytes、历史 100；fixture 回答 1000 tokens；真实回答 `min(批准报价输出, 模型输出, 20000)`；附属整理历史 0；report 未启用。
 
-## 预扣与止损（按总控决定，不改算法）
+get 返回配置与安全上限，不声称返回所有模型/报价的即时有效预算。实际有效值在新执行准入时求交集并冻结。
 
-保留当前“选中报价的最大 upperUsd × maxCalls”预扣、call claim、冻结费用展示和供应商实际费用结算，不改 SQL 或账务契约。按实际发送内容估算留给 RUNTIME-PROD 第 ④ 项，不在本 PR 实现。
+`mentorBudget.update`：管理员 mutation，完整替换以下严格对象，保存成功后返回与 get 相同的读回视图：
 
-用途预算不得越过模型和批准报价；超过时沿用收窄或拒绝规则。`0108_runtime_staging_window.sql` 要求 run.callPolicy 与批准窗口条目完全一致，原报价保持不变。需要调整 staging 报价时，只在 PR 列出模型/线路、现有与建议输入/输出上界及成本影响，由总控另请 Owner 批准，本任务不写 staging 数据。
+```json
+{
+  "version": 1,
+  "interactive": { "inputBytes": 64000, "maxOutputTokens": 1000, "historyItems": 100 },
+  "organize": { "inputBytes": 64000, "historyItems": 0 },
+  "report": { "inputBytes": 64000, "maxOutputTokens": 1000, "historyItems": 100 }
+}
+```
 
-## 提示缓存：已知与待证
+上例仅说明写入结构，不是要自动写入的新默认值。未设置该 key 时沿用原默认路径；特别是不能把真实模型原报价输出自动改成 1000。
+inputBytes 必须为 1024 至各用途硬上限的整数；输出 1–128000 tokens；历史 0–1000 条。拒绝未知字段、分数、负数、越界和 organize.maxOutputTokens。
+普通用户为 FORBIDDEN，匿名为 UNAUTHORIZED；通用单条/批量设置接口均拒绝该 key。存储失败不返回成功。
+报告配置仅预留给 B，本 PR 没有报告调用入口。前端单位应写“token”，不可显示为字数。
 
-- 官方资料说明可以从 `usage.prompt_tokens_details.cached_tokens`、generation/Activity 费用看到缓存情况；DeepInfra 描述的是相同前缀的 KV 复用。这不能证明当前 `deepseek/deepseek-v4.1-flash` 的 `deepinfra/fp8` 路线已经命中或采用某个折扣。
-- 本地 evidence 路径保留 SDK usage，并以响应 `usage.cost` / 官方查询 `total_cost` 结算；没有当前线路真实回执，命中率和实际优惠结论为 NOT_VERIFIED。
-- 实施阶段检查 Skill 固定内容是否已在动态上下文之前；只有小幅调整且不改变指令/计费语义时才纳入。不得把缓存缺失记为零，不启用响应缓存或另建缓存系统。
-- 来源：[OpenRouter 缓存文档](https://openrouter.ai/docs/guides/best-practices/prompt-caching)、[DeepInfra 前缀缓存说明](https://deepinfra.com/blog/token-verbosity)。
+## 准入、冻结与默认兼容
 
-真实测试只提案、不执行：建议最多 6 次固定线路请求（3 次现有前缀、3 次稳定前缀；首个冷请求加两次不同后缀），使用合成内容，每次最多约 64KB 输入和 256 输出 tokens。按运行前批准报价计算冷缓存最坏总费用，建议申请总额不超过 US$0.20；报价算出的最坏值超过该额度则重新报批。当前尚未读取有效报价金额，不能把这个申请上限写成已核实预计花费。不开报告长输出实测、不自动补样；必须先在 PR 补全精确报价和预计费用，由总控请 Owner 批准后再跑。
+先查询原 requestId 的 replay，再读用途设置。新执行按服务端用途选择预算；模型限制、批准报价和 MODEL-REASONING 继续校验。
+冻结解析后的输入预算、输出和历史条数到现有 Runtime/BILL2 payload；执行/恢复只读快照，后台修改不影响已准入记录。
+附属整理输出唯一来源仍是 v3_summary_max_tokens；独立整理同样遵循此来源。附属整理的历史只取该执行已冻结的主调用历史子集，不扩大 Session 依赖。
 
-## 验证和交付
+无配置保持原输入、历史、输出和预扣路径。唯一新增安全拒绝是两份完整冻结载荷无法存入数据库，或含 PostgreSQL 无法保存的字符。
+历史超限仍先裁旧历史；必需内容或最终请求超限仍拒绝，不静默裁剪 Skill、当前输入或工具结果。
+额外指令不再单独固定为 8000 字符，但计入用途的完整输入字节预算。数据库、模型、报价限制不随后台配置放大。
+每次新准入增加一次用途设置查询；replay 不增加读取。这一有意的往返增量已纳入 AC-0/AC-1 集成断言。
 
-1. 管理员保存读回；普通/匿名直调专用及通用 API、直写表被拒；非法和超范围值拒绝。直接表权限用本地数据库真实角色验证，不用 mock 冒充。
-2. 配置变更仅作用新执行；旧执行、重复 requestId、断线恢复保持旧预算和原身份。
-3. 默认路径回归；报价/模型/思考预算联动；裁历史与必需输入超限；长 Skill 资源边界；预扣/claim/费用展示一致。
-4. 假时钟及可中断 transport 覆盖慢凭证、慢 claim、连续调用、流式 keepalive、响应体超时、结算与持久化超时、未知结果恢复与不重复扣费；整次请求有界收尾。
-5. 运行相关单测、API/Web 类型和 lint、大小检查、BILL2/Runtime 本地集成及全部必需远程 CI/Security。真实 provider/Preview 验证另待额度授权，不能以模拟结果冒充。
-6. CI 全绿后在 PR 报增量，交总控审；总控通过后才标 ready 并单独请求机器人复审。high 合并另待 Owner，不自行合并。
+## 262144 字节边界与硬上限推导
 
-## 写入协调
+两个现有 CHECK 分别来自迁移 0106 `runtime_executions.payload` 和 0105 `bill2_runs.payload`，均为
+`octet_length(payload::text) <= 262144`。不改 SQL、不去重、不改变旧快照结构；只添加可选冻结预算字段。
+准入先构建完整 Runtime 和 BILL2 对象，再按 PostgreSQL JSONB 文本计量（UTF-8、逗号/冒号空格、字符串转义、指数数字展开）。
+任一超限在调用 `runtime_admit` 前返回 BAD_REQUEST，消息包含 `RUNTIME_FROZEN_PAYLOAD_TOO_LARGE` 与中文说明。
+因此没有 execution/run/pre-deduct 写入，也没有模型派发。不可保存字符使用 `RUNTIME_FROZEN_PAYLOAD_INVALID`。
+最终逐份检查始终执行，不将经验硬上限当成对任意扩展元数据的绝对保证。
 
-- Owner 已允许本任务先于暂停的 #497 修改 Runtime/OPC/BILL2；不修改 #497 分支。
-- #537 当前修改 SQL 的 runtime_start，与本方案 TS 范围不重叠；本任务不写 SQL。
-- 总控已解决 #540 重叠安排：本任务只在 settings.ts 原有按 key 校验函数加一个 if，settings.test.ts 只新增用例，不碰 admin.ts；后续同步冲突由 #540 处理。
-- 代码大小基线只手动更新本任务文件条目，不执行全量 update。后台页面另交 Claude。
+最坏合法组合采用现有 OPC 8000 字符输入（全部为可保存控制字符，JSON 中占 48000 bytes）、
+12000 字符整理指令、24000 字符整理输入（中文与转义字符混合），交互的 Skill + 额外指令填满输入预算，
+历史条数 1000，交互输出上限 128000，保留 OPC token 和重复 request.input。
+附属整理的完整输入计量恰好为 112000；交互恰好为 90000。
+字段字符上限与用途总字节上限必须同时满足：不声称所有字段各自采用最大转义膨胀后仍合法；这种组合会先被完整输入检查拒绝。
 
-## 第一实施步：payload 容量预检
+在该组合中 BILL2 大小为 `interactiveBytes + 48000 + organizeBytes + 349`。
+要求至少 8192 余量，则两个用途预算之和不应大于 `262144 - 8192 - 48000 - 349 = 205603`。
+选取可同时成立的 `90000 + 112000 = 202000`，额外留下 3603 字节结构余量，总余量 11795。
+整理单独运行并不受这个联合上限挤压，但同一 organize 配置还服务附属整理，因此统一采用 112000。
+report 没有执行入口，保守复用交互加附属整理的封套和 90000 上限，B 接线时还必须再次验证真实报告结构。
 
-约束来源：迁移 0106 的 `runtime_executions.payload` 和迁移 0105 的 `bill2_runs.payload` 均要求 `octet_length(payload::text) <= 262144`；未发现后续迁移放宽。输入检查衡量模型内容，SQL 衡量完整 JSONB 冻结记录，两者不能互相替代。
+以下是独立、无网络 PostgreSQL 17 对真实准入捕获参数的实测；报告行是保守封套投影，不冒充报告执行：
 
-使用未修改的 `runtimeAdmissionService`、真实 Skill loader/context 筛选和合成 Skill/source；仅将数据库和身份查询替换为测试夹具，捕获 runtime_admit 的原参数。输入为现有 OPC 上限 8000 个中文字符，附属整理输入和额外指令均在现有限制内。将捕获的参数送入本任务独立、无网络的 PostgreSQL 17，以与迁移相同的 CHECK 逐条验证实际 JSONB 字节数；不是远端 staging 验证，也不是完整数据库集成。
+| 用途/组合 | 用途输入计量 | Runtime JSONB | BILL2 JSONB | 距存储上限余量 |
+| --- | ---: | ---: | ---: | ---: |
+| 交互 + 附属整理 | 90000 / 112000 | 249012 | 250349 | 11795 |
+| 独立整理 | 112000 | 159636 | 160522 | 101622 |
+| 报告预留 + 附属整理封套 | 90000 / 112000 | 249007 | 250344 | 11800 |
 
-| 合成资源字节数 | 准入输入计量（含余量） | Runtime JSONB | BILL2 JSONB | PostgreSQL CHECK |
-| --- | ---: | ---: | ---: | --- |
-| 46000 | 83739 | 146690 | 148026 | 两者通过 |
-| 162000 | 199739 | 262690 | 264026 | 两者拒绝（check_violation） |
+自动测试覆盖交互/整理预算恰好上限可准入、必需内容增加 1 byte 在预扣前拒绝、配置硬上限 +1 保存拒绝，
+以及完整 BILL2 payload 恰好 262144 接受、262145 拒绝；分别覆盖两份 payload 的边界判断。
+46KB 合成资源正常准入。此证据不是未发布 Skill 2.6.0 本体或 12000 字完整报告的真实验收。
+原预检中 200000 输入预算可产生 262690 / 264026 的冻结记录，证明仅扩大输入数值不够；现在该组合先明确拒绝。
 
-第二例通过 200000-byte 输入准入，却分别超过两个存储上限 546 / 1882 bytes。冻结载荷包含独立的 input、request.input 和 attachedOrganizer.input 等，不止一份当前轮输入。历史通常单独存储，并不表示所有 20 万字节的模型上下文都会超限。
+## 超时与账务
 
-**边界结论：FAIL（200000-byte 输入预算不能单独保证可冻结），不是 Skill 2.6.0 本体不可用的结论。** 46000-byte 样本只有合成资源，不是未发布 Skill 的完整内容；不能据此声称真实 Skill 已验收。复现测试见 `packages/api/src/services/runtime/mentorBudgetPayload.test.ts`。
+函数 maxDuration 保持 300s。单次模型最多 240s；共享工作截止 265s；持久化截止 285s，
+留 20s 结算/持久化以及 15s HTTP 收尾余量。常量分别位于 openRouterPolicy.ts / budget.ts。
+实际调用超时为 min(240s, 剩余工作时间)，最低派发剩余为 60000ms，取凭证、claim 后和真正发送前均再检查。
+不足 60s 不派发；恰好 60s 可以派发；keepalive 不续期，响应体读取同样受固定 signal 限制。
+官方费用查询仍最多 45s，必须完整装入剩余工作预算。数据库 fetch 在共享 285s 截止取消。
+外部不可用只能保证有界退出和保留恢复身份，不能保证截止前写库必然成功。
 
-按 Owner“装不下就停下报告”的指令，尚未继续预算/超时业务实现，也没有修改 SQL。此结果尚不能证明必须改 SQL：推荐最小路径是在 TS 准入前同时检查完整 Runtime 与 BILL2 冻结载荷，优先消除可安全去除的重复内容；不能安全容纳的组合在预扣前明确拒绝。不能只把模型输入限额一刀切减去本样本的 1882 bytes，也不能静默裁剪必要内容。若产品要求完整支持所有接近 200000 bytes 的合法组合，先评估 TS 去重与旧快照兼容是否足够，再决定是否必须另立 SQL 范围。将此具体结果交总控后再推进。
+保留既有“选中报价最大 upperUsd × maxCalls”的预扣、call claim、冻结费用展示及实际供应商费用结算；
+实际发送内容估算留给 RUNTIME-PROD ④。本 PR 不改报价、不改 SQL/账务契约。
+已派发超时仍为 unknown/pending，保留原请求身份，不重发、不重复扣费；未派发证明沿用原机制撤销本次授权。
 
-## Handoff
+## 提示缓存评估和真实调用提案
 
-- Done：按总控四项决定与 P2 要求修订方案；完成首步容量预检并复现上述失败。最新远端 staging 为 `91a90e39410feba17bede03e83bddd2519b11be6`，新增 #536/#541；AGENTS 未变，已阅读 ENGINEERING 变化。任务分支保持原候选起点，未把他人改动混入。
-- Next：总控处理已报告的容量边界后继续服务端实施。之后仍按 CI 全绿 → 报增量 → 总控审 → ready/机器人复审交付。
-- Blockers：200000-byte 输入预算可产生超限冻结载荷；真实模型报价精确费用与额度尚未补齐/批准。
-- Validation：两项合成准入容量测试 PASS（成功复现正/反边界）；PostgreSQL 17 约束测试 PASS（两项接受、两项按预期拒绝）；API 类型检查、该测试 ESLint、代码大小和 diff 检查 PASS；目标容量保证 FAIL。未执行产品全量回归、真实模型调用、远端数据库操作或最终语义审查；远程 CI 单独记录。
+源码确认 Skill 固定内容已经在 additionalInstructions 之前，当前请求前缀无需重排。交换历史可能改变后缀，不能据此承诺命中。
+OpenRouter 回执原始 usage 保留在私有证据（流式保存原 SSE），费用取官方 usage.cost / total_cost，缓存优惠若供应商已反映其中，就随实际费用结算；不自行按缓存 token 重算。
+当前 OpenRouter evidence 的归一化 usage 仅含 sdkResponse，未映射顶层 cachedTokens；BILL2 聚合因此不能把统计页 cached_tokens 的 null 当零或当无缓存。
+本 PR 不改账务投影或缓存语义。
+
+2026-09-30 只读[官方线路目录](https://openrouter.ai/api/v1/models/deepseek/deepseek-v4.1-flash/endpoints)结果：
+`deepinfra/fp8` context 1048576，最大输出 131072；输入 $0.14/M，输出 $0.42/M，缓存读取 $0.0042/M。
+目录同时返回 supports_implicit_caching=false，仅有价格字段不能证明本产品当前请求会命中。
+参见[OpenRouter 缓存文档](https://openrouter.ai/docs/guides/best-practices/prompt-caching)。
+当前 Supabase 连接器可访问项目列表为空；未获取 staging 当前批准窗口与实际回执。
+因此实际命中率、cached tokens 和实际费用对应关系为 NOT_VERIFIED，没有读取密钥或用历史评论冒充当前回执。
+
+真实测试计划仍为最多 6 次固定线路合成请求、每次最多 64KB 输入/256 输出 tokens，三次现有前缀、三次相同固定前缀不同后缀；
+不测长报告、不补样，未知即停。按当前公开价格及现有全模型 context 保守算法：
+`(1048576 × 0.14 + 256 × 0.42) / 1000000 = $0.14690816/次`，六次 `$0.88144896`，不计缓存折扣。
+这是公开价格下的精确提案计算，不是已核实的 staging 批准报价，原 $0.20 建议不足，应撤回。
+若窗口仍用更大输出报价，预扣还会更高。运行前仍须补齐该窗口的有效报价、余额/次数和绑定，再由总控请 Owner 批准；未批准不发请求。
+没有当前报价读取证据，不能宣称“精确批准报价费用已补齐”或开始实测。
+
+需总控另行核对/批准的 staging 清单（本 PR 不写入）：
+
+- 交互 deepseek/deepseek-v4.1-flash / deepinfra/fp8：若现有 inputLimit < 90000，目标输入报价至少需 90000；配置默认不自动放宽。
+- 独立整理模型：若要使用整个新输入范围，inputLimit 至少需 112000，仍受该模型 context 和已批准线路约束；输出保持 v3_summary_max_tokens。
+- 实测的输出上界 256 和公开保守费率不能直接替换现有窗口条目；由总控核对当前条目后形成一次额度申请。
+- 交互新输出值尚无真实质量/时延证据，本 PR 不指定后台新默认；report 未启用。后续长输出若需扩大批准 outputLimit/upperUsd，单独列实测结果再配置。
+
+## 验证与 Handoff
+
+- Done：预算配置与冻结、两份载荷预检、超时调整、管理权限和错误映射，默认兼容及超时回归测试。
+- 本地已通过：完整 API 回归（后续新增边界用例另计）、API/Web 类型、API lint、大小检查；BILL2 隔离集成 78/78；PostgreSQL 字节计量及三用途封套测量。
+- Next：完成当前候选 Runtime 集成/CI，CI 全绿后在 PR 报增量交总控审；通过后才 ready 和独立机器人复审。
+- 未运行：真实模型、远端 DB/配置变更、后台页面验收、最终独立语义审查。真实缓存证据和批准报价读取受连接器项目可见性阻断。
+- #497 的重叠写入已获授权，未动其分支；#537 SQL 不碰；#540 后续处理 settings.ts 一处分支同步。
+- high 合并另需 Owner 批准，不自行合并；回滚可撤回本 PR，新增设置不影响旧版本，旧冻结记录仍可按原语义恢复。

@@ -5,6 +5,10 @@ import { logger } from '../../lib/logger';
 import { DatabaseReadError } from '../../lib/databaseReadError';
 
 const failures = {
+  RUNTIME_FROZEN_PAYLOAD_TOO_LARGE: ['BAD_REQUEST', 'RUNTIME_FROZEN_PAYLOAD_TOO_LARGE：本轮内容超过可保存的容量，请缩短本轮输入后重试；未发起模型调用或扣费。'],
+  RUNTIME_FROZEN_PAYLOAD_INVALID: ['BAD_REQUEST', 'RUNTIME_FROZEN_PAYLOAD_INVALID：本轮内容包含无法保存的字符，请检查输入；未发起模型调用或扣费。'],
+  RUNTIME_BUDGET_CONFIG_UNAVAILABLE: ['SERVICE_UNAVAILABLE', '暂时无法读取用途预算，请稍后重试。'],
+  RUNTIME_BUDGET_CONFIG_INVALID: ['PRECONDITION_FAILED', '用途预算配置无效，请管理员检查设置。'],
   RUNTIME_REASONING_NOT_CONFIGURED: ['PRECONDITION_FAILED', '请在后台为这个模型设置“交互对话”的思考方式。'],
   RUNTIME_REASONING_ROUTE_MISMATCH: ['PRECONDITION_FAILED', '后台思考设置的供应商线路与测试窗口报价不一致，请管理员核对完整线路。'],
   RUNTIME_REASONING_CONFIG_INVALID: ['PRECONDITION_FAILED', '模型思考设置不可用，请管理员核对目录、用途、线路能力与输出上限。'],

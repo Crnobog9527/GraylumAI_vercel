@@ -67,13 +67,15 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
  }
  async function request(path:string,key:string,body?:string,send?:()=>Promise<TransportObservation>,streamModel?:string,
   onChunk?:(chunk:string)=>void,agentTurn=false):Promise<TransportObservation> {
-  try{options.budget?.assertCanStart(body===undefined?OPENROUTER_LOOKUP_TIMEOUT_MS:OPENROUTER_RESPONSE_TIMEOUT_MS);}
+  let timeout=OPENROUTER_LOOKUP_TIMEOUT_MS;
+  try{if(body===undefined)options.budget?.assertCanStart(timeout);
+   else timeout=options.budget?.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS)??OPENROUTER_RESPONSE_TIMEOUT_MS;}
   catch(error){
    if(body===undefined||!send)throw error;
    const proof=new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');
    unstarted.set(proof,{requestHash:createHash('sha256').update(body).digest('hex'),send});throw proof;
   }
-  const signal=AbortSignal.timeout(body===undefined?OPENROUTER_LOOKUP_TIMEOUT_MS:OPENROUTER_RESPONSE_TIMEOUT_MS);
+  const signal=AbortSignal.timeout(timeout);
   const response=await transport('https://openrouter.ai/api/v1/'+path,{method:body===undefined?'GET':'POST',redirect:'error',
    headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body,signal});
   // This fixed official endpoint is the only source of the optional lookup ID.
@@ -103,7 +105,7 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
   return {...raw,httpStatus:response.status,complete,transportIssue,...(generationId?{generationId}:{})};
  }
  async function prepareDispatch(input:unknown,identity:CallIdentity,onChunk?:(chunk:string)=>void){
-   options.budget?.assertCanStart(OPENROUTER_RESPONSE_TIMEOUT_MS);
+   options.budget?.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
    if(identity.provider!=='openrouter'||identity.protocol!=='openrouter-chat-v1')throw new Error('BILL2_PROVIDER_IDENTITY_DENIED');
    // Aliases such as :online can enable research without an explicit plugin.
    if(!/^[a-z0-9-]+\/[a-z0-9._-]+$/i.test(identity.model)||identity.model.startsWith('openrouter/'))throw new Error('BILL2_PROVIDER_MODEL_DENIED');
@@ -142,7 +144,7 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
      }))
       throw new Error('BILL2_PROVIDER_REQUEST_DENIED');
    const key=await credential({...identity,provider:'openrouter',protocol:'openrouter-chat-v1'});
-   options.budget?.assertCanStart(OPENROUTER_RESPONSE_TIMEOUT_MS);
+   options.budget?.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
    let used=false;
    const send:()=>Promise<TransportObservation>=()=>{
     if(used)throw new Error('BILL2_DISPATCH_CAPABILITY_CONSUMED');

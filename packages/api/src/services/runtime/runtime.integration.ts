@@ -10,6 +10,7 @@ import {readRuntimeView,retainedOutputReason} from './view';
 import { runtimeExecutor } from './execute';
 import {createRuntimeBudget,withRuntimeBudget} from './budget';
 import {runtimeActor} from './actor';
+import {postgresJsonbBytes,assertFrozenPayloads} from './payloadSize';
 import { runtimeAdmissionService } from './admission';
 import { activateRuntimeCandidate } from './matching';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
@@ -236,7 +237,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool-turn','fast-t
    }
    if(mode==='late-receipt'&&name==='bill2_record'&&posts===1)elapsed=134_000; // Include the first SQL/auth persistence wait.
    if(mode==='late-receipt'&&name==='bill2_record'&&posts===2){elapsed=256_000;return {...result,error:{message:'Synthetic lost commit response'}};}
-   if(mode.startsWith('delayed-')&&name==='bill2_dispatch'&&result.data?.dispatch||mode==='early-db'&&name==='runtime_execution'&&args.p_action==='begin'||mode==='history-delay'&&name==='runtime_session_items'&&args.p_action==='freeze')elapsed=136_000;
+   if(mode.startsWith('delayed-')&&name==='bill2_dispatch'&&result.data?.dispatch||mode==='early-db'&&name==='runtime_execution'&&args.p_action==='begin'||mode==='history-delay'&&name==='runtime_session_items'&&args.p_action==='freeze')elapsed=206_000;
    return result;
   }};
   const adapter=openRouterAdapter({budget,allowWorkspaceRead:true,credential:async()=> 'SYNTHETIC',transport:async(_url,init)=>fetch(endpoint,init)});
@@ -298,7 +299,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['header','timeout',
  const recovered=mode==='header'||mode==='timeout';
  const nativeTimeout=AbortSignal.timeout.bind(AbortSignal);
  // Exercise native fetch/body abort without a two-minute wall-clock sleep.
- const timer=mode==='timeout'?vi.spyOn(AbortSignal,'timeout').mockImplementation(ms=>nativeTimeout(ms===120_000?50:ms)):null;
+ const timer=mode==='timeout'?vi.spyOn(AbortSignal,'timeout').mockImplementation(ms=>nativeTimeout(ms===240_000?50:ms)):null;
  const f=await fixture(),model=randomUUID(),windowId=randomUUID(),providerId='gen-interrupted-'+windowId;
  await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic interrupted body','test/interrupted','openai',true)",[model]);
  const policy={...f.billing.callPolicy[0],modelId:model,provider:'openrouter',model:'test/interrupted',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
@@ -930,11 +931,11 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    start:{prelude:2,policy:0,host:1},
-   ordinary:{prelude:2,policy:0,host:0,admission:5},
+   ordinary:{prelude:2,policy:0,host:0,admission:6},
    stream:{prelude:2,policy:0,host:0,execute:6,provider:5},
-   skill:{prelude:2,policy:0,host:0,admission:12},
+   skill:{prelude:2,policy:0,host:0,admission:13},
    execute:{prelude:2,policy:0,host:0,execute:6,provider:5},
-   skillWarm:{prelude:2,policy:0,host:0,admission:10},
+   skillWarm:{prelude:2,policy:0,host:0,admission:11},
   });
   // AC-0c: Auth verifies once per invocation and credential, plus once again
   // after the provider response (AC-0 baseline was 2/6/9/12/9).
@@ -1060,13 +1061,13 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    // The first prepare of this new package misses the Skill file cache (AC-0c).
-   oldPrepareOpening:{prelude:2,policy:0,host:5,admission:13},
+   oldPrepareOpening:{prelude:2,policy:0,host:5,admission:14},
    oldStreamOpening:{prelude:2,policy:0,host:0,execute:6,provider:5},
-   oldPrepareAnswer:{prelude:2,policy:0,host:5,admission:11},
+   oldPrepareAnswer:{prelude:2,policy:0,host:5,admission:12},
    oldStreamAnswer:{prelude:2,policy:0,host:0,execute:6,provider:14},
    // One invocation: one prelude instead of two; admission and execution unchanged.
-   opening:{prelude:2,policy:0,host:5,admission:9,execute:6,provider:5},
-   answer:{prelude:2,policy:0,host:5,admission:11,execute:6,provider:14},
+   opening:{prelude:2,policy:0,host:5,admission:10,execute:6,provider:5},
+   answer:{prelude:2,policy:0,host:5,admission:12,execute:6,provider:14},
   });
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
   // Auth verifies once per invocation, and again after each provider response.
@@ -1964,7 +1965,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['complete','missing
  const f=await fixture(),mentorId=randomUUID(),organizerId=randomUUID(),windowId=randomUUID();
  const policies=[[mentorId,'test/mentor'],[organizerId,'test/organizer']].map(([modelId,model])=>({...f.billing.callPolicy[0],modelId,model,provider:'openrouter',protocol:'openrouter-chat-v1',inputLimit:10000,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
  for(const p of policies)await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic truncation',$2,'openrouter','true')",[p.modelId,p.model]);
- await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.12,6,now()+interval '1 hour')",[windowId,[f.actorId],JSON.stringify(policies)]);
+ await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.12,6,now()+interval '2 hours')",[windowId,[f.actorId],JSON.stringify(policies)]);
  await rpc('runtime_material',{p_actor_id:f.actorId,p_session_id:f.s.sessionId,p_action:'save',p_request_id:randomUUID(),p_expected_revision:0,p_payload:{brief:'Synthetic truncation source',material:'local only',roundId:null}});
  const material=(await rpc('runtime_session_context',{p_actor_id:f.actorId,p_session_id:f.s.sessionId})).scopeMaterial;
  let firstExecutionId='';
@@ -2110,3 +2111,31 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: stopped unknown
   expect(await snapshot()).toEqual(original);
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },30000);
+
+it('RUNTIME: MENTOR-BUDGET: PostgreSQL oracle agrees on JSONB size and exact storage boundary',async()=>{
+ const samples:unknown[]=[null,{},[],{text:'中😀\n\t\b\f\r\u0001"\\,:',nested:[true,false,null,1e-7,1e21,-1.2e-10,1.23e30]},
+  ...[262144,262145].map(n=>({x:'x'.repeat(n-9)}))];
+ for(const value of samples){
+  const actual=(await db.query('select octet_length($1::jsonb::text)::int n',[JSON.stringify(value)])).rows[0].n;
+  expect(postgresJsonbBytes(value)).toBe(actual);
+  if(actual<=262144)expect(()=>assertFrozenPayloads(value,value)).not.toThrow();
+  else expect(()=>assertFrozenPayloads(value,value)).toThrow('RUNTIME_FROZEN_PAYLOAD_TOO_LARGE');
+ }
+});
+it('RUNTIME: MENTOR-BUDGET: only the service role can write and read back the existing settings table',async()=>{
+ const c=new pg.Client({connectionString});await c.connect();
+ try{
+  for(const role of ['anon','authenticated']){
+   for(const statement of ["insert into system_settings(key,value) values('runtime_purpose_budgets','{}')",
+    "update system_settings set value='{}' where key='runtime_purpose_budgets'"]){
+    await c.query('begin');await c.query('set local role '+role);
+    try{await expect(c.query(statement)).rejects.toMatchObject({code:'42501'});}finally{await c.query('rollback');}
+   }
+  }
+  await c.query('begin');await c.query('set local role service_role');
+  try{
+   await c.query("insert into system_settings(key,value) values('runtime_purpose_budgets','{}') on conflict(key) do update set value=excluded.value");
+   expect((await c.query("select value from system_settings where key='runtime_purpose_budgets'")).rows[0].value).toEqual({});
+  }finally{await c.query('rollback');}
+ }finally{await c.end();}
+});
