@@ -9,7 +9,7 @@ import {
 // sees them; they are rendered explicitly into the dialog instead.
 export const CAPTCHA_REQUIRED_MESSAGE = '请完成人机验证后重试。';
 export const CAPTCHA_EXPIRED_MESSAGE = '人机验证已过期，请重新验证。';
-const SCRIPT_ID = 'graylum-hcaptcha-explicit';
+export const HCAPTCHA_SCRIPT_ID = 'graylum-hcaptcha-explicit';
 
 type LoaderEnv = { doc: Document; win: Window };
 
@@ -20,10 +20,10 @@ export function loadHCaptcha(env: LoaderEnv = { doc: document, win: window }): P
     return Promise.resolve(loaded);
   }
   return new Promise((resolve, reject) => {
-    let script = env.doc.getElementById(SCRIPT_ID) as HTMLScriptElement | null;
+    let script = env.doc.getElementById(HCAPTCHA_SCRIPT_ID) as HTMLScriptElement | null;
     if (!script) {
       script = env.doc.createElement('script');
-      script.id = SCRIPT_ID;
+      script.id = HCAPTCHA_SCRIPT_ID;
       script.src = `${HCAPTCHA_SCRIPT_SRC}?render=explicit`;
       script.async = true;
       env.doc.head.appendChild(script);

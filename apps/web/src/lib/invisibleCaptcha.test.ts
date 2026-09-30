@@ -1,6 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { HCaptchaClient } from '@/lib/authCaptcha';
-import { CAPTCHA_FAILED_MESSAGE, CAPTCHA_UNAVAILABLE_MESSAGE, invisibleCaptchaOptions } from './invisibleCaptcha';
+import {
+  CAPTCHA_FAILED_MESSAGE,
+  CAPTCHA_LOAD_TIMEOUT_MS,
+  CAPTCHA_UNAVAILABLE_MESSAGE,
+  invisibleCaptchaOptions,
+} from './invisibleCaptcha';
 
 type Holder = { attrs: Record<string, string>; removed: boolean; setAttribute: (k: string, v: string) => void; remove: () => void };
 
@@ -95,5 +100,65 @@ describe('invisibleCaptchaOptions', () => {
     await expect(invisibleCaptchaOptions(fake.env, 'site-key')).rejects.toThrow(CAPTCHA_UNAVAILABLE_MESSAGE);
     expect(fake.client.render).not.toHaveBeenCalled();
     expect(fake.attached).toEqual([]);
+  });
+});
+
+describe('invisibleCaptchaOptions when the script never loads', () => {
+  afterEach(() => vi.useRealTimers());
+
+  // A document whose script requests stay pending until the test fires load/error.
+  function stalledEnv() {
+    type El = { id: string; src: string; async: boolean; listeners: Record<string, Array<() => void>>;
+      addEventListener: (e: string, h: () => void) => void; remove: () => void; setAttribute: (k: string, v: string) => void };
+    const byId = new Map<string, El>();
+    const scripts: El[] = [];
+    const make = (): El => ({
+      id: '', src: '', async: false, listeners: {},
+      addEventListener(e, h) { (this.listeners[e] ??= []).push(h); },
+      remove() { if (byId.get(this.id) === this) byId.delete(this.id); },
+      setAttribute() {},
+    });
+    const doc = {
+      getElementById: (id: string) => byId.get(id) ?? null,
+      createElement: vi.fn((tag: string) => { const el = make(); if (tag === 'script') scripts.push(el); return el; }),
+      head: { appendChild: (el: El) => { byId.set(el.id, el); } },
+      body: { appendChild: vi.fn() },
+    };
+    const win: { hcaptcha?: HCaptchaClient; addEventListener: () => void; removeEventListener: () => void } = {
+      addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    };
+    return { env: { doc: doc as unknown as Document, win: win as unknown as Window }, win, scripts, byId };
+  }
+
+  it('bounds loading to CAPTCHA_LOAD_TIMEOUT_MS, drops the stalled script, and loads afresh next time', async () => {
+    expect(CAPTCHA_LOAD_TIMEOUT_MS).toBe(15_000);
+    vi.useFakeTimers();
+    const fake = stalledEnv();
+    const first = invisibleCaptchaOptions(fake.env, 'site-key');
+    const settled = expect(first).rejects.toThrow(CAPTCHA_UNAVAILABLE_MESSAGE);
+    await vi.advanceTimersByTimeAsync(CAPTCHA_LOAD_TIMEOUT_MS);
+    await settled;
+    expect(fake.byId.size).toBe(0);
+
+    const client = {
+      getResponse: vi.fn(), reset: vi.fn(), render: vi.fn(() => 1), remove: vi.fn(),
+      execute: vi.fn(async () => ({ response: 'token-after-retry' })),
+    };
+    const second = invisibleCaptchaOptions(fake.env, 'site-key');
+    expect(fake.scripts).toHaveLength(2);
+    fake.win.hcaptcha = client;
+    fake.scripts[1].listeners.load.forEach(handler => handler());
+    await expect(second).resolves.toEqual({ captchaToken: 'token-after-retry' });
+    expect(fake.byId.size).toBe(1); // the loaded script stays for later attempts
+  });
+
+  it('does not time out the challenge itself (execute may wait for a person)', async () => {
+    vi.useFakeTimers();
+    let finish: (value: { response: string }) => void = () => {};
+    const fake = fakeEnv(vi.fn(() => new Promise<{ response: string }>(resolve => { finish = resolve; })));
+    const pending = invisibleCaptchaOptions(fake.env, 'site-key');
+    await vi.advanceTimersByTimeAsync(CAPTCHA_LOAD_TIMEOUT_MS * 4);
+    finish({ response: 'solved-late' });
+    await expect(pending).resolves.toEqual({ captchaToken: 'solved-late' });
   });
 });
