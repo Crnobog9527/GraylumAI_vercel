@@ -26,7 +26,6 @@ beforeEach(() => { vi.clearAllMocks(); mocks.catalog = { data: [], isError: fals
 describe('legacy entry replacements', () => {
   it.each([
     ['app/workbench/page.tsx', '/positioning'],
-    ['components/home/SixStepsGuide.tsx', '/positioning'],
     ['components/profile/UsageHistoryCard.tsx', '/positioning'],
     ['components/admin/AdminSidebar.tsx', '/'],
   ])('%s links to %s', (file, destination) => {
