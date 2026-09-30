@@ -78,12 +78,11 @@ try {
   if (!/^127\.0\.0\.1:\d+$/.test(binding)) throw new Error('Unexpected port binding');
   const databaseUrl = new URL(`postgresql://${binding}/c3_disposable`);
   databaseUrl.username = 'postgres';
-  const guarded = invoke('pnpm', ['db:push'], { env: { ...env, DATABASE_URL: databaseUrl.href } });
-  report.phases.push({ name: 'unchanged-db-push-guard', exitCode: guarded.status,
-    diagnostic: diagnostic(guarded), migrations: 'NOT_RUN: push prerequisite refused local target' });
-  if (guarded.status === 0) throw new Error('Guard unexpectedly accepted local target; inspect before continuing');
+  // The retired entry is not executed; a missing command is not evidence of target rejection.
+  report.phases.push({ name: 'retired-db-push-guard', status: 'NOT_RUN',
+    reason: 'db:push and its target guard were retired; no guard check was executed' });
   // Separate experiment: same schema/locked Drizzle, synthetic config with no dotenv.
-  // Does not change or impersonate the guarded Supabase target.
+  // Uses only the synthetic local target, never a Supabase target.
   const config = resolve(temp, 'drizzle.config.cjs');
   writeFileSync(config, `module.exports = ${JSON.stringify({
     schema: resolve(root, 'packages/db/schema.ts'), dialect: 'postgresql',
