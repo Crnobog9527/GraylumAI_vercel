@@ -1895,7 +1895,7 @@
   "fn:enforce_skill_package_kind()": "ed67bc5f26db",
   "fn:enforce_skill_row_invariants()": "c505aa596426",
   "fn:erased_row_guard()": "9b8b64a3fa24",
-  "fn:erasure_closed_conversation_guard()": "53a4cf1615ec",
+  "fn:erasure_closed_conversation_guard()": "1a3efc0c4ba6",
   "fn:erasure_update_allowed(jsonb,jsonb,text[])": "9b7020d74229",
   "fn:get_system_setting_int(text,integer)": "40a5ae3ee26a",
   "fn:guard_model_setting_references()": "a799b7fc80c9",

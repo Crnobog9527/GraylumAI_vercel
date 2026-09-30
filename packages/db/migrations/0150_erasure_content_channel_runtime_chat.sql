@@ -4,6 +4,9 @@
 -- Only content-free shells remain. Money, state, identities and bill2_runs.session_ref stay.
 -- In-flight rows / locked sessions and conversations are skipped and counted for PR-C retry.
 -- PR-C follows B2; single deletion requires PR-D read/replay hardening. No remote execution here.
+-- Clarifies 0149's "DELETE stays possible": the guard does not intercept DELETE itself, but
+-- FK SET NULL/CASCADE UPDATEs still hit it. PR-C/D must delete snapshots before individual
+-- messages, or delete the whole conversation; erased snapshot source links cannot be nulled.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
@@ -143,12 +146,15 @@ BEGIN
   END LOOP;
 END $$;
 
--- conversations still permits owner UPDATEs through RLS. A client cannot mark an open
--- account's row erased, including through INSERT. The catalog-only guard runs as its owner;
--- it reads the protected request table without widening client grants.
+-- BEFORE INSERT precedes RLS: reject every erased INSERT before consulting account closure,
+-- so another user's UUID cannot reveal whether that account has an erasure request.
+-- Owner UPDATEs setting erased_at require closure; this definer does not widen client grants.
 CREATE OR REPLACE FUNCTION public.erasure_closed_conversation_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 BEGIN
+  IF TG_OP = 'INSERT' AND NEW.erased_at IS NOT NULL THEN
+    RAISE EXCEPTION 'ERASURE_INSERT_DENIED' USING ERRCODE = '42501';
+  END IF;
   IF NEW.erased_at IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM account_erasure_requests WHERE profile_id = NEW.user_id) THEN
     RAISE EXCEPTION 'ACCOUNT_ERASURE_NOT_CLOSED' USING ERRCODE = '42501';

@@ -20,6 +20,9 @@ Both matched the actual migration-before replay database after receipt:
 0150 rejects source drift before rewriting either function; exact new definitions are also accepted
 for idempotent reapplication. CREATE OR REPLACE retains owners/ACLs. The rollback contains both
 staging originals and refuses before any mutation if any B1b table has an erased row.
+Before rollback, stop all scrub callers and let their in-flight transactions finish. Its erased-row
+check takes no table lock, so it is not safe to run concurrently with scrubs. Keep callers stopped
+through rollback completion; the script cannot restore already erased content.
 
 | Table | Content cleared | Preserved identity / financial boundary |
 | --- | --- | --- |
@@ -43,11 +46,19 @@ return processed and skipped counts. Busy parent locks are skipped for PR-C retr
 precede execution locks. No profile/BILL2 run/artifact project lock or definer temporary table is added.
 
 Conversations retain client UPDATE permission: a definer trigger checks closure without widening
-client table grants. `a_erased_row_guard` executes before the existing skill-message guard and freezes
+client table grants. Every INSERT with non-NULL `erased_at` is rejected before any closure lookup,
+so its error cannot reveal another account's closure status before RLS. Normal owner INSERTs pass.
+`a_erased_row_guard` executes before the existing skill-message guard and freezes
 all erased rows, including late complete/checkpoint/tool results whose old values are NULL.
 No physical DELETE is added; tests verify existing busy-conversation DELETE refusals by row existence.
 `bill2_runs` (including `session_ref`) stays unchanged. B2 supplies restricted settlement; C retries
 and removes shells after B2. D must harden read/replay paths before enabling single-item erasure.
+An erased snapshot rejects FK-driven UPDATEs too: deleting an individual source message invokes
+ON DELETE SET NULL on `source_message_start_id/end_id` and fails. C/D must remove snapshots before
+individual messages, or delete the whole conversation. This corrects the broad "DELETE stays
+possible" comment in immutable migration 0149; 0150 carries the clarification without changing 0149.
+B2/C must also move interrupted/cost_pending executions to completed/cancelled after run settlement;
+a terminal run alone does not make the execution or its session eligible for scrubbing.
 
 ## Reproduction (local Docker only)
 
@@ -68,6 +79,7 @@ node packages/db/tests/baseline/replay-with-new-migrations.mjs --local-only \
   --before-after packages/db/tests/erasure-structure-fingerprint.sql \
   --after packages/db/tests/erasure-structure-fingerprint.sql,packages/db/tests/erasure-b1b-rollback.sql,packages/db/tests/erasure-structure-fingerprint.sql,packages/db/migrations/0150_erasure_content_channel_runtime_chat.sql,packages/db/tests/erasure-structure-fingerprint.sql
 node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built
+node packages/db/tests/run-erasure-b1b-locks.mjs --local-only
 node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files
 ```
 
@@ -76,6 +88,10 @@ For rollback refusal, use the wrapper with `--after` cases,refusal,rollback (the
 unrelated earlier failure. Structure fingerprints must match before=rollback and after=reapply.
 The runner compares every migration's immediate second application object by object.
 Do not refresh staging snapshots before application; the controller refreshes those afterwards.
+The C12 runner reuses the file-built schema and committed B1b fixtures. One live connection holds
+a Runtime session lock, then a conversation lock. A stdout barrier confirms acquisition before
+a distinct service-role session scrubs under a 3-second statement timeout. It checks all 22 counts
+while locked and again after release; every scrub assertion rolls back to preserve the same fixture.
 
 ## Verified results
 
@@ -84,12 +100,16 @@ Do not refresh staging snapshots before application; the controller refreshes th
 - PASS: B1a C1–C8 regression and B1b C1–C11 (eleven-table counts/content/hash, idempotency,
   in-flight retry, replacements/refills/non-whitelist columns, both silent delete guards,
   fresh non-owner/client sessions, real definer writes). Account-open/constraint audits: 0 rows.
+- PASS: C11 non-NULL erasure-marker INSERTs fail uniformly for self, other open/closed and absent
+  accounts before closure lookup; normal owner INSERT succeeds. The new test fails on the old guard.
+- PASS: C12 holds actual Runtime/conversation parent locks in one connection; a distinct service-role
+  connection skips them, returns all 22 expected counts, and scrubs successfully after release.
 - PASS: audit probes detect NOT NULL, live-only CHECK, missing-argument guard and a new private
   column on the marker-only table. With validator EXECUTE revoked, fresh C8 fails specifically
   with `permission denied for function erasure_update_allowed`; this is the expected negative result.
-- PASS: rollback/reapply fingerprint `34a07d637b40321a3f52b2a6a5229bc3` →
+- PASS: rollback/reapply fingerprint `3648273d345ede8b7daa59623d82bc0c` →
   `4afb151f0e649311ba14861ad345c0c9` (matches the independently recorded pre-0150 fingerprint) →
-  `34a07d637b40321a3f52b2a6a5229bc3` → same after immediate repeat.
+  `3648273d345ede8b7daa59623d82bc0c` → same after immediate repeat.
 - PASS: with erased rows rollback fails specifically at its initial check with
   `ERASURE_ROLLBACK_REFUSED`; changed staging-source definition is refused before schema mutation.
 - PASS: Runtime integration against repository-built schema: 100 passed; 5 explicitly skipped
