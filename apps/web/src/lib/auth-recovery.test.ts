@@ -32,6 +32,13 @@ describe('decideUnauthorizedAction', () => {
     });
   });
 
+  it('sends a verified account with no session in this browser to login instead of spinning', () => {
+    // The verify link was opened in another browser: the email is confirmed but no session exists here,
+    // so every API call on /profile is rejected. The first 401 must lead to login, not to more retries.
+    const action = decideUnauthorizedAction({ ...base, search: '', hasSession: false });
+    expect(action).toEqual({ kind: 'redirect', to: '/login?redirect=%2Fprofile' });
+  });
+
   it('shows a notice instead of redirecting again within the cooldown', () => {
     const lastRedirectAt = base.now - AUTO_LOGIN_REDIRECT_COOLDOWN_MS + 1;
     expect(decideUnauthorizedAction({ ...base, lastRedirectAt })).toEqual({ kind: 'notice', reason: 'no-session' });
