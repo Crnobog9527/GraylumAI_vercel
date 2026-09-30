@@ -1,0 +1,82 @@
+{
+  "col:bill2_receipts.financial_projected_at": {
+    "before": null,
+    "after": "78a4814f9534"
+  },
+  "col:bill2_receipts.financial_projection_hash": {
+    "before": null,
+    "after": "1cb251ec0d56"
+  },
+  "col:bill2_receipts.financial_projection_version": {
+    "before": null,
+    "after": "157db7df5300"
+  },
+  "col:bill2_runs.result_financial_projection_hash": {
+    "before": null,
+    "after": "1cb251ec0d56"
+  },
+  "col:bill2_runs.result_financial_projection_version": {
+    "before": null,
+    "after": "157db7df5300"
+  },
+  "con:bill2_receipts.bill2_financial_projection_valid": {
+    "before": null,
+    "after": "caaedaa47884"
+  },
+  "con:bill2_runs.bill2_result_projection_valid": {
+    "before": null,
+    "after": "3074a4fe7e03"
+  },
+  "fn:bill2_close(uuid,uuid,text,jsonb)": {
+    "before": "d446f8c9a4ca",
+    "after": "cdd624f5aba3"
+  },
+  "fn:bill2_erasure_closed(uuid,uuid)": {
+    "before": null,
+    "after": "d63869779b6e"
+  },
+  "fn:bill2_erasure_view(bill2_runs,boolean)": {
+    "before": null,
+    "after": "6c7915dcbc1f"
+  },
+  "fn:bill2_financial_projection(jsonb)": {
+    "before": null,
+    "after": "373a819a343e"
+  },
+  "fn:bill2_outcome_projection(jsonb)": {
+    "before": null,
+    "after": "157635d6ba56"
+  },
+  "fn:bill2_read(uuid,uuid)": {
+    "before": "a15230d1b76e",
+    "after": "2c349657dcc1"
+  },
+  "fn:bill2_record(uuid,uuid,uuid,jsonb)": {
+    "before": "87f1ca11a951",
+    "after": "230e64de05ff"
+  },
+  "fn:bill2_revoke_unstarted_dispatch(uuid,uuid,uuid,uuid,text,boolean)": {
+    "before": "86107967a3d5",
+    "after": "c682e3961564"
+  },
+  "fn:runtime_financial_recovery(uuid,uuid,boolean)": {
+    "before": "97bf2f1859bc",
+    "after": "d24b8d6aa4ea"
+  },
+  "fnacl:bill2_erasure_closed(uuid,uuid)": {
+    "before": null,
+    "after": "341a58cafc38"
+  },
+  "fnacl:bill2_erasure_view(bill2_runs,boolean)": {
+    "before": null,
+    "after": "341a58cafc38"
+  },
+  "fnacl:bill2_financial_projection(jsonb)": {
+    "before": null,
+    "after": "341a58cafc38"
+  },
+  "fnacl:bill2_outcome_projection(jsonb)": {
+    "before": null,
+    "after": "341a58cafc38"
+  }
+}

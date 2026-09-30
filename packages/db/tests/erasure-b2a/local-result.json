@@ -1,0 +1,31 @@
+{
+  "development": false,
+  "build": {
+    "steps": 153,
+    "passed": 153,
+    "bridges": [
+      "0143_ticket_grants_and_own_rls.sql"
+    ],
+    "repeated": 84,
+    "failed": null
+  },
+  "checks": [
+    "Q1 source md5: 5/5",
+    "draft twice: identical full catalog",
+    "source drift rejects atomically; no-data rollback and reapply exact",
+    "anon/authenticated RPC denied; service private-helper denied",
+    "closed original identity; admission denied; recursive projection/original hash/replay; exact aggregate once",
+    "winning delivered outcome with missing result; execution terminal; B1b scrub and immutable replay",
+    "unknown no ID retains original reservation; reliable lookup remains bounded at three",
+    "confirmed failure refunds once; late cost no re-debit; conflicting costs latch; immutable receipt unchanged",
+    "closed one-shot unstarted proof: exact actor/token/hash, revoked scope, once-only refund, no late record",
+    "typed nested financial whitelist rejects disguised content and drops malformed usage",
+    "ordinary suspension without erasure cannot use the new exception",
+    "five RPCs deny both client roles; prepared recovery refunds once; cross-identity denied; fault rollback atomic; lookup deadline; model mismatch strips text and latches conflict",
+    "two-backend confirmation/receipt overlap verified; post-commit projection",
+    "rollback refuses after financial projection; no erased content restoration",
+    "account-open policy audit unchanged"
+  ],
+  "failed": null,
+  "cleanup": "PASS"
+}

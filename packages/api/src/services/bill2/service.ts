@@ -31,7 +31,7 @@ const call = z.object({ provider: z.string().min(1).max(128), account: z.string(
   inputLimit: z.number().int().positive().max(1_000_000), outputLimit: z.number().int().positive().max(1_000_000),
   automaticRetry: z.literal(false), hiddenTools: z.literal(false), lookupSupported: z.boolean(), phase: z.string().min(1).max(64) }).strict();
 export type FrozenCall = z.infer<typeof call>;
-export type RunView = { id: string; state: 'prepared' | 'dispatched' | 'unknown' | 'cost_pending' | 'settled' | 'refunded';
+export type RunView = { accountClosed?: boolean; id: string; state: 'prepared' | 'dispatched' | 'unknown' | 'cost_pending' | 'settled' | 'refunded';
   preDeductId: string; closed: boolean; conflict: boolean; reservedCredits: number; chargedCredits: number | null; outcome: string | null };
 export interface BillingRpc { rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }> }
 export interface BillingTransport {
@@ -151,8 +151,16 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
        }
        evidence = { ...unknownEvidence(identity), evidenceKind: 'transport_observation' };
       }
-      try { await recordReceipt(capability.runId, callId, evidence); }
+      try {
+        const saved = await recordReceipt(capability.runId, callId, evidence);
+        if (saved.accountClosed) return { dispatched: true, accountClosed: true as const };
+      }
       catch { return { dispatched: true, pendingReceipt: { runId: capability.runId, callId, evidence } }; }
+      // Receipt insertion and account confirmation can commit in either order.
+      // The host must still recheck immediately before SDK/history/stream delivery.
+      if ((await readRun(capability.runId)).accountClosed) {
+        return { dispatched: true, accountClosed: true as const };
+      }
       return { dispatched: true, observation }; // Private server composition only; never a public route result.
     },
     closeRun: (runId: string, outcome: 'delivered' | 'confirmed_failure' | 'cancelled' | 'unknown', result: unknown = null) =>

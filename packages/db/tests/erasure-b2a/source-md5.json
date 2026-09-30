@@ -1,0 +1,7 @@
+{
+  "bill2_read(uuid,uuid)": "a15230d1b76e914de934909d4094a07b",
+  "bill2_close(uuid,uuid,text,jsonb)": "d446f8c9a4cadeb4f0d1345d3dba7479",
+  "bill2_record(uuid,uuid,uuid,jsonb)": "87f1ca11a9519c5e7d9a5bf774c976dd",
+  "runtime_financial_recovery(uuid,uuid,boolean)": "97bf2f1859bc1019146cafd7e1418ae7",
+  "bill2_revoke_unstarted_dispatch(uuid,uuid,uuid,uuid,text,boolean)": "86107967a3d5bf30ec1737459a606eec"
+}
