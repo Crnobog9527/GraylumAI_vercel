@@ -1,7 +1,6 @@
 "use client";
 
 import Link from 'next/link';
-import Script from 'next/script';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -21,12 +20,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { trpc } from '@/trpc/client';
-import {
-  getAuthCaptchaOptions,
-  getAuthCaptchaSiteKey,
-  HCAPTCHA_SCRIPT_SRC,
-  runAuthCaptchaAttempt,
-} from '@/lib/authCaptcha';
+import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
 
 type AuthMode = 'login' | 'signup';
 type StatusTone = 'error' | 'success' | 'info';
@@ -131,23 +125,21 @@ function LoginPageContent() {
     setPendingAction('login');
     setStatus(null);
 
-    let captchaOptions: ReturnType<typeof getAuthCaptchaOptions>;
+    let captchaOptions: Awaited<ReturnType<typeof invisibleCaptchaOptions>>;
     try {
-      captchaOptions = getAuthCaptchaOptions();
+      captchaOptions = await invisibleCaptchaOptions();
     } catch (error) {
-      setStatus({ tone: 'error', message: getSafeErrorMessage(error, '请完成人机验证后重试。') });
+      setStatus({ tone: 'error', message: getSafeErrorMessage(error, '人机验证未完成，请重试。') });
       setPendingAction(null);
       return;
     }
 
     const supabase = createClient();
-    const { data, error } = await runAuthCaptchaAttempt(captchaOptions, (options) =>
-      supabase.auth.signInWithPassword({
-        email,
-        password,
-        options,
-      }),
-    );
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+      options: captchaOptions,
+    });
 
     if (error) {
       const shouldRouteToVerify = /confirm|verified|verification|email/i.test(getErrorMessageText(error));
@@ -197,30 +189,28 @@ function LoginPageContent() {
 
     const supabase = createClient();
     const emailRedirectTo = getEmailConfirmRedirect(redirectTarget);
-    let captchaOptions: ReturnType<typeof getAuthCaptchaOptions>;
+    let captchaOptions: Awaited<ReturnType<typeof invisibleCaptchaOptions>>;
     try {
-      captchaOptions = getAuthCaptchaOptions();
+      captchaOptions = await invisibleCaptchaOptions();
     } catch (error) {
-      setStatus({ tone: 'error', message: getSafeErrorMessage(error, '请完成人机验证后重试。') });
+      setStatus({ tone: 'error', message: getSafeErrorMessage(error, '人机验证未完成，请重试。') });
       setPendingAction(null);
       return;
     }
 
-    const { data, error } = await runAuthCaptchaAttempt(captchaOptions, (options) =>
-      supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo,
-          ...options,
-          data: {
-            nickname: nickname.trim() || undefined,
-            display_name: nickname.trim() || undefined,
-            invite_code: trimmedInviteCode || undefined,
-          },
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo,
+        ...captchaOptions,
+        data: {
+          nickname: nickname.trim() || undefined,
+          display_name: nickname.trim() || undefined,
+          invite_code: trimmedInviteCode || undefined,
         },
-      }),
-    );
+      },
+    });
 
     if (error) {
       setStatus({
@@ -278,7 +268,6 @@ function LoginPageContent() {
   };
 
   const isBusy = pendingAction !== null;
-  const captchaSiteKey = getAuthCaptchaSiteKey();
   const submitLabel = mode === 'signup' ? '创建账户' : '登录';
   const submitBusyLabel = mode === 'signup' ? '创建中...' : '登录中...';
   const siteName =
@@ -431,12 +420,6 @@ function LoginPageContent() {
                   </div>
 
                   <form className="space-y-4" onSubmit={handleSubmit}>
-                    {captchaSiteKey ? (
-                      <>
-                        <Script src={HCAPTCHA_SCRIPT_SRC} strategy="afterInteractive" />
-                        <div className="h-captcha" data-sitekey={captchaSiteKey} />
-                      </>
-                    ) : null}
                     {mode === 'signup' && (
                       <>
                         <div className="space-y-2">

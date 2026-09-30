@@ -1,7 +1,6 @@
 "use client";
 
 import { Suspense, useEffect, useState } from 'react';
-import Script from 'next/script';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2, Loader2, LogOut, MailCheck, RefreshCw } from 'lucide-react';
@@ -11,12 +10,7 @@ import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildAuthHref, resolveAuthAppUrl } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  getAuthCaptchaOptions,
-  getAuthCaptchaSiteKey,
-  HCAPTCHA_SCRIPT_SRC,
-  runAuthCaptchaAttempt,
-} from '@/lib/authCaptcha';
+import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
 
 type VerifyTone = 'info' | 'success' | 'error';
 
@@ -113,11 +107,11 @@ function VerifyEmailPageContent() {
 
     setResending(true);
     const supabase = createClient();
-    let captchaOptions: ReturnType<typeof getAuthCaptchaOptions>;
+    let captchaOptions: Awaited<ReturnType<typeof invisibleCaptchaOptions>>;
     try {
-      captchaOptions = getAuthCaptchaOptions();
+      captchaOptions = await invisibleCaptchaOptions();
     } catch (error) {
-      setMessage({ tone: 'error', text: getSafeErrorMessage(error, '请完成人机验证后重试。') });
+      setMessage({ tone: 'error', text: getSafeErrorMessage(error, '人机验证未完成，请重试。') });
       setResending(false);
       return;
     }
@@ -125,16 +119,14 @@ function VerifyEmailPageContent() {
     const emailRedirectTo = new URL('/auth/callback', resolveAuthAppUrl());
     emailRedirectTo.searchParams.set('next', redirectTarget);
 
-    const { error } = await runAuthCaptchaAttempt(captchaOptions, (options) =>
-      supabase.auth.resend({
-        type: 'signup',
-        email,
-        options: {
-          emailRedirectTo: emailRedirectTo.toString(),
-          ...options,
-        },
-      }),
-    );
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: {
+        emailRedirectTo: emailRedirectTo.toString(),
+        ...captchaOptions,
+      },
+    });
 
     if (error) {
       setMessage({
@@ -167,7 +159,6 @@ function VerifyEmailPageContent() {
     );
   }
 
-  const captchaSiteKey = getAuthCaptchaSiteKey();
 
   return (
     <main className="min-h-screen bg-[#070707] px-4 py-6 sm:px-6">
@@ -234,12 +225,6 @@ function VerifyEmailPageContent() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              {captchaSiteKey ? (
-                <>
-                  <Script src={HCAPTCHA_SCRIPT_SRC} strategy="afterInteractive" />
-                  <div className="h-captcha sm:col-span-2" data-sitekey={captchaSiteKey} />
-                </>
-              ) : null}
               <Button
                 type="button"
                 onClick={handleRefreshStatus}
