@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+// Confirmation uses a synthetic prehashed identity fixture; never a real identity or key.
 import assert from 'node:assert/strict';
 import { actorFixture } from './erasure-b1b-barrier-fixtures.mjs';
 
@@ -7,7 +8,8 @@ export async function parentLocks({ q, Session }) {
   const fresh = () => {
     const actor = actorFixture(q);
     const conversation = q(`INSERT INTO conversations(user_id,title) VALUES('${actor}','private') RETURNING id`);
-    q(`SET ROLE service_role; SELECT account_erasure_confirm('${actor}',gen_random_uuid())`);
+    q(`SET ROLE service_role; SELECT account_erasure_confirm_with_digests('${actor}',gen_random_uuid(),
+      jsonb_build_array(jsonb_build_object('kind','email','key_version','test-v1','digest',repeat('b',64))))`);
     return { actor, conversation };
   };
   const inputs = [
