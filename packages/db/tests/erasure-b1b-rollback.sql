@@ -91,4 +91,6 @@ BEGIN
  IF EXISTS(SELECT 1 FROM conversations WHERE id=NEW.conversation_id AND skill_mode) THEN RAISE EXCEPTION 'guided messages require artifact turn' USING ERRCODE='42501'; END IF;
  RETURN NEW;
 END $function$;
+-- Restore the pre-0150 service-role admission grant; the function body never changed.
+GRANT EXECUTE ON FUNCTION public.ordinary_chat_claim(uuid,uuid,jsonb,uuid) TO service_role;
 COMMIT;

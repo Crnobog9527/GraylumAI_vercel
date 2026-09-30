@@ -36,7 +36,17 @@ through rollback completion; the script cannot restore already erased content.
 | conversations | title, summary, summary_metadata | IDs, summary counters/time, skill/agent mode, is_deleted/deleted_at |
 | messages | content | conversation/message IDs, role, times, soft-delete facts |
 | conversation_context_snapshots | content, metadata | source message IDs, type, count, times |
-| ordinary_chat_requests | input, response_params, partial_content, failure_reason; nonfinancial JSON keys | IDs, state/times/token; only named financial/transaction/message keys remain in reservation/billing_result |
+| ordinary_chat_requests | input, response_params, partial_content, failure_reason, writer_token; nonfinancial JSON keys | IDs, state/times/token; only named financial/transaction/message keys remain in reservation/billing_result |
+
+Following the controller's [P1/P2 decision](https://github.com/Crnobog9527/GraylumAI_vercel/pull/537#issuecomment-5908426698),
+0150 revokes service_role EXECUTE on `ordinary_chat_claim(uuid,uuid,jsonb,uuid)`; rollback restores
+its original grant. Its function body and `ordinary_chat_transition` are unchanged. The legacy
+HTTP entry is already disabled; this closes new service-role admission at the database boundary.
+REVOKE does not cancel calls already executing: the controller must keep the legacy entry disabled
+and drain any pre-migration claim transactions before running scrubs. Existing requests retain
+transition access and follow the in-flight eligibility rules below.
+Terminal ordinary requests lose `writer_token` during erasure. Live requests still require and
+preserve it; erased rows cannot refill it. It is a dispatch credential, not retained identity.
 
 Runtime eligibility requires completed/cancelled executions and either no billing run or a closed,
 settled/refunded run. Session/material content waits for every execution; child rows wait for their
@@ -68,7 +78,9 @@ file-only objects (the snapshot-type CHECK). The wrapper now compares every obje
 with correctly hashed object definitions, retaining the existing staging snapshot/expected differences.
 Fixtures seed under replica only, commit, then assert in a new transaction with real guards/FKs.
 Each subsequent `--after` file runs in a fresh connection: C8 exercises service_role first, C11
-exercises authenticated/anon, and C9 calls actual post-migration definer functions without mocks.
+exercises authenticated/anon, and C9 calls actual post-migration definer functions without mocks. C9 now seeds an existing
+ordinary request directly before switching role, asserts claim permission denial in that fresh
+session, and verifies existing transitions. No production RPC is replaced or re-granted in tests.
 
 ```sh
 node packages/db/tests/baseline/replay-with-new-migrations.mjs --local-only \
@@ -99,7 +111,12 @@ while locked and again after release; every scrub assertion rolls back to preser
 - PASS: file build 153 steps; 84 migrations repeat with identical catalog objects; built fingerprint updated.
 - PASS: B1a C1–C8 regression and B1b C1–C11 (eleven-table counts/content/hash, idempotency,
   in-flight retry, replacements/refills/non-whitelist columns, both silent delete guards,
-  fresh non-owner/client sessions, real definer writes). Account-open/constraint audits: 0 rows.
+  fresh non-owner/client sessions, real definer writes and disabled legacy admission).
+  Account-open/constraint audits: 0 rows.
+- PASS: C9 fresh service-role claim call is denied with its permission error; real Runtime
+  writes and existing ordinary dispatch/unknown/stop transitions still work, including stop for a
+  closed account's in-flight request. C2/C4/C6/C10 clear terminal tokens, preserve live/in-flight
+  values, require live tokens and reject refills. Both new regressions failed on the old migration.
 - PASS: C11 non-NULL erasure-marker INSERTs fail uniformly for self, other open/closed and absent
   accounts before closure lookup; normal owner INSERT succeeds. The new test fails on the old guard.
 - PASS: C12 holds actual Runtime/conversation parent locks in one connection; a distinct service-role
@@ -107,9 +124,9 @@ while locked and again after release; every scrub assertion rolls back to preser
 - PASS: audit probes detect NOT NULL, live-only CHECK, missing-argument guard and a new private
   column on the marker-only table. With validator EXECUTE revoked, fresh C8 fails specifically
   with `permission denied for function erasure_update_allowed`; this is the expected negative result.
-- PASS: rollback/reapply fingerprint `3648273d345ede8b7daa59623d82bc0c` →
+- PASS: rollback/reapply fingerprint `6a504112eadbfba26d1962173071a11d` →
   `4afb151f0e649311ba14861ad345c0c9` (matches the independently recorded pre-0150 fingerprint) →
-  `3648273d345ede8b7daa59623d82bc0c` → same after immediate repeat.
+  `6a504112eadbfba26d1962173071a11d` → same after immediate repeat.
 - PASS: with erased rows rollback fails specifically at its initial check with
   `ERASURE_ROLLBACK_REFUSED`; changed staging-source definition is refused before schema mutation.
 - PASS: Runtime integration against repository-built schema: 100 passed; 5 explicitly skipped

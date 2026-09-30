@@ -231,8 +231,9 @@ PR-B1a（0149，artifact / agent / research / opc 表）的擦除通道：
 PR-B1b（0150，runtime / 旧对话表）的擦除通道：
 - 复用 0149 的 `erased_row_guard` 和目录约束改写，覆盖 7 张 runtime 表以及 conversations、messages、conversation_context_snapshots、ordinary_chat_requests；服务端调用 `account_erasure_scrub_runtime(p_profile_id)`，同样要求 `account_erasure_requests` 已有记录。依赖边没有正文，用显式 `marker-only` 规则只写 `erased_at`；空白名单仍拒绝，其他列及已擦除行不可改。
 - runtime 的 payload、结果、历史、工具参数和结果、scope/material 全清，`runtime_scope_material.content_hash` 一并清掉。complete / checkpoint / tool complete 会尝试回填 NULL，守卫拒绝这种写入。`bill2_runs` 全部列（包含 `session_ref`）不动；解绑归 PR-B2。只有 completed/cancelled 且对应 run 已 closed、settled/refunded（或没有 run）的执行可清；依赖边等两端，会话和 material 等该会话全部执行，锁忙的父行也跳过并计数。
-- 旧对话的标题、摘要、消息正文及上下文快照清空；`is_deleted` / `deleted_at` 软删除事实不变。skill 模式消息的已有 guard 仅给合法单向擦除放行；conversations 的客户端 UPDATE 写入 `erased_at` 时要求账号已注销，INSERT 一律不能直接创建已擦除行。ordinary 请求只清 succeeded/failed，reservation / billing_result 仅保留迁移列明的财务键；共享会话内容等普通请求及成果生成都到终态。
+- 旧对话的标题、摘要、消息正文及上下文快照清空；`is_deleted` / `deleted_at` 软删除事实不变。skill 模式消息的已有 guard 仅给合法单向擦除放行；conversations 的客户端 UPDATE 写入 `erased_at` 时要求账号已注销，INSERT 一律不能直接创建已擦除行。ordinary 请求只清 succeeded/failed，正文和 `writer_token` 派发凭证一并清空，未擦除请求仍须保留凭证；reservation / billing_result 仅保留迁移列明的财务键；共享会话内容等普通请求及成果生成都到终态。
 - 不做物理删除，不放宽表授权。两个 conversation DELETE guard 返回 NULL 时，必须检查行仍存在，不能把影响 0 行当成功。回退含总控给出的 staging 函数原文；已有擦除行就拒绝执行。PR-C 仍排在 PR-B2 之后；PR-D 仍须先补读取和重放对 `erased_at` 的显式拒绝，不能把账号注销通道直接用于单条删除。
+- **旧对话准入关闭**：按总控在 #537 的 P1 决定，0150 撤销 `service_role` 对 `ordinary_chat_claim(uuid,uuid,jsonb,uuid)` 的执行权限，回退恢复；不改函数体，不影响已有请求的 `ordinary_chat_transition`。应用层继续保持旧聊天关闭；REVOKE 不终止已进入函数的事务，总控须在擦除前排空迁移前已进入的 claim，不能把一次扫描当成阻止晚到写入。
 - **PR-C/PR-D 删除顺序**：`conversation_context_snapshots.source_message_start_id/end_id` 的 ON DELETE SET NULL 会内部执行 UPDATE，被已擦除快照的 guard 拒绝。须先删快照再单独删消息，或者只按整个会话删除；两条路径都要验证实际删除结果。0149 注释的“DELETE stays possible”仅指 guard 本身不拦 DELETE，并不保证外键引发的 UPDATE 能通过；历史迁移保持原文，此处及 0150 注释予以澄清。
 - **PR-B2/C 终态推进**：即使对应 run 已 settled/refunded 且 closed，仍停在 interrupted/cost_pending 的执行及其会话也会一直被跳过。B2 的受限恢复须把执行推进 completed/cancelled，C 随后重试清除；不能仅凭 run 已结算就报告内容清除完成。
 

@@ -10,6 +10,11 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
+-- Legacy HTTP admission is disabled (#507). Also close the service-role RPC boundary.
+-- This does not cancel already executing calls; drain pre-migration claims before scrubbing.
+-- Existing requests keep ordinary_chat_transition; rollback restores the original claim grant.
+REVOKE EXECUTE ON FUNCTION public.ordinary_chat_claim(uuid,uuid,jsonb,uuid) FROM service_role;
+
 -- Refuse drift before any rewrite; both exact originals and exact reapplication are valid.
 DO $$
 BEGIN
@@ -103,6 +108,7 @@ INSERT INTO b1b_erasure_columns VALUES
   ('messages', 'content', false),
   ('conversation_context_snapshots', 'content', false),
   ('conversation_context_snapshots', 'metadata', false),
+  ('ordinary_chat_requests', 'writer_token', false),
   ('ordinary_chat_requests', 'input', false),
   ('ordinary_chat_requests', 'response_params', false),
   ('ordinary_chat_requests', 'partial_content', false),
@@ -182,7 +188,7 @@ BEGIN
     ('conversations', ARRAY['title', 'summary', 'summary_metadata']::text[]),
     ('messages', ARRAY['content']::text[]),
     ('conversation_context_snapshots', ARRAY['content', 'metadata']::text[]),
-    ('ordinary_chat_requests', ARRAY['input', 'response_params', 'partial_content', 'failure_reason',
+    ('ordinary_chat_requests', ARRAY['writer_token', 'input', 'response_params', 'partial_content', 'failure_reason',
       'reservation=keys:pre_deduct_id,balance_before,balance_after,is_idempotent',
       'billing_result=keys:user_message_id,assistant_message_id,transaction_id,settle_id,refund_id,'
       'balance_after,refunded_credits,refund_amount']::text[])
@@ -256,7 +262,8 @@ BEGIN
       (''completed'',''cancelled'') AND (e.billing_run_id IS NULL OR EXISTS (SELECT 1 FROM bill2_runs b WHERE b.id = e.billing_run_id AND
       b.actor_id = $1 AND b.closed AND b.state IN (''settled'',''refunded'')))))'),
     ('ordinary_chat_requests',
-      'input = NULL, response_params = NULL, partial_content = NULL, failure_reason = NULL, reservation = (SELECT jsonb_object_agg(x.key,
+      'writer_token = NULL, input = NULL, response_params = NULL, partial_content = NULL, failure_reason = NULL,
+      reservation = (SELECT jsonb_object_agg(x.key,
       x.value) FROM jsonb_each(CASE WHEN jsonb_typeof(t.reservation) = ''object'' THEN t.reservation ELSE ''{}''::jsonb END) x WHERE x.key IN
       (''pre_deduct_id'', ''balance_before'', ''balance_after'', ''is_idempotent'')), billing_result = (SELECT jsonb_object_agg(x.key, x.value)
       FROM jsonb_each(CASE WHEN jsonb_typeof(t.billing_result) = ''object'' THEN t.billing_result ELSE ''{}''::jsonb END) x WHERE x.key IN

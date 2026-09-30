@@ -81,6 +81,7 @@ SELECT (SELECT v FROM b1b_ids WHERE k='generation'),(SELECT v FROM b1b_ids WHERE
   (SELECT v FROM b1b_ids WHERE k='round'),gen_random_uuid(),'s','{}','{}','[]','[]','{}',
   gen_random_uuid(),gen_random_uuid(),'unknown';
 CREATE TEMP TABLE b1b_bill_before AS SELECT id,to_jsonb(b) row FROM bill2_runs b WHERE id IN (SELECT v FROM b1b_ids);
+CREATE TEMP TABLE b1b_token_before AS SELECT request_id,writer_token FROM ordinary_chat_requests;
 CREATE TEMP TABLE b1b_conversation_before AS SELECT id,is_deleted,deleted_at FROM conversations WHERE id IN (SELECT v FROM b1b_ids);
 COMMIT;
 
@@ -123,11 +124,14 @@ BEGIN
     OR EXISTS (SELECT 1 FROM conversations WHERE erased_at IS NOT NULL
       AND (title IS NOT NULL OR summary IS NOT NULL OR summary_metadata IS NOT NULL))
     OR EXISTS (SELECT 1 FROM ordinary_chat_requests WHERE erased_at IS NOT NULL AND (input IS NOT NULL
-      OR response_params IS NOT NULL OR partial_content IS NOT NULL OR failure_reason IS NOT NULL
+      OR response_params IS NOT NULL OR partial_content IS NOT NULL OR failure_reason IS NOT NULL OR writer_token IS NOT NULL
       OR reservation IS DISTINCT FROM '{"balance_after":7}'::jsonb
       OR billing_result IS DISTINCT FROM '{"balance_after":7,"refunded_credits":2}'::jsonb)) THEN
     RAISE EXCEPTION 'B1b C2 private content survived';
   END IF;
+  IF EXISTS (SELECT 1 FROM b1b_token_before x JOIN ordinary_chat_requests r USING(request_id)
+    WHERE r.erased_at IS NULL AND r.writer_token IS DISTINCT FROM x.writer_token) THEN
+    RAISE EXCEPTION 'B1b C2 live or in-flight token changed'; END IF;
   IF EXISTS (SELECT 1 FROM b1b_bill_before x JOIN bill2_runs b ON b.id=x.id WHERE x.row IS DISTINCT FROM to_jsonb(b))
     OR EXISTS (SELECT 1 FROM b1b_conversation_before x JOIN conversations conv ON conv.id=x.id
       WHERE x.is_deleted IS DISTINCT FROM conv.is_deleted OR x.deleted_at IS DISTINCT FROM conv.deleted_at) THEN
@@ -164,6 +168,8 @@ SELECT pg_temp.b1b_refuses('UPDATE runtime_executions SET primary_result = ''{"b
   'erased row is immutable');
 SELECT pg_temp.b1b_refuses('UPDATE runtime_tool_calls SET result = ''{"body":"late tool complete"}'' WHERE erased_at IS NOT NULL',
   'erased row is immutable');
+SELECT pg_temp.b1b_refuses('UPDATE ordinary_chat_requests SET writer_token = gen_random_uuid() WHERE erased_at IS NOT NULL',
+  'erased row is immutable');
 SELECT 'PASS B1b C4 erased rows and NULL complete/checkpoint/tool results cannot be rewritten';
 SELECT pg_temp.b1b_refuses(format('UPDATE runtime_scope_material SET content_hash = ''replacement'', erased_at = now() WHERE session_id = %L',
   (SELECT v FROM b1b_ids WHERE k='o_session')),'erasure outside allow-list');
@@ -176,6 +182,8 @@ SELECT 'PASS B1b C5 replacement/non-whitelist/open-account direct marker rejecte
 DO $$ BEGIN
   BEGIN UPDATE runtime_scope_material SET content=NULL WHERE session_id=(SELECT v FROM b1b_ids WHERE k='o_session');
     RAISE EXCEPTION 'B1b C6 live required content accepted NULL'; EXCEPTION WHEN check_violation THEN NULL; END;
+  BEGIN UPDATE ordinary_chat_requests SET writer_token=NULL WHERE request_id=(SELECT v FROM b1b_ids WHERE k='o_request');
+    RAISE EXCEPTION 'B1b C6 live writer_token accepted NULL'; EXCEPTION WHEN check_violation THEN NULL; END;
   BEGIN UPDATE runtime_session_batches SET items='{}' WHERE session_id=(SELECT v FROM b1b_ids WHERE k='o_session');
     RAISE EXCEPTION 'B1b C6 live array CHECK lost'; EXCEPTION WHEN check_violation THEN NULL; END;
 END $$;
@@ -211,6 +219,10 @@ BEGIN
   FOR k IN SELECT jsonb_object_keys(r) LOOP
     IF k LIKE '%_skipped' AND (r->>k)::int<>0 THEN RAISE EXCEPTION 'B1b C10 still skipped %',k; END IF;
   END LOOP;
+END $$;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM ordinary_chat_requests WHERE user_id=(SELECT closed FROM b1b_i) AND writer_token IS NOT NULL) THEN
+    RAISE EXCEPTION 'B1b C10 token survived terminal retry'; END IF;
 END $$;
 SELECT 'PASS B1b C10 retry scrubs formerly in-flight fixtures after terminal settlement';
 ROLLBACK;
