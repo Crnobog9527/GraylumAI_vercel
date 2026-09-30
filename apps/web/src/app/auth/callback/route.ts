@@ -6,6 +6,7 @@ import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import {
   buildVerifyEmailPath,
   classifyCodeExchangeError,
+  parseAuthCallbackFlow,
   routeCallbackError,
   type LoginErrorCode,
 } from '@/lib/authFlow';
@@ -59,10 +60,11 @@ export async function GET(request: NextRequest) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (error) {
-      const reason = classifyCodeExchangeError(error);
+      const reason = classifyCodeExchangeError(error, parseAuthCallbackFlow(requestUrl.searchParams.get('flow')));
       logServerError('auth', 'auth_callback_session_exchange_failed', { reason });
-      // A verifier mismatch usually means the email link was opened where this sign-up did not
-      // start; /verify has already confirmed the email, so the visitor should just log in.
+      // A verifier mismatch usually means the link was opened where the flow did not start. For an
+      // email link /verify has already confirmed the email, so the visitor should just log in; a
+      // Google sign-in is simply retried. `flow` only picks the fixed message, never access.
       return loginError(reason);
     }
   }

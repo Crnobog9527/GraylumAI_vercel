@@ -51,10 +51,18 @@ export function buildVerifyEmailPath(email: string, redirect: string, reason?: V
 
 // Where GoTrue sends an email or OAuth link back to. `next` goes through the same sanitizer the
 // callback applies, so a landing's error or code parameters never ride along to the next page.
-export function buildAuthCallbackUrl(origin: string, next: string) {
+// `flow=oauth` marks a Google sign-in; it only picks which fixed message a failed exchange shows.
+export type AuthCallbackFlow = 'email' | 'oauth';
+
+export function buildAuthCallbackUrl(origin: string, next: string, flow: AuthCallbackFlow = 'email') {
   const url = new URL('/auth/callback', origin);
   url.searchParams.set('next', sanitizeRedirectTarget(next));
+  if (flow === 'oauth') url.searchParams.set('flow', 'oauth');
   return url.toString();
+}
+
+export function parseAuthCallbackFlow(value: string | null): AuthCallbackFlow {
+  return value === 'oauth' ? 'oauth' : 'email';
 }
 
 // Errors GoTrue appends to the email-link redirect. Only error_code values listed here route to the
@@ -92,16 +100,18 @@ export function readAuthFragment(hash: string): FragmentOutcome {
 
 // /login?error=<code>. The page shows fixed text for known codes and ignores any other value, so a
 // crafted link cannot put its own words on the login page.
-export type LoginErrorCode = 'callback_failed' | 'link_needs_login';
+export type LoginErrorCode = 'callback_failed' | 'link_needs_login' | 'oauth_incomplete';
 
 export const LOGIN_ERROR_MESSAGES: Record<LoginErrorCode, string> = {
   callback_failed: '登录验证失败，请稍后重试。',
   // /verify already confirmed the email before the code exchange failed in this browser.
   link_needs_login: '如果你刚点击了验证邮件，邮箱可能已经验证成功，请直接用密码登录。',
+  // A Google sign-in verifies no email and the account may have no password: just retry Google.
+  oauth_incomplete: 'Google 登录没有完成，请重新点击 Google 登录。',
 };
 
 export function loginErrorMessage(value: string | null): string | null {
-  return value === 'callback_failed' || value === 'link_needs_login' ? LOGIN_ERROR_MESSAGES[value] : null;
+  return value && Object.hasOwn(LOGIN_ERROR_MESSAGES, value) ? LOGIN_ERROR_MESSAGES[value as LoginErrorCode] : null;
 }
 
 // A PKCE code exchange that failed because this browser does not hold the verifier the link was
@@ -113,11 +123,12 @@ const VERIFIER_EXCHANGE_ERROR_CODES = new Set([
   'flow_state_expired',
 ]);
 
-export function classifyCodeExchangeError(error: unknown): LoginErrorCode {
+export function classifyCodeExchangeError(error: unknown, flow: AuthCallbackFlow = 'email'): LoginErrorCode {
   const code = errorCode(error);
-  if (VERIFIER_EXCHANGE_ERROR_CODES.has(code)) return 'link_needs_login';
-  if (!code && /code verifier|code challenge/i.test(getErrorMessageText(error))) return 'link_needs_login';
-  return 'callback_failed';
+  const verifierMismatch = VERIFIER_EXCHANGE_ERROR_CODES.has(code)
+    || (!code && /code verifier|code challenge/i.test(getErrorMessageText(error)));
+  if (!verifierMismatch) return 'callback_failed';
+  return flow === 'oauth' ? 'oauth_incomplete' : 'link_needs_login';
 }
 
 export const RESEND_RATE_LIMIT_MESSAGE = '发送太频繁，请稍后再试。';

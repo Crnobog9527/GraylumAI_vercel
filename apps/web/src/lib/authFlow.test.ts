@@ -160,3 +160,17 @@ describe('resendErrorMessage', () => {
     expect(resendErrorMessage(authError('unexpected_failure', 'token broken'))).toBe('验证邮件发送失败，请稍后重试。');
   });
 });
+
+describe('Google sign-in callback marker', () => {
+  it('adds flow=oauth only for Google, and the marker only changes the fixed message', () => {
+    const google = new URL(buildAuthCallbackUrl('https://a.example', '/profile', 'oauth'));
+    expect(Object.fromEntries(google.searchParams)).toEqual({ next: '/profile', flow: 'oauth' });
+    expect(new URL(buildAuthCallbackUrl('https://a.example', '/profile')).searchParams.has('flow')).toBe(false);
+    const mismatch = authError('bad_code_verifier', 'x');
+    expect(classifyCodeExchangeError(mismatch, 'oauth')).toBe('oauth_incomplete');
+    expect(classifyCodeExchangeError(mismatch, 'email')).toBe('link_needs_login');
+    expect(classifyCodeExchangeError(authError('unexpected_failure', 'x'), 'oauth')).toBe('callback_failed');
+    expect(loginErrorMessage('oauth_incomplete')).toBe('Google 登录没有完成，请重新点击 Google 登录。');
+    expect(loginErrorMessage('toString')).toBeNull();
+  });
+});

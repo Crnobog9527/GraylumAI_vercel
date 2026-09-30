@@ -13,7 +13,7 @@ import { createClient } from '@/lib/supabase';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import {
   buildAuthCallbackUrl, buildVerifyEmailPath, classifyLoginError, EMAIL_VERIFIED_LOGIN_MESSAGE,
-  LOGIN_ERROR_MESSAGES, loginErrorMessage, readAuthFragment,
+  LOGIN_ERROR_MESSAGES, loginErrorMessage, readAuthFragment, type AuthCallbackFlow,
 } from '@/lib/authFlow';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildAuthHref, resolveAuthAppUrl, resolveSiteName } from '@/lib/site-config';
@@ -56,8 +56,8 @@ function GoogleIcon({ className }: { className?: string }) {
   );
 }
 
-function getEmailConfirmRedirect(redirectTarget: string) {
-  return buildAuthCallbackUrl(resolveAuthAppUrl(), redirectTarget);
+function getEmailConfirmRedirect(redirectTarget: string, flow: AuthCallbackFlow = 'email') {
+  return buildAuthCallbackUrl(resolveAuthAppUrl(), redirectTarget, flow);
 }
 
 export default function LoginPage() {
@@ -229,7 +229,7 @@ function LoginPageContent() {
     setStatus(null);
 
     const supabase = createClient();
-    const redirectTo = getEmailConfirmRedirect(redirectTarget);
+    const redirectTo = getEmailConfirmRedirect(redirectTarget, 'oauth');
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {

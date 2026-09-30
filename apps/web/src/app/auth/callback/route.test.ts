@@ -110,3 +110,21 @@ describe('auth callback after a failed code exchange', () => {
     expect(`${to.pathname}${to.search}`).toBe('/library?item=1');
   });
 });
+
+describe('auth callback failure message by flow', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    auth.getUser.mockResolvedValue({ data: { user: null } });
+    auth.exchangeCodeForSession.mockResolvedValue({ error: Object.assign(new Error('x'), { code: 'bad_code_verifier' }) });
+  });
+
+  it('asks a Google sign-in to retry Google, not to use a password', async () => {
+    const to = await callback('code=abc&next=%2Fprofile&flow=oauth');
+    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'oauth_incomplete', redirect: '/profile' });
+  });
+
+  it('keeps the email-link guidance without the Google marker', async () => {
+    const to = await callback('code=abc&next=%2Fprofile&flow=anything');
+    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'link_needs_login', redirect: '/profile' });
+  });
+});
