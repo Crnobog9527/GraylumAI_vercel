@@ -46,13 +46,25 @@ export function installPgCronStub(root, container, dockerExec) {
     readFileSync(resolve(root, 'packages/db/tests/baseline/pg_cron_stub.sql'), 'utf8'));
 }
 
+// Migrations applied twice in a row, as the v3 workbench fixture did for 0067-0139 (0103 was never
+// repeated there): everything from 0067 on, including every later migration, except those listed
+// in NOT_REPEATABLE with the reason they cannot run twice.
+export const REPEAT_FROM = '0067';
+export const NOT_REPEATABLE = {};
+export const repeatsTwice = step => {
+  const file = step.split('/').at(-1);
+  return step.startsWith(`${MIGRATION_DIR}/`) && file.slice(0, 4) >= REPEAT_FROM && !(file in NOT_REPEATABLE);
+};
+
 // Runs the plan. applyFile(path) runs a repository SQL file through psql; applyServerOnly(sql) sends
 // one string with psql -c. Both return { ok, error }. Stops at the first failure; afterPlatform() lets
-// a caller add its own local roles right after the platform stand-in.
-export function buildFromFiles(root, { applyFile, applyServerOnly, afterPlatform, onFail }) {
+// a caller add its own local roles right after the platform stand-in. With fingerprint() (returns the
+// catalog objects as { key: definition }) every repeatsTwice() migration is applied again right away
+// and must leave the structure unchanged.
+export function buildFromFiles(root, { applyFile, applyServerOnly, afterPlatform, onFail, fingerprint }) {
   const { steps, bridges, bridgeDir } = buildPlan(root);
   const read = path => readFileSync(resolve(root, path), 'utf8');
-  const report = { steps: steps.length, passed: 0, bridges: [], failed: null };
+  const report = { steps: steps.length, passed: 0, bridges: [], repeated: 0, failed: null };
   for (const step of steps) {
     const file = step.split('/').at(-1);
     if (step.startsWith(`${MIGRATION_DIR}/`) && bridges.has(file)) {
@@ -71,6 +83,22 @@ export function buildFromFiles(root, { applyFile, applyServerOnly, afterPlatform
     }
     report.passed += 1;
     if (step === PLATFORM && afterPlatform) afterPlatform();
+    if (fingerprint && repeatsTwice(step)) {
+      const before = fingerprint();
+      const again = applyFile(step);
+      if (!again.ok) {
+        report.failed = { step: `${step} (applied twice)`, error: again.error };
+        break;
+      }
+      const after = fingerprint();
+      const changed = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(key => before[key] !== after[key]);
+      if (changed.length > 0) {
+        report.failed = { step: `${step} (second application changed the structure)`,
+          error: changed.slice(0, 20).map(key => `${key}: ${before[key] ?? '(absent)'} -> ${after[key] ?? '(absent)'}`) };
+        break;
+      }
+      report.repeated += 1;
+    }
   }
   return report;
 }

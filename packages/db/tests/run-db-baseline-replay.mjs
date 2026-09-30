@@ -47,6 +47,11 @@ const read = path => readFileSync(resolve(root, path), 'utf8');
 const readJson = path => JSON.parse(read(path));
 const errorLines = result => (result.stderr || '').split('\n').filter(Boolean).slice(0, 12);
 buildPlan(root); // rules for baseline and bridge files are checked before anything starts
+// Catalog fingerprint as { object key: definition } (fingerprint.sql up to its grouped output).
+const objectsSql = () => {
+  const text = read('packages/db/tests/baseline/fingerprint.sql');
+  return `${text.slice(0, text.indexOf('-- FINAL'))}SELECT jsonb_object_agg(k, d ORDER BY k) FROM grouped;`;
+};
 
 const BUILT = 'packages/db/tests/baseline/built-fingerprint.json';
 const md5 = text => createHash('md5').update(text ?? '<null>').digest('hex');
@@ -126,6 +131,8 @@ try {
     applyFile: path => outcome(psql(read(path))),
     applyServerOnly: sql => outcome(psqlServerOnly(sql)),
     onFail: option('--on-fail') ? () => psql(option('--on-fail')).stdout.trim().split('\n') : undefined,
+    // Repeat-application check (idempotency), object by object, for every migration from REPEAT_FROM on.
+    fingerprint: () => JSON.parse(ok(psql(objectsSql()), 'Fingerprint')),
   }) };
   if (!report.failed) {
     const fingerprintSql = read('packages/db/tests/baseline/fingerprint.sql');
