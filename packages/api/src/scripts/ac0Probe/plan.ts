@@ -110,7 +110,7 @@ export function parseProbeArgs(argv: string[], home: string): ProbeArgs {
   validateCaps(maxCalls, maxUsd);
   return {
     ...(agentTurn ? {agentTurn: true} : {}),
-    ...(candidate ? {agentTurnCandidate: candidate} : {}),
+    ...(candidate ? {agentTurnCandidate: candidate as AgentTurnCandidate} : {}),
     skillDir: values['skill-dir'],
     scenarios: values.scenarios,
     configIds: (values.configs ?? DEFAULT_CONFIG_IDS.join(',')).split(',').map(id => id.trim()).filter(Boolean),

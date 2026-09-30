@@ -45,11 +45,11 @@ describe('AC1-4 prepared probe (synthetic transport only)', () => {
     expect(result.firstVisibleMs).toBe(result.cardAvailableMs);
     const summary = agentTurnSummary([result]);
     expect(summary.firstSdkTextMs.n).toBe(0);
-    expect(summary.cardOnlyTrials).toBe(1);
-    expect(summary.cardOnlyAvailableMs).toMatchObject({n: 1, min: result.cardAvailableMs, max: result.cardAvailableMs});
+    expect(summary).toMatchObject({cardOnlyTrials: 1});
+    expect(summary).toMatchObject({cardOnlyAvailableMs: {n: 1, min: result.cardAvailableMs, max: result.cardAvailableMs}});
     const invalid = await trial('ask', toolDeltas('ask_question', {...card, options: ['same', 'same']}), 'tool_calls');
     expect(invalid.result.cardAvailableMs).toBeUndefined();
-    expect(agentTurnSummary([invalid.result]).cardOnlyTrials).toBe(0);
+    expect(agentTurnSummary([invalid.result])).toMatchObject({cardOnlyTrials: 0});
     const text = await trial('text', textDeltas('Only text.'));
     expect(text.result.cardAvailableMs).toBeUndefined();
   });
@@ -161,7 +161,7 @@ describe('AC1-4 prepared probe (synthetic transport only)', () => {
     const good = (await trial('ask', toolDeltas('ask_question', card), 'tool_calls')).result;
     const forty: TrialResult[] = Array.from({length: 40}, (_, i) => ({...good, kind: i < 30 ? 'ask' : 'text'}));
     expect(agentTurnSummary(forty).verdict).toBe('manual_review_required');
-    expect(agentTurnSummary(forty).textCompliance).toEqual({planned: 10, completed: 10, plainTextOnly: 0, unexpectedToolCalls: 10});
+    expect(agentTurnSummary(forty)).toHaveProperty('textCompliance', {planned: 10, completed: 10, plainTextOnly: 0, unexpectedToolCalls: 10});
     expect(agentTurnSummary(forty.slice(0, 39))).toMatchObject({plannedAsk: 30, plannedTotal: 40, verdict: 'incomplete'});
     expect(agentTurnSummary([...forty.slice(2), cut.result, cut.result])).toMatchObject({formatErrors: 2, formatErrorRate: 0.05, verdict: 'fail'});
   });

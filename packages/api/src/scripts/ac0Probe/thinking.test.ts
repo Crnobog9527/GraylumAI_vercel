@@ -89,7 +89,7 @@ describe('qwen3.8-flash on Alibaba', () => {
     const omitted = builtInConfigs.filter(config => !('data_collection' in routing(config))).map(config => config.id);
     expect(omitted).toEqual(['qwen-flash-alibaba-off', 'qwen-flash-alibaba-min']);
     for (const config of builtInConfigs) {
-      if (!omitted.includes(config.id)) expect(routing(config).data_collection).toBe('deny');
+      if (!omitted.includes(config.id)) expect(routing(config)).toHaveProperty('data_collection', 'deny');
     }
   });
 });
@@ -148,7 +148,7 @@ describe('config file limits', () => {
 
   it('accepts a reasoning object from a file and still sends deny for it', () => {
     const [config] = resolveConfigs(['x'], extra({reasoning: {enabled: false}}));
-    expect(routing(config!).data_collection).toBe('deny');
+    expect(routing(config!)).toHaveProperty('data_collection', 'deny');
   });
 
   it('refuses dataCollection from a file, both thinking forms, neither, or an unknown reasoning field', () => {

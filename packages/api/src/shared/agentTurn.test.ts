@@ -76,7 +76,7 @@ describe("stored reply body", () => {
   it("refuses to build an empty, over-long or invalid body", () => {
     expect(() => agentTurnBody("  ", null)).toThrow("AGENT_TURN_BODY_EMPTY");
     expect(() => agentTurnBody("字".repeat(AGENT_TURN_MESSAGE_LIMIT + 1), null)).toThrow();
-    expect(() => agentTurnBody("文字", { question: "问题", options: ["A"] })).toThrow();
+    expect(() => agentTurnBody("文字", { question: "问题", options: ["A"], recommended: null })).toThrow();
   });
 
   it("drops an invalid stored card but keeps its message", () => {
