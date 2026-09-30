@@ -171,7 +171,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     ...(policy.real?{providerRequestFormat}:{}),...(reasoning?{reasoning}:{}),role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
     ...(policy.opcTurnToken?{opcTurnToken:uuid.parse(policy.opcTurnToken)}:{}),...(candidates.length?{matching:{candidates}}:{}),...(session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...(workspaceContext?{workspaceContext:true}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems,network:input.network,
-    ...(budgets?{purposeBudget:{purpose,inputBytes:inputLimit,historyItems}}:{}),
+    // Freeze the purpose ceiling; each selected model keeps its own call-policy limit.
+    ...(budgets?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),
     tools:[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext?['read_source']:[])],maxToolCalls:(searchAllowed?1:0)+(workspaceContext?Math.min(2,primaryTurns-1):input.sources.length),
     request:input,...(revisionId?{moduleId,skillId,revisionId}:{}),sources:input.sources};
    const selectedIds=new Set([modelId,...(attachedOrganizer?[attachedOrganizer.modelId]:[]),...candidates.map(c=>c.modelId)]);

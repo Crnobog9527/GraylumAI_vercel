@@ -13,6 +13,7 @@ import {runtimeActor} from './actor';
 import {postgresJsonbBytes,assertFrozenPayloads} from './payloadSize';
 import { runtimeAdmissionService } from './admission';
 import { activateRuntimeCandidate } from './matching';
+import {packageHash,sha256} from '../skills/loader';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
 import { workbenchService } from '../artifacts/workbench';
 import { artifactReuse } from '../artifacts/reuse';
@@ -1648,28 +1649,56 @@ it.each([{searchEnabled:false,stopAfterPrimary:false},{searchEnabled:true,stopAf
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 });
 
-it.each(['selected','none','checkpoint_loss','none_checkpoint','result_loss','invalid'])('RUNTIME: automatic public Skill matching %s shares one run and preserves control history',async mode=>{
+it.each(['selected','none','checkpoint_loss','none_checkpoint','result_loss','invalid','purpose-budget'])('RUNTIME: automatic public Skill matching %s shares one run and preserves control history',async mode=>{
  const email=randomUUID()+'@example.test',password='Local-'+randomUUID()+'!';
  const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;const actor=created.data.user.id;
  await db.query("insert into profiles(id,email,credits,role) values($1,$2,100,'admin')",[actor,email]);
  await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,100,'adjustment','adjustment','opening','system',$2,0,100)",[actor,randomUUID()]);
  const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});expect((await user.auth.signInWithPassword({email,password})).error).toBeNull();
  const pack=makePackage(),moduleId=randomUUID(),skillModel=randomUUID();
+ if(mode==='purpose-budget'){
+  const text=Buffer.from(pack.files[0].base64,'base64').toString()+'x'.repeat(70000);
+  pack.files[0].base64=Buffer.from(text).toString('base64');
+  Object.assign(pack.descriptor.files[0],{bytes:Buffer.byteLength(text),sha256:sha256(text)});
+  pack.descriptor.packageHash=packageHash(pack.descriptor);
+ }
  await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Auto Skill fixture',$2,'fixture','true')",[skillModel,'auto-'+skillModel]);
  await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[pack.id,'auto-'+pack.id,actor]);
  await db.query("insert into modules(id,title,skill_id,active,model_id) values($1,'Automatic document Skill',$2,true,$3)",[moduleId,pack.id,skillModel]);
  await publishSkillPackage(admin,actor,pack);
- const admission=runtimeAdmissionService(user,admin,{account:'sandbox',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:200,inputBytes:30000,historyItems:30});
+ const admission=runtimeAdmissionService(user,admin,{purposeBudgets:mode==='purpose-budget',account:'sandbox',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:200,inputBytes:30000,historyItems:30});
  const s=await admission.start(randomUUID(),{kind:'positioning_draft'});
  const oldCapacity=(await db.query('select input_limit from ai_models where id=$1',[modelId])).rows[0].input_limit;
  if(mode==='none_checkpoint'){
   await db.query('update ai_models set input_limit=10200 where id=$1',[modelId]);
   await db.query("update ai_models set model_id='runtime-m' where id=$1",[skillModel]);
  }
- const e=await admission.prepare({sessionId:s.sessionId,requestId:randomUUID(),input:'Use the appropriate method for this request',selection:{kind:'auto',modelId},network:'deny'});
- await db.query('update ai_models set input_limit=$2 where id=$1',[modelId,oldCapacity]);
+ const priorBudget=(await db.query("select value from system_settings where key='runtime_purpose_budgets'")).rows[0];
+ if(mode==='purpose-budget'){
+  const config={version:1,interactive:{inputBytes:90000,maxOutputTokens:200,historyItems:30},
+   organize:{inputBytes:64000,historyItems:0},report:{inputBytes:90000,maxOutputTokens:200,historyItems:0}};
+  await db.query("insert into system_settings(key,value) values('runtime_purpose_budgets',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(JSON.stringify(config))]);
+  await db.query('update ai_models set input_limit=64200 where id=$1',[modelId]);
+  await db.query('update ai_models set input_limit=90200 where id=$1',[skillModel]);
+ }
+ let e;
+ try{
+  e=await admission.prepare({sessionId:s.sessionId,requestId:randomUUID(),input:'Use the appropriate method for this request',selection:{kind:'auto',modelId},network:'deny'});
+ }finally{
+  if(mode==='purpose-budget'){
+   if(priorBudget)await db.query("update system_settings set value=$1 where key='runtime_purpose_budgets'",[JSON.stringify(priorBudget.value)]);
+   else await db.query("delete from system_settings where key='runtime_purpose_budgets'");
+  }
+  await db.query('update ai_models set input_limit=$2 where id=$1',[modelId,oldCapacity]);
+ }
  const payload=(await db.query('select payload from runtime_executions where id=$1',[e.executionId])).rows[0].payload;
  const chosen=payload.matching.candidates.find((c:any)=>c.moduleId===moduleId);expect(chosen).toBeTruthy();
+ if(mode==='purpose-budget'){
+  expect(payload.purposeBudget.inputBytes).toBe(90000);
+  expect(chosen.inputLimit).toBe(90000);
+  const frozen=(await db.query('select payload from bill2_runs where id=$1',[e.runId])).rows[0].payload;
+  expect(frozen.callPolicy.find((p:{modelId:string;inputLimit:number})=>p.modelId===modelId).inputLimit).toBe(64000);
+ }
  const requests:any[]=[];let injected=false;
  const server=createServer(async(req,res)=>{
   let raw='';for await(const chunk of req)raw+=chunk;const input=JSON.parse(JSON.parse(raw).input);requests.push(input);
@@ -1703,6 +1732,7 @@ it.each(['selected','none','checkpoint_loss','none_checkpoint','result_loss','in
   }else{
    expect(result).toEqual({body:'Auto matched answer',state:'completed'});expect(requests).toHaveLength(2);
    expect(requests[1].model).toBe(mode==='none'?'runtime-m':'auto-'+skillModel);
+   if(mode==='purpose-budget')expect(Buffer.byteLength(JSON.stringify(requests[1]))).toBeGreaterThan(64000);
    if(mode!=='none')expect(JSON.stringify(requests[1])).toContain('METHOD_CANARY');
    else expect(JSON.stringify(requests[1])).not.toContain('METHOD_CANARY');
    await executor.execute(e.executionId);expect(requests).toHaveLength(2);
