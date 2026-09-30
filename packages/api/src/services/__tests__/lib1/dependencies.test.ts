@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 
@@ -18,10 +18,11 @@ const probe = fileURLToPath(new URL('./probe.cjs', import.meta.url));
 const moduleRoots = ['yauzl', 'sax', 'pend'].flatMap(name => {
   const location = name === 'pend' ? createRequire(require.resolve('yauzl')) : require;
   const root = dirname(realpathSync(location.resolve(`${name}/package.json`)));
-  const alias = name === 'pend'
-    ? resolve(dirname(require.resolve('yauzl')), '../pend')
-    : resolve(dirname(probe), '../../../../node_modules', name);
-  return [root, alias];
+  // Permission checks also see the unresolved package alias. Derive it from
+  // Node's resolver search paths rather than assuming a pnpm directory layout.
+  const alias = location.resolve.paths(name)?.map(base => resolve(base, name))
+    .find(candidate => existsSync(candidate) && realpathSync(candidate) === root);
+  return alias ? [root, alias] : [root];
 });
 
 async function run(input: Buffer, mode = 'parse') {
@@ -90,11 +91,17 @@ describe('LIB-1 dependency qualification (test-only, no upload or OOXML implemen
   it.each(['../escape', '/absolute', 'C:/drive', 'word\\escape'])('rejects ZIP-slip path %s', async name => {
     await rejects(zipFixture([{ name, body: 'x' }]), /invalid|absolute/i);
   });
+  it('rejects dot-component path aliases in the probe', async () => {
+    await rejects(zipFixture([{ name: 'word/./document.xml', body: '<x/>' }]), /^PATH_ALIAS$/);
+  });
   it('rejects high-ratio ZIP bombs before decompression', async () => {
     await rejects(zipFixture([{ body: 'x'.repeat(1_000_000), deflate: true }]), /RATIO/);
   });
   it('rejects an understated deflated size from the actual stream', async () => {
-    await rejects(zipFixture([{ body: 'x'.repeat(100_000), deflate: true, declaredSize: 100 }]), /size|bytes/i);
+    await rejects(
+      zipFixture([{ body: 'x'.repeat(100_000), deflate: true, declaredSize: 100 }]),
+      /^too many bytes in the stream\. expected 100\. got at least \d+$/,
+    );
   });
   it.each([
     '<!DOCTYPE x [<!ENTITY e SYSTEM "file:///not-a-real-file">]><x>&e;</x>',
@@ -130,7 +137,7 @@ describe('LIB-1 dependency qualification (test-only, no upload or OOXML implemen
   });
   it('rejects XML depth over 64 and oversized sax tokens', async () => {
     await rejects(zipFixture([{ body: '<x>'.repeat(65) + '</x>'.repeat(65) }]), /XML_DEPTH/);
-    await rejects(zipFixture([{ body: `<x a="${'x'.repeat(100_000)}"/>` }]), /XML_TOKEN|buffer|length/i);
+    await rejects(zipFixture([{ body: `<x a="${'x'.repeat(100_000)}"/>` }]), /^XML_TOKEN$/);
   });
   it('kills and reaps a CPU-bound child instead of only timing out a Promise', async () => {
     const result = await run(Buffer.alloc(0), 'hang');

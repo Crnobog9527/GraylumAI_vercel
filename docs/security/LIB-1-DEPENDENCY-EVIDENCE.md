@@ -47,7 +47,7 @@ Run under Node 24:
 pnpm --filter @repo/api exec vitest run src/services/__tests__/lib1/dependencies.test.ts
 ```
 
-These 19 tests are discovered by the existing API Vitest suite, hence normal CI;
+These 20 tests are discovered by the existing API Vitest suite, hence normal CI;
 no new workflow, script gate or dependency was added. All helper code stays inside
 `__tests__/lib1/` and is never exported/imported by the application. The tiny ZIP
 **writer** builds adversarial inputs in memory; yauzl performs all ZIP parsing and
@@ -60,7 +60,7 @@ Coverage:
   tests do not merely pass because the child cannot load its dependencies.
 - High compression ratio rejected before inflation; forged uncompressed size
   rejected by the real yauzl stream; ZIP-slip relative, absolute, drive and
-  backslash paths; duplicate entry, symlink and encrypted flag rejection.
+  backslash paths; dot-component aliases; duplicate entry, symlink and encrypted flag rejection.
 - External file/URL and internal entity DTDs rejected; malformed ZIP/truncation/XML
   and corrupted CRC rejected. CRC is explicitly checked: yauzl's entry-size
   checking alone is not CRC verification.
@@ -77,7 +77,7 @@ Coverage:
   deadline to 100 ms after readiness; ordinary fixture deadline is 15 seconds.
   Stdout/stderr have 64 KB caps. No untrusted file is extracted to disk.
 
-Local qualification: Node **24.14.0**, pnpm **10.28.1**; the 19 tests, API typecheck,
+Local qualification: Node **24.14.0**, pnpm **10.28.1**; the 20 tests, API typecheck,
 API ESLint and repository code-size check passed. Final full-suite/build/CI evidence
 is linked from the PR. The synthetic corpus is not evidence of complete Word
 semantics or platform isolation.
