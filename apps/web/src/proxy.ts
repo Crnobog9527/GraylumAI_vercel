@@ -149,14 +149,15 @@ function getClientIP(request: NextRequest): string {
   return 'unknown';
 }
 
-// GoTrue sends email and OAuth links to /auth/callback, or to the Site URL root when it did not
-// accept the requested redirect. A code landing anywhere else goes to the server callback, which
-// exchanges it with the verifier cookie this request carries (with duplicate cookie names the browser
-// client reads the older one first). Only the expired-link error code on the root is routed here;
-// other errors keep their existing handling.
+// GoTrue sends email and OAuth links to /auth/callback. Only when it does not accept the requested
+// redirect does it fall back to the Site URL root, so only the root is handled here: a code goes to
+// the server callback, which exchanges it with the verifier cookie this request carries (with
+// duplicate cookie names the browser client reads the older one first), and the expired-link error
+// code goes to the resend page. Other errors, and codes on any other page, keep their handling.
+// This also runs on the public site: its /auth/callback is forwarded to the app domain as usual.
 export function routeAuthLanding(request: NextRequest): NextResponse | null {
   const { pathname, searchParams } = request.nextUrl;
-  if (pathname === '/auth/callback' || pathname.startsWith('/api') || pathname.startsWith('/_next')) {
+  if (pathname !== '/') {
     return null;
   }
 
@@ -168,7 +169,7 @@ export function routeAuthLanding(request: NextRequest): NextResponse | null {
     return NextResponse.redirect(callbackUrl);
   }
 
-  if (pathname === '/' && routeCallbackError(searchParams)?.to === 'verify-expired') {
+  if (routeCallbackError(searchParams)?.to === 'verify-expired') {
     return NextResponse.redirect(new URL(buildVerifyEmailPath('', '/profile', 'expired'), request.url));
   }
 

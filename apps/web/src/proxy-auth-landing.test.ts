@@ -26,16 +26,30 @@ describe('proxy handling of GoTrue landings', () => {
     expect(await get(`${APP}/?code=abc`)).toEqual({ status: 307, to: `${APP}/auth/callback?code=abc&next=/profile` });
   });
 
-  it('forwards a code on another page and keeps that page as next without the code', async () => {
+  it('keeps a code on any other page for that page, as before', async () => {
     expect(await get(`${APP}/library?item=1&code=abc`)).toEqual({
       status: 307,
-      to: `${APP}/auth/callback?code=abc&next=/library?item=1`,
+      to: `${APP}/login?redirect=/library?item=1&code=abc`,
     });
+    getUser.mockResolvedValue({ data: { user: { email: 'a@example.test', email_confirmed_at: '2026-09-30T00:00:00Z' } } });
+    expect(await get(`${APP}/profile?code=abc`)).toEqual({ status: 200, to: null });
   });
 
   it('leaves the callback itself and API routes alone', async () => {
     expect((await get(`${APP}/auth/callback?code=abc`)).status).toBe(200);
     expect((await get(`${APP}/api/health?code=abc`)).to).toBeNull();
+  });
+
+  it('forwards a code on the public site root to the app callback without losing it', async () => {
+    expect(await get('https://www.graylum.com/?code=abc')).toEqual({
+      status: 307,
+      to: 'https://www.graylum.com/auth/callback?code=abc&next=/profile',
+    });
+    // The public site then sends its /auth/callback, query included, to the app domain.
+    expect(await get('https://www.graylum.com/auth/callback?code=abc&next=%2Fprofile')).toEqual({
+      status: 307,
+      to: 'https://app.graylum.com/auth/callback?code=abc&next=/profile',
+    });
   });
 
   it('sends an expired-link landing on the root straight to the resend page', async () => {
