@@ -260,7 +260,7 @@ it('STG_MENTOR: frozen single-turn samples and product two-turn offline preparat
   const totals=candidates.map(c=>{const own=rows.filter(row=>row.model===c.model);
     return {model:c.model,calls:own.length,minB:Math.min(...own.map(r=>r.B)),maxB:Math.max(...own.map(r=>r.B)),
       reserveUsd:nanoToUsd(own.reduce((sum,row)=>sum+row.reserveNano,0))};});
-  const result={version:1,mode:live?'live':'offline-only',frozenHead:'f9afd0db7805e80ccc6f5b7023a3e87b5014f5bd',
+  const result={version:1,mode:live?'live':'offline-only',frozenHead:'d5c22653d65f29b9df75dd1ff3c8e7378d42ba36',
     planId:hash(JSON.stringify(rows)),scenariosSourceHash:input.scenariosSourceHash,totals,
     totalReserveUsd:nanoToUsd(rows.reduce((sum,row)=>sum+row.reserveNano,0)),providerRequests:live?rows.length:0,rows};
   writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/mentor-preparation.json',JSON.stringify(result,null,2)+'\n',{mode:0o600});

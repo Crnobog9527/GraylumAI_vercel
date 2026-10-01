@@ -27,12 +27,12 @@ export function mentorMaxUsd(value:string | undefined):number {
 }
 
 /** One process holds the existing ledger lock for the entire batch. Restarting
- * after even one reservation fails the 740 baseline; no resume/retry switch. */
+ * after even one reservation fails the 750 baseline; no resume/retry switch. */
 export function mentorSender(options:{ledger:LedgerStore;maxUsd:number;slots:MentorSlot[];
   upstream:typeof fetch;authorization:string;save:(record:Record<string,unknown>)=>void}) {
   mentorMaxUsd(String(options.maxUsd));
   const baseline=options.ledger.read();
-  if (baseline.calls!==740) throw new Error('MENTOR_BASELINE_CHANGED');
+  if (baseline.calls!==750) throw new Error('MENTOR_BASELINE_CHANGED');
   const budget=createBudget({maxCalls:104,maxUsd:options.maxUsd,ledger:options.ledger});
   const modelTotals={G:{calls:0,nano:0},S:{calls:0,nano:0},L:{calls:0,nano:0}};
   const used=new Set<string>();

@@ -16,7 +16,7 @@ if(live&&(!maxUsdArg||!evidencePath))throw new Error('--live requires --max-usd 
 if(args.length!==4)throw new Error('Usage: node scripts/stg-mentor-offline.mjs DETACHED_FROZEN_ROOT SKILL_DIR SCENARIOS_JSON OUTPUT_DIR');
 const [root,skill,scenariosPath,output]=args.map(p=>resolve(p));
 const git=(...a)=>execFileSync('git',a,{cwd:root,encoding:'utf8'}).trim();
-const frozen='f9afd0db7805e80ccc6f5b7023a3e87b5014f5bd';
+const frozen='d5c22653d65f29b9df75dd1ff3c8e7378d42ba36';
 if(git('rev-parse','HEAD')!==frozen||git('branch','--show-current'))throw new Error('Exact detached frozen checkout required');
 if(git('status','--porcelain'))throw new Error('Clean detached checkout required');
 const require=createRequire(join(root,'packages/api/package.json'));

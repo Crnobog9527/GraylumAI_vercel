@@ -3,7 +3,7 @@
 
 /** Owner approval: PR #561 issuecomment-5935911029. Cumulative only;
  * STG-MENTOR additionally enforces 104 calls / $10.24 and per-model limits. */
-export const HARD_MAX_CALLS = 844;
+export const HARD_MAX_CALLS = 854;
 export const HARD_MAX_USD = 25.24;
 export const DEFAULT_MAX_CALLS = 60;
 export const DEFAULT_MAX_USD = 1;

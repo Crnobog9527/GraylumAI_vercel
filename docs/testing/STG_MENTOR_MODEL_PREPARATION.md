@@ -259,3 +259,33 @@ Owner本会话明确批准，覆盖此前停止状态，但不授权下一次停
 旧结果文件完整保留，仅供计量证据；新批次独立输出目录，从G第1题开始，80题及盲评不混入旧结果。
 同head验证/独立审查通过后按本次授权启动，仍携带代理环境、--use-env-proxy及--max-usd 10.24，首条前免费US检查。
 80条后照旧停在/main-complete，等总控独立锁定JSON；再有未知/拒绝/本地断开则停下报告。
+
+
+## 第三次恢复准备（2026-10-02）
+
+写入方已由 Codex 交接给 Claude（[交接记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/561#issuecomment-5938294353)）。
+[第10条诊断](https://github.com/Crnobog9527/GraylumAI_vercel/pull/561#issuecomment-5938475137)确认是冻结产品
+`bill2/openRouterStream.ts` 的 `mergeDetails` 缺陷，[总控已接受](https://github.com/Crnobog9527/GraylumAI_vercel/pull/561#issuecomment-5938501084)。
+#574 把累积键改为 (index, type)，#497 随后[重新冻结](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5939174514)
+为 `d5c22653d65f29b9df75dd1ff3c8e7378d42ba36`。与 `f9afd0db` 相比，`packages/api/src/services`、`shared`、`packages/db`
+和锁文件只差 `openRouterStream.ts` 及其回归测试。
+
+本次只改探测绑定和次数，不改金额、模型、样本、请求组装或转发逻辑：
+- `scripts/stg-mentor-offline.mjs` 和 `mentorPreparation.mjs` 的冻结 SHA 改为 `d5c22653`；
+- 启动基线 740 → 750，`HARD_MAX_CALLS` 844 → 854，`HARD_MAX_USD` 仍为 25.24，并同步了断言；
+- 已批准的离线证据（`mentor-preparation.json` sha256 `040cd0d0…`）和私有输入（`406d521f…`）不变。
+
+离线复核（无网络、无真实请求，真实账本前后全文件 hash 相同，仍 750 次）：
+- 在 `d5c22653` 独立 detached 副本上重跑 104 条离线组装：通过。80 条主评测 requestHash 与已批准记录逐一相同、顺序相同；
+  104 条 B 全部相同，预留合计仍为 $9.143556。端到端里 12 条导师请求的 hash 每次运行都会变（新建草稿和请求 ID），
+  在 `f9afd0db` 上重跑也是 12/24 一致；发送入口只对主评测按 hash 拦截。
+- 用第二次恢复保存的 10 条 Gemini 完整上游字节经新冻结产品（`openRouterStream` → adapter → `runRuntime` → evidence）回放：
+  10 条全部完整读完、回执 final、正常出卡；回执费用与当时结清金额一致。第 10 条现在解析为
+  `[reasoning.text@0, reasoning.encrypted@0]`，不再被拒。回放是临时测试文件，不提交，内容和标识不公开。
+- 冻结副本复核后保持干净，HEAD 仍为 `d5c22653`。
+
+执行条件：总控审过本 head 并在 PR 上写下批准记录（依据 Owner 授权总控自主使用测试余额的
+[记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/561#issuecomment-5938790602)）。之后只读核对账本 750 次，
+带代理变量和 `--use-env-proxy`、`--max-usd 10.24` 启动，首条前免费美国来源检查。80 条后停在 `/main-complete`，
+报告 `blind-review.json` 路径和 sha256，等总控另开评审会话锁定评分；不打开私有映射、不自评。
+再遇到未知、拒绝或下游断开，照旧停止报告，不自动恢复。
