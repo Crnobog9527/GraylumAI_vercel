@@ -29,7 +29,13 @@ export type BillingUnitErrorCode =
   | 'BILLING_UNIT_MODEL_MISSING'
   | 'BILLING_UNIT_MULTIPLIER_INVALID'
   | 'BILLING_UNIT_SNAPSHOT_INVALID'
-  | 'BILLING_UNIT_MODEL_NOT_APPROVED';
+  | 'BILLING_UNIT_MODEL_NOT_APPROVED'
+  | 'BILLING_UNIT_ROUTE_NOT_APPROVED'
+  | 'BILLING_UNIT_PROVIDER_PRICES_UNAVAILABLE'
+  | 'BILLING_UNIT_PROVIDER_PRICES_INVALID'
+  | 'BILLING_UNIT_PROVIDER_PRICE_UNKNOWN'
+  | 'BILLING_UNIT_PROVIDER_PRICE_EXPIRED'
+  | 'BILLING_UNIT_PROVIDER_USAGE_INVALID';
 
 export class BillingUnitConfigError extends Error {
   constructor(public readonly code: BillingUnitErrorCode) {
@@ -116,7 +122,7 @@ export async function readBillingUnitSettings(db: SupabaseClient): Promise<Billi
   return billingUnitSettingsFromRows(data as SettingRow[]);
 }
 
-export type MultiplierSource = 'model' | 'global';
+export type MultiplierSource = 'model' | 'provider' | 'global';
 export type ResolvedMultiplier = { multiplier: string; source: MultiplierSource };
 
 /** The row must carry the column: an undeployed or unselected field is an error, not NULL. */
@@ -133,59 +139,101 @@ export type MultiplierSnapshot = {
   creditsPerUsd: string;
   defaultMultiplier: string;
   models: Readonly<Record<string, ResolvedMultiplier>>;
+  /** Third-party routes keyed by providerRouteKey(); priced separately, multiplier frozen here. */
+  providers: Readonly<Record<string, ResolvedMultiplier>>;
   hash: string;
 };
 
+export const providerRouteKey = (provider: string, route: string) => `${provider} ${route}`;
+
+function canonicalMap(map: Readonly<Record<string, ResolvedMultiplier>>) {
+  return Object.keys(map).sort().map((key) => [key, map[key]!.multiplier, map[key]!.source]);
+}
+
 function snapshotHash(body: Omit<MultiplierSnapshot, 'hash'>): string {
-  const models = Object.keys(body.models).sort().map((id) => [id, body.models[id]!.multiplier, body.models[id]!.source]);
-  const canonicalBody = JSON.stringify([body.version, body.creditsPerUsd, body.defaultMultiplier, models]);
+  const canonicalBody = JSON.stringify([
+    body.version, body.creditsPerUsd, body.defaultMultiplier, canonicalMap(body.models), canonicalMap(body.providers),
+  ]);
   return createHash('sha256').update(canonicalBody).digest('hex');
+}
+
+function frozenMap(map: Readonly<Record<string, ResolvedMultiplier>>, own: MultiplierSource) {
+  const keys = Object.keys(map);
+  if (keys.length > MAX_SNAPSHOT_MODELS) throw new BillingUnitConfigError('BILLING_UNIT_SNAPSHOT_INVALID');
+  return Object.fromEntries(keys.sort().map((key) => {
+    const entry = map[key]!;
+    if (entry.source !== own && entry.source !== 'global') throw new BillingUnitConfigError('BILLING_UNIT_SNAPSHOT_INVALID');
+    return [key, { multiplier: parseMultiplier(entry.multiplier), source: entry.source }];
+  }));
 }
 
 export function buildMultiplierSnapshot(
   settings: Pick<BillingUnitSettings, 'creditsPerUsd' | 'defaultMultiplier'>,
   models: Readonly<Record<string, ResolvedMultiplier>>,
+  providers: Readonly<Record<string, ResolvedMultiplier>> = {},
 ): MultiplierSnapshot {
-  const ids = Object.keys(models);
-  if (ids.length === 0 || ids.length > MAX_SNAPSHOT_MODELS) throw new BillingUnitConfigError('BILLING_UNIT_SNAPSHOT_INVALID');
+  if (Object.keys(models).length + Object.keys(providers).length === 0) {
+    throw new BillingUnitConfigError('BILLING_UNIT_SNAPSHOT_INVALID');
+  }
   const body = {
     version: BILLING_UNIT_SNAPSHOT_VERSION,
     creditsPerUsd: parseCreditsPerUsd(settings.creditsPerUsd),
     defaultMultiplier: parseMultiplier(settings.defaultMultiplier),
-    models: Object.fromEntries(ids.sort().map((id) => {
-      const entry = models[id]!;
-      return [id, { multiplier: parseMultiplier(entry.multiplier), source: entry.source }];
-    })),
+    models: frozenMap(models, 'model'),
+    providers: frozenMap(providers, 'provider'),
   } as const;
   return { ...body, hash: snapshotHash(body) };
 }
 
-/** Reads q and the default, then the approved models' overrides. These are two separate reads,
- * not one transaction: the frozen snapshot that results is the authority for the operation. */
-export async function readMultiplierSnapshot(db: SupabaseClient, modelIds: readonly string[]): Promise<MultiplierSnapshot> {
+/** Reads q and the default, then the approved models' overrides. These are separate reads, not one
+ * transaction: the frozen snapshot that results is the authority for the operation. Third-party
+ * route multipliers are resolved by the caller (billingProviderPrices) against the same default. */
+export async function readMultiplierSnapshot(
+  db: SupabaseClient,
+  modelIds: readonly string[],
+  resolveProviders?: (defaultMultiplier: string) => Readonly<Record<string, ResolvedMultiplier>>,
+): Promise<MultiplierSnapshot> {
   const ids = [...new Set(modelIds)];
-  if (ids.length === 0 || ids.length > MAX_SNAPSHOT_MODELS) throw new BillingUnitConfigError('BILLING_UNIT_SNAPSHOT_INVALID');
-  const settings = await readBillingUnitSettings(db);
-  const { data, error } = await db.from('ai_models').select('id, price_multiplier').in('id', ids);
-  if (error || !Array.isArray(data)) throw new BillingUnitConfigError('BILLING_UNIT_MODEL_UNAVAILABLE');
-  const rows = data as Array<Record<string, unknown>>;
-  const models: Record<string, ResolvedMultiplier> = {};
-  for (const id of ids) {
-    const matches = rows.filter((row) => row.id === id);
-    if (matches.length !== 1) throw new BillingUnitConfigError('BILLING_UNIT_MODEL_MISSING');
-    models[id] = resolveModelMultiplier(matches[0]!, settings.defaultMultiplier);
+  if (ids.length > MAX_SNAPSHOT_MODELS || (ids.length === 0 && !resolveProviders)) {
+    throw new BillingUnitConfigError('BILLING_UNIT_SNAPSHOT_INVALID');
   }
-  return buildMultiplierSnapshot(settings, models);
+  const settings = await readBillingUnitSettings(db);
+  const models: Record<string, ResolvedMultiplier> = {};
+  if (ids.length > 0) {
+    const { data, error } = await db.from('ai_models').select('id, price_multiplier').in('id', ids);
+    if (error || !Array.isArray(data)) throw new BillingUnitConfigError('BILLING_UNIT_MODEL_UNAVAILABLE');
+    const rows = data as Array<Record<string, unknown>>;
+    for (const id of ids) {
+      const matches = rows.filter((row) => row.id === id);
+      if (matches.length !== 1) throw new BillingUnitConfigError('BILLING_UNIT_MODEL_MISSING');
+      models[id] = resolveModelMultiplier(matches[0]!, settings.defaultMultiplier);
+    }
+  }
+  return buildMultiplierSnapshot(settings, models, resolveProviders?.(settings.defaultMultiplier) ?? {});
+}
+
+function assertSnapshot(snapshot: MultiplierSnapshot) {
+  const maps: unknown[] = [snapshot?.models, snapshot?.providers];
+  if (!snapshot || snapshot.version !== BILLING_UNIT_SNAPSHOT_VERSION
+    || maps.some((map) => typeof map !== 'object' || map === null || Array.isArray(map))
+    || snapshotHash(snapshot) !== snapshot.hash) {
+    throw new BillingUnitConfigError('BILLING_UNIT_SNAPSHOT_INVALID');
+  }
 }
 
 /** A call may only use a model frozen into its operation's snapshot. */
 export function multiplierForCall(snapshot: MultiplierSnapshot, modelId: string) {
-  const models: unknown = snapshot?.models;
-  if (!snapshot || snapshot.version !== BILLING_UNIT_SNAPSHOT_VERSION || typeof models !== 'object' || models === null
-    || Array.isArray(models) || snapshotHash(snapshot) !== snapshot.hash) {
-    throw new BillingUnitConfigError('BILLING_UNIT_SNAPSHOT_INVALID');
-  }
+  assertSnapshot(snapshot);
   const entry = Object.hasOwn(snapshot.models, modelId) ? snapshot.models[modelId] : undefined;
   if (!entry) throw new BillingUnitConfigError('BILLING_UNIT_MODEL_NOT_APPROVED');
+  return { multiplier: entry.multiplier, source: entry.source, snapshotHash: snapshot.hash };
+}
+
+/** Same rule for a third-party route: only routes frozen at admission may be charged. */
+export function multiplierForProviderCall(snapshot: MultiplierSnapshot, provider: string, route: string) {
+  assertSnapshot(snapshot);
+  const key = providerRouteKey(provider, route);
+  const entry = Object.hasOwn(snapshot.providers, key) ? snapshot.providers[key] : undefined;
+  if (!entry) throw new BillingUnitConfigError('BILLING_UNIT_ROUTE_NOT_APPROVED');
   return { multiplier: entry.multiplier, source: entry.source, snapshotHash: snapshot.hash };
 }

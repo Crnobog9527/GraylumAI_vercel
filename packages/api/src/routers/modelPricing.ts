@@ -3,7 +3,17 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, adminProcedure } from '../trpc';
 import { createSafeInternalError } from '../lib/publicError';
-import { parseOptionalMultiplier, readBillingUnitSettings, type BillingUnitSettings } from '../services/billingUnit';
+import {
+  BillingUnitConfigError, parseOptionalMultiplier, readBillingUnitSettings, type BillingUnitSettings,
+} from '../services/billingUnit';
+import { readProviderPrices, saveProviderPrices } from '../services/billingProviderPrices';
+
+function providerPricesError(cause: unknown): TRPCError {
+  if (cause instanceof BillingUnitConfigError && cause.code === 'BILLING_UNIT_PROVIDER_PRICES_INVALID') {
+    return new TRPCError({ code: 'BAD_REQUEST', message: '第三方价格配置不合法，请检查后再保存', cause });
+  }
+  return new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: '无法读取或保存第三方价格配置，请稍后重试', cause });
+}
 
 // BILL-UNIT: admin-only view and edit of the per-model price multiplier (ai_models.price_multiplier).
 // Reads go through the service-role client; the column has no anon/authenticated grant.
@@ -45,6 +55,14 @@ export const modelPricingRouter = router({
     // A missing column (migration not applied) or read failure disables editing; it is never shown as "inherit".
     if (error || !Array.isArray(data)) return { site, available: false as const, models: [] as ModelMultiplierView[] };
     return { site, available: true as const, models: (data as MultiplierRow[]).map((row) => viewRow(row, site)) };
+  }),
+
+  getProviderPrices: adminProcedure.query(async ({ ctx }) => {
+    try { return await readProviderPrices(ctx.supabase); } catch (cause) { throw providerPricesError(cause); }
+  }),
+
+  setProviderPrices: adminProcedure.input(z.unknown()).mutation(async ({ ctx, input }) => {
+    try { return await saveProviderPrices(ctx.supabase, input); } catch (cause) { throw providerPricesError(cause); }
   }),
 
   setMultiplier: adminProcedure.input(setMultiplierInput).mutation(async ({ ctx, input }) => {

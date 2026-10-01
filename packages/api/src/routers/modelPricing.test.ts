@@ -16,10 +16,20 @@ function harness(role: 'admin' | 'user' | 'anonymous', options: {
     { id: MODEL, name: 'Sonnet', model_id: 'vendor/sonnet', is_active: 'true', price_multiplier: null, updated_at: STAMP },
   ];
   const updates: Array<{ patch: Record<string, unknown>; filters: Record<string, unknown> }> = [];
+  const settingWrites: Array<{ key: string; value: string }> = [];
+  let providerRow: { value: string } | null = null;
   const db = { from(table: string) {
     if (table === 'profiles') return { select() { return this; }, eq() { return this; },
       single: async () => ({ data: { id: 'actor', role, status: 'active', credits: 0, nickname: 'S', email: 's@example.test' }, error: null }) };
-    if (table === 'system_settings') return { select() { return { in: async () => options.settings ?? { data: [], error: null } }; } };
+    if (table === 'system_settings') return {
+      select() {
+        return {
+          in: async () => options.settings ?? { data: [], error: null },
+          eq: () => ({ maybeSingle: async () => ({ data: providerRow, error: null }) }),
+        };
+      },
+      upsert: async (row: { key: string; value: string }) => { settingWrites.push(row); providerRow = { value: row.value }; return { error: null }; },
+    };
     if (table !== 'ai_models') throw new Error(table);
     return {
       select() { return { order: async () => options.listError ? { data: null, error: options.listError } : { data: rows, error: null } }; },
@@ -44,7 +54,7 @@ function harness(role: 'admin' | 'user' | 'anonymous', options: {
     id: 'actor', email: 's@example.test', app_metadata: { provider: 'email' }, user_metadata: { email_verified: true } },
     isEmailVerified: true, authProvider: 'email', supabase: db, supabaseAuth: db, supabasePublic: {},
     supabaseAdmin: db, hasSupabaseAdminPrivileges: true } as never;
-  return { caller: modelPricingRouter.createCaller(ctx), rows, updates };
+  return { caller: modelPricingRouter.createCaller(ctx), rows, updates, settingWrites };
 }
 
 describe('model multiplier admin endpoints', () => {
@@ -114,6 +124,35 @@ describe('model multiplier admin endpoints', () => {
       await expect(call()).rejects.toMatchObject({ code: role === 'anonymous' ? 'UNAUTHORIZED' : 'FORBIDDEN' });
     }
     expect(f.updates).toEqual([]);
+  });
+
+  const prices = { version: 1, entries: [{
+    provider: 'parallel', route: 'search/basic', appliesToUnlistedRoutes: false, currency: 'USD', usageUnit: 'request',
+    unitsPerPrice: '1000', price: '5', usdPerCurrency: null, pricingBasis: 'list-price',
+    sourceUrl: 'https://docs.parallel.ai/getting-started/pricing', evidenceHash: 'b'.repeat(64),
+    verifiedAt: '2026-10-01T00:00:00Z', validUntil: null, chargeCondition: 'successful search', includedInReceipt: false,
+    priceMultiplier: '2',
+  }] };
+
+  it('admin saves third-party prices through the dedicated endpoint and reads them back', async () => {
+    const f = harness('admin');
+    expect(await f.caller.getProviderPrices()).toEqual({ config: { version: 1, entries: [] }, source: 'absent' });
+    expect(await f.caller.setProviderPrices(prices)).toEqual({ config: prices, source: 'configured' });
+    expect(f.settingWrites.map((w) => w.key)).toEqual(['billing_provider_prices']);
+  });
+
+  it('invalid third-party prices are a bad request and are not written', async () => {
+    const f = harness('admin');
+    await expect(f.caller.setProviderPrices({ ...prices, entries: [{ ...prices.entries[0], apiKey: 'sk' }] }))
+      .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.settingWrites).toEqual([]);
+  });
+
+  it.each(['user', 'anonymous'] as const)('denies %s third-party price access', async (role) => {
+    const f = harness(role);
+    await expect(f.caller.getProviderPrices()).rejects.toMatchObject({ code: role === 'anonymous' ? 'UNAUTHORIZED' : 'FORBIDDEN' });
+    await expect(f.caller.setProviderPrices(prices)).rejects.toMatchObject({ code: role === 'anonymous' ? 'UNAUTHORIZED' : 'FORBIDDEN' });
+    expect(f.settingWrites).toEqual([]);
   });
 
   it('rejects unknown fields such as a client-supplied effective multiplier', async () => {

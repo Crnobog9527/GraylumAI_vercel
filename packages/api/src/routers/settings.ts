@@ -4,6 +4,7 @@ import {
 import { RUNTIME_RATE_LIMIT_KEY } from '../services/runtime/rateLimitSettings';
 import { parseSearchSurcharge } from '../services/searchPricing';
 import { BILLING_UNIT_SETTING_KEYS, parseCreditsPerUsd, parseMultiplier } from '../services/billingUnit';
+import { PROVIDER_PRICES_KEY } from '../services/billingProviderPrices';
 import { RUNTIME_MODEL_COLUMNS, runtimeModelOption } from "../services/models/runtimeEligibility";
 import { router, publicProcedure, adminProcedure } from '../trpc';
 import { z } from 'zod';
@@ -85,6 +86,9 @@ const systemSettingInputSchema = z.object({
 }).superRefine((setting, ctx) => {
   if (setting.key === RUNTIME_RATE_LIMIT_KEY) {
     ctx.addIssue({ code: 'custom', path: ['key'], message: '使用额度请通过专用管理接口保存' });
+  }
+  if (setting.key === PROVIDER_PRICES_KEY) {
+    ctx.addIssue({ code: 'custom', path: ['key'], message: '第三方价格请通过专用管理接口保存' });
   }
   if (setting.key === 'runtime_purpose_budgets') {
     ctx.addIssue({ code: 'custom', path: ['key'], message: '用途预算请通过专用管理接口保存' });
