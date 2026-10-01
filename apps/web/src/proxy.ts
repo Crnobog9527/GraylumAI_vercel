@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
+import { buildVerifyEmailPath, routeCallbackError } from '@/lib/authFlow';
 import { logServerError } from '@/lib/server-log';
 import { isPublicPathname } from '@/lib/public-paths';
 import { isPublicSiteHost, resolveAuthAppUrl, resolveSupabaseCookieOptions } from '@/lib/site-config';
@@ -127,6 +128,33 @@ function getClientIP(request: NextRequest): string {
   return 'unknown';
 }
 
+// GoTrue sends email and OAuth links to /auth/callback. Only when it does not accept the requested
+// redirect does it fall back to the Site URL root, so only the root is handled here: a code goes to
+// the server callback, which exchanges it with the verifier cookie this request carries (with
+// duplicate cookie names the browser client reads the older one first), and the expired-link error
+// code goes to the resend page. Other errors, and codes on any other page, keep their handling.
+// This also runs on the public site: its /auth/callback is forwarded to the app domain as usual.
+export function routeAuthLanding(request: NextRequest): NextResponse | null {
+  const { pathname, searchParams } = request.nextUrl;
+  if (pathname !== '/') {
+    return null;
+  }
+
+  const code = searchParams.get('code');
+  if (code) {
+    const callbackUrl = new URL('/auth/callback', request.url);
+    callbackUrl.searchParams.set('code', code);
+    callbackUrl.searchParams.set('next', sanitizeRedirectTarget(`${pathname}${request.nextUrl.search}`));
+    return NextResponse.redirect(callbackUrl);
+  }
+
+  if (routeCallbackError(searchParams)?.to === 'verify-expired') {
+    return NextResponse.redirect(new URL(buildVerifyEmailPath('', '/profile', 'expired'), request.url));
+  }
+
+  return null;
+}
+
 let maintenanceCache: { enabled: boolean; expiresAt: number } | null = null;
 
 function shouldFailClosedMaintenance(): boolean {
@@ -227,6 +255,11 @@ export async function proxy(request: NextRequest) {
         },
       });
     }
+  }
+
+  const authLandingRedirect = routeAuthLanding(request);
+  if (authLandingRedirect) {
+    return authLandingRedirect;
   }
 
   // 判断域名类型

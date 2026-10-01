@@ -24,11 +24,12 @@ pnpm stripe:readiness:staging
 ```
 
 当前 staging runtime 是独立 Vercel 项目 `graylumai-staging` 的
-Production environment，域名为 `https://graylumai-staging.vercel.app`。
+Production environment，域名为 `https://auth-staging.graylum.com`（旧域名
+`graylumai-staging.vercel.app` 已于 2026-10-01 删除）。
 staging webhook endpoint 必须配置为：
 
 ```text
-https://graylumai-staging.vercel.app/api/stripe/webhook
+https://auth-staging.graylum.com/api/stripe/webhook
 ```
 
 staging 必须使用 Stripe test mode key、test mode webhook secret、test mode

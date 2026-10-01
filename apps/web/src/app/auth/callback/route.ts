@@ -3,7 +3,14 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { appRouter } from '@repo/api/src/root';
 import { createTRPCContext } from '@repo/api/src/trpc';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
-import { buildVerifyEmailPath, routeCallbackError } from '@/lib/authFlow';
+import {
+  buildVerifyEmailPath,
+  classifyCodeExchangeError,
+  parseAuthCallbackFlow,
+  routeCallbackError,
+  type LoginErrorCode,
+} from '@/lib/authFlow';
+import { buildForgotPasswordPath, classifyRecoveryExchangeError, type RecoveryFailure } from '@/lib/passwordRecovery';
 import { logServerError } from '@/lib/server-log';
 import { resolveAuthCallbackOrigin, resolveSupabaseCookieOptions } from '@/lib/site-config';
 
@@ -12,6 +19,7 @@ export async function GET(request: NextRequest) {
   const hostname = requestUrl.hostname.toLowerCase();
   const code = requestUrl.searchParams.get('code');
   const next = sanitizeRedirectTarget(requestUrl.searchParams.get('next'));
+  const flow = parseAuthCallbackFlow(requestUrl.searchParams.get('flow'));
 
   const authOrigin = resolveAuthCallbackOrigin(requestUrl.origin);
   let response = NextResponse.redirect(new URL(next, authOrigin));
@@ -34,17 +42,21 @@ export async function GET(request: NextRequest) {
     }
   );
 
-  const loginError = () => {
+  const loginError = (reason: LoginErrorCode = 'callback_failed') => {
     const loginUrl = new URL('/login', authOrigin);
-    loginUrl.searchParams.set('error', 'callback_failed');
+    loginUrl.searchParams.set('error', reason);
     loginUrl.searchParams.set('redirect', next);
     return NextResponse.redirect(loginUrl);
   };
+  // A failed password reset link goes back to the request page, which only shows fixed texts.
+  const recoveryError = (reason: RecoveryFailure) =>
+    NextResponse.redirect(new URL(buildForgotPasswordPath(reason), authOrigin));
 
   // An email link that failed (expired, already used) arrives with error params and no code.
   const linkError = routeCallbackError(requestUrl.searchParams);
   if (linkError) {
     logServerError('auth', 'auth_callback_link_error');
+    if (flow === 'recovery') return recoveryError('expired');
     return linkError.to === 'verify-expired'
       ? NextResponse.redirect(new URL(buildVerifyEmailPath('', next, 'expired'), authOrigin))
       : loginError();
@@ -53,9 +65,19 @@ export async function GET(request: NextRequest) {
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
+    if (error && flow === 'recovery') {
+      const reason = classifyRecoveryExchangeError(error);
+      logServerError('auth', 'auth_callback_session_exchange_failed', { reason });
+      return recoveryError(reason);
+    }
+
     if (error) {
-      logServerError('auth', 'auth_callback_session_exchange_failed');
-      return loginError();
+      const reason = classifyCodeExchangeError(error, flow);
+      logServerError('auth', 'auth_callback_session_exchange_failed', { reason });
+      // A verifier mismatch usually means the link was opened where the flow did not start. For an
+      // email link /verify has already confirmed the email, so the visitor should just log in; a
+      // Google sign-in is simply retried. `flow` only picks the fixed message, never access.
+      return loginError(reason);
     }
   }
 

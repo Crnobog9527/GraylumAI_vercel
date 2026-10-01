@@ -116,8 +116,8 @@ it.each(['','a'.repeat(257),'gen-first, gen-second','gen unsafe'])('does not ret
  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport:async()=>new Response('broken',{headers:{'X-Generation-Id':id}})});
  expect(await adapter.dispatch({input:body},identity)).not.toHaveProperty('generationId');
 });
-it('preserves the lookup identity even when a response exceeds the unchanged byte cap',async()=>{
- const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport:async()=>new Response('x'.repeat(65537),{headers:{'X-Generation-Id':'gen-limit'}})});
+it('preserves the lookup identity even when an error response exceeds its unchanged byte cap',async()=>{
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport:async()=>new Response('x'.repeat(65537),{status:500,headers:{'X-Generation-Id':'gen-limit'}})});
  const observation=await adapter.dispatch({input:body},identity);
  expect(Buffer.from(observation.rawBodyBase64,'base64')).toHaveLength(65536);
  expect(adapter.evidence(observation,identity,'response')).toMatchObject({providerId:'gen-limit',cost:null,final:false,evidenceKind:'transport_observation'});

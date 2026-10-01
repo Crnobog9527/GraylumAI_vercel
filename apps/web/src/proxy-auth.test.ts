@@ -22,7 +22,7 @@ describe('proxy login requirement by host', () => {
   });
 
   it('sends anonymous visitors on every app host to login', async () => {
-    for (const host of ['auth-staging.graylum.com', 'graylumai-staging.vercel.app', 'app.graylum.com', 'new.example.com']) {
+    for (const host of ['auth-staging.graylum.com', 'example-preview.vercel.app', 'app.graylum.com', 'new.example.com']) {
       expect(await get(`https://${host}/profile`)).toEqual({
         status: 307,
         location: `https://${host}/login?redirect=%2Fprofile`,
@@ -39,8 +39,15 @@ describe('proxy login requirement by host', () => {
   });
 
   it('keeps public pages open on the staging domain', async () => {
-    for (const path of ['/login', '/verify-email', '/landing']) {
+    for (const path of ['/login', '/verify-email', '/landing', '/forgot-password', '/reset-password']) {
       expect((await get(`https://auth-staging.graylum.com${path}`)).status).toBe(200);
+    }
+  });
+
+  it('lets a signed-in user open the reset pages instead of bouncing them like the login page', async () => {
+    getUser.mockResolvedValue({ data: { user: { email: 'a@example.com', email_confirmed_at: '2026-09-30T00:00:00Z' } } });
+    for (const path of ['/forgot-password', '/reset-password']) {
+      expect(await get(`https://auth-staging.graylum.com${path}`)).toEqual({ status: 200, location: null });
     }
   });
 
@@ -71,12 +78,12 @@ describe('proxy login requirement by host', () => {
       });
     });
 
-    it('go to the configured app URL, such as a staging alias', async () => {
+    it('go to the configured app URL, such as the staging domain', async () => {
       vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', '');
-      vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://graylumai-staging.vercel.app');
+      vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://auth-staging.graylum.com');
       expect(await get('https://www.graylum.com/login?action=signup')).toEqual({
         status: 307,
-        location: 'https://graylumai-staging.vercel.app/login?action=signup',
+        location: 'https://auth-staging.graylum.com/login?action=signup',
       });
     });
   });

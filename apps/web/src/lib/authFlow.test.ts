@@ -1,7 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  buildAuthCallbackUrl,
   buildVerifyEmailPath,
+  classifyCodeExchangeError,
+  parseAuthCallbackFlow,
   classifyLoginError,
+  clearAuthFragment,
+  RESEND_RATE_LIMIT_MESSAGE,
+  resendErrorMessage,
   INVALID_CREDENTIALS_MESSAGE,
   loginErrorMessage,
   parseVerifyReason,
@@ -112,3 +118,110 @@ describe('loginErrorMessage', () => {
     for (const value of [null, '', '请联系客服转账', '%E7%99%BB%E5%BD%95']) expect(loginErrorMessage(value)).toBeNull();
   });
 });
+
+describe('buildAuthCallbackUrl', () => {
+  it('sanitizes next the same way the callback does', () => {
+    const url = new URL(buildAuthCallbackUrl('https://auth-staging.graylum.com', '/?error=access_denied&error_code=otp_expired'));
+    expect(url.origin + url.pathname).toBe('https://auth-staging.graylum.com/auth/callback');
+    expect(url.searchParams.get('next')).toBe('/profile');
+    expect(new URL(buildAuthCallbackUrl('https://a.example', '/profile?tab=a')).searchParams.get('next')).toBe('/profile?tab=a');
+    expect(new URL(buildAuthCallbackUrl('https://a.example', '//evil.example')).searchParams.get('next')).toBe('/profile');
+  });
+});
+
+describe('classifyCodeExchangeError', () => {
+  it.each(['pkce_code_verifier_not_found', 'bad_code_verifier', 'flow_state_not_found', 'flow_state_expired'])(
+    'treats %s as a link that needs a password login',
+    code => expect(classifyCodeExchangeError(authError(code, 'x'))).toBe('link_needs_login'),
+  );
+
+  it('recognizes the verifier mismatch text when the code is missing', () => {
+    const error = authError(undefined, 'code challenge does not match previously saved code verifier');
+    expect(classifyCodeExchangeError(error)).toBe('link_needs_login');
+  });
+
+  it('keeps other failures on the generic message', () => {
+    expect(classifyCodeExchangeError(authError('unexpected_failure', 'boom'))).toBe('callback_failed');
+    expect(classifyCodeExchangeError(null)).toBe('callback_failed');
+  });
+
+  it('shows fixed login text for the new code', () => {
+    expect(loginErrorMessage('link_needs_login')).toContain('请直接用密码登录');
+  });
+});
+
+describe('resendErrorMessage', () => {
+  it('reports a 429 as sending too often, never as sent', () => {
+    const limited = Object.assign(authError('over_email_send_rate_limit', 'email rate limit exceeded'), { status: 429 });
+    expect(resendErrorMessage(limited)).toBe(RESEND_RATE_LIMIT_MESSAGE);
+    expect(resendErrorMessage(Object.assign(new Error('Too many'), { status: 429 }))).toBe(RESEND_RATE_LIMIT_MESSAGE);
+    expect(resendErrorMessage(authError('over_request_rate_limit', 'x'))).toBe(RESEND_RATE_LIMIT_MESSAGE);
+  });
+
+  it('keeps the safe fallback for other errors', () => {
+    expect(resendErrorMessage(authError('unexpected_failure', 'token broken'))).toBe('验证邮件发送失败，请稍后重试。');
+  });
+});
+
+describe('Google sign-in callback marker', () => {
+  it('adds flow=oauth only for Google, and the marker only changes the fixed message', () => {
+    const google = new URL(buildAuthCallbackUrl('https://a.example', '/profile', 'oauth'));
+    expect(Object.fromEntries(google.searchParams)).toEqual({ next: '/profile', flow: 'oauth' });
+    expect(new URL(buildAuthCallbackUrl('https://a.example', '/profile')).searchParams.has('flow')).toBe(false);
+    const mismatch = authError('bad_code_verifier', 'x');
+    expect(classifyCodeExchangeError(mismatch, 'oauth')).toBe('oauth_incomplete');
+    expect(classifyCodeExchangeError(mismatch, 'email')).toBe('link_needs_login');
+    expect(classifyCodeExchangeError(authError('unexpected_failure', 'x'), 'oauth')).toBe('callback_failed');
+    expect(loginErrorMessage('oauth_incomplete')).toBe('Google 登录没有完成，请重新点击 Google 登录。');
+    expect(loginErrorMessage('toString')).toBeNull();
+  });
+});
+
+describe('password reset callback marker', () => {
+  it('marks a reset link and parses only the known flows', () => {
+    const reset = new URL(buildAuthCallbackUrl('https://a.example', '/reset-password', 'recovery'));
+    expect(Object.fromEntries(reset.searchParams)).toEqual({ next: '/reset-password', flow: 'recovery' });
+    expect(parseAuthCallbackFlow('recovery')).toBe('recovery');
+    expect(parseAuthCallbackFlow('oauth')).toBe('oauth');
+    expect(parseAuthCallbackFlow('admin')).toBe('email');
+    expect(parseAuthCallbackFlow(null)).toBe('email');
+  });
+});
+
+describe('clearAuthFragment', () => {
+  // Final addresses recorded on staging (deployment c4b13758) for a reused link and a closed account.
+  const landings = [
+    '/forgot-password?reason=expired#error=access_denied&error_code=otp_expired'
+      + '&error_description=Email+link+is+invalid+or+has+expired&sb=',
+    '/forgot-password?reason=expired#error=access_denied&error_code=user_banned&error_description=User+is+banned&sb=',
+  ];
+  const browserAt = (address: string) => {
+    const url = new URL(address, 'https://auth-staging.graylum.com');
+    const history = { replaceState: vi.fn() };
+    return { win: { location: { pathname: url.pathname, search: url.search, hash: url.hash }, history }, history };
+  };
+
+  it.each(landings)('drops the provider fragment and keeps path and reason (%s)', address => {
+    const { win, history } = browserAt(address);
+    expect(clearAuthFragment(win)).toBe(true);
+    expect(history.replaceState).toHaveBeenCalledExactlyOnceWith(null, '', '/forgot-password?reason=expired');
+    const [, , cleaned] = history.replaceState.mock.calls[0];
+    expect(cleaned).not.toMatch(/#|error|banned|invalid|sb=/i);
+  });
+
+  it('also drops tokens of a link sent without PKCE, without using them', () => {
+    const { win, history } = browserAt('/reset-password#access_token=a&refresh_token=b&type=recovery');
+    expect(clearAuthFragment(win)).toBe(true);
+    expect(history.replaceState).toHaveBeenCalledExactlyOnceWith(null, '', '/reset-password');
+  });
+
+  it.each(['/forgot-password?reason=expired', '/forgot-password', '/reset-password#section'])(
+    'leaves an address without an auth fragment alone (%s)',
+    address => {
+      const { win, history } = browserAt(address);
+      expect(clearAuthFragment(win)).toBe(false);
+      expect(history.replaceState).not.toHaveBeenCalled();
+    },
+  );
+});
+

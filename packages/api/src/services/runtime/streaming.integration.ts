@@ -339,3 +339,36 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([
  expect((await db.query('select state,charged,provider_cost_usd::text cost from bill2_runs where id=$1',[f.execution.runId])).rows[0]).toEqual({state:'settled',charged:6,cost:'0.006'});
  expect((await db.query("select count(*)::int n from credit_transactions where bill2_run_id=$1 and reason_code='bill2_spend'",[f.execution.runId])).rows[0].n).toBe(1);
 });
+
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: 8192 one-token frames finish as clean output_truncated',async()=>{
+ const outputLimit=8192;
+ const f=await fixture('serial-tools-v4-stream',true,outputLimit);
+ let sends=0;
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  sends++;
+  const request=JSON.parse(String(init!.body));
+  expect(request.max_tokens).toBe(outputLimit);
+  const envelope={id:'gen-token-frames',model:request.model,object:'chat.completion.chunk'};
+  const frame=(delta:unknown,finish_reason:string|null=null)=>'data: '+JSON.stringify({...envelope,
+   choices:[{index:0,delta,finish_reason}]})+'\n\n';
+  const wire=frame({role:'assistant'})+frame({reasoning:'x'}).repeat(outputLimit)+frame({},'length')+
+   'data: '+JSON.stringify({...envelope,choices:[],usage:{prompt_tokens:10,completion_tokens:outputLimit,
+    total_tokens:outputLimit+10,cost:0.003}})+'\n\ndata: [DONE]\n\n';
+  expect(Buffer.byteLength(wire)).toBeLessThan(4_194_304);
+  return new Response(wire,{headers:{'content-type':'text/event-stream'}});
+ }});
+ const host=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter});
+ const result=await host.execute(f.execution.executionId);
+ expect(result).toEqual({state:'cancelled',unavailable:'output_truncated'});
+ const calls=(await db.query('select id from bill2_calls where run_id=$1',[f.execution.runId])).rows;
+ expect(calls).toHaveLength(1);
+ const receipt=(await db.query('select payload from bill2_receipts where call_id=$1',[calls[0].id])).rows[0].payload;
+ expect(receipt).toMatchObject({final:true,cost:'0.003',transport:{complete:true,transportIssue:null}});
+ expect(receipt.usage.sdkResponse.choices[0]).toMatchObject({finish_reason:'length',
+  message:{content:null,reasoning:'x'.repeat(outputLimit)}});
+ expect((await db.query('select state,charged from bill2_runs where id=$1',[f.execution.runId])).rows[0])
+  .toEqual({state:'settled',charged:3});
+ expect(await host.execute(f.execution.executionId)).toMatchObject({state:'cancelled'});
+ expect(sends).toBe(1);
+});

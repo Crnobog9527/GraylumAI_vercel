@@ -14,7 +14,7 @@ const TONES = {
   info: { borderColor: 'rgba(255,215,0,0.24)', background: 'rgba(120,53,15,0.2)', color: '#fde68a' },
 } as const;
 
-export function AuthStatusBanner({ status, resendHref }: { status: AuthStatus; resendHref: string }) {
+export function AuthStatusBanner({ status, resendHref }: { status: AuthStatus; resendHref?: string }) {
   const Icon = status.tone === 'success' ? CheckCircle2 : Mail;
   return (
     <div className="rounded-2xl border px-4 py-3 text-sm leading-6" aria-live="polite" style={TONES[status.tone]}>
@@ -22,7 +22,7 @@ export function AuthStatusBanner({ status, resendHref }: { status: AuthStatus; r
         <Icon className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
           {status.message}
-          {status.offerResend && (
+          {status.offerResend && resendHref && (
             <Link href={resendHref} className="ml-1 text-[#f2c94c] underline underline-offset-4">
               还没验证邮箱？重新发送验证邮件
             </Link>
