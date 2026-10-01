@@ -12,8 +12,8 @@ import {
 import { createClient } from '@/lib/supabase';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import {
-  buildVerifyEmailPath, classifyLoginError, EMAIL_VERIFIED_LOGIN_MESSAGE, LOGIN_ERROR_MESSAGES,
-  loginErrorMessage, readAuthFragment,
+  buildAuthCallbackUrl, buildVerifyEmailPath, classifyLoginError, EMAIL_VERIFIED_LOGIN_MESSAGE,
+  LOGIN_ERROR_MESSAGES, loginErrorMessage, readAuthFragment, type AuthCallbackFlow,
 } from '@/lib/authFlow';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildAuthHref, resolveAuthAppUrl, resolveSiteName } from '@/lib/site-config';
@@ -56,10 +56,8 @@ function GoogleIcon({ className }: { className?: string }) {
   );
 }
 
-function getEmailConfirmRedirect(redirectTarget: string) {
-  const callbackUrl = new URL('/auth/callback', resolveAuthAppUrl());
-  callbackUrl.searchParams.set('next', redirectTarget);
-  return callbackUrl.toString();
+function getEmailConfirmRedirect(redirectTarget: string, flow: AuthCallbackFlow = 'email') {
+  return buildAuthCallbackUrl(resolveAuthAppUrl(window.location.origin), redirectTarget, flow);
 }
 
 export default function LoginPage() {
@@ -109,7 +107,8 @@ function LoginPageContent() {
     }
 
     const errorMessage = loginErrorMessage(error);
-    if (errorMessage) setStatus({ tone: 'error', message: errorMessage });
+    // After a verifier mismatch the email is usually already confirmed: guide, do not alarm.
+    if (errorMessage) setStatus({ tone: error === 'link_needs_login' ? 'info' : 'error', message: errorMessage });
 
     // Errors or tokens from an email link: drop them from the address bar and history first.
     const fragment = readAuthFragment(window.location.hash);
@@ -230,7 +229,7 @@ function LoginPageContent() {
     setStatus(null);
 
     const supabase = createClient();
-    const redirectTo = getEmailConfirmRedirect(redirectTarget);
+    const redirectTo = getEmailConfirmRedirect(redirectTarget, 'oauth');
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
@@ -510,7 +509,7 @@ function LoginPageContent() {
                     </p>
                     <div className="mt-3 flex flex-wrap items-center gap-3">
                       <Link
-                        href={buildAuthHref(`/verify-email?email=${encodeURIComponent(email)}&redirect=${encodeURIComponent(redirectTarget)}`)}
+                        href={buildVerifyEmailPath(email, redirectTarget)}
                         className="text-[#f2c94c] underline-offset-4 hover:underline"
                       >
                         打开验证状态页

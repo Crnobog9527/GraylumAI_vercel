@@ -16,7 +16,9 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { DEFAULT_SITE_NAME, DEFAULT_SUPPORT_EMAIL } from '@/lib/site-config';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
-import AdminErrorState from '@/components/admin/AdminErrorState';
+import AdminSettingsLoadError from '@/components/admin/AdminErrorState';
+import { RuntimeRateLimitSettings, RuntimeRateLimitTabTrigger } from '@/components/admin/RuntimeRateLimitSettings';
+import { MentorBudgetTabContent, MentorBudgetTabTrigger } from '@/components/admin/MentorBudgetSettings';
 
 // 完整的系统设置定义
 const defaultSettings: Record<string, { value: string; type: 'string' | 'number' | 'boolean'; label: string; description: string }> = {
@@ -110,19 +112,12 @@ interface MembershipPlan {
   allow_batch_export: string;
 }
 
-export function AdminSettingsLoadError({
-  error,
-  onRetry,
-}: {
-  error: Error | { message: string };
-  onRetry?: () => void;
-}) {
-  return <AdminErrorState error={error} onRetry={onRetry} />;
-}
+export { AdminSettingsLoadError };
 
 export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<Record<string, SettingData>>({});
   const [saving, setSaving] = useState(false);
+  const [tab, setTab] = useState('general');
   const [membershipSettings, setMembershipSettings] = useState<Record<string, { allowExport: boolean; allowBatchExport: boolean }>>({});
 
   const {
@@ -331,17 +326,13 @@ export default function AdminSettingsPage() {
           disabled={saving}
           className="w-full gap-2 bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90 sm:w-auto"
         >
-          {saving ? (
-            <RefreshCw className="h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="h-4 w-4" />
-          )}
+          {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           {saving ? '保存中...' : '保存所有设置'}
         </Button>
       </div>
 
       {/* Settings Tabs */}
-      <Tabs defaultValue="general" className="space-y-6">
+      <Tabs value={tab} onValueChange={setTab} className="space-y-6">
         <TabsList
           className="flex h-auto w-full justify-start gap-1 overflow-x-auto p-1"
           style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
@@ -374,6 +365,8 @@ export default function AdminSettingsPage() {
             <Crown className="h-4 w-4" />
             会员权限
           </TabsTrigger>
+          <MentorBudgetTabTrigger />
+          <RuntimeRateLimitTabTrigger />
         </TabsList>
 
         {/* General Tab */}
@@ -647,6 +640,8 @@ export default function AdminSettingsPage() {
             </Card>
           </div>
         </TabsContent>
+        <MentorBudgetTabContent onOpenFeatures={() => setTab('features')} />
+        <RuntimeRateLimitSettings />
       </Tabs>
     </div>
   );

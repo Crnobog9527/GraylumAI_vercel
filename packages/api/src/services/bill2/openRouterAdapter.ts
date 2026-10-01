@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
+import {OPENROUTER_RESPONSE_BYTE_LIMIT,OPENROUTER_FRAME_BYTE_LIMIT} from './responseCapacity';
 import {gzipSync} from 'node:zlib';
 import {openRouterStream,OPENROUTER_STREAM_BYTE_LIMIT} from './openRouterStream';
 import {withRuntimeBudget,type RuntimeBudget} from '../runtime/budget';
@@ -82,7 +83,8 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
   const headerId=response.headers.get('x-generation-id');
   const generationId=validGenerationId(headerId)?headerId:undefined;
   const stream=streamModel&&response.ok?openRouterStream(streamModel,generationId,onChunk,agentTurn?AGENT_STREAM_TOOLS:undefined):undefined;
-  const decoder=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}),byteLimit=streamModel?OPENROUTER_STREAM_BYTE_LIMIT:65536;
+  const decoder=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}),byteLimit=streamModel?OPENROUTER_STREAM_BYTE_LIMIT:
+   body!==undefined&&response.ok?OPENROUTER_RESPONSE_BYTE_LIMIT:OPENROUTER_FRAME_BYTE_LIMIT;
   const reader=response.body?.getReader(),chunks:Uint8Array[]=[];let bytes=0,observedBytes=0,complete=!reader,transportIssue:string|null=null;
   const observedHash=createHash('sha256');
   if(reader)try{for(;;){const part=await reader.read();if(part.done){complete=true;break;}
@@ -101,6 +103,9 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
   const raw=streamModel?{rawBody:'',rawBodyBase64:gzipSync(buffer).toString('base64'),rawBodyEncoding:'gzip-base64' as const,rawBodyByteLength:buffer.length,rawBodySha256:retainedHash,observedByteLength:observedBytes,sourceHash:observedHash.digest('hex'),stream:true as const,
    // Receipt projection re-parses these bytes with the same tool rules.
    ...(agentTurn?{agentTools:true as const}:{})}:
+   buffer.length>OPENROUTER_FRAME_BYTE_LIMIT?{rawBody:'',rawBodyBase64:gzipSync(buffer).toString('base64'),
+    rawBodyEncoding:'gzip-base64' as const,rawBodyByteLength:buffer.length,rawBodySha256:retainedHash,
+    observedByteLength:buffer.length,sourceHash:retainedHash}:
    {rawBody,rawBodyBase64:buffer.toString('base64'),sourceHash:retainedHash};
   return {...raw,httpStatus:response.status,complete,transportIssue,...(generationId?{generationId}:{})};
  }

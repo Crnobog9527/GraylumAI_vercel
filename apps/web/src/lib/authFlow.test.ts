@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildAuthCallbackUrl,
   buildVerifyEmailPath,
+  classifyCodeExchangeError,
   classifyLoginError,
+  RESEND_RATE_LIMIT_MESSAGE,
+  resendErrorMessage,
   INVALID_CREDENTIALS_MESSAGE,
   loginErrorMessage,
   parseVerifyReason,
@@ -110,5 +114,63 @@ describe('loginErrorMessage', () => {
   it('shows fixed text for known codes and nothing for anything else', () => {
     expect(loginErrorMessage('callback_failed')).toBe('登录验证失败，请稍后重试。');
     for (const value of [null, '', '请联系客服转账', '%E7%99%BB%E5%BD%95']) expect(loginErrorMessage(value)).toBeNull();
+  });
+});
+
+describe('buildAuthCallbackUrl', () => {
+  it('sanitizes next the same way the callback does', () => {
+    const url = new URL(buildAuthCallbackUrl('https://auth-staging.graylum.com', '/?error=access_denied&error_code=otp_expired'));
+    expect(url.origin + url.pathname).toBe('https://auth-staging.graylum.com/auth/callback');
+    expect(url.searchParams.get('next')).toBe('/profile');
+    expect(new URL(buildAuthCallbackUrl('https://a.example', '/profile?tab=a')).searchParams.get('next')).toBe('/profile?tab=a');
+    expect(new URL(buildAuthCallbackUrl('https://a.example', '//evil.example')).searchParams.get('next')).toBe('/profile');
+  });
+});
+
+describe('classifyCodeExchangeError', () => {
+  it.each(['pkce_code_verifier_not_found', 'bad_code_verifier', 'flow_state_not_found', 'flow_state_expired'])(
+    'treats %s as a link that needs a password login',
+    code => expect(classifyCodeExchangeError(authError(code, 'x'))).toBe('link_needs_login'),
+  );
+
+  it('recognizes the verifier mismatch text when the code is missing', () => {
+    const error = authError(undefined, 'code challenge does not match previously saved code verifier');
+    expect(classifyCodeExchangeError(error)).toBe('link_needs_login');
+  });
+
+  it('keeps other failures on the generic message', () => {
+    expect(classifyCodeExchangeError(authError('unexpected_failure', 'boom'))).toBe('callback_failed');
+    expect(classifyCodeExchangeError(null)).toBe('callback_failed');
+  });
+
+  it('shows fixed login text for the new code', () => {
+    expect(loginErrorMessage('link_needs_login')).toContain('请直接用密码登录');
+  });
+});
+
+describe('resendErrorMessage', () => {
+  it('reports a 429 as sending too often, never as sent', () => {
+    const limited = Object.assign(authError('over_email_send_rate_limit', 'email rate limit exceeded'), { status: 429 });
+    expect(resendErrorMessage(limited)).toBe(RESEND_RATE_LIMIT_MESSAGE);
+    expect(resendErrorMessage(Object.assign(new Error('Too many'), { status: 429 }))).toBe(RESEND_RATE_LIMIT_MESSAGE);
+    expect(resendErrorMessage(authError('over_request_rate_limit', 'x'))).toBe(RESEND_RATE_LIMIT_MESSAGE);
+  });
+
+  it('keeps the safe fallback for other errors', () => {
+    expect(resendErrorMessage(authError('unexpected_failure', 'token broken'))).toBe('验证邮件发送失败，请稍后重试。');
+  });
+});
+
+describe('Google sign-in callback marker', () => {
+  it('adds flow=oauth only for Google, and the marker only changes the fixed message', () => {
+    const google = new URL(buildAuthCallbackUrl('https://a.example', '/profile', 'oauth'));
+    expect(Object.fromEntries(google.searchParams)).toEqual({ next: '/profile', flow: 'oauth' });
+    expect(new URL(buildAuthCallbackUrl('https://a.example', '/profile')).searchParams.has('flow')).toBe(false);
+    const mismatch = authError('bad_code_verifier', 'x');
+    expect(classifyCodeExchangeError(mismatch, 'oauth')).toBe('oauth_incomplete');
+    expect(classifyCodeExchangeError(mismatch, 'email')).toBe('link_needs_login');
+    expect(classifyCodeExchangeError(authError('unexpected_failure', 'x'), 'oauth')).toBe('callback_failed');
+    expect(loginErrorMessage('oauth_incomplete')).toBe('Google 登录没有完成，请重新点击 Google 登录。');
+    expect(loginErrorMessage('toString')).toBeNull();
   });
 });
