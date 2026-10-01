@@ -19,7 +19,7 @@ export const BILLING_UNIT_SETTING_KEYS = {
   creditsPerUsd: 'billing_credits_per_usd',
   multiplier: 'billing_token_price_multiplier',
 } as const;
-export const BILLING_UNIT_SNAPSHOT_VERSION = 'bill-unit-v1';
+export const BILLING_UNIT_SNAPSHOT_VERSION = 'bill-unit-v2';
 export const MAX_SNAPSHOT_MODELS = 16;
 
 export type BillingUnitErrorCode =
@@ -33,6 +33,8 @@ export type BillingUnitErrorCode =
   | 'BILLING_UNIT_ROUTE_NOT_APPROVED'
   | 'BILLING_UNIT_PROVIDER_PRICES_UNAVAILABLE'
   | 'BILLING_UNIT_PROVIDER_PRICES_INVALID'
+  | 'BILLING_UNIT_PROVIDER_PRICES_STORED_INVALID'
+  | 'BILLING_UNIT_PROVIDER_PRICES_CONFLICT'
   | 'BILLING_UNIT_PROVIDER_PRICE_UNKNOWN'
   | 'BILLING_UNIT_PROVIDER_PRICE_EXPIRED'
   | 'BILLING_UNIT_PROVIDER_USAGE_INVALID';
@@ -110,6 +112,20 @@ export function billingUnitSettingsFromRows(rows: readonly SettingRow[]): Billin
     creditsPerUsd: qRow ? parseCreditsPerUsd(qRow.value) : BILLING_UNIT_DEFAULTS.creditsPerUsd,
     defaultMultiplier,
     source: { creditsPerUsd: qRow ? 'configured' : 'default', defaultMultiplier: mRow ? 'configured' : 'default' },
+  };
+}
+
+export type BillingUnitSettingSource = 'configured' | 'default' | 'invalid';
+
+/** For read-only displays: a stored row, a fallback for a missing row, or an invalid stored value. */
+export function describeBillingUnitSettings(settings: Readonly<Record<string, unknown>>) {
+  const describe = (key: string, parse: (value: unknown) => string): BillingUnitSettingSource => {
+    if (!Object.hasOwn(settings, key)) return 'default';
+    try { parse(settings[key]); return 'configured'; } catch { return 'invalid'; }
+  };
+  return {
+    creditsPerUsd: describe(BILLING_UNIT_SETTING_KEYS.creditsPerUsd, parseCreditsPerUsd),
+    defaultMultiplier: describe(BILLING_UNIT_SETTING_KEYS.multiplier, parseMultiplier),
   };
 }
 
@@ -212,10 +228,14 @@ export async function readMultiplierSnapshot(
   return buildMultiplierSnapshot(settings, models, resolveProviders?.(settings.defaultMultiplier) ?? {});
 }
 
+const isPlainMap = (map: unknown): map is Record<string, unknown> => typeof map === 'object' && map !== null && !Array.isArray(map);
+const isEntry = (entry: unknown) => isPlainMap(entry) && typeof entry.multiplier === 'string' && typeof entry.source === 'string';
+
 function assertSnapshot(snapshot: MultiplierSnapshot) {
   const maps: unknown[] = [snapshot?.models, snapshot?.providers];
-  if (!snapshot || snapshot.version !== BILLING_UNIT_SNAPSHOT_VERSION
-    || maps.some((map) => typeof map !== 'object' || map === null || Array.isArray(map))
+  // Every malformed shape (null maps, null or partial entries) is one error, never a TypeError.
+  if (!snapshot || snapshot.version !== BILLING_UNIT_SNAPSHOT_VERSION || !maps.every(isPlainMap)
+    || !maps.every((map) => Object.values(map as Record<string, unknown>).every(isEntry))
     || snapshotHash(snapshot) !== snapshot.hash) {
     throw new BillingUnitConfigError('BILLING_UNIT_SNAPSHOT_INVALID');
   }

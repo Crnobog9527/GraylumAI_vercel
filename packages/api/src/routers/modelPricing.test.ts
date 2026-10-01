@@ -128,7 +128,8 @@ describe('model multiplier admin endpoints', () => {
 
   const prices = { version: 1, entries: [{
     provider: 'parallel', route: 'search/basic', appliesToUnlistedRoutes: false, currency: 'USD', usageUnit: 'request',
-    unitsPerPrice: '1000', price: '5', usdPerCurrency: null, pricingBasis: 'list-price',
+    unitsPerPrice: '1000', price: '5', usdPerCurrency: null, fxSourceUrl: null, fxEffectiveAt: null, fxValidUntil: null,
+    pricingBasis: 'list-price',
     sourceUrl: 'https://docs.parallel.ai/getting-started/pricing', evidenceHash: 'b'.repeat(64),
     verifiedAt: '2026-10-01T00:00:00Z', validUntil: null, chargeCondition: 'successful search', includedInReceipt: false,
     priceMultiplier: '2',
@@ -136,14 +137,17 @@ describe('model multiplier admin endpoints', () => {
 
   it('admin saves third-party prices through the dedicated endpoint and reads them back', async () => {
     const f = harness('admin');
-    expect(await f.caller.getProviderPrices()).toEqual({ config: { version: 1, entries: [] }, source: 'absent' });
-    expect(await f.caller.setProviderPrices(prices)).toEqual({ config: prices, source: 'configured' });
+    expect(await f.caller.getProviderPrices()).toEqual({ config: { version: 1, entries: [] }, source: 'absent', hash: null });
+    const saved = await f.caller.setProviderPrices({ expectedHash: null, config: prices });
+    expect(saved).toMatchObject({ config: prices, source: 'configured', hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(f.settingWrites.map((w) => w.key)).toEqual(['billing_provider_prices']);
+    await expect(f.caller.setProviderPrices({ expectedHash: null, config: prices })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(f.settingWrites).toHaveLength(1);
   });
 
   it('invalid third-party prices are a bad request and are not written', async () => {
     const f = harness('admin');
-    await expect(f.caller.setProviderPrices({ ...prices, entries: [{ ...prices.entries[0], apiKey: 'sk' }] }))
+    await expect(f.caller.setProviderPrices({ expectedHash: null, config: { ...prices, entries: [{ ...prices.entries[0], apiKey: 'sk' }] } }))
       .rejects.toMatchObject({ code: 'BAD_REQUEST' });
     expect(f.settingWrites).toEqual([]);
   });
@@ -151,7 +155,8 @@ describe('model multiplier admin endpoints', () => {
   it.each(['user', 'anonymous'] as const)('denies %s third-party price access', async (role) => {
     const f = harness(role);
     await expect(f.caller.getProviderPrices()).rejects.toMatchObject({ code: role === 'anonymous' ? 'UNAUTHORIZED' : 'FORBIDDEN' });
-    await expect(f.caller.setProviderPrices(prices)).rejects.toMatchObject({ code: role === 'anonymous' ? 'UNAUTHORIZED' : 'FORBIDDEN' });
+    await expect(f.caller.setProviderPrices({ expectedHash: null, config: prices }))
+      .rejects.toMatchObject({ code: role === 'anonymous' ? 'UNAUTHORIZED' : 'FORBIDDEN' });
     expect(f.settingWrites).toEqual([]);
   });
 

@@ -20,6 +20,13 @@ const DECIMAL = /^(0|[1-9][0-9]{0,11})(\.[0-9]{1,12})?$/;
 const decimalText = z.string().regex(DECIMAL);
 const positiveDecimal = decimalText.refine((value) => /[1-9]/.test(value), 'must be positive');
 const isoTime = z.string().datetime({ offset: true });
+// Evidence links: https only, no embedded credentials, no query string or fragment.
+const httpsUrl = z.string().url().max(500).refine((value) => {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash;
+  } catch { return false; }
+}, 'https URL without credentials, query or fragment');
 const multiplierText = z.string().nullable().refine((value) => {
   try { parseOptionalMultiplier(value); return true; } catch { return false; }
 }, 'invalid multiplier');
@@ -34,8 +41,12 @@ const entrySchema = z.object({
   unitsPerPrice: z.string().regex(/^[1-9][0-9]{0,8}$/),
   price: decimalText,
   usdPerCurrency: positiveDecimal.nullable(),
+  // Non-USD prices need their own exchange-rate evidence and an expiry; USD entries leave these null.
+  fxSourceUrl: httpsUrl.nullable(),
+  fxEffectiveAt: isoTime.nullable(),
+  fxValidUntil: isoTime.nullable(),
   pricingBasis: z.string().min(1).max(80),
-  sourceUrl: z.string().url().max(500).refine((url) => url.startsWith('https://'), 'https only'),
+  sourceUrl: httpsUrl,
   evidenceHash: z.string().regex(/^[0-9a-f]{64}$/),
   verifiedAt: isoTime,
   validUntil: isoTime.nullable(),
@@ -43,11 +54,18 @@ const entrySchema = z.object({
   includedInReceipt: z.boolean(),
   priceMultiplier: multiplierText,
 }).strict().superRefine((entry, ctx) => {
-  if ((entry.currency === 'USD') !== (entry.usdPerCurrency === null)) {
-    ctx.addIssue({ code: 'custom', path: ['usdPerCurrency'], message: 'USD needs no rate; other currencies need one' });
+  const fx = [entry.usdPerCurrency, entry.fxSourceUrl, entry.fxEffectiveAt, entry.fxValidUntil];
+  if (entry.currency === 'USD' ? fx.some((v) => v !== null) : fx.some((v) => v === null)) {
+    ctx.addIssue({ code: 'custom', path: ['usdPerCurrency'], message: 'USD needs no rate; other currencies need rate, source, effective date and expiry' });
+  }
+  if (entry.fxEffectiveAt !== null && entry.fxValidUntil !== null && Date.parse(entry.fxValidUntil) <= Date.parse(entry.fxEffectiveAt)) {
+    ctx.addIssue({ code: 'custom', path: ['fxValidUntil'], message: 'must be after fxEffectiveAt' });
   }
   if (entry.route !== null && entry.appliesToUnlistedRoutes) {
     ctx.addIssue({ code: 'custom', path: ['appliesToUnlistedRoutes'], message: 'only provider-wide entries may cover unlisted routes' });
+  }
+  if (entry.route === null && !entry.appliesToUnlistedRoutes) {
+    ctx.addIssue({ code: 'custom', path: ['appliesToUnlistedRoutes'], message: 'a provider-wide entry that covers nothing is not allowed' });
   }
   if (entry.validUntil !== null && Date.parse(entry.validUntil) <= Date.parse(entry.verifiedAt)) {
     ctx.addIssue({ code: 'custom', path: ['validUntil'], message: 'must be after verifiedAt' });
@@ -80,8 +98,8 @@ export function parseProviderPrices(raw: unknown): ProviderPrices {
   return result.data;
 }
 
-/** A failed read or invalid stored value is an error; only a confirmed-missing row is "no routes priced". */
-export async function readProviderPrices(db: SupabaseClient) {
+/** The stored row as text plus its hash (the optimistic-concurrency token), whether or not it is valid. */
+async function readProviderPricesRow(db: SupabaseClient): Promise<{ raw: string | null; hash: string | null }> {
   let result;
   try {
     result = await db.from('system_settings').select('value').eq('key', PROVIDER_PRICES_KEY).maybeSingle();
@@ -89,12 +107,41 @@ export async function readProviderPrices(db: SupabaseClient) {
     throw new BillingUnitConfigError('BILLING_UNIT_PROVIDER_PRICES_UNAVAILABLE');
   }
   if (result.error) throw new BillingUnitConfigError('BILLING_UNIT_PROVIDER_PRICES_UNAVAILABLE');
-  if (!result.data) return { config: { version: 1 as const, entries: [] }, source: 'absent' as const };
-  return { config: parseProviderPrices(result.data.value), source: 'configured' as const };
+  if (!result.data) return { raw: null, hash: null };
+  const value: unknown = result.data.value;
+  const raw = typeof value === 'string' ? value : JSON.stringify(value);
+  return { raw, hash: createHash('sha256').update(raw).digest('hex') };
 }
 
-export async function saveProviderPrices(db: SupabaseClient, input: unknown) {
+/** For charging: a failed read or an invalid stored value is an error; only a missing row prices nothing. */
+export async function readProviderPrices(db: SupabaseClient) {
+  const row = await readProviderPricesRow(db);
+  if (row.raw === null) return { config: { version: 1 as const, entries: [] }, source: 'absent' as const, hash: null };
+  try {
+    return { config: parseProviderPrices(row.raw), source: 'configured' as const, hash: row.hash };
+  } catch {
+    throw new BillingUnitConfigError('BILLING_UNIT_PROVIDER_PRICES_STORED_INVALID');
+  }
+}
+
+/** For the admin page: an invalid stored value is shown as such (with its hash) so it can be replaced. */
+export async function providerPricesView(db: SupabaseClient) {
+  try {
+    return await readProviderPrices(db);
+  } catch (cause) {
+    if (!(cause instanceof BillingUnitConfigError) || cause.code !== 'BILLING_UNIT_PROVIDER_PRICES_STORED_INVALID') throw cause;
+    return { config: null, source: 'invalid' as const, hash: (await readProviderPricesRow(db)).hash };
+  }
+}
+
+/**
+ * Saves only if the stored row still has the hash the admin edited (null = no row yet). The read and
+ * the write are separate statements, so a concurrent save landing between them can still win.
+ */
+export async function saveProviderPrices(db: SupabaseClient, input: unknown, expectedHash: string | null) {
   const config = parseProviderPrices(input);
+  const current = await readProviderPricesRow(db);
+  if (current.hash !== expectedHash) throw new BillingUnitConfigError('BILLING_UNIT_PROVIDER_PRICES_CONFLICT');
   const { error } = await db.from('system_settings')
     .upsert({ key: PROVIDER_PRICES_KEY, value: JSON.stringify(config) }, { onConflict: 'key' });
   if (error) throw new BillingUnitConfigError('BILLING_UNIT_PROVIDER_PRICES_UNAVAILABLE');
@@ -137,7 +184,10 @@ export function resolveProviderPrice(
   if (candidates.length !== 1) throw new BillingUnitConfigError('BILLING_UNIT_PROVIDER_PRICE_UNKNOWN');
   const entry = candidates[0]!;
   const now = at.getTime();
-  if (Date.parse(entry.verifiedAt) > now || (entry.validUntil !== null && Date.parse(entry.validUntil) <= now)) {
+  const outside = (from: string | null, until: string | null) =>
+    (from !== null && Date.parse(from) > now) || (until !== null && Date.parse(until) <= now);
+  // An invalid clock is not "no expiry".
+  if (!Number.isFinite(now) || outside(entry.verifiedAt, entry.validUntil) || outside(entry.fxEffectiveAt, entry.fxValidUntil)) {
     throw new BillingUnitConfigError('BILLING_UNIT_PROVIDER_PRICE_EXPIRED');
   }
   const override = parseOptionalMultiplier(entry.priceMultiplier);
@@ -168,20 +218,26 @@ function scaled(value: string): bigint {
   return BigInt(whole!) * SCALE + BigInt(fraction.padEnd(12, '0'));
 }
 
+export type ProviderCost =
+  | { costUsd: string; entryHash: string }
+  | { costUsd: null; reason: 'included_in_receipt'; entryHash: string };
+
 /**
- * USD cost of official usage = usage × price × usdPerCurrency / unitsPerPrice, rounded up to the
- * BILL2 12-decimal USD unit (never down). Returns null when the cost is already inside another
- * receipt, so it is not charged twice.
+ * USD cost of official usage = usage × price × usdPerCurrency / unitsPerPrice in the BILL2 12-decimal
+ * USD unit. The caller must choose the rounding: 'up' for an admission upper bound, 'down' for a
+ * settled actual cost, so that actual ≤ exact ≤ bound and an exact total never gains a credit from
+ * rounding (the platform absorbs at most 1e-12 USD per call). A cost already inside another
+ * receipt is not charged twice.
  */
-export function providerUsageCostUsd(price: ResolvedProviderPrice, usage: string): string | null {
+export function providerUsageCostUsd(price: ResolvedProviderPrice, usage: string, rounding: 'up' | 'down'): ProviderCost {
   if (!DECIMAL.test(usage)) throw new BillingUnitConfigError('BILLING_UNIT_PROVIDER_USAGE_INVALID');
-  if (price.entry.includedInReceipt) return null;
+  if (price.entry.includedInReceipt) return { costUsd: null, reason: 'included_in_receipt', entryHash: price.entryHash };
   const rate = price.entry.usdPerCurrency === null ? SCALE : scaled(price.entry.usdPerCurrency);
   const numerator = scaled(usage) * scaled(price.entry.price) * rate;
   const denominator = SCALE * SCALE * BigInt(price.entry.unitsPerPrice);
-  const units = (numerator + denominator - 1n) / denominator;
+  const units = (numerator + (rounding === 'up' ? denominator - 1n : 0n)) / denominator;
   const whole = units / SCALE;
   if (whole >= 1_000_000_000_000n) throw new BillingUnitConfigError('BILLING_UNIT_PROVIDER_USAGE_INVALID');
   const fraction = (units % SCALE).toString().padStart(12, '0').replace(/0+$/, '');
-  return fraction ? `${whole}.${fraction}` : whole.toString();
+  return { costUsd: fraction ? `${whole}.${fraction}` : whole.toString(), entryHash: price.entryHash };
 }

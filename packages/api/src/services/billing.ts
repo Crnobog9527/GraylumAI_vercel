@@ -18,7 +18,7 @@ import { type TokenUsage, type CostBreakdown } from '../types/ai';
 import { logger } from '../lib/logger';
 import { creditBalanceDiagnostics, readCreditBalance, type CreditBalanceReadOptions } from './creditBalance';
 import { applyInvitationRebateForSpend } from './invitationRebate';
-import { BillingUnitConfigError } from './billingUnit';
+import { BillingUnitConfigError, billingUnitPublicError } from './billingUnit';
 
 // ============================================
 // 类型定义
@@ -267,7 +267,7 @@ export async function getBillingRuntimeSettings(
   // invalid values keep the legacy fallbacks; BILL-UNIT's strict 1–20 rules apply to the new path only.
   if (error || !Array.isArray(data)) {
     logger.warn('billing', 'billing_runtime_settings_read_failed', { code: error?.code });
-    throw new BillingUnitConfigError('BILLING_UNIT_SETTINGS_UNAVAILABLE');
+    throw billingUnitPublicError(new BillingUnitConfigError('BILLING_UNIT_SETTINGS_UNAVAILABLE'));
   }
   const settings = new Map<string, unknown>();
   for (const row of data) {

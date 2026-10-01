@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,6 +17,11 @@ export function ModelMultiplierPanel() {
   const view = trpc.modelPricing.getMultipliers.useQuery(undefined, { refetchOnMount: 'always' });
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<{ id: string; text: string } | null>(null);
+  // Any edit in the model table bumps updated_at; refresh so the next save does not conflict.
+  const modelsUpdatedAt = trpc.model.getAdminModelsDashboard.useQuery(undefined, { enabled: false }).dataUpdatedAt;
+  useEffect(() => {
+    if (modelsUpdatedAt) void utils.modelPricing.getMultipliers.invalidate();
+  }, [modelsUpdatedAt, utils]);
   const save = trpc.modelPricing.setMultiplier.useMutation({
     onSuccess: (_data, input) => {
       setDrafts((current) => {
@@ -27,7 +32,11 @@ export function ModelMultiplierPanel() {
       setMessage({ id: input.modelId, text: '已保存并读回' });
       void utils.modelPricing.getMultipliers.invalidate();
     },
-    onError: (error, input) => setMessage({ id: input.modelId, text: error.message }),
+    onError: (error, input) => {
+      setMessage({ id: input.modelId, text: error.message });
+      // Keep the draft; reload updated_at so the admin can save again after checking the change.
+      if (error.data?.code === 'CONFLICT') void utils.modelPricing.getMultipliers.invalidate();
+    },
   });
   const site = view.data?.site;
   return <Card data-testid="model-multiplier-panel">
@@ -35,7 +44,7 @@ export function ModelMultiplierPanel() {
       <CardTitle>加价倍数（按模型）</CardTitle>
       <CardDescription>
         应收积分 = 每美元积分数 × Σ(每次调用的美元成本 × 该次倍数)，整次操作只进位一次。
-        留空表示使用全站默认倍数；修改只影响之后新开始的操作，已冻结的调用不重算。
+        留空表示使用全站默认倍数。新计费启用后才按这里收费；之后的修改只影响新开始的操作，已冻结的调用不重算。
       </CardDescription>
     </CardHeader>
     <CardContent className="space-y-3">
@@ -48,7 +57,7 @@ export function ModelMultiplierPanel() {
           : '全站配置读取失败或无效，新收费会被拒绝；这里不显示推测的默认值。'}</p>
         {!view.data.available ? <p role="alert">模型倍数字段暂不可用（数据库迁移尚未应用或读取失败），暂时不能编辑。</p>
           : <table className="w-full text-sm"><thead><tr>
-            <th className="text-left">模型</th><th className="text-left">当前生效</th><th className="text-left">来源</th>
+            <th className="text-left">模型</th><th className="text-left">新计费启用后生效</th><th className="text-left">来源</th>
             <th className="text-left">单独设置</th><th />
           </tr></thead><tbody>{view.data.models.map((model) => {
             const draft = drafts[model.id] ?? model.override ?? '';

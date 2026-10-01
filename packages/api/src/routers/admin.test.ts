@@ -1148,6 +1148,7 @@ describe('adminRouter finance stats runtime billing summary', () => {
     expect(result.runtimeBilling).toMatchObject({
       creditsPerUsd: 1000,
       tokenPriceMultiplier: 1.5,
+      billingUnitSource: { creditsPerUsd: 'default', defaultMultiplier: 'default' },
       searchSurchargeCredits: null,
       newUserCredits: 100,
     });
@@ -1335,6 +1336,7 @@ describe('adminRouter finance stats runtime billing summary', () => {
     expect(result.runtimeBilling).toEqual({
       creditsPerUsd: 1000,
       tokenPriceMultiplier: 1.5,
+      billingUnitSource: { creditsPerUsd: 'configured', defaultMultiplier: 'configured' },
       activeModelCount: 2,
       inputCreditsPer1KRange: { min: 1.2, max: 4.5 },
       outputCreditsPer1KRange: { min: 6, max: 22.5 },

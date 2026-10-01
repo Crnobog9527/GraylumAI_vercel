@@ -8,10 +8,24 @@
 -- masked by a back-filled value. Unconstrained numeric plus a CHECK (instead of numeric(p,2))
 -- so an over-precise value is rejected rather than silently rounded before the check.
 -- No column grant to anon/authenticated: only service-role admin endpoints read or write it.
+--
+-- Rollback: stop new BILL-UNIT admission first, then `UPDATE ai_models SET price_multiplier = NULL`
+-- restores site-wide inheritance. Do not drop the column once a frozen call has recorded an m_i:
+-- frozen calls keep their own m_i, but forward-fix instead of deploying code that cannot read it.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE public.ai_models ADD COLUMN IF NOT EXISTS price_multiplier numeric;
+
+-- ADD COLUMN IF NOT EXISTS silently keeps a pre-existing column of another type; refuse that.
+DO $$
+BEGIN
+  IF (SELECT format_type(atttypid, atttypmod) FROM pg_attribute
+      WHERE attrelid = 'public.ai_models'::regclass AND attname = 'price_multiplier' AND NOT attisdropped)
+     IS DISTINCT FROM 'numeric' THEN
+    RAISE EXCEPTION 'BILL_UNIT_PRICE_MULTIPLIER_TYPE_MISMATCH';
+  END IF;
+END $$;
 
 ALTER TABLE public.ai_models DROP CONSTRAINT IF EXISTS ai_models_price_multiplier_check;
 ALTER TABLE public.ai_models ADD CONSTRAINT ai_models_price_multiplier_check CHECK (

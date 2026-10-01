@@ -79,6 +79,15 @@ try {
   assert.equal(sqlState("SET ROLE service_role; UPDATE public.ai_models SET price_multiplier = 2.5 WHERE name = 'b'"), 'ok');
   assert.equal(sql("SELECT price_multiplier::text FROM public.ai_models WHERE name = 'b'"), '2.5');
   console.log('PASS only service_role reads/writes the multiplier; authenticated safe-column reads unchanged');
+
+  // A pre-existing column of another type must stop the migration instead of being kept silently.
+  sql('ALTER TABLE public.ai_models DROP COLUMN price_multiplier; ALTER TABLE public.ai_models ADD COLUMN price_multiplier text;');
+  let mismatch = '';
+  try { apply(); } catch (error) { mismatch = String(error.stderr); }
+  assert.match(mismatch, /BILL_UNIT_PRICE_MULTIPLIER_TYPE_MISMATCH/);
+  assert.equal(sql(`SELECT format_type(atttypid, atttypmod) FROM pg_attribute
+    WHERE attrelid = 'public.ai_models'::regclass AND attname = 'price_multiplier'`), 'text');
+  console.log('PASS a pre-existing price_multiplier of another type aborts the migration and changes nothing');
 } catch (error) {
   console.error('FAIL BILL-UNIT model multiplier contract:', error.message ?? error.name);
   process.exitCode = 1;

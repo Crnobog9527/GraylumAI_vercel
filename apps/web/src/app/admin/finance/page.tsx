@@ -23,6 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AdminErrorState from '@/components/admin/AdminErrorState';
 import { formatUsdFromCents } from '@/lib/currency';
 import { ReportUsdValue } from '@/components/admin/ReportUsdValue';
+import { Bill2ModelReportCard, UNIT_SOURCE_LABEL } from '@/components/admin/Bill2ModelReportCard';
 
 function formatCreditsRange(range: { min: number; max: number } | null, suffix: string) {
   if (!range) {
@@ -60,16 +61,9 @@ export default function AdminFinancePage() {
   const modelStats = data?.modelStats ?? [];
   const financeOverview = data?.financeOverview ?? { paidRevenueCents: 0, recordedCostUsd: 0, estimatedProfitUsd: 0,
     creditsConsumed: 0, creditsPurchased: 0, creditsGiven: 0, netCreditsFlow: 0 };
-  const runtimeBilling = data?.runtimeBilling ?? {
-    creditsPerUsd: 1000,
-    tokenPriceMultiplier: 1.5,
-    activeModelCount: 0,
-    inputCreditsPer1KRange: null,
-    outputCreditsPer1KRange: null,
-    searchCreditsPer1KRange: null,
-    searchSurchargeCredits: 0,
-    newUserCredits: 100,
-  };
+  const runtimeBilling = data?.runtimeBilling ?? { creditsPerUsd: 1000, tokenPriceMultiplier: 1.5, billingUnitSource: null,
+    activeModelCount: 0, inputCreditsPer1KRange: null, outputCreditsPer1KRange: null, searchCreditsPer1KRange: null,
+    searchSurchargeCredits: 0, newUserCredits: 100 };
 
   // Paid USD revenue minus recorded provider cost, computed exactly on the server.
   const { estimatedProfitUsd } = financeOverview;
@@ -644,7 +638,8 @@ export default function AdminFinancePage() {
                       </div>
                       <div>
                         <p className="font-medium" style={{ color: 'var(--text-primary)' }}>积分兑美元比例</p>
-                        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>站内统一换算基线</p>
+                        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                          {UNIT_SOURCE_LABEL[runtimeBilling.billingUnitSource?.creditsPerUsd ?? 'unknown']}</p>
                       </div>
                     </div>
                     <Badge className="bg-blue-500/20 text-blue-400 text-lg px-3">
@@ -659,7 +654,8 @@ export default function AdminFinancePage() {
                       </div>
                       <div>
                         <p className="font-medium" style={{ color: 'var(--text-primary)' }}>价格倍率</p>
-                        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>用户价格 = API 成本 × 倍率</p>
+                        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                          全站默认，模型可单独设置：{UNIT_SOURCE_LABEL[runtimeBilling.billingUnitSource?.defaultMultiplier ?? 'unknown']}</p>
                       </div>
                     </div>
                     <Badge className="bg-purple-500/20 text-purple-400 text-lg px-3">
@@ -765,6 +761,7 @@ export default function AdminFinancePage() {
                 </div>
               </CardContent>
             </Card>
+            <div className="mt-6"><Bill2ModelReportCard /></div>
           </div>
         </TabsContent>
       </Tabs>

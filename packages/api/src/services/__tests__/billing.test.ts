@@ -568,7 +568,10 @@ describe('getBillingRuntimeSettings', () => {
         return { select() { return this; }, in: () => Promise.resolve(result) };
       },
     } as unknown as BillingContext['supabase'];
-    await expect(getBillingRuntimeSettings(supabase)).rejects.toThrow('SETTINGS_UNAVAILABLE');
+    await expect(getBillingRuntimeSettings(supabase)).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE', message: expect.not.stringContaining('BILLING_UNIT'),
+      cause: expect.objectContaining({ code: 'BILLING_UNIT_SETTINGS_UNAVAILABLE' }),
+    });
   });
 });
 
