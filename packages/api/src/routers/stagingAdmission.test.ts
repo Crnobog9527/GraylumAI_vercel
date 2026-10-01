@@ -8,6 +8,11 @@ vi.mock('../services/runtime/admission', async original => {const actual=await o
 import { opcRouter } from './opc';
 import { runtimeRouter } from './runtime';
 import { router } from '../trpc';
+// The window/configuration consistency of BILL-UNIT is covered in billingUnitAdmission.test.ts.
+vi.mock('../services/runtime/billingUnitAdmission', async (original) => ({
+  ...(await original<typeof import('../services/runtime/billingUnitAdmission')>()),
+  freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2', creditsPerUsd: '1000', defaultMultiplier: '1', models: {}, providers: {}, hash: 'f'.repeat(64) }),
+}));
 const app = router({ opc: opcRouter, runtime: runtimeRouter });
 const actor = '00000000-0000-4000-8000-000000000001';
 const windowId = '00000000-0000-4000-8000-000000000002';

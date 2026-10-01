@@ -51,7 +51,7 @@ export function billingUnitPublicError(cause: unknown): TRPCError {
   return new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: '计费配置暂不可用，新的收费已暂停，请稍后重试', cause });
 }
 
-const MULTIPLIER_PATTERN = /^(?:(?:[1-9]|1[0-9])(?:\.[0-9]{1,2})?|20(?:\.0{1,2})?)$/;
+export const MULTIPLIER_PATTERN = /^(?:(?:[1-9]|1[0-9])(?:\.[0-9]{1,2})?|20(?:\.0{1,2})?)$/;
 const CREDITS_PER_USD_PATTERN = /^(0|[1-9][0-9]{0,11})(\.[0-9]{1,12})?$/;
 
 function decimalText(value: unknown): string | null {

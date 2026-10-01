@@ -21,6 +21,7 @@ import {askQuestionToolBytes,QUESTION_CONTRACT,QUESTION_CONTRACT_INSTRUCTIONS} f
 import {currentRequestTiming} from './timing';
 import {readPurposeBudgets} from './purposeBudgets';
 import {assertFrozenPayloads} from './payloadSize';
+import {freezeWindowBillingUnit} from './billingUnitAdmission';
 
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
@@ -220,6 +221,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     if(!billing.callPolicy.some(p=>p.modelId===candidate.modelId))billing.callPolicy.push({...billing.callPolicy[0],modelId:candidate.modelId,model:candidate.model,inputLimit:candidate.inputLimit,outputLimit:candidate.outputLimit});
    }
    if(realCalls)billing.callPolicy=realCalls;
+   // BILL-UNIT: the window must match the current q and each selected model's m_i (0157 claim/finalize).
+   if(realCalls)billing.rules.billingUnit=await freezeWindowBillingUnit(admin,policy.real!,realCalls);
    if(budgets&&attachedOrganizer){
     // The organizer's separately configured input cap includes all its required
     // frozen material. The eventual primary reply is checked again at execution.
