@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle2,
@@ -9,14 +10,14 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
-import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import { buildAuthHref } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { keepDialogOpenForCaptcha } from '@/lib/dialogCaptcha';
 import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
-import { validateNewPassword } from '@/lib/passwordRecovery';
+import { FORGOT_PASSWORD_PATH } from '@/lib/passwordRecovery';
+import { changePasswordWithReauth, passwordChangeEntry, SET_PASSWORD_BY_EMAIL_HINT } from '@/lib/passwordChange';
 import {
   Dialog,
   DialogContent,
@@ -46,64 +47,30 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
   });
 
   const authProvider = user?.auth_provider || 'email';
-  const isEmailPasswordAccount = authProvider === 'email';
+  // Not hidden by provider: a Google account may have set a password, which GoTrue does not show.
+  const passwordEntry = passwordChangeEntry({ email: user?.email, auth_provider: authProvider });
   const registerDate = user?.created_date
     ? new Date(user.created_date).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
     : '-';
 
   const handleChangePassword = async () => {
-    if (!passwordForm.current_password || !passwordForm.new_password || !passwordForm.confirm_password) {
-      setStatusTone('error');
-      setStatusMessage('请完整填写当前密码和新密码。');
-      return;
-    }
-
-    const invalidPassword = validateNewPassword(passwordForm.new_password, passwordForm.confirm_password);
-    if (invalidPassword) {
-      setStatusTone('error');
-      setStatusMessage(invalidPassword);
-      return;
-    }
-
-    if (!user?.email) {
-      setStatusTone('error');
-      setStatusMessage('当前会话缺少邮箱信息，无法修改密码。');
-      return;
-    }
-    const userEmail = user.email;
-
     setPasswordLoading(true);
-
     try {
       const supabase = createClient();
       // Invisible hCaptcha: a fresh single-use token per attempt; a challenge appears only if needed.
-      let captchaOptions: Awaited<ReturnType<typeof invisibleCaptchaOptions>>;
-      try {
-        captchaOptions = await invisibleCaptchaOptions();
-      } catch (error) {
-        setStatusTone('error');
-        setStatusMessage(getSafeErrorMessage(error, '人机验证未完成，请重试。'));
-        return;
-      }
-      const { error: reauthError } = await supabase.auth.signInWithPassword({
-        email: userEmail,
-        password: passwordForm.current_password,
-        options: captchaOptions,
+      const result = await changePasswordWithReauth({
+        captcha: () => invisibleCaptchaOptions(),
+        signInWithPassword: credentials => supabase.auth.signInWithPassword(credentials),
+        updatePassword: password => supabase.auth.updateUser({ password }),
+      }, user?.email, {
+        current: passwordForm.current_password,
+        next: passwordForm.new_password,
+        confirm: passwordForm.confirm_password,
       });
 
-      if (reauthError) {
+      if (!result.ok) {
         setStatusTone('error');
-        setStatusMessage('当前密码验证失败，请重新输入。');
-        return;
-      }
-
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: passwordForm.new_password,
-      });
-
-      if (updateError) {
-        setStatusTone('error');
-        setStatusMessage(updateError.message);
+        setStatusMessage(result.message);
         return;
       }
 
@@ -212,13 +179,11 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                   修改密码
                 </div>
                 <div className="mt-1 text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                  {isEmailPasswordAccount
-                    ? '邮箱密码账户可在重新验证当前密码后修改密码'
-                    : 'Google 登录账户不提供站内密码修改'}
+                  {passwordEntry.description}
                 </div>
               </div>
 
-              {isEmailPasswordAccount ? (
+              {passwordEntry.available ? (
                 <Button
                   variant="outline"
                   size="sm"
@@ -356,6 +321,17 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                 {statusMessage}
               </p>
             )}
+            {/* For accounts without a current password (for example signed up with Google only). */}
+            <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
+              {SET_PASSWORD_BY_EMAIL_HINT}
+              <Link
+                href={buildAuthHref(FORGOT_PASSWORD_PATH)}
+                className="ml-1 underline-offset-4 hover:underline"
+                style={{ color: 'var(--color-primary)' }}
+              >
+                通过邮件设置密码
+              </Link>
+            </p>
           </div>
           <DialogFooter>
             <Button
