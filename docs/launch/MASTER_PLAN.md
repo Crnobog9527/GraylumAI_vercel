@@ -132,6 +132,7 @@
 | 旧规则 | 出处 | 本版处理 |
 | --- | --- | --- |
 | RUNTIME-PROD ④ 的统一预扣估算、报告固定上界预扣过渡方案 | 本文原第 7.1 节；#547 原方案 | 由第 2.1 节第 26–27 项取代：BILL-PAYG 逐次冻结与实际结算，积分不足在两步之间暂停，超出本次冻结额由平台承担；不改变 D16 和报告 / Fusion 的预告边界 |
+| 每 run 一次预留、run 与 pre_deduct 一一对应；平台承担超额需人工授权 | [BILL2 技术契约](tasks/V3-BILL-2-provider-authoritative-billing.md)第 43–53、81–89 行中的这两组条款 | 由第 2.1 节第 26–27 项取代：每次供应商调用前只冻结本次上界，调用后按实际费用结算；单次超出冻结额自动由平台承担，不向用户补扣、不需逐笔人工授权；进入 `budget_conflict`、停止新调用，保存真实费用和超额用于对账。其余不冲突条款继续有效，不将上述行号区间整体废止（[总控修订记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/559#issuecomment-5925648847)） |
 | Fusion 按 RUNTIME-PROD 统一预扣估算规则冻结积分 | 本文原第 4.4 节第 2 条 | 已按 BILL-PAYG 逐次冻结规则取代：运行前总预估仅展示，每次供应商调用只冻结该次上界；Fusion 多模型单次上界由 FUSION-REVIEW 定义，定义前不放行。保留运行前预告和三种结局的收费规则（[总控修订记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/559#issuecomment-5925344654)） |
 | 层级题号 1.1/1.2、只展示已到达的问题、逐题确认 | v11 §4.4；架构规格 §3.3 的逐字段状态 | 由第 3 节取代：每一步确认一次，笔记只分"草稿 / 已确认" |
 | 多模型智囊团只给 Gold 用户，模型组合只由管理员配置，用户只能开关 | v10.2 §5–§6；架构规格 §7.1、§10；v11 §6.2 | 由第 4 节取代：分评审和对比两种模式；对比模式用户可在管理员允许的范围内自选模型；各等级权限由管理员配置 |
@@ -726,7 +727,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 <a id="billing"></a><a id="compatibility"></a>
 ### 9.2 仍然有效的技术规格
 
-- [BILL2 技术契约](tasks/V3-BILL-2-provider-authoritative-billing.md)：精确成本、锁序、原子结算、原请求与未知恢复。
+- [BILL2 技术契约](tasks/V3-BILL-2-provider-authoritative-billing.md)：除第 2.2 节明确取代的“每 run 一次预留”和“平台承担超额需人工授权”两组条款外，其余继续有效，包括精确成本、锁序、原子结算、唯一钱路、原请求与未知恢复。契约文件本身由 **BILL-PAYG 实施 PR 同步修改**（[#553 实施交接](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553#issuecomment-5925672087)），本次规划同步不修改该契约文件。
 - [V3 标准 Skill 规格](tasks/V3-standard-skills.md)：私有包、固定版本、3 / 6 / 8 步和无步骤 Skill、隔离与恢复（其中"确定性报告"由第 2.1 节第 22 项取代：所有带步骤的 Skill 都改为模型根据全部信息写完整报告、收积分，依据 Owner 2026-09-30 原话"所有带步骤的 Skill，报告都改由模型写、都收积分"，[#545 评论](https://github.com/Crnobog9527/GraylumAI_vercel/pull/545#issuecomment-5912946236)）。
 - [OPC 详细架构](tasks/V3-OPC-growth-agent-architecture.md)：业务归属、版本、会话、权限、账务和恢复契约；与本文第 2.2 节冲突的部分以本文为准。
 - [Master Plan v10.1](Graylum_Master_Plan_v10.1.md)：钱路、认证、安全、年付、退款、cron、完整验收和发布 / 回退要求（其中为保护现网数据而设的部分由第 9.3 节取代，见第 2.2 节）。
