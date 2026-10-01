@@ -3,7 +3,13 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { appRouter } from '@repo/api/src/root';
 import { createTRPCContext } from '@repo/api/src/trpc';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
-import { buildVerifyEmailPath, routeCallbackError } from '@/lib/authFlow';
+import {
+  buildVerifyEmailPath,
+  classifyCodeExchangeError,
+  parseAuthCallbackFlow,
+  routeCallbackError,
+  type LoginErrorCode,
+} from '@/lib/authFlow';
 import { logServerError } from '@/lib/server-log';
 import { resolveAuthCallbackOrigin, resolveSupabaseCookieOptions } from '@/lib/site-config';
 
@@ -34,9 +40,9 @@ export async function GET(request: NextRequest) {
     }
   );
 
-  const loginError = () => {
+  const loginError = (reason: LoginErrorCode = 'callback_failed') => {
     const loginUrl = new URL('/login', authOrigin);
-    loginUrl.searchParams.set('error', 'callback_failed');
+    loginUrl.searchParams.set('error', reason);
     loginUrl.searchParams.set('redirect', next);
     return NextResponse.redirect(loginUrl);
   };
@@ -54,8 +60,12 @@ export async function GET(request: NextRequest) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (error) {
-      logServerError('auth', 'auth_callback_session_exchange_failed');
-      return loginError();
+      const reason = classifyCodeExchangeError(error, parseAuthCallbackFlow(requestUrl.searchParams.get('flow')));
+      logServerError('auth', 'auth_callback_session_exchange_failed', { reason });
+      // A verifier mismatch usually means the link was opened where the flow did not start. For an
+      // email link /verify has already confirmed the email, so the visitor should just log in; a
+      // Google sign-in is simply retried. `flow` only picks the fixed message, never access.
+      return loginError(reason);
     }
   }
 

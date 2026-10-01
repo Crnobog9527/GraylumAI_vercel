@@ -18,7 +18,7 @@ function runtime(includeHistory = false) {
     'services/runtime/agentTools', 'services/runtime/openRouterHistory', 'services/runtime/reasoningPolicy',
     'services/runtime/budget', 'services/runtime/timing', 'services/runtime/authReuse',
     'services/bill2/openRouterAdapter', 'services/bill2/openRouterStream', 'services/bill2/openRouterPolicy',
-    'services/bill2/openRouterEvidence', 'services/bill2/decimal',
+    'services/bill2/openRouterEvidence', 'services/bill2/decimal', 'services/bill2/responseCapacity',
   ].map(path =>
     [new URL(path, root).href, new URL(path + '.ts', root).href]));
   const hook = registerHooks({resolve(specifier, context, next) {

@@ -34,7 +34,7 @@ async function capture(config: ProbeConfig, kind: 'ask' | 'text' = 'ask', maxTok
     bodies.push(String(init.body));
     return sseResponse(config.model, toolDeltas('ask_question', card), {finish: 'tool_calls'});
   }, authorization: 'Bearer synthetic', clock: () => performance.now(), redact: text => text});
-  expect(bodies).toHaveLength(1);
+  expect(bodies, JSON.stringify(result)).toHaveLength(1);
   expect(result.askExecutions).toBe(1);
   expect(result.stop).toBeUndefined();
   return {body: JSON.parse(bodies[0]!), bytes: bodies[0]!};

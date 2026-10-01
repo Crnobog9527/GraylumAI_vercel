@@ -1,6 +1,7 @@
 # MENTOR-BUDGET 实施方案与交接
 
-风险 high；继续 PR #542 的既有分支，原始起点 staging `314fde20`。
+风险 high；原实现为 PR #542，原始起点 staging `314fde20`。
+2026-10-01 的独立容量增量见文末；当前新配置输出硬上限为 8192。
 按[方案审查](https://github.com/Crnobog9527/GraylumAI_vercel/pull/542#issuecomment-5910051123)和
 [容量决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/542#issuecomment-5911038927)实施。
 只改服务端、管理 API 和相关测试；没有 SQL、载荷去重、后台页面、staging 配置写入或真实模型调用。
@@ -15,7 +16,7 @@ MODEL-REASONING 配置仍负责模型/用途的思考参数和线路能力；预
 `mentorBudget.get`：无参数，管理员 query。返回：
 
 - `version: 1`、`source: legacy | configured`、`config: null | 配置对象`。
-- `limits: { inputBytes: { interactive: 90000, organize: 112000, report: 90000 }, maxOutputTokens: 3584, historyItems: 1000 }`。
+- `limits: { inputBytes: { interactive: 90000, organize: 112000, report: 90000 }, maxOutputTokens: 8192, historyItems: 1000 }`。
 - `organizeOutput: { source: "v3_summary_max_tokens", maxOutputTokens }`，仍只读原设置，合法 128–4096，未设置默认 2048。
 - `legacy` 描述原行为：OPC 输入 64000 bytes、历史 100；fixture 回答 1000 tokens；真实回答 `min(批准报价输出, 模型输出, 20000)`；附属整理历史 0；report 未启用。
 
@@ -95,7 +96,7 @@ report 没有执行入口，保守复用交互加附属整理的封套和 90000 
 实际发送内容估算留给 RUNTIME-PROD ④。本 PR 不改报价、不改 SQL/账务契约。
 已派发超时仍为 unknown/pending，保留原请求身份，不重发、不重复扣费；未派发证明沿用原机制撤销本次授权。
 
-## P1：端到端回答容量与新配置上限
+## 历史：3584 输出上限的容量依据（已由下节取代）
 
 新 interactive/report 配置硬上限取 **3584 tokens**，不直接采用 8192：
 `8192 × 8 = 65536` 已占满最小接收空间，没有 JSON 封套余量，reasoning 还可能同时出现在
@@ -178,3 +179,56 @@ inputLimit 64000、outputLimit 4096、upperUsd $0.14852096。探针输出上限�
 - 缓存实测执行 1 次后因官方费用缺失停止；其余 5 次未运行。总控已接受“安全停止、结论不确定”收尾，不再追加模型调用。远端 DB/配置写入、后台页面验收和合并未运行。
 - #497 的重叠写入已获授权，未动其分支；#537 SQL 不碰；#540 后续处理 settings.ts 一处分支同步。
 - high 合并另需 Owner 批准，不自行合并。回滚前应让新格式在途执行完成或由当前版本恢复，再撤回代码；旧版本 strict parser 不认识新增冻结字段。新增设置不影响旧版本，原有旧快照无需迁移。
+
+
+## 2026-10-01：8192 输出上限与回复容量
+
+Owner 批准：[确认记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5925811760)。
+新 interactive/report 配置硬上限为 8192；organize 保持 4096。后台显示复用管理 API 返回的用途限额，
+保存与读回使用同一校验。既有执行继续读取冻结预算；数据库配置值仍由总控另行调整。
+
+完整响应容量采用 `2 × 8192 × 8 + 8192 = 139264 bytes`。容量单位包含 JSON 转义和 UTF-8，
+正文与思考共享输出预算，额外一份预留给重复的思考表示；这不是 tokenizer 对任意输出的绝对保证。
+
+| 位置 | 类别 | 本次值／处理 |
+| --- | --- | --- |
+| openRouterStream 聚合 SDK 响应 | 单次回复容量 | UTF-8 JSON 139264 bytes |
+| openRouterStream 聚合正文／思考及 detail 字符串 | 累积内存边界 | 139264 字符；最终仍受上述字节限制 |
+| openRouterAdapter 非流式成功响应 | 单次回复容量 | 139264 bytes |
+| openRouterHistory summary/encrypted | 历史字段接收边界 | 139264 字符；沿用既有规范化规则 |
+| decimal.parseExactJson | 默认证据解析边界 | 默认 65536 bytes 不变；完整回复显式传 139264 |
+| SSE 单帧及单个 detail 增量 | 单帧边界 | 65536 bytes／字符不变 |
+| SSE 原始累计／帧数 | 原始证据边界 | 4MiB 不变；帧数为 2 × PURPOSE_OUTPUT_CAP + 64（当前 16448） |
+| 非成功响应／费用查询 | 独立诊断证据 | 65536 bytes 不变 |
+| BILL2 receipt／result SQL | 持久化边界 | 524288／262144 bytes 不变 |
+
+大于 64KiB 的非流式响应复用现有 gzip-base64 传输封套，哈希和长度仍针对原始供应商字节，
+解压后核对字节数、哈希和严格 UTF-8，再解析费用与 SDK 回复。旧的小响应和旧冻结记录仍可读。
+这减少 rawBody 与 base64 的重复存储，同时保留用于 Runtime 恢复的完整回复；不改 SQL 限额。
+极端元数据或无法在回执边界内保存的证据仍按既有方式降为诊断，不凭缺失原文确认费用。
+回滚至不支持大响应解码的旧代码前，应先处理该版本产生的待恢复执行；历史小响应不受影响。
+
+确定性验证包括正文、纯思考、重复思考三种组合，流式／非流式恰好 139264 bytes 接受，
+增加 1 byte 或一个 8-byte 容量单位拒绝；8192 保存读回与 8193 拒绝；旧冻结预算兼容。
+本地真实 PostgreSQL 使用 octet_length 验证满额回执低于 512KiB 减 16KiB 预留，
+8192 正文加 4096 整理结果（内容 98304 bytes 加封套）低于 256KiB 减 8KiB 预留。
+原始传输字节可还原，重复回执和重复结算仅记一次。全部采用合成供应商响应，无真实模型调用。
+时间预算、路由、模型、思考配置及工具参数 4000 字符边界不在本增量修改。
+
+
+### 独立审查后的容量边界说明
+
+帧数随输出硬上限联动，额外预留 role、finish、usage 等元数据帧；每 token 单独一帧、
+8192 个思考 token 后以 length 结束的本地流式用例，应正常保留最终费用回执并返回
+output_truncated，取消生成并结算一次，不进入未知传输状态、不追加整理或重发。4MiB 原始 SSE 边界不变。
+
+非流式极端内容仍可能被保守回执估算拒绝：估算会额外计入字符串内的冒号和逗号，
+这类字符占满响应时，估算可能约为 51–56 万 bytes，超过回执预留后的 507904 bytes，
+即使实际 JSONB 未必超限。此时保留诊断、身份和哈希，不认定最终费用，沿既有未知结果恢复；
+不截正文或扩大 SQL 上限。常规满额回执的本地 PostgreSQL 验证不代表任意极端内容保证。
+
+附属整理输入包含主回复全文，主回复增至 8192 后，更容易触及既有 organize 输入预算。
+主回复已完成并可能已结算后，整理仍按冻结的 organize.inputBytes 与模型输入限额求交集；
+必需材料装不下时在整理派发前拒绝，返回 capacity，不截主回复、不提高整理上限、不自动补调用。
+主回复 checkpoint 和原回执保留；已有主调用不能按“未派发”退款，执行沿现有 pending/恢复路径收尾，
+没有“自动续做成功”的保证。本增量只记录影响，不改变该处理语义。

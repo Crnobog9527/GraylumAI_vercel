@@ -19,8 +19,8 @@ export function aggregateCredits(costs: readonly string[], creditsPerUsd: string
 
 /** JSON number lexemes never pass through a JS Number, including nested costs.
  * Duplicate keys are rejected instead of silently accepting last-write-wins evidence. */
-export function parseExactJson(raw: string): unknown {
-  if (Buffer.byteLength(raw) > 65_536) throw new Error('BILL2_EVIDENCE_TOO_LARGE');
+export function parseExactJson(raw: string, byteLimit = 65_536): unknown {
+  if (Buffer.byteLength(raw) > byteLimit) throw new Error('BILL2_EVIDENCE_TOO_LARGE');
   let at = 0;
   const fail = (): never => { throw new Error('BILL2_INVALID_JSON'); };
   const ws = () => { while (/[ \t\r\n]/.test(raw[at] ?? '') && at < raw.length) at++; };

@@ -3,6 +3,7 @@ import {expect,it,vi} from 'vitest';
 import {openRouterAdapter} from './openRouterAdapter';
 import {openRouterBound} from './openRouterPolicy';
 import {PURPOSE_OUTPUT_CAP} from '../runtime/purposeBudgets';
+import {OPENROUTER_RESPONSE_BYTE_LIMIT} from './responseCapacity';
 import {mentorOutputFixture} from '../__tests__/fixtures/mentorOutput';
 const identity={provider:'openrouter',account:'synthetic',model:'test/model',protocol:'openrouter-chat-v1',
  providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'},
@@ -10,7 +11,7 @@ const identity={provider:'openrouter',account:'synthetic',model:'test/model',pro
 it.each([false,true])('full response budget fits nonstream and stream with reasoning=%s',async reasoning=>{
  const {response,wire,generatedBytes}=mentorOutputFixture(reasoning);
  expect(Buffer.byteLength(JSON.stringify(response))).toBe(generatedBytes+8192);
- expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThanOrEqual(65536);
+ expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThanOrEqual(OPENROUTER_RESPONSE_BYTE_LIMIT);
  const observations=[];
  for(const stream of [false,true]){
   const transport=vi.fn(async()=>new Response(stream?wire:JSON.stringify(response),{
