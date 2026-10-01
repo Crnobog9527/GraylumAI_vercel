@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "mode": "offline-only",
+  "frozenHead": "f9afd0db7805e80ccc6f5b7023a3e87b5014f5bd",
+  "planId": "33b4364703015f9c8b4877996c0be8c530feae99d28714414b5e87435f7c2c04",
+  "scenariosSourceHash": "0be012a845999a8d6c345a74df7a66e9cb61e3242dac4db98880ef8ebcd2564a",
+  "totals": [
+    {
+      "model": "google/gemini-3.8-flash",
+      "calls": 46,
+      "minB": 27683,
+      "maxB": 31167,
+      "reserveUsd": 2.4878445
+    },
+    {
+      "model": "anthropic/claude-sonnet-5.5",
+      "calls": 46,
+      "minB": 27671,
+      "maxB": 31155,
+      "reserveUsd": 6.633148
+    },
+    {
+      "model": "openai/gpt-6-luna",
+      "calls": 12,
+      "minB": 4562,
+      "maxB": 5220,
+      "reserveUsd": 0.0225635
+    }
+  ],
+  "totalReserveUsd": 9.143556,
+  "providerRequests": 0,
+  "fullPrivateEvidenceSha256": "040cd0d08c833ad83ad1814f5d5c4c0befff435b6361d24d670bcde7d67c6bc5",
+  "coverage": {
+    "mainSingleTurnHarness": 80,
+    "productEndToEnd": 24,
+    "realProviderRequests": 0,
+    "missingRealPromptTokens": 104,
+    "missingRealReasoningTokens": 104,
+    "missingRealCosts": 104,
+    "realAdmissionEvidenceFor553": 0
+  },
+  "suggestedBudget": {
+    "G": {
+      "calls": 46,
+      "usd": 2.77,
+      "singleUsd": 0.1
+    },
+    "S": {
+      "calls": 46,
+      "usd": 7.39,
+      "singleUsd": 0.27
+    },
+    "L": {
+      "calls": 12,
+      "usd": 0.08,
+      "singleUsd": 0.006
+    },
+    "totalCalls": 104,
+    "totalUsd": 10.24
+  },
+  "profiles": {
+    "G": "8192/low/no-cache-control",
+    "S": "8192/low/no-cache-control",
+    "L": "2048/none/no-cache-control; preparation revision pending controller review"
+  }
+}
