@@ -28,7 +28,7 @@
 
 **Graylum 是什么**：给一人公司和社媒新手用的增长教练 Agent。主线是：业务定位 → 按周选题 → 写具体内容（文章 / 视频口播稿，视频再配分镜和剪辑建议）→ 用户发布 → 数据回流和复盘 → 调整下一轮。
 
-**现在到哪了**（2026-10-01）：N1a 仍差 staging 导师出字速度实测，N1b 仍剩 AC1-4（#497，Codex 唯一写入）和 AC1-5。MENTOR-BUDGET（#542、#551、#564）已合并；主线为 **#497 → DATA-ERASURE B2a（#550）→ BILL-UNIT（#565）→ BILL-PAYG（#553）→ REPORT-GEN（#547）**。DB-BASELINE #539 / #556、ENTITLEMENTS PR-1 #540、邀请防刷 #560、认证 #548 / #552 已合并，迁移 0151–0154 已应用到 staging。RATE-LIMIT #562 仅准备切片已合并，限流和暂停开关须在内测前接线；#561 在 #497 冻结 head 后实测 Gemini / Claude。FORGOT-PASSWORD 现在可以开工，待 Owner 选定。内容审核沿用第 19 项，不重复决定。详细证据见第 7.0 节；代码合并、配置应用和产品验收分开记录。
+**现在到哪了**（2026-10-01）：N1a 仍差 staging 导师出字速度实测，N1b 仍剩 AC1-4（#497，Codex 唯一写入）和 AC1-5。MENTOR-BUDGET（#542、#551、#564）已合并；主线为 **#497 → DATA-ERASURE B2a（#550）→ BILL-UNIT（#565）→ BILL-PAYG（#553）→ REPORT-GEN（#547）**。DB-BASELINE #539 / #556、ENTITLEMENTS PR-1 #540、邀请防刷 #560、认证 #548 / #552 已合并，迁移 0151–0154 已应用到 staging。RATE-LIMIT #562 仅准备切片已合并，限流和暂停开关须在内测前接线；#561 在 #497 冻结 head 后实测 Gemini / Claude。FORGOT-PASSWORD 现在可以开工，待 Owner 选定。内容审核暂缓，不阻塞封闭内测；默认放行的接口随 RATE-LIMIT 接线（第 19 项）。详细证据见第 7.0 节；代码合并、配置应用和产品验收分开记录。
 
 最初的问题（2026-09-27）：计费、Runtime、持久会话、定位草稿、周选题和资料库查看编辑的代码都已合并（#419、#421、#422 以及之后 10 个修复 #434–#443）。但 Owner 实际体验后认为定位对话"没有 Agent 感、笨重、慢"。原因已经查清：实现把 Skill 的步骤写成了逐题确认的表单；导师模型默认按最高档思考，导致很久不出字。
 
@@ -106,13 +106,13 @@
 16. **新交互的开场也调用整理模型**（AC1-4）：导师开场给出的建议，由整理模型作为"待核对"填进右侧，体验和旧方式一致；每次开场多一次整理调用。
 17. **接受一项旧链路影响**（#480）：整理模型选了旧名单之外的模型时，旧成果生成和 agentSlice 会报"整理模型未配置"，不会用错模型或多扣费；这些旧链路随 LEGACY-CLOSE 删除。
 18. **数据库结构只由迁移文件决定**（C3 方案 B，#510）：`db:push` 退役，`schema.ts` 只作类型参考；新增 DB-BASELINE 任务补齐基线并做空库建库验证，必须在 V3-M3 / REL-1 之前完成（第 7.1 节、第 9.3 节）。
-19. **内容审核改用 OpenAI Moderation**（#510）：新导师引擎接入，被拦截的消息不收积分，违规记录进后台由管理员人工处理；新增 MODERATION 任务，封闭内测前完成。旧的自研内容检查随 LEGACY-CLOSE 删除。
+19. **内容审核暂缓，只先留接口**（Owner 2026-10-01 新决定，[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/566#issuecomment-5930126786)）。Owner 原话：
 
-    **2026-10-01 修订**（[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/559#issuecomment-5918953004)）：Owner 选择简化版，原话：
+    > 内容审核这个功能暂时不用考虑。但可以先留一个接口。
 
-    > 选 b
+    总控据此安排（不是 Owner 原话）：MODERATION 不再是封闭内测前提，取代原 #510 及 [#559 简化版安排](https://github.com/Crnobog9527/GraylumAI_vercel/pull/559#issuecomment-5918953004)中“封闭内测前输入/输出检查、拦截不收费、记日志”的要求。何时正式实现，公开上线前再请 Owner 决定；此前不接 OpenAI Moderation，不需要 OpenAI 密钥，也不核实价格。旧自研内容检查仍随 LEGACY-CLOSE 删除。
 
-    只缩小封闭内测前的交付范围：完成输入检查和输出检查，违规就拦截、不收积分、记一条日志；后台违规管理页面和多次违规账号处理流程推迟到公开上线前。原 #510 的检查方式不变：输入检查和导师调用同时进行，违规立即中断；回复生成完再检查，违规就隐藏；“被拦截”有独立终止状态。仍用 OpenAI Moderation，实施前核实价格和数据保留政策。
+    **MODERATION-HOOK** 随 RATE-LIMIT 接线，由同一写入方在 #497 和 #550 之后实施，不加进 #497：新导师引擎在发送模型之前和完整回复之后各留一个检查点，默认直接放行，用测试证明现有行为不变。不新建表、不调用外部服务、不加配置。接口返回值预留“拦截”，本轮不实现拦截后的不收费、终止状态和日志处理；以后正式实现时补齐，并保证“被拦截”有独立终止状态，不被改写成 `pending`。风险 high（Runtime 调用路径）。
 
 20. **提问卡改为辅助工具**（Owner 2026-09-29，#497 方案）：不是每轮都出卡；只在"要做选择、用户意思不明确"时出卡，方案类卡片推荐其中一项并在正文说明理由，中性的范围或分类卡片不推荐；信息不够时默认在正文里追问，不替用户编造经历、优势、效果或数字；用户说不清时导师可以在正文里举例，但要标明"这是猜测、由你决定"以及为什么要猜，猜测不做成卡片；导师开场不出卡；卡片去掉"我不确定"按钮，末尾固定加"其他"入口；正文和卡片必须一致。第 3.2 节第 2 条随之更新。
 21. **是否联网由系统判断**（Owner 2026-09-30，#530）：自由对话的联网不受用户设置限制；以后做一个联网路由，由系统判断这一轮要不要搜索，发生搜索时在对话里展示；后台总开关保留。Fusion 评审不联网，只用前面已收集的资料（第 4 节）。隐私条款以后按定下来的机制再写（第 2.1 节第 9 项）。第 3.7 节和 RESEARCH-TOOLS 随之更新。
@@ -551,11 +551,11 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | N1c 完整定位流程 | 未开始 | 已满足：DATA-ERASURE 删除规则设计 #474（E1–E11 已决定）、CI-TRUST-1。仍被阻塞：按第 7.2 节依赖图 AC-0 → AC-1 → AC-2，要等 AC-1（AC1-4、AC1-5）完成。报告改为模型写（第 2.1 节第 22 项），由已合并的 MENTOR-BUDGET 与在途 BILL-UNIT → BILL-PAYG → REPORT-GEN 先行准备 |
 | MENTOR-BUDGET / BILL-UNIT / BILL-PAYG / REPORT-GEN | **MENTOR-BUDGET 已合并；BILL-UNIT、BILL-PAYG、REPORT-GEN 方案在途** | 服务端 [#542](https://github.com/Crnobog9527/GraylumAI_vercel/pull/542)、后台设置页 [#551](https://github.com/Crnobog9527/GraylumAI_vercel/pull/551) 已合并；预算按用途配置，staging 函数总时长仍为 300 秒；#564 已将交互/报告输出上限升到 8192，接收容量为 139264 bytes，报告入口尚未启用。#551 的[合并后交互验证记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/551#issuecomment-5917336729)达到该 handoff 标准，保存中返回瞬间未测，不替代 Owner 产品验收。BILL-UNIT #565、BILL-PAYG [#553](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553)、REPORT-GEN [#547](https://github.com/Crnobog9527/GraylumAI_vercel/pull/547) 均为 draft 方案，按 #497 → #550 → BILL-UNIT（#565）→ BILL-PAYG（#553）→ REPORT-GEN（#547） 由 Codex 顺序实施；方案不等于功能已交付 |
 | N1d 推广 | 未开始 | DEBT-QUICK 已做一部分：删除失效脚本 #482、文档纠错和脱敏 #483、无引用前端清理 #558；CI 安装/缓存切片 #557 已合并 |
-| N2 上线基础 | 部分完成 | **已完成**：SEC-RATELIMIT #488（本机预览限流 #492）；PII-REGEX #500（关闭 #333）；COST-REPORT #513；CI-TRUST 其余部分 #511（网页单测统一入口）、#512（依赖升级机器人改发 staging）、#523（ESLint 覆盖 TS/TSX、API 独立类型检查、删除空壳包）；S1 权限修复 #514、#519、#521（DB-BASELINE 的前置）。**DB-BASELINE**：PR-1 #528（空库建库基线和收敛迁移 0148）、PR-2a #532、PR-2b #535（CI 在文件建出的库上跑集成测试）、PR-3 #536（退役 `db:push`）已合并；#539（补齐 staging 缺的 90 项约束和索引）已合并，0152 已应用（[总控执行记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/539#issuecomment-5918428227)）；指纹收尾 #556 已合并。**DATA-ERASURE**：PR-A #526（注销封闭账号）、PR-B1a #531（内容擦除通道，0149）已合并；PR-B1b #537 已合并，采用擦除前的事务屏障；PR-E #538（注销后开户赠送防刷）已合并，0151 已应用（[总控执行记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/538#issuecomment-5917664336)）；B2a #550 在途，后续按 B2a → B2b → PR-C（删除 Auth 账号）；#538 第 ③ 步须等 PR-C 完成。细节见 [#537](https://github.com/Crnobog9527/GraylumAI_vercel/pull/537) 和 [实施说明](tasks/DATA-ERASURE.md)。**ENTITLEMENTS**：PR-1 #540 已合并（0153 已应用），不等于全部会员前端入口已交付。**INVITE-ABUSE**：#560 完成，0154 已应用。**RATE-LIMIT**：#562 准备切片合并，限流和暂停未接线。**认证**：未验证邮箱的账号登录修复 #543 已合并；auth-staging 域名 / Cookie / 401 修复 #548、邮箱验证落地页修复 #552 已合并；忘记密码任务的 #543 已合并，现在可以开工，需 Owner 选定（第 7.1 节）。MODERATION、RUNTIME-PROD、RESEARCH-TOOLS 未开始 |
+| N2 上线基础 | 部分完成 | **已完成**：SEC-RATELIMIT #488（本机预览限流 #492）；PII-REGEX #500（关闭 #333）；COST-REPORT #513；CI-TRUST 其余部分 #511（网页单测统一入口）、#512（依赖升级机器人改发 staging）、#523（ESLint 覆盖 TS/TSX、API 独立类型检查、删除空壳包）；S1 权限修复 #514、#519、#521（DB-BASELINE 的前置）。**DB-BASELINE**：PR-1 #528（空库建库基线和收敛迁移 0148）、PR-2a #532、PR-2b #535（CI 在文件建出的库上跑集成测试）、PR-3 #536（退役 `db:push`）已合并；#539（补齐 staging 缺的 90 项约束和索引）已合并，0152 已应用（[总控执行记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/539#issuecomment-5918428227)）；指纹收尾 #556 已合并。**DATA-ERASURE**：PR-A #526（注销封闭账号）、PR-B1a #531（内容擦除通道，0149）已合并；PR-B1b #537 已合并，采用擦除前的事务屏障；PR-E #538（注销后开户赠送防刷）已合并，0151 已应用（[总控执行记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/538#issuecomment-5917664336)）；B2a #550 在途，后续按 B2a → B2b → PR-C（删除 Auth 账号）；#538 第 ③ 步须等 PR-C 完成。细节见 [#537](https://github.com/Crnobog9527/GraylumAI_vercel/pull/537) 和 [实施说明](tasks/DATA-ERASURE.md)。**ENTITLEMENTS**：PR-1 #540 已合并（0153 已应用），不等于全部会员前端入口已交付。**INVITE-ABUSE**：#560 完成，0154 已应用。**RATE-LIMIT**：#562 准备切片合并，限流和暂停未接线。**认证**：未验证邮箱的账号登录修复 #543 已合并；auth-staging 域名 / Cookie / 401 修复 #548、邮箱验证落地页修复 #552 已合并；忘记密码任务的 #543 已合并，现在可以开工，需 Owner 选定（第 7.1 节）。MODERATION 正式功能暂缓、接口随 RATE-LIMIT 接线；RUNTIME-PROD、RESEARCH-TOOLS 未开始 |
 | N3 差异化功能 | LIB-1 依赖切片已合并，上传功能未交付 | [#549](https://github.com/Crnobog9527/GraylumAI_vercel/pull/549)：DOCX 解析依赖及安全夹具；不等于 LIB-DOCS 全部完成 |
 | N4 收口 | 部分提前完成 | LEGACY-CLOSE 的关入口 #507（标注 #508）；旧聊天关闭后的后台技能步骤测试 #515；过期端到端测试清理并入 #522 |
 
-规划类 PR：#509（2026-09-29 进度同步）、#530（Fusion 评审改用 OpenRouter Fusion，第 4 节）、[#545](https://github.com/Crnobog9527/GraylumAI_vercel/pull/545)（2026-09-30 规划同步）；另含 #559（PLAN-SYNC-1001）；本轮不重复其内容审核方案 B 决定。
+规划类 PR：#509（2026-09-29 进度同步）、#530（Fusion 评审改用 OpenRouter Fusion，第 4 节）、[#545](https://github.com/Crnobog9527/GraylumAI_vercel/pull/545)（2026-09-30 规划同步）；另含 #559（PLAN-SYNC-1001）；其内容审核方案 B 已由本轮第 19 项“暂缓、只留接口”取代。
 
 **在途 PR**（2026-10-01）：#497 AC1-4、#550 DATA-ERASURE B2a、#565 BILL-UNIT、#553 BILL-PAYG、#547 REPORT-GEN、#561 STG-MENTOR-MODEL，均保持 draft。#562 已合并的是准备切片，接线未完成；不能把方案或准备合并记为功能生效。
 
@@ -615,11 +615,11 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | BILL-UNIT | 2026-10-01，[方案 #565](https://github.com/Crnobog9527/GraylumAI_vercel/pull/565) 在途：所有成本统一美元，q=100、默认 m=3；后台按模型设置倍数，未设用默认值；供应商/线路按同一口径，逐调用冻结有效倍数后合计只进位一次（第 32–34 项）。staging 改配置须 Owner 批准；积分产品数值由 Owner 复核 | #497 → DATA-ERASURE B2a #550 → 本任务 → BILL-PAYG #553 | 高 | 待实施方案细化 |
 | | BILL-PAYG | 2026-10-01（第 26–27 项），[方案 #553](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553) 在途：余额封顶冻结和结算，低于按模型/用途配置的 L 才暂停并提示充值，保留断点、不得负余额、不重复收费。正常余额封顶由平台承担；只有超出估算上界才异常停新调用。复用 BILL2，按模型/用途记录平台承担金额；同步 BILL-UNIT 的逐调用倍数与累计差额公式，最终只进位一次 | #497 → #550 B2a → BILL-UNIT #565 → 本任务 → REPORT-GEN #547，Codex 顺序写；#540 会员权益契约已合并 | 高 | 待实施方案细化 |
 | | DB-BASELINE | 按 Owner 2026-09-29 选择的 C3 方案 B（第 9.3 节）：① 先修完 S1（#498）查出的 staging 权限漂移；引入 `0000` 前，先完成与现有追加式迁移账本、检查器及 CI 的兼容过渡，涉及的治理变更单独按受保护流程先行交付，不得在新增基线的同一 PR 中修改检查器来放行自身；② 从 staging 导出只有结构的建库脚本作为核对来源，整理成只补缺失前置对象的 `0000` 基线，补上 16 张核心表及缺失的相关函数、触发器、扩展、存储桶、授权；已有迁移负责创建的 75 张表及其对象仍由原文件创建，不把完整 staging 结构直接放进 `0000`；③ 用空库按顺序跑完全部迁移，并跑完整测试；④ 退役 `db:push`，更新 `docs/ENGINEERING.md` 和 `docs/runbooks/STAGING_REPRODUCIBILITY.md`，这部分属于治理变更，按受保护流程走。必须在 V3-M3 / REL-1 之前完成。**进度**：S1 权限修复（#514、#519、#521）和 PR-1 #528、PR-2a #532、PR-2b #535、PR-3 #536 已合并；#539 已合并、0152 已应用，指纹收尾 #556 已合并（第 7.0 节） | S1 的权限修复 | 高 | 待实施方案细化 |
-| | MODERATION | 按 Owner 2026-09-29 决定，新导师引擎接入 OpenAI Moderation：① 输入检查和导师调用同时进行，违规立即中断；② AI 回复生成完再检查，违规就隐藏；③ 被拦截的消息不收积分；④ 封闭内测前记一条违规日志；后台违规管理页面和多次违规账号的人工处理流程推迟到**公开上线前**（Owner 2026-10-01 修订，见第 2.1 节第 19 项及[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/559#issuecomment-5918953004)）；⑤ “被拦截”有单独的终止状态，不能被 runner 改写成 `pending`；⑥ 需要单独的 OpenAI 密钥，由 Owner 提供；⑦ 实施前先核实接口价格和数据保留政策。除 ④ 中推迟的后台管理和账号处理外，必须在封闭内测之前完成 | AGENT-CORE 稳定；后台管理和账号处理先于公开上线 | 高 | 待实施方案细化 |
+| | MODERATION | **暂缓**（Owner 2026-10-01，第 19 项）：不再是封闭内测前提；正式功能何时实现，公开上线前再请 Owner 决定。此前不接 OpenAI Moderation、不需密钥、不核实价格。仅 MODERATION-HOOK 随 RATE-LIMIT 接线预留输入/输出检查点，默认放行；拦截后的不收费、独立终止状态与日志以后正式实现时补齐 | 正式功能待 Owner 决定；接口随 RATE-LIMIT，在 #497 / #550 后 | 高 | 接口待接线，正式功能暂缓 |
 | | MODEL-REASONING | ① 添加或编辑模型时，从 OpenRouter 公开模型目录读取该模型支持的思考档位、默认档位、能否关闭，保存快照并可"重新读取"；② 管理员按模型和用途（交互对话、整理、评审、写作）选择思考强度，选项只来自该模型支持的档位，外加"关闭"（允许时）和"用供应商默认"；③ 保存前检查所选供应商线路支持这个参数；④ 准入时把所选档位冻结进执行记录，重放用原值；⑤ 档位和回复长度上限联动校验；⑥ "试一次"按钮，用固定短问题真实调用一次，显示首字时间和是否有正文，费用由平台承担。取代 PR #446 里写死的对照表。**按 Owner 2026-09-28 决定，MODEL-REASONING 提前到 N1b，在 AC1-4 之前完成**（Owner 要求模型在后台随时切换、不绑在代码里）。**已完成**（#480、#494、#495，2026-09-29） | P0-1；和 RUNTIME-PROD 由同一个 writer 完成（同一个后台模型页） | 高 | 中 / 2–3 |
 | | ENTITLEMENTS | PR-1 #540 已合并、0153 已应用；会员权限配置：Fusion 两种模式的开关和上限、资料库总存储空间；服务端检查（系统级文件数量保护上限不属于会员权益，不在这里配置） | —；和 PAY-COMMON 由同一个 writer 先后完成 | 高 | 中 / 2 |
 | | RESEARCH-TOOLS | 第三方搜索统一接口层和对标研究（第 3.7 节，见 [实施说明](tasks/RESEARCH-TOOLS.md)）：规则表和已验证平台清单、统一返回格式、美元成本接入 BILL2、确认失败时如实告知取不到数据（以后经批准增加备用线路后才换备用）、证据进资料库并接入账号注销、打开真实模型的搜索开关、对标流程的代码计算和表格写入限制。在封闭内测之前完成 | RESEARCH-0、AC-1、RUNTIME-PROD、DATA-ERASURE | 高 | 大 / 3–5 |
-| | RATE-LIMIT | 2026-10-01：#562 准备切片已合并，限流/一键暂停**未接线生效**；初始新对话 10/分钟、200/天，模型调用 30/分钟、600/天（第 30 项）。staging Upstash 已配置；正式环境上线前配置并核对容量 | 接线在 #497 和 #550 后，必须在内测前完成 | 高 | 准备完成，接线待做 |
+| | RATE-LIMIT | 2026-10-01：#562 准备切片已合并，限流/一键暂停**未接线生效**；同一写入方同时留 MODERATION-HOOK 输入/输出两个检查点，默认放行、测试证明行为不变，不新增表/外部调用/配置，不实现拦截处理（第 19 项）；初始新对话 10/分钟、200/天，模型调用 30/分钟、600/天（第 30 项）。staging Upstash 已配置；正式环境上线前配置并核对容量 | 接线在 #497 和 #550 后，必须在内测前完成 | 高 | 准备完成，接线待做 |
 | | INVITE-ABUSE | **已完成**（2026-10-01，#560、0154 已应用 staging）：首次正金额开户赠送的新账号才获邀请奖励、每账号仅绑定一次；不开消费返利；接受不同身份同一人无法识别（第 29 项） | #538 开户赠送资格 | 高 | 已合并 |
 | | SEC-RATELIMIT | 限流 fail-closed、Redis 超时放行、诊断计费探针。**已完成**（#488，2026-09-28） | — | 高 | 小 / 1–2 |
 | | FORGOT-PASSWORD | 忘记密码（Owner 2026-09-30 提出）：用户通过邮件验证重置密码；发送重置邮件时复用 #541 的隐形 hCaptcha；重置链接落到站内设置新密码的页面；**已注销或被封禁的账号不能靠重置密码恢复登录**，允许和拒绝两条路径都要测。现在代码里没有这个入口。#543 已合并；#548、#552 已合并，**现在可以开工，需 Owner 选定**；原登录文件前置已解除 | #543、#548、#552（均已合并） | 高（认证和登录恢复） | 小 / 1 |
@@ -649,14 +649,14 @@ P0-1、CI-TRUST-1 ─→ AGENT-CORE（AC-0 → AC-1 → AC-2、AC-3 → AC-5 →
 DATA-ERASURE 删除规则设计 ─→ AC-2
 AGENT-CORE 稳定 ─→ RUNTIME-PROD 其余项（④ 的 BILL-PAYG 按下方顺序提前）；MODEL-REASONING 已完成
 RESEARCH-0 + AC-1 + RUNTIME-PROD + DATA-ERASURE ─→ RESEARCH-TOOLS ─→ 封闭内测
-AGENT-CORE 稳定 ─→ MODERATION 简化版（输入 / 输出检查、拦截、免积分、日志）─→ 封闭内测
-MODERATION 后台违规管理与多次违规账号处理 ─→ 公开上线
+公开上线前 ─→ Owner 决定 MODERATION 正式实现时间（暂缓，不作封闭内测前提）
 S1 权限修复 ─→ DB-BASELINE ─→ V3-M3 ─→ REL-1
 ENTITLEMENTS ─→ PAY-COMMON ─→ PAY-WAFFO（同一 writer）
 MENTOR-BUDGET（#542 / #551 已合并）─→ REPORT-GEN ─→ FUSION-REVIEW
 #497（Codex 已恢复实施）─→ #550 B2a ─→ BILL-UNIT（#565，含按模型倍数）─→ BILL-PAYG（#553，RUNTIME-PROD ④）─→ REPORT-GEN（#547）
   上一行全部由 Codex 顺序写；#540 会员权益契约已合并
-#497 + #550 ─→ RATE-LIMIT 接线（#562 仅准备切片已合并）─→ 封闭内测
+#497 + #550 ─→ RATE-LIMIT 接线 + MODERATION-HOOK（同一写入方，输入/输出默认放行）─→ 封闭内测
+  #562 仅准备切片已合并；接口不实现拦截处理，不加进 #497
 #497 冻结 head ─→ STG-MENTOR-MODEL（#561，Gemini / Claude staging 实测）
 DATA-ERASURE B2a（#550）─→ B2b ─→ PR-C（删除 Auth 账号）─→ #538 第 ③ 步
 REPORT-GEN ─→ AC-3（报告部分）
@@ -689,9 +689,9 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | N1b 体验样片 | AC-0、AC-1 及其对应的 AGENT-CORE-UI 部分；RESEARCH-0（和 AC-0 同期）；MODEL-REASONING（按 Owner 2026-09-28 决定提前，在 AC1-4 之前完成） | Owner 在 staging 用真实模型走完定位第一步，决定继续、调整还是换模型；右侧整理这一阶段沿用旧做法 |
 | N1c 完整定位流程 | DATA-ERASURE 删除规则设计、AC-2、AC-3、AC-5 及其对应的 AGENT-CORE-UI 部分（本步小结卡、右侧面板和进度条） | Owner 从进入到定稿完整走通并验收 |
 | N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
-| N2 上线基础 | RUNTIME-PROD（含 BILL-UNIT、BILL-PAYG）、RATE-LIMIT 接线、DB-BASELINE、RESEARCH-TOOLS、MODERATION 简化版、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON | 上线基础完成；然后邀请 5–10 位真实用户**封闭内测**：只开放定位、周选题和写作，用赠送积分，不开放付费，反馈用于调整 N3 的优先级（D8，不改变 D1 的公开上线范围） |
+| N2 上线基础 | RUNTIME-PROD（含 BILL-UNIT、BILL-PAYG）、RATE-LIMIT 接线（含默认放行的 MODERATION-HOOK）、DB-BASELINE、RESEARCH-TOOLS、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON | 上线基础完成；然后邀请 5–10 位真实用户**封闭内测**：只开放定位、周选题和写作，用赠送积分，不开放付费，反馈用于调整 N3 的优先级（D8，不改变 D1 的公开上线范围） |
 | N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
-| N4 收口 | LEGACY-CLOSE、MODERATION 后台违规管理与多次违规账号处理、V3-M3 | 完整验收；REL-1 和生产另行批准 |
+| N4 收口 | LEGACY-CLOSE、V3-M3；公开上线前请 Owner 决定 MODERATION 正式实现时间 | 完整验收；REL-1 和生产另行批准 |
 
 每批由 Owner 选定后开工，批次内由 Agent 自主排序、测试、修复，完成后停下，不自动开始下一批（AGENTS 第 5 节）。
 
@@ -873,7 +873,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 <a id="decisions"></a>
 ## 10. Owner 决定事项
 
-Owner 于 2026-09-27 确认 D1–D17（D6 在 Fable 评估后改为不含 PDF；D13 于 2026-09-28 按 RESEARCH-0 结果修订；D2、D12 于 2026-09-30 修订，同日决定自由对话是否联网由系统判断、不受用户设置限制，见第 2.1 节第 21 项；2026-09-30 的其他决定见第 2.1 节第 22–25 项；2026-10-01 的内容审核简化、边用边扣和超出冻结额由平台承担见第 2.1 节第 19、26–27 项，模型、8192、邀请、限流、长对话与 q/m 决定见第 13、26–34 项，正式库建库约束见第 9.3 节）。会员权限和额度是后台可改的默认值，以后调整不需要改规划。
+Owner 于 2026-09-27 确认 D1–D17（D6 在 Fable 评估后改为不含 PDF；D13 于 2026-09-28 按 RESEARCH-0 结果修订；D2、D12 于 2026-09-30 修订，同日决定自由对话是否联网由系统判断、不受用户设置限制，见第 2.1 节第 21 项；2026-09-30 的其他决定见第 2.1 节第 22–25 项；2026-10-01 的内容审核暂缓且先留接口、边用边扣和超出冻结额由平台承担见第 2.1 节第 19、26–27 项，模型、8192、邀请、限流、长对话与 q/m 决定见第 13、26–34 项，正式库建库约束见第 9.3 节）。会员权限和额度是后台可改的默认值，以后调整不需要改规划。
 
 | 编号 | 问题 | 已确认的决定 |
 | --- | --- | --- |
@@ -901,6 +901,7 @@ Owner 于 2026-09-27 确认 D1–D17（D6 在 Fable 评估后改为不含 PDF；
 
 | 事项 | 现状 | 何时需要定案 |
 | --- | --- | --- |
+| MODERATION 正式实现时间 | Owner 2026-10-01 决定暂缓，只留接口；MODERATION-HOOK 随 RATE-LIMIT 接线默认放行，不作为已实现内容审核（第 19 项及[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/566#issuecomment-5930126786)） | 公开上线前再请 Owner 决定；不阻塞封闭内测 |
 | 正式环境是否强制"数据不用于训练"（RUNTIME-PROD 第 ⑦ 项、第 2.1 节第 9 项的举例、VOICE 的前置条件） | Owner 2026-09-28 表示，除非违反 GDPR 等法律，请求不需要强制 `data_collection: deny`；合法性尚未核实，规划里仍是"强制" | RUNTIME-PROD 开工前 |
 | 删除规则 E5"付费默认不退款、Owner 逐笔批准手动退款"与现有退款代码和 v11 退款规则（REFUND-1B 等）的衔接 | 删除规则已决定，退款功能尚未按它调整 | PAY-COMMON 或相关退款任务开工前 |
 | 上线前配置与产品数值复核（2026-10-01） | 正式环境 Upstash 上线前配置，Vercel Pro 已决定升级但仍待执行；BILL-UNIT 交付后在 staging 改 q=100/m=3 须 Owner 批准；开户赠送 100、邀请奖励 50/30、会员套餐与积分包积分值须 Owner 复核 | 具体执行前批准；上线前完成（第 7.6 节） |
