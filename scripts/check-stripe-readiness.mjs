@@ -15,7 +15,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const defaultEnvLocalPath = path.join(rootDir, '.env.local');
-const defaultExpectedAppHost = 'graylumai-staging.vercel.app';
+const defaultExpectedAppHost = 'auth-staging.graylum.com';
 const knownProductionHostFragments = ['app.graylum.com'];
 const productionWordPattern = /(^|[-_.])prod(uction)?($|[-_.])/i;
 

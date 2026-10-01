@@ -29,7 +29,7 @@ describe('proxy hostname classification', () => {
       publicSite: true,
     },
     {
-      hostname: 'graylumai-staging.vercel.app',
+      hostname: 'example-preview.vercel.app',
       appAuth: true,
       localhost: false,
       dev: false,

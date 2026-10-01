@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   buildAuthCallbackUrl,
   buildVerifyEmailPath,
   classifyCodeExchangeError,
+  parseAuthCallbackFlow,
   classifyLoginError,
+  clearAuthFragment,
   RESEND_RATE_LIMIT_MESSAGE,
   resendErrorMessage,
   INVALID_CREDENTIALS_MESSAGE,
@@ -174,3 +176,52 @@ describe('Google sign-in callback marker', () => {
     expect(loginErrorMessage('toString')).toBeNull();
   });
 });
+
+describe('password reset callback marker', () => {
+  it('marks a reset link and parses only the known flows', () => {
+    const reset = new URL(buildAuthCallbackUrl('https://a.example', '/reset-password', 'recovery'));
+    expect(Object.fromEntries(reset.searchParams)).toEqual({ next: '/reset-password', flow: 'recovery' });
+    expect(parseAuthCallbackFlow('recovery')).toBe('recovery');
+    expect(parseAuthCallbackFlow('oauth')).toBe('oauth');
+    expect(parseAuthCallbackFlow('admin')).toBe('email');
+    expect(parseAuthCallbackFlow(null)).toBe('email');
+  });
+});
+
+describe('clearAuthFragment', () => {
+  // Final addresses recorded on staging (deployment c4b13758) for a reused link and a closed account.
+  const landings = [
+    '/forgot-password?reason=expired#error=access_denied&error_code=otp_expired'
+      + '&error_description=Email+link+is+invalid+or+has+expired&sb=',
+    '/forgot-password?reason=expired#error=access_denied&error_code=user_banned&error_description=User+is+banned&sb=',
+  ];
+  const browserAt = (address: string) => {
+    const url = new URL(address, 'https://auth-staging.graylum.com');
+    const history = { replaceState: vi.fn() };
+    return { win: { location: { pathname: url.pathname, search: url.search, hash: url.hash }, history }, history };
+  };
+
+  it.each(landings)('drops the provider fragment and keeps path and reason (%s)', address => {
+    const { win, history } = browserAt(address);
+    expect(clearAuthFragment(win)).toBe(true);
+    expect(history.replaceState).toHaveBeenCalledExactlyOnceWith(null, '', '/forgot-password?reason=expired');
+    const [, , cleaned] = history.replaceState.mock.calls[0];
+    expect(cleaned).not.toMatch(/#|error|banned|invalid|sb=/i);
+  });
+
+  it('also drops tokens of a link sent without PKCE, without using them', () => {
+    const { win, history } = browserAt('/reset-password#access_token=a&refresh_token=b&type=recovery');
+    expect(clearAuthFragment(win)).toBe(true);
+    expect(history.replaceState).toHaveBeenCalledExactlyOnceWith(null, '', '/reset-password');
+  });
+
+  it.each(['/forgot-password?reason=expired', '/forgot-password', '/reset-password#section'])(
+    'leaves an address without an auth fragment alone (%s)',
+    address => {
+      const { win, history } = browserAt(address);
+      expect(clearAuthFragment(win)).toBe(false);
+      expect(history.replaceState).not.toHaveBeenCalled();
+    },
+  );
+});
+
