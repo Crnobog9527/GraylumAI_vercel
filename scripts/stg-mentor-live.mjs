@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Temporary loopback transport for the existing isolated runner; no service or database.
+import {checkOpenRouterUS,requireMentorProxy} from './stg-mentor-network.mjs';
 import {createServer} from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {readFileSync,appendFileSync} from 'node:fs';
@@ -10,6 +11,7 @@ import {fileLedger,acquireLedgerLock} from '../packages/api/src/scripts/ac0Probe
 import {accountHome,assertOutsideRepository} from '../packages/api/src/scripts/ac0Probe/paths.ts';
 
 export async function liveBridge({maxUsd,evidencePath,output}) {
+  requireMentorProxy();
   assertOutsideRepository(output);assertOutsideRepository(evidencePath);
   const evidenceRaw=readFileSync(evidencePath,'utf8');
   if(sha256(evidenceRaw)!=='040cd0d08c833ad83ad1814f5d5c4c0befff435b6361d24d670bcde7d67c6bc5')
@@ -24,6 +26,7 @@ export async function liveBridge({maxUsd,evidencePath,output}) {
     sender=mentorSender({maxUsd,ledger:fileLedger(ledgerPath),authorization:'Bearer '+key,upstream:fetch,
       slots:evidence.rows.map(row=>({...row,model:row.model.startsWith('google/')?'G':row.model.startsWith('anthropic/')?'S':'L'})),
       save:record=>appendFileSync(join(output,'mentor-live-results.jsonl'),JSON.stringify(record)+'\n',{mode:0o600})});
+    let networkReady=false;
     let mainComplete=false,passed=[],reviewDone=false,reviewFailed=false;
     server=createServer(async(req,res)=>{
       if(req.headers.authorization!=='Bearer '+secret){res.writeHead(403).end();return;}
@@ -40,7 +43,7 @@ export async function liveBridge({maxUsd,evidencePath,output}) {
           // Stay in the same locked batch; never restart to obtain fresh run caps.
           const terminal=createInterface({input:process.stdin,output:process.stdout});
           try {
-            console.log('Main complete. Grade blind-review.json using the approved rubric; lock judgments before revealing private-blind-mapping.json.');
+            console.log('Main complete. Wait for controller-locked independent grades; enter the supplied JSON verbatim. Do not self-grade.');
             const answer=await terminal.question('Enter JSON '+
               '{"G":{"cards":0,"recommended":0,"format":0,"fabrications":0,"contradictions":0},"S":{...}}; no default: ');
             const grades=JSON.parse(answer);
@@ -65,6 +68,15 @@ export async function liveBridge({maxUsd,evidencePath,output}) {
         if(request.slot.phase==='e2e'&&(!reviewDone||!passed.includes(request.slot.id.split('-')[0])))
           throw new Error('E2E_QUALITY_GATE');
         if(mainComplete&&request.slot.phase==='main-single-turn')throw new Error('MAIN_ALREADY_COMPLETE');
+        if(!networkReady){
+          const proof=await checkOpenRouterUS().catch(error=>{
+            appendFileSync(join(output,'mentor-live-results.jsonl'),JSON.stringify({phase:'network-preflight',
+              status:'stopped',stopReason:'MENTOR_OPENROUTER_US_NOT_CONFIRMED'})+'\n',{mode:0o600});
+            throw error;
+          });
+          appendFileSync(join(output,'mentor-live-results.jsonl'),JSON.stringify(proof)+'\n',{mode:0o600});
+          networkReady=true;
+        }
         await sender.send(request.raw,request.slot,{
           headers:response=>res.writeHead(response.status,{'Content-Type':response.headers.get('content-type')??'application/json',
             ...(response.headers.get('x-generation-id')?{'x-generation-id':response.headers.get('x-generation-id')}:{})}),

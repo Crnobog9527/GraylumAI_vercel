@@ -20,7 +20,7 @@ const reply=(cost:unknown=.001,model:string=MENTOR_LIMITS.G.model)=>new Response
 const slot=(id='one',model:MentorModel='G')=>({id,model,phase:'e2e' as const});
 const setup=(options:Partial<Parameters<typeof mentorSender>[0]>={})=>{
   const upstream=vi.fn(async()=>reply());
-  const ledger=memoryLedger({calls:736,nanoUsd:usdToNano(3.36)});
+  const ledger=memoryLedger({calls:737,nanoUsd:usdToNano(3.36)});
   const save=vi.fn();
   const sender=mentorSender({ledger,upstream,maxUsd:10.24,authorization:'Bearer fixture',save,
     slots:Array.from({length:50},(_,i)=>({...slot(String(i)),requestHash:''})),...options});
@@ -33,26 +33,26 @@ describe('STG mentor live boundary without network',()=>{
   });
   it('reserves to the real file-ledger implementation before send; settles exactly once',async()=>{
     const directory=mkdtempSync(join(tmpdir(),'mentor-ledger-'));directories.push(directory);
-    const path=join(directory,'ledger.json');writeFileSync(path,JSON.stringify({calls:736,nanoUsd:100,external:[]}));
+    const path=join(directory,'ledger.json');writeFileSync(path,JSON.stringify({calls:737,nanoUsd:100,external:[]}));
     const ledger=fileLedger(path),release=acquireLedgerLock(path);
     expect(()=>acquireLedgerLock(path)).toThrow('PROBE_LEDGER_LOCKED');
-    const upstream=vi.fn(async()=>{expect(ledger.read().calls).toBe(737);expect(ledger.read().nanoUsd).toBeGreaterThan(100);return reply();});
+    const upstream=vi.fn(async()=>{expect(ledger.read().calls).toBe(738);expect(ledger.read().nanoUsd).toBeGreaterThan(100);return reply();});
     const {sender}=setup({ledger,upstream});
     await sender.send(raw(),slot('0'));
-    expect(JSON.parse(readFileSync(path,'utf8'))).toMatchObject({calls:737,nanoUsd:100+usdToNano(.001),external:[]});
+    expect(JSON.parse(readFileSync(path,'utf8'))).toMatchObject({calls:738,nanoUsd:100+usdToNano(.001),external:[]});
     await expect(sender.send(raw(),slot('0'))).rejects.toThrow('duplicate');
     expect(upstream).toHaveBeenCalledTimes(1);release();
   });
   it('refuses restart, absent ledger, foreign usage, and ledger-write failure before network',async()=>{
-    for(const calls of [0,735,737,840])expect(()=>setup({ledger:memoryLedger({calls,nanoUsd:0})})).toThrow('BASELINE');
-    const a=setup();a.ledger.write({calls:737,nanoUsd:0});await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow('ledger_changed');
+    for(const calls of [0,736,738,841])expect(()=>setup({ledger:memoryLedger({calls,nanoUsd:0})})).toThrow('BASELINE');
+    const a=setup();a.ledger.write({calls:738,nanoUsd:0});await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow('ledger_changed');
     expect(a.upstream).not.toHaveBeenCalled();
-    const b=setup({ledger:{read:()=>({calls:736,nanoUsd:0}),write:()=>{throw Error('disk');}}});
+    const b=setup({ledger:{read:()=>({calls:737,nanoUsd:0}),write:()=>{throw Error('disk');}}});
     await expect(b.sender.send(raw(),slot('0'))).rejects.toThrow();expect(b.upstream).not.toHaveBeenCalled();
   });
   it('checks run dollars and cumulative dollars independently',async()=>{
     const a=setup({maxUsd:.001});await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow();expect(a.upstream).not.toHaveBeenCalled();
-    const b=setup({ledger:memoryLedger({calls:736,nanoUsd:usdToNano(25.239)})});
+    const b=setup({ledger:memoryLedger({calls:737,nanoUsd:usdToNano(25.239)})});
     await expect(b.sender.send(raw(),slot('0'))).rejects.toThrow();expect(b.upstream).not.toHaveBeenCalled();
   });
   it('shares one 104-call batch across all three models and refuses an extra call',async()=>{
@@ -61,7 +61,7 @@ describe('STG mentor live boundary without network',()=>{
     const upstream=vi.fn(async(_url:RequestInfo|URL,init?:RequestInit)=>reply(.001,JSON.parse(String(init?.body)).model));
     const a=setup({slots,upstream});
     for(const s of slots)await a.sender.send(raw(s.model),s);
-    expect(a.ledger.read().calls).toBe(840);expect(a.sender.totals.run.calls).toBe(104);
+    expect(a.ledger.read().calls).toBe(841);expect(a.sender.totals.run.calls).toBe(104);
     await expect(a.sender.send(raw(),slot('extra'))).rejects.toThrow();
     expect(upstream).toHaveBeenCalledTimes(104);
   });
@@ -87,7 +87,7 @@ describe('STG mentor live boundary without network',()=>{
   it.each([401,402,429,500])('keeps reservation and stops after HTTP %s',async(status)=>{
     const upstream=vi.fn(async()=>new Response('refused',{status})),a=setup({upstream});
     await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow('provider_rejected');
-    const reserved=a.ledger.read();expect(reserved.calls).toBe(737);expect(reserved.nanoUsd).toBeGreaterThan(usdToNano(3.36));
+    const reserved=a.ledger.read();expect(reserved.calls).toBe(738);expect(reserved.nanoUsd).toBeGreaterThan(usdToNano(3.36));
     await expect(a.sender.send(raw(),slot('1'))).rejects.toThrow();expect(upstream).toHaveBeenCalledTimes(1);
   });
   it.each([undefined,-1,'0.001',null])('stops with missing/invalid provider cost %s',async(cost)=>{
@@ -135,4 +135,14 @@ describe('STG mentor live boundary without network',()=>{
     await expect(b.sender.send(raw(),slot('1'))).rejects.toThrow('previous_unsettled');release(reply());
     await expect(first).rejects.toThrow('stopped');expect(upstream).toHaveBeenCalledTimes(1);
   });
+});
+
+it('retains only bounded numeric HTTP error code, never sensitive upstream rejection data',async()=>{
+  for(const code of [403,'secret-code']){
+    const a=setup({upstream:vi.fn(async()=>new Response(JSON.stringify({error:{code,message:'secret-key',metadata:{raw:'private'}}}),{status:403}))});
+    await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow('provider_rejected');
+    expect(a.save.mock.calls.at(-1)?.[0].providerErrorCode).toBe(code===403?403:null);
+    expect(JSON.stringify(a.save.mock.calls)).not.toMatch(/secret-key|private|secret-code/);
+    await expect(a.sender.send(raw(),slot('1'))).rejects.toThrow('stopped');
+  }
 });

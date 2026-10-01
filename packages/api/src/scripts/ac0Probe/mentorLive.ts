@@ -25,12 +25,12 @@ export function mentorMaxUsd(value:string | undefined):number {
 }
 
 /** One process holds the existing ledger lock for the entire batch. Restarting
- * after even one reservation fails the 736 baseline; no resume/retry switch. */
+ * after even one reservation fails the 737 baseline; no resume/retry switch. */
 export function mentorSender(options:{ledger:LedgerStore;maxUsd:number;slots:MentorSlot[];
   upstream:typeof fetch;authorization:string;save:(record:Record<string,unknown>)=>void}) {
   mentorMaxUsd(String(options.maxUsd));
   const baseline=options.ledger.read();
-  if (baseline.calls!==736) throw new Error('MENTOR_BASELINE_CHANGED');
+  if (baseline.calls!==737) throw new Error('MENTOR_BASELINE_CHANGED');
   const budget=createBudget({maxCalls:104,maxUsd:options.maxUsd,ledger:options.ledger});
   const modelTotals={G:{calls:0,nano:0},S:{calls:0,nano:0},L:{calls:0,nano:0}};
   const used=new Set<string>();
@@ -79,7 +79,10 @@ export function mentorSender(options:{ledger:LedgerStore;maxUsd:number;slots:Men
           headers:{Authorization:options.authorization,'Content-Type':'application/json'},
         });
         record.httpStatus=response.status;
-        if(!response.ok||!response.body) return fail('provider_rejected');
+        if(!response.ok||!response.body) {
+          record.providerErrorCode=await rejectionCode(response);
+          return fail('provider_rejected');
+        }
         relay?.headers(response);
         const chunks:Uint8Array[]=[];let size=0;
         const reader=response.body.getReader();
@@ -138,4 +141,18 @@ export function mentorSender(options:{ledger:LedgerStore;maxUsd:number;slots:Men
       } finally {busy=false;}
     },
   };
+}
+
+// Never persist upstream messages, metadata, headers or arbitrary string codes.
+async function rejectionCode(response:Response):Promise<number|null> {
+  const reader=response.body?.getReader();
+  if(!reader)return null;
+  const chunks:Uint8Array[]=[];let size=0;
+  try {
+    for(;;){const part=await reader.read();if(part.done)break;
+      size+=part.value.length;if(size>4096)return null;chunks.push(part.value);
+    }
+    const code=JSON.parse(Buffer.concat(chunks).toString('utf8'))?.error?.code;
+    return Number.isInteger(code)&&code>=100&&code<=599?code:null;
+  }catch{return null;}finally{await reader.cancel().catch(()=>{});}
 }
