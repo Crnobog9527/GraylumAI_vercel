@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- DATA-ERASURE B2a draft: no migration number reserved. Rename only after #538 -> #539 -> #540.
--- Local development only until host integration, final validation, review and Owner authorization.
+-- DATA-ERASURE B2a SQL slice: numbered after staging 0154 under PR #550 controller coordination.
+-- Host integration remains deferred; remote application requires separate Owner authorization.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 DO $$

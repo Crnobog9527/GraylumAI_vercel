@@ -1,9 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 export const rpc=async(db,name,...args)=>(await db.query(`SELECT public.${name}(${args.map((_,i)=>'$'+(i+1)).join(',')}) v`,args)).rows[0].v;
 export const fixture=async db=>(await db.query('SELECT b2a_test.fixture() v')).rows[0].v;
-export const closeAccount=(db,f)=>rpc(db,'account_erasure_confirm',f.actor,randomUUID());
+export const closeAccount=(db,f)=>rpc(db,'account_erasure_confirm_with_digests',f.actor,randomUUID(),
+ JSON.stringify([{kind:'email',key_version:'b2a_local_v1',digest:createHash('sha256').update(f.actor).digest('hex')}]));
 export const call=async(db,f,n=1,dispatch=true)=>{
  const c=await rpc(db,'bill2_claim',f.actor,f.run,n,{provider:'fixture',account:'sandbox',model:'b2a-fixture',
   protocol:'fixture-cost-v1',phase:'reply',requestHash:'b'.repeat(64),upperUsd:'0.005',inputLimit:1000,outputLimit:1000,

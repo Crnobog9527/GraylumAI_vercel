@@ -1,17 +1,17 @@
 {
   "development": false,
   "build": {
-    "steps": 153,
-    "passed": 153,
+    "steps": 158,
+    "passed": 158,
     "bridges": [
       "0143_ticket_grants_and_own_rls.sql"
     ],
-    "repeated": 84,
+    "repeated": 89,
     "failed": null
   },
   "checks": [
-    "Q1 source md5: 5/5",
-    "draft twice: identical full catalog",
+    "Q1 source md5 before 0155: 5/5",
+    "0155 canonical application/replay: identical full catalog",
     "source drift rejects atomically; no-data rollback and reapply exact",
     "anon/authenticated RPC denied; service private-helper denied",
     "closed original identity; admission denied; recursive projection/original hash/replay; exact aggregate once",

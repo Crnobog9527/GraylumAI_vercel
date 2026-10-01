@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Local-only unnumbered B2a development; no database URL, environment secrets or remote host accepted.
+// Local-only B2a migration verification; no database URL, environment secrets or remote host accepted.
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {randomUUID,createHash} from 'node:crypto';
@@ -27,7 +27,8 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-const draft=read('packages/db/migrations/PENDING_erasure_b2a.sql');
+const migrationPath='packages/db/migrations/0155_erasure_b2a.sql';
+const migration=read(migrationPath);
 const report={development,build:null,checks:[],failed:null};
 let client;
 try {
@@ -41,26 +42,32 @@ try {
  assert.ok(ready,'local postgres ready');
  installPgCronStub(root,name,(argv,input)=>ok(docker(['exec',...argv],input)));
  const outcome=r=>({ok:r.status===0&&!r.error,error:r.stderr});
- report.build=buildFromFiles(root,{applyFile:path=>outcome(sql(read(path))),
+ const originals=JSON.parse(read('packages/db/tests/erasure-b2a/source-md5.json'));
+ let before;
+ report.build=buildFromFiles(root,{applyFile:path=>{
+  if(path===migrationPath&&!before){
+   for(const [sig,md5]of Object.entries(originals))assert.equal(ok(sql(`SELECT md5(pg_get_functiondef('${sig}'::regprocedure));`)),md5,sig);
+   report.checks.push('Q1 source md5 before 0155: 5/5');
+   before=snapshot();
+  }
+  return outcome(sql(read(path)));
+ },
   applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-c',input])),
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
- const originals=JSON.parse(read('packages/db/tests/erasure-b2a/source-md5.json'));
- for(const [sig,md5]of Object.entries(originals))assert.equal(ok(sql(`SELECT md5(pg_get_functiondef('${sig}'::regprocedure));`)),md5,sig);
- report.checks.push('Q1 source md5: 5/5');
- const before=snapshot();
- ok(sql(draft));const once=snapshot();
- ok(sql(draft));assert.deepEqual(snapshot(),once,'repeat draft is a structural no-op');
- report.checks.push('draft twice: identical full catalog');
+ assert.ok(before,'0155 must be applied through the canonical build plan');
+ const once=snapshot();
+ ok(sql(migration));assert.deepEqual(snapshot(),once,'repeat 0155 is a structural no-op');
+ report.checks.push('0155 canonical application/replay: identical full catalog');
  // Source drift must abort before helpers, columns or any function are changed.
  ok(sql("CREATE OR REPLACE FUNCTION bill2_read(p_actor_id uuid,p_run_id uuid) RETURNS jsonb LANGUAGE plpgsql "
   +"SECURITY DEFINER SET search_path=public,pg_temp AS $$ BEGIN RETURN '{}'; END $$;"));
- const drift=snapshot();const refused=sql(draft);
+ const drift=snapshot();const refused=sql(migration);
  assert.notEqual(refused.status,0);assert.match(refused.stderr,/ERASURE_SOURCE_MISMATCH/);
  assert.deepEqual(snapshot(),drift,'source drift leaves catalog untouched');
  ok(sql(read('packages/db/tests/erasure-b2a/rollback.sql')));
  assert.deepEqual(snapshot(),before,'no-data structural rollback restores exact catalog');
- ok(sql(draft));assert.deepEqual(snapshot(),once);
+ ok(sql(migration));assert.deepEqual(snapshot(),once);
  report.checks.push('source drift rejects atomically; no-data rollback and reapply exact');
  const md5=value=>createHash('md5').update(value??'<null>').digest('hex').slice(0,12);
  const changes=Object.fromEntries([...new Set([...Object.keys(before),...Object.keys(once)])]
