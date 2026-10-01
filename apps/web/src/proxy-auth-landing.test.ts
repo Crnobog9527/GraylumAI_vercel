@@ -15,7 +15,7 @@ async function get(url: string) {
   return { status: response.status, to: location ? decodeURIComponent(location) : null };
 }
 
-const APP = 'https://graylumai-staging.vercel.app';
+const APP = 'https://auth-staging.graylum.com';
 
 describe('proxy handling of GoTrue landings', () => {
   beforeEach(() => {
