@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {parseExactJson} from './decimal';
+import {OPENROUTER_RESPONSE_BYTE_LIMIT} from './responseCapacity';
 
 export const OPENROUTER_STREAM_BYTE_LIMIT=4_194_304;
 const object=(v:unknown):v is Record<string,unknown>=>Boolean(v&&typeof v==='object'&&!Array.isArray(v));
@@ -34,7 +35,7 @@ export function openRouterStream(model:string,headerId?:string,onChunk?:(chunk:s
      if(old[key]!==undefined&&old[key]!==value)return reject();old[key]=value;
     }else{
      if(typeof value!=='string'||value.length>65536)return reject();old[key]=String(old[key]??'')+value;
-     if(String(old[key]).length>65536)return reject();
+     if(String(old[key]).length>OPENROUTER_RESPONSE_BYTE_LIMIT)return reject();
     }
    }
    details.set(index,old);
@@ -63,7 +64,7 @@ export function openRouterStream(model:string,headerId?:string,onChunk?:(chunk:s
     const text=delta[key];if(text===undefined||text===null)continue;if(typeof text!=='string')return reject();
     if(key==='content')content+=text;else if(key==='refusal')refusal+=text;else reasoning+=text;
    }
-   if(content.length+refusal.length+reasoning.length>65536)return reject();
+   if(content.length+refusal.length+reasoning.length>OPENROUTER_RESPONSE_BYTE_LIMIT)return reject();
    if(delta.reasoning_details!==undefined&&delta.reasoning_details!==null)mergeDetails(delta.reasoning_details);
    if(delta.tool_calls!==undefined&&delta.tool_calls!==null){
     if(!Array.isArray(delta.tool_calls)||delta.tool_calls.length>tools.maxCalls)return reject();
@@ -108,7 +109,7 @@ export function openRouterStream(model:string,headerId?:string,onChunk?:(chunk:s
    ...(details.size?{reasoning_details:[...details.entries()].sort(([a],[b])=>a-b).map(([,v])=>v)}:{}),
    ...(calls.size?{tool_calls:[...calls.entries()].sort(([a],[b])=>a-b).map(([,call])=>call)}:{})};
   const sdkResponse={id:providerId,object:'chat.completion',model,choices:[{index:0,message,finish_reason:finish}],...(usage?{usage}:{})};
-  if(Buffer.byteLength(JSON.stringify(sdkResponse))>65536)return {providerId,identityConflict,error:'aggregate_limit'};
+  if(Buffer.byteLength(JSON.stringify(sdkResponse))>OPENROUTER_RESPONSE_BYTE_LIMIT)return {providerId,identityConflict,error:'aggregate_limit'};
   return {providerId,identityConflict,sdkResponse,exactUsage};
  }
  return {push,result,get error(){return failed;},get providerId(){return providerId;},get identityConflict(){return identityConflict;}};

@@ -27,8 +27,9 @@ describe('mentor budget draft', () => {
     expect(fieldProblem(configuredView, edit({ inputBytes: '90000' }), 'interactive', 'inputBytes')).toBeNull();
     expect(fieldProblem(configuredView, edit({ inputBytes: '90001' }), 'interactive', 'inputBytes')).toBe('不能超过系统上限 90000 字节');
     expect(fieldProblem(configuredView, edit({ inputBytes: '1023' }), 'interactive', 'inputBytes')).toBe('不能小于 1024 字节');
-    expect(fieldProblem(configuredView, edit({ maxOutputTokens: '3585' }), 'interactive', 'maxOutputTokens'))
-      .toBe('不能超过系统上限 3584 token');
+    expect(fieldProblem(configuredView, edit({ maxOutputTokens: '8192' }), 'interactive', 'maxOutputTokens')).toBeNull();
+    expect(fieldProblem(configuredView, edit({ maxOutputTokens: '8193' }), 'interactive', 'maxOutputTokens'))
+      .toBe('不能超过系统上限 8192 token');
     expect(fieldProblem(configuredView, edit({ maxOutputTokens: '0' }), 'interactive', 'maxOutputTokens')).toBe('不能小于 1 token');
     expect(fieldProblem(configuredView, edit({ historyItems: '1.5' }), 'interactive', 'historyItems')).toBe('请填写不带小数的非负整数');
     expect(fieldProblem(configuredView, edit({ historyItems: '-1' }), 'interactive', 'historyItems')).toBe('请填写不带小数的非负整数');
@@ -40,12 +41,12 @@ describe('mentor budget draft', () => {
 
   it('translates server validation issues into Chinese per purpose and field', () => {
     const message = JSON.stringify([
-      { code: 'too_big', maximum: 3584, path: ['report', 'maxOutputTokens'], message: 'Too big' },
+      { code: 'too_big', maximum: 8192, path: ['report', 'maxOutputTokens'], message: 'Too big' },
       { code: 'unrecognized_keys', keys: ['maxOutputTokens'], path: ['organize'], message: 'Unrecognized key' },
       { code: 'invalid_type', expected: 'int', path: ['interactive', 'historyItems'], message: 'Invalid input' },
     ]);
     expect(translateValidationMessage(message)).toBe(
-      '报告（预留） · 回答上限（token）：不能超过 3584；整理：包含不支持的字段：maxOutputTokens；交互对话 · 历史条数上限：必须是整数');
+      '报告（预留） · 回答上限（token）：不能超过 8192；整理：包含不支持的字段：maxOutputTokens；交互对话 · 历史条数上限：必须是整数');
     expect(budgetErrorMessage({ message, data: { code: 'BAD_REQUEST' } }, '保存失败')).toMatch(/^服务端拒绝保存：报告/);
   });
 
