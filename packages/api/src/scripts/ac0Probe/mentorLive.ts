@@ -90,7 +90,7 @@ export function mentorSender(options:{ledger:LedgerStore;maxUsd:number;slots:Men
           }
         } finally {await reader.cancel().catch(()=>{});}
         const bytes=Buffer.concat(chunks),text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
-        let usage,finish,providerId;
+        let usage,finish,providerId,refused=false;
         if(body.stream){
           const facts=observer.end();
           Object.assign(record,{firstValidContentMs:facts.firstContentMs??null,firstByteMs:facts.firstByteMs??null,
@@ -99,6 +99,7 @@ export function mentorSender(options:{ledger:LedgerStore;maxUsd:number;slots:Men
           // Bind every SSE chunk identity, including the usage-only final chunk.
           for(const line of text.split('\n').filter(l=>l.startsWith('data:')&&!l.includes('[DONE]'))){
             const frame=JSON.parse(line.slice(5));
+            if(frame.choices?.some((choice:{delta?:{refusal?:unknown}})=>choice.delta?.refusal))refused=true;
             if(frame.model!==undefined&&frame.model!==limits.model)return fail('response_model');
             if(frame.id){if(providerId&&providerId!==frame.id)return fail('response_identity');providerId=frame.id;}
           }
@@ -107,6 +108,7 @@ export function mentorSender(options:{ledger:LedgerStore;maxUsd:number;slots:Men
           const parsed=JSON.parse(text);
           if(parsed.error||parsed.model!==limits.model||parsed.choices?.length!==1)return fail('response_identity');
           providerId=parsed.id;finish=parsed.choices[0].finish_reason;
+          refused=Boolean(parsed.choices[0].message?.refusal);
           usage={costUsd:parsed.usage?.cost,promptTokens:parsed.usage?.prompt_tokens,
             completionTokens:parsed.usage?.completion_tokens,reasoningTokens:parsed.usage?.completion_tokens_details?.reasoning_tokens};
         }
@@ -123,6 +125,7 @@ export function mentorSender(options:{ledger:LedgerStore;maxUsd:number;slots:Men
         // A known overrun is recorded honestly, then prevents any further send.
         settle(actual);own.nano+=actual-bound;expected=options.ledger.read();
         record.status='settled';options.save(record);
+        if(refused||finish==='content_filter')return fail('provider_refused');
         if(actual>bound||own.nano>usdToNano(limits.usd))return fail('actual_over_bound');
         if(stopped)return fail('stopped');
         return new Response(bytes,{status:response.status,headers:response.headers});

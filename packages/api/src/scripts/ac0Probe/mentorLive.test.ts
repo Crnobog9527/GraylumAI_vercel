@@ -95,6 +95,15 @@ describe('STG mentor live boundary without network',()=>{
     await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow('unknown_result');
     await expect(a.sender.send(raw(),slot('1'))).rejects.toThrow();expect(upstream).toHaveBeenCalledTimes(1);
   });
+  it.each(['refusal','content_filter'])('stops after a paid model-level %s without another request',async(kind)=>{
+    const upstream=vi.fn(async()=>new Response(JSON.stringify({id:'gen-fixture',model:MENTOR_LIMITS.G.model,
+      choices:[{message:{content:'',...(kind==='refusal'?{refusal:'refused'}:{})},
+        finish_reason:kind==='content_filter'?'content_filter':'stop'}],usage:{cost:.001}})));
+    const a=setup({upstream});
+    await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow('provider_refused');
+    await expect(a.sender.send(raw(),slot('1'))).rejects.toThrow();
+    expect(upstream).toHaveBeenCalledTimes(1);expect(a.ledger.read().nanoUsd).toBe(usdToNano(3.361));
+  });
   it('does not retry thrown transport errors or leak their text',async()=>{
     const upstream=vi.fn(async()=>{throw Error('secret');}),a=setup({upstream});
     await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow('local_or_transport');
