@@ -3,6 +3,7 @@ import { runtimeRouter } from './routers/runtime';
 import { workbenchRouter } from './routers/workbench';
 import { agentSliceRouter } from './routers/agentSlice';
 import { router } from './trpc';
+import { runtimeRateLimitsRouter } from './routers/runtimeRateLimits';
 import { mentorBudgetRouter } from './routers/mentorBudget';
 import { chatRouter } from './routers/chat';
 import { userRouter } from './routers/user';
@@ -36,6 +37,7 @@ export const appRouter = router({
   model: modelRouter,
   modelReasoning: modelReasoningRouter,
   mentorBudget: mentorBudgetRouter,
+  runtimeRateLimits: runtimeRateLimitsRouter,
   invitation: invitationRouter,
   checkin: checkinRouter,
   admin: adminRouter,

@@ -9,7 +9,7 @@
   "apps/web/src/app/admin/performance/page.tsx": {"lines":756,"longLines":2},
   "apps/web/src/app/admin/prompts/module-skill-editor.tsx": {"longLines":11},
   "apps/web/src/app/admin/prompts/page.tsx": {"lines":1323,"longLines":6},
-  "apps/web/src/app/admin/settings/page.tsx": {"lines":653,"longLines":6},
+  "apps/web/src/app/admin/settings/page.tsx": {"lines":648,"longLines":6},
   "apps/web/src/app/admin/skills/page.tsx": {"longLines":8},
   "apps/web/src/app/admin/skills/skills.browser.mjs": {"longLines":1},
   "apps/web/src/app/admin/tickets/page.tsx": {"lines":728,"longLines":5},

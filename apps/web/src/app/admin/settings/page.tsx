@@ -16,7 +16,8 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { DEFAULT_SITE_NAME, DEFAULT_SUPPORT_EMAIL } from '@/lib/site-config';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
-import AdminErrorState from '@/components/admin/AdminErrorState';
+import AdminSettingsLoadError from '@/components/admin/AdminErrorState';
+import { RuntimeRateLimitSettings, RuntimeRateLimitTabTrigger } from '@/components/admin/RuntimeRateLimitSettings';
 import { MentorBudgetTabContent, MentorBudgetTabTrigger } from '@/components/admin/MentorBudgetSettings';
 
 // 完整的系统设置定义
@@ -111,15 +112,7 @@ interface MembershipPlan {
   allow_batch_export: string;
 }
 
-export function AdminSettingsLoadError({
-  error,
-  onRetry,
-}: {
-  error: Error | { message: string };
-  onRetry?: () => void;
-}) {
-  return <AdminErrorState error={error} onRetry={onRetry} />;
-}
+export { AdminSettingsLoadError };
 
 export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<Record<string, SettingData>>({});
@@ -373,6 +366,7 @@ export default function AdminSettingsPage() {
             会员权限
           </TabsTrigger>
           <MentorBudgetTabTrigger />
+          <RuntimeRateLimitTabTrigger />
         </TabsList>
 
         {/* General Tab */}
@@ -647,6 +641,7 @@ export default function AdminSettingsPage() {
           </div>
         </TabsContent>
         <MentorBudgetTabContent onOpenFeatures={() => setTab('features')} />
+        <RuntimeRateLimitSettings />
       </Tabs>
     </div>
   );
