@@ -41,7 +41,8 @@ export async function liveBridge({maxUsd,evidencePath,output}) {
           const terminal=createInterface({input:process.stdin,output:process.stdout});
           try {
             console.log('Main complete. Grade blind-review.json using the approved rubric; lock judgments before revealing private-blind-mapping.json.');
-            const answer=await terminal.question('Enter JSON {"G":{"cards":0,"recommended":0,"format":0,"fabrications":0,"contradictions":0},"S":{...}}; no default: ');
+            const answer=await terminal.question('Enter JSON '+
+              '{"G":{"cards":0,"recommended":0,"format":0,"fabrications":0,"contradictions":0},"S":{...}}; no default: ');
             const grades=JSON.parse(answer);
             for(const model of ['G','S']) {
               const g=grades[model];
