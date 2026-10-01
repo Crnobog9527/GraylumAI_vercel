@@ -113,7 +113,7 @@
   "packages/api/src/services/bill2/openRouterEvidence.ts": {"longLines":2},
   "packages/api/src/services/bill2/openRouterStream.ts": {"longLines":2},
   "packages/api/src/services/bill2/service.ts": {"longLines":6},
-  "packages/api/src/services/billing.ts": {"lines":1606},
+  "packages/api/src/services/billing.ts": {"lines":1601},
   "packages/api/src/services/billingReconciliation.ts": {"lines":1902,"longLines":5},
   "packages/api/src/services/contentModerator.ts": {"lines":526},
   "packages/api/src/services/contextManager.ts": {"lines":586},

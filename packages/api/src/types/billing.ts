@@ -271,11 +271,11 @@ export const BILLING_CONSTANTS = {
   // 预扣超时时间 (毫秒) - 超过此时间未结算则自动退费
   PRE_DEDUCT_TIMEOUT: 5 * 60 * 1000, // 5 分钟
 
-  // 积分与美元兑换比例 (1美元 = X积分)
-  CREDITS_PER_USD: 1000,
+  // 积分与美元兑换比例 (1美元 = X积分)；只在配置确认缺失时使用，见 services/billingUnit.ts
+  CREDITS_PER_USD: 100,
 
-  // Token 价格倍率 (基于 Claude API 价格)
-  TOKEN_PRICE_MULTIPLIER: 1.5, // 用户价格 = API 成本 * 1.5
+  // 全站默认加价倍数；模型可单独覆盖，见 services/billingUnit.ts
+  TOKEN_PRICE_MULTIPLIER: 3, // 用户价格 = API 成本 * 3
 } as const;
 
 /**

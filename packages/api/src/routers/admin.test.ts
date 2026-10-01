@@ -1146,8 +1146,8 @@ describe('adminRouter finance stats runtime billing summary', () => {
     expect(result.modelStats).toEqual([]);
     expect(result.dailyChart).toHaveLength(30);
     expect(result.runtimeBilling).toMatchObject({
-      creditsPerUsd: 1000,
-      tokenPriceMultiplier: 1.5,
+      creditsPerUsd: 100,
+      tokenPriceMultiplier: 3,
       searchSurchargeCredits: null,
       newUserCredits: 100,
     });
@@ -1289,6 +1289,8 @@ describe('adminRouter finance stats runtime billing summary', () => {
                   { key: 'new_user_credits', value: '120' },
                   { key: 'search_surcharge_credits', value: '7' },
                   { key: 'input_credits_per_1k', value: '999' },
+                  { key: 'billing_credits_per_usd', value: '1000' },
+                  { key: 'billing_token_price_multiplier', value: '1.5' },
                 ],
                 error: null,
               };

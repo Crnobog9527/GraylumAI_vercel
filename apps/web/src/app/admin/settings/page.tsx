@@ -29,8 +29,8 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
 
   // Credits & Billing
   new_user_credits: { value: '100', type: 'number', label: '新用户赠送积分', description: '新用户注册时赠送的积分数量' },
-  billing_credits_per_usd: { value: '1000', type: 'number', label: '每美元积分数', description: 'AI 成本换算为站内积分的基准比例' },
-  billing_token_price_multiplier: { value: '1.5', type: 'number', label: 'Token 成本倍率', description: '用户计费 = 供应商成本 × 每美元积分数 × 该倍率' },
+  billing_credits_per_usd: { value: '100', type: 'number', label: '每美元积分数', description: '成本先统一为美元，再按此比例换成积分；只影响新操作' },
+  billing_token_price_multiplier: { value: '3', type: 'number', label: '全站默认加价倍数', description: '1–20，最多两位小数；模型未单独设置倍数时使用' },
   billing_min_pre_deduct: { value: '10', type: 'number', label: '最小预扣积分', description: 'AI 请求预扣的最低积分数，默认沿用现有安全值 10' },
   billing_max_pre_deduct: { value: '10000', type: 'number', label: '最大预扣积分', description: '单次 AI 请求预扣积分上限' },
   billing_safety_margin: { value: '0.2', type: 'number', label: '预扣安全边际', description: '预扣时在估算积分上额外增加的比例，例如 0.2 表示 20%' },
