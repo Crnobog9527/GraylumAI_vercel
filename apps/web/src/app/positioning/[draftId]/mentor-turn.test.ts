@@ -28,7 +28,7 @@ const request: MentorRequest = {
   questionId: "who",
   organizeAfter: true,
 };
-const card = { question: "你的读者是谁？", options: ["新人", "同行"] };
+const card = { question: "你的读者是谁？", options: ["新人", "同行"], recommended: null };
 
 async function* stream(events: AgentTurnEvent[]) {
   for (const event of events) yield event;
@@ -285,4 +285,26 @@ describe("turnResultNotice", () => {
     expect(turnResultNotice({ state: "completed", body: "{}" })).toBeNull();
     expect(turnResultNotice({ state: "cancelled", unavailable: "capacity" })).toBeNull();
   });
+});
+
+import {sameRequest,releaseRejectedAnswer} from './mentor-turn';
+it('matches a stopped request structurally including nested answerSource, retaining all identity differences',()=>{
+ const request={requestId:'a',input:'乙',answerSource:{executionId:'source',optionIndex:1}};
+ expect(sameRequest(request,JSON.parse(JSON.stringify(request)))).toBe(true);
+ expect(sameRequest(request,{answerSource:{optionIndex:1,executionId:'source'},input:'乙',requestId:'a'})).toBe(true);
+ for(const other of [{...request,answerSource:{executionId:'source',optionIndex:0}},
+  {...request,input:'甲'},{...request,extra:true},{...request,answerSource:{executionId:'other',optionIndex:1}}])
+  expect(sameRequest(request,other)).toBe(false);
+});
+it('definite source rejection releases its own envelope, unknown errors and other requests retain theirs',()=>{
+ const values=new Map<string,string>();
+ const storage={getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>{values.set(key,value);},removeItem:(key:string)=>{values.delete(key);}};
+ const raw=JSON.stringify({request:{draftId:'d',stepId:'s',requestId:'a',input:'乙'}});
+ storage.setItem('key',raw);
+ expect(releaseRejectedAnswer(storage,'key','a',new Error('RUNTIME_ADMISSION_DENIED'))).toBe(false);
+ expect(storage.getItem('key')).toBe(raw);
+ expect(releaseRejectedAnswer(storage,'key','b',new Error('OPC_ANSWER_SOURCE_DENIED'))).toBe(true);
+ expect(storage.getItem('key')).toBe(raw);
+ expect(releaseRejectedAnswer(storage,'key','a',new Error('OPC_ANSWER_SOURCE_DENIED'))).toBe(true);
+ expect(storage.getItem('key')).toBeNull();
 });

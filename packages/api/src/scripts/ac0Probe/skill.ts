@@ -75,6 +75,14 @@ export function loadSkill(dir: string | undefined): LoadedSkill {
       throw new Error('PROBE_SKILL_WORKFLOW_INVALID: workflow.yaml is not a valid workflow manifest');
     }
   }
+  // The real host preloads each step's resources, which may also name assets/ files.
+  // Only those named files are read, so a Skill whose steps name none keeps its digest.
+  for (const path of new Set(workflow?.flatMap(step => step.resources) ?? [])) {
+    const normalized = posix.normalize(path);
+    if (references.has(normalized) || !normalized.startsWith('assets/') || normalized.split('/').length > 3) continue;
+    references.set(normalized, readRegular(join(root, normalized)));
+    if (references.size > REFERENCE_LIMIT) throw new Error('PROBE_SKILL_TOO_MANY_REFERENCES');
+  }
   const hash = createHash('sha256').update('SKILL.md\0' + instructions);
   let bytes = Buffer.byteLength(instructions);
   for (const [path, text] of references) {
@@ -102,7 +110,8 @@ const message = z.object({role: z.enum(['user', 'assistant']), content: z.string
 const askTurn = z.object({
   role: z.literal('assistant'),
   content: z.string().min(1).max(8000).optional(),
-  askQuestion: askQuestionArgs,
+  // Cards shown under the 2026-09-29 design may carry the recommended index.
+  askQuestion: askQuestionArgs.extend({recommended: z.number().int().min(0).max(4).nullable().optional()}).strict(),
 }).strict();
 export type HistoryItem = z.infer<typeof message> | z.infer<typeof askTurn>;
 export const scenarioSchema = z.object({
@@ -115,6 +124,13 @@ export const scenarioSchema = z.object({
   step: z.number().int().min(0).optional(),
   /** Operator's expectation for later manual labelling of step completion. */
   expectStepComplete: z.boolean().optional(),
+  currentStepId: z.string().min(1).max(100).optional(),
+  questionId: z.string().min(1).max(100).optional(),
+  opening: z.boolean().optional(),
+  /** Card design category (agent-turn baseline only): A choice card with a recommendation, B neutral card,
+   * C Socratic prose, D labelled guess in prose, E clear answer without a card. */
+  category: z.enum(['A', 'B', 'C', 'D', 'E']).optional(),
+  fieldValues: z.record(z.string(), z.object({status: z.enum(['missing', 'provisional', 'confirmed', 'deferred'])}).strict()).optional(),
 }).strict();
 export type Scenario = z.infer<typeof scenarioSchema>;
 
@@ -177,7 +193,7 @@ export function parsePrivateJson<T>(text: string, schema: z.ZodType<T>, label: s
   throw new Error(`PROBE_${label}_INVALID: ${where.join('; ')}`);
 }
 
-export function loadScenarios(path: string | undefined, skill: LoadedSkill): {scenarios: Scenario[]; digest: string} {
+export function loadScenarios(path: string | undefined, skill: LoadedSkill, agentTurn = false): {scenarios: Scenario[]; digest: string} {
   let scenarios: Scenario[];
   if (path) scenarios = parsePrivateJson(readRegular(resolve(path)), scenarioFile, 'SCENARIOS').scenarios;
   else if (skill.isFixture) scenarios = fixtureScenarios.map(scenario => scenarioSchema.parse(scenario));
@@ -185,7 +201,7 @@ export function loadScenarios(path: string | undefined, skill: LoadedSkill): {sc
   if (new Set(scenarios.map(scenario => scenario.id)).size !== scenarios.length) throw new Error('PROBE_SCENARIO_ID_DUPLICATE');
   for (const scenario of scenarios) {
     // Text trials run without tools, so a replayed tool call would have no definition.
-    if (scenario.kind === 'text' && scenario.history.some(item => 'askQuestion' in item)) {
+    if (!agentTurn && scenario.kind === 'text' && scenario.history.some(item => 'askQuestion' in item)) {
       throw new Error(`PROBE_SCENARIO_TOOL_HISTORY_UNSUPPORTED: ${scenario.id} is a text scenario`);
     }
     if (scenario.step !== undefined && !skill.workflow?.[scenario.step]) {

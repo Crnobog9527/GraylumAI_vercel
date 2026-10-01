@@ -29,8 +29,12 @@ export type AskOutcome = {
   detail?: string;
 };
 
+/** A card argument check; the default is the AC-0 card shape. */
+export type AskArgsCheck = (args: unknown) => boolean;
+const legacyArgs: AskArgsCheck = args => askQuestionArgs.safeParse(args).success;
+
 /** Why one call is not a valid ask_question, or undefined when it is. */
-function askProblem(call: RawToolCall): string | undefined {
+function askProblem(call: RawToolCall, valid: AskArgsCheck): string | undefined {
   if (call.name !== 'ask_question') return 'wrong_tool';
   let parsed: unknown;
   try {
@@ -38,13 +42,14 @@ function askProblem(call: RawToolCall): string | undefined {
   } catch {
     return 'invalid_json';
   }
-  return askQuestionArgs.safeParse(parsed).success ? undefined : 'schema_mismatch';
+  return valid(parsed) ? undefined : 'schema_mismatch';
 }
 
 /** Classifies one ask trial from what the provider actually returned, not from
  * the SDK's reaction to it. text_question vs no_question uses a question mark
  * as a measurement heuristic only; the full output is kept for manual review. */
-export function classifyAsk(calls: CallRecord[], sdkError: string | undefined, stop: string | undefined): AskOutcome {
+export function classifyAsk(calls: CallRecord[], sdkError: string | undefined, stop: string | undefined,
+  valid: AskArgsCheck = legacyArgs): AskOutcome {
   const base = {toolCalled: false, argsValid: false, turnEnded: null, textBeforeTool: false, toolCallCount: 0};
   const first = calls[0];
   if (!first) return {...base, category: stop === 'budget' ? 'not_run' : 'unknown', detail: stop ?? 'no_call'};
@@ -61,10 +66,10 @@ export function classifyAsk(calls: CallRecord[], sdkError: string | undefined, s
   // Counted apart from malformed: whether the host could keep only the first
   // call is an AC-1 design question this measurement has to answer.
   if (toolCalls.length > 1) {
-    const firstProblem = askProblem(toolCalls[0]!);
+    const firstProblem = askProblem(toolCalls[0]!, valid);
     return {...called, category: 'multiple_calls', firstCallValidAsk: !firstProblem, ...(firstProblem ? {detail: firstProblem} : {})};
   }
-  const problem = askProblem(toolCalls[0]!);
+  const problem = askProblem(toolCalls[0]!, valid);
   if (problem) return {...called, category: 'malformed', detail: problem};
   if (!turnEnded) return {...called, argsValid: true, category: 'turn_not_ended'};
   return {...called, argsValid: true, category: 'correct'};

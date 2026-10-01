@@ -27,6 +27,7 @@ import {loadStagingPolicy,loadStagingRecoveryPolicy,assertStagingReadAccess} fro
 import {stagingTransport} from './stagingTransport';
 import {runtimeRouter} from '../../routers/runtime';
 import {opcRouter} from '../../routers/opc';
+import {agentTurnBody} from '../../shared/agentTurn';
 import {OPENING_INPUT} from '../../shared/opcQuestions';
 import {createTRPCContext} from '../../trpc';
 const connectionString=process.env.V3_LOCAL_DB!;
@@ -1011,7 +1012,7 @@ async function heldProvider(){
  const calls:ProviderCall[]=[];let hold=false;
  const server=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;const input=JSON.parse(JSON.parse(raw).input);
   let release=()=>{};const gate=hold?new Promise<void>(resolve=>{release=resolve;}):Promise.resolve();calls.push({model:input.model,release});await gate;
-  const id='ac1-'+randomUUID(),content=input.model==='ac1-organizer'?'{"inputKind":"answer","informationPatch":{}}':JSON.stringify({message:'导师回复 '+calls.length});
+  const id='ac1-'+randomUUID(),content=input.model==='ac1-organizer'?'{"inputKind":"answer","informationPatch":{}}':input.messages?.some((m:{role?:string;content?:unknown})=>m.role==='system'&&String(m.content).includes('Act as the single continuous mentor'))?'导师回复 '+calls.length:JSON.stringify({message:'导师回复 '+calls.length});
   res.setHeader('content-type','application/json');
   res.end(JSON.stringify({id,model:input.model,final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:input.model,choices:[{index:0,message:{role:'assistant',content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));
  });
@@ -1052,27 +1053,28 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
    expect(events.filter(e=>e.type==='admitted')).toHaveLength(1);
    const effects=await requestEffects(request.requestId);
    // One execution, one billing run; the organizer call stays in the same run.
-   expect(effects).toEqual([{execution:events[0]!.executionId,state:'completed',run:expect.any(String),calls:request.organizeAfter?2:1}]);
+   expect(effects).toEqual([{execution:events[0]!.executionId,state:'completed',run:expect.any(String),calls:2}]);
   }
-  for(const request of [oldOpening,oldAnswer])expect((await requestEffects(request.requestId)).map(e=>[e.state,e.calls])).toEqual([['completed',request.organizeAfter?2:1]]);
-  expect(opening.result.at(-1)!.result!.body).toBe(JSON.stringify({message:'导师回复 4'}));
-  expect(oldStreamOpening.result.at(-1)!.result!.body).toBe(JSON.stringify({message:'导师回复 1'}));
-  expect(provider.calls.map(c=>c.model)).toEqual(['ac1-mentor','ac1-mentor','ac1-organizer','ac1-mentor','ac1-mentor','ac1-organizer']);
+  for(const request of [oldOpening,oldAnswer])expect((await requestEffects(request.requestId)).map(e=>[e.state,e.calls])).toEqual([['completed',2]]);
+  expect(opening.result.at(-1)!.result!.body).toBe(agentTurnBody('导师回复 5',null));
+  expect(oldStreamOpening.result.at(-1)!.result!.body).toBe(agentTurnBody('导师回复 1',null));
+  expect(provider.calls.map(c=>c.model)).toEqual(['ac1-mentor','ac1-organizer','ac1-mentor','ac1-organizer','ac1-mentor','ac1-organizer','ac1-mentor','ac1-organizer']);
   const all={oldPrepareOpening,oldStreamOpening,oldPrepareAnswer,oldStreamAnswer,opening,answer};
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
+   // Attached organizers now skip one Session history read in each invocation.
    // The first prepare of this new package misses the Skill file cache (AC-0c).
-   oldPrepareOpening:{prelude:2,policy:0,host:5,admission:14},
-   oldStreamOpening:{prelude:2,policy:0,host:0,execute:6,provider:5},
+   oldPrepareOpening:{prelude:2,policy:0,host:5,admission:16},
+   oldStreamOpening:{prelude:2,policy:0,host:0,execute:6,provider:13},
    oldPrepareAnswer:{prelude:2,policy:0,host:5,admission:12},
-   oldStreamAnswer:{prelude:2,policy:0,host:0,execute:6,provider:14},
+   oldStreamAnswer:{prelude:2,policy:0,host:0,execute:6,provider:13},
    // One invocation: one prelude instead of two; admission and execution unchanged.
-   opening:{prelude:2,policy:0,host:5,admission:10,execute:6,provider:5},
-   answer:{prelude:2,policy:0,host:5,admission:12,execute:6,provider:14},
+   opening:{prelude:2,policy:0,host:5,admission:12,execute:6,provider:13},
+   answer:{prelude:2,policy:0,host:5,admission:12,execute:6,provider:13},
   });
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
   // Auth verifies once per invocation, and again after each provider response.
-  expect(label('auth/v1/user')).toEqual({oldPrepareOpening:1,oldStreamOpening:2,oldPrepareAnswer:1,oldStreamAnswer:3,opening:2,answer:3});
+  expect(label('auth/v1/user')).toEqual({oldPrepareOpening:1,oldStreamOpening:3,oldPrepareAnswer:1,oldStreamAnswer:3,opening:3,answer:3});
   expect(label('rest/profiles')).toEqual({oldPrepareOpening:1,oldStreamOpening:1,oldPrepareAnswer:1,oldStreamAnswer:1,opening:1,answer:1});
   for(const m of [opening,answer])expect(m.summary.executionIds).toEqual([m.result[0]!.executionId]);
  }finally{await provider.close();}
@@ -1095,15 +1097,15 @@ it('RUNTIME: AC-1 mentorTurnStream disconnect, concurrent resend and later resen
   expect(concurrent[0]).toEqual({type:'admitted',executionId:admitted.executionId});
   expect(concurrent.at(-1)).toEqual({type:'result',result:{state:'pending'}});
   expect(closed).toBe(false);expect(provider.calls).toHaveLength(1);
-  provider.calls[0]!.release();await closing;
+  provider.setHold(false);provider.calls[0]!.release();await closing;
   // Later resends and resume by execution id return the stored reply.
   const later=await collectTurn(await opcRouter.createCaller(await f.context()).mentorTurnStream(request));
   expect(later[0]).toEqual({type:'admitted',executionId:admitted.executionId});
-  expect(later.at(-1)).toEqual({type:'result',result:{state:'completed',body:JSON.stringify({message:'导师回复 1'})}});
+  expect(later.at(-1)).toEqual({type:'result',result:{state:'completed',body:agentTurnBody('导师回复 1',null),summary:'{"inputKind":"answer","informationPatch":{}}'}});
   const resumed=await collectTurn(await runtimeRouter.createCaller(await f.context()).executeStream({executionId:admitted.executionId}));
   expect(resumed.at(-1)).toEqual(later.at(-1));
-  expect(provider.calls).toHaveLength(1);
-  expect(await requestEffects(request.requestId)).toEqual([{execution:admitted.executionId,state:'completed',run:expect.any(String),calls:1}]);
+  expect(provider.calls).toHaveLength(2);
+  expect(await requestEffects(request.requestId)).toEqual([{execution:admitted.executionId,state:'completed',run:expect.any(String),calls:2}]);
  }finally{await provider.close();}
 });
 it('RUNTIME: AC-1 mentorTurnStream refuses before admission like prepareStep does',async()=>{

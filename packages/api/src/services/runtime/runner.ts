@@ -24,6 +24,12 @@ export type RuntimeRunnerInput = {
   exchange: (sequence: number, body: string, onChunk?: (chunk: string) => void) => Promise<string>;
   stream?: boolean;
   onText?: (delta:string)=>void;
+  /** v5 only: a successfully completed empty reply is handled by the host fallback. */
+  allowEmptyResult?: boolean;
+  /** v5 one-call turn only: discard SDK input-only writes when replay is still pending. */
+  commitSessionOnSuccess?: boolean;
+  /** Explicit-input attached organizer only; Session output persistence is unchanged. */
+  readSessionHistory?: boolean;
   selectHistory: (history: unknown[], incoming: unknown[]) => Promise<unknown[]>;
   filterModelInput?: (items: AgentInputItem[], instructions: string) => AgentInputItem[];
   tools: RuntimeTool[];
@@ -74,6 +80,21 @@ export function emptyTruncatedResponse(decoded:unknown):boolean{
 
 /** One official SDK loop for all roles. No SDK trace, remote Session, fallback or retry. */
 export async function runRuntime(input: RuntimeRunnerInput) {
+  if(input.commitSessionOnSuccess&&(!input.firstToolCallOnly||input.maxTurns!==1))
+    throw new Error('RUNTIME_CONTEXT_INVALID');
+  const sessionWrites:AgentInputItem[][]=[];
+  // Keep the frozen history objects and the original append batch boundaries.
+  // The SDK may save just the input in its failure finally; v5 must not let
+  // that pending observer conflict with the owner's successful full batch.
+  const session:Session=input.commitSessionOnSuccess||input.readSessionHistory===false?{
+    getSessionId:()=>input.session.getSessionId(),
+    getItems:limit=>input.readSessionHistory===false?Promise.resolve([]):input.session.getItems(limit),
+    addItems:async items=>{
+      if(input.commitSessionOnSuccess)sessionWrites.push(structuredClone(items));
+      else await input.session.addItems(items);
+    },
+    popItem:()=>input.session.popItem(),clearSession:()=>input.session.clearSession(),
+  }:input.session;
   let sequence=0,outputTruncated=false;
   const guardedFetch: typeof fetch = async (url, init) => {
     if(String(url)!=='http://127.0.0.1/runtime/chat/completions') throw new Error('RUNTIME_TRANSPORT_DENIED');
@@ -88,26 +109,46 @@ export async function runRuntime(input: RuntimeRunnerInput) {
         void input.exchange(sequence,JSON.stringify(body),chunk=>{received=true;emit(firstCallFrame(chunk,input));}).then(raw=>{
           const response=JSON.parse(raw);
           const calls=response.choices?.[0]?.message?.tool_calls;
+          if(input.allowEmptyResult&&(response.choices?.[0]?.message?.refusal||response.choices?.[0]?.finish_reason==='content_filter'))
+            throw new Error('RUNTIME_RESPONSE_REFUSED');
           if(response.choices?.length!==1||batchDenied(calls,input))throw new Error('RUNTIME_TOOL_BATCH_DENIED');
           if(emptyTruncatedResponse(response)||truncatedToolTurn(response,input)){outputTruncated=true;throw new Error('RUNTIME_OUTPUT_TRUNCATED');}
           // Replay streams only already-persisted output, never redispatches.
           if(!received){const choice=response.choices[0];emit(JSON.stringify({...response,object:'chat.completion.chunk',choices:[{index:0,delta:keepFirstCall(choice.message,input),finish_reason:choice.finish_reason}]}));}
           else if(input.firstToolCallOnly&&Array.isArray(calls)&&calls.length>1)input.onToolCallsDropped?.(calls.length-1);
+          // The SDK retries a streamed response with no output items. After a
+          // proven successful, empty stop only, a whitespace item lets it finish
+          // without another request. The v5 host trims it into its fallback;
+          // persisted supplier evidence and older formats remain untouched.
+          const choice=response.choices[0];
+          if(input.allowEmptyResult&&choice.finish_reason==='stop'&&!calls?.length&&
+            !choice.message.refusal&&(choice.message.content==null||choice.message.content==='')){
+            emit(JSON.stringify({...response,object:'chat.completion.chunk',choices:[
+              {index:0,delta:{role:'assistant',content:' '},finish_reason:'stop'},
+            ]}));
+          }
           if(open){controller.enqueue(encoder.encode('data: [DONE]\n\n'));controller.close();open=false;}
         }).catch(error=>{if(open){controller.error(error);open=false;}});
       }});
       return new Response(stream,{status:200,headers:{'content-type':'text/event-stream'}});
     }
-    const response=await input.exchange(sequence,JSON.stringify(body));
+    let response=await input.exchange(sequence,JSON.stringify(body));
     // parallel_tool_calls is a provider hint, not an execution boundary. Reject
     // an entire multi-tool response before the SDK can invoke any local tool.
     const decoded=JSON.parse(response),calls=decoded.choices?.[0]?.message?.tool_calls;
+    if(input.allowEmptyResult&&(decoded.choices?.[0]?.message?.refusal||decoded.choices?.[0]?.finish_reason==='content_filter'))
+      throw new Error('RUNTIME_RESPONSE_REFUSED');
     if(!Array.isArray(decoded.choices)||decoded.choices.length!==1||batchDenied(calls,input))throw new Error('RUNTIME_TOOL_BATCH_DENIED');
     if(emptyTruncatedResponse(decoded)||truncatedToolTurn(decoded,input)){
       // A final, empty, length-limited response cannot be repaired by replaying it.
       // Never expose reasoning as an answer or let the SDK start another turn.
       outputTruncated=true;
       throw new Error('RUNTIME_OUTPUT_TRUNCATED');
+    }
+    if(input.allowEmptyResult&&decoded.choices[0].finish_reason==='stop'&&!calls?.length&&
+      decoded.choices[0].message.content==null){
+      decoded.choices[0].message.content='';
+      response=JSON.stringify(decoded);
     }
     const kept=Array.isArray(calls)&&calls.length>1
       ?JSON.stringify({...decoded,choices:[{...decoded.choices[0],message:keepFirstCall(decoded.choices[0].message,input)}]}):response;
@@ -132,7 +173,7 @@ export async function runRuntime(input: RuntimeRunnerInput) {
        input.reasoning?.parameter==='reasoning'?{providerData:{reasoning:input.reasoning.value}}:{})}});
   const runner=new Runner({model,tracingDisabled:true,traceIncludeSensitiveData:false});
   try{
-    const options={session:input.session,maxTurns:input.maxTurns,
+    const options={session,maxTurns:input.maxTurns,
       signal:input.signal,sessionInputCallback:async(history:AgentInputItem[],incoming:AgentInputItem[])=>await input.selectHistory(history,incoming) as typeof history,
       ...(input.filterModelInput?{callModelInputFilter:({modelData}:{modelData:{input:AgentInputItem[];instructions?:string}})=>({
         ...modelData,input:input.filterModelInput!(modelData.input,modelData.instructions??input.instructions),
@@ -143,8 +184,12 @@ export async function runRuntime(input: RuntimeRunnerInput) {
       for await(const text of streamed.toTextStream())input.onText?.(text);
       await streamed.completed;
     }
-    if(typeof result.finalOutput!=='string'||!result.finalOutput.trim())throw new Error('RUNTIME_EMPTY_RESULT');
-    return result.finalOutput;
+    const output=input.allowEmptyResult&&result.finalOutput==null?'':result.finalOutput;
+    if(typeof output!=='string'||!output.trim()&&!input.allowEmptyResult)throw new Error('RUNTIME_EMPTY_RESULT');
+    // SDK completion and output validation must both succeed before Session
+    // writes. SQL still owns idempotency if a flush commits but its reply is lost.
+    for(const items of sessionWrites)await input.session.addItems(items);
+    return input.allowEmptyResult&&!output.trim()?'':output;
   }catch(error){
     if(outputTruncated)throw new Error('RUNTIME_OUTPUT_TRUNCATED');
     if(error instanceof Error&&['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY'].includes(error.message))throw error;
