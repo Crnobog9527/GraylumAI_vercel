@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const getUser = vi.fn();
@@ -53,14 +53,31 @@ describe('proxy login requirement by host', () => {
     });
   });
 
-  it('sends relative auth links on the public site to the app domain, query included', async () => {
-    expect(await get('https://www.graylum.com/login?action=signup')).toEqual({
-      status: 307,
-      location: 'https://app.graylum.com/login?action=signup',
+  describe('relative auth links on the public site', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
     });
-    expect(await get('https://www.graylum.com/register')).toEqual({
-      status: 307,
-      location: 'https://app.graylum.com/register',
+
+    it('go to the app domain with their query when no app URL is configured', async () => {
+      vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', '');
+      vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
+      expect(await get('https://www.graylum.com/login?action=signup')).toEqual({
+        status: 307,
+        location: 'https://app.graylum.com/login?action=signup',
+      });
+      expect(await get('https://www.graylum.com/register')).toEqual({
+        status: 307,
+        location: 'https://app.graylum.com/register',
+      });
+    });
+
+    it('go to the configured app URL, such as a staging alias', async () => {
+      vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', '');
+      vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://graylumai-staging.vercel.app');
+      expect(await get('https://www.graylum.com/login?action=signup')).toEqual({
+        status: 307,
+        location: 'https://graylumai-staging.vercel.app/login?action=signup',
+      });
     });
   });
 });
