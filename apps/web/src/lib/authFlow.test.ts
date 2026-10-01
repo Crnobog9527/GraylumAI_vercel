@@ -3,6 +3,7 @@ import {
   buildAuthCallbackUrl,
   buildVerifyEmailPath,
   classifyCodeExchangeError,
+  parseAuthCallbackFlow,
   classifyLoginError,
   RESEND_RATE_LIMIT_MESSAGE,
   resendErrorMessage,
@@ -174,3 +175,15 @@ describe('Google sign-in callback marker', () => {
     expect(loginErrorMessage('toString')).toBeNull();
   });
 });
+
+describe('password reset callback marker', () => {
+  it('marks a reset link and parses only the known flows', () => {
+    const reset = new URL(buildAuthCallbackUrl('https://a.example', '/reset-password', 'recovery'));
+    expect(Object.fromEntries(reset.searchParams)).toEqual({ next: '/reset-password', flow: 'recovery' });
+    expect(parseAuthCallbackFlow('recovery')).toBe('recovery');
+    expect(parseAuthCallbackFlow('oauth')).toBe('oauth');
+    expect(parseAuthCallbackFlow('admin')).toBe('email');
+    expect(parseAuthCallbackFlow(null)).toBe('email');
+  });
+});
+

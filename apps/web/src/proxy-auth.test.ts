@@ -39,8 +39,15 @@ describe('proxy login requirement by host', () => {
   });
 
   it('keeps public pages open on the staging domain', async () => {
-    for (const path of ['/login', '/verify-email', '/landing']) {
+    for (const path of ['/login', '/verify-email', '/landing', '/forgot-password', '/reset-password']) {
       expect((await get(`https://auth-staging.graylum.com${path}`)).status).toBe(200);
+    }
+  });
+
+  it('lets a signed-in user open the reset pages instead of bouncing them like the login page', async () => {
+    getUser.mockResolvedValue({ data: { user: { email: 'a@example.com', email_confirmed_at: '2026-09-30T00:00:00Z' } } });
+    for (const path of ['/forgot-password', '/reset-password']) {
+      expect(await get(`https://auth-staging.graylum.com${path}`)).toEqual({ status: 200, location: null });
     }
   });
 

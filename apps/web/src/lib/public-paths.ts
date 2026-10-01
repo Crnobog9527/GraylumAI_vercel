@@ -4,6 +4,9 @@ export const PUBLIC_PATHS = [
   '/login',
   '/register',
   '/verify-email',
+  '/forgot-password',
+  // Needs a session from a reset link; the page itself checks it instead of sending visitors to login.
+  '/reset-password',
   '/maintenance',
   '/contact',
   '/tutorials',

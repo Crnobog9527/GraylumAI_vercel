@@ -135,3 +135,34 @@ describe('auth callback failure message by flow', () => {
     expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'link_needs_login', redirect: '/profile' });
   });
 });
+
+describe('auth callback for a password reset link', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    auth.getUser.mockResolvedValue({ data: { user: null } });
+  });
+
+  it.each(['error=access_denied&error_code=otp_expired', 'error=access_denied&error_code=user_banned', 'error=server_error'])(
+    'sends a failed reset link back to the request page with a fixed reason (%s)',
+    async error => {
+      const to = await callback(`${error}&error_description=Pay+here&next=%2Freset-password&flow=recovery`);
+      expect(`${to.pathname}${to.search}`).toBe('/forgot-password?reason=expired');
+      expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it('asks for the same browser when the verifier is missing, and to request again otherwise', async () => {
+    auth.exchangeCodeForSession.mockResolvedValue({ error: Object.assign(new Error('x'), { code: 'pkce_code_verifier_not_found' }) });
+    expect(`${(await callback('code=abc&next=%2Freset-password&flow=recovery')).search}`).toBe('?reason=browser');
+    auth.exchangeCodeForSession.mockResolvedValue({ error: Object.assign(new Error('x'), { code: 'unexpected_failure' }) });
+    expect(`${(await callback('code=abc&next=%2Freset-password&flow=recovery')).search}`).toBe('?reason=failed');
+  });
+
+  it('lands a valid reset link on the new-password page with the session cookie set', async () => {
+    auth.exchangeCodeForSession.mockResolvedValue({ error: null });
+    auth.getUser.mockResolvedValue({ data: { user: { email: 'a@example.test', email_confirmed_at: '2026-09-30T00:00:00Z' } } });
+    const to = await callback('code=abc&next=%2Freset-password&flow=recovery');
+    expect(`${to.pathname}${to.search}`).toBe('/reset-password');
+    expect(auth.exchangeCodeForSession).toHaveBeenCalledWith('abc');
+  });
+});
