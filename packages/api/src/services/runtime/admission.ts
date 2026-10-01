@@ -16,7 +16,7 @@ import { type ReasoningPolicy } from './reasoningPolicy';
 import { admitReasoning } from './reasoningAdmission';
 import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
 import {isOpeningInput} from '../../shared/opcQuestions';
-import {askQuestionToolBytes} from './agentTools';
+import {askQuestionToolBytes,QUESTION_CONTRACT,QUESTION_CONTRACT_INSTRUCTIONS} from './agentTools';
 import {currentRequestTiming} from './timing';
 import {readPurposeBudgets} from './purposeBudgets';
 import {assertFrozenPayloads} from './payloadSize';
@@ -154,6 +154,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const candidates=input.selection.kind==='auto'?await discoverRuntimeCandidates(
     user,admin,{...policy,inputBytes,maxOutputTokens:configuredOutput??policy.maxOutputTokens,...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(inputBytes,q.inputLimit),outputLimit:outputCapacity(row,Infinity,configuredOutput)};}}:{})}):[];
    if(policy.additionalInstructions)instructions+='\n'+z.string().max(budgets?inputBytes:8000).parse(policy.additionalInstructions);
+   if(mentorStream)instructions+='\n'+QUESTION_CONTRACT_INSTRUCTIONS;
    const searchAllowed=Boolean(policy.searchEnabled&&input.network!=='deny');
    let workspaceContext=false;
    if(policy.workspaceContext&&!policy.opcTurnToken&&!input.sources.length&&input.selection.kind!=='organizer'){
@@ -170,7 +171,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(!Number.isSafeInteger(maxOutputTokens)||maxOutputTokens<1)throw new Error('RUNTIME_MODEL_CAPACITY');
    const inputLimit=inputCapacity(row.data,maxOutputTokens,inputBytes);
    if(candidates.length)selectRuntimeHistory([],[{role:'user',content:matchingInput(input.input,candidates)}],{instructions:MATCH_INSTRUCTIONS,inputBytes:inputLimit,historyItems:0,toolBytes:0});
-   selectRuntimeHistory([], [{role:'user',content:runtimeScopeInput(input.input,session.scopeMaterial)}],{instructions,inputBytes:inputLimit,historyItems:0,toolBytes:mentorStream?askQuestionToolBytes():policy.searchEnabled?2048:0});
+   selectRuntimeHistory([], [{role:'user',content:runtimeScopeInput(input.input,session.scopeMaterial)}],{instructions,inputBytes:inputLimit,historyItems:0,toolBytes:mentorStream?askQuestionToolBytes(true):policy.searchEnabled?2048:0});
    // New mentor turns use the interactive format; replays returned before this branch.
    // A host-opened mentor turn (the user has not spoken) never gets a question card.
    const opening=Boolean(mentorStream&&isOpeningInput(input.input));
@@ -184,6 +185,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(organizerFormat&&!reasoning)reasoning={parameter:'none'};
    const providerRequestFormat=mentorStream?'agent-turn-v5-stream':organizerFormat?'serial-tools-v6-reasoning':'serial-tools-v2';
    const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:'scope-projection-v1',
+    ...(mentorStream?{questionContract:QUESTION_CONTRACT}:{}),
     ...(policy.real||mentorStream?{providerRequestFormat}:{}),...(reasoning?{reasoning}:{}),role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
     ...(policy.opcTurnToken?{opcTurnToken:uuid.parse(policy.opcTurnToken)}:{}),...(candidates.length?{matching:{candidates}}:{}),...(session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...(workspaceContext?{workspaceContext:true}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems,network:input.network,

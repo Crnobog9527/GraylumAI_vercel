@@ -45,6 +45,7 @@ export function QuestionCardView({
         <span>导师提问</span>
         {status && <span className={styles.status}>{status}</span>}
       </div>
+      {card.recommendationReason && <p className={styles.hint}>{card.recommendationReason}</p>}
       <p className={styles.question}>{card.question}</p>
       {answered ? (
         <>

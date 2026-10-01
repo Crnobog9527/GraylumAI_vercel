@@ -9,7 +9,7 @@ import {logger} from '../../lib/logger';
  * Every method swallows its own failure: timing never changes a request. */
 export const TIMING_PHASES=['prelude','policy','host','admission','execute','provider'] as const;
 export type TimingPhase=typeof TIMING_PHASES[number];
-export const TIMING_MARKS=['providerPost','firstModelText','firstPublicText'] as const;
+export const TIMING_MARKS=['providerPost','firstModelText','firstPublicText','fullModelReply','firstValidContent'] as const;
 export type TimingMark=typeof TIMING_MARKS[number];
 type Tally={rt:number;rtMs:number};
 type PhaseTally=Tally&{ms:number};

@@ -43,6 +43,8 @@ it.each([false,true].flatMap(real=>[false,true].map(mentorStream=>({real,mentorS
  const service=runtimeAdmissionService(user,admin,{...policy,opcTurnToken:requestId,mentorStream});
  const input={sessionId,requestId,input:'Real business facts',selection:{kind:'ordinary',modelId},network:'deny',organizeAfter:true};
  await service.prepare(input);expect(frozen.providerRequestFormat).toBe(mentorStream?'agent-turn-v5-stream':real?'serial-tools-v6-reasoning':undefined);expect(frozen.reasoning).toEqual(real?(mentorStream?{effort:'none'}:{parameter:'none'}):mentorStream?{parameter:'none'}:undefined);expect(frozen.attachedOrganizer.reasoning).toEqual(real?{parameter:'none'}:undefined);
+ expect(frozen.questionContract).toBe(mentorStream?'five-fields-v1':undefined);
+ expect(frozen.instructions.includes('complete public prose in message')).toBe(mentorStream);
  expect(billing.sourceHash).toBe(createHash('sha256').update(JSON.stringify(frozen)).digest('hex'));expect(billing.input).toBe(frozen);expect(frozen.maxOutputTokens).toBe(real?4096:1000);expect(frozen.attachedOrganizer.maxOutputTokens).toBe(real?2048:1000);
  if(real)expect(billing.callPolicy).toEqual(quotes);
  else expect(billing.limits).toMatchObject({maxCalls:2,credits:40,maxPreDeduct:40});

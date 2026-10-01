@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
-import {ASK_QUESTION_TOOL,MAX_OPTIONS,MIN_OPTIONS,OPTION_MAX_CHARS,QUESTION_MAX_CHARS} from '../../shared/agentTurn';
-import {parseQuestionCard,questionCardSchema,type QuestionCard} from '../../shared/agentTurn';
+import {AGENT_TURN_MESSAGE_LIMIT,ASK_QUESTION_TOOL,MAX_OPTIONS,MIN_OPTIONS,OPTION_MAX_CHARS,QUESTION_MAX_CHARS} from '../../shared/agentTurn';
+import {parseQuestionCard,questionCardSchema,questionToolCardSchema,type QuestionCard} from '../../shared/agentTurn';
 import type {RuntimeTool} from './runner';
 
 /** Interactive Agent turn tools (AC-1). Only the `agent-turn-v5-stream`
@@ -29,14 +29,27 @@ export const askQuestionParameters=z.object({
  recommended:z.number().nullable(),
 }).strict();
 
+export const QUESTION_CONTRACT = 'five-fields-v1';
+export const QUESTION_CONTRACT_INSTRUCTIONS = [
+ 'Question tool contract: when using a card, put the complete public prose in message,',
+ 'not in separate assistant text. This replaces only the separate-prose delivery rule.',
+ 'Use question and options for the same question and choices. Set recommendationReason',
+ 'to the nonempty reason for recommended, or null when recommended is null.',
+ 'Without a card, keep replying in public natural-language text.',
+].join(' ');
+export const questionParameters = askQuestionParameters.extend({
+ message:z.string().min(1).max(AGENT_TURN_MESSAGE_LIMIT),
+ recommendationReason:z.string().min(1).max(AGENT_TURN_MESSAGE_LIMIT).nullable(),
+}).strict();
+
 /** The tool result for a card the host refuses to show (arguments outside
  * the card rules). The turn still ends there: the already paid reply keeps its
  * text and is shown without a card. */
 export const INVALID_CARD_RESULT=JSON.stringify({card:'invalid'});
 
 /** The result the SDK stores for a shown card; history replays the same text. */
-export function questionCardToolResult(value:unknown):string{
- const card=questionCardSchema.safeParse(value);
+export function questionCardToolResult(value:unknown,fiveFields=false):string{
+ const card=(fiveFields?questionToolCardSchema:questionCardSchema).safeParse(value);
  if(!card.success)throw new Error('RUNTIME_QUESTION_CARD_INVALID');
  return JSON.stringify({card:'question',...card.data});
 }
@@ -55,16 +68,17 @@ export function questionCardFromResult(output:string):QuestionCard|null{
 
 /** Showing a card has no external effect: its result is a pure function of
  * the arguments, so replay returns identical bytes without persistence. */
-export function askQuestionTool():RuntimeTool{
- return {name:ASK_QUESTION_TOOL,parameters:askQuestionParameters,
+export function askQuestionTool(fiveFields=false):RuntimeTool{
+ return {name:ASK_QUESTION_TOOL,parameters:fiveFields?questionParameters:askQuestionParameters,
   description:'Show the user one question card with 2 to 5 short suggested answers. recommended is the index of '+
-   'the option you recommend, or null for neutral ranges or categories. The host adds an Other entry. Ends your turn.',
-  invalidResult:INVALID_CARD_RESULT,execute:async args=>questionCardToolResult(args)};
+   'the option you recommend, or null for neutral ranges or categories. The host adds an Other entry. Ends your turn.'+
+   (fiveFields?' Put the complete public reply in message. recommendationReason must be nonempty for a recommendation, otherwise null.':''),
+  invalidResult:INVALID_CARD_RESULT,execute:async args=>questionCardToolResult(args,fiveFields)};
 }
 
 /** Conservative serialized-tool allowance; the full SDK request is checked again before dispatch. */
-export function askQuestionToolBytes():number {
- const tool=askQuestionTool();
+export function askQuestionToolBytes(fiveFields=false):number {
+ const tool=askQuestionTool(fiveFields);
  return Buffer.byteLength(JSON.stringify([{type:'function',function:{name:tool.name,description:tool.description,
-  strict:true,parameters:z.toJSONSchema(askQuestionParameters)}}]));
+  strict:true,parameters:z.toJSONSchema(tool.parameters!)}}]));
 }

@@ -33,6 +33,8 @@ export const ASK_QUESTION_ARGUMENT_LIMIT = 49152;
 export const DEFAULT_TOOL_ARGUMENT_LIMIT = 4000;
 export const toolArgumentLimit = (name: string): number =>
   name === ASK_QUESTION_TOOL ? ASK_QUESTION_ARGUMENT_LIMIT : DEFAULT_TOOL_ARGUMENT_LIMIT;
+/** Display limit for envelope, tool message and plain-text messages. */
+export const AGENT_TURN_MESSAGE_LIMIT = 20000;
 export const QUESTION_MAX_CHARS = 500;
 export const OPTION_MAX_CHARS = 200;
 export const MIN_OPTIONS = 2;
@@ -54,7 +56,7 @@ const cardText = (max: number) =>
 
 /**
  * One main question and 2–5 short suggested answers. This schema is the
- * `ask_question` tool's parameter schema and the stored card shape.
+ * legacy `ask_question` parameter schema and stored card shape.
  * Options must be distinct after trimming. `recommended` is the index of the
  * option the mentor recommends, or null for a neutral card (ranges or
  * categories the user places themselves in); an index outside the options
@@ -72,7 +74,16 @@ export const questionCardSchema = z
   })
   .strict()
   .refine(card => card.recommended === null || card.recommended < card.options.length, "recommended out of range");
-export type QuestionCard = z.infer<typeof questionCardSchema>;
+/** New calls require all five fields. Legacy storage remains readable separately. */
+export const questionToolCardSchema = questionCardSchema.safeExtend({
+  message: cardText(AGENT_TURN_MESSAGE_LIMIT),
+  recommendationReason: cardText(AGENT_TURN_MESSAGE_LIMIT).nullable(),
+}).refine(card => card.recommended === null
+  ? card.recommendationReason === null : card.recommendationReason !== null,
+"recommendation reason must match recommended");
+export type QuestionCard = z.infer<typeof questionCardSchema> & {
+  message?: string; recommendationReason?: string | null;
+};
 
 /**
  * Validated card or null. Never throws; invalid model output shows no card.
@@ -81,7 +92,10 @@ export type QuestionCard = z.infer<typeof questionCardSchema>;
  */
 export function parseQuestionCard(value: unknown): QuestionCard | null {
   const legacy = value && typeof value === "object" && !Array.isArray(value) && !("recommended" in value);
-  const parsed = questionCardSchema.safeParse(legacy ? { ...value, recommended: null } : value);
+  const extended = value && typeof value === "object" &&
+    ("message" in value || "recommendationReason" in value);
+  const parsed = extended ? questionToolCardSchema.safeParse(value)
+    : questionCardSchema.safeParse(legacy ? { ...value, recommended: null } : value);
   return parsed.success ? parsed.data : null;
 }
 
@@ -145,8 +159,6 @@ export type AgentTurnEvent =
 
 /** Marks the host-built envelope. Legacy bodies never carry this field. */
 export const AGENT_TURN_FORMAT = "agent-turn.v1";
-/** Display limit for envelope and plain-text messages. */
-export const AGENT_TURN_MESSAGE_LIMIT = 20000;
 /** Legacy JSON mentor messages keep their existing 4000-character display limit. */
 export const LEGACY_MESSAGE_LIMIT = 4000;
 /** Bodies above this size are not parsed at all. */
@@ -200,7 +212,7 @@ export function agentTurnBody(message: string, card: QuestionCard | null): strin
   const envelope: AgentTurnEnvelope = {
     format: AGENT_TURN_FORMAT,
     message: text,
-    card: card === null ? null : questionCardSchema.parse(card),
+    card: card === null ? null : (card.message === undefined ? questionCardSchema : questionToolCardSchema).parse(card),
   };
   if (!envelope.message && !envelope.card) throw new Error("AGENT_TURN_BODY_EMPTY");
   return JSON.stringify(envelope);
@@ -231,7 +243,7 @@ export function readAgentTurnBody(raw: string | null | undefined): AgentTurnBody
   const message = typeof value.message === "string" ? value.message : "";
   if (value.format === AGENT_TURN_FORMAT) {
     const card = parseQuestionCard(value.card);
-    const text = limited(message, AGENT_TURN_MESSAGE_LIMIT);
+    const text = limited(card?.message ?? message, AGENT_TURN_MESSAGE_LIMIT);
     if (!text.message && !card) return none("invalid");
     return { kind: "envelope", card, ...text };
   }

@@ -94,3 +94,9 @@ describe("QuestionCardView: answered card", () => {
     expect(html).not.toContain("<button");
   });
 });
+
+it.each([false,true])('retains the validated recommendation reason (answered=%s)',answered=>{
+ const html=render({card:{...card,message:'公开分析',recommended:1,recommendationReason:'已有相关经验'},answered});
+ expect(html).toContain('已有相关经验');
+ expect(html).not.toContain('公开分析'); // The conversation renders the single canonical message.
+});

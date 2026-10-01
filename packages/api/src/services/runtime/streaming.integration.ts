@@ -6,11 +6,13 @@ import {createServer,type ServerResponse} from 'node:http';
 import pg from 'pg';
 import {createClient} from '@supabase/supabase-js';
 import {runtimeExecutor} from './execute';
+import {createRuntimeBudget} from './budget';
+import {authoritativeBilling} from '../bill2/service';
 import type {RuntimeProgress} from './progress';
 import {openRouterAdapter} from '../bill2/openRouterAdapter';
 import type {ReasoningPolicy} from './reasoningPolicy';
 import {agentTurnBody,AGENT_TURN_MESSAGE_LIMIT,INVALID_REPLY_NOTICE,ASK_QUESTION_ARGUMENT_LIMIT} from '../../shared/agentTurn';
-import {decodeOpenRouterStreamObservation} from '../bill2/openRouterEvidence';
+import {openRouterEvidence,decodeOpenRouterStreamObservation} from '../bill2/openRouterEvidence';
 
 // Deliberately no remote fallback, application credentials or real model keys.
 const connectionString=process.env.V3_LOCAL_DB!;
@@ -24,7 +26,7 @@ const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 async function rpc(name:string,args:Record<string,unknown>){const result=await admin.rpc(name,args);if(result.error)throw new Error(result.error.message);return result.data;}
 function latch(){let release!:()=>void;const promise=new Promise<void>(resolve=>{release=resolve;});return {promise,release};}
 async function until(test:()=>boolean){const deadline=Date.now()+5000;while(!test()){if(Date.now()>deadline)throw new Error('synthetic progress deadline');await new Promise(resolve=>setTimeout(resolve,10));}}
-async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial-tools-v4-stream'|'agent-turn-v5-stream'|'serial-tools-v6-reasoning',organize=false,outputLimit=100,tool=false,reasoning?:{primary:ReasoningPolicy;organizer:ReasoningPolicy},opening=false,inputLimit=10000){
+async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial-tools-v4-stream'|'agent-turn-v5-stream'|'serial-tools-v6-reasoning',organize=false,outputLimit=100,tool=false,reasoning?:{primary:ReasoningPolicy;organizer:ReasoningPolicy},opening=false,inputLimit=10000,fiveFields=false){
  const actorId=randomUUID(),mentorId=randomUUID(),organizerId=randomUUID(),windowId=randomUUID(),requestId=randomUUID();
  await db.query('insert into profiles(id,credits) values($1,100)',[actorId]);
  await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,100,'addition','grant','opening_grant','system',$2,0,100)",[actorId,'stream-opening:'+actorId]);
@@ -32,7 +34,7 @@ async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial
  const policies=[[mentorId,'synthetic/mentor'],[organizerId,'synthetic/organizer']].map(([modelId,model])=>({modelId,model,provider:'openrouter',account:'synthetic-stream',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:inputLimit>10000?40000:10000,promptUsdPerMillion:inputLimit>10000?'0.5':'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
  for(const policy of policies)await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic streaming integration',$2,'openrouter','true')",[policy.modelId,policy.model]);
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.10,3,now()+interval '2 hours')",[windowId,[actorId],JSON.stringify(policies)]);
- const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',inputSelection:'scope-projection-v1',providerRequestFormat:format,...(reasoning?{reasoning:reasoning.primary}:format==='serial-tools-v4-stream'||format==='agent-turn-v5-stream'?{reasoning:{effort:'none'}}:{}),input:opening?'HOST_OPEN_CURRENT_QUESTION':'Synthetic original input',instructions:'Return the public mentor message in the message property; keep protocol fields private.',model:policies[0]!.model,modelId:mentorId,maxOutputTokens:outputLimit,maxTurns:1,historyItems:20,network:'deny',tools:format==='agent-turn-v5-stream'?['ask_question']:tool?['read_source']:[],...(tool?{workspaceContext:true,maxToolCalls:1,maxTurns:2}:{}),request:{sessionId:session.sessionId,requestId,organizeAfter:false},...(organize?{attachedOrganizer:{modelId:organizerId,model:policies[1]!.model,maxOutputTokens:reasoning?outputLimit:100,...(reasoning?{reasoning:reasoning.organizer}:{}),instructions:'Synthetic organizer only',input:'Synthetic original input'}}:{})};
+ const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',inputSelection:'scope-projection-v1',providerRequestFormat:format,...(fiveFields?{questionContract:'five-fields-v1'}:{}),...(reasoning?{reasoning:reasoning.primary}:format==='serial-tools-v4-stream'||format==='agent-turn-v5-stream'?{reasoning:{effort:'none'}}:{}),input:opening?'HOST_OPEN_CURRENT_QUESTION':'Synthetic original input',instructions:'Return the public mentor message in the message property; keep protocol fields private.',model:policies[0]!.model,modelId:mentorId,maxOutputTokens:outputLimit,maxTurns:1,historyItems:20,network:'deny',tools:format==='agent-turn-v5-stream'?(fiveFields&&opening?[]:['ask_question']):tool?['read_source']:[],...(tool?{workspaceContext:true,maxToolCalls:1,maxTurns:2}:{}),request:{sessionId:session.sessionId,requestId,organizeAfter:false},...(organize?{attachedOrganizer:{modelId:organizerId,model:policies[1]!.model,maxOutputTokens:reasoning?outputLimit:100,...(reasoning?{reasoning:reasoning.organizer}:{}),instructions:'Synthetic organizer only',input:'Synthetic original input'}}:{})};
  const billing={contractVersion:'bill2.v1',mode:'staging_test',testWindowId:windowId,scope:session.scope,operation:'question',modelId:mentorId,sourceHash:hash('synthetic-stream'),input:context,callPolicy:organize?policies:[policies[0]],rules:{version:'runtime-staging-v1',quoteVersion:windowId,creditsPerUsd:'1000',multiplier:'1',fx:{}},limits:{costUsd:tool?'0.06':organize?'0.04':'0.02',credits:tool?60:organize?40:20,maxPreDeduct:tool?60:organize?40:20,maxCalls:tool?3:organize?2:1,deadline:new Date(Date.now()+3600000).toISOString()}};
  const execution=await rpc('runtime_admit',{p_actor_id:actorId,p_session_id:session.sessionId,p_request_id:requestId,p_payload:context,p_billing:billing});
  return {actorId,context,execution,session,billing};
@@ -510,4 +512,117 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: full ask_questi
   .toEqual({state:'settled',charged:3});
  expect((await db.query("select count(*)::int n from credit_transactions where bill2_run_id=$1 and reason_code='bill2_spend'",
   [f.execution.runId])).rows[0].n).toBe(1);
+});
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['settled','refunded'] as const)(
+ 'RUNTIME: legacy >4000 invalid_stream %s recovery preserves verdict, ledger and receipts',async terminal=>{
+ const f=await fixture('agent-turn-v5-stream',false,8192);
+ const args=JSON.stringify({question:'Old range?',options:['First','Second'],recommended:null}).padEnd(4001,' ');
+ let posts=0,lookups=0,projected=0;
+ const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  const id='gen-legacy-'+f.execution.executionId;
+  if(init?.method==='GET'){
+   lookups++;
+   return new Response(JSON.stringify({data:{id,model:'synthetic/mentor',total_cost:0.003,finish_reason:'tool_calls'}}));
+  }
+  posts++;
+  const frame={id,model:'synthetic/mentor',choices:[{index:0,delta:{role:'assistant',content:null,
+   tool_calls:[{index:0,id:'old-call',type:'function',function:{name:'ask_question',arguments:args}}]},finish_reason:'tool_calls'}],
+   usage:{prompt_tokens:10,completion_tokens:100,total_tokens:110,cost:0.003}};
+  return new Response('data: '+JSON.stringify(frame)+'\n\ndata: [DONE]\n\n',
+   {headers:{'content-type':'text/event-stream'}});
+ }});
+ // Seed the historical saved verdict, not the current parser's verdict. The
+ // transport is complete and retained: current reprojection really would pass.
+ const oldDatabase={rpc:async(name:string,input:Record<string,unknown>)=>{
+  if(name==='bill2_record'){
+   const evidence=input.p_evidence as Record<string,unknown>;
+   if(evidence.source==='response'){
+    projected++;
+    expect(evidence).toMatchObject({final:true,cost:'0.003'});
+    return admin.rpc(name,{...input,p_evidence:{...evidence,rawBody:'',usage:null,cost:null,final:false,
+     evidenceKind:'transport_observation',rejectedReason:'invalid_stream'}});
+   }
+  }
+  return admin.rpc(name,input);
+ }};
+ expect(await runtimeExecutor({database:oldDatabase,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId))
+  .toEqual({state:'pending'});
+ const host=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter});
+ await authoritativeBilling({admin,actor:async()=>f.actorId,adapter}).recoverReceipts(f.execution.runId);
+ if(terminal==='refunded'){
+  await rpc('bill2_close',{p_actor_id:f.actorId,p_run_id:f.execution.runId,p_outcome:'confirmed_failure',
+   p_result:{kind:'confirmed_delivery_failure',evidenceRef:'legacy-invalid-stream',evidenceHash:hash('invalid_stream')}});
+  await rpc('bill2_finalize',{p_actor_id:f.actorId,p_run_id:f.execution.runId});
+ }
+ await host.cancel(f.execution.executionId);
+ const snapshot=async()=>({
+  execution:(await db.query('select state,result,primary_result,payload from runtime_executions where id=$1',[f.execution.executionId])).rows,
+  run:(await db.query('select state,outcome,result,charged,actual_restore from bill2_runs where id=$1',[f.execution.runId])).rows,
+  receipts:(await db.query('select r.* from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1 order by r.created_at,r.id',[f.execution.runId])).rows,
+  transactions:(await db.query('select * from credit_transactions where bill2_run_id=$1 order by id',[f.execution.runId])).rows,
+  balance:(await db.query('select credits from profiles where id=$1',[f.actorId])).rows,
+  history:(await db.query('select * from runtime_session_history where session_id=$1 order by revision',[f.session.sessionId])).rows,
+ });
+ const before=await snapshot();
+ expect(before.run[0]).toMatchObject({state:terminal,charged:terminal==='settled'?3:0});
+ const rejected=before.receipts.find(row=>row.payload.rejectedReason==='invalid_stream')!.payload;
+ expect(openRouterEvidence(rejected.transport,{provider:'openrouter',account:'synthetic-stream',
+  model:'synthetic/mentor',protocol:'openrouter-chat-v1'},'response')).toMatchObject({final:true,cost:'0.003'});
+ const counts={posts,lookups,projected};
+ for(let repeat=0;repeat<2;repeat++){
+  expect(await host.execute(f.execution.executionId)).toEqual({state:'cancelled'});
+  await host.recoverFinancial(f.execution.executionId);
+  await rpc('bill2_finalize',{p_actor_id:f.actorId,p_run_id:f.execution.runId});
+  // Even a conflicting close attempt cannot replace a terminal result.
+  await rpc('bill2_close',{p_actor_id:f.actorId,p_run_id:f.execution.runId,p_outcome:'delivered',
+   p_result:{kind:'usable_result',evidenceRef:'new-parser',evidenceHash:hash('new-parser')}});
+ }
+ expect(await snapshot()).toEqual(before);
+ expect({posts,lookups,projected}).toEqual(counts);
+ expect(posts).toBe(1);
+});
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['card','invalid','plain','opening'] as const)(
+ 'RUNTIME: five-field %s buffers prose and persists the sole public result',async scenario=>{
+ const f=await fixture('agent-turn-v5-stream',false,8192,false,undefined,scenario==='opening',30000,true);
+ const card={message:'Canonical card message',question:'Range?',options:['First','Second'],
+  recommended:0,recommendationReason:'First matches your stated constraint'};
+ const gate=latch(),seen=latch(),events:RuntimeProgress[]=[];
+ let posts=0;
+ const server=createServer(async(req,res)=>{
+  posts++;let raw='';for await(const part of req)raw+=part;
+  const request=JSON.parse(raw),id='gen-five-'+f.execution.executionId;
+  if(scenario==='opening')expect(request.tools).toBeUndefined();
+  else expect(request.tools[0].function.parameters.required).toEqual(expect.arrayContaining([
+   'message','question','options','recommended','recommendationReason']));
+  res.setHeader('content-type','text/event-stream');
+  chunk(res,id,request.model,{role:'assistant',content:'Separate assistant text'});
+  seen.release();await gate.promise;
+  if(scenario==='card'||scenario==='invalid')chunk(res,id,request.model,{tool_calls:[{index:0,id:'five-call',type:'function',
+   function:{name:'ask_question',arguments:JSON.stringify(scenario==='invalid'?{...card,recommendationReason:null}:card)}}]});
+  chunk(res,id,request.model,{},scenario==='card'||scenario==='invalid'?'tool_calls':'stop');
+  res.end('data: '+JSON.stringify({id,model:request.model,choices:[],
+   usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}})+'\n\ndata: [DONE]\n\n');
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const address=server.address();if(!address||typeof address==='string')throw new Error('local listener required');
+ const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',
+  transport:async(_url,init)=>fetch(`http://127.0.0.1:${address.port}`,init)});
+ try{
+  const budget=createRuntimeBudget();
+  const host=()=>runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,budget});
+  const pending=host().execute(f.execution.executionId,event=>events.push(event));
+  await Promise.race([seen.promise,pending.then(result=>{throw new Error('No stream: '+JSON.stringify(result));})]);
+  if(scenario==='opening')await until(()=>events.some(event=>event.type==='text'));
+  else expect(events.filter(event=>event.type==='text'||event.type==='card')).toEqual([]);
+  gate.release();const result=await pending;
+  const expected=agentTurnBody(scenario==='card'?card.message:'Separate assistant text',scenario==='card'?card:null);
+  expect(result).toEqual({state:'completed',body:expected});
+  const texts=events.filter(event=>event.type==='text');
+  expect(texts).toEqual(Array(scenario==='opening'?2:1).fill({type:'text',text:scenario==='card'?card.message:'Separate assistant text'}));
+  expect(budget.timing.summary().marks).toMatchObject({firstValidContentMs:expect.any(Number),fullModelReplyMs:expect.any(Number)});
+  expect(events.filter(event=>event.type==='card')).toEqual(scenario==='card'?[{type:'card',card}]:[]);
+  expect(await host().execute(f.execution.executionId)).toEqual(result);expect(posts).toBe(1);
+ }finally{gate.release();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });
