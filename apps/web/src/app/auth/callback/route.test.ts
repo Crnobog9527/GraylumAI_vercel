@@ -92,3 +92,46 @@ describe('auth callback link errors', () => {
     expect(Object.fromEntries(to.searchParams)).toEqual({ email: 'a@example.test', redirect: '/profile' });
   });
 });
+
+describe('auth callback after a failed code exchange', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    auth.getUser.mockResolvedValue({ data: { user: null } });
+  });
+
+  it.each(['pkce_code_verifier_not_found', 'bad_code_verifier', 'flow_state_not_found'])(
+    'tells the visitor to log in when the verifier does not match (%s)',
+    async code => {
+      auth.exchangeCodeForSession.mockResolvedValue({ error: Object.assign(new Error('x'), { code }) });
+      const to = await callback('code=abc&next=%2Fprofile');
+      expect(to.pathname).toBe('/login');
+      expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'link_needs_login', redirect: '/profile' });
+    },
+  );
+
+  it('drops GoTrue landing parameters from next before redirecting', async () => {
+    auth.exchangeCodeForSession.mockResolvedValue({ error: null });
+    auth.getUser.mockResolvedValue({ data: { user: { email: 'a@example.test', email_confirmed_at: '2026-09-30T00:00:00Z' } } });
+    const next = encodeURIComponent('/library?item=1&error_code=otp_expired&code=old');
+    const to = await callback(`code=abc&next=${next}`);
+    expect(`${to.pathname}${to.search}`).toBe('/library?item=1');
+  });
+});
+
+describe('auth callback failure message by flow', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    auth.getUser.mockResolvedValue({ data: { user: null } });
+    auth.exchangeCodeForSession.mockResolvedValue({ error: Object.assign(new Error('x'), { code: 'bad_code_verifier' }) });
+  });
+
+  it('asks a Google sign-in to retry Google, not to use a password', async () => {
+    const to = await callback('code=abc&next=%2Fprofile&flow=oauth');
+    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'oauth_incomplete', redirect: '/profile' });
+  });
+
+  it('keeps the email-link guidance without the Google marker', async () => {
+    const to = await callback('code=abc&next=%2Fprofile&flow=anything');
+    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'link_needs_login', redirect: '/profile' });
+  });
+});
