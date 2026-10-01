@@ -53,13 +53,17 @@ request or product configuration is involved.
   rollback and reapplication, and both erasure permission audits pass. Built
   fingerprint changes only the two invitation function bodies and one partial
   index; 0151 and existing ACL fingerprints are unchanged.
-- Full API suite: 146 files, 3,179 passed, 3 existing skips. API lint/typecheck
+- Full API suite: 149 files, 3,293 passed, 3 existing skips. API lint/typecheck
   and code-size pass. The local integration suite is separate from normal CI.
-- Migration ledger / safeguards remain blocked by the absent 0153 migration
-  reserved by pending #540 (125 safeguards pass; 3 fail on the same gap). Keep
-  0154 until that dependency is resolved; do not add a placeholder or weaken the
-  checker. Synchronize staging, numbering and the built fingerprint before
-  final candidate validation. Check the PR Handoff for newer CI/review results.
+- After ordinary merge of staging `ddd22a3c` (#540), the ledger contains
+  0153 membership and 0154 invitation migrations. Exact-base migration ledger
+  and all 128 safeguards pass; the prior numbering gap is resolved.
+- Full baseline replay: 157/157 build steps, 88 repeats, unchanged convergence
+  reapply and successful cleanup. Built fingerprint was regenerated; it matches
+  the ordinary merge result and differs from current staging only by the two
+  invitation functions and the partial index. The current-head CI and review
+  results are recorded separately in the PR Handoff.
+
 
 ## Compatibility and later staging acceptance
 
