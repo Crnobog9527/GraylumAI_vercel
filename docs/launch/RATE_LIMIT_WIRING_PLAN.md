@@ -100,8 +100,9 @@ OPC 的两条路径在调用 `prepare` 之前已经写了材料，读 SQL 后确
 | `opc_step_material`（0107:281） | 新建一版会话材料（版本号 +1）和一条 `opc_turns` | 找到原材料和原 `opc_turns`，输入一致就原样返回原版本和 turnToken，不新建；输入不同报 `OPC_REQUEST_CONFLICT` | 再新建一版材料，版本号继续 +1 |
 | `opc_topic_material`（0114:52） | 只插入一条 `opc_turns`，不改材料版本 | 输入一致就原样返回 | 新插一条 |
 
-- 被拦后留下的只是"有材料、有 `opc_turns`、没有执行"。`opc_query` 列出轮次时
-  用 `opc_turns` **inner join** `runtime_executions`（0107:216），没有执行的轮次不显示；
+- 被拦后留下的只是"有材料、有 `opc_turns`、没有执行"。现行 `opc_query`（0111:71 起的定义，
+  经 0116、0120、0133、0134 包装）列出轮次时用 `opc_turns` **inner join** `runtime_executions`，
+  没有执行的轮次不显示；
   材料只有 `brief`（"用途:步骤"）和空材料，不含用户原话（原话只存哈希）。
 - **同一个 requestId 重新提交**（页面"原请求与输入已保留"的情况）：材料函数原样返回，
   `prepare` 的 `expectedMaterialRevision` 等于当前版本，重放查询为空，重新过闸门，
@@ -176,6 +177,9 @@ OPC 的两条路径在调用 `prepare` 之前已经写了材料，读 SQL 后确
 | 导师一轮，不带整理 | 1 | 1 |
 | 导师一轮 + 附属整理（`organizeAfter`，含回答卡片后的整理） | 1 | 2 |
 | 开场轮（宿主开场 + 开场提取，`organizeOpening`） | 1 | 2 |
+| OPC 步骤生成（`prepareStep` 用途 `step`），不带整理 | 1 | 1 |
+| OPC 步骤生成（用途 `step`）带 `organizeAfter` | 1 | 2 |
+| OPC 周计划（用途 `plan`，不允许带整理） | 1 | 1 |
 | 选题一轮（`opc.topicTurn`） | 1 | 1 |
 | `/runtime` 自由对话、Skill、写作、视频包 | 1 | 3 |
 | `/runtime` 单独整理（`selection.kind = organizer`） | 1 | 3 |
@@ -191,13 +195,17 @@ OPC 的两条路径在调用 `prepare` 之前已经写了材料，读 SQL 后确
 - 按现在的 `maxCalls`，`/runtime` 每轮预扣 3：30 次/分钟、600 次/天正好对应
   10 轮/分钟、200 轮/天，和消息桶一致；导师和选题每轮预扣 1–2，正常使用时消息桶先起作用。
   调用桶主要防以后调大 `maxCalls` 的多步 Skill 和报告。
-- **环境前缀的取法（服务层）**：
-  - `runtimeLocalEndpoint()` 成功（本机回环）→ `local`；
-  - 否则用现有 `stagingRuntimeWindow(env, true)` 校验通过（staging 项目、`staging`
-    分支、staging 数据库）→ `staging`；
-  - 两者都不满足 → 不猜，按 `limit_unavailable` 拒绝。
-  - 正式环境现在没有 Runtime 宿主；`production` 前缀由 RUNTIME-PROD 接正式环境时
-    加上自己的判断，本任务不提前写。
+- **环境前缀的取法**：闸门模块自己不读环境变量，由已经做过本机/staging 判断的宿主传入，
+  避免 `newWorkGate → executionStream` 的循环引用（`runtimeLocalEndpoint` 在
+  `executionStream.ts` 里）：
+  - 消息闸门：`runtimeAdmissionService` 里 `policy.real` 存在 → `staging`，否则 → `local`。
+    `real` 只由 `loadStagingPolicy` 产生，它已经用 `stagingRuntimeWindow` 校验过 staging
+    项目、`staging` 分支和 staging 数据库；本机回环由路由里的 `runtimeLocalEndpoint()` /
+    回环地址判断后才不带 `real`。
+  - 调用闸门：`executeOriginalExecution` 里 `maintenanceEndpoint` 存在 → `local`，
+    staging 分支 → `staging`；`routers/runtime.ts` 同理按 `endpoint` / `real`。
+  - 正式环境现在没有 Runtime 宿主；`production` 前缀和正式环境的判断由 RUNTIME-PROD
+    接正式环境时加上，本任务不提前写。
 
 ### 2.6 超限时用户看到什么
 
@@ -221,9 +229,20 @@ OPC 的两条路径在调用 `prepare` 之前已经写了材料，读 SQL 后确
   - `positioning/[draftId]/mentor-turn.ts:187` 的 `turnResultNotice`（page.tsx:182 调用）
     和 `mentor-turn.test.ts`：加三个原因的固定提示。`agent-turn-display.ts` 读的是数据库
     里的原因，本方案不写库，所以不改它；
-  - `runtime/page.tsx:68`（`execute` 成功回调，现在只认 `output_truncated`）和
-    `:183` 一带（写作/视频包流程，把结果原因转成 `OPC_CONTENT_*` 错误）：加三个原因。
-  - 不自动重试。
+  - `positioning/[draftId]/topics/page.tsx`（`opc.topicTurn` 唯一的前端调用方，:151、:326–358）：
+    - 消息被拦（429/503）现在落到 `failureMessage`（:267–277）兜底，显示"本次请求状态待核实……
+      不要重复发送相同内容"，要按原因显示固定提示；
+    - 现在不读 `execute.mutateAsync` 的结果（:330），调用被拦时页面没有任何提示，
+      要读取结果原因并显示固定提示。
+  - `runtime/page.tsx`：
+    - `send()` 里 `prepare` 被拒落到 :135 的 catch，显示"请求状态待核实。请读取原任务状态，
+      不要重新发送相同内容。"，要按 429/503 原因显示固定提示；
+    - :68（`execute` 成功回调，现在只认 `output_truncated`）加三个结果原因；
+    - 写作/视频包流程：:183 一带把执行结果原因转成 `OPC_CONTENT_*` 错误，要加三个原因；
+      :188 的 catch（准入被拒会落到"视频工作请求状态待核实"）要识别 429/503。
+  - 以上每处补对应单测或组件测试。
+  - 不自动重试。被拦的请求保留在页面的"原请求"恢复记录里，稍后用同一个 requestId
+    重新发送是安全的（第 2.2 节）。
 - "近24小时"是滑动窗口的近似说法，不承诺任意连续 24 小时都严格不超过 200 次。
 
 ### 2.7 和计费（BILL2 / BILL-PAYG）的关系
@@ -276,15 +295,25 @@ OPC 的两条路径在调用 `prepare` 之前已经写了材料，读 SQL 后确
     `OPENROUTER_RESPONSE_TIMEOUT_MS` = 240 秒），回复正常保存和结算。
   - 不受影响：查看、取消、已保存回复的重放、收据和财务恢复、注销后的财务收尾。
 - **检查顺序**：先读配置看暂停，暂停时直接拒绝、不访问 Redis（不消耗命令），再查限流桶。
-- **部署前要核对一件事**：#562 起后台接口就能保存 `stopNewCalls`（只是没生效）。
-  部署接线版本前，要先在 staging 后台确认它是 `false`，否则一部署所有新消息就会停。
-  写进验证第 0 步。
+- **合并前要核对一件事**：#562 起后台接口就能保存 `stopNewCalls`（只是没生效）。
+  合并 staging 会立即自动部署，所以合并前要先在 staging 后台确认它是 `false`，否则一部署所有新消息就会停。
+  写进验证的合并前检查 M0。
 - 和规划里 RUNTIME-PROD ⑤"一键停止新调用的开关"是同一个开关，正式环境沿用，不另做。
 - **旧链路**（总控已答复）：`/api/ai/stream` 已由 #507 对新请求返回 410，暂停开关只管新
-  Runtime，旧代码由 LEGACY-CLOSE 删除。工作台还会发起付费调用的路径：
-  `routers/workbench.ts` 的生成和报价（SEC-RATELIMIT 已有限流），以及
-  `routers/agentSlice.ts`（旧切片）。实施 PR 开始前核对它们在新 staging 上是否还对用户开放，
-  结果报总控；本方案不给它们接暂停开关。
+  Runtime 的限流桶，旧代码由 LEGACY-CLOSE 删除。仍可能发起真实付费调用的旧路径
+  （`f9afd0db` 上核对过直接调用 OpenRouter）：
+  - `routers/agentSlice.ts`（`/chat` 页面的 `agent-slice-*` 组件调用，`services/agentSlice/runner.ts`
+    直连 OpenRouter），仍在 `root.ts` 注册；
+  - `routers/workbench.ts` 的 `generate`（`services/artifacts/generation.ts`，SEC-RATELIMIT 已有限流）。
+
+  **处理办法**：实施 PR 开始前核对这两条路径在新 staging 上是否仍能被普通用户触发
+  （入口页面可达、接口未被关闭）。
+  - 仍可触发的：在它们各自的准入处（发起付费调用、建预留之前）加一行暂停检查，
+    复用同一个读配置函数，暂停时返回同一句"AI服务暂时暂停新调用"；不给它们加新的限流桶
+    （已有 SEC-RATELIMIT）。查看、恢复、取消照常。
+  - 已不可触发的：在实施 PR 描述里写明"一键暂停不覆盖此路径，因为它已不对用户开放"，
+    由总控在请求合并批准时报 Owner。
+  - 管理员后台的模型试调（`models/tryReasoning.ts`）只有管理员能用，不接暂停开关，同样写明。
 
 ## 5. MODERATION-HOOK
 
@@ -342,6 +371,11 @@ export const allowAllModeration: RuntimeModeration = {
   之前，什么都没创建。
 - 输出返回 `block` → 用现有 `runtime_cancel` 结束（和 `terminalReplyFailure` 同一条路径），
   **绝不落进通用 catch 变成 `pending`**。
+- **检查函数本身抛异常**：按现在的 catch 顺序，输出检查点抛出的异常会走
+  `interrupt` → `pending`。所以两个检查点都用 try/catch 包住调用，**异常一律按 `block`
+  处理**：输入点抛 `RUNTIME_MODERATION_BLOCKED`；输出点走上面同一条 `runtime_cancel`
+  路径。接口注释写明"实现不应抛异常；抛出等同拦截"。默认实现不会抛异常，
+  补一条"检查函数抛异常 → 结果不是 `pending`"的测试。
 - 不做的事：拦截后不收费、独立终止状态、拦截日志、界面提示、流式文字的撤回。
   这些等 Owner 决定正式实现时再做，届时"被拦截"要有自己的终止状态。
 
@@ -355,7 +389,8 @@ export const allowAllModeration: RuntimeModeration = {
 - 次数：新准入时输入检查恰好 1 次；重放 0 次；新完成的执行输出检查恰好 1 次；
   `cost_pending` 恢复、已完成重放、取消 0 次。
 - 拦截替身（只在测试里）：输入拦截 → 没有 `runtime_admit`、没有预留；
-  输出拦截 → 结果是 `cancelled` 或 `cost_pending`，不是 `completed`，也不是 `pending`。
+  输出拦截 → 结果是 `cancelled` 或 `cost_pending`，不是 `completed`，也不是 `pending`；
+  两个检查函数抛异常时结果分别与拦截相同。
 
 ## 6. 实施范围和最小改动说明（AGENTS 第 5 节）
 
@@ -363,27 +398,44 @@ export const allowAllModeration: RuntimeModeration = {
 
 | 文件 | 改什么 |
 | --- | --- |
-| 新增 `services/runtime/newWorkGate.ts` | 组合"读配置 → 暂停 → 限流桶"和环境前缀判断，返回 `{ok}` 或拒绝原因；消息和调用共用 |
+| 新增 `services/runtime/newWorkGate.ts` | 组合"读配置 → 暂停 → 限流桶"，环境由宿主传入，返回 `{ok}` 或拒绝原因；消息和调用共用。不引用 `executionStream.ts` |
 | 新增 `services/runtime/moderation.ts` | 第 5.1 节接口和默认放行实现 |
 | `services/redisRateLimiter.ts` | `checkRuntimeRateLimit` 加 `rate` 参数和 `rate > 1` 时的只读预查 |
 | `services/runtime/admission.ts` | 重放之后接消息闸门；`runtime_admit` 前接输入检查点 |
-| `services/runtime/execute.ts` | 第一次 `claimCall` 前接调用闸门；`fail_before_dispatch` 返回时带原因；`complete` 前接输出检查点 |
+| `services/runtime/execute.ts` | `runtimeExecutor` 选项加**必填**的 `callGate`；第一次 `claimCall` 前调用它；`fail_before_dispatch` 返回时带原因；`complete` 前接输出检查点 |
+| `services/runtime/executionStream.ts` | 三处构造执行器都传 `callGate`：本机维护（:47）→ 本机闸门；只做财务恢复（:60）→ **一律拒绝的闸门**（这条路径本来就不发送，多一道保险）；staging（:68）→ staging 闸门 |
+| `routers/runtime.ts` | :40 构造执行器时传 `callGate`（`endpoint` → 本机，`real` → staging） |
 | `lib/rateLimitError.ts` | 按原因选择提示文字，旧链路默认不变 |
 | `routers/runtimeRateLimits.ts` | `enforcement` 改为三个 `true` |
 | `shared/agentTurn.ts` | `AgentTurnUnavailable` 加 `call_limited`、`paused`、`limit_unavailable` |
-| `components/admin/RuntimeRateLimitSettings.tsx` | 启用暂停按钮；文案改为"新消息（每轮消息）"；提示调用每分钟不能低于单轮最多调用数 |
-| `positioning/[draftId]/admission-message.ts`、`mentor-turn.ts` 及测试、`runtime/page.tsx` | 显示固定提示，识别 429（第 2.6 节） |
-| 测试文件 | 见第 8 节；集成测试按仓库已有做法 `vi.mock` 替换 Redis |
+| `components/admin/RuntimeRateLimitSettings.tsx` | 启用暂停按钮；"新对话"改为"新消息（每轮消息）"；"模型调用"注明"每轮开始时按这一轮最多可用的调用数一次性预扣（导师 1–2 次，`/runtime` 3 次），实际用得少也不退回"；提示"模型调用每分钟"不能低于单轮最多调用数 |
+| `positioning/[draftId]/admission-message.ts`、`mentor-turn.ts`、`topics/page.tsx` 及测试，`runtime/page.tsx` | 显示固定提示，识别 429/503 和三个结果原因（第 2.6 节） |
+| 旧链路付费入口（视实施前核对结果，见第 4 节） | 仍对用户开放的，在它们的准入处加一行暂停检查 |
+| 测试文件 | 见第 8 节 |
 
-不改：`opc/service.ts`、`bill2/service.ts`、`runner.ts`、`executionStream.ts`、
-两个路由的组合代码、`agent-turn-display.ts`、SQL 和迁移、依赖。`execute.ts` 和
-`admission.ts` 的行数要守住代码大小基线（`execute.ts` 有超长行基线 22 条，不能增加），
-必要时把闸门判断放进新模块。
+不改：`opc/service.ts`、`bill2/service.ts`、`runner.ts`、OPC 路由的组合代码、
+`agent-turn-display.ts`、SQL 和迁移、依赖。`execute.ts` 和 `admission.ts` 的行数要守住
+代码大小基线（`execute.ts` 有超长行基线 22 条，不能增加），必要时把闸门判断放进新模块。
 
-**生产代码不留"可选放行"参数**：闸门在服务内部用现有 admin 客户端构造，测试通过
-`vi.mock('../redisRateLimiter')` 或替换闸门模块（`accountErasure`、`invitationAbuse`
-集成测试已经这样做）。这样不会因为某个调用点忘了传参数而默认放行。
-配置读取失败或内容不合法按"不可用"拒绝；数据库里没有这一行时用默认值。
+**两个闸门怎么拿到读配置的客户端（生产代码不留"可选放行"参数）**：
+
+- **消息闸门**：`runtimeAdmissionService(user, admin, policy)` 的 `admin` 本来就是
+  `SupabaseClient`，闸门在服务内部用它构造，所有准入调用方（含 `opc/service.ts`）不用改。
+  测试按仓库已有做法 `vi.mock('../redisRateLimiter')` 或替换闸门模块（`accountErasure`、
+  `invitationAbuse` 集成测试已经这样做）。
+- **调用闸门**：`runtimeExecutor` 的 `database` 类型是 `SessionRpc`（只有 `rpc`），
+  读不了 `system_settings`。**采用"加一个必填依赖"**，不放宽 `database` 的类型：
+  `runtimeExecutor({..., callGate})`，`callGate(actorId, rounds)` 由宿主用 admin 客户端
+  和它已知的环境构造（上表 `executionStream.ts`、`routers/runtime.ts` 三处加一处）。
+  不放宽类型的原因：执行器里大量测试替身只实现 `rpc`，放宽后要么全部补 `from`，要么在
+  缺少 `from` 时默认放行，后者正是要避免的。
+- **防止漏接**：`callGate` 在类型上必填，漏传编译失败；`runtimeExecutor` 构造时再检查一次
+  `typeof callGate === 'function'`，不是就直接抛错（防 `any` 绕过）。补测试：
+  `executeOriginalExecution` 的三个分支和 `routers/runtime.ts` 构造执行器时都带了闸门，
+  而且财务恢复分支带的是一律拒绝的闸门。
+- **测试构造点**：Runtime、流式、OPC 集成测试里的执行器构造统一传一个测试专用的放行闸门，
+  放在测试辅助文件里；加一条静态检查测试，确认非测试源码不引用它。
+- 配置读取失败或内容不合法按"不可用"拒绝；数据库里没有这一行时用默认值。
 
 ### 6.2 为什么这是最小的正确做法
 
@@ -419,8 +471,11 @@ export const allowAllModeration: RuntimeModeration = {
   都够才扣、任一不够就拒绝且不调用 `limit`；`n` 大于上限 → 配置错误拒绝；
   `getRemaining` 失败或超时 → `unavailable`。
 - 闸门模块：暂停时拒绝且 Redis 调用 0 次；配置读取失败、内容不合法 → `limit_unavailable`；
-  没有这一行 → 用默认值；分钟、日拒绝的原因和 `retryAfter`；环境前缀 local / staging /
-  两者都不满足时拒绝；同一用户跨入口共用一个桶，不同用户互不影响。
+  没有这一行 → 用默认值；分钟、日拒绝的原因和 `retryAfter`；环境前缀按宿主传入的
+  local / staging 隔离，准入（`policy.real`）和执行（`maintenanceEndpoint`）两侧取到的前缀一致；
+  同一用户跨入口共用一个桶，不同用户互不影响；闸门模块不引用 `executionStream.ts`。
+- 执行器构造：缺少 `callGate` 时构造即抛错；`executeOriginalExecution` 三个分支、
+  `routers/runtime.ts` 都带闸门，财务恢复分支的闸门一律拒绝；非测试源码不引用测试放行闸门。
 - 准入：重放请求不调用闸门、不检查暂停；**配置读取失败时重放仍正常返回**；新请求恰好调用
   1 次且在 `runtime_admit` 之前；被拒时没有 `runtime_admit`；四个入口（`runtime.prepare`、
   `opc.prepareStep`、`opc.topicTurn`、`opc.mentorTurnStream`）都被同一个闸门拦住。
@@ -429,7 +484,9 @@ export const allowAllModeration: RuntimeModeration = {
   `claimCall`，返回 `cancelled` 加对应原因；SDK 包装后的错误仍被识别。
 - 错误和提示：429/503、`retryAfter`、4 句固定文字；旧链路 `RateLimitError` 默认文字不变；
   `admission-message.ts` 把 429 显示为固定提示而不是"结果未知"；`turnResultNotice` 和
-  `/runtime` 页面三个新原因各有提示。
+  `/runtime` 页面三个新原因各有提示；选题页 `failureMessage` 对 429/503 显示固定提示、
+  `execute` 结果原因有提示；`/runtime` 的 `send()` 和视频包流程准入被拒时显示固定提示，
+  不再显示"请求状态待核实"。
 - 审核接口：第 5.4 节全部。
 - 后台：`enforcement` 为 `true`；暂停按钮可用，保存后显示读回值；文案为"新消息"；
   非管理员读写被拒（已有）。
@@ -476,6 +533,7 @@ CI 必需的 10 项检查全部通过。CI 里的 Runtime 和计费集成测试�
 - **A 段（合并前，在实施 PR 当前 head 上）**：本机预览（真实网页、PostgreSQL、BILL2、
   本机 Redis + SRH，供应商是合成回环），覆盖全部功能、拒绝路径和 Redis 故障。
   这是候选干净的前提。
+- **合并前检查 M0**：只读确认当前 staging 的暂停设置是关闭的（合并会立即部署）。
 - **B 段（合并后，staging 冒烟）**：少量真实模型调用，只确认部署环境里的接线和提示。
   总控在请求合并批准时向 Owner 说明 B 段只能合并后做。
 
@@ -503,7 +561,12 @@ A3. 测试用户在 /positioning/<草稿> 连续发 2 轮导师对话，均正�
     没有出现"结果未知"，页面没有多出空轮次。
 A4. 等 1 分钟后，在原输入框直接重新发送刚才被拦的那一轮（同一请求）。通过：正常回复。
     再发一条新消息。通过：正常回复。
-A5. 在 /runtime 发一轮。通过：和 /positioning 共用次数（在 A2 额度下，两边合计第 3 轮被拦）。
+A5. 在 /runtime 发一轮。通过：和 /positioning 共用次数（在 A2 额度下，两边合计第 3 轮被拦）；
+    /runtime 被拦时显示"操作过于频繁，请稍后再试。本次被拦截的调用不扣积分。"，
+    不显示"请求状态待核实"，余额不变。
+A5b. 在选题页 /positioning/<草稿>/topics 发一轮选题对话，使其在 A2 额度下被拦（必要时先在定位页发够次数）。
+    通过：显示同一句"操作过于频繁……不扣积分"，不显示"本次请求状态待核实……"，余额不变；
+    等 1 分钟后用页面的"恢复原请求"重新发送同一轮，正常回复。
 A6. 管理员点"一键暂停"。测试用户发新一轮。通过：显示"AI服务暂时暂停新调用……"，余额不变；
     历史对话能正常查看。管理员关闭暂停，测试用户再发一轮。通过：正常回复。
 A7. 管理员恢复"新消息每分钟"原值，把"模型调用每分钟"改为 2。测试用户在 /positioning 连续发导师轮次，
@@ -515,14 +578,18 @@ A9. 停掉本机 SRH 容器，测试用户发新一轮。通过：显示"暂时�
     重新启动 SRH，再发一轮。通过：正常回复。
 A10. 把所有额度和暂停恢复为 A0 的原值，保存并读回。通过：一致。
 
+—— 合并前检查（合并 staging 会立即自动部署，所以这一步必须在执行合并之前做）——
+M0. 管理员打开当前 staging 的 /admin/settings → AI使用额度（仍是未接线版本），只读确认
+    "暂停设置"显示"未暂停"（不是"已保存暂停意向"），并记录 4 个额度原值。
+    否则不合并，报总控（一合并就会停掉所有新消息）。
+
 —— B 段（合并后，staging，真实模型）——
-B0. 部署前，管理员在 staging 后台确认暂停为关闭，记录原值。否则停止，报总控。
-B1. 部署后卡片显示"已接线"。普通测试用户打开 /admin/settings 被拒。
+B1. 部署后卡片显示"已接线"，读回值与 M0 一致。普通测试用户打开 /admin/settings 被拒。
 B2. 管理员把"新消息每分钟"改为 2；测试用户发 2 轮正常、第 3 轮被拦，余额不变。
 B3. 管理员一键暂停 → 测试用户新一轮被拦；关闭暂停 → 再发一轮正常。
 B4. 恢复全部原值并读回。
 
-通过标准：A 段全部通过（A5 若 /runtime 不对测试用户开放可 SKIP 并写原因）才算候选干净；
+通过标准：A 段全部通过（A5、A5b 若对应页面不对测试用户开放可 SKIP 并写原因）才算候选干净；M0 通过才能合并；
 B 段全部通过才算部署验证完成。任何一步出现被拦却扣费、已完成的回复被作废、页面一直"处理中"、
 或暂停后仍有新回复，即为失败。
 不在范围内：staging 上的 Redis 故障注入和并发压测（只在本机做）、正式环境、内容审核
@@ -540,9 +607,12 @@ B 段全部通过才算部署验证完成。任何一步出现被拦却扣费、
 | `rate` 的并发窗口 | 预查和扣减之间并发，可能加了计数又被拒 | 只会偏严 |
 | 结果原因不落库 | 刷新后被拦的那一轮显示通用"已停止" | 已知限制，避免改 SQL |
 | 计数偏严 | 并发相同请求、配置错误的失败、日窗口拒绝时分钟已计数，都会多算 | 只会少放行，不会多放行 |
+| "模型调用"口径比原话严 | Owner 原话"模型调用每分钟 30 次、每天 600 次"，实现为"每轮按最多可用调用数预扣" | 后台文案写明；总控请求合并批准时向 Owner 说明 |
+| 被拦的 OPC 新请求仍写数据库 | 新 requestId 过闸门前已写入材料版本（`opc_step_material`）和 `opc_turns`，被拒的请求也会增加行数（不显示、不涉及费用） | 只受现有 `/api/trpc` 按 IP 60 次/分钟的限制；不为此前移闸门（第 2.2 节） |
+| 旧链路 | `agentSlice`、工作台 `generate` 若仍对用户开放 | 第 4 节：接上暂停检查，或写明不覆盖并报 Owner |
 | 滑动窗口近似 | 不保证任意连续 24 小时严格不超限 | 提示用"近24小时"，不承诺精确 |
 | 暂停对长轮次有延迟 | 已开始的一轮会跑完 | 设计如此，避免作废已付费的回复 |
-| 暂停意向已提前保存 | 部署即生效 | 验证 B0 |
+| 暂停意向已提前保存 | 合并即部署即生效 | 合并前检查 M0 |
 | 输出检查在整理之后、在流式之后 | 以后正式拦截时已花整理费用、用户已看到文字 | 第 5.2 节已知限制，正式实现时处理 |
 
 **回退**：
@@ -560,6 +630,6 @@ B 段全部通过才算部署验证完成。任何一步出现被拦却扣费、
 | --- | --- | --- |
 | "新对话"怎么计 | Owner：每发一条消息算一次；后台写"新消息"/"每轮消息" | 第 2.5、6.1 节 |
 | 调用闸门位置 | 总控：`claimCall` 之前，只拦一轮的第一次调用 | 第 2.3 节 |
-| 旧链路是否受暂停控制 | 总控：不受；`/api/ai/stream` 已 410，旧代码由 LEGACY-CLOSE 删除；列出工作台付费路径 | 第 4 节 |
+| 旧链路是否受暂停控制 | 总控：`/api/ai/stream` 已 410，旧代码由 LEGACY-CLOSE 删除；独立审查补充：`agentSlice`、工作台 `generate` 仍开放的要接上暂停检查，否则写明不覆盖并报 Owner | 第 4 节 |
 | 封闭内测环境 | Owner：正式环境；正式环境 Redis 等配置是内测前提 | 第 3 节 |
 | staging 验证预算 | 总控：到验证阶段按实际步骤算，由总控请 Owner 批准；本文先写估算 | 第 9 节 |
