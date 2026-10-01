@@ -156,8 +156,8 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
         if (saved.accountClosed) return { dispatched: true, accountClosed: true as const };
       }
       catch { return { dispatched: true, pendingReceipt: { runId: capability.runId, callId, evidence } }; }
-      // The host must recheck before SDK/history/stream delivery: confirmation
-      // can commit after receipt insertion. Host integration follows PR #497.
+      // Confirmation can still commit after this receipt. Every later Runtime
+      // read/write then refuses the actor (bill2_actor), so no content reaches SDK/history/result.
       return { dispatched: true, observation }; // Private server composition only; never a public route result.
     },
     closeRun: (runId: string, outcome: 'delivered' | 'confirmed_failure' | 'cancelled' | 'unknown', result: unknown = null) =>
