@@ -10,6 +10,14 @@ const DEFAULT_APP_URL = 'http://localhost:3000';
 const DEFAULT_AUTH_APP_URL = 'https://app.graylum.com';
 const SHARED_COOKIE_DOMAIN = '.graylum.com';
 
+// Production hosts. Only these share the parent-domain session cookie; every other host, including
+// a staging domain under graylum.com, keeps a host-only cookie so sessions never cross environments.
+const PUBLIC_SITE_HOSTS = new Set(['graylum.com', 'www.graylum.com']);
+const SHARED_COOKIE_HOSTS = new Set([...PUBLIC_SITE_HOSTS, 'app.graylum.com']);
+// App hosts whose own origin serves login, the auth callback and the verify page. Matched exactly so a
+// request's Host header alone never chooses where auth redirects go.
+const STAGING_APP_HOSTS = new Set(['auth-staging.graylum.com']);
+
 function resolveTrimmedValue(value?: string | null) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
@@ -46,8 +54,13 @@ function resolveHostname(hostname?: string | null) {
   return '';
 }
 
+export function isPublicSiteHost(hostname: string) {
+  return PUBLIC_SITE_HOSTS.has(hostname);
+}
+
 function isRuntimeAuthHost(hostname: string) {
   return (
+    STAGING_APP_HOSTS.has(hostname) ||
     hostname === 'localhost' ||
     hostname === '127.0.0.1' ||
     hostname.endsWith('.localhost') ||
@@ -86,6 +99,11 @@ export function resolveSupportEmail(value?: string | null) {
 }
 
 export function resolveAppUrl() {
+  const runtimeOrigin = resolveRuntimeAuthOrigin();
+  if (runtimeOrigin) {
+    return runtimeOrigin;
+  }
+
   return normalizeAppOrigin(
     resolveTrimmedValue(process.env.NEXT_PUBLIC_APP_URL) ||
       (typeof window !== 'undefined' ? window.location.origin : null),
@@ -112,28 +130,51 @@ export function resolveAuthCallbackOrigin(requestOrigin: string | URL) {
 
 export function resolveSupabaseCookieOptions(hostname?: string | null) {
   const normalizedHostname = resolveHostname(hostname);
-  const useSharedDomain =
-    normalizedHostname === 'graylum.com' ||
-    normalizedHostname === 'www.graylum.com' ||
-    normalizedHostname === 'app.graylum.com' ||
-    normalizedHostname.endsWith('.graylum.com');
+  const useSharedDomain = SHARED_COOKIE_HOSTS.has(normalizedHostname);
 
   return {
     domain: useSharedDomain ? SHARED_COOKIE_DOMAIN : undefined,
     path: '/',
     sameSite: 'lax' as const,
-    secure: useSharedDomain,
+    secure: useSharedDomain || normalizedHostname.endsWith(SHARED_COOKIE_DOMAIN),
   };
 }
 
+// Before host-only cookies, a staging host under graylum.com wrote its session to .graylum.com.
+// Returns this project's cookie names that may still sit there; production hosts return none.
+export function legacyParentCookieNames(cookieNames: string[], hostname?: string | null) {
+  const normalizedHostname = resolveHostname(hostname);
+  if (SHARED_COOKIE_HOSTS.has(normalizedHostname) || !normalizedHostname.endsWith(SHARED_COOKIE_DOMAIN)) {
+    return [];
+  }
+
+  const prefix = supabaseAuthCookiePrefix();
+  return prefix ? cookieNames.filter(name => name.startsWith(prefix)) : [];
+}
+
+// Same storage key @supabase/ssr derives: sb-<first label of the project URL host>-auth-token.
+function supabaseAuthCookiePrefix() {
+  try {
+    const ref = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').hostname.split('.')[0];
+    return ref ? `sb-${ref}-auth-token` : null;
+  } catch {
+    return null;
+  }
+}
+
+// Links for moving around the site. In the browser they point at the app or auth origin. On the
+// server there is no request origin here, so they stay relative: the current host serves them, and on
+// the public site the proxy forwards non-public paths such as /login to the app domain. URLs that
+// must be absolute (email and OAuth redirects, payment return URLs) do not use these helpers; they
+// pass an explicit origin to resolveAuthAppUrl or build from the request.
 export function buildAppHref(path: string) {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  return `${resolveAppUrl()}${normalizedPath}`;
+  return typeof window === 'undefined' ? normalizedPath : `${resolveAppUrl()}${normalizedPath}`;
 }
 
 export function buildAuthHref(path: string) {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  return `${resolveAuthAppUrl()}${normalizedPath}`;
+  return typeof window === 'undefined' ? normalizedPath : `${resolveAuthAppUrl()}${normalizedPath}`;
 }
 
 export {
