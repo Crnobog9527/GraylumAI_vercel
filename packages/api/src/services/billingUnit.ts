@@ -1,13 +1,20 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { TRPCError } from '@trpc/server';
+import { BILLING_CONSTANTS } from '../types/billing';
 
 /**
  * BILL-UNIT configuration: q (credits per USD), the site-wide default multiplier and
  * per-model overrides. Read failures and invalid values reject new charging; only a
  * successfully confirmed missing key or a legal NULL override inherits a default.
  */
-export const BILLING_UNIT_DEFAULTS = { creditsPerUsd: '100', multiplier: '3' } as const;
+// Fallback only for a confirmed-missing row. Kept equal to the pre-BILL-UNIT defaults so merging
+// never changes an environment's effective q/m; the Owner-approved q=100/m=3 is written as rows.
+export const BILLING_UNIT_DEFAULTS = {
+  creditsPerUsd: String(BILLING_CONSTANTS.CREDITS_PER_USD),
+  multiplier: String(BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER),
+} as const;
 export const BILLING_UNIT_SETTING_KEYS = {
   creditsPerUsd: 'billing_credits_per_usd',
   multiplier: 'billing_token_price_multiplier',
@@ -29,6 +36,11 @@ export class BillingUnitConfigError extends Error {
     super(code);
     this.name = 'BillingUnitConfigError';
   }
+}
+
+/** Client-facing form: the configuration is unavailable; internal codes and values stay in logs. */
+export function billingUnitPublicError(cause: unknown): TRPCError {
+  return new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: '计费配置暂不可用，新的收费已暂停，请稍后重试', cause });
 }
 
 const MULTIPLIER_PATTERN = /^(?:(?:[1-9]|1[0-9])(?:\.[0-9]{1,2})?|20(?:\.0{1,2})?)$/;
@@ -148,7 +160,8 @@ export function buildMultiplierSnapshot(
   return { ...body, hash: snapshotHash(body) };
 }
 
-/** Reads q, the default and the approved models' overrides as one admission snapshot. */
+/** Reads q and the default, then the approved models' overrides. These are two separate reads,
+ * not one transaction: the frozen snapshot that results is the authority for the operation. */
 export async function readMultiplierSnapshot(db: SupabaseClient, modelIds: readonly string[]): Promise<MultiplierSnapshot> {
   const ids = [...new Set(modelIds)];
   if (ids.length === 0 || ids.length > MAX_SNAPSHOT_MODELS) throw new BillingUnitConfigError('BILLING_UNIT_SNAPSHOT_INVALID');
@@ -167,7 +180,9 @@ export async function readMultiplierSnapshot(db: SupabaseClient, modelIds: reado
 
 /** A call may only use a model frozen into its operation's snapshot. */
 export function multiplierForCall(snapshot: MultiplierSnapshot, modelId: string) {
-  if (snapshot.version !== BILLING_UNIT_SNAPSHOT_VERSION || snapshotHash(snapshot) !== snapshot.hash) {
+  const models: unknown = snapshot?.models;
+  if (!snapshot || snapshot.version !== BILLING_UNIT_SNAPSHOT_VERSION || typeof models !== 'object' || models === null
+    || Array.isArray(models) || snapshotHash(snapshot) !== snapshot.hash) {
     throw new BillingUnitConfigError('BILLING_UNIT_SNAPSHOT_INVALID');
   }
   const entry = Object.hasOwn(snapshot.models, modelId) ? snapshot.models[modelId] : undefined;

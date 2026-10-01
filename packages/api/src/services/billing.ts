@@ -18,7 +18,7 @@ import { type TokenUsage, type CostBreakdown } from '../types/ai';
 import { logger } from '../lib/logger';
 import { creditBalanceDiagnostics, readCreditBalance, type CreditBalanceReadOptions } from './creditBalance';
 import { applyInvitationRebateForSpend } from './invitationRebate';
-import { BillingUnitConfigError, billingUnitSettingsFromRows } from './billingUnit';
+import { BillingUnitConfigError } from './billingUnit';
 
 // ============================================
 // 类型定义
@@ -263,14 +263,14 @@ export async function getBillingRuntimeSettings(
       'billing_require_model_pricing',
     ]);
 
-  if (error) {
-    logger.warn('billing', 'billing_runtime_settings_read_failed', { code: error.code });
+  // A failed read is not a missing row: refuse instead of charging with fallbacks. Present but
+  // invalid values keep the legacy fallbacks; BILL-UNIT's strict 1–20 rules apply to the new path only.
+  if (error || !Array.isArray(data)) {
+    logger.warn('billing', 'billing_runtime_settings_read_failed', { code: error?.code });
     throw new BillingUnitConfigError('BILLING_UNIT_SETTINGS_UNAVAILABLE');
   }
-  // q and the default multiplier fail closed (BILL-UNIT); the legacy pre-deduct knobs keep their fallbacks.
-  const unit = billingUnitSettingsFromRows(data ?? []);
   const settings = new Map<string, unknown>();
-  for (const row of data ?? []) {
+  for (const row of data) {
     settings.set(row.key, row.value);
   }
 
@@ -287,8 +287,8 @@ export async function getBillingRuntimeSettings(
   );
 
   return {
-    creditsPerUsd: Number(unit.creditsPerUsd),
-    tokenPriceMultiplier: Number(unit.defaultMultiplier),
+    creditsPerUsd: parsePositiveNumberSetting(settings.get('billing_credits_per_usd'), DEFAULT_BILLING_RUNTIME_SETTINGS.creditsPerUsd),
+    tokenPriceMultiplier: parsePositiveNumberSetting(settings.get('billing_token_price_multiplier'), DEFAULT_BILLING_RUNTIME_SETTINGS.tokenPriceMultiplier),
     minPreDeduct,
     maxPreDeduct,
     safetyMargin: parseNonNegativeNumberSetting(

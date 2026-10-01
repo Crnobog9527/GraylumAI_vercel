@@ -59,10 +59,14 @@ describe('BILL-UNIT weighted arithmetic', () => {
     expect(weightedAggregateCredits([{ costUsd: '0.01', multiplier: '1' }], '100.5')).toBe(2);
   });
 
+  it.each(['0', '0.5', '20.01', '1.234', '3e0', '-1', ''])('rejects multiplier %j itself, without relying on the caller', (multiplier) => {
+    expect(() => weightedAggregateCredits([{ costUsd: '1', multiplier }], '100')).toThrow('MULTIPLIER_INVALID');
+    expect(() => weightedDeltaCredits(0n, { costUsd: '1', multiplier }, '100')).toThrow('MULTIPLIER_INVALID');
+  });
+
   it('rejects zero rules, invalid text and overflow', () => {
-    expect(() => weightedAggregateCredits([{ costUsd: '1', multiplier: '0' }], '100')).toThrow('RULES');
     expect(() => weightedAggregateCredits([{ costUsd: '1', multiplier: '3' }], '0')).toThrow('RULES');
-    expect(() => weightedAggregateCredits([{ costUsd: '1', multiplier: '3e0' }], '100')).toThrow('DECIMAL');
+    expect(() => weightedAggregateCredits([{ costUsd: '1e-3', multiplier: '3' }], '100')).toThrow('DECIMAL');
     expect(() => weightedAggregateCredits([{ costUsd: '999999999999', multiplier: '20' }], '1000')).toThrow('OVERFLOW');
     expect(() => parseWeightedUsd('1.0000000000000000000000001')).toThrow('DECIMAL');
     expect(() => formatWeightedUsd(-1n)).toThrow('DECIMAL');

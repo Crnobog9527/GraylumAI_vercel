@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  billingUnitPublicError,
   billingUnitSettingsFromRows,
   buildMultiplierSnapshot,
   multiplierForCall,
@@ -58,15 +59,18 @@ describe('multiplier and q validation', () => {
 });
 
 describe('billing unit settings read', () => {
-  it('uses 100 / 3 only when the keys are confirmed absent', () => {
+  it('a confirmed-missing row keeps the pre-BILL-UNIT fallback, so merging does not move the effective q/m', () => {
     expect(billingUnitSettingsFromRows([])).toEqual({
-      creditsPerUsd: '100', defaultMultiplier: '3', source: { creditsPerUsd: 'default', defaultMultiplier: 'default' },
+      creditsPerUsd: '1000', defaultMultiplier: '1.5', source: { creditsPerUsd: 'default', defaultMultiplier: 'default' },
     });
   });
 
-  it('keeps configured values, including an old q=1000 contract value', () => {
-    expect(billingUnitSettingsFromRows([{ key: Q, value: 1000 }, { key: M, value: '1.5' }])).toMatchObject({
-      creditsPerUsd: '1000', defaultMultiplier: '1.5', source: { creditsPerUsd: 'configured', defaultMultiplier: 'configured' },
+  it('uses explicit rows: the Owner-approved q=100/m=3 switch is a configuration write', () => {
+    expect(billingUnitSettingsFromRows([{ key: Q, value: '100' }, { key: M, value: '3' }])).toMatchObject({
+      creditsPerUsd: '100', defaultMultiplier: '3', source: { creditsPerUsd: 'configured', defaultMultiplier: 'configured' },
+    });
+    expect(billingUnitSettingsFromRows([{ key: Q, value: 1000 }, { key: M, value: 1.5 }])).toMatchObject({
+      creditsPerUsd: '1000', defaultMultiplier: '1.5',
     });
   });
 
@@ -79,6 +83,10 @@ describe('billing unit settings read', () => {
     [[{ key: Q, value: 100 }, { key: Q, value: 100 }]],
   ])('rejects explicit NULL, invalid or duplicate global values %j', (rows) =>
     expect(() => billingUnitSettingsFromRows(rows)).toThrow('SETTINGS_INVALID'));
+
+  it('maps to a generic SERVICE_UNAVAILABLE for clients', () => {
+    expect(billingUnitPublicError(new Error('x'))).toMatchObject({ code: 'SERVICE_UNAVAILABLE', message: expect.stringContaining('计费配置') });
+  });
 
   it('a read error rejects instead of falling back', async () => {
     const { db } = fakeDb({ system_settings: { data: null, error: { code: 'PGRST' } } });
@@ -108,6 +116,10 @@ describe('per-model multiplier snapshot', () => {
     expect(() => multiplierForCall(snapshot, 'c')).toThrow('MODEL_NOT_APPROVED');
     expect(() => multiplierForCall({ ...snapshot, models: { ...snapshot.models, a: { multiplier: '9', source: 'model' } } }, 'a'))
       .toThrow('SNAPSHOT_INVALID');
+    for (const models of [null, [], undefined]) {
+      expect(() => multiplierForCall({ ...snapshot, models } as never, 'a')).toThrow('SNAPSHOT_INVALID');
+    }
+    expect(() => multiplierForCall(null as never, 'a')).toThrow('SNAPSHOT_INVALID');
   });
 
   it('hash is order independent and changes with any frozen value', () => {

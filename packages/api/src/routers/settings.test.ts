@@ -58,8 +58,9 @@ describe('billing unit setting validation', () => {
   it.each([['billing_credits_per_usd', '100'], ['billing_token_price_multiplier', '3'], ['billing_token_price_multiplier', '19.99']])(
     'accepts %s=%s and continues to the writer check', async (key, value) => {
       const upsert = vi.fn();
-      await expect(callerWithFailingWriterRead(upsert).updateSystemSettingsBulk([{ key, value }]))
-        .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+      const caller = callerWithFailingWriterRead(upsert);
+      await expect(caller.updateSystemSettingsBulk([{ key, value }])).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+      await expect(caller.updateSystemSettings({ key, value })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
       expect(upsert).not.toHaveBeenCalled();
     });
 });

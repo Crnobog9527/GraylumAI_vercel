@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { ModelReasoningButton } from '@/components/admin/ModelReasoningDialog';
+import { ModelMultiplierPanel } from '@/components/admin/ModelMultiplierPanel';
 import {
   Bot, Plus, Pencil, Trash2, Sparkles, Brain, Zap,
   Check, X, Loader2, Globe, RefreshCw, AlertTriangle, HelpCircle
@@ -29,14 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -603,6 +597,8 @@ export default function AdminModelsPage() {
             </Table>
           </CardContent>
         </Card>
+
+        <div className="mt-8"><ModelMultiplierPanel /></div>
 
         {/* Create/Edit Dialog */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

@@ -19,6 +19,7 @@ import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import AdminSettingsLoadError from '@/components/admin/AdminErrorState';
 import { RuntimeRateLimitSettings, RuntimeRateLimitTabTrigger } from '@/components/admin/RuntimeRateLimitSettings';
 import { MentorBudgetTabContent, MentorBudgetTabTrigger } from '@/components/admin/MentorBudgetSettings';
+import { changedSettings } from './changedSettings';
 
 // 完整的系统设置定义
 const defaultSettings: Record<string, { value: string; type: 'string' | 'number' | 'boolean'; label: string; description: string }> = {
@@ -29,8 +30,8 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
 
   // Credits & Billing
   new_user_credits: { value: '100', type: 'number', label: '新用户赠送积分', description: '新用户注册时赠送的积分数量' },
-  billing_credits_per_usd: { value: '100', type: 'number', label: '每美元积分数', description: '成本先统一为美元，再按此比例换成积分；只影响新操作' },
-  billing_token_price_multiplier: { value: '3', type: 'number', label: '全站默认加价倍数', description: '1–20，最多两位小数；模型未单独设置倍数时使用' },
+  billing_credits_per_usd: { value: '', type: 'number', label: '每美元积分数', description: '留空 = 未配置（按缺省值 1000 计算）；只影响新操作' },
+  billing_token_price_multiplier: { value: '', type: 'number', label: '全站默认加价倍数', description: '留空 = 未配置（缺省 1.5）；1–20，最多两位小数' },
   billing_min_pre_deduct: { value: '10', type: 'number', label: '最小预扣积分', description: 'AI 请求预扣的最低积分数，默认沿用现有安全值 10' },
   billing_max_pre_deduct: { value: '10000', type: 'number', label: '最大预扣积分', description: '单次 AI 请求预扣积分上限' },
   billing_safety_margin: { value: '0.2', type: 'number', label: '预扣安全边际', description: '预扣时在估算积分上额外增加的比例，例如 0.2 表示 20%' },
@@ -187,12 +188,9 @@ export default function AdminSettingsPage() {
   const handleSaveAll = async () => {
     setSaving(true);
     try {
-      await updateSettingsBulk.mutateAsync(
-        Object.entries(settings).map(([key, data]) => ({
-          key,
-          value: data.value,
-        })),
-      );
+      const changes = changedSettings(settings, savedSettings, defaultSettings);
+      if (changes.length === 0) { toast.success('没有需要保存的修改'); return; }
+      await updateSettingsBulk.mutateAsync(changes);
       toast.success('设置保存成功');
       void refetchDashboard();
     } catch (error) {

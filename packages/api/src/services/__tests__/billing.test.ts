@@ -455,7 +455,7 @@ describe('getModelPricing', () => {
 });
 
 describe('calculateTokenCostWithPricing', () => {
-  it('charges 1 credit for 50 input and 291 output tokens at $1/$5 per 1M with default q=100, m=3', () => {
+  it('charges 3 credits for 50 input and 291 output tokens at $1/$5 per 1M', () => {
     const result = calculateTokenCostWithPricing(
       {
         inputTokens: 50,
@@ -471,7 +471,7 @@ describe('calculateTokenCostWithPricing', () => {
     );
 
     expect(result.costUsd).toBeCloseTo(0.001505, 12);
-    expect(result.credits).toBe(1);
+    expect(result.credits).toBe(3);
   });
 
   it('uses configured creditsPerUsd and tokenPriceMultiplier when provided', () => {
@@ -515,8 +515,8 @@ describe('getBillingRuntimeSettings', () => {
     } as unknown as BillingContext['supabase'];
 
     await expect(getBillingRuntimeSettings(supabase)).resolves.toMatchObject({
-      creditsPerUsd: 100,
-      tokenPriceMultiplier: 3,
+      creditsPerUsd: 1000,
+      tokenPriceMultiplier: 1.5,
       minPreDeduct: 10,
       maxPreDeduct: 10000,
       safetyMargin: 0.2,
@@ -524,7 +524,7 @@ describe('getBillingRuntimeSettings', () => {
     });
   });
 
-  it('falls back invalid pre-deduct values while preserving valid settings', async () => {
+  it('falls back invalid values while preserving valid settings', async () => {
     const supabase = {
       from(table: string) {
         expect(table).toBe('system_settings');
@@ -536,7 +536,7 @@ describe('getBillingRuntimeSettings', () => {
             return Promise.resolve({
               data: [
                 { key: 'billing_credits_per_usd', value: '200' },
-                { key: 'billing_token_price_multiplier', value: '2' },
+                { key: 'billing_token_price_multiplier', value: '-1' },
                 { key: 'billing_min_pre_deduct', value: '3' },
                 { key: 'billing_max_pre_deduct', value: '2' },
                 { key: 'billing_safety_margin', value: 'bad' },
@@ -551,7 +551,7 @@ describe('getBillingRuntimeSettings', () => {
 
     await expect(getBillingRuntimeSettings(supabase)).resolves.toMatchObject({
       creditsPerUsd: 200,
-      tokenPriceMultiplier: 2,
+      tokenPriceMultiplier: 1.5,
       minPreDeduct: 3,
       maxPreDeduct: 3,
       safetyMargin: 0.2,
@@ -560,16 +560,15 @@ describe('getBillingRuntimeSettings', () => {
   });
 
   it.each([
-    [{ data: null, error: { code: 'PGRST301' } }, 'SETTINGS_UNAVAILABLE'],
-    [{ data: [{ key: 'billing_token_price_multiplier', value: '-1' }], error: null }, 'SETTINGS_INVALID'],
-    [{ data: [{ key: 'billing_credits_per_usd', value: 'bad' }], error: null }, 'SETTINGS_INVALID'],
-  ])('rejects instead of falling back when q or m cannot be trusted %#', async (result, code) => {
+    [{ data: null, error: { code: 'PGRST301' } }],
+    [{ data: null, error: null }],
+  ])('a failed read is refused, not treated as missing rows %#', async (result) => {
     const supabase = {
       from() {
         return { select() { return this; }, in: () => Promise.resolve(result) };
       },
     } as unknown as BillingContext['supabase'];
-    await expect(getBillingRuntimeSettings(supabase)).rejects.toThrow(code);
+    await expect(getBillingRuntimeSettings(supabase)).rejects.toThrow('SETTINGS_UNAVAILABLE');
   });
 });
 

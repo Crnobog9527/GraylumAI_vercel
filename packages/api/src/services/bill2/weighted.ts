@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { decimal } from './decimal';
+import { parseMultiplier } from '../billingUnit';
 
 /**
  * BILL-UNIT arithmetic: every call keeps the multiplier m_i frozen for it, and an
@@ -12,11 +13,11 @@ const SCALE = 1_000_000_000_000n;
 const WEIGHTED_SCALE = SCALE * SCALE;
 const MAX_CREDITS = 2_147_483_647n;
 
-/** Exact W = Σ(cost_i × m_i) in 1e-24 USD units; nothing is rounded here. */
+/** Exact W = Σ(cost_i × m_i) in 1e-24 USD units; nothing is rounded here. Each m_i must itself be a
+ * valid BILL-UNIT multiplier (1–20, ≤2 decimals); callers are not trusted to have checked it. */
 export function weightedUsdUnits(entries: readonly WeightedCost[]): bigint {
   return entries.reduce((sum, entry) => {
-    const multiplier = decimal(entry.multiplier);
-    if (multiplier === 0n) throw new Error('BILL2_INVALID_RULES');
+    const multiplier = decimal(parseMultiplier(entry.multiplier));
     return sum + decimal(entry.costUsd) * multiplier;
   }, 0n);
 }
