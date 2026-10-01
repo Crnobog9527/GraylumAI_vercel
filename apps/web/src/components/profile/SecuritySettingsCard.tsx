@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { keepDialogOpenForCaptcha } from '@/lib/dialogCaptcha';
 import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
+import { validateNewPassword } from '@/lib/passwordRecovery';
 import {
   Dialog,
   DialogContent,
@@ -57,15 +58,10 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
       return;
     }
 
-    if (passwordForm.new_password !== passwordForm.confirm_password) {
+    const invalidPassword = validateNewPassword(passwordForm.new_password, passwordForm.confirm_password);
+    if (invalidPassword) {
       setStatusTone('error');
-      setStatusMessage('两次输入的新密码不一致。');
-      return;
-    }
-
-    if (passwordForm.new_password.length < 8) {
-      setStatusTone('error');
-      setStatusMessage('新密码至少需要 8 位字符。');
+      setStatusMessage(invalidPassword);
       return;
     }
 

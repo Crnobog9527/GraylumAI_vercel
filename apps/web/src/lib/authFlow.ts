@@ -51,18 +51,19 @@ export function buildVerifyEmailPath(email: string, redirect: string, reason?: V
 
 // Where GoTrue sends an email or OAuth link back to. `next` goes through the same sanitizer the
 // callback applies, so a landing's error or code parameters never ride along to the next page.
-// `flow=oauth` marks a Google sign-in; it only picks which fixed message a failed exchange shows.
-export type AuthCallbackFlow = 'email' | 'oauth';
+// `flow=oauth` marks a Google sign-in and `flow=recovery` a password reset link; the flow only picks
+// which fixed page and message a failed link or exchange leads to, never whether access is granted.
+export type AuthCallbackFlow = 'email' | 'oauth' | 'recovery';
 
 export function buildAuthCallbackUrl(origin: string, next: string, flow: AuthCallbackFlow = 'email') {
   const url = new URL('/auth/callback', origin);
   url.searchParams.set('next', sanitizeRedirectTarget(next));
-  if (flow === 'oauth') url.searchParams.set('flow', 'oauth');
+  if (flow !== 'email') url.searchParams.set('flow', flow);
   return url.toString();
 }
 
 export function parseAuthCallbackFlow(value: string | null): AuthCallbackFlow {
-  return value === 'oauth' ? 'oauth' : 'email';
+  return value === 'oauth' || value === 'recovery' ? value : 'email';
 }
 
 // Errors GoTrue appends to the email-link redirect. Only error_code values listed here route to the
@@ -123,11 +124,14 @@ const VERIFIER_EXCHANGE_ERROR_CODES = new Set([
   'flow_state_expired',
 ]);
 
-export function classifyCodeExchangeError(error: unknown, flow: AuthCallbackFlow = 'email'): LoginErrorCode {
+export function isVerifierMismatch(error: unknown) {
   const code = errorCode(error);
-  const verifierMismatch = VERIFIER_EXCHANGE_ERROR_CODES.has(code)
+  return VERIFIER_EXCHANGE_ERROR_CODES.has(code)
     || (!code && /code verifier|code challenge/i.test(getErrorMessageText(error)));
-  if (!verifierMismatch) return 'callback_failed';
+}
+
+export function classifyCodeExchangeError(error: unknown, flow: AuthCallbackFlow = 'email'): LoginErrorCode {
+  if (!isVerifierMismatch(error)) return 'callback_failed';
   return flow === 'oauth' ? 'oauth_incomplete' : 'link_needs_login';
 }
 
