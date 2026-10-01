@@ -15,7 +15,8 @@ const model='test/model';
 const identity={provider:'openrouter',account:'test',model,protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,
  promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'},outputLimit:100,upperUsd:'0.02'} as const;
 const routing=openRouterBound(identity.providerLimits,identity.outputLimit).routing;
-const card={question:'你主要在哪个平台？',options:['小红书','抖音']};
+// The v5 product card (five fields): public prose travels in message.
+const card={question:'你主要在哪个平台？',options:['小红书','抖音'],recommended:null,message:'先了解一下。',recommendationReason:null};
 const event=(delta:unknown,finish:string|null=null,extra:Record<string,unknown>={})=>
  'data: '+JSON.stringify({id:'gen-1',model,choices:[{index:0,delta,finish_reason:finish}],...extra})+'\n\n';
 const text=(value:string,index=0)=>({type:'reasoning.text',index,format:'google-gemini-v1',text:value});
@@ -28,7 +29,6 @@ const geminiEvents=[
  event({content:'',reasoning:'平台',reasoning_details:[text('平台')]}),
  event({content:'',reasoning:'再问',reasoning_details:[text('再问')]}),keepalive,
  event({content:'',reasoning_details:[signature()]}),
- event({content:'先了解一下。'}),
  event({tool_calls:[{index:0,id:'call_a',type:'function',function:{name:'ask_question',arguments:JSON.stringify(card)}}]}),
  event({},'tool_calls'),usage,'data: [DONE]\n\n',
 ];
@@ -71,9 +71,10 @@ describe('reasoning_details with a type change at one index',()=>{
   });
   const session:Session={getSessionId:async()=> 'synthetic',getItems:async()=>[],addItems:async()=>{},popItem:async()=>undefined,clearSession:async()=>{}};
   const output=await runRuntime({model,instructions:'I',input:'hello',session,maxOutputTokens:4096,maxTurns:1,exchange,stream:true,
-   tools:[askQuestionTool()],selectHistory:async(_h,i)=>i,stopAtToolNames:['ask_question'],firstToolCallOnly:true});
+   tools:[askQuestionTool(true)],selectHistory:async(_h,i)=>i,stopAtToolNames:['ask_question'],firstToolCallOnly:true,
+   allowEmptyResult:true,commitSessionOnSuccess:true});
   expect(questionCardFromResult(output)).toEqual(card);expect(exchange).toHaveBeenCalledTimes(1);
-  expect(served()).toBe(geminiEvents.length);expect(cancel).not.toHaveBeenCalled();expect(chunks).toHaveLength(8);
+  expect(served()).toBe(geminiEvents.length);expect(cancel).not.toHaveBeenCalled();expect(chunks).toHaveLength(7);
   expect(observations[0]).toMatchObject({complete:true,transportIssue:null,agentTools:true});
   expect(evidence[0]).toMatchObject({final:true,cost:'0.00123',providerId:'gen-1'});expect(evidence[0]!.rejectedReason).toBeUndefined();
   expect(JSON.parse(evidence[0]!.rawBody).choices[0].message.reasoning_details).toEqual(expectedDetails);
