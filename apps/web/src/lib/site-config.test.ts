@@ -16,7 +16,7 @@ describe('auth origin resolution', () => {
   });
 
   it('uses the exact initiating Preview deployment host', () => {
-    vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', 'https://graylumai-staging.vercel.app');
+    vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', 'https://auth-staging.graylum.com');
 
     expect(resolveAuthAppUrl('https://graylum-ai-vercel-v1-preview.vercel.app')).toBe(
       'https://graylum-ai-vercel-v1-preview.vercel.app',
@@ -24,19 +24,19 @@ describe('auth origin resolution', () => {
   });
 
   it('keeps the branch alias origin when the flow starts there', () => {
-    expect(resolveAuthCallbackOrigin('https://graylumai-staging.vercel.app')).toBe(
-      'https://graylumai-staging.vercel.app',
+    expect(resolveAuthCallbackOrigin('https://example-alias.vercel.app')).toBe(
+      'https://example-alias.vercel.app',
     );
   });
 
   it('uses the initiating localhost origin instead of a configured deployment alias', () => {
-    vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', 'https://graylumai-staging.vercel.app');
+    vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', 'https://auth-staging.graylum.com');
 
     expect(resolveAuthAppUrl('http://localhost:3127')).toBe('http://localhost:3127');
   });
 
   it('uses the browser runtime origin by default on a Preview deployment', () => {
-    vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', 'https://graylumai-staging.vercel.app');
+    vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', 'https://auth-staging.graylum.com');
     vi.stubGlobal('window', {
       location: { origin: 'https://graylum-ai-vercel-v1-preview.vercel.app' },
     });
@@ -60,7 +60,7 @@ describe('staging app host', () => {
 
   it('keeps login, callback and verify links on the staging domain', () => {
     vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', '');
-    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://graylumai-staging.vercel.app');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://example-alias.vercel.app');
 
     expect(resolveAuthAppUrl('https://auth-staging.graylum.com')).toBe('https://auth-staging.graylum.com');
     vi.stubGlobal('window', { location: { origin: 'https://auth-staging.graylum.com' } });
@@ -92,7 +92,7 @@ describe('session cookie scope', () => {
     expect(resolveSupabaseCookieOptions('auth-staging.graylum.com')).toMatchObject({ domain: undefined, secure: true });
     expect(resolveSupabaseCookieOptions('x.app.graylum.com')).toMatchObject({ domain: undefined, secure: true });
     expect(resolveSupabaseCookieOptions('evilgraylum.com')).toMatchObject({ domain: undefined, secure: false });
-    expect(resolveSupabaseCookieOptions('graylumai-staging.vercel.app')).toMatchObject({ domain: undefined });
+    expect(resolveSupabaseCookieOptions('example-alias.vercel.app')).toMatchObject({ domain: undefined });
     expect(resolveSupabaseCookieOptions('localhost')).toMatchObject({ domain: undefined, secure: false });
   });
 
@@ -110,7 +110,7 @@ describe('session cookie scope', () => {
       'sb-stagingref-auth-token-code-verifier',
     ]);
     expect(legacyParentCookieNames(names, 'app.graylum.com')).toEqual([]);
-    expect(legacyParentCookieNames(names, 'graylumai-staging.vercel.app')).toEqual([]);
+    expect(legacyParentCookieNames(names, 'example-alias.vercel.app')).toEqual([]);
   });
 
   it('cleans nothing when the project URL is missing', () => {
@@ -126,14 +126,14 @@ describe('site links on the server and in the browser', () => {
   });
 
   it('stays relative on the server, where no request origin is known', () => {
-    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://graylumai-staging.vercel.app');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://auth-staging.graylum.com');
     expect(buildAuthHref('/login?action=signup')).toBe('/login?action=signup');
     expect(buildAppHref('landing')).toBe('/landing');
   });
 
   it('points at the auth origin in the browser', () => {
     vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', '');
-    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://graylumai-staging.vercel.app');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://example-alias.vercel.app');
     vi.stubGlobal('window', { location: { origin: 'https://auth-staging.graylum.com', hostname: 'auth-staging.graylum.com' } });
     expect(buildAuthHref('/login')).toBe('https://auth-staging.graylum.com/login');
     vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
@@ -143,10 +143,10 @@ describe('site links on the server and in the browser', () => {
 
   it('keeps redirect URLs sent to GoTrue absolute when built from an explicit origin on the server', () => {
     vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', '');
-    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://graylumai-staging.vercel.app');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://example-alias.vercel.app');
     expect(new URL('/auth/callback', resolveAuthAppUrl('https://auth-staging.graylum.com')).toString())
       .toBe('https://auth-staging.graylum.com/auth/callback');
-    expect(resolveAuthAppUrl()).toBe('https://graylumai-staging.vercel.app');
-    expect(resolveAuthCallbackOrigin('https://www.graylum.com')).toBe('https://graylumai-staging.vercel.app');
+    expect(resolveAuthAppUrl()).toBe('https://example-alias.vercel.app');
+    expect(resolveAuthCallbackOrigin('https://www.graylum.com')).toBe('https://example-alias.vercel.app');
   });
 });
