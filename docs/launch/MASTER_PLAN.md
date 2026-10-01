@@ -223,9 +223,11 @@
 
     总控只读核对（不是 Owner 原话）：`https://graylumai-staging.vercel.app/` 当时返回 404。以后 staging 的验证和交接只用 `https://auth-staging.graylum.com`。
 
-    后续事项：
+    Owner 已把 staging 的 `NEXT_PUBLIC_APP_URL` 改为 `https://auth-staging.graylum.com` 并重新部署；总控只读核对了线上代码里的值，没有读 Vercel 环境变量的原值（[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/567#issuecomment-5936590630)）。
 
-    - **STAGING-HOST-CLEANUP**（普通风险，总控安排）：清理代码、测试、脚本和文档里残留的 `graylumai-staging.vercel.app` 引用。本任务在 staging `9cb6cb84` 上只读搜索，有 18 个跟踪文件含这个域名，其中包括 `packages/api/src/services/runtime/stagingEnvironment.ts` 的 staging 环境名单；这一处影响测试窗口的环境判断，实施时由写入方按第 7.1 节规则核实风险，需要时单独拆成高风险 PR。
+    后续事项（[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/567#issuecomment-5936590630)，总控安排，不是 Owner 原话）：
+
+    - **STAGING-HOST-CLEANUP**（普通风险）：清理代码、测试、脚本和文档里残留的 `graylumai-staging.vercel.app` 引用。本任务在 staging `9cb6cb84` 上只读搜索，有 18 个跟踪文件含这个域名，其中包括 `packages/api/src/services/runtime/stagingEnvironment.ts` 的 staging 环境名单；这一处影响测试窗口的环境判断，实施时由写入方按第 7.1 节规则核实风险，需要时单独拆成高风险 PR。
     - **待 Owner 确认**：Stripe / Waffo 沙箱的回调地址和 Supabase 的 Site URL 是否已不再指向旧域名，由 Owner 自行检查（服务商配置，Agent 不改）。
 
 ### 2.2 被本版取代的旧规则
@@ -652,7 +654,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | CI-TRUST-1 | 集成测试进 CI（计费、恢复等关键路径） | — | 高 | 中 / 1–2 |
 | **1 核心体验重做** | AGENT-CORE | AC-0 可行性验证；AC-1 提问卡和纯文本流式；AC-2 后台整理、Skill 模板、右侧数据沉淀区；AC-3 每步确认、模型根据全部信息写完整报告（第 2.1 节第 22 项；分工：REPORT-GEN 负责报告生成能力，AC-3 负责每步确认、定稿，并把报告接进流程）、定稿、承接第一周选题；AC-4 通用工作区和旧入口改指；AC-5 数据基础补缺，包括 D5 数据使用同意（勾选、撤回、按同意状态过滤记录）。见 [实施说明](tasks/AGENT-CORE.md) | P0-1；AC-2 另外依赖 CI-TRUST-1 和 DATA-ERASURE 的删除规则设计；AC-3 的报告部分依赖 REPORT-GEN | 高 | 大 / 12–16 |
 | | AGENT-CORE-UI | 从 AGENT-CORE 拆出的纯前端部分：提问卡和本步小结卡的显示、流式文字显示、右侧面板和进度条的布局、旧入口链接改指。只改前端，沿用现有接口；需要改接口、工具、数据库或计费的部分一律留在 AGENT-CORE | 与对应的 AGENT-CORE 子任务配合 | 普通 | 中 / 3–4 |
-| | MENTOR-BUDGET | Owner 2026-09-30 立项（第 2.1 节第 23 项）：导师每一轮的输入和输出预算按用途（交互对话、整理、报告）在后台配置，准入时冻结，不再写死在代码里；放宽我们代码里的单次模型调用超时和每次请求的时间预算（staging 上限受 Vercel Hobby 单次 300 秒约束，正式运营升级 Pro（2026-10-01，第 28 项））；评估提示缓存。**已合并**：服务端 [#542](https://github.com/Crnobog9527/GraylumAI_vercel/pull/542)、后台页 [#551](https://github.com/Crnobog9527/GraylumAI_vercel/pull/551)、输出容量 #564；交互/报告 8192，单次接收 139264 bytes，staging 用途预算已调至 8192，报告入口尚未启用 | —（Owner 批准先于 #497） | 高 | 中 / 1–2 |
+| | MENTOR-BUDGET | Owner 2026-09-30 立项（第 2.1 节第 23 项）：导师每一轮的输入和输出预算按用途（交互对话、整理、报告）在后台配置，准入时冻结，不再写死在代码里；放宽我们代码里的单次模型调用超时和每次请求的时间预算（staging 上限受 Vercel Hobby 单次 300 秒约束，正式运营升级 Pro（2026-10-01，第 28 项））；评估提示缓存（已由第 35 项定为上线必做 PROMPT-CACHE）。**已合并**：服务端 [#542](https://github.com/Crnobog9527/GraylumAI_vercel/pull/542)、后台页 [#551](https://github.com/Crnobog9527/GraylumAI_vercel/pull/551)、输出容量 #564；交互/报告 8192，单次接收 139264 bytes，staging 用途预算已调至 8192，报告入口尚未启用 | —（Owner 批准先于 #497） | 高 | 中 / 1–2 |
 | | REPORT-GEN | Owner 2026-09-30 立项：所有步骤确认后，由模型根据全部信息写完整报告，结构由各自 Skill 的模板规定（第 2.1 节第 22 项）。先实现定位 Skill（当前 13 个部分、正文最多 12000 字），报告生成能力按通用方式设计，其他带步骤的 Skill 复用同一套能力；无步骤的 Skill 不受影响。使用单独的报告预算。先用真实模型实测生成时间，超时就分章节生成或改为后台生成。立项时要一并解决 staging Hobby 函数最长 300 秒、冻结载荷 262144 字节、单次回复接收 139264 字节（#564）等限制；收费按第 2.1 节第 25 项：扣费逻辑和正常对话一样，不做运行前预告。**方案在途**（[#547](https://github.com/Crnobog9527/GraylumAI_vercel/pull/547)）：建立在 BILL-PAYG 上，一次调用（全文或章节）一冻结、一结算；可用余额低于 L 时停在章节 / 调用之间，充值后继续；不再采用报告固定上界预扣。FUSION-REVIEW 评审的就是这份报告 | MENTOR-BUDGET（已合并）、BILL-PAYG；Codex 在 #497 → #550 → BILL-UNIT #565 → BILL-PAYG 之后实施 | 高 | 待实施方案细化 |
 | | STG-MENTOR-MODEL | 2026-10-01，[方案 #561](https://github.com/Crnobog9527/GraylumAI_vercel/pull/561)：staging 实测 Gemini 3.8 Flash、Claude Sonnet 5.5，按 8192 输出上限验证；放弃 deepseek，整理用 GPT-6 Luna。**Owner 2026-10-02 已批准实测预算**（104 次 / $10.24，单次和本机累计上限见第 13 项）；真实发送入口须先经总控审过，**尚未执行**；缓存实验延后到 PROMPT-CACHE 之后（第 35 项）。尚未记为实测通过或切换完成 | #497 冻结 head `f9afd0db` 后执行；真实调用按批准预算 | 高 | 预算已批准，待实测 |
 | | RESEARCH-0 | **已完成**（#457、#465、#466，2026-09-28）。第三方搜索供应商对比测试：同一组查询测每一家，记录平台覆盖、新鲜度、字段完整度、速度、单次成本、失败率、是否返回每次调用的官方成本；Owner 据此确定了供应商（第 3.7 节、D13，结论见 [实施说明](tasks/RESEARCH-TOOLS.md)） | —（可与 AC-0 同期） | 高（真实付费调用） | 小 / 0–1 |
@@ -671,7 +673,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | INVITE-ABUSE | **已完成**（2026-10-01，#560、0154 已应用 staging）：首次正金额开户赠送的新账号才获邀请奖励、每账号仅绑定一次；不开消费返利；接受不同身份同一人无法识别（第 29 项） | #538 开户赠送资格 | 高 | 已合并 |
 | | SEC-RATELIMIT | 限流 fail-closed、Redis 超时放行、诊断计费探针。**已完成**（#488，2026-09-28） | — | 高 | 小 / 1–2 |
 | | FORGOT-PASSWORD | 忘记密码（Owner 2026-09-30 提出）：用户通过邮件验证重置密码；发送重置邮件时复用 #541 的隐形 hCaptcha；重置链接落到站内设置新密码的页面；**已注销或被封禁的账号不能靠重置密码恢复登录**，允许和拒绝两条路径都要测。**已完成**：Owner 2026-10-01 选定（[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/566#issuecomment-5930333333)），#567（`c4b13758`）、#568（`74408bd1`）已合并，staging 交互验收完成（[总控结论](https://github.com/Crnobog9527/GraylumAI_vercel/pull/568#issuecomment-5935583047)）；最后三组是 Owner 整组确认，没有逐项截图和部署 SHA 的同期记录。**追加**：关联 Google 的账号也能在个人中心改密码（第 36 项），#569（`9cb6cb84`）已合并，staging 交互验收通过（[总控结论](https://github.com/Crnobog9527/GraylumAI_vercel/pull/569#issuecomment-5935890997)）。正式环境上线另行批准 | #543、#548、#552（均已合并） | 高（认证和登录恢复） | 已合并（#567、#568、#569） |
-| | STAGING-HOST-CLEANUP | 2026-10-01（第 37 项）：清理代码、测试、脚本和文档里残留的 `graylumai-staging.vercel.app` 引用（staging `9cb6cb84` 上 18 个跟踪文件）；`stagingEnvironment.ts` 的 staging 环境名单影响测试窗口判断，实施时核实风险，需要时单独拆成高风险 PR。Stripe / Waffo 沙箱回调和 Supabase Site URL 由 Owner 自行检查，待 Owner 确认 | — | 普通（总控安排） | 小 / 1 |
+| | STAGING-HOST-CLEANUP | 2026-10-01（第 37 项）：清理代码、测试、脚本和文档里残留的 `graylumai-staging.vercel.app` 引用（staging `9cb6cb84` 上 18 个跟踪文件）；`stagingEnvironment.ts` 的 staging 环境名单影响测试窗口判断，实施时核实风险，需要时单独拆成高风险 PR。Stripe / Waffo 沙箱回调和 Supabase Site URL 由 Owner 自行检查，待 Owner 确认。风险分级和待确认事项来源：[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/567#issuecomment-5936590630) | — | 普通（总控安排） | 小 / 1 |
 | | DATA-ERASURE | 账号注销与数据删除，以及 D7 承诺的单条删除（对话回答、会话、已保存成果），都在公开上线前完成并列入验收。**设计先行**：在 AC-2 新建任何表之前先写出删除规则，实现在公开上线前完成（**设计已完成**，#474，E1–E11 已决定，见第 2.1 节第 14 项）。见 [实施说明](tasks/DATA-ERASURE.md)。之后任何新增保存用户私有内容的任务，都要把新数据接入注销流程并列入验收。**实现进度**：PR-A #526、PR-B1a #531、PR-B1b #537、PR-E #538 已合并，0151 已应用；B2a #550 在途，之后 B2b → PR-C（删除 Auth 账号）；#538 第 ③ 步等 PR-C 完成（第 7.0 节），正式库建库约束见第 9.3 节 | —（设计部分先于 AC-2） | 高 | 大 / 3–5 |
 | | COST-REPORT | 后台成本报表的金额、估算和查询修正（原清单 06）。**已完成**（#513，2026-09-29） | — | 高 | 小 / 1 |
 | | PII-REGEX | 接手 PR #333（邮箱类个人信息匹配的性能加固，改的是安全过滤规则）：基于最新 staging 更新后重新审查、由 Owner 批准合并（第 8.4 节第 6 项）。**已完成**：由 #500 在最新 staging 上重新实现并合并，#333 已关闭 | — | 高 | 小 / 1 |
