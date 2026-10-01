@@ -28,9 +28,16 @@ describe('auth callback origin', () => {
   });
 
   it('normalizes production public-domain requests to the app auth origin', () => {
-    expect(resolveAuthCallbackOrigin(new URL('https://www.graylum.com/auth/callback'))).toBe(
-      'https://app.graylum.com',
-    );
+    // Isolated from the caller's environment: a configured app URL would correctly win here.
+    vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', '');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
+    try {
+      expect(resolveAuthCallbackOrigin(new URL('https://www.graylum.com/auth/callback'))).toBe(
+        'https://app.graylum.com',
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 
