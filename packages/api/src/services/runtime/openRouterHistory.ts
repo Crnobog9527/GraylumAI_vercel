@@ -2,6 +2,7 @@
 import {isDeepStrictEqual} from 'node:util';
 import {z} from 'zod';
 import {toolCallFor} from '../bill2/openRouterAdapter';
+import {OPENROUTER_RESPONSE_BYTE_LIMIT} from '../bill2/responseCapacity';
 import {SOURCE_TOOL_NAMES} from './agentTools';
 
 const reasoningDetails=z.array(z.discriminatedUnion('type',[
@@ -11,13 +12,13 @@ const reasoningDetails=z.array(z.discriminatedUnion('type',[
  // OpenRouter's summary schema permits an omitted/null id. Accept only the
  // observed OpenAI format; summaries stay private alongside encrypted data.
  z.object({type:z.literal('reasoning.summary'),format:z.literal('openai-responses-v1'),
-  summary:z.string().max(65536),id:z.string().min(1).max(256).nullish(),index:z.number().int().nonnegative().optional(),
+  summary:z.string().max(OPENROUTER_RESPONSE_BYTE_LIMIT),id:z.string().min(1).max(256).nullish(),index:z.number().int().nonnegative().optional(),
  }).strict(),
  // Known OpenRouter OpenAI response metadata only. This is opaque storage,
- // never decoded or forwarded. The local adapter retains at most 64 KiB of
+ // never decoded or forwarded. The local adapter retains at most 136 KiB of
  // response bytes; the string cap is a local bound, not a provider guarantee.
  z.object({type:z.literal('reasoning.encrypted'),format:z.literal('openai-responses-v1'),
-  id:z.string().min(1).max(256).nullable(),data:z.string().min(1).max(65536),index:z.number().int().nonnegative().optional(),
+  id:z.string().min(1).max(256).nullable(),data:z.string().min(1).max(OPENROUTER_RESPONSE_BYTE_LIMIT),index:z.number().int().nonnegative().optional(),
  }).strict(),
 ])).nullish();
 const hasOpenAIReasoning=(details:unknown)=>Array.isArray(details)&&details.some(detail=>detail?.type==='reasoning.encrypted'||detail?.type==='reasoning.summary');

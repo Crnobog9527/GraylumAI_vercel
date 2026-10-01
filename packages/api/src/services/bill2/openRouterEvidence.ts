@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
+import {OPENROUTER_RESPONSE_BYTE_LIMIT} from './responseCapacity';
 import {gunzipSync} from 'node:zlib';
 import { decimal, parseExactJson } from './decimal';
 import {openRouterStream,OPENROUTER_STREAM_BYTE_LIMIT} from './openRouterStream';
@@ -9,16 +10,17 @@ import {AGENT_STREAM_TOOLS} from '../runtime/agentTools';
 // and control characters (including combined duplicate HTTP header values).
 export const validGenerationId=(value:unknown):value is string=>typeof value==='string'&&/^[a-zA-Z0-9._:-]{1,256}$/.test(value);
 export type OpenRouterIdentity = {provider:'openrouter';account:string;model:string;protocol:'openrouter-chat-v1'};
-/** Only streaming observations use reversible compression. Decode before parsing,
+/** Streaming and large nonstream observations use reversible compression. Decode before parsing,
  * with an independent allocation bound and hashes over original provider bytes. */
 export function decodeOpenRouterStreamObservation(observation:TransportObservation):Buffer {
+ const limit=observation.stream?OPENROUTER_STREAM_BYTE_LIMIT:OPENROUTER_RESPONSE_BYTE_LIMIT;
  const encoded=observation.rawBodyBase64;
- if(observation.rawBodyOmitted||encoded.length>Math.ceil((OPENROUTER_STREAM_BYTE_LIMIT+2048)/3)*4||
+ if(observation.rawBodyOmitted||encoded.length>Math.ceil((limit+2048)/3)*4||
    encoded.length%4!==0||!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))throw new Error('invalid_stream_encoding');
  const packed=Buffer.from(encoded,'base64');
  if(packed.toString('base64')!==encoded)throw new Error('invalid_stream_encoding');
  if(observation.rawBodyEncoding!=='gzip-base64')throw new Error('invalid_stream_encoding');
- const bytes=gunzipSync(packed,{maxOutputLength:OPENROUTER_STREAM_BYTE_LIMIT});
+ const bytes=gunzipSync(packed,{maxOutputLength:limit});
  const hash=createHash('sha256').update(bytes).digest('hex');
  if(observation.rawBody!==''||bytes.length!==observation.rawBodyByteLength||hash!==observation.rawBodySha256||
    !Number.isSafeInteger(observation.observedByteLength)||observation.observedByteLength!<bytes.length||
@@ -55,7 +57,8 @@ function officialCost(value:unknown):string {
  */
 function projectOpenRouterEvidence(observation:TransportObservation, identity:OpenRouterIdentity, source:'response'|'lookup', expectedProviderId?:string) {
   const base={...identity,providerId:null as string|null,cost:null as string|null,currency:'USD',final:false,coverage:'request_total',
-    source,sourceHash:observation.stream?observation.sourceHash:createHash('sha256').update(Buffer.from(observation.rawBodyBase64,'base64')).digest('hex'),
+    source,sourceHash:observation.rawBodyEncoding==='gzip-base64'?observation.sourceHash:
+     createHash('sha256').update(Buffer.from(observation.rawBodyBase64,'base64')).digest('hex'),
     observedAt:new Date().toISOString(),rawBody:observation.rawBody,transport:observation,usage:null as Record<string,unknown>|null};
   const diagnostic=(reason:string)=>({...base,evidenceKind:'transport_observation' as const,rejectedReason:reason});
   if(validGenerationId(observation.generationId))base.providerId=observation.generationId;
@@ -80,7 +83,12 @@ function projectOpenRouterEvidence(observation:TransportObservation, identity:Op
    base.rawBody=JSON.stringify(sdkResponse);
   }else{
    if(!observation.complete)return diagnostic('incomplete_transport');
-   try { root=parseExactJson(observation.rawBody) as Record<string,unknown>;sdkResponse=JSON.parse(observation.rawBody); }
+   try {
+    const raw=observation.rawBodyEncoding==='gzip-base64'?
+     new TextDecoder('utf-8',{fatal:true}).decode(decodeOpenRouterStreamObservation(observation)):observation.rawBody;
+    root=parseExactJson(raw,source==='response'?OPENROUTER_RESPONSE_BYTE_LIMIT:65536) as Record<string,unknown>;
+    sdkResponse=JSON.parse(raw);base.rawBody=raw;
+   }
    catch{return diagnostic('invalid_json');}
   }
   if(!root || typeof root!=='object')return diagnostic('invalid_response');
@@ -115,7 +123,7 @@ function projectOpenRouterEvidence(observation:TransportObservation, identity:Op
  * that case. No terminal/cost assertion survives omission of provider bytes. */
 export function openRouterEvidence(observation:TransportObservation,identity:OpenRouterIdentity,source:'response'|'lookup',expectedProviderId?:string){
  const evidence=projectOpenRouterEvidence(observation,identity,source,expectedProviderId);
- if(!observation.stream)return evidence;
+ if(!observation.stream&&observation.rawBodyEncoding!=='gzip-base64')return evidence;
  const issue=receiptIssue(evidence);if(!issue)return evidence;
  const conflict='rejectedReason' in evidence&&evidence.rejectedReason==='identity_or_response_mismatch';
  return {...evidence,rawBody:'',usage:null,cost:null,final:false,
@@ -126,5 +134,6 @@ export function openRouterEvidence(observation:TransportObservation,identity:Ope
   transport:{rawBody:'',rawBodyBase64:'',rawBodyOmitted:issue,
    rawBodyByteLength:observation.rawBodyByteLength,rawBodySha256:observation.rawBodySha256,
    observedByteLength:observation.observedByteLength,sourceHash:observation.sourceHash,
-   httpStatus:observation.httpStatus,complete:observation.complete,transportIssue:observation.transportIssue,stream:true as const}};
+   httpStatus:observation.httpStatus,complete:observation.complete,transportIssue:observation.transportIssue,
+   ...(observation.stream?{stream:true as const}:{})}};
 }
