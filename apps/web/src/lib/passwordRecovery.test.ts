@@ -1,3 +1,4 @@
+import { AuthRetryableFetchError, createClient } from '@supabase/supabase-js';
 import { describe, expect, it } from 'vitest';
 import { ACCOUNT_UNAVAILABLE_MESSAGE } from './safe-error-message';
 import {
@@ -10,6 +11,7 @@ import {
   isFreshRecoverySession,
   isTransientAuthError,
   parseRecoveryFailure,
+  readAccessTokenClaims,
   RECOVERY_SESSION_MAX_AGE_SECONDS,
   recoveryTimestamp,
   RESET_CAPTCHA_FAILED_MESSAGE,
@@ -58,7 +60,11 @@ describe('reset request outcome', () => {
 
   it.each([
     ['a failed send', authError('unexpected_failure', 500)],
-    ['a server error without code', { status: 502, message: 'Bad Gateway' }],
+    ['a server error without code', { status: 500, message: 'Internal Server Error' }],
+    ['a gateway error (SDK, 502)', new AuthRetryableFetchError('Bad Gateway', 502)],
+    ['a gateway error (SDK, 503)', new AuthRetryableFetchError('Service Unavailable', 503)],
+    ['a gateway error (SDK, 504)', new AuthRetryableFetchError('Gateway Timeout', 504)],
+    ['a gateway error (SDK, 530)', new AuthRetryableFetchError('x', 530)],
     ['the per-email send limit', authError('over_email_send_rate_limit', 429)],
     ['an address the mailer refuses', authError('email_address_not_authorized', 400)],
     ['an unknown error', new Error('Error sending recovery email')],
@@ -72,11 +78,72 @@ describe('reset request outcome', () => {
     ['the per-visitor request limit', authError('over_request_rate_limit', 429), RESET_RATE_LIMIT_MESSAGE],
     ['a 429 without code', { status: 429 }, RESET_RATE_LIMIT_MESSAGE],
     ['a malformed address', authError('validation_failed', 400), RESET_INVALID_EMAIL_MESSAGE],
-    ['a request that never arrived', Object.assign(new Error('x'), { name: 'AuthRetryableFetchError', status: 0 }), RESET_NETWORK_MESSAGE],
+    ['a request without any HTTP response (SDK, status 0)', new AuthRetryableFetchError('Failed to fetch', 0), RESET_NETWORK_MESSAGE],
     ['a thrown fetch', new TypeError('Failed to fetch'), RESET_NETWORK_MESSAGE],
   ])('reports %s, which is the same for every address, without a cooldown', (_, error, message) => {
     expect(resetRequestOutcome(error)).toEqual({ tone: 'error', message, cooldownSeconds: 0 });
     expect(message).not.toMatch(/已注册|未注册/);
+  });
+});
+
+// The real SDK turns each response into the error the page sees: auth-js 2.105.4 handleError wraps
+// 502/503/504/520-524/530 as AuthRetryableFetchError with that status, and a failed fetch as status 0.
+describe('reset request outcome for real SDK responses', () => {
+  async function outcomeFor(respond: () => Promise<Response>) {
+    const client = createClient('http://gotrue.local', 'anon', {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      global: { fetch: respond },
+    });
+    const { error } = await client.auth.resetPasswordForEmail('a@example.test', { redirectTo: 'http://127.0.0.1:3000/auth/callback' });
+    return { error, outcome: resetRequestOutcome(error) };
+  }
+  // Shaped like GoTrue v2.197.0 errors: the API version header makes auth-js read the string `code`.
+  const json = (status: number, body: object) => async () => new Response(JSON.stringify(body), {
+    status, headers: { 'content-type': 'application/json', 'x-supabase-api-version': '2024-01-01' },
+  });
+  const sent = { tone: 'success', message: RESET_EMAIL_SENT_MESSAGE, cooldownSeconds: RESET_REQUEST_COOLDOWN_SECONDS };
+
+  it('shows an unknown email (GoTrue answers 200) and every registered-only failure identically', async () => {
+    const unknownEmail = await outcomeFor(json(200, {}));
+    expect(unknownEmail).toEqual({ error: null, outcome: sent });
+    for (const status of [502, 503, 504]) {
+      const gateway = await outcomeFor(async () => new Response('upstream timed out', { status }));
+      expect(gateway.error).toBeInstanceOf(AuthRetryableFetchError);
+      expect(gateway.error).toMatchObject({ status });
+      expect(gateway.outcome).toEqual(unknownEmail.outcome);
+    }
+    const sendFailed = await outcomeFor(json(500, { code: 'unexpected_failure', message: 'Error sending recovery email' }));
+    expect(sendFailed.outcome).toEqual(unknownEmail.outcome);
+    const emailLimit = await outcomeFor(json(429, { code: 'over_email_send_rate_limit', message: 'email rate limit exceeded' }));
+    expect(emailLimit.outcome).toEqual(unknownEmail.outcome);
+  });
+
+  it('reports only failures that are the same for every address', async () => {
+    const noResponse = await outcomeFor(async () => { throw new TypeError('Failed to fetch'); });
+    expect(noResponse.error).toBeInstanceOf(AuthRetryableFetchError);
+    expect(noResponse.error).toMatchObject({ status: 0 });
+    expect(noResponse.outcome).toEqual({ tone: 'error', message: RESET_NETWORK_MESSAGE, cooldownSeconds: 0 });
+    expect((await outcomeFor(json(429, { code: 'over_request_rate_limit', message: 'x' }))).outcome)
+      .toEqual({ tone: 'error', message: RESET_RATE_LIMIT_MESSAGE, cooldownSeconds: 0 });
+    expect((await outcomeFor(json(400, { code: 'captcha_failed', message: 'x' }))).outcome)
+      .toEqual({ tone: 'error', message: RESET_CAPTCHA_FAILED_MESSAGE, cooldownSeconds: 0 });
+  });
+});
+
+describe('access token claims', () => {
+  const token = (claims: object) => `h.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.s`;
+
+  it('reads the user and sign-in methods without a request', () => {
+    const amr = [{ method: 'recovery', timestamp: 1_800_000_000 }];
+    expect(readAccessTokenClaims(token({ sub: 'u1', amr, email: 'ü@example.test' }))).toEqual({ userId: 'u1', amr });
+    expect(readAccessTokenClaims(token({ sub: 'u1' }))).toEqual({ userId: 'u1', amr: [] });
+  });
+
+  it('rejects anything that is not a token with a user', () => {
+    expect(readAccessTokenClaims(token({ amr: [] }))).toBeNull();
+    expect(readAccessTokenClaims('h.not-base64!.s')).toBeNull();
+    expect(readAccessTokenClaims('')).toBeNull();
+    expect(readAccessTokenClaims(undefined)).toBeNull();
   });
 });
 

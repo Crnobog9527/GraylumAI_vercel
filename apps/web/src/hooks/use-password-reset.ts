@@ -8,6 +8,7 @@ import {
   classifyPasswordUpdateError,
   isFreshRecoverySession,
   isTransientAuthError,
+  readAccessTokenClaims,
   recoveryTimestamp,
   validateNewPassword,
   type AccountGate,
@@ -31,7 +32,7 @@ export type ResetPhase =
 
 type AuthClient = Pick<
   ReturnType<typeof createClient>['auth'],
-  'getUser' | 'mfa' | 'signOut' | 'updateUser' | 'onAuthStateChange'
+  'getUser' | 'getSession' | 'mfa' | 'signOut' | 'updateUser' | 'onAuthStateChange'
 >;
 
 export type ResetDeps = {
@@ -92,9 +93,38 @@ export type ResetSubmitResult =
   | { kind: 'signout-pending' }
   | { kind: 'done'; to: string };
 
+// One submit. Auth events (also from other tabs) void it while it waits; once the password has
+// changed, its own sign-out events are expected and no longer count.
+export class ResetAttempt {
+  voided: ResetPhase | null = null;
+  signingOut = false;
+
+  constructor(readonly grant: ResetGrant) {}
+
+  observe(session: { user: { id: string } } | null) {
+    if (this.signingOut || this.voided) return;
+    if (!session) this.voided = { kind: 'no-link' };
+    else if (session.user.id !== this.grant.userId) this.voided = { kind: 'not-recovery' };
+  }
+}
+
+// The last check, right before the change: this browser's session, read locally, must still be the
+// reset the form was opened with, and nothing may have voided the attempt while it waited.
+async function confirmSameReset(deps: ResetDeps, attempt: ResetAttempt): Promise<ResetPhase | null> {
+  const { data } = await deps.auth.getSession().catch(() => ({ data: { session: null } }));
+  if (attempt.voided) return attempt.voided;
+  const claims = readAccessTokenClaims(data.session?.access_token);
+  if (!claims) return { kind: 'no-link' };
+  const { grant } = attempt;
+  const same = claims.userId === grant.userId
+    && recoveryTimestamp(claims.amr) === grant.recoveredAt
+    && isFreshRecoverySession(claims.amr, deps.nowSeconds());
+  return same ? null : { kind: 'not-recovery' };
+}
+
 export async function submitNewPassword(
   deps: ResetDeps,
-  grant: ResetGrant,
+  attempt: ResetAttempt,
   password: string,
   confirm: string,
 ): Promise<ResetSubmitResult> {
@@ -105,9 +135,12 @@ export async function submitNewPassword(
   // switched to another account, or the account may have been closed since.
   const current = await checkResetAccess(deps);
   if (current.kind !== 'ready') return { kind: 'closed', phase: current };
+  const { grant } = attempt;
   if (current.grant.userId !== grant.userId || current.grant.recoveredAt !== grant.recoveredAt) {
     return { kind: 'closed', phase: { kind: 'not-recovery' } };
   }
+  const changed = await confirmSameReset(deps, attempt);
+  if (changed) return { kind: 'closed', phase: changed };
 
   let failure;
   try {
@@ -120,6 +153,7 @@ export async function submitNewPassword(
     return failure.kind === 'session' ? { kind: 'closed', phase: { kind: 'no-link' } } : { kind: 'invalid', message: failure.message };
   }
 
+  attempt.signingOut = true;
   return (await signOutAfterReset(deps.auth)) ? { kind: 'done', to: PASSWORD_RESET_DONE_PATH } : { kind: 'signout-pending' };
 }
 
@@ -130,7 +164,9 @@ export function usePasswordReset() {
   const [formError, setFormError] = useState<string | null>(null);
   // Read by the auth listener and kept in step with the phase.
   const phaseRef = useRef<ResetPhase>(phase);
+  // A sign-out retry is running; its own events are expected.
   const busyRef = useRef(false);
+  const attemptRef = useRef<ResetAttempt | null>(null);
 
   const show = useCallback((next: ResetPhase) => {
     phaseRef.current = next;
@@ -152,10 +188,14 @@ export function usePasswordReset() {
     void check();
   }, [check]);
 
-  // A sign-out or another account's sign-in (also from another tab) closes an open form at once;
-  // submit checks again in any case.
+  // A sign-out or another account's sign-in (also from another tab) closes an open form at once,
+  // or voids a submit that is still waiting; submit checks again in any case.
   useEffect(() => {
     const { data } = createClient().auth.onAuthStateChange((_event, session) => {
+      if (attemptRef.current) {
+        attemptRef.current.observe(session);
+        return;
+      }
       const current = phaseRef.current;
       if (busyRef.current || current.kind !== 'ready') return;
       if (!session) show({ kind: 'no-link' });
@@ -176,18 +216,24 @@ export function usePasswordReset() {
 
   const submit = useCallback(async (password: string, confirm: string) => {
     const current = phaseRef.current;
-    if (current.kind !== 'ready' || busyRef.current) return;
-    busyRef.current = true;
+    if (current.kind !== 'ready' || attemptRef.current || busyRef.current) return;
+    const attempt = new ResetAttempt(current.grant);
+    attemptRef.current = attempt;
     setFormError(null);
     setPending(true);
-    const result = await submitNewPassword(deps(), current.grant, password, confirm);
-    if (result.kind === 'done' || result.kind === 'signout-pending') {
-      finish(result.kind === 'done');
+    const result = await submitNewPassword(deps(), attempt, password, confirm);
+    // On success the page is leaving; the finished attempt keeps absorbing its own sign-out events.
+    if (result.kind === 'done') {
+      finish(true);
+      return;
+    }
+    attemptRef.current = null;
+    if (result.kind === 'signout-pending') {
+      finish(false);
       return;
     }
     if (result.kind === 'closed') show(result.phase);
     else setFormError(result.message);
-    busyRef.current = false;
     setPending(false);
   }, [deps, finish, show]);
 

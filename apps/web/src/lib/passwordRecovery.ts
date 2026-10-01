@@ -43,16 +43,18 @@ function errorName(error: unknown) {
 
 // Only failures that happen the same way for every address get their own text: the human check,
 // the per-visitor request limit (code over_request_rate_limit, or a 429 without a code), a request
-// that never reached GoTrue, and a malformed address. Everything else counts as sent.
+// that got no HTTP response at all (status 0, or a thrown TypeError), and a malformed address.
+// Any 5xx counts as sent whatever the error class: auth-js reports gateway errors (502, 503, 504,
+// 520-524, 530) as AuthRetryableFetchError with that status, and a registered email can cause them
+// while sending. Everything else counts as sent too.
 function accountIndependentFailure(error: unknown): string | null {
   const code = errorCode(error);
   const status = errorStatus(error);
+  if (typeof status === 'number' && status >= 500) return null;
   if (code === 'captcha_failed') return RESET_CAPTCHA_FAILED_MESSAGE;
   if (code === 'over_request_rate_limit' || (status === 429 && !code)) return RESET_RATE_LIMIT_MESSAGE;
   if (code === 'validation_failed' || code === 'email_address_invalid') return RESET_INVALID_EMAIL_MESSAGE;
-  if (errorName(error) === 'AuthRetryableFetchError' || status === 0 || error instanceof TypeError) {
-    return RESET_NETWORK_MESSAGE;
-  }
+  if (status === 0 || error instanceof TypeError) return RESET_NETWORK_MESSAGE;
   return null;
 }
 
@@ -123,6 +125,20 @@ export function isFreshRecoverySession(amr: readonly AmrEntry[] | null | undefin
   if (at === null) return false;
   const age = nowSeconds - at;
   return age >= -CLOCK_SKEW_SECONDS && age <= RECOVERY_SESSION_MAX_AGE_SECONDS;
+}
+
+// The user and sign-in methods in an access token, read locally without a request. Used for the
+// last check before a password change, so nothing else can happen between it and the change.
+export function readAccessTokenClaims(token: string | null | undefined): { userId: string; amr: AmrEntry[] } | null {
+  const payload = token?.split('.')[1];
+  if (!payload) return null;
+  try {
+    const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+    if (typeof claims?.sub !== 'string') return null;
+    return { userId: claims.sub, amr: Array.isArray(claims.amr) ? claims.amr : [] };
+  } catch {
+    return null;
+  }
 }
 
 // Same rules and wording as changing the password while signed in (SecuritySettingsCard).

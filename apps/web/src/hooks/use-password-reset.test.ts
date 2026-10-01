@@ -17,6 +17,7 @@ vi.mock('react', () => ({
 type Listener = (event: string, session: { user: { id: string } } | null) => void;
 const auth = vi.hoisted(() => ({
   getUser: vi.fn(),
+  getSession: vi.fn(),
   mfa: { getAuthenticatorAssuranceLevel: vi.fn() },
   signOut: vi.fn(),
   updateUser: vi.fn(),
@@ -28,7 +29,7 @@ vi.mock('@/lib/supabase', () => ({ createClient: () => ({ auth }) }));
 vi.mock('@/trpc/client', () => ({ trpc: { useUtils: () => ({ user: { getUserProfile: { fetch: fetchProfile } } }) } }));
 vi.mock('@/lib/site-config', () => ({ buildAuthHref: (path: string) => `https://auth.example${path}` }));
 
-const { checkResetAccess, submitNewPassword, usePasswordReset } = await import('./use-password-reset');
+const { checkResetAccess, ResetAttempt, submitNewPassword, usePasswordReset } = await import('./use-password-reset');
 
 const NOW = 1_800_000_000;
 const clock = { now: NOW };
@@ -38,7 +39,21 @@ const methods = (...entries: { method: string; timestamp: number }[]) => ({ data
 const forbidden = (message: string) => Object.assign(new Error(message), { data: { code: 'FORBIDDEN' } });
 const failedSignOut = { error: Object.assign(new Error('x'), { status: 502 }) };
 const deps = () => ({ auth: auth as never, checkAccount: fetchProfile, nowSeconds: () => clock.now });
-const submit = (password = 'password-1', confirm = password) => submitNewPassword(deps(), grant, password, confirm);
+const submit = (password = 'password-1', confirm = password, attempt = new ResetAttempt(grant)) =>
+  submitNewPassword(deps(), attempt, password, confirm);
+// The session this browser holds locally, as auth-js stores it: only the access token's claims matter.
+const tokenFor = (sub: string, recoveredAt: number | null) => {
+  const amr = recoveredAt === null ? [{ method: 'password', timestamp: NOW }] : [{ method: 'recovery', timestamp: recoveredAt }];
+  return `header.${Buffer.from(JSON.stringify({ sub, amr })).toString('base64url')}.signature`;
+};
+const holdSession = (sub: string | null, recoveredAt: number | null = NOW - 60) => auth.getSession.mockResolvedValue({
+  data: { session: sub ? { access_token: tokenFor(sub, recoveredAt), user: { id: sub } } : null }, error: null,
+});
+const deferred = () => {
+  let resolve!: (value: unknown) => void;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -49,6 +64,7 @@ beforeEach(() => {
   react.effects.length = 0;
   auth.listener = null;
   auth.getUser.mockResolvedValue({ data: { user }, error: null });
+  holdSession('u1');
   auth.mfa.getAuthenticatorAssuranceLevel.mockResolvedValue(methods({ method: 'recovery', timestamp: NOW - 60 }));
   auth.signOut.mockResolvedValue({ error: null });
   auth.updateUser.mockResolvedValue({ data: { user }, error: null });
@@ -158,6 +174,29 @@ describe('submitNewPassword', () => {
     expect(auth.updateUser).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['another account', () => { holdSession('u2'); }, { kind: 'not-recovery' }],
+    ['a newer reset of the same account', () => { holdSession('u1', NOW - 10); }, { kind: 'not-recovery' }],
+    ['a password sign-in of the same account', () => { holdSession('u1', null); }, { kind: 'not-recovery' }],
+    ['no session', () => { holdSession(null); }, { kind: 'no-link' }],
+    ['an unreadable session', () => { auth.getSession.mockRejectedValue(new Error('x')); }, { kind: 'no-link' }],
+  ])('refuses when the local session read right before the change shows %s', async (_, arrange, phase) => {
+    arrange();
+    expect(await submit()).toEqual({ kind: 'closed', phase });
+    expect(auth.updateUser).not.toHaveBeenCalled();
+  });
+
+  it('refuses an attempt voided by a sign-out or another sign-in while it waited', async () => {
+    const signedOut = new ResetAttempt(grant);
+    signedOut.observe(null);
+    expect(await submit(undefined, undefined, signedOut)).toEqual({ kind: 'closed', phase: { kind: 'no-link' } });
+    const switched = new ResetAttempt(grant);
+    switched.observe({ user: { id: 'u2' } });
+    switched.observe({ user: { id: 'u1' } });
+    expect(await submit(undefined, undefined, switched)).toEqual({ kind: 'closed', phase: { kind: 'not-recovery' } });
+    expect(auth.updateUser).not.toHaveBeenCalled();
+  });
+
   it('shows fixed texts for update errors and sends a lost session to a new request', async () => {
     auth.updateUser.mockResolvedValue({ data: {}, error: Object.assign(new Error('raw'), { code: 'same_password', status: 422 }) });
     expect(await submit()).toEqual({ kind: 'invalid', message: '新密码不能和原来的密码相同。' });
@@ -223,6 +262,27 @@ describe('usePasswordReset', () => {
     const second = await startedReset();
     auth.listener!('SIGNED_OUT', null);
     expect(second.phase.value).toEqual({ kind: 'no-link' });
+  });
+
+  it.each([
+    ['another account signs in (event only, the session read still looks the same)', { user: { id: 'u2' } }, () => { /* local session unchanged */ },
+      { kind: 'not-recovery' }],
+    ['another account signs in (session switched, event not delivered yet)', undefined, () => { holdSession('u2'); },
+      { kind: 'not-recovery' }],
+    ['this browser signs out', null, () => { holdSession(null); }, { kind: 'no-link' }],
+  ])('does not change any password when, while the account lookup is pending, %s', async (_, event, switchSession, closed) => {
+    const { hook, phase } = await startedReset();
+    const lookup = deferred();
+    fetchProfile.mockImplementationOnce(() => lookup.promise);
+    const submitting = hook.submit('password-1', 'password-1');
+    await vi.waitFor(() => expect(fetchProfile).toHaveBeenCalledTimes(2));
+    switchSession();
+    if (event !== undefined) auth.listener!(event ? 'SIGNED_IN' : 'SIGNED_OUT', event);
+    lookup.resolve({ id: 'u1' });
+    await submitting;
+    expect(auth.updateUser).not.toHaveBeenCalled();
+    expect(phase.value).toEqual(closed);
+    expect(assign).not.toHaveBeenCalled();
   });
 
   it('does not change the password after the reset expired on an open page', async () => {
