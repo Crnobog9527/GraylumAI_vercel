@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
+import {ASK_QUESTION_ARGUMENT_LIMIT,toolArgumentLimit} from '../../shared/agentTurn';
 import {OPENROUTER_RESPONSE_BYTE_LIMIT,OPENROUTER_FRAME_BYTE_LIMIT} from './responseCapacity';
 import {gzipSync} from 'node:zlib';
 import {openRouterStream,OPENROUTER_STREAM_BYTE_LIMIT} from './openRouterStream';
@@ -23,7 +24,8 @@ const requestFields=new Set(['model','stream','stream_options','store','messages
 export const sourceCall=z.object({id:z.string().min(1).max(256),type:z.literal('function'),function:z.object({name:z.literal('read_source'),arguments:z.string().max(4000)}).strict()}).strict();
 /** One tool call whose name is in a request format's allowlist. */
 export const toolCallFor=(names:ReadonlySet<string>)=>z.object({id:z.string().min(1).max(256),type:z.literal('function'),
- function:z.object({name:z.string().refine(name=>names.has(name)),arguments:z.string().max(4000)}).strict()}).strict();
+ function:z.object({name:z.string().refine(name=>names.has(name)),arguments:z.string().max(ASK_QUESTION_ARGUMENT_LIMIT)}).strict()
+  .refine(call=>call.arguments.length<=toolArgumentLimit(call.name),'tool arguments too long')}).strict();
 const workspaceMessage=z.union([z.object({role:z.literal('assistant'),content:z.string().nullable(),tool_calls:z.array(sourceCall).min(1).max(1)}).strict(),z.object({role:z.literal('tool'),content:z.string(),tool_call_id:z.string().min(1).max(256)}).strict()]);
 const workspaceTools=z.array(z.object({type:z.literal('function'),function:z.object({name:z.literal('read_source'),description:z.string().max(16000).optional(),parameters:z.record(z.string(),z.unknown()),strict:z.boolean().optional()}).strict()}).strict()).max(1);
 // Interactive Agent turn tools (AC-1): only the allowlisted names, at most two,

@@ -1,0 +1,46 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {expect,it} from 'vitest';
+import {terminalAgentReplyFailure} from './terminalAgentReply';
+const reply=(message:unknown,finish_reason='stop')=>({choices:[{message,finish_reason}]});
+const call=(name:string)=>({function:{name}});
+it.each([false,true])('classifies terminal refusal and filtered output in either v5 phase (%s)',organizer=>{
+ expect(terminalAgentReplyFailure(reply({content:null,refusal:'Refused'}),organizer)).toBe(true);
+ expect(terminalAgentReplyFailure(reply({content:'Partial'},'content_filter'),organizer)).toBe(true);
+});
+it('honors only the first question tool and rejects every organizer tool',()=>{
+ expect(terminalAgentReplyFailure(reply({content:null,tool_calls:[call('unknown'),call('ask_question')]}))).toBe(true);
+ expect(terminalAgentReplyFailure(reply({content:null,tool_calls:[call('ask_question'),call('unknown')]}))).toBe(false);
+ expect(terminalAgentReplyFailure(reply({content:null,tool_calls:[call('ask_question')]},'tool_calls'),true)).toBe(true);
+});
+it('a host-opened mentor turn offered no card tool cannot run even ask_question',()=>{
+ expect(terminalAgentReplyFailure(reply({content:'先聊聊',tool_calls:[call('ask_question')]},'tool_calls'),false,false)).toBe(true);
+ expect(terminalAgentReplyFailure(reply({content:'先聊聊'}),false,false)).toBe(false);
+ expect(terminalAgentReplyFailure(reply({content:'先聊聊',tool_calls:[]}),false,false)).toBe(false);
+});
+it.each([null,'','  \n'])('only empty successful organizer output is terminal (%j)',content=>{
+ expect(terminalAgentReplyFailure(reply({content}))).toBe(false);
+ expect(terminalAgentReplyFailure(reply({content}),true)).toBe(true);
+ expect(terminalAgentReplyFailure(reply({content},'length'),true)).toBe(false);
+ expect(terminalAgentReplyFailure(reply({content},''),true)).toBe(false);
+});
+it('does not classify incomplete or malformed transport evidence as a terminal reply',()=>{
+ for(const value of [null,{}, {choices:[]},{choices:[{}]}, {choices:[{},{}]}])
+  expect(terminalAgentReplyFailure(value,true)).toBe(false);
+ expect(terminalAgentReplyFailure(reply({content:'Kept proposal'}),true)).toBe(false);
+});
+
+it.each([false,true].flatMap(organizer=>['stop','length','tool_calls','content_filter'].map(finish=>({organizer,finish}))))(
+ 'complete malformed replies are terminal in both phases ($organizer, $finish)',({organizer,finish})=>{
+  for(const message of [undefined,null,[],false,'text',{}, {content:[]},{content:1},
+   {content:{}},{content:'kept',tool_calls:{}},{content:null,tool_calls:null}])
+   expect(terminalAgentReplyFailure(reply(message,finish),organizer)).toBe(true);
+ });
+it.each([false,true])('unknown or absent finish never turns partial evidence into cancellation (%s)',organizer=>{
+ for(const finish_reason of [undefined,null,'','unknown']){
+  for(const message of [undefined,[],{content:[]},{content:null,refusal:'Refused'},
+   {content:null,tool_calls:[call('unknown')]}])
+   expect(terminalAgentReplyFailure({choices:[{message,finish_reason}]},organizer)).toBe(false);
+ }
+ expect(terminalAgentReplyFailure(reply({content:null},'length'),organizer)).toBe(false);
+ expect(terminalAgentReplyFailure(reply({content:''},'length'),organizer)).toBe(false);
+});

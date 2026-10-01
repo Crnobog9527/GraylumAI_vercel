@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {AGENT_TURN_MESSAGE_LIMIT} from '../../shared/agentTurn';
-export type RuntimeProgress={type:'text';text:string}|{type:'phase';phase:'mentor'|'organizer'|'saving'};
+import {AGENT_TURN_MESSAGE_LIMIT,type QuestionCard} from '../../shared/agentTurn';
+export type RuntimeProgress={type:'card';card:QuestionCard}|{type:'text';text:string}|{type:'phase';phase:'mentor'|'organizer'|'saving'};
 /** Only the leading public message string of the OPC JSON protocol may leave
  * the server. Partial escapes wait for the next provider chunk. Never forward
  * raw JSON, reasoning, provider metadata or later structured fields. */
