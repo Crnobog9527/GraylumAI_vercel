@@ -1148,7 +1148,7 @@ export default function AdminPackagesPage() {
 
                 <div className="space-y-2">
                   <Label style={{ color: 'var(--text-secondary)' }}>等级类型</Label>
-                  <Select
+                  <Select disabled={Boolean(editingPlan)}
                     value={planFormData.level}
                     onValueChange={(value: 'free' | 'pro' | 'gold') => setPlanFormData({ ...planFormData, level: value })}
                   >
@@ -1161,9 +1161,9 @@ export default function AdminPackagesPage() {
                       <SelectItem value="gold">Gold 黄金版</SelectItem>
                     </SelectContent>
                   </Select>
+                  {editingPlan && <p className="text-sm text-muted-foreground">修改等级需同时设置会员权益，暂不支持</p>}
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label style={{ color: 'var(--text-secondary)' }}>月付价格 (USD)</Label>
