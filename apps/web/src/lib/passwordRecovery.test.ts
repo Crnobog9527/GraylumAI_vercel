@@ -6,11 +6,13 @@ import {
   buildForgotPasswordPath,
   buildRecoveryRedirectUrl,
   classifyAccountGateError,
+  changePasswordWithToken,
   classifyPasswordUpdateError,
   classifyRecoveryExchangeError,
   isFreshRecoverySession,
   isTransientAuthError,
   parseRecoveryFailure,
+  PASSWORD_UPDATE_UNCERTAIN_MESSAGE,
   readAccessTokenClaims,
   RECOVERY_SESSION_MAX_AGE_SECONDS,
   recoveryTimestamp,
@@ -200,9 +202,50 @@ describe('new password', () => {
     expect(classifyPasswordUpdateError(authError('weak_password', 422))).toMatchObject({ kind: 'error' });
     expect(classifyPasswordUpdateError(authError('session_not_found', 403))).toEqual({ kind: 'session' });
     expect(classifyPasswordUpdateError({ status: 401 })).toEqual({ kind: 'session' });
+    expect(classifyPasswordUpdateError({ status: 403, code: '' })).toEqual({ kind: 'session' });
+    expect(classifyPasswordUpdateError({ status: 429, code: '' })).toEqual({ kind: 'error', message: '操作太频繁，请稍后再试。' });
+    for (const status of [0, 500, 502, 504]) {
+      expect(classifyPasswordUpdateError({ status, code: '' })).toEqual({ kind: 'error', message: PASSWORD_UPDATE_UNCERTAIN_MESSAGE });
+    }
     expect(classifyPasswordUpdateError(new Error('postgres exploded'))).toEqual({
       kind: 'error', message: '密码重置失败，请稍后重试。',
     });
+  });
+});
+
+describe('changePasswordWithToken', () => {
+  const call = (respond: (url: string, init: RequestInit) => Promise<Response>) => {
+    const requests: { url: string; init: RequestInit }[] = [];
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      requests.push({ url, init });
+      return respond(url, init);
+    }) as unknown as typeof fetch;
+    const result = changePasswordWithToken({
+      supabaseUrl: 'https://project.supabase.co/', anonKey: 'anon-key', accessToken: 'token-of-a', password: 'new-password', fetchImpl,
+    });
+    return { result, requests };
+  };
+  const json = (status: number, body: object) => async () => new Response(JSON.stringify(body), { status });
+
+  it('sends PUT /user with exactly the given token, the public key and only the password', async () => {
+    const { result, requests } = call(json(200, { id: 'u1' }));
+    expect(await result).toEqual({ error: null });
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe('https://project.supabase.co/auth/v1/user');
+    expect(requests[0].init.method).toBe('PUT');
+    expect(requests[0].init.headers).toMatchObject({
+      apikey: 'anon-key', Authorization: 'Bearer token-of-a', 'X-Supabase-Api-Version': '2024-01-01',
+    });
+    expect(JSON.parse(String(requests[0].init.body))).toEqual({ password: 'new-password' });
+  });
+
+  it('reports the status and error code, never the provider text', async () => {
+    expect(await call(json(422, { code: 'same_password', message: 'raw' })).result).toEqual({ error: { status: 422, code: 'same_password' } });
+    expect(await call(json(403, { error_code: 'session_not_found', msg: 'raw' })).result)
+      .toEqual({ error: { status: 403, code: 'session_not_found' } });
+    expect(await call(async () => new Response('<html>Bad Gateway</html>', { status: 502 })).result)
+      .toEqual({ error: { status: 502, code: '' } });
+    expect(await call(async () => { throw new TypeError('Failed to fetch'); }).result).toEqual({ error: { status: 0, code: '' } });
   });
 });
 

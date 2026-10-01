@@ -151,15 +151,62 @@ export function validateNewPassword(password: string, confirm: string): string |
 
 const SESSION_ERROR_CODES = new Set(['session_not_found', 'session_expired', 'bad_jwt', 'no_authorization']);
 
+// No HTTP answer, or a server error: the change may or may not have been saved. Trying again with the
+// same password then answers "same as before" if it was.
+export const PASSWORD_UPDATE_UNCERTAIN_MESSAGE =
+  '暂时无法确认新密码是否已保存，请稍后重试。如果重试时提示新密码不能和原来的密码相同，说明已经保存成功，请退出后用新密码登录。';
+
 export type PasswordUpdateFailure = { kind: 'session' } | { kind: 'error'; message: string };
 
 export function classifyPasswordUpdateError(error: unknown): PasswordUpdateFailure {
   const code = errorCode(error);
-  if (SESSION_ERROR_CODES.has(code) || errorStatus(error) === 401) return { kind: 'session' };
+  const status = errorStatus(error);
+  if (SESSION_ERROR_CODES.has(code) || status === 401 || status === 403) return { kind: 'session' };
   if (code === 'same_password') return { kind: 'error', message: '新密码不能和原来的密码相同。' };
   if (code === 'weak_password') return { kind: 'error', message: '新密码强度不够，请换一个更复杂的密码。' };
-  if (errorStatus(error) === 429) return { kind: 'error', message: '操作太频繁，请稍后再试。' };
+  if (status === 429) return { kind: 'error', message: '操作太频繁，请稍后再试。' };
+  if (status === 0 || (typeof status === 'number' && status >= 500)) return { kind: 'error', message: PASSWORD_UPDATE_UNCERTAIN_MESSAGE };
   return { kind: 'error', message: '密码重置失败，请稍后重试。' };
+}
+
+export type PasswordChangeError = { status: number; code: string };
+
+// Changes the password of exactly the session whose access token was checked, with GoTrue's
+// PUT /user. auth-js updateUser would read this browser's shared session again (after waiting for
+// its lock), which another tab may have switched to another account by then.
+export async function changePasswordWithToken({
+  supabaseUrl,
+  anonKey,
+  accessToken,
+  password,
+  fetchImpl = fetch,
+}: {
+  supabaseUrl: string;
+  anonKey: string;
+  accessToken: string;
+  password: string;
+  fetchImpl?: typeof fetch;
+}): Promise<{ error: PasswordChangeError | null }> {
+  let response: Response;
+  try {
+    response = await fetchImpl(`${supabaseUrl.replace(/\/+$/, '')}/auth/v1/user`, {
+      method: 'PUT',
+      headers: {
+        apikey: anonKey,
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        // Same API version auth-js sends, so error bodies carry a string `code`.
+        'X-Supabase-Api-Version': '2024-01-01',
+      },
+      body: JSON.stringify({ password }),
+    });
+  } catch {
+    return { error: { status: 0, code: '' } };
+  }
+  if (response.ok) return { error: null };
+  const body = await response.json().catch(() => null);
+  const code = typeof body?.code === 'string' ? body.code : typeof body?.error_code === 'string' ? body.error_code : '';
+  return { error: { status: response.status, code } };
 }
 
 // Account status comes from the API's protected procedures, which reject every status but active.

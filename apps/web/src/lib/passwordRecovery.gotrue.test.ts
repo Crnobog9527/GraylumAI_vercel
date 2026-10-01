@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { classifyLoginError } from './authFlow';
 import {
   buildRecoveryRedirectUrl,
+  changePasswordWithToken,
   classifyPasswordUpdateError,
   isFreshRecoverySession,
 } from './passwordRecovery';
@@ -65,6 +66,15 @@ async function admin(path: string, method: string, body: object) {
   expect(response.ok).toBe(true);
   return response.json();
 }
+
+// The page's real password change: PUT /user with one access token, through the local GoTrue.
+const changeWith = (accessToken: string, password: string) => changePasswordWithToken({
+  supabaseUrl: 'http://gotrue.local',
+  anonKey: 'local-anon',
+  accessToken,
+  password,
+  fetchImpl: (input, init) => fetch(String(input).replace('http://gotrue.local/auth/v1', authUrl!), init),
+});
 
 async function latestLink(email: string, after: number) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -129,10 +139,25 @@ describe.skipIf(!authUrl || !mailUrl || !jwtSecret)('password reset against loca
     const { data: level } = await requester.auth.mfa.getAuthenticatorAssuranceLevel();
     expect(isFreshRecoverySession(level?.currentAuthenticationMethods, Date.now() / 1000)).toBe(true);
 
-    const same = await requester.auth.updateUser({ password });
+    const recoveryToken = (await requester.auth.getSession()).data.session!.access_token;
+    const same = await changeWith(recoveryToken, password);
+    expect(same.error).toMatchObject({ status: 422, code: 'same_password' });
     expect(classifyPasswordUpdateError(same.error)).toEqual({ kind: 'error', message: '新密码不能和原来的密码相同。' });
-    expect((await requester.auth.updateUser({ password: newPassword })).error).toBeNull();
-    expect((await requester.auth.signOut({ scope: 'global' })).error).toBeNull();
+
+    // Another tab signs this browser into B before the change is sent: the change still goes to
+    // the checked token's account, and B's password stays as it was.
+    const otherEmail = `b-${tag}@example.test`;
+    await admin('users', 'POST', { email: otherEmail, password, email_confirm: true });
+    expect((await requester.auth.signInWithPassword({ email: otherEmail, password })).error).toBeNull();
+    expect((await changeWith(recoveryToken, newPassword)).error).toBeNull();
+    expect((await browserClient().auth.signInWithPassword({ email: otherEmail, password })).error).toBeNull();
+    expect((await browserClient().auth.signInWithPassword({ email: otherEmail, password: newPassword })).error)
+      .toMatchObject({ code: 'invalid_credentials' });
+    // Once the reset session is signed out, a change with its token is refused as a lost session.
+    expect((await fetch(`${authUrl}/logout?scope=global`, {
+      method: 'POST', headers: { authorization: `Bearer ${recoveryToken}` },
+    })).status).toBe(204);
+    expect(classifyPasswordUpdateError((await changeWith(recoveryToken, `${newPassword}-x`)).error)).toEqual({ kind: 'session' });
     // The session from before the reset can neither be used nor refreshed any more.
     expect((await otherDevice.auth.getUser()).data.user).toBeNull();
     expect((await otherDevice.auth.refreshSession()).error).not.toBeNull();

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase';
 import { buildAuthHref } from '@/lib/site-config';
 import {
+  changePasswordWithToken,
   classifyAccountGateError,
   classifyPasswordUpdateError,
   isFreshRecoverySession,
@@ -32,7 +33,7 @@ export type ResetPhase =
 
 type AuthClient = Pick<
   ReturnType<typeof createClient>['auth'],
-  'getUser' | 'getSession' | 'mfa' | 'signOut' | 'updateUser' | 'onAuthStateChange'
+  'getUser' | 'getSession' | 'mfa' | 'signOut' | 'onAuthStateChange'
 >;
 
 export type ResetDeps = {
@@ -40,6 +41,8 @@ export type ResetDeps = {
   // Any protected API call; it fails with FORBIDDEN for every account status but active.
   checkAccount: () => Promise<unknown>;
   nowSeconds: () => number;
+  // Sends the change with exactly this access token (changePasswordWithToken).
+  changePassword: (accessToken: string, password: string) => Promise<{ error: unknown }>;
 };
 
 export const PASSWORD_RESET_DONE_PATH = '/login?notice=password_reset';
@@ -108,18 +111,23 @@ export class ResetAttempt {
   }
 }
 
-// The last check, right before the change: this browser's session, read locally, must still be the
-// reset the form was opened with, and nothing may have voided the attempt while it waited.
-async function confirmSameReset(deps: ResetDeps, attempt: ResetAttempt): Promise<ResetPhase | null> {
+// The last check: this browser's session, read locally, must still be the reset the form was opened
+// with, and nothing may have voided the attempt while it waited. Returns the checked access token,
+// which the change then uses, so a later switch of the shared session cannot redirect it.
+async function confirmSameReset(
+  deps: ResetDeps,
+  attempt: ResetAttempt,
+): Promise<{ phase: ResetPhase } | { accessToken: string }> {
   const { data } = await deps.auth.getSession().catch(() => ({ data: { session: null } }));
-  if (attempt.voided) return attempt.voided;
-  const claims = readAccessTokenClaims(data.session?.access_token);
-  if (!claims) return { kind: 'no-link' };
+  if (attempt.voided) return { phase: attempt.voided };
+  const accessToken = data.session?.access_token;
+  const claims = readAccessTokenClaims(accessToken);
+  if (!accessToken || !claims) return { phase: { kind: 'no-link' } };
   const { grant } = attempt;
   const same = claims.userId === grant.userId
     && recoveryTimestamp(claims.amr) === grant.recoveredAt
     && isFreshRecoverySession(claims.amr, deps.nowSeconds());
-  return same ? null : { kind: 'not-recovery' };
+  return same ? { accessToken } : { phase: { kind: 'not-recovery' } };
 }
 
 export async function submitNewPassword(
@@ -139,12 +147,14 @@ export async function submitNewPassword(
   if (current.grant.userId !== grant.userId || current.grant.recoveredAt !== grant.recoveredAt) {
     return { kind: 'closed', phase: { kind: 'not-recovery' } };
   }
-  const changed = await confirmSameReset(deps, attempt);
-  if (changed) return { kind: 'closed', phase: changed };
+  const confirmed = await confirmSameReset(deps, attempt);
+  if ('phase' in confirmed) return { kind: 'closed', phase: confirmed.phase };
+  // Nothing is awaited between this check and sending the request with the checked token.
+  if (attempt.voided) return { kind: 'closed', phase: attempt.voided };
 
   let failure;
   try {
-    const { error } = await deps.auth.updateUser({ password });
+    const { error } = await deps.changePassword(confirmed.accessToken, password);
     failure = error ? classifyPasswordUpdateError(error) : null;
   } catch (error) {
     failure = classifyPasswordUpdateError(error);
@@ -153,6 +163,9 @@ export async function submitNewPassword(
     return failure.kind === 'session' ? { kind: 'closed', phase: { kind: 'no-link' } } : { kind: 'invalid', message: failure.message };
   }
 
+  // The checked account's password changed, and GoTrue revoked its other sessions. If this browser
+  // switched to another account meanwhile, that account's password was not touched; the sign-out
+  // below acts on whatever session this browser holds now, so it would only sign that account out.
   attempt.signingOut = true;
   return (await signOutAfterReset(deps.auth)) ? { kind: 'done', to: PASSWORD_RESET_DONE_PATH } : { kind: 'signout-pending' };
 }
@@ -177,6 +190,12 @@ export function usePasswordReset() {
     auth: createClient().auth,
     checkAccount: () => utils.user.getUserProfile.fetch(undefined, { staleTime: 0 }),
     nowSeconds: () => Date.now() / 1000,
+    changePassword: (accessToken, password) => changePasswordWithToken({
+      supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ?? '',
+      anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '',
+      accessToken,
+      password,
+    }),
   }), [utils]);
 
   const check = useCallback(async () => {
