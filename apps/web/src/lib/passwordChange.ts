@@ -14,6 +14,10 @@ import { classifyPasswordUpdateError, validateNewPassword } from '@/lib/password
 
 export const SET_PASSWORD_BY_EMAIL_HINT = '还没有设置过密码？可以通过邮件设置。';
 
+// The check never got an answer about the password (no response, or a server or gateway error):
+// saying "wrong password" here would send the visitor in the wrong direction.
+export const REAUTH_UNAVAILABLE_MESSAGE = '网络异常或服务暂时不可用，没有完成当前密码验证，请稍后重试。';
+
 export const REAUTH_FAILED_MESSAGE =
   '当前密码验证失败，请重新输入。如果你一直用 Google 登录、还没有设置过密码，请通过邮件设置。';
 
@@ -50,8 +54,16 @@ function errorStatus(error: unknown) {
 }
 
 function reauthFailureMessage(error: unknown) {
+  const status = errorStatus(error);
+  const name = error && typeof error === 'object' && 'name' in error ? error.name : null;
   if (errorCode(error) === 'captcha_failed') return '人机验证没有通过，请重试。';
-  if (errorStatus(error) === 429) return '操作太频繁，请稍后再试。';
+  if (status === 429) return '操作太频繁，请稍后再试。';
+  // auth-js reports a failed request as status 0 and gateway errors (502/503/504/520-524/530) as
+  // AuthRetryableFetchError; a call that throws instead is no answer either.
+  if (name === 'AuthRetryableFetchError' || status === 0 || (typeof status === 'number' && status >= 500)
+    || error instanceof TypeError) {
+    return REAUTH_UNAVAILABLE_MESSAGE;
+  }
   return REAUTH_FAILED_MESSAGE;
 }
 

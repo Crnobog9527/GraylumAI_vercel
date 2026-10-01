@@ -1,10 +1,11 @@
-import type { User } from '@supabase/supabase-js';
+import { AuthRetryableFetchError, createClient, type User } from '@supabase/supabase-js';
 import { describe, expect, it, vi } from 'vitest';
 import { getAuthProvider } from './auth';
 import {
   changePasswordWithReauth,
   passwordChangeEntry,
   REAUTH_FAILED_MESSAGE,
+  REAUTH_UNAVAILABLE_MESSAGE,
   type PasswordChangeDeps,
 } from './passwordChange';
 
@@ -110,9 +111,42 @@ describe('changePasswordWithReauth', () => {
     expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message: '人机验证没有通过，请重试。' });
     deps.signInWithPassword.mockResolvedValueOnce({ error: Object.assign(new Error('raw'), { code: 'over_request_rate_limit', status: 429 }) });
     expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message: '操作太频繁，请稍后再试。' });
-    deps.signInWithPassword.mockRejectedValueOnce(new TypeError('Failed to fetch'));
-    expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message: REAUTH_FAILED_MESSAGE });
     expect(deps.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['no response (SDK, status 0)', new AuthRetryableFetchError('Failed to fetch', 0)],
+    ['a gateway error (SDK, 502)', new AuthRetryableFetchError('Bad Gateway', 502)],
+    ['a gateway error (SDK, 504)', new AuthRetryableFetchError('Gateway Timeout', 504)],
+    ['a server error', Object.assign(new Error('raw'), { code: 'unexpected_failure', status: 500 })],
+  ])('does not call %s a wrong password, and changes nothing', async (_, error) => {
+    const deps = depsFor(accounts.emailOnly);
+    deps.signInWithPassword.mockResolvedValueOnce({ error });
+    expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message: REAUTH_UNAVAILABLE_MESSAGE });
+    deps.signInWithPassword.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message: REAUTH_UNAVAILABLE_MESSAGE });
+    expect(deps.updatePassword).not.toHaveBeenCalled();
+    expect(REAUTH_UNAVAILABLE_MESSAGE).not.toContain('密码验证失败');
+  });
+
+  it('gets the same answers from the real SDK sign-in for an unreachable or failing GoTrue', async () => {
+    const signInVia = (respond: () => Promise<Response>) => createClient('http://gotrue.local', 'anon', {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      global: { fetch: respond },
+    }).auth.signInWithPassword({ email: 'a@example.test', password: CURRENT });
+    const json = (status: number, body: object) => async () => new Response(JSON.stringify(body), {
+      status, headers: { 'content-type': 'application/json', 'x-supabase-api-version': '2024-01-01' },
+    });
+    const cases: [() => Promise<Response>, string][] = [
+      [async () => { throw new TypeError('Failed to fetch'); }, REAUTH_UNAVAILABLE_MESSAGE],
+      [async () => new Response('upstream timed out', { status: 504 }), REAUTH_UNAVAILABLE_MESSAGE],
+      [json(400, { code: 'invalid_credentials', message: 'Invalid login credentials' }), REAUTH_FAILED_MESSAGE],
+    ];
+    for (const [respond, message] of cases) {
+      const deps = { ...depsFor(accounts.emailOnly), signInWithPassword: () => signInVia(respond) };
+      expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message });
+      expect(deps.updatePassword).not.toHaveBeenCalled();
+    }
   });
 
   it('shows fixed texts when the update itself fails, never the provider text', async () => {
