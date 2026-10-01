@@ -8,10 +8,10 @@ import { createClient } from '@/lib/supabase';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
 import { resolveAuthAppUrl } from '@/lib/site-config';
+import { clearAuthFragment } from '@/lib/authFlow';
 import {
   buildRecoveryRedirectUrl,
-  parseRecoveryFailure,
-  RECOVERY_FAILURE_MESSAGES,
+  recoveryFailureNotice,
   resetRequestOutcome,
 } from '@/lib/passwordRecovery';
 import { Button } from '@/components/ui/button';
@@ -42,8 +42,9 @@ function ForgotPasswordContent() {
   const [status, setStatus] = useState<AuthStatus | null>(null);
 
   useEffect(() => {
-    const reason = parseRecoveryFailure(searchParams.get('reason'));
-    setStatus(reason ? { tone: 'error', message: RECOVERY_FAILURE_MESSAGES[reason] } : null);
+    // A failed reset link arrives with GoTrue's #error=…&error_description=… still attached.
+    clearAuthFragment(window);
+    setStatus(recoveryFailureNotice(searchParams.get('reason')));
   }, [searchParams]);
 
   useEffect(() => {

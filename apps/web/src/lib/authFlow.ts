@@ -99,6 +99,15 @@ export function readAuthFragment(hash: string): FragmentOutcome {
   return null;
 }
 
+// Drops an email link's fragment (an error with the provider's description, or tokens) from the
+// address bar and history, keeping path and query. Only fragments readAuthFragment recognizes are
+// removed, so an ordinary #section stays. Returns whether something was removed.
+export function clearAuthFragment(win: { location: Pick<Location, 'pathname' | 'search' | 'hash'>; history: Pick<History, 'replaceState'> }) {
+  if (!readAuthFragment(win.location.hash)) return false;
+  win.history.replaceState(null, '', win.location.pathname + win.location.search);
+  return true;
+}
+
 // /login?error=<code>. The page shows fixed text for known codes and ignores any other value, so a
 // crafted link cannot put its own words on the login page.
 export type LoginErrorCode = 'callback_failed' | 'link_needs_login' | 'oauth_incomplete';

@@ -12,6 +12,8 @@ import {
   isFreshRecoverySession,
   isTransientAuthError,
   parseRecoveryFailure,
+  RECOVERY_FAILURE_MESSAGES,
+  recoveryFailureNotice,
   PASSWORD_UPDATE_UNCERTAIN_MESSAGE,
   readAccessTokenClaims,
   RECOVERY_SESSION_MAX_AGE_SECONDS,
@@ -52,6 +54,19 @@ describe('reset link destination', () => {
     expect(classifyRecoveryExchangeError(authError('flow_state_expired'))).toBe('expired');
     expect(classifyRecoveryExchangeError(authError('unexpected_failure'))).toBe('failed');
     expect(classifyRecoveryExchangeError(null)).toBe('failed');
+  });
+});
+
+describe('request page notice after a failed link', () => {
+  it('comes from the reason alone, with the fixed text and nothing from the provider', () => {
+    const landing = new URL('https://auth-staging.graylum.com/forgot-password?reason=expired'
+      + '#error=access_denied&error_code=user_banned&error_description=User+is+banned&sb=');
+    const notice = recoveryFailureNotice(landing.searchParams.get('reason'));
+    expect(notice).toEqual({ tone: 'error', message: '重置链接无效、已过期或已被使用，请重新申请。' });
+    expect(notice!.message).not.toMatch(/banned|invalid|expired|access_denied/i);
+    expect(recoveryFailureNotice('browser')).toEqual({ tone: 'error', message: RECOVERY_FAILURE_MESSAGES.browser });
+    expect(recoveryFailureNotice('User is banned')).toBeNull();
+    expect(recoveryFailureNotice(null)).toBeNull();
   });
 });
 

@@ -81,6 +81,12 @@ export function parseRecoveryFailure(value: string | null): RecoveryFailure | nu
   return value === 'expired' || value === 'browser' || value === 'failed' ? value : null;
 }
 
+// The request page's notice comes from `reason` alone, never from a fragment GoTrue appended.
+export function recoveryFailureNotice(reason: string | null): { tone: 'error'; message: string } | null {
+  const failure = parseRecoveryFailure(reason);
+  return failure ? { tone: 'error', message: RECOVERY_FAILURE_MESSAGES[failure] } : null;
+}
+
 export function buildForgotPasswordPath(reason?: RecoveryFailure) {
   return reason ? `${FORGOT_PASSWORD_PATH}?reason=${reason}` : FORGOT_PASSWORD_PATH;
 }

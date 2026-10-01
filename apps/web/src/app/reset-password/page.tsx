@@ -1,10 +1,11 @@
 "use client";
 
 import Link from 'next/link';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Loader2, LockKeyhole, LogOut, RefreshCw } from 'lucide-react';
 import { ACCOUNT_GATE_MESSAGES, FORGOT_PASSWORD_PATH, RECOVERY_FAILURE_MESSAGES } from '@/lib/passwordRecovery';
 import { usePasswordReset } from '@/hooks/use-password-reset';
+import { clearAuthFragment } from '@/lib/authFlow';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -27,6 +28,12 @@ export default function ResetPasswordPage() {
   const { phase, pending, formError, retry, retrySignOut, submit } = usePasswordReset();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+
+  // An email link's fragment (an error, or tokens of a link sent without PKCE) never stays in the
+  // address bar; tokens there are never turned into a session.
+  useEffect(() => {
+    clearAuthFragment(window);
+  }, []);
 
   if (phase.kind === 'checking') return <AuthPageLoading />;
 
