@@ -1,5 +1,5 @@
 {
- "_about": "0154 应用后（账本 20261001072923），由总控在只读事务中抓取",
+ "_about": "0155 应用后（账本 20261001204919），由总控在只读事务中抓取",
  "groups": {
   "acl:account_erasure_requests": "f9039ad689",
   "acl:agent_confirmed_preferences": "43f5fb440d",
@@ -537,7 +537,7 @@
   "fn:revoke_skill_revision(uuid,uuid)": "edfd51c4e1",
   "fn:rls_auto_enable()": "a721b43969",
   "fn:runtime_admission_replay(uuid,uuid,jsonb)": "54fae1bce5",
-  "fn:runtime_admit(uuid,uuid,uuid,jsonb,jsonb)": "42876ec221",
+  "fn:runtime_admit(uuid,uuid,uuid,jsonb,jsonb)": "d36923a240",
   "fn:runtime_billing_allowed(uuid,jsonb,uuid)": "44e0b15d10",
   "fn:runtime_binding_guard()": "2ed3717e19",
   "fn:runtime_cancel(uuid,uuid)": "6a472d47d2",
@@ -566,7 +566,7 @@
   "fn:runtime_test_recovery_policy(uuid,uuid)": "bf7f342820",
   "fn:runtime_test_window_allowed(uuid,jsonb)": "29986deeb8",
   "fn:runtime_tool(uuid,uuid,text,text,jsonb,text,jsonb)": "99ef09cc1a",
-  "fn:runtime_view(uuid,uuid)": "0965ca8004",
+  "fn:runtime_view(uuid,uuid)": "216a1f0e8b",
   "fn:runtime_work_projection(uuid,uuid,uuid)": "279fc75766",
   "fn:runtime_work_projection_before_opc(uuid,uuid,uuid)": "678a45c051",
   "fn:runtime_workspace_session(uuid,uuid)": "d9f34ae213",
