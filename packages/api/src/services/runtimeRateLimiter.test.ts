@@ -16,11 +16,11 @@ beforeEach(() => {
   mock.limit.mockResolvedValue({ success: true, reset: Date.now() + 60000 });
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
-it('checks day then minute with the shared identity and disables analytics and fail-open timers', async () => {
+it('checks minute then day with the shared identity and disables analytics and fail-open timers', async () => {
   const { checkRuntimeRateLimit } = await import('./redisRateLimiter');
   expect(await checkRuntimeRateLimit('actor', 'admission', defaults, 'staging')).toEqual({ success: true });
   expect(mock.limit.mock.calls.map(([options, id]) => [options.limiter, id])).toEqual([
-    [{ count: 200, duration: '1 d' }, 'actor'], [{ count: 10, duration: '1 m' }, 'actor'],
+    [{ count: 10, duration: '1 m' }, 'actor'], [{ count: 200, duration: '1 d' }, 'actor'],
   ]);
   expect(mock.construct.mock.calls.every(([v]) => !v.analytics && v.ephemeralCache === false && v.timeout === 0)).toBe(true);
   expect(mock.redis).toHaveBeenCalledWith(expect.objectContaining({
@@ -48,7 +48,10 @@ it.each(['day', 'minute'])('returns %s denial and never calls later windows', as
   expect(await check('a', 'admission', defaults, 'staging')).toEqual({
     success: false, reason: 'rate_limited', window, retryAfter: 60,
   });
-  expect(mock.limit).toHaveBeenCalledTimes(window === 'day' ? 1 : 2);
+  expect(mock.limit).toHaveBeenCalledTimes(window === 'minute' ? 1 : 2);
+  if (window === 'minute') {
+    expect(mock.limit.mock.calls.some(([options]) => options.prefix.includes(':day:'))).toBe(false);
+  }
   expect(mock.log).not.toHaveBeenCalled();
 });
 it.each(['error', 'sdk-timeout', 'missing-config'])('fails closed for %s without raw details in logs', async mode => {

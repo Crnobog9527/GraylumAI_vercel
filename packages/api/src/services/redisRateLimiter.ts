@@ -346,7 +346,7 @@ export async function checkRuntimeRateLimit(
       pair = { perMinute, perDay, minute: make('minute', perMinute, '1 m'), day: make('day', perDay, '1 d') };
       runtimeLimiters.set(key, pair); // Exactly six possible entries; replace, never append config versions.
     }
-    for (const window of ['day', 'minute'] as const) {
+    for (const window of ['minute', 'day'] as const) {
       const result = await limitWithDeadline(pair[window], identifier);
       if (!result.success) return { success: false, reason: 'rate_limited', window,
         retryAfter: Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)) };

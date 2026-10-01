@@ -14,7 +14,8 @@
 - API Redis 客户端兼容两套完整变量名，原 500ms 超时及失败关闭不变。
 - checkRuntimeRateLimit 支持准入/调用双窗口参数、显式环境前缀、稳定 Redis key；
   调值替换实例，不清计数，最多六组缓存；关闭 analytics 和本地拒绝缓存。
-  日窗口先检查，失败不检查分钟；分钟失败可能已占日次数，保守不扣回。
+  分钟窗口先检查；分钟被拒时不检查日窗口、不消耗日额度。
+  分钟通过但日窗口拒绝时，已占的分钟次数保守不扣回。
   该 helper 尚无运行时消费者，stopNewCalls 的安全执行由后续宿主接线完成。
   不改 Web 旧链路的独立客户端，不改变其配置要求。
 
@@ -37,10 +38,18 @@ execute.ts 内。路由前置拒绝会挡住恢复和原失败收尾；路由预
 | 用途 | URL 名字 | 可写 token 名字 |
 | --- | --- | --- |
 | 首选 | UPSTASH_REDIS_REST_URL | UPSTASH_REDIS_REST_TOKEN |
-| Vercel 集成兼容 | KV_REST_API_URL | KV_REST_API_TOKEN |
+| 仅 API 侧的 Vercel 集成兼容 | KV_REST_API_URL | KV_REST_API_TOKEN |
 
 首选任一非空就要求首选成对完整；只有首选两个都不存在/为空时才读取集成完整对。
 不混用两套，不接受 KV_REST_API_READ_ONLY_TOKEN，不遍历自定义前缀。
+
+**目前 UPSTASH_REDIS_REST_URL 与 UPSTASH_REDIS_REST_TOKEN 这一对仍是必需的。**
+构建校验 `validateRedisEnvForBuild`（packages/api/src/lib/envValidator.ts）以及
+Web 中间件客户端（apps/web/src/lib/rateLimit.ts）目前只认这一对；
+`KV_REST_API_*` 只是 API 侧的兼容读取，不能替代构建和 Web 的配置。
+若 Vercel 集成仅注入 KV 那一对，由 Owner 补齐同数据库的 UPSTASH 完整别名对再部署；
+本次只澄清文档，不改构建校验、Web 中间件或远程环境配置。
+
 不输出值、长度、哈希或凭证来源内容；本任务没有查询远程环境变量或加载本地真实凭证。
 自定义前缀由 Owner 在 Vercel 增加同数据库的完整别名对，或另行确认具体名字兼容。
 
