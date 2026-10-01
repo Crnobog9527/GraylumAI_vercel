@@ -10,7 +10,7 @@ const poll:typeof expect.poll=(callback,options)=>expect.poll(callback,{timeout:
 // The isolated staging-host gateway supplies synthetic provider responses and
 // controlled pauses only; these tests do not establish real mentor quality.
 
-it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','proposal'] as const)('OPC: MENTOR_STREAM real browser incremental HTTP, editable drafts, frozen input and persistence (%s)',async(scenario)=>{
+it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','proposal','invalid'] as const)('OPC: MENTOR_STREAM real browser incremental HTTP, editable drafts, frozen input and persistence (%s)',async(scenario)=>{
  const f=await mergedPositioningFixture(scenario==='proposal'?flow=>{
   flow.steps[0]!.information![0] = {...flow.steps[0]!.information![0]!,title:'参考研究结论',elicitation:'agent_proposal'};
  }:undefined),mentorId=randomUUID(),organizerId=randomUUID(),key='SYNTHETIC_BROWSER_'+randomUUID();
@@ -19,7 +19,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
  for(const p of policies)await sql.query("insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,api_key,max_tokens,input_limit,config) values($1,'Synthetic browser streaming',$2,'openai','true','https://openrouter.ai/api/v1',$3,1000,10000,$4)",[p.modelId,p.model,key,JSON.stringify(configuredReasoning(p.model))]);
  await sql.query('update modules set model_id=$1 where id=$2',[mentorId,f.moduleId]);
  await sql.query("insert into system_settings(key,value) values('v3_summary_model_id',$1),('v3_summary_max_tokens','128') on conflict(key) do update set value=excluded.value",[JSON.stringify(organizerId)]);
- await sql.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,1,20,now()+interval '1 hour') on conflict(id) do update set actor_ids=excluded.actor_ids,call_policies=excluded.call_policies,expires_at=excluded.expires_at",[process.env.V3_RUNTIME_STAGING_WINDOW_ID,[f.actor],JSON.stringify(policies)]);
+ await sql.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,1,40,now()+interval '1 hour') on conflict(id) do update set actor_ids=excluded.actor_ids,call_policies=excluded.call_policies,expires_at=excluded.expires_at",[process.env.V3_RUNTIME_STAGING_WINDOW_ID,[f.actor],JSON.stringify(policies)]);
  const d=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'mentor',businessName:'Graylum AI'});
  if(scenario==='proposal')expect((await f.service.read(d.draftId)).information['step-0'].schema[0]).toMatchObject({id:'product',title:'参考研究结论',elicitation:'agent_proposal'});
  const {chromium}=await import('../../../../../apps/web/node_modules/@playwright/test');
@@ -28,7 +28,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
  await page.addInitScript(()=>{const seen=new Set<string>();(window as unknown as {mentorTextTimes:number[]}).mentorTextTimes=[];(window as unknown as {mentorTextSamples:Array<{at:number;text:string}>}).mentorTextSamples=[];new MutationObserver(()=>{for(const node of document.querySelectorAll('p')){const text=node.textContent??'';if(text.includes('本地流式导师正文：')&&!seen.has(text)){seen.add(text);(window as unknown as {mentorTextTimes:number[]}).mentorTextTimes.push(Date.now());(window as unknown as {mentorTextSamples:Array<{at:number;text:string}>}).mentorTextSamples.push({at:Date.now(),text});}}}).observe(document,{childList:true,subtree:true,characterData:true});});
  type Call={index:number;id:string;model:string;stream:boolean;reasoningEffort:string|null;startedAt:number;firstAt:number|null;finishedAt:number|null};
  const control=async(release?:number):Promise<Call[]>=>{const r=await fetch(process.env.V3_LOCAL_REST+'/__mentor_stream',{method:release?'POST':'GET',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!},...(release?{body:JSON.stringify({release})}:{})});if(!r.ok)throw new Error('isolated gate failed');return r.json();};
- await fetch(process.env.V3_LOCAL_REST+'/__mentor_stream',{method:'POST',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!},body:JSON.stringify({reset:true})});
+ await fetch(process.env.V3_LOCAL_REST+'/__mentor_stream',{method:'POST',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!},body:JSON.stringify({reset:true,invalidCard:scenario==='invalid'})});
  let releasePrepare=()=>{};
  const path='/positioning/'+d.draftId,timings:Record<string,number>={};let turnRequests=0,streamRequests=0,prepareRequests=0;const prepares:Array<{started:number;finished?:number}>=[];const prepareIndex=new Map<unknown,number>();
  await context.route('**/*',async route=>{const u=new URL(route.request().url());if(u.hostname==='syntheticstaging.supabase.co'){const response=await route.fetch({url:process.env.V3_LOCAL_REST+u.pathname+u.search});await route.fulfill({response});return;}if(!['127.0.0.1','localhost'].includes(u.hostname)&&!['data:','blob:'].includes(u.protocol)){await route.abort();return;}await route.continue();});
@@ -74,6 +74,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   await poll(async()=>(await control()).length).toBe(3);
   const second=(await control())[2]!;expect(second.finishedAt).toBeNull();expect([turnRequests,prepareRequests,streamRequests]).toEqual([2,0,0]);
   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-user-incremental-'+scenario+'.png',fullPage:true});
+  expect(await page.getByText('DISCARDED_SEPARATE_ASSISTANT_TEXT',{exact:true}).count()).toBe(0);
   await control(3);await poll(async()=>(await control()).length).toBe(4);
   expect((await control())[3]!.finishedAt).toBeNull();expect(await composer.isEditable()).toBe(true);expect(await composer.inputValue()).toBe('这是下一条尚未发送的新草稿');
   await poll(()=>page.getByText(/本地流式导师正文：/).count()).toBeGreaterThan(1);
@@ -90,29 +91,55 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    expect((await control()).length).toBe(4);expect((await sql.query('select id,request_id from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows).toEqual(executions);
   }else await control(4);
   await poll(()=>send.isEnabled()).toBe(true);expect(await composer.inputValue()).toBe('这是下一条尚未发送的新草稿');
-  // An answer turn is offered the card tool; the synthetic gateway then returns a card.
-  await poll(()=>page.getByText('请选择当前问题最接近的答案：',{exact:true}).isVisible()).toBe(true);
-  // Owner card design: recommended tag, fixed Other entry that focuses the message box, no unsure buttons.
-  const card=page.getByRole('region',{name:'导师提问'}).last();
-  await poll(()=>card.getByText('推荐',{exact:true}).isVisible()).toBe(true);
+  const source=(await sql.query('select id,result from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows.at(-1);
+  const saved=JSON.parse(source.result.body);
+  expect(saved.message).toContain('本地流式导师正文：');
+  expect(await page.getByText('DISCARDED_SEPARATE_ASSISTANT_TEXT',{exact:true}).count()).toBe(0);
+  if(scenario==='invalid'){
+   expect(saved.card).toBeNull();expect(await page.getByRole('region',{name:'导师提问'}).count()).toBe(0);
+  }else{
+   await poll(()=>page.getByText('请选择当前问题最接近的答案：',{exact:true}).isVisible()).toBe(true);
+   const card=page.getByRole('region',{name:'导师提问'}).last();
+   await poll(()=>card.getByText('推荐',{exact:true}).isVisible()).toBe(true);
+   expect(await card.getByText(saved.card.recommendationReason,{exact:true}).isVisible()).toBe(true);
+   expect(saved.message).toBe(saved.card.message);
+   await card.getByRole('button',{name:'其他',exact:true}).click();
+   await poll(()=>composer.evaluate(element=>element===document.activeElement)).toBe(true);
+  }
   expect(await page.getByRole('button',{name:/我不确定/}).count()).toBe(0);
   expect(await composer.getAttribute('placeholder')).toBe('其他：自己补充');
-  await card.getByRole('button',{name:'其他',exact:true}).click();
-  await poll(()=>composer.evaluate(element=>element===document.activeElement)).toBe(true);
   expect(await composer.inputValue()).toBe('这是下一条尚未发送的新草稿');
+  await page.reload();await poll(()=>send.isEnabled()).toBe(true);
+  await poll(()=>page.getByText(saved.message,{exact:true}).count()).toBeGreaterThan(0);
+  expect((await control()).length).toBe(4);
   await poll(async()=>(await f.service.read(d.draftId)).information['step-0'].values?.product?.status).toBe('provisional');timings.mentorCompleteToFieldReadMs=Date.now()-(await control())[2]!.finishedAt!;expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1',[f.actor])).rows[0].n).toBe(2);expect((await sql.query('select count(*)::int n from opc_turns where draft_id=$1',[d.draftId])).rows[0].n).toBe(2);
   const calls=(await sql.query('select c.id,c.state,c.provider_id,c.payload from bill2_calls c join bill2_runs r on r.id=c.run_id where r.actor_id=$1 order by c.created_at',[f.actor])).rows;expect(calls).toHaveLength(4);expect(new Set(calls.map(c=>c.provider_id)).size).toBe(4);
-  await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).click();await poll(async()=>(await control()).length).toBe(5);expect((await control())[4]!.stream).toBe(true);await control(5);await poll(async()=>(await control()).length).toBe(6);await control(6);await poll(()=>send.isEnabled()).toBe(true);
+  // Exercise both chosen-option and free-input correlation through the real HTTP admission.
+  if(scenario==='refresh'||scenario==='invalid'){
+   await composer.fill('我主要提供每周摄影练习课程。');await send.click();
+  }else await page.getByRole('region',{name:'导师提问'}).last().getByRole('button').first().click();
+  await poll(async()=>(await control()).length).toBe(5);await control(5);
+  await poll(async()=>(await control()).length).toBe(6);await control(6);await composer.fill('后续尚未发送草稿');
+  await poll(()=>send.isEnabled()).toBe(true);
+  const answered=(await sql.query('select payload from runtime_executions where actor_id=$1 order by created_at desc limit 1',[f.actor])).rows[0].payload;
+  expect(answered.attachedOrganizer.historyItems).toBe(0);
+  if(scenario!=='invalid'){
+   expect(answered.request.answerSource).toEqual({executionId:source.id,...(scenario==='refresh'?{}:{optionIndex:0})});
+   const material=JSON.parse(answered.attachedOrganizer.input).answeredCard;
+   expect(material).toMatchObject({question:saved.card.question,recommended:saved.card.recommended,
+    selectedIndex:scenario==='refresh'?null:0,selectedOption:scenario==='refresh'?null:saved.card.options[0]});
+  }
+  await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).click();await poll(async()=>(await control()).length).toBe(7);expect((await control())[6]!.stream).toBe(true);await control(7);await poll(async()=>(await control()).length).toBe(8);await control(8);await poll(()=>send.isEnabled()).toBe(true);
   const before=(await sql.query('select id,state from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows;
-  await page.reload();await poll(()=>composer.isEditable()).toBe(true);expect((await control()).length).toBe(6);
+  await page.reload();await poll(()=>composer.isEditable()).toBe(true);expect((await control()).length).toBe(8);
   expect((await f.service.read(d.draftId)).information['step-0'].values.product.status).toBe('confirmed');
   await page.getByRole('link',{name:'资料库',exact:true}).click();await page.getByRole('link',{name:'返回当前工作',exact:true}).click();await page.waitForURL('**'+path);
-  expect((await control()).length).toBe(6);expect((await sql.query('select id,state from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows).toEqual(before);
+  expect((await control()).length).toBe(8);expect((await sql.query('select id,state from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows).toEqual(before);
   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-persisted-return-'+scenario+'.png',fullPage:true});
   // Mentor dialogue carries the frozen latency policy; the Luna organizer keeps its original bytes.
   expect((await control()).map(call=>[call.stream,call.reasoningEffort])).toEqual((await control()).map(call=>call.stream?[true,'none']:[false,null]));expect((await control()).some(call=>!call.stream)).toBe(true);
   const settlements=(await sql.query("select r.id,count(t.id)::int spends from bill2_runs r left join credit_transactions t on t.bill2_run_id=r.id and t.reason_code='bill2_spend' where r.actor_id=$1 group by r.id",[f.actor])).rows;
-  expect(settlements).toHaveLength(3);expect(settlements.every(row=>row.spends===1)).toBe(true);
+  expect(settlements).toHaveLength(4);expect(settlements.every(row=>row.spends===1)).toBe(true);
   Object.assign(timings,{turnRequests,streamRequests,prepareRequests});await writeFile(process.env.V3_WORKBENCH_OUTPUT+'/mentor-stream-browser-evidence-'+scenario+'.json',JSON.stringify({synthetic:true,qualityProof:false,timings,openingProgress,prepares,calls:await control(),executionIds:before},null,2));
  }catch(error){await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-stream-failure.png',fullPage:true}).catch(()=>{});console.info('MENTOR_STREAM_FAILURE',error,await page.locator('body').innerText().catch(()=>''));throw error;}
  finally{releasePrepare();for(const call of await control())await control(call.index);await browser.close();}

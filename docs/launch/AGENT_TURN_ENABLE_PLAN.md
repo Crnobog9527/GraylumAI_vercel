@@ -57,6 +57,46 @@ round、step、question、已完成可读有效卡及整个 Session 最新 execu
 后续：完整浏览器覆盖与最终冻结说明。B1 一次性入口/fixture/protocol 已在此前恢复实施时
 移除，本分支无这些可执行文件；历史章节仅保留审计证据。**本增量不是 #561 的冻结 head。**
 
+## 最终确定性验证与 #561 入口
+
+确定性证据覆盖：五字段严格校验与旧三字段读取；卡片正文优先、回合缓冲与开场增量；
+非法卡有合法 message 时纯文字保存/刷新；多工具仅首个；旧冻结字节/已结算失败不改判；
+原 execution 来源、选项文字、显式整理材料、零历史、请求恢复与一次结算。
+本机 MENTOR_STREAM 使用真实网页/HTTP/SDK/PostgreSQL/BILL2，但供应商为合成 loopback；
+normal、refresh、proposal、invalid 四场景分别保留 DOM 时间戳、调用和截图证据。
+不得把本机合成验证称为真实模型质量、真实 staging 或 Owner 产品验收。
+
+本轮本地结果：MENTOR_STREAM 四场景 4 PASS（442 项按 pattern 排除）；来源 PostgreSQL
+14 PASS（285 项按 pattern 排除）；Runtime 147 PASS（5 项原 without-app 排除）；
+空库 158/158、89 次迁移重复不变、built 指纹已更新。迁移编号尚待总控协调，CI 连续账本
+目前拒绝缺少 0155，因此以上本地通过不能据此声明最终冻结/可合并。
+
+
+可重现入口（均本机，不发真实调用）：
+
+```sh
+pnpm test:api
+pnpm --filter web test:unit
+node packages/db/tests/run-db-baseline-replay.mjs --local-only
+node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files
+node packages/db/tests/v3/run-workbench.mjs --opc-only --case-pattern='^OPC: ANSWER_SOURCE'
+node packages/db/tests/v3/run-workbench.mjs --opc-only --staging-host --with-staging-schema --case-pattern='^OPC: MENTOR_STREAM'
+```
+
+#561 只能以 PR 最终声明的**完整冻结 SHA**为入口；当前编号协调/CI 未完成，不授予实测。
+之后在该 SHA 的隔离环境使用正常 `/positioning/<draftId>` → `opc.mentorTurnStream`
+路径（与 `opc.prepareStep` 相同准入），保持同一 Session。第一轮完整卡片后，点选携带
+`answerSource: {executionId, optionIndex}`；自由输入仅携带 executionId。不要手工合成
+第二轮 assistant/tool 历史或跳过 admission。执行恢复用原 requestId/executionId。
+测试环境需包含本 PR 的来源校验迁移；远程应用、模型/线路/思考/报价及真实调用预算
+均由 #561 按其独立 Owner 授权处理，不由 #497 的冻结声明授权。
+
+旧 `ac0Probe/agentTurn.ts` 默认仍代表历史三字段 probe，不能直接作为新五字段质量证据。
+若 #561 使用单轮离线样本 harness，须调用本 head 的 `askQuestionTool(true)` 与
+`QUESTION_CONTRACT_INSTRUCTIONS` 并校验当前契约；两轮端到端证明仍走上述真实产品路径。
+记录工具五字段合法性、正文/卡片/整理输入一致、来源请求、usage/费用、finish_reason、
+firstValidContent/fullModelReply；模型质量和协议成功分别判定。旧测试额度不得复用。
+
 ## 当前实现增量：工具参数容量（五字段前置）
 
 依据 Owner 已确认架构及两项定向修正，先消除工具参数原4000字符传输边界。

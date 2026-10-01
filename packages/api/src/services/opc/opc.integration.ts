@@ -10649,13 +10649,14 @@ it.each(['card','input','index','owner','race'] as const)('OPC: ANSWER_SOURCE lo
  await sql.query('update runtime_sessions set active_execution=null where id=$1',[d.sessionId]);
  let intercepted=false;
  const interceptedDb=new Proxy(admin,{get(target,key){
-  if(key==='rpc')return (name:string,args:Record<string,any>)=>{
+  if(key==='rpc')return (name:string,args:Record<string,unknown>)=>{
    if(name!=='runtime_admit')return target.rpc(name,args);
    return (async()=>{
     intercepted=true;
-    if(mode==='card')args.p_payload.answeredCard.card.options[0]='伪造';
-    if(mode==='input')args.p_payload.input='伪造';
-    if(mode==='index')args.p_payload.request.answerSource.optionIndex=4;
+    const payload=args.p_payload as {input:string;answeredCard:{card:{options:string[]}};request:{answerSource:{optionIndex:number}}};
+    if(mode==='card')payload.answeredCard.card.options[0]='伪造';
+    if(mode==='input')payload.input='伪造';
+    if(mode==='index')payload.request.answerSource.optionIndex=4;
     if(mode==='owner')args.p_actor_id=randomUUID();
     if(mode==='race'){
      const competitor=await f.service.prepareStep({...base,requestId:randomUUID()});

@@ -468,13 +468,13 @@ try {
   const receiptFile=resolve(evidenceDirectory,'synthetic-receipts.jsonl');
   const runtimeCalls=[];const runtimeReceipts=new Map(existsSync(receiptFile)?readFileSync(receiptFile,'utf8').trim().split('\n').filter(Boolean).map(line=>{const entry=JSON.parse(line);return [entry.id,{model:entry.model}];}):[]);let runtimeFinal=!runtimeUpgrade,holdRuntime=false;const heldRuntime=[];
   const mentorStreamTest=stagingHost&&casePattern?.includes('MENTOR_STREAM');
-  const mentorStreamCalls=[],mentorStreamHeld=new Map();
+  const mentorStreamCalls=[],mentorStreamHeld=new Map();let invalidMentorCard=false;
   let rateLimitFixtureRejected = false;
   let summaryRateLimitFixtureRejected = false;
   gateway = createServer(async (req, res) => {
     if(mentorStreamTest&&req.url==='/__mentor_stream'){
       if(req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
-      if(req.method==='POST'){let raw='';for await(const part of req)raw+=part;const command=JSON.parse(raw);if(command.reset===true){if(mentorStreamHeld.size){res.writeHead(409).end();return;}mentorStreamCalls.length=0;}const release=mentorStreamHeld.get(command.release);if(release){mentorStreamHeld.delete(command.release);release();}}
+      if(req.method==='POST'){let raw='';for await(const part of req)raw+=part;const command=JSON.parse(raw);if(command.reset===true){if(mentorStreamHeld.size){res.writeHead(409).end();return;}mentorStreamCalls.length=0;invalidMentorCard=command.invalidCard===true;}const release=mentorStreamHeld.get(command.release);if(release){mentorStreamHeld.delete(command.release);release();}}
       res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify(mentorStreamCalls));return;
     }
     if((opcMode||runtimeMode||runtimeUpgrade) && (req.url==='/call'||(stagingHost&&req.url==='/__official_chat'))){
@@ -589,6 +589,11 @@ try {
           res.setHeader('content-type','text/event-stream');
           if(agentTurn)content='本地流式导师正文：'+content;
           else{const parsed=JSON.parse(content);parsed.message='本地流式导师正文：'+parsed.message;content=JSON.stringify(parsed);}
+          if(agentCard){
+            agentCard.message=content;agentCard.recommendationReason='建议从已经明确的业务范围开始。';
+            if(invalidMentorCard)agentCard.options=[agentCard.options[0],agentCard.options[0]];
+            content='DISCARDED_SEPARATE_ASSISTANT_TEXT';
+          }
           official.choices[0].message.content=content;
           const write=(delta,finish=null)=>res.write('data: '+JSON.stringify({id,object:'chat.completion.chunk',created:1,model:request.model,choices:[{index:0,delta,finish_reason:finish}]})+'\n\n');
           write({role:'assistant',reasoning:'PRIVATE_STREAM_REASONING'});

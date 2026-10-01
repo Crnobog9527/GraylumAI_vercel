@@ -64,3 +64,9 @@ it.each(['{broken','null','[]','{}',...['',' ','x'.repeat(20001),'unsafe\u0007te
  expect(agentTurnResult('',INVALID_CARD_RESULT,true,questionMessageFromArguments(args)))
   .toMatchObject({message:INVALID_REPLY_NOTICE,card:null});
 });
+
+it('keeps frozen v2 invalid-message fallback even when a separate assistant text exists (P3)',async()=>{
+ const {INVALID_CARD_RESULT}=await import('./agentTools');
+ const {INVALID_REPLY_NOTICE}=await import('../../shared/agentTurn');
+ expect(agentTurnResult('Separate paid prose',INVALID_CARD_RESULT,true,null)).toMatchObject({message:INVALID_REPLY_NOTICE,card:null});
+});

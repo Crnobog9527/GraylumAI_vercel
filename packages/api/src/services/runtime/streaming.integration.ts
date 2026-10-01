@@ -584,7 +584,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['settled','refunded
  expect(posts).toBe(1);
 });
 
-it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['card','invalid','plain','opening'] as const)(
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['card','multiple','invalid','plain','opening'] as const)(
  'RUNTIME: five-field %s buffers prose and persists the sole public result',async scenario=>{
  const f=await fixture('agent-turn-v5-stream',false,8192,false,undefined,scenario==='opening',30000,true);
  const card={message:'Canonical card message',question:'Range?',options:['First','Second'],
@@ -600,9 +600,11 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['card','invalid','p
   res.setHeader('content-type','text/event-stream');
   chunk(res,id,request.model,{role:'assistant',content:scenario==='invalid'?null:'Separate assistant text'});
   seen.release();await gate.promise;
-  if(scenario==='card'||scenario==='invalid')chunk(res,id,request.model,{tool_calls:[{index:0,id:'five-call',type:'function',
+  if((scenario==='card'||scenario==='multiple')||scenario==='invalid')chunk(res,id,request.model,{tool_calls:[{index:0,id:'five-call',type:'function',
    function:{name:'ask_question',arguments:JSON.stringify(scenario==='invalid'?{...card,recommendationReason:null}:card)}}]});
-  chunk(res,id,request.model,{},scenario==='card'||scenario==='invalid'?'tool_calls':'stop');
+  if(scenario==='multiple')chunk(res,id,request.model,{tool_calls:[{index:1,id:'ignored-second',type:'function',
+   function:{name:'ask_question',arguments:JSON.stringify({...card,message:'Ignored second card'})}}]});
+  chunk(res,id,request.model,{},(scenario==='card'||scenario==='multiple')||scenario==='invalid'?'tool_calls':'stop');
   res.end('data: '+JSON.stringify({id,model:request.model,choices:[],
    usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}})+'\n\ndata: [DONE]\n\n');
  });
@@ -618,12 +620,12 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['card','invalid','p
   if(scenario==='opening')await until(()=>events.some(event=>event.type==='text'));
   else expect(events.filter(event=>event.type==='text'||event.type==='card')).toEqual([]);
   gate.release();const result=await pending;
-  const expected=agentTurnBody(scenario==='card'||scenario==='invalid'?card.message:'Separate assistant text',scenario==='card'?card:null);
+  const expected=agentTurnBody((scenario==='card'||scenario==='multiple')||scenario==='invalid'?card.message:'Separate assistant text',(scenario==='card'||scenario==='multiple')?card:null);
   expect(result).toEqual({state:'completed',body:expected});
   const texts=events.filter(event=>event.type==='text');
-  expect(texts).toEqual(Array(scenario==='opening'?2:1).fill({type:'text',text:scenario==='card'||scenario==='invalid'?card.message:'Separate assistant text'}));
+  expect(texts).toEqual(Array(scenario==='opening'?2:1).fill({type:'text',text:(scenario==='card'||scenario==='multiple')||scenario==='invalid'?card.message:'Separate assistant text'}));
   expect(budget.timing.summary().marks).toMatchObject({firstValidContentMs:expect.any(Number),fullModelReplyMs:expect.any(Number)});
-  expect(events.filter(event=>event.type==='card')).toEqual(scenario==='card'?[{type:'card',card}]:[]);
+  expect(events.filter(event=>event.type==='card')).toEqual((scenario==='card'||scenario==='multiple')?[{type:'card',card}]:[]);
   expect(await host().execute(f.execution.executionId)).toEqual(result);expect(posts).toBe(1);
  }finally{gate.release();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });
