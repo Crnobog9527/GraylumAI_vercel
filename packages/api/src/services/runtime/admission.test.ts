@@ -42,11 +42,17 @@ it.each([false,true].flatMap(real=>[false,true].map(mentorStream=>({real,mentorS
  const policy={...(real?{real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01',callPolicies:quotes}}:{}),account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:1000,inputBytes:32000,historyItems:10};
  const service=runtimeAdmissionService(user,admin,{...policy,opcTurnToken:requestId,mentorStream});
  const input={sessionId,requestId,input:'Real business facts',selection:{kind:'ordinary',modelId},network:'deny',organizeAfter:true};
- await service.prepare(input);expect(frozen.providerRequestFormat).toBe(real?(mentorStream?'serial-tools-v4-stream':'serial-tools-v6-reasoning'):undefined);expect(frozen.reasoning).toEqual(real?(mentorStream?{effort:'none'}:{parameter:'none'}):undefined);expect(frozen.attachedOrganizer.reasoning).toEqual(real?{parameter:'none'}:undefined);
+ await service.prepare(input);expect(frozen.providerRequestFormat).toBe(mentorStream?'agent-turn-v5-stream':real?'serial-tools-v6-reasoning':undefined);expect(frozen.reasoning).toEqual(real?(mentorStream?{effort:'none'}:{parameter:'none'}):mentorStream?{parameter:'none'}:undefined);expect(frozen.attachedOrganizer.reasoning).toEqual(real?{parameter:'none'}:undefined);
+ expect(frozen.attachedOrganizer.historyItems).toBe(mentorStream?0:undefined);
+ expect(frozen.questionContract).toBe(mentorStream?'five-fields-v2':undefined);
+ expect(frozen.instructions.includes('complete public prose in message')).toBe(mentorStream);
  expect(billing.sourceHash).toBe(createHash('sha256').update(JSON.stringify(frozen)).digest('hex'));expect(billing.input).toBe(frozen);expect(frozen.maxOutputTokens).toBe(real?4096:1000);expect(frozen.attachedOrganizer.maxOutputTokens).toBe(real?2048:1000);
  if(real)expect(billing.callPolicy).toEqual(quotes);
+ else expect(billing.limits).toMatchObject({maxCalls:2,credits:40,maxPreDeduct:40});
+ frozen.attachedOrganizer.instructions='LEGACY_FROZEN_ORGANIZER_BYTES';
  replay={executionId:requestId};const reads=modelReads;models[0]!.max_tokens=512;
  expect(await service.prepare(input)).toEqual(replay);expect(modelReads).toBe(reads);expect(frozen.maxOutputTokens).toBe(real?4096:1000);
+ expect(frozen.attachedOrganizer.instructions).toBe('LEGACY_FROZEN_ORGANIZER_BYTES');
 });
 
 it.each(['test/unverified','constructor','__proto__'])('real mentor admission fails closed for model %s without configured reasoning',async(model)=>{
@@ -62,4 +68,23 @@ it.each(['test/unverified','constructor','__proto__'])('real mentor admission fa
  const service=runtimeAdmissionService(user,admin,{real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01T00:00:00Z',callPolicies:[quote]},account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:1000,inputBytes:32000,historyItems:10,opcTurnToken:requestId,mentorStream:true});
  await expect(service.prepare({sessionId,requestId,input:'HOST_OPEN_CURRENT_QUESTION',selection:{kind:'ordinary',modelId},network:'deny'})).rejects.toThrow('RUNTIME_REASONING_NOT_CONFIGURED');
  expect(rpc.mock.calls.map(([name])=>name)).not.toContain('runtime_admit');
+});
+
+it.each([
+ ['runtime_admit','OPC_ANSWER_SOURCE_DENIED','OPC_ANSWER_SOURCE_DENIED'],
+ ['runtime_admit','OPC_ANSWER_SOURCE_DENIED: private','RUNTIME_ADMISSION_DENIED'],
+ ['runtime_admit','OTHER_SQL_SECRET','RUNTIME_ADMISSION_DENIED'],
+ ['runtime_session_context','OPC_ANSWER_SOURCE_DENIED','RUNTIME_ADMISSION_DENIED'],
+])('only the exact source refusal from %s is public (%s)',async(failingRpc,message,expected)=>{
+ const rpc=vi.fn(async(name:string)=>{
+  if(name===failingRpc)return {data:null,error:{message}};
+  if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:sessionId}},error:null};
+  if(name==='runtime_admission_replay')return {data:null,error:null};
+  throw new Error(name);
+ });
+ const query={select:()=>query,eq:()=>query,single:async()=>({data:{id:modelId,model_id:'fixture',provider:'fixture',is_active:'true',max_tokens:1000,input_limit:32000},error:null})};
+ const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
+ const admin={rpc,from:()=>query} as unknown as SupabaseClient;
+ const service=runtimeAdmissionService(user,admin,{account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:1000,inputBytes:32000,historyItems:10});
+ await expect(service.prepare({sessionId,requestId,input:'test',selection:{kind:'ordinary',modelId},network:'deny'})).rejects.toThrow(expected!);
 });

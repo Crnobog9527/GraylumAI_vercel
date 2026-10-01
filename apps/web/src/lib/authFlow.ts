@@ -51,18 +51,19 @@ export function buildVerifyEmailPath(email: string, redirect: string, reason?: V
 
 // Where GoTrue sends an email or OAuth link back to. `next` goes through the same sanitizer the
 // callback applies, so a landing's error or code parameters never ride along to the next page.
-// `flow=oauth` marks a Google sign-in; it only picks which fixed message a failed exchange shows.
-export type AuthCallbackFlow = 'email' | 'oauth';
+// `flow=oauth` marks a Google sign-in and `flow=recovery` a password reset link; the flow only picks
+// which fixed page and message a failed link or exchange leads to, never whether access is granted.
+export type AuthCallbackFlow = 'email' | 'oauth' | 'recovery';
 
 export function buildAuthCallbackUrl(origin: string, next: string, flow: AuthCallbackFlow = 'email') {
   const url = new URL('/auth/callback', origin);
   url.searchParams.set('next', sanitizeRedirectTarget(next));
-  if (flow === 'oauth') url.searchParams.set('flow', 'oauth');
+  if (flow !== 'email') url.searchParams.set('flow', flow);
   return url.toString();
 }
 
 export function parseAuthCallbackFlow(value: string | null): AuthCallbackFlow {
-  return value === 'oauth' ? 'oauth' : 'email';
+  return value === 'oauth' || value === 'recovery' ? value : 'email';
 }
 
 // Errors GoTrue appends to the email-link redirect. Only error_code values listed here route to the
@@ -98,6 +99,15 @@ export function readAuthFragment(hash: string): FragmentOutcome {
   return null;
 }
 
+// Drops an email link's fragment (an error with the provider's description, or tokens) from the
+// address bar and history, keeping path and query. Only fragments readAuthFragment recognizes are
+// removed, so an ordinary #section stays. Returns whether something was removed.
+export function clearAuthFragment(win: { location: Pick<Location, 'pathname' | 'search' | 'hash'>; history: Pick<History, 'replaceState'> }) {
+  if (!readAuthFragment(win.location.hash)) return false;
+  win.history.replaceState(null, '', win.location.pathname + win.location.search);
+  return true;
+}
+
 // /login?error=<code>. The page shows fixed text for known codes and ignores any other value, so a
 // crafted link cannot put its own words on the login page.
 export type LoginErrorCode = 'callback_failed' | 'link_needs_login' | 'oauth_incomplete';
@@ -123,11 +133,14 @@ const VERIFIER_EXCHANGE_ERROR_CODES = new Set([
   'flow_state_expired',
 ]);
 
-export function classifyCodeExchangeError(error: unknown, flow: AuthCallbackFlow = 'email'): LoginErrorCode {
+export function isVerifierMismatch(error: unknown) {
   const code = errorCode(error);
-  const verifierMismatch = VERIFIER_EXCHANGE_ERROR_CODES.has(code)
+  return VERIFIER_EXCHANGE_ERROR_CODES.has(code)
     || (!code && /code verifier|code challenge/i.test(getErrorMessageText(error)));
-  if (!verifierMismatch) return 'callback_failed';
+}
+
+export function classifyCodeExchangeError(error: unknown, flow: AuthCallbackFlow = 'email'): LoginErrorCode {
+  if (!isVerifierMismatch(error)) return 'callback_failed';
   return flow === 'oauth' ? 'oauth_incomplete' : 'link_needs_login';
 }
 

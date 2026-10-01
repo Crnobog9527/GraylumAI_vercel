@@ -3,7 +3,7 @@ import {describe,it,expect,vi} from 'vitest';
 import {openRouterBound} from './openRouterPolicy';
 import {openRouterAdapter} from './openRouterAdapter';
 import {openRouterStream} from './openRouterStream';
-import {AGENT_TOOL_NAMES} from '../runtime/agentTools';
+import {AGENT_TOOL_NAMES,AGENT_STREAM_TOOLS} from '../runtime/agentTools';
 
 // AC-1 Agent turn tools at the provider boundary: allowlisted names only, at
 // most two, never tool_choice or parallel_tool_calls, and older requests
@@ -72,6 +72,23 @@ describe('Agent turn stream parsing',()=>{
   const result=stream.result();
   expect(result.error).toBeUndefined();
   expect(result.sdkResponse?.choices[0]?.message.tool_calls?.map(c=>c.id)).toEqual(['call_a','call_b']);
+ });
+ it('v5 retains unknown tool evidence for terminal handling but not malformed names or partial streams',()=>{
+  for(const name of ['unknown_tool','read_source']){
+   const body=frame({tool_calls:[{index:0,id:'x',type:'function',function:{name,arguments:'{}'}}]})+
+    frame({},'tool_calls')+usage;
+   const current=openRouterStream('test/model',undefined,undefined,AGENT_STREAM_TOOLS);
+   current.push(body);expect(current.result().error).toBeUndefined();
+   expect(current.result().sdkResponse?.choices[0]?.message.tool_calls?.[0]?.function.name).toBe(name);
+   const partial=openRouterStream('test/model',undefined,undefined,AGENT_STREAM_TOOLS);
+   partial.push(body.replace('data: [DONE]\n\n',''));expect(partial.result().error).toBe('incomplete_stream');
+  }
+  for(const name of ['', 'invalid name', 'x'.repeat(257)]){
+   const current=openRouterStream('test/model',undefined,undefined,AGENT_STREAM_TOOLS);
+   current.push(frame({tool_calls:[{index:0,id:'x',type:'function',function:{name,arguments:'{}'}}]})+
+    frame({},'tool_calls')+usage);
+   expect(current.result().error).toBeTruthy();
+  }
  });
  it('keeps the older single read_source rule by default',()=>{
   const stream=openRouterStream('test/model');stream.push(twoCalls);expect(stream.result().error).toBeTruthy();

@@ -5,6 +5,8 @@ import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {parseArgs} from 'node:util';
 import {z} from 'zod';
+import {AGENT_TURN_CONFIG, AGENT_TURN_CANDIDATES, AGENT_TURN_CANDIDATE_TOKENS, CARD_DESIGN_CANDIDATES,
+  agentTurnPrompt, assertCardDesignScenarios, type AgentTurnCandidate} from './agentTurn.ts';
 import {DEFAULT_MAX_CALLS, DEFAULT_MAX_USD, HARD_MAX_CALLS, HARD_MAX_USD, validateCaps} from './budget.ts';
 import {callBoundUsd, DEFAULT_CONFIG_IDS, resolveConfigs, thinkingLabel, type ProbeConfig} from './config.ts';
 import {parsePrivateJson, scenariosOf, stepRules, type LoadedSkill, type Scenario} from './skill.ts';
@@ -22,6 +24,10 @@ export const USAGE = `AC-0b model probe (dry run unless --live).
 
   node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON packages/api/src/scripts/ac0Probe/main.ts [options]
 
+  --agent-turn          AC1-4: fixed DeepSeek deepinfra/fp8, thinking off; Owner card design: 18 card (A12 B6) +
+                        22 prose (C12 D5 E5) categorized scenarios, no openings, no references
+  --agent-turn-candidate <c1|c2|c3|c4>  fixed candidate; requires --agent-turn; c1/c2 max_tokens 8192 (30 + 10),
+                        c3/c4 max_tokens 4096 with the card design samples; pass the approved --max-usd
   --skill-dir <dir>     private Skill directory with SKILL.md and references/ (default: synthetic repo fixture)
   --scenarios <file>    scenario JSON; required with --skill-dir (keep it outside the repository)
   --configs <ids>       comma-separated config ids (default: ${DEFAULT_CONFIG_IDS.join(',')})
@@ -44,6 +50,8 @@ export const USAGE = `AC-0b model probe (dry run unless --live).
 `;
 
 export type ProbeArgs = {
+  agentTurn?: boolean;
+  agentTurnCandidate?: AgentTurnCandidate;
   skillDir?: string;
   scenarios?: string;
   configIds: string[];
@@ -73,7 +81,8 @@ function integer(value: string | undefined, fallback: number, min: number, max: 
 
 export function parseProbeArgs(argv: string[], home: string): ProbeArgs {
   const {values} = parseArgs({args: argv, strict: true, allowPositionals: false, options: {
-    'skill-dir': {type: 'string'}, scenarios: {type: 'string'}, configs: {type: 'string'}, 'config-file': {type: 'string'},
+    'agent-turn-candidate': {type: 'string'},
+    'agent-turn': {type: 'boolean'}, 'skill-dir': {type: 'string'}, scenarios: {type: 'string'}, configs: {type: 'string'}, 'config-file': {type: 'string'},
     ask: {type: 'string'}, text: {type: 'string'}, reference: {type: 'string'},
     'max-calls': {type: 'string'}, 'max-usd': {type: 'string'}, 'max-tokens': {type: 'string'}, 'timeout-ms': {type: 'string'},
     'out-dir': {type: 'string'}, live: {type: 'boolean'}, confirm: {type: 'string'}, help: {type: 'boolean'},
@@ -81,24 +90,39 @@ export function parseProbeArgs(argv: string[], home: string): ProbeArgs {
   }});
   const external = parseExternal(values['record-external-calls'], values['record-external-usd'], values['external-note']);
   if (external && values.live) throw new Error('PROBE_ARGUMENT_INVALID: --record-external-* never sends; do not combine with --live');
+  const agentTurn = values['agent-turn'] ?? false;
+  const candidate = values['agent-turn-candidate'];
+  if (candidate !== undefined && !agentTurn) throw new Error('PROBE_AGENT_TURN_CANDIDATE_REQUIRES_AGENT_TURN');
+  if (candidate !== undefined && !Object.hasOwn(AGENT_TURN_CANDIDATES, candidate)) throw new Error('PROBE_AGENT_TURN_CANDIDATE_INVALID');
+  const fixedTokens = candidate ? AGENT_TURN_CANDIDATE_TOKENS[candidate as AgentTurnCandidate] : undefined;
+  const cardDesign = agentTurn && (!candidate || CARD_DESIGN_CANDIDATES.has(candidate as AgentTurnCandidate));
+  if (candidate && values['max-tokens'] !== undefined && values['max-tokens'] !== String(fixedTokens)) {
+    throw new Error('PROBE_AGENT_TURN_CANDIDATE_MAX_TOKENS_FIXED');
+  }
+  if (agentTurn && (values.configs !== undefined || values['config-file'] !== undefined || external)) {
+    throw new Error('PROBE_AGENT_TURN_CONFIG_FIXED');
+  }
   const maxUsdText = values['max-usd'];
   if (maxUsdText !== undefined && !/^\d+(\.\d+)?$/.test(maxUsdText)) throw new Error('PROBE_ARGUMENT_INVALID: --max-usd');
   // Cap validation reads the raw request before any default could hide it.
-  const maxCalls = integer(values['max-calls'], DEFAULT_MAX_CALLS, 1, Number.MAX_SAFE_INTEGER, 'max-calls');
-  const maxUsd = maxUsdText === undefined ? DEFAULT_MAX_USD : Number(maxUsdText);
+  const maxCalls = integer(values['max-calls'], candidate ? 40 : DEFAULT_MAX_CALLS, 1, Number.MAX_SAFE_INTEGER, 'max-calls');
+  const maxUsd = maxUsdText === undefined ? (candidate ? HARD_MAX_USD : agentTurn ? 1 : DEFAULT_MAX_USD) : Number(maxUsdText);
   validateCaps(maxCalls, maxUsd);
   return {
+    ...(agentTurn ? {agentTurn: true} : {}),
+    ...(candidate ? {agentTurnCandidate: candidate as AgentTurnCandidate} : {}),
     skillDir: values['skill-dir'],
     scenarios: values.scenarios,
     configIds: (values.configs ?? DEFAULT_CONFIG_IDS.join(',')).split(',').map(id => id.trim()).filter(Boolean),
     configFile: values['config-file'],
     counts: {
-      ask: integer(values.ask, 30, 0, 100, 'ask'),
-      text: integer(values.text, 0, 0, 100, 'text'),
+      // The baseline and C3/C4 follow the Owner card design (A+B cards, C+D+E prose); C1/C2 keep 30 + 10.
+      ask: integer(values.ask, cardDesign ? 18 : 30, 0, 100, 'ask'),
+      text: integer(values.text, agentTurn ? (cardDesign ? 22 : 10) : 0, 0, 100, 'text'),
       reference: integer(values.reference, 0, 0, 100, 'reference'),
     },
     maxCalls, maxUsd,
-    maxTokens: integer(values['max-tokens'], 1024, 64, 8192, 'max-tokens'),
+    maxTokens: integer(values['max-tokens'], fixedTokens ?? 1024, 64, 8192, 'max-tokens'),
     timeoutMs: integer(values['timeout-ms'], DEFAULT_TIMEOUT_MS, 5_000, DEFAULT_TIMEOUT_MS, 'timeout-ms'),
     outDir: values['out-dir'] ?? join(home, '.graylum', 'ac0', 'results'),
     ledger: join(home, '.graylum', 'ac0', 'ledger.json'),
@@ -122,6 +146,8 @@ function parseExternal(calls: string | undefined, usd: string | undefined, note:
 }
 
 export type ProbePlan = {
+  agentTurn?: boolean;
+  agentTurnCandidate?: AgentTurnCandidate;
   planId: string;
   configs: ProbeConfig[];
   counts: Record<TrialKind, number>;
@@ -144,8 +170,22 @@ function scenarioBytes(scenario: Scenario, skill: LoadedSkill): number {
 }
 
 export function buildPlan(args: ProbeArgs, skill: LoadedSkill, scenarios: Scenario[], scenarioDigest: string): ProbePlan {
+  const candidate = args.agentTurnCandidate;
+  if (candidate && !args.agentTurn) throw new Error('PROBE_AGENT_TURN_CANDIDATE_REQUIRES_AGENT_TURN');
+  if (candidate && !Object.hasOwn(AGENT_TURN_CANDIDATES, candidate)) throw new Error('PROBE_AGENT_TURN_CANDIDATE_INVALID');
+  if (candidate && args.maxTokens !== AGENT_TURN_CANDIDATE_TOKENS[candidate]) throw new Error('PROBE_AGENT_TURN_CANDIDATE_MAX_TOKENS_FIXED');
+  const cardDesign = args.agentTurn && (!candidate || CARD_DESIGN_CANDIDATES.has(candidate));
   const extra = args.configFile ? parsePrivateJson(readFileSync(args.configFile, 'utf8'), z.unknown(), 'CONFIG_FILE') : undefined;
-  const configs = resolveConfigs(args.configIds, extra);
+  const configs = args.agentTurn ? [candidate ? AGENT_TURN_CANDIDATES[candidate] : AGENT_TURN_CONFIG] : resolveConfigs(args.configIds, extra);
+  if (candidate && !cardDesign && (args.counts.ask !== 30 || args.counts.text !== 10 || args.counts.reference !== 0)) {
+    throw new Error('PROBE_AGENT_TURN_PLAN_FIXED: C1/C2 keep 30 ask + 10 text, no references');
+  }
+  if (cardDesign) {
+    if (args.counts.ask !== 18 || args.counts.text !== 22 || args.counts.reference !== 0 || !candidate && args.maxUsd > 1) {
+      throw new Error('PROBE_AGENT_TURN_PLAN_FIXED: 18 card + 22 prose samples (A12 B6 C12 D5 E5), no references, at most USD 1');
+    }
+    assertCardDesignScenarios(scenarios);
+  }
   let plannedCalls = 0;
   let plannedUsd = 0;
   const referenceBytes = [...skill.references.values()].reduce((sum, text) => sum + Buffer.byteLength(text), 0);
@@ -154,7 +194,9 @@ export function buildPlan(args: ProbeArgs, skill: LoadedSkill, scenarios: Scenar
     if (!count) continue;
     const pool = scenariosOf(scenarios, kind);
     if (!pool.length) throw new Error(`PROBE_SCENARIOS_MISSING: no "${kind}" scenario for --${kind} ${count}`);
-    const largest = Math.max(...pool.map(scenario => scenarioBytes(scenario, skill)));
+    if (args.agentTurn && pool.length < count) throw new Error('PROBE_AGENT_TURN_DISTINCT_SCENARIOS_REQUIRED');
+    const largest = Math.max(...pool.map(scenario => scenarioBytes(scenario, skill) +
+      (args.agentTurn ? Buffer.byteLength(agentTurnPrompt(skill, scenario)) : 0)));
     const bytes = Buffer.byteLength(skill.instructions) + largest + REQUEST_OVERHEAD_BYTES +
       (kind === 'reference' ? referenceBytes : 0);
     for (const config of configs) {
@@ -162,11 +204,15 @@ export function buildPlan(args: ProbeArgs, skill: LoadedSkill, scenarios: Scenar
       plannedUsd += count * CALLS_PER_TRIAL[kind] * callBoundUsd(config, bytes, args.maxTokens);
     }
   }
+  // Candidates may expose an over-cap estimate; execution still reserves against both caps.
+  if (args.agentTurn && !candidate && plannedUsd > args.maxUsd) throw new Error('PROBE_AGENT_TURN_RUN_BUDGET_INSUFFICIENT');
   if (plannedCalls === 0) throw new Error('PROBE_PLAN_EMPTY');
   if (plannedCalls > args.maxCalls) {
     throw new Error(`PROBE_PLAN_REFUSED: worst case ${plannedCalls} calls exceeds --max-calls ${args.maxCalls}`);
   }
   const identity = {
+    ...(args.agentTurn ? {agentTurn: true} : {}),
+    ...(candidate ? {agentTurnCandidate: candidate} : {}),
     configs, counts: args.counts, maxCalls: args.maxCalls, maxUsd: args.maxUsd, maxTokens: args.maxTokens,
     timeoutMs: args.timeoutMs, skillDigest: skill.digest, scenarioDigest,
   };
@@ -193,6 +239,11 @@ export function describePlan(plan: ProbePlan, mode: 'dry-run' | 'live', ledger: 
     `Cumulative ledger before this run: ${ledger.calls} calls, $${ledger.usd.toFixed(6)} booked of ${HARD_MAX_CALLS} calls / $${HARD_MAX_USD}`,
   ];
   if (ledger.path) lines.push(`Ledger file (real path): ${ledger.path}`);
-  if (mode === 'dry-run') lines.push(`Dry run: no request leaves this machine. For real calls add: --live --confirm ${plan.planId}`);
+  if (plan.agentTurnCandidate) {
+    lines.push('Candidate live use requires Owner-approved caps and the confirmed plan id; estimates alone do not authorize spending.');
+    if (plan.plannedUsdUpperBound > plan.maxUsd) lines.push('Estimated upper bound exceeds this cap; the dry-run estimate is not executable.');
+  } else if (mode === 'dry-run') {
+    lines.push(`Dry run: no request leaves this machine. For real calls add: --live --confirm ${plan.planId}`);
+  }
   return lines.join('\n') + '\n';
 }

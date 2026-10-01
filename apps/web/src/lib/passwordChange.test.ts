@@ -1,0 +1,227 @@
+import { AuthRetryableFetchError, createClient, type User } from '@supabase/supabase-js';
+import { describe, expect, it, vi } from 'vitest';
+import { getAuthProvider } from './auth';
+import {
+  changePasswordWithReauth,
+  createPasswordChanger,
+  PASSWORD_CHANGE_UNCERTAIN_MESSAGE,
+  passwordChangeEntry,
+  REAUTH_FAILED_MESSAGE,
+  REAUTH_UNAVAILABLE_MESSAGE,
+  type PasswordChangeDeps,
+} from './passwordChange';
+
+// What GoTrue v2.197.0 returns for each kind of account (checked against a local GoTrue): a Google
+// account that set a password through a reset email looks exactly like one that never did.
+const accounts = {
+  emailOnly: { providers: ['email'], identities: ['email'], hasPassword: true },
+  googleOnly: { providers: ['google'], identities: ['google'], hasPassword: false },
+  googleWithPassword: { providers: ['google'], identities: ['google'], hasPassword: true },
+  emailThenGoogle: { providers: ['email', 'google'], identities: ['email', 'google'], hasPassword: true },
+} as const;
+type Account = (typeof accounts)[keyof typeof accounts];
+
+const userOf = (account: Account) => ({
+  id: 'u1',
+  email: 'a@example.test',
+  app_metadata: { provider: account.providers[0], providers: [...account.providers] },
+  identities: account.identities.map(provider => ({ provider })),
+}) as unknown as User;
+
+const CURRENT = 'current-password';
+// A GoTrue-like sign-in: only an account that has a password, given that password, gets in.
+const depsFor = (account: Account) => {
+  const signInWithPassword = vi.fn<PasswordChangeDeps['signInWithPassword']>(async ({ password }) => (
+    account.hasPassword && password === CURRENT
+      ? { error: null }
+      : { error: Object.assign(new Error('Invalid login credentials'), { code: 'invalid_credentials', status: 400 }) }
+  ));
+  const deps = {
+    captcha: vi.fn(async () => ({ captchaToken: 'token' })),
+    signInWithPassword,
+    updatePassword: vi.fn(async () => ({ error: null as unknown })),
+  };
+  return deps;
+};
+const form = (current = CURRENT) => ({ current, next: 'new-password-1', confirm: 'new-password-1' });
+
+describe('password change entry', () => {
+  it.each(Object.entries(accounts))('is offered to a %s account, never hidden by provider', (_, account) => {
+    const entry = passwordChangeEntry({ email: 'a@example.test', auth_provider: getAuthProvider(userOf(account)) });
+    expect(entry.available).toBe(true);
+  });
+
+  it('cannot tell a Google account with a password from one without, so both get the same entry', () => {
+    const withPassword = passwordChangeEntry({ email: 'a@example.test', auth_provider: getAuthProvider(userOf(accounts.googleWithPassword)) });
+    const without = passwordChangeEntry({ email: 'a@example.test', auth_provider: getAuthProvider(userOf(accounts.googleOnly)) });
+    expect(withPassword).toEqual(without);
+    expect(without.description).toContain('通过邮件设置');
+  });
+
+  it('is not offered without an email', () => {
+    expect(passwordChangeEntry({ auth_provider: 'google' })).toMatchObject({ available: false });
+  });
+});
+
+describe('changePasswordWithReauth', () => {
+  it.each([
+    ['email-only', accounts.emailOnly],
+    ['Google with a password', accounts.googleWithPassword],
+    ['email then Google', accounts.emailThenGoogle],
+  ])('changes the password of a %s account after the current password checks out', async (_, account) => {
+    const deps = depsFor(account);
+    expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: true });
+    expect(deps.signInWithPassword).toHaveBeenCalledWith({
+      email: 'a@example.test', password: CURRENT, options: { captchaToken: 'token' },
+    });
+    expect(deps.updatePassword).toHaveBeenCalledExactlyOnceWith('new-password-1');
+  });
+
+  it('never changes anything for a Google account without a password, and points to the email route', async () => {
+    const deps = depsFor(accounts.googleOnly);
+    expect(await changePasswordWithReauth(deps, 'a@example.test', form('anything-at-all'))).toEqual({
+      ok: false, message: REAUTH_FAILED_MESSAGE,
+    });
+    expect(REAUTH_FAILED_MESSAGE).toContain('通过邮件设置');
+    expect(deps.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it.each(Object.entries(accounts))('rejects a wrong current password for a %s account without changing it', async (_, account) => {
+    const deps = depsFor(account);
+    expect(await changePasswordWithReauth(deps, 'a@example.test', form('wrong-password'))).toEqual({
+      ok: false, message: REAUTH_FAILED_MESSAGE,
+    });
+    expect(deps.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it('checks the form before any human check or sign-in', async () => {
+    const deps = depsFor(accounts.emailOnly);
+    expect(await changePasswordWithReauth(deps, 'a@example.test', { current: '', next: 'x', confirm: 'x' }))
+      .toEqual({ ok: false, message: '请完整填写当前密码和新密码。' });
+    expect(await changePasswordWithReauth(deps, 'a@example.test', { current: CURRENT, next: 'short', confirm: 'short' }))
+      .toEqual({ ok: false, message: '新密码至少需要 8 位字符。' });
+    expect(await changePasswordWithReauth(deps, undefined, form())).toMatchObject({ ok: false });
+    expect(deps.captcha).not.toHaveBeenCalled();
+    expect(deps.signInWithPassword).not.toHaveBeenCalled();
+  });
+
+  it('stops at a failed human check, a refused token or too many attempts', async () => {
+    const deps = depsFor(accounts.emailOnly);
+    deps.captcha.mockRejectedValueOnce(new Error('人机验证已取消，请重试。'));
+    expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message: '人机验证已取消，请重试。' });
+    deps.signInWithPassword.mockResolvedValueOnce({ error: Object.assign(new Error('raw'), { code: 'captcha_failed', status: 400 }) });
+    expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message: '人机验证没有通过，请重试。' });
+    deps.signInWithPassword.mockResolvedValueOnce({ error: Object.assign(new Error('raw'), { code: 'over_request_rate_limit', status: 429 }) });
+    expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message: '操作太频繁，请稍后再试。' });
+    expect(deps.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['no response (SDK, status 0)', new AuthRetryableFetchError('Failed to fetch', 0)],
+    ['a gateway error (SDK, 502)', new AuthRetryableFetchError('Bad Gateway', 502)],
+    ['a gateway error (SDK, 504)', new AuthRetryableFetchError('Gateway Timeout', 504)],
+    ['a server error', Object.assign(new Error('raw'), { code: 'unexpected_failure', status: 500 })],
+  ])('does not call %s a wrong password, and changes nothing', async (_, error) => {
+    const deps = depsFor(accounts.emailOnly);
+    deps.signInWithPassword.mockResolvedValueOnce({ error });
+    expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message: REAUTH_UNAVAILABLE_MESSAGE });
+    deps.signInWithPassword.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message: REAUTH_UNAVAILABLE_MESSAGE });
+    expect(deps.updatePassword).not.toHaveBeenCalled();
+    expect(REAUTH_UNAVAILABLE_MESSAGE).not.toContain('密码验证失败');
+  });
+
+  it('gets the same answers from the real SDK sign-in for an unreachable or failing GoTrue', async () => {
+    const signInVia = (respond: () => Promise<Response>) => createClient('http://gotrue.local', 'anon', {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      global: { fetch: respond },
+    }).auth.signInWithPassword({ email: 'a@example.test', password: CURRENT });
+    const json = (status: number, body: object) => async () => new Response(JSON.stringify(body), {
+      status, headers: { 'content-type': 'application/json', 'x-supabase-api-version': '2024-01-01' },
+    });
+    const cases: [() => Promise<Response>, string][] = [
+      [async () => { throw new TypeError('Failed to fetch'); }, REAUTH_UNAVAILABLE_MESSAGE],
+      [async () => new Response('upstream timed out', { status: 504 }), REAUTH_UNAVAILABLE_MESSAGE],
+      [json(400, { code: 'invalid_credentials', message: 'Invalid login credentials' }), REAUTH_FAILED_MESSAGE],
+    ];
+    for (const [respond, message] of cases) {
+      const deps = { ...depsFor(accounts.emailOnly), signInWithPassword: () => signInVia(respond) };
+      expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message });
+      expect(deps.updatePassword).not.toHaveBeenCalled();
+    }
+  });
+
+  it('shows fixed texts when the update itself fails, never the provider text', async () => {
+    const deps = depsFor(accounts.emailOnly);
+    deps.updatePassword.mockResolvedValueOnce({ error: Object.assign(new Error('raw'), { code: 'same_password', status: 422 }) });
+    expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message: '新密码不能和原来的密码相同。' });
+    deps.updatePassword.mockResolvedValueOnce({ error: Object.assign(new Error('raw'), { code: 'session_not_found', status: 403 }) });
+    expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message: '登录状态已失效，请重新登录后再试。' });
+    deps.updatePassword.mockRejectedValueOnce(new Error('New password should be different'));
+    const thrown = await changePasswordWithReauth(deps, 'a@example.test', form());
+    expect(thrown).toMatchObject({ ok: false });
+    expect(JSON.stringify(thrown)).not.toContain('should be different');
+  });
+});
+
+describe('an update whose answer is lost', () => {
+  const invalid = () => ({ error: Object.assign(new Error('Invalid login credentials'), { code: 'invalid_credentials', status: 400 }) });
+  // A GoTrue that keeps one password: the update saves it, then the answer never arrives.
+  const gotrue = (lose: () => Promise<{ error: unknown }>) => {
+    const server = { password: CURRENT };
+    const deps = {
+      captcha: vi.fn(async () => ({ captchaToken: 'token' })),
+      signInWithPassword: vi.fn<PasswordChangeDeps['signInWithPassword']>(async ({ password }) => (
+        password === server.password ? { error: null } : invalid()
+      )),
+      updatePassword: vi.fn(async (next: string) => {
+        server.password = next;
+        return lose();
+      }),
+    };
+    return { server, deps };
+  };
+  const losses: [string, () => Promise<{ error: unknown }>][] = [
+    ['no response (thrown)', async () => { throw new TypeError('Failed to fetch'); }],
+    ['no response (SDK, status 0)', async () => ({ error: new AuthRetryableFetchError('Failed to fetch', 0) })],
+    ['a gateway timeout (SDK, 504)', async () => ({ error: new AuthRetryableFetchError('Gateway Timeout', 504) })],
+    ['a server error', async () => ({ error: Object.assign(new Error('raw'), { code: 'unexpected_failure', status: 500 }) })],
+  ];
+
+  it.each(losses)('without the lock, retrying the same form would report a wrong password (%s)', async (_, lose) => {
+    const { deps } = gotrue(lose);
+    await changePasswordWithReauth(deps, 'a@example.test', form());
+    expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message: REAUTH_FAILED_MESSAGE });
+  });
+
+  it.each(losses)('says it cannot confirm, then stops every retry without checking or sending (%s)', async (_, lose) => {
+    const { server, deps } = gotrue(lose);
+    const changer = createPasswordChanger(deps);
+    const first = await changer.change('a@example.test', form());
+    expect(server.password).toBe('new-password-1');
+    expect(first).toEqual({ ok: false, message: PASSWORD_CHANGE_UNCERTAIN_MESSAGE, locked: true });
+    expect(changer.isLocked()).toBe(true);
+
+    const retry = await changer.change('a@example.test', form());
+    expect(retry).toEqual(first);
+    expect(retry.ok ? '' : retry.message).not.toMatch(/验证失败|不能和原来的密码相同/);
+    expect(deps.updatePassword).toHaveBeenCalledTimes(1);
+    expect(deps.signInWithPassword).toHaveBeenCalledTimes(1);
+    expect(deps.captcha).toHaveBeenCalledTimes(1);
+    // What the text advises works: the new password signs in, the old one does not.
+    expect((await deps.signInWithPassword({ email: 'a@example.test', password: 'new-password-1', options: {} })).error).toBeNull();
+    expect((await deps.signInWithPassword({ email: 'a@example.test', password: CURRENT, options: {} })).error).toBeTruthy();
+  });
+
+  it('keeps answered failures retryable', async () => {
+    const deps = depsFor(accounts.emailOnly);
+    const changer = createPasswordChanger(deps);
+    deps.updatePassword.mockResolvedValueOnce({ error: Object.assign(new Error('raw'), { code: 'same_password', status: 422 }) });
+    expect(await changer.change('a@example.test', form())).toEqual({ ok: false, message: '新密码不能和原来的密码相同。' });
+    expect(await changer.change('a@example.test', form('wrong-password'))).toEqual({ ok: false, message: REAUTH_FAILED_MESSAGE });
+    expect(changer.isLocked()).toBe(false);
+    expect(await changer.change('a@example.test', form())).toEqual({ ok: true });
+    expect(deps.updatePassword).toHaveBeenCalledTimes(2);
+  });
+});
+

@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { PURPOSE_OUTPUT_CAP } from '../bill2/responseCapacity';
 import { StagingAccessError } from './stagingErrors';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -8,7 +9,8 @@ export const PURPOSE_BUDGET_KEY = 'runtime_purpose_budgets';
 export const PURPOSE_INPUT_CAPS = { interactive: 90000, organize: 112000, report: 90000 } as const;
 // 2 * 8192 * 8 serialized bytes + 8192 envelope bytes = 139264.
 // The second copy reserves reasoning duplicated in reasoning_details.
-export const PURPOSE_OUTPUT_CAP = 8192;
+// Shared with response and frame capacity without loading admission dependencies.
+export { PURPOSE_OUTPUT_CAP };
 // Reader compatibility only: never use this to admit a new configured budget.
 export const FROZEN_OUTPUT_CAP = 128000;
 export const PURPOSE_HISTORY_CAP = 1000;
