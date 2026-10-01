@@ -6,7 +6,15 @@ const auth = vi.hoisted(() => ({
   exchangeCodeForSession: vi.fn(),
   getUser: vi.fn(),
 }));
-vi.mock('@supabase/ssr', () => ({ createServerClient: () => ({ auth }) }));
+type CookieWrite = { name: string; value: string; options: Record<string, unknown> };
+// The route's cookie adapter, so a test can write the session cookies the way @supabase/ssr does.
+const server = vi.hoisted(() => ({ cookies: null as null | { setAll(cookies: CookieWrite[]): void } }));
+vi.mock('@supabase/ssr', () => ({
+  createServerClient: (_url: string, _key: string, options: { cookies: { setAll(cookies: CookieWrite[]): void } }) => {
+    server.cookies = options.cookies;
+    return { auth };
+  },
+}));
 vi.mock('@repo/api/src/root', () => ({ appRouter: { createCaller: vi.fn() } }));
 vi.mock('@repo/api/src/trpc', () => ({ createTRPCContext: vi.fn() }));
 vi.mock('@/lib/server-log', () => ({ logServerError: vi.fn() }));
@@ -159,10 +167,16 @@ describe('auth callback for a password reset link', () => {
   });
 
   it('lands a valid reset link on the new-password page with the session cookie set', async () => {
-    auth.exchangeCodeForSession.mockResolvedValue({ error: null });
+    auth.exchangeCodeForSession.mockImplementation(async () => {
+      server.cookies!.setAll([{ name: 'sb-test-auth-token', value: 'session-value', options: { path: '/', sameSite: 'lax' } }]);
+      return { error: null };
+    });
     auth.getUser.mockResolvedValue({ data: { user: { email: 'a@example.test', email_confirmed_at: '2026-09-30T00:00:00Z' } } });
-    const to = await callback('code=abc&next=%2Freset-password&flow=recovery');
+    const response = await GET(new NextRequest('http://127.0.0.1:3000/auth/callback?code=abc&next=%2Freset-password&flow=recovery'));
+    const to = new URL(response.headers.get('location') ?? '');
     expect(`${to.pathname}${to.search}`).toBe('/reset-password');
     expect(auth.exchangeCodeForSession).toHaveBeenCalledWith('abc');
+    expect(response.cookies.get('sb-test-auth-token')).toMatchObject({ value: 'session-value', path: '/', sameSite: 'lax' });
+    expect(response.headers.get('set-cookie')).toContain('sb-test-auth-token=session-value');
   });
 });

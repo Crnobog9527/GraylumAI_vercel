@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState, type FormEvent } from 'react';
-import { Loader2, LockKeyhole, RefreshCw } from 'lucide-react';
+import { Loader2, LockKeyhole, LogOut, RefreshCw } from 'lucide-react';
 import { ACCOUNT_GATE_MESSAGES, FORGOT_PASSWORD_PATH, RECOVERY_FAILURE_MESSAGES } from '@/lib/passwordRecovery';
 import { usePasswordReset } from '@/hooks/use-password-reset';
 import { Button } from '@/components/ui/button';
@@ -18,10 +18,13 @@ import {
 } from '@/components/auth/AuthPageCard';
 
 const NOT_RECOVERY_MESSAGE =
-  '这个页面只能通过重置密码邮件中的链接打开。已登录时，可以在个人中心的“账户安全”里修改密码。';
+  '这个页面只能通过重置密码邮件中的链接打开，并且要在 1 小时内完成设置。已登录时，可以在个人中心的“账户安全”里修改密码。';
+const SIGNOUT_PENDING_MESSAGE =
+  '密码已经修改，但退出登录没有完成。请检查网络后点“重试退出”，退出后用新密码登录。';
+const BLOCKED_SIGNOUT_MESSAGE = '退出登录没有完成，请检查网络后点“重试退出”。';
 
 export default function ResetPasswordPage() {
-  const { phase, pending, formError, retry, submit } = usePasswordReset();
+  const { phase, pending, formError, retry, retrySignOut, submit } = usePasswordReset();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
 
@@ -35,7 +38,12 @@ export default function ResetPasswordPage() {
   let notice: AuthStatus | null = null;
   if (phase.kind === 'no-link') notice = { tone: 'error', message: RECOVERY_FAILURE_MESSAGES.expired };
   if (phase.kind === 'not-recovery') notice = { tone: 'info', message: NOT_RECOVERY_MESSAGE };
-  if (phase.kind === 'blocked') notice = { tone: 'error', message: ACCOUNT_GATE_MESSAGES[phase.gate] };
+  if (phase.kind === 'blocked') {
+    const message = ACCOUNT_GATE_MESSAGES[phase.gate];
+    notice = { tone: 'error', message: phase.signedOut ? message : `${message}${BLOCKED_SIGNOUT_MESSAGE}` };
+  }
+  if (phase.kind === 'signout-pending') notice = { tone: 'info', message: SIGNOUT_PENDING_MESSAGE };
+  const signOutRetry = phase.kind === 'signout-pending' || (phase.kind === 'blocked' && !phase.signedOut);
 
   return (
     <AuthPageCard icon={LockKeyhole} title="设置新密码" description="新密码至少 8 位。设置成功后，所有设备都需要用新密码重新登录。">
@@ -95,6 +103,17 @@ export default function ResetPasswordPage() {
         className="flex flex-wrap items-center gap-4 rounded-2xl border px-4 py-4 text-sm text-[#afafaf]"
         style={{ borderColor: 'rgba(255,255,255,0.08)' }}
       >
+        {signOutRetry && (
+          <button
+            type="button"
+            onClick={() => void retrySignOut()}
+            disabled={pending}
+            className={`inline-flex items-center gap-1 ${AUTH_LINK_CLASS}`}
+          >
+            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+            重试退出
+          </button>
+        )}
         {phase.kind === 'blocked' && phase.gate === 'retry' && (
           <button type="button" onClick={() => void retry()} className={`inline-flex items-center gap-1 ${AUTH_LINK_CLASS}`}>
             <RefreshCw className="h-4 w-4" />
@@ -111,9 +130,12 @@ export default function ResetPasswordPage() {
             重新申请重置邮件
           </Link>
         )}
-        <Link href="/login" className={AUTH_LINK_CLASS}>
-          返回登录
-        </Link>
+        {/* Still signed in: the login page would send the visitor straight back into the app. */}
+        {!signOutRetry && (
+          <Link href="/login" className={AUTH_LINK_CLASS}>
+            返回登录
+          </Link>
+        )}
       </div>
     </AuthPageCard>
   );

@@ -12,9 +12,7 @@ import {
   buildRecoveryRedirectUrl,
   parseRecoveryFailure,
   RECOVERY_FAILURE_MESSAGES,
-  RESET_EMAIL_SENT_MESSAGE,
-  RESET_REQUEST_COOLDOWN_SECONDS,
-  resetRequestErrorMessage,
+  resetRequestOutcome,
 } from '@/lib/passwordRecovery';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -73,15 +71,20 @@ function ForgotPasswordContent() {
       return;
     }
 
-    const { error } = await createClient().auth.resetPasswordForEmail(address, {
-      redirectTo: buildRecoveryRedirectUrl(resolveAuthAppUrl(window.location.origin)),
-      ...captchaOptions,
-    });
+    let error: unknown;
+    try {
+      ({ error } = await createClient().auth.resetPasswordForEmail(address, {
+        redirectTo: buildRecoveryRedirectUrl(resolveAuthAppUrl(window.location.origin)),
+        ...captchaOptions,
+      }));
+    } catch (thrown) {
+      error = thrown;
+    }
+    // One outcome for the whole page state, so a registered and an unknown email end up identical.
+    const outcome = resetRequestOutcome(error);
     setPending(false);
-    setStatus(error
-      ? { tone: 'error', message: resetRequestErrorMessage(error) }
-      : { tone: 'success', message: RESET_EMAIL_SENT_MESSAGE });
-    if (!error) setCooldown(RESET_REQUEST_COOLDOWN_SECONDS);
+    setStatus({ tone: outcome.tone, message: outcome.message });
+    setCooldown(outcome.cooldownSeconds);
   };
 
   return (

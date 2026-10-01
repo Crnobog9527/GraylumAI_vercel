@@ -12,20 +12,20 @@ export function buildRecoveryRedirectUrl(origin: string) {
   return buildAuthCallbackUrl(origin, RESET_PASSWORD_PATH, 'recovery');
 }
 
-// GoTrue answers an unknown email with the same success as a registered one, and the page shows
-// this one text either way, so the form never confirms whether an email has an account.
+// GoTrue answers an unknown email with success before looking further, so any result that only a
+// registered email can produce (a failed send, the per-email send limit) must look exactly like
+// success: same text, same cooldown. The text therefore also covers "nothing arrived".
 export const RESET_EMAIL_SENT_MESSAGE =
-  '如果这个邮箱已注册，你会收到一封重置密码的邮件。请在申请重置的同一个浏览器里打开邮件中的链接；'
-  + '没有收到时，请检查垃圾邮件文件夹。';
-
-// GoTrue limits how often one registered email gets mail. The text stays neutral about whether the
-// address has an account; a link sent earlier keeps working until it expires.
-export const RESET_RATE_LIMIT_MESSAGE =
-  '请求太频繁，请稍后再试。如果这个邮箱已注册，之前发出的重置邮件在有效期内仍然可以使用。';
-const RATE_LIMIT_ERROR_CODES = new Set(['over_email_send_rate_limit', 'over_request_rate_limit']);
+  '如果这个邮箱已注册，你会收到一封重置密码的邮件。请在申请重置的同一个浏览器里打开邮件中的链接。'
+  + '几分钟内没有收到时，请检查垃圾邮件文件夹，或在倒计时结束后重新申请。';
 
 // Seconds the request button stays disabled after a request, so one page does not hit the limit.
 export const RESET_REQUEST_COOLDOWN_SECONDS = 60;
+
+export const RESET_CAPTCHA_FAILED_MESSAGE = '人机验证没有通过，请重试。';
+export const RESET_RATE_LIMIT_MESSAGE = '请求太频繁，请稍后再试。';
+export const RESET_NETWORK_MESSAGE = '网络异常，请检查网络后重试。';
+export const RESET_INVALID_EMAIL_MESSAGE = '邮箱格式不正确，请检查后重试。';
 
 function errorCode(error: unknown) {
   return error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
@@ -37,18 +37,32 @@ function errorStatus(error: unknown) {
   return error && typeof error === 'object' && 'status' in error ? error.status : null;
 }
 
-export const RESET_CAPTCHA_FAILED_MESSAGE = '人机验证没有通过，请重试。';
-// A send failure happens only for a registered email (GoTrue returns success for unknown ones), so
-// the provider text is never shown and this fixed text says nothing about whether one exists.
-export const RESET_SEND_FAILED_MESSAGE =
-  '暂时无法发送重置邮件，请稍后重试。如果之前收到过重置邮件，在有效期内仍然可以使用。';
+function errorName(error: unknown) {
+  return error && typeof error === 'object' && 'name' in error ? error.name : null;
+}
 
-export function resetRequestErrorMessage(error: unknown) {
-  if (errorStatus(error) === 429 || RATE_LIMIT_ERROR_CODES.has(errorCode(error))) {
-    return RESET_RATE_LIMIT_MESSAGE;
+// Only failures that happen the same way for every address get their own text: the human check,
+// the per-visitor request limit (code over_request_rate_limit, or a 429 without a code), a request
+// that never reached GoTrue, and a malformed address. Everything else counts as sent.
+function accountIndependentFailure(error: unknown): string | null {
+  const code = errorCode(error);
+  const status = errorStatus(error);
+  if (code === 'captcha_failed') return RESET_CAPTCHA_FAILED_MESSAGE;
+  if (code === 'over_request_rate_limit' || (status === 429 && !code)) return RESET_RATE_LIMIT_MESSAGE;
+  if (code === 'validation_failed' || code === 'email_address_invalid') return RESET_INVALID_EMAIL_MESSAGE;
+  if (errorName(error) === 'AuthRetryableFetchError' || status === 0 || error instanceof TypeError) {
+    return RESET_NETWORK_MESSAGE;
   }
-  if (errorCode(error) === 'captcha_failed') return RESET_CAPTCHA_FAILED_MESSAGE;
-  return RESET_SEND_FAILED_MESSAGE;
+  return null;
+}
+
+export type ResetRequestOutcome = { tone: 'success' | 'error'; message: string; cooldownSeconds: number };
+
+export function resetRequestOutcome(error: unknown): ResetRequestOutcome {
+  const failure = error ? accountIndependentFailure(error) : null;
+  return failure
+    ? { tone: 'error', message: failure, cooldownSeconds: 0 }
+    : { tone: 'success', message: RESET_EMAIL_SENT_MESSAGE, cooldownSeconds: RESET_REQUEST_COOLDOWN_SECONDS };
 }
 
 // Why /forgot-password was opened again. Only these values are honored; the callback sets them.
@@ -80,7 +94,7 @@ export function classifyRecoveryExchangeError(error: unknown): RecoveryFailure {
 
 // A network failure or server error says nothing about the session; it must not read as "no link".
 export function isTransientAuthError(error: unknown) {
-  if (error && typeof error === 'object' && 'name' in error && error.name === 'AuthRetryableFetchError') return true;
+  if (errorName(error) === 'AuthRetryableFetchError') return true;
   const status = errorStatus(error);
   return typeof status === 'number' && (status === 0 || status >= 500);
 }
@@ -92,15 +106,23 @@ const CLOCK_SKEW_SECONDS = 5 * 60;
 
 type AmrEntry = { method?: unknown; timestamp?: unknown } | string;
 
-export function isFreshRecoverySession(amr: readonly AmrEntry[] | null | undefined, nowSeconds: number) {
-  if (!Array.isArray(amr)) return false;
-  return amr.some(entry => {
-    if (typeof entry !== 'object' || entry === null || entry.method !== 'recovery') return false;
+// When the newest reset link behind this session was used, or null if none was.
+export function recoveryTimestamp(amr: readonly AmrEntry[] | null | undefined): number | null {
+  if (!Array.isArray(amr)) return null;
+  let newest: number | null = null;
+  for (const entry of amr) {
+    if (typeof entry !== 'object' || entry === null || entry.method !== 'recovery') continue;
     const at = entry.timestamp;
-    if (typeof at !== 'number' || !Number.isFinite(at)) return false;
-    const age = nowSeconds - at;
-    return age >= -CLOCK_SKEW_SECONDS && age <= RECOVERY_SESSION_MAX_AGE_SECONDS;
-  });
+    if (typeof at === 'number' && Number.isFinite(at) && (newest === null || at > newest)) newest = at;
+  }
+  return newest;
+}
+
+export function isFreshRecoverySession(amr: readonly AmrEntry[] | null | undefined, nowSeconds: number) {
+  const at = recoveryTimestamp(amr);
+  if (at === null) return false;
+  const age = nowSeconds - at;
+  return age >= -CLOCK_SKEW_SECONDS && age <= RECOVERY_SESSION_MAX_AGE_SECONDS;
 }
 
 // Same rules and wording as changing the password while signed in (SecuritySettingsCard).

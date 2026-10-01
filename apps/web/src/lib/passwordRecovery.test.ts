@@ -11,10 +11,14 @@ import {
   isTransientAuthError,
   parseRecoveryFailure,
   RECOVERY_SESSION_MAX_AGE_SECONDS,
+  recoveryTimestamp,
   RESET_CAPTCHA_FAILED_MESSAGE,
+  RESET_EMAIL_SENT_MESSAGE,
+  RESET_INVALID_EMAIL_MESSAGE,
+  RESET_NETWORK_MESSAGE,
   RESET_RATE_LIMIT_MESSAGE,
-  RESET_SEND_FAILED_MESSAGE,
-  resetRequestErrorMessage,
+  RESET_REQUEST_COOLDOWN_SECONDS,
+  resetRequestOutcome,
   validateNewPassword,
 } from './passwordRecovery';
 
@@ -47,28 +51,32 @@ describe('reset link destination', () => {
   });
 });
 
-describe('reset request errors', () => {
-  it('answers both rate limits with the neutral text', () => {
-    expect(resetRequestErrorMessage(authError('over_email_send_rate_limit', 429))).toBe(RESET_RATE_LIMIT_MESSAGE);
-    expect(resetRequestErrorMessage(authError('over_request_rate_limit', 429))).toBe(RESET_RATE_LIMIT_MESSAGE);
-    expect(resetRequestErrorMessage({ status: 429 })).toBe(RESET_RATE_LIMIT_MESSAGE);
-    expect(RESET_RATE_LIMIT_MESSAGE).toContain('如果这个邮箱已注册');
-  });
+describe('reset request outcome', () => {
+  const sent = { tone: 'success', message: RESET_EMAIL_SENT_MESSAGE, cooldownSeconds: RESET_REQUEST_COOLDOWN_SECONDS };
+  // GoTrue v2.197.0 answers an unknown email with success; only a registered email reaches sending.
+  const unknownEmail = null;
 
-  it('gives a failed human check its own fixed text', () => {
-    expect(resetRequestErrorMessage(authError('captcha_failed', 400))).toBe(RESET_CAPTCHA_FAILED_MESSAGE);
+  it.each([
+    ['a failed send', authError('unexpected_failure', 500)],
+    ['a server error without code', { status: 502, message: 'Bad Gateway' }],
+    ['the per-email send limit', authError('over_email_send_rate_limit', 429)],
+    ['an address the mailer refuses', authError('email_address_not_authorized', 400)],
+    ['an unknown error', new Error('Error sending recovery email')],
+  ])('makes %s for a registered email look exactly like an unknown email', (_, registeredEmail) => {
+    expect(resetRequestOutcome(registeredEmail)).toEqual(resetRequestOutcome(unknownEmail));
+    expect(resetRequestOutcome(unknownEmail)).toEqual(sent);
   });
 
   it.each([
-    ['send failure', authError('unexpected_failure', 500), 'Error sending recovery email'],
-    ['readable provider text', new Error('Email address is invalid'), 'Email address is invalid'],
-    ['no code', { status: 400, message: 'Something went wrong' }, 'Something went wrong'],
-    ['nothing', null, ''],
-  ])('never shows provider text or hints at registration (%s)', (_, error, raw) => {
-    const text = resetRequestErrorMessage(error);
-    expect(text).toBe(RESET_SEND_FAILED_MESSAGE);
-    if (raw) expect(text).not.toContain(raw);
-    expect(text).not.toMatch(/已注册|未注册/);
+    ['the human check', authError('captcha_failed', 400), RESET_CAPTCHA_FAILED_MESSAGE],
+    ['the per-visitor request limit', authError('over_request_rate_limit', 429), RESET_RATE_LIMIT_MESSAGE],
+    ['a 429 without code', { status: 429 }, RESET_RATE_LIMIT_MESSAGE],
+    ['a malformed address', authError('validation_failed', 400), RESET_INVALID_EMAIL_MESSAGE],
+    ['a request that never arrived', Object.assign(new Error('x'), { name: 'AuthRetryableFetchError', status: 0 }), RESET_NETWORK_MESSAGE],
+    ['a thrown fetch', new TypeError('Failed to fetch'), RESET_NETWORK_MESSAGE],
+  ])('reports %s, which is the same for every address, without a cooldown', (_, error, message) => {
+    expect(resetRequestOutcome(error)).toEqual({ tone: 'error', message, cooldownSeconds: 0 });
+    expect(message).not.toMatch(/已注册|未注册/);
   });
 });
 
@@ -90,6 +98,13 @@ describe('recovery session check', () => {
     expect(isFreshRecoverySession([{ method: 'recovery', timestamp: now - 30 }], now)).toBe(true);
     expect(isFreshRecoverySession([{ method: 'password', timestamp: now - 9999 }, { method: 'recovery', timestamp: now }], now))
       .toBe(true);
+  });
+
+  it('reports the newest reset behind the session', () => {
+    expect(recoveryTimestamp([{ method: 'recovery', timestamp: 5 }, { method: 'recovery', timestamp: 9 }, { method: 'password', timestamp: 20 }]))
+      .toBe(9);
+    expect(recoveryTimestamp([{ method: 'password', timestamp: 20 }, 'recovery'])).toBeNull();
+    expect(recoveryTimestamp(null)).toBeNull();
   });
 
   it('rejects sessions from other sign-ins, old resets and malformed claims', () => {
