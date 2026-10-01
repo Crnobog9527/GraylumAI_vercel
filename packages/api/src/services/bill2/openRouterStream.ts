@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {parseExactJson} from './decimal';
+import {ASK_QUESTION_TOOL,ASK_QUESTION_ARGUMENT_LIMIT,DEFAULT_TOOL_ARGUMENT_LIMIT,toolArgumentLimit} from '../../shared/agentTurn';
 import {OPENROUTER_RESPONSE_BYTE_LIMIT,PURPOSE_OUTPUT_CAP} from './responseCapacity';
 
 export const OPENROUTER_STREAM_BYTE_LIMIT=4_194_304;
@@ -21,6 +22,7 @@ export function openRouterStream(model:string,headerId?:string,onChunk?:(chunk:s
  let pending='',frame:string[]=[],done=false,finish:string|null=null,providerId=headerId,failed:string|null=null,identityConflict=false;
  let content='',reasoning='',refusal='',usage:Record<string,unknown>|undefined,exactUsage:Record<string,unknown>|undefined;
  let frameCount=0,usageSeen=false;
+ const argumentBufferLimit=tools.toolNames.has(ASK_QUESTION_TOOL)?ASK_QUESTION_ARGUMENT_LIMIT:DEFAULT_TOOL_ARGUMENT_LIMIT;
  const details=new Map<number,Record<string,unknown>>(),calls=new Map<number,{id:string;type:string;function:{name:string;arguments:string}}>();
  const reject=(reason='invalid_stream'):never=>{failed=reason;throw new Error(reason);};
  const conflict=():never=>{identityConflict=true;return reject('identity_or_response_mismatch');};
@@ -80,7 +82,7 @@ export function openRouterStream(model:string,headerId?:string,onChunk?:(chunk:s
      if(part.function!==undefined){if(!object(part.function)||Object.keys(part.function).some(k=>!['name','arguments'].includes(k)))return reject();
       for(const key of ['name','arguments'] as const){if(part.function[key]!==undefined){if(typeof part.function[key]!=='string')return reject();call.function[key]+=part.function[key];}}
      }
-     if(call.function.name.length>256||call.function.arguments.length>4000)return reject();calls.set(index,call);
+     if(call.function.name.length>256||call.function.arguments.length>argumentBufferLimit)return reject();calls.set(index,call);
     }
    }
    const terminal=choice.finish_reason;
@@ -110,7 +112,7 @@ export function openRouterStream(model:string,headerId?:string,onChunk?:(chunk:s
   for(const call of calls.values()){
    const validName=tools.toolNames.has(call.function.name)||
     tools.retainUnknownNames&&/^[a-zA-Z0-9_-]{1,256}$/.test(call.function.name);
-   if(!call.id||!validName)failed??='invalid_stream';
+   if(!call.id||!validName||call.function.arguments.length>toolArgumentLimit(call.function.name))failed??='invalid_stream';
   }
   // Calls are numbered from 0 without gaps; the Agent turn keeps index 0.
   if([...calls.keys()].some(index=>index>=calls.size))failed??='invalid_stream';

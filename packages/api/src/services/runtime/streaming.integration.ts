@@ -9,7 +9,7 @@ import {runtimeExecutor} from './execute';
 import type {RuntimeProgress} from './progress';
 import {openRouterAdapter} from '../bill2/openRouterAdapter';
 import type {ReasoningPolicy} from './reasoningPolicy';
-import {agentTurnBody,AGENT_TURN_MESSAGE_LIMIT,INVALID_REPLY_NOTICE} from '../../shared/agentTurn';
+import {agentTurnBody,AGENT_TURN_MESSAGE_LIMIT,INVALID_REPLY_NOTICE,ASK_QUESTION_ARGUMENT_LIMIT} from '../../shared/agentTurn';
 import {decodeOpenRouterStreamObservation} from '../bill2/openRouterEvidence';
 
 // Deliberately no remote fallback, application credentials or real model keys.
@@ -471,4 +471,43 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: 8192 one-token 
   .toEqual({state:'settled',charged:3});
  expect(await host.execute(f.execution.executionId)).toMatchObject({state:'cancelled'});
  expect(sends).toBe(1);
+});
+
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: full ask_question arguments persist with one card and one settlement',async()=>{
+ const f=await fixture('agent-turn-v5-stream',false,8192);
+ const card={question:'Synthetic range?',options:['First','Second'],recommended:null};
+ const args=JSON.stringify(card).padEnd(ASK_QUESTION_ARGUMENT_LIMIT,' ');
+ let sends=0;
+ const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  sends++;
+  const request=JSON.parse(String(init!.body));
+  const envelope={id:'gen-arguments',model:request.model};
+  const frame=(delta:unknown,finish_reason:string|null=null)=>'data: '+JSON.stringify({...envelope,
+   choices:[{index:0,delta,finish_reason}]})+'\n\n';
+  let wire=frame({role:'assistant',content:'Synthetic message'});
+  for(let index=0;index<args.length;index+=2048){
+   wire+=frame({tool_calls:[{index:0,...(index===0?{id:'call-long',type:'function'}:{}),
+    function:{...(index===0?{name:'ask_question'}:{}),arguments:args.slice(index,index+2048)}}]});
+  }
+  wire+=frame({},'tool_calls')+'data: '+JSON.stringify({...envelope,choices:[],
+   usage:{prompt_tokens:10,completion_tokens:8192,total_tokens:8202,cost:0.003}})+'\n\ndata: [DONE]\n\n';
+  return new Response(wire,{headers:{'content-type':'text/event-stream'}});
+ }});
+ const host=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter});
+ const result=await host.execute(f.execution.executionId);
+ expect(result).toEqual({state:'completed',body:agentTurnBody('Synthetic message',card)});
+ const receipt=(await db.query('select r.payload from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1',
+  [f.execution.runId])).rows[0].payload;
+ expect(receipt.final).toBe(true);
+ expect(receipt.usage.sdkResponse.choices[0].message.tool_calls[0].function.arguments).toBe(args);
+ expect(decodeOpenRouterStreamObservation(receipt.transport).toString()).toContain('call-long');
+ const history=(await db.query('select item from runtime_session_history where session_id=$1',[f.session.sessionId])).rows;
+ expect(history.some(row=>row.item.type==='function_call'&&row.item.arguments===args)).toBe(true);
+ expect(await host.execute(f.execution.executionId)).toEqual(result);
+ expect(sends).toBe(1);
+ expect((await db.query('select state,charged from bill2_runs where id=$1',[f.execution.runId])).rows[0])
+  .toEqual({state:'settled',charged:3});
+ expect((await db.query("select count(*)::int n from credit_transactions where bill2_run_id=$1 and reason_code='bill2_spend'",
+  [f.execution.runId])).rows[0].n).toBe(1);
 });

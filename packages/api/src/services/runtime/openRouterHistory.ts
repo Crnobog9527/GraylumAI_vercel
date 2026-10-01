@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {isDeepStrictEqual} from 'node:util';
 import {z} from 'zod';
+// Reuse the exact name-specific argument limit used by request admission.
 import {toolCallFor} from '../bill2/openRouterAdapter';
 import {OPENROUTER_RESPONSE_BYTE_LIMIT} from '../bill2/responseCapacity';
 import {SOURCE_TOOL_NAMES} from './agentTools';

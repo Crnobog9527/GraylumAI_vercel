@@ -26,6 +26,13 @@ import { z } from "zod";
 
 /** The only tool name that produces a question card. */
 export const ASK_QUESTION_TOOL = "ask_question";
+// Serialized arguments, not display text. Other tools keep their existing bound.
+// This character bound leaves room for the five-field card; the response still
+// obeys the independent provider-response byte limit.
+export const ASK_QUESTION_ARGUMENT_LIMIT = 49152;
+export const DEFAULT_TOOL_ARGUMENT_LIMIT = 4000;
+export const toolArgumentLimit = (name: string): number =>
+  name === ASK_QUESTION_TOOL ? ASK_QUESTION_ARGUMENT_LIMIT : DEFAULT_TOOL_ARGUMENT_LIMIT;
 export const QUESTION_MAX_CHARS = 500;
 export const OPTION_MAX_CHARS = 200;
 export const MIN_OPTIONS = 2;
