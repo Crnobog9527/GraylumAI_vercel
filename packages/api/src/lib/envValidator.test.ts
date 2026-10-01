@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { validateEnv, getSafeEnvSummary } from './envValidator';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { validateEnv, validateEnvOnStartup, getSafeEnvSummary } from './envValidator';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -7,6 +7,8 @@ function applyBaseEnv(): void {
   process.env = {
     ...ORIGINAL_ENV,
     NODE_ENV: 'development',
+    OPENING_GRANT_HMAC_KEYS: JSON.stringify({ active: 'test-v1',
+      keys: { 'test-v1': Buffer.from('test-only-opening-grant-key-00001').toString('base64') } }),
     UPSTASH_REDIS_REST_URL: 'https://redis.example.invalid',
     UPSTASH_REDIS_REST_TOKEN: 'synthetic-redis-token',
     NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co',
@@ -34,6 +36,30 @@ describe('validateEnv', () => {
 
     expect(result.valid).toBe(true);
     expect(result.errors).toEqual([]);
+  });
+
+  it('requires the independent HMAC keyring and never echoes its submitted value', () => {
+    delete process.env.OPENING_GRANT_HMAC_KEYS;
+    expect(validateEnv().errors.some(error => error.startsWith('OPENING_GRANT_HMAC_KEYS'))).toBe(true);
+    process.env.OPENING_GRANT_HMAC_KEYS = 'private-invalid-value';
+    const result = validateEnv();
+    expect(result.valid).toBe(false);
+    expect(JSON.stringify(result)).not.toContain('private-invalid-value');
+    expect(getSafeEnvSummary().OPENING_GRANT_HMAC_KEYS_SET).toBe('✓');
+  });
+
+  it('explicit validator invocation rejects a missing or malformed HMAC keyring without logging its value', () => {
+    process.env.NODE_ENV = 'production';
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      delete process.env.OPENING_GRANT_HMAC_KEYS;
+      expect(() => validateEnvOnStartup()).toThrow(/OPENING_GRANT_HMAC_KEYS/);
+      process.env.OPENING_GRANT_HMAC_KEYS = 'test-only-malformed-keyring';
+      expect(() => validateEnvOnStartup()).toThrow(/OPENING_GRANT_HMAC_KEYS/);
+      expect(JSON.stringify(log.mock.calls)).not.toContain('test-only-malformed-keyring');
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('rejects DATABASE_URL values polluted with a duplicated key prefix', () => {

@@ -4,7 +4,7 @@
 // Check-in DDL (including constraints and indexes) comes directly from migration 0013;
 // read policies also come from authoritative migrations. No reward functions,
 // real accounts, Stripe prices, providers or money state are installed.
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const PUBLIC_READ_POLICIES = [
@@ -73,15 +73,20 @@ GRANT ALL ON announcements,membership_plans,credit_packages TO service_role;
   sql(authoritativeStatement(checkinMigration, 'CREATE POLICY "users_own_user_checkins_select"'));
   sql(PUBLIC_READ_POLICIES.map((name) =>
     authoritativeStatement(policies, `CREATE POLICY "${name}"`, '$policy$')).join('\n'));
+  const migrationDir = resolve(root, 'packages/db/migrations');
+  const entitlementMigrations = readdirSync(migrationDir).filter(name => /^\d{4}_membership_entitlements\.sql$/.test(name));
+  if (entitlementMigrations.length !== 1) throw new Error('missing or ambiguous entitlement migration');
+  sql(readFileSync(resolve(migrationDir, entitlementMigrations[0]), 'utf8'));
   // Free and Pro carry no feature list so the profile card falls back to its
   // generated defaults; the homepage row is retired data that must stay unlisted.
   sql(`
-INSERT INTO membership_plans(name,level,monthly_price,yearly_price,monthly_credits,yearly_credits,features,allow_export,allow_batch_export,sort_order) VALUES
- ('Synthetic Free','free',0,0,0,0,'[]','false','false',0),
- ('Synthetic Pro','pro',990,9900,1500,20000,'[]','true','false',1),
- ('Synthetic Gold','gold',1990,19900,4000,48000,'["Synthetic gold feature"]','true','true',2);
+INSERT INTO membership_plans(name,level,monthly_price,yearly_price,monthly_credits,yearly_credits,features,allow_export,allow_batch_export,sort_order,
+ allow_fusion_review,allow_fusion_compare,library_storage_bytes) VALUES
+ ('Synthetic Free','free',0,0,0,0,'[]','false','false',0,false,false,50000000),
+ ('Synthetic Pro','pro',990,9900,1500,20000,'[]','true','false',1,true,true,500000000),
+ ('Synthetic Gold','gold',1990,19900,4000,48000,'["Synthetic gold feature"]','true','true',2,true,true,2000000000);
 INSERT INTO credit_packages(name,price,credits_amount,bonus_credits,sort_order) VALUES ('Synthetic 1000 credits',990,1000,100,0);
 INSERT INTO announcements(title,content,announcement_type,active) VALUES ('Retired homepage notice','Must not appear in the banner admin list','homepage','true');
-NOTIFY pgrst, 'reload schema';
 `);
+  sql("NOTIFY pgrst, 'reload schema';");
 }

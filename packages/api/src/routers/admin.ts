@@ -1,3 +1,5 @@
+import { membershipPlanMutations } from './adminMembershipPlans';
+import { entitlementRowShape } from '../services/membershipEntitlementConfig';
 import { ANNOUNCEMENT_LINK_ERROR, resolveAnnouncementLink } from '../shared/announcementLink';
 import { parseSearchSurcharge } from '../services/searchPricing';
 import { router, adminProcedure } from '../trpc';
@@ -155,6 +157,7 @@ const adminSettingsRowSchema = z.object({
   value: adminScalarSettingValueSchema,
 }).passthrough();
 const adminSettingsMembershipPlanRowSchema = z.object({
+  ...entitlementRowShape,
   id: z.string().min(1),
   name: z.string().min(1),
   level: z.enum(['free', 'pro', 'gold']),
@@ -2535,131 +2538,7 @@ export const adminRouter = router({
       };
     }),
 
-  /**
-   * Create a new membership plan
-   */
-  createMembershipPlan: adminProcedure
-    .input(z.object({
-      name: z.string().min(1).max(100),
-      level: z.enum(['free', 'pro', 'gold']).default('pro'),
-      monthlyPrice: z.number().int().min(0), // In cents
-      yearlyPrice: z.number().int().min(0), // In cents
-      stripeMonthlyPriceId: z.string().trim().min(1).max(255).optional(),
-      stripeYearlyPriceId: z.string().trim().min(1).max(255).optional(),
-      monthlyCredits: z.number().int().min(0),
-      yearlyCredits: z.number().int().min(0),
-      monthlyBonusCredits: z.number().int().min(0).default(0),
-      packageDiscount: z.number().int().min(0).max(100).default(100),
-      features: z.array(z.string()).default([]),
-      maxContextMessages: z.number().int().min(5).max(100).default(20), // 上下文消息数限制
-      sortOrder: z.number().int().min(0).default(0),
-    }))
-    .mutation(async ({ ctx, input }) => {
-      const { data, error } = await ctx.supabase
-        .from('membership_plans')
-        .insert({
-          name: input.name,
-          level: input.level,
-          monthly_price: input.monthlyPrice,
-          yearly_price: input.yearlyPrice,
-          stripe_monthly_price_id: input.stripeMonthlyPriceId ?? null,
-          stripe_yearly_price_id: input.stripeYearlyPriceId ?? null,
-          monthly_credits: input.monthlyCredits,
-          yearly_credits: input.yearlyCredits,
-          monthly_bonus_credits: input.monthlyBonusCredits,
-          package_discount: input.packageDiscount,
-          features: input.features,
-          max_context_messages: input.maxContextMessages,
-          is_active: 'true',
-          sort_order: input.sortOrder,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        throw createAdminOperationError('创建会员方案', error);
-      }
-
-      return data;
-    }),
-
-  /**
-   * Update a membership plan
-   */
-  updateMembershipPlan: adminProcedure
-    .input(z.object({
-      id: z.string().uuid(),
-      name: z.string().min(1).max(100).optional(),
-      level: z.enum(['free', 'pro', 'gold']).optional(),
-      monthlyPrice: z.number().int().min(0).optional(),
-      yearlyPrice: z.number().int().min(0).optional(),
-      stripeMonthlyPriceId: z.string().trim().min(1).max(255).nullable().optional(),
-      stripeYearlyPriceId: z.string().trim().min(1).max(255).nullable().optional(),
-      monthlyCredits: z.number().int().min(0).optional(),
-      yearlyCredits: z.number().int().min(0).optional(),
-      monthlyBonusCredits: z.number().int().min(0).optional(),
-      packageDiscount: z.number().int().min(0).max(100).optional(),
-      features: z.array(z.string()).optional(),
-      maxContextMessages: z.number().int().min(5).max(100).optional(), // 上下文消息数限制
-      allowExport: z.enum(['true', 'false']).optional(),
-      allowBatchExport: z.enum(['true', 'false']).optional(),
-      isActive: z.enum(['true', 'false']).optional(),
-      sortOrder: z.number().int().min(0).optional(),
-    }))
-    .mutation(async ({ ctx, input }) => {
-      const updateData: Record<string, unknown> = {
-        updated_at: new Date().toISOString(),
-      };
-      if (input.name !== undefined) updateData.name = input.name;
-      if (input.level !== undefined) updateData.level = input.level;
-      if (input.monthlyPrice !== undefined) updateData.monthly_price = input.monthlyPrice;
-      if (input.yearlyPrice !== undefined) updateData.yearly_price = input.yearlyPrice;
-      if (input.stripeMonthlyPriceId !== undefined) updateData.stripe_monthly_price_id = input.stripeMonthlyPriceId || null;
-      if (input.stripeYearlyPriceId !== undefined) updateData.stripe_yearly_price_id = input.stripeYearlyPriceId || null;
-      if (input.monthlyCredits !== undefined) updateData.monthly_credits = input.monthlyCredits;
-      if (input.yearlyCredits !== undefined) updateData.yearly_credits = input.yearlyCredits;
-      if (input.monthlyBonusCredits !== undefined) updateData.monthly_bonus_credits = input.monthlyBonusCredits;
-      if (input.packageDiscount !== undefined) updateData.package_discount = input.packageDiscount;
-      if (input.features !== undefined) updateData.features = input.features;
-      if (input.maxContextMessages !== undefined) updateData.max_context_messages = input.maxContextMessages;
-      if (input.allowExport !== undefined) updateData.allow_export = input.allowExport;
-      if (input.allowBatchExport !== undefined) updateData.allow_batch_export = input.allowBatchExport;
-      if (input.isActive !== undefined) updateData.is_active = input.isActive;
-      if (input.sortOrder !== undefined) updateData.sort_order = input.sortOrder;
-
-      const { data, error } = await ctx.supabase
-        .from('membership_plans')
-        .update(updateData)
-        .eq('id', input.id)
-        .select()
-        .single();
-
-      if (error) {
-        throw createAdminOperationError('更新会员方案', error);
-      }
-
-      return data;
-    }),
-
-  /**
-   * Delete a membership plan
-   */
-  deleteMembershipPlan: adminProcedure
-    .input(z.object({
-      id: z.string().uuid(),
-    }))
-    .mutation(async ({ ctx, input }) => {
-      const { error } = await ctx.supabase
-        .from('membership_plans')
-        .delete()
-        .eq('id', input.id);
-
-      if (error) {
-        throw createAdminOperationError('删除会员方案', error);
-      }
-
-      return { success: true };
-    }),
+  ...membershipPlanMutations,
 
   // ============================================
   // Performance Monitoring
