@@ -4,10 +4,8 @@ import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { ModelReasoningButton } from '@/components/admin/ModelReasoningDialog';
 import { ModelMultiplierPanel } from '@/components/admin/ModelMultiplierPanel';
-import {
-  Bot, Plus, Pencil, Trash2, Sparkles, Brain, Zap,
-  Check, X, Loader2, Globe, RefreshCw, AlertTriangle, HelpCircle
-} from 'lucide-react';
+import { ProviderPricesEditor } from '@/components/admin/ProviderPricesEditor';
+import { Bot, Plus, Pencil, Trash2, Sparkles, Brain, Zap, Check, X, Loader2, Globe, RefreshCw, AlertTriangle, HelpCircle } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -598,7 +596,7 @@ export default function AdminModelsPage() {
           </CardContent>
         </Card>
 
-        <div className="mt-8"><ModelMultiplierPanel /></div>
+        <div className="mt-8 space-y-8"><ModelMultiplierPanel /><ProviderPricesEditor /></div>
 
         {/* Create/Edit Dialog */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
