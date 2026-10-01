@@ -251,11 +251,13 @@ it('BILL2: receipt database outage retains server-private evidence and recovery 
  await s.recordReceipt(r.id,c.id,out.pendingReceipt!.evidence);await s.closeRun(r.id,'delivered',result());await s.finalizeRun(r.id);expect(providerCount-before).toBe(1);expect((await conservation(f.actor)).credits).toBe(93);
 });
 async function period(actor:string,credits=100) {
- const grant=randomUUID(),subscription='sub_'+randomUUID(),plan=randomUUID(),invoice='in_'+randomUUID(),start=new Date(Date.now()-86400000).toISOString(),end=new Date(Date.now()+86400000).toISOString();
+ const grant=randomUUID(),subscription='sub_'+randomUUID(),invoice='in_'+randomUUID(),start=new Date(Date.now()-86400000).toISOString(),end=new Date(Date.now()+86400000).toISOString();
+ let plan=randomUUID();
  // Rows satisfy the real schema too (--schema-from-files): plan FK, NOT NULL status and idempotency key.
  const entitlements = (await db.query("select exists(select 1 from information_schema.columns where table_schema='public' and table_name='membership_plans' and column_name='allow_fusion_review') as present")).rows[0].present;
  if (entitlements) {
-  await db.query("insert into membership_plans(id,name,allow_fusion_review,allow_fusion_compare,library_storage_bytes) values($1,'Synthetic plan',true,true,500000000)",[plan]);
+  await db.query("insert into membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes) values($1,'Synthetic plan','pro',true,true,500000000) on conflict(level) do nothing",[plan]);
+  plan=(await db.query("select id from membership_plans where level='pro'")).rows[0].id;
  } else {
   // Older minimal fixtures intentionally predate membership entitlement configuration.
   await db.query("insert into membership_plans(id,name) values($1,'Synthetic plan')",[plan]);

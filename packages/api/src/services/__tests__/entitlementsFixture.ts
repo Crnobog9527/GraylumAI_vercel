@@ -33,6 +33,13 @@ export function fixture(level: 'free' | 'pro' | 'gold' = 'pro') {
         if (failures.has(table)) return { data: null, error: { message: 'PRIVATE_DATABASE_ERROR' } };
         let data = (rows[table] ?? []).filter(row => filters.every(filter => filter(row))).slice(0, limit);
         if (mutation) {
+          if (table === 'membership_plans') {
+            const proposed = Array.isArray(mutation.value) ? mutation.value : [mutation.value];
+            if (proposed.some(item => item.level !== undefined && rows[table]!.some(row =>
+              row.level === item.level && !(mutation!.kind === 'update' && data.includes(row))))) {
+              return { data: null, error: { code: '23505', message: 'duplicate tier PRIVATE_DETAIL' } };
+            }
+          }
           writes.push({ table, value: mutation.value });
           if (mutation.kind === 'update') {
             data.forEach(row => Object.assign(row, mutation!.value));

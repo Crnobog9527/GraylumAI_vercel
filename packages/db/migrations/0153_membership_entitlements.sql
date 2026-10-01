@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- ENTITLEMENTS PR-1. Number is provisional until preceding staging migrations merge.
+-- ENTITLEMENTS PR-1. Append after 0152; not yet applied, per controller approval.
 -- Add configuration to the existing authorities; do not change membership/payment facts.
 BEGIN;
 
@@ -31,6 +31,10 @@ ALTER TABLE public.membership_plans
 
 DO $$
 BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.membership_plans'::regclass
+                 AND conname = 'membership_plans_level_key') THEN
+    ALTER TABLE public.membership_plans ADD CONSTRAINT membership_plans_level_key UNIQUE (level);
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.membership_plans'::regclass
                  AND conname = 'membership_plans_library_storage_bytes_check') THEN
     ALTER TABLE public.membership_plans ADD CONSTRAINT membership_plans_library_storage_bytes_check

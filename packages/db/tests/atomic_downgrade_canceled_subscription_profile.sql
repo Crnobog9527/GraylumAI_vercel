@@ -23,7 +23,9 @@ BEGIN
   VALUES (v_user_id, 'subscription-downgrade@example.test', 777, 'pro');
 
   INSERT INTO membership_plans (id, name, level, allow_fusion_review, allow_fusion_compare, library_storage_bytes)
-  VALUES (v_plan_id, 'Downgrade Smoke Pro', 'pro', true, true, 500000000);
+  VALUES (v_plan_id, 'Downgrade Smoke Pro', 'pro', true, true, 500000000)
+  ON CONFLICT (level) DO NOTHING;
+  SELECT id INTO v_plan_id FROM membership_plans WHERE level = 'pro';
 
   INSERT INTO user_subscriptions (
     id,

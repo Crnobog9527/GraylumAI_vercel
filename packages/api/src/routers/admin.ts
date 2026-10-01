@@ -2540,26 +2540,6 @@ export const adminRouter = router({
 
   ...membershipPlanMutations,
 
-  /**
-   * Delete a membership plan
-   */
-  deleteMembershipPlan: adminProcedure
-    .input(z.object({
-      id: z.string().uuid(),
-    }))
-    .mutation(async ({ ctx, input }) => {
-      const { error } = await ctx.supabase
-        .from('membership_plans')
-        .delete()
-        .eq('id', input.id);
-
-      if (error) {
-        throw createAdminOperationError('删除会员方案', error);
-      }
-
-      return { success: true };
-    }),
-
   // ============================================
   // Performance Monitoring
   // ============================================

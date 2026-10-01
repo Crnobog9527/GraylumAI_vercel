@@ -4,6 +4,7 @@ BEGIN;
 ALTER TABLE public.system_settings DROP CONSTRAINT IF EXISTS system_settings_fusion_compare_max_models_check;
 DELETE FROM public.system_settings WHERE key = 'fusion_compare_max_models';
 ALTER TABLE public.membership_plans
+  DROP CONSTRAINT IF EXISTS membership_plans_level_key,
   DROP COLUMN IF EXISTS allow_fusion_review,
   DROP COLUMN IF EXISTS allow_fusion_compare,
   DROP COLUMN IF EXISTS library_storage_bytes;

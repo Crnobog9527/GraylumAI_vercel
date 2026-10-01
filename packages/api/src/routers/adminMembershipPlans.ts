@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 import { adminProcedure } from '../trpc';
 import { createSafeInternalError } from '../lib/publicError';
 import {
@@ -8,6 +9,11 @@ import {
 import { assertExplicitEntitlementsOnLevelChange } from '../services/membershipPlanChanges';
 
 export const membershipPlanMutations = {
+  // UNIQUE(level) makes every valid plan the sole configuration for its tier.
+  // No read-then-delete race: this admin endpoint never hard-deletes a plan.
+  deleteMembershipPlan: adminProcedure.input(z.object({ id: z.string().uuid() })).mutation(() => {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: '每个等级必须保留唯一的会员方案，请改用下架。' });
+  }),
   /**
    * Create a new membership plan
    */
@@ -52,6 +58,9 @@ export const membershipPlanMutations = {
         .select()
         .single();
 
+      if (error?.code === '23505') {
+        throw new TRPCError({ code: 'CONFLICT', message: '该会员等级已存在方案，请编辑现有方案。' });
+      }
       if (error) {
         throw createSafeInternalError(error, '创建会员方案失败，请稍后重试');
       }
@@ -111,6 +120,9 @@ export const membershipPlanMutations = {
       if (previousLevel !== undefined) query.eq('level', previousLevel);
       const { data, error } = await query.select().single();
 
+      if (error?.code === '23505') {
+        throw new TRPCError({ code: 'CONFLICT', message: '该会员等级已存在方案，请编辑现有方案。' });
+      }
       if (error || !data) {
         throw createSafeInternalError(error, '更新会员方案失败，请稍后重试');
       }

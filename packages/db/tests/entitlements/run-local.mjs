@@ -25,6 +25,7 @@ try {
     `CREATE TEMP TABLE entitlements_rollback_before AS ${objectQuery}`,
     read(`${dir}/seed.sql`), migration, read(`${dir}/cases.sql`), migration,
     ...['unknown', 'free'].map(level => `DO $probe$ BEGIN
+      ALTER TABLE public.membership_plans DROP CONSTRAINT membership_plans_level_key;
       INSERT INTO public.membership_plans
         (name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
         VALUES ('invalid local fixture','${level}',false,false,0);
@@ -70,9 +71,16 @@ try {
       THEN RAISE EXCEPTION 'preview fixture entitlement defaults missing'; END IF;
   END $$;`);
   const preview = write('preview-fixture.sql', previewStatements.join('\n'));
+  const stagingSeed = write('staging-seed.sql', [
+    'DELETE FROM public.membership_plans;',
+    read('packages/db/seeds/staging_non_secret_baseline.sql'),
+    read(`${dir}/staging-seed-first.sql`),
+    read('packages/db/seeds/staging_non_secret_baseline.sql'),
+    read(`${dir}/staging-seed-replay.sql`),
+  ].join('\n'));
   const result = spawnSync('node', ['packages/db/tests/run-db-baseline-replay.mjs', '--local-only',
     '--out', resolve(temp, 'fingerprint.json'), '--after', [cases, ...clients, `${dir}/service.sql`, `${dir}/closed-client.sql`, preview,
-      'packages/db/tests/atomic_downgrade_canceled_subscription_profile.sql'].join(',')], {
+      'packages/db/tests/atomic_downgrade_canceled_subscription_profile.sql', stagingSeed].join(',')], {
     cwd: root, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME }, maxBuffer: 64 * 1024 * 1024,
   });
   process.stdout.write(result.stdout);

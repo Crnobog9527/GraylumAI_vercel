@@ -36,6 +36,7 @@ describe('ENTITLEMENTS APIs with real tRPC authentication middleware', () => {
   });
   it.each(['free', 'pro', 'gold'] as const)('admin creates %s with D4 defaults', async level => {
     const f = fixture(); f.rows.profiles![0]!.role = 'admin';
+    f.rows.membership_plans = f.rows.membership_plans!.filter(row => row.level !== level);
     const result = await adminRouter.createCaller(f.context).createMembershipPlan({ ...createPlanInput, level });
     expect(result).toMatchObject({
       allow_fusion_review: level !== 'free', allow_fusion_compare: level !== 'free',
@@ -57,9 +58,32 @@ describe('ENTITLEMENTS APIs with real tRPC authentication middleware', () => {
     expect(f.writes).toEqual([]);
     await expect(caller.updateMembershipPlan({ id: planIds.pro, level: 'pro', name: 'New name' }))
       .resolves.toMatchObject({ name: 'New name', library_storage_bytes: 500_000_000 });
+    f.rows.membership_plans = f.rows.membership_plans!.filter(row => row.level !== 'gold');
     await expect(caller.updateMembershipPlan({ id: planIds.pro, level: 'gold',
       allowFusionReview: true, allowFusionCompare: false, libraryStorageBytes: 100 }))
       .resolves.toMatchObject({ level: 'gold', allow_fusion_compare: false, library_storage_bytes: 100 });
+  });
+  it.each(['create', 'move'] as const)('reports a clear conflict for duplicate tier %s', async action => {
+    const f = fixture(); f.rows.profiles![0]!.role = 'admin';
+    const caller = adminRouter.createCaller(f.context);
+    const result = action === 'create'
+      ? caller.createMembershipPlan({ ...createPlanInput, level: 'pro' })
+      : caller.updateMembershipPlan({ id: planIds.pro, level: 'gold',
+        allowFusionReview: true, allowFusionCompare: true, libraryStorageBytes: 2_000_000_000 });
+    await expect(result).rejects.toMatchObject({ code: 'CONFLICT', message: '该会员等级已存在方案，请编辑现有方案。' });
+    expect(f.writes).toEqual([]);
+  });
+  it('rejects deleting the only plan, and allows renaming and taking it off sale', async () => {
+    const f = fixture(); f.rows.profiles![0]!.role = 'admin';
+    const caller = adminRouter.createCaller(f.context);
+    await expect(caller.deleteMembershipPlan({ id: planIds.pro })).rejects.toMatchObject({
+      code: 'BAD_REQUEST', message: '每个等级必须保留唯一的会员方案，请改用下架。',
+    });
+    expect(f.writes).toEqual([]);
+    await expect(caller.updateMembershipPlan({ id: planIds.pro, name: 'Renamed', isActive: 'false' }))
+      .resolves.toMatchObject({ id: planIds.pro, name: 'Renamed', is_active: 'false' });
+    expect(await userRouter.createCaller(f.context).getEntitlements())
+      .toMatchObject({ level: 'pro', allowFusionReview: true, allowFusionCompare: true });
   });
   it('rejects a concurrent tier change instead of restoring a tier without explicit entitlements', async () => {
     const f = fixture(); f.rows.profiles![0]!.role = 'admin';
@@ -93,6 +117,7 @@ describe('ENTITLEMENTS APIs with real tRPC authentication middleware', () => {
     const f = fixture(); if (role === 'anonymous') f.context.user = null;
     const caller = adminRouter.createCaller(f.context);
     await expect(caller.createMembershipPlan(createPlanInput)).rejects.toBeDefined();
+    await expect(caller.deleteMembershipPlan({ id: planIds.pro })).rejects.toBeDefined();
     await expect(caller.updateMembershipPlan({ id: planIds.pro, allowFusionCompare: true })).rejects.toBeDefined();
     await expect(settingsRouter.createCaller(f.context).updateSystemSettings({ key: 'fusion_compare_max_models', value: 8 }))
       .rejects.toBeDefined();

@@ -45,3 +45,22 @@ BEGIN
   UPDATE public.system_settings SET value = '8'::jsonb WHERE key = 'fusion_compare_max_models';
 END $$;
 RESET ROLE;
+
+-- The database, not a preflight read, arbitrates duplicate inserts and tier moves.
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO public.membership_plans (name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
+      VALUES ('duplicate','pro',true,true,500000000);
+    RAISE EXCEPTION 'duplicate level accepted';
+  EXCEPTION WHEN unique_violation THEN NULL; END;
+  BEGIN
+    UPDATE public.membership_plans SET level = 'gold' WHERE level = 'pro';
+    RAISE EXCEPTION 'occupied tier move accepted';
+  EXCEPTION WHEN unique_violation THEN NULL; END;
+  UPDATE public.membership_plans SET name = 'Renamed', is_active = 'false' WHERE level = 'pro';
+  IF (SELECT count(*) FROM public.membership_plans WHERE level = 'pro' AND name = 'Renamed' AND is_active = 'false') <> 1
+    THEN RAISE EXCEPTION 'rename/off-sale failed'; END IF;
+  -- Restore catalog visibility before the separate anon/authenticated ACL probes.
+  UPDATE public.membership_plans SET is_active = 'true' WHERE level = 'pro';
+END $$;
