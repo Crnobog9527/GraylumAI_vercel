@@ -168,6 +168,8 @@ describe('downstream real-model admission after a valid remote window',()=>{
   const response=await post('runtime.execute',{executionId:actor});expect(response.status).toBe(403);expect((await response.json()).error.message).toContain('无法恢复');
  });
  it('preserves bounded OPC recovery refusals and sanitizes unexpected downstream exceptions',async()=>{
+  mocks.prepareStep.mockRejectedValueOnce(new Error('OPC_ANSWER_SOURCE_DENIED'));
+  await expect(app.createCaller(context()).opc.prepareStep(stepInput)).rejects.toMatchObject({message:'OPC_ANSWER_SOURCE_DENIED'});
   mocks.prepareStep.mockRejectedValueOnce(new Error('OPC_REQUEST_CONFLICT'));
   await expect(app.createCaller(context()).opc.prepareStep(stepInput)).rejects.toMatchObject({message:'OPC_REQUEST_CONFLICT'});
   mocks.prepareStep.mockRejectedValueOnce(new Error('SYNTHETIC_PRIVATE_UNEXPECTED_BODY'));

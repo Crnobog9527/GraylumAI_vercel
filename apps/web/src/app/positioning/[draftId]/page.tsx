@@ -19,7 +19,8 @@ import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-resp
 import { focusReply, liveReplyAfter, livePhaseNotice, mentorReplyDisplay, questionCardStatus, startLiveReply, type LiveReply } from "./agent-turn-display";
 import { OTHER_PLACEHOLDER, QuestionCardView } from "@/components/opc/question-card";
 import type { AgentTurnEvent, AgentTurnOutcome } from "@repo/api/src/shared/agentTurn";
-import { openingRequest, parseStepEnvelope, readAgentTurn, retainExecution, settleEnvelope, turnResultNotice } from "./mentor-turn";
+import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, readAgentTurn,
+  retainExecution, settleEnvelope, turnResultNotice } from "./mentor-turn";
 import type { MentorRequest, MentorStepEnvelope, MentorTurn, MentorExecution } from "./mentor-turn";
 import {
   confirmationActionIsRedundant,
@@ -267,10 +268,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         billing?: {closed?: boolean; cancelRequested?: boolean};
       }) => execution.state === "cost_pending" && execution.billing?.closed === true &&
         execution.billing.cancelRequested === true && execution.executionId !== history.data.activeExecution &&
-        execution.request && Object.keys(request).length === Object.keys(execution.request).length &&
-        Object.entries(request).every(([key, value]) => execution.request?.[key as keyof MentorRequest] === value));
+        execution.request && sameRequest(request, execution.request));
       // Only an exact server-persisted, stopped request retires this local lock.
-      // Original request, financial reservation and execution remain unchanged.
       if (stopped && sessionStorage.getItem(key) === raw) {
         sessionStorage.removeItem(key); removed = true;
       }
@@ -931,16 +930,19 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         const next = {...old}; delete next[step.id]; infoEditsRef.current = next; return next;
       });
     }
-    // Resume the retained request without changing its identity.
     const request = fixed.request;
     if (request.questionId)
       setActiveQuestions((old) => ({ ...old, [step.id]: request.questionId! }));
     if (!request.input?.trim()) throw new Error("OPC_INPUT_REQUIRED");
-    // An admitted request resumes its execution; otherwise the same request is
-    // resent and the server replays its admission. Neither dispatches twice.
     let executionId = fixed.executionId;
     const result = executionId ? await execute.mutateAsync({ executionId })
-      : await mentorTurn(request, id => { executionId = id; retainExecution(sessionStorage, key, request.requestId, id); });
+      : await mentorTurn(request, id => { executionId = id; retainExecution(sessionStorage, key, request.requestId, id); }).catch(async cause => {
+        if (releaseRejectedAnswer(sessionStorage, key, request.requestId, cause)) {
+          setPendingBubble(old => old?.requestId === request.requestId ? null : old); setLiveReply(null);
+          await Promise.all([read.refetch(), history.refetch()]);
+        }
+        throw cause;
+      });
     // Read the turn binding and its execution together while the retained
     // envelope still blocks automatic opening. Clearing the envelope first
     // lets that effect race an explicit first message on a manual draft.
@@ -949,7 +951,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       throw new Error('OPC_MENTOR_READBACK_UNAVAILABLE');
     // A still-running execution keeps its envelope and pending bubble until an explicit resume sees a terminal result.
     if (!settleEnvelope(sessionStorage, key, request.requestId, executionId, result)) return;
-    // Retire only this pending bubble; never touch the next editable draft.
     setPendingBubble(old=>old?.requestId===request.requestId?null:old);
     setLiveReply(null);
   }
@@ -983,7 +984,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       answerSource = { executionId: latest.executionId };
     const fixed:StepEnvelope={request:{...(answerSource ? {answerSource} : {}),draftId,stepId:step.id,
       purpose:'mentor',requestId:crypto.randomUUID(),input,questionId,organizeAfter:true}};
-    // Freeze identity synchronously before any preparation/network await.
     sessionStorage.setItem(key,JSON.stringify(fixed));
     mentorSendInFlight.current=true;
     setPendingBubble(fixed.request);if(inputOverride===undefined)setMentorInput('');

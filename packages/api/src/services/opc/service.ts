@@ -11,7 +11,7 @@ import { agentTurnInstructions, OPENING_EXTRACTION_RULE } from "./agentTurnPromp
 import { elicitFieldSpecs } from "../../shared/opcMethodPolicy";
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
 export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
-import { opcGenerate, resolveAnswerCard, organizerAnswerCard } from "./answerCard";
+import { opcGenerate, ANSWER_CARD_RULE, resolveAnswerCard, organizerAnswerCard } from "./answerCard";
 export { opcGenerate } from "./answerCard";
 const uuid = z.string().uuid();
 export const opcStart = z
@@ -160,7 +160,6 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         sources: [],
       };
       // Recover the original frozen question before newer form state is checked.
-      // A new question must pass validation before creating turn/material state.
       const replay = await admin.rpc("runtime_admission_replay", {
         p_actor_id: (await user.auth.getUser()).data.user!.id,
         p_request_id: v.requestId,
@@ -169,12 +168,11 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       if (replay.error) throw new Error("OPC_REQUEST_CONFLICT");
       if (replay.data) {
         // Validate the original host step/purpose as well as Runtime identity.
-        // This reuses existing material; a different host is a definite conflict.
+        // 0155 binds selected request.input to the saved option before admission.
+        // Replay has verified those original bytes; no visible history is needed.
         await rpc("opc_step_material", {
           p_draft_id: v.draftId, p_request_id: v.requestId,
-          p_step_id: v.stepId, p_purpose: v.purpose, p_input: v.answerSource
-            ? (await rpc("runtime_view", {p_session_id:d.sessionId})).executions
-                .find((e: {executionId:string}) => e.executionId === replay.data.executionId)?.input : v.input,
+          p_step_id: v.stepId, p_purpose: v.purpose, p_input: v.input,
         });
         return replay.data;
       }
@@ -189,7 +187,6 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       // An already admitted request never reaches this point: it is recovered
       // above under its own frozen identity.
       if (opening && !v.questionId) throw new Error("OPC_QUESTION_NOT_REACHED");
-      // A new question must pass validation before creating turn/material state.
       if (questionNotReached) throw new Error("OPC_QUESTION_NOT_REACHED");
       const instruction =
         v.purpose === "plan"
@@ -220,6 +217,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
           "Decide by meaning, never by deleting keywords: testing can be the user's actual business. Preserve relevant negation, limits, scope, trial periods and uncertainty; a plan or hypothesis must not become an established fact or commitment. Do not remove business qualifications such as 暂不商业化, 每周最多4小时 or 先试运营一个月. " +
           "Examples (only when relevant to the current field): 当前 Graylum 调试记录：计划分享摄影练习，请保留这条聊天。 -> 计划分享摄影练习; 仅用于本轮验收：每周最多4小时，选题1小时、拍摄2小时、复盘1小时；请保留这条原请求。 -> 每周最多4小时，选题1小时、拍摄2小时、复盘1小时; 我的内容主要做 GitHub PR 代码审查。 -> 我的内容主要做 GitHub PR 代码审查; 我的 SaaS 核心功能是自动保存和失败重试。 -> 我的 SaaS 核心功能是自动保存和失败重试; 我的业务是软件测试，暂不商业化，先试运营一个月。 -> 我的业务是软件测试，暂不商业化，先试运营一个月; 请保存这条聊天并重试原请求。 -> inputKind request, with an empty informationPatch for a user_fact field."
         : undefined;
+      if (organizerInstructions) organizerInstructions += "\n" + ANSWER_CARD_RULE;
       if (organizerInstructions && opening) organizerInstructions += "\n" + OPENING_EXTRACTION_RULE;
       const organizerInput = organizerInstructions
         ? JSON.stringify({

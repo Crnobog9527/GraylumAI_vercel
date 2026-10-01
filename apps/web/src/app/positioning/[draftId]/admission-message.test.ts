@@ -14,3 +14,8 @@ it.each([
 ])('does not reinterpret a missing response, execution or conflict as a known admission refusal %#',cause=>{
  expect(admissionMessage(cause)).toBeNull();
 });
+
+it('uses fixed expired-card wording without claiming the rejected envelope was retained',()=>{
+ expect(admissionMessage(new Error('OPC_ANSWER_SOURCE_DENIED'))).toBe('这张卡已经过期，请看最新的回复。');
+ expect(admissionMessage(new Error('OPC_ANSWER_SOURCE_DENIED: private details'))).toBeNull();
+});

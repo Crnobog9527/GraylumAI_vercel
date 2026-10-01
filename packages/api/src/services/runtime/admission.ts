@@ -71,7 +71,12 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
  }
 
  async function actor(){const a=await user.auth.getUser();if(a.error||!a.data.user||!isEmailVerified(a.data.user))throw new Error('RUNTIME_AUTH_REQUIRED');return a.data.user.id;}
- async function query(name:string,args:Record<string,unknown>){const r=await admin.rpc(name,{...args,p_actor_id:await actor()});if(r.error)throw new Error('RUNTIME_ADMISSION_DENIED');return r.data;}
+ async function query(name:string,args:Record<string,unknown>){
+  const r=await admin.rpc(name,{...args,p_actor_id:await actor()});
+  if(r.error)throw new Error(name==='runtime_admit'&&r.error.message==='OPC_ANSWER_SOURCE_DENIED'
+   ?'OPC_ANSWER_SOURCE_DENIED':'RUNTIME_ADMISSION_DENIED');
+  return r.data;
+ }
  return {
   start:(requestId:string,scope:unknown)=>query('runtime_start',{p_request_id:uuid.parse(requestId),p_payload:{scope:z.discriminatedUnion('kind',[z.object({kind:z.literal('positioning_draft')}).strict(),z.object({kind:z.literal('work_item'),projectId:uuid,workItemId:uuid}).strict()]).parse(scope)}}),
   saveMaterial(value:unknown){const v=runtimeMaterialInput.parse(value);return query('runtime_material',{p_session_id:v.sessionId,p_action:'save',p_request_id:v.requestId,p_expected_revision:v.expectedRevision,p_payload:{brief:v.brief,material:v.material,roundId:v.roundId}});},

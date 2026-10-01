@@ -114,6 +114,23 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   expect((await control()).length).toBe(4);
   await poll(async()=>(await f.service.read(d.draftId)).information['step-0'].values?.product?.status).toBe('provisional');timings.mentorCompleteToFieldReadMs=Date.now()-(await control())[2]!.finishedAt!;expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1',[f.actor])).rows[0].n).toBe(2);expect((await sql.query('select count(*)::int n from opc_turns where draft_id=$1',[d.draftId])).rows[0].n).toBe(2);
   const calls=(await sql.query('select c.id,c.state,c.provider_id,c.payload from bill2_calls c join bill2_runs r on r.id=c.run_id where r.actor_id=$1 order by c.created_at',[f.actor])).rows;expect(calls).toHaveLength(4);expect(new Set(calls.map(c=>c.provider_id)).size).toBe(4);
+  // Simulate a stale tab without changing its visible card: a newer completed
+  // Session execution exists before admission. The SQL lock must refuse it.
+  if(scenario==='normal'){
+   const original=(await sql.query('select id,created_at from runtime_executions where actor_id=$1 order by created_at limit 1',[f.actor])).rows[0];
+   await sql.query("update runtime_executions set created_at=now()+interval '1 second' where id=$1",[original.id]);
+   const requestsBefore=turnRequests;
+   await page.getByRole('region',{name:'导师提问'}).last().getByRole('button').first().click();
+   await poll(()=>page.getByText('这张卡已经过期，请看最新的回复。',{exact:true}).isVisible()).toBe(true);
+   expect(await page.evaluate(id=>sessionStorage.getItem('opc-step:'+id+':step-0'),d.draftId)).toBeNull();
+   expect(await page.getByRole('button',{name:'继续核对这条原请求',exact:true}).count()).toBe(0);
+   expect(turnRequests).toBe(requestsBefore+1);expect((await control()).length).toBe(4);
+   expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actor])).rows[0].n).toBe(2);
+   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-source-denied-released.png',fullPage:true});
+   await sql.query('update runtime_executions set created_at=$2 where id=$1',[original.id,original.created_at]);
+   await page.reload();await poll(()=>send.isEnabled()).toBe(true);
+   await poll(()=>page.getByRole('region',{name:'导师提问'}).last().isVisible()).toBe(true);
+  }
   // Exercise both chosen-option and free-input correlation through the real HTTP admission.
   if(scenario==='refresh'||scenario==='invalid'){
    await composer.fill('我主要提供每周摄影练习课程。');await send.click();

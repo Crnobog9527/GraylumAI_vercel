@@ -2005,7 +2005,7 @@
   "fn:research_user_charge(uuid,uuid,uuid,text)": "43e7695b80b8",
   "fn:revoke_skill_revision(uuid,uuid)": "5717057fe412",
   "fn:runtime_admission_replay(uuid,uuid,jsonb)": "fc3312373cdf",
-  "fn:runtime_admit(uuid,uuid,uuid,jsonb,jsonb)": "e881819d42ac",
+  "fn:runtime_admit(uuid,uuid,uuid,jsonb,jsonb)": "ee0b34456d76",
   "fn:runtime_billing_allowed(uuid,jsonb,uuid)": "278553b3c44a",
   "fn:runtime_binding_guard()": "fc26a993cf13",
   "fn:runtime_cancel(uuid,uuid)": "11d81278ba84",

@@ -2,6 +2,17 @@
 -- Bind answers to immutable saved cards under the existing Session admission
 -- lock. Existing RPC signatures/grants and frozen executions are unchanged.
 BEGIN;
+-- Pin both the reviewed 0138 source and this migration's own output (repeatable).
+-- A different core RPC definition must be reviewed, never overwritten silently.
+DO $$
+BEGIN
+ IF md5(pg_get_functiondef('public.runtime_admit(uuid,uuid,uuid,jsonb,jsonb)'::regprocedure))
+  NOT IN ('c226faa0598f42db96f298b6f42e3445','ee0b34456d760952a594bb4326208c30') THEN
+  RAISE EXCEPTION 'OPC_ANSWER_SOURCE_MIGRATION_MISMATCH: runtime_admit';END IF;
+ IF md5(pg_get_functiondef('public.runtime_view(uuid,uuid)'::regprocedure))
+  NOT IN ('badbde510691c96244b85b52addd3263','769e56ff54272fc2ce0abe07a339ee5c') THEN
+  RAISE EXCEPTION 'OPC_ANSWER_SOURCE_MIGRATION_MISMATCH: runtime_view';END IF;
+END $$;
 CREATE OR REPLACE FUNCTION public.runtime_admit(p_actor_id uuid,p_session_id uuid,p_request_id uuid,p_payload jsonb,p_billing jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE s runtime_sessions;e runtime_executions;b jsonb;history_candidates bigint[];source runtime_executions;prior_turn opc_turns;current_turn opc_turns;card jsonb;answer jsonb;idx integer;
@@ -21,8 +32,11 @@ BEGIN
  -- execution recovery retain their frozen inputs even after another turn exists.
  answer:=p_payload#>'{request,answerSource}';
  IF answer IS NOT NULL THEN
-  SELECT * INTO source FROM runtime_executions WHERE id=(answer->>'executionId')::uuid
-   AND actor_id=p_actor_id AND session_id=s.id;
+  BEGIN
+   SELECT * INTO source FROM runtime_executions WHERE id=(answer->>'executionId')::uuid
+    AND actor_id=p_actor_id AND session_id=s.id;
+   EXCEPTION WHEN invalid_text_representation THEN RAISE EXCEPTION 'OPC_ANSWER_SOURCE_DENIED';
+  END;
   SELECT * INTO prior_turn FROM opc_turns WHERE session_id=s.id AND request_id=source.request_id
    AND token::text=source.payload->>'opcTurnToken' AND purpose='mentor';
   SELECT * INTO current_turn FROM opc_turns WHERE session_id=s.id AND request_id=p_request_id
@@ -54,6 +68,7 @@ BEGIN
    idx:=(answer->>'optionIndex')::integer;
    IF idx>=jsonb_array_length(card#>'{card,options}')
     OR p_payload->>'input' IS DISTINCT FROM card#>>ARRAY['card','options',idx::text]
+    OR p_payload#>>'{request,input}' IS DISTINCT FROM card#>>ARRAY['card','options',idx::text]
     THEN RAISE EXCEPTION 'OPC_ANSWER_SOURCE_DENIED';END IF;
   ELSIF p_payload->>'input' IS DISTINCT FROM p_payload#>>'{request,input}' THEN
    RAISE EXCEPTION 'OPC_ANSWER_SOURCE_DENIED';

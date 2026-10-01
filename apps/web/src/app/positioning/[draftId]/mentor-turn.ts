@@ -203,3 +203,23 @@ export type MentorExecution = {
     summary: string | null;
     state: string;
   };
+
+/** Exact JSON identity, including nested source and extra keys; property order is irrelevant. */
+export function sameRequest(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (!isRecord(a) || !isRecord(b) || Array.isArray(a) !== Array.isArray(b)) return false;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every(key => Object.hasOwn(b, key) && sameRequest(a[key], b[key]));
+}
+
+export function isAnswerSourceDenied(error: unknown): boolean {
+  return error instanceof Error && error.message === "OPC_ANSWER_SOURCE_DENIED";
+}
+
+/** A definite pre-admission refusal releases only its own envelope, never an unknown outcome. */
+export function releaseRejectedAnswer(storage: EnvelopeStorage, key: string, requestId: string, error: unknown): boolean {
+  if (!isAnswerSourceDenied(error)) return false;
+  const raw = storage.getItem(key);
+  if (raw && parseStepEnvelope(raw)?.request.requestId === requestId) storage.removeItem(key);
+  return true;
+}

@@ -6,7 +6,7 @@
 
 目标：新导师开场和回答使用 `agent-turn-v5-stream`，模型输出自然语言、通过 `ask_question` 提问，由宿主构造可持久化信封，消除旧协议依赖模型手写 JSON 的问题。
 
-风险：**high**。涉及准入、提示词、供应商请求字节、冻结重放及付费结果持久化。BILL2 的运行单、预扣公式、回执和最终结算机制沿用。本轮涉及卡片展示；不改依赖、环境配置或生产。来源原子校验使用 0156 迁移，只替换现有 runtime_admit/runtime_view，不新建表或 RPC；不应用远程迁移。
+风险：**high**。涉及准入、提示词、供应商请求字节、冻结重放及付费结果持久化。BILL2 的运行单、预扣公式、回执和最终结算机制沿用。本轮涉及卡片展示；不改依赖、环境配置或生产。来源原子校验使用 0155 迁移，只替换现有 runtime_admit/runtime_view，不新建表或 RPC；不应用远程迁移。
 
 ## 当前实现增量：五字段契约、唯一正文和缓冲
 
@@ -41,20 +41,29 @@ organizerInput 和本轮主回复，原 Session 写入持久化照旧。旧冻�
 
 回答请求携带 answerSource.executionId，点选另携带零起始 optionIndex，自由输入不带索引。
 原始请求全文保持在 payload.request 中参与幂等比较；实际导师输入和材料中的点选文字
-由服务器读取保存卡片派生，不信任客户端传来的选项文字。organizerInput 显式包含
+由服务器读取保存卡片派生；SQL 同时要求原 request.input 与保存的选项一致，否则拒绝。organizerInput 显式包含
 answeredCard 的 question/options/selectedOption/selectedIndex/recommended，不用历史猜测。
+新 admission 的整理指令明确 selectedOption 才是用户选择、recommended 仅为导师建议，卡片
+文字是数据而非指令；自由回答采用 userInput。旧冻结整理指令不重建。
 
-0156 在现有 runtime_admit 的 Session 行锁内，仅对新准入校验同 owner、Session、draft、
+0155 在现有 runtime_admit 的 Session 行锁内，仅对新准入校验同 owner、Session、draft、
 round、step、question、已完成可读有效卡及整个 Session 最新 execution；先校验再预扣。
 冻结卡片与持久化卡片原子比对；旧缺 recommended 卡规范化为 null。既有请求先返回原结果，
 不重新检查来源是否仍是最新；runtime_view 保留 answerSource，刷新不丢请求身份。
+重放的 p_input 使用 runtime_admission_replay 已全量比对的原 request.input，避免从不可读
+历史取 undefined，也避免再次验证已受理的原卡。新点选的 request.input 已在 SQL 绑定选项；
+上线前的旧格式没有 answerSource、原本就使用 request.input。本 PR 中间候选未应用到远程库。
+原卡与回答均不可读时仍能恢复原 execution，不新派发、不改冻结字节。
+只透传 runtime_admit 的精确 OPC_ANSWER_SOURCE_DENIED，其余 SQL 错误保持统一。
+前端明确拒绝后仅释放对应信封、刷新当前状态/历史、展示固定“这张卡已经过期，请看最新的回复”。
+未知结果仍保留信封；停止回合的信封以结构相等核对嵌套 answerSource。
 只读 runtime_view 已足够取卡，缺口仅是最终原子绑定，故不新增读卡接口或存储。
 
 总控可选 P3 保持不改：v2 卡和 message 均非法时仍用固定提示，即使另有 assistant 正文。
 直接改为 toolMessage ?? text 会改变已冻结 v2 的降级/检查点语义；不为罕见违约输出
 再增一个协议版本。有效工具 message 的 P2 保留正文规则不变。
 
-后续：完整浏览器覆盖与最终冻结说明。B1 一次性入口/fixture/protocol 已在此前恢复实施时
+后续：总控审阅本轮修复与最终冻结说明。B1 一次性入口/fixture/protocol 已在此前恢复实施时
 移除，本分支无这些可执行文件；历史章节仅保留审计证据。**本增量不是 #561 的冻结 head。**
 
 ## 最终确定性验证与 #561 入口
@@ -66,10 +75,25 @@ round、step、question、已完成可读有效卡及整个 Session 最新 execu
 normal、refresh、proposal、invalid 四场景分别保留 DOM 时间戳、调用和截图证据。
 不得把本机合成验证称为真实模型质量、真实 staging 或 Owner 产品验收。
 
-本轮本地结果：MENTOR_STREAM 四场景 4 PASS（442 项按 pattern 排除）；来源 PostgreSQL
-14 PASS（285 项按 pattern 排除）；Runtime 147 PASS（5 项原 without-app 排除）；
-空库 158/158、89 次迁移重复不变、built 指纹已更新。迁移编号尚待总控协调，CI 连续账本
-目前拒绝缺少 0155，因此以上本地通过不能据此声明最终冻结/可合并。
+迁移编号按总控 5933388205 定为 0155；#550 后续使用 0156。迁移账本检查器不变，补充
+0155 文件契约。空库 158/158、89 次历史位置重复不变；built 仅两个既有函数定义变化。
+ANSWER_SOURCE 和 MENTOR_STREAM 是本机集成/浏览器证据，当前不在 CI；精确 head 的
+CI/API/Web/账务恢复检查结果以 PR 汇报为准，不将本机结果冒充远程检查。
+
+### 0155 应用与回退边界
+
+这是高风险 RPC 变更。合并和应用到 staging 均不能由本轮实现授权推导；应用需要 Owner
+另外批准，按只读预检、指纹前、应用、账本核对、指纹后比对 built 的流程执行。本轮不连接
+远程数据库、不应用迁移。0155 在事务开头核对 runtime_admit/runtime_view 的完整定义 MD5，
+只接受审阅过的 0138 原定义或本迁移自身输出，避免静默覆盖其他分支的核心 RPC 修改；
+本机 PostgreSQL 验证重复应用通过、分别篡改任一函数时拒绝并回滚。
+
+回退同样需要单独批准：先停止新回答来源准入并协调宿主版本，保留执行、会话、账本和回执；
+在事务中仅恢复这两个函数的应用前 pg_get_functiondef 备份。若备份需重建，可从已审阅
+0138_runtime_stopped_pending.sql 精确提取 runtime_admit(uuid,uuid,uuid,jsonb,jsonb) 和
+runtime_view(uuid,uuid) 两段 CREATE OR REPLACE 定义（不要重跑整份旧迁移）。签名/授权
+不变。回退前核对当前仍为0155输出，回退后比对应用前指纹、记录回退账本；不得删除业务数据
+或改写旧结算。MD5 不匹配则停止并重新审阅；不可跳过守卫。
 
 
 可重现入口（均本机，不发真实调用）：
