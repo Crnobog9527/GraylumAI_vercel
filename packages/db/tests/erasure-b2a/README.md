@@ -1,9 +1,10 @@
-# DATA-ERASURE B2a：0155 SQL 切片
+# DATA-ERASURE B2a：0156 SQL 切片
 
 按 [PR #550 总控协调](https://github.com/Crnobog9527/GraylumAI_vercel/pull/550#issuecomment-5929618776)，
 在原分支普通 merge staging `da4aa6be5084e329d40fb6bb6b760965c91f16e5`，
-将未编号 SQL 正式登记为 `0155_erasure_b2a.sql`。0151–0154 已在目标分支；
-0155 由原 canonical builder 在历史顺序中执行并重复校验，不再需要临时入口。
+将未编号 SQL 正式登记为 `0155_erasure_b2a.sql`；按[编号决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5933388205)，
+合入 #497（占用 0155）后改名为 `0156_erasure_b2a.sql`。0151–0154 已在目标分支；
+0156 由原 canonical builder 在历史顺序中（#497 的 0155 之后）执行并重复校验，不再需要临时入口。
 本切片仍仅为不与 #497 重叠的 SQL 收尾和 BILL2 服务层；禁止应用远程迁移。
 
 ## 权威和边界
@@ -34,8 +35,8 @@ node packages/db/tests/erasure-b2a/run-local.mjs --local-only
 ```
 
 只接受本机 Docker unix socket，数据库只绑定 loopback；不读取数据库 URL 或环境凭据，
-不调用模型/支付。复用 baseline 文件建库及固定 PostgreSQL 镜像；在首次执行 0155 前核对
-五个原函数的 Q1 MD5，0155 随正式迁移重复执行并逐对象比较结构。
+不调用模型/支付。复用 baseline 文件建库及固定 PostgreSQL 镜像；在首次执行 0156 前核对
+五个原函数的 Q1 MD5，0156 随正式迁移重复执行并逐对象比较结构。
 用实际新事务验证来源漂移原子拒绝、无数据回退/重放、五 RPC 客户端拒绝、服务端允许、
 越权/暂停账号拒绝、未发送证明、财务精度/幂等/冲突、故障全退后迟到成本、未知预留、
 查询次数/期限、空正文 Runtime 终态/B1b 组合、故障回滚和双连接注销/收据锁竞争。
