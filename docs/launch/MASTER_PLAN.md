@@ -131,7 +131,11 @@
 
     本轮顺序：**#497 → DATA-ERASURE B2a（#550）→ BILL-UNIT（#565）→ BILL-PAYG（#553）→ REPORT-GEN（#547）**，由 Codex 顺序实施；方案在途不等于实施、真实调用或配置变更授权。
 
-27. **超出冻结额由平台承担；区分余额封顶和估算异常**（2026-10-01 修订，[余额封顶来源](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553#issuecomment-5927708649)、[模型准入更正](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553#issuecomment-5925575062)、[首版清单](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553#issuecomment-5925598947)）。原“单次调用超出冻结额的费用由平台承担，不向用户补扣”的保证保留：超出 H_i 但未超估算上界是正常余额封顶，不进入 `budget_conflict`、不因此停止 run；只有真实成本超出估算上界本身才按异常停止新调用并执行移出收费配置的监控规则。真实供应商成本和平台承担金额全部留存，按模型、用途汇总对账，复用现有记录。
+27. **超出冻结额由平台承担；区分余额封顶和估算异常**（2026-10-01 修订，[余额封顶来源](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553#issuecomment-5927708649)、[模型准入更正](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553#issuecomment-5925575062)、[首版清单](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553#issuecomment-5925598947)）。Owner 原话（2026-10-01，[来源](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553#issuecomment-5916401852)）：
+
+    > 同意：单次调用超出冻结额的费用由平台承担，不向用户补扣。
+
+    在此保证上接续余额封顶修订：超出 H_i 但未超估算上界是正常余额封顶，不进入 `budget_conflict`、不因此停止 run；只有真实成本超出估算上界本身才按异常停止新调用并执行移出收费配置的监控规则。真实供应商成本和平台承担金额全部留存，按模型、用途汇总对账，复用现有记录。
 
     收费准入允许“公开分词器证明”或“实测验证 + 监控”任一路径；首版 Claude、Gemini、GPT-6 Luna 走后者，不再要求只有公开分词器数学证明才能收费。实测样本和预算先写方案并获批准；输入、思考、缓存写入和固定费用均须计入上界，联网插件保持关闭。此处不以新规划宣称准入实测已完成。
 
@@ -155,7 +159,7 @@
 
 31. **长对话原则与查询工具归属**（2026-10-01，[总控决定来源](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5926388706)）：保留原始对话记录；每一轮带当前草稿或状态，以及查询工具；不对整段对话做摘要压缩。Agents SDK 自带压缩功能在 OpenRouter 的 Claude/Gemini 线路上不能使用，不能把它作为本路线的压缩方案。
 
-    上述原则和 SDK 限制由 Owner 在本次同步指令明确；链接记录了总控对缺口的归属决定，没有完整的 Owner 原话引文，故不伪造引文。定位导师的查询工具推迟到 AC-2 / LIB-DOCS，#497 每轮完整带上当前状态、容量不足时拒绝；独立整理角色仍可读取受 inputBytes 限制的 Session 历史，超限裁掉最早部分；“零历史”只适用于定位附属整理器。这些例外不等于对原始记录做摘要替换。
+    上述原则和 SDK 限制是总控依据 Owner 2026-10-01 在总控窗口的讨论定下的技术原则，记录见上述链接；没有可引用的 Owner 原话。定位导师的查询工具推迟到 AC-2 / LIB-DOCS，#497 每轮完整带上当前状态、容量不足时拒绝；独立整理角色仍可读取受 inputBytes 限制的 Session 历史，超限裁掉最早部分；“零历史”只适用于定位附属整理器。这些例外不等于对原始记录做摘要替换。
 
 32. **美元统一成本与 q=100**（Owner 2026-10-01，[来源](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553#issuecomment-5927256926)）。Owner 原话：
 
@@ -914,4 +918,4 @@ Owner 于 2026-09-27 确认 D1–D17（D6 在 Fable 评估后改为不含 PDF；
 
 2026-10-01 增量同步依据：staging `0470e7a7`、GitHub PR 实时状态，以及第 2.1、7.0、9.3 节所链接的总控记录；#545 已写入的报告范围、收费 / 预告决定和 AC-3 分工继续保留，计费模式按第 26–27 项更新。
 
-2026-10-01 PLAN-SYNC-1001B 依据：staging `da4aa6be` 的合并日志、第 2.1 节逐条链接的来源评论和本次 Owner 同步指令。第 31 项来源无完整 Owner 原话，明确区分本次指令与总控归属决定；未用记忆补引文。
+2026-10-01 PLAN-SYNC-1001B 依据：staging `da4aa6be` 的合并日志、第 2.1 节逐条链接的来源评论。第 31 项是总控依据 Owner 2026-10-01 在总控窗口的讨论定下的技术原则，记录见[链接](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5926388706)；没有可引用的 Owner 原话。
