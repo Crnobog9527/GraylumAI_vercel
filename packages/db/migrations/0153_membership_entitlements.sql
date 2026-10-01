@@ -55,4 +55,10 @@ INSERT INTO public.system_settings (key, value)
 VALUES ('fusion_compare_max_models', '4'::jsonb)
 ON CONFLICT (key) DO NOTHING;
 
+-- D3 is intentionally public for selector display; expose this key only.
+-- Reuse the key-scoped SELECT policy pattern from 0075; no client write grant.
+DROP POLICY IF EXISTS system_settings_select_fusion_compare ON public.system_settings;
+CREATE POLICY system_settings_select_fusion_compare ON public.system_settings
+  FOR SELECT TO anon, authenticated USING (key = 'fusion_compare_max_models');
+
 COMMIT;

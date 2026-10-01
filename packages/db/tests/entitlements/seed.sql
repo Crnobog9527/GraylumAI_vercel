@@ -5,3 +5,8 @@ INSERT INTO public.membership_plans (id, name, level, monthly_price, monthly_cre
 ('00000000-0000-4000-8000-00000000e013', 'ENTITLEMENTS gold', 'gold', 1990, 300, 'true');
 INSERT INTO public.profiles (id, role, status, is_deleted) VALUES
 ('00000000-0000-4000-8000-00000000e001', 'user', 'active', 'false');
+
+INSERT INTO public.system_settings (key, value) VALUES
+('entitlements_private_fixture', '"private test value"'::jsonb),
+('site_name', '"public test value"'::jsonb)
+ON CONFLICT (key) DO NOTHING;

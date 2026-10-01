@@ -128,7 +128,8 @@ D3 是对比参与模型数量，不是评审模型数、工具调用次数、SD
 ### 4.3 是否新表、迁移、兼容与恢复
 
 - **新表：不需要。迁移：需要**，已有计划表没有这些可配置、可验证字段；一份追加迁移
-  补字段、数据初始化、范围约束及 D3 初始 key。不改 baseline、历史 SQL 或原会员 RLS/grants。
+  补字段、数据初始化、范围约束及 D3 初始 key 和单 key 公开 SELECT 策略。
+  不改 baseline、历史 SQL 或原会员 RLS/grants。
 - 按 2026-10-01 总控与 Owner 新批准的修法，在未应用的 0153 增加 `UNIQUE(level)`，
   保留重复/未知等级预检，不自动清理数据。数据库防止并发重复创建或移入已占等级；
   API 返回明确冲突错误，删除接口拒绝硬删除并提示下架，避免删掉等级唯一配置。
@@ -138,7 +139,7 @@ D3 是对比参与模型数量，不是评审模型数、工具调用次数、SD
   `node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built` 并提交新指纹。
 - 本地：空库建库、迁移连续两次（结构与配置均不变）、管理员修改后重跑不覆盖、
   非管理员新会话读/写权限、account-open 审计、回退后结构比对。恢复材料放 tests 目录，
-  不作为自动下迁移；只撤本任务新增字段/key，不改用户文件、订单、余额或已运行执行。
+  不作为自动下迁移；只撤本任务新增字段/key/约束/策略，不改用户文件、订单、余额或已运行执行。
 - 结构指纹按 `packages/db/baseline/README.md`：本地生成 built 指纹；staging 指纹/差异由
   总控执行后提供，应用前标明 pending，应用后凭新只读证据更新。Agent 不抓远程指纹。
 
@@ -386,7 +387,7 @@ WHERE key = 'fusion_compare_max_models';
   用户输入不能提供 ID/等级/额度。输出不含订阅、订单或后台内部数据。
 - 计划 create/update 沿原 admin API，局部拆到 `adminMembershipPlans.ts`；实际变更等级
   必须显式给出三项权益，并用读取到的原 level 作为写入条件防止并发绕过。只改单项不重置其余字段。
-- 追加迁移使用 `0153_membership_entitlements.sql`（紧随 staging 的 0152），不动 RLS/grant/旧 text 字段、不新增表；追加 level 唯一约束。
+- 追加迁移使用 `0153_membership_entitlements.sql`（紧随 staging 的 0152），保留原 RLS/grant/旧 text 字段，不新增表；追加 level 唯一约束及仅公开 D3 的 SELECT 策略。
   先迁移后发布新 API；迁移前新 API fail closed。迁移后、API 发布前旧创建接口不能创建新计划，
   因此该短暂窗口暂停后台新增计划；旧读取/购买使用的字段不变。回退先退 API，再由总控按审批备份
   三列/D3 配置后决定是否回退结构；回退会丢失这四项新配置，不能说成无损。
@@ -408,3 +409,11 @@ WHERE key = 'fusion_compare_max_models';
 - 前序 0150–0152 已随 staging 同步；按授权本地完整建库并以 `--write-built` 更新共享指纹。
   本地测试限 local-only，不连接远程数据库、不应用远程迁移。
 - 下一步：完成 PR-1 及完整 CI 后交总控审；保持 draft，不自行标 ready、触发机器人审或合并。
+
+### PR-1 复审补充：D3 数据库公开读取
+
+机器人在 `1508d9b2` 的复审发现 API 公开白名单与数据库 RLS 不一致。
+0153 复用 0075 的单 key SELECT 策略模式，仅向 anon/authenticated 放行
+`fusion_compare_max_models`；不扩大其他配置可见性，不添加客户端写入权限。
+本地真实角色测试同时验证 D3 可读、原公开 key 可读、私有 key 不可见与写入拒绝；
+rollback 移除该策略并验证原结构恢复，built 随完整本地回放重新生成。

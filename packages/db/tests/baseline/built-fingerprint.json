@@ -2626,6 +2626,7 @@
   "pol:subscription_credit_grants.users_own_subscription_credit_grants_select": "779e02327cde",
   "pol:system_settings.account_open_required": "68ef78b3b25e",
   "pol:system_settings.system_settings_select_admin": "1bc6c367d8c3",
+  "pol:system_settings.system_settings_select_fusion_compare": "60d66e133051",
   "pol:system_settings.system_settings_select_home_analysis": "62b19c5f2ea9",
   "pol:system_settings.system_settings_select_public_user_facing": "6be588e98066",
   "pol:ticket_replies.account_open_required": "68ef78b3b25e",

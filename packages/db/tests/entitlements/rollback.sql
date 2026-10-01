@@ -1,6 +1,7 @@
 -- LOCAL-ONLY recovery drill. A real rollback needs controller/Owner approval and a config backup.
 -- Roll back application code first; this drops only the new configuration, not membership facts.
 BEGIN;
+DROP POLICY IF EXISTS system_settings_select_fusion_compare ON public.system_settings;
 ALTER TABLE public.system_settings DROP CONSTRAINT IF EXISTS system_settings_fusion_compare_max_models_check;
 DELETE FROM public.system_settings WHERE key = 'fusion_compare_max_models';
 ALTER TABLE public.membership_plans
