@@ -80,7 +80,7 @@
   "apps/web/src/components/ui/textarea.tsx": {"longLines":1},
   "apps/web/src/hooks/useStreamingChat.ts": {"longLines":18},
   "packages/api/src/middleware/securityChecks.ts": {"lines":552},
-  "packages/api/src/routers/admin.ts": {"lines":3026},
+  "packages/api/src/routers/admin.ts": {"lines":2905},
   "packages/api/src/routers/agentSlice.ts": {"longLines":3},
   "packages/api/src/routers/chat.ts": {"lines":607,"longLines":1},
   "packages/api/src/routers/model.ts": {"lines":514,"longLines":4},
