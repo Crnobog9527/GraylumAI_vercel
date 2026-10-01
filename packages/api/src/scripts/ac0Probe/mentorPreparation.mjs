@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Offline-only overlay for the exact #497 head. No live mode or credentials.
+// Overlay for the exact #497 head. Live requests pass the parent budget boundary.
 import assert from 'node:assert/strict';
-import {createHash, randomUUID} from 'node:crypto';
+import {createHash, randomUUID, randomBytes} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {it} from 'vitest';
 import {MemorySession} from '@openai/agents';
@@ -22,6 +22,7 @@ import {openRouterBound} from '../../services/bill2/openRouterPolicy.ts';
 import {OPENING_INPUT} from '../../shared/opcQuestions.ts';
 import {configuredReasoning} from '../../services/__tests__/fixtures/runtimeReasoning.ts';
 import {historyItems} from './trial.ts';
+import {blindReview} from './blindReview.ts';
 import {assertCardDesignScenarios} from './agentTurn.ts';
 import {callBoundUsd} from './config.ts';
 import {createBudget, memoryLedger, usdToNano, nanoToUsd} from './budget.ts';
@@ -55,7 +56,15 @@ it('STG_MENTOR: frozen single-turn samples and product two-turn offline preparat
   assert.equal(hash(JSON.stringify(input.scenarios)), input.scenariosCanonicalHash);
   assert.equal(input.scenariosSourceHash,'0be012a845999a8d6c345a74df7a66e9cb61e3242dac4db98880ef8ebcd2564a');
   assertCardDesignScenarios(input.scenarios);
-  const rows = [];
+  const rows = [],mainTrials=[];
+  const live=input.live;
+  const forward=async(raw,c,phase,id)=>{
+    const response=await fetch(live.url+'/request',{method:'POST',
+      headers:{Authorization:'Bearer '+live.secret,'Content-Type':'application/json'},
+      body:JSON.stringify({raw,slot:{model:c.id,phase,id}})});
+    if(!response.ok)throw new Error('MENTOR_LIVE_STOP');
+    return response;
+  };
   const budget = createBudget({maxCalls:104,maxUsd:15,ledger:memoryLedger()});
   const capture = (raw,c,phase,id,sample) => {
     const body=JSON.parse(raw), B=Buffer.byteLength(raw);
@@ -66,10 +75,11 @@ it('STG_MENTOR: frozen single-turn samples and product two-turn offline preparat
     const estimateConfig=c.id==='L'?{...c.config,maxPrice:{...c.config.maxPrice,prompt:.125}}:c.config;
     const reserveNano=usdToNano(callBoundUsd(estimateConfig,B,c.maxTokens));
     assert.ok(reserveNano<=usdToNano(c.id==='L'?.006:c.id==='G'?.1:.27));
-    budget.reserve(reserveNano); // Unknown cost retains reservation; never touches the on-disk ledger.
+    if(!live)budget.reserve(reserveNano); // Live reservations belong exclusively to the parent boundary.
     rows.push({id,phase,category:sample?.category??'e2e',sampleHash:hash(JSON.stringify(sample??{id})),model:c.model,
       route:c.route,B,K:4096,M:4096,T:B+8192,requestHash:hash(raw),
-      prompt_tokens:null,reasoning_tokens:null,providerCostUsd:null,finishReason:null,truncated:null,reason:'offline fixture; no provider usage',
+      prompt_tokens:null,reasoning_tokens:null,providerCostUsd:null,finishReason:null,truncated:null,
+      reason:live?'provider evidence in parent mentor-live-results.jsonl':'offline fixture; no provider usage',
       maxTokens:c.maxTokens,effort:c.config.effort,
       reserveNano,reserveUsd:nanoToUsd(reserveNano),productQuoteUsd:policyFor(c).upperUsd});
   };
@@ -89,29 +99,69 @@ it('STG_MENTOR: frozen single-turn samples and product two-turn offline preparat
     })+'\n'+QUESTION_CONTRACT_INSTRUCTIONS;
     const session=new MemorySession();await session.addItems(historyItems(scenario).slice(0,-1));
     const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'SYNTHETIC_ONLY',
-      transport:async()=>{throw new Error('OFFLINE_TRANSPORT_FORBIDDEN');}});
-    let calls=0,toolCalled=false,prose='';
+      transport:live?async(_url,init)=>forward(String(init.body),c,'main-single-turn',scenario.id):
+        async()=>{throw new Error('OFFLINE_TRANSPORT_FORBIDDEN');}});
+    let calls=0,toolCalled=false,prose='',providerSettled=false,rawResponse;
+    try {
     const result=await runRuntime({model:c.model,instructions,input:scenario.input,session,
       maxOutputTokens:8192,maxTurns:1,reasoning:{effort:'low'},stream:true,firstToolCallOnly:true,
       stopAtToolNames:['ask_question'],allowEmptyResult:true,commitSessionOnSuccess:true,
       tools:[askQuestionTool(true)],onText:text=>{prose+=text;},
       selectHistory:async(history,incoming)=>selectRuntimeHistory(history,incoming,{instructions,inputBytes:90000,
         historyItems:100,toolBytes:askQuestionToolBytes(true),projectItems:projectOpenRouterItemsForSizing}),
-      exchange:async(_sequence,request)=>{
+      exchange:async(_sequence,request,onChunk)=>{
         assert.equal(++calls,1);
         const raw=openRouterRequestBody(request,{context:{providerRequestFormat:'agent-turn-v5-stream',tools:['ask_question'],
           network:'deny',reasoning:{effort:'low'}},policy:policyFor(c),phase:'mentor',primaryDialogue:true});
-        await adapter.prepareDispatch({input:raw},policyFor(c)); // Deliberately never invokes send.
+        const send=await adapter.prepareDispatch({input:raw},policyFor(c),onChunk);
         capture(raw,c,'main-single-turn',scenario.id,scenario);
-        const response=reply(c,['A','B'].includes(scenario.category));
+        const response=live?await (async()=>{
+          const observation=await send();
+          providerSettled=observation.complete&&observation.httpStatus===200;
+          const evidence=adapter.evidence(observation,policyFor(c),'response');
+          if(!evidence.final||!evidence.usage?.sdkResponse)throw new Error('MENTOR_LIVE_EVIDENCE_INVALID');
+          return evidence.usage.sdkResponse;
+        })():reply(c,['A','B'].includes(scenario.category));
+        rawResponse=response;
         toolCalled=Boolean(response.choices[0].message.tool_calls);
         return JSON.stringify(response);
       },
     });
     const projection=agentTurnResult(prose,result,toolCalled);
-    assert.ok(projection.message);assert.equal(Boolean(projection.card),['A','B'].includes(scenario.category));
+    if(!live){assert.ok(projection.message);assert.equal(Boolean(projection.card),['A','B'].includes(scenario.category));}
+    else {rows[rows.length-1].projection=projection;writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/mentor-main-results.json',
+      JSON.stringify(rows),{mode:0o600});}
+    } catch(error) {
+      if(!live||!providerSettled)throw error;
+      rows[rows.length-1].formatFailure=true;
+      writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/mentor-main-results.json',JSON.stringify(rows),{mode:0o600});
+    }
+    if(live){
+      const message=rawResponse?.choices?.[0]?.message;
+      mainTrials.push({configId:c.id,scenarioId:scenario.id,kind:'ask',index:input.scenarios.indexOf(scenario),
+        calls:[{facts:{content:message?.content??'',toolCalls:(message?.tool_calls??[]).map(tool=>
+          ({name:tool.function.name,arguments:tool.function.arguments}))}}]});
+    }
   }
 
+  let passed=['G','S'];
+  if(live){
+    const blind=blindReview(['G','S'].map(id=>mainTrials.filter(t=>t.configId===id)),randomBytes(32));
+    writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/blind-review.json',JSON.stringify(blind.items),{mode:0o600});
+    writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/private-blind-mapping.json',JSON.stringify(blind.privateMapping),{mode:0o600});
+    const response=await fetch(live.url+'/main-complete',{method:'POST',
+      headers:{Authorization:'Bearer '+live.secret},body:'{}'});
+    if(!response.ok)throw new Error('MENTOR_QUALITY_STOP');
+    let review=await response.json();
+    while(review.pending){
+      await new Promise(resolve=>setTimeout(resolve,5000));
+      const status=await fetch(live.url+'/review-status',{method:'POST',
+        headers:{Authorization:'Bearer '+live.secret},body:'{}'});
+      if(!status.ok)throw new Error('MENTOR_QUALITY_STOP');
+      review=await status.json();
+    }
+    passed=review.passed;
+  }
   // Full product path for the six two-turn scenarios. All SQL is through the
   // existing disposable local runner. No remote database or real key is accepted.
   assert.match(process.env.V3_LOCAL_DB,/^postgres:\/\/postgres@127\.0\.0\.1:\d+\/v3_disposable$/);
@@ -155,15 +205,16 @@ it('STG_MENTOR: frozen single-turn samples and product two-turn offline preparat
   [windowId,[f.actor],JSON.stringify(policies)]);
   const service=opcService(f.user,admin,{id:windowId,callPolicies:policies,creditsPerUsd:'1000',multiplier:'1',
     expiresAt:new Date(Date.now()+3600000).toISOString()});
-  for(const mentor of candidates.slice(0,2)) {
+  for(const mentor of candidates.slice(0,2).filter(c=>passed.includes(c.id))) {
     await sql.query('update modules set model_id=$1 where id=$2',[mentor.modelId,moduleInput.moduleId]);
     for(const scenario of ['opening-answer','card-selection','free-clarification']) {
       const draft=await service.start({requestId:randomUUID(),registration,mode:'mentor'});
-      let turn=0,previous;
+      let turn=0,previous,actualCard;
       const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'SYNTHETIC_ONLY',transport:async(url,init)=>{
         assert.equal(String(url),'https://openrouter.ai/api/v1/chat/completions');
         const raw=String(init.body),body=JSON.parse(raw),c=candidates.find(item=>item.model===body.model);
         capture(raw,c,'e2e',mentor.id+'-'+scenario+'-'+turn+'-'+c.id);
+        if(live)return forward(raw,c,'e2e',mentor.id+'-'+scenario+'-'+turn+'-'+c.id);
         const hasCard=c.id!=='L'&&scenario!=='opening-answer'&&turn===0;
         const text=c.id==='L'?JSON.stringify({inputKind:'uncertainty',targetStepId:'step-1',informationPatch:{}}):'离线合成回复，不代表模型质量。';
         if(body.stream) {
@@ -178,9 +229,9 @@ it('STG_MENTOR: frozen single-turn samples and product two-turn offline preparat
         const selected=scenario==='card-selection'&&turn===1;
         const request={draftId:draft.draftId,stepId:'step-1',questionId:moduleInput.steps[0].information[0].id,
           purpose:'mentor',requestId:randomUUID(),input:turn===0&&scenario==='opening-answer'?OPENING_INPUT:
-            selected?card.options[0]:turn===0?'我还不确定，帮我分析一下。':'我是独立开发者，提供账号内容规划服务。',
+            selected?(live?actualCard.options[0]:card.options[0]):turn===0?'我还不确定，帮我分析一下。':'我是独立开发者，提供账号内容规划服务。',
           ...(turn===0&&scenario==='opening-answer'?{}:{organizeAfter:true}),
-          ...(turn===1&&scenario!=='opening-answer'?{answerSource:{executionId:previous,...(selected?{optionIndex:0}:{})}}:{})};
+          ...(turn===1&&scenario!=='opening-answer'&&(!live||actualCard)?{answerSource:{executionId:previous,...(selected?{optionIndex:0}:{})}}:{})};
         const admitted=await service.prepareStep(request);
         const before=rows.length;
         const result=await runtimeExecutor({database:admin,actor:async()=>f.actor,adapter}).execute(admitted.executionId);
@@ -188,12 +239,19 @@ it('STG_MENTOR: frozen single-turn samples and product two-turn offline preparat
         const calls=(await sql.query('select c.payload from bill2_calls c join runtime_executions e on e.billing_run_id=c.run_id where e.id=$1',
           [admitted.executionId])).rows;
         assert.deepEqual(calls.map(c=>c.payload.requestHash).sort(),rows.slice(before).map(r=>r.requestHash).sort());
+        if(live&&turn===0&&scenario!=='opening-answer'){
+          actualCard=result.result?.card??result.card;
+          // Read the real saved product reply; never fabricate answerSource/options.
+          const execution=(await sql.query('select result from runtime_executions where id=$1',[admitted.executionId])).rows[0];
+          actualCard=JSON.parse(execution.result.body).card;
+          if(scenario==='card-selection'&&!actualCard?.options?.length)throw new Error('MENTOR_E2E_CARD_PRECONDITION');
+        }
         previous=admitted.executionId;
       }
     }
   }
-  assert.equal(rows.length,104);
-  assert.throws(()=>budget.reserve(1),/run_call_cap/);
+  assert.equal(rows.length,live?80+passed.length*12:104);
+  if(!live)assert.throws(()=>budget.reserve(1),/run_call_cap/);
   const unknown=createBudget({maxCalls:2,maxUsd:1,ledger:memoryLedger()});
   unknown.reserve(100);unknown.stop('unknown_result');
   assert.throws(()=>unknown.reserve(100),/unknown_result/);assert.equal(unknown.run.calls,1);
@@ -202,9 +260,10 @@ it('STG_MENTOR: frozen single-turn samples and product two-turn offline preparat
   const totals=candidates.map(c=>{const own=rows.filter(row=>row.model===c.model);
     return {model:c.model,calls:own.length,minB:Math.min(...own.map(r=>r.B)),maxB:Math.max(...own.map(r=>r.B)),
       reserveUsd:nanoToUsd(own.reduce((sum,row)=>sum+row.reserveNano,0))};});
-  const result={version:1,mode:'offline-only',frozenHead:'f9afd0db7805e80ccc6f5b7023a3e87b5014f5bd',
+  const result={version:1,mode:live?'live':'offline-only',frozenHead:'f9afd0db7805e80ccc6f5b7023a3e87b5014f5bd',
     planId:hash(JSON.stringify(rows)),scenariosSourceHash:input.scenariosSourceHash,totals,
-    totalReserveUsd:nanoToUsd(budget.run.nanoUsd),providerRequests:0,rows};
+    totalReserveUsd:nanoToUsd(rows.reduce((sum,row)=>sum+row.reserveNano,0)),providerRequests:live?rows.length:0,rows};
   writeFileSync(process.env.V3_WORKBENCH_OUTPUT+'/mentor-preparation.json',JSON.stringify(result,null,2)+'\n',{mode:0o600});
   console.info('STG_MENTOR_OFFLINE_RESULT',JSON.stringify({...result,rows:undefined}));
-},180000);
+},liveTimeout());
+function liveTimeout(){return 24*60*60*1000;}

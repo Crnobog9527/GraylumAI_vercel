@@ -1,12 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // AC-0b model probe. Standalone script: application code must never import it.
 
-/** Owner decisions: the AC-0 feasibility measurement started at 200 calls and
- * 3 USD; 2026-09-28 the call total was raised to 350 ("同意追加到 350 次，金额上限
- * 3 美元不变"); 2026-09-29 both were raised for gemini-3.8-flash ("同意把 AC-0
- * 测试累计上限调到 420 次、3.5 美元，用来测 gemini-3.8-flash"). No flag can raise these. */
-export const HARD_MAX_CALLS = 420;
-export const HARD_MAX_USD = 3.5;
+/** Owner approval: PR #561 issuecomment-5935911029. Cumulative only;
+ * STG-MENTOR additionally enforces 104 calls / $10.24 and per-model limits. */
+export const HARD_MAX_CALLS = 840;
+export const HARD_MAX_USD = 25.24;
 export const DEFAULT_MAX_CALLS = 60;
 export const DEFAULT_MAX_USD = 1;
 

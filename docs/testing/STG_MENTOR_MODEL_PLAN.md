@@ -1,6 +1,6 @@
 # STG-MENTOR-MODEL：候选实测与 staging 切换方案
 
-2026-10-02；风险 high；方案与离线探测准备，等待总控审阅及 Owner 对后续实测的批准。
+2026-10-02；风险 high；预算已获 Owner 批准；本次仅实现真实发送入口，等待总控审阅该改动。
 本轮真实推理请求 0 次；未写真实账本、未改 staging 配置、不合并。
 
 ## 1. 决策和证据边界
@@ -33,7 +33,7 @@ Owner 最新安排以[更正评论](https://github.com/Crnobog9527/GraylumAI_ver
 | --- | --- | --- | --- | --- | --- |
 | 导师 G | `google/gemini-3.8-flash` | `google-vertex/global` | 0.75 / 3.75 | `reasoning_effort: "low"` | 8192 |
 | 导师 S | `anthropic/claude-sonnet-5.5` | `anthropic` | 2 / 10 | `reasoning_effort: "low"` | 8192 |
-| 固定整理器 L | `openai/gpt-6-luna` | `openai` | 0.10 / 0.50 | `reasoning_effort: "none"`（准备修正，待总控审） | 2048 |
+| 固定整理器 L | `openai/gpt-6-luna` | `openai` | 0.10 / 0.50 | `reasoning_effort: "none"`（总控已接受的目标配置） | 2048 |
 
 官方来源：[G 报价](https://openrouter.ai/google/gemini-3.8-flash)、
 [S 报价](https://openrouter.ai/anthropic/claude-sonnet-5.5)、
@@ -50,7 +50,7 @@ G/S 的目录均列出 low 且思考不可关闭。
 [Anthropic 思考说明](https://platform.claude.com/docs/en/build-with-claude/extended-thinking)。
 8192 为可见输出和思考预留空间；仍须记录截断，不能保证零截断。
 L 原建议 low + 2048 被冻结产品 admission 拒绝：开启思考要求至少 4096 输出。
-本次准备建议 L 改 none，保持 2048，目录明确支持；这项探测配置修正须经总控审，不改产品或任何上限。
+本次准备建议 L 改 none，保持 2048，目录明确支持；总控已接受此目标配置，不改产品输出上限；见下方最新批准记录。
 不声称等于 staging 现值；真实执行须沿用经审配置。
 
 每次请求只允许表内单一 tag，`allow_fallbacks:false`、`require_parameters:true`；
@@ -110,7 +110,7 @@ Sonnet 主评测和端到端不带缓存标记，以冻结产品字节为基线�
 本轮 104 次不含原先额外 8 次 Sonnet 缓存对照，不发送任何 cache_control，不占用未来缓存实验额度。
 原冻结 head 不支持 cache_control 的事实保留，现已不构成本轮无缓存准备的阻塞。
 
-## 4. 次数和预算（全部待批准）
+## 4. 次数和预算（历史估算；已批准执行额度见下）
 
 每个候选：40 次单轮 + 最多 6 次端到端导师；L 每个候选最多 6 次。
 总计最多 92 次导师 + 12 次 L = 104 次 provider 请求，不是 104 次用户对话。
@@ -139,7 +139,8 @@ L 的 12 × $0.006 = $0.072 向上取整到 $0.08；不转移这部分差额。
 按全部 104 次约 $2.80；实际取决于 Skill/历史、思考与截断。预算上限覆盖长请求，不能拿情景估算作硬限制。
 
 方案初次核验时，本地账本已用 736 次，冻结 #497 probe 硬上限为 736 次/$15。
-本轮不修改硬上限或真实账本；真正执行前须刷新账本次数和金额快照，增量最多 104 次且单独受限。
+本次按最新批准将探测代码的累计硬上限改为 840 次/$25.24；不写真实账本。
+真实执行前核对基线736次，本轮增量104次/$10.24另外独立受限。
 按 Owner 更正，不以测试密钥余额 >= 预算作为前提，不要求充值，不换 key。
 并发调用者未停、未知费用未结算或账本基线变化时停止，不挪用历史额度。
 真实执行若因实际额度不足被拒或出现未知结果，停止报告，不重试、不换密钥。
@@ -240,10 +241,22 @@ P 包含输入缓存命中 token，不扣缓存；usage 缺失记 null 和原因
    若失败，停止新请求并由总控处理恢复；Owner 已决定禁用 DeepSeek，不能把恢复到 DeepSeek 当默认回滚。
    可恢复配置快照用于核对/结算历史；新导师回退候选另经 Owner 确认。
 
+## 最新批准及第 1 步交付（2026-10-02）
+
+[总控已确认主评测及 Luna 目标配置](https://github.com/Crnobog9527/GraylumAI_vercel/pull/561#issuecomment-5935886740)。
+[Owner 批准与执行顺序](https://github.com/Crnobog9527/GraylumAI_vercel/pull/561#issuecomment-5935911029)
+取代上文历史“待批准”状态：G 46次/$2.77、S 46次/$7.39、L 12次/$0.08，合计104次/$10.24；
+单次$0.10/$0.27/$0.006，累计840次/$25.24。旧$17.10只保留为历史字节限额估算，不能作为可执行额度。
+
+本次仅实现 live 发送入口：原账本锁、逐次预留/结算，单次、模型、本轮与本机累计检查，必填 `--max-usd`，
+未知/拒绝整批停且保留预留。主评测固定已批准输入字节；端到端沿冻结产品路径生成真实历史。
+新增临时 loopback 转发只为保留原本地 runner 的网络隔离：真实 key 和原账本留在父进程，
+子进程仍只能访问本机；发送串行且前条结清前不能发送下一条。不是新增评测框架、账本或数据库表。
+
 ## Handoff
 
-按 Owner 更正继续无缓存准备；缓存延后到 PROMPT-CACHE 合入后，密钥余额不再作为前提。
-本轮新增 offline-only 入口，复用冻结 SDK/契约/adapter、旧样本工具、callBoundUsd/memoryLedger 和现有本机 OPC runner。
-80 次单轮样本与 24 次完整产品端到端证据分别标注，不能把单轮夹具声称为完整 Session/UI 验收。
-实际 dry-run 数字、冻结调用链、验证状态和剩余执行条件见[准备记录](STG_MENTOR_MODEL_PREPARATION.md)。
-保持 draft；推送后 CI 全绿报总控审，不发真实调用、不改上限、staging 或 #497、不合并。
+预算与无缓存边界已批准；本次仅交付真实入口代码及无付费验证，尚未运行 live。
+主评测与产品全路径端到端分开记录；缓存仍延后到 PROMPT-CACHE 合入后另报。
+入口用法、验证和资金停止规则见[准备记录](STG_MENTOR_MODEL_PREPARATION.md)。
+推送后等待同 head CI/Security 全绿和总控审；总控审过之前不发任何真实请求。
+保持 draft；不改 staging、#497 产品文件或数据库，不合并。

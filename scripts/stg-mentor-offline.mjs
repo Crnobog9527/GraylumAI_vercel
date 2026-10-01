@@ -1,11 +1,18 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Existing OPC integration runner + probe overlay. There is deliberately no live option.
-import {execFileSync, spawnSync} from 'node:child_process';
+// Existing OPC integration runner + probe overlay. Default offline; explicit live mode requires the approved evidence and budget.
+import {execFileSync, spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {createHash, randomUUID} from 'node:crypto';
 import {readFileSync, writeFileSync, readdirSync, mkdirSync, copyFileSync, unlinkSync} from 'node:fs';
-import {resolve, join} from 'node:path';
+import {resolve, join, dirname} from 'node:path';
 const args=process.argv.slice(2);
+const liveIndex=args.indexOf('--live');
+const live=liveIndex>=0;
+if(live)args.splice(liveIndex,1);
+function option(name){const index=args.indexOf(name);if(index<0)return undefined;return args.splice(index,2)[1];}
+const maxUsdArg=option('--max-usd'),evidencePath=option('--approved-evidence');
+if(!live&&maxUsdArg!==undefined)throw new Error('Live options require --live');
+if(live&&(!maxUsdArg||!evidencePath))throw new Error('--live requires --max-usd and --approved-evidence');
 if(args.length!==4)throw new Error('Usage: node scripts/stg-mentor-offline.mjs DETACHED_FROZEN_ROOT SKILL_DIR SCENARIOS_JSON OUTPUT_DIR');
 const [root,skill,scenariosPath,output]=args.map(p=>resolve(p));
 const git=(...a)=>execFileSync('git',a,{cwd:root,encoding:'utf8'}).trim();
@@ -37,20 +44,40 @@ const moduleSkill={moduleId:randomUUID(),skillId:randomUUID(),revisionId:randomU
     active:true,is_featured:false,features:null,examples:null,preparation_questions:null}};
 mkdirSync(output,{recursive:true,mode:0o700});
 const inputPath=join(output,'private-input.json');
-writeFileSync(inputPath,JSON.stringify({moduleSkill,scenarios,scenariosSourceHash:hash(source),
-  scenariosCanonicalHash:hash(JSON.stringify(scenarios))}),{mode:0o600});
+let input={moduleSkill,scenarios,scenariosSourceHash:hash(source),scenariosCanonicalHash:hash(JSON.stringify(scenarios))};
+if(evidencePath){
+  const originalInput=readFileSync(join(dirname(dirname(resolve(evidencePath))),'private-input.json'));
+  if(hash(originalInput)!=='406d521f92b5da5f1356ae7bc9a6f05175a47ffd12752ff39cc540193e3780c6')
+    throw new Error('Approved private input required');
+  const approved=JSON.parse(originalInput);
+  if(hash(JSON.stringify(approved.moduleSkill.files))!==hash(JSON.stringify(files))||
+    approved.scenariosSourceHash!==hash(source))throw new Error('Approved Skill/scenarios drift');
+  input=approved; // Preserve original publication identities appearing in the prompt bytes.
+}
+writeFileSync(inputPath,JSON.stringify(input),{mode:0o600});
+let bridge;
+if(live){
+  const {mentorMaxUsd}=await import('../packages/api/src/scripts/ac0Probe/mentorLive.ts');
+  const {liveBridge}=await import('./stg-mentor-live.mjs');
+  bridge=await liveBridge({maxUsd:mentorMaxUsd(maxUsdArg),evidencePath,output});
+  const data=JSON.parse(readFileSync(inputPath,'utf8'));data.live={url:bridge.url,secret:bridge.secret};
+  writeFileSync(inputPath,JSON.stringify(data),{mode:0o600});
+}
 const overlay='packages/api/src/scripts/ac0Probe/mentorPreparation.mjs';
 const entry='packages/api/src/services/opc/opc.integration.ts';
 const original=readFileSync(join(root,entry));
+try {
 copyFileSync(new URL('../'+overlay,import.meta.url),join(root,overlay));
 writeFileSync(join(root,entry),Buffer.concat([original,Buffer.from("\nimport '../../scripts/ac0Probe/mentorPreparation.mjs';\n")]));
 git('add','--',overlay);
-try {
-  const result=spawnSync(process.execPath,['packages/db/tests/v3/run-workbench.mjs','--opc-only','--with-staging-schema',
+  const child=spawn(process.execPath,['packages/db/tests/v3/run-workbench.mjs','--opc-only','--with-staging-schema',
     '--case-pattern=STG_MENTOR'],{cwd:root,env:{PATH:process.env.PATH,HOME:process.env.HOME,
       V3_REAL_SKILL_INPUT:inputPath,V3_WORKBENCH_OUTPUT:output},stdio:'inherit'});
-  if(result.status!==0)throw new Error('Offline runner failed; inspect local evidence');
+  const status=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});
+  if(status!==0)throw new Error('Runner failed; inspect private evidence; do not retry');
 } finally {
+  await bridge?.close();
+  if(bridge){const data=JSON.parse(readFileSync(inputPath,'utf8'));delete data.live;writeFileSync(inputPath,JSON.stringify(data),{mode:0o600});}
   writeFileSync(join(root,entry),original);
   git('reset','--',overlay);
   unlinkSync(join(root,overlay));
