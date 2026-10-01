@@ -14,7 +14,8 @@ import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from '.
 import { discoverRuntimeCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
 import { type ReasoningPolicy } from './reasoningPolicy';
 import { admitReasoning } from './reasoningAdmission';
-import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
+import type {AnsweredCard} from '../opc/answerCard';
+import {ASK_QUESTION_TOOL,questionAnswerSourceSchema} from '../../shared/agentTurn';
 import {isOpeningInput} from '../../shared/opcQuestions';
 import {askQuestionToolBytes,QUESTION_CONTRACT,QUESTION_CONTRACT_INSTRUCTIONS} from './agentTools';
 import {currentRequestTiming} from './timing';
@@ -25,7 +26,7 @@ const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
  brief:z.string().max(8000),material:z.string().max(16000),roundId:uuid.nullable().default(null)}).strict();
 export const runtimeAdmission=z.object({sessionId:uuid,requestId:uuid,input:z.string().trim().min(1).max(20000),
- organizeAfter:z.boolean().default(false),selection:z.discriminatedUnion('kind',[
+ answerSource:questionAnswerSourceSchema.optional(),organizeAfter:z.boolean().default(false),selection:z.discriminatedUnion('kind',[
   z.object({kind:z.literal('ordinary'),modelId:uuid}).strict(),
   z.object({kind:z.literal('auto'),modelId:uuid}).strict(),
   z.object({kind:z.literal('skill'),moduleId:uuid,revisionId:uuid,task:z.string().max(128).optional()}).strict(),
@@ -38,7 +39,7 @@ export type LocalRuntimePolicy={
  maxCalls:number;maxOutputTokens:number;inputBytes:number;historyItems:number;
  expectedMaterialRevision?:number;opcTurnToken?:string;mentorStream?:boolean;organizeOpening?:boolean;
  additionalInstructions?:string;skillResources?:readonly string[];searchEnabled?:boolean;workspaceContext?:boolean;
- organizerInstructions?:string;organizerInput?:string;
+ organizerInstructions?:string;organizerInput?:string;answeredCard?:AnsweredCard;resolvedInput?:string;
 };
 export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient,policy:LocalRuntimePolicy){
  policy=Object.freeze({...policy,...(policy.real?{real:structuredClone(policy.real),creditsPerUsd:policy.real.creditsPerUsd,multiplier:policy.real.multiplier}:{}),...(policy.skillResources?{skillResources:Object.freeze([...policy.skillResources])}:{})});
@@ -76,12 +77,13 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
   saveMaterial(value:unknown){const v=runtimeMaterialInput.parse(value);return query('runtime_material',{p_session_id:v.sessionId,p_action:'save',p_request_id:v.requestId,p_expected_revision:v.expectedRevision,p_payload:{brief:v.brief,material:v.material,roundId:v.roundId}});},
   revokeMaterial(sessionId:string,revision:number){return query('runtime_material',{p_session_id:uuid.parse(sessionId),p_action:'revoke',p_expected_revision:z.number().int().positive().parse(revision)});},
   prepare:(value:unknown)=>timedAdmission(async()=>{
-   const input=runtimeAdmission.parse(value);await actor();
+   const request=runtimeAdmission.parse(value);
+   const input=policy.resolvedInput === undefined ? request : {...request,input:policy.resolvedInput};await actor();
    if(policy.real&&(input.network!=='deny'||policy.searchEnabled))throw new Error('RUNTIME_REAL_SEARCH_DISABLED');
    if(input.network==='require_latest'&&!policy.searchEnabled)throw new Error('RUNTIME_SEARCH_UNAVAILABLE');
    const session=await query('runtime_session_context',{p_session_id:input.sessionId});
    // Resolve replay before model or revision freshness changes produce another budget.
-   const replay=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:input});
+   const replay=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:request});
    if(replay)return replay;
    const mentorStream=Boolean(policy.opcTurnToken&&policy.mentorStream);
    if(policy.organizeOpening&&(!mentorStream||!isOpeningInput(input.input)))throw new Error('RUNTIME_CONTEXT_INVALID');
@@ -193,7 +195,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     // Freeze the purpose ceiling; each selected model keeps its own call-policy limit.
     ...(budgets?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),
     tools:mentorStream?(opening?[]:[ASK_QUESTION_TOOL]):[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext?['read_source']:[])],maxToolCalls:mentorStream?(opening?0:1):(searchAllowed?1:0)+(workspaceContext?Math.min(2,primaryTurns-1):input.sources.length),
-    request:input,...(revisionId?{moduleId,skillId,revisionId}:{}),sources:input.sources};
+    request,...(policy.answeredCard?{answeredCard:policy.answeredCard}:{}),...(revisionId?{moduleId,skillId,revisionId}:{}),sources:input.sources};
    const selectedIds=new Set([modelId,...(attachedOrganizer?[attachedOrganizer.modelId]:[]),...candidates.map(c=>c.modelId)]);
    const realCalls=policy.real?.callPolicies.filter(c=>selectedIds.has(c.modelId));
    const costPerCall=realCalls?.reduce((upper,c)=>decimal(c.upperUsd)>decimal(upper)?c.upperUsd:upper,'0')??policy.costPerCall;
@@ -228,7 +230,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     // A competing identical request may have frozen its deadline/config first,
     // or the commit response may have been lost. Read its immutable identity;
     // never retry admission/reservation or replace the winner's frozen context.
-    const committed=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:input});
+    const committed=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:request});
     if(committed)return committed;
     throw error;
    }

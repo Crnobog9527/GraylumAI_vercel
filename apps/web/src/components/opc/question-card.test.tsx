@@ -41,14 +41,14 @@ describe("QuestionCardView: open card", () => {
     expect(html).toMatch(/有经验的同行<span[^>]*>推荐<\/span><\/button>/);
   });
 
-  it("sends the option text itself; Other sends nothing and asks the page to focus its message box", () => {
+  it("sends the option text and index; Other sends nothing and asks the page to focus its message box", () => {
     const onAnswer = vi.fn();
     const onOther = vi.fn();
     const buttons = clickables(QuestionCardView({ card: { ...card, recommended: 0 }, answered: false, onAnswer, onOther }));
     expect(buttons).toHaveLength(card.options.length + 1);
     buttons[1].click();
     buttons[3].click();
-    expect(onAnswer.mock.calls).toEqual([["有经验的同行"]]);
+    expect(onAnswer.mock.calls).toEqual([["有经验的同行", 1]]);
     expect(onOther).toHaveBeenCalledTimes(1);
   });
 

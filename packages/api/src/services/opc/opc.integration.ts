@@ -10589,3 +10589,87 @@ it("OPC: homepage guide starts one unnamed mentor task and replays its exact int
   expect((await sql.query('select b.name from opc_businesses b join opc_draft_businesses d on d.business_id=b.id where d.draft_id=$1',[draftId])).rows[0].name).toBe('未命名业务');
  }finally{await browser.close();}
 },120000);
+
+// Seed only the historical card row; the new answer takes the real service,
+// Session-lock admission, reservation and replay paths against PostgreSQL.
+it.each(['five','legacy','free'] as const)('OPC: ANSWER_SOURCE frozen card, canonical option and replay (%s)',async(kind)=>{
+ const f=await mergedPositioningFixture();await planFixtureModel(f.moduleId);
+ const d=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'mentor'});
+ const base={draftId:d.draftId,stepId:'step-0',purpose:'mentor' as const,questionId:'product',input:'请给选项'};
+ const prior=await f.service.prepareStep({...base,requestId:randomUUID()});
+ const card={question:'请选择范围',options:['甲方案','乙方案'],...(kind==='legacy'?{}:{recommended:0,message:'付费正文',recommendationReason:'理由'})};
+ await sql.query("update runtime_executions set state='completed',result=$2 where id=$1",[prior.executionId,{body:JSON.stringify({format:'agent-turn.v1',message:'付费正文',card})}]);
+ await sql.query('update runtime_sessions set active_execution=null where id=$1',[d.sessionId]);
+ const answerSource={executionId:prior.executionId,...(kind==='free'?{}:{optionIndex:1})};
+ const request={...base,requestId:randomUUID(),input:'客户端文字',organizeAfter:true,answerSource};
+ const answer=await f.service.prepareStep(request);
+ const frozen=(await sql.query('select payload from runtime_executions where id=$1',[answer.executionId])).rows[0].payload;
+ expect(frozen.input).toBe(kind==='free'?'客户端文字':'乙方案');expect(frozen.request.input).toBe('客户端文字');
+ expect(frozen.request.answerSource).toEqual(answerSource);expect(frozen.attachedOrganizer.historyItems).toBe(0);
+ expect(JSON.parse(frozen.attachedOrganizer.input).answeredCard).toMatchObject({question:'请选择范围',
+  selectedOption:kind==='free'?null:'乙方案',selectedIndex:kind==='free'?null:1,recommended:kind==='legacy'?null:0});
+ const before=(await sql.query('select to_jsonb(r) row from bill2_runs r where actor_id=$1 order by id',[f.actor])).rows;
+ expect((await f.service.prepareStep(request)).executionId).toBe(answer.executionId);
+ const view=await admin.rpc('runtime_view',{p_actor_id:f.actor,p_session_id:d.sessionId});
+ expect(view.data.executions.find((e:{executionId:string})=>e.executionId===answer.executionId).request.answerSource).toEqual(answerSource);
+ await expect(f.service.prepareStep({...request,input:'改过的原始请求'})).rejects.toThrow('OPC_REQUEST_CONFLICT');
+ expect((await sql.query('select to_jsonb(r) row from bill2_runs r where actor_id=$1 order by id',[f.actor])).rows).toEqual(before);
+ expect((await sql.query('select count(*)::int n from bill2_calls c join bill2_runs r on c.run_id=r.id where r.actor_id=$1',[f.actor])).rows[0].n).toBe(0);
+});
+
+it.each(['session','question','stale','no-card','pending','index'] as const)('OPC: ANSWER_SOURCE refuses %s before reservation',async(mode)=>{
+ const f=await mergedPositioningFixture();await planFixtureModel(f.moduleId);
+ const d=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'mentor'});
+ const base={draftId:d.draftId,stepId:'step-0',purpose:'mentor' as const,questionId:'product',input:'请给选项'};
+ const prior=await f.service.prepareStep({...base,requestId:randomUUID()});
+ const card={question:'请选择范围',options:['甲','乙'],recommended:null};
+ await sql.query("update runtime_executions set state=$2,result=$3 where id=$1",[prior.executionId,mode==='pending'?'prepared':'completed',
+  {body:JSON.stringify({format:'agent-turn.v1',message:'正文',card:mode==='no-card'?null:card})}]);
+ await sql.query('update runtime_sessions set active_execution=null where id=$1',[d.sessionId]);
+ if(mode==='stale'){
+  const newer=await f.service.prepareStep({...base,requestId:randomUUID()});
+  await sql.query("update runtime_executions set state='cancelled' where id=$1",[newer.executionId]);
+  await sql.query('update runtime_sessions set active_execution=null where id=$1',[d.sessionId]);
+ }
+ if(mode==='session')base.draftId=(await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'mentor'})).draftId;
+ if(mode==='question')await sql.query("update runtime_executions set payload=jsonb_set(payload,'{request,selection,task}','\"opc-question:platforms\"'::jsonb) where id=$1",[prior.executionId]);
+ const before=(await sql.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actor])).rows[0].n;
+ await expect(f.service.prepareStep({...base,requestId:randomUUID(),answerSource:{executionId:prior.executionId,optionIndex:mode==='index'?4:0}})).rejects.toThrow();
+ expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actor])).rows[0].n).toBe(before);
+});
+
+it.each(['card','input','index','owner','race'] as const)('OPC: ANSWER_SOURCE lock rejects tamper after application read (%s)',async(mode)=>{
+ const f=await mergedPositioningFixture();await planFixtureModel(f.moduleId);
+ const d=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'mentor'});
+ const base={draftId:d.draftId,stepId:'step-0',purpose:'mentor' as const,questionId:'product',input:'请给选项'};
+ const prior=await f.service.prepareStep({...base,requestId:randomUUID()});
+ const card={question:'请选择范围',options:['甲','乙'],recommended:null};
+ await sql.query("update runtime_executions set state='completed',result=$2 where id=$1",[prior.executionId,
+  {body:JSON.stringify({format:'agent-turn.v1',message:'正文',card})}]);
+ await sql.query('update runtime_sessions set active_execution=null where id=$1',[d.sessionId]);
+ let intercepted=false;
+ const interceptedDb=new Proxy(admin,{get(target,key){
+  if(key==='rpc')return (name:string,args:Record<string,any>)=>{
+   if(name!=='runtime_admit')return target.rpc(name,args);
+   return (async()=>{
+    intercepted=true;
+    if(mode==='card')args.p_payload.answeredCard.card.options[0]='伪造';
+    if(mode==='input')args.p_payload.input='伪造';
+    if(mode==='index')args.p_payload.request.answerSource.optionIndex=4;
+    if(mode==='owner')args.p_actor_id=randomUUID();
+    if(mode==='race'){
+     const competitor=await f.service.prepareStep({...base,requestId:randomUUID()});
+     const {runtimeExecutor}=await import('../runtime/execute');
+     await runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:process.env.V3_RUNTIME_LOCAL_ENDPOINT!}).cancel(competitor.executionId);
+    }
+    return target.rpc(name,args);
+   })();
+  };
+  return Reflect.get(target,key);
+ }});
+ const before=(await sql.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actor])).rows[0].n;
+ await expect(opcService(f.user,interceptedDb).prepareStep({...base,requestId:randomUUID(),
+  answerSource:{executionId:prior.executionId,optionIndex:0}})).rejects.toThrow();
+ expect(intercepted).toBe(true);
+ expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actor])).rows[0].n).toBe(before+(mode==='race'?1:0));
+});

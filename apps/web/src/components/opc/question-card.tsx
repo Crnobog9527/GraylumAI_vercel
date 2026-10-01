@@ -32,7 +32,7 @@ export function QuestionCardView({
   answer?: string | null;
   /** Temporarily not sendable, for example while another reply is running. */
   disabled?: boolean;
-  onAnswer?: (input: string) => void;
+  onAnswer?: (input: string, optionIndex: number) => void;
   /** Called by the fixed "其他" entry; the page focuses its message box. */
   onOther?: () => void;
 }) {
@@ -73,7 +73,7 @@ export function QuestionCardView({
               variant="outline"
               className={styles.option}
               disabled={disabled}
-              onClick={() => onAnswer?.(option)}
+              onClick={() => onAnswer?.(option, index)}
             >
               {option}
               {recommended(index)}

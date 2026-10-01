@@ -6,7 +6,7 @@
 
 目标：新导师开场和回答使用 `agent-turn-v5-stream`，模型输出自然语言、通过 `ask_question` 提问，由宿主构造可持久化信封，消除旧协议依赖模型手写 JSON 的问题。
 
-风险：**high**。涉及准入、提示词、供应商请求字节、冻结重放及付费结果持久化。BILL2 的运行单、预扣公式、回执和最终结算机制沿用。本轮涉及卡片展示；不改依赖、环境配置或生产。本增量无迁移；来源原子校验另作后续增量。
+风险：**high**。涉及准入、提示词、供应商请求字节、冻结重放及付费结果持久化。BILL2 的运行单、预扣公式、回执和最终结算机制沿用。本轮涉及卡片展示；不改依赖、环境配置或生产。来源原子校验使用 0156 迁移，只替换现有 runtime_admit/runtime_view，不新建表或 RPC；不应用远程迁移。
 
 ## 当前实现增量：五字段契约、唯一正文和缓冲
 
@@ -39,8 +39,23 @@ fullModelReply；前者是可展示正文或完整合法卡确认时刻，不把
 organizerInput 和本轮主回复，原 Session 写入持久化照旧。旧冻结非零历史继续原字节
 重放，独立 organizer 仍按后台配置读取历史，时间/费用预算和调用次数不变。
 
-后续待审增量：原 execution 来源原子校验、organizerInput 显式回答卡片、完整浏览器覆盖、
-B1 脚手架清理。**本增量不是 #561 的冻结 head。**
+回答请求携带 answerSource.executionId，点选另携带零起始 optionIndex，自由输入不带索引。
+原始请求全文保持在 payload.request 中参与幂等比较；实际导师输入和材料中的点选文字
+由服务器读取保存卡片派生，不信任客户端传来的选项文字。organizerInput 显式包含
+answeredCard 的 question/options/selectedOption/selectedIndex/recommended，不用历史猜测。
+
+0156 在现有 runtime_admit 的 Session 行锁内，仅对新准入校验同 owner、Session、draft、
+round、step、question、已完成可读有效卡及整个 Session 最新 execution；先校验再预扣。
+冻结卡片与持久化卡片原子比对；旧缺 recommended 卡规范化为 null。既有请求先返回原结果，
+不重新检查来源是否仍是最新；runtime_view 保留 answerSource，刷新不丢请求身份。
+只读 runtime_view 已足够取卡，缺口仅是最终原子绑定，故不新增读卡接口或存储。
+
+总控可选 P3 保持不改：v2 卡和 message 均非法时仍用固定提示，即使另有 assistant 正文。
+直接改为 toolMessage ?? text 会改变已冻结 v2 的降级/检查点语义；不为罕见违约输出
+再增一个协议版本。有效工具 message 的 P2 保留正文规则不变。
+
+后续：完整浏览器覆盖与最终冻结说明。B1 一次性入口/fixture/protocol 已在此前恢复实施时
+移除，本分支无这些可执行文件；历史章节仅保留审计证据。**本增量不是 #561 的冻结 head。**
 
 ## 当前实现增量：工具参数容量（五字段前置）
 

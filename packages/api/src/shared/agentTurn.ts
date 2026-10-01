@@ -33,6 +33,11 @@ export const ASK_QUESTION_ARGUMENT_LIMIT = 49152;
 export const DEFAULT_TOOL_ARGUMENT_LIMIT = 4000;
 export const toolArgumentLimit = (name: string): number =>
   name === ASK_QUESTION_TOOL ? ASK_QUESTION_ARGUMENT_LIMIT : DEFAULT_TOOL_ARGUMENT_LIMIT;
+/** Correlates an answer with the saved card; option indexes are zero based. */
+export const questionAnswerSourceSchema = z.object({
+  executionId: z.string().uuid(), optionIndex: z.number().int().min(0).max(4).optional(),
+}).strict();
+export type QuestionAnswerSource = z.infer<typeof questionAnswerSourceSchema>;
 /** Display limit for envelope, tool message and plain-text messages. */
 export const AGENT_TURN_MESSAGE_LIMIT = 20000;
 export const QUESTION_MAX_CHARS = 500;

@@ -375,6 +375,7 @@ try {
   if(opcSchema&&!upgradeMode){apply('packages/db/migrations/0138_runtime_stopped_pending.sql');apply('packages/db/migrations/0138_runtime_stopped_pending.sql');}
   if(opcSchema&&!upgradeMode){apply('packages/db/migrations/0139_opc_business_context.sql');apply('packages/db/migrations/0139_opc_business_context.sql');}
   }
+  if(opcSchema&&!upgradeMode&&!schemaFromFiles){apply('packages/db/migrations/0156_runtime_answer_source.sql');apply('packages/db/migrations/0156_runtime_answer_source.sql');}
   console.log("SQL additive migration and repeat application PASS; runtime schema="+runtimeSchema+"; deferred upgrade="+upgradeMode);
   docker(
     "run",

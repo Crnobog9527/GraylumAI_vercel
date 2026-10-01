@@ -1,4 +1,5 @@
 "use client";
+import { readAgentTurnBody } from "@repo/api/src/shared/agentTurn";
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -19,7 +20,7 @@ import { focusReply, liveReplyAfter, livePhaseNotice, mentorReplyDisplay, questi
 import { OTHER_PLACEHOLDER, QuestionCardView } from "@/components/opc/question-card";
 import type { AgentTurnEvent, AgentTurnOutcome } from "@repo/api/src/shared/agentTurn";
 import { openingRequest, parseStepEnvelope, readAgentTurn, retainExecution, settleEnvelope, turnResultNotice } from "./mentor-turn";
-import type { MentorRequest, MentorStepEnvelope } from "./mentor-turn";
+import type { MentorRequest, MentorStepEnvelope, MentorTurn, MentorExecution } from "./mentor-turn";
 import {
   confirmationActionIsRedundant,
   confirmQuestionValues,
@@ -965,7 +966,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if (interrupted)
       await execute.mutateAsync({ executionId: interrupted.executionId });
   }
-  async function ask(step: Step, questionId: string, inputOverride?: string) {
+  async function ask(step: Step, questionId: string, inputOverride?: string, answerSource?: MentorRequest["answerSource"]) {
     if(mentorSendInFlight.current)return;
     const key = "opc-step:" + draftId + ":" + step.id;
     if (sessionStorage.getItem(key)) {
@@ -976,7 +977,12 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     }
     if(running||openingInFlight.current.size||history.data?.activeExecution)return;
     const input=(inputOverride??mentorInput).trim();if(!input)return;
-    const fixed:StepEnvelope={request:{draftId,stepId:step.id,purpose:'mentor',requestId:crypto.randomUUID(),input,questionId,organizeAfter:true}};
+    const latest = mentorExecutions.at(-1), sourceTurn = latest && mentorTurns.get(latest.executionId);
+    if (!answerSource && latest?.state === "completed" && sourceTurn && sourceTurn.roundId === d.roundId &&
+      sourceTurn.stepId === step.id && sourceTurn.questionId === questionId && readAgentTurnBody(latest.body).card)
+      answerSource = { executionId: latest.executionId };
+    const fixed:StepEnvelope={request:{...(answerSource ? {answerSource} : {}),draftId,stepId:step.id,
+      purpose:'mentor',requestId:crypto.randomUUID(),input,questionId,organizeAfter:true}};
     // Freeze identity synchronously before any preparation/network await.
     sessionStorage.setItem(key,JSON.stringify(fixed));
     mentorSendInFlight.current=true;
@@ -1669,17 +1675,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const selectedStep =
     steps.find((step) => step.id === activeStep) ??
     steps[Math.max(0, firstPending)];
-  type MentorTurn = { executionId: string; roundId?: string | null; stepId: string; questionId: string | null; kind: string };
-  type MentorExecution = {
-    request?: MentorRequest | null;
-    unavailableReason?: string | null;
-    executionId: string;
-    input: string | null;
-    body: string | null;
-    primaryBody: string | null;
-    summary: string | null;
-    state: string;
-  };
   const mentorTurns = new Map<string, MentorTurn>(
     ((d.turns ?? []) as MentorTurn[])
       .filter((turn) => turn.kind === "mentor" || turn.kind === "organizer" || turn.kind === "opening")
@@ -1947,7 +1942,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                             <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>{reply.text}</p>
                           </div>}
                           {reply.card && <QuestionCardView card={reply.card} answered={cardStatus.answered} answer={cardStatus.answer}
-                            disabled={cardLocked} onAnswer={input => { void ask(step, activeQuestion.id, input); }} onOther={focusReply}/>}
+                            disabled={cardLocked} onAnswer={(input, optionIndex) => {
+                              void ask(step, activeQuestion.id, input, {executionId: execution.executionId, optionIndex});
+                            }} onOther={focusReply}/>}
                           {parsed.message && execution.unavailableReason === 'output_truncated' && <p role="status">本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。</p>}
                           {execution.state === "completed" && target && latestSuggestion.get(target.id) === execution.executionId && proposed.length > 0 && (
                             <div className={resultStyles.suggestionCard}>

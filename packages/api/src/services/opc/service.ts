@@ -11,6 +11,8 @@ import { agentTurnInstructions, OPENING_EXTRACTION_RULE } from "./agentTurnPromp
 import { elicitFieldSpecs } from "../../shared/opcMethodPolicy";
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
 export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
+import { opcGenerate, resolveAnswerCard, organizerAnswerCard } from "./answerCard";
+export { opcGenerate } from "./answerCard";
 const uuid = z.string().uuid();
 export const opcStart = z
   .object({
@@ -19,17 +21,6 @@ export const opcStart = z
     mode: z.enum(["mentor", "manual"]),
     businessId: uuid.nullable().optional(),
     businessName: z.string().trim().min(1).max(120).optional(),
-  })
-  .strict();
-export const opcGenerate = z
-  .object({
-    draftId: uuid,
-    requestId: uuid,
-    purpose: z.enum(["step", "mentor", "plan"]).default("step"),
-    organizeAfter: z.boolean().default(false),
-    stepId: z.string().min(1).max(64),
-    input: z.string().trim().min(1).max(8000),
-    questionId: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/).optional(),
   })
   .strict();
 export const opcSaveResult = z
@@ -155,6 +146,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         organizeAfter: v.organizeAfter,
         requestId: v.requestId,
         input: v.input,
+        ...(v.answerSource ? { answerSource: v.answerSource } : {}),
         selection: {
           kind: "skill" as const,
           moduleId: resolved.data.moduleId,
@@ -180,10 +172,16 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         // This reuses existing material; a different host is a definite conflict.
         await rpc("opc_step_material", {
           p_draft_id: v.draftId, p_request_id: v.requestId,
-          p_step_id: v.stepId, p_purpose: v.purpose, p_input: v.input,
+          p_step_id: v.stepId, p_purpose: v.purpose, p_input: v.answerSource
+            ? (await rpc("runtime_view", {p_session_id:d.sessionId})).executions
+                .find((e: {executionId:string}) => e.executionId === replay.data.executionId)?.input : v.input,
         });
         return replay.data;
       }
+      const answeredCard = v.answerSource
+        ? resolveAnswerCard(await rpc("runtime_view", { p_session_id: d.sessionId }), v) : undefined;
+      if (answeredCard && (v.purpose !== "mentor" || opening)) throw new Error("OPC_ANSWER_SOURCE_DENIED");
+      if (answeredCard?.optionIndex !== undefined) v.input = answeredCard.card.options[answeredCard.optionIndex]!;
       // A host-authored opening that does not freeze the question it is opening
       // is malformed for a NEW admission: refuse it here, before any material,
       // turn, runtime, billing or reservation state exists, instead of letting
@@ -226,6 +224,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       const organizerInput = organizerInstructions
         ? JSON.stringify({
             userInput: v.input,
+            ...organizerAnswerCard(answeredCard),
             originalStepId: v.stepId,
             currentQuestion: question ? { id: question.id, title: question.title, fields: fieldSpecs } : null,
             allowedWorkflow: workflowContext,
@@ -261,6 +260,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         ...(organizerInstructions ? { organizerInstructions, organizerInput } : {}),
         expectedMaterialRevision: material.revision,
         opcTurnToken: material.turnToken,
+        ...(answeredCard ? { answeredCard, resolvedInput: v.input } : {}),
         mentorStream: v.purpose === "mentor",
         skillResources:
           v.purpose === "plan" && resolved.data.workflow.planResources
