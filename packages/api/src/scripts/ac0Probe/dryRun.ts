@@ -37,7 +37,7 @@ export function toolDeltas(name: string, args: unknown, id = 'call_dry_run'): De
 export function syntheticUpstream(referencePaths: readonly string[]): Upstream {
   return async (_url, init) => {
     const body = JSON.parse(String(init.body)) as {
-      model: string; tools?: Array<{function: {name: string}}>; messages: Array<{role: string}>;
+      model: string; tools?: Array<{function: {name: string; parameters?: {required?: string[]}}}>; messages: Array<{role: string}>;
     };
     const names = (body.tools ?? []).map(tool => tool.function.name);
     const toolResult = body.messages.some(message => message.role === 'tool');
@@ -47,7 +47,10 @@ export function syntheticUpstream(referencePaths: readonly string[]): Upstream {
     }
     if (names.includes('ask_question')) {
       const deltas = [...textDeltas('Dry run, no request was sent. '),
-        ...toolDeltas('ask_question', {question: 'Dry run question?', options: ['Option A', 'Option B']}, callId)];
+        ...toolDeltas('ask_question', {question: 'Dry run question?', options: ['Option A', 'Option B'],
+          // The v5 card schema requires the recommended field (null: a neutral card).
+          ...(body.tools!.find(tool => tool.function.name === 'ask_question')!.function.parameters?.required
+            ?.includes('recommended') ? {recommended: null} : {})}, callId)];
       return sseResponse(body.model, deltas, {finish: 'tool_calls'});
     }
     return sseResponse(body.model, textDeltas('Dry run reply. No network request was sent for this trial.'));

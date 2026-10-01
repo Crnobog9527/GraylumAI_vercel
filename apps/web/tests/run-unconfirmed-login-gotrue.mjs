@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Local only: starts a disposable Postgres + GoTrue (staging's version) + mail catcher, runs
-// src/lib/authFlow.gotrue.test.ts against them, then removes everything.
+// src/lib/authFlow.gotrue.test.ts, src/lib/authLanding.gotrue.test.ts and src/lib/passwordRecovery.gotrue.test.ts
+// against them, then removes everything.
 // Usage: node apps/web/tests/run-unconfirmed-login-gotrue.mjs --local-only
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -22,6 +23,8 @@ if (!endpoint.startsWith('unix:///')) throw new Error('Local Docker only');
 
 const tag = `graylum-unconfirmed-${randomUUID().slice(0, 8)}`;
 const db = `${tag}-db`, mail = `${tag}-mail`, auth = `${tag}-auth`;
+// Disposable: the password reset test signs a service_role token with it to ban a local test user.
+const jwtSecret = `${randomUUID()}${randomUUID()}`;
 const waitFor = async probe => {
   for (let i = 0; i < 150; i += 1) {
     try { if (await probe()) return; } catch {}
@@ -45,7 +48,7 @@ try {
     '-e', `DATABASE_URL=postgres://supabase_auth_admin@${db}:5432/auth?sslmode=disable`,
     '-e', 'GOTRUE_SITE_URL=http://127.0.0.1:3000', '-e', 'API_EXTERNAL_URL=http://127.0.0.1:9999',
     '-e', 'GOTRUE_URI_ALLOW_LIST=http://127.0.0.1:3000/**',
-    '-e', `GOTRUE_JWT_SECRET=${randomUUID()}${randomUUID()}`, '-e', 'GOTRUE_JWT_AUD=authenticated',
+    '-e', `GOTRUE_JWT_SECRET=${jwtSecret}`, '-e', 'GOTRUE_JWT_AUD=authenticated',
     '-e', 'GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated', '-e', 'GOTRUE_JWT_ADMIN_ROLES=service_role',
     '-e', 'GOTRUE_EXTERNAL_EMAIL_ENABLED=true', '-e', 'GOTRUE_MAILER_AUTOCONFIRM=false',
     '-e', 'GOTRUE_DISABLE_SIGNUP=false', '-e', 'GOTRUE_MAILER_OTP_EXP=2',
@@ -57,12 +60,14 @@ try {
   const mailUrl = `http://127.0.0.1:${port(mail, '8025')}`;
   await waitFor(async () => (await fetch(`${authUrl}/health`)).ok);
   await waitFor(async () => (await fetch(`${mailUrl}/api/v1/info`)).ok);
-  execFileSync('pnpm', ['exec', 'vitest', 'run', 'src/lib/authFlow.gotrue.test.ts'], {
+  const files = ['src/lib/authFlow.gotrue.test.ts', 'src/lib/authLanding.gotrue.test.ts', 'src/lib/passwordRecovery.gotrue.test.ts'];
+  execFileSync('pnpm', ['exec', 'vitest', 'run', ...files], {
     cwd: web, stdio: 'inherit',
     env: { PATH: process.env.PATH, HOME: process.env.HOME,
-      UNCONFIRMED_LOGIN_GOTRUE_URL: authUrl, UNCONFIRMED_LOGIN_MAIL_URL: mailUrl },
+      UNCONFIRMED_LOGIN_GOTRUE_URL: authUrl, UNCONFIRMED_LOGIN_MAIL_URL: mailUrl,
+      UNCONFIRMED_LOGIN_GOTRUE_JWT_SECRET: jwtSecret },
   });
-  console.log('PASS unconfirmed sign-in against local GoTrue v2.197.0');
+  console.log('PASS unconfirmed sign-in and password reset against local GoTrue v2.197.0');
 } catch (error) {
   console.error('FAIL unconfirmed sign-in diagnostic:', error.message);
   process.exitCode = 1;

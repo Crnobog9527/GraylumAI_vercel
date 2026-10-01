@@ -60,6 +60,9 @@ INSERT INTO public.membership_plans (
   id,
   name,
   level,
+  allow_fusion_review,
+  allow_fusion_compare,
+  library_storage_bytes,
   monthly_price,
   yearly_price,
   stripe_monthly_price_id,
@@ -82,6 +85,7 @@ VALUES
     '10000000-0000-4000-8000-000000000001',
     'Free',
     'free',
+    false, false, 50000000,
     0,
     0,
     NULL,
@@ -103,6 +107,7 @@ VALUES
     '10000000-0000-4000-8000-000000000002',
     'Pro',
     'pro',
+    true, true, 500000000,
     990,
     9900,
     NULL,
@@ -124,6 +129,7 @@ VALUES
     '10000000-0000-4000-8000-000000000003',
     'Gold',
     'gold',
+    true, true, 2000000000,
     2990,
     29900,
     NULL,
@@ -141,7 +147,8 @@ VALUES
     30,
     NOW()
   )
-ON CONFLICT (id) DO UPDATE
+-- Preserve the existing plan identity and administrator entitlement edits on replay.
+ON CONFLICT (level) DO UPDATE
 SET
   name = EXCLUDED.name,
   level = EXCLUDED.level,

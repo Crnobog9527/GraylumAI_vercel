@@ -18,7 +18,7 @@ import {
 import { readWorkflowMentorExecution } from "./mentor-response";
 
 const fields = { audience: { schema: [{ id: "who" }] } };
-const card = { question: "你的内容主要写给谁？", options: ["刚入行的新人", "有经验的同行"] };
+const card = { question: "你的内容主要写给谁？", options: ["刚入行的新人", "有经验的同行"], recommended: 0 };
 
 function source(body: string | null, extra: Partial<MentorReplySource> = {}): MentorReplySource {
   const parsed = readWorkflowMentorExecution(body, null, "audience", fields);
@@ -139,7 +139,7 @@ describe("mentorReplyDisplay: live stream", () => {
   });
 
   it("the saved card wins over a streamed one", () => {
-    const other = { question: "另一个问题？", options: ["甲", "乙"] };
+    const other = { question: "另一个问题？", options: ["甲", "乙"], recommended: null };
     expect(mentorReplyDisplay(source(agentTurnBody("正文", card), { liveCard: other })).card).toEqual(card);
   });
 });

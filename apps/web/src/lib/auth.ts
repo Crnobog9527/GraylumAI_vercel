@@ -40,10 +40,44 @@ export function isEmailVerified(user: User | null | undefined): boolean {
   });
 }
 
-export function sanitizeRedirectTarget(redirect: string | null | undefined) {
-  if (!redirect || !isSafeRelativePath(redirect)) {
-    return '/profile';
+const DEFAULT_REDIRECT_TARGET = '/profile';
+
+// Parameters GoTrue adds to the page it sends an email or OAuth link back to. They belong to that
+// one landing, never to where the visitor should end up, so they are dropped from redirect targets.
+const AUTH_LANDING_PARAMS = ['code', 'error', 'error_code', 'error_description'];
+
+function stripAuthParams(params: string) {
+  const search = new URLSearchParams(params);
+  if (!AUTH_LANDING_PARAMS.some(name => search.has(name))) {
+    return { value: params, stripped: false };
+  }
+  AUTH_LANDING_PARAMS.forEach(name => search.delete(name));
+  return { value: search.toString(), stripped: true };
+}
+
+// Works on the string instead of re-serializing a parsed URL, which could turn a path such as
+// /.//evil.example into the protocol-relative //evil.example. The result is checked again.
+function stripAuthLandingParams(target: string) {
+  const hashIndex = target.indexOf('#');
+  const beforeHash = hashIndex >= 0 ? target.slice(0, hashIndex) : target;
+  const queryIndex = beforeHash.indexOf('?');
+  const path = queryIndex >= 0 ? beforeHash.slice(0, queryIndex) : beforeHash;
+  const query = stripAuthParams(queryIndex >= 0 ? beforeHash.slice(queryIndex + 1) : '');
+  const hash = stripAuthParams(hashIndex >= 0 ? target.slice(hashIndex + 1) : '');
+  if (!query.stripped && !hash.stripped) {
+    return target;
   }
 
-  return redirect;
+  const rebuilt = `${path}${query.value ? `?${query.value}` : ''}${hash.value ? `#${hash.value}` : ''}`;
+  // A bare root was only GoTrue's fallback landing, not a page the visitor asked for.
+  return rebuilt === '/' ? DEFAULT_REDIRECT_TARGET : rebuilt;
+}
+
+export function sanitizeRedirectTarget(redirect: string | null | undefined) {
+  if (!redirect || !isSafeRelativePath(redirect)) {
+    return DEFAULT_REDIRECT_TARGET;
+  }
+
+  const target = stripAuthLandingParams(redirect);
+  return isSafeRelativePath(target) ? target : DEFAULT_REDIRECT_TARGET;
 }

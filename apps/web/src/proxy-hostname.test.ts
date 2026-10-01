@@ -2,19 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { unstable_doesMiddlewareMatch } from 'next/experimental/testing/server';
 import {
   config,
-  isAppDomain,
   isDevEnvironment,
   isLocalhost,
   isPublicSiteDomain,
   isPreviewDeployment,
   normalizeHostname,
+  requiresAppAuth,
 } from './proxy';
 
 describe('proxy hostname classification', () => {
   const cases = [
     {
       hostname: 'app.graylum.com',
-      app: true,
+      appAuth: true,
       localhost: false,
       dev: false,
       preview: false,
@@ -22,15 +22,15 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'www.graylum.com',
-      app: false,
+      appAuth: false,
       localhost: false,
       dev: false,
       preview: false,
       publicSite: true,
     },
     {
-      hostname: 'graylumai-staging.vercel.app',
-      app: false,
+      hostname: 'example-preview.vercel.app',
+      appAuth: true,
       localhost: false,
       dev: false,
       preview: true,
@@ -38,7 +38,7 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'app.evil.com',
-      app: false,
+      appAuth: true,
       localhost: false,
       dev: false,
       preview: false,
@@ -46,7 +46,7 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'localhost',
-      app: false,
+      appAuth: false,
       localhost: true,
       dev: true,
       preview: false,
@@ -54,7 +54,7 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: '127.0.0.1',
-      app: false,
+      appAuth: false,
       localhost: true,
       dev: true,
       preview: false,
@@ -62,7 +62,7 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'localhost.evil.com',
-      app: false,
+      appAuth: true,
       localhost: false,
       dev: false,
       preview: false,
@@ -70,7 +70,7 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'my-localhost.com',
-      app: false,
+      appAuth: true,
       localhost: false,
       dev: false,
       preview: false,
@@ -78,7 +78,7 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'foo.github.dev',
-      app: false,
+      appAuth: false,
       localhost: false,
       dev: true,
       preview: false,
@@ -86,7 +86,7 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'github.dev.evil.com',
-      app: false,
+      appAuth: true,
       localhost: false,
       dev: false,
       preview: false,
@@ -94,7 +94,7 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'app.graylum.com.',
-      app: true,
+      appAuth: true,
       localhost: false,
       dev: false,
       preview: false,
@@ -102,7 +102,7 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'www.graylum.com.',
-      app: false,
+      appAuth: false,
       localhost: false,
       dev: false,
       preview: false,
@@ -110,7 +110,7 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'localhost.',
-      app: false,
+      appAuth: false,
       localhost: true,
       dev: true,
       preview: false,
@@ -118,7 +118,7 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'app.graylum.com',
-      app: true,
+      appAuth: true,
       localhost: false,
       dev: false,
       preview: false,
@@ -126,7 +126,7 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'app.evil.com',
-      app: false,
+      appAuth: true,
       localhost: false,
       dev: false,
       preview: false,
@@ -134,7 +134,7 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'www.evil.com',
-      app: false,
+      appAuth: true,
       localhost: false,
       dev: false,
       preview: false,
@@ -142,7 +142,7 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'www.graylum.com',
-      app: false,
+      appAuth: false,
       localhost: false,
       dev: false,
       preview: false,
@@ -150,7 +150,7 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'graylum.com',
-      app: false,
+      appAuth: false,
       localhost: false,
       dev: false,
       preview: false,
@@ -158,7 +158,7 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'localhost.evil.com',
-      app: false,
+      appAuth: true,
       localhost: false,
       dev: false,
       preview: false,
@@ -166,7 +166,31 @@ describe('proxy hostname classification', () => {
     },
     {
       hostname: 'github.dev.evil.com',
-      app: false,
+      appAuth: true,
+      localhost: false,
+      dev: false,
+      preview: false,
+      publicSite: false,
+    },
+    {
+      hostname: 'auth-staging.graylum.com',
+      appAuth: true,
+      localhost: false,
+      dev: false,
+      preview: false,
+      publicSite: false,
+    },
+    {
+      hostname: 'evilgraylum.com',
+      appAuth: true,
+      localhost: false,
+      dev: false,
+      preview: false,
+      publicSite: false,
+    },
+    {
+      hostname: 'shop.www.graylum.com',
+      appAuth: true,
       localhost: false,
       dev: false,
       preview: false,
@@ -176,7 +200,7 @@ describe('proxy hostname classification', () => {
 
   it.each(cases)('$hostname has the expected classification', ({
     hostname,
-    app,
+    appAuth,
     localhost,
     dev,
     preview,
@@ -184,7 +208,7 @@ describe('proxy hostname classification', () => {
   }) => {
     const normalizedHostname = normalizeHostname(hostname);
 
-    expect(isAppDomain(normalizedHostname)).toBe(app);
+    expect(requiresAppAuth(normalizedHostname)).toBe(appAuth);
     expect(isLocalhost(normalizedHostname)).toBe(localhost);
     expect(isDevEnvironment(normalizedHostname)).toBe(dev);
     expect(isPreviewDeployment(normalizedHostname)).toBe(preview);

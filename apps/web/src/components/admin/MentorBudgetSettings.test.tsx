@@ -42,7 +42,7 @@ describe('MentorBudgetPanel', () => {
     expect(markup).not.toContain('mentor-budget-legacy');
     expect(markup).toContain('系统上限 90000 字节');
     expect(markup).toContain('系统上限 112000 字节');
-    expect(markup).toContain('系统上限 3584 token');
+    expect(markup).toContain('系统上限 8192 token');
     expect(markup).toContain('系统上限 1000 条');
     expect(markup).not.toContain('mentor-budget-organize-maxOutputTokens');
     expect(markup).toContain('2048 token');
