@@ -14,6 +14,7 @@ import {
  */
 export const PROVIDER_PRICES_KEY = 'billing_provider_prices';
 export const MAX_PROVIDER_PRICE_ENTRIES = 64;
+export const MAX_FX_VALIDITY_MS = 31 * 24 * 60 * 60 * 1000;
 
 const SCALE = 1_000_000_000_000n;
 const DECIMAL = /^(0|[1-9][0-9]{0,11})(\.[0-9]{1,12})?$/;
@@ -58,8 +59,12 @@ const entrySchema = z.object({
   if (entry.currency === 'USD' ? fx.some((v) => v !== null) : fx.some((v) => v === null)) {
     ctx.addIssue({ code: 'custom', path: ['usdPerCurrency'], message: 'USD needs no rate; other currencies need rate, source, effective date and expiry' });
   }
-  if (entry.fxEffectiveAt !== null && entry.fxValidUntil !== null && Date.parse(entry.fxValidUntil) <= Date.parse(entry.fxEffectiveAt)) {
-    ctx.addIssue({ code: 'custom', path: ['fxValidUntil'], message: 'must be after fxEffectiveAt' });
+  if (entry.fxEffectiveAt !== null && entry.fxValidUntil !== null) {
+    const span = Date.parse(entry.fxValidUntil) - Date.parse(entry.fxEffectiveAt);
+    // Controller decision: an exchange rate is valid for at most 31 days, then must be re-evidenced.
+    if (span <= 0 || span > MAX_FX_VALIDITY_MS) {
+      ctx.addIssue({ code: 'custom', path: ['fxValidUntil'], message: 'must be after fxEffectiveAt and at most 31 days later' });
+    }
   }
   if (entry.route !== null && entry.appliesToUnlistedRoutes) {
     ctx.addIssue({ code: 'custom', path: ['appliesToUnlistedRoutes'], message: 'only provider-wide entries may cover unlisted routes' });

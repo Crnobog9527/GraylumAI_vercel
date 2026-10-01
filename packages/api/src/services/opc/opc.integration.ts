@@ -2552,7 +2552,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       expect(await page.getByText('完成定位并采用选题后，账号工作会出现在这里。').count()).toBe(0);
       await page.getByRole('alert').filter({hasText:'账号未获准'}).first().waitFor();
       await capture('staging-actor-denied');
-      const policy={modelId:randomUUID(),provider:'openrouter',account:'synthetic',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:8000,outputLimit:100,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
+      const policy={multiplier:'1',modelId:randomUUID(),provider:'openrouter',account:'synthetic',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:8000,outputLimit:100,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
       await sql.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '1 hour')",[windowId,[f.actor],JSON.stringify([policy])]);
       await page.goto(process.env.V3_LOCAL_APP+'/');await page.getByRole('heading',{name:'六个环节，理解你的内容增长路径'}).waitFor();
       await capture('staging-allowed-directory');
@@ -2587,7 +2587,9 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       key = "LOCAL_STAGING_" + randomUUID(),
       windowId = process.env.V3_RUNTIME_STAGING_WINDOW_ID!;
     expect(windowId).toMatch(/^[a-f0-9-]{36}$/);
+    // BILL-UNIT window: the entry's m_i equals the model's configured multiplier (set to 1 below).
     const callPolicy = {
+      multiplier: "1",
       modelId,
       provider: "openrouter",
       account:
@@ -2616,6 +2618,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       modelId,
       f.moduleId,
     ]);
+    await sql.query("update ai_models set price_multiplier=1 where id=$1", [modelId]);
     await sql.query(
       "insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",
       [windowId, [f.actor], JSON.stringify([callPolicy])],

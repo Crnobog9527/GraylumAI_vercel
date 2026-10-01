@@ -516,9 +516,10 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RU
  await db.query('insert into profiles(id,credits) values($1,1000) on conflict(id) do update set credits=1000',[actor]);
  const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
  const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
- await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Synthetic quote','test/admission','openai','true',1000,$2)",[model,contextTokens]);
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit,price_multiplier) values($1,'Synthetic quote','test/admission','openai','true',1000,$2,1)",[model,contextTokens]);
  const upperUsd=contextTokens===1050000?'0.4218':'0.02',outputLimit=contextTokens===1050000?1000:100;
- const call={modelId:model,provider:'openrouter',account:'synthetic-account',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd,inputLimit:8000,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens,promptUsdPerMillion:contextTokens===1050000?'0.4':'2',completionUsdPerMillion:contextTokens===1050000?'1.8':'0',requestUsd:'0'}};
+ // BILL-UNIT window: each entry carries the model's m_i, equal to the configuration (price_multiplier=1).
+ const call={multiplier:'1',modelId:model,provider:'openrouter',account:'synthetic-account',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd,inputLimit:8000,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens,promptUsdPerMillion:contextTokens===1050000?'0.4':'2',completionUsdPerMillion:contextTokens===1050000?'1.8':'0',requestUsd:'0'}};
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.9,1,now()+interval '2 hours')",[windowId,[actor],JSON.stringify([call])]);
  const env={V3_RUNTIME_STAGING_ENABLED:'true',VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'graylumai-staging.vercel.app',VERCEL_GIT_COMMIT_REF:'staging',VERCEL_GIT_REPO_OWNER:'Crnobog9527',VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',V3_RUNTIME_STAGING_PROJECT_ID:'synthetic-project',VERCEL_PROJECT_ID:'synthetic-project',NEXT_PUBLIC_SUPABASE_URL:'https://synthetic.supabase.co',V3_RUNTIME_STAGING_DATABASE_HOST:'synthetic.supabase.co',V3_RUNTIME_STAGING_WINDOW_ID:windowId};
  const real=await loadStagingPolicy(admin,actor,env);
@@ -529,6 +530,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RU
  const e=await admission.prepare(request);expect(await admission.prepare(request)).toEqual(e);
  const saved=(await db.query('select payload,reserved from bill2_runs where id=$1',[e.runId])).rows[0];
  expect(saved.reserved).toBe(contextTokens===1050000?422:20);expect(saved.payload).toMatchObject({mode:'staging_test',testWindowId:windowId,callPolicy:[call],rules:{creditsPerUsd:'1000',multiplier:'1'}});
+ expect(saved.payload.rules.billingUnit).toMatchObject({version:'bill-unit-v2',creditsPerUsd:'1000',models:{[model]:{multiplier:'1',source:'model'}}});
  // Actual protected router + real Auth/PostgREST: switching only the host
  // enablement off must preserve reads and cancel a definitely unsent request.
  const caller=runtimeRouter.createCaller(await createTRPCContext({headers:new Headers(),supabaseAuth:user}));

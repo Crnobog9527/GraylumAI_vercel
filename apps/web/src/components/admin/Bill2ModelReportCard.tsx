@@ -21,7 +21,8 @@ export function Bill2ModelReportCard() {
       <CardTitle>按模型的新计费成本（BILL2）</CardTitle>
       <CardDescription>
         官方成本来自每次调用记录的真实费用；"计价金额"= 成本 × 该次调用冻结的倍数，是名义值，不是现金收入。
-        实扣积分只在整个运行单都在本时间段内、且只用了一个模型时才归到该模型，其余列为"未归属"。
+        实扣积分的归属：新计费按调用顺序把每次调用带来的累计增量归到它的模型；旧计费只有整单只用一个模型时才归属；
+        运行单不完整、费用未知或对不上时列为"未归属"。
       </CardDescription>
     </CardHeader>
     <CardContent className="space-y-3">
@@ -45,8 +46,21 @@ export function Bill2ModelReportCard() {
           </tr>)}</tbody></table>
           <p className="text-xs">合计：{data.totals.calls} 次调用 / {data.totals.runs} 个运行单；官方成本 ${data.totals.officialCostUsd}；
             计价金额 ${data.totals.weightedUsd}；实扣 {data.totals.chargedCredits} 积分，其中未归属 {data.totals.unallocatedChargedCredits}；
-            已退款运行单 {data.totals.refundedRuns} 个（不计入实扣）。</p>
-        </>}
+            已退款运行单 {data.totals.refundedRuns} 个（不计入实扣）；倍数无效的调用 {data.totals.invalidMultiplierCalls} 次（单独列出，未计入模型）；
+            平台承担：不适用（边用边扣上线后提供）。</p>
+          <GroupTable title="按用途" lines={data.byPurpose} />
+          <GroupTable title="按日期（UTC）" lines={data.byDate} /></>
+        }
     </CardContent>
   </Card>;
+}
+
+function GroupTable({ title, lines }: { title: string; lines: Array<{ key: string; calls: number; officialCostUsd: string; weightedUsd: string }> }) {
+  return <table className="w-full text-sm"><thead><tr>
+    <th className="text-left">{title}</th><th className="text-right">调用</th>
+    <th className="text-right">官方成本（美元）</th><th className="text-right">计价金额（美元，名义）</th>
+  </tr></thead><tbody>{lines.map((line) => <tr key={line.key}>
+    <td>{line.key}</td><td className="text-right">{line.calls}</td>
+    <td className="text-right">{line.officialCostUsd}</td><td className="text-right">{line.weightedUsd}</td>
+  </tr>)}</tbody></table>;
 }

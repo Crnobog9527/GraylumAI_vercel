@@ -49,6 +49,7 @@ describe('provider price configuration', () => {
     ['non-USD without FX effective date', entry({ ...fx, fxEffectiveAt: null })],
     ['non-USD without FX expiry', entry({ ...fx, fxValidUntil: null })],
     ['FX expiry before effective date', entry({ ...fx, fxValidUntil: '2026-09-01T00:00:00Z' })],
+    ['FX valid for more than 31 days', entry({ ...fx, fxValidUntil: '2026-11-01T00:00:01Z' })],
     ['route entry covering unlisted routes', entry({ appliesToUnlistedRoutes: true })],
     ['provider-wide entry covering nothing', entry({ route: null, appliesToUnlistedRoutes: false })],
     ['validUntil before verifiedAt', entry({ validUntil: '2026-09-01T00:00:00Z' })],
@@ -62,6 +63,10 @@ describe('provider price configuration', () => {
     ['zero denominator', entry({ unitsPerPrice: '0' })],
   ])('rejects %s', (_label, bad) => {
     expect(() => parseProviderPrices(config(bad as ProviderPriceEntry))).toThrow('PROVIDER_PRICES_INVALID');
+  });
+
+  it('accepts an exchange rate valid for exactly 31 days', () => {
+    expect(() => parseProviderPrices(config(entry({ ...fx, fxValidUntil: '2026-11-01T00:00:00Z' })))).not.toThrow();
   });
 
   it('rejects duplicate provider/route pairs and oversized lists', () => {

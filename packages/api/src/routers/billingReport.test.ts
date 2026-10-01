@@ -29,6 +29,25 @@ describe('BILL2 model report endpoint', () => {
     expect(Date.parse(to) - Date.parse(from)).toBe(7 * 24 * 60 * 60 * 1000);
   });
 
+  it('aggregates returned rows (text numbers) into per-model, purpose and date lines', async () => {
+    const rows = [
+      { call_id: 'a', run_id: 'r', call_sequence: 1, created_at: '2026-10-01T00:00:00Z', provider: 'openrouter', model: 'v/a',
+        call_state: 'responded', selected_cost_usd: '0.002', run_state: 'settled', run_outcome: 'delivered', credits_per_usd: '100',
+        run_multiplier: '3', run_charged: 1, run_actual_restore: 0, run_call_count: 2, call_multiplier: '2', multiplier_source: 'model',
+        purpose: 'interactive' },
+      { call_id: 'b', run_id: 'r', call_sequence: 2, created_at: '2026-10-01T00:00:01Z', provider: 'openrouter', model: 'v/b',
+        call_state: 'responded', selected_cost_usd: '0.002', run_state: 'settled', run_outcome: 'delivered', credits_per_usd: '100',
+        run_multiplier: '3', run_charged: 1, run_actual_restore: 0, run_call_count: 2, call_multiplier: '3', multiplier_source: 'global',
+        purpose: 'interactive' },
+    ];
+    const f = harness('admin', { data: rows, error: null });
+    const report = await f.caller.bill2ByModel({ days: 30 });
+    expect(report).toMatchObject({ available: true, totals: { calls: 2, runs: 1, chargedCredits: 1, unallocatedChargedCredits: 0 } });
+    if (!report.available) throw new Error('unavailable');
+    expect(report.models.map((m) => [m.model, m.attributedChargedCredits])).toEqual([['v/a', 1], ['v/b', 0]]);
+    expect(report.byPurpose).toEqual([{ key: 'interactive', calls: 2, officialCostUsd: '0.004', weightedUsd: '0.01' }]);
+  });
+
   it('a missing function is reported as unavailable, never as an empty month', async () => {
     const f = harness('admin', { data: null, error: { code: 'PGRST202' } });
     expect(await f.caller.bill2ByModel({ days: 30 })).toMatchObject({ available: false });
