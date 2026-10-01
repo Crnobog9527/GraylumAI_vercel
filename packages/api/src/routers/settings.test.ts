@@ -74,6 +74,9 @@ const validCreditPackage = {
 };
 
 const validMembershipPlan = {
+  allow_fusion_review: true,
+  allow_fusion_compare: true,
+  library_storage_bytes: 500_000_000,
   id: '123e4567-e89b-42d3-a456-426614174111',
   name: 'Pro',
   level: 'pro',
@@ -90,6 +93,18 @@ const validMembershipPlan = {
 };
 
 describe('getPublicReadClient', () => {
+  it('intentionally exposes only the D3 comparison limit through the public settings allowlist', async () => {
+    const rows = [{ key: 'fusion_compare_max_models', value: 4 }, { key: 'runtime_purpose_budgets', value: 'private' }];
+    const caller = settingsRouter.createCaller({
+      supabasePublic: { from: () => ({ select: () => ({ in: (_column: string, keys: string[]) => {
+        expect(keys).toContain('fusion_compare_max_models');
+        expect(keys).not.toContain('runtime_purpose_budgets');
+        return Promise.resolve({ data: rows.filter(row => keys.includes(row.key)), error: null });
+      } }) }) },
+    } as unknown as Parameters<typeof settingsRouter.createCaller>[0]);
+    expect(await caller.getSystemSettings()).toEqual({ fusion_compare_max_models: 4 });
+  });
+
   it('uses the public client even when admin credentials are configured', () => {
     const publicClient = { role: 'public' };
     const adminClient = { role: 'admin' };

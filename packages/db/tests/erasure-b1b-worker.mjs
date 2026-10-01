@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+// Confirmation uses a synthetic prehashed identity fixture; never a real identity or key.
 // Real C background worker; all installation and markers live only in the disposable container.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -39,7 +40,8 @@ export async function backgroundWorker({ q, exec }) {
       const before = observe();
       assert.deepEqual(before, { state: null, xact_start_null: disabled, xid_null: true,
         xmin_null: true, row_candidate: disabled, has_virtual_xact: true });
-      q(`SET ROLE service_role; SELECT account_erasure_confirm('${actor}',gen_random_uuid())`);
+      q(`SET ROLE service_role; SELECT account_erasure_confirm_with_digests('${actor}',gen_random_uuid(),
+      jsonb_build_array(jsonb_build_object('kind','email','key_version','test-v1','digest',repeat('b',64))))`);
       for (const name of ['account_erasure_scrub_content', 'account_erasure_scrub_runtime']) {
         const result = JSON.parse(q(`SET ROLE service_role; SELECT ${name}('${actor}')`));
         assert.deepEqual(result, { retry: true, reason: 'transactions_pending' });

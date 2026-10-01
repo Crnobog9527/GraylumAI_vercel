@@ -151,7 +151,7 @@ function VerifyEmailPageContent() {
       type: 'signup',
       email,
       options: {
-        emailRedirectTo: buildAuthCallbackUrl(resolveAuthAppUrl(), redirectTarget),
+        emailRedirectTo: buildAuthCallbackUrl(resolveAuthAppUrl(window.location.origin), redirectTarget),
         ...captchaOptions,
       },
     });

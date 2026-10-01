@@ -6,6 +6,7 @@ import { ensureWorkspaceServerEnv } from './lib/serverEnv';
 import { logger } from './lib/logger';
 import { assertUsableUserStatus, normalizeUserStatus } from './lib/accountStatus';
 import {createRuntimeBudget,withRuntimeBudget,type RuntimeBudget} from './services/runtime/budget';
+import { openingGrantDigests } from './services/accountErasure/openingGrantIdentity';
 export {createRuntimeBudget,withRuntimeBudget};
 type ApiSupabaseClient = SupabaseClient<any, 'public', any>;
 type ApiContext = Awaited<ReturnType<typeof createTRPCContext>>;
@@ -110,8 +111,6 @@ const t = initTRPC.context<typeof createTRPCContext>().create({ errorFormatter: 
 export const router = t.router;
 export const publicProcedure = t.procedure;
 
-const OPENING_GRANT_CREDITS = 100;
-
 function getOpeningGrantIdempotencyKey(userId: string) {
   return `opening_grant:${userId}`;
 }
@@ -160,21 +159,17 @@ function isRecoverableBootstrapProfile(profile: Record<string, unknown>, normali
 }
 
 async function applyOpeningGrant(ctx: ApiContext, userId: string) {
-  const idempotencyKey = getOpeningGrantIdempotencyKey(userId);
-  const { data, error } = await ctx.supabaseAdmin.rpc('atomic_apply_credit_ledger_entry', {
-    p_user_id: userId,
-    p_amount: OPENING_GRANT_CREDITS,
-    p_type: 'addition',
-    p_description: 'Opening grant for new user profile bootstrap',
-    p_idempotency_key: idempotencyKey,
+  if (!ctx.user || ctx.user.id !== userId) throw new Error('OPENING_GRANT_IDENTITY_INVALID');
+  const { data, error } = await ctx.supabaseAdmin.rpc('opening_grant_claim', {
+    p_profile_id: userId,
+    p_digests: openingGrantDigests(ctx.user),
   });
 
   if (error) {
     throw error;
   }
 
-  const ledgerEntry = data?.[0];
-  if (!ledgerEntry) {
+  if (!data || typeof data.granted !== 'boolean') {
     throw new Error('atomic opening grant ledger RPC returned no rows');
   }
 }

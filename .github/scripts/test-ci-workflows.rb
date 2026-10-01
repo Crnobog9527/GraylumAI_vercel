@@ -127,9 +127,17 @@ class CIWorkflowsTest < Minitest::Test
     steps = @ci.fetch('jobs').fetch('build-and-e2e').fetch('steps')
     cache = steps.find { |step| step['name'] == 'Cache Next.js build state' }
     assert_equal 'apps/web/.next/cache', cache.fetch('with').fetch('path')
-    prefix = cache['with'].fetch('restore-keys').strip
-    assert_equal 1, prefix.lines.length
-    assert_equal "#{prefix}${{ github.sha }}", cache['with'].fetch('key')
+    assert_includes cache.fetch('uses'), 'actions/cache/restore@'
+    prefix = cache['with'].fetch('key')
+    assert prefix.start_with?('secretless-next-v2-')
+    refute cache['with'].key?('restore-keys')
+    refute_includes prefix, 'github.sha'
+    save = steps.find { |step| step['name'] == 'Save bounded Next.js build state' }
+    assert_includes save.fetch('uses'), 'actions/cache/save@'
+    assert_equal 'apps/web/.next/cache', save.fetch('with').fetch('path')
+    assert_equal "${{ steps.next-cache.outputs.cache-primary-key }}", save['with'].fetch('key')
+    assert_equal "steps.next-cache-size.outputs.save == 'true'", save.fetch('if')
+    assert_operator steps.index(save), :>, steps.index { |step| step['name'] == 'Run transitional secretless Security E2E' }
     %w[runner.os runner.arch steps.build-node.outputs.node-version steps.cache-scope.outputs.workflow steps.cache-scope.outputs.ref].each do |scope|
       assert_includes prefix, "${{ #{scope} }}"
     end
@@ -165,6 +173,45 @@ class CIWorkflowsTest < Minitest::Test
       malicious = run_scope.call('refs/heads/$(touch injected); branch')
       assert_match(/\A[0-9a-f]{64}\z/, malicious['ref'])
       refute File.exist?("#{dir}/injected")
+    end
+  end
+
+  def test_store_cache_never_replaces_frozen_install
+    %w[lint-and-type test build-and-e2e integration].each do |id|
+      steps = @ci.fetch('jobs').fetch(id).fetch('steps')
+      pnpm = steps.index { |step| step['name'] == 'Setup pnpm' }
+      node = steps.index { |step| step['name'] == 'Setup Node.js' }
+      install = steps.index { |step| step['run'] == 'pnpm install --frozen-lockfile' }
+      assert_operator pnpm, :<, node
+      assert_operator node, :<, install
+      assert_equal 'pnpm', steps[node].fetch('with').fetch('cache')
+      refute steps[install].key?('if')
+    end
+    steps = @security.fetch('jobs').fetch('audit').fetch('steps')
+    refute steps.any? { |step| step['run'].to_s.include?('pnpm install') }
+    audit = steps.find { |step| step['name'] == 'Run security audit' }
+    assert_equal 'pnpm audit --audit-level high', audit.fetch('run')
+    assert_equal '${{ runner.temp }}/graylum-pnpm-audit', audit.fetch('working-directory')
+    refute audit.key?('if')
+    assert_equal false, steps.find { |step| step['name'] == 'Setup Node.js' }.fetch('with').fetch('package-manager-cache')
+    assert_equal '11.13.0', steps.find { |step| step['name'] == 'Setup audit-compatible pnpm' }.fetch('with').fetch('version')
+  end
+
+  def test_build_cache_size_limit_executes_both_branches
+    steps = @ci.fetch('jobs').fetch('build-and-e2e').fetch('steps')
+    step = steps.find { |item| item['name'] == 'Check build cache size' }
+    assert_equal "steps.next-cache.outputs.cache-hit != 'true'", step.fetch('if')
+    Dir.mktmpdir('cache-size-') do |dir|
+      File.write("#{dir}/du", "#!/bin/sh\nprintf '%s\tapps/web/.next/cache\n' \"$TEST_KIB\"\n")
+      FileUtils.chmod(0755, "#{dir}/du")
+      {'0'=>'true', '1048576'=>'true', '1048577'=>'false'}.each do |kib, expected|
+        output = "#{dir}/output"
+        File.write(output, '')
+        env = {'PATH'=>"#{dir}:#{ENV.fetch('PATH')}", 'GITHUB_OUTPUT'=>output, 'TEST_KIB'=>kib}
+        out, err, status = Open3.capture3(env, 'bash', '-c', step.fetch('run'))
+        assert status.success?, out + err
+        assert_equal "save=#{expected}\n", File.read(output)
+      end
     end
   end
 

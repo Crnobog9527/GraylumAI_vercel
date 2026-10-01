@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { openingGrantKeyringIsValid } from './openingGrantKeyring';
 
 // ============================================
 // 环境变量 Schema
@@ -26,6 +27,9 @@ const rejectDuplicatedEnvPrefix = (key: string) =>
 const envSchema = z.object({
   // Node 环境
   NODE_ENV: z.enum(['development', 'staging', 'production']).default('development'),
+
+  OPENING_GRANT_HMAC_KEYS: z.string().refine(openingGrantKeyringIsValid,
+    'OPENING_GRANT_HMAC_KEYS missing or invalid'),
 
   // Supabase (必需)
   NEXT_PUBLIC_SUPABASE_URL: z
@@ -308,6 +312,7 @@ export function getSafeEnvSummary(): Record<string, string> {
     SITE_NAME_SET: process.env.NEXT_PUBLIC_SITE_NAME ? '✓' : '✗',
     SUPPORT_EMAIL_SET: process.env.NEXT_PUBLIC_SUPPORT_EMAIL ? '✓' : '✗',
     SUPABASE_SERVICE_KEY_SET: process.env.SUPABASE_SERVICE_ROLE_KEY ? '✓' : '✗',
+    OPENING_GRANT_HMAC_KEYS_SET: process.env.OPENING_GRANT_HMAC_KEYS ? '✓' : '✗',
     DATABASE_URL_SET: process.env.DATABASE_URL ? '✓' : '✗',
     ANTHROPIC_KEY_RETIRED_SET: process.env.ANTHROPIC_API_KEY ? '⚠' : '✗',
     OPENROUTER_KEY_SET: process.env.OPENROUTER_API_KEY ? '✓' : '✗',

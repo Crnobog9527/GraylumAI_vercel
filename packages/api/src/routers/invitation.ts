@@ -6,11 +6,7 @@ import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
 import { loadInvitationSummary } from '../services/invitationSummary';
 import {
-  evaluateInvitationClaimDecision,
-  getChinaDayStartIso,
-  getChinaMonthStartIso,
   getClientIp,
-  getOneHourAgoIso,
   loadInvitationRuntimeSettings,
 } from '../services/invitationRuntime';
 
@@ -159,6 +155,9 @@ export const invitationRouter = router({
       code: z.string().min(1),
     }))
     .mutation(async ({ ctx, input }) => {
+      if (!ctx.hasSupabaseAdminPrivileges) {
+        throw createInvitationOperationError('领取邀请码', new Error('Service role unavailable'));
+      }
       const normalizedCode = input.code.trim();
       const inviteeId = ctx.profileId;
       const inviteeEmail = ctx.user.email;
@@ -185,124 +184,16 @@ export const invitationRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message: '不能使用自己的邀请码。' });
       }
 
-      if (invitation.status !== 'active' || invitation.used_by) {
-        const { data, error } = await ctx.supabaseAdmin.rpc('atomic_claim_invitation_code', {
-          p_invitation_code: normalizedCode,
-          p_invitee_id: inviteeId,
-          p_invitee_email: inviteeEmail,
-          p_claim_status: 'rejected',
-          p_risk_level: 'low',
-          p_block_reason: 'invitation_already_used',
-          p_inviter_reward: 0,
-          p_invitee_reward: 0,
-          p_ip_address: getClientIp(ctx.headers),
-          p_user_agent: ctx.headers.get('user-agent'),
-        });
-
-        if (error) {
-          throw createInvitationClaimRpcError(error);
-        }
-
-        const existingClaim = Array.isArray(data) ? data[0] : data;
-        if (existingClaim?.is_idempotent) {
-          return { status: 'already_claimed' as const };
-        }
-
-        throw new TRPCError({ code: 'NOT_FOUND', message: '邀请码无效或已使用。' });
-      }
-
-      const now = new Date();
-      const ipAddress = getClientIp(ctx.headers);
-      const dayStartIso = getChinaDayStartIso(now);
-      const monthStartIso = getChinaMonthStartIso(now);
-      const hourStartIso = getOneHourAgoIso(now);
-
-      const [
-        settings,
-        dailyRewardResult,
-        totalRewardResult,
-        monthlyCountResult,
-        sameIpHourResult,
-        sameIpDayResult,
-      ] = await Promise.all([
-        loadInvitationRuntimeSettings(ctx.supabaseAdmin),
-        ctx.supabaseAdmin
-          .from('invitation_records')
-          .select('inviter_reward')
-          .eq('inviter_id', invitation.created_by)
-          .eq('status', 'rewarded')
-          .gte('created_at', dayStartIso),
-        ctx.supabaseAdmin
-          .from('invitation_records')
-          .select('inviter_reward')
-          .eq('inviter_id', invitation.created_by)
-          .eq('status', 'rewarded'),
-        ctx.supabaseAdmin
-          .from('invitation_records')
-          .select('*', { count: 'exact', head: true })
-          .eq('inviter_id', invitation.created_by)
-          .eq('status', 'rewarded')
-          .gte('created_at', monthStartIso),
-        ipAddress
-          ? ctx.supabaseAdmin
-              .from('invitation_records')
-              .select('*', { count: 'exact', head: true })
-              .eq('ip_address', ipAddress)
-              .gte('created_at', hourStartIso)
-          : Promise.resolve({ count: 0, error: null }),
-        ipAddress
-          ? ctx.supabaseAdmin
-              .from('invitation_records')
-              .select('*', { count: 'exact', head: true })
-              .eq('ip_address', ipAddress)
-              .gte('created_at', dayStartIso)
-          : Promise.resolve({ count: 0, error: null }),
-      ]);
-
-      if (dailyRewardResult.error || totalRewardResult.error || monthlyCountResult.error || sameIpHourResult.error || sameIpDayResult.error) {
-        throw createInvitationOperationError(
-          '读取邀请限制',
-          dailyRewardResult.error
-            || totalRewardResult.error
-            || monthlyCountResult.error
-            || sameIpHourResult.error
-            || sameIpDayResult.error
-            || new Error('读取邀请限制失败'),
-        );
-      }
-
-      const inviterRewardedToday = (dailyRewardResult.data ?? []).reduce(
-        (sum, record) => sum + (Number(record.inviter_reward ?? 0) || 0),
-        0
-      );
-      const inviterRewardedTotal = (totalRewardResult.data ?? []).reduce(
-        (sum, record) => sum + (Number(record.inviter_reward ?? 0) || 0),
-        0
-      );
-      const decision = evaluateInvitationClaimDecision({
-        settings,
-        metrics: {
-          inviterRewardedToday,
-          inviterRewardedTotal,
-          rewardedInvitesThisMonth: monthlyCountResult.count ?? 0,
-          sameIpClaimsLastHour: sameIpHourResult.count ?? 0,
-          sameIpClaimsToday: sameIpDayResult.count ?? 0,
-        },
-        ipAddress,
-      });
-      const inviterReward = decision.status === 'rewarded' ? decision.inviterRewardGranted : 0;
-      const inviteeReward = decision.status === 'rewarded' ? decision.inviteeRewardGranted : 0;
-
       const { data, error } = await ctx.supabaseAdmin.rpc('atomic_claim_invitation_code', {
         p_invitation_code: normalizedCode,
         p_invitee_id: inviteeId,
         p_invitee_email: inviteeEmail,
-        p_claim_status: decision.status,
-        p_risk_level: decision.riskLevel,
-        p_block_reason: decision.blockReason,
-        p_inviter_reward: inviterReward,
-        p_invitee_reward: inviteeReward,
-        p_ip_address: ipAddress,
+        p_claim_status: 'server_decides',
+        p_risk_level: 'low',
+        p_block_reason: null,
+        p_inviter_reward: 0,
+        p_invitee_reward: 0,
+        p_ip_address: getClientIp(ctx.headers),
         p_user_agent: ctx.headers.get('user-agent'),
       });
 
@@ -312,7 +203,7 @@ export const invitationRouter = router({
 
       const claimResult = Array.isArray(data) ? data[0] : data;
 
-      if (!claimResult) {
+      if (!claimResult || !['rewarded', 'rejected'].includes(claimResult.status)) {
         throw createInvitationOperationError('领取邀请码', new Error('atomic invitation claim RPC returned no rows'));
       }
 
@@ -320,13 +211,15 @@ export const invitationRouter = router({
         return { status: 'already_claimed' as const };
       }
 
-      if (decision.status === 'rejected') {
+      const inviterReward = claimResult.inviter_reward;
+      const inviteeReward = claimResult.invitee_reward;
+      if (claimResult.status === 'rejected') {
         return {
           status: 'rejected' as const,
           inviterReward,
           inviteeReward,
-          blockReason: decision.blockReason,
-          riskLevel: decision.riskLevel,
+          blockReason: claimResult.block_reason,
+          riskLevel: claimResult.risk_level,
         };
       }
 
@@ -334,7 +227,7 @@ export const invitationRouter = router({
         status: 'claimed' as const,
         inviterReward,
         inviteeReward,
-        riskLevel: decision.riskLevel,
+        riskLevel: claimResult.risk_level,
       };
     }),
 

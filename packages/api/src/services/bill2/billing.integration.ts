@@ -251,9 +251,17 @@ it('BILL2: receipt database outage retains server-private evidence and recovery 
  await s.recordReceipt(r.id,c.id,out.pendingReceipt!.evidence);await s.closeRun(r.id,'delivered',result());await s.finalizeRun(r.id);expect(providerCount-before).toBe(1);expect((await conservation(f.actor)).credits).toBe(93);
 });
 async function period(actor:string,credits=100) {
- const grant=randomUUID(),subscription='sub_'+randomUUID(),plan=randomUUID(),invoice='in_'+randomUUID(),start=new Date(Date.now()-86400000).toISOString(),end=new Date(Date.now()+86400000).toISOString();
+ const grant=randomUUID(),subscription='sub_'+randomUUID(),invoice='in_'+randomUUID(),start=new Date(Date.now()-86400000).toISOString(),end=new Date(Date.now()+86400000).toISOString();
+ let plan=randomUUID();
  // Rows satisfy the real schema too (--schema-from-files): plan FK, NOT NULL status and idempotency key.
- await db.query("insert into membership_plans(id,name) values($1,'Synthetic plan')",[plan]);
+ const entitlements = (await db.query("select exists(select 1 from information_schema.columns where table_schema='public' and table_name='membership_plans' and column_name='allow_fusion_review') as present")).rows[0].present;
+ if (entitlements) {
+  await db.query("insert into membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes) values($1,'Synthetic plan','pro',true,true,500000000) on conflict(level) do nothing",[plan]);
+  plan=(await db.query("select id from membership_plans where level='pro'")).rows[0].id;
+ } else {
+  // Older minimal fixtures intentionally predate membership entitlement configuration.
+  await db.query("insert into membership_plans(id,name) values($1,'Synthetic plan')",[plan]);
+ }
  await db.query("insert into user_subscriptions(user_id,stripe_subscription_id,membership_plan_id,billing_cycle,current_period_start,current_period_end,status) values($1,$2,$3,'monthly',$4,$5,'active')",[actor,subscription,plan,start,end]);
  await db.query("insert into subscription_credit_grants(id,user_id,stripe_subscription_id,membership_plan_id,billing_cycle,grant_type,grant_period_key,period_start,period_end,total_periods,stripe_invoice_id,credits_granted,idempotency_key) values($1,$2,$3,$4,'monthly','monthly_invoice',$5,$6,$7,1,$8,$9,$10)",[grant,actor,subscription,plan,'invoice:'+invoice,start,end,invoice,credits,'grant:'+invoice]);return {grant,subscription};
 }

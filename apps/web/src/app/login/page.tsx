@@ -57,7 +57,7 @@ function GoogleIcon({ className }: { className?: string }) {
 }
 
 function getEmailConfirmRedirect(redirectTarget: string, flow: AuthCallbackFlow = 'email') {
-  return buildAuthCallbackUrl(resolveAuthAppUrl(), redirectTarget, flow);
+  return buildAuthCallbackUrl(resolveAuthAppUrl(window.location.origin), redirectTarget, flow);
 }
 
 export default function LoginPage() {
@@ -509,7 +509,7 @@ function LoginPageContent() {
                     </p>
                     <div className="mt-3 flex flex-wrap items-center gap-3">
                       <Link
-                        href={buildAuthHref(`/verify-email?email=${encodeURIComponent(email)}&redirect=${encodeURIComponent(redirectTarget)}`)}
+                        href={buildVerifyEmailPath(email, redirectTarget)}
                         className="text-[#f2c94c] underline-offset-4 hover:underline"
                       >
                         打开验证状态页
