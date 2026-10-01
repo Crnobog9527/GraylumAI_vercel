@@ -5,7 +5,7 @@ import {openRouterRequestBody} from '../../services/runtime/providerRequest';
 import {frozenReasoningFields} from '../../services/runtime/reasoningPolicy';
 import {AGENT_TURN_CANDIDATES, AGENT_TURN_CANDIDATE_TOKENS, AGENT_TURN_CONFIG, CARD_CATEGORIES,
   type AgentTurnCandidate} from './agentTurn.ts';
-import {createBudget, HARD_MAX_CALLS, HARD_MAX_USD, memoryLedger} from './budget.ts';
+import {CANDIDATE_DEFAULT_MAX_USD, createBudget, HARD_MAX_CALLS, HARD_MAX_USD, memoryLedger} from './budget.ts';
 import {resolveConfigs, routing, type ProbeConfig} from './config.ts';
 import {sseResponse, toolDeltas} from './dryRun.ts';
 import {buildPlan, describePlan, parseProbeArgs} from './plan.ts';
@@ -44,7 +44,7 @@ describe('fixed AC1-4 candidates: approved live caps', () => {
   it.each(['c1', 'c2'] as const)('fixes %s to forty distinct trials, 8192 output tokens and offline defaults', candidate => {
     const parsed = args(candidate);
     expect(parsed).toMatchObject({agentTurn: true, agentTurnCandidate: candidate, live: false,
-      counts: {ask: 30, text: 10, reference: 0}, maxCalls: 40, maxUsd: 25.24, maxTokens: 8192});
+      counts: {ask: 30, text: 10, reference: 0}, maxCalls: 40, maxUsd: 15, maxTokens: 8192});
     expect(args(candidate, '--max-tokens', '8192').maxTokens).toBe(8192);
     const plan = buildPlan(parsed, skill, scenarios, 'candidate-scenarios');
     expect(plan).toMatchObject({agentTurnCandidate: candidate, plannedCalls: 40, configs: [AGENT_TURN_CANDIDATES[candidate]]});
@@ -104,12 +104,19 @@ describe('fixed AC1-4 candidates: approved live caps', () => {
 
   it('reports over-cap candidate estimates without changing or bypassing execution caps', () => {
     const plan = buildPlan(args('c2'), {...skill, instructions: 'x'.repeat(600_000)}, scenarios, 's');
-    expect(plan.plannedUsdUpperBound).toBeGreaterThan(25.24);
-    expect(plan.maxUsd).toBe(25.24);
+    expect(plan.plannedUsdUpperBound).toBeGreaterThan(15);
+    expect(plan.maxUsd).toBe(15);
     expect(describePlan(plan, 'dry-run', {calls: 493, usd: 3.5})).toContain('estimate is not executable');
     expect(buildPlan({...args('c2'), live: true}, skill, scenarios, 's').plannedCalls).toBe(40);
     const ledger = memoryLedger({calls: 854, nanoUsd: 0});
     expect(() => createBudget({maxCalls: 40, maxUsd: 25.24, ledger}).reserve(1)).toThrow('total_call_cap');
+  });
+
+  it.each(['c1', 'c2', 'c3', 'c4'] as const)('keeps the %s default run cap at USD 15 below the cumulative cap', candidate => {
+    expect(CANDIDATE_DEFAULT_MAX_USD).toBe(15);
+    expect(CANDIDATE_DEFAULT_MAX_USD).toBeLessThan(HARD_MAX_USD);
+    expect(args(candidate).maxUsd).toBe(15);
+    expect(args(candidate, '--max-usd', String(HARD_MAX_USD)).maxUsd).toBe(HARD_MAX_USD);
   });
 
   it('preserves baseline identity, routing bytes, token default and USD 1 behavior', () => {

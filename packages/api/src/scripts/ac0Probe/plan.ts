@@ -7,7 +7,7 @@ import {parseArgs} from 'node:util';
 import {z} from 'zod';
 import {AGENT_TURN_CONFIG, AGENT_TURN_CANDIDATES, AGENT_TURN_CANDIDATE_TOKENS, CARD_DESIGN_CANDIDATES,
   agentTurnPrompt, assertCardDesignScenarios, type AgentTurnCandidate} from './agentTurn.ts';
-import {DEFAULT_MAX_CALLS, DEFAULT_MAX_USD, HARD_MAX_CALLS, HARD_MAX_USD, validateCaps} from './budget.ts';
+import {CANDIDATE_DEFAULT_MAX_USD, DEFAULT_MAX_CALLS, DEFAULT_MAX_USD, HARD_MAX_CALLS, HARD_MAX_USD, validateCaps} from './budget.ts';
 import {callBoundUsd, DEFAULT_CONFIG_IDS, resolveConfigs, thinkingLabel, type ProbeConfig} from './config.ts';
 import {parsePrivateJson, scenariosOf, stepRules, type LoadedSkill, type Scenario} from './skill.ts';
 import type {TrialKind} from './trial.ts';
@@ -106,7 +106,7 @@ export function parseProbeArgs(argv: string[], home: string): ProbeArgs {
   if (maxUsdText !== undefined && !/^\d+(\.\d+)?$/.test(maxUsdText)) throw new Error('PROBE_ARGUMENT_INVALID: --max-usd');
   // Cap validation reads the raw request before any default could hide it.
   const maxCalls = integer(values['max-calls'], candidate ? 40 : DEFAULT_MAX_CALLS, 1, Number.MAX_SAFE_INTEGER, 'max-calls');
-  const maxUsd = maxUsdText === undefined ? (candidate ? HARD_MAX_USD : agentTurn ? 1 : DEFAULT_MAX_USD) : Number(maxUsdText);
+  const maxUsd = maxUsdText === undefined ? (candidate ? CANDIDATE_DEFAULT_MAX_USD : agentTurn ? 1 : DEFAULT_MAX_USD) : Number(maxUsdText);
   validateCaps(maxCalls, maxUsd);
   return {
     ...(agentTurn ? {agentTurn: true} : {}),

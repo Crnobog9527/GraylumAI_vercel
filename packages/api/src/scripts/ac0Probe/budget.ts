@@ -7,6 +7,8 @@ export const HARD_MAX_CALLS = 854;
 export const HARD_MAX_USD = 25.24;
 export const DEFAULT_MAX_CALLS = 60;
 export const DEFAULT_MAX_USD = 1;
+/** AC1-4 candidate runs keep their #497 default run cap; raising the cumulative cap does not widen it. */
+export const CANDIDATE_DEFAULT_MAX_USD = 15;
 
 const NANO = 1_000_000_000;
 export const usdToNano = (usd: number): number => Math.ceil(usd * NANO);
