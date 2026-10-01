@@ -14,6 +14,8 @@ export const MENTOR_LIMITS = {
   L: {model:'openai/gpt-6-luna',route:'openai',calls:12,usd:.08,
     single:.006,prompt:.1,completion:.5,tokens:2048,effort:'none',bytes:32000},
 } as const;
+type LocalReason='client_disconnected'|'upstream_stream_error'|'timeout'|'size_limit'|'utf8'|'identity'|'local';
+class MentorStop extends Error {}
 export type MentorModel = keyof typeof MENTOR_LIMITS;
 export type MentorSlot = {model:MentorModel;phase:'main-single-turn'|'e2e';id:string;requestHash:string};
 export const sha256 = (raw:string) => createHash('sha256').update(raw).digest('hex');
@@ -36,18 +38,24 @@ export function mentorSender(options:{ledger:LedgerStore;maxUsd:number;slots:Men
   const used=new Set<string>();
   let busy=false, stopped=false;
   let expected={...baseline};
-  const fail=(reason:string):never=>{stopped=true;budget.stop(reason);throw new Error('MENTOR_STOP:'+reason);};
+  const fail=(reason:string):never=>{stopped=true;budget.stop(reason);throw new MentorStop('MENTOR_STOP:'+reason);};
   return {
     stop(){stopped=true;budget.stop('stopped');},
     get totals(){return {run:budget.run,models:structuredClone(modelTotals)};},
     async send(raw:string,slot:Omit<MentorSlot,'requestHash'>,
-      relay?:{headers:(response:Response)=>void;chunk:(bytes:Uint8Array)=>void}):Promise<Response> {
+      relay?:{headers:(response:Response)=>void;chunk:(bytes:Uint8Array)=>void;closed?:()=>boolean}):Promise<Response> {
       if(stopped) return fail('stopped');
       if(busy) return fail('previous_unsettled');
       busy=true;
-      let reserved=false;
+      let reserved=false,disconnected=false;
+      let localReason:LocalReason='local';
+      let timeout:AbortSignal|undefined;
+      const relayToClient=(action:()=>void)=>{
+        if(disconnected)return;
+        try{action();}catch{disconnected=true;}
+      };
       let started=performance.now();
-      const record:Record<string,unknown>={...slot,status:'not_sent'};
+      const record:Record<string,unknown>={...slot,status:'not_sent',receivedBytes:0};
       try {
         if(!isDeepStrictEqual(options.ledger.read(),expected)) return fail('ledger_changed');
         const limits=MENTOR_LIMITS[slot.model];
@@ -74,31 +82,52 @@ export function mentorSender(options:{ledger:LedgerStore;maxUsd:number;slots:Men
         expected=options.ledger.read();record.status='reserved';options.save(record);
         started=performance.now();
         const observer=streamObserver(()=>performance.now()-started);
+        timeout=AbortSignal.timeout(240000);localReason='upstream_stream_error';
         const response=await options.upstream('https://openrouter.ai/api/v1/chat/completions',{
-          method:'POST',body:raw,redirect:'error',signal:AbortSignal.timeout(240000),
+          method:'POST',body:raw,redirect:'error',signal:timeout,
           headers:{Authorization:options.authorization,'Content-Type':'application/json'},
         });
         record.httpStatus=response.status;
+        const headerId=response.headers.get('x-generation-id');
+        if(headerId&&/^[a-zA-Z0-9._:-]{1,256}$/.test(headerId))record.providerId=headerId;
         if(!response.ok||!response.body) {
           record.providerErrorCode=await rejectionCode(response);
           return fail('provider_rejected');
         }
-        relay?.headers(response);
-        const chunks:Uint8Array[]=[];let size=0;
+        relayToClient(()=>relay?.headers(response));
+        const chunks:Uint8Array[]=[];let size=0,pending='';
+        const idDecoder=new TextDecoder();
         const reader=response.body.getReader();
         try {
           for(;;){const part=await reader.read();if(part.done)break;
-            size+=part.value.length;if(size>4*1024*1024)return fail('response_size');
-            chunks.push(part.value);if(body.stream)observer.push(part.value);relay?.chunk(part.value);
+            size+=part.value.length;record.receivedBytes=size;
+            if(size>4*1024*1024){localReason='size_limit';return fail('response_size');}
+            chunks.push(part.value);
+            if(body.stream){
+              observer.push(part.value);pending+=idDecoder.decode(part.value,{stream:true});
+              let newline;
+              while((newline=pending.indexOf('\n'))>=0){
+                const line=pending.slice(0,newline);pending=pending.slice(newline+1);
+                if(!line.startsWith('data:'))continue;
+                let frame;try{frame=JSON.parse(line.slice(5));}catch{continue;}
+                if(typeof frame?.id==='string'&&/^[a-zA-Z0-9._:-]{1,256}$/.test(frame.id)){
+                  if(record.providerId&&record.providerId!==frame.id){localReason='identity';return fail('response_identity');}
+                  record.providerId=frame.id;
+                }
+              }
+            }
+            relayToClient(()=>relay?.chunk(part.value));
           }
         } finally {await reader.cancel().catch(()=>{});}
+        localReason='utf8';
         const bytes=Buffer.concat(chunks),text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
-        let usage,finish,providerId,refused=false;
+        localReason='identity';
+        let usage,finish,providerId=record.providerId as string|undefined,refused=false;
         if(body.stream){
           const facts=observer.end();
           Object.assign(record,{firstValidContentMs:facts.firstContentMs??null,firstByteMs:facts.firstByteMs??null,
             firstToolMs:facts.firstToolMs??null,streamFacts:facts});
-          if(!facts.done||facts.streamError||facts.malformedFrames) return fail('incomplete_stream');
+          if(!facts.done||facts.streamError||facts.malformedFrames){localReason='upstream_stream_error';return fail('incomplete_stream');}
           // Bind every SSE chunk identity, including the usage-only final chunk.
           for(const line of text.split('\n').filter(l=>l.startsWith('data:')&&!l.includes('[DONE]'))){
             const frame=JSON.parse(line.slice(5));
@@ -110,11 +139,13 @@ export function mentorSender(options:{ledger:LedgerStore;maxUsd:number;slots:Men
         } else {
           const parsed=JSON.parse(text);
           if(parsed.error||parsed.model!==limits.model||parsed.choices?.length!==1)return fail('response_identity');
+          if(providerId&&providerId!==parsed.id)return fail('response_identity');
           providerId=parsed.id;finish=parsed.choices[0].finish_reason;
           refused=Boolean(parsed.choices[0].message?.refusal);
           usage={costUsd:parsed.usage?.cost,promptTokens:parsed.usage?.prompt_tokens,
             completionTokens:parsed.usage?.completion_tokens,reasoningTokens:parsed.usage?.completion_tokens_details?.reasoning_tokens};
         }
+        localReason='local';
         const cost=usage?.costUsd;
         Object.assign(record,{providerId:providerId??null,prompt_tokens:usage?.promptTokens??null,
           reasoning_tokens:usage?.reasoningTokens??null,completion_tokens:usage?.completionTokens??null,
@@ -130,12 +161,18 @@ export function mentorSender(options:{ledger:LedgerStore;maxUsd:number;slots:Men
         record.status='settled';options.save(record);
         if(refused||finish==='content_filter')return fail('provider_refused');
         if(actual>bound||own.nano>usdToNano(limits.usd))return fail('actual_over_bound');
+        disconnected ||= relay?.closed?.()??false;
+        if(disconnected){localReason='client_disconnected';return fail('client_disconnected');}
         if(stopped)return fail('stopped');
         return new Response(bytes,{status:response.status,headers:response.headers});
       } catch(error) {
         stopped=true;budget.stop('unknown_or_rejected');
         if(reserved&&record.status!=='settled')record.status='unknown_or_rejected_reserved';
-        record.stopReason=error instanceof Error&&error.message.startsWith('MENTOR_STOP:')?error.message:'MENTOR_STOP:local_or_transport';
+        record.localReason=timeout?.aborted?'timeout':localReason;
+        record.elapsedMs=performance.now()-started;
+        record.clientDisconnected=disconnected;
+        record.stopReason=error instanceof MentorStop?error.message:'MENTOR_STOP:'+record.localReason;
+        if(record.status!=='settled'){delete record.response;delete record.streamFacts;}
         options.save(record);
         throw new Error(String(record.stopReason)); // Never echo upstream/key-bearing errors.
       } finally {busy=false;}

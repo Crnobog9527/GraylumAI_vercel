@@ -1,4 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {createServer} from 'node:http';
+import {once} from 'node:events';
 import {mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -106,7 +108,7 @@ describe('STG mentor live boundary without network',()=>{
   });
   it('does not retry thrown transport errors or leak their text',async()=>{
     const upstream=vi.fn(async()=>{throw Error('secret');}),a=setup({upstream});
-    await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow('local_or_transport');
+    await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow('upstream_stream_error');
     expect(JSON.stringify(a.save.mock.calls)).not.toContain('secret');expect(upstream).toHaveBeenCalledTimes(1);
   });
   it('requires original main bytes and rejects routing/output drift before send',async()=>{
@@ -145,4 +147,95 @@ it('retains only bounded numeric HTTP error code, never sensitive upstream rejec
     expect(JSON.stringify(a.save.mock.calls)).not.toMatch(/secret-key|private|secret-code/);
     await expect(a.sender.send(raw(),slot('1'))).rejects.toThrow('stopped');
   }
+});
+
+it('drains upstream after downstream closes, settles cost then stops without a second send',async()=>{
+  let drained=false;
+  const encoded=await sseResponse(MENTOR_LIMITS.G.model,textDeltas('hello'),
+    {finish:'stop',usage:{cost:.001,prompt_tokens:10,completion_tokens:5,total_tokens:15}}).text();
+  const stream=new ReadableStream<Uint8Array>({async start(controller){
+    controller.enqueue(new TextEncoder().encode(encoded.slice(0,40)));
+    await new Promise(resolve=>setTimeout(resolve,10));
+    controller.enqueue(new TextEncoder().encode(encoded.slice(40)));drained=true;controller.close();
+  }});
+  const upstream=vi.fn(async()=>new Response(stream)),a=setup({upstream});
+  await expect(a.sender.send(raw('G',{stream:true}),slot('0'),{headers:()=>{},chunk:()=>{throw Error('private-disconnect');}}))
+    .rejects.toThrow('client_disconnected');
+  expect(drained).toBe(true);expect(a.ledger.read().nanoUsd).toBe(usdToNano(3.361));
+  const record=a.save.mock.calls.at(-1)![0];
+  expect(record).toMatchObject({status:'settled',localReason:'client_disconnected',clientDisconnected:true,receivedBytes:Buffer.byteLength(encoded)});
+  expect(JSON.stringify(a.save.mock.calls)).not.toContain('private-disconnect');
+  await expect(a.sender.send(raw(),slot('1'))).rejects.toThrow('stopped');expect(upstream).toHaveBeenCalledTimes(1);
+});
+it('captures bytes and generation identity before an interrupted upstream, preserving reserve',async()=>{
+  let reads=0;
+  const frame='data: '+JSON.stringify({id:'gen-synthetic',model:MENTOR_LIMITS.G.model,choices:[]})+'\n\n';
+  const stream=new ReadableStream<Uint8Array>({pull(controller){
+    if(reads++===0)controller.enqueue(new TextEncoder().encode(frame));else controller.error(Error('private proxy detail'));
+  }});
+  const a=setup({upstream:vi.fn(async()=>new Response(stream))});
+  await expect(a.sender.send(raw('G',{stream:true}),slot('0'))).rejects.toThrow('upstream_stream_error');
+  expect(a.save.mock.calls.at(-1)![0]).toMatchObject({status:'unknown_or_rejected_reserved',receivedBytes:Buffer.byteLength(frame),
+    providerId:'gen-synthetic',localReason:'upstream_stream_error'});
+  expect(JSON.stringify(a.save.mock.calls)).not.toContain('private proxy detail');
+  expect(a.ledger.read().nanoUsd).toBeGreaterThan(usdToNano(3.36));
+});
+it('classifies timeout using the actual signal, never the exception text',async()=>{
+  const aborted=new AbortController();aborted.abort();
+  const spy=vi.spyOn(AbortSignal,'timeout').mockReturnValue(aborted.signal);
+  try{
+    const a=setup({upstream:vi.fn(async()=>{throw Error('private timeout');})});
+    await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow('timeout');
+    expect(a.save.mock.calls.at(-1)![0].localReason).toBe('timeout');
+    expect(JSON.stringify(a.save.mock.calls)).not.toContain('private timeout');
+  }finally{spy.mockRestore();}
+});
+it.each(['utf8','identity','size_limit'])('classifies %s without raw rejection text',async(kind)=>{
+  const data=kind==='utf8'?new Uint8Array([255]):kind==='size_limit'?'x'.repeat(4*1024*1024+1):'private-invalid-json';
+  const a=setup({upstream:vi.fn(async()=>new Response(data))});
+  await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow();
+  expect(a.save.mock.calls.at(-1)![0].localReason).toBe(kind);
+  expect(JSON.stringify(a.save.mock.calls)).not.toContain('private-invalid-json');
+});
+
+it('real loopback client cancellation still drains synthetic upstream and settles before server close',async()=>{
+  let complete!:()=>void;
+  const done=new Promise<void>(resolve=>{complete=resolve;});
+  const encoded=await sseResponse(MENTOR_LIMITS.G.model,textDeltas('hello'),
+    {finish:'stop',usage:{cost:.001,prompt_tokens:10,completion_tokens:5,total_tokens:15}}).text();
+  const cut=encoded.indexOf('\n\n')+2;
+  let release!:()=>void;
+  const disconnected=new Promise<void>(resolve=>{release=resolve;});
+  const upstream=vi.fn(async()=>new Response(new ReadableStream<Uint8Array>({async start(c){
+    c.enqueue(new TextEncoder().encode(encoded.slice(0,cut)));await disconnected;
+    c.enqueue(new TextEncoder().encode(encoded.slice(cut)));c.close();
+  }})));
+  const a=setup({upstream});let failure:unknown;
+  const server=createServer(async(_req,res)=>{
+    res.on('close',release);res.on('error',()=>{});
+    try{await a.sender.send(raw('G',{stream:true}),slot('0'),{
+      headers:()=>{res.writeHead(200);},closed:()=>res.destroyed,
+      chunk:bytes=>{if(res.destroyed)throw Error('CLIENT_DISCONNECTED');res.write(bytes);},
+    });}catch(error){failure=error;}finally{res.destroy();complete();}
+  });
+  server.listen(0,'127.0.0.1');await once(server,'listening');
+  try{
+    const address=server.address() as {port:number};
+    const response=await fetch('http://127.0.0.1:'+address.port),reader=response.body!.getReader();
+    await reader.read();await reader.cancel();await done;
+    expect(String(failure)).toContain('client_disconnected');
+    expect(a.ledger.read().nanoUsd).toBe(usdToNano(3.361));expect(upstream).toHaveBeenCalledTimes(1);
+    expect(a.save.mock.calls.at(-1)![0].receivedBytes).toBe(Buffer.byteLength(encoded));
+  }finally{release();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+it('downstream closure never permits settlement when upstream also breaks',async()=>{
+  let reads=0;
+  const a=setup({upstream:vi.fn(async()=>new Response(new ReadableStream<Uint8Array>({pull(c){
+    if(reads++===0)c.enqueue(new TextEncoder().encode('data: {}\n\n'));else c.error(Error('private upstream'));
+  }})))});
+  await expect(a.sender.send(raw('G',{stream:true}),slot('0'),{headers:()=>{throw Error('private client');},chunk:()=>{}}))
+    .rejects.toThrow('upstream_stream_error');
+  expect(a.save.mock.calls.at(-1)![0]).toMatchObject({status:'unknown_or_rejected_reserved',clientDisconnected:true});
+  expect(a.ledger.read().nanoUsd).toBeGreaterThan(usdToNano(3.36));
+  expect(JSON.stringify(a.save.mock.calls)).not.toMatch(/private upstream|private client/);
 });

@@ -27,6 +27,7 @@ export async function liveBridge({maxUsd,evidencePath,output}) {
       slots:evidence.rows.map(row=>({...row,model:row.model.startsWith('google/')?'G':row.model.startsWith('anthropic/')?'S':'L'})),
       save:record=>appendFileSync(join(output,'mentor-live-results.jsonl'),JSON.stringify(record)+'\n',{mode:0o600})});
     let networkReady=false;
+    const inFlight=new Set();
     let mainComplete=false,passed=[],reviewDone=false,reviewFailed=false;
     server=createServer(async(req,res)=>{
       if(req.headers.authorization!=='Bearer '+secret){res.writeHead(403).end();return;}
@@ -77,16 +78,26 @@ export async function liveBridge({maxUsd,evidencePath,output}) {
           appendFileSync(join(output,'mentor-live-results.jsonl'),JSON.stringify(proof)+'\n',{mode:0o600});
           networkReady=true;
         }
-        await sender.send(request.raw,request.slot,{
+        let clientDisconnected=false;
+        res.on('error',()=>{clientDisconnected=true;});
+        res.on('close',()=>{if(!res.writableFinished)clientDisconnected=true;});
+        const sending=sender.send(request.raw,request.slot,{
+          closed:()=>clientDisconnected||res.destroyed,
           headers:response=>res.writeHead(response.status,{'Content-Type':response.headers.get('content-type')??'application/json',
             ...(response.headers.get('x-generation-id')?{'x-generation-id':response.headers.get('x-generation-id')}:{})}),
-          chunk:bytes=>{if(res.destroyed)throw new Error('CLIENT_DISCONNECTED');res.write(bytes);},
+          chunk:bytes=>{if(clientDisconnected||res.destroyed)throw new Error('CLIENT_DISCONNECTED');res.write(bytes);},
         });
+        inFlight.add(sending);
+        try{await sending;}finally{inFlight.delete(sending);}
         res.end();
       }catch{sender.stop();if(res.headersSent)res.destroy();else res.writeHead(409).end('MENTOR_STOP');}
     });
     await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
     return {url:'http://127.0.0.1:'+server.address().port,secret,
-      close:async()=>{sender.stop();await new Promise(resolve=>server.close(resolve));release();}};
+      close:async()=>{
+        sender.stop();
+        await Promise.allSettled([...inFlight]);
+        await new Promise(resolve=>server.close(resolve));release();
+      }};
   }catch(error){server?.close();release();throw error;}
 }
