@@ -116,6 +116,9 @@ describe.skipIf(!authUrl || !mailUrl || !jwtSecret)('password reset against loca
   it('resets the password through the callback in the requesting browser, once', async () => {
     const email = `ok-${tag}@example.test`;
     await admin('users', 'POST', { email, password, email_confirm: true });
+    // Another device signed in before the reset.
+    const otherDevice = browserClient();
+    expect((await otherDevice.auth.signInWithPassword({ email, password })).error).toBeNull();
     const requester = browserClient();
     const { link, landing } = await requestAndOpenLink(requester, email);
     expect(landing.pathname).toBe('/auth/callback');
@@ -130,6 +133,9 @@ describe.skipIf(!authUrl || !mailUrl || !jwtSecret)('password reset against loca
     expect(classifyPasswordUpdateError(same.error)).toEqual({ kind: 'error', message: '新密码不能和原来的密码相同。' });
     expect((await requester.auth.updateUser({ password: newPassword })).error).toBeNull();
     expect((await requester.auth.signOut({ scope: 'global' })).error).toBeNull();
+    // The session from before the reset can neither be used nor refreshed any more.
+    expect((await otherDevice.auth.getUser()).data.user).toBeNull();
+    expect((await otherDevice.auth.refreshSession()).error).not.toBeNull();
 
     const oldLogin = await browserClient().auth.signInWithPassword({ email, password });
     expect(classifyLoginError(oldLogin.error, 'x')).toMatchObject({ kind: 'error', offerResend: true });

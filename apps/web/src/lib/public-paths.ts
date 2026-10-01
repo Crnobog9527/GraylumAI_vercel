@@ -23,5 +23,6 @@ export const PUBLIC_PATHS = [
 ];
 
 export function isPublicPathname(pathname: string): boolean {
-  return PUBLIC_PATHS.some(path => pathname.startsWith(path));
+  // Whole path segments only, so /login-anything is not public just because /login is.
+  return PUBLIC_PATHS.some(path => pathname === path || pathname.startsWith(`${path}/`));
 }

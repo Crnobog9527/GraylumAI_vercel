@@ -1,6 +1,6 @@
 import { buildAuthCallbackUrl, isVerifierMismatch } from '@/lib/authFlow';
 import {
-  ACCOUNT_UNAVAILABLE_MESSAGE, getErrorMessageText, getSafeErrorMessage,
+  ACCOUNT_UNAVAILABLE_MESSAGE, getErrorMessageText,
 } from '@/lib/safe-error-message';
 
 // Forgot-password flow: /forgot-password asks GoTrue for a reset email, the link goes through the
@@ -37,11 +37,18 @@ function errorStatus(error: unknown) {
   return error && typeof error === 'object' && 'status' in error ? error.status : null;
 }
 
+export const RESET_CAPTCHA_FAILED_MESSAGE = '人机验证没有通过，请重试。';
+// A send failure happens only for a registered email (GoTrue returns success for unknown ones), so
+// the provider text is never shown and this fixed text says nothing about whether one exists.
+export const RESET_SEND_FAILED_MESSAGE =
+  '暂时无法发送重置邮件，请稍后重试。如果之前收到过重置邮件，在有效期内仍然可以使用。';
+
 export function resetRequestErrorMessage(error: unknown) {
   if (errorStatus(error) === 429 || RATE_LIMIT_ERROR_CODES.has(errorCode(error))) {
     return RESET_RATE_LIMIT_MESSAGE;
   }
-  return getSafeErrorMessage(error, '重置邮件发送失败，请稍后重试。');
+  if (errorCode(error) === 'captcha_failed') return RESET_CAPTCHA_FAILED_MESSAGE;
+  return RESET_SEND_FAILED_MESSAGE;
 }
 
 // Why /forgot-password was opened again. Only these values are honored; the callback sets them.
@@ -62,8 +69,20 @@ export function buildForgotPasswordPath(reason?: RecoveryFailure) {
   return reason ? `${FORGOT_PASSWORD_PATH}?reason=${reason}` : FORGOT_PASSWORD_PATH;
 }
 
+// A missing or different verifier means another browser. A used or expired flow state (for example
+// the callback address opened again in the same browser) is an expired link instead.
+const SPENT_FLOW_ERROR_CODES = new Set(['flow_state_not_found', 'flow_state_expired']);
+
 export function classifyRecoveryExchangeError(error: unknown): RecoveryFailure {
+  if (SPENT_FLOW_ERROR_CODES.has(errorCode(error))) return 'expired';
   return isVerifierMismatch(error) ? 'browser' : 'failed';
+}
+
+// A network failure or server error says nothing about the session; it must not read as "no link".
+export function isTransientAuthError(error: unknown) {
+  if (error && typeof error === 'object' && 'name' in error && error.name === 'AuthRetryableFetchError') return true;
+  const status = errorStatus(error);
+  return typeof status === 'number' && (status === 0 || status >= 500);
 }
 
 // /reset-password only works with a session that a reset link created recently. GoTrue records how
@@ -102,7 +121,7 @@ export function classifyPasswordUpdateError(error: unknown): PasswordUpdateFailu
   if (code === 'same_password') return { kind: 'error', message: '新密码不能和原来的密码相同。' };
   if (code === 'weak_password') return { kind: 'error', message: '新密码强度不够，请换一个更复杂的密码。' };
   if (errorStatus(error) === 429) return { kind: 'error', message: '操作太频繁，请稍后再试。' };
-  return { kind: 'error', message: getSafeErrorMessage(error, '密码重置失败，请稍后重试。') };
+  return { kind: 'error', message: '密码重置失败，请稍后重试。' };
 }
 
 // Account status comes from the API's protected procedures, which reject every status but active.

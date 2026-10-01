@@ -8,9 +8,12 @@ import {
   classifyPasswordUpdateError,
   classifyRecoveryExchangeError,
   isFreshRecoverySession,
+  isTransientAuthError,
   parseRecoveryFailure,
   RECOVERY_SESSION_MAX_AGE_SECONDS,
+  RESET_CAPTCHA_FAILED_MESSAGE,
   RESET_RATE_LIMIT_MESSAGE,
+  RESET_SEND_FAILED_MESSAGE,
   resetRequestErrorMessage,
   validateNewPassword,
 } from './passwordRecovery';
@@ -35,7 +38,10 @@ describe('reset link destination', () => {
 
   it('separates a link opened in another browser from other exchange failures', () => {
     expect(classifyRecoveryExchangeError(authError('pkce_code_verifier_not_found'))).toBe('browser');
-    expect(classifyRecoveryExchangeError(authError('flow_state_expired'))).toBe('browser');
+    expect(classifyRecoveryExchangeError(authError('bad_code_verifier'))).toBe('browser');
+    // Opening the callback address again in the same browser: the flow is spent, not elsewhere.
+    expect(classifyRecoveryExchangeError(authError('flow_state_not_found'))).toBe('expired');
+    expect(classifyRecoveryExchangeError(authError('flow_state_expired'))).toBe('expired');
     expect(classifyRecoveryExchangeError(authError('unexpected_failure'))).toBe('failed');
     expect(classifyRecoveryExchangeError(null)).toBe('failed');
   });
@@ -49,8 +55,31 @@ describe('reset request errors', () => {
     expect(RESET_RATE_LIMIT_MESSAGE).toContain('如果这个邮箱已注册');
   });
 
-  it('never shows unsafe provider text', () => {
-    expect(resetRequestErrorMessage(new Error('database connection refused'))).toBe('重置邮件发送失败，请稍后重试。');
+  it('gives a failed human check its own fixed text', () => {
+    expect(resetRequestErrorMessage(authError('captcha_failed', 400))).toBe(RESET_CAPTCHA_FAILED_MESSAGE);
+  });
+
+  it.each([
+    ['send failure', authError('unexpected_failure', 500), 'Error sending recovery email'],
+    ['readable provider text', new Error('Email address is invalid'), 'Email address is invalid'],
+    ['no code', { status: 400, message: 'Something went wrong' }, 'Something went wrong'],
+    ['nothing', null, ''],
+  ])('never shows provider text or hints at registration (%s)', (_, error, raw) => {
+    const text = resetRequestErrorMessage(error);
+    expect(text).toBe(RESET_SEND_FAILED_MESSAGE);
+    if (raw) expect(text).not.toContain(raw);
+    expect(text).not.toMatch(/已注册|未注册/);
+  });
+});
+
+describe('transient auth errors', () => {
+  it('separates network and server failures from a missing or rejected session', () => {
+    expect(isTransientAuthError(Object.assign(new Error('x'), { name: 'AuthRetryableFetchError', status: 0 }))).toBe(true);
+    expect(isTransientAuthError({ status: 503 })).toBe(true);
+    expect(isTransientAuthError(Object.assign(new Error('Auth session missing!'), { name: 'AuthSessionMissingError', status: 400 })))
+      .toBe(false);
+    expect(isTransientAuthError(authError('session_not_found', 403))).toBe(false);
+    expect(isTransientAuthError(null)).toBe(false);
   });
 });
 
