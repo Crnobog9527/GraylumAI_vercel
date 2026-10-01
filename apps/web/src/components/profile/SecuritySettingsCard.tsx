@@ -17,7 +17,7 @@ import { Label } from '@/components/ui/label';
 import { keepDialogOpenForCaptcha } from '@/lib/dialogCaptcha';
 import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
 import { FORGOT_PASSWORD_PATH } from '@/lib/passwordRecovery';
-import { changePasswordWithReauth, passwordChangeEntry, SET_PASSWORD_BY_EMAIL_HINT } from '@/lib/passwordChange';
+import { createPasswordChanger, passwordChangeEntry, SET_PASSWORD_BY_EMAIL_HINT } from '@/lib/passwordChange';
 import {
   Dialog,
   DialogContent,
@@ -40,6 +40,14 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [statusTone, setStatusTone] = useState<'info' | 'success' | 'error'>('info');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  // One changer per page: after an unanswered update it stops further attempts (see passwordChange.ts).
+  const [passwordChanger] = useState(() => createPasswordChanger({
+    // Invisible hCaptcha: a fresh single-use token per attempt; a challenge appears only if needed.
+    captcha: () => invisibleCaptchaOptions(),
+    signInWithPassword: credentials => createClient().auth.signInWithPassword(credentials),
+    updatePassword: password => createClient().auth.updateUser({ password }),
+  }));
+  const [changeLocked, setChangeLocked] = useState(false);
   const [passwordForm, setPasswordForm] = useState({
     current_password: '',
     new_password: '',
@@ -53,20 +61,26 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
     ? new Date(user.created_date).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
     : '-';
 
+  const clearPasswordForm = () => setPasswordForm({ current_password: '', new_password: '', confirm_password: '' });
+
   const handleChangePassword = async () => {
     setPasswordLoading(true);
     try {
-      const supabase = createClient();
-      // Invisible hCaptcha: a fresh single-use token per attempt; a challenge appears only if needed.
-      const result = await changePasswordWithReauth({
-        captcha: () => invisibleCaptchaOptions(),
-        signInWithPassword: credentials => supabase.auth.signInWithPassword(credentials),
-        updatePassword: password => supabase.auth.updateUser({ password }),
-      }, user?.email, {
+      const result = await passwordChanger.change(user?.email, {
         current: passwordForm.current_password,
         next: passwordForm.new_password,
         confirm: passwordForm.confirm_password,
       });
+
+      if (!result.ok && result.locked) {
+        // Maybe saved: no retry from this form, the visitor checks by signing in again.
+        setChangeLocked(true);
+        setShowPasswordDialog(false);
+        clearPasswordForm();
+        setStatusTone('info');
+        setStatusMessage(result.message);
+        return;
+      }
 
       if (!result.ok) {
         setStatusTone('error');
@@ -77,11 +91,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
       setStatusTone('success');
       setStatusMessage('密码已更新。');
       setShowPasswordDialog(false);
-      setPasswordForm({
-        current_password: '',
-        new_password: '',
-        confirm_password: '',
-      });
+      clearPasswordForm();
     } finally {
       setPasswordLoading(false);
     }
@@ -187,6 +197,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                 <Button
                   variant="outline"
                   size="sm"
+                  disabled={changeLocked}
                   onClick={() => { setStatusMessage(null); setShowPasswordDialog(true); }}
                   style={{
                     background: 'transparent',

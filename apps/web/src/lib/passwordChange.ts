@@ -43,7 +43,22 @@ export type PasswordChangeDeps = {
   updatePassword: (password: string) => Promise<{ error: unknown }>;
 };
 
-export type PasswordChangeResult = { ok: true } | { ok: false; message: string };
+// `locked`: the update got no clear answer, so it may have been saved. Retrying from the same form
+// cannot tell: if it was saved, the "current password" in the form no longer works and the retry
+// would report a wrong password. Further attempts stop until the visitor signs in again.
+export type PasswordChangeResult = { ok: true } | { ok: false; message: string; locked?: boolean };
+
+// The reset page's "retry and see whether it says same password" advice does not apply here.
+export const PASSWORD_CHANGE_UNCERTAIN_MESSAGE =
+  '暂时无法确认新密码是否已保存。请先退出，再用新密码登录试试；如果新密码登录不了，再用原来的密码；都不行，可以通过邮件重置密码。';
+
+// No HTTP answer, a gateway or server error, or a call that threw: the change may have happened.
+function isUnanswered(error: unknown) {
+  const status = errorStatus(error);
+  const name = error && typeof error === 'object' && 'name' in error ? error.name : null;
+  return name === 'AuthRetryableFetchError' || status === 0 || (typeof status === 'number' && status >= 500)
+    || typeof status !== 'number';
+}
 
 function errorCode(error: unknown) {
   return error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : '';
@@ -92,8 +107,22 @@ export async function changePasswordWithReauth(
 
   const update = await deps.updatePassword(form.next).catch(error => ({ error }));
   if (update.error) {
+    if (isUnanswered(update.error)) return { ok: false, message: PASSWORD_CHANGE_UNCERTAIN_MESSAGE, locked: true };
     const failure = classifyPasswordUpdateError(update.error);
     return { ok: false, message: failure.kind === 'session' ? '登录状态已失效，请重新登录后再试。' : failure.message };
   }
   return { ok: true };
+}
+
+// The profile page's changer: after an unanswered update it refuses every further attempt without
+// checking or sending anything, so a saved change can never be reported as a wrong password.
+export function createPasswordChanger(deps: PasswordChangeDeps) {
+  let locked = false;
+  const change = async (email: string | undefined, form: PasswordChangeForm): Promise<PasswordChangeResult> => {
+    if (locked) return { ok: false, message: PASSWORD_CHANGE_UNCERTAIN_MESSAGE, locked: true };
+    const result = await changePasswordWithReauth(deps, email, form);
+    if (!result.ok && result.locked) locked = true;
+    return result;
+  };
+  return { change, isLocked: () => locked };
 }
