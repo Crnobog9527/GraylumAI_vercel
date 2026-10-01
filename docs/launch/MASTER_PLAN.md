@@ -149,6 +149,30 @@
 | 发布时"不能假设现网无用户"，以及为此要求的"schema 与旧 runtime 向后兼容""兼容回退" | v11 §13.3 | 由第 9.3 节取代：Owner 已确认正式环境没有真实用户（第 2.1 节第 8 项） |
 | 为保护现网数据而设的发布要求：迁移必须向后兼容旧代码（只扩不缩、"旧代码 × 新库"测试）、按"先库后代码"分步切换、旧数据迁移、针对旧数据的回滚 | v10.1 §9、§10 | 由第 9.3 节取代；v10.1 §9、§10 中其余要求（密钥和配置逐项核对、Stripe 正式配置核对、定时任务、验证码开关顺序、冒烟、同日对账、立即关站条件等）继续有效 |
 
+**边用边扣冲突条款清查（2026-10-01）**：按[总控要求](https://github.com/Crnobog9527/GraylumAI_vercel/pull/559#issuecomment-5926136494)搜索整个 `docs/**`（含 `docs/launch/**`、测试记录和归档），以下作为取代表的补充。文件路径均相对仓库根目录，行号固定于本轮清查基准 `8122e21a6b6fd876b7f4303846de31c647a54c79`，不是随本文增行移动的行号。
+
+以下冲突条款统一由第 2.1 节第 26–27 项取代：每次调用前只冻结本次上界，调用后按实际费用结算；不足时暂停，充值后断点继续；单次超额由平台承担、不补扣、不需逐笔人工授权，停新调用并留存真实成本和超额对账。一个运行单、最终累计只取整一次仍保留，逐次结算与累计取整由 BILL-PAYG 衔接；未知结果保留本次冻结额，原身份恢复、不重发、不盲退款。这里不把整段契约、安全约束或历史证据整体废止，也不宣称代码已实现新模式。
+
+| 被取代或须限定适用范围的条款 | 文件与基准行号 | 负责同步的实施任务及保留边界 |
+| --- | --- | --- |
+| run 唯一 pre_deduct、run/pre_deduct 一对一、prepareRun 一次预留、每 run 一次原子预留 | `docs/launch/tasks/V3-BILL-2-provider-authoritative-billing.md`：43、47、53、83 | **BILL-PAYG** 同步契约的数据关联、准入和逐次冻结；保留请求幂等、权限、预算上限与不得负余额，不按调用数提前冻结整单费用 |
+| 平台承担单次超额需人工授权、不增设自动亏损政策 | `docs/launch/tasks/V3-BILL-2-provider-authoritative-billing.md`：89；137 中人工核销授权不得再用于阻塞本类已确定超额 | **BILL-PAYG** 同步；本类超额执行第 27 项。137 中未知结果的人工补偿、退款和无证据核销授权边界仍有效，不把 unknown 当成已确定超额 |
+| prepare 预留 R 后等整单终结才收费的流水示例、run/pre_deduct 唯一关系及整单一次结算验收 | `docs/launch/tasks/V3-BILL-2-provider-authoritative-billing.md`：99–102、112–118、127–128、163 | **BILL-PAYG** 同步逐次冻结/结算、累计取整和相应验收；保留原子性、唯一消费、来源恢复、锁序、终态互斥和不可重复记账，不以逐次结算提前终结尚未封闭的 run |
+| 整组只预扣一次、按全部轮数上限冻结；要求整组预扣覆盖所有轮次的验收 | `docs/launch/tasks/FUSION.md`：21–23、35、60、65–66；15、17、25–35 中按该整组预扣解释的估算用语 | **FUSION-REVIEW** 同步规格及验收，FUSION-COMPARE 复用；总预估仅展示，每次供应商调用冻结本次上界，Fusion 多模型单次上界由 FUSION-REVIEW 定义、定义前不放行。保留一个运行单、汇总取整、各调用状态和部分结算，不把 Fusion 内部模型拆成重复收费 |
+| 选中报价最大 upperUsd × maxCalls 预扣，实际发送内容估算留给 RUNTIME-PROD ④ | `docs/launch/tasks/MENTOR-BUDGET.md`：94–95 | **BILL-PAYG** 承接 ④ 并同步当前适用说明；保留原交付记录、call claim、调用时限和实际成本证据，不因该历史交付继续整单预扣 |
+| 整理和 Fusion 不能多次预扣；整理尚未派发即在消息运行单中预留，之后退多余预扣 | `docs/launch/tasks/AGENT-CORE.md`：57、61–62、70 | **BILL-PAYG** 同步计费边界，**AGENT-CORE / AC-2** 同步整理实施与验收：每次实际调用前冻结；保留同一消息/整组运行单、整理次数限制、冲突不重复派发及累计取整，不把调用次数槽位当成提前冻结资金 |
+| 每一步按“次数上限 × 该查询类型最高单价”预扣 | `docs/launch/tasks/RESEARCH-TOOLS.md`：52 | **RESEARCH-TOOLS** 在 BILL-PAYG 钱路上同步为逐次调用冻结；保留调用次数限制、D14 搜索计价/保底积分、确认失败平台承担和未知恢复，不用步数上限提前冻结整步费用 |
+| 运行单只有汇总预留字段、最终 RPC 才统一计算预扣差额，未表达逐次冻结与结算 | `docs/launch/tasks/V3-OPC-growth-agent-architecture.md`：468–482、513–526 | **BILL-PAYG** 同步架构说明；保留作用域、Session、精确成本、一个运行单最终累计取整、事务和未知恢复。旧“最终结算”不能阻止每次调用后结算 |
+| 多调用只做一次最终原子结算的概述 | `docs/launch/plan-core.md`：84 | **BILL-PAYG** 同步概述；保留唯一余额/流水、持久调用身份和收据，不解释为必须等整单结束才扣费 |
+| 调用前预扣一次，多个调用汇总后只结算一次的项目地图 | `docs/PROJECT_MAP_FOR_OWNER.md`：37 | **BILL-PAYG** 同步为逐次冻结/结算；保留运行单汇总和最终只取整一次 |
+| actual > reserved 作为用户新增消费追加扣减，及依赖该规则的超用验收/旧修订说明 | `docs/launch/Graylum_Master_Plan_v10.1.md`：101、239、248、251、365、498、520、543、623、650、656 | **BILL-PAYG** 同步有效规格的取代提示和新验收；新调用超额由平台承担，不从用户当期或其他来源补扣。历史数值案例不回写成新模式证据，少用返还、锁序、退款来源保护继续有效 |
+| 旧 BILL2 测试契约的一 run 一预扣、整单终结结算和对应 Runtime/整理验证 | `docs/testing/v3-bill2-authoritative-billing.md`：21–23、27、38–40；`docs/testing/v3-runtime.md`：38；`docs/testing/v3-opc-workbench.md`：67 | **BILL-PAYG** 在实施时补新契约验证与版本适用说明；保留这些历史测试结果，不拿旧版本一次预扣的 PASS 作为 PAYG 验收 |
+| 归档示例在实耗高于预扣时补扣差额 | `docs/archive/2026-01/movetonew/GraylumAI_分阶段重构执行计划.md`：420–434 | **BILL-PAYG** 负责在实施交接中明确旧示例不适用于新调用；归档原文保留，不恢复为实施契约 |
+
+RUNTIME-PROD ④ 和 REPORT-GEN 在本基准没有独立同名任务文件；仓库内入口是本文原第 134、498 行，已明确取代统一预扣及报告固定上界方案，分别由 **BILL-PAYG**、**REPORT-GEN** 同步实施方案。本文原第 289–290 行的 Fusion 估算用语同样只按第 4.4 节的本次上界/总预估展示解释，由 **FUSION-REVIEW** 同步，不能重新启用整组冻结。
+
+搜索命中的一般“预扣/预留”并不全部冲突：`docs/ARCHITECTURE.md` 第 117–126、158 行及 `docs/ADMIN_SETTINGS_EFFECT_MATRIX.md` 第 36–41、68–79 行描述旧聊天实现，由 **BILL-PAYG** 在实施文档中标明适用版本，不作为新模式规则；v10.2 第 116–139 行、v11 第 303–311 行及 DATA-ERASURE 中原身份/未知恢复和人工退款授权仍有效。输出 token 预留、测试预算、迁移槽位、生产操作授权、历史 SQL/字段名也不属于整单冻结或超额补扣承诺；本次不改历史证据或扩大授权。
+
 除上表外，v11 和更早文档中不冲突的要求继续有效（第 9 节）。
 
 <a id="agent"></a>
@@ -727,9 +751,11 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 <a id="billing"></a><a id="compatibility"></a>
 ### 9.2 仍然有效的技术规格
 
-- [BILL2 技术契约](tasks/V3-BILL-2-provider-authoritative-billing.md)：除第 2.2 节明确取代的“每 run 一次预留”和“平台承担超额需人工授权”两组条款外，其余继续有效，包括精确成本、锁序、原子结算、唯一钱路、原请求与未知恢复。契约文件本身由 **BILL-PAYG 实施 PR 同步修改**（[#553 实施交接](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553#issuecomment-5925672087)），本次规划同步不修改该契约文件。
+- [BILL2 技术契约](tasks/V3-BILL-2-provider-authoritative-billing.md)：除第 2.2 节明确取代的预留、结算及超额处理条款外，其余继续有效，包括精确成本、锁序、原子结算、唯一钱路、原请求与未知恢复。契约文件本身由 **BILL-PAYG 实施 PR 同步修改**（[#553 实施交接](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553#issuecomment-5925672087)），本次规划同步不修改该契约文件。
 - [V3 标准 Skill 规格](tasks/V3-standard-skills.md)：私有包、固定版本、3 / 6 / 8 步和无步骤 Skill、隔离与恢复（其中"确定性报告"由第 2.1 节第 22 项取代：所有带步骤的 Skill 都改为模型根据全部信息写完整报告、收积分，依据 Owner 2026-09-30 原话"所有带步骤的 Skill，报告都改由模型写、都收积分"，[#545 评论](https://github.com/Crnobog9527/GraylumAI_vercel/pull/545#issuecomment-5912946236)）。
 - [OPC 详细架构](tasks/V3-OPC-growth-agent-architecture.md)：业务归属、版本、会话、权限、账务和恢复契约；与本文第 2.2 节冲突的部分以本文为准。
+- [FUSION 实施说明](tasks/FUSION.md)：除第 2.2 节列出的整组预扣、估算及对应验收条款外，其余继续有效；规格文件由 **FUSION-REVIEW 实施 PR 同步修改**，FUSION-COMPARE 复用新计费口径。一个运行单、汇总取整和其他不冲突约束保留。
+- 第 2.2 节清查表中的其余计费说明，按表内责任任务同步；本次仅修改 MASTER_PLAN.md，不修改被引用的契约、规格或历史验证文件。
 - [Master Plan v10.1](Graylum_Master_Plan_v10.1.md)：钱路、认证、安全、年付、退款、cron、完整验收和发布 / 回退要求（其中为保护现网数据而设的部分由第 9.3 节取代，见第 2.2 节）。
 - [v10.2 修订](Graylum_Master_Plan_v10.2_OPC_Growth_Agent_Amendment.md)：OPC 产品依据，冲突部分以本文为准。
 
