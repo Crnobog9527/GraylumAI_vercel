@@ -74,9 +74,10 @@ export const questionCardSchema = z
   })
   .strict()
   .refine(card => card.recommended === null || card.recommended < card.options.length, "recommended out of range");
+export const questionMessageSchema = cardText(AGENT_TURN_MESSAGE_LIMIT);
 /** New calls require all five fields. Legacy storage remains readable separately. */
 export const questionToolCardSchema = questionCardSchema.safeExtend({
-  message: cardText(AGENT_TURN_MESSAGE_LIMIT),
+  message: questionMessageSchema,
   recommendationReason: cardText(AGENT_TURN_MESSAGE_LIMIT).nullable(),
 }).refine(card => card.recommended === null
   ? card.recommendationReason === null : card.recommendationReason !== null,

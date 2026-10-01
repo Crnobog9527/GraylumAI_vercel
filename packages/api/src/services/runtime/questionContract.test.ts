@@ -41,3 +41,26 @@ it('uses only validated card message for display, persistence and refresh',()=>{
  expect(parseQuestionCard(old)).toEqual(old);
  expect(agentTurnResult('Original old prose',questionCardToolResult(old),true).message).toBe('Original old prose');
 });
+
+it.each([
+ {...card,recommendationReason:null},
+ {...card,options:['duplicate','duplicate']},
+ {...card,options:['x'.repeat(201),'other']},
+])('retains independently valid paid prose when the five-field card is invalid (%j)',async value=>{
+ const {questionMessageFromArguments,INVALID_CARD_RESULT}=await import('./agentTools');
+ const tool=askQuestionTool(true);
+ expect(()=>questionCardToolResult(value,true)).toThrow('RUNTIME_QUESTION_CARD_INVALID');
+ expect(tool.invalidResult).toBe(INVALID_CARD_RESULT);
+ const message=questionMessageFromArguments(JSON.stringify(value));
+ const result=agentTurnResult('',INVALID_CARD_RESULT,true,message);
+ expect(result).toMatchObject({message:card.message,card:null,truncated:false});
+ expect(readAgentTurnBody(result.body)).toMatchObject({message:card.message,card:null});
+});
+it.each(['{broken','null','[]','{}',...['',' ','x'.repeat(20001),'unsafe\u0007text',123].map(message=>JSON.stringify({message}))])(
+ 'rejects an invalid fallback message (%s)',async args=>{
+ const {questionMessageFromArguments,INVALID_CARD_RESULT}=await import('./agentTools');
+ const {INVALID_REPLY_NOTICE}=await import('../../shared/agentTurn');
+ expect(questionMessageFromArguments(args)).toBeNull();
+ expect(agentTurnResult('',INVALID_CARD_RESULT,true,questionMessageFromArguments(args)))
+  .toMatchObject({message:INVALID_REPLY_NOTICE,card:null});
+});

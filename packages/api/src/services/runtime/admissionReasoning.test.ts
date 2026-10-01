@@ -175,7 +175,7 @@ it('configured budgets freeze separately from unchanged quotes and reservation a
  const original=await service.prepare(f.input);
  expect(original.context.maxOutputTokens).toBe(2000);
  expect(original.context.purposeBudget).toEqual({purpose:'interactive',inputBytes:24000,historyItems:7});
- expect(original.context.attachedOrganizer).toMatchObject({maxOutputTokens:4096,inputBytes:16000,historyItems:3});
+ expect(original.context.attachedOrganizer).toMatchObject({maxOutputTokens:4096,inputBytes:16000,historyItems:0});
  expect(original.billing.callPolicy).toEqual(f.policy.real.callPolicies.filter(q=>q.modelId!==second));
  expect(original.billing.limits).toMatchObject({costUsd:'0.008000000000',credits:8,maxPreDeduct:8,maxCalls:2});
  config.interactive.maxOutputTokens=PURPOSE_OUTPUT_CAP;config.interactive.historyItems=2;
@@ -199,4 +199,16 @@ it('legacy admission retains its old ceiling and replay ignores newly invalid co
  for(const q of legacy.policy.real.callPolicies)q.outputLimit=40000;
  const legacyService=runtimeAdmissionService(legacy.user,legacy.admin,legacy.policy);
  expect((await legacyService.prepare(legacy.input)).context.maxOutputTokens).toBe(20000);
+});
+
+it.each([false,true])('zero history applies only to newly admitted positioning attachment (standalone=%s)',async standalone=>{
+ const config={version:1,interactive:{inputBytes:24000,maxOutputTokens:2000,historyItems:7},
+  organize:{inputBytes:16000,historyItems:3},report:{inputBytes:64000,maxOutputTokens:1000,historyItems:100}};
+ const f=fixture(config);
+ const service=runtimeAdmissionService(f.user,f.admin,{...f.policy,purposeBudgets:true,
+  ...(standalone?{mentorStream:false,opcTurnToken:undefined}:{})});
+ const result=await service.prepare({...f.input,...(standalone?{selection:{kind:'organizer'},organizeAfter:false}:{})});
+ expect(standalone?result.context.historyItems:result.context.attachedOrganizer.historyItems).toBe(standalone?3:0);
+ config.organize.historyItems=9;
+ expect(await service.prepare({...f.input,...(standalone?{selection:{kind:'organizer'},organizeAfter:false}:{})})).toEqual(result);
 });

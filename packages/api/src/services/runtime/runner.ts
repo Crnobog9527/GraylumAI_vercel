@@ -28,6 +28,8 @@ export type RuntimeRunnerInput = {
   allowEmptyResult?: boolean;
   /** v5 one-call turn only: discard SDK input-only writes when replay is still pending. */
   commitSessionOnSuccess?: boolean;
+  /** Explicit-input attached organizer only; Session output persistence is unchanged. */
+  readSessionHistory?: boolean;
   selectHistory: (history: unknown[], incoming: unknown[]) => Promise<unknown[]>;
   filterModelInput?: (items: AgentInputItem[], instructions: string) => AgentInputItem[];
   tools: RuntimeTool[];
@@ -84,9 +86,13 @@ export async function runRuntime(input: RuntimeRunnerInput) {
   // Keep the frozen history objects and the original append batch boundaries.
   // The SDK may save just the input in its failure finally; v5 must not let
   // that pending observer conflict with the owner's successful full batch.
-  const session:Session=input.commitSessionOnSuccess?{
-    getSessionId:()=>input.session.getSessionId(),getItems:limit=>input.session.getItems(limit),
-    addItems:async items=>{sessionWrites.push(structuredClone(items));},
+  const session:Session=input.commitSessionOnSuccess||input.readSessionHistory===false?{
+    getSessionId:()=>input.session.getSessionId(),
+    getItems:limit=>input.readSessionHistory===false?Promise.resolve([]):input.session.getItems(limit),
+    addItems:async items=>{
+      if(input.commitSessionOnSuccess)sessionWrites.push(structuredClone(items));
+      else await input.session.addItems(items);
+    },
     popItem:()=>input.session.popItem(),clearSession:()=>input.session.clearSession(),
   }:input.session;
   let sequence=0,outputTruncated=false;

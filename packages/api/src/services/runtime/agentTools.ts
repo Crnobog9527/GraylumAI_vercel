@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
 import {AGENT_TURN_MESSAGE_LIMIT,ASK_QUESTION_TOOL,MAX_OPTIONS,MIN_OPTIONS,OPTION_MAX_CHARS,QUESTION_MAX_CHARS} from '../../shared/agentTurn';
-import {parseQuestionCard,questionCardSchema,questionToolCardSchema,type QuestionCard} from '../../shared/agentTurn';
+import {parseQuestionCard,questionCardSchema,questionToolCardSchema,questionMessageSchema,type QuestionCard} from '../../shared/agentTurn';
 import type {RuntimeTool} from './runner';
 
 /** Interactive Agent turn tools (AC-1). Only the `agent-turn-v5-stream`
@@ -29,7 +29,9 @@ export const askQuestionParameters=z.object({
  recommended:z.number().nullable(),
 }).strict();
 
-export const QUESTION_CONTRACT = 'five-fields-v1';
+export const LEGACY_QUESTION_CONTRACT = 'five-fields-v1';
+// v2 changes only host fallback; provider schema and description bytes are identical.
+export const QUESTION_CONTRACT = 'five-fields-v2';
 export const QUESTION_CONTRACT_INSTRUCTIONS = [
  'Question tool contract: when using a card, put the complete public prose in message,',
  'not in separate assistant text. This replaces only the separate-prose delivery rule.',
@@ -46,6 +48,18 @@ export const questionParameters = askQuestionParameters.extend({
  * the card rules). The turn still ends there: the already paid reply keeps its
  * text and is shown without a card. */
 export const INVALID_CARD_RESULT=JSON.stringify({card:'invalid'});
+
+/** Read only independently valid prose from complete, retained tool arguments.
+ * The invalid tool result itself stays unchanged for deterministic Session replay. */
+export function questionMessageFromArguments(arguments_:unknown):string|null{
+ if(typeof arguments_!=='string')return null;
+ try{
+  const value:unknown=JSON.parse(arguments_);
+  if(!value||typeof value!=='object'||Array.isArray(value))return null;
+  const message=questionMessageSchema.safeParse((value as {message?:unknown}).message);
+  return message.success?message.data:null;
+ }catch{return null;}
+}
 
 /** The result the SDK stores for a shown card; history replays the same text. */
 export function questionCardToolResult(value:unknown,fiveFields=false):string{

@@ -8,7 +8,7 @@ import {AGENT_TURN_REQUEST_FORMAT,PROVIDER_REQUEST_FORMATS,validReasoningFormat,
  STREAMING_FORMATS,historyToolNames,openRouterRequestBody} from './providerRequest';
 import {agentTurnResult} from './agentTurnResult';
 import {terminalAgentReplyFailure} from './terminalAgentReply';
-import {askQuestionTool,askQuestionToolBytes,QUESTION_CONTRACT} from './agentTools';
+import {askQuestionTool,askQuestionToolBytes,questionMessageFromArguments,QUESTION_CONTRACT,LEGACY_QUESTION_CONTRACT} from './agentTools';
 import {ASK_QUESTION_TOOL,INVALID_REPLY_NOTICE} from '../../shared/agentTurn';
 import { authoritativeBilling, type FrozenRun, type FrozenCall, type BillingTransport } from '../bill2/service';
 import {OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
@@ -29,7 +29,7 @@ export const runtimeContext=z.object({
  maxOutputTokens:z.number().int().positive().max(FROZEN_OUTPUT_CAP),maxTurns:z.number().int().min(1).max(32),
  inputSelection:z.literal('scope-projection-v1').optional(),
  providerRequestFormat:z.enum(PROVIDER_REQUEST_FORMATS).optional(),
- questionContract:z.literal(QUESTION_CONTRACT).optional(),reasoning:reasoningPolicy.optional(),
+ questionContract:z.enum([LEGACY_QUESTION_CONTRACT,QUESTION_CONTRACT]).optional(),reasoning:reasoningPolicy.optional(),
  historyItems:z.number().int().min(0).max(1000),purposeBudget:frozenPurposeBudget.optional(),
  tools:z.array(z.enum(['search','read_source',ASK_QUESTION_TOOL])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
  modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
@@ -91,7 +91,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
   // The Agent turn format (AC-1) is interactive dialogue only: no automatic
   // Skill matching or workspace reads, and its only tool is the question card.
   const agentTurn=context.providerRequestFormat===AGENT_TURN_REQUEST_FORMAT;
-  const fiveFields=context.questionContract===QUESTION_CONTRACT;
+  const fiveFields=Boolean(context.questionContract);
   if(fiveFields&&!agentTurn)throw new Error('RUNTIME_CONTEXT_INVALID');
   if(agentTurn&&(context.matching||context.workspaceContext||context.tools.some(name=>name!==ASK_QUESTION_TOOL)))throw new Error('RUNTIME_CONTEXT_INVALID');
   if(!agentTurn&&context.tools.includes(ASK_QUESTION_TOOL))throw new Error('RUNTIME_CONTEXT_INVALID');
@@ -228,9 +228,10 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
    const primarySequence=callSequence;
    let agentText="";
    let agentToolCalled=false;
+   let agentCardMessage:string|null|undefined;
    const runPrimary=async(legacyInput=false)=>{
    agentText="";
-   agentToolCalled=false;
+   agentToolCalled=false;agentCardMessage=undefined;
    if(context.reasoning&&('effort' in context.reasoning||context.reasoning.parameter!=='none')&&effective.model!==context.model)
     throw new Error('RUNTIME_MODEL_DENIED');
    const normalized=context.providerRequestFormat==='serial-tools-v2'||context.providerRequestFormat==='serial-tools-v6-reasoning'||streaming;
@@ -275,6 +276,9 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
      if(!response||response.model!==effective.model||response.choices?.length!==1)throw new Error('RUNTIME_RESPONSE_INVALID');
      checkAgentReply(response);
      if(agentTurn)agentToolCalled=Boolean(response.choices[0]?.message?.tool_calls?.length);
+     const firstCall=response.choices[0]?.message?.tool_calls?.[0];
+     if(context.questionContract===QUESTION_CONTRACT&&firstCall?.function?.name===ASK_QUESTION_TOOL)
+      agentCardMessage=questionMessageFromArguments(firstCall.function.arguments);
      return JSON.stringify(response);
     }});
    };
@@ -295,7 +299,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
     if(latest.unavailable)return {state:latest.state,unavailable:'latest' as const};
    }
    budget.timing?.mark('fullModelReply');
-   const turn=agentTurn?agentTurnResult(agentText,body,agentToolCalled):null;
+   const turn=agentTurn?agentTurnResult(agentText,body,agentToolCalled,agentCardMessage):null;
    if(turn){
     if(turn.card||turn.message!==INVALID_REPLY_NOTICE)budget.timing?.mark('firstValidContent');
     body=turn.body;
@@ -313,8 +317,8 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
     const instructions=organizer.instructions ?? 'Organize this operation result. Preserve provenance and uncertainty. Do not add new facts.';
     const organizerInput=organizer.input ? organizer.input+'\n\nPrimary assistant reply:\n'+body : body;
     summary=await runRuntime({model:organizer.model,instructions,input:organizerInput,session,maxOutputTokens:organizer.maxOutputTokens,maxTurns:1,tools:[],
-     reasoning:organizer.reasoning,
-     // Session reads now contain only the primary call's frozen dependencies.
+     reasoning:organizer.reasoning,readSessionHistory:organizer.historyItems===0?false:undefined,
+     // New explicit-zero organizers never read Session; older frozen values replay as before.
      selectHistory:async(history,incoming)=>selectRuntimeHistory(history,incoming,{
       instructions,inputBytes:Math.min(organizerPolicy.inputLimit,organizer.inputBytes??Infinity),
       historyItems:organizer.historyItems??0,toolBytes:0}),

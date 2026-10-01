@@ -1062,14 +1062,15 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
   const all={oldPrepareOpening,oldStreamOpening,oldPrepareAnswer,oldStreamAnswer,opening,answer};
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
+   // Attached organizers now skip one Session history read in each invocation.
    // The first prepare of this new package misses the Skill file cache (AC-0c).
    oldPrepareOpening:{prelude:2,policy:0,host:5,admission:16},
-   oldStreamOpening:{prelude:2,policy:0,host:0,execute:6,provider:14},
+   oldStreamOpening:{prelude:2,policy:0,host:0,execute:6,provider:13},
    oldPrepareAnswer:{prelude:2,policy:0,host:5,admission:12},
-   oldStreamAnswer:{prelude:2,policy:0,host:0,execute:6,provider:14},
+   oldStreamAnswer:{prelude:2,policy:0,host:0,execute:6,provider:13},
    // One invocation: one prelude instead of two; admission and execution unchanged.
-   opening:{prelude:2,policy:0,host:5,admission:12,execute:6,provider:14},
-   answer:{prelude:2,policy:0,host:5,admission:12,execute:6,provider:14},
+   opening:{prelude:2,policy:0,host:5,admission:12,execute:6,provider:13},
+   answer:{prelude:2,policy:0,host:5,admission:12,execute:6,provider:13},
   });
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
   // Auth verifies once per invocation, and again after each provider response.

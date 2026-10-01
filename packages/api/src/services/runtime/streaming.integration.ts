@@ -6,6 +6,7 @@ import {createServer,type ServerResponse} from 'node:http';
 import pg from 'pg';
 import {createClient} from '@supabase/supabase-js';
 import {runtimeExecutor} from './execute';
+import {QUESTION_CONTRACT,LEGACY_QUESTION_CONTRACT} from './agentTools';
 import {createRuntimeBudget} from './budget';
 import {authoritativeBilling} from '../bill2/service';
 import type {RuntimeProgress} from './progress';
@@ -26,7 +27,7 @@ const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 async function rpc(name:string,args:Record<string,unknown>){const result=await admin.rpc(name,args);if(result.error)throw new Error(result.error.message);return result.data;}
 function latch(){let release!:()=>void;const promise=new Promise<void>(resolve=>{release=resolve;});return {promise,release};}
 async function until(test:()=>boolean){const deadline=Date.now()+5000;while(!test()){if(Date.now()>deadline)throw new Error('synthetic progress deadline');await new Promise(resolve=>setTimeout(resolve,10));}}
-async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial-tools-v4-stream'|'agent-turn-v5-stream'|'serial-tools-v6-reasoning',organize=false,outputLimit=100,tool=false,reasoning?:{primary:ReasoningPolicy;organizer:ReasoningPolicy},opening=false,inputLimit=10000,fiveFields=false){
+async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial-tools-v4-stream'|'agent-turn-v5-stream'|'serial-tools-v6-reasoning',organize=false,outputLimit=100,tool=false,reasoning?:{primary:ReasoningPolicy;organizer:ReasoningPolicy},opening=false,inputLimit=10000,fiveFields:boolean|'legacy'=false){
  const actorId=randomUUID(),mentorId=randomUUID(),organizerId=randomUUID(),windowId=randomUUID(),requestId=randomUUID();
  await db.query('insert into profiles(id,credits) values($1,100)',[actorId]);
  await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,100,'addition','grant','opening_grant','system',$2,0,100)",[actorId,'stream-opening:'+actorId]);
@@ -34,7 +35,7 @@ async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial
  const policies=[[mentorId,'synthetic/mentor'],[organizerId,'synthetic/organizer']].map(([modelId,model])=>({modelId,model,provider:'openrouter',account:'synthetic-stream',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:inputLimit>10000?40000:10000,promptUsdPerMillion:inputLimit>10000?'0.5':'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
  for(const policy of policies)await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic streaming integration',$2,'openrouter','true')",[policy.modelId,policy.model]);
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.10,3,now()+interval '2 hours')",[windowId,[actorId],JSON.stringify(policies)]);
- const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',inputSelection:'scope-projection-v1',providerRequestFormat:format,...(fiveFields?{questionContract:'five-fields-v1'}:{}),...(reasoning?{reasoning:reasoning.primary}:format==='serial-tools-v4-stream'||format==='agent-turn-v5-stream'?{reasoning:{effort:'none'}}:{}),input:opening?'HOST_OPEN_CURRENT_QUESTION':'Synthetic original input',instructions:'Return the public mentor message in the message property; keep protocol fields private.',model:policies[0]!.model,modelId:mentorId,maxOutputTokens:outputLimit,maxTurns:1,historyItems:20,network:'deny',tools:format==='agent-turn-v5-stream'?(fiveFields&&opening?[]:['ask_question']):tool?['read_source']:[],...(tool?{workspaceContext:true,maxToolCalls:1,maxTurns:2}:{}),request:{sessionId:session.sessionId,requestId,organizeAfter:false},...(organize?{attachedOrganizer:{modelId:organizerId,model:policies[1]!.model,maxOutputTokens:reasoning?outputLimit:100,...(reasoning?{reasoning:reasoning.organizer}:{}),instructions:'Synthetic organizer only',input:'Synthetic original input'}}:{})};
+ const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',inputSelection:'scope-projection-v1',providerRequestFormat:format,...(fiveFields?{questionContract:fiveFields==='legacy'?LEGACY_QUESTION_CONTRACT:QUESTION_CONTRACT}:{}),...(reasoning?{reasoning:reasoning.primary}:format==='serial-tools-v4-stream'||format==='agent-turn-v5-stream'?{reasoning:{effort:'none'}}:{}),input:opening?'HOST_OPEN_CURRENT_QUESTION':'Synthetic original input',instructions:'Return the public mentor message in the message property; keep protocol fields private.',model:policies[0]!.model,modelId:mentorId,maxOutputTokens:outputLimit,maxTurns:1,historyItems:20,network:'deny',tools:format==='agent-turn-v5-stream'?(fiveFields&&opening?[]:['ask_question']):tool?['read_source']:[],...(tool?{workspaceContext:true,maxToolCalls:1,maxTurns:2}:{}),request:{sessionId:session.sessionId,requestId,organizeAfter:false},...(organize?{attachedOrganizer:{modelId:organizerId,model:policies[1]!.model,maxOutputTokens:reasoning?outputLimit:100,...(reasoning?{reasoning:reasoning.organizer}:{}),instructions:'Synthetic organizer only',input:'Synthetic original input'}}:{})};
  const billing={contractVersion:'bill2.v1',mode:'staging_test',testWindowId:windowId,scope:session.scope,operation:'question',modelId:mentorId,sourceHash:hash('synthetic-stream'),input:context,callPolicy:organize?policies:[policies[0]],rules:{version:'runtime-staging-v1',quoteVersion:windowId,creditsPerUsd:'1000',multiplier:'1',fx:{}},limits:{costUsd:tool?'0.06':organize?'0.04':'0.02',credits:tool?60:organize?40:20,maxPreDeduct:tool?60:organize?40:20,maxCalls:tool?3:organize?2:1,deadline:new Date(Date.now()+3600000).toISOString()}};
  const execution=await rpc('runtime_admit',{p_actor_id:actorId,p_session_id:session.sessionId,p_request_id:requestId,p_payload:context,p_billing:billing});
  return {actorId,context,execution,session,billing};
@@ -597,7 +598,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['card','invalid','p
   else expect(request.tools[0].function.parameters.required).toEqual(expect.arrayContaining([
    'message','question','options','recommended','recommendationReason']));
   res.setHeader('content-type','text/event-stream');
-  chunk(res,id,request.model,{role:'assistant',content:'Separate assistant text'});
+  chunk(res,id,request.model,{role:'assistant',content:scenario==='invalid'?null:'Separate assistant text'});
   seen.release();await gate.promise;
   if(scenario==='card'||scenario==='invalid')chunk(res,id,request.model,{tool_calls:[{index:0,id:'five-call',type:'function',
    function:{name:'ask_question',arguments:JSON.stringify(scenario==='invalid'?{...card,recommendationReason:null}:card)}}]});
@@ -617,12 +618,129 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['card','invalid','p
   if(scenario==='opening')await until(()=>events.some(event=>event.type==='text'));
   else expect(events.filter(event=>event.type==='text'||event.type==='card')).toEqual([]);
   gate.release();const result=await pending;
-  const expected=agentTurnBody(scenario==='card'?card.message:'Separate assistant text',scenario==='card'?card:null);
+  const expected=agentTurnBody(scenario==='card'||scenario==='invalid'?card.message:'Separate assistant text',scenario==='card'?card:null);
   expect(result).toEqual({state:'completed',body:expected});
   const texts=events.filter(event=>event.type==='text');
-  expect(texts).toEqual(Array(scenario==='opening'?2:1).fill({type:'text',text:scenario==='card'?card.message:'Separate assistant text'}));
+  expect(texts).toEqual(Array(scenario==='opening'?2:1).fill({type:'text',text:scenario==='card'||scenario==='invalid'?card.message:'Separate assistant text'}));
   expect(budget.timing.summary().marks).toMatchObject({firstValidContentMs:expect.any(Number),fullModelReplyMs:expect.any(Number)});
   expect(events.filter(event=>event.type==='card')).toEqual(scenario==='card'?[{type:'card',card}]:[]);
   expect(await host().execute(f.execution.executionId)).toEqual(result);expect(posts).toBe(1);
  }finally{gate.release();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['reason','duplicate','oversize','bad-message'] as const)(
+ 'RUNTIME: invalid five-field %s preserves paid message without assistant prose through interrupted replay',async kind=>{
+ const f=await fixture('agent-turn-v5-stream',false,8192,false,undefined,false,30000,true);
+ const card={message:kind==='bad-message'?' ': 'Paid valid public message',question:'Choose?',
+  options:kind==='duplicate'?['Same','Same']:kind==='oversize'?['x'.repeat(201),'Other']:['First','Second'],
+  recommended:0,recommendationReason:kind==='reason'?null:'Grounded reason'};
+ let posts=0,failComplete=true;
+ const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  posts++;const request=JSON.parse(String(init!.body));
+  const frame={id:'gen-invalid-'+f.execution.executionId,model:request.model,choices:[{index:0,
+   delta:{role:'assistant',content:null,tool_calls:[{index:0,id:'bad-card',type:'function',
+    function:{name:'ask_question',arguments:JSON.stringify(card)}}]},finish_reason:'tool_calls'}],
+   usage:{prompt_tokens:10,completion_tokens:100,total_tokens:110,cost:0.003}};
+  return new Response('data: '+JSON.stringify(frame)+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
+ }});
+ const database={rpc:async(name:string,args:Record<string,unknown>)=>{
+  if(name==='runtime_execution'&&args.p_action==='complete'&&failComplete){
+   failComplete=false;return {data:null,error:{message:'Synthetic completion loss'}};
+  }
+  return admin.rpc(name,args);
+ }};
+ const expected=kind==='bad-message'?INVALID_REPLY_NOTICE:card.message;
+ const host=()=>runtimeExecutor({database,actor:async()=>f.actorId,adapter});
+ const first:RuntimeProgress[]=[],replayed:RuntimeProgress[]=[];
+ expect(await host().execute(f.execution.executionId,event=>first.push(event))).toEqual({state:'pending'});
+ const before=(await db.query('select r.* from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1',[f.execution.runId])).rows;
+ const result={state:'completed',body:agentTurnBody(expected,null)};
+ expect(await host().execute(f.execution.executionId,event=>replayed.push(event))).toEqual(result);
+ expect(await host().execute(f.execution.executionId)).toEqual(result);
+ for(const events of [first,replayed]){
+  expect(events.filter(event=>event.type==='text')).toEqual([{type:'text',text:expected}]);
+  expect(events.filter(event=>event.type==='card')).toEqual([]);
+ }
+ const history=(await db.query('select item from runtime_session_history where session_id=$1 order by revision',[f.session.sessionId])).rows;
+ const toolResult=history.find(row=>row.item.type==='function_call_result')?.item;
+ expect(JSON.stringify(toolResult)).toContain('card');
+ expect(JSON.stringify(toolResult)).toContain('invalid');
+ expect(JSON.stringify(toolResult)).not.toContain(card.message.trim()||'Paid valid public message');
+ expect((await db.query('select r.* from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1',[f.execution.runId])).rows).toEqual(before);
+ expect((await db.query('select state,charged from bill2_runs where id=$1',[f.execution.runId])).rows[0]).toEqual({state:'settled',charged:3});
+ expect((await db.query("select count(*)::int n from credit_transactions where bill2_run_id=$1 and reason_code='bill2_spend'",[f.execution.runId])).rows[0].n).toBe(1);
+ expect(posts).toBe(1);
+});
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([0,20])(
+ 'RUNTIME: attached organizer frozen history=%i preserves request replay and only explicit-zero skips history reads',async historyItems=>{
+ const f=await fixture('agent-turn-v5-stream',true,8192,false,undefined,false,30000,true);
+ const bodies:string[]=[];
+ const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  const body=String(init!.body);bodies.push(body);const request=JSON.parse(body);
+  const id='gen-history-'+f.execution.executionId+'-'+bodies.length;
+  if(!request.stream)return new Response(completion(id,request.model,'Organized explicit material'));
+  const content=bodies.length===1?'OLD_SESSION_ONLY':'Current primary reply';
+  const frame={id,model:request.model,choices:[{index:0,delta:{role:'assistant',content},finish_reason:'stop'}],
+   usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}};
+  return new Response('data: '+JSON.stringify(frame)+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
+ }});
+ expect(await runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId)).toMatchObject({state:'completed'});
+ await db.query('update runtime_test_windows set max_calls=4 where id=$1',[f.billing.testWindowId]);
+ const requestId=randomUUID();
+ const context={...f.context,input:'Current answer',request:{...f.context.request,requestId},
+  attachedOrganizer:{...f.context.attachedOrganizer!,historyItems,input:'EXPLICIT_ORGANIZER_INPUT'}};
+ const billing={...f.billing,input:context};
+ const next=await rpc('runtime_admit',{p_actor_id:f.actorId,p_session_id:f.session.sessionId,p_request_id:requestId,p_payload:context,p_billing:billing});
+ let organizing=false,historyReads=0,failComplete=true;
+ const database={rpc:async(name:string,args:Record<string,unknown>)=>{
+  if(organizing&&name==='runtime_session_items'&&args.p_action==='read'&&args.p_limit!==0)historyReads++;
+  if(name==='runtime_execution'&&args.p_action==='complete'&&failComplete){failComplete=false;return {data:null,error:{message:'Synthetic completion loss'}};}
+  return admin.rpc(name,args);
+ }};
+ const host=()=>runtimeExecutor({database,actor:async()=>f.actorId,adapter});
+ const progress=(event:RuntimeProgress)=>{if(event.type==='phase')organizing=event.phase==='organizer';};
+ expect(await host().execute(next.executionId,progress)).toEqual({state:'pending'});
+ organizing=false;
+ expect(await host().execute(next.executionId,progress)).toMatchObject({state:'completed'});
+ expect(historyReads).toBe(historyItems===0?0:2);
+ expect(bodies).toHaveLength(4);
+ expect(bodies[2]).toContain('OLD_SESSION_ONLY'); // The mentor still gets its normal history.
+ expect(bodies[3]!.includes('OLD_SESSION_ONLY')).toBe(historyItems>0);
+ expect(bodies[3]).toContain('EXPLICIT_ORGANIZER_INPUT');
+ expect(bodies[3]).toContain('Current primary reply');
+ expect((await db.query("select count(*)::int n from credit_transactions where bill2_run_id=$1 and reason_code='bill2_spend'",[next.runId])).rows[0].n).toBe(1);
+});
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['legacy',true] as const)(
+ 'RUNTIME: question contract %s preserves its invalid-card primary checkpoint and organizer bytes on recovery',async contract=>{
+ const f=await fixture('agent-turn-v5-stream',true,8192,false,undefined,false,30000,contract);
+ const message='Valid prose inside invalid card';
+ const expected=contract==='legacy'?INVALID_REPLY_NOTICE:message;
+ const bodies:string[]=[];let failComplete=true;
+ const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  bodies.push(String(init!.body));const request=JSON.parse(bodies.at(-1)!);
+  const id='gen-checkpoint-'+f.execution.executionId+'-'+bodies.length;
+  if(!request.stream)return new Response(completion(id,request.model,'Organized'));
+  const frame={id,model:request.model,choices:[{index:0,delta:{role:'assistant',content:null,
+   tool_calls:[{index:0,id:'invalid-card',type:'function',function:{name:'ask_question',
+    arguments:JSON.stringify({message,question:'Choose?',options:['First','Second'],recommended:0,recommendationReason:null})}}]},
+   finish_reason:'tool_calls'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}};
+  return new Response('data: '+JSON.stringify(frame)+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
+ }});
+ const database={rpc:async(name:string,args:Record<string,unknown>)=>{
+  if(name==='runtime_execution'&&args.p_action==='complete'&&failComplete){failComplete=false;return {data:null,error:{message:'Synthetic completion loss'}};}
+  return admin.rpc(name,args);
+ }};
+ const host=()=>runtimeExecutor({database,actor:async()=>f.actorId,adapter});
+ expect(await host().execute(f.execution.executionId)).toEqual({state:'pending'});
+ const checkpoint=(await db.query('select primary_result from runtime_executions where id=$1',[f.execution.executionId])).rows[0].primary_result;
+ expect(checkpoint.body).toBe(agentTurnBody(expected,null));
+ expect(JSON.parse(bodies[1]!).messages.at(-1).content).toContain(expected);
+ const calls=(await db.query('select id,payload from bill2_calls where run_id=$1 order by sequence',[f.execution.runId])).rows;
+ expect(await host().execute(f.execution.executionId)).toEqual({state:'completed',body:agentTurnBody(expected,null),summary:'Organized'});
+ expect((await db.query('select primary_result from runtime_executions where id=$1',[f.execution.executionId])).rows[0].primary_result).toEqual(checkpoint);
+ expect((await db.query('select id,payload from bill2_calls where run_id=$1 order by sequence',[f.execution.runId])).rows).toEqual(calls);
+ expect(bodies).toHaveLength(2);
+ expect((await db.query("select count(*)::int n from credit_transactions where bill2_run_id=$1 and reason_code='bill2_spend'",[f.execution.runId])).rows[0].n).toBe(1);
 });

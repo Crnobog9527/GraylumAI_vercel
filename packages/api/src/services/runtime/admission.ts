@@ -144,6 +144,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     attachedOrganizer={
      modelId:summary.modelId,model:model.data.model_id,maxOutputTokens:limit,
      ...(budgets?{inputBytes:attachedInputLimit,historyItems:budgets.organize.historyItems}:{}),
+     ...(mentorStream?{historyItems:0}:{}),
      ...(policy.real?{reasoning:admitReasoning(model.data,'organize',realModel(model.data).providerLimits!.providerSlug,limit)}:{}),
      ...(policy.organizerInstructions?{instructions:z.string().max(12000).parse(policy.organizerInstructions)}:{}),
      ...(policy.organizerInput?{input:z.string().max(24000).parse(policy.organizerInput)}:{}),
