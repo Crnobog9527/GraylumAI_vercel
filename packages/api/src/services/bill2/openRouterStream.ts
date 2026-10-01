@@ -1,8 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {parseExactJson} from './decimal';
+import {PURPOSE_OUTPUT_CAP} from '../runtime/purposeBudgets';
 import {OPENROUTER_RESPONSE_BYTE_LIMIT} from './responseCapacity';
 
 export const OPENROUTER_STREAM_BYTE_LIMIT=4_194_304;
+// Allow separate token/reasoning-detail frames plus role, finish and usage metadata.
+export const OPENROUTER_STREAM_FRAME_LIMIT=2*PURPOSE_OUTPUT_CAP+64;
 const object=(v:unknown):v is Record<string,unknown>=>Boolean(v&&typeof v==='object'&&!Array.isArray(v));
 const id=(v:unknown):v is string=>typeof v==='string'&&/^[a-zA-Z0-9._:-]{1,256}$/.test(v);
 const finishes=new Set(['stop','length','content_filter','tool_calls']);
@@ -45,7 +48,7 @@ export function openRouterStream(model:string,headerId?:string,onChunk?:(chunk:s
   if(!frame.length)return;const data=frame.join('\n');frame=[];
   if(done)return reject();
   if(data==='[DONE]'){done=true;return;}
-  if(++frameCount>8192||Buffer.byteLength(data)>65536)return reject();
+  if(++frameCount>OPENROUTER_STREAM_FRAME_LIMIT||Buffer.byteLength(data)>65536)return reject();
   const exact=parseExactJson(data);const value:unknown=JSON.parse(data);
   if(!object(value)||!object(exact))return reject();
   if(value.error)return reject('provider_stream_error');
