@@ -23,7 +23,7 @@ docker('image', 'inspect', POSTGRES_IMAGE);
 const db = `graylum-bill-unit-${randomUUID().slice(0, 8)}`;
 const sql = input => run('docker', ['--host', endpoint, 'exec', '-i', db, 'psql',
   '-X', '-A', '-t', '-U', 'postgres', '-d', 'billunit', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=verbose'], input);
-const migration = 'packages/db/migrations/PENDING_bill_unit_model_multiplier.sql';
+const migration = 'packages/db/pending/bill_unit_model_multiplier.sql';
 const apply = () => sql(readFileSync(resolve(root, migration), 'utf8'));
 const sqlState = query => {
   try { sql(query); return 'ok'; } catch (error) { return /\b(23514|42501|22P02)\b/.exec(String(error.stderr))?.[1] ?? 'other'; }

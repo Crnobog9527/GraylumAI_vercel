@@ -1,5 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- BILL-UNIT draft: no migration number reserved. Rename after #497 (0155) and #550 (0156) merge.
+-- BILL-UNIT draft kept outside packages/db/migrations so the ledger check and CI tests keep running.
+-- Move into packages/db/migrations with the next free number after #497 (0155) and #550 (0156) merge.
 -- Local development only until host integration, final validation, review and Owner authorization.
 --
 -- Per-model price multiplier m. NULL means "inherit the site-wide default"
