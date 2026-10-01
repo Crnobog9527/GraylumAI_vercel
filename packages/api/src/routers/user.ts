@@ -1,3 +1,4 @@
+import { readMembershipEntitlements } from '../services/membershipEntitlements';
 import { router, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -6,6 +7,12 @@ import { createSafeInternalError, createSafeServiceUnavailableError } from '../l
 import { countsAsCreditSpend } from '../services/creditLedger';
 
 export const userRouter = router({
+  getEntitlements: protectedProcedure.input(z.void()).query(async ({ ctx }) => {
+    if (!ctx.hasSupabaseAdminPrivileges) {
+      throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: 'ENTITLEMENTS_UNAVAILABLE' });
+    }
+    return readMembershipEntitlements(ctx.supabaseAdmin, ctx.profileId);
+  }),
   getUserProfile: protectedProcedure.query(async ({ ctx }) => {
     // 只查询数据库中实际存在的列
     // profiles 表结构: id, credits, created_at, role, status, membership_level,
