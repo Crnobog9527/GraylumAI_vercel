@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { invitationRouter, validateInvitationCodeExists } from './invitation';
 
-function createProtectedCaller(supabase: { from(table: string): unknown; rpc?: (fn: string, payload: Record<string, unknown>) => Promise<unknown> }) {
+function createProtectedCaller(supabase: { from(table: string): unknown; rpc?: (fn: string, payload: Record<string, unknown>) => Promise<unknown> }, privileged = true) {
   return invitationRouter.createCaller({
     headers: new Headers(),
     user: {
@@ -16,7 +16,7 @@ function createProtectedCaller(supabase: { from(table: string): unknown; rpc?: (
     supabaseAuth: supabase,
     supabasePublic: { rpc: () => Promise.resolve({ data: true, error: null }) },
     supabaseAdmin: supabase,
-    hasSupabaseAdminPrivileges: true,
+    hasSupabaseAdminPrivileges: privileged,
   } as any);
 }
 
@@ -231,6 +231,15 @@ describe('validateInvitationCodeExists', () => {
 });
 
 describe('invitationRouter error sanitization', () => {
+  it('fails before invitation access without service privileges', async () => {
+    const { supabase, rpc } = createClaimSupabase({});
+    const from = vi.spyOn(supabase, 'from');
+    await expect(createProtectedCaller(supabase, false).claimInvitationCode({ code: 'ABC123' }))
+      .rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+    expect(from.mock.calls.every(([table]) => table === 'profiles')).toBe(true);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it('sanitizes claimInvitationCode lookup failures', async () => {
     const supabase = {
       from(table: string) {
@@ -286,11 +295,11 @@ describe('invitationRouter error sanitization', () => {
       p_invitation_code: 'ABC123',
       p_invitee_id: 'user-1',
       p_invitee_email: 'user@example.com',
-      p_claim_status: 'rewarded',
+      p_claim_status: 'server_decides',
       p_risk_level: 'low',
       p_block_reason: null,
-      p_inviter_reward: 50,
-      p_invitee_reward: 30,
+      p_inviter_reward: 0,
+      p_invitee_reward: 0,
       p_ip_address: null,
       p_user_agent: null,
     });
@@ -365,9 +374,11 @@ describe('invitationRouter error sanitization', () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
-  it('passes rejected claim decisions to the atomic RPC with zero rewards', async () => {
+  it('uses the database decision instead of API statistics', async () => {
     const { supabase, rpc } = createClaimSupabase({
-      monthlyCount: 50,
+      monthlyCount: 0,
+      rpcResult: [{ status: 'rejected', risk_level: 'medium', block_reason: 'invitation_monthly_limit',
+        inviter_reward: 0, invitee_reward: 0, is_idempotent: false }],
     });
     const caller = createProtectedCaller(supabase);
 
@@ -380,8 +391,8 @@ describe('invitationRouter error sanitization', () => {
       riskLevel: 'medium',
     });
     expect(rpc).toHaveBeenCalledWith('atomic_claim_invitation_code', expect.objectContaining({
-      p_claim_status: 'rejected',
-      p_risk_level: 'medium',
+      p_claim_status: 'server_decides',
+      p_risk_level: 'low',
       p_inviter_reward: 0,
       p_invitee_reward: 0,
     }));

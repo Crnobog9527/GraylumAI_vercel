@@ -83,7 +83,6 @@
   "packages/api/src/routers/admin.ts": {"lines":3026},
   "packages/api/src/routers/agentSlice.ts": {"longLines":3},
   "packages/api/src/routers/chat.ts": {"lines":607,"longLines":1},
-  "packages/api/src/routers/invitation.ts": {"lines":530},
   "packages/api/src/routers/model.ts": {"lines":514,"longLines":4},
   "packages/api/src/routers/opc.ts": {"longLines":5},
   "packages/api/src/routers/payments.ts": {"lines":2107},
