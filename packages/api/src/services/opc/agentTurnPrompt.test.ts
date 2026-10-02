@@ -41,26 +41,24 @@ describe('pinned generic Agent turn prompt',()=>{
  // Owner 2026-09-29: the card is an aid for sorting out known material, never a guess.
  it('states when a card is used and when prose is used instead',()=>{
   const prompt=agentTurnInstructions(input);
-  expect(prompt).toContain('it never guesses the user\'s situation, and most turns need no card');
-  expect(prompt).toContain('1. Choice card: your prose compares concrete alternatives built from the user\'s own material');
-  expect(prompt).toContain('options they named or asked you to decide between, or plans computed from their stated constraints');
-  expect(prompt).toContain('recommended set to that pick; the prose says which and why');
-  expect(prompt).toContain('2. Neutral card');expect(prompt).toContain('Set recommended to null.');
-  expect(prompt).toContain('A card always follows prose; never reply with a card alone.');
-  expect(prompt).toContain('Categories you supply for the user\'s customers, audience, strengths, story or offer are guesses and never card options');
-  expect(prompt).toContain('a few general ranges or categories (such as weekly hours or platform types) listable without knowing the user');
-  expect(prompt).toContain("3. Socratic prose: the answer is open personal content (the user's experience, strengths, stories, goals or customers)");
-  expect(prompt).toContain('or the information is not enough for a professional judgement. No card');
-  expect(prompt).toContain('4. Labelled guess');
-  expect(prompt).toContain('Give examples in prose only, saying they are your guesses for the user to decide, '+
-   'made because the information is not yet enough for a professional judgement');
-  expect(prompt).toContain('5. Clear answer: no card');
-  expect(prompt).toContain('Do not list the options again in prose, and recommend the same option as recommended');
-  expect(prompt).toContain('The host adds an Other entry; never add other, not-sure, skip, defer or continue options');
-  // Owner rule 4 (locked): a neutral card never asserts facts about the user.
+  expect(prompt).toContain("it never guesses the user's situation");
+  expect(prompt).not.toContain('most turns need no card');
+  expect(prompt).toContain('you MUST call ask_question');
+  expect(prompt).toContain('including when they explicitly ask for options');
+  expect(prompt).toContain('Never write a multiple-choice question only as assistant prose');
+  expect(prompt).toContain('examples in prose do not replace the card');
   expect(prompt).toContain('Set recommended to null. Options must not assert facts about the user.');
+  expect(prompt).toContain('insufficient information for a professional judgement, ask one open question');
+  expect(prompt).toContain("Do not turn guesses about the user's customers, audience, strengths, story or offer into options");
+  expect(prompt).toContain('4. Clear answer: no card');
+  expect(prompt).toContain('5. Host opening: no card');
+  expect(prompt).toContain('Do not repeat the list of card options in prose');
+  expect(prompt).toContain('Recommend one with a reason');
+  expect(prompt).toContain('The host adds an Other entry; never add other, not-sure, skip, defer or continue options');
   expect(prompt).toContain('For user_fact, use a neutral card only for general ranges or categories and Socratic prose for open personal content');
   expect(prompt).toContain('never offer guesses as options');
+  expect(prompt).toContain('explicitly label the claim as a hypothesis made because information is insufficient');
+  expect(prompt).toContain('information is insufficient; never present it as measured data');
   expect(prompt).not.toContain('我不确定，帮我分析');
  });
  it('adds host-opening instructions only for openings and never fabricates user speech',()=>{
@@ -83,7 +81,7 @@ describe('pinned generic Agent turn prompt',()=>{
   expect(prompt).toContain('an occasional maximum is not a sustainable commitment');
   expect(prompt).toContain('this overrides every case');
   expect(prompt).toContain('with no card, follow-up question, confirmation request or next-topic invitation');
-  expect(prompt).toContain('options resolving only the current field');
+  expect(prompt).toContain('one main question about the current');
   expect(prompt).toContain('acknowledge briefly without reopening it or offering to advance');
  });
  it('handles a revision without a current question',()=>{

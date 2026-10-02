@@ -1,5 +1,4 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import './promptCache.integration';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { beforeAll, afterAll, it, expect, vi } from 'vitest';
 import {logger} from '../../lib/logger';
@@ -7,6 +6,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { PostgresSession } from './session';
+import {assertLongSessionPerformance} from './runtimePerformance.integration';
 import { runRuntime } from './runner';
 import {readRuntimeView,retainedOutputReason} from './view';
 import { runtimeExecutor } from './execute';
@@ -40,6 +40,10 @@ const modelId=randomUUID();
 async function rpc(name:string,args:Record<string,unknown>){const r=await admin.rpc(name,args);if(r.error)throw new Error(r.error.message);return r.data;}
 beforeAll(async()=>{await db.connect();await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Runtime local','runtime-m','fixture','true')",[modelId]);});
 afterAll(async()=>{await db.end();});
+
+it('RUNTIME: 100-execution history stays below one second and still excludes revoked ancestors',async()=>{
+ await assertLongSessionPerformance(db);
+},30000);
 async function fixture(existingActor?:string){
  const actorId=existingActor??randomUUID();
  await db.query(existingActor?'insert into profiles(id,credits) values($1,100) on conflict(id) do update set credits=100':'insert into profiles(id,credits) values($1,100)',[actorId]);

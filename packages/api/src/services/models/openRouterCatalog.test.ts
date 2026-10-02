@@ -112,6 +112,21 @@ describe('pricing-only reads', () => {
     for (const endpoint of pricing.endpoints.slice(1)) expect(endpoint.issues).toContain('PRICE_INVALID');
   });
 
+  it('marks only the route with a field name longer than 64 characters as inadmissible', async () => {
+    const price = { prompt: '0.000001', completion: '0.000002' };
+    const routes = { data: { id: model, endpoints: [
+      { tag: 'good', provider_name: 'Good', pricing: price },
+      { tag: 'long-field', provider_name: 'Bad', pricing: { ...price, ['x'.repeat(65)]: '1' } },
+    ] } };
+    const fetchMock = transport({ [urls().endpoints]: () => json(routes) });
+    const pricing = await readOpenRouterPricing(model, fetchMock);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(pricing.endpoints).toEqual([
+      expect.objectContaining({ tag: 'good', admissible: true, issues: [], base: { prompt: '1', completion: '2' } }),
+      expect.objectContaining({ tag: 'long-field', admissible: false, issues: ['FIELD_NAME_TOO_LONG'] }),
+    ]);
+  });
+
   it('hashes endpoint tags in character-code order, independent of input ordering', () => {
     const endpoints = ['a', '_', 'Z', 'ä', 'A'].map(tag =>
       normalizeEndpointPricing(tag, 100, { prompt: '0.000001', completion: '0.000002' }));
