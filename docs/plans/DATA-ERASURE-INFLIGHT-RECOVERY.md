@@ -99,18 +99,30 @@ merge `7b880fc4e53766b0af9eb4cd362cd50ffcbebfc0`；其描述中的旧 draft 状�
 会话撤销、管理员禁用/封禁、注销，均不再以当前 getUser 成功作为原回执记录和财务结算的条件。
 这只承接当时已获授权的原 call；不授予下一次调用权，不恢复任何用户访问权限。
 退出登录或改密码后的 profile 通常仍 active；管理员 `updateUserStatus` 只改 profiles.status，
-而 `bill2_actor` 要求 active，因此 **disabled/banned 还需要 SQL 窄分支，单独绕过 Auth 不够**。
-按总控决定，在追加迁移中让原 read、record、close、finalize 的财务路径允许这两种状态：
-仅限已有已派发事实的 call，锁内核验 call 属于原 run、run/call 属于原 actor，
-并保留原预扣、合同版本、金额/来源、幂等及冲突约束；读取只返回必要财务数据。
-未派发或跨 actor/run/call 的请求不能借此分支写回执或结算；不得把任意已派发 call 当作
-访问另一笔账或正文的凭据。v1/run 预扣与 v2/call 预扣按 §3.6 分别核验。
+并不封禁 Auth。不能据此声称 disabled/banned 的 record/close/finalize 被 SQL active 门槛拦住。
+按本轮静态核验及总控更正，**新增窄分支仅限两处非注销路径**：
 
-prepare、claim、dispatch 继续要求账号 active，**不修改或放宽 bill2_actor 本身**，
-也不把 disabled/banned 伪装为注销。注销账号仍走原 B2a 注销判定、投影与恢复路径。
-非注销账号保留原资金语义；若原财务宿主经过 runtime_financial_recovery，
-其对 disabled/banned 的前置读取/资格判断须承接同一已派发原绑定分支，不能再次落回 active 门槛；
-只允许关闭及结算已有调用，不运行 SDK、恢复业务或无条件绕过正常执行的资格判断。
+- `bill2_read`（0156:133–134）：disabled/banned 的原 actor/run 下存在已派发 call 时，
+  允许读取必要财务视图，不读取 private_input 或 SDK 正文。
+- `bill2_revoke_unstarted_dispatch`（0156:334–335）：对已取得派发许可并登记派发事实、
+  绑定原 actor/run/call 的调用，允许原 token/hash 撤权证明，包括 `p_inspect` 和幂等回读。
+  “已派发”在这里是数据库派发许可事实，不等于 HTTP 已实际开始；只有原可信传输证明未开始
+  才能撤权，不能用零回执代替。撤权后保留的 dispatch_granted_at/dispatch_revoked_at
+  用于识别同一原证明并回读，不能因为 dispatched_at 已清空而破坏幂等。
+
+两处均保留原归属、scope、预扣、合同版本、金额/来源、冲突与撤权资格约束；
+不以任意已派发 call 授权另一笔账。v1/run 与 v2/call 预扣按 §3.6 分别核验。
+**不修改或放宽 bill2_actor 本身**；prepare、claim、dispatch、bill2_private_input、
+正文类 RPC 仍拒绝 disabled/banned。注销账号继续原 B2a 路径，不改注销判定。
+
+以下函数目前没有 active 门槛，**本修复也不新增**：`bill2_record`、`bill2_close`、
+`bill2_cancel`、`bill2_finalize`、`bill2_pending_calls`、`bill2_recovery_claim`、
+`runtime_receipt_saved`、`runtime_financial_recovery`。它们列为 disabled/banned 的行为回归，
+不是“实际走新增窄分支”的测试对象。record 仍保留其已有 dispatched_at 要求；
+尤其不得给 close/cancel/finalize 加“必须有已派发事实”，只有未派发 call 的 run
+仍可 cancel+finalize 释放一次预扣。financial_recovery 保留已有绑定与恢复资格判断；
+runtime_history_available 对禁用账号捕获权限异常返回 false，不需新增 active 豁免。
+SQL 能执行不等于无条件成功：原证据、绑定、查询次数/截止等约束继续生效。
 
 **后台批次只处理已注销账号**：由 service-only 数据库读取真实注销请求及原绑定构造能力，
 不依赖用户 JWT；普通退出、改密码、disabled/banned 但无注销请求的遗留 run 不纳入本批次。
@@ -168,7 +180,7 @@ B1b 正文擦除仍在单独事务通过原屏障；本切片不扩为 B2b 全�
 
 批次只枚举确有注销请求且仍有非终态 BILL2/Runtime 的原绑定，兼顾 closed=true 的未决 run，
 以及 run 已终态但 execution/active_execution 未同步的行，不能只筛 closed=false。
-先做短事务关闭集合/释放活动指针，再在事务外做有界 lookup，最后执行原 finish；
+先做短事务关闭集合；活动指针只在仍指向本执行时释放，再在事务外做有界 lookup，最后执行原 finish；
 单项失败继续其他合格项，下一次从数据库事实恢复。
 当前 recoverFinancial 将 lookup 失败与 finish 串联，拟让非致命查询失败也能独立完成关单阶段，
 但绑定/权限失败必须停止该项，不能用 finally 无条件绕过。
@@ -236,9 +248,10 @@ PAYG v2 将预扣移到 call，run.pre_deduct_id 为空；不能沿用该判断�
 | #553 BILL-PAYG | PR-A writer 负责 v1/v2 预扣绑定及财务 RPC，PR-B writer 负责 waiting_credits；#598 实施 writer 保留 v1 能力并纳入双方兼容验收。后合并方承担最终集成，不能把适配留在无人负责的后续项 |
 | #590 门禁 | #598 实施 writer 基于其合并后的 staging，在财务恢复使用 runtimeExecutor 时显式传 callGate: denyNewCalls；stopNewCalls/限流生效时 recovery 仍能 record/close/finalize，任何新 claim 被拒；不省略门禁或传允许新调用的替身 |
 | #593 信息捕获 | 同改 executionStream.ts，#598 实施在 #593 合并基础上同步；如顺序倒置由 #593 writer 同步。账号已关闭或结果 pending/cost_pending 时不触发捕获写入；正常 completed 捕获行为保留，测试注销并发与写入前封闭检查 |
-| #597 财务报表 | 报表 writer 负责保留并显示费用未知 run，不能将 NULL 当零或把 closed 当 settled；#598 实施在 #597 落地后核对数据契约与验收。若遗漏由报表 writer 同范围补齐，后合并方执行联调；本次不改报表 |
+| #597 财务报表 | 已合并为 c6441946；由 #598 对应实施 PR（后合并方）负责核对并补齐费用未知 run 的展示，不能将实际费用或名义费用的未知值当 0，也不能把 closed 当 settled；不再交给已结束的 #597 writer |
 
-修订时 #590/#593/#597 仍 OPEN，核验 head 分别为 9874815e、fd210532、555e595d；
+上一轮快照中 #590/#593 的 head 分别为 9874815e、fd210532；#597 的 555e595d
+已先合并为 c6441946，不再是 OPEN；
 #553 仍是方案，head 135d4c19。这些是快照，未来开工/合并时重新核对，不按旧号预占迁移。
 
 **邀请返利保持原行为**：SQL `runtime_financial_recovery → bill2_finalize` 不经过 TS
@@ -246,6 +259,13 @@ PAYG v2 将预扣移到 call，run.pre_deduct_id 为空；不能沿用该判断�
 包括注销后迟到结算。此次不补发返利；#553 的正常计费下游不能因此重复给恢复账单返利。
 
 ## 4. 三年保留与可对账
+
+按 [#553 名义费用决定 5957160656](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553#issuecomment-5957160656)，
+PAYG 将同时保留供应商实际费用和名义收费基准；收费公式、冻结标价及计费实现归 #553。
+本修复恢复时按原合同和冻结依据处理，不能拿新口径重算 v1 历史账。
+报表须区分这两个值：未知不能展示或聚合成 0，也不能用其中一个冒充另一个。
+若某一项已有独立可靠证据，可显示该项已知值，同时明确另一项仍未知；两项均缺证则都标未知。
+该联调和补齐由 #598 实施 PR 负责，列入 §6 必测，本轮不实施名义计价或修改报表。
 
 沿 DATA-ERASURE 已定要求：从对应交易年度结束起保留三年，不从注销或恢复日期重新计时。
 保留原不可登录财务主体、run/call/预扣/流水关系、派发和取消事实、冻结价格、精确费用、
@@ -263,9 +283,9 @@ PAYG v2 将预扣移到 call，run.pre_deduct_id 为空；不能沿用该判断�
 
 复用原 actor/run/call/receipt/预扣权威、B2a 投影、cancel/finalize/recovery_claim、
 注销阶段表及现有 cron。最小缺口是**窄财务身份、可靠 ID 早记、持久化事实驱动的补偿调用**。
-disabled/banned 的现有 SQL active 门槛无法满足已派发回执持久化，因此本修复实施方在
-同一组财务函数及必要恢复前置判断中追加 §3.1 的窄分支；不新增独立结算系统，
-不扩大新调用准入，不修改注销判定，不改历史迁移。
+disabled/banned 的 SQL 改动仅在 bill2_read、bill2_revoke_unstarted_dispatch
+两处追加 §3.1 窄分支；其余八个财务函数不新增 active 或已派发门槛，仅做行为回归。
+不新增独立结算系统，不扩大新调用准入，不修改注销判定，不改历史迁移。
 BILL2 表不向 service_role 开通通用 DML。批次发现与精确回读如现有 RPC 不足，
 只新增/扩展一个 service-only 财务枚举读取入口，返回必要绑定、冻结策略和状态；
 固定 search_path、限制数量、明确注销谓词，不接受任意 SQL，不返回正文。
@@ -286,13 +306,15 @@ PAYG 合同兼容复用 #553 的 call 级预扣和版本分支，责任及合并
 | 无后续用户请求 | 注销触发中断、worker/宿主重启、回执后崩溃；已有 cron 补齐 run/execution/session，并输出失败而非假成功 |
 | ID 早记与缺证 | 首个合法 ID 后崩溃仍能原 ID lookup；无 ID 永不猜查/重发；ID 冲突 fail closed；不持久化原始 SSE/正文 |
 | 宿主内允许路径 | 已派发后退出登录、改密码撤销会话、disabled/banned、注销均可凭原闭包持久化回执及合法结算；正常账号也测；不依赖 getUser 再成功 |
-| disabled/banned SQL 允许 | 两种状态分别验证已派发且原 actor/run/call 绑定的财务 read、record、close、finalize 成功；实际走 SQL 窄分支而非仅绕过 Auth；正常 active 与注销路径回归不变 |
-| disabled/banned SQL 拒绝 | 两种状态分别验证新的 prepare、claim、dispatch 均拒绝，包括禁用前 prepared 但未派发的调用；未派发伪回执、跨 actor/run/call 及正文读取拒绝；bill2_actor 仍要求 active |
+| disabled/banned 两处窄分支 | 两种状态分别验证原 actor/run 的已派发 call 可经 bill2_read 读取财务视图、经 bill2_revoke_unstarted_dispatch 原 token/hash 执行撤权与 p_inspect；实际走新增分支，跨绑定拒绝，正常 active/注销不变 |
+| disabled/banned 既有财务回归 | record、close、cancel、finalize、pending_calls、recovery_claim、runtime_receipt_saved、runtime_financial_recovery 各自满足原条件时照常执行，不新增 active 门槛；已派发 call 可写回执、关单、结算 |
+| 未实际发送与释放 | disabled/banned 分别测：只有 prepared 未派发 call 的 run 可 cancel+finalize，预扣仅释放一次；已登记派发许可但可靠证明 HTTP 未开始的 call 可撤权后正常释放；撤权回包丢失用 p_inspect 读回不重复释放；零回执但无证明不能撤权 |
+| disabled/banned SQL 拒绝 | 两种状态分别验证新的 prepare、claim、dispatch、private_input、正文类 RPC 均拒绝，包括禁用前 prepared 的新派发；未派发伪回执、跨 actor/run/call 拒绝；bill2_actor 仍要求 active |
 | 拒绝与后台边界 | anon/authenticated 直调、伪造/跨 actor/run/call、未派发伪回执拒绝；后台只允许真实注销原绑定，普通禁用无注销请求拒绝；新 prepare/claim/dispatch 和正文权限保持 |
 | PAYG 双合同 | v1 run 预扣、v2 call 预扣在注销场景都通过；零 call/零 hold waiting_credits 能终止；已结算前缀+未知后续仅保留后者 hold；缺失/错绑拒绝；不等待充值、不重复扣款 |
 | 门禁与捕获 | callGate: denyNewCalls 下恢复通过、新 claim 拒绝；stopNewCalls/限流不拦恢复；已关闭或 pending/cost_pending 不发生 #593 捕获，正常 completed 仍可捕获 |
 | 流式延迟 | 同一夹具对比首字时间、帧间隔，注入 ID 写入延迟/失败；首字不等待早记，持续输出不中断，结束前有界核对早记结果 |
-| 返利与报表 | SQL 恢复不调用邀请返利、不补发；#597 显示注销后费用未知 run，不当零/不漏掉；关单不等于结清 |
+| 返利与报表 | SQL 恢复不调用邀请返利、不补发；#598 实施 PR 在已合并 #597 上核对并补齐未知费用 run 展示：实际费用与名义费用分别保留未知，均不当 0、不漏掉；closed=true 不等于 settled/refunded，列表、汇总和导出均测 |
 | 状态与并发 | prepared、可靠未发送、dispatched、known/unknown、run 终态而 execution 非终态；注销/record/cancel/finalize 并发，无反锁；仅清原 active_execution |
 | 查询限制 | v1 原 run deadline+24h；v2 原 call recovery_deadline；各最多 3 次；无 ID/不支持 lookup/冲突/凭据换绑/预算不足不猜查；不重置次数、不新增 POST/预扣 |
 | 金额 | 0157 冻结计价兼容、精确小数、一次取整、来源保护、一次消费/释放；退款后晚到成本只记平台；未知不是零 |
@@ -357,3 +379,19 @@ PR 的 CI 是现有仓库检查，不是缺陷已修复的证据；独立方案�
 
 本次仍未实施代码、SQL 或配置，未访问数据库或调用供应商；新增功能验证 NOT_RUN。
 CI 通过只说明文档候选通过现有检查；新 head 仍需独立增量结论。交付后停止写入。
+
+### 2026-10-03：更正 SQL 门槛事实与报表责任
+
+依据[增量复核 5956696834](https://github.com/Crnobog9527/GraylumAI_vercel/pull/598#issuecomment-5956696834)、
+[总控确认 5956706024](https://github.com/Crnobog9527/GraylumAI_vercel/pull/598#issuecomment-5956706024)
+及 #553 评论 5957160656，从 3ba7a4fe 修订本文与 PR 描述。
+上一轮关于 record/close/finalize 有 active 门槛的事实前提有误；上一条修订记录仅保留历史，
+不作为实施要求，以本次 §3.1、§5、§6 更正为准。
+
+- P2：窄分支只在 read、revoke_unstarted_dispatch；其余八函数没有 active 门槛且不新增，
+  close/cancel/finalize 不加已派发前提。补齐原有行为、未派发取消释放、可靠未发送撤权的回归。
+- P3：§3.4 活动指针仅在仍指向本执行时释放。
+- #597 已先合并，报表核对/补齐归本方案实施 PR；实际费用与名义费用分别保留未知，
+  均不当 0，关单不当结清；列入实施必测。
+- 本轮仅静态核对最新 staging 迁移定义及指定决定，未运行功能测试、访问数据库或供应商。
+  推送后核对当前 head CI，再同步描述和交付评论；新 head 仍待独立增量结论。
