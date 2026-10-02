@@ -31,7 +31,7 @@ export async function captureCompleted(admin: SupabaseClient, actorId: string, e
   try {
     const result = await admin.rpc('opc_capture_apply', {
       p_actor_id: actorId, p_draft_id: null, p_execution_id: executionId,
-    });
+    }).abortSignal(AbortSignal.timeout(1000));
     // Ordinary Runtime sessions have no OPC draft; SQL refuses without writing.
     if (result.error?.message === 'OPC_CAPTURE_DENIED') return;
     if (result.error) throw result.error;

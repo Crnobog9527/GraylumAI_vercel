@@ -1,6 +1,21 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- B1: existing JSONB state and immutable request history remain authoritative.
+-- Capture receipts reserve UUID version F, which client UUID validation rejects.
+-- Manual information/resolve SQL also rejects that namespace before any write.
 BEGIN;
+DO $$
+DECLARE sig text; before_md5 text; after_md5 text;
+BEGIN
+ FOR sig,before_md5,after_md5 IN SELECT * FROM (VALUES
+  ('opc_information(uuid,uuid,text,uuid,integer,jsonb)','2b2414a7b77824c94460886e8de28102','facb1a24394a78ce3ccef78871bae75e'),
+  ('opc_query(uuid,uuid)','a897e051632d08666e9e42327c501e81','8f7d9b04d0f95ea595dbc49bdf82e4a9'),
+  ('runtime_work_projection(uuid,uuid,uuid)','5a5bfa688cb801fec9b1dbdaa0ce9627','fcb191fa3d9135c42509cd1395a6e025'),
+  ('runtime_material_allowed_before_b1(uuid,jsonb)','d9733d393816cf74ae0ae04088b87d80','0a1bac81b4214c2151f8ac32660b8d76')
+ ) v(signature,before_hash,after_hash) LOOP
+  IF to_regprocedure(sig) IS NULL OR md5(pg_get_functiondef(to_regprocedure(sig))) NOT IN (before_md5,after_md5)
+  THEN RAISE EXCEPTION 'OPC_CAPTURE_SOURCE_MISMATCH: %',sig;END IF;
+ END LOOP;
+END $$;
 CREATE OR REPLACE FUNCTION opc_capture_apply(p_actor_id uuid,p_draft_id uuid,p_execution_id uuid DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE d opc_drafts;r artifact_rounds;p artifact_projects;e runtime_executions;t opc_turns;req artifact_requests;
@@ -27,7 +42,7 @@ BEGIN
    AND CASE WHEN (ex.payload#>>'{attachedOrganizer,input}') IS JSON OBJECT
     THEN (ex.payload#>>'{attachedOrganizer,input}')::jsonb->>'captureFormat'='v2' ELSE false END
    AND NOT EXISTS(SELECT 1 FROM artifact_requests a WHERE a.project_id=d.project_id
-    AND a.request_id=md5('opc_capture:'||ex.id::text)::uuid AND a.action='opc_capture'
+    AND a.request_id=overlay(md5('opc_capture:'||ex.id::text) placing 'f' from 13 for 1)::uuid AND a.action='opc_capture'
     AND a.payload=jsonb_build_object('executionId',ex.id,'ruleVersion',1));
   SELECT coalesce(array_agg(x.id ORDER BY x.ord),'{}') INTO available_ids
   FROM unnest(ids) WITH ORDINALITY x(id,ord)
@@ -39,12 +54,12 @@ BEGIN
   END LOOP;
   SELECT count(*)::integer INTO remaining FROM unnest(available_ids) x(id)
   WHERE NOT EXISTS(SELECT 1 FROM artifact_requests a WHERE a.project_id=d.project_id
-   AND a.request_id=md5('opc_capture:'||x.id::text)::uuid);
+   AND a.request_id=overlay(md5('opc_capture:'||x.id::text) placing 'f' from 13 for 1)::uuid);
   RETURN jsonb_build_object('processed',processed,'remaining',remaining,'hasMore',remaining>0);
  END IF;
  SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND session_id=d.session_id AND actor_id=p_actor_id;
  IF e.id IS NULL THEN RAISE EXCEPTION 'OPC_CAPTURE_DENIED';END IF;
- capture_request_id:=md5('opc_capture:'||e.id::text)::uuid;
+ capture_request_id:=overlay(md5('opc_capture:'||e.id::text) placing 'f' from 13 for 1)::uuid;
  payload:=jsonb_build_object('executionId',e.id,'ruleVersion',1);
  SELECT * INTO req FROM artifact_requests WHERE project_id=d.project_id AND artifact_requests.request_id=capture_request_id;
  IF FOUND THEN
@@ -98,14 +113,14 @@ BEGIN
  AND coalesce(st->'information'->(field_id)->>'status','unknown') NOT IN ('confirmed','deferred') AND (
   (st->'fieldMeta'->(field_id)->>'source'='capture' AND st->'fieldMeta'->(field_id)->>'fp'=artifact_hash(st->'information'->(field_id))
    AND EXISTS(SELECT 1 FROM artifact_requests cap WHERE cap.project_id=d.project_id AND cap.round_id=r.id
-    AND cap.request_id=md5('opc_capture:'||(st->'fieldMeta'->(field_id)->>'executionId'))::uuid
+    AND cap.request_id=overlay(md5('opc_capture:'||(st->'fieldMeta'->(field_id)->>'executionId')) placing 'f' from 13 for 1)::uuid
     AND cap.action='opc_capture' AND cap.payload->>'executionId'=st->'fieldMeta'->(field_id)->>'executionId'
     AND cap.response->'versions' ? (step_id)
     AND NOT EXISTS(SELECT 1 FROM artifact_requests manual WHERE manual.project_id=d.project_id AND manual.round_id=r.id
      AND manual.action='opc_information' AND manual.payload->>'stepId'=(step_id)
      AND (manual.payload->>'expectedVersion')::integer >= (cap.response->'versions'->>(step_id))::integer
      AND artifact_hash(manual.payload->'values'->(field_id)) IS DISTINCT FROM st->'fieldMeta'->(field_id)->>'fp')))
-  OR (st->'fieldMeta'->(field_id) IS NULL AND coalesce(st->'information'->(field_id)->>'value','')='' AND coalesce(st->'information'->(field_id)->>'status','unknown')='unknown'
+  OR (st->'fieldMeta'->(field_id)->>'source' IS NULL AND coalesce(st->'information'->(field_id)->>'value','')='' AND coalesce(st->'information'->(field_id)->>'status','unknown')='unknown'
    AND NOT EXISTS(SELECT 1 FROM artifact_requests history WHERE history.project_id=d.project_id AND history.round_id=r.id
     AND ((history.action='opc_information' AND history.payload->>'stepId'=(step_id)
       AND coalesce(history.payload->'values'->(field_id)->>'value','')<>'')
@@ -146,6 +161,7 @@ CREATE OR REPLACE FUNCTION opc_information(p_actor_id uuid,p_draft_id uuid,p_ste
 DECLARE d opc_drafts;r artifact_rounds;step jsonb;field jsonb;value jsonb;st jsonb;req artifact_requests;payload jsonb;
 BEGIN
  PERFORM bill2_actor(p_actor_id);
+ IF substr(p_request_id::text,15,1)='f' THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
  SELECT * INTO d FROM opc_drafts WHERE actor_id=p_actor_id AND draft_id=p_draft_id;
  IF d.draft_id IS NULL OR NOT bill2_scope_allowed(p_actor_id,jsonb_build_object('kind','positioning_draft','draftId',p_draft_id)) THEN RAISE EXCEPTION 'OPC_DENIED';END IF;
  PERFORM 1 FROM artifact_projects WHERE id=d.project_id FOR UPDATE;
@@ -234,14 +250,14 @@ BEGIN
  AND coalesce(st->'information'->(field_id)->>'status','unknown') NOT IN ('confirmed','deferred') AND (
   (st->'fieldMeta'->(field_id)->>'source'='capture' AND st->'fieldMeta'->(field_id)->>'fp'=artifact_hash(st->'information'->(field_id))
    AND EXISTS(SELECT 1 FROM artifact_requests cap WHERE cap.project_id=capture_round.project_id AND cap.round_id=capture_round.id
-    AND cap.request_id=md5('opc_capture:'||(st->'fieldMeta'->(field_id)->>'executionId'))::uuid
+    AND cap.request_id=overlay(md5('opc_capture:'||(st->'fieldMeta'->(field_id)->>'executionId')) placing 'f' from 13 for 1)::uuid
     AND cap.action='opc_capture' AND cap.payload->>'executionId'=st->'fieldMeta'->(field_id)->>'executionId'
     AND cap.response->'versions' ? (step_id)
     AND NOT EXISTS(SELECT 1 FROM artifact_requests manual WHERE manual.project_id=capture_round.project_id AND manual.round_id=capture_round.id
      AND manual.action='opc_information' AND manual.payload->>'stepId'=(step_id)
      AND (manual.payload->>'expectedVersion')::integer >= (cap.response->'versions'->>(step_id))::integer
      AND artifact_hash(manual.payload->'values'->(field_id)) IS DISTINCT FROM st->'fieldMeta'->(field_id)->>'fp')))
-  OR (st->'fieldMeta'->(field_id) IS NULL AND coalesce(st->'information'->(field_id)->>'value','')='' AND coalesce(st->'information'->(field_id)->>'status','unknown')='unknown'
+  OR (st->'fieldMeta'->(field_id)->>'source' IS NULL AND coalesce(st->'information'->(field_id)->>'value','')='' AND coalesce(st->'information'->(field_id)->>'status','unknown')='unknown'
    AND NOT EXISTS(SELECT 1 FROM artifact_requests history WHERE history.project_id=capture_round.project_id AND history.round_id=capture_round.id
     AND ((history.action='opc_information' AND history.payload->>'stepId'=(step_id)
       AND coalesce(history.payload->'values'->(field_id)->>'value','')<>'')
@@ -287,14 +303,14 @@ BEGIN
  AND coalesce(st->'information'->(field_id)->>'status','unknown') NOT IN ('confirmed','deferred') AND (
   (st->'fieldMeta'->(field_id)->>'source'='capture' AND st->'fieldMeta'->(field_id)->>'fp'=artifact_hash(st->'information'->(field_id))
    AND EXISTS(SELECT 1 FROM artifact_requests cap WHERE cap.project_id=d.project_id AND cap.round_id=r.id
-    AND cap.request_id=md5('opc_capture:'||(st->'fieldMeta'->(field_id)->>'executionId'))::uuid
+    AND cap.request_id=overlay(md5('opc_capture:'||(st->'fieldMeta'->(field_id)->>'executionId')) placing 'f' from 13 for 1)::uuid
     AND cap.action='opc_capture' AND cap.payload->>'executionId'=st->'fieldMeta'->(field_id)->>'executionId'
     AND cap.response->'versions' ? (step_id)
     AND NOT EXISTS(SELECT 1 FROM artifact_requests manual WHERE manual.project_id=d.project_id AND manual.round_id=r.id
      AND manual.action='opc_information' AND manual.payload->>'stepId'=(step_id)
      AND (manual.payload->>'expectedVersion')::integer >= (cap.response->'versions'->>(step_id))::integer
      AND artifact_hash(manual.payload->'values'->(field_id)) IS DISTINCT FROM st->'fieldMeta'->(field_id)->>'fp')))
-  OR (st->'fieldMeta'->(field_id) IS NULL AND coalesce(st->'information'->(field_id)->>'value','')='' AND coalesce(st->'information'->(field_id)->>'status','unknown')='unknown'
+  OR (st->'fieldMeta'->(field_id)->>'source' IS NULL AND coalesce(st->'information'->(field_id)->>'value','')='' AND coalesce(st->'information'->(field_id)->>'status','unknown')='unknown'
    AND NOT EXISTS(SELECT 1 FROM artifact_requests history WHERE history.project_id=d.project_id AND history.round_id=r.id
     AND ((history.action='opc_information' AND history.payload->>'stepId'=(step_id)
       AND coalesce(history.payload->'values'->(field_id)->>'value','')<>'')
@@ -314,6 +330,7 @@ DECLARE d opc_drafts;r artifact_rounds;req artifact_requests;payload jsonb;st js
  value jsonb;information jsonb;version integer;response jsonb;e runtime_executions;t opc_turns;
 BEGIN
  PERFORM bill2_actor(p_actor_id);
+ IF substr(p_request_id::text,15,1)='f' THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
  SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
  IF d.draft_id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,jsonb_build_object('kind','positioning_draft','draftId',p_draft_id)),false)
  THEN RAISE EXCEPTION 'OPC_CAPTURE_DENIED';END IF;
@@ -348,13 +365,94 @@ BEGIN
   END IF;
   meta:=jsonb_build_object('source','user','fp',artifact_hash(value));
  ELSE meta:=meta-'suggestion';END IF;
- st:=jsonb_set(st,ARRAY['fieldMeta',p_field_id],meta);
+ IF meta='{}' THEN st:=st #- ARRAY['fieldMeta',p_field_id];
+ ELSE st:=jsonb_set(st,ARRAY['fieldMeta',p_field_id],meta);END IF;
  r.steps:=jsonb_set(r.steps,ARRAY[p_step_id],st);
  IF p_action='accept' AND version<>p_expected_version THEN r.steps:=artifact_invalidate(r.workflow,r.steps,p_step_id);END IF;
  UPDATE artifact_rounds SET steps=r.steps WHERE id=r.id;
  response:=jsonb_build_object('version',version,'result',p_action);
  INSERT INTO artifact_requests VALUES(d.project_id,p_request_id,r.id,'opc_capture_resolve',payload,response);
  RETURN response;
+END $$;
+CREATE OR REPLACE FUNCTION runtime_material_allowed_before_b1(p_actor_id uuid,p_material jsonb)
+RETURNS void LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+DECLARE m runtime_scope_material;current_work jsonb;frozen_work jsonb;st jsonb;context jsonb;binding uuid;source_id uuid;draft_record opc_drafts;round_record artifact_rounds;
+BEGIN
+ IF p_material IS NULL OR p_material='null'::jsonb THEN RETURN;END IF;
+ SELECT v.* INTO m FROM runtime_scope_material v JOIN runtime_sessions s ON s.id=v.session_id
+ WHERE s.actor_id=p_actor_id AND v.session_id=(p_material->>'sessionId')::uuid AND v.revision=(p_material->>'revision')::bigint FOR SHARE OF v;
+ IF m.session_id IS NULL OR m.revoked OR m.content_hash IS DISTINCT FROM p_material->>'hash' OR m.content IS DISTINCT FROM p_material->'content'
+ THEN RAISE EXCEPTION 'RUNTIME_MATERIAL_UNAVAILABLE';END IF;
+ -- History checks compare only material identity, never the mutable steps.
+ -- Keep the pre-capture OPC identity/authorization path without computing field protection.
+ SELECT * INTO draft_record FROM opc_drafts WHERE actor_id=p_actor_id AND session_id=m.session_id
+  AND project_id=(SELECT project_id FROM artifact_rounds WHERE id=(m.content->>'roundId')::uuid);
+ IF FOUND THEN
+  IF NOT bill2_scope_allowed(p_actor_id,jsonb_build_object('kind','positioning_draft','draftId',draft_record.draft_id))
+  THEN RAISE EXCEPTION 'RUNTIME_SCOPE_DENIED';END IF;
+  SELECT * INTO round_record FROM artifact_rounds WHERE id=(m.content->>'roundId')::uuid;
+  current_work:=jsonb_build_object('projectId',draft_record.project_id,'roundId',round_record.id,'revisionId',round_record.revision_id,'packageHash',round_record.package_hash,'source',NULL);
+  context:=opc_business_context(p_actor_id,m.session_id,round_record.id);
+  IF context IS NOT NULL THEN current_work:=current_work||jsonb_build_object('businessContext',context);END IF;
+ ELSE
+  current_work:=coalesce(runtime_work_projection_before_opc(p_actor_id,m.session_id,(m.content->>'roundId')::uuid),'null'::jsonb);
+ END IF;
+ frozen_work:=m.content->'work';
+ -- The current projection is server-authored. A business addition must not
+ -- invalidate a pre-0139 frozen request that did not inherit that source.
+ IF current_work ? 'businessContext' THEN
+  IF current_work->'businessContext' IS DISTINCT FROM opc_business_context(p_actor_id,m.session_id,(m.content->>'roundId')::uuid)
+  THEN RAISE EXCEPTION 'RUNTIME_MATERIAL_UNAVAILABLE';END IF;
+  current_work:=current_work-'businessContext';
+ END IF;
+ IF frozen_work ? 'businessContext' THEN
+  context:=frozen_work->'businessContext';
+  IF jsonb_typeof(context) IS DISTINCT FROM 'object' OR context->>'version' IS DISTINCT FROM 'opc-business-context.v1'
+   OR context-ARRAY['version','businessId','name','source']<>'{}'::jsonb
+   OR NOT (context ?& ARRAY['version','businessId','name','source'])
+   OR (context->'name'<>'null'::jsonb AND (jsonb_typeof(context->'name') IS DISTINCT FROM 'string' OR char_length(context->>'name') NOT BETWEEN 1 AND 120))
+  THEN RAISE EXCEPTION 'RUNTIME_MATERIAL_UNAVAILABLE';END IF;
+  SELECT business.id INTO binding FROM opc_drafts d
+   JOIN opc_draft_businesses db ON db.draft_id=d.draft_id
+   JOIN opc_businesses business ON business.id=db.business_id AND business.actor_id=p_actor_id
+   JOIN artifact_rounds r ON r.id=(m.content->>'roundId')::uuid AND r.project_id=d.project_id
+   WHERE d.actor_id=p_actor_id AND d.session_id=m.session_id AND business.id::text=context->>'businessId';
+  IF binding IS NULL THEN RAISE EXCEPTION 'RUNTIME_MATERIAL_UNAVAILABLE';END IF;
+  IF context->'source'<>'null'::jsonb THEN
+   IF EXISTS(SELECT 1 FROM opc_drafts d JOIN opc_account_strategy_drafts a ON a.draft_id=d.draft_id AND a.actor_id=p_actor_id
+    WHERE d.session_id=m.session_id AND d.actor_id=p_actor_id) THEN RAISE EXCEPTION 'RUNTIME_MATERIAL_UNAVAILABLE';END IF;
+   IF jsonb_typeof(context->'source') IS DISTINCT FROM 'object'
+    OR (context->'source')-ARRAY['versionId','profile']<>'{}'::jsonb
+    OR NOT (context->'source' ?& ARRAY['versionId','profile'])
+   THEN RAISE EXCEPTION 'RUNTIME_MATERIAL_UNAVAILABLE';END IF;
+   -- A later publication or rename must not rewrite the frozen source. Its
+   -- original version must still belong to this business and remain allowed.
+   SELECT v.id INTO source_id FROM artifact_versions v
+    JOIN opc_drafts source_d ON source_d.project_id=v.project_id AND source_d.actor_id=p_actor_id
+    JOIN bill2_drafts source_draft ON source_draft.id=source_d.draft_id AND source_draft.actor_id=p_actor_id
+    JOIN artifact_projects source_project ON source_project.id=v.project_id AND source_project.actor_id=p_actor_id
+    JOIN opc_draft_businesses db ON db.draft_id=source_d.draft_id AND db.business_id=binding
+    WHERE v.id::text=context->'source'->>'versionId'
+     AND NOT EXISTS(SELECT 1 FROM opc_account_strategy_drafts a WHERE a.draft_id=source_d.draft_id) FOR SHARE OF source_draft,source_project;
+   PERFORM module.id FROM artifact_versions v JOIN artifact_projects p ON p.id=v.project_id
+    JOIN artifact_rounds r ON r.id=v.round_id JOIN modules module ON module.id=p.module_id
+    JOIN skills skill ON skill.id=p.skill_id JOIN skill_revisions revision ON revision.id=r.revision_id AND revision.skill_id=skill.id
+    WHERE v.id=source_id FOR SHARE OF module,skill,revision;
+   IF source_id IS NULL OR NOT opc_source_allowed(p_actor_id,source_id)
+    OR context->'source'->'profile' IS DISTINCT FROM opc_profile(source_id)
+   THEN RAISE EXCEPTION 'RUNTIME_MATERIAL_UNAVAILABLE';END IF;
+  END IF;
+  frozen_work:=frozen_work-'businessContext';
+ END IF;
+ -- Only steps may have ordinary mutable edits. Every other pre-existing
+ -- package/source/round identity field retains the original exact comparison.
+ IF (CASE WHEN jsonb_typeof(frozen_work)='object' THEN frozen_work-'steps' ELSE frozen_work END)
+  IS DISTINCT FROM (CASE WHEN jsonb_typeof(current_work)='object' THEN current_work-'steps' ELSE current_work END)
+ THEN RAISE EXCEPTION 'RUNTIME_MATERIAL_UNAVAILABLE';END IF;
+ FOR st IN SELECT value FROM jsonb_each(coalesce(m.content->'work'->'steps','{}')) LOOP
+  IF NOT artifact_evidence_allowed((m.content->'work'->>'projectId')::uuid,coalesce(st->'evidenceIds','[]')||coalesce(st->'provenanceIds','[]'))
+  THEN RAISE EXCEPTION 'RUNTIME_MATERIAL_UNAVAILABLE';END IF;
+ END LOOP;
 END $$;
 REVOKE ALL ON FUNCTION opc_capture_apply(uuid,uuid,uuid),
  opc_capture_resolve(uuid,uuid,uuid,text,text,uuid,text,text,integer) FROM PUBLIC,anon,authenticated;

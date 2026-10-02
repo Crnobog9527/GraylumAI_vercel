@@ -68,6 +68,23 @@ async function fixture(extraFields = 0, informationCounts?: number[]) {
     return service.information({ draftId: draft.draftId, requestId: randomUUID(), stepId: 'step-0',
       expectedVersion: current['step-0'].version, values: { ...current['step-0'].information, [field]: tuple(value, value ? 'provisional' : 'unknown', value ? 'fact' : 'unknown') } });
   };
+  const prepare = async (requestId: string, targetDraftId: string, client: typeof admin, databaseCapacity = false) => {
+    // Artificial SQL capacity/performance fixtures use a short synthetic
+    // instruction. Real method freeze/replay cases below use the unchanged OPC host.
+    const material = databaseCapacity ? await rpc('opc_step_material', { p_actor_id: actor,
+      p_draft_id: targetDraftId, p_request_id: requestId, p_step_id: 'step-0',
+      p_purpose: 'mentor', p_input: 'Synthetic capture input' }) : null;
+    return material ? await runtimeAdmissionService(user, client, {
+      account: 'runtime-local', costPerCall: '0.02', creditsPerUsd: '1000', multiplier: '1',
+      maxCalls: 1, maxOutputTokens: 1000, inputBytes: 64000, historyItems: 100,
+      expectedMaterialRevision: material.revision, opcTurnToken: material.turnToken,
+      additionalInstructions: 'Synthetic database capacity fixture', mentorStream: true,
+      skillResources: ['SKILL.md'], searchEnabled: false,
+    }).prepare({ sessionId: d.sessionId, requestId, input: 'Synthetic capture input', network: 'deny', sources: [],
+      selection: { kind: 'skill', moduleId, revisionId: pack.revisionId, task: 'opc-question:goal' } })
+      : await opcService(user, client).prepareStep({ draftId: targetDraftId,
+        requestId, stepId: 'step-0', purpose: 'mentor', questionId: 'goal', input: 'Synthetic capture input' });
+  };
   // Construct persisted executions through the real admission authority. A synthetic
   // DB-only completion keeps this suite independent of providers and transport.
   const seed = async (summary = output(), v2 = true, targetDraftId = draft.draftId, databaseCapacity = false) => {
@@ -80,21 +97,7 @@ async function fixture(extraFields = 0, informationCounts?: number[]) {
           : target.rpc(name, args);
       },
     });
-    // The artificial 24-field SQL byte-boundary fixture uses a short synthetic
-    // instruction. Real method freeze/replay cases below use the unchanged OPC host.
-    const material = databaseCapacity ? await rpc('opc_step_material', { p_actor_id: actor,
-      p_draft_id: targetDraftId, p_request_id: requestId, p_step_id: 'step-0',
-      p_purpose: 'mentor', p_input: 'Synthetic capture input' }) : null;
-    const prepared = material ? await runtimeAdmissionService(user, admin, {
-      account: 'runtime-local', costPerCall: '0.02', creditsPerUsd: '1000', multiplier: '1',
-      maxCalls: 1, maxOutputTokens: 1000, inputBytes: 64000, historyItems: 100,
-      expectedMaterialRevision: material.revision, opcTurnToken: material.turnToken,
-      additionalInstructions: 'Synthetic database capacity fixture', mentorStream: true,
-      skillResources: ['SKILL.md'], searchEnabled: false,
-    }).prepare({ sessionId: d.sessionId, requestId, input: 'Synthetic capture input', network: 'deny', sources: [],
-      selection: { kind: 'skill', moduleId, revisionId: pack.revisionId, task: 'opc-question:goal' } })
-      : await opcService(user, bypassCapture).prepareStep({ draftId: targetDraftId,
-        requestId, stepId: 'step-0', purpose: 'mentor', questionId: 'goal', input: 'Synthetic capture input' });
+    const prepared = await prepare(requestId, targetDraftId, bypassCapture, databaseCapacity);
     const id = prepared.executionId;
     await rpc('runtime_cancel', { p_actor_id: actor, p_execution_id: id });
     await db.query(`update runtime_executions set state='completed',unavailable_reason=null,result=$2,
@@ -102,7 +105,7 @@ async function fixture(extraFields = 0, informationCounts?: number[]) {
     [id, { body: 'Synthetic mentor', summary }, { input: JSON.stringify(v2 ? { captureFormat: 'v2' } : {}) }]);
     return id;
   };
-  return { actor, model, moduleId, user, service, draft, d, read, apply, records, steps, save, seed };
+  return { actor, model, moduleId, user, service, draft, d, read, apply, records, steps, save, seed, prepare };
 }
 
 it('RUNTIME: capture classification, permissions and unchanged content for terminal refusals', async () => {
@@ -483,7 +486,7 @@ it.each(['material', 'ancestor'])('RUNTIME: capture checks revoked frozen materi
 
 it('RUNTIME: capture request namespace conflicts are not treated as successful replay', async () => {
   const f = await fixture(), id = await f.seed();
-  await db.query("insert into artifact_requests values($1,md5('opc_capture:'||$2::text)::uuid,$3,'unrelated','{}','{}')", [f.d.projectId, id, f.d.roundId]);
+  await db.query("insert into artifact_requests values($1,overlay(md5('opc_capture:'||$2::text) placing 'f' from 13 for 1)::uuid,$3,'unrelated','{}','{}')", [f.d.projectId, id, f.d.roundId]);
   await expect(f.apply(id)).rejects.toThrow('OPC_REQUEST_CONFLICT');
   await expect(f.apply()).rejects.toThrow('OPC_REQUEST_CONFLICT');
 });
@@ -623,4 +626,186 @@ it('RUNTIME: capture suggestions remain visible across confirmation and disappea
   await db.query("update runtime_executions set unavailable_reason='revoked' where id=$1", [id]);
   expect((await f.read()).information['step-0'].meta.goal.suggestion).toBeUndefined();
   expect((await f.steps())['step-0'].fieldMeta.goal.suggestion).toEqual(visible);
+});
+
+it.each([false, true])('RUNTIME: suggestion-only metadata does not permanently protect untouched fields (ignored=%s)', async ignored => {
+  const f = await fixture(), first = await f.seed(output([patch('S1', 'step-0', 'other')]));
+  await f.save('user edit');
+  expect(await f.apply(first)).toMatchObject({ result: 'suggested' });
+  const st = (await f.steps())['step-0'];
+  if (ignored) {
+    await f.service.captureResolve({ draftId: f.draft.draftId, requestId: randomUUID(), stepId: 'step-0', fieldId: 'other',
+      executionId: first, hash: st.fieldMeta.other.suggestion.hash, action: 'ignore', expectedVersion: st.version });
+    expect((await f.steps())['step-0'].fieldMeta.other).toBeUndefined();
+  }
+  expect((await f.read()).information['step-0'].meta.other.protected).toBe(false);
+  const next = await f.seed(output([patch('fresh', 'step-0', 'other')]));
+  expect(await f.apply(next)).toMatchObject({ result: 'applied' });
+  expect((await f.steps())['step-0'].information.other.value).toBe('fresh');
+});
+
+it('RUNTIME: capture reserved receipt IDs cannot be supplied through manual write APIs', async () => {
+  const f = await fixture(), id = await f.seed();
+  const reserved = (await db.query("select overlay(md5('opc_capture:'||$1::text) placing 'f' from 13 for 1)::uuid id", [id])).rows[0].id;
+  const st = (await f.steps())['step-0'];
+  await expect(f.service.information({ draftId: f.draft.draftId, requestId: reserved,
+    stepId: 'step-0', expectedVersion: st.version, values: st.information })).rejects.toThrow();
+  await expect(rpc('opc_information', { p_actor_id: f.actor, p_draft_id: f.draft.draftId, p_request_id: reserved,
+    p_step_id: 'step-0', p_expected_version: st.version, p_values: st.information })).rejects.toThrow('OPC_REQUEST_CONFLICT');
+  expect((await f.records()).rows).toHaveLength(0);
+  expect(await f.apply(id)).toMatchObject({ result: 'applied' });
+});
+
+it('RUNTIME: capture writes an unreached step and its next full information save remains valid', async () => {
+  const f = await fixture();
+  await db.query("update artifact_rounds set steps=steps #- '{step-2,information}' where id=$1", [f.d.roundId]);
+  const id = await f.seed(output([patch('later step', 'step-2')]));
+  expect(await f.apply(id)).toMatchObject({ result: 'applied' });
+  expect((await f.read()).information['step-2'].values.goal.value).toBe('later step');
+  const st = (await f.steps())['step-2'];
+  await f.service.information({ draftId: f.draft.draftId, requestId: randomUUID(), stepId: 'step-2',
+    expectedVersion: st.version, values: { goal: st.information.goal, other: tuple() } });
+  expect((await f.steps())['step-2'].information.other).toEqual(tuple());
+});
+
+async function pendingAdmission(f: Awaited<ReturnType<typeof fixture>>, databaseCapacity = false) {
+  let args: Record<string, unknown> | undefined;
+  const held = new Proxy(admin, { get(target, key) {
+    if (key !== 'rpc') return Reflect.get(target, key);
+    return (name: string, value: Record<string, unknown>) => {
+      if (name === 'opc_capture_apply') return { abortSignal: async () => ({ data: { processed: [], remaining: 0, hasMore: false }, error: null }) };
+      if (name === 'runtime_admit') { args = value; return Promise.resolve({ data: null, error: { message: 'HOLD_ADMISSION' } }); }
+      return target.rpc(name, value);
+    };
+  } });
+  await expect(f.prepare(randomUUID(), f.draft.draftId, held, databaseCapacity)).rejects.toThrow();
+  expect(args).toBeDefined();
+  return args!;
+}
+const admit = (client: pg.Client, a: Record<string, unknown>) => client.query('select runtime_admit($1,$2,$3,$4,$5) v',
+  [a.p_actor_id, a.p_session_id, a.p_request_id, a.p_payload, a.p_billing]);
+
+it.each(['capture-first', 'admit-first'].flatMap(order => [false, true].map(revoke => ({ order, revoke }))))
+('RUNTIME: capture and runtime_admit serialize without deadlock ($order, revoke=$revoke)', async ({ order, revoke }) => {
+  const f = await fixture();
+  await db.query("update artifact_rounds set steps=steps #- '{step-2,information}' where id=$1", [f.d.roundId]);
+  const id = await f.seed(output([patch('unreached', 'step-2')])), args = await pendingAdmission(f);
+  const first = new pg.Client({ connectionString }), second = new pg.Client({ connectionString });
+  await first.connect(); await second.connect();
+  try {
+    const pid = (await second.query('select pg_backend_pid() pid')).rows[0].pid;
+    await first.query("begin; set local lock_timeout='8s'; set local statement_timeout='12s'");
+    await second.query("set lock_timeout='8s'; set statement_timeout='12s'");
+    if (order === 'capture-first') await first.query('select opc_capture_apply($1,$2,$3)', [f.actor, f.draft.draftId, id]);
+    else await admit(first, args);
+    if (revoke) await first.query("update ai_models set is_active='false' where id=$1", [f.model]);
+    let settled = false;
+    const pending = (order === 'capture-first' ? admit(second, args)
+      : second.query('select opc_capture_apply($1,$2,$3) v', [f.actor, f.draft.draftId, id]))
+      .then(value => ({ value, error: null }), error => ({ value: null, error }))
+      .then(result => { settled = true; return result; });
+    let blocked = false;
+    for (let i = 0; i < 100; i++) {
+      blocked = (await db.query("select wait_event_type='Lock' waiting from pg_stat_activity where pid=$1", [pid])).rows[0]?.waiting;
+      if (blocked || settled) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    // Shared authorization locks are compatible until the first transaction revokes.
+    expect(blocked).toBe(revoke);
+    if (!revoke) expect(settled).toBe(true);
+    await first.query('commit');
+    const result = await pending;
+    if (revoke && order === 'capture-first') {
+      expect(result.error).toMatchObject({ code: 'P0001', message: expect.stringMatching(/^BILL2_(CALL_POLICY|MODEL)_DENIED$/) });
+    }
+    else {
+      expect(result.error).toBeNull();
+      if (order === 'admit-first') expect(result.value!.rows[0].v.result).toBe(revoke ? 'unavailable' : 'applied');
+    }
+    expect((await f.records()).rows).toHaveLength(revoke && order === 'admit-first' ? 0 : 1);
+  } finally { await first.query('rollback'); await first.end(); await second.end(); }
+}, 30000);
+
+it('RUNTIME: 2000 manual requests and 11 executions keep view and admission history at the 0158 baseline', async () => {
+  const f = await fixture(22), ids: string[] = [];
+  for (let i = 0; i < 11; i++) ids.push(await f.seed(output([]), false, f.draft.draftId, true));
+  await db.query(`insert into runtime_session_history(session_id,revision,execution_id,item)
+    select $1,n,id,jsonb_build_object('type','message','role','assistant','content','Synthetic history')
+    from unnest($2::uuid[]) with ordinality t(id,n)`, [f.d.sessionId, ids]);
+  await db.query('update runtime_sessions set revision=11 where id=$1', [f.d.sessionId]);
+  await db.query(`insert into artifact_requests(project_id,request_id,round_id,action,payload,response)
+    select $1,gen_random_uuid(),$2,'opc_information',jsonb_build_object('stepId','step-0','expectedVersion',n,
+    'values',jsonb_build_object('goal',jsonb_build_object('status','unknown','value','','nature','unknown'))),'{}'
+    from generate_series(1,2000) n`, [f.d.projectId, f.d.roundId]);
+  const args = await pendingAdmission(f, true);
+  const signatures = ['runtime_work_projection(uuid,uuid,uuid)', 'runtime_material_allowed_before_b1(uuid,jsonb)'];
+  const current = await Promise.all(signatures.map(async sig => (await db.query('select pg_get_functiondef($1::regprocedure) def', [sig])).rows[0].def));
+  const rollback = readFileSync(resolve(import.meta.dirname, '../../../../../docs/launch/rollback/CONVERSATION_CAPTURE_B1.sql'), 'utf8');
+  const originals = ['runtime_work_projection', 'runtime_material_allowed_before_b1'].map(name =>
+    rollback.match(new RegExp('CREATE OR REPLACE FUNCTION ' + name + '[\\s\\S]*?END \\$\\$;'))![0]);
+  const sample = async () => {
+    const view: number[] = [], admission: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      let start = performance.now();
+      const visible = (await db.query('select runtime_view($1,$2) v', [f.actor, f.d.sessionId])).rows[0].v;
+      if (i) view.push(performance.now() - start);
+      expect(visible.executions).toHaveLength(11);
+      expect(visible.executions.every((e: { contentAvailable: boolean }) => e.contentAvailable)).toBe(true);
+      await db.query('begin');
+      try {
+        start = performance.now(); const result = await admit(db, args);
+        if (i) admission.push(performance.now() - start);
+        const history = (await db.query('select cardinality(candidate_history) n from runtime_executions where id=$1', [result.rows[0].v.executionId])).rows[0].n;
+        expect(history).toBe(11);
+      } finally { await db.query('rollback'); }
+    }
+    const median = (values: number[]) => values.sort((a, b) => a - b)[1];
+    return { view: median(view), admission: median(admission) };
+  };
+  let baseline: Awaited<ReturnType<typeof sample>>;
+  try { for (const def of originals) await db.query(def); baseline = await sample(); }
+  finally { for (const def of current) await db.query(def); }
+  const measured = await sample();
+  for (const key of ['view', 'admission'] as const) {
+    expect(measured[key]).toBeLessThan(400);
+    expect(measured[key]).toBeLessThan(baseline![key] * 2 + 30);
+  }
+  // Structural guard: permission checks must not invoke the field projection at all.
+  try {
+    await db.query("create or replace function runtime_work_projection(p_actor_id uuid,p_session_id uuid,p_round_id uuid) returns jsonb language plpgsql as $$ begin raise exception 'projection reached from authorization'; end $$");
+    await sample();
+  } finally { await db.query(current[0]); }
+  console.info('B1 permission performance', JSON.stringify({ requests: 2000, executions: 11, baseline: baseline!, measured,
+    thresholdMs: 400, relativeThreshold: '2 * 0158 baseline + 30ms', samples: 3, projectionCallsFromAuthorization: 0 }));
+}, 90000);
+
+it('RUNTIME: migration rejects an unexpected previous function definition before changing any function', async () => {
+  const sig = 'opc_information(uuid,uuid,text,uuid,integer,jsonb)';
+  const original = (await db.query('select pg_get_functiondef($1::regprocedure) def', [sig])).rows[0].def;
+  const forward = readFileSync(resolve('../db/migrations/0159_opc_capture.sql'), 'utf8');
+  const before = (await db.query("select md5(pg_get_functiondef('opc_capture_apply(uuid,uuid,uuid)'::regprocedure)) h")).rows[0].h;
+  try {
+    await db.query(original.replace('OPC_DENIED', 'OPC_SYNTHETIC_DRIFT'));
+    await expect(db.query(forward)).rejects.toThrow('OPC_CAPTURE_SOURCE_MISMATCH');
+    await db.query('rollback');
+    expect((await db.query("select md5(pg_get_functiondef('opc_capture_apply(uuid,uuid,uuid)'::regprocedure)) h")).rows[0].h).toBe(before);
+  } finally { await db.query('rollback'); await db.query(original); }
+  await db.query(forward);
+});
+
+it('RUNTIME: completion capture has a bounded wait and later retry remains idempotent', async () => {
+  const f = await fixture(), id = await f.seed();
+  const locker = new pg.Client({ connectionString }); await locker.connect();
+  try {
+    await locker.query('begin');
+    await locker.query('select id from artifact_projects where id=$1 for update', [f.d.projectId]);
+    const start = performance.now();
+    await captureCompleted(admin, f.actor, id);
+    expect(performance.now() - start).toBeLessThan(2500);
+    expect((await f.records()).rows).toHaveLength(0);
+    await locker.query('commit');
+    // Cancellation may race with commit; either outcome must use the same receipt.
+    await f.apply(id); await f.apply(id);
+    expect((await f.records()).rows).toHaveLength(1);
+  } finally { await locker.query('rollback'); await locker.end(); }
 });

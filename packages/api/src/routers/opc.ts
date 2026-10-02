@@ -61,12 +61,12 @@ const readProcedure = protectedProcedure.use(async ({ ctx, next, path }) => {
   } catch (cause) { throw stagingProcedureError(cause, path); }
   ctx.runtimeBudget?.timing?.enter('host');
   const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin), stagingRead: !local } });
-  if (!result.ok && !isOpcRefusal(result.error.cause)) throw stagingProcedureError(result.error, path);
+  if (!result.ok) throw stagingProcedureError(result.error, path);
   return result;
 });
 export const opcRouter = router({
   capturePending: readProcedure.input(capturePendingInput).mutation(({ ctx, input }) => ctx.opc.capturePending(input)),
-  captureResolve: readProcedure.input(captureResolveInput).mutation(({ ctx, input }) => ctx.opc.captureResolve(input)),
+  captureResolve: procedure.input(captureResolveInput).mutation(({ ctx, input }) => ctx.opc.captureResolve(input)),
   information: procedure
     .input(opcInformation)
     .mutation(({ ctx, input }) => ctx.opc.information(input)),

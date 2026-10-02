@@ -24,7 +24,17 @@ it('capture propagates batch storage errors and does not pretend to finish', asy
   expect(rpc).toHaveBeenCalledTimes(1);
 });
 it('completion failure never prevents original result recovery', async () => {
-  const rpc = vi.fn().mockResolvedValue({ error: { message: 'database unavailable' } });
+  const abortSignal = vi.fn().mockResolvedValue({ error: { message: 'database unavailable' } });
+  const rpc = vi.fn().mockReturnValue({ abortSignal });
   await expect(captureCompleted({ rpc } as unknown as SupabaseClient, 'actor', 'execution')).resolves.toBeUndefined();
   expect(rpc).toHaveBeenCalledWith('opc_capture_apply', { p_actor_id: 'actor', p_draft_id: null, p_execution_id: 'execution' });
+});
+
+it('completion aborts a stalled RPC after its bounded deadline without hiding the result', async () => {
+  const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(AbortSignal.abort());
+  const abortSignal = vi.fn((signal: AbortSignal) => { expect(signal.aborted).toBe(true); return Promise.reject(new Error('aborted')); });
+  try {
+    await expect(captureCompleted({ rpc: () => ({ abortSignal }) } as unknown as SupabaseClient, 'actor', 'execution')).resolves.toBeUndefined();
+    expect(timeout).toHaveBeenCalledWith(1000); expect(abortSignal).toHaveBeenCalledOnce();
+  } finally { timeout.mockRestore(); }
 });
