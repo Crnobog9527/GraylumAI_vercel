@@ -1,11 +1,12 @@
 # CONVERSATION-DRIVEN-CAPTURE：右侧信息跟着对话走（方案）
 
 > 状态：仅方案，未实施。风险：实施部分为 high（数据库函数、迁移、准入规则）；本文件本身是文档。
-> 基线：staging `acd52307`（迁移到 0158；#576、#581、#582、#584、#586、#587、#592 已合并，0158 已应用）。本方案只引用代码事实，不改代码。
+> 基线：staging `da5b526d`（迁移到 0158；#576、#581、#582、#584、#586、#587、#589、#592 已合并，0158 已应用）。本方案只引用代码事实，不改代码。
 > 修订：v2 按[独立审查](https://github.com/Crnobog9527/GraylumAI_vercel/pull/588#issuecomment-5950945925)
 > 补齐 P1 ×2、P2 ×5 和 P3；v3 按[复核](https://github.com/Crnobog9527/GraylumAI_vercel/pull/588#issuecomment-5951295069)
 > 补齐 P2-A/B/C 和 P3，并写入 Owner 2026-10-02 的导师模型和出卡分寸决定；v4 按
-> [v3 复核](https://github.com/Crnobog9527/GraylumAI_vercel/pull/588#issuecomment-5951643622)修正批次事务语义并统一结果分类。对照见第 12 节。
+> [v3 复核](https://github.com/Crnobog9527/GraylumAI_vercel/pull/588#issuecomment-5951643622)修正批次事务语义并统一结果分类；v5 按
+> [v4 复核](https://github.com/Crnobog9527/GraylumAI_vercel/pull/588#issuecomment-5951977163)修正 P3 文字。对照见第 12 节。
 
 ## 0. 一句话结论
 
@@ -190,7 +191,7 @@ v12 第 3.2 节第 4 条的"文字确认"（D10，已锁定）不在本批交付
 "记"的处理记录只含执行 id、结果码、规则版本，以及 `applied` 时每个被写步骤写入后的版本号（第 3.2.2 节靠它判断"capture 之后有没有人工写入"），
 不含任何内容。所以"拒绝"和"不写内容"是两回事：终结的拒绝会留一条不含内容的处理记录，但草稿内容一定不变。
 
-`unavailable` 的执行如果之后恢复可读，会重新成为候选；那时步骤版本通常已经变化，按第 3.2.2 节整次只生成更新，不会用旧材料覆盖新内容。
+`unavailable` 的执行如果之后恢复可读，会重新成为候选，并重新按第 3.2.2 节判断：期间任一步骤版本变化，整次只生成更新；版本都没变、字段满足直接写的条件，就正常应用。不为此新增任何状态。
 
 幂等：处理记录写在 `artifact_requests`，request id 用独立命名空间（由 `'opc_capture:' || 执行 id` 推导），`action = 'opc_capture'`；
 同 id 但 payload 不同报冲突，不能"见到同 id 就成功"。**一条执行已有记录时，重复调用先重跑第一组和第 8 项**：第一组不通过 → 拒绝、不写；
@@ -501,7 +502,7 @@ p_action, p_expected_version)`，只授予 service role，经 tRPC 薄路由调�
 
 | 组 | 必测 |
 | --- | --- |
-| 授权和结果分类（P1-2） | 跨用户、草稿不属于该会话 → 拒绝且**不写任何记录**；执行未完成 → `not_ready` 不记；合法旧格式 → `skipped_format`（不是拒绝）；turn token 不匹配、`purpose` 不是 mentor → `denied_binding`；旧轮次、已发布 → `stale_round`；材料/祖先来源/模型撤权 → `unavailable` 不记、恢复后重新成为候选且只生成更新；账号注销后拒绝；**重放已应用结果时撤权 → `unavailable`、原记录不变、不返回内容**；两连接并发撤权（两种提交顺序）；所有拒绝和终结结果下草稿内容不变 |
+| 授权和结果分类（P1-2） | 跨用户、草稿不属于该会话 → 拒绝且**不写任何记录**；执行未完成 → `not_ready` 不记；合法旧格式 → `skipped_format`（不是拒绝）；turn token 不匹配、`purpose` 不是 mentor → `denied_binding`；旧轮次、已发布 → `stale_round`；材料/祖先来源/模型撤权 → `unavailable` 不记；恢复后重新成为候选，期间有步骤版本变化 → 整次只生成更新，版本没变且字段可直接写 → 正常应用（两种各一个用例）；账号注销后拒绝；**重放已应用结果时撤权 → `unavailable`、原记录不变、不返回内容**；两连接并发撤权（两种提交顺序）；第一组拒绝和不写草稿的结果码（`not_ready`、`skipped_format`、`denied_binding`、`stale_round`、`unavailable`、`invalid_output`）下草稿内容不变 |
 | 来源保护（P1-1、P2-A） | 旧非空 provisional（手改的、旧页面自动填的）→ 更新；旧空字段从没有值 → 直接写；旧清空过的字段 → 更新；旧 confirmed/deferred → 更新；新 `source: user` → 更新；`source: capture` 指纹未变且之后无人工写入 → 直接写；指纹已变 → 更新；**A→B→A** 和**清空再恢复原值** → 更新；找不到本轮 capture 记录 → 更新；继承来的 `fieldMeta`（普通修订、账号修订两支）→ 更新；旧页面在 B1 上线后自动保存 → 标为 user |
 | 整份材料（P2-1） | 双连接："用户改 A 字段 + 旧执行更新 B 字段" → B 只生成更新；比较包含 status/nature/受保护标记；更新的执行先应用、旧执行晚到 → 旧的全部变更新 |
 | 更新身份（P2-2） | 用户看到 S1、S2 到达后忽略 / 采用 → `OPC_SUGGESTION_CHANGED`；倒序应用不替换较新的更新；忽略不改版本、不失效；采用改版本、失效、标为 user；重复调用幂等 |
@@ -529,7 +530,7 @@ p_action, p_expected_version)`，只授予 service role，经 tRPC 薄路由调�
 | 0 | 本方案 | Claude | 文档 | 本文件 | — |
 | 1 | B1 数据库与写入 | Codex | high | 迁移（两个新函数、`opc_information` / `opc_query` / `runtime_work_projection` 函数体）、服务端调用点和补应用约定、`capture.integration.ts` 进 CI | #586 已合并，可从最新 staging 开工 |
 | 2 | B2 整理器、导师和准入 | Codex | high | 第 3.3–3.6 节全部提示词（含出卡分寸）、v2 标记、焦点 task、去掉到达检查、开场每步一次；第 8 节第 3 项的小评测 | B1；#591 合并 |
-| 3 | F1 右侧面板和每步确认 | Claude | ordinary | 新清单面板、小结卡、整步确认、更新采用/忽略、删除逐题导航和浏览器投影、旧信封续完 | B2（和 B2 前后脚合并）；#589 合并 |
+| 3 | F1 右侧面板和每步确认 | Claude | ordinary | 新清单面板、小结卡、整步确认、更新采用/忽略、删除逐题导航和浏览器投影、旧信封续完；保留 #589 的阅读位置恢复 | B2（和 B2 前后脚合并）；#589 已合并 |
 | 4 | B3 + F2 补充笔记 | Codex + Claude | high + ordinary | 笔记写入、增删改、去重、显示、并入步骤正文 | 1–3，按第 8 节第 1 项的时点 |
 
 共享文件和单一写入方（实施时以当时 `gh pr list` 为准，有重叠就在 PR 里写明谁先合、后合者负责同步）：
@@ -540,7 +541,7 @@ p_action, p_expected_version)`，只授予 service role，经 tRPC 薄路由调�
 | #581 MODEL-PRICING-SYNC B（已合并，`1d75b130`）、#591 PROMPT-CACHE（在途） | 都改 `runtime/admission.ts`、`runtime.integration.ts`；#591 冻结提示缓存前缀 | B2 **不改** `admission.ts`（v2 标记放在 `service.ts` 构造的整理器输入里，容量上限不动）；如果实施时发现必须改，先停下报总控，等 #591 合并后由 B2 同步。本方案不涉及报价逻辑；Owner 已定正式环境价格全自动、不需要重新批准，只有 staging 测试窗口继续锁价，B2 小评测和 staging 验证按当时的测试窗口执行。B2 在 #591 合并后做，提示词变化后联合回归 #591 的缓存前缀快照和 B2 的完整请求快照 |
 | #590 RATE-LIMIT / MODERATION-HOOK | 新调用闸门 `newWorkGate` | capture、补应用、重放都不经过调用闸门；联合回归"暂停新调用时补应用照常、计数不变" |
 | #582 MENTOR-PROMPT-V2 | `agentTurnPrompt.ts` 及其测试 | 已合并（`0cbade58`），B2 在它的基础上改写；它的评测只证明它冻结的请求，不证明新的多字段整理效果，也没达到出卡门槛（见第 8 节第 3 项） |
-| #587、#589 | `page.tsx`（#589）、对话区 CSS（#587） | #587 已合并（`de784460`）；#589 待合并，F1 在它合并后同步；`page.tsx` 已在代码尺寸上限（2747 行），F1 把新面板拆进 `components/opc/` 和 `hooks/`，只减不增 |
+| #587、#589 | `page.tsx`（#589）、对话区 CSS（#587） | 都已合并（#587 `de784460`、#589 `da5b526d`），前置已满足；F1 改 `page.tsx` 时必须保留 #589 的刷新后阅读位置恢复，以及它在 `mentor-browser.integration.ts` 里的对应测试；`page.tsx` 已在代码尺寸上限（2747 行），F1 把新面板拆进 `components/opc/` 和 `hooks/`，只减不增 |
 | #547 REPORT-GEN | 报告读取每步确认后的字段 | 不在本批改；B3 合并后在 #547 记一条"笔记作为对话补充资料（随步骤确认）进入报告输入" |
 | #576 | — | 已合并（`0a5a701c`），B1/B2 在它的基础上改写逐题用例 |
 | #561 STG-MENTOR-MODEL | 导师模型实测方案 | Owner 已定导师用 Sonnet 5.5，旧评测方案按总控记录收尾，本方案不依赖它 |
@@ -663,8 +664,9 @@ p_action, p_expected_version)`，只授予 service role，经 tRPC 薄路由调�
 | P3 措辞与 Owner 决定 | 第 1.1 节"已到达"两类和 F1 清理清单；`opc_revise` 定义位置；第 8 节五项按审查意见改写 |
 | Owner 2026-10-02 新决定（v3） | 第 1.3 节记录 #582 合并和盲评结果；导师定为 Sonnet 5.5；第 3.4、3.6 节加入出卡分寸；第 7 节在途关系更新（#582、#587 已合并，#589 待合并，#561 收尾）；第 8 节第 3 项改为出卡分寸 + 多字段小评测，给出题数、次数和金额；第 9 节加出卡分寸检查 |
 | 复核 P2-A 回退 | 第 5.2 节：先移除 B1 调用方并部署核验再删函数；`skipped_format` 与 `denied` 区分（第 3.2.1 节结果分类）；第 3.2.2 节 (a) 加上用现有 `opc_information` 历史证明"capture 之后无人工写入"，A→B→A 受保护；对应用例 |
-| 复核 P2-B 补应用 | 第 3.2.5 节：`processed/remaining/hasMore`、准入前处理完（最多 20 条，否则 `OPC_CAPTURE_PENDING` 且不计费）、逐条子事务、坏条目记永久结果不挡队首、不吞存储异常；对应用例 |
+| 复核 P2-B 补应用 | 第 3.2.5 节：`processed/remaining/hasMore`、准入前处理完（最多 20 条，否则 `OPC_CAPTURE_PENDING` 且不计费）、逐条子事务（**旧描述，已被 v4 替换为「一批一次 RPC、一个事务，子块只捕获 JSON 解析错误」**）、坏条目记永久结果不挡队首、不吞存储异常；对应用例 |
 | 复核 P2-C 冻结材料 | 第 3.8 节选定改现有 `runtime_work_projection`（B1 范围、迁移、回退）：保留 `information` 和 `notes`，`fieldMeta` 只留受保护标记；旧请求不受影响；对应用例 |
 | 复核 P3 | 第 1.4、3.1、5.1 节按 0134 两支真实行为改写；第 3.7 节确认快照包含可见更新的身份；第 3.2.2 节版本号说明限定为新函数 |
 | 复核 v3 P2 批次事务 | 第 3.2.5 节：一批一次 RPC、一个事务；子块只捕获 JSON 解析错误；存储错误本批全部回滚、之前成功返回的批次保留、下次重试整批；恢复用例同步改写 |
 | 复核 v3 P3 结果分类 | 第 3.2.1 节统一为一张表：归属未确认时拒绝且不写；合法旧格式优先 `skipped_format`；`not_ready`、`unavailable` 不记且可恢复；终结结果只记不含内容的处理记录，草稿内容不变 |
+| 复核 v4 P3 文字 | 第 3.2.1 节和授权用例：权限恢复后按第 3.2.2 节重新判断（版本变化只生成更新，版本没变可正常应用，各一个用例）；「草稿内容不变」限定为不写草稿的结果码；上方「逐条子事务」标为已被 v4 替换的旧描述；第 7 节 #589 已合并，F1 保留阅读位置恢复和测试 |
