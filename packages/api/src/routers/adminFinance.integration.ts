@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { adminRouter } from './admin';
 import { router } from '../trpc';
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
+import type { inferRouterContext } from '@trpc/server';
 import { normalizeEndpointPricing } from '../shared/modelPricing';
 
 const origin = process.env.FINANCE_LOCAL_REST!;
@@ -27,7 +28,7 @@ const context = { headers: new Headers(),
   user: { id: '00000000-0000-4000-8000-000000000003', app_metadata: { provider: 'email' }, user_metadata: {} },
   isEmailVerified: true, authProvider: 'email', supabase: auth, supabaseAuth: auth,
   supabasePublic: auth, supabaseAdmin: service, hasSupabaseAdminPrivileges: true,
-} as Parameters<typeof adminRouter.createCaller>[0];
+} as inferRouterContext<typeof adminRouter>;
 const caller = adminRouter.createCaller(context);
 
 it('loads finance before and after saving an empty provider-price configuration', async () => {
