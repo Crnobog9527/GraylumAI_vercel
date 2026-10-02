@@ -31,7 +31,8 @@ without partial changes; never expand an allowlist to force an application. It i
 For recovery, `rollback.sql` restores the four original functions and removes the new internal helper.
 It checks the exact old/new function identities first, rejects later drift, and does not modify execution,
 history, billing or financial rows. Repeated rollback is safe. Use it only after Owner approval and after
-confirming no later migration depends on the helper; its DROP has no CASCADE, so dependencies fail closed.
+confirming no later migration depends on the helper; its DROP has no CASCADE, so catalog-tracked dependencies fail closed. PostgreSQL does not track every
+PL/pgSQL body reference; separately inspect later source changes before removing the helper.
 Capture/compare fingerprints before and after recovery and record the migration-ledger state through
 the existing release process rather than rewriting history. Reapplying 0158 restores the optimized state.
 
