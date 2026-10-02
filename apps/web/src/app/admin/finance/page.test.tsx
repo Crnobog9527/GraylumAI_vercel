@@ -75,7 +75,8 @@ describe('admin finance overview', () => {
     expect(given).toContain('+30');
     expect(given).toContain('含签到 20');
     expect(html).toContain('赠送（含签到）');
-    expect(rowOf(html, 'admin-finance-day-2026-10-02')).toContain('data-given="30"');
+    // 30 of the busiest 41 credits; real pixel heights are checked in page.browser.test.tsx.
+    expect(rowOf(html, 'admin-finance-day-2026-10-02')).toContain('data-bar="given" style="height:73.17');
   });
 
   it('shows no unknown-value notice when every type and status is known', () => {

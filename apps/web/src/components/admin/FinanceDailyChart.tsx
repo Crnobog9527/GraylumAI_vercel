@@ -12,7 +12,10 @@ export interface FinanceDailyPoint {
 
 const LEGEND = [['bg-emerald-400', '赠送（含签到）'], ['bg-blue-400', '购买'], ['bg-rose-400', '消耗']] as const;
 
-/** The 赠送 bar matches the overview total: manual additions plus check-in rewards. */
+/**
+ * Grouped bars per day, each scaled against the busiest value of the 30 days. The day column
+ * fills the fixed-height chart so percentage heights resolve. 赠送 = additions + check-ins.
+ */
 export function FinanceDailyChart({ dailyChart }: { dailyChart: FinanceDailyPoint[] }) {
   const days = dailyChart.map((day) => ({ ...day, given: day.additions + (day.checkins ?? 0) }));
   const maxValue = Math.max(0, ...days.map((d) => Math.max(d.given, d.purchases, d.deductions))) || 1;
@@ -35,12 +38,12 @@ export function FinanceDailyChart({ dailyChart }: { dailyChart: FinanceDailyPoin
               </div>
             ))}
           </div>
-          <div className="h-40 flex items-end gap-1">
+          <div className="h-40 flex gap-1">
             {days.slice(-14).map((day) => (
-              <div key={day.date} className="flex-1 flex flex-col gap-0.5" title={day.date} data-testid={`admin-finance-day-${day.date}`}>
-                <div className="bg-emerald-400 rounded-t" data-given={day.given} style={bar(day.given)} />
-                <div className="bg-blue-400" style={bar(day.purchases)} />
-                <div className="bg-rose-400 rounded-b" style={bar(day.deductions)} />
+              <div key={day.date} className="flex h-full flex-1 items-end gap-px" title={day.date} data-testid={`admin-finance-day-${day.date}`}>
+                <div className="flex-1 bg-emerald-400 rounded-t" data-bar="given" style={bar(day.given)} />
+                <div className="flex-1 bg-blue-400 rounded-t" data-bar="purchases" style={bar(day.purchases)} />
+                <div className="flex-1 bg-rose-400 rounded-t" data-bar="deductions" style={bar(day.deductions)} />
               </div>
             ))}
           </div>
