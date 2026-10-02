@@ -46,7 +46,7 @@ export function Bill2ModelReportCard() {
           </tr>)}</tbody></table>
           <p className="text-xs">合计：{data.totals.calls} 次调用 / {data.totals.runs} 个运行单；官方成本 ${data.totals.officialCostUsd}；
             计价金额 ${data.totals.weightedUsd}；实扣 {data.totals.chargedCredits} 积分，其中未归属 {data.totals.unallocatedChargedCredits}；
-            已退款运行单 {data.totals.refundedRuns} 个（不计入实扣）；倍数无效的调用 {data.totals.invalidMultiplierCalls} 次（单独列出，未计入模型）；
+            已退款运行单 {data.totals.refundedRuns} 个（不计入实扣）；无法解析的调用（倍数或费用格式无效）{data.totals.unparsableCalls} 次（单独列出，未计入模型）；
             平台承担：不适用（边用边扣上线后提供）。</p>
           <GroupTable title="按用途" lines={data.byPurpose} />
           <GroupTable title="按日期（UTC）" lines={data.byDate} /></>

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 
 const rpc = async (db, name, ...args) =>
   (await db.query(`SELECT public.${name}(${args.map((_, i) => '$' + (i + 1)).join(',')}) v`, args)).rows[0].v;
-const fixture = async (db, { weighted, q, runM, modelM, upper = '0.02', maxCalls = 4 }) =>
-  (await db.query('SELECT bill_unit_test.fixture($1,$2,$3,$4,$5,$6) v', [weighted, q, runM, modelM, upper, maxCalls])).rows[0].v;
+const fixture = async (db, { weighted, q, runM, modelM, upper = '0.02', maxCalls = 4, unitQ = null }) =>
+  (await db.query('SELECT bill_unit_test.fixture($1,$2,$3,$4,$5,$6,$7) v', [weighted, q, runM, modelM, upper, maxCalls, unitQ])).rows[0].v;
 
 function callPayload(f, index, overrides = {}) {
   const model = f.models[index];
@@ -15,7 +15,7 @@ function callPayload(f, index, overrides = {}) {
   };
 }
 const unit = (f, index, multiplier = f.models[index].multiplier) =>
-  ({ billingUnit: { modelId: f.models[index].id, multiplier, source: 'model', snapshotHash: 'f'.repeat(64) } });
+  ({ billingUnit: { modelId: f.models[index].id, multiplier, source: 'model' } }); // the exact TS call shape
 
 async function claim(db, f, sequence, payload) {
   const c = await rpc(db, 'bill2_claim', f.actor, f.run, sequence, payload);
@@ -102,7 +102,24 @@ export async function cases(db, report) {
   const mismatch = await fixture(db, { weighted: true, q: '100', runM: '2', modelM: ['3'] });
   await rejects(rpc(db, 'bill2_claim', mismatch.actor, mismatch.run, 1, { ...callPayload(mismatch, 0), ...unit(mismatch, 0) }),
     /BILL2_CALL_BUDGET_OR_CONTRACT/, 'm_i above the run multiplier used for the reservation');
-  report.checks.push('claim refuses m_i above the run reservation multiplier');
+  const qDiffers = await fixture(db, { weighted: true, q: '100', runM: '3', modelM: ['3'], unitQ: '1000' });
+  await rejects(rpc(db, 'bill2_claim', qDiffers.actor, qDiffers.run, 1, { ...callPayload(qDiffers, 0), ...unit(qDiffers, 0) }),
+    /BILL2_CALL_BUDGET_OR_CONTRACT/, 'rules.billingUnit.creditsPerUsd must equal the run q');
+  report.checks.push('claim refuses m_i above the run reservation multiplier and a billingUnit q that differs from the run q');
+
+  // Finalize marks a conflict and charges nothing when q × Σ(cost × m_i) exceeds the reservation.
+  // Admission bounds make this unreachable with honest costs, so the recorded cost is raised directly here.
+  const over = await fixture(db, { weighted: true, q: '100', runM: '3', modelM: ['3'], upper: '0.005', maxCalls: 1 });
+  const overCall = await claim(db, over, 1, { ...callPayload(over, 0), ...unit(over, 0) });
+  await rpc(db, 'bill2_record', over.actor, over.run, overCall.id, evidence(overCall, over.models[0].model, '0.005'));
+  await rpc(db, 'bill2_close', over.actor, over.run, 'delivered', outcome);
+  await db.query('UPDATE bill2_calls SET selected_cost_usd = 0.01 WHERE id = $1', [overCall.id]);
+  const conflicted = await rpc(db, 'bill2_finalize', over.actor, over.run);
+  assert.equal(conflicted.conflict, true, 'ceil(100 × 0.01 × 3) = 3 > reserved 2 → conflict');
+  assert.equal(conflicted.chargedCredits, null);
+  const runRow = (await db.query('SELECT state, charged, conflict FROM bill2_runs WHERE id = $1', [over.run])).rows[0];
+  assert.deepEqual([runRow.charged, runRow.conflict], [null, true]);
+  report.checks.push('new-contract finalize above the reservation marks a conflict and charges nothing');
 
   // The report function sees the frozen multiplier and returns numbers as text.
   await db.query('SET ROLE service_role');

@@ -98,12 +98,13 @@ export function buildBill2ModelReport(rows: readonly Bill2CallReportRow[], limit
   const runs = new Map<string, { row: Bill2CallReportRow; calls: Parsed[]; invalid: boolean }>();
   const byPurpose = new Map<string, { calls: number; cost: bigint; weighted: bigint }>();
   const byDate = new Map<string, { calls: number; cost: bigint; weighted: bigint }>();
-  let invalidMultiplierCalls = 0;
+  // Rows whose multiplier or recorded cost cannot be parsed; kept out of every model and group.
+  let unparsableCalls = 0;
   for (const row of rows) {
     const run = runs.get(row.run_id) ?? { row, calls: [], invalid: false };
     runs.set(row.run_id, run);
     const parsed = parseRow(row);
-    if (!parsed) { invalidMultiplierCalls += 1; run.invalid = true; continue; }
+    if (!parsed) { unparsableCalls += 1; run.invalid = true; continue; }
     run.calls.push(parsed);
     const line = lines.get(parsed.key) ?? { provider: row.provider, model: row.model, calls: 0, unknownCostCalls: 0,
       officialCostUsd: '0', weightedUsd: '0', multipliers: [], attributedChargedCredits: 0, cost: 0n, weighted: 0n };
@@ -150,7 +151,7 @@ export function buildBill2ModelReport(rows: readonly Bill2CallReportRow[], limit
       calls: rows.length,
       runs: runs.size,
       refundedRuns,
-      invalidMultiplierCalls,
+      unparsableCalls,
       officialCostUsd: picoText(totalCost),
       weightedUsd: formatWeightedUsd(totalWeighted),
       chargedCredits,

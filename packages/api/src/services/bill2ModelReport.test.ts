@@ -76,7 +76,7 @@ describe('BILL2 per-model finance report', () => {
       row({ call_id: 'y', run_id: 'bad', call_sequence: 2, call_multiplier: '3', run_call_count: 2, run_charged: 7 }),
       row({ call_id: 'z', run_id: 'old', run_multiplier: '0' }),
     ], 5000);
-    expect(report.totals).toMatchObject({ invalidMultiplierCalls: 2, unallocatedChargedCredits: 22 });
+    expect(report.totals).toMatchObject({ unparsableCalls: 2, unallocatedChargedCredits: 22 });
     expect(report.models[0]!.calls).toBe(1);
   });
 

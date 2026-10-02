@@ -3,7 +3,8 @@
 CREATE SCHEMA bill_unit_test;
 -- One actor, models with the given multipliers, and a prepared run. rules.billingUnit is present only
 -- for the new contract; the old contract keeps one run-level multiplier.
-CREATE FUNCTION bill_unit_test.fixture(weighted boolean, q text, run_m text, model_m text[], upper text, max_calls integer)
+CREATE FUNCTION bill_unit_test.fixture(weighted boolean, q text, run_m text, model_m text[], upper text, max_calls integer,
+ unit_q text DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE a uuid:=gen_random_uuid();d uuid;r jsonb;p jsonb;models jsonb:='[]';policy jsonb:='[]';m uuid;i integer;
  cost numeric;credits integer;rules jsonb;
@@ -24,7 +25,7 @@ BEGIN
  cost:=upper::numeric*max_calls;
  credits:=ceil(cost*q::numeric*run_m::numeric);
  rules:=jsonb_build_object('version','v1','quoteVersion','fixture-v1','creditsPerUsd',q,'multiplier',run_m,'fx','{}'::jsonb)
-  ||CASE WHEN weighted THEN jsonb_build_object('billingUnit',jsonb_build_object('version','bill-unit-v2','creditsPerUsd',q,
+  ||CASE WHEN weighted THEN jsonb_build_object('billingUnit',jsonb_build_object('version','bill-unit-v2','creditsPerUsd',coalesce(unit_q,q),
    'defaultMultiplier','3','hash',repeat('f',64))) ELSE '{}'::jsonb END;
  p:=jsonb_build_object('contractVersion','bill2.v1','mode','isolated','scope',jsonb_build_object('kind','positioning_draft','draftId',d),
   'operation','question','modelId',models->0->>'id','sourceHash',repeat('a',64),'input',jsonb_build_object('text','fixture'),
