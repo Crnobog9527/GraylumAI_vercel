@@ -118,7 +118,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   await page.evaluate(text=>{const started=performance.now();(window as unknown as {mentorTiming:unknown}).mentorTiming={started};const observer=new MutationObserver(()=>{const bubbles=[...document.querySelectorAll('[data-message-role="user"][data-request-id]')];if(bubbles.some(b=>b.textContent?.includes(text))){(window as unknown as {mentorTiming:unknown}).mentorTiming={started,bubble:performance.now()};observer.disconnect();}});observer.observe(document.body,{subtree:true,childList:true,characterData:true});},input);
   await send.evaluate(button=>{(button as HTMLButtonElement).click();(button as HTMLButtonElement).click();});
   await poll(()=>page.getByText(input,{exact:true}).count()).toBeGreaterThan(0);
-  const feedback=await page.evaluate(()=>(window as unknown as {mentorTiming:{started:number;bubble:number}}).mentorTiming);timings.clickToBubbleMs=feedback.bubble-feedback.started;expect(timings.clickToBubbleMs).toBeLessThan(200);expect(await page.getByText('发送中 · 等待服务器确认',{exact:true}).isVisible()).toBe(true);expect(await page.getByText('上一条发给导师的内容仍在核对。请先用“继续核对这条原请求”恢复，不会重复发送。',{exact:true}).count()).toBe(0);expect(await composer.inputValue()).toBe('');await composer.fill('这是下一条尚未发送的新草稿');releasePrepare();
+  const feedback=await page.evaluate(()=>(window as unknown as {mentorTiming:{started:number;bubble:number}}).mentorTiming);timings.clickToBubbleMs=feedback.bubble-feedback.started;expect(timings.clickToBubbleMs).toBeLessThan(200);expect(await page.getByText('发送中 · 等待服务器确认',{exact:true}).isVisible()).toBe(true);expect(await page.getByText('上一条发给导师的内容仍在核对。请先点“重试”恢复，不会重复发送。',{exact:true}).count()).toBe(0);expect(await composer.inputValue()).toBe('');await composer.fill('这是下一条尚未发送的新草稿');releasePrepare();
   await poll(async()=>(await control()).length).toBe(3);
   const second=(await control())[2]!;expect(second.finishedAt).toBeNull();expect([turnRequests,prepareRequests,streamRequests]).toEqual([2,0,0]);
   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-user-incremental-'+scenario+'.png',fullPage:true});
@@ -130,13 +130,35 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   if(scenario==='refresh'){
    const envelope=await page.evaluate(id=>sessionStorage.getItem('opc-step:'+id+':step-0'),d.draftId);expect(envelope).toBeTruthy();
    const executions=(await sql.query('select id,request_id from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows;
+   // The first history reads after the reload fail: the compact retry line is the entry until reads work again.
+   const historyRead=(url:URL)=>url.pathname.includes('runtime.view');await page.route(historyRead,route=>route.abort());
    await page.reload();await poll(()=>composer.isEditable()).toBe(true);expect(await composer.inputValue()).toBe('这是下一条尚未发送的新草稿');expect((await control()).length).toBe(4);
    expect(await page.evaluate(id=>sessionStorage.getItem('opc-step:'+id+':step-0'),d.draftId)).toBe(envelope);
+   const recoveryCard=page.getByRole('status',{name:'待恢复的导师请求'}),retryLine=page.getByRole('status',{name:'恢复提示'});
+   await poll(()=>retryLine.isVisible()).toBe(true);expect(await retryLine.getByRole('button',{name:'重试',exact:true}).isEnabled()).toBe(true);
+   expect(await recoveryCard.count()).toBe(0);await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-refresh-history-failed.png',fullPage:true});
+   // Reads work again: without any click the page re-reads history by itself and follows the running turn.
+   await page.unroute(historyRead);await poll(()=>retryLine.count(),{timeout:20000}).toBe(0);
    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-refresh-pending.png',fullPage:true});
+   // Recovery is silent: no recovery card or retry line, only the small reply status while the turn still runs.
+   expect(await send.isDisabled()).toBe(true);await poll(()=>page.getByText('正在回复…',{exact:true}).isVisible()).toBe(true);
+   expect([await recoveryCard.count(),await retryLine.count()]).toEqual([0,0]);
    await control(4);await poll(async()=>(await sql.query('select state from runtime_executions where id=$1',[executions.at(-1).id])).rows[0].state).toBe('completed');
-   const recovery=page.getByRole('button',{name:'继续核对这条原请求',exact:true});if(await recovery.isVisible())await recovery.click();else await page.reload();
+   // The reloaded page finds the finished turn by itself: no focus change, no reload and no recovery click.
+   const settledAt=Date.now(),soon={timeout:10000},refreshed=executions.at(-1);
+   await poll(()=>page.getByText('请选择当前问题最接近的答案：',{exact:true}).count(),soon).toBeGreaterThan(0);
+   await poll(()=>page.evaluate(id=>sessionStorage.getItem('opc-step:'+id+':step-0'),d.draftId),soon).toBeNull();
+   await poll(()=>send.isEnabled(),soon).toBe(true);await poll(()=>page.getByRole('button',{name:'确认当前信息，继续',exact:true}).isEnabled(),soon).toBe(true);
+   timings.refreshSettledToRecoveredMs=Date.now()-settledAt;expect(await composer.isEditable()).toBe(true);
+   expect([await recoveryCard.count(),await retryLine.count(),await page.getByText('正在回复…',{exact:true}).count()]).toEqual([0,0,0]);
    await poll(async()=>(await f.service.read(d.draftId)).information['step-0'].values?.product?.status).toBe('provisional');
-   expect((await control()).length).toBe(4);expect((await sql.query('select id,request_id from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows).toEqual(executions);
+   // One turn, no new admission or model call, and exactly one settlement for it.
+   expect(turnRequests).toBe(2);expect((await control()).length).toBe(4);
+   expect((await sql.query('select id,request_id from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows).toEqual(executions);
+   expect((await sql.query('select count(*)::int n from opc_turns where draft_id=$1 and request_id=$2',[d.draftId,refreshed.request_id])).rows[0].n).toBe(1);
+   await poll(async()=>(await sql.query("select count(t.id)::int n from runtime_executions e join credit_transactions t on t.bill2_run_id=e.billing_run_id and t.reason_code='bill2_spend' where e.id=$1",[refreshed.id])).rows[0].n).toBe(1);
+   expect(await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).isEnabled()).toBe(true);
+   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-refresh-auto-recovered.png',fullPage:true});
   }else await control(4);
   await poll(()=>send.isEnabled()).toBe(true);expect(await composer.inputValue()).toBe('这是下一条尚未发送的新草稿');
   const source=(await sql.query('select id,result from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows.at(-1);
@@ -176,7 +198,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    await page.getByRole('region',{name:'导师提问'}).last().getByRole('button').first().click();
    await poll(()=>page.getByText('这张卡已经过期，请看最新的回复。',{exact:true}).isVisible()).toBe(true);
    expect(await page.evaluate(id=>sessionStorage.getItem('opc-step:'+id+':step-0'),d.draftId)).toBeNull();
-   expect(await page.getByRole('button',{name:'继续核对这条原请求',exact:true}).count()).toBe(0);
+   expect(await page.getByRole('status',{name:'恢复提示'}).count()).toBe(0);
    expect(turnRequests).toBe(requestsBefore+1);expect((await control()).length).toBe(4);
    expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actor])).rows[0].n).toBe(2);
    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-source-denied-released.png',fullPage:true});
