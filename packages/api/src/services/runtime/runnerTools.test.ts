@@ -123,8 +123,11 @@ describe('question card tool definition and invalid cards',()=>{
  it('sends a strict JSON Schema without the host-only card rules',async()=>{
   const t=await agentTurn('stream',completion({content:'好的'}));await t.run;
   expect(JSON.parse(t.bodies[0]!).tools).toEqual([{type:'function',function:{name:'ask_question',
-   description:'Show the user one question card with 2 to 5 short suggested answers. recommended is the index of the option you '+
-    'recommend, or null for neutral ranges or categories. The host adds an Other entry. Ends your turn.',strict:true,parameters:{
+   description:'Use when asking the user to choose between 2 to 5 concrete directions grounded in their own material, '+
+    'including an explicit request for options, or to select a neutral range or category. '+
+    'Call this tool for a choice question; prose examples do not replace the card. Never guess user facts as options. '+
+    'recommended is the index of your recommendation with a reason, or null for neutral ranges or categories. '+
+    'The host adds an Other entry. Ends your turn.', strict:true,parameters:{
     $schema:'http://json-schema.org/draft-07/schema#',type:'object',additionalProperties:false,required:['question','options','recommended'],properties:{
      question:{type:'string',minLength:1,maxLength:500},
      options:{type:'array',minItems:2,maxItems:5,items:{type:'string',minLength:1,maxLength:200}},
@@ -169,7 +172,7 @@ it('freezes exact v5 provider request bytes including the exported strict tool s
   providerLimits:{providerSlug:'deepinfra/fp8',contextTokens:32000,
    promptUsdPerMillion:'0.1',completionUsdPerMillion:'0.1',requestUsd:'0'}};
  const wire=openRouterRequestBody(t.bodies[0]!,{context,policy,phase:'skill',primaryDialogue:true});
- expect(sha(wire)).toBe('50d1722ae999281dee6566f1c10ae78463a90f772738cd2416505c7f2224ae49');
+ expect(sha(wire)).toBe('fcf48b77f31231796042c784a576d054a3a4e66377cfc0b3d7fb9ac06ced21ab');
  const sent=JSON.parse(wire);
  expect(sent.tools).toHaveLength(1);expect(sent.tools[0].function.strict).toBe(true);
  expect(askQuestionToolBytes()).toBeGreaterThanOrEqual(Buffer.byteLength(JSON.stringify(sent.tools)));

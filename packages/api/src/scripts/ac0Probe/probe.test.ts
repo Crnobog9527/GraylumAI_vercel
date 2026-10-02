@@ -92,14 +92,14 @@ describe('dry run', () => {
 });
 
 describe('limits', () => {
-  it('refuses caps above the hard total of 736 calls and 15 USD', async () => {
-    expect(HARD_MAX_CALLS).toBe(736);
-    expect(HARD_MAX_USD).toBe(15);
+  it('refuses caps above the hard total of 974 calls and 31.24 USD', async () => {
+    expect(HARD_MAX_CALLS).toBe(974);
+    expect(HARD_MAX_USD).toBe(31.24);
     expect(() => validateCaps(HARD_MAX_CALLS + 1, 1)).toThrow('PROBE_CAP_REFUSED');
-    expect(() => validateCaps(10, 15.01)).toThrow('PROBE_CAP_REFUSED');
-    expect(validateCaps(HARD_MAX_CALLS, 15)).toBeUndefined();
+    expect(() => validateCaps(10, 31.25)).toThrow('PROBE_CAP_REFUSED');
+    expect(validateCaps(HARD_MAX_CALLS, 3.5)).toBeUndefined();
     expect(() => parseProbeArgs(['--max-calls', String(HARD_MAX_CALLS + 1)], home)).toThrow('PROBE_CAP_REFUSED');
-    expect(() => parseProbeArgs(['--max-usd', '16'], home)).toThrow('PROBE_CAP_REFUSED');
+    expect(() => parseProbeArgs(['--max-usd', '31.25'], home)).toThrow('PROBE_CAP_REFUSED');
     expect(parseProbeArgs([], home)).toMatchObject({maxCalls: 60, maxUsd: 1, live: false});
     const network = recording();
     const outcome = await runProbe(base('--max-calls', '500', '--live'), {[KEY_ENV]: KEY}, deps(network.upstream));

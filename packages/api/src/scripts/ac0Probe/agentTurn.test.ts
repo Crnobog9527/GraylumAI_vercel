@@ -106,7 +106,7 @@ describe('AC1-4 prepared probe (synthetic transport only)', () => {
       .toThrow('CARD_CATEGORY_COUNTS_FIXED');
     expect(() => buildPlan(args, skill, scenarios.map((item, i) => i ? item : {...item, opening: true}), 's'))
       .toThrow('CARD_OPENING_UNSUPPORTED');
-    expect(HARD_MAX_CALLS).toBe(736);
+    expect(HARD_MAX_CALLS).toBe(974);
     expect(plan).toMatchObject({agentTurn: true, plannedCalls: 40, maxUsd: 1, configs: [AGENT_TURN_CONFIG]});
     expect(() => parseProbeArgs(['--agent-turn', '--configs', 'other'], '/synthetic')).toThrow('CONFIG_FIXED');
     expect(() => buildPlan({...args, counts: {...args.counts, text: 21}}, skill, scenarios, 's')).toThrow('PLAN_FIXED');
