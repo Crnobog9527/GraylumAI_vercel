@@ -28,7 +28,8 @@ try {
   if(liveArgs.length){
     const [flag,evidencePath,evidenceHash]=liveArgs;
     if(flag!=='--live'||!/^[a-f0-9]{64}$/.test(evidenceHash))throw new Error('LIVE_EVIDENCE_REQUIRED');
-    bridge=await liveBridge({maxUsd:6,evidencePath:resolve(evidencePath),evidenceHash,frozenHead:head,output});
+    // The interrupted old-head batch settled $0.0287535; both batches share the $6 limit.
+    bridge=await liveBridge({maxUsd:5.9712465,evidencePath:resolve(evidencePath),evidenceHash,frozenHead:head,output});
     input.live={url:bridge.url,secret:bridge.secret};
   }
   writeFileSync(privateInput,JSON.stringify(input),{mode:0o600});

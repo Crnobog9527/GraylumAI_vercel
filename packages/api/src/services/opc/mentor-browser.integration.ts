@@ -104,6 +104,11 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    const card=page.getByRole('region',{name:'导师提问'}).last();
    await poll(()=>card.getByText('推荐',{exact:true}).isVisible()).toBe(true);
    expect(await card.getByText(saved.card.recommendationReason,{exact:true}).isVisible()).toBe(true);
+   // The reason sits directly under the recommended option and describes it.
+   const recommendedOption=card.locator('button[aria-describedby]'),reason=card.locator('button[aria-describedby] + p');
+   expect(await recommendedOption.count()).toBe(1);expect(await recommendedOption.textContent()).toContain('推荐');
+   expect(await reason.textContent()).toBe(saved.card.recommendationReason);
+   expect(await reason.getAttribute('id')).toBe(await recommendedOption.getAttribute('aria-describedby'));
    expect(saved.message).toBe(saved.card.message);
    await card.getByRole('button',{name:'其他',exact:true}).click();
    await poll(()=>composer.evaluate(element=>element===document.activeElement)).toBe(true);
