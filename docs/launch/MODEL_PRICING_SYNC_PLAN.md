@@ -17,9 +17,11 @@
 2. 价格区变成**只读**，照搬 OpenRouter 的结构：输入、输出、缓存读取、缓存写入、思考、联网搜索，有分档就显示
    "输入超过 27.2 万 token 时：……"，不再写死两档。旁边显示"读取时间"和"已经过了几天"。
 3. 同一页显示这个模型的加价倍数（#565 做的那块），以及"用户实际大约付多少积分"的换算。
-4. 价格过旧（建议超过 7 天）时，页面变黄提醒，新的调用会被拒绝，点一下"重新读取"就恢复。
-5. 如果 OpenRouter 涨价：系统**不会自动跟着提高上限**。已批准的报价会被拦下，需要重新批准；
-   OpenRouter 那边也会因为我们设置的最高价，直接拒绝按新价调用，不会产生费用。
+4. 价格过旧（建议超过 7 天）时，页面变黄提醒；推荐让系统在下一次调用前自动重读一次公开价格（第 9 节 D4），
+   价格没涨就继续，不用人去点。
+5. 如果 OpenRouter 涨价：系统**不会自动跟着提高上限**。已批准的报价会被拦下，需要重新批准。
+   OpenRouter 那边也有一道"最高价"保护：线路的价格超过我们冻结的最高单价时，直接拒绝调用，不产生费用；
+   小幅涨价拦不住，要靠我们这边的价格比较发现（第 10 节）。
 6. 用户最终扣多少，仍然按 OpenRouter 实际收的钱（已经包含缓存折扣）乘倍数算，这一点不变。
 
 **需要你决定的事**见第 9 节，每项都有推荐答案；不想细看可以直接回复第 9 节末尾那句话。
@@ -32,7 +34,10 @@
   （`packages/api/src/services/bill2/openRouterPolicy.ts:7-11`：`providerSlug`、`contextTokens`、
   `promptUsdPerMillion`、`completionUsdPerMillion`、`requestUsd`）。
   `openRouterBound` 按 `prompt × contextTokens + completion × maxOutput` 向上取整加 `request` 得到上界，
-  同时生成 `only:[线路]`、`allow_fallbacks:false`、`max_price:{prompt,completion,request}`（同文件 26-37 行）。
+  同时生成 `only:[线路]`、`allow_fallbacks:false`、`max_price:{prompt,completion,request}`（同文件 27-36 行）。
+  **上界和 `max_price` 用的是同一个 `promptUsdPerMillion` / `completionUsdPerMillion`。** 总控 2026-10-02 在 staging
+  新建的 v2 窗口 `239cea19…` 已把这两个字段直接填成最高单价（Sonnet 输入 2.5 = 5 分钟缓存写入价；Luna
+  0.25 / 0.75 = 27.2 万档的写入价和输出价），所以现在实际发给 OpenRouter 的 `max_price` 就是最高单价。
 - `providerLimits` 冻结在 staging 测试窗口 `runtime_test_windows.call_policies`
   （`packages/db/migrations/0108_runtime_staging_window.sql:8-16`）。这张表对 anon / authenticated / service_role
   都撤销了权限，窗口行由总控在 Owner 批准后用 SQL 写入；SQL 准入按**整对象相等**匹配报价（同文件 40-44 行），
@@ -48,9 +53,9 @@
 - `packages/api/src/services/models/openRouterCatalog.ts`：`readOpenRouterCatalog(model)` 用公开、不带密钥的
   GET 同时读 `/api/v1/models` 和 `/api/v1/models/{作者}/{名称}/endpoints`，有 15 秒超时、8 MB 上限、
   `redirect:'error'`，任何格式异常整体失败、不保存半份快照。
-- 结果存为 `ai_models.config.reasoning.catalog`（`shared/modelReasoning.ts:43-73`：`fetchedAt`、`model`、
+- 结果存为 `ai_models.config.reasoning.catalog`（`shared/modelReasoning.ts:46-75`：`fetchedAt`、`model`、
   `reasoning`、`endpoints[]{tag, providerName, supportedParameters, contextLength, maxCompletionTokens}`），
-  由后台 `modelReasoning.refreshCatalog`（`routers/modelReasoning.ts:85-96`）触发；页面入口是模型页的
+  由后台 `modelReasoning.refreshCatalog`（`routers/modelReasoning.ts:78-89`）触发；页面入口是模型页的
   `ModelReasoningDialog`。**端点返回里的 `pricing` 目前被丢弃。**
 - 线路用完整 tag（例如 `deepinfra/fp8`、`google-vertex/global`），这是仓库现有约定（MR-1/MR-2）。
 
@@ -64,7 +69,7 @@
 `prompt` 464、`completion` 464、`input_cache_read` 300、`web_search` 177、`input_cache_write` 94、
 `overrides` 80、`input_cache_write_1h` 33、`internal_reasoning` 31、`image` 30、`audio` 33、
 `input_audio_cache` 28、`image_output` 9、`audio_output` 2；**没有任何模型带 `request` 字段**。
-端点价格另有 `discount` 字段（含义见第 3.5 节）。价格单位是"美元 / 每个 token"的十进制字符串。
+端点价格另有数字型的 `discount` 字段（每条线路都有，多数是 0；含义见第 3.5 节）。价格单位是"美元 / 每个 token"的十进制字符串。
 
 我们在用或准备用的 5 个模型（线路取各自 `/endpoints` 的值，单位已换成美元 / 百万 token）：
 
@@ -79,8 +84,11 @@
 另外观察到、方案必须处理的形状：
 
 - **多档**：`qwen/qwen3.7-flash` 有 `min_prompt_tokens` 32,000 和 256,000 两档。
-- **按时段变价**：`deepseek/deepseek-v4-pro-0813` 的 `overrides` 用 `utc_days`、`utc_start`、`utc_end`
-  表示周末和工作日不同时段的价格。
+- **按时段变价**：`deepseek/deepseek-v4-pro-0813` 的 `overrides` 用 `utc_days`（小写星期名）、`utc_start`、`utc_end`
+  （HHMM 写法，例如 `utc_start:1400, utc_end:0`，会跨过午夜）表示不同时段的价格。
+- **override 是平铺对象**：条件键和价格键混在一起，例如 Luna 是
+  `{min_prompt_tokens:272000, prompt, completion, input_cache_read, input_cache_write}`；override 不一定列出全部价格
+  （DeepSeek 的时段 override 没写 `input_cache_write`）。
 - **同一模型下线路 tag 重复**：`deepseek/deepseek-v4.1-flash` 的 `/endpoints` 里 `baseten/fp8` 出现两次
   （本次两条价格相同）。tag 不能直接当唯一键。
 - **同一线路名在不同地区价格不同**：Sonnet 5.5 的 `google-vertex/global` 是 2，`google-vertex/us` 是 2.2。
@@ -119,7 +127,10 @@ config.pricing = {
 放在并列的键里，旧代码只读 `config.reasoning`，回退是干净的。代价是两处要保持一致：同一次写入、相同 `fetchedAt`
 和 `model`，推导时校验两者一致且 `model` 等于当前行的 `model_id`（改过模型 ID 的行必须重新读取）；
 `services/models/modelConfig.ts` 的 `withStoredReasoning`（`routers/model.ts:389,456` 在编辑通用配置时用它保住
-`reasoning`）同样要保住 `pricing`。
+`reasoning`）同样要处理 `pricing`：**丢掉客户端传来的 `pricing`**（防伪造），再放回已存的值。
+连接测试的 `persistConnectionState`（`routers/model.ts:106-133`）也是对整个 `config` 先读后写，和"重新读取"同时
+发生时会把 `pricing` 改回旧快照（不会提高上限，但会让一次已发现的涨价暂时"消失"）；PR A 让它只合并自己的键
+（或同样加 `updated_at` 防覆盖）。
 
 每条线路的 `pricing` 保持 OpenRouter 的形状，只做规范化，不压成两档：
 
@@ -128,7 +139,7 @@ pricing: {
   base: { prompt, completion, inputCacheRead?, inputCacheWrite?, inputCacheWrite1h?,
           internalReasoning?, webSearch?, request?, image?, audio?, ... }   // 美元/百万 token（或每次），十进制字符串
   overrides: [ { when: { minPromptTokens? , utcDays?, utcStart?, utcEnd? }, prices: {同上的子集} } ]  // 最多 16 条
-  discount: string | null      // 原样记录，不参与计算
+  discount: number | null      // 原样记录（数字，例如 0、0.3、0.5），不参与计算
   unknownKeys: string[]        // 目录里出现、但本版本不认识的价格字段名
   raw: object                  // OpenRouter 原始 pricing 对象（字符串原样），只供核对
 }
@@ -137,7 +148,16 @@ pricing: {
 - 单位换算：OpenRouter 字符串 × 1,000,000 用十进制移位完成（不经过浮点）；超过 12 位小数的**向上取整到 12 位**
   （和 `bill2/decimal.ts` 精度一致，与 PROMPT_CACHE_PLAN 第 4.1 节对 Gemini 的规定相同），原始字符串另存一份
   `raw` 供核对。
-- 重复 tag：价格完全相同则合并；不同则这条 tag 标为"价格不唯一"，不能被选为线路。
+- 重复 tag：价格完全相同则合并，`contextLength` 不同时取较小值；价格不同则这条 tag 标为"价格不唯一"，不能被选为线路。
+- 键分类（OpenRouter 的 override 是平铺对象，必须分类）：
+  - 已知条件键：`min_prompt_tokens`、`utc_days`、`utc_start`、`utc_end`。
+  - 已知价格键：`prompt`、`completion`、`request`、`input_cache_read`、`input_cache_write`、`input_cache_write_1h`、
+    `internal_reasoning`、`web_search`、`image`、`audio`、`input_audio_cache`、`image_output`、`audio_output`。
+  - 基础价层另有 `discount`、`overrides` 两个结构键。
+  - **override 里出现任何其他键**：整条线路不可准入（无法判断它是新条件还是新价格），不受 D5 影响。
+  - 基础价层出现其他键：记入 `unknownKeys`，按 D5 处理。
+  - 条件值校验：`utc_days` 只接受 7 个小写星期名；`utc_start` / `utc_end` 是 0–2359 的 HHMM，分钟 ≤ 59，
+    允许 `utc_end < utc_start`（跨午夜）；`min_prompt_tokens` 是正整数。不合法 → 整条线路不可准入。
 - 只读、不可手改：没有任何接口能单独写 `pricing`；唯一写入路径是"重新读取"，每次整体替换成新快照（新 `fetchedAt`、
   新 `pricingHash`）。历史价格的权威记录在已冻结的报价里（窗口 `call_policies`、`bill2_runs.payload.callPolicy`、
   `bill2_calls.payload.providerLimits`），不在 `ai_models` 里另存历史。
@@ -191,87 +211,103 @@ pricing: {
 
 ```
 对每个"适用的价格层"L（基础价 + 所有适用的 overrides）：
-  写入价(L) = inputCacheWrite 是"总价"   ? inputCacheWrite
-            : inputCacheWrite 是"附加费" ? prompt + inputCacheWrite（向上取整到 12 位）
-            : 无写入价                   ? 0
-  输入(L)   = max(prompt, 写入价(L))
-  输出(L)   = max(completion, internalReasoning ?? 0)
-输入最高单价 = max over L 输入(L)；输出最高单价 = max over L 输出(L)
+  价格(L, k) = override 写了 k ? override 的值 : 基础价的值        // 没写的沿用基础价，不能当 0
+  写入价(L)  = 没有写入价                ? 0
+             : 写入价是"总价"           ? 价格(L, input_cache_write)
+             : 写入价是"附加费"         ? 价格(L, prompt) + 价格(L, input_cache_write)   // 每一层分别相加，向上取整到 12 位
+  输入(L)    = max(价格(L, prompt), 写入价(L))
+  输出(L)    = max(价格(L, completion), 价格(L, internal_reasoning) ?? 0)
+  每次(L)    = 价格(L, request) ?? 0
+输入最高单价 = max over L 输入(L)；输出最高单价 = max over L 输出(L)；每次最高 = max over L 每次(L)
 ```
 
 - **适用的价格层**：
   - `minPromptTokens`：当 `promptTokensUpper ≥ minPromptTokens` 时适用。现在 `promptTokensUpper = contextTokens`
     （整个上下文都预留），所以 Luna、Qwen 的高档都适用；PAYG 后改为 #553 的 `T = B + K + M`，T 低于阈值才用低档。
   - `utcDays` / `utcStart` / `utcEnd`：一律适用（调用可能跨过时段边界），即冻结时取所有时段中最高的价。
-  - `when` 里出现不认识的条件键：整条线路**不可准入**，不猜。
+  - override 里出现不认识的键：整条线路**不可准入**，不猜（第 3.1 节键分类）。
 - **缓存写入是"总价"还是"附加费"**：Anthropic、OpenAI、Qwen 的 `input_cache_write` 是写入 token 的总单价
   （都高于普通输入价）；Gemini 的是 5 分钟存储费，需要加在输入价上（#572 第 4.1 节）。规则：作者是 `google/`
   的按附加费；其他作者若写入价低于输入价，也按附加费处理（保守，算高不算低）；写入价不低于输入价按总价。
-  这条规则写在代码注释和测试里。
+  这条规则写在代码注释和测试里。它只在一个方向上保守：写入价不低于输入价、但其实是附加费的线路会被算低
+  （现有 5 个模型都不是这种情况），写进第 10 节。
 - **1 小时缓存写入**：Runtime 现在只发 5 分钟缓存标记（#572）。请求里出现 1 小时标记时必须把
   `inputCacheWrite1h` 纳入输入最高单价，否则拒绝发送；首版不发。
 - **思考 token**：`internal_reasoning` 存在时与 `completion` 取大。这只在思考 token 计入 `outputLimit` 时成立；
   不计入的情况按 #553 第 2 节要求另设硬上限 R 并逐项加，本任务不放宽这条。
-- **联网搜索、图片、音频**：Runtime 首版是纯文本、`network:'deny'`、关闭搜索插件（0108 准入要求），
-  这些价格只保存和显示，不进上限。以后开启某一项时，必须同时把对应单价 × 次数上限加进上限，否则拒绝。
-- **`request`**：目录目前没有这个字段，缺省为 `"0"`；出现时照实计入。
+- **联网搜索、图片、音频、1 小时写入**（已知的非文本价格键白名单：`web_search`、`image`、`audio`、
+  `input_audio_cache`、`image_output`、`audio_output`、`input_cache_write_1h`）：Runtime 首版是纯文本、
+  `network:'deny'`、关闭搜索插件（0108 准入要求），这些价格只保存和显示，不进上限。以后开启某一项时，
+  必须同时把对应单价 × 次数上限加进上限，否则拒绝。
+- **`request`**：目录目前没有这个字段，缺省为 `"0"`；出现时照实计入（取各层最高）。
 - **`discount`**：只记录，不参与计算（第 3.5 节）。
-- **不认识的价格字段**（`unknownKeys` 非空）：显示出来；首版**仍允许**准入，前提是请求类型不会用到它
-  （纯文本）。是否改为一律拒绝，见第 9 节 D5。
+- **基础价层不认识的字段**（`unknownKeys` 非空）：页面显示出来；准入按 D5（推荐拒绝，见第 9 节）。
 
-输出给 BILL2 的 `providerLimits`（向后兼容扩展 `openRouterLimits`）：
+输出给 BILL2 的 `providerLimits`——**单字段写法**（与 v2 窗口 `239cea19…` 完全一致）：
 
 ```
-{ providerSlug, contextTokens, promptUsdPerMillion, completionUsdPerMillion, requestUsd,   // 现有字段：基础价，用于 max_price
-  cacheWriteUsdPerMillion?,                                                               // #572 已定名字和含义
-  boundInputUsdPerMillion?, boundCompletionUsdPerMillion?,                                // 新增：上面推导的最高单价
-  priceSnapshot?: { fetchedAt, pricingHash } }                                            // 新增：来源，便于对账
+{ providerSlug, contextTokens,
+  promptUsdPerMillion:     输入最高单价,
+  completionUsdPerMillion: 输出最高单价,
+  requestUsd:              每次最高 }
 ```
 
-- `openRouterBound` 改为：有 `boundInput/boundCompletion` 时用它们算上界，没有时退回现有算法（旧窗口和旧回执不变）；
-  #572 的 `cacheWriteUsdPerMillion` 仍保留并参与同一个 max（两者取大，保证只有一套算法）。
-- `max_price` 仍用基础的 `prompt` / `completion` / `request`：作用是"线路挂牌价比快照高就不执行"，
-  这是调用时唯一的实时涨价保护。分档后的实际单价能否通过基础价的 `max_price`，OpenRouter 文档没写，
-  列为第 7 节必测项；不通过时改为 `max_price` 取分档最高价（仍不超过上界）。
+- `openRouterLimits` 和 `openRouterBound` **不改结构、不改算法**：上界仍是
+  `ceil((prompt × contextTokens + completion × maxOutput) / 1e6) + request`，`max_price` 也用这三个最高单价。
+  所以只有一套上界算法；`max_price` 一定不低于任何分档价，长输入跨档不会被 OpenRouter 拒；旧窗口、v2 窗口和旧回执
+  的上界逐位不变；0108 的整对象相等匹配和 `stagingPolicy.ts:33` 的 `upperUsd` 复核都不用动。
+- 代价（写入第 10 节）：OpenRouter 端的实时拦截只能拦住"挂牌价涨到超过冻结的最高单价"的情况；涨幅更小的
+  （例如 Sonnet 基础价从 2 涨到 2.4），要靠第 3.4 节的快照比较和过期时限发现，结算时 `cost > upper_usd` 记冲突兜底。
+- `cacheWriteUsdPerMillion`（#572）：保留，作为 PROMPT-CACHE "能否加缓存标记"的前提和来源说明。由 PR B 作为
+  `openRouterLimits` 的可选字段加入，值由推导函数填写；在上界里它只是 `max(prompt, cacheWrite)` 中一个不起作用的项
+  （prompt 已经是最高价），测试证明加上它上界不变。旧报价没有这个字段，行为不变。
+- 来源（`fetchedAt`、`pricingHash`）**不放进** `providerLimits`，避免让 SQL 整对象匹配更复杂：建窗口时写进总控的
+  执行记录；每次准入由 `pricingAdmission` 写进结构化日志。
 - `contextTokens` 取所选线路的 `contextLength`（真实能力，#553 要求不为改变收费而人为改小）；
   仍须满足现有 `ai_models.input_limit ≥ contextTokens`。
-- 冻结报价整体放进 `bill2_calls.payload`，新增字段约 150 字节，远低于 65,536 字节上限；测试覆盖。
+- `bill2_calls.payload` 只多一个可选的 `cacheWriteUsdPerMillion`，远低于 65,536 字节上限；测试覆盖。
 
 ### 3.4 准入时的价格检查、过期和涨价
 
 新增 `pricingAdmission.ts`（与 `reasoningAdmission.ts` 并列），真实窗口的每次新准入：
 
-1. 读取当前模型行的快照，按窗口报价的 `providerSlug` 找到线路；没有快照、没有价格、线路消失或价格不唯一 → 拒绝
-   `RUNTIME_PRICE_SNAPSHOT_MISSING`。
-2. 快照 `fetchedAt` 超过时限 → 拒绝 `RUNTIME_PRICE_SNAPSHOT_STALE`（中文："模型价格太久没更新，请在后台重新读取"）。
-   推荐时限 7 天（D1）。
-3. 用当前快照重新推导报价，与窗口里冻结的报价比较价格字段：
-   - 完全相同 → 通过（只是重新读取、价格没变，不影响窗口）。
-   - **任一单价上涨 → 拒绝** `RUNTIME_PRICE_INCREASED`，提示"供应商涨价，需要重新批准报价"。系统永远不会自动提高上限。
-   - 只有下降 → 按 D2 处理（推荐：继续用旧的、偏高的冻结报价，直到重新批准；实扣仍按实际费用，用户不吃亏）。
+1. 读取当前模型行的快照，按窗口报价的 `providerSlug` 找到线路；没有快照、没有价格、线路消失、价格不唯一、
+   线路不可准入（第 3.1 节键分类）或 `pricing.model` 不等于行的 `model_id` → 拒绝 `RUNTIME_PRICE_SNAPSHOT_MISSING`。
+2. 快照 `fetchedAt` 超过时限（推荐 7 天，D1）：按 D4 推荐，由准入自动重读一次公开目录（与后台按钮同一函数、同一
+   防覆盖写入，15 秒超时），成功后用新快照继续第 3 步；读取失败 → 拒绝 `RUNTIME_PRICE_SNAPSHOT_STALE`
+   （中文："模型价格太久没更新，暂时无法核对，请稍后重试或在后台重新读取"）。若 D4 选"只手动"，过期直接拒绝。
+3. 用当前快照按本次的 `promptTokensUpper` 推导出三个最高单价，与窗口冻结的 `promptUsdPerMillion`、
+   `completionUsdPerMillion`、`requestUsd` **逐项比较**：
+   - 三项都是"窗口 ≥ 推导值" → 通过。价格没变、或供应商降价（D2：继续用旧的、偏高的冻结报价，直到重新批准；
+     实扣按实际费用，用户不吃亏）都走这条。
+   - **任一项"窗口 < 推导值" → 拒绝** `RUNTIME_PRICE_INCREASED`，提示"供应商涨价，需要重新批准报价"。
+     系统永远不会自动提高上限。比较的是推导出的**最高单价**，所以缓存写入价、分档价、时段价单独上涨也能发现。
+   - 例：v2 窗口（Sonnet 2.5、Luna 0.25 / 0.75）对当前目录通过；按基础价 2 冻结 Sonnet 的 v1 窗口被拒（2 < 2.5）。
 4. 已开始的 run 和恢复、重放不受影响：它们只用自己冻结的报价，不重新读快照（和 MR-2 的冻结规则一致）。
 
-为什么调用时不实时查 OpenRouter：会给每次调用增加一个外部依赖和延迟；实时涨价已由 `max_price` 在 OpenRouter
-那边拦截（不产生费用）；`max_price` 覆盖不到的缓存写入和分档价，由过期时限 + 结算时 `cost > upper_usd`
-冲突检查兜底（冲突时平台承担差额，按 #553 规则停止新派发）。
+为什么不是每次调用都实时查 OpenRouter：会给每次调用增加一个外部依赖和延迟。只在快照过期时由准入重读一次
+（每个模型最多每 7 天一次）；两次读取之间，挂牌价涨过冻结最高价的由 `max_price` 在 OpenRouter 那边拦截（不产生费用），
+更小的涨幅由下一次读取后的比较发现，期间多出的费用由结算时 `cost > upper_usd` 冲突检查兜底
+（差额平台承担，按 #553 规则停止新派发）。
 
-不加定时刷新（不新增 cron）：管理员点按钮即可；过期会在页面和准入两处提示。是否要自动刷新见 D4。
+不加定时任务（不新增 cron）。
 
 ### 3.5 `discount` 字段
 
 端点价格带 `discount`（Gemini 0.5、DeepSeek `deepinfra/fp8` 0.3），文档未说明挂牌价是折前还是折后。
 处理：只记录、不参与计算，冻结按挂牌价。若挂牌价是折前价，实际扣费更低，上限偏高但安全；若是折后价且折扣到期，
-挂牌价上涨会被 `max_price` 和第 3.4 节拦下。第一次经批准的 staging 小额对账时核对 `usage.cost` 与挂牌价的关系。
+挂牌价上涨会被第 3.4 节的比较拦下（涨过冻结最高价的也会被 `max_price` 拦下）。第一次经批准的 staging 小额对账时核对 `usage.cost` 与挂牌价的关系。
 
 ### 3.6 测试窗口和以后的正式环境怎么用
 
 - **staging 测试窗口**：窗口仍由总控在 Owner 批准后用 SQL 新建（不改 0108 的权限设计）。变化是窗口报价不再手抄：
-  后台面板提供"复制报价 JSON"（由 `deriveOpenRouterLimits` 生成，带 `fetchedAt` 和 `pricingHash`），
-  总控把它原样放进窗口 SQL；准入第 3 步保证两者一致。建窗口前 24 小时内必须重新读取一次。
+  后台面板提供"复制报价 JSON"（由 `deriveOpenRouterLimits` 生成，旁边单独列出 `fetchedAt` 和 `pricingHash`
+  供执行记录引用），总控把报价原样放进窗口 SQL；准入第 3 步保证窗口不低于当前推导值。建窗口前 24 小时内必须重新读取一次。
   #565 合并后窗口条目还带每个模型的 `multiplier`（必须等于当时配置，`assertWindowMultipliers`），这部分仍按 #565 的规则
   取值；"复制报价 JSON"只负责 `providerLimits` 和 `upperUsd`，不生成倍数。
-- **v1 旧窗口**（报价没有新字段）：`openRouterBound` 结果不变；第 3.4 节检查对它们照样生效（基础单价比较），
-  旧窗口的价格若和当前快照不同会被拦下，需要新窗口。合并前列出当时有效窗口，由总控决定是否一起换。
+- **已有窗口**：`openRouterBound` 结果逐位不变；第 3.4 节检查对它们同样生效。按总控提供的事实，现在 staging 用的是
+  v2 窗口 `239cea19…`（已按最高单价冻结，会通过）；旧 v1 窗口 `3b90b458…` 若仍按基础价冻结，会被拒。
+  **合并 PR B 之前**，执行方列出当时所有有效窗口及每条报价按当前快照的比较结果，交总控决定是否先停用或换新窗口。
 - **正式环境（RUNTIME-PROD ①）**：报价审批机制由 RUNTIME-PROD 设计，本方案只约束：报价必须由
   `deriveOpenRouterLimits` 从快照生成，带来源和 hash；准入走同一个 `pricingAdmission`；涨价拒绝、过期拒绝规则相同。
 
@@ -280,7 +316,7 @@ pricing: {
 | 来源 | 本方案怎么对齐 |
 | --- | --- |
 | #565 BILL-UNIT | 不碰 q、m、`price_multiplier`、`billing_provider_prices` 和 `C = ceil(q × Σ(U_i × m_i))`。U_i 仍是 OpenRouter 实际费用。页面把价格面板放在倍数面板旁边，只读取 #565 的生效倍数用于预览。 |
-| #572 PROMPT-CACHE | 沿用 `cacheWriteUsdPerMillion` 的名字和含义、Gemini 附加费换算和 12 位向上取整；本方案让这个值由快照自动生成，不再手填。 |
+| #572 PROMPT-CACHE | 沿用 `cacheWriteUsdPerMillion` 的名字和含义、Gemini 附加费换算和 12 位向上取整；这个值由快照自动生成，不再手填。**取代 #572 第 4.1 节"改 `openRouterBound`"的做法**：单字段写法下 `prompt` 已含写入价，PROMPT-CACHE 实现只读取推导出的单价和 `cacheWriteUsdPerMillion`，不改 `openRouterBound`，因此可以和 PR B 并行。 |
 | #553 BILL-PAYG | 提供 #553 第 2 节"输入最高单价 = max(普通输入价, 5 分钟缓存写入价, 适用的长上下文档位价)"所需的数据；`promptTokensUpper` 参数就是 #553 的 T。第 7 节"稳定 quote policy"里的价格和来源就是本方案的快照字段。#553 的算法不在这里改。 |
 | RATE-LIMIT #573 | 无交叉。 |
 
@@ -288,12 +324,12 @@ pricing: {
 
 | PR | 内容 | 风险 |
 | --- | --- | --- |
-| A | 新的严格 schema `pricingSnapshot`（`config.pricing`）；`readOpenRouterCatalog` 同一次读取里解析和规范化价格（十进制换算、重复 tag、overrides、unknownKeys）；`refreshCatalog` 同时写 `reasoning.catalog` 和 `pricing`，加 `updated_at` 防覆盖、新旧比较和日志；`withStoredReasoning` 保住 `pricing`；只读价格面板。不改任何收费路径 | high（只新增价格来源和显示，但属于计费数据；按 AGENTS.md 第 4 节保守按 high） |
-| B | `deriveOpenRouterLimits`；`openRouterLimits` 增加可选字段，`openRouterBound` 使用推导单价；`pricingAdmission` 接入真实窗口准入；"复制报价 JSON"；stagingPolicy / SQL 整对象匹配随新字段自然生效（无 SQL 改动，需测试证明） | high（计费上界、准入） |
+| A | 新的严格 schema `pricingSnapshot`（`config.pricing`）；`readOpenRouterCatalog` 同一次读取里解析和规范化价格（十进制换算、重复 tag、键分类、overrides、unknownKeys）；`refreshCatalog` 同时写 `reasoning.catalog` 和 `pricing`，加 `updated_at` 防覆盖、新旧比较和日志；`withStoredReasoning` 丢掉客户端 `pricing` 并保住已存值；`persistConnectionState` 只合并自己的键；只读价格面板。不改任何收费路径 | high（只新增价格来源和显示，但属于计费数据；按 AGENTS.md 第 4 节保守按 high） |
+| B | `deriveOpenRouterLimits`（单字段写法）；`openRouterLimits` 只加可选 `cacheWriteUsdPerMillion`，`openRouterBound` 算法不变；`pricingAdmission`（含过期自动重读，按 D4）接入真实窗口准入；"复制报价 JSON"；合并前列出有效窗口（第 3.6 节）。无 SQL 改动 | high（计费上界、准入） |
 | C | 删除模型页"Token 成本设置"表单和 `routers/model.ts` / `admin.ts` 对 5 个手填列的写入；读者按第 6 节处理；列本身保留到 LEGACY-CLOSE | high（计费字段、旧链路） |
 
-如果 PROMPT-CACHE 实现届时还没开始，B 按 #572 的名字一并加 `cacheWriteUsdPerMillion`，PROMPT-CACHE 直接复用；
-两边不能各写一套 `openRouterBound`，由总控指定 `openRouterPolicy.ts` 的唯一写入方。
+**写入方（总控 2026-10-02 指定）**：`openRouterPolicy.ts` 的唯一写入方是本任务 PR B。PROMPT-CACHE 实现只读取
+推导出的单价和 `cacheWriteUsdPerMillion`，不自己改 `openRouterBound`。A 可以先做；C 在 B 之后做，或并入 LEGACY-CLOSE。
 
 ## 6. 手填价格列的读者：保留、迁移还是随 LEGACY-CLOSE 删除
 
@@ -331,8 +367,8 @@ LEGACY-CLOSE 删除上述旧链路后，再用一个迁移删掉 5 列（含建�
 
 - 不需要 SQL 迁移。现有 5 个模型行（`deepseek/deepseek-v4.1-flash`、`google/gemini-3.8-flash`、`openai/gpt-6-luna`、
   `qwen/qwen3.8-27b`、`anthropic/claude-sonnet-5.5`；以 staging 实际行为准，本方案未连库读取）在 PR A 部署后，
-  由管理员在后台对每个模型点一次"从 OpenRouter 读取"。这会改写 staging `ai_models.config`，按 D3 推荐由
-  Owner 给一次性许可，执行方读回核对 `pricingHash` 和线路。
+  由管理员在后台对每个模型点一次"从 OpenRouter 读取"。这会改写 staging `ai_models.config`；按 D3 推荐，读取公开价格
+  不需要逐次批准，执行方读回核对 `pricingHash` 和线路。
 - 手填列保留原值、不再显示、不再被新路径读取；LEGACY-CLOSE 时再决定删列（那时需要迁移和指纹更新）。
 - 正式库建库（REL-1）：模型行导入后同样点读取，不从 staging 复制价格。
 
@@ -341,8 +377,8 @@ LEGACY-CLOSE 删除上述旧链路后，再用一个迁移删掉 5 列（含建�
 - PR A：回退代码即可。价格在并列的 `config.pricing` 键里，旧代码不读它，`config.reasoning` 结构不变；
   旧版通用配置编辑可能把 `config.pricing` 清掉，重新部署后再点一次读取即可。测试覆盖"带 `config.pricing`
   的行在旧解析下思考设置仍有效"。
-- PR B：新字段可选，删掉准入检查和推导即可回到旧算法；已冻结的新格式报价需要保留能读新字段的版本完成或恢复
-  （同 MR-2 的恢复边界）。
+- PR B：`openRouterBound` 算法没变，回退只是删掉准入检查和推导；报价里唯一的新字段 `cacheWriteUsdPerMillion`
+  是可选的，已冻结带该字段的报价需要保留能读它的版本完成或恢复（同 MR-2 的恢复边界）。
 - PR C：恢复表单即可；列一直没删。
 
 ### 7.3 测试
@@ -351,34 +387,44 @@ LEGACY-CLOSE 删除上述旧链路后，再用一个迁移删掉 5 列（含建�
 
 - 价格换算：每 token 字符串 → 每百万；12 位以上向上取整（Gemini 0.0000000416666666666667 → 0.041666666667）；
   非法字符串、负数、科学计数法拒绝。
-- overrides：Luna 在 T = 271,999 / 272,000 的输入和输出单价；Qwen 两档；DeepSeek 时段价取最高；不认识的条件键拒绝。
+- overrides：Luna 在 T = 271,999 / 272,000 的输入和输出单价；Qwen 两档；DeepSeek 时段价取最高；override 缺字段时
+  沿用基础价（含写入价）；附加费写法每层分别相加；`utc_end < utc_start` 跨午夜能解析；override 里有未知键、
+  条件值不合法时整条线路不可准入。
 - 写入价：Anthropic 总价、Gemini 附加费、"写入价低于输入价"的非 google 作者按附加费；1 小时写入价不进首版上限。
-- `internal_reasoning` 取大；`request` 缺省为 0；重复 tag 相同合并、不同标为不可选。
-- `openRouterBound`：无新字段时结果与现在逐位相同（旧窗口）；有新字段时等于推导值；`max_price` 只用基础价。
-- 准入：快照缺失、过期（边界 ±1 秒）、线路消失、涨价、降价、价格不变但 `fetchedAt` 变化，各一条。
+- `internal_reasoning` 取大；`request` 缺省为 0；重复 tag 价格相同合并且 `contextTokens` 取小，价格不同标为不可选；
+  `discount` 是数字。
+- 推导结果：当前目录下 Sonnet `anthropic` = 2.5 / 10、Luna `openai` = 0.25 / 0.75、Gemini 按附加费；
+  `openRouterBound` 对 v1 / v2 形状报价的结果与现在逐位相同；加上 `cacheWriteUsdPerMillion` 上界不变；
+  `max_price` 等于三个最高单价。
+- 准入：快照缺失、过期（边界 ±1 秒）、过期后自动重读成功 / 失败、线路消失、`model` 不一致、涨价（逐项：prompt、
+  completion、request 各一条）、降价、价格不变但 `fetchedAt` 变化；v2 形状窗口（Sonnet 2.5、Luna 0.25 / 0.75）通过，
+  v1 形状窗口（Sonnet 2）被拒。
+- 基础价层 `unknownKeys` 按 D5 的结果（推荐：拒绝）各一条。
 - `refreshCatalog`：`updated_at` 冲突返回 CONFLICT；比较结果和日志字段。
-- 后台：没有任何接口能写 `pricing`；`updateModel` 不再接受 5 个手填字段（PR C）。
+- 后台：没有任何接口能写 `pricing`——覆盖 `updateModel`、旧版 `updateModelConfig`、连接测试 `persistConnectionState`
+  三条路径（客户端传 `pricing` 被丢掉，已存值保留；连接测试与重新读取交错时不回滚）；`updateModel` 不再接受
+  5 个手填字段（PR C）。
 
 集成测试（本机 Docker，CI 同款入口）：
 
 - `run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files`：本机窗口的报价由
   `deriveOpenRouterLimits` 从测试快照生成；准入、冻结、结算一条 BILL2 记录；快照涨价后新准入被拒、已有 run 正常结算。
-- `--bill2-core-only`：带新字段的 `providerLimits` 通过整对象匹配、`payload` 大小、`cost > upper_usd` 冲突规则不变。
+- `--bill2-core-only`：带 `cacheWriteUsdPerMillion` 的 `providerLimits` 通过整对象匹配、`payload` 大小、
+  `cost > upper_usd` 冲突规则不变。
 
 浏览器验证（交 Codex，PR A 和 C 各一次，按全局分工发 Validation handoff）：后台读取价格、选线路、分档和时段显示、
 过期提示、倍数面板联动、旧成本表单已消失、模型保存后其他字段不受影响。只用 staging 测试管理员身份，不发模型调用。
 
-必测项（需要另行批准的 staging 真实小额调用，不在本任务里执行）：
-
-1. 分档模型在基础价 `max_price` 下，长输入请求能否被 OpenRouter 接受（第 3.3 节）。
-2. `discount` 线路的 `usage.cost` 与挂牌价的关系（第 3.5 节）。
+必测项（需要另行批准的 staging 真实小额调用，不在本任务里执行）：`discount` 线路的 `usage.cost` 与挂牌价的关系
+（第 3.5 节）。单字段写法下 `max_price` 不低于任何分档价，原"分档请求能否通过基础价 `max_price`"一项不再需要。
 
 ## 8. 施工顺序
 
 1. #565 已合并（`7909c118`）；本方案获批后即可开始 PR A。
 2. PR A（可与 PROMPT-CACHE 实现并行，不碰 `openRouterPolicy.ts`）。
-3. PR A 部署后：Owner 许可 → 后台逐个模型读取价格。
-4. PR B：在 PROMPT-CACHE 的 `openRouterLimits` 改动之后，或由同一写入方一起做；合并后新建 staging 窗口时用"复制报价 JSON"。
+3. PR A 部署后：后台逐个模型读取价格（D3）。
+4. PR B（`openRouterPolicy.ts` 唯一写入方）：合并前列出有效窗口；合并后新建 staging 窗口时用"复制报价 JSON"。
+   PROMPT-CACHE 实现不改 `openRouterBound`，可与 B 并行；B 合并后用它生成的报价建下一个窗口。
 5. PR C：可在 B 之后任何时间；如果 LEGACY-CLOSE 先到，就并入 LEGACY-CLOSE。
 6. BILL-PAYG 实现直接使用 `deriveOpenRouterLimits` 的 T 参数版本。
 
@@ -386,11 +432,11 @@ LEGACY-CLOSE 删除上述旧链路后，再用一个迁移删掉 5 列（含建�
 
 | 编号 | 问题 | 推荐 | 理由 |
 | --- | --- | --- | --- |
-| D1 | 价格快照多久算过期（过期后新调用被拒、要点"重新读取"） | **7 天**；新建测试窗口前 24 小时内必须读一次 | 供应商调价不频繁；实时涨价已有 `max_price` 拦截，7 天主要防缓存写入和分档价变化 |
+| D1 | 价格快照多久算过期 | **7 天**；新建测试窗口前 24 小时内必须读一次 | 供应商调价不频繁。**白话后果**：过期以后，如果系统不能自动重读（D4 选"只手动"，或者 OpenRouter 读不到），这个模型的新调用会全部停下，直到有人点"重新读取"。所以 D1 必须和 D3、D4 一起看 |
 | D2 | 供应商**降价**时，已批准的报价怎么办 | **继续用旧报价**，等下次批准时再降 | 旧报价只是冻结得多一点，实扣按实际费用，用户不多花钱；自动降低会让"批准过的报价"悄悄变化 |
-| D3 | staging 上管理员点"重新读取"是否要每次请示 | **staging 一次性许可**：执行方可以在 staging 后台对模型点读取，读后核对；正式环境仍要逐次批准 | 只是读公开价格写进 staging 配置，不调用模型、不花钱 |
-| D4 | 要不要自动定时刷新价格 | **不要**，手动读取 + 过期拦截 | 加定时任务就是新基础设施；手动加过期提示已够用 |
-| D5 | OpenRouter 出现我们不认识的新价格字段时 | **纯文本调用照常，页面标注**；以后开放图片 / 音频 / 搜索时再纳入 | 一律拒绝会因为无关的新字段让模型突然不可用 |
+| D3 | 读取公开价格要不要每次请示 | **staging 和正式环境都不用逐次批准**：读取公开价格（按钮或自动重读）是日常动作；只有"涨价以后重新批准报价"需要 Owner 批准 | 读取本身不调用模型、不花钱，也不会提高任何上限（涨价会被拦下等批准）。如果正式环境也要逐次批准读取，再加上 D1 的 7 天过期，就等于上线后你**至少每 7 天要批准一次**，漏一次所有调用都会停 |
+| D4 | 价格过期后怎么续期 | **不加定时任务；过期后由下一次调用前自动重读一次**（每个模型最多每 7 天一次，那一次调用最多多等 15 秒）。价格没涨就继续，涨了就拦下等批准；读不到就拒绝这次调用 | 不用人每周去点，也不新增定时任务。另一个选项"只手动"：最简单，但要有人每 7 天点一次，否则调用会停 |
+| D5 | OpenRouter 出现我们不认识的新价格字段时 | 已知的非文本字段（图片、音频、联网搜索、1 小时缓存写入等）列入白名单，纯文本调用照常；**真正不认识的新字段：推荐拒绝这个模型的新调用**，等代码更新后再放开 | 两边都有风险：拒绝会让模型在代码更新前不能用；放行的话，如果新字段是纯文本也会收的费用（比如按时间收的缓存存储费），冻结上限没算进去，超出部分平台承担。内测阶段停用一个模型比少冻结更容易接受。（override 里出现不认识的键一律拒绝，不在这项选择里） |
 | D6 | 旧手填价格列 | **后台不再填写；还在用它的 4 个旧入口（旧估价、agentSlice、旧工作台生成）继续读原值，不改造；LEGACY-CLOSE 删掉这些入口后再删列** | 这些入口本来就要删，改造它们是白做；新模型没有手填价，旧入口会按现有规则拒绝，不会少收或乱收 |
 | D7 | 按时段变价的模型（如 DeepSeek V4 Pro 高峰/低谷价） | **冻结时按最高时段价，实扣按实际** | 调用可能跨时段；按实际扣费，用户享受低谷价 |
 
@@ -400,7 +446,11 @@ LEGACY-CLOSE 删除上述旧链路后，再用一个迁移删掉 5 列（含建�
 
 ## 10. 剩余风险
 
-- `max_price` 不覆盖缓存写入和分档价，这部分涨价只能靠过期时限和结算冲突检查发现；冲突时差额由平台承担。
-- "写入价低于输入价就当附加费"是保守规则，可能让个别模型冻结偏高，不会偏低。
+- **OpenRouter 端的实时拦截变松**（单字段写法的代价）：`max_price` 用的是冻结的最高单价，只能拦住"挂牌价涨到超过
+  最高单价"的情况；涨幅更小的（例如 Sonnet 基础价 2 → 2.4，仍低于 2.5），以及 `max_price` 本来就不覆盖的
+  缓存写入价，要等下一次读取快照后的比较才发现；两次读取之间多出的费用由结算冲突检查记录，差额平台承担。
+- "写入价低于输入价就当附加费"**只在一个方向上保守**：写入价不低于输入价、但其实是附加费的线路会被算低。现有 5 个
+  模型都不是这种情况；新增模型时若出现，结算冲突检查会发现。
+- 过期自动重读（D4）在 OpenRouter 不可用时会让过期模型的新调用失败。
 - `discount` 的确切含义未经实测。
 - 本方案没有连接 staging 数据库，第 7.1 节的模型清单来自仓库文档和代码，以 staging 实际行为准。
