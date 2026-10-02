@@ -10440,7 +10440,7 @@ it("OPC: mentor freezes actor-bound business identity and existing material with
   expect(frozen.scopeMaterial.content.work.businessContext).toMatchObject({version: "opc-business-context.v1", name: "graylum ai", businessId: draft.businessId, source: null});
   // v5 host rules (agentTurnPrompt.ts): a name alone is not substance, uncertainty
   // gets analysis, and labels are never recited.
-  expect(frozen.instructions).toContain("A known name does not establish what a product does or whom it serves");
+  expect(frozen.instructions).toContain("A name does not establish product function or audience");
   expect(frozen.instructions).toContain("the most consequential missing substance");
   expect(frozen.instructions).toContain("When the user is not sure, first analyse the available information");
   expect(frozen.instructions).toContain("Omit process numbers");
