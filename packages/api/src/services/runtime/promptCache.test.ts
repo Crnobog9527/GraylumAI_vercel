@@ -8,7 +8,7 @@ import {openRouterBound} from '../bill2/openRouterPolicy';
 import {applyPromptCache,freezePromptCache,PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 const instructions='技能内容\n固定规则\n\n变化内容';
 const input={real:true,role:'skill',model:'anthropic/test',cacheWriteUsdPerMillion:'2.5',
- instructions,skillChars:4,stableAdditionalChars:6};
+ instructions,skillChars:4,stableAdditionalPrefix:'固定规则\n\n'};
 const cache=freezePromptCache(input)!;
 const sha=(text:string)=>createHash('sha256').update(text).digest('hex');
 it.each(golden)('preserves pre-implementation bytes and hash: $context.providerRequestFormat / $phase',fixture=>{
@@ -19,7 +19,7 @@ it.each(golden)('preserves pre-implementation bytes and hash: $context.providerR
 });
 it('freezes exactly the Skill and trusted stable host prefix',()=>{
  expect(cache).toEqual({version:'prompt-cache-v1',systemPrefixChars:11,systemPrefixSha256:sha(instructions.slice(0,11))});
- expect(freezePromptCache({...input,stableAdditionalChars:undefined})?.systemPrefixChars).toBe(4);
+ expect(freezePromptCache({...input,stableAdditionalPrefix:undefined})?.systemPrefixChars).toBe(4);
 });
 it.each([{real:false},{role:'ordinary'},{role:'auto'},{role:'organizer'},{role:'matching'},
  {model:'google/gemini'},{model:'openai/gpt-6-luna'},{cacheWriteUsdPerMillion:undefined},{skillChars:0}])('does not opt in: %j',patch=>{
@@ -39,7 +39,7 @@ it('splits only the first system content, preserves all text, and replays identi
 });
 it('uses one block for an entire-system prefix',()=>{
  const request={messages:[{role:'system',content:instructions}]};
- applyPromptCache(request,freezePromptCache({...input,skillChars:instructions.length,stableAdditionalChars:0})!,input.model,'2.5');
+ applyPromptCache(request,freezePromptCache({...input,skillChars:instructions.length,stableAdditionalPrefix:''})!,input.model,'2.5');
  expect(request.messages[0].content).toEqual([{type:'text',text:instructions,cache_control:{type:'ephemeral'}}]);
 });
 it.each([
@@ -72,4 +72,15 @@ it.each(golden.filter(row=>row.phase==='skill'))('marks frozen primary cache wit
  const context={...fixture.context,promptCache:cache} as RequestContext;
  const wire=openRouterRequestBody(request,{context,policy,phase:'skill',primaryDialogue:true});
  expect(JSON.parse(wire).messages[0].content[0].cache_control).toEqual({type:'ephemeral'});
+});
+it.each([
+ '技能内容\n步骤标题\n固定规则\n\n变化内容',
+ '技能内容\n变动规则\n\n变化内容',
+ '技能内容\n固定规则',
+])('omits caching without refusing a mismatched stable prefix: %s',instructions=>{
+ expect(freezePromptCache({...input,instructions})).toBeUndefined();
+});
+it('keeps the Skill-only path when no stable host prefix is supplied',()=>{
+ expect(freezePromptCache({...input,instructions:'技能内容\n任意附加指令',stableAdditionalPrefix:undefined}))
+  .toEqual({version:'prompt-cache-v1',systemPrefixChars:4,systemPrefixSha256:sha('技能内容')});
 });

@@ -41,7 +41,7 @@ export type LocalRuntimePolicy={
  purposeBudgets?:boolean;real?:StagingPolicy;account:string;costPerCall:string;creditsPerUsd:string;multiplier:string;
  maxCalls:number;maxOutputTokens:number;inputBytes:number;historyItems:number;
  expectedMaterialRevision?:number;opcTurnToken?:string;mentorStream?:boolean;organizeOpening?:boolean;
- additionalInstructions?:string;stableAdditionalInstructionChars?:number;skillResources?:readonly string[];searchEnabled?:boolean;workspaceContext?:boolean;
+ additionalInstructions?:string;stableAdditionalInstructions?:string;skillResources?:readonly string[];searchEnabled?:boolean;workspaceContext?:boolean;
  organizerInstructions?:string;organizerInput?:string;answeredCard?:AnsweredCard;resolvedInput?:string;
 };
 export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient,policy:LocalRuntimePolicy){
@@ -168,7 +168,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(policy.additionalInstructions)instructions+='\n'+z.string().max(budgets?inputBytes:8000).parse(policy.additionalInstructions);
    const promptCache=freezePromptCache({real:Boolean(policy.real),role:input.selection.kind,model:row.data.model_id,
     cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined,
-    instructions,skillChars,stableAdditionalChars:policy.stableAdditionalInstructionChars});
+    instructions,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions});
    if(mentorStream)instructions+='\n'+QUESTION_CONTRACT_INSTRUCTIONS;
    const searchAllowed=Boolean(policy.searchEnabled&&input.network!=='deny');
    let workspaceContext=false;

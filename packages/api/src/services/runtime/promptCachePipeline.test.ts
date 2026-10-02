@@ -17,7 +17,7 @@ const policy={modelId:'10000000-0000-4000-8000-000000000001',provider:'openroute
  protocol:'openrouter-chat-v1' as const,upperUsd:quote.upperUsd,inputLimit:10000,outputLimit:100,
  automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true,providerLimits:limits};
 const promptCache=freezePromptCache({real:true,role:'skill',model,instructions,skillChars:4,
- stableAdditionalChars:8,cacheWriteUsdPerMillion:limits.cacheWriteUsdPerMillion})!;
+ stableAdditionalPrefix:'固定系统规则\n\n',cacheWriteUsdPerMillion:limits.cacheWriteUsdPerMillion})!;
 const context={providerRequestFormat:'serial-tools-v2' as const,tools:[],network:'deny',promptCache};
 const session=():Session=>({getSessionId:async()=> 'synthetic-session',getItems:async()=>[],
  addItems:async()=>{},popItem:async()=>undefined,clearSession:async()=>{}});

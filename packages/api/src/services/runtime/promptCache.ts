@@ -21,11 +21,15 @@ export const PROMPT_CACHE_OVERHEAD_BYTES = Buffer.byteLength(JSON.stringify(bloc
 /** Only a trusted Skill admission with an explicit frozen write price opts in. */
 export function freezePromptCache(input: {
   real: boolean; role: string; model: string; cacheWriteUsdPerMillion?: string;
-  instructions: string; skillChars: number; stableAdditionalChars?: number;
+  instructions: string; skillChars: number; stableAdditionalPrefix?: string;
 }): PromptCachePolicy | undefined {
   if (!input.real || input.role !== 'skill' || !input.model.startsWith('anthropic/') ||
       input.cacheWriteUsdPerMillion === undefined || input.skillChars === 0) return undefined;
-  const extra = input.stableAdditionalChars ?? 0;
+  const prefix = input.stableAdditionalPrefix ?? '';
+  // Host text can evolve independently of the stable rules. A prepended or
+  // changed dynamic section must fall back to the unchanged unmarked request.
+  if (prefix && !input.instructions.slice(input.skillChars).startsWith('\n' + prefix)) return undefined;
+  const extra = prefix.length;
   const chars = input.skillChars + (extra > 0 ? 1 + extra : 0);
   if (!Number.isSafeInteger(extra) || extra < 0 || chars > input.instructions.length)
     throw new Error('RUNTIME_CONTEXT_INVALID');

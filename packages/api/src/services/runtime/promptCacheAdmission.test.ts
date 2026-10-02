@@ -7,7 +7,7 @@ import {runtimeContext} from './execute';
 import {openRouterBound} from '../bill2/openRouterPolicy';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 import {pricingConfig} from '../__tests__/fixtures/runtimePricing';
-import {agentTurnInstructions,AGENT_TURN_STABLE_PREFIX_CHARS} from '../opc/agentTurnPrompt';
+import {agentTurnInstructions,AGENT_TURN_STABLE_PREFIX,AGENT_TURN_STABLE_PREFIX_CHARS} from '../opc/agentTurnPrompt';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 const skill='Pinned skill 正文';
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[{revisionId:'10000000-0000-4000-8000-000000000003'}]})}));
@@ -46,7 +46,7 @@ function fixture(model='anthropic/test',write:string|undefined='2.5',real=true,i
  const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
  const policy={...(real?{real:{id:actor,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01',callPolicies:[quote]}}:{}),
   account:'synthetic',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:100,inputBytes,historyItems:0,
-  additionalInstructions:host(),stableAdditionalInstructionChars:AGENT_TURN_STABLE_PREFIX_CHARS};
+  additionalInstructions:host(),stableAdditionalInstructions:AGENT_TURN_STABLE_PREFIX};
  const input={sessionId:actor,requestId,input:'user facts',network:'deny',selection:{kind:'skill',moduleId,revisionId}};
  return {service:runtimeAdmissionService(user,admin,policy),input,rpc,configReads,row,user,admin,policy};
 }
@@ -103,4 +103,23 @@ it('mentor v5 freezes the host prefix before the question contract',async()=>{
  expect(result.context.instructions.slice(0,result.context.promptCache.systemPrefixChars))
   .toBe(skill+'\n'+host().slice(0,AGENT_TURN_STABLE_PREFIX_CHARS));
  expect(result.context.instructions).toContain('complete public prose in message');
+});
+it.each(['prepend','same-length-change','truncated'] as const)('admits without a marker when host text mismatches (%s)',async mode=>{
+ const f=fixture();
+ const additionalInstructions=mode==='prepend'?'Private business name\n'+host():
+  mode==='same-length-change'?'X'+host().slice(1):AGENT_TURN_STABLE_PREFIX.slice(0,-1);
+ const service=runtimeAdmissionService(f.user,f.admin,{...f.policy,additionalInstructions});
+ const result=await service.prepare(f.input);
+ expect(result.context).not.toHaveProperty('promptCache');
+ expect(result.context.instructions).toBe(skill+'\n'+additionalInstructions);
+ expect(f.rpc.mock.calls.filter(([name])=>name==='runtime_admit')).toHaveLength(1);
+ expect(result.billing.sourceHash).toBe(createHash('sha256').update(JSON.stringify(result.context)).digest('hex'));
+});
+it('keeps ordinary Skill caching without host rules and derives current prefix length from text',async()=>{
+ const f=fixture();
+ const result=await runtimeAdmissionService(f.user,f.admin,{...f.policy,additionalInstructions:'Dynamic text',
+  stableAdditionalInstructions:undefined}).prepare(f.input);
+ expect(result.context.promptCache.systemPrefixChars).toBe(skill.length);
+ expect(AGENT_TURN_STABLE_PREFIX_CHARS).toBe(AGENT_TURN_STABLE_PREFIX.length);
+ expect(AGENT_TURN_STABLE_PREFIX).toBe(host().slice(0,AGENT_TURN_STABLE_PREFIX_CHARS));
 });

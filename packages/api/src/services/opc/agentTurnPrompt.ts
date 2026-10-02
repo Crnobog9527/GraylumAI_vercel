@@ -85,7 +85,8 @@ const HOST_RULES = [
   "impose a fixed paragraph count or response template.\n",
 ].join('');
 // End before the first dynamic placeholder's entire line; preserve prompt text.
-export const AGENT_TURN_STABLE_PREFIX_CHARS = HOST_RULES.lastIndexOf('\n', HOST_RULES.indexOf('{{')) + 1;
+export const AGENT_TURN_STABLE_PREFIX = HOST_RULES.slice(0, HOST_RULES.lastIndexOf('\n', HOST_RULES.indexOf('{{')) + 1);
+export const AGENT_TURN_STABLE_PREFIX_CHARS = AGENT_TURN_STABLE_PREFIX.length;
 
 const OPENING_RULE = [
   "This turn is opened by the host: the user has not spoken and no question card is available. Do not inven",
