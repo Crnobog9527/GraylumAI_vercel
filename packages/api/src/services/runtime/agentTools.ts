@@ -84,9 +84,13 @@ export function questionCardFromResult(output:string):QuestionCard|null{
  * the arguments, so replay returns identical bytes without persistence. */
 export function askQuestionTool(fiveFields=false):RuntimeTool{
  return {name:ASK_QUESTION_TOOL,parameters:fiveFields?questionParameters:askQuestionParameters,
-  description:'Show the user one question card with 2 to 5 short suggested answers. recommended is the index of '+
-   'the option you recommend, or null for neutral ranges or categories. The host adds an Other entry. Ends your turn.'+
-   (fiveFields?' Put the complete public reply in message. recommendationReason must be nonempty for a recommendation, otherwise null.':''),
+  description:'Use when asking the user to choose between 2 to 5 concrete directions grounded in their own material, '+
+   'including an explicit request for options, or to select a neutral range or category. '+
+   'Call this tool for a choice question; prose examples do not replace the card. Never guess user facts as options. '+
+   'recommended is the index of your recommendation with a reason, or null for neutral ranges or categories. '+
+   'The host adds an Other entry. Ends your turn.'+
+   (fiveFields?' Put the complete public reply in message without repeating the option list. '+
+    'recommendationReason must explain the same recommendation, or be null when recommended is null.':''),
   invalidResult:INVALID_CARD_RESULT,execute:async args=>questionCardToolResult(args,fiveFields)};
 }
 

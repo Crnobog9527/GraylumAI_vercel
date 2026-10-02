@@ -1,12 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // AC-0b model probe. Standalone script: application code must never import it.
 
-/** Owner follow-up approval, PR #497 issuecomment-5912345087: at most 2 calls / USD 0.30
- * from 734 used; cumulative 736 calls / USD 15. No flag can raise these. */
-export const HARD_MAX_CALLS = 736;
-export const HARD_MAX_USD = 15;
+/** Owner 2026-10-02 MENTOR-PROMPT-V2: +120 calls / $6 above 854 / $25.24.
+ * This cumulative ceiling does not authorize additional runs. */
+export const HARD_MAX_CALLS = 974;
+export const HARD_MAX_USD = 31.24;
 export const DEFAULT_MAX_CALLS = 60;
 export const DEFAULT_MAX_USD = 1;
+/** AC1-4 candidate runs keep their #497 default run cap; raising the cumulative cap does not widen it. */
+export const CANDIDATE_DEFAULT_MAX_USD = 15;
 
 const NANO = 1_000_000_000;
 export const usdToNano = (usd: number): number => Math.ceil(usd * NANO);
