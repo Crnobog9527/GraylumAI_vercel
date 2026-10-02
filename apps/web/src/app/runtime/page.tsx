@@ -143,16 +143,15 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   const executed=await execute.mutateAsync({executionId:admitted.executionId});
   if(alive.current){if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(admitted.executionId);setError('本次必要材料超过模型输入容量。原请求和已完成内容已保留；请取消剩余执行后缩短材料再发送。');}await Promise.all([view.refetch(),utils.opc.conversations.invalidate()]);}
  }catch(cause){if(!alive.current)return;const gate=runtimeAdmissionNotice(cause);
-  // A refused send keeps its input and request id but must not resend itself after a reload.
-  if(gate)sessionStorage.removeItem('opc-runtime-send:'+sessionId);
   setError(gate??'请求状态待核实。请读取原任务状态，不要重新发送相同内容。');await view.refetch();}}
  const initialSend=useRef(false);
  useEffect(()=>{
   if(initialSend.current||!sessionId||!input.trim()||!workContextReady||!choices.data||!activeSelection||busy)return;
   const requestId=sessionStorage.getItem('opc-runtime-send:'+sessionId);
   if(!requestId||new URL(location.href).searchParams.get('request')!==requestId)return;
-  initialSend.current=true;void send();
-  // The marker records an explicit send on the start page, never mere navigation.
+  // The marker records one explicit send on the start page, never mere navigation. Consume it on
+  // this attempt: whatever the outcome, input and request id stay, and any later send is the user's.
+  initialSend.current=true;sessionStorage.removeItem('opc-runtime-send:'+sessionId);void send();
   // eslint-disable-next-line react-hooks/exhaustive-deps
  },[sessionId,input,workContextReady,choices.data,activeSelection,busy]);
  const videoKey=sessionId?'opc-video-operation:'+sessionId:'';

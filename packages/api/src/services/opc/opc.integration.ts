@@ -11203,6 +11203,18 @@ it("OPC: RATE-LIMIT /runtime call-gate stop display and video package admission 
       "select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'",
       [f.actor, sessionId])).rows[0].n);
     const credits = async () => Number((await sql.query("select credits from profiles where id=$1", [f.actor])).rows[0].credits);
+    // Earlier rounds may still settle (release unused reservations); take baselines only once
+    // nothing runs and the balance holds still, so a later change belongs to the step under test.
+    async function settledCredits() {
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const busy = Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and state not in ('completed','cancelled')",
+          [f.actor])).rows[0].n);
+        const first = await credits();
+        await page.waitForTimeout(2000);
+        if (!busy && first === await credits()) return first;
+      }
+      throw new Error('credits did not settle');
+    }
     const packagePrepares: string[] = [], abandons: string[] = [];
     page.on('request', request => {
       const body = request.postData() ?? '';
@@ -11215,7 +11227,7 @@ it("OPC: RATE-LIMIT /runtime call-gate stop display and video package admission 
     const unavailable = '暂时无法确认使用额度，请稍后再试。本次被拦截的调用不扣积分。';
     const stoppedRounds = async () => Number((await sql.query(
       "select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and state='cancelled'", [f.actor, sessionId])).rows[0].n);
-    const stoppedBefore = await stoppedRounds(), creditsAtStop = await credits();
+    const stoppedBefore = await stoppedRounds(), creditsAtStop = await settledCredits();
     await limits(false, 2);
     await page.getByLabel('消息', { exact: true }).fill('调用闸门下的一轮');
     await page.getByRole('button', { name: '发送', exact: true }).click();
@@ -11230,7 +11242,7 @@ it("OPC: RATE-LIMIT /runtime call-gate stop display and video package admission 
     expect(await page.getByText('正在核实结果，请保留原任务。', { exact: true }).count()).toBe(0);
     await limits(false);
 
-    const runsBefore = await packageRuns(), creditsBefore = await credits();
+    const runsBefore = await packageRuns(), creditsBefore = await settledCredits();
 
     await limits(true);
     await page.getByLabel('消息', { exact: true }).fill('先做分镜，再生成剪辑建议');
@@ -11268,6 +11280,104 @@ it("OPC: RATE-LIMIT /runtime call-gate stop display and video package admission 
     expect(JSON.parse(completed!).followup.requestId).toBe(held.followup.requestId);
     expect((await sql.query("select state from runtime_executions where actor_id=$1 and request_id=$2",
       [f.actor, held.followup.requestId])).rows[0].state).toBe('completed');
+  } finally {
+    await sql.query("delete from system_settings where key='runtime_rate_limits'");
+    await browser.close();
+  }
+}, 600000);
+
+// Review P2-1 on #594 (d8846b48): a send started on the start page is attempted once on /runtime.
+// Whatever refuses it (the gate's whitelisted 503, an unknown structured 503 or a plain non-tRPC
+// 503), a reload and a later recovery never send it again by themselves; input and request id stay
+// for the user's explicit send.
+it("OPC: RATE-LIMIT start-page send refused by any 503 is never re-sent automatically", async () => {
+  const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const { execFileSync } = await import("node:child_process");
+  const tag = process.env.V3_RATE_LIMIT_TAG;
+  if (!tag || !/^[a-z0-9][a-z0-9-]{0,80}$/.test(tag)) throw new Error("local rate limit required");
+  expect(execFileSync("docker", ["exec", tag + "-redis", "redis-cli", "FLUSHDB"], { encoding: "utf8" }).trim()).toBe("OK");
+  const pause = (stopNewCalls: boolean) => sql.query(
+    "insert into system_settings(key,value) values('runtime_rate_limits',$1::jsonb) on conflict(key) do update set value=excluded.value",
+    [JSON.stringify({ version: 1, admissionPerMinute: 60, admissionPer24Hours: 5000, callsPerMinute: 180,
+      callsPer24Hours: 15000, stopNewCalls })]);
+  await pause(false);
+  const f = await fixture(3);
+  await planFixtureModel(f.moduleId);
+  const browser = await chromium.launch({
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true,
+  });
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", route => {
+      const u = new URL(route.request().url());
+      return ["127.0.0.1", "localhost"].includes(u.hostname) || ["data:", "blob:"].includes(u.protocol)
+        ? route.continue() : route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(90000);
+    const ready = page.waitForResponse(r => r.url().includes("/api/trpc/settings.getSystemSettings") && r.ok());
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=/positioning");
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", { name: "登录", exact: true }).last().click();
+    await page.waitForURL(url => url.pathname === "/positioning", { timeout: 90000 });
+    // Every browser prepare, by the request id it carries.
+    const prepares: string[] = [];
+    page.on("request", request => {
+      if (/\/api\/trpc\/runtime\.prepare(?:[?,]|$)/.test(request.url())) prepares.push(request.postData() ?? "");
+    });
+    const sendsOf = (requestId: string) => prepares.filter(body => body.includes(requestId)).length;
+    const unknown503 = JSON.stringify([{ error: { message: "internal diagnostic: upstream unavailable", code: -32603,
+      data: { code: "SERVICE_UNAVAILABLE", httpStatus: 503, path: "runtime.prepare" } } }]);
+    const plain503 = JSON.stringify({ error: "Service Unavailable", message: "服务暂时繁忙，请稍后再试", retryAfter: 60 });
+    const cases = [
+      { name: "paused", refuse: () => pause(true), recover: () => pause(false),
+        notice: "AI服务暂时暂停新调用，请稍后再试。本次被拦截的调用不扣积分。" },
+      { name: "unknown structured 503", body: unknown503, notice: "请求状态待核实" },
+      { name: "plain non-tRPC 503", body: plain503, notice: "请求状态待核实" },
+    ];
+    for (const item of cases) {
+      const input = "开始页发送：" + item.name;
+      let blocking = Boolean(item.body);
+      if (item.body) await page.route("**/api/trpc/runtime.prepare*", route => blocking
+        ? route.fulfill({ status: 503, contentType: "application/json", body: item.body! }) : route.continue());
+      await item.refuse?.();
+      await page.goto(process.env.V3_LOCAL_APP + "/positioning");
+      await page.getByLabel("新任务内容", { exact: true }).fill(input);
+      await page.getByRole("button", { name: "发送", exact: true }).first().click();
+      await page.waitForURL(url => url.pathname === "/runtime" && Boolean(url.searchParams.get("request")), { timeout: 90000 });
+      const url = new URL(page.url()), sessionId = url.searchParams.get("session")!, requestId = url.searchParams.get("request")!;
+      await page.getByRole("alert").filter({ hasText: item.notice }).waitFor({ timeout: 60000 });
+      expect(sendsOf(requestId)).toBe(1);
+      expect(await page.evaluate(key => sessionStorage.getItem(key), "opc-runtime-send:" + sessionId)).toBeNull();
+      // A reload while still refused: no automatic send; input and request id are kept.
+      await page.reload();
+      await expect.poll(() => page.getByLabel("消息", { exact: true }).inputValue(), { timeout: 60000 }).toBe(input);
+      await page.waitForTimeout(5000);
+      expect(sendsOf(requestId)).toBe(1);
+      expect(new URL(page.url()).searchParams.get("request")).toBe(requestId);
+      // After recovery and another reload: still nothing sent by itself.
+      blocking = false;
+      await item.recover?.();
+      await page.reload();
+      await expect.poll(() => page.getByLabel("消息", { exact: true }).inputValue(), { timeout: 60000 }).toBe(input);
+      await page.waitForTimeout(5000);
+      expect(sendsOf(requestId)).toBe(1);
+      expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2",
+        [f.actor, requestId])).rows[0].n)).toBe(0);
+      // The user's explicit send uses the same request id once.
+      await page.getByRole("button", { name: "发送", exact: true }).click();
+      await expect.poll(async () => Number((await sql.query(
+        "select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2", [f.actor, requestId])).rows[0].n),
+      { timeout: 60000 }).toBe(1);
+      expect(sendsOf(requestId)).toBe(2);
+      // The next case may reuse this Session; let the explicit round finish first.
+      await expect.poll(async () => (await sql.query(
+        "select state from runtime_executions where actor_id=$1 and request_id=$2", [f.actor, requestId])).rows[0]?.state,
+      { timeout: 90000 }).toBe("completed");
+      if (item.body) await page.unroute("**/api/trpc/runtime.prepare*");
+    }
   } finally {
     await sql.query("delete from system_settings where key='runtime_rate_limits'");
     await browser.close();
