@@ -131,7 +131,7 @@
   "packages/api/src/services/research/tavilySchema.ts": {"longLines":2},
   "packages/api/src/services/research/workbenchSearch.ts": {"longLines":2},
   "packages/api/src/services/runtime/actor.ts": {"longLines":1},
-  "packages/api/src/services/runtime/admission.ts": {"longLines":21},
+  "packages/api/src/services/runtime/admission.ts": {"longLines":20},
   "packages/api/src/services/runtime/context.ts": {"longLines":4},
   "packages/api/src/services/runtime/execute.ts": {"longLines":22},
   "packages/api/src/services/runtime/matching.ts": {"longLines":2},

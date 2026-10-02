@@ -10,6 +10,7 @@ import {assertLongSessionPerformance} from './runtimePerformance.integration';
 import { runRuntime } from './runner';
 import {readRuntimeView,retainedOutputReason} from './view';
 import { runtimeExecutor } from './execute';
+import './promptCache.integration';
 import {createRuntimeBudget,withRuntimeBudget} from './budget';
 import {runtimeActor} from './actor';
 import {postgresJsonbBytes,assertFrozenPayloads} from './payloadSize';

@@ -7,7 +7,7 @@ import { runtimeAdmissionService } from "../runtime/admission";
 import { workbenchService } from "../artifacts/workbench";
 import type {StagingPolicy} from '../runtime/stagingPolicy';
 import { displayedQuestion, isOpeningInput, questionLabel, questionTask, reachedQuestions } from "./questions";
-import { agentTurnInstructions, OPENING_EXTRACTION_RULE } from "./agentTurnPrompt";
+import { agentTurnInstructions, AGENT_TURN_STABLE_PREFIX, OPENING_EXTRACTION_RULE } from "./agentTurnPrompt";
 import { ORGANIZER_INSTRUCTIONS, organizerStepMaterial } from "./organizerPrompt";
 import { elicitFieldSpecs } from "../../shared/opcMethodPolicy";
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
@@ -244,7 +244,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       return runtimeAdmissionService(user, admin, {
         ...(real?{real}:{}),
         account: "runtime-local",
-        additionalInstructions,
+        additionalInstructions, stableAdditionalInstructions: v.purpose === "mentor" ? AGENT_TURN_STABLE_PREFIX : undefined,
         costPerCall: "0.02",
         creditsPerUsd: "1000",
         multiplier: "1",

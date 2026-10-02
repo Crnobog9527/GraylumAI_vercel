@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {promptCachePolicy,PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 import {publicAgentText,publicMentorText,type RuntimeProgress} from './progress';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
@@ -29,7 +30,7 @@ export const runtimeContext=z.object({
  input:z.string().min(1).max(20000),instructions:z.string().max(262144),model:z.string().min(1),
  maxOutputTokens:z.number().int().positive().max(FROZEN_OUTPUT_CAP),maxTurns:z.number().int().min(1).max(32),
  inputSelection:z.literal('scope-projection-v1').optional(),
- providerRequestFormat:z.enum(PROVIDER_REQUEST_FORMATS).optional(),
+ providerRequestFormat:z.enum(PROVIDER_REQUEST_FORMATS).optional(),promptCache:promptCachePolicy.optional(),
  questionContract:z.enum([LEGACY_QUESTION_CONTRACT,QUESTION_CONTRACT]).optional(),reasoning:reasoningPolicy.optional(),
  historyItems:z.number().int().min(0).max(1000),purposeBudget:frozenPurposeBudget.optional(),
  tools:z.array(z.enum(['search','read_source',ASK_QUESTION_TOOL])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
@@ -235,8 +236,9 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
      // the next SDK request bytes after recovery despite identical tool data.
      return JSON.stringify(committed.result);
     }});
-   const toolBytes=agentTurn?askQuestionToolBytes(fiveFields):
-    Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description}))));
+   const toolBytes=(agentTurn?askQuestionToolBytes(fiveFields):
+    Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description})))))+
+    (context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0);
    const preserveHistoricalMaterial=Boolean(context.sources?.length)||requestsHistoricalComparison(context.input);
    const primarySequence=callSequence;
    let agentText="";
