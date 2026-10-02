@@ -19,6 +19,7 @@ import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-resp
 import { focusReply, liveReplyAfter, livePhaseNotice, mentorReplyDisplay, questionCardStatus, startLiveReply, type LiveReply } from "./agent-turn-display";
 import { OTHER_PLACEHOLDER, QuestionCardView } from "@/components/opc/question-card";
 import type { AgentTurnEvent, AgentTurnOutcome } from "@repo/api/src/shared/agentTurn";
+import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, readAgentTurn,
   retainExecution, settleEnvelope, turnResultNotice } from "./mentor-turn";
 import type { MentorRequest, MentorStepEnvelope, MentorTurn, MentorExecution } from "./mentor-turn";
@@ -234,10 +235,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [planAccount, setPlanAccount] = useState("");
   const [planStart, setPlanStart] = useState(() => new Date().toISOString().slice(0, 10));
   const [planDays, setPlanDays] = useState(7);
-  const history = trpc.runtime.view.useQuery(
-    { sessionId: read.data?.sessionId ?? "" },
-    { enabled: Boolean(read.data?.sessionId) },
-  );
+  const history = trpc.runtime.view.useQuery({ sessionId: read.data?.sessionId ?? "" },
+    { enabled: Boolean(read.data?.sessionId), refetchInterval: useHistoryPolling(draftId, read.data?.snapshot?.workflow.steps ?? []) });
   const [activeStep, setActiveStep] = useState<string | null>(null);
   const [activeQuestions, setActiveQuestions] = useState<Record<string, string>>({});
   const [confirmingQuestion, setConfirmingQuestion] = useState(false);
@@ -799,6 +798,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       }
     })();
   }, [planView, hydratedDraft, draftId, d, history.data, activeStep, activeQuestions, manualMentorEnabled]);
+  const recoveryNeedsUser = useAutoStepRecovery({ history: history.data, historyFailed: history.isError, draftId, recover: recoverPendingStep,
+    steps: (d?.snapshot.workflow.steps ?? []) as Step[],
+    ready: !planView && hydratedDraft === draftId, blocked: busy || openingSteps.length > 0 });
   async function run(fn: () => Promise<unknown>) {
     setRunning(true);
     setError("");
@@ -973,7 +975,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if (sessionStorage.getItem(key)) {
       // A retained envelope still owns this step. Never create a second
       // identity; the explicit recovery control resumes the original request.
-      setError("上一条发给导师的内容仍在核对。请先用“继续核对这条原请求”恢复，不会重复发送。");
+      setError("上一条发给导师的内容仍在核对。请先点“重试”恢复，不会重复发送。");
       return;
     }
     if(running||openingInFlight.current.size||history.data?.activeExecution)return;
@@ -993,7 +995,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     finally{mentorSendInFlight.current=false;}
   }
 
-  async function recoverStep(step: Step) {
+  function recoverPendingStep(step: Step, quiet = false) { setActiveStep(step.id); return recoverStep(step, quiet); } // Retry; also the automatic path.
+  async function recoverStep(step: Step, quiet = false) {
     const key = "opc-step:" + draftId + ":" + step.id;
     const envelope = stepEnvelopeFor(step.id);
     if (!envelope) return;
@@ -1020,8 +1023,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     });
     // A mismatch or unknown outcome retains the original identity for a later
     // explicit retry instead of orphaning the request.
+    // An automatic attempt stays quiet; the compact retry line asks the user once attempts run out.
     if (sessionStorage.getItem(key))
-      setError(admissionMessage(failure) ?? "原请求仍未确认结果，已继续保留。请稍后再试“继续核对这条原请求”，不会重复发送或重复扣费。");
+      setError(quiet ? "" : admissionMessage(failure) ?? "原请求仍未确认结果，已继续保留。请稍后再点“重试”，不会重复发送或重复扣费。");
   }
   function confirmEnvelopeState(stepId: string): ConfirmEnvelopeState {
     if (hydratedDraft !== draftId || typeof window === "undefined")
@@ -1738,30 +1742,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         </div>
       </header>
       {workInfoOpen&&<div className={resultStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setWorkInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={resultStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setWorkInfoOpen(false)}>×</button></header><p>当前工作：{manualEntry?'已有定位录入':'定位分析'}</p><p>状态：{snap.state==='published'?'定位已确认':'定位进行中'}</p><p>定位讨论、待确认修改与历史版本留在原工作；查看不会确认或保存。</p><footer><button type="button" onClick={()=>{void read.refetch();setWorkInfoOpen(false);}}>重新读取状态</button><Link href="/positioning">新任务与账号</Link></footer></section></div>}
-      {!planView && <>{hasPendingStepRequest && !busy && (
-        <section role="status" aria-label="待恢复的导师请求" className={resultStyles.requestRecovery}>
-          <p>上一条请求已保留，请继续核对这条请求。</p>
-          {pendingStepRequests.map(({ step, parsed }) => (
-            <div key={step.id} className="space-y-2">
-              <p className="text-sm">
-                {step.title}：{parsed
-                  ? "将用原来的问题和请求继续核对，不会重复发送或重复扣费。"
-                  : "原请求无法读取。将先保留原始记录，再读取服务器状态。"}
-              </p>
-              <Button
-                variant="outline"
-                disabled={busy}
-                onClick={() => {
-                  setActiveStep(step.id);
-                  void recoverStep(step);
-                }}
-              >
-                {parsed ? "继续核对这条原请求" : "保留原始记录并重新读取状态"}
-              </Button>
-            </div>
-          ))}
-        </section>
-      )}
+      {!planView && <>
       {d.accountRevision?.methodConflict&&<div role="alert">此修改草稿使用的方法与原正式版本不同，未自动合并或覆盖任何答案。请对照原正式内容核对当前草稿。
           <details><summary>查看原正式版本完整内容</summary>{Object.entries(d.accountRevision.sourceInformation as Record<string,{title:string;schema:Array<{id:string;title:string}>;values:Record<string,Information>}>).map(([id,part])=><section key={id}><h4>{part.title}</h4>{part.schema.map(field=><p key={field.id}>{field.title}：{part.values?.[field.id]?.value}</p>)}</section>)}</details>
       </div>}
@@ -1955,8 +1936,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                               <p className={resultStyles.suggestionNote}>原有内容在采用前保持不变。采用后请核对本步骤及受影响的后续结果。</p>
                             </div>
                           )}
-                          {!busy && execution.executionId === history.data?.activeExecution && !["completed", "cancelled"].includes(
-                            execution.state,
+                          {!busy && execution.executionId === history.data?.activeExecution && !["completed", "cancelled", "running"].includes(
+                            execution.state, // Polling follows a running turn; this is for one that stopped advancing.
                           ) && (
                             <Button
                               variant="outline"
@@ -1987,7 +1968,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     </div>
                   </section>}
                   </div>
-                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} note={busy && hasPendingStepRequest ? "正在回复…" : undefined} maxLength={8000} disabled={snap.state!=="draft"||reviewOnly} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step,activeQuestion.id);}}/>
+                  {recoveryNeedsUser[0] && !busy && <p role="status" aria-label="恢复提示" className={resultStyles.recoveryLine}>
+                    {recoveryNeedsUser[0].readable ? '上一条回复还没确认完成，原请求已保留，重试不会重复扣费。' : '上一条请求无法读取，原始记录已保留。'}
+                    <button type="button" onClick={() => void recoverPendingStep(recoveryNeedsUser[0]!.step)}>重试</button></p>}
+                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} note={hasPendingStepRequest && !recoveryNeedsUser.length ? "正在回复…" : undefined} maxLength={8000} disabled={snap.state!=="draft"||reviewOnly} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step,activeQuestion.id);}}/>
                   {free.error&&<p role="alert">{free.error}</p>}
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}

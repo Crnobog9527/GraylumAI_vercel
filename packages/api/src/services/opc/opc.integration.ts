@@ -2076,7 +2076,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
       sessionStorage.setItem(key, JSON.stringify(saved));
     }, draftId);
     await page.reload();
-    await page.getByRole("button", { name: "继续核对这条原请求", exact: true }).click();
+    // The reloaded page finishes the retained request by itself with its original identities.
     await expect.poll(() => page.getByRole("log", { name: "完整导师消息" })
       .getByText("导师 · 1.1", { exact: true }).count(), { timeout: 30000 }).toBe(1);
     expect(
@@ -6676,8 +6676,9 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
     expect(explicitRows).toHaveLength(1);
     const explicitExecution = explicitRows[0][0];
     expect(explicitExecution).not.toBe(openingExecution);
-    await expect.poll(() => tab1.getByRole("button", { name: "继续核对这条原请求", exact: true }).isEnabled(), { timeout: 30000 })
-      .toBe(true);
+    // Automatic attempts keep losing the reply; once they run out the compact retry line asks the user.
+    await expect.poll(() => tab1.getByRole("status", { name: "恢复提示", exact: true })
+      .getByRole("button", { name: "重试", exact: true }).isEnabled(), { timeout: 30000 }).toBe(true);
 
     phase = "real website logout in the original tab";
     // Positioning has no user-menu header. Use the existing profile page in
@@ -6711,7 +6712,7 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
     await show(tab1, "goal", finalValue);
     expect((await readEnvelope(tab1)).raw).toBe(retained.raw);
     expect(await expectExactMentorEffects(f.actor, draftId, roundId, expected)).toEqual(paidIdentities);
-    await tab1.getByRole("button", { name: "继续核对这条原请求", exact: true }).click();
+    // After login the page recovers the same request by itself; no retry click is needed.
     await expect.poll(() => tab1.evaluate(key => sessionStorage.getItem(key), stepKey), { timeout: 60000 }).toBeNull();
     const explicitMessage = await mentorMessageCheck(tab1, f.actor, explicitExecution);
     await explicitMessage();
@@ -9379,7 +9380,7 @@ it("OPC: mentor lost reply still projects once from its unchanged frozen informa
     await input.fill(reply);
     await page.getByRole('button', { name: '发送', exact: true }).click();
     await Promise.race([intercepted,new Promise((_,reject)=>setTimeout(()=>reject(new Error('mentor response barrier not reached')),30000))]);
-    const recovery=page.getByRole('status',{name:'待恢复的导师请求',exact:true});
+    const recovery=page.getByRole('status',{name:'恢复提示',exact:true});
     expect(await recovery.count()).toBe(0);
     release();
     await expect.poll(() => lost, { timeout: 30000 }).toBe(1);
@@ -9390,7 +9391,6 @@ it("OPC: mentor lost reply still projects once from its unchanged frozen informa
     await page.unroute('**/api/trpc/runtime.execute*');
     await page.unroute('**/api/trpc/runtime.view*');
     await page.reload();
-    await page.getByRole('button', { name: '继续核对这条原请求', exact: true }).click();
     await expect.poll(async () => (await f.service.read(d.draftId)).information['step-0'].values?.goal?.value, { timeout: 30000 }).toBe(reply);
     await expect.poll(() => page.evaluate(id => sessionStorage.getItem('opc-step:' + id + ':step-0'), d.draftId), { timeout: 30000 }).toBeNull();
     const savedVersion = (await f.service.read(d.draftId)).snapshot.steps['step-0'].version;

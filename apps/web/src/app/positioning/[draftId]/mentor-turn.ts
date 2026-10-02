@@ -105,8 +105,9 @@ export function isTerminalTurn(result: AgentTurnOutcome) {
 /**
  * What happens to the retained envelope after a resumed or resent turn
  * returns. A terminal outcome releases it. A still-running execution keeps it,
- * with its execution id, so the next explicit "继续核对这条原请求" resumes that
- * execution; the page never polls or retries by itself.
+ * with its execution id, so the next recovery ("重试") resumes that execution.
+ * The page only runs that same recovery by itself once history shows the
+ * execution is terminal (see step-recovery.ts); it never resends a request.
  */
 export function envelopeAfterTurn(
   raw: string | null,
