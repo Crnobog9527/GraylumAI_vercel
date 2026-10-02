@@ -9,6 +9,7 @@ import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
 import { publishSkillPackage } from '../skills/publication';
 import { opcService } from './service';
 import { captureCompleted } from './capture';
+import { runtimeExecutor } from '../runtime/execute';
 
 const connectionString = process.env.V3_LOCAL_DB!;
 if (!connectionString?.startsWith('postgres://postgres@127.0.0.1:') ||
@@ -28,22 +29,21 @@ const patch = (value = 'A', stepId = 'step-0', fieldId = 'goal') =>
   ({ stepId, fieldId, value, status: 'provisional', nature: 'fact', basis: 'user_statement' });
 const output = (patches = [patch()]) => JSON.stringify({ inputKind: 'answer', patches, notes: [] });
 
-async function fixture(extraFields = 0) {
+async function fixture(extraFields = 0, informationCounts?: number[]) {
   const owner = randomUUID(), model = randomUUID(), moduleId = randomUUID();
   const email = randomUUID() + '@example.test', password = 'Local-' + randomUUID() + '!';
   const made = await admin.auth.admin.createUser({ email, password, email_confirm: true });
   if (made.error) throw made.error;
   const actor = made.data.user.id;
-  const pack = makePackage(), registration = 'capture-' + randomUUID(), flow = makeWorkflow(3);
+  const pack = makePackage(), registration = 'capture-' + randomUUID(), flow = makeWorkflow(informationCounts?.length ?? 3);
   await db.query("insert into profiles(id,role,credits) values($1,'admin',10000),($2,'user',10000)", [owner, actor]);
   await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,10000,'addition','grant','opening_grant','system',$2,0,10000)", [actor, randomUUID()]);
   await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)', [pack.id, registration, owner]);
   await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Capture fixture','opc-fixture-default','fixture','true',1000,64000)", [model]);
   await db.query('insert into modules(id,title,skill_id,model_id,active) values($1,$2,$3,$4,true)', [moduleId, registration, pack.id, model]);
-  flow.steps.forEach((s, i) => { s.information = [
-    { id: 'goal', title: 'Goal', required: true, profileKey: 'goal_' + i },
-    { id: 'other', title: 'Other', required: false },
-  ]; });
+  flow.steps.forEach((s, i) => { s.information = Array.from({ length: informationCounts?.[i] ?? 2 }, (_, field) =>
+    field === 0 ? { id: 'goal', title: 'Goal', required: true, profileKey: 'goal_' + i }
+      : { id: field === 1 ? 'other' : 'extra' + field, title: 'Other', required: false }); });
   for (let i = 0; i < extraFields; i++) flow.steps[0].information!.push({ id: 'extra' + i, title: 'Extra', required: false });
   await publishSkillPackage(admin, owner, pack);
   await db.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)', [registration, moduleId, pack.id, pack.revisionId, flow, registration]);
@@ -374,29 +374,66 @@ it('RUNTIME: capture rollback repeats, preserves values and protects A-B-A after
   expect((await f.steps())['step-0'].information.goal.value).toBe('A');
 });
 
-it('RUNTIME: capture information byte capacity falls back to suggestions and freezes full notes safely', async () => {
+it('RUNTIME: capture information byte capacity falls back to suggestions', async () => {
   const f = await fixture(22);
   const current = (await f.steps())['step-0'];
-  // Leave the target field untouched. Fill the others near the byte ceiling.
   const values = Object.fromEntries(Object.keys(current.information).map(key => [key,
     key === 'goal' ? tuple() : tuple('x'.repeat(400), 'provisional', 'fact')]));
   await f.service.information({ draftId: f.draft.draftId, requestId: randomUUID(), stepId: 'step-0', expectedVersion: current.version, values });
-  const raw = await f.steps();
-  for (const step of Object.values(raw) as Array<Record<string, unknown>>) {
-    step.notes = Array.from({ length: 8 }, () => ({ id: randomUUID(), text: '汉'.repeat(400), source: 'user', createdAt: new Date().toISOString() }));
-  }
-  await db.query('update artifact_rounds set steps=$2 where id=$1', [f.d.roundId, raw]);
-  const id = await f.seed(output([patch('😀'.repeat(400))]));
-  expect(await f.apply(id)).toMatchObject({ result: 'suggested' });
+  expect(await f.apply(await f.seed(output([patch('😀'.repeat(400))])))).toMatchObject({ result: 'suggested' });
   const after = await f.steps();
   expect(after['step-0'].information.goal.value).toBe('');
   expect(after['step-0'].fieldMeta.goal.suggestion.value).toBe('😀'.repeat(400));
-  const frozen = (await db.query('select payload from runtime_executions where id=$1', [id])).rows[0].payload;
-  expect(Buffer.byteLength(JSON.stringify(frozen))).toBeLessThan(262144);
-  expect(frozen.scopeMaterial.content.work.steps['step-0'].notes).toEqual(raw['step-0'].notes);
-  expect(JSON.stringify(frozen.scopeMaterial.content.work.steps)).not.toContain('suggestion');
-  expect(JSON.stringify(frozen.scopeMaterial.content.work.steps)).not.toContain('"fp"');
-  expect(Buffer.byteLength(JSON.stringify(frozen.scopeMaterial.content.work))).toBeLessThan(64000);
+});
+
+it.each(['ascii', 'utf8'])('RUNTIME: full fields and protected markers fit 32768 bytes for new freeze and old request recovery (%s)', async encoding => {
+  // Same six-step/nine-field public shape pinned by agentTurnPromptCapacity.test.ts.
+  const f = await fixture(0, [3, 1, 2, 1, 1, 1]);
+  for (const [stepId, step] of Object.entries(await f.steps()) as Array<[string, { version: number; information: Record<string, unknown> }]>) {
+    const values = Object.fromEntries(Object.keys(step.information).map(key => {
+      const value = (encoding === 'ascii' ? 'x' : '汉').repeat(400);
+      return [key, tuple(value, 'provisional', 'fact')];
+    }));
+    await f.service.information({ draftId: f.draft.draftId, requestId: randomUUID(), stepId, expectedVersion: step.version, values });
+  }
+  const root = resolve(import.meta.dirname, '../../../../..');
+  const forward = readFileSync(resolve(root, 'packages/db/migrations/0159_opc_capture.sql'), 'utf8');
+  const rollback = readFileSync(resolve(root, 'docs/launch/rollback/CONVERSATION_CAPTURE_B1.sql'), 'utf8');
+  const oldProjection = rollback.match(/CREATE OR REPLACE FUNCTION runtime_work_projection[\s\S]*?END \$\$;/)![0];
+  let oldId: string;
+  await db.query(oldProjection);
+  try { oldId = await f.seed(output([]), false); } finally { await db.query(forward); }
+  const old = (await db.query('select request_id,payload from runtime_executions where id=$1', [oldId!])).rows[0];
+  const raw = await f.steps();
+  for (const step of Object.values(raw) as Array<{ fieldMeta: Record<string, Record<string, unknown>> }>) {
+    for (const meta of Object.values(step.fieldMeta)) meta.suggestion = { value: 'S'.repeat(400), executionId: oldId! };
+  }
+  await db.query('update artifact_rounds set steps=$2 where id=$1', [f.d.roundId, raw]);
+  const id = await f.seed(output([]));
+  const frozen = (await db.query(`select payload,octet_length((payload#>'{scopeMaterial,content}')::text) bytes,
+    octet_length(payload::text) payload_bytes from runtime_executions where id=$1`, [id])).rows[0];
+  expect(frozen.bytes).toBeLessThanOrEqual(32768);
+  expect(frozen.payload_bytes).toBeLessThanOrEqual(262144);
+  let fields = 0;
+  for (const step of Object.values(frozen.payload.scopeMaterial.content.work.steps) as Array<{ fieldMeta: Record<string, unknown>; information: Record<string, { value: string }> }>) {
+    expect(Object.keys(step.fieldMeta).sort()).toEqual(Object.keys(step.information).sort());
+    for (const [field, meta] of Object.entries(step.fieldMeta)) {
+      expect(meta).toEqual({ protected: true });
+      expect(step.information[field].value).toHaveLength(400); fields++;
+    }
+  }
+  expect(fields).toBe(9);
+  expect(JSON.stringify(frozen.payload.scopeMaterial.content)).not.toContain('suggestion');
+  expect(JSON.stringify(frozen.payload.scopeMaterial.content)).not.toContain('"fp"');
+  const adapter = { dispatch: async () => { throw new Error('no model dispatch'); }, lookup: async () => { throw new Error('no provider lookup'); } };
+  expect(await runtimeExecutor({ database: admin, actor: async () => f.actor, adapter }).execute(oldId!))
+    .toMatchObject({ state: 'completed', body: 'Synthetic mentor' });
+  expect(await f.service.prepareStep({ draftId: f.draft.draftId, requestId: old.request_id,
+    stepId: 'step-0', purpose: 'mentor', questionId: 'goal', input: 'Synthetic capture input' }))
+    .toMatchObject({ executionId: oldId! });
+  expect((await db.query('select payload from runtime_executions where id=$1', [oldId!])).rows[0].payload).toEqual(old.payload);
+  console.info('B1 capacity', JSON.stringify({ encoding, fields, charactersPerField: 400, protectedMarkers: fields,
+    contentBytes: frozen.bytes, payloadBytes: frozen.payload_bytes, notes: 0 }));
 });
 
 it.each(['purpose', 'revision', 'module', 'published'])('RUNTIME: capture frozen binding result (%s)', async mode => {
