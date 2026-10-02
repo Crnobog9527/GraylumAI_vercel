@@ -23,6 +23,7 @@ describe('organizer complete-value context',()=>{
       {id:'audience',title:'服务受众',required:true,elicit:'user_fact',...values.audience},
       {id:'platform',title:'起步平台',required:true,elicit:'user_fact',...values.platform},
     ]});
+    expect(organizerStepMaterial('current',schema,null)).toEqual(organizerStepMaterial('current',schema));
     expect(organizerStepMaterial('current',schema).fields.every(f=>f.value===''&&f.status==='unknown')).toBe(true);
   });
   it.each([

@@ -49,9 +49,9 @@ export const ORGANIZER_INSTRUCTIONS = [
 type ExistingValue = {value?: unknown; status?: string; nature?: string; basis?: string};
 
 export function organizerStepMaterial(id: string, schema: readonly MethodInformationField[],
-  values: Record<string, ExistingValue> = {}) {
+  values: Record<string, ExistingValue> | null = {}) {
   return {id, fields: elicitFieldSpecs(schema).map(field => {
-    const existing = values[field.id];
+    const existing = values?.[field.id];
     return {...field, status: existing?.status ?? 'unknown',
       value: existing?.value ?? '',
       ...(existing?.nature ? {nature: existing.nature} : {}),
