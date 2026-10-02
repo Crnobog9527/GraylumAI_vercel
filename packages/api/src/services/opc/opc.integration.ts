@@ -3240,6 +3240,7 @@ it("OPC: the Agent opens the current question once per entry and plans without u
     [model],
   );
   await sql.query("update modules set model_id=$1 where id=$2", [model, f.moduleId]);
+  const organizerModel = await organizerFixtureModel();
   const draft = await f.service.start({
     requestId: randomUUID(),
     registration: f.registration,
@@ -3266,11 +3267,15 @@ it("OPC: the Agent opens the current question once per entry and plans without u
             )
             .join("\n"),
     );
+    // v5: the mentor replies in prose; the attached organizer returns the extraction.
+    const content = request.model === organizerModel
+      ? JSON.stringify({ inputKind: "answer", targetStepId: "step-0", informationPatch: {} })
+      : "【隔离模拟】先把当前问题聊清楚。";
     res.setHeader("content-type", "application/json");
     res.end(
       JSON.stringify({
         id: "opening-" + calls,
-        model: "opc-opening",
+        model: request.model,
         final: true,
         cost: "0.003",
         currency: "USD",
@@ -3280,17 +3285,13 @@ it("OPC: the Agent opens the current question once per entry and plans without u
             id: "opening-" + calls,
             object: "chat.completion",
             created: 1,
-            model: "opc-opening",
+            model: request.model,
             choices: [
               {
                 index: 0,
                 message: {
                   role: "assistant",
-                  content: JSON.stringify({
-                    message: "【隔离模拟】先把当前问题聊清楚。",
-                    inputKind: "answer",
-                    informationPatch: {},
-                  }),
+                  content,
                 },
                 finish_reason: "stop",
               },
@@ -3321,7 +3322,7 @@ it("OPC: the Agent opens the current question once per entry and plans without u
       questionId: schema[0].id,
     };
     const opening = await f.service.prepareStep(openingRequest);
-    await executor.execute(opening.executionId);
+    expect(await executor.execute(opening.executionId)).toMatchObject({ state: "completed" });
     // A future question cannot be opened before the current one is confirmed.
     await expect(
       f.service.prepareStep({
@@ -3530,6 +3531,7 @@ it("OPC: a revised round opens the same question under its own identity without 
     [model],
   );
   await sql.query("update modules set model_id=$1 where id=$2", [model, f.moduleId]);
+  const organizerModel = await organizerFixtureModel();
   const draft = await f.service.start({
     requestId: randomUUID(),
     registration: f.registration,
@@ -3544,12 +3546,18 @@ it("OPC: a revised round opens the same question under its own identity without 
   let calls = 0;
   const server = createServer(async (req, res) => {
     calls++;
-    for await (const _ of req) void _;
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const wireModel: string = JSON.parse(JSON.parse(raw).input).model;
+    // v5: the mentor replies in prose; the attached organizer returns the extraction.
+    const content = wireModel === organizerModel
+      ? JSON.stringify({ inputKind: "answer", targetStepId: "step-0", informationPatch: {} })
+      : "【隔离模拟】第 " + calls + " 次开场。";
     res.setHeader("content-type", "application/json");
     res.end(
       JSON.stringify({
         id: "round-" + calls,
-        model: "opc-round",
+        model: wireModel,
         final: true,
         cost: "0.003",
         currency: "USD",
@@ -3559,17 +3567,13 @@ it("OPC: a revised round opens the same question under its own identity without 
             id: "round-" + calls,
             object: "chat.completion",
             created: 1,
-            model: "opc-round",
+            model: wireModel,
             choices: [
               {
                 index: 0,
                 message: {
                   role: "assistant",
-                  content: JSON.stringify({
-                    message: "【隔离模拟】第 " + calls + " 次开场。",
-                    inputKind: "answer",
-                    informationPatch: {},
-                  }),
+                  content,
                 },
                 finish_reason: "stop",
               },
@@ -3610,7 +3614,7 @@ it("OPC: a revised round opens the same question under its own identity without 
       (await sql.query("select count(*)::int n from bill2_runs where actor_id=$1", [f.actor])).rows[0].n,
     ).toBe(1);
     expect(calls).toBe(0);
-    await executor.execute(openingA.executionId);
+    expect(await executor.execute(openingA.executionId)).toMatchObject({ state: "completed" });
     expect(calls).toBe(OPENING_CALLS);
     // The original round's request stays retryable and recoverable as itself.
     expect((await f.service.prepareStep(roundARequest)).executionId).toBe(openingA.executionId);
@@ -3653,7 +3657,7 @@ it("OPC: a revised round opens the same question under its own identity without 
     expect(roundBRequest.requestId).not.toBe(roundARequest.requestId);
     const openingB = await f.service.prepareStep(roundBRequest);
     expect(openingB.executionId).not.toBe(openingA.executionId);
-    await executor.execute(openingB.executionId);
+    expect(await executor.execute(openingB.executionId)).toMatchObject({ state: "completed" });
     expect(calls).toBe(2 * OPENING_CALLS);
     // The older round keeps its own identity: it replays to its own execution
     // and never adopts the revised round's turn.
@@ -4006,21 +4010,26 @@ async function finalized(n = 3, withTopics = false) {
 /** A fixture-backed model bound to the module under test. */
 async function planFixtureModel(moduleId: string) {
   const model = randomUUID();
-  const summaryModel = randomUUID();
   await sql.query(
     "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-browser','fixture','true',1000,32000)",
     [model],
   );
+  await organizerFixtureModel();
+  await sql.query("update modules set model_id=$1 where id=$2", [model, moduleId]);
+  return model;
+}
+/** Owns the global extraction organizer setting instead of inheriting another case's. Returns its model name. */
+async function organizerFixtureModel() {
+  const summaryModel = randomUUID(), name = "opc-organizer-" + summaryModel;
   await sql.query(
     "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'OPC organizer',$2,'fixture','true',1000,32000)",
-    [summaryModel, "opc-organizer-" + summaryModel],
+    [summaryModel, name],
   );
   await sql.query(
     "insert into system_settings(key,value) values('v3_summary_model_id',to_jsonb($1::text)),('v3_summary_max_tokens','1000'::jsonb) on conflict(key) do update set value=excluded.value",
     [summaryModel],
   );
-  await sql.query("update modules set model_id=$1 where id=$2", [model, moduleId]);
-  return model;
+  return name;
 }
 /**
  * Exact plan-purpose money and identity for one actor: nothing here is derived
