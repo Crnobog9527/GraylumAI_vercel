@@ -13,7 +13,7 @@ import {
   calculateTokenCacheHitRate,
   estimateCacheSavings,
 } from '../services/performanceCostReport';
-import { buildFinanceUsdOverview } from '../services/financeReport';
+import { buildFinanceUsdOverview, buildFinanceTransactionStats } from '../services/financeReport';
 import { picoToUsd, usdToPico } from '../services/reportUsd';
 import { BILLING_CONSTANTS } from '../types/billing';
 import { describeBillingUnitSettings } from '../services/billingUnit';
@@ -49,7 +49,7 @@ const adminScalarSettingValueSchema = z.union([
 ]);
 const adminFinanceCreditTransactionRowSchema = z.object({
   amount: z.number().finite(),
-  type: z.enum(['deduction', 'addition', 'purchase', 'refund', 'consumption', 'adjustment']),
+  type: z.string().trim().min(1),
   created_at: adminDateStringSchema,
   description: z.string().nullable().optional(),
 }).passthrough();
@@ -58,7 +58,7 @@ const adminFinanceCreditPackageRowSchema = z.object({
   name: z.string().min(1),
   price: z.number().finite(),
   credits_amount: z.number().finite(),
-  active: z.enum(['true', 'false']),
+  active: z.string().trim().min(1),
 }).passthrough();
 const adminFinanceProfileRowSchema = z.object({
   credits: z.number().finite(),
@@ -69,7 +69,7 @@ const adminFinanceModelRowSchema = z.object({
   name: z.string().min(1),
   model_id: z.string().min(1),
   provider: z.string().min(1),
-  is_active: z.union([z.enum(['true', 'false']), z.boolean()]),
+  is_active: z.union([z.string().trim().min(1), z.boolean()]),
   input_token_cost: z.number().finite(),
   output_token_cost: z.number().finite(),
   input_token_cost_above_200k: z.number().finite(),
@@ -2268,64 +2268,7 @@ export const adminRouter = router({
       const now = new Date();
       const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-      const transactionStats = {
-        totalAdditions: 0,
-        totalDeductions: 0,
-        totalPurchases: 0,
-        totalRefunds: 0,
-        todayTransactions: 0,
-        weekTransactions: 0,
-        monthTransactions: 0,
-      };
-
-      // Daily breakdown for chart (last 30 days)
-      const dailyStats: Record<string, { additions: number; deductions: number; purchases: number }> = {};
-      for (let i = 0; i < 30; i++) {
-        const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-        const dateKey = date.toISOString().split('T')[0];
-        dailyStats[dateKey] = { additions: 0, deductions: 0, purchases: 0 };
-      }
-
-      creditTransactions.forEach(t => {
-        const transDate = new Date(t.created_at);
-        const dateKey = transDate.toISOString().split('T')[0];
-
-        if (t.type === 'addition') {
-          transactionStats.totalAdditions += t.amount;
-          if (dailyStats[dateKey]) dailyStats[dateKey].additions += t.amount;
-        } else if (t.type === 'purchase') {
-          transactionStats.totalPurchases += t.amount;
-          if (dailyStats[dateKey]) dailyStats[dateKey].purchases += t.amount;
-        }
-
-        if (transDate >= todayStart) transactionStats.todayTransactions++;
-        if (transDate >= sevenDaysAgo) transactionStats.weekTransactions++;
-        if (transDate >= thirtyDaysAgo) transactionStats.monthTransactions++;
-      });
-
-      tokenStats.forEach((stat) => {
-        const createdAt = new Date(stat.created_at);
-        const dateKey = createdAt.toISOString().split('T')[0];
-        const credits = stat.total_credits;
-
-        transactionStats.totalDeductions += credits;
-        if (dailyStats[dateKey]) {
-          dailyStats[dateKey].deductions += credits;
-        }
-      });
-
-      billingHistory.forEach((entry) => {
-        const createdAt = new Date(entry.created_at);
-        if (createdAt >= todayStart) transactionStats.todayTransactions++;
-        if (createdAt >= sevenDaysAgo) transactionStats.weekTransactions++;
-        if (createdAt >= thirtyDaysAgo) transactionStats.monthTransactions++;
-
-        if (entry.operation_type === 'refund') {
-          transactionStats.totalRefunds += Math.abs(entry.amount);
-        }
-      });
+      const { transactionStats, dailyStats } = buildFinanceTransactionStats(creditTransactions, tokenStats, billingHistory, now);
 
       // User statistics
       const userStats = {
@@ -2350,6 +2293,7 @@ export const adminRouter = router({
       const packageStats = {
         totalPackages: packages.length,
         activePackages: packages.filter(p => p.active === 'true').length,
+        unknownActiveCount: packages.filter(p => p.active !== 'true' && p.active !== 'false').length,
         packages: packages.map(p => ({
           id: p.id,
           name: p.name,
@@ -2416,8 +2360,9 @@ export const adminRouter = router({
         ...buildFinanceUsdOverview(paymentOrders, tokenStats),
         creditsConsumed: transactionStats.totalDeductions,
         creditsPurchased: transactionStats.totalPurchases,
-        creditsGiven: transactionStats.totalAdditions,
-        netCreditsFlow: transactionStats.totalAdditions + transactionStats.totalPurchases - transactionStats.totalDeductions,
+        creditsGiven: transactionStats.totalAdditions + transactionStats.totalCheckins,
+        netCreditsFlow: transactionStats.totalAdditions + transactionStats.totalCheckins
+          + transactionStats.totalPurchases - transactionStats.totalDeductions,
       };
 
       // Runtime billing reference derived from active model pricing
@@ -2465,6 +2410,8 @@ export const adminRouter = router({
         tokenPriceMultiplier,
         billingUnitSource,
         activeModelCount: activeMeteredModels.length,
+        unknownModelActiveCount: models.filter(model =>
+          ![true, false, 'true', 'false'].includes(model.is_active)).length,
         inputCreditsPer1KRange: formatRange(inputCreditsPer1KValues),
         outputCreditsPer1KRange: formatRange(outputCreditsPer1KValues),
         searchCreditsPer1KRange: formatRange(searchCreditsPer1KValues),

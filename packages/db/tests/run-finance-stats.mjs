@@ -51,6 +51,9 @@ try {
   assert.equal(built.failed, null, JSON.stringify(built.failed));
   console.log(`Schema built: ${built.passed}/${built.steps}`);
   sql(`INSERT INTO profiles(id,role,nickname) VALUES ('${admin}','admin','Synthetic admin');`);
+  // Fixture setup as the local database owner; do not broaden application ledger grants.
+  sql(`INSERT INTO credit_transactions(user_id,type,amount) VALUES
+    ('${admin}','checkin',7), ('${admin}','future_reward',11);`);
   docker('run', '-d', '--pull=never', '--name', rest, '--network', tag, '-p', '127.0.0.1::3000',
     '-e', `PGRST_DB_URI=postgres://authenticator@${db}:5432/finance`, '-e', 'PGRST_DB_SCHEMAS=public',
     '-e', 'PGRST_DB_ANON_ROLE=anon', '-e', `PGRST_JWT_SECRET=${secret}`, POSTGREST_IMAGE);
