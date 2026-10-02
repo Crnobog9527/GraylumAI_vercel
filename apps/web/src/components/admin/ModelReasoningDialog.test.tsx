@@ -32,7 +32,8 @@ beforeAll(async () => {
     };
     const setData = (_, value) => { state.data = value; window.rerender(); };
     export const trpc = {
-      useUtils: () => ({ modelReasoning: { get: { setData } }, settings: { getSummaryModels: { invalidate() {} } } }),
+      useUtils: () => ({ modelReasoning: { get: { setData } }, settings: { getSummaryModels: { invalidate() {} } },
+        modelPricing: { getMultipliers: { invalidate() {} } } }),
       modelReasoning: {
         tryOnce: { useMutation: () => ({ isPending: state.tryPending,
           mutate: (input, options) => {
@@ -49,7 +50,7 @@ beforeAll(async () => {
         refreshCatalog: { useMutation: options => ({
           error: state.refreshError, isPending: false,
           mutate: () => {
-            if (state.refreshCatalog) options.onSuccess({ ...state.data, config: { ...state.data.config, catalog: state.refreshCatalog } });
+            if (state.refreshCatalog) options.onSuccess({ ...state.data, config: { ...state.data.config, catalog: state.refreshCatalog }, priceChanges: [] });
           }
         }) },
         save: { useMutation: () => ({ error: state.saveError, isPending: false, isSuccess: false,
@@ -189,4 +190,22 @@ describe('reasoning dialog local browser regression', () => {
       expect(await page.evaluate('window.__mr1.data.config.purposes.interactive.effort')).toBe('high');
     });
   });
+
+  it('shows the read-only price snapshot of the selected route, its tiers and staleness', async () => {
+    await withDialog(async page => {
+      await loadSettings(page);
+      await browserExpect(page.getByTestId('model-price-snapshot')).toContainText('还没有读取价格');
+      await page.evaluate(`window.__mr1.data = { ...window.__mr1.data, pricing: {
+        fetchedAt: '2026-09-01T00:00:00.000Z', model: 'example/model', source: 'openrouter:/api/v1/models/example/model/endpoints',
+        pricingHash: '${'c'.repeat(64)}', endpoints: [{ tag: 'example', contextLength: 8192, admissible: true, issues: [], discount: 0, unknownKeys: [],
+          base: { prompt: '0.1', completion: '0.5', input_cache_write: '0.125' }, raw: {},
+          overrides: [{ when: { minPromptTokens: 272000 }, prices: { prompt: '0.2', completion: '0.75' } }] }] } }; window.rerender();`);
+      const panel = page.getByTestId('model-price-snapshot');
+      await browserExpect(panel).toContainText('缓存写入（5 分钟）');
+      await browserExpect(panel).toContainText('当 输入 ≥ 272,000 token 时');
+      await browserExpect(panel).toContainText('价格已超过 7 天没有更新');
+      await browserExpect(panel.getByRole('textbox')).toHaveCount(0);
+    });
+  });
 });
+

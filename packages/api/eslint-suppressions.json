@@ -484,11 +484,6 @@
       "count": 2
     }
   },
-  "src/services/models/modelConfig.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
   "src/services/opc/opc.integration.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 67

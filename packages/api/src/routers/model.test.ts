@@ -16,6 +16,24 @@ function createSingleQueryBuilder(result: Promise<unknown>) {
   };
 }
 
+/** Connection-state writes re-read the row and are conditional on updated_at (mergeConnectionState). */
+function withConnectionState<T extends object>(table: T, onUpdate: (payload: Record<string, unknown>) => void = () => {}, row: unknown = null) {
+  const read = {
+    eq: () => read,
+    single: async () => ({ data: row, error: null }),
+    maybeSingle: async () => ({ data: { config: {}, updated_at: 'v1' }, error: null }),
+  };
+  return {
+    ...table,
+    select: () => read,
+    update(payload: Record<string, unknown>) {
+      onUpdate(payload);
+      const write = { eq: () => write, select: async () => ({ data: [{ id: 'model' }], error: null }) };
+      return write;
+    },
+  };
+}
+
 function createProtectedCaller(options: {
   role?: 'user' | 'admin';
   supabase: {
@@ -173,7 +191,7 @@ describe('modelRouter error sanitization', () => {
         }
 
         if (table === 'ai_models') {
-          return {
+          return withConnectionState({
             insert(payload: Record<string, unknown>) {
               inserted.push(payload);
               return {
@@ -193,14 +211,7 @@ describe('modelRouter error sanitization', () => {
                 },
               };
             },
-            update() {
-              return {
-                eq() {
-                  return Promise.resolve({ data: null, error: null });
-                },
-              };
-            },
-          };
+          });
         }
 
         throw new Error(`Unexpected table ${table}`);
@@ -357,7 +368,7 @@ describe('modelRouter error sanitization', () => {
         }
 
         if (table === 'ai_models') {
-          return {
+          return withConnectionState({
             insert() {
               return {
                 select() {
@@ -372,18 +383,7 @@ describe('modelRouter error sanitization', () => {
                 },
               };
             },
-            update(payload: Record<string, unknown>) {
-              updatePayloads.push(payload);
-              return {
-                eq() {
-                  return Promise.resolve({
-                    data: null,
-                    error: null,
-                  });
-                },
-              };
-            },
-          };
+          }, payload => updatePayloads.push(payload));
         }
 
         throw new Error(`Unexpected table ${table}`);
@@ -501,7 +501,7 @@ describe('modelRouter error sanitization', () => {
         }
 
         if (table === 'ai_models') {
-          return {
+          return withConnectionState({
             insert(payload: Record<string, unknown>) {
               inserted.push(payload);
               return {
@@ -521,14 +521,7 @@ describe('modelRouter error sanitization', () => {
                 },
               };
             },
-            update() {
-              return {
-                eq() {
-                  return Promise.resolve({ data: null, error: null });
-                },
-              };
-            },
-          };
+          });
         }
 
         throw new Error(`Unexpected table ${table}`);
@@ -655,39 +648,15 @@ describe('modelRouter error sanitization', () => {
         }
 
         if (table === 'ai_models') {
-          return {
-            select() {
-              return this;
-            },
-            eq() {
-              return this;
-            },
-            single() {
-              return Promise.resolve({
-                data: {
-                  id: '123e4567-e89b-42d3-a456-426614174000',
-                  name: 'No Key Model',
-                  model_id: 'anthropic/claude-sonnet-4.6',
-                  provider: 'openai',
-                  api_key: null,
-                  api_endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-                  config: {},
-                },
-                error: null,
-              });
-            },
-            update(payload: Record<string, unknown>) {
-              updatePayloads.push(payload);
-              return {
-                eq() {
-                  return Promise.resolve({
-                    data: null,
-                    error: null,
-                  });
-                },
-              };
-            },
-          };
+          return withConnectionState({}, payload => updatePayloads.push(payload), {
+            id: '123e4567-e89b-42d3-a456-426614174000',
+            name: 'No Key Model',
+            model_id: 'anthropic/claude-sonnet-4.6',
+            provider: 'openai',
+            api_key: null,
+            api_endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+            config: {},
+          });
         }
 
         throw new Error(`Unexpected table ${table}`);
