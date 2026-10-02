@@ -11394,3 +11394,184 @@ it("OPC: RATE-LIMIT start-page send refused by any 503 is never re-sent automati
     await browser.close();
   }
 }, 600000);
+
+// Review 5958591969 (P2-1, P2-2): on a video work item, the continue-work guidance and the video
+// package both hold every request that was not admitted, whatever refused it: the gate's whitelisted
+// 503 (pause), an unknown structured 503, a plain non-tRPC 503, and for the package also a shared
+// failure of material preparation and admission. Reloads during the refusal and after recovery send
+// nothing by themselves; the user's explicit retry sends the same request id once and completes it.
+// Guidance runs its three cases on one fixture; each package case gets its own fixture.
+async function runtimeHoldCase(part: 'guidance' | 'video', videoCase = -1) {
+  const { execFileSync } = await import("node:child_process");
+  const tag = process.env.V3_RATE_LIMIT_TAG;
+  if (!tag || !/^[a-z0-9][a-z0-9-]{0,80}$/.test(tag)) throw new Error("local rate limit required");
+  expect(execFileSync("docker", ["exec", tag + "-redis", "redis-cli", "FLUSHDB"], { encoding: "utf8" }).trim()).toBe("OK");
+  const pausedNotice = "AI服务暂时暂停新调用，请稍后再试。本次被拦截的调用不扣积分。";
+  const pause = (stopNewCalls: boolean) => sql.query(
+    "insert into system_settings(key,value) values('runtime_rate_limits',$1::jsonb) on conflict(key) do update set value=excluded.value",
+    [JSON.stringify({ version: 1, admissionPerMinute: 60, admissionPer24Hours: 5000, callsPerMinute: 180,
+      callsPer24Hours: 15000, stopNewCalls })]);
+  await pause(false);
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const seed = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'existing-account', title: '原工作', brief: '原有账号项目', day: '2026-09-20' }] });
+  await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: seed.planId,
+    accounts: [{ platform: 'x', account: 'existing-account', expectedRevision: null }] });
+  const { browser, page } = await planBrowser(f);
+  const unknown503 = JSON.stringify([{ error: { message: "internal diagnostic: upstream unavailable", code: -32603,
+    data: { code: "SERVICE_UNAVAILABLE", httpStatus: 503, path: "runtime.prepare" } } }]);
+  const plain503 = JSON.stringify({ error: "Service Unavailable", message: "服务暂时繁忙，请稍后再试", retryAfter: 60 });
+  // Every browser prepare (guidance and package) and every material call, with the request id each carries.
+  const prepares: Array<{ kind: 'guide' | 'package' | 'other'; requestId: string }> = [];
+  const abandons: string[] = [];
+  page.on('request', request => {
+    const body = request.postData() ?? '';
+    if (/\/api\/trpc\/runtime\.prepare(?:[?,]|$)/.test(request.url())) {
+      const input = Object.values(JSON.parse(body || '{}'))[0] as { requestId?: string; input?: string } | undefined;
+      prepares.push({ requestId: input?.requestId ?? '', kind: input?.input?.startsWith('[OPC_WORK_CONTINUE_V1]') ? 'guide'
+        : input?.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]') ? 'package' : 'other' });
+    }
+    if (request.url().includes('opc.prepareVideoMaterial') && body.includes('abandon')) abandons.push(body);
+  });
+  const sendsOf = (requestId: string) => prepares.filter(item => item.requestId === requestId).length;
+  const executionsOf = async (requestId: string, state?: string) => Number((await sql.query(
+    "select count(*)::int n from runtime_executions where actor_id=$1 and request_id::text=$2 and ($3::text is null or state=$3)",
+    [f.actor, requestId, state ?? null])).rows[0].n);
+  type Refusal = { name: string; on: () => Promise<void>; off: () => Promise<void> };
+  const fulfil = (pattern: string | RegExp, body: string): Refusal['on'] => () => page.route(pattern,
+    route => route.fulfill({ status: 503, contentType: 'application/json', body }));
+  const refusals: Array<Refusal & { gate: boolean }> = [
+    { name: 'paused', gate: true, on: () => pause(true).then(() => undefined), off: () => pause(false).then(() => undefined) },
+    { name: 'unknown structured 503', gate: false, on: fulfil('**/api/trpc/runtime.prepare*', unknown503),
+      off: () => page.unroute('**/api/trpc/runtime.prepare*') },
+    { name: 'plain non-tRPC 503', gate: false, on: fulfil('**/api/trpc/runtime.prepare*', plain503),
+      off: () => page.unroute('**/api/trpc/runtime.prepare*') },
+  ];
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + f.d.draftId + '/topics');
+    await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
+    const card = page.getByRole('heading', { name: '1. 首周选题', exact: true }).first().locator('..');
+    await card.getByRole('button', { name: '采用这个选题', exact: true }).click({ timeout: 420000 });
+    const link = card.getByRole('link', { name: '继续这条内容工作', exact: true });
+    await link.waitFor({ timeout: 420000 });
+    const continueUrl = new URL(await link.getAttribute('href') ?? '', process.env.V3_LOCAL_APP).toString();
+    expect(new URL(continueUrl).searchParams.get('continue')).toBe('1');
+    const sessionId = new URL(continueUrl).searchParams.get('session')!;
+    const transcript = page.getByLabel('对话记录', { exact: true });
+    const recoverGuide = page.getByRole('button', { name: '恢复引导请求', exact: true });
+    const videoKey = 'opc-video-operation:' + sessionId;
+    const finalPrompt = page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true });
+    const scripts = async () => Number((await sql.query(
+      "select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and state='completed' and payload->>'input' not like '[OPC_%'",
+      [f.actor, sessionId])).rows[0].n);
+    let script = 0;
+    /** A new finalized script version: a new guidance stage, and a script without a package yet. */
+    async function finalizeNewScript() {
+      script += 1;
+      const before = await scripts();
+      await page.getByLabel('消息', { exact: true }).fill('请和我讨论这条视频的口播稿，第 ' + script + ' 版。');
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      await expect.poll(scripts, { timeout: 420000 }).toBe(before + 1);
+      const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true }).last();
+      await finalize.waitFor({ timeout: 420000 });
+      // Read the database directly: this long case outlives the fixture client's session.
+      const finals = async () => Number((await sql.query(
+        "select count(*)::int n from opc_content_versions where actor_id=$1 and kind='script' and status='final'", [f.actor])).rows[0].n);
+      const finalsBefore = await finals();
+      await finalize.click();
+      await expect.poll(finals, { timeout: 420000 }).toBe(finalsBefore + 1);
+      // The finalize UI refresh is not under test here, and an overloaded local stack can drop that read: reload.
+      await page.reload();
+      await finalPrompt.waitFor({ timeout: 420000 }).catch(async error => {
+        const text = await page.locator('body').innerText();
+        throw new Error('no final-script prompt; page tail: ' + text.slice(-900) + ' / ' + error);
+      });
+    }
+    async function quietAfterReload(check: () => Promise<void>) {
+      await page.reload();
+      await transcript.waitFor({ timeout: 420000 });
+      await page.waitForTimeout(5000);
+      await check();
+    }
+
+    // P2-1: the continue-work guidance.
+    for (const [index, refusal] of (part === 'guidance' ? refusals : []).entries()) {
+      if (index > 0) await finalizeNewScript();
+      const sent = prepares.length;
+      await refusal.on();
+      await page.goto(continueUrl);
+      await page.getByRole('alert').filter({ hasText: refusal.gate ? pausedNotice : '引导请求待恢复' }).waitFor({ timeout: 420000 });
+      const guides = prepares.slice(sent).filter(item => item.kind === 'guide');
+      expect(guides).toHaveLength(1);
+      const requestId = guides[0].requestId;
+      expect(new URL(page.url()).searchParams.has('continue')).toBe(false);
+      await recoverGuide.waitFor({ timeout: 30000 });
+      await quietAfterReload(async () => { expect(sendsOf(requestId)).toBe(1); });
+      await refusal.off();
+      await quietAfterReload(async () => {
+        expect(sendsOf(requestId)).toBe(1);
+        expect(await executionsOf(requestId)).toBe(0);
+      });
+      await recoverGuide.click();
+      await expect.poll(() => executionsOf(requestId, 'completed'), { timeout: 420000 }).toBe(1);
+      expect(sendsOf(requestId)).toBe(2);
+      expect(await executionsOf(requestId)).toBe(1);
+    }
+
+    // P2-2: the video package, including a shared failure of material preparation and admission.
+    const both = /\/api\/trpc\/(?:runtime\.prepare|opc\.prepareVideoMaterial)(?:[?,]|$)/;
+    const videoRefusals: Array<Refusal & { gate: boolean; admissionSent: boolean }> = [
+      ...refusals.map(refusal => ({ ...refusal, admissionSent: true })),
+      { name: 'material and admission both fail', gate: false, admissionSent: false,
+        on: fulfil(both, plain503), off: () => page.unroute(both) },
+    ];
+    if (part === 'video') {
+      // Enter the work as the user does (the guidance completes), then finalize the first script.
+      await page.goto(continueUrl);
+      await page.getByText('【主动引导合成示例，仅验证交互】', { exact: false }).first().waitFor({ timeout: 420000 });
+    }
+    // One video case per fixture: a long Session history slows every later round on a local stack.
+    for (const refusal of part === 'video' ? [videoRefusals[videoCase]] : []) {
+      const choice = '先做分镜，再生成剪辑建议';
+      await finalizeNewScript();
+      await finalPrompt.waitFor({ timeout: 420000 });
+      const sent = prepares.length;
+      await refusal.on();
+      await page.getByLabel('消息', { exact: true }).fill(choice);
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      await page.getByRole('alert').filter({ hasText: refusal.gate ? pausedNotice : '视频工作请求未完成' }).waitFor({ timeout: 420000 });
+      const held = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
+      expect(held.held).toBe(true);
+      expect(held.followup.executionId).toBeUndefined();
+      const requestId = held.followup.requestId as string;
+      const admissions = refusal.admissionSent ? 1 : 0;
+      expect(prepares.slice(sent).filter(item => item.kind === 'package').map(item => item.requestId))
+        .toEqual(Array(admissions).fill(requestId));
+      expect(abandons).toEqual([]);
+      const stillHeld = async () => {
+        expect(sendsOf(requestId)).toBe(admissions);
+        expect(abandons).toEqual([]);
+        expect(JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!)).toEqual(held);
+        expect(await executionsOf(requestId)).toBe(0);
+      };
+      await quietAfterReload(stillHeld);
+      await refusal.off();
+      await quietAfterReload(stillHeld);
+      await page.getByLabel('消息', { exact: true }).fill(choice);
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      await expect.poll(() => page.evaluate(key => localStorage.getItem(key), videoKey), { timeout: 420000 }).toBeNull();
+      expect(sendsOf(requestId)).toBe(admissions + 1);
+      expect(await executionsOf(requestId, 'completed')).toBe(1);
+      expect(await executionsOf(requestId)).toBe(1);
+      expect(abandons).toEqual([]);
+    }
+  } finally {
+    await sql.query("delete from system_settings where key='runtime_rate_limits'");
+    await browser.close();
+  }
+}
+it("OPC: RATE-LIMIT /runtime guidance holds every unadmitted 503 for an explicit retry", () => runtimeHoldCase('guidance'), 2700000);
+it.each([[0, 'paused'], [1, 'unknown structured 503'], [2, 'plain non-tRPC 503'], [3, 'material and admission both fail']] as const)(
+  "OPC: RATE-LIMIT /runtime video package holds an unadmitted request for an explicit retry (%i: %s)",
+  videoCase => runtimeHoldCase('video', videoCase), 1200000);
