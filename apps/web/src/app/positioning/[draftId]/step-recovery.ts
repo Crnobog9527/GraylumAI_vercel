@@ -11,6 +11,9 @@ import { parseStepEnvelope, type MentorStepEnvelope } from "./mentor-turn";
 export const HISTORY_POLL_MS = 2000;
 /** How long an envelope with no execution in history yet may still be admitted by a request in flight. */
 export const UNMATCHED_POLL_MS = 30000;
+/** Re-reads of a history that has never loaded: their interval and how many failed reads end them. */
+export const HISTORY_RETRY_MS = 5000;
+export const HISTORY_RETRY_LIMIT = 10;
 
 /** Execution states that will not change any more (see runtime_sessions' state check). */
 const TERMINAL_STATES = ["completed", "cancelled", "cost_pending"];
@@ -65,15 +68,18 @@ export function envelopeExecution(history: RecoveryHistory, envelope: MentorStep
  * - `auto`: its execution is terminal and no execution owns the session. The
  *   page may run the same idempotent recovery as the retry action by itself.
  * - `user`: nothing will change by itself (unreadable envelope, interrupted
- *   execution, or a request that was never admitted). Ask the user.
+ *   execution, or a request that was never admitted), or the history cannot
+ *   be read (a failed read, or none after the grace period). Ask the user;
+ *   the retry still replays the envelope's own identities.
  */
 export function envelopeRecovery(
   history: RecoveryHistory | undefined,
   envelope: StoredStepEnvelope,
   elapsedMs: number,
+  historyFailed = false,
 ): "wait" | "auto" | "user" {
   if (!envelope.parsed) return "user";
-  if (!history) return "wait";
+  if (!history) return historyFailed || elapsedMs >= UNMATCHED_POLL_MS ? "user" : "wait";
   const executions = history.executions ?? [];
   const active = history.activeExecution
     ? executions.find(execution => execution.executionId === history.activeExecution) ?? { state: "running" }
@@ -90,14 +96,17 @@ export function envelopeRecovery(
  * the server is still advancing a turn (the active execution, or the
  * execution of a retained envelope), and for a short grace period while a
  * retained envelope has no execution in history yet. A terminal or
- * interrupted execution stops polling.
+ * interrupted execution stops polling. A history that has never loaded is
+ * re-read after failed reads, HISTORY_RETRY_LIMIT times at most, so the page
+ * picks up again once the connection returns.
  */
 export function historyPollInterval(
   history: RecoveryHistory | undefined,
   envelopes: readonly StoredStepEnvelope[],
   elapsedMs: number,
+  failedReads = 0,
 ): number | false {
-  if (!history) return false;
+  if (!history) return failedReads > 0 && failedReads < HISTORY_RETRY_LIMIT ? HISTORY_RETRY_MS : false;
   if (history.activeExecution) {
     const active = (history.executions ?? []).find(execution => execution.executionId === history.activeExecution);
     if (!active || PROGRESSING_STATES.includes(active.state)) return HISTORY_POLL_MS;
@@ -140,8 +149,38 @@ export function envelopeNeedsUser(
   envelope: StoredStepEnvelope,
   attempts: ReadonlyMap<string, RecoveryAttempt>,
   elapsedMs: number,
+  historyFailed = false,
 ) {
-  const state = envelopeRecovery(history, envelope, elapsedMs);
+  const state = envelopeRecovery(history, envelope, elapsedMs, historyFailed);
   const count = attempts.get(envelopeIdentity(envelope))?.count ?? 0;
   return state === "user" || (state === "auto" && count >= AUTO_RECOVERY_DELAYS_MS.length);
+}
+
+/**
+ * The page's own recovery timers. Disposing (unmount, which also covers a
+ * draft switch because the page is keyed by draft) clears every pending timer,
+ * and a recovery that finishes later can no longer schedule another one.
+ */
+export class RecoveryTimers {
+  private readonly timers = new Set<ReturnType<typeof setTimeout>>();
+  private disposed = false;
+
+  schedule(delayMs: number, callback: () => void) {
+    if (this.disposed) return;
+    const timer = setTimeout(() => {
+      this.timers.delete(timer);
+      if (!this.disposed) callback();
+    }, delayMs);
+    this.timers.add(timer);
+  }
+
+  dispose() {
+    this.disposed = true;
+    for (const timer of this.timers) clearTimeout(timer);
+    this.timers.clear();
+  }
+
+  get pending() {
+    return this.timers.size;
+  }
 }

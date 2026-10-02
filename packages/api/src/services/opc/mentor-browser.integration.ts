@@ -130,11 +130,17 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   if(scenario==='refresh'){
    const envelope=await page.evaluate(id=>sessionStorage.getItem('opc-step:'+id+':step-0'),d.draftId);expect(envelope).toBeTruthy();
    const executions=(await sql.query('select id,request_id from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows;
+   // The first history reads after the reload fail: the compact retry line is the entry until reads work again.
+   const historyRead=(url:URL)=>url.pathname.includes('runtime.view');await page.route(historyRead,route=>route.abort());
    await page.reload();await poll(()=>composer.isEditable()).toBe(true);expect(await composer.inputValue()).toBe('这是下一条尚未发送的新草稿');expect((await control()).length).toBe(4);
    expect(await page.evaluate(id=>sessionStorage.getItem('opc-step:'+id+':step-0'),d.draftId)).toBe(envelope);
+   const recoveryCard=page.getByRole('status',{name:'待恢复的导师请求'}),retryLine=page.getByRole('status',{name:'恢复提示'});
+   await poll(()=>retryLine.isVisible()).toBe(true);expect(await retryLine.getByRole('button',{name:'重试',exact:true}).isEnabled()).toBe(true);
+   expect(await recoveryCard.count()).toBe(0);await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-refresh-history-failed.png',fullPage:true});
+   // Reads work again: without any click the page re-reads history by itself and follows the running turn.
+   await page.unroute(historyRead);await poll(()=>retryLine.count(),{timeout:20000}).toBe(0);
    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-refresh-pending.png',fullPage:true});
    // Recovery is silent: no recovery card or retry line, only the small reply status while the turn still runs.
-   const recoveryCard=page.getByRole('status',{name:'待恢复的导师请求'}),retryLine=page.getByRole('status',{name:'恢复提示'});
    expect(await send.isDisabled()).toBe(true);await poll(()=>page.getByText('正在回复…',{exact:true}).isVisible()).toBe(true);
    expect([await recoveryCard.count(),await retryLine.count()]).toEqual([0,0]);
    await control(4);await poll(async()=>(await sql.query('select state from runtime_executions where id=$1',[executions.at(-1).id])).rows[0].state).toBe('completed');

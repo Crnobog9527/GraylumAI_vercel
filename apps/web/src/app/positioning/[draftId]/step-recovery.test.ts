@@ -1,9 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MentorRequest } from "./mentor-turn";
 import {
   AUTO_RECOVERY_DELAYS_MS,
   HISTORY_POLL_MS,
+  HISTORY_RETRY_LIMIT,
+  HISTORY_RETRY_MS,
+  RecoveryTimers,
   UNMATCHED_POLL_MS,
   autoRecoveryTarget,
   envelopeIdentity,
@@ -155,5 +158,84 @@ describe("autoRecoveryTarget", () => {
       executions: [{ executionId: otherExecution, state: "completed", request: { requestId: next.requestId } }] };
     const fresh = envelopesOf(JSON.stringify({ request: next, executionId: otherExecution }));
     expect(autoRecoveryTarget(later, fresh, attempts(AUTO_RECOVERY_DELAYS_MS.length), 0, 0)).toBe(fresh[0]);
+  });
+});
+
+describe("a history that never loaded", () => {
+  const envelopes = envelopesOf(admitted);
+
+  it("is still loading at first: no retry line, no extra polling", () => {
+    expect(envelopeRecovery(undefined, envelopes[0]!, 0)).toBe("wait");
+    expect(envelopeNeedsUser(undefined, envelopes[0]!, new Map(), 0)).toBe(false);
+    expect(historyPollInterval(undefined, envelopes, 0, 0)).toBe(false);
+  });
+
+  it("shows the retry line once a read failed and re-reads a bounded number of times", () => {
+    expect(envelopeRecovery(undefined, envelopes[0]!, 0, true)).toBe("user");
+    expect(envelopeNeedsUser(undefined, envelopes[0]!, new Map(), 0, true)).toBe(true);
+    // The retry line is the user's entry; nothing is recovered automatically without history.
+    expect(autoRecoveryTarget(undefined, envelopes, new Map(), 0, 0)).toBeNull();
+    expect(historyPollInterval(undefined, envelopes, 0, 1)).toBe(HISTORY_RETRY_MS);
+    expect(historyPollInterval(undefined, envelopes, 0, HISTORY_RETRY_LIMIT - 1)).toBe(HISTORY_RETRY_MS);
+    expect(historyPollInterval(undefined, envelopes, 0, HISTORY_RETRY_LIMIT)).toBe(false);
+  });
+
+  it("also shows the retry line when a read never returns within the grace period", () => {
+    expect(envelopeNeedsUser(undefined, envelopes[0]!, new Map(), UNMATCHED_POLL_MS - 1)).toBe(false);
+    expect(envelopeNeedsUser(undefined, envelopes[0]!, new Map(), UNMATCHED_POLL_MS)).toBe(true);
+  });
+
+  it("continues by itself once a later read succeeds", () => {
+    // Connection back while the turn still runs: poll and hide the retry line.
+    expect(historyPollInterval(history("running", executionId), envelopes, 0, 0)).toBe(HISTORY_POLL_MS);
+    expect(envelopeNeedsUser(history("running", executionId), envelopes[0]!, new Map(), 60000, false)).toBe(false);
+    // Connection back after the turn finished: recover automatically with the same envelope.
+    expect(autoRecoveryTarget(history("completed"), envelopes, new Map(), 60000, 0)).toBe(envelopes[0]);
+    expect(envelopeNeedsUser(history("completed"), envelopes[0]!, new Map(), 60000, false)).toBe(false);
+  });
+});
+
+describe("RecoveryTimers", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("runs a scheduled callback after its delay", () => {
+    vi.useFakeTimers();
+    const timers = new RecoveryTimers(), callback = vi.fn();
+    timers.schedule(3000, callback);
+    vi.advanceTimersByTime(2999);
+    expect(callback).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(callback).toHaveBeenCalledOnce();
+    expect(timers.pending).toBe(0);
+  });
+
+  it("clears pending timers on unmount and ignores a recovery that finishes afterwards", async () => {
+    vi.useFakeTimers();
+    const timers = new RecoveryTimers(), callback = vi.fn();
+    timers.schedule(10000, callback);
+    let finish!: () => void;
+    const recovery = new Promise<void>(resolve => { finish = resolve; }).finally(() => timers.schedule(3000, callback));
+    timers.dispose();
+    expect(timers.pending).toBe(0);
+    finish();
+    await recovery;
+    expect(timers.pending).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(60000);
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it("keeps a switched-away draft's timers from reaching the next draft", () => {
+    vi.useFakeTimers();
+    // The page is keyed by draft: switching unmounts the old instance and mounts a new one.
+    const first = new RecoveryTimers(), second = new RecoveryTimers();
+    const firstCallback = vi.fn(), secondCallback = vi.fn();
+    first.schedule(3000, firstCallback);
+    first.dispose();
+    first.schedule(0, firstCallback);
+    second.schedule(3000, secondCallback);
+    vi.advanceTimersByTime(3000);
+    expect(firstCallback).not.toHaveBeenCalled();
+    expect(secondCallback).toHaveBeenCalledOnce();
   });
 });

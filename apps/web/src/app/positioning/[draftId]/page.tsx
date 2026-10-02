@@ -798,7 +798,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       }
     })();
   }, [planView, hydratedDraft, draftId, d, history.data, activeStep, activeQuestions, manualMentorEnabled]);
-  const recoveryNeedsUser = useAutoStepRecovery({ history: history.data, draftId, recover: recoverPendingStep,
+  const recoveryNeedsUser = useAutoStepRecovery({ history: history.data, historyFailed: history.isError, draftId, recover: recoverPendingStep,
     steps: (d?.snapshot.workflow.steps ?? []) as Step[],
     ready: !planView && hydratedDraft === draftId, blocked: busy || openingSteps.length > 0 });
   async function run(fn: () => Promise<unknown>) {
