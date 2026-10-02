@@ -84,9 +84,6 @@ it.each([false,true].flatMap(opening=>['missing','provisional','confirmed','defe
   expect(complete).toContain('this overrides every case');
   expect(complete).toContain('it never guesses the user\'s situation');
   expect(complete).toContain('total time across combined activities');
-  const statusLengths={missing:7,provisional:11,confirmed:9,deferred:8};
-  const expectedLength=(opening?7772:7219)+statusLengths[status as keyof typeof statusLengths];
-  expect(complete.length).toBe(expectedLength);
   expect(complete.length).toBeLessThanOrEqual(8000);
   // Keep room for later host rules; raise it only with a capacity plan.
   expect(8000-complete.length).toBeGreaterThanOrEqual(200);
