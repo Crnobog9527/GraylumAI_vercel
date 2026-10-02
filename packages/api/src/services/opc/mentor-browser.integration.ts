@@ -200,6 +200,9 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
     selectedIndex:scenario==='refresh'?null:0,selectedOption:scenario==='refresh'?null:saved.card.options[0]});
   }
   await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).click();await poll(async()=>(await control()).length).toBe(7);expect((await control())[6]!.stream).toBe(true);await control(7);await poll(async()=>(await control()).length).toBe(8);await control(8);await poll(()=>send.isEnabled()).toBe(true);
+  // A reader at the bottom keeps following the newest mentor message as it arrives.
+  if(scenario==='normal')await poll(()=>log.evaluate(node=>
+   node.scrollHeight>node.clientHeight+300&&node.scrollHeight-node.clientHeight-node.scrollTop<64)).toBe(true);
   const before=(await sql.query('select id,state from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows;
   await page.reload();await poll(()=>composer.isEditable()).toBe(true);expect((await control()).length).toBe(8);
   expect((await f.service.read(d.draftId)).information['step-0'].values.product.status).toBe('confirmed');
@@ -219,6 +222,16 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    await expectColumn(14);
    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-scroll-surface-narrow.png'});
    await page.setViewportSize({width:1440,height:1000});
+   // A reader who scrolled up keeps that position across a refresh instead of jumping to the newest message.
+   // Return in-app first: the history is then cached before the log mounts, which is the path that lost the position.
+   await page.getByRole('link',{name:'资料库',exact:true}).click();await page.getByRole('link',{name:'返回当前工作',exact:true}).click();
+   await page.waitForURL('**'+path);await loaded();
+   expect(await log.evaluate(node=>node.scrollHeight-node.clientHeight)).toBeGreaterThan(300);
+   await log.evaluate(node=>{node.scrollTop=120;});await page.waitForTimeout(300);
+   expect(await page.evaluate(id=>sessionStorage.getItem('opc-position-chat-scroll:'+id),d.draftId)).toBe('120');
+   await page.reload();await poll(()=>log.locator('[data-message-role=assistant]').count()).toBeGreaterThan(0);
+   await poll(()=>log.evaluate(node=>node.scrollTop)).toBe(120);
+   await page.waitForTimeout(500);expect(await log.evaluate(node=>node.scrollTop)).toBe(120);
   }
   // Mentor dialogue carries the frozen latency policy; the Luna organizer keeps its original bytes.
   expect((await control()).map(call=>[call.stream,call.reasoningEffort])).toEqual((await control()).map(call=>call.stream?[true,'none']:[false,null]));expect((await control()).some(call=>!call.stream)).toBe(true);
