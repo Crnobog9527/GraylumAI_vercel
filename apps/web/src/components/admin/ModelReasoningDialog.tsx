@@ -26,6 +26,9 @@ import { ModelPriceSnapshotPanel } from './ModelPriceSnapshotPanel';
 import { ModelCapacityPanel } from './ModelCapacityPanel';
 import { ModelFrozenPriceSummary } from './ModelFrozenPriceSummary';
 import type { ModelCapacityView } from './modelReportPricing';
+import { showMultiplierPanel } from './multiplierPanelLink';
+import { ModelReadinessNote } from './ModelReadinessNote';
+import { useModelPriceUnits } from './useModelPriceUnits';
 
 const PURPOSE_NOTES: Record<ReasoningPurpose, string> = {
   interactive: '导师和日常对话。必须设置，没设置的模型不能用作 Skill 模型。',
@@ -106,7 +109,7 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
   const view = trpc.modelReasoning.get.useQuery({ modelId });
   const [priceChanges, setPriceChanges] = useState<PriceChange[] | null>(null);
   const [previousCapacity, setPreviousCapacity] = useState<ModelCapacityView | null>(null);
-  const multipliers = trpc.modelPricing.getMultipliers.useQuery();
+  const units = useModelPriceUnits(modelId);
   const refresh = trpc.modelReasoning.refreshCatalog.useMutation({
     onSuccess: ({ priceChanges: changes, previousCapacity: previous, ...data }) => {
       utils.modelReasoning.get.setData({ modelId }, data);
@@ -167,9 +170,6 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
   // Plan 3.2: a route whose duplicate catalog entries disagree on price cannot be chosen.
   const notUnique = new Set((view.data?.pricing?.endpoints ?? [])
     .filter(endpoint => endpoint.issues.includes('PRICE_NOT_UNIQUE')).map(endpoint => endpoint.tag));
-  const multiplierRow = multipliers.data?.models.find(model => model.id === modelId);
-  const units = multipliers.data
-    ? { multiplier: multiplierRow?.effective ?? null, creditsPerUsd: multipliers.data.site?.creditsPerUsd ?? null } : null;
 
   return (
     <Dialog open onOpenChange={next => { if (!next) onClose(); }}>
@@ -231,6 +231,7 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
               </p>
             </section>
 
+            {view.data ? <ModelReadinessNote priceView={view.data.priceView} /> : null}
             <ModelPriceSnapshotPanel
               pricing={view.data?.pricing ?? null}
               route={route}
@@ -238,7 +239,12 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
               catalogFetchedAt={catalog?.fetchedAt ?? null}
               changes={priceChanges}
             />
-            {view.data ? <ModelFrozenPriceSummary priceView={view.data.priceView} selectedRoute={route} units={units} /> : null}
+            {view.data ? <ModelFrozenPriceSummary
+                priceView={view.data.priceView}
+                selectedRoute={route}
+                units={units}
+                onShowMultipliers={() => showMultiplierPanel(onClose)}
+              /> : null}
             {view.data ? (
               <ModelCapacityPanel capacity={view.data.capacity} previous={previousCapacity} selectedRoute={route} where="dialog" />
             ) : null}

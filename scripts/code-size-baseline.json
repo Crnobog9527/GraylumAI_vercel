@@ -3,7 +3,7 @@
   "apps/web/src/app/admin/costs/page.tsx": {"lines":780},
   "apps/web/src/app/admin/diagnostics/page.tsx": {"lines":988},
   "apps/web/src/app/admin/finance/page.tsx": {"lines":748},
-  "apps/web/src/app/admin/models/page.tsx": {"lines":768,"longLines":1},
+  "apps/web/src/app/admin/models/page.tsx": {"lines":764,"longLines":1},
   "apps/web/src/app/admin/packages/page.tsx": {"lines":1333,"longLines":2},
   "apps/web/src/app/admin/page.tsx": {"lines":592,"longLines":1},
   "apps/web/src/app/admin/performance/page.tsx": {"lines":755,"longLines":2},

@@ -23,6 +23,24 @@ export function priceStatusReason(status: string): string {
   return STATUS_REASONS[status] ?? '价格不可用';
 }
 
+/** Where the "从 OpenRouter 读取" button is, relative to a read-only panel. */
+export const READ_HINT = {
+  dialog: '点上面的"重新读取"',
+  form: '在这个模型的"思考设置"里点"重新读取"',
+} as const;
+export type ReadHintPlace = keyof typeof READ_HINT;
+
+/**
+ * Plan 3.2 item 3: a model can be saved before it has a price snapshot and a
+ * route, but cannot be called until then. Null when the projection is ready.
+ */
+export function readinessNote(priceView: ModelPriceView | null): string | null {
+  if (priceView?.status === 'ready') return null;
+  const base = '这个模型可以保存，但在读取价格并选定线路之前不能被调用。';
+  if (!priceView || priceView.status === 'unread') return base;
+  return `${base}当前价格状态：${priceView.label}（${priceStatusReason(priceView.status)}）。`;
+}
+
 export type PriceCellKind = 'prompt' | 'completion' | 'web_search';
 export type PriceCell = { main: string; details: string[]; known: boolean };
 

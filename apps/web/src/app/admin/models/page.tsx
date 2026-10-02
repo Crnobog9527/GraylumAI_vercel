@@ -5,7 +5,8 @@ import { trpc } from '@/trpc/client';
 import { ModelReasoningButton } from '@/components/admin/ModelReasoningDialog';
 import { ModelMultiplierPanel } from '@/components/admin/ModelMultiplierPanel';
 import { ProviderPricesEditor } from '@/components/admin/ProviderPricesEditor';
-import { ModelCapacityPanel } from '@/components/admin/ModelCapacityPanel';
+import { ModelEditPriceSection } from '@/components/admin/ModelEditPriceSection';
+import { showMultiplierPanel } from '@/components/admin/multiplierPanelLink';
 import { Bot, Plus, Pencil, Trash2, Sparkles, Brain, Zap, Check, X, Loader2, Globe, RefreshCw, AlertTriangle, HelpCircle } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -110,11 +111,6 @@ export default function AdminModelsPage() {
   const [testingModelId, setTestingModelId] = useState<string | null>(null);
 
   const { data: dashboard, isLoading, error, refetch } = trpc.model.getAdminModelsDashboard.useQuery();
-  // Capacity comes from the server projection of the selected route; the form never edits it.
-  const selectedCapacity = trpc.modelReasoning.get.useQuery(
-    { modelId: selectedModel?.id ?? '' },
-    { enabled: dialogOpen && Boolean(selectedModel) },
-  );
   const models = dashboard?.models;
   const connectionStatus = dashboard?.connectionStatus;
 
@@ -573,7 +569,7 @@ export default function AdminModelsPage() {
         {/* Create/Edit Dialog */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent
-            className="max-w-lg max-h-[90vh] overflow-y-auto"
+            className="max-w-2xl max-h-[90vh] overflow-y-auto"
             style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
           >
             <DialogHeader>
@@ -665,10 +661,10 @@ export default function AdminModelsPage() {
                 </p>
               </div>
 
-              <ModelCapacityPanel
-                capacity={selectedCapacity.data?.capacity ?? null}
-                where="form"
-                pending={!selectedModel || selectedCapacity.data ? undefined : selectedCapacity.error ? 'failed' : 'loading'}
+              <ModelEditPriceSection
+                modelId={selectedModel?.id ?? null}
+                open={dialogOpen}
+                onShowMultipliers={() => showMultiplierPanel(closeDialog)}
               />
 
               <div className="space-y-2">

@@ -101,7 +101,8 @@ async function withDialog(run: (page: Page) => Promise<void>) {
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', route => route.abort());
   try {
-    await page.setContent('<div id="root"></div>');
+    // The page's multiplier panel sits far below the table; the link must bring it into view.
+    await page.setContent('<div id="root"></div><div style="height:4000px"></div><div id="model-multipliers" tabindex="-1">倍数面板</div>');
     await page.addScriptTag({ content: code });
     await page.getByRole('button', { name: '思考设置', exact: true }).click();
     await run(page);
@@ -288,6 +289,55 @@ describe('reasoning dialog local browser regression', () => {
       const option = page.getByRole('option', { name: /价格不唯一，不可选/ });
       await browserExpect(option).toHaveAttribute('aria-disabled', 'true');
       await browserExpect(page.getByRole('option', { name: /Example/ })).not.toHaveAttribute('aria-disabled', 'true');
+    });
+  });
+
+  it('says an unpriced model can be saved but not called, until its price is ready', async () => {
+    await withDialog(async page => {
+      await loadSettings(page);
+      const note = page.getByTestId('model-readiness-note');
+      await browserExpect(note).toHaveText('这个模型可以保存，但在读取价格并选定线路之前不能被调用。');
+      await page.evaluate(`window.__mr1.data = { ...window.__mr1.data, priceView: { ...window.__mr1.data.priceView,
+        status: 'UNKNOWN_PRICE_FIELD', label: '不可推导' } }; window.rerender();`);
+      await browserExpect(note).toContainText('当前价格状态：不可推导（价格里有本系统不认识的字段）');
+      await page.evaluate(`window.__mr1.data = { ...window.__mr1.data, priceView: { ...window.__mr1.data.priceView,
+        status: 'ready', label: '已读取', fetchedAt: '2026-09-29T00:00:00.000Z', promptTokensUpper: 8192,
+        base: { prompt: '0.1', completion: '0.5' },
+        frozen: { promptUsdPerMillion: '0.2', completionUsdPerMillion: '0.75', requestUsd: '0',
+          explain: { prompt: '第 1 档输入', completion: '第 1 档输出' } } } }; window.rerender();`);
+      await browserExpect(note).toHaveCount(0);
+    });
+  });
+
+  it('closes the dialog and moves to the multiplier panel from the user price preview', async () => {
+    await withDialog(async page => {
+      await loadSettings(page);
+      await page.evaluate(`window.__mr1.data = { ...window.__mr1.data, priceView: { ...window.__mr1.data.priceView,
+        status: 'ready', label: '已读取', fetchedAt: '2026-09-29T00:00:00.000Z', promptTokensUpper: 8192,
+        base: { prompt: '0.1', completion: '0.5' },
+        frozen: { promptUsdPerMillion: '0.2', completionUsdPerMillion: '0.75', requestUsd: '0',
+          explain: { prompt: '第 1 档输入', completion: '第 1 档输出' } } } }; window.rerender();`);
+      const target = page.locator('#model-multipliers');
+      await page.evaluate('window.scrollTo(0, 0)');
+      await browserExpect(target).not.toBeInViewport();
+      await page.getByRole('button', { name: /查看或修改这个模型的加价倍数/ }).click();
+      await browserExpect(page.getByRole('dialog')).toHaveCount(0);
+      await browserExpect(target).toBeInViewport();
+      await browserExpect(target).toBeFocused();
+    });
+  });
+
+  it('lists unknown catalog price fields with their original values, marked as not used', async () => {
+    await withDialog(async page => {
+      await loadSettings(page);
+      await page.evaluate(`window.__mr1.data = { ...window.__mr1.data, pricing: {
+        fetchedAt: '2026-09-29T00:00:00.000Z', model: 'example/model', source: 'openrouter', pricingHash: '${'e'.repeat(64)}',
+        endpoints: [{ tag: 'example', contextLength: 8192, admissible: true, issues: [], discount: null, unknownKeys: ['video_frame'],
+          base: { prompt: '0.1', completion: '0.5' }, raw: { prompt: '0.0000001', video_frame: '0.002' }, overrides: [] }] } };
+        window.rerender();`);
+      const unknown = page.getByTestId('price-unknown-fields');
+      await browserExpect(unknown).toContainText('原样列出，不参与计算');
+      await browserExpect(unknown).toContainText('video_frame = 0.002');
     });
   });
 });

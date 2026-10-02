@@ -14,6 +14,7 @@ vi.mock('@/trpc/client', () => ({ trpc: {
     deleteModel: { useMutation: mutation }, testConnection: { useMutation: mutation },
   },
   modelReasoning: { get: { useQuery: query } },
+  modelPricing: { getMultipliers: { useQuery: query } },
 } }));
 // The page's own panels have their own tests; render only the create/edit form here.
 vi.mock('@/components/admin/ModelMultiplierPanel', () => ({ ModelMultiplierPanel: () => null }));
@@ -35,5 +36,6 @@ describe('admin model form', () => {
     expect(html).toContain('data-testid="model-capacity-panel"');
     expect(html).toContain('上下文限制 / 最大输出 Token（只读）');
     expect(html).toContain('新模型先使用默认值');
+    expect(html).toContain('这个模型可以保存，但在读取价格并选定线路之前不能被调用。');
   });
 });

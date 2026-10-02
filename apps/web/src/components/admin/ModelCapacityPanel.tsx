@@ -2,13 +2,7 @@
 'use client';
 
 import { Label } from '@/components/ui/label';
-import { capacityRows, capacitySyncChanges, type ModelCapacityView } from './modelReportPricing';
-
-/** Where the "从 OpenRouter 读取" button is, relative to the panel. */
-const READ_HINT = {
-  dialog: '点上面的"重新读取"',
-  form: '在这个模型的"思考设置"里点"重新读取"',
-} as const;
+import { READ_HINT, capacityRows, capacitySyncChanges, type ModelCapacityView, type ReadHintPlace } from './modelReportPricing';
 
 /**
  * Read-only context window and maximum output (MODEL-PRICING-SYNC C2). The values
@@ -19,7 +13,7 @@ export function ModelCapacityPanel(props: {
   capacity: ModelCapacityView | null;
   previous?: ModelCapacityView | null;
   selectedRoute?: string | null;
-  where: keyof typeof READ_HINT;
+  where: ReadHintPlace;
   /** Set while the capacity of an existing model is being read, or when that read failed. */
   pending?: 'loading' | 'failed';
 }) {

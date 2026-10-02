@@ -14,8 +14,10 @@ export function ModelFrozenPriceSummary(props: {
   priceView: ModelPriceView;
   selectedRoute: string | null;
   units: MultiplierInfo | null;
+  /** Closes the dialog and moves to the page's multiplier panel. */
+  onShowMultipliers: () => void;
 }) {
-  const { priceView, selectedRoute, units } = props;
+  const { priceView, selectedRoute, units, onShowMultipliers } = props;
   if (priceView.status === 'unread') return null;
   const frozen = priceView.frozen;
   const multiplier = units?.multiplier ?? null, creditsPerUsd = units?.creditsPerUsd ?? null;
@@ -45,13 +47,16 @@ export function ModelFrozenPriceSummary(props: {
               用户价预览 = 单价 × 倍数 m（{multiplier ?? '未知'}）× 每美元积分 q（{creditsPerUsd ?? '未知'}）。仅供参考，实扣按实际费用。
             </p>
             {preview(frozen.promptUsdPerMillion) === null ? (
-              <p role="status" className="text-amber-400">倍数或每美元积分未知，无法换算；在本页下方"加价倍数"和系统设置里查看。</p>
+              <p role="status" className="text-amber-400">倍数或每美元积分未知，无法换算；每美元积分在系统设置里查看。</p>
             ) : (
               <ul>
                 <li>输入最多约 {preview(frozen.promptUsdPerMillion)} 积分 / 百万 token</li>
                 <li>输出最多约 {preview(frozen.completionUsdPerMillion)} 积分 / 百万 token</li>
               </ul>
             )}
+            <button type="button" className="text-[var(--color-primary)] underline hover:no-underline" onClick={onShowMultipliers}>
+              查看或修改这个模型的加价倍数（关闭对话框，跳到本页的"加价倍数"）
+            </button>
           </div>
         </>
       ) : (
