@@ -216,8 +216,12 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-scroll-surface-narrow.png'});
    await page.setViewportSize({width:1440,height:1000});
    // A reader who scrolled up keeps that position across a refresh instead of jumping to the newest message.
+   // Return in-app first: the history is then cached before the log mounts, which is the path that lost the position.
+   await page.getByRole('link',{name:'资料库',exact:true}).click();await page.getByRole('link',{name:'返回当前工作',exact:true}).click();
+   await page.waitForURL('**'+path);await loaded();
    expect(await log.evaluate(node=>node.scrollHeight-node.clientHeight)).toBeGreaterThan(300);
    await log.evaluate(node=>{node.scrollTop=120;});await page.waitForTimeout(300);
+   expect(await page.evaluate(id=>sessionStorage.getItem('opc-position-chat-scroll:'+id),d.draftId)).toBe('120');
    await page.reload();await poll(()=>log.locator('[data-message-role=assistant]').count()).toBeGreaterThan(0);
    await poll(()=>log.evaluate(node=>node.scrollTop)).toBe(120);
    await page.waitForTimeout(500);expect(await log.evaluate(node=>node.scrollTop)).toBe(120);
