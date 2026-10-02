@@ -3109,6 +3109,10 @@ for (const sample of [
   { name: "C save and retry product features", field: "features", title: "核心功能", inputKind: "answer", input: "我的 SaaS 核心功能是自动保存和失败重试。", value: "我的 SaaS 核心功能是自动保存和失败重试。" },
   { name: "D operational request without an answer", field: "goal", title: "业务目标", inputKind: "request", input: "请保存这条聊天并重试原请求。", value: null },
   { name: "E retention and retry business limits", field: "policy", title: "产品使用约束", inputKind: "answer", input: "产品保留历史版本一个月，失败任务最多重试3次，暂不商业化", value: "产品保留历史版本一个月，失败任务最多重试3次，暂不商业化" },
+  { name: "D2 audience answer must not replace goal", field: "goal", title: "目标与变现方式", inputKind: "answer", input: "先服务附近独自阅读的自由职业者，给他们安静的空间", value: null, existing: "增加工作日下午到店客流，暂不扩店" },
+  { name: "D2 platform choice must not replace goal", field: "goal", title: "目标与变现方式", inputKind: "answer", input: "小红书", value: null, existing: "增加工作日下午到店客流，暂不扩店" },
+  { name: "existing goal plus substantive addition", field: "goal", title: "目标与变现方式", inputKind: "answer", input: "也希望提高甜品套餐销量", value: "增加工作日下午到店客流，暂不扩店；提高甜品套餐销量", existing: "增加工作日下午到店客流，暂不扩店" },
+  { name: "unchanged goal keeps existing value", field: "goal", title: "目标与变现方式", inputKind: "answer", input: "还是增加工作日下午到店客流，暂不扩店", value: null, existing: "增加工作日下午到店客流，暂不扩店" },
 ]) it(`OPC: independent extraction transports original context and applies only its structured result (${sample.name})`, async () => {
   const { runtimeExecutor } = await import("../runtime/execute");
   const { createServer } = await import("node:http");
@@ -3122,6 +3126,13 @@ for (const sample of [
   });
   const primaryModelId = await planFixtureModel(f.moduleId);
   const draft = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: "mentor" });
+  const existing = "existing" in sample ? sample.existing : undefined;
+  if (existing) await f.service.information({draftId: draft.draftId, stepId: "step-0", requestId: randomUUID(),
+    expectedVersion: 0, values: {
+      [sample.field]: {value: existing, status: "provisional", nature: "decision"},
+      future: {value: "", status: "unknown", nature: "unknown"},
+    }});
+  const initial = await f.service.read(draft.draftId);
   const userInput = sample.input;
   const primaryBody = JSON.stringify({ message: "【预设导师回复】请核对本题的业务内容。" });
   // Deliberately prewritten, not computed from userInput: this verifies the
@@ -3181,9 +3192,18 @@ for (const sample of [
     expect(context).toEqual({
       userInput, originalStepId: "step-0",
       currentQuestion: { id: sample.field, title: sample.title, fields: [{ id: sample.field, title: sample.title, required: true, elicit: "user_fact" }] },
+      currentStepMaterial: {id: "step-0", fields: [
+        {id: sample.field, title: sample.title, required: true, elicit: "user_fact",
+          status: existing ? "provisional" : "unknown", value: existing ?? "",
+          ...(existing ? {nature: "decision"} : {})},
+        {id: "future", title: "尚未到达的问题", required: true, elicit: "user_fact", status: "unknown", value: "",
+          ...(existing ? {nature: "unknown"} : {})},
+      ]},
       allowedWorkflow: [{ id: "step-0", title: f.flow.steps[0].title, confirmed: false, fields: [{ id: sample.field, title: sample.title }] }],
     });
     expect(reply).toBe(primaryBody);
+    expect(system[0].content).toContain("updated COMPLETE value, preserving valid information");
+    expect(system[0].content).toContain("return an empty informationPatch: do not put an audience answer or a platform choice");
     const view = await admin.rpc("runtime_view", { p_actor_id: f.actor, p_session_id: draft.sessionId });
     expect(view.error).toBeNull();
     const execution = view.data.executions.find((item: { executionId: string }) => item.executionId === prepared.executionId);
@@ -3208,7 +3228,9 @@ for (const sample of [
       const saved = await f.service.read(draft.draftId);
       expect(saved.information).toEqual(before.information);
       expect(saved.snapshot.steps["step-0"].version).toBe(before.snapshot.steps["step-0"].version);
-      expect((await sql.query("select count(*)::int n from artifact_requests where project_id=$1 and action='opc_information'", [draft.projectId])).rows[0].n).toBe(0);
+      expect((await sql.query("select count(*)::int n from artifact_requests where project_id=$1 and action='opc_information'", [draft.projectId])).rows[0].n).toBe(existing ? 1 : 0);
+      expect(saved.information).toEqual(initial.information);
+      expect(saved.snapshot.steps["step-0"].valid).toBe(false);
     }
     // Refresh/replay must preserve the original wording and frozen prompt, with
     // no second model call or implicit confirmation after the form is saved.
