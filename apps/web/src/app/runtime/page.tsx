@@ -13,7 +13,7 @@ import workStyles from './runtime-work.module.css';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { trpc } from '@/trpc/client';
 import {
- OUTPUT_TRUNCATED_NOTICE, gateStopNotices, rememberGateStop, runtimeAdmissionNotice, runtimeExecutionNotice, showsReply,
+ OUTPUT_TRUNCATED_NOTICE, definiteRefusal, gateStopNotices, rememberGateStop, runtimeAdmissionNotice, runtimeExecutionNotice, showsReply,
  videoGateError, videoGateNotice,
 } from './gate-notices';
 
@@ -200,14 +200,24 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
    await saveResults.mutateAsync({workItemId:op.workItemId,requestId:op.package.requestId,executionId:packageExecutionId,sourceScriptId,expectedStoryboardVersion:op.package.expectedStoryboardVersion,expectedEditingVersion:op.package.expectedEditingVersion,choice:op.choice??'both'});
    localStorage.setItem(videoKey+':completed:'+op.package.requestId,JSON.stringify(op));localStorage.removeItem(videoKey);const rejectedPackage=localStorage.getItem(videoKey+':rejected-source:'+op.script.executionId);if(rejectedPackage)localStorage.removeItem(videoKey+':rejected:'+rejectedPackage);localStorage.removeItem(videoKey+':rejected-source:'+op.script.executionId);await Promise.all([view.refetch(),library.refetch()]);
   });}catch(cause){const message=cause instanceof Error?cause.message:'';const admissionGate=runtimeAdmissionNotice(cause);
-  // Not admitted and not a definite refusal (gate, unknown 503, lost response, failed cleanup alike): keep the frozen
-  // material and request id for an explicit retry. Never abandon it or resume it automatically after a reload.
-  if(!active.followup.executionId&&!videoDefiniteRejections.has(message)){
+  // A definite 4xx refusal before admission ends the request. Admission refused it after material preparation,
+  // so release that claim first (abandon); otherwise nothing was bound. If the release fails, it stays held below.
+  const refused=definiteRefusal(cause);let released=false;
+  if(refused&&!active.followup.executionId&&localStorage.getItem(videoKey)){
+   if(refused.path!=='runtime.prepare')released=true;
+   else if(active.sourceScriptId)try{await prepareVideoMaterial.mutateAsync({action:'abandon',workItemId:active.workItemId,
+    requestId:active.followup.requestId,sourceScriptId:active.sourceScriptId,choice:active.choice??'both',
+    expectedStoryboardVersion:active.package.expectedStoryboardVersion,expectedEditingVersion:active.package.expectedEditingVersion});
+    released=true;}catch{/* Outcome unknown: keep the claim and the request for an explicit retry. */}
+  }
+  // Every other failure before admission may have been processed (any 503, lost response, failed release): keep the
+  // frozen material and request id for an explicit retry. Never abandon it or resume it automatically after a reload.
+  if(!released&&!active.followup.executionId&&!videoDefiniteRejections.has(message)){
    const frozen=localStorage.getItem(videoKey);if(frozen)storeVideo({...JSON.parse(frozen),...active,held:true});
-   setError(admissionGate??(frozen?'视频工作请求未完成，完整原请求已保留。再次选择会用同一请求重试，不会新建请求。':'视频工作请求未发出，请稍后再选择一次。'));return;
+   setError(admissionGate??(frozen?'视频工作请求状态待核实。完整原请求已保留；再次选择会用同一请求重试，不会新建请求。':'视频工作请求未发出，请稍后再选择一次。'));return;
   }
   const gateNotice=videoGateNotice(message);
-  let definite=videoDefiniteRejections.has(message)||videoGateNotice(message)!==null;if(message==='OPC_CONTENT_BINDING'&&active.followup.executionId)try{await cancel.mutateAsync({executionId:active.followup.executionId});await view.refetch();}catch{definite=false;}if(message==='OPC_CONTENT_OUTPUT_TRUNCATED_PENDING'){setError('本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。');await view.refetch();}else if(definite){localStorage.setItem(videoKey+':rejected:'+active.package.requestId,JSON.stringify(active));localStorage.setItem(videoKey+':rejected-source:'+active.script.executionId,active.package.requestId);localStorage.removeItem(videoKey);await view.refetch();setError(gateNotice??(message==='OPC_CONTENT_OUTPUT_TRUNCATED'?OUTPUT_TRUNCATED_NOTICE:message==='OPC_CONTENT_RESPONSE_INVALID'?'分镜回复格式未通过保存校验，口播稿定稿已保留；请在原对话要求 Agent 重新整理。':'原视频工作请求已明确拒绝（'+message+'），没有再次派发。请刷新后基于最新版本重试。'));}else if(message==='OPC_CONTENT_CAPACITY'){if(active.followup.executionId)markCapacity(active.followup.executionId);setError('分镜或剪辑所需材料超过模型输入容量。原请求与口播稿已保留；请取消剩余执行后缩短材料再继续。');}else setError(gateNotice??'视频工作请求状态待核实。完整原请求已保留；再次点击只会恢复这一次请求。');}finally{setVideoBusy(false);}
+  let definite=released||videoDefiniteRejections.has(message)||videoGateNotice(message)!==null;if(message==='OPC_CONTENT_BINDING'&&active.followup.executionId)try{await cancel.mutateAsync({executionId:active.followup.executionId});await view.refetch();}catch{definite=false;}if(message==='OPC_CONTENT_OUTPUT_TRUNCATED_PENDING'){setError('本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。');await view.refetch();}else if(definite){localStorage.setItem(videoKey+':rejected:'+active.package.requestId,JSON.stringify(active));localStorage.setItem(videoKey+':rejected-source:'+active.script.executionId,active.package.requestId);localStorage.removeItem(videoKey);await view.refetch();setError(gateNotice??(message==='OPC_CONTENT_OUTPUT_TRUNCATED'?OUTPUT_TRUNCATED_NOTICE:message==='OPC_CONTENT_RESPONSE_INVALID'?'分镜回复格式未通过保存校验，口播稿定稿已保留；请在原对话要求 Agent 重新整理。':'原视频工作请求已明确拒绝（'+message+'），没有再次派发。请刷新后基于最新版本重试。'));}else if(message==='OPC_CONTENT_CAPACITY'){if(active.followup.executionId)markCapacity(active.followup.executionId);setError('分镜或剪辑所需材料超过模型输入容量。原请求与口播稿已保留；请取消剩余执行后缩短材料再继续。');}else setError(gateNotice??'视频工作请求状态待核实。完整原请求已保留；再次点击只会恢复这一次请求。');}finally{setVideoBusy(false);}
  }
  async function finalizeScript(executionId:string,recoveryKey?:string){const key=recoveryKey??scriptKey;if(!workItem||!key)return;setVideoBusy(true);setError('');try{await navigator.locks.request(key,async()=>{const frozen=localStorage.getItem(key);const op:ScriptOperation=frozen?JSON.parse(frozen):{kind:isVideo?'script':'brief',workItemId:workItem.workItemId,requestId:executionId,executionId,expectedVersion:latest(isVideo?'script':'brief')};if(op.workItemId!==workItem.workItemId)throw new Error('OPC_REQUEST_CONFLICT');localStorage.setItem(key,JSON.stringify(op));await saveContent.mutateAsync({workItemId:op.workItemId,requestId:op.requestId,expectedVersion:op.expectedVersion,kind:op.kind??'script',status:(op.kind??'script')==='script'?'final':'draft',executionId:op.executionId,sourceContentId:null});localStorage.setItem(key+':completed:'+op.requestId,JSON.stringify(op));localStorage.removeItem(key);await library.refetch();setVideoUiRevision(v=>v+1);});}catch(cause){const message=cause instanceof Error?cause.message:'';if(scriptDefiniteRejections.has(message)){localStorage.setItem(key+':rejected:'+executionId,localStorage.getItem(key)??'');localStorage.removeItem(key);setError('采用请求已明确拒绝（'+message+'），请刷新后核对最新版本。');}else setError('采用结果待核实。完整原请求已保留；再次点击只会恢复这一次请求。');}finally{setVideoBusy(false);}}
  async function chooseVideo(choice:VideoChoice|'end'){if(!isVideo||!currentScript||!workItem||!choices.data)return;if(choice==='end'){localStorage.setItem('opc-video-ended:'+currentScript.id,'true');setVideoUiRevision(v=>v+1);setError('');return;}if(choice==='editing'&&!currentStoryboard){setError('请先完成这版口播稿的分镜，再基于分镜生成剪辑建议。');return;}if(!videoSourceExecution){setError('这版口播稿缺少可恢复的来源，暂不能继续生成。');return;}if((choice==='both'&&(currentStoryboard||currentEditing))||(choice==='storyboard'&&currentStoryboard)||(choice==='editing'&&currentEditing)){setError('这版口播稿对应的所选成果已经生成，请在下方查看。');return;}const frozen=videoKey?localStorage.getItem(videoKey):null;if(frozen){await runVideo(JSON.parse(frozen));return;}const skill=choices.data.skills.find(s=>'skill:'+s.moduleId===activeSelection);const selection=skill?{kind:'skill' as const,moduleId:skill.moduleId,revisionId:skill.revisionId}:null;if(!selection){setError('请选择当前选题可用的 Skill，再继续生成。');return;}const requestId=crypto.randomUUID();const requested=choice==='both'?'生成分镜脚本和剪辑建议':choice==='storyboard'?'只生成分镜脚本':'只生成剪辑建议';const fields=choice==='both'?'storyboard 与 editing 两个字符串字段':choice==='storyboard'?'storyboard 一个字符串字段':'editing 一个字符串字段';const op:VideoOperation={workItemId:workItem.workItemId,choice,script:{requestId:currentScript.requestId,executionId:videoSourceExecution,expectedVersion:currentScript.version-1},sourceScriptId:currentScript.id,followup:{requestId,input:`[OPC_VIDEO_PACKAGE_V1] 用户已明确同意：基于资料中已定稿的口播稿，${requested}。遵循当前 Skill 的创作方法：剪辑建议必须基于匹配当前口播稿的分镜；仅剪辑时必须依据资料中已保存的分镜，不得跳过分镜或自行补造。只返回严格 JSON 对象，且只含 ${fields}；不要生成图片、视频或执行发布。`,selection},package:{requestId,expectedStoryboardVersion:latest('storyboard'),expectedEditingVersion:latest('editing')}};await runVideo(op);}
@@ -254,7 +264,12 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   if(executions?.some(e=>e.input?.startsWith('[OPC_WORK_CONTINUE_V1] 工作阶段 '+stage+'。')))return;
   setGuiding(true);setError('');
   try{await navigator.locks.request(key,async()=>{const raw=localStorage.getItem(key);const frozen=raw?JSON.parse(raw):request;localStorage.setItem(key,JSON.stringify(frozen));const admitted=await prepare.mutateAsync(frozen);const executed=await execute.mutateAsync({executionId:admitted.executionId});if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(admitted.executionId);setError('引导请求的必要材料超过模型输入容量，原请求已保留；请取消剩余执行后缩短材料再发送。');}await view.refetch();});}
-  catch(cause){setError(runtimeAdmissionNotice(cause)??'引导请求待恢复。点“恢复引导请求”会沿用原请求，不会另开一次。');}
+  catch(cause){
+   // A definite 4xx refusal ends this guidance request; keep its record but drop the recovery control.
+   if(definiteRefusal(cause)){try{localStorage.setItem(key+':rejected',localStorage.getItem(key)??'');localStorage.removeItem(key);}
+    catch{/* Without storage there is nothing to recover. */}setError('引导请求已明确拒绝（'+(cause as Error).message+'），没有再次派发。');}
+   else setError(runtimeAdmissionNotice(cause)??'引导请求待恢复。点“恢复引导请求”会沿用原请求，不会另开一次。');
+  }
   finally{setGuiding(false);}
  }
  // A frozen guidance request without its execution waits for the user's explicit recovery.

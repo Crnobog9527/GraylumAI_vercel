@@ -58,3 +58,16 @@ export function gateStopNotices(storage: GateStopStorage | null, sessionId: stri
 export function showsReply(execution: { state: string; body: string | null; primaryBody: string | null }) {
   return !(execution.state === 'cancelled' && !(execution.body ?? execution.primaryBody));
 }
+
+/**
+ * A structured tRPC refusal the server definitely did not process further: an HTTP 4xx other than
+ * 401 (sign in again), 408 (outcome unknown) and 429 (rate limit; the same request is resent later).
+ * Decided by status, never by wording. Any other failure leaves the outcome open.
+ */
+export function definiteRefusal(cause: unknown): { path: string } | null {
+  if (!(cause instanceof Error) || !('data' in cause) || !cause.data || typeof cause.data !== 'object') return null;
+  const data = cause.data as { httpStatus?: unknown; path?: unknown };
+  const status = Number(data.httpStatus);
+  if (!Number.isInteger(status) || status < 400 || status > 499 || [401, 408, 429].includes(status)) return null;
+  return { path: String(data.path ?? '') };
+}

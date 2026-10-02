@@ -80,3 +80,24 @@ it('shows no "verifying" reply for a cancelled round without a body, and keeps e
   expect(showsReply({ state: 'running', body: null, primaryBody: null })).toBe(true);
   expect(showsReply({ state: 'completed', body: '回复', primaryBody: null })).toBe(true);
 });
+
+import { definiteRefusal } from './gate-notices';
+
+const structured = (httpStatus: number, code: string, path = 'runtime.prepare') =>
+  Object.assign(new Error('fixed refusal'), { data: { httpStatus, code, path } });
+
+it.each([
+  [412, 'PRECONDITION_FAILED'], [403, 'FORBIDDEN'], [409, 'CONFLICT'], [400, 'BAD_REQUEST'], [404, 'NOT_FOUND'],
+])('treats a structured %i %s as a definite refusal', (status, code) => {
+  expect(definiteRefusal(structured(status, code))).toEqual({ path: 'runtime.prepare' });
+  expect(definiteRefusal(structured(status, code, 'opc.prepareVideoMaterial'))).toEqual({ path: 'opc.prepareVideoMaterial' });
+});
+
+it('leaves every uncertain or retryable failure open', () => {
+  for (const [status, code] of [[401, 'UNAUTHORIZED'], [408, 'TIMEOUT'], [429, 'TOO_MANY_REQUESTS'],
+    [503, 'SERVICE_UNAVAILABLE'], [500, 'INTERNAL_SERVER_ERROR']] as const)
+    expect(definiteRefusal(structured(status, code))).toBeNull();
+  expect(definiteRefusal(new Error('network'))).toBeNull();
+  expect(definiteRefusal(Object.assign(new Error('x'), { data: { code: 'PRECONDITION_FAILED' } }))).toBeNull();
+  expect(definiteRefusal('PRECONDITION_FAILED')).toBeNull();
+});

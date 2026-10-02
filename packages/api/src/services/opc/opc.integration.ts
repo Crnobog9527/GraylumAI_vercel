@@ -11401,7 +11401,8 @@ it("OPC: RATE-LIMIT start-page send refused by any 503 is never re-sent automati
 // failure of material preparation and admission. Reloads during the refusal and after recovery send
 // nothing by themselves; the user's explicit retry sends the same request id once and completes it.
 // Guidance runs its three cases on one fixture; each package case gets its own fixture.
-async function runtimeHoldCase(part: 'guidance' | 'video', videoCase = -1) {
+async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase = -1,
+  refusalCase: '' | 'guidance403' | 'video412' | 'video412AbandonFails' = '') {
   const { execFileSync } = await import("node:child_process");
   const tag = process.env.V3_RATE_LIMIT_TAG;
   if (!tag || !/^[a-z0-9][a-z0-9-]{0,80}$/.test(tag)) throw new Error("local rate limit required");
@@ -11540,7 +11541,7 @@ async function runtimeHoldCase(part: 'guidance' | 'video', videoCase = -1) {
       await refusal.on();
       await page.getByLabel('消息', { exact: true }).fill(choice);
       await page.getByRole('button', { name: '发送', exact: true }).click();
-      await page.getByRole('alert').filter({ hasText: refusal.gate ? pausedNotice : '视频工作请求未完成' }).waitFor({ timeout: 420000 });
+      await page.getByRole('alert').filter({ hasText: refusal.gate ? pausedNotice : '视频工作请求状态待核实' }).waitFor({ timeout: 420000 });
       const held = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
       expect(held.held).toBe(true);
       expect(held.followup.executionId).toBeUndefined();
@@ -11566,6 +11567,86 @@ async function runtimeHoldCase(part: 'guidance' | 'video', videoCase = -1) {
       expect(await executionsOf(requestId)).toBe(1);
       expect(abandons).toEqual([]);
     }
+
+    // Definite 4xx refusals before admission end the request instead of holding it forever: the guidance
+    // drops its recovery control; the package releases its material claim so the work can continue.
+    const prepareRoute = /\/api\/trpc\/runtime\.prepare(?:[?,]|$)/;
+    const refusal412 = JSON.stringify([{ error: { message: '本次操作所需模型尚未获准用于当前测试窗口，请联系管理员。', code: -32012,
+      data: { code: 'PRECONDITION_FAILED', httpStatus: 412, path: 'runtime.prepare' } } }]);
+    const refusal403 = JSON.stringify([{ error: { message: '当前环境不允许访问此工作空间。', code: -32003,
+      data: { code: 'FORBIDDEN', httpStatus: 403, path: 'runtime.prepare' } } }]);
+    async function ordinaryChatWorks(text: string) {
+      const before = await scripts();
+      await page.getByLabel('消息', { exact: true }).fill(text);
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      await expect.poll(scripts, { timeout: 420000 }).toBe(before + 1);
+    }
+    if (refusalCase === 'guidance403') {
+      const sent = prepares.length;
+      await page.route(prepareRoute, route => route.fulfill({ status: 403, contentType: 'application/json', body: refusal403 }));
+      await page.goto(continueUrl);
+      await page.getByRole('alert').filter({ hasText: '引导请求已明确拒绝' }).waitFor({ timeout: 420000 });
+      const guides = prepares.slice(sent).filter(item => item.kind === 'guide');
+      expect(guides).toHaveLength(1);
+      const requestId = guides[0].requestId;
+      expect(new URL(page.url()).searchParams.has('continue')).toBe(false);
+      await page.unroute(prepareRoute);
+      await quietAfterReload(async () => {
+        expect(sendsOf(requestId)).toBe(1);
+        expect(await recoverGuide.count()).toBe(0);
+        expect(await executionsOf(requestId)).toBe(0);
+      });
+      await ordinaryChatWorks('引导被拒后继续普通对话。');
+      expect(sendsOf(requestId)).toBe(1);
+    }
+    if (refusalCase === 'video412' || refusalCase === 'video412AbandonFails') {
+      await page.goto(continueUrl);
+      await page.getByText('【主动引导合成示例，仅验证交互】', { exact: false }).first().waitFor({ timeout: 420000 });
+      await finalizeNewScript();
+      const choice = '先做分镜，再生成剪辑建议';
+      const sent = prepares.length;
+      const material = /\/api\/trpc\/opc\.prepareVideoMaterial(?:[?,]|$)/;
+      await page.route(prepareRoute, route => route.fulfill({ status: 412, contentType: 'application/json', body: refusal412 }));
+      if (refusalCase === 'video412AbandonFails') await page.route(material, route => (route.request().postData() ?? '').includes('abandon')
+        ? route.fulfill({ status: 503, contentType: 'application/json', body: plain503 }) : route.continue());
+      await page.getByLabel('消息', { exact: true }).fill(choice);
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      if (refusalCase === 'video412') {
+        await page.getByRole('alert').filter({ hasText: '原视频工作请求已明确拒绝' }).waitFor({ timeout: 420000 });
+        const packages = prepares.slice(sent).filter(item => item.kind === 'package');
+        expect(packages).toHaveLength(1);
+        const requestId = packages[0].requestId;
+        expect(abandons).toHaveLength(1);
+        expect(await page.evaluate(key => localStorage.getItem(key), videoKey)).toBeNull();
+        await page.unroute(prepareRoute);
+        await quietAfterReload(async () => {
+          expect(sendsOf(requestId)).toBe(1);
+          expect(await executionsOf(requestId)).toBe(0);
+          expect(await page.evaluate(key => localStorage.getItem(key), videoKey)).toBeNull();
+        });
+        // The released claim no longer blocks the work: ordinary dialogue is admitted again.
+        await ordinaryChatWorks('视频包被拒后继续普通对话。');
+        expect(sendsOf(requestId)).toBe(1);
+      } else {
+        await page.getByRole('alert').filter({ hasText: '视频工作请求状态待核实' }).waitFor({ timeout: 420000 });
+        const held = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
+        expect(held.held).toBe(true);
+        const requestId = held.followup.requestId as string;
+        expect(abandons).toHaveLength(1);
+        await page.unroute(prepareRoute);
+        await page.unroute(material);
+        await quietAfterReload(async () => {
+          expect(sendsOf(requestId)).toBe(1);
+          expect(await executionsOf(requestId)).toBe(0);
+          expect(JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!)).toEqual(held);
+        });
+        await page.getByLabel('消息', { exact: true }).fill(choice);
+        await page.getByRole('button', { name: '发送', exact: true }).click();
+        await expect.poll(() => page.evaluate(key => localStorage.getItem(key), videoKey), { timeout: 420000 }).toBeNull();
+        expect(sendsOf(requestId)).toBe(2);
+        expect(await executionsOf(requestId, 'completed')).toBe(1);
+      }
+    }
   } finally {
     await sql.query("delete from system_settings where key='runtime_rate_limits'");
     await browser.close();
@@ -11575,3 +11656,6 @@ it("OPC: RATE-LIMIT /runtime guidance holds every unadmitted 503 for an explicit
 it.each([[0, 'paused'], [1, 'unknown structured 503'], [2, 'plain non-tRPC 503'], [3, 'material and admission both fail']] as const)(
   "OPC: RATE-LIMIT /runtime video package holds an unadmitted request for an explicit retry (%i: %s)",
   videoCase => runtimeHoldCase('video', videoCase), 1200000);
+it.each(['guidance403', 'video412', 'video412AbandonFails'] as const)(
+  "OPC: RATE-LIMIT /runtime definite 4xx refusal before admission is released, not held (%s)",
+  refusalCase => runtimeHoldCase('refusal', -1, refusalCase), 1200000);
