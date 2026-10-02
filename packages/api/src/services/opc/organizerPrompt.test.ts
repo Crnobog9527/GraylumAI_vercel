@@ -56,4 +56,19 @@ describe('organizer complete-value context',()=>{
     expect(ORGANIZER_INSTRUCTIONS).toContain('Updates remain provisional');
     expect(ORGANIZER_INSTRUCTIONS).toContain('Never return confirmed or deferred');
   });
+  it('separates user statements from mentor proposals when merging complete values',()=>{
+    expect(ORGANIZER_INSTRUCTIONS).toContain('For user_fact, retain supported user-stated content and add only what the user stated');
+    expect(ORGANIZER_INSTRUCTIONS).toContain('Use the mentor reply only to understand context');
+    expect(ORGANIZER_INSTRUCTIONS).toContain("never merge the mentor's guesses or recommendations as user facts");
+    expect(ORGANIZER_INSTRUCTIONS).toContain('Only an agent_proposal field may adopt a relevant concrete mentor recommendation, with basis agent_proposal');
+    expect(ORGANIZER_INSTRUCTIONS).not.toContain('combine its existing supported content with the relevant user answer and the primary mentor reply');
+  });
+  it('bounds every complete value and preserves qualifications when condensing',()=>{
+    expect(ORGANIZER_INSTRUCTIONS).toContain('Each field value must be at most 400 characters');
+    expect(ORGANIZER_INSTRUCTIONS).toContain('condense it into concise key points within that limit');
+    expect(ORGANIZER_INSTRUCTIONS).toContain('preserving key facts, decisions, negation, constraints and uncertainty');
+    expect(ORGANIZER_INSTRUCTIONS).toContain('Do not emit an overlong value that the host would discard');
+    expect(ORGANIZER_INSTRUCTIONS).toContain('or drop important qualifications merely to shorten it');
+  });
+
 });
