@@ -10443,7 +10443,7 @@ it("OPC: mentor freezes actor-bound business identity and existing material with
   expect(frozen.instructions).toContain("A known name does not establish what a product does or whom it serves");
   expect(frozen.instructions).toContain("the most consequential missing substance");
   expect(frozen.instructions).toContain("When the user is not sure, first analyse the available information");
-  expect(frozen.instructions).toContain("Do not recite process numbers");
+  expect(frozen.instructions).toContain("Omit process numbers");
   expect(frozen.instructions).not.toContain("When you name the question, use exactly that label");
   expect(frozen.instructions).not.toContain("Reflect the current answer and invite clarification");
   expect(frozen.instructions).not.toContain("one short paragraph");
