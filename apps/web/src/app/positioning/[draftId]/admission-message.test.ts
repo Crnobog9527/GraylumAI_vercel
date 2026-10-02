@@ -2,7 +2,7 @@
 import {expect,it} from 'vitest';
 import {admissionMessage} from './admission-message';
 const message='本次操作所需模型尚未获准用于当前测试窗口，请联系管理员。';
-it.each(['PRECONDITION_FAILED','FORBIDDEN','SERVICE_UNAVAILABLE'].flatMap(code=>['opc.prepareStep','opc.mentorTurnStream'].map(path=>[code,path])))('presents a structured %s admission refusal from %s while retaining the same request',(code,path)=>{
+it.each(['PRECONDITION_FAILED','FORBIDDEN'].flatMap(code=>['opc.prepareStep','opc.mentorTurnStream'].map(path=>[code,path])))('presents a structured %s admission refusal from %s while retaining the same request',(code,path)=>{
  const result=admissionMessage(Object.assign(new Error(message),{data:{code,path}}));
  expect(result).toContain(message);expect(result).toContain('原请求与输入已保留');expect(result).toContain('同一请求');expect(result).not.toMatch(/版本已变化|结果未知|结果暂未确认/);
 });
@@ -35,8 +35,15 @@ it.each(['opc.prepareStep','opc.mentorTurnStream','runtime.prepare'].flatMap(pat
 ]))('shows only the fixed new-work gate notice for %s %s',(path,code,serverText,notice)=>{
  expect(admissionMessage(Object.assign(new Error(serverText),{data:{code,path,retryAfter:30}}))).toBe(notice);
 });
-it('keeps other 503 admission refusals on their existing wording and ignores 429 from other procedures',()=>{
- const other=Object.assign(new Error('工作空间服务暂不可用，请稍后重试。'),{data:{code:'SERVICE_UNAVAILABLE',path:'opc.prepareStep'}});
- expect(admissionMessage(other)).toBe('工作空间服务暂不可用，请稍后重试。 原请求与输入已保留；条件恢复后可继续核对同一请求。');
+it.each(['工作空间服务暂不可用，请稍后重试。（诊断编号：1f0c）','internal diagnostic: relation runtime_x does not exist'])(
+ 'shows one fixed notice for any other 503, never its server text and never a rate-limit notice (%s)',text=>{
+ for(const path of ['opc.prepareStep','opc.mentorTurnStream','runtime.prepare']){
+  const result=admissionMessage(Object.assign(new Error(text),{data:{code:'SERVICE_UNAVAILABLE',path}}));
+  expect(result).toBe('服务暂时不可用，请稍后再试。 原请求与输入已保留；条件恢复后可继续核对同一请求。');
+  expect(result).not.toContain(text);
+  expect(Object.values(gateNotices)).not.toContain(result);
+ }
+});
+it('ignores 429 from other procedures',()=>{
  expect(admissionMessage(Object.assign(new Error(gateNotices.minute),{data:{code:'TOO_MANY_REQUESTS',path:'runtime.execute'}}))).toBeNull();
 });

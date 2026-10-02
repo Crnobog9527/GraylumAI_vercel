@@ -10921,9 +10921,10 @@ vi.mock('../runtime/newWorkGate', async importOriginal => ({
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
 
-// RATE-LIMIT front end (plan section 9, A segment): real website, PostgreSQL, BILL2,
-// local Redis + SRH and the synthetic provider. Settings are written directly so each
-// step controls one gate; the admin card is exercised through the browser at the end.
+// RATE-LIMIT front end (plan section 9, A segment), positioning page only: real website,
+// PostgreSQL, BILL2, local Redis + SRH and the synthetic provider. Limits and the pause are
+// written directly to system_settings, not through the admin card; A0/A2/A6 button/A10,
+// A5 (/runtime) and A5b (topics) are not covered here (see the PR's Validation handoff).
 it("OPC: RATE-LIMIT browser gate notices keep the original request, never auto-retry and charge nothing", async () => {
   const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
   const { execFileSync } = await import("node:child_process");
@@ -10949,6 +10950,8 @@ it("OPC: RATE-LIMIT browser gate notices keep the original request, never auto-r
   const credits = async () => Number((await sql.query("select credits from profiles where id=$1", [f.actor])).rows[0].credits);
   const executions = async () =>
     Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n);
+  const executionsFor = async (requestId: string) => Number((await sql.query(
+    "select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2", [f.actor, requestId])).rows[0].n);
   await limits();
   flush();
   const browser = await chromium.launch({
@@ -10966,29 +10969,38 @@ it("OPC: RATE-LIMIT browser gate notices keep the original request, never auto-r
     page.setDefaultTimeout(90000);
     const errors: string[] = [];
     page.on("pageerror", e => errors.push(e.message));
-    async function login(target: Page, email: string, password: string, redirect: string) {
-      const ready = target.waitForResponse(r => r.url().includes("/api/trpc/settings.getSystemSettings") && r.ok());
-      await target.goto(process.env.V3_LOCAL_APP + "/login?redirect=" + redirect);
-      await ready;
-      await target.getByPlaceholder("name@example.com").fill(email);
-      await target.getByPlaceholder("输入你的密码").fill(password);
-      await target.getByRole("button", { name: "登录", exact: true }).last().click();
-      await target.waitForURL(url => url.pathname === redirect, { timeout: 90000 });
-    }
-    await login(page, f.email, f.password, "/positioning");
+    // Every browser send of a mentor turn, by its user input: proves the page never re-sends by itself.
+    const sent: string[] = [];
+    page.on("request", request => {
+      if (!request.url().includes("/api/trpc/opc.mentorTurnStream")) return;
+      for (const item of Object.values(JSON.parse(request.postData() ?? "{}")) as Array<{ input?: string }>)
+        if (item?.input) sent.push(item.input);
+    });
+    const sends = (input: string) => sent.filter(value => value === input).length;
+    const ready = page.waitForResponse(r => r.url().includes("/api/trpc/settings.getSystemSettings") && r.ok());
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=/positioning");
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", { name: "登录", exact: true }).last().click();
+    await page.waitForURL(url => url.pathname === "/positioning", { timeout: 90000 });
     const draft = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: "mentor", businessName: "限流测试业务" });
     await page.goto(process.env.V3_LOCAL_APP + "/positioning/" + draft.draftId);
     const chat = page.getByRole("log", { name: "完整导师消息" });
-    // The automatic opening is the first counted message of this minute.
     await chat.getByText("导师主动引导 · 1.1", { exact: true }).waitFor({ timeout: 60000 });
     const box = page.getByRole("textbox", { name: "给导师的回复", exact: true });
     const send = page.getByRole("button", { name: "发送", exact: true });
-    const replies = () => chat.getByText(/^导师 · /).count();
+    const labels = chat.getByText(/^导师 · /);
     const alert = (text: string) => page.getByRole("alert").filter({ hasText: text });
+    // #595's single retry line for a retained request that was never admitted.
+    const retry = page.locator("p", { hasText: "上一条回复还没确认完成" }).getByRole("button", { name: "重试", exact: true });
+    const minuteWindow = () => Math.floor(Date.now() / 60000);
     async function sendTurn(text: string) {
       await box.fill(text);
       await expect.poll(() => send.isEnabled(), { timeout: 30000 }).toBe(true);
+      const window = minuteWindow();
       await send.click();
+      return window;
     }
     const completedTurns = async () => Number((await sql.query(
       "select count(*)::int n from runtime_executions where actor_id=$1 and state='completed'", [f.actor])).rows[0].n);
@@ -10999,16 +11011,44 @@ it("OPC: RATE-LIMIT browser gate notices keep the original request, never auto-r
         "select count(*)::int n from runtime_executions where actor_id=$1 and state not in ('completed','cancelled')", [f.actor],
       )).rows[0].n, { timeout: 60000 }).toBe(0);
     }
-    async function expectNothingCharged(before: { credits: number; executions: number }, admitted = 0) {
-      // Give an erroneous automatic retry time to appear before asserting there is none.
-      await page.waitForTimeout(3000);
-      expect(await executions()).toBe(before.executions + admitted);
+    /** The request id of the retained step envelope, as the page persisted it. */
+    async function retainedRequestId() {
+      const raw = await page.evaluate(prefix => {
+        const key = Object.keys(sessionStorage).find(name => name.startsWith(prefix));
+        return key ? sessionStorage.getItem(key) : null;
+      }, "opc-step:" + draft.draftId + ":");
+      return raw ? JSON.parse(raw).request.requestId as string : null;
+    }
+    /**
+     * A refused message: one browser send, no new execution or charge, and the page keeps
+     * the same request id without sending again, also once its retry line is shown.
+     */
+    async function expectRefusedAndRetained(input: string, before: { credits: number; executions: number }, text: string) {
+      await alert(text).waitFor();
+      const requestId = await retainedRequestId();
+      expect(requestId).toBeTruthy();
+      await retry.waitFor({ timeout: 90000 });
+      expect(sends(input)).toBe(1);
+      expect(await executions()).toBe(before.executions);
+      expect(await executionsFor(requestId!)).toBe(0);
       await expect.poll(credits, { timeout: 30000 }).toBe(before.credits);
+      expect(await retainedRequestId()).toBe(requestId);
+      expect(await page.getByText(/结果未知|状态待核实/).count()).toBe(0);
+      return requestId!;
+    }
+    /** The explicit retry sends the retained request once more, under the same request id. */
+    async function retryOnce(input: string, requestId: string, completed: number) {
+      await retry.click();
+      await expectReply(completed);
+      expect(sends(input)).toBe(2);
+      expect(await executionsFor(requestId)).toBe(1);
+      await expect.poll(retainedRequestId, { timeout: 30000 }).toBeNull();
     }
     const snapshot = async () => ({ credits: await credits(), executions: await executions() });
     await expect.poll(completedTurns, { timeout: 60000 }).toBe(1);
     // Upstash sliding windows weight the previous fixed window and round down, so a round
-    // straddling a minute boundary may not count. Bucket-filling steps start a fresh window.
+    // straddling a minute boundary may not count. Bucket-filling steps start a fresh window,
+    // and each refusal asserts that both sends really fell into the same window.
     async function atWindowStart() {
       const into = Date.now() % 60000;
       if (into > 10000) await page.waitForTimeout(60000 - into + 300);
@@ -11020,74 +11060,80 @@ it("OPC: RATE-LIMIT browser gate notices keep the original request, never auto-r
     await expectReply(2);
     await limits({ admissionPerMinute: 1 });
     await atWindowStart();
-    await sendTurn("限流前的一轮");
+    const filled = await sendTurn("限流前的一轮");
     await expectReply(3);
     let before = await snapshot();
-    await sendTurn("第二轮会被限流");
-    await alert(notice.minute).waitFor();
-    await expectNothingCharged(before);
-    expect(await page.getByText(/结果未知|状态待核实/).count()).toBe(0);
-    expect(await completedTurns()).toBe(3);
-    // A4: after the window resets, the retained original request is sent once.
+    expect(await sendTurn("第二轮会被限流")).toBe(filled);
+    const refusedA3 = await expectRefusedAndRetained("第二轮会被限流", before, notice.minute);
+    // A4: FLUSHDB simulates the window expiring (no real one-minute wait); the retry reuses the request id.
     flush();
-    await page.getByRole("button", { name: "继续核对这条原请求", exact: true }).click();
-    await expectReply(4);
-    expect(await executions()).toBe(before.executions + 1);
-    const resent = await fetch(process.env.V3_LOCAL_REST! + "/__runtime_count", { headers: { "x-local-control": process.env.V3_LOCAL_CONTROL! } });
-    expect(((await resent.json()).userRequests as string[]).filter(input => input === "第二轮会被限流")).toHaveLength(1);
+    await retryOnce("第二轮会被限流", refusedA3, 4);
+    const counted = await fetch(process.env.V3_LOCAL_REST! + "/__runtime_count", { headers: { "x-local-control": process.env.V3_LOCAL_CONTROL! } });
+    expect(((await counted.json()).userRequests as string[]).filter(input => input === "第二轮会被限流")).toHaveLength(1);
 
-    // A6: pause refuses the new message without spending; history remains readable.
+    // A6: pause refuses the new message without spending; the explicit retry continues after it ends.
     await limits({ stopNewCalls: true });
     before = await snapshot();
     await sendTurn("暂停期间的消息");
-    await alert(notice.paused).waitFor();
-    await expectNothingCharged(before);
-    expect(await completedTurns()).toBe(4);
+    const refusedA6 = await expectRefusedAndRetained("暂停期间的消息", before, notice.paused);
     await limits();
     flush();
-    await page.getByRole("button", { name: "继续核对这条原请求", exact: true }).click();
-    await expectReply(5);
+    await retryOnce("暂停期间的消息", refusedA6, 5);
 
     // A8: a round needing two calls (reply + organizer) exceeds a one-call limit: configuration refusal.
+    // Sent as typed text, not through an answer card.
     await limits({ callsPerMinute: 1 });
     before = await snapshot();
     await sendTurn("单轮调用超过上限");
     await alert(notice.unavailable).waitFor();
-    await expectNothingCharged(before, 1);
+    await page.waitForTimeout(3000);
+    expect(sends("单轮调用超过上限")).toBe(1);
+    expect(await executions()).toBe(before.executions + 1);
+    await expect.poll(credits, { timeout: 30000 }).toBe(before.credits);
     expect((await sql.query("select state from runtime_executions where actor_id=$1 order by created_at desc limit 1", [f.actor]))
       .rows[0].state).toBe("cancelled");
 
-    // A7: the call bucket refuses the next round after one two-call round in this minute.
+    // A7: the call bucket refuses the next round after one two-call round in this window;
+    // every earlier reply body and organizer result stays exactly as it was.
     await limits({ callsPerMinute: 2 });
     await atWindowStart();
-    await sendTurn("调用桶第一轮");
+    const bucket = await sendTurn("调用桶第一轮");
     await expectReply(6);
-    before = await snapshot();
-    await sendTurn("调用桶第二轮");
-    await alert(notice.minute).waitFor();
-    await expectNothingCharged(before, 1);
-    // Completed replies stay visible after a reload; the refused round removed nothing.
-    const shown = await replies();
-    expect(await completedTurns()).toBe(6);
+    const results = () => sql.query(
+      "select id, result::text from runtime_executions where actor_id=$1 and state='completed' order by created_at", [f.actor])
+      .then(r => r.rows);
+    const shownReplies = async () => {
+      await expect.poll(() => labels.count(), { timeout: 60000 }).toBeGreaterThanOrEqual(5);
+      return Promise.all((await labels.all()).map(label => label.locator("..").innerText()));
+    };
     await page.reload();
-    await expect.poll(replies, { timeout: 60000 }).toBe(shown);
+    const repliesBefore = await shownReplies(), resultsBefore = await results();
+    const informationBefore = (await f.service.read(draft.draftId)).information;
+    before = await snapshot();
+    expect(await sendTurn("调用桶第二轮")).toBe(bucket);
+    await alert(notice.minute).waitFor();
+    await page.waitForTimeout(3000);
+    expect(sends("调用桶第二轮")).toBe(1);
+    expect(await executions()).toBe(before.executions + 1);
+    await expect.poll(credits, { timeout: 30000 }).toBe(before.credits);
+    await page.reload();
+    expect((await shownReplies()).slice(0, repliesBefore.length)).toEqual(repliesBefore);
+    expect(await results()).toEqual(resultsBefore);
+    expect((await f.service.read(draft.draftId)).information).toEqual(informationBefore);
 
     // A9: the SRH stops answering. The website IP limiter (#488) shares this Redis and fails
     // closed first with a plain 503 outside tRPC, so the page keeps its generic retained-request
-    // notice instead of the gate text. Asserted as observed: refused, uncharged, retained, recoverable.
+    // notice instead of the gate text (controller decision). Refused, uncharged, retained, recoverable.
     await limits();
     flush();
     docker("pause", tag + "-srh");
     paused = true;
     before = await snapshot();
     await sendTurn("缓存故障时的消息");
-    await alert("操作未完成").waitFor();
-    await expectNothingCharged(before);
-    await page.getByRole("button", { name: "继续核对这条原请求", exact: true }).waitFor();
+    const refusedA9 = await expectRefusedAndRetained("缓存故障时的消息", before, "操作未完成");
     docker("unpause", tag + "-srh");
     paused = false;
-    await page.getByRole("button", { name: "继续核对这条原请求", exact: true }).click();
-    await expectReply(7);
+    await retryOnce("缓存故障时的消息", refusedA9, 7);
     expect(errors).toEqual([]);
 
     // A1: an ordinary user cannot open the admin settings or call the admin procedures.
@@ -11107,11 +11153,101 @@ it("OPC: RATE-LIMIT browser gate notices keep the original request, never auto-r
       expect(response.text).toContain("FORBIDDEN");
     }
     expect((await storedLimits()).stopNewCalls).toBe(false);
-
-    // A0/A2/A10 and the admin pause button run in the admin settings suite
-    // ("ADMIN: settings runtime rate limit card"), whose fixture serves the settings dashboard.
   } finally {
     if (paused) docker("unpause", tag + "-srh");
+    await sql.query("delete from system_settings where key='runtime_rate_limits'");
+    await browser.close();
+  }
+}, 900000);
+
+// Review P2 on #594: a video package refused by the new-work gate at admission keeps its
+// material and request id, is not resumed automatically after a reload, and the explicit
+// retry sends that same request once.
+it("OPC: RATE-LIMIT video package refused at admission keeps its request for an explicit retry", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const tag = process.env.V3_RATE_LIMIT_TAG;
+  if (!tag || !/^[a-z0-9][a-z0-9-]{0,80}$/.test(tag)) throw new Error("local rate limit required");
+  expect(execFileSync("docker", ["exec", tag + "-redis", "redis-cli", "FLUSHDB"], { encoding: "utf8" }).trim()).toBe("OK");
+  const paused = "AI服务暂时暂停新调用，请稍后再试。本次被拦截的调用不扣积分。";
+  const limits = (stopNewCalls: boolean) => sql.query(
+    "insert into system_settings(key,value) values('runtime_rate_limits',$1::jsonb) on conflict(key) do update set value=excluded.value",
+    [JSON.stringify({ version: 1, admissionPerMinute: 60, admissionPer24Hours: 5000, callsPerMinute: 180,
+      callsPer24Hours: 15000, stopNewCalls })]);
+  await limits(false);
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const seed = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'existing-account', title: '原工作', brief: '原有账号项目', day: '2026-09-20' }] });
+  await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: seed.planId,
+    accounts: [{ platform: 'x', account: 'existing-account', expectedRevision: null }] });
+  const { browser, page } = await planBrowser(f);
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + f.d.draftId + '/topics');
+    await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
+    // The video topic on the existing account; each candidate card adopts on its own.
+    const card = page.getByRole('heading', { name: '1. 首周选题', exact: true }).first().locator('..');
+    await card.getByRole('button', { name: '采用这个选题', exact: true }).click({ timeout: 60000 });
+    await card.getByRole('link', { name: '继续这条内容工作', exact: true }).click({ timeout: 60000 });
+    await page.waitForURL(url => url.pathname === '/runtime');
+    await page.getByText('【主动引导合成示例，仅验证交互】', { exact: false }).first().waitFor({ timeout: 60000 });
+    await page.getByLabel('消息', { exact: true }).fill('请和我讨论这条视频的口播稿。');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
+    await finalize.waitFor({ timeout: 60000 });
+    await finalize.click();
+    await page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true }).waitFor({ timeout: 60000 });
+    const sessionId = new URL(page.url()).searchParams.get('session')!;
+    const videoKey = 'opc-video-operation:' + sessionId;
+    const packageRuns = async () => Number((await sql.query(
+      "select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'",
+      [f.actor, sessionId])).rows[0].n);
+    const credits = async () => Number((await sql.query("select credits from profiles where id=$1", [f.actor])).rows[0].credits);
+    const packagePrepares: string[] = [], abandons: string[] = [];
+    page.on('request', request => {
+      const body = request.postData() ?? '';
+      if (/\/api\/trpc\/runtime\.prepare(?:[?,]|$)/.test(request.url()) && body.includes('[OPC_VIDEO_PACKAGE_V1]'))
+        packagePrepares.push(body);
+      if (request.url().includes('opc.prepareVideoMaterial') && body.includes('abandon')) abandons.push(body);
+    });
+    const runsBefore = await packageRuns(), creditsBefore = await credits();
+
+    await limits(true);
+    await page.getByLabel('消息', { exact: true }).fill('先做分镜，再生成剪辑建议');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: paused }).waitFor({ timeout: 60000 });
+    expect(await page.getByText(/视频工作请求状态待核实|原视频工作请求已明确拒绝/).count()).toBe(0);
+    const held = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
+    expect(held.held).toBe(true);
+    expect(held.followup.executionId).toBeUndefined();
+    expect(packagePrepares).toHaveLength(1);
+    expect(abandons).toEqual([]);
+    expect(await packageRuns()).toBe(runsBefore);
+    expect(await credits()).toBe(creditsBefore);
+
+    // A reload must not resume the held request by itself.
+    await page.reload();
+    await page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true }).waitFor({ timeout: 60000 });
+    await page.waitForTimeout(5000);
+    expect(packagePrepares).toHaveLength(1);
+    expect(JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!)).toEqual(held);
+
+    // The explicit retry after the pause ends sends the same request id once and completes.
+    await limits(false);
+    await page.getByLabel('消息', { exact: true }).fill('先做分镜，再生成剪辑建议');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await expect.poll(() => page.evaluate(key => localStorage.getItem(key), videoKey), { timeout: 90000 }).toBeNull();
+    expect(packagePrepares).toHaveLength(2);
+    for (const body of packagePrepares) expect(body).toContain(held.followup.requestId);
+    expect(abandons).toEqual([]);
+    expect(await packageRuns()).toBe(runsBefore + 1);
+    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2",
+      [f.actor, held.followup.requestId])).rows[0].n)).toBe(1);
+    const completed = await page.evaluate(({ key, requestId }) => localStorage.getItem(key + ':completed:' + requestId),
+      { key: videoKey, requestId: held.package.requestId });
+    expect(JSON.parse(completed!).followup.requestId).toBe(held.followup.requestId);
+    expect((await sql.query("select state from runtime_executions where actor_id=$1 and request_id=$2",
+      [f.actor, held.followup.requestId])).rows[0].state).toBe('completed');
+  } finally {
     await sql.query("delete from system_settings where key='runtime_rate_limits'");
     await browser.close();
   }
