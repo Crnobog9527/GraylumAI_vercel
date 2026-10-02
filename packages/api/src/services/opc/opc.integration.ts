@@ -1,3 +1,5 @@
+import {vi} from 'vitest';
+import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeAll, afterAll, it, expect } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
@@ -628,7 +630,7 @@ it("OPC: real SDK HTTP result becomes a candidate on original draft; restart/rep
     const addr = server.address();
     if (!addr || typeof addr === "string") throw new Error("local endpoint");
     const endpoint = "http://127.0.0.1:" + addr.port;
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint,
@@ -650,7 +652,7 @@ it("OPC: real SDK HTTP result becomes a candidate on original draft; restart/rep
     await expect(
       f.service.planResult(d.draftId, prepared.executionId),
     ).rejects.toThrow("DENIED");
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint,
@@ -1188,7 +1190,7 @@ it("OPC: work item uses shared Runtime and saves non-workflow Skill artifact onc
     if (!address || typeof address === "string")
       throw new Error("local server");
     const endpoint = "http://127.0.0.1:" + address.port;
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint,
@@ -1201,7 +1203,7 @@ it("OPC: work item uses shared Runtime and saves non-workflow Skill artifact onc
       network: "deny",
       sources: [],
     });
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint,
@@ -1278,7 +1280,7 @@ it("OPC: work item uses shared Runtime and saves non-workflow Skill artifact onc
     await expect(
       f.artifacts.report(saved.artifactId, saved.artifactId),
     ).rejects.toThrow("DENIED"); // Dedicated result projection above is readable; workflow mutation/export entry stays closed.
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint,
@@ -1498,7 +1500,7 @@ it("OPC: plan generation uses the original SDK session and returns a separate bo
     if (!address || typeof address === "string")
       throw new Error("local server");
     const endpoint = "http://127.0.0.1:" + address.port;
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint,
@@ -1518,7 +1520,7 @@ it("OPC: plan generation uses the original SDK session and returns a separate bo
     expect((await f.service.prepareStep(request)).executionId).toBe(
       prepared.executionId,
     );
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint,
@@ -1766,7 +1768,7 @@ it.skipIf(!process.env.V3_REAL_SKILL_INPUT)(
     expect(frozen.instructions).toContain("不编造数据");
     expect(frozen.request.sessionId).toBe(d.sessionId);
     const { runtimeExecutor } = await import("../runtime/execute");
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint: process.env.V3_RUNTIME_LOCAL_ENDPOINT!,
@@ -3004,7 +3006,7 @@ it('OPC: CAPACITY tool continuation measures each complete SDK request and cap b
    const seed=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'HISTORY_CANARY_'+ '旧讨论'.repeat(400),selection:{kind:'ordinary',modelId},network:'deny'});
    const seedServer=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;const request=JSON.parse(JSON.parse(raw).input);const id='seed-'+randomUUID();res.setHeader('content-type','application/json');res.end(JSON.stringify({id,model:request.model,final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:request.model,choices:[{index:0,message:{role:'assistant',content:'必要约束已保留'},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));});
    await new Promise<void>(resolve=>seedServer.listen(0,'127.0.0.1',resolve));
-   try{const address=seedServer.address();if(!address||typeof address==='string')throw new Error('seed server');const executor=runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});expect(await executor.execute(seed.executionId)).toMatchObject({state:'completed'});}
+   try{const address=seedServer.address();if(!address||typeof address==='string')throw new Error('seed server');const executor=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});expect(await executor.execute(seed.executionId)).toMatchObject({state:'completed'});}
    finally{await new Promise<void>((resolve,reject)=>seedServer.close(error=>error?reject(error):resolve()));}
   }
   const prepared=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'请读取我的长来源并回答',selection:{kind:'ordinary',modelId},network:'deny'});
@@ -3025,7 +3027,7 @@ it('OPC: CAPACITY tool continuation measures each complete SDK request and cap b
     if(interrupted&&name==='runtime_session_items'&&args.p_action==='append')return {data:null,error:{message:'synthetic interruption after tool-loop receipts'}};
     return admin.rpc(name,args);
    }};
-   const executor=runtimeExecutor({database,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
+   const executor=runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
    let result=await executor.execute(prepared.executionId);
    if(interrupt){
     expect(result).toMatchObject({state:'pending'});expect(requests).toHaveLength(3);
@@ -3098,7 +3100,7 @@ it('OPC: CAPACITY interrupted request retains frozen manuscript after a new save
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{
   const address=server.address();if(!address||typeof address==='string')throw new Error('local server');
-  const executor=runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
+  const executor=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
   expect(await executor.execute(prepared.executionId)).toMatchObject({state:'pending'});
   const historyBefore=(await sql.query('select count(*)::int n from runtime_session_history where session_id=$1',[work.sessionId])).rows[0].n;
   await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:1,sourceContentId:first.id,kind:'brief',status:'final',title:'恢复隔离稿',body:'CAPACITY_NEW_V2_正文'});
@@ -3179,7 +3181,7 @@ for (const sample of [
   try {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("local server");
-    const executor = runtimeExecutor({ database: admin, actor: async () => f.actor, endpoint: "http://127.0.0.1:" + address.port });
+    const executor = runtimeExecutor({callGate:allowTestCalls, database: admin, actor: async () => f.actor, endpoint: "http://127.0.0.1:" + address.port });
     expect(await executor.execute(prepared.executionId)).toEqual({ state: "completed", body: primaryBody, summary: extractionBody });
     expect(requests.map(item => item.model)).toEqual([frozen.model, frozen.attachedOrganizer.model]);
     // Inspect the real SDK wire after admission, freezing and execution, not
@@ -3324,7 +3326,7 @@ it("OPC: the Agent opens the current question once per entry and plans without u
   try {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("local server");
-    const executor = runtimeExecutor({
+    const executor = runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint: "http://127.0.0.1:" + address.port,
@@ -3499,7 +3501,7 @@ it("OPC: a confirmed positioning produces an editable first-week plan candidate 
   try {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("local server");
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint: "http://127.0.0.1:" + address.port,
@@ -3606,7 +3608,7 @@ it("OPC: a revised round opens the same question under its own identity without 
   try {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("local server");
-    const executor = runtimeExecutor({
+    const executor = runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint: "http://127.0.0.1:" + address.port,
@@ -9128,7 +9130,7 @@ it.each([[2, "same"], [2, "draft"], [2, "published"], [3, "published"]] as const
     mark('unadmitted-verified');
     const prepared = await f.service.prepareStep(envelope.request);
     const { runtimeExecutor } = await import("../runtime/execute");
-    await runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:process.env.V3_RUNTIME_LOCAL_ENDPOINT!}).execute(prepared.executionId);
+    await runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actor,endpoint:process.env.V3_RUNTIME_LOCAL_ENDPOINT!}).execute(prepared.executionId);
     mark('receipt-saved');
     let resultLost = 0;
     await page.route('**/api/trpc/opc.planResult*', async route => { await route.fetch(); await route.abort(); resultLost += 1; });
@@ -10043,7 +10045,7 @@ it('OPC: free runtime reads owned context only on model tool request and recheck
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{
   const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
-  const executor=runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
+  const executor=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
   const unrelated=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'Give general travel packing tips',selection:{kind:'ordinary',modelId},network:'deny'});
   expect(await executor.execute(unrelated.executionId)).toMatchObject({state:'completed'});
   expect(JSON.stringify(requests[0])).not.toContain(secret);expect(JSON.stringify(requests[0])).not.toContain('context-account');
@@ -10341,7 +10343,7 @@ it.skipIf(!process.env.V3_LEGACY_ROOT)('OPC: U3 cross-code receipt recovery pres
    if(mode!=='unknown')expect(JSON.stringify(before.receipts)).toContain('合成回复');
    await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:version,sourceContentId:second.id,kind:'brief',status:'final',title:'升级恢复稿',body:'UPGRADE_AFTER_INTERRUPT_'+mode});
    const observed={rpc:async(name:string,args:Record<string,unknown>)=>{const r=await admin.rpc(name,args);if(r.error)errors.push(r.error.message);return r;}};
-   const executor=runtimeExecutor({database:observed,actor:async()=>f.actor,endpoint});
+   const executor=runtimeExecutor({callGate:allowTestCalls,database:observed,actor:async()=>f.actor,endpoint});
    const recovered=await executor.execute(prepared.executionId);
    console.info('U3_UPGRADE_RESULT',JSON.stringify({legacyRef:process.env.V3_LEGACY_REF,mode,recovered,errors,dispatches:requests.length-beforeDispatch,requestBytes:Buffer.byteLength(sent),requestHash:before.calls[0].payload.requestHash}));
    if(mode==='marked'||!process.env.V3_LEGACY_REF?.startsWith('6d70caf'))expect(errors).toEqual([]);
@@ -10397,7 +10399,7 @@ it.each(['true','omitted','false'] as const)('OPC: stopped pending cost unlocks 
  const server=createServer(async(req,res)=>{for await(const _ of req){/* local only */}posts++;res.destroy();});
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
  const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
- const executor=runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
+ const executor=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
  const {browser,page}=await planBrowser({...f,d:draft});
  const key='opc-step:'+draft.draftId+':step-0';
  try{
@@ -10840,7 +10842,7 @@ for (const sample of [
   try {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("local server");
-    const executor = runtimeExecutor({ database: admin, actor: async () => f.actor, endpoint: "http://127.0.0.1:" + address.port });
+    const executor = runtimeExecutor({callGate:allowTestCalls, database: admin, actor: async () => f.actor, endpoint: "http://127.0.0.1:" + address.port });
     expect(await executor.execute(prepared.executionId)).toEqual({ state: "completed", body: primaryBody, summary: extractionBody });
     expect(requests.map(item => item.model)).toEqual([frozen.model, frozen.attachedOrganizer.model]);
     // Inspect the real SDK wire after admission, freezing and execution, not
@@ -10913,3 +10915,8 @@ for (const sample of [
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
 }, 90000);
+
+vi.mock('../runtime/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../runtime/newWorkGate')>(),
+ ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
+}));

@@ -16,3 +16,15 @@ export const allowAllModeration: RuntimeModeration = {
   checkInput: async () => ({ action: 'allow' }),
   checkOutput: async () => ({ action: 'allow' }),
 };
+
+export async function requireAllowedInput(input: ModerationInput): Promise<void> {
+  let allowed = false;
+  try { allowed = (await allowAllModeration.checkInput(input)).action === 'allow'; }
+  catch { /* Exceptions have the same verdict as a block. */ }
+  if (!allowed) throw new Error('RUNTIME_MODERATION_BLOCKED');
+}
+
+export async function allowedOutput(output: ModerationOutput): Promise<boolean> {
+  try { return (await allowAllModeration.checkOutput(output)).action === 'allow'; }
+  catch { return false; }
+}

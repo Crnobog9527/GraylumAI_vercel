@@ -1,7 +1,8 @@
 # RATE-LIMIT 前端接线清单（交给 Claude）
 
 本任务 Owner 将界面组件实现交给 Claude。本文是实施说明，不代表界面已经完成或通过验收。
-依据 `RATE_LIMIT_WIRING_PLAN.md` 第 2.6、4、6、8 节；本后端 PR 尚在实施，不能单独作为干净候选。
+依据 `RATE_LIMIT_WIRING_PLAN.md` 第 2.6、4、6、8 节；#590 后端已接线，enforcement 三项均为 true。
+以下错误码、执行结果原因和固定文案保持原方案不变；界面及浏览器验收由单独前端 PR 完成。
 
 ## 固定提示与返回契约
 

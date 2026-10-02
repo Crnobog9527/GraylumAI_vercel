@@ -29,7 +29,7 @@ function harness(role: 'admin' | 'user' | 'anonymous') {
 it('reads explicit defaults, saves all settings and reads actual stored state back', async () => {
   const f = harness('admin');
   expect(await f.caller.get()).toMatchObject({ source: 'default', config,
-    enforcement: { admission: false, calls: false, pause: false } });
+    enforcement: { admission: true, calls: true, pause: true } });
   const changed = { ...config, admissionPerMinute: 9, stopNewCalls: true };
   expect(await f.caller.update(changed)).toMatchObject({ source: 'configured', config: changed });
   expect((await f.caller.get()).config).toEqual(changed);

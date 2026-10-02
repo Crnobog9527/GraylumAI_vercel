@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
 import {beforeAll,afterAll,it,expect,vi} from 'vitest';
 import {randomUUID,createHash} from 'node:crypto';
 import pg from 'pg';
@@ -65,7 +66,7 @@ it.each(['write','read','legacy','bad-hash'] as const)('RUNTIME: prompt cache %s
   }
   return admin.rpc(name,args);
  }};
- const execute=()=>runtimeExecutor({database,actor:async()=>actor,adapter}).execute(execution.executionId);
+ const execute=()=>runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>actor,adapter}).execute(execution.executionId);
  if(mode==='bad-hash'){
   await execute();
   expect(transport).not.toHaveBeenCalled();expect(credential).not.toHaveBeenCalled();
