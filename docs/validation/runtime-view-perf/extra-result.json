@@ -1,0 +1,16 @@
+{
+  "checks": [
+    "batch equals scalar oracle: dense",
+    "batch equals scalar oracle: diamond",
+    "batch equals scalar oracle: cycle",
+    "batch equals scalar oracle: foreign",
+    "batch equals scalar oracle: missingAncestorRun",
+    "batch equals scalar oracle: missingRootRun",
+    "batch equals scalar oracle: deniedAncestor",
+    "freeze valid/repeat/duplicate/outside/revoked results and dependencies match original",
+    "populated rollback/reapply preserves exact view and execution/history/run/ledger counts",
+    "successful batch retains permission SHARE locks; next statement sees committed model revocation"
+  ],
+  "failed": null,
+  "cleanup": "PASS"
+}
