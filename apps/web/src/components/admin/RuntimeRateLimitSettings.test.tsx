@@ -147,3 +147,17 @@ it('shows wired protection, pauses with the read-back value and keeps unsaved li
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 15000);
+
+it('keeps every line of the card inside a 375px screen', async () => {
+  const { page, errors } = await openCard(true);
+  try {
+    await page.setViewportSize({ width: 375, height: 800 });
+    await browserExpect(page.getByText('runtime_rate_limit_backend_unavailable_denying_request')).toBeVisible();
+    const overflowing = await page.evaluate(() => [...document.querySelectorAll('p, label, code, button')]
+      .filter(node => node.scrollWidth > node.clientWidth + 1 || node.getBoundingClientRect().right > window.innerWidth + 1)
+      .map(node => node.textContent?.slice(0, 40)));
+    expect(overflowing).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 15000);

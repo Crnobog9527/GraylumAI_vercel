@@ -113,7 +113,9 @@ export function RuntimeRateLimitSettings() {
         </p>}
         <p className="text-sm">
           Redis 不可用时，{wired ? '新消息和新一轮的第一次模型调用都会被拒绝' : '接线后的新请求将被拒绝'}。运维日志事件
-          runtime_rate_limit_backend_unavailable_denying_request 表示新限流器的 Redis 保护不可用，
+          {/* The long event name must wrap inside a 375px card instead of overflowing. */}
+          <code style={{ overflowWrap: 'anywhere' }}>runtime_rate_limit_backend_unavailable_denying_request</code>
+          表示新限流器的 Redis 保护不可用，
           不等同于用户次数超限，也不证明一定是免费额度耗尽。请在 Upstash 控制台核对用量。
         </p>
       </CardContent>

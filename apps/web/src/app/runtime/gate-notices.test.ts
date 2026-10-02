@@ -41,3 +41,42 @@ it('keeps output truncation and leaves capacity and success to the page', () => 
   expect(videoGateNotice('OPC_CONTENT_DENIED')).toBeNull();
   expect(videoGateNotice('OPC_CONTENT_GATE_other')).toBeNull();
 });
+
+import { gateStopNotices, rememberGateStop, showsReply } from './gate-notices';
+
+function memoryStorage() {
+  const values = new Map<string, string>();
+  return { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
+}
+
+it.each([
+  ['call_limited', runtimeGateMessages.minute],
+  ['paused', runtimeGateMessages.paused],
+  ['limit_unavailable', runtimeGateMessages.limit_unavailable],
+])('a %s stop keeps its fixed notice for the cancelled round after a reload', (unavailable, notice) => {
+  const storage = memoryStorage();
+  expect(rememberGateStop(storage, 'session', 'stopped', { state: 'cancelled', unavailable })).toBe(notice);
+  const executions = [{ executionId: 'stopped', state: 'cancelled' }, { executionId: 'other', state: 'cancelled' }];
+  expect(gateStopNotices(storage, 'session', executions)).toEqual({ stopped: notice });
+  // Another session or a non-cancelled state never borrows the notice.
+  expect(gateStopNotices(storage, 'another', executions)).toEqual({});
+  expect(gateStopNotices(storage, 'session', [{ executionId: 'stopped', state: 'running' }])).toEqual({});
+});
+
+it('remembers nothing for other results and survives missing or failing storage', () => {
+  const storage = memoryStorage();
+  expect(rememberGateStop(storage, 'session', 'a', { state: 'cancelled', unavailable: 'capacity' })).toBeNull();
+  expect(rememberGateStop(storage, 'session', 'b', { state: 'completed' })).toBeNull();
+  expect(gateStopNotices(storage, 'session', [{ executionId: 'a', state: 'cancelled' }])).toEqual({});
+  const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
+  expect(rememberGateStop(broken, 'session', 'c', { state: 'cancelled', unavailable: 'paused' })).toBe(runtimeGateMessages.paused);
+  expect(gateStopNotices(broken, 'session', [{ executionId: 'c', state: 'cancelled' }])).toEqual({});
+  expect(rememberGateStop(null, 'session', 'd', { state: 'cancelled', unavailable: 'paused' })).toBe(runtimeGateMessages.paused);
+});
+
+it('shows no "verifying" reply for a cancelled round without a body, and keeps every other reply', () => {
+  expect(showsReply({ state: 'cancelled', body: null, primaryBody: null })).toBe(false);
+  expect(showsReply({ state: 'cancelled', body: null, primaryBody: '已保存的主回复' })).toBe(true);
+  expect(showsReply({ state: 'running', body: null, primaryBody: null })).toBe(true);
+  expect(showsReply({ state: 'completed', body: '回复', primaryBody: null })).toBe(true);
+});

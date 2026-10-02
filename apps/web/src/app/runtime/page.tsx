@@ -12,7 +12,10 @@ import composerStyles from '@/components/opc/work-composer.module.css';
 import workStyles from './runtime-work.module.css';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { trpc } from '@/trpc/client';
-import { OUTPUT_TRUNCATED_NOTICE, runtimeAdmissionNotice, runtimeExecutionNotice, videoGateError, videoGateNotice } from './gate-notices';
+import {
+ OUTPUT_TRUNCATED_NOTICE, gateStopNotices, rememberGateStop, runtimeAdmissionNotice, runtimeExecutionNotice, showsReply,
+ videoGateError, videoGateNotice,
+} from './gate-notices';
 
 type VideoChoice='both'|'storyboard'|'editing';
 type VideoOperation={workItemId:string;choice?:VideoChoice;script:{requestId:string;executionId:string;expectedVersion:number};followup:{requestId:string;input:string;selection:{kind:'skill';moduleId:string;revisionId:string};executionId?:string};package:{requestId:string;expectedStoryboardVersion:number;expectedEditingVersion:number};sourceScriptId?:string;held?:boolean};
@@ -32,6 +35,8 @@ function displayReply(input:string|null,body:string|null){
  try{const value=JSON.parse(body);if(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).every(key=>['storyboard','editing'].includes(key))){const parts=[];if(typeof value.storyboard==='string')parts.push('分镜脚本\n'+value.storyboard);if(typeof value.editing==='string')parts.push('剪辑建议\n'+value.editing);if(parts.length)return parts.join('\n\n');}}catch{/* Incomplete output stays recoverable; protocol text is not conversation. */}
  return '生成结果尚未整理完成，请保留原任务并恢复核对。';
 }
+/** Session storage when available; private modes and the server render have none. */
+function browserSession(){try{return typeof window==='undefined'?null:window.sessionStorage;}catch{return null;}}
 function transcriptDay(value:string){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(value));}
 function transcriptDate(value:string){const day=transcriptDay(value),today=transcriptDay(new Date().toISOString());const time=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value));return day===today?'今天 '+time:day.replaceAll('-','/')+' '+time;}
 
@@ -47,6 +52,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const profile=trpc.user.getUserProfile.useQuery();
  const [sessionId,setSession]=useState(routeSession),[input,setInput]=useState(''),[selection,setSelection]=useState(''),[error,setError]=useState('');
  const [capacityIds,setCapacityIds]=useState<string[]>([]);
+ const [gateStops,setGateStops]=useState<Record<string,string>>({});
  const capacityKey=(executionId:string)=>'opc-runtime-capacity:'+sessionId+':'+executionId;
  function markCapacity(executionId:string){try{sessionStorage.setItem(capacityKey(executionId),'1');}catch{/* The current alert still explains the failure. */}setCapacityIds(ids=>ids.includes(executionId)?ids:[...ids,executionId]);}
  const [storedModule,setStoredModule]=useState('');
@@ -66,7 +72,10 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const [typePending,setTypePending]=useState(false);
  const editItem=trpc.opc.editLibrary.useMutation();
  const saveContent=trpc.opc.saveContentResult.useMutation(),prepareVideoMaterial=trpc.opc.prepareVideoMaterial.useMutation(),checkVideo=trpc.opc.checkVideoExecution.useMutation(),saveResults=trpc.opc.saveVideoResults.useMutation();
- const start=trpc.runtime.start.useMutation(),prepare=trpc.runtime.prepare.useMutation(),execute=trpc.runtime.execute.useMutation({onSuccess(result){const notice=runtimeExecutionNotice(result);if(notice)setError(notice);}}),cancel=trpc.runtime.cancel.useMutation();
+ const start=trpc.runtime.start.useMutation(),prepare=trpc.runtime.prepare.useMutation(),execute=trpc.runtime.execute.useMutation({onSuccess(result,{executionId}){
+  const notice=runtimeExecutionNotice(result);if(notice)setError(notice);
+  const stop=rememberGateStop(browserSession(),sessionId,executionId,result);if(stop)setGateStops(stops=>({...stops,[executionId]:stop}));
+ }}),cancel=trpc.runtime.cancel.useMutation();
  const [videoBusy,setVideoBusy]=useState(false),[,setVideoUiRevision]=useState(0);
  const busy=start.isPending||prepare.isPending||execute.isPending||videoBusy||guiding;
  const ordinary=choices.data?.models[0]?.id??'';
@@ -210,6 +219,9 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  async function recover(executionId:string){setError('');try{const executed=await execute.mutateAsync({executionId});if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(executionId);setError('原请求的必要材料超过模型输入容量，无法继续发送。已有内容已保留；请取消剩余执行后缩短材料再发送。');}await view.refetch();}catch{setError('暂时无法恢复，请保留原任务。');}}
  const executions=view.data?.executions as Array<{executionId:string;createdAt?:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;contentAvailable:boolean}>|undefined;
  const capacitySignature=executions?.map(e=>e.executionId+':'+e.state).join('|');
+ useEffect(()=>{setGateStops(gateStopNotices(browserSession(),sessionId,executions??[]));
+ // eslint-disable-next-line react-hooks/exhaustive-deps
+ },[sessionId,capacitySignature]);
  useEffect(()=>{const ids:string[]=[];for(const e of executions??[]){const key=capacityKey(e.executionId);if(e.state==='completed'||e.state==='cancelled'){try{sessionStorage.removeItem(key);}catch{/* No local marker to remove. */}}else try{if(sessionStorage.getItem(key)==='1')ids.push(e.executionId);}catch{/* Current request can still show the alert. */}}setCapacityIds(current=>current.join('|')===ids.join('|')?current:ids);
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[sessionId,capacitySignature]);
@@ -258,11 +270,11 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
    <section className={workStyles.transcript}>{workItem&&typePending&&<Button disabled={editItem.isPending} onClick={()=>setType('unknown')}>恢复类型保存</Button>}{workItem&&contentType==='unknown'&&<section className="rounded-xl border p-4" aria-label="确认内容类型"><h2>这条选题准备做成什么内容？</h2><p>先确认形式，再一起细化重点和结构。</p><div className="flex gap-2 mt-3">{['article','image_text','video'].map(value=><Button key={value} disabled={busy||editItem.isPending||typePending} onClick={()=>setType(value)}>{typeLabel[value]}</Button>)}</div></section>}{error==='引导请求待恢复。再次恢复会沿用原请求，不会另开一次。'&&<Button disabled={busy} onClick={guide}>恢复引导</Button>}{executions?.map((e,index)=><div key={e.executionId}>{e.createdAt&&(index===0||!executions[index-1].createdAt||transcriptDay(executions[index-1].createdAt!)!==transcriptDay(e.createdAt))&&<p className={workStyles.dateMarker}>{transcriptDate(e.createdAt)}</p>}<article className={workStyles.turn}>
     {e.input&&!e.input.startsWith('[OPC_WORK_CONTINUE_V1]')&&<p className={workStyles.userMessage}>{e.input.startsWith('[OPC_VIDEO_PACKAGE_V1]')?(e.input.includes('只生成分镜脚本')?'请基于已定稿口播稿生成分镜脚本。':e.input.includes('只生成剪辑建议')?'请基于已保存的分镜生成剪辑建议。':'请先完成分镜脚本，再基于分镜生成剪辑建议。'):e.input.replace(/^\[OPC_SCRIPT_V1\]\s*/, '')}</p>}
     <div className={workStyles.agentMessage}><div className={workStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/><span>Graylum · {e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')?'已完成本轮建议':'增长顾问'}</span></div><div>
-     {workItem&&e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&e.contentAvailable?<div className={workStyles.proposal}><div className={workStyles.proposalHead}><strong>建议稿</strong><span>{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?'已采用':'尚未采用'}</span></div><p>{displayReply(e.input,e.body??e.primaryBody)}</p></div>:<p className={workStyles.reply}>{e.contentAvailable?displayReply(e.input,e.body??e.primaryBody):'来源已不可用，暂不展示此内容。'}</p>}
+     {workItem&&e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&e.contentAvailable?<div className={workStyles.proposal}><div className={workStyles.proposalHead}><strong>建议稿</strong><span>{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?'已采用':'尚未采用'}</span></div><p>{displayReply(e.input,e.body??e.primaryBody)}</p></div>:showsReply(e)&&<p className={workStyles.reply}>{e.contentAvailable?displayReply(e.input,e.body??e.primaryBody):'来源已不可用，暂不展示此内容。'}</p>}
      {e.primaryBody&&!e.organizerComplete&&<p role="status" className="mt-2 text-sm">主回复已保存，附属整理未完成。</p>}
      {workItem&&contentType!=='unknown'&&e.state==='completed'&&e.skillExecution&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&<div className="mt-3 flex flex-wrap gap-2">{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?<Link className="underline" href={'/library?item='+workItem.workItemId+'&return='+sessionId}>{isVideo?'这版口播稿已定稿':'已采用为草稿'} · 查看</Link>:<Button disabled={busy} onClick={()=>finalizeScript(e.executionId)}>{isVideo?'将这条回复定稿为口播稿':'采用为当前草稿'}</Button>}</div>}
      {workItem&&contentType==='unknown'&&e.state==='completed'&&e.skillExecution&&e.contentAvailable&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&<div className="mt-2">{saved.data?.find((result:{artifactId:string;version:number})=>result.artifactId===e.executionId)?<p role="status">已保存成果 · 第 {saved.data.find((result:{artifactId:string;version:number})=>result.artifactId===e.executionId)?.version} 版</p>:<Button variant="outline" disabled={saveWorkResult.isPending} onClick={()=>persistSkillResult(e.executionId)}>保存 Skill 成果</Button>}</div>}
-     {e.state==='cancelled'&&<p role="status" className="mt-2 text-sm">已取消剩余执行，保留原记录。</p>}
+     {e.state==='cancelled'&&<p role="status" className="mt-2 text-sm">{gateStops[e.executionId]??'已取消剩余执行，保留原记录。'}</p>}
      {e.state==='cost_pending'&&<p role="status" className="mt-2 text-sm">费用待核实；恢复只核对原调用。</p>}
      {e.needsTask&&<p className="mt-2 text-sm">当前入口暂不支持这个 Skill 的任务选择。可取消剩余执行后使用普通对话。</p>}
      {e.unavailableReason==='output_truncated'&&<p role="status" className="mt-2 text-sm">本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。</p>}

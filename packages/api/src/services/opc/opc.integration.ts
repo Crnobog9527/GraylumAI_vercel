@@ -11160,18 +11160,19 @@ it("OPC: RATE-LIMIT browser gate notices keep the original request, never auto-r
   }
 }, 900000);
 
-// Review P2 on #594: a video package refused by the new-work gate at admission keeps its
-// material and request id, is not resumed automatically after a reload, and the explicit
-// retry sends that same request once.
-it("OPC: RATE-LIMIT video package refused at admission keeps its request for an explicit retry", async () => {
+// /runtime on one video work item. First, a round cancelled by the call gate shows only its
+// fixed notice, also after a reload, never a "verifying" reply. Then (review P2 on #594) a video
+// package refused by the new-work gate at admission keeps its material and request id, is not
+// resumed automatically after a reload, and the explicit retry sends that same request once.
+it("OPC: RATE-LIMIT /runtime call-gate stop display and video package admission hold", async () => {
   const { execFileSync } = await import("node:child_process");
   const tag = process.env.V3_RATE_LIMIT_TAG;
   if (!tag || !/^[a-z0-9][a-z0-9-]{0,80}$/.test(tag)) throw new Error("local rate limit required");
   expect(execFileSync("docker", ["exec", tag + "-redis", "redis-cli", "FLUSHDB"], { encoding: "utf8" }).trim()).toBe("OK");
   const paused = "AI服务暂时暂停新调用，请稍后再试。本次被拦截的调用不扣积分。";
-  const limits = (stopNewCalls: boolean) => sql.query(
+  const limits = (stopNewCalls: boolean, callsPerMinute = 180) => sql.query(
     "insert into system_settings(key,value) values('runtime_rate_limits',$1::jsonb) on conflict(key) do update set value=excluded.value",
-    [JSON.stringify({ version: 1, admissionPerMinute: 60, admissionPer24Hours: 5000, callsPerMinute: 180,
+    [JSON.stringify({ version: 1, admissionPerMinute: 60, admissionPer24Hours: 5000, callsPerMinute,
       callsPer24Hours: 15000, stopNewCalls })]);
   await limits(false);
   const f = await publishedDraft();
@@ -11209,6 +11210,26 @@ it("OPC: RATE-LIMIT video package refused at admission keeps its request for an 
         packagePrepares.push(body);
       if (request.url().includes('opc.prepareVideoMaterial') && body.includes('abandon')) abandons.push(body);
     });
+
+    // A /runtime round needs 3 calls; a 2-call limit cancels it before its first call.
+    const unavailable = '暂时无法确认使用额度，请稍后再试。本次被拦截的调用不扣积分。';
+    const stoppedRounds = async () => Number((await sql.query(
+      "select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and state='cancelled'", [f.actor, sessionId])).rows[0].n);
+    const stoppedBefore = await stoppedRounds(), creditsAtStop = await credits();
+    await limits(false, 2);
+    await page.getByLabel('消息', { exact: true }).fill('调用闸门下的一轮');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: unavailable }).waitFor({ timeout: 60000 });
+    await expect.poll(stoppedRounds, { timeout: 30000 }).toBe(stoppedBefore + 1);
+    const transcript = page.getByLabel('对话记录', { exact: true });
+    await transcript.getByRole('status').filter({ hasText: unavailable }).waitFor({ timeout: 30000 });
+    expect(await page.getByText('正在核实结果，请保留原任务。', { exact: true }).count()).toBe(0);
+    expect(await credits()).toBe(creditsAtStop);
+    await page.reload();
+    await transcript.getByRole('status').filter({ hasText: unavailable }).waitFor({ timeout: 60000 });
+    expect(await page.getByText('正在核实结果，请保留原任务。', { exact: true }).count()).toBe(0);
+    await limits(false);
+
     const runsBefore = await packageRuns(), creditsBefore = await credits();
 
     await limits(true);
