@@ -20,6 +20,10 @@ export function consumeOpenRouterNotStarted(error:unknown,requestHash:string,sen
  const proof=unstarted.get(error);if(proof?.requestHash!==requestHash||proof.send!==send)return false;
  unstarted.delete(error);return true;
 }
+const cachedSystemContent=z.tuple([
+ z.object({type:z.literal('text'),text:z.string().min(1),cache_control:z.object({type:z.literal('ephemeral')}).strict()}).strict(),
+ z.object({type:z.literal('text'),text:z.string().min(1)}).strict().optional(),
+]);
 const requestFields=new Set(['model','stream','stream_options','store','messages','provider','max_tokens','max_completion_tokens','temperature','top_p','parallel_tool_calls','response_format','reasoning_effort','reasoning']);
 export const sourceCall=z.object({id:z.string().min(1).max(256),type:z.literal('function'),function:z.object({name:z.literal('read_source'),arguments:z.string().max(4000)}).strict()}).strict();
 /** One tool call whose name is in a request format's allowlist. */
@@ -141,10 +145,13 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
      (parsed.reasoning_effort!==undefined && (typeof parsed.reasoning_effort!=='string' || !approvedReasoningEfforts.has(parsed.reasoning_effort))) ||
      (parsed.reasoning!==undefined&&!reasoningObject.safeParse(parsed.reasoning).success) ||
      ('reasoning_effort' in parsed&&'reasoning' in parsed) ||
-     parsed.messages.some((message:unknown)=>{
+     parsed.messages.some((message:unknown,index:number)=>{
       if(!message || typeof message!=='object' || Array.isArray(message))return true;
       const m=message as Record<string,unknown>;
       if(agentTurn?agentMessage.safeParse(m).success:options.allowWorkspaceRead&&workspaceMessage.safeParse(m).success)return false;
+      if(index===0&&m.role==='system'&&identity.model.startsWith('anthropic/')&&
+       identity.providerLimits?.cacheWriteUsdPerMillion!==undefined&&Object.keys(m).every(key=>['role','content'].includes(key))&&
+       cachedSystemContent.safeParse(m.content).success)return false;
       return Object.keys(m).some(key=>!['role','content'].includes(key)) || !['system','developer','user','assistant'].includes(String(m.role)) ||
        !(typeof m.content==='string' || (Array.isArray(m.content) && m.content.every(part=>part && typeof part==='object' &&
          Object.keys(part).every(key=>['type','text'].includes(key)) && part.type==='text' && typeof part.text==='string')));
