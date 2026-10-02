@@ -283,6 +283,7 @@ describe('modelRouter error sanitization', () => {
               return {
                 eq() {
                   return {
+                    eq() { return this; },
                     select() {
                       return {
                         single() {

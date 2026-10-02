@@ -2,7 +2,9 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { OPENROUTER_MODEL_ID, catalogSnapshot, type CatalogSnapshot } from '../../shared/modelReasoning';
-import { mergeDuplicateTags, normalizeEndpointPricing, priceIdentity, pricingSnapshot, type PricingSnapshot } from '../../shared/modelPricing';
+import {
+  byCodeUnit, mergeDuplicateTags, normalizeEndpointPricing, priceIdentity, pricingSnapshot, type PricingSnapshot,
+} from '../../shared/modelPricing';
 
 /** Only these two public, keyless catalog reads. No credential is ever sent. */
 const CATALOG_BASE = 'https://openrouter.ai/api/v1/';
@@ -72,7 +74,7 @@ export type CatalogRead = { catalog: CatalogSnapshot; pricing: PricingSnapshot }
 
 /** sha256 of every route's normalized prices, in tag order. */
 export function pricingHash(endpoints: PricingSnapshot['endpoints']): string {
-  const lines = [...endpoints].sort((a, b) => a.tag.localeCompare(b.tag)).map(endpoint => JSON.stringify([endpoint.tag, priceIdentity(endpoint)]));
+  const lines = [...endpoints].sort((a, b) => byCodeUnit(a.tag, b.tag)).map(endpoint => JSON.stringify([endpoint.tag, priceIdentity(endpoint)]));
   return createHash('sha256').update(lines.join('\n')).digest('hex');
 }
 
@@ -113,11 +115,29 @@ export async function readOpenRouterCatalog(model: string, transport: typeof fet
     })),
   });
   if (!snapshot.success) throw new Error('MODEL_CATALOG_INVALID');
-  const priced = mergeDuplicateTags(routes.data.data.endpoints
-    .map(endpoint => normalizeEndpointPricing(endpoint.tag, endpoint.context_length, endpoint.pricing)));
+  return { catalog: snapshot.data, pricing: pricingFrom(model, path, routes.data.data.endpoints, fetchedAt) };
+}
+
+type EndpointRows = z.infer<typeof endpointList>['data']['endpoints'];
+function pricingFrom(model: string, path: string, endpoints: EndpointRows, fetchedAt: string): PricingSnapshot {
+  const priced = mergeDuplicateTags(endpoints.map(endpoint => normalizeEndpointPricing(endpoint.tag, endpoint.context_length, endpoint.pricing)));
   const pricing = pricingSnapshot.safeParse({
     fetchedAt, model, source: `openrouter:/api/v1/models/${path}/endpoints`, pricingHash: pricingHash(priced), endpoints: priced,
   });
   if (!pricing.success) throw new Error('MODEL_CATALOG_INVALID');
-  return { catalog: snapshot.data, pricing: pricing.data };
+  return pricing.data;
+}
+
+/**
+ * Reads only one model's route prices (one public GET, no credential, no full
+ * model list). Used by Runtime admission to renew a stale price snapshot
+ * (plan D4); the reasoning catalog is only renewed by the administrator.
+ */
+export async function readOpenRouterPricing(
+  model: string, transport: typeof fetch = fetch, now: () => Date = () => new Date(),
+): Promise<PricingSnapshot> {
+  const path = catalogModelPath(model);
+  const routes = endpointList.safeParse(await readJson(transport, 'models/' + path + '/endpoints'));
+  if (!routes.success || routes.data.data.id !== model) throw new Error('MODEL_CATALOG_INVALID');
+  return pricingFrom(model, path, routes.data.data.endpoints, now().toISOString());
 }

@@ -22,6 +22,7 @@ import {currentRequestTiming} from './timing';
 import {readPurposeBudgets} from './purposeBudgets';
 import {assertFrozenPayloads} from './payloadSize';
 import {freezeWindowBillingUnit} from './billingUnitAdmission';
+import {admitPricing} from './pricingAdmission';
 
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
@@ -220,6 +221,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     if(attachedOrganizer)modelConfiguration(()=>assertSeparateSummaryModel(candidate.model,attachedOrganizer!.model));
     if(!billing.callPolicy.some(p=>p.modelId===candidate.modelId))billing.callPolicy.push({...billing.callPolicy[0],modelId:candidate.modelId,model:candidate.model,inputLimit:candidate.inputLimit,outputLimit:candidate.outputLimit});
    }
+   // MODEL-PRICING-SYNC: every selected quote must still cover its route's current OpenRouter prices.
+   if(realCalls)await admitPricing(admin,realCalls);
    if(realCalls)billing.callPolicy=realCalls;
    // BILL-UNIT: the window must match the current q and each selected model's m_i (0157 claim/finalize).
    if(realCalls)billing.rules.billingUnit=await freezeWindowBillingUnit(admin,policy.real!,realCalls);

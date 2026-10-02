@@ -617,6 +617,18 @@ try {
         }else mentorStreamHeld.set(index,()=>{entry.finishedAt=Date.now();res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify(official));});
         return;
       }
+      // The protected-route smoke also exercises the current streamed mentor opening.
+      if(stagingHost&&req.url==='/__official_chat'&&request.stream===true){
+        res.writeHead(200,{'content-type':'text/event-stream','x-generation-id':id});
+        const write=(delta,finish=null)=>res.write('data: '+JSON.stringify({id,object:'chat.completion.chunk',created:1,
+          model:request.model,choices:[{index:0,delta,finish_reason:finish}]})+'\n\n');
+        write({role:'assistant',content});
+        if(agentCard)write({tool_calls:[{index:0,id:'question-local',type:'function',
+          function:{name:'ask_question',arguments:JSON.stringify({...agentCard,message:content})}}]});
+        write({},agentCard?'tool_calls':'stop');
+        res.write('data: '+JSON.stringify({id,model:request.model,choices:[],usage:official.usage})+'\n\n');
+        res.end('data: [DONE]\n\n');return;
+      }
       const send=()=>res.writeHead(200,{'content-type':'application/json'}).end(req.url==='/__official_chat'?JSON.stringify(official):response);
       if(holdRuntime){holdRuntime=false;heldRuntime.push(send);}else send();return;
     }
