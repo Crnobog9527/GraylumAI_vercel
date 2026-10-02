@@ -1,12 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DEFAULT_RUNTIME_RATE_LIMITS as defaults } from './runtime/rateLimitSettings';
-const mock = vi.hoisted(() => ({ limit: vi.fn(), construct: vi.fn(), redis: vi.fn(), log: vi.fn() }));
+const mock = vi.hoisted(() => ({ limit: vi.fn(), remaining: vi.fn(), construct: vi.fn(), redis: vi.fn(), log: vi.fn() }));
 vi.mock('@upstash/redis', () => ({ Redis: class { constructor(options: unknown) { mock.redis(options); } } }));
 vi.mock('@upstash/ratelimit', () => ({ Ratelimit: class {
   static slidingWindow(count: number, duration: string) { return { count, duration }; }
   constructor(private options: unknown) { mock.construct(options); }
-  limit(id: string) { return mock.limit(this.options, id); }
+  limit(id: string, rate: unknown) { return mock.limit(this.options, id, rate); }
+  getRemaining(id: string) { return mock.remaining(this.options, id); }
 } }));
 vi.mock('../lib/logger', () => ({ logger: { error: mock.log } }));
 beforeEach(() => {
@@ -14,6 +15,42 @@ beforeEach(() => {
   vi.stubEnv('UPSTASH_REDIS_REST_URL', ''); vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', '');
   vi.stubEnv('KV_REST_API_URL', 'https://synthetic.invalid'); vi.stubEnv('KV_REST_API_TOKEN', 'synthetic');
   mock.limit.mockResolvedValue({ success: true, reset: Date.now() + 60000 });
+  mock.remaining.mockResolvedValue({ remaining: 30, reset: Date.now() + 60000 });
+});
+it('prechecks both windows before charging the frozen call budget', async () => {
+  const { checkRuntimeRateLimit: check } = await import('./redisRateLimiter');
+  expect(await check('actor', 'calls', defaults, 'local', 2)).toEqual({ success: true });
+  expect(mock.remaining).toHaveBeenCalledTimes(2);
+  expect(mock.limit.mock.calls.map(([, id, rate]) => [id, rate])).toEqual([
+    ['actor', { rate: 2 }], ['actor', { rate: 2 }],
+  ]);
+  expect(Math.max(...mock.remaining.mock.invocationCallOrder)).toBeLessThan(mock.limit.mock.invocationCallOrder[0]);
+});
+it.each(['minute', 'day'])('does not charge either bucket when %s remaining is insufficient', async window => {
+  mock.remaining.mockImplementation(async options => ({
+    remaining: options.prefix.includes(`:${window}:`) ? 1 : 30, reset: Date.now() + 60000,
+  }));
+  const { checkRuntimeRateLimit: check } = await import('./redisRateLimiter');
+  expect(await check('actor', 'calls', defaults, 'local', 2)).toEqual({
+    success: false, reason: 'rate_limited', window, retryAfter: 60,
+  });
+  expect(mock.limit).not.toHaveBeenCalled();
+});
+it.each([0, -1, 1.5, NaN, Infinity, 31])('rejects invalid or impossible rate %s before Redis', async rate => {
+  const { checkRuntimeRateLimit: check } = await import('./redisRateLimiter');
+  expect(await check('actor', 'calls', defaults, 'local', rate)).toMatchObject({ reason: 'unavailable' });
+  expect(mock.redis).not.toHaveBeenCalled();
+});
+it.each(['error', 'hang', 'invalid'])('fails closed for remaining precheck %s', async mode => {
+  vi.useFakeTimers();
+  if (mode === 'error') mock.remaining.mockRejectedValue(new Error('private'));
+  if (mode === 'hang') mock.remaining.mockImplementation(() => new Promise(() => {}));
+  if (mode === 'invalid') mock.remaining.mockResolvedValue({ remaining: NaN, reset: NaN });
+  const { checkRuntimeRateLimit: check } = await import('./redisRateLimiter');
+  const pending = check('actor', 'calls', defaults, 'local', 2);
+  await vi.advanceTimersByTimeAsync(500);
+  expect(await pending).toMatchObject({ reason: 'unavailable' });
+  expect(mock.limit).not.toHaveBeenCalled();
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 it('checks minute then day with the shared identity and disables analytics and fail-open timers', async () => {
