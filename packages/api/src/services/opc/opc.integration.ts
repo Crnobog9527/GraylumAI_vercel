@@ -6209,7 +6209,10 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
     }, { timeout: 60000 });
     await tab1.getByRole("menuitem", { name: "退出登录", exact: true }).click();
     expect((await logoutResponse).ok()).toBe(true);
-    await tab1.waitForURL(url => url.origin === origin && url.pathname === "/landing", { timeout: 60000 });
+    // AppHeader sends the page to /landing; on /marketplace the page's own
+    // sign-in guard may get there first with /login. Either leaves the
+    // signed-in area; the retained request below is what this phase checks.
+    await tab1.waitForURL(url => url.origin === origin && ["/landing", "/login"].includes(url.pathname), { timeout: 60000 });
     await tab1.goto(app + draftPath);
     await tab1.waitForURL(url => url.origin === origin && url.pathname === "/login", { timeout: 60000 });
     expect(await tab1.locator("section[aria-label='本步填写信息']").count()).toBe(0);
