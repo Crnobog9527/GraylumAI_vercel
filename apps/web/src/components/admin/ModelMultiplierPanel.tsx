@@ -5,6 +5,7 @@ import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { MULTIPLIER_PANEL_ID } from './multiplierPanelLink';
 
 // Same rule as the server: 1–20, at most two decimals; blank means "inherit the site default".
 export const MULTIPLIER_INPUT_PATTERN = /^(?:(?:[1-9]|1[0-9])(?:\.[0-9]{1,2})?|20(?:\.0{1,2})?)$/;
@@ -39,7 +40,7 @@ export function ModelMultiplierPanel() {
     },
   });
   const site = view.data?.site;
-  return <Card data-testid="model-multiplier-panel">
+  return <Card data-testid="model-multiplier-panel" id={MULTIPLIER_PANEL_ID} tabIndex={-1}>
     <CardHeader>
       <CardTitle>加价倍数（按模型）</CardTitle>
       <CardDescription>

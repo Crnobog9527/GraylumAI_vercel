@@ -24,10 +24,11 @@ import AdminErrorState from '@/components/admin/AdminErrorState';
 import { formatUsdFromCents } from '@/lib/currency';
 import { ReportUsdValue } from '@/components/admin/ReportUsdValue';
 import { Bill2ModelReportCard, UNIT_SOURCE_LABEL } from '@/components/admin/Bill2ModelReportCard';
+import { ModelReportPriceCell } from '@/components/admin/ModelReportPriceCell';
 
 function formatCreditsRange(range: { min: number; max: number } | null, suffix: string) {
   if (!range) {
-    return '未配置';
+    return '无可用价格（未读取或不可推导）';
   }
 
   if (range.min === range.max) {
@@ -510,6 +511,9 @@ export default function AdminFinancePage() {
                 <Cpu className="h-5 w-5" />
                 模型渠道统计
               </CardTitle>
+              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                价格为所选线路的 OpenRouter 价格快照（只读）；"冻结用单价"是调用前上限用的最高单价。实际成本以每次记录的费用为准。
+              </p>
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
@@ -518,9 +522,9 @@ export default function AdminFinancePage() {
                   <TableRow>
                     <TableHead>模型名称</TableHead>
                     <TableHead>提供商</TableHead>
-                    <TableHead>输入成本</TableHead>
-                    <TableHead>输出成本</TableHead>
-                    <TableHead>搜索成本</TableHead>
+                    <TableHead>输入价格</TableHead>
+                    <TableHead>输出价格</TableHead>
+                    <TableHead>联网搜索价格</TableHead>
                     <TableHead>对话数</TableHead>
                     <TableHead>状态</TableHead>
                   </TableRow>
@@ -543,35 +547,9 @@ export default function AdminFinancePage() {
                           {model.provider}
                         </Badge>
                       </TableCell>
-                      <TableCell>
-                        <div className="text-sm">
-                          <div style={{ color: 'var(--text-primary)' }}>
-                            ${(model.inputTokenCost / 1000000).toFixed(3)}/1M
-                          </div>
-                          {model.inputTokenCostAbove200k > 0 && (
-                            <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                              &gt;200K: ${(model.inputTokenCostAbove200k / 1000000).toFixed(3)}
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="text-sm">
-                          <div style={{ color: 'var(--text-primary)' }}>
-                            ${(model.outputTokenCost / 1000000).toFixed(3)}/1M
-                          </div>
-                          {model.outputTokenCostAbove200k > 0 && (
-                            <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                              &gt;200K: ${(model.outputTokenCostAbove200k / 1000000).toFixed(3)}
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <span style={{ color: 'var(--text-primary)' }}>
-                          {model.webSearchCost > 0 ? `$${(model.webSearchCost / 1_000_000).toFixed(3)}/1K` : '-'}
-                        </span>
-                      </TableCell>
+                      <TableCell><ModelReportPriceCell pricing={model.pricing} kind="prompt" /></TableCell>
+                      <TableCell><ModelReportPriceCell pricing={model.pricing} kind="completion" /></TableCell>
+                      <TableCell><ModelReportPriceCell pricing={model.pricing} kind="web_search" /></TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
                           <MessageSquare className="h-4 w-4" style={{ color: 'var(--text-tertiary)' }} />
@@ -707,8 +685,8 @@ export default function AdminFinancePage() {
                 <div className="space-y-4">
                   <div className="flex justify-between items-center p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
                     <div>
-                      <p className="font-medium" style={{ color: 'var(--text-primary)' }}>输入成本区间</p>
-                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>按活跃模型折算，每 1K 输入 Token</p>
+                      <p className="font-medium" style={{ color: 'var(--text-primary)' }}>输入单价上限区间</p>
+                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>按活跃模型的冻结用单价（上限，可能取缓存写入价或长上下文档）折算，每 1K 输入 Token</p>
                     </div>
                     <Badge className="bg-blue-500/20 text-blue-400 text-sm px-3 py-1">
                       {formatCreditsRange(runtimeBilling.inputCreditsPer1KRange, '积分')}
@@ -717,8 +695,8 @@ export default function AdminFinancePage() {
 
                   <div className="flex justify-between items-center p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
                     <div>
-                      <p className="font-medium" style={{ color: 'var(--text-primary)' }}>输出成本区间</p>
-                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>按活跃模型折算，每 1K 输出 Token</p>
+                      <p className="font-medium" style={{ color: 'var(--text-primary)' }}>输出单价上限区间</p>
+                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>按活跃模型的冻结用单价（上限）折算，每 1K 输出 Token</p>
                     </div>
                     <Badge className="bg-purple-500/20 text-purple-400 text-sm px-3 py-1">
                       {formatCreditsRange(runtimeBilling.outputCreditsPer1KRange, '积分')}
@@ -728,7 +706,7 @@ export default function AdminFinancePage() {
                   <div className="flex justify-between items-center p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
                     <div>
                       <p className="font-medium" style={{ color: 'var(--text-primary)' }}>模型联网成本区间</p>
-                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>按活跃模型折算，每 1K 次真实搜索</p>
+                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>按活跃模型的基础搜索价折算，每 1K 次真实搜索；未检查线路能否用于计费，仅供参考</p>
                     </div>
                     <Badge className="bg-emerald-500/20 text-emerald-400 text-sm px-3 py-1">
                       {formatCreditsRange(runtimeBilling.searchCreditsPer1KRange, '积分')}
