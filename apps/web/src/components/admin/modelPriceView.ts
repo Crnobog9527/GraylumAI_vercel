@@ -29,8 +29,17 @@ export type RouteView = {
   tiers: Array<{ condition: string; prices: PriceRow[] }>;
   discount: number | null;
   unknownKeys: string[];
+  /** Original catalog value of each unknown field, as text (shown, never used in any calculation). */
+  unknown: Array<{ key: string; value: string }>;
   contextLength: number | null;
 };
+
+const RAW_VALUE_MAX = 200;
+/** Catalog text of one raw field, cut to a readable length. */
+function rawText(value: unknown): string {
+  const text = value === undefined ? '（目录未给出）' : typeof value === 'string' ? value : JSON.stringify(value) ?? String(value);
+  return text.length > RAW_VALUE_MAX ? `${text.slice(0, RAW_VALUE_MAX)}…` : text;
+}
 
 export function routeView(endpoint: PricedEndpoint): RouteView {
   return {
@@ -41,6 +50,7 @@ export function routeView(endpoint: PricedEndpoint): RouteView {
     tiers: endpoint.overrides.map(item => ({ condition: describeCondition(item.when), prices: priceRows(item.prices) })),
     discount: endpoint.discount,
     unknownKeys: endpoint.unknownKeys,
+    unknown: endpoint.unknownKeys.map(key => ({ key, value: rawText(endpoint.raw[key]) })),
     contextLength: endpoint.contextLength,
   };
 }

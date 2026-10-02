@@ -228,18 +228,16 @@ describe('modelRouter error sanitization', () => {
       inputTokenCostAbove200k: 6,
       outputTokenCostAbove200k: 22.5,
       webSearchCost: 10,
-    });
+      maxTokens: 999999,
+      inputLimit: 999999,
+    } as never);
 
-    expect(inserted[0]).toMatchObject({
-      input_token_cost: 3_000_000,
-      output_token_cost: 15_000_000,
-      input_token_cost_above_200k: 6_000_000,
-      output_token_cost_above_200k: 22_500_000,
-      web_search_cost: 10_000_000,
-    });
+    for (const key of ['input_token_cost', 'output_token_cost', 'input_token_cost_above_200k', 'output_token_cost_above_200k', 'web_search_cost', 'max_tokens', 'input_limit'])
+      expect(inserted[0]).not.toHaveProperty(key);
+    expect(inserted[0]).toMatchObject({ name: 'Claude Sonnet', model_id: 'anthropic/claude-sonnet-4.6' });
   });
 
-  it.each([['openai','https://openrouter.ai/api/v1/chat/completions'],['anthropic','https://openrouter.ai/api/v1/chat/completions'],['openai','https://proxy.example.com/v1/chat/completions']])('preserves provider usage while updating pricing for %s %s', async (provider, endpoint) => {
+  it.each([['openai','https://openrouter.ai/api/v1/chat/completions'],['anthropic','https://openrouter.ai/api/v1/chat/completions'],['openai','https://proxy.example.com/v1/chat/completions']])('preserves provider usage while discarding retired fields for %s %s', async (provider, endpoint) => {
     const updated: Array<Record<string, unknown>> = [];
     const supabase = {
       from(table: string) {
@@ -316,16 +314,15 @@ describe('modelRouter error sanitization', () => {
       inputTokenCostAbove200k: 6,
       outputTokenCostAbove200k: 22.5,
       webSearchCost: 10,
-    });
+      maxTokens: 999999,
+      inputLimit: 999999,
+    } as never);
 
+    for (const key of ['input_token_cost', 'output_token_cost', 'input_token_cost_above_200k', 'output_token_cost_above_200k', 'web_search_cost', 'max_tokens', 'input_limit'])
+      expect(updated[0]).not.toHaveProperty(key);
     expect(updated[0]).toMatchObject({
       token_counting_supported: 'true',
       token_counting_method: 'provider_usage',
-      input_token_cost: 3_000_000,
-      output_token_cost: 15_000_000,
-      input_token_cost_above_200k: 6_000_000,
-      output_token_cost_above_200k: 22_500_000,
-      web_search_cost: 10_000_000,
     });
   });
 
@@ -480,6 +477,8 @@ describe('modelRouter error sanitization', () => {
 
     expect(result).toHaveLength(1);
     expect(result[0]).not.toHaveProperty('api_key');
+    for (const field of ['input_token_cost', 'output_token_cost', 'input_token_cost_above_200k',
+      'output_token_cost_above_200k', 'web_search_cost']) expect(result[0]).not.toHaveProperty(field);
   });
 
   it('marks OpenRouter-compatible models as provider usage billing', async () => {
@@ -549,6 +548,8 @@ describe('modelRouter error sanitization', () => {
     });
 
     expect(inserted).toHaveLength(1);
+    for (const key of ['input_token_cost', 'output_token_cost', 'input_token_cost_above_200k', 'output_token_cost_above_200k', 'web_search_cost', 'max_tokens', 'input_limit'])
+      expect(inserted[0]).not.toHaveProperty(key);
     expect(inserted[0]).toMatchObject({
       token_counting_supported: 'true',
       token_counting_method: 'provider_usage',

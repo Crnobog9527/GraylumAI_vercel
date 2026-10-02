@@ -4,6 +4,7 @@
 import { Label } from '@/components/ui/label';
 import type { PriceChange, PricingSnapshot } from '@repo/api/src/shared/modelPricing';
 import { describeChange, routeView, selectedRoute, snapshotAge, type PriceRow, type RouteView } from './modelPriceView';
+import { READ_HINT, type ReadHintPlace } from './modelReportPricing';
 
 function PriceTable({ rows }: { rows: PriceRow[] }) {
   return (
@@ -34,10 +35,15 @@ function RouteDetails({ view }: { view: RouteView }) {
           <PriceTable rows={tier.prices} />
         </div>
       ))}
-      <p className="text-xs text-[var(--text-tertiary)]">
-        discount：{view.discount ?? '无'}（只记录，不参与计算）
-        {view.unknownKeys.length ? `；目录里还有本系统不认识的价格字段：${view.unknownKeys.join('、')}` : ''}
-      </p>
+      <p className="text-xs text-[var(--text-tertiary)]">discount：{view.discount ?? '无'}（只记录，不参与计算）</p>
+      {view.unknown.length ? (
+        <div className="text-xs text-[var(--text-tertiary)]" data-testid="price-unknown-fields">
+          <p>目录里还有本系统不认识的价格字段（原样列出，不参与计算）：</p>
+          <ul className="list-disc pl-5">
+            {view.unknown.map(item => <li key={item.key}><code>{item.key}</code> = <code>{item.value}</code></li>)}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -54,8 +60,11 @@ export function ModelPriceSnapshotPanel(props: {
   catalogFetchedAt: string | null;
   changes: PriceChange[] | null;
   now?: number;
+  /** Where the read button is; the edit form has none of its own. */
+  where?: ReadHintPlace;
 }) {
   const { pricing, route, modelId, catalogFetchedAt, changes } = props;
+  const hint = READ_HINT[props.where ?? 'dialog'];
   const now = props.now ?? Date.now();
   const selected = selectedRoute(pricing, route, modelId);
   const age = pricing ? snapshotAge(pricing.fetchedAt, now) : null;
@@ -71,12 +80,12 @@ export function ModelPriceSnapshotPanel(props: {
         </p>
       ) : null}
       {age?.stale ? (
-        <p role="status" className="text-amber-400">价格已超过 7 天没有更新，请点上面的"重新读取"。</p>
+        <p role="status" className="text-amber-400">价格已超过 7 天没有更新，请{hint}。</p>
       ) : null}
-      {selected.state === 'missing' ? <p className="text-[var(--text-secondary)]">还没有读取价格。点上面的"重新读取"会同时读取思考目录和价格。</p> : null}
-      {selected.state === 'model_changed' ? <p role="status" className="text-amber-400">模型 ID 已变化，价格属于旧的模型，请重新读取。</p> : null}
+      {selected.state === 'missing' ? <p className="text-[var(--text-secondary)]">还没有读取价格。{hint}会同时读取思考目录和价格。</p> : null}
+      {selected.state === 'model_changed' ? <p role="status" className="text-amber-400">模型 ID 已变化，价格属于旧的模型，请{hint}。</p> : null}
       {selected.state === 'no_route' ? <p className="text-[var(--text-secondary)]">先选择供应商线路，才会显示这条线路的价格。</p> : null}
-      {selected.state === 'route_missing' ? <p role="status" className="text-amber-400">所选线路不在最新的价格里，请重新读取后再选。</p> : null}
+      {selected.state === 'route_missing' ? <p role="status" className="text-amber-400">所选线路不在最新的价格里，请{hint}后再选。</p> : null}
       {selected.state === 'ok' ? <RouteDetails view={selected.view} /> : null}
       {changes && changes.length ? (
         <div role="status" className="space-y-1 text-xs text-[var(--text-secondary)]">

@@ -1,3 +1,5 @@
+import { modelCapacityView, supplierCapacityPatch } from '../shared/modelCapacityView';
+import { modelPriceView } from '../shared/modelPriceView';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -27,15 +29,16 @@ const catalogMessages: Record<string, string> = {
 };
 
 async function readModel(db: SupabaseClient, modelId: string) {
-  const { data, error } = await db.from('ai_models').select('id,model_id,max_tokens,config,updated_at').eq('id', modelId).maybeSingle();
+  const { data, error } = await db.from('ai_models').select('id,model_id,input_limit,max_tokens,config,updated_at').eq('id', modelId).maybeSingle();
   if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '无法读取模型配置，请稍后重试' });
   if (!data) throw new TRPCError({ code: 'NOT_FOUND', message: '模型不存在，请刷新列表' });
-  return data as { id: string; model_id: string; max_tokens: number | null; config: unknown; updated_at: string };
+  return data as { id: string; model_id: string; input_limit?: number | null; max_tokens: number | null; config: unknown; updated_at: string };
 }
-function view(row: { model_id: string; max_tokens: number | null; config: unknown }) {
+function view(row: { model_id: string; input_limit?: number | null; max_tokens: number | null; config: unknown }) {
   const config = readReasoningConfig(row.config);
   const maxTokens = Number(row.max_tokens) || 0;
-  return { model: row.model_id, maxTokens, config, pricing: readPricingSnapshot(row.config),
+  return { model: row.model_id, maxTokens, config, capacity: modelCapacityView(row), priceView: modelPriceView(row),
+    pricing: readPricingSnapshot(row.config),
     issues: checkReasoningConfig(config, { maxTokens, modelId: row.model_id }) };
 }
 type ModelRow = Awaited<ReturnType<typeof readModel>>;
@@ -50,11 +53,12 @@ async function writeReasoning(
   const reasoning = update(readReasoningConfig(current.config), current);
   const base = current.config && typeof current.config === 'object' && !Array.isArray(current.config) ? current.config as Record<string, unknown> : {};
   const config = { ...base, reasoning, ...(pricing ? { pricing } : {}) };
-  const { data, error } = await db.from('ai_models').update({ config, updated_at: new Date().toISOString() })
+  const capacityPatch = pricing ? supplierCapacityPatch({ ...current, config }) : {};
+  const { data, error } = await db.from('ai_models').update({ config, ...capacityPatch, updated_at: new Date().toISOString() })
     .eq('id', modelId).eq('updated_at', current.updated_at).select('id');
   if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '保存模型设置失败，请稍后重试' });
   if (!Array.isArray(data) || data.length !== 1) throw new TRPCError({ code: 'CONFLICT', message: '模型配置刚被修改，请重试' });
-  return { row: current, view: view({ ...current, config }) };
+  return { row: current, view: view({ ...current, config, ...capacityPatch }) };
 }
 
 export const modelReasoningRouter = router({
@@ -107,7 +111,7 @@ export const modelReasoningRouter = router({
       previousHash: previous?.pricingHash ?? null, pricingHash: read.pricing.pricingHash, changes: priceChanges.slice(0, 50),
       catalogChanged: JSON.stringify(readReasoningConfig(saved.row.config).catalog?.endpoints ?? null) !== JSON.stringify(read.catalog.endpoints),
     });
-    return { ...saved.view, priceChanges };
+    return { ...saved.view, priceChanges, previousCapacity: modelCapacityView({ ...saved.row, config: { reasoning: saved.view.config } }) };
   }),
 
   /** Saves the route and purpose settings after checking them against the stored catalog. */

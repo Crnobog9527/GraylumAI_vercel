@@ -1,3 +1,4 @@
+import { pricedModel } from '../shared/__tests__/modelPriceFixture';
 import { describe, expect, it } from 'vitest';
 import {
   buildPerformanceCostStats,
@@ -27,8 +28,15 @@ describe('buildPerformanceCostStats', () => {
     expect(estimateCacheSavings([{ model_used: 'bill2.aggregate', cached_tokens: null }], [])).toBeNull();
     expect(estimateCacheSavings([{ model_used: 'bill2.aggregate', cached_tokens: 100 }], [])).toBeNull();
     expect(estimateCacheSavings([{ model_used: 'model-a', cached_tokens: 100 }], [
-      { model_id: 'model-a', input_token_cost: 1000000 },
-    ])).toBe(0.00009);
+      { ...pricedModel(), model_id: 'model-a', config: undefined },
+    ])).toBeNull();
+    expect(estimateCacheSavings([{ model_used: 'openai/example', cached_tokens: 100 }], [pricedModel()])).toBe(0.000175);
+    const noCache = pricedModel();
+    delete noCache.config.pricing.endpoints[0]!.base.input_cache_read;
+    expect(estimateCacheSavings([{ model_used: 'openai/example', cached_tokens: 100 }], [noCache])).toBeNull();
+    const freeCache = pricedModel('0');
+    expect(estimateCacheSavings([{ model_used: 'openai/example', cached_tokens: 100 }], [freeCache])).toBe(0.0002);
+    expect(estimateCacheSavings([{ model_used: 'openai/example', cached_tokens: 100 }], [freeCache, pricedModel()])).toBeNull();
   });
 });
 

@@ -1,3 +1,4 @@
+import { modelPriceView } from '../shared/modelPriceView';
 import { membershipPlanMutations } from './adminMembershipPlans';
 import { entitlementRowShape } from '../services/membershipEntitlementConfig';
 import { ANNOUNCEMENT_LINK_ERROR, resolveAnnouncementLink } from '../shared/announcementLink';
@@ -70,12 +71,8 @@ const adminFinanceModelRowSchema = z.object({
   model_id: z.string().min(1),
   provider: z.string().min(1),
   is_active: z.union([z.string().trim().min(1), z.boolean()]),
-  input_token_cost: z.number().finite(),
-  output_token_cost: z.number().finite(),
-  input_token_cost_above_200k: z.number().finite(),
-  output_token_cost_above_200k: z.number().finite(),
-  web_search_cost: z.number().finite(),
   max_tokens: z.number().finite(),
+  config: z.unknown().optional(),
 }).passthrough();
 const adminFinanceConversationRowSchema = z.object({
   id: z.string().min(1),
@@ -2152,7 +2149,7 @@ export const adminRouter = router({
 
       const { data: models, error: modelsError } = await readAllReportRows((from, to) => ctx.supabase
         .from('ai_models')
-        .select('*')
+        .select('id,name,model_id,provider,is_active,max_tokens,config')
         .order('name', { ascending: true }).order('id').range(from, to));
 
       if (modelsError) {
@@ -2344,11 +2341,7 @@ export const adminRouter = router({
         modelId: model.model_id,
         provider: model.provider,
         isActive: model.is_active,
-        inputTokenCost: model.input_token_cost,
-        outputTokenCost: model.output_token_cost,
-        inputTokenCostAbove200k: model.input_token_cost_above_200k,
-        outputTokenCostAbove200k: model.output_token_cost_above_200k,
-        webSearchCost: model.web_search_cost,
+        pricing: modelPriceView(model),
         maxTokens: model.max_tokens,
         conversationCount: modelUsageByConversation[model.id] || 0,
         requestCount: modelUsageByToken[model.model_id]?.requests || 0,
@@ -2379,31 +2372,13 @@ export const adminRouter = router({
       // Whether q / the default m is a stored row, a fallback for a missing row, or an invalid stored value.
       const billingUnitSource = describeBillingUnitSettings(settingsMap);
 
-      const inputCreditsPer1KValues = activeMeteredModels
-        .filter((model) => (model.input_token_cost ?? 0) > 0)
-        .map((model) => convertUsdPer1MToCreditsPer1K(
-          (model.input_token_cost ?? 0) / 1_000_000,
-          creditsPerUsd,
-          tokenPriceMultiplier,
-        ));
-
-      const outputCreditsPer1KValues = activeMeteredModels
-        .filter((model) => (model.output_token_cost ?? 0) > 0)
-        .map((model) => convertUsdPer1MToCreditsPer1K(
-          (model.output_token_cost ?? 0) / 1_000_000,
-          creditsPerUsd,
-          tokenPriceMultiplier,
-        ));
-
-      const searchCreditsPer1KValues = activeMeteredModels
-        .filter((model) => (model.web_search_cost ?? 0) > 0)
-        .map((model) =>
-          convertUsdPer1KSearchToCreditsPer1KSearch(
-            (model.web_search_cost ?? 0) / 1_000_000,
-            creditsPerUsd,
-            tokenPriceMultiplier,
-          ),
-        );
+      const currentPrices = activeMeteredModels.map(modelPriceView);
+      const inputCreditsPer1KValues = currentPrices.flatMap(({ frozen }) => frozen
+        ? [convertUsdPer1MToCreditsPer1K(Number(frozen.promptUsdPerMillion), creditsPerUsd, tokenPriceMultiplier)] : []);
+      const outputCreditsPer1KValues = currentPrices.flatMap(({ frozen }) => frozen
+        ? [convertUsdPer1MToCreditsPer1K(Number(frozen.completionUsdPerMillion), creditsPerUsd, tokenPriceMultiplier)] : []);
+      const searchCreditsPer1KValues = currentPrices.flatMap(({ base }) => base?.web_search !== undefined
+        ? [convertUsdPer1KSearchToCreditsPer1KSearch(Number(base.web_search) * 1000, creditsPerUsd, tokenPriceMultiplier)] : []);
 
       const runtimeBilling = {
         creditsPerUsd,
@@ -2554,7 +2529,7 @@ export const adminRouter = router({
           .eq('is_deleted', false),
         ctx.supabase
           .from('ai_models')
-          .select('id, name, model_id, provider, input_token_cost, output_token_cost, web_search_cost, is_active'),
+          .select('id, name, model_id, provider, config, is_active'),
         readAllReportRows((from, to) => ctx.supabase
           .from('token_stats')
           .select('model_used, total_credits, total_cost_usd, input_tokens, output_tokens, cached_tokens, cache_creation_tokens, created_at')
@@ -2718,9 +2693,7 @@ export const adminRouter = router({
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
           cachedTokens: usage.cachedTokens,
-          inputTokenCost: model.input_token_cost ?? 0,
-          outputTokenCost: model.output_token_cost ?? 0,
-          webSearchCost: model.web_search_cost ?? 0,
+          pricing: modelPriceView(model),
         };
       });
 
