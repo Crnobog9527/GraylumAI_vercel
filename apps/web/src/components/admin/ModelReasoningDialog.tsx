@@ -23,6 +23,9 @@ import {
 import type { PriceChange } from '@repo/api/src/shared/modelPricing';
 import { catalogEfforts, fromDraft, normalizeDrafts, toDraft, type Draft, type Wire } from './modelReasoningDraft';
 import { ModelPriceSnapshotPanel } from './ModelPriceSnapshotPanel';
+import { ModelCapacityPanel } from './ModelCapacityPanel';
+import { ModelFrozenPriceSummary } from './ModelFrozenPriceSummary';
+import type { ModelCapacityView } from './modelReportPricing';
 
 const PURPOSE_NOTES: Record<ReasoningPurpose, string> = {
   interactive: '导师和日常对话。必须设置，没设置的模型不能用作 Skill 模型。',
@@ -102,12 +105,16 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
   const utils = trpc.useUtils();
   const view = trpc.modelReasoning.get.useQuery({ modelId });
   const [priceChanges, setPriceChanges] = useState<PriceChange[] | null>(null);
+  const [previousCapacity, setPreviousCapacity] = useState<ModelCapacityView | null>(null);
+  const multipliers = trpc.modelPricing.getMultipliers.useQuery();
   const refresh = trpc.modelReasoning.refreshCatalog.useMutation({
-    onSuccess: ({ priceChanges: changes, ...data }) => {
+    onSuccess: ({ priceChanges: changes, previousCapacity: previous, ...data }) => {
       utils.modelReasoning.get.setData({ modelId }, data);
       setPriceChanges(changes);
-      // The read bumps updated_at; reload it so a multiplier save on the page does not conflict.
+      setPreviousCapacity(previous);
+      // The read bumps updated_at and may sync capacity; reload both so later saves on the page do not conflict.
       void utils.modelPricing.getMultipliers.invalidate();
+      void utils.model.getAdminModelsDashboard.invalidate();
     },
   });
   const save = trpc.modelReasoning.save.useMutation({
@@ -157,6 +164,9 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
   const reasoning = catalog?.reasoning ?? null;
   const problem = drafts ? draftProblem(drafts) : null;
   const serverIssues = view.data?.issues ?? [];
+  const multiplierRow = multipliers.data?.models.find(model => model.id === modelId);
+  const units = multipliers.data
+    ? { multiplier: multiplierRow?.effective ?? null, creditsPerUsd: multipliers.data.site?.creditsPerUsd ?? null } : null;
 
   return (
     <Dialog open onOpenChange={next => { if (!next) onClose(); }}>
@@ -225,6 +235,10 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
               catalogFetchedAt={catalog?.fetchedAt ?? null}
               changes={priceChanges}
             />
+            {view.data ? <ModelFrozenPriceSummary priceView={view.data.priceView} selectedRoute={route} units={units} /> : null}
+            {view.data ? (
+              <ModelCapacityPanel capacity={view.data.capacity} previous={previousCapacity} selectedRoute={route} where="dialog" />
+            ) : null}
 
             {REASONING_PURPOSES.map(purpose => {
               const draft = drafts[purpose];

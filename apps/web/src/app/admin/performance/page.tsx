@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/select";
 import AdminErrorState from '@/components/admin/AdminErrorState';
 import { ReportUsdValue } from '@/components/admin/ReportUsdValue';
+import { ModelReportPriceCell } from '@/components/admin/ModelReportPriceCell';
 import { formatReportUsd } from '@/lib/currency';
 
 type TimeRange = '7d' | '14d' | '30d';
@@ -85,7 +86,7 @@ export default function AdminPerformancePage() {
     inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0
   };
   const costStats = data?.costStats ?? {
-    totalCost: 0, avgCostPerRequest: 0, cacheSavings: 0, estimatedMonthly: 0
+    totalCost: 0, avgCostPerRequest: 0, cacheSavings: null, estimatedMonthly: 0
   };
 
   const healthInfo = healthConfig[aiPerformance.healthStatus];
@@ -575,7 +576,7 @@ export default function AdminPerformancePage() {
                   <div className="min-w-0 flex-1">
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>估算缓存节省</p>
                     {costStats.cacheSavings === null ? (
-                      <p className="text-2xl font-bold mt-1 text-emerald-400">无法估算</p>
+                      <p className="text-2xl font-bold mt-1 text-emerald-400">未知</p>
                     ) : (
                       <ReportUsdValue amount={-costStats.cacheSavings} className="mt-1 text-emerald-400" />
                     )}
@@ -644,11 +645,13 @@ export default function AdminPerformancePage() {
                     </div>
                     <div>
                       <p className="font-medium text-emerald-400">估算缓存节省</p>
-                      <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>命中率 {cacheHitRateText}</p>
+                      <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
+                        命中率 {cacheHitRateText}；按当前价格快照估算：缓存读取 token ×（输入价 − 缓存读取价），不是历史实际节省
+                      </p>
                     </div>
                   </div>
                   <span className="font-mono text-lg text-emerald-400">
-                    {costStats.cacheSavings === null ? '无法估算' : `-${formatCost(costStats.cacheSavings)}`}
+                    {costStats.cacheSavings === null ? '未知' : `-${formatCost(costStats.cacheSavings)}`}
                   </span>
                 </div>
               </div>
@@ -673,8 +676,8 @@ export default function AdminPerformancePage() {
                     <TableHead>提供商</TableHead>
                     <TableHead>状态</TableHead>
                     <TableHead>对话数</TableHead>
-                    <TableHead>输入成本</TableHead>
-                    <TableHead>输出成本</TableHead>
+                    <TableHead>输入价格</TableHead>
+                    <TableHead>输出价格</TableHead>
                     <TableHead>占比</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -711,12 +714,8 @@ export default function AdminPerformancePage() {
                         <TableCell style={{ color: 'var(--text-primary)' }}>
                           {model.conversationCount.toLocaleString()}
                         </TableCell>
-                        <TableCell style={{ color: 'var(--text-tertiary)' }}>
-                          ${(model.inputTokenCost / 1000000).toFixed(2)}/M
-                        </TableCell>
-                        <TableCell style={{ color: 'var(--text-tertiary)' }}>
-                          ${(model.outputTokenCost / 1000000).toFixed(2)}/M
-                        </TableCell>
+                        <TableCell><ModelReportPriceCell pricing={model.pricing} kind="prompt" /></TableCell>
+                        <TableCell><ModelReportPriceCell pricing={model.pricing} kind="completion" /></TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <div className="flex-1 h-2 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">

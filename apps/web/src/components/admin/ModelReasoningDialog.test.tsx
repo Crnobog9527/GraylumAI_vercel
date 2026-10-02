@@ -21,19 +21,26 @@ beforeAll(async () => {
       reasoning: { mandatory: false, defaultEnabled: false, supportedEfforts: ['high', 'low'], defaultEffort: 'low', supportsMaxTokens: true },
       endpoints: [{ tag: 'example', providerName: 'Example', supportedParameters: ['tools', 'reasoning'], contextLength: 8192, maxCompletionTokens: 8192 }]
     };
-    const data = { model: 'example/model', maxTokens: 8192, issues: [], config: {
+    const capacity = { route: 'example', fetchedAt: '2026-09-29T00:00:00.000Z',
+      inputLimit: { supplier: 8192, current: 8192, matches: true }, maxTokens: { supplier: 8192, current: 8192, matches: true } };
+    const priceView = { status: 'unread', label: '未读取', route: 'example', fetchedAt: null, pricingHash: null, source: null,
+      base: null, frozen: null, promptTokensUpper: null };
+    const data = { model: 'example/model', maxTokens: 8192, issues: [], capacity, priceView, config: {
       catalog, route: 'example', purposes: { interactive: { mode: 'effort', effort: 'high', wire: 'reasoning' } }
     }};
+    const multipliers = { available: true, site: { creditsPerUsd: '100', defaultMultiplier: '1.5' },
+      models: [{ id: 'model-fixture', effective: '2' }] };
     const state = window.__mr1 = {
       data, initialError: true, refetches: 0, saved: [], refreshError: null, saveError: null,
       queryError: { message: 'fetch failed: internal transport token', data: { code: 'INTERNAL_SERVER_ERROR' } },
-      refreshCatalog: null, tried: [], tryPending: false, tryError: null,
+      refreshCatalog: null, refreshCapacity: null, multipliers, tried: [], tryPending: false, tryError: null,
       tryResult: { ok: true, firstTextMs: 123, totalMs: 456, hasText: true, reasoningTokens: 0, costUsd: 0.00001, truncated: false },
     };
     const setData = (_, value) => { state.data = value; window.rerender(); };
     export const trpc = {
       useUtils: () => ({ modelReasoning: { get: { setData } }, settings: { getSummaryModels: { invalidate() {} } },
-        modelPricing: { getMultipliers: { invalidate() {} } } }),
+        modelPricing: { getMultipliers: { invalidate() {} } }, model: { getAdminModelsDashboard: { invalidate() {} } } }),
+      modelPricing: { getMultipliers: { useQuery: () => ({ data: state.multipliers }) } },
       modelReasoning: {
         tryOnce: { useMutation: () => ({ isPending: state.tryPending,
           mutate: (input, options) => {
@@ -50,7 +57,8 @@ beforeAll(async () => {
         refreshCatalog: { useMutation: options => ({
           error: state.refreshError, isPending: false,
           mutate: () => {
-            if (state.refreshCatalog) options.onSuccess({ ...state.data, config: { ...state.data.config, catalog: state.refreshCatalog }, priceChanges: [] });
+            if (state.refreshCatalog) options.onSuccess({ ...state.data, config: { ...state.data.config, catalog: state.refreshCatalog },
+              capacity: state.refreshCapacity ?? state.data.capacity, previousCapacity: state.data.capacity, priceChanges: [] });
           }
         }) },
         save: { useMutation: () => ({ error: state.saveError, isPending: false, isSuccess: false,
@@ -207,5 +215,61 @@ describe('reasoning dialog local browser regression', () => {
       await browserExpect(panel.getByRole('textbox')).toHaveCount(0);
     });
   });
-});
 
+  it('shows read-only capacity, flags a supplier mismatch and reports what an explicit read synced', async () => {
+    await withDialog(async page => {
+      await loadSettings(page);
+      await page.evaluate(`const d = window.__mr1.data;
+        window.__mr1.data = { ...d, capacity: { ...d.capacity, maxTokens: { supplier: 8192, current: 4096, matches: false } } };
+        window.rerender();`);
+      const panel = page.getByTestId('model-capacity-panel');
+      await browserExpect(panel.locator('[data-capacity-field="inputLimit"]')).toHaveText(/上下文限制8,1928,192一致/);
+      await browserExpect(panel.locator('[data-capacity-field="maxTokens"]')).toHaveText(/最大输出 Token8,1924,096不一致/);
+      await browserExpect(panel).toContainText('当前值和供应商不一致，请点上面的"重新读取"同步');
+      await browserExpect(panel.getByRole('textbox')).toHaveCount(0);
+      await browserExpect(panel.getByRole('spinbutton')).toHaveCount(0);
+      await page.evaluate(`window.__mr1.refreshCatalog = window.__mr1.data.config.catalog;
+        window.__mr1.refreshCapacity = { ...window.__mr1.data.capacity, maxTokens: { supplier: 8192, current: 8192, matches: true } };`);
+      await page.getByRole('button', { name: '重新读取', exact: true }).click();
+      await browserExpect(panel).toContainText('本次读取已按供应商同步：最大输出 Token：4,096 → 8,192');
+      await browserExpect(panel).not.toContainText('不一致');
+    });
+  });
+
+  it('says capacity and frozen prices follow the saved route when the selection is unsaved', async () => {
+    await withDialog(async page => {
+      await loadSettings(page);
+      await page.evaluate(`const d = window.__mr1.data;
+        window.__mr1.data = { ...d, capacity: { ...d.capacity, route: 'old-route' },
+          priceView: { ...d.priceView, status: 'route_unavailable', label: '不可推导', route: 'old-route', fetchedAt: '2026-09-29T00:00:00.000Z' } };
+        window.rerender();`);
+      await browserExpect(page.getByTestId('model-capacity-panel')).toContainText('你改选了线路但还没保存');
+      const frozen = page.getByTestId('model-frozen-price');
+      await browserExpect(frozen).toContainText('按已保存的线路 old-route 计算');
+      await browserExpect(frozen).toContainText('不可推导：已选线路不在最新价格或目录里');
+    });
+  });
+
+  it('shows frozen prices with their source and a reference user price, never a guessed one', async () => {
+    await withDialog(async page => {
+      await loadSettings(page);
+      await browserExpect(page.getByTestId('model-frozen-price')).toHaveCount(0);
+      await page.evaluate(`window.__mr1.data = { ...window.__mr1.data, priceView: { ...window.__mr1.data.priceView,
+        status: 'ready', label: '已读取', fetchedAt: '2026-09-29T00:00:00.000Z', promptTokensUpper: 8192,
+        base: { prompt: '0.1', completion: '0.5' },
+        frozen: { promptUsdPerMillion: '0.2', completionUsdPerMillion: '0.75', requestUsd: '0',
+          explain: { prompt: '第 1 档输入', completion: '第 1 档输出' } } } }; window.rerender();`);
+      const frozen = page.getByTestId('model-frozen-price');
+      await browserExpect(frozen).toContainText('输入最高单价 $0.2 美元 / 百万 token（来源：第 1 档输入）');
+      await browserExpect(frozen).toContainText('输出最高单价 $0.75 美元 / 百万 token（来源：第 1 档输出）');
+      await browserExpect(frozen).not.toContainText('每次请求');
+      const preview = page.getByTestId('model-user-price-preview');
+      await browserExpect(preview).toContainText('倍数 m（2）× 每美元积分 q（100）。仅供参考，实扣按实际费用');
+      await browserExpect(preview).toContainText('输入最多约 40 积分 / 百万 token');
+      await browserExpect(preview).toContainText('输出最多约 150 积分 / 百万 token');
+      await page.evaluate(`window.__mr1.multipliers = { ...window.__mr1.multipliers, site: null }; window.rerender();`);
+      await browserExpect(preview).toContainText('倍数或每美元积分未知，无法换算');
+      await browserExpect(preview).not.toContainText('积分 / 百万 token');
+    });
+  });
+});

@@ -24,6 +24,7 @@ import AdminErrorState from '@/components/admin/AdminErrorState';
 import { formatUsdFromCents } from '@/lib/currency';
 import { ReportUsdValue } from '@/components/admin/ReportUsdValue';
 import { Bill2ModelReportCard, UNIT_SOURCE_LABEL } from '@/components/admin/Bill2ModelReportCard';
+import { ModelReportPriceCell } from '@/components/admin/ModelReportPriceCell';
 
 function formatCreditsRange(range: { min: number; max: number } | null, suffix: string) {
   if (!range) {
@@ -510,6 +511,9 @@ export default function AdminFinancePage() {
                 <Cpu className="h-5 w-5" />
                 模型渠道统计
               </CardTitle>
+              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                价格为所选线路的 OpenRouter 价格快照（只读）；"冻结用单价"是调用前上限用的最高单价。实际成本以每次记录的费用为准。
+              </p>
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
@@ -518,9 +522,9 @@ export default function AdminFinancePage() {
                   <TableRow>
                     <TableHead>模型名称</TableHead>
                     <TableHead>提供商</TableHead>
-                    <TableHead>输入成本</TableHead>
-                    <TableHead>输出成本</TableHead>
-                    <TableHead>搜索成本</TableHead>
+                    <TableHead>输入价格</TableHead>
+                    <TableHead>输出价格</TableHead>
+                    <TableHead>联网搜索价格</TableHead>
                     <TableHead>对话数</TableHead>
                     <TableHead>状态</TableHead>
                   </TableRow>
@@ -543,35 +547,9 @@ export default function AdminFinancePage() {
                           {model.provider}
                         </Badge>
                       </TableCell>
-                      <TableCell>
-                        <div className="text-sm">
-                          <div style={{ color: 'var(--text-primary)' }}>
-                            ${(model.inputTokenCost / 1000000).toFixed(3)}/1M
-                          </div>
-                          {model.inputTokenCostAbove200k > 0 && (
-                            <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                              &gt;200K: ${(model.inputTokenCostAbove200k / 1000000).toFixed(3)}
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="text-sm">
-                          <div style={{ color: 'var(--text-primary)' }}>
-                            ${(model.outputTokenCost / 1000000).toFixed(3)}/1M
-                          </div>
-                          {model.outputTokenCostAbove200k > 0 && (
-                            <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                              &gt;200K: ${(model.outputTokenCostAbove200k / 1000000).toFixed(3)}
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <span style={{ color: 'var(--text-primary)' }}>
-                          {model.webSearchCost > 0 ? `$${(model.webSearchCost / 1_000_000).toFixed(3)}/1K` : '-'}
-                        </span>
-                      </TableCell>
+                      <TableCell><ModelReportPriceCell pricing={model.pricing} kind="prompt" /></TableCell>
+                      <TableCell><ModelReportPriceCell pricing={model.pricing} kind="completion" /></TableCell>
+                      <TableCell><ModelReportPriceCell pricing={model.pricing} kind="web_search" /></TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
                           <MessageSquare className="h-4 w-4" style={{ color: 'var(--text-tertiary)' }} />
