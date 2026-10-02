@@ -154,12 +154,24 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
     selectedIndex:scenario==='refresh'?null:0,selectedOption:scenario==='refresh'?null:saved.card.options[0]});
   }
   await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).click();await poll(async()=>(await control()).length).toBe(7);expect((await control())[6]!.stream).toBe(true);await control(7);await poll(async()=>(await control()).length).toBe(8);await control(8);await poll(()=>send.isEnabled()).toBe(true);
+  // A reader at the bottom keeps following the newest mentor message as it arrives.
+  if(scenario==='normal')await poll(()=>page.getByRole('log',{name:'完整导师消息'}).evaluate(node=>
+   node.scrollHeight>node.clientHeight+300&&node.scrollHeight-node.clientHeight-node.scrollTop<64)).toBe(true);
   const before=(await sql.query('select id,state from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows;
   await page.reload();await poll(()=>composer.isEditable()).toBe(true);expect((await control()).length).toBe(8);
   expect((await f.service.read(d.draftId)).information['step-0'].values.product.status).toBe('confirmed');
   await page.getByRole('link',{name:'资料库',exact:true}).click();await page.getByRole('link',{name:'返回当前工作',exact:true}).click();await page.waitForURL('**'+path);
   expect((await control()).length).toBe(8);expect((await sql.query('select id,state from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows).toEqual(before);
   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-persisted-return-'+scenario+'.png',fullPage:true});
+  if(scenario==='normal'){
+   // A reader who scrolled up keeps that position across a refresh instead of jumping to the newest message.
+   const log=page.getByRole('log',{name:'完整导师消息'});
+   expect(await log.evaluate(node=>node.scrollHeight-node.clientHeight)).toBeGreaterThan(300);
+   await log.evaluate(node=>{node.scrollTop=120;});await page.waitForTimeout(300);
+   await page.reload();await poll(()=>log.locator('[data-message-role=assistant]').count()).toBeGreaterThan(0);
+   await poll(()=>log.evaluate(node=>node.scrollTop)).toBe(120);
+   await page.waitForTimeout(500);expect(await log.evaluate(node=>node.scrollTop)).toBe(120);
+  }
   // Mentor dialogue carries the frozen latency policy; the Luna organizer keeps its original bytes.
   expect((await control()).map(call=>[call.stream,call.reasoningEffort])).toEqual((await control()).map(call=>call.stream?[true,'none']:[false,null]));expect((await control()).some(call=>!call.stream)).toBe(true);
   const settlements=(await sql.query("select r.id,count(t.id)::int spends from bill2_runs r left join credit_transactions t on t.bill2_run_id=r.id and t.reason_code='bill2_spend' where r.actor_id=$1 group by r.id",[f.actor])).rows;
