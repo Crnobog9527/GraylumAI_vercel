@@ -100,6 +100,41 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['legacy','serial-to
   expect((await db.query('select count(*)::int n from bill2_runs where test_window_id=$1',[windowId])).rows[0].n).toBe(1);
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },30000);
+// runM is the run/window multiplier used for the reservation (the window's maximum m); the called model's m_i is 1.5.
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([{runM:'1.5',credits:30},{runM:'3',credits:60}])('RUNTIME: BILL-UNIT new contract freezes m_i on the TS-built call and settles ceil(q × Σ cost × m_i) once (run m=$runM)',async({runM,credits})=>{
+ const f=await fixture(),realModel=randomUUID(),windowId=randomUUID();
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic BILL-UNIT','test/bill-unit','openai','true')",[realModel]);
+ // A v2 window: the entry carries m_i, rules carry the frozen billingUnit snapshot (q=1000, inherited m=1.5).
+ const policy={...f.billing.callPolicy[0],multiplier:'1.5',modelId:realModel,provider:'openrouter',model:'test/bill-unit',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
+ const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'hello',instructions:'Only local synthetic input',model:'test/bill-unit',maxOutputTokens:100,maxTurns:1,historyItems:0,network:'deny',workspaceContext:true,tools:['read_source'],request:{sessionId:f.s.sessionId,requestId:f.admit.p_request_id}};
+ const billingUnit={version:'bill-unit-v2',creditsPerUsd:'1000',defaultMultiplier:'1.5',models:{[realModel]:{multiplier:'1.5',source:'global'}},providers:{},hash:'f'.repeat(64)};
+ const billing={...f.billing,mode:'staging_test',testWindowId:windowId,modelId:realModel,input:context,callPolicy:[policy],
+  rules:{...f.billing.rules,version:'runtime-staging-v1',quoteVersion:windowId,creditsPerUsd:'1000',multiplier:runM,billingUnit},
+  limits:{...f.billing.limits,credits,maxPreDeduct:credits}};
+ // With runM=3 the window also approves a second, more expensive model that this run does not call.
+ const other={...policy,multiplier:'3',modelId:randomUUID(),model:'test/bill-unit-other'};
+ await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,$4,0.02,1,now()+interval '2 hours')",
+  [windowId,[f.actorId],JSON.stringify(runM==='3'?[policy,other]:[policy]),runM]);
+ const e=await rpc('runtime_admit',{...f.admit,p_payload:context,p_billing:billing});
+ const server=createServer(async(req,res)=>{req.resume();await new Promise(resolve=>req.on('end',resolve));
+  res.setHeader('content-type','application/json');res.end(JSON.stringify({id:'gen-bill-unit-'+windowId,object:'chat.completion',created:1,model:'test/bill-unit',choices:[{index:0,message:{role:'assistant',content:'BILL-UNIT answer',tool_calls:null},finish_reason:'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7,cost:0.003}}));
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('local server');
+  const endpoint='http://127.0.0.1:'+address.port;
+  const adapter=openRouterAdapter({allowWorkspaceRead:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>fetch(endpoint,init)});
+  const host=runtimeExecutor({database:admin,actor:async()=>f.actorId,endpoint,adapter});
+  expect(await host.execute(e.executionId)).toMatchObject({state:'completed',body:'BILL-UNIT answer'});
+  const call=(await db.query('select payload from bill2_calls where run_id=$1',[e.runId])).rows[0].payload;
+  expect(call.billingUnit).toEqual({modelId:realModel,multiplier:'1.5',source:'global'});
+  const run=(await db.query('select state,charged,provider_cost_usd::text cost,multiplier::text m from bill2_runs where id=$1',[e.runId])).rows[0];
+  // Settled at the call's own m_i: ceil(0.003 × 1000 × 1.5) = 5, also when the run's reservation multiplier
+  // is 3 (charging at the run m would give ceil(0.003 × 1000 × 3) = 9).
+  expect(run).toMatchObject({state:'settled',charged:5,cost:'0.003',m:runM});
+  expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(95);
+ }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+},30000);
 it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['plain','reasoning','unsupported'])('RUNTIME: staging SDK assistant history across executions preserves %s and rejects unsupported metadata',async(shape)=>{
  const f=await fixture(),model=randomUUID(),windowId=randomUUID();
  await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic history','test/history','openrouter','true')",[model]);
@@ -516,9 +551,10 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RU
  await db.query('insert into profiles(id,credits) values($1,1000) on conflict(id) do update set credits=1000',[actor]);
  const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
  const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
- await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Synthetic quote','test/admission','openai','true',1000,$2)",[model,contextTokens]);
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit,price_multiplier) values($1,'Synthetic quote','test/admission','openai','true',1000,$2,1)",[model,contextTokens]);
  const upperUsd=contextTokens===1050000?'0.4218':'0.02',outputLimit=contextTokens===1050000?1000:100;
- const call={modelId:model,provider:'openrouter',account:'synthetic-account',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd,inputLimit:8000,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens,promptUsdPerMillion:contextTokens===1050000?'0.4':'2',completionUsdPerMillion:contextTokens===1050000?'1.8':'0',requestUsd:'0'}};
+ // BILL-UNIT window: each entry carries the model's m_i, equal to the configuration (price_multiplier=1).
+ const call={multiplier:'1',modelId:model,provider:'openrouter',account:'synthetic-account',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd,inputLimit:8000,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens,promptUsdPerMillion:contextTokens===1050000?'0.4':'2',completionUsdPerMillion:contextTokens===1050000?'1.8':'0',requestUsd:'0'}};
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.9,1,now()+interval '2 hours')",[windowId,[actor],JSON.stringify([call])]);
  const env={V3_RUNTIME_STAGING_ENABLED:'true',VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'graylumai-staging.vercel.app',VERCEL_GIT_COMMIT_REF:'staging',VERCEL_GIT_REPO_OWNER:'Crnobog9527',VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',V3_RUNTIME_STAGING_PROJECT_ID:'synthetic-project',VERCEL_PROJECT_ID:'synthetic-project',NEXT_PUBLIC_SUPABASE_URL:'https://synthetic.supabase.co',V3_RUNTIME_STAGING_DATABASE_HOST:'synthetic.supabase.co',V3_RUNTIME_STAGING_WINDOW_ID:windowId};
  const real=await loadStagingPolicy(admin,actor,env);
@@ -529,6 +565,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RU
  const e=await admission.prepare(request);expect(await admission.prepare(request)).toEqual(e);
  const saved=(await db.query('select payload,reserved from bill2_runs where id=$1',[e.runId])).rows[0];
  expect(saved.reserved).toBe(contextTokens===1050000?422:20);expect(saved.payload).toMatchObject({mode:'staging_test',testWindowId:windowId,callPolicy:[call],rules:{creditsPerUsd:'1000',multiplier:'1'}});
+ expect(saved.payload.rules.billingUnit).toMatchObject({version:'bill-unit-v2',creditsPerUsd:'1000',models:{[model]:{multiplier:'1',source:'model'}}});
  // Actual protected router + real Auth/PostgREST: switching only the host
  // enablement off must preserve reads and cancel a definitely unsent request.
  const caller=runtimeRouter.createCaller(await createTRPCContext({headers:new Headers(),supabaseAuth:user}));

@@ -5,6 +5,7 @@ import {decimal} from '../bill2/decimal';
 import {openRouterBound} from '../bill2/openRouterPolicy';
 import {stagingRuntimeWindow} from './stagingEnvironment';
 import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
+import {assertWindowMultipliers} from './billingUnitAdmission';
 const schema=z.object({id:z.string().uuid(),callPolicies:z.array(frozenCallPolicy).min(1).max(16),creditsPerUsd:z.string(),multiplier:z.string(),expiresAt:z.string().datetime({offset:true})}).strict();
 export type StagingPolicy=z.infer<typeof schema>;
 /** Called only after authentication by the server host. The SQL procedure
@@ -31,6 +32,7 @@ function parsePolicy(value:unknown,windowId?:string):StagingPolicy{
   ids.add(call.modelId);
   if(decimal(openRouterBound(call.providerLimits,call.outputLimit).upperUsd)!==decimal(call.upperUsd))throw new StagingAccessError('RUNTIME_STAGING_QUOTE_CONFLICT');
  }
+ assertWindowMultipliers(policy);
  return policy;
 }
 

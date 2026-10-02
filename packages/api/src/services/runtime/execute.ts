@@ -21,6 +21,7 @@ import { runRuntime, type RuntimeTool } from './runner';
 import { selectRuntimeHistory, selectRuntimeCallInput, projectSupersededScopeItem, requestsHistoricalComparison, assertRuntimeRequestCapacity, runtimeScopeInput } from './context';
 import { matchingPlan, matchingInput, MATCH_INSTRUCTIONS, parseMatch, type MatchCandidate } from './matching';
 import { reasoningPolicy } from './reasoningPolicy';
+import { callBillingUnit } from './billingUnitAdmission';
 const preflightCodes=new Set(['RUNTIME_TIME_BUDGET_EXHAUSTED','RUNTIME_PROVIDER_HISTORY_DENIED','RUNTIME_PROVIDER_BINDING_DENIED','BILL2_PROVIDER_REQUEST_DENIED','BILL2_PROVIDER_CREDENTIAL_UNAVAILABLE','BILL2_PROVIDER_IDENTITY_DENIED','BILL2_PROVIDER_MODEL_DENIED','BILL2_PROVIDER_QUOTE_REQUIRED','BILL2_PROVIDER_QUOTE_CONFLICT']);
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 export const runtimeContext=z.object({
@@ -140,7 +141,8 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
       else budget.assertCanStart(5000);
       const call:FrozenCall={provider:selectedPolicy.provider,account:selectedPolicy.account,model:selectedPolicy.model,protocol:selectedPolicy.protocol,
        ...(selectedPolicy.providerLimits?{providerLimits:selectedPolicy.providerLimits}:{}),phase,requestHash,upperUsd:selectedPolicy.upperUsd,inputLimit:selectedPolicy.inputLimit,outputLimit:selectedPolicy.outputLimit,
-       automaticRetry:false,hiddenTools:false,lookupSupported:selectedPolicy.lookupSupported};
+       automaticRetry:false,hiddenTools:false,lookupSupported:selectedPolicy.lookupSupported,
+       ...callBillingUnit(execution.billing.rules,selectedPolicy)};
       const claim=await billing.claimCall(execution.runId,sequence,call);
       if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
       else budget.assertCanStart(5000);
