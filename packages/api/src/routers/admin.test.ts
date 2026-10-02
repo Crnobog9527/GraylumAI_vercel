@@ -578,6 +578,8 @@ describe('adminRouter performance stats aggregation', () => {
 
     const caller = createAdminCaller(adminSupabase);
     const result = await caller.getPerformanceStats({ timeRange: '14d' });
+    expect(result.modelUsage[0]?.pricing).toMatchObject({ status: 'unread', label: '未读取', base: null, frozen: null });
+    expect(result.modelUsage[0]).not.toHaveProperty('inputTokenCost');
 
     expect(result.conversations).toMatchObject({
       total: 100,
@@ -1336,6 +1338,9 @@ describe('adminRouter finance stats runtime billing summary', () => {
     const caller = createAdminCaller(adminSupabase);
     const result = await caller.getFinanceStats();
 
+    expect(result.modelStats[0]?.pricing).toMatchObject({ status: 'ready', base: { prompt: '2' },
+      frozen: { promptUsdPerMillion: '3' } });
+    expect(result.modelStats[0]).not.toHaveProperty('inputTokenCost');
     expect(result.runtimeBilling).toEqual({
       creditsPerUsd: 1000,
       tokenPriceMultiplier: 1.5,

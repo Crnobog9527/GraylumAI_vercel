@@ -58,6 +58,7 @@ describe('modelReasoning router', () => {
   it('is administrator only', async () => {
     const t = harness('user', null);
     await expect(t.caller.get({ modelId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(t.caller.refreshCatalog({ modelId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(t.caller.save({ modelId, route: 'deepinfra', purposes: deepseekOff })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     expect(t.tables).not.toContain('ai_models');expect(t.updates).toEqual([]);
   });
@@ -91,6 +92,9 @@ describe('modelReasoning router', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result.config.catalog?.reasoning?.supportedEfforts).toEqual(['low']);
     expect(t.updates[0]!.config).toMatchObject({ last_error: null, reasoning: { route: 'deepinfra', purposes: deepseekOff } });
+    expect(t.updates[0]).not.toHaveProperty('input_limit');
+    expect(t.updates[0]).not.toHaveProperty('max_tokens');
+    expect(result.capacity.maxTokens).toEqual({ supplier: null, current: 8192, matches: null });
   });
 
   it('updates supplier capacities only on explicit refresh and returns before/after comparisons', async () => {

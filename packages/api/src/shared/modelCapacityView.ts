@@ -29,3 +29,5 @@ export function supplierCapacityPatch(row: CapacityRow) {
     ...(capacity.maxTokens.supplier !== null ? { max_tokens: capacity.maxTokens.supplier } : {}),
   };
 }
+
+export type ModelCapacityView = ReturnType<typeof modelCapacityView>;

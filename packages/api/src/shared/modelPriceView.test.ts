@@ -12,6 +12,16 @@ describe('snapshot report and capacity views', () => {
     expect(modelPriceView({ model_id: row.model_id })).toMatchObject({ status: 'unread', label: '未读取', base: null, frozen: null });
     expect(modelPriceView({ ...row, model_id: 'changed/model' })).toMatchObject({ status: 'model_mismatch', base: null, frozen: null });
   });
+  it('refuses frozen reports for missing routes, malformed snapshots and unknown price keys', () => {
+    const row = pricedModel();
+    row.config.reasoning.route = 'missing';
+    expect(modelPriceView(row)).toMatchObject({ status: 'route_unavailable', base: null, frozen: null });
+    row.config.reasoning.route = 'openai';
+    row.config.pricing.endpoints[0]!.unknownKeys = ['new_charge'];
+    expect(modelPriceView(row)).toMatchObject({ status: 'UNKNOWN_PRICE_FIELD', frozen: null });
+    row.config.pricing.pricingHash = 'malformed';
+    expect(modelPriceView(row)).toMatchObject({ status: 'unread', base: null, frozen: null });
+  });
   it('reports differences without writing and prepares supplier limits only when explicitly called', () => {
     const row = { ...pricedModel(), max_tokens: 8192, input_limit: 180000 };
     expect(modelCapacityView(row)).toMatchObject({ inputLimit: { supplier: 1000000, current: 180000, matches: false },
