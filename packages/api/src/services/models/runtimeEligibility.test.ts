@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { runtimeModelOption } from './runtimeEligibility';
-import { withStoredReasoning } from './modelConfig';
+import { withStoredManagedKeys } from './modelConfig';
 
 const reasoning = { route: 'deepinfra', purposes: { interactive: { mode: 'off', wire: 'reasoning_effort' } }, catalog: {
   fetchedAt: '2026-09-29T00:00:00.000Z', model: 'deepseek/deepseek-v4.1-flash',
@@ -42,10 +42,10 @@ describe('runtimeModelOption', () => {
   });
 });
 
-describe('withStoredReasoning', () => {
+describe('withStoredManagedKeys', () => {
   it('keeps the stored reasoning and ignores one in a generic write', () => {
-    expect(withStoredReasoning({ connection_status: 'ok', reasoning: { forged: true } }, { reasoning, last_error: 'x' }))
+    expect(withStoredManagedKeys({ connection_status: 'ok', reasoning: { forged: true } }, { reasoning, last_error: 'x' }))
       .toEqual({ connection_status: 'ok', reasoning });
-    expect(withStoredReasoning({ connection_status: 'ok', reasoning: { forged: true } }, null)).toEqual({ connection_status: 'ok' });
+    expect(withStoredManagedKeys({ connection_status: 'ok', reasoning: { forged: true } }, null)).toEqual({ connection_status: 'ok' });
   });
 });

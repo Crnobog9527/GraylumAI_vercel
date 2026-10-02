@@ -12,6 +12,9 @@ const catalog = {
 function harness(role: 'admin' | 'user', config: Record<string, unknown> | null) {
   const updates: Array<Record<string, unknown>> = [];
   let stored = config;
+  // Each stored change gets a new updated_at; writes are conditional on the version read.
+  let version = 1, model = 'deepseek/deepseek-v4.1-flash', bumpBeforeWrite = false;
+  const stamp = () => `2026-10-02T00:00:0${version}.000Z`;
   const tables: string[] = [];
   const db = {
     from(table: string) {
@@ -21,11 +24,21 @@ function harness(role: 'admin' | 'user', config: Record<string, unknown> | null)
       if (table !== 'ai_models') throw new Error('unexpected table ' + table);
       return {
         select() { return this; }, eq() { return this; },
-        maybeSingle: async () => ({ data: { id: modelId, name: 'DeepSeek', model_id: 'deepseek/deepseek-v4.1-flash', max_tokens: 8192, input_limit: 100000,
-          provider: 'openai', is_active: 'true', api_key: 'SECRET_CANARY', api_endpoint: '', config: stored }, error: null }),
+        maybeSingle: async () => ({ data: { id: modelId, name: 'DeepSeek', model_id: model, max_tokens: 8192, input_limit: 100000,
+          provider: 'openai', is_active: 'true', api_key: 'SECRET_CANARY', api_endpoint: '', config: stored, updated_at: stamp() }, error: null }),
         update(payload: Record<string, unknown>) {
-          updates.push(payload); stored = payload.config as Record<string, unknown>;
-          return { eq: async () => ({ error: null }) };
+          const filters: Record<string, unknown> = {};
+          const write = {
+            eq(column: string, value: unknown) { filters[column] = value; return write; },
+            select: async () => {
+              // Simulates another writer committing between this read and this write.
+              if (bumpBeforeWrite) version += 1;
+              if (filters.updated_at !== stamp()) return { data: [], error: null };
+              updates.push(payload); stored = payload.config as Record<string, unknown>; version += 1;
+              return { data: [{ id: modelId }], error: null };
+            },
+          };
+          return write;
         },
       };
     },
@@ -34,7 +47,8 @@ function harness(role: 'admin' | 'user', config: Record<string, unknown> | null)
     headers: new Headers(), user: { id: 'actor', email: 'admin@example.test', app_metadata: { provider: 'email' }, user_metadata: { email_verified: true } },
     isEmailVerified: true, authProvider: 'email', supabase: db, supabaseAuth: db, supabasePublic: {}, supabaseAdmin: db, hasSupabaseAdminPrivileges: true,
   } as never);
-  return { caller, updates, tables, set: (value: Record<string, unknown>) => { stored = value; } };
+  return { caller, updates, tables, set: (value: Record<string, unknown>) => { stored = value; version += 1; },
+    setModel: (value: string) => { model = value; }, bumpOnWrite: () => { bumpBeforeWrite = true; } };
 }
 const deepseekOff = { interactive: { mode: 'off', wire: 'reasoning_effort' } } as const;
 
@@ -95,6 +109,46 @@ describe('modelReasoning router', () => {
     }));
     await t.caller.refreshCatalog({ modelId });
     expect(t.updates[0]!.config).toMatchObject({ connection_status: 'connected', reasoning: { route: 'deepinfra', purposes: deepseekOff } });
+  });
+
+  it('stores the price snapshot with the catalog and reports field changes on the next read', async () => {
+    const list = { data: [{ id: 'openai/gpt-6-luna' }] };
+    let prompt = '0.0000001';
+    const endpoints = () => ({ data: { id: 'openai/gpt-6-luna', endpoints: [{ tag: 'openai', provider_name: 'OpenAI', supported_parameters: ['tools'],
+      context_length: 1050000, pricing: { prompt, completion: '0.0000005', input_cache_write: '0.000000125', discount: 0,
+        overrides: [{ min_prompt_tokens: 272000, prompt: '0.0000002', completion: '0.00000075' }] } }] } });
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => new Response(JSON.stringify(String(url).endsWith('/endpoints') ? endpoints() : list))));
+    const t = harness('admin', { connection_status: 'connected', reasoning: { catalog: null, route: 'openai', purposes: {} } });
+    t.setModel('openai/gpt-6-luna');
+    const first = await t.caller.refreshCatalog({ modelId });
+    expect(first.pricing).toMatchObject({ model: 'openai/gpt-6-luna', source: 'openrouter:/api/v1/models/openai/gpt-6-luna/endpoints',
+      endpoints: [{ tag: 'openai', admissible: true, base: { prompt: '0.1', completion: '0.5', input_cache_write: '0.125' },
+        overrides: [{ when: { minPromptTokens: 272000 }, prices: { prompt: '0.2', completion: '0.75' } }] }] });
+    expect(first.priceChanges).toEqual([]);
+    expect(t.updates[0]!.config).toMatchObject({ connection_status: 'connected', reasoning: { route: 'openai' }, pricing: { pricingHash: first.pricing!.pricingHash } });
+    prompt = '0.00000011';
+    const second = await t.caller.refreshCatalog({ modelId });
+    expect(second.priceChanges).toEqual([{ tag: 'openai', change: 'changed', field: 'prompt', before: '0.1', after: '0.11' }]);
+    expect(second.pricing!.pricingHash).not.toBe(first.pricing!.pricingHash);
+  });
+
+  it('stores nothing when the model ID changes while the catalog is read', async () => {
+    const t = harness('admin', { reasoning: { catalog: null, route: null, purposes: {} } });
+    const list = { data: [{ id: 'deepseek/deepseek-v4.1-flash' }] };
+    const endpoints = { data: { id: 'deepseek/deepseek-v4.1-flash', endpoints: [{ tag: 'deepinfra', provider_name: 'DeepInfra' }] } };
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
+      t.setModel('deepseek/deepseek-v4.2-flash');
+      return new Response(JSON.stringify(String(url).endsWith('/endpoints') ? endpoints : list));
+    }));
+    await expect(t.caller.refreshCatalog({ modelId })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(t.updates).toEqual([]);
+  });
+
+  it('refuses to overwrite a config changed between its read and its write', async () => {
+    const t = harness('admin', { reasoning: { catalog, route: null, purposes: {} } });
+    t.bumpOnWrite();
+    await expect(t.caller.save({ modelId, route: 'deepinfra', purposes: deepseekOff })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(t.updates).toEqual([]);
   });
 
   it('tries once per model within the interval, admin only, and a refusal does not use the slot', async () => {

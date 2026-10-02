@@ -6,6 +6,11 @@ import {runtimeAdmissionService} from './admission';
 import {OPENING_INPUT} from '../../shared/opcQuestions';
 import {PURPOSE_OUTPUT_CAP} from './purposeBudgets';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
+// The window/configuration consistency of BILL-UNIT is covered in billingUnitAdmission.test.ts.
+vi.mock('./billingUnitAdmission', async (original) => ({
+  ...(await original<typeof import('./billingUnitAdmission')>()),
+  freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2', creditsPerUsd: '1000', defaultMultiplier: '1', models: {}, providers: {}, hash: 'f'.repeat(64) }),
+}));
 const actor='10000000-0000-4000-8000-000000000001',sessionId='10000000-0000-4000-8000-000000000002';
 const first='10000000-0000-4000-8000-000000000003',second='10000000-0000-4000-8000-000000000004',organizer='10000000-0000-4000-8000-000000000005';
 const requestId='10000000-0000-4000-8000-000000000006',nextId='10000000-0000-4000-8000-000000000007';

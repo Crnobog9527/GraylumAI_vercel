@@ -3,10 +3,9 @@
 import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { ModelReasoningButton } from '@/components/admin/ModelReasoningDialog';
-import {
-  Bot, Plus, Pencil, Trash2, Sparkles, Brain, Zap,
-  Check, X, Loader2, Globe, RefreshCw, AlertTriangle, HelpCircle
-} from 'lucide-react';
+import { ModelMultiplierPanel } from '@/components/admin/ModelMultiplierPanel';
+import { ProviderPricesEditor } from '@/components/admin/ProviderPricesEditor';
+import { Bot, Plus, Pencil, Trash2, Sparkles, Brain, Zap, Check, X, Loader2, Globe, RefreshCw, AlertTriangle, HelpCircle } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -29,14 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -603,6 +595,8 @@ export default function AdminModelsPage() {
             </Table>
           </CardContent>
         </Card>
+
+        <div className="mt-8 space-y-8"><ModelMultiplierPanel /><ProviderPricesEditor /></div>
 
         {/* Create/Edit Dialog */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

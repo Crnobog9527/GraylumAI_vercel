@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { transportEvidence, unknownEvidence, type CallIdentity, type TransportObservation } from './fixtureAdapter';
 import {openRouterLimits,OPENROUTER_LOOKUP_TIMEOUT_MS} from './openRouterPolicy';
+import { MULTIPLIER_PATTERN } from '../billingUnit';
+import { frozenBillingUnit } from '../runtime/billingUnitAdmission';
 import type {RuntimeBudget} from '../runtime/budget';
 import { openRouterEvidence } from './openRouterEvidence';
 import {consumeOpenRouterNotStarted} from './openRouterAdapter';
@@ -13,14 +15,15 @@ const scope = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('positioning_draft'), draftId: uuid }).strict(),
   z.object({ kind: z.literal('work_item'), projectId: uuid, workItemId: uuid }).strict(),
 ]);
-export const frozenCallPolicy = z.object({ modelId: uuid, provider:z.string().min(1),account:z.string().min(1),model:z.string().min(1),protocol:z.enum(['fixture-cost-v1','openrouter-chat-v1']),providerLimits:openRouterLimits.optional(),upperUsd:z.string(),inputLimit:z.number().int().positive().max(1_000_000),outputLimit:z.number().int().positive().max(1_000_000),automaticRetry:z.literal(false),hiddenTools:z.literal(false),lookupSupported:z.boolean() }).strict();
+export const frozenCallPolicy = z.object({ multiplier: z.string().regex(MULTIPLIER_PATTERN).optional(), modelId: uuid, provider:z.string().min(1),account:z.string().min(1),model:z.string().min(1),protocol:z.enum(['fixture-cost-v1','openrouter-chat-v1']),providerLimits:openRouterLimits.optional(),upperUsd:z.string(),inputLimit:z.number().int().positive().max(1_000_000),outputLimit:z.number().int().positive().max(1_000_000),automaticRetry:z.literal(false),hiddenTools:z.literal(false),lookupSupported:z.boolean() }).strict();
 const frozen = z.object({
   contractVersion: z.literal('bill2.v1'), mode: z.enum(['isolated','staging_test']), testWindowId:uuid.optional(), sessionRef: z.null().optional(), scope,
   moduleId: uuid.optional(), skillId: uuid.optional(),
   callPolicy: z.array(frozenCallPolicy).min(1).max(32),
   operation: z.enum(['question', 'research', 'organize', 'plan', 'work']), modelId: uuid, revisionId: uuid.optional(),
   sourceHash: z.string().regex(/^[a-f0-9]{64}$/), input: z.unknown(),
-  rules: z.object({ version: z.string().min(1), quoteVersion: z.string().min(1), creditsPerUsd: z.string(), multiplier: z.string(),
+  rules: z.object({ billingUnit: frozenBillingUnit.optional(),
+    version: z.string().min(1), quoteVersion: z.string().min(1), creditsPerUsd: z.string(), multiplier: z.string(),
     fx: z.record(z.string(), z.object({ version: z.string().min(1), usdPerUnit: z.string() }).strict()) }).strict(),
   limits: z.object({ costUsd: z.string(), credits: z.number().int().positive().max(2_147_483_647), maxPreDeduct: z.number().int().positive().max(2_147_483_647),
     maxCalls: z.number().int().min(1).max(32), deadline: z.string().datetime() }).strict(),
@@ -29,9 +32,11 @@ export type FrozenRun = z.infer<typeof frozen>;
 const call = z.object({ provider: z.string().min(1).max(128), account: z.string().min(1).max(128), model: z.string().min(1).max(256),
   protocol: z.enum(['fixture-cost-v1','openrouter-chat-v1']), providerLimits:openRouterLimits.optional(), requestHash: z.string().regex(/^[a-f0-9]{64}$/), upperUsd: z.string(),
   inputLimit: z.number().int().positive().max(1_000_000), outputLimit: z.number().int().positive().max(1_000_000),
-  automaticRetry: z.literal(false), hiddenTools: z.literal(false), lookupSupported: z.boolean(), phase: z.string().min(1).max(64) }).strict();
+  automaticRetry: z.literal(false), hiddenTools: z.literal(false), lookupSupported: z.boolean(), phase: z.string().min(1).max(64),
+  billingUnit: z.object({ modelId: uuid, multiplier: z.string().regex(MULTIPLIER_PATTERN), source: z.enum(['model', 'provider', 'global']) })
+    .strict().optional() }).strict();
 export type FrozenCall = z.infer<typeof call>;
-export type RunView = { id: string; state: 'prepared' | 'dispatched' | 'unknown' | 'cost_pending' | 'settled' | 'refunded';
+export type RunView = { accountClosed?: boolean; id: string; state: 'prepared' | 'dispatched' | 'unknown' | 'cost_pending' | 'settled' | 'refunded';
   preDeductId: string; closed: boolean; conflict: boolean; reservedCredits: number; chargedCredits: number | null; outcome: string | null };
 export interface BillingRpc { rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }> }
 export interface BillingTransport {
@@ -151,8 +156,13 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
        }
        evidence = { ...unknownEvidence(identity), evidenceKind: 'transport_observation' };
       }
-      try { await recordReceipt(capability.runId, callId, evidence); }
+      try {
+        const saved = await recordReceipt(capability.runId, callId, evidence);
+        if (saved.accountClosed) return { dispatched: true, accountClosed: true as const };
+      }
       catch { return { dispatched: true, pendingReceipt: { runId: capability.runId, callId, evidence } }; }
+      // Confirmation can still commit after this receipt. Every later Runtime
+      // read/write then refuses the actor (bill2_actor), so no content reaches SDK/history/result.
       return { dispatched: true, observation }; // Private server composition only; never a public route result.
     },
     closeRun: (runId: string, outcome: 'delivered' | 'confirmed_failure' | 'cancelled' | 'unknown', result: unknown = null) =>

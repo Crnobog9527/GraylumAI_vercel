@@ -20,6 +20,10 @@
 
 BEGIN;
 
+-- BILL-UNIT (#565): billing_credits_per_usd / billing_token_price_multiplier below keep the
+-- pre-BILL-UNIT values. The Owner-decided q=100 / m=3 is applied as a separately approved,
+-- explicit write of those two rows (with the previous values kept for recovery) — never by
+-- re-running this whole seed, which would also overwrite every other key (ON CONFLICT DO UPDATE).
 INSERT INTO public.system_settings (key, value)
 VALUES
   ('site_name', to_jsonb('Graylum AI Staging'::text)),

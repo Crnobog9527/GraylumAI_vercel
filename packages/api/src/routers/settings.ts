@@ -3,6 +3,8 @@ import {
 } from '../services/membershipEntitlementConfig';
 import { RUNTIME_RATE_LIMIT_KEY } from '../services/runtime/rateLimitSettings';
 import { parseSearchSurcharge } from '../services/searchPricing';
+import { BILLING_UNIT_SETTING_KEYS, parseCreditsPerUsd, parseMultiplier } from '../services/billingUnit';
+import { PROVIDER_PRICES_KEY } from '../services/billingProviderPrices';
 import { RUNTIME_MODEL_COLUMNS, runtimeModelOption } from "../services/models/runtimeEligibility";
 import { router, publicProcedure, adminProcedure } from '../trpc';
 import { z } from 'zod';
@@ -69,6 +71,15 @@ const membershipPlanCatalogRowSchema = z.object({
 
 const CATALOG_UNAVAILABLE_MESSAGE = '套餐服务暂不可用，请稍后重试';
 
+function accepts(parse: (value: unknown) => string, value: unknown): boolean {
+  try {
+    parse(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const systemSettingInputSchema = z.object({
   key: z.string().trim().min(1),
   value: z.any(),
@@ -76,11 +87,20 @@ const systemSettingInputSchema = z.object({
   if (setting.key === RUNTIME_RATE_LIMIT_KEY) {
     ctx.addIssue({ code: 'custom', path: ['key'], message: '使用额度请通过专用管理接口保存' });
   }
+  if (setting.key === PROVIDER_PRICES_KEY) {
+    ctx.addIssue({ code: 'custom', path: ['key'], message: '第三方价格请通过专用管理接口保存' });
+  }
   if (setting.key === 'runtime_purpose_budgets') {
     ctx.addIssue({ code: 'custom', path: ['key'], message: '用途预算请通过专用管理接口保存' });
   }
   if (setting.key === FUSION_COMPARE_SETTING && !fusionCompareLimitSchema.safeParse(setting.value).success) {
     ctx.addIssue({ code: 'custom', path: ['value'], message: '对比模型上限须为 2 至 8 的整数' });
+  }
+  if (setting.key === BILLING_UNIT_SETTING_KEYS.creditsPerUsd && !accepts(parseCreditsPerUsd, setting.value)) {
+    ctx.addIssue({ code: 'custom', path: ['value'], message: '每美元积分数须为正数，最多 12 位小数' });
+  }
+  if (setting.key === BILLING_UNIT_SETTING_KEYS.multiplier && !accepts(parseMultiplier, setting.value)) {
+    ctx.addIssue({ code: 'custom', path: ['value'], message: '全站默认加价倍数须在 1 到 20 之间，最多两位小数' });
   }
   if (setting.key === 'search_surcharge_credits' && parseSearchSurcharge(setting.value) === null) {
     ctx.addIssue({code:'custom',path:['value'],message:'联网附加积分须为0至999999的整数；受控Skill搜索仍须配置正数'});

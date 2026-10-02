@@ -746,3 +746,85 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['legacy',true] as c
  expect(bodies).toHaveLength(2);
  expect((await db.query("select count(*)::int n from credit_transactions where bill2_run_id=$1 and reason_code='bill2_spend'",[f.execution.runId])).rows[0].n).toBe(1);
 });
+
+// DATA-ERASURE B2a host: a confirmation that commits while an execution is in
+// flight. The executor must not read back, show or store late provider content.
+const closeAccount=(actorId:string)=>db.query('select account_erasure_confirm_with_digests($1,$2,$3)',[actorId,randomUUID(),
+ JSON.stringify([{kind:'email',key_version:'b2a_local_v1',digest:hash(actorId)}])]);
+const replayOnly=(adapter:ReturnType<typeof openRouterAdapter>)=>({dispatch:async()=>{throw new Error('RUNTIME_DISPATCH_DISABLED');},lookup:adapter.lookup});
+const fiveCard={message:'PRIVATE_CLOSED_CARD',question:'Range?',options:['First','Second'],recommended:null,recommendationReason:null};
+async function closedProvider(format:'serial-tools-v2'|'agent-turn-v5-stream',gate:Promise<void>,seen:()=>void,onPost:()=>void){
+ const server=createServer(async(req,res)=>{
+  onPost();let raw='';for await(const part of req)raw+=part;
+  const request=JSON.parse(raw),id='gen-closed-'+randomUUID();res.setHeader('x-generation-id',id);
+  if(format==='serial-tools-v2'){
+   seen();await gate;res.setHeader('content-type','application/json');
+   res.end(completion(id,request.model,JSON.stringify({message:'PRIVATE_CLOSED_TEXT',patches:[]})));return;
+  }
+  res.setHeader('content-type','text/event-stream');
+  chunk(res,id,request.model,{role:'assistant',content:'PRIVATE_CLOSED_TEXT'});
+  seen();await gate;
+  chunk(res,id,request.model,{tool_calls:[{index:0,id:'closed-call',type:'function',
+   function:{name:'ask_question',arguments:JSON.stringify(fiveCard)}}]});
+  chunk(res,id,request.model,{},'tool_calls');
+  res.end('data: '+JSON.stringify({id,model:request.model,choices:[],
+   usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}})+'\n\ndata: [DONE]\n\n');
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const address=server.address();if(!address||typeof address==='string')throw new Error('local listener required');
+ const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',
+  transport:async(_url,init)=>fetch(`http://127.0.0.1:${address.port}`,init)});
+ return {server,adapter};
+}
+const closedFixture=(format:'serial-tools-v2'|'agent-turn-v5-stream')=>format==='serial-tools-v2'?fixture(format):
+ fixture(format,false,8192,false,undefined,false,30000,true);
+async function expectNothingRetained(f:Awaited<ReturnType<typeof fixture>>,events:RuntimeProgress[]){
+ expect(events.filter(event=>event.type==='text'||event.type==='card')).toEqual([]);
+ expect(events).not.toContainEqual({type:'phase',phase:'saving'});
+ expect(JSON.stringify(events)).not.toContain('PRIVATE_CLOSED');
+ const history=JSON.stringify((await db.query('select item from runtime_session_history where session_id=$1',[f.session.sessionId])).rows);
+ expect(history).not.toContain('PRIVATE_CLOSED');
+ const execution=(await db.query('select state,result from runtime_executions where id=$1',[f.execution.executionId])).rows[0];
+ expect(execution.result).toBeNull();expect(execution.state).not.toBe('completed');
+}
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['serial-tools-v2','agent-turn-v5-stream'] as const)(
+ 'RUNTIME: erasure confirmed during the provider call (%s) keeps only a financial projection and shows nothing late',async format=>{
+ const f=await closedFixture(format),gate=latch(),seen=latch(),events:RuntimeProgress[]=[];let posts=0;
+ const {server,adapter}=await closedProvider(format,gate.promise,seen.release,()=>{posts++;});
+ try{
+  // After the confirmation, the host records the receipt once and makes no further Runtime call.
+  const afterClose:string[]=[];let closing=false;
+  const database={rpc:(name:string,args:Record<string,unknown>)=>{if(closing)afterClose.push(name);return admin.rpc(name,args);}};
+  const pending=runtimeExecutor({database,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId,event=>events.push(event));
+  await Promise.race([seen.promise,pending.then(result=>{throw new Error('No provider call: '+JSON.stringify(result));})]);
+  await closeAccount(f.actorId);closing=true;gate.release();
+  expect(await pending).toEqual({state:'pending'});expect(posts).toBe(1);expect(afterClose).toEqual(['bill2_record']);
+  await expectNothingRetained(f,events);
+  const receipts=(await db.query('select r.payload,r.financial_projection_version v from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1',[f.execution.runId])).rows;
+  expect(receipts).toHaveLength(1);expect(receipts[0].v).toBe(1);expect(JSON.stringify(receipts)).not.toContain('PRIVATE_CLOSED');
+  // Trusted maintenance finishes the original run once; nothing is dispatched again.
+  const recovered=await runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter:replayOnly(adapter)}).recoverFinancial(f.execution.executionId);
+  expect(recovered.state).toBe('cancelled');expect(posts).toBe(1);
+  expect((await db.query('select state,closed,charged from bill2_runs where id=$1',[f.execution.runId])).rows[0]).toEqual({state:'settled',closed:true,charged:3});
+  expect((await db.query('select active_execution from runtime_sessions where id=$1',[f.session.sessionId])).rows[0].active_execution).toBeNull();
+ }finally{gate.release();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')(
+ 'RUNTIME: erasure confirmed after the receipt but before the Session write shows no card and stores no turn',async()=>{
+ const f=await closedFixture('agent-turn-v5-stream'),gate=latch(),events:RuntimeProgress[]=[];let posts=0,closed=false;
+ gate.release();
+ const {server,adapter}=await closedProvider('agent-turn-v5-stream',gate.promise,()=>{},()=>{posts++;});
+ // Close the account exactly before the first Session append of this turn.
+ const database={rpc:async(name:string,args:Record<string,unknown>)=>{
+  if(!closed&&name==='runtime_session_items'&&args.p_action==='append'){closed=true;await closeAccount(f.actorId);}
+  return admin.rpc(name,args);
+ }};
+ try{
+  expect(await runtimeExecutor({database,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId,event=>events.push(event)))
+   .toEqual({state:'pending'});
+  expect(closed).toBe(true);expect(posts).toBe(1);
+  await expectNothingRetained(f,events);
+ }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});

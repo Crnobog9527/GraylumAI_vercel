@@ -4,6 +4,11 @@ import type {SupabaseClient} from '@supabase/supabase-js';
 import {createHash} from 'node:crypto';
 import {runtimeAdmissionService} from './admission';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
+// The window/configuration consistency of BILL-UNIT is covered in billingUnitAdmission.test.ts.
+vi.mock('./billingUnitAdmission', async (original) => ({
+  ...(await original<typeof import('./billingUnitAdmission')>()),
+  freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2', creditsPerUsd: '1000', defaultMultiplier: '1', models: {}, providers: {}, hash: 'f'.repeat(64) }),
+}));
 const actor='10000000-0000-4000-8000-000000000001',sessionId='10000000-0000-4000-8000-000000000002',modelId='10000000-0000-4000-8000-000000000003',requestId='10000000-0000-4000-8000-000000000004';
 it.each(['PGRST202','42883','42501','PGRST301','XX000',null].flatMap(code=>[false,true].map(real=>({code,real}))))('workspace capability $code (real=$real) preserves free chat only for genuinely missing RPC',async({code,real})=>{
  let frozen:Record<string,unknown>|undefined;
@@ -49,6 +54,9 @@ it.each([false,true].flatMap(real=>[false,true].map(mentorStream=>({real,mentorS
  expect(billing.sourceHash).toBe(createHash('sha256').update(JSON.stringify(frozen)).digest('hex'));expect(billing.input).toBe(frozen);expect(frozen.maxOutputTokens).toBe(real?4096:1000);expect(frozen.attachedOrganizer.maxOutputTokens).toBe(real?2048:1000);
  if(real)expect(billing.callPolicy).toEqual(quotes);
  else expect(billing.limits).toMatchObject({maxCalls:2,credits:40,maxPreDeduct:40});
+ // Real admissions freeze the BILL-UNIT snapshot into rules; local fixture admissions stay on the old contract.
+ if(real)expect(billing.rules.billingUnit).toMatchObject({version:'bill-unit-v2',creditsPerUsd:'1000'});
+ else expect(billing.rules.billingUnit).toBeUndefined();
  frozen.attachedOrganizer.instructions='LEGACY_FROZEN_ORGANIZER_BYTES';
  replay={executionId:requestId};const reads=modelReads;models[0]!.max_tokens=512;
  expect(await service.prepare(input)).toEqual(replay);expect(modelReads).toBe(reads);expect(frozen.maxOutputTokens).toBe(real?4096:1000);

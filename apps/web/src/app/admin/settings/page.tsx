@@ -19,6 +19,7 @@ import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import AdminSettingsLoadError from '@/components/admin/AdminErrorState';
 import { RuntimeRateLimitSettings, RuntimeRateLimitTabTrigger } from '@/components/admin/RuntimeRateLimitSettings';
 import { MentorBudgetTabContent, MentorBudgetTabTrigger } from '@/components/admin/MentorBudgetSettings';
+import { changedSettings } from './changedSettings';
 
 // 完整的系统设置定义
 const defaultSettings: Record<string, { value: string; type: 'string' | 'number' | 'boolean'; label: string; description: string }> = {
@@ -29,8 +30,8 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
 
   // Credits & Billing
   new_user_credits: { value: '100', type: 'number', label: '新用户赠送积分', description: '新用户注册时赠送的积分数量' },
-  billing_credits_per_usd: { value: '1000', type: 'number', label: '每美元积分数', description: 'AI 成本换算为站内积分的基准比例' },
-  billing_token_price_multiplier: { value: '1.5', type: 'number', label: 'Token 成本倍率', description: '用户计费 = 供应商成本 × 每美元积分数 × 该倍率' },
+  billing_credits_per_usd: { value: '', type: 'number', label: '每美元积分数', description: '留空 = 未配置（按缺省值 1000 计算）；只影响新操作' },
+  billing_token_price_multiplier: { value: '', type: 'number', label: '全站默认加价倍数', description: '留空 = 未配置（缺省 1.5）；1–20，最多两位小数' },
   billing_min_pre_deduct: { value: '10', type: 'number', label: '最小预扣积分', description: 'AI 请求预扣的最低积分数，默认沿用现有安全值 10' },
   billing_max_pre_deduct: { value: '10000', type: 'number', label: '最大预扣积分', description: '单次 AI 请求预扣积分上限' },
   billing_safety_margin: { value: '0.2', type: 'number', label: '预扣安全边际', description: '预扣时在估算积分上额外增加的比例，例如 0.2 表示 20%' },
@@ -42,16 +43,16 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
 
   // Features (11项)
   max_messages_per_conversation: { value: '100', type: 'number', label: '单对话最大消息数', description: '每个对话允许的最大消息数' },
-  max_input_characters: { value: '2000', type: 'number', label: '输入框字符上限', description: '用户单次输入的最大字符数' },
+  max_input_characters: { value: '', type: 'number', label: '输入框字符上限', description: '用户单次输入的最大字符数；留空 = 未配置（实际按 2500）' },
   enable_free_tier: { value: 'false', type: 'boolean', label: '启用免费体验', description: '允许用户在无积分时使用有限功能' },
   free_tier_messages: { value: '5', type: 'number', label: '免费消息数/天', description: '每天免费消息数量' },
   long_text_warning_threshold: { value: '5000', type: 'number', label: '长文本预警阈值(tokens)', description: '输入token超过此值时弹窗提示用户确认' },
   enable_long_text_warning: { value: 'true', type: 'boolean', label: '启用长文本预警', description: '开启后，超长文本会提示预计消耗积分' },
   show_token_usage_stats: { value: 'true', type: 'boolean', label: '显示Token使用统计', description: '在聊天页面显示本次请求和累计的Token使用情况' },
-  chat_show_model_selector: { value: 'true', type: 'boolean', label: '显示模型选择器', description: '在聊天界面显示AI模型选择下拉框' },
-  chat_prompt_text: { value: '请选择一个模型开始对话', type: 'string', label: '聊天提示文案', description: '聊天输入框 placeholder 文案' },
-  chat_welcome_message: { value: '你好！有什么可以帮助你的吗？', type: 'string', label: '聊天欢迎消息', description: '聊天页空状态欢迎文案' },
-  chat_billing_hint: { value: '⚡ 按实际Token消耗计费：输入 {input}积分/1K tokens，输出 {output}积分/1K tokens', type: 'string', label: '计费提示文案', description: '聊天页面底部显示的计费说明' },
+  chat_show_model_selector: { value: '', type: 'boolean', label: '显示模型选择器', description: '在聊天界面显示AI模型选择下拉框；未配置时不显示' },
+  chat_prompt_text: { value: '', type: 'string', label: '聊天提示文案', description: '聊天输入框 placeholder；留空 = 未配置（显示"请输入您的问题..."）' },
+  chat_welcome_message: { value: '', type: 'string', label: '聊天欢迎消息', description: '聊天页空状态文案；留空 = 未配置（显示内置默认文案）' },
+  chat_billing_hint: { value: '', type: 'string', label: '计费提示文案', description: '聊天页面底部的计费说明；留空 = 未配置（显示内置提示，不含单价）' },
   home_show_onboarding: { value: 'true', type: 'boolean', label: '显示新手引导', description: '首页显示六步引导模块' },
   home_show_featured_modules: { value: 'true', type: 'boolean', label: '显示精选模块', description: '首页显示精选推荐模块' },
   enable_smart_routing: { value: 'true', type: 'boolean', label: '启用智能路由', description: '根据用户问题自动分类任务类型并推荐最合适的AI模型' },
@@ -62,8 +63,8 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
   assistant_model_id: { value: '', type: 'string', label: '辅助模型', description: '为轻任务、压缩、搜索摘要等任务选择默认辅助模型' },
   enable_smart_search_decision: { value: 'true', type: 'boolean', label: '启用智能搜索判断', description: '根据请求自动决策是否联网，并优先调用 provider 原生联网能力' },
   search_decision_min_confidence: { value: '0.75', type: 'number', label: '联网决策最小置信度', description: '低于该阈值时即使命中实时性信号也不自动联网' },
-  search_surcharge_credits: { value: '0', type: 'number', label: '联网附加积分', description: '每次真实联网搜索额外增加的站内积分成本' },
-  enable_prompt_cache: { value: 'false', type: 'boolean', label: 'Prompt Cache（官方 Anthropic 已退役）', description: 'Claude 当前统一经 OpenRouter 调用；该项仅作为历史兼容设置保留，不再作为运行时依赖' },
+  search_surcharge_credits: { value: '', type: 'number', label: '联网附加积分', description: '每次真实联网搜索额外增加的积分；留空 = 未配置：联网搜索和研究不可用' },
+  enable_prompt_cache: { value: 'true', type: 'boolean', label: 'Prompt Cache（官方 Anthropic 已退役）', description: 'Claude 当前统一经 OpenRouter 调用；该项仅作为历史兼容设置保留，不再作为运行时依赖' },
 
   // Checkin (6项)
   checkin_day1: { value: '5', type: 'number', label: '签到第1天', description: '第1天签到奖励积分' },
@@ -187,12 +188,9 @@ export default function AdminSettingsPage() {
   const handleSaveAll = async () => {
     setSaving(true);
     try {
-      await updateSettingsBulk.mutateAsync(
-        Object.entries(settings).map(([key, data]) => ({
-          key,
-          value: data.value,
-        })),
-      );
+      const changes = changedSettings(settings, savedSettings, defaultSettings);
+      if (changes.length === 0) { toast.success('没有需要保存的修改'); return; }
+      await updateSettingsBulk.mutateAsync(changes);
       toast.success('设置保存成功');
       void refetchDashboard();
     } catch (error) {

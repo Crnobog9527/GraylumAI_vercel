@@ -15,9 +15,11 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   flow.steps[0]!.information![0] = {...flow.steps[0]!.information![0]!,title:'参考研究结论',elicitation:'agent_proposal'};
  }:undefined),mentorId=randomUUID(),organizerId=randomUUID(),key='SYNTHETIC_BROWSER_'+randomUUID();
  // Real mentor admission requires a verified reasoning policy; the gateway stays synthetic.
- const policies=[[mentorId,'qwen/qwen3.8-27b'],[organizerId,'synthetic/browser-organizer']].map(([modelId,model])=>({modelId,model,provider:'openrouter',account:'openrouter-key:'+createHash('sha256').update(key).digest('hex'),protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:32000,outputLimit:100,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic/fp8',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
+ const policies=[[mentorId,'qwen/qwen3.8-27b'],[organizerId,'synthetic/browser-organizer']].map(([modelId,model])=>({multiplier:'1',modelId,model,provider:'openrouter',account:'openrouter-key:'+createHash('sha256').update(key).digest('hex'),protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:32000,outputLimit:100,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic/fp8',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
  for(const p of policies)await sql.query("insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,api_key,max_tokens,input_limit,config) values($1,'Synthetic browser streaming',$2,'openai','true','https://openrouter.ai/api/v1',$3,1000,10000,$4)",[p.modelId,p.model,key,JSON.stringify(configuredReasoning(p.model))]);
  await sql.query('update modules set model_id=$1 where id=$2',[mentorId,f.moduleId]);
+ // BILL-UNIT window: entries carry m_i=1, equal to these models' configured multiplier.
+ await sql.query('update ai_models set price_multiplier=1 where id=any($1)',[[mentorId,organizerId]]);
  await sql.query("insert into system_settings(key,value) values('v3_summary_model_id',$1),('v3_summary_max_tokens','128') on conflict(key) do update set value=excluded.value",[JSON.stringify(organizerId)]);
  await sql.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,1,40,now()+interval '1 hour') on conflict(id) do update set actor_ids=excluded.actor_ids,call_policies=excluded.call_policies,expires_at=excluded.expires_at",[process.env.V3_RUNTIME_STAGING_WINDOW_ID,[f.actor],JSON.stringify(policies)]);
  const d=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'mentor',businessName:'Graylum AI'});
@@ -102,6 +104,11 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    const card=page.getByRole('region',{name:'导师提问'}).last();
    await poll(()=>card.getByText('推荐',{exact:true}).isVisible()).toBe(true);
    expect(await card.getByText(saved.card.recommendationReason,{exact:true}).isVisible()).toBe(true);
+   // The reason sits directly under the recommended option and describes it.
+   const recommendedOption=card.locator('button[aria-describedby]'),reason=card.locator('button[aria-describedby] + p');
+   expect(await recommendedOption.count()).toBe(1);expect(await recommendedOption.textContent()).toContain('推荐');
+   expect(await reason.textContent()).toBe(saved.card.recommendationReason);
+   expect(await reason.getAttribute('id')).toBe(await recommendedOption.getAttribute('aria-describedby'));
    expect(saved.message).toBe(saved.card.message);
    await card.getByRole('button',{name:'其他',exact:true}).click();
    await poll(()=>composer.evaluate(element=>element===document.activeElement)).toBe(true);

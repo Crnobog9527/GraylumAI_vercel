@@ -12,6 +12,8 @@ import { ticketRouter } from './routers/ticket';
 import { settingsRouter } from './routers/settings';
 import { modelRouter } from './routers/model';
 import { modelReasoningRouter } from './routers/modelReasoning';
+import { modelPricingRouter } from './routers/modelPricing';
+import { billingReportRouter } from './routers/billingReport';
 import { invitationRouter } from './routers/invitation';
 import { checkinRouter } from './routers/checkin';
 import { adminRouter } from './routers/admin';
@@ -36,6 +38,8 @@ export const appRouter = router({
   settings: settingsRouter,
   model: modelRouter,
   modelReasoning: modelReasoningRouter,
+  modelPricing: modelPricingRouter,
+  billingReport: billingReportRouter,
   mentorBudget: mentorBudgetRouter,
   runtimeRateLimits: runtimeRateLimitsRouter,
   invitation: invitationRouter,

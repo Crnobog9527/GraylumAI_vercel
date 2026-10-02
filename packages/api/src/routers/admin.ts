@@ -16,6 +16,7 @@ import {
 import { buildFinanceUsdOverview } from '../services/financeReport';
 import { picoToUsd, usdToPico } from '../services/reportUsd';
 import { BILLING_CONSTANTS } from '../types/billing';
+import { describeBillingUnitSettings } from '../services/billingUnit';
 import { issueSignedAttachmentUrlsByBatch } from '../lib/ticketAttachments';
 import {
   resolveMembershipEligibility,
@@ -2428,16 +2429,10 @@ export const adminRouter = router({
       const activeMeteredModels = models.filter((model) =>
         model.is_active === 'true' || model.is_active === true,
       );
-      const creditsPerUsd = parseNumericSetting(
-        settingsMap,
-        'billing_credits_per_usd',
-        BILLING_CONSTANTS.CREDITS_PER_USD,
-      );
-      const tokenPriceMultiplier = parseNumericSetting(
-        settingsMap,
-        'billing_token_price_multiplier',
-        BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER,
-      );
+      const creditsPerUsd = parseNumericSetting(settingsMap, 'billing_credits_per_usd', BILLING_CONSTANTS.CREDITS_PER_USD);
+      const tokenPriceMultiplier = parseNumericSetting(settingsMap, 'billing_token_price_multiplier', BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER);
+      // Whether q / the default m is a stored row, a fallback for a missing row, or an invalid stored value.
+      const billingUnitSource = describeBillingUnitSettings(settingsMap);
 
       const inputCreditsPer1KValues = activeMeteredModels
         .filter((model) => (model.input_token_cost ?? 0) > 0)
@@ -2468,6 +2463,7 @@ export const adminRouter = router({
       const runtimeBilling = {
         creditsPerUsd,
         tokenPriceMultiplier,
+        billingUnitSource,
         activeModelCount: activeMeteredModels.length,
         inputCreditsPer1KRange: formatRange(inputCreditsPer1KValues),
         outputCreditsPer1KRange: formatRange(outputCreditsPer1KValues),

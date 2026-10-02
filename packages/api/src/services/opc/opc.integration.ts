@@ -2554,7 +2554,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       expect(await page.getByText('完成定位并采用选题后，账号工作会出现在这里。').count()).toBe(0);
       await page.getByRole('alert').filter({hasText:'账号未获准'}).first().waitFor();
       await capture('staging-actor-denied');
-      const policy={modelId:randomUUID(),provider:'openrouter',account:'synthetic',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:8000,outputLimit:100,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
+      const policy={multiplier:'1',modelId:randomUUID(),provider:'openrouter',account:'synthetic',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:8000,outputLimit:100,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
       await sql.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '1 hour')",[windowId,[f.actor],JSON.stringify([policy])]);
       await page.goto(process.env.V3_LOCAL_APP+'/');await page.getByRole('heading',{name:'六个环节，理解你的内容增长路径'}).waitFor();
       await capture('staging-allowed-directory');
@@ -2589,7 +2589,9 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       key = "LOCAL_STAGING_" + randomUUID(),
       windowId = process.env.V3_RUNTIME_STAGING_WINDOW_ID!;
     expect(windowId).toMatch(/^[a-f0-9-]{36}$/);
+    // BILL-UNIT window: the entry's m_i equals the model's configured multiplier (set to 1 below).
     const callPolicy = {
+      multiplier: "1",
       modelId,
       provider: "openrouter",
       account:
@@ -2618,6 +2620,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       modelId,
       f.moduleId,
     ]);
+    await sql.query("update ai_models set price_multiplier=1 where id=$1", [modelId]);
     await sql.query(
       "insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",
       [windowId, [f.actor], JSON.stringify([callPolicy])],
@@ -3184,6 +3187,10 @@ for (const sample of [
     expect(context).toEqual({
       userInput, originalStepId: "step-0",
       currentQuestion: { id: sample.field, title: sample.title, fields: [{ id: sample.field, title: sample.title, required: true, elicit: "user_fact" }] },
+      currentStepMaterial: {id: "step-0", fields: [
+        {id: sample.field, title: sample.title, required: true, elicit: "user_fact", status: "unknown", value: ""},
+        {id: "future", title: "尚未到达的问题", required: true, elicit: "user_fact", status: "unknown", value: ""},
+      ]},
       allowedWorkflow: [{ id: "step-0", title: f.flow.steps[0].title, confirmed: false, fields: [{ id: sample.field, title: sample.title }] }],
     });
     expect(reply).toBe(primaryBody);
@@ -10754,3 +10761,144 @@ it.each(['runtime_admit(uuid,uuid,uuid,jsonb,jsonb)','runtime_view(uuid,uuid)'])
  }finally{await sql.query('rollback');}
  expect((await sql.query('select pg_get_functiondef($1::regprocedure) def',[signature])).rows[0].def).toBe(original);
 });
+
+for (const sample of [
+  { name: "D2 audience answer must not replace goal", field: "goal", title: "目标与变现方式", inputKind: "answer", input: "先服务附近独自阅读的自由职业者，给他们安静的空间", value: null, existing: "增加工作日下午到店客流，暂不扩店" },
+  { name: "D2 platform choice must not replace goal", field: "goal", title: "目标与变现方式", inputKind: "answer", input: "小红书", value: null, existing: "增加工作日下午到店客流，暂不扩店" },
+  { name: "existing goal plus substantive addition", field: "goal", title: "目标与变现方式", inputKind: "answer", input: "也希望提高甜品套餐销量", value: "增加工作日下午到店客流，暂不扩店；提高甜品套餐销量", existing: "增加工作日下午到店客流，暂不扩店" },
+  { name: "unchanged goal keeps existing value", field: "goal", title: "目标与变现方式", inputKind: "answer", input: "还是增加工作日下午到店客流，暂不扩店", value: null, existing: "增加工作日下午到店客流，暂不扩店" },
+]) it(`OPC: organizer complete-value context preserves current goal (${sample.name})`, async () => {
+  const { runtimeExecutor } = await import("../runtime/execute");
+  const { createServer } = await import("node:http");
+  const { readWorkflowMentorExecution, applyMentorTurnRules } =
+    await import("../../../../../apps/web/src/app/positioning/[draftId]/mentor-response");
+  const f = await fixture(2, false, 0, flow => {
+    flow.steps[0].information = [
+      { id: sample.field, title: sample.title, required: true, profileKey: sample.field, elicitation: "user_fact" },
+      { id: "future", title: "尚未到达的问题", required: true, profileKey: "future" },
+    ];
+  });
+  const primaryModelId = await planFixtureModel(f.moduleId);
+  const draft = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: "mentor" });
+  const existing = "existing" in sample ? sample.existing : undefined;
+  if (existing) await f.service.information({draftId: draft.draftId, stepId: "step-0", requestId: randomUUID(),
+    expectedVersion: 0, values: {
+      [sample.field]: {value: existing, status: "provisional", nature: "decision"},
+      future: {value: "", status: "unknown", nature: "unknown"},
+    }});
+  const initial = await f.service.read(draft.draftId);
+  const userInput = sample.input;
+  const {agentTurnBody} = await import("../../shared/agentTurn");
+  const primaryText = "【预设导师回复】请先核对当前目标。";
+  const primaryBody = agentTurnBody(primaryText, null);
+  // Deliberately prewritten, not computed from userInput: this verifies the
+  // transport/application contract, NOT a model's semantic extraction quality.
+  const extractedValue = sample.value;
+  const extractionBody = JSON.stringify({
+    inputKind: sample.inputKind, targetStepId: "step-0",
+    informationPatch: extractedValue === null ? {} : {
+      [sample.field]: { value: extractedValue, status: "provisional", nature: "decision", basis: "user_statement" },
+    },
+  });
+  const request = {
+    draftId: draft.draftId, stepId: "step-0", questionId: sample.field, purpose: "mentor" as const,
+    requestId: randomUUID(), input: userInput, organizeAfter: true,
+  };
+  const prepared = await f.service.prepareStep(request);
+  const frozen = (await sql.query("select payload from runtime_executions where id=$1", [prepared.executionId])).rows[0].payload;
+  expect(frozen.modelId).toBe(primaryModelId);
+  expect(frozen.attachedOrganizer.modelId).not.toBe(primaryModelId);
+  const requests: Array<{ model: string; messages: Array<{ role: string; content: string }> }> = [];
+  const server = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const wire = JSON.parse(JSON.parse(raw).input);
+    requests.push(wire);
+    const id = "extraction-contract-" + request.requestId + "-" + requests.length;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({
+      id, model: wire.model, final: true, cost: "0.003", currency: "USD", coverage: "request_total",
+      usage: { sdkResponse: {
+        id, object: "chat.completion", created: 1, model: wire.model,
+        choices: [{ index: 0, message: { role: "assistant", content: requests.length === 1 ? primaryText : extractionBody }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      } },
+    }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("local server");
+    const executor = runtimeExecutor({ database: admin, actor: async () => f.actor, endpoint: "http://127.0.0.1:" + address.port });
+    expect(await executor.execute(prepared.executionId)).toEqual({ state: "completed", body: primaryBody, summary: extractionBody });
+    expect(requests.map(item => item.model)).toEqual([frozen.model, frozen.attachedOrganizer.model]);
+    // Inspect the real SDK wire after admission, freezing and execution, not
+    // merely the service's string constant or a fake runtime invocation.
+    const system = requests[1].messages.filter(item => item.role === "system");
+    expect(system).toEqual([{ role: "system", content: frozen.attachedOrganizer.instructions }]);
+    expect(system[0].content).toContain("Separate business content from surrounding meta-instructions even within one sentence");
+    expect(system[0].content).toContain("Exclude a clause only when it describes the provenance or operation of this current Graylum conversation or request");
+    expect(system[0].content).toContain("Retain the same words, identifiers and actions when they express business content relevant to the allowed field");
+    expect(system[0].content).toContain("Decide by meaning, never by deleting keywords");
+    expect(system[0].content).toContain("Never return confirmed or deferred");
+    const organizerMessage = requests[1].messages.filter(item => item.role === "user");
+    expect(organizerMessage).toHaveLength(1);
+    const [contextRaw, reply] = organizerMessage[0].content.split("\n\nPrimary assistant reply:\n");
+    const context = JSON.parse(contextRaw);
+    expect(context).toEqual({
+      userInput, originalStepId: "step-0",
+      currentQuestion: { id: sample.field, title: sample.title, fields: [{ id: sample.field, title: sample.title, required: true, elicit: "user_fact" }] },
+      currentStepMaterial: {id: "step-0", fields: [
+        {id: sample.field, title: sample.title, required: true, elicit: "user_fact",
+          status: existing ? "provisional" : "unknown", value: existing ?? "",
+          ...(existing ? {nature: "decision"} : {})},
+        {id: "future", title: "尚未到达的问题", required: true, elicit: "user_fact", status: "unknown", value: "",
+          ...(existing ? {nature: "unknown"} : {})},
+      ]},
+      allowedWorkflow: [{ id: "step-0", title: f.flow.steps[0].title, confirmed: false, fields: [{ id: sample.field, title: sample.title }] }],
+    });
+    expect(reply).toBe(primaryBody);
+    expect(system[0].content).toContain("updated COMPLETE value, preserving valid information");
+    expect(system[0].content).toContain("return an empty informationPatch: do not put an audience answer or a platform choice");
+    const view = await admin.rpc("runtime_view", { p_actor_id: f.actor, p_session_id: draft.sessionId });
+    expect(view.error).toBeNull();
+    const execution = view.data.executions.find((item: { executionId: string }) => item.executionId === prepared.executionId);
+    expect(execution).toMatchObject({ input: userInput, body: primaryBody, summary: extractionBody });
+    const before = await f.service.read(draft.draftId);
+    const parsed = readWorkflowMentorExecution(execution.body, execution.summary, "step-0", before.information);
+    expect(parsed.message).toBe(primaryText);
+    const accepted = applyMentorTurnRules(parsed, execution.input);
+    expect(accepted).toEqual(JSON.parse(extractionBody).informationPatch);
+    // Use the same public projection as the page, then persist through the
+    // actual information service. The UI event/autosave loop is not simulated.
+    if (extractedValue !== null) {
+      const { value, status, nature } = accepted[sample.field];
+      const untouched = { status: "unknown", nature: "unknown", value: "" };
+      await f.service.information({ draftId: draft.draftId, stepId: "step-0", requestId: randomUUID(), expectedVersion: before.snapshot.steps["step-0"].version, values: { [sample.field]: { value, status, nature }, future: untouched } });
+      const saved = await f.service.read(draft.draftId);
+      expect(saved.information["step-0"].values[sample.field]).toEqual({ value: extractedValue, status: "provisional", nature: "decision" });
+      expect(saved.information["step-0"].values.future).toEqual(untouched);
+      expect(saved.snapshot.steps["step-0"].valid).toBe(false);
+    } else {
+      expect(accepted).toEqual({});
+      const saved = await f.service.read(draft.draftId);
+      expect(saved.information).toEqual(before.information);
+      expect(saved.snapshot.steps["step-0"].version).toBe(before.snapshot.steps["step-0"].version);
+      expect((await sql.query("select count(*)::int n from artifact_requests where project_id=$1 and action='opc_information'", [draft.projectId])).rows[0].n).toBe(existing ? 1 : 0);
+      expect(saved.information).toEqual(initial.information);
+      expect(saved.snapshot.steps["step-0"].valid).toBe(false);
+    }
+    // Refresh/replay must preserve the original wording and frozen prompt, with
+    // no second model call or implicit confirmation after the form is saved.
+    expect(await f.service.prepareStep(request)).toMatchObject({ executionId: prepared.executionId });
+    expect(await executor.execute(prepared.executionId)).toEqual({ state: "completed", body: primaryBody, summary: extractionBody });
+    expect(requests).toHaveLength(2);
+    expect((await sql.query("select payload from runtime_executions where id=$1", [prepared.executionId])).rows[0].payload).toEqual(frozen);
+    const refreshed = await admin.rpc("runtime_view", { p_actor_id: f.actor, p_session_id: draft.sessionId });
+    expect(refreshed.error).toBeNull();
+    expect(refreshed.data.executions.find((item: { executionId: string }) => item.executionId === prepared.executionId))
+      .toMatchObject({ input: userInput, body: primaryBody, summary: extractionBody });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+}, 90000);
