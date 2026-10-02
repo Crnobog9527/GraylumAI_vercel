@@ -49,7 +49,7 @@ describe('pinned generic Agent turn prompt',()=>{
   expect(prompt).toContain('examples in prose do not replace the card');
   expect(prompt).toContain('Set recommended to null. Options must not assert facts about the user.');
   expect(prompt).toContain('insufficient information for a professional judgement, ask one open question');
-  expect(prompt).toContain("Do not turn guesses about the user's audience, strengths or offer into options");
+  expect(prompt).toContain("Do not turn guesses about the user's customers, audience, strengths, story or offer into options");
   expect(prompt).toContain('4. Clear answer: no card');
   expect(prompt).toContain('5. Host opening: no card');
   expect(prompt).toContain('Do not repeat the list of card options in prose');
@@ -57,7 +57,7 @@ describe('pinned generic Agent turn prompt',()=>{
   expect(prompt).toContain('The host adds an Other entry; never add other, not-sure, skip, defer or continue options');
   expect(prompt).toContain('For user_fact, use a neutral card only for general ranges or categories and Socratic prose for open personal content');
   expect(prompt).toContain('never offer guesses as options');
-  expect(prompt).toContain('explicitly label the claim as a hypothesis made because');
+  expect(prompt).toContain('explicitly label the claim as a hypothesis made because information is insufficient');
   expect(prompt).toContain('information is insufficient; never present it as measured data');
   expect(prompt).not.toContain('我不确定，帮我分析');
  });
