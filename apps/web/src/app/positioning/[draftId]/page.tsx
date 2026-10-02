@@ -1,7 +1,7 @@
 "use client";
 import { readAgentTurnBody } from "@repo/api/src/shared/agentTurn";
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { use, useCallback, useEffect, useRef, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -242,10 +242,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [activeQuestions, setActiveQuestions] = useState<Record<string, string>>({});
   const [confirmingQuestion, setConfirmingQuestion] = useState(false);
   const confirmationLock = useRef(false);
-  const chatScroll = useRef<HTMLDivElement>(null);
-  const chatRestored = useRef(false), chatFollow = useRef(true);
+  // State, not a ref: on a client-side return cached history exists before the log mounts.
+  const [chatNode, attachChatScroll] = useState<HTMLDivElement|null>(null);
+  const chatRestored = useRef<HTMLDivElement|null>(null), chatFollow = useRef(true);
   const chatKey = 'opc-position-chat-scroll:' + draftId;
-  const attachChatScroll = useCallback((node:HTMLDivElement|null)=>{chatScroll.current=node;},[]);
   const [mentorInput, setMentorInput] = useState("");
   const free=useFreeConversation();
   const [manualMentorEnabled, setManualMentorEnabled] = useState(false);
@@ -466,15 +466,15 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       retained.kind === "unconsented" ? retained.sourceRoundId : null });
   }, [planView, hydratedDraft, draftId, d?.roundId]);
   useEffect(() => {
-    const node=chatScroll.current;
+    const node=chatNode;
     if(!node||!history.data)return;
-    if(!chatRestored.current){
+    if(chatRestored.current!==node){
       const saved=sessionStorage.getItem(chatKey);
       node.scrollTop=saved===null?node.scrollHeight:Number(saved)||0;
       chatFollow.current=node.scrollHeight-node.clientHeight-node.scrollTop<64;
-      chatRestored.current=true;
+      chatRestored.current=node;
     }else if(chatFollow.current) node.scrollTop=node.scrollHeight;
-  }, [history.data,chatKey,pendingBubble,liveReply]);
+  }, [chatNode,history.data,chatKey,pendingBubble,liveReply]);
   function captureInformationBase(stepId: string) {
     const key = "opc-information-base:" + draftId + ":" + stepId;
     if (!sessionStorage.getItem(key)) sessionStorage.setItem(key, JSON.stringify(d.information[stepId].values ?? {}));
@@ -1881,7 +1881,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   </div>
                   <div
                     ref={attachChatScroll}
-                    onScroll={event=>{const node=event.currentTarget;chatFollow.current=node.scrollHeight-node.clientHeight-node.scrollTop<64;if(chatRestored.current)sessionStorage.setItem(chatKey,String(node.scrollTop));}}
+                    onScroll={event=>{const node=event.currentTarget;chatFollow.current=node.scrollHeight-node.clientHeight-node.scrollTop<64;if(chatRestored.current===node)sessionStorage.setItem(chatKey,String(node.scrollTop));}}
                     role="log"
                     aria-label="完整导师消息"
                     aria-live="polite"

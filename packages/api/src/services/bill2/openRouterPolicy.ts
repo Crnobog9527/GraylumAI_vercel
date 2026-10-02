@@ -8,6 +8,8 @@ export const openRouterLimits=z.object({
  providerSlug:z.string().regex(/^[a-z0-9][a-z0-9._/-]{0,127}$/),
  contextTokens:z.number().int().min(1).max(1_050_000),
  promptUsdPerMillion:z.string(),completionUsdPerMillion:z.string(),requestUsd:z.string(),
+ // MODEL-PRICING-SYNC / #572: total price of one cache-written token. Optional; absent on older quotes.
+ cacheWriteUsdPerMillion:z.string().optional(),
 }).strict();
 export type OpenRouterLimits=z.infer<typeof openRouterLimits>;
 const scale=1_000_000_000_000n;
@@ -23,11 +25,16 @@ function wireNumber(value:string){
  * Token acceptance remains the provider's responsibility; the local history
  * byte cap is only a transport bound. Actual settlement uses official usage.
  * max_price uses USD/million prompt/completion and USD/request.
+ * Quotes are frozen in single-field form (deriveFrozenPrices): prompt already
+ * is the highest input price, so cacheWriteUsdPerMillion never raises a
+ * derived bound; it still counts if a quote states a higher write price.
  */
 export function openRouterBound(value:OpenRouterLimits,maxOutputTokens:number){
  const limits=openRouterLimits.parse(value);
  if(!Number.isSafeInteger(maxOutputTokens)||maxOutputTokens<1||maxOutputTokens>=limits.contextTokens)throw new Error('BILL2_PROVIDER_CAPACITY');
- const prompt=decimal(limits.promptUsdPerMillion),completion=decimal(limits.completionUsdPerMillion),request=decimal(limits.requestUsd);
+ const listed=decimal(limits.promptUsdPerMillion),completion=decimal(limits.completionUsdPerMillion),request=decimal(limits.requestUsd);
+ const write=limits.cacheWriteUsdPerMillion===undefined?0n:decimal(limits.cacheWriteUsdPerMillion);
+ const prompt=write>listed?write:listed;
  const numerator=prompt*BigInt(limits.contextTokens)+completion*BigInt(maxOutputTokens);
  const bound=(numerator+999_999n)/1_000_000n+request;
  if(bound<=0n)throw new Error('BILL2_PROVIDER_QUOTE_INVALID');

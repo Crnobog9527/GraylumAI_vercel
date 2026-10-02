@@ -1,13 +1,16 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { beforeAll, afterAll, it, expect, vi } from 'vitest';
 import {logger} from '../../lib/logger';
 import { randomUUID, createHash } from 'node:crypto';
 import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { PostgresSession } from './session';
+import {assertLongSessionPerformance} from './runtimePerformance.integration';
 import { runRuntime } from './runner';
 import {readRuntimeView,retainedOutputReason} from './view';
 import { runtimeExecutor } from './execute';
+import './promptCache.integration';
 import {createRuntimeBudget,withRuntimeBudget} from './budget';
 import {runtimeActor} from './actor';
 import {postgresJsonbBytes,assertFrozenPayloads} from './payloadSize';
@@ -38,6 +41,10 @@ const modelId=randomUUID();
 async function rpc(name:string,args:Record<string,unknown>){const r=await admin.rpc(name,args);if(r.error)throw new Error(r.error.message);return r.data;}
 beforeAll(async()=>{await db.connect();await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Runtime local','runtime-m','fixture','true')",[modelId]);});
 afterAll(async()=>{await db.end();});
+
+it('RUNTIME: 100-execution history stays below one second and still excludes revoked ancestors',async()=>{
+ await assertLongSessionPerformance(db);
+},30000);
 async function fixture(existingActor?:string){
  const actorId=existingActor??randomUUID();
  await db.query(existingActor?'insert into profiles(id,credits) values($1,100) on conflict(id) do update set credits=100':'insert into profiles(id,credits) values($1,100)',[actorId]);
@@ -552,6 +559,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RU
  const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
  const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
  await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit,price_multiplier) values($1,'Synthetic quote','test/admission','openai','true',1000,$2,1)",[model,contextTokens]);
+ await db.query('update ai_models set config=$2 where id=$1',[model,pricingConfig('test/admission','synthetic',contextTokens===1050000?'0.4':'2',contextTokens===1050000?'1.8':'0')]);
  const upperUsd=contextTokens===1050000?'0.4218':'0.02',outputLimit=contextTokens===1050000?1000:100;
  // BILL-UNIT window: each entry carries the model's m_i, equal to the configuration (price_multiplier=1).
  const call={multiplier:'1',modelId:model,provider:'openrouter',account:'synthetic-account',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd,inputLimit:8000,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens,promptUsdPerMillion:contextTokens===1050000?'0.4':'2',completionUsdPerMillion:contextTokens===1050000?'1.8':'0',requestUsd:'0'}};
@@ -2208,3 +2216,29 @@ it('RUNTIME: MENTOR-BUDGET: only the service role can write and read back the ex
   }finally{await c.query('rollback');}
  }finally{await c.end();}
 });
+
+it('RUNTIME: price renewal uses real version conditions and preserves a concurrent administrator save', async () => {
+ const { admitPricing, PRICE_SNAPSHOT_MAX_AGE_MS } = await import('./pricingAdmission');
+ const { readOpenRouterPricing } = await import('../models/openRouterCatalog');
+ const id=randomUUID(), model='synthetic/pricing', now=Date.now();
+ const config=pricingConfig(model,'synthetic','1','2');
+ config.pricing.fetchedAt=new Date(now-PRICE_SNAPSHOT_MAX_AGE_MS-1000).toISOString();
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active,config) values($1,'Synthetic price renewal',$2,'openrouter',true,$3)",[id,model,config]);
+ const quote={modelId:id,model,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'1',completionUsdPerMillion:'2',requestUsd:'0'}};
+ const latest={...config,reasoning:{...config.reasoning,route:'admin-route'},connection_status:'connected'};
+ const transport=vi.fn(async()=>new Response(JSON.stringify({data:{id:model,endpoints:[{tag:'synthetic',provider_name:'Synthetic',context_length:10000,pricing:{prompt:'0.000001',completion:'0.000002'}}]}})));
+ const read=vi.fn(async()=>{
+  // This database edit happens after admitPricing's read but before its conditional write.
+  await db.query('update ai_models set config=$2,updated_at=clock_timestamp() where id=$1',[id,latest]);
+  return readOpenRouterPricing(model,transport,()=>new Date(now));
+ });
+ await expect(admitPricing(admin,[quote],{read,now:()=>now})).resolves.toBeUndefined();
+ expect(read).toHaveBeenCalledTimes(1);expect(transport).toHaveBeenCalledTimes(1);
+ expect((await db.query('select config from ai_models where id=$1',[id])).rows[0].config).toEqual(latest);
+ // A subsequent uncontended refresh persists only pricing and retains the administrator's keys.
+ await admitPricing(admin,[quote],{read:()=>readOpenRouterPricing(model,transport,()=>new Date(now)),now:()=>now});
+ const saved=(await db.query('select config from ai_models where id=$1',[id])).rows[0].config;
+ expect(saved).toMatchObject({reasoning:latest.reasoning,connection_status:'connected'});
+ expect(saved.pricing.fetchedAt).toBe(new Date(now).toISOString());
+ await expect(admitPricing(admin,[{...quote,providerLimits:{...quote.providerLimits,promptUsdPerMillion:'0.9'}}])).rejects.toThrow('RUNTIME_PRICE_INCREASED');
+},30000);

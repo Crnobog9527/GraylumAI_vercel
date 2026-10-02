@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type {z} from 'zod';
+import {applyPromptCache,type PromptCachePolicy} from './promptCache';
 import {decimal} from '../bill2/decimal';
 import {openRouterBound} from '../bill2/openRouterPolicy';
 import type {frozenCallPolicy} from '../bill2/service';
@@ -21,7 +22,7 @@ export const AGENT_TURN_REQUEST_FORMAT='agent-turn-v5-stream';
 type FrozenCallPolicy=z.infer<typeof frozenCallPolicy>;
 /** Only the frozen context fields that decide the provider bytes. */
 export type RequestContext={providerRequestFormat?:ProviderRequestFormat;tools:readonly string[];workspaceContext?:boolean;
- network?:string;reasoning?:ReasoningPolicy;attachedOrganizer?:{reasoning?:ReasoningPolicy}};
+ promptCache?:PromptCachePolicy;network?:string;reasoning?:ReasoningPolicy;attachedOrganizer?:{reasoning?:ReasoningPolicy}};
 
 /** Fail closed for reasoning attached to an older, unmarked request format. */
 export function validReasoningFormat(context:RequestContext):boolean{
@@ -65,5 +66,7 @@ export function openRouterRequestBody(request:string,options:{context:RequestCon
  // keep their original bytes for replay; the runner enforces one tool/turn.
  if(format)delete original.parallel_tool_calls;
  if(format==='serial-tools-v2'||format==='serial-tools-v6-reasoning'||streaming)normalizeOpenRouterHistory(original,historyToolNames(format));
+ if(context.promptCache&&options.primaryDialogue&&phase!=='attached_organizer')
+  applyPromptCache(original,context.promptCache,policy.model,policy.providerLimits.cacheWriteUsdPerMillion);
  return JSON.stringify({...original,stream:streaming&&phase!=='attached_organizer'&&Boolean(original.stream),provider:quoted.routing});
 }

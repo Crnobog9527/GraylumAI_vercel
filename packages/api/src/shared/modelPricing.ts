@@ -49,10 +49,12 @@ export const PRICING_ISSUES = {
   DISCOUNT_INVALID: "discount 不是数字",
   RAW_TOO_LARGE: "价格数据过大，没有保存",
   PRICE_NOT_UNIQUE: "同名线路出现了不同的价格",
+  FIELD_NAME_TOO_LONG: "价格数据里有过长的字段名",
 } as const;
 export type PricingIssue = keyof typeof PRICING_ISSUES;
 
-const decimalText = z.string().regex(/^\d{1,9}(\.\d{1,12})?$/);
+const DECIMAL_TEXT = /^\d{1,9}(\.\d{1,12})?$/;
+const decimalText = z.string().regex(DECIMAL_TEXT);
 const priceShape = Object.fromEntries(PRICE_KEYS.map(key => [key, decimalText.optional()]));
 const priceLayer = z.object(priceShape as Record<PriceKey, z.ZodOptional<typeof decimalText>>).strict();
 export type PriceLayer = z.infer<typeof priceLayer>;
@@ -132,7 +134,8 @@ function readLayer(source: Record<string, unknown>, keys: string[], issues: Set<
   for (const key of keys) {
     const value = source[key];
     const normalized = typeof value === "string" ? (TOKEN_KEYS.has(key) ? perMillion(value) : plainPrice(value)) : null;
-    if (normalized === null) issues.add("PRICE_INVALID");
+    // A value that rounds past what the snapshot stores marks only this route, never the whole read.
+    if (normalized === null || !DECIMAL_TEXT.test(normalized)) issues.add("PRICE_INVALID");
     else layer[key] = normalized;
   }
   return layer as PriceLayer;
@@ -189,6 +192,7 @@ export function normalizeEndpointPricing(tag: string, contextLength: number | nu
   if (!isRecord(pricing)) return { ...empty, admissible: false, issues: ["PRICING_MISSING"] };
   const raw = JSON.stringify(pricing);
   if (new TextEncoder().encode(raw).length > MAX_RAW_PRICING_BYTES) return { ...empty, admissible: false, issues: ["RAW_TOO_LARGE"] };
+  if (Object.keys(pricing).some(key => key.length > 64)) return { ...empty, admissible: false, issues: ["FIELD_NAME_TOO_LONG"] };
   const keys = Object.keys(pricing);
   const base = readLayer(pricing, keys.filter(key => ALL_PRICE_KEYS.has(key)), issues);
   if (base.prompt === undefined || base.completion === undefined) issues.add("BASE_PRICE_MISSING");
@@ -205,9 +209,12 @@ export function normalizeEndpointPricing(tag: string, contextLength: number | nu
   };
 }
 
+/** Ordering by UTF-16 code unit, independent of the runtime's ICU collation. */
+export const byCodeUnit = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
 /** The price-relevant part of an endpoint, as a stable string; used to merge duplicate tags and to hash. */
 export function priceIdentity(endpoint: Pick<PricedEndpoint, "base" | "overrides" | "discount" | "unknownKeys" | "issues">): string {
-  const sortObject = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)));
+  const sortObject = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).sort(([a], [b]) => byCodeUnit(a, b)));
   return JSON.stringify([
     sortObject(endpoint.base), endpoint.overrides.map(item => [sortObject(item.when), sortObject(item.prices)]),
     endpoint.discount, endpoint.unknownKeys, [...endpoint.issues].sort(),
@@ -249,6 +256,9 @@ function flatten(endpoint: PricedEndpoint): Map<string, string> {
   });
   fields.set("discount", String(endpoint.discount));
   fields.set("admissible", String(endpoint.admissible));
+  fields.set("contextLength", String(endpoint.contextLength));
+  fields.set("unknownKeys", endpoint.unknownKeys.join(","));
+  fields.set("issues", [...endpoint.issues].sort().join(","));
   return fields;
 }
 
