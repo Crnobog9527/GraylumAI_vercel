@@ -48,7 +48,8 @@ describe('capacity rows', () => {
   it('marks a mismatch and spells out unknown supplier values', () => {
     const rows = capacityRows(capacity(4096, 128000));
     expect(rows[1]).toMatchObject({ label: '最大输出 Token', supplier: '128,000', current: '4,096', state: '不一致', mismatch: true });
-    expect(capacityRows(capacity(4096, null))[1]).toMatchObject({ supplier: '未知', state: '无法比较', mismatch: false });
+    expect(capacityRows(capacity(4096, null))[1]).toMatchObject({ supplier: '供应商未提供', state: '无法比较', mismatch: false });
+    expect(capacityRows({ ...capacity(4096, null), fetchedAt: null })[1].supplier).toBe('未读取');
     expect(capacityRows(capacity(null, null))[1].current).toBe('未设置');
   });
 

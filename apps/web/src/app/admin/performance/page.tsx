@@ -574,7 +574,7 @@ export default function AdminPerformancePage() {
               <CardContent className="p-6">
                 <div className="flex items-center justify-between gap-4">
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>估算缓存节省</p>
+                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>估算缓存节省（按基础价）</p>
                     {costStats.cacheSavings === null ? (
                       <p className="text-2xl font-bold mt-1 text-emerald-400">未知</p>
                     ) : (
@@ -646,7 +646,7 @@ export default function AdminPerformancePage() {
                     <div>
                       <p className="font-medium text-emerald-400">估算缓存节省</p>
                       <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                        命中率 {cacheHitRateText}；按当前价格快照估算：缓存读取 token ×（输入价 − 缓存读取价），不是历史实际节省
+                        命中率 {cacheHitRateText}；按当前价格快照的基础价估算：缓存读取 token ×（输入价 − 缓存读取价），不含分档，不是历史实际节省
                       </p>
                     </div>
                   </div>

@@ -272,4 +272,22 @@ describe('reasoning dialog local browser regression', () => {
       await browserExpect(preview).not.toContainText('积分 / 百万 token');
     });
   });
+
+  it('does not let a route with conflicting duplicate prices be chosen', async () => {
+    await withDialog(async page => {
+      await loadSettings(page);
+      await page.evaluate(`const d = window.__mr1.data;
+        const catalog = { ...d.config.catalog, endpoints: [...d.config.catalog.endpoints,
+          { tag: 'dup', providerName: 'Dup', supportedParameters: [], contextLength: 8192, maxCompletionTokens: 8192 }] };
+        const endpoint = { tag: 'dup', contextLength: 8192, admissible: false, issues: ['PRICE_NOT_UNIQUE'], discount: null,
+          unknownKeys: [], base: { prompt: '0.1', completion: '0.5' }, raw: {}, overrides: [] };
+        window.__mr1.data = { ...d, config: { ...d.config, catalog }, pricing: { fetchedAt: '2026-09-29T00:00:00.000Z',
+          model: 'example/model', source: 'openrouter', pricingHash: '${'d'.repeat(64)}', endpoints: [endpoint] } };
+        window.rerender();`);
+      await page.getByRole('combobox', { name: '供应商线路', exact: true }).click();
+      const option = page.getByRole('option', { name: /价格不唯一，不可选/ });
+      await browserExpect(option).toHaveAttribute('aria-disabled', 'true');
+      await browserExpect(page.getByRole('option', { name: /Example/ })).not.toHaveAttribute('aria-disabled', 'true');
+    });
+  });
 });

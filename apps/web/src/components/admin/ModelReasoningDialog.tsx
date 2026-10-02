@@ -164,6 +164,9 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
   const reasoning = catalog?.reasoning ?? null;
   const problem = drafts ? draftProblem(drafts) : null;
   const serverIssues = view.data?.issues ?? [];
+  // Plan 3.2: a route whose duplicate catalog entries disagree on price cannot be chosen.
+  const notUnique = new Set((view.data?.pricing?.endpoints ?? [])
+    .filter(endpoint => endpoint.issues.includes('PRICE_NOT_UNIQUE')).map(endpoint => endpoint.tag));
   const multiplierRow = multipliers.data?.models.find(model => model.id === modelId);
   const units = multipliers.data
     ? { multiplier: multiplierRow?.effective ?? null, creditsPerUsd: multipliers.data.site?.creditsPerUsd ?? null } : null;
@@ -214,8 +217,8 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
                 <SelectTrigger aria-label="供应商线路"><SelectValue placeholder="选择线路" /></SelectTrigger>
                 <SelectContent>
                   {(catalog?.endpoints ?? []).map(endpoint => (
-                    <SelectItem key={endpoint.tag} value={endpoint.tag}>
-                      {endpoint.providerName}（{endpoint.tag}）
+                    <SelectItem key={endpoint.tag} value={endpoint.tag} disabled={notUnique.has(endpoint.tag)}>
+                      {endpoint.providerName}（{endpoint.tag}）{notUnique.has(endpoint.tag) ? ' · 价格不唯一，不可选' : ''}
                       {` · 工具${endpoint.supportedParameters.includes('tools') ? '✓' : '✗'}`}
                       {` · reasoning_effort${endpoint.supportedParameters.includes('reasoning_effort') ? '✓' : '✗'}`}
                       {` · reasoning${endpoint.supportedParameters.includes('reasoning') ? '✓' : '✗'}`}

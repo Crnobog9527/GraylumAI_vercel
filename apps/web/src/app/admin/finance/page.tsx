@@ -28,7 +28,7 @@ import { ModelReportPriceCell } from '@/components/admin/ModelReportPriceCell';
 
 function formatCreditsRange(range: { min: number; max: number } | null, suffix: string) {
   if (!range) {
-    return '未配置';
+    return '无可用价格（未读取或不可推导）';
   }
 
   if (range.min === range.max) {
@@ -685,8 +685,8 @@ export default function AdminFinancePage() {
                 <div className="space-y-4">
                   <div className="flex justify-between items-center p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
                     <div>
-                      <p className="font-medium" style={{ color: 'var(--text-primary)' }}>输入成本区间</p>
-                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>按活跃模型折算，每 1K 输入 Token</p>
+                      <p className="font-medium" style={{ color: 'var(--text-primary)' }}>输入单价上限区间</p>
+                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>按活跃模型的冻结用单价（上限，可能取缓存写入价或长上下文档）折算，每 1K 输入 Token</p>
                     </div>
                     <Badge className="bg-blue-500/20 text-blue-400 text-sm px-3 py-1">
                       {formatCreditsRange(runtimeBilling.inputCreditsPer1KRange, '积分')}
@@ -695,8 +695,8 @@ export default function AdminFinancePage() {
 
                   <div className="flex justify-between items-center p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
                     <div>
-                      <p className="font-medium" style={{ color: 'var(--text-primary)' }}>输出成本区间</p>
-                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>按活跃模型折算，每 1K 输出 Token</p>
+                      <p className="font-medium" style={{ color: 'var(--text-primary)' }}>输出单价上限区间</p>
+                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>按活跃模型的冻结用单价（上限）折算，每 1K 输出 Token</p>
                     </div>
                     <Badge className="bg-purple-500/20 text-purple-400 text-sm px-3 py-1">
                       {formatCreditsRange(runtimeBilling.outputCreditsPer1KRange, '积分')}
@@ -706,7 +706,7 @@ export default function AdminFinancePage() {
                   <div className="flex justify-between items-center p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
                     <div>
                       <p className="font-medium" style={{ color: 'var(--text-primary)' }}>模型联网成本区间</p>
-                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>按活跃模型折算，每 1K 次真实搜索</p>
+                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>按活跃模型的基础搜索价折算，每 1K 次真实搜索；未检查线路能否用于计费，仅供参考</p>
                     </div>
                     <Badge className="bg-emerald-500/20 text-emerald-400 text-sm px-3 py-1">
                       {formatCreditsRange(runtimeBilling.searchCreditsPer1KRange, '积分')}

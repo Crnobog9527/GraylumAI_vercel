@@ -47,7 +47,7 @@ export function ModelCapacityPanel(props: {
   }
   const rows = capacityRows(capacity);
   const mismatch = rows.some(row => row.mismatch);
-  const unknown = rows.some(row => row.supplier === '未知');
+  const unknown = capacity.inputLimit.supplier === null || capacity.maxTokens.supplier === null;
   const synced = previous ? capacitySyncChanges(previous, capacity) : [];
   const routeUnsaved = selectedRoute !== undefined && selectedRoute !== capacity.route;
   return (
@@ -91,7 +91,7 @@ export function ModelCapacityPanel(props: {
         <p className="text-xs text-[var(--text-secondary)]">
           {!capacity.route ? `还没有选线路；选好线路并保存后，${hint}同步。`
             : !capacity.fetchedAt ? `还没有读取这个模型 ID 的目录，请${hint}。`
-              : '目录没有给出这条线路的值，读取时会保留当前值。'}
+              : '供应商没有提供这条线路的值，读取时会保留当前值；后台没有手填入口，需要时请联系技术处理。'}
         </p>
       ) : null}
     </section>

@@ -75,12 +75,14 @@ export type CapacityRow = {
 
 /** One display row per capacity value: supplier value, stored value and whether they agree. */
 export function capacityRows(capacity: ModelCapacityView): CapacityRow[] {
+  // With a read catalog and a saved route, a missing value means the supplier did not publish it.
+  const missing = capacity.fetchedAt && capacity.route ? '供应商未提供' : '未读取';
   return (['inputLimit', 'maxTokens'] as const).map(field => {
     const value = capacity[field];
     return {
       field,
       label: CAPACITY_LABELS[field],
-      supplier: count(value.supplier) ?? '未知',
+      supplier: count(value.supplier) ?? missing,
       current: count(value.current) ?? '未设置',
       state: value.matches === null ? '无法比较' : value.matches ? '一致' : '不一致',
       mismatch: value.matches === false,
