@@ -7,7 +7,7 @@ DECLARE d opc_drafts;r artifact_rounds;p artifact_projects;e runtime_executions;
  ids uuid[];available_ids uuid[];execution_id uuid;processed jsonb:='[]';response jsonb;payload jsonb;capture_request_id uuid;
  output jsonb;code text;patch jsonb;step_id text;field_id text;st jsonb;meta jsonb;value jsonb;candidate jsonb;
  changed jsonb:='{}';fields jsonb:='{}';discarded jsonb:='[]';versions jsonb:='{}';old_steps jsonb;
- protected boolean;material_changed boolean;seq jsonb;suggestion jsonb;remaining integer;
+ protected boolean;material_changed boolean;seq jsonb;suggestion jsonb;remaining integer;patch_index integer:=0;
 BEGIN
  -- Match existing OPC lock order; never acquire a runtime session/run update lock.
  PERFORM bill2_actor(p_actor_id);
@@ -81,6 +81,7 @@ BEGIN
   material_changed:=EXISTS(SELECT 1 FROM jsonb_each(r.steps) s
    WHERE s.value->'version' IS DISTINCT FROM e.payload#>ARRAY['scopeMaterial','content','work','steps',s.key,'version']);
   FOR patch IN SELECT * FROM jsonb_array_elements(output->'patches') LOOP
+   patch_index:=patch_index+1;
    step_id:=patch->>'stepId';field_id:=patch->>'fieldId';st:=r.steps->step_id;
    IF jsonb_typeof(patch) IS DISTINCT FROM 'object' OR jsonb_typeof(patch->'value') IS DISTINCT FROM 'string'
     OR char_length(btrim(coalesce(patch->>'value','')))=0 OR char_length(patch->>'value')>400
@@ -89,7 +90,7 @@ BEGIN
     OR coalesce(patch->>'basis','') NOT IN ('user_statement','agent_proposal')
     OR NOT EXISTS(SELECT 1 FROM jsonb_array_elements(r.workflow->'steps') s,jsonb_array_elements(s->'information') f
       WHERE s->>'id'=step_id AND f->>'id'=field_id)
-   THEN discarded:=discarded||jsonb_build_array(jsonb_build_object('stepId',step_id,'fieldId',field_id));CONTINUE;END IF;
+   THEN discarded:=discarded||jsonb_build_array(jsonb_build_object('index',patch_index,'reason','invalid_patch'));CONTINUE;END IF;
    value:=patch-ARRAY['stepId','fieldId','basis'];
    value:=jsonb_build_object('value',value->'value','status',value->'status','nature',value->'nature');
    meta:=coalesce(st->'fieldMeta'->field_id,'{}');

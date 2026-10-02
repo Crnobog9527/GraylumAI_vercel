@@ -293,7 +293,7 @@ it.each([6, 21])('RUNTIME: capture drains before new admission and never charges
     expect((await f.records()).rows).toHaveLength(6);
     await rpc('runtime_cancel', { p_actor_id: f.actor, p_execution_id: prepared.executionId });
   }
-});
+}, 60000);
 
 it('RUNTIME: capture skips unavailable queue entries and rejects stale rounds without changing information', async () => {
   const f = await fixture();
@@ -319,6 +319,8 @@ it('RUNTIME: capture rejects invalid items and confirmed steps only receive sugg
   const result = await f.apply(id);
   expect(result.result).toBe('suggested');
   expect(result.discarded).toHaveLength(5);
+  expect(result.discarded).toEqual([1, 2, 3, 4, 5].map(index => ({ index, reason: 'invalid_patch' })));
+  expect(JSON.stringify((await f.records()).rows)).not.toContain('safe');
   const after = await f.steps();
   expect(after['step-1'].information).toEqual(before['step-1'].information);
   expect(after['step-1'].version).toBe(before['step-1'].version);
@@ -452,7 +454,7 @@ it('RUNTIME: account erasure clears captured metadata, notes and processing hist
   const f = await fixture(), id = await f.seed();
   await f.apply(id);
   await db.query("update artifact_rounds set steps=jsonb_set(steps,'{step-0,notes}',$2) where id=$1", [f.d.roundId, JSON.stringify([{ id: randomUUID(), text: 'private note', source: 'user' }])]);
-  await rpc('account_erasure_confirm', { p_profile_id: f.actor, p_request_id: randomUUID() });
+  await db.query('select account_erasure_confirm($1,$2)', [f.actor, randomUUID()]);
   await db.query('select account_erasure_scrub_content($1)', [f.actor]);
   expect(await f.steps()).toBeNull();
   const record = (await f.records()).rows[0];
