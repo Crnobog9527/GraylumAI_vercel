@@ -35,11 +35,6 @@ type AdminModelRow = Omit<PersistedModel, 'config'> & {
   max_tokens?: number | null;
   input_limit?: number | null;
   enable_web_search?: string | null;
-  input_token_cost?: number | null;
-  output_token_cost?: number | null;
-  input_token_cost_above_200k?: number | null;
-  output_token_cost_above_200k?: number | null;
-  web_search_cost?: number | null;
   token_counting_supported?: string | null;
   token_counting_method?: string | null;
   tokenizer_family?: string | null;
@@ -51,12 +46,13 @@ type AdminModelRow = Omit<PersistedModel, 'config'> & {
 
 function stripSensitiveModelFields<T extends { api_key?: string | null }>(model: T): Omit<T, 'api_key'> {
   const { api_key: _apiKey, ...safeModel } = model;
+  for (const key of ['input_token_cost', 'output_token_cost', 'input_token_cost_above_200k',
+    'output_token_cost_above_200k', 'web_search_cost']) Reflect.deleteProperty(safeModel, key);
   return safeModel;
 }
 
 const GENERIC_CONNECTION_ERROR = 'API 连接失败，请检查配置后重试';
 const GENERIC_CONNECTION_ERROR_DETAIL = '连接测试失败，请查看服务端日志';
-const MICRO_DOLLARS_PER_USD = 1_000_000;
 
 function createModelOperationError(operation: string, cause: unknown) {
   return createSafeInternalError(cause, `${operation}失败，请稍后重试`);
@@ -220,7 +216,7 @@ export const modelRouter = router({
   getAvailableModels: adminProcedure.query(async ({ ctx }) => {
     const { data, error } = await ctx.supabase
       .from('ai_models')
-      .select('id, name, model_id, provider, api_key, api_endpoint, description, max_tokens, input_limit, enable_web_search, input_token_cost, output_token_cost, input_token_cost_above_200k, output_token_cost_above_200k, web_search_cost, token_counting_supported, token_counting_method, tokenizer_family, is_active, config, created_at, updated_at')
+      .select('id, name, model_id, provider, api_key, api_endpoint, description, max_tokens, input_limit, enable_web_search, token_counting_supported, token_counting_method, tokenizer_family, is_active, config, created_at, updated_at')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -234,7 +230,7 @@ export const modelRouter = router({
     const startedAt = Date.now();
     const { data, error } = await ctx.supabase
       .from('ai_models')
-      .select('id, name, model_id, provider, api_key, api_endpoint, description, max_tokens, input_limit, enable_web_search, input_token_cost, output_token_cost, input_token_cost_above_200k, output_token_cost_above_200k, web_search_cost, token_counting_supported, token_counting_method, tokenizer_family, is_active, config, created_at, updated_at')
+      .select('id, name, model_id, provider, api_key, api_endpoint, description, max_tokens, input_limit, enable_web_search, token_counting_supported, token_counting_method, tokenizer_family, is_active, config, created_at, updated_at')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -271,14 +267,7 @@ export const modelRouter = router({
       apiKey: z.string().optional(),
       apiEndpoint: z.string().optional(),
       description: z.string().optional(),
-      maxTokens: z.number().int().min(256).default(4096),
-      inputLimit: z.number().int().min(1000).default(180000),
       enableWebSearch: z.boolean().default(false),
-      inputTokenCost: z.number().min(0).default(0),
-      outputTokenCost: z.number().min(0).default(0),
-      inputTokenCostAbove200k: z.number().min(0).default(0),
-      outputTokenCostAbove200k: z.number().min(0).default(0),
-      webSearchCost: z.number().min(0).default(0),
     }))
     .mutation(async ({ ctx, input }) => {
       const tokenCountingMetadata = inferTokenCountingMetadata({
@@ -296,14 +285,7 @@ export const modelRouter = router({
           api_key: input.apiKey,
           api_endpoint: input.apiEndpoint,
           description: input.description,
-          max_tokens: input.maxTokens,
-          input_limit: input.inputLimit,
           enable_web_search: input.enableWebSearch ? 'true' : 'false',
-          input_token_cost: Math.round(input.inputTokenCost * MICRO_DOLLARS_PER_USD),
-          output_token_cost: Math.round(input.outputTokenCost * MICRO_DOLLARS_PER_USD),
-          input_token_cost_above_200k: Math.round(input.inputTokenCostAbove200k * MICRO_DOLLARS_PER_USD),
-          output_token_cost_above_200k: Math.round(input.outputTokenCostAbove200k * MICRO_DOLLARS_PER_USD),
-          web_search_cost: Math.round(input.webSearchCost * MICRO_DOLLARS_PER_USD),
           token_counting_supported: tokenCountingMetadata.token_counting_supported,
           token_counting_method: tokenCountingMetadata.token_counting_method,
           tokenizer_family: tokenCountingMetadata.tokenizer_family,
@@ -333,14 +315,7 @@ export const modelRouter = router({
       apiKey: z.string().optional(),
       apiEndpoint: z.string().optional(),
       description: z.string().optional(),
-      maxTokens: z.number().int().min(256).optional(),
-      inputLimit: z.number().int().min(1000).optional(),
       enableWebSearch: z.boolean().optional(),
-      inputTokenCost: z.number().min(0).optional(),
-      outputTokenCost: z.number().min(0).optional(),
-      inputTokenCostAbove200k: z.number().min(0).optional(),
-      outputTokenCostAbove200k: z.number().min(0).optional(),
-      webSearchCost: z.number().min(0).optional(),
       isActive: z.boolean().optional(),
       config: z.record(z.string(), z.unknown()).optional(),
     }))
@@ -363,14 +338,7 @@ export const modelRouter = router({
       if (input.apiKey !== undefined) updateData.api_key = input.apiKey;
       if (input.apiEndpoint !== undefined) updateData.api_endpoint = input.apiEndpoint;
       if (input.description !== undefined) updateData.description = input.description;
-      if (input.maxTokens !== undefined) updateData.max_tokens = input.maxTokens;
-      if (input.inputLimit !== undefined) updateData.input_limit = input.inputLimit;
       if (input.enableWebSearch !== undefined) updateData.enable_web_search = input.enableWebSearch ? 'true' : 'false';
-      if (input.inputTokenCost !== undefined) updateData.input_token_cost = Math.round(input.inputTokenCost * MICRO_DOLLARS_PER_USD);
-      if (input.outputTokenCost !== undefined) updateData.output_token_cost = Math.round(input.outputTokenCost * MICRO_DOLLARS_PER_USD);
-      if (input.inputTokenCostAbove200k !== undefined) updateData.input_token_cost_above_200k = Math.round(input.inputTokenCostAbove200k * MICRO_DOLLARS_PER_USD);
-      if (input.outputTokenCostAbove200k !== undefined) updateData.output_token_cost_above_200k = Math.round(input.outputTokenCostAbove200k * MICRO_DOLLARS_PER_USD);
-      if (input.webSearchCost !== undefined) updateData.web_search_cost = Math.round(input.webSearchCost * MICRO_DOLLARS_PER_USD);
       if (input.isActive !== undefined) updateData.is_active = input.isActive ? 'true' : 'false';
       if (input.config !== undefined) updateData.config = withStoredManagedKeys(input.config, currentModel.data?.config);
       const nextProvider = input.provider ?? currentModel.data?.provider ?? 'custom';

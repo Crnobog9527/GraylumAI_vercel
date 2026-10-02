@@ -229,6 +229,8 @@ SET
   is_popular = EXCLUDED.is_popular,
   active = EXCLUDED.active;
 
+-- Legacy cost columns below are placeholders for old entry points only.
+-- New pricing paths use OpenRouter config.pricing; remove these with LEGACY-CLOSE.
 INSERT INTO public.ai_models (
   id,
   name,

@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { normalizeEndpointPricing, type PricingSnapshot } from '@repo/api/src/shared/modelPricing';
-import { describeChange, priceRows, selectedRoute, snapshotAge } from './modelPriceView';
+import { describeChange, priceRows, routeView, selectedRoute, snapshotAge } from './modelPriceView';
 
 const luna = normalizeEndpointPricing('openai', 1050000, {
   prompt: '0.0000001', completion: '0.0000005', input_cache_write: '0.000000125', web_search: '0.01', discount: 0,
@@ -43,5 +43,14 @@ describe('model price view', () => {
       .toBe('openai · overrides[0].输入：0.2 → 0.25（上涨）');
     expect(describeChange({ tag: 'openai', change: 'changed', field: 'prompt', before: '0.2', after: '0.1' })).toBe('openai · 输入：0.2 → 0.1');
     expect(describeChange({ tag: 'azure', change: 'removed' })).toBe('线路 azure 已不在目录里');
+  });
+
+  it('lists unknown catalog price fields with their original values', () => {
+    const odd = normalizeEndpointPricing('odd', 8192, { prompt: '0.0000001', completion: '0.0000005', video_frame: '0.002', bonus: { a: 1 } });
+    expect(odd.unknownKeys.length).toBeGreaterThan(0);
+    const view = routeView(odd);
+    expect(view.unknown).toEqual(odd.unknownKeys.map(key => ({ key, value: key === 'video_frame' ? '0.002' : '{"a":1}' })));
+    const long = routeView({ ...odd, unknownKeys: ['long'], raw: { long: 'x'.repeat(300) } });
+    expect(long.unknown[0].value).toHaveLength(201);
   });
 });

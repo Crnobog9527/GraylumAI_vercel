@@ -1,3 +1,4 @@
+import { modelPriceView, type ModelPriceRow } from '../shared/modelPriceView';
 import { divRoundPico, picoToUsd, sumUsdPico, usdToPico } from './reportUsd';
 
 interface RecordedCostRow {
@@ -9,21 +10,18 @@ interface CacheCostRow {
   cached_tokens: number | null;
 }
 
-interface CurrentModelPrice {
-  model_id: string;
-  input_token_cost: number | null;
-}
-
-export function estimateCacheSavings(rows: CacheCostRow[], models: CurrentModelPrice[]): number | null {
-  const prices = new Map(models.map((model) => [model.model_id, model.input_token_cost]));
+export function estimateCacheSavings(rows: CacheCostRow[], models: ModelPriceRow[]): number | null {
+  // A token_stats model id cannot identify one route when multiple configured rows share it.
+  const prices = new Map<string, ReturnType<typeof modelPriceView> | null>();
+  for (const model of models) prices.set(model.model_id, prices.has(model.model_id) ? null : modelPriceView(model));
   let estimatePico = 0n;
   for (const row of rows) {
     if (row.cached_tokens === null) return null;
     if (row.cached_tokens === 0) continue;
     const price = prices.get(row.model_used ?? '');
-    if (price === undefined || price === null || price <= 0) return null;
-    // cached_tokens * price * 0.9 / 1e12 USD, which is cached_tokens * price * 0.9 picodollars.
-    estimatePico += divRoundPico(BigInt(row.cached_tokens) * usdToPico(price) * 9n, 10n ** 13n);
+    const input = price?.base?.prompt, cache = price?.base?.input_cache_read;
+    if (!price?.frozen || input === undefined || cache === undefined) return null;
+    estimatePico += divRoundPico(BigInt(row.cached_tokens) * (usdToPico(input) - usdToPico(cache)), 1_000_000n);
   }
   return picoToUsd(estimatePico);
 }
