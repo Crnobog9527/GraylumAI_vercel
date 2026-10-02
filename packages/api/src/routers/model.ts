@@ -347,7 +347,7 @@ export const modelRouter = router({
     .mutation(async ({ ctx, input }) => {
       const currentModel = await ctx.supabase
         .from('ai_models')
-        .select('provider, model_id, api_endpoint, config')
+        .select('provider, model_id, api_endpoint, config, updated_at')
         .eq('id', input.id)
         .single();
 
@@ -387,13 +387,14 @@ export const modelRouter = router({
         updateData.tokenizer_family = tokenCountingMetadata.tokenizer_family;
       }
 
+      // Conditional on the version read above, so a concurrent price read or setting save is never written back.
       const { data, error } = await ctx.supabase
         .from('ai_models')
         .update(updateData)
-        .eq('id', input.id)
+        .eq('id', input.id).eq('updated_at', currentModel.data?.updated_at)
         .select()
         .single();
-
+      if (error?.code === 'PGRST116') throw new TRPCError({ code: 'CONFLICT', message: '模型配置刚被修改，请刷新后再保存' });
       if (error) {
         throw createModelOperationError('更新模型', error);
       }
@@ -435,12 +436,13 @@ export const modelRouter = router({
   updateModelConfig: adminProcedure
     .input(z.object({ id: z.string().uuid(), config: z.record(z.string(), z.unknown()) }))
     .mutation(async ({ ctx, input }) => {
-      const current = await ctx.supabase.from('ai_models').select('config').eq('id', input.id).maybeSingle();
+      const current = await ctx.supabase.from('ai_models').select('config, updated_at').eq('id', input.id).maybeSingle();
       const { data, error } = await ctx.supabase.from('ai_models')
         .update({ config: withStoredManagedKeys(input.config, current.data?.config), updated_at: new Date().toISOString() })
-        .eq('id', input.id)
+        .eq('id', input.id).eq('updated_at', current.data?.updated_at)
         .select();
       if (error) throw createModelOperationError('更新模型配置', error);
+      if (!data?.length) throw new TRPCError({ code: 'CONFLICT', message: '模型配置刚被修改或已删除，请刷新后再保存' });
       return data?.map(stripSensitiveModelFields) ?? data;
     }),
 

@@ -118,7 +118,7 @@ config.pricing = {
   fetchedAt, model,                 // 后台按钮读取时与 config.reasoning.catalog 同一次写入；准入自动重读只更新 pricing
   source: "openrouter:/api/v1/models/{model}/endpoints",
   pricingHash,                      // 规范化后全部线路价格的 sha256
-  endpoints: [ { tag, pricing } ]   // 最多 64 条，与目录快照的线路一一对应
+  endpoints: [ { tag, pricing } ]   // 最多 64 条；准入自动重读后可能比目录快照新，线路不保证一一对应
 }
 ```
 
