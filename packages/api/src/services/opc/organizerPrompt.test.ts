@@ -32,7 +32,7 @@ describe('organizer complete-value context',()=>{
   ])('freezes existing goal and off-topic %s separately without widening writable fields',async(_name,input)=>{
     const admin={rpc:vi.fn((name:string)=>{
       const data:Record<string,unknown>={opc_query:{projectId:id,roundId:id,sessionId:id,information:{current:{schema,values}}},
-        artifact_query:{moduleId:id,workflow:{steps:[{id:"current",resources:[]}] }},runtime_admission_replay:null,opc_step_material:{revision:1,turnToken:id}};
+        artifact_query:{moduleId:id,workflow:{steps:[{id:"current",resources:[]}] }},runtime_admission_replay:null,opc_capture_apply:{processed:[],remaining:0,hasMore:false},opc_step_material:{revision:1,turnToken:id}};
       if(!(name in data))throw new Error(name);
       const response=Promise.resolve({data:data[name],error:null});
       return Object.assign(response,{abortSignal:()=>response});
