@@ -1114,6 +1114,32 @@ describe('adminRouter finance stats runtime billing summary', () => {
     expect(rows[0].cached_tokens).toBeNull();
   });
 
+  it('accepts the saved empty provider-price setting without treating it as a scalar billing setting', async () => {
+    const result = await createAdminCaller(createFinanceStatsSupabase({
+      system_settings: [
+        { key: 'billing_provider_prices', value: { version: 1, entries: [] } },
+        { key: 'billing_credits_per_usd', value: 100 },
+        { key: 'billing_token_price_multiplier', value: 3 },
+      ],
+    })).getFinanceStats();
+    expect(result.runtimeBilling).toMatchObject({ creditsPerUsd: 100, tokenPriceMultiplier: 3 });
+    expect(result.financeOverview.recordedCostUsd).toBe(0.125);
+  });
+
+  it('accepts a renamed model with a refreshed snapshot and the retained manual costs', async () => {
+    const modelId = 'openai/gpt-6.1-sol';
+    const result = await createAdminCaller(createFinanceStatsSupabase({
+      ai_models: [{ id: 'renamed-model', name: modelId, model_id: modelId, provider: 'openrouter',
+        is_active: true, max_tokens: 4096, input_token_cost: 200000, output_token_cost: 400000,
+        input_token_cost_above_200k: 300000, output_token_cost_above_200k: 600000, web_search_cost: 50000,
+        config: { pricing: { model: modelId, fetchedAt: '2026-03-29T08:00:00.000Z',
+          source: 'fixture', pricingHash: 'a'.repeat(64), endpoints: [] } },
+      }],
+    })).getFinanceStats();
+    expect(result.modelStats).toEqual([expect.objectContaining({ modelId, inputTokenCost: 200000, outputTokenCost: 400000 })]);
+    expect(result.financeOverview.recordedCostUsd).toBe(0.125);
+  });
+
   it('accepts genuinely empty datasets and keeps missing-setting fallbacks', async () => {
     const emptyOverrides = Object.fromEntries(
       financeTables.map((table) => [table, []]),
