@@ -351,6 +351,8 @@ export const modelRouter = router({
         .eq('id', input.id)
         .single();
 
+      if (currentModel.error) throw createModelOperationError('读取模型', currentModel.error);
+      if (!currentModel.data) throw new TRPCError({ code: 'CONFLICT', message: '模型已删除，请刷新后再保存' });
       const updateData: Record<string, unknown> = {
         updated_at: new Date().toISOString(),
       };
@@ -371,11 +373,9 @@ export const modelRouter = router({
       if (input.webSearchCost !== undefined) updateData.web_search_cost = Math.round(input.webSearchCost * MICRO_DOLLARS_PER_USD);
       if (input.isActive !== undefined) updateData.is_active = input.isActive ? 'true' : 'false';
       if (input.config !== undefined) updateData.config = withStoredManagedKeys(input.config, currentModel.data?.config);
-
       const nextProvider = input.provider ?? currentModel.data?.provider ?? 'custom';
       const nextModelId = input.modelId ?? currentModel.data?.model_id;
       const nextEndpoint = input.apiEndpoint ?? currentModel.data?.api_endpoint ?? null;
-
       if (nextModelId) {
         const tokenCountingMetadata = inferTokenCountingMetadata({
           provider: nextProvider,
@@ -386,7 +386,6 @@ export const modelRouter = router({
         updateData.token_counting_method = tokenCountingMetadata.token_counting_method;
         updateData.tokenizer_family = tokenCountingMetadata.tokenizer_family;
       }
-
       // Conditional on the version read above, so a concurrent price read or setting save is never written back.
       const { data, error } = await ctx.supabase
         .from('ai_models')
@@ -398,7 +397,6 @@ export const modelRouter = router({
       if (error) {
         throw createModelOperationError('更新模型', error);
       }
-
       const shouldVerifyConnection =
         input.apiKey !== undefined ||
         input.apiEndpoint !== undefined ||
@@ -437,6 +435,8 @@ export const modelRouter = router({
     .input(z.object({ id: z.string().uuid(), config: z.record(z.string(), z.unknown()) }))
     .mutation(async ({ ctx, input }) => {
       const current = await ctx.supabase.from('ai_models').select('config, updated_at').eq('id', input.id).maybeSingle();
+      if (current.error) throw createModelOperationError('读取模型配置', current.error);
+      if (!current.data) throw new TRPCError({ code: 'CONFLICT', message: '模型已删除，请刷新后再保存' });
       const { data, error } = await ctx.supabase.from('ai_models')
         .update({ config: withStoredManagedKeys(input.config, current.data?.config), updated_at: new Date().toISOString() })
         .eq('id', input.id).eq('updated_at', current.data?.updated_at)

@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
 import type { OpenRouterLimits } from '../bill2/openRouterPolicy';
 import { readOpenRouterPricing } from '../models/openRouterCatalog';
-import { readPricingSnapshot, type PricingSnapshot } from '../../shared/modelPricing';
+import { diffPricing, readPricingSnapshot, type PricingSnapshot } from '../../shared/modelPricing';
 import { deriveFrozenPrices, priceIncreases } from '../../shared/modelPriceBound';
 import { readReasoningConfig } from '../../shared/modelReasoning';
 import { StagingAccessError, stagingRpcFailure } from './stagingErrors';
@@ -51,7 +51,7 @@ async function renew(admin: SupabaseClient, row: Row, previous: PricingSnapshot,
   try {
     fresh = await deps.read(row.model_id);
   } catch {
-    failedAt.set(row.id, now);
+    failedAt.set(row.id, deps.now());
     log(row, 'read_failed', { previousHash: previous.pricingHash });
     throw new StagingAccessError('RUNTIME_PRICE_SNAPSHOT_STALE');
   }
@@ -60,8 +60,9 @@ async function renew(admin: SupabaseClient, row: Row, previous: PricingSnapshot,
   const written = await admin.from('ai_models').update({ config: { ...base, pricing: fresh }, updated_at: new Date(now).toISOString() })
     .eq('id', row.id).eq('updated_at', row.updated_at).select('id');
   const changed = previous.pricingHash !== fresh.pricingHash;
+  const details = { changes: diffPricing(previous, fresh), routes: fresh.endpoints.map(endpoint => endpoint.tag) };
   if (!written.error && Array.isArray(written.data) && written.data.length === 1) {
-    log(row, 'written', { previousHash: previous.pricingHash, pricingHash: fresh.pricingHash, changed });
+    log(row, 'written', { previousHash: previous.pricingHash, pricingHash: fresh.pricingHash, changed, ...details });
     return { row: { ...row, config: { ...base, pricing: fresh } }, snapshot: fresh };
   }
   const latest = await admin.from('ai_models').select(ROW_COLUMNS).eq('id', row.id).maybeSingle();
@@ -70,7 +71,7 @@ async function renew(admin: SupabaseClient, row: Row, previous: PricingSnapshot,
   const current = latest.data as Row, stored = readPricingSnapshot(current.config);
   const useStored = Boolean(stored && !isStale(stored, now));
   log(current, written.error ? 'write_failed' : 'write_conflict', {
-    previousHash: previous.pricingHash, pricingHash: fresh.pricingHash, changed, used: useStored ? 'stored' : 'fresh_unwritten',
+    previousHash: previous.pricingHash, pricingHash: fresh.pricingHash, changed, ...details, used: useStored ? 'stored' : 'fresh_unwritten',
   });
   return { row: current, snapshot: useStored ? stored! : fresh };
 }

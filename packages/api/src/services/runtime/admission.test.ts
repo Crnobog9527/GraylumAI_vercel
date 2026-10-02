@@ -19,7 +19,7 @@ it.each(['PGRST202','42883','42501','PGRST301','XX000',null].flatMap(code=>[fals
   if(name==='runtime_admit'){frozen=args.p_payload as Record<string,unknown>;return {data:{executionId:requestId},error:null};}
   throw new Error(name);
  });
- const query={select:()=>query,eq:()=>query,single:async()=>({data:{id:modelId,model_id:real?'test/model':'fixture',provider:real?'openrouter':'fixture',is_active:'true',max_tokens:1000,input_limit:32000},error:null})};
+ const query={in:async()=>({data:[{id:modelId,model_id:'test/model',config:configuredReasoning('test/model')}],error:null}),select:()=>query,eq:()=>query,single:async()=>({data:{id:modelId,model_id:real?'test/model':'fixture',provider:real?'openrouter':'fixture',is_active:'true',max_tokens:1000,input_limit:32000},error:null})};
  const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01T00:00:00Z'}},error:null})}} as unknown as SupabaseClient;
  const admin={rpc,from:()=>query} as unknown as SupabaseClient;
  const admission=runtimeAdmissionService(user,admin,{...(real?{real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01T00:00:00Z',callPolicies:[{modelId,provider:'openrouter',account:'test',model:'test/model',protocol:'openrouter-chat-v1' as const,providerLimits:{providerSlug:'synthetic/fp8',contextTokens:32000,promptUsdPerMillion:'0.1',completionUsdPerMillion:'0.1',requestUsd:'0'},upperUsd:'0.004',inputLimit:32000,outputLimit:1000,automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true}]}}:{}),workspaceContext:true,account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:10});
@@ -39,7 +39,7 @@ it.each([false,true].flatMap(real=>[false,true].map(mentorStream=>({real,mentorS
   throw new Error(name);
  });
  const admin={rpc,from:(table:string)=>{
-  let selected='';const q={select:()=>q,eq:(_key:string,id:string)=>{selected=id;return q;},in:async()=>({data:[{key:'v3_summary_model_id',value:organizerId},{key:'v3_summary_max_tokens',value:'2048'}],error:null}),single:async()=>{modelReads++;return {data:models.find(m=>m.id===selected),error:null};}};
+  let selected='';const q={select:()=>q,eq:(_key:string,id:string)=>{selected=id;return q;},in:async()=>({data:table==='ai_models'?models:[{key:'v3_summary_model_id',value:organizerId},{key:'v3_summary_max_tokens',value:'2048'}],error:null}),single:async()=>{modelReads++;return {data:models.find(m=>m.id===selected),error:null};}};
   expect(['ai_models','system_settings']).toContain(table);return q;
  }} as unknown as SupabaseClient;
  const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;

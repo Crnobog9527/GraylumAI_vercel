@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { pricingConfig } from '../services/__tests__/fixtures/runtimePricing';
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 const mocks = vi.hoisted(() => ({ realOpc: false, realAdmission: false, prepareStep: vi.fn(), catalog: vi.fn(), list: vi.fn(), library: vi.fn(), start: vi.fn(), info: vi.fn(), error: vi.fn() }));
 vi.mock('../lib/logger', () => ({ logger: { info: mocks.info, error: mocks.error, warn: vi.fn() } }));
@@ -37,7 +38,7 @@ function context(privileged = true) {
   const client = { from: (table:string) => {
     if(!mocks.realAdmission||table==='profiles')return profile;
     if(table==='system_settings')return {select(){return this;},eq(){return this;},maybeSingle:async()=>({data:null,error:null}),in:async()=>({data:[{key:'v3_summary_model_id',value:summaryModel},{key:'v3_summary_max_tokens',value:128}],error:null})};
-    let id=actor;const query={select(){return this;},eq(_key:string,value:string){id=value;return this;},single:async()=>({data:{id,model_id:id===actor?'test/model':'test/summary',provider:'openrouter',is_active:modelFault==='inactive'?'false':'true',input_limit:10000,max_tokens:1000},error:modelFault&&modelFault!=='inactive'?{code:modelFault,message:'SYNTHETIC_PRIVATE_DATABASE_BODY'}:null})};return query;
+    let id=actor;const query={in:async(_key:string,ids:string[])=>({data:ids.map(id=>({id,model_id:id===actor?'test/model':'test/summary',config:pricingConfig(id===actor?'test/model':'test/summary','synthetic','2','0')})),error:null}),select(){return this;},eq(_key:string,value:string){id=value;return this;},single:async()=>({data:{id,model_id:id===actor?'test/model':'test/summary',provider:'openrouter',is_active:modelFault==='inactive'?'false':'true',input_limit:10000,max_tokens:1000},error:modelFault&&modelFault!=='inactive'?{code:modelFault,message:'SYNTHETIC_PRIVATE_DATABASE_BODY'}:null})};return query;
   }, rpc, auth: { getUser: async () => ({ data: { user: { id: actor, email_confirmed_at: '2026-01-01T00:00:00Z' } }, error: null }) } };
   return { user: { id: actor, email: 'fixture@example.test' }, isEmailVerified: true, supabase: client, supabaseAuth: client, supabaseAdmin: client, hasSupabaseAdminPrivileges: privileged } as never;
 }
