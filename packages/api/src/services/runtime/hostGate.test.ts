@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { executeOriginalExecution } from './executionStream';
 import { createRuntimeBudget } from './budget';
 import { denyNewCalls } from './newWorkGate';
@@ -39,7 +40,8 @@ it('router constructor wires its authenticated admin and resolved environment', 
   expect(source).toContain("callGate:newWorkGate(ctx.supabaseAdmin,endpoint?'local':'staging').calls");
 });
 it('no production source imports the test-only allowing gate', () => {
-  const root = new URL('../../', import.meta.url).pathname;
+  // pathname keeps percent-encoding, which breaks checkouts under non-ASCII or spaced paths.
+  const root = fileURLToPath(new URL('../../', import.meta.url));
   function visit(directory: string): void {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       if (['__tests__', 'tests'].includes(entry.name)) continue;
