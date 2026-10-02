@@ -103,7 +103,7 @@
 OpenRouter 价格快照**按**同一个函数**推导，后台不再有手填成本；实际扣费仍是 OpenRouter `usage.cost`。
 
 不做：不改 #565 的 q / m 公式和取整；不改 #553 的 PAYG 算法（只提供它要的单价）；不做第三方
-搜索服务价格（那是 #565 的 `billing_provider_prices`）；不加定时任务；不在调用时实时请求 OpenRouter 目录；
+搜索服务价格（那是 #565 的 `billing_provider_prices`）；不加定时任务；不在每次调用时请求 OpenRouter 目录——只在快照过期时由准入重读一次（D4 推荐；如果 D4 选"只手动"，就完全不在调用时请求）；
 不决定正式环境报价的审批流程（RUNTIME-PROD ①），只规定它必须用本方案的快照和推导函数。
 
 ## 3. 设计
@@ -115,7 +115,7 @@ OpenRouter 价格快照**按**同一个函数**推导，后台不再有手填成
 
 ```
 config.pricing = {
-  fetchedAt, model,                 // 与同一次写入的 config.reasoning.catalog 完全相同
+  fetchedAt, model,                 // 后台按钮读取时与 config.reasoning.catalog 同一次写入；准入自动重读只更新 pricing
   source: "openrouter:/api/v1/models/{model}/endpoints",
   pricingHash,                      // 规范化后全部线路价格的 sha256
   endpoints: [ { tag, pricing } ]   // 最多 64 条，与目录快照的线路一一对应
@@ -124,8 +124,10 @@ config.pricing = {
 
 为什么不直接加进 `config.reasoning.catalog.endpoints[]`：现有 `catalogSnapshot` 是 `.strict()`，一旦回退到旧版本，
 带价格的目录会被判为无效，导致思考设置和 Runtime 准入（`RUNTIME_REASONING_CONFIG_INVALID`）一起失效。
-放在并列的键里，旧代码只读 `config.reasoning`，回退是干净的。代价是两处要保持一致：同一次写入、相同 `fetchedAt`
-和 `model`，推导时校验两者一致且 `model` 等于当前行的 `model_id`（改过模型 ID 的行必须重新读取）；
+放在并列的键里，旧代码只读 `config.reasoning`，回退是干净的。代价是两处要保持一致：推导时校验
+`pricing.model` 和 `reasoning.catalog.model` 都等于当前行的 `model_id`（改过模型 ID 的行必须重新读取），所选线路在两边
+都存在。`fetchedAt` 不要求相同：后台按钮一次写两处，准入自动重读（第 3.4 节）只更新 `pricing`，思考设置用的目录
+只由管理员按钮更新；
 `services/models/modelConfig.ts` 的 `withStoredReasoning`（`routers/model.ts:389,456` 在编辑通用配置时用它保住
 `reasoning`）同样要处理 `pricing`：**丢掉客户端传来的 `pricing`**（防伪造），再放回已存的值。
 连接测试的 `persistConnectionState`（`routers/model.ts:106-133`）也是对整个 `config` 先读后写，和"重新读取"同时
@@ -161,8 +163,9 @@ pricing: {
 - 只读、不可手改：没有任何接口能单独写 `pricing`；唯一写入路径是"重新读取"，每次整体替换成新快照（新 `fetchedAt`、
   新 `pricingHash`）。历史价格的权威记录在已冻结的报价里（窗口 `call_policies`、`bill2_runs.payload.callPolicy`、
   `bill2_calls.payload.providerLimits`），不在 `ai_models` 里另存历史。
-- "重新读取"的写入改为带 `updated_at` 防覆盖（和 #565 `modelPricing` 一样），现有 `writeReasoning` 只是读后写，
-  慢请求期间别人改过配置会被覆盖。
+- "重新读取"的写入改为带 `updated_at` 防覆盖（和 #565 `modelPricing` 一样），并且**只合并自己负责的键**
+  （按钮：`pricing` 和 `reasoning.catalog`；准入自动重读：只有 `pricing`），不把读到的整个 `config` 写回去。
+  现有 `writeReasoning` 是读后整体写，慢请求期间别人改过的线路、思考设置会被覆盖。
 - 重新读取时服务端把新旧快照逐线路逐字段比较，结果返回给页面（"输入 2 → 2.2，上涨"）并写一条结构化日志
   `model_price_snapshot_changed`（模型、线路、字段、旧值、新值、新旧 hash），不建历史表。
 
@@ -252,7 +255,7 @@ pricing: {
   requestUsd:              每次最高 }
 ```
 
-- `openRouterLimits` 和 `openRouterBound` **不改结构、不改算法**：上界仍是
+- `openRouterBound` **算法不变**，`openRouterLimits` 的结构只加一个可选字段 `cacheWriteUsdPerMillion`（见下）：上界仍是
   `ceil((prompt × contextTokens + completion × maxOutput) / 1e6) + request`，`max_price` 也用这三个最高单价。
   所以只有一套上界算法；`max_price` 一定不低于任何分档价，长输入跨档不会被 OpenRouter 拒；旧窗口、v2 窗口和旧回执
   的上界逐位不变；0108 的整对象相等匹配和 `stagingPolicy.ts:33` 的 `upperUsd` 复核都不用动。
@@ -273,9 +276,26 @@ pricing: {
 
 1. 读取当前模型行的快照，按窗口报价的 `providerSlug` 找到线路；没有快照、没有价格、线路消失、价格不唯一、
    线路不可准入（第 3.1 节键分类）或 `pricing.model` 不等于行的 `model_id` → 拒绝 `RUNTIME_PRICE_SNAPSHOT_MISSING`。
-2. 快照 `fetchedAt` 超过时限（推荐 7 天，D1）：按 D4 推荐，由准入自动重读一次公开目录（与后台按钮同一函数、同一
-   防覆盖写入，15 秒超时），成功后用新快照继续第 3 步；读取失败 → 拒绝 `RUNTIME_PRICE_SNAPSHOT_STALE`
+2. 快照 `fetchedAt` 超过时限（推荐 7 天，D1）：按 D4 推荐，由准入自动重读一次公开目录（与后台按钮同一个
+   `readOpenRouterCatalog`，15 秒超时），成功后用新快照继续第 3 步；读取失败 → 拒绝 `RUNTIME_PRICE_SNAPSHOT_STALE`
    （中文："模型价格太久没更新，暂时无法核对，请稍后重试或在后台重新读取"）。若 D4 选"只手动"，过期直接拒绝。
+   自动重读的细则：
+   - **写入**：用读到快照前的 `updated_at` 做防覆盖条件，只合并 `config.pricing` 一个键（不碰 `reasoning`、线路和
+     连接状态）。不能只按 `fetchedAt` 判断要不要覆盖。
+   - **抢写失败**（两个调用同时发现过期，或管理员同时保存了思考设置、做了连接测试、编辑了模型）：重新读一次模型行；
+     库里的快照已经不过期，就用库里的；否则这次准入直接用自己刚读到的快照做第 3 步比较，**但不写库**。不循环重试写入。
+     刚读到的是公开数据，只用来比较，不会提高任何上限。
+   - **多个模型**：一次准入涉及的主模型、附带的整理模型（`organizeAfter`）和 `auto` 候选模型（最多 16 个）中，所有过期的
+     **并行**重读，共用一个 15 秒的总时限；所以一次调用最多多等约 15 秒（每个读取含两次 GET，模型列表约 0.75 MB）。
+   - **失败冷却**：同一服务器进程里，某个模型重读失败后 60 秒内的准入直接按 `RUNTIME_PRICE_SNAPSHOT_STALE` 拒绝，
+     不再重读。取舍：OpenRouter 目录持续不可用时，用户不用每次多等 15 秒才失败；代价是 OpenRouter 恢复后最多晚 60 秒
+     才恢复调用（管理员点按钮可立即恢复）。冷却只在单个进程内有效，不加共享存储。
+   - **思考目录不随自动重读更新**：`admitReasoning` 继续用管理员维护的 `reasoning.catalog`，所以自动重读不会让思考设置
+     在无人在场时变得不合格；目录里线路的参数变化，要等管理员按按钮时才看到。
+   - **日志**：每次自动重读都写 `model_price_snapshot_changed`（触发方 `admission`、模型、线路、变化的字段、新旧
+     `pricingHash`、是否写库成功 / 抢写失败 / 读取失败），价格没变也记一条"无变化"。
+   - **新的写入方**：这是第一次由用户请求路径（用 service-role 的 `admin` 客户端）写 `ai_models.config`。写入内容只来自
+     OpenRouter 公开目录，范围只有 `config.pricing` 一个键；PR B 的描述要写明这一点。
 3. 用当前快照按本次的 `promptTokensUpper` 推导出三个最高单价，与窗口冻结的 `promptUsdPerMillion`、
    `completionUsdPerMillion`、`requestUsd` **逐项比较**：
    - 三项都是"窗口 ≥ 推导值" → 通过。价格没变、或供应商降价（D2：继续用旧的、偏高的冻结报价，直到重新批准；
@@ -325,7 +345,7 @@ pricing: {
 | PR | 内容 | 风险 |
 | --- | --- | --- |
 | A | 新的严格 schema `pricingSnapshot`（`config.pricing`）；`readOpenRouterCatalog` 同一次读取里解析和规范化价格（十进制换算、重复 tag、键分类、overrides、unknownKeys）；`refreshCatalog` 同时写 `reasoning.catalog` 和 `pricing`，加 `updated_at` 防覆盖、新旧比较和日志；`withStoredReasoning` 丢掉客户端 `pricing` 并保住已存值；`persistConnectionState` 只合并自己的键；只读价格面板。不改任何收费路径 | high（只新增价格来源和显示，但属于计费数据；按 AGENTS.md 第 4 节保守按 high） |
-| B | `deriveOpenRouterLimits`（单字段写法）；`openRouterLimits` 只加可选 `cacheWriteUsdPerMillion`，`openRouterBound` 算法不变；`pricingAdmission`（含过期自动重读，按 D4）接入真实窗口准入；"复制报价 JSON"；合并前列出有效窗口（第 3.6 节）。无 SQL 改动 | high（计费上界、准入） |
+| B | `deriveOpenRouterLimits`（单字段写法）；`openRouterLimits` 只加可选 `cacheWriteUsdPerMillion`，`openRouterBound` 算法不变；`pricingAdmission`（含过期自动重读，按 D4：并行、15 秒总时限、抢写失败不写库、60 秒失败冷却；PR 描述写明这是用户请求路径上新的 `config.pricing` 写入方）接入真实窗口准入；"复制报价 JSON"；合并前列出有效窗口（第 3.6 节）。无 SQL 改动 | high（计费上界、准入） |
 | C | 删除模型页"Token 成本设置"表单和 `routers/model.ts` / `admin.ts` 对 5 个手填列的写入；读者按第 6 节处理；列本身保留到 LEGACY-CLOSE | high（计费字段、旧链路） |
 
 **写入方（总控 2026-10-02 指定）**：`openRouterPolicy.ts` 的唯一写入方是本任务 PR B。PROMPT-CACHE 实现只读取
@@ -396,6 +416,9 @@ LEGACY-CLOSE 删除上述旧链路后，再用一个迁移删掉 5 列（含建�
 - 推导结果：当前目录下 Sonnet `anthropic` = 2.5 / 10、Luna `openai` = 0.25 / 0.75、Gemini 按附加费；
   `openRouterBound` 对 v1 / v2 形状报价的结果与现在逐位相同；加上 `cacheWriteUsdPerMillion` 上界不变；
   `max_price` 等于三个最高单价。
+- 自动重读（全部注入假的 `transport`，单元测试和集成测试都不访问外网）：两个调用同时发现过期、一方抢写失败后
+  不写库也完成比较；与管理员保存思考线路交错时线路不被覆盖；主模型和整理模型同时过期时并行、总时限 15 秒；
+  读取失败后 60 秒冷却；只更新 `config.pricing`，`reasoning` 不变；日志字段。
 - 准入：快照缺失、过期（边界 ±1 秒）、过期后自动重读成功 / 失败、线路消失、`model` 不一致、涨价（逐项：prompt、
   completion、request 各一条）、降价、价格不变但 `fetchedAt` 变化；v2 形状窗口（Sonnet 2.5、Luna 0.25 / 0.75）通过，
   v1 形状窗口（Sonnet 2）被拒。
@@ -435,7 +458,7 @@ LEGACY-CLOSE 删除上述旧链路后，再用一个迁移删掉 5 列（含建�
 | D1 | 价格快照多久算过期 | **7 天**；新建测试窗口前 24 小时内必须读一次 | 供应商调价不频繁。**白话后果**：过期以后，如果系统不能自动重读（D4 选"只手动"，或者 OpenRouter 读不到），这个模型的新调用会全部停下，直到有人点"重新读取"。所以 D1 必须和 D3、D4 一起看 |
 | D2 | 供应商**降价**时，已批准的报价怎么办 | **继续用旧报价**，等下次批准时再降 | 旧报价只是冻结得多一点，实扣按实际费用，用户不多花钱；自动降低会让"批准过的报价"悄悄变化 |
 | D3 | 读取公开价格要不要每次请示 | **staging 和正式环境都不用逐次批准**：读取公开价格（按钮或自动重读）是日常动作；只有"涨价以后重新批准报价"需要 Owner 批准 | 读取本身不调用模型、不花钱，也不会提高任何上限（涨价会被拦下等批准）。如果正式环境也要逐次批准读取，再加上 D1 的 7 天过期，就等于上线后你**至少每 7 天要批准一次**，漏一次所有调用都会停 |
-| D4 | 价格过期后怎么续期 | **不加定时任务；过期后由下一次调用前自动重读一次**（每个模型最多每 7 天一次，那一次调用最多多等 15 秒）。价格没涨就继续，涨了就拦下等批准；读不到就拒绝这次调用 | 不用人每周去点，也不新增定时任务。另一个选项"只手动"：最简单，但要有人每 7 天点一次，否则调用会停 |
+| D4 | 价格过期后怎么续期 | **不加定时任务；过期后由下一次调用前自动重读一次**（每个模型最多每 7 天一次，那一次调用最多多等约 15 秒，涉及几个模型都并行读）。价格没涨就继续，涨了就拦下等批准；读不到就拒绝这次调用，之后 60 秒内直接拒绝 | 不用人每周去点，也不新增定时任务。另一个选项"只手动"：最简单，但要有人每 7 天点一次，否则调用会停 |
 | D5 | OpenRouter 出现我们不认识的新价格字段时 | 已知的非文本字段（图片、音频、联网搜索、1 小时缓存写入等）列入白名单，纯文本调用照常；**真正不认识的新字段：推荐拒绝这个模型的新调用**，等代码更新后再放开 | 两边都有风险：拒绝会让模型在代码更新前不能用；放行的话，如果新字段是纯文本也会收的费用（比如按时间收的缓存存储费），冻结上限没算进去，超出部分平台承担。内测阶段停用一个模型比少冻结更容易接受。（override 里出现不认识的键一律拒绝，不在这项选择里） |
 | D6 | 旧手填价格列 | **后台不再填写；还在用它的 4 个旧入口（旧估价、agentSlice、旧工作台生成）继续读原值，不改造；LEGACY-CLOSE 删掉这些入口后再删列** | 这些入口本来就要删，改造它们是白做；新模型没有手填价，旧入口会按现有规则拒绝，不会少收或乱收 |
 | D7 | 按时段变价的模型（如 DeepSeek V4 Pro 高峰/低谷价） | **冻结时按最高时段价，实扣按实际** | 调用可能跨时段；按实际扣费，用户享受低谷价 |
@@ -451,6 +474,8 @@ LEGACY-CLOSE 删除上述旧链路后，再用一个迁移删掉 5 列（含建�
   缓存写入价，要等下一次读取快照后的比较才发现；两次读取之间多出的费用由结算冲突检查记录，差额平台承担。
 - "写入价低于输入价就当附加费"**只在一个方向上保守**：写入价不低于输入价、但其实是附加费的线路会被算低。现有 5 个
   模型都不是这种情况；新增模型时若出现，结算冲突检查会发现。
-- 过期自动重读（D4）在 OpenRouter 不可用时会让过期模型的新调用失败。
+- 过期自动重读（D4）在 OpenRouter 不可用时会让过期模型的新调用失败；失败后 60 秒冷却期内直接失败，OpenRouter
+  恢复后最多晚 60 秒恢复（管理员点按钮可立即恢复）。
+- 自动重读是用户请求路径上新的 `ai_models.config` 写入方（只写 `config.pricing`）。
 - `discount` 的确切含义未经实测。
 - 本方案没有连接 staging 数据库，第 7.1 节的模型清单来自仓库文档和代码，以 staging 实际行为准。
