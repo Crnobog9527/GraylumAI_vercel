@@ -9,13 +9,20 @@ const card = { question: "你的内容主要写给谁？", options: ["刚入行�
 type Props = Parameters<typeof QuestionCardView>[0];
 const render = (props: Props) => renderToStaticMarkup(createElement(QuestionCardView, props));
 
-/** Clickable elements of the card, found in its element tree (the component has no hooks). */
+/** Clickable elements of the card, found in its element tree. */
 function clickables(node: ReactNode): Array<{ label: string; click: () => void }> {
   if (Array.isArray(node)) return node.flatMap(clickables);
   if (!isValidElement(node)) return [];
   const props = (node as ReactElement<{ children?: ReactNode; onClick?: () => void }>).props;
   const own = typeof props.onClick === "function" ? [{ label: String(props.children), click: props.onClick }] : [];
   return [...own, ...clickables(props.children)];
+}
+
+/** The card's element tree, captured inside a real render so its hooks run. */
+function tree(props: Props): ReactNode {
+  let captured: ReactNode = null;
+  renderToStaticMarkup(createElement(() => (captured = QuestionCardView(props))));
+  return captured;
 }
 
 describe("QuestionCardView: open card", () => {
@@ -44,7 +51,7 @@ describe("QuestionCardView: open card", () => {
   it("sends the option text and index; Other sends nothing and asks the page to focus its message box", () => {
     const onAnswer = vi.fn();
     const onOther = vi.fn();
-    const buttons = clickables(QuestionCardView({ card: { ...card, recommended: 0 }, answered: false, onAnswer, onOther }));
+    const buttons = clickables(tree({ card: { ...card, recommended: 0 }, answered: false, onAnswer, onOther }));
     expect(buttons).toHaveLength(card.options.length + 1);
     buttons[1].click();
     buttons[3].click();
@@ -72,7 +79,7 @@ describe("QuestionCardView: answered card", () => {
     expect(html).toContain('data-question-card="answered"');
     expect(html).toContain("已回答");
     expect(html).toMatch(/想转行的人<span[^>]*>你的选择<\/span>/);
-    expect(clickables(QuestionCardView({ card, answered: true, answer: "想转行的人", onAnswer: vi.fn() }))).toEqual([]);
+    expect(clickables(tree({ card, answered: true, answer: "想转行的人", onAnswer: vi.fn() }))).toEqual([]);
   });
 
   it("keeps the recommended tag in history next to the user's choice", () => {
@@ -95,8 +102,33 @@ describe("QuestionCardView: answered card", () => {
   });
 });
 
-it.each([false,true])('retains the validated recommendation reason (answered=%s)',answered=>{
- const html=render({card:{...card,message:'公开分析',recommended:1,recommendationReason:'已有相关经验'},answered});
- expect(html).toContain('已有相关经验');
- expect(html).not.toContain('公开分析'); // The conversation renders the single canonical message.
+describe("QuestionCardView: recommendation reason", () => {
+  const reasoned = { ...card, message: "公开分析", recommended: 1, recommendationReason: "已有相关经验" };
+  const reasonAt = /<p id="([^"]+)" class="[^"]*">已有相关经验<\/p>/;
+
+  it("shows the reason directly under the recommended option and describes that option with it", () => {
+    const html = render({ card: reasoned, answered: false, onAnswer: () => {} });
+    expect(html.match(/已有相关经验/g)).toHaveLength(1);
+    expect(html).not.toContain("公开分析"); // The conversation renders the single canonical message.
+    const id = html.match(reasonAt)?.[1];
+    expect(id).toBeTruthy();
+    expect(html.indexOf(card.question)).toBeLessThan(html.indexOf("已有相关经验"));
+    const button = `<button[^>]*aria-describedby="${id}"[^>]*>有经验的同行<span[^>]*>推荐</span></button>`;
+    expect(html).toMatch(new RegExp(`${button}<p id="${id}"[^>]*>已有相关经验</p></div><div`));
+    expect(html.match(/aria-describedby=/g)).toHaveLength(1);
+  });
+
+  it("keeps the reason under the recommended option in a history card", () => {
+    const html = render({ card: reasoned, answered: true, answer: "刚入行的新人" });
+    expect(html.match(/已有相关经验/g)).toHaveLength(1);
+    expect(html).toMatch(/<li[^>]*><div[^>]*>有经验的同行<span[^>]*>推荐<\/span><\/div><p[^>]*>已有相关经验<\/p><\/li>/);
+    expect(html).toMatch(/刚入行的新人<span[^>]*>你的选择<\/span>/);
+  });
+
+  it.each([false, true])("shows no tag and no reason without a recommendation (answered=%s)", answered => {
+    const html = render({ card: { ...card, message: "公开分析", recommended: null, recommendationReason: null }, answered });
+    expect(html).not.toContain("推荐");
+    expect(html).not.toContain("<p id=");
+    expect(html).not.toContain("aria-describedby");
+  });
 });

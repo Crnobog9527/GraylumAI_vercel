@@ -376,6 +376,11 @@ try {
   if(opcSchema&&!upgradeMode){apply('packages/db/migrations/0139_opc_business_context.sql');apply('packages/db/migrations/0139_opc_business_context.sql');}
   }
   if(opcSchema&&!upgradeMode&&!schemaFromFiles){apply('packages/db/migrations/0155_runtime_answer_source.sql');apply('packages/db/migrations/0155_runtime_answer_source.sql');}
+  // Staging-window admissions freeze BILL-UNIT rates and settle through the canonical 0157 functions.
+  if (stagingSchema && !upgradeMode && !schemaFromFiles) {
+    apply('packages/db/migrations/0157_bill_unit.sql');
+    apply('packages/db/migrations/0157_bill_unit.sql');
+  }
   console.log("SQL additive migration and repeat application PASS; runtime schema="+runtimeSchema+"; deferred upgrade="+upgradeMode);
   docker(
     "run",
