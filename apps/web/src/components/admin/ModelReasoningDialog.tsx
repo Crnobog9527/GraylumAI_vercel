@@ -20,7 +20,9 @@ import {
   type ReasoningPurpose,
 } from '@repo/api/src/shared/modelReasoning';
 
+import type { PriceChange } from '@repo/api/src/shared/modelPricing';
 import { catalogEfforts, fromDraft, normalizeDrafts, toDraft, type Draft, type Wire } from './modelReasoningDraft';
+import { ModelPriceSnapshotPanel } from './ModelPriceSnapshotPanel';
 
 const PURPOSE_NOTES: Record<ReasoningPurpose, string> = {
   interactive: '导师和日常对话。必须设置，没设置的模型不能用作 Skill 模型。',
@@ -99,7 +101,15 @@ export function ModelReasoningButton({ modelId, name }: { modelId: string; name:
 function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; name: string; onClose: () => void }) {
   const utils = trpc.useUtils();
   const view = trpc.modelReasoning.get.useQuery({ modelId });
-  const refresh = trpc.modelReasoning.refreshCatalog.useMutation({ onSuccess: data => utils.modelReasoning.get.setData({ modelId }, data) });
+  const [priceChanges, setPriceChanges] = useState<PriceChange[] | null>(null);
+  const refresh = trpc.modelReasoning.refreshCatalog.useMutation({
+    onSuccess: ({ priceChanges: changes, ...data }) => {
+      utils.modelReasoning.get.setData({ modelId }, data);
+      setPriceChanges(changes);
+      // The read bumps updated_at; reload it so a multiplier save on the page does not conflict.
+      void utils.modelPricing.getMultipliers.invalidate();
+    },
+  });
   const save = trpc.modelReasoning.save.useMutation({
     onSuccess: data => {
       utils.modelReasoning.get.setData({ modelId }, data);
@@ -154,7 +164,7 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
         <DialogHeader>
           <DialogTitle>思考设置 · {name}</DialogTitle>
           <DialogDescription>
-            按用途设置调用这个模型时的思考方式。可选项来自 OpenRouter 公开目录；保存前会按所选线路检查。
+            按用途设置调用这个模型时的思考方式。可选项和价格都来自 OpenRouter 公开目录；价格只读，保存前会按所选线路检查。
           </DialogDescription>
         </DialogHeader>
         {view.error ? (
@@ -207,6 +217,14 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
                 测试窗口或正式报价必须使用同一条线路。先选线路，才会列出这条线路支持的思考方式。
               </p>
             </section>
+
+            <ModelPriceSnapshotPanel
+              pricing={view.data?.pricing ?? null}
+              route={route}
+              modelId={view.data?.model ?? ''}
+              catalogFetchedAt={catalog?.fetchedAt ?? null}
+              changes={priceChanges}
+            />
 
             {REASONING_PURPOSES.map(purpose => {
               const draft = drafts[purpose];

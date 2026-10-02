@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { OPENROUTER_MODEL_ID, catalogSnapshot, type CatalogSnapshot } from '../../shared/modelReasoning';
+import { mergeDuplicateTags, normalizeEndpointPricing, priceIdentity, pricingSnapshot, type PricingSnapshot } from '../../shared/modelPricing';
 
 /** Only these two public, keyless catalog reads. No credential is ever sent. */
 const CATALOG_BASE = 'https://openrouter.ai/api/v1/';
@@ -66,12 +68,22 @@ async function readJson(transport: typeof fetch, path: string): Promise<unknown>
   }
 }
 
+export type CatalogRead = { catalog: CatalogSnapshot; pricing: PricingSnapshot };
+
+/** sha256 of every route's normalized prices, in tag order. */
+export function pricingHash(endpoints: PricingSnapshot['endpoints']): string {
+  const lines = [...endpoints].sort((a, b) => a.tag.localeCompare(b.tag)).map(endpoint => JSON.stringify([endpoint.tag, priceIdentity(endpoint)]));
+  return createHash('sha256').update(lines.join('\n')).digest('hex');
+}
+
 /**
  * Reads the public OpenRouter catalog for one model: its reasoning metadata
- * from the model list, and each provider route's parameters. Any unexpected
- * shape fails the whole read, so a stored snapshot is never partial.
+ * from the model list, each provider route's parameters, and each route's
+ * prices (MODEL-PRICING-SYNC). Any unexpected catalog shape fails the whole
+ * read, so a stored snapshot is never partial; a route whose prices cannot
+ * be represented is kept and marked not admissible instead.
  */
-export async function readOpenRouterCatalog(model: string, transport: typeof fetch = fetch, now: () => Date = () => new Date()): Promise<CatalogSnapshot> {
+export async function readOpenRouterCatalog(model: string, transport: typeof fetch = fetch, now: () => Date = () => new Date()): Promise<CatalogRead> {
   const path = catalogModelPath(model);
   const [list, endpoints] = await Promise.all([readJson(transport, 'models'), readJson(transport, 'models/' + path + '/endpoints')]);
   const models = modelList.safeParse(list);
@@ -81,8 +93,9 @@ export async function readOpenRouterCatalog(model: string, transport: typeof fet
   const listed = models.data.data.map(item => listedModel.safeParse(item)).find(item => item.success && item.data.id === model);
   if (!listed?.success) throw new Error('MODEL_CATALOG_NOT_FOUND');
   const reasoning = listed.data.reasoning;
+  const fetchedAt = now().toISOString();
   const snapshot = catalogSnapshot.safeParse({
-    fetchedAt: now().toISOString(),
+    fetchedAt,
     model,
     reasoning: reasoning ? {
       mandatory: reasoning.mandatory ?? false,
@@ -100,5 +113,11 @@ export async function readOpenRouterCatalog(model: string, transport: typeof fet
     })),
   });
   if (!snapshot.success) throw new Error('MODEL_CATALOG_INVALID');
-  return snapshot.data;
+  const priced = mergeDuplicateTags(routes.data.data.endpoints
+    .map(endpoint => normalizeEndpointPricing(endpoint.tag, endpoint.context_length, endpoint.pricing)));
+  const pricing = pricingSnapshot.safeParse({
+    fetchedAt, model, source: `openrouter:/api/v1/models/${path}/endpoints`, pricingHash: pricingHash(priced), endpoints: priced,
+  });
+  if (!pricing.success) throw new Error('MODEL_CATALOG_INVALID');
+  return { catalog: snapshot.data, pricing: pricing.data };
 }
