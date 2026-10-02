@@ -9409,6 +9409,14 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
   const modelId=await planFixtureModel(f.moduleId);
   await sql.query('update modules set active=false where id<>$1',[f.moduleId]);
   const saved={credentials:{email:f.email,password:f.password},actor:f.actor,moduleId:f.moduleId,modelId};
+  // Every local browser request shares 127.0.0.1, and the website's IP limiter (#488) allows 60 per
+  // minute. This journey with #595's history polling exceeds that, which is not what it verifies:
+  // start a fresh local window before each phase. Only the disposable local Redis is flushed.
+  const {execFileSync}=await import('node:child_process');
+  const freshLimitWindow=()=>{
+    const tag=process.env.V3_RATE_LIMIT_TAG;
+    if(tag&&/^[a-z0-9][a-z0-9-]{0,80}$/.test(tag))expect(execFileSync('docker',['exec',tag+'-redis','redis-cli','FLUSHDB'],{encoding:'utf8'}).trim()).toBe('OK');
+  };
   const {chromium}=await import('../../../../../apps/web/node_modules/@playwright/test');
   const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
   const context=await browser.newContext();
@@ -9465,6 +9473,7 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
     ];
     const confirm=page.getByRole('button',{name:'确认当前信息，继续',exact:true});
     for(const [label,value] of answers){
+      freshLimitWindow();
       await confirm.click();
       await page.getByRole('textbox',{name:label,exact:true}).fill(value);
       await page.getByText('已自动保存',{exact:true}).waitFor();
@@ -9473,6 +9482,7 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
         await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-positioning-stage3-1600x900.png'});
       }
     }
+    freshLimitWindow();
     await confirm.click();
     const positioningUrl=page.url();
     const confirmed=await f.service.read(draftId);
@@ -9490,6 +9500,7 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
     await second.getByRole('link',{name:'继续这条内容工作',exact:true}).waitFor();
     const adopted=await f.service.library({search:'',from:null,to:null});
     expect(adopted.businesses.flatMap((business:{accounts:Array<{items:Array<{title:string}>}>})=>business.accounts.flatMap(account=>account.items.map(item=>item.title)))).toEqual(['第二个账号选题']);
+    freshLimitWindow();
     await second.getByRole('link',{name:'继续这条内容工作',exact:true}).click();
     await page.waitForURL(url=>url.pathname==='/runtime');
     await page.getByLabel('消息',{exact:true}).fill('请根据这条选题给我一版文章正文建议，先不要定稿。');
