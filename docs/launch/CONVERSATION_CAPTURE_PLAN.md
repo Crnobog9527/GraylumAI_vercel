@@ -1,10 +1,11 @@
 # CONVERSATION-DRIVEN-CAPTURE：右侧信息跟着对话走（方案）
 
 > 状态：仅方案，未实施。风险：实施部分为 high（数据库函数、迁移、准入规则）；本文件本身是文档。
-> 基线：staging `1736dc8f`（迁移到 0158；#576、#582、#584、#586、#587 已合并，0158 已应用）。本方案只引用代码事实，不改代码。
+> 基线：staging `acd52307`（迁移到 0158；#576、#581、#582、#584、#586、#587、#592 已合并，0158 已应用）。本方案只引用代码事实，不改代码。
 > 修订：v2 按[独立审查](https://github.com/Crnobog9527/GraylumAI_vercel/pull/588#issuecomment-5950945925)
 > 补齐 P1 ×2、P2 ×5 和 P3；v3 按[复核](https://github.com/Crnobog9527/GraylumAI_vercel/pull/588#issuecomment-5951295069)
-> 补齐 P2-A/B/C 和 P3，并写入 Owner 2026-10-02 的导师模型和出卡分寸决定。对照见第 12 节。
+> 补齐 P2-A/B/C 和 P3，并写入 Owner 2026-10-02 的导师模型和出卡分寸决定；v4 按
+> [v3 复核](https://github.com/Crnobog9527/GraylumAI_vercel/pull/588#issuecomment-5951643622)修正批次事务语义并统一结果分类。对照见第 12 节。
 
 ## 0. 一句话结论
 
@@ -146,46 +147,61 @@ v12 第 3.2 节第 4 条的"文字确认"（D10，已锁定）不在本批交付
 #### 3.2.1 授权和绑定（P1-2）
 
 新增数据库函数 `opc_capture_apply(p_actor_id, p_draft_id, p_execution_id)`，只授予 service role，浏览器调不到。
-它自己读执行结果，不接受调用方传入的整理内容。参照 `opc_save_result`（0107:237-248），在**同一事务**里按以下顺序检查，
-任何一项不过就拒绝且不写任何东西：
+它自己读执行结果，不接受调用方传入的整理内容。参照 `opc_save_result`（0107:237-248），在**同一事务**里按下面的顺序判断，
+每一条执行得到唯一一个结果（统一见下表，正文其他地方都以此表为准）。
+
+**第一组：身份和归属**（不通过就拒绝，什么都不写，包括处理记录——无法确认归属的执行不能在任何项目里留下痕迹）
 
 1. `bill2_actor(p_actor_id)`；草稿属于该用户、`bill2_scope_allowed(..., positioning_draft)` 通过；
-2. 锁顺序与 `opc_information` / `opc_save_result` 一致：读 `opc_drafts` → `artifact_projects ... FOR UPDATE` →
-   读 `artifact_rounds`；轮次是草稿的当前轮且 `state = 'draft'`；
-3. 执行：`session_id` 等于草稿会话、`actor_id` 等于用户、`state = 'completed'`；
-4. 冻结身份：存在 `opc_turns` 行，`session_id`、`request_id` 对应、`token` 等于 `payload.opcTurnToken`、
-   `purpose = 'mentor'`、`round_id` 等于当前轮；`payload.revisionId` / `moduleId` 与当前轮和项目一致；
-   `payload.scopeMaterial.content.work.roundId` 等于当前轮；
-5. 新格式：冻结的 `attachedOrganizer.input` 是 JSON 且 `captureFormat = "v2"`（由 B2 写入；旧执行没有这个标记，一律不处理）；
-6. **执行内容当前仍可读**：`runtime_history_available(e.id)`（0158 定义：执行没有 `unavailable_reason`，并用
-   `runtime_billing_allowed` 检查这次执行和全部祖先的冻结材料、来源和模型）。撤权后的执行结果不会被写进仍可访问的草稿。
-   这一项放在锁内、写入前最后检查。补应用一次检查多条时，用 0158 的批量 helper `runtime_history_availability(uuid[])`
-   （只供数据库函数内部调用，已对 service role 收回直接权限）；两者是同一套权限判断。
+2. 锁顺序与 `opc_information` / `opc_save_result` 一致：读 `opc_drafts` → `artifact_projects ... FOR UPDATE` → 读 `artifact_rounds`；
+3. 执行的 `session_id` 等于草稿会话、`actor_id` 等于用户。
 
-幂等：在 `artifact_requests` 里用独立命名空间的 request id（由 `'opc_capture:' || 执行 id` 推导）记一条
-`action = 'opc_capture'`，payload 记执行 id 和规则版本，response 记处理结果和**每个被写步骤写入后的版本号**
-（第 3.2.2 节靠它判断"capture 之后有没有人工写入"）。**重复调用先重新跑 1–6 项检查**，通过后才返回上次结果；
-同 id 但 payload 不同报冲突，不能"见到同 id 就成功"。返回值只含字段 id 和处理结果，不含内容。
+通过第一组后，这条执行可以安全归属到这份草稿，后面的结果才允许在本草稿项目里留处理记录。
 
-并发撤权：如果撤权和 capture 同时提交，capture 在锁内最后检查第 6 项；撤权先提交 → capture 拒绝。
+**第二组：能不能处理**（按顺序，命中第一条就停）
+
+4. 执行还没 `completed` → `not_ready`；
+5. 冻结的 `attachedOrganizer.input` 不是带 `captureFormat = "v2"` 的 JSON → `skipped_format`（合法的旧格式执行优先得到这个结果，
+   不归入拒绝）；
+6. 冻结身份不符：没有对应的 `opc_turns` 行（`session_id`、`request_id`、`token = payload.opcTurnToken`）、`purpose` 不是 `mentor`、
+   `payload.revisionId` / `moduleId` 与轮次和项目不一致 → `denied_binding`；
+7. 执行所属轮次（`opc_turns.round_id` 和 `scopeMaterial.content.work.roundId`）不是草稿的当前轮，或当前轮已不是 `draft` 状态 → `stale_round`；
+8. **执行内容当前不可读**：`runtime_history_available(e.id)` 为 false（0158 定义：执行没有 `unavailable_reason`，并用
+   `runtime_billing_allowed` 检查这次执行和全部祖先的冻结材料、来源和模型）→ `unavailable`。撤权后的执行结果不会被写进仍可访问的草稿。
+   这一项在锁内、写入前最后检查。补应用一次检查多条时，用 0158 的批量 helper `runtime_history_availability(uuid[])`
+   （只供数据库函数内部调用，已对 service role 收回直接权限）；两者是同一套权限判断；
+9. 整理结果不是严格的 JSON 对象，或格式不符合第 3.3 节 → `invalid_output`；
+10. 否则按第 3.2.2–3.2.3 节处理 → `applied`（至少写了一项）或 `suggested`（只生成了更新或全部丢弃）。
+
+**结果分类（唯一口径）**
+
+| 结果 | 草稿内容 | 处理记录（`opc_capture`） | 是否终结 | 理由 |
+| --- | --- | --- | --- | --- |
+| 第一组不通过 | 不改 | **不记** | — | 归属未确认，抛 `OPC_CAPTURE_DENIED` |
+| `not_ready` | 不改 | 不记 | 否 | 执行可能稍后完成；补应用的候选本来只取已完成的 |
+| `skipped_format` | 不改 | 记 | 是 | 冻结的格式不会再变 |
+| `denied_binding` | 不改 | 记 | 是 | 冻结身份和当时的绑定是固定事实 |
+| `stale_round` | 不改 | 记 | 是 | 轮次只会向前；已发布的轮次不会回到草稿（修订会建新轮次） |
+| `unavailable` | 不改 | **不记** | 否 | 模型或来源权限可能恢复；补应用候选先用批量 helper 过滤掉当前不可读的执行，所以它不会挡在队首 |
+| `invalid_output` | 不改 | 记 | 是 | 冻结的整理结果不会再变 |
+| `applied` / `suggested` | 按规则改 | 记 | 是 | — |
+| 数据库或事务错误 | 不改（本批回滚） | 不记 | 否 | 原样抛出，**不吞掉、不标成成功** |
+
+"记"的处理记录只含执行 id、结果码、规则版本，以及 `applied` 时每个被写步骤写入后的版本号（第 3.2.2 节靠它判断"capture 之后有没有人工写入"），
+不含任何内容。所以"拒绝"和"不写内容"是两回事：终结的拒绝会留一条不含内容的处理记录，但草稿内容一定不变。
+
+`unavailable` 的执行如果之后恢复可读，会重新成为候选；那时步骤版本通常已经变化，按第 3.2.2 节整次只生成更新，不会用旧材料覆盖新内容。
+
+幂等：处理记录写在 `artifact_requests`，request id 用独立命名空间（由 `'opc_capture:' || 执行 id` 推导），`action = 'opc_capture'`；
+同 id 但 payload 不同报冲突，不能"见到同 id 就成功"。**一条执行已有记录时，重复调用先重跑第一组和第 8 项**：第一组不通过 → 拒绝、不写；
+第 8 项不通过 → 返回 `unavailable`，不改原记录、不返回内容；都通过才返回原记录的结果。返回值只含字段 id 和结果码，不含内容。
+
+并发撤权：如果撤权和 capture 同时提交，capture 在锁内最后检查第 8 项；撤权先提交 → `unavailable`。
 capture 先提交、之后才撤权的情况，与今天用户自动保存了这段内容再撤权完全相同，按现有规则处理，本方案不改变它。
 用两个数据库连接测试这两种顺序。
 
 `opc_query` 和补应用读取执行状态时，复用上面同一套检查，不另写权限判断。capture 和 `runtime_admit` 保持为两个独立事务；
 capture 不新增对会话、运行单的更新锁，只用权限函数自己的锁。实施时用两个数据库连接实测授权先后和无死锁。
-
-**结果分类**（P2-A、P2-B 都依赖它）：
-
-| 结果 | 含义 | 是否记 `opc_capture` | 调用方怎么处理 |
-| --- | --- | --- | --- |
-| `applied` / `suggested` | 正常处理 | 记 | 成功 |
-| `skipped_format` | 没有 v2 标记（旧格式执行） | 记 | 成功，空操作 |
-| `invalid_output` | 整理结果不是合法 JSON 或格式不对 | 记（永久结果） | 成功，空操作；记日志 |
-| `denied` | 第 1–6 项任一不过（撤权、换轮、已发布、用途不对） | 记（这些判断是确定的，不会自己恢复） | 不报错给用户；记日志 |
-| 数据库或事务错误 | 存储、锁超时等 | 不记 | 原样抛出，下次重试；**不吞掉、不标成成功** |
-
-`runtime_history_available` 只在权限拒绝时返回 false，存储错误会抛出（0158 注释），所以 `denied` 不会把临时故障误记成永久结果。
-一个执行已经有记录时，重复调用仍先重跑 1–6 项：仍通过则返回原记录；现在不通过则返回 `denied`（不改原记录、不返回内容）。
 
 #### 3.2.2 字段能不能直接写（P1-1、P2-1）
 
@@ -261,9 +277,12 @@ p_action, p_expected_version)`，只授予 service role，经 tRPC 薄路由调�
 - 候选：**当前轮**、`completed`、**带 v2 标记**、尚未有 `opc_capture` 记录的导师执行，按执行顺序取最早的**最多 5 条**
   （旧格式执行不进候选，否则旧草稿里成批的旧执行会堵住准入；`skipped_format` 只出现在指定执行 id 的单条调用里）；
   用 `opc_turns` 和 `artifact_requests` 主键定位，不扫描整段会话历史（避免把 #586 修掉的长会话延迟带回来）。
-- **逐条处理、逐条原子**：每条执行在自己的子事务里（PL/pgSQL 的 `BEGIN ... EXCEPTION` 块）完成检查、写入和记录；
-  只捕获本方案定义的业务拒绝码（`OPC_*`），把它记成 `denied` / `invalid_output`；其他异常不捕获、整次调用失败，
-  已经提交的前几条不受影响（下一次调用从失败那条重来）。**坏条目被记成永久结果后不会再挡在队首**，后面合格的执行照常处理。
+- **一批一次 RPC、一个事务**：最多 5 条在同一次 `opc_capture_apply` 调用、同一个事务里依次处理。每条按第 3.2.1 节的判断得到结果；
+  只有解析整理结果时用一个 PL/pgSQL `BEGIN ... EXCEPTION` 块，**只捕获 JSON 解析错误**，转成 `invalid_output`。
+  这个块只用来隔离坏内容，它不会单独提交。存储、锁、事务错误一律不捕获：**失败的这一批全部回滚**（包括本批前面已处理的条目
+  和它们的处理记录），只有之前已经成功返回的批次保留；下一次调用幂等地重试整批。不新建队列，也不改成逐条 RPC。
+- **坏条目不挡队首**：`invalid_output`、`skipped_format`、`denied_binding`、`stale_round` 都是终结结果，记下后不再进候选；
+  `unavailable` 的执行在选候选时就被批量可读性检查过滤掉。所以同一条坏内容不会每次都卡在最前面。
 - 返回 `{processed: [{executionId, result}], remaining, hasMore}`。
 - **新一轮导师准入前必须处理完**：`prepareStep` 循环调用补应用直到 `hasMore = false`，最多 4 次（20 条）；仍有剩余就
   拒绝这次准入（`OPC_CAPTURE_PENDING`，在任何计费和模型调用之前），页面提示"正在整理之前的对话"，用户再发一次时继续处理。
@@ -477,17 +496,17 @@ p_action, p_expected_version)`，只授予 service role，经 tRPC 薄路由调�
 
 新文件 `packages/api/src/services/opc/capture.integration.ts`，**显式加入** `packages/db/tests/v3/without-app.mjs` 的
 无应用清单，由 CI 已有的 `--runtime-only --with-staging-schema --without-app` 运行；不改 `runtime.integration.ts`
-（#586、#581、#591 都在改它）。实施时核对实际收集到的用例数和允许跳过的清单。这改动了 CI 的测试范围，随 B1 高风险审查。
+（#586、#581 已改过，#591 还在改）。实施时核对实际收集到的用例数和允许跳过的清单。这改动了 CI 的测试范围，随 B1 高风险审查。
 并发用例用两个真实数据库连接，不用 mock 代替。
 
 | 组 | 必测 |
 | --- | --- |
-| 授权（P1-2） | 跨用户；草稿不属于该会话；旧轮次；已发布；`purpose` 不是 mentor；turn token 不匹配；没有 v2 标记；执行未完成；材料/祖先来源/模型撤权后拒绝；账号注销后拒绝；**重放已应用结果时撤权 → 拒绝**；两连接并发撤权（两种提交顺序） |
+| 授权和结果分类（P1-2） | 跨用户、草稿不属于该会话 → 拒绝且**不写任何记录**；执行未完成 → `not_ready` 不记；合法旧格式 → `skipped_format`（不是拒绝）；turn token 不匹配、`purpose` 不是 mentor → `denied_binding`；旧轮次、已发布 → `stale_round`；材料/祖先来源/模型撤权 → `unavailable` 不记、恢复后重新成为候选且只生成更新；账号注销后拒绝；**重放已应用结果时撤权 → `unavailable`、原记录不变、不返回内容**；两连接并发撤权（两种提交顺序）；所有拒绝和终结结果下草稿内容不变 |
 | 来源保护（P1-1、P2-A） | 旧非空 provisional（手改的、旧页面自动填的）→ 更新；旧空字段从没有值 → 直接写；旧清空过的字段 → 更新；旧 confirmed/deferred → 更新；新 `source: user` → 更新；`source: capture` 指纹未变且之后无人工写入 → 直接写；指纹已变 → 更新；**A→B→A** 和**清空再恢复原值** → 更新；找不到本轮 capture 记录 → 更新；继承来的 `fieldMeta`（普通修订、账号修订两支）→ 更新；旧页面在 B1 上线后自动保存 → 标为 user |
 | 整份材料（P2-1） | 双连接："用户改 A 字段 + 旧执行更新 B 字段" → B 只生成更新；比较包含 status/nature/受保护标记；更新的执行先应用、旧执行晚到 → 旧的全部变更新 |
 | 更新身份（P2-2） | 用户看到 S1、S2 到达后忽略 / 采用 → `OPC_SUGGESTION_CHANGED`；倒序应用不替换较新的更新；忽略不改版本、不失效；采用改版本、失效、标为 user；重复调用幂等 |
 | 写入规则 | 跨步骤写入后面的未确认步骤；已确认步骤只存更新；超 400 字 / 未知字段 / confirmed 状态 → 丢弃；12000 字节上限 |
-| 补应用（P2-B） | 待处理 0 / 5 / 6 条时的 `processed`、`remaining`、`hasMore`；6 条时准入前处理完再放行，超过 20 条时 `OPC_CAPTURE_PENDING` 且不计费；**首条无效（坏 JSON）而后条有效** → 首条记 `invalid_output`、后条照常写；首条撤权 → 记 `denied`、后条照常；存储错误 → 整次失败、已提交的前几条保留、下次从失败处继续；两个客户端同时补应用 → 幂等无重复写；300 条执行的会话里耗时有界；暂停新调用时照常工作；不新建运行单、不扣积分、不计限流 |
+| 补应用（P2-B） | 待处理 0 / 5 / 6 条时的 `processed`、`remaining`、`hasMore`；6 条时准入前处理完再放行，超过 20 条时 `OPC_CAPTURE_PENDING` 且不计费；**首条无效（坏 JSON）而后条有效** → 首条记 `invalid_output`、后条照常写；首条撤权 → 不进候选（`unavailable` 不记）、后条照常；首条属于已结束的轮次 → 记 `stale_round`、后条照常；存储错误（例如第 3 条处理时注入）→ 本批全部回滚、本批前两条的写入和处理记录都不存在、之前已成功返回的批次保留，下一次调用重试整批并得到同样结果；两个客户端同时补应用 → 幂等无重复写；300 条执行的会话里耗时有界；暂停新调用时照常工作；不新建运行单、不扣积分、不计限流 |
 | 冻结材料（P2-C） | 新冻结的 `scopeMaterial` 没有更新正文和指纹、保留笔记和受保护标记；旧请求恢复和重放不受影响；满额笔记和字段下冻结载荷、导师和整理器输入都不超限；用户刚编辑的笔记出现在下一轮导师输入里 |
 | 确认快照 | 打开核对页后出现新的更新 → 提交时停下刷新；确认后未处理的更新仍在、采用后步骤回到草稿 |
 | 确认 | 整步可见快照不一致 → 停下；三阶段中途断网续做；重复提交；途中 capture 或另一个标签页编辑；旧单题信封续完 |
@@ -518,7 +537,7 @@ p_action, p_expected_version)`，只授予 service role，经 tRPC 薄路由调�
 | 在途 PR | 共享面 | 处理 |
 | --- | --- | --- |
 | #586 RUNTIME-VIEW-PERF | 已合并（`1736dc8f`），0158 已应用；重写了 `runtime_view`、`runtime_admit`、`runtime_history_available`、`runtime_session_items`，新增批量 helper `runtime_history_availability(uuid[])`；改了 `runtime.integration.ts` | B1 从最新 staging 起；单条检查用 0158 的 `runtime_history_available`，补应用批量检查用 `runtime_history_availability`；测试放新文件 |
-| #581 MODEL-PRICING-SYNC B、#591 PROMPT-CACHE（基于 #581 的 head 建分支，#581 合并前不能合并） | 都改 `runtime/admission.ts`、`runtime.integration.ts`；#591 冻结提示缓存前缀 | B2 **不改** `admission.ts`（v2 标记放在 `service.ts` 构造的整理器输入里，容量上限不动）；如果实施时发现必须改，先停下报总控，等 #581/#591 合并后由 B2 同步。B2 在 #591 合并后做，提示词变化后联合回归 #591 的缓存前缀快照和 B2 的完整请求快照 |
+| #581 MODEL-PRICING-SYNC B（已合并，`1d75b130`）、#591 PROMPT-CACHE（在途） | 都改 `runtime/admission.ts`、`runtime.integration.ts`；#591 冻结提示缓存前缀 | B2 **不改** `admission.ts`（v2 标记放在 `service.ts` 构造的整理器输入里，容量上限不动）；如果实施时发现必须改，先停下报总控，等 #591 合并后由 B2 同步。本方案不涉及报价逻辑；Owner 已定正式环境价格全自动、不需要重新批准，只有 staging 测试窗口继续锁价，B2 小评测和 staging 验证按当时的测试窗口执行。B2 在 #591 合并后做，提示词变化后联合回归 #591 的缓存前缀快照和 B2 的完整请求快照 |
 | #590 RATE-LIMIT / MODERATION-HOOK | 新调用闸门 `newWorkGate` | capture、补应用、重放都不经过调用闸门；联合回归"暂停新调用时补应用照常、计数不变" |
 | #582 MENTOR-PROMPT-V2 | `agentTurnPrompt.ts` 及其测试 | 已合并（`0cbade58`），B2 在它的基础上改写；它的评测只证明它冻结的请求，不证明新的多字段整理效果，也没达到出卡门槛（见第 8 节第 3 项） |
 | #587、#589 | `page.tsx`（#589）、对话区 CSS（#587） | #587 已合并（`de784460`）；#589 待合并，F1 在它合并后同步；`page.tsx` 已在代码尺寸上限（2747 行），F1 把新面板拆进 `components/opc/` 和 `hooks/`，只减不增 |
@@ -647,3 +666,5 @@ p_action, p_expected_version)`，只授予 service role，经 tRPC 薄路由调�
 | 复核 P2-B 补应用 | 第 3.2.5 节：`processed/remaining/hasMore`、准入前处理完（最多 20 条，否则 `OPC_CAPTURE_PENDING` 且不计费）、逐条子事务、坏条目记永久结果不挡队首、不吞存储异常；对应用例 |
 | 复核 P2-C 冻结材料 | 第 3.8 节选定改现有 `runtime_work_projection`（B1 范围、迁移、回退）：保留 `information` 和 `notes`，`fieldMeta` 只留受保护标记；旧请求不受影响；对应用例 |
 | 复核 P3 | 第 1.4、3.1、5.1 节按 0134 两支真实行为改写；第 3.7 节确认快照包含可见更新的身份；第 3.2.2 节版本号说明限定为新函数 |
+| 复核 v3 P2 批次事务 | 第 3.2.5 节：一批一次 RPC、一个事务；子块只捕获 JSON 解析错误；存储错误本批全部回滚、之前成功返回的批次保留、下次重试整批；恢复用例同步改写 |
+| 复核 v3 P3 结果分类 | 第 3.2.1 节统一为一张表：归属未确认时拒绝且不写；合法旧格式优先 `skipped_format`；`not_ready`、`unavailable` 不记且可恢复；终结结果只记不含内容的处理记录，草稿内容不变 |
