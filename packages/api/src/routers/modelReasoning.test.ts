@@ -66,6 +66,8 @@ describe('modelReasoning router', () => {
     const t = harness('admin', { connection_status: 'connected', reasoning: { catalog, route: null, purposes: {} } });
     const result = await t.caller.save({ modelId, route: 'deepinfra', purposes: deepseekOff });
     expect(result.issues).toEqual([]);
+    expect(t.updates[0]).not.toHaveProperty('max_tokens');
+    expect(t.updates[0]).not.toHaveProperty('input_limit');
     expect(t.updates).toHaveLength(1);
     expect(t.updates[0]!.config).toEqual({ connection_status: 'connected', reasoning: { catalog, route: 'deepinfra', purposes: deepseekOff } });
   });
@@ -89,6 +91,21 @@ describe('modelReasoning router', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result.config.catalog?.reasoning?.supportedEfforts).toEqual(['low']);
     expect(t.updates[0]!.config).toMatchObject({ last_error: null, reasoning: { route: 'deepinfra', purposes: deepseekOff } });
+  });
+
+  it('updates supplier capacities only on explicit refresh and returns before/after comparisons', async () => {
+    const t = harness('admin', { reasoning: { catalog, route: 'deepinfra', purposes: deepseekOff } });
+    const before = await t.caller.get({ modelId });
+    expect(before.capacity.inputLimit.matches).toBe(false);
+    expect(t.updates).toEqual([]);
+    const list = { data: [{ id: catalog.model }] };
+    const endpoints = { data: { id: catalog.model, endpoints: [{ tag: 'deepinfra', provider_name: 'DeepInfra',
+      context_length: 1000000, max_completion_tokens: 128000 }] } };
+    vi.stubGlobal('fetch', vi.fn(async url => new Response(JSON.stringify(String(url).endsWith('/endpoints') ? endpoints : list))));
+    const result = await t.caller.refreshCatalog({ modelId });
+    expect(t.updates[0]).toMatchObject({ input_limit: 1000000, max_tokens: 128000 });
+    expect(result.capacity.maxTokens).toEqual({ supplier: 128000, current: 128000, matches: true });
+    expect(result.previousCapacity.maxTokens).toEqual({ supplier: 128000, current: 8192, matches: false });
   });
 
   it('reports a catalog failure plainly and keeps the stored snapshot', async () => {

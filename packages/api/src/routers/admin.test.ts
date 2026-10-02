@@ -1,3 +1,4 @@
+import { pricedModel } from '../shared/__tests__/modelPriceFixture';
 import { TRPCError } from '@trpc/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -1235,9 +1236,10 @@ describe('adminRouter finance stats runtime billing summary', () => {
                   {
                     id: 'model-a-row',
                     name: 'Claude Sonnet',
-                    model_id: 'model-a',
+                    model_id: 'openai/model-a',
                     provider: 'anthropic',
                     is_active: 'true',
+                    config: (() => { const row = pricedModel(); row.config.pricing.model = row.config.reasoning.catalog.model = 'openai/model-a'; return row.config; })(),
                     input_token_cost: 3000000,
                     output_token_cost: 15000000,
                     input_token_cost_above_200k: 0,
@@ -1248,9 +1250,10 @@ describe('adminRouter finance stats runtime billing summary', () => {
                   {
                     id: 'model-b-row',
                     name: 'Claude Haiku',
-                    model_id: 'model-b',
+                    model_id: 'openai/model-b',
                     provider: 'anthropic',
                     is_active: 'true',
+                    config: (() => { const row = pricedModel(); row.config.pricing.model = row.config.reasoning.catalog.model = 'openai/model-b'; return row.config; })(),
                     input_token_cost: 800000,
                     output_token_cost: 4000000,
                     input_token_cost_above_200k: 0,
@@ -1338,9 +1341,9 @@ describe('adminRouter finance stats runtime billing summary', () => {
       tokenPriceMultiplier: 1.5,
       billingUnitSource: { creditsPerUsd: 'configured', defaultMultiplier: 'configured' },
       activeModelCount: 2,
-      inputCreditsPer1KRange: { min: 1.2, max: 4.5 },
-      outputCreditsPer1KRange: { min: 6, max: 22.5 },
-      searchCreditsPer1KRange: { min: 300, max: 300 },
+      inputCreditsPer1KRange: { min: 4.5, max: 4.5 },
+      outputCreditsPer1KRange: { min: 7.5, max: 7.5 },
+      searchCreditsPer1KRange: null,
       searchSurchargeCredits: 7,
       newUserCredits: 120,
     });
