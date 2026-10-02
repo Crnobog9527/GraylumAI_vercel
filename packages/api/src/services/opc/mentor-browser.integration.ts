@@ -25,7 +25,9 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
  const d=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'mentor',businessName:'Graylum AI'});
  if(scenario==='proposal')expect((await f.service.read(d.draftId)).information['step-0'].schema[0]).toMatchObject({id:'product',title:'参考研究结论',elicitation:'agent_proposal'});
  const {chromium}=await import('../../../../../apps/web/node_modules/@playwright/test');
- const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+ const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true,
+  // Evidence screenshots show where the chat scrollbar sits.
+  ignoreDefaultArgs:['--hide-scrollbars']});
  const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();page.setDefaultTimeout(60000);
  await page.addInitScript(()=>{const seen=new Set<string>();(window as unknown as {mentorTextTimes:number[]}).mentorTextTimes=[];(window as unknown as {mentorTextSamples:Array<{at:number;text:string}>}).mentorTextSamples=[];new MutationObserver(()=>{for(const node of document.querySelectorAll('p')){const text=node.textContent??'';if(text.includes('本地流式导师正文：')&&!seen.has(text)){seen.add(text);(window as unknown as {mentorTextTimes:number[]}).mentorTextTimes.push(Date.now());(window as unknown as {mentorTextSamples:Array<{at:number;text:string}>}).mentorTextSamples.push({at:Date.now(),text});}}}).observe(document,{childList:true,subtree:true,characterData:true});});
  type Call={index:number;id:string;model:string;stream:boolean;reasoningEffort:string|null;startedAt:number;firstAt:number|null;finishedAt:number|null};
@@ -160,6 +162,40 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   await page.getByRole('link',{name:'资料库',exact:true}).click();await page.getByRole('link',{name:'返回当前工作',exact:true}).click();await page.waitForURL('**'+path);
   expect((await control()).length).toBe(8);expect((await sql.query('select id,state from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows).toEqual(before);
   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-persisted-return-'+scenario+'.png',fullPage:true});
+  if(scenario==='normal'){
+   // The whole middle panel is the scroll surface (scrollbar at its right edge);
+   // messages and the composer keep one centered column of at most 720px.
+   const log=page.getByRole('log',{name:'完整导师消息'});
+   const layout=()=>log.evaluate(node=>{
+    const panel=node.closest('main')!.getBoundingClientRect(),box=node.getBoundingClientRect();
+    const center=(rect:DOMRect)=>rect.left+rect.width/2-(panel.left+panel.width/2);
+    const message=node.querySelector('[data-message-role=assistant]')!.getBoundingClientRect();
+    const reply=document.querySelector('textarea[aria-label="给导师的回复"]')!.getBoundingClientRect();
+    return {left:box.left-panel.left,right:panel.right-box.right,overflowY:getComputedStyle(node).overflowY,
+     scrolls:node.scrollHeight>node.clientHeight,messageWidth:message.width,messageCenter:center(message),composerCenter:center(reply),
+     pageFits:document.documentElement.scrollWidth<=innerWidth,logFits:node.scrollWidth<=node.clientWidth};
+   });
+   const wide=await layout();
+   expect(wide).toMatchObject({overflowY:'auto',scrolls:true,pageFits:true,logFits:true});
+   expect([Math.abs(wide.left),Math.abs(wide.right)].every(gap=>gap<=1)).toBe(true);
+   expect(wide.messageWidth).toBeLessThanOrEqual(720);
+   expect([Math.abs(wide.messageCenter),Math.abs(wide.composerCenter)].every(offset=>offset<=8)).toBe(true);
+   await log.evaluate(node=>{node.scrollTop=0;});await page.waitForTimeout(300);
+   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-scroll-surface-top.png'});
+   await page.reload();const loaded=()=>poll(()=>log.locator('[data-message-role=assistant]').count()).toBeGreaterThan(0);await loaded();
+   // After refresh the same element is still the full-width scroll surface.
+   const refreshed=await layout();
+   expect(refreshed).toMatchObject({scrolls:true,pageFits:true,logFits:true});
+   expect([Math.abs(refreshed.left),Math.abs(refreshed.right)].every(gap=>gap<=1)).toBe(true);
+   await log.evaluate(node=>{node.scrollTop=node.scrollHeight;});
+   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-scroll-surface-bottom.png'});
+   await page.setViewportSize({width:390,height:844});await loaded();
+   const narrow=await layout();
+   expect(narrow).toMatchObject({pageFits:true,logFits:true});
+   expect([Math.abs(narrow.left),Math.abs(narrow.right)].every(gap=>gap<=1)).toBe(true);
+   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-scroll-surface-narrow.png'});
+   await page.setViewportSize({width:1440,height:1000});
+  }
   // Mentor dialogue carries the frozen latency policy; the Luna organizer keeps its original bytes.
   expect((await control()).map(call=>[call.stream,call.reasoningEffort])).toEqual((await control()).map(call=>call.stream?[true,'none']:[false,null]));expect((await control()).some(call=>!call.stream)).toBe(true);
   const settlements=(await sql.query("select r.id,count(t.id)::int spends from bill2_runs r left join credit_transactions t on t.bill2_run_id=r.id and t.reason_code='bill2_spend' where r.actor_id=$1 group by r.id",[f.actor])).rows;
