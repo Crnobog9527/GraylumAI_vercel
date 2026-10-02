@@ -45,8 +45,9 @@
   也就是说，**现在窗口里的单价也是人工抄进 SQL 的**，只是不在后台表单里。
 - 实际扣费用 OpenRouter 回执的 `usage.cost`（`openRouterEvidence.ts`），结算时若实际费用超过上界，
   SQL 把回执标为冲突（0105 第 261 行 `cost > c.upper_usd`，见 PROMPT_CACHE_PLAN 第 4.1 节）。
-- 准入时 Runtime 已经读取 `ai_models.config.reasoning`，并要求它的 `route` 等于报价的 `providerSlug`
-  （`services/runtime/reasoningAdmission.ts:24`），即 MODEL-REASONING 已经把"后台选的线路"和"窗口报价线路"绑在一起。
+- 价格准入始终按窗口报价的 `providerSlug` 查价格，不以 `reasoning.route` 替代。导师对话和整理用途在存在对应
+  用途的思考设置时，另由 `services/runtime/reasoningAdmission.ts` 检查 `reasoning.route` 与报价线路一致；
+  不能把这个用途限定的思考检查概括为所有 Runtime 调用的线路绑定。
 
 ### 1.2 已经有一个从 OpenRouter 读目录的功能，只差价格
 
@@ -118,7 +119,7 @@ config.pricing = {
   fetchedAt, model,                 // 后台按钮读取时与 config.reasoning.catalog 同一次写入；准入自动重读只更新 pricing
   source: "openrouter:/api/v1/models/{model}/endpoints",
   pricingHash,                      // 规范化后全部线路价格的 sha256
-  endpoints: [ { tag, pricing } ]   // 最多 64 条，与目录快照的线路一一对应
+  endpoints: [ { tag, pricing } ]   // 最多 64 条；准入自动重读后可能比目录快照新，线路不保证一一对应
 }
 ```
 
@@ -487,6 +488,7 @@ LEGACY-CLOSE 删除上述旧链路后，再用一个迁移删掉 5 列（含建�
   模型都不是这种情况；新增模型时若出现，结算冲突检查会发现。
 - 过期自动重读（D4）在 OpenRouter 不可用时会让过期模型的新调用失败；失败后 60 秒冷却期内直接失败，OpenRouter
   恢复后最多晚 60 秒恢复（管理员点按钮可立即恢复）。
-- 自动重读是用户请求路径上新的 `ai_models.config` 写入方（只写 `config.pricing`）。
+- 自动重读是用户请求路径上新的 `ai_models.config` 写入方（只写 `config.pricing`）。它会更新 `updated_at`，
+  已打开的倍数面板保存时可能报版本冲突；刷新面板后再保存。
 - `discount` 的确切含义未经实测。
 - 本方案没有连接 staging 数据库，第 7.1 节的模型清单来自仓库文档和代码，以 staging 实际行为准。

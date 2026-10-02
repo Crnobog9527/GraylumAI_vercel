@@ -200,3 +200,11 @@ describe("selected endpoint output limits", () => {
     expect(issues[0].message).toContain(String(model.maxTokens));
   });
 });
+
+
+it('keeps legacy reasoning parsing valid when pricing is stored beside it', () => {
+  const reasoning = config({ purposes: { interactive: { mode: 'off', wire: 'reasoning_effort' } } });
+  const stored = { reasoning, pricing: { fetchedAt: '2026-10-02T00:00:00.000Z', endpoints: [{ pricing: 'new format' }] } };
+  expect(readReasoningConfig(stored)).toEqual(reasoning);
+  expect(checkReasoningConfig(readReasoningConfig(stored), model)).toEqual([]);
+});

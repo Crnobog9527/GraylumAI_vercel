@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import {
-  MAX_RAW_PRICING_BYTES, describeCondition, diffPricing, mergeDuplicateTags, normalizeEndpointPricing, perMillion,
+  MAX_RAW_PRICING_BYTES, byCodeUnit, priceIdentity, describeCondition, diffPricing, mergeDuplicateTags, normalizeEndpointPricing, perMillion,
   pricingSnapshot, readPricingSnapshot, type PricingSnapshot,
 } from './modelPricing';
 
@@ -127,5 +127,43 @@ describe('snapshot', () => {
       { tag: 'azure/us', change: 'added' },
     ]);
     expect(diffPricing(null, after)).toEqual([]);
+  });
+});
+
+
+describe('price identity and audit differences', () => {
+  it('sorts by UTF-16 code units regardless of locale collation', () => {
+    expect(['a', '_', 'Z', 'ä', 'A'].sort(byCodeUnit)).toEqual(['A', 'Z', '_', 'a', 'ä']);
+    const endpoint = normalizeEndpointPricing('x', 100, {
+      prompt: '0.000001', completion: '0.000002', input_cache_write: '0.00000125',
+    });
+    const reordered = { ...endpoint, base: { input_cache_write: '1.25', prompt: '1', completion: '2' } };
+    expect(priceIdentity(endpoint)).toBe(priceIdentity(reordered));
+    expect(JSON.parse(priceIdentity(endpoint))[0]).toEqual({ completion: '2', input_cache_write: '1.25', prompt: '1' });
+  });
+
+  it.each([
+    ['prompt', '999.9999999999999999999'],
+    ['request', '999999999.9999999999999'],
+  ])('keeps a rounding overflow in %s isolated to its route', (key, value) => {
+    const bad = normalizeEndpointPricing('bad', 100, { prompt: '0.000001', completion: '0.000002', [key]: value });
+    expect(bad.admissible).toBe(false);
+    expect(bad.issues).toContain('PRICE_INVALID');
+    expect(pricingSnapshot.shape.endpoints.element.safeParse(bad).success).toBe(true);
+  });
+
+  it('reports context, unknown fields, admissibility and issue changes even when prices stay equal', () => {
+    const endpoint = normalizeEndpointPricing('x', 100, { prompt: '0.000001', completion: '0.000002' });
+    const before: PricingSnapshot = { fetchedAt: '2026-10-02T00:00:00.000Z', model: 'x/model',
+      source: 'openrouter:/api/v1/models/x/model/endpoints', pricingHash: 'a'.repeat(64), endpoints: [endpoint] };
+    const after: PricingSnapshot = { ...before, endpoints: [{ ...endpoint, contextLength: 99,
+      unknownKeys: ['storage'], admissible: false, issues: ['PRICE_NOT_UNIQUE'] }] };
+    expect(diffPricing(before, after)).toEqual([
+      { tag: 'x', change: 'changed', field: 'admissible', before: 'true', after: 'false' },
+      { tag: 'x', change: 'changed', field: 'contextLength', before: '100', after: '99' },
+      { tag: 'x', change: 'changed', field: 'unknownKeys', before: '', after: 'storage' },
+      { tag: 'x', change: 'changed', field: 'issues', before: '', after: 'PRICE_NOT_UNIQUE' },
+    ]);
+    expect(diffPricing(before, { ...before, fetchedAt: '2026-10-03T00:00:00.000Z' })).toEqual([]);
   });
 });
