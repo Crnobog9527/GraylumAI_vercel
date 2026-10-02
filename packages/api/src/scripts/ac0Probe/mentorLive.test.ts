@@ -71,6 +71,14 @@ describe('STG mentor live boundary without network',()=>{
     const a=setup();for(let i=0;i<40;i++)await a.sender.send(raw(),slot(String(i)));
     await expect(a.sender.send(raw(),slot('40'))).rejects.toThrow('model_cap');expect(a.upstream).toHaveBeenCalledTimes(40);
   });
+  it('reserves against each model dollar cap before sending',async()=>{
+    const large=raw('G',{messages:[{role:'user',content:'x'.repeat(88000)}]});
+    const slots=Array.from({length:40},(_,i)=>({...slot(String(i)),requestHash:sha256(large)}));
+    const upstream=vi.fn(async()=>reply(.09)),a=setup({slots,upstream});
+    for(let i=0;i<18;i++)await a.sender.send(large,slot(String(i)));
+    await expect(a.sender.send(large,slot('18'))).rejects.toThrow('model_cap');
+    expect(upstream).toHaveBeenCalledTimes(18);
+  });
   it('books a known over-bound cost then stops',async()=>{
     const a=setup({upstream:vi.fn(async()=>reply(.2))});
     await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow('actual_over_bound');
