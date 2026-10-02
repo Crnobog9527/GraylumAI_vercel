@@ -1,0 +1,125 @@
+{
+  "note": "One 100-execution history check, auto_explain nested overhead included; inclusive times must not be summed.",
+  "queries": [
+    {
+      "query": "SELECT runtime_billing_allowed(e.actor_id,b.payload,b.id)",
+      "calls": 1,
+      "totalMs": 281.733,
+      "maxMs": 281.733
+    },
+    {
+      "query": "SELECT runtime_direct_billing_allowed_before_topic(a,p,p_run_id)",
+      "calls": 100,
+      "totalMs": 246.888,
+      "maxMs": 19.806
+    },
+    {
+      "query": "SELECT runtime_direct_billing_allowed_before_opc(a,p,p_run_id)",
+      "calls": 100,
+      "totalMs": 235.751,
+      "maxMs": 18.486
+    },
+    {
+      "query": "SELECT runtime_direct_billing_allowed(a,dependency.payload,dependency.run_id)",
+      "calls": 99,
+      "totalMs": 230.753,
+      "maxMs": 18.303
+    },
+    {
+      "query": "SELECT (bill2_scope_allowed_before_topic(a,s) OR (",
+      "calls": 100,
+      "totalMs": 93.825,
+      "maxMs": 5.343
+    },
+    {
+      "query": "SELECT bill2_scope_allowed_before_opc(a,s) OR (s->>'kind'='work_item' AND NOT(s?'draftId') AND EXISTS(",
+      "calls": 100,
+      "totalMs": 42.835,
+      "maxMs": 1.369
+    },
+    {
+      "query": "SELECT runtime_context_allowed_before_workspace(p_actor_id,p_context)",
+      "calls": 201,
+      "totalMs": 34.672,
+      "maxMs": 3.5
+    },
+    {
+      "query": "SELECT runtime_context_allowed(a,p->'input')",
+      "calls": 100,
+      "totalMs": 26.484,
+      "maxMs": 3.672
+    },
+    {
+      "query": "SELECT runtime_direct_billing_allowed(a,p,p_run_id)",
+      "calls": 1,
+      "totalMs": 20.238,
+      "maxMs": 20.238
+    },
+    {
+      "query": "SELECT runtime_material_allowed(p_actor_id,p_context->'scopeMaterial')",
+      "calls": 201,
+      "totalMs": 15.915,
+      "maxMs": 2.561
+    },
+    {
+      "query": "SELECT runtime_context_allowed(a,dependency.runtime_payload)",
+      "calls": 99,
+      "totalMs": 14.694,
+      "maxMs": 0.479
+    },
+    {
+      "query": "SELECT bill2_actor(a)",
+      "calls": 100,
+      "totalMs": 9.684,
+      "maxMs": 1.472
+    },
+    {
+      "query": "WITH RECURSIVE lineage(id) AS (",
+      "calls": 1,
+      "totalMs": 3.774,
+      "maxMs": 3.774
+    },
+    {
+      "query": "SELECT runtime_material_allowed_before_b1(p_actor_id,p_material)",
+      "calls": 201,
+      "totalMs": 2.617,
+      "maxMs": 0.994
+    },
+    {
+      "query": "SELECT value FROM jsonb_array_elements(policy) ORDER BY value->>'modelId'",
+      "calls": 100,
+      "totalMs": 1.436,
+      "maxMs": 0.094
+    },
+    {
+      "query": "SELECT runtime_test_window_allowed(a,p)",
+      "calls": 100,
+      "totalMs": 1.402,
+      "maxMs": 0.388
+    },
+    {
+      "query": "a IS NULL OR NOT EXISTS(SELECT 1 FROM profiles WHERE id=a AND status='active' AND is_deleted='false')",
+      "calls": 100,
+      "totalMs": 0.989,
+      "maxMs": 0.12
+    },
+    {
+      "query": "SELECT id FROM ai_models WHERE id=(entry->>'modelId')::uuid AND model_id=entry->>'model' AND (provider=entry->>'provider' OR (p->>'mode'='staging_test' AND entr",
+      "calls": 100,
+      "totalMs": 0.988,
+      "maxMs": 0.058
+    },
+    {
+      "query": "SELECT id FROM bill2_drafts WHERE id=(p->'scope'->>'draftId')::uuid AND actor_id=a AND NOT revoked FOR SHARE",
+      "calls": 100,
+      "totalMs": 0.94,
+      "maxMs": 0.075
+    },
+    {
+      "query": "SELECT CASE WHEN s->>'kind'='positioning_draft' THEN",
+      "calls": 100,
+      "totalMs": 0.902,
+      "maxMs": 0.129
+    }
+  ]
+}

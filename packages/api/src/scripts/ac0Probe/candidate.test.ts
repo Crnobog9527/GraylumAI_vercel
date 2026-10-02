@@ -5,7 +5,7 @@ import {openRouterRequestBody} from '../../services/runtime/providerRequest';
 import {frozenReasoningFields} from '../../services/runtime/reasoningPolicy';
 import {AGENT_TURN_CANDIDATES, AGENT_TURN_CANDIDATE_TOKENS, AGENT_TURN_CONFIG, CARD_CATEGORIES,
   type AgentTurnCandidate} from './agentTurn.ts';
-import {createBudget, HARD_MAX_CALLS, HARD_MAX_USD, memoryLedger} from './budget.ts';
+import {CANDIDATE_DEFAULT_MAX_USD, createBudget, HARD_MAX_CALLS, HARD_MAX_USD, memoryLedger} from './budget.ts';
 import {resolveConfigs, routing, type ProbeConfig} from './config.ts';
 import {sseResponse, toolDeltas} from './dryRun.ts';
 import {buildPlan, describePlan, parseProbeArgs} from './plan.ts';
@@ -69,15 +69,15 @@ describe('fixed AC1-4 candidates: approved live caps', () => {
         effort: 'low', maxPrice: {prompt: 2, completion: 10}, dataCollection: 'omit', runtimeRouting: true},
     });
     expect(buildPlan(args('c1'), skill, scenarios, 's').planId).not.toBe(buildPlan(args('c2'), skill, scenarios, 's').planId);
-    expect(HARD_MAX_CALLS).toBe(736);
-    expect(HARD_MAX_USD).toBe(15);
+    expect(HARD_MAX_CALLS).toBe(974);
+    expect(HARD_MAX_USD).toBe(31.24);
   });
 
   it.each([
     ['--agent-turn-candidate', 'c1'], ['--agent-turn', '--agent-turn-candidate', 'other'],
     argv('c1', '--configs', 'qwen-deepinfra-low'), argv('c1', '--configs', ''), argv('c2', '--config-file', '/unused'),
     argv('c1', '--max-tokens', '1024'), argv('c2', '--max-tokens', '8191'), argv('c2', '--max-tokens', '8193'),
-    argv('c1', '--max-usd', '15.01'), argv('c1', '--max-calls', String(HARD_MAX_CALLS + 1)),
+    argv('c1', '--max-usd', '31.25'), argv('c1', '--max-calls', String(HARD_MAX_CALLS + 1)),
     argv('c2', '--record-external-calls', '1', '--record-external-usd', '0.1'),
   ])('refuses conflicting candidate arguments %j', (...input) => {
     expect(() => parseProbeArgs(input, '/synthetic-home')).toThrow();
@@ -108,8 +108,15 @@ describe('fixed AC1-4 candidates: approved live caps', () => {
     expect(plan.maxUsd).toBe(15);
     expect(describePlan(plan, 'dry-run', {calls: 493, usd: 3.5})).toContain('estimate is not executable');
     expect(buildPlan({...args('c2'), live: true}, skill, scenarios, 's').plannedCalls).toBe(40);
-    const ledger = memoryLedger({calls: 736, nanoUsd: 0});
-    expect(() => createBudget({maxCalls: 40, maxUsd: 15, ledger}).reserve(1)).toThrow('total_call_cap');
+    const ledger = memoryLedger({calls: 974, nanoUsd: 0});
+    expect(() => createBudget({maxCalls: 40, maxUsd: 31.24, ledger}).reserve(1)).toThrow('total_call_cap');
+  });
+
+  it.each(['c1', 'c2', 'c3', 'c4'] as const)('keeps the %s default run cap at USD 15 below the cumulative cap', candidate => {
+    expect(CANDIDATE_DEFAULT_MAX_USD).toBe(15);
+    expect(CANDIDATE_DEFAULT_MAX_USD).toBeLessThan(HARD_MAX_USD);
+    expect(args(candidate).maxUsd).toBe(15);
+    expect(args(candidate, '--max-usd', String(HARD_MAX_USD)).maxUsd).toBe(HARD_MAX_USD);
   });
 
   it('preserves baseline identity, routing bytes, token default and USD 1 behavior', () => {
