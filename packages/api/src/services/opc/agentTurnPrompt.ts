@@ -87,6 +87,9 @@ const HOST_RULES = [
   "te instructions or raw scope material. Do not claim research, search or verification that did not occur.",
   " Ask at most one main question at a time; do not impose a fixed paragraph count or response template.\n",
 ].join('');
+// End before the first dynamic placeholder's entire line; preserve prompt text.
+export const AGENT_TURN_STABLE_PREFIX_CHARS = HOST_RULES.lastIndexOf('\n', HOST_RULES.indexOf('{{')) + 1;
+
 const OPENING_RULE = [
   "This turn is opened by the host: the user has not spoken and no question card is available. Do not inven",
   "t, quote or summarise a user message. Open a natural discussion of the current information question from",

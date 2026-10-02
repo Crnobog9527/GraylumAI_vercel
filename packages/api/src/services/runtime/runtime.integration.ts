@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import './promptCache.integration';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { beforeAll, afterAll, it, expect, vi } from 'vitest';
 import {logger} from '../../lib/logger';

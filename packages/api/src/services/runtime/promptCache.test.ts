@@ -65,3 +65,11 @@ it('binds marking to primary dialogue and preserves organizer and matching bytes
  for(const phase of ['attached_organizer','matching'])
   expect(send(phase,false)).toBe(send(phase,false,{...context,promptCache:undefined}));
 });
+it.each(golden.filter(row=>row.phase==='skill'))('marks frozen primary cache with format $context.providerRequestFormat',fixture=>{
+ const policy={...frozenCallPolicy.parse(fixture.policy),providerLimits:{...fixture.policy.providerLimits,cacheWriteUsdPerMillion:'2.5'}};
+ policy.upperUsd=openRouterBound(policy.providerLimits,policy.outputLimit).upperUsd;
+ const request=JSON.stringify({...JSON.parse(fixture.request),messages:[{role:'system',content:instructions}]});
+ const context={...fixture.context,promptCache:cache} as RequestContext;
+ const wire=openRouterRequestBody(request,{context,policy,phase:'skill',primaryDialogue:true});
+ expect(JSON.parse(wire).messages[0].content[0].cache_control).toEqual({type:'ephemeral'});
+});
