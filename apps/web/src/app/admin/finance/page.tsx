@@ -25,6 +25,10 @@ import { formatUsdFromCents } from '@/lib/currency';
 import { ReportUsdValue } from '@/components/admin/ReportUsdValue';
 import { Bill2ModelReportCard, UNIT_SOURCE_LABEL } from '@/components/admin/Bill2ModelReportCard';
 import { ModelReportPriceCell } from '@/components/admin/ModelReportPriceCell';
+import { FinanceDailyChart } from '@/components/admin/FinanceDailyChart';
+import { FinanceStatusBadge } from '@/components/admin/FinanceStatusBadge';
+import { FinanceUnknownNotice } from '@/components/admin/FinanceUnknownNotice';
+import { collectFinanceUnknowns } from '@/components/admin/financeStatus';
 
 function formatCreditsRange(range: { min: number; max: number } | null, suffix: string) {
   if (!range) {
@@ -49,7 +53,7 @@ export default function AdminFinancePage() {
   const isInitialLoading = isLoading && !data;
 
   const transactions = data?.transactions ?? {
-    totalAdditions: 0, totalDeductions: 0, totalPurchases: 0, totalRefunds: 0,
+    totalAdditions: 0, totalCheckins: 0, totalDeductions: 0, totalPurchases: 0, totalRefunds: 0,
     todayTransactions: 0, weekTransactions: 0, monthTransactions: 0
   };
   const users = data?.users ?? {
@@ -69,6 +73,7 @@ export default function AdminFinancePage() {
   // Paid USD revenue minus recorded provider cost, computed exactly on the server.
   const { estimatedProfitUsd } = financeOverview;
   const profitTone = estimatedProfitUsd >= 0 ? 'text-emerald-400' : 'text-rose-400';
+  const checkinCredits = transactions.totalCheckins;
   return (
     <div className="space-y-6 p-4 md:p-8" data-testid="admin-finance-page">
       {/* Page Header */}
@@ -91,6 +96,7 @@ export default function AdminFinancePage() {
           刷新数据
         </Button>
       </div>
+      <FinanceUnknownNotice items={collectFinanceUnknowns(data)} />
 
       <Tabs data-testid="admin-finance-tabs" defaultValue="overview" className="w-full">
         <TabsList
@@ -257,7 +263,10 @@ export default function AdminFinancePage() {
                       <ArrowUpCircle className="h-4 w-4 text-emerald-400" />
                       <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>赠送</span>
                     </div>
-                    <span className="text-emerald-400">+{transactions.totalAdditions.toLocaleString()}</span>
+                    <span className="text-emerald-400" data-testid="admin-finance-credits-given">
+                      +{financeOverview.creditsGiven.toLocaleString()}
+                      {checkinCredits > 0 && <span className="ml-1 text-xs">（含签到 {checkinCredits.toLocaleString()}）</span>}
+                    </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <div className="flex items-center gap-2">
@@ -278,60 +287,7 @@ export default function AdminFinancePage() {
             </Card>
           </div>
 
-          {/* Daily Chart */}
-          <Card data-testid="admin-finance-daily-chart" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                <Calendar className="h-5 w-5" />
-                近30天积分流动
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <div className="flex items-center gap-4 text-xs mb-4" style={{ color: 'var(--text-tertiary)' }}>
-                  <div className="flex items-center gap-1">
-                    <div className="w-3 h-3 bg-emerald-400 rounded"></div>
-                    <span>赠送</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <div className="w-3 h-3 bg-blue-400 rounded"></div>
-                    <span>购买</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <div className="w-3 h-3 bg-rose-400 rounded"></div>
-                    <span>消耗</span>
-                  </div>
-                </div>
-                <div className="h-40 flex items-end gap-1">
-                  {dailyChart.slice(-14).map((day, index) => {
-                    const maxValue = Math.max(
-                      ...dailyChart.map(d => Math.max(d.additions, d.purchases, d.deductions))
-                    ) || 1;
-                    return (
-                      <div key={index} className="flex-1 flex flex-col gap-0.5" title={day.date}>
-                        <div
-                          className="bg-emerald-400 rounded-t"
-                          style={{ height: `${(day.additions / maxValue) * 100}%`, minHeight: day.additions > 0 ? '2px' : '0' }}
-                        />
-                        <div
-                          className="bg-blue-400"
-                          style={{ height: `${(day.purchases / maxValue) * 100}%`, minHeight: day.purchases > 0 ? '2px' : '0' }}
-                        />
-                        <div
-                          className="bg-rose-400 rounded-b"
-                          style={{ height: `${(day.deductions / maxValue) * 100}%`, minHeight: day.deductions > 0 ? '2px' : '0' }}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="flex justify-between text-xs" style={{ color: 'var(--text-disabled)' }}>
-                  <span>{dailyChart[dailyChart.length - 14]?.date.slice(5) || ''}</span>
-                  <span>{dailyChart[dailyChart.length - 1]?.date.slice(5) || ''}</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <FinanceDailyChart dailyChart={dailyChart} />
 
           {/* Credit Packages Table */}
           <Card data-testid="admin-finance-packages-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
@@ -388,14 +344,7 @@ export default function AdminFinancePage() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          className={pkg.active === 'true'
-                            ? 'bg-emerald-500/20 text-emerald-400'
-                            : 'bg-rose-500/20 text-rose-400'
-                          }
-                        >
-                          {pkg.active === 'true' ? '已上架' : '已下架'}
-                        </Badge>
+                        <FinanceStatusBadge value={pkg.active} on="已上架" off="已下架" />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -559,14 +508,7 @@ export default function AdminFinancePage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          className={model.isActive === 'true'
-                            ? 'bg-emerald-500/20 text-emerald-400'
-                            : 'bg-rose-500/20 text-rose-400'
-                          }
-                        >
-                          {model.isActive === 'true' ? '启用' : '禁用'}
-                        </Badge>
+                        <FinanceStatusBadge value={model.isActive} on="启用" off="禁用" />
                       </TableCell>
                     </TableRow>
                   ))}
