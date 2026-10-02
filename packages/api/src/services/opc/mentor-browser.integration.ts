@@ -44,6 +44,35 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   await page.getByPlaceholder('name@example.com').fill(f.email);await page.getByPlaceholder('输入你的密码').fill(f.password);await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL('**'+path);
   await poll(async()=>(await control()).length,{timeout:60000}).toBe(1);
   const composer=page.getByRole('textbox',{name:'给导师的回复'}),send=page.getByRole('button',{name:'发送',exact:true});
+  // The whole middle panel is the chat's scroll surface (scrollbar at its right edge), while
+  // messages, the current check, composer and notes keep one centered column of at most 720px.
+  const log=page.getByRole('log',{name:'完整导师消息'});
+  const layout=()=>log.evaluate(node=>{
+   const main=node.closest('main')!,panel=main.getBoundingClientRect(),box=node.getBoundingClientRect(),middle=panel.left+panel.width/2;
+   const rect=(element:Element|null|undefined)=>{if(!element)return null;const r=element.getBoundingClientRect();return {width:r.width,center:r.left+r.width/2-middle,left:r.left-middle,right:r.right-middle,top:r.top,bottom:r.bottom};};
+   const chat=node.parentElement!;
+   return {panelWidth:panel.width,panelBottom:panel.bottom,left:box.left-panel.left,right:panel.right-box.right,logTop:box.top,
+    overflowY:getComputedStyle(node).overflowY,scrolls:node.scrollHeight>node.clientHeight,
+    messages:[...node.querySelectorAll('[data-message-role=assistant]')].map(rect),current:rect(node.querySelector('section[aria-label="当前问题操作"]')),
+    composer:rect([...chat.children].find(child=>child.querySelector('textarea[aria-label="给导师的回复"]'))),notes:rect(chat.lastElementChild),
+    steps:rect(main.querySelector('nav[aria-label="定位步骤"]')),footer:rect(main.querySelector(':scope>div>footer')),
+    pageFits:document.documentElement.scrollWidth<=innerWidth,logFits:node.scrollWidth<=node.clientWidth};
+  });
+  const expectColumn=async(gutter:number)=>{
+   const l=await layout(),column=Math.min(720,l.panelWidth-2*gutter);
+   expect(l).toMatchObject({overflowY:'auto',pageFits:true,logFits:true});
+   for(const gap of [l.left,l.right])expect(Math.abs(gap)).toBeLessThanOrEqual(1);
+   // Composer and notes sit on the CSS gutter; log rows also keep symmetric scrollbar slots, so they may be narrower
+   // (the first row keeps its existing 690px cap) but never leave the centered column.
+   for(const box of [l.composer!,l.notes!]){expect(Math.abs(box.width-column)).toBeLessThanOrEqual(1);expect(Math.abs(box.center)).toBeLessThanOrEqual(1);}
+   expect(l.messages.length).toBeGreaterThan(0);expect(l.current).not.toBeNull();
+   for(const box of [...l.messages,l.current]){expect(box!.left).toBeGreaterThanOrEqual(-column/2-1);expect(box!.right).toBeLessThanOrEqual(column/2+1);}
+   expect(Math.abs(l.current!.center)).toBeLessThanOrEqual(1);
+   // Header and step tabs stay above the log; composer and the publish bar stay below it, inside the panel.
+   expect(l.steps!.bottom).toBeLessThanOrEqual(l.logTop+1);expect(l.composer!.bottom).toBeLessThanOrEqual(l.footer!.top+1);
+   expect(l.footer!.bottom).toBeLessThanOrEqual(l.panelBottom+1);
+   return l;
+  };
   await poll(()=>composer.isEditable()).toBe(true);await composer.fill('下一条仍可编辑的草稿');
   await poll(()=>page.getByText(/本地流式导师正文：/).count()).toBeGreaterThan(0);
   const opening=(await control())[0]!;expect(opening.finishedAt).toBeNull();expect([turnRequests,prepareRequests,streamRequests]).toEqual([1,0,0]);timings.openingDispatchToBrowserTextMs=(await page.evaluate(()=>(window as unknown as {mentorTextTimes:number[]}).mentorTextTimes))[0]!-opening.startedAt;
@@ -51,6 +80,14 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-opening-incremental-'+scenario+'.png',fullPage:true});
   await poll(async()=>(await page.evaluate(()=>(window as unknown as {mentorTextTimes:number[]}).mentorTextTimes)).length).toBeGreaterThanOrEqual(3);
   await control(1);await poll(async()=>(await control()).length).toBe(2);await control(2);await poll(()=>send.isEnabled()).toBe(true);
+  if(scenario==='normal'){
+   // A single opening message must not shrink the chat to its content, also with the right panel collapsed.
+   expect((await expectColumn(24)).messages).toHaveLength(1);
+   await page.getByRole('button',{name:'收起成果面板'}).click();await page.getByRole('button',{name:'展开右边栏'}).waitFor();
+   expect((await expectColumn(24)).panelWidth).toBeGreaterThan(1000);
+   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-scroll-surface-single-wide.png'});
+   await page.getByRole('button',{name:'展开右边栏'}).click();await page.getByRole('heading',{name:'已确认的定位'}).waitFor();
+  }
   // A host-opened turn is admitted without the card tool: text only.
   expect(await page.getByText('请选择当前问题最接近的答案：',{exact:true}).count()).toBe(0);
   if(scenario==='proposal')await poll(async()=>(await f.service.read(d.draftId)).information['step-0'].values?.product).toMatchObject({status:'provisional',nature:'decision',value:'借鉴同场景前后对照的讲解方式，不以器材评测为主。'});
@@ -163,36 +200,16 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   expect((await control()).length).toBe(8);expect((await sql.query('select id,state from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows).toEqual(before);
   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-persisted-return-'+scenario+'.png',fullPage:true});
   if(scenario==='normal'){
-   // The whole middle panel is the scroll surface (scrollbar at its right edge);
-   // messages and the composer keep one centered column of at most 720px.
-   const log=page.getByRole('log',{name:'完整导师消息'});
-   const layout=()=>log.evaluate(node=>{
-    const panel=node.closest('main')!.getBoundingClientRect(),box=node.getBoundingClientRect();
-    const center=(rect:DOMRect)=>rect.left+rect.width/2-(panel.left+panel.width/2);
-    const message=node.querySelector('[data-message-role=assistant]')!.getBoundingClientRect();
-    const reply=document.querySelector('textarea[aria-label="给导师的回复"]')!.getBoundingClientRect();
-    return {left:box.left-panel.left,right:panel.right-box.right,overflowY:getComputedStyle(node).overflowY,
-     scrolls:node.scrollHeight>node.clientHeight,messageWidth:message.width,messageCenter:center(message),composerCenter:center(reply),
-     pageFits:document.documentElement.scrollWidth<=innerWidth,logFits:node.scrollWidth<=node.clientWidth};
-   });
-   const wide=await layout();
-   expect(wide).toMatchObject({overflowY:'auto',scrolls:true,pageFits:true,logFits:true});
-   expect([Math.abs(wide.left),Math.abs(wide.right)].every(gap=>gap<=1)).toBe(true);
-   expect(wide.messageWidth).toBeLessThanOrEqual(720);
-   expect([Math.abs(wide.messageCenter),Math.abs(wide.composerCenter)].every(offset=>offset<=8)).toBe(true);
+   expect((await expectColumn(24)).scrolls).toBe(true);
    await log.evaluate(node=>{node.scrollTop=0;});await page.waitForTimeout(300);
    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-scroll-surface-top.png'});
-   await page.reload();const loaded=()=>poll(()=>log.locator('[data-message-role=assistant]').count()).toBeGreaterThan(0);await loaded();
-   // After refresh the same element is still the full-width scroll surface.
-   const refreshed=await layout();
-   expect(refreshed).toMatchObject({scrolls:true,pageFits:true,logFits:true});
-   expect([Math.abs(refreshed.left),Math.abs(refreshed.right)].every(gap=>gap<=1)).toBe(true);
+   await page.reload();const loaded=()=>poll(()=>log.locator('[data-message-role=assistant]').count()).toBeGreaterThan(1);await loaded();
+   // After refresh the same element is still the full-width scroll surface with the same column.
+   expect((await expectColumn(24)).scrolls).toBe(true);
    await log.evaluate(node=>{node.scrollTop=node.scrollHeight;});
    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-scroll-surface-bottom.png'});
    await page.setViewportSize({width:390,height:844});await loaded();
-   const narrow=await layout();
-   expect(narrow).toMatchObject({pageFits:true,logFits:true});
-   expect([Math.abs(narrow.left),Math.abs(narrow.right)].every(gap=>gap<=1)).toBe(true);
+   await expectColumn(14);
    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-scroll-surface-narrow.png'});
    await page.setViewportSize({width:1440,height:1000});
   }

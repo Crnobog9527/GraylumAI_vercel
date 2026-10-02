@@ -57,8 +57,9 @@
 .conversationPage .positionTop,.conversationPage .phaseStrip,.conversationPage .publishBar{flex:none}
 .conversationPage .workspaceContent>section[aria-label="当前定位步骤"]{flex:1;min-height:0;overflow:hidden;padding:0 0 10px;display:flex;flex-direction:column}
 .conversationPage .stepArticle{flex:1;min-height:0;display:flex;flex-direction:column;width:100%;margin:0}
-.conversationPage .stepColumns{flex:1;min-height:0;display:flex;flex-direction:column;margin:0}
-.conversationPage .mentorChat{flex:1;min-height:0;display:flex;flex-direction:column;margin:0}
+/* The older .stepColumns align-items:start would shrink the chat to its content. */
+.conversationPage .stepColumns{flex:1;min-height:0;display:flex;flex-direction:column;align-items:stretch;margin:0}
+.conversationPage .mentorChat{flex:1;min-height:0;display:flex;flex-direction:column;align-self:stretch;width:100%;margin:0}
 /* The log spans the whole middle panel so its scrollbar sits at the panel edge;
    the gutter (% of the panel width) keeps every row in the centered 720px column. */
 .conversationPage .mentorChat [role=log]{flex:1;min-height:0;height:auto;max-height:none!important;padding:16px var(--chat-gutter) 12px;margin:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable both-edges}
