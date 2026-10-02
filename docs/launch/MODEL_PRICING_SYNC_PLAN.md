@@ -2,7 +2,7 @@
 
 - 任务：MODEL-PRICING-SYNC。风险：**high**（计费：调用前冻结上限、OpenRouter `max_price`、后台价格来源）。
 - 本文只是方案，未获批准前不写代码、不改配置、不应用迁移、不发真实模型请求。
-- 基于 staging `e7e818b1`。在途相关 PR：BILL-UNIT #565（倍数、q、第三方价格，即将合并）、
+- 基于 staging `7909c118`（BILL-UNIT #565 已于 2026-10-02 06:59 UTC 合并：倍数、q、第三方价格）。其他相关 PR：
   BILL-PAYG #553（边用边扣，仅方案）、PROMPT-CACHE #572（已合并，仅方案）、RATE-LIMIT #573（已合并，仅方案）。
 
 ## 0. 给 Owner 看的（白话）
@@ -36,7 +36,7 @@
 - `providerLimits` 冻结在 staging 测试窗口 `runtime_test_windows.call_policies`
   （`packages/db/migrations/0108_runtime_staging_window.sql:8-16`）。这张表对 anon / authenticated / service_role
   都撤销了权限，窗口行由总控在 Owner 批准后用 SQL 写入；SQL 准入按**整对象相等**匹配报价（同文件 40-44 行），
-  `stagingPolicy.ts:32` 再复核 `openRouterBound(...).upperUsd` 等于冻结的 `upperUsd`。
+  `stagingPolicy.ts:33` 再复核 `openRouterBound(...).upperUsd` 等于冻结的 `upperUsd`。
   也就是说，**现在窗口里的单价也是人工抄进 SQL 的**，只是不在后台表单里。
 - 实际扣费用 OpenRouter 回执的 `usage.cost`（`openRouterEvidence.ts`），结算时若实际费用超过上界，
   SQL 把回执标为冲突（0105 第 261 行 `cost > c.upper_usd`，见 PROMPT_CACHE_PLAN 第 4.1 节）。
@@ -159,12 +159,13 @@ pricing: {
 
 ### 3.2 后台"添加 / 编辑模型"
 
-模型页（`apps/web/src/app/admin/models/page.tsx`，912 行，在代码大小基线上限，只许变小）：
+模型页（`apps/web/src/app/admin/models/page.tsx`，906 行，在代码大小基线上限，只许变小）：
 
-1. 表单删除"Token 成本设置"整块（约 90 行，第 755-845 行附近）和对应 `formData` 字段；保存不再提交这 5 个字段。
+1. 表单删除"Token 成本设置"整块（约 90 行，第 749-840 行附近）和对应 `formData` 字段；保存不再提交这 5 个字段。
    页面行数因此下降，基线一起调低。
-2. 新增只读组件 `ModelPriceSnapshotPanel`（`apps/web/src/components/admin/`），挂在 #565 的 `ModelMultiplierPanel`
-   旁边，模型页只加一个挂载行：
+2. 新增只读组件 `ModelPriceSnapshotPanel`（`apps/web/src/components/admin/`），放在每个模型的编辑对话框里，取代
+   被删掉的成本表单，模型页只加一个挂载行。#565 的倍数面板 `ModelMultiplierPanel` 是页面底部的全站列表
+   （`page.tsx:599`），保留不动；价格面板里同时显示这个模型的生效倍数，并提供跳到倍数面板的链接：
    - 顶部：模型 ID、已选线路、读取时间、距今多久、来源、`pricingHash` 前 8 位；"从 OpenRouter 读取"按钮
      （调用扩展后的 `refreshCatalog`，思考档位和价格一次读完）。
    - 已选线路的价格表：只列快照里实际出现的字段，单位"美元 / 百万 token"；分档逐条显示条件
@@ -267,6 +268,8 @@ pricing: {
 - **staging 测试窗口**：窗口仍由总控在 Owner 批准后用 SQL 新建（不改 0108 的权限设计）。变化是窗口报价不再手抄：
   后台面板提供"复制报价 JSON"（由 `deriveOpenRouterLimits` 生成，带 `fetchedAt` 和 `pricingHash`），
   总控把它原样放进窗口 SQL；准入第 3 步保证两者一致。建窗口前 24 小时内必须重新读取一次。
+  #565 合并后窗口条目还带每个模型的 `multiplier`（必须等于当时配置，`assertWindowMultipliers`），这部分仍按 #565 的规则
+  取值；"复制报价 JSON"只负责 `providerLimits` 和 `upperUsd`，不生成倍数。
 - **v1 旧窗口**（报价没有新字段）：`openRouterBound` 结果不变；第 3.4 节检查对它们照样生效（基础单价比较），
   旧窗口的价格若和当前快照不同会被拦下，需要新窗口。合并前列出当时有效窗口，由总控决定是否一起换。
 - **正式环境（RUNTIME-PROD ①）**：报价审批机制由 RUNTIME-PROD 设计，本方案只约束：报价必须由
@@ -294,12 +297,12 @@ pricing: {
 
 ## 6. 手填价格列的读者：保留、迁移还是随 LEGACY-CLOSE 删除
 
-核对结论（staging `e7e818b1`，只读代码）：
+核对结论（staging `7909c118`，只读代码）：
 
 - 五个手填列都是 `integer`，单位是微美元：输入 / 输出是"每百万 token"，联网搜索是"每千次"
   （`packages/db/baseline/0000_core_prerequisites.sql:57-61`）。**仓库里没有任何 200K 分档计算**：两个
   `*_above_200k` 列只被后台写入、读出和显示，没有计费代码使用。
-- 缓存价不是存的，而是旧计费代码写死的比例：写入 = 1.25 × 输入、读取 = 0.1 × 输入（`services/billing.ts:402-403`）。
+- 缓存价不是存的，而是旧计费代码写死的比例：写入 = 1.25 × 输入、读取 = 0.1 × 输入（`services/billing.ts:397-398`）。
 - 新 Runtime / BILL2 不读这些列（第 1.1 节）。
 - `/api/ai/stream` 已对新请求返回 410（`route.ts:272-274`），但 `billing.ts:getModelPricing` 还有 4 个**仍可调用**的入口：
   `routers/ai.ts:295`（`estimateCost`）、`services/agentSlice/admission.ts:38`、`services/agentSlice/accounting.ts:41`、
@@ -309,9 +312,9 @@ pricing: {
 | --- | --- | --- |
 | `routers/model.ts:293-297, 318-322, 355-359, 383-387`（`createModel` / `updateModel`） | 写入 5 列（美元 × 1,000,000） | **PR C 删除写入**；输入 schema 不再接受这 5 个字段 |
 | `routers/model.ts:239, 253` | 后台列表读 5 列 | PR C 不再返回；页面改读快照 |
-| `apps/web/src/app/admin/models/page.tsx:65-69, 106-127, 285-308, 755-845` | 手填表单（≤200K / >200K） | **PR C 删除**，换成第 3.2 节只读面板 |
-| `services/billing.ts:365-420`（`getModelPricing`）及上面 4 个仍可调用的入口 | 读输入、输出、搜索价，预扣和结算旧链路 | **保留到 LEGACY-CLOSE，不迁移**（D6）。已有模型继续用原值；新模型手填列为 0，旧链路按现有规则报"价格不可用"拒绝（`billing_require_model_pricing` 默认开，第 407-416 行），不会少收或乱收 |
-| `services/billing.ts:1186-1205`（`settleAbort`）、`apps/web/src/app/api/ai/stream/route.ts:184-198, 666-798, 1054` | 旧聊天预扣和结算 | 入口已 410；随 LEGACY-CLOSE 删除 |
+| `apps/web/src/app/admin/models/page.tsx:65-69, 106-127, 285-308, 749-840` | 手填表单（≤200K / >200K） | **PR C 删除**，换成第 3.2 节只读面板 |
+| `services/billing.ts:360-415`（`getModelPricing`）及上面 4 个仍可调用的入口 | 读输入、输出、搜索价，预扣和结算旧链路 | **保留到 LEGACY-CLOSE，不迁移**（D6）。已有模型继续用原值；新模型手填列为 0，旧链路按现有规则报"价格不可用"拒绝（`billing_require_model_pricing` 默认开，第 402-411 行），不会少收或乱收 |
+| `services/billing.ts:1181` 起（`settleAbort`）、`apps/web/src/app/api/ai/stream/route.ts:184-198, 666-798, 1054` | 旧聊天预扣和结算 | 入口已 410；随 LEGACY-CLOSE 删除 |
 | `services/modelRouter.ts:300-355`、`services/models/publicColumns.ts:4-6` | 只用输入 / 输出价给旧聊天的模型路由打分 | 旧聊天已关；随 LEGACY-CLOSE 删除 |
 | `services/costCalculator.ts` | 不读数据库，用写死的旧价格表；只被 `services/index.ts:43` 再导出，没找到生产调用方 | 随 LEGACY-CLOSE 删除 |
 | SQL `atomic_finalize_ai_success`（0023、0058；0105 改名旧函数并重定义） | 调用方未传价格时读这 3 列写结算元数据 | 旧链路；0105 新函数体是否仍读这些列未核对，PR C 实施时核对；随 LEGACY-CLOSE 处理 |
@@ -372,7 +375,7 @@ LEGACY-CLOSE 删除上述旧链路后，再用一个迁移删掉 5 列（含建�
 
 ## 8. 施工顺序
 
-1. 等 #565 合并（它改了模型页和新增 `modelPricing` 路由，本任务要挂在它旁边）。
+1. #565 已合并（`7909c118`）；本方案获批后即可开始 PR A。
 2. PR A（可与 PROMPT-CACHE 实现并行，不碰 `openRouterPolicy.ts`）。
 3. PR A 部署后：Owner 许可 → 后台逐个模型读取价格。
 4. PR B：在 PROMPT-CACHE 的 `openRouterLimits` 改动之后，或由同一写入方一起做；合并后新建 staging 窗口时用"复制报价 JSON"。
