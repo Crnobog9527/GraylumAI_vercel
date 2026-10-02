@@ -7,6 +7,8 @@ import { makePackage, makeWorkflow } from "../__tests__/fixtures/artifacts";
 import { publishSkillPackage } from "../skills/publication";
 import { opcService } from "./service";
 import { workbenchService } from "../artifacts/workbench";
+import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
+import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { OPENING_INPUT } from "../../shared/opcQuestions";
 import { agentTurnBody } from "../../shared/agentTurn";
 import { OPENING_EXTRACTION_RULE } from "./agentTurnPrompt";
@@ -2586,6 +2588,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       await import("../../../../../apps/web/node_modules/@playwright/test");
     const f = await fixture(6),
       modelId = randomUUID(),
+      organizerId = randomUUID(),
       key = "LOCAL_STAGING_" + randomUUID(),
       windowId = process.env.V3_RUNTIME_STAGING_WINDOW_ID!;
     expect(windowId).toMatch(/^[a-f0-9-]{36}$/);
@@ -2596,34 +2599,42 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       provider: "openrouter",
       account:
         "openrouter-key:" + createHash("sha256").update(key).digest("hex"),
-      model: "test/opc-staging",
+      model: "qwen/qwen3.8-27b",
       protocol: "openrouter-chat-v1",
       upperUsd: "0.02",
-      inputLimit: 8000,
+      inputLimit: 32000,
       outputLimit: 100,
       automaticRetry: false,
       hiddenTools: false,
       lookupSupported: true,
       providerLimits: {
-        providerSlug: "synthetic",
+        providerSlug: "synthetic/fp8",
         contextTokens: 10000,
         promptUsdPerMillion: "2",
         completionUsdPerMillion: "0",
         requestUsd: "0",
       },
     };
+    // The current opening is one mentor turn with a separate organizer call.
+    const policies = [callPolicy, {...callPolicy, modelId: organizerId, model: 'synthetic/protected-organizer'}];
+    for (const quote of policies) {
+      const config = {...configuredReasoning(quote.model), pricing: pricingConfig(
+        quote.model, quote.providerLimits.providerSlug,
+        quote.providerLimits.promptUsdPerMillion, quote.providerLimits.completionUsdPerMillion,
+      ).pricing};
+      await sql.query(
+        "insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,api_key,max_tokens,input_limit,config,price_multiplier) values($1,'Synthetic Staging OPC',$2,'openai','true','https://openrouter.ai/api/v1',$3,1000,10000,$4,1)",
+        [quote.modelId, quote.model, key, JSON.stringify(config)],
+      );
+    }
+    await sql.query("update modules set model_id=$1 where id=$2", [modelId, f.moduleId]);
     await sql.query(
-      "insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,api_key,max_tokens,input_limit) values($1,'Synthetic Staging OPC','test/opc-staging','openai','true','https://openrouter.ai/api/v1',$2,1000,10000)",
-      [modelId, key],
+      "insert into system_settings(key,value) values('v3_summary_model_id',to_jsonb($1::text)),('v3_summary_max_tokens','128'::jsonb) on conflict(key) do update set value=excluded.value",
+      [organizerId],
     );
-    await sql.query("update modules set model_id=$1 where id=$2", [
-      modelId,
-      f.moduleId,
-    ]);
-    await sql.query("update ai_models set price_multiplier=1 where id=$1", [modelId]);
     await sql.query(
-      "insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",
-      [windowId, [f.actor], JSON.stringify([callPolicy])],
+      "insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.04,2,now()+interval '2 hours')",
+      [windowId, [f.actor], JSON.stringify(policies)],
     );
     const browser = await chromium.launch({
       executablePath:
@@ -2697,8 +2708,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       ).toEqual([
         {
           state: "settled",
-          charged: 3,
-          cost: "0.003",
+          charged: 6,
+          cost: "0.006",
           test_window_id: windowId,
         },
       ]);
@@ -2706,7 +2717,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
         headers: { "x-local-control": process.env.V3_LOCAL_CONTROL! },
       });
       expect(count.ok).toBe(true);
-      expect((await count.json()).calls).toBe(1);
+      expect((await count.json()).calls).toBe(2);
     } finally {
       await browser.close();
     }
