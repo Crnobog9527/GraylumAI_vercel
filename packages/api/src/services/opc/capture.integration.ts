@@ -10,6 +10,7 @@ import { publishSkillPackage } from '../skills/publication';
 import { opcService } from './service';
 import { captureCompleted } from './capture';
 import { runtimeExecutor } from '../runtime/execute';
+import { runtimeAdmissionService } from '../runtime/admission';
 
 const connectionString = process.env.V3_LOCAL_DB!;
 if (!connectionString?.startsWith('postgres://postgres@127.0.0.1:') ||
@@ -69,7 +70,7 @@ async function fixture(extraFields = 0, informationCounts?: number[]) {
   };
   // Construct persisted executions through the real admission authority. A synthetic
   // DB-only completion keeps this suite independent of providers and transport.
-  const seed = async (summary = output(), v2 = true, targetDraftId = draft.draftId) => {
+  const seed = async (summary = output(), v2 = true, targetDraftId = draft.draftId, databaseCapacity = false) => {
     const requestId = randomUUID();
     const bypassCapture = new Proxy(admin, {
       get(target, key) {
@@ -79,8 +80,21 @@ async function fixture(extraFields = 0, informationCounts?: number[]) {
           : target.rpc(name, args);
       },
     });
-    const prepared = await opcService(user, bypassCapture).prepareStep({ draftId: targetDraftId,
-      requestId, stepId: 'step-0', purpose: 'mentor', questionId: 'goal', input: 'Synthetic capture input' });
+    // The artificial 24-field SQL byte-boundary fixture uses a short synthetic
+    // instruction. Real method freeze/replay cases below use the unchanged OPC host.
+    const material = databaseCapacity ? await rpc('opc_step_material', { p_actor_id: actor,
+      p_draft_id: targetDraftId, p_request_id: requestId, p_step_id: 'step-0',
+      p_purpose: 'mentor', p_input: 'Synthetic capture input' }) : null;
+    const prepared = material ? await runtimeAdmissionService(user, admin, {
+      account: 'runtime-local', costPerCall: '0.02', creditsPerUsd: '1000', multiplier: '1',
+      maxCalls: 1, maxOutputTokens: 1000, inputBytes: 64000, historyItems: 100,
+      expectedMaterialRevision: material.revision, opcTurnToken: material.turnToken,
+      additionalInstructions: 'Synthetic database capacity fixture', mentorStream: true,
+      skillResources: ['SKILL.md'], searchEnabled: false,
+    }).prepare({ sessionId: d.sessionId, requestId, input: 'Synthetic capture input', network: 'deny', sources: [],
+      selection: { kind: 'skill', moduleId, revisionId: pack.revisionId, task: 'opc-question:goal' } })
+      : await opcService(user, bypassCapture).prepareStep({ draftId: targetDraftId,
+        requestId, stepId: 'step-0', purpose: 'mentor', questionId: 'goal', input: 'Synthetic capture input' });
     const id = prepared.executionId;
     await rpc('runtime_cancel', { p_actor_id: actor, p_execution_id: id });
     await db.query(`update runtime_executions set state='completed',unavailable_reason=null,result=$2,
@@ -380,7 +394,8 @@ it('RUNTIME: capture information byte capacity falls back to suggestions', async
   const values = Object.fromEntries(Object.keys(current.information).map(key => [key,
     key === 'goal' ? tuple() : tuple('x'.repeat(400), 'provisional', 'fact')]));
   await f.service.information({ draftId: f.draft.draftId, requestId: randomUUID(), stepId: 'step-0', expectedVersion: current.version, values });
-  expect(await f.apply(await f.seed(output([patch('😀'.repeat(400))])))).toMatchObject({ result: 'suggested' });
+  expect(await f.apply(await f.seed(output([patch('😀'.repeat(400))]), true, f.draft.draftId, true)))
+    .toMatchObject({ result: 'suggested' });
   const after = await f.steps();
   expect(after['step-0'].information.goal.value).toBe('');
   expect(after['step-0'].fieldMeta.goal.suggestion.value).toBe('😀'.repeat(400));
