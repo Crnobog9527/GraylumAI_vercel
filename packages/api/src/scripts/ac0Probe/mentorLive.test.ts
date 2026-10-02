@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {mentorSender,mentorMaxUsd,MENTOR_LIMITS,sha256,type MentorModel} from './mentorLive.ts';
 import {fileLedger,acquireLedgerLock} from './ledger.ts';
-import {memoryLedger,usdToNano} from './budget.ts';
+import {createBudget,memoryLedger,usdToNano} from './budget.ts';
 import {sseResponse,textDeltas} from './dryRun.ts';
 const directories:string[]=[];
 afterEach(()=>{for(const path of directories.splice(0))rmSync(path,{recursive:true,force:true});});
@@ -22,7 +22,7 @@ const reply=(cost:unknown=.001,model:string=MENTOR_LIMITS.G.model)=>new Response
 const slot=(id='one',model:MentorModel='G')=>({id,model,phase:'main-single-turn' as const});
 const setup=(options:Partial<Parameters<typeof mentorSender>[0]>={},stream=false)=>{
   const upstream=vi.fn(async()=>reply());
-  const ledger=memoryLedger({calls:830,nanoUsd:usdToNano(3.36)});
+  const ledger=memoryLedger({calls:834,nanoUsd:7863735263});
   const save=vi.fn();
   const sender=mentorSender({ledger,upstream,maxUsd:6,authorization:'Bearer fixture',save,
     slots:Array.from({length:50},(_,i)=>({...slot(String(i)),requestHash:sha256(raw('G',stream?{stream:true}:{}))})),...options});
@@ -35,27 +35,29 @@ describe('STG mentor live boundary without network',()=>{
   });
   it('reserves to the real file-ledger implementation before send; settles exactly once',async()=>{
     const directory=mkdtempSync(join(tmpdir(),'mentor-ledger-'));directories.push(directory);
-    const path=join(directory,'ledger.json');writeFileSync(path,JSON.stringify({calls:830,nanoUsd:100,external:[]}));
+    const path=join(directory,'ledger.json');writeFileSync(path,JSON.stringify({calls:834,nanoUsd:7863735263,external:[]}));
     const ledger=fileLedger(path),release=acquireLedgerLock(path);
     expect(()=>acquireLedgerLock(path)).toThrow('PROBE_LEDGER_LOCKED');
-    const upstream=vi.fn(async()=>{expect(ledger.read().calls).toBe(831);expect(ledger.read().nanoUsd).toBeGreaterThan(100);return reply();});
+    const upstream=vi.fn(async()=>{expect(ledger.read().calls).toBe(835);expect(ledger.read().nanoUsd).toBeGreaterThan(7863735263);return reply();});
     const {sender}=setup({ledger,upstream});
     await sender.send(raw(),slot('0'));
-    expect(JSON.parse(readFileSync(path,'utf8'))).toMatchObject({calls:831,nanoUsd:100+usdToNano(.001),external:[]});
+    expect(JSON.parse(readFileSync(path,'utf8'))).toMatchObject({calls:835,nanoUsd:7863735263+usdToNano(.001),external:[]});
     await expect(sender.send(raw(),slot('0'))).rejects.toThrow('duplicate');
     expect(upstream).toHaveBeenCalledTimes(1);release();
   });
   it('refuses restart, absent ledger, foreign usage, and ledger-write failure before network',async()=>{
-    for(const calls of [0,829,831,974])expect(()=>setup({ledger:memoryLedger({calls,nanoUsd:0})})).toThrow('BASELINE');
-    const a=setup();a.ledger.write({calls:831,nanoUsd:0});await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow('ledger_changed');
+    for(const calls of [0,830,833,835,974])expect(()=>setup({ledger:memoryLedger({calls,nanoUsd:7863735263})})).toThrow('BASELINE');
+    for(const nanoUsd of [0,7863735262,7863735264])
+      expect(()=>setup({ledger:memoryLedger({calls:834,nanoUsd})})).toThrow('BASELINE');
+    const a=setup();a.ledger.write({calls:835,nanoUsd:0});await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow('ledger_changed');
     expect(a.upstream).not.toHaveBeenCalled();
-    const b=setup({ledger:{read:()=>({calls:830,nanoUsd:0}),write:()=>{throw Error('disk');}}});
+    const b=setup({ledger:{read:()=>({calls:834,nanoUsd:7863735263}),write:()=>{throw Error('disk');}}});
     await expect(b.sender.send(raw(),slot('0'))).rejects.toThrow();expect(b.upstream).not.toHaveBeenCalled();
   });
   it('checks run dollars and cumulative dollars independently',async()=>{
     const a=setup({maxUsd:.001});await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow();expect(a.upstream).not.toHaveBeenCalled();
-    const b=setup({ledger:memoryLedger({calls:830,nanoUsd:usdToNano(31.239)})});
-    await expect(b.sender.send(raw(),slot('0'))).rejects.toThrow();expect(b.upstream).not.toHaveBeenCalled();
+    const b=createBudget({maxCalls:80,maxUsd:6,ledger:memoryLedger({calls:834,nanoUsd:usdToNano(31.239)})});
+    expect(()=>b.reserve(usdToNano(.01))).toThrow('total_usd_cap');
   });
   it('shares one 80-call batch across both models and refuses an extra call',async()=>{
     const slots=(['G','S'] as const).flatMap(model=>Array.from({length:MENTOR_LIMITS[model].calls},
@@ -63,7 +65,7 @@ describe('STG mentor live boundary without network',()=>{
     const upstream=vi.fn(async(_url:RequestInfo|URL,init?:RequestInit)=>reply(.001,JSON.parse(String(init?.body)).model));
     const a=setup({slots,upstream});
     for(const s of slots)await a.sender.send(raw(s.model),s);
-    expect(a.ledger.read().calls).toBe(910);expect(a.sender.totals.run.calls).toBe(80);
+    expect(a.ledger.read().calls).toBe(914);expect(a.sender.totals.run.calls).toBe(80);
     await expect(a.sender.send(raw(),slot('extra'))).rejects.toThrow();
     expect(upstream).toHaveBeenCalledTimes(80);
   });
@@ -82,7 +84,7 @@ describe('STG mentor live boundary without network',()=>{
   it('books a known over-bound cost then stops',async()=>{
     const a=setup({upstream:vi.fn(async()=>reply(.2))});
     await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow('actual_over_bound');
-    expect(a.ledger.read().nanoUsd).toBe(usdToNano(3.36)+usdToNano(.2));
+    expect(a.ledger.read().nanoUsd).toBe(7863735263+usdToNano(.2));
   });
   it('denies e2e and GPT before any provider call',async()=>{
     const a=setup();
@@ -92,7 +94,7 @@ describe('STG mentor live boundary without network',()=>{
   it.each([401,402,429,500])('keeps reservation and stops after HTTP %s',async(status)=>{
     const upstream=vi.fn(async()=>new Response('refused',{status})),a=setup({upstream});
     await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow('provider_rejected');
-    const reserved=a.ledger.read();expect(reserved.calls).toBe(831);expect(reserved.nanoUsd).toBeGreaterThan(usdToNano(3.36));
+    const reserved=a.ledger.read();expect(reserved.calls).toBe(835);expect(reserved.nanoUsd).toBeGreaterThan(7863735263);
     await expect(a.sender.send(raw(),slot('1'))).rejects.toThrow();expect(upstream).toHaveBeenCalledTimes(1);
   });
   it.each([undefined,-1,'0.001',null])('stops with missing/invalid provider cost %s',async(cost)=>{
@@ -107,7 +109,7 @@ describe('STG mentor live boundary without network',()=>{
     const a=setup({upstream});
     await expect(a.sender.send(raw(),slot('0'))).rejects.toThrow('provider_refused');
     await expect(a.sender.send(raw(),slot('1'))).rejects.toThrow();
-    expect(upstream).toHaveBeenCalledTimes(1);expect(a.ledger.read().nanoUsd).toBe(usdToNano(3.361));
+    expect(upstream).toHaveBeenCalledTimes(1);expect(a.ledger.read().nanoUsd).toBe((7863735263+usdToNano(.001)));
   });
   it('does not retry thrown transport errors or leak their text',async()=>{
     const upstream=vi.fn(async()=>{throw Error('secret');}),a=setup({upstream});
@@ -127,7 +129,7 @@ describe('STG mentor live boundary without network',()=>{
       {finish:'stop',usage:{cost:.001,prompt_tokens:10,completion_tokens:5,total_tokens:15}}));
     const a=setup({upstream},true),chunks:Uint8Array[]=[];
     await a.sender.send(raw('G',{stream:true}),slot('0'),{headers:()=>{},chunk:bytes=>{
-      expect(a.ledger.read().nanoUsd).toBeGreaterThan(usdToNano(3.361));chunks.push(bytes);
+      expect(a.ledger.read().nanoUsd).toBeGreaterThan((7863735263+usdToNano(.001)));chunks.push(bytes);
     }});
     expect(Buffer.concat(chunks).toString()).toContain('[DONE]');expect(a.sender.totals.run.calls).toBe(1);
   });
@@ -164,7 +166,7 @@ it('drains upstream after downstream closes, settles cost then stops without a s
   const upstream=vi.fn(async()=>new Response(stream)),a=setup({upstream},true);
   await expect(a.sender.send(raw('G',{stream:true}),slot('0'),{headers:()=>{},chunk:()=>{throw Error('private-disconnect');}}))
     .rejects.toThrow('client_disconnected');
-  expect(drained).toBe(true);expect(a.ledger.read().nanoUsd).toBe(usdToNano(3.361));
+  expect(drained).toBe(true);expect(a.ledger.read().nanoUsd).toBe((7863735263+usdToNano(.001)));
   const record=a.save.mock.calls.at(-1)![0];
   expect(record).toMatchObject({status:'settled',localReason:'client_disconnected',clientDisconnected:true,receivedBytes:Buffer.byteLength(encoded)});
   expect(JSON.stringify(a.save.mock.calls)).not.toContain('private-disconnect');
@@ -181,7 +183,7 @@ it('captures bytes and generation identity before an interrupted upstream, prese
   expect(a.save.mock.calls.at(-1)![0]).toMatchObject({status:'unknown_or_rejected_reserved',receivedBytes:Buffer.byteLength(frame),
     providerId:'gen-synthetic',localReason:'upstream_stream_error'});
   expect(JSON.stringify(a.save.mock.calls)).not.toContain('private proxy detail');
-  expect(a.ledger.read().nanoUsd).toBeGreaterThan(usdToNano(3.36));
+  expect(a.ledger.read().nanoUsd).toBeGreaterThan(7863735263);
 });
 it('classifies timeout using the actual signal, never the exception text',async()=>{
   const aborted=new AbortController();aborted.abort();
@@ -227,7 +229,7 @@ it('real loopback client cancellation still drains synthetic upstream and settle
     const response=await fetch('http://127.0.0.1:'+address.port),reader=response.body!.getReader();
     await reader.read();await reader.cancel();await done;
     expect(String(failure)).toContain('client_disconnected');
-    expect(a.ledger.read().nanoUsd).toBe(usdToNano(3.361));expect(upstream).toHaveBeenCalledTimes(1);
+    expect(a.ledger.read().nanoUsd).toBe((7863735263+usdToNano(.001)));expect(upstream).toHaveBeenCalledTimes(1);
     expect(a.save.mock.calls.at(-1)![0].receivedBytes).toBe(Buffer.byteLength(encoded));
   }finally{release();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });
@@ -239,6 +241,6 @@ it('downstream closure never permits settlement when upstream also breaks',async
   await expect(a.sender.send(raw('G',{stream:true}),slot('0'),{headers:()=>{throw Error('private client');},chunk:()=>{}}))
     .rejects.toThrow('upstream_stream_error');
   expect(a.save.mock.calls.at(-1)![0]).toMatchObject({status:'unknown_or_rejected_reserved',clientDisconnected:true});
-  expect(a.ledger.read().nanoUsd).toBeGreaterThan(usdToNano(3.36));
+  expect(a.ledger.read().nanoUsd).toBeGreaterThan(7863735263);
   expect(JSON.stringify(a.save.mock.calls)).not.toMatch(/private upstream|private client/);
 });
