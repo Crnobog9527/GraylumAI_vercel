@@ -100,7 +100,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['legacy','serial-to
   expect((await db.query('select count(*)::int n from bill2_runs where test_window_id=$1',[windowId])).rows[0].n).toBe(1);
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },30000);
-it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: BILL-UNIT new contract freezes m_i on the TS-built call and settles ceil(q × Σ cost × m_i) once',async()=>{
+// runM is the run/window multiplier used for the reservation (the window's maximum m); the called model's m_i is 1.5.
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([{runM:'1.5',credits:30},{runM:'3',credits:60}])('RUNTIME: BILL-UNIT new contract freezes m_i on the TS-built call and settles ceil(q × Σ cost × m_i) once (run m=$runM)',async({runM,credits})=>{
  const f=await fixture(),realModel=randomUUID(),windowId=randomUUID();
  await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic BILL-UNIT','test/bill-unit','openai','true')",[realModel]);
  // A v2 window: the entry carries m_i, rules carry the frozen billingUnit snapshot (q=1000, inherited m=1.5).
@@ -108,9 +109,12 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: BILL-UNIT new c
  const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'hello',instructions:'Only local synthetic input',model:'test/bill-unit',maxOutputTokens:100,maxTurns:1,historyItems:0,network:'deny',workspaceContext:true,tools:['read_source'],request:{sessionId:f.s.sessionId,requestId:f.admit.p_request_id}};
  const billingUnit={version:'bill-unit-v2',creditsPerUsd:'1000',defaultMultiplier:'1.5',models:{[realModel]:{multiplier:'1.5',source:'global'}},providers:{},hash:'f'.repeat(64)};
  const billing={...f.billing,mode:'staging_test',testWindowId:windowId,modelId:realModel,input:context,callPolicy:[policy],
-  rules:{...f.billing.rules,version:'runtime-staging-v1',quoteVersion:windowId,creditsPerUsd:'1000',multiplier:'1.5',billingUnit},
-  limits:{...f.billing.limits,credits:30,maxPreDeduct:30}};
- await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1.5,0.02,1,now()+interval '2 hours')",[windowId,[f.actorId],JSON.stringify([policy])]);
+  rules:{...f.billing.rules,version:'runtime-staging-v1',quoteVersion:windowId,creditsPerUsd:'1000',multiplier:runM,billingUnit},
+  limits:{...f.billing.limits,credits,maxPreDeduct:credits}};
+ // With runM=3 the window also approves a second, more expensive model that this run does not call.
+ const other={...policy,multiplier:'3',modelId:randomUUID(),model:'test/bill-unit-other'};
+ await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,$4,0.02,1,now()+interval '2 hours')",
+  [windowId,[f.actorId],JSON.stringify(runM==='3'?[policy,other]:[policy]),runM]);
  const e=await rpc('runtime_admit',{...f.admit,p_payload:context,p_billing:billing});
  const server=createServer(async(req,res)=>{req.resume();await new Promise(resolve=>req.on('end',resolve));
   res.setHeader('content-type','application/json');res.end(JSON.stringify({id:'gen-bill-unit-'+windowId,object:'chat.completion',created:1,model:'test/bill-unit',choices:[{index:0,message:{role:'assistant',content:'BILL-UNIT answer',tool_calls:null},finish_reason:'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7,cost:0.003}}));
@@ -124,9 +128,10 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: BILL-UNIT new c
   expect(await host.execute(e.executionId)).toMatchObject({state:'completed',body:'BILL-UNIT answer'});
   const call=(await db.query('select payload from bill2_calls where run_id=$1',[e.runId])).rows[0].payload;
   expect(call.billingUnit).toEqual({modelId:realModel,multiplier:'1.5',source:'global'});
-  const run=(await db.query('select state,charged,provider_cost_usd::text cost from bill2_runs where id=$1',[e.runId])).rows[0];
-  // ceil(0.003 × 1000 × 1.5) = 5 (the old single-m=1 contract would have charged 3).
-  expect(run).toMatchObject({state:'settled',charged:5,cost:'0.003'});
+  const run=(await db.query('select state,charged,provider_cost_usd::text cost,multiplier::text m from bill2_runs where id=$1',[e.runId])).rows[0];
+  // Settled at the call's own m_i: ceil(0.003 × 1000 × 1.5) = 5, also when the run's reservation multiplier
+  // is 3 (charging at the run m would give ceil(0.003 × 1000 × 3) = 9).
+  expect(run).toMatchObject({state:'settled',charged:5,cost:'0.003',m:runM});
   expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(95);
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },30000);
