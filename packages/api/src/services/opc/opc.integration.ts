@@ -8,6 +8,8 @@ import { publishSkillPackage } from "../skills/publication";
 import { opcService } from "./service";
 import { workbenchService } from "../artifacts/workbench";
 import { OPENING_INPUT } from "../../shared/opcQuestions";
+import { agentTurnBody } from "../../shared/agentTurn";
+import { OPENING_EXTRACTION_RULE } from "./agentTurnPrompt";
 import type { Page } from "../../../../../apps/web/node_modules/@playwright/test";
 const connectionString = process.env.V3_LOCAL_DB!;
 if (
@@ -2968,7 +2970,9 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     const runs=await sql.query("select payload from runtime_executions where actor_id=$1 order by created_at",[f.actor]);
     // The frozen mentor context carries the host-derived hierarchical label.
     expect(runs.rows.some(row=>row.payload.instructions.includes('Current information question: {"id":"other","title":"Second independent field","label":"1.2"}'))).toBe(true);
-    expect(runs.rows.some(row=>row.payload.instructions.includes("opened by the host, not by the user"))).toBe(true);
+    // v5 host opening (agentTurnPrompt.ts) plus its forced opening extraction.
+    expect(runs.rows.some(row=>row.payload.instructions.includes("This turn is opened by the host"))).toBe(true);
+    expect(runs.rows.some(row=>row.payload.attachedOrganizer?.instructions?.includes(OPENING_EXTRACTION_RULE))).toBe(true);
     expect(errors).toEqual([]);
   } finally { release?.();await browser.close(); }
 },300000);
@@ -3123,7 +3127,9 @@ for (const sample of [
   const primaryModelId = await planFixtureModel(f.moduleId);
   const draft = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: "mentor" });
   const userInput = sample.input;
-  const primaryBody = JSON.stringify({ message: "【预设导师回复】请核对本题的业务内容。" });
+  // v5 mentor turns reply in plain prose; the host stores it as the agent-turn envelope.
+  const primaryText = "【预设导师回复】请核对本题的业务内容。";
+  const primaryBody = agentTurnBody(primaryText, null);
   // Deliberately prewritten, not computed from userInput: this verifies the
   // transport/application contract, NOT a model's semantic extraction quality.
   const extractedValue = sample.value;
@@ -3153,7 +3159,7 @@ for (const sample of [
       id, model: wire.model, final: true, cost: "0.003", currency: "USD", coverage: "request_total",
       usage: { sdkResponse: {
         id, object: "chat.completion", created: 1, model: wire.model,
-        choices: [{ index: 0, message: { role: "assistant", content: requests.length === 1 ? primaryBody : extractionBody }, finish_reason: "stop" }],
+        choices: [{ index: 0, message: { role: "assistant", content: requests.length === 1 ? primaryText : extractionBody }, finish_reason: "stop" }],
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       } },
     }));
@@ -3181,6 +3187,10 @@ for (const sample of [
     expect(context).toEqual({
       userInput, originalStepId: "step-0",
       currentQuestion: { id: sample.field, title: sample.title, fields: [{ id: sample.field, title: sample.title, required: true, elicit: "user_fact" }] },
+      currentStepMaterial: {id: "step-0", fields: [
+        {id: sample.field, title: sample.title, required: true, elicit: "user_fact", status: "unknown", value: ""},
+        {id: "future", title: "尚未到达的问题", required: true, elicit: "user_fact", status: "unknown", value: ""},
+      ]},
       allowedWorkflow: [{ id: "step-0", title: f.flow.steps[0].title, confirmed: false, fields: [{ id: sample.field, title: sample.title }] }],
     });
     expect(reply).toBe(primaryBody);
@@ -3190,7 +3200,7 @@ for (const sample of [
     expect(execution).toMatchObject({ input: userInput, body: primaryBody, summary: extractionBody });
     const before = await f.service.read(draft.draftId);
     const parsed = readWorkflowMentorExecution(execution.body, execution.summary, "step-0", before.information);
-    expect(parsed.message).toBe(JSON.parse(primaryBody).message);
+    expect(parsed.message).toBe(primaryText);
     const accepted = applyMentorTurnRules(parsed, execution.input);
     expect(accepted).toEqual(JSON.parse(extractionBody).informationPatch);
     // Use the same public projection as the page, then persist through the
@@ -3237,6 +3247,7 @@ it("OPC: the Agent opens the current question once per entry and plans without u
     [model],
   );
   await sql.query("update modules set model_id=$1 where id=$2", [model, f.moduleId]);
+  const organizerModel = await organizerFixtureModel();
   const draft = await f.service.start({
     requestId: randomUUID(),
     registration: f.registration,
@@ -3263,11 +3274,15 @@ it("OPC: the Agent opens the current question once per entry and plans without u
             )
             .join("\n"),
     );
+    // v5: the mentor replies in prose; the attached organizer returns the extraction.
+    const content = request.model === organizerModel
+      ? JSON.stringify({ inputKind: "answer", targetStepId: "step-0", informationPatch: {} })
+      : "【隔离模拟】先把当前问题聊清楚。";
     res.setHeader("content-type", "application/json");
     res.end(
       JSON.stringify({
         id: "opening-" + calls,
-        model: "opc-opening",
+        model: request.model,
         final: true,
         cost: "0.003",
         currency: "USD",
@@ -3277,17 +3292,13 @@ it("OPC: the Agent opens the current question once per entry and plans without u
             id: "opening-" + calls,
             object: "chat.completion",
             created: 1,
-            model: "opc-opening",
+            model: request.model,
             choices: [
               {
                 index: 0,
                 message: {
                   role: "assistant",
-                  content: JSON.stringify({
-                    message: "【隔离模拟】先把当前问题聊清楚。",
-                    inputKind: "answer",
-                    informationPatch: {},
-                  }),
+                  content,
                 },
                 finish_reason: "stop",
               },
@@ -3318,7 +3329,7 @@ it("OPC: the Agent opens the current question once per entry and plans without u
       questionId: schema[0].id,
     };
     const opening = await f.service.prepareStep(openingRequest);
-    await executor.execute(opening.executionId);
+    expect(await executor.execute(opening.executionId)).toMatchObject({ state: "completed" });
     // A future question cannot be opened before the current one is confirmed.
     await expect(
       f.service.prepareStep({
@@ -3356,7 +3367,9 @@ it("OPC: the Agent opens the current question once per entry and plans without u
       opening.executionId,
     );
     await executor.execute(opening.executionId);
-    expect(calls).toBe(1);
+    // A v5 opening is one entry with two provider calls: the mentor and its forced
+    // extraction organizer (AGENT_TURN_ENABLE_PLAN option A). Replay adds none.
+    expect(calls).toBe(2);
     const after = await f.service.read(draft.draftId);
     // The turn is owned by the draft's current round, and every other projected
     // value stays exact.
@@ -3377,7 +3390,8 @@ it("OPC: the Agent opens the current question once per entry and plans without u
     });
     expect(history.error).toBeNull();
     expect(history.data.executions[0].input).toBe(OPENING_INPUT);
-    expect(instructions[0]).toContain("opened by the host, not by the user");
+    expect(instructions[0]).toContain("This turn is opened by the host");
+    expect(instructions[1]).toContain(OPENING_EXTRACTION_RULE);
     expect(instructions[0]).toContain('"elicit"');
     expect(instructions[0]).toContain("inputKind");
     // One entry is one charge.
@@ -3524,6 +3538,7 @@ it("OPC: a revised round opens the same question under its own identity without 
     [model],
   );
   await sql.query("update modules set model_id=$1 where id=$2", [model, f.moduleId]);
+  const organizerModel = await organizerFixtureModel();
   const draft = await f.service.start({
     requestId: randomUUID(),
     registration: f.registration,
@@ -3532,15 +3547,24 @@ it("OPC: a revised round opens the same question under its own identity without 
   const roundA = draft.roundId;
   const schema = (await f.service.read(draft.draftId)).information["step-0"].schema;
   const questionId = schema[0].id;
+  // Each v5 opening makes two provider calls: the mentor and its forced extraction
+  // organizer (AGENT_TURN_ENABLE_PLAN option A). Replays make none.
+  const OPENING_CALLS = 2;
   let calls = 0;
   const server = createServer(async (req, res) => {
     calls++;
-    for await (const _ of req) void _;
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const wireModel: string = JSON.parse(JSON.parse(raw).input).model;
+    // v5: the mentor replies in prose; the attached organizer returns the extraction.
+    const content = wireModel === organizerModel
+      ? JSON.stringify({ inputKind: "answer", targetStepId: "step-0", informationPatch: {} })
+      : "【隔离模拟】第 " + calls + " 次开场。";
     res.setHeader("content-type", "application/json");
     res.end(
       JSON.stringify({
         id: "round-" + calls,
-        model: "opc-round",
+        model: wireModel,
         final: true,
         cost: "0.003",
         currency: "USD",
@@ -3550,17 +3574,13 @@ it("OPC: a revised round opens the same question under its own identity without 
             id: "round-" + calls,
             object: "chat.completion",
             created: 1,
-            model: "opc-round",
+            model: wireModel,
             choices: [
               {
                 index: 0,
                 message: {
                   role: "assistant",
-                  content: JSON.stringify({
-                    message: "【隔离模拟】第 " + calls + " 次开场。",
-                    inputKind: "answer",
-                    informationPatch: {},
-                  }),
+                  content,
                 },
                 finish_reason: "stop",
               },
@@ -3601,12 +3621,12 @@ it("OPC: a revised round opens the same question under its own identity without 
       (await sql.query("select count(*)::int n from bill2_runs where actor_id=$1", [f.actor])).rows[0].n,
     ).toBe(1);
     expect(calls).toBe(0);
-    await executor.execute(openingA.executionId);
-    expect(calls).toBe(1);
+    expect(await executor.execute(openingA.executionId)).toMatchObject({ state: "completed" });
+    expect(calls).toBe(OPENING_CALLS);
     // The original round's request stays retryable and recoverable as itself.
     expect((await f.service.prepareStep(roundARequest)).executionId).toBe(openingA.executionId);
     await executor.execute(openingA.executionId);
-    expect(calls).toBe(1);
+    expect(calls).toBe(OPENING_CALLS);
     // Publish round A so a revision is allowed, exactly as the product requires.
     for (const step of f.flow.steps) {
       await f.artifacts.execute({
@@ -3644,13 +3664,13 @@ it("OPC: a revised round opens the same question under its own identity without 
     expect(roundBRequest.requestId).not.toBe(roundARequest.requestId);
     const openingB = await f.service.prepareStep(roundBRequest);
     expect(openingB.executionId).not.toBe(openingA.executionId);
-    await executor.execute(openingB.executionId);
-    expect(calls).toBe(2);
+    expect(await executor.execute(openingB.executionId)).toMatchObject({ state: "completed" });
+    expect(calls).toBe(2 * OPENING_CALLS);
     // The older round keeps its own identity: it replays to its own execution
     // and never adopts the revised round's turn.
     expect((await f.service.prepareStep(roundARequest)).executionId).toBe(openingA.executionId);
     await executor.execute(openingA.executionId);
-    expect(calls).toBe(2);
+    expect(calls).toBe(2 * OPENING_CALLS);
     const after = await f.service.read(draft.draftId);
     const openings = after.turns.filter((turn: any) => turn.kind === "opening");
     expect(openings).toHaveLength(2);
@@ -3997,21 +4017,26 @@ async function finalized(n = 3, withTopics = false) {
 /** A fixture-backed model bound to the module under test. */
 async function planFixtureModel(moduleId: string) {
   const model = randomUUID();
-  const summaryModel = randomUUID();
   await sql.query(
     "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-browser','fixture','true',1000,32000)",
     [model],
   );
+  await organizerFixtureModel();
+  await sql.query("update modules set model_id=$1 where id=$2", [model, moduleId]);
+  return model;
+}
+/** Owns the global extraction organizer setting instead of inheriting another case's. Returns its model name. */
+async function organizerFixtureModel() {
+  const summaryModel = randomUUID(), name = "opc-organizer-" + summaryModel;
   await sql.query(
     "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'OPC organizer',$2,'fixture','true',1000,32000)",
-    [summaryModel, "opc-organizer-" + summaryModel],
+    [summaryModel, name],
   );
   await sql.query(
     "insert into system_settings(key,value) values('v3_summary_model_id',to_jsonb($1::text)),('v3_summary_max_tokens','1000'::jsonb) on conflict(key) do update set value=excluded.value",
     [summaryModel],
   );
-  await sql.query("update modules set model_id=$1 where id=$2", [model, moduleId]);
-  return model;
+  return name;
 }
 /**
  * Exact plan-purpose money and identity for one actor: nothing here is derived
@@ -10413,10 +10438,12 @@ it("OPC: mentor freezes actor-bound business identity and existing material with
   const prepared = await f.service.prepareStep(request);
   const frozen = (await sql.query("select payload from runtime_executions where id=$1", [prepared.executionId])).rows[0].payload;
   expect(frozen.scopeMaterial.content.work.businessContext).toMatchObject({version: "opc-business-context.v1", name: "graylum ai", businessId: draft.businessId, source: null});
-  expect(frozen.instructions).toContain("A known name is not a product description");
-  expect(frozen.instructions).toContain("most consequential missing purpose, intended user or delivery form");
-  expect(frozen.instructions).toContain("relate it to their preceding options");
-  expect(frozen.instructions).toContain("do not include process numbers");
+  // v5 host rules (agentTurnPrompt.ts): a name alone is not substance, uncertainty
+  // gets analysis, and labels are never recited.
+  expect(frozen.instructions).toContain("A known name does not establish what a product does or whom it serves");
+  expect(frozen.instructions).toContain("the most consequential missing substance");
+  expect(frozen.instructions).toContain("When the user is not sure, first analyse the available information");
+  expect(frozen.instructions).toContain("Omit process numbers");
   expect(frozen.instructions).not.toContain("When you name the question, use exactly that label");
   expect(frozen.instructions).not.toContain("Reflect the current answer and invite clarification");
   expect(frozen.instructions).not.toContain("one short paragraph");
@@ -10579,16 +10606,19 @@ it("OPC: homepage guide starts one unnamed mentor task and replays its exact int
   expect((await f.service.read(draftId)).snapshot.workflow.steps).toHaveLength(6);
   await page.getByRole('textbox',{name:'给导师的回复',exact:true}).waitFor();
   await expect.poll(async()=>(await f.service.read(draftId)).snapshot.steps['step-0'].version,{timeout:30000}).toBeGreaterThanOrEqual(0);
-  await expect.poll(async()=>(await counts()).calls,{timeout:30000}).toBe(1);
+  // One v5 opening execution bills two calls: mentor + forced extraction organizer
+  // (AGENT_TURN_ENABLE_PLAN option A).
+  await expect.poll(async()=>(await counts()).calls,{timeout:30000}).toBe(2);
   expect(await page.getByRole('dialog').count()).toBe(0);
   expect(await page.getByRole('textbox',{name:'产品/服务/品牌名称'}).count()).toBe(0);
   expect(new URL(intentUrl).searchParams.get('intent')).toMatch(/^[0-9a-f-]{36}$/);
   const frozen=(await sql.query('select payload from runtime_executions where actor_id=$1',[f.actor])).rows[0].payload;
   expect(frozen.scopeMaterial.content.work.businessContext.name).toBeNull();
+  expect(frozen.attachedOrganizer.instructions).toContain(OPENING_EXTRACTION_RULE);
   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-home-direct.png',fullPage:true});
   await page.goto(intentUrl);await page.waitForURL('**/positioning/'+draftId);await page.getByRole('textbox',{name:'给导师的回复',exact:true}).waitFor();
   await page.reload();await page.getByRole('textbox',{name:'给导师的回复',exact:true}).waitFor();
-  expect(await counts()).toEqual({drafts:1,executions:1,calls:1});
+  expect(await counts()).toEqual({drafts:1,executions:1,calls:2});
   expect((await sql.query('select b.name from opc_businesses b join opc_draft_businesses d on d.business_id=b.id where d.draft_id=$1',[draftId])).rows[0].name).toBe('未命名业务');
  }finally{await browser.close();}
 },120000);
@@ -10731,3 +10761,144 @@ it.each(['runtime_admit(uuid,uuid,uuid,jsonb,jsonb)','runtime_view(uuid,uuid)'])
  }finally{await sql.query('rollback');}
  expect((await sql.query('select pg_get_functiondef($1::regprocedure) def',[signature])).rows[0].def).toBe(original);
 });
+
+for (const sample of [
+  { name: "D2 audience answer must not replace goal", field: "goal", title: "目标与变现方式", inputKind: "answer", input: "先服务附近独自阅读的自由职业者，给他们安静的空间", value: null, existing: "增加工作日下午到店客流，暂不扩店" },
+  { name: "D2 platform choice must not replace goal", field: "goal", title: "目标与变现方式", inputKind: "answer", input: "小红书", value: null, existing: "增加工作日下午到店客流，暂不扩店" },
+  { name: "existing goal plus substantive addition", field: "goal", title: "目标与变现方式", inputKind: "answer", input: "也希望提高甜品套餐销量", value: "增加工作日下午到店客流，暂不扩店；提高甜品套餐销量", existing: "增加工作日下午到店客流，暂不扩店" },
+  { name: "unchanged goal keeps existing value", field: "goal", title: "目标与变现方式", inputKind: "answer", input: "还是增加工作日下午到店客流，暂不扩店", value: null, existing: "增加工作日下午到店客流，暂不扩店" },
+]) it(`OPC: organizer complete-value context preserves current goal (${sample.name})`, async () => {
+  const { runtimeExecutor } = await import("../runtime/execute");
+  const { createServer } = await import("node:http");
+  const { readWorkflowMentorExecution, applyMentorTurnRules } =
+    await import("../../../../../apps/web/src/app/positioning/[draftId]/mentor-response");
+  const f = await fixture(2, false, 0, flow => {
+    flow.steps[0].information = [
+      { id: sample.field, title: sample.title, required: true, profileKey: sample.field, elicitation: "user_fact" },
+      { id: "future", title: "尚未到达的问题", required: true, profileKey: "future" },
+    ];
+  });
+  const primaryModelId = await planFixtureModel(f.moduleId);
+  const draft = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: "mentor" });
+  const existing = "existing" in sample ? sample.existing : undefined;
+  if (existing) await f.service.information({draftId: draft.draftId, stepId: "step-0", requestId: randomUUID(),
+    expectedVersion: 0, values: {
+      [sample.field]: {value: existing, status: "provisional", nature: "decision"},
+      future: {value: "", status: "unknown", nature: "unknown"},
+    }});
+  const initial = await f.service.read(draft.draftId);
+  const userInput = sample.input;
+  const {agentTurnBody} = await import("../../shared/agentTurn");
+  const primaryText = "【预设导师回复】请先核对当前目标。";
+  const primaryBody = agentTurnBody(primaryText, null);
+  // Deliberately prewritten, not computed from userInput: this verifies the
+  // transport/application contract, NOT a model's semantic extraction quality.
+  const extractedValue = sample.value;
+  const extractionBody = JSON.stringify({
+    inputKind: sample.inputKind, targetStepId: "step-0",
+    informationPatch: extractedValue === null ? {} : {
+      [sample.field]: { value: extractedValue, status: "provisional", nature: "decision", basis: "user_statement" },
+    },
+  });
+  const request = {
+    draftId: draft.draftId, stepId: "step-0", questionId: sample.field, purpose: "mentor" as const,
+    requestId: randomUUID(), input: userInput, organizeAfter: true,
+  };
+  const prepared = await f.service.prepareStep(request);
+  const frozen = (await sql.query("select payload from runtime_executions where id=$1", [prepared.executionId])).rows[0].payload;
+  expect(frozen.modelId).toBe(primaryModelId);
+  expect(frozen.attachedOrganizer.modelId).not.toBe(primaryModelId);
+  const requests: Array<{ model: string; messages: Array<{ role: string; content: string }> }> = [];
+  const server = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const wire = JSON.parse(JSON.parse(raw).input);
+    requests.push(wire);
+    const id = "extraction-contract-" + request.requestId + "-" + requests.length;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({
+      id, model: wire.model, final: true, cost: "0.003", currency: "USD", coverage: "request_total",
+      usage: { sdkResponse: {
+        id, object: "chat.completion", created: 1, model: wire.model,
+        choices: [{ index: 0, message: { role: "assistant", content: requests.length === 1 ? primaryText : extractionBody }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      } },
+    }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("local server");
+    const executor = runtimeExecutor({ database: admin, actor: async () => f.actor, endpoint: "http://127.0.0.1:" + address.port });
+    expect(await executor.execute(prepared.executionId)).toEqual({ state: "completed", body: primaryBody, summary: extractionBody });
+    expect(requests.map(item => item.model)).toEqual([frozen.model, frozen.attachedOrganizer.model]);
+    // Inspect the real SDK wire after admission, freezing and execution, not
+    // merely the service's string constant or a fake runtime invocation.
+    const system = requests[1].messages.filter(item => item.role === "system");
+    expect(system).toEqual([{ role: "system", content: frozen.attachedOrganizer.instructions }]);
+    expect(system[0].content).toContain("Separate business content from surrounding meta-instructions even within one sentence");
+    expect(system[0].content).toContain("Exclude a clause only when it describes the provenance or operation of this current Graylum conversation or request");
+    expect(system[0].content).toContain("Retain the same words, identifiers and actions when they express business content relevant to the allowed field");
+    expect(system[0].content).toContain("Decide by meaning, never by deleting keywords");
+    expect(system[0].content).toContain("Never return confirmed or deferred");
+    const organizerMessage = requests[1].messages.filter(item => item.role === "user");
+    expect(organizerMessage).toHaveLength(1);
+    const [contextRaw, reply] = organizerMessage[0].content.split("\n\nPrimary assistant reply:\n");
+    const context = JSON.parse(contextRaw);
+    expect(context).toEqual({
+      userInput, originalStepId: "step-0",
+      currentQuestion: { id: sample.field, title: sample.title, fields: [{ id: sample.field, title: sample.title, required: true, elicit: "user_fact" }] },
+      currentStepMaterial: {id: "step-0", fields: [
+        {id: sample.field, title: sample.title, required: true, elicit: "user_fact",
+          status: existing ? "provisional" : "unknown", value: existing ?? "",
+          ...(existing ? {nature: "decision"} : {})},
+        {id: "future", title: "尚未到达的问题", required: true, elicit: "user_fact", status: "unknown", value: "",
+          ...(existing ? {nature: "unknown"} : {})},
+      ]},
+      allowedWorkflow: [{ id: "step-0", title: f.flow.steps[0].title, confirmed: false, fields: [{ id: sample.field, title: sample.title }] }],
+    });
+    expect(reply).toBe(primaryBody);
+    expect(system[0].content).toContain("updated COMPLETE value, preserving valid information");
+    expect(system[0].content).toContain("return an empty informationPatch: do not put an audience answer or a platform choice");
+    const view = await admin.rpc("runtime_view", { p_actor_id: f.actor, p_session_id: draft.sessionId });
+    expect(view.error).toBeNull();
+    const execution = view.data.executions.find((item: { executionId: string }) => item.executionId === prepared.executionId);
+    expect(execution).toMatchObject({ input: userInput, body: primaryBody, summary: extractionBody });
+    const before = await f.service.read(draft.draftId);
+    const parsed = readWorkflowMentorExecution(execution.body, execution.summary, "step-0", before.information);
+    expect(parsed.message).toBe(primaryText);
+    const accepted = applyMentorTurnRules(parsed, execution.input);
+    expect(accepted).toEqual(JSON.parse(extractionBody).informationPatch);
+    // Use the same public projection as the page, then persist through the
+    // actual information service. The UI event/autosave loop is not simulated.
+    if (extractedValue !== null) {
+      const { value, status, nature } = accepted[sample.field];
+      const untouched = { status: "unknown", nature: "unknown", value: "" };
+      await f.service.information({ draftId: draft.draftId, stepId: "step-0", requestId: randomUUID(), expectedVersion: before.snapshot.steps["step-0"].version, values: { [sample.field]: { value, status, nature }, future: untouched } });
+      const saved = await f.service.read(draft.draftId);
+      expect(saved.information["step-0"].values[sample.field]).toEqual({ value: extractedValue, status: "provisional", nature: "decision" });
+      expect(saved.information["step-0"].values.future).toEqual(untouched);
+      expect(saved.snapshot.steps["step-0"].valid).toBe(false);
+    } else {
+      expect(accepted).toEqual({});
+      const saved = await f.service.read(draft.draftId);
+      expect(saved.information).toEqual(before.information);
+      expect(saved.snapshot.steps["step-0"].version).toBe(before.snapshot.steps["step-0"].version);
+      expect((await sql.query("select count(*)::int n from artifact_requests where project_id=$1 and action='opc_information'", [draft.projectId])).rows[0].n).toBe(existing ? 1 : 0);
+      expect(saved.information).toEqual(initial.information);
+      expect(saved.snapshot.steps["step-0"].valid).toBe(false);
+    }
+    // Refresh/replay must preserve the original wording and frozen prompt, with
+    // no second model call or implicit confirmation after the form is saved.
+    expect(await f.service.prepareStep(request)).toMatchObject({ executionId: prepared.executionId });
+    expect(await executor.execute(prepared.executionId)).toEqual({ state: "completed", body: primaryBody, summary: extractionBody });
+    expect(requests).toHaveLength(2);
+    expect((await sql.query("select payload from runtime_executions where id=$1", [prepared.executionId])).rows[0].payload).toEqual(frozen);
+    const refreshed = await admin.rpc("runtime_view", { p_actor_id: f.actor, p_session_id: draft.sessionId });
+    expect(refreshed.error).toBeNull();
+    expect(refreshed.data.executions.find((item: { executionId: string }) => item.executionId === prepared.executionId))
+      .toMatchObject({ input: userInput, body: primaryBody, summary: extractionBody });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+}, 90000);
