@@ -7,6 +7,7 @@ import {workbenchModelSchema,providerInputReservation} from '../artifacts/modelP
 import {summaryPolicy,assertSeparateSummaryModel} from '../artifacts/summaryPolicy';
 import {getModelPricing,getBillingRuntimeSettings,calculateTokenCostWithPricing,estimatePreDeductCredits} from '../billing';
 import {preferenceReference} from './preferences';
+import {requireLegacyCallsEnabled} from '../runtime/newWorkGate';
 const uuid=z.string().uuid();
 export const sliceAdmissionInput=z.object({conversationId:uuid,requestId:uuid,projectId:uuid,roundId:uuid,stepId:z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/),pairId:z.string().regex(/^[a-z][a-z0-9_-]{0,99}$/),body:z.string().trim().min(1).max(2000),preferenceRefs:preferenceReference.array().max(40)}).strict();
 const admitted=z.object({requestId:uuid,projectId:uuid,roundId:uuid,revisionId:uuid});
@@ -18,6 +19,7 @@ export function sliceAdmission(user:SupabaseClient,admin:SupabaseClient){
   const args={p_actor_id:auth.data.user.id,p_conversation_id:conversationId,p_request_id:requestId};
   const prior=await admin.rpc('agent_slice_admission_replay',{...args,p_payload:payload}).abortSignal(AbortSignal.timeout(10000));
   if(prior.error)throw new Error('SLICE_ADMISSION_CONFLICT');if(prior.data)return admitted.parse(prior.data);
+  await requireLegacyCallsEnabled(admin);
   const binding=await admin.rpc('artifact_query',{p_actor_id:auth.data.user.id,p_action:'resolve',p_project_id:payload.projectId,p_round_id:payload.roundId}).abortSignal(AbortSignal.timeout(10000));
   if(binding.error)throw new Error('SLICE_DENIED');
   const moduleId=uuid.parse(binding.data?.moduleId);

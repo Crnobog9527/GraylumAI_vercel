@@ -285,6 +285,16 @@ describe("turnResultNotice", () => {
     expect(turnResultNotice({ state: "completed", body: "{}" })).toBeNull();
     expect(turnResultNotice({ state: "cancelled", unavailable: "capacity" })).toBeNull();
   });
+  it.each([
+    ["call_limited", "操作过于频繁，请稍后再试。本次被拦截的调用不扣积分。"],
+    ["paused", "AI服务暂时暂停新调用，请稍后再试。本次被拦截的调用不扣积分。"],
+    ["limit_unavailable", "暂时无法确认使用额度，请稍后再试。本次被拦截的调用不扣积分。"],
+  ] as const)("shows the fixed notice for a turn stopped by the new-work gate (%s)", (unavailable, notice) => {
+    const result = { state: "cancelled" as const, unavailable };
+    expect(turnResultNotice(result)).toBe(notice);
+    // A gate stop is terminal: the envelope is released and nothing re-sends it automatically.
+    expect(envelopeAfterTurn(JSON.stringify({ request }), request.requestId, executionId, result)).toEqual({ release: true });
+  });
 });
 
 import {sameRequest,releaseRejectedAnswer} from './mentor-turn';
