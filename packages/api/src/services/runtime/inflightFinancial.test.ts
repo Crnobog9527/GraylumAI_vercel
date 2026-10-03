@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { AuthSessionMissingError } from '@supabase/supabase-js';
 import { expect, it, vi } from 'vitest';
 import { inflightFinancialHost } from './inflightFinancial';
 import { runtimeActor } from './actor';
@@ -65,6 +66,8 @@ it.each([
   ['server', { status: 500 }, false],
   ['rate limit', { status: 429 }, false],
   ['unknown', {}, false],
+  ['unknown bad request', { status: 400 }, false],
+  ['revoked session', new AuthSessionMissingError(), true],
   ['invalid token', { status: 401 }, true],
   ['banned', { status: 403 }, true],
   ['deleted user', null, true],

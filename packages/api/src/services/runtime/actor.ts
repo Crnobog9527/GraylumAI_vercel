@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type {SupabaseClient} from '@supabase/supabase-js';
+import {isAuthSessionMissingError, type SupabaseClient} from '@supabase/supabase-js';
 import type {RuntimeBudget} from './budget';
 import {StagingAccessError} from './stagingErrors';
 // Only an explicit Auth rejection permits financial finalization to cancel work.
 // Unknown/transport/service errors deny this operation without revoking the execution.
 function authFailure(error: { status?: number }) {
- return new Error(error.status===401||error.status===403?'RUNTIME_DENIED':'RUNTIME_AUTH_UNAVAILABLE');
+ return new Error(isAuthSessionMissingError(error)||error.status===401||error.status===403?'RUNTIME_DENIED':'RUNTIME_AUTH_UNAVAILABLE');
 }
 /** Capture only the credential, never the authorization verdict. Every operation
  * still verifies the original user with Auth. Within one HTTP invocation the

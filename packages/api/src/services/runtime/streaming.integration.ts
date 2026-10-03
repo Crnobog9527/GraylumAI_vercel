@@ -842,7 +842,7 @@ function revocableRuntimeIdentity(actorId:string) {
  const budget=createRuntimeBudget();
  const jwt='local.'+Buffer.from(JSON.stringify({exp:Math.floor(Date.now()/1000)+3600})).toString('base64url')+'.only';
  const auth={getSession:vi.fn(async()=>({data:{session:{access_token:jwt}},error:null})),
-  getUser:vi.fn(async()=>({data:{user:revoked?null:{id:actorId}},error:revoked?{message:'Synthetic revoked token'}:null}))};
+  getUser:vi.fn(async()=>({data:{user:revoked?null:{id:actorId}},error:revoked?{message:'Synthetic revoked token',status:401}:null}))};
  return {budget,auth,actor:runtimeActor(auth as unknown as Parameters<typeof runtimeActor>[0],actorId,budget),
   revoke:()=>{revoked=true;}};
 }
