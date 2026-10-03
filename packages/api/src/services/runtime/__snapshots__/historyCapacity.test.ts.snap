@@ -1,0 +1,65 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`reports short/long input retention and fallback frequency on a declared synthetic distribution 1`] = `
+{
+  "fallbackSamples": 9,
+  "reserve": 8000,
+  "rows": [
+    {
+      "currentBytes": 7820,
+      "fallback": false,
+      "inputBytes": 64000,
+      "inputChars": 100,
+      "newBytes": 36209,
+      "newItems": 32,
+      "oldBytes": 36209,
+      "oldItems": 32,
+    },
+    {
+      "currentBytes": 20720,
+      "fallback": true,
+      "inputBytes": 64000,
+      "inputChars": 13000,
+      "newBytes": 22631,
+      "newItems": 20,
+      "oldBytes": 24265,
+      "oldItems": 21,
+    },
+    {
+      "currentBytes": 7820,
+      "fallback": false,
+      "inputBytes": 90000,
+      "inputChars": 100,
+      "newBytes": 54313,
+      "newItems": 48,
+      "oldBytes": 63365,
+      "oldItems": 56,
+    },
+    {
+      "currentBytes": 20720,
+      "fallback": true,
+      "inputBytes": 90000,
+      "inputChars": 13000,
+      "newBytes": 49787,
+      "newItems": 44,
+      "oldBytes": 49787,
+      "oldItems": 44,
+    },
+  ],
+  "sampleBytes": [
+    4820,
+    7820,
+    11820,
+    5720,
+    8720,
+    12720,
+    12720,
+    15720,
+    19720,
+    17720,
+    20720,
+    24720,
+  ],
+  "totalSamples": 12,
+}
+`;
