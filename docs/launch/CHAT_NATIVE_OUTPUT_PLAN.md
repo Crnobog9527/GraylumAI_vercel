@@ -1,521 +1,618 @@
 # CHAT-NATIVE-OUTPUT：对话原生体验方案（仅方案，high）
 
-- 状态：第一版，待独立审查。只写方案，不改代码、SQL、配置。
+- 状态：第二版，待复审。只写方案，不改代码、SQL、配置。修订对照见第 12 节。
 - 依据：Owner 2026-10-03 在总控窗口的决定（总控记录在 #547 评论 5965354780）：
   全站对话统一流式输出；统一一个输出上限（报告也用，原 D1 并入）；写到上限或快超时时自动续写、用户无感；不按 Skill 区分。
-- 代码基准：staging `34017395`。在途 PR 的事实按各 PR 当前描述读取：#553 第七版（head `135d4c19`，空提交）、
-  #547 第七版（head `8fb950af`，空提交）、#601 第五版（`4c0c52a7`）、#593 B1（`fd210532`）、#598（`001d8b44`）、
-  #594 联合候选（`3693d5a5`，含 #590）。行号均指 staging `34017395`，"#594 中"表示只在在途候选里存在。
-- 风险：**high**（Runtime 执行流程、BILL2/PAYG 计费接线、Provider 请求形状、冻结上下文）。
+  第二版另依据 Owner 同日的修订决定（总控记录在本 PR 评论 5968952542）：
+  - 两条 P1 按建议改：续写接近保存上限就停止；停止时先保存已写内容；
+  - 选题页和视频包暂不做边写边显示，等内容创作对话驱动方案一起重做。
+- 代码基准：staging `1563a44d`。从第一版的基准 `34017395` 到现在，staging 已合并：
+  - #594（RATE-LIMIT 联合候选，含 #590）；
+  - #610（#601 H1 历史缓存机制，默认不激活）；
+  - #593（B1，迁移 0159）；
+  - #611（注销在途收尾，迁移 0160）；
+  - #613；以及 #598、#601 两份方案。
+  在途 PR 按当前描述读取：#553 第七版（描述 SHA-256 `e431af20…`）、#547 第七版（`8fb950af`）、
+  PAYG PR-A #617（`54e0f757`，目前只是任务初始化，还没有实现文件）。PAYG 的能力都还没有实现，本方案把它们当作依赖，不当作现成保证。
+- 行号均指 staging `1563a44d`。迁移文件只能追加，所以 `0105`/`0106` 的行号不会变。
+- 风险：**high**（Runtime 执行流程、BILL2/PAYG 计费接线、Provider 请求形状、冻结上下文、`runtime_execution` SQL）。
 
 ## 0. 结论摘要
 
-1. **流式**：服务端已经只有一个执行器（`executeOriginalExecution`），流式和非流式只差两件事：前端调哪个入口，准入时冻结哪种请求格式。
-   收拢方法是让 runtime 页、选题页、plan 生成都改用现有 `runtime.executeStream`，并让新准入冻结流式格式。不新建传输或第二套执行器。
-2. **统一上限**：每次模型调用的输出上限 O = min(全站上限, 模型能力, 报价上限, 上下文剩余)。
-   全站上限沿用 Owner 已批准、现在代码里就有的 **8192**（`PURPOSE_OUTPUT_CAP`），不再分 interactive/report。
-   "一篇回答"的长度不再由单次上限决定，而由"最多续写几段"决定。这是本方案唯一需要 Owner 定的数（第 9 节）。
-3. **自动续写**：一次回答 = 同一个 execution 里的若干段调用。
-   - 触发：上一段因输出上限停止（`finish_reason=length` 且有正文）。
-   - 构造：每段的请求 = 原请求 + assistant（已写全文）+ 固定的宿主"继续"指令。不用 assistant 预填。
-   - 时长：同一次 HTTP 时间不够写一整段时，不开新段，交给下一次 HTTP 接着写。前端自动发起，用户无感。
-   - 复用：落点、继续入口、余额暂停都复用 PAYG PR-B 要建的 `waiting_resume` / `waiting_credits` 和断点机制，**不新增表、队列或状态机**。
-4. **计费**：每段就是一次 PAYG v2 调用，按 #553 第七版冻结、过启动门槛 L、按名义费用结算。余额不足时停在两段之间，充值后从原处接着写。
-   单次上限不变，所以单次 U、单次冻结、响应字节上限都不变。平台承担的风险也不会按段数放大（第 4.3 节）。
-5. **顺序**：
-   - C0 流式收拢、C1 统一上限：可以在 #594 合并后做。
-   - C2 自动续写：必须在 PAYG PR-B 合并后做，因为它依赖 v2 逐次冻结和继续入口。
-   - REPORT-GEN 的 R-B 排在 C2 之后。
-   - 本方案不改 #547，只列出需要同步的地方（第 7 节）。
+1. **流式（C0，范围已收窄）**
+   - 服务端只有一个执行器 `executeOriginalExecution`。一个回答是否边写边出，取决于准入时冻结的请求格式。
+   - 本方案只收拢**定位页里显示正文的非流式路径**：plan 生成，以及带附属整理器的主回复。
+   - runtime 页（自由/Skill 对话、视频包、工作引导）和选题页的回复里有协议 JSON，按 Owner 决定**暂时保持写完再显示**，等 CONTENT-CONVERSATION-DRIVEN 方案一起重做。
+2. **统一上限（C1）**
+   - 单次调用的输出上限 O = min(全站 8192, 模型能力, 报价上限)，并且要放得进上下文。
+   - 8192 沿用已批准值，不再区分 interactive 和 report。
+3. **自动续写（C2）**
+   - 一次回答是同一个 execution 里的若干段调用。触发条件是 `length` 且有正文。
+   - 续写请求 = 原请求 + 已写全文 + 固定的继续指令。不用 assistant 预填。
+   - 每段开始前检查三件事：剩余时间、完整请求容量、**累计结果的序列化字节**。
+     任何一项不够，就在调用边界落点（交给下一次 HTTP），或以"已达单次回答长度上限"收尾。保存永远不会超过 262144 字节。
+4. **停止（C2）**
+   - 用户点停止时，先把已写内容原子地保存为回答，再收尾，不走会丢弃正文的 `runtime_cancel`。
+   - 正在写的那一段照常按回执结算一次，不会重复扣费（第 4.6 节）。
+5. **计费**
+   - 每段是一次 PAYG v2 调用，按 #553 第七版冻结、过启动门槛 L、按名义费用结算。
+   - 余额不足就停在两段之间，充值后点继续接着写。
+6. **顺序**：C0 和 C1 现在可以开工（#594 已合并），作为一个 PR。C2 在 PAYG PR-B 合并后开工。REPORT-GEN 的 R-B 在 C2 之后。
 
-## 1. 现状（staging `34017395`，只读核对）
+## 1. 现状（staging `1563a44d`，只读核对）
 
 ### 1.1 入口：哪些已经流式，哪些还没有
 
-三个 tRPC 入口都进入同一个函数 `executeOriginalExecution`（`packages/api/src/services/runtime/executionStream.ts:31-69`），
-再进入 `runtimeExecutor().execute`（`runtime/execute.ts:71`）。
+三个 tRPC 入口都进入同一个函数：`executeOriginalExecution`（`packages/api/src/services/runtime/executionStream.ts:38`），
+再进入 `runtimeExecutor`（`runtime/execute.ts:38`）。
 
 | 入口 | 流式 | 前端调用方 |
 |---|---|---|
-| `opc.mentorTurnStream`（`routers/opc.ts:77-108`） | 是 | 定位页导师对话（`apps/web/src/app/positioning/[draftId]/page.tsx:193`） |
-| `runtime.executeStream`（`routers/runtime.ts:92-97`） | 入口是流式；有没有文字流取决于冻结格式 | 定位页恢复（:940、:970）、plan 生成（:1405）、"继续"（:1947） |
-| `runtime.execute`（`routers/runtime.ts:91`） | **否** | runtime 页：自由/Skill 对话 `send()`（`app/runtime/page.tsx:122,133`）、视频包 `runVideo()`（:181）、恢复（:200）、工作引导（:224-231）；选题页（`positioning/[draftId]/topics/page.tsx:152`，选题对话 :326-328、恢复 :400） |
+| `opc.mentorTurnStream`（`routers/opc.ts:80`） | 是，导师冻结 `agent-turn-v5-stream` | 定位页导师对话（`positioning/[draftId]/page.tsx:194`） |
+| `runtime.executeStream`（`routers/runtime.ts:96`） | 入口是流式；有没有文字流取决于冻结格式 | 定位页恢复、plan 生成、"继续"（`page.tsx:191` 包装） |
+| `runtime.execute`（`routers/runtime.ts:95`） | **否** | runtime 页（`app/runtime/page.tsx:75`）：`send()` :132、`runVideo()` :162、`recover()` :234、`guide()` :261；选题页（`topics/page.tsx:153`，:316、:389） |
 
-- **传输**：tRPC v11 async-generator mutation，走 `httpBatchStreamLink`（`apps/web/src/trpc/provider.tsx:99-104`，只对上面两个流式 path 生效）。
-  服务端路由是 `app/api/trpc/[trpc]/route.ts`，`maxDuration=300`。
-- **事件**：`admitted → (phase|text)* → card? → result`（`shared/agentTurn.ts:139-160`）。
-  每个 text 事件带"目前为止的全文"，节流到 100ms 一次（`executionStream.ts:77-111`）。
-  客户端断开不会中断服务端执行。
-- **是否真有文字流由准入冻结的格式决定**（`admission.ts:204`）：
-  - 只有导师轮冻结 `agent-turn-v5-stream`；
-  - 整理器冻结 `serial-tools-v6-reasoning`；
-  - 其余（runtime 页、选题、plan）冻结 `serial-tools-v2`，是非流式请求。
-  - 所以 plan 虽然走 `executeStream`，用户也看不到逐字输出。
-  - runtime 页和选题页只靠 `runtime.view` 每 5 秒轮询拿结果（`runtime/page.tsx:59`，`topics/page.tsx:146-149`）。
-- **Runtime 以外的模型调用**：
-  - `workbench.generate`（`services/artifacts/generation.ts:97-135`，非流式，45 秒，要求 `finish_reason` 为 `stop`）。`/workbench` 页面仍可访问。
-  - `agentSlice.executePhase`：只被 `/chat` 使用，而 `/chat` 已 307 跳到 `/positioning`（`next.config.ts:40`）。
-  - 管理员试跑 `modelReasoning.tryOnce`。
-  - 旧 `/api/ai/stream` 已停用（`LEGACY_CHAT_DISABLED=true`）。
-  - 这些都不走 Runtime/BILL2，不属于本方案的"对话"（见 2.1 的范围说明）。
+- **准入冻结的格式**（`admission.ts:227-229`）：
+  - 导师：`agent-turn-v5-stream`；
+  - 整理器，**以及带附属整理器的非导师主回复**：非流式 `serial-tools-v6-reasoning`；
+  - 其余：非流式 `serial-tools-v2`。
+  - 流式格式只有 `serial-tools-v3/v4-stream` 和 `agent-turn-v5-stream`（`providerRequest.ts:11-15`）；其中 v4 和 v5 必须冻结思考设置。
+- **前端显示**：
+  - runtime 页用 `displayReply`（`app/runtime/page.tsx:29-37`）在完成后解析选题 JSON 数组和视频包 JSON，再显示；
+  - 选题页也是完成后解析；
+  - 两页都靠 `runtime.view` 每 5 秒轮询（`runtime/page.tsx:66`，`topics/page.tsx:149`）。
+- **截断工具调用的拒绝**只在 `firstToolCallOnly` 时生效（`runner.ts:56-59`）。这是 v5 的保证，不能直接推到 v2、v4 的工具路径上。
+- **Runtime 以外的模型调用**不在本方案范围：
+  - `workbench.generate`：独立旧链路，由 LEGACY-CLOSE 决定去留；
+  - `agentSlice`：只被已经 307 跳走的 `/chat` 使用；
+  - 管理员试跑；
+  - 已停用的 `/api/ai/stream`。
 
 ### 1.2 输出上限
 
-- `PURPOSE_OUTPUT_CAP = 8192`（`bill2/responseCapacity.ts:2`）。响应字节上限由它推出：`OPENROUTER_RESPONSE_BYTE_LIMIT = 2×8192×8+8192 = 139264`（:5）。
-  #547 §4 记录帧上限 `openRouterStream.ts` 为 `2×CAP+64`。
+- `PURPOSE_OUTPUT_CAP = 8192`（`bill2/responseCapacity.ts:2`），响应字节上限 139264 由它推出。
 - `runtime/purposeBudgets.ts`：
-  - 后台配置键 `system_settings.runtime_purpose_budgets`，按 interactive / organize / report 分别存 `inputBytes`、`historyItems`。
-  - interactive 和 report 还各有 `maxOutputTokens ≤ 8192`；organize 的输出另用 `v3_summary_max_tokens`（128–4096，默认 2048）。
-  - `frozenPurposeBudget` 只冻结 `{purpose, inputBytes, historyItems}`，**不含输出**。
-  - `FROZEN_OUTPUT_CAP=128000` 只用于读旧数据。
-  - 后台表单：`components/admin/MentorBudgetSettings.tsx`、`mentorBudgetDraft.ts`。
-- **单次 max_tokens**：`outputCapacity`（`admission.ts:68-70`）= min(报价 `outputLimit`（真实）或配置值, `ai_models.max_tokens`, 整理器上限, 配置值或 20000)。
-  - 结果冻结为 `context.maxOutputTokens`，由 runner 作为 SDK `maxTokens` 发出（`runner.ts:171`）。
-  - adapter 强制 `max_tokens ≤ outputLimit`（`bill2/openRouterAdapter.ts:140-141`）。
-- **模型能力（#597）**：管理员显式刷新时，catalog 的 `maxCompletionTokens`/`contextLength` 写回 `ai_models.max_tokens`/`input_limit`
-  （`shared/modelCapacityView.ts:7-31`）。准入要求 `max_tokens ≥ 报价 outputLimit`（`admission.ts:57-64`）。
+  - interactive 和 report 各有 `maxOutputTokens ≤ 8192`；organize 用 `v3_summary_max_tokens`（128–4096，默认 2048）；
+  - `frozenPurposeBudget` 不含输出。
+- 单次 max_tokens 由 `outputCapacity`（`admission.ts:75-77`）计算：取报价 `outputLimit`（真实调用）或配置值、`ai_models.max_tokens`、整理器上限、配置值或 20000 中的最小值。
+  `realModel`（`admission.ts:64-71`）要求 `ai_models.max_tokens ≥ 报价 outputLimit`，否则拒绝准入。
 
 ### 1.3 截断
 
-- 服务端只把两种情况当截断，抛 `RUNTIME_OUTPUT_TRUNCATED`（`runner.ts:54-79`，流式 :115、非流式 :142-147）：
-  - `finish_reason=length` 且**正文为空**、没有工具调用；
-  - 新格式下 `length` 并带工具调用。
-- 抛出后 `execute.ts:365-375` 执行 `runtime_cancel`，返回 `unavailable:'output_truncated'`。
-- **缺口**：`finish_reason=length` 但**有正文**时被当作成功完成（`terminalAgentReply.ts:6,24-25` 也放行）。用户拿到的是一篇半截回答，没有任何提示。
-  这正是续写要接管的位置。
-- `OPC_CONTENT_OUTPUT_TRUNCATED` 是前端合成的字符串（`app/runtime/page.tsx:183`）。文案"已达到长度上限……不会自动重试"出现在 :68、:188。
-  导师页的对应文案在 `agent-turn-display.ts:68-70`、`mentor-turn.ts:188-194`。
-- "不自动重试"的出处：`shared/agentTurn.ts:125-129`、`docs/launch/AGENT_TURN_ENABLE_PLAN.md:197,420,499`；
-  `FrozenCall.automaticRetry:false`（`bill2/service.ts:35`）；SDK `maxRetries:0`。本方案取代的是"截断后不续写"。
-  **"不盲目重试结果不明的调用"不变**：续写是一次新的、已知前文的调用，不是重发。
-- 另一种截断：v5 正文超过 `AGENT_TURN_MESSAGE_LIMIT=20000` 字符时被截短（`runtime/agentTurnResult.ts:10-12`）。这是显示长度限制，与模型无关。
+- `RUNTIME_OUTPUT_TRUNCATED` 只在两种情况下抛出（`runner.ts:73-79`，流式 :115，非流式 :145）：
+  - 正文为空的 `length`；
+  - `firstToolCallOnly` 下带工具调用的 `length`。
+- 抛出后，`execute.ts:386-394` 调 `runtime_cancel`，返回 `unavailable:'output_truncated'`。
+- **缺口**：有正文的 `length` 会被当作成功完成，`terminalAgentReply.ts` 也放行。用户拿到半截回答，没有任何提示。
+- 前端文案"……不会自动重试"在 `app/runtime/page.tsx`（`OPC_CONTENT_OUTPUT_TRUNCATED`）和导师页的 `agent-turn-display.ts` 里。
+- v5 正文超过 `AGENT_TURN_MESSAGE_LIMIT = 20000` 字符时会被截短（`shared/agentTurn.ts:42`）。
 
 ### 1.4 时长
 
-- staging 是 Hobby：函数 300 秒。`budget.ts` 规定 `RUNTIME_WORK_MS=265_000`、`RUNTIME_PERSISTENCE_MS=285_000`、`MIN_MODEL_DISPATCH_MS=60_000`。
-- 单次供应商调用 `OPENROUTER_RESPONSE_TIMEOUT_MS=240_000`（`bill2/openRouterPolicy.ts:5`）。adapter 取 min(240 秒, 剩余时间)。
-- 没有流空闲超时。剩余不足 60 秒时不派发新调用（`budget.ts:22-26`）。
-- 正式运营已定用 Pro（Fluid 最长 800 秒）。#547 §4 已指出：升级套餐不会自动改掉代码里的 240/265/285 秒。
+- 路由 `maxDuration=300`（`app/api/trpc/[trpc]/route.ts:8`）。
+- `budget.ts:6-9` 定义了三个值：`RUNTIME_WORK_MS=265_000`、`RUNTIME_PERSISTENCE_MS=285_000`、`MIN_MODEL_DISPATCH_MS=60_000`。
+- 单次供应商调用 `OPENROUTER_RESPONSE_TIMEOUT_MS=240_000`（`bill2/openRouterPolicy.ts:5`），adapter 取 min(240 秒, 剩余时间)。
+- 正式运营用 Pro（函数时长最长可配到 800 秒）。升级套餐**不会**自动改掉代码里的这些值。
 
-### 1.5 一个 execution 里的多次调用
+### 1.5 一个 execution 里的多次调用和收尾 SQL
 
-- 已经支持：`limits.maxCalls ≤ 32`；每次调用用 `(runId, sequence, requestHash)` 先 claim 再 dispatch，回执按 sequence 落库。
-- 重放时 SDK 重新执行，但每一步只读已存回执（`execute.ts:126-184`）。
-- 现在的限制：
-  - `live` 只在 `prepared→running` 那一次 begin 成立（`0106_runtime_sessions.sql:407-410`）。之后再来的 HTTP 只能重放，不能派发新调用。
-  - `maxCalls` 和 v1 预扣在准入时就冻结了。
-  - 流式 `partial` 在每次 exchange 开头清零（`execute.ts:286`），所以实时文字只显示当前这次调用。
-- PAYG PR-B 会加上 `waiting_resume` / `waiting_credits`、断点（checkpoint/游标/epoch）和继续入口：
-  原 execution + expectedCursor + epoch 的 CAS，只给未派发的下一次调用（#553 §4–§5）。
+- **已支持多次调用**：`maxCalls ≤ 32`，每次调用先按 sequence claim 再 dispatch，回执按 sequence 落库，重放只读回执。
+- **流式文字**：`partial` 在每次 exchange 开头清零（`execute.ts:296`），实时文字只显示当前这次调用。
+- **`live`**：只在 `prepared→running` 的那一次 begin 时为真（`0106_runtime_sessions.sql:407-410`）。之后再来的 HTTP 只能重放。
+- **`runtime_cancel`**（`0106`，唯一定义）：
+  - 立即调用 `bill2_cancel`：把 prepared 状态的 call 改成 cancelled，并设置 `cancel_requested=true, closed=true`；
+  - 接着调用 `bill2_finalize`；
+  - 没有结果的 execution 被改成 `cancelled`。
+- **`runtime_execution` 的 `complete` 分支**（`0106:449-466`）：
+  - 遇到 `cancel_requested` 直接拒绝（`RUNTIME_EXECUTION_CANCELLED`）；
+  - 否则依次调用 `bill2_close('delivered', p_result)` 和 `bill2_finalize`，写入 `result`。
+  - 它检查"有 primary checkpoint 时最终 body 必须与它一致"（:452），**不要求** body 等于某一次供应商回复。
+- **结果上限**：
+  - `bill2_close` 拒绝序列化后超过 262144 字节的 `p_result`（`0105:309`，0156 重定义后仍是 `0156:165`）；
+  - `checkpoint_primary` 同样是 262144（`0106:440`）；
+  - Session item 有 262144 的 CHECK（`0106:40`）。
 
 ## 2. 全站统一流式（C0）
 
 ### 2.1 范围
 
-- "对话"指：经过 Runtime 执行器、把模型正文显示给用户的所有回答。包括导师、选题、runtime 页的自由/Skill 对话、视频包、工作引导、plan、以后的报告。
-- 新增 Skill 只要走 Runtime，就自动适用，不需要任何配置。
-- 宿主内部的结构化调用不显示给用户，**不属于对话输出**，保持现状：附属整理器、匹配、搜索规划、只产出工具调用的轮次。
-  这是按"输出给谁看"划分，不是按 Skill 划分。
-- `workbench.generate` 不走 Runtime/BILL2，是独立的旧生成链路。由 LEGACY-CLOSE 决定去留；如果保留，迁到 Runtime 后自动适用本方案。
-  本方案不为它另建流式。`/chat` 和 agentSlice 已经跳转停用，不处理。
+- "对话"指经过 Runtime 执行器、把模型正文直接显示给用户的回答。以后新增的 Skill 只要走 Runtime，就自动适用，不需要配置。
+- **本方案 C0 收拢**：定位页里还不能边写边出的正文路径，即 plan 生成和带附属整理器的主回复。导师已经是流式。
+- **暂不收拢**（Owner 2026-10-03 决定）：runtime 页的自由/Skill 对话、视频包、工作引导，以及选题页。
+  - 原因：这些回复里有协议 JSON（选题数组、视频包对象），现在靠完成后的 `displayReply` 解析或隐藏。
+  - 直接复用导师页的纯文本实时气泡，会在写的过程中把半截 JSON 露给用户。
+  - 这些页面的交互会被 CONTENT-CONVERSATION-DRIVEN 方案整体取代（自由对话 + 按意图加载 Skill），届时按本方案的统一机制接入流式和续写。
+  - 在那之前，这些入口保持写完再显示，冻结格式不变。
+- **宿主内部的结构化调用**（附属整理器、匹配、搜索规划、只产出工具调用的轮次）不显示给用户，不属于对话输出，保持现状。这是按"输出给谁看"划分，不是按 Skill 划分。
 
 ### 2.2 做法
 
-1. **前端**：runtime 页和选题页的 `runtime.execute` 改用 `runtime.executeStream`，复用定位页的 `readAgentTurn`/`LiveReply` 渲染和 #595 的恢复信封与轮询。
-   `runtime.execute` 保留给旧客户端和重放，新页面不再调用。
-2. **准入**：新准入的对话调用一律冻结流式格式。
-   - 导师已经是 `agent-turn-v5-stream`。
-   - runtime 页、选题、plan 冻结已有的 `serial-tools-v4-stream` 一类流式格式。具体选哪一个由实施 PR 按工具协议核对。
-     只有现有流式格式都无法表达这些入口的工具约束时，才新增一个带版本号的流式格式，并且只是 `providerRequestFormat` 的一个新值。
-   - 旧 execution 按冻结格式重放，字节不变。
-3. **结果读取不变**：结构化结果（视频包分镜、选题卡片等）照旧在完成后由服务端解析和保存。流式只影响"边写边显示"。
-4. **计费不变**：流式回执解析（`openRouterStream.ts`）已经在导师路径上线。流式和非流式的账单证据等价，这一点由 C0 的集成测试证明。
+1. **准入**：对于定位页的 plan 和带附属整理器的主回复，新准入冻结已有的流式格式（`serial-tools-v4-stream`）。
+   - 同时冻结与它匹配的思考设置（v4 属于 `REASONING_FORMATS`），附属整理器保持非流式。
+   - 现有流式格式只要有一种无法表达这些路径的工具约束，实施 PR 就停下报告，不自行新增格式。
+2. **前端**：这两条路径已经通过 `executeStream` 调用，补上与导师相同的 `LiveReply` 渲染即可。
+3. **重放**：旧 execution 按冻结格式重放，字节不变。
+4. **计费**：不变。流式回执解析（`openRouterStream.ts`）已在导师路径上线。C0 的集成测试要证明流式和非流式的账单证据等价。
 
 ## 3. 统一输出上限（C1）
 
 ### 3.1 取值原则
 
-每一次对话调用的输出上限：
-
 ```
-O = min( 全站上限 CHAT_OUTPUT_CAP,
-         ai_models.max_tokens（#597 同步的模型能力，管理员可下调）,
-         报价 outputLimit（真实调用）,
-         上下文剩余 contextTokens − T )
+O = min( 全站上限 CHAT_OUTPUT_CAP = PURPOSE_OUTPUT_CAP = 8192,
+         ai_models.max_tokens（#597 同步的模型能力）,
+         报价 outputLimit（真实调用） )
 ```
 
-- `CHAT_OUTPUT_CAP` = 现有 `PURPOSE_OUTPUT_CAP` = **8192**，不提高。理由：
-  1. 这是 Owner 在 PAYG 里已经批准的数（#553 Owner 决定 5）；
-  2. 有了续写，回答长度不再受单次上限限制；
-  3. 单次上限不变，所以单次 U、冻结额、`139264` 字节响应上限、帧上限、`bill2_calls`/回执容量都不用动，#547 §6 那整套按 O 重算的 R(O)/F(O) 也不再需要；
-  4. 在 Hobby 的 240 秒内，8192 一段更有把握写完（第 3.3 节）。
-- **思考 token**：OpenRouter 的 `max_tokens` 已经包含 reasoning（#553 §2）。思考多的模型，一段可见正文会少一些，由续写补上。
-- 模型自身能力低于 8192 时自动取小值，续写会补足。以后换模型或新增 Skill 都不用配置。
+- 同时要求 `T + O ≤ contextTokens`（T 的定义见 #553 §2）。放不下时按 4.2 的容量条件处理。
+- 8192 是 Owner 在 PAYG 里已经批准的数（#553 Owner 决定 5）。
+- 单次 O 不变，所以下面这些**不需要改**：
+  - 单次的输出计价项；
+  - 响应接收上限 139264 和帧上限；
+  - #547 §6 的 R(O)/F(O) 推导。这套推导方法保留，以后调整统一上限时仍然要用。
+- 单次 U、G、H **会**随每段请求变长而变化（后面的段要重发更长的已写全文），按 PAYG 规则每段重新计量。
+- `max_tokens` 包含思考 token（#553 §2）。思考多的模型，一段可见正文会少一些，由续写补足。
 
 ### 3.2 旧的按用途设计如何收敛
 
-- `runtime_purpose_budgets` 里 interactive 和 report 的 `maxOutputTokens` 不再参与新准入。
-  - 后台表单改成只读显示"全站单次输出上限 8192"。
-  - schema 升 version 2：去掉这两个输出字段，保留各用途的 `inputBytes`/`historyItems`。输入预算是"给模型看多少材料"，不是输出上限，不在 Owner 这次决定的范围内。
-  - version 1 只读兼容。
-- `frozenPurposeBudget` 本来就不含输出，不改。新准入在冻结上下文里照旧记录 `maxOutputTokens`（= 上面的 O），重放使用冻结值。
-- `admission.ts` 的 `outputCapacity`：
-  - 去掉"配置值"和"20000"这两项；
-  - fixture 默认值 1000 只在本机测试路径保留；
-  - 真实调用的报价 `outputLimit` 由报价流程保证不高于全站上限。
-- 整理器（`v3_summary_max_tokens`）属于宿主内部结构化输出，不在"对话输出"范围内，保持现状。
-  总控以后如果要把它也并成一个值，单独做一个小改动，不影响本方案。
-- #547 R-A 原计划的"按用途返回上限、report-full 24576 profile"整体取消（第 7 节）。
+- **用途预算**：`runtime_purpose_budgets` 里 interactive 和 report 的 `maxOutputTokens` 不再参与新准入。
+  - schema 升到 version 2：去掉这两个输出字段，保留各用途的 `inputBytes` 和 `historyItems`；
+  - version 1 只读兼容；
+  - 后台表单只读显示"全站单次输出上限 8192"。
+- **`outputCapacity`**：去掉"配置值"和"20000"这两项；fixture 默认值 1000 只在本机测试路径保留。
+- **整理器**（`v3_summary_max_tokens`）是宿主内部输出，保持现状。
+- **#547 R-A**：取消按用途拆输出上限。R-A 里的输入容量和冻结读取工作保留（第 8 节）。
 
 ### 3.3 和时长的关系
 
-- 一段 8192 token 在 240 秒内写完，要求平均速度不低于约 35 token/秒。
-- 首版主力模型（Claude Sonnet 5.5、Gemini 3.8 Flash、GPT-6 Luna）在 staging 实测中能否稳定做到，C2 必测会记录每段实际用时。这里不预设结论。
-- 如果某个模型达不到，技术处理是把这个模型的 `ai_models.max_tokens` 调低（这是模型能力字段，不是按 Skill 配置），续写自动补足。不需要 Owner 决定。
+- 8192 token 在 240 秒内写完，粗算需要约 34 token/秒。这个估算忽略了排队、首字前思考、网络和收尾，**不是**完成保证。
+- 当前方案的保证只在调用边界上：时间不够写一整段时，不开新段（4.2）。
+- 一段写到一半超过 240 秒，仍然会进入现有的超时和 `cost_pending` 路径，这一段的内容丢失，前面已写的段保留。
+- 这是第二版**仍然存在的产品限制**。独立审查 F1 建议"正式环境用 Pro 时提高统一单次上限，续写只作兜底"，这一项由总控另行安排，本版不改。
+- 第一版提出"把慢模型的 `ai_models.max_tokens` 调低"，这条已撤回：`realModel` 要求 `max_tokens ≥ 报价 outputLimit`，单独调低会让这个模型无法通过准入。
 
 ## 4. 自动续写（C2）
 
-### 4.1 概念
+### 4.1 概念和适用范围
 
-- 一次用户回答仍然是**一张 run、一个 execution**（PAYG：run = 逻辑操作，HTTP = 一次执行机会，call = 一次供应商请求）。
+- 一次用户回答仍然是**一张 run、一个 execution**。
 - 每一**段**是这个 execution 里的一次调用，有自己的 sequence、请求 hash、claim、回执和 PAYG v2 冻结与结算。
-- 全文 = 各段正文按 sequence 顺序拼接。各段正文的**唯一权威来源是已落库的回执**（`runtime_response` 按 sequence 存的 rawBody）。
-  不另存一份"拼好的全文"作为第二来源；最终 body 由 `complete` 时的拼接结果写入，和现在一样。
+- 各段正文的**唯一权威来源是已落库的回执**。全文是各段正文按 sequence 顺序的确定性投影（4.3 的拼接规则）。
+  发给模型、实时显示、重放和最终保存，都用同一个投影。
+- **适用范围**：新准入、走流式格式、显示正文的对话回答，即导师和 C0 收拢的路径。
+- **不适用**：2.1 中暂不收拢的结构化入口，新准入冻结 `maxSegments=1`。
+  - 对这些入口，有正文的 `length` 不再静默当成功：结果元数据记为"未完成"，不作为合格的结构化成果。
+  - 显示和保存沿用现有的"未完成"通知。
 
-### 4.2 触发条件
+### 4.2 触发和继续条件
 
-在**文字回答阶段**（最终给用户看的正文这一次调用）结束时，满足以下全部条件才续写：
+在文字回答阶段，每一段结束后按下面的顺序判断。
 
-1. `finish_reason=length`；
-2. 本段可见正文非空且有实际进展（去掉空白后 ≥ 1 个字符）；
-3. 本段没有被截断的工具调用；
-4. 已写段数 < 冻结的 `maxSegments`（第 9 节）；
-5. 下一段请求放得进上下文（`T + O_min ≤ contextTokens`）；
-6. 没有未知费用的调用（PAYG：出现未知 call 后不扩大外部调用）；
-7. 没有取消请求，账号仍然有效。
+**A. 是否需要续写**：
 
-不续写的情况：
+- `finish_reason=length`；
+- 本段正文按拼接投影去重后**非空**；
+- 本段没有被截断的工具调用。
 
-- **正文为空的 length**：多半是思考把额度用完了。继续写也很可能重复花钱，所以保持现有的 `RUNTIME_OUTPUT_TRUNCATED` 失败路径。
-- **截断的工具调用**：结构化参数不能拼接，保持现有失败路径。
-- 条件 4 或 5 不满足：**正常完成**，已写全文作为回答保存，末尾加一行宿主提示"已达到单次回答的最长长度"。
-  不报错、不丢内容。这种情况预计很少，触发时记日志，但**不建统计系统，也不把它当前置条件**。
-- 条件 6、7 不满足：分别走 PAYG 的 `cost_pending` 和取消/注销路径（第 4.6 节）。
+不满足时：
 
-"快超时"不需要另设触发条件。它在调用边界上处理：
+- `stop`：正常完成；
+- 正文为空的 `length`、截断的工具调用：沿用现有失败路径；
+- 去重后零进展：按 C 的"长度上限"收尾，防止重复花钱。
 
-- 每一段开始前，如果本次 HTTP 剩余的工作时间 < `SEGMENT_DISPATCH_MS`，就**不在本次开新段**，按 PAYG 的 `waiting_resume` 落点，交给下一次 HTTP。
-- `SEGMENT_DISPATCH_MS` = 单次供应商超时，即 240 秒；以后按实测每段最长用时加余量下调。
-- 这一条同时取代现在只看 60 秒的 `MIN_MODEL_DISPATCH_MS`，用于对话正文调用。原来剩 61 秒也会开一次可能写 240 秒的调用，结果必然超时。
-- Hobby（300 秒）下，结果是"每次 HTTP 最多写一段"；Pro 调大函数时长后，一次 HTTP 可以连写多段。代码不需要区分。
-- **首版不在一段写到一半时主动中止供应商流。** 中止后供应商仍可能计费，回执会变成"结果不明"，在 BILL2 里属于高风险的新证据形态。
-  如果实测表明某模型的一段经常接近 240 秒，先按 3.3 调低该模型的 `max_tokens`。
-  只有调低也不够时，才另立方案做"中途收尾"，届时需要新的独立审查。
+**B. 能否继续**：
 
-### 4.3 续写请求怎么构造
+- 已写段数 < 冻结的 `maxSegments`；
+- 没有未知费用的调用；
+- 没有停止或取消；
+- 账号有效；
+- 下一段没有被 calls 闸门或 L 拒绝。
 
-Claude 新模型不支持 assistant 预填（结尾是 assistant 的请求会被拒，或不被当作续写）。所以每段续写都是**新一轮**：
+**C. 容量是否放得下**（下一段按最坏情况算）：
+
+1. **结果容量**（4.8）：已写全文投影加上下一段的最坏字节数，再加非正文字段的预留，不超过 262144。
+2. **完整请求容量**：
+   - 下一段的完整最终请求（按实际 JSON 序列化计算 B，含已写全文、继续指令和工具定义）通过现有的完整请求检查；
+   - 检查的上限是冻结在续写合同里的 `continuationInputBytes`（4.3），并且不超过报价的 `inputLimit`；
+   - 同时满足 `T + O ≤ contextTokens`，并且落在 PAYG 已验证的 profile 内。
+3. **调用次数**：总调用次数不超过冻结的 `maxCalls`（4.3）。
+
+C 中任何一项不满足时：
+
+- 不派发；
+- 以已写全文完成；
+- 结果元数据记 `lengthLimit:true`；
+- 界面在正文**外面**显示"已达到单次回答的最长长度"，不把提示写进正文，以免破坏结构化解析。
+
+**D. 时间**：
+
+- 每一段开始前，如果本次 HTTP 剩余的工作时间小于 `SEGMENT_DISPATCH_MS`（首版等于单次供应商超时 240 秒），就不在本次开新段，而是按 PAYG 的 `waiting_resume` 落点，交给下一次 HTTP。
+- 用于对话正文调用时，它取代 `MIN_MODEL_DISPATCH_MS`（60 秒）。
+- Hobby（工作预算 265 秒）下：第一段及其前置开销超过约 25 秒时，第二段就要换一次 HTTP；开销更少时，同一次 HTTP 里也可能接着写。
+- 首版不在一段写到一半时主动中止供应商流，原因和限制见 3.3。
+
+### 4.3 续写请求和冻结合同
+
+Claude 新模型不支持 assistant 预填，所以续写段是**以 user 结束的新一轮**：
 
 ```
-[ system（与第 1 段逐字节相同，含 #591 缓存标记）,
-  历史（与第 1 段冻结的成员完全相同）,
-  当前 user 消息（与第 1 段相同，含 #601 的 hostTurnContext）,
-  assistant: 已写全文（第 1..k 段正文按顺序拼接，不含思考、不含工具调用）,
+[ 第 k 段被截断那次调用的完整输入前缀（system、历史、当前 user，
+  以及本 execution 里在它之前已完成的工具调用和工具结果，原样引用、按原 toolCallId 读取，不重新执行），
+  assistant: 已写全文投影（不含思考、不含工具调用），
   user: CONTINUE_V1 ]
 ```
 
-- `CONTINUE_V1` 是宿主固定指令，带版本号，放在共享常量里，进入冻结上下文和 `sourceHash`。大意是：
+- **冻结合同**：新准入在冻结上下文里加入下面的字段，随 `sourceHash` 冻结。旧 execution 没有这个字段，按"不续写"处理，字节不变。
+  ```
+  continuation: { version: 'continue-v1', maxSegments, instruction: 'CONTINUE_V1',
+                  joinVersion: 'join-v1', continuationInputBytes }
+  ```
+  - `continuationInputBytes` = 原完整请求上限 + 4.8 的正文字节上限。它由宿主在准入时计算并冻结，用于让续写段的完整请求检查有一个明确的、经过验证的上限，**不跳过**完整请求检查。
+  - 准入时，冻结的 `maxCalls` 和 runner 的 `maxTurns` 都加上 `maxSegments − 1`。v2 没有 run 级预扣，所以不会放大冻结额。
+- **`CONTINUE_V1`**：宿主固定指令，所有 Skill 共用。大意是：
   - 上一条回答因长度中断，请从中断处直接接着写；
   - 不重复已写内容，不加开场白、过渡语或总结；
   - 如果停在未闭合的代码块、表格或列表里，就在里面接着写。
-  - 它不是 Skill 指令，所有 Skill 共用。
-- 工具定义与第 1 段相同（请求形状和缓存前缀稳定）。续写段如果改为调用工具（例如导师在结尾出提问卡），按现有工具流程处理；工具调用本身被截断时不续写。
-- 请求由已落库的回执确定性地重建，所以重放时 hash 相同，只读回执，不会重发。
-- **容量**：
-  - 续写段的 B = 原请求字节 + 已写全文字节 + 指令字节。
-  - 检查对象是模型上下文（`T + O ≤ contextTokens`），不是用途的 `inputBytes`。`inputBytes` 限制的是用户材料，模型自己写出的正文不受它约束。
-  - #601 §2.4 第 8 条（逐调用过滤不再往后切）在续写段同样适用：放不下时不切历史，按 4.2 条件 5 正常完成。
-- 拼接：
-  - 段与段直接拼接。
-  - 唯一的宿主处理：如果新段开头逐字重复了上一段结尾 ≥ 16 个字符，只去掉重复的那部分。
+- **工具**：工具定义与原调用相同。续写段如果改为调用工具，只在冻结格式本身允许的工具协议内处理。
+  - 对需要保留思考签名的线路（OpenRouter 对工具推理块的要求），现有 `openRouterHistory.ts` 会剥除 reasoning。
+  - 因此续写段一旦需要带工具续接，而该线路要求保留思考签名，就不续写，按 C 收尾。
+  - 纯文本续写不受影响。
+- **拼接 `join-v1`**：
+  - 各段原文不改，回执保持原样；
+  - 新段开头与已写全文结尾做"最长后缀—前缀"精确匹配，匹配长度 ≥ 16 字符、且不跨代码块或表格边界时，去掉重复部分；
+  - 实时流在新段开头先缓冲，最多 64 字符，等去重判断完成再输出，不回退已显示的文字；
   - 除此之外不改写模型正文。
-- 结构化回复（视频包分镜、选题卡片等）照样在拼好的全文上走原有的解析校验。校验失败走原来的"格式未通过"路径。
-  不为某个 Skill 写特殊规则。
+- **重放**：续写请求由回执和冻结合同确定性地重建，hash 相同，只读回执，不重发。
+- **Session**：只在最终完成时写入一条 assistant 消息，内容为全文投影（受 4.8 约束）。继续指令和中间各段都不写入 Session。
+- **B1 capture**：只在**最终完成**、且结果没有 `lengthLimit`/`stopped` 时幂等执行一次，不按段执行。
 
 ### 4.4 一次回答的流程
 
 ```
-准入（冻结 maxSegments、CONTINUE_V1 版本、O）
+准入（冻结 continuation、O、maxCalls）
 → 段 1：claim → dispatch → 流式输出 → 回执落库 → 结算
-→ length 且满足 4.2？
-   ├─ 否 → complete（全文 = 各段拼接）
-   └─ 是 → 时间够一整段？
-            ├─ 是 → 余额 ≥ L？
-            │        ├─ 是 → 段 k+1（同一次 HTTP）
-            │        └─ 否 → 落点 waiting_credits
-            └─ 否 → 落点 waiting_resume → 前端自动发起继续 → 新一次 HTTP
+→ A 需要续写？
+   ├─ 否 → complete（全文 = 投影）
+   └─ 是 → B 能继续？
+            ├─ 否 → 按原因收尾（未知费用 → cost_pending；停止 → 4.6；余额 → waiting_credits）
+            └─ 是 → C 放得下？
+                     ├─ 否 → complete（lengthLimit）
+                     └─ 是 → D 时间够？
+                              ├─ 是 → 段 k+1（同一次 HTTP）
+                              └─ 否 → 落点 waiting_resume → 前端继续 → 新 HTTP
 ```
 
-- **落点**：结算第 k 段和写入"下一段可继续"的断点在同一次原子操作里完成（复用 PAYG §5 的规则）。
-  断点只放引用：下一段序号、已写段的 sequence 列表、epoch。正文从回执读，不复制进断点，所以不碰断点 65536 字节的合计上限。
-- **前端自动继续**：
-  - `executeStream` 的 result 是 `waiting_resume` 时，前端立刻用原 executionId 调继续入口，不显示按钮或提示。
-  - 新流的第一个 text 事件就是"已写全文"，然后接着出新字。用户看到的是同一个气泡继续往下写，中间可能有一两秒停顿，光标/打字动画保持。
-- **服务端实时文字**：`execute.ts` 的 `partial` 改为"前 k 段全文 + 当前段"。text 事件仍然发全文，前端渲染逻辑不用改。
+- **落点**：结算第 k 段和写入"下一段可继续"的断点在同一次原子操作里完成（PAYG §5）。断点只放引用：下一段序号、已写段的 sequence 列表、epoch。
+- **前端继续**：`executeStream` 返回 `waiting_resume` 时，前端用原 executionId 调继续入口。新流的第一个 text 事件就是已写全文。
+  - 这一步需要扩展 #595 的恢复判定。现有 `useAutoStepRecovery` 只恢复已到终态的 execution，`waiting_resume` 不在其中。
+  - 新的判定按服务器上的游标和 epoch 继续，保留同一个气泡和 busy 状态。
+  - 只有 `waiting_resume` 会自动继续，并且每个 epoch 最多自动发起一次。
+  - 下面这些**不进入**自动继续：继续请求被 calls 闸门拒绝、429、503、`waiting_credits`、`cost_pending`、撤权、资料冲突。它们保持原状态并显示对应提示，沿用 #594 已合并的拒绝边界。
+- **段间停顿**：等于一次新请求加上新一段的首字时间，具体时长没有实测，不作产品承诺。
+- **服务端实时文字**：`partial` 改为"前 k 段投影 + 当前段"，text 事件仍然发全文，前端渲染不变。
 
 ### 4.5 刷新、断线、多标签页
 
-- **断线**：服务端不受影响，当前段照常写完、落库、结算。
-  - 如果本次 HTTP 还有时间，并且是在同一次 HTTP 内连写，后续段也照常写。
-  - 如果下一段需要新的 HTTP，就停在 `waiting_resume`，等客户端回来继续。
-  - 不建定时器或后台 worker（与 PAYG "继续必须来自用户在原任务上的请求" 一致）。
-- **刷新**：复用 #595。
-  - 恢复信封在终态前不释放；`waiting_resume` 不是终态。
-  - 页面回来后，`useAutoStepRecovery` 对这个 execution 调 `executeStream`。
-  - 状态是 `waiting_resume` 时直接走继续入口；状态是 running（另一次 HTTP 还在写）时，按现有逻辑返回 pending 并继续轮询。
-  - 刷新时正在写的那一段，在它完成前看不到新增文字（沿用 #547 §7 "只读已持久化的完整调用结果"）。已完成的段立刻可见。
-  - runtime 页和选题页在 C0 接入同一套恢复。
-- **两个标签页**：继续入口是 epoch CAS，只有一个能领到下一段；另一个只读，显示同一篇。
-- **重放**：每段都有 sequence、hash 和回执。重复的继续请求只读回执，不重复派发、不重复扣费（PAYG 的幂等规则）。
+- **断线**：本次函数执行期间不受影响，当前段照常写完、落库、结算。下一段如果需要新的 HTTP，就停在 `waiting_resume`，等客户端回来。
+  不建后台任务。关闭页面以后，没有任何东西会继续写。
+- **刷新**：恢复信封在终态前不释放。页面回来后按 4.4 的扩展判定继续。
+  正在写的那一段完成前，看不到新增文字（沿用 #547 §7 "只读已持久化的完整调用结果"），已完成的段立即可见。
+- **两个标签页**：继续入口是 epoch CAS，只有一个能领到下一段。
+- **重放**：重复的继续请求只读回执，不重复派发、不重复扣费。
 
-### 4.6 取消、余额不足、注销、未知费用
+### 4.6 停止：先保存已写内容，再收尾
 
-- **用户停止**（对标原生"停止生成"）：
-  - 正在写的那一段不中断供应商请求（现状：runner 不转发 signal）。这一段写完后照常落库、结算，但不再开新段。
-  - 回答以"已写全文 + 已停止"保存，不丢内容。
-  - 停在 `waiting_*` 时取消：直接收尾，已写全文保留。
-  - 这一点改变了现在"取消 = 没有正文"的语义，只适用于新冻结了 `maxSegments` 的 execution。旧 execution 保持原样。
+**问题**：现有 `runtime_cancel` 会立刻调用 `bill2_cancel` 和 `bill2_finalize`，把没有结果的 execution 改成 `cancelled`；
+`complete` 分支遇到 `cancel_requested` 会拒绝。所以如果停止复用 `runtime_cancel`，正在写的那一段返回时无法保存。
+
+**做法**：复用现有机制，不新建 RPC 家族、表或状态机。
+
+1. **入口**：沿用现有 `runtime.cancel` 路由，增加可选参数 `stopAt`（用户停止时屏幕上已经显示的投影字符数）。
+   - 只对冻结了 `continue-v1` 的 execution 改走下面的停止路径。旧 execution 和不续写的入口仍走原 `runtime_cancel`，语义不变。
+2. **SQL**：在现有的 `runtime_execution` 函数里加一个 `stop` 动作，做法是在 PAYG PR-B 之后**追加**一张迁移，重定义该函数；不修改已合并的迁移。
+   它在同一个事务里按现有锁顺序（session → execution → run）执行：
+   - **(a) 记录停止**：复用 PAYG 的暂停字段和 epoch，写入 `paused_reason='user_stop'`、`stopAt` 并递增 epoch。之后：
+     - v2 claim 拒绝新调用；
+     - 继续入口的 CAS 失败；
+     - 只把 prepared 但还没派发的 call 改为 cancelled，并释放冻结；
+     - **不调用 `bill2_cancel`，不设置 `cancel_requested`**。
+   - **(b) 没有已派发、未结束的 call 时**（例如停在 `waiting_*`）：同一个事务内按 `complete` 的规则保存结果，然后依次调用 `bill2_close('delivered')` 和 `bill2_finalize`。
+     - 结果由宿主根据回执投影截到 `stopAt`，元数据 `stopped:true`；
+     - execution 进入 `completed`；如果有未知费用，进入 `cost_pending`。
+   - **(c) 有已派发、未结束的 call 时**：只做 (a)，返回 `stopping`。
+     - 那次调用所在的 HTTP 拿到回执后，走 `complete` 分支保存结果（含这一段，截到 `stopAt`）。
+     - 因为 `cancel_requested` 没被设置，`complete` 能成功。
+     - 扩展后的 `complete` 分支在 `paused_reason='user_stop'` 时，要求结果带 `stopped:true`，并且 body 不超过停止时登记的 `stopAt`。
+   - **(d) 那次 HTTP 已经结束**（函数被回收、断线）：下次恢复或重放时读到 `user_stop`，只读回执，然后按 (b) 收尾。
+     - 回执结果不明时，按 PAYG 查账；仍然不明就进入 `cost_pending`，结果是已持久化各段的投影；
+     - 不重发，不补扣。
+   - **(e) 一个字都还没写出来**（`stopAt=0`，且没有任何已落库的正文）：结果为空，等价于现有取消，最终状态 `cancelled`，没有正文。
+     在途的那次调用仍按回执结算一次。
+3. **不重复扣费的保证**：
+   - 每段调用只由自己的回执结算一次（BILL2 幂等，重复回执返回原 D/e）；
+   - run 只由一次 `bill2_close` 和 `bill2_finalize` 收尾，(b) 和 (c) 两条路径都受同一把锁、同一个 `paused_reason`/epoch 约束，谁后到谁只读；
+   - 停止从不在调用已派发时释放它的冻结，所以不会出现"已释放冻结、又要扣这一段"的冲突；
+   - 未派发的 call 只取消，不扣费。
+4. **正在写的那一段怎么结算**：按回执和名义费用**整段**结算（供应商按实际生成量收费，和原生停止生成相同）。保存的正文截到 `stopAt`，完整原文留在回执里。
+5. **界面**：
+   - 点停止后立刻停止显示新字，标记"已停止"，退出自动继续；
+   - 收尾完成后，用服务器上的结果替换显示；正文与停止时一致（截到 `stopAt`）。
+6. **竞态**：
+   - 停止和继续同时到达时，epoch CAS 只让一个成功。
+   - 继续先成功：已派发的段按 (c) 处理。
+   - 停止先成功：继续请求失败，只读结果。
+
+### 4.7 余额不足、注销、未知费用
+
 - **余额不足**（Owner 已定"暂停在两步之间、充值后继续"）：
-  - 下一段在锁内检查 A < L 时，落点 `waiting_credits`，前端在已写全文下方显示"余额不足，充值后接着写"和继续按钮。
-  - 这里需要用户点击：充值本身不授予生成权（PAYG）。
-  - 继续后从第 k+1 段接着写，已写全文不变。
-- **注销**：`waiting_*` 和进行中的执行按 #598 和 PAYG 的注销收尾处理。注销后继续入口拒绝，同一次 HTTP 内的下一段在 claim 时被拒。已结算的段保留账务。
-- **未知费用**：某段结果不明（超时、回执缺失）时：
-  - 不开新段（PAYG）。
-  - 如果这一段的正文没有落库，回答以前 k−1 段全文加"内容和费用核对中"的状态显示，执行进入 `cost_pending`。
-  - 不重发这一段，不估算补扣。
+  - 下一段 A < L 时，落点 `waiting_credits`，显示已写全文和继续按钮；
+  - 充值本身不触发生成（PAYG），用户点继续后从第 k+1 段接着写。
+- **注销**：`waiting_*` 和进行中的续写按已合并的 #611（0160）以及 PAYG 的注销收尾处理。继续入口和下一段的 claim 都会被拒，已结算的段保留账务。
+- **未知费用**：不开新段，进入 `cost_pending`，已持久化各段的投影可见，不重发。
 
-### 4.7 持久状态（AGENTS 第 5 节说明）
+### 4.8 结果容量：累计判断，永不超过 262144
 
-- 考虑过的现有机制：Runtime execution/回执（每段正文的权威来源）、PAYG 的 v2 call、`waiting_*` 状态和断点（落点与继续）、#595 的恢复信封与轮询（前端接续）。
-- 这些已经覆盖续写需要的全部能力。**不新增表、RPC 家族、队列、定时器或状态机。**
-- 只在现有 JSONB 里加：
-  - **冻结上下文**加一个小字段：`continuation:{version:'continue-v1', maxSegments, instruction:'CONTINUE_V1'}`，随 `sourceHash` 冻结。旧 execution 没有这个字段，按"不续写"处理，字节不变。
-  - **PAYG 断点**加：续写所需的引用（下一段序号、已写段 sequence 列表）。
-- 唯一可能碰 SQL 的地方：`checkpoint_primary` / `complete` 对 body 有一致性约束（`0106:436-466`）。如果它要求 body 等于单次调用的结果，就需要放宽为"等于各段回执拼接"。
-  这个改动随 PAYG 的同一张迁移或一张小追加迁移做，由 C2 实施时核对确定。
+- **约束对象**：
+  - `bill2_close` 的 `p_result`（0105、0156）；
+  - `checkpoint_primary`（0106:440）；
+  - Session item（0106:40），都按**序列化后的字节数**计算，上限 262144。
+  - 底层上限不改。
+- **预留**：
+  - `ENVELOPE_RESERVE` = 非正文字段的最坏字节数：
+    - kind；
+    - 卡片的最大序列化长度；
+    - 附属整理器 summary 的最坏值：`v3_summary_max_tokens` 上限 4096 × 8 字节；
+    - `stopped`/`lengthLimit`/`truncated` 等元数据；
+    - 再加 4096 字节余量。
+  - `SEGMENT_WORST` = O × 8 字节。沿用仓库在 `responseCapacity.ts` 里对单个 token 序列化字节的工程假设。
+- **第一道保护（派发前）**：只有当下式成立时才派发下一段：
+  ```
+  序列化(当前结果投影) + SEGMENT_WORST + ENVELOPE_RESERVE ≤ 262144
+  ```
+  否则按 4.2 C 以 `lengthLimit` 收尾。
+  - 按 O=8192 计：SEGMENT_WORST 为 65536，ENVELOPE_RESERVE 约 4 万字节。
+  - 所以在每段都按最坏字节计时，最多只能放下 3 段。
+  - 正常中文和英文正文的实际字节数远低于每 token 8 字节，判断按**实际**已写字节进行，所以通常能写满 `maxSegments`。
+  - "最多 N 段"是上限，不是保证。
+- **第二道保护（保存前）**：上面的 8 字节/token 是工程假设，个别字符组合（大量需要转义的控制字符）可能超出。
+  - 最终保存前按实际序列化字节再检查一次；
+  - 超出时在 Unicode 码点边界截短正文，使结果恰好不超过上限，并记 `lengthLimit:true`；
+  - 完整原文仍在回执里。
+  - 所以无论什么组合，保存都不会因为超过上限而失败。
+- **显示长度**：
+  - `AGENT_TURN_MESSAGE_LIMIT`（20000 字符）对冻结了 `continue-v1` 的 execution 改为由上面的字节规则约束；
+  - 旧 execution 不变。
+
+### 4.9 持久状态（AGENTS 第 5 节说明）
+
+- **考虑过的现有机制**：
+  - Runtime execution 和回执：每段正文的权威来源；
+  - `runtime_execution` 的 `complete` 和 checkpoint：最终保存；
+  - PAYG 的 v2 call、`waiting_*`、断点、epoch 和暂停字段：落点、继续和停止；
+  - #595 的恢复信封与轮询：前端接续。
+- **为什么够用**：这些已覆盖续写和停止需要的全部能力。**不新增表、RPC 家族、队列、定时器或状态机。**
+- **最小新增**：
+  - 冻结上下文里加 `continuation` 字段；
+  - PAYG 断点里加续写引用；
+  - PAYG 暂停字段增加取值 `user_stop`，并记录 `stopAt`；
+  - `runtime_execution` 增加 `stop` 动作，`complete` 分支增加停止校验。
+  - 后两项要在 PAYG PR-B 合并后用一张**追加**迁移完成，编号取当时 staging 最大号 + 1。
+- **权威来源不变**：正文以回执为准，账务以 BILL2 为准，状态以 `runtime_executions` 为准。不另存第二份"全文"。
 
 ## 5. 计费（以 #553 第七版为准）
 
-### 5.1 每段一次 PAYG v2 调用
+- **每段一次 v2 调用**：
+  - 按本段最终请求重新计量 B、T、U、G；
+  - 冻结 H = min(G, A)；
+  - 段前检查 L；
+  - 按名义费用 n 结算，在 run 内累计、只进位一次（W/N/Δ）；
+  - 没有"一次回答"级别的预扣。
+- **用户多付的部分**：后面的段要重发更长的已写全文，所以用户的名义费用会随段数上升。缓存不抵扣名义费用（Owner 决定 12）；
+  缺 token 时按 #553 的 `actual_fallback` 例外处理。
+  准确的积分算例要在 PAYG 定价函数实施后，按当时的价格快照写进 C2 的 PR。
+- **平台承担**：按 #553 原规则逐段计算（`e_cap`/`e_bound`），不做"每次回答最多一段"之类的推论。
+  - 余额封顶冻结（H<G）不等于发生了平台承担：只有 Δ>H 时才产生 E。
+  - 期间其他任务释放冻结、退款或赠送，也会恢复可用余额。
+- **L**：沿用"精确模型 + 现有用途"的 L，不新增续写用途。报告用途（#547）的 L 要按续写后的工作负载重新核对，这一项由 #547 同步处理。
+- **v1 路径**：PAYG 默认切到 v2 之前，新准入冻结 `maxSegments=1`（统一上限仍然生效）。
 
-每一段都是一次独立调用：
+## 6. 和提示缓存的关系
 
-- 按本段最终请求重新计量 B、T、U、G；
-- 余额封顶冻结 H = min(G, A)；
-- 段前检查启动门槛 L；
-- 按名义费用 n 结算，在 run 内累计进位（W/N/Δ）。
-- 没有任何"一次回答"级的预扣。
+- **现状**：
+  - #591 的 system 前缀缓存已上线；
+  - #610（H1）已合并，但**默认不激活**；
+  - 导师的历史断点要等 B2 激活后才有；
+  - 非导师路径、开场轮、超出预留的轮次、历史对比轮可能没有历史断点。
+- **续写段的缓存规则**：
+  - 续写段**沿用第 1 段的断点身份和位置**，不把断点后移到已写全文上；
+  - 第 1 段没有历史断点，续写段也不加。
+- **adapter**：增加**一种**严格的尾部形状：`[…原调用的消息…, assistant 纯文本, user = 冻结的 CONTINUE_V1]`。
+  - 只在宿主可信地传入 `continue-v1` 冻结合同时允许；
+  - 原有的配对工具历史照样允许；
+  - 不靠检查用户文本来推断授权。
+- **命中条件**：同前缀只是命中的条件之一。TTL（5 分钟）、最小长度和线路都会影响，充值、断线和长时间停顿都可能让缓存过期。
+  必测只要求"有资格命中时，回执能证实命中；冷缓存、过期、没有断点时仍然正确"。
+- **影响范围**：缓存只影响平台实际成本，不影响用户的名义费用。
 
-### 5.2 用户承担和平台承担
+## 7. 顺序和写入负责人
 
-- **用户为续写多付的钱**：主要是每段都要重新发送一遍输入（B 随已写全文增长），再加各段输出。
-  - 按名义费用收费，缓存不抵扣（Owner 决定 12）。
-  - 最坏情况下，一次回答的费用约为 `maxSegments` 次单次调用上界的总和，而且后面的段因为带着已写全文，输入更长。
-  - 准确的积分算例要在 PAYG 定价函数实施后，按当时的价格快照算出，写进 C2 的 PR。这里不给可能过时的数字。
-- **平台承担风险不会按段数放大**：
-  - 余额封顶的损失只发生在 H < G 的那一段。这一段结算后余额接近 0，必然低于 L，下一段不会开始，而是进入 `waiting_credits`。
-  - 所以一次回答在每次充值之间最多有一段被余额封顶。单次风险和今天"一次调用"相同。
-  - 估算超界（`e_bound`）按 PAYG 规则：该模型退出收费准入，单段损失上限仍是这一段的 U − H。
-- **L 怎么调**：
-  - L 按"精确模型 + 用途"配置，取典型名义费用 P50（PAYG Q2：首版不自动更新）。
-  - 续写段是写满上限的长段，名义费用高于典型值。但如上所述，余额封顶对每段只发生一次，所以**不需要为续写单设 L，也不需要新的用途键**。
-  - 如果实施时总控认为续写段需要更高的门槛，可以复用 PAYG 现有的按用途键，加一个技术用途值，不需要 Owner 决定。
-
-### 5.3 v1 计费路径
-
-- C2 只在 PAYG v2 默认路径下启用续写。
-- v1（run 级预扣 = maxCalls × 单次上界）在准入时就要为全部可能的段预扣，冻结会放大到原来的数倍，不适合。
-- 所以 PAYG 默认切到 v2 之前，新准入冻结 `maxSegments=1`（等于不续写，但 C1 的统一上限仍生效）。
-
-## 6. 和提示缓存的关系（#591 已合并，#601 方案）
-
-- 续写段和第 1 段在同一个 execution 内，相隔几秒到几分钟，远在 5 分钟 TTL 内。
-- **system 前缀**（#591 断点 1）：逐字节相同，命中缓存读取。Gemini、Luna 的隐式/自动缓存也会命中相同前缀。
-- **历史前缀**（#601 断点 2）：续写段的历史成员与第 1 段冻结的完全相同，断点**保持在第 1 段的位置**（当前 user 之前的最后一条纯文本历史），因此"system + 历史"也命中读取。
-  - 按 #601 §2.3 的通用规则，断点会后移到 assistant 已写全文上，触发一次 1.25 倍写入，而且下一轮当前 user 会被改成 Superseded 占位，这次写入无法跨轮复用。
-  - 本方案规定续写段**沿用第 1 段的断点位置，不后移**。
-- **adapter 白名单**：#601 §2.8 要求"标记和最后一条 user 之间只能是配对的工具调用/结果"，续写尾部 `[当前 user, assistant 已写全文, user CONTINUE_V1]` 不符合。
-  - C2 在 adapter 增加**一种**严格形状：只在冻结了 `continue-v1` 时允许。
-  - 尾部恰好是这三条：assistant 单个纯文本块、无工具调用；最后一条 user 等于冻结的指令。
-  - 标记总数和位置规则不变。
-  - H1 不需要为此改动。
-- **不缓存的部分**：当前 user 消息和已写全文按普通输入计价，每段都重新发送。
-  - 这只影响平台实际成本，不影响用户收费（名义费用）。
-  - 如果实测表明长回答的续写成本明显偏高，再评估把断点放到已写全文上，属于技术决定。
-- **报告**：#547 §2.3 以"每份报告通常只调用一次"为由不冻结 `promptCache`。续写后这个理由不再成立（每段都要重发约 91 KB 前缀）。
-  建议 #547 同步时改为冻结 #591 的 system 前缀缓存（第 7 节）。
-
-## 7. 和在途方案的顺序与写入协调
-
-### 7.1 顺序
+### 7.1 顺序（以 staging `1563a44d` 为起点）
 
 ```
-#594（含 #590）合并
-  ├─ C0 流式收拢 ─┐（可与 H1 并行；admission.ts 冲突由后合并方同步）
-  ├─ C1 统一上限 ─┘（可与 C0 合成一个 PR）
-  ├─ #601 H1（execute.ts 先写方）
-  ├─ #598 实施 → PAYG PR-A
-  └─ #593 B1
-PAYG PR-A 与 H1 都合并 → PAYG PR-B
-PAYG PR-B 合并 → C2 自动续写（含前端接续）
-C2 合并 → REPORT-GEN R-A（缩小后）/ R-B → PAYG 默认切 v2 → 打开续写（maxSegments 改为批准值）
+已合并：#594、H1 #610、B1 #593、#611
+C0+C1（一个 PR）── 现在可以开工；admission.ts 的写入负责人见 7.2
+PAYG PR-A #617 → PAYG PR-B
+PAYG PR-B 合并 → C2（续写、停止、追加迁移、前端接续）
+C2 合并 → REPORT-GEN R-A / R-B → PAYG 前端技术验收 → 默认切 v2 → 打开续写（maxSegments 改为批准值）
 ```
 
-- **C2 必须在 PAYG PR-B 之后**：它依赖 v2 逐次冻结、`waiting_*`、断点和继续入口。如果把续写塞进 PR-B，会让已经很大的 PR-B 更难审查。
-  PR-B 实施时只需要知道"断点要能带一个续写引用"，本方案第 4.7 节已写明。
-- **C0 不依赖 PAYG**。用户最先感受到的"边写边出"可以早上线。
-- **C1** 只是把输出上限收成一个值，现有值已经是 8192，行为基本不变，也不依赖 PAYG。
+### 7.2 文件重叠与单一写入负责人
 
-### 7.2 文件重叠与写入负责人
+| 文件 | 本方案 | 写入负责人与交接 |
+|---|---|---|
+| `runtime/admission.ts` | C0：流式格式；C1：`outputCapacity`；C2：冻结 `continuation` | C0+C1 PR 先写，PAYG PR-B 在 C0+C1 合并之后再改这个文件。PR-B 如果先开工，C0+C1 就等 PR-B 合并后再开工。不并行写 |
+| `runtime/execute.ts`、`runner.ts`、`executionStream.ts`、`shared/agentTurn.ts` | C2 | PAYG PR-B 先写，C2 在 PR-B 合并后基于当时的 staging 开工；R-B 在 C2 之后 |
+| `bill2/openRouterAdapter.ts`、`runtime/providerRequest.ts`、`promptCache.ts` | C2：尾部形状 | H1 已合并；C2 是唯一写入方，B2 激活如果同期进行，由总控指定先后 |
+| `runtime/purposeBudgets.ts`、`MentorBudgetSettings.tsx`、`mentorBudgetDraft.ts` | C1 | C1 先写；R-A 在 C1 之后 |
+| `positioning/[draftId]/page.tsx`、`mentor-turn.ts`、`step-recovery.ts` | C0：渲染；C2：恢复判定 | C0+C1 PR → C2，依次进行 |
+| `runtime_execution` 等 SQL | C2 追加迁移 | 只能在 PAYG 迁移之后追加；编号冲突时由后合并方改号，并重生成 built-fingerprint |
+| 共享测试（`runtime.integration.ts`、`streaming.integration.ts`、`terminalReply.integration.ts`）和 `code-size-baseline.json` | C0–C2 | 跟随所在 PR 的写入顺序，同一时间只有一个 PR 改它们 |
 
-| 文件 | 在途改动 | 本方案 | 处理 |
-|---|---|---|---|
-| `runtime/execute.ts` | #594、H1（先写）、PAYG PR-B（后写） | C2：多段循环、`partial` 拼接、落点 | C2 在 PR-B 之后，基于含 H1 和 PR-B 的 staging 开工，不并行写 |
-| `runtime/admission.ts` | #594、H1、PAYG PR-B | C0：流式格式；C1：`outputCapacity`；C2：冻结 `continuation` | C0/C1 和 H1 都是小改动；后合并方同步并重跑准入测试 |
-| `runtime/executionStream.ts` | #594、#593 B1（完成回调）、PR-B | C2：`waiting_resume` 结果 | B1 的 capture 只在**最终完成**时执行一次，不能每段一次；C2 必测 |
-| `runtime/runner.ts` | #547 R-B（不写 Session 窄分支） | C2：length 有正文时交回宿主，不当成完成 | C2 先写，R-B 后写 |
-| `bill2/openRouterAdapter.ts`、`runtime/providerRequest.ts`、`promptCache.ts` | H1 | C2：续写尾部形状 | C2 在 H1 之后 |
-| `runtime/purposeBudgets.ts`、`MentorBudgetSettings.tsx`、`mentorBudgetDraft.ts` | #547 R-A | C1 | C1 先做；R-A 不再按用途拆输出 |
-| `shared/agentTurn.ts` | #594、PR-B（等待积分状态） | C2：`waiting_resume` 自动继续 | C2 在 PR-B 之后 |
-| `app/runtime/page.tsx`、`topics/page.tsx` | #594 | C0：改用 `executeStream`；C2：去掉截断文案 | C0 在 #594 合并后开工 |
-| `bill2_*` / `runtime_execution` SQL | PAYG PR-A/B、#598、B1 0159 | 可能放宽 `complete` 的 body 约束 | 只能在 PAYG 迁移之后追加，编号按当时 staging 最大号 + 1 |
-
-- 共享测试文件（`runtime.integration.ts`、`streaming.integration.ts`、`terminalReply.integration.ts`、`code-size-baseline.json`）照例由后合并方同步。
 - 各 PR 开工时写明会碰哪些共享文件。
 
 ## 8. #547 需要同步的地方（定稿后由总控安排，本方案不改 #547）
 
-- **D1**：作废。报告用全站统一上限 8192，长度靠续写。D2 的 U/G 按 O=8192 重算，三份样本额度相应变小。
-- **§0.3**：去掉"D1 待决"。
-- **§2.2**："单次全文就是这个 run 里的一次调用"改为"一份报告是一个 execution，可能有多段续写调用"。
-- **§2.3**：缓存排除的理由不再成立，改为冻结 #591 system 前缀缓存（见第 6 节）。
+- **D1**：作废。报告用统一单次上限 8192，长度靠续写。
+- **D2**：按新形状重新测算并重新申请：份数、每份最多几次供应商调用、总预算、遇到未知就停。
+  原来"最多 3 次单次全文、合计 0.50 美元"的额度**不能**自动沿用为续写形状的付费授权。
+- **§0.3、§1 分工表、§3 前置和共享文件**：
+  - 去掉"D1 待决"；
+  - 补上前置条件：C2 已合并，PAYG 前端技术验收已完成；
+  - 共享文件的写入负责人按本方案 7.2。
+- **§2.2**："单次全文就是一次调用"改为"一份报告是一个 execution，可能有多段续写调用"。
+- **§2.3**：原来的缓存排除理由不再成立，按整体净成本重新评估是否冻结 #591 的 system 前缀缓存（第 6 节）。
 - **§4**：
-  - 删除 report-full 24576 profile 和"不能把截断当成功，只能改走分章"；
-  - 删除"不自动追加续写调用"；
-  - 210/270/300 秒目标改为引用本方案 4.2 的段间交接。
-- **§6**：整张 R(O)/F(O) profile 表不再需要，响应和帧上限保持 8192 对应值。
-  - 报告全文的 `bill2_close` 262144 字节存储上限要按 `maxSegments × 8192` 的最坏字节数核对（第 10 节必测）。
+  - 删除 report-full 24576 profile；
+  - 删除"截断只能改走分章"和"不自动追加续写调用"；
+  - 时长目标改为引用本方案 4.2 D 和 3.3 的限制。
+- **§5**：输入容量按续写段的完整请求增长重新核对（`continuationInputBytes`）。
+- **§6**：响应和帧上限保持 8192 的对应值，R(O)/F(O) 推导方法保留。报告结果容量按本方案 4.8 处理。
 - **§7 持久化契约**：
-  - "receipt 显示截断……不作为报告候选"改为"有正文的 length 触发续写；正文为空的 length 和截断的工具调用仍不作候选"；
-  - 候选 = 各段回执拼接。
-- **§8 取消/超时、§9 分章**：分章原本是 D1 不批准时的退路，有了续写后不再需要。§8 改为引用本方案 4.5–4.6。
-- **§10**：U/G 表和 D2 金额按 O=8192 重算。
+  - 有正文的 `length` 触发续写；
+  - 正文为空的 `length`、截断的工具调用仍然不能作为候选；
+  - 结果带 `lengthLimit` 或 `stopped` 的报告**不能**作为可确认的完整候选（13 部分完整性校验不变）；
+  - tools、`maxTurns`、不写 Session 的窄分支，与 4.3 对齐。
+- **§8 等待、取消、资料冲突**：引用本方案 4.5–4.7。
+- **§9 分章**：分章原本是 D1 不批准时的退路，现在不再需要。
+- **§10**：每段的费用和调用次数按新形状重算。
 - **§11**：
-  - R-A 去掉按用途输出上限的两条接线（由 C1 完成）；
-  - 必测"report-full 24576 通过 / 24577 拒绝"和 R(O)/F(O) 的 +1 边界改为"统一 8192 通过 / 8193 拒绝"；
-  - "截断不追加续写"改为续写必测；
-  - 顺序上 R-B 在 C2 之后。
-- **§12 风险第 2 条**按上述内容同步。
+  - R-A 保留输入容量和冻结读取，去掉按用途的输出接线；
+  - 必测"24576/24577"改为"统一 8192 通过、8193 拒绝"；
+  - 截断必测改为续写、停止、容量（4.8）必测；
+  - R-B/R-C 补缓存和多段必测；
+  - R-B 排在 C2 之后。
+- **§12 风险、Handoff 和阻塞条件**：按上述内容同步。
+- **报告长度**：#547 锁定的是 13 部分、最多 12000 字（不是 5000 字）。是否一段写得完，由实测决定，本方案不作推断。
 
 ## 9. 需要 Owner 决定的事项
 
-只有一项会影响成本和体验的产品数值。其余都是技术决定，由规划窗口和总控负责。
-
 **Q1：一次回答最多自动续写几次？**
 
-- 推荐 **3 次**（加上第一段共 4 段，输出总量最多约 32768 token。中文大约两到三万字，按模型和内容不同会有出入）。
-- 理由：
-  - 报告和长文案都在这个范围内（定位报告目标是 5000 字以内，一段通常就够）；
-  - 次数有上限，能防止模型陷入"一直写下去"时无限花钱；
-  - 达到上限时回答照样完整保存，只在末尾提示"已达到单次回答的最长长度"，用户可以接着发消息让它继续。
-- 次数越多，单次回答最坏情况的费用越高（约为单次调用上界乘以段数，后面的段输入更长）。
-- 单次调用上限保持已批准的 8192，不需要另外批准。
+- 推荐 **3 次**（加上第一段最多 4 段），作为**异常情况的兜底上限**，不是正常回答的预期形态。
+- 4 段是上限，不是保证：
+  - 按 4.8，全文接近 262144 字节保存上限时会更早收尾；
+  - 完整请求放不下、遇到未知费用或被停止时，也会更早收尾。
+  - 收尾时已写内容完整保存，正文外提示"已达到单次回答的最长长度"。用户可以接着发消息让它继续。
+- 4 段的输出总量最多 32768 token（含思考），能对应多少中文字，取决于模型和内容，不作承诺。
+- 次数越多，单次回答最坏情况的费用越高：后面的段要重发更长的输入，每段按名义费用单独计费。
+- 单次调用上限保持已批准的 8192。正式环境用 Pro 时是否提高单次上限（独立审查 F1），由总控另行安排，不在这一项里。
 
 可以直接复制的批准话：
 
-> 同意对话原生体验方案：单次调用上限保持 8192，每次回答最多自动续写 3 次。
+> 同意对话原生体验方案：单次调用上限保持 8192，每次回答最多自动续写 3 次，接近保存上限时提前收尾。
 
 ## 10. 风险、回退、必测
 
 ### 10.1 风险
 
-1. **续写质量**：模型可能重复、换语气或在结构中间接错。缓解措施：固定指令、去重规则、结构化结果仍然过原有校验。
-   必测里要有中文长文、Markdown 表格和代码块跨段的样本。
-2. **一段超过 240 秒**：会进入现有的超时 / `cost_pending` 路径，正在写的那一段内容丢失（已写段保留）。
-   缓解：按实测调低慢模型的 `max_tokens`。"中途收尾"另立方案。
-3. **段间停顿**：Hobby 下每段之间要多一次 HTTP，停顿约等于一次新请求加上首字时间。Pro 下多段可以在同一次 HTTP 里写完。
-4. **成本**：每段都重发输入。这一点由第 6 节的缓存和 Q1 的段数上限约束，用户按名义费用付费。
-5. **语义变化**：取消后保留已写内容，以及"有正文的 length 不再静默当作完成"。两者都只作用于新冻结了 `continue-v1` 的 execution。
+1. **快超时**：一段写到一半超过 240 秒时，这一段会丢失（3.3），这是本版尚未满足的产品限制。
+2. **续写质量**：可能出现重复、语气变化或结构接错。缓解：固定指令、`join-v1` 去重、结构化结果仍然过原有校验。
+3. **段间停顿**：没有实测数据，不作承诺。
+4. **成本**：后面的段要重发更长的输入。由 Q1 的段数上限和 4.8 的容量收尾共同约束。
+5. **语义变化**：停止后保留已写内容；有正文的 `length` 不再静默当作完成。两者只作用于新冻结的 execution。
+6. **线路差异**：带工具的续写如果需要保留思考签名，就不续写（4.3）。三类主力模型的续写质量都还没有实测证据。
 
 ### 10.2 回退
 
-- 续写参数随 execution 冻结。要回退，只需代码常量把新准入的 `maxSegments` 改为 1，进行中的执行仍按各自冻结的值完成。
-- 回退不删数据，不需要回滚 SQL。
-- C0 回退：前端改回 `runtime.execute`；新准入改回非流式格式；旧 execution 照冻结格式重放。
-- C1 回退：`outputCapacity` 恢复读取用途配置（version 1 数据仍可读）。
-- 如果 C2 带了放宽 `complete` 约束的迁移，回退 SQL 草稿放在 migrations 之外，远程执行另取 Owner 批准。
+- **C2**：
+  - 代码常量把新准入的 `maxSegments` 改为 1；进行中的执行按各自冻结的合同完成。
+  - 停止路径在 `maxSegments=1` 时仍然可用（行为是保存已写的这一段）。
+  - 追加迁移的回退 SQL 草稿放在 migrations 目录之外，远程执行要另取 Owner 批准。
+- **C0**：新准入改回非流式格式，旧 execution 按冻结格式重放。
+- **C1**：`outputCapacity` 恢复读取用途配置（version 1 的数据仍然可读）。
 
 ### 10.3 必测（C0–C2 实施 PR 按各自范围执行）
 
-- **流式**：
-  - runtime 页对话、视频包、工作引导、选题、plan 都能边写边出；
+- **流式（C0）**：
+  - plan 和带附属整理器的主回复能边写边出；
   - 旧 execution 按原格式重放，字节不变；
-  - 流式和非流式的账单证据等价。
-- **统一上限**：
+  - 流式和非流式的账单证据等价；
+  - runtime 页和选题页行为不变，写的过程中不显示半截 JSON。
+- **统一上限（C1）**：
   - 8192 通过、8193 拒绝；
   - 模型能力低于 8192 时取小值；
-  - 后台表单只读显示；
+  - 后台表单只读；
   - version 1 配置可读。
-- **续写，单次 HTTP 内**：
-  - length 有正文 → 第 2 段 → stop；拼接后的全文等于各段回执拼接；
-  - 去重规则生效；
-  - 流式 text 事件不断档、不回退。
-- **续写多次**：
-  - 写满 `maxSegments` → 正常完成并带上限提示；
-  - 正文为空的 length 不续写；
-  - 截断的工具调用不续写；
-  - 下一段放不下上下文时正常完成。
-- **时长上限**：
-  - 剩余时间 < `SEGMENT_DISPATCH_MS` 时落点 `waiting_resume`；
-  - 前端自动继续，用户侧无按钮；
-  - 模拟 300 秒 Hobby 下 4 段跨 4 次 HTTP 能完整写完；
-  - 记录每段实际用时（只记日志，不做统计系统）。
-- **取消**：
-  - 写到一半时停止，当前段写完后不开新段，已写全文保留并标记已停止；
-  - 在 `waiting_*` 时取消，直接收尾；
-  - 旧 execution 的取消语义不变。
-- **刷新与断线**：
-  - 刷新后已写段立即可见，当前段完成后补上；
-  - 断线后服务端不中断；
-  - 两个标签页只有一个领到下一段；
-  - 重复的继续请求不重复派发、不重复扣费。
-- **余额不足**：
-  - 段间 A < L 时进入 `waiting_credits`，显示已写全文和继续按钮；
-  - 充值后点继续，从下一段接着写；
-  - 充值本身不触发生成；
-  - 一次回答在两次充值之间最多一段被余额封顶。
-- **注销**：`waiting_*` 和进行中的续写都按 #598/PAYG 收尾，继续入口拒绝，已结算账务保留。
-- **未知费用**：
-  - 某段回执缺失时不开新段，进入 `cost_pending`，不重发；
-  - 前 k−1 段可见；
-  - 名义费用和实际费用的未知都不能当 0。
+- **续写**：
+  - 第 1 段 `length` → 第 2 段 → `stop`，最终结果等于各段回执按 `join-v1` 拼接的投影；
+  - 去重：正常去掉重复、去重后零进展时收尾、跨段的空格和换行、Markdown 表格和代码块跨段不被误删；
+  - 流式缓冲不回退已显示的文字；
+  - 写满 `maxSegments` 时以 `lengthLimit` 收尾；
+  - 正文为空的 `length`、截断的工具调用、最后一段被拒或返回坏的工具调用时，前面已持久化的正文仍然可读，并且不会被当作合格成果；
+  - 带工具调用的路径续写时，按原 toolCallId 读取结果，不重新执行工具。
+- **容量（4.8）**：
+  - 构造性证明（属性测试）：任意段数、任意 O、卡片、summary 和元数据的组合，派发前判断加上保存前截短之后，序列化字节**永不超过** 262144；
+  - 夹具覆盖 4 字节 emoji、引号、反斜杠、控制字符（每字符 6 字节转义）和全中文；
+  - 恰好等于上限通过，加 1 字节被截短；
+  - Session item 和 `checkpoint_primary` 用同一套测试；
+  - 完整请求容量：续写段超过 `continuationInputBytes` 时在 claim 前收尾，不跳过检查。
+- **时长**：
+  - 剩余时间小于 `SEGMENT_DISPATCH_MS` 时落点 `waiting_resume`；
+  - 模拟 300 秒 Hobby 时，4 段跨多次 HTTP 能写完；
+  - 一段超时时，这一段丢失、前面的段保留，执行进入 `cost_pending`，不重发；
+  - 记录每段用时（只写日志）。
+- **停止（4.6）**：
+  - (b) 停在 `waiting_*`：一个事务内保存截到 `stopAt` 的结果并收尾，状态为 `completed`；
+  - (c) 在途时停止：返回 `stopping`；在途段回执落库后，`complete` 成功保存带 `stopped:true` 的结果；`complete` 拒绝超过 `stopAt` 的 body；
+  - (d) 在途 HTTP 消失：恢复时读回执收尾；回执不明时进入 `cost_pending`；
+  - (e) 没写出字：结果为空，状态为 `cancelled`；
+  - 停止和继续同时到达：只有一个成功；
+  - 停止后 claim 被拒；
+  - 未派发的 call 被取消并释放冻结；
+  - 在途段只结算一次；
+  - run 只收尾一次；
+  - 旧 execution 的 `runtime_cancel` 行为不变。
+- **前端接续**：
+  - `waiting_resume` 时自动继续，每个 epoch 最多一次；
+  - calls 闸门拒绝、429、503、`waiting_credits`、`cost_pending`、撤权、资料冲突时，不自动循环（保留 #594 的拒绝边界）；
+  - 刷新后已写段立即可见；
+  - 两个标签页只有一个领到下一段。
+- **余额、注销、未知费用**：
+  - 段间 A < L 时进入 `waiting_credits`，充值后点继续接着写，充值本身不触发生成；
+  - 注销按 #611（0160）和 PAYG 收尾；
+  - 未知费用不开新段，名义费用和实际费用的未知都不能当 0。
 - **计费**：
-  - 每段一次 v2 call，有独立的 B/T/U/G/H 和 L 检查；
+  - 每段一次 v2 调用，各自独立计算 B/T/U/G/H，并各自检查 L；
   - run 内累计只进位一次；
   - `C + E = N` 守恒。
 - **缓存**：
-  - 续写段的 system 和历史缓存都命中读取；
+  - 有资格命中时，回执能证实命中；
+  - 冷缓存、过期、没有历史断点时仍然正确；
   - 断点不后移；
-  - adapter 只接受冻结了 `continue-v1` 的那一种尾部形状，其余形状照旧拒绝。
-- **B1**：capture 只在最终完成时执行一次。
-- **容量**：
-  - `maxSegments × 8192` 最坏字节数的全文能存进 `bill2_close`（262144）；
-  - `AGENT_TURN_MESSAGE_LIMIT` 改为由段数推出的值，并带边界测试。
+  - adapter 只接受带可信冻结合同的那一种尾部形状。
+- **B1**：capture 只在最终完成时执行一次，结果带 `lengthLimit` 或 `stopped` 时不执行，重放不会产生第二份。
 
 ## 11. 本方案实际做过的核对
 
-- `gh`/`git` 核对 staging head `34017395`，以及上述 open PR 的 head 和文件列表。
-- 只读阅读 staging 代码（第 1 节所列文件和行号），以及 #553、#547、#601、#593、#598 的描述和相关评论
-  （#547 评论 5965354780，#601 评论 5958482083）。
-- 未改代码，未访问数据库，未调用模型或付费接口，未改配置。
+- 第一版：
+  - 核对 staging `34017395` 和当时的 open PR；
+  - 只读阅读代码，以及 #553、#547、#601、#593、#598 的描述和评论。
+- 第二版：
+  - 同步到 staging `1563a44d`，核对第 1 节引用的全部行号；
+  - 阅读 `0105`、`0106`、`0156` 中的 `runtime_cancel`、`runtime_execution` 的 `complete`/`checkpoint_primary` 分支、`bill2_cancel` 和 `bill2_close` 的结果上限；
+  - 核对 `admission.ts` 的格式冻结和 `realModel`，`providerRequest.ts` 的格式集合，`runtime/page.tsx` 的 `displayReply`；
+  - 阅读本 PR 的三条机器人行内意见、独立审查 5965539310 和总控记录 5968952542；
+  - 核对 #617 的当前状态。
+- 未运行测试（纯文档）；未改代码，未访问数据库，未调用模型或付费接口，未改配置。
+
+## 12. 第二版修订对照
+
+| 意见 | 修订位置 |
+|---|---|
+| 机器人 P1（结果容量，原第 513 行） | 新增 4.8：派发前按累计序列化字节加最坏段预留判断；保存前按实际字节截短；必测改为构造性证明；第 9 节说明 4 段是上限、不是保证 |
+| 机器人 P1（停止，原第 287 行） | 重写 4.6：新增 `runtime_execution` 的 `stop` 动作和 `complete` 的停止校验；不走 `bill2_cancel`；写明 (a)–(e) 各情况、不重复扣费、在途段结算和必测 |
+| 机器人 P2（结构化输出，原第 125 行） | 2.1：runtime 页和选题页不纳入 C0，等 CONTENT-CONVERSATION-DRIVEN；4.1：这些入口 `maxSegments=1`，有正文的 `length` 记为未完成；第 8 节同步 |
+| 独立审查 F10（代码事实） | 1.1：带附属整理器的主回复是 v6 非流式，`firstToolCallOnly` 的限制；4.2 D：Hobby 下"每次 HTTP 一段"不是严格结论；4.9：撤回"放宽 0106 单段相等约束" |
+| 独立审查 F2（与容量重叠的部分） | 4.2 C：完整请求按实际序列化计算 B，冻结 `continuationInputBytes`，不跳过检查；`maxCalls` 和 `maxTurns` 随段数冻结 |
+| 第一版事实错误 | 3.3：撤回"调低 `ai_models.max_tokens`"；第 5 节：撤回"平台风险每次回答最多一段"的推论；第 8 节：报告上限是 12000 字 |
+| 其他独立审查意见（F1，以及 F3–F9 中本版没有覆盖的部分） | 本版只在相关段落顺带更正了事实，是否在下一版完整处理由总控决定。F1 已在 3.3 和第 9 节标注为未决 |
