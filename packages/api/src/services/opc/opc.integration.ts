@@ -6941,9 +6941,13 @@ it("OPC: old publish and adoption replays cannot roll back the current business 
   expect(Number((await sql.query("select count(*)::int n from opc_items i join opc_plans p on p.id=i.plan_id where p.draft_id=$1 and i.item_key=$2", [f.d.draftId, historicalItemId])).rows[0].n)).toBe(itemCount);
 }, 120000);
 
-it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the library and continues video work", async () => {
+it("OPC: B1 browser auto-saves discussion, adopts one topic across a lost reply and re-login, and edits it in the library", async () => {
+  // The topic workspace adopts one card at a time since its redesign; the
+  // video package half of the old journey is covered by "final script asks
+  // before derivatives…", "upgraded legacy partial result…" and "work item uses
+  // shared Runtime … source revocation denies recovery reads".
   const f = await publishedDraft();
-  const modelId = await planFixtureModel(f.moduleId);
+  await planFixtureModel(f.moduleId);
   const seed = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'existing-account', title: '原工作', brief: '原有账号项目', day: '2026-09-20' }] });
   await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: seed.planId, accounts: [{ platform: 'x', account: 'existing-account', expectedRevision: null }] });
@@ -6956,23 +6960,23 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     expect(await page.getByRole('heading', { name: '先完成正式定位', exact: true }).count()).toBe(0);
     await page.goto(process.env.V3_LOCAL_APP + path);
     await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
-    await page.getByRole('button',{name:'选题与版本',exact:true}).click();
-    await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).waitFor({ timeout: 60000 });
+    await page.getByRole('heading', { name: '1. 首周选题', exact: true }).waitFor({ timeout: 60000 });
     expect((await f.service.topicDraftRead(f.d.draftId)).version).toBe(1);
-    expect(await page.getByRole('link', { name: '打开内容资料库', exact: true }).count()).toBe(1);
 
+    // Discussion revises the candidate and auto-saves a new draft version.
     await page.getByLabel('消息', { exact: true }).fill('请修改第一条选题');
     await page.getByRole('button', { name: '发送', exact: true }).click();
     await expect.poll(async () => (await f.service.topicDraftRead(f.d.draftId)).version, { timeout: 60000 }).toBe(2);
-    await page.getByRole('button',{name:'选题与版本',exact:true}).click();
-    await page.getByLabel('选择 修改后的选题').waitFor();
-    await expect.poll(()=>page.getByLabel('选择 第二个账号选题').isEnabled(),{timeout:30000}).toBe(true);
-    await page.getByLabel('选择 第二个账号选题').uncheck();
+    const revised = page.getByRole('heading', { name: '1. 修改后的选题', exact: true }).last().locator('..');
+    await revised.waitFor({ timeout: 60000 });
+    const second = page.getByRole('heading', { name: '2. 第二个账号选题', exact: true }).last().locator('..');
+    await expect.poll(() => second.getByRole('button', { name: '采用这个选题', exact: true }).isEnabled(), { timeout: 30000 }).toBe(true);
 
+    // Adopting only the revised topic loses its reply; the frozen request survives a re-login.
     await page.route('**/api/trpc/opc.adoptTopics*', async route => {
       const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort(); lostAdoption += 1;
     });
-    await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).click();
+    await revised.getByRole('button', { name: '采用这个选题', exact: true }).click();
     await page.getByRole('button', { name: '恢复原请求', exact: true }).waitFor({ timeout: 60000 });
     await expect.poll(() => lostAdoption, { timeout: 30000 }).toBeGreaterThan(0);
     const bound = await f.service.topicRead(f.d.draftId);
@@ -6980,6 +6984,7 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     const frozen = JSON.parse((await page.evaluate(key => localStorage.getItem(key), frozenKey))!);
     expect(frozen.kind).toBe('adoptTopics');
     expect(frozen.request.body).toHaveLength(1);
+    expect(frozen.request.body[0].title).toBe('修改后的选题');
     expect(frozen.request.expectedVersion).toBe(1);
     await page.unroute('**/api/trpc/opc.adoptTopics*');
 
@@ -6994,77 +6999,30 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     const plans = (await f.service.read(f.d.draftId)).plans;
     expect(plans).toHaveLength(2);
     expect(plans[0].body).toHaveLength(1);
-    await page.getByRole('button',{name:'选题与版本',exact:true}).click();
-    expect(await page.getByRole('button', {name:'采用所选并保存到资料库',exact:true}).isVisible()).toBe(false);
-    await page.getByRole('button', {name:/展开选题/}).click();
-    await expect.poll(()=>page.getByLabel('选择 第二个账号选题').isEnabled(),{timeout:30000}).toBe(true);
-    await page.getByRole('button', {name:/收起选题/}).click();
+    // The adopted card now continues its work; the other card stays adoptable.
+    await page.getByRole('heading', { name: '1. 修改后的选题', exact: true }).last().locator('..')
+      .getByRole('link', { name: '继续这条内容工作', exact: true }).waitFor({ timeout: 30000 });
+    await expect.poll(() => page.getByRole('heading', { name: '2. 第二个账号选题', exact: true }).last().locator('..')
+      .getByRole('button', { name: '采用这个选题', exact: true }).isEnabled(), { timeout: 30000 }).toBe(true);
 
-    await page.getByRole('button',{name:'Close',exact:true}).click();
-    await page.getByRole('link', { name: '打开内容资料库', exact: true }).first().click();
-    await page.waitForURL(url => url.pathname === '/library');
-    const adoptedCard = page.getByRole('article').filter({ hasText: '修改后的选题' });
-    await adoptedCard.getByRole('button', { name: '直接编辑', exact: true }).click();
-    await page.getByLabel('选题标题').fill('资料库修订标题');
-    await page.getByLabel('完整选题简报').fill('内容：真实案例；对象：起步创作者；价值：明确行动；结构：问题、过程、结果；假设：案例提升收藏。');
-    await page.getByRole('button', { name: '保存修改', exact: true }).click();
-    await page.getByRole('heading', { name: '资料库修订标题', exact: true }).waitFor();
-    await page.getByRole('article').filter({ hasText: '资料库修订标题' }).getByRole('link', { name: '继续工作', exact: true }).click();
+    // The library edits the adopted topic's direction and returns to its work.
+    await page.goto(process.env.V3_LOCAL_APP + '/library');
+    const adoptedRow = page.getByRole('article').filter({ hasText: '修改后的选题' });
+    await adoptedRow.getByRole('button').first().click();
+    const detail = page.getByRole('dialog', { name: '选题详情' });
+    await detail.getByRole('button', { name: '编辑稿件', exact: true }).click();
+    await detail.getByRole('button', { name: /选题方向.*查看与修改/ }).click();
+    await page.getByLabel('方向名称', { exact: true }).fill('资料库修订标题');
+    await page.getByLabel('选题简报', { exact: true }).fill('内容：真实案例；对象：起步创作者；价值：明确行动；结构：问题、过程、结果；假设：案例提升收藏。');
+    await page.getByRole('button', { name: '保存选题方向', exact: true }).click();
+    await page.getByText('选题方向已保存', { exact: true }).waitFor({ timeout: 30000 });
+    const edited = (await f.service.library({ search: '资料库修订标题', from: null, to: null })).businesses
+      .flatMap((business: { accounts: Array<{ items: any[] }> }) => business.accounts.flatMap(account => account.items));
+    expect(edited.map((item: { title: string }) => item.title)).toEqual(['资料库修订标题']);
+    await page.getByRole('button', { name: '← 返回详情', exact: true }).click();
+    await detail.getByRole('link', { name: '继续讨论', exact: true }).click();
     await page.waitForURL(url => url.pathname === '/runtime');
-    await page.getByRole('heading', { name: '资料库修订标题', exact: true }).waitFor();
-
-    await page.getByText('【主动引导合成示例，仅验证交互】我们先细化这条选题：你最希望读者看完后理解哪一个重点？',{exact:true}).waitFor({timeout:60000});
-    await page.getByLabel('消息', { exact: true }).fill('请和我讨论这条视频的口播稿。');
-    await page.getByRole('button', { name: '发送', exact: true }).click();
-    const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
-    await finalize.waitFor({ timeout: 60000 });
-    const packageRunsBefore = Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, new URL(page.url()).searchParams.get('session')])).rows[0].n);
-    await finalize.click();
-    await page.getByRole('link',{name:'这版口播稿已定稿 · 查看',exact:true}).waitFor({timeout:60000});
-    await page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true }).waitFor();
-    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, new URL(page.url()).searchParams.get('session')])).rows[0].n)).toBe(packageRunsBefore);
-    let lostPackage = 0;
-    await page.route('**/api/trpc/opc.saveVideoResults*', async route => {
-      if (lostPackage++) return route.continue();
-      const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort();
-    });
-    const ordinaryPrepareCalls:string[]=[];
-    page.on('request',request=>{if(/\/api\/trpc\/runtime\.prepare(?:[?,]|$)/.test(request.url())&&!request.postData()?.includes('[OPC_VIDEO_PACKAGE_V1]'))ordinaryPrepareCalls.push(request.url());});
-    // The visible card wording must take the exact same frozen business action.
-    await page.getByLabel('消息', { exact: true }).fill('先做分镜，再生成剪辑建议');
-    await page.getByRole('button', { name: '发送', exact: true }).click();
-    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('状态待核实');
-    const videoKey = 'opc-video-operation:' + new URL(page.url()).searchParams.get('session');
-    const frozenVideo = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
-    const recoveryTab = await context.newPage();
-    await recoveryTab.goto(page.url());
-    await expect.poll(() => recoveryTab.evaluate(key => localStorage.getItem(key), videoKey), { timeout: 60000 }).toBeNull();
-    const completedVideo = await recoveryTab.evaluate(({key,requestId}) => localStorage.getItem(key + ':completed:' + requestId), { key: videoKey, requestId: frozenVideo.package.requestId });
-    expect(JSON.parse(completedVideo!)).toEqual(frozenVideo);
-    expect(ordinaryPrepareCalls).toEqual([]);
-    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'",[f.actor,new URL(page.url()).searchParams.get('session')])).rows[0].n)).toBe(packageRunsBefore+1);
-    await recoveryTab.getByRole('heading',{name:'成果与版本',exact:true}).waitFor();
-    await recoveryTab.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
-    await recoveryTab.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor();
-    await recoveryTab.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor();
-    await recoveryTab.close();
-    const library = await f.service.library({ search: '资料库修订标题', from: null, to: null });
-    const [savedItem] = library.businesses[0].accounts.flatMap((account: {items: any[]}) => account.items);
-    expect(savedItem).toBeDefined();
-    const script = savedItem.content.find((entry: {kind: string}) => entry.kind === 'script');
-    const completedPackage = (await sql.query("select id::text from runtime_executions where actor_id=$1 and session_id=$2 and state='completed' and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, savedItem.sessionId])).rows[0].id;
-    await sql.query("update runtime_executions set result=jsonb_build_object('body','{}') where id=$1", [completedPackage]);
-    await expect(f.service.videoPackage({ workItemId: savedItem.workItemId, requestId: randomUUID(), executionId: completedPackage, sourceScriptId: script.id, expectedStoryboardVersion: 1, expectedEditingVersion: 1 })).rejects.toThrow('OPC_CONTENT_RESPONSE_INVALID');
-    const materialRevision = Number((await sql.query("select payload#>>'{scopeMaterial,revision}' revision from runtime_executions where id=$1", [script.executionId])).rows[0].revision);
-    await sql.query("select runtime_material($1,$2,'revoke',NULL,$3)", [f.actor, savedItem.sessionId, materialRevision]);
-    const withdrawn = await f.service.library({ search: '资料库修订标题', from: null, to: null });
-    const withdrawnItem = withdrawn.businesses[0].accounts.flatMap((account: {items: any[]}) => account.items)[0];
-    expect(withdrawnItem.content.map((entry: {contentAvailable: boolean}) => entry.contentAvailable)).toEqual([false, false, false]);
-    const { runtimeAdmissionService } = await import('../runtime/admission');
-    const admission = runtimeAdmissionService(f.user, admin, { account: 'local', costPerCall: '0.02', creditsPerUsd: '1000', multiplier: '1', maxCalls: 1, maxOutputTokens: 1000, inputBytes: 32000, historyItems: 20, searchEnabled: false });
-    const runsBefore = Number((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1', [f.actor])).rows[0].n);
-    await expect(admission.prepare({ sessionId: savedItem.sessionId, requestId: randomUUID(), input: '继续使用已撤回口播稿', selection: { kind: 'ordinary', modelId }, network: 'deny', sources: [] })).rejects.toThrow('RUNTIME_ADMISSION_DENIED');
-    expect(Number((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1', [f.actor])).rows[0].n)).toBe(runsBefore);
+    expect(new URL(page.url()).searchParams.get('session')).toBe(edited[0].sessionId);
   } finally { await browser.close(); }
 }, 300000);
 
@@ -8462,7 +8420,7 @@ it("OPC: definite pre-admission failure revokes its claim and permits an explici
     await finalize.waitFor({ timeout: 60000 }); await finalize.click();
     // The finalized script is shown by its version summary and next actions now (a8dba69c).
     await page.getByRole('button', { name: '只生成分镜', exact: true }).waitFor({ timeout: 60000 });
-    expect((await sql.query("select version,status from opc_content_versions where work_item_id=$1 and kind='script'", [work.workItemId])).rows)
+    expect((await sql.query("select version::int version,status from opc_content_versions where work_item_id=$1 and kind='script'", [work.workItemId])).rows)
       .toEqual([{ version: 1, status: 'final' }]);
     let lateRequestBody = '';
     await page.route('**/api/trpc/runtime.prepare*', route => {
@@ -8508,7 +8466,7 @@ it("OPC: video claim material stays exclusive and a rejected claim can be retrie
     await finalize.waitFor({ timeout: 60000 }); await finalize.click();
     // The finalized script is shown by its version summary and next actions now (a8dba69c).
     await page.getByRole('button', { name: '只生成分镜', exact: true }).waitFor({ timeout: 60000 });
-    expect((await sql.query("select version,status from opc_content_versions where work_item_id=$1 and kind='script'", [work.workItemId])).rows)
+    expect((await sql.query("select version::int version,status from opc_content_versions where work_item_id=$1 and kind='script'", [work.workItemId])).rows)
       .toEqual([{ version: 1, status: 'final' }]);
     const item = (await f.service.library({ search: '', from: null, to: null })).businesses
       .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;content: Array<{id: string;kind: string}>}>}>}) => business.accounts.flatMap(account => account.items))
@@ -9244,7 +9202,9 @@ it.skipIf(process.env.V3_CAPACITY_CAPTURE !== 'true')('OPC: CAPACITY chat histor
  }finally{await browser.close();}
 },300000);
 
-it('OPC: rejected cross-business adoption recovers its original request and permits corrected account adoption', async()=>{
+it('OPC: rejected cross-business adoption recovers its original request and permits adopting a topic of this business', async()=>{
+ // Topic cards are adopted one at a time and no longer offer an in-place account
+ // edit; the correction is to adopt a topic whose account belongs to this business.
  const f=await publishedDraft();await planFixtureModel(f.moduleId);
  const seed=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'existing-account',title:'另一业务原工作',brief:'必须保留',day:'2026-09-20'}]});
  const [original]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:seed.planId,accounts:[{platform:'x',account:'existing-account',expectedRevision:null}]});
@@ -9254,33 +9214,29 @@ it('OPC: rejected cross-business adoption recovers its original request and perm
  try{
   await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+f.d.draftId+'/topics');
   await page.getByRole('button',{name:'开始选题工作对话',exact:true}).click();
-  await page.getByLabel('选择 第二个账号选题').uncheck();
+  const card=(title:string)=>page.getByRole('heading',{name:title,exact:true}).last().locator('..');
+  await card('1. 首周选题').waitFor({timeout:60000});
   // Simulate the old client's unknown outcome; do not hand-edit or delete pending state.
   await page.route('**/api/trpc/opc.adoptTopics*',async route=>{await route.fetch();await route.abort();});
-  await page.getByRole('button',{name:'采用所选并保存到资料库',exact:true}).click();
+  await card('1. 首周选题').getByRole('button',{name:'采用这个选题',exact:true}).click();
   await page.getByRole('button',{name:'恢复原请求',exact:true}).waitFor();
   await expect.poll(()=>page.getByRole('button',{name:'恢复原请求',exact:true}).isEnabled()).toBe(true);
   const workspace=await f.service.topicRead(f.d.draftId),key='opc-topic-operation:'+workspace.sessionId;
   const frozen=await page.evaluate(key=>localStorage.getItem(key),key);
   await page.unroute('**/api/trpc/opc.adoptTopics*');
   await page.getByRole('button',{name:'恢复原请求',exact:true}).click();
-  await page.getByText('这个账号已属于另一项业务，本次没有采用。请展开选题，修改为当前业务的账号后再采用；原请求已保留。',{exact:true}).waitFor();
+  await page.getByText(/^这个账号已属于另一项业务，本次没有采用。/).waitFor();
   expect(await page.evaluate(key=>localStorage.getItem(key),key)).toBeNull();
   expect(await page.evaluate(key=>localStorage.getItem(key),key+':rejected:'+JSON.parse(frozen!).request.requestId)).toBe(frozen);
-  await page.getByText('修改平台或账号',{exact:true}).first().click();
-  await page.getByLabel('账号 首周选题',{exact:true}).fill('photography-account');
   await page.reload();
-  await page.getByText('修改平台或账号',{exact:true}).first().click();
-  expect(await page.getByLabel('账号 首周选题',{exact:true}).inputValue()).toBe('photography-account');
-  await page.getByLabel('选择 第二个账号选题').uncheck();
-  await page.getByRole('button',{name:'采用所选并保存到资料库',exact:true}).click();
-  await page.getByText('已采用所选内容并保存到资料库。可从下方进入对应内容工作。',{exact:true}).waitFor();
+  await card('2. 第二个账号选题').getByRole('button',{name:'采用这个选题',exact:true}).click();
+  await page.getByText(/^已采用所选内容并保存到资料库。/).waitFor();
   expect((await sql.query('select business_id from opc_accounts where project_id=$1',[original.projectId])).rows[0].business_id).toBe(other);
   const plans=(await f.service.read(f.d.draftId)).plans;
-  expect(plans[0].body).toHaveLength(1);expect(plans[0].body[0].account).toBe('photography-account');
-  await page.getByRole('link',{name:'打开内容资料库',exact:true}).click();
+  expect(plans[0].body).toHaveLength(1);expect(plans[0].body[0].account).toBe('proposed-account');
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
   await page.getByRole('heading',{name:'资料库',exact:true}).waitFor();
-  await expect.poll(()=>page.locator('main').innerText()).toContain('photography-account');
+  await expect.poll(()=>page.locator('main').innerText()).toContain('proposed-account');
  }finally{await browser.close();}
 },180000);
 
