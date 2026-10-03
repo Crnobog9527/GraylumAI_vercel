@@ -36,13 +36,18 @@ const call = z.object({ provider: z.string().min(1).max(128), account: z.string(
   billingUnit: z.object({ modelId: uuid, multiplier: z.string().regex(MULTIPLIER_PATTERN), source: z.enum(['model', 'provider', 'global']) })
     .strict().optional() }).strict();
 export type FrozenCall = z.infer<typeof call>;
-export type RunView = { accountClosed?: boolean; id: string; state: 'prepared' | 'dispatched' | 'unknown' | 'cost_pending' | 'settled' | 'refunded';
+export type RunView = { executionId?: string|null; accountClosed?: boolean; id: string; state: 'prepared' | 'dispatched' | 'unknown' | 'cost_pending' | 'settled' | 'refunded';
   preDeductId: string; closed: boolean; conflict: boolean; reservedCredits: number; chargedCredits: number | null; outcome: string | null };
-export interface BillingRpc { rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }> }
+type RpcResult={data:unknown;error:unknown};
+export interface BillingRpc {
+  rpc(name:string,args:Record<string,unknown>):PromiseLike<RpcResult> & {
+    abortSignal?:(signal:AbortSignal)=>PromiseLike<RpcResult>;
+  };
+}
 export interface BillingTransport {
  /** Private no-HTTP validation before persistent dispatch; returned capability
   * encloses the exact validated request and credential for one send. */
- prepareDispatch?(body:unknown,identity:CallIdentity,onChunk?:(chunk:string)=>void):Promise<()=>Promise<TransportObservation>>;
+ prepareDispatch?(body:unknown,identity:CallIdentity,onChunk?:(chunk:string)=>void,onIdentity?:(id:string)=>void):Promise<()=>Promise<TransportObservation>>;
  dispatch(body:unknown, identity:CallIdentity):Promise<TransportObservation>;
  lookup(providerId:string, identity:CallIdentity):Promise<TransportObservation>;
 }
@@ -53,6 +58,8 @@ function providerEvidence(observation:TransportObservation,identity:CallIdentity
  }
  return transportEvidence(observation,identity,source);
 }
+const financialNames=new Set(['bill2_read','bill2_record','bill2_finalize','bill2_pending_calls','bill2_recovery_claim',
+  'bill2_revoke_unstarted_dispatch','bill2_close','bill2_cancel','runtime_receipt_saved']);
 export type DispatchClaim = { id: string; state: string; dispatchToken: string | null };
 /** Trusted server composition only: actor comes from verified authentication, policy from the server.
  * No public route exposes raw RPC payloads or accepts a browser price/receipt. No env/fallback loading. */
@@ -60,15 +67,35 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
   /** Existing downstream rebate, explicitly enabled only by the trusted host. */
   rebateClient?: Parameters<typeof applyInvitationRebateForSpend>[0]['supabase'];
 }) {
-  const capabilities = new Map<string, { token: string; frozen: FrozenCall; runId: string }>();
+  const capabilities = new Map<string, { token: string; frozen: FrozenCall; runId: string; actorId: string }>();
+  const financialActors = new Map<string,string>();
   async function rpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
-    const actor = uuid.parse(await deps.actor());
-    const result = await deps.admin.rpc(name, { ...args, p_actor_id: actor });
+    const runId = typeof args.p_run_id === 'string' ? args.p_run_id : '';
+    const retained = financialNames.has(name) ? financialActors.get(runId) : undefined;
+    const actor = retained ?? uuid.parse(await deps.actor());
+    return rpcAs<T>(name,args,actor);
+  }
+  async function rpcAs<T>(name:string,args:Record<string,unknown>,actor:string):Promise<T> {
+    const query=deps.admin.rpc(name,{...args,p_actor_id:actor});
+    // Native cancellation bounds the owned early write and ambiguous-result readback.
+    // Supabase supports abortSignal; test doubles can return already-bounded promises.
+    const remaining=Math.max(1,Math.floor(deps.budget?.remainingPersistence()??10_000));
+    const result=await (financialNames.has(name)&&query.abortSignal ? query.abortSignal(AbortSignal.timeout(Math.min(10_000,remaining))) : query);
     if (result.error) throw new Error('BILL2_DATABASE_UNAVAILABLE');
     return result.data as T;
   }
   const readRun = (id: string) => rpc<RunView>('bill2_read', { p_run_id: uuid.parse(id) });
-  const recordReceipt = (runId: string, callId: string, evidence: unknown) => rpc<RunView>('bill2_record', { p_run_id: uuid.parse(runId), p_call_id: uuid.parse(callId), p_evidence: evidence });
+  async function recordReceipt(runId:string,callId:string,evidence:unknown):Promise<RunView> {
+    const args={p_run_id:uuid.parse(runId),p_call_id:uuid.parse(callId),p_evidence:evidence};
+    try { return await rpc<RunView>('bill2_record',args); }
+    catch(error) {
+      if (!financialActors.has(runId)) throw error;
+      const prior=await readRun(runId);
+      if(!prior.executionId)throw error;
+      const saved=await rpc<boolean>('runtime_receipt_saved',{...args,p_execution_id:prior.executionId});
+      return saved ? readRun(runId) : rpc<RunView>('bill2_record',args);
+    }
+  }
   async function finalizeRun(runId: string): Promise<RunView> {
     let state: RunView;
     try { state = await rpc<RunView>('bill2_finalize', { p_run_id: uuid.parse(runId) }); }
@@ -80,7 +107,7 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
     if (state.state === 'settled' && state.chargedCredits && deps.rebateClient) {
       // Reuse the existing idempotent downstream; run identity is stable, releases/refunds never enter it.
       await applyInvitationRebateForSpend({ supabase: deps.rebateClient, supabaseAdmin: deps.rebateClient,
-        inviteeId: uuid.parse(await deps.actor()), consumedCredits: state.chargedCredits, preDeductId: state.preDeductId });
+        inviteeId: financialActors.get(runId) ?? uuid.parse(await deps.actor()), consumedCredits: state.chargedCredits, preDeductId: state.preDeductId });
     }
     return state;
   }
@@ -110,14 +137,16 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
     },
     async claimCall(runId: string, sequence: number, value: FrozenCall) {
       const parsed = call.parse(value);
-      const claimed = await rpc<DispatchClaim>('bill2_claim', { p_run_id: uuid.parse(runId), p_sequence: z.number().int().positive().parse(sequence), p_payload: parsed });
-      if (claimed.dispatchToken) capabilities.set(claimed.id, { token: claimed.dispatchToken, frozen: parsed, runId });
+      const actorId=uuid.parse(await deps.actor());
+      const claimed = await rpcAs<DispatchClaim>('bill2_claim', { p_run_id: uuid.parse(runId), p_sequence: z.number().int().positive().parse(sequence), p_payload: parsed },actorId);
+      if (claimed.dispatchToken) capabilities.set(claimed.id, { token: claimed.dispatchToken, frozen: parsed, runId, actorId });
       return { id: claimed.id, state: claimed.state };
     },
     async rotatePrepared(runId: string, callId: string, value: FrozenCall) {
       const parsed = call.parse(value);
-      const rotated = await rpc<{ dispatchToken?: string }>('bill2_dispatch', { p_run_id: uuid.parse(runId), p_call_id: uuid.parse(callId), p_token: null, p_rotate: true, p_payload: parsed });
-      if (rotated.dispatchToken) capabilities.set(callId, { token: rotated.dispatchToken, frozen: parsed, runId });
+      const actorId=uuid.parse(await deps.actor());
+      const rotated = await rpcAs<{ dispatchToken?: string }>('bill2_dispatch', { p_run_id: uuid.parse(runId), p_call_id: uuid.parse(callId), p_token: null, p_rotate: true, p_payload: parsed },actorId);
+      if (rotated.dispatchToken) capabilities.set(callId, { token: rotated.dispatchToken, frozen: parsed, runId, actorId });
       return Boolean(rotated.dispatchToken);
     },
     async dispatchOnce(callId: string, body: string, onChunk?:(chunk:string)=>void) {
@@ -130,9 +159,22 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       const input={input:body,maxOutputTokens:capability.frozen.outputLimit,automaticRetry:false,hiddenTools:false};
       // A known local preflight failure leaves the SQL call prepared, so the
       // existing Runtime fail-before-dispatch path can safely release it.
-      const send=deps.adapter.prepareDispatch?await deps.adapter.prepareDispatch(input,identity,onChunk):()=>deps.adapter.dispatch(input,identity);
-      const permission = await rpc<{ dispatch: boolean }>('bill2_dispatch', { p_run_id: capability.runId, p_call_id: callId, p_token: capability.token });
+      let early:Promise<unknown>|undefined;
+      const onIdentity=(providerId:string)=>{
+        if(early)return;
+        const evidence={...unknownEvidence({provider:identity.provider,account:identity.account,
+          model:identity.model,protocol:identity.protocol}),providerId,source:'response',
+          sourceHash:createHash('sha256').update(JSON.stringify({providerId,provider:identity.provider,
+            account:identity.account,model:identity.model})).digest('hex'),evidenceKind:'transport_observation'};
+        early=recordReceipt(capability.runId,callId,evidence).catch(()=>undefined);
+      };
+      const send=deps.adapter.prepareDispatch?await deps.adapter.prepareDispatch(input,identity,onChunk,onIdentity):()=>deps.adapter.dispatch(input,identity);
+      const actorId=uuid.parse(await deps.actor());
+      if(actorId!==capability.actorId)throw new Error('BILL2_ACTOR_BINDING_DENIED');
+      const permission = await rpcAs<{ dispatch: boolean }>('bill2_dispatch',
+        { p_run_id: capability.runId, p_call_id: callId, p_token: capability.token },actorId);
       if (!permission.dispatch) return { dispatched: false };
+      financialActors.set(capability.runId,actorId);
       let evidence;
       let observation: TransportObservation | undefined;
       try { observation = await send(); evidence = providerEvidence(observation, identity, 'response'); }
@@ -156,6 +198,7 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
        }
        evidence = { ...unknownEvidence(identity), evidenceKind: 'transport_observation' };
       }
+      await early; // Owned by this invocation; database transport shares its persistence deadline.
       try {
         const saved = await recordReceipt(capability.runId, callId, evidence);
         if (saved.accountClosed) return { dispatched: true, accountClosed: true as const };

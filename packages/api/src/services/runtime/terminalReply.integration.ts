@@ -179,7 +179,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA === 'true').each(cases)(
     expect(calls.map(call => call.payload.requestHash)).toEqual(frozenRequests.map(hash));
     expect(calls.map(call => call.provider_id)).toEqual(calls.map((_, index) =>
       'gen-terminal-' + f.execution.executionId + '-' + (index + 1)));
-    expect((await db.query('select count(*)::int n from bill2_receipts where call_id=any($1::uuid[])',
+    expect((await db.query("select count(*)::int n from bill2_receipts where call_id=any($1::uuid[]) and payload ? 'transport'",
       [calls.map(call => call.id)])).rows[0].n).toBe(expectedCalls);
     expect((await db.query('select state,closed,charged,actual_restore from bill2_runs where id=$1',
       [f.execution.runId])).rows[0]).toEqual({state: 'settled', closed: true,

@@ -165,3 +165,38 @@ it.each([
  await expect(openRouterAdapter({credential,transport}).dispatch({input:JSON.stringify({...JSON.parse(body),...patch})},identity)).rejects.toThrow('BILL2_PROVIDER_REQUEST_DENIED');
  expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
 });
+
+it.each(['header','frame','conflict','invalid-header'])(
+ 'emits one reliable early identity without waiting for the response tail: %s',async(mode)=>{
+ let finish!:()=>void;
+ const tail=new Promise<void>(resolve=>{finish=resolve;});
+ const encode=(id:string,content:string)=>new TextEncoder().encode('data: '+JSON.stringify({
+  id,model:identity.model,choices:[{index:0,delta:{content},finish_reason:null}],
+ })+'\n\n');
+ const stream=new ReadableStream<Uint8Array>({async start(controller){
+  controller.enqueue(encode('gen-first','first'));await tail;
+  if(mode==='conflict')controller.enqueue(encode('gen-second','second'));
+  controller.close();
+ }});
+ const headers=mode==='header'||mode==='conflict'?{'x-generation-id':'gen-first'}:
+  mode==='invalid-header'?{'x-generation-id':'invalid id'}:undefined;
+ const transport=vi.fn(async()=>new Response(stream,{headers}));
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport});
+ const early=vi.fn(),chunk=vi.fn();
+ const send=await adapter.prepareDispatch({input:JSON.stringify({...JSON.parse(body),stream:true,stream_options:{include_usage:true}})},
+  identity,chunk,early);
+ let complete=false;const result=send().then(value=>{complete=true;return value;});
+ for(let i=0;i<20;i++)await Promise.resolve();
+ expect(early).toHaveBeenCalledExactlyOnceWith('gen-first');expect(chunk).toHaveBeenCalled();expect(complete).toBe(false);
+ finish();const observed=await result;
+ expect(early).toHaveBeenCalledTimes(1);
+ if(mode==='conflict')expect(adapter.evidence(observed,identity,'response')).toMatchObject({
+  providerId:null,cost:null,final:false,rejectedReason:'identity_or_response_mismatch',
+ });
+});
+it('an early identity observer failure does not interrupt provider reading',async()=>{
+ const transport=vi.fn(async()=>new Response('{}',{headers:{'x-generation-id':'gen-test'}}));
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport});
+ const send=await adapter.prepareDispatch({input:body},identity,undefined,()=>{throw new Error('storage down');});
+ expect(await send()).toMatchObject({complete:true,generationId:'gen-test'});
+});
