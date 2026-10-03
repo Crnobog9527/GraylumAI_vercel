@@ -12,6 +12,7 @@ import { activateSkill, identityOf } from '../skills/loader';
 import { summaryPolicy, assertSeparateSummaryModel } from '../artifacts/summaryPolicy';
 import { aggregateCredits, decimal } from '../bill2/decimal';
 import type {StagingPolicy} from './stagingPolicy';
+import { throwIfContentBindingRefused } from '../opc/contentBindingError';
 import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
 import type {FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
@@ -82,6 +83,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
  async function actor(){const a=await user.auth.getUser();if(a.error||!a.data.user||!isEmailVerified(a.data.user))throw new Error('RUNTIME_AUTH_REQUIRED');return a.data.user.id;}
  async function query(name:string,args:Record<string,unknown>){
   const r=await admin.rpc(name,{...args,p_actor_id:await actor()});
+  if(r.error)throwIfContentBindingRefused(r.error);
   if(r.error)throw new Error(name==='runtime_admit'&&r.error.message==='OPC_ANSWER_SOURCE_DENIED'
    ?'OPC_ANSWER_SOURCE_DENIED':'RUNTIME_ADMISSION_DENIED');
   return r.data;
