@@ -262,14 +262,28 @@ O = min( 全站统一上限 CHAT_OUTPUT_CAP（按环境取值）,
    - 可见正文：凡是信封，一律取 `message`（3.4）；非信封的纯文本就是 `body`。
    - 实时 text 事件发送的就是可见正文，前端计数和服务器投影是同一份文本。
    - T3 不走停止路径，仍然用原来的 `runtime_cancel`。
-2. **SQL**：在 PAYG PR-B 之后**追加**一张迁移，重定义 `runtime_execution`，加一个 `stop` 动作；不修改已合并的迁移。它在同一个事务里，按现有锁顺序（session → execution → run）执行：
+2. **SQL 和宿主的分工**：在 PAYG PR-B 之后**追加**一张迁移，重定义 `runtime_execution`，加一个 `stop` 动作；不修改已合并的迁移。
+   - `stop` 动作**只记录停止，从不在 SQL 里直接收尾**：它没有结果可以保存，结果只能由宿主从回执重建。
+   - 收尾一律由宿主用 `complete` 提交校验过的结果来完成。
+   - `stop` 动作在一个事务里，按现有锁顺序（session → execution → run）执行：
    - **(a) 记录停止**：复用 PAYG 的暂停字段，写入 `paused_reason='user_stop'` 和 `stopAt`。之后：
      - v2 claim 拒绝新调用，包括还没派发的工具轮次和整理器；
      - 只把 prepared 但还没派发的 call 改为 cancelled，并释放冻结；
      - **不调用 `bill2_cancel`，不设置 `cancel_requested`**。
-   - **(b) 没有已派发、未结束的 call 时**：同一个事务内按下面的 `complete` 规则保存结果，然后依次调用 `bill2_close('delivered')` 和 `bill2_finalize`。
+   - **(b) 没有已派发、未结束的 call 时**：`stop` 动作只做 (a)，返回 `stopped_pending_result`。
+     - 这包括"调用已经关闭、回执已经落库，但原 HTTP 还没解析 body、也还没构造 `p_result`"的窗口（`execute.ts:327-365`）。
+     - 这种状态视为**等待宿主重建**，不当作"没有结果"。
+     - 接下来由处理这次停止请求的宿主（`runtime.cancel` 路由）执行，不在 SQL 事务里收尾：
+       1. 用现有的只读重放（`denyNewCalls` 闸门、只读回执，不派发）把回执重放成正文；
+       2. 按第 4 项截到 `stopAt` 并重新封装，按 4.3 检查保存上限；
+       3. 通过 `complete` 提交（满足下面的 R1–R4）；
+       4. `complete` 照常依次调用 `bill2_close('delivered')` 和 `bill2_finalize`。
+     - **原 HTTP 仍在运行时**：它解析完 body 后也会读到 `user_stop`，按同样的规则构造结果。两边用的是同样的回执、同样的 `stopAt` 和同样的确定性规则，所以结果逐字相同。
+       - 先提交的一方完成收尾；后提交的一方走 `complete` 现有的"已完成且结果相同"分支，只读返回（`0106:454-455`），不会重复收尾。
+       - 结果字段里不包含时间戳之类的非确定内容。
+     - **宿主崩溃时**：停止已经记录，execution 仍停在 running 或 interrupted，由现有恢复路径（#595 的自动恢复、`executeStream` 重放、财务恢复）按 (d) 收尾。
    - **(c) 有已派发、未结束的 call 时**：只做 (a)，返回 `stopping`。那次调用所在的 HTTP 拿到回执后，按下面的规则走 `complete`。因为 `cancel_requested` 没被设置，`complete` 能成功。
-   - **(d) 那次 HTTP 已经结束**（函数被回收、断线）：下次恢复或重放时读到 `user_stop`，只读回执，然后按 (b) 收尾。回执不明就按 PAYG 查账；仍然不明，就进入 `cost_pending`。不重发，不补扣。
+   - **(d) 那次 HTTP 已经结束**（函数被回收、断线），或者 (b) 的宿主崩溃：下次恢复或重放时读到 `user_stop`，只读回执重建结果，按 (b) 的第 2–4 步用 `complete` 收尾。回执不明就按 PAYG 查账；仍然不明，就进入 `cost_pending`。不重发，不补扣。
    - **(e) 一个字都还没写出来**（`stopAt=0`，或者截断后可见正文为空）：结果为空，等价于现有取消，状态 `cancelled`。在途调用照常按回执结算一次。
 3. **结果字段**（宿主生成）：
    - `stopped:true`：`user_stop` 下的每个结果都必须带。
@@ -300,7 +314,7 @@ O = min( 全站统一上限 CHAT_OUTPUT_CAP（按环境取值）,
        - 主回复还在写就被停止时，没有 primary。**只在这种情况**（`user_stop` + `organized:false` + 空摘要）放宽"`primary_result` 非空"这一项；
      - 其他组合（空摘要却标 `organized:true`，或者非空摘要却标 `organized:false`），一律拒绝。
    - **R4**：`completeness` 只接受 `complete`、`stopped`、`length_limit`。
-   - 除 R1–R4 外，其余检查（`kind`、`active_execution`、Session 批次、结果冲突）与 0106 相同。`stop` 动作 (b) 调用同一段逻辑。`checkpoint_primary` 不改。
+   - 除 R1–R4 外，其余检查（`kind`、`active_execution`、Session 批次、结果冲突）与 0106 相同。`stop` 动作本身不调用 `complete`，所有收尾都由宿主提交。`checkpoint_primary` 不改。
 6. **带附属整理器的执行被停止**：
    - **主回复还在写**：这次调用落库后，宿主**不再** checkpoint primary，也不派发整理器（claim 已被拒）。按"没有 primary"的规则保存，`summary:""`、`organized:false`。
    - **主回复已完成，整理器还没派发**：取消这个 call 并释放冻结。按 (b) 保存：body 用 primary 的 body，`summary:""`、`organized:false`、`completeness:'complete'`。
@@ -533,7 +547,13 @@ REPORT-GEN R-A / R-B 按 #547 原顺序，用统一上限
     - 转义很多、超出预留的合法摘要，保存为 `summary:""`、`organized:false`、`summaryOmitted:true`，`complete` 成功，执行能收尾，整理器只结算一次；
     - 摘要在预留之内时正常保存。
 - **停止（C2）**：
-  - (b) 没有在途调用：一个事务内保存截到 `stopAt` 的结果并收尾；
+  - (b) 没有在途调用：`stop` 只记录停止，不收尾；停止请求的宿主只读重放回执，提交截到 `stopAt` 的结果，再收尾；
+  - **回执落库与结果写入之间点停止**（`execute.ts:327-365` 的窗口）：
+    - 停止返回 `stopped_pending_result`，SQL 不直接调用 `bill2_close`；
+    - 停止宿主重放得到的结果，与原 HTTP 随后构造的结果逐字相同；
+    - 两边谁先提交都只收尾一次，另一边只读返回；
+    - 停止宿主在提交前崩溃时，由现有恢复路径收尾；
+    - 整个过程中调用只结算一次；
   - (c) 有在途调用：返回 `stopping`，回执落库后 `complete` 保存带 `stopped:true` 的结果；超过 `stopAt` 的可见正文被拒绝；
   - (d) 在途 HTTP 已经消失：恢复时读回执收尾；回执不明时进入 `cost_pending`；
   - (e) 没写出字：状态 `cancelled`；
@@ -601,6 +621,7 @@ REPORT-GEN R-A / R-B 按 #547 原顺序，用统一上限
 | 第三版：Owner 决定首版不做自动续写（总控记录 5970578413） | 首版只保留流式、统一上限和写满收尾（3.4）；停止和保存上限按"只有一次正文调用"重写（第 4 节）；续写相关的全部内容移到第 13 节；第 0、5–11 节按首版重写；对 #547、#553 的影响见第 8 节 |
 | 机器人第七轮 P1（整理器摘要的序列化大小，线程 4173706457） | 4.3：checkpoint 之前先为摘要预留 `SUMMARY_RESERVE`=65536 字节，主回复超出就在 checkpoint 前截短；摘要超出预留时保存 `summary:""`、`organized:false`、`summaryOmitted:true`（现有 0106:453 接受空字符串），保证一定能收尾；补必测 |
 | 机器人第七轮 P1（暂停后恢复绕过限流窗口，线程 4173706459） | 只在有续写时成立，已移到第二版；第 13 节记下约束：恢复时不能只凭"已有 claim"跳过闸门，必须按限流窗口的实际有效期重新校验，或者只为新派发的调用扣额度 |
+| 机器人第八轮 P1（回执落库后、结果写入前停止，线程 4173778352） | 4.2：`stop` 动作只记录停止，从不在 SQL 里收尾；"调用已关闭但还没有结果"视为等待宿主重建，由停止请求的宿主只读重放回执，提交截到 `stopAt` 的结果后再收尾；与原 HTTP 的结果逐字相同、只收尾一次；宿主崩溃时由现有恢复路径收尾；补必测 |
 
 ## 13. 第二版设计：自动续写（不在首版实施）
 
