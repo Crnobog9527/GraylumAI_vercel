@@ -8582,7 +8582,8 @@ it("OPC: video claim material stays exclusive and a rejected claim can be retrie
       choice: 'storyboard', expectedStoryboardVersion: 0, expectedEditingVersion: 0 });
     const admission = runtimeAdmissionService(f.user, admin, { account: 'local', costPerCall: '0.02', creditsPerUsd: '1000', multiplier: '1', maxCalls: 1, maxOutputTokens: 1000, inputBytes: 32000, historyItems: 20, searchEnabled: false });
     const otherRequestId = randomUUID();
-    await expect(admission.prepare({ sessionId: work.sessionId, requestId: otherRequestId, input: '尝试占用视频请求的专属材料', selection: { kind: 'ordinary', modelId }, network: 'deny', sources: [] })).rejects.toThrow('RUNTIME_ADMISSION_DENIED');
+    // Since #613 admission releases the exact binding refusal (HTTP 412) instead of the generic denial.
+    await expect(admission.prepare({ sessionId: work.sessionId, requestId: otherRequestId, input: '尝试占用视频请求的专属材料', selection: { kind: 'ordinary', modelId }, network: 'deny', sources: [] })).rejects.toThrow('OPC_CONTENT_BINDING');
     expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2', [f.actor, otherRequestId])).rows[0].n).toBe(0);
     expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1 and request_id=$2', [f.actor, otherRequestId])).rows[0].n).toBe(0);
     await f.service.videoMaterialPrepare({ action: 'abandon', workItemId: work.workItemId, requestId: claimRequestId, sourceScriptId: script.id,
