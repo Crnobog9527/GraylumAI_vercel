@@ -15,9 +15,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
+import { CHAT_ACTION, ChatNoticeList, ChatPendingStatus, type ChatNotice } from '@/components/chat/ChatInlineNotice';
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import composerStyles from '@/components/opc/work-composer.module.css';
@@ -124,6 +124,8 @@ export default function TopicWorkspacePage() {
   function updateInput(value:string){setInput(value);if(inputKey)localStorage.setItem(inputKey,value);}
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  // The user's message, shown at once until the server records its turn.
+  const [outgoing, setOutgoing] = useState<{ text: string; executionId?: string } | null>(null);
   const [pending, setPending] = useState<Operation | null>(null);
   const operationBusy = useRef(false);
   const openingAttempt = useRef('');
@@ -312,7 +314,9 @@ export default function TopicWorkspacePage() {
         setPending(op);
         try {
           if (op.kind === 'chat') {
+            setOutgoing({ text: op.request.input });
             const admitted = await turn.mutateAsync(op.request);
+            setOutgoing(old => old && { ...old, executionId: admitted.executionId });
             if (op.candidateAtSend) localStorage.setItem('opc-topic-adoption-context:'+sessionId+':'+admitted.executionId,JSON.stringify(op.candidateAtSend));
             const notice = topicExecutionNotice(await execute.mutateAsync({ executionId: admitted.executionId }));
             if (notice) setError(notice);
@@ -339,6 +343,7 @@ export default function TopicWorkspacePage() {
           localStorage.removeItem(storageKey);
           setPending(null);
         } catch (cause) {
+          setOutgoing(old => old?.executionId ? old : null); // Not admitted: the text is still in the box.
           const message = cause instanceof Error ? cause.message : '';
           if (definiteRejections.has(message)) {
             localStorage.setItem(storageKey + ':rejected:' + op.request.requestId, JSON.stringify(op));
@@ -490,6 +495,25 @@ export default function TopicWorkspacePage() {
 
   const bound = Boolean(workspace.data?.bound);
   const sourceAvailable = workspace.data?.sourceAllowed !== false;
+  const lastOpen = Boolean(executions?.length && !['completed', 'cancelled'].includes(executions.at(-1)!.state));
+  const pendingOutgoing = outgoing && !executions?.some(e => e.executionId === outgoing.executionId) ? outgoing : null;
+  // Everything about the latest turn sits directly under it, in the conversation.
+  const tailNotices: ChatNotice[] = [
+    ...(pending ? [{ id: 'pending', tone: 'warning' as const, label: '待确认的操作', actions: [{ label: CHAT_ACTION.retry, disabled: busy, onClick: () => void perform(pending) }],
+      text: '上一项操作的结果尚未确认（完整原请求已冻结）。重试会核对原消息、保存或采纳，不新建身份。' }] : []),
+    ...(busy && !lastOpen ? [{ id: 'busy', tone: 'status' as const, busy: true, text: '正在处理，请稍候…' }] : []),
+    ...(notice ? [{ id: 'notice', tone: 'success' as const, text: notice }] : []),
+    ...(error ? [{ id: 'error', tone: 'error' as const, text: error }] : []),
+    ...(free.error ? [{ id: 'free', tone: 'error' as const, text: free.error }] : []),
+  ];
+  const openTurnNotice = (e: { executionId: string; state: string }): ChatNotice | null => {
+    if (e.state === 'completed' || e.state === 'cancelled') return null;
+    const running = busy && e.state !== 'cost_pending';
+    return { id: e.executionId, tone: running ? 'status' : 'warning', busy: running,
+      text: e.state === 'cost_pending' ? '费用待核实；重试只核对原调用。' : running ? '正在回复…' : '回复尚未完成，原请求已保留。',
+      actions: [{ label: CHAT_ACTION.retry, disabled: busy, onClick: () => void recover(e.executionId) },
+        { label: CHAT_ACTION.stop, disabled: cancel.isPending, onClick: () => void stop(e.executionId) }] };
+  };
   const adoptedTopics = [...new Map([...plans.flatMap(plan => plan.body ?? []), ...(candidate?.body ?? [])].filter(item => adoptedItemIds.has(item.id)).map(item => [item.id, item])).values()];
 
   return (
@@ -540,15 +564,11 @@ export default function TopicWorkspacePage() {
               </div>
             )}
             <section className={topicStyles.transcript}>
-              <details className="text-sm">
-                <summary>本次引用的正式定位 v{workspace.data?.sourceVersion}</summary>
-                <pre className="whitespace-pre-wrap break-words">{JSON.stringify(workspace.data?.profile, null, 2)}</pre>
-              </details>
               {executions?.map((e) => (
                 <article key={e.executionId} className="space-y-3">
                   {e.input && (
                     <div className="flex justify-end gap-3">
-                      <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-[#f5f5f6] px-4 py-3 text-[#303030]">
+                      <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-[#f5f5f6] px-4 py-3 text-[15px] leading-[1.75] text-[#303030]">
                         {e.input}
                       </p>
                     </div>
@@ -559,21 +579,7 @@ export default function TopicWorkspacePage() {
                       <span className={topicStyles.agentName}>Graylum · 增长顾问</span>
                       <MessageMarkdown className={topicStyles.reply}
                         text={e.contentAvailable ? replyProse(e.body ?? e.primaryBody) : '来源已不可用，暂不展示此内容。'} />
-                      {e.state === 'cost_pending' && (
-                        <p role="status" className="mt-2 text-sm">
-                          费用待核实；恢复只核对原调用。
-                        </p>
-                      )}
-                      {e.state !== 'completed' && e.state !== 'cancelled' && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <Button size="sm" variant="outline" disabled={busy} onClick={() => recover(e.executionId)}>
-                            恢复原任务
-                          </Button>
-                          <Button size="sm" variant="ghost" disabled={cancel.isPending} onClick={() => stop(e.executionId)}>
-                            取消剩余执行
-                          </Button>
-                        </div>
-                      )}
+                      <ChatNoticeList notices={[openTurnNotice(e)]} />
                       {e.state === 'completed' &&
                         (() => {
                           const body = parseCandidate(e.body ?? e.primaryBody);
@@ -597,22 +603,14 @@ export default function TopicWorkspacePage() {
                   </div>
                 </article>
               ))}
-              {pending && (
-                <div className="rounded-xl border border-[var(--border-primary)] p-4">
-                  <p role="status" className="text-sm">
-                    上一项操作的结果尚未确认（完整原请求已冻结）。恢复会核对原消息、保存或采纳，不新建身份。
+              {pendingOutgoing && (
+                <div className="flex justify-end" data-message-role="user">
+                  <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-[#f5f5f6] px-4 py-3 text-[15px] leading-[1.75] text-[#303030]">
+                    {pendingOutgoing.text}<ChatPendingStatus sending={busy} />
                   </p>
-                  <Button className="mt-3" size="sm" variant="outline" disabled={busy} onClick={() => perform(pending)}>
-                    恢复原请求
-                  </Button>
                 </div>
               )}
-              {busy && (
-                <p role="status" className="flex items-center gap-2 text-sm text-[var(--text-tertiary)]">
-                  <Loader2 className="h-4 w-4 animate-spin" />正在处理，请稍候…
-                </p>
-              )}
-
+              <ChatNoticeList notices={tailNotices} />
             </section>
           </div>
 
@@ -620,8 +618,9 @@ export default function TopicWorkspacePage() {
 
           <footer className={composerStyles.zone}>
             <div className={composerStyles.wrap}>
-              <WorkComposer maxLength={8000} value={input} onChange={updateInput} disabled={busy||Boolean(pending)||Boolean(view.data?.activeExecution)||free.busy} onSend={skill=>{if(skill)void free.send(input,skill);else void send();}}/>
-              {free.error&&<p role="alert">{free.error}</p>}
+              <WorkComposer maxLength={8000} value={input} onChange={updateInput}
+                sendDisabled={busy||Boolean(pending)||Boolean(view.data?.activeExecution)||free.busy}
+                onSend={skill=>{if(skill)void free.send(input,skill);else void send();}}/>
               <p className={composerStyles.note}>
                 候选会自动保存；只有你明确采用的具体选题才会进入资料库。
               </p>
@@ -630,16 +629,7 @@ export default function TopicWorkspacePage() {
         </>
       )}
 
-      {notice && (
-        <p role="status" className="shrink-0 p-3 text-center text-sm">
-          {notice}
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="shrink-0 p-3 text-center text-sm">
-          {error}
-        </p>
-      )}
+      {!(bound && sourceAvailable) && <ChatNoticeList className="mx-auto w-full max-w-2xl shrink-0 px-6 pb-4" notices={tailNotices} />}
     </main>{infoOpen&&<div className={topicStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={topicStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setInfoOpen(false)}>×</button></header><p>本工作绑定正式定位 v{workspace.data?.sourceVersion??'—'} 与原选题方法修订。查看不会生成或采用。</p><div><Link href={`/positioning/${draftId}`}>查看原定位</Link><Link href={'/library?returnTo='+encodeURIComponent('/positioning/'+draftId+'/topics')}>打开资料库</Link></div></section></div>}</WorkspaceFrame>
   );
 }

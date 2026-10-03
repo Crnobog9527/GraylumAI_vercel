@@ -14,7 +14,7 @@ export function topicFailureMessage(cause: unknown) {
     return '这个草稿已经有绑定的选题工作空间，不能静默换到另一个版本。请继续使用原有工作空间。';
   if (message.includes('OPC_REQUEST_CONFLICT'))
     return '这条消息的原请求身份与现在的负载不一致，已停止发送。请读取原任务状态后再决定。';
-  return '本次请求状态待核实。请使用「恢复原请求」读取原任务，不要重复发送相同内容。';
+  return '本次请求状态待核实。请点「重试」读取原任务，不要重复发送相同内容。';
 }
 
 /**

@@ -185,9 +185,12 @@ export async function readAgentTurn(
   return { executionId, result };
 }
 
-/** Fixed notice for a finished execution without a usable body; none of them is retried. */
+/**
+ * Fixed notice for a finished execution without a usable body; none of them is retried.
+ * Output truncation has none: the turn itself shows it once (mentorReplyDisplay).
+ */
 export function turnResultNotice(result: AgentTurnOutcome): string | null {
-  if (result.unavailable === "output_truncated") return "本次模型调用达到长度上限，原请求已保留，不会自动重试。";
+  if (result.unavailable === "output_truncated") return null;
   if (result.unavailable === "provider_history")
     return "历史消息格式暂不兼容，本次执行已停止。原记录已保留；请联系支持检查历史兼容性，不要重复发送这条请求。";
   if (result.unavailable === "preflight") return "本次执行在模型派发前检查失败，已停止并保留原记录。请核对服务状态后再继续，不会自动重放。";

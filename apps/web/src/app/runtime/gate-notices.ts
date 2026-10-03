@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { gateAdmissionNotice, gateResultNotice, isRuntimeGateReason } from '@/lib/runtime-gate-notice';
+import { OUTPUT_TRUNCATED_NOTICE, gateAdmissionNotice, gateResultNotice, isRuntimeGateReason } from '@/lib/runtime-gate-notice';
 
-export const OUTPUT_TRUNCATED_NOTICE = '本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。';
+export { OUTPUT_TRUNCATED_NOTICE };
 const videoGatePrefix = 'OPC_CONTENT_GATE_';
 
 /** A `runtime.prepare` refusal by the new-work gate; the caller keeps the request and input. */
