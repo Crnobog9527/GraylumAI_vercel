@@ -4511,7 +4511,9 @@ it("OPC: Stage C7 a stale round candidate neither suppresses nor impersonates th
     expect(generated.planCandidate).toHaveLength(7);
     // Repair B4, through the real revise button: a successful revision archives
     // the previous round's candidate so it cannot become current again.
-    await page.goto(process.env.V3_LOCAL_APP + "/positioning/" + f.d.draftId);
+    // Write the round-A buffer before the draft page hydrates; an open page keeps
+    // persisting its own state over a buffer written underneath it.
+    await page.goto(process.env.V3_LOCAL_APP + "/positioning");
     await page.evaluate(
       ({ id, candidate, roundId }) =>
         sessionStorage.setItem(
@@ -4526,8 +4528,7 @@ it("OPC: Stage C7 a stale round candidate neither suppresses nor impersonates th
         ),
       { id: f.d.draftId, candidate: staleCandidate, roundId: f.d.roundId },
     );
-    // Hydrate from that buffer: the page loaded before it was written.
-    await page.reload();
+    await page.goto(process.env.V3_LOCAL_APP + "/positioning/" + f.d.draftId);
     const revise = page.getByRole("button", {
       name: "修订定位，保留原版本",
       exact: true,
@@ -4611,6 +4612,8 @@ it("OPC: an upstream reconfirmation can be resubmitted and never hides already a
     await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("confirmed");
     await expect.poll(async () => (await rowTexts()).length, {timeout:30000}).toBe(2);
     // No deferral UI in a mentor draft: defer on the server, then check the page.
+    // Like the removed control, defer only after this question's own opening finished.
+    await page.getByRole("log", {name:"完整导师消息"}).getByText("导师主动引导 · 1.2", {exact:true}).waitFor({timeout:60000});
     await deferQuestion(f, draft.draftId, "step-0", "other");
     await resetLocalIpWindow();
 
@@ -4755,6 +4758,8 @@ it("OPC: clicking a review row opens that reached question without advancing pro
     await expect.poll(async () => (await read()).information["step-0"].values?.extra0?.status, {timeout:30000}).toBe("confirmed");
     await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.3");
     // No deferral UI in a mentor draft: defer on the server, then check the page.
+    // Like the removed control, defer only after this question's own opening finished.
+    await page.getByRole("log", {name:"完整导师消息"}).getByText("导师主动引导 · 1.3", {exact:true}).waitFor({timeout:60000});
     await deferQuestion(f, draft.draftId, "step-0", "extra1");
     await page.reload();
     // Deferring q3 reaches q4, which the page opens on its own after the reload.
@@ -4897,6 +4902,8 @@ it("OPC: a legally reached question keeps its explicit confirm and mentor send w
     await field("Extra field 1").fill("第三条实质答案");
     await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.value, {timeout:30000}).toBe("第三条实质答案");
     // No deferral UI in a mentor draft: defer on the server, then check the page.
+    // Like the removed control, defer only after this question's own opening finished.
+    await page.getByRole("log", {name:"完整导师消息"}).getByText("导师主动引导 · 1.3", {exact:true}).waitFor({timeout:60000});
     await deferQuestion(f, draft.draftId, "step-0", "extra1");
     await page.reload();
     // Deferring q3 reaches q4, which the page opens on its own after the reload.
@@ -5095,6 +5102,8 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
     await field("Extra field 1").fill("第三条实质答案");
     await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.value, {timeout:30000}).toBe("第三条实质答案");
     // No deferral UI in a mentor draft: defer on the server, then check the page.
+    // Like the removed control, defer only after this question's own opening finished.
+    await page.getByRole("log", {name:"完整导师消息"}).getByText("导师主动引导 · 1.3", {exact:true}).waitFor({timeout:60000});
     await deferQuestion(f, draft.draftId, "step-0", "extra1");
     await resetLocalIpWindow();
 
@@ -8518,7 +8527,8 @@ it("OPC: definite pre-admission failure revokes its claim and permits an explici
     expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2', [f.actor, abandoned.request_id])).rows[0].n).toBe(0);
     await page.unroute('**/api/trpc/runtime.prepare*');
     await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
-    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
+    // Derived results are listed as collapsible summaries since a8dba69c.
+    await page.locator('summary').filter({ hasText: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿' }).waitFor({ timeout: 60000 });
     expect(lateRequestBody).toContain('OPC_VIDEO_PACKAGE_V1');
     await page.evaluate(async body => {
       await fetch('/api/trpc/runtime.prepare?batch=1', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
@@ -9379,7 +9389,9 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   await page.getByRole('button',{name:'收起成果面板',exact:true}).waitFor();
   await page.getByRole('link',{name:'已采用为草稿 · 查看',exact:true}).click();
   await page.waitForURL(url=>url.pathname==='/library'&&url.searchParams.get('item')===article.workItemId);
-  const card=page.locator('#item-'+article.workItemId);await card.getByText('文章细化',{exact:true}).waitFor();
+  const card=page.locator('#item-'+article.workItemId);
+  // The deep link also opens the item's detail dialog, which repeats the title; check the list row itself.
+  await card.getByRole('button').first().getByText('文章细化',{exact:true}).waitFor();
   expect(await card.innerText()).toContain('文章');
   const saved=(await sql.query("select execution_id from opc_content_versions where work_item_id=$1 and kind='brief'",[article.workItemId])).rows[0];
   await expect(f.service.contentFromExecution({workItemId:article.workItemId,requestId:randomUUID(),executionId:saved.execution_id,kind:'script',status:'final',expectedVersion:0})).rejects.toThrow('OPC_VIDEO_TYPE_REQUIRED');
