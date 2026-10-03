@@ -23,6 +23,8 @@ import {currentRequestTiming} from './timing';
 import {readPurposeBudgets} from './purposeBudgets';
 import {assertFrozenPayloads} from './payloadSize';
 import {freezeWindowBillingUnit} from './billingUnitAdmission';
+import {newWorkGate,readNewWorkSettings,requireNewWork} from './newWorkGate';
+import {requireAllowedInput} from './moderation';
 import {admitPricing} from './pricingAdmission';
 
 const uuid=z.string().uuid();
@@ -86,13 +88,18 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
   revokeMaterial(sessionId:string,revision:number){return query('runtime_material',{p_session_id:uuid.parse(sessionId),p_action:'revoke',p_expected_revision:z.number().int().positive().parse(revision)});},
   prepare:(value:unknown)=>timedAdmission(async()=>{
    const request=runtimeAdmission.parse(value);
-   const input=policy.resolvedInput === undefined ? request : {...request,input:policy.resolvedInput};await actor();
+   const input=policy.resolvedInput === undefined ? request : {...request,input:policy.resolvedInput};
+   const actorId=await actor();
    if(policy.real&&(input.network!=='deny'||policy.searchEnabled))throw new Error('RUNTIME_REAL_SEARCH_DISABLED');
    if(input.network==='require_latest'&&!policy.searchEnabled)throw new Error('RUNTIME_SEARCH_UNAVAILABLE');
    const session=await query('runtime_session_context',{p_session_id:input.sessionId});
    // Resolve replay before model or revision freshness changes produce another budget.
+   const settings=readNewWorkSettings(admin);
    const replay=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:request});
    if(replay)return replay;
+   const leaveRateLimit=currentRequestTiming()?.enter('rateLimit');
+   try{requireNewWork(await newWorkGate(admin,policy.real?'staging':'local').message(actorId,settings));}
+   finally{leaveRateLimit?.();}
    const mentorStream=Boolean(policy.opcTurnToken&&policy.mentorStream);
    if(policy.organizeOpening&&(!mentorStream||!isOpeningInput(input.input)))throw new Error('RUNTIME_CONTEXT_INVALID');
    const organizeAfter=input.organizeAfter||Boolean(policy.organizeOpening);
@@ -244,6 +251,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    }
    // Both SQL CHECKs measure jsonb::text, not JSON.stringify or model input.
    // This runs before runtime_admit, which atomically creates the execution/reservation.
+   await requireAllowedInput({actorId,sessionId:input.sessionId,requestId:input.requestId,
+    text:input.input,opening});
    assertFrozenPayloads(context,billing);
    try{return await query('runtime_admit',{p_session_id:input.sessionId,p_request_id:input.requestId,p_payload:context,p_billing:billing});}
    catch(error){

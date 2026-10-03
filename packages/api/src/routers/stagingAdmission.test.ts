@@ -183,3 +183,8 @@ describe('downstream real-model admission after a valid remote window',()=>{
   expect(JSON.stringify(body)+JSON.stringify(mocks.error.mock.calls)).not.toContain('SYNTHETIC_PRIVATE_UNEXPECTED_BODY');
  });
 });
+
+vi.mock('../services/runtime/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../services/runtime/newWorkGate')>(),
+ ...(await import('../services/__tests__/fixtures/runtimeGates')).testAdmissionGates,
+}));

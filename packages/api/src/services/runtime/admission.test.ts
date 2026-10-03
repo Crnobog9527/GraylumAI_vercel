@@ -96,3 +96,8 @@ it.each([
  const service=runtimeAdmissionService(user,admin,{account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:1000,inputBytes:32000,historyItems:10});
  await expect(service.prepare({sessionId,requestId,input:'test',selection:{kind:'ordinary',modelId},network:'deny'})).rejects.toThrow(expected!);
 });
+
+vi.mock('./newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('./newWorkGate')>(),
+ ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
+}));
