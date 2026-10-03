@@ -19,3 +19,17 @@
   .card{margin-right:0;padding:14px}
   .card .options button.option{min-height:44px}
 }
+/* Compact history record in the conversation; the options fold into <details>. */
+.record{gap:8px;padding:12px 14px;background:#fff}
+.record .question{font-size:14px}
+.answer{margin:0;color:#262626;font-size:13px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.answer span{margin-right:8px;color:#858585;font-size:12px}
+.history summary{width:fit-content;color:#858585;font-size:12px;line-height:20px;cursor:pointer}
+.history[open] summary{margin-bottom:8px}
+.show{width:fit-content;padding:0;border:0;background:none;color:#555;font-size:12px;line-height:20px;text-decoration:underline;cursor:pointer}
+/* Docked inside the composer, above the text box: the composer draws the border. */
+.docked{position:relative;margin:0;padding:2px 2px 12px;border:0;border-bottom:1px solid #ececec;border-radius:0;background:none}
+.docked .head{padding-right:30px}
+.dismiss{position:absolute;top:-1px;right:0;display:grid;place-items:center;width:26px;height:26px;border:0;border-radius:50%;background:none;color:#8a8a8a;cursor:pointer}
+.dismiss:hover{background:#f2f2f2;color:#262626}
+@media(max-width:480px){.docked{padding:0 0 10px}}
