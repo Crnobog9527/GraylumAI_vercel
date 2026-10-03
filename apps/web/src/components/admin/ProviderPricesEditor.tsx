@@ -5,6 +5,7 @@ import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
+import { readValidationIssueMessages } from '@/lib/safe-error-message';
 
 const EMPTY = { version: 1, entries: [] };
 const FIELDS = 'provider、route（精确线路，通用条目填 null）、appliesToUnlistedRoutes、currency、usageUnit、unitsPerPrice、price、'
@@ -28,7 +29,7 @@ export function ProviderPricesEditor() {
       void utils.modelPricing.getProviderPrices.invalidate();
     },
     onError: (error) => {
-      setMessage(error.message);
+      setMessage(readValidationIssueMessages(error.message) ?? error.message);
       if (error.data?.code === 'CONFLICT') void utils.modelPricing.getProviderPrices.invalidate();
     },
   });

@@ -13,7 +13,8 @@ vi.mock('@/trpc/client', () => ({ trpc: {
     createModel: { useMutation: mutation }, updateModel: { useMutation: mutation },
     deleteModel: { useMutation: mutation }, testConnection: { useMutation: mutation },
   },
-  modelReasoning: { get: { useQuery: query } },
+  useUtils: () => ({}),
+  modelReasoning: { get: { useQuery: query }, refreshCatalog: { useMutation: mutation } },
   modelPricing: { getMultipliers: { useQuery: query } },
 } }));
 // The page's own panels have their own tests; render only the create/edit form here.
