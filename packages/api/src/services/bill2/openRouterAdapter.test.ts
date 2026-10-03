@@ -200,3 +200,47 @@ it('an early identity observer failure does not interrupt provider reading',asyn
  const send=await adapter.prepareDispatch({input:body},identity,undefined,()=>{throw new Error('storage down');});
  expect(await send()).toMatchObject({complete:true,generationId:'gen-test'});
 });
+
+it('v2 independently verifies final UTF-8 request, counts and per-call U before credentials',async()=>{
+ const {openRouterCallBound}=await import('./openRouterPolicy');
+ const request={...JSON.parse(body),messages:[{role:'user',content:'中文🙂'}]};
+ const wire=JSON.stringify(request),bytes=Buffer.byteLength(wire);
+ const nominalPricing={version:'nominal-v1' as const,pricingHash:'a'.repeat(64),endpointTag:'synthetic',
+  tiers:[{minPromptTokens:0,prompt:'2',completion:'0',request:'0'}],timeOfDay:[]};
+ const payg={policyId:'policy',policyVersion:'v1',profileVersion:'v1',evidenceVersion:'fixture-v1',
+  bytes,templateTokens:100,marginTokens:100,promptTokensUpper:bytes+200,messages:1,tools:0,schemaBytes:0,
+  pricingHash:nominalPricing.pricingHash,endpointTag:'synthetic',nominalPricing};
+ const bound=openRouterCallBound(identity.providerLimits,identity.outputLimit,payg.promptTokensUpper);
+ const v2={...identity,payg,upperUsd:bound.upperUsd};
+ const credential=vi.fn(async()=> 'LOCAL_SYNTHETIC_KEY'),transport=vi.fn(async()=>new Response('{}'));
+ const adapter=openRouterAdapter({credential,transport});
+ await adapter.dispatch({input:wire},v2);
+ expect(transport).toHaveBeenCalledTimes(1);
+ credential.mockClear();transport.mockClear();
+ for(const mutation of [{bytes:wire.length,promptTokensUpper:wire.length+200},{messages:2},{tools:1},{schemaBytes:1}]){
+  await expect(adapter.prepareDispatch({input:wire},{...v2,payg:{...payg,...mutation}})).rejects.toThrow('QUOTE_CONFLICT');
+ }
+ await expect(adapter.prepareDispatch({input:wire},{...v2,upperUsd:identity.upperUsd})).rejects.toThrow('QUOTE_CONFLICT');
+ await expect(adapter.prepareDispatch({input:wire},{...v2,payg:{...payg,nominalPricing:{...nominalPricing,
+  tiers:[{...nominalPricing.tiers[0]!,prompt:'3'}]}}})).rejects.toThrow('BOUND_CONFLICT');
+ expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
+});
+it('v2 binds actual tool parameter and response format schema bytes',async()=>{
+ const {openRouterCallBound}=await import('./openRouterPolicy');
+ const tool={type:'function',function:{name:'read_source',parameters:{type:'object',properties:{query:{type:'string'}}}}};
+ const response_format={type:'json_object'};
+ const request={...JSON.parse(body),messages:[{role:'user',content:'read'}],tools:[tool],response_format};
+ const wire=JSON.stringify(request),bytes=Buffer.byteLength(wire);
+ const nominalPricing={version:'nominal-v1' as const,pricingHash:'a'.repeat(64),endpointTag:'synthetic',
+  tiers:[{minPromptTokens:0,prompt:'2',completion:'0',request:'0'}],timeOfDay:[]};
+ const payg={policyId:'policy',policyVersion:'v1',profileVersion:'v1',evidenceVersion:'fixture-v1',bytes,
+  templateTokens:0,marginTokens:0,promptTokensUpper:bytes,messages:1,tools:1,
+  schemaBytes:Buffer.byteLength(JSON.stringify(tool.function.parameters))+Buffer.byteLength(JSON.stringify(response_format)),
+  pricingHash:nominalPricing.pricingHash,endpointTag:'synthetic',nominalPricing};
+ const v2={...identity,payg,upperUsd:openRouterCallBound(identity.providerLimits,identity.outputLimit,bytes).upperUsd};
+ const credential=vi.fn(async()=> 'LOCAL_SYNTHETIC_KEY'),transport=vi.fn(async()=>new Response('{}'));
+ const adapter=openRouterAdapter({allowWorkspaceRead:true,credential,transport});
+ await adapter.prepareDispatch({input:wire},v2);
+ expect(credential).toHaveBeenCalledTimes(1);expect(transport).not.toHaveBeenCalled();
+ await expect(adapter.prepareDispatch({input:wire},{...v2,payg:{...payg,schemaBytes:0}})).rejects.toThrow('QUOTE_CONFLICT');
+});

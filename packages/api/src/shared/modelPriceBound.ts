@@ -9,6 +9,7 @@
  * Browser and server share this file; no database, network or Node imports.
  */
 import type { PriceLayer, PricedEndpoint } from "./modelPricing";
+import { nominalPricing, type NominalPricing } from "./nominalPricing";
 
 const SCALE = 12;
 const UNIT = 10n ** BigInt(SCALE);
@@ -44,16 +45,23 @@ export function cacheWriteIsAdditive(model: string, prompt: bigint, write: bigin
   return model.startsWith("google/") || write < prompt;
 }
 
+function inheritedPrice(endpoint: PricedEndpoint, layer: PriceLayer, key: keyof PriceLayer): string | undefined {
+  return layer[key] ?? endpoint.base[key];
+}
+
 type Layer = { label: string; price: (key: keyof PriceLayer) => bigint | null };
 
 /** The base layer plus every override that can apply to a call of up to `promptTokensUpper` input tokens.
  * Time-of-day overrides always apply (a call may cross a boundary; plan D7). Missing override prices inherit the base. */
 function applicableLayers(endpoint: PricedEndpoint, promptTokensUpper: number): Layer[] {
-  const read = (layer: PriceLayer, key: keyof PriceLayer) => (layer[key] === undefined ? null : units(layer[key]!));
+  const read = (layer: PriceLayer, key: keyof PriceLayer) => {
+    const value = inheritedPrice(endpoint, layer, key);
+    return value === undefined ? null : units(value);
+  };
   const layers: Layer[] = [{ label: "基础价", price: key => read(endpoint.base, key) }];
   endpoint.overrides.forEach((override, index) => {
     if (override.when.minPromptTokens !== undefined && promptTokensUpper < override.when.minPromptTokens) return;
-    layers.push({ label: `第 ${index + 1} 档`, price: key => read(override.prices, key) ?? read(endpoint.base, key) });
+    layers.push({ label: `第 ${index + 1} 档`, price: key => read(override.prices, key) });
   });
   return layers;
 }
@@ -103,4 +111,34 @@ export function priceIncreases(
     { field: "request", frozen: frozen.requestUsd, current: current.requestUsd },
   ];
   return pairs.filter(pair => units(pair.frozen) < units(pair.current));
+}
+
+/** List prices and the upper bound share the exact snapshot and base inheritance. */
+export function deriveListPrices(endpoint: PricedEndpoint, pricingHash: string): NominalPricing | DeriveRefusal {
+  if (!endpoint.admissible) return "NOT_ADMISSIBLE";
+  if (endpoint.unknownKeys.length) return "UNKNOWN_PRICE_FIELD";
+  const read = (layer: PriceLayer) => {
+    const prompt = inheritedPrice(endpoint, layer, "prompt");
+    const completion = inheritedPrice(endpoint, layer, "completion");
+    const reasoning = inheritedPrice(endpoint, layer, "internal_reasoning");
+    if (prompt === undefined || completion === undefined) return null;
+    return { prompt, completion, request: inheritedPrice(endpoint, layer, "request") ?? "0",
+      ...(reasoning === undefined ? {} : { internalReasoning: reasoning }) };
+  };
+  const base = read(endpoint.base);
+  if (!base) return "NOT_ADMISSIBLE";
+  const tiers: NominalPricing["tiers"] = [{ minPromptTokens: 0, ...base }];
+  const timeOfDay: NominalPricing["timeOfDay"] = [];
+  for (const override of endpoint.overrides) {
+    const prices = read(override.prices);
+    if (!prices) return "NOT_ADMISSIBLE";
+    const when = override.when;
+    if (when.utcDays !== undefined || when.utcStart !== undefined || when.utcEnd !== undefined) {
+      timeOfDay.push({ ...prices, ...(when.minPromptTokens === undefined ? {} : { minPromptTokens: when.minPromptTokens }) });
+    } else if (when.minPromptTokens !== undefined) tiers.push({ minPromptTokens: when.minPromptTokens, ...prices });
+    else return "NOT_ADMISSIBLE";
+  }
+  tiers.sort((a, b) => a.minPromptTokens - b.minPromptTokens);
+  const parsed = nominalPricing.safeParse({ version: "nominal-v1", pricingHash, endpointTag: endpoint.tag, tiers, timeOfDay });
+  return parsed.success ? parsed.data : "NOT_ADMISSIBLE";
 }

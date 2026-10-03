@@ -50,3 +50,36 @@ it.each([
 it('does not let a header replace a missing body ID for finality',()=>{
  expect(openRouterEvidence({...observed(raw.replace('"id":"gen-local",','')),generationId:'gen-local'},identity,'response')).toMatchObject({providerId:'gen-local',cost:null,final:false,evidenceKind:'transport_observation'});
 });
+
+it('projects native response counts exactly while preserving SDK replay and cache audit fields',()=>{
+ const wire=raw.replace('"cost":0.000000123456','"cost":0.000000123456,"prompt_tokens":1000,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":900,"cache_write_tokens":200},"completion_tokens_details":{"reasoning_tokens":5}');
+ const evidence=openRouterEvidence(observed(wire),identity,'response');
+ expect(evidence.usage).toMatchObject({inputTokens:'1000',outputTokens:'20',reasoningTokens:'5',cachedTokens:'900',cacheCreationTokens:'200',
+  sdkResponse:{usage:{prompt_tokens:1000,completion_tokens:20}}});
+ expect(evidence).toMatchObject({cost:'0.000000123456',final:true});
+});
+it('uses native generation counts, never normalized lookup counts or cached cost discounts',()=>{
+ const wire=JSON.stringify({data:{id:'gen-local',model:identity.model,finish_reason:'stop',total_cost:0.01,
+  native_tokens_prompt:100,native_tokens_completion:20,native_tokens_reasoning:5,native_tokens_cached:90,
+  tokens_prompt:200,tokens_completion:40,cache_discount:0.99}});
+ expect(openRouterEvidence(observed(wire),identity,'lookup','gen-local').usage).toEqual({
+  inputTokens:'100',outputTokens:'20',reasoningTokens:'5',cachedTokens:'90'});
+ const noNative=wire.replace('"native_tokens_prompt":100,','');
+ expect(openRouterEvidence(observed(noNative),identity,'lookup','gen-local').usage).not.toHaveProperty('inputTokens');
+});
+it.each(['-1','0.5','9007199254740993','true','{}','"broken"'])('preserves invalid or oversized token evidence %s for SQL conflict',token=>{
+ const wire=raw.replace('"cost":0.000000123456',`"cost":0.000000123456,"prompt_tokens":${token}`);
+ const evidence=openRouterEvidence(observed(wire),identity,'response');
+ expect(evidence.usage).toHaveProperty('inputTokens');
+ const actual=evidence.usage?.inputTokens;
+ expect(actual).toEqual(token==='true'?true:token==='{}'?{}:token==='"broken"'?'broken':token);
+});
+it.each([['1e3','1000'],['1.0','1'],['0e+8','0']])('normalizes exact integer token lexeme %s without float', (token,expected)=>{
+ const wire=raw.replace('"cost":0.000000123456',`"cost":0.000000123456,"prompt_tokens":${token}`);
+ expect(openRouterEvidence(observed(wire),identity,'response').usage).toMatchObject({inputTokens:expected});
+});
+it('keeps native token evidence when terminal official cost is missing',()=>{
+ const wire=raw.replace('"cost":0.000000123456','"prompt_tokens":10,"completion_tokens":2');
+ expect(openRouterEvidence(observed(wire),identity,'response')).toMatchObject({cost:null,final:false,
+  usage:{inputTokens:'10',outputTokens:'2',sdkResponse:{usage:{prompt_tokens:10}}}});
+});

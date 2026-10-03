@@ -51,6 +51,34 @@ function officialCost(value:unknown):string {
  const canonical=integer!.replace(/^0+(?=\d)/,'')+(part.replace(/0+$/,'')?'.'+part.replace(/0+$/,''):'');
  decimal(canonical);return canonical;
 }
+/** Preserve malformed present values so SQL distinguishes conflict from missing evidence.
+ * parseExactJson supplies numeric lexemes; only integral nonnegative forms normalize. */
+function tokenEvidence(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const match = /^(0|[1-9][0-9]*)(?:\.([0-9]+))?(?:[eE]([+-]?[0-9]{1,3}))?$/.exec(value);
+  if (!match) return value;
+  const fraction = match[2] ?? '', exponent = Number(match[3] ?? 0);
+  if (Math.abs(exponent) > 100) return value;
+  const digits = BigInt(match[1]! + fraction), shift = exponent - fraction.length;
+  if (shift >= 0) return (digits * 10n ** BigInt(shift)).toString();
+  const divisor = 10n ** BigInt(-shift);
+  return digits % divisor === 0n ? (digits / divisor).toString() : value;
+}
+function canonicalUsage(data: Record<string, unknown>, source: 'response' | 'lookup'): Record<string, unknown> {
+  const usage = data.usage as Record<string, unknown> | undefined;
+  const prompt = usage?.prompt_tokens_details as Record<string, unknown> | undefined;
+  const completion = usage?.completion_tokens_details as Record<string, unknown> | undefined;
+  const fields = source === 'response' ? {
+    inputTokens: usage?.prompt_tokens, outputTokens: usage?.completion_tokens,
+    reasoningTokens: completion?.reasoning_tokens, cachedTokens: prompt?.cached_tokens,
+    cacheCreationTokens: prompt?.cache_write_tokens,
+  } : {
+    inputTokens: data.native_tokens_prompt, outputTokens: data.native_tokens_completion,
+    reasoningTokens: data.native_tokens_reasoning, cachedTokens: data.native_tokens_cached,
+  };
+  return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined && value !== null)
+    .map(([key, value]) => [key, tokenEvidence(value)]));
+}
 /** Server-observed official response only; no browser receipt endpoint.
  * https://openrouter.ai/docs/cookbook/administration/usage-accounting
  * Cost finality is separate from whether a usable answer was delivered.
@@ -111,7 +139,8 @@ function projectOpenRouterEvidence(observation:TransportObservation, identity:Op
   // A terminal response can carry a usable answer while cost is unresolved.
   // Keep the original response available to Runtime; only financial finality
   // waits for an official lookup. Diagnostics do not establish zero cost.
-  const responseUsage=source==='response'?{sdkResponse}:null;
+  const tokens=canonicalUsage(data,source);
+  const responseUsage=source==='response'?{...tokens,sdkResponse}:Object.keys(tokens).length?tokens:null;
   if(typeof cost!=='string')return {...base,usage:responseUsage,costIssue:'missing_cost'};
   let exactCost:string;
   try { exactCost=officialCost(cost); } catch{return {...base,usage:responseUsage,costIssue:'invalid_cost'};}
