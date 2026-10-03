@@ -267,7 +267,7 @@ C 中任何一项不满足时：
 **收尾和成功是两回事。** 结果元数据 `completeness` 有三种取值：`complete`、`length_limit`、`stopped`。
 
 - 三种情况都通过现有 `complete` 分支保存，`kind` 仍是 `usable_result`，所以聊天里能展示已写内容。
-- 依赖"完整成果"的消费者只认 `complete`：报告候选、结构化解析、B1 capture。
+- 依赖"完整成果"的消费者（报告候选、结构化解析、B1 capture）只采用 `completeness:'complete'` 的结果；带附属整理器的执行还要求 `organized:true`。`stopped:true` 只表示用户点过停止，本身不阻止采用。
 - 附属整理器：`length_limit` 时照常处理用户已经看到的正文（现有 `complete` 分支要求有 summary），整理结果同样带上来源的 `completeness`；`stopped` 时不再整理，见 4.6 的 2B。
 - 下列情况都不会把前面已持久化的正文误判为合格成果，这些正文仍然可读：
   - 第 `maxSegments` 段仍然是 `length`；
@@ -275,7 +275,7 @@ C 中任何一项不满足时：
   - 停止；
   - 最后一段被拒、返回空正文或坏的工具调用。
 
-下文的 `lengthLimit`、`stopped` 都是 `completeness` 的简写。
+下文提到的 `lengthLimit`，是 `completeness:'length_limit'` 的简写。`stopped:true` 是另一个字段，只表示用户点过停止（4.6），和 `completeness:'stopped'` 不是一回事。
 
 **D. 时间**：
 
@@ -364,7 +364,7 @@ Claude 新模型不支持 assistant 预填，所以续写段是**以 user 结束
   - 除此之外不改写模型正文。
 - **重放**：续写请求由回执和冻结合同确定性地重建，hash 相同，只读回执，不重发。
 - **Session**：只在最终完成时写入一条 assistant 消息，内容为全文投影（受 4.8 约束）。继续指令和中间各段都不写入 Session。
-- **B1 capture**：只在**最终完成**、且结果没有 `lengthLimit`/`stopped` 时幂等执行一次，不按段执行。
+- **B1 capture**：只在**最终完成**、`completeness:'complete'`（带附属整理器时还要 `organized:true`）时幂等执行一次，不按段执行。
 
 ### 4.4 一次回答的流程
 
@@ -425,19 +425,39 @@ Claude 新模型不支持 assistant 预填，所以续写段是**以 user 结束
      - 结果由宿主根据回执投影截到 `stopAt`（截断规则见下面第 2A 项），元数据 `stopped:true`；
      - execution 进入 `completed`；如果有未知费用，进入 `cost_pending`。
    - **(c) 有已派发、未结束的 call 时**：只做 (a)，返回 `stopping`。
-     - 那次调用所在的 HTTP 拿到回执后，走 `complete` 分支保存结果（含这一段，截到 `stopAt`）。
+     - 那次调用所在的 HTTP 拿到回执后，按下面的规则走 `complete` 分支保存结果（含这一段）。
      - 因为 `cancel_requested` 没被设置，`complete` 能成功。
-     - 扩展后的 `complete` 分支在 `paused_reason='user_stop'` 时，要求结果带 `stopped:true`，并且**可见正文**的 `char_length` 不超过停止时登记的 `stopAt`。
-       - 导师回合：先把 `p_result->>'body'` 解析为 jsonb，取 `->>'message'`，再计数；
-       - 普通回合：直接对 `p_result->>'body'` 计数；
-       - 用哪种格式由冻结上下文的 `providerRequestFormat` 决定，不由结果自报；
-       - 导师回合的 body 解析失败，或者 `format` 不是 `AGENT_TURN_FORMAT`，都直接拒绝。
+   - **停止下的结果字段**（宿主生成，(b)、(c)、(d) 共用）：
+     - `stopped:true`：`user_stop` 下的每个结果都必须带，没有例外。
+     - `completeness`：
+       - 主回复已经完整写完，并且没有因为 `stopAt` 被截断时，为 `'complete'`；
+       - 否则为 `'stopped'`；
+       - 遇到 4.8 的保存截短时为 `'length_limit'`。
+     - `organized`：只在 `attachedOrganizer` 的执行里出现。有 summary 时为 `true`，没有时为 `false`（见 2B）。
+   - **`complete` 分支在 `paused_reason='user_stop'` 下的完整规则**（C2 追加迁移重定义 `runtime_execution`；不在 `user_stop` 下的执行完全保持 0106 现状）：
+     - **R1**：结果必须带 `stopped:true`。
+     - **R2 正文**：
+       - 已有 `primary_result` 时，沿用 `0106:452`：body 必须等于 primary 的 body，不做 `stopAt` 计数（主回复已经全部写完并显示）；
+       - 没有 `primary_result` 时，**可见正文**的 `char_length` 不超过登记的 `stopAt`：
+         - 导师回合：先把 `p_result->>'body'` 解析为 jsonb，取 `->>'message'`，再计数；
+         - 普通回合：直接对 `p_result->>'body'` 计数；
+         - 用哪种格式由冻结上下文的 `providerRequestFormat` 决定，不由结果自报；
+         - 导师回合的 body 解析失败，或者 `format` 不是 `AGENT_TURN_FORMAT`，都直接拒绝。
+     - **R3 整理器**（只针对 `attachedOrganizer`）：
+       - 结果带 summary 且 `organized:true`：现有的 `0106:453` 检查本来就会通过，不改；
+       - 结果不带 summary 且 `organized:false`：跳过 `RUNTIME_ORGANIZER_PENDING`；
+       - 其他组合（不带 summary 却标 `organized:true`，或者带 summary 却标 `organized:false`）一律拒绝。
+     - **R4**：`completeness` 只接受 `complete`、`stopped`、`length_limit` 三个值。
+     - 除 R1–R4 之外的检查（`kind`、`active_execution`、Session 批次、结果冲突）与 0106 相同。
+     - `stop` 动作 (b) 调用同一段 `complete` 逻辑；`checkpoint_primary` 不改。
    - **2A. 截断后重新封装**（宿主执行，(b)、(c)、(d) 共用）：
      - **普通回合**：`body = 投影前 stopAt 个码点`。
      - **导师回合**：
        - 取全部已写段的 `message` 投影，截到前 `stopAt` 个码点，去掉首尾空白，得到 `m`；
        - 卡片 `card` 只在**没有发生截断**时保留，即 `stopAt` ≥ 完整 `message` 的码点数，并且这一段确实带回了卡片。
          截断时 `card = null`，因为用户没有看完正文，问题卡也没有显示过。
+       - 带卡片的导师回合只有一段：截断的工具调用不续写（4.2 A），续写段也不允许调用工具（4.3）。
+         所以"卡片 + 多段正文"的组合不存在。
        - 再用 `agentTurnBody(m, card)` 重新生成信封，经过与正常完成相同的 schema 校验后保存。
          对冻结了 `continue-v1` 的 execution，`message` 的长度上限按 4.8 的字节规则，不再是 20000 字符。
        - `m` 为空且 `card = null` 时，`agentTurnBody` 会拒绝（`AGENT_TURN_BODY_EMPTY`），这种情况按 (e) 处理。
@@ -449,16 +469,15 @@ Claude 新模型不支持 assistant 预填，所以续写段是**以 user 结束
    - **2B. 带附属整理器的执行被停止**（`attachedOrganizer`，C0 收拢的定位页主回复）：
      - **问题**：停止时整理器可能还没跑。现有 `complete` 分支在 `attachedOrganizer` 下要求有 `primary_result` 和 `summary`，否则以 `RUNTIME_ORGANIZER_PENDING` 拒绝（`0106:452-453`）。而停止又拒绝新的 claim，整理器之后也没法再跑。
      - **做法：停止后不整理**（与"停止 = 不再产生新的调用和花费"一致，不为整理器另开一次调用）：
-       - 结果保存已写正文，`completeness:'stopped'`，`organized:false`，没有 `summary`。
+       - 结果保存已写正文，`stopped:true`、`organized:false`，没有 `summary`。`completeness` 按上面的规则取值：已有 `primary_result` 时为 `'complete'`，否则为 `'stopped'`。无论哪种，`organized:false` 都不会被 B1 和报告采用。
        - 已经有 `primary_result`（主回复已完成、整理器还没完成）时，body 就用 `primary_result.body`，不再按 `stopAt` 截断（主回复已经全部显示）。现有的"body 必须与 primary checkpoint 一致"校验（`0106:452`）保持不变。
-       - 整理器的调用如果已经派发（在途），按 (c) 处理：等它的回执落库，正常带 `summary` 完成，结果为 `completeness:'complete'`、`organized:true`，因为主回复和整理都已经完成。
+       - 整理器的调用如果已经派发（在途），按 (c) 处理：等它的回执落库，正常带 summary 完成。
+         结果为 `stopped:true`、`completeness:'complete'`、`organized:true`，满足 R1–R3。
        - 整理器还没派发：按 (a) 取消未派发的 call 并释放冻结，然后按 (b) 保存未整理的结果。
-     - **需要改的 SQL**：在 C2 的追加迁移里重定义 `runtime_execution`：
-       - `complete` 分支：只在 `paused_reason='user_stop'`、结果带 `stopped:true` 和 `organized:false`、并且没有 `summary` 时，跳过 `RUNTIME_ORGANIZER_PENDING` 检查。其他情况保持现状，包括 `0106:452` 的 primary 一致性检查。
-       - `stop` 动作 (b)：调用同一个 `complete` 逻辑。
-       - `checkpoint_primary` 不改。
+       - 停止时主回复的段还在途：这一段落库后，宿主**不再** checkpoint primary、也不派发整理器（claim 已被拒），直接按 R2（没有 primary 的分支）和 R3（`organized:false`）保存。
+     - **需要改的 SQL**：只有上面 R1–R4 这一处。`checkpoint_primary` 和不在 `user_stop` 下的分支都不改。
      - **右侧整理怎么处理**：
-       - 这一轮不更新右侧信息，B1 capture 不执行；
+       - `organized:false` 时，这一轮不更新右侧信息，B1 capture 不执行；
        - 界面在这条回答下显示"已停止，本轮未整理"；
        - 不自动补整理，也不在下一轮自动补做这一轮的整理。用户可以重新发送，或者在后续的对话驱动设计里手动整理（CONTENT-CONVERSATION-DRIVEN）。
    - **(e) 一个字都还没写出来**（`stopAt=0`，且没有任何已落库的正文）：结果为空，等价于现有取消，最终状态 `cancelled`，没有正文。
@@ -497,15 +516,28 @@ Claude 新模型不支持 assistant 预填，所以续写段是**以 user 结束
 - **计量方式**：
   - 宿主在流式过程中和每段结束后，按**实际**结果投影计算 `bytes(result)`；
   - 计算方式与数据库 `jsonb::text` 的序列化一致（JSON 转义，非 ASCII 字符保持 UTF-8），由测试对照数据库实际的 `octet_length` 校准。
-- **预留**：`ENVELOPE_RESERVE` = 非正文字段的最坏字节数，包括：
-  - kind 和 `completeness` 等元数据；
-  - 卡片的最大序列化长度；
-  - 附属整理器 summary 的最坏值：`v3_summary_max_tokens` 上限 4096 × 8 字节；
-  - 4096 字节余量。
-  - 合计约 4 万字节。
-  - 可用于正文的空间：`ROOM = 262144 − ENVELOPE_RESERVE`。
+- **计量对象是整个结果**：`bytes(result)` = `octet_length(p_result::text)`，包括信封、卡片、summary、元数据，以及导师回合 body 的**双层转义**。
+  - 导师回合的 body 是 JSON 字符串，又嵌在结果 JSON 里，所以正文里的一个引号或反斜杠最终占 4 字节，一个换行占 3 字节，一个中文字占 3 字节。
+  - 所以每个 UTF-16 码元最坏按 4 字节计算。
+- **结果只有两种形状**（4.6 2A）：
+  - **形状 P，纯正文**：可以多段，不可能带卡片，信封里 `card:null`。
+  - **形状 C，带卡片的导师回合**：只有一段，不续写。
+- **形状 P 的预留** `RESERVE_P`，用于续写前的判断：
+  - 信封和元数据的固定开销；
+  - 附属整理器 summary 的最坏值：`v3_summary_max_tokens` 上限 4096 × 8 字节 = 32768；
+  - 4096 字节余量；
+  - 合计约 4 万字节。不含卡片，因为形状 P 不可能有卡片。
+  - 可用于正文的空间：`ROOM = 262144 − RESERVE_P`。
+- **形状 C 的最坏值**：
+  - `questionToolCardSchema` 允许 `message` 和 `recommendationReason` 各 20000 个 UTF-16 码元；
+  - `agentTurnBody` 把卡片的 `message` 在信封顶层再存一份；
+  - 再加上 `question` 500 和 `options` 5 × 200。
+  - 合计最多约 61500 码元，按每码元 4 字节约 246000 字节；再加 summary 最坏 32768 字节，可能超过 262144。
+  - 所以形状 C **不能**靠预留来保证，由下面"保存前截短"的规则处理。
+  - 本方案不改卡片 schema。卡片 schema 属于提问工具协议，单独调整会影响导师提示词。
 - **第一次调用不受影响**：第一段照常用该环境的 O 派发，派发前不做容量预留。
 - **续写前的判断**：
+  - `bytes(已写正文)` 指已写正文在结果里的实际序列化字节（导师回合按双层转义计算）。
   - 只有 `ROOM − bytes(已写正文) ≥ MIN_SEGMENT_ROOM`（首版 16384 字节）时才续写，否则以 `lengthLimit` 收尾。
   - 续写段的输出上限取：
     ```
@@ -513,11 +545,25 @@ Claude 新模型不支持 assistant 预填，所以续写段是**以 user 结束
     ```
   - ρ 为每 token 的典型序列化字节数，首版取 4：中文约 3 字节/字，英文平均每 token 不到 4 字节。
   - ρ 用实际回执校准，只用来**减少付费写出、却存不下的 token**，不承担"不超过上限"的保证。
-- **保存前截短（唯一的硬保证）**：
-  - 最终保存前，按实际序列化字节检查；
-  - 超出 `ROOM` 时，在 Unicode 码点边界截短正文，使整个结果不超过 262144，并记 `lengthLimit`；
-  - 完整原文仍在回执里。
-  - 所以无论 O、段数、字符组成如何，保存都不会因为超过上限而失败，正常调用也不会被预留挡掉。
+- **保存前截短（唯一的硬保证）**：最终保存前，按实际的 `bytes(result)` 检查，超过 262144 时按固定顺序截短。截短都在 Unicode 码点边界进行，每截一次重新封装、重新计量：
+  1. **形状 P**：截短可见正文，导师回合截 `message` 后重新调用 `agentTurnBody`。
+  2. **形状 C**：
+     1. 先截短 `message`。信封顶层的 `message` 和 `card.message` 截成**同一个**值，保持 `agentTurnResult` 的"两份一致"；
+     2. 仍然超出时，截短 `recommendationReason`。
+     - 两者都至少保留 1 个字符，满足 schema 的 `min(1)`；
+     - `question`、`options`、`recommended` 和 summary 永远不截。
+  - **能保证的依据**：除这两个长文本以外的部分，最坏约为：
+    - `question` 和 `options` 1500 码元 × 4 字节 = 6000；
+    - summary 32768；
+    - 信封、元数据和余量约 8192；
+    - 合计不到 47000 字节。
+    - 所以两个长文本至少还有约 215000 字节可用，截短后一定能放下，并且截完仍然通过 `questionToolCardSchema` 和 `agentTurnBody` 的校验。
+  - 截短后记 `completeness:'length_limit'`，完整原文仍在回执里。
+  - 所以无论 O、段数、卡片、字符组成如何，保存都不会因为超过上限而失败；正常的第一次调用也不会被预留挡掉。
+- **Session item**（`0106:40`）：
+  - 形状 P 由宿主在最终完成时写入一条 assistant 消息，内容是截短后的投影，受同一个 ROOM 约束。
+  - 形状 C 沿用 v5 现有的 Session 写入（工具调用参数里 `message`、`recommendationReason`、`question`、`options` 各一份）。最坏约 41500 码元 × 4 字节，约 166000 字节，在 262144 之内。
+  - 截短发生时，Session 写入用截短后的值。
 - **量级**（只作说明，以实测为准）：O=32768 写满时，中文正文约十万字节，在 ROOM 之内。
   所以正式环境一般只会在第二段续写时，才可能因为容量收尾。
 - **为什么不提高 262144**：
@@ -632,7 +678,7 @@ C2 合并 → REPORT-GEN R-A / R-B → PAYG 前端技术验收 → 默认切 v2 
 - **§7 持久化契约**：
   - 有正文的 `length` 触发续写；
   - 正文为空的 `length`、截断的工具调用仍然不能作为候选；
-  - 结果带 `lengthLimit` 或 `stopped` 的报告**不能**作为可确认的完整候选（13 部分完整性校验不变）；
+  - `completeness` 不是 `'complete'` 的报告**不能**作为可确认的完整候选（13 部分完整性校验不变）；
   - tools、`maxTurns`、不写 Session 的窄分支，与 4.3 对齐。
 - **§8 等待、取消、资料冲突**：引用本方案 4.5–4.7。
 - **§9 分章**：分章原本是 D1 不批准时的退路，现在不再需要。
@@ -741,6 +787,14 @@ C2 合并 → REPORT-GEN R-A / R-B → PAYG 前端技术验收 → 默认切 v2 
   - O=32768 的第一次调用不会被容量预留挡掉；
   - `O_k` 按剩余空间缩小；剩余空间小于 `MIN_SEGMENT_ROOM` 时以 `lengthLimit` 收尾；
   - 宿主计算的字节数与数据库 `octet_length(jsonb::text)` 一致；
+  - **最坏卡片**：构造 `message` 和 `recommendationReason` 各 20000 码元（分别全用引号、反斜杠、中文、换行和代理对构造），`question` 500、5 个 200 码元的选项，再加最坏 summary：
+    - 保存的结果不超过 262144；
+    - 按"先 message、后 recommendationReason"的顺序截短；
+    - 截短后信封的 `message` 等于 `card.message`；
+    - 截短后通过 `questionToolCardSchema` 和 `agentTurnBody` 的校验；
+    - `question`、`options` 和 summary 不变；
+    - 记 `length_limit`；
+    - Session item 不超过 262144；
   - 夹具覆盖 4 字节 emoji、引号、反斜杠、控制字符（每字符 6 字节转义）和全中文；
   - 恰好等于上限通过，加 1 字节被截短；
   - Session item 和 `checkpoint_primary` 用同一套测试；
@@ -755,9 +809,11 @@ C2 合并 → REPORT-GEN R-A / R-B → PAYG 前端技术验收 → 默认切 v2 
   - 停止时的可见正文校验，各补一条：
     - 导师回合不带卡：截到 `stopAt` 的 `message` 重新封装后通过 schema，`complete` 按 `message` 计数通过，超过 `stopAt` 的被拒绝；
     - 带附属整理器的执行被停止：
-      - 停在 `waiting_resume`、整理器还没派发：保存 `stopped`、`organized:false`、没有 summary，`complete` 成功（不报 `RUNTIME_ORGANIZER_PENDING`），未派发的 call 被取消并释放冻结；
+      - 停在 `waiting_resume`、整理器还没派发：保存 `stopped:true`、`organized:false`、没有 summary，`complete` 成功（不报 `RUNTIME_ORGANIZER_PENDING`），未派发的 call 被取消并释放冻结；
       - 已有 `primary_result`：body 等于 primary 的 body；body 不一致仍然报 `RUNTIME_CHECKPOINT_CONFLICT`；
-      - 整理器在途：回执落库后正常带 summary 完成，整理器只结算一次；
+      - 整理器在途：回执落库后正常带 summary 完成，结果为 `stopped:true`、`completeness:'complete'`、`organized:true`，`complete` 接受；整理器只结算一次；
+      - 主回复段在途时停止：这一段落库后不 checkpoint primary、不派发整理器，按 `organized:false` 保存；
+      - R3 拒绝"没有 summary 却标 `organized:true`"和"有 summary 却标 `organized:false`"；R1 拒绝 `user_stop` 下没有 `stopped:true` 的结果；
       - 没有停止的执行如果缺 summary，仍然报 `RUNTIME_ORGANIZER_PENDING`；
       - 右侧信息不更新，B1 不执行；
     - 导师回合带卡：没有截断时保留卡片；截断时 `card=null`；`message` 为空且无卡时按 (e) 处理；
@@ -790,7 +846,7 @@ C2 合并 → REPORT-GEN R-A / R-B → PAYG 前端技术验收 → 默认切 v2 
   - 冷缓存、过期、没有历史断点时仍然正确；
   - 断点不后移；
   - adapter 只接受带可信冻结合同的那一种尾部形状。
-- **B1**：capture 只在最终完成时执行一次，结果带 `lengthLimit` 或 `stopped` 时不执行，重放不会产生第二份。
+- **B1**：capture 只在最终完成、`completeness:'complete'`（带附属整理器时还要 `organized:true`）时执行一次；`completeness` 为 `length_limit`/`stopped` 或 `organized:false` 时不执行；`stopped:true` 但 `complete` 且已整理时照常执行；重放不会产生第二份。
 
 ## 11. 本方案实际做过的核对
 
@@ -830,3 +886,5 @@ C2 合并 → REPORT-GEN R-A / R-B → PAYG 前端技术验收 → 默认切 v2 
 | 机器人复审 P2（calls 闸门重复扣，线程 4173464773） | 4.3：续写段额度在首次闸门里随 `maxCalls` 一次扣满；跨 HTTP 继续只检查暂停、不扣额度，以已有 claim 过的 call 作为扣过的依据，不新增状态；标注 #553 §5 需要对齐；补"四段 Hobby 回复只扣一次"必测 |
 | 机器人复审 P1（带整理器的执行被停止，线程 4173504630） | 4.6 新增 2B：停止后不整理，结果 `stopped`、`organized:false`、没有 summary；已有 primary 时用它的 body；整理器在途时等回执后正常完成；追加迁移里的 `complete` 只在 user_stop 下跳过 `RUNTIME_ORGANIZER_PENDING`，保留 primary 一致性检查；右侧不更新、B1 不执行、不自动补整理；4.2 同步；补必测 |
 | 机器人复审 P2（join-v1 与 64 字符缓冲，线程 4173504631） | 4.3：重叠检测长度上限 64，缓冲 64 正好覆盖所有候选长度，实时和重放的投影一致；超过 64 字符的重复原样保留（首版限制）；补必测 |
+| 机器人复审 P1（卡片最坏值超过预留，线程 4173597656） | 4.8：计量对象改为整个结果（含导师 body 的双层转义，每码元最坏 4 字节）；把结果分成形状 P（多段、无卡片）和形状 C（带卡片、只有一段）；预留只用于形状 P；形状 C 由保存前截短保证（先 message 两份同步、后 recommendationReason，其他字段不截），并给出可行性计算；Session item 的最坏值；补最坏卡片必测 |
+| 机器人复审 P1（停止规则不统一，线程 4173597658） | 4.6：统一为 `user_stop` 下所有结果都带 `stopped:true`，另用 `completeness` 和 `organized` 区分；`complete` 分支只改 R1–R4 一处，已有 primary 时沿用 0106:452、不按 `stopAt` 计数；整理器在途完成的结果为 `stopped:true`、`complete`、`organized:true`；主回复段在途时停止也写明了；4.2 的消费规则同步；补必测 |
