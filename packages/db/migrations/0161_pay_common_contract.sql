@@ -74,7 +74,7 @@ WITH rel AS (
 )
 SELECT md5(string_agg(k || '=' || coalesce(d, '<null>'), E'\n' ORDER BY k)) INTO actual FROM grouped WHERE g ~ '^[^:]+:(payment_orders|user_subscriptions|subscription_credit_grants|payment_provider_refs)$' OR g ~ '^fn(acl)?:pay_common_';
 
-  IF actual = '42526f45dac32fd11eb955dac81f5ddf' THEN RETURN; END IF;
+  IF actual = 'a006da3060397b886bd7e33162eb7f33' THEN RETURN; END IF;
   IF actual IS DISTINCT FROM '178f7c617b86e7cd66f5d4dacbc91a20' THEN
     RAISE EXCEPTION 'PAY_COMMON_SCHEMA_DRIFT';
   END IF;
@@ -200,9 +200,8 @@ ALTER TABLE public.user_subscriptions
     (payment_channel IS NULL AND merchant_namespace IS NULL AND payment_mode IS NULL AND contract_snapshot IS NULL)
     OR (payment_channel IS NOT NULL AND merchant_namespace IS NOT NULL AND payment_mode IS NOT NULL
       AND contract_snapshot IS NOT NULL AND membership_plan_id IS NOT NULL
-      AND contract_snapshot->>'item_type'='membership_plan'
-      AND contract_snapshot->>'item_id'=membership_plan_id::text
-      AND contract_snapshot->>'billing_cycle'=billing_cycle));
+      -- Original opening contract; upgrade/renewal terms belong to order and grant snapshots.
+      AND contract_snapshot->>'item_type'='membership_plan'));
 ALTER TABLE public.subscription_credit_grants
   ADD COLUMN subscription_id uuid,
   ADD COLUMN source_order_id uuid,

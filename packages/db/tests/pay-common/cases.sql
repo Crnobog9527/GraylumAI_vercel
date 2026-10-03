@@ -14,11 +14,14 @@ END $$;
 DO $$
 DECLARE a uuid:=gen_random_uuid(); b uuid:=gen_random_uuid(); plan uuid;
   subscription uuid:=gen_random_uuid(); ord uuid:=gen_random_uuid(); grantid uuid:=gen_random_uuid();
-  legacy uuid:=gen_random_uuid(); quote jsonb; facts jsonb; captured jsonb; n integer;
+  legacy uuid:=gen_random_uuid(); upgrade_subscription uuid:=gen_random_uuid(); upgraded_plan uuid;
+  original_contract jsonb; quote jsonb; facts jsonb; captured jsonb; n integer;
 BEGIN
   INSERT INTO profiles(id) VALUES(a),(b);
   INSERT INTO membership_plans(name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
     VALUES('Local fixture','test_pay_common',false,false,0) RETURNING id INTO plan;
+  INSERT INTO membership_plans(name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
+    VALUES('Upgrade fixture','test_pay_common_upgrade',false,false,0) RETURNING id INTO upgraded_plan;
   quote:=jsonb_build_object('version',1,'item_type','membership_plan','item_id',plan,
     'item_updated_at','2026-10-03T00:00:00.000Z','billing_cycle','yearly','currency','usd','unit','major','price','99.123456789012',
     'discount','0','tax_behavior','exclusive','credits',1200,'bonus_credits',0);
@@ -28,6 +31,24 @@ BEGIN
     current_period_start,current_period_end,payment_channel,merchant_namespace,payment_mode,contract_snapshot)
   VALUES(subscription,a,plan,'test_subscription','yearly','active','true',now(),now()+interval '1 year',
     'stripe','test_merchant','test',quote);
+  -- An original opening contract stays immutable while the same subscription changes its current terms.
+  original_contract:=quote||'{"billing_cycle":"monthly"}'::jsonb;
+  INSERT INTO user_subscriptions(id,user_id,membership_plan_id,stripe_subscription_id,billing_cycle,status,cancel_at_period_end,
+    current_period_start,current_period_end,payment_channel,merchant_namespace,payment_mode,contract_snapshot)
+  VALUES(upgrade_subscription,a,plan,'test_upgrade_subscription','monthly','active','true',now(),now()+interval '1 month',
+    'stripe','test_merchant','test',original_contract);
+  UPDATE user_subscriptions SET membership_plan_id=upgraded_plan WHERE id=upgrade_subscription;
+  SELECT count(*) INTO n FROM user_subscriptions WHERE id=upgrade_subscription AND membership_plan_id=upgraded_plan;
+  PERFORM pg_temp.assert_true(n=1,'existing contract permits plan upgrade');
+  UPDATE user_subscriptions SET billing_cycle='yearly' WHERE id=upgrade_subscription;
+  SELECT count(*) INTO n FROM user_subscriptions WHERE id=upgrade_subscription AND billing_cycle='yearly';
+  PERFORM pg_temp.assert_true(n=1,'existing contract permits monthly to yearly change');
+  PERFORM pg_temp.denied(format('UPDATE user_subscriptions SET contract_snapshot=contract_snapshot||''{"billing_cycle":"yearly"}''
+    WHERE id=%L',upgrade_subscription),'23514');
+  PERFORM pg_temp.denied(format('UPDATE user_subscriptions SET contract_snapshot=contract_snapshot||jsonb_build_object(''item_id'',%L::text)
+    WHERE id=%L',upgraded_plan,upgrade_subscription),'23514');
+  SELECT contract_snapshot INTO captured FROM user_subscriptions WHERE id=upgrade_subscription;
+  PERFORM pg_temp.assert_true(captured=original_contract,'upgrade preserves original opening contract');
   INSERT INTO payment_orders(id,user_id,item_type,item_id,billing_cycle,mode,status)
   VALUES(legacy,a,'membership_plan',plan,'yearly','subscription','pending');
   UPDATE payment_orders SET status='completed' WHERE id=legacy;

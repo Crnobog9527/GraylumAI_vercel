@@ -74,7 +74,7 @@ WITH rel AS (
   FROM items
 )
 SELECT md5(string_agg(k || '=' || coalesce(d, '<null>'), E'\n' ORDER BY k)) INTO actual FROM grouped WHERE g ~ '^[^:]+:(payment_orders|user_subscriptions|subscription_credit_grants|payment_provider_refs)$' OR g ~ '^fn(acl)?:pay_common_';
-IF actual IS DISTINCT FROM '42526f45dac32fd11eb955dac81f5ddf' THEN RAISE EXCEPTION 'PAY_COMMON_ROLLBACK_DRIFT'; END IF;
+IF actual IS DISTINCT FROM 'a006da3060397b886bd7e33162eb7f33' THEN RAISE EXCEPTION 'PAY_COMMON_ROLLBACK_DRIFT'; END IF;
 IF EXISTS(SELECT 1 FROM public.payment_provider_refs)
   OR EXISTS(SELECT 1 FROM public.payment_orders WHERE payment_mode IS NOT NULL OR payment_channel IS NOT NULL OR source_order_id IS NOT NULL OR subscription_id IS NOT NULL OR purchase_snapshot IS NOT NULL OR merchant_namespace IS NOT NULL OR purchase_request_id IS NOT NULL OR payment_amount_facts IS NOT NULL OR purchase_payload_hash IS NOT NULL)
   OR EXISTS(SELECT 1 FROM public.user_subscriptions WHERE payment_mode IS NOT NULL OR payment_channel IS NOT NULL OR contract_snapshot IS NOT NULL OR merchant_namespace IS NOT NULL)

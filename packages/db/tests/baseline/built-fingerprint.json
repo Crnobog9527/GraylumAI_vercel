@@ -1877,7 +1877,7 @@
   "con:user_checkins.user_checkins_streak_day_check": "e8074816d3b4",
   "con:user_checkins.user_checkins_user_id_checkin_date_pk": "f63039f37099",
   "con:user_checkins.user_checkins_user_id_profiles_id_fk": "f52ea365e97d",
-  "con:user_subscriptions.pay_common_subscription_contract": "97cf5823e0ae",
+  "con:user_subscriptions.pay_common_subscription_contract": "bd4f6fcbcfdf",
   "con:user_subscriptions.pay_common_subscription_owner_key": "828ffa6fca06",
   "con:user_subscriptions.user_subscriptions_billing_cycle_check": "f8597f9ecea6",
   "con:user_subscriptions.user_subscriptions_contract_snapshot_check": "22fd8679b6e7",
