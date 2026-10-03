@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it} from 'vitest';
-import {recoverOpenRouterHistory} from './historyRecovery';
+import {recoverOpenRouterHistory,assertLatestHistoryRetained} from './historyRecovery';
 import {SOURCE_TOOL_NAMES} from './agentTools';
 import {projectOpenRouterItemsForSizing} from './openRouterHistory';
 const user={role:'user',content:'Synthetic question'};
@@ -18,10 +18,24 @@ it.each([
  [user,{type:'function_call_result',callId:'a',output:'Synthetic output'}],
  [user,{type:'function_call',callId:'a',name:'read_source',arguments:'{}'},user,
   {type:'function_call_result',callId:'a',name:'read_source',output:'Synthetic output'}],
-])('can discard an entire incompatible old trace without forwarding a partial chain (%j)',(...history)=>{
- expect(recoverOpenRouterHistory(history,SOURCE_TOOL_NAMES)).toEqual([]);
+])('rejects rather than discarding the most recent turn (%j)',(...history)=>{
+ expect(()=>recoverOpenRouterHistory(history,SOURCE_TOOL_NAMES)).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
  expect(()=>projectOpenRouterItemsForSizing(history,0,SOURCE_TOOL_NAMES)).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
 });
 it('does not cut valid history',()=>{
  const history=[user,answer];expect(recoverOpenRouterHistory(history,SOURCE_TOOL_NAMES)).toEqual(history);
+});
+
+it('allows an originally empty history but never empties a damaged one',()=>{
+ expect(recoverOpenRouterHistory([],SOURCE_TOOL_NAMES)).toEqual([]);
+ expect(()=>recoverOpenRouterHistory([invalid],SOURCE_TOOL_NAMES)).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+});
+
+it('rejects if subsequent capacity selection removes any of the latest recovered turn',()=>{
+ const earlier={role:'user',content:'Earlier'},latest={role:'user',content:'Latest'};
+ const history=[earlier,invalid,latest,answer];
+ const recovered=recoverOpenRouterHistory(history,SOURCE_TOOL_NAMES);
+ expect(()=>assertLatestHistoryRetained(history,recovered)).not.toThrow();
+ for(const selected of [[],[answer],[latest]])
+  expect(()=>assertLatestHistoryRetained(history,selected)).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
 });

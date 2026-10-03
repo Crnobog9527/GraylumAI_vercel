@@ -8,7 +8,7 @@ import {publicAgentText,publicMentorText,type RuntimeProgress} from './progress'
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import {logger} from '../../lib/logger';
-import {recoverOpenRouterHistory} from './historyRecovery';
+import {recoverOpenRouterHistory,latestHistoryTurn,assertLatestHistoryRetained} from './historyRecovery';
 import {projectOpenRouterItemsForSizing} from './openRouterHistory';
 import {AGENT_TURN_REQUEST_FORMAT,validReasoningFormat,
  STREAMING_FORMATS,historyToolNames,openRouterRequestBody} from './providerRequest';
@@ -61,7 +61,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   },
   async execute(executionId:string,onProgress?:(event:RuntimeProgress)=>void){
   type Execution={executionId:string;sessionId:string;runId:string;live:boolean;cancelRequested:boolean;state:string;
-   unavailableReason?:string;historyFrozen?:boolean;context:unknown;billing:FrozenRun;
+   unavailableReason?:string;historyFrozen?:boolean;historyOmitted?:boolean;context:unknown;billing:FrozenRun;
    result:{kind:string;evidenceRef:string;evidenceHash:string;body:string;summary?:string}|null};
   const args={p_execution_id:z.string().uuid().parse(executionId)};
   budget.timing?.enter('execute');
@@ -113,6 +113,15 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const closed=():never=>{accountClosed=true;throw new Error('RUNTIME_ACCOUNT_CLOSED');};
   const progress=(event:RuntimeProgress)=>{
    if(accountClosed)return;try{onProgress?.(event);}catch{/* UI disconnect never interrupts receipt persistence. */}
+  };
+  const normalized=context.providerRequestFormat==='serial-tools-v2'||context.providerRequestFormat==='serial-tools-v6-reasoning'||streaming;
+  const historyChecked=<T>(check:()=>T):T=>{
+   try{return check();}catch(error){
+    if(error instanceof Error&&error.message==='RUNTIME_PROVIDER_HISTORY_DENIED'){
+     preflightFailure=error.message;logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});
+    }
+    throw error;
+   }
   };
   try{
    let callSequence=0;
@@ -190,6 +199,13 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    };
    let effective={model:context.model,instructions:context.instructions,maxOutputTokens:context.maxOutputTokens,role:context.role};
    if(context.matching){
+    // Matching is also billable: reject unusable latest history before any call.
+    if(normalized){
+     const history=await session.getItems();
+     historyChecked(()=>execution.live&&execution.historyFrozen===false?
+      recoverOpenRouterHistory(history,historyToolNames(context.providerRequestFormat)):
+      projectOpenRouterItemsForSizing(history,history.length,historyToolNames(context.providerRequestFormat)));
+    }
     const plan=context.matching;
     const matched=await runRuntime({model:context.model,instructions:MATCH_INSTRUCTIONS,input:matchingInput(context.input,plan.candidates),session,maxOutputTokens:context.maxOutputTokens,maxTurns:1,tools:[],
      selectHistory:async(_history,incoming)=>selectRuntimeHistory([],incoming,{instructions:MATCH_INSTRUCTIONS,inputBytes:policy.inputLimit,historyItems:0,toolBytes:0}),
@@ -255,14 +271,10 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    agentToolCalled=false;agentCardMessage=undefined;
    if(context.reasoning&&('effort' in context.reasoning||context.reasoning.parameter!=='none')&&effective.model!==context.model)
     throw new Error('RUNTIME_MODEL_DENIED');
-   const normalized=context.providerRequestFormat==='serial-tools-v2'||context.providerRequestFormat==='serial-tools-v6-reasoning'||streaming;
-   const sizing=normalized?{projectItemsForSizing:(items:unknown[],historyCount:number)=>{
-    try{return projectOpenRouterItemsForSizing(items,historyCount,historyToolNames(context.providerRequestFormat));}catch(error){
-     if(error instanceof Error&&error.message==='RUNTIME_PROVIDER_HISTORY_DENIED'){preflightFailure=error.message;logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});}
-     throw error;
-    }
-   }}:{};
-   let selectedHistoryCount=0;
+   const sizing=normalized?{projectItemsForSizing:(items:unknown[],historyCount:number)=>
+    historyChecked(()=>projectOpenRouterItemsForSizing(items,historyCount,historyToolNames(context.providerRequestFormat)))}:{};
+   let selectedHistoryCount=0,latestHistoryCount=0;
+   let historyOmitted=execution.historyOmitted===true;
    let partial="";progress({type:"phase",phase:"mentor"});
    return runRuntime({...context,...effective,stream:streaming,onText:delta=>{
     if(delta)budget.timing?.mark('firstModelText');
@@ -277,11 +289,13 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      onToolCallsDropped:(dropped:number)=>logger.warn('api','runtime_tool_calls_dropped',{executionId,dropped}),
      ...(context.tools.includes(ASK_QUESTION_TOOL)?{stopAtToolNames:[ASK_QUESTION_TOOL]}:{})}:{}),
     input:runtimeScopeInput(context.input,context.scopeMaterial,context.hostTurnContext),session,tools,selectHistory:async(history,incoming)=>{
-    const originalCount=history.length;
+    const originalHistory=history,originalCount=history.length;
+    latestHistoryCount=latestHistoryTurn(history).length;
     if(normalized&&execution.live&&execution.historyFrozen===false){
-     history=recoverOpenRouterHistory(history,historyToolNames(context.providerRequestFormat));
+     history=historyChecked(()=>recoverOpenRouterHistory(history,historyToolNames(context.providerRequestFormat)));
     }
     if(history.length<originalCount){
+     historyOmitted=true;
      logger.warn('api','runtime_history_prefix_omitted',{executionId,omittedItems:originalCount-history.length});
     }
     const selectionOptions={instructions:effective.instructions,inputBytes:Math.min(primaryPolicy.inputLimit,context.purposeBudget?.inputBytes??Infinity),
@@ -295,16 +309,24 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     selectedHistoryCount=selected.length-incoming.length;
     // Freeze the exact first-call history members. Later tool calls may use a
     // subset, but never acquire a new Session dependency during this execution.
-    await session.freezeHistoryItems(selected.slice(0,selectedHistoryCount));
-    execution.historyFrozen=true;return selected;
-   },filterModelInput:legacyInput?undefined:(items,instructions)=>context.historySelection?validateBlockCall(items,selectedHistoryCount,{
+    const members=selected.slice(0,selectedHistoryCount);
+    if(historyOmitted)historyChecked(()=>assertLatestHistoryRetained(originalHistory,members));
+    await session.freezeHistoryItems(members,historyOmitted);
+    execution.historyFrozen=true;execution.historyOmitted=historyOmitted;return selected;
+   },filterModelInput:legacyInput?undefined:(items,instructions)=>{
+    const selected=context.historySelection?validateBlockCall(items,selectedHistoryCount,{
     instructions,inputBytes:Math.min(primaryPolicy.inputLimit,context.purposeBudget?.inputBytes??Infinity),
     toolBytes,historyItems:context.historyItems,historySelection:context.historySelection,...sizing,
     projectHistoryItem:item=>projectHostTurnItem(item,context.scopeMaterial,preserveHistoricalMaterial,projectSupersededScopeItem),
    }) as typeof items:selectRuntimeCallInput(items,selectedHistoryCount,{
     instructions,inputBytes:Math.min(primaryPolicy.inputLimit,context.purposeBudget?.inputBytes??Infinity),
     toolBytes,currentMaterial:context.scopeMaterial,preserveHistoricalMaterial,...sizing,
-   }) as typeof items,
+   }) as typeof items;
+    if(historyOmitted&&selected.length-(items.length-selectedHistoryCount)<latestHistoryCount){
+     historyChecked(()=>{throw new Error('RUNTIME_PROVIDER_HISTORY_DENIED');});
+    }
+    return selected;
+   },
     exchange:async(_sequence,request,onChunk)=>{
      partial="";
      const envelope=await exchange(request,effective.role,primaryPolicy,onChunk);

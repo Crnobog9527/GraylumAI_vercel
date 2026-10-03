@@ -10,6 +10,8 @@ import { runtimeGateMessages } from '../../../../packages/api/src/shared/runtime
 /** One wording for a turn that hit the output length limit, shown once under that turn. */
 export const OUTPUT_TRUNCATED_NOTICE = '本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。';
 
+export const HISTORY_OMITTED_NOTICE = '较早的部分对话记录无法使用，本轮回复未参考它们';
+
 export const PROVIDER_HISTORY_NOTICE = '这条对话的历史记录格式不兼容，本轮无法继续。请新开一个对话，并重新提供需要参考的内容。';
 
 export type RuntimeGateReason = 'call_limited' | 'paused' | 'limit_unavailable';

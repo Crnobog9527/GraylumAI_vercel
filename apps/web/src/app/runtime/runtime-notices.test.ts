@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from "vitest";
-import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE } from "@/lib/runtime-gate-notice";
+import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
 import { CAPACITY_NOTICE, ENDED_NOTICE, GUIDE_HELD_NOTICE, USER_STOP_NOTICE, runtimeTailNotices, runtimeTurnNotices, type RuntimeTurn } from "./runtime-notices";
 
 const turn = (extra: Partial<RuntimeTurn> = {}): RuntimeTurn => ({
@@ -92,4 +92,10 @@ it('uses the persisted history reason after reload, ahead of a stale local stop 
   expect(runtimeTailNotices({error:PROVIDER_HISTORY_NOTICE,heldGuide:false,busy:false,onGuide:vi.fn(),
    lastTurn:{open:false,texts:notices.map(n=>String(n.text))}})).toEqual([]);
  }
+});
+
+it('shows the persisted older-history notice without blocking the completed reply',()=>{
+ const notices=runtimeTurnNotices(turn({state:'completed',historyOmitted:true}),ctx());
+ expect(notices).toEqual([{id:'e1:history-omitted',tone:'status',text:HISTORY_OMITTED_NOTICE}]);
+ expect(notices[0].actions).toBeUndefined();
 });

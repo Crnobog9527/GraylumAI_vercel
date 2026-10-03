@@ -1,11 +1,13 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- Keep the existing locks, actor/scope checks, cancellation and settlement.
--- No new schema/grants or client-controlled reason. The service-only RPC accepts
+-- No new RPC/grants or client-controlled reason. The service-only RPC accepts
 -- just the history diagnostic; existing callers omit p_result as before.
 -- Applying twice replaces the identical definition. Rollback via a new migration
--- restoring 0106's runtime_execution; recorded reasons remain private/unavailable.
+-- restoring 0106 runtime_execution and 0158 session_items/view; retain private reasons.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
+-- One execution-local diagnostic bit: not revocation and not model context.
+ALTER TABLE public.runtime_executions ADD COLUMN IF NOT EXISTS history_omitted boolean NOT NULL DEFAULT false;
 CREATE OR REPLACE FUNCTION public.runtime_execution(p_actor_id uuid,p_execution_id uuid,p_action text,p_result jsonb DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE s runtime_sessions;e runtime_executions;b bill2_runs;live boolean:=false;v jsonb;
@@ -90,6 +92,154 @@ BEGIN
   END IF;
  ELSIF p_action<>'read' THEN RAISE EXCEPTION 'RUNTIME_ACTION_DENIED';END IF;
  RETURN jsonb_build_object('executionId',e.id,'sessionId',s.id,'runId',b.id,'state',e.state,
-  'live',live,'cancelRequested',b.cancel_requested,'context',e.payload,'billing',b.payload,'result',e.result,'primaryResult',e.primary_result,'matchResult',e.match_result,'historyFrozen',e.selected_history IS NOT NULL,'unavailableReason',e.unavailable_reason);
+  'live',live,'cancelRequested',b.cancel_requested,'context',e.payload,'billing',b.payload,'result',e.result,'primaryResult',e.primary_result,'matchResult',e.match_result,'historyFrozen',e.selected_history IS NOT NULL,'historyOmitted',e.history_omitted,'unavailableReason',e.unavailable_reason);
 END $$;
+
+-- Definitions carried forward from 0158; existing grants are retained.
+CREATE OR REPLACE FUNCTION public.runtime_session_items(p_actor_id uuid, p_session_id uuid, p_execution_id uuid, p_action text, p_items jsonb DEFAULT NULL::jsonb, p_limit integer DEFAULT NULL::integer, p_batch integer DEFAULT NULL::integer)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE s runtime_sessions;e runtime_executions;b runtime_session_batches;n integer;answer jsonb;selected bigint[];omitted_notice boolean:=false;
+BEGIN
+ PERFORM bill2_actor(p_actor_id);
+ SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id FOR UPDATE;
+ SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND session_id=s.id AND actor_id=p_actor_id;
+ IF s.id IS NULL OR e.id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,s.scope),false) THEN RAISE EXCEPTION 'RUNTIME_SESSION_DENIED';END IF;
+ PERFORM runtime_billing_allowed(p_actor_id,(SELECT payload FROM bill2_runs WHERE id=e.billing_run_id),e.billing_run_id);
+ IF p_action='read' THEN
+  IF p_limit<0 THEN RAISE EXCEPTION 'RUNTIME_SESSION_LIMIT';END IF;
+  -- Freeze the SDK's initial history for replay; this execution's own batches
+  -- are replayed by the host, never injected again as previous-turn history.
+  WITH candidates AS MATERIALIZED (
+   SELECT h.revision,h.execution_id,h.item FROM runtime_session_history h
+   WHERE h.session_id=s.id AND h.revision=ANY(coalesce(e.selected_history,e.candidate_history)) AND NOT h.internal_control
+  ), availability AS MATERIALIZED (
+   SELECT * FROM runtime_history_availability(ARRAY(SELECT DISTINCT execution_id FROM candidates))
+  )
+  SELECT coalesce(jsonb_agg(item ORDER BY revision),'[]') INTO answer FROM (
+   SELECT jsonb_build_object('revision',revision,'item',item) item,revision
+   FROM candidates JOIN availability USING(execution_id) WHERE available ORDER BY revision DESC LIMIT p_limit
+  ) x;
+  RETURN answer;
+ ELSIF p_action='freeze' THEN
+  -- New service callers can attach one fixed diagnostic to the existing freeze.
+  -- Old array callers and replay keep their original wire contract.
+  IF jsonb_typeof(p_items)='object' THEN
+   IF p_items->'historyOmitted' IS DISTINCT FROM 'true'::jsonb
+    OR NOT (p_items ? 'revisions')
+    OR EXISTS(SELECT 1 FROM jsonb_object_keys(p_items) k WHERE k NOT IN ('revisions','historyOmitted'))
+   THEN RAISE EXCEPTION 'RUNTIME_HISTORY_SELECTION';END IF;
+   omitted_notice:=true;p_items:=p_items->'revisions';
+  END IF;
+  IF jsonb_typeof(p_items) IS DISTINCT FROM 'array' OR jsonb_array_length(p_items)>1000 THEN RAISE EXCEPTION 'RUNTIME_HISTORY_SELECTION';END IF;
+  SELECT coalesce(array_agg(v::bigint ORDER BY v::bigint),ARRAY[]::bigint[]) INTO selected FROM jsonb_array_elements_text(p_items) v;
+  IF e.selected_history IS NOT NULL THEN
+   IF e.selected_history IS DISTINCT FROM selected OR (omitted_notice AND NOT e.history_omitted) THEN RAISE EXCEPTION 'RUNTIME_HISTORY_CHANGED';END IF;
+   RETURN to_jsonb(selected);
+  END IF;
+  IF cardinality(selected)>greatest(0,least(1000,coalesce((e.payload->>'historyItems')::int,0)))
+   OR cardinality(selected)<>(SELECT count(DISTINCT v) FROM unnest(selected) v)
+   OR NOT selected<@e.candidate_history
+   OR cardinality(selected)<>(WITH candidates AS MATERIALIZED (
+    SELECT h.execution_id FROM runtime_session_history h WHERE h.session_id=s.id AND h.revision=ANY(selected)
+   ), availability AS MATERIALIZED (
+    SELECT * FROM runtime_history_availability(ARRAY(SELECT DISTINCT execution_id FROM candidates))
+   ) SELECT count(*) FROM candidates JOIN availability USING(execution_id) WHERE available)
+   OR EXISTS(SELECT 1 FROM bill2_calls WHERE run_id=e.billing_run_id AND payload->>'phase'<>'skill_matching')
+  THEN RAISE EXCEPTION 'RUNTIME_HISTORY_SELECTION';END IF;
+  IF omitted_notice AND (cardinality(selected)=0 OR cardinality(selected)>=cardinality(e.candidate_history)
+   OR s.active_execution IS DISTINCT FROM e.id OR e.state<>'running'
+   OR EXISTS(SELECT 1 FROM bill2_runs WHERE id=e.billing_run_id AND (closed OR cancel_requested)))
+  THEN RAISE EXCEPTION 'RUNTIME_HISTORY_SELECTION';END IF;
+  -- Membership and notice commit together, before any primary model call.
+  UPDATE runtime_executions SET selected_history=selected,history_omitted=omitted_notice WHERE id=e.id;
+  INSERT INTO runtime_history_dependencies(execution_id,dependency_id)
+   SELECT DISTINCT e.id,h.execution_id FROM runtime_session_history h WHERE h.session_id=s.id AND h.revision=ANY(selected);
+  RETURN to_jsonb(selected);
+ ELSIF p_action='append' THEN
+  IF EXISTS(SELECT 1 FROM bill2_runs WHERE id=e.billing_run_id AND (cancel_requested OR closed)) THEN RAISE EXCEPTION 'RUNTIME_SESSION_CLOSED';END IF;
+  IF s.active_execution IS DISTINCT FROM e.id OR e.state IN ('completed','cancelled') THEN RAISE EXCEPTION 'RUNTIME_SESSION_CLOSED';END IF;
+  IF p_batch IS NULL OR p_batch<0 OR jsonb_typeof(p_items) IS DISTINCT FROM 'array' OR jsonb_array_length(p_items)>128 THEN RAISE EXCEPTION 'RUNTIME_SESSION_BATCH';END IF;
+  SELECT * INTO b FROM runtime_session_batches WHERE execution_id=e.id AND batch=p_batch;
+  IF b.execution_id IS NOT NULL THEN
+   IF b.items IS DISTINCT FROM p_items THEN RAISE EXCEPTION 'RUNTIME_SESSION_CONFLICT';END IF;
+   RETURN 'null'::jsonb;
+  END IF;
+  IF p_batch<>(SELECT count(*) FROM runtime_session_batches WHERE execution_id=e.id) THEN RAISE EXCEPTION 'RUNTIME_SESSION_BATCH_ORDER';END IF;
+  n:=jsonb_array_length(p_items);
+  INSERT INTO runtime_session_batches VALUES(s.id,e.id,p_batch,p_items,s.revision,s.revision+n);
+  INSERT INTO runtime_session_history(session_id,revision,execution_id,item,internal_control)
+   SELECT s.id,s.revision+ordinality,e.id,value,(e.payload ? 'matching' AND p_batch=0) FROM jsonb_array_elements(p_items) WITH ORDINALITY;
+  UPDATE runtime_sessions SET revision=revision+n WHERE id=s.id;
+  RETURN 'null'::jsonb;
+ END IF;
+ RAISE EXCEPTION 'RUNTIME_SESSION_ACTION';
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.runtime_view(p_actor_id uuid, p_session_id uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE s runtime_sessions;items jsonb;
+BEGIN
+ PERFORM bill2_actor(p_actor_id);
+ SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id;
+ IF s.id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,s.scope),false) THEN RAISE EXCEPTION 'RUNTIME_SCOPE_DENIED';END IF;
+ WITH availability AS MATERIALIZED (
+  SELECT execution_id id,available FROM runtime_history_availability(ARRAY(
+   SELECT e.id FROM runtime_executions e JOIN bill2_runs b ON b.id=e.billing_run_id WHERE e.session_id=s.id))
+ )
+ SELECT coalesce(jsonb_agg(jsonb_build_object('executionId',e.id,'request',CASE WHEN availability.available THEN (SELECT jsonb_strip_nulls(jsonb_build_object(
+   'draftId',t.draft_id,'stepId',t.step_id,'purpose',t.purpose,'requestId',e.request_id,
+   'input',e.payload->'request'->>'input','answerSource',e.payload#>'{request,answerSource}',
+   'questionId',CASE WHEN e.payload->'request'->'selection'->>'task' LIKE 'opc-question:%'
+    THEN substring(e.payload->'request'->'selection'->>'task' from 14) END,
+   'organizeAfter',CASE WHEN e.payload->'request'->'organizeAfter'='true'::jsonb THEN true END))
+   FROM opc_turns t WHERE t.session_id=e.session_id AND t.request_id=e.request_id
+    AND t.token::text=e.payload->>'opcTurnToken' AND t.purpose='mentor') ELSE NULL END,'createdAt',e.created_at,'state',e.state,
+  'input',CASE WHEN availability.available THEN e.payload->>'input' ELSE NULL END,
+  'body',CASE WHEN availability.available THEN e.result->>'body' ELSE NULL END,
+  'primaryBody',CASE WHEN availability.available THEN e.primary_result->>'body' ELSE NULL END,
+  'organizerComplete',e.result ? 'summary',
+  'summary',CASE WHEN availability.available THEN e.result->>'summary' ELSE NULL END,
+  'skillExecution',coalesce(e.payload->>'revisionId',(SELECT c->>'revisionId' FROM jsonb_array_elements(coalesce(e.payload->'matching'->'candidates','[]'::jsonb)) c WHERE c->>'key'=e.match_result->>'key' LIMIT 1)) IS NOT NULL,
+  'needsTask',coalesce((SELECT (c->>'requiresTask')::boolean FROM jsonb_array_elements(e.payload->'matching'->'candidates') c WHERE c->>'key'=e.match_result->>'key'),false),
+  'historyOmitted',availability.available AND e.history_omitted,
+  'unavailableReason',CASE WHEN e.unavailable_reason IS NOT NULL THEN e.unavailable_reason
+   WHEN availability.available AND NOT b.conflict
+    AND (e.state='cancelled' OR (e.state='cost_pending' AND b.cancel_requested))
+    AND EXISTS(
+     SELECT 1 FROM bill2_calls c JOIN bill2_receipts r ON r.call_id=c.id
+     WHERE c.run_id=b.id AND NOT r.conflict AND r.payload->>'source'='response'
+      AND r.payload->>'evidenceKind' IS DISTINCT FROM 'transport_observation'
+      AND r.payload->>'rejectedReason' IS NULL
+      AND r.payload->>'model'=c.model AND r.payload->>'providerId'=c.provider_id
+      AND r.payload#>>'{usage,sdkResponse,model}'=c.model
+      AND CASE WHEN jsonb_typeof(r.payload#>'{usage,sdkResponse,choices}')='array'
+       THEN jsonb_array_length(r.payload#>'{usage,sdkResponse,choices}') ELSE 0 END=1
+      AND r.payload#>>'{usage,sdkResponse,choices,0,finish_reason}'='length'
+      AND r.payload#>>'{usage,sdkResponse,choices,0,message,role}'='assistant'
+      AND (r.payload#>'{usage,sdkResponse,choices,0,message,content}' IS NULL
+       OR r.payload#>'{usage,sdkResponse,choices,0,message,content}'='null'::jsonb
+       OR (jsonb_typeof(r.payload#>'{usage,sdkResponse,choices,0,message,content}')='string'
+        AND (r.payload#>>'{usage,sdkResponse,choices,0,message,content}') !~ '[^[:space:]]'))
+      AND (r.payload#>'{usage,sdkResponse,choices,0,message,tool_calls}' IS NULL
+       OR r.payload#>'{usage,sdkResponse,choices,0,message,tool_calls}' IN ('null'::jsonb,'[]'::jsonb))
+    ) THEN 'output_truncated' ELSE NULL END,
+  'contentAvailable',availability.available,'billing',bill2_public(b)) ORDER BY e.created_at,e.id),'[]') INTO items
+ FROM runtime_executions e JOIN bill2_runs b ON b.id=e.billing_run_id
+ JOIN availability ON availability.id=e.id WHERE e.session_id=s.id;
+ RETURN jsonb_build_object('sessionId',s.id,'scope',s.scope,'activeExecution',CASE WHEN EXISTS(SELECT 1 FROM runtime_executions old_execution JOIN bill2_runs old_run
+   ON old_run.id=old_execution.billing_run_id
+   WHERE old_execution.id=s.active_execution AND old_execution.session_id=s.id
+    AND old_execution.actor_id=p_actor_id AND old_run.actor_id=p_actor_id
+    AND old_run.session_ref=s.id AND old_execution.state='cost_pending'
+    AND old_run.closed AND old_run.cancel_requested) THEN NULL ELSE s.active_execution END,'executions',items);
+END $function$;
+
 COMMIT;

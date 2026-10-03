@@ -201,6 +201,7 @@ export type MentorTurn = { executionId: string; roundId?: string | null; stepId:
 export type MentorExecution = {
     request?: MentorRequest | null;
     unavailableReason?: string | null;
+    historyOmitted?: boolean;
     executionId: string;
     input: string | null;
     body: string | null;
