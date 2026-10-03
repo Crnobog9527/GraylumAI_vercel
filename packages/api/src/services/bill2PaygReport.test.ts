@@ -62,3 +62,11 @@ describe('PAYG compensation projection', () => {
       releasedFailureCalls: [{ callId: 'a', officialCostUsd: null, providerCostKnown: false, nominalCostUsd: '0' }] });
   });
 });
+
+
+it.each(['', ' ', '1.5', '1e2', '-1', '9007199254740992', null, undefined])(
+  'rejects invalid or unsafe SQL text credits: %s', value => {
+    expect(buildPaygReport([{ ...call, contract_version: 'bill2.v2', theoretical_delta: value }]))
+      .toMatchObject({ invalidCalls: 1, complete: false, platformAbsorbedCredits: null });
+  },
+);

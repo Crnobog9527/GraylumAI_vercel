@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { buildPaygReport, type PaygReportFields } from './bill2PaygReport';
+import { buildPaygReport, isPaygContract, type PaygReportFields } from './bill2PaygReport';
 import { usdToPico } from './reportUsd';
 import { formatWeightedUsd, weightedDeltaCredits } from './bill2/weighted';
 import { parseMultiplier } from './billingUnit';
@@ -132,7 +132,7 @@ export function buildBill2ModelReport(rows: readonly Bill2CallReportRow[], limit
   let refundedRuns = 0;
   let unsettledRuns = 0;
   for (const run of runs.values()) {
-    if (String(run.row.contract_version) === '2' || run.row.contract_version === 'v2') {
+    if (isPaygContract(run.row.contract_version)) {
       const valid = payg.calls.filter(call => run.calls.some(p => p.row.call_id === call.callId));
       for (const call of valid) {
         chargedCredits += call.chargedCredits;

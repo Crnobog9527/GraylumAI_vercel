@@ -79,6 +79,32 @@ export async function edgeCases(db,report,createFixture,claim,receipt) {
   }
   report.checks.push('every required metering/price/multiplier field missing fails closed before money movement');
 
+  // Exercise the private validator directly as well as public claim: outer checks must
+  // not hide NULL comparisons in its frozen policy/quote arithmetic.
+  const validate = (payload,quote) => db.query(`SELECT bill2_payg_validate_quote(
+    jsonb_populate_record(r, jsonb_build_object('payload',$2::jsonb)), $3::jsonb)
+    FROM bill2_runs r WHERE r.id=$1`,[missing.run,payload,quote]);
+  await validate(missing.payload,missing.claimPayload);
+  for (const key of ['inputLimit','outputLimit']) {
+    for (const nullValue of [false,true]) {
+      const quote=structuredClone(missing.claimPayload);
+      if (nullValue) quote[key]=null; else delete quote[key];
+      await assert.rejects(validate(missing.payload,quote),/BILL2_PAYG_QUOTE_INVALID/,key);
+      await assert.rejects(rpc(db,'bill2_claim',missing.actor,missing.run,1,quote),/BILL2_PAYG_QUOTE_INVALID/,key);
+      const payload=structuredClone(missing.payload);
+      if (nullValue) payload.callPolicy[0][key]=null; else delete payload.callPolicy[0][key];
+      await assert.rejects(validate(payload,missing.claimPayload),/BILL2_PAYG_QUOTE_INVALID/,`policy.${key}`);
+    }
+  }
+  const nullContext=structuredClone(missing.payload);
+  const nullQuote=structuredClone(missing.claimPayload);
+  nullContext.callPolicy[0].providerLimits.contextTokens=null;
+  nullQuote.providerLimits.contextTokens=null;
+  await assert.rejects(validate(nullContext,nullQuote),/BILL2_PAYG_QUOTE_INVALID/);
+  assert.equal((await financial(db,missing)).credits,100);
+  assert.equal((await db.query('SELECT count(*)::int n FROM bill2_calls WHERE run_id=$1',[missing.run])).rows[0].n,0);
+  report.checks.push('quote validator rejects missing/NULL call and policy input/output limits and NULL context before any hold');
+
   const size=await createFixture(db);
   const base={...size.claimPayload,testPadding:''};
   const length=(await db.query('SELECT octet_length($1::jsonb::text)::int n',[base])).rows[0].n;

@@ -35,14 +35,14 @@ DO $$ BEGIN
  IF md5(pg_get_functiondef('public.runtime_financial_recovery(uuid,uuid,boolean)'::regprocedure)) NOT IN ('0d366951817eb3218256c81d060ee026','8b4ef3b787caf790ab5510c61dd07883') THEN RAISE EXCEPTION 'PAYG_SOURCE_MISMATCH: runtime_financial_recovery(uuid,uuid,boolean)';END IF;
  IF md5(pg_get_functiondef('public.runtime_test_budget_guard()'::regprocedure)) NOT IN ('2d6b766e9825f0caec8e9941805b80dd','6b73ed6b31272f9f75c0f90845901501') THEN RAISE EXCEPTION 'PAYG_SOURCE_MISMATCH: runtime_test_budget_guard()';END IF;
  IF to_regprocedure('public.bill2_payg_absorb_report(timestamp with time zone,timestamp with time zone)') IS NOT NULL AND md5(pg_get_functiondef(to_regprocedure('public.bill2_payg_absorb_report(timestamp with time zone,timestamp with time zone)'))) <> '336c3faed08c1925c71391b4b47bf7c2' THEN RAISE EXCEPTION 'PAYG_TARGET_MISMATCH: bill2_payg_absorb_report(timestamp with time zone,timestamp with time zone)';END IF;
- IF to_regprocedure('public.bill2_payg_claim(uuid,uuid,integer,jsonb)') IS NOT NULL AND md5(pg_get_functiondef(to_regprocedure('public.bill2_payg_claim(uuid,uuid,integer,jsonb)'))) <> '52e397d4738ce026df10579f3b2dc38d' THEN RAISE EXCEPTION 'PAYG_TARGET_MISMATCH: bill2_payg_claim(uuid,uuid,integer,jsonb)';END IF;
+ IF to_regprocedure('public.bill2_payg_claim(uuid,uuid,integer,jsonb)') IS NOT NULL AND md5(pg_get_functiondef(to_regprocedure('public.bill2_payg_claim(uuid,uuid,integer,jsonb)'))) <> '0e9af3688e33e3adc1d1400a3561b01e' THEN RAISE EXCEPTION 'PAYG_TARGET_MISMATCH: bill2_payg_claim(uuid,uuid,integer,jsonb)';END IF;
  IF to_regprocedure('public.bill2_payg_compensate(bill2_runs,bill2_calls)') IS NOT NULL AND md5(pg_get_functiondef(to_regprocedure('public.bill2_payg_compensate(bill2_runs,bill2_calls)'))) <> '8daa785df26e308a09663bb4714caf32' THEN RAISE EXCEPTION 'PAYG_TARGET_MISMATCH: bill2_payg_compensate(bill2_runs,bill2_calls)';END IF;
  IF to_regprocedure('public.bill2_payg_finalize(uuid,uuid)') IS NOT NULL AND md5(pg_get_functiondef(to_regprocedure('public.bill2_payg_finalize(uuid,uuid)'))) <> '1625da8f6a13a74250f7c454e84319ea' THEN RAISE EXCEPTION 'PAYG_TARGET_MISMATCH: bill2_payg_finalize(uuid,uuid)';END IF;
  IF to_regprocedure('public.bill2_payg_financial_binding(bill2_runs)') IS NOT NULL AND md5(pg_get_functiondef(to_regprocedure('public.bill2_payg_financial_binding(bill2_runs)'))) <> 'c6515b16f4db74ac09b4f2e4558f6c1d' THEN RAISE EXCEPTION 'PAYG_TARGET_MISMATCH: bill2_payg_financial_binding(bill2_runs)';END IF;
  IF to_regprocedure('public.bill2_payg_lock_models(bill2_runs)') IS NOT NULL AND md5(pg_get_functiondef(to_regprocedure('public.bill2_payg_lock_models(bill2_runs)'))) <> 'e34331b9c52ec8cfa83c0639530dea75' THEN RAISE EXCEPTION 'PAYG_TARGET_MISMATCH: bill2_payg_lock_models(bill2_runs)';END IF;
  IF to_regprocedure('public.bill2_payg_nominal(jsonb,jsonb)') IS NOT NULL AND md5(pg_get_functiondef(to_regprocedure('public.bill2_payg_nominal(jsonb,jsonb)'))) <> '62ad045bdebe8cca129707146ec53a8a' THEN RAISE EXCEPTION 'PAYG_TARGET_MISMATCH: bill2_payg_nominal(jsonb,jsonb)';END IF;
  IF to_regprocedure('public.bill2_payg_prices(jsonb,bigint)') IS NOT NULL AND md5(pg_get_functiondef(to_regprocedure('public.bill2_payg_prices(jsonb,bigint)'))) <> '3ce50167ab077ea5328a3b6b140981d4' THEN RAISE EXCEPTION 'PAYG_TARGET_MISMATCH: bill2_payg_prices(jsonb,bigint)';END IF;
- IF to_regprocedure('public.bill2_payg_validate_quote(bill2_runs,jsonb)') IS NOT NULL AND md5(pg_get_functiondef(to_regprocedure('public.bill2_payg_validate_quote(bill2_runs,jsonb)'))) <> '1d2f752ed19849bfc5797d38288cf13c' THEN RAISE EXCEPTION 'PAYG_TARGET_MISMATCH: bill2_payg_validate_quote(bill2_runs,jsonb)';END IF;
+ IF to_regprocedure('public.bill2_payg_validate_quote(bill2_runs,jsonb)') IS NOT NULL AND md5(pg_get_functiondef(to_regprocedure('public.bill2_payg_validate_quote(bill2_runs,jsonb)'))) <> '33d989f4d2852bdac363ce1af4b28d90' THEN RAISE EXCEPTION 'PAYG_TARGET_MISMATCH: bill2_payg_validate_quote(bill2_runs,jsonb)';END IF;
 END $$;
 
 ALTER TABLE bill2_runs DROP CONSTRAINT IF EXISTS bill2_runs_contract_version_check;
@@ -230,7 +230,10 @@ BEGIN
   IF coalesce(v->>k,'') !~ '^(0|[1-9][0-9]{0,6})$' THEN RAISE EXCEPTION 'BILL2_PAYG_QUOTE_INVALID';END IF;
  END LOOP;
  t:=(v->>'promptTokensUpper')::bigint;o:=(p->>'outputLimit')::bigint;
- IF t<>(v->>'bytes')::bigint+(v->>'templateTokens')::bigint+(v->>'marginTokens')::bigint
+ -- Missing JSON fields cast to SQL NULL; comparisons alone would not reject them.
+ IF (p->>'inputLimit') IS NULL OR (stable->>'inputLimit') IS NULL
+ OR (stable->>'outputLimit') IS NULL OR (limits->>'contextTokens') IS NULL
+ OR t<>(v->>'bytes')::bigint+(v->>'templateTokens')::bigint+(v->>'marginTokens')::bigint
  OR (v->>'bytes')::int NOT BETWEEN 1 AND least((q->>'maxBytes')::int,196608)
  OR (v->>'bytes')::int>(p->>'inputLimit')::int OR (p->>'inputLimit')::int>(stable->>'inputLimit')::int
  OR (v->>'messages')::int NOT BETWEEN 1 AND least((q->>'maxMessages')::int,32)
@@ -260,8 +263,12 @@ BEGIN
  SELECT * INTO r FROM bill2_runs WHERE id=rid AND actor_id=a FOR UPDATE;
  IF r.id IS NULL OR r.contract_version<>'bill2.v2' THEN RAISE EXCEPTION 'BILL2_RUN_DENIED';END IF;
  PERFORM bill2_payg_lock_models(r);
- -- Window lock precedes every wallet/grant lock, as in v1.
- PERFORM runtime_billing_allowed(a,r.payload,r.id);PERFORM runtime_test_window_allowed(a,r.payload);
+ PERFORM runtime_billing_allowed(a,r.payload,r.id);
+ -- Match prepare/dispatch: profile before test window, then grants. The window
+ -- permission check itself takes FOR UPDATE, so lock the profile before calling it.
+ SELECT credits INTO avail FROM profiles WHERE id=a AND status='active' AND is_deleted='false' FOR UPDATE;
+ IF NOT FOUND THEN RAISE EXCEPTION 'BILL2_ACTOR_DENIED';END IF;
+ PERFORM runtime_test_window_allowed(a,r.payload);
  IF NOT coalesce(bill2_scope_allowed(a,r.scope),false) THEN RAISE EXCEPTION 'BILL2_RUN_DENIED';END IF;
  SELECT * INTO c FROM bill2_calls WHERE run_id=rid AND sequence=seq;
  IF c.id IS NOT NULL THEN
@@ -295,8 +302,6 @@ BEGIN
  IF coalesce(cfg->>'version','')='' OR coalesce(threshold->>'credits','') !~ '^[1-9][0-9]{0,8}$'
  OR (SELECT count(*) FROM jsonb_array_elements(cfg->'thresholds') x WHERE x->>'model'=p->>'model' AND x->>'purpose'=p->>'phase')<>1
  THEN RAISE EXCEPTION 'BILL2_START_THRESHOLD_UNCONFIGURED';END IF;
- SELECT credits INTO avail FROM profiles WHERE id=a AND status='active' AND is_deleted='false' FOR UPDATE;
- IF NOT FOUND THEN RAISE EXCEPTION 'BILL2_ACTOR_DENIED';END IF;
  -- The balance already excludes all pre-deductions. Subtract only unavailable grant remainder.
  PERFORM id FROM subscription_credit_grants WHERE user_id=a ORDER BY id FOR UPDATE;
  IF EXISTS(SELECT 1 FROM subscription_credit_grants WHERE user_id=a AND accounting_state<>'trusted') THEN

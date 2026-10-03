@@ -14,6 +14,8 @@ node packages/db/tests/payg/run-local.mjs --local-only
 连续执行两次、逐对象比对结构。`--local-only --development` 仅用于同范围修复迭代，
 跳过历史逐迁移指纹重放；它不能替代完整模式或仓库要求的 baseline replay。
 
+0162 在首次应用前注入提交前失败，核对完整目录回退；应用后分别篡改一个来源函数及本次修改的两个目标函数，验证 md5 拒绝漂移且恢复后目录一致。
+
 测试复用既有 B2a/inflight 的 v1 fixture 和全部原用例，再覆盖：
 
 - 六个旧公开收尾入口对 v1/run 和 v2/call 预扣全部拒绝；普通旧钱包六入口保持可用。
@@ -21,9 +23,9 @@ node packages/db/tests/payg/run-local.mjs --local-only
 - 名义计价、缓存费用偏差、长上下文、分时最高价、实际费用兜底和三次查账上限。
 - 确认故障对已结算前缀的补偿及未知后续退款；迟到证据不重扣。
 - 注销后的未派发撤权、未知费用 hold、已结算前缀、零 call 和错误预扣绑定。
-- 真实双数据库连接的重复领取、跨 run 争余额、重复回执/收尾及取消竞争。
+- 真实双数据库连接的重复领取、跨 run 争余额、重复回执/收尾及取消竞争；同账户/窗口、不同模型的 prepare/claim 与 dispatch/claim 锁顺序竞争。
 - 计费投影允许/拒绝权限、平台承担和实际/名义差额恒等式。
-- grant 过期、逆转、终止、隔离；混合模型倍数、充值不补收 E、大小和缺字段边界。
+- grant 过期、逆转、终止、隔离；混合模型倍数、充值不补收 E、大小和缺字段边界；直接验证 quote 缺失或 NULL 的输入/输出/context 上限会拒绝。
 
 所有身份、余额、门槛、模型与价格均为每次本地建库的合成 fixture，v2 不接入默认 Runtime。
 结构指纹提交仍使用工程规范要求的 `run-db-baseline-replay.mjs --local-only --write-built`。

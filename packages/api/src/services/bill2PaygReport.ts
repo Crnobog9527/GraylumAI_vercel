@@ -5,12 +5,12 @@ export type PaygReportFields = {
   settled_at?: string | null;
   nominal_cost_usd?: string | null;
   nominal_source?: string | null;
-  charged_delta?: number | null;
-  compensation_credits?: number | null;
+  charged_delta?: number | string | null;
+  compensation_credits?: number | string | null;
   compensated_at?: string | null;
-  theoretical_delta?: number | null;
-  platform_absorbed_cap_credits?: number | null;
-  platform_absorbed_bound_credits?: number | null;
+  theoretical_delta?: number | string | null;
+  platform_absorbed_cap_credits?: number | string | null;
+  platform_absorbed_bound_credits?: number | string | null;
   platform_absorbed_cap_usd?: string | null;
   platform_absorbed_bound_usd?: string | null;
   platform_margin_cache_read_usd?: string | null;
@@ -34,10 +34,16 @@ const text = (n: bigint): string => {
   const tail = (abs % SCALE).toString().padStart(18, '0').replace(/0+$/, '');
   return `${n < 0n ? '-' : ''}${abs / SCALE}${tail ? `.${tail}` : ''}`;
 };
-const credits = (n: number | null | undefined) => {
-  if (!Number.isSafeInteger(n) || n! < 0) throw new Error('Invalid credits');
-  return n!;
+const credits = (value: number | string | null | undefined): number => {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !/^[0-9]+$/.test(value))) {
+    throw new Error('Invalid credits');
+  }
+  const n = Number(value);
+  if (!Number.isSafeInteger(n) || n < 0) throw new Error('Invalid credits');
+  return n;
 };
+export const isPaygContract = (version: PaygReportFields['contract_version']): boolean =>
+  version === 'bill2.v2' || version === 'v2' || version === '2' || version === 2;
 type Rational = { n: bigint; d: bigint };
 const gcd = (a: bigint, b: bigint): bigint => b ? gcd(b, a % b) : a;
 function add(a: Rational, b: Rational): Rational {
@@ -99,7 +105,7 @@ export function buildPaygReport(rows: readonly Row[]) {
   let invalidCalls = 0;
   const seen = new Set<string>();
   for (const row of rows) {
-    if (String(row.contract_version) !== '2' && row.contract_version !== 'v2') continue;
+    if (!isPaygContract(row.contract_version)) continue;
     if (seen.has(row.call_id)) { invalidCalls += 1; continue; }
     seen.add(row.call_id);
     if (row.nominal_source === 'not_dispatched' || row.nominal_source === 'confirmed_failure') {
