@@ -3,7 +3,7 @@
 .wrap{position:relative;max-width:720px;margin:0 auto}
 .composer{position:relative;border:1px solid #e8e8e8;border-radius:25px;background:#fff;padding:16px 17px 12px;box-shadow:0 2px 7px #02041a0b}
 .composer:focus-within{border-color:#a5b3c0;box-shadow:0 0 0 2px #4162870d}
-.textarea{display:block!important;width:100%!important;min-height:56px!important;height:56px;max-height:145px;resize:none!important;border:0!important;border-radius:0!important;background:none!important;box-shadow:none!important;outline:0!important;padding:0!important;font:400 15px/1.55 -apple-system-body,system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",Ubuntu,Cantarell,"Helvetica Neue","San Francisco Pro",sans-serif,"PingFang SC","Microsoft YaHei","Source Han Sans SC","Noto Sans SC"!important;color:#262626!important;scrollbar-width:thin;scrollbar-color:#c4c4c4 transparent}
+.textarea{display:block!important;width:100%!important;min-height:56px!important;height:56px;max-height:145px;resize:none!important;border:0!important;border-radius:0!important;background:none!important;box-shadow:none!important;outline:0!important;padding:0!important;font:400 15px/1.55 var(--font-primary)!important;color:#262626!important;scrollbar-width:thin;scrollbar-color:#c4c4c4 transparent}
 .textarea::-webkit-scrollbar{width:7px}.textarea::-webkit-scrollbar-thumb{background:#c4c4c4;border-radius:9px}
 .textarea::placeholder{color:#aaa}
 .tools,.toolLeft,.toolRight{display:flex;align-items:center}
@@ -26,6 +26,6 @@
 @media(max-width:700px){.skillMenu{left:-70px}}
 .note{margin:5px 3px 0;color:#9a9a9a;font-size:10px;line-height:16px}
 @media(max-width:700px){.zone{padding:8px 12px 4px}.composer{padding:16px 17px 12px;border-radius:25px}.textarea{min-height:50px!important;height:50px}.note{font-size:9px}}
-/* Attached panel above the text box; scrolls on its own so the text box stays visible. */
+/* Attached panel above the text box (the open question card): at most 40% of the viewport, scrolling on its own so the text box stays visible. */
 .attachment{max-height:min(320px,40dvh);margin:-4px -5px 12px;padding:0 5px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
 @media(max-width:700px){.attachment{max-height:34dvh}}

@@ -2,10 +2,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { Suspense,useEffect,useState,useRef,useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Bot,Plus,Loader2 } from 'lucide-react';
+import { Bot,Plus } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
+import { CHAT_ACTION, ChatInlineNotice, ChatNoticeList, ChatPendingStatus } from '@/components/chat/ChatInlineNotice';
+import { followTranscript, transcriptSignature } from '@/components/chat/chat-scroll';
 import { WorkComposer } from '@/components/opc/work-composer';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { ContentEditor } from '@/components/opc/content-editor';
@@ -17,6 +19,7 @@ import {
  OUTPUT_TRUNCATED_NOTICE, definiteRefusal, gateStopNotices, rememberGateStop, runtimeAdmissionNotice, runtimeExecutionNotice, showsReply,
  videoGateError, videoGateNotice,
 } from './gate-notices';
+import { GUIDE_HELD_NOTICE, isOpenTurn, runtimeTailNotices, runtimeTurnNotices, type RuntimeTurn } from './runtime-notices';
 
 type VideoChoice='both'|'storyboard'|'editing';
 type VideoOperation={workItemId:string;choice?:VideoChoice;script:{requestId:string;executionId:string;expectedVersion:number};followup:{requestId:string;input:string;selection:{kind:'skill';moduleId:string;revisionId:string};executionId?:string};package:{requestId:string;expectedStoryboardVersion:number;expectedEditingVersion:number};sourceScriptId?:string;held?:boolean};
@@ -53,6 +56,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const profile=trpc.user.getUserProfile.useQuery();
  const [sessionId,setSession]=useState(routeSession),[input,setInput]=useState(''),[selection,setSelection]=useState(''),[error,setError]=useState('');
  const [capacityIds,setCapacityIds]=useState<string[]>([]);
+ // The user's message, shown at once until the server records its turn.
+ const [outgoing,setOutgoing]=useState<{text:string;executionId?:string}|null>(null);
  const [gateStops,setGateStops]=useState<Record<string,string>>({});
  const capacityKey=(executionId:string)=>'opc-runtime-capacity:'+sessionId+':'+executionId;
  function markCapacity(executionId:string){try{sessionStorage.setItem(capacityKey(executionId),'1');}catch{/* The current alert still explains the failure. */}setCapacityIds(ids=>ids.includes(executionId)?ids:[...ids,executionId]);}
@@ -134,16 +139,18 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   const chosen=choices.data?.skills.find(s=>'skill:'+s.moduleId===activeSelection);
   const selected=chosen?{kind:'skill' as const,moduleId:chosen.moduleId,revisionId:chosen.revisionId}:activeSelection.startsWith('auto:')?{kind:'auto' as const,modelId:activeSelection.slice(5)}:{kind:'ordinary' as const,modelId:activeSelection};
   const url=new URL(location.href),requestId=url.searchParams.get('request')??crypto.randomUUID();url.searchParams.set('request',requestId);history.replaceState(null,'',url);
-  const submitted=input;
+  const submitted=input;if(!scriptRequest)setOutgoing({text:submitted});
   const admitted=await prepare.mutateAsync({sessionId,requestId,input:scriptRequest?'[OPC_SCRIPT_V1] 请基于当前选题简报讨论并给出可修改的口播稿。'+(submitted.trim()||'先给我一版口播稿。'):submitted,selection:selected,network:'deny',sources:[]});
   if(!alive.current)return;
+  setOutgoing(old=>old&&{...old,executionId:admitted.executionId});
   void utils.opc.conversations.invalidate();
   sessionStorage.removeItem('opc-runtime-send:'+sessionId);
   url.searchParams.delete('request');history.replaceState(null,'',url);
   setInput(current=>{if(current===submitted){localStorage.removeItem('opc-runtime-input:'+sessionId);return '';}return current;});
   const executed=await execute.mutateAsync({executionId:admitted.executionId});
-  if(alive.current){if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(admitted.executionId);setError('本次必要材料超过模型输入容量。原请求和已完成内容已保留；请取消剩余执行后缩短材料再发送。');}await Promise.all([view.refetch(),utils.opc.conversations.invalidate()]);}
+  if(alive.current){if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(admitted.executionId);setError('本次必要材料超过模型输入容量。原请求和已完成内容已保留；请点“停止”后缩短材料再发送。');}await Promise.all([view.refetch(),utils.opc.conversations.invalidate()]);}
  }catch(cause){if(!alive.current)return;const gate=runtimeAdmissionNotice(cause);
+  setOutgoing(old=>old?.executionId?old:null); // Not admitted: the text is still in the box.
   setError(gate??'请求状态待核实。请读取原任务状态，不要重新发送相同内容。');await view.refetch();}}
  const initialSend=useRef(false);
  useEffect(()=>{
@@ -220,7 +227,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
    setError(!frozen?'视频工作请求未发出，请稍后再选择一次。':admissionGate??refusedNotice??'视频工作请求状态待核实。'+kept);return;
   }
   const gateNotice=videoGateNotice(message);
-  let definite=released||videoDefiniteRejections.has(message)||videoGateNotice(message)!==null;if(message==='OPC_CONTENT_BINDING'&&active.followup.executionId)try{await cancel.mutateAsync({executionId:active.followup.executionId});await view.refetch();}catch{definite=false;}if(message==='OPC_CONTENT_OUTPUT_TRUNCATED_PENDING'){setError('本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。');await view.refetch();}else if(definite){localStorage.setItem(videoKey+':rejected:'+active.package.requestId,JSON.stringify(active));localStorage.setItem(videoKey+':rejected-source:'+active.script.executionId,active.package.requestId);localStorage.removeItem(videoKey);await view.refetch();setError(gateNotice??(message==='OPC_CONTENT_OUTPUT_TRUNCATED'?OUTPUT_TRUNCATED_NOTICE:message==='OPC_CONTENT_RESPONSE_INVALID'?'分镜回复格式未通过保存校验，口播稿定稿已保留；请在原对话要求 Agent 重新整理。':'原视频工作请求已明确拒绝（'+message+'），没有再次派发。请刷新后基于最新版本重试。'));}else if(message==='OPC_CONTENT_CAPACITY'){if(active.followup.executionId)markCapacity(active.followup.executionId);setError('分镜或剪辑所需材料超过模型输入容量。原请求与口播稿已保留；请取消剩余执行后缩短材料再继续。');}else setError(gateNotice??'视频工作请求状态待核实。完整原请求已保留；再次点击只会恢复这一次请求。');}finally{setVideoBusy(false);}
+  let definite=released||videoDefiniteRejections.has(message)||videoGateNotice(message)!==null;if(message==='OPC_CONTENT_BINDING'&&active.followup.executionId)try{await cancel.mutateAsync({executionId:active.followup.executionId});await view.refetch();}catch{definite=false;}if(message==='OPC_CONTENT_OUTPUT_TRUNCATED_PENDING'){setError('本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。');await view.refetch();}else if(definite){localStorage.setItem(videoKey+':rejected:'+active.package.requestId,JSON.stringify(active));localStorage.setItem(videoKey+':rejected-source:'+active.script.executionId,active.package.requestId);localStorage.removeItem(videoKey);await view.refetch();setError(gateNotice??(message==='OPC_CONTENT_OUTPUT_TRUNCATED'?OUTPUT_TRUNCATED_NOTICE:message==='OPC_CONTENT_RESPONSE_INVALID'?'分镜回复格式未通过保存校验，口播稿定稿已保留；请在原对话要求 Agent 重新整理。':'原视频工作请求已明确拒绝（'+message+'），没有再次派发。请刷新后基于最新版本重试。'));}else if(message==='OPC_CONTENT_CAPACITY'){if(active.followup.executionId)markCapacity(active.followup.executionId);setError('分镜或剪辑所需材料超过模型输入容量。原请求与口播稿已保留；请点“停止”后缩短材料再继续。');}else setError(gateNotice??'视频工作请求状态待核实。完整原请求已保留；再次点击只会恢复这一次请求。');}finally{setVideoBusy(false);}
  }
  async function finalizeScript(executionId:string,recoveryKey?:string){const key=recoveryKey??scriptKey;if(!workItem||!key)return;setVideoBusy(true);setError('');try{await navigator.locks.request(key,async()=>{const frozen=localStorage.getItem(key);const op:ScriptOperation=frozen?JSON.parse(frozen):{kind:isVideo?'script':'brief',workItemId:workItem.workItemId,requestId:executionId,executionId,expectedVersion:latest(isVideo?'script':'brief')};if(op.workItemId!==workItem.workItemId)throw new Error('OPC_REQUEST_CONFLICT');localStorage.setItem(key,JSON.stringify(op));await saveContent.mutateAsync({workItemId:op.workItemId,requestId:op.requestId,expectedVersion:op.expectedVersion,kind:op.kind??'script',status:(op.kind??'script')==='script'?'final':'draft',executionId:op.executionId,sourceContentId:null});localStorage.setItem(key+':completed:'+op.requestId,JSON.stringify(op));localStorage.removeItem(key);await library.refetch();setVideoUiRevision(v=>v+1);});}catch(cause){const message=cause instanceof Error?cause.message:'';if(scriptDefiniteRejections.has(message)){localStorage.setItem(key+':rejected:'+executionId,localStorage.getItem(key)??'');localStorage.removeItem(key);setError('采用请求已明确拒绝（'+message+'），请刷新后核对最新版本。');}else setError('采用结果待核实。完整原请求已保留；再次点击只会恢复这一次请求。');}finally{setVideoBusy(false);}}
  async function chooseVideo(choice:VideoChoice|'end'){if(!isVideo||!currentScript||!workItem||!choices.data)return;if(choice==='end'){localStorage.setItem('opc-video-ended:'+currentScript.id,'true');setVideoUiRevision(v=>v+1);setError('');return;}if(choice==='editing'&&!currentStoryboard){setError('请先完成这版口播稿的分镜，再基于分镜生成剪辑建议。');return;}if(!videoSourceExecution){setError('这版口播稿缺少可恢复的来源，暂不能继续生成。');return;}if((choice==='both'&&(currentStoryboard||currentEditing))||(choice==='storyboard'&&currentStoryboard)||(choice==='editing'&&currentEditing)){setError('这版口播稿对应的所选成果已经生成，请在下方查看。');return;}const frozen=videoKey?localStorage.getItem(videoKey):null;if(frozen){await runVideo(JSON.parse(frozen));return;}const skill=choices.data.skills.find(s=>'skill:'+s.moduleId===activeSelection);const selection=skill?{kind:'skill' as const,moduleId:skill.moduleId,revisionId:skill.revisionId}:null;if(!selection){setError('请选择当前选题可用的 Skill，再继续生成。');return;}const requestId=crypto.randomUUID();const requested=choice==='both'?'生成分镜脚本和剪辑建议':choice==='storyboard'?'只生成分镜脚本':'只生成剪辑建议';const fields=choice==='both'?'storyboard 与 editing 两个字符串字段':choice==='storyboard'?'storyboard 一个字符串字段':'editing 一个字符串字段';const op:VideoOperation={workItemId:workItem.workItemId,choice,script:{requestId:currentScript.requestId,executionId:videoSourceExecution,expectedVersion:currentScript.version-1},sourceScriptId:currentScript.id,followup:{requestId,input:`[OPC_VIDEO_PACKAGE_V1] 用户已明确同意：基于资料中已定稿的口播稿，${requested}。遵循当前 Skill 的创作方法：剪辑建议必须基于匹配当前口播稿的分镜；仅剪辑时必须依据资料中已保存的分镜，不得跳过分镜或自行补造。只返回严格 JSON 对象，且只含 ${fields}；不要生成图片、视频或执行发布。`,selection},package:{requestId,expectedStoryboardVersion:latest('storyboard'),expectedEditingVersion:latest('editing')}};await runVideo(op);}
@@ -232,7 +239,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  },[sessionId,workItem?.workItemId,view.data,videoBusy]);
 
  async function stop(executionId:string){setError('');try{await cancel.mutateAsync({executionId});await view.refetch();}catch{setError('取消状态待核实，请读取原任务。');}}
- async function recover(executionId:string){setError('');try{const executed=await execute.mutateAsync({executionId});if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(executionId);setError('原请求的必要材料超过模型输入容量，无法继续发送。已有内容已保留；请取消剩余执行后缩短材料再发送。');}await view.refetch();}catch{setError('暂时无法恢复，请保留原任务。');}}
+ async function recover(executionId:string){setError('');try{const executed=await execute.mutateAsync({executionId});if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(executionId);setError('原请求的必要材料超过模型输入容量，无法继续发送。已有内容已保留；请点“停止”后缩短材料再发送。');}await view.refetch();}catch{setError('暂时无法恢复，请保留原任务。');}}
  const executions=view.data?.executions as Array<{executionId:string;createdAt?:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;contentAvailable:boolean}>|undefined;
  const capacitySignature=executions?.map(e=>e.executionId+':'+e.state).join('|');
  useEffect(()=>{setGateStops(gateStopNotices(browserSession(),sessionId,executions??[]));
@@ -246,18 +253,12 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   const align=()=>node.parentElement?.style.setProperty('--chat-scrollbar-space',((node.offsetWidth-node.clientWidth)/2)+'px');
   align();const observer=new ResizeObserver(align);observer.observe(node);return()=>observer.disconnect();
  },[]);
- const scrollSignature=executions?.map(item=>[item.executionId,item.state,item.body,item.primaryBody].join(':')).join('|');
+ const scrollSignature=transcriptSignature(executions?.map(item=>[item.executionId,item.state,item.body,item.primaryBody].join(':')).join('|'),outgoing);
  useEffect(()=>{
   const node=scrollArea.current;if(!node||!scrollKey||scrollSignature===undefined)return;
-  if(scrollState.current.key!==scrollKey){
-   let saved:string|null=null;try{saved=sessionStorage.getItem(scrollKey);}catch{/* First entry uses the latest messages. */}
-   const top=saved===null?NaN:Number(saved);
-   node.scrollTop=Number.isFinite(top)?Math.max(0,top):node.scrollHeight;
-   scrollState.current={key:scrollKey,follow:node.scrollHeight-node.clientHeight-node.scrollTop<80,signature:scrollSignature};
-  }else if(scrollState.current.signature!==scrollSignature){
-   if(scrollState.current.follow)node.scrollTop=node.scrollHeight;
-   scrollState.current.signature=scrollSignature;
-  }
+  scrollState.current=followTranscript(node,scrollState.current,scrollKey,scrollSignature,()=>{
+   try{return sessionStorage.getItem(scrollKey);}catch{return null; /* First entry uses the latest messages. */}
+  });
  },[scrollKey,scrollSignature]);
  async function guide(){
   if(!workItem||!choices.data?.defaultSkill||!sessionId||contentType==='unknown')return;
@@ -266,12 +267,12 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   const request={sessionId,requestId:stage,input:'[OPC_WORK_CONTINUE_V1] 工作阶段 '+stage+'。用户选择继续这条'+typeLabel[contentType]+'选题。请遵循当前Skill，结合现有简报、对话与已保存成果，判断当前进度与适合的讨论方式。不要直接生成正文或口播稿，不要生成分镜、剪辑、图片、视频或发布；已定稿后只询问下一步意愿。',selection:{kind:'skill' as const,moduleId:choices.data.defaultSkill.moduleId,revisionId:choices.data.defaultSkill.revisionId},network:'deny' as const,sources:[]};
   if(executions?.some(e=>e.input?.startsWith('[OPC_WORK_CONTINUE_V1] 工作阶段 '+stage+'。')))return;
   setGuiding(true);setError('');
-  try{await navigator.locks.request(key,async()=>{const raw=localStorage.getItem(key);const frozen=raw?JSON.parse(raw):request;localStorage.setItem(key,JSON.stringify(frozen));const admitted=await prepare.mutateAsync(frozen);const executed=await execute.mutateAsync({executionId:admitted.executionId});if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(admitted.executionId);setError('引导请求的必要材料超过模型输入容量，原请求已保留；请取消剩余执行后缩短材料再发送。');}await view.refetch();});}
+  try{await navigator.locks.request(key,async()=>{const raw=localStorage.getItem(key);const frozen=raw?JSON.parse(raw):request;localStorage.setItem(key,JSON.stringify(frozen));const admitted=await prepare.mutateAsync(frozen);const executed=await execute.mutateAsync({executionId:admitted.executionId});if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(admitted.executionId);setError('引导请求的必要材料超过模型输入容量，原请求已保留；请点“停止”后缩短材料再发送。');}await view.refetch();});}
   catch(cause){
    // A definite 4xx refusal ends this guidance request; keep its record but drop the recovery control.
    if(definiteRefusal(cause)){try{localStorage.setItem(key+':rejected',localStorage.getItem(key)??'');localStorage.removeItem(key);}
     catch{/* Without storage there is nothing to recover. */}setError('引导请求已明确拒绝（'+(cause as Error).message+'），没有再次派发。');}
-   else setError(runtimeAdmissionNotice(cause)??'引导请求待恢复。点“恢复引导请求”会沿用原请求，不会另开一次。');
+   else setError(runtimeAdmissionNotice(cause)??GUIDE_HELD_NOTICE);
   }
   finally{setGuiding(false);}
  }
@@ -286,6 +287,11 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const url=new URL(location.href);url.searchParams.delete('continue');history.replaceState(null,'',url);void guide();
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[workItem,view.data,choices.data,contentType,videoBusy]);
+ const turnNotices=(e:RuntimeTurn)=>runtimeTurnNotices(e,{busy,capacity:capacityIds.includes(e.executionId),gateStop:gateStops[e.executionId],
+  stopping:cancel.isPending,onRetry:()=>void recover(e.executionId),onStop:()=>void stop(e.executionId)});
+ const lastExecution=executions?.at(-1);
+ const lastTurn=lastExecution&&{open:isOpenTurn(lastExecution.state),texts:turnNotices(lastExecution).map(notice=>String(notice.text))};
+ const pendingOutgoing=outgoing&&!executions?.some(e=>e.executionId===outgoing.executionId)?outgoing:null;
  async function setType(value:string){if(!workItem)return;const key='opc-content-type:'+workItem.workItemId;try{await navigator.locks.request(key,async()=>{const raw=localStorage.getItem(key);const frozen=raw?JSON.parse(raw):{requestId:crypto.randomUUID(),target:'item' as const,targetId:workItem.workItemId,expectedRevision:workItem.revision,patch:{title:workItem.title,brief:workItem.brief??'',day:workItem.day,contentType:value}};localStorage.setItem(key,JSON.stringify(frozen));setTypePending(true);await editItem.mutateAsync(frozen);localStorage.removeItem(key);setTypePending(false);await library.refetch();});}catch(cause){const code=cause instanceof Error?cause.message:'';if(['OPC_VERSION_CONFLICT','OPC_REQUEST_CONFLICT','OPC_DENIED','OPC_LIBRARY_INVALID'].includes(code)){localStorage.setItem(key+':rejected',localStorage.getItem(key)??'');localStorage.removeItem(key);setTypePending(false);await library.refetch();setError('类型保存已明确拒绝，已读取当前版本，请重新确认。');}else setError('类型保存状态待核实；再次选择会恢复原请求，不会覆盖为另一类型。');}}
 
  return <WorkspaceFrame area="chat" activeWorkItemId={workItem?.workItemId} notice={choices.data?.mode==='staging_test'?'Staging 真实对话测试 · 消耗测试预算':choices.data?.mode==='isolated'?'本地隔离 · 模型回复为模拟，保存写入本地测试服务':undefined} rightOpen={panelOpen} onToggleRight={()=>setPanelOpen(value=>!value)} right={workItem?(contentType==='unknown'?<div className={workStyles.typePending}><h2>当前成果</h2><p>先在对话中确认这条选题的内容类型，再起草和保存稿件。已确认前不会创建内容版本。</p></div>:<ContentEditor key={workItem.workItemId+':'+contentType} item={workItem} onSaved={()=>library.refetch()}>{(isVideo||Boolean(saved.data?.length))&&<section aria-label={isVideo?'视频派生成果':'其他 Skill 成果'} className={workStyles.videoResults}>{isVideo&&<><h2>分镜与剪辑建议</h2>{versions.filter(version=>version.kind==='storyboard'||version.kind==='editing').map(version=><details key={version.id}><summary>{version.kind==='storyboard'?'分镜':'剪辑建议'} · 第 {version.version} 版 · {version.status==='final'?'已定稿':'草稿'}{version.sourceContentId===currentScript?.id?' · 匹配当前口播稿':' · 旧口播稿版本'}</summary><p>{version.body}</p></details>)}</>}{saved.data?.map((artifact:{artifactId:string;version:number;body:string|null})=><details key={artifact.artifactId}><summary>其他 Skill 成果 · 第 {artifact.version} 版</summary><p>{artifact.body??'来源不可用'}</p></details>)}<Link href={'/library?item='+workItem.workItemId+'&return='+sessionId}>在资料库查看这个选题</Link></section>}</ContentEditor>):undefined}><main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}>
@@ -296,31 +302,29 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   {requestedModule&&!chosenModule&&<p className="shrink-0 px-6 py-1 text-center text-[11px] text-[var(--text-tertiary)]">所选功能当前不满足本地工作区准入条件；不会自动换用其他功能。</p>}
   <QueryNotice error={choices.error||view.error||library.error} label="当前工作" retry={()=>Promise.all([choices.refetch(),...(sessionId?[view.refetch()]:[]),...(sessionId&&view.data?.scope?.kind==='work_item'?[library.refetch()]:[])])}/>
   <div ref={scrollArea} onScroll={rememberScroll} className={workStyles.scrollArea} aria-label="对话记录">
-   {!executions?.length&&<div className="mx-auto flex min-h-64 max-w-xl flex-col items-center justify-center px-6 py-12 text-center"><Bot className="mb-4 h-9 w-9 text-[var(--color-primary)]"/><h2 className="text-2xl font-semibold">开始一段对话</h2><p className="mt-3 text-sm text-[var(--text-tertiary)]">{workItem?'已带入选题简报和原工作方法，正在根据当前进度准备引导。':sessionId?'输入一条消息，发送后可刷新查看记录。':'从左侧“新对话”开始。'}</p></div>}
-   <section className={workStyles.transcript}>{workItem&&typePending&&<Button disabled={editItem.isPending} onClick={()=>setType('unknown')}>恢复类型保存</Button>}{workItem&&contentType==='unknown'&&<section className="rounded-xl border p-4" aria-label="确认内容类型"><h2>这条选题准备做成什么内容？</h2><p>先确认形式，再一起细化重点和结构。</p><div className="flex gap-2 mt-3">{['article','image_text','video'].map(value=><Button key={value} disabled={busy||editItem.isPending||typePending} onClick={()=>setType(value)}>{typeLabel[value]}</Button>)}</div></section>}{error==='引导请求待恢复。再次恢复会沿用原请求，不会另开一次。'&&<Button disabled={busy} onClick={guide}>恢复引导</Button>}{executions?.map((e,index)=><div key={e.executionId}>{e.createdAt&&(index===0||!executions[index-1].createdAt||transcriptDay(executions[index-1].createdAt!)!==transcriptDay(e.createdAt))&&<p className={workStyles.dateMarker}>{transcriptDate(e.createdAt)}</p>}<article className={workStyles.turn}>
+   {!executions?.length&&<div className="mx-auto flex min-h-64 max-w-xl flex-col items-center justify-center px-6 py-12 text-center"><Bot className="mb-3 h-7 w-7 text-[var(--color-primary)]"/><h2 className="text-base font-medium">开始一段对话</h2><p className="mt-2 text-[13px] text-[var(--text-tertiary)]">{workItem?'已带入选题简报和原工作方法，正在根据当前进度准备引导。':sessionId?'输入一条消息，发送后可刷新查看记录。':'从左侧“新对话”开始。'}</p></div>}
+   <section className={workStyles.transcript}>
+    {workItem&&typePending&&<ChatInlineNotice tone="warning" label="类型保存待核实"
+     actions={[{label:CHAT_ACTION.retry,disabled:editItem.isPending,onClick:()=>void setType('unknown')}]}>内容类型保存结果待核实。</ChatInlineNotice>}
+    {workItem&&contentType==='unknown'&&<section className="rounded-xl border p-4" aria-label="确认内容类型"><h2>这条选题准备做成什么内容？</h2><p>先确认形式，再一起细化重点和结构。</p><div className="flex gap-2 mt-3">{['article','image_text','video'].map(value=><Button key={value} disabled={busy||editItem.isPending||typePending} onClick={()=>setType(value)}>{typeLabel[value]}</Button>)}</div></section>}{executions?.map((e,index)=><div key={e.executionId}>{e.createdAt&&(index===0||!executions[index-1].createdAt||transcriptDay(executions[index-1].createdAt!)!==transcriptDay(e.createdAt))&&<p className={workStyles.dateMarker}>{transcriptDate(e.createdAt)}</p>}<article className={workStyles.turn}>
     {e.input&&!e.input.startsWith('[OPC_WORK_CONTINUE_V1]')&&<p className={workStyles.userMessage}>{e.input.startsWith('[OPC_VIDEO_PACKAGE_V1]')?(e.input.includes('只生成分镜脚本')?'请基于已定稿口播稿生成分镜脚本。':e.input.includes('只生成剪辑建议')?'请基于已保存的分镜生成剪辑建议。':'请先完成分镜脚本，再基于分镜生成剪辑建议。'):e.input.replace(/^\[OPC_SCRIPT_V1\]\s*/, '')}</p>}
     <div className={workStyles.agentMessage}><div className={workStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/><span>Graylum · {e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')?'已完成本轮建议':'增长顾问'}</span></div><div>
      {workItem&&e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&e.contentAvailable?<div className={workStyles.proposal}><div className={workStyles.proposalHead}><strong>建议稿</strong><span>{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?'已采用':'尚未采用'}</span></div><MessageMarkdown className={workStyles.reply} text={displayReply(e.input,e.body??e.primaryBody)}/></div>:showsReply(e)&&(e.contentAvailable?<MessageMarkdown className={workStyles.reply} text={displayReply(e.input,e.body??e.primaryBody)}/>:<p className={workStyles.reply}>来源已不可用，暂不展示此内容。</p>)}
-     {e.primaryBody&&!e.organizerComplete&&<p role="status" className="mt-2 text-sm">主回复已保存，附属整理未完成。</p>}
      {workItem&&contentType!=='unknown'&&e.state==='completed'&&e.skillExecution&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&<div className="mt-3 flex flex-wrap gap-2">{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?<Link className="underline" href={'/library?item='+workItem.workItemId+'&return='+sessionId}>{isVideo?'这版口播稿已定稿':'已采用为草稿'} · 查看</Link>:<Button disabled={busy} onClick={()=>finalizeScript(e.executionId)}>{isVideo?'将这条回复定稿为口播稿':'采用为当前草稿'}</Button>}</div>}
      {workItem&&contentType==='unknown'&&e.state==='completed'&&e.skillExecution&&e.contentAvailable&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&<div className="mt-2">{saved.data?.find((result:{artifactId:string;version:number})=>result.artifactId===e.executionId)?<p role="status">已保存成果 · 第 {saved.data.find((result:{artifactId:string;version:number})=>result.artifactId===e.executionId)?.version} 版</p>:<Button variant="outline" disabled={saveWorkResult.isPending} onClick={()=>persistSkillResult(e.executionId)}>保存 Skill 成果</Button>}</div>}
-     {e.state==='cancelled'&&<p role="status" className="mt-2 text-sm">{gateStops[e.executionId]??'已取消剩余执行，保留原记录。'}</p>}
-     {e.state==='cost_pending'&&<p role="status" className="mt-2 text-sm">费用待核实；恢复只核对原调用。</p>}
-     {e.needsTask&&<p className="mt-2 text-sm">当前入口暂不支持这个 Skill 的任务选择。可取消剩余执行后使用普通对话。</p>}
-     {e.unavailableReason==='output_truncated'&&<p role="status" className="mt-2 text-sm">本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。</p>}
-     {e.unavailableReason==='latest_unavailable'&&<p className="mt-2 text-sm">本次未取得搜索资料，无法提供已核实的最新信息。</p>}
-     {capacityIds.includes(e.executionId)&&e.state!=='completed'&&e.state!=='cancelled'&&<p role="status" className="mt-2 text-sm">本次必要材料超过模型输入容量，原请求和已完成内容已保留。取消剩余执行后可缩短材料并新发请求。</p>}
-     {e.state!=='completed'&&e.state!=='cancelled'&&<div className="mt-3 flex flex-wrap gap-2">{!capacityIds.includes(e.executionId)&&<Button size="sm" variant="outline" disabled={busy} onClick={()=>recover(e.executionId)}>恢复原任务</Button>}<Button size="sm" variant="ghost" disabled={cancel.isPending} onClick={()=>stop(e.executionId)}>取消剩余执行</Button></div>}
+     <ChatNoticeList notices={turnNotices(e)}/>
     </div></div>
    </article></div>)}
    {isVideo&&currentScript&&videoPromptEnded&&(!currentStoryboard||!currentEditing)&&<Button variant="outline" onClick={()=>{localStorage.removeItem('opc-video-ended:'+currentScript.id);setVideoUiRevision(v=>v+1);}}>继续这版口播稿的分镜或剪辑</Button>}
    {isVideo&&currentScript&&!videoPromptEnded&&(!currentStoryboard||!currentEditing)&&<section aria-label="口播稿后续选择" className="space-y-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4"><h2 className="font-medium">{currentStoryboard?'分镜已保存。要基于这版分镜生成剪辑建议吗？':'口播稿已定稿。要先制作分镜脚本吗？'}</h2><p className="text-sm text-[var(--text-secondary)]">本次只绑定口播稿第 {currentScript.version} 版。选择后才会调用 Agent；以后重新定稿口播稿时不会自动生成。</p><div className="flex flex-wrap gap-2">{!currentStoryboard&&<Button disabled={busy||currentEditing} onClick={()=>chooseVideo('both')}>先做分镜，再生成剪辑建议</Button>}{!currentStoryboard&&<Button variant="outline" disabled={busy} onClick={()=>chooseVideo('storyboard')}>只生成分镜</Button>}{currentStoryboard&&<Button variant="outline" disabled={busy||currentEditing} onClick={()=>chooseVideo('editing')}>只生成剪辑建议</Button>}<Button variant="ghost" disabled={busy} onClick={()=>chooseVideo('end')}>暂时结束</Button></div><p className="text-xs text-[var(--text-tertiary)]">也可以在消息框输入同样的选择；提问卡和自然语言只执行同一个业务动作。</p></section>}
-{busy&&<p role="status" className="flex items-center gap-2 text-sm text-[var(--text-tertiary)]"><Loader2 className="h-4 w-4 animate-spin"/>正在处理，请稍候…</p>}</section>
+{pendingOutgoing&&<article className={workStyles.turn} data-message-role="user"><p className={workStyles.userMessage}>{pendingOutgoing.text}
+    <ChatPendingStatus sending={busy}/></p></article>}
+   <ChatNoticeList notices={runtimeTailNotices({error,heldGuide,busy,onGuide:()=>void guide(),lastTurn})}/></section>
   </div>
   {sessionId&&<footer className={`${composerStyles.zone} ${workStyles.composerZone}`}><div className={composerStyles.wrap}>
    {workItem&&isVideo&&<Button variant="outline" disabled={busy||Boolean(view.data?.activeExecution)||!choices.data?.defaultSkill} onClick={()=>send(true)}>{currentScript?'修改口播稿':'起草口播稿'}</Button>}
-   <WorkComposer value={input} onChange={updateInput} onSend={()=>void send()} disabled={busy||Boolean(view.data?.activeExecution)} sendDisabled={!workContextReady||!choices.data||!activeSelection} sessionId={sessionId} skillId={activeSelection.startsWith('skill:')?activeSelection.slice(6):''} onSkillChange={id=>{setSelection(id?'skill:'+id:ordinary);if(id)localStorage.setItem('opc-runtime-skill:'+sessionId,id);else localStorage.removeItem('opc-runtime-skill:'+sessionId);}} note={workItem?'本次讨论参考当前工作的最新成果。Enter 发送，Shift + Enter 换行。':'可以自由提问；Agent 按需查阅相关资料。Enter 发送，Shift + Enter 换行。'}/>
-  </div></footer>}{error&&<p role="alert" className="shrink-0 p-3 text-center text-sm">{error}</p>}
-  {heldGuide&&<div className="shrink-0 pb-3 text-center"><Button size="sm" variant="outline" disabled={busy} onClick={()=>void guide()}>恢复引导请求</Button></div>}
+   <WorkComposer value={input} onChange={updateInput} onSend={()=>void send()}
+    sendDisabled={busy||Boolean(view.data?.activeExecution)||!workContextReady||!choices.data||!activeSelection} sessionId={sessionId} skillId={activeSelection.startsWith('skill:')?activeSelection.slice(6):''} onSkillChange={id=>{setSelection(id?'skill:'+id:ordinary);if(id)localStorage.setItem('opc-runtime-skill:'+sessionId,id);else localStorage.removeItem('opc-runtime-skill:'+sessionId);}} note={workItem?'本次讨论参考当前工作的最新成果。Enter 发送，Shift + Enter 换行。':'可以自由提问；Agent 按需查阅相关资料。Enter 发送，Shift + Enter 换行。'}/>
+  </div></footer>}
  </main></WorkspaceFrame>;
 }

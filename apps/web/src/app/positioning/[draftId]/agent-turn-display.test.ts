@@ -16,6 +16,7 @@ import {
   type MentorReplySource,
 } from "./agent-turn-display";
 import { readWorkflowMentorExecution } from "./mentor-response";
+import { OUTPUT_TRUNCATED_NOTICE } from "@/lib/runtime-gate-notice";
 
 const fields = { audience: { schema: [{ id: "who" }] } };
 const card = { question: "你的内容主要写给谁？", options: ["刚入行的新人", "有经验的同行"], recommended: 0 };
@@ -25,16 +26,21 @@ function source(body: string | null, extra: Partial<MentorReplySource> = {}): Me
   return { body, legacyMessage: parsed.message, state: "completed", active: false, busy: false, ...extra };
 }
 
-/** The page's display expression before this change, kept to prove legacy parity. */
+/**
+ * The page's display before notices moved out of the message body: the same wording, now split
+ * into the body text and one state notice under the turn. Truncation is always that notice.
+ */
 function previousDisplay(s: MentorReplySource) {
-  return s.liveText || s.legacyMessage ||
-    (s.unavailableReason === "output_truncated"
-      ? "本次模型调用达到长度上限，未返回该阶段正文。原请求已保留，不会自动重试。"
-      : s.state === "cost_pending" && !s.active
-      ? "本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。"
-      : s.state === "cancelled"
-      ? "本次执行已停止，未取得可用回复。原记录已保留；请查看错误提示或继续讨论，系统不会自动重放这条请求。"
-      : s.busy ? "正在回复…" : "回复暂未完成，请继续核对。");
+  if (s.liveText) return { text: s.liveText, card: null };
+  const notice = s.unavailableReason === "output_truncated"
+    ? { tone: "warning", text: OUTPUT_TRUNCATED_NOTICE }
+    : s.legacyMessage ? undefined
+    : s.state === "cost_pending" && !s.active
+    ? { tone: "warning", text: "本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。" }
+    : s.state === "cancelled"
+    ? { tone: "warning", text: "本次执行已停止，未取得可用回复。原记录已保留；请查看错误提示或继续讨论，系统不会自动重放这条请求。" }
+    : s.busy ? { tone: "status", text: "正在回复…", busy: true } : { tone: "warning", text: "回复暂未完成，请继续核对。" };
+  return notice ? { text: s.legacyMessage, card: null, notice } : { text: s.legacyMessage, card: null };
 }
 
 describe("mentorReplyDisplay: new envelope", () => {
@@ -82,12 +88,19 @@ describe("mentorReplyDisplay: every other body kind", () => {
     expect(mentorReplyDisplay(source("早期的纯文本回复"))).toEqual({ text: "早期的纯文本回复", card: null });
   });
 
-  it("an empty body falls back to the execution state", () => {
-    expect(mentorReplyDisplay(source(null)).text).toBe("回复暂未完成，请继续核对。");
-    expect(mentorReplyDisplay(source(null, { busy: true })).text).toBe("正在回复…");
-    expect(mentorReplyDisplay(source(null, { state: "cancelled" })).text).toContain("本次执行已停止，未取得可用回复");
-    expect(mentorReplyDisplay(source(null, { state: "cost_pending" })).text).toContain("费用仍待核实");
-    expect(mentorReplyDisplay(source(null, { unavailableReason: "output_truncated" })).text).toContain("达到长度上限");
+  it("an empty body shows no text and one notice for the execution state", () => {
+    const notice = (extra: Partial<MentorReplySource>) => mentorReplyDisplay(source(null, extra));
+    expect(notice({})).toEqual({ text: "", card: null, notice: { tone: "warning", text: "回复暂未完成，请继续核对。" } });
+    expect(notice({ busy: true }).notice).toEqual({ tone: "status", text: "正在回复…", busy: true });
+    expect(notice({ state: "cancelled" }).notice?.text).toContain("本次执行已停止，未取得可用回复");
+    expect(notice({ state: "cost_pending" }).notice?.text).toContain("费用仍待核实");
+    expect(notice({ unavailableReason: "output_truncated" }).notice?.text).toBe(OUTPUT_TRUNCATED_NOTICE);
+  });
+
+  it("shows output truncation once, as the notice, even when the body has text", () => {
+    const shown = mentorReplyDisplay(source(agentTurnBody("已写出的部分", null), { unavailableReason: "output_truncated" }));
+    expect(shown).toEqual({ text: "已写出的部分", card: null, notice: { tone: "warning", text: OUTPUT_TRUNCATED_NOTICE } });
+    expect(shown.text).not.toContain("长度上限");
   });
 
   it("invalid content shows the fixed notice", () => {
@@ -127,7 +140,7 @@ describe("mentorReplyDisplay: every other body kind", () => {
     for (const body of bodies)
       for (const extra of states) {
         const s = source(body, extra);
-        expect(mentorReplyDisplay(s)).toEqual({ text: previousDisplay(s), card: null });
+        expect(mentorReplyDisplay(s)).toEqual(previousDisplay(s));
       }
   });
 });

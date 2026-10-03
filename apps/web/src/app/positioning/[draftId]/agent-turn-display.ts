@@ -6,6 +6,7 @@ import {
   type AgentTurnEvent,
   type QuestionCard,
 } from "@repo/api/src/shared/agentTurn";
+import { OUTPUT_TRUNCATED_NOTICE } from "@/lib/runtime-gate-notice";
 
 /** Shown instead of a body above the contract's parse limit. */
 export const OVERSIZED_REPLY_NOTICE = "本次回复内容过长，页面暂时无法展示。原记录已保留，你可以继续对话。";
@@ -41,7 +42,7 @@ export function liveReplyAfter(old: LiveReply | null, executionId: string, event
   return old;
 }
 
-/** Status line under a streaming reply. `incomplete` is set by the page when the stream stops early. */
+/** Status notice under a streaming reply. `incomplete` is set by the page when the stream stops early. */
 export function livePhaseNotice(phase: string) {
   if (phase === "reading") return "正在查阅方法资料…";
   if (phase === "organizer") return "正文已返回，正在整理待核对信息…";
@@ -65,33 +66,37 @@ export type MentorReplySource = {
   busy: boolean;
 };
 
-function unavailableNotice(source: MentorReplySource) {
-  if (source.unavailableReason === "output_truncated")
-    return "本次模型调用达到长度上限，未返回该阶段正文。原请求已保留，不会自动重试。";
+/** A state notice shown under a mentor turn (inline notice), never as the message body. */
+export type ReplyNotice = { tone: "status" | "warning"; text: string; busy?: boolean };
+
+function unavailableNotice(source: MentorReplySource): ReplyNotice {
   if (source.state === "cost_pending" && !source.active)
-    return "本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。";
+    return { tone: "warning", text: "本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。" };
   if (source.state === "cancelled")
-    return "本次执行已停止，未取得可用回复。原记录已保留；请查看错误提示或继续讨论，系统不会自动重放这条请求。";
-  return source.busy ? "正在回复…" : "回复暂未完成，请继续核对。";
+    return { tone: "warning", text: "本次执行已停止，未取得可用回复。原记录已保留；请查看错误提示或继续讨论，系统不会自动重放这条请求。" };
+  return source.busy ? { tone: "status", text: "正在回复…", busy: true } : { tone: "warning", text: "回复暂未完成，请继续核对。" };
 }
 
 /**
  * What one mentor message shows. Only the new envelope changes anything:
  * legacy JSON and plain bodies keep the existing parser's text, so saved
  * drafts look the same as before. Reasoning and raw JSON never reach the page.
- * `text` is empty only when a card is shown; a body without usable text or
- * card shows a fixed notice, never a blank.
+ * A body without usable text or card shows no text and one state `notice`;
+ * output truncation is always that one notice, shown once under the turn.
  */
-export function mentorReplyDisplay(source: MentorReplySource): { text: string; card: QuestionCard | null } {
+export function mentorReplyDisplay(source: MentorReplySource): { text: string; card: QuestionCard | null; notice?: ReplyNotice } {
   const body = readAgentTurnBody(source.body);
   const card = body.card ?? source.liveCard ?? null;
   if (source.liveText) return { text: source.liveText, card };
+  const truncated: ReplyNotice | undefined =
+    source.unavailableReason === "output_truncated" ? { tone: "warning", text: OUTPUT_TRUNCATED_NOTICE } : undefined;
+  const withNotice = (text: string, notice: ReplyNotice | undefined) => (notice ? { text, card, notice } : { text, card });
   // A valid envelope always has text, a card or both; a card alone needs no text.
-  if (body.kind === "envelope") return { text: body.message, card };
+  if (body.kind === "envelope") return withNotice(body.message, truncated);
   let stored = source.legacyMessage;
   if (body.kind === "invalid") stored = INVALID_REPLY_NOTICE;
   else if (body.kind === "oversized") stored = OVERSIZED_REPLY_NOTICE;
-  return { text: stored || (card ? "" : unavailableNotice(source)), card };
+  return withNotice(stored, truncated ?? (stored || card ? undefined : unavailableNotice(source)));
 }
 
 /** Where a turn was asked: a revision opens a new round that reuses step and question ids. */

@@ -279,7 +279,7 @@ describe("openingRequest", () => {
 
 describe("turnResultNotice", () => {
   it("maps each unavailable reason that has a notice, and nothing else", () => {
-    expect(turnResultNotice({ state: "completed", unavailable: "output_truncated" })).toContain("长度上限");
+    expect(turnResultNotice({ state: "completed", unavailable: "output_truncated" })).toBeNull(); // Shown once under the turn.
     expect(turnResultNotice({ state: "cancelled", unavailable: "provider_history" })).toContain("历史消息格式");
     expect(turnResultNotice({ state: "cancelled", unavailable: "preflight" })).toContain("派发前检查失败");
     expect(turnResultNotice({ state: "completed", body: "{}" })).toBeNull();

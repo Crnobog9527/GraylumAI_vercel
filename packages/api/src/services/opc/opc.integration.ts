@@ -2405,19 +2405,20 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       await capture('staging-actor-denied');
       const policy={multiplier:'1',modelId:randomUUID(),provider:'openrouter',account:'synthetic',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:8000,outputLimit:100,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
       await sql.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '1 hour')",[windowId,[f.actor],JSON.stringify([policy])]);
-      // The method cards are static, so wait for the library read itself before asserting its state.
-      const libraryRead=()=>page.waitForResponse(r=>r.url().includes('opc.library'));
-      let settled=libraryRead();await page.goto(process.env.V3_LOCAL_APP+'/');await settled;await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
+      // The method cards are static. Wait for the line the home page renders only after the library
+      // query succeeded (not just its response headers), then assert that no QueryNotice is shown.
+      const libraryLoaded=()=>page.locator('main').getByText(/已有定位和工作会保留|先一起确认定位，再开展选题和内容创作/).waitFor();
+      await page.goto(process.env.V3_LOCAL_APP+'/');await libraryLoaded();await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
       await capture('staging-allowed-directory');
       await sql.query('update artifact_workflows set enabled=false where id=$1',[f.registration]);
-      settled=libraryRead();await page.reload();await settled;await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
+      await page.reload();await libraryLoaded();await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
       expect(await page.locator('main').getByRole('alert').count()).toBe(0);await capture('staging-empty-directory');
       await sql.query('update runtime_test_windows set enabled=false where id=$1',[windowId]);
-      settled=libraryRead();await page.reload();await settled;await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
+      await page.reload();await libraryLoaded();await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
       // Retained read access is independent of current execution enablement.
       expect(await page.getByRole('alert').filter({hasText:'账号与资料'}).count()).toBe(0);
       await sql.query("update runtime_test_windows set enabled=true,expires_at=now()-interval '1 minute' where id=$1",[windowId]);
-      settled=libraryRead();await page.reload();await settled;await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
+      await page.reload();await libraryLoaded();await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
       await capture('staging-expired-window');
       expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actor])).rows[0].n).toBe(0);
       await writeFile(process.env.V3_WORKBENCH_OUTPUT+'/staging-state-styles.json',JSON.stringify(screenshots,null,2));
@@ -2611,7 +2612,7 @@ for (const scenario of ["fresh", "retry", "same-field", "offline", "response-los
           return route.continue();
         });
         await a.getByRole("textbox",{name:"已知目标 0",exact:true}).fill("Recover my original edit");
-        await a.getByRole("button",{name:"重试自动保存",exact:true}).waitFor();
+        await a.getByRole("status",{name:"自动保存失败",exact:true}).getByRole("button",{name:"重试",exact:true}).waitFor();
         const original=requests[0]; expect(original).toBeTruthy();
         expect((await sql.query("select count(*)::int n from artifact_requests where project_id=$1 and action='opc_information'",[draft.projectId])).rows[0].n).toBe(scenario==="response-lost"?1:0);
         await context.clearCookies();
@@ -2622,12 +2623,12 @@ for (const scenario of ["fresh", "retry", "same-field", "offline", "response-los
         await a.getByPlaceholder("输入你的密码").fill(f.password);
         await a.getByRole("button",{name:"登录",exact:true}).last().click();
         await a.waitForURL(url,{timeout:90000});
-        await a.getByRole("button",{name:"重试自动保存",exact:true}).waitFor();
+        await a.getByRole("status",{name:"自动保存失败",exact:true}).getByRole("button",{name:"重试",exact:true}).waitFor();
         expect(await a.getByRole("textbox",{name:"已知目标 0",exact:true}).inputValue()).toBe("Recover my original edit");
         blocked=false;
-        await a.getByRole("button",{name:"重试自动保存",exact:true}).click();
+        await a.getByRole("status",{name:"自动保存失败",exact:true}).getByRole("button",{name:"重试",exact:true}).click();
         await expect.poll(async()=> (await f.service.read(draft.draftId)).information["step-0"].values?.goal?.value,{timeout:20000}).toBe("Recover my original edit");
-        await expect.poll(()=>a.getByRole("button",{name:"重试自动保存",exact:true}).count()).toBe(0);
+        await expect.poll(()=>a.getByRole("status",{name:"自动保存失败",exact:true}).getByRole("button",{name:"重试",exact:true}).count()).toBe(0);
         expect(new Set(requests).size).toBe(1);
         expect((await sql.query("select count(*)::int n from artifact_requests where project_id=$1 and action='opc_information'",[draft.projectId])).rows[0].n).toBe(1);
         expect((await f.service.read(draft.draftId)).sessionId).toBe(draft.sessionId);
@@ -2916,9 +2917,9 @@ it('OPC: CAPACITY tool continuation measures each complete SDK request and cap b
   await page.goto(process.env.V3_LOCAL_APP+'/runtime?session='+bounded.sessionId);
   await page.evaluate(({sessionId,executionId})=>sessionStorage.setItem('opc-runtime-capacity:'+sessionId+':'+executionId,'1'),{sessionId:bounded.sessionId,executionId:bounded.executionId});
   await page.reload();
-  await page.getByText('本次必要材料超过模型输入容量，原请求和已完成内容已保留。取消剩余执行后可缩短材料并新发请求。').waitFor();
-  expect(await page.getByRole('button',{name:'恢复原任务'}).count()).toBe(0);
-  expect(await page.getByRole('button',{name:'取消剩余执行'}).count()).toBe(1);
+  await page.getByText('本次必要材料超过模型输入容量，原请求和已完成内容已保留。停止后可缩短材料再新发请求。').waitFor();
+  expect(await page.getByRole('button',{name:'重试',exact:true}).count()).toBe(0);
+  expect(await page.getByRole('button',{name:'停止',exact:true}).count()).toBe(1);
  }finally{await browser.close();}
  const historical=await run(9000,true);
  expect(supported.rows[2].bytes).toBeLessThan(9000);
@@ -7010,7 +7011,7 @@ it("OPC: B1 browser auto-saves discussion, adopts one topic across a lost reply 
       const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort(); lostAdoption += 1;
     });
     await revised.getByRole('button', { name: '采用这个选题', exact: true }).click();
-    await page.getByRole('button', { name: '恢复原请求', exact: true }).waitFor({ timeout: 60000 });
+    await page.getByRole('status',{name:'待确认的操作',exact:true}).getByRole('button',{name:'重试',exact:true}).waitFor({ timeout: 60000 });
     await expect.poll(() => lostAdoption, { timeout: 30000 }).toBeGreaterThan(0);
     const bound = await f.service.topicRead(f.d.draftId);
     const frozenKey = 'opc-topic-operation:' + bound.sessionId;
@@ -7027,7 +7028,7 @@ it("OPC: B1 browser auto-saves discussion, adopts one topic across a lost reply 
     await page.getByPlaceholder('输入你的密码').fill(f.password);
     await page.getByRole('button', { name: '登录', exact: true }).last().click();
     await page.waitForURL(url => url.pathname === path);
-    await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
+    await page.getByRole('status',{name:'待确认的操作',exact:true}).getByRole('button',{name:'重试',exact:true}).click();
     await expect.poll(() => page.evaluate(key => localStorage.getItem(key), frozenKey), { timeout: 30000 }).toBeNull();
     const plans = (await f.service.read(f.d.draftId)).plans;
     expect(plans).toHaveLength(2);
@@ -7093,7 +7094,7 @@ it("OPC: a second topic generation takes a new constraint and request id, and a 
     });
     await page.getByLabel('消息', { exact: true }).fill('请修改第一条选题，改成更适合新手的版本');
     await page.getByRole('button', { name: '发送', exact: true }).click();
-    await page.getByRole('button', { name: '恢复原请求', exact: true }).waitFor({ timeout: 60000 });
+    await page.getByRole('status',{name:'待确认的操作',exact:true}).getByRole('button',{name:'重试',exact:true}).waitFor({ timeout: 60000 });
     await expect.poll(() => lost, { timeout: 30000 }).toBeGreaterThan(0);
     const afterB = { identity: await topicIdentity(f.actor), money: await money(), requests: await topicRequests() };
     expect(afterB.requests).toHaveLength(2);
@@ -7110,7 +7111,7 @@ it("OPC: a second topic generation takes a new constraint and request id, and a 
     // no second reservation, no further charge.
     await page.unroute('**/api/trpc/runtime.execute*');
     await page.reload();
-    await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
+    await page.getByRole('status',{name:'待确认的操作',exact:true}).getByRole('button',{name:'重试',exact:true}).click();
     await card('1. 修改后的选题').waitFor({ timeout: 60000 });
     await expect.poll(async () => (await f.service.topicDraftRead(f.d.draftId)).version, { timeout: 30000 }).toBe(2);
     expect(await topicRequests()).toEqual(afterB.requests);
@@ -8674,7 +8675,7 @@ it("OPC: natural-language adoption stays complete after refresh and permits the 
     const before = await f.service.read(f.d.draftId);
     await page.reload();
     await page.getByLabel('消息', { exact: true }).waitFor();
-    expect(await page.getByRole('button', { name: '恢复原请求', exact: true }).count()).toBe(0);
+    expect(await page.getByRole('status',{name:'待确认的操作',exact:true}).getByRole('button',{name:'重试',exact:true}).count()).toBe(0);
     expect((await page.getByRole('alert').allTextContents()).join(' ')).not.toContain('原请求身份');
     await page.getByLabel('消息', { exact: true }).fill('请继续修改标题');
     await page.getByRole('button', { name: '发送', exact: true }).click();
@@ -8915,7 +8916,7 @@ it("OPC: topic invalid messages and legacy invalid pending records remain recove
       } }));
     }, { key, id: workspace.sessionId, requestId: invalidId, sourceVersionId: workspace.sourceVersionId });
     await page.reload();
-    await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
+    await page.getByRole('status',{name:'待确认的操作',exact:true}).getByRole('button',{name:'重试',exact:true}).click();
     await expect.poll(() => page.evaluate(k => localStorage.getItem(k), key), { timeout: 30000 }).toBeNull();
     expect(await page.evaluate(k => localStorage.getItem(k), key + ':invalid:' + invalidId)).not.toBeNull();
     await page.getByRole('button', { name: '采用这个选题', exact: true }).first().waitFor();
@@ -9338,12 +9339,12 @@ it('OPC: rejected cross-business adoption recovers its original request and perm
   // Simulate the old client's unknown outcome; do not hand-edit or delete pending state.
   await page.route('**/api/trpc/opc.adoptTopics*',async route=>{await route.fetch();await route.abort();});
   await card('1. 首周选题').getByRole('button',{name:'采用这个选题',exact:true}).click();
-  await page.getByRole('button',{name:'恢复原请求',exact:true}).waitFor();
-  await expect.poll(()=>page.getByRole('button',{name:'恢复原请求',exact:true}).isEnabled()).toBe(true);
+  await page.getByRole('status',{name:'待确认的操作',exact:true}).getByRole('button',{name:'重试',exact:true}).waitFor();
+  await expect.poll(()=>page.getByRole('status',{name:'待确认的操作',exact:true}).getByRole('button',{name:'重试',exact:true}).isEnabled()).toBe(true);
   const workspace=await f.service.topicRead(f.d.draftId),key='opc-topic-operation:'+workspace.sessionId;
   const frozen=await page.evaluate(key=>localStorage.getItem(key),key);
   await page.unroute('**/api/trpc/opc.adoptTopics*');
-  await page.getByRole('button',{name:'恢复原请求',exact:true}).click();
+  await page.getByRole('status',{name:'待确认的操作',exact:true}).getByRole('button',{name:'重试',exact:true}).click();
   // The prompt text after this prefix still points at a removed control (front-end P3, tracked separately).
   await page.getByText(/^这个账号已属于另一项业务，本次没有采用。/).waitFor();
   // Rejected: nothing adopted, nothing charged, and the original request is kept.
@@ -9436,10 +9437,10 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   let lostType=0;
   await page.route('**/api/trpc/opc.editLibrary*',async route=>{if(lostType++)return route.continue();const response=await route.fetch();expect(response.ok()).toBe(true);await route.abort();});
   await page.getByRole('button',{name:'图文',exact:true}).click();
-  await page.getByRole('button',{name:'恢复类型保存',exact:true}).waitFor();
+  await page.getByRole('status',{name:'类型保存待核实',exact:true}).getByRole('button',{name:'重试',exact:true}).waitFor();
   await page.reload();
-  await page.getByRole('button',{name:'恢复类型保存',exact:true}).click();
-  await expect.poll(()=>page.getByRole('button',{name:'恢复类型保存',exact:true}).count()).toBe(0);
+  await page.getByRole('status',{name:'类型保存待核实',exact:true}).getByRole('button',{name:'重试',exact:true}).click();
+  await expect.poll(()=>page.getByRole('status',{name:'类型保存待核实',exact:true}).getByRole('button',{name:'重试',exact:true}).count()).toBe(0);
   await page.getByText('【主动引导合成示例，仅验证交互】我们先细化这条选题：你最希望读者看完后理解哪一个重点？',{exact:true}).waitFor({timeout:60000});
   expect((await sql.query('select opc_item_content_type($1) t',[unknown.workItemId])).rows[0].t).toBe('image_text');
   await page.getByLabel('图文正文',{exact:true}).fill('图文 U3 合成正文');
@@ -10087,7 +10088,7 @@ it.each(['true','omitted','false'] as const)('OPC: stopped pending cost unlocks 
   await expect.poll(()=>composer.isEnabled()).toBe(true);
   await expect.poll(()=>page.evaluate(key=>sessionStorage.getItem(key),key),{timeout:30000}).toBeNull();
   await page.getByText('本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。').waitFor();
-  expect(await page.getByRole('button',{name:'继续核对这条回复',exact:true}).count()).toBe(0);
+  expect(await page.getByRole('button',{name:'重试',exact:true}).count()).toBe(0);
   await page.reload();await composer.waitFor();await expect.poll(()=>composer.isEnabled()).toBe(true);
   expect((await sql.query('select to_jsonb(r) row from bill2_runs r where id=(select billing_run_id from runtime_executions where id=$1)',[prepared.executionId])).rows).toEqual(original);
   expect(posts).toBe(1);
@@ -11138,7 +11139,7 @@ async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase
     expect(new URL(continueUrl).searchParams.get('continue')).toBe('1');
     const sessionId = new URL(continueUrl).searchParams.get('session')!;
     const transcript = page.getByLabel('对话记录', { exact: true });
-    const recoverGuide = page.getByRole('button', { name: '恢复引导请求', exact: true });
+    const recoverGuide = page.getByRole('status', { name: '引导待重试', exact: true }).getByRole('button', { name: '重试', exact: true });
     const videoKey = 'opc-video-operation:' + sessionId;
     const finalPrompt = page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true });
     const scripts = async () => Number((await sql.query(

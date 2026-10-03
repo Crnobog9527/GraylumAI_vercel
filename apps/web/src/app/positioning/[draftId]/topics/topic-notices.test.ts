@@ -20,7 +20,7 @@ it.each([
 it('keeps existing topic failure wording for everything else', () => {
   expect(topicFailureMessage(new Error('OPC_REQUEST_CONFLICT'))).toContain('原请求身份');
   expect(topicFailureMessage(turnRefusal('SERVICE_UNAVAILABLE', '工作空间服务暂不可用，请稍后重试。'))).toContain('状态待核实');
-  expect(topicFailureMessage(new Error('network'))).toContain('恢复原请求');
+  expect(topicFailureMessage(new Error('network'))).toContain('「重试」');
 });
 
 it.each([

@@ -1,35 +1,33 @@
-/* The mentor's question card. Visual family of the suggestion card in positioning-result.module.css. */
-.card{display:flex;flex-direction:column;gap:12px;margin-right:16px;padding:16px 18px;border:1px solid #e5e5e5;border-radius:12px;background:#fafafa}
-.head{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#929292;font-size:12px;line-height:20px}
-.status{padding:1px 8px;border-radius:999px;background:#efefef;color:#777;font-size:11px;line-height:18px;white-space:nowrap}
-.question{margin:0;color:#262626;font-size:15px;font-weight:500;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}
-.options{display:grid;gap:8px;margin:0;padding:0;list-style:none}
-/* Beats the chat log's generic button rule and the Button component's centring. */
-.card .options button.option{height:auto;min-height:38px;white-space:normal;overflow-wrap:anywhere}
-.card .options button.option{display:flex;width:100%;justify-content:flex-start;padding:9px 12px;text-align:left;font-size:13px;line-height:1.6;color:#262626}
-.optionItem{display:grid;gap:4px}
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The mentor's open question, on the light OPC workbench (DESIGN.md U0/U1): site font, #262626 text,
+ * #777 secondary text, quiet #ececec borders. A compact choice list like Claude.ai/ChatGPT: rows that
+ * highlight on hover, a small recommended tag, the reason as secondary text.
+ */
+.card{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:1px solid #ececec;border-radius:12px;background:#fff;
+  font-family:var(--font-primary);color:#262626}
+.head{margin:0;color:#8a8a8a;font-size:12px;font-weight:400;line-height:18px}
+.question{margin:0;color:#262626;font-size:14px;font-weight:500;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.options{display:grid;gap:2px;margin:2px -6px 0}
+.optionItem{display:grid}
+.card .option{display:flex;align-items:baseline;gap:8px;width:100%;min-height:36px;margin:0;padding:7px 8px;border:0;border-radius:8px;
+  background:transparent;box-shadow:none;color:#262626;font:inherit;font-size:13px;font-weight:400;line-height:1.6;text-align:left;
+  white-space:normal;overflow-wrap:anywhere;cursor:pointer;transition:background var(--transition-fast)}
+.card .option:hover:not(:disabled),.card .option:focus-visible{background:#f4f4f5;outline:0}
+.card .option:disabled{color:#aaa;cursor:not-allowed}
+.card .other{color:#777}
+.tag{flex:none;padding:0 6px;border-radius:999px;background:#f4efe3;color:#7a5f2c;font-size:11px;line-height:18px;white-space:nowrap}
 /* The mentor's reason, directly under the recommended option and aligned with its text. */
-.reason{margin:0;padding:0 12px;color:#858585;font-size:12px;line-height:18px;white-space:pre-wrap;overflow-wrap:anywhere}
-.historyItem{padding:9px 12px;border:1px solid #ececec;border-radius:8px;background:#fff;color:#999;font-size:13px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
-.chosen{border-color:#262626;color:#262626}
-.chosenTag{margin-left:8px;color:#777;font-size:11px;white-space:nowrap}
-.foot{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding-top:12px;border-top:1px solid #ececec}
-.hint{margin:0;color:#858585;font-size:12px;line-height:18px}
-@media(max-width:480px){
-  .card{margin-right:0;padding:14px}
-  .card .options button.option{min-height:44px}
-}
-/* Compact history record in the conversation; the options fold into <details>. */
-.record{gap:8px;padding:12px 14px;background:#fff}
-.record .question{font-size:14px}
-.answer{margin:0;color:#262626;font-size:13px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
-.answer span{margin-right:8px;color:#858585;font-size:12px}
-.history summary{width:fit-content;color:#858585;font-size:12px;line-height:20px;cursor:pointer}
-.history[open] summary{margin-bottom:8px}
-.show{width:fit-content;padding:0;border:0;background:none;color:#555;font-size:12px;line-height:20px;text-decoration:underline;cursor:pointer}
+.reason{margin:-4px 0 4px;padding:0 8px;color:#8a8a8a;font-size:12px;line-height:18px;white-space:pre-wrap;overflow-wrap:anywhere}
 /* Docked inside the composer, above the text box: the composer draws the border. */
-.docked{position:relative;margin:0;padding:2px 2px 12px;border:0;border-bottom:1px solid #ececec;border-radius:0;background:none}
+.docked{position:relative;margin:0;padding:0 0 10px;border:0;border-bottom:1px solid #ececec;border-radius:0;background:none}
 .docked .head{padding-right:30px}
-.dismiss{position:absolute;top:-1px;right:0;display:grid;place-items:center;width:26px;height:26px;border:0;border-radius:50%;background:none;color:#8a8a8a;cursor:pointer}
+.dismiss{position:absolute;top:-4px;right:-4px;display:grid;place-items:center;width:26px;height:26px;border:0;border-radius:50%;
+  background:none;color:#8a8a8a;cursor:pointer}
 .dismiss:hover{background:#f2f2f2;color:#262626}
-@media(max-width:480px){.docked{padding:0 0 10px}}
+.folded{display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid #ececec;border-radius:10px;background:#fff;
+  font-family:var(--font-primary);font-size:13px;line-height:1.6;color:#262626}
+.foldedText{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.foldedText .head{display:inline;margin-right:8px}
+.folded button.show{flex:none;min-height:0;padding:0;border:0;background:none;color:#555;font:inherit;font-size:12px;text-decoration:underline;cursor:pointer}
+@media(max-width:480px){.card .option{min-height:44px}.docked{padding-bottom:8px}}

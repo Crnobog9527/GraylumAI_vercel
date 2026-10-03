@@ -16,10 +16,12 @@ import { mergeInformation } from "./information-merge";
 import { readPlanEnvelope, type PlanEnvelope, type PlanRequest } from "./plan-envelope";
 import { admissionMessage } from "./admission-message";
 import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-response";
-import { focusReply, liveReplyAfter, livePhaseNotice, mentorReplyDisplay, questionCardStatus, startLiveReply, type LiveReply } from "./agent-turn-display";
+import { focusReply, liveReplyAfter, mentorReplyDisplay, questionCardStatus, startLiveReply, type LiveReply } from "./agent-turn-display";
 import { OpenQuestionRecord, OTHER_PLACEHOLDER, QuestionCardView } from "@/components/opc/question-card";
 import { isDefiniteConfirmConflict } from "./confirm-conflict";
 import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
+import { CHAT_ACTION, ChatInlineNotice, ChatNoticeList, ChatPendingStatus } from "@/components/chat/ChatInlineNotice";
+import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE } from "./mentor-notices";
 import type { AgentTurnEvent, AgentTurnOutcome } from "@repo/api/src/shared/agentTurn";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, readAgentTurn,
@@ -1011,7 +1013,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     // explicit retry instead of orphaning the request.
     // An automatic attempt stays quiet; the compact retry line asks the user once attempts run out.
     if (sessionStorage.getItem(key))
-      setError(quiet ? "" : admissionMessage(failure) ?? "原请求仍未确认结果，已继续保留。请稍后再点“重试”，不会重复发送或重复扣费。");
+      setError(quiet ? "" : admissionMessage(failure) ?? RETRY_PENDING_NOTICE);
   }
   function confirmEnvelopeState(stepId: string): ConfirmEnvelopeState {
     if (hydratedDraft !== draftId || typeof window === "undefined")
@@ -1098,7 +1100,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if (confirmationLock.current) return;
     const envelopeState = confirmEnvelopeState(step.id);
     if (envelopeState.kind === "malformed") {
-      setError("上次的确认记录无法读取，结果未知。请先用“恢复上次确认记录并重新读取”保留原始内容，再重新核对本题。");
+      setError("上次的确认记录无法读取，结果未知。请先点“重试”保留原始内容，再重新核对本题。");
       return;
     }
     if (
@@ -1609,9 +1611,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   if (planView) return <main className="mx-auto max-w-3xl space-y-4 p-6">
     <Link href={`/positioning/${draftId}/topics`}>进入当前选题工作</Link>
     <h1>旧计划请求恢复</h1>
-    {error && <p role="alert">{error}</p>}
+    {error && <ChatInlineNotice tone="error">{error}</ChatInlineNotice>}
     <p>这里只恢复原请求及其结果，不创建新请求，不替换当前工作。</p>
-    {notice && <p role="alert">{notice}</p>}
+    {notice && <ChatInlineNotice tone="warning">{notice}</ChatInlineNotice>}
     {retainedPlan && <section className="space-y-3">
       <h2>本机保留了一条早先的生成请求</h2>
       <p role="status">{retainedState.isLoading ? "正在核对原请求…" : retainedState.error || !retainedStateData
@@ -1700,7 +1702,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   /** A streaming reply whose execution is not in history yet. */
   const liveOnly = liveReply && !mentorExecutions.some(e => e.executionId === liveReply.executionId) ? liveReply : null;
   // The one open question card, docked to the message box. Set while the conversation renders.
-  let dock: ReactNode = liveOnly?.card ? <QuestionCardView key="live" card={liveOnly.card} answered={false} disabled docked/> : null;
+  let chatShown = false, lastTurnNotice = false;
+  let dock: ReactNode = liveOnly?.card ? <QuestionCardView key="live" card={liveOnly.card} disabled docked/> : null;
   // A retained mentor envelope can exist before its execution is visible in
   // history (or after a lost reply), so recovery is driven by the envelope
   // itself rather than the execution list.
@@ -1711,6 +1714,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     })
     .filter((entry): entry is { step: Step; raw: string; parsed: StepEnvelope | null } => Boolean(entry));
   const hasPendingStepRequest = pendingStepRequests.length > 0;
+  const awaitingReply = hasPendingStepRequest && !recoveryNeedsUser.length;
   // The server execution slot owns concurrency. A stopped historical call may
   // still have pending cost without owning that slot; never infer busy from cost.
   const pendingMentor = mentorExecutions.find(
@@ -1731,9 +1735,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       </header>
       {workInfoOpen&&<div className={resultStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setWorkInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={resultStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setWorkInfoOpen(false)}>×</button></header><p>当前工作：{manualEntry?'已有定位录入':'定位分析'}</p><p>状态：{snap.state==='published'?'定位已确认':'定位进行中'}</p><p>定位讨论、待确认修改与历史版本留在原工作；查看不会确认或保存。</p><footer><button type="button" onClick={()=>{void read.refetch();setWorkInfoOpen(false);}}>重新读取状态</button><Link href="/positioning">新任务与账号</Link></footer></section></div>}
       {!planView && <>
-      {d.accountRevision?.methodConflict&&<div role="alert">此修改草稿使用的方法与原正式版本不同，未自动合并或覆盖任何答案。请对照原正式内容核对当前草稿。
+      {d.accountRevision?.methodConflict&&<ChatInlineNotice tone="warning" alert>此修改草稿使用的方法与原正式版本不同，未自动合并或覆盖任何答案。请对照原正式内容核对当前草稿。
           <details><summary>查看原正式版本完整内容</summary>{Object.entries(d.accountRevision.sourceInformation as Record<string,{title:string;schema:Array<{id:string;title:string}>;values:Record<string,Information>}>).map(([id,part])=><section key={id}><h4>{part.title}</h4>{part.schema.map(field=><p key={field.id}>{field.title}：{part.values?.[field.id]?.value}</p>)}</section>)}</details>
-      </div>}
+      </ChatInlineNotice>}
       <nav aria-label="定位步骤" className={resultStyles.phaseStrip} style={{gridTemplateColumns:`repeat(${steps.length},minmax(0,1fr))`}}>
         {steps.map((step, index) => (
           <Button
@@ -1752,11 +1756,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           </Button>
         ))}
       </nav>
-      {hasUnsavedInformation && (
-        <p role="status">
-          正在保存最新修改。保存完成前不会确认步骤或采用计划。
-        </p>
-      )}
       <section aria-label="当前定位步骤" className="space-y-4">
         {snap.workflow.steps.map((step: Step, index: number) => {
           if (step.id !== selectedStep.id) return null;
@@ -1818,6 +1817,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           const questionConfirmed =
             questionIsConfirmed(d.information[step.id].values?.[activeQuestion.id]) &&
             !infoEdits[step.id];
+          chatShown = true; // Its message list carries the page's notices.
           return (
             <article
               key="positioning-workspace"
@@ -1880,15 +1880,16 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                       const live = liveReply?.executionId === execution.executionId ? liveReply : null;
                       const reply = mentorReplyDisplay({ body: execution.body ?? execution.primaryBody, legacyMessage: parsed.message,
                         liveText: live?.text, liveCard: live?.card, state: execution.state, unavailableReason: execution.unavailableReason,
-                        active: execution.executionId === history.data?.activeExecution, busy });
+                        active: execution.executionId === history.data?.activeExecution, busy: busy || awaitingReply });
                       const next = mentorExecutions[executionIndex + 1];
+                      if (!next) lastTurnNotice = Boolean(reply.notice);
                       const cardStatus = questionCardStatus({ isLatest: !next, turn,
                         shown: { roundId: d.roundId, stepId: step.id, questionId: activeQuestion.id },
                         reply: next ? { ...mentorTurns.get(next.executionId), input: isOpeningInput(next.input) ? null : next.input }
                           : pendingBubble && { ...pendingBubble, roundId: d.roundId } });
                       const cardLocked = !cardStatus.onShownQuestion || execution.state !== "completed" || sendLocked || snap.state !== "draft" || reviewOnly;
                       if (reply.card && !cardStatus.answered && !liveOnly && foldedCard !== execution.executionId) {
-                        dock = <QuestionCardView key={execution.executionId} card={reply.card} answered={false} disabled={cardLocked} docked
+                        dock = <QuestionCardView key={execution.executionId} card={reply.card} disabled={cardLocked} docked
                           onAnswer={(input, optionIndex) => void ask(step, activeQuestion.id, input, {executionId: execution.executionId, optionIndex})}
                           onOther={focusReply} onDismiss={() => setFoldedCard(execution.executionId)}/>;
                       }
@@ -1914,9 +1915,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                             </span>
                             <MessageMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={reply.text} streaming={Boolean(live)}/>
                           </div>}
-                          {reply.card && (cardStatus.answered ? <QuestionCardView card={reply.card} answered answer={cardStatus.answer}/>
-                            : <OpenQuestionRecord card={reply.card} hidden={foldedCard === execution.executionId} onShow={() => setFoldedCard("")}/>)}
-                          {parsed.message && execution.unavailableReason === 'output_truncated' && <p role="status">本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。</p>}
+                          {/* Answered: gone. Open: docked. Folded: one line. */reply.card && !cardStatus.answered && foldedCard === execution.executionId
+                            && <OpenQuestionRecord card={reply.card} onShow={() => setFoldedCard("")}/>}
                           {execution.state === "completed" && target && latestSuggestion.get(target.id) === execution.executionId && proposed.length > 0 && (
                             <div className={resultStyles.suggestionCard}>
                               <p className={resultStyles.suggestionTitle}>导师建议调整 · {target.title}</p>
@@ -1926,30 +1926,19 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                               <p className={resultStyles.suggestionNote}>原有内容在采用前保持不变。采用后请核对本步骤及受影响的后续结果。</p>
                             </div>
                           )}
-                          {!busy && execution.executionId === history.data?.activeExecution && !["completed", "cancelled", "running"].includes(
-                            execution.state, // Polling follows a running turn; this is for one that stopped advancing.
-                          ) && (
-                            <Button
-                              variant="outline"
-                              disabled={busy}
-                              onClick={() =>
-                                run(() =>
-                                  execute.mutateAsync({
-                                    executionId: execution.executionId,
-                                  }),
-                                )
-                              }
-                            >
-                              继续核对这条回复
-                            </Button>
-                          )}
+                          {/* Polling follows a running turn; the retry is for one that stopped advancing. */}
+                          <ChatNoticeList notices={[mentorTurnNotice(execution.executionId, reply.notice,
+                            !busy && execution.executionId === history.data?.activeExecution && !["completed", "cancelled", "running"].includes(execution.state)
+                            ? { onClick: () => void run(() => execute.mutateAsync({ executionId: execution.executionId })) } : null)]}/>
                         </div>
                       );
                     })}
-                    {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<div data-message-role="user" data-request-id={pendingBubble.requestId} className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3"><span>你 · {d.information[pendingBubble.stepId]?.schema.find((f:{id:string;title:string})=>f.id===pendingBubble.questionId)?.title}</span><p className="whitespace-pre-wrap">{pendingBubble.input}</p><small role="status">{running?'发送中 · 等待服务器确认':'尚未确认保存 · 原请求已保留'}</small></div>}
+                    {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<div data-message-role="user" data-request-id={pendingBubble.requestId} className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3"><span>你 · {d.information[pendingBubble.stepId]?.schema.find((f:{id:string;title:string})=>f.id===pendingBubble.questionId)?.title}</span><p className={`whitespace-pre-wrap ${resultStyles.messageBody}`}>{pendingBubble.input}</p><ChatPendingStatus sending={running}/></div>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="导师正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>导师</span>{liveOnly.text?<MessageMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={liveOnly.text} streaming/>:<p className={`mt-1 ${resultStyles.messageBody}`}>导师正在思考…</p>}</div>}
-                  {liveOnly?.card&&<OpenQuestionRecord card={liveOnly.card}/>}
-                  {liveReply&&<p role="status">{livePhaseNotice(liveReply.phase)}</p>}
+                  <ChatNoticeList notices={mentorTailNotices({ livePhase: liveReply?.phase ?? null, saving: hasUnsavedInformation,
+                    error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice,
+                    recovery: recoveryNeedsUser[0] && !busy
+                      ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })}/>
                   {!manualEntry && snap.state === "draft" && !reviewOnly && <section className={resultStyles.currentAction} aria-label="当前问题操作">
                     <strong>当前核对：{activeQuestion.title}</strong>
                     <p>{(infoEdits[step.id]?.[activeQuestion.id] ?? d.information[step.id].values?.[activeQuestion.id])?.value || '先讨论当前问题，或在右侧填写答案。'}</p>
@@ -1958,11 +1947,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     </div>
                   </section>}
                   </div>
-                  {recoveryNeedsUser[0] && !busy && <p role="status" aria-label="恢复提示" className={resultStyles.recoveryLine}>
-                    {recoveryNeedsUser[0].readable ? '上一条回复还没确认完成，原请求已保留，重试不会重复扣费。' : '上一条请求无法读取，原始记录已保留。'}
-                    <button type="button" onClick={() => void recoverPendingStep(recoveryNeedsUser[0]!.step)}>重试</button></p>}
-                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} note={hasPendingStepRequest && !recoveryNeedsUser.length ? "正在回复…" : undefined} maxLength={8000} disabled={snap.state!=="draft"||reviewOnly} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step,activeQuestion.id);}}/>
-                  {free.error&&<p role="alert">{free.error}</p>}
+                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"||reviewOnly} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step,activeQuestion.id);}}/>
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
                   </p>
@@ -2004,16 +1989,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     <Button onClick={()=>retainConflictingInput(step.id)}>保留我的这些修改并重新保存</Button>
                   </div>}
                   {confirmationState.kind === "malformed" && (
-                    <div role="alert" className="space-y-2">
-                      <p>上次的确认请求无法读取，确认结果未知。原始记录已在本机保留，不会被删除。恢复会先读取服务器状态，再允许你重新核对当前问题，不会当作已确认通过。</p>
-                      <Button
-                        variant="outline"
-                        disabled={busy}
-                        onClick={() => void recoverCorruptConfirmation(step.id)}
-                      >
-                        恢复上次确认记录并重新读取
-                      </Button>
-                    </div>
+                    <ChatInlineNotice tone="warning"
+                      actions={[{ label: CHAT_ACTION.retry, disabled: busy, onClick: () => void recoverCorruptConfirmation(step.id) }]}>
+                      上次的确认请求无法读取，确认结果未知。原始记录已在本机保留，不会被删除。重试会先读取服务器状态，再允许你重新核对当前问题，不会当作已确认通过。
+                    </ChatInlineNotice>
                   )}
                   <div className="space-y-4">
                   {(manualEntry ? schema : [activeQuestion]).map((field) => {
@@ -2167,19 +2146,15 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     })}
                   </div>}
                   {saveState[step.id] === "error" && (
-                    <Button
-                      variant="outline"
-                      disabled={information.isPending || hasPendingConfirmation}
-                      onClick={() => {
+                    <ChatInlineNotice tone="warning" label="自动保存失败"
+                      actions={[{ label: CHAT_ACTION.retry, disabled: information.isPending || hasPendingConfirmation,
+                      onClick: () => {
                         const values = infoEditsRef.current[step.id];
                         if (values)
                           void enqueueInformation(step.id, values).catch(() =>
                             setError("自动保存仍未成功。内容已保留，请稍后重试。"),
                           );
-                      }}
-                    >
-                      重试自动保存
-                    </Button>
+                      } }]}>自动保存失败，内容仍保留在本机。</ChatInlineNotice>
                   )}
                   {(() => {
                     const pending = nextInformationQuestion(schema, d.information[step.id].values);
@@ -2714,8 +2689,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
             ))}
         </section>
       )}
-      {error && <p role="alert">{error}</p>}
-      {notice && <p role="status">{notice}</p>}
+      {!chatShown && <ChatNoticeList
+        notices={[error && { id: "error", tone: "error", text: error }, notice && { id: "notice", tone: "warning", text: notice }]}/>}
     </div></main></WorkspaceFrame>
   );
 }

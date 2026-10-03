@@ -18,6 +18,9 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
  const [menu,setMenu]=useState<'files'|'skills'|null>(null),[query,setQuery]=useState(''),[localSkill,setLocalSkill]=useState(''),[error,setError]=useState(''),[reading,setReading]=useState(false);
  const root=useRef<HTMLDivElement>(null);
  const fileInput=useRef<HTMLInputElement>(null),current=useRef(value);current.current=value;
+ const textarea=useRef<HTMLTextAreaElement>(null);
+ // The box stays enabled while a turn runs, so focus is kept after Enter; a click on send returns it.
+ const sendAndFocus=()=>sendKeepingFocus(()=>onSend(selected),textarea.current);
  useEffect(()=>{if(!menu)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape')setMenu(null);};const outside=(event:PointerEvent)=>{if(!root.current?.contains(event.target as Node))setMenu(null);};document.addEventListener('keydown',key);document.addEventListener('pointerdown',outside);return()=>{document.removeEventListener('keydown',key);document.removeEventListener('pointerdown',outside);};},[menu]);
  const choices=trpc.runtime.choices.useQuery(sessionId?{sessionId}:undefined,{enabled:menu==='skills'});
  const selected=onSkillChange?skillId:localSkill;
@@ -43,13 +46,19 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
  const cannotSend=disabled||sendDisabled||reading||!value.trim();
  return <div ref={root} className={styles.wrap}><div className={styles.composer}>
   {attachment&&<div className={styles.attachment}>{attachment}</div>}
-  <textarea aria-label={label} placeholder={placeholder} value={value} disabled={disabled||reading} maxLength={maxLength} onChange={event=>onChange(event.target.value)} onKeyDown={event=>{if(event.key==='Escape')setMenu(null);if(event.key==='Enter'&&!event.shiftKey&&!event.nativeEvent.isComposing&&event.nativeEvent.keyCode!==229){event.preventDefault();if(!cannotSend)onSend(selected);}}} className={styles.textarea} rows={2}/>
+  <textarea ref={textarea} aria-label={label} placeholder={placeholder} value={value} disabled={disabled||reading} maxLength={maxLength} onChange={event=>onChange(event.target.value)} onKeyDown={event=>{if(event.key==='Escape')setMenu(null);if(event.key==='Enter'&&!event.shiftKey&&!event.nativeEvent.isComposing&&event.nativeEvent.keyCode!==229){event.preventDefault();if(!cannotSend)onSend(selected);}}} className={styles.textarea} rows={2}/>
   <div className={styles.tools}><div className={styles.toolLeft}>
    <div className={styles.menuAnchor}><button type="button" aria-label="添加资料" disabled={disabled||reading} aria-expanded={menu==='files'} onClick={()=>setMenu(menu==='files'?null:'files')}><Plus size={19}/></button>{menu==='files'&&<div className={styles.menu} role="dialog" aria-label="添加资料"><button type="button" onClick={()=>fileInput.current?.click()}><FileText size={16}/> 从文件添加</button><p>支持 TXT、Markdown、CSV、JSON、日志。内容会加入本条消息，发送前可以检查或删除。</p></div>}</div>
    <input ref={fileInput} type="file" aria-label="选择附件" accept=".txt,.md,.csv,.json,.log" multiple hidden onChange={event=>void addFiles(event.target.files)}/>
    <div className={styles.menuAnchor}><button type="button" aria-label="使用技能" disabled={disabled} aria-expanded={menu==='skills'} onClick={toggleSkills}><Box size={18}/></button>{menu==='skills'&&<div className={styles.skillMenu} role="dialog" aria-label="使用技能"><div className={styles.skillHead}><strong>使用技能</strong><button type="button" aria-label="关闭技能菜单" onClick={()=>setMenu(null)}><X size={16}/></button></div><label className={styles.skillSearch}><Search size={16}/><input aria-label="搜索技能" placeholder="搜索技能" value={query} onChange={event=>setQuery(event.target.value)}/></label><div className={styles.skillList}>{choices.isLoading?<p role="status">正在读取技能…</p>:choices.error?<QueryNotice error={choices.error} label="技能列表" retry={()=>choices.refetch()}/>:<>{skills.map(skill=><button type="button" key={skill.moduleId} onClick={()=>changeSkill(skill.moduleId)}><span className={styles.skillGlyph}><Box size={16}/></span><span><strong>{skill.name}</strong><small>{onSkillChange?'加载到本对话，不自动发送':'使用此技能开展独立对话'}</small></span></button>)}{!skills.length&&<p>没有匹配的可用技能</p>}</>}</div><div className={styles.skillFoot}><Link href="/workbench/marketplace">浏览功能广场</Link></div></div>}</div>
-  </div><div className={styles.toolRight}>{selected&&<span>{choices.data?.skills.find(skill=>skill.moduleId===selected)?.name??'已选择技能'}</span>}<button type="button" aria-label="发送" className={styles.send} disabled={cannotSend} onClick={()=>onSend(selected)}><ArrowUp size={18}/></button></div></div>
+  </div><div className={styles.toolRight}>{selected&&<span>{choices.data?.skills.find(skill=>skill.moduleId===selected)?.name??'已选择技能'}</span>}<button type="button" aria-label="发送" className={styles.send} disabled={cannotSend} onClick={sendAndFocus}><ArrowUp size={18}/></button></div></div>
  </div>{reading&&<p role="status" className={styles.note}>正在读取附件…</p>}{error&&<p role="alert" className={styles.note}>{error}</p>}{note&&<p className={styles.note}>{note}</p>}</div>;
+}
+
+/** Send, then put the caret back in the message box (ChatGPT/Claude.ai keep it there). */
+export function sendKeepingFocus(send:()=>void,box:Pick<HTMLTextAreaElement,'focus'>|null){
+ send();
+ box?.focus({preventScroll:true});
 }
 
 /** Start an unbound session, then hand the explicit send to its recoverable Runtime. */
