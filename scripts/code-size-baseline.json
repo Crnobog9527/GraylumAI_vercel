@@ -31,7 +31,7 @@
   "apps/web/src/app/login/page.tsx": {"lines":569,"longLines":2},
   "apps/web/src/app/maintenance/page.tsx": {"longLines":3},
   "apps/web/src/app/marketplace/page.tsx": {"lines":526,"longLines":7},
-  "apps/web/src/app/page.tsx": {"longLines":6},
+  "apps/web/src/app/page.tsx": {"longLines":4},
   "apps/web/src/app/positioning/[draftId]/page.tsx": {"lines":2696,"longLines":40},
   "apps/web/src/app/positioning/[draftId]/topics/page.tsx": {"lines":635,"longLines":16},
   "apps/web/src/app/positioning/page.tsx": {"longLines":23},
