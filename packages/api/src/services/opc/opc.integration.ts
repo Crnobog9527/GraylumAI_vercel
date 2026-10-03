@@ -10,7 +10,7 @@ import { publishSkillPackage } from "../skills/publication";
 import { opcService } from "./service";
 import { workbenchService } from "../artifacts/workbench";
 import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
-import { schemaGuard } from "../__tests__/fixtures/schemaSnapshot";
+import { schemaGuard, snapshotSchema } from "../__tests__/fixtures/schemaSnapshot";
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { OPENING_INPUT, confirmQuestionValues } from "../../shared/opcQuestions";
 import { agentTurnBody } from "../../shared/agentTurn";
@@ -8131,11 +8131,16 @@ it("OPC: prior confirmed information remains scoped after edits and reader upgra
  const frozen=await records();
  const {readFile}=await import('node:fs/promises');
  const migration=await readFile(new URL('../../../../db/migrations/0133_opc_confirmed_information_history.sql',import.meta.url),'utf8');
+ // Later migrations (0159) extend the same reader, so 0133 is checked for what it
+ // adds and the current reader is then restored before the full comparison.
+ const restoreCurrent=await snapshotSchema(sql);
  await sql.query(await readFile(new URL('../../../../db/migrations/0120_opc_entry_projection.sql',import.meta.url),'utf8'));
  try{
   expect((await read()).information['step-0'].previouslyConfirmed).toBeUndefined();
  }finally{await sql.query(migration);}
  await sql.query(migration);
+ expect((await read()).information['step-0'].previouslyConfirmed).toEqual(edited.information['step-0'].previouslyConfirmed);
+ await restoreCurrent();
  expect((await read()).information['step-0']).toEqual(edited.information['step-0']);
  expect(await records()).toEqual(frozen);
  const other=await fixture(3);
