@@ -11,7 +11,7 @@ import { opcService } from "./service";
 import { workbenchService } from "../artifacts/workbench";
 import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
-import { OPENING_INPUT } from "../../shared/opcQuestions";
+import { OPENING_INPUT, confirmQuestionValues } from "../../shared/opcQuestions";
 import { agentTurnBody } from "../../shared/agentTurn";
 import { OPENING_EXTRACTION_RULE } from "./agentTurnPrompt";
 import type { Page } from "../../../../../apps/web/node_modules/@playwright/test";
@@ -680,7 +680,7 @@ it("OPC: real SDK HTTP result becomes a candidate on original draft; restart/rep
     );
   }
 });
-it("OPC: browser manual positioning, versioned week plan, handoff and authenticated recovery", async () => {
+it("OPC: browser manual positioning publishes, defers topic generation and recovers after re-login", async () => {
   const { chromium } =
     await import("../../../../../apps/web/node_modules/@playwright/test");
   const f = await fixture(3);
@@ -751,6 +751,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       await route.fulfill({ response });
     });
     for (const step of f.flow.steps) {
+      await resetLocalIpWindow();
       const field = step.information![0];
       const article = page.getByLabel("本步填写信息");
       await article
@@ -849,90 +850,27 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     await expect
       .poll(() => lastArticle.textContent(), { timeout: 15000 })
       .toContain("已确认");
+    await resetLocalIpWindow();
     await page
       .getByRole("button", { name: "确认正式定位", exact: true })
       .click();
-    // The current B1 entry opens the topic conversation. This legacy plan
-    // remains directly recoverable, but opening it never inherits the topic
-    // consent or starts a model call on its own.
-    await page
-      .getByRole("dialog", { name: "是否继续生成第一周选题" })
-      .getByRole("button", { name: "稍后", exact: true })
-      .click();
-    await page.goto(draftUrl + "/plan");
-    expect(await page.getByLabel("定位摘要").textContent()).toContain("Updated confirmed decision");
-    expect(await page.getByLabel("当前定位步骤").count()).toBe(0);
-    expect(await page.getByRole("table", {name:"第一周选题计划"}).count()).toBe(1);
-    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n)).toBe(0);
-    await page.getByRole("button", { name: "生成第一周计划", exact: true }).click();
-    await page
-      .getByRole("heading", {
-        name: "AI 计划候选 · 尚未替换你的编辑",
-        exact: true,
-      })
-      .waitFor();
-    expect(
-      await page
-        .getByRole("button", { name: "重新生成计划候选", exact: true })
-        .count(),
-    ).toBe(1);
-    await page
-      .getByRole("button", { name: "采用候选到计划工作稿", exact: true })
-      .click();
-    await page.getByRole("textbox", { name: "title 0", exact: true }).waitFor();
-    expect(
-      await page
-        .getByRole("textbox", { name: "title 0", exact: true })
-        .inputValue(),
-    ).toBe("模拟选题 1");
-    // Adopting the candidate ends the recovery envelope, so a reload must not
-    // generate a second one.
-    await page.reload();
+    // Publishing asks first; "稍后" defers topic generation without any call.
+    const consent = page.getByRole("dialog", { name: "是否继续生成第一周选题" });
+    await consent.getByRole("button", { name: "稍后", exact: true }).click();
+    await expect.poll(() => consent.count(), { timeout: 15000 }).toBe(0);
     await expect
-      .poll(
-        () =>
-          page
-            .getByRole("heading", {
-              name: "AI 计划候选 · 尚未替换你的编辑",
-              exact: true,
-            })
-            .count(),
-        { timeout: 15000 },
-      )
-      .toBe(0);
-    // Manual editing stays available once a candidate has been adopted.
-    await page
-      .getByRole("textbox", { name: "title 0", exact: true })
-      .fill("Browser topic");
-    await page.getByRole("button", { name: "保存计划版本" }).click();
-    let lostHandoff = false;
-    await page.route("**/api/trpc/opc.handoff*", async (route) => {
-      if (!lostHandoff) {
-        lostHandoff = true;
-        const response = await route.fetch();
-        expect(response.status()).toBe(200);
-        await route.abort();
-      } else await route.continue();
-    });
-    await page
-      .getByRole("button", { name: "确认账号与计划，创建选题" })
-      .click();
-    await page.getByRole("alert").waitFor();
-    await page.reload();
-    await page
-      .getByRole("button", { name: "确认账号与计划，创建选题" })
-      .click();
-    await page.getByRole("link", { name: "进入选题工作空间" }).first().waitFor();
-    const href = await page
-      .getByRole("link", { name: "进入选题工作空间" }).first()
-      .getAttribute("href");
-    await page.reload();
-    await page.getByRole("link", { name: "进入选题工作空间" }).first().waitFor();
-    expect(
-      await page
-        .getByRole("link", { name: "进入选题工作空间" }).first()
-        .getAttribute("href"),
-    ).toBe(href);
+      .poll(async () => (await f.service.read(new URL(draftUrl).pathname.split("/").at(-1)!)).snapshot.state, { timeout: 30000 })
+      .toBe("published");
+    // a8dba69c: the weekly plan page and its handoff are retired. Without a
+    // retained request the old /plan link continues to the topic workspace,
+    // which is the explicit next step; opening it starts nothing by itself.
+    const topicsPath = new URL(draftUrl).pathname + "/topics";
+    await page.goto(draftUrl + "/plan");
+    await page.waitForURL((url) => url.pathname === topicsPath);
+    await page.getByRole("button", { name: "开始选题工作对话", exact: true }).waitFor();
+    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n)).toBe(0);
+    // Authenticated recovery: a new sign-in returns to the same draft's link.
+    await resetLocalIpWindow();
     await context.clearCookies();
     await page.goto(
       process.env.V3_LOCAL_APP +
@@ -945,140 +883,50 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .getByRole("button", { name: "登录", exact: true })
       .last()
       .click();
-    const expectedPlanPath = new URL(draftUrl).pathname + "/plan";
-    await page.waitForURL(url => url.pathname === expectedPlanPath);
-    await page.getByRole("link", { name: "进入选题工作空间" }).first().waitFor();
-    expect(
-      await page
-        .getByRole("link", { name: "进入选题工作空间" }).first()
-        .getAttribute("href"),
-    ).toBe(href);
-    expect((await f.service.list()).accounts[0].profile.goal_2.value).toBe(
+    await page.waitForURL((url) => url.pathname === topicsPath);
+    await page.goto(draftUrl);
+    await expect
+      .poll(() => page.getByRole("button", { name: "继续生成第一周选题", exact: true }).count(), { timeout: 30000 })
+      .toBe(1);
+    const published = await f.service.read(new URL(draftUrl).pathname.split("/").at(-1)!);
+    expect(published.information[lastStep.id].values.goal.value).toBe(
       "Updated confirmed decision before publication",
     );
-    // The Agent produced the seven-row candidate that was adopted, so the
-    // handoff created exactly one work item per adopted row.
-    expect(
-      (
-        await sql.query(
-          "select count(*)::int n from opc_items i join artifact_projects p on p.id=i.work_item_id where p.actor_id=$1",
-          [f.actor],
-        )
-      ).rows[0].n,
-    ).toBe(7);
-    expect(
-      (
-        await sql.query(
-          "select count(*)::int n from bill2_runs b join runtime_executions e on e.billing_run_id=b.id join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id where b.actor_id=$1 and t.purpose='plan'",
-          [f.actor],
-        )
-      ).rows[0].n,
-    ).toBe(1);
+    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n)).toBe(0);
     expect(errors).toEqual([]);
   } finally {
     releaseInformation();
     await browser.close();
   }
 }, 300000);
-it("OPC: browser can correct plan inputs after a definite invalid completed response", async () => {
-  const { chromium } =
-    await import("../../../../../apps/web/node_modules/@playwright/test");
+it("OPC: browser releases a legacy plan request after a definite invalid completed response", async () => {
+  // a8dba69c retired plan inputs and generation on /plan. A request an older
+  // client completed with an unusable body is released once, without a second
+  // request, so the link continues to the current topic workspace.
   const f = await completed(3);
-  const browserModel = randomUUID();
-  await sql.query(
-    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-browser','fixture','true',1000,32000)",
-    [browserModel],
-  );
-  await sql.query("update modules set model_id=$1 where id=$2", [
-    browserModel,
-    f.moduleId,
-  ]);
-  const browser = await chromium.launch({
-    executablePath:
-      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-  });
+  await planFixtureModel(f.moduleId);
+  const envelope = planEnvelopeFor(f, { accounts: ["invalid-plan"] });
+  await admitLegacyPlan(f, envelope.request);
+  const admitted = await planIdentity(f.actor, f.d.draftId);
+  const { browser, page, key } = await planBrowser(f, { envelope });
   try {
-    const context = await browser.newContext();
-    await context.route("**/*", (route) => {
-      const u = new URL(route.request().url());
-      return ["127.0.0.1", "localhost"].includes(u.hostname) ||
-        ["data:", "blob:"].includes(u.protocol)
-        ? route.continue()
-        : route.abort();
-    });
-    const page = await context.newPage();
-    page.setDefaultTimeout(90000);
-    await page.goto(
-      process.env.V3_LOCAL_APP +
-        "/login?redirect=" +
-        encodeURIComponent("/positioning/" + f.d.draftId + "/plan"),
-    );
-    await page.getByPlaceholder("name@example.com").fill(f.email);
-    await page.getByPlaceholder("输入你的密码").fill(f.password);
-    await page
-      .getByRole("button", { name: "登录", exact: true })
-      .last()
-      .click();
-    await page.waitForURL((url) =>
-      url.pathname.endsWith("/positioning/" + f.d.draftId + "/plan"),
-    );
-    await page.getByRole("button", { name: "添加选题" }).click();
-    await page
-      .getByRole("textbox", { name: "account 0", exact: true })
-      .fill("manual-user-row");
-    await page
-      .getByRole("textbox", { name: "title 0", exact: true })
-      .fill("Original user title");
-    await page
-      .getByRole("textbox", { name: "简报", exact: true })
-      .fill("Original user brief");
-    // The user supplies their own choices; the Agent produces the rows.
-    const accountChoice = page.getByRole("textbox", {
-      name: "具体账号",
-      exact: true,
-    });
-    await accountChoice.fill("invalid-plan");
-    const generate = page.getByRole("button", {
-      name: "生成第一周计划",
-      exact: true,
-    });
+    const recover = page.getByRole("button", { name: "继续这条原请求", exact: true });
+    await expect.poll(() => recover.isEnabled(), { timeout: 30000 }).toBe(true);
     const invalidResponse = page.waitForResponse(
-      (response) =>
-        response.url().includes("/api/trpc/opc.planResult") && response.ok(),
+      (response) => response.url().includes("/api/trpc/opc.planResult") && response.ok(),
     );
-    await generate.click();
+    await recover.click();
     await invalidResponse;
-    await expect
-      .poll(() =>
-        page.evaluate((id) =>
-          sessionStorage.getItem("opc-plan-generation:" + id),
-        f.d.draftId),
-      )
-      .toBeNull();
-    await accountChoice.fill("corrected-plan");
-    await generate.click();
-    await page
-      .getByRole("heading", {
-        name: "AI 计划候选 · 尚未替换你的编辑",
-        exact: true,
-      })
-      .waitFor();
-    expect(
-      await page
-        .getByRole("textbox", { name: "title 0", exact: true })
-        .inputValue(),
-    ).toBe("Original user title");
+    await expect.poll(() => page.evaluate((k) => sessionStorage.getItem(k), key)).toBeNull();
+    expect(await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).count()).toBe(0);
+    await page.reload();
+    await page.waitForURL((url) => url.pathname.endsWith("/positioning/" + f.d.draftId + "/topics"));
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(admitted);
     const requests = await sql.query(
       "select request_id,state from runtime_executions where session_id=$1 order by created_at,id",
       [f.d.sessionId],
     );
-    expect(requests.rows).toHaveLength(2);
-    expect(new Set(requests.rows.map((row) => row.request_id)).size).toBe(2);
-    expect(requests.rows.map((row) => row.state)).toEqual([
-      "completed",
-      "completed",
-    ]);
+    expect(requests.rows).toEqual([{ request_id: envelope.request.requestId, state: "completed" }]);
   } finally {
     await browser.close();
   }
@@ -2048,6 +1896,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     await page
       .getByRole("textbox", { name: "给导师的回复" })
       .fill("我想先明确我的受众");
+    await resetLocalIpWindow();
     await page.reload();
     await expect
       .poll(() =>
@@ -2055,7 +1904,12 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
       )
       .toBe("我想先明确我的受众");
     let loseFirstReply = true;
-    await page.route("**/api/trpc/runtime.execute*", async (route) => {
+    // A mentor turn is one opc.mentorTurnStream request (U2). The server
+    // finishes it and only the reply to the page is lost. History reads are
+    // held meanwhile so #595's automatic recovery cannot finish the turn before
+    // the reload below; that reload must do it with the original identities.
+    await page.route("**/api/trpc/runtime.view*", (route) => route.abort());
+    await page.route("**/api/trpc/opc.mentorTurnStream*", async (route) => {
       if (!loseFirstReply) return route.continue();
       loseFirstReply = false;
       const response = await route.fetch();
@@ -2075,6 +1929,8 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
       saved.mentorInput = "恢复期间另写的未发送内容";
       sessionStorage.setItem(key, JSON.stringify(saved));
     }, draftId);
+    await page.unroute("**/api/trpc/runtime.view*");
+    await resetLocalIpWindow();
     await page.reload();
     // The reloaded page finishes the retained request by itself with its original identities.
     await expect.poll(() => page.getByRole("log", { name: "完整导师消息" })
@@ -2087,10 +1943,13 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     const d = await f.service.read(draftId);
     expect(d.sessionId).toBeTruthy();
     expect(d.information["step-0"].values.goal).toMatchObject({value:"尚未确定的用户想法",status:"provisional"});
-    for (const reply of ["我想帮助刚接触短视频的人", "我担心自己没有可以教的经验"]) {
+    // The composer now clears as soon as the bubble shows (AC-1), so wait for
+    // each mentor reply itself before sending the next message.
+    for (const [index, reply] of ["我想帮助刚接触短视频的人", "我担心自己没有可以教的经验"].entries()) {
       await page.getByRole("textbox",{name:"给导师的回复",exact:true}).fill(reply);
       await page.getByRole("button",{name:"发送",exact:true}).click();
-      await expect.poll(() => page.getByRole("textbox",{name:"给导师的回复",exact:true}).inputValue(), {timeout:15000}).toBe("");
+      await expect.poll(() => page.getByRole("log", { name: "完整导师消息" })
+        .getByText("导师 · 1.1", { exact: true }).count(), {timeout:30000}).toBe(index + 2);
     }
     const count = await fetch(process.env.V3_LOCAL_REST!+"/__runtime_count", {headers:{"x-local-control":process.env.V3_LOCAL_CONTROL!}});
     const observed = await count.json();
@@ -2098,7 +1957,8 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     const afterChat = await f.service.read(draftId);
     const frozenChat = await sql.query("select payload from runtime_executions where actor_id=$1 order by created_at desc limit 1", [f.actor]);
     expect(frozenChat.rows[0].payload.instructions).toContain("single continuous mentor");
-    expect(frozenChat.rows[0].payload.instructions).toContain("Confirmed fields do not end the conversation");
+    // The v5 host rules (#497) state the same continuity in their own words.
+    expect(frozenChat.rows[0].payload.instructions).toContain("keep continuity across steps");
     expect(frozenChat.rows[0].payload.scopeMaterial.content.brief).toBe("mentor:step-0");
     await expect(f.service.saveResult({draftId,stepId:"step-0",executionId:afterChat.turns[0].executionId,requestId:randomUUID()})).rejects.toThrow("OPC_RESULT_DENIED");
     expect(afterChat.information["step-0"].values.goal.status).toBe("provisional");
@@ -2108,6 +1968,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
       t.stepId==="step-0" && ["mentor", "organizer"].includes(t.kind))).toHaveLength(3);
     const box = await page.getByRole("log",{name:"完整导师消息"}).boundingBox();
     expect(box!.height).toBeLessThanOrEqual(400);
+    await resetLocalIpWindow();
     await page.reload();
     await expect
       .poll(
@@ -2155,6 +2016,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
       expectedVersion: state.version,
       expectedReviewVersion: state.reviewVersion,
     });
+    await resetLocalIpWindow();
     await page.reload();
     await expect.poll(() => nextButton.isEnabled()).toBe(true);
     const sharedLog = page.getByRole("log", { name: "完整导师消息" });
@@ -2240,6 +2102,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     expect(await conversationText()).toBe(conversationAfterSecondStep);
     await stepNavigation.getByRole("button").nth(1).click();
     expect(await conversationText()).toBe(conversationAfterSecondStep);
+    await resetLocalIpWindow();
     await page.reload();
     await page.getByRole("log", { name: "完整导师消息" })
       .getByText("导师 · 2.1", { exact: true }).waitFor();
@@ -2268,14 +2131,17 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     // A model-proposed cross-step change stays separate until explicit acceptance.
     await page.getByRole("textbox", {name:"给导师的回复"}).fill("模拟：修改第一步目标");
     await page.getByRole("button", {name:"发送",exact:true}).click();
-    await expect.poll(()=>page.getByRole("textbox",{name:"给导师的回复"}).inputValue(),{timeout:15000}).toBe("");
+    // The composer clears as soon as the bubble shows (AC-1); wait for the
+    // reply itself. The earlier step-1 suggestion card stays until it is replaced.
+    await expect.poll(() => page.getByRole("log", { name: "完整导师消息" })
+      .getByText("导师 · 2.1", { exact: true }).count(), {timeout:30000}).toBe(2);
     const adopt = page.getByRole("button", {name:'采用这些修改到“'+f.flow.steps[0].title+'”',exact:true});
-    await adopt.waitFor();
+    await expect.poll(() => adopt.locator("..").textContent(), {timeout:30000}).toContain("改为帮助独立开发者");
     expect(await adopt.locator("..").textContent()).toContain("已知目标 0");
-    expect(await adopt.locator("..").textContent()).toContain("改为帮助独立开发者");
     expect((await f.service.read(draftId)).information["step-0"].values.goal.value).toBe("A concrete user decision");
     await adopt.click();
     await expect.poll(async() => (await f.service.read(draftId)).information["step-0"].values.goal.value, {timeout:30000}).toBe("改为帮助独立开发者");
+    await resetLocalIpWindow();
     await page.reload();
     // Explicitly reopen the revised step after reload before inspecting its
     // form; do not assume the asynchronous selection was already persisted.
@@ -2359,7 +2225,9 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
     await page.waitForURL((url) => url.pathname === "/positioning", {
       timeout: 90000,
     });
-    const fixtureDraft=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'manual',businessName:'已有定位引导测试业务'});
+    // The Agent opens each reached question here (see the expected openings
+    // below), which only a mentor draft does; manual entry never starts the Agent.
+    const fixtureDraft=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'mentor',businessName:'已有定位引导测试业务'});
     await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+fixtureDraft.draftId);
 
     const draftId = new URL(page.url()).pathname.split("/").at(-1)!;
@@ -2477,12 +2345,13 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
       summaryModel,
     ]);
     // Saving, confirming and recovering the form do not make model calls.
-    // Only the initial and newly reached question each have one opening.
+    // Only the initial and newly reached question each have one opening, and
+    // since #497 each opening is one mentor call plus its organizer extraction.
     await expectExactMentorEffects(f.actor,draftId,read.roundId,[
       {stepId:"step-0",questionId:"goal",opening:true,input:OPENING_INPUT},
       {stepId:"step-1",questionId:"goal",opening:true,input:OPENING_INPUT},
     ]);
-    expect(await providerCount() - callsBefore).toBe(2);
+    expect(await providerCount() - callsBefore).toBe(4);
     expect(await page.getByRole("textbox", { name: f.flow.steps[0].title + " 工作稿" }).count()).toBe(0);
     expect(errors).toEqual([]);
   } finally {
@@ -2490,36 +2359,6 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
   }
 }, 300000);
 
-it("OPC: browser stale account confirmation restarts only after definite rejection", async () => {
-  const {chromium}=await import("../../../../../apps/web/node_modules/@playwright/test");
-  const f=await completed(3);
-  const saved=await f.service.savePlan({draftId:f.d.draftId,sourceVersionId:f.sourceVersionId,requestId:randomUUID(),expectedVersion:0,body:[{id:randomUUID(),platform:"x",account:"stale-browser",day:"2026-09-15",title:"Topic",brief:"Brief"}]});
-  const request={draftId:f.d.draftId,planId:saved.planId,requestId:randomUUID(),accounts:[{platform:"x",account:"stale-browser",expectedRevision:null}]};
-  await f.service.handoff(request);
-  const browser=await chromium.launch({headless:true,executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"}),context=await browser.newContext(),page=await context.newPage();
-  page.setDefaultTimeout(90000);
-  try {
-    const url=process.env.V3_LOCAL_APP+"/positioning/"+f.d.draftId+"/plan";
-    await page.goto(process.env.V3_LOCAL_APP+"/login?redirect="+encodeURIComponent(new URL(url).pathname));
-    await page.getByPlaceholder("name@example.com").fill(f.email);
-    await page.getByPlaceholder("输入你的密码").fill(f.password);
-    await page.getByRole("button",{name:"登录",exact:true}).last().click();
-    await page.waitForURL(url);
-    const button=page.getByRole("button",{name:"确认账号与计划，创建选题",exact:true});
-    await button.waitFor();
-    await expect.poll(()=>button.isEnabled(),{timeout:15000}).toBe(true);
-    await f.service.handoff({...request,requestId:randomUUID(),accounts:[{...request.accounts[0],expectedRevision:1}]});
-    const failed=page.waitForResponse(r=>r.url().includes("/api/trpc/opc.handoff"));
-    await button.click();await failed;
-    await page.getByRole("alert").filter({hasText:"操作未完成"}).waitFor();
-    await page.getByRole("button",{name:"重新读取状态",exact:true}).click();
-    await expect.poll(()=>button.isEnabled(),{timeout:15000}).toBe(true);
-    await button.click();
-    await expect.poll(async()=>Number((await sql.query('select revision from opc_accounts where actor_id=$1',[f.actor])).rows[0].revision),{timeout:15000}).toBe(3);
-    expect((await sql.query('select count(*)::int n from opc_items i join artifact_projects p on p.id=i.work_item_id where p.actor_id=$1',[f.actor])).rows[0].n).toBe(1);
-    expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actor])).rows[0].n).toBe(0);
-  }finally{await browser.close();}
-},180000);
 
 it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
   "OPC: staging host admission states never masquerade as empty data",
@@ -2790,6 +2629,9 @@ for (const scenario of ["fresh", "retry", "same-field", "offline", "response-los
       await a.getByRole("textbox",{name:"已知目标 0",exact:true}).fill("Initially confirmed goal");
       await a.getByRole("textbox",{name:"已知目标 0",exact:true}).locator("..").getByRole("button",{name:/^(确认本题并继续|确认当前信息，继续)$/,exact:true}).click();
       await a.getByRole("textbox",{name:"Second independent field",exact:true}).waitFor();
+      // Manual entry now shows every field of the step at once, so the second
+      // field no longer proves the confirmation landed; B must load after it.
+      await expect.poll(async()=>(await f.service.read(draft.draftId)).information["step-0"].values?.goal?.status,{timeout:20000}).toBe("confirmed");
       const b=await context.newPage(); b.setDefaultTimeout(20000); await b.goto(url);
       await b.getByRole("textbox",{name:"Second independent field",exact:true}).waitFor();
       // The ordered navigator names each reached row with its hierarchical
@@ -2955,7 +2797,9 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     ];
     const beforeRecoveryEffects=await expectExactMentorEffects(f.actor,draft.draftId,draft.roundId,expectedBeforeRecovery);
     const fresh=await login();await fresh.page.getByRole("textbox",{name:"Second independent field",exact:true}).waitFor();
-    await expect.poll(()=>fresh.page.getByRole("log",{name:"完整导师消息"}).textContent()).toContain("我做 AI 赛道");
+    // The draft and its Runtime history are separate reads after a fresh login;
+    // the default one-second poll raced the history read in the production build.
+    await expect.poll(()=>fresh.page.getByRole("log",{name:"完整导师消息"}).textContent(),{timeout:30000}).toContain("我做 AI 赛道");
     await expect.poll(()=>fresh.page.getByRole("textbox",{name:"Second independent field",exact:true}).inputValue(),{timeout:30000}).toBe("摄影课程");
     expect((await f.service.read(draft.draftId)).information["step-0"].values.other)
       .toEqual({value:"摄影课程",nature:"hypothesis",status:"provisional"});
@@ -3861,9 +3705,10 @@ it("OPC: a published revision's per-field elicitation reaches the read schema an
     const model = randomUUID();
     // Publication validates the administrator model binding; the runtime
     // admission below needs the same row switched to the fixture protocol.
+    // MR-1: a Skill model must carry a checked interactive reasoning setting.
     await sql.query(
-      "insert into ai_models(id,name,model_id,provider,is_active,api_key,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family) values($1,'Stage B local','qwen/qwen3.8-27b','openai','true','LOCAL_ONLY','',4096,128000,'false','openai')",
-      [model],
+      "insert into ai_models(id,name,model_id,provider,is_active,api_key,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family,config) values($1,'Stage B local','qwen/qwen3.8-27b','openai','true','LOCAL_ONLY','',4096,128000,'false','openai',$2)",
+      [model, JSON.stringify(configuredReasoning("qwen/qwen3.8-27b"))],
     );
     const moduleId = randomUUID();
     await saveModuleSkill(admin, f.owner, {
@@ -3952,16 +3797,21 @@ it("OPC: a published revision's per-field elicitation reaches the read schema an
     { id: "owned_fact", title: "用户自有事实", required: true, profileKey: "owned_fact", elicitation: "user_fact" },
     { id: "agent_deliverable", title: "导师成果建议", required: true, profileKey: "agent_deliverable", elicitation: "agent_proposal" },
   ]);
+  // Since the v5 turn (#497) the directive carries the whole step material, so
+  // both roles appear in it; the current question's own role is the line
+  // "Field roles for the current question".
+  const currentRoles = (instructions: string) =>
+    JSON.parse(instructions.match(/Field roles for the current question: (.*)\n/)![1]);
   const fact = await directiveForQuestion(declared.registration, "owned_fact");
-  expect(fact.instructions).toContain('"id":"owned_fact"');
-  expect(fact.instructions).toContain('"elicit":"user_fact"');
-  expect(fact.instructions).not.toContain('"elicit":"agent_proposal"');
+  expect(currentRoles(fact.instructions)).toEqual([
+    { id: "owned_fact", title: "用户自有事实", required: true, elicit: "user_fact" },
+  ]);
   const proposal = await directiveForQuestion(declared.registration, "agent_deliverable", [
     { id: "owned_fact", title: "用户自有事实", required: true, profileKey: "owned_fact" },
   ]);
-  expect(proposal.instructions).toContain('"id":"agent_deliverable"');
-  expect(proposal.instructions).toContain('"elicit":"agent_proposal"');
-  expect(proposal.instructions).not.toContain('"elicit":"user_fact"');
+  expect(currentRoles(proposal.instructions)).toEqual([
+    { id: "agent_deliverable", title: "导师成果建议", required: true, elicit: "agent_proposal" },
+  ]);
 
   // An older revision without the property stays valid and resolves to user_fact.
   const legacy = await publishRevision([
@@ -3983,8 +3833,9 @@ it("OPC: a published revision's per-field elicitation reaches the read schema an
   const legacyFact = await directiveForQuestion(legacy.registration, "position");
   // The name `position` used to be classified as a deliverable; it must now
   // resolve to a user-owned fact because the revision declares nothing.
-  expect(legacyFact.instructions).toContain('"id":"position"');
-  expect(legacyFact.instructions).toContain('"elicit":"user_fact"');
+  expect(currentRoles(legacyFact.instructions)).toEqual([
+    { id: "position", title: "一句话核心商业定位", required: true, elicit: "user_fact" },
+  ]);
   expect(legacyFact.instructions).not.toContain('"elicit":"agent_proposal"');
 }, 180000);
 /**
@@ -4028,6 +3879,63 @@ async function finalized(n = 3, withTopics = false) {
   return { ...f, d };
 }
 /** A fixture-backed model bound to the module under test. */
+/**
+ * Every local browser request shares 127.0.0.1, and the website IP limiter
+ * (#488) allows 60 per minute. A long journey (reloads plus #595 history
+ * polling) exceeds that, which the positioning cases using this do not verify:
+ * start a fresh window before a heavy phase. This empties this run's whole
+ * disposable Redis (IP, message and call buckets alike) after checking its
+ * ownership labels, so it is for preparing non-rate-limit cases only and must
+ * never be used inside a RATE-LIMIT case. It must run before the limit is
+ * reached: once an IP is limited, the website's limiter client also remembers
+ * the block in its own process until the window ends. Nothing happens without
+ * the local limiter.
+ */
+async function resetLocalIpWindow() {
+  const tag = process.env.V3_RATE_LIMIT_TAG, owner = process.env.V3_RATE_LIMIT_OWNER;
+  if (!tag || !owner) return;
+  const { resetLocalRateLimit } = await import("../../../../db/tests/v3/local-rate-limit.mjs");
+  resetLocalRateLimit(tag, owner);
+}
+/**
+ * A server value alone does not prove the page finished its autosave: until it
+ * clears its local buffer, a reload restores that edit against the old base and
+ * reports a same-field conflict. Reload only after this.
+ */
+async function autosaveAcknowledged(page: Page, draftId: string, stepId = "step-0") {
+  await expect.poll(() => page.evaluate(({ id, step }) => {
+    if (sessionStorage.getItem("opc-information-autosave:" + id + ":" + step)) return false;
+    const raw = sessionStorage.getItem("opc-edit:" + id);
+    const state = raw ? JSON.parse(raw) : null;
+    return !state?.infoEdits || !Object.hasOwn(state.infoEdits, step);
+  }, { id: draftId, step: stepId }), { timeout: 30000 }).toBe(true);
+}
+/**
+ * dc3ab89a keeps "暂时跳过本题" for manual entry only; a mentor draft has no
+ * deferral control in the UI (deliberately; see #588). Cases that need a
+ * deferred question in a mentor draft therefore make the server calls that
+ * control makes (the values from confirmQuestionValues and, when they finish
+ * the step, the step result save and confirm) and only verify the downstream
+ * behaviour after that server-side deferral, not any deferral UI.
+ */
+async function deferQuestion(
+  f: { service: ReturnType<typeof opcService>; artifacts: ReturnType<typeof workbenchService> },
+  draftId: string, stepId: string, questionId: string,
+) {
+  const d = await f.service.read(draftId);
+  const schema = d.information[stepId].schema as Array<{ id: string; title: string; required: boolean }>;
+  const { values, finishStep } = confirmQuestionValues(schema, d.information[stepId].values ?? {}, questionId, true, { allowUnreached: true });
+  await f.service.information({ draftId, stepId, requestId: randomUUID(), expectedVersion: d.snapshot.steps[stepId].version, values });
+  if (!finishStep) return;
+  const body = schema.filter(field => values[field.id].value).map(field =>
+    field.title + "\n" + (values[field.id].status === "deferred" ? "（暂缓确认）" : "") + values[field.id].value).join("\n\n");
+  const saved = await f.service.read(draftId);
+  await f.artifacts.execute({ action: "save", projectId: saved.projectId, roundId: saved.roundId, requestId: randomUUID(), stepId,
+    body, evidenceIds: saved.snapshot.steps[stepId].evidenceIds, expectedVersion: saved.snapshot.steps[stepId].version });
+  const state = (await f.artifacts.read(saved.projectId, saved.roundId)).steps[stepId];
+  await f.artifacts.execute({ action: "confirm", projectId: saved.projectId, roundId: saved.roundId, requestId: randomUUID(), stepId,
+    expectedVersion: state.version, expectedReviewVersion: state.reviewVersion });
+}
 async function planFixtureModel(moduleId: string) {
   const model = randomUUID();
   await sql.query(
@@ -4123,9 +4031,28 @@ function planEnvelopeFor(
   };
 }
 /**
- * Logs a browser page into an already published draft's plan page. The
- * envelope is seeded afterwards so each case controls exactly what automatic
- * recovery is allowed to see.
+ * a8dba69c: /plan only recovers a request an older client already admitted;
+ * opening it never admits one. Seeds that server state as the old client left
+ * it: admitted and, unless `execute` is false, completed.
+ */
+async function admitLegacyPlan(
+  f: { actor: string; service: ReturnType<typeof opcService> },
+  request: ReturnType<typeof planEnvelopeFor>["request"],
+  execute = true,
+) {
+  const prepared = await f.service.prepareStep(request);
+  if (execute) {
+    const { runtimeExecutor } = await import("../runtime/execute");
+    await runtimeExecutor({ callGate: allowTestCalls, database: admin, actor: async () => f.actor, endpoint: process.env.V3_RUNTIME_LOCAL_ENDPOINT! })
+      .execute(prepared.executionId);
+  }
+  return prepared.executionId as string;
+}
+/**
+ * Logs a browser page into an already published draft's plan link, which
+ * without a local request continues to the topic workspace (a8dba69c). A
+ * seeded envelope or buffer is written afterwards and /plan is opened again,
+ * so each case controls exactly what recovery is allowed to see.
  */
 async function planBrowser(
   f: { email: string; password: string; d: { draftId: string } },
@@ -4178,6 +4105,7 @@ async function planBrowser(
       draftId: f.d.draftId,
     },
   );
+  if (options.envelope || options.buffer) await page.goto(process.env.V3_LOCAL_APP + path);
   return { browser, context, page, key };
 }
 const CANDIDATE_HEADING = "AI 计划候选 · 尚未替换你的编辑";
@@ -4261,7 +4189,7 @@ it("OPC: Stage C1 the final positioning confirmation asks first and spends nothi
       .click();
     await page.waitForURL((url) => url.pathname.endsWith(draftPath + "/topics"));
     await page
-      .getByRole("heading", { name: "第一周选题工作对话", exact: true })
+      .getByRole("heading", { name: "第一批选题", level: 1, exact: true })
       .waitFor();
     // One canonical reading of the binding row. Mentor Session, topic Session,
     // bind request, frozen source version and creation time are different
@@ -4306,7 +4234,7 @@ it("OPC: Stage C1 the final positioning confirmation asks first and spends nothi
       .click();
     await page.waitForURL((url) => url.pathname.endsWith(draftPath + "/topics"));
     await page
-      .getByRole("heading", { name: "第一周选题工作对话", exact: true })
+      .getByRole("heading", { name: "第一批选题", level: 1, exact: true })
       .waitFor();
     const againRows = await bindingState();
     expect(againRows).toHaveLength(1);
@@ -4324,156 +4252,117 @@ it("OPC: Stage C2 a lost reply keeps one plan identity across refresh and re-log
   const f = await completed(3);
   await planFixtureModel(f.moduleId);
   const envelope = planEnvelopeFor(f);
+  // The older client admitted and finished this request; only its reply is
+  // recovered here (a8dba69c).
+  await admitLegacyPlan(f, envelope.request);
+  const admitted = await planIdentity(f.actor, f.d.draftId);
+  expect(admitted.planExecutions).toBe(1);
+  expect(admitted.planRuns).toBe(1);
+  expect(admitted.reserves).toBe(1);
+  const identity = await planIdentityRows(f.actor);
+  expect(identity).toHaveLength(1);
   const { browser, context, page, key } = await planBrowser(f, { envelope });
+  const recover = page.getByRole("button", { name: "继续这条原请求", exact: true });
   try {
     let releases = 0;
     await page.route("**/api/trpc/opc.planResult*", async (route) => {
-      // The server admitted and finished the work; every client reply is lost,
-      // including any automatic query retry, so the page cannot confirm the
-      // outcome on its own.
+      // Every client reply is lost, including any automatic query retry, so
+      // the page cannot confirm the outcome on its own.
       const response = await route.fetch();
       expect(response.ok()).toBe(true);
       releases += 1;
       await route.abort();
     });
-    await page.reload();
-    await expect.poll(() => page.getByText("这次生成的结果暂时无法确认").count(), {
+    await expect.poll(() => recover.isEnabled(), { timeout: 30000 }).toBe(true);
+    await recover.click();
+    await expect.poll(() => page.getByText("这次生成的结果暂时无法确认", { exact: false }).count(), {
       timeout: 30000,
     }).toBe(1);
     expect(releases).toBeGreaterThan(0);
-    const afterLoss = await planIdentity(f.actor, f.d.draftId);
-    expect(afterLoss.planExecutions).toBe(1);
-    expect(afterLoss.planRuns).toBe(1);
-    expect(afterLoss.reserves).toBe(1);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(admitted);
     expect(await page.evaluate((k) => sessionStorage.getItem(k), key)).not.toBeNull();
-    const identity = await planIdentityRows(f.actor);
-    expect(identity).toHaveLength(1);
-    // A reload with no local candidate must replay the same request, not make
+    // With no local candidate, recovery must replay the same request, not make
     // a new one: the buffer is cleared first so only recovery can help.
     await page.unroute("**/api/trpc/opc.planResult*");
-    await page.evaluate(
-      (id) => sessionStorage.removeItem("opc-edit:" + id),
-      f.d.draftId,
-    );
+    await page.evaluate((id) => sessionStorage.removeItem("opc-edit:" + id), f.d.draftId);
     await page.reload();
+    await recover.click();
     await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
-    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(afterLoss);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(admitted);
     expect(await planIdentityRows(f.actor)).toEqual(identity);
     expect(
-      JSON.parse(
-        (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
-      ).request.requestId,
+      JSON.parse((await page.evaluate((k) => sessionStorage.getItem(k), key)) as string).request.requestId,
     ).toBe(envelope.request.requestId);
     // Re-login on a fresh session recovers the same identity again.
     await context.clearCookies();
     await page.goto(
-      process.env.V3_LOCAL_APP +
-        "/login?redirect=" +
-        encodeURIComponent("/positioning/" + f.d.draftId + "/plan"),
+      process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent("/positioning/" + f.d.draftId + "/plan"),
     );
     await page.getByPlaceholder("name@example.com").fill(f.email);
     await page.getByPlaceholder("输入你的密码").fill(f.password);
     await page.getByRole("button", { name: "登录", exact: true }).last().click();
     await page.waitForURL((url) => url.pathname.endsWith("/plan"));
     await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
-    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(afterLoss);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(admitted);
     expect(await planIdentityRows(f.actor)).toEqual(identity);
   } finally {
     await browser.close();
   }
 }, 300000);
-it("OPC: Stage C3 adopting or dismissing the candidate is a local edit, never a call", async () => {
+it("OPC: Stage C3 a recovered candidate stays display-only and never becomes a plan, account or work item", async () => {
+  // a8dba69c: /plan shows the original request's result only; adopting or
+  // dismissing it into a plan working copy is no longer offered there.
   const f = await completed(3);
   await planFixtureModel(f.moduleId);
-  const { browser, page, key } = await planBrowser(f, {
-    envelope: planEnvelopeFor(f, { accounts: ["c3-account"] }),
-  });
+  const envelope = planEnvelopeFor(f, { accounts: ["c3-account"] });
+  await admitLegacyPlan(f, envelope.request);
+  const admitted = await planIdentity(f.actor, f.d.draftId);
+  const { browser, page, key } = await planBrowser(f, { envelope });
   try {
+    await page.getByRole("button", { name: "继续这条原请求", exact: true }).click();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    await expect.poll(() => page.getByText(/模拟选题 \d/).count()).toBe(7);
+    for (const name of ["采用候选到计划工作稿", "保留原计划", "保存计划版本", "确认账号与计划，创建选题", "生成第一周计划"])
+      expect(await page.getByRole("button", { name, exact: true }).count()).toBe(0);
+    expect(await page.getByRole("textbox").count()).toBe(0);
     await page.reload();
     await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
-    const generated = await planIdentity(f.actor, f.d.draftId);
-    expect(generated.planRuns).toBe(1);
-    // Dismissing ends the envelope without touching the working rows.
-    await page.getByRole("button", { name: "保留原计划", exact: true }).click();
-    await expect
-      .poll(() => page.evaluate((k) => sessionStorage.getItem(k), key), { timeout: 15000 })
-      .toBeNull();
-    expect(await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).count()).toBe(0);
-    expect(await page.getByRole("textbox", { name: "title 0", exact: true }).count()).toBe(0);
-    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(generated);
-    // A second, user-authorized generation adopts instead.
-    await page.evaluate(
-      ({ k, value }) => sessionStorage.setItem(k, JSON.stringify(value)),
-      { k: key, value: planEnvelopeFor(f, { accounts: ["c3-account"] }) },
-    );
-    await page.reload();
-    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
-    const second = await planIdentity(f.actor, f.d.draftId);
-    expect(second.planRuns).toBe(2);
-    await page.getByRole("button", { name: "采用候选到计划工作稿", exact: true }).click();
-    await expect
-      .poll(() => page.evaluate((k) => sessionStorage.getItem(k), key), { timeout: 15000 })
-      .toBeNull();
-    expect(await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).count()).toBe(0);
-    const titles = await page.getByRole("textbox", { name: /^title / }).all();
-    expect(titles).toHaveLength(7);
-    expect(await page.getByRole("textbox", { name: "title 0", exact: true }).inputValue()).toBe("模拟选题 1");
-    // Adopting is local: no model call, no plan row, no account, no work item.
-    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(second);
-    await page.getByRole("button", { name: "保存计划版本" }).click();
-    await expect
-      .poll(async () => (await planIdentity(f.actor, f.d.draftId)).plans, { timeout: 30000 })
-      .toBe(1);
-    const saved = await planIdentity(f.actor, f.d.draftId);
-    expect(saved.executions).toBe(second.executions);
-    expect(saved.planRuns).toBe(second.planRuns);
-    expect(saved.reserves).toBe(second.reserves);
-    expect(saved.accounts).toBe(0);
-    expect(saved.workItems).toBe(0);
-    // Handoff stays a separate explicit action that has not happened yet.
-    await expect
-      .poll(
-        () =>
-          page
-            .getByRole("button", {
-              name: "确认账号与计划，创建选题",
-              exact: true,
-            })
-            .count(),
-        { timeout: 30000 },
-      )
-      .toBe(1);
-    expect((await planIdentity(f.actor, f.d.draftId)).workItems).toBe(0);
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), key)).not.toBeNull();
+    // Reading the result is local: no model call, plan row, account or work item.
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(admitted);
+    expect(admitted).toMatchObject({ planExecutions: 1, plans: 0, accounts: 0, workItems: 0 });
   } finally {
     await browser.close();
   }
 }, 300000);
 it("OPC: Stage C4 an already published draft spends nothing by waiting or refreshing", async () => {
-  const f = await completed(3);
+  const f = await publishedDraft();
   await planFixtureModel(f.moduleId);
+  const before = { plan: await planIdentity(f.actor, f.d.draftId), topic: await topicIdentity(f.actor) };
+  expect(before.plan.planExecutions).toBe(0);
+  expect(before.topic).toMatchObject({ binds: 0, topicExecutions: 0 });
+  // Without a local request the plan link continues to the topic workspace.
   const { browser, page, key } = await planBrowser(f);
+  const topicsPath = "/positioning/" + f.d.draftId + "/topics";
   try {
     expect(await page.evaluate((k) => sessionStorage.getItem(k), key)).toBeNull();
-    const generate = page.getByRole("button", { name: "生成第一周计划", exact: true });
-    await generate.waitFor();
+    const start = page.getByRole("button", { name: "开始选题工作对话", exact: true });
+    await start.waitFor();
     await page.reload();
-    await generate.waitFor();
+    await start.waitFor();
     // Give an automatic generation every chance to (wrongly) fire.
     await new Promise((resolve) => setTimeout(resolve, 3000));
-    await page.reload();
+    await page.goto(process.env.V3_LOCAL_APP + "/positioning/" + f.d.draftId + "/plan");
+    await page.waitForURL((url) => url.pathname === topicsPath);
     await new Promise((resolve) => setTimeout(resolve, 3000));
-    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
-      executions: 0, planExecutions: 0, planRuns: 0, reserves: 0,
-      plans: 0, accounts: 0, workItems: 0,
-    });
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(before.plan);
+    expect(await topicIdentity(f.actor)).toEqual(before.topic);
     expect(await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).count()).toBe(0);
-    // Only the explicit button may create one request.
-    await generate.click();
-    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
-    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
-      executions: 1, planExecutions: 1, planRuns: 1, reserves: 1,
-      plans: 0, accounts: 0, workItems: 0,
-    });
+    // Only the explicit start may create one request, and it is topic work.
+    await start.click();
+    await expect.poll(async () => (await topicIdentity(f.actor)).topicExecutions, { timeout: 30000 }).toBe(1);
+    expect((await topicIdentity(f.actor)).binds).toBe(1);
+    expect(await planIdentity(f.actor, f.d.draftId)).toMatchObject({ planExecutions: 0, planRuns: 0 });
   } finally {
     await browser.close();
   }
@@ -4483,107 +4372,67 @@ it("OPC: Stage C5 an unadmitted old-round request stays recoverable and never be
   await planFixtureModel(f.moduleId);
   const staleRequestId = randomUUID();
   const { browser, page, key } = await planBrowser(f, {
-    envelope: planEnvelopeFor(f, {
-      requestId: staleRequestId,
-      sourceRoundId: randomUUID(),
-    }),
+    envelope: planEnvelopeFor(f, { requestId: staleRequestId, sourceRoundId: randomUUID() }),
   });
   try {
-    await page.reload();
-    await page.getByRole('heading', { name: '本机保留了一条早先的生成请求', exact: true }).waitFor();
-    const original = await page.evaluate(k => sessionStorage.getItem(k), key);
+    await page.getByRole("heading", { name: "本机保留了一条早先的生成请求", exact: true }).waitFor();
+    const original = await page.evaluate((k) => sessionStorage.getItem(k), key);
     expect(JSON.parse(original!).request.requestId).toBe(staleRequestId);
-    await page.getByRole('button', { name: '继续这条原请求', exact: true }).click();
-    await expect.poll(async () => (await page.getByRole('status').allTextContents()).join(' ')).toContain('服务端尚无可恢复执行');
-    expect(await page.evaluate(k => sessionStorage.getItem(k), key)).toBe(original);
+    // The server's own verdict is shown; recovery stays closed and nothing is
+    // admitted under the current round.
+    await page.getByText("服务端没有这条请求的准入记录；没有开始新的生成。", { exact: true }).waitFor();
+    expect(await page.getByRole("button", { name: "继续这条原请求", exact: true }).isDisabled()).toBe(true);
+    await page.reload();
+    await page.getByText("服务端没有这条请求的准入记录；没有开始新的生成。", { exact: true }).waitFor();
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), key)).toBe(original);
     expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
       executions: 0, planExecutions: 0, planRuns: 0, reserves: 0,
       plans: 0, accounts: 0, workItems: 0,
     });
-    // The bounded notice offers an explicit regenerate path for this round.
-    await page.getByRole("button", { name: "生成第一周计划", exact: true }).click();
-    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
-    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
-      executions: 1, planExecutions: 1, planRuns: 1, reserves: 1,
-      plans: 0, accounts: 0, workItems: 0,
-    });
-    // No migration: the new request is a new identity, not the archived one.
-    const fresh = JSON.parse(
-      (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
-    );
-    expect(fresh.request.requestId).not.toBe(staleRequestId);
-    expect(fresh.sourceRoundId).toBe(f.d.roundId);
+    expect(await page.getByRole("button", { name: "生成第一周计划", exact: true }).count()).toBe(0);
+    expect((await topicIdentity(f.actor)).binds).toBe(0);
   } finally {
     await browser.close();
   }
 }, 300000);
-/** The frozen plan requests this actor actually sent, in send order. */
-async function planRequests(actor: string) {
-  return (await sql.query(
-    `select e.request_id::text request_id, e.payload->'request'->>'input' input
-     from runtime_executions e
-     join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id
-     where e.actor_id=$1 and t.purpose='plan'
-     order by e.created_at, e.id`,
-    [actor],
-  )).rows;
-}
-it("OPC: Stage C6 explicit regeneration honours changed constraints and a new identity", async () => {
+it("OPC: the legacy /plan link recovers only an admitted request and never admits or charges", async () => {
+  // a8dba69c contract in one place: no local request continues to /topics; an
+  // unadmitted one stays retained and closed without any call or charge; an
+  // admitted one is recovered under its own identity without another charge.
   const f = await completed(3);
   await planFixtureModel(f.moduleId);
-  const { browser, page, key } = await planBrowser(f, {
-    envelope: planEnvelopeFor(f, { accounts: ["c6-account"] }),
-  });
-  const bufferOf = async () =>
-    JSON.parse(
-      (await page.evaluate(
-        (id) => sessionStorage.getItem("opc-edit:" + id),
-        f.d.draftId,
-      )) as string,
-    );
+  const zero = { executions: 0, planExecutions: 0, planRuns: 0, reserves: 0, plans: 0, accounts: 0, workItems: 0 };
+  const envelope = planEnvelopeFor(f);
+  const { browser, page, key } = await planBrowser(f);
+  const planPath = "/positioning/" + f.d.draftId + "/plan";
+  const recover = page.getByRole("button", { name: "继续这条原请求", exact: true });
   try {
+    await page.goto(process.env.V3_LOCAL_APP + planPath);
+    await page.waitForURL((url) => url.pathname === "/positioning/" + f.d.draftId + "/topics");
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(zero);
+    await page.evaluate(({ key, value }) => sessionStorage.setItem(key, JSON.stringify(value)), { key, value: envelope });
+    await page.goto(process.env.V3_LOCAL_APP + planPath);
+    await page.getByText("服务端没有这条请求的准入记录；没有开始新的生成。", { exact: true }).waitFor();
+    expect(await recover.isDisabled()).toBe(true);
     await page.reload();
+    await page.getByText("服务端没有这条请求的准入记录；没有开始新的生成。", { exact: true }).waitFor();
+    expect(JSON.parse((await page.evaluate((k) => sessionStorage.getItem(k), key))!)).toEqual(envelope);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(zero);
+    const balance = async () => Number((await sql.query("select credits from profiles where id=$1", [f.actor])).rows[0].credits);
+    const unadmittedBalance = await balance();
+    await admitLegacyPlan(f, envelope.request);
+    const admitted = await planIdentity(f.actor, f.d.draftId);
+    expect(admitted).toMatchObject({ planExecutions: 1, planRuns: 1, reserves: 1 });
+    const admittedBalance = await balance();
+    expect(admittedBalance).toBeLessThanOrEqual(unadmittedBalance);
+    await page.reload();
+    await expect.poll(() => recover.isEnabled(), { timeout: 30000 }).toBe(true);
+    await recover.click();
     await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
-    const first = await planIdentity(f.actor, f.d.draftId);
-    expect(first.planRuns).toBe(1);
-    const sent = await planRequests(f.actor);
-    expect(sent).toHaveLength(1);
-    const firstRequestId = sent[0].request_id;
-    expect(JSON.parse(sent[0].input).accounts).toEqual(["c6-account"]);
-    expect(JSON.parse(sent[0].input).platforms).toEqual([]);
-    expect((await bufferOf()).planCandidateRequestId).toBe(firstRequestId);
-    // The user changes two optional constraints, then explicitly regenerates.
-    await page.getByRole("textbox", { name: "目标平台", exact: true }).fill("douyin");
-    await page.getByRole("textbox", { name: "开始日期", exact: true }).fill("2026-10-05");
-    await page
-      .getByRole("button", { name: "重新生成计划候选", exact: true })
-      .click();
-    await expect
-      .poll(async () => (await planRequests(f.actor)).length, { timeout: 90000 })
-      .toBe(2);
-    const after = await planRequests(f.actor);
-    // The new constraints really reached the model, on a new identity.
-    expect(JSON.parse(after[1].input).platforms).toEqual(["douyin"]);
-    expect(JSON.parse(after[1].input).startDate).toBe("2026-10-05");
-    expect(after[1].request_id).not.toBe(firstRequestId);
-    // Exactly one more generation was paid for.
-    const second = await planIdentity(f.actor, f.d.draftId);
-    expect(second.planExecutions - first.planExecutions).toBe(1);
-    expect(second.planRuns - first.planRuns).toBe(1);
-    expect(second.reserves - first.reserves).toBe(1);
-    // Only the candidate changed: the working rows were never overwritten.
-    expect(await page.getByRole("textbox", { name: "title 0", exact: true }).count()).toBe(0);
-    await expect
-      .poll(() => page.getByText("douyin").count(), { timeout: 30000 })
-      .toBeGreaterThan(0);
-    const buffer = await bufferOf();
-    expect(buffer.planCandidateRequestId).toBe(after[1].request_id);
-    expect(buffer.planCandidateSourceRoundId).toBe(f.d.roundId);
-    expect(
-      JSON.parse(
-        (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
-      ).request.requestId,
-    ).toBe(after[1].request_id);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(admitted);
+    expect(await balance()).toBe(admittedBalance);
+    expect(JSON.parse((await page.evaluate((k) => sessionStorage.getItem(k), key))!).request.requestId)
+      .toBe(envelope.request.requestId);
   } finally {
     await browser.close();
   }
@@ -4603,8 +4452,11 @@ it("OPC: Stage C7 a stale round candidate neither suppresses nor impersonates th
       day: "2026-01-01",
     },
   ];
+  const envelope = planEnvelopeFor(f);
+  await admitLegacyPlan(f, envelope.request);
+  const admitted = await planIdentity(f.actor, f.d.draftId);
   const { browser, page } = await planBrowser(f, {
-    envelope: planEnvelopeFor(f),
+    envelope,
     buffer: {
       planCandidate: staleCandidate,
       planCandidateSourceRoundId: staleRoundId,
@@ -4621,18 +4473,17 @@ it("OPC: Stage C7 a stale round candidate neither suppresses nor impersonates th
       )) as string,
     );
   try {
-    await page.reload();
-    // The round-A candidate is not rendered as this round's candidate, and it
-    // does not stop the round-B envelope from executing exactly once.
+    // The round-A candidate is neither shown as this request's result nor
+    // stops the round-B request from being recovered under its own identity.
+    await page.getByRole("heading", { name: "本机保留了一条早先的生成请求", exact: true }).waitFor();
+    expect(await page.getByText("上一轮候选").count()).toBe(0);
+    await page.getByRole("button", { name: "继续这条原请求", exact: true }).click();
     await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
     expect(await page.getByText("上一轮候选").count()).toBe(0);
-    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
-      executions: 1, planExecutions: 1, planRuns: 1, reserves: 1,
-      plans: 0, accounts: 0, workItems: 0,
-    });
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(admitted);
     const generated = await bufferOf();
     expect(generated.planCandidateSourceRoundId).toBe(f.d.roundId);
-    expect(generated.planCandidateRequestId).not.toBe(staleRequestId);
+    expect(generated.planCandidateRequestId).toBe(envelope.request.requestId);
     expect(
       (generated.planCandidate as Array<{ title: string }>).map((i) => i.title),
     ).not.toContain("上一轮候选");
@@ -4677,155 +4528,6 @@ it("OPC: Stage C7 a stale round candidate neither suppresses nor impersonates th
     await browser.close();
   }
 }, 300000);
-it("OPC: Stage C8 an ambiguous explicit regeneration recovers B behind candidate A without creating C", async () => {
-  const f = await completed(3);
-  await planFixtureModel(f.moduleId);
-  const { browser, context, page, key } = await planBrowser(f, {
-    envelope: planEnvelopeFor(f, { accounts: ["c8-account"] }),
-  });
-  const bufferOf = async () =>
-    JSON.parse(
-      (await page.evaluate(
-        (id) => sessionStorage.getItem("opc-edit:" + id),
-        f.d.draftId,
-      )) as string,
-    );
-  const envelopeOf = async () =>
-    JSON.parse(
-      (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
-    );
-  const rowsOf = async () =>
-    (await planIdentityRows(f.actor)).map((row) => JSON.parse(row) as string[]);
-  try {
-    // Candidate A: the confirmation's own authorization, confirmed normally.
-    await page.reload();
-    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
-    const first = await planRequests(f.actor);
-    expect(first).toHaveLength(1);
-    const aRequestId = first[0].request_id;
-    expect(JSON.parse(first[0].input).accounts).toEqual(["c8-account"]);
-    expect(JSON.parse(first[0].input).platforms).toEqual([]);
-    expect((await bufferOf()).planCandidateRequestId).toBe(aRequestId);
-    expect((await envelopeOf()).request.requestId).toBe(aRequestId);
-    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
-      executions: 1, planExecutions: 1, planRuns: 1, reserves: 1,
-      plans: 0, accounts: 0, workItems: 0,
-    });
-    const rowsA = await rowsOf();
-    expect(rowsA).toHaveLength(1);
-    expect(rowsA[0][1]).toBe(aRequestId);
-    expect(await page.getByText("c8-account").count()).toBeGreaterThan(0);
-
-    // B is a real second authorization: the user changes two optional
-    // constraints and clicks the regeneration control. The server admits,
-    // executes and reserves B, but every client reply for its plan result is
-    // fetched and then dropped, so the page cannot confirm what it paid for.
-    let releases = 0;
-    await page.route("**/api/trpc/opc.planResult*", async (route) => {
-      const response = await route.fetch();
-      expect(response.ok()).toBe(true);
-      releases += 1;
-      await route.abort();
-    });
-    await page.getByRole("textbox", { name: "目标平台", exact: true }).fill("douyin");
-    await page.getByRole("textbox", { name: "开始日期", exact: true }).fill("2026-10-05");
-    await page
-      .getByRole("button", { name: "重新生成计划候选", exact: true })
-      .click();
-    await expect
-      .poll(async () => (await planRequests(f.actor)).length, { timeout: 90000 })
-      .toBe(2);
-    await expect.poll(() => releases, { timeout: 90000 }).toBeGreaterThan(0);
-    const sent = await planRequests(f.actor);
-    const bRequestId = sent[1].request_id;
-    expect(bRequestId).not.toBe(aRequestId);
-    // B really carries the changed constraints.
-    expect(JSON.parse(sent[1].input).platforms).toEqual(["douyin"]);
-    expect(JSON.parse(sent[1].input).startDate).toBe("2026-10-05");
-    // The old candidate A is still what the user sees; the retained envelope
-    // already names the newer, unconfirmed request B.
-    expect((await bufferOf()).planCandidateRequestId).toBe(aRequestId);
-    expect(await page.getByText("c8-account").count()).toBeGreaterThan(0);
-    expect(await page.getByText("douyin").count()).toBe(0);
-    const lost = await envelopeOf();
-    expect(lost.request.requestId).toBe(bRequestId);
-    expect(lost.sourceRoundId).toBe(f.d.roundId);
-    expect(JSON.parse(lost.request.input).platforms).toEqual(["douyin"]);
-    const afterLoss = await planIdentity(f.actor, f.d.draftId);
-    expect(afterLoss.planExecutions).toBe(2);
-    expect(afterLoss.planRuns).toBe(2);
-    expect(afterLoss.reserves).toBe(2);
-    const rowsAB = await rowsOf();
-    expect(rowsAB).toHaveLength(2);
-    expect(rowsAB.map((row) => row[1]).sort()).toEqual([aRequestId, bRequestId].sort());
-    const bBefore = rowsAB.find((row) => row[1] === bRequestId)!;
-    expect(bBefore.every((value) => typeof value === "string" && value.length > 0)).toBe(true);
-
-    // Explicit recovery of the same unresolved intent must reuse B, not create
-    // a third request C that would be a third charge.
-    await page
-      .getByRole("button", { name: "重新生成计划候选", exact: true })
-      .click();
-    await expect.poll(() => releases, { timeout: 90000 }).toBeGreaterThan(1);
-    expect((await envelopeOf()).request.requestId).toBe(bRequestId);
-    expect((await envelopeOf()).request.input).toBe(lost.request.input);
-    expect((await bufferOf()).planCandidateRequestId).toBe(aRequestId);
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    expect((await planRequests(f.actor)).map((row) => row.request_id)).toEqual([
-      aRequestId,
-      bRequestId,
-    ]);
-    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(afterLoss);
-    expect(await rowsOf()).toEqual(rowsAB);
-
-    // With the interception removed, a reload recovers B on its own identity
-    // instead of stopping at the visible fallback candidate A.
-    await page.unroute("**/api/trpc/opc.planResult*");
-    await page.reload();
-    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
-    await expect
-      .poll(async () => (await bufferOf()).planCandidateRequestId, { timeout: 30000 })
-      .toBe(bRequestId);
-    const recovered = await envelopeOf();
-    expect(recovered.request.requestId).toBe(bRequestId);
-    expect(JSON.parse(recovered.request.input).platforms).toEqual(["douyin"]);
-    expect(await page.getByText("douyin").count()).toBeGreaterThan(0);
-    expect(await page.getByText("c8-account").count()).toBe(0);
-    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(afterLoss);
-    const rowsRecovered = await rowsOf();
-    expect(rowsRecovered).toEqual(rowsAB);
-    expect(rowsRecovered.find((row) => row[1] === bRequestId)).toEqual(bBefore);
-    expect((await planRequests(f.actor)).map((row) => row.request_id)).toEqual([
-      aRequestId,
-      bRequestId,
-    ]);
-
-    // A fresh login recovers the same identity once more and still cannot
-    // create a third request.
-    await context.clearCookies();
-    await page.goto(
-      process.env.V3_LOCAL_APP +
-        "/login?redirect=" +
-        encodeURIComponent("/positioning/" + f.d.draftId + "/plan"),
-    );
-    await page.getByPlaceholder("name@example.com").fill(f.email);
-    await page.getByPlaceholder("输入你的密码").fill(f.password);
-    await page.getByRole("button", { name: "登录", exact: true }).last().click();
-    await page.waitForURL((url) => url.pathname.endsWith("/plan"));
-    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
-    await expect
-      .poll(async () => (await bufferOf()).planCandidateRequestId, { timeout: 30000 })
-      .toBe(bRequestId);
-    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(afterLoss);
-    expect(await rowsOf()).toEqual(rowsAB);
-    expect((await planRequests(f.actor)).map((row) => row.request_id)).toEqual([
-      aRequestId,
-      bRequestId,
-    ]);
-  } finally {
-    await browser.close();
-  }
-}, 300000);
 /**
  * The retained `opc-confirm:<draftId>` request owns a business intent: the
  * draft, the plan version and the normalized platform/account set. A lost
@@ -4833,264 +4535,14 @@ it("OPC: Stage C8 an ambiguous explicit regeneration recovers B behind candidate
  * be able to form its own explicit request instead of being refused locally
  * with `confirmation pending` forever.
  */
-it("OPC: a retained handoff request does not block a newly saved current plan", async () => {
-  const { chromium } =
-    await import("../../../../../apps/web/node_modules/@playwright/test");
-  const f = await completed(3);
-  const planA = await f.service.savePlan({
-    draftId: f.d.draftId,
-    sourceVersionId: f.sourceVersionId,
-    requestId: randomUUID(),
-    expectedVersion: 0,
-    body: [
-      {
-        id: randomUUID(),
-        platform: "x",
-        account: "f1-retained",
-        day: "2026-09-15",
-        title: "Plan A topic",
-        brief: "Plan A brief",
-      },
-    ],
-  });
-  const key = "opc-confirm:" + f.d.draftId;
-  const path = "/positioning/" + f.d.draftId + "/plan";
-  const handoffHistory = async () =>
-    (
-      await sql.query(
-        "select request_id::text request_id, payload, result from opc_handoffs where actor_id=$1",
-        [f.actor],
-      )
-    ).rows as Array<{
-      request_id: string;
-      payload: { draftId: string; planId: string; accounts: unknown[] };
-      result: Array<{ workItemId: string; sessionId: string }>;
-    }>;
-  const currentPlan = async () =>
-    (
-      await sql.query(
-        "select id::text id, version::int version from opc_plans where draft_id=$1 order by version desc limit 1",
-        [f.d.draftId],
-      )
-    ).rows[0] as { id: string; version: number };
-  const workItemCount = async () =>
-    Number(
-      (
-        await sql.query(
-          "select count(*)::int n from opc_items i join artifact_projects p on p.id=i.work_item_id where p.actor_id=$1",
-          [f.actor],
-        )
-      ).rows[0].n,
-    );
-  const accountRevision = async () =>
-    Number(
-      (
-        await sql.query("select revision::int r from opc_accounts where actor_id=$1", [
-          f.actor,
-        ])
-      ).rows[0].r,
-    );
-  const browser = await chromium.launch({
-    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-  });
-  const context = await browser.newContext();
-  await context.route("**/*", (route) => {
-    const u = new URL(route.request().url());
-    return ["127.0.0.1", "localhost"].includes(u.hostname) ||
-      ["data:", "blob:"].includes(u.protocol)
-      ? route.continue()
-      : route.abort();
-  });
-  const page = await context.newPage();
-  page.setDefaultTimeout(90000);
-  /** The exact retained request body, or null when the key is gone. */
-  const retainedRequest = async () =>
-    (await page.evaluate(
-      (k) => sessionStorage.getItem(k) ?? "null",
-      key,
-    )) as string;
-  let lostHandoffs = 0;
-  try {
-    await page.goto(
-      process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path),
-    );
-    await page.getByPlaceholder("name@example.com").fill(f.email);
-    await page.getByPlaceholder("输入你的密码").fill(f.password);
-    await page.getByRole("button", { name: "登录", exact: true }).last().click();
-    await page.waitForURL((url) => url.pathname.endsWith(path));
-    const confirm = page.getByRole("button", {
-      name: "确认账号与计划，创建选题",
-      exact: true,
-    });
-    await confirm.waitFor();
-    await expect.poll(() => confirm.isEnabled(), { timeout: 15000 }).toBe(true);
-    // Steps 1-4. Plan A's handoff really completes on the server while the
-    // browser loses the successful reply, so the page keeps request A as an
-    // unresolved authorization for plan A.
-    await page.route("**/api/trpc/opc.handoff*", async (route) => {
-      const response = await route.fetch();
-      expect(response.status()).toBe(200);
-      lostHandoffs += 1;
-      await route.abort();
-    });
-    await confirm.click();
-    await expect.poll(() => lostHandoffs, { timeout: 90000 }).toBe(1);
-    await expect
-      .poll(async () => (await retainedRequest()) !== "null", { timeout: 30000 })
-      .toBe(true);
-    const retainedA = JSON.parse(await retainedRequest());
-    expect(retainedA.planId).toBe(planA.planId);
-    expect(retainedA.draftId).toBe(f.d.draftId);
-    expect(retainedA.accounts).toEqual([
-      { platform: "x", account: "f1-retained", expectedRevision: null },
-    ]);
-    const historyA = await handoffHistory();
-    expect(historyA.map((row) => row.request_id)).toEqual([
-      retainedA.requestId,
-    ]);
-    expect(historyA[0].payload.planId).toBe(planA.planId);
-    expect(historyA[0].result).toHaveLength(1);
-    // Step 5. Change the editable working plan and explicitly save plan B.
-    await page
-      .getByRole("textbox", { name: "title 0", exact: true })
-      .fill("Plan B topic");
-    await page.getByRole("button", { name: "保存计划版本" }).click();
-    await expect
-      .poll(async () => (await currentPlan()).version, { timeout: 30000 })
-      .toBe(2);
-    const planB = await currentPlan();
-    expect(planB.id).not.toBe(planA.planId);
-    // The page itself must have re-read plan B and cleared its dirty state
-    // before the reload, otherwise a reload correctly restores the pending
-    // local edits this test is not exercising.
-    await page
-      .getByRole("heading", { name: "确认采用定位与计划第 2 版", exact: true })
-      .waitFor();
-    // Step 6. Reload so plan B and the current account revision are what the
-    // page shows, while request A is still retained.
-    await page.reload();
-    await confirm.waitFor();
-    await expect.poll(() => confirm.isEnabled(), { timeout: 15000 }).toBe(true);
-    expect(JSON.parse(await retainedRequest()).requestId).toBe(
-      retainedA.requestId,
-    );
-    // Steps 7-8. Confirming plan B is a new explicit authorization. A local
-    // `confirmation pending` refusal would issue no HTTP request at all, so the
-    // second interception is the proof the repair removed the deadlock.
-    await confirm.click();
-    await expect.poll(() => lostHandoffs, { timeout: 90000 }).toBe(2);
-    const retainedB = JSON.parse(await retainedRequest());
-    expect(retainedB.planId).toBe(planB.id);
-    expect(retainedB.requestId).not.toBe(retainedA.requestId);
-    expect(retainedB.accounts).toEqual([
-      { platform: "x", account: "f1-retained", expectedRevision: 1 },
-    ]);
-    const historyB = await handoffHistory();
-    expect(historyB).toHaveLength(2);
-    expect(historyB.map((row) => row.request_id).sort()).toEqual(
-      [retainedA.requestId, retainedB.requestId].sort(),
-    );
-    expect(
-      historyB.find((row) => row.request_id === retainedB.requestId)!.payload
-        .planId,
-    ).toBe(planB.id);
-    expect(await workItemCount()).toBe(2);
-    expect(await accountRevision()).toBe(2);
-    // The same-intent path still replays: B's unresolved request recovers its
-    // own committed result instead of creating anything new.
-    await page.unroute("**/api/trpc/opc.handoff*");
-    await page.reload();
-    await confirm.waitFor();
-    await expect.poll(() => confirm.isEnabled(), { timeout: 15000 }).toBe(true);
-    await confirm.click();
-    await expect
-      .poll(async () => await retainedRequest(), { timeout: 30000 })
-      .toBe("null");
-    await page.getByRole("link", { name: "进入选题工作空间" }).first().waitFor();
-    expect(
-      await page.getByRole("link", { name: "进入选题工作空间" }).count(),
-    ).toBe(2);
-    expect((await handoffHistory()).map((row) => row.request_id).sort()).toEqual(
-      historyB.map((row) => row.request_id).sort(),
-    );
-    expect(await workItemCount()).toBe(2);
-    // H3 for the version dimension: another writer saves a newer plan while this
-    // confirmation is in flight. The save runs strictly before the server sees
-    // the pending handoff, so the answer is a definite `OPC_VERSION_CONFLICT`
-    // rollback rather than a timing race. That transaction must leave no
-    // handoff history and release the local request for the current plan.
-    let planC: { planId: string; version: number } | null = null;
-    await page.route("**/api/trpc/opc.handoff*", async (route) => {
-      planC ??= await f.service.savePlan({
-        draftId: f.d.draftId,
-        sourceVersionId: f.sourceVersionId,
-        requestId: randomUUID(),
-        expectedVersion: 2,
-        body: [
-          {
-            id: randomUUID(),
-            platform: "x",
-            account: "f1-retained",
-            day: "2026-09-16",
-            title: "Plan C topic",
-            brief: "Plan C brief",
-          },
-        ],
-      });
-      await route.continue();
-    });
-    await confirm.click();
-    await page.getByRole("alert").filter({ hasText: "操作未完成" }).waitFor();
-    expect(planC).not.toBeNull();
-    expect(planC!.planId).not.toBe(planB.id);
-    expect(await handoffHistory()).toHaveLength(2);
-    expect(await workItemCount()).toBe(2);
-    await expect
-      .poll(async () => await retainedRequest(), { timeout: 30000 })
-      .toBe("null");
-    await page.unroute("**/api/trpc/opc.handoff*");
-    await expect.poll(() => confirm.isEnabled(), { timeout: 15000 }).toBe(true);
-    await confirm.click();
-    await expect
-      .poll(async () => (await handoffHistory()).length, { timeout: 90000 })
-      .toBe(3);
-    const historyC = await handoffHistory();
-    const requestC = historyC.find(
-      (row) =>
-        row.request_id !== retainedA.requestId &&
-        row.request_id !== retainedB.requestId,
-    )!;
-    expect(requestC.payload.planId).toBe(planC!.planId);
-    expect(await workItemCount()).toBe(3);
-    expect(await accountRevision()).toBe(3);
-    // Step 9. The current handoff result stays visible after a reload.
-    await page.reload();
-    await page.getByRole("link", { name: "进入选题工作空间" }).first().waitFor();
-    expect(
-      await page.getByRole("link", { name: "进入选题工作空间" }).count(),
-    ).toBe(3);
-    // Handoff itself is a financial no-op: no model execution, BILL2 run or
-    // reservation is introduced by any of the three explicit confirmations.
-    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
-      executions: 0,
-      planExecutions: 0,
-      planRuns: 0,
-      reserves: 0,
-      plans: 3,
-      accounts: 1,
-      workItems: 1,
-    });
-  } finally {
-    await browser.close();
-  }
-}, 300000);
 
 it("OPC: an upstream reconfirmation can be resubmitted and never hides already answered questions", async () => {
   const {chromium} = await import("../../../../../apps/web/node_modules/@playwright/test");
   const f = await fixture(3, true), model = randomUUID();
   await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Reconfirm local','opc-reconfirm','fixture','true',1000,32000)",[model]);
   await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  // v5 openings carry an organizer extraction (#497): own that global setting.
+  await organizerFixtureModel();
   const draft = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
   const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
   const startedAt = Date.now();
@@ -5124,8 +4576,9 @@ it("OPC: an upstream reconfirmation can be resubmitted and never hides already a
     const goalOf = (n: number) => page.getByRole("textbox", {name:"已知目标 " + n, exact:true});
     const confirmButton = () => page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/, exact:true});
     const navigator = page.getByRole("navigation", {name:"本步骤已到达的问题"});
+    // Since dc3ab89a a step tab reads "<n> <title>", or "✓ <title>" once valid.
     const stepPill = (n: number) =>
-      page.getByRole("navigation", {name:"定位步骤"}).getByRole("button", {name:new RegExp("^" + n + "\\. ")});
+      page.getByRole("navigation", {name:"定位步骤"}).getByRole("button", {name:new RegExp("^(✓|" + n + ") " + f.flow.steps[n - 1].title + "$")});
     const rowTexts = async () =>
       (await navigator.getByRole("button").allTextContents()).map(t => t.replace(/\s+/g," ").trim());
 
@@ -5134,11 +4587,16 @@ it("OPC: an upstream reconfirmation can be resubmitted and never hides already a
     await confirmButton().click();
     await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("confirmed");
     await expect.poll(async () => (await rowTexts()).length, {timeout:30000}).toBe(2);
-    await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
+    // No deferral UI in a mentor draft: defer on the server, then check the page.
+    await deferQuestion(f, draft.draftId, "step-0", "other");
+    await resetLocalIpWindow();
+
+    await page.reload();
     await expect.poll(async () => (await read()).information["step-0"].values?.other?.status, {timeout:30000}).toBe("deferred");
     await expect.poll(async () => (await stepState("step-0")).valid, {timeout:30000}).toBe(true);
 
     // Step 1 must be confirmed BEFORE the upstream change, so it can be invalidated.
+    await resetLocalIpWindow();
     await stepPill(2).click();
     await goalOf(1).waitFor();
     await goalOf(1).fill("第二步定位");
@@ -5147,6 +4605,7 @@ it("OPC: an upstream reconfirmation can be resubmitted and never hides already a
     marks.step1Confirmed = Date.now() - startedAt;
 
     // Q-F2: going back and editing the first answer must not shrink the review list.
+    await resetLocalIpWindow();
     await stepPill(1).click();
     await expect.poll(async () => (await rowTexts()).length, {timeout:30000}).toBe(2);
     const pinned = await rowTexts();
@@ -5161,6 +4620,9 @@ it("OPC: an upstream reconfirmation can be resubmitted and never hides already a
     expect(afterEdit[1]).toContain("待定（已暂缓）");
     marks.rowsKeptAfterEdit = Date.now() - startedAt;
     // A refresh keeps the same durable rows.
+    await autosaveAcknowledged(page, draft.draftId);
+    await resetLocalIpWindow();
+
     await page.reload();
     await expect.poll(async () => (await rowTexts()).length, {timeout:90000}).toBe(2);
 
@@ -5174,6 +4636,7 @@ it("OPC: an upstream reconfirmation can be resubmitted and never hides already a
 
     // The downstream answers are still resolved, but the step needs an explicit
     // reconfirmation; the button must be actionable and the resubmit must stick.
+    await resetLocalIpWindow();
     await stepPill(2).click();
     await expect.poll(async () => confirmButton().isEnabled(), {timeout:30000}).toBe(true);
     await confirmButton().click();
@@ -5181,12 +4644,14 @@ it("OPC: an upstream reconfirmation can be resubmitted and never hides already a
     marks.downstreamReconfirmed = Date.now() - startedAt;
     expect((await read()).information["step-1"].values?.goal?.value).toBe("第二步定位");
     // A valid step with an unchanged answer offers no duplicate submit.
+    await resetLocalIpWindow();
     await stepPill(2).click();
     await goalOf(1).waitFor();
     await expect.poll(async () => confirmButton().isEnabled(), {timeout:30000}).toBe(false);
 
     // Q-F3: finish the workflow and check the completion copy does not promise a
     // dialog that does not exist yet.
+    await resetLocalIpWindow();
     await stepPill(3).click();
     await goalOf(2).waitFor();
     await goalOf(2).fill("第三步定位");
@@ -5213,6 +4678,8 @@ it("OPC: clicking a review row opens that reached question without advancing pro
   const f = await fixture(3, false, 4), model = randomUUID();
   await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Review select local','opc-review-select','fixture','true',1000,32000)",[model]);
   await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  // v5 openings carry an organizer extraction (#497): own that global setting.
+  await organizerFixtureModel();
   const draft = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
   const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
   const startedAt = Date.now();
@@ -5264,7 +4731,11 @@ it("OPC: clicking a review row opens that reached question without advancing pro
     await confirmButton().click();
     await expect.poll(async () => (await read()).information["step-0"].values?.extra0?.status, {timeout:30000}).toBe("confirmed");
     await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.3");
-    await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
+    // No deferral UI in a mentor draft: defer on the server, then check the page.
+    await deferQuestion(f, draft.draftId, "step-0", "extra1");
+    await page.reload();
+    // Deferring q3 reaches q4, which the page opens on its own after the reload.
+    await page.getByRole("log", {name:"完整导师消息"}).getByText("导师主动引导 · 1.4", {exact:true}).waitFor({timeout:60000});
     await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.status, {timeout:30000}).toBe("deferred");
     await expect.poll(async () => (await read()).information["step-0"].values?.extra2?.status, {timeout:30000}).not.toBe("confirmed");
     await expect.poll(async () => (await rowTexts()).length, {timeout:60000}).toBe(4);
@@ -5308,7 +4779,8 @@ it("OPC: clicking a review row opens that reached question without advancing pro
     // The pending progression question is still q1, and a review-only selection
     // may not confirm, defer or spend.
     expect((await read()).information["step-0"].values?.goal?.status).toBe("provisional");
-    await expect.poll(() => confirmButton().isEnabled(), {timeout:15000}).toBe(false);
+    // Review-only in a mentor draft: the current-question action is not offered (dc3ab89a).
+    await expect.poll(() => confirmButton().count(), {timeout:15000}).toBe(0);
     await expect.poll(async () => page.getByText("这是回看较早的问题", {exact:false}).count(), {timeout:15000}).toBeGreaterThan(0);
     expect(await counts()).toEqual(settled);
     expect(await identitySignature()).toBe(settledIdentity);
@@ -5348,6 +4820,8 @@ it("OPC: a legally reached question keeps its explicit confirm and mentor send w
   const f = await fixture(3, false, 4), model = randomUUID();
   await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Legal action local','opc-legal-action','fixture','true',1000,32000)",[model]);
   await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  // v5 openings carry an organizer extraction (#497): own that global setting.
+  await organizerFixtureModel();
   const draft = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
   const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
   const startedAt = Date.now();
@@ -5398,7 +4872,12 @@ it("OPC: a legally reached question keeps its explicit confirm and mentor send w
     await expect.poll(async () => (await read()).information["step-0"].values?.extra0?.status, {timeout:30000}).toBe("confirmed");
     await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.3");
     await field("Extra field 1").fill("第三条实质答案");
-    await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.value, {timeout:30000}).toBe("第三条实质答案");
+    // No deferral UI in a mentor draft: defer on the server, then check the page.
+    await deferQuestion(f, draft.draftId, "step-0", "extra1");
+    await page.reload();
+    // Deferring q3 reaches q4, which the page opens on its own after the reload.
+    await page.getByRole("log", {name:"完整导师消息"}).getByText("导师主动引导 · 1.4", {exact:true}).waitFor({timeout:60000});
     await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.status, {timeout:30000}).toBe("deferred");
     await expect.poll(async () => (await rowTexts()).length, {timeout:60000}).toBe(4);
     expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
@@ -5537,6 +5016,8 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
   const f = await fixture(3, false, 4), model = randomUUID();
   await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Frontier local','opc-frontier','fixture','true',1000,32000)",[model]);
   await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  // v5 openings carry an organizer extraction (#497): own that global setting.
+  await organizerFixtureModel();
   const draft = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
   const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
   try {
@@ -5562,6 +5043,7 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
       return raw.includes("extra2") ? route.abort() : route.continue();
     });
     const read = async () => await f.service.read(draft.draftId);
+    const acknowledged = () => autosaveAcknowledged(page, draft.draftId);
     const field = (title: string) => page.getByRole("textbox", {name:title, exact:true});
     const heading = () => page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3});
     const confirmButton = () => page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/, exact:true});
@@ -5588,7 +5070,12 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
     await expect.poll(async () => (await read()).information["step-0"].values?.extra0?.status, {timeout:30000}).toBe("confirmed");
     await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.3");
     await field("Extra field 1").fill("第三条实质答案");
-    await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
+    await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.value, {timeout:30000}).toBe("第三条实质答案");
+    // No deferral UI in a mentor draft: defer on the server, then check the page.
+    await deferQuestion(f, draft.draftId, "step-0", "extra1");
+    await resetLocalIpWindow();
+
+    await page.reload();
     await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.status, {timeout:30000}).toBe("deferred");
     await expect.poll(async () => (await rowTexts()).length, {timeout:60000}).toBe(4);
     const q4Turns = Number((await sql.query(
@@ -5612,6 +5099,9 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
     await row("1.1").click();
     await field("已知目标 0").fill("客户定位（修改）");
     await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("provisional");
+    await acknowledged();
+    await resetLocalIpWindow();
+
     await page.reload();
     // With the bounded historical reach from this round's snapshots, the empty
     // and never-opened q4 stays reviewable after the earlier edit.
@@ -5625,7 +5115,8 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
     await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.4");
     expect(await field("Extra field 2").inputValue()).toBe("");
     await expect.poll(() => row("1.4").getAttribute("aria-current"), {timeout:15000}).toBe("true");
-    await expect.poll(() => confirmButton().isEnabled(), {timeout:15000}).toBe(false);
+    // Review-only in a mentor draft: the current-question action is not offered (dc3ab89a).
+    await expect.poll(() => confirmButton().count(), {timeout:15000}).toBe(0);
     expect((await read()).information["step-0"].values?.goal?.status).toBe("provisional");
     // Passive recovery created no new turn/execution for q4.
     expect(Number((await sql.query(
@@ -5642,6 +5133,7 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
     // Repeated later edits (more than fields x 2) must not lose the historical
     // maximum, and the reach must stay stable.
     for (let i = 0; i < 10; i++) {
+      await resetLocalIpWindow();
       await row("1.1").click();
       const goalInput = field("已知目标 0");
       await goalInput.waitFor();
@@ -5653,6 +5145,9 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
         (await read()).information["step-0"].values?.goal?.value ?? "", {timeout:60000},
       ).toBe(nextValue);
     }
+    await acknowledged();
+    await resetLocalIpWindow();
+
     await page.reload();
     await expect.poll(async () => (await rowTexts()).length, {timeout:90000}).toBe(4);
     expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
@@ -5873,6 +5368,8 @@ it("OPC: a second published revision drives new drafts while an existing draft s
   const f = await fixture(3, false, 4), model = randomUUID();
   await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Revision local','opc-revision','fixture','true',1000,32000)",[model]);
   await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  // v5 openings carry an organizer extraction (#497): own that global setting.
+  await organizerFixtureModel();
   const first = await f.service.start({requestId: randomUUID(), registration: f.registration, mode: "mentor"});
   const schemaOf = async (draftId: string, stepId: string) =>
     (await f.service.read(draftId)).information[stepId].schema as Array<{id:string;title:string;elicitation?:string}>;
@@ -6038,8 +5535,8 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     expect(await page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3}).count()).toBe(1);
     expect(await page.getByRole("textbox", {name:"重复标题", exact:true}).count()).toBe(1);
     expect(await page.getByRole("textbox", {name:"Renamed goal", exact:true}).count()).toBe(0);
-    // Drive the new revision through its own buttons: 1.1 defer, 1.2 answer,
-    // then 1.3 must show the agent_proposal guidance and its pending proposal.
+    // Drive the new revision: 1.1 defer (server-side, see deferQuestion), 1.2
+    // answer, then 1.3 must show the agent_proposal guidance and its pending proposal.
     const secondRead = async () => await f.service.read(second!.draftId);
     // Four-opening baseline before the cross-step action (shared helper, scopes).
     const secondRoundId: unknown = (await secondRead()).roundId;
@@ -6058,7 +5555,9 @@ it("OPC: a second published revision drives new drafts while an existing draft s
       f.actor, first.draftId, first.roundId, allExpected.slice(0, count),
     );
     await checkEffects(2);
-    await page.getByRole("button", {name:"暂时跳过本题", exact:true}).click();
+    // No deferral UI in a mentor draft: defer on the server, then check the page.
+    await deferQuestion(f, second!.draftId, "step-0", "extra1");
+    await page.reload();
     await expect.poll(async () => (await secondRead()).information["step-0"].values?.extra1?.status, {timeout:60000}).toBe("deferred");
     await expect.poll(headingText, {timeout:60000}).toContain("Renamed goal");
     expect(await page.getByRole("textbox", {name:"Renamed goal", exact:true}).count()).toBe(1);
@@ -6067,7 +5566,9 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     await page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/, exact:true}).click();
     await expect.poll(async () => (await secondRead()).information["step-0"].values?.goal?.status, {timeout:60000}).toBe("confirmed");
     await expect.poll(headingText, {timeout:60000}).toContain("1.3");
-    await expect.poll(async () => (await page.getByText("这是导师要给出的成果建议", {exact:false}).count()), {timeout:60000}).toBeGreaterThan(0);
+    // dc3ab89a shows the "这是导师要给出的成果建议" hint for manual entry only; in
+    // this mentor draft the agent_proposal role is verified by the provisional
+    // proposal the host puts into the field below.
     expect(await page.locator("section[aria-label='本步填写信息']").getByRole("heading", {level:3}).count()).toBe(1);
     expect(await page.getByRole("textbox", {name:"重复标题", exact:true}).count()).toBe(1);
     // The mentor fixture deterministically proposes this text for the current
@@ -6090,7 +5591,7 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     await page.getByRole("button", {name:/^(确认本题并继续|确认当前信息，继续)$/, exact:true}).click();
     await expect.poll(async () => (await secondRead()).information["step-0"].values?.extra0?.status, {timeout:60000}).toBe("confirmed");
     await expect.poll(async () => (await secondRead()).snapshot.steps["step-0"].valid, {timeout:60000}).toBe(true);
-    await expect.poll(async () => await page.getByRole("navigation",{name:"定位步骤"}).getByRole("button",{name:/^2\./}).getAttribute("aria-current"), {timeout:60000}).toBe("step");
+    await expect.poll(async () => await page.getByRole("navigation",{name:"定位步骤"}).getByRole("button",{name:/^2 /}).getAttribute("aria-current"), {timeout:60000}).toBe("step");
     await expect.poll(async () => (await page.locator("section[aria-label='本步填写信息']").getByRole("heading",{level:3}).first().textContent()) ?? "", {timeout:60000}).toContain("2.1");
     mark("new at step-1");
     // The next step's own user_fact question must stay empty: the earlier step's
@@ -6111,7 +5612,7 @@ it("OPC: a second published revision drives new drafts while an existing draft s
     await expect.poll(() => refreshedForm.getByRole("heading", {level:3}).count()).toBe(1);
     await expect.poll(() => refreshedForm.getByRole("heading", {level:3}).textContent()).toMatch(/^2\.1 重复标题/);
     expect(await page.getByRole("navigation", {name:"定位步骤"})
-      .getByRole("button", {name:/^2\./}).getAttribute("aria-current")).toBe("step");
+      .getByRole("button", {name:/^2 /}).getAttribute("aria-current")).toBe("step");
     expect(await refreshedForm.getByRole("textbox", {name:"重复标题", exact:true}).inputValue()).toBe("");
     await expectNewOpeningVisible();
     expect(await checkEffects(5)).toEqual(stableIdentities);
@@ -6549,6 +6050,7 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
     tab1.setDefaultTimeout(30000);
     tab1.on("pageerror", error => pageErrors.push(error.message));
     phase = "login and one shared opening";
+    await resetLocalIpWindow();
     await login(tab1);
     await tab1.goto(app + draftPath);
     await show(tab1, "goal", values.goal.value);
@@ -6566,21 +6068,28 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
     expect(await expectExactMentorEffects(f.actor, draftId, roundId, [opening])).toEqual(initialIdentities);
 
     phase = "real second-tab update during historical review";
+    await resetLocalIpWindow();
     await nav(tab1).getByRole("button", { name: /C extra2/ }).click();
     await show(tab1, "extra2", "");
-    expect(await tab1.getByRole("button", { name: /^(确认本题并继续|确认当前信息，继续)$/, exact: true }).isDisabled()).toBe(true);
+    // A review-only selection in a mentor draft offers no confirmation at all
+    // (dc3ab89a hides the current-question action), so it cannot be confirmed.
+    expect(await tab1.getByRole("button", { name: /^(确认本题并继续|确认当前信息，继续)$/, exact: true }).count()).toBe(0);
+    expect(await tab1.getByText("这是回看较早的问题", { exact: false }).count()).toBeGreaterThan(0);
     const beforeRemote = (await read()).snapshot.steps["step-0"].version;
     const firstRemote = "C updated while the other tab reviews question four";
     await box(tab2).fill(firstRemote);
     await saved(tab2, firstRemote, beforeRemote + 1);
-    await tab1.getByRole("button", { name: "重新读取状态", exact: true }).click();
+    // The explicit re-read lives in the "工作信息" dialog (dc3ab89a).
+    await tab1.getByRole("button", { name: "工作信息", exact: true }).click();
+    await tab1.getByRole("dialog", { name: "工作信息", exact: true }).getByRole("button", { name: "重新读取状态", exact: true }).click();
     await show(tab1, "extra2", "");
-    expect(await tab1.getByRole("button", { name: /^(确认本题并继续|确认当前信息，继续)$/, exact: true }).isDisabled()).toBe(true);
+    expect(await tab1.getByRole("button", { name: /^(确认本题并继续|确认当前信息，继续)$/, exact: true }).count()).toBe(0);
     expect((await assertBinding()).information["step-0"].values.goal.value).toBe(firstRemote);
     await nav(tab1).getByRole("button", { name: /C goal/ }).click();
     await show(tab1, "goal", firstRemote);
 
     phase = "two real writes produce an explicit conflict";
+    await resetLocalIpWindow();
     let sawHeldSave = false;
     const gate = new Promise<void>(resolve => { releaseHeld = resolve; });
     await tab1.route("**/api/trpc/**", async route => {
@@ -6614,6 +6123,7 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
     await tab2.close();
 
     phase = "twelve persisted edits without truncating historical reach";
+    await resetLocalIpWindow();
     const editBase = (await read()).snapshot.steps["step-0"].version;
     const requestBase = await countInformation();
     let finalValue = localInput;
@@ -6624,6 +6134,7 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
       expect(await countInformation()).toBe(requestBase + index);
       await assertBinding();
     }
+    await resetLocalIpWindow();
     await tab1.reload();
     await show(tab1, "goal", finalValue);
     await openingMessage();
@@ -6645,9 +6156,13 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
     expect((await assertBinding()).information["step-0"].values.goal.value).toBe(finalValue);
 
     phase = "lose a completed explicit reply without creating a new request";
+    await resetLocalIpWindow();
     let sawSuccessfulDroppedReply = false;
     await tab1.route("**/api/trpc/**", async route => {
-      if (dropExecutionReply && route.request().method() === "POST" && isProcedure(route.request().url(), "runtime.execute")) {
+      // A mentor turn is one opc.mentorTurnStream request (U2); recovery of an
+      // admitted turn follows its execution stream. Lose both replies.
+      if (dropExecutionReply && route.request().method() === "POST" &&
+          ["opc.mentorTurnStream", "runtime.executeStream"].some(name => isProcedure(route.request().url(), name))) {
         const response = await route.fetch(); // Real server execution and settlement happen first.
         const succeeded = response.ok();
         await route.abort("failed");
@@ -6681,9 +6196,12 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
       .getByRole("button", { name: "重试", exact: true }).isEnabled(), { timeout: 30000 }).toBe(true);
 
     phase = "real website logout in the original tab";
-    // Positioning has no user-menu header. Use the existing profile page in
-    // THIS page/context to invoke AppHeader's real supabase.auth.signOut().
-    await tab1.goto(app + "/profile");
+    await resetLocalIpWindow();
+    // Positioning has no user-menu header. Use another page with the same
+    // AppHeader in THIS page/context to invoke its real supabase.auth.signOut().
+    // Not /profile: the --opc-only disposable schema lacks 0148's
+    // credit_transactions read grant, so its credit summary is denied locally.
+    await tab1.goto(app + "/marketplace");
     expect((await readEnvelope(tab1)).raw).toBe(retained.raw);
     await tab1.getByRole("button", { name: "打开用户菜单", exact: true }).click();
     const logoutResponse = tab1.waitForResponse(response => {
@@ -6693,7 +6211,10 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
     }, { timeout: 60000 });
     await tab1.getByRole("menuitem", { name: "退出登录", exact: true }).click();
     expect((await logoutResponse).ok()).toBe(true);
-    await tab1.waitForURL(url => url.origin === origin && url.pathname === "/landing", { timeout: 60000 });
+    // AppHeader sends the page to /landing; on /marketplace the page's own
+    // sign-in guard may get there first with /login. Either leaves the
+    // signed-in area; the retained request below is what this phase checks.
+    await tab1.waitForURL(url => url.origin === origin && ["/landing", "/login"].includes(url.pathname), { timeout: 60000 });
     await tab1.goto(app + draftPath);
     await tab1.waitForURL(url => url.origin === origin && url.pathname === "/login", { timeout: 60000 });
     expect(await tab1.locator("section[aria-label='本步填写信息']").count()).toBe(0);
@@ -6701,6 +6222,7 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
     expect(await expectExactMentorEffects(f.actor, draftId, roundId, expected)).toEqual(paidIdentities);
 
     phase = "same-page login and same-request recovery";
+    await resetLocalIpWindow();
     dropExecutionReply = false;
     await login(tab1);
     // Global sign-out also revokes the fixture service client's refresh token.
@@ -6718,6 +6240,7 @@ it("OPC: two real tabs retain review, resolve edits and recover one reply after 
     await explicitMessage();
     await show(tab1, "goal", finalValue);
     expect(await expectExactMentorEffects(f.actor, draftId, roundId, expected)).toEqual(paidIdentities);
+    await resetLocalIpWindow();
     await tab1.reload();
     await show(tab1, "goal", finalValue);
     await explicitMessage();
@@ -6781,7 +6304,7 @@ it("OPC: an explicit continue keeps a retained request identity instead of overw
     await page.getByRole("button", { name: "登录", exact: true }).last().click();
     await page.waitForURL((url) => url.pathname.endsWith(draftPath));
     // A consented envelope that still owns an unresolved request: pressing the
-    // re-entry control again must continue THAT request, never replace it.
+    // re-entry control again must keep THAT request, never replace it.
     const original = planEnvelopeFor(f, {
       requestId: "1f0a1c2d-3e4f-4a5b-8c6d-7e8f90a1b2c3",
     });
@@ -6790,6 +6313,7 @@ it("OPC: an explicit continue keeps a retained request identity instead of overw
       { key, envelope: original },
     );
     const before = await planIdentity(f.actor, f.d.draftId);
+    const topicsBefore = await topicIdentity(f.actor);
     await page
       .getByRole("button", { name: "继续生成第一周选题", exact: true })
       .click();
@@ -6797,15 +6321,21 @@ it("OPC: an explicit continue keeps a retained request identity instead of overw
       .getByRole("dialog", { name: "是否继续生成第一周选题" })
       .getByRole("button", { name: "继续生成第一周选题", exact: true })
       .click();
-    await page.waitForURL((url) => url.pathname.endsWith(draftPath + "/plan"));
-    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    // a8dba69c: the continue goes on to the topic workspace and leaves the
+    // retained request for the explicit /plan recovery; it neither admits it
+    // nor creates a second identity or a topic binding.
+    await page.waitForURL((url) => url.pathname.endsWith(draftPath + "/topics"));
     const stored = JSON.parse(
       (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
     ) as { request: { requestId: string } };
     expect(stored.request.requestId).toBe(original.request.requestId);
-    const after = await planIdentity(f.actor, f.d.draftId);
-    expect(after.planExecutions - before.planExecutions).toBe(1);
-    expect(after.reserves - before.reserves).toBe(1);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(before);
+    expect(await topicIdentity(f.actor)).toEqual(topicsBefore);
+    await page.goto(process.env.V3_LOCAL_APP + draftPath + "/plan");
+    await page.getByRole("heading", { name: "本机保留了一条早先的生成请求", exact: true }).waitFor();
+    expect(
+      JSON.parse((await page.evaluate((k) => sessionStorage.getItem(k), key)) as string).request.requestId,
+    ).toBe(original.request.requestId);
   } finally {
     await browser.close();
   }
@@ -6816,17 +6346,14 @@ it("OPC: a local record without consent is checked on the server and only recove
   const legacy = planEnvelopeFor(f, {
     requestId: "2b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e",
   }) as Record<string, unknown>;
-  // A pre-upgrade record: no consent marker, and nothing was ever dispatched.
+  // A pre-upgrade record: no consent marker.
   delete legacy.consentedAt;
   legacy.v = 2;
   const { browser, page, key } = await planBrowser(f, { envelope: legacy });
   try {
-    await page.reload();
     await page
       .getByRole("heading", { name: "本机保留了一条早先的生成请求", exact: true })
       .waitFor();
-    const before = await planIdentity(f.actor, f.d.draftId);
-    expect(before.planExecutions).toBe(0);
     // The page must report the server's own verdict instead of assuming that a
     // local record was never executed or never cost anything.
     await expect
@@ -6836,15 +6363,28 @@ it("OPC: a local record without consent is checked on the server and only recove
         { timeout: 30000 },
       )
       .toContain("服务端没有这条请求的准入记录");
-    expect(before.planExecutions).toBe(0);
+    expect(await page.getByRole("button", { name: "继续这条原请求", exact: true }).isDisabled()).toBe(true);
+    expect((await planIdentity(f.actor, f.d.draftId)).planExecutions).toBe(0);
+    // The older client did admit and finish it: only then does the explicit
+    // continue recover it, under the same identity and without a new request.
+    await admitLegacyPlan(f, (legacy as ReturnType<typeof planEnvelopeFor>).request);
+    const admitted = await planIdentity(f.actor, f.d.draftId);
+    expect(admitted.planExecutions).toBe(1);
+    await page.reload();
+    await expect
+      .poll(
+        async () =>
+          (await page.getByRole("status").allTextContents()).join(" "),
+        { timeout: 30000 },
+      )
+      .toContain("服务端已保存这条请求的完成结果");
     await page.getByRole("button", { name: "继续这条原请求", exact: true }).click();
     await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
     const stored = JSON.parse(
       (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
     ) as { request: { requestId: string } };
     expect(stored.request.requestId).toBe("2b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e");
-    const after = await planIdentity(f.actor, f.d.draftId);
-    expect(after.planExecutions - before.planExecutions).toBe(1);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(admitted);
   } finally {
     await browser.close();
   }
@@ -6925,8 +6465,11 @@ it.each(["save", "confirm"] as const)(
       const rawPending = () => p.evaluate(k => sessionStorage.getItem(k), key);
       const form = () => p.locator("section[aria-label='本步填写信息']");
       const answer = () => form().getByRole("textbox", { name: "已知目标 0", exact: true });
-      const confirm = () => form().getByRole("button", { name: /^(确认本题并继续|确认当前信息，继续)$/, exact: true });
-      const retry = () => form().getByRole("button", { name: "继续核对本题确认", exact: true });
+      // A mentor draft confirms from the current-question action under the chat,
+      // not from the form panel (dc3ab89a).
+      const action = () => p.locator("section[aria-label='当前问题操作']");
+      const confirm = () => action().getByRole("button", { name: /^(确认本题并继续|确认当前信息，继续)$/, exact: true });
+      const retry = () => action().getByRole("button", { name: "继续核对本题确认", exact: true });
       const settings = p.waitForResponse(r => r.url().includes("settings.getSystemSettings") && r.ok(), { timeout: 60000 });
       await p.goto(app + "/login");
       await settings;
@@ -7541,6 +7084,8 @@ it("OPC: B1 business scope, legacy handoff replay and library edits stay owned a
   const body = [{
     id: randomUUID(), platform: "x", account: "owned-account", title: "可恢复的选题",
     brief: "完整简报保留内容、对象、价值、结构和待验证假设。", day: "2026-09-23",
+    // 0124 accepts a brief version only for an article or image-text item.
+    contentType: "article",
   }];
   const plan = await f.service.savePlan({
     draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0,
@@ -8587,6 +8132,9 @@ it("OPC: approved six-stage guided positioning keeps one editable conversation a
       expect((await phases.nth(index).innerText()).replace(/\s+/g,' ')).toContain(`${index+1} ${title}`);
     const answer=page.getByRole('textbox',{name:'产品与服务',exact:true});
     const mentor=page.getByRole('textbox',{name:'给导师的回复',exact:true});
+    // The opening, autosave, send and history polling reach the local IP limit
+    // (60/min) within the first minute; see resetLocalIpWindow.
+    await resetLocalIpWindow();
     await answer.fill('摄影入门课程，用真实场景带新手练习取景。');
     await page.getByText('已自动保存',{exact:true}).waitFor();
     await mentor.fill('我想先聊真实的学员困境。');
@@ -8608,6 +8156,7 @@ it("OPC: approved six-stage guided positioning keeps one editable conversation a
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/u2-approved-six-stage-answer-390x844.png'});
     await page.getByRole('button',{name:'收起成果面板'}).click();
     await page.setViewportSize({width:1600,height:900});
+    await resetLocalIpWindow();
     await page.reload();
     expect(await answer.inputValue()).toBe('摄影入门课程，用真实场景带新手练习取景。');
     const answers:[string,string][]=[
@@ -8622,6 +8171,7 @@ it("OPC: approved six-stage guided positioning keeps one editable conversation a
     ];
     const confirm=page.getByRole('button',{name:'确认当前信息，继续',exact:true});
     for(const [index,[label,value]] of answers.entries()){
+      await resetLocalIpWindow();
       await confirm.click({timeout:15000});
       const next=page.getByRole('textbox',{name:label,exact:true});
       await next.waitFor();
@@ -8657,6 +8207,8 @@ it("OPC: approved six-stage guided positioning keeps one editable conversation a
     const earlier=page.getByRole('textbox',{name:'已确认：产品与服务'});
     await earlier.fill('摄影入门课程，用真实学员案例讲解取景。');
     await expect.poll(async()=> (await f.service.read(draftId)).information[f.flow.steps[0].id].values?.product?.status,{timeout:15000}).toBe('provisional');
+    await autosaveAcknowledged(page, draftId, f.flow.steps[0].id);
+    await resetLocalIpWindow();
     await page.reload(); // A saved correction must remain available after the server projection refreshes.
     const reconfirm=page.getByRole('button',{name:'确认这项修改',exact:true}).first();
     await expect.poll(()=>reconfirm.isEnabled(),{timeout:15000}).toBe(true);
@@ -8668,6 +8220,7 @@ it("OPC: approved six-stage guided positioning keeps one editable conversation a
     const confirmed=await f.service.read(draftId),stepId=f.flow.steps[0].id;
     await f.service.information({draftId,stepId,requestId:randomUUID(),expectedVersion:confirmed.snapshot.steps[stepId].version,
       values:{...confirmed.information[stepId].values,product:{...confirmed.information[stepId].values.product,status:'deferred'}}});
+    await resetLocalIpWindow();
     await page.reload();
     await page.getByRole('textbox',{name:'已确认：准备经营的平台',exact:true}).waitFor();
     expect(await earlier.count()).toBe(0);
@@ -9410,14 +8963,8 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
   const modelId=await planFixtureModel(f.moduleId);
   await sql.query('update modules set active=false where id<>$1',[f.moduleId]);
   const saved={credentials:{email:f.email,password:f.password},actor:f.actor,moduleId:f.moduleId,modelId};
-  // Every local browser request shares 127.0.0.1, and the website's IP limiter (#488) allows 60 per
-  // minute. This journey with #595's history polling exceeds that, which is not what it verifies:
-  // start a fresh local window before each phase. Only the disposable local Redis is flushed.
-  const {execFileSync}=await import('node:child_process');
-  const freshLimitWindow=()=>{
-    const tag=process.env.V3_RATE_LIMIT_TAG;
-    if(tag&&/^[a-z0-9][a-z0-9-]{0,80}$/.test(tag))expect(execFileSync('docker',['exec',tag+'-redis','redis-cli','FLUSHDB'],{encoding:'utf8'}).trim()).toBe('OK');
-  };
+  // This journey with #595's history polling exceeds the local IP limit; start a fresh
+  // window before each phase (resetLocalIpWindow checks the disposable Redis ownership).
   const {chromium}=await import('../../../../../apps/web/node_modules/@playwright/test');
   const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
   const context=await browser.newContext();
@@ -9474,7 +9021,7 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
     ];
     const confirm=page.getByRole('button',{name:'确认当前信息，继续',exact:true});
     for(const [label,value] of answers){
-      freshLimitWindow();
+      await resetLocalIpWindow();
       await confirm.click();
       await page.getByRole('textbox',{name:label,exact:true}).fill(value);
       await page.getByText('已自动保存',{exact:true}).waitFor();
@@ -9483,7 +9030,7 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
         await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-positioning-stage3-1600x900.png'});
       }
     }
-    freshLimitWindow();
+    await resetLocalIpWindow();
     await confirm.click();
     const positioningUrl=page.url();
     const confirmed=await f.service.read(draftId);
@@ -9501,7 +9048,7 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
     await second.getByRole('link',{name:'继续这条内容工作',exact:true}).waitFor();
     const adopted=await f.service.library({search:'',from:null,to:null});
     expect(adopted.businesses.flatMap((business:{accounts:Array<{items:Array<{title:string}>}>})=>business.accounts.flatMap(account=>account.items.map(item=>item.title)))).toEqual(['第二个账号选题']);
-    freshLimitWindow();
+    await resetLocalIpWindow();
     await second.getByRole('link',{name:'继续这条内容工作',exact:true}).click();
     await page.waitForURL(url=>url.pathname==='/runtime');
     await page.getByLabel('消息',{exact:true}).fill('请根据这条选题给我一版文章正文建议，先不要定稿。');
