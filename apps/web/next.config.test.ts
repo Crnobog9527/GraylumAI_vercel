@@ -29,6 +29,7 @@ describe('security response headers', () => {
     expect(headers['Referrer-Policy']).toBe('strict-origin-when-cross-origin');
     expect(headers['X-Frame-Options']).toBe('DENY');
     expect(headers['Strict-Transport-Security']).toBe('max-age=2592000');
+    expect(headers['X-Robots-Tag']).toBe('noindex, nofollow');
     expect(headers['Permissions-Policy']).toContain('camera=()');
     expect(headers['Permissions-Policy']).toContain('microphone=()');
     expect(headers['Permissions-Policy']).toContain('geolocation=()');

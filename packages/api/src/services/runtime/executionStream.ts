@@ -12,6 +12,9 @@ import {runtimeExecutor} from './execute';
 import {runtimeActor} from './actor';
 import {activateRuntimeCandidate} from './matching';
 import {newWorkGate,denyNewCalls} from './newWorkGate';
+import {inflightFinancialHost} from './inflightFinancial';
+import {localFixtureAdapter} from '../bill2/fixtureAdapter';
+import type {BillingTransport} from '../bill2/service';
 
 /** Loopback tests remain separate from the explicitly enabled Staging host. */
 export function runtimeLocalEndpoint(){
@@ -49,10 +52,24 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    const reason=await retainedOutputReason(host.admin,host.actorId,executionId);
    return {...result,...(reason?{unavailable:reason}:{})};
   };
-  const base={database:host.admin,budget:host.budget,actor};
+  const financial=inflightFinancialHost({database:host.admin,actorId:host.actorId,executionId,actor,budget:host.budget});
+  const base={database:financial.database,budget:host.budget,actor};
+  const publicProgress=(event:RuntimeProgress)=>{if(!financial.isAccountClosed())onProgress?.(event);};
+  const run=async(adapter:BillingTransport,execute:()=>Promise<AgentTurnOutcome>)=>{
+   let result:AgentTurnOutcome|undefined;
+   try{result=await execute();}
+   finally{
+    const recovered=result?.state==='completed'&&!financial.isAccountClosed()
+     ?undefined:await financial.finish(adapter);
+    if(financial.isAccountClosed()&&recovered)
+     result={state:recovered.state as 'completed'|'cancelled'|'cost_pending'};
+   }
+   return result!;
+  };
   if(host.maintenanceEndpoint)
-   return outcome(await runtimeExecutor({...base,endpoint:host.maintenanceEndpoint,activateSkill,
-    callGate:newWorkGate(host.admin,'local').calls}).execute(executionId,onProgress));
+   return outcome(await run(localFixtureAdapter(host.maintenanceEndpoint),()=>runtimeExecutor({
+    ...base,endpoint:host.maintenanceEndpoint,activateSkill,
+    callGate:newWorkGate(host.admin,'local').calls}).execute(executionId,publicProgress)));
   try{await loadStagingPolicy(host.admin,host.actorId,process.env);}catch{
    const original=await loadStagingRecoveryPolicy(host.admin,host.actorId,executionId,process.env);
    // This branch never constructs/runs an SDK request. It only looks up the
@@ -73,8 +90,8 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   // even if a later test window is now selected in the host environment.
   const original=await loadStagingRecoveryPolicy(host.admin,host.actorId,executionId,process.env);
   const adapter=stagingTransport(host.admin,original,host.budget);
-  return outcome(await runtimeExecutor({...base,adapter,activateSkill,
-   callGate:newWorkGate(host.admin,'staging').calls}).execute(executionId,onProgress));
+  return outcome(await run(adapter,()=>runtimeExecutor({...base,adapter,activateSkill,
+   callGate:newWorkGate(host.admin,'staging').calls}).execute(executionId,publicProgress)));
 }
 export type OriginalExecutionOutcome=AgentTurnOutcome;
 export type ExecutionStreamEvent=RuntimeProgress|{type:'result';result:OriginalExecutionOutcome};
