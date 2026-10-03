@@ -23,6 +23,8 @@ import { selectRuntimeHistory, selectRuntimeCallInput, projectSupersededScopeIte
 import { matchingPlan, matchingInput, MATCH_INSTRUCTIONS, parseMatch, type MatchCandidate } from './matching';
 import { reasoningPolicy } from './reasoningPolicy';
 import { callBillingUnit } from './billingUnitAdmission';
+import type {RuntimeCallGate,GateRejection} from './newWorkGate';
+import {allowedOutput} from './moderation';
 const preflightCodes=new Set(['RUNTIME_TIME_BUDGET_EXHAUSTED','RUNTIME_PROVIDER_HISTORY_DENIED','RUNTIME_PROVIDER_BINDING_DENIED','BILL2_PROVIDER_REQUEST_DENIED','BILL2_PROVIDER_CREDENTIAL_UNAVAILABLE','BILL2_PROVIDER_IDENTITY_DENIED','BILL2_PROVIDER_MODEL_DENIED','BILL2_PROVIDER_QUOTE_REQUIRED','BILL2_PROVIDER_QUOTE_CONFLICT']);
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 export const runtimeContext=z.object({
@@ -46,7 +48,10 @@ export const runtimeContext=z.object({
  * The default transport is local-only; the Staging host must explicitly supply
  * its allowlisted official adapter and frozen price policy.
  */
-export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionRpc;actor:()=>Promise<string>;endpoint?:string;adapter?:BillingTransport;activateSkill?:(candidate:MatchCandidate)=>Promise<string>}){
+type RuntimeExecutorOptions={budget?:RuntimeBudget;database:SessionRpc;actor:()=>Promise<string>;
+ callGate:RuntimeCallGate;endpoint?:string;adapter?:BillingTransport;activateSkill?:(candidate:MatchCandidate)=>Promise<string>};
+export function runtimeExecutor(options:RuntimeExecutorOptions){
+ if(typeof options.callGate!=='function')throw new Error('RUNTIME_CALL_GATE_REQUIRED');
  const budget=options.budget??createRuntimeBudget();
  const adapter=expiringAuthAfterProvider(options.adapter ?? localFixtureAdapter(options.endpoint??''),budget.auth);
  const billing=authoritativeBilling({admin:options.database,actor:options.actor,adapter,budget});
@@ -102,6 +107,8 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
   const session=new PostgresSession(options.database,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
   let transportNotStarted=false;
   let terminalReplyFailure=false;
+  let gateChecked=false,moderationBlocked=false;
+  let gateRejection:GateRejection|undefined;
   const checkAgentReply=(response:unknown,organizer=false)=>{
    if(agentTurn&&terminalAgentReplyFailure(response,organizer,context.tools.includes(ASK_QUESTION_TOOL))){
     // Only inspect a complete response returned from durable runtime_response.
@@ -144,6 +151,16 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
        ...(selectedPolicy.providerLimits?{providerLimits:selectedPolicy.providerLimits}:{}),phase,requestHash,upperUsd:selectedPolicy.upperUsd,inputLimit:selectedPolicy.inputLimit,outputLimit:selectedPolicy.outputLimit,
        automaticRetry:false,hiddenTools:false,lookupSupported:selectedPolicy.lookupSupported,
        ...callBillingUnit(execution.billing.rules,selectedPolicy)};
+      // Every new claim path must pass this once-per-round gate before BILL2.
+      if(!gateChecked){
+       const leaveRateLimit=budget.timing?.enter('rateLimit');
+       try{
+        const verdict=await options.callGate(await options.actor(),execution.billing.limits.maxCalls);
+        if(!verdict.ok){gateRejection=verdict.reason;throw new Error('RUNTIME_NEW_CALL_DENIED');}
+        gateChecked=true;
+       }catch(error){gateRejection??='limit_unavailable';throw error;}
+       finally{leaveRateLimit?.();}
+      }
       const claim=await billing.claimCall(execution.runId,sequence,call);
       if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
       else budget.assertCanStart(5000);
@@ -344,6 +361,11 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
       return JSON.stringify(response);
      }});
    }
+   // This is after organizer spend and streamed text. Real moderation must decide
+   // whether to buffer/retract output or check the primary reply before organizing.
+   if(execution.live&&!await allowedOutput({actorId:await options.actor(),executionId,body,summary})){
+    moderationBlocked=true;throw new Error('RUNTIME_MODERATION_BLOCKED');
+   }
    const result={kind:'usable_result',evidenceRef:executionId,
     evidenceHash:hash(JSON.stringify({body,summary,...turnMetadata})),body,...turnMetadata,...(summary?{summary}:{})};
    progress({type:'phase',phase:'saving'});
@@ -353,6 +375,12 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
    // The SDK may wrap the error; rely on the latch. Every Runtime write now
    // refuses this actor, so leave settlement to trusted financial recovery.
    if(accountClosed)return {state:'pending' as const};
+   if(moderationBlocked){
+    // A cancellation failure propagates; never rewrite a moderation block as pending
+    // or retry an ambiguous durable cancellation here.
+    const stopped=await rpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
+    return {state:stopped.state};
+   }
    if(terminalReplyFailure){
     // The persisted reply proves this execution cannot continue, including a
     // replay after owner loss. Cancellation retains receipts/checkpoints and
@@ -385,7 +413,11 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
    if(!execution.live)return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{})};
    // A lost durable response is inspected by later recovery, never a network retry.
    const failed=await rpc<{state:string}>('runtime_execution',{...args,p_action:'fail_before_dispatch'}).catch(()=>null);
-   if(failed?.state==='cancelled')return {state:'cancelled' as const,...(preflightFailure?{unavailable:preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?'provider_history' as const:'preflight' as const}:capacity?{unavailable:'capacity' as const}:{})};
+   if(failed?.state==='cancelled'){
+    const unavailable:GateRejection|'provider_history'|'preflight'|'capacity'|undefined=gateRejection??(preflightFailure?
+     preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?'provider_history':'preflight':capacity?'capacity':undefined);
+    return {state:'cancelled' as const,...(unavailable?{unavailable}:{})};
+   }
    await rpc('runtime_execution',{...args,p_action:'interrupt'}).catch(()=>{});
    return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{})};
   }

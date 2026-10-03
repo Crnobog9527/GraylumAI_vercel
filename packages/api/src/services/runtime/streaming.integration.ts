@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
 import {beforeAll,afterAll,it,expect,vi} from 'vitest';
 import {logger} from '../../lib/logger';
 import {randomUUID,createHash} from 'node:crypto';
@@ -71,7 +72,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['serial-tools-v3-st
  const address=server.address();if(!address||typeof address==='string')throw new Error('isolated listener required');
  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>fetch('http://127.0.0.1:'+address.port,init)});
  const frozen=(await db.query('select payload from runtime_executions where id=$1',[f.execution.executionId])).rows[0].payload;
- const start=Date.now(),host=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter});
+ const start=Date.now(),host=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter});
  const running=host.execute(f.execution.executionId,event=>{events.push({event,at:Date.now()-start});}).then(result=>{finished=true;return result;});
  try{
   await until(()=>events.some(({event})=>event.type==='text'));
@@ -112,7 +113,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: streaming mid-b
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
  const address=server.address();if(!address||typeof address==='string')throw new Error('isolated listener required');
  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>fetch('http://127.0.0.1:'+address.port,init)});
- const running=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId,event=>{events.push(event);});
+ const running=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId,event=>{events.push(event);});
  try{
   await until(()=>events.some(event=>event.type==='text'));gate.release();
   expect(await running).toMatchObject({state:'pending'});expect(posts).toBe(1);
@@ -135,7 +136,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: streaming old v
  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>fetch('http://127.0.0.1:'+address.port,init)});
  const frozen=(await db.query('select payload from runtime_executions where id=$1',[f.execution.executionId])).rows[0].payload;
  try{
-  const host=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter}),result=await host.execute(f.execution.executionId,event=>{events.push(event);});
+  const host=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter}),result=await host.execute(f.execution.executionId,event=>{events.push(event);});
   expect(result).toEqual({state:'completed',body});expect(await host.execute(f.execution.executionId)).toEqual(result);expect(bodies).toHaveLength(1);
   const request=JSON.parse(bodies[0]!);expect(request.stream).toBe(false);expect(request.stream_options).toBeUndefined();
   expect(events.filter(event=>event.type==='text')).toEqual([{type:'text',text:'Original non-streaming answer'}]);
@@ -170,7 +171,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: streaming saved
  const frozen=(await db.query('select payload from runtime_executions where id=$1',[f.execution.executionId])).rows[0].payload;
  try{
   const options={database,actor:async()=>f.actorId,adapter};
-  expect(await runtimeExecutor(options).execute(f.execution.executionId)).toEqual({state:'pending'});
+  expect(await runtimeExecutor({...options,callGate:allowTestCalls}).execute(f.execution.executionId)).toEqual({state:'pending'});
   expect(completionFailed).toBe(true);expect(bodies).toHaveLength(1);expect(JSON.parse(bodies[0]!).stream).toBe(true);
   const call=(await db.query('select id,payload,provider_id,selected_cost_usd::text cost from bill2_calls where run_id=$1',[f.execution.runId])).rows[0];
   expect(call.provider_id).toBe(id);expect(call.cost).toBe('0.003');expect(call.payload.requestHash).toBe(hash(bodies[0]!));
@@ -180,11 +181,11 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: streaming saved
   expect(historyBefore.length).toBeGreaterThan(0);expect(historyBefore.filter(row=>row.item.role==='assistant')).toHaveLength(1);
   expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(80);
   // Recreate the host: the SSE replay cannot rely on a process-local buffer.
-  const recovered=await runtimeExecutor(options).execute(f.execution.executionId,event=>{events.push(event);});
+  const recovered=await runtimeExecutor({...options,callGate:allowTestCalls}).execute(f.execution.executionId,event=>{events.push(event);});
   expect(recovered).toEqual({state:'completed',body});
   expect(events.filter(event=>event.type==='text').at(-1)).toEqual({type:'text',text:publicMessage});
   expect(JSON.stringify(events)).not.toMatch(/PRIVATE_|patches|reasoning|encrypted/);
-  expect(await runtimeExecutor(options).execute(f.execution.executionId)).toEqual(recovered);expect(bodies).toHaveLength(1);
+  expect(await runtimeExecutor({...options,callGate:allowTestCalls}).execute(f.execution.executionId)).toEqual(recovered);expect(bodies).toHaveLength(1);
   expect(responseHashes.length).toBeGreaterThanOrEqual(3);expect(new Set(responseHashes)).toEqual(new Set([hash(bodies[0]!)]));
   expect((await db.query('select id,payload,provider_id,selected_cost_usd::text cost from bill2_calls where run_id=$1',[f.execution.runId])).rows).toEqual([call]);
   expect((await db.query('select id,payload,payload_hash from bill2_receipts where call_id=$1',[call.id])).rows).toEqual(receiptBefore);
@@ -206,7 +207,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: streaming 4096 
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));const address=server.address();if(!address||typeof address==='string')throw new Error('isolated listener required');
  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>fetch('http://127.0.0.1:'+address.port,init)});
  try{
-  const host=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter}),result=await host.execute(f.execution.executionId);
+  const host=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter}),result=await host.execute(f.execution.executionId);
   expect(result).toEqual({state:'completed',body});expect(await host.execute(f.execution.executionId)).toEqual(result);expect(bodies).toHaveLength(1);expect(JSON.parse(bodies[0]!).max_tokens).toBe(4096);
   const call=(await db.query('select id,payload,provider_id,selected_cost_usd::text cost from bill2_calls where run_id=$1',[f.execution.runId])).rows[0];
   expect(call.provider_id).toBe(id);expect(call.cost).toBe('0.003');expect(call.payload.requestHash).toBe(hash(bodies[0]!));
@@ -241,7 +242,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: streaming tool 
   }
   return admin.rpc(name,args);
  }};
- const host=runtimeExecutor({database,actor:async()=>f.actorId,adapter}),running=host.execute(f.execution.executionId);
+ const host=runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,adapter}),running=host.execute(f.execution.executionId);
  try{
   await until(()=>toolFrameSent);await new Promise(resolve=>setTimeout(resolve,40));expect(sourceReads).toBe(0);expect(bodies).toHaveLength(1);
   expect((await db.query('select count(*)::int n from runtime_tool_calls where execution_id=$1',[f.execution.executionId])).rows[0].n).toBe(0);
@@ -272,7 +273,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool_calls','lengt
  const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>fetch('http://127.0.0.1:'+address.port,init)});
  const warned=vi.spyOn(logger,'warn');
  try{
-  const host=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter}),result=await host.execute(f.execution.executionId,event=>{events.push(event);});
+  const host=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter}),result=await host.execute(f.execution.executionId,event=>{events.push(event);});
   const request=JSON.parse(bodies[0]!);
   expect(bodies).toHaveLength(1);expect(request).not.toHaveProperty('parallel_tool_calls');expect(request).not.toHaveProperty('tool_choice');
   expect(request).toMatchObject({stream:true,reasoning_effort:'none'});expect(request.tools.map((t:{function:{name:string}})=>t.function.name)).toEqual(['ask_question']);
@@ -296,7 +297,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool_calls','lengt
    expect(JSON.stringify((await db.query('select item from runtime_session_history where session_id=$1',[f.session.sessionId])).rows)).not.toContain('call_first');
   }
   // Replay after the outcome: the stored result, no further provider POST.
-  expect(await runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId)).toMatchObject({state:result.state});
+  expect(await runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId)).toMatchObject({state:result.state});
   expect(bodies).toHaveLength(1);
  }finally{warned.mockRestore();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });
@@ -322,7 +323,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([
   if(name==='runtime_execution'&&args.p_action==='complete'&&failComplete){failComplete=false;return {data:null,error:{message:'Synthetic completion write failure'}};}
   return admin.rpc(name,args);
  }};
- const host=runtimeExecutor({database,actor:async()=>f.actorId,adapter});
+ const host=runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,adapter});
  expect(await host.execute(f.execution.executionId)).toMatchObject({state:'pending'});
  const frozen=(await db.query('select payload from runtime_executions where id=$1',[f.execution.executionId])).rows[0].payload;
  // Deliberately replace live configuration after both paid responses were retained.
@@ -371,7 +372,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([
   if(lostInterrupt&&name==='runtime_execution'&&args.p_action==='interrupt')return {data:null,error:{message:'Synthetic process loss'}};
   return admin.rpc(name,args);
  }};
- const host=()=>runtimeExecutor({database,actor:async()=>f.actorId,adapter});
+ const host=()=>runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,adapter});
  expect(await host().execute(f.execution.executionId)).toEqual({state:'pending'});
  expect((await db.query('select state from runtime_executions where id=$1',[f.execution.executionId])).rows[0].state)
   .toBe(lostInterrupt?'running':'interrupted');
@@ -405,7 +406,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: v5 opening unkn
   if(name==='bill2_dispatch'&&++dispatches===2){const committed=await admin.rpc(name,args);if(committed.error)throw committed.error;return {data:null,error:{message:'Synthetic lost organizer dispatch response'}};}
   return admin.rpc(name,args);
  }};
- const host=()=>runtimeExecutor({database,actor:async()=>f.actorId,adapter});
+ const host=()=>runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,adapter});
  expect(await host().execute(f.execution.executionId)).toEqual({state:'pending'});
  expect(posts).toBe(1);
  const snapshot=async()=>(await db.query('select c.id,c.state,c.provider_id,c.payload from bill2_calls c where run_id=$1 order by sequence',[f.execution.runId])).rows;
@@ -432,7 +433,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['empty','invalid-ca
   const wire=frames.map((delta,index)=>'data: '+JSON.stringify({id,object:'chat.completion.chunk',created:1,model:request.model,choices:[{index:0,delta,finish_reason:index===frames.length-1?(scenario==='invalid-card'?'tool_calls':'stop'):null}]})+'\n\n').join('');
   return new Response(wire+'data: '+JSON.stringify({id,model:request.model,choices:[],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}})+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
  }});
- const host=()=>runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter});
+ const host=()=>runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter});
  expect(await host().execute(f.execution.executionId,event=>events.push(event))).toEqual({state:'completed',body,summary});
  expect(events.filter(event=>event.type==='card')).toEqual([]);
  expect(events.filter(event=>event.type==='text').at(-1)).toEqual({type:'text',text:message});
@@ -461,7 +462,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: 8192 one-token 
   expect(Buffer.byteLength(wire)).toBeLessThan(4_194_304);
   return new Response(wire,{headers:{'content-type':'text/event-stream'}});
  }});
- const host=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter});
+ const host=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter});
  const result=await host.execute(f.execution.executionId);
  expect(result).toEqual({state:'cancelled',unavailable:'output_truncated'});
  const calls=(await db.query('select id from bill2_calls where run_id=$1',[f.execution.runId])).rows;
@@ -497,7 +498,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: full ask_questi
    usage:{prompt_tokens:10,completion_tokens:8192,total_tokens:8202,cost:0.003}})+'\n\ndata: [DONE]\n\n';
   return new Response(wire,{headers:{'content-type':'text/event-stream'}});
  }});
- const host=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter});
+ const host=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter});
  const result=await host.execute(f.execution.executionId);
  expect(result).toEqual({state:'completed',body:agentTurnBody('Synthetic message',card)});
  const receipt=(await db.query('select r.payload from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1',
@@ -547,9 +548,9 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['settled','refunded
   }
   return admin.rpc(name,input);
  }};
- expect(await runtimeExecutor({database:oldDatabase,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId))
+ expect(await runtimeExecutor({callGate:allowTestCalls,database:oldDatabase,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId))
   .toEqual({state:'pending'});
- const host=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter});
+ const host=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter});
  await authoritativeBilling({admin,actor:async()=>f.actorId,adapter}).recoverReceipts(f.execution.runId);
  if(terminal==='refunded'){
   await rpc('bill2_close',{p_actor_id:f.actorId,p_run_id:f.execution.runId,p_outcome:'confirmed_failure',
@@ -614,7 +615,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['card','multiple','
   transport:async(_url,init)=>fetch(`http://127.0.0.1:${address.port}`,init)});
  try{
   const budget=createRuntimeBudget();
-  const host=()=>runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,budget});
+  const host=()=>runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter,budget});
   const pending=host().execute(f.execution.executionId,event=>events.push(event));
   await Promise.race([seen.promise,pending.then(result=>{throw new Error('No stream: '+JSON.stringify(result));})]);
   if(scenario==='opening')await until(()=>events.some(event=>event.type==='text'));
@@ -652,7 +653,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['reason','duplicate
   return admin.rpc(name,args);
  }};
  const expected=kind==='bad-message'?INVALID_REPLY_NOTICE:card.message;
- const host=()=>runtimeExecutor({database,actor:async()=>f.actorId,adapter});
+ const host=()=>runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,adapter});
  const first:RuntimeProgress[]=[],replayed:RuntimeProgress[]=[];
  expect(await host().execute(f.execution.executionId,event=>first.push(event))).toEqual({state:'pending'});
  const before=(await db.query('select r.* from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1',[f.execution.runId])).rows;
@@ -687,7 +688,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([0,20])(
    usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}};
   return new Response('data: '+JSON.stringify(frame)+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
  }});
- expect(await runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId)).toMatchObject({state:'completed'});
+ expect(await runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId)).toMatchObject({state:'completed'});
  await db.query('update runtime_test_windows set max_calls=4 where id=$1',[f.billing.testWindowId]);
  const requestId=randomUUID();
  const context={...f.context,input:'Current answer',request:{...f.context.request,requestId},
@@ -700,7 +701,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([0,20])(
   if(name==='runtime_execution'&&args.p_action==='complete'&&failComplete){failComplete=false;return {data:null,error:{message:'Synthetic completion loss'}};}
   return admin.rpc(name,args);
  }};
- const host=()=>runtimeExecutor({database,actor:async()=>f.actorId,adapter});
+ const host=()=>runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,adapter});
  const progress=(event:RuntimeProgress)=>{if(event.type==='phase')organizing=event.phase==='organizer';};
  expect(await host().execute(next.executionId,progress)).toEqual({state:'pending'});
  organizing=false;
@@ -734,7 +735,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['legacy',true] as c
   if(name==='runtime_execution'&&args.p_action==='complete'&&failComplete){failComplete=false;return {data:null,error:{message:'Synthetic completion loss'}};}
   return admin.rpc(name,args);
  }};
- const host=()=>runtimeExecutor({database,actor:async()=>f.actorId,adapter});
+ const host=()=>runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,adapter});
  expect(await host().execute(f.execution.executionId)).toEqual({state:'pending'});
  const checkpoint=(await db.query('select primary_result from runtime_executions where id=$1',[f.execution.executionId])).rows[0].primary_result;
  expect(checkpoint.body).toBe(agentTurnBody(expected,null));
@@ -796,7 +797,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['serial-tools-v2','
   // After the confirmation, the host records the receipt once and makes no further Runtime call.
   const afterClose:string[]=[];let closing=false;
   const database={rpc:(name:string,args:Record<string,unknown>)=>{if(closing)afterClose.push(name);return admin.rpc(name,args);}};
-  const pending=runtimeExecutor({database,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId,event=>events.push(event));
+  const pending=runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId,event=>events.push(event));
   await Promise.race([seen.promise,pending.then(result=>{throw new Error('No provider call: '+JSON.stringify(result));})]);
   await closeAccount(f.actorId);closing=true;gate.release();
   expect(await pending).toEqual({state:'pending'});expect(posts).toBe(1);expect(afterClose).toEqual(['bill2_record']);
@@ -804,7 +805,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['serial-tools-v2','
   const receipts=(await db.query('select r.payload,r.financial_projection_version v from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1',[f.execution.runId])).rows;
   expect(receipts).toHaveLength(1);expect(receipts[0].v).toBe(1);expect(JSON.stringify(receipts)).not.toContain('PRIVATE_CLOSED');
   // Trusted maintenance finishes the original run once; nothing is dispatched again.
-  const recovered=await runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter:replayOnly(adapter)}).recoverFinancial(f.execution.executionId);
+  const recovered=await runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter:replayOnly(adapter)}).recoverFinancial(f.execution.executionId);
   expect(recovered.state).toBe('cancelled');expect(posts).toBe(1);
   expect((await db.query('select state,closed,charged from bill2_runs where id=$1',[f.execution.runId])).rows[0]).toEqual({state:'settled',closed:true,charged:3});
   expect((await db.query('select active_execution from runtime_sessions where id=$1',[f.session.sessionId])).rows[0].active_execution).toBeNull();
@@ -822,7 +823,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')(
   return admin.rpc(name,args);
  }};
  try{
-  expect(await runtimeExecutor({database,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId,event=>events.push(event)))
+  expect(await runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId,event=>events.push(event)))
    .toEqual({state:'pending'});
   expect(closed).toBe(true);expect(posts).toBe(1);
   await expectNothingRetained(f,events);

@@ -8,6 +8,7 @@ import {loadStagingPolicy,assertStagingReadAccess} from '../services/runtime/sta
 import {StagingAccessError,stagingProcedureError} from '../services/runtime/stagingErrors';
 import {stagingTransport} from '../services/runtime/stagingTransport';
 import { runtimeExecutor } from '../services/runtime/execute';
+import {newWorkGate} from '../services/runtime/newWorkGate';
 import {runtimeActor} from '../services/runtime/actor';
 import { databaseSkillSource, userVisibleModules } from '../services/skills/databaseSource';
 import { discoverSkills } from '../services/skills/loader';
@@ -37,7 +38,10 @@ const procedure=protectedProcedure.use(async({ctx,next,path})=>{
   ctx.runtimeBudget?.timing?.enter('host');
   const actor=runtimeActor(ctx.userScopedSupabase.auth,ctx.user.id,ctx.runtimeBudget,ctx.headers?.get('Authorization'));
   const admission=runtimeAdmissionService(ctx.userScopedSupabase,ctx.supabaseAdmin,{...(real?{real}:{}),purposeBudgets:true,account:'runtime-local',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:100,searchEnabled:!real,workspaceContext:true});
-  const executor=runtimeExecutor({database:ctx.supabaseAdmin,budget:ctx.runtimeBudget,actor,endpoint,...(real?{adapter:stagingTransport(ctx.supabaseAdmin,real,ctx.runtimeBudget)}:{}),activateSkill:c=>activateRuntimeCandidate(ctx.userScopedSupabase,ctx.supabaseAdmin!,c)});
+  const executor=runtimeExecutor({database:ctx.supabaseAdmin,budget:ctx.runtimeBudget,actor,endpoint,
+   callGate:newWorkGate(ctx.supabaseAdmin,endpoint?'local':'staging').calls,
+   ...(real?{adapter:stagingTransport(ctx.supabaseAdmin,real,ctx.runtimeBudget)}:{}),
+   activateSkill:c=>activateRuntimeCandidate(ctx.userScopedSupabase,ctx.supabaseAdmin!,c)});
   const result=await next({ctx:{...ctx,admission,executor,real}});
   if(!result.ok)throw result.error;
   return result;
