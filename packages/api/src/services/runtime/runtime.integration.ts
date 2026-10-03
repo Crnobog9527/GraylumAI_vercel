@@ -376,9 +376,14 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['header','timeout',
   const host=()=>runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter});
   expect(await host().execute(e.executionId)).toEqual({state:'pending'});
   const original=(await db.query('select request_id,pre_deduct_id,payload from bill2_runs where id=$1',[e.runId])).rows[0];
-  const call=(await db.query('select id,payload,provider_id from bill2_calls where run_id=$1',[e.runId])).rows[0];
-  expect(call.payload.requestHash).toBe(sentHash);expect(call.provider_id).toBe(['absent','response-mismatch'].includes(mode)?null:providerId);
-  const receipt=(await db.query('select payload from bill2_receipts where call_id=$1',[call.id])).rows[0].payload;
+  const call=(await db.query('select id,payload,provider_id,selected_cost_usd from bill2_calls where run_id=$1',[e.runId])).rows[0];
+  expect(call.payload.requestHash).toBe(sentHash);expect(call.provider_id).toBe(mode==='absent'?null:providerId);
+  // An early reliable header remains evidence, but a later mismatch prohibits its use for recovery or settlement.
+  if(mode==='response-mismatch'){
+   expect((await db.query('select conflict from bill2_runs where id=$1',[e.runId])).rows[0].conflict).toBe(true);
+   expect(call.selected_cost_usd).toBeNull();
+  }
+  const receipt=(await db.query("select payload from bill2_receipts where call_id=$1 and payload ? 'transport'",[call.id])).rows[0].payload;
   expect(receipt).toMatchObject({cost:null,final:false});
   if(mode!=='response-mismatch')expect(receipt.transport).toMatchObject({rawBody:' '.repeat(165),complete:false,transportIssue:mode==='timeout'?'body_timeout':'body_interrupted'});
   const history=(await db.query('select revision,item from runtime_session_history where session_id=$1 order by revision',[f.s.sessionId])).rows;
@@ -388,7 +393,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['header','timeout',
   expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(80);
   for(let i=0;i<4;i++)expect((await host().recoverFinancial(e.executionId)).state).toBe(recovered?'cancelled':'cost_pending');
   const run=(await db.query('select state,charged,provider_cost_usd::text cost,conflict from bill2_runs where id=$1',[e.runId])).rows[0];
-  expect(run).toEqual(recovered?{state:'settled',charged:3,cost:'0.003',conflict:false}:{state:mode==='absent'?'unknown':mode==='response-mismatch'?'dispatched':'cost_pending',charged:null,cost:null,conflict:mode.endsWith('mismatch')});
+  expect(run).toEqual(recovered?{state:'settled',charged:3,cost:'0.003',conflict:false}:{state:mode==='absent'?'unknown':'cost_pending',charged:null,cost:null,conflict:mode.endsWith('mismatch')});
   expect(posts).toBe(1);expect(lookups).toBe(mode==='lookup-pending'?3:['header','timeout','lookup-mismatch'].includes(mode)?1:0);
   expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(recovered?97:80);
   expect((await db.query("select reason_code from credit_transactions where bill2_run_id=$1 order by reason_code",[e.runId])).rows.map(row=>row.reason_code)).toEqual(recovered?['bill2_release','bill2_reserve','bill2_spend']:['bill2_reserve']);

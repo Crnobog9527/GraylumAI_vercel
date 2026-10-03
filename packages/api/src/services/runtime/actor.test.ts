@@ -61,3 +61,10 @@ it.each(['e30.e30.synthetic','invalid','e30.'+Buffer.from(JSON.stringify({exp:'2
  const getUser=vi.fn();
  await expect(runtimeActor({getSession:async()=>({data:{session:{access_token:jwt}},error:null}),getUser} as never,id,createRuntimeBudget())()).rejects.toThrow('RUNTIME_STAGING_AUTH_REFRESH_REQUIRED');expect(getUser).not.toHaveBeenCalled();
 });
+
+it.each([0, 500, 504, 429, 401, 403])('classifies session Auth failure without treating status %s as missing credentials', async status => {
+ const getUser=vi.fn();
+ const actor=runtimeActor({getSession:async()=>({data:{session:null},error:{status}}),getUser} as never,id,createRuntimeBudget());
+ await expect(actor()).rejects.toThrow(status===401||status===403?'RUNTIME_DENIED':'RUNTIME_AUTH_UNAVAILABLE');
+ expect(getUser).not.toHaveBeenCalled();
+});

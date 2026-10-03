@@ -473,7 +473,7 @@ it.each([
  const claimed=await billing.claimCall(run.id,1,{...identity,upperUsd:bound.upperUsd,phase:'reply',requestHash:hash(request)});
  const dispatched=await billing.dispatchOnce(claimed.id,request);
  expect(dispatched.dispatched).toBe(true);expect(dispatched.pendingReceipt).toBeUndefined();
- const rows=await db.query('select payload,octet_length(payload::text) bytes from bill2_receipts where call_id=$1',[claimed.id]);
+ const rows=await db.query("select payload,octet_length(payload::text) bytes from bill2_receipts where call_id=$1 and payload ? 'transport'",[claimed.id]);
  expect(rows.rows).toHaveLength(1);
  const saved=rows.rows[0].payload;
  expect(rows.rows[0].bytes).toBeLessThan(524288-16384);
@@ -484,7 +484,7 @@ it.each([
  expect(gunzipSync(Buffer.from(saved.transport.rawBodyBase64,'base64'))).toEqual(Buffer.from(original));
  await billing.recordReceipt(run.id,claimed.id,saved);
  await billing.recordReceipt(run.id,claimed.id,saved);
- expect((await db.query('select count(*)::int n from bill2_receipts where call_id=$1',[claimed.id])).rows[0].n).toBe(1);
+ expect((await db.query('select count(*)::int n from bill2_receipts where call_id=$1',[claimed.id])).rows[0].n).toBe(stream?2:1);
  const delivered={...result(),body:fullBudgetText,summary:outputUnit.repeat(4096)};
  await billing.closeRun(run.id,'delivered',delivered);
  expect(await billing.finalizeRun(run.id)).toMatchObject({state:'settled',chargedCredits:7,conflict:false});

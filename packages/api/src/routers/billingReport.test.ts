@@ -45,7 +45,7 @@ describe('BILL2 model report endpoint', () => {
     expect(report).toMatchObject({ available: true, totals: { calls: 2, runs: 1, chargedCredits: 1, unallocatedChargedCredits: 0 } });
     if (!report.available) throw new Error('unavailable');
     expect(report.models.map((m) => [m.model, m.attributedChargedCredits])).toEqual([['v/a', 1], ['v/b', 0]]);
-    expect(report.byPurpose).toEqual([{ key: 'interactive', calls: 2, officialCostUsd: '0.004', weightedUsd: '0.01' }]);
+    expect(report.byPurpose).toEqual([{ key: 'interactive', calls: 2, unknownCostCalls: 0, knownOfficialCostUsd: '0.004', knownWeightedUsd: '0.01', officialCostUsd: '0.004', weightedUsd: '0.01' }]);
   });
 
   it('a missing function is reported as unavailable, never as an empty month', async () => {

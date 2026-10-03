@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { throwOpcRpcError } from "./contentBindingError";
 import { capturePending, capturePendingInput, captureResolveInput } from "./capture";
 import { opcInformation } from "./information";
 export { opcInformation } from "./information";
@@ -55,11 +56,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
     const r = await admin
       .rpc(name, { ...args, p_actor_id: a.data.user.id })
       .abortSignal(AbortSignal.timeout(10000));
-    if (r.error) {
-      // Retain bounded business refusal codes used by request recovery.
-      if (/^(?:OPC|RUNTIME)_[A-Z_]+$/.test(r.error.message)) throw new Error(r.error.message);
-      throw new DatabaseReadError("OPC_UNAVAILABLE", r.error.code);
-    }
+    if (r.error) throwOpcRpcError(r.error);
     return r.data;
   }
   return {

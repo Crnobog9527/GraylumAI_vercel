@@ -33,6 +33,7 @@
     "./src/services/subscriptionCreditGrants": "./src/services/subscriptionCreditGrants.ts",
     "./src/services/contextManager": "./src/services/contextManager.ts",
     "./src/services/contextSnapshots": "./src/services/contextSnapshots.ts",
+    "./src/services/accountErasure/financialRecovery": "./src/services/accountErasure/financialRecovery.ts",
     "./src/services/billingReconciliation": "./src/services/billingReconciliation.ts",
     "./src/services/artifacts/public": "./src/services/artifacts/public.ts",
     "./src/services/artifacts/chat": "./src/services/artifacts/chat.ts",
