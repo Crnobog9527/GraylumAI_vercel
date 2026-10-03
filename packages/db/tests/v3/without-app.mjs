@@ -10,7 +10,9 @@ export const WITHOUT_APP_SUITES = {
     excluded: [],
   },
   runtime: {
-    files: ['src/services/runtime/runtime.integration.ts', 'src/services/runtime/streaming.integration.ts', 'src/services/runtime/terminalReply.integration.ts', 'src/services/runtime/historyCache.integration.ts'],
+    files: ['src/services/runtime/runtime.integration.ts', 'src/services/runtime/streaming.integration.ts',
+      'src/services/runtime/terminalReply.integration.ts', 'src/services/runtime/historyCache.integration.ts',
+      'src/services/opc/capture.integration.ts'],
     prefix: 'RUNTIME: ',
     excluded: [
       {

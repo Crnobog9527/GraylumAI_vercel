@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { capturePendingInput, captureResolveInput } from "../services/opc/capture";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
@@ -64,6 +65,8 @@ const readProcedure = protectedProcedure.use(async ({ ctx, next, path }) => {
   return result;
 });
 export const opcRouter = router({
+  capturePending: readProcedure.input(capturePendingInput).mutation(({ ctx, input }) => ctx.opc.capturePending(input)),
+  captureResolve: procedure.input(captureResolveInput).mutation(({ ctx, input }) => ctx.opc.captureResolve(input)),
   information: procedure
     .input(opcInformation)
     .mutation(({ ctx, input }) => ctx.opc.information(input)),
