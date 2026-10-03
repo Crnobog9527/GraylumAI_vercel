@@ -5,8 +5,8 @@ import { parseMultiplier } from './billingUnit';
 
 /**
  * BILL-UNIT finance projection: per provider/model official cost, the multiplier actually frozen
- * for each call and the weighted "nominal" amount (cost × m_i). Nominal amounts are pricing values,
- * not cash revenue. Run-level charges are attributed to models only with evidence:
+ * for each call and the weighted cost (cost × m_i). This v1 pricing projection is not PAYG nominal cost
+ * or cash revenue. Unknown total costs stay null, with known subtotals reported separately. Run-level charges are attributed to models only with evidence:
  * - new contract (per-call m_i): each call's cumulative difference Δ_i = ceil(q×W_after) − ceil(q×W_before)
  *   in sequence order, when the whole run is in the window, every cost is known and ΣΔ equals the charge;
  * - old contract: the whole charge, when the whole run is in the window and used one model.
@@ -39,12 +39,15 @@ export type ModelReportLine = {
   model: string;
   calls: number;
   unknownCostCalls: number;
-  officialCostUsd: string;
-  weightedUsd: string;
+  knownOfficialCostUsd: string;
+  knownWeightedUsd: string;
+  officialCostUsd: string | null;
+  weightedUsd: string | null;
   multipliers: Array<{ multiplier: string; source: 'call' | 'run'; calls: number }>;
   attributedChargedCredits: number;
 };
-type GroupLine = { key: string; calls: number; officialCostUsd: string; weightedUsd: string };
+type GroupLine = { key: string; calls: number; unknownCostCalls: number; knownOfficialCostUsd: string;
+  knownWeightedUsd: string; officialCostUsd: string | null; weightedUsd: string | null };
 
 const PICO = 10n ** 12n;
 const picoText = (pico: bigint) => {
@@ -83,21 +86,25 @@ function newContractDeltas(calls: Parsed[], creditsPerUsd: string, charged: numb
   return deltas.reduce((a, b) => a + b, 0) === charged ? deltas : null;
 }
 
-function addGroup(groups: Map<string, { calls: number; cost: bigint; weighted: bigint }>, key: string, p: Parsed) {
-  const group = groups.get(key) ?? { calls: 0, cost: 0n, weighted: 0n };
+function addGroup(groups: Map<string, { calls: number; unknownCostCalls: number; cost: bigint; weighted: bigint }>, key: string, p: Parsed) {
+  const group = groups.get(key) ?? { calls: 0, unknownCostCalls: 0, cost: 0n, weighted: 0n };
   group.calls += 1;
+  if (p.cost === null) group.unknownCostCalls += 1;
   if (p.cost !== null) { group.cost += p.cost; group.weighted += p.cost * p.mPico; }
   groups.set(key, group);
 }
-const groupLines = (groups: Map<string, { calls: number; cost: bigint; weighted: bigint }>): GroupLine[] =>
+const groupLines = (groups: Map<string, { calls: number; unknownCostCalls: number; cost: bigint; weighted: bigint }>): GroupLine[] =>
   [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, g]) => ({ key, calls: g.calls, officialCostUsd: picoText(g.cost), weightedUsd: formatWeightedUsd(g.weighted) }));
+    .map(([key, g]) => ({ key, calls: g.calls, unknownCostCalls: g.unknownCostCalls,
+      knownOfficialCostUsd: picoText(g.cost), knownWeightedUsd: formatWeightedUsd(g.weighted),
+      officialCostUsd: g.unknownCostCalls ? null : picoText(g.cost),
+      weightedUsd: g.unknownCostCalls ? null : formatWeightedUsd(g.weighted) }));
 
 export function buildBill2ModelReport(rows: readonly Bill2CallReportRow[], limit: number) {
   const lines = new Map<string, ModelReportLine & { cost: bigint; weighted: bigint }>();
   const runs = new Map<string, { row: Bill2CallReportRow; calls: Parsed[]; invalid: boolean }>();
-  const byPurpose = new Map<string, { calls: number; cost: bigint; weighted: bigint }>();
-  const byDate = new Map<string, { calls: number; cost: bigint; weighted: bigint }>();
+  const byPurpose = new Map<string, { calls: number; unknownCostCalls: number; cost: bigint; weighted: bigint }>();
+  const byDate = new Map<string, { calls: number; unknownCostCalls: number; cost: bigint; weighted: bigint }>();
   // Rows whose multiplier or recorded cost cannot be parsed; kept out of every model and group.
   let unparsableCalls = 0;
   for (const row of rows) {
@@ -107,7 +114,8 @@ export function buildBill2ModelReport(rows: readonly Bill2CallReportRow[], limit
     if (!parsed) { unparsableCalls += 1; run.invalid = true; continue; }
     run.calls.push(parsed);
     const line = lines.get(parsed.key) ?? { provider: row.provider, model: row.model, calls: 0, unknownCostCalls: 0,
-      officialCostUsd: '0', weightedUsd: '0', multipliers: [], attributedChargedCredits: 0, cost: 0n, weighted: 0n };
+      knownOfficialCostUsd: '0', knownWeightedUsd: '0', officialCostUsd: '0', weightedUsd: '0',
+      multipliers: [], attributedChargedCredits: 0, cost: 0n, weighted: 0n };
     line.calls += 1;
     if (parsed.cost === null) line.unknownCostCalls += 1;
     else { line.cost += parsed.cost; line.weighted += parsed.cost * parsed.mPico; }
@@ -120,8 +128,10 @@ export function buildBill2ModelReport(rows: readonly Bill2CallReportRow[], limit
   let chargedCredits = 0;
   let unallocatedChargedCredits = 0;
   let refundedRuns = 0;
+  let unsettledRuns = 0;
   for (const run of runs.values()) {
     if (run.row.run_state === 'refunded') { refundedRuns += 1; continue; }
+    if (run.row.run_state !== 'settled') unsettledRuns += 1;
     const charged = run.row.run_charged ?? 0;
     chargedCredits += charged;
     const complete = !run.invalid && run.calls.length === run.row.run_call_count;
@@ -141,8 +151,11 @@ export function buildBill2ModelReport(rows: readonly Bill2CallReportRow[], limit
   const models = [...lines.values()].map(({ cost, weighted, ...line }) => {
     totalCost += cost;
     totalWeighted += weighted;
-    return { ...line, officialCostUsd: picoText(cost), weightedUsd: formatWeightedUsd(weighted) };
+    return { ...line, knownOfficialCostUsd: picoText(cost), knownWeightedUsd: formatWeightedUsd(weighted),
+      officialCostUsd: line.unknownCostCalls ? null : picoText(cost),
+      weightedUsd: line.unknownCostCalls ? null : formatWeightedUsd(weighted) };
   }).sort((a, b) => a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
+  const unknownCostCalls = models.reduce((sum, line) => sum + line.unknownCostCalls, 0);
   return {
     models,
     byPurpose: groupLines(byPurpose),
@@ -151,9 +164,13 @@ export function buildBill2ModelReport(rows: readonly Bill2CallReportRow[], limit
       calls: rows.length,
       runs: runs.size,
       refundedRuns,
+      unsettledRuns,
+      unknownCostCalls,
       unparsableCalls,
-      officialCostUsd: picoText(totalCost),
-      weightedUsd: formatWeightedUsd(totalWeighted),
+      knownOfficialCostUsd: picoText(totalCost),
+      knownWeightedUsd: formatWeightedUsd(totalWeighted),
+      officialCostUsd: unknownCostCalls || unparsableCalls ? null : picoText(totalCost),
+      weightedUsd: unknownCostCalls || unparsableCalls ? null : formatWeightedUsd(totalWeighted),
       chargedCredits,
       unallocatedChargedCredits,
       platformAbsorbedCredits: null,

@@ -73,7 +73,7 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
   return key;
  }
  async function request(path:string,key:string,body?:string,send?:()=>Promise<TransportObservation>,streamModel?:string,
-  onChunk?:(chunk:string)=>void,agentTurn=false):Promise<TransportObservation> {
+  onChunk?:(chunk:string)=>void,agentTurn=false,onIdentity?:(id:string)=>void):Promise<TransportObservation> {
   let timeout=OPENROUTER_LOOKUP_TIMEOUT_MS;
   try{if(body===undefined)options.budget?.assertCanStart(timeout);
    else timeout=options.budget?.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS)??OPENROUTER_RESPONSE_TIMEOUT_MS;}
@@ -88,6 +88,12 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
   // This fixed official endpoint is the only source of the optional lookup ID.
   const headerId=response.headers.get('x-generation-id');
   const generationId=validGenerationId(headerId)?headerId:undefined;
+  let identityNotified=false;
+  const notifyIdentity=(id:string|undefined)=>{
+   if(!id||identityNotified)return;identityNotified=true;
+   try{onIdentity?.(id);}catch{/* Financial observation must never interrupt streaming. */}
+  };
+  if(response.ok)notifyIdentity(generationId);
   const stream=streamModel&&response.ok?openRouterStream(streamModel,generationId,onChunk,agentTurn?AGENT_STREAM_TOOLS:undefined):undefined;
   const decoder=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}),byteLimit=streamModel?OPENROUTER_STREAM_BYTE_LIMIT:
    body!==undefined&&response.ok?OPENROUTER_RESPONSE_BYTE_LIMIT:OPENROUTER_FRAME_BYTE_LIMIT;
@@ -96,7 +102,7 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
   if(reader)try{for(;;){const part=await reader.read();if(part.done){complete=true;break;}
    if(streamModel){observedHash.update(part.value);observedBytes+=part.value.length;}
    const keep=part.value.subarray(0,byteLimit-bytes);chunks.push(keep);bytes+=keep.length;
-   if(stream){try{stream.push(decoder.decode(keep,{stream:true}));}catch{transportIssue='invalid_text';break;}if(stream.error){transportIssue=stream.error;break;}}
+   if(stream){try{stream.push(decoder.decode(keep,{stream:true}));}catch{transportIssue='invalid_text';break;}if(stream.error){transportIssue=stream.error;break;}notifyIdentity(stream.providerId);}
    if(keep.length<part.value.length){transportIssue='body_limit';break;}
   }}catch{transportIssue=signal.aborted?'body_timeout':'body_interrupted';}finally{await reader.cancel().catch(()=>{});}
   if(stream&&complete){try{stream.push(decoder.decode());}catch{complete=false;transportIssue='invalid_text';}}
@@ -115,7 +121,7 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    {rawBody,rawBodyBase64:buffer.toString('base64'),sourceHash:retainedHash};
   return {...raw,httpStatus:response.status,complete,transportIssue,...(generationId?{generationId}:{})};
  }
- async function prepareDispatch(input:unknown,identity:CallIdentity,onChunk?:(chunk:string)=>void){
+ async function prepareDispatch(input:unknown,identity:CallIdentity,onChunk?:(chunk:string)=>void,onIdentity?:(id:string)=>void){
    options.budget?.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
    if(identity.provider!=='openrouter'||identity.protocol!=='openrouter-chat-v1')throw new Error('BILL2_PROVIDER_IDENTITY_DENIED');
    // Aliases such as :online can enable research without an explicit plugin.
@@ -162,7 +168,7 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    let used=false;
    const send:()=>Promise<TransportObservation>=()=>{
     if(used)throw new Error('BILL2_DISPATCH_CAPABILITY_CONSUMED');
-    used=true;return request('chat/completions',key,body,send,parsed.stream===true?identity.model:undefined,onChunk,agentTurn);
+    used=true;return request('chat/completions',key,body,send,parsed.stream===true?identity.model:undefined,onChunk,agentTurn,onIdentity);
    };
    return send;
  }

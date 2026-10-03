@@ -74,9 +74,11 @@ const withoutApp=args.includes('--without-app');
 const withoutAppSuite=!withoutApp?null:args.includes('--bill2-core-only')?'bill2':runtimeMode&&stagingSchema&&!opcMode?'runtime':null;
 if(withoutApp&&(!withoutAppSuite||serve||legacyRef||casePattern))throw new Error('--without-app requires --bill2-core-only or --runtime-only --with-staging-schema, without preview, legacy ref or case pattern');
 // DB-BASELINE: build the schema from repository files only (baseline/build-from-files.mjs) instead of
-// the local fixture; limited to the two database/API suites until the other modes are migrated.
+// the local fixture; database/API suites and explicitly bounded Runtime browser cases.
 const schemaFromFiles=args.includes('--schema-from-files');
-if(schemaFromFiles&&!withoutAppSuite)throw new Error('--schema-from-files is only supported with the --without-app suites');
+// A bounded Runtime browser case uses the same canonical schema, never a stale hand-built subset.
+if(schemaFromFiles&&!withoutAppSuite&&!(runtimeMode&&stagingSchema&&casePattern&&!serve&&!legacyRef))
+  throw new Error('--schema-from-files requires a without-app suite or a bounded Runtime browser case');
 if(casePattern){if(casePattern.length>1000)throw new Error('case pattern too long');new RegExp(casePattern);}
 const testPattern=casePattern??(stagingHost?'^OPC: staging host':opcMode?'^OPC:':runtimeUpgrade?'^RUNTIME UPGRADE:':runtimeMode?'^RUNTIME:':upgradeMode?'^UPGRADE:':args.includes('--bill2-compat-only')?'^(AI:|SLICE:|CHAT: (free and document UI|ordinary init persists|provider usage is persisted|HTTP 429|summary HTTP 429|dual model stages|prepared replay|missing summary configuration|summary dispatched|a summary rejected|server-only summary recovery))':args.includes('--bill2-core-only')?'^BILL2:':args.includes('--bill2-only')?'^(BILL2:|AI:)':args.includes('--workbench-restart-only')?'^runs every configured workflow through browser login':args.includes('--agent-slice-only')?'^SLICE:':args.includes('--ordinary-only')?'^CHAT: (free and document UI|ordinary init persists|provider usage is persisted)':args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:');
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
@@ -951,6 +953,8 @@ try {
         "--config",
         rateLimitCases?.config ?? "vitest.integration.config.ts",
         ...(runtimeUpgrade ? ["src/services/runtime/upgrade.integration.ts"] : upgradeMode ? ["src/services/bill2/upgrade.integration.ts"] : withoutApp ? [] : ["src/services/__tests__/workbench.integration.ts"]),
+        ...(runtimeMode&&!withoutApp&&casePattern?.startsWith('^ERASURE_BROWSER:')
+          ? ['src/services/runtime/erasureBrowser.integration.ts'] : []),
         ...(bill2Mode ? ['src/services/bill2/billing.integration.ts'] : []),
         ...(runtimeMode ? ['src/services/runtime/runtime.integration.ts', 'src/services/runtime/streaming.integration.ts', 'src/services/runtime/terminalReply.integration.ts'] : []),
         ...(opcMode ? ['src/services/opc/opc.integration.ts',...(mentorStreamTest?['src/services/opc/mentor-browser.integration.ts']:[])] : []),

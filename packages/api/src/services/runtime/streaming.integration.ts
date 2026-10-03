@@ -9,6 +9,10 @@ import {createClient} from '@supabase/supabase-js';
 import {runtimeExecutor} from './execute';
 import {QUESTION_CONTRACT,LEGACY_QUESTION_CONTRACT} from './agentTools';
 import {createRuntimeBudget} from './budget';
+import {runtimeActor} from './actor';
+import {inflightFinancialHost} from './inflightFinancial';
+import {recoverErasedAccounts,erasureFinancialBudget} from '../accountErasure/financialRecovery';
+import type {BillingRpc} from '../bill2/service';
 import {authoritativeBilling} from '../bill2/service';
 import type {RuntimeProgress} from './progress';
 import {openRouterAdapter} from '../bill2/openRouterAdapter';
@@ -93,7 +97,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['serial-tools-v3-st
   const calls=(await db.query('select id,payload,provider_id,state from bill2_calls where run_id=$1 order by sequence',[f.execution.runId])).rows;
   expect(calls).toHaveLength(2);expect(calls.map(call=>call.payload.requestHash)).toEqual(bodies.map(hash));
   expect(calls.map(call=>call.provider_id)).toEqual([1,2].map(n=>'gen-stream-'+f.execution.executionId+'-'+n));
-  expect((await db.query('select count(*)::int n from bill2_receipts where call_id=any($1::uuid[])',[calls.map(call=>call.id)])).rows[0].n).toBe(2);
+  expect((await db.query("select count(*)::int n from bill2_receipts where call_id=any($1::uuid[]) and payload ? 'transport'",[calls.map(call=>call.id)])).rows[0].n).toBe(2);
   expect((await db.query('select state,closed,charged,actual_restore,provider_cost_usd::text cost from bill2_runs where id=$1',[f.execution.runId])).rows[0]).toEqual({state:'settled',closed:true,charged:6,actual_restore:34,cost:'0.006'});
   expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(94);
   expect((await db.query('select payload from runtime_executions where id=$1',[f.execution.executionId])).rows[0].payload).toEqual(frozen);
@@ -121,7 +125,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: streaming mid-b
   expect(calls).toHaveLength(1);expect(calls[0]).toMatchObject({state:'dispatched',provider_id:id});
   expect((await db.query('select state,charged,actual_restore from bill2_runs where id=$1',[f.execution.runId])).rows[0]).toMatchObject({state:'cost_pending',charged:null,actual_restore:null});
   expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(80);
-  const receipts=(await db.query('select payload from bill2_receipts where call_id=$1',[calls[0].id])).rows;
+  const receipts=(await db.query("select payload from bill2_receipts where call_id=$1 and payload ? 'transport'",[calls[0].id])).rows;
   expect(receipts).toHaveLength(1);expect(JSON.stringify(receipts)).toContain(id);
   expect(events.some(event=>event.type==='phase'&&event.phase==='saving')).toBe(false);
  }finally{gate.release();await running;server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
@@ -176,7 +180,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: streaming saved
   const call=(await db.query('select id,payload,provider_id,selected_cost_usd::text cost from bill2_calls where run_id=$1',[f.execution.runId])).rows[0];
   expect(call.provider_id).toBe(id);expect(call.cost).toBe('0.003');expect(call.payload.requestHash).toBe(hash(bodies[0]!));
   const receiptBefore=(await db.query('select id,payload,payload_hash from bill2_receipts where call_id=$1',[call.id])).rows;
-  expect(receiptBefore).toHaveLength(1);
+  expect(receiptBefore.filter(row=>row.payload.transport)).toHaveLength(1);
+  expect(receiptBefore.filter(row=>!row.payload.transport)).toHaveLength(1);
   const historyBefore=(await db.query('select revision,execution_id,item from runtime_session_history where session_id=$1 order by revision',[f.session.sessionId])).rows;
   expect(historyBefore.length).toBeGreaterThan(0);expect(historyBefore.filter(row=>row.item.role==='assistant')).toHaveLength(1);
   expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(80);
@@ -211,7 +216,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: streaming 4096 
   expect(result).toEqual({state:'completed',body});expect(await host.execute(f.execution.executionId)).toEqual(result);expect(bodies).toHaveLength(1);expect(JSON.parse(bodies[0]!).max_tokens).toBe(4096);
   const call=(await db.query('select id,payload,provider_id,selected_cost_usd::text cost from bill2_calls where run_id=$1',[f.execution.runId])).rows[0];
   expect(call.provider_id).toBe(id);expect(call.cost).toBe('0.003');expect(call.payload.requestHash).toBe(hash(bodies[0]!));
-  const receipts=(await db.query('select payload,octet_length(payload::text) bytes from bill2_receipts where call_id=$1',[call.id])).rows;
+  const receipts=(await db.query("select payload,octet_length(payload::text) bytes from bill2_receipts where call_id=$1 and payload ? 'transport'",[call.id])).rows;
   expect(receipts).toHaveLength(1);expect(receipts[0].bytes).toBeLessThan(524288);expect(receipts[0].payload.sourceHash).toBe(hash(wire));
   expect(decodeOpenRouterStreamObservation(receipts[0].payload.transport).toString()).toBe(wire);expect(JSON.parse(receipts[0].payload.rawBody).choices[0].message.content).toBe(body);
   expect((await db.query('select state,closed,charged,actual_restore,provider_cost_usd::text cost from bill2_runs where id=$1',[f.execution.runId])).rows[0]).toEqual({state:'settled',closed:true,charged:3,actual_restore:17,cost:'0.003'});
@@ -237,7 +242,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: streaming tool 
  const adapter=openRouterAdapter({allowWorkspaceRead:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>fetch('http://127.0.0.1:'+address.port,init)});
  const database={rpc:async(name:string,args:Record<string,unknown>)=>{
   if(name==='runtime_workspace_source'){
-   sourceReads++;const rows=(await db.query('select count(*)::int n from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1',[f.execution.runId])).rows;
+   sourceReads++;const rows=(await db.query("select count(*)::int n from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1 and r.payload ? 'transport'",[f.execution.runId])).rows;
    expect(rows[0].n).toBe(1);
   }
   return admin.rpc(name,args);
@@ -282,7 +287,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool_calls','lengt
   const call=(await db.query('select id,payload,provider_id from bill2_calls where run_id=$1',[f.execution.runId])).rows;
   expect(call).toHaveLength(1);expect(call[0].payload.requestHash).toBe(hash(bodies[0]!));
   // The provider response stays whole as evidence, including the dropped call.
-  const receipt=(await db.query('select payload from bill2_receipts where call_id=$1',[call[0].id])).rows[0].payload;
+  const receipt=(await db.query("select payload from bill2_receipts where call_id=$1 and payload ? 'transport'",[call[0].id])).rows[0].payload;
   expect(decodeOpenRouterStreamObservation(receipt.transport).toString()).toContain('call_second');
   if(finish==='tool_calls'){
    expect(result).toEqual({state:'completed',body:agentTurnBody('先了解一下你的情况。',card)});
@@ -340,7 +345,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([
  expect(calls.map(call=>call.payload.requestHash)).toEqual(bodies.map(hash));
  expect(new Set(replayed)).toEqual(new Set(bodies.map(hash)));expect(replayed.length).toBeGreaterThan(4);
  expect((await db.query('select payload from runtime_executions where id=$1',[f.execution.executionId])).rows[0].payload).toEqual(frozen);
- expect((await db.query('select count(*)::int n from bill2_receipts where call_id=any($1::uuid[])',[calls.map(c=>c.id)])).rows[0].n).toBe(2);
+ expect((await db.query("select count(*)::int n from bill2_receipts where call_id=any($1::uuid[]) and payload ? 'transport'",[calls.map(c=>c.id)])).rows[0].n).toBe(2);
  expect((await db.query('select state,charged,provider_cost_usd::text cost from bill2_runs where id=$1',[f.execution.runId])).rows[0]).toEqual({state:'settled',charged:6,cost:'0.006'});
  expect((await db.query("select count(*)::int n from credit_transactions where bill2_run_id=$1 and reason_code='bill2_spend'",[f.execution.runId])).rows[0].n).toBe(1);
 });
@@ -441,7 +446,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['empty','invalid-ca
  expect(saved.result).toMatchObject({body,truncated:scenario==='long'});
  expect(saved.primary_result).toMatchObject({body,truncated:scenario==='long'});
  expect(await host().execute(f.execution.executionId)).toEqual({state:'completed',body,summary});expect(bodies).toHaveLength(2);
- expect((await db.query('select count(*)::int n from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1',[f.execution.runId])).rows[0].n).toBe(2);
+ expect((await db.query("select count(*)::int n from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1 and r.payload ? 'transport'",[f.execution.runId])).rows[0].n).toBe(2);
  expect((await db.query("select count(*)::int n from credit_transactions where bill2_run_id=$1 and reason_code='bill2_spend'",[f.execution.runId])).rows[0].n).toBe(1);
 });
 
@@ -467,7 +472,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: 8192 one-token 
  expect(result).toEqual({state:'cancelled',unavailable:'output_truncated'});
  const calls=(await db.query('select id from bill2_calls where run_id=$1',[f.execution.runId])).rows;
  expect(calls).toHaveLength(1);
- const receipt=(await db.query('select payload from bill2_receipts where call_id=$1',[calls[0].id])).rows[0].payload;
+ const receipt=(await db.query("select payload from bill2_receipts where call_id=$1 and payload ? 'transport'",[calls[0].id])).rows[0].payload;
  expect(receipt).toMatchObject({final:true,cost:'0.003',transport:{complete:true,transportIssue:null}});
  expect(receipt.usage.sdkResponse.choices[0]).toMatchObject({finish_reason:'length',
   message:{content:null,reasoning:'x'.repeat(outputLimit)}});
@@ -501,7 +506,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: full ask_questi
  const host=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter});
  const result=await host.execute(f.execution.executionId);
  expect(result).toEqual({state:'completed',body:agentTurnBody('Synthetic message',card)});
- const receipt=(await db.query('select r.payload from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1',
+ const receipt=(await db.query("select r.payload from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1 and r.payload ? 'transport'",
   [f.execution.runId])).rows[0].payload;
  expect(receipt.final).toBe(true);
  expect(receipt.usage.sdkResponse.choices[0].message.tool_calls[0].function.arguments).toBe(args);
@@ -800,10 +805,12 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['serial-tools-v2','
   const pending=runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId,event=>events.push(event));
   await Promise.race([seen.promise,pending.then(result=>{throw new Error('No provider call: '+JSON.stringify(result));})]);
   await closeAccount(f.actorId);closing=true;gate.release();
-  expect(await pending).toEqual({state:'pending'});expect(posts).toBe(1);expect(afterClose).toEqual(['bill2_record']);
+  expect(await pending).toEqual({state:'pending'});expect(posts).toBe(1);expect(afterClose.filter(name=>name!=='bill2_record')).toEqual([]);expect(afterClose).toContain('bill2_record');
   await expectNothingRetained(f,events);
   const receipts=(await db.query('select r.payload,r.financial_projection_version v from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1',[f.execution.runId])).rows;
-  expect(receipts).toHaveLength(1);expect(receipts[0].v).toBe(1);expect(JSON.stringify(receipts)).not.toContain('PRIVATE_CLOSED');
+  expect(receipts.filter(row=>row.payload.final===true)).toHaveLength(1);
+  expect(receipts.find(row=>row.payload.final===true)?.v).toBe(1);
+  expect(JSON.stringify(receipts)).not.toContain('PRIVATE_CLOSED');
   // Trusted maintenance finishes the original run once; nothing is dispatched again.
   const recovered=await runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter:replayOnly(adapter)}).recoverFinancial(f.execution.executionId);
   expect(recovered.state).toBe('cancelled');expect(posts).toBe(1);
@@ -828,4 +835,100 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')(
   expect(closed).toBe(true);expect(posts).toBe(1);
   await expectNothingRetained(f,events);
  }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+
+function revocableRuntimeIdentity(actorId:string) {
+ let revoked=false;
+ const budget=createRuntimeBudget();
+ const jwt='local.'+Buffer.from(JSON.stringify({exp:Math.floor(Date.now()/1000)+3600})).toString('base64url')+'.only';
+ const auth={getSession:vi.fn(async()=>({data:{session:{access_token:jwt}},error:null})),
+  getUser:vi.fn(async()=>({data:{user:revoked?null:{id:actorId}},error:revoked?{message:'Synthetic revoked token'}:null}))};
+ return {budget,auth,actor:runtimeActor(auth as unknown as Parameters<typeof runtimeActor>[0],actorId,budget),
+  revoke:()=>{revoked=true;}};
+}
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['serial-tools-v2','agent-turn-v5-stream'] as const)(
+ 'RUNTIME: real Auth revocation during %s uses the dispatched host capability and automatically finishes late money',async format=>{
+ const f=await closedFixture(format),identity=revocableRuntimeIdentity(f.actorId);
+ const gate=latch(),seen=latch(),events:RuntimeProgress[]=[];let posts=0;
+ const {server,adapter}=await closedProvider(format,gate.promise,seen.release,()=>{posts++;});
+ const financial=inflightFinancialHost({database:admin,actorId:f.actorId,executionId:f.execution.executionId,
+  actor:identity.actor,budget:identity.budget});
+ // This is the same executor/financial-finally composition as executionStream, with local transport only.
+ const pending=(async()=>{
+  try{return await runtimeExecutor({callGate:allowTestCalls,database:financial.database,
+   actor:identity.actor,budget:identity.budget,adapter}).execute(f.execution.executionId,event=>events.push(event));}
+  finally{await financial.finish(adapter);}
+ })();
+ try{
+  await Promise.race([seen.promise,pending.then(value=>{throw new Error('No provider: '+JSON.stringify(value));})]);
+  await closeAccount(f.actorId);identity.revoke();
+  await expect(identity.actor()).rejects.toThrow('RUNTIME_DENIED');
+  gate.release();expect(await pending).toEqual({state:'pending'});
+  await expectNothingRetained(f,events);
+  expect(posts).toBe(1);
+  expect((await db.query('select state,closed,charged from bill2_runs where id=$1',[f.execution.runId])).rows[0])
+   .toEqual({state:'settled',closed:true,charged:3});
+  expect((await db.query('select state from runtime_executions where id=$1',[f.execution.executionId])).rows[0].state).toBe('cancelled');
+  expect((await db.query('select active_execution from runtime_sessions where id=$1',[f.session.sessionId])).rows[0].active_execution).toBeNull();
+  expect((await db.query("select count(*)::int n from credit_transactions where bill2_run_id=$1 and reason_code='bill2_spend'",
+   [f.execution.runId])).rows[0].n).toBe(1);
+  expect((await db.query('select r.payload from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1',
+   [f.execution.runId])).rows.some(row=>JSON.stringify(row).includes('PRIVATE_CLOSED'))).toBe(false);
+  await financial.finish(adapter);expect(posts).toBe(1);
+ }finally{gate.release();await pending;server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([false,true])(
+ 'RUNTIME: a new erasure batch closes a lost host with early ID=%s without replaying its model call',async withId=>{
+ const f=await fixture('serial-tools-v3-stream'),identity=revocableRuntimeIdentity(f.actorId);
+ const sent=latch(),earlySaved=latch(),tail=latch();let crashed=false,posts=0,lookups=0;
+ const id='gen-lost-'+f.execution.executionId;
+ const database:BillingRpc={rpc:async(name,args)=>{
+  if(crashed)throw new Error('Synthetic invocation lost');
+  const result=await admin.rpc(name,args);
+  if(name==='bill2_record'&&!result.error&&(args.p_evidence as {providerId?:string}).providerId===id)earlySaved.release();
+  return result;
+ }};
+ const adapter=openRouterAdapter({budget:identity.budget,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',
+  transport:async(_url,init)=>{
+   if(init?.method==='GET'){
+    lookups++;return new Response(JSON.stringify({data:{id,model:'synthetic/mentor',total_cost:0.003,finish_reason:'stop'}}));
+   }
+   posts++;sent.release();
+   return new Response(new ReadableStream<Uint8Array>({async start(controller){
+    if(withId)controller.enqueue(new TextEncoder().encode('data: '+JSON.stringify({id,model:'synthetic/mentor',
+     choices:[{index:0,delta:{role:'assistant',content:'{"message":"partial'},finish_reason:null}]})+'\n\n'));
+    await tail.promise;controller.close();
+   }}),{headers:{'content-type':'text/event-stream',...(withId?{'x-generation-id':id}:{})}});
+  }});
+ // Simulate process loss after its already-durable dispatch/early ID: no invocation finally can run.
+ const pending=runtimeExecutor({callGate:allowTestCalls,database,actor:identity.actor,budget:identity.budget,adapter})
+  .execute(f.execution.executionId).catch(()=>({state:'lost'}));
+ await Promise.race([withId?earlySaved.promise:sent.promise,pending.then(value=>{throw new Error('No dispatch: '+JSON.stringify(value));})]);
+ await closeAccount(f.actorId);identity.revoke();crashed=true;tail.release();await pending;
+ const before=(await db.query('select closed from bill2_runs where id=$1',[f.execution.runId])).rows[0];
+ expect(before.closed).toBe(false);
+ const call=(await db.query('select provider_id,selected_cost_usd from bill2_calls where run_id=$1',[f.execution.runId])).rows[0];
+ expect(call).toEqual({provider_id:withId?id:null,selected_cost_usd:null});
+ const freshAdapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  expect(init?.method).toBe('GET');lookups++;
+  return new Response(JSON.stringify({data:{id,model:'synthetic/mentor',total_cost:0.003,finish_reason:'stop'}}));
+ }});
+ const report=await recoverErasedAccounts({database:admin,budget:erasureFinancialBudget(55_000),profileId:f.actorId,
+  adapter:()=>freshAdapter});
+ expect(report.failed).toBe(0);expect(report.processed).toBeGreaterThanOrEqual(1);
+ expect(posts).toBe(1);expect(lookups).toBe(withId?1:0);
+ expect((await db.query('select state,closed,charged from bill2_runs where id=$1',[f.execution.runId])).rows[0])
+  // Existing BILL2 finalize leaves the dispatched ledger state while actual cost is unknown.
+  .toEqual({state:withId?'settled':'dispatched',closed:true,charged:withId?3:null});
+ expect((await db.query('select provider_cost_usd::text cost from bill2_runs where id=$1',[f.execution.runId])).rows[0].cost)
+  .toBe(withId?'0.003':null);
+ expect((await db.query('select state from runtime_executions where id=$1',[f.execution.executionId])).rows[0].state)
+  .toBe(withId?'cancelled':'cost_pending');
+ expect((await db.query('select active_execution from runtime_sessions where id=$1',[f.session.sessionId])).rows[0].active_execution).toBeNull();
+ expect(report.pending).toBe(withId?0:1);expect(report.success).toBe(withId);
+ if(!withId){
+  expect(report.oldestPendingAt).not.toBeNull();
+  expect((await db.query('select actual_restore from bill2_runs where id=$1',[f.execution.runId])).rows[0].actual_restore).toBeNull();
+ }
 });

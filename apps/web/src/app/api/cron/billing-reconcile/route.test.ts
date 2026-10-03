@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
+  erasure: vi.fn(),
   runDailyBillingReconciliation: vi.fn(),
   runBillingEngineV15ReadinessAudit: vi.fn(),
   validateCronRequest: vi.fn(),
@@ -16,6 +17,10 @@ vi.mock('@supabase/supabase-js', () => ({
 vi.mock('@repo/api/src/services/billingReconciliation', () => ({
   runDailyBillingReconciliation: mocks.runDailyBillingReconciliation,
   runBillingEngineV15ReadinessAudit: mocks.runBillingEngineV15ReadinessAudit,
+}));
+
+vi.mock('@repo/api/src/services/accountErasure/financialRecovery', () => ({
+  runErasureFinancialReconciliation: mocks.erasure,
 }));
 
 vi.mock('@repo/api/src/services', () => ({
@@ -60,6 +65,7 @@ describe('/api/cron/billing-reconcile', () => {
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://example.supabase.co');
     vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key');
     mocks.validateCronRequest.mockReturnValue(null);
+    mocks.erasure.mockResolvedValue({ success: true, pending: 0, failed: 0 });
     mocks.createClient.mockReturnValue({ client: 'service-role' });
     mocks.runDailyBillingReconciliation.mockResolvedValue(dailySuccess);
     mocks.runBillingEngineV15ReadinessAudit.mockResolvedValue(readinessSuccess);
@@ -162,4 +168,13 @@ describe('/api/cron/billing-reconcile', () => {
       schedule: '0 4 * * *',
     }]);
   });
+});
+
+it('reports an unresolved erasure batch as failure while preserving both original audits', async () => {
+  mocks.erasure.mockResolvedValue({ success: false, pending: 1, failed: 0, oldestPendingAt: '2026-01-01T00:00:00Z' });
+  const response = await GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
+  expect(response.status).toBe(500);
+  expect(await response.json()).toMatchObject({ success: false, erasureFinancial: { pending: 1 } });
+  expect(mocks.runDailyBillingReconciliation).toHaveBeenCalled();
+  expect(mocks.runBillingEngineV15ReadinessAudit).toHaveBeenCalled();
 });
