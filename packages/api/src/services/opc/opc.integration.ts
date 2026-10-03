@@ -7386,6 +7386,7 @@ it("OPC: U2 browser preserves later edits across unknown saves, conflict and ano
 
 it("OPC: new business start restores the complete frozen request before another business can begin", async () => {
   const f=await publishedDraft();
+  await onlyOwnCatalog([f.moduleId]);
   const originalBusiness=(await sql.query('select business_id::text id from opc_draft_businesses where draft_id=$1',[f.d.draftId])).rows[0].id;
   const otherActor=await publishedDraft();
   const {browser,page}=await planBrowser(f);
@@ -8520,7 +8521,10 @@ it("OPC: definite pre-admission failure revokes its claim and permits an explici
     await page.route('**/api/trpc/runtime.prepare*', route => {
       if (!(route.request().postData() ?? '').includes('OPC_VIDEO_PACKAGE_V1')) return route.continue();
       lateRequestBody = route.request().postData()!;
-      return route.abort();
+      // Since #594 a lost response is an open outcome; only a structured 4xx proves a definite refusal.
+      return route.fulfill({ status: 412, contentType: 'application/json', body: JSON.stringify([{ error: {
+        message: '本次操作所需模型尚未获准用于当前测试窗口，请联系管理员。', code: -32012,
+        data: { code: 'PRECONDITION_FAILED', httpStatus: 412, path: 'runtime.prepare' } } }]) });
     });
     await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
     await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('明确拒绝');
