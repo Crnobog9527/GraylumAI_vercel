@@ -3,9 +3,13 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ data: undefined as unknown, error: null as unknown }));
+const state = vi.hoisted(() => ({ data: undefined as unknown, error: null as unknown, refreshError: null as unknown }));
 vi.mock('@/trpc/client', () => ({ trpc: {
-  modelReasoning: { get: { useQuery: () => ({ data: state.data, error: state.error }) } },
+  useUtils: () => ({}),
+  modelReasoning: {
+    get: { useQuery: () => ({ data: state.data, error: state.error }) },
+    refreshCatalog: { useMutation: () => ({ mutate: () => undefined, isPending: false, error: state.refreshError }) },
+  },
   modelPricing: { getMultipliers: { useQuery: () => ({ data: {
     site: { creditsPerUsd: '100' }, models: [{ id: 'model-1', effective: '2' }],
   } }) } },
@@ -24,7 +28,7 @@ const pricing = { fetchedAt: '2026-10-01T00:00:00.000Z', model: 'example/model',
 const view = (priceView: unknown) => ({ model: 'example/model', maxTokens: 4096, issues: [], capacity, priceView, pricing,
   config: { route: 'example/fp8', purposes: {}, catalog: { fetchedAt: '2026-10-01T00:00:00.000Z', model: 'example/model' } } });
 
-beforeEach(() => { state.data = undefined; state.error = null; });
+beforeEach(() => { state.data = undefined; state.error = null; state.refreshError = null; });
 
 describe('model edit form price section', () => {
   it('tells a new model it can be saved but not called yet', () => {
@@ -42,9 +46,22 @@ describe('model edit form price section', () => {
     expect(html).toContain('输入最高单价 $2.5 美元 / 百万 token');
     expect(html).toContain('输入最多约 500 积分 / 百万 token');
     expect(html).toContain('查看或修改这个模型的加价倍数');
-    expect(html).toContain('在这个模型的&quot;思考设置&quot;里点&quot;重新读取&quot;同步');
+    expect(html).toContain('点本区的&quot;读取价格和容量&quot;同步');
+    expect(html).toContain('>读取价格和容量</button>');
     expect(html).not.toContain('点上面的');
     expect(html).not.toContain('type="number"');
+  });
+
+  it('shows the read failure safely, keeping server validation text', () => {
+    state.data = view({ ...prices.readyPrice, route: 'example/fp8' });
+    state.refreshError = { message: 'fetch failed: internal transport token', data: { code: 'INTERNAL_SERVER_ERROR' } };
+    expect(render('model-1')).toContain('暂时无法读取模型目录，请稍后重试');
+    state.refreshError = { message: 'OpenRouter 目录里没有这个模型 ID', data: { code: 'BAD_REQUEST' } };
+    expect(render('model-1')).toContain('OpenRouter 目录里没有这个模型 ID');
+  });
+
+  it('has no read button for a model that is not saved yet', () => {
+    expect(render(null)).not.toContain('读取价格和容量</button>');
   });
 
   it('keeps the not-callable notice while the price is unread', () => {

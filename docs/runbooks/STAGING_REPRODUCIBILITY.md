@@ -535,7 +535,7 @@ pnpm stripe:readiness:staging
 
 The current staging runtime is the standalone Vercel project `graylumai-staging`
 using the Vercel Production environment at
-`https://auth-staging.graylum.com` (the old `graylumai-staging.vercel.app` domain was
+`https://auth-staging.graylum.com` (the old Vercel domain was
 removed on 2026-10-01). Its Stripe test-mode webhook endpoint is:
 
 ```text

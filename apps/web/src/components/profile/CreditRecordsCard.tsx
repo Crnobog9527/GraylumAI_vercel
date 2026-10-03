@@ -3,7 +3,8 @@
 import { memo, useMemo } from 'react';
 import { Zap, TrendingDown, Package, RefreshCw, Crown, CheckCircle2, Settings, Loader2 } from 'lucide-react';
 import { trpc } from '@/trpc/client';
-import { summaryStat } from './summaryStat';
+import { CREDITS_SUMMARY_QUERY_OPTIONS } from './creditsSummaryQuery';
+import { SummaryStatValue } from './SummaryRetry';
 import { formatCreditsBalance } from '@/components/credits/balancePresentation';
 import {
   countsAsCreditSpend,
@@ -144,10 +145,8 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
   const credits = typeof user?.credits === 'number' ? user.credits : null;
 
   // 从 API 获取积分统计数据
-  const monthlySummary = trpc.credits.getCreditsSummary.useQuery({ period: 'month' });
-  const allTimeSummary = trpc.credits.getCreditsSummary.useQuery({ period: 'all' });
-  const monthlyUsed = summaryStat(monthlySummary, (summary) => summary.totalSpent);
-  const totalUsed = summaryStat(allTimeSummary, (summary) => summary.totalSpent);
+  const monthlySummary = trpc.credits.getCreditsSummary.useQuery({ period: 'month' }, CREDITS_SUMMARY_QUERY_OPTIONS);
+  const allTimeSummary = trpc.credits.getCreditsSummary.useQuery({ period: 'all' }, CREDITS_SUMMARY_QUERY_OPTIONS);
 
   // 从 API 获取交易记录
   const { data: transactionsData, isLoading: isLoadingTx } = trpc.credits.getCreditTransactions.useQuery({ limit: 50 });
@@ -249,7 +248,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
               }}
             >
               <div className="text-sm font-medium mb-1" style={{ color: 'var(--text-tertiary)' }}>本月消耗</div>
-              <div className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{monthlyUsed}</div>
+              <SummaryStatValue query={monthlySummary} pick={(summary) => summary.totalSpent} />
             </div>
 
             <div
@@ -260,7 +259,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
               }}
             >
               <div className="text-sm font-medium mb-1" style={{ color: 'var(--text-tertiary)' }}>累计消耗</div>
-              <div className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{totalUsed}</div>
+              <SummaryStatValue query={allTimeSummary} pick={(summary) => summary.totalSpent} />
             </div>
           </div>
         </div>

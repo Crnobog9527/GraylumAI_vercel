@@ -133,7 +133,7 @@
   "packages/api/src/services/runtime/actor.ts": {"longLines":1},
   "packages/api/src/services/runtime/admission.ts": {"longLines":20},
   "packages/api/src/services/runtime/context.ts": {"longLines":4},
-  "packages/api/src/services/runtime/execute.ts": {"longLines":20},
+  "packages/api/src/services/runtime/execute.ts": {"longLines":17},
   "packages/api/src/services/runtime/matching.ts": {"longLines":2},
   "packages/api/src/services/runtime/openRouterHistory.ts": {"longLines":3},
   "packages/api/src/services/runtime/runner.ts": {"longLines":4},

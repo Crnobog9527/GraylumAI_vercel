@@ -46,8 +46,31 @@ function translateKnownAuthError(error: unknown, message: string): string | null
   return null;
 }
 
+// tRPC serializes zod input failures as a JSON array of issues in `message`. Show the
+// server-written issue messages instead of the raw array; anything else is not an issue list.
+export function readValidationIssueMessages(message: string): string | null {
+  if (!message.startsWith('[')) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(message);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return null;
+    }
+    const texts = parsed.map((issue) => (issue && typeof issue === 'object' && 'message' in issue
+      && typeof issue.message === 'string' ? issue.message.trim() : ''));
+    if (texts.some((text) => !text)) {
+      return null;
+    }
+    return [...new Set(texts)].join('；');
+  } catch {
+    return null;
+  }
+}
+
 export function getSafeErrorMessage(error: unknown, fallback: string) {
-  const message = getErrorMessageText(error).trim();
+  const rawMessage = getErrorMessageText(error).trim();
+  const message = readValidationIssueMessages(rawMessage) ?? rawMessage;
   const translated = translateKnownAuthError(error, message);
   if (translated) {
     return translated;

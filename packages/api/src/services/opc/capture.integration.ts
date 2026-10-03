@@ -371,7 +371,7 @@ it('RUNTIME: capture v2 summary parsing accepts only strict objects', async () =
   expect(await f.apply(await f.seed(output([])))).toMatchObject({ result: 'suggested' });
 });
 
-it('RUNTIME: capture rollback repeats, preserves values and protects A-B-A after reenabling', async () => {
+it('RUNTIME: capture rollback rejects a second rollback, preserves values and protects A-B-A after reenabling', async () => {
   const f = await fixture();
   await f.apply(await f.seed());
   const rollback = readFileSync(resolve('../../docs/launch/rollback/CONVERSATION_CAPTURE_B1.sql'), 'utf8');
@@ -381,7 +381,8 @@ it('RUNTIME: capture rollback repeats, preserves values and protects A-B-A after
   try {
     await db.query(rollback);
     const first = await definitions();
-    await db.query(rollback);
+    await expect(db.query(rollback)).rejects.toThrow('OPC_CAPTURE_ROLLBACK_SOURCE_MISMATCH');
+    await db.query('rollback');
     expect(await definitions()).toEqual(first);
     await f.save('B'); await f.save('A');
   } finally { await db.query(forward); }
@@ -791,6 +792,31 @@ it('RUNTIME: migration rejects an unexpected previous function definition before
     expect((await db.query("select md5(pg_get_functiondef('opc_capture_apply(uuid,uuid,uuid)'::regprocedure)) h")).rows[0].h).toBe(before);
   } finally { await db.query('rollback'); await db.query(original); }
   await db.query(forward);
+});
+
+it('RUNTIME: rollback rejects drift in every replaced or removed definition without changing functions', async () => {
+  const rollback = readFileSync(resolve('../../docs/launch/rollback/CONVERSATION_CAPTURE_B1.sql'), 'utf8');
+  const signatures = [
+    'opc_information(uuid,uuid,text,uuid,integer,jsonb)', 'opc_query(uuid,uuid)',
+    'runtime_work_projection(uuid,uuid,uuid)', 'runtime_material_allowed_before_b1(uuid,jsonb)',
+    'opc_capture_apply(uuid,uuid,uuid)',
+    'opc_capture_resolve(uuid,uuid,uuid,text,text,uuid,text,text,integer)',
+  ];
+  const definitions = async () => (await db.query(`select sig, pg_get_functiondef(sig::regprocedure) def
+    from unnest($1::text[]) sig order by sig`, [signatures])).rows as { sig: string; def: string }[];
+  const original = await definitions();
+  for (const entry of original) {
+    try {
+      const drifted = entry.def.replace('AS $function$', 'AS $function$\n-- synthetic definition drift');
+      expect(drifted).not.toBe(entry.def);
+      await db.query(drifted);
+      const before = await definitions();
+      await expect(db.query(rollback)).rejects.toThrow('OPC_CAPTURE_ROLLBACK_SOURCE_MISMATCH');
+      await db.query('rollback');
+      expect(await definitions()).toEqual(before);
+    } finally { await db.query('rollback'); await db.query(entry.def); }
+  }
+  expect(await definitions()).toEqual(original);
 });
 
 it('RUNTIME: completion capture has a bounded wait and later retry remains idempotent', async () => {

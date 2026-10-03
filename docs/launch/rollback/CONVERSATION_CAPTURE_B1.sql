@@ -3,7 +3,23 @@
 -- First remove B1 callers and verify ordinary/old-request/page recovery.
 -- Before external use re-read all four live definitions and reconcile later PRs.
 -- This preserves all user information, metadata, notes and immutable history.
+-- Only the exact 0159 definitions may be rolled back; an already rolled-back state is rejected.
 BEGIN;
+DO $$
+DECLARE sig text; expected_md5 text;
+BEGIN
+ FOR sig,expected_md5 IN SELECT * FROM (VALUES
+  ('opc_information(uuid,uuid,text,uuid,integer,jsonb)','facb1a24394a78ce3ccef78871bae75e'),
+  ('opc_query(uuid,uuid)','8f7d9b04d0f95ea595dbc49bdf82e4a9'),
+  ('runtime_work_projection(uuid,uuid,uuid)','fcb191fa3d9135c42509cd1395a6e025'),
+  ('runtime_material_allowed_before_b1(uuid,jsonb)','0a1bac81b4214c2151f8ac32660b8d76'),
+  ('opc_capture_apply(uuid,uuid,uuid)','b2c3b7f2dc0a30511a635b4febf5be61'),
+  ('opc_capture_resolve(uuid,uuid,uuid,text,text,uuid,text,text,integer)','960d19ab5a52c6ab35fc54724aa33188')
+ ) v(signature,definition_hash) LOOP
+  IF to_regprocedure(sig) IS NULL OR md5(pg_get_functiondef(to_regprocedure(sig))) IS DISTINCT FROM expected_md5
+  THEN RAISE EXCEPTION 'OPC_CAPTURE_ROLLBACK_SOURCE_MISMATCH: %',sig;END IF;
+ END LOOP;
+END $$;
 CREATE OR REPLACE FUNCTION opc_information(p_actor_id uuid,p_draft_id uuid,p_step_id text,p_request_id uuid,p_expected_version integer,p_values jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE d opc_drafts;r artifact_rounds;step jsonb;field jsonb;value jsonb;st jsonb;req artifact_requests;payload jsonb;
 BEGIN
