@@ -268,7 +268,7 @@ C 中任何一项不满足时：
 
 - 三种情况都通过现有 `complete` 分支保存，`kind` 仍是 `usable_result`，所以聊天里能展示已写内容。
 - 依赖"完整成果"的消费者只认 `complete`：报告候选、结构化解析、B1 capture。
-- 附属整理器照常处理用户已经看到的正文（现有 `complete` 分支要求有 summary），整理结果同样带上来源的 `completeness`。
+- 附属整理器：`length_limit` 时照常处理用户已经看到的正文（现有 `complete` 分支要求有 summary），整理结果同样带上来源的 `completeness`；`stopped` 时不再整理，见 4.6 的 2B。
 - 下列情况都不会把前面已持久化的正文误判为合格成果，这些正文仍然可读：
   - 第 `maxSegments` 段仍然是 `length`；
   - 容量耗尽；
@@ -354,8 +354,13 @@ Claude 新模型不支持 assistant 预填，所以续写段是**以 user 结束
     这是按模型能力区分，不是按 Skill 区分。
 - **拼接 `join-v1`**：
   - 各段原文不改，回执保持原样；
-  - 新段开头与已写全文结尾做"最长后缀—前缀"精确匹配，匹配长度 ≥ 16 字符、且不跨代码块或表格边界时，去掉重复部分；
-  - 实时流在新段开头先缓冲，最多 64 字符，等去重判断完成再输出，不回退已显示的文字；
+  - **重叠检测有上限**：只在长度 L ∈ [16, 64] 字符（Unicode 码点）的范围内，找"已写全文的后缀 = 新段的前缀"的最长精确匹配；
+    匹配不跨代码块或表格边界时，去掉新段开头的这 L 个字符。
+  - 实时流在新段开头先缓冲 64 个字符，正好覆盖所有候选长度：
+    - 缓冲满 64 字符，或者新段结束时，再做判断并输出；
+    - 判断只依赖已写全文和新段的前 64 个字符，所以实时输出和重放时的投影逐字相同；
+    - 已经显示的文字不回退。
+  - 超过 64 字符的重复**不去除**，原样保留在正文里。这是首版接受的限制，由 `CONTINUE_V1` 的"不重复已写内容"来减少发生。
   - 除此之外不改写模型正文。
 - **重放**：续写请求由回执和冻结合同确定性地重建，hash 相同，只读回执，不重发。
 - **Session**：只在最终完成时写入一条 assistant 消息，内容为全文投影（受 4.8 约束）。继续指令和中间各段都不写入 Session。
@@ -441,6 +446,21 @@ Claude 新模型不支持 assistant 预填，所以续写段是**以 user 结束
    - **(d) 那次 HTTP 已经结束**（函数被回收、断线）：下次恢复或重放时读到 `user_stop`，只读回执，然后按 (b) 收尾。
      - 回执结果不明时，按 PAYG 查账；仍然不明就进入 `cost_pending`，结果是已持久化各段的投影；
      - 不重发，不补扣。
+   - **2B. 带附属整理器的执行被停止**（`attachedOrganizer`，C0 收拢的定位页主回复）：
+     - **问题**：停止时整理器可能还没跑。现有 `complete` 分支在 `attachedOrganizer` 下要求有 `primary_result` 和 `summary`，否则以 `RUNTIME_ORGANIZER_PENDING` 拒绝（`0106:452-453`）。而停止又拒绝新的 claim，整理器之后也没法再跑。
+     - **做法：停止后不整理**（与"停止 = 不再产生新的调用和花费"一致，不为整理器另开一次调用）：
+       - 结果保存已写正文，`completeness:'stopped'`，`organized:false`，没有 `summary`。
+       - 已经有 `primary_result`（主回复已完成、整理器还没完成）时，body 就用 `primary_result.body`，不再按 `stopAt` 截断（主回复已经全部显示）。现有的"body 必须与 primary checkpoint 一致"校验（`0106:452`）保持不变。
+       - 整理器的调用如果已经派发（在途），按 (c) 处理：等它的回执落库，正常带 `summary` 完成，结果为 `completeness:'complete'`、`organized:true`，因为主回复和整理都已经完成。
+       - 整理器还没派发：按 (a) 取消未派发的 call 并释放冻结，然后按 (b) 保存未整理的结果。
+     - **需要改的 SQL**：在 C2 的追加迁移里重定义 `runtime_execution`：
+       - `complete` 分支：只在 `paused_reason='user_stop'`、结果带 `stopped:true` 和 `organized:false`、并且没有 `summary` 时，跳过 `RUNTIME_ORGANIZER_PENDING` 检查。其他情况保持现状，包括 `0106:452` 的 primary 一致性检查。
+       - `stop` 动作 (b)：调用同一个 `complete` 逻辑。
+       - `checkpoint_primary` 不改。
+     - **右侧整理怎么处理**：
+       - 这一轮不更新右侧信息，B1 capture 不执行；
+       - 界面在这条回答下显示"已停止，本轮未整理"；
+       - 不自动补整理，也不在下一轮自动补做这一轮的整理。用户可以重新发送，或者在后续的对话驱动设计里手动整理（CONTENT-CONVERSATION-DRIVEN）。
    - **(e) 一个字都还没写出来**（`stopAt=0`，且没有任何已落库的正文）：结果为空，等价于现有取消，最终状态 `cancelled`，没有正文。
      在途的那次调用仍按回执结算一次。
 3. **不重复扣费的保证**：
@@ -699,6 +719,8 @@ C2 合并 → REPORT-GEN R-A / R-B → PAYG 前端技术验收 → 默认切 v2 
   - version 1 配置可读。
 - **续写**：
   - 第 1 段 `length` → 第 2 段 → `stop`，最终结果等于各段回执按 `join-v1` 拼接的投影；
+  - `join-v1` 的重叠上限：重复 16–64 个字符时去除；重复超过 64 个字符时原样保留；新段短于 64 个字符时在段结束时判断；
+    这三种情况下，实时输出（逐帧拼接）与重放得到的投影逐字相同，已显示的文字不回退；
   - 去重：正常去掉重复、去重后零进展时收尾、跨段的空格和换行、Markdown 表格和代码块跨段不被误删；
   - 流式缓冲不回退已显示的文字；
   - 写满 `maxSegments` 时以 `lengthLimit` 收尾；
@@ -732,6 +754,12 @@ C2 合并 → REPORT-GEN R-A / R-B → PAYG 前端技术验收 → 默认切 v2 
   - (b) 停在 `waiting_*`：一个事务内保存截到 `stopAt` 的结果并收尾，状态为 `completed`；
   - 停止时的可见正文校验，各补一条：
     - 导师回合不带卡：截到 `stopAt` 的 `message` 重新封装后通过 schema，`complete` 按 `message` 计数通过，超过 `stopAt` 的被拒绝；
+    - 带附属整理器的执行被停止：
+      - 停在 `waiting_resume`、整理器还没派发：保存 `stopped`、`organized:false`、没有 summary，`complete` 成功（不报 `RUNTIME_ORGANIZER_PENDING`），未派发的 call 被取消并释放冻结；
+      - 已有 `primary_result`：body 等于 primary 的 body；body 不一致仍然报 `RUNTIME_CHECKPOINT_CONFLICT`；
+      - 整理器在途：回执落库后正常带 summary 完成，整理器只结算一次；
+      - 没有停止的执行如果缺 summary，仍然报 `RUNTIME_ORGANIZER_PENDING`；
+      - 右侧信息不更新，B1 不执行；
     - 导师回合带卡：没有截断时保留卡片；截断时 `card=null`；`message` 为空且无卡时按 (e) 处理；
     - 普通回合：`body` 截到 `stopAt` 个码点，`complete` 按 `body` 计数；
     - 中文、emoji（代理对）和换行下，前端的 `Array.from` 与数据库的 `char_length` 计数一致；
@@ -800,3 +828,5 @@ C2 合并 → REPORT-GEN R-A / R-B → PAYG 前端技术验收 → 默认切 v2 
 | 机器人复审 P1（续写段调用工具会耗尽调用预算，线程 4173417613） | 4.3：续写段不允许新的工具调用（总控技术决定），每段固定一次模型调用，`maxSegments − 1` 的预算成立；模型请求工具时宿主拒绝、不执行、以 `length_limit` 收尾；写明对付费搜索、`read_source` 和导师提问卡的影响；补必测 |
 | 机器人复审 P1（stopAt 校验对象，线程 4173464770） | 4.6：`stopAt` 按可见正文的码点计数；导师回合取信封的 `message`，普通回合取 `body`；格式由冻结上下文决定；新增 2A 截断后重新封装（截断时去掉卡片、经 schema 校验）；`complete` 按可见正文计数；补三类必测 |
 | 机器人复审 P2（calls 闸门重复扣，线程 4173464773） | 4.3：续写段额度在首次闸门里随 `maxCalls` 一次扣满；跨 HTTP 继续只检查暂停、不扣额度，以已有 claim 过的 call 作为扣过的依据，不新增状态；标注 #553 §5 需要对齐；补"四段 Hobby 回复只扣一次"必测 |
+| 机器人复审 P1（带整理器的执行被停止，线程 4173504630） | 4.6 新增 2B：停止后不整理，结果 `stopped`、`organized:false`、没有 summary；已有 primary 时用它的 body；整理器在途时等回执后正常完成；追加迁移里的 `complete` 只在 user_stop 下跳过 `RUNTIME_ORGANIZER_PENDING`，保留 primary 一致性检查；右侧不更新、B1 不执行、不自动补整理；4.2 同步；补必测 |
+| 机器人复审 P2（join-v1 与 64 字符缓冲，线程 4173504631） | 4.3：重叠检测长度上限 64，缓冲 64 正好覆盖所有候选长度，实时和重放的投影一致；超过 64 字符的重复原样保留（首版限制）；补必测 |
