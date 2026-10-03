@@ -43,6 +43,7 @@ export class PostgresSession implements Session {
     this.historyItems=rows.map(r=>r.item) as AgentInputItem[];
     return this.historyItems;
   }
+  getHistoryRevisions(): readonly number[] { return [...this.historyRevisions]; }
   async freezeHistory(count:number):Promise<void>{
     if(!Number.isSafeInteger(count)||count<0||count>this.historyRevisions.length)throw new Error('RUNTIME_HISTORY_SELECTION');
     await this.request('freeze',count?this.historyRevisions.slice(-count):[]);

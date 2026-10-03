@@ -83,6 +83,8 @@ export function createRequestTiming(now:()=>number=()=>performance.now()){
    safe(()=>{previous=phase;if(phase!=='provider')switchTo(next);});
    return ()=>safe(()=>{if(phase===next)switchTo(previous);});
   },
+  // Durable execution completion ends provider timing before post-processing.
+  finishProvider:()=>safe(()=>{if(phase==='provider')switchTo('host');}),
   mark,
   tagExecution:(id:unknown)=>safe(()=>{if(typeof id==='string'&&UUID.test(id)&&executions.size<8)executions.add(id.toLowerCase());}),
   setProcedures:(paths:readonly unknown[])=>safe(()=>{

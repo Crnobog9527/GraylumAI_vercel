@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
+import {cachedSystemContent,historyCacheIndex} from './cacheMessages';
 import {ASK_QUESTION_ARGUMENT_LIMIT,toolArgumentLimit} from '../../shared/agentTurn';
 import {OPENROUTER_RESPONSE_BYTE_LIMIT,OPENROUTER_FRAME_BYTE_LIMIT} from './responseCapacity';
 import {gzipSync} from 'node:zlib';
@@ -20,10 +21,6 @@ export function consumeOpenRouterNotStarted(error:unknown,requestHash:string,sen
  const proof=unstarted.get(error);if(proof?.requestHash!==requestHash||proof.send!==send)return false;
  unstarted.delete(error);return true;
 }
-const cachedSystemContent=z.tuple([
- z.object({type:z.literal('text'),text:z.string().min(1),cache_control:z.object({type:z.literal('ephemeral')}).strict()}).strict(),
- z.object({type:z.literal('text'),text:z.string().min(1)}).strict().optional(),
-]);
 const requestFields=new Set(['model','stream','stream_options','store','messages','provider','max_tokens','max_completion_tokens','temperature','top_p','parallel_tool_calls','response_format','reasoning_effort','reasoning']);
 export const sourceCall=z.object({id:z.string().min(1).max(256),type:z.literal('function'),function:z.object({name:z.literal('read_source'),arguments:z.string().max(4000)}).strict()}).strict();
 /** One tool call whose name is in a request format's allowlist. */
@@ -136,6 +133,8 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    // replays their history) and never the optional parallel_tool_calls hint;
    // older requests keep their rules.
    const agentTurn=Boolean(options.allowAgentTools&&parsed&&typeof parsed==='object'&&!Array.isArray(parsed)&&agentTurnRequest(parsed));
+   const cachedHistoryIndex=Array.isArray(parsed?.messages)?historyCacheIndex(parsed.messages,agentTurn&&
+    identity.model.startsWith('anthropic/')&&identity.providerLimits.cacheWriteUsdPerMillion!==undefined):-1;
    // These routing constraints must already be in the frozen request bytes.
    if(!parsed || typeof parsed!=='object' || Array.isArray(parsed) || Object.keys(parsed).some(key=>!requestFields.has(key)&&!((options.allowWorkspaceRead||agentTurn)&&key==='tools')) ||
      (parsed.tools!==undefined&&!agentTurn&&!workspaceTools.safeParse(parsed.tools).success) ||
@@ -154,6 +153,7 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
      parsed.messages.some((message:unknown,index:number)=>{
       if(!message || typeof message!=='object' || Array.isArray(message))return true;
       const m=message as Record<string,unknown>;
+      if(index===cachedHistoryIndex)return false;
       if(agentTurn?agentMessage.safeParse(m).success:options.allowWorkspaceRead&&workspaceMessage.safeParse(m).success)return false;
       if(index===0&&m.role==='system'&&identity.model.startsWith('anthropic/')&&
        identity.providerLimits?.cacheWriteUsdPerMillion!==undefined&&Object.keys(m).every(key=>['role','content'].includes(key))&&
