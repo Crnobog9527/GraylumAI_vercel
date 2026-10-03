@@ -4509,6 +4509,8 @@ it("OPC: Stage C7 a stale round candidate neither suppresses nor impersonates th
         ),
       { id: f.d.draftId, candidate: staleCandidate, roundId: f.d.roundId },
     );
+    // Hydrate from that buffer: the page loaded before it was written.
+    await page.reload();
     const revise = page.getByRole("button", {
       name: "修订定位，保留原版本",
       exact: true,
@@ -6961,7 +6963,8 @@ it("OPC: B1 browser auto-saves discussion, adopts one topic across a lost reply 
     await page.goto(process.env.V3_LOCAL_APP + path);
     await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
     await page.getByRole('heading', { name: '1. 首周选题', exact: true }).waitFor({ timeout: 60000 });
-    expect((await f.service.topicDraftRead(f.d.draftId)).version).toBe(1);
+    // The candidate draft is saved after the reply renders.
+    await expect.poll(async () => (await f.service.topicDraftRead(f.d.draftId)).version, { timeout: 30000 }).toBe(1);
 
     // Discussion revises the candidate and auto-saves a new draft version.
     await page.getByLabel('消息', { exact: true }).fill('请修改第一条选题');
