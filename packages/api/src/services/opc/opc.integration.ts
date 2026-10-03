@@ -10606,6 +10606,8 @@ it("OPC: RATE-LIMIT browser gate notices keep the original request, never auto-r
   };
   const f = await fixture(3);
   await planFixtureModel(f.moduleId);
+  // Data hygiene only (no assertion or limiter change): keep this case's own Skill visible; see onlyOwnCatalog.
+  await onlyOwnCatalog([f.moduleId]);
   const credits = async () => Number((await sql.query("select credits from profiles where id=$1", [f.actor])).rows[0].credits);
   const executions = async () =>
     Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n);
@@ -10836,6 +10838,8 @@ it("OPC: RATE-LIMIT /runtime call-gate stop display and video package admission 
   await limits(false);
   const f = await publishedDraft();
   await planFixtureModel(f.moduleId);
+  // Data hygiene only (no assertion or limiter change): keep this case's own Skill visible; see onlyOwnCatalog.
+  await onlyOwnCatalog([f.moduleId]);
   const seed = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'existing-account', title: '原工作', brief: '原有账号项目', day: '2026-09-20' }] });
   await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: seed.planId,
@@ -10962,6 +10966,8 @@ it("OPC: RATE-LIMIT start-page send refused by any 503 is never re-sent automati
   await pause(false);
   const f = await fixture(3);
   await planFixtureModel(f.moduleId);
+  // Data hygiene only (no assertion or limiter change): keep this case's own Skill visible; see onlyOwnCatalog.
+  await onlyOwnCatalog([f.moduleId]);
   const browser = await chromium.launch({
     executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true,
   });
@@ -11063,6 +11069,8 @@ async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase
   await pause(false);
   const f = await publishedDraft();
   await planFixtureModel(f.moduleId);
+  // Data hygiene only (no assertion or limiter change): keep this case's own Skill visible; see onlyOwnCatalog.
+  await onlyOwnCatalog([f.moduleId]);
   const seed = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'existing-account', title: '原工作', brief: '原有账号项目', day: '2026-09-20' }] });
   await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: seed.planId,
