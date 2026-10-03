@@ -11,6 +11,7 @@ import {retainedOutputReason} from './view';
 import {runtimeExecutor} from './execute';
 import {runtimeActor} from './actor';
 import {activateRuntimeCandidate} from './matching';
+import {newWorkGate,denyNewCalls} from './newWorkGate';
 
 /** Loopback tests remain separate from the explicitly enabled Staging host. */
 export function runtimeLocalEndpoint(){
@@ -50,7 +51,8 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   };
   const base={database:host.admin,budget:host.budget,actor};
   if(host.maintenanceEndpoint)
-   return outcome(await runtimeExecutor({...base,endpoint:host.maintenanceEndpoint,activateSkill}).execute(executionId,onProgress));
+   return outcome(await runtimeExecutor({...base,endpoint:host.maintenanceEndpoint,activateSkill,
+    callGate:newWorkGate(host.admin,'local').calls}).execute(executionId,onProgress));
   try{await loadStagingPolicy(host.admin,host.actorId,process.env);}catch{
    const original=await loadStagingRecoveryPolicy(host.admin,host.actorId,executionId,process.env);
    // This branch never constructs/runs an SDK request. It only looks up the
@@ -63,7 +65,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    }
    const adapter=stagingTransport(host.admin,original,host.budget);
    const replayOnly={dispatch:async()=>{throw new Error('RUNTIME_DISPATCH_DISABLED');},lookup:adapter.lookup};
-   const state=await runtimeExecutor({...base,adapter:replayOnly}).recoverFinancial(executionId);
+   const state=await runtimeExecutor({...base,adapter:replayOnly,callGate:denyNewCalls}).recoverFinancial(executionId);
    // With p_finish, runtime_financial_recovery returns only these three states.
    return outcome({state:state.state as 'completed'|'cancelled'|'cost_pending'});
   }
@@ -71,7 +73,8 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   // even if a later test window is now selected in the host environment.
   const original=await loadStagingRecoveryPolicy(host.admin,host.actorId,executionId,process.env);
   const adapter=stagingTransport(host.admin,original,host.budget);
-  return outcome(await runtimeExecutor({...base,adapter,activateSkill}).execute(executionId,onProgress));
+  return outcome(await runtimeExecutor({...base,adapter,activateSkill,
+   callGate:newWorkGate(host.admin,'staging').calls}).execute(executionId,onProgress));
 }
 export type OriginalExecutionOutcome=AgentTurnOutcome;
 export type ExecutionStreamEvent=RuntimeProgress|{type:'result';result:OriginalExecutionOutcome};

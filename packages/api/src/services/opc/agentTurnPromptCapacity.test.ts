@@ -94,3 +94,8 @@ it.each([false,true].flatMap(opening=>['missing','provisional','confirmed','defe
   console.info('Synthetic final-step prompt capacity',JSON.stringify({opening,status,
    builderCharacters:direct.length,additionalCharacters:complete.length,utf8Bytes:Buffer.byteLength(complete)}));
  });
+
+vi.mock('../runtime/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../runtime/newWorkGate')>(),
+ ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
+}));

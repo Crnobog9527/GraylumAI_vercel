@@ -1,3 +1,4 @@
+import { modelPriceView } from '../shared/modelPriceView';
 import { membershipPlanMutations } from './adminMembershipPlans';
 import { entitlementRowShape } from '../services/membershipEntitlementConfig';
 import { ANNOUNCEMENT_LINK_ERROR, resolveAnnouncementLink } from '../shared/announcementLink';
@@ -13,7 +14,7 @@ import {
   calculateTokenCacheHitRate,
   estimateCacheSavings,
 } from '../services/performanceCostReport';
-import { buildFinanceUsdOverview } from '../services/financeReport';
+import { buildFinanceUsdOverview, buildFinanceTransactionStats } from '../services/financeReport';
 import { picoToUsd, usdToPico } from '../services/reportUsd';
 import { BILLING_CONSTANTS } from '../types/billing';
 import { describeBillingUnitSettings } from '../services/billingUnit';
@@ -49,7 +50,7 @@ const adminScalarSettingValueSchema = z.union([
 ]);
 const adminFinanceCreditTransactionRowSchema = z.object({
   amount: z.number().finite(),
-  type: z.enum(['deduction', 'addition', 'purchase', 'refund', 'consumption', 'adjustment']),
+  type: z.string().trim().min(1),
   created_at: adminDateStringSchema,
   description: z.string().nullable().optional(),
 }).passthrough();
@@ -58,7 +59,7 @@ const adminFinanceCreditPackageRowSchema = z.object({
   name: z.string().min(1),
   price: z.number().finite(),
   credits_amount: z.number().finite(),
-  active: z.enum(['true', 'false']),
+  active: z.string().trim().min(1),
 }).passthrough();
 const adminFinanceProfileRowSchema = z.object({
   credits: z.number().finite(),
@@ -69,13 +70,9 @@ const adminFinanceModelRowSchema = z.object({
   name: z.string().min(1),
   model_id: z.string().min(1),
   provider: z.string().min(1),
-  is_active: z.union([z.enum(['true', 'false']), z.boolean()]),
-  input_token_cost: z.number().finite(),
-  output_token_cost: z.number().finite(),
-  input_token_cost_above_200k: z.number().finite(),
-  output_token_cost_above_200k: z.number().finite(),
-  web_search_cost: z.number().finite(),
+  is_active: z.union([z.string().trim().min(1), z.boolean()]),
   max_tokens: z.number().finite(),
+  config: z.unknown().optional(),
 }).passthrough();
 const adminFinanceConversationRowSchema = z.object({
   id: z.string().min(1),
@@ -2152,7 +2149,7 @@ export const adminRouter = router({
 
       const { data: models, error: modelsError } = await readAllReportRows((from, to) => ctx.supabase
         .from('ai_models')
-        .select('*')
+        .select('id,name,model_id,provider,is_active,max_tokens,config')
         .order('name', { ascending: true }).order('id').range(from, to));
 
       if (modelsError) {
@@ -2268,64 +2265,7 @@ export const adminRouter = router({
       const now = new Date();
       const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-      const transactionStats = {
-        totalAdditions: 0,
-        totalDeductions: 0,
-        totalPurchases: 0,
-        totalRefunds: 0,
-        todayTransactions: 0,
-        weekTransactions: 0,
-        monthTransactions: 0,
-      };
-
-      // Daily breakdown for chart (last 30 days)
-      const dailyStats: Record<string, { additions: number; deductions: number; purchases: number }> = {};
-      for (let i = 0; i < 30; i++) {
-        const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-        const dateKey = date.toISOString().split('T')[0];
-        dailyStats[dateKey] = { additions: 0, deductions: 0, purchases: 0 };
-      }
-
-      creditTransactions.forEach(t => {
-        const transDate = new Date(t.created_at);
-        const dateKey = transDate.toISOString().split('T')[0];
-
-        if (t.type === 'addition') {
-          transactionStats.totalAdditions += t.amount;
-          if (dailyStats[dateKey]) dailyStats[dateKey].additions += t.amount;
-        } else if (t.type === 'purchase') {
-          transactionStats.totalPurchases += t.amount;
-          if (dailyStats[dateKey]) dailyStats[dateKey].purchases += t.amount;
-        }
-
-        if (transDate >= todayStart) transactionStats.todayTransactions++;
-        if (transDate >= sevenDaysAgo) transactionStats.weekTransactions++;
-        if (transDate >= thirtyDaysAgo) transactionStats.monthTransactions++;
-      });
-
-      tokenStats.forEach((stat) => {
-        const createdAt = new Date(stat.created_at);
-        const dateKey = createdAt.toISOString().split('T')[0];
-        const credits = stat.total_credits;
-
-        transactionStats.totalDeductions += credits;
-        if (dailyStats[dateKey]) {
-          dailyStats[dateKey].deductions += credits;
-        }
-      });
-
-      billingHistory.forEach((entry) => {
-        const createdAt = new Date(entry.created_at);
-        if (createdAt >= todayStart) transactionStats.todayTransactions++;
-        if (createdAt >= sevenDaysAgo) transactionStats.weekTransactions++;
-        if (createdAt >= thirtyDaysAgo) transactionStats.monthTransactions++;
-
-        if (entry.operation_type === 'refund') {
-          transactionStats.totalRefunds += Math.abs(entry.amount);
-        }
-      });
+      const { transactionStats, dailyStats } = buildFinanceTransactionStats(creditTransactions, tokenStats, billingHistory, now);
 
       // User statistics
       const userStats = {
@@ -2350,6 +2290,7 @@ export const adminRouter = router({
       const packageStats = {
         totalPackages: packages.length,
         activePackages: packages.filter(p => p.active === 'true').length,
+        unknownActiveCount: packages.filter(p => p.active !== 'true' && p.active !== 'false').length,
         packages: packages.map(p => ({
           id: p.id,
           name: p.name,
@@ -2400,11 +2341,7 @@ export const adminRouter = router({
         modelId: model.model_id,
         provider: model.provider,
         isActive: model.is_active,
-        inputTokenCost: model.input_token_cost,
-        outputTokenCost: model.output_token_cost,
-        inputTokenCostAbove200k: model.input_token_cost_above_200k,
-        outputTokenCostAbove200k: model.output_token_cost_above_200k,
-        webSearchCost: model.web_search_cost,
+        pricing: modelPriceView(model),
         maxTokens: model.max_tokens,
         conversationCount: modelUsageByConversation[model.id] || 0,
         requestCount: modelUsageByToken[model.model_id]?.requests || 0,
@@ -2416,8 +2353,9 @@ export const adminRouter = router({
         ...buildFinanceUsdOverview(paymentOrders, tokenStats),
         creditsConsumed: transactionStats.totalDeductions,
         creditsPurchased: transactionStats.totalPurchases,
-        creditsGiven: transactionStats.totalAdditions,
-        netCreditsFlow: transactionStats.totalAdditions + transactionStats.totalPurchases - transactionStats.totalDeductions,
+        creditsGiven: transactionStats.totalAdditions + transactionStats.totalCheckins,
+        netCreditsFlow: transactionStats.totalAdditions + transactionStats.totalCheckins
+          + transactionStats.totalPurchases - transactionStats.totalDeductions,
       };
 
       // Runtime billing reference derived from active model pricing
@@ -2434,37 +2372,21 @@ export const adminRouter = router({
       // Whether q / the default m is a stored row, a fallback for a missing row, or an invalid stored value.
       const billingUnitSource = describeBillingUnitSettings(settingsMap);
 
-      const inputCreditsPer1KValues = activeMeteredModels
-        .filter((model) => (model.input_token_cost ?? 0) > 0)
-        .map((model) => convertUsdPer1MToCreditsPer1K(
-          (model.input_token_cost ?? 0) / 1_000_000,
-          creditsPerUsd,
-          tokenPriceMultiplier,
-        ));
-
-      const outputCreditsPer1KValues = activeMeteredModels
-        .filter((model) => (model.output_token_cost ?? 0) > 0)
-        .map((model) => convertUsdPer1MToCreditsPer1K(
-          (model.output_token_cost ?? 0) / 1_000_000,
-          creditsPerUsd,
-          tokenPriceMultiplier,
-        ));
-
-      const searchCreditsPer1KValues = activeMeteredModels
-        .filter((model) => (model.web_search_cost ?? 0) > 0)
-        .map((model) =>
-          convertUsdPer1KSearchToCreditsPer1KSearch(
-            (model.web_search_cost ?? 0) / 1_000_000,
-            creditsPerUsd,
-            tokenPriceMultiplier,
-          ),
-        );
+      const currentPrices = activeMeteredModels.map(modelPriceView);
+      const inputCreditsPer1KValues = currentPrices.flatMap(({ frozen }) => frozen
+        ? [convertUsdPer1MToCreditsPer1K(Number(frozen.promptUsdPerMillion), creditsPerUsd, tokenPriceMultiplier)] : []);
+      const outputCreditsPer1KValues = currentPrices.flatMap(({ frozen }) => frozen
+        ? [convertUsdPer1MToCreditsPer1K(Number(frozen.completionUsdPerMillion), creditsPerUsd, tokenPriceMultiplier)] : []);
+      const searchCreditsPer1KValues = currentPrices.flatMap(({ base }) => base?.web_search !== undefined
+        ? [convertUsdPer1KSearchToCreditsPer1KSearch(Number(base.web_search) * 1000, creditsPerUsd, tokenPriceMultiplier)] : []);
 
       const runtimeBilling = {
         creditsPerUsd,
         tokenPriceMultiplier,
         billingUnitSource,
         activeModelCount: activeMeteredModels.length,
+        unknownModelActiveCount: models.filter(model =>
+          ![true, false, 'true', 'false'].includes(model.is_active)).length,
         inputCreditsPer1KRange: formatRange(inputCreditsPer1KValues),
         outputCreditsPer1KRange: formatRange(outputCreditsPer1KValues),
         searchCreditsPer1KRange: formatRange(searchCreditsPer1KValues),
@@ -2607,7 +2529,7 @@ export const adminRouter = router({
           .eq('is_deleted', false),
         ctx.supabase
           .from('ai_models')
-          .select('id, name, model_id, provider, input_token_cost, output_token_cost, web_search_cost, is_active'),
+          .select('id, name, model_id, provider, config, is_active'),
         readAllReportRows((from, to) => ctx.supabase
           .from('token_stats')
           .select('model_used, total_credits, total_cost_usd, input_tokens, output_tokens, cached_tokens, cache_creation_tokens, created_at')
@@ -2771,9 +2693,7 @@ export const adminRouter = router({
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
           cachedTokens: usage.cachedTokens,
-          inputTokenCost: model.input_token_cost ?? 0,
-          outputTokenCost: model.output_token_cost ?? 0,
-          webSearchCost: model.web_search_cost ?? 0,
+          pricing: modelPriceView(model),
         };
       });
 

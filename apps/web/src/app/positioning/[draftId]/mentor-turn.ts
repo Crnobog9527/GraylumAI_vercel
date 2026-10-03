@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { AgentTurnEvent, AgentTurnOutcome, QuestionAnswerSource } from "@repo/api/src/shared/agentTurn";
 import { OPENING_INPUT, openingRequestId } from "@repo/api/src/shared/opcQuestions";
+import { gateResultNotice } from "@/lib/runtime-gate-notice";
 
 /** One mentor turn as sent to `opc.mentorTurnStream` (same input as `opc.prepareStep`). */
 export type MentorRequest = {
@@ -104,8 +105,9 @@ export function isTerminalTurn(result: AgentTurnOutcome) {
 /**
  * What happens to the retained envelope after a resumed or resent turn
  * returns. A terminal outcome releases it. A still-running execution keeps it,
- * with its execution id, so the next explicit "继续核对这条原请求" resumes that
- * execution; the page never polls or retries by itself.
+ * with its execution id, so the next recovery ("重试") resumes that execution.
+ * The page only runs that same recovery by itself once history shows the
+ * execution is terminal (see step-recovery.ts); it never resends a request.
  */
 export function envelopeAfterTurn(
   raw: string | null,
@@ -189,7 +191,7 @@ export function turnResultNotice(result: AgentTurnOutcome): string | null {
   if (result.unavailable === "provider_history")
     return "历史消息格式暂不兼容，本次执行已停止。原记录已保留；请联系支持检查历史兼容性，不要重复发送这条请求。";
   if (result.unavailable === "preflight") return "本次执行在模型派发前检查失败，已停止并保留原记录。请核对服务状态后再继续，不会自动重放。";
-  return null;
+  return gateResultNotice(result.unavailable);
 }
 
 export type MentorTurn = { executionId: string; roundId?: string | null; stepId: string; questionId: string | null; kind: string };

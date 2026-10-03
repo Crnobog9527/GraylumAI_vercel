@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { beforeAll, afterAll, it, expect } from 'vitest';
+import { beforeAll, afterAll, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -444,7 +444,7 @@ it.each(['ascii', 'utf8'])('RUNTIME: full fields and protected markers fit 32768
   expect(JSON.stringify(frozen.payload.scopeMaterial.content)).not.toContain('suggestion');
   expect(JSON.stringify(frozen.payload.scopeMaterial.content)).not.toContain('"fp"');
   const adapter = { dispatch: async () => { throw new Error('no model dispatch'); }, lookup: async () => { throw new Error('no provider lookup'); } };
-  expect(await runtimeExecutor({ database: admin, actor: async () => f.actor, adapter }).execute(oldId!))
+  expect(await runtimeExecutor({ callGate: async () => { throw new Error('replay must not call the gate'); }, database: admin, actor: async () => f.actor, adapter }).execute(oldId!))
     .toMatchObject({ state: 'completed', body: 'Synthetic mentor' });
   expect(await f.service.prepareStep({ draftId: f.draft.draftId, requestId: old.request_id,
     stepId: 'step-0', purpose: 'mentor', questionId: 'goal', input: 'Synthetic capture input' }))
@@ -809,3 +809,8 @@ it('RUNTIME: completion capture has a bounded wait and later retry remains idemp
     expect((await f.records()).rows).toHaveLength(1);
   } finally { await locker.query('rollback'); await locker.end(); }
 });
+
+vi.mock('../runtime/newWorkGate', async importOriginal => ({
+  ...await importOriginal<typeof import('../runtime/newWorkGate')>(),
+  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
+}));

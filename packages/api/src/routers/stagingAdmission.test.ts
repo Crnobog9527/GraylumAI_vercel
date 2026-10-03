@@ -197,3 +197,7 @@ it('capture resolve requires the same open test window as information and read e
   mocks.captureResolve.mockResolvedValueOnce({ version: 1, result: 'accept' });
   await expect(app.createCaller(context()).opc.captureResolve(input)).resolves.toEqual({ version: 1, result: 'accept' });
 });
+vi.mock('../services/runtime/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../services/runtime/newWorkGate')>(),
+ ...(await import('../services/__tests__/fixtures/runtimeGates')).testAdmissionGates,
+}));

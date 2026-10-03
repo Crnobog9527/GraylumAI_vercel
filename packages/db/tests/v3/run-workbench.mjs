@@ -381,6 +381,13 @@ try {
     apply('packages/db/migrations/0157_bill_unit.sql');
     apply('packages/db/migrations/0157_bill_unit.sql');
   }
+  // OPC's legacy fixture also needs capture and its batch-permission prerequisite.
+  if (opcSchema && !upgradeMode && !schemaFromFiles) {
+    for (const migration of ['0158_runtime_view_perf.sql', '0159_opc_capture.sql']) {
+      apply('packages/db/migrations/' + migration);
+      apply('packages/db/migrations/' + migration);
+    }
+  }
   console.log("SQL additive migration and repeat application PASS; runtime schema="+runtimeSchema+"; deferred upgrade="+upgradeMode);
   docker(
     "run",
