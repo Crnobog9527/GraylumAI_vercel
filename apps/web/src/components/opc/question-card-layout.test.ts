@@ -26,3 +26,11 @@ it("keeps the fold button at least 32px to tap and inside the card", () => {
   expect(Number(dismiss.match(/(?:^|;)\s*height:(\d+)px/)?.[1])).toBeGreaterThanOrEqual(32);
   expect(dismiss).toMatch(/top:0;right:0/);
 });
+
+it("keeps the title and the question line clear of the fold button", () => {
+  const size = Number(rules.find(rule => rule.selector.endsWith(".dismiss"))!.body.match(/(?:^|;)\s*width:(\d+)px/)?.[1]);
+  for (const part of [".docked .head", ".docked .question"]) {
+    const rule = rules.find(candidate => candidate.selector.split(",").map(selector => selector.trim()).includes(part));
+    expect(Number(rule?.body.match(/padding-right:(\d+)px/)?.[1]), part).toBeGreaterThanOrEqual(size);
+  }
+});

@@ -21,7 +21,8 @@
 .reason{margin:-4px 0 4px;padding:0 8px;color:#8a8a8a;font-size:12px;line-height:18px;white-space:pre-wrap;overflow-wrap:anywhere}
 /* Docked inside the composer, above the text box: the composer draws the border. */
 .docked{position:relative;margin:0;padding:0 0 10px;border:0;border-bottom:1px solid #ececec;border-radius:0;background:none}
-.docked .head{padding-right:36px}
+/* The 32px fold button reaches below the 18px title into the question line: keep both clear of it. */
+.docked .head,.docked .question{padding-right:36px}
 /* At least 32px to tap; inside the box so the scrolling dock never overflows. */
 .dismiss{position:absolute;top:0;right:0;display:grid;place-items:center;width:32px;height:32px;border:0;border-radius:50%;
   background:none;color:#8a8a8a;cursor:pointer}
