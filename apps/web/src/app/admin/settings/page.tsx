@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { trpc } from '@/trpc/client';
 import {
   Save, RefreshCw, Settings, CreditCard, Gift, Users, Sliders, Crown,
-  Download, AlertTriangle, MessageSquare
+  AlertTriangle, MessageSquare
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -19,7 +19,10 @@ import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import AdminSettingsLoadError from '@/components/admin/AdminErrorState';
 import { RuntimeRateLimitSettings, RuntimeRateLimitTabTrigger } from '@/components/admin/RuntimeRateLimitSettings';
 import { MentorBudgetTabContent, MentorBudgetTabTrigger } from '@/components/admin/MentorBudgetSettings';
-import { changedSettings } from './changedSettings';
+import { changedSettings, mergeReadSettings } from './changedSettings';
+import { MembershipPlanPermissions } from '@/components/admin/MembershipPlanPermissions';
+import { FUSION_COMPARE_SETTING_KEY, FusionCompareSetting } from '@/components/admin/FusionCompareSetting';
+import type { MembershipPlanRow } from '@/components/admin/membershipEntitlementDraft';
 
 // 完整的系统设置定义
 const defaultSettings: Record<string, { value: string; type: 'string' | 'number' | 'boolean'; label: string; description: string }> = {
@@ -105,21 +108,12 @@ interface SettingData {
   id?: string;
 }
 
-interface MembershipPlan {
-  id: string;
-  name: string;
-  level: 'free' | 'pro' | 'gold';
-  allow_export: string;
-  allow_batch_export: string;
-}
-
 export { AdminSettingsLoadError };
 
 export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<Record<string, SettingData>>({});
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState('general');
-  const [membershipSettings, setMembershipSettings] = useState<Record<string, { allowExport: boolean; allowBatchExport: boolean }>>({});
 
   const {
     data: dashboard,
@@ -134,55 +128,15 @@ export default function AdminSettingsPage() {
 
   const updateSettingsBulk = trpc.settings.updateSystemSettingsBulk.useMutation();
 
-  const updateMembershipPlan = trpc.admin.updateMembershipPlan.useMutation({
-    onSuccess: () => {
-      refetchDashboard();
-      toast.success('会员权限更新成功');
-    },
-    onError: () => {
-      toast.error('更新失败');
-    },
-  });
+  // Entitlement editors show only values read back from the server after a save.
+  const reloadDashboard = async () => !(await refetchDashboard()).error;
 
-  // Initialize membership settings from plans
+  // 合并默认设置和已保存的设置；重新读取时保留管理员还没保存的修改
+  const previousSaved = useRef<Record<string, unknown> | undefined>(undefined);
   useEffect(() => {
-    if (membershipPlans) {
-      const newSettings: Record<string, { allowExport: boolean; allowBatchExport: boolean }> = {};
-      (membershipPlans as MembershipPlan[]).forEach((plan: MembershipPlan) => {
-        newSettings[plan.id] = {
-          allowExport: plan.allow_export === 'true',
-          allowBatchExport: plan.allow_batch_export === 'true',
-        };
-      });
-      setMembershipSettings(newSettings);
-    }
-  }, [membershipPlans]);
-
-  const handleSaveMembershipSetting = async (planId: string) => {
-    const setting = membershipSettings[planId];
-    if (!setting) return;
-
-    await updateMembershipPlan.mutateAsync({
-      id: planId,
-      allowExport: setting.allowExport ? 'true' : 'false',
-      allowBatchExport: setting.allowBatchExport ? 'true' : 'false',
-    });
-  };
-
-  // 合并默认设置和已保存的设置
-  useEffect(() => {
-    const mergedSettings = { ...defaultSettings };
-    if (savedSettings) {
-      Object.entries(savedSettings).forEach(([key, value]) => {
-        if (mergedSettings[key]) {
-          mergedSettings[key] = {
-            ...mergedSettings[key],
-            value: String(value),
-          };
-        }
-      });
-    }
-    setSettings(mergedSettings);
+    const previous = previousSaved.current;
+    previousSaved.current = savedSettings;
+    setSettings(current => mergeReadSettings(defaultSettings, savedSettings, current, previous));
   }, [savedSettings]);
 
   const handleSaveAll = async () => {
@@ -297,7 +251,8 @@ export default function AdminSettingsPage() {
     );
   }
 
-  if (dashboardError) {
+  // Only a failed first load replaces the page; a failed re-read keeps the editors (and their state).
+  if (dashboardError && !dashboard) {
     return (
       <AdminSettingsLoadError
         error={dashboardError}
@@ -329,6 +284,13 @@ export default function AdminSettingsPage() {
         </Button>
       </div>
 
+      {dashboardError ? (
+        <div role="alert" data-testid="admin-settings-reread-failed" className="flex flex-wrap items-center gap-2 rounded-lg p-3 text-sm"
+          style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)', color: 'var(--error)' }}>
+          最新设置读取失败，页面上可能不是最新的值。
+          <Button size="sm" variant="outline" onClick={() => { void refetchDashboard(); }}>重新读取</Button>
+        </div>
+      ) : null}
       {/* Settings Tabs */}
       <Tabs value={tab} onValueChange={setTab} className="space-y-6">
         <TabsList
@@ -515,127 +477,8 @@ export default function AdminSettingsPage() {
         {/* Membership Tab */}
         <TabsContent value="membership">
           <div className="space-y-6">
-            {/* Membership Plans Permissions */}
-            <Card data-testid="admin-settings-membership-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                  <Crown className="h-5 w-5 text-amber-500" />
-                  会员等级权限配置
-                </CardTitle>
-                <CardDescription style={{ color: 'var(--text-tertiary)' }}>
-                  配置不同会员等级的导出权限
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div
-                  className="mb-4 rounded-lg border p-4"
-                  style={{ background: 'var(--bg-tertiary)', borderColor: 'var(--border-primary)' }}
-                >
-                  <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                    套餐价格、积分发放和 Stripe Price ID 在
-                    <a href="/admin/packages" className="ml-1 underline hover:no-underline" style={{ color: 'var(--color-primary)' }}>
-                      套餐管理
-                    </a>
-                    维护；这里仅负责会员导出权限和批量导出策略。运营调整价格或上下架时，请返回套餐管理页面，不要在本页寻找计费入口。
-                  </p>
-                </div>
-                {!membershipPlans || (membershipPlans as MembershipPlan[]).length === 0 ? (
-                  <div
-                    className="p-6 rounded-lg text-center"
-                    style={{ background: 'var(--bg-tertiary)', border: '1px dashed var(--border-primary)' }}
-                  >
-                    <Crown className="h-12 w-12 mx-auto mb-4 text-amber-500 opacity-50" />
-                    <p style={{ color: 'var(--text-secondary)' }}>
-                      暂无会员套餐，请先在「积分包管理」中创建会员套餐
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-6">
-                    {(membershipPlans as MembershipPlan[]).map((plan: MembershipPlan) => {
-                      const setting = membershipSettings[plan.id] || { allowExport: false, allowBatchExport: false };
-                      const levelColors: Record<string, string> = {
-                        free: 'bg-gray-500/20 text-gray-400',
-                        pro: 'bg-blue-500/20 text-blue-400',
-                        gold: 'bg-amber-500/20 text-amber-400',
-                      };
-                      return (
-                        <div
-                          key={plan.id}
-                          data-testid={`membership-plan-${plan.level}`}
-                          className="p-4 rounded-lg"
-                          style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-primary)' }}
-                        >
-                          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                            <div className="flex items-center gap-3">
-                              <Badge className={levelColors[plan.level] || 'bg-gray-500/20 text-gray-400'}>
-                                {plan.level.toUpperCase()}
-                              </Badge>
-                              <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                                {plan.name}
-                              </span>
-                            </div>
-                            <Button
-                              data-testid={`membership-plan-save-${plan.level}`}
-                              size="sm"
-                              onClick={() => handleSaveMembershipSetting(plan.id)}
-                              disabled={updateMembershipPlan.isPending}
-                              className="w-full bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90 md:w-auto"
-                            >
-                              <Save className="h-3 w-3 mr-1" />
-                              保存
-                            </Button>
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                              <Label className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                                <Download className="h-4 w-4 inline mr-1" />
-                                允许导出对话
-                              </Label>
-                              <div className="flex items-center gap-2 mt-2">
-                                <Switch
-                                  data-testid={`membership-plan-allow-export-${plan.level}`}
-                                  checked={setting.allowExport}
-                                  onCheckedChange={(checked) => {
-                                    setMembershipSettings(prev => ({
-                                      ...prev,
-                                      [plan.id]: { ...prev[plan.id], allowExport: checked }
-                                    }));
-                                  }}
-                                />
-                                <span className="text-sm" style={{ color: setting.allowExport ? 'var(--success)' : 'var(--text-disabled)' }}>
-                                  {setting.allowExport ? '已启用' : '已禁用'}
-                                </span>
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                                <Download className="h-4 w-4 inline mr-1" />
-                                允许批量导出
-                              </Label>
-                              <div className="flex items-center gap-2 mt-2">
-                                <Switch
-                                  data-testid={`membership-plan-allow-batch-export-${plan.level}`}
-                                  checked={setting.allowBatchExport}
-                                  onCheckedChange={(checked) => {
-                                    setMembershipSettings(prev => ({
-                                      ...prev,
-                                      [plan.id]: { ...prev[plan.id], allowBatchExport: checked }
-                                    }));
-                                  }}
-                                />
-                                <span className="text-sm" style={{ color: setting.allowBatchExport ? 'var(--success)' : 'var(--text-disabled)' }}>
-                                  {setting.allowBatchExport ? '已启用' : '已禁用'}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            <MembershipPlanPermissions plans={(membershipPlans ?? []) as MembershipPlanRow[]} onSaved={reloadDashboard} />
+            <FusionCompareSetting saved={savedSettings?.[FUSION_COMPARE_SETTING_KEY]} onSaved={reloadDashboard} />
           </div>
         </TabsContent>
         <MentorBudgetTabContent onOpenFeatures={() => setTab('features')} />

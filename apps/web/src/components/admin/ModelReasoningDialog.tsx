@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { Brain, Loader2, RefreshCw } from 'lucide-react';
 import { trpc } from '@/trpc/client';
-import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -20,15 +19,14 @@ import {
   type ReasoningPurpose,
 } from '@repo/api/src/shared/modelReasoning';
 
-import type { PriceChange } from '@repo/api/src/shared/modelPricing';
 import { catalogEfforts, fromDraft, normalizeDrafts, toDraft, type Draft, type Wire } from './modelReasoningDraft';
 import { ModelPriceSnapshotPanel } from './ModelPriceSnapshotPanel';
 import { ModelCapacityPanel } from './ModelCapacityPanel';
 import { ModelFrozenPriceSummary } from './ModelFrozenPriceSummary';
-import type { ModelCapacityView } from './modelReportPricing';
 import { showMultiplierPanel } from './multiplierPanelLink';
 import { ModelReadinessNote } from './ModelReadinessNote';
 import { useModelPriceUnits } from './useModelPriceUnits';
+import { reasoningErrorMessage, useModelCatalogRefresh } from './useModelCatalogRefresh';
 
 const PURPOSE_NOTES: Record<ReasoningPurpose, string> = {
   interactive: '导师和日常对话。必须设置，没设置的模型不能用作 Skill 模型。',
@@ -44,10 +42,6 @@ const MODE_LABELS: Record<Draft['mode'], string> = {
   budget: '思考预算（token）',
 };
 
-/** These procedures use BAD_REQUEST for their administrator-readable validation messages. */
-function reasoningErrorMessage(error: { message: string; data?: { code?: string } | null }, fallback: string): string {
-  return error.data?.code === 'BAD_REQUEST' ? error.message : getSafeErrorMessage(error, fallback);
-}
 type TryOutcome = {
   ok: boolean; httpStatus: number | null; firstTextMs: number | null; totalMs: number; hasText: boolean; truncated: boolean;
   reasoningTokens: number | null; costUsd: number | null; maxTokens: number; error: string | null; providerMessage: string | null;
@@ -107,19 +101,9 @@ export function ModelReasoningButton({ modelId, name }: { modelId: string; name:
 function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; name: string; onClose: () => void }) {
   const utils = trpc.useUtils();
   const view = trpc.modelReasoning.get.useQuery({ modelId });
-  const [priceChanges, setPriceChanges] = useState<PriceChange[] | null>(null);
-  const [previousCapacity, setPreviousCapacity] = useState<ModelCapacityView | null>(null);
   const units = useModelPriceUnits(modelId);
-  const refresh = trpc.modelReasoning.refreshCatalog.useMutation({
-    onSuccess: ({ priceChanges: changes, previousCapacity: previous, ...data }) => {
-      utils.modelReasoning.get.setData({ modelId }, data);
-      setPriceChanges(changes);
-      setPreviousCapacity(previous);
-      // The read bumps updated_at and may sync capacity; reload both so later saves on the page do not conflict.
-      void utils.modelPricing.getMultipliers.invalidate();
-      void utils.model.getAdminModelsDashboard.invalidate();
-    },
-  });
+  const refresh = useModelCatalogRefresh(modelId);
+  const { priceChanges, previousCapacity } = refresh;
   const save = trpc.modelReasoning.save.useMutation({
     onSuccess: data => {
       utils.modelReasoning.get.setData({ modelId }, data);
@@ -192,7 +176,7 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
             <section className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <Label>OpenRouter 目录</Label>
-                <Button variant="outline" size="sm" onClick={() => refresh.mutate({ modelId })} disabled={refresh.isPending}>
+                <Button variant="outline" size="sm" onClick={refresh.read} disabled={refresh.isPending}>
                   {refresh.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1 h-4 w-4" />}
                   {catalog ? '重新读取' : '读取目录'}
                 </Button>
@@ -208,7 +192,7 @@ function ModelReasoningDialog({ modelId, name, onClose }: { modelId: string; nam
               ) : (
                 <p className="text-[var(--text-secondary)]">还没有读取目录。</p>
               )}
-              {refresh.error ? <p role="alert" className="text-rose-400">{reasoningErrorMessage(refresh.error, '暂时无法读取模型目录，请稍后重试')}</p> : null}
+              {refresh.errorText ? <p role="alert" className="text-rose-400">{refresh.errorText}</p> : null}
             </section>
 
             <section className="space-y-2">
