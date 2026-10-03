@@ -6,7 +6,7 @@ import {
   type AgentTurnEvent,
   type QuestionCard,
 } from "@repo/api/src/shared/agentTurn";
-import { OUTPUT_TRUNCATED_NOTICE } from "@/lib/runtime-gate-notice";
+import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
 
 /** Shown instead of a body above the contract's parse limit. */
 export const OVERSIZED_REPLY_NOTICE = "本次回复内容过长，页面暂时无法展示。原记录已保留，你可以继续对话。";
@@ -61,6 +61,7 @@ export type MentorReplySource = {
   liveCard?: QuestionCard | null;
   state: string;
   unavailableReason?: string | null;
+  historyOmitted?: boolean;
   /** This execution owns the server execution slot. */
   active: boolean;
   busy: boolean;
@@ -85,18 +86,23 @@ function unavailableNotice(source: MentorReplySource): ReplyNotice {
  * output truncation is always that one notice, shown once under the turn.
  */
 export function mentorReplyDisplay(source: MentorReplySource): { text: string; card: QuestionCard | null; notice?: ReplyNotice } {
+  if (source.unavailableReason === "provider_history")
+    return { text: "", card: null, notice: { tone: "warning", text: PROVIDER_HISTORY_NOTICE } };
+  const historyNotice: ReplyNotice | undefined = source.historyOmitted
+    ? { tone: "status", text: HISTORY_OMITTED_NOTICE } : undefined;
   const body = readAgentTurnBody(source.body);
   const card = body.card ?? source.liveCard ?? null;
-  if (source.liveText) return { text: source.liveText, card };
+  if (source.liveText) return { text: source.liveText, card, ...(historyNotice ? { notice: historyNotice } : {}) };
   const truncated: ReplyNotice | undefined =
-    source.unavailableReason === "output_truncated" ? { tone: "warning", text: OUTPUT_TRUNCATED_NOTICE } : undefined;
+    source.unavailableReason === "output_truncated"
+      ? { tone: "warning", text: [OUTPUT_TRUNCATED_NOTICE, historyNotice?.text].filter(Boolean).join("\n") } : undefined;
   const withNotice = (text: string, notice: ReplyNotice | undefined) => (notice ? { text, card, notice } : { text, card });
   // A valid envelope always has text, a card or both; a card alone needs no text.
-  if (body.kind === "envelope") return withNotice(body.message, truncated);
+  if (body.kind === "envelope") return withNotice(body.message, truncated ?? historyNotice);
   let stored = source.legacyMessage;
   if (body.kind === "invalid") stored = INVALID_REPLY_NOTICE;
   else if (body.kind === "oversized") stored = OVERSIZED_REPLY_NOTICE;
-  return withNotice(stored, truncated ?? (stored || card ? undefined : unavailableNotice(source)));
+  return withNotice(stored, truncated ?? historyNotice ?? (stored || card ? undefined : unavailableNotice(source)));
 }
 
 /** Where a turn was asked: a revision opens a new round that reuses step and question ids. */

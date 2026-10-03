@@ -15,3 +15,12 @@ it('freezes the exact selected Session revisions instead of a suffix with the sa
  expect(calls.at(-1)?.args.p_items).toEqual([11,13]);
  await expect(session.freezeHistoryItems([structuredClone(loaded[0])])).rejects.toThrow('RUNTIME_HISTORY_SELECTION');
 });
+
+it('sends the older-history warning atomically with the exact frozen revisions',async()=>{
+ const item={role:'user',content:'Latest synthetic turn'},calls:Record<string,unknown>[]=[];
+ const session=new PostgresSession({rpc:async(_name,args)=>{
+  calls.push(args);return {data:args.p_action==='read'?[{revision:7,item}]:args.p_items,error:null};
+ }},{actorId:randomUUID(),sessionId:randomUUID(),executionId:randomUUID()});
+ const items=await session.getItems();await session.freezeHistoryItems(items,true);
+ expect(calls.at(-1)).toMatchObject({p_action:'freeze',p_items:{revisions:[7],historyOmitted:true}});
+});

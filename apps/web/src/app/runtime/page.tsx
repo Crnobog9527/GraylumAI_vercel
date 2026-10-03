@@ -244,7 +244,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   setUserStops(ids=>ids.includes(executionId)?ids:[...ids,executionId]);
   try{await cancel.mutateAsync({executionId});await view.refetch();}catch{setError('取消状态待核实，请读取原任务。');}}
  async function recover(executionId:string){setError('');try{const executed=await execute.mutateAsync({executionId});if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(executionId);setError('原请求的必要材料超过模型输入容量，无法继续发送。已有内容已保留；请点“停止”后缩短材料再发送。');}await view.refetch();}catch{setError('暂时无法恢复，请保留原任务。');}}
- const executions=view.data?.executions as Array<{executionId:string;createdAt?:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;contentAvailable:boolean}>|undefined;
+ const executions=view.data?.executions as Array<{executionId:string;createdAt?:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;historyOmitted?:boolean;contentAvailable:boolean}>|undefined;
  const capacitySignature=executions?.map(e=>e.executionId+':'+e.state).join('|');
  useEffect(()=>{setGateStops(gateStopNotices(browserSession(),sessionId,executions??[]));setUserStops(userStopIds(browserSession(),sessionId,executions??[]));
  // eslint-disable-next-line react-hooks/exhaustive-deps

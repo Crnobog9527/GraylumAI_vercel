@@ -19,7 +19,8 @@ export class PostgresSession implements Session {
   constructor(private readonly database: SessionRpc, binding: { actorId: string; sessionId: string; executionId: string }) {
     this.binding = Object.freeze(z.object({ actorId: uuid, sessionId: uuid, executionId: uuid }).strict().parse(binding));
   }
-  private async request(action: 'read' | 'append' | 'freeze', items?: AgentInputItem[] | number[], limit?: number): Promise<unknown> {
+  private async request(action: 'read' | 'append' | 'freeze',
+    items?: AgentInputItem[] | number[] | {revisions:number[];historyOmitted:true}, limit?: number): Promise<unknown> {
     const response = await this.database.rpc('runtime_session_items', {
       p_actor_id: this.binding.actorId, p_session_id: this.binding.sessionId,
       p_execution_id: this.binding.executionId, p_action: action,
@@ -48,14 +49,14 @@ export class PostgresSession implements Session {
     if(!Number.isSafeInteger(count)||count<0||count>this.historyRevisions.length)throw new Error('RUNTIME_HISTORY_SELECTION');
     await this.request('freeze',count?this.historyRevisions.slice(-count):[]);
   }
-  async freezeHistoryItems(items:unknown[]):Promise<void>{
+  async freezeHistoryItems(items:unknown[],historyOmitted=false):Promise<void>{
     const selected=items.map(item=>{
       const index=this.historyItems.findIndex(candidate=>candidate===item);
       if(index<0)return null;
       return this.historyRevisions[index];
     });
     if(selected.some(revision=>revision===null)||new Set(selected).size!==selected.length)throw new Error('RUNTIME_HISTORY_SELECTION');
-    await this.request('freeze',selected as number[]);
+    await this.request('freeze',historyOmitted?{revisions:selected as number[],historyOmitted:true}:selected as number[]);
   }
   async addItems(items: AgentInputItem[]): Promise<void> {
     await this.request('append', items);
