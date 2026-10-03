@@ -17,6 +17,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import composerStyles from '@/components/opc/work-composer.module.css';
@@ -556,9 +557,8 @@ export default function TopicWorkspacePage() {
                     <img className={topicStyles.agentAvatar} src="/graylum-logo.png" alt="" />
                     <div className={topicStyles.assistantMessage}>
                       <span className={topicStyles.agentName}>Graylum · 增长顾问</span>
-                      <p className="whitespace-pre-wrap break-words">
-                        {e.contentAvailable ? replyProse(e.body ?? e.primaryBody) : '来源已不可用，暂不展示此内容。'}
-                      </p>
+                      <MessageMarkdown className={topicStyles.reply}
+                        text={e.contentAvailable ? replyProse(e.body ?? e.primaryBody) : '来源已不可用，暂不展示此内容。'} />
                       {e.state === 'cost_pending' && (
                         <p role="status" className="mt-2 text-sm">
                           费用待核实；恢复只核对原调用。
