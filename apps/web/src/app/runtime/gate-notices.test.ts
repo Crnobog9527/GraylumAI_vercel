@@ -1,7 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { runtimeGateMessages } from '../../../../../packages/api/src/shared/runtimeGateMessages';
-import { OUTPUT_TRUNCATED_NOTICE, runtimeAdmissionNotice, runtimeExecutionNotice, videoGateError, videoGateNotice } from './gate-notices';
+import {
+  OUTPUT_TRUNCATED_NOTICE, rememberUserStop, runtimeAdmissionNotice, runtimeExecutionNotice, userStopIds, videoGateError, videoGateNotice,
+} from './gate-notices';
 
 const prepareRefusal = (code: string, message: string) =>
   Object.assign(new Error(message), { data: { code, path: 'runtime.prepare', retryAfter: 60 } });
@@ -100,4 +102,21 @@ it('leaves every uncertain or retryable failure open', () => {
   expect(definiteRefusal(new Error('network'))).toBeNull();
   expect(definiteRefusal(Object.assign(new Error('x'), { data: { code: 'PRECONDITION_FAILED' } }))).toBeNull();
   expect(definiteRefusal('PRECONDITION_FAILED')).toBeNull();
+});
+
+describe('user stops', () => {
+  const memory = () => { const items = new Map<string, string>(); return { getItem: (k: string) => items.get(k) ?? null, setItem: (k: string, v: string) => { items.set(k, v); } }; };
+  it('remembers only the stops this browser requested, per session', () => {
+    const storage = memory();
+    rememberUserStop(storage, 's1', 'e1');
+    const executions = [{ executionId: 'e1' }, { executionId: 'e2' }];
+    expect(userStopIds(storage, 's1', executions)).toEqual(['e1']);
+    expect(userStopIds(storage, 's2', executions)).toEqual([]);
+  });
+  it('treats missing or failing storage as no user stop', () => {
+    expect(userStopIds(null, 's1', [{ executionId: 'e1' }])).toEqual([]);
+    const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
+    expect(() => rememberUserStop(broken, 's1', 'e1')).not.toThrow();
+    expect(userStopIds(broken, 's1', [{ executionId: 'e1' }])).toEqual([]);
+  });
 });
