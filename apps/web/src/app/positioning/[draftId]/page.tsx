@@ -1703,7 +1703,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const liveOnly = liveReply && !mentorExecutions.some(e => e.executionId === liveReply.executionId) ? liveReply : null;
   // The one open question card, docked to the message box. Set while the conversation renders.
   let chatShown = false, lastTurnNotice = false;
-  let dock: ReactNode = liveOnly?.card ? <QuestionCardView key="live" card={liveOnly.card} answered={false} disabled docked/> : null;
+  let dock: ReactNode = liveOnly?.card ? <QuestionCardView key="live" card={liveOnly.card} disabled docked/> : null;
   // A retained mentor envelope can exist before its execution is visible in
   // history (or after a lost reply), so recovery is driven by the envelope
   // itself rather than the execution list.
@@ -1889,7 +1889,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                           : pendingBubble && { ...pendingBubble, roundId: d.roundId } });
                       const cardLocked = !cardStatus.onShownQuestion || execution.state !== "completed" || sendLocked || snap.state !== "draft" || reviewOnly;
                       if (reply.card && !cardStatus.answered && !liveOnly && foldedCard !== execution.executionId) {
-                        dock = <QuestionCardView key={execution.executionId} card={reply.card} answered={false} disabled={cardLocked} docked
+                        dock = <QuestionCardView key={execution.executionId} card={reply.card} disabled={cardLocked} docked
                           onAnswer={(input, optionIndex) => void ask(step, activeQuestion.id, input, {executionId: execution.executionId, optionIndex})}
                           onOther={focusReply} onDismiss={() => setFoldedCard(execution.executionId)}/>;
                       }
@@ -1915,8 +1915,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                             </span>
                             <MessageMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={reply.text} streaming={Boolean(live)}/>
                           </div>}
-                          {reply.card && (cardStatus.answered ? <QuestionCardView card={reply.card} answered answer={cardStatus.answer}/>
-                            : <OpenQuestionRecord card={reply.card} hidden={foldedCard === execution.executionId} onShow={() => setFoldedCard("")}/>)}
+                          {/* Answered: gone. Open: docked. Folded: one line. */reply.card && !cardStatus.answered && foldedCard === execution.executionId
+                            && <OpenQuestionRecord card={reply.card} onShow={() => setFoldedCard("")}/>}
                           {execution.state === "completed" && target && latestSuggestion.get(target.id) === execution.executionId && proposed.length > 0 && (
                             <div className={resultStyles.suggestionCard}>
                               <p className={resultStyles.suggestionTitle}>导师建议调整 · {target.title}</p>
@@ -1935,7 +1935,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     })}
                     {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<div data-message-role="user" data-request-id={pendingBubble.requestId} className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3"><span>你 · {d.information[pendingBubble.stepId]?.schema.find((f:{id:string;title:string})=>f.id===pendingBubble.questionId)?.title}</span><p className={`whitespace-pre-wrap ${resultStyles.messageBody}`}>{pendingBubble.input}</p><ChatPendingStatus sending={running}/></div>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="导师正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>导师</span>{liveOnly.text?<MessageMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={liveOnly.text} streaming/>:<p className={`mt-1 ${resultStyles.messageBody}`}>导师正在思考…</p>}</div>}
-                  {liveOnly?.card&&<OpenQuestionRecord card={liveOnly.card}/>}
                   <ChatNoticeList notices={mentorTailNotices({ livePhase: liveReply?.phase ?? null, saving: hasUnsavedInformation,
                     error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice,
                     recovery: recoveryNeedsUser[0] && !busy
