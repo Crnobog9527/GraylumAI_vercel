@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Homepage presentation copy approved by the Owner on 2026-10-04.
-// It is marketing copy only and intentionally independent of the published mentor Skill.
+// Promotional "how we help" copy for the homepage, approved by the Owner on 2026-10-04.
+// It is a method introduction, not a workflow definition: it drives nothing and does not
+// describe the steps /positioning actually executes, which come from the published Skill
+// (docs/ENGINEERING.md section 6). Do not read it from, or feed it into, any runtime flow.
 
 export type HomeStep = {
   title: string;

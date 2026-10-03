@@ -2405,17 +2405,19 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       await capture('staging-actor-denied');
       const policy={multiplier:'1',modelId:randomUUID(),provider:'openrouter',account:'synthetic',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit:8000,outputLimit:100,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
       await sql.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '1 hour')",[windowId,[f.actor],JSON.stringify([policy])]);
-      await page.goto(process.env.V3_LOCAL_APP+'/');await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
+      // The method cards are static, so wait for the library read itself before asserting its state.
+      const libraryRead=()=>page.waitForResponse(r=>r.url().includes('opc.library'));
+      let settled=libraryRead();await page.goto(process.env.V3_LOCAL_APP+'/');await settled;await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
       await capture('staging-allowed-directory');
       await sql.query('update artifact_workflows set enabled=false where id=$1',[f.registration]);
-      await page.reload();await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
+      settled=libraryRead();await page.reload();await settled;await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
       expect(await page.locator('main').getByRole('alert').count()).toBe(0);await capture('staging-empty-directory');
       await sql.query('update runtime_test_windows set enabled=false where id=$1',[windowId]);
-      await page.reload();await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
+      settled=libraryRead();await page.reload();await settled;await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
       // Retained read access is independent of current execution enablement.
       expect(await page.getByRole('alert').filter({hasText:'账号与资料'}).count()).toBe(0);
       await sql.query("update runtime_test_windows set enabled=true,expires_at=now()-interval '1 minute' where id=$1",[windowId]);
-      await page.reload();await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
+      settled=libraryRead();await page.reload();await settled;await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
       await capture('staging-expired-window');
       expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actor])).rows[0].n).toBe(0);
       await writeFile(process.env.V3_WORKBENCH_OUTPUT+'/staging-state-styles.json',JSON.stringify(screenshots,null,2));

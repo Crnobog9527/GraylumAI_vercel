@@ -39,6 +39,7 @@ it('renders the six static steps with labelled parts and no catalog dependency',
  expect(html.match(/<dt>为什么重要<\/dt>/g)).toHaveLength(6);
  expect(html).not.toContain('个环节，理解你的内容增长路径');expect(html).not.toContain('Agent 提供分析与建议');
  expect(html).not.toContain('具体问题将在进入定位工作后呈现');expect(html).not.toContain('定位方法');
+ expect(html).toContain('aria-label="我们怎样帮你做定位"');expect(html).not.toContain('定位工作步骤');
 });
 it('does not claim a membership level or placeholder name when the profile read fails',()=>{
  state.profile={data:undefined,isError:true};

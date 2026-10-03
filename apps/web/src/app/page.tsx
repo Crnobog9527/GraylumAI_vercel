@@ -26,7 +26,8 @@ export default function HomePage(){
   <main className={styles.page}>
    <section className={styles.account}><div><strong>{name?`欢迎回来，${name}`:'欢迎回来'}</strong><span>{membershipText(profile)}</span></div><Link href="/profile?tab=subscription">账户与积分 →</Link></section>
    <section className={styles.value}><h1>让你的业务，<br/>拥有清楚的内容方向</h1><p>从找到自己的位置，到持续做出有价值的内容。<br/>Graylum 和你一起分析、判断和创作，让每一步都有依据。</p></section>
-   <section className={styles.method} aria-label="定位工作步骤">
+   {/* Owner-approved promotional method introduction; not the executed /positioning workflow. */}
+   <section className={styles.method} aria-label="我们怎样帮你做定位">
     <ol>
      {HOME_STEPS.map((step,index)=><li key={step.title}>
       <span className={styles.stepNumber}>{String(index+1).padStart(2,'0')}</span>
