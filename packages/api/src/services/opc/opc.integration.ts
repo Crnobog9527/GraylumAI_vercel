@@ -11192,6 +11192,10 @@ async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase
         expect(await executionsOf(requestId)).toBe(0);
       });
       expect(await money()).toEqual(moneyBefore);
+      // Test isolation only: this case's own traffic runs close to the local 60/min IP limit, which can 429 the
+      // recovery's runtime.execute. This case proves a refused 503 recovers only by hand, not a natural limit
+      // window, so this reset is not evidence of rate-limit recovery.
+      await resetLocalIpWindow();
       await recoverGuide.click();
       await expect.poll(() => executionsOf(requestId, 'completed'), { timeout: 420000 }).toBe(1);
       expect(sendsOf(requestId)).toBe(2);
