@@ -154,3 +154,8 @@ it('standalone organization fits at its exact input cap and rejects one more byt
  if(process.env.MENTOR_PAYLOAD_PREFLIGHT_DIR)writeFileSync(
   `${process.env.MENTOR_PAYLOAD_PREFLIGHT_DIR}/organize-worst.json`,JSON.stringify(f.captured()));
 });
+
+vi.mock('./newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('./newWorkGate')>(),
+ ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
+}));

@@ -808,8 +808,8 @@ async function testRateLimit(ctx: DiagnosticContext): Promise<DiagnosticTestResu
       testId,
       testName,
       category,
-      status: result.isConfigured ? 'passed' : 'failed',
-      message: `速率限制: ${result.testResult.limit}/分钟, 剩余: ${result.testResult.remaining}`,
+      status: result.isConfigured ? 'warning' : 'failed',
+      message: `仅本地限流器检查: ${result.testResult.limit}/分钟；未验证请求链路限流或 Redis 故障处理`,
       details: result,
       latencyMs,
     };
@@ -862,8 +862,8 @@ async function testCircuitBreaker(ctx: DiagnosticContext): Promise<DiagnosticTes
       testId,
       testName,
       category,
-      status: result.circuitBreakerEnabled ? 'passed' : 'warning',
-      message: `消费熔断: ${result.maxCreditsPerHour}/小时, 状态: ${result.circuitBreakerEnabled ? '已启用' : '未启用'}`,
+      status: 'warning',
+      message: '仅读取旧熔断配置及默认值；未验证消费熔断是否在请求链路生效',
       details: result,
       latencyMs,
     };

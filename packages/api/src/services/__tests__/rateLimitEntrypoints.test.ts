@@ -34,7 +34,9 @@ function fixture() {
     const response = Promise.resolve({ data, error: null });
     return Object.assign(response, { abortSignal: () => response });
   });
-  return { client, admin: { rpc }, user, reads };
+  const settings = { select() { return this; }, eq() { return this; },
+    maybeSingle: async () => ({ data: null, error: null }) };
+  return { client, admin: { rpc, from: () => settings }, user, reads };
 }
 
 beforeEach(() => {
