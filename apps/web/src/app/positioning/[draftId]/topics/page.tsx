@@ -18,6 +18,7 @@ import { useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { CHAT_ACTION, ChatNoticeList, ChatPendingStatus, type ChatNotice } from '@/components/chat/ChatInlineNotice';
+import { followTranscript, transcriptSignature } from '@/components/chat/chat-scroll';
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import composerStyles from '@/components/opc/work-composer.module.css';
@@ -254,18 +255,12 @@ export default function TopicWorkspacePage() {
       }>
     | undefined;
 
-  const scrollSignature=executions?.map(item=>[item.executionId,item.state,item.body,item.primaryBody].join(':')).join('|');
+  const scrollSignature=transcriptSignature(executions?.map(item=>[item.executionId,item.state,item.body,item.primaryBody].join(':')).join('|'),outgoing);
   useEffect(()=>{
     const node=scrollArea.current;if(!node||!scrollKey||scrollSignature===undefined)return;
-    if(scrollState.current.key!==scrollKey){
-      let saved:string|null=null;try{saved=sessionStorage.getItem(scrollKey);}catch{/* Use latest messages on first entry. */}
-      const top=saved===null?NaN:Number(saved);
-      node.scrollTop=Number.isFinite(top)?Math.max(0,top):node.scrollHeight;
-      scrollState.current={key:scrollKey,follow:node.scrollHeight-node.clientHeight-node.scrollTop<80,signature:scrollSignature};
-    }else if(scrollState.current.signature!==scrollSignature){
-      if(scrollState.current.follow)node.scrollTop=node.scrollHeight;
-      scrollState.current.signature=scrollSignature;
-    }
+    scrollState.current=followTranscript(node,scrollState.current,scrollKey,scrollSignature,()=>{
+      try{return sessionStorage.getItem(scrollKey);}catch{return null; /* First entry uses the latest messages. */}
+    });
   },[scrollKey,scrollSignature]);
 
   async function start() {

@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { CHAT_ACTION, ChatInlineNotice, ChatNoticeList, ChatPendingStatus } from '@/components/chat/ChatInlineNotice';
+import { followTranscript, transcriptSignature } from '@/components/chat/chat-scroll';
 import { WorkComposer } from '@/components/opc/work-composer';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { ContentEditor } from '@/components/opc/content-editor';
@@ -252,18 +253,12 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   const align=()=>node.parentElement?.style.setProperty('--chat-scrollbar-space',((node.offsetWidth-node.clientWidth)/2)+'px');
   align();const observer=new ResizeObserver(align);observer.observe(node);return()=>observer.disconnect();
  },[]);
- const scrollSignature=executions?.map(item=>[item.executionId,item.state,item.body,item.primaryBody].join(':')).join('|');
+ const scrollSignature=transcriptSignature(executions?.map(item=>[item.executionId,item.state,item.body,item.primaryBody].join(':')).join('|'),outgoing);
  useEffect(()=>{
   const node=scrollArea.current;if(!node||!scrollKey||scrollSignature===undefined)return;
-  if(scrollState.current.key!==scrollKey){
-   let saved:string|null=null;try{saved=sessionStorage.getItem(scrollKey);}catch{/* First entry uses the latest messages. */}
-   const top=saved===null?NaN:Number(saved);
-   node.scrollTop=Number.isFinite(top)?Math.max(0,top):node.scrollHeight;
-   scrollState.current={key:scrollKey,follow:node.scrollHeight-node.clientHeight-node.scrollTop<80,signature:scrollSignature};
-  }else if(scrollState.current.signature!==scrollSignature){
-   if(scrollState.current.follow)node.scrollTop=node.scrollHeight;
-   scrollState.current.signature=scrollSignature;
-  }
+  scrollState.current=followTranscript(node,scrollState.current,scrollKey,scrollSignature,()=>{
+   try{return sessionStorage.getItem(scrollKey);}catch{return null; /* First entry uses the latest messages. */}
+  });
  },[scrollKey,scrollSignature]);
  async function guide(){
   if(!workItem||!choices.data?.defaultSkill||!sessionId||contentType==='unknown')return;
