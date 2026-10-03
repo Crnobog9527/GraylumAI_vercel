@@ -366,7 +366,7 @@
 
     - **加价倍数**：全站默认 m 由 3 改为 6；按模型/线路单独配置（第 34 项）、调用时冻结、只进位一次的规则不变。staging 和正式环境的实际修改仍须执行前另获 Owner 批准（第 39 项的做法）。
     - **订阅和积分包的积分比例**：订阅每 1 美元售价给的积分 Pro 120、Gold 130；积分包每 1 美元 100 积分，最小积分包 9.9 美元。积分包只有会员能买。积分永不过期，只有会员等级会过期；退款仍按 v11 §9.3（只处理被退款那一期订阅未用的积分，保护开户、签到、积分包等其他来源）。
-    - **价格页**：只写积分和会员权益，不承诺次数或份数，也不写"约等于多少次定位"。所有用户（含免费用户）统一使用 Claude Sonnet 5.5（与第 38 项一致）。
+    - **价格页**：只写积分和会员权益，不承诺次数或份数，也不写"约等于多少次定位"。导师用途对所有会员档位（含免费用户）统一使用 Claude Sonnet 5.5，不按档位降级（与第 38 项一致，只管导师用途）；第 13 项里对话和报告使用 Claude 与 Gemini 的安排不变。
     - **报告付费墙**：带步骤 Skill 生成报告必须是付费会员，同时照常扣积分（第 22、25 项的其余规则不变）。免费用户可以做完报告前的全部步骤；已确认、已整理的前置信息可以看、可以导出，不绑定步骤数，不收回。会员到期后，已生成的报告仍可看、可导出，只是不能生成新报告。会员检查在服务端的报告入口和调用准入两处执行，页面只负责提示。
     - **其他付费提示**：免费积分在报告前用完时只提供开通会员；会员余额不足按 BILL-PAYG 在两步之间暂停、充值后继续；Pro 用户一个月买 2 次以上积分包时提示 Gold 更划算。
     - **数值怎么定**：开户赠送 = Owner 用 Sonnet 5.5 亲自走完报告前全部步骤的账本消耗 × 1.2，按 m=6 换算（目前写死在 0151 的 100 积分要走迁移修改）；Pro 月价 = Pro 的用量目标（"一份报告 + 4 周日常选题和写作"的实测消耗）÷ 120；Gold 用单独的、比 Pro 更大的实测用量目标，月价 = 该目标 ÷ 130；约束：Gold 月价必须高于 Pro。具体用量和价格由 Owner 实测后定。邀请奖励 50/30 按 m=6 复核。
@@ -943,7 +943,7 @@ P0-1、CI-TRUST-1 ─→ AGENT-CORE（AC-0 → AC-1 → AC-2、AC-3 → AC-5 →
 DATA-ERASURE 删除规则设计 ─→ AC-2
 AGENT-CORE 稳定 ─→ RUNTIME-PROD 其余项（④ 的 BILL-PAYG 按下方主线提前）；MODEL-REASONING、BILL-UNIT、MODEL-PRICING-SYNC 已完成
 RESEARCH-0 + AC-1 + RUNTIME-PROD + DATA-ERASURE ─→ RESEARCH-TOOLS（原先接封闭内测，已取消，第 50 项）
-REPORT-GEN + BILL-PAYG + PAY-COMMON + ENTITLEMENTS ─→ PAYWALL
+REPORT-GEN + BILL-PAYG + PAY-COMMON + ENTITLEMENTS ─→ PAYWALL（第 7.4 节 N3 批次，与 PAY-WAFFO 同批）
 D1 范围全部完成（第 0–4 阶段：上线基础含 RESEARCH-TOOLS；FUSION-REVIEW、LIB-DOCS、VOICE、UI-A—UI-FINISH、FUSION-COMPARE；PAY-COMMON → PAY-WAFFO、PAYWALL、LEGACY-CLOSE）─→ V3-M3 ─→ REL-1 ─→ 公开上线售卖（生产另行批准）
 公开上线前 ─→ Owner 决定 MODERATION 正式实现时间（暂缓，不作封闭内测前提；默认放行的检查点已随 #594 接线）
 S1 权限修复 ─→ DB-BASELINE ─→ V3-M3 ─→ REL-1
@@ -991,7 +991,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | N1c 完整定位流程 | DATA-ERASURE 删除规则设计、AC-2（含 CONVERSATION-DRIVEN-CAPTURE B1/B2）、AC-3、AC-5 及其对应的 AGENT-CORE-UI 部分（本步小结卡、右侧面板和进度条）；CHAT-NATIVE-OUTPUT、REPORT-GEN（暂列，待 Owner 选定批次） | Owner 从进入到定稿完整走通并验收 |
 | N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；CONTENT-CONVERSATION-DRIVEN（暂列，方案待写，待 Owner 选定批次）；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
 | N2 上线基础 | RUNTIME-PROD（含 BILL-UNIT、BILL-PAYG）、PROMPT-CACHE、PROMPT-CACHE-HISTORY、RATE-LIMIT 接线（含默认放行的 MODERATION-HOOK）、DB-BASELINE、RESEARCH-TOOLS、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON。2026-10-03：BILL-UNIT、PROMPT-CACHE、RATE-LIMIT、ENTITLEMENTS、MODEL-PRICING-SYNC 已完成，PROMPT-CACHE-HISTORY H1 已合并；钱路线已由 Owner 批准并行开工（第 46 项） | 上线基础完成。原定此后先做 5–10 人封闭内测（D8），2026-10-03 已取消（第 2.1 节第 50 项），按 D1 范围完成后直接公开上线售卖 |
-| N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
+| N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO（含微信一次性会员）；PAYWALL（依赖 REPORT-GEN、BILL-PAYG、PAY-COMMON、ENTITLEMENTS，须在 REL-1 之前完成） | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
 | N4 收口 | LEGACY-CLOSE、V3-M3；公开上线前请 Owner 决定 MODERATION 正式实现时间 | 完整验收；REL-1 和生产另行批准 |
 
 每批由 Owner 选定后开工，批次内由 Agent 自主排序、测试、修复，完成后停下，不自动开始下一批（AGENTS 第 5 节）。
