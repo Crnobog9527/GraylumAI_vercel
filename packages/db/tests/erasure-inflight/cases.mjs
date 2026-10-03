@@ -1,0 +1,105 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {rpc,fixture,call,evidence,closeAccount,outcome} from '../erasure-b2a/cases.mjs';
+const bind=async(db,f)=>(await db.query('SELECT b2a_test.bind($1) v',[f])).rows[0].v;
+const scalar=async(db,sql,args)=>(await db.query(sql,args)).rows[0].v;
+const active=(db,e)=>scalar(db,'SELECT s.active_execution v FROM runtime_sessions s JOIN runtime_executions e ON e.session_id=s.id WHERE e.id=$1',[e]);
+const setStatus=(db,f,status)=>db.query('UPDATE profiles SET status=$2 WHERE id=$1',[f.actor,status]);
+const batch=(db,actor=null,after=null,limit=20)=>rpc(db,'account_erasure_financial_batch',limit,actor,after);
+
+export async function inflightCases(db,report){
+ for(const role of ['anon','authenticated']){
+  await db.query('SET ROLE '+role);
+  await assert.rejects(batch(db),/permission denied/);
+  await assert.rejects(rpc(db,'runtime_receipt_saved',randomUUID(),randomUUID(),randomUUID(),randomUUID(),{}),/permission denied/);
+  await db.query('RESET ROLE');
+ }
+ await assert.rejects(batch(db,null,null,101),/LIMIT_INVALID/);
+ await assert.rejects(batch(db,randomUUID()),/ACTOR_DENIED/);
+ for(const status of ['disabled','banned']){
+  const f=await fixture(db);const e=await bind(db,f);const c=await call(db,f);const pending=await call(db,f,2,false);
+  await setStatus(db,f,status);
+  await db.query('SET ROLE service_role');
+  const read=await rpc(db,'bill2_read',f.actor,f.run);
+  assert.equal(read.executionId,e);assert.equal(read.scope,undefined);assert.equal(read.accountClosed,undefined);
+  assert.doesNotMatch(JSON.stringify(read),/B2A_PRIVATE_CANARY|input|result/);
+  await assert.rejects(rpc(db,'bill2_read',randomUUID(),f.run),/RUN_DENIED/);
+  await assert.rejects(batch(db,f.actor),/ACTOR_DENIED/);
+  await assert.rejects(rpc(db,'bill2_prepare',f.actor,randomUUID(),f.payload),/ACTOR_DENIED/);
+  await assert.rejects(rpc(db,'bill2_claim',f.actor,f.run,3,{}),/ACTOR_DENIED/);
+  await assert.rejects(rpc(db,'bill2_dispatch',f.actor,f.run,pending.id,pending.dispatchToken),/ACTOR_DENIED/);
+  await assert.rejects(rpc(db,'bill2_private_input',f.actor,f.run),/ACTOR_DENIED/);
+  await assert.rejects(rpc(db,'runtime_execution',f.actor,e,'read'),/ACTOR_DENIED/);
+  await assert.rejects(rpc(db,'bill2_record',f.actor,f.run,pending.id,evidence(pending)),/NOT_DISPATCHED/);
+  await assert.rejects(rpc(db,'bill2_record',f.actor,f.run,randomUUID(),evidence(c)),/NOT_DISPATCHED/);
+  await rpc(db,'bill2_record',f.actor,f.run,c.id,evidence(c,null));
+  assert.deepEqual(await rpc(db,'bill2_pending_calls',f.actor,f.run),[c.id]);
+  assert.ok(await rpc(db,'bill2_recovery_claim',f.actor,f.run,c.id));
+  const final=evidence(c,'0.001');
+  await rpc(db,'bill2_record',f.actor,f.run,c.id,final);
+  assert.equal(await rpc(db,'runtime_receipt_saved',f.actor,e,f.run,c.id,final),true);
+  assert.equal(await rpc(db,'runtime_receipt_saved',f.actor,e,f.run,c.id,{...final,cost:'0.002'}),false);
+  await assert.rejects(rpc(db,'runtime_receipt_saved',f.actor,e,f.run,randomUUID(),final),/BINDING_DENIED/);
+  await rpc(db,'bill2_close',f.actor,f.run,'cancelled',null);
+  const settled=await rpc(db,'runtime_financial_recovery',f.actor,e,true);
+  assert.equal(settled.state,'cancelled');assert.equal(settled.billing.state,'settled');
+  assert.equal((await rpc(db,'bill2_finalize',f.actor,f.run)).chargedCredits,2);
+  await db.query('RESET ROLE');
+  assert.equal(await active(db,e),null);
+  const prepared=await fixture(db);await call(db,prepared,1,false);await setStatus(db,prepared,status);
+  await assert.rejects(rpc(db,'bill2_read',prepared.actor,prepared.run),/ACTOR_DENIED/);
+  await rpc(db,'bill2_cancel',prepared.actor,prepared.run);
+  assert.equal((await rpc(db,'bill2_finalize',prepared.actor,prepared.run)).state,'refunded');
+  await rpc(db,'bill2_finalize',prepared.actor,prepared.run);
+  assert.equal(await scalar(db,'SELECT credits v FROM profiles WHERE id=$1',[prepared.actor]),100);
+  const unstarted=await fixture(db);const uc=await call(db,unstarted);
+  await db.query("UPDATE bill2_calls SET provider='openrouter',payload=jsonb_set(payload,'{protocol}','\"openrouter-chat-v1\"') WHERE id=$1",[uc.id]);
+  await setStatus(db,unstarted,status);
+  const revoke=(token=uc.dispatchToken,hash='b'.repeat(64),inspect=false)=>rpc(db,'bill2_revoke_unstarted_dispatch',unstarted.actor,unstarted.run,uc.id,token,hash,inspect);
+  await assert.rejects(revoke(randomUUID()),/ACTOR_DENIED|UNSTARTED_DISPATCH_DENIED/);
+  await assert.rejects(revoke(uc.dispatchToken,'a'.repeat(64)),/ACTOR_DENIED|UNSTARTED_DISPATCH_DENIED/);
+  assert.deepEqual(await revoke(uc.dispatchToken,'b'.repeat(64),true),{eligible:true,revoked:false});
+  assert.equal((await revoke()).revoked,true);
+  assert.deepEqual(await revoke(uc.dispatchToken,'b'.repeat(64),true),{eligible:false,revoked:true});
+  assert.equal((await rpc(db,'bill2_read',unstarted.actor,unstarted.run)).state,'refunded');
+  assert.equal(await scalar(db,'SELECT credits v FROM profiles WHERE id=$1',[unstarted.actor]),100);
+  await assert.rejects(rpc(db,'bill2_record',unstarted.actor,unstarted.run,uc.id,evidence(uc)),/NOT_DISPATCHED/);
+  report.checks.push(`${status}: narrow read/revoke + exact inspect; all eight existing financial paths; admission/body/cross binding denied; prepared refund once`);
+ }
+ const f=await fixture(db);const e=await bind(db,f);const c=await call(db,f);
+ await closeAccount(db,f);
+ const before=await batch(db,f.actor);assert.equal(before.items[0].runId,f.run);
+ assert.equal(before.items[0].reason,'BILLING_NO_PROVIDER_ID');
+ assert.doesNotMatch(JSON.stringify(before),/B2A_PRIVATE_CANARY|rawBody|sdkResponse/);
+ await rpc(db,'runtime_financial_recovery',f.actor,e,true);
+ assert.equal(await active(db,e),null);
+ const after=await batch(db,f.actor);assert.equal(after.items.length,0);assert.equal(after.totalPending,1);
+ assert.equal(after.reasons.BILLING_NO_PROVIDER_ID,1);assert.ok(after.oldestPendingAt);
+ await rpc(db,'account_erasure_note_error',f.actor,'BILLING_NO_PROVIDER_ID');
+ assert.equal(await scalar(db,'SELECT stage v FROM account_erasure_requests WHERE profile_id=$1',[f.actor]),'billing_pending');
+ await assert.rejects(rpc(db,'account_erasure_note_error',f.actor,'BILLING_CLEAR'),/STILL_PENDING/);
+ await assert.rejects(rpc(db,'account_erasure_note_error',f.actor,'BILLING_INJECTED'),/CODE_INVALID/);
+ const receipt=evidence(c,'0.001');await rpc(db,'bill2_record',f.actor,f.run,c.id,receipt);
+ assert.equal(await rpc(db,'runtime_receipt_saved',f.actor,e,f.run,c.id,receipt),true,'original hash survives erasure projection');
+ assert.equal(await rpc(db,'runtime_receipt_saved',f.actor,e,f.run,c.id,{...receipt,rawBody:'different'}),false);
+ assert.equal((await batch(db,f.actor)).items.length,1,'known final cost makes closed run finishable');
+ await rpc(db,'runtime_financial_recovery',f.actor,e,true);
+ await rpc(db,'account_erasure_note_error',f.actor,'AUTH_BAN_FAILED');
+ await rpc(db,'account_erasure_note_error',f.actor,'BILLING_CLEAR');
+ assert.equal(await scalar(db,'SELECT last_error_code v FROM account_erasure_requests WHERE profile_id=$1',[f.actor]),'AUTH_BAN_FAILED');
+ assert.equal((await batch(db,f.actor)).totalPending,0);
+ const other=await fixture(db);const oe=await bind(db,other);await call(db,other);await closeAccount(db,other);
+ // Simulate a different winning pointer; recovery must not clear it.
+ await db.query('UPDATE runtime_sessions SET active_execution=$1 WHERE id=(SELECT session_id FROM runtime_executions WHERE id=$2)',[e,oe]);
+ await rpc(db,'runtime_financial_recovery',other.actor,oe,true);
+ assert.equal(await active(db,oe),e);
+ report.checks.push('erased unknown closes and clears only own pointer; no-ID stays reported, not repeatedly selected; exact hash after projection; stage/clear/auth-error safety');
+ const ready=await fixture(db);const re=await bind(db,ready);await closeAccount(db,ready);
+ assert.equal((await batch(db,ready.actor)).items.length,1,'zero dispatched calls still discovered');
+ await rpc(db,'bill2_cancel',ready.actor,ready.run);await rpc(db,'bill2_finalize',ready.actor,ready.run);
+ assert.equal((await batch(db,ready.actor)).items.length,1,'terminal run with unsynchronised execution');
+ await rpc(db,'runtime_financial_recovery',ready.actor,re,true);
+ assert.equal((await batch(db,ready.actor)).totalPending,0);
+ report.checks.push('prepared-only discovery/refund; terminal money with unfinished execution remains selectable');
+}

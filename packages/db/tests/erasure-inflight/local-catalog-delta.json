@@ -1,0 +1,30 @@
+{
+  "fn:account_erasure_financial_batch(integer,uuid,uuid)": {
+    "before": null,
+    "after": "9b930e32526b"
+  },
+  "fn:account_erasure_note_error(uuid,text)": {
+    "before": "cedefb39681c",
+    "after": "f09bddd3e08a"
+  },
+  "fn:bill2_read(uuid,uuid)": {
+    "before": "b7a41ced1962",
+    "after": "703cec867c8d"
+  },
+  "fn:bill2_revoke_unstarted_dispatch(uuid,uuid,uuid,uuid,text,boolean)": {
+    "before": "df0b57cbf4ad",
+    "after": "59bb3d3fea51"
+  },
+  "fn:runtime_financial_recovery(uuid,uuid,boolean)": {
+    "before": "d24b8d6aa4ea",
+    "after": "0d366951817e"
+  },
+  "fn:runtime_receipt_saved(uuid,uuid,uuid,uuid,jsonb)": {
+    "before": "77aecd183ab1",
+    "after": "4fab7f2e8586"
+  },
+  "fnacl:account_erasure_financial_batch(integer,uuid,uuid)": {
+    "before": null,
+    "after": "6d080cde71ba"
+  }
+}
