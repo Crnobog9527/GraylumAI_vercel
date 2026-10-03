@@ -7046,6 +7046,65 @@ it("OPC: B1 browser auto-saves discussion, adopts one topic across a lost reply 
   } finally { await browser.close(); }
 }, 300000);
 
+it("OPC: a second topic generation takes a new constraint and request id, and a lost reply recovers B behind candidate A without creating C", async () => {
+  // Replaces the retired /plan regeneration cases (Stage C6/C8) on /topics,
+  // where new input still creates a new request beside the current candidate.
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  await onlyOwnCatalog([f.moduleId]);
+  const path = '/positioning/' + f.d.draftId + '/topics';
+  const { browser, page } = await planBrowser(f);
+  const card = (title: string) => page.getByRole('heading', { name: title, exact: true }).last().locator('..');
+  const money = async () => (await sql.query(
+    `select (select credits from profiles where id=$1) balance,
+       (select count(*)::int from credit_transactions where user_id=$1 and reason_code='bill2_reserve') reserves,
+       (select count(*)::int from credit_transactions where user_id=$1) ledger`, [f.actor])).rows[0];
+  const topicRequests = async () => (await sql.query(
+    `select e.request_id::text request_id, e.payload->>'input' input from runtime_executions e
+       join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id
+      where e.actor_id=$1 and t.purpose='topic' order by e.created_at, e.id`, [f.actor])).rows;
+  let lost = 0;
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + path);
+    await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
+    await card('1. 首周选题').waitFor({ timeout: 60000 });
+    await expect.poll(async () => (await f.service.topicDraftRead(f.d.draftId)).version, { timeout: 30000 }).toBe(1);
+    const afterA = { identity: await topicIdentity(f.actor), money: await money(), requests: await topicRequests() };
+    expect(afterA.identity).toMatchObject({ binds: 1, turns: 1, topicExecutions: 1, topicRuns: 1 });
+    expect(afterA.requests).toHaveLength(1);
+
+    // Request B carries a new constraint. The server admits and runs it once;
+    // only the reply to the page is lost, so candidate A stays on screen.
+    await page.route('**/api/trpc/runtime.execute*', async route => {
+      const response = await route.fetch(); expect(response.ok()).toBe(true); lost += 1; await route.abort();
+    });
+    await page.getByLabel('消息', { exact: true }).fill('请修改第一条选题，改成更适合新手的版本');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await page.getByRole('button', { name: '恢复原请求', exact: true }).waitFor({ timeout: 60000 });
+    await expect.poll(() => lost, { timeout: 30000 }).toBeGreaterThan(0);
+    const afterB = { identity: await topicIdentity(f.actor), money: await money(), requests: await topicRequests() };
+    expect(afterB.requests).toHaveLength(2);
+    expect(afterB.requests[0]).toEqual(afterA.requests[0]);
+    expect(afterB.requests[1].request_id).not.toBe(afterA.requests[0].request_id);
+    expect(afterB.requests[1].input).toContain('请修改第一条选题，改成更适合新手的版本');
+    expect(afterB.identity).toMatchObject({ binds: 1, turns: 2, topicExecutions: 2, topicRuns: 2 });
+    expect(afterB.money.reserves).toBe(afterA.money.reserves + 1);
+    expect(Number(afterB.money.balance)).toBeLessThan(Number(afterA.money.balance));
+    expect(await page.getByRole('heading', { name: '1. 修改后的选题', exact: true }).count()).toBe(0);
+    expect((await f.service.topicDraftRead(f.d.draftId)).version).toBe(1);
+
+    // Recovering after a reload replays B by its own identity: no request C,
+    // no second reservation, no further charge.
+    await page.unroute('**/api/trpc/runtime.execute*');
+    await page.reload();
+    await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
+    await card('1. 修改后的选题').waitFor({ timeout: 60000 });
+    await expect.poll(async () => (await f.service.topicDraftRead(f.d.draftId)).version, { timeout: 30000 }).toBe(2);
+    expect(await topicRequests()).toEqual(afterB.requests);
+    expect(await topicIdentity(f.actor)).toEqual(afterB.identity);
+    expect(await money()).toEqual(afterB.money);
+  } finally { await browser.close(); }
+}, 300000);
 it("OPC: B1 business scope, legacy handoff replay and library edits stay owned and versioned", async () => {
   const f = await publishedDraft();
   const businessId = (await sql.query(
