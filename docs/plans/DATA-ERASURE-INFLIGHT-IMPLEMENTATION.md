@@ -80,7 +80,7 @@ AGENTS §5：复用原 run/call/receipt/预扣、cancel/finalize/recovery_claim�
   必测注销 v2 从未发出 call 的撤权释放、v1/v2 全套绑定/查询期限；PR-B 负责等待积分遇注销。
   名义收费归 #553，报表须区分 nominal / actual_fallback / cost_pending；v1 nominal 不适用。
 - #593：executionStream.ts、runtime.integration.ts、测试 runner 与 built fingerprint 重叠，后合并方同步。
-- #606：Bill2ModelReportCard.tsx 重叠，后合并方保留未知/已知小计/v1 不适用语义。
+- #606：已合并并同步；财务卡片保留其近 1 天日期选择和本次未知/已知小计/v1 不适用语义，合并后 9 项 Web 相关测试通过。
 - H1 现在为 #610；本次不改 execute.ts/context.ts；共享影响由后合并方回归。
 
 推送前刷新：staging 仍为 `2259e895`；#593 仍 OPEN，head 更新为 `146540098e6aaa410256d1a945aa50358a980a92`；
@@ -199,3 +199,10 @@ AGENTS §5：复用原 run/call/receipt/预扣、cancel/finalize/recovery_claim�
 
 - 无文件差异（方案见 PR 描述）。
 
+
+## 当前 Handoff
+
+代码、SQL、本机集成和浏览器验证已完成；已同步 staging `dd1deaaa`，AGENTS 和财务源函数未变化。
+遗留证据数据保持不动。当前交付阻塞是 0160 之前缺少 #593 的 0159，迁移连续性检查失败。
+建议维持 #593 先合并顺序，随后同步共享宿主/测试/指纹及重新核对源 MD5；不修改检查或添加占位迁移。
+在 CI 全绿前不留下完成评论；最终独立审查由总控安排，保持 draft，不合并或应用迁移。
