@@ -42,7 +42,7 @@ describe('BILL2 per-model finance report', () => {
       row({ call_id: 'a', selected_cost_usd: null, call_state: 'unknown' }),
       row({ call_id: 'b', run_id: 'r2', run_state: 'refunded', run_charged: 20 }),
     ], 5000);
-    expect(report.models[0]).toMatchObject({ unknownCostCalls: 1, officialCostUsd: '0.01', attributedChargedCredits: 15 });
+    expect(report.models[0]).toMatchObject({ unknownCostCalls: 1, officialCostUsd: null, attributedChargedCredits: 15 });
     expect(report.totals).toMatchObject({ refundedRuns: 1, chargedCredits: 15 });
   });
 
@@ -95,4 +95,45 @@ describe('BILL2 per-model finance report', () => {
   it('flags a report that hit the row limit', () => {
     expect(buildBill2ModelReport([row({})], 1).truncated).toBe(true);
   });
+});
+
+
+describe('erasure financial report evidence', () => {
+  it('retains a dispatched unknown run in list, groups, totals and serialized output', () => {
+    const report = buildBill2ModelReport([row({
+      selected_cost_usd: null, call_state: 'dispatched', run_state: 'cost_pending',
+      run_outcome: 'cancelled', run_charged: null,
+    })], 5000);
+    expect(report.models[0]).toMatchObject({ calls: 1, unknownCostCalls: 1, officialCostUsd: null, weightedUsd: null });
+    expect(report.totals).toMatchObject({ runs: 1, unsettledRuns: 1, refundedRuns: 0,
+      officialCostUsd: null, weightedUsd: null });
+    expect(report.byPurpose[0]).toMatchObject({ unknownCostCalls: 1, officialCostUsd: null, weightedUsd: null });
+    expect(report.byDate[0]).toMatchObject({ unknownCostCalls: 1, officialCostUsd: null, weightedUsd: null });
+    // The existing endpoint returns JSON; there is no BILL2 CSV/download endpoint.
+    expect(JSON.parse(JSON.stringify(report)).totals.officialCostUsd).toBeNull();
+  });
+
+  it('does not present a known subtotal as a complete amount, but retains unrelated known model costs', () => {
+    const report = buildBill2ModelReport([row({}), row({ run_id: 'unknown', model: 'other/model',
+      selected_cost_usd: null, run_state: 'cost_pending', run_charged: null })], 5000);
+    expect(report.models.find((line) => line.model === 'vendor/sonnet')?.officialCostUsd).toBe('0.01');
+    expect(report.totals.officialCostUsd).toBeNull();
+    expect(report.byPurpose[0]?.officialCostUsd).toBeNull();
+  });
+
+  it('distinguishes official zero evidence and known costs without token evidence from unknown costs', () => {
+    // The v1 report has no token requirement: known official cost remains known without token usage.
+    const report = buildBill2ModelReport([row({ selected_cost_usd: '0', run_charged: 0 }),
+      row({ run_id: 'known', selected_cost_usd: '0.001', run_charged: 2 })], 5000);
+    expect(report.totals).toMatchObject({ officialCostUsd: '0.001', unknownCostCalls: 0, unsettledRuns: 0 });
+  });
+});
+
+it('keeps proven actual cost known without token counts; nominal/fallback charging remains the PAYG contract', () => {
+  // The v1 report deliberately needs no token field. PAYG actual_fallback must preserve this
+  // actual-cost fact, while its separate nominal fee remains not applicable to v1.
+  const known = buildBill2ModelReport([row({ selected_cost_usd: '0.003' })], 100);
+  expect(known.models[0]).toMatchObject({ officialCostUsd: '0.003', unknownCostCalls: 0 });
+  const pending = buildBill2ModelReport([row({ selected_cost_usd: null, run_state: 'dispatched', run_charged: null })], 100);
+  expect(pending.totals).toMatchObject({ officialCostUsd: null, unsettledRuns: 1 });
 });

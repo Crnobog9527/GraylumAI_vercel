@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 
-const limit = vi.hoisted(() => ({ check: vi.fn() }));
+const limit = vi.hoisted(() => ({ check: vi.fn(), close: vi.fn() }));
+vi.mock('./financialRecovery', () => ({ closeErasedAccountFinancials: limit.close }));
 vi.mock('../redisRateLimiter', () => ({ checkRateLimitOrThrow: limit.check }));
 
 import { confirmAccountErasure, loadAccountErasurePreview } from './service';
@@ -49,6 +50,7 @@ describe('account erasure confirm', () => {
     process.env.OPENING_GRANT_HMAC_KEYS = JSON.stringify({ active: 'test-v1',
       keys: { 'test-v1': Buffer.from('test-only-opening-grant-key-00001').toString('base64') } });
     limit.check.mockReset().mockResolvedValue({ success: true });
+    limit.close.mockReset().mockResolvedValue({ success: true, pending: 0, failed: 0 });
   });
 
   it('closes the account after a recent verified sign-in and bans the Auth user', async () => {
@@ -62,6 +64,17 @@ describe('account erasure confirm', () => {
       p_digests: openingGrantDigests({ id: USER, email: 'fixture@example.test', identities: [] } as unknown as User),
     });
     expect(admin.auth.admin.updateUserById).toHaveBeenCalledWith(USER, { ban_duration: '876000h' });
+    expect(limit.close).toHaveBeenCalledWith(admin, USER);
+    expect(admin.rpc.mock.invocationCallOrder[0]).toBeLessThan(limit.close.mock.invocationCallOrder[0]!);
+  });
+
+  it('keeps erasure committed when its separate financial attempt fails', async () => {
+    limit.close.mockRejectedValue(new Error('synthetic unavailable'));
+    const admin = adminClient();
+    const auth = authClient({ sub: USER, amr: [{ method: 'password', timestamp: NOW_S - 60 }] });
+    await expect(confirm(admin, auth)).resolves.toMatchObject({ created: true, authRevoked: true });
+    expect(limit.close).toHaveBeenCalledTimes(1);
+    expect(admin.rpc.mock.calls.filter(([name]) => name === 'account_erasure_confirm_with_digests')).toHaveLength(1);
   });
 
   it('accepts an email-code sign-in and passes a Bearer token to claim verification', async () => {

@@ -5,6 +5,7 @@ import {
   runDailyBillingReconciliation,
 } from '@repo/api/src/services/billingReconciliation';
 import { logger } from '@repo/api/src/services';
+import { runErasureFinancialReconciliation } from '@repo/api/src/services/accountErasure/financialRecovery';
 import { validateCronRequest } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
@@ -31,19 +32,22 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('billing-reconcile', 'started');
-    const [result, readinessAudit] = await Promise.all([
+    const [result, readinessAudit, erasureFinancial] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
+      runErasureFinancialReconciliation(supabase),
     ]);
-    const success = result.success && readinessAudit.success;
+    const success = result.success && readinessAudit.success && erasureFinancial.success;
 
     if (!success) {
       logger.system.cronJob(
         'billing-reconcile',
         'failed',
         Date.now() - startedAt,
-        [...result.mismatches, ...readinessAudit.findings.map((finding) => finding.message)].join(' | '),
+        [...result.mismatches, ...readinessAudit.findings.map((finding) => finding.message),
+          ...(erasureFinancial.success ? [] : ['Erasure financial recovery pending'])].join(' | '),
         {
+          erasureFinancial,
           mismatches: result.mismatches,
           summary: result.summary,
           readinessAudit: {
@@ -60,6 +64,7 @@ export async function GET(request: Request) {
         Date.now() - startedAt,
         undefined,
         {
+          erasureFinancial,
           summary: result.summary,
           readinessAudit: {
             checkedAt: readinessAudit.checkedAt,
@@ -76,6 +81,7 @@ export async function GET(request: Request) {
       mismatches: result.mismatches,
       summary: result.summary,
       readinessAudit,
+      erasureFinancial,
       timestamp: new Date().toISOString(),
     }, { status: success ? 200 : 500 });
   } catch (error) {
