@@ -137,3 +137,39 @@ it('keeps proven actual cost known without token counts; nominal/fallback chargi
   const pending = buildBill2ModelReport([row({ selected_cost_usd: null, run_state: 'dispatched', run_charged: null })], 100);
   expect(pending.totals).toMatchObject({ officialCostUsd: null, unsettledRuns: 1 });
 });
+
+
+describe('0162 SQL projection through the full model/PAYG report chain', () => {
+  it('accepts bill2.v2 and SQL text credits, preserving totals and C+E=N', () => {
+    // Same scalar types as bill2_admin_call_report: charged/refund are integers;
+    // theoretical/absorbed credits and decimals are SQL ::text, timestamps are JSON strings.
+    const sqlRow = row({ contract_version: 'bill2.v2', settled_at: '2026-10-03T00:00:00Z',
+      run_state: 'running', run_charged: null, run_call_count: 2,
+      credits_per_usd: '1000', call_multiplier: '1', multiplier_source: 'model',
+      selected_cost_usd: '0.005000000000', nominal_cost_usd: '0.005000000000000000',
+      nominal_source: 'nominal', charged_delta: 2, theoretical_delta: '5',
+      platform_absorbed_cap_credits: '3', platform_absorbed_bound_credits: '0',
+      platform_absorbed_cap_usd: '0.00300000000000000000', platform_absorbed_bound_usd: '0',
+      platform_margin_cache_read_usd: '0', platform_margin_cache_write_usd: '0', platform_margin_other_usd: '0',
+      compensation_credits: 0, compensated_at: null });
+    const report = buildBill2ModelReport([sqlRow, { ...sqlRow, call_id: 'c2', call_sequence: 2,
+      selected_cost_usd: '0.010000000000', nominal_cost_usd: '0.010000000000000000',
+      charged_delta: 4, theoretical_delta: '10', platform_absorbed_cap_credits: '0',
+      platform_absorbed_bound_credits: '6', platform_absorbed_cap_usd: '0',
+      platform_absorbed_bound_usd: '0.00600000000000000000',
+      compensation_credits: 1, compensated_at: '2026-10-04T00:00:00Z' }], 5000);
+    expect(report.totals).toMatchObject({ calls: 2, chargedCredits: 6, unallocatedChargedCredits: 0,
+      officialCostUsd: '0.015', platformAbsorbedCredits: 9, paygRefundedCredits: 1, paygNetChargedCredits: 5 });
+    expect(report.models[0]).toMatchObject({ calls: 2, attributedChargedCredits: 6 });
+    expect(report.payg).toMatchObject({ complete: true, invalidCalls: 0, unsettledCalls: 0,
+      platformAbsorbedCredits: 9, groups: [{ calls: 2, chargedCredits: 6, theoreticalCredits: 15,
+        capCredits: 3, boundCredits: 6, nominalCostUsd: '0.015', officialCostUsd: '0.015',
+        platformMarginUsd: '0', compensationCredits: 1, netChargedCredits: 5 }] });
+    expect(report.payg.calls).toHaveLength(2);
+    for (const call of report.payg.calls) {
+      expect(call.chargedCredits + call.capCredits + call.boundCredits).toBe(call.theoreticalCredits);
+    }
+    const group = report.payg.groups[0]!;
+    expect(group.chargedCredits + group.capCredits + group.boundCredits).toBe(group.theoreticalCredits);
+  });
+});

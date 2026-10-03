@@ -6,8 +6,10 @@ import {OPENROUTER_RESPONSE_BYTE_LIMIT,OPENROUTER_FRAME_BYTE_LIMIT} from './resp
 import {gzipSync} from 'node:zlib';
 import {openRouterStream,OPENROUTER_STREAM_BYTE_LIMIT} from './openRouterStream';
 import {withRuntimeBudget,type RuntimeBudget} from '../runtime/budget';
-import {openRouterBound,OPENROUTER_RESPONSE_TIMEOUT_MS,OPENROUTER_LOOKUP_TIMEOUT_MS} from './openRouterPolicy';
+import {openRouterBound,openRouterCallBound,OPENROUTER_RESPONSE_TIMEOUT_MS,OPENROUTER_LOOKUP_TIMEOUT_MS} from './openRouterPolicy';
 import {decimal} from './decimal';
+import {paygCallQuote} from './paygPolicy';
+import {validateNominalBound} from '../../shared/nominalPricing';
 import {createHash} from 'node:crypto';
 import {openRouterEvidence,validGenerationId,type OpenRouterIdentity} from './openRouterEvidence';
 import type {CallIdentity,TransportObservation} from './fixtureAdapter';
@@ -127,7 +129,18 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    if(typeof body!=='string')throw new Error('BILL2_PROVIDER_REQUEST_DENIED');
    const parsed=JSON.parse(body);
    if(!identity.providerLimits || !identity.outputLimit || !identity.upperUsd)throw new Error('BILL2_PROVIDER_QUOTE_REQUIRED');
-   const quote=openRouterBound(identity.providerLimits,identity.outputLimit);
+   const payg=identity.payg===undefined?undefined:paygCallQuote.parse(identity.payg);
+   if(payg){
+    const tools=Array.isArray(parsed?.tools)?parsed.tools:[];
+    const schemaBytes=tools.reduce((sum:number,tool:{function?:{parameters?:unknown}})=>
+      sum+(tool?.function?.parameters===undefined?0:Buffer.byteLength(JSON.stringify(tool.function.parameters))),0)
+      +(parsed?.response_format===undefined?0:Buffer.byteLength(JSON.stringify(parsed.response_format)));
+    if(payg.bytes!==Buffer.byteLength(body)||payg.messages!==parsed?.messages?.length
+      ||payg.tools!==tools.length||payg.schemaBytes!==schemaBytes)throw new Error('BILL2_PROVIDER_QUOTE_CONFLICT');
+    validateNominalBound(payg.nominalPricing,{...identity.providerLimits,...payg});
+   }
+   const quote=payg?openRouterCallBound(identity.providerLimits,identity.outputLimit,payg.promptTokensUpper)
+    :openRouterBound(identity.providerLimits,identity.outputLimit);
    if(decimal(quote.upperUsd)!==decimal(identity.upperUsd))throw new Error('BILL2_PROVIDER_QUOTE_CONFLICT');
    // An Agent turn request carries only the interactive tools (or none, when it
    // replays their history) and never the optional parallel_tool_calls hint;

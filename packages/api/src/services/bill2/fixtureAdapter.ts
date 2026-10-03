@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import type {PaygCallQuote} from './paygPolicy';
 import type {OpenRouterLimits} from './openRouterPolicy';
 import { decimal, parseExactJson } from './decimal';
 const amount = z.string().refine((v) => { try { decimal(v); return true; } catch { return false; } });
@@ -11,7 +12,7 @@ const receipt = z.object({
   includedDetails: z.array(z.object({ cost: amount, currency: z.string().regex(/^[A-Z]{3}$/) }).strict()).max(128).default([]),
   usage: z.record(z.string(), z.unknown()).optional(),
 }).strict().refine(v=>v.coverage!=='included_detail'||Boolean(v.detailId));
-export type CallIdentity = { provider: string; account: string; model: string; protocol: 'fixture-cost-v1' | 'openrouter-chat-v1'; providerLimits?:OpenRouterLimits; outputLimit?:number; upperUsd?:string };
+export type CallIdentity = { provider: string; account: string; model: string; protocol: 'fixture-cost-v1' | 'openrouter-chat-v1'; providerLimits?:OpenRouterLimits; outputLimit?:number; upperUsd?:string; payg?:PaygCallQuote };
 export function fixtureEvidence(raw: string, identity: CallIdentity, source: 'response' | 'lookup') {
   const parsed = receipt.parse(parseExactJson(raw));
   return { ...identity, model: parsed.model, providerId: parsed.id, cost: parsed.cost, currency: parsed.currency,

@@ -4,7 +4,7 @@ import pg from 'pg';
 import { createHash, randomUUID } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { createServer } from 'node:http';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import { authoritativeBilling, type FrozenRun, type FrozenCall } from './service';
@@ -494,3 +494,31 @@ it.each([
  expect(await conservation(f.actor)).toMatchObject({credits:93,spend:7,terminals:1,usage:1});
  expect(await billing.dispatchOnce(claimed.id,request)).toEqual({dispatched:false});expect(sends).toBe(1);
 });
+
+// The required BILL2 CI suite executes the same offline PAYG financial cases as the dedicated runner.
+it('BILL2: PAYG v2 money paths, erasure, nominal pricing and real concurrency remain isolated',async()=>{
+  const base=new URL('../../../../db/tests/payg/',import.meta.url);
+  const load=(name:string)=>import(/* @vite-ignore */ new URL(name+'.mjs',base).href);
+  const report={checks:[] as string[]};
+  const prior=(await db.query("select value from system_settings where key='billing_payg_start_thresholds'")).rows[0];
+  const existing=(await db.query("select to_regnamespace('b2a_test') name")).rows[0].name;
+  if(!existing)await db.query(readFileSync(new URL('../erasure-b2a/fixture.sql',base),'utf8'));
+  const {createFixture,claim,receipt}=await load('fixture');
+  try{
+    for(const [file,entry]of [
+      ['legacy','legacyCases'],['core','coreCases'],['nominal','nominalCases'],
+      ['grants','grantCases'],['edges','edgeCases'],['monitor','monitorCases'],['erasure','erasureCases'],
+    ]){
+      const module=await load(file!);
+      await module[entry!](db,report,createFixture,claim,receipt);
+    }
+    const {concurrencyCases}=await load('concurrency');
+    await concurrencyCases({db,Client:pg.Client,connectionString,report,createFixture,claim,receipt});
+    expect(report.checks.length).toBeGreaterThan(40);
+  }finally{
+    await db.query('RESET ROLE');
+    if(prior)await db.query("update system_settings set value=$1 where key='billing_payg_start_thresholds'",[prior.value]);
+    else await db.query("delete from system_settings where key='billing_payg_start_thresholds'");
+    writeFileSync(resolve(process.env.V3_WORKBENCH_OUTPUT!,'payg-regression.json'),JSON.stringify(report,null,2));
+  }
+},60000);

@@ -42,3 +42,30 @@ export function openRouterBound(value:OpenRouterLimits,maxOutputTokens:number){
   prompt:wireNumber(limits.promptUsdPerMillion),completion:wireNumber(limits.completionUsdPerMillion),request:wireNumber(limits.requestUsd),
  }}};
 }
+
+
+/** B is the final serialized request, including any cache block exactly once. */
+export function measureCallInput(serializedRequest:string,protocolOverhead:number,safetyMargin:number){
+  for(const value of [protocolOverhead,safetyMargin]){
+    if(!Number.isSafeInteger(value)||value<0)throw new Error('BILL2_INPUT_PROFILE_INVALID');
+  }
+  const requestBytes=new TextEncoder().encode(serializedRequest).length;
+  const promptTokensUpper=requestBytes+protocolOverhead+safetyMargin;
+  if(requestBytes<1||!Number.isSafeInteger(promptTokensUpper))throw new Error('BILL2_INPUT_PROFILE_INVALID');
+  return {requestBytes,promptTokensUpper};
+}
+
+/** v2 only: same price maxima, routing and 12-place upward rounding as v1. */
+export function openRouterCallBound(value:OpenRouterLimits,maxOutputTokens:number,promptTokensUpper:number){
+  const limits=openRouterLimits.parse(value);
+  if(!Number.isSafeInteger(promptTokensUpper)||promptTokensUpper<1
+    ||!Number.isSafeInteger(maxOutputTokens)||maxOutputTokens<1
+    ||promptTokensUpper+maxOutputTokens>limits.contextTokens)throw new Error('BILL2_PROVIDER_CAPACITY');
+  const listed=decimal(limits.promptUsdPerMillion);
+  const write=limits.cacheWriteUsdPerMillion===undefined?0n:decimal(limits.cacheWriteUsdPerMillion);
+  const prompt=write>listed?write:listed;
+  const numerator=prompt*BigInt(promptTokensUpper)+decimal(limits.completionUsdPerMillion)*BigInt(maxOutputTokens);
+  const bound=(numerator+999_999n)/1_000_000n+decimal(limits.requestUsd);
+  if(bound<=0n)throw new Error('BILL2_PROVIDER_QUOTE_INVALID');
+  return {upperUsd:formatted(bound),routing:openRouterBound(limits,maxOutputTokens).routing};
+}

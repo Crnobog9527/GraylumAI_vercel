@@ -1,11 +1,11 @@
 # GraylumAI 项目地图（给不写代码的负责人）
 
-用大白话说明代码结构，2026-09-27 按 staging 核对。具体接口和状态以当前代码为准；执行规则见 [AGENTS.md](../AGENTS.md)，产品规划和施工顺序见 [Master Plan v12](launch/MASTER_PLAN.md)，技术栈和写代码的规矩见 [工程规范](ENGINEERING.md)。
+用大白话说明代码结构，主体于 2026-09-27 按 staging 核对；计费说明于 2026-10-03 按 BILL-PAYG PR-A 契约补充，未表示该候选已合并或迁移已应用。具体接口和状态以当前代码为准；执行规则见 [AGENTS.md](../AGENTS.md)，产品规划和施工顺序见 [Master Plan v12](launch/MASTER_PLAN.md)，技术栈和写代码的规矩见 [工程规范](ENGINEERING.md)。
 
 ## 1) 这个项目是什么
 
 - 一个 pnpm + Turborepo 的多包仓库：网站在 `apps/web`（Next.js），后端接口在 `packages/api`（tRPC），数据库结构在 `packages/db/migrations`（Supabase Postgres）。
-- 用户在网页上和 Agent 对话，Agent 通过 OpenRouter 调用大模型；每次调用按实际成本扣积分。
+- 用户在网页上和 Agent 对话，Agent 通过 OpenRouter 调用大模型。默认 v1 按供应商实际成本及冻结费率计费；本次 v2 核心改用冻结标价计算名义费用，暂时仅供测试创建，不切换用户入口。
 
 ## 2) 用户能看到的页面
 
@@ -34,10 +34,22 @@
 | --- | --- | --- |
 | 用在哪里 | 定位、选题、工作会话、侧栏对话 | `/chat` 普通对话 |
 | 主要代码 | `packages/api/src/services/runtime`（官方 Agent SDK）、`services/bill2`（计费）、`routers/runtime.ts`、`routers/opc.ts`、`services/opc` | `apps/web/src/app/api/ai/stream/route.ts`、`services/modelRouter.ts`、`services/contextManager.ts`、`services/billing.ts` |
-| 计费 | BILL2：一次用户收费操作一个计费运行单，调用前预扣一次，按供应商官方成本汇总后只结算、取整一次（一个运行单可以包含多个调用，例如整理或 Fusion 的各模型） | 旧的预扣 / 结算 / 退费 |
+| 计费 | BILL2：一次用户操作一个运行单。默认 v1 整单预扣；PAYG v2 核心按每个 call 预留并结算，按累计应计积分取整差额结算，暂时仅测试可创建。一个运行单可以包含多个调用 | 旧的预扣 / 结算 / 退费 |
 | 前途 | 所有新功能都接这里 | 新工作区接管自由对话后下线 |
 
 两套共用同一个积分余额和流水，没有第二个钱包。
+
+BILL-PAYG 本次只做 [PR-A 计费核心](https://github.com/Crnobog9527/GraylumAI_vercel/pull/617)，
+具体契约见 [BILL2 说明第 0 节](launch/tasks/V3-BILL-2-provider-authoritative-billing.md#0-bill-payg-pr-av1-保留v2-逐调用预留)：
+
+- v2 每次调用先冻结可用积分范围内的额度，再按累计应计差额扣款；不足以覆盖本次费用的差额由平台承担，不留待充值后追收。
+- 供应商实际费用 c 完整保留；用户名义费用 n 按输入、输出和请求标价计算，不使用缓存折扣，有分时价时取最高时段价。可靠 token 缺失时按 `min(c,U)` 兜底；实际费用也未知时不当成零。
+- 费用未知的已派发 call 保留冻结额度并等待核对；未派发且能可靠撤权的 call 释放一次。注销同样区分这两种状态，不能把未知费用的冻结额度直接清空。
+- 平台承担报表及管理员提醒接口属于 PR-A；提醒未设定时返回“未启用”。已确认故障的补偿单列实际退回金额，净扣减去这笔金额，不抹掉原始成本或平台承担记录。
+- Runtime 接线是后续 PR-B；价格变动提醒是 PR-C；前端等待、继续和提醒页面另做。PR-A 不改变默认 v1，不代表已开放边用边扣。
+
+本段说明合同和实现范围；当前测试、CI、审查及迁移状态以 PR 的 Handoff 为准。
+
 
 缓存代码位置：当前 Runtime 使用 `packages/api/src/services/runtime/promptCache.ts`；
 旧诊断仍引用 `services/promptCacheBuilder.ts`。没有调用方的旧 `services/promptCache.ts`

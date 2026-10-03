@@ -4,11 +4,22 @@ import { router, adminProcedure } from '../trpc';
 import { logger } from '../lib/logger';
 import { buildBill2ModelReport, type Bill2CallReportRow } from '../services/bill2ModelReport';
 
+import {
+  absorbConfigSchema, absorbAckInput, readAbsorbConfig, saveAbsorbConfig,
+  readAbsorbAlerts, acknowledgeAbsorb,
+} from '../services/bill2PlatformAlerts';
+
 export const BILL2_REPORT_LIMIT = 5000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // BILL-UNIT: admin-only BILL2 cost per model with frozen multipliers (via bill2_admin_call_report).
 export const billingReportRouter = router({
+  platformAbsorbConfig: adminProcedure.query(({ ctx }) => readAbsorbConfig(ctx.supabase)),
+  savePlatformAbsorbConfig: adminProcedure.input(absorbConfigSchema)
+    .mutation(({ ctx, input }) => saveAbsorbConfig(ctx.supabase, input)),
+  platformAbsorbAlerts: adminProcedure.query(({ ctx }) => readAbsorbAlerts(ctx.supabase)),
+  acknowledgePlatformAbsorb: adminProcedure.input(absorbAckInput)
+    .mutation(({ ctx, input }) => acknowledgeAbsorb(ctx.supabase, input)),
   bill2ByModel: adminProcedure
     .input(z.object({ days: z.number().int().min(1).max(90).default(30) }).strict().default({ days: 30 }))
     .query(async ({ ctx, input }) => {

@@ -6,6 +6,8 @@ function harness(role: 'admin' | 'user' | 'anonymous', rpcResult: { data: unknow
   const calls: Array<{ fn: string; args: Record<string, unknown> }> = [];
   const db = {
     from(table: string) {
+      if (table === 'system_settings') return { select() { return this; }, eq() { return this; },
+        maybeSingle: async () => ({ data: null, error: null }) };
       if (table !== 'profiles') throw new Error(table);
       return { select() { return this; }, eq() { return this; },
         single: async () => ({ data: { id: 'actor', role, status: 'active', credits: 0, nickname: 'S', email: 's@example.test' }, error: null }) };
@@ -62,6 +64,24 @@ describe('BILL2 model report endpoint', () => {
   it.each(['user', 'anonymous'] as const)('denies %s', async (role) => {
     const f = harness(role, { data: [], error: null });
     await expect(f.caller.bill2ByModel({ days: 30 })).rejects.toMatchObject({ code: role === 'anonymous' ? 'UNAUTHORIZED' : 'FORBIDDEN' });
+    expect(f.calls).toEqual([]);
+  });
+});
+
+
+describe('platform alert endpoint permissions', () => {
+  it('allows administrators to read disabled reminders and missing configuration', async () => {
+    const f = harness('admin', { data: [], error: null });
+    expect(await f.caller.platformAbsorbConfig()).toBeNull();
+    expect(await f.caller.platformAbsorbAlerts()).toEqual({ status: 'disabled', alerts: [] });
+  });
+  it.each(['user', 'anonymous'] as const)('denies every platform alert operation to %s', async (role) => {
+    const f = harness(role, { data: [], error: null });
+    const code = role === 'anonymous' ? 'UNAUTHORIZED' : 'FORBIDDEN';
+    await expect(f.caller.platformAbsorbConfig()).rejects.toMatchObject({ code });
+    await expect(f.caller.platformAbsorbAlerts()).rejects.toMatchObject({ code });
+    await expect(f.caller.savePlatformAbsorbConfig({ defaultUsd: '1', models: {} })).rejects.toMatchObject({ code });
+    await expect(f.caller.acknowledgePlatformAbsorb({ model: 'v/a', utcDate: '2026-10-01' })).rejects.toMatchObject({ code });
     expect(f.calls).toEqual([]);
   });
 });

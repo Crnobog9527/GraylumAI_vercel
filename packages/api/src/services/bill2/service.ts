@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { transportEvidence, unknownEvidence, type CallIdentity, type TransportObservation } from './fixtureAdapter';
 import {openRouterLimits,OPENROUTER_LOOKUP_TIMEOUT_MS} from './openRouterPolicy';
+import { paygStablePolicy, paygCallQuote } from './paygPolicy';
 import { MULTIPLIER_PATTERN } from '../billingUnit';
 import { frozenBillingUnit } from '../runtime/billingUnitAdmission';
 import type {RuntimeBudget} from '../runtime/budget';
@@ -15,7 +16,9 @@ const scope = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('positioning_draft'), draftId: uuid }).strict(),
   z.object({ kind: z.literal('work_item'), projectId: uuid, workItemId: uuid }).strict(),
 ]);
-export const frozenCallPolicy = z.object({ multiplier: z.string().regex(MULTIPLIER_PATTERN).optional(), modelId: uuid, provider:z.string().min(1),account:z.string().min(1),model:z.string().min(1),protocol:z.enum(['fixture-cost-v1','openrouter-chat-v1']),providerLimits:openRouterLimits.optional(),upperUsd:z.string(),inputLimit:z.number().int().positive().max(1_000_000),outputLimit:z.number().int().positive().max(1_000_000),automaticRetry:z.literal(false),hiddenTools:z.literal(false),lookupSupported:z.boolean() }).strict();
+export const frozenCallPolicy = z.object({
+  payg: paygStablePolicy.optional(), multiplier: z.string().regex(MULTIPLIER_PATTERN).optional(),
+   modelId: uuid, provider:z.string().min(1),account:z.string().min(1),model:z.string().min(1),protocol:z.enum(['fixture-cost-v1','openrouter-chat-v1']),providerLimits:openRouterLimits.optional(),upperUsd:z.string(),inputLimit:z.number().int().positive().max(1_000_000),outputLimit:z.number().int().positive().max(1_000_000),automaticRetry:z.literal(false),hiddenTools:z.literal(false),lookupSupported:z.boolean() }).strict();
 const frozen = z.object({
   contractVersion: z.literal('bill2.v1'), mode: z.enum(['isolated','staging_test']), testWindowId:uuid.optional(), sessionRef: z.null().optional(), scope,
   moduleId: uuid.optional(), skillId: uuid.optional(),
@@ -28,8 +31,14 @@ const frozen = z.object({
   limits: z.object({ costUsd: z.string(), credits: z.number().int().positive().max(2_147_483_647), maxPreDeduct: z.number().int().positive().max(2_147_483_647),
     maxCalls: z.number().int().min(1).max(32), deadline: z.string().datetime() }).strict(),
 }).strict();
+const frozenPayg = frozen.extend({
+  contractVersion: z.literal('bill2.v2'),
+  limits: frozen.shape.limits.extend({ credits: z.literal(0) }),
+}).refine(value => value.callPolicy.every(policy => policy.payg !== undefined) && value.rules.billingUnit !== undefined);
+export type FrozenPaygRun = z.infer<typeof frozenPayg>;
 export type FrozenRun = z.infer<typeof frozen>;
-const call = z.object({ provider: z.string().min(1).max(128), account: z.string().min(1).max(128), model: z.string().min(1).max(256),
+const call = z.object({ payg: paygCallQuote.optional(),
+  provider: z.string().min(1).max(128), account: z.string().min(1).max(128), model: z.string().min(1).max(256),
   protocol: z.enum(['fixture-cost-v1','openrouter-chat-v1']), providerLimits:openRouterLimits.optional(), requestHash: z.string().regex(/^[a-f0-9]{64}$/), upperUsd: z.string(),
   inputLimit: z.number().int().positive().max(1_000_000), outputLimit: z.number().int().positive().max(1_000_000),
   automaticRetry: z.literal(false), hiddenTools: z.literal(false), lookupSupported: z.boolean(), phase: z.string().min(1).max(64),
@@ -37,6 +46,7 @@ const call = z.object({ provider: z.string().min(1).max(128), account: z.string(
     .strict().optional() }).strict();
 export type FrozenCall = z.infer<typeof call>;
 export type RunView = { executionId?: string|null; accountClosed?: boolean; id: string; state: 'prepared' | 'dispatched' | 'unknown' | 'cost_pending' | 'settled' | 'refunded';
+  contractVersion?: string; calls?: Array<{preDeductId?: string; chargedCredits?: number;}>;
   preDeductId: string; closed: boolean; conflict: boolean; reservedCredits: number; chargedCredits: number | null; outcome: string | null };
 type RpcResult={data:unknown;error:unknown};
 export interface BillingRpc {
@@ -104,7 +114,15 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       state = await readRun(runId);
       if (!['settled', 'refunded'].includes(state.state)) throw error;
     }
-    if (state.state === 'settled' && state.chargedCredits && deps.rebateClient) {
+    if (state.contractVersion === 'bill2.v2' && state.state === 'settled' && deps.rebateClient) {
+      const current = await readRun(runId);
+      for (const item of current.calls ?? []) {
+        if (!item.preDeductId || !item.chargedCredits) continue;
+        await applyInvitationRebateForSpend({ supabase: deps.rebateClient, supabaseAdmin: deps.rebateClient,
+          inviteeId: financialActors.get(runId) ?? uuid.parse(await deps.actor()),
+          consumedCredits: item.chargedCredits, preDeductId: item.preDeductId });
+      }
+    } else if (state.contractVersion !== 'bill2.v2' && state.state === 'settled' && state.chargedCredits && deps.rebateClient) {
       // Reuse the existing idempotent downstream; run identity is stable, releases/refunds never enter it.
       await applyInvitationRebateForSpend({ supabase: deps.rebateClient, supabaseAdmin: deps.rebateClient,
         inviteeId: financialActors.get(runId) ?? uuid.parse(await deps.actor()), consumedCredits: state.chargedCredits, preDeductId: state.preDeductId });
@@ -130,6 +148,9 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
     createDraft: () => rpc<string>('bill2_create_draft', {}),
     revokeDraft: (id: string) => rpc<void>('bill2_revoke_draft', { p_draft_id: uuid.parse(id) }),
     readPrivateInput: (id: string) => rpc<unknown>('bill2_private_input', { p_run_id: uuid.parse(id) }),
+    /** Core-only v2 entry; no Runtime or public route selects it in PR-A. */
+    preparePaygRun: (requestId: string, value: FrozenPaygRun) =>
+      rpc<RunView>('bill2_prepare', { p_request_id: uuid.parse(requestId), p_payload: frozenPayg.parse(value) }),
     async prepareRun(requestId: string, value: FrozenRun) {
       const parsed = frozen.parse(value);
       if (aggregateCredits([parsed.limits.costUsd], parsed.rules.creditsPerUsd, parsed.rules.multiplier) > parsed.limits.credits || parsed.limits.credits > parsed.limits.maxPreDeduct) throw new Error('BILL2_BUDGET_REJECTED');
@@ -139,6 +160,7 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       const parsed = call.parse(value);
       const actorId=uuid.parse(await deps.actor());
       const claimed = await rpcAs<DispatchClaim>('bill2_claim', { p_run_id: uuid.parse(runId), p_sequence: z.number().int().positive().parse(sequence), p_payload: parsed },actorId);
+      if (claimed.state === 'waiting_credits') throw new Error('BILL2_INSUFFICIENT_CREDITS');
       if (claimed.dispatchToken) capabilities.set(claimed.id, { token: claimed.dispatchToken, frozen: parsed, runId, actorId });
       return { id: claimed.id, state: claimed.state };
     },
@@ -153,7 +175,10 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       const capability = capabilities.get(callId);
       if (!capability) return { dispatched: false };
       if (createHash('sha256').update(body).digest('hex') !== capability.frozen.requestHash) throw new Error('BILL2_REQUEST_CONFLICT');
-      if (body.length > capability.frozen.inputLimit) throw new Error('BILL2_INPUT_LIMIT');
+      if ((capability.frozen.payg ? Buffer.byteLength(body) : body.length) > capability.frozen.inputLimit) throw new Error('BILL2_INPUT_LIMIT');
+      if (capability.frozen.payg && Buffer.byteLength(body) !== capability.frozen.payg.bytes) {
+        throw new Error('BILL2_INPUT_BOUND_CONFLICT');
+      }
       capabilities.delete(callId); // Single process possession is consumed before any await.
       const identity: CallIdentity = capability.frozen;
       const input={input:body,maxOutputTokens:capability.frozen.outputLimit,automaticRetry:false,hiddenTools:false};
