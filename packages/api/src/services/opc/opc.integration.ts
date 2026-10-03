@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { beforeAll, afterAll, it, expect } from "vitest";
+import { beforeAll, afterAll, afterEach, it, expect } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import { createClient } from "@supabase/supabase-js";
@@ -8,6 +8,7 @@ import { publishSkillPackage } from "../skills/publication";
 import { opcService } from "./service";
 import { workbenchService } from "../artifacts/workbench";
 import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
+import { schemaGuard } from "../__tests__/fixtures/schemaSnapshot";
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { OPENING_INPUT, confirmQuestionValues } from "../../shared/opcQuestions";
 import { agentTurnBody } from "../../shared/agentTurn";
@@ -25,7 +26,12 @@ const admin = createClient(
   process.env.V3_LOCAL_SERVICE_JWT!,
   { auth: { persistSession: false } },
 );
-beforeAll(() => sql.connect());
+// Several cases replay old migrations on this shared database to prove an
+// upgrade path. Restore the schema after every case and fail the case that
+// leaves anything unrestorable (see schemaSnapshot.ts).
+let restoreSchema = async () => {};
+beforeAll(async () => { await sql.connect(); restoreSchema = await schemaGuard(sql); }, 120000);
+afterEach(() => restoreSchema(), 120000);
 afterAll(() => sql.end());
 
 /** The exact business turns in a fixture, not just "one row per request ID". */
@@ -7323,7 +7329,8 @@ it("OPC: U2 browser preserves later edits across unknown saves, conflict and ano
     await page.getByPlaceholder('输入你的密码').fill(outsider.password);
     await page.getByRole('button',{name:'登录',exact:true}).last().click();
     await page.waitForURL(url=>url.pathname==='/runtime');
-    await page.getByRole('alert').filter({hasText:'无权访问'}).waitFor();
+    // 0beff6aa: denial is reported through the shared workspace notice.
+    await page.getByRole('alert').filter({hasText:'当前工作：'}).waitFor();
     expect(await page.getByText('未知结果后继续写，不能被旧结果覆盖').count()).toBe(0);
     expect(await page.getByLabel('文章正文').count()).toBe(0);
   }finally{await browser.close();}
@@ -7390,14 +7397,17 @@ it("OPC: library edit binds fields and revision to one snapshot across a concurr
     await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/edit-account/}).click();
     const card=page.getByRole('article').filter({hasText:'原始标题'});
     await card.getByRole('button',{name:/原始标题/}).first().click();
-    await page.getByRole('dialog',{name:'选题详情'}).getByRole('button',{name:'编辑稿件'}).click();
-    await page.getByLabel('选题标题').fill('本标签准备保存的标题');
+    // The redesigned library edits the topic direction from the manuscript view.
+    const detail=page.getByRole('dialog',{name:'选题详情'});
+    await detail.getByRole('button',{name:'编辑稿件'}).click();
+    await detail.getByRole('button',{name:/选题方向.*查看与修改/}).click();
+    await page.getByLabel('方向名称',{exact:true}).fill('本标签准备保存的标题');
     const before=(await f.service.library({search:'原始标题',from:null,to:null})).businesses.flatMap((business:{accounts:Array<{items:Array<{workItemId:string;revision:number}>}>})=>business.accounts.flatMap(account=>account.items)).find((item:{workItemId:string})=>item.workItemId===work.workItemId)!;
     await f.service.libraryEdit({requestId:randomUUID(),target:'item',targetId:work.workItemId,expectedRevision:before.revision,patch:{title:'另一标签已保存的标题',brief:'另一标签已保存的简报',day:'2026-09-26'}});
     const refreshed=page.waitForResponse(response=>response.url().includes('opc.library')&&response.ok());
     await page.getByLabel('当前阶段 edit-account').selectOption('starting');
     await refreshed;
-    await page.getByRole('button',{name:'保存选题信息',exact:true}).click();
+    await page.getByRole('button',{name:'保存选题方向',exact:true}).click();
     await expect.poll(async()=>(await page.getByRole('alert').allTextContents()).join(' '),{timeout:30000}).toContain('OPC_VERSION_CONFLICT');
     const library=await f.service.library({search:'另一标签已保存的标题',from:null,to:null});
     const saved=library.businesses.flatMap((business:{accounts:Array<{items:Array<{workItemId:string;title:string;brief:string;day:string}>}>})=>business.accounts.flatMap(account=>account.items)).find((item:{workItemId:string})=>item.workItemId===work.workItemId);
