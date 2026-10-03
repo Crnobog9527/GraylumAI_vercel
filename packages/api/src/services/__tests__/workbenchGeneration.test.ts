@@ -137,15 +137,18 @@ it('does not normalize punctuation-heavy resource paths into common short words'
     expect(echoesPrivateMethod(`Private file: ${path}`,context)).toBe(true);
   }
 });
-it('rate limits invalid direct generation before private reads and tokenization', async () => {
+it('rate limits invalid direct generation after pause settings but before model reads and tokenization', async () => {
   const limit=vi.spyOn(security,'checkRateLimitAsync').mockRejectedValue(new TRPCError({code:'TOO_MANY_REQUESTS'}));
-  const from=vi.fn(), rpc=vi.fn(()=>({abortSignal:async()=>({data:null,error:null})})), transport=vi.fn();
+  const settings={select(){return this;},eq:vi.fn().mockReturnThis(),maybeSingle:async()=>({data:null,error:null})};
+  const from=vi.fn(()=>settings), rpc=vi.fn(()=>({abortSignal:async()=>({data:null,error:null})})), transport=vi.fn();
   const auth={getUser:async()=>({data:{user:{id:model.id,email_confirmed_at:'2026-01-01'}},error:null})};
   const service=workbenchGeneration({auth} as never,{from,rpc} as never,transport);
   for(let n=1;n<=3;n++) {
     await expect(service.generate({projectId:model.id,roundId:model.id,requestId:`00000000-0000-4000-8000-00000000000${n}`,stepId:'step-0',instruction:'',expectedSteps:{'step-0':{version:0,reviewVersion:0}},quoteHash:'a'.repeat(64),budgetCredits:100})).rejects.toMatchObject({code:'TOO_MANY_REQUESTS'});
   }
-  expect(limit).toHaveBeenCalledTimes(3); expect(from).not.toHaveBeenCalled(); expect(transport).not.toHaveBeenCalled();
+  expect(limit).toHaveBeenCalledTimes(3); expect(from.mock.calls).toEqual([['system_settings'],['system_settings'],['system_settings']]);
+  expect(settings.eq.mock.calls).toEqual([['key','runtime_rate_limits'],['key','runtime_rate_limits'],['key','runtime_rate_limits']]);
+  expect(transport).not.toHaveBeenCalled();
   expect(rpc).toHaveBeenCalledTimes(3);
   for(const [,payload] of rpc.mock.calls as unknown as Array<[string,{p_action:string}]>) expect(payload.p_action).toBe('get');
 });

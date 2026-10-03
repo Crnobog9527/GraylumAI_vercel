@@ -38,3 +38,8 @@ it('maps insufficient auth lifetime before any claim to an explicit recoverable 
  await expect(caller.execute({executionId:id})).rejects.toMatchObject({code:'PRECONDITION_FAILED',message:'登录会话剩余时间不足，请重新登录后继续原请求。'});
  expect(claim).not.toHaveBeenCalled();expect(client.auth.getUser).not.toHaveBeenCalled();
 });
+
+vi.mock('../services/runtime/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../services/runtime/newWorkGate')>(),
+ ...(await import('../services/__tests__/fixtures/runtimeGates')).testAdmissionGates,
+}));

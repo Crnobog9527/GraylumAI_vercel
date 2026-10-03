@@ -126,7 +126,8 @@ export type AgentTurnState = "completed" | "cancelled" | "cost_pending" | "pendi
  * Why a finished or stopped execution has no usable body. The page maps each
  * value to a fixed notice; none of them may be retried automatically.
  */
-export type AgentTurnUnavailable = "output_truncated" | "provider_history" | "preflight" | "capacity" | "latest";
+export type AgentTurnUnavailable = "output_truncated" | "provider_history" | "preflight" | "capacity" | "latest"
+  | "call_limited" | "paused" | "limit_unavailable";
 
 /** The execution outcome. `body` is the stored reply body; read it with `readAgentTurnBody`. */
 export type AgentTurnOutcome = {

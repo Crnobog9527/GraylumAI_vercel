@@ -217,3 +217,8 @@ it.each([false,true])('zero history applies only to newly admitted positioning a
  config.organize.historyItems=9;
  expect(await service.prepare({...f.input,...(standalone?{selection:{kind:'organizer'},organizeAfter:false}:{})})).toEqual(result);
 });
+
+vi.mock('./newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('./newWorkGate')>(),
+ ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
+}));
