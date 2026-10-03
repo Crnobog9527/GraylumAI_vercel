@@ -5,6 +5,7 @@ import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { readValidationIssueMessages } from '@/lib/safe-error-message';
 import { MULTIPLIER_PANEL_ID } from './multiplierPanelLink';
 
 // Same rule as the server: 1–20, at most two decimals; blank means "inherit the site default".
@@ -34,7 +35,7 @@ export function ModelMultiplierPanel() {
       void utils.modelPricing.getMultipliers.invalidate();
     },
     onError: (error, input) => {
-      setMessage({ id: input.modelId, text: error.message });
+      setMessage({ id: input.modelId, text: readValidationIssueMessages(error.message) ?? error.message });
       // Keep the draft; reload updated_at so the admin can save again after checking the change.
       if (error.data?.code === 'CONFLICT') void utils.modelPricing.getMultipliers.invalidate();
     },
