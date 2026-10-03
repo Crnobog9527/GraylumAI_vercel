@@ -200,12 +200,11 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
    await saveResults.mutateAsync({workItemId:op.workItemId,requestId:op.package.requestId,executionId:packageExecutionId,sourceScriptId,expectedStoryboardVersion:op.package.expectedStoryboardVersion,expectedEditingVersion:op.package.expectedEditingVersion,choice:op.choice??'both'});
    localStorage.setItem(videoKey+':completed:'+op.package.requestId,JSON.stringify(op));localStorage.removeItem(videoKey);const rejectedPackage=localStorage.getItem(videoKey+':rejected-source:'+op.script.executionId);if(rejectedPackage)localStorage.removeItem(videoKey+':rejected:'+rejectedPackage);localStorage.removeItem(videoKey+':rejected-source:'+op.script.executionId);await Promise.all([view.refetch(),library.refetch()]);
   });}catch(cause){const message=cause instanceof Error?cause.message:'';const admissionGate=runtimeAdmissionNotice(cause);
-  // A definite 4xx refusal before admission ends the request. Admission refused it after material preparation,
-  // so release that claim first (abandon); otherwise nothing was bound. If the release fails, it stays held below.
+  // Only a definite admission refusal followed by a successful abandon proves the material claim is gone. Any other
+  // refusal (for example material replay refused by policy or sign-in) says nothing about an earlier claim: hold it.
   const refused=definiteRefusal(cause);let released=false;
-  if(refused&&!active.followup.executionId&&localStorage.getItem(videoKey)){
-   if(refused.path!=='runtime.prepare')released=true;
-   else if(active.sourceScriptId)try{await prepareVideoMaterial.mutateAsync({action:'abandon',workItemId:active.workItemId,
+  if(refused?.path==='runtime.prepare'&&!active.followup.executionId&&localStorage.getItem(videoKey)){
+   if(active.sourceScriptId)try{await prepareVideoMaterial.mutateAsync({action:'abandon',workItemId:active.workItemId,
     requestId:active.followup.requestId,sourceScriptId:active.sourceScriptId,choice:active.choice??'both',
     expectedStoryboardVersion:active.package.expectedStoryboardVersion,expectedEditingVersion:active.package.expectedEditingVersion});
     released=true;}catch{/* Outcome unknown: keep the claim and the request for an explicit retry. */}
@@ -214,7 +213,10 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   // frozen material and request id for an explicit retry. Never abandon it or resume it automatically after a reload.
   if(!released&&!active.followup.executionId&&!videoDefiniteRejections.has(message)){
    const frozen=localStorage.getItem(videoKey);if(frozen)storeVideo({...JSON.parse(frozen),...active,held:true});
-   setError(admissionGate??(frozen?'视频工作请求状态待核实。完整原请求已保留；再次选择会用同一请求重试，不会新建请求。':'视频工作请求未发出，请稍后再选择一次。'));return;
+   const kept='完整原请求已保留；条件恢复后再次选择，会用同一请求继续，不会新建请求。';
+   // A structured refusal carries a fixed server notice (for example "please sign in again"); never raw diagnostics.
+   const refusedNotice=refused&&refused.path!=='runtime.prepare'&&cause instanceof Error?cause.message+' '+kept:null;
+   setError(!frozen?'视频工作请求未发出，请稍后再选择一次。':admissionGate??refusedNotice??'视频工作请求状态待核实。'+kept);return;
   }
   const gateNotice=videoGateNotice(message);
   let definite=released||videoDefiniteRejections.has(message)||videoGateNotice(message)!==null;if(message==='OPC_CONTENT_BINDING'&&active.followup.executionId)try{await cancel.mutateAsync({executionId:active.followup.executionId});await view.refetch();}catch{definite=false;}if(message==='OPC_CONTENT_OUTPUT_TRUNCATED_PENDING'){setError('本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。');await view.refetch();}else if(definite){localStorage.setItem(videoKey+':rejected:'+active.package.requestId,JSON.stringify(active));localStorage.setItem(videoKey+':rejected-source:'+active.script.executionId,active.package.requestId);localStorage.removeItem(videoKey);await view.refetch();setError(gateNotice??(message==='OPC_CONTENT_OUTPUT_TRUNCATED'?OUTPUT_TRUNCATED_NOTICE:message==='OPC_CONTENT_RESPONSE_INVALID'?'分镜回复格式未通过保存校验，口播稿定稿已保留；请在原对话要求 Agent 重新整理。':'原视频工作请求已明确拒绝（'+message+'），没有再次派发。请刷新后基于最新版本重试。'));}else if(message==='OPC_CONTENT_CAPACITY'){if(active.followup.executionId)markCapacity(active.followup.executionId);setError('分镜或剪辑所需材料超过模型输入容量。原请求与口播稿已保留；请取消剩余执行后缩短材料再继续。');}else setError(gateNotice??'视频工作请求状态待核实。完整原请求已保留；再次点击只会恢复这一次请求。');}finally{setVideoBusy(false);}

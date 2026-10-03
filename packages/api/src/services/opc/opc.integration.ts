@@ -9531,7 +9531,8 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
     await page.getByRole('button',{name:'关闭窗口',exact:true}).click();
     await page.getByRole('link',{name:'返回当前工作',exact:true}).last().click();
     await page.waitForURL(url=>url.pathname==='/runtime');
-    expect(page.url()).toBe(contentUrl);
+    // The page consumes the one-shot continue marker after it loads; compare once it is gone.
+    await expect.poll(()=>page.url(),{timeout:60000}).toBe(contentUrl);
     await page.reload();
     await page.getByLabel('文章正文').waitFor();
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/default-content-journey.png',fullPage:true});
@@ -11402,7 +11403,7 @@ it("OPC: RATE-LIMIT start-page send refused by any 503 is never re-sent automati
 // nothing by themselves; the user's explicit retry sends the same request id once and completes it.
 // Guidance runs its three cases on one fixture; each package case gets its own fixture.
 async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase = -1,
-  refusalCase: '' | 'guidance403' | 'video412' | 'video412AbandonFails' = '') {
+  refusalCase: '' | 'guidance403' | 'video412' | 'video412AbandonFails' | 'materialRefusedOnRecovery' = '') {
   const { execFileSync } = await import("node:child_process");
   const tag = process.env.V3_RATE_LIMIT_TAG;
   if (!tag || !/^[a-z0-9][a-z0-9-]{0,80}$/.test(tag)) throw new Error("local rate limit required");
@@ -11439,6 +11440,20 @@ async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase
   const executionsOf = async (requestId: string, state?: string) => Number((await sql.query(
     "select count(*)::int n from runtime_executions where actor_id=$1 and request_id::text=$2 and ($3::text is null or state=$3)",
     [f.actor, requestId, state ?? null])).rows[0].n);
+  /** Credits and BILL2 runs/reservations, read once nothing runs and the values hold still across 2 seconds. */
+  async function money() {
+    const read = async () => (await sql.query(
+      "select (select credits from profiles where id=$1)::text credits,(select count(*) from bill2_runs where actor_id=$1)::int runs," +
+      "(select count(*) from credit_transactions where user_id=$1 and reason_code='bill2_reserve')::int reserves," +
+      "(select count(*) from runtime_executions where actor_id=$1 and state not in ('completed','cancelled'))::int busy", [f.actor])).rows[0];
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const first = await read();
+      await page.waitForTimeout(2000);
+      const second = await read();
+      if (!first.busy && JSON.stringify(first) === JSON.stringify(second)) return { credits: first.credits, runs: first.runs, reserves: first.reserves };
+    }
+    throw new Error('credits and reservations did not settle');
+  }
   type Refusal = { name: string; on: () => Promise<void>; off: () => Promise<void> };
   const fulfil = (pattern: string | RegExp, body: string): Refusal['on'] => () => page.route(pattern,
     route => route.fulfill({ status: 503, contentType: 'application/json', body }));
@@ -11499,6 +11514,7 @@ async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase
     // P2-1: the continue-work guidance.
     for (const [index, refusal] of (part === 'guidance' ? refusals : []).entries()) {
       if (index > 0) await finalizeNewScript();
+      const moneyBefore = await money();
       const sent = prepares.length;
       await refusal.on();
       await page.goto(continueUrl);
@@ -11514,6 +11530,7 @@ async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase
         expect(sendsOf(requestId)).toBe(1);
         expect(await executionsOf(requestId)).toBe(0);
       });
+      expect(await money()).toEqual(moneyBefore);
       await recoverGuide.click();
       await expect.poll(() => executionsOf(requestId, 'completed'), { timeout: 420000 }).toBe(1);
       expect(sendsOf(requestId)).toBe(2);
@@ -11537,6 +11554,7 @@ async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase
       const choice = '先做分镜，再生成剪辑建议';
       await finalizeNewScript();
       await finalPrompt.waitFor({ timeout: 420000 });
+      const moneyBefore = await money();
       const sent = prepares.length;
       await refusal.on();
       await page.getByLabel('消息', { exact: true }).fill(choice);
@@ -11559,6 +11577,7 @@ async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase
       await quietAfterReload(stillHeld);
       await refusal.off();
       await quietAfterReload(stillHeld);
+      expect(await money()).toEqual(moneyBefore);
       await page.getByLabel('消息', { exact: true }).fill(choice);
       await page.getByRole('button', { name: '发送', exact: true }).click();
       await expect.poll(() => page.evaluate(key => localStorage.getItem(key), videoKey), { timeout: 420000 }).toBeNull();
@@ -11568,8 +11587,8 @@ async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase
       expect(abandons).toEqual([]);
     }
 
-    // Definite 4xx refusals before admission end the request instead of holding it forever: the guidance
-    // drops its recovery control; the package releases its material claim so the work can continue.
+    // Definite 4xx refusals before admission: the guidance drops its recovery control; a package refused by admission
+    // releases its material claim (abandon) so the work can continue. Nothing else is taken as proof of release.
     const prepareRoute = /\/api\/trpc\/runtime\.prepare(?:[?,]|$)/;
     const refusal412 = JSON.stringify([{ error: { message: '本次操作所需模型尚未获准用于当前测试窗口，请联系管理员。', code: -32012,
       data: { code: 'PRECONDITION_FAILED', httpStatus: 412, path: 'runtime.prepare' } } }]);
@@ -11582,6 +11601,7 @@ async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase
       await expect.poll(scripts, { timeout: 420000 }).toBe(before + 1);
     }
     if (refusalCase === 'guidance403') {
+      const moneyBefore = await money();
       const sent = prepares.length;
       await page.route(prepareRoute, route => route.fulfill({ status: 403, contentType: 'application/json', body: refusal403 }));
       await page.goto(continueUrl);
@@ -11595,7 +11615,12 @@ async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase
         expect(sendsOf(requestId)).toBe(1);
         expect(await recoverGuide.count()).toBe(0);
         expect(await executionsOf(requestId)).toBe(0);
+        // The refused guidance keeps its record, and the active recovery record is gone.
+        const guideKey = 'opc-work-guide:' + sessionId + ':' + requestId;
+        expect(JSON.parse((await page.evaluate(key => localStorage.getItem(key), guideKey + ':rejected'))!).requestId).toBe(requestId);
+        expect(await page.evaluate(key => localStorage.getItem(key), guideKey)).toBeNull();
       });
+      expect(await money()).toEqual(moneyBefore);
       await ordinaryChatWorks('引导被拒后继续普通对话。');
       expect(sendsOf(requestId)).toBe(1);
     }
@@ -11604,6 +11629,7 @@ async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase
       await page.getByText('【主动引导合成示例，仅验证交互】', { exact: false }).first().waitFor({ timeout: 420000 });
       await finalizeNewScript();
       const choice = '先做分镜，再生成剪辑建议';
+      const moneyBefore = await money();
       const sent = prepares.length;
       const material = /\/api\/trpc\/opc\.prepareVideoMaterial(?:[?,]|$)/;
       await page.route(prepareRoute, route => route.fulfill({ status: 412, contentType: 'application/json', body: refusal412 }));
@@ -11624,6 +11650,7 @@ async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase
           expect(await executionsOf(requestId)).toBe(0);
           expect(await page.evaluate(key => localStorage.getItem(key), videoKey)).toBeNull();
         });
+        expect(await money()).toEqual(moneyBefore);
         // The released claim no longer blocks the work: ordinary dialogue is admitted again.
         await ordinaryChatWorks('视频包被拒后继续普通对话。');
         expect(sendsOf(requestId)).toBe(1);
@@ -11640,12 +11667,59 @@ async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase
           expect(await executionsOf(requestId)).toBe(0);
           expect(JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!)).toEqual(held);
         });
+        expect(await money()).toEqual(moneyBefore);
         await page.getByLabel('消息', { exact: true }).fill(choice);
         await page.getByRole('button', { name: '发送', exact: true }).click();
         await expect.poll(() => page.evaluate(key => localStorage.getItem(key), videoKey), { timeout: 420000 }).toBeNull();
         expect(sendsOf(requestId)).toBe(2);
         expect(await executionsOf(requestId, 'completed')).toBe(1);
       }
+    }
+    // Review 5965199920: a held request whose material replay is refused (412, for example "sign in again") still
+    // owns its earlier claim. It must stay held under the same identity, then complete once the condition clears.
+    if (refusalCase === 'materialRefusedOnRecovery') {
+      await page.goto(continueUrl);
+      await page.getByText('【主动引导合成示例，仅验证交互】', { exact: false }).first().waitFor({ timeout: 420000 });
+      await finalizeNewScript();
+      const choice = '先做分镜，再生成剪辑建议';
+      const moneyBefore = await money();
+      const material = /\/api\/trpc\/opc\.prepareVideoMaterial(?:[?,]|$)/;
+      const signIn412 = JSON.stringify([{ error: { message: '登录会话剩余时间不足，请重新登录后继续原请求。', code: -32012,
+        data: { code: 'PRECONDITION_FAILED', httpStatus: 412, path: 'opc.prepareVideoMaterial' } } }]);
+      // 1. The material is bound, then admission fails uncertainly: held.
+      await page.route(prepareRoute, route => route.fulfill({ status: 503, contentType: 'application/json', body: plain503 }));
+      await page.getByLabel('消息', { exact: true }).fill(choice);
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      await page.getByRole('alert').filter({ hasText: '视频工作请求状态待核实' }).waitFor({ timeout: 420000 });
+      const held = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
+      expect(held.held).toBe(true);
+      const requestId = held.followup.requestId as string;
+      await page.unroute(prepareRoute);
+      // 2. The explicit recovery replays the material call, which policy now refuses with a structured 412.
+      await page.route(material, route => route.fulfill({ status: 412, contentType: 'application/json', body: signIn412 }));
+      await page.getByLabel('消息', { exact: true }).fill(choice);
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      await page.getByRole('alert').filter({ hasText: '请重新登录后继续原请求' }).waitFor({ timeout: 420000 });
+      expect(await page.getByRole('alert').filter({ hasText: '原视频工作请求已明确拒绝' }).count()).toBe(0);
+      const stillHeld = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
+      expect(stillHeld.held).toBe(true);
+      expect(stillHeld.followup.requestId).toBe(requestId);
+      expect(abandons).toEqual([]);
+      await quietAfterReload(async () => {
+        expect(sendsOf(requestId)).toBe(1);
+        expect(await executionsOf(requestId)).toBe(0);
+        expect(JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!).followup.requestId).toBe(requestId);
+      });
+      expect(await money()).toEqual(moneyBefore);
+      // 3. Once the condition clears, the same request completes exactly once, and ordinary dialogue continues.
+      await page.unroute(material);
+      await page.getByLabel('消息', { exact: true }).fill(choice);
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      await expect.poll(() => page.evaluate(key => localStorage.getItem(key), videoKey), { timeout: 420000 }).toBeNull();
+      expect(await executionsOf(requestId, 'completed')).toBe(1);
+      expect(await executionsOf(requestId)).toBe(1);
+      expect(abandons).toEqual([]);
+      await ordinaryChatWorks('视频包恢复后继续普通对话。');
     }
   } finally {
     await sql.query("delete from system_settings where key='runtime_rate_limits'");
@@ -11656,6 +11730,6 @@ it("OPC: RATE-LIMIT /runtime guidance holds every unadmitted 503 for an explicit
 it.each([[0, 'paused'], [1, 'unknown structured 503'], [2, 'plain non-tRPC 503'], [3, 'material and admission both fail']] as const)(
   "OPC: RATE-LIMIT /runtime video package holds an unadmitted request for an explicit retry (%i: %s)",
   videoCase => runtimeHoldCase('video', videoCase), 1200000);
-it.each(['guidance403', 'video412', 'video412AbandonFails'] as const)(
-  "OPC: RATE-LIMIT /runtime definite 4xx refusal before admission is released, not held (%s)",
+it.each(['guidance403', 'video412', 'video412AbandonFails', 'materialRefusedOnRecovery'] as const)(
+  "OPC: RATE-LIMIT /runtime definite 4xx refusal before admission ends or holds by what it proves (%s)",
   refusalCase => runtimeHoldCase('refusal', -1, refusalCase), 1200000);
