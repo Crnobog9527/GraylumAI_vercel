@@ -1,6 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
-import {freezePromptCache,PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
+import {freezePromptCache,freezeHostPromptCache,PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
+import {hostTurnContextSchema,freezeHistorySelection,type HostTurnContext} from './hostTurn';
+import {currentInputBytes} from './historySelection';
+import {requestsHistoricalComparison} from './context';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isEmailVerified } from '../../lib/auth';
@@ -40,6 +43,7 @@ export const runtimeAdmission=z.object({sessionId:uuid,requestId:uuid,input:z.st
 /** Deployment policy is server configuration, never request input.
  * Real admission requires the separately loaded, enabled Staging window. */
 export type LocalRuntimePolicy={
+ hostTurnContext?:HostTurnContext;
  purposeBudgets?:boolean;real?:StagingPolicy;account:string;costPerCall:string;creditsPerUsd:string;multiplier:string;
  maxCalls:number;maxOutputTokens:number;inputBytes:number;historyItems:number;
  expectedMaterialRevision?:number;opcTurnToken?:string;mentorStream?:boolean;organizeOpening?:boolean;
@@ -102,6 +106,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    finally{leaveRateLimit?.();}
    const mentorStream=Boolean(policy.opcTurnToken&&policy.mentorStream);
    if(policy.organizeOpening&&(!mentorStream||!isOpeningInput(input.input)))throw new Error('RUNTIME_CONTEXT_INVALID');
+   const hostParsed=hostTurnContextSchema.safeParse(policy.hostTurnContext);
+   if(policy.hostTurnContext!==undefined&&(!hostParsed.success||!mentorStream||input.selection.kind!=='skill'||
+    hostParsed.data.opening!==isOpeningInput(input.input)))throw new Error('RUNTIME_CONTEXT_INVALID');
+   const hostTurnContext=policy.hostTurnContext===undefined?undefined:hostParsed.data;
+   const historySelection=hostTurnContext?freezeHistorySelection():undefined;
    const organizeAfter=input.organizeAfter||Boolean(policy.organizeOpening);
    if(mentorStream&&(input.network!=='deny'||input.sources.length||input.selection.kind==='auto'||policy.workspaceContext))
     throw new Error('RUNTIME_CONTEXT_INVALID');
@@ -173,10 +182,17 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const candidates=input.selection.kind==='auto'?await discoverRuntimeCandidates(
     user,admin,{...policy,inputBytes,maxOutputTokens:configuredOutput??policy.maxOutputTokens,...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(inputBytes,q.inputLimit),outputLimit:outputCapacity(row,Infinity,configuredOutput)};}}:{})}):[];
    if(policy.additionalInstructions)instructions+='\n'+z.string().max(budgets?inputBytes:8000).parse(policy.additionalInstructions);
-   const promptCache=freezePromptCache({real:Boolean(policy.real),role:input.selection.kind,model:row.data.model_id,
+   let promptCache=hostTurnContext?undefined:freezePromptCache({real:Boolean(policy.real),role:input.selection.kind,model:row.data.model_id,
     cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined,
     instructions,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions});
    if(mentorStream)instructions+='\n'+QUESTION_CONTRACT_INSTRUCTIONS;
+   const currentInput=runtimeScopeInput(input.input,session.scopeMaterial,hostTurnContext);
+   if(hostTurnContext)promptCache=freezeHostPromptCache({real:Boolean(policy.real),role:input.selection.kind,
+    model:row.data.model_id,cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined,
+    instructions,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions,
+    additionalInstructions:policy.additionalInstructions,mentor:mentorStream,
+    historyMarker:!hostTurnContext.opening&&!requestsHistoricalComparison(input.input)&&
+     currentInputBytes([{role:'user',content:currentInput}])<=historySelection!.currentReserveBytes});
    const searchAllowed=Boolean(policy.searchEnabled&&input.network!=='deny');
    let workspaceContext=false;
    if(policy.workspaceContext&&!policy.opcTurnToken&&!input.sources.length&&input.selection.kind!=='organizer'){
@@ -194,8 +210,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const inputLimit=inputCapacity(row.data,maxOutputTokens,inputBytes);
    if(candidates.length)selectRuntimeHistory([],[{role:'user',content:matchingInput(input.input,candidates)}],{instructions:MATCH_INSTRUCTIONS,inputBytes:inputLimit,historyItems:0,toolBytes:0});
    const admissionToolBytes=(mentorStream?askQuestionToolBytes(true):policy.searchEnabled?2048:0)+
-    (promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0);
-   selectRuntimeHistory([], [{role:'user',content:runtimeScopeInput(input.input,session.scopeMaterial)}],
+    (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
+   selectRuntimeHistory([], [{role:'user',content:currentInput}],
     {instructions,inputBytes:inputLimit,historyItems:0,toolBytes:admissionToolBytes});
    // New mentor turns use the interactive format; replays returned before this branch.
    // A host-opened mentor turn (the user has not spoken) never gets a question card.
@@ -209,7 +225,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const organizerFormat=Boolean(policy.real&&!mentorStream&&(organize||attachedOrganizer));
    if(organizerFormat&&!reasoning)reasoning={parameter:'none'};
    const providerRequestFormat=mentorStream?'agent-turn-v5-stream':organizerFormat?'serial-tools-v6-reasoning':'serial-tools-v2';
-   const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:'scope-projection-v1',
+   const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:hostTurnContext?'scope-projection-v2':'scope-projection-v1',
+    ...(hostTurnContext?{hostTurnContext,historySelection}:{}),
     ...(promptCache?{promptCache}:{}),
     ...(mentorStream?{questionContract:QUESTION_CONTRACT}:{}),
     ...(policy.real||mentorStream?{providerRequestFormat}:{}),...(reasoning?{reasoning}:{}),role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
