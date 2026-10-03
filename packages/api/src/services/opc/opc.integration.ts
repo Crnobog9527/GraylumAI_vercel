@@ -8453,11 +8453,17 @@ it("OPC: definite pre-admission failure revokes its claim and permits an explici
   const { browser, page } = await planBrowser(f);
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    // The item's content type is chosen first; only a video item offers a script final.
+    await page.getByRole('button', { name: '视频', exact: true }).click();
+    await page.getByLabel('口播稿正文', { exact: true }).waitFor();
     await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿。');
     await page.getByRole('button', { name: '发送', exact: true }).click();
     const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 }); await finalize.click();
-    await page.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    // The finalized script is shown by its version summary and next actions now (a8dba69c).
+    await page.getByRole('button', { name: '只生成分镜', exact: true }).waitFor({ timeout: 60000 });
+    expect((await sql.query("select version,status from opc_content_versions where work_item_id=$1 and kind='script'", [work.workItemId])).rows)
+      .toEqual([{ version: 1, status: 'final' }]);
     let lateRequestBody = '';
     await page.route('**/api/trpc/runtime.prepare*', route => {
       if (!(route.request().postData() ?? '').includes('OPC_VIDEO_PACKAGE_V1')) return route.continue();
@@ -8493,11 +8499,17 @@ it("OPC: video claim material stays exclusive and a rejected claim can be retrie
   const { browser, page } = await planBrowser(f);
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    // The item's content type is chosen first; only a video item offers a script final.
+    await page.getByRole('button', { name: '视频', exact: true }).click();
+    await page.getByLabel('口播稿正文', { exact: true }).waitFor();
     await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿。');
     await page.getByRole('button', { name: '发送', exact: true }).click();
     const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 }); await finalize.click();
-    await page.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    // The finalized script is shown by its version summary and next actions now (a8dba69c).
+    await page.getByRole('button', { name: '只生成分镜', exact: true }).waitFor({ timeout: 60000 });
+    expect((await sql.query("select version,status from opc_content_versions where work_item_id=$1 and kind='script'", [work.workItemId])).rows)
+      .toEqual([{ version: 1, status: 'final' }]);
     const item = (await f.service.library({ search: '', from: null, to: null })).businesses
       .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;content: Array<{id: string;kind: string}>}>}>}) => business.accounts.flatMap(account => account.items))
       .find((entry: {workItemId: string}) => entry.workItemId === work.workItemId)!;
@@ -9108,7 +9120,9 @@ it("OPC: entry projection stays actor-owned and repeatable without granting tabl
   expect(privileges).toEqual({client:false,business_table:false,predecessor:false});
 },60000);
 
-it('OPC: CAPACITY version counts use only current manuscript through browser and refresh after save',async()=>{
+// These two read the runner's capacity transport sample, which exists only in a
+// disposable run whose case pattern names CAPACITY (V3_CAPACITY_CAPTURE).
+it.skipIf(process.env.V3_CAPACITY_CAPTURE !== 'true')('OPC: CAPACITY version counts use only current manuscript through browser and refresh after save',async()=>{
  const {readFileSync}=await import('node:fs');
  const capture=process.env.V3_WORKBENCH_OUTPUT+'/capacity-requests.jsonl';
  const all=()=>{try{return readFileSync(capture,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));}catch{return [];}};
@@ -9194,7 +9208,7 @@ it('OPC: CAPACITY version counts use only current manuscript through browser and
  expect((results.find(x=>x.storedVersions===100)!.requestBytes as number)-base).toBeLessThan(3000);
 },300000);
 
-it('OPC: CAPACITY chat history projects superseded scope bodies without rewriting stored turns',async()=>{
+it.skipIf(process.env.V3_CAPACITY_CAPTURE !== 'true')('OPC: CAPACITY chat history projects superseded scope bodies without rewriting stored turns',async()=>{
  const {readFileSync}=await import('node:fs');
  const capture=process.env.V3_WORKBENCH_OUTPUT+'/capacity-requests.jsonl';
  const all=()=>{try{return readFileSync(capture,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));}catch{return [];}};
@@ -9376,7 +9390,8 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
  }finally{await browser.close();}
 },180000);
 
-it('OPC: Agent-first U1 sample preserves target, partial adoption, document edits and a narrow-screen return',async()=>{
+// The Agent-first sample page calls notFound() in a production build (--serve).
+it.skipIf(process.env.NODE_ENV === 'production')('OPC: Agent-first U1 sample preserves target, partial adoption, document edits and a narrow-screen return',async()=>{
  const f=await publishedDraft();
  const {browser,page}=await planBrowser(f);
  try{

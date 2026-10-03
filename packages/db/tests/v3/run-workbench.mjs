@@ -69,6 +69,8 @@ const runtimeSchema=stagingSchema||opcSchema||runtimeMode||runtimeUpgrade||args.
 const bill2Schema=args.includes('--with-bill2-schema')||runtimeSchema;
 const bill2Mode=args.includes('--bill2-only')||args.includes('--bill2-core-only');
 const casePattern=args.find(arg=>arg.startsWith('--case-pattern='))?.slice(15);
+// Capacity transport sampling only runs for a disposable CAPACITY case pattern; cases read V3_CAPACITY_CAPTURE.
+const capacityCapture=!previewOptions.persistent&&!stagingHost&&Boolean(casePattern?.includes('CAPACITY'));
 // CI path: database/API integration subsets without the local application or a browser.
 const withoutApp=args.includes('--without-app');
 const withoutAppSuite=!withoutApp?null:args.includes('--bill2-core-only')?'bill2':runtimeMode&&stagingSchema&&!opcMode?'runtime':null;
@@ -486,7 +488,7 @@ try {
       let raw='';for await(const chunk of req)raw+=chunk;
       const request=req.url==='/__official_chat'?JSON.parse(raw):JSON.parse(JSON.parse(raw).input);runtimeCalls.push(request);
       // Disposable synthetic transport sampling for the capacity validation.
-      if(!previewOptions.persistent&&!stagingHost&&req.url==='/call'&&casePattern?.includes('CAPACITY'))appendFileSync(resolve(evidenceDirectory,'capacity-requests.jsonl'),JSON.stringify(request)+'\n',{mode:0o600});
+      if(capacityCapture&&req.url==='/call')appendFileSync(resolve(evidenceDirectory,'capacity-requests.jsonl'),JSON.stringify(request)+'\n',{mode:0o600});
       const id=serve ? 'local-runtime-'+randomUUID() : 'local-runtime-'+runtimeCalls.length;
       runtimeReceipts.set(id,request);
       appendFileSync(receiptFile,JSON.stringify({id,model:request.model})+'\n',{mode:0o600});
@@ -844,6 +846,7 @@ try {
     NEXT_PUBLIC_SUPABASE_ANON_KEY: anon,
     SUPABASE_SERVICE_ROLE_KEY: service,
     V3_LOCAL_STAGING_SCHEMA: stagingSchema ? 'true' : 'false',
+    V3_CAPACITY_CAPTURE: capacityCapture ? 'true' : 'false',
     V3_LOCAL_DB: `postgres://postgres@127.0.0.1:${port(db, "5432")}/v3_disposable`,
     V3_LOCAL_REST: apiUrl,
     ...((opcMode||runtimeMode||runtimeUpgrade)&&!stagingHost?{V3_RUNTIME_LOCAL_ENDPOINT:apiUrl}:{}),
