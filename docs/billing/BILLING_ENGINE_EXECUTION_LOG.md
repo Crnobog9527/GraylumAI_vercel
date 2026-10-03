@@ -1,3 +1,6 @@
+> 历史记录说明：`[retired-staging-host]` 代表当时使用、现已退役的 staging 域名。
+> 当前入口为 `https://auth-staging.graylum.com`；以下历史结果不构成当前域名的验证证据。
+
 # Billing Engine v1.5 Execution Log
 
 > 项目：GraylumAI_vercel / graylum 网站维护
@@ -944,7 +947,7 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 ### Staging no-payment runtime check
 
-- Target app host：`graylumai-staging.vercel.app`。
+- Target app host：`[retired-staging-host]`。
 - Checked page：`/profile?tab=subscription`。
 - Browser state：Chrome existing staging login state；in-app browser without login state redirected to login and was not used for authenticated assertions。
 - 页面可见：`个人中心`、`会员订阅`、`账单记录`、`积分概览`、`积分余额`、`本月消耗`。
@@ -1160,7 +1163,7 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 - Supabase project ref：`staging 项目`。
 - Supabase project name：`GraylumAI Staging`。
-- App host：`graylumai-staging.vercel.app`。
+- App host：`[retired-staging-host]`。
 - Safety check：`NEXT_PUBLIC_SUPABASE_URL` project ref 与 `EXPECTED_SUPABASE_PROJECT_REF` 匹配；未发现 production-like target。
 - Production project / production host：未访问、未作为目标。
 
@@ -1225,18 +1228,18 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 - 执行模式：unauthenticated / no-payment / no cron secret。
 - 尝试访问：
-  - `https://graylumai-staging.vercel.app/`
-  - `https://graylumai-staging.vercel.app/login`
-  - `https://graylumai-staging.vercel.app/profile?tab=subscription`
-  - `https://graylumai-staging.vercel.app/api/cron/release-subscription-credits`
-- 结果：blocked by local DNS / network. 本机 DNS 将 `graylumai-staging.vercel.app` 解析到异常非 Vercel 地址，并且 HTTPS 443 连接超时。
+  - `[retired-staging-host]/`
+  - `[retired-staging-host]/login`
+  - `[retired-staging-host]/profile?tab=subscription`
+  - `[retired-staging-host]/api/cron/release-subscription-credits`
+- 结果：blocked by local DNS / network. 本机 DNS 将 `[retired-staging-host]` 解析到异常非 Vercel 地址，并且 HTTPS 443 连接超时。
 - 未完成项：页面加载与 cron unauthenticated response 未能在本机完成。
 - Forbidden runtime actions confirmation：未点击购买、升级、Stripe invoice/payment、退款、取消按钮或链接；未携带 cron secret；未触发 `releaseDueAnnualSubscriptionCredits`；未留下 runtime 数据。
 
 #### Runtime no-payment rerun
 
 - 时间：2026-06-11 CST。
-- 重跑目标仍限 staging host：`graylumai-staging.vercel.app`。
+- 重跑目标仍限 staging host：`[retired-staging-host]`。
 - System DNS rerun：仍返回异常非 Vercel 地址，例如 `199.16.156.103`、`108.160.166.142`、`2a03:2880:f117:83:face:b00c:0:25de`。
 - Public DoH rerun：Cloudflare DoH 与 Google DoH 均在本机网络层 HTTPS 443 timeout。
 - Vercel edge forced-connect rerun：使用 staging Host header 指向 common Vercel edge IP `76.76.21.21` 时连接被 reset。
@@ -1252,8 +1255,8 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 - 时间：2026-06-11 CST。
 - Owner 指令边界：不重新执行 0045 migration；不修改 staging DB；不使用 cron secret；不触发 `release-subscription-credits`；仅检查 staging host。
-- System DNS rerun：`graylumai-staging.vercel.app` 仍解析到异常非 Vercel 地址 `154.85.102.30`。
-- CLI HTTPS rerun：`https://graylumai-staging.vercel.app/` 返回 SSL handshake failure / `SSL_ERROR_SYSCALL`。
+- System DNS rerun：`[retired-staging-host]` 仍解析到异常非 Vercel 地址 `154.85.102.30`。
+- CLI HTTPS rerun：`[retired-staging-host]/` 返回 SSL handshake failure / `SSL_ERROR_SYSCALL`。
 - Chrome existing-network rerun：新建只读 Chrome tab，访问 `/` 与 `/profile?tab=subscription` 均在 `Page.navigate` 阶段 timeout；未进入页面 DOM，无法读取账单/订阅/积分展示。
 - Rerun result：仍 failed / blocked；runtime no-payment 未通过。
 - Forbidden runtime actions confirmation：未登录、未点击购买/升级/Stripe invoice/payment/refund/cancel；未使用 cron secret；未访问 cron release route；未触发 checkout/payment/refund/cancel/webhook/release；未留下 runtime 数据。
@@ -1261,11 +1264,11 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 #### Runtime no-payment success rerun
 
 - 时间：2026-06-11 CST。
-- DNS / HTTPS：system DNS now resolves `graylumai-staging.vercel.app` to Clash/Mihomo fake-ip `198.18.0.4`; normal HTTPS to staging host reaches Vercel.
-- `/`：loaded on `graylumai-staging.vercel.app` with title `Graylum AI Staging`; no console error / warning observed.
-- `/profile?tab=subscription`：loaded on `graylumai-staging.vercel.app` with title `Graylum AI Staging`; visible content includes personal center, membership subscription, billing records, credit overview, credit balance, and monthly spend.
+- DNS / HTTPS：system DNS now resolves `[retired-staging-host]` to Clash/Mihomo fake-ip `198.18.0.4`; normal HTTPS to staging host reaches Vercel.
+- `/`：loaded on `[retired-staging-host]` with title `Graylum AI Staging`; no console error / warning observed.
+- `/profile?tab=subscription`：loaded on `[retired-staging-host]` with title `Graylum AI Staging`; visible content includes personal center, membership subscription, billing records, credit overview, credit balance, and monthly spend.
 - Error check：no Next/app error page signal; no internal server error signal; no body-leading `500`.
-- Resource / request check：observed resource hosts only `graylumai-staging.vercel.app`; no production host resource; no observed checkout / Stripe / refund / cancel / webhook / `release-subscription-credits` request.
+- Resource / request check：observed resource hosts only `[retired-staging-host]`; no production host resource; no observed checkout / Stripe / refund / cancel / webhook / `release-subscription-credits` request.
 - Visible payment-adjacent controls / links existed on the page, including invoice links and purchase buttons, but none were clicked.
 - Runtime no-payment result：passed.
 - Forbidden runtime actions confirmation：no production host; no Supabase DB access; no cron secret; no checkout/payment/refund/cancel/webhook/release; no `apps/web/vercel.json` change; no PR4 / PR5 / PR6.

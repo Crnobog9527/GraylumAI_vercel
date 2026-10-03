@@ -60,7 +60,7 @@ it.each([false,true].flatMap(opening=>['missing','provisional','confirmed','defe
    const data:Record<string,unknown>={
     opc_query:{projectId:id,roundId:id,sessionId:id,information},
     artifact_query:{moduleId:id,workflow:{steps}},runtime_admission_replay:null,
-    opc_step_material:{revision:1,turnToken:id},
+    opc_capture_apply:{processed:[],remaining:0,hasMore:false},opc_step_material:{revision:1,turnToken:id},
    };
    if(!(name in data))throw new Error('Unexpected local fixture RPC: '+name);
    const response=Promise.resolve({data:data[name],error:null});
