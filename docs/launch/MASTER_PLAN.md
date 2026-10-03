@@ -40,7 +40,7 @@
 
 1. **马上**（**已完成**，2026-09-28）：合并已经修好的"导师不出字"问题（PR #446）；关掉一个没人用但仍可调用的旧付费接口，删掉会扣积分的临时脚本；把计费和恢复的集成测试放进 CI。
 2. **核心体验重做，分几次给你试**（**进行中**，样片剩余 AC1-5；AC1-4 已于 2026-10-02 合并并完成 staging 验收）：先用真实模型验证"现在的模型能不能驱动提问卡"，做一个你能亲手试的样片；再做完整定位流程；最后推广到自由对话和其他 Skill。
-3. **上线基础**：正式环境能真实调用模型（含止损和 BILL-PAYG 逐次冻结、按名义费用结算）、后台配置模型思考强度、第三方搜索和对标研究（基于真实数据）、会员权限、限流修复、账号注销和数据删除。完成后先做 5–10 人的封闭内测。
+3. **上线基础**：正式环境能真实调用模型（含止损和 BILL-PAYG 逐次冻结、按名义费用结算）、后台配置模型思考强度、第三方搜索和对标研究（基于真实数据）、会员权限、限流修复、账号注销和数据删除。不再做封闭内测，按 D1 范围完成后直接公开上线售卖（2026-10-03，第 2.1 节第 50 项）。
 4. **差异化功能**：Fusion 多模型（定稿报告评审、多模型对比），个人资料库和语料库（学习用户文风），输入框的引用和附件。
 5. **收费和上线**：Waffo 支付、下线旧对话链路、完整验收、发布。
 6. **上线后**：飞书等连接器、社媒数据同步、Skill 的后续学习机制、资料库检索和图片音频。
@@ -348,10 +348,39 @@
 
     总控记录的含义（不是 Owner 原话）：第 30 项"新对话每分钟 10 次、每天 200 次"按用户每发一轮消息计一次，后台文案写"每轮消息"或"新消息"。5–10 位受邀用户的封闭内测（D8）在**正式环境**进行，所以正式环境的 Upstash Redis、Vercel Pro 等正式环境配置都是封闭内测前提；staging 的 Upstash 已配好，不影响 staging 上的开发和验收。服务层的环境前缀由 RUNTIME-PROD 区分。
 
+50. **定价、付费墙和上线方式**（Owner 2026-10-03，在定价方案审查会话中逐条确认，记录见本 PR 描述）。Owner 原话，按时间：
+
+    > 1.先按 120 计算吧。 2.免费用户也统一用 claude sonnet 5.5 3.不对外承诺约多少次定位。 就写积分 + 会员权益
+
+    > 不按 90% 算了， 太夸张了。
+
+    > 我之前设定的积分是不过期的， 只有会员等级会过期。
+
+    > 就算用户这个时候积分足够，他要想生成报告，必须要付费会员才能继续。
+
+    > 免费用户能拿走的：已确认的整理好的前置信息，不固定只有 6 步，后面有可能会改步骤，可以看，可以导出。免费拿到的东西不收回。 …… 积分包确实只能给会员购买。 取消封闭内测环节， 直接上线售卖。 我自己使用体验一下积分消耗的速度就可以定。 首发目标用户定为"想打造个人品牌，利用社交媒体变现的人。"其他的按你建议的来
+
+    > 退款扣除积分的规则是我口误了，现有的这个规则才是对的。
+
+    （第五段的省略号省去了 Owner 随后更正为口误的退款说法，见第六段。）"其他的按你建议的来"所指的建议已在同一会话列给 Owner，记录如下（不是 Owner 原话）：
+
+    - **加价倍数**：全站默认 m 由 3 改为 6；按模型/线路单独配置（第 34 项）、调用时冻结、只进位一次的规则不变。staging 和正式环境的实际修改仍须执行前另获 Owner 批准（第 39 项的做法）。
+    - **订阅和积分包的积分比例**：订阅每 1 美元售价给的积分 Pro 120、Gold 130；积分包每 1 美元 100 积分，最小积分包 10 美元。积分包只有会员能买。积分永不过期，只有会员等级会过期；退款仍按 v11 §9.3（只处理被退款那一期订阅未用的积分，保护开户、签到、积分包等其他来源）。
+    - **价格页**：只写积分和会员权益，不承诺次数或份数，也不写"约等于多少次定位"。所有用户（含免费用户）统一使用 Claude Sonnet 5.5（与第 38 项一致）。
+    - **报告付费墙**：带步骤 Skill 生成报告必须是付费会员，同时照常扣积分（第 22、25 项的其余规则不变）。免费用户可以做完报告前的全部步骤；已确认、已整理的前置信息可以看、可以导出，不绑定步骤数，不收回。会员到期后，已生成的报告仍可看、可导出，只是不能生成新报告。会员检查在服务端的报告入口和调用准入两处执行，页面只负责提示。
+    - **其他付费提示**：免费积分在报告前用完时只提供开通会员；会员余额不足按 BILL-PAYG 在两步之间暂停、充值后继续；Pro 用户一个月买 2 次以上积分包时提示 Gold 更划算。
+    - **数值怎么定**：开户赠送 = Owner 用 Sonnet 5.5 亲自走完报告前全部步骤的账本消耗 × 1.2，按 m=6 换算（目前写死在 0151 的 100 积分要走迁移修改）；Pro / Gold 月价 = "一份报告 + 4 周日常选题和写作"的实测消耗 ÷ 每美元积分。邀请奖励 50/30 按 m=6 复核。
+    - **上线方式**：取消封闭内测（D8）。上线基础完成后不再先做内测，按 D1 范围完成后直接公开上线售卖；原先写作"封闭内测前""内测前提"的事项改为公开上线前完成（第 2.2 节）。上线和生产相关动作仍按第 10 节另行批准。
+    - **首发目标用户**：想打造个人品牌、利用社交媒体变现的人。宣传不提内容追踪和数据复盘（社媒同步在上线后，D1）。
+    - **实施**：由新任务 PAYWALL 落实（第 7.1 节）。
+
 ### 2.2 被本版取代的旧规则
 
 | 旧规则 | 出处 | 本版处理 |
 | --- | --- | --- |
+| 封闭内测：上线基础完成后先邀请 5–10 人内测，只用赠送积分、不开放付费；以及写作"封闭内测前""内测前提"的安排 | 第 10 节 D8；第 2.1 节第 7、19、30、49 项；第 7.2、7.4、7.6 节 | 由第 2.1 节第 50 项取代：取消封闭内测，按 D1 范围完成后直接公开上线售卖。原写"封闭内测前"的事项（正式环境 Upstash、Vercel Pro 等）改读为"公开上线前"；第 49 项"限流按每条新消息计"不变 |
+| 全站默认加价倍数 m=3 | 第 2.1 节第 11、33 项；D16 | 由第 2.1 节第 50 项取代为默认 m=6；按模型/线路配置、冻结和只进位一次的规则不变；实际修改配置须执行前另获 Owner 批准 |
+| "不影响没有 Fusion 权限的用户走普通定位到报告；升级提示不能成为定位流程的必经步骤" | [ENTITLEMENTS 实施说明](tasks/ENTITLEMENTS.md)第 180 行 | 由第 2.1 节第 50 项取代：生成报告必须是付费会员；免费用户可做完报告前的全部步骤，已确认的前置信息可看、可导出、不收回。Fusion 权限部分不变 |
 | RUNTIME-PROD ④ 的统一预扣估算、报告固定上界预扣过渡方案 | 本文原第 7.1 节；#547 原方案 | 由第 2.1 节第 26–27、32–34 项取代：BILL-PAYG 余额封顶冻结，余额低于按模型/用途配置的 L 才暂停；超额由平台承担。D16 改按美元成本与逐调用倍数累计，预告边界不变 |
 | 每 run 一次预留、run 与 pre_deduct 一一对应；平台承担超额需人工授权 | [BILL2 技术契约](tasks/V3-BILL-2-provider-authoritative-billing.md)第 43–53、81–89 行中的这两组条款 | 由第 2.1 节第 26–27 项取代：每次供应商调用按余额封顶冻结、封顶结算；超出冻结额自动由平台承担、不补扣、不需逐笔批准；只有超出估算上界本身才进入 `budget_conflict`、停止新调用，正常余额封顶不触发异常；保存真实成本及平台承担金额。其余不冲突条款继续有效，不将上述行号区间整体废止（[总控修订记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/559#issuecomment-5925648847)） |
 | Fusion 按 RUNTIME-PROD 统一预扣估算规则冻结积分 | 本文原第 4.4 节第 2 条 | 已按 BILL-PAYG 逐次冻结规则取代：运行前总预估仅展示，每次供应商调用冻结该次估算上界与可用余额的较小值；Fusion 多模型单次上界由 FUSION-REVIEW 定义，定义前不放行。保留运行前预告和三种结局的收费规则（[总控修订记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/559#issuecomment-5925344654)） |
@@ -883,6 +912,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | UI-C | 输入框附件 = 上传进资料库再引用（不另建一套上传，只支持 D6 的文档类型） | UI-A、LIB-DOCS、RUNTIME-PROD | 高 | 中 / 2 |
 | | UI-FINISH | 导航、响应式、旧链接迁移、界面全验收（沿用 v11） | UI-B、UI-C | 普通 | 中 / 2–3 |
 | **4 收费和上线** | PAY-COMMON → PAY-WAFFO | 沿用 v11 §9 和第 11 节定义；按 D17，PAY-COMMON 提供后台"新购买使用的渠道"设置（Waffo / Stripe，手动切换），订单记录成交渠道，续费、退款和凭证按原渠道处理。**PAY-COMMON 方案已合并**（[#608](https://github.com/Crnobog9527/GraylumAI_vercel/pull/608)，`6546f27d`；退款衔接 P1 已由 Owner 决定，第 47 项），由同一个 Codex writer 从 PR-1（[#612](https://github.com/Crnobog9527/GraylumAI_vercel/pull/612)，在途）开始实施，每个实施 PR 合并另需 Owner 批准 | ENTITLEMENTS（已完成）之后，同一条钱路线；与 Runtime 主线并行（第 46 项） | 高 | 大 / 7–10 |
+| | PAYWALL | 第 2.1 节第 50 项的付费墙和积分产品：服务端在报告入口和调用准入两处检查付费会员；新对话入口（以及以后的按意图选 Skill）拒绝带步骤的 Skill，参照旧入口的 409；报告模板和写作规则只在报告用途加载，不放进 SKILL.md 和前置步骤资源；积分包只允许会员购买；开户赠送改为 Owner 实测值（迁移修改 0151 的固定 100）；记录付费墙曝光；按第 50 项重设套餐和积分包数值；Pro 一个月买 2 次以上积分包时提示 Gold；会员到期后已生成的报告仍可看、可导出 | REPORT-GEN、BILL-PAYG、PAY-COMMON、ENTITLEMENTS | 高 | 中 / 2–3 |
 | | LEGACY-CLOSE | 关入口已由 #507 提前完成（2026-09-29）：`/chat` 临时跳转 `/positioning`，`/api/ai/stream` 对新请求返回 410，8 处入口改指或禁用；本任务剩余工作是删除旧代码（`/chat` 页面与组件、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等；自研内容检查 `contentModerator.ts`、`aiOutputFilter.ts`、`streamingOutput.ts`，以及它们在 `agentSlice` 和旧 `workbench` 生成里的调用，不单独开任务）和功能对照检查记录。旧检查文件随 LEGACY-CLOSE 删除；删除前核实必要的凭证保护和用户数据隔离不受影响，不要求迁移旧的通用 PII 正则过滤。按 Owner 2026-09-29 决定不再提供旧对话只读查看入口（staging 和正式环境都没有真实用户，上线前清空数据），旧链接直接跳到 `/positioning`；旧对话不迁移、不删除 | AC-4 接管自由对话；入口改指已由 #507 满足；UI-MODEL、UI-B、UI-C、UI-FINISH 已交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 |
 | | V3-M3 → REL-1 | 完整验收和发布（第 9.3 节；正式环境没有真实用户，按新建环境发布，不做旧数据兼容和迁移） | 以上全部 | 高；生产另行批准 | 大 |
 | **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | 沿用 v11 §8（C1 套餐式自动追踪已确认） | 上线 | 高 | 大 |
@@ -895,7 +925,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 P0-1、CI-TRUST-1 ─→ AGENT-CORE（AC-0 → AC-1 → AC-2、AC-3 → AC-5 → AC-4）；AC1-4（#497）已合并，AC1-5 未开始
 DATA-ERASURE 删除规则设计 ─→ AC-2
 AGENT-CORE 稳定 ─→ RUNTIME-PROD 其余项（④ 的 BILL-PAYG 按下方主线提前）；MODEL-REASONING、BILL-UNIT、MODEL-PRICING-SYNC 已完成
-RESEARCH-0 + AC-1 + RUNTIME-PROD + DATA-ERASURE ─→ RESEARCH-TOOLS ─→ 封闭内测
+RESEARCH-0 + AC-1 + RUNTIME-PROD + DATA-ERASURE ─→ RESEARCH-TOOLS ─→ 公开上线（封闭内测已取消，第 50 项）
 公开上线前 ─→ Owner 决定 MODERATION 正式实现时间（暂缓，不作封闭内测前提；默认放行的检查点已随 #594 接线）
 S1 权限修复 ─→ DB-BASELINE ─→ V3-M3 ─→ REL-1
 已完成：#497 → #550 B2a（0156）→ BILL-UNIT #565（0157）；PROMPT-CACHE #591；RUNTIME-VIEW-PERF #586（0158）；RATE-LIMIT #590+#594（含 MODERATION-HOOK）；PROMPT-CACHE-HISTORY H1 #610；右侧整理 B1 #593（0159）
@@ -941,7 +971,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | N1b 体验样片 | AC-0、AC-1 及其对应的 AGENT-CORE-UI 部分；RESEARCH-0（和 AC-0 同期）；MODEL-REASONING（按 Owner 2026-09-28 决定提前，在 AC1-4 之前完成） | Owner 在 staging 用真实模型走完定位第一步，决定继续、调整还是换模型；右侧整理这一阶段沿用旧做法 |
 | N1c 完整定位流程 | DATA-ERASURE 删除规则设计、AC-2（含 CONVERSATION-DRIVEN-CAPTURE B1/B2）、AC-3、AC-5 及其对应的 AGENT-CORE-UI 部分（本步小结卡、右侧面板和进度条）；CHAT-NATIVE-OUTPUT、REPORT-GEN（暂列，待 Owner 选定批次） | Owner 从进入到定稿完整走通并验收 |
 | N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；CONTENT-CONVERSATION-DRIVEN（暂列，方案待写，待 Owner 选定批次）；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
-| N2 上线基础 | RUNTIME-PROD（含 BILL-UNIT、BILL-PAYG）、PROMPT-CACHE、PROMPT-CACHE-HISTORY、RATE-LIMIT 接线（含默认放行的 MODERATION-HOOK）、DB-BASELINE、RESEARCH-TOOLS、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON。2026-10-03：BILL-UNIT、PROMPT-CACHE、RATE-LIMIT、ENTITLEMENTS、MODEL-PRICING-SYNC 已完成，PROMPT-CACHE-HISTORY H1 已合并；钱路线已由 Owner 批准并行开工（第 46 项） | 上线基础完成；然后邀请 5–10 位真实用户**封闭内测**：只开放定位、周选题和写作，用赠送积分，不开放付费，反馈用于调整 N3 的优先级（D8，不改变 D1 的公开上线范围） |
+| N2 上线基础 | RUNTIME-PROD（含 BILL-UNIT、BILL-PAYG）、PROMPT-CACHE、PROMPT-CACHE-HISTORY、RATE-LIMIT 接线（含默认放行的 MODERATION-HOOK）、DB-BASELINE、RESEARCH-TOOLS、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON。2026-10-03：BILL-UNIT、PROMPT-CACHE、RATE-LIMIT、ENTITLEMENTS、MODEL-PRICING-SYNC 已完成，PROMPT-CACHE-HISTORY H1 已合并；钱路线已由 Owner 批准并行开工（第 46 项） | 上线基础完成。原定此后先做 5–10 人封闭内测（D8），2026-10-03 已取消（第 2.1 节第 50 项），按 D1 范围完成后直接公开上线售卖 |
 | N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
 | N4 收口 | LEGACY-CLOSE、V3-M3；公开上线前请 Owner 决定 MODERATION 正式实现时间 | 完整验收；REL-1 和生产另行批准 |
 
@@ -953,7 +983,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 - `V3-WORKBENCH` 的 SCOPE / AGENT / ENTRY / CONTENT：代码已随 #422 合并；未完成的 VERIFY 和 Owner 体验验收并入 AGENT-CORE。
 - `V3-OPC-UI` 的 A / B / C / FINISH：改称 UI-A / UI-B / UI-C / UI-FINISH，UI-C 改为复用 LIB-DOCS。
 - `V3-GOLD`：改名 FUSION，拆成 FUSION-REVIEW 和 FUSION-COMPARE。
-- 新增：AGENT-CORE（含 AC-0）、AGENT-CORE-UI（从 AGENT-CORE 拆出的纯前端部分）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的模型选择）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX（接手 PR #333）、RESEARCH-0、RESEARCH-TOOLS、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2；2026-09-30 新增 MENTOR-BUDGET、REPORT-GEN、FORGOT-PASSWORD；2026-10-01 新增 BILL-PAYG（承接 RUNTIME-PROD ④）、BILL-UNIT（#565，含按模型倍数）、RATE-LIMIT（#562 准备完成，接线待做）、STG-MENTOR-MODEL（#561）、INVITE-ABUSE（#560 已完成）；2026-10-01—02 新增 PROMPT-CACHE（上线必做，第 35 项）、STAGING-HOST-CLEANUP（第 37 项）；2026-10-02—03 新增 MODEL-PRICING-SYNC（第 40 项）、MENTOR-PROMPT-V2、RUNTIME-VIEW-PERF、CONVERSATION-DRIVEN-CAPTURE（第 48 项）、PROMPT-CACHE-HISTORY（第 43 项）、CHAT-NATIVE-OUTPUT（第 44 项，方案待审）、CONTENT-CONVERSATION-DRIVEN（第 45 项，方案待写）；STG-MENTOR-MODEL 已关闭（第 38 项）。
+- 新增：AGENT-CORE（含 AC-0）、AGENT-CORE-UI（从 AGENT-CORE 拆出的纯前端部分）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的模型选择）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX（接手 PR #333）、RESEARCH-0、RESEARCH-TOOLS、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2；2026-09-30 新增 MENTOR-BUDGET、REPORT-GEN、FORGOT-PASSWORD；2026-10-01 新增 BILL-PAYG（承接 RUNTIME-PROD ④）、BILL-UNIT（#565，含按模型倍数）、RATE-LIMIT（#562 准备完成，接线待做）、STG-MENTOR-MODEL（#561）、INVITE-ABUSE（#560 已完成）；2026-10-01—02 新增 PROMPT-CACHE（上线必做，第 35 项）、STAGING-HOST-CLEANUP（第 37 项）；2026-10-02—03 新增 MODEL-PRICING-SYNC（第 40 项）、MENTOR-PROMPT-V2、RUNTIME-VIEW-PERF、CONVERSATION-DRIVEN-CAPTURE（第 48 项）、PROMPT-CACHE-HISTORY（第 43 项）、CHAT-NATIVE-OUTPUT（第 44 项，方案待审）、CONTENT-CONVERSATION-DRIVEN（第 45 项，方案待写）；STG-MENTOR-MODEL 已关闭（第 38 项）；2026-10-03 新增 PAYWALL（第 50 项）。
 - 迁移编号在实际实施时分配，本文不预占。
 
 ### 7.6 Owner 需要提前启动的事项
@@ -966,13 +996,12 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | 隐私条款、服务条款和数据使用政策 | 由 Owner 用第三方专业软件生成；规划只规定产品行为，不规定条款文字 |
 | Stripe 直接收款的税务责任 | Stripe 是备用渠道（D17）。Stripe 直接收款时 Graylum 是卖家，这和通过 Waffo（MoR）销售不同；税务责任要在第一次切换到 Stripe 之前确认 |
 | 第三方搜索服务 | TikHub、Parallel、Firecrawl 已注册并在 RESEARCH-0 中实测。等网站用户使用量大了，再由 Owner 向三家申请企业定制授权（第 3.7 节表格）；需要时向 TikHub 购买更高的每秒请求数；定稿隐私条款时一并咨询抓取类数据的合规问题 |
-| 定价配置与积分产品复核（2026-10-01，2026-10-03 更新） | q=100、默认 m=3 已决定，staging 已按 Owner 批准修改（第 39 项）。开户赠送 100、邀请奖励 50/30、会员套餐和积分包的积分数值仍需要 Owner 复核，不因 q/m 变化自动改产品数值；面向用户的计费说明要按名义费用和"有分时价的线路按最高时段标价计费"写（第 41 项，条款文字由 Owner 处理） |
-| 正式环境 Upstash（2026-10-01） | staging 已配置；正式环境在封闭内测前配置（封闭内测在正式环境，第 49 项），核对容量、变量名和故障拒绝路径（第 30 项） |
+| 定价配置与积分产品复核（2026-10-01，2026-10-03 更新） | q=100 已决定；默认 m 2026-10-03 改为 6（第 50 项），staging 现为 m=3（第 39 项），改配置须另获批准。订阅和积分包比例已定（第 50 项）；开户赠送和月价由 Owner 用 Sonnet 5.5 亲自体验后按第 50 项公式定。开户赠送 100、邀请奖励 50/30、会员套餐和积分包的积分数值仍需要 Owner 复核，不因 q/m 变化自动改产品数值；面向用户的计费说明要按名义费用和"有分时价的线路按最高时段标价计费"写（第 41 项，条款文字由 Owner 处理） |
+| 正式环境 Upstash（2026-10-01） | staging 已配置；正式环境在公开上线前配置（封闭内测已取消，第 50 项），核对容量、变量名和故障拒绝路径（第 30 项） |
 | Vercel Pro（2026-10-01） | Owner 已承诺正式运营升级；上线前完成套餐与运行时预算核对，Hobby 300 秒仅约束 staging（第 28 项） |
 | staging 服务商回调地址（2026-10-01） | 旧域名已删除（第 37 项）；Stripe / Waffo 沙箱回调地址、Supabase Site URL 和邮件 Redirect URLs 是否已不再指向旧域名，待 Owner 自行检查确认（#605 列出了待核对位置，没有读取外部配置） |
 | 正式站临时重定向（2026-10-03） | 待 Owner 在 Vercel 正式项目后台把 `www.graylum.com` 临时 307 到 `app.graylum.com`，操作后总控线上复核；新落地页上线时先撤回这条重定向，再去掉代码里的 noindex（第 8.5 节，[#614 总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/614#issuecomment-5968241886)） |
 | 客服邮箱 | 上线发布条件之一（v11 §13.3） |
-| 封闭内测的 5–10 位用户 | 提前找好，N2 完成后就能开始 |
 
 <a id="debt"></a>
 ## 8. 技术债：核实结果与清理顺序
@@ -1143,7 +1172,7 @@ Owner 于 2026-09-27 确认 D1–D17（D6 在 Fable 评估后改为不含 PDF；
 | D5 | 用户数据使用同意 | 允许 Graylum 团队查看去除身份信息后的使用记录，用来人工改进产品；默认不参与，用户主动勾选才参与。现在不会用来训练模型，也不会自动修改 Skill。以后改进机制设计出来、用途发生变化时，必须重新征求用户同意。文风画像和个人偏好只服务用户本人，不需要额外同意 |
 | D6 | 资料库支持的文件 | 第一版支持 `.txt`、`.md`、`.docx`，单个文件不超过 10 MB；PDF 等其他格式上线后再加 |
 | D7 | 删除资料库文档时，已完成的对话回答和已保存成果是否一起清除 | 不自动清除（它们是用户自己的内容，可单独删除），只清除文档和系统派生数据；账号注销时全部清除 |
-| D8 | 封闭内测 | 上线基础（N2）完成后，先邀请 5–10 位真实用户封闭内测，不改变 D1 的公开上线范围 |
+| D8 | 封闭内测 | **2026-10-03 取消**（第 2.1 节第 50 项）：不做封闭内测，按 D1 范围完成后直接公开上线售卖。原决定：上线基础（N2）完成后先邀请 5–10 位真实用户封闭内测 |
 | D9 | 自由对话是否自动整理 | 默认不自动整理；带步骤的 Skill 每轮自动整理。（2026-10-03：方向已由第 2.1 节第 45 项改为用户手动触发"整理纪要"，方案待写；实施前现行行为不变） |
 | D10 | 文字确认 | 用户用文字表达的明确同意等同于点击确认，含糊回答不算 |
 | D11 | 模型思考强度 | 后台读取每个模型支持的思考档位，管理员按模型和用途自定义（MODEL-REASONING） |
@@ -1151,12 +1180,12 @@ Owner 于 2026-09-27 确认 D1–D17（D6 在 Fable 评估后改为不含 PDF；
 | D13 | 第三方搜索 | 接入第三方普通搜索和社媒数据 API，同时支持中国和海外平台；统一接口层，方便更换。**2026-09-28 按 RESEARCH-0 结果修订**：社媒数据只用 TikHub，网页搜索用 Parallel，网页抓取用 Firecrawl（取代原先的"多家社媒数据供应商同时启用"和候选名单）；供应商条款必须写明允许商用、允许二次分发给用户使用，并且能提高并发；三家的公开条款都没有完全写明第一条，Owner 决定等网站用户使用量大了再申请企业定制授权，在此之前按公开条款使用（第 3.7 节） |
 | D14 | 搜索费用 | 用户承担，所有计价先换成美元；官方用量、自家点数按冻结单价换算，按次线路按官方单价；TikHub 官方标价计成本、阶梯折扣归平台。2026-10-01 取代固定保底积分直扣，按第 32–34 项与 D16 统一计算；搜索前不预告，限制次数、展示每次扣费，低于 L 时提示充值 |
 | D15 | 对标研究 | 只基于真实取到的数据，禁止编造；指标由代码计算，表格数字只能由取数结果填入；取不到数据就明说，不给示例账号（第 3.7 节） |
-| D16 | 收费公式（2026-10-01 修订） | 应收 `C = ceil(q × Σ(U_i × m_i))`；所有成本先换美元，q=100、默认 m=3，模型/线路未设置倍数才用默认值；调用冻结有效倍数，旧执行不重算，最终只进位一次；实际扣费按余额封顶（第 26、32–34 项），固定保底积分直扣已被取代 |
+| D16 | 收费公式（2026-10-01 修订） | 应收 `C = ceil(q × Σ(U_i × m_i))`；所有成本先换美元，q=100、默认 m=3（2026-10-03 改为默认 m=6，第 2.1 节第 50 项），模型/线路未设置倍数才用默认值；调用冻结有效倍数，旧执行不重算，最终只进位一次；实际扣费按余额封顶（第 26、32–34 项），固定保底积分直扣已被取代 |
 | D17 | 支付渠道 | 新销售默认走 Waffo，Stripe 作为备用渠道保留；备用是管理员在后台手动切换"新购买使用的渠道"，不做自动切换；同一笔订单不跨渠道重试，付款结果未知时不换渠道再扣；已成交订单的续费、退款和凭证始终走原渠道 |
 
-**2026-09-28—30 的新决定**记在第 2.1 节第 13–25 项；2026-10-01—03 的记在第 26–49 项。
+**2026-09-28—30 的新决定**记在第 2.1 节第 13–25 项；2026-10-01—03 的记在第 26–50 项。
 
-**待 Owner 确认或批准执行的事项**（q=100、默认 m=3、正式运营升级 Pro 已定，不重复请求产品定案）：
+**待 Owner 确认或批准执行的事项**（q=100、默认 m=6（第 50 项）、正式运营升级 Pro 已定，不重复请求产品定案）：
 
 | 事项 | 现状 | 何时需要定案 |
 | --- | --- | --- |
@@ -1164,7 +1193,7 @@ Owner 于 2026-09-27 确认 D1–D17（D6 在 Fable 评估后改为不含 PDF；
 | 正式环境是否强制"数据不用于训练"（RUNTIME-PROD 第 ⑦ 项、第 2.1 节第 9 项的举例、VOICE 的前置条件） | Owner 2026-09-28 表示，除非违反 GDPR 等法律，请求不需要强制 `data_collection: deny`；合法性尚未核实，规划里仍是"强制" | RUNTIME-PROD 开工前 |
 | 删除规则 E5"付费默认不退款、Owner 逐笔批准手动退款"与现有退款代码和 v11 退款规则（REFUND-1B 等）的衔接 | **已定**（Owner 2026-10-03，第 2.1 节第 47 项）：PAY-COMMON 方案 #608 第 8 节 P1；退款功能按 PAY-COMMON 实施调整，积分包人工退款的执行能力另行设计 | 已定；实施随 PAY-COMMON |
 | staging 服务商回调地址（2026-10-01） | 旧域名已删除（第 37 项）；Stripe / Waffo 沙箱回调和 Supabase Site URL 待 Owner 自行检查确认 | 支付或邮件回调相关的 staging 验证前（建议） |
-| 上线前配置与产品数值复核（2026-10-01，2026-10-03 更新） | 正式环境 Upstash 上线前配置，Vercel Pro 已决定升级但仍待执行；staging 的 q=100/m=3 已按 Owner 批准修改（第 39 项）；开户赠送 100、邀请奖励 50/30、会员套餐与积分包积分值须 Owner 复核 | 具体执行前批准；上线前完成（第 7.6 节） |
+| 上线前配置与产品数值复核（2026-10-01，2026-10-03 更新） | 正式环境 Upstash 上线前配置，Vercel Pro 已决定升级但仍待执行；staging 的 q=100/m=3 已按 Owner 批准修改（第 39 项）；开户赠送 100、邀请奖励 50/30、会员套餐与积分包积分值须 Owner 复核；2026-10-03 已定订阅和积分包比例与计算方式，开户赠送和月价待 Owner 亲自体验 Sonnet 5.5 后定（第 50 项） | 具体执行前批准；上线前完成（第 7.6 节） |
 | 对话原生体验的续写次数（2026-10-03） | #604 方案第一版推荐每次回答最多自动续写 3 次、单次上限保持 8192；方案还在审查 | #604 审查干净后由总控交 Owner |
 
 <a id="documents"></a><a id="cutover"></a><a id="sources"></a>
