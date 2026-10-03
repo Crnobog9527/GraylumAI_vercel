@@ -30,7 +30,8 @@ vi.mock('@/lib/server-log', () => ({
   logServerError: vi.fn(),
 }));
 
-vi.mock('@/lib/site-config', () => ({
+vi.mock('@/lib/site-config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/site-config')>()),
   resolveAuthAppUrl: vi.fn(() => 'https://app.graylum.com'),
   resolveSupabaseCookieOptions: vi.fn(() => ({})),
 }));

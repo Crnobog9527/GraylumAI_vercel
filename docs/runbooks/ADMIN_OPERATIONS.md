@@ -60,6 +60,6 @@ staging 页面检查可确认入口、确认弹窗和取消；真实保存/删�
 | [PR #399](https://github.com/Crnobog9527/GraylumAI_vercel/pull/399) | staging 合并；55 项相关单测；真实本地 53 字段保存/刷新/数据库一致，非法批次与拒绝路径验证 | 保存成功不等于每项下游 provider 效果都重新验收 |
 | [PR #400](https://github.com/Crnobog9527/GraylumAI_vercel/pull/400) | staging 合并；62 项 API 单测；隔离管理员套件 8 passed / 101 skipped；精确候选必需检查及独立审查通过 | 101 项未运行；不能宣称全工作台回归完成 |
 
-#400 合并提交为 `7af10101b2300c34fe506805269590098b37dea6`。当次 staging 部署 `dpl_Ef9V3kRYPRPgXpfH2JntYoke9iqv` 为 Ready，`graylumai-staging.vercel.app` 上的新批量删除入口、弹窗及取消已检查；没有通过删除 staging 记录做部署后速度基准。
+#400 合并提交为 `7af10101b2300c34fe506805269590098b37dea6`。当次 staging 部署 `dpl_Ef9V3kRYPRPgXpfH2JntYoke9iqv` 为 Ready，当时的 staging 域名（现已退役）上的新批量删除入口、弹窗及取消已检查；没有通过删除 staging 记录做部署后速度基准。
 
 优化前的一次 staging 样本：删除请求 6,394 ms，随后列表刷新 2,942 ms；同类数据库 DELETE 的 4 次统计均值 15.42 ms、最大 38.11 ms。最终本地隔离样本：批次请求 144 ms，确认后界面更新 69 ms，刷新刻意阻塞时也能显示结果。环境与测量条件不同，不能据此计算线上提速倍数；下一次已授权真实删除才能补充 staging 提速实测。

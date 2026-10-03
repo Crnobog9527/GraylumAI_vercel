@@ -1,0 +1,677 @@
+[
+  {
+    "context": {
+      "tools": [],
+      "network": "deny"
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "skill",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "20abdd34de9bf4220ec66aeecf9389ce306b52c302f3a4155b88c17d6bc3dd44"
+  },
+  {
+    "context": {
+      "tools": [],
+      "network": "deny"
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "attached_organizer",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "20abdd34de9bf4220ec66aeecf9389ce306b52c302f3a4155b88c17d6bc3dd44"
+  },
+  {
+    "context": {
+      "tools": [],
+      "network": "deny"
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "matching",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "20abdd34de9bf4220ec66aeecf9389ce306b52c302f3a4155b88c17d6bc3dd44"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "serial-tools-v1",
+      "tools": [],
+      "network": "deny"
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "skill",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "serial-tools-v1",
+      "tools": [],
+      "network": "deny"
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "attached_organizer",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "serial-tools-v1",
+      "tools": [],
+      "network": "deny"
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "matching",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "serial-tools-v2",
+      "tools": [],
+      "network": "deny"
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "skill",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "serial-tools-v2",
+      "tools": [],
+      "network": "deny"
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "attached_organizer",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "serial-tools-v2",
+      "tools": [],
+      "network": "deny"
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "matching",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "serial-tools-v3-stream",
+      "tools": [],
+      "network": "deny"
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "skill",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "serial-tools-v3-stream",
+      "tools": [],
+      "network": "deny"
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "attached_organizer",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "serial-tools-v3-stream",
+      "tools": [],
+      "network": "deny"
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "matching",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "serial-tools-v4-stream",
+      "tools": [],
+      "network": "deny",
+      "reasoning": {
+        "parameter": "none"
+      }
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "skill",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "serial-tools-v4-stream",
+      "tools": [],
+      "network": "deny",
+      "reasoning": {
+        "parameter": "none"
+      }
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "attached_organizer",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "serial-tools-v4-stream",
+      "tools": [],
+      "network": "deny",
+      "reasoning": {
+        "parameter": "none"
+      }
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "matching",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "agent-turn-v5-stream",
+      "tools": [],
+      "network": "deny",
+      "reasoning": {
+        "parameter": "none"
+      }
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "skill",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "agent-turn-v5-stream",
+      "tools": [],
+      "network": "deny",
+      "reasoning": {
+        "parameter": "none"
+      }
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "attached_organizer",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "agent-turn-v5-stream",
+      "tools": [],
+      "network": "deny",
+      "reasoning": {
+        "parameter": "none"
+      }
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "matching",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "serial-tools-v6-reasoning",
+      "tools": [],
+      "network": "deny",
+      "reasoning": {
+        "parameter": "none"
+      }
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "skill",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "serial-tools-v6-reasoning",
+      "tools": [],
+      "network": "deny",
+      "reasoning": {
+        "parameter": "none"
+      }
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "attached_organizer",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  },
+  {
+    "context": {
+      "providerRequestFormat": "serial-tools-v6-reasoning",
+      "tools": [],
+      "network": "deny",
+      "reasoning": {
+        "parameter": "none"
+      }
+    },
+    "policy": {
+      "modelId": "00000000-0000-4000-8000-000000000001",
+      "provider": "openrouter",
+      "account": "synthetic",
+      "model": "anthropic/test",
+      "protocol": "openrouter-chat-v1",
+      "upperUsd": "0.020000000000",
+      "inputLimit": 10000,
+      "outputLimit": 100,
+      "automaticRetry": false,
+      "hiddenTools": false,
+      "lookupSupported": true,
+      "providerLimits": {
+        "providerSlug": "anthropic",
+        "contextTokens": 10000,
+        "promptUsdPerMillion": "2",
+        "completionUsdPerMillion": "0",
+        "requestUsd": "0"
+      }
+    },
+    "phase": "matching",
+    "request": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"parallel_tool_calls\":false,\"stream\":false,\"store\":false}",
+    "output": "{\"model\":\"anthropic/test\",\"messages\":[{\"content\":\"固定规则\\n动态内容\",\"role\":\"system\"},{\"role\":\"user\",\"content\":\"hello\"}],\"max_tokens\":100,\"stream\":false,\"store\":false,\"provider\":{\"allow_fallbacks\":false,\"require_parameters\":true,\"only\":[\"anthropic\"],\"max_price\":{\"prompt\":2,\"completion\":0,\"request\":0}}}",
+    "requestHash": "21fb2e299d175c922f03c7f71f06f63acd097748231edaefa2da2224794a93e7"
+  }
+]

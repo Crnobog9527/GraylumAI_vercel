@@ -2,12 +2,16 @@
 import { beforeAll, afterAll, it, expect } from 'vitest';
 import pg from 'pg';
 import { createHash, randomUUID } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { createServer } from 'node:http';
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import { authoritativeBilling, type FrozenRun, type FrozenCall } from './service';
-import {fullBudgetText,outputUnit} from '../__tests__/fixtures/mentorOutput';
+import {fullBudgetText,mentorOutputFixture,outputUnit} from '../__tests__/fixtures/mentorOutput';
+import {openRouterAdapter} from './openRouterAdapter';
+import {openRouterBound} from './openRouterPolicy';
+import {PURPOSE_OUTPUT_CAP} from '../runtime/purposeBudgets';
 import { fixtureEvidence, localFixtureAdapter } from './fixtureAdapter';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
 import { publishSkillPackage } from '../skills/publication';
@@ -251,9 +255,17 @@ it('BILL2: receipt database outage retains server-private evidence and recovery 
  await s.recordReceipt(r.id,c.id,out.pendingReceipt!.evidence);await s.closeRun(r.id,'delivered',result());await s.finalizeRun(r.id);expect(providerCount-before).toBe(1);expect((await conservation(f.actor)).credits).toBe(93);
 });
 async function period(actor:string,credits=100) {
- const grant=randomUUID(),subscription='sub_'+randomUUID(),plan=randomUUID(),invoice='in_'+randomUUID(),start=new Date(Date.now()-86400000).toISOString(),end=new Date(Date.now()+86400000).toISOString();
+ const grant=randomUUID(),subscription='sub_'+randomUUID(),invoice='in_'+randomUUID(),start=new Date(Date.now()-86400000).toISOString(),end=new Date(Date.now()+86400000).toISOString();
+ let plan=randomUUID();
  // Rows satisfy the real schema too (--schema-from-files): plan FK, NOT NULL status and idempotency key.
- await db.query("insert into membership_plans(id,name) values($1,'Synthetic plan')",[plan]);
+ const entitlements = (await db.query("select exists(select 1 from information_schema.columns where table_schema='public' and table_name='membership_plans' and column_name='allow_fusion_review') as present")).rows[0].present;
+ if (entitlements) {
+  await db.query("insert into membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes) values($1,'Synthetic plan','pro',true,true,500000000) on conflict(level) do nothing",[plan]);
+  plan=(await db.query("select id from membership_plans where level='pro'")).rows[0].id;
+ } else {
+  // Older minimal fixtures intentionally predate membership entitlement configuration.
+  await db.query("insert into membership_plans(id,name) values($1,'Synthetic plan')",[plan]);
+ }
  await db.query("insert into user_subscriptions(user_id,stripe_subscription_id,membership_plan_id,billing_cycle,current_period_start,current_period_end,status) values($1,$2,$3,'monthly',$4,$5,'active')",[actor,subscription,plan,start,end]);
  await db.query("insert into subscription_credit_grants(id,user_id,stripe_subscription_id,membership_plan_id,billing_cycle,grant_type,grant_period_key,period_start,period_end,total_periods,stripe_invoice_id,credits_granted,idempotency_key) values($1,$2,$3,$4,'monthly','monthly_invoice',$5,$6,$7,1,$8,$9,$10)",[grant,actor,subscription,plan,'invoice:'+invoice,start,end,invoice,credits,'grant:'+invoice]);return {grant,subscription};
 }
@@ -415,11 +427,70 @@ it('BILL2: configured maximum output and attached summary survive jsonb close an
  const f=await fixture(),run=await f.prepare(),cid=await call(f.actor,run.id);
  await receipt(f.actor,run.id,cid);
  const saved={...result(),body:fullBudgetText,summary:outputUnit.repeat(4096)};
+ expect(PURPOSE_OUTPUT_CAP).toBe(8192);
+ expect(Buffer.byteLength(JSON.stringify(saved.body))-2).toBe(8192*8);
+ expect(Buffer.byteLength(JSON.stringify(saved.summary))-2).toBe(4096*8);
  const bytes=(await db.query('select octet_length($1::jsonb::text) bytes',[JSON.stringify(saved)])).rows[0].bytes;
  expect(bytes).toBeLessThan(262144-8192);
  await sqlRpc('bill2_close',[f.actor,run.id,'delivered',saved]);
  expect((await db.query('select result from bill2_runs where id=$1',[run.id])).rows[0].result).toEqual(saved);
- expect(await sqlRpc('bill2_finalize',[f.actor,run.id])).toMatchObject({state:'settled'});
+ expect(await sqlRpc('bill2_finalize',[f.actor,run.id])).toMatchObject({state:'settled',chargedCredits:7});
+ const settled=await snapshot(f.actor);
+ await sqlRpc('bill2_close',[f.actor,run.id,'delivered',saved]);
  await sqlRpc('bill2_finalize',[f.actor,run.id]);
+ expect(await snapshot(f.actor)).toEqual(settled);
  expect(await conservation(f.actor)).toMatchObject({credits:93,terminals:1,usage:1});
+});
+
+
+it.each([
+ {stream:false,reasoning:false},{stream:false,reasoning:true},
+ {stream:true,reasoning:false},{stream:true,reasoning:true},
+])('BILL2: 8192 output receipt persists and settles once with stream=$stream reasoning=$reasoning',async({stream,reasoning})=>{
+ const f=await fixture(),capacityModelId=randomUUID(),windowId=randomUUID();
+ const {response,wire}=mentorOutputFixture(reasoning);
+ const identity={provider:'openrouter',account:'synthetic-output-'+windowId,model:response.model,
+  protocol:'openrouter-chat-v1' as const,providerLimits:{providerSlug:'synthetic',contextTokens:10000,
+   promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'},
+  inputLimit:10000,outputLimit:PURPOSE_OUTPUT_CAP,automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true};
+ const bound=openRouterBound(identity.providerLimits,identity.outputLimit);
+ const policy={...identity,upperUsd:bound.upperUsd,modelId:capacityModelId};
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic output capacity',$2,'openrouter','true')",
+  [capacityModelId,identity.model]);
+ await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) " +
+  "values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",[windowId,[f.actor],JSON.stringify([policy])]);
+ const payload:FrozenRun={...f.payload,mode:'staging_test',testWindowId:windowId,modelId:capacityModelId,
+  input:{version:'runtime.v1',network:'deny',tools:[]},callPolicy:[policy],
+  rules:{...f.payload.rules,version:'runtime-staging-v1',quoteVersion:windowId},limits:{...f.payload.limits,maxCalls:1}};
+ const request=JSON.stringify({model:identity.model,stream,...(stream?{stream_options:{include_usage:true}}:{}),
+  store:false,messages:[],max_tokens:PURPOSE_OUTPUT_CAP,provider:bound.routing});
+ const original=stream?wire:JSON.stringify(response);let sends=0;
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_OUTPUT_CAPACITY_ONLY',transport:async()=>{
+  sends++;return new Response(original,{headers:{'content-type':stream?'text/event-stream':'application/json'}});
+ }});
+ const billing=authoritativeBilling({admin,actor:async()=>f.actor,adapter});
+ const run=await billing.prepareRun(f.request,payload);
+ const claimed=await billing.claimCall(run.id,1,{...identity,upperUsd:bound.upperUsd,phase:'reply',requestHash:hash(request)});
+ const dispatched=await billing.dispatchOnce(claimed.id,request);
+ expect(dispatched.dispatched).toBe(true);expect(dispatched.pendingReceipt).toBeUndefined();
+ const rows=await db.query("select payload,octet_length(payload::text) bytes from bill2_receipts where call_id=$1 and payload ? 'transport'",[claimed.id]);
+ expect(rows.rows).toHaveLength(1);
+ const saved=rows.rows[0].payload;
+ expect(rows.rows[0].bytes).toBeLessThan(524288-16384);
+ expect(saved).toMatchObject({final:true,cost:'0.007',sourceHash:hash(original),usage:{sdkResponse:response}});
+ expect(JSON.parse(saved.rawBody)).toEqual(response);
+ expect(saved.transport).toMatchObject({complete:true,transportIssue:null,rawBodyEncoding:'gzip-base64',
+  rawBodyByteLength:Buffer.byteLength(original),rawBodySha256:hash(original)});
+ expect(gunzipSync(Buffer.from(saved.transport.rawBodyBase64,'base64'))).toEqual(Buffer.from(original));
+ await billing.recordReceipt(run.id,claimed.id,saved);
+ await billing.recordReceipt(run.id,claimed.id,saved);
+ expect((await db.query('select count(*)::int n from bill2_receipts where call_id=$1',[claimed.id])).rows[0].n).toBe(stream?2:1);
+ const delivered={...result(),body:fullBudgetText,summary:outputUnit.repeat(4096)};
+ await billing.closeRun(run.id,'delivered',delivered);
+ expect(await billing.finalizeRun(run.id)).toMatchObject({state:'settled',chargedCredits:7,conflict:false});
+ const settled=await snapshot(f.actor);
+ await billing.recordReceipt(run.id,claimed.id,saved);await billing.finalizeRun(run.id);
+ expect(await snapshot(f.actor)).toEqual(settled);
+ expect(await conservation(f.actor)).toMatchObject({credits:93,spend:7,terminals:1,usage:1});
+ expect(await billing.dispatchOnce(claimed.id,request)).toEqual({dispatched:false});expect(sends).toBe(1);
 });

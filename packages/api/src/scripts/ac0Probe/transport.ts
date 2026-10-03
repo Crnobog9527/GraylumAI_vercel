@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // AC-0b model probe. Standalone script: application code must never import it.
 import {createHash} from 'node:crypto';
+import {normalizeCandidateRequestHistory} from './agentTurn.ts';
 import {isDeepStrictEqual} from 'node:util';
 import {BudgetStop, usdToNano, nanoToUsd, type Budget} from './budget.ts';
 import {callBoundUsd, routing, type ProbeConfig} from './config.ts';
@@ -161,6 +162,7 @@ export function probeTransport(options: {
     if (state.stopped) throw new Error('PROBE_TRIAL_STOPPED:' + state.stopped);
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
     checkBody(body, options.config, options.maxTokens);
+    if (options.config.runtimeRouting) normalizeCandidateRequestHistory(body);
     body.provider = routing(options.config);
     const bytes = JSON.stringify(body);
     assertDataCollection(JSON.parse(bytes), options.config);

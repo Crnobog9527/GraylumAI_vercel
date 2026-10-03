@@ -3,13 +3,14 @@ import {chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {CARD_CATEGORIES} from './agentTurn.ts';
 import {classifyAsk} from './classify.ts';
 import {createBudget, HARD_MAX_CALLS, HARD_MAX_USD, memoryLedger, usdToNano, validateCaps} from './budget.ts';
 import {resolveConfigs} from './config.ts';
 import {sseResponse, syntheticUpstream, textDeltas, toolDeltas} from './dryRun.ts';
 import {assertOutsideRepository, KEY_ENV, runProbe} from './main.ts';
 import {parseProbeArgs} from './plan.ts';
-import {FIXTURE_SKILL_DIR} from './skill.ts';
+import {FIXTURE_SKILL_DIR, loadSkill} from './skill.ts';
 import {accountHome} from './paths.ts';
 import {assertDataCollectionDenied, probeTransport, type Upstream} from './transport.ts';
 
@@ -91,14 +92,14 @@ describe('dry run', () => {
 });
 
 describe('limits', () => {
-  it('refuses caps above the hard total of 420 calls and 3.5 USD', async () => {
-    expect(HARD_MAX_CALLS).toBe(420);
-    expect(HARD_MAX_USD).toBe(3.5);
+  it('refuses caps above the hard total of 974 calls and 31.24 USD', async () => {
+    expect(HARD_MAX_CALLS).toBe(974);
+    expect(HARD_MAX_USD).toBe(31.24);
     expect(() => validateCaps(HARD_MAX_CALLS + 1, 1)).toThrow('PROBE_CAP_REFUSED');
-    expect(() => validateCaps(10, 3.51)).toThrow('PROBE_CAP_REFUSED');
+    expect(() => validateCaps(10, 31.25)).toThrow('PROBE_CAP_REFUSED');
     expect(validateCaps(HARD_MAX_CALLS, 3.5)).toBeUndefined();
     expect(() => parseProbeArgs(['--max-calls', String(HARD_MAX_CALLS + 1)], home)).toThrow('PROBE_CAP_REFUSED');
-    expect(() => parseProbeArgs(['--max-usd', '4'], home)).toThrow('PROBE_CAP_REFUSED');
+    expect(() => parseProbeArgs(['--max-usd', '31.25'], home)).toThrow('PROBE_CAP_REFUSED');
     expect(parseProbeArgs([], home)).toMatchObject({maxCalls: 60, maxUsd: 1, live: false});
     const network = recording();
     const outcome = await runProbe(base('--max-calls', '500', '--live'), {[KEY_ENV]: KEY}, deps(network.upstream));
@@ -699,6 +700,46 @@ describe('question-card history and step fields', () => {
     input: 'That is all I can say about it for now.',
   };
 
+  it.each(['http_502', 'disconnected_stream'] as const)(
+    'stops the entire forty-scenario agent-turn run after the first %s without replacement calls', async failure => {
+      const cases = Object.entries(CARD_CATEGORIES).flatMap(([category, {kind, count}]) => Array.from({length: count}, (_, index) => ({
+        ...withHistory, id: `${kind}-${category}-${index}`, kind, category, currentStepId: 'step-1', questionId: 'offer',
+      })));
+      const args = ['--agent-turn', '--out-dir', outDir(), '--skill-dir', privateSkill(),
+        '--scenarios', scenarios(cases), '--max-calls', '40', '--max-usd', '1'];
+      const id = await planId(args);
+      const globalFetch = vi.spyOn(globalThis, 'fetch');
+      const network = recording(async () => {
+        if (failure === 'http_502') return new Response('upstream unavailable', {status: 502});
+        let first = true;
+        return new Response(new ReadableStream<Uint8Array>({pull(controller) {
+          if (first) {
+            first = false;
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"index":0,"delta":{"content":"Partial"}}]}\n\n'));
+          } else controller.error(new Error('synthetic disconnected stream'));
+        }}), {headers: {'content-type': 'text/event-stream'}});
+      });
+      const outcome = await runProbe([...args, '--live', '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
+      expect(outcome.exitCode).toBe(0);
+      expect(outcome.plan).toMatchObject({plannedCalls: 40, counts: {ask: 18, text: 22, reference: 0}});
+      expect(outcome.stop).toBe('unknown_result');
+      expect(network.sent).toHaveLength(1);
+      expect(globalFetch).not.toHaveBeenCalled();
+      expect(outcome.results).toHaveLength(1);
+      const result = outcome.results![0]!;
+      expect(result).toMatchObject({scenarioId: 'ask-A-0', category: 'A', stop: 'unknown_result'});
+      expect(result.calls).toHaveLength(1);
+      expect(result.calls[0]).toMatchObject({status: 'unknown', costSource: 'upper_bound'});
+      expect(result.calls[0]!.costUsd).toBe(result.calls[0]!.boundUsd);
+      const ledger = JSON.parse(readFileSync(join(home, '.graylum', 'ac0', 'ledger.json'), 'utf8'));
+      expect(ledger).toMatchObject({calls: 1, nanoUsd: usdToNano(result.calls[0]!.boundUsd)});
+      const summary = JSON.parse(readFileSync(join(outcome.runDir!, 'summary.json'), 'utf8'));
+      expect(summary).toMatchObject({calls: 1, stop: 'unknown_result', ledgerAfter: {calls: 1}});
+      const records = readFileSync(join(outcome.runDir!, 'results.jsonl'), 'utf8').trim().split('\n');
+      expect(records).toHaveLength(1);
+    },
+  );
+
   it('replays a question card as a tool call and its result, and gives the model the step fields', async () => {
     const args = ['--out-dir', outDir(), '--configs', 'qwen-deepinfra-none', '--skill-dir', privateSkill(),
       '--scenarios', scenarios([withHistory]), '--ask', '1'];
@@ -779,5 +820,54 @@ describe('question-card history and step fields', () => {
     const withWorkflow = (await runProbe(args(privateSkill()), {}, deps())).plan!.skillDigest;
     const without = (await runProbe(args(privateSkill(false)), {}, deps())).plan!.skillDigest;
     expect(withWorkflow).not.toBe(without);
+  });
+
+  it.each([true, false])('scores a whole card-design run end to end from synthetic replies (all correct=%s)', async allCorrect => {
+    const cases = Object.entries(CARD_CATEGORIES).flatMap(([category, {kind, count}]) => Array.from({length: count}, (_, index) => ({
+      id: `${category}-${index}`, kind, category, step: 0, currentStepId: 'step-1', questionId: 'offer',
+      history: [], input: `Sample for category ${category} number ${index}`,
+    })));
+    const args = ['--agent-turn', '--out-dir', outDir(), '--skill-dir', privateSkill(),
+      '--scenarios', scenarios(cases), '--max-calls', '40', '--max-usd', '1'];
+    const id = await planId(args);
+    const network = recording(async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      const category = /Sample for category ([A-E])/.exec(JSON.stringify(body.messages))![1]!;
+      const wantsCard = (category === 'A' || category === 'B') === allCorrect;
+      if (!wantsCard) return sseResponse(body.model, textDeltas('What would you like to share first?'));
+      const newCard = {question: 'Which channel first?', options: ['Channel A', 'Channel B'],
+        recommended: category === 'A' ? 1 : null};
+      return sseResponse(body.model, [...textDeltas('Channel B fits what you said. '),
+        ...toolDeltas('ask_question', newCard, 'call_' + body.messages.length)], {finish: 'tool_calls'});
+    });
+    const outcome = await runProbe([...args, '--live', '--confirm', id], {[KEY_ENV]: KEY}, deps(network.upstream));
+    expect(outcome.exitCode).toBe(0);
+    expect(network.sent).toHaveLength(40);
+    const summary = JSON.parse(readFileSync(join(outcome.runDir!, 'agent-turn-summary.json'), 'utf8'));
+    if (allCorrect) {
+      expect(summary).toMatchObject({completed: 40, formatErrors: 0, cardDecisionCorrect: 40, recommendationCorrect: 18,
+        verdict: 'manual_review_required'});
+      // The per-trial record classifies a valid new-format card as valid too.
+      for (const result of outcome.results!.filter(item => item.kind === 'ask')) {
+        expect(result.outcome).toMatchObject({category: 'correct', argsValid: true});
+      }
+    } else {
+      expect(summary).toMatchObject({completed: 40, formatErrors: 0, cardDecisionCorrect: 0, recommendationCorrect: 0, verdict: 'fail'});
+    }
+  });
+
+  it('preloads only the assets/ files a workflow step names, as the real host does', () => {
+    const plain = loadSkill(privateSkill());
+    const dir = privateSkill(workflowYaml.replace('      - references/step-1.md', '      - references/step-1.md\n      - assets/plan.md'));
+    mkdirSync(join(dir, 'assets'), {recursive: true});
+    writeFileSync(join(dir, 'assets', 'plan.md'), 'Synthetic template.\n');
+    writeFileSync(join(dir, 'assets', 'unused.md'), 'Never loaded.\n');
+    const named = loadSkill(dir);
+    expect(named.references.get('assets/plan.md')).toBe('Synthetic template.\n');
+    expect(named.references.has('assets/unused.md')).toBe(false);
+    expect(named.digest).not.toBe(plain.digest);
+    // A Skill whose steps name no asset keeps its earlier digest.
+    writeFileSync(join(privateSkill(), 'unused.txt'), 'x');
+    expect(loadSkill(join(home, 'skill')).digest).toBe(plain.digest);
   });
 });

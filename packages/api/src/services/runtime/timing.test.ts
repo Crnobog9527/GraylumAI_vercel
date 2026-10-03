@@ -127,3 +127,14 @@ it('keeps the transport call identical and swallows recorder and log failures',a
  broken=true;
  expect(()=>{budget.timing.begin('rpc/x')();budget.timing.enter('host')();budget.timing.mark('firstModelText');budget.timing.release();}).not.toThrow();
 });
+
+it('ends provider timing at durable completion before the bounded capture RPC',()=>{
+ const c=clock(),timing=createRequestTiming(c.now);
+ timing.enter('execute');timing.begin('rpc/bill2_dispatch')();
+ c.advance(100);timing.enter('host'); // Ordinary transitions cannot end a live provider phase.
+ expect(timing.summary().phases.provider.ms).toBe(100);
+ timing.finishProvider();
+ const capture=timing.begin('rpc/opc_capture_apply');c.advance(1000);capture();
+ expect(timing.summary().phases.provider).toEqual({rt:0,rtMs:0,ms:100});
+ expect(timing.summary().phases.host).toEqual({rt:1,rtMs:1000,ms:1000});
+});

@@ -38,31 +38,36 @@
 .positionActions button{font-family:inherit!important;font-size:12px!important;font-weight:400!important;line-height:18px!important;letter-spacing:0!important}
 
 /* Positioning actions use the same quiet controls as the merged workspace. */
-.currentAction button,.stepForm button,.requestRecovery button,.mentorChat [role=log] button{height:auto;min-height:34px;padding:7px 12px;border:1px solid #e6e6e6;border-radius:8px;background:#fff;color:#444;font-family:inherit;font-size:12px;font-weight:400;line-height:18px;letter-spacing:0;white-space:normal;box-shadow:none;transform:none}
+.currentAction button,.stepForm button,.mentorChat [role=log] button{height:auto;min-height:34px;padding:7px 12px;border:1px solid #e6e6e6;border-radius:8px;background:#fff;color:#444;font-family:inherit;font-size:12px;font-weight:400;line-height:18px;letter-spacing:0;white-space:normal;box-shadow:none;transform:none}
 .currentAction button:first-child{border-color:#262626;background:#262626;color:#fff}
-.currentAction button:disabled,.stepForm button:disabled,.requestRecovery button:disabled,.mentorChat [role=log] button:disabled{opacity:1;background:#f5f5f5;border-color:#ececec;color:#aaa;cursor:default}
-.currentAction button:hover:not(:disabled),.stepForm button:hover:not(:disabled),.requestRecovery button:hover:not(:disabled),.mentorChat [role=log] button:hover:not(:disabled){background:#f5f5f5;border-color:#ddd;color:#262626}
+.currentAction button:disabled,.stepForm button:disabled,.mentorChat [role=log] button:disabled{opacity:1;background:#f5f5f5;border-color:#ececec;color:#aaa;cursor:default}
+.currentAction button:hover:not(:disabled),.stepForm button:hover:not(:disabled),.mentorChat [role=log] button:hover:not(:disabled){background:#f5f5f5;border-color:#ddd;color:#262626}
 .currentAction button:first-child:hover:not(:disabled){background:#3b3b3b;color:#fff}
 .questionNav{margin-top:20px;padding-top:16px;border-top:1px solid #eee}
 .questionNav>p{margin:0 0 10px;color:#999;font-size:11px;line-height:18px}
 .questionNav ul{display:grid;gap:4px;margin:0;padding:0;list-style:none}
 .questionNav button{width:100%;justify-content:flex-start;text-align:left;border-color:transparent;background:transparent;color:#777}
 .questionNav button[aria-current=true]{border-color:#eee;background:#f6f6f6;color:#333;font-weight:500}
-.requestRecovery{margin:12px 24px;padding:12px 14px;border:1px solid #ececec;border-radius:10px;background:#fafafa;color:#666;font-size:12px;line-height:1.6}
-.requestRecovery>p{margin:0 0 6px;color:#444}.requestRecovery p{font-size:12px}.requestRecovery button{margin-top:8px}
+/* Shown only when automatic recovery cannot finish a retained request: one line above the composer. */
+.recoveryLine{display:flex;align-items:center;gap:8px;margin:0 0 6px;color:#666;font-size:12px;line-height:18px}
+.recoveryLine button{flex:none;padding:0;border:0;background:none;color:#262626;font:inherit;text-decoration:underline;cursor:pointer}
 
 /* The workspace owns the viewport; only messages and results scroll. */
-.conversationPage{height:100%;min-height:0;overflow:hidden!important}
+.conversationPage{height:100%;min-height:0;overflow:hidden!important;--chat-gutter:max(24px,calc((100% - 720px)/2))}
 .conversationPage>.workspaceContent{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .conversationPage .positionTop,.conversationPage .phaseStrip,.conversationPage .publishBar{flex:none}
-.conversationPage .workspaceContent>section[aria-label="当前定位步骤"]{flex:1;min-height:0;overflow:hidden;padding:0 24px 10px;display:flex;flex-direction:column}
-.conversationPage .stepArticle{flex:1;min-height:0;display:flex;flex-direction:column;max-width:720px;width:100%;margin:0 auto}
-.conversationPage .stepColumns{flex:1;min-height:0;display:flex;flex-direction:column;margin:0}
-.conversationPage .mentorChat{flex:1;min-height:0;display:flex;flex-direction:column;margin:0}
-.conversationPage .mentorChat [role=log]{flex:1;min-height:0;height:auto;max-height:none!important;padding:16px 4px 12px;margin:0;overflow-y:auto;overscroll-behavior:contain}
-.conversationPage .mentorChat>div:has(textarea){flex:none;width:100%;max-width:720px;align-self:stretch}
+.conversationPage .workspaceContent>section[aria-label="当前定位步骤"]{flex:1;min-height:0;overflow:hidden;padding:0 0 10px;display:flex;flex-direction:column}
+.conversationPage .stepArticle{flex:1;min-height:0;display:flex;flex-direction:column;width:100%;margin:0}
+/* The older .stepColumns align-items:start would shrink the chat to its content. */
+.conversationPage .stepColumns{flex:1;min-height:0;display:flex;flex-direction:column;align-items:stretch;margin:0}
+.conversationPage .mentorChat{flex:1;min-height:0;display:flex;flex-direction:column;align-self:stretch;width:100%;margin:0}
+/* The log spans the whole middle panel so its scrollbar sits at the panel edge;
+   the gutter (% of the panel width) keeps every row in the centered 720px column. */
+.conversationPage .mentorChat [role=log]{flex:1;min-height:0;height:auto;max-height:none!important;padding:16px var(--chat-gutter) 12px;margin:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable both-edges}
+.conversationPage .stepArticle>:not(.stepColumns),.conversationPage .mentorChat>:not([role=log]){width:auto;max-width:none;margin-inline:var(--chat-gutter)}
+.conversationPage .mentorChat>div:has(textarea){flex:none;align-self:stretch}
 .conversationPage .mentorChat>p{flex:none}
-.conversationPage .mentorChat>p:last-child{margin:4px 0 0;font-size:10px;line-height:15px}
+.conversationPage .mentorChat>p:last-child{margin:4px var(--chat-gutter) 0;font-size:10px;line-height:15px}
 .conversationPage .mentorChat [data-message-role=assistant]{max-width:100%;margin-right:0}
 .conversationPage .mentorChat [data-message-role=user]{max-width:85%;margin-right:0}
 .publishBar{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px 16px;padding:10px 24px;border-top:1px solid #eee;background:#fff}
@@ -71,7 +76,7 @@
 .publishBar button:disabled{background:#f5f5f5;color:#aaa;opacity:1;border-color:#eee}
 .publishBar p,.publishBar a{margin:0;color:#999;font-size:11px;line-height:17px}
 .publishBar a{color:#666;text-decoration:none}
-@media(max-width:700px){.conversationPage .workspaceContent>section[aria-label="当前定位步骤"]{padding:0 14px 8px}.publishBar{padding:8px 12px;gap:5px 10px}.publishBar p{width:100%;text-align:center}}
+@media(max-width:700px){.conversationPage{--chat-gutter:14px}.conversationPage .workspaceContent>section[aria-label="当前定位步骤"]{padding:0 0 8px}.publishBar{padding:8px 12px;gap:5px 10px}.publishBar p{width:100%;text-align:center}}
 
 .currentQuestionBox{padding:16px;border:1px solid #dcdcdc;border-radius:12px;background:#fff}.currentQuestionBox>div+div,.currentQuestionBox>p{margin-top:16px}
 .confirmedPositions{margin-top:24px;padding:16px;border:1px solid #e4e4e4;border-radius:12px;background:#f8f8f8}.confirmedPositions section:last-child{margin-bottom:0}.confirmedPositions label:last-child{margin-bottom:0}

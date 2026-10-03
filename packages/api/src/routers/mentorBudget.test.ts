@@ -27,13 +27,17 @@ function harness(role: 'admin' | 'user' | 'anonymous') {
     supabaseAdmin: db, hasSupabaseAdminPrivileges: true } as never;
   return { caller: mentorBudgetRouter.createCaller(ctx), generic: settingsRouter.createCaller(ctx), stored, writes };
 }
-it('admin saves and reads back; organizer output keeps its sole authority', async () => {
+it('admin saves and reads back 8192 for both purposes; organizer output keeps its sole authority', async () => {
   const f = harness('admin');
   expect(await f.caller.get()).toMatchObject({ source: 'legacy', config: null, organizeOutput: { maxOutputTokens: 2048 } });
   f.stored.set('v3_summary_max_tokens', '3072');
   expect(await f.caller.update(config)).toMatchObject({ source: 'configured', config,
     organizeOutput: { source: 'v3_summary_max_tokens', maxOutputTokens: 3072 } });
-  expect((await f.caller.get()).config).toEqual(config);
+  const readback = await f.caller.get();
+  expect(readback.config).toEqual(config);
+  expect(readback).toMatchObject({ limits: { maxOutputTokens: 8192 }, config: {
+    interactive: { maxOutputTokens: 8192 }, report: { maxOutputTokens: 8192 },
+  } });
   expect(f.writes).toHaveLength(1);
 });
 it.each(['user', 'anonymous'] as const)('denies %s without writing settings', async role => {
@@ -47,8 +51,8 @@ it.each([
   { ...config, organize: { ...config.organize, inputBytes: PURPOSE_INPUT_CAPS.organize + 1 } },
   { ...config, report: { ...config.report, inputBytes: PURPOSE_INPUT_CAPS.report + 1 } },
   { ...config, organize: { ...config.organize, maxOutputTokens: 3000 } },
-  { ...config, interactive: { ...config.interactive, maxOutputTokens: PURPOSE_OUTPUT_CAP + 1 } },
-  { ...config, report: { ...config.report, maxOutputTokens: PURPOSE_OUTPUT_CAP + 1 } },
+  { ...config, interactive: { ...config.interactive, maxOutputTokens: 8193 } },
+  { ...config, report: { ...config.report, maxOutputTokens: 8193 } },
   { ...config, report: { ...config.report, historyItems: -1 } },
   { ...config, interactive: { ...config.interactive, inputBytes: 2.5 } },
   { ...config, unknown: true },

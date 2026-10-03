@@ -15,7 +15,7 @@ export function mentorQuestionFixture(instructions, userRequest, stepIndex) {
   const label = typeof question?.label === "string" && /^\d+\.\d+$/.test(question.label) ? question.label : null;
   const where = label ? `第 ${label} 题` : "当前这一题";
   const roles = (() => {
-    const found = /Field roles for the current question: (\[.*?\])(?:\. |\.$|$)/s.exec(instructions);
+    const found = /Field roles for the current question: (\[.*?\])(?:\. |\.$|$)/sm.exec(instructions);
     try { return found ? JSON.parse(found[1]) : []; } catch { return []; }
   })();
   const role = roles.find(entry => entry.id === question?.id) ?? null;

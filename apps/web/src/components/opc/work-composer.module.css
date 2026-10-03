@@ -26,3 +26,6 @@
 @media(max-width:700px){.skillMenu{left:-70px}}
 .note{margin:5px 3px 0;color:#9a9a9a;font-size:10px;line-height:16px}
 @media(max-width:700px){.zone{padding:8px 12px 4px}.composer{padding:16px 17px 12px;border-radius:25px}.textarea{min-height:50px!important;height:50px}.note{font-size:9px}}
+/* Attached panel above the text box; scrolls on its own so the text box stays visible. */
+.attachment{max-height:min(320px,40dvh);margin:-4px -5px 12px;padding:0 5px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+@media(max-width:700px){.attachment{max-height:34dvh}}

@@ -3,30 +3,12 @@ import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
+import { buildVerifyEmailPath, routeCallbackError } from '@/lib/authFlow';
 import { logServerError } from '@/lib/server-log';
-import { resolveAuthAppUrl, resolveSupabaseCookieOptions } from '@/lib/site-config';
+import { isPublicPathname } from '@/lib/public-paths';
+import { isPublicSiteHost, resolveAuthAppUrl, resolveSupabaseCookieOptions } from '@/lib/site-config';
 
 const SENTRY_TUNNEL_PATH = '/monitoring';
-
-// 公开路径 - 不需要认证
-const PUBLIC_PATHS = [
-  '/login',
-  '/register',
-  '/verify-email',
-  '/maintenance',
-  '/contact',
-  '/tutorials',
-  '/faq',
-  '/terms',
-  '/privacy',
-  '/acceptable-use',
-  '/auth',
-  '/landing',
-  '/api',
-  '/_next',
-  '/_vercel',
-  '/favicon.ico',
-];
 
 // 公开站点路径 - 仅允许公共内容留在 public 域
 const PUBLIC_SITE_PATHS = [
@@ -59,10 +41,6 @@ export function normalizeHostname(hostname: string): string {
   return hostname.split(':')[0].toLowerCase().replace(/\.$/, '');
 }
 
-export function isAppDomain(hostname: string): boolean {
-  return hostname === 'app.graylum.com' || hostname.endsWith('.app.graylum.com');
-}
-
 export function isPreviewDeployment(hostname: string): boolean {
   return hostname.endsWith('.vercel.app');
 }
@@ -76,11 +54,13 @@ export function isDevEnvironment(hostname: string): boolean {
 }
 
 export function isPublicSiteDomain(hostname: string): boolean {
-  return (
-    hostname === 'graylum.com' ||
-    hostname === 'www.graylum.com' ||
-    hostname.endsWith('.www.graylum.com')
-  );
+  return isPublicSiteHost(hostname);
+}
+
+// Every host that is not the public site or a local/dev host is an app host and requires login,
+// so a newly added domain (for example a staging domain) is protected without a code change.
+export function requiresAppAuth(hostname: string): boolean {
+  return !isPublicSiteDomain(hostname) && !isDevEnvironment(hostname);
 }
 
 // 判断是否为公开路径
@@ -89,7 +69,7 @@ function isPublicPath(pathname: string): boolean {
     return true;
   }
 
-  return PUBLIC_PATHS.some(path => pathname.startsWith(path));
+  return isPublicPathname(pathname);
 }
 
 function isPublicSitePath(pathname: string): boolean {
@@ -146,6 +126,33 @@ function getClientIP(request: NextRequest): string {
     return realIP;
   }
   return 'unknown';
+}
+
+// GoTrue sends email and OAuth links to /auth/callback. Only when it does not accept the requested
+// redirect does it fall back to the Site URL root, so only the root is handled here: a code goes to
+// the server callback, which exchanges it with the verifier cookie this request carries (with
+// duplicate cookie names the browser client reads the older one first), and the expired-link error
+// code goes to the resend page. Other errors, and codes on any other page, keep their handling.
+// This also runs on the public site: its /auth/callback is forwarded to the app domain as usual.
+export function routeAuthLanding(request: NextRequest): NextResponse | null {
+  const { pathname, searchParams } = request.nextUrl;
+  if (pathname !== '/') {
+    return null;
+  }
+
+  const code = searchParams.get('code');
+  if (code) {
+    const callbackUrl = new URL('/auth/callback', request.url);
+    callbackUrl.searchParams.set('code', code);
+    callbackUrl.searchParams.set('next', sanitizeRedirectTarget(`${pathname}${request.nextUrl.search}`));
+    return NextResponse.redirect(callbackUrl);
+  }
+
+  if (routeCallbackError(searchParams)?.to === 'verify-expired') {
+    return NextResponse.redirect(new URL(buildVerifyEmailPath('', '/profile', 'expired'), request.url));
+  }
+
+  return null;
 }
 
 let maintenanceCache: { enabled: boolean; expiresAt: number } | null = null;
@@ -250,8 +257,13 @@ export async function proxy(request: NextRequest) {
     }
   }
 
+  const authLandingRedirect = routeAuthLanding(request);
+  if (authLandingRedirect) {
+    return authLandingRedirect;
+  }
+
   // 判断域名类型
-  const isAppDomainMatch = isAppDomain(normalizedHostname);
+  const requiresAppAuthMatch = requiresAppAuth(normalizedHostname);
   const isPublicSiteDomainMatch = isPublicSiteDomain(normalizedHostname);
   const isPreviewDeploymentMatch = isPreviewDeployment(normalizedHostname);
   const isDevEnvironmentMatch = isDevEnvironment(normalizedHostname);
@@ -345,8 +357,8 @@ export async function proxy(request: NextRequest) {
     return supabaseResponse;
   }
 
-  // app 域名: 应用后台 (需要认证)
-  if (isAppDomainMatch || isPreviewDeploymentMatch) {
+  // 应用域名（app、staging、预览及任何未单独列出的域名）: 需要认证
+  if (requiresAppAuthMatch) {
     // 公开路径允许访问
     if (isPublicPath(pathname)) {
       // 已登录用户访问登录页时重定向到首页

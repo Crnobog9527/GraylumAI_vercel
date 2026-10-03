@@ -272,3 +272,9 @@ test('fails closed when the exact base contains no migration evidence', async ()
     );
   }, { trustedMigrations: false });
 });
+
+test('AC1-4 occupies 0155 after staging 0154 and must not leave a numbered gap', async () => {
+  const files = await readdir(repositoryMigrations);
+  assert.ok(files.includes('0155_runtime_answer_source.sql'));
+  assert.ok(!files.includes('0156_runtime_answer_source.sql'));
+});

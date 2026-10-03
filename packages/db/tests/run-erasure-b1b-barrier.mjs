@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+// Confirmation uses a synthetic prehashed identity fixture; never a real identity or key.
 // Local-only deterministic sessions test the real migrated functions, never a replacement scrub.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -17,7 +18,8 @@ const { q, sql, Session } = db;
 const retry = { retry: true, reason: 'transactions_pending' };
 const scrubbers = ['account_erasure_scrub_content', 'account_erasure_scrub_runtime'];
 const service = input => `SET ROLE service_role; ${input}`;
-const confirm = actor => q(service(`SELECT account_erasure_confirm('${actor}',gen_random_uuid())`));
+const confirm = actor => q(service(`SELECT account_erasure_confirm_with_digests('${actor}',gen_random_uuid(),
+      jsonb_build_array(jsonb_build_object('kind','email','key_version','test-v1','digest',repeat('b',64))))`));
 const scrub = (name, actor) => JSON.parse(q(service(`SELECT ${name}('${actor}')`)));
 function blocked(actor) {
   for (const name of scrubbers) assert.deepEqual(scrub(name, actor), retry, name);
@@ -173,10 +175,12 @@ try {
     const session = new Session(`barrier-confirm-same-transaction-${nested ? 'nested' : 'direct'}`);
     try {
       await session.exec('BEGIN; SET LOCAL ROLE service_role');
-      const confirmation = `PERFORM account_erasure_confirm('${actor}',gen_random_uuid())`;
+      const confirmation = `PERFORM account_erasure_confirm_with_digests('${actor}',gen_random_uuid(),
+      jsonb_build_array(jsonb_build_object('kind','email','key_version','test-v1','digest',repeat('b',64))))`;
       await session.exec(nested
         ? `DO $$ BEGIN BEGIN ${confirmation}; EXCEPTION WHEN OTHERS THEN RAISE; END; END $$`
-        : `SELECT account_erasure_confirm('${actor}',gen_random_uuid())`);
+        : `SELECT account_erasure_confirm_with_digests('${actor}',gen_random_uuid(),
+      jsonb_build_array(jsonb_build_object('kind','email','key_version','test-v1','digest',repeat('b',64))))`);
       for (const name of scrubbers) {
         assert.deepEqual(JSON.parse(await session.exec(`SELECT ${name}('${actor}')`)), retry,
           `${name}: closure must commit separately before scrub (${nested ? 'subtransaction' : 'direct'})`);

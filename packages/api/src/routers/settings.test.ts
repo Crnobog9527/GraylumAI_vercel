@@ -28,6 +28,44 @@ describe('settings writer verification', () => {
   });
 });
 
+describe('billing unit setting validation', () => {
+  const callerWithFailingWriterRead = (upsert: ReturnType<typeof vi.fn>) => {
+    const profile = { id: 'admin-user', role: 'admin', status: 'active', nickname: 'Admin', email: 'admin@example.test' };
+    const client = (result: unknown) => ({ from: (table: string) => table === 'system_settings'
+      ? { upsert }
+      : { select() { return this; }, eq() { return this; }, single: async () => result } });
+    return settingsRouter.createCaller({
+      headers: new Headers(),
+      user: { id: profile.id, email: profile.email, app_metadata: { provider: 'email' }, user_metadata: { email_verified: true } },
+      isEmailVerified: true, authProvider: 'email', hasSupabaseAdminPrivileges: true,
+      supabase: client({ data: profile, error: null }), supabasePublic: {},
+      supabaseAdmin: client({ data: null, error: { code: '42501' } }),
+    } as unknown as Parameters<typeof settingsRouter.createCaller>[0]);
+  };
+
+  it.each([
+    ['billing_credits_per_usd', '0'], ['billing_credits_per_usd', '-1'], ['billing_credits_per_usd', '1e3'],
+    ['billing_token_price_multiplier', '0'], ['billing_token_price_multiplier', '20.01'],
+    ['billing_token_price_multiplier', '1.234'], ['billing_token_price_multiplier', ''], ['billing_token_price_multiplier', null],
+    ['billing_provider_prices', '{"version":1,"entries":[]}'],
+  ])('rejects %s=%j before any write, without rounding', async (key, value) => {
+    const upsert = vi.fn();
+    const caller = callerWithFailingWriterRead(upsert);
+    await expect(caller.updateSystemSettingsBulk([{ key, value }])).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(caller.updateSystemSettings({ key, value })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it.each([['billing_credits_per_usd', '100'], ['billing_token_price_multiplier', '3'], ['billing_token_price_multiplier', '19.99']])(
+    'accepts %s=%s and continues to the writer check', async (key, value) => {
+      const upsert = vi.fn();
+      const caller = callerWithFailingWriterRead(upsert);
+      await expect(caller.updateSystemSettingsBulk([{ key, value }])).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+      await expect(caller.updateSystemSettings({ key, value })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+      expect(upsert).not.toHaveBeenCalled();
+    });
+});
+
 function createQueryBuilder(result: Promise<unknown>) {
   return {
     select() {
@@ -74,6 +112,9 @@ const validCreditPackage = {
 };
 
 const validMembershipPlan = {
+  allow_fusion_review: true,
+  allow_fusion_compare: true,
+  library_storage_bytes: 500_000_000,
   id: '123e4567-e89b-42d3-a456-426614174111',
   name: 'Pro',
   level: 'pro',
@@ -90,6 +131,18 @@ const validMembershipPlan = {
 };
 
 describe('getPublicReadClient', () => {
+  it('intentionally exposes only the D3 comparison limit through the public settings allowlist', async () => {
+    const rows = [{ key: 'fusion_compare_max_models', value: 4 }, { key: 'runtime_purpose_budgets', value: 'private' }];
+    const caller = settingsRouter.createCaller({
+      supabasePublic: { from: () => ({ select: () => ({ in: (_column: string, keys: string[]) => {
+        expect(keys).toContain('fusion_compare_max_models');
+        expect(keys).not.toContain('runtime_purpose_budgets');
+        return Promise.resolve({ data: rows.filter(row => keys.includes(row.key)), error: null });
+      } }) }) },
+    } as unknown as Parameters<typeof settingsRouter.createCaller>[0]);
+    expect(await caller.getSystemSettings()).toEqual({ fusion_compare_max_models: 4 });
+  });
+
   it('uses the public client even when admin credentials are configured', () => {
     const publicClient = { role: 'public' };
     const adminClient = { role: 'admin' };

@@ -12,7 +12,8 @@ vi.mock('next/navigation', () => ({ useSearchParams: () => state.params }));
 vi.mock('@/trpc/client', () => ({
   trpc: {
     user: { getUserProfile: { useQuery: () => state.profile } },
-    credits: { getCreditsSummary: { useQuery: () => ({ data: { totalSpent: 1, totalEarned: 2 }, isLoading: false }) } },
+    // A summary that never finishes: the page must not wait for it (the cards that show it handle it).
+    credits: { getCreditsSummary: { useQuery: () => ({ data: undefined, isLoading: true, isError: false }) } },
   },
 }));
 vi.mock('@/hooks/use-credits', () => ({
@@ -76,6 +77,7 @@ describe('profile page', () => {
   it('renders real profile data when the read succeeds', () => {
     const html = renderToStaticMarkup(<ProfilePage />);
     expect(html).toContain('profile-header:小王:pro');
+    expect(html).not.toContain('animate-spin');
     expect(html).not.toContain('role="alert"');
   });
 

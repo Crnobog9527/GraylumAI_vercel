@@ -26,17 +26,33 @@ import { z } from "zod";
 
 /** The only tool name that produces a question card. */
 export const ASK_QUESTION_TOOL = "ask_question";
+// Serialized arguments, not display text. Other tools keep their existing bound.
+// This character bound leaves room for the five-field card; the response still
+// obeys the independent provider-response byte limit.
+export const ASK_QUESTION_ARGUMENT_LIMIT = 49152;
+export const DEFAULT_TOOL_ARGUMENT_LIMIT = 4000;
+export const toolArgumentLimit = (name: string): number =>
+  name === ASK_QUESTION_TOOL ? ASK_QUESTION_ARGUMENT_LIMIT : DEFAULT_TOOL_ARGUMENT_LIMIT;
+/** Correlates an answer with the saved card; option indexes are zero based. */
+export const questionAnswerSourceSchema = z.object({
+  executionId: z.string().uuid(), optionIndex: z.number().int().min(0).max(4).optional(),
+}).strict();
+export type QuestionAnswerSource = z.infer<typeof questionAnswerSourceSchema>;
+/** Display limit for envelope, tool message and plain-text messages. */
+export const AGENT_TURN_MESSAGE_LIMIT = 20000;
 export const QUESTION_MAX_CHARS = 500;
 export const OPTION_MAX_CHARS = 200;
 export const MIN_OPTIONS = 2;
 export const MAX_OPTIONS = 5;
 
 /**
- * Fixed page controls, never model arguments. Every card also shows a
- * "not sure" button and a free-text box; neither locks the input field.
- * The button sends `UNSURE_INPUT` as the next turn's plain user input, and a
- * clicked option sends the option text itself. The server-side prompt treats
- * `UNSURE_INPUT` as a request for analysis, never as an answer.
+ * Fixed page control, never a model argument. Every card ends with a fixed
+ * "其他" entry that moves focus to the message box, where the user answers in
+ * their own words; the box never locks. A clicked option sends the option text
+ * itself as the next turn's plain user input.
+ *
+ * `UNSURE_INPUT` was the reply of an earlier "not sure" button. New pages no
+ * longer send it; it stays so history cards answered with it read correctly.
  */
 export const UNSURE_INPUT = "我不确定，帮我分析";
 
@@ -45,8 +61,11 @@ const cardText = (max: number) =>
 
 /**
  * One main question and 2–5 short suggested answers. This schema is the
- * `ask_question` tool's parameter schema and the stored card shape.
- * Options must be distinct after trimming.
+ * legacy `ask_question` parameter schema and stored card shape.
+ * Options must be distinct after trimming. `recommended` is the index of the
+ * option the mentor recommends, or null for a neutral card (ranges or
+ * categories the user places themselves in); an index outside the options
+ * makes the card invalid.
  */
 export const questionCardSchema = z
   .object({
@@ -56,13 +75,33 @@ export const questionCardSchema = z
       .min(MIN_OPTIONS)
       .max(MAX_OPTIONS)
       .refine(options => new Set(options).size === options.length, "duplicate option"),
+    recommended: z.number().int().min(0).max(MAX_OPTIONS - 1).nullable(),
   })
-  .strict();
-export type QuestionCard = z.infer<typeof questionCardSchema>;
+  .strict()
+  .refine(card => card.recommended === null || card.recommended < card.options.length, "recommended out of range");
+export const questionMessageSchema = cardText(AGENT_TURN_MESSAGE_LIMIT);
+/** New calls require all five fields. Legacy storage remains readable separately. */
+export const questionToolCardSchema = questionCardSchema.safeExtend({
+  message: questionMessageSchema,
+  recommendationReason: cardText(AGENT_TURN_MESSAGE_LIMIT).nullable(),
+}).refine(card => card.recommended === null
+  ? card.recommendationReason === null : card.recommendationReason !== null,
+"recommendation reason must match recommended");
+export type QuestionCard = z.infer<typeof questionCardSchema> & {
+  message?: string; recommendationReason?: string | null;
+};
 
-/** Validated card or null. Never throws; invalid model output shows no card. */
+/**
+ * Validated card or null. Never throws; invalid model output shows no card.
+ * Cards stored before `recommended` existed (local test data only; v5 was
+ * never enabled before it) read as having no recommendation.
+ */
 export function parseQuestionCard(value: unknown): QuestionCard | null {
-  const parsed = questionCardSchema.safeParse(value);
+  const legacy = value && typeof value === "object" && !Array.isArray(value) && !("recommended" in value);
+  const extended = value && typeof value === "object" &&
+    ("message" in value || "recommendationReason" in value);
+  const parsed = extended ? questionToolCardSchema.safeParse(value)
+    : questionCardSchema.safeParse(legacy ? { ...value, recommended: null } : value);
   return parsed.success ? parsed.data : null;
 }
 
@@ -87,7 +126,8 @@ export type AgentTurnState = "completed" | "cancelled" | "cost_pending" | "pendi
  * Why a finished or stopped execution has no usable body. The page maps each
  * value to a fixed notice; none of them may be retried automatically.
  */
-export type AgentTurnUnavailable = "output_truncated" | "provider_history" | "preflight" | "capacity" | "latest";
+export type AgentTurnUnavailable = "output_truncated" | "provider_history" | "preflight" | "capacity" | "latest"
+  | "call_limited" | "paused" | "limit_unavailable";
 
 /** The execution outcome. `body` is the stored reply body; read it with `readAgentTurnBody`. */
 export type AgentTurnOutcome = {
@@ -126,8 +166,6 @@ export type AgentTurnEvent =
 
 /** Marks the host-built envelope. Legacy bodies never carry this field. */
 export const AGENT_TURN_FORMAT = "agent-turn.v1";
-/** Display limit for envelope and plain-text messages. */
-export const AGENT_TURN_MESSAGE_LIMIT = 20000;
 /** Legacy JSON mentor messages keep their existing 4000-character display limit. */
 export const LEGACY_MESSAGE_LIMIT = 4000;
 /** Bodies above this size are not parsed at all. */
@@ -136,7 +174,7 @@ export const AGENT_TURN_BODY_LIMIT = 262144;
 /**
  * The stored body of a new-format turn:
  *
- *   {"format":"agent-turn.v1","message":"…","card":{"question":"…","options":[…]}|null}
+ *   {"format":"agent-turn.v1","message":"…","card":{"question":"…","options":[…],"recommended":0|null}|null}
  *
  * It is still a JSON object with a top-level `message` string, so the legacy
  * mentor parser keeps showing the text of new turns without a migration.
@@ -181,7 +219,7 @@ export function agentTurnBody(message: string, card: QuestionCard | null): strin
   const envelope: AgentTurnEnvelope = {
     format: AGENT_TURN_FORMAT,
     message: text,
-    card: card === null ? null : questionCardSchema.parse(card),
+    card: card === null ? null : (card.message === undefined ? questionCardSchema : questionToolCardSchema).parse(card),
   };
   if (!envelope.message && !envelope.card) throw new Error("AGENT_TURN_BODY_EMPTY");
   return JSON.stringify(envelope);
@@ -212,7 +250,7 @@ export function readAgentTurnBody(raw: string | null | undefined): AgentTurnBody
   const message = typeof value.message === "string" ? value.message : "";
   if (value.format === AGENT_TURN_FORMAT) {
     const card = parseQuestionCard(value.card);
-    const text = limited(message, AGENT_TURN_MESSAGE_LIMIT);
+    const text = limited(card?.message ?? message, AGENT_TURN_MESSAGE_LIMIT);
     if (!text.message && !card) return none("invalid");
     return { kind: "envelope", card, ...text };
   }

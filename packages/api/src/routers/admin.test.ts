@@ -1,3 +1,4 @@
+import { pricedModel } from '../shared/__tests__/modelPriceFixture';
 import { TRPCError } from '@trpc/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -577,6 +578,8 @@ describe('adminRouter performance stats aggregation', () => {
 
     const caller = createAdminCaller(adminSupabase);
     const result = await caller.getPerformanceStats({ timeRange: '14d' });
+    expect(result.modelUsage[0]?.pricing).toMatchObject({ status: 'unread', label: '未读取', base: null, frozen: null });
+    expect(result.modelUsage[0]).not.toHaveProperty('inputTokenCost');
 
     expect(result.conversations).toMatchObject({
       total: 100,
@@ -1114,6 +1117,77 @@ describe('adminRouter finance stats runtime billing summary', () => {
     expect(rows[0].cached_tokens).toBeNull();
   });
 
+  it('accepts the saved empty provider-price setting without treating it as a scalar billing setting', async () => {
+    const result = await createAdminCaller(createFinanceStatsSupabase({
+      system_settings: [
+        { key: 'billing_provider_prices', value: { version: 1, entries: [] } },
+        { key: 'billing_credits_per_usd', value: 100 },
+        { key: 'billing_token_price_multiplier', value: 3 },
+      ],
+    })).getFinanceStats();
+    expect(result.runtimeBilling).toMatchObject({ creditsPerUsd: 100, tokenPriceMultiplier: 3 });
+    expect(result.financeOverview.recordedCostUsd).toBe(0.125);
+  });
+
+  it('accepts a renamed model with a refreshed snapshot and the retained manual costs', async () => {
+    const modelId = 'openai/gpt-6.1-sol';
+    const config = pricedModel().config;
+    config.pricing.model = modelId;
+    config.reasoning.catalog.model = modelId;
+    const result = await createAdminCaller(createFinanceStatsSupabase({
+      ai_models: [{ id: 'renamed-model', name: modelId, model_id: modelId, provider: 'openrouter',
+        is_active: true, max_tokens: 4096, input_token_cost: 200000, output_token_cost: 400000,
+        input_token_cost_above_200k: 300000, output_token_cost_above_200k: 600000, web_search_cost: 50000,
+        config,
+      }],
+    })).getFinanceStats();
+    expect(result.modelStats).toEqual([expect.objectContaining({ modelId, pricing: expect.objectContaining({ status: 'ready' }) })]);
+    expect(result.modelStats[0]).not.toHaveProperty('inputTokenCost');
+    expect(result.financeOverview.recordedCostUsd).toBe(0.125);
+  });
+
+  it('counts checkins and exposes unknown transaction types without failing or double counting spend', async () => {
+    const created_at = '2026-03-29T08:00:00.000Z';
+    const rows = [
+      { type: 'addition', amount: 25, created_at }, { type: 'purchase', amount: 100, created_at },
+      { type: 'checkin', amount: 7, created_at }, { type: 'future_reward', amount: 11, created_at },
+      { type: 'future_reward', amount: -2, created_at }, { type: '__proto__', amount: 3, created_at },
+      ...['deduction', 'consumption', 'adjustment', 'refund'].map(type => ({ type, amount: -20, created_at })),
+    ];
+    const result = await createAdminCaller(createFinanceStatsSupabase({ credit_transactions: rows })).getFinanceStats();
+    expect(result.transactions).toMatchObject({ totalAdditions: 25, totalCheckins: 7, totalPurchases: 100,
+      totalDeductions: 5, totalRefunds: 3, unknownTypeCount: 3,
+      unknownTypes: { future_reward: 2, ['__proto__']: 1 } });
+    expect(result.financeOverview).toMatchObject({ creditsGiven: 32, creditsPurchased: 100, netCreditsFlow: 127 });
+    expect(result.dailyChart.find(day => day.date === '2026-03-29')).toMatchObject({ additions: 25, checkins: 7,
+      purchases: 100, deductions: 5, unknownTypeCount: 3 });
+  });
+
+  it('preserves an unfamiliar model active value without counting it as active', async () => {
+    const result = await createAdminCaller(createFinanceStatsSupabase({ ai_models: [
+      { id: 'future-model', name: 'Future', model_id: 'future/model', provider: 'openrouter', is_active: 'archived',
+        max_tokens: 4096, input_token_cost: 1, output_token_cost: 2, input_token_cost_above_200k: 0,
+        output_token_cost_above_200k: 0, web_search_cost: 0 },
+    ] })).getFinanceStats();
+    expect(result.runtimeBilling).toMatchObject({ activeModelCount: 0, unknownModelActiveCount: 1 });
+    expect(result.modelStats[0].isActive).toBe('archived');
+  });
+
+  it('preserves an unfamiliar unconstrained package active value and counts it separately', async () => {
+    const result = await createAdminCaller(createFinanceStatsSupabase({ credit_packages: [
+      { id: 'future-package', name: 'Future', price: 100, credits_amount: 10, active: 'archived' },
+    ] })).getFinanceStats();
+    expect(result.packages).toMatchObject({ totalPackages: 1, activePackages: 0, unknownActiveCount: 1,
+      packages: [expect.objectContaining({ active: 'archived' })] });
+  });
+
+  it.each(['', '   ', null, 123])('still rejects an invalid transaction type: %#', async type => {
+    const caller = createAdminCaller(createFinanceStatsSupabase({ credit_transactions: [
+      { amount: 7, type, created_at: '2026-03-29T08:00:00.000Z' },
+    ] }));
+    await expect(caller.getFinanceStats()).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+  });
+
   it('accepts genuinely empty datasets and keeps missing-setting fallbacks', async () => {
     const emptyOverrides = Object.fromEntries(
       financeTables.map((table) => [table, []]),
@@ -1127,6 +1201,9 @@ describe('adminRouter finance stats runtime billing summary', () => {
       totalDeductions: 0,
       totalPurchases: 0,
       totalRefunds: 0,
+      totalCheckins: 0,
+      unknownTypeCount: 0,
+      unknownTypes: {},
       todayTransactions: 0,
       weekTransactions: 0,
       monthTransactions: 0,
@@ -1141,6 +1218,7 @@ describe('adminRouter finance stats runtime billing summary', () => {
     expect(result.packages).toEqual({
       totalPackages: 0,
       activePackages: 0,
+      unknownActiveCount: 0,
       packages: [],
     });
     expect(result.modelStats).toEqual([]);
@@ -1148,6 +1226,7 @@ describe('adminRouter finance stats runtime billing summary', () => {
     expect(result.runtimeBilling).toMatchObject({
       creditsPerUsd: 1000,
       tokenPriceMultiplier: 1.5,
+      billingUnitSource: { creditsPerUsd: 'default', defaultMultiplier: 'default' },
       searchSurchargeCredits: null,
       newUserCredits: 100,
     });
@@ -1234,9 +1313,10 @@ describe('adminRouter finance stats runtime billing summary', () => {
                   {
                     id: 'model-a-row',
                     name: 'Claude Sonnet',
-                    model_id: 'model-a',
+                    model_id: 'openai/model-a',
                     provider: 'anthropic',
                     is_active: 'true',
+                    config: (() => { const row = pricedModel(); row.config.pricing.model = row.config.reasoning.catalog.model = 'openai/model-a'; return row.config; })(),
                     input_token_cost: 3000000,
                     output_token_cost: 15000000,
                     input_token_cost_above_200k: 0,
@@ -1247,9 +1327,10 @@ describe('adminRouter finance stats runtime billing summary', () => {
                   {
                     id: 'model-b-row',
                     name: 'Claude Haiku',
-                    model_id: 'model-b',
+                    model_id: 'openai/model-b',
                     provider: 'anthropic',
                     is_active: 'true',
+                    config: (() => { const row = pricedModel(); row.config.pricing.model = row.config.reasoning.catalog.model = 'openai/model-b'; return row.config; })(),
                     input_token_cost: 800000,
                     output_token_cost: 4000000,
                     input_token_cost_above_200k: 0,
@@ -1289,6 +1370,8 @@ describe('adminRouter finance stats runtime billing summary', () => {
                   { key: 'new_user_credits', value: '120' },
                   { key: 'search_surcharge_credits', value: '7' },
                   { key: 'input_credits_per_1k', value: '999' },
+                  { key: 'billing_credits_per_usd', value: '1000' },
+                  { key: 'billing_token_price_multiplier', value: '1.5' },
                 ],
                 error: null,
               };
@@ -1330,13 +1413,18 @@ describe('adminRouter finance stats runtime billing summary', () => {
     const caller = createAdminCaller(adminSupabase);
     const result = await caller.getFinanceStats();
 
+    expect(result.modelStats[0]?.pricing).toMatchObject({ status: 'ready', base: { prompt: '2' },
+      frozen: { promptUsdPerMillion: '3' } });
+    expect(result.modelStats[0]).not.toHaveProperty('inputTokenCost');
     expect(result.runtimeBilling).toEqual({
       creditsPerUsd: 1000,
       tokenPriceMultiplier: 1.5,
+      billingUnitSource: { creditsPerUsd: 'configured', defaultMultiplier: 'configured' },
       activeModelCount: 2,
-      inputCreditsPer1KRange: { min: 1.2, max: 4.5 },
-      outputCreditsPer1KRange: { min: 6, max: 22.5 },
-      searchCreditsPer1KRange: { min: 300, max: 300 },
+      unknownModelActiveCount: 0,
+      inputCreditsPer1KRange: { min: 4.5, max: 4.5 },
+      outputCreditsPer1KRange: { min: 7.5, max: 7.5 },
+      searchCreditsPer1KRange: null,
       searchSurchargeCredits: 7,
       newUserCredits: 120,
     });
@@ -1880,6 +1968,9 @@ describe('adminRouter lightweight admin dashboards', () => {
                 level: 'pro',
                 allow_export: 'true',
                 allow_batch_export: 'false',
+        allow_fusion_review: true,
+        allow_fusion_compare: true,
+        library_storage_bytes: 500_000_000,
               }],
               error: null,
             };
@@ -1924,6 +2015,9 @@ describe('adminRouter lightweight admin dashboards', () => {
         level: 'pro',
         allow_export: 'true',
         allow_batch_export: 'false',
+        allow_fusion_review: true,
+        allow_fusion_compare: true,
+        library_storage_bytes: 500_000_000,
       }],
     });
     expect(adminQueries).toEqual(['system_settings', 'membership_plans']);
@@ -1993,6 +2087,9 @@ describe('adminRouter lightweight admin dashboards', () => {
       level: 'pro',
       allow_export: 'maybe',
       allow_batch_export: 'false',
+        allow_fusion_review: true,
+        allow_fusion_compare: true,
+        library_storage_bytes: 500_000_000,
     }]],
   ])('fails the settings dashboard for a %s', async (_caseName, invalidTable, invalidData) => {
     const adminSupabase = {
@@ -2005,6 +2102,9 @@ describe('adminRouter lightweight admin dashboards', () => {
               level: 'pro',
               allow_export: 'true',
               allow_batch_export: 'false',
+        allow_fusion_review: true,
+        allow_fusion_compare: true,
+        library_storage_bytes: 500_000_000,
             }];
         return createAwaitableQueryBuilder(Promise.resolve({
           data: table === invalidTable ? invalidData : validData,

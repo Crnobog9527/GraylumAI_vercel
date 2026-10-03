@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { trpc } from '@/trpc/client';
 import {
   Save, RefreshCw, Settings, CreditCard, Gift, Users, Sliders, Crown,
-  Download, AlertTriangle, MessageSquare
+  AlertTriangle, MessageSquare
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -16,7 +16,13 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { DEFAULT_SITE_NAME, DEFAULT_SUPPORT_EMAIL } from '@/lib/site-config';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
-import AdminErrorState from '@/components/admin/AdminErrorState';
+import AdminSettingsLoadError from '@/components/admin/AdminErrorState';
+import { RuntimeRateLimitSettings, RuntimeRateLimitTabTrigger } from '@/components/admin/RuntimeRateLimitSettings';
+import { MentorBudgetTabContent, MentorBudgetTabTrigger } from '@/components/admin/MentorBudgetSettings';
+import { changedSettings, mergeReadSettings } from './changedSettings';
+import { MembershipPlanPermissions } from '@/components/admin/MembershipPlanPermissions';
+import { FUSION_COMPARE_SETTING_KEY, FusionCompareSetting } from '@/components/admin/FusionCompareSetting';
+import type { MembershipPlanRow } from '@/components/admin/membershipEntitlementDraft';
 
 // 完整的系统设置定义
 const defaultSettings: Record<string, { value: string; type: 'string' | 'number' | 'boolean'; label: string; description: string }> = {
@@ -27,8 +33,8 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
 
   // Credits & Billing
   new_user_credits: { value: '100', type: 'number', label: '新用户赠送积分', description: '新用户注册时赠送的积分数量' },
-  billing_credits_per_usd: { value: '1000', type: 'number', label: '每美元积分数', description: 'AI 成本换算为站内积分的基准比例' },
-  billing_token_price_multiplier: { value: '1.5', type: 'number', label: 'Token 成本倍率', description: '用户计费 = 供应商成本 × 每美元积分数 × 该倍率' },
+  billing_credits_per_usd: { value: '', type: 'number', label: '每美元积分数', description: '留空 = 未配置（按缺省值 1000 计算）；只影响新操作' },
+  billing_token_price_multiplier: { value: '', type: 'number', label: '全站默认加价倍数', description: '留空 = 未配置（缺省 1.5）；1–20，最多两位小数' },
   billing_min_pre_deduct: { value: '10', type: 'number', label: '最小预扣积分', description: 'AI 请求预扣的最低积分数，默认沿用现有安全值 10' },
   billing_max_pre_deduct: { value: '10000', type: 'number', label: '最大预扣积分', description: '单次 AI 请求预扣积分上限' },
   billing_safety_margin: { value: '0.2', type: 'number', label: '预扣安全边际', description: '预扣时在估算积分上额外增加的比例，例如 0.2 表示 20%' },
@@ -40,16 +46,16 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
 
   // Features (11项)
   max_messages_per_conversation: { value: '100', type: 'number', label: '单对话最大消息数', description: '每个对话允许的最大消息数' },
-  max_input_characters: { value: '2000', type: 'number', label: '输入框字符上限', description: '用户单次输入的最大字符数' },
+  max_input_characters: { value: '', type: 'number', label: '输入框字符上限', description: '用户单次输入的最大字符数；留空 = 未配置（实际按 2500）' },
   enable_free_tier: { value: 'false', type: 'boolean', label: '启用免费体验', description: '允许用户在无积分时使用有限功能' },
   free_tier_messages: { value: '5', type: 'number', label: '免费消息数/天', description: '每天免费消息数量' },
   long_text_warning_threshold: { value: '5000', type: 'number', label: '长文本预警阈值(tokens)', description: '输入token超过此值时弹窗提示用户确认' },
   enable_long_text_warning: { value: 'true', type: 'boolean', label: '启用长文本预警', description: '开启后，超长文本会提示预计消耗积分' },
   show_token_usage_stats: { value: 'true', type: 'boolean', label: '显示Token使用统计', description: '在聊天页面显示本次请求和累计的Token使用情况' },
-  chat_show_model_selector: { value: 'true', type: 'boolean', label: '显示模型选择器', description: '在聊天界面显示AI模型选择下拉框' },
-  chat_prompt_text: { value: '请选择一个模型开始对话', type: 'string', label: '聊天提示文案', description: '聊天输入框 placeholder 文案' },
-  chat_welcome_message: { value: '你好！有什么可以帮助你的吗？', type: 'string', label: '聊天欢迎消息', description: '聊天页空状态欢迎文案' },
-  chat_billing_hint: { value: '⚡ 按实际Token消耗计费：输入 {input}积分/1K tokens，输出 {output}积分/1K tokens', type: 'string', label: '计费提示文案', description: '聊天页面底部显示的计费说明' },
+  chat_show_model_selector: { value: '', type: 'boolean', label: '显示模型选择器', description: '在聊天界面显示AI模型选择下拉框；未配置时不显示' },
+  chat_prompt_text: { value: '', type: 'string', label: '聊天提示文案', description: '聊天输入框 placeholder；留空 = 未配置（显示"请输入您的问题..."）' },
+  chat_welcome_message: { value: '', type: 'string', label: '聊天欢迎消息', description: '聊天页空状态文案；留空 = 未配置（显示内置默认文案）' },
+  chat_billing_hint: { value: '', type: 'string', label: '计费提示文案', description: '聊天页面底部的计费说明；留空 = 未配置（显示内置提示，不含单价）' },
   home_show_onboarding: { value: 'true', type: 'boolean', label: '显示新手引导', description: '首页显示六步引导模块' },
   home_show_featured_modules: { value: 'true', type: 'boolean', label: '显示精选模块', description: '首页显示精选推荐模块' },
   enable_smart_routing: { value: 'true', type: 'boolean', label: '启用智能路由', description: '根据用户问题自动分类任务类型并推荐最合适的AI模型' },
@@ -60,8 +66,8 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
   assistant_model_id: { value: '', type: 'string', label: '辅助模型', description: '为轻任务、压缩、搜索摘要等任务选择默认辅助模型' },
   enable_smart_search_decision: { value: 'true', type: 'boolean', label: '启用智能搜索判断', description: '根据请求自动决策是否联网，并优先调用 provider 原生联网能力' },
   search_decision_min_confidence: { value: '0.75', type: 'number', label: '联网决策最小置信度', description: '低于该阈值时即使命中实时性信号也不自动联网' },
-  search_surcharge_credits: { value: '0', type: 'number', label: '联网附加积分', description: '每次真实联网搜索额外增加的站内积分成本' },
-  enable_prompt_cache: { value: 'false', type: 'boolean', label: 'Prompt Cache（官方 Anthropic 已退役）', description: 'Claude 当前统一经 OpenRouter 调用；该项仅作为历史兼容设置保留，不再作为运行时依赖' },
+  search_surcharge_credits: { value: '', type: 'number', label: '联网附加积分', description: '每次真实联网搜索额外增加的积分；留空 = 未配置：联网搜索和研究不可用' },
+  enable_prompt_cache: { value: 'true', type: 'boolean', label: 'Prompt Cache（官方 Anthropic 已退役）', description: 'Claude 当前统一经 OpenRouter 调用；该项仅作为历史兼容设置保留，不再作为运行时依赖' },
 
   // Checkin (6项)
   checkin_day1: { value: '5', type: 'number', label: '签到第1天', description: '第1天签到奖励积分' },
@@ -102,28 +108,12 @@ interface SettingData {
   id?: string;
 }
 
-interface MembershipPlan {
-  id: string;
-  name: string;
-  level: 'free' | 'pro' | 'gold';
-  allow_export: string;
-  allow_batch_export: string;
-}
-
-export function AdminSettingsLoadError({
-  error,
-  onRetry,
-}: {
-  error: Error | { message: string };
-  onRetry?: () => void;
-}) {
-  return <AdminErrorState error={error} onRetry={onRetry} />;
-}
+export { AdminSettingsLoadError };
 
 export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<Record<string, SettingData>>({});
   const [saving, setSaving] = useState(false);
-  const [membershipSettings, setMembershipSettings] = useState<Record<string, { allowExport: boolean; allowBatchExport: boolean }>>({});
+  const [tab, setTab] = useState('general');
 
   const {
     data: dashboard,
@@ -138,66 +128,23 @@ export default function AdminSettingsPage() {
 
   const updateSettingsBulk = trpc.settings.updateSystemSettingsBulk.useMutation();
 
-  const updateMembershipPlan = trpc.admin.updateMembershipPlan.useMutation({
-    onSuccess: () => {
-      refetchDashboard();
-      toast.success('会员权限更新成功');
-    },
-    onError: () => {
-      toast.error('更新失败');
-    },
-  });
+  // Entitlement editors show only values read back from the server after a save.
+  const reloadDashboard = async () => !(await refetchDashboard()).error;
 
-  // Initialize membership settings from plans
+  // 合并默认设置和已保存的设置；重新读取时保留管理员还没保存的修改
+  const previousSaved = useRef<Record<string, unknown> | undefined>(undefined);
   useEffect(() => {
-    if (membershipPlans) {
-      const newSettings: Record<string, { allowExport: boolean; allowBatchExport: boolean }> = {};
-      (membershipPlans as MembershipPlan[]).forEach((plan: MembershipPlan) => {
-        newSettings[plan.id] = {
-          allowExport: plan.allow_export === 'true',
-          allowBatchExport: plan.allow_batch_export === 'true',
-        };
-      });
-      setMembershipSettings(newSettings);
-    }
-  }, [membershipPlans]);
-
-  const handleSaveMembershipSetting = async (planId: string) => {
-    const setting = membershipSettings[planId];
-    if (!setting) return;
-
-    await updateMembershipPlan.mutateAsync({
-      id: planId,
-      allowExport: setting.allowExport ? 'true' : 'false',
-      allowBatchExport: setting.allowBatchExport ? 'true' : 'false',
-    });
-  };
-
-  // 合并默认设置和已保存的设置
-  useEffect(() => {
-    const mergedSettings = { ...defaultSettings };
-    if (savedSettings) {
-      Object.entries(savedSettings).forEach(([key, value]) => {
-        if (mergedSettings[key]) {
-          mergedSettings[key] = {
-            ...mergedSettings[key],
-            value: String(value),
-          };
-        }
-      });
-    }
-    setSettings(mergedSettings);
+    const previous = previousSaved.current;
+    previousSaved.current = savedSettings;
+    setSettings(current => mergeReadSettings(defaultSettings, savedSettings, current, previous));
   }, [savedSettings]);
 
   const handleSaveAll = async () => {
     setSaving(true);
     try {
-      await updateSettingsBulk.mutateAsync(
-        Object.entries(settings).map(([key, data]) => ({
-          key,
-          value: data.value,
-        })),
-      );
+      const changes = changedSettings(settings, savedSettings, defaultSettings);
+      if (changes.length === 0) { toast.success('没有需要保存的修改'); return; }
+      await updateSettingsBulk.mutateAsync(changes);
       toast.success('设置保存成功');
       void refetchDashboard();
     } catch (error) {
@@ -304,7 +251,8 @@ export default function AdminSettingsPage() {
     );
   }
 
-  if (dashboardError) {
+  // Only a failed first load replaces the page; a failed re-read keeps the editors (and their state).
+  if (dashboardError && !dashboard) {
     return (
       <AdminSettingsLoadError
         error={dashboardError}
@@ -331,17 +279,20 @@ export default function AdminSettingsPage() {
           disabled={saving}
           className="w-full gap-2 bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90 sm:w-auto"
         >
-          {saving ? (
-            <RefreshCw className="h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="h-4 w-4" />
-          )}
+          {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           {saving ? '保存中...' : '保存所有设置'}
         </Button>
       </div>
 
+      {dashboardError ? (
+        <div role="alert" data-testid="admin-settings-reread-failed" className="flex flex-wrap items-center gap-2 rounded-lg p-3 text-sm"
+          style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)', color: 'var(--error)' }}>
+          最新设置读取失败，页面上可能不是最新的值。
+          <Button size="sm" variant="outline" onClick={() => { void refetchDashboard(); }}>重新读取</Button>
+        </div>
+      ) : null}
       {/* Settings Tabs */}
-      <Tabs defaultValue="general" className="space-y-6">
+      <Tabs value={tab} onValueChange={setTab} className="space-y-6">
         <TabsList
           className="flex h-auto w-full justify-start gap-1 overflow-x-auto p-1"
           style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
@@ -374,6 +325,8 @@ export default function AdminSettingsPage() {
             <Crown className="h-4 w-4" />
             会员权限
           </TabsTrigger>
+          <MentorBudgetTabTrigger />
+          <RuntimeRateLimitTabTrigger />
         </TabsList>
 
         {/* General Tab */}
@@ -524,129 +477,12 @@ export default function AdminSettingsPage() {
         {/* Membership Tab */}
         <TabsContent value="membership">
           <div className="space-y-6">
-            {/* Membership Plans Permissions */}
-            <Card data-testid="admin-settings-membership-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                  <Crown className="h-5 w-5 text-amber-500" />
-                  会员等级权限配置
-                </CardTitle>
-                <CardDescription style={{ color: 'var(--text-tertiary)' }}>
-                  配置不同会员等级的导出权限
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div
-                  className="mb-4 rounded-lg border p-4"
-                  style={{ background: 'var(--bg-tertiary)', borderColor: 'var(--border-primary)' }}
-                >
-                  <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                    套餐价格、积分发放和 Stripe Price ID 在
-                    <a href="/admin/packages" className="ml-1 underline hover:no-underline" style={{ color: 'var(--color-primary)' }}>
-                      套餐管理
-                    </a>
-                    维护；这里仅负责会员导出权限和批量导出策略。运营调整价格或上下架时，请返回套餐管理页面，不要在本页寻找计费入口。
-                  </p>
-                </div>
-                {!membershipPlans || (membershipPlans as MembershipPlan[]).length === 0 ? (
-                  <div
-                    className="p-6 rounded-lg text-center"
-                    style={{ background: 'var(--bg-tertiary)', border: '1px dashed var(--border-primary)' }}
-                  >
-                    <Crown className="h-12 w-12 mx-auto mb-4 text-amber-500 opacity-50" />
-                    <p style={{ color: 'var(--text-secondary)' }}>
-                      暂无会员套餐，请先在「积分包管理」中创建会员套餐
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-6">
-                    {(membershipPlans as MembershipPlan[]).map((plan: MembershipPlan) => {
-                      const setting = membershipSettings[plan.id] || { allowExport: false, allowBatchExport: false };
-                      const levelColors: Record<string, string> = {
-                        free: 'bg-gray-500/20 text-gray-400',
-                        pro: 'bg-blue-500/20 text-blue-400',
-                        gold: 'bg-amber-500/20 text-amber-400',
-                      };
-                      return (
-                        <div
-                          key={plan.id}
-                          data-testid={`membership-plan-${plan.level}`}
-                          className="p-4 rounded-lg"
-                          style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-primary)' }}
-                        >
-                          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                            <div className="flex items-center gap-3">
-                              <Badge className={levelColors[plan.level] || 'bg-gray-500/20 text-gray-400'}>
-                                {plan.level.toUpperCase()}
-                              </Badge>
-                              <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                                {plan.name}
-                              </span>
-                            </div>
-                            <Button
-                              data-testid={`membership-plan-save-${plan.level}`}
-                              size="sm"
-                              onClick={() => handleSaveMembershipSetting(plan.id)}
-                              disabled={updateMembershipPlan.isPending}
-                              className="w-full bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90 md:w-auto"
-                            >
-                              <Save className="h-3 w-3 mr-1" />
-                              保存
-                            </Button>
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                              <Label className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                                <Download className="h-4 w-4 inline mr-1" />
-                                允许导出对话
-                              </Label>
-                              <div className="flex items-center gap-2 mt-2">
-                                <Switch
-                                  data-testid={`membership-plan-allow-export-${plan.level}`}
-                                  checked={setting.allowExport}
-                                  onCheckedChange={(checked) => {
-                                    setMembershipSettings(prev => ({
-                                      ...prev,
-                                      [plan.id]: { ...prev[plan.id], allowExport: checked }
-                                    }));
-                                  }}
-                                />
-                                <span className="text-sm" style={{ color: setting.allowExport ? 'var(--success)' : 'var(--text-disabled)' }}>
-                                  {setting.allowExport ? '已启用' : '已禁用'}
-                                </span>
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                                <Download className="h-4 w-4 inline mr-1" />
-                                允许批量导出
-                              </Label>
-                              <div className="flex items-center gap-2 mt-2">
-                                <Switch
-                                  data-testid={`membership-plan-allow-batch-export-${plan.level}`}
-                                  checked={setting.allowBatchExport}
-                                  onCheckedChange={(checked) => {
-                                    setMembershipSettings(prev => ({
-                                      ...prev,
-                                      [plan.id]: { ...prev[plan.id], allowBatchExport: checked }
-                                    }));
-                                  }}
-                                />
-                                <span className="text-sm" style={{ color: setting.allowBatchExport ? 'var(--success)' : 'var(--text-disabled)' }}>
-                                  {setting.allowBatchExport ? '已启用' : '已禁用'}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            <MembershipPlanPermissions plans={(membershipPlans ?? []) as MembershipPlanRow[]} onSaved={reloadDashboard} />
+            <FusionCompareSetting saved={savedSettings?.[FUSION_COMPARE_SETTING_KEY]} onSaved={reloadDashboard} />
           </div>
         </TabsContent>
+        <MentorBudgetTabContent onOpenFeatures={() => setTab('features')} />
+        <RuntimeRateLimitSettings />
       </Tabs>
     </div>
   );

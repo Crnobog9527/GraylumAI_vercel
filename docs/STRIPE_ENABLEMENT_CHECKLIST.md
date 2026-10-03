@@ -24,11 +24,12 @@ pnpm stripe:readiness:staging
 ```
 
 当前 staging runtime 是独立 Vercel 项目 `graylumai-staging` 的
-Production environment，域名为 `https://graylumai-staging.vercel.app`。
+Production environment，域名为 `https://auth-staging.graylum.com`（旧 Vercel 域名已于
+2026-10-01 删除）。
 staging webhook endpoint 必须配置为：
 
 ```text
-https://graylumai-staging.vercel.app/api/stripe/webhook
+https://auth-staging.graylum.com/api/stripe/webhook
 ```
 
 staging 必须使用 Stripe test mode key、test mode webhook secret、test mode
@@ -80,7 +81,7 @@ Stripe Price ID 替换为 test mode Price ID，或暂时置空让 checkout 保�
 staging 项目已完成以下 smoke：
 
 - `/login` 在关闭 `Vercel Authentication` 后可正常返回 `200`
-- `https://graylumai-staging.vercel.app/api/stripe/webhook` 可达，非法签名返回 `400`
+- 当时的 staging 域名（现已退役）的 `/api/stripe/webhook` 可达，非法签名返回 `400`；这不是当前域名的验证结果
 - 购买积分包时会创建真实 checkout session，并跳转到 Stripe Checkout
 
 生产环境已完成以下验收：

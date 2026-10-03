@@ -168,11 +168,6 @@
       "count": 1
     }
   },
-  "src/components/admin/StatsCardGrid.tsx": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
   "src/components/chat/ChatSidebar.tsx": {
     "react-hooks/exhaustive-deps": {
       "count": 2

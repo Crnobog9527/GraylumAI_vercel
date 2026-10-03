@@ -11,6 +11,8 @@ import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import { RateLimitError } from '../lib/rateLimitError';
 import { logger } from '../lib/logger';
+import { redisEnvironment } from './redisEnvironment';
+import { runtimeRateLimitsSchema, type RuntimeRateLimits } from './runtime/rateLimitSettings';
 
 // ============================================
 // 类型定义
@@ -48,33 +50,31 @@ let redis: Redis | null = null;
 // 500ms bounds admission latency during outages; it is not a provider timeout.
 const RATE_LIMIT_TIMEOUT_MS = 500;
 
-async function limitWithDeadline(limiter: Ratelimit, identifier: string) {
+async function withDeadline<T>(operation: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const result = await Promise.race([
-      limiter.limit(identifier),
+      operation,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('RATE_LIMIT_TIMEOUT')), RATE_LIMIT_TIMEOUT_MS);
       }),
     ]);
-    // Upstash can report a timeout as success. Never treat that as admission.
-    if (result.reason === 'timeout') throw new Error('RATE_LIMIT_TIMEOUT');
     return result;
   } finally {
     clearTimeout(timer);
   }
 }
 
+async function limitWithDeadline(limiter: Ratelimit, identifier: string, rate?: number) {
+  const result = await withDeadline(limiter.limit(identifier, rate === undefined ? undefined : { rate }));
+  // Upstash can report a timeout as success. Never treat that as admission.
+  if (result.reason === 'timeout') throw new Error('RATE_LIMIT_TIMEOUT');
+  return result;
+}
+
 function getRedis(): Redis {
   if (!redis) {
-    const url = process.env.UPSTASH_REDIS_REST_URL;
-    const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-
-    if (!url || !token) {
-      throw new Error(
-        'Missing UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN environment variables'
-      );
-    }
+    const { url, token } = redisEnvironment(process.env);
 
     redis = new Redis({
       url, token, retry: { retries: 0 },
@@ -315,3 +315,65 @@ export async function isRedisHealthy(): Promise<boolean> {
 // ============================================
 
 export type { Ratelimit };
+
+/** Prepared for host wiring; no route invokes this until replay/recovery boundaries are integrated. */
+type RuntimeBucket = 'admission' | 'calls';
+type RuntimeEnvironment = 'staging' | 'production' | 'local';
+type RuntimeWindow = 'day' | 'minute';
+type RuntimeLimitResult =
+  | { success: true }
+  | { success: false; reason: 'rate_limited' | 'unavailable'; window?: RuntimeWindow; retryAfter: number };
+const runtimeLimiters = new Map<string, {
+  perMinute: number; perDay: number; minute: Ratelimit; day: Ratelimit;
+}>();
+
+export async function checkRuntimeRateLimit(
+  identifier: string, bucket: RuntimeBucket, config: RuntimeRateLimits, environment: RuntimeEnvironment, rate = 1,
+): Promise<RuntimeLimitResult> {
+  let backendStarted = false;
+  try {
+    const parsed = runtimeRateLimitsSchema.parse(config);
+    if (!identifier || !['admission', 'calls'].includes(bucket)
+      || !['staging', 'production', 'local'].includes(environment)) throw new Error('INVALID_RUNTIME_BUCKET');
+    const perMinute = bucket === 'admission' ? parsed.admissionPerMinute : parsed.callsPerMinute;
+    const perDay = bucket === 'admission' ? parsed.admissionPer24Hours : parsed.callsPer24Hours;
+    if (!Number.isSafeInteger(rate) || rate < 1) throw new Error('INVALID_RUNTIME_RATE');
+    if (rate > perMinute || rate > perDay) {
+      logger.error('security', 'runtime_rate_limit_round_exceeds_limit', { bucket });
+      return { success: false, reason: 'unavailable', retryAfter: 60 };
+    }
+    backendStarted = true;
+    const key = `${environment}:${bucket}`;
+    let pair = runtimeLimiters.get(key);
+    if (!pair || pair.perMinute !== perMinute || pair.perDay !== perDay) {
+      const client = getRedis();
+      const make = (window: RuntimeWindow, count: number, duration: '1 m' | '1 d') => new Ratelimit({
+        redis: client, limiter: Ratelimit.slidingWindow(count, duration),
+        // Stable across edits: changing a threshold never resets the Redis counters.
+        prefix: `graylum:ratelimit:runtime:${key}:${window}:`,
+        analytics: false, ephemeralCache: false, timeout: 0,
+      });
+      pair = { perMinute, perDay, minute: make('minute', perMinute, '1 m'), day: make('day', perDay, '1 d') };
+      runtimeLimiters.set(key, pair); // Exactly six possible entries; replace, never append config versions.
+    }
+    // Read both windows before any multi-call reservation. Concurrent races can only overcount.
+    if (rate > 1) {
+      for (const window of ['minute', 'day'] as const) {
+        const result = await withDeadline(pair[window].getRemaining(identifier));
+        if (!Number.isFinite(result.remaining) || !Number.isFinite(result.reset)) throw new Error('INVALID_REMAINING');
+        if (result.remaining < rate) return { success: false, reason: 'rate_limited', window,
+          retryAfter: Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)) };
+      }
+    }
+    for (const window of ['minute', 'day'] as const) {
+      const result = await limitWithDeadline(pair[window], identifier, rate);
+      if (!result.success) return { success: false, reason: 'rate_limited', window,
+        retryAfter: Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)) };
+    }
+    return { success: true };
+  } catch {
+    logger.error('security', backendStarted ? 'runtime_rate_limit_backend_unavailable_denying_request'
+      : 'runtime_rate_limit_invalid_configuration_denying_request');
+    return { success: false, reason: 'unavailable', retryAfter: 60 };
+  }
+}

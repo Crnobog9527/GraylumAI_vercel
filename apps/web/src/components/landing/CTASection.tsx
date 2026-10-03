@@ -86,10 +86,6 @@ export default function CTASection() {
             <div className="w-2 h-2 rounded-full bg-[#22C55E]" />
             <span>数据加密</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-[#22C55E]" />
-            <span>7 天退款保障</span>
-          </div>
         </div>
       </div>
     </section>

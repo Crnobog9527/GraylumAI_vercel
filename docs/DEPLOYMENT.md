@@ -16,7 +16,7 @@
 | `Preview / Staging` | 预发布演练 | 锁定单个部署版本，不允许中途切换 |
 | `Production` | 正式上线 | 完成本次候选适用的验收并取得独立生产授权后发布 |
 
-独立 Vercel 项目 `graylumai-staging` 使用 Vercel 的 `Production` 环境服务 staging 分支，域名为 `graylumai-staging.vercel.app`。平台环境标签不等于主站生产；操作前同时核对项目、分支和域名。
+独立 Vercel 项目 `graylumai-staging` 使用 Vercel 的 `Production` 环境服务 staging 分支，域名为 `auth-staging.graylum.com`（旧 Vercel 域名已于 2026-10-01 删除）。平台环境标签不等于主站生产；操作前同时核对项目、分支和域名。
 
 ## 关键环境变量
 

@@ -16,6 +16,24 @@ function createSingleQueryBuilder(result: Promise<unknown>) {
   };
 }
 
+/** Connection-state writes re-read the row and are conditional on updated_at (mergeConnectionState). */
+function withConnectionState<T extends object>(table: T, onUpdate: (payload: Record<string, unknown>) => void = () => {}, row: unknown = null) {
+  const read = {
+    eq: () => read,
+    single: async () => ({ data: row, error: null }),
+    maybeSingle: async () => ({ data: { config: {}, updated_at: 'v1' }, error: null }),
+  };
+  return {
+    ...table,
+    select: () => read,
+    update(payload: Record<string, unknown>) {
+      onUpdate(payload);
+      const write = { eq: () => write, select: async () => ({ data: [{ id: 'model' }], error: null }) };
+      return write;
+    },
+  };
+}
+
 function createProtectedCaller(options: {
   role?: 'user' | 'admin';
   supabase: {
@@ -173,7 +191,7 @@ describe('modelRouter error sanitization', () => {
         }
 
         if (table === 'ai_models') {
-          return {
+          return withConnectionState({
             insert(payload: Record<string, unknown>) {
               inserted.push(payload);
               return {
@@ -193,14 +211,7 @@ describe('modelRouter error sanitization', () => {
                 },
               };
             },
-            update() {
-              return {
-                eq() {
-                  return Promise.resolve({ data: null, error: null });
-                },
-              };
-            },
-          };
+          });
         }
 
         throw new Error(`Unexpected table ${table}`);
@@ -217,18 +228,16 @@ describe('modelRouter error sanitization', () => {
       inputTokenCostAbove200k: 6,
       outputTokenCostAbove200k: 22.5,
       webSearchCost: 10,
-    });
+      maxTokens: 999999,
+      inputLimit: 999999,
+    } as never);
 
-    expect(inserted[0]).toMatchObject({
-      input_token_cost: 3_000_000,
-      output_token_cost: 15_000_000,
-      input_token_cost_above_200k: 6_000_000,
-      output_token_cost_above_200k: 22_500_000,
-      web_search_cost: 10_000_000,
-    });
+    for (const key of ['input_token_cost', 'output_token_cost', 'input_token_cost_above_200k', 'output_token_cost_above_200k', 'web_search_cost', 'max_tokens', 'input_limit'])
+      expect(inserted[0]).not.toHaveProperty(key);
+    expect(inserted[0]).toMatchObject({ name: 'Claude Sonnet', model_id: 'anthropic/claude-sonnet-4.6' });
   });
 
-  it.each([['openai','https://openrouter.ai/api/v1/chat/completions'],['anthropic','https://openrouter.ai/api/v1/chat/completions'],['openai','https://proxy.example.com/v1/chat/completions']])('preserves provider usage while updating pricing for %s %s', async (provider, endpoint) => {
+  it.each([['openai','https://openrouter.ai/api/v1/chat/completions'],['anthropic','https://openrouter.ai/api/v1/chat/completions'],['openai','https://proxy.example.com/v1/chat/completions']])('preserves provider usage while discarding retired fields for %s %s', async (provider, endpoint) => {
     const updated: Array<Record<string, unknown>> = [];
     const supabase = {
       from(table: string) {
@@ -272,6 +281,7 @@ describe('modelRouter error sanitization', () => {
               return {
                 eq() {
                   return {
+                    eq() { return this; },
                     select() {
                       return {
                         single() {
@@ -304,16 +314,15 @@ describe('modelRouter error sanitization', () => {
       inputTokenCostAbove200k: 6,
       outputTokenCostAbove200k: 22.5,
       webSearchCost: 10,
-    });
+      maxTokens: 999999,
+      inputLimit: 999999,
+    } as never);
 
+    for (const key of ['input_token_cost', 'output_token_cost', 'input_token_cost_above_200k', 'output_token_cost_above_200k', 'web_search_cost', 'max_tokens', 'input_limit'])
+      expect(updated[0]).not.toHaveProperty(key);
     expect(updated[0]).toMatchObject({
       token_counting_supported: 'true',
       token_counting_method: 'provider_usage',
-      input_token_cost: 3_000_000,
-      output_token_cost: 15_000_000,
-      input_token_cost_above_200k: 6_000_000,
-      output_token_cost_above_200k: 22_500_000,
-      web_search_cost: 10_000_000,
     });
   });
 
@@ -357,7 +366,7 @@ describe('modelRouter error sanitization', () => {
         }
 
         if (table === 'ai_models') {
-          return {
+          return withConnectionState({
             insert() {
               return {
                 select() {
@@ -372,18 +381,7 @@ describe('modelRouter error sanitization', () => {
                 },
               };
             },
-            update(payload: Record<string, unknown>) {
-              updatePayloads.push(payload);
-              return {
-                eq() {
-                  return Promise.resolve({
-                    data: null,
-                    error: null,
-                  });
-                },
-              };
-            },
-          };
+          }, payload => updatePayloads.push(payload));
         }
 
         throw new Error(`Unexpected table ${table}`);
@@ -479,6 +477,8 @@ describe('modelRouter error sanitization', () => {
 
     expect(result).toHaveLength(1);
     expect(result[0]).not.toHaveProperty('api_key');
+    for (const field of ['input_token_cost', 'output_token_cost', 'input_token_cost_above_200k',
+      'output_token_cost_above_200k', 'web_search_cost']) expect(result[0]).not.toHaveProperty(field);
   });
 
   it('marks OpenRouter-compatible models as provider usage billing', async () => {
@@ -501,7 +501,7 @@ describe('modelRouter error sanitization', () => {
         }
 
         if (table === 'ai_models') {
-          return {
+          return withConnectionState({
             insert(payload: Record<string, unknown>) {
               inserted.push(payload);
               return {
@@ -521,14 +521,7 @@ describe('modelRouter error sanitization', () => {
                 },
               };
             },
-            update() {
-              return {
-                eq() {
-                  return Promise.resolve({ data: null, error: null });
-                },
-              };
-            },
-          };
+          });
         }
 
         throw new Error(`Unexpected table ${table}`);
@@ -555,6 +548,8 @@ describe('modelRouter error sanitization', () => {
     });
 
     expect(inserted).toHaveLength(1);
+    for (const key of ['input_token_cost', 'output_token_cost', 'input_token_cost_above_200k', 'output_token_cost_above_200k', 'web_search_cost', 'max_tokens', 'input_limit'])
+      expect(inserted[0]).not.toHaveProperty(key);
     expect(inserted[0]).toMatchObject({
       token_counting_supported: 'true',
       token_counting_method: 'provider_usage',
@@ -655,39 +650,15 @@ describe('modelRouter error sanitization', () => {
         }
 
         if (table === 'ai_models') {
-          return {
-            select() {
-              return this;
-            },
-            eq() {
-              return this;
-            },
-            single() {
-              return Promise.resolve({
-                data: {
-                  id: '123e4567-e89b-42d3-a456-426614174000',
-                  name: 'No Key Model',
-                  model_id: 'anthropic/claude-sonnet-4.6',
-                  provider: 'openai',
-                  api_key: null,
-                  api_endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-                  config: {},
-                },
-                error: null,
-              });
-            },
-            update(payload: Record<string, unknown>) {
-              updatePayloads.push(payload);
-              return {
-                eq() {
-                  return Promise.resolve({
-                    data: null,
-                    error: null,
-                  });
-                },
-              };
-            },
-          };
+          return withConnectionState({}, payload => updatePayloads.push(payload), {
+            id: '123e4567-e89b-42d3-a456-426614174000',
+            name: 'No Key Model',
+            model_id: 'anthropic/claude-sonnet-4.6',
+            provider: 'openai',
+            api_key: null,
+            api_endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+            config: {},
+          });
         }
 
         throw new Error(`Unexpected table ${table}`);

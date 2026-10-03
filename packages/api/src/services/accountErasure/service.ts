@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { logger } from '../../lib/logger';
 import { checkRateLimitOrThrow } from '../redisRateLimiter';
 import { assertRecentAuthTime, readVerifiedAuthTime } from './reauth';
+import { loadOpeningGrantDigests } from './openingGrantIdentity';
+import { closeErasedAccountFinancials } from './financialRecovery';
 
 type Client = SupabaseClient;
 
@@ -67,9 +69,18 @@ export async function confirmAccountErasure(input: {
   await checkRateLimitOrThrow(`account-erasure:${input.userId}`, 'auth');
   assertRecentAuthTime(await readVerifiedAuthTime(input), input.nowMs);
 
-  const { data, error } = await input.admin.rpc('account_erasure_confirm', {
+  let digests;
+  try {
+    digests = await loadOpeningGrantDigests(input.admin, input.userId);
+  } catch {
+    logger.error('auth', 'account_erasure_identity_digest_failed');
+    throw unavailable();
+  }
+
+  const { data, error } = await input.admin.rpc('account_erasure_confirm_with_digests', {
     p_profile_id: input.userId,
     p_request_id: input.requestId,
+    p_digests: digests,
   });
   if (error) {
     const known = Object.keys(DB_ERRORS).find((key) => error.message?.includes(key));
@@ -85,6 +96,14 @@ export async function confirmAccountErasure(input: {
 
   // The DB marker already closed the account; Auth revocation is best effort and retried later.
   const authRevoked = await revokeAuthAccess(input.admin, input.userId);
+  // The erasure transaction has committed. Financial locks are taken separately,
+  // with no supplier network work and no rollback of erasure on recovery failure.
+  try {
+    const financial = await closeErasedAccountFinancials(input.admin, input.userId);
+    if (!financial.success) logger.error('auth', 'account_erasure_financial_pending', {
+      failed: financial.failed, pending: financial.pending,
+    });
+  } catch { logger.error('auth', 'account_erasure_financial_pending'); }
   return { ...result.data, authRevoked };
 }
 

@@ -1,15 +1,19 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowUp, Box, FileText, Plus, Search, X } from 'lucide-react';
 import Link from 'next/link';
 import { trpc } from '@/trpc/client';
 import styles from './work-composer.module.css';
 import { QueryNotice, workspaceErrorMessage } from './query-notice';
 
-/** One input surface for free conversation, positioning and topic work. */
-export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=false,label='消息',placeholder='消息',maxLength=20000,sessionId,skillId='',onSkillChange,note}: {
- value:string;onChange:(value:string)=>void;onSend:(skillId?:string)=>void;disabled?:boolean;sendDisabled?:boolean;label?:string;placeholder?:string;maxLength?:number;sessionId?:string;skillId?:string;onSkillChange?:(id:string)=>void;note?:string;
+/**
+ * One input surface for free conversation, positioning and topic work.
+ * `attachment` is shown inside the same frame, above the text box (the mentor's open question card).
+ */
+export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=false,label='消息',placeholder='消息',maxLength=20000,sessionId,skillId='',onSkillChange,note,attachment}: {
+ value:string;onChange:(value:string)=>void;onSend:(skillId?:string)=>void;disabled?:boolean;sendDisabled?:boolean;label?:string;placeholder?:string;maxLength?:number;
+ sessionId?:string;skillId?:string;onSkillChange?:(id:string)=>void;note?:string;attachment?:ReactNode;
 }) {
  const [menu,setMenu]=useState<'files'|'skills'|null>(null),[query,setQuery]=useState(''),[localSkill,setLocalSkill]=useState(''),[error,setError]=useState(''),[reading,setReading]=useState(false);
  const root=useRef<HTMLDivElement>(null);
@@ -38,6 +42,7 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
  }
  const cannotSend=disabled||sendDisabled||reading||!value.trim();
  return <div ref={root} className={styles.wrap}><div className={styles.composer}>
+  {attachment&&<div className={styles.attachment}>{attachment}</div>}
   <textarea aria-label={label} placeholder={placeholder} value={value} disabled={disabled||reading} maxLength={maxLength} onChange={event=>onChange(event.target.value)} onKeyDown={event=>{if(event.key==='Escape')setMenu(null);if(event.key==='Enter'&&!event.shiftKey&&!event.nativeEvent.isComposing&&event.nativeEvent.keyCode!==229){event.preventDefault();if(!cannotSend)onSend(selected);}}} className={styles.textarea} rows={2}/>
   <div className={styles.tools}><div className={styles.toolLeft}>
    <div className={styles.menuAnchor}><button type="button" aria-label="添加资料" disabled={disabled||reading} aria-expanded={menu==='files'} onClick={()=>setMenu(menu==='files'?null:'files')}><Plus size={19}/></button>{menu==='files'&&<div className={styles.menu} role="dialog" aria-label="添加资料"><button type="button" onClick={()=>fileInput.current?.click()}><FileText size={16}/> 从文件添加</button><p>支持 TXT、Markdown、CSV、JSON、日志。内容会加入本条消息，发送前可以检查或删除。</p></div>}</div>

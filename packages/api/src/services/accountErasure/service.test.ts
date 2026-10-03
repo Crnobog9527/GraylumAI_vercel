@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient, User } from '@supabase/supabase-js';
 
-const limit = vi.hoisted(() => ({ check: vi.fn() }));
+const limit = vi.hoisted(() => ({ check: vi.fn(), close: vi.fn() }));
+vi.mock('./financialRecovery', () => ({ closeErasedAccountFinancials: limit.close }));
 vi.mock('../redisRateLimiter', () => ({ checkRateLimitOrThrow: limit.check }));
 
 import { confirmAccountErasure, loadAccountErasurePreview } from './service';
+import { openingGrantDigests } from './openingGrantIdentity';
 import { REAUTH_MAX_AGE_SECONDS, REAUTH_REQUIRED_MESSAGE } from './reauth';
 
 const USER = '00000000-0000-4000-8000-000000000001';
@@ -21,7 +23,7 @@ function adminClient(options: {
   banError?: { status?: number } | null;
 } = {}) {
   const rpc = vi.fn(async (name: string) => {
-    if (name === 'account_erasure_confirm') {
+    if (name === 'account_erasure_confirm_with_digests') {
       return {
         data: options.confirm?.data ?? {
           requestId: REQUEST, stage: 'closed', confirmedAt: '2026-09-30T12:00:00Z', created: true,
@@ -32,7 +34,9 @@ function adminClient(options: {
     return { data: null, error: null };
   });
   const updateUserById = vi.fn().mockResolvedValue({ error: options.banError ?? null });
-  return { rpc, auth: { admin: { updateUserById } } };
+  return { rpc, auth: { admin: { updateUserById, getUserById: vi.fn().mockResolvedValue({
+    data: { user: { id: USER, email: 'fixture@example.test', identities: [] } }, error: null,
+  }) } } };
 }
 
 function confirm(admin: ReturnType<typeof adminClient>, auth: unknown, headers = new Headers()) {
@@ -43,7 +47,10 @@ function confirm(admin: ReturnType<typeof adminClient>, auth: unknown, headers =
 
 describe('account erasure confirm', () => {
   beforeEach(() => {
+    process.env.OPENING_GRANT_HMAC_KEYS = JSON.stringify({ active: 'test-v1',
+      keys: { 'test-v1': Buffer.from('test-only-opening-grant-key-00001').toString('base64') } });
     limit.check.mockReset().mockResolvedValue({ success: true });
+    limit.close.mockReset().mockResolvedValue({ success: true, pending: 0, failed: 0 });
   });
 
   it('closes the account after a recent verified sign-in and bans the Auth user', async () => {
@@ -52,8 +59,22 @@ describe('account erasure confirm', () => {
 
     await expect(confirm(admin, auth)).resolves.toMatchObject({ requestId: REQUEST, created: true, authRevoked: true });
     expect(limit.check).toHaveBeenCalledWith(`account-erasure:${USER}`, 'auth');
-    expect(admin.rpc).toHaveBeenCalledWith('account_erasure_confirm', { p_profile_id: USER, p_request_id: REQUEST });
+    expect(admin.rpc).toHaveBeenCalledWith('account_erasure_confirm_with_digests', {
+      p_profile_id: USER, p_request_id: REQUEST,
+      p_digests: openingGrantDigests({ id: USER, email: 'fixture@example.test', identities: [] } as unknown as User),
+    });
     expect(admin.auth.admin.updateUserById).toHaveBeenCalledWith(USER, { ban_duration: '876000h' });
+    expect(limit.close).toHaveBeenCalledWith(admin, USER);
+    expect(admin.rpc.mock.invocationCallOrder[0]).toBeLessThan(limit.close.mock.invocationCallOrder[0]!);
+  });
+
+  it('keeps erasure committed when its separate financial attempt fails', async () => {
+    limit.close.mockRejectedValue(new Error('synthetic unavailable'));
+    const admin = adminClient();
+    const auth = authClient({ sub: USER, amr: [{ method: 'password', timestamp: NOW_S - 60 }] });
+    await expect(confirm(admin, auth)).resolves.toMatchObject({ created: true, authRevoked: true });
+    expect(limit.close).toHaveBeenCalledTimes(1);
+    expect(admin.rpc.mock.calls.filter(([name]) => name === 'account_erasure_confirm_with_digests')).toHaveLength(1);
   });
 
   it('accepts an email-code sign-in and passes a Bearer token to claim verification', async () => {
@@ -93,6 +114,15 @@ describe('account erasure confirm', () => {
     await expect(confirm(admin, authClient({ sub: USER, amr: [{ method: 'otp', timestamp: NOW_S }] })))
       .rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
     expect(admin.rpc).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before confirmation when the verified identity is unavailable', async () => {
+    const admin = adminClient();
+    admin.auth.admin.getUserById.mockResolvedValueOnce({ data: { user: null }, error: null });
+    await expect(confirm(admin, authClient({ sub: USER, amr: [{ method: 'otp', timestamp: NOW_S }] })))
+      .rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+    expect(admin.rpc).not.toHaveBeenCalled();
+    expect(admin.auth.admin.updateUserById).not.toHaveBeenCalled();
   });
 
   it('refuses while a subscription still renews, as enforced by the database', async () => {

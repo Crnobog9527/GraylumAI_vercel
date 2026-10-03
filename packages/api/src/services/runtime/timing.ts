@@ -7,9 +7,9 @@ import {logger} from '../../lib/logger';
  * query strings, headers, bodies, prompts, Skill text, user input, model output
  * or account identity; only labels, counts, milliseconds and internal UUIDs.
  * Every method swallows its own failure: timing never changes a request. */
-export const TIMING_PHASES=['prelude','policy','host','admission','execute','provider'] as const;
+export const TIMING_PHASES=['prelude','policy','host','admission','execute','rateLimit','provider'] as const;
 export type TimingPhase=typeof TIMING_PHASES[number];
-export const TIMING_MARKS=['providerPost','firstModelText','firstPublicText'] as const;
+export const TIMING_MARKS=['providerPost','firstModelText','firstPublicText','fullModelReply','firstValidContent'] as const;
 export type TimingMark=typeof TIMING_MARKS[number];
 type Tally={rt:number;rtMs:number};
 type PhaseTally=Tally&{ms:number};
@@ -83,6 +83,8 @@ export function createRequestTiming(now:()=>number=()=>performance.now()){
    safe(()=>{previous=phase;if(phase!=='provider')switchTo(next);});
    return ()=>safe(()=>{if(phase===next)switchTo(previous);});
   },
+  // Durable execution completion ends provider timing before post-processing.
+  finishProvider:()=>safe(()=>{if(phase==='provider')switchTo('host');}),
   mark,
   tagExecution:(id:unknown)=>safe(()=>{if(typeof id==='string'&&UUID.test(id)&&executions.size<8)executions.add(id.toLowerCase());}),
   setProcedures:(paths:readonly unknown[])=>safe(()=>{

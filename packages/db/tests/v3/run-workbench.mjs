@@ -69,14 +69,18 @@ const runtimeSchema=stagingSchema||opcSchema||runtimeMode||runtimeUpgrade||args.
 const bill2Schema=args.includes('--with-bill2-schema')||runtimeSchema;
 const bill2Mode=args.includes('--bill2-only')||args.includes('--bill2-core-only');
 const casePattern=args.find(arg=>arg.startsWith('--case-pattern='))?.slice(15);
+// Capacity transport sampling only runs for a disposable CAPACITY case pattern; cases read V3_CAPACITY_CAPTURE.
+const capacityCapture=!previewOptions.persistent&&!stagingHost&&Boolean(casePattern?.includes('CAPACITY'));
 // CI path: database/API integration subsets without the local application or a browser.
 const withoutApp=args.includes('--without-app');
 const withoutAppSuite=!withoutApp?null:args.includes('--bill2-core-only')?'bill2':runtimeMode&&stagingSchema&&!opcMode?'runtime':null;
 if(withoutApp&&(!withoutAppSuite||serve||legacyRef||casePattern))throw new Error('--without-app requires --bill2-core-only or --runtime-only --with-staging-schema, without preview, legacy ref or case pattern');
 // DB-BASELINE: build the schema from repository files only (baseline/build-from-files.mjs) instead of
-// the local fixture; limited to the two database/API suites until the other modes are migrated.
+// the local fixture; database/API suites and explicitly bounded Runtime browser cases.
 const schemaFromFiles=args.includes('--schema-from-files');
-if(schemaFromFiles&&!withoutAppSuite)throw new Error('--schema-from-files is only supported with the --without-app suites');
+// A bounded Runtime browser case uses the same canonical schema, never a stale hand-built subset.
+if(schemaFromFiles&&!withoutAppSuite&&!(runtimeMode&&stagingSchema&&casePattern&&!serve&&!legacyRef))
+  throw new Error('--schema-from-files requires a without-app suite or a bounded Runtime browser case');
 if(casePattern){if(casePattern.length>1000)throw new Error('case pattern too long');new RegExp(casePattern);}
 const testPattern=casePattern??(stagingHost?'^OPC: staging host':opcMode?'^OPC:':runtimeUpgrade?'^RUNTIME UPGRADE:':runtimeMode?'^RUNTIME:':upgradeMode?'^UPGRADE:':args.includes('--bill2-compat-only')?'^(AI:|SLICE:|CHAT: (free and document UI|ordinary init persists|provider usage is persisted|HTTP 429|summary HTTP 429|dual model stages|prepared replay|missing summary configuration|summary dispatched|a summary rejected|server-only summary recovery))':args.includes('--bill2-core-only')?'^BILL2:':args.includes('--bill2-only')?'^(BILL2:|AI:)':args.includes('--workbench-restart-only')?'^runs every configured workflow through browser login':args.includes('--agent-slice-only')?'^SLICE:':args.includes('--ordinary-only')?'^CHAT: (free and document UI|ordinary init persists|provider usage is persisted)':args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:');
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
@@ -375,6 +379,19 @@ try {
   if(opcSchema&&!upgradeMode){apply('packages/db/migrations/0138_runtime_stopped_pending.sql');apply('packages/db/migrations/0138_runtime_stopped_pending.sql');}
   if(opcSchema&&!upgradeMode){apply('packages/db/migrations/0139_opc_business_context.sql');apply('packages/db/migrations/0139_opc_business_context.sql');}
   }
+  if(opcSchema&&!upgradeMode&&!schemaFromFiles){apply('packages/db/migrations/0155_runtime_answer_source.sql');apply('packages/db/migrations/0155_runtime_answer_source.sql');}
+  // Staging-window admissions freeze BILL-UNIT rates and settle through the canonical 0157 functions.
+  if (stagingSchema && !upgradeMode && !schemaFromFiles) {
+    apply('packages/db/migrations/0157_bill_unit.sql');
+    apply('packages/db/migrations/0157_bill_unit.sql');
+  }
+  // OPC's legacy fixture also needs capture and its batch-permission prerequisite.
+  if (opcSchema && !upgradeMode && !schemaFromFiles) {
+    for (const migration of ['0158_runtime_view_perf.sql', '0159_opc_capture.sql']) {
+      apply('packages/db/migrations/' + migration);
+      apply('packages/db/migrations/' + migration);
+    }
+  }
   console.log("SQL additive migration and repeat application PASS; runtime schema="+runtimeSchema+"; deferred upgrade="+upgradeMode);
   docker(
     "run",
@@ -467,24 +484,28 @@ try {
   const receiptFile=resolve(evidenceDirectory,'synthetic-receipts.jsonl');
   const runtimeCalls=[];const runtimeReceipts=new Map(existsSync(receiptFile)?readFileSync(receiptFile,'utf8').trim().split('\n').filter(Boolean).map(line=>{const entry=JSON.parse(line);return [entry.id,{model:entry.model}];}):[]);let runtimeFinal=!runtimeUpgrade,holdRuntime=false;const heldRuntime=[];
   const mentorStreamTest=stagingHost&&casePattern?.includes('MENTOR_STREAM');
-  const mentorStreamCalls=[],mentorStreamHeld=new Map();
+  const mentorStreamCalls=[],mentorStreamHeld=new Map();let invalidMentorCard=false;
   let rateLimitFixtureRejected = false;
   let summaryRateLimitFixtureRejected = false;
   gateway = createServer(async (req, res) => {
     if(mentorStreamTest&&req.url==='/__mentor_stream'){
       if(req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
-      if(req.method==='POST'){let raw='';for await(const part of req)raw+=part;const command=JSON.parse(raw);if(command.reset===true){if(mentorStreamHeld.size){res.writeHead(409).end();return;}mentorStreamCalls.length=0;}const release=mentorStreamHeld.get(command.release);if(release){mentorStreamHeld.delete(command.release);release();}}
+      if(req.method==='POST'){let raw='';for await(const part of req)raw+=part;const command=JSON.parse(raw);if(command.reset===true){if(mentorStreamHeld.size){res.writeHead(409).end();return;}mentorStreamCalls.length=0;invalidMentorCard=command.invalidCard===true;}const release=mentorStreamHeld.get(command.release);if(release){mentorStreamHeld.delete(command.release);release();}}
       res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify(mentorStreamCalls));return;
     }
     if((opcMode||runtimeMode||runtimeUpgrade) && (req.url==='/call'||(stagingHost&&req.url==='/__official_chat'))){
       let raw='';for await(const chunk of req)raw+=chunk;
       const request=req.url==='/__official_chat'?JSON.parse(raw):JSON.parse(JSON.parse(raw).input);runtimeCalls.push(request);
       // Disposable synthetic transport sampling for the capacity validation.
-      if(!previewOptions.persistent&&!stagingHost&&req.url==='/call'&&casePattern?.includes('CAPACITY'))appendFileSync(resolve(evidenceDirectory,'capacity-requests.jsonl'),JSON.stringify(request)+'\n',{mode:0o600});
+      if(capacityCapture&&req.url==='/call')appendFileSync(resolve(evidenceDirectory,'capacity-requests.jsonl'),JSON.stringify(request)+'\n',{mode:0o600});
       const id=serve ? 'local-runtime-'+randomUUID() : 'local-runtime-'+runtimeCalls.length;
       runtimeReceipts.set(id,request);
       appendFileSync(receiptFile,JSON.stringify({id,model:request.model})+'\n',{mode:0o600});
-      let content='Saved runtime answer '+runtimeCalls.length;
+      let content='Saved runtime answer '+runtimeCalls.length,agentCard;
+      // A v5 mentor turn is recognised by its host prompt; host-opened turns carry no card tool.
+      const offersCard=request.tools?.some(tool=>tool.function?.name==='ask_question');
+      const agentTurn=offersCard||(request.messages??[]).some(m=>m.role==='system'&&typeof m.content==='string'&&
+        m.content.includes('Act as the single continuous mentor'));
       if(opcMode){
         content='【固定模拟回复，仅验证流程】你最想帮助哪类人解决一个什么具体问题？';
         try{
@@ -522,7 +543,9 @@ try {
                 ? request.instructions
                 : request.messages.filter(m=>['system','developer'].includes(m.role)).map(m=>typeof m.content==='string'?m.content:'').join('\n');
               const {mentorQuestionFixture}=await import('./opc-mentor-fixture.mjs');
-              content=JSON.stringify(mentorQuestionFixture(mentorInstructions,input.userRequest,stepIndex));
+              const reply=mentorQuestionFixture(mentorInstructions,input.userRequest,stepIndex);
+              content=agentTurn?reply.message:JSON.stringify(reply);
+              if(offersCard)agentCard={question:'请选择当前问题最接近的答案：',options:['我提供摄影入门练习课程，帮助相机初学者完成每周练习。','我提供设计咨询服务。'],recommended:0};
             }else content='【分步模拟，仅验证流程】第 '+(stepIndex+1)+' 步示例：'+(questions[stepIndex] ?? '这一步你最想确认什么？')+'\n你可以继续回复，也可以在表单里补充想法。此示例不会理解或评估你的答案。';
           }
           if(brief==='topic:first-week') {
@@ -532,7 +555,9 @@ try {
             // fixture must not require an old hard-coded field named "goal".
             if(!material || !instructionText.includes('first-week topic workspace')) throw new Error('topic context missing');
             const revision=String(input.userRequest).includes('修改');
-            const rows=[{id:'aaaaaaaa-1111-4111-8111-111111111111',platform:'x',account:'existing-account',title:revision?'修改后的选题':'首周选题',brief:'内容：展示一次真实工作过程；对象：正在起步的创作者；价值：解决本周行动不清；结构：问题、过程、结果；假设：具体案例更容易促成收藏。',day:'2026-09-21',contentType:'video'}, {id:'bbbbbbbb-2222-4222-8222-222222222222',platform:'x',account:'proposed-account',title:'第二个账号选题',brief:'内容：解释定位方法；对象：准备开新账号的人；价值：减少试错；结构：误区、方法、行动；假设：步骤清单会提升完成率。建议账号未注册。',day:'2026-09-22',contentType:'article'}];
+            // A conversational account change ("账号改为 <account>") retargets the first topic.
+            const account=/账号改为\s*([a-z0-9-]{1,40})/.exec(String(input.userRequest))?.[1]??'existing-account';
+            const rows=[{id:'aaaaaaaa-1111-4111-8111-111111111111',platform:'x',account,title:revision?'修改后的选题':'首周选题',brief:'内容：展示一次真实工作过程；对象：正在起步的创作者；价值：解决本周行动不清；结构：问题、过程、结果；假设：具体案例更容易促成收藏。',day:'2026-09-21',contentType:'video'}, {id:'bbbbbbbb-2222-4222-8222-222222222222',platform:'x',account:'proposed-account',title:'第二个账号选题',brief:'内容：解释定位方法；对象：准备开新账号的人；价值：减少试错；结构：误区、方法、行动；假设：步骤清单会提升完成率。建议账号未注册。',day:'2026-09-22',contentType:'article'}];
             content=String(input.userRequest).includes('采用')?'已识别明确采用指令。\n```json\n'+JSON.stringify({action:'adopt',itemIds:String(input.userRequest).includes('全部')?rows.map(row=>row.id):[rows[0].id]})+'\n```':'【选题合成回复，仅验证流程】已读取正式定位与选题方法。'+(revision?'已按本轮要求修改。':'先给出可核对的候选。')+'\n```json\n'+JSON.stringify(rows)+'\n```';
           }
           if(String(input.userRequest).includes('口播稿')&&!String(input.userRequest).includes('[OPC_VIDEO_PACKAGE_V1]')){
@@ -580,13 +605,42 @@ try {
         res.setHeader('x-generation-id',id);
         if(request.stream===true){
           res.setHeader('content-type','text/event-stream');
-          const parsed=JSON.parse(content);parsed.message='本地流式导师正文：'+parsed.message;
-          content=JSON.stringify(parsed);official.choices[0].message.content=content;
+          if(agentTurn)content='本地流式导师正文：'+content;
+          else{const parsed=JSON.parse(content);parsed.message='本地流式导师正文：'+parsed.message;content=JSON.stringify(parsed);}
+          if(agentCard){
+            agentCard.message=content;agentCard.recommendationReason='建议从已经明确的业务范围开始。';
+            if(invalidMentorCard)agentCard.options=[agentCard.options[0],agentCard.options[0]];
+            content='DISCARDED_SEPARATE_ASSISTANT_TEXT';
+          }
+          official.choices[0].message.content=content;
           const write=(delta,finish=null)=>res.write('data: '+JSON.stringify({id,object:'chat.completion.chunk',created:1,model:request.model,choices:[{index:0,delta,finish_reason:finish}]})+'\n\n');
-          write({role:'assistant',reasoning:'PRIVATE_STREAM_REASONING'});write({content:content.slice(0,Math.min(content.length-1,35))});entry.firstAt=Date.now();
-          mentorStreamHeld.set(index,()=>{write({content:content.slice(Math.min(content.length-1,35))});write({},'stop');res.write('data: '+JSON.stringify({id,model:request.model,choices:[],usage:{prompt_tokens:10,completion_tokens:5,total_tokens:15,cost:0.003}})+'\n\n');entry.finishedAt=Date.now();res.end('data: [DONE]\n\n');});
+          write({role:'assistant',reasoning:'PRIVATE_STREAM_REASONING'});
+          const cuts=[Math.min(content.length-1,18),Math.min(content.length-1,28),Math.min(content.length-1,38)];
+          let releaseTurn;const released=new Promise(resolve=>{releaseTurn=resolve;});mentorStreamHeld.set(index,releaseTurn);
+          let offset=0;
+          for(const cut of cuts){write({content:content.slice(offset,cut)});offset=cut;entry.firstAt??=Date.now();await new Promise(resolve=>setTimeout(resolve,180));}
+          await released;
+          {
+            write({content:content.slice(offset)});
+            if(agentCard)write({tool_calls:[{index:0,id:'question-'+index,type:'function',function:{name:'ask_question',arguments:JSON.stringify(agentCard)}}]});
+            write({},agentCard?'tool_calls':'stop');
+            res.write('data: '+JSON.stringify({id,model:request.model,choices:[],usage:{prompt_tokens:10,completion_tokens:5,total_tokens:15,cost:0.003}})+'\n\n');
+            entry.finishedAt=Date.now();res.end('data: [DONE]\n\n');
+          }
         }else mentorStreamHeld.set(index,()=>{entry.finishedAt=Date.now();res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify(official));});
         return;
+      }
+      // The protected-route smoke also exercises the current streamed mentor opening.
+      if(stagingHost&&req.url==='/__official_chat'&&request.stream===true){
+        res.writeHead(200,{'content-type':'text/event-stream','x-generation-id':id});
+        const write=(delta,finish=null)=>res.write('data: '+JSON.stringify({id,object:'chat.completion.chunk',created:1,
+          model:request.model,choices:[{index:0,delta,finish_reason:finish}]})+'\n\n');
+        write({role:'assistant',content});
+        if(agentCard)write({tool_calls:[{index:0,id:'question-local',type:'function',
+          function:{name:'ask_question',arguments:JSON.stringify({...agentCard,message:content})}}]});
+        write({},agentCard?'tool_calls':'stop');
+        res.write('data: '+JSON.stringify({id,model:request.model,choices:[],usage:official.usage})+'\n\n');
+        res.end('data: [DONE]\n\n');return;
       }
       const send=()=>res.writeHead(200,{'content-type':'application/json'}).end(req.url==='/__official_chat'?JSON.stringify(official):response);
       if(holdRuntime){holdRuntime=false;heldRuntime.push(send);}else send();return;
@@ -759,11 +813,10 @@ try {
   // Every fetch from the disposable Next process is constrained to loopback,
   // including optional routing helpers. No configured provider can be contacted.
   const networkGuard=resolve(root,'local-loopback-only.cjs');
-  writeFileSync(networkGuard,`const original=globalThis.fetch;globalThis.fetch=(input,init)=>{const u=new URL(typeof input==='string'||input instanceof URL?input:input.url);let target=null;
-${stagingHost?`if(u.origin==='https://${syntheticStagingHost}')target='${apiUrl}'+u.pathname+u.search;
-if(u.origin==='https://openrouter.ai'&&u.pathname==='/api/v1/chat/completions')target='${apiUrl}/__official_chat';`:''}
-if(target)return original(input instanceof Request?new Request(target,input):target,init);
-if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCAL_ONLY_NETWORK');return original(input,init);};`);
+  // Next normalizes repeated --require options to the last value in its child.
+  // Load both test hooks through one entry so the loopback guard is never lost.
+  const observerPreload=!withoutApp?`require(${JSON.stringify(resolve(root,'packages/db/tests/v3/local-rate-limit-observer.cjs'))});`:'';
+  writeFileSync(networkGuard,`require(${JSON.stringify(resolve(root,'packages/db/tests/v3/local-fetch-guard.cjs'))}).installLocalFetchGuard(${JSON.stringify(stagingHost?{stagingOrigin:'https://'+syntheticStagingHost,gatewayOrigin:apiUrl}:{})});\n${observerPreload}`);
   console.log('Model transport: synthetic loopback HTTP; non-loopback server fetch denied in disposable copy only');
   const searchPath=resolve(root,'packages/api/src/services/research/workbenchSearch.ts');
   let searchSource=readFileSync(searchPath,'utf8');
@@ -799,11 +852,12 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
     ...((args.includes('--real-skill-only')||opcMode) ? {V3_REAL_SKILL_INPUT:process.env.V3_REAL_SKILL_INPUT} : {}),
     V3_LEGACY_ROOT:legacyRoot??'', V3_LEGACY_REF:legacyRef??'',
     NODE_ENV: serve ? "production" : "development",
-    NODE_OPTIONS:`--require=${networkGuard}${rateLimitCases?.nodeOptions ?? ""}`,
+    NODE_OPTIONS:`--require=${networkGuard}`,
     NEXT_PUBLIC_SUPABASE_URL: stagingHost?'https://'+syntheticStagingHost:apiUrl,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: anon,
     SUPABASE_SERVICE_ROLE_KEY: service,
     V3_LOCAL_STAGING_SCHEMA: stagingSchema ? 'true' : 'false',
+    V3_CAPACITY_CAPTURE: capacityCapture ? 'true' : 'false',
     V3_LOCAL_DB: `postgres://postgres@127.0.0.1:${port(db, "5432")}/v3_disposable`,
     V3_LOCAL_REST: apiUrl,
     ...((opcMode||runtimeMode||runtimeUpgrade)&&!stagingHost?{V3_RUNTIME_LOCAL_ENDPOINT:apiUrl}:{}),
@@ -911,8 +965,10 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
         "--config",
         rateLimitCases?.config ?? "vitest.integration.config.ts",
         ...(runtimeUpgrade ? ["src/services/runtime/upgrade.integration.ts"] : upgradeMode ? ["src/services/bill2/upgrade.integration.ts"] : withoutApp ? [] : ["src/services/__tests__/workbench.integration.ts"]),
+        ...(runtimeMode&&!withoutApp&&casePattern?.startsWith('^ERASURE_BROWSER:')
+          ? ['src/services/runtime/erasureBrowser.integration.ts'] : []),
         ...(bill2Mode ? ['src/services/bill2/billing.integration.ts'] : []),
-        ...(runtimeMode ? ['src/services/runtime/runtime.integration.ts', 'src/services/runtime/streaming.integration.ts'] : []),
+        ...(runtimeMode ? WITHOUT_APP_SUITES.runtime.files : []),
         ...(opcMode ? ['src/services/opc/opc.integration.ts',...(mentorStreamTest?['src/services/opc/mentor-browser.integration.ts']:[])] : []),
         "--reporter",
         "verbose",

@@ -4,6 +4,11 @@ import type {SupabaseClient} from '@supabase/supabase-js';
 import {createHash} from 'node:crypto';
 import {runtimeAdmissionService} from './admission';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
+// The window/configuration consistency of BILL-UNIT is covered in billingUnitAdmission.test.ts.
+vi.mock('./billingUnitAdmission', async (original) => ({
+  ...(await original<typeof import('./billingUnitAdmission')>()),
+  freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2', creditsPerUsd: '1000', defaultMultiplier: '1', models: {}, providers: {}, hash: 'f'.repeat(64) }),
+}));
 const actor='10000000-0000-4000-8000-000000000001',sessionId='10000000-0000-4000-8000-000000000002',modelId='10000000-0000-4000-8000-000000000003',requestId='10000000-0000-4000-8000-000000000004';
 it.each(['PGRST202','42883','42501','PGRST301','XX000',null].flatMap(code=>[false,true].map(real=>({code,real}))))('workspace capability $code (real=$real) preserves free chat only for genuinely missing RPC',async({code,real})=>{
  let frozen:Record<string,unknown>|undefined;
@@ -14,7 +19,7 @@ it.each(['PGRST202','42883','42501','PGRST301','XX000',null].flatMap(code=>[fals
   if(name==='runtime_admit'){frozen=args.p_payload as Record<string,unknown>;return {data:{executionId:requestId},error:null};}
   throw new Error(name);
  });
- const query={select:()=>query,eq:()=>query,single:async()=>({data:{id:modelId,model_id:real?'test/model':'fixture',provider:real?'openrouter':'fixture',is_active:'true',max_tokens:1000,input_limit:32000},error:null})};
+ const query={in:async()=>({data:[{id:modelId,model_id:'test/model',config:configuredReasoning('test/model')}],error:null}),select:()=>query,eq:()=>query,single:async()=>({data:{id:modelId,model_id:real?'test/model':'fixture',provider:real?'openrouter':'fixture',is_active:'true',max_tokens:1000,input_limit:32000},error:null})};
  const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01T00:00:00Z'}},error:null})}} as unknown as SupabaseClient;
  const admin={rpc,from:()=>query} as unknown as SupabaseClient;
  const admission=runtimeAdmissionService(user,admin,{...(real?{real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01T00:00:00Z',callPolicies:[{modelId,provider:'openrouter',account:'test',model:'test/model',protocol:'openrouter-chat-v1' as const,providerLimits:{providerSlug:'synthetic/fp8',contextTokens:32000,promptUsdPerMillion:'0.1',completionUsdPerMillion:'0.1',requestUsd:'0'},upperUsd:'0.004',inputLimit:32000,outputLimit:1000,automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true}]}}:{}),workspaceContext:true,account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:10});
@@ -34,7 +39,7 @@ it.each([false,true].flatMap(real=>[false,true].map(mentorStream=>({real,mentorS
   throw new Error(name);
  });
  const admin={rpc,from:(table:string)=>{
-  let selected='';const q={select:()=>q,eq:(_key:string,id:string)=>{selected=id;return q;},in:async()=>({data:[{key:'v3_summary_model_id',value:organizerId},{key:'v3_summary_max_tokens',value:'2048'}],error:null}),single:async()=>{modelReads++;return {data:models.find(m=>m.id===selected),error:null};}};
+  let selected='';const q={select:()=>q,eq:(_key:string,id:string)=>{selected=id;return q;},in:async()=>({data:table==='ai_models'?models:[{key:'v3_summary_model_id',value:organizerId},{key:'v3_summary_max_tokens',value:'2048'}],error:null}),single:async()=>{modelReads++;return {data:models.find(m=>m.id===selected),error:null};}};
   expect(['ai_models','system_settings']).toContain(table);return q;
  }} as unknown as SupabaseClient;
  const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
@@ -42,11 +47,20 @@ it.each([false,true].flatMap(real=>[false,true].map(mentorStream=>({real,mentorS
  const policy={...(real?{real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01',callPolicies:quotes}}:{}),account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:1000,inputBytes:32000,historyItems:10};
  const service=runtimeAdmissionService(user,admin,{...policy,opcTurnToken:requestId,mentorStream});
  const input={sessionId,requestId,input:'Real business facts',selection:{kind:'ordinary',modelId},network:'deny',organizeAfter:true};
- await service.prepare(input);expect(frozen.providerRequestFormat).toBe(real?(mentorStream?'serial-tools-v4-stream':'serial-tools-v6-reasoning'):undefined);expect(frozen.reasoning).toEqual(real?(mentorStream?{effort:'none'}:{parameter:'none'}):undefined);expect(frozen.attachedOrganizer.reasoning).toEqual(real?{parameter:'none'}:undefined);
+ await service.prepare(input);expect(frozen.providerRequestFormat).toBe(mentorStream?'agent-turn-v5-stream':real?'serial-tools-v6-reasoning':undefined);expect(frozen.reasoning).toEqual(real?(mentorStream?{effort:'none'}:{parameter:'none'}):mentorStream?{parameter:'none'}:undefined);expect(frozen.attachedOrganizer.reasoning).toEqual(real?{parameter:'none'}:undefined);
+ expect(frozen.attachedOrganizer.historyItems).toBe(mentorStream?0:undefined);
+ expect(frozen.questionContract).toBe(mentorStream?'five-fields-v2':undefined);
+ expect(frozen.instructions.includes('complete public prose in message')).toBe(mentorStream);
  expect(billing.sourceHash).toBe(createHash('sha256').update(JSON.stringify(frozen)).digest('hex'));expect(billing.input).toBe(frozen);expect(frozen.maxOutputTokens).toBe(real?4096:1000);expect(frozen.attachedOrganizer.maxOutputTokens).toBe(real?2048:1000);
  if(real)expect(billing.callPolicy).toEqual(quotes);
+ else expect(billing.limits).toMatchObject({maxCalls:2,credits:40,maxPreDeduct:40});
+ // Real admissions freeze the BILL-UNIT snapshot into rules; local fixture admissions stay on the old contract.
+ if(real)expect(billing.rules.billingUnit).toMatchObject({version:'bill-unit-v2',creditsPerUsd:'1000'});
+ else expect(billing.rules.billingUnit).toBeUndefined();
+ frozen.attachedOrganizer.instructions='LEGACY_FROZEN_ORGANIZER_BYTES';
  replay={executionId:requestId};const reads=modelReads;models[0]!.max_tokens=512;
  expect(await service.prepare(input)).toEqual(replay);expect(modelReads).toBe(reads);expect(frozen.maxOutputTokens).toBe(real?4096:1000);
+ expect(frozen.attachedOrganizer.instructions).toBe('LEGACY_FROZEN_ORGANIZER_BYTES');
 });
 
 it.each(['test/unverified','constructor','__proto__'])('real mentor admission fails closed for model %s without configured reasoning',async(model)=>{
@@ -63,3 +77,27 @@ it.each(['test/unverified','constructor','__proto__'])('real mentor admission fa
  await expect(service.prepare({sessionId,requestId,input:'HOST_OPEN_CURRENT_QUESTION',selection:{kind:'ordinary',modelId},network:'deny'})).rejects.toThrow('RUNTIME_REASONING_NOT_CONFIGURED');
  expect(rpc.mock.calls.map(([name])=>name)).not.toContain('runtime_admit');
 });
+
+it.each([
+ ['runtime_admit','OPC_ANSWER_SOURCE_DENIED','OPC_ANSWER_SOURCE_DENIED'],
+ ['runtime_admit','OPC_ANSWER_SOURCE_DENIED: private','RUNTIME_ADMISSION_DENIED'],
+ ['runtime_admit','OTHER_SQL_SECRET','RUNTIME_ADMISSION_DENIED'],
+ ['runtime_session_context','OPC_ANSWER_SOURCE_DENIED','RUNTIME_ADMISSION_DENIED'],
+])('only the exact source refusal from %s is public (%s)',async(failingRpc,message,expected)=>{
+ const rpc=vi.fn(async(name:string)=>{
+  if(name===failingRpc)return {data:null,error:{message}};
+  if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:sessionId}},error:null};
+  if(name==='runtime_admission_replay')return {data:null,error:null};
+  throw new Error(name);
+ });
+ const query={select:()=>query,eq:()=>query,single:async()=>({data:{id:modelId,model_id:'fixture',provider:'fixture',is_active:'true',max_tokens:1000,input_limit:32000},error:null})};
+ const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
+ const admin={rpc,from:()=>query} as unknown as SupabaseClient;
+ const service=runtimeAdmissionService(user,admin,{account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:1000,inputBytes:32000,historyItems:10});
+ await expect(service.prepare({sessionId,requestId,input:'test',selection:{kind:'ordinary',modelId},network:'deny'})).rejects.toThrow(expected!);
+});
+
+vi.mock('./newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('./newWorkGate')>(),
+ ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
+}));

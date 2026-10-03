@@ -392,7 +392,7 @@ describe('Exported Functions', () => {
 describe('Custom Configuration', () => {
   it('should respect custom price multiplier', () => {
     const standardCalc = new CostCalculator();
-    const customCalc = new CostCalculator({ priceMultiplier: 2.0 });
+    const customCalc = new CostCalculator({ priceMultiplier: BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER * 2 });
 
     const usage: TokenUsage = {
       inputTokens: 1000,
@@ -402,7 +402,7 @@ describe('Custom Configuration', () => {
     const standardResult = standardCalc.calculate('claude-sonnet-4-20250514', usage);
     const customResult = customCalc.calculate('claude-sonnet-4-20250514', usage);
 
-    // Custom should be roughly 2x / 1.1x = ~1.82x the credits
+    // Doubling the default multiplier must charge more credits
     expect(customResult.totalCredits).toBeGreaterThan(standardResult.totalCredits);
   });
 

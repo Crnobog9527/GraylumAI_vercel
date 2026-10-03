@@ -94,3 +94,22 @@ it('current staging mentor configuration generates exactly the previous v4 SDK b
  expect(frozen).toEqual({effort:'none'});
  expect(await generatedBody(true,frozen,model)).toBe(await generatedBody(true,{effort:'none'},model));
 });
+
+it.each([false,true])('explicit organizer history read flag=%s preserves writes and wire selection',async readSessionHistory=>{
+ const saved:unknown[]=[];let reads=0;
+ const local=session();
+ local.getItems=async()=>{reads++;return [{role:'user',content:'Historical material'}];};
+ local.addItems=async items=>{saved.push(...items);};
+ const requests:string[]=[];
+ await runRuntime({model:'test/model',instructions:'Organize explicit input',input:'Explicit material',
+  session:local,maxOutputTokens:1000,maxTurns:1,tools:[],readSessionHistory,
+  selectHistory:async(history,incoming)=>[...history,...incoming],exchange:async(_sequence,body)=>{
+   requests.push(body);
+   return JSON.stringify({id:'test',object:'chat.completion',created:1,model:'test/model',
+    choices:[{index:0,message:{role:'assistant',content:'Organized'},finish_reason:'stop'}]});
+  }});
+ expect(reads).toBe(readSessionHistory?1:0);
+ expect(requests[0]!.includes('Historical material')).toBe(readSessionHistory);
+ expect(requests[0]).toContain('Explicit material');
+ expect(JSON.stringify(saved)).toContain('Organized');
+});

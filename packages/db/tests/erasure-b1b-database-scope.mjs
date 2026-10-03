@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+// Confirmation uses a synthetic prehashed identity fixture; never a real identity or key.
 import assert from 'node:assert/strict';
 import { actorFixture } from './erasure-b1b-barrier-fixtures.mjs';
 
@@ -15,7 +16,8 @@ export async function databaseScope({ q, Session }) {
     await other.exec('BEGIN; SELECT 1');
     assert.equal(q(`SELECT count(*) FROM pg_stat_activity WHERE application_name='${other.label}'
       AND datname='b1b_other' AND state='idle in transaction' AND xact_start IS NOT NULL`), '1');
-    q(`SET ROLE service_role; SELECT account_erasure_confirm('${actor}',gen_random_uuid())`);
+    q(`SET ROLE service_role; SELECT account_erasure_confirm_with_digests('${actor}',gen_random_uuid(),
+      jsonb_build_array(jsonb_build_object('kind','email','key_version','test-v1','digest',repeat('b',64))))`);
     for (const result of scrubs()) assert.equal(result.retry, undefined, 'Other database must not block either scrub');
     assert.equal(q(`SELECT count(*) FROM runtime_sessions WHERE actor_id='${actor}'
       AND erased_at IS NOT NULL AND scope IS NULL AND start_payload IS NULL`), '1');

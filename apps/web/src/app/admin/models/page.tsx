@@ -3,10 +3,11 @@
 import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { ModelReasoningButton } from '@/components/admin/ModelReasoningDialog';
-import {
-  Bot, Plus, Pencil, Trash2, Sparkles, Brain, Zap,
-  Check, X, Loader2, Globe, RefreshCw, AlertTriangle, HelpCircle
-} from 'lucide-react';
+import { ModelMultiplierPanel } from '@/components/admin/ModelMultiplierPanel';
+import { ProviderPricesEditor } from '@/components/admin/ProviderPricesEditor';
+import { ModelEditPriceSection } from '@/components/admin/ModelEditPriceSection';
+import { showMultiplierPanel } from '@/components/admin/multiplierPanelLink';
+import { Bot, Plus, Pencil, Trash2, Sparkles, Brain, Zap, Check, X, Loader2, Globe, RefreshCw, AlertTriangle, HelpCircle } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -29,14 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -62,11 +56,6 @@ interface AIModel {
   max_tokens: number;
   input_limit: number;
   enable_web_search: string;
-  input_token_cost: number;
-  output_token_cost: number;
-  input_token_cost_above_200k: number;
-  output_token_cost_above_200k: number;
-  web_search_cost: number;
   token_counting_supported: string;
   token_counting_method: string;
   tokenizer_family?: string | null;
@@ -100,14 +89,7 @@ interface FormData {
   apiKey: string;
   apiEndpoint: string;
   description: string;
-  maxTokens: number;
-  inputLimit: number;
   enableWebSearch: boolean;
-  inputTokenCost: number;
-  outputTokenCost: number;
-  inputTokenCostAbove200k: number;
-  outputTokenCostAbove200k: number;
-  webSearchCost: number;
 }
 
 const initialFormData: FormData = {
@@ -117,16 +99,8 @@ const initialFormData: FormData = {
   apiKey: '',
   apiEndpoint: '',
   description: '',
-  maxTokens: 4096,
-  inputLimit: 180000,
   enableWebSearch: false,
-  inputTokenCost: 0,
-  outputTokenCost: 0,
-  inputTokenCostAbove200k: 0,
-  outputTokenCostAbove200k: 0,
-  webSearchCost: 0,
 };
-const MICRO_DOLLARS_PER_USD = 1_000_000;
 
 export default function AdminModelsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -279,14 +253,7 @@ export default function AdminModelsPage() {
       apiKey: '',
       apiEndpoint: model.api_endpoint || '',
       description: model.description || '',
-      maxTokens: model.max_tokens || 4096,
-      inputLimit: model.input_limit || 180000,
       enableWebSearch: model.enable_web_search === 'true',
-      inputTokenCost: (model.input_token_cost || 0) / MICRO_DOLLARS_PER_USD,
-      outputTokenCost: (model.output_token_cost || 0) / MICRO_DOLLARS_PER_USD,
-      inputTokenCostAbove200k: (model.input_token_cost_above_200k || 0) / MICRO_DOLLARS_PER_USD,
-      outputTokenCostAbove200k: (model.output_token_cost_above_200k || 0) / MICRO_DOLLARS_PER_USD,
-      webSearchCost: (model.web_search_cost || 0) / MICRO_DOLLARS_PER_USD,
     });
     setDialogOpen(true);
   };
@@ -298,14 +265,7 @@ export default function AdminModelsPage() {
       provider: formData.provider,
       apiEndpoint: formData.apiEndpoint,
       description: formData.description,
-      maxTokens: formData.maxTokens,
-      inputLimit: formData.inputLimit,
       enableWebSearch: formData.enableWebSearch,
-      inputTokenCost: formData.inputTokenCost,
-      outputTokenCost: formData.outputTokenCost,
-      inputTokenCostAbove200k: formData.inputTokenCostAbove200k,
-      outputTokenCostAbove200k: formData.outputTokenCostAbove200k,
-      webSearchCost: formData.webSearchCost,
       ...(formData.apiKey.trim() ? { apiKey: formData.apiKey.trim() } : {}),
     };
 
@@ -604,10 +564,12 @@ export default function AdminModelsPage() {
           </CardContent>
         </Card>
 
+        <div className="mt-8 space-y-8"><ModelMultiplierPanel /><ProviderPricesEditor /></div>
+
         {/* Create/Edit Dialog */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent
-            className="max-w-lg max-h-[90vh] overflow-y-auto"
+            className="max-w-2xl max-h-[90vh] overflow-y-auto"
             style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
           >
             <DialogHeader>
@@ -615,7 +577,7 @@ export default function AdminModelsPage() {
                 {selectedModel ? '编辑模型' : '添加模型'}
               </DialogTitle>
               <DialogDescription className="sr-only">
-                配置模型的提供商、密钥、计费参数和运行时能力。
+                配置模型的提供商、密钥和运行时能力；价格和容量从 OpenRouter 读取，只读。
               </DialogDescription>
             </DialogHeader>
 
@@ -699,28 +661,11 @@ export default function AdminModelsPage() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label style={{ color: 'var(--text-secondary)' }}>最大输出 Token</Label>
-                  <Input
-                    type="number"
-                    value={formData.maxTokens}
-                    onChange={(e) => setFormData({ ...formData, maxTokens: parseInt(e.target.value) || 4096 })}
-                    min={256}
-                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label style={{ color: 'var(--text-secondary)' }}>上下文限制</Label>
-                  <Input
-                    type="number"
-                    value={formData.inputLimit}
-                    onChange={(e) => setFormData({ ...formData, inputLimit: parseInt(e.target.value) || 180000 })}
-                    min={1000}
-                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
-                  />
-                </div>
-              </div>
+              <ModelEditPriceSection
+                modelId={selectedModel?.id ?? null}
+                open={dialogOpen}
+                onShowMultipliers={() => showMultiplierPanel(closeDialog)}
+              />
 
               <div className="space-y-2">
                 <Label style={{ color: 'var(--text-secondary)' }}>描述</Label>
@@ -750,99 +695,6 @@ export default function AdminModelsPage() {
                   checked={formData.enableWebSearch}
                   onCheckedChange={(checked) => setFormData({ ...formData, enableWebSearch: checked })}
                 />
-              </div>
-
-              {/* Token Cost Settings */}
-              <div
-                className="p-4 rounded-lg space-y-4"
-                style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.2)' }}
-              >
-                <Label className="text-amber-400 font-medium">Token 成本设置</Label>
-                <p className="text-xs leading-relaxed text-amber-200/80">
-                  填写供应商美元成本；输入/输出为 $/1M tokens，联网搜索为 $/1K 次。
-                </p>
-
-                {/* ≤200K tokens */}
-                <div className="space-y-2">
-                  <p className="text-xs text-amber-300 font-medium">≤ 200K tokens</p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-amber-200">输入成本 ($/1M)</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={formData.inputTokenCost}
-                        onChange={(e) => setFormData({ ...formData, inputTokenCost: parseFloat(e.target.value) || 0 })}
-                        className="h-9 bg-[var(--bg-tertiary)] border-amber-500/30 text-[var(--text-primary)]"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-amber-200">输出成本 ($/1M)</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={formData.outputTokenCost}
-                        onChange={(e) => setFormData({ ...formData, outputTokenCost: parseFloat(e.target.value) || 0 })}
-                        className="h-9 bg-[var(--bg-tertiary)] border-amber-500/30 text-[var(--text-primary)]"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* >200K tokens */}
-                <div className="space-y-2 pt-2 border-t border-amber-500/20">
-                  <p className="text-xs text-amber-300 font-medium">&gt; 200K tokens</p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-amber-200">输入成本 ($/1M)</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={formData.inputTokenCostAbove200k}
-                        onChange={(e) => setFormData({ ...formData, inputTokenCostAbove200k: parseFloat(e.target.value) || 0 })}
-                        className="h-9 bg-[var(--bg-tertiary)] border-amber-500/30 text-[var(--text-primary)]"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-amber-200">输出成本 ($/1M)</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={formData.outputTokenCostAbove200k}
-                        onChange={(e) => setFormData({ ...formData, outputTokenCostAbove200k: parseFloat(e.target.value) || 0 })}
-                        className="h-9 bg-[var(--bg-tertiary)] border-amber-500/30 text-[var(--text-primary)]"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Web Search Cost */}
-                <div className="space-y-2 pt-2 border-t border-amber-500/20">
-                  <p className="text-xs text-amber-300 font-medium">联网搜索成本</p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-amber-200">搜索成本 ($/1K次)</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={formData.webSearchCost}
-                        onChange={(e) => setFormData({ ...formData, webSearchCost: parseFloat(e.target.value) || 0 })}
-                        className="h-9 bg-[var(--bg-tertiary)] border-amber-500/30 text-[var(--text-primary)]"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-amber-200">每次成本</Label>
-                      <div
-                        className="h-9 px-3 flex items-center rounded-md"
-                        style={{ background: 'var(--bg-tertiary)' }}
-                      >
-                        <span className="text-amber-400 font-medium">
-                          ${((formData.webSearchCost || 0) / 1000).toFixed(4)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
 

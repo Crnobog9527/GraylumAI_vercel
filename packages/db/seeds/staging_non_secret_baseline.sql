@@ -20,6 +20,10 @@
 
 BEGIN;
 
+-- BILL-UNIT (#565): billing_credits_per_usd / billing_token_price_multiplier below keep the
+-- pre-BILL-UNIT values. The Owner-decided q=100 / m=3 is applied as a separately approved,
+-- explicit write of those two rows (with the previous values kept for recovery) — never by
+-- re-running this whole seed, which would also overwrite every other key (ON CONFLICT DO UPDATE).
 INSERT INTO public.system_settings (key, value)
 VALUES
   ('site_name', to_jsonb('Graylum AI Staging'::text)),
@@ -60,6 +64,9 @@ INSERT INTO public.membership_plans (
   id,
   name,
   level,
+  allow_fusion_review,
+  allow_fusion_compare,
+  library_storage_bytes,
   monthly_price,
   yearly_price,
   stripe_monthly_price_id,
@@ -82,6 +89,7 @@ VALUES
     '10000000-0000-4000-8000-000000000001',
     'Free',
     'free',
+    false, false, 50000000,
     0,
     0,
     NULL,
@@ -103,6 +111,7 @@ VALUES
     '10000000-0000-4000-8000-000000000002',
     'Pro',
     'pro',
+    true, true, 500000000,
     990,
     9900,
     NULL,
@@ -124,6 +133,7 @@ VALUES
     '10000000-0000-4000-8000-000000000003',
     'Gold',
     'gold',
+    true, true, 2000000000,
     2990,
     29900,
     NULL,
@@ -141,7 +151,8 @@ VALUES
     30,
     NOW()
   )
-ON CONFLICT (id) DO UPDATE
+-- Preserve the existing plan identity and administrator entitlement edits on replay.
+ON CONFLICT (level) DO UPDATE
 SET
   name = EXCLUDED.name,
   level = EXCLUDED.level,
@@ -218,6 +229,8 @@ SET
   is_popular = EXCLUDED.is_popular,
   active = EXCLUDED.active;
 
+-- Legacy cost columns below are placeholders for old entry points only.
+-- New pricing paths use OpenRouter config.pricing; remove these with LEGACY-CLOSE.
 INSERT INTO public.ai_models (
   id,
   name,

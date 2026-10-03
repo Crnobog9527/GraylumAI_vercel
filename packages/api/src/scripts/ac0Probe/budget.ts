@@ -1,14 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // AC-0b model probe. Standalone script: application code must never import it.
 
-/** Owner decisions: the AC-0 feasibility measurement started at 200 calls and
- * 3 USD; 2026-09-28 the call total was raised to 350 ("同意追加到 350 次，金额上限
- * 3 美元不变"); 2026-09-29 both were raised for gemini-3.8-flash ("同意把 AC-0
- * 测试累计上限调到 420 次、3.5 美元，用来测 gemini-3.8-flash"). No flag can raise these. */
-export const HARD_MAX_CALLS = 420;
-export const HARD_MAX_USD = 3.5;
+/** Owner 2026-10-02 MENTOR-PROMPT-V2: +120 calls / $6 above 854 / $25.24.
+ * This cumulative ceiling does not authorize additional runs. */
+export const HARD_MAX_CALLS = 974;
+export const HARD_MAX_USD = 31.24;
 export const DEFAULT_MAX_CALLS = 60;
 export const DEFAULT_MAX_USD = 1;
+/** AC1-4 candidate runs keep their #497 default run cap; raising the cumulative cap does not widen it. */
+export const CANDIDATE_DEFAULT_MAX_USD = 15;
 
 const NANO = 1_000_000_000;
 export const usdToNano = (usd: number): number => Math.ceil(usd * NANO);

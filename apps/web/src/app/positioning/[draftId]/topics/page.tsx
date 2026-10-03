@@ -17,6 +17,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import composerStyles from '@/components/opc/work-composer.module.css';
@@ -24,6 +25,7 @@ import topicStyles from './topic-candidates.module.css';
 import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 import { consentedTopicIds } from './adoption-consent';
+import { topicExecutionNotice, topicFailureMessage } from './topic-notices';
 
 type PlanItem = {
   id: string;
@@ -264,19 +266,6 @@ export default function TopicWorkspacePage() {
     }
   },[scrollKey,scrollSignature]);
 
-  function failureMessage(cause: unknown) {
-    const message = cause instanceof Error ? cause.message : '';
-    if (message.includes('OPC_TOPIC_SKILL_MISSING'))
-      return '当前定位方法没有声明可用的选题方法资源，无法开始选题工作对话。请联系管理员配置选题 Skill 后再继续；本次没有任何调用或花费。';
-    if (message.includes('OPC_TOPIC_SOURCE_REVOKED'))
-      return '这个工作空间绑定的定位版本已不可用，暂不能继续派发。原对话和成果仍然保留。';
-    if (message.includes('OPC_TOPIC_BOUND') || message.includes('OPC_TOPIC_SOURCE_CHANGED'))
-      return '这个草稿已经有绑定的选题工作空间，不能静默换到另一个版本。请继续使用原有工作空间。';
-    if (message.includes('OPC_REQUEST_CONFLICT'))
-      return '这条消息的原请求身份与现在的负载不一致，已停止发送。请读取原任务状态后再决定。';
-    return '本次请求状态待核实。请使用「恢复原请求」读取原任务，不要重复发送相同内容。';
-  }
-
   async function start() {
     setError('');
     const sourceVersionId = read.data?.report?.id;
@@ -285,7 +274,7 @@ export default function TopicWorkspacePage() {
       const accepted = await bind.mutateAsync({ draftId, sourceVersionId });
       if (accepted.sourceVersionId !== sourceVersionId) throw new Error('OPC_TOPIC_SOURCE_CHANGED');
       await workspace.refetch();
-    } catch (cause) { setError(failureMessage(cause)); }
+    } catch (cause) { setError(topicFailureMessage(cause)); }
   }
 
   async function perform(proposed: Operation) {
@@ -325,8 +314,9 @@ export default function TopicWorkspacePage() {
           if (op.kind === 'chat') {
             const admitted = await turn.mutateAsync(op.request);
             if (op.candidateAtSend) localStorage.setItem('opc-topic-adoption-context:'+sessionId+':'+admitted.executionId,JSON.stringify(op.candidateAtSend));
-            await execute.mutateAsync({ executionId: admitted.executionId });
-            setInput(current=>{if(current===op.request.input){localStorage.removeItem(inputKey);return '';}return current;});
+            const notice = topicExecutionNotice(await execute.mutateAsync({ executionId: admitted.executionId }));
+            if (notice) setError(notice);
+            else setInput(current=>{if(current===op.request.input){localStorage.removeItem(inputKey);return '';}return current;});
           } else if (op.kind === 'save') {
             const result = await savePlan.mutateAsync(op.request);
             editCandidate(null);
@@ -355,11 +345,11 @@ export default function TopicWorkspacePage() {
             localStorage.removeItem(storageKey);
             setPending(null);
             setError(message === 'OPC_BUSINESS_CONFLICT' ? '这个账号已属于另一项业务，本次没有采用。请展开选题，修改为当前业务的账号后再采用；原请求已保留。' : '本次请求已明确拒绝（' + message + '），未提交此项修改。请核对刷新后的计划与账号，再明确重试。');
-          } else setError(failureMessage(cause));
+          } else setError(topicFailureMessage(cause));
         }
         await Promise.all([read.refetch(), view.refetch(), accountList.refetch(), topicDraft.refetch()]);
       });
-    } catch (cause) { setError(failureMessage(cause)); }
+    } catch (cause) { setError(topicFailureMessage(cause)); }
     finally { operationBusy.current = false; setWorking(false); }
   }
 
@@ -567,9 +557,8 @@ export default function TopicWorkspacePage() {
                     <img className={topicStyles.agentAvatar} src="/graylum-logo.png" alt="" />
                     <div className={topicStyles.assistantMessage}>
                       <span className={topicStyles.agentName}>Graylum · 增长顾问</span>
-                      <p className="whitespace-pre-wrap break-words">
-                        {e.contentAvailable ? replyProse(e.body ?? e.primaryBody) : '来源已不可用，暂不展示此内容。'}
-                      </p>
+                      <MessageMarkdown className={topicStyles.reply}
+                        text={e.contentAvailable ? replyProse(e.body ?? e.primaryBody) : '来源已不可用，暂不展示此内容。'} />
                       {e.state === 'cost_pending' && (
                         <p role="status" className="mt-2 text-sm">
                           费用待核实；恢复只核对原调用。

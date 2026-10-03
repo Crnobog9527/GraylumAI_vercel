@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {captureCompleted} from '../opc/capture';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import type {RuntimeProgress} from './progress';
 import type {AgentTurnOutcome} from '../../shared/agentTurn';
@@ -10,6 +11,10 @@ import {retainedOutputReason} from './view';
 import {runtimeExecutor} from './execute';
 import {runtimeActor} from './actor';
 import {activateRuntimeCandidate} from './matching';
+import {newWorkGate,denyNewCalls} from './newWorkGate';
+import {inflightFinancialHost} from './inflightFinancial';
+import {localFixtureAdapter} from '../bill2/fixtureAdapter';
+import type {BillingTransport} from '../bill2/service';
 
 /** Loopback tests remain separate from the explicitly enabled Staging host. */
 export function runtimeLocalEndpoint(){
@@ -38,13 +43,33 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   const actor=runtimeActor(host.user.auth,host.actorId,host.budget,host.authorization);
   const activateSkill=(candidate:Parameters<typeof activateRuntimeCandidate>[2])=>activateRuntimeCandidate(host.user,host.admin,candidate);
   const outcome=async<T extends {state:string}>(result:T)=>{
+   if(result.state==='completed'&&'summary' in result){
+    host.budget?.timing?.finishProvider();
+    const leave=host.budget?.timing?.enter('host');
+    try{await captureCompleted(host.admin,host.actorId,executionId);}finally{leave?.();}
+   }
    if(!['cancelled','cost_pending'].includes(result.state))return result;
    const reason=await retainedOutputReason(host.admin,host.actorId,executionId);
    return {...result,...(reason?{unavailable:reason}:{})};
   };
-  const base={database:host.admin,budget:host.budget,actor};
+  const financial=inflightFinancialHost({database:host.admin,actorId:host.actorId,executionId,actor,budget:host.budget});
+  const base={database:financial.database,budget:host.budget,actor};
+  const publicProgress=(event:RuntimeProgress)=>{if(!financial.isAccountClosed())onProgress?.(event);};
+  const run=async(adapter:BillingTransport,execute:()=>Promise<AgentTurnOutcome>)=>{
+   let result:AgentTurnOutcome|undefined;
+   try{result=await execute();}
+   finally{
+    const recovered=result?.state==='completed'&&!financial.isAccountClosed()
+     ?undefined:await financial.finish(adapter);
+    if(financial.isAccountClosed()&&recovered)
+     result={state:recovered.state as 'completed'|'cancelled'|'cost_pending'};
+   }
+   return result!;
+  };
   if(host.maintenanceEndpoint)
-   return outcome(await runtimeExecutor({...base,endpoint:host.maintenanceEndpoint,activateSkill}).execute(executionId,onProgress));
+   return outcome(await run(localFixtureAdapter(host.maintenanceEndpoint),()=>runtimeExecutor({
+    ...base,endpoint:host.maintenanceEndpoint,activateSkill,
+    callGate:newWorkGate(host.admin,'local').calls}).execute(executionId,publicProgress)));
   try{await loadStagingPolicy(host.admin,host.actorId,process.env);}catch{
    const original=await loadStagingRecoveryPolicy(host.admin,host.actorId,executionId,process.env);
    // This branch never constructs/runs an SDK request. It only looks up the
@@ -57,7 +82,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    }
    const adapter=stagingTransport(host.admin,original,host.budget);
    const replayOnly={dispatch:async()=>{throw new Error('RUNTIME_DISPATCH_DISABLED');},lookup:adapter.lookup};
-   const state=await runtimeExecutor({...base,adapter:replayOnly}).recoverFinancial(executionId);
+   const state=await runtimeExecutor({...base,adapter:replayOnly,callGate:denyNewCalls}).recoverFinancial(executionId);
    // With p_finish, runtime_financial_recovery returns only these three states.
    return outcome({state:state.state as 'completed'|'cancelled'|'cost_pending'});
   }
@@ -65,7 +90,8 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   // even if a later test window is now selected in the host environment.
   const original=await loadStagingRecoveryPolicy(host.admin,host.actorId,executionId,process.env);
   const adapter=stagingTransport(host.admin,original,host.budget);
-  return outcome(await runtimeExecutor({...base,adapter,activateSkill}).execute(executionId,onProgress));
+  return outcome(await run(adapter,()=>runtimeExecutor({...base,adapter,activateSkill,
+   callGate:newWorkGate(host.admin,'staging').calls}).execute(executionId,publicProgress)));
 }
 export type OriginalExecutionOutcome=AgentTurnOutcome;
 export type ExecutionStreamEvent=RuntimeProgress|{type:'result';result:OriginalExecutionOutcome};
@@ -83,15 +109,17 @@ export const TEXT_EVENT_INTERVAL_MS=100;
 export async function* streamOriginalExecution(run:(onProgress:(event:RuntimeProgress)=>void)=>Promise<OriginalExecutionOutcome>,
  timing:RuntimeBudget['timing']|undefined,path:string,now:()=>number=()=>performance.now()):AsyncGenerator<ExecutionStreamEvent>{
  let textEvent:ExecutionStreamEvent|undefined,phaseEvent:ExecutionStreamEvent|undefined,resultEvent:ExecutionStreamEvent|undefined;
+ let cardEvent:ExecutionStreamEvent|undefined,cardSeen=false;
  let done=false,failure:unknown,wake:()=>void=()=>{},lastText:number|undefined;
- const pending=run(event=>{if(event.type==='text')textEvent=event;else phaseEvent=event;wake();})
+ const pending=run(event=>{if(event.type==='text')textEvent=event;
+  else if(event.type==='card'){if(!cardSeen){cardSeen=true;cardEvent=event;}}else phaseEvent=event;wake();})
   .then(result=>{resultEvent={type:'result',result};},error=>{failure=error;}).finally(()=>{done=true;wake();});
  const idle=(ms?:number)=>new Promise<void>(resolve=>{
   const timer=ms===undefined?undefined:setTimeout(resolve,ms);
   wake=()=>{if(timer!==undefined)clearTimeout(timer);resolve();};
  });
  try{
-  while(!done||textEvent||phaseEvent||resultEvent){
+  while(!done||textEvent||cardEvent||phaseEvent||resultEvent){
    if(textEvent){
     const wait=done||lastText===undefined?0:lastText+TEXT_EVENT_INTERVAL_MS-now();
     if(wait>0){await idle(wait);continue;}
@@ -99,6 +127,7 @@ export async function* streamOriginalExecution(run:(onProgress:(event:RuntimePro
     if(event.type==='text'&&event.text)timing?.mark('firstPublicText');
     yield event;
    }
+   else if(cardEvent){const event=cardEvent;cardEvent=undefined;yield event;}
    else if(phaseEvent){const event=phaseEvent;phaseEvent=undefined;yield event;}
    else if(resultEvent){const event=resultEvent;resultEvent=undefined;yield event;}
    else await idle();

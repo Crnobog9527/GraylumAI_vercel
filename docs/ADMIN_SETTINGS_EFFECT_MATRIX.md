@@ -65,7 +65,7 @@ Existing `verified` rows below describe the 2026-04-28 baseline, not a fresh ful
 
 ## Billing Runtime Defaults
 
-The PR 2A billing runtime settings affect the AI chat main path for both pre-deduct and final settlement. PR 2B extends the same dynamic `ai_models` pricing + billing runtime settings path to `settleAbort`, so interrupted stream settlement no longer uses legacy hardcoded model prices. Missing or invalid values fall back to safe defaults:
+The PR 2A billing runtime settings affect the AI chat main path for both pre-deduct and final settlement. PR 2B extends the same dynamic `ai_models` pricing + billing runtime settings path to `settleAbort`, so interrupted stream settlement no longer uses legacy hardcoded model prices. Missing or invalid values fall back to safe defaults (a failed settings read is refused instead, since BILL-UNIT #565; the Owner-approved q=100 / m=3 is applied by writing explicit rows, not by changing these defaults):
 
 | Setting key | Safe default |
 | --- | --- |

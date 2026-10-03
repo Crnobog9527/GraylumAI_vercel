@@ -535,14 +535,15 @@ pnpm stripe:readiness:staging
 
 The current staging runtime is the standalone Vercel project `graylumai-staging`
 using the Vercel Production environment at
-`https://graylumai-staging.vercel.app`. Its Stripe test-mode webhook endpoint is:
+`https://auth-staging.graylum.com` (the old Vercel domain was
+removed on 2026-10-01). Its Stripe test-mode webhook endpoint is:
 
 ```text
-https://graylumai-staging.vercel.app/api/stripe/webhook
+https://auth-staging.graylum.com/api/stripe/webhook
 ```
 
 The Stripe readiness script loads `.env.staging.local`, refuses production-like
-app hosts, defaults to the `graylumai-staging.vercel.app` staging host, requires
+app hosts, defaults to the `auth-staging.graylum.com` staging host, requires
 test-mode Stripe keys, checks active plan/package Price ID coverage, and verifies
 the referenced Stripe Price objects are readable, active, test-mode, and match
 their expected one-time/monthly/yearly usage. It prints only presence flags, safe

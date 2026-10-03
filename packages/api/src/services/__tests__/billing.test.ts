@@ -558,6 +558,21 @@ describe('getBillingRuntimeSettings', () => {
       requireModelPricing: false,
     });
   });
+
+  it.each([
+    [{ data: null, error: { code: 'PGRST301' } }],
+    [{ data: null, error: null }],
+  ])('a failed read is refused, not treated as missing rows %#', async (result) => {
+    const supabase = {
+      from() {
+        return { select() { return this; }, in: () => Promise.resolve(result) };
+      },
+    } as unknown as BillingContext['supabase'];
+    await expect(getBillingRuntimeSettings(supabase)).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE', message: expect.not.stringContaining('BILLING_UNIT'),
+      cause: expect.objectContaining({ code: 'BILLING_UNIT_SETTINGS_UNAVAILABLE' }),
+    });
+  });
 });
 
 describe('estimatePreDeductCredits', () => {
