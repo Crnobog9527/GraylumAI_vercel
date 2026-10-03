@@ -27,7 +27,8 @@
 
 1. **流式（C0，范围已收窄）**
    - 服务端只有一个执行器 `executeOriginalExecution`。一个回答是否边写边出，取决于准入时冻结的请求格式。
-   - 本方案只收拢**定位页里显示正文的非流式路径**：plan 生成，以及带附属整理器的主回复。
+   - 本方案只收拢**定位页 `step` 用途的回复**（模型写的 JSON 信封，只流公开的 `message`）。
+   - plan 这类非信封的结构化输出，首版整段缓冲、完成后显示，不续写（首版限制）。
    - runtime 页（自由/Skill 对话、视频包、工作引导）和选题页的回复里有协议 JSON，按 Owner 决定**暂时保持写完再显示**，等 CONTENT-CONVERSATION-DRIVEN 方案一起重做。
 2. **统一上限（C1）**
    - 单次调用的输出上限 O = min(全站统一上限, 模型能力, 报价上限)，并且要放得进上下文。
@@ -128,7 +129,13 @@
 ### 2.1 范围
 
 - "对话"指经过 Runtime 执行器、把模型正文直接显示给用户的回答。以后新增的 Skill 只要走 Runtime，就自动适用，不需要配置。
-- **本方案 C0 收拢**：定位页里还不能边写边出的正文路径，即 plan 生成和带附属整理器的主回复。导师已经是流式。
+- **本方案 C0 收拢**：定位页 `step` 用途的回复（有附属整理器时冻结 `serial-tools-v6-reasoning`，没有时冻结 `serial-tools-v2`，两者都是非流式）。导师已经是流式。
+  - `step` 回复是模型直接写出的 JSON 信封：第一个字段是公开的 `message`，后面是私有协议字段。
+  - 现有 `publicMentorText`（`runtime/progress.ts:7`）只把开头的 `message` 字符串流给前端，不会露出 JSON。所以这类回复可以边写边出。
+- **首版不做边写边显示的结构化输出**（总控技术决定，列为首版限制）：
+  - **plan 生成**：模型只返回 JSON 数组，`publicMentorText` 对它输出空白。
+  - 首版保持**整段缓冲，完成后再显示**，冻结格式不变，不做流式、不续写；停止仍走现有 `runtime_cancel`。
+  - 已核对 C0 目标里的其他路径：定位页只有 `mentor`、`step`、`plan` 三种用途（`opc/service.ts` 的准入），除 plan 以外没有其他非信封的结构化输出。
 - **暂不收拢**（Owner 2026-10-03 决定）：runtime 页的自由/Skill 对话、视频包、工作引导，以及选题页。
   - 原因：这些回复里有协议 JSON（选题数组、视频包对象），现在靠完成后的 `displayReply` 解析或隐藏。
   - 直接复用导师页的纯文本实时气泡，会在写的过程中把半截 JSON 露给用户。
@@ -142,10 +149,10 @@
    - 未准入的 held、429、各类 503、结果未知时，不自动重新准入；
    - 确定的结构化 4xx 按现有 abandon 规则释放；
    - 首次调用闸门取消时显示固定提示。
-1. **准入**：对于定位页的 plan 和带附属整理器的主回复，新准入冻结已有的流式格式（`serial-tools-v4-stream`）。
+1. **准入**：对于定位页 `step` 用途的回复，新准入冻结已有的流式格式（`serial-tools-v4-stream`）；plan 不变。
    - 同时冻结与它匹配的思考设置（v4 属于 `REASONING_FORMATS`），附属整理器保持非流式。
    - 现有流式格式只要有一种无法表达这些路径的工具约束，实施 PR 就停下报告，不自行新增格式。
-2. **前端**：这两条路径已经通过 `executeStream` 调用，补上与导师相同的 `LiveReply` 渲染即可。
+2. **前端**：`step` 回复已经通过 `executeStream` 调用，补上与导师相同的 `LiveReply` 渲染即可。实时文字只来自 `publicMentorText` 的 `message` 投影。
 3. **重放**：旧 execution 按冻结格式重放，字节不变。
 4. **计费**：不变。流式回执解析（`openRouterStream.ts`）已在导师路径上线。C0 的集成测试要证明流式和非流式的账单证据等价。
 
@@ -216,10 +223,20 @@ O = min( 全站统一上限 CHAT_OUTPUT_CAP（按环境取值）,
 - 每一**段**是这个 execution 里的一次调用，有自己的 sequence、请求 hash、claim、回执和 PAYG v2 冻结与结算。
 - 各段正文的**唯一权威来源是已落库的回执**。全文是各段正文按 sequence 顺序的确定性投影（4.3 的拼接规则）。
   发给模型、实时显示、重放和最终保存，都用同一个投影。
-- **适用范围**：新准入、走流式格式、显示正文的对话回答，即导师和 C0 收拢的路径。
-- **不适用**：2.1 中暂不收拢的结构化入口，新准入冻结 `maxSegments=1`。
-  - 对这些入口，有正文的 `length` 不再静默当成功：结果元数据记为"未完成"，不作为合格的结构化成果。
-  - 显示和保存沿用现有的"未完成"通知。
+- **按"可见正文由谁产生"分成三类**。首版只给每类一条规则，不按每种线上格式各设计一套：
+
+| 类别 | 例子 | 流式 | 续写 | 停止 |
+|---|---|---|---|---|
+| **T1 纯文本**：模型直接写正文 | 导师（v5，宿主再把正文封进信封） | 是 | **是** | 4.6 停止路径 |
+| **T2 模型写的信封**：模型输出 JSON 对象，公开字段是 `message`，其余是私有协议字段 | 定位页 `step` 回复（含带附属整理器的主回复） | 是，只流 `message` | **否**（`maxSegments=1`） | 4.6 停止路径 |
+| **T3 其他结构化输出** | plan 的 JSON 数组；2.1 中暂不收拢的 runtime 页和选题页 | 否，整段缓冲 | 否（`maxSegments=1`） | 现有 `runtime_cancel` |
+
+- **T2 不续写的原因**：`length` 停下时 JSON 还没写完。跨段拼接 JSON 属于结构化续写，首版不做。
+  - 正式环境的单次上限提高以后（3.1），T2 写满的情况很少。
+- **T2、T3 遇到有正文的 `length`**：不再静默当成功，结果记 `completeness:'length_limit'`，不作为合格的结构化成果，显示和保存沿用现有的"未完成"通知。
+- **"信封"一词的统一定义**（4.6、4.8 共用）：结果 body 是一个 JSON 对象，公开字段是 `message`。
+  - 包括 T1 导师的宿主信封（`agentTurnBody`），也包括 T2 模型写的信封。
+  - 两者用同一条规则：取 `message` 计量和截断，其余字段原样保留，重建信封后，用该格式**正常完成时的同一个**校验函数检查。
 
 ### 4.2 触发和继续条件
 
@@ -409,9 +426,11 @@ Claude 新模型不支持 assistant 预填，所以续写段是**以 user 结束
 
 1. **入口**：沿用现有 `runtime.cancel` 路由，增加可选参数 `stopAt`：用户停止时屏幕上已经显示的**可见正文**的 Unicode 码点数。
    - 前端用 `Array.from(text).length` 计算。数据库用 `char_length` 计算，口径一致。
-   - **可见正文**按结果格式定义：
-     - **导师回合**（`agent-turn-v5-stream`）：`result.body` 是 `agentTurnBody(message, card)` 生成的 JSON 信封（`shared/agentTurn.ts:217-225`、`runtime/agentTurnResult.ts:9-12`），页面显示的是信封里的 `message`。所以可见正文是 `message` 字段，而不是 `body` 字符串。
-     - **普通回合**（C0 收拢的流式文本格式）：`result.body` 就是正文本身，可见正文就是 `body`。
+   - **可见正文**按 4.1 的统一定义：**凡是信封格式，一律取信封的 `message`**，不按线上格式分别处理。
+     - 导师回合（T1）：`result.body` 是 `agentTurnBody(message, card)` 生成的信封（`shared/agentTurn.ts:217-225`、`runtime/agentTurnResult.ts:9-12`）。
+     - `step` 回复（T2）：`result.body` 是模型写的信封，`publicMentorText` 只露出 `message`。
+     - 不是信封的纯文本 body（以后的 T1 纯文本格式）：可见正文就是 `body`。
+     - T3 不走停止路径，也就不需要可见正文。
    - 实时 text 事件发送的也是可见正文的投影，前端计数和服务器投影是同一份文本。
    - 只对冻结了 `continue-v1` 的 execution 改走下面的停止路径。旧 execution 和不续写的入口仍走原 `runtime_cancel`，语义不变。
 2. **SQL**：在现有的 `runtime_execution` 函数里加一个 `stop` 动作，做法是在 PAYG PR-B 之后**追加**一张迁移，重定义该函数；不修改已合并的迁移。
@@ -439,10 +458,9 @@ Claude 新模型不支持 assistant 预填，所以续写段是**以 user 结束
      - **R2 正文**：
        - 已有 `primary_result` 时，沿用 `0106:452`：body 必须等于 primary 的 body，不做 `stopAt` 计数（主回复已经全部写完并显示）；
        - 没有 `primary_result` 时，**可见正文**的 `char_length` 不超过登记的 `stopAt`：
-         - 导师回合：先把 `p_result->>'body'` 解析为 jsonb，取 `->>'message'`，再计数；
-         - 普通回合：直接对 `p_result->>'body'` 计数；
-         - 用哪种格式由冻结上下文的 `providerRequestFormat` 决定，不由结果自报；
-         - 导师回合的 body 解析失败，或者 `format` 不是 `AGENT_TURN_FORMAT`，都直接拒绝。
+         - 信封格式（T1 导师、T2）：把 `p_result->>'body'` 解析为 jsonb，取 `->>'message'` 计数；解析失败，或者 `message` 不是字符串，都直接拒绝；
+         - 非信封的纯文本：直接对 `p_result->>'body'` 计数；
+         - 是不是信封由冻结上下文的 `providerRequestFormat` 决定，不由结果自报。
      - **R3 整理器**（只针对 `attachedOrganizer`）：
        - 结果带 summary 且 `organized:true`：现有的 `0106:453` 检查本来就会通过，不改；
        - 结果不带 summary 且 `organized:false`：跳过 `RUNTIME_ORGANIZER_PENDING`；
@@ -451,8 +469,13 @@ Claude 新模型不支持 assistant 预填，所以续写段是**以 user 结束
      - 除 R1–R4 之外的检查（`kind`、`active_execution`、Session 批次、结果冲突）与 0106 相同。
      - `stop` 动作 (b) 调用同一段 `complete` 逻辑；`checkpoint_primary` 不改。
    - **2A. 截断后重新封装**（宿主执行，(b)、(c)、(d) 共用）：
-     - **普通回合**：`body = 投影前 stopAt 个码点`。
-     - **导师回合**：
+     - **非信封的纯文本**：`body = 投影前 stopAt 个码点`。
+     - **T2 模型写的信封**（只有一段，因为 T2 不续写）：
+       - 在途段落库后，用该格式**正常完成时的同一个**解析函数解析完整 body；
+       - 把 `message` 截到前 `stopAt` 个码点，私有协议字段原样保留，重建信封；
+       - 重建后用同一个校验函数检查；
+       - 解析失败（例如模型输出本身不合格），或者截断后校验不通过时，不保存坏的协议 JSON，按 (e) 处理：没有正文，状态 `cancelled`，这次调用照常按回执结算一次。
+     - **T1 导师信封**：
        - 取全部已写段的 `message` 投影，截到前 `stopAt` 个码点，去掉首尾空白，得到 `m`；
        - 卡片 `card` 只在**没有发生截断**时保留，即 `stopAt` ≥ 完整 `message` 的码点数，并且这一段确实带回了卡片。
          截断时 `card = null`，因为用户没有看完正文，问题卡也没有显示过。
@@ -562,8 +585,15 @@ Claude 新模型不支持 assistant 预填，所以续写段是**以 user 结束
   - 所以无论 O、段数、卡片、字符组成如何，保存都不会因为超过上限而失败；正常的第一次调用也不会被预留挡掉。
 - **Session item**（`0106:40`）：
   - 形状 P 由宿主在最终完成时写入一条 assistant 消息，内容是截短后的投影，受同一个 ROOM 约束。
-  - 形状 C 沿用 v5 现有的 Session 写入（工具调用参数里 `message`、`recommendationReason`、`question`、`options` 各一份）。最坏约 41500 码元 × 4 字节，约 166000 字节，在 262144 之内。
-  - 截短发生时，Session 写入用截短后的值。
+  - 形状 C 沿用 v5 现有的 Session 写入，但写入前按**实际序列化后的字节数**计量**每一个** Session item（`octet_length(item::text)`，与 `0106:40` 的 CHECK 口径一致），而不是只估算卡片字段。
+    - 卡片回复除了工具调用参数（`message`、`recommendationReason`、`question`、`options`），还可能带一段普通 assistant 文本（伴随文本，`streaming.integration.ts` 已覆盖这种形状）。
+    - 伴随文本不公开，页面显示的是卡片的 `message`（`agentTurnResult` 只在没有卡片时才用它兜底）。
+    - O=32768 时，光伴随文本就可能接近或超过 262144。
+  - **写入前处理**，只作用于冻结了 `continue-v1` 的 execution：
+    1. 带卡片时，伴随文本先截短到 4000 码元（与 `publicMentorText` 的显示上限同一量级）；
+    2. 截短后这个 item 仍超过 262144，就整条丢弃伴随文本 item（只是不写入 Session，回执里仍然保留原文）；
+    3. 工具调用参数所在的 item 按上面形状 C 的截短规则处理。这个 item 最坏约 41500 码元 × 4 字节，约 166000 字节，在 262144 之内。
+  - 截短发生时，Session 写入和结果都用截短后的值，两者一致。
 - **量级**（只作说明，以实测为准）：O=32768 写满时，中文正文约十万字节，在 ROOM 之内。
   所以正式环境一般只会在第二段续写时，才可能因为容量收尾。
 - **为什么不提高 262144**：
@@ -751,7 +781,8 @@ C2 合并 → REPORT-GEN R-A / R-B → PAYG 前端技术验收 → 默认切 v2 
 ### 10.3 必测（C0–C2 实施 PR 按各自范围执行）
 
 - **流式（C0）**：
-  - plan 和带附属整理器的主回复能边写边出；
+  - `step` 回复（带整理器和不带整理器）能边写边出，写的过程中只显示 `message`，不显示 JSON；
+  - plan 仍然整段缓冲，完成后显示；
   - 旧 execution 按原格式重放，字节不变；
   - 流式和非流式的账单证据等价；
   - runtime 页和选题页行为不变，写的过程中不显示半截 JSON。
@@ -795,6 +826,12 @@ C2 合并 → REPORT-GEN R-A / R-B → PAYG 前端技术验收 → 默认切 v2 
     - `question`、`options` 和 summary 不变；
     - 记 `length_limit`；
     - Session item 不超过 262144；
+  - **卡片带伴随文本**：卡片加上一段 O=32768 写满的伴随文本：
+    - 伴随文本被截短到 4000 码元；
+    - 构造成截短后仍然超出时，伴随文本 item 被整条丢弃；
+    - 每个 Session item 都不超过 262144，Session 写入成功；
+    - 回执保留原文；
+    - 页面显示的仍是卡片 `message`；
   - 夹具覆盖 4 字节 emoji、引号、反斜杠、控制字符（每字符 6 字节转义）和全中文；
   - 恰好等于上限通过，加 1 字节被截短；
   - Session item 和 `checkpoint_primary` 用同一套测试；
@@ -817,7 +854,9 @@ C2 合并 → REPORT-GEN R-A / R-B → PAYG 前端技术验收 → 默认切 v2 
       - 没有停止的执行如果缺 summary，仍然报 `RUNTIME_ORGANIZER_PENDING`；
       - 右侧信息不更新，B1 不执行；
     - 导师回合带卡：没有截断时保留卡片；截断时 `card=null`；`message` 为空且无卡时按 (e) 处理；
-    - 普通回合：`body` 截到 `stopAt` 个码点，`complete` 按 `body` 计数；
+    - T2 `step` 回复（带整理器和不带整理器各一条）：截断信封的 `message`，私有字段不变，重建后通过正常完成的校验函数，`complete` 按 `message` 计数；模型输出本身不合格时按 (e) 处理，不保存坏 JSON；
+    - 非信封的纯文本：`body` 截到 `stopAt` 个码点，`complete` 按 `body` 计数；
+    - plan（T3）：仍然整段缓冲，写的过程中不显示任何文字，停止走原 `runtime_cancel`；
     - 中文、emoji（代理对）和换行下，前端的 `Array.from` 与数据库的 `char_length` 计数一致；
   - (c) 在途时停止：返回 `stopping`；在途段回执落库后，`complete` 成功保存带 `stopped:true` 的结果；`complete` 拒绝超过 `stopAt` 的 body；
   - (d) 在途 HTTP 消失：恢复时读回执收尾；回执不明时进入 `cost_pending`；
@@ -888,3 +927,6 @@ C2 合并 → REPORT-GEN R-A / R-B → PAYG 前端技术验收 → 默认切 v2 
 | 机器人复审 P2（join-v1 与 64 字符缓冲，线程 4173504631） | 4.3：重叠检测长度上限 64，缓冲 64 正好覆盖所有候选长度，实时和重放的投影一致；超过 64 字符的重复原样保留（首版限制）；补必测 |
 | 机器人复审 P1（卡片最坏值超过预留，线程 4173597656） | 4.8：计量对象改为整个结果（含导师 body 的双层转义，每码元最坏 4 字节）；把结果分成形状 P（多段、无卡片）和形状 C（带卡片、只有一段）；预留只用于形状 P；形状 C 由保存前截短保证（先 message 两份同步、后 recommendationReason，其他字段不截），并给出可行性计算；Session item 的最坏值；补最坏卡片必测 |
 | 机器人复审 P1（停止规则不统一，线程 4173597658） | 4.6：统一为 `user_stop` 下所有结果都带 `stopped:true`，另用 `completeness` 和 `organized` 区分；`complete` 分支只改 R1–R4 一处，已有 primary 时沿用 0106:452、不按 `stopAt` 计数；整理器在途完成的结果为 `stopped:true`、`complete`、`organized:true`；主回复段在途时停止也写明了；4.2 的消费规则同步；补必测 |
+| 机器人复审 P1（T2 信封的停止，线程 4173655350） | 4.1：按"可见正文由谁产生"分成 T1/T2/T3，统一定义"信封"；4.6：凡是信封一律取 `message` 计量和截断，私有字段原样保留，重建后用正常完成的同一个校验函数检查，校验不通过就不保存坏 JSON；R2 改为同一条规则；补 T2 必测 |
+| 机器人复审 P1（卡片伴随文本的 Session item，线程 4173655362） | 4.8：按实际序列化字节计量每个 Session item；带卡片时，非公开的伴随文本先截到 4000 码元，仍然超出就整条丢弃；补必测 |
+| 机器人复审 P2（plan 数组，线程 4173655358） | 2.1、2.2、4.1：plan 等非信封的结构化输出（T3）首版整段缓冲，完成后再显示，不续写，停止走原取消；C0 只收拢 `step` 回复；已核对定位页没有其他这类路径；T2 首版不续写 |
