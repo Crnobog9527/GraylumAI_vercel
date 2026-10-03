@@ -92,7 +92,8 @@ export function inflightFinancialHost(input: {
       } catch (error) {
         if (!(error instanceof Error) || error.message !== 'RUNTIME_EXECUTION_STILL_ALLOWED') return undefined;
         // Logout/password revocation leaves profiles active. Only the original dispatched
-        // invocation can cancel its own call set after Auth rejects; it cannot start anything.
+        // invocation can cancel after explicit Auth rejection only; transient Auth errors
+        // preserve the execution for recovery and never grant new-call authority.
         try { await input.actor(); return undefined; } catch (authError) {
           if (!(authError instanceof Error) || authError.message !== 'RUNTIME_DENIED') return undefined;
         }

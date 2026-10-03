@@ -2,6 +2,11 @@
 import type {SupabaseClient} from '@supabase/supabase-js';
 import type {RuntimeBudget} from './budget';
 import {StagingAccessError} from './stagingErrors';
+// Only an explicit Auth rejection permits financial finalization to cancel work.
+// Unknown/transport/service errors deny this operation without revoking the execution.
+function authFailure(error: { status?: number }) {
+ return new Error(error.status===401||error.status===403?'RUNTIME_DENIED':'RUNTIME_AUTH_UNAVAILABLE');
+}
 /** Capture only the credential, never the authorization verdict. Every operation
  * still verifies the original user with Auth. Within one HTTP invocation the
  * budgeted transport may answer an identical verification from Auth's earlier
@@ -20,6 +25,7 @@ export function runtimeActor(auth:Pick<SupabaseClient['auth'],'getSession'|'getU
    budget.assertCanPersist(30_000);
    token=(async()=>{
     const session=await auth.getSession();
+    if(session.error)throw authFailure(session.error);
     const jwt=session.data.session?.access_token??authorization?.match(/^Bearer (.+)$/i)?.[1];
     if(!jwt)throw new Error('RUNTIME_DENIED');
     // SDK refreshes only within 90s of expiry. A valid 100–200s token may
@@ -33,7 +39,8 @@ export function runtimeActor(auth:Pick<SupabaseClient['auth'],'getSession'|'getU
   budget.assertCanPersist();
   const result=await auth.getUser(jwt);
   budget.assertCanPersist();
-  if(result.error||result.data.user?.id!==userId)throw new Error('RUNTIME_DENIED');
+  if(result.error)throw authFailure(result.error);
+  if(result.data.user?.id!==userId)throw new Error('RUNTIME_DENIED');
   return userId;
  };
 }

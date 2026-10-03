@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
 import { inflightFinancialHost } from './inflightFinancial';
+import { runtimeActor } from './actor';
 import { createRuntimeBudget } from './budget';
 const actorId = '10000000-0000-4000-8000-000000000001';
 const runId = '10000000-0000-4000-8000-000000000002';
@@ -55,4 +56,44 @@ it('cannot borrow a dispatched run from another execution owned by the same acto
   await host.database.rpc('bill2_dispatch', { ...args, p_run_id: callId });
   expect(await host.finish()).toBeUndefined();
   expect(rpc).toHaveBeenCalledTimes(2);
+});
+
+// Exercise the real Auth conversion and finalizer together, including a later recovery.
+it.each([
+  ['network', { name: 'AuthRetryableFetchError', status: 0 }, false],
+  ['timeout', { name: 'AuthRetryableFetchError', status: 504 }, false],
+  ['server', { status: 500 }, false],
+  ['rate limit', { status: 429 }, false],
+  ['unknown', {}, false],
+  ['invalid token', { status: 401 }, true],
+  ['banned', { status: 403 }, true],
+  ['deleted user', null, true],
+])('preserves recoverability unless Auth explicitly rejects: %s', async (_label, error, denied) => {
+  const budget = createRuntimeBudget();
+  const jwt = 'e30.' + Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }))
+    .toString('base64url') + '.synthetic';
+  const getUser = vi.fn().mockResolvedValue({ data: { user: null }, error });
+  const actor = runtimeActor({ getSession: async () => ({ data: { session: { access_token: jwt } }, error: null }),
+    getUser } as never, actorId, budget);
+  let state = 'interrupted';
+  const rpc = vi.fn(async (name: string) => {
+    if (name === 'runtime_execution') return { data: { executionId, runId }, error: null };
+    if (name === 'bill2_dispatch') return { data: { dispatch: true }, error: null };
+    if (name === 'runtime_cancel') { state = 'cancelled'; return { data: {}, error: null }; }
+    return state === 'cancelled' ? { data: { state, runId }, error: null }
+      : { data: null, error: { message: 'RUNTIME_EXECUTION_STILL_ALLOWED' } };
+  });
+  const host = inflightFinancialHost({ database: { rpc }, actorId, executionId, actor, budget });
+  await host.database.rpc('runtime_execution', { p_actor_id: actorId, p_execution_id: executionId });
+  await host.database.rpc('bill2_dispatch', args);
+  await host.finish();
+  expect(state).toBe(denied ? 'cancelled' : 'interrupted');
+  expect(rpc.mock.calls.filter(([name]) => name === 'runtime_cancel')).toHaveLength(denied ? 1 : 0);
+  if (!denied) {
+    getUser.mockResolvedValue({ data: { user: { id: actorId } }, error: null });
+    await expect(actor()).resolves.toBe(actorId);
+    await host.finish();
+    expect(state).toBe('interrupted');
+    expect(rpc.mock.calls.filter(([name]) => name === 'runtime_cancel')).toHaveLength(0);
+  }
 });
