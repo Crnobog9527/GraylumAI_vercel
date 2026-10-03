@@ -243,7 +243,7 @@ O = min( 全站统一上限 CHAT_OUTPUT_CAP（按环境取值）,
 - 没有未知费用的调用；
 - 没有停止或取消；
 - 账号有效；
-- 下一段没有被 calls 闸门或 L 拒绝。
+- 下一段没有被 L 拒绝；跨 HTTP 继续时，全站暂停开关没有打开（只检查、不扣额度，见 4.3）。
 
 **C. 容量是否放得下**：
 
@@ -318,8 +318,15 @@ Claude 新模型不支持 assistant 预填，所以续写段是**以 user 结束
     - 续写段保持原来的 `maxTurns`（v5 为 1），以不写 Session 的方式运行；Session 只在最终完成时由宿主写一次。
   - 准入时，冻结的 BILL2 `maxCalls` 加上 `maxSegments − 1`；搜索、匹配、整理器各自的次数不变（`admission.ts:207` 的 `primaryTurns` 计算不变）。v2 没有 run 级预扣，所以不会放大冻结额。
   - 这个预算成立的前提是**每个续写段固定只有一次模型调用**：续写段不允许新的工具调用（见下文"工具"），所以不会出现"工具往返再加一轮模型调用"。
-  - PAYG 恢复不重置已用调用数（#553 §5）。跨 HTTP 继续时，按剩余可领取次数重新过 calls 闸门。
-  - 同一次 HTTP 里的后续段，按 #590 的"一轮只拦第一次调用"不再过闸门。
+  - **calls 闸门只在第一次扣，一次扣满全部预留**：
+    - 现有首次调用闸门（`execute.ts:139-145`）按冻结的 `execution.billing.limits.maxCalls` 扣限流额度，而 `maxCalls` 已经包含了 `maxSegments − 1` 个续写段。
+    - 所以续写段的额度在第一次闸门里已经扣过，后面任何一次 HTTP 交接（`waiting_resume`、`waiting_credits` 之后继续）都**不再扣**。
+    - 跨 HTTP 继续时只做**不扣额度的检查**：
+      - 检查全站暂停开关 `stopNewCalls`，由 `newWorkGate` 的现有 `pauseResult` 判断；暂停时保持等待，不自动循环（4.4）。
+      - 检查依据是这个 run 是否已有 claim 过的 call：claim 只发生在闸门通过之后（`execute.ts:139-149`），有就证明首次闸门已经扣过。不新增持久状态。
+    - 同一次 HTTP 里的后续段，按现有 `gateChecked` 不再过闸门。
+    - #553 §5 写的是"续跑按剩余 call 数重新过 calls 闸门"，这会对续写重复扣额度。本方案对续写的恢复改为只检查、不扣，PAYG PR-B 实施时按此对齐。其他类型的恢复是否同样只检查，由总控在 #553 同步时决定。
+  - PAYG 恢复不重置已用调用数（#553 §5），claim 仍然受冻结的 `maxCalls` 约束。
   - 窗口和限流计数按 #590 已合并的规则计算，本方案不另设预算。
 - **`CONTINUE_V1`**：宿主固定指令，所有 Skill 共用。大意是：
   - 上一条回答因长度中断，请从中断处直接接着写；
@@ -395,7 +402,12 @@ Claude 新模型不支持 assistant 预填，所以续写段是**以 user 结束
 
 **做法**：复用现有机制，不新建 RPC 家族、表或状态机。
 
-1. **入口**：沿用现有 `runtime.cancel` 路由，增加可选参数 `stopAt`（用户停止时屏幕上已经显示的投影字符数）。
+1. **入口**：沿用现有 `runtime.cancel` 路由，增加可选参数 `stopAt`：用户停止时屏幕上已经显示的**可见正文**的 Unicode 码点数。
+   - 前端用 `Array.from(text).length` 计算。数据库用 `char_length` 计算，口径一致。
+   - **可见正文**按结果格式定义：
+     - **导师回合**（`agent-turn-v5-stream`）：`result.body` 是 `agentTurnBody(message, card)` 生成的 JSON 信封（`shared/agentTurn.ts:217-225`、`runtime/agentTurnResult.ts:9-12`），页面显示的是信封里的 `message`。所以可见正文是 `message` 字段，而不是 `body` 字符串。
+     - **普通回合**（C0 收拢的流式文本格式）：`result.body` 就是正文本身，可见正文就是 `body`。
+   - 实时 text 事件发送的也是可见正文的投影，前端计数和服务器投影是同一份文本。
    - 只对冻结了 `continue-v1` 的 execution 改走下面的停止路径。旧 execution 和不续写的入口仍走原 `runtime_cancel`，语义不变。
 2. **SQL**：在现有的 `runtime_execution` 函数里加一个 `stop` 动作，做法是在 PAYG PR-B 之后**追加**一张迁移，重定义该函数；不修改已合并的迁移。
    它在同一个事务里按现有锁顺序（session → execution → run）执行：
@@ -405,12 +417,27 @@ Claude 新模型不支持 assistant 预填，所以续写段是**以 user 结束
      - 只把 prepared 但还没派发的 call 改为 cancelled，并释放冻结；
      - **不调用 `bill2_cancel`，不设置 `cancel_requested`**。
    - **(b) 没有已派发、未结束的 call 时**（例如停在 `waiting_*`）：同一个事务内按 `complete` 的规则保存结果，然后依次调用 `bill2_close('delivered')` 和 `bill2_finalize`。
-     - 结果由宿主根据回执投影截到 `stopAt`，元数据 `stopped:true`；
+     - 结果由宿主根据回执投影截到 `stopAt`（截断规则见下面第 2A 项），元数据 `stopped:true`；
      - execution 进入 `completed`；如果有未知费用，进入 `cost_pending`。
    - **(c) 有已派发、未结束的 call 时**：只做 (a)，返回 `stopping`。
      - 那次调用所在的 HTTP 拿到回执后，走 `complete` 分支保存结果（含这一段，截到 `stopAt`）。
      - 因为 `cancel_requested` 没被设置，`complete` 能成功。
-     - 扩展后的 `complete` 分支在 `paused_reason='user_stop'` 时，要求结果带 `stopped:true`，并且 body 不超过停止时登记的 `stopAt`。
+     - 扩展后的 `complete` 分支在 `paused_reason='user_stop'` 时，要求结果带 `stopped:true`，并且**可见正文**的 `char_length` 不超过停止时登记的 `stopAt`。
+       - 导师回合：先把 `p_result->>'body'` 解析为 jsonb，取 `->>'message'`，再计数；
+       - 普通回合：直接对 `p_result->>'body'` 计数；
+       - 用哪种格式由冻结上下文的 `providerRequestFormat` 决定，不由结果自报；
+       - 导师回合的 body 解析失败，或者 `format` 不是 `AGENT_TURN_FORMAT`，都直接拒绝。
+   - **2A. 截断后重新封装**（宿主执行，(b)、(c)、(d) 共用）：
+     - **普通回合**：`body = 投影前 stopAt 个码点`。
+     - **导师回合**：
+       - 取全部已写段的 `message` 投影，截到前 `stopAt` 个码点，去掉首尾空白，得到 `m`；
+       - 卡片 `card` 只在**没有发生截断**时保留，即 `stopAt` ≥ 完整 `message` 的码点数，并且这一段确实带回了卡片。
+         截断时 `card = null`，因为用户没有看完正文，问题卡也没有显示过。
+       - 再用 `agentTurnBody(m, card)` 重新生成信封，经过与正常完成相同的 schema 校验后保存。
+         对冻结了 `continue-v1` 的 execution，`message` 的长度上限按 4.8 的字节规则，不再是 20000 字符。
+       - `m` 为空且 `card = null` 时，`agentTurnBody` 会拒绝（`AGENT_TURN_BODY_EMPTY`），这种情况按 (e) 处理。
+     - 截断永远发生在可见正文上，不截 JSON 字符串，所以不会产生无效 JSON。
+     - 4.8 的保存前截短同样作用在可见正文上，之后再重新封装。
    - **(d) 那次 HTTP 已经结束**（函数被回收、断线）：下次恢复或重放时读到 `user_stop`，只读回执，然后按 (b) 收尾。
      - 回执结果不明时，按 PAYG 查账；仍然不明就进入 `cost_pending`，结果是已持久化各段的投影；
      - 不重发，不补扣。
@@ -681,7 +708,9 @@ C2 合并 → REPORT-GEN R-A / R-B → PAYG 前端技术验收 → 默认切 v2 
   - 续写段的模型请求工具（单个、多个、伴随正文、只有工具调用）：宿主在 SDK 执行前拒绝，不执行工具、不扣搜索费；这次调用只结算一次；伴随的正文计入投影；以 `length_limit` 收尾，不再开新段；调用总数不超过冻结的 `maxCalls`；
   - 线路要求保留思考签名的工具续接以 `lengthLimit` 收尾；
   - 每段是一次独立的 `runRuntime`（v5 保持 `maxTurns=1`），中间各段不写 Session，最终完成时只写一次；
-  - `maxCalls` 按段数冻结，搜索、匹配、整理器的次数不变；跨 HTTP 继续时 calls 闸门按剩余次数检查；
+  - `maxCalls` 按段数冻结，搜索、匹配、整理器的次数不变；
+  - 四段的 Hobby 回复（跨多次 HTTP）只在第一次 HTTP 扣一次限流额度（等于冻结的 `maxCalls`），后续 HTTP 不再扣；
+  - 后续 HTTP 遇到全站暂停时保持等待、不扣额度、不自动循环；首次闸门被拒的 execution 没有已 claim 的 call，继续时仍然要过完整闸门；
   - `completeness`：`length_limit`/`stopped` 的结果能在聊天中展示，但报告候选、结构化解析、B1 都不采用；
   - 逐模型验证续写请求能被接受，并检查衔接质量（Claude Sonnet 5.5、Gemini 3.8 Flash、GPT-6 Luna），
     付费调用次数和预算由总控另行申请，不沿用其他任务的额度。
@@ -701,6 +730,11 @@ C2 合并 → REPORT-GEN R-A / R-B → PAYG 前端技术验收 → 默认切 v2 
   - 记录每段用时（只写日志）。
 - **停止（4.6）**：
   - (b) 停在 `waiting_*`：一个事务内保存截到 `stopAt` 的结果并收尾，状态为 `completed`；
+  - 停止时的可见正文校验，各补一条：
+    - 导师回合不带卡：截到 `stopAt` 的 `message` 重新封装后通过 schema，`complete` 按 `message` 计数通过，超过 `stopAt` 的被拒绝；
+    - 导师回合带卡：没有截断时保留卡片；截断时 `card=null`；`message` 为空且无卡时按 (e) 处理；
+    - 普通回合：`body` 截到 `stopAt` 个码点，`complete` 按 `body` 计数；
+    - 中文、emoji（代理对）和换行下，前端的 `Array.from` 与数据库的 `char_length` 计数一致；
   - (c) 在途时停止：返回 `stopping`；在途段回执落库后，`complete` 成功保存带 `stopped:true` 的结果；`complete` 拒绝超过 `stopAt` 的 body；
   - (d) 在途 HTTP 消失：恢复时读回执收尾；回执不明时进入 `cost_pending`；
   - (e) 没写出字：结果为空，状态为 `cancelled`；
@@ -764,3 +798,5 @@ C2 合并 → REPORT-GEN R-A / R-B → PAYG 前端技术验收 → 默认切 v2 
 | 总控补充（32768 与结果容量） | 4.8 重写：不再按每 token 8 字节给整段预留；按实际字节计量，续写段 O 按剩余空间缩小，保存前截短是唯一的硬保证，第一次调用不受影响；不提高 262144，只在证明行不通时另列 high 迁移交 Owner 批准 |
 | 机器人复审 P1（续写输入递归重复，线程 4173417610） | 4.3：第 k 段输入固定为"最初请求前缀 + 第 1 段之前的工具往返各一次 + 最新全文投影 + 一条 CONTINUE_V1"，不在上一段输入上追加；第 6 节：adapter 尾部只允许一条 assistant 和一条 CONTINUE_V1；补第 3、4 段的输入必测 |
 | 机器人复审 P1（续写段调用工具会耗尽调用预算，线程 4173417613） | 4.3：续写段不允许新的工具调用（总控技术决定），每段固定一次模型调用，`maxSegments − 1` 的预算成立；模型请求工具时宿主拒绝、不执行、以 `length_limit` 收尾；写明对付费搜索、`read_source` 和导师提问卡的影响；补必测 |
+| 机器人复审 P1（stopAt 校验对象，线程 4173464770） | 4.6：`stopAt` 按可见正文的码点计数；导师回合取信封的 `message`，普通回合取 `body`；格式由冻结上下文决定；新增 2A 截断后重新封装（截断时去掉卡片、经 schema 校验）；`complete` 按可见正文计数；补三类必测 |
+| 机器人复审 P2（calls 闸门重复扣，线程 4173464773） | 4.3：续写段额度在首次闸门里随 `maxCalls` 一次扣满；跨 HTTP 继续只检查暂停、不扣额度，以已有 claim 过的 call 作为扣过的依据，不新增状态；标注 #553 §5 需要对齐；补"四段 Hobby 回复只扣一次"必测 |
