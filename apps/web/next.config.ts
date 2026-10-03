@@ -10,6 +10,13 @@ const sentryBuildUploadEnabled =
   );
 
 const nextConfig: NextConfig = {
+  // Keep every host out of search and AI indexes until the redesigned public site launches.
+  async headers() {
+    return [{
+      source: "/:path*",
+      headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+    }];
+  },
   transpilePackages: [
     "@repo/api",
     "@radix-ui/react-avatar",
