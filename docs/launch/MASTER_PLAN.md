@@ -6,7 +6,7 @@
 > 进度同步：2026-10-01，依据 staging `0470e7a7` 和 GitHub 实时状态，在 [#545](https://github.com/Crnobog9527/GraylumAI_vercel/pull/545) 基础上增量同步计费、内容审核、上线约束和任务进度；仅记录 Owner 已做的决定。
 > 进度同步：2026-10-01（PLAN-SYNC-1001B），依据 staging `da4aa6be5084e329d40fb6bb6b760965c91f16e5`，同步 #559 后的 Owner 决定、计费口径、依赖和交付状态；来源及原话见第 2.1 节，合并提交见第 7.0 节。
 > 进度同步：2026-10-02（PLAN-SYNC-1002），依据 staging `9cb6cb84cf096de70c4a5b3337db2f5b04406c22`，同步 #566 之后的 Owner 决定（第 2.1 节第 13、24、35–37 项）、#497 冻结 head、PROMPT-CACHE 立项和交付状态；来源及原话见第 2.1 节，合并提交见第 7.0 节。
-> 进度同步：2026-10-03（MASTER-PLAN-SYNC），依据 staging `e122857f2a27c9a10daf2cb31cd9d6f5da4bc8f5` 和 GitHub 实时状态，同步 #570 之后到 #610 的合并、迁移 0155–0159 的 staging 应用记录、2026-10-02—03 的 Owner 决定（第 2.1 节第 38–48 项）和施工顺序；还在审或待写的方案标为"方向已定、方案待审/待写"。只记录已有的决定，不改变产品规则的含义。
+> 进度同步：2026-10-03（MASTER-PLAN-SYNC），依据 staging `e39f1dc5b03a3a6843adce1ab10f393b1f3aacb8`（`e122857f` 之后只多了 #615）和 GitHub 实时状态，同步 #570 之后到 #615 的合并、迁移 0155–0159 的 staging 应用记录、2026-10-02—03 的 Owner 决定（第 2.1 节第 38–48 项）和施工顺序；还在审或待写的方案标为"方向已定、方案待审/待写"。只记录已有的决定，不改变产品规则的含义。
 > 本文是**唯一的当前产品规划**，取代 [v11](Graylum_Master_Plan_v11.md) 的施工顺序和状态描述。v11 及更早文档中仍然有效的详细要求，由第 9 节逐项列明继续适用。
 > 本文不授予任何执行权限。仓库操作、风险分级、审查和合并只按 [AGENTS.md](../../AGENTS.md)；具体功能要等 Owner 选定批次后才开工（第 7.4 节）。
 
@@ -701,7 +701,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 
 ### 7.0 进度（2026-10-03 同步）
 
-依据 staging `e122857f2a27c9a10daf2cb31cd9d6f5da4bc8f5` 和 GitHub 实时状态（2026-10-02 一轮依据 `9cb6cb84`）。下表合并提交由 `git log origin/staging` 实际读取并与 PR mergeCommit 核对。迁移 0155–0159 的 staging 应用依据各 PR 的总控执行记录（下文逐条链接）和仓库 `packages/db/migrations`；本任务没有连接任何数据库，不代称 Owner 产品验收通过。
+依据 staging `e39f1dc5b03a3a6843adce1ab10f393b1f3aacb8` 和 GitHub 实时状态（2026-10-02 一轮依据 `9cb6cb84`）。下表合并提交由 `git log origin/staging` 实际读取并与 PR mergeCommit 核对。迁移 0155–0159 的 staging 应用依据各 PR 的总控执行记录（下文逐条链接）和仓库 `packages/db/migrations`；本任务没有连接任何数据库，不代称 Owner 产品验收通过。
 
 | 批次 | 状态 | 已合并的 PR 和说明 |
 | --- | --- | --- |
@@ -723,14 +723,15 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 - [#553](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553) BILL-PAYG 方案（第七版定稿，draft，作为实施依据）；
 - [#547](https://github.com/Crnobog9527/GraylumAI_vercel/pull/547) REPORT-GEN 方案（第七版，draft，等 #604 定稿后小同步）；
 - [#602](https://github.com/Crnobog9527/GraylumAI_vercel/pull/602)、[#603](https://github.com/Crnobog9527/GraylumAI_vercel/pull/603) OPC 浏览器集成用例修复（仅测试，draft）；
-- [#613](https://github.com/Crnobog9527/GraylumAI_vercel/pull/613) 冻结视频材料变化返回明确的 412 拒绝（draft）；
-- [#614](https://github.com/Crnobog9527/GraylumAI_vercel/pull/614)（目标 `main`，high，draft）、[#615](https://github.com/Crnobog9527/GraylumAI_vercel/pull/615)（目标 staging，ordinary）正式站紧急 noindex，见第 8.5 节，**进行中**。
+- [#613](https://github.com/Crnobog9527/GraylumAI_vercel/pull/613) 冻结视频材料变化返回明确的 412 拒绝（draft）。
+
+正式站紧急 noindex：#615 已合并进 staging，#614 已关闭，正式站改由 Owner 在 Vercel 后台临时重定向（待操作），见第 8.5 节。
 
 方案在途或定稿都不等于功能生效、合并或配置变更授权。
 
 **审查路线备注（2026-10-01）**：Codex 审查机器人额度用完期间，Codex 实现的 PR 由全新的 Claude 会话独立审查，按 AGENTS.md §12 核验当前 GitHub 候选与有效政策；实现者不能自审，本备注不改写仓库政策。2026-10-03 已有 PR 由 Codex 审查机器人完成审查（例如 #593、#604）；各 PR 的审查以 PR 上的实际结论为准。
 
-**本轮核实的已合并提交（2026-10-01；2026-10-02 增补 #566–#569；2026-10-03 增补 #570–#610）**：
+**本轮核实的已合并提交（2026-10-01；2026-10-02 增补 #566–#569；2026-10-03 增补 #570–#615）**：
 
 | PR | staging 合并提交 |
 | --- | --- |
@@ -793,6 +794,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | [#609](https://github.com/Crnobog9527/GraylumAI_vercel/pull/609) | `52252eef` |
 | [#608](https://github.com/Crnobog9527/GraylumAI_vercel/pull/608) | `6546f27d` |
 | [#593](https://github.com/Crnobog9527/GraylumAI_vercel/pull/593) | `e122857f` |
+| [#615](https://github.com/Crnobog9527/GraylumAI_vercel/pull/615) | `e39f1dc5` |
 
 0151（#538）、0152（#539）、0153（#540）、0154（#560）已应用到 staging；#556、#563 为相应指纹收尾。#538 第 ③ 步仍等 PR-C 删除 Auth 账号完成，代码合并不表示该步骤已验收。
 
@@ -857,7 +859,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 | | INVITE-ABUSE | **已完成**（2026-10-01，#560、0154 已应用 staging）：首次正金额开户赠送的新账号才获邀请奖励、每账号仅绑定一次；不开消费返利；接受不同身份同一人无法识别（第 29 项） | #538 开户赠送资格 | 高 | 已合并 |
 | | SEC-RATELIMIT | 限流 fail-closed、Redis 超时放行、诊断计费探针。**已完成**（#488，2026-09-28） | — | 高 | 小 / 1–2 |
 | | FORGOT-PASSWORD | 忘记密码（Owner 2026-09-30 提出）：用户通过邮件验证重置密码；发送重置邮件时复用 #541 的隐形 hCaptcha；重置链接落到站内设置新密码的页面；**已注销或被封禁的账号不能靠重置密码恢复登录**，允许和拒绝两条路径都要测。**已完成**：Owner 2026-10-01 选定（[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/566#issuecomment-5930333333)），#567（`c4b13758`）、#568（`74408bd1`）已合并，staging 交互验收完成（[总控结论](https://github.com/Crnobog9527/GraylumAI_vercel/pull/568#issuecomment-5935583047)）；最后三组是 Owner 整组确认，没有逐项截图和部署 SHA 的同期记录。**追加**：关联 Google 的账号也能在个人中心改密码（第 36 项），#569（`9cb6cb84`）已合并，staging 交互验收通过（[总控结论](https://github.com/Crnobog9527/GraylumAI_vercel/pull/569#issuecomment-5935890997)）。正式环境上线另行批准 | #543、#548、#552（均已合并） | 高（认证和登录恢复） | 已合并（#567、#568、#569） |
-| | STAGING-HOST-CLEANUP | 2026-10-01（第 37 项）：清理残留的 `graylumai-staging.vercel.app` 引用。**部分完成**：#571（测试、脚本默认值、示例配置、部署文档）、#605（文档入口）已合并。staging `e122857f` 上仍有 6 个跟踪文件含旧域名：`stagingEnvironment.ts` 的 staging 环境名单（删掉会改变测试窗口准入，属于高风险，要另开 high PR）及其测试 `stagingEnvironment.test.ts`、`stagingAdmission.test.ts`、`runtime.integration.ts`、`run-workbench.mjs`，以及本文中的 Owner 原话和历史记录（保留）。Stripe / Waffo 沙箱回调、Supabase Site URL 和邮件回调由 Owner 自行检查，待 Owner 确认 | — | 普通；`stagingEnvironment.ts` 部分为高 | 剩余 1 个 high PR |
+| | STAGING-HOST-CLEANUP | 2026-10-01（第 37 项）：清理残留的 `graylumai-staging.vercel.app` 引用。**部分完成**：#571（测试、脚本默认值、示例配置、部署文档）、#605（文档入口）已合并。staging `e39f1dc5` 上仍有 6 个跟踪文件含旧域名：`stagingEnvironment.ts` 的 staging 环境名单（删掉会改变测试窗口准入，属于高风险，要另开 high PR）及其测试 `stagingEnvironment.test.ts`、`stagingAdmission.test.ts`、`runtime.integration.ts`、`run-workbench.mjs`，以及本文中的 Owner 原话和历史记录（保留）。Stripe / Waffo 沙箱回调、Supabase Site URL 和邮件回调由 Owner 自行检查，待 Owner 确认 | — | 普通；`stagingEnvironment.ts` 部分为高 | 剩余 1 个 high PR |
 | | DATA-ERASURE | 账号注销与数据删除，以及 D7 承诺的单条删除（对话回答、会话、已保存成果），都在公开上线前完成并列入验收。**设计先行**：在 AC-2 新建任何表之前先写出删除规则，实现在公开上线前完成（**设计已完成**，#474，E1–E11 已决定，见第 2.1 节第 14 项）。见 [实施说明](tasks/DATA-ERASURE.md)。之后任何新增保存用户私有内容的任务，都要把新数据接入注销流程并列入验收。**实现进度**：PR-A #526、PR-B1a #531、PR-B1b #537、PR-E #538 已合并，0151 已应用；B2a #550 已合并（0156 已应用）；注销期间在途执行与账务收尾：方案 #598 已合并，实施 [#611](https://github.com/Crnobog9527/GraylumAI_vercel/pull/611)（迁移 0160）在途，排在 BILL-PAYG 实施之前（第 42 项）；之后 B2b → PR-C（删除 Auth 账号）；#538 第 ③ 步等 PR-C 完成（第 7.0 节），正式库建库约束见第 9.3 节 | —（设计部分先于 AC-2） | 高 | 大 / 3–5 |
 | | COST-REPORT | 后台成本报表的金额、估算和查询修正（原清单 06）。**已完成**（#513，2026-09-29） | — | 高 | 小 / 1 |
 | | PII-REGEX | 接手 PR #333（邮箱类个人信息匹配的性能加固，改的是安全过滤规则）：基于最新 staging 更新后重新审查、由 Owner 批准合并（第 8.4 节第 6 项）。**已完成**：由 #500 在最新 staging 上重新实现并合并，#333 已关闭 | — | 高 | 小 / 1 |
@@ -958,6 +960,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | 正式环境 Upstash（2026-10-01） | staging 已配置；正式环境上线前配置，核对容量、变量名和故障拒绝路径（第 30 项） |
 | Vercel Pro（2026-10-01） | Owner 已承诺正式运营升级；上线前完成套餐与运行时预算核对，Hobby 300 秒仅约束 staging（第 28 项） |
 | staging 服务商回调地址（2026-10-01） | 旧域名已删除（第 37 项）；Stripe / Waffo 沙箱回调地址、Supabase Site URL 和邮件 Redirect URLs 是否已不再指向旧域名，待 Owner 自行检查确认（#605 列出了待核对位置，没有读取外部配置） |
+| 正式站临时重定向（2026-10-03） | 待 Owner 在 Vercel 正式项目后台把 `www.graylum.com` 临时 307 到 `app.graylum.com`，操作后总控线上复核；新落地页上线时先撤回这条重定向，再去掉代码里的 noindex（第 8.5 节，[#614 总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/614#issuecomment-5968241886)） |
 | 客服邮箱 | 上线发布条件之一（v11 §13.3） |
 | 封闭内测的 5–10 位用户 | 提前找好，N2 完成后就能开始 |
 
@@ -1059,7 +1062,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | Runtime 修复（2026-10-01） | Gemini 在同一个 index 上先流出思考文字、再流出思考签名时，流解析不再判为无效流（#561 实测中发现的产品缺陷） | [#574](https://github.com/Crnobog9527/GraylumAI_vercel/pull/574) |
 | 定位页修复（2026-10-02，ordinary） | 推荐理由显示在推荐选项正下方；滚动条移到中间面板右边缘；刷新后保持阅读位置；刷新后自动接上并无感恢复 | #583、#587、#589、#595 |
 | 后台修复（2026-10-02—03，ordinary） | 财务统计兼容签到和未知流水类型；财务页显示签到赠送和未知流水/状态；财务近 1 天、校验提示、编辑弹窗读取、个人中心重试 | #599、#600、#606 |
-| 正式站紧急 noindex（2026-10-03，**进行中**） | 正式站 `www.graylum.com`（由 `main` 部署）在落地页重新设计前不被搜索引擎和 AI 爬虫收录：全站响应头加 `X-Robots-Tag: noindex, nofollow`；首页删除未经证实的「10K+ / 300% / 1M+」数字和「7 天退款保障」。#614 是对 `main` 的紧急修复（high），#615 把同样改动同步回 staging，staging 和预览环境也一起不被收录。依据两个 PR 描述里记载的 Owner 批准（"对 main 做紧急修复……改完同步回 staging"，PR 描述是转述，不是 Owner 原话的逐字记录）。截至本次同步两个 PR 都未合并，正式站的处理方式和 Owner 原话以合并时的总控记录为准。**新落地页上线时必须去掉全站 noindex**，否则整站不会被收录 | [#614](https://github.com/Crnobog9527/GraylumAI_vercel/pull/614)、[#615](https://github.com/Crnobog9527/GraylumAI_vercel/pull/615) |
+| 正式站紧急 noindex（2026-10-03） | 正式站 `www.graylum.com`（由 `main` 部署）在落地页重新设计前不被搜索引擎和 AI 爬虫收录，首页删除未经证实的「10K+ / 300% / 1M+」数字和「7 天退款保障」。Owner 先在 SEO/GEO 窗口批准紧急修复，又在总控窗口确认，原话：「同意合并紧急修复 PR #xxx 到 main 并部署正式环境：全站 noindex，删除首页 10K+/300%/1M+ 数字和 7 天退款文字。」（原话里的 #xxx 就是原文；总控当时说明，正式部署前仍要按具体 PR 号和 head 再确认一次。）**staging**：#615 已合并（`e39f1dc5`），全站响应头加 `X-Robots-Tag: noindex, nofollow`，staging 和预览环境也不被收录。**正式站**：#614（对 `main` 的修复）因为 `main` 的必需检查 Dependency Audit 失败而关闭、没有合并。失败原因是 `main` 2026-08-16 的锁文件被新公布的漏洞命中，和这个修复无关；`main` 的保护对管理员同样生效，不绕过，也不为此把依赖升级搬到 `main`。替代做法是在 Vercel 正式项目后台把 `www.graylum.com` 临时 307 重定向到 `app.graylum.com`（维护页），**待 Owner 在 Vercel 后台操作**，操作后由总控做线上复核。同样的代码改动随下次 staging→main 常规上线带进 `main`。**新落地页上线时**：先撤回 Vercel 的 www→app 重定向，再去掉代码里的 noindex，否则整站不会被收录 | [#614 总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/614#issuecomment-5968241886)、[#615 合并记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/615#issuecomment-5968246657) |
 | 测试维护（2026-10-02） | 本机 OPC 集成用例跟上 v5 导师回合；本机浏览器集成夹具；每个迁移后的 staging 指纹刷新 | #576、#585、#575、#577、#579、#592 |
 
 **后续事项**：
@@ -1176,4 +1179,4 @@ Owner 于 2026-09-27 确认 D1–D17（D6 在 Fable 评估后改为不含 PDF；
 
 2026-10-01 PLAN-SYNC-1001B 依据：staging `da4aa6be` 的合并日志、第 2.1 节逐条链接的来源评论。第 31 项是总控依据 Owner 2026-10-01 在总控窗口的讨论定下的技术原则，记录见[链接](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5926388706)；没有可引用的 Owner 原话。
 
-2026-10-03 MASTER-PLAN-SYNC 依据：staging `e122857f` 的合并日志（#570—#610）、`gh pr list --state open` 实时结果、各 PR 上的总控合并和迁移应用记录，以及第 2.1 节第 38–48 项逐条链接的 Owner 原话。Owner 原话均来自总控在 PR 评论里的记录（总控窗口本身不在 GitHub 上）；本次没有连接数据库或外部服务。
+2026-10-03 MASTER-PLAN-SYNC 依据：staging `e39f1dc5` 的合并日志（#570—#615）、`gh pr list --state open` 实时结果、各 PR 上的总控合并和迁移应用记录，以及第 2.1 节第 38–48 项逐条链接的 Owner 原话。Owner 原话均来自总控在 PR 评论里的记录（总控窗口本身不在 GitHub 上）；本次没有连接数据库或外部服务。
