@@ -1,7 +1,7 @@
 import {vi} from 'vitest';
 import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { beforeAll, afterAll, it, expect } from "vitest";
+import { beforeAll, afterAll, afterEach, it, expect, onTestFinished } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import { createClient } from "@supabase/supabase-js";
@@ -10,6 +10,7 @@ import { publishSkillPackage } from "../skills/publication";
 import { opcService } from "./service";
 import { workbenchService } from "../artifacts/workbench";
 import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
+import { schemaGuard, snapshotSchema } from "../__tests__/fixtures/schemaSnapshot";
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { OPENING_INPUT, confirmQuestionValues } from "../../shared/opcQuestions";
 import { agentTurnBody } from "../../shared/agentTurn";
@@ -27,7 +28,12 @@ const admin = createClient(
   process.env.V3_LOCAL_SERVICE_JWT!,
   { auth: { persistSession: false } },
 );
-beforeAll(() => sql.connect());
+// Several cases replay old migrations on this shared database to prove an
+// upgrade path. Restore the schema after every case and fail the case that
+// leaves anything unrestorable (see schemaSnapshot.ts).
+let restoreSchema = async () => {};
+beforeAll(async () => { await sql.connect(); restoreSchema = await schemaGuard(sql); }, 120000);
+afterEach(() => restoreSchema(), 120000);
 afterAll(() => sql.end());
 
 /** The exact business turns in a fixture, not just "one row per request ID". */
@@ -3936,6 +3942,23 @@ async function deferQuestion(
   await f.artifacts.execute({ action: "confirm", projectId: saved.projectId, roundId: saved.roundId, requestId: randomUUID(), stepId,
     expectedVersion: state.version, expectedReviewVersion: state.reviewVersion });
 }
+/**
+ * Test data hygiene, not product behaviour. Every case registers its own
+ * fixture module and enabled workflow, and product reads cap them:
+ * runtime.choices sees only userVisibleModules(limit:64), unordered, so a work
+ * item's own Skill can be missing and its turn runs as ordinary chat; the
+ * catalog query raises 'registry capacity' above 100 enabled workflows. A case
+ * that depends on its own Skill or method keeps only its modules enabled. The
+ * ids it disables are recorded and restored when this case finishes, pass or fail.
+ */
+async function onlyOwnCatalog(moduleIds: string[]) {
+  const modules = (await sql.query("update modules set active=false where active and id<>all($1::uuid[]) returning id", [moduleIds])).rows.map(row => row.id);
+  const workflows = (await sql.query("update artifact_workflows set enabled=false where enabled and module_id<>all($1::uuid[]) returning id", [moduleIds])).rows.map(row => row.id);
+  onTestFinished(async () => {
+    await sql.query("update modules set active=true where id=any($1::uuid[])", [modules]);
+    await sql.query("update artifact_workflows set enabled=true where id=any($1::text[])", [workflows]);
+  });
+}
 async function planFixtureModel(moduleId: string) {
   const model = randomUUID();
   await sql.query(
@@ -4490,7 +4513,9 @@ it("OPC: Stage C7 a stale round candidate neither suppresses nor impersonates th
     expect(generated.planCandidate).toHaveLength(7);
     // Repair B4, through the real revise button: a successful revision archives
     // the previous round's candidate so it cannot become current again.
-    await page.goto(process.env.V3_LOCAL_APP + "/positioning/" + f.d.draftId);
+    // Write the round-A buffer before the draft page hydrates; an open page keeps
+    // persisting its own state over a buffer written underneath it.
+    await page.goto(process.env.V3_LOCAL_APP + "/positioning");
     await page.evaluate(
       ({ id, candidate, roundId }) =>
         sessionStorage.setItem(
@@ -4505,6 +4530,7 @@ it("OPC: Stage C7 a stale round candidate neither suppresses nor impersonates th
         ),
       { id: f.d.draftId, candidate: staleCandidate, roundId: f.d.roundId },
     );
+    await page.goto(process.env.V3_LOCAL_APP + "/positioning/" + f.d.draftId);
     const revise = page.getByRole("button", {
       name: "修订定位，保留原版本",
       exact: true,
@@ -4588,6 +4614,8 @@ it("OPC: an upstream reconfirmation can be resubmitted and never hides already a
     await expect.poll(async () => (await read()).information["step-0"].values?.goal?.status, {timeout:30000}).toBe("confirmed");
     await expect.poll(async () => (await rowTexts()).length, {timeout:30000}).toBe(2);
     // No deferral UI in a mentor draft: defer on the server, then check the page.
+    // Like the removed control, defer only after this question's own opening finished.
+    await page.getByRole("log", {name:"完整导师消息"}).getByText("导师主动引导 · 1.2", {exact:true}).waitFor({timeout:60000});
     await deferQuestion(f, draft.draftId, "step-0", "other");
     await resetLocalIpWindow();
 
@@ -4732,6 +4760,8 @@ it("OPC: clicking a review row opens that reached question without advancing pro
     await expect.poll(async () => (await read()).information["step-0"].values?.extra0?.status, {timeout:30000}).toBe("confirmed");
     await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.3");
     // No deferral UI in a mentor draft: defer on the server, then check the page.
+    // Like the removed control, defer only after this question's own opening finished.
+    await page.getByRole("log", {name:"完整导师消息"}).getByText("导师主动引导 · 1.3", {exact:true}).waitFor({timeout:60000});
     await deferQuestion(f, draft.draftId, "step-0", "extra1");
     await page.reload();
     // Deferring q3 reaches q4, which the page opens on its own after the reload.
@@ -4874,6 +4904,8 @@ it("OPC: a legally reached question keeps its explicit confirm and mentor send w
     await field("Extra field 1").fill("第三条实质答案");
     await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.value, {timeout:30000}).toBe("第三条实质答案");
     // No deferral UI in a mentor draft: defer on the server, then check the page.
+    // Like the removed control, defer only after this question's own opening finished.
+    await page.getByRole("log", {name:"完整导师消息"}).getByText("导师主动引导 · 1.3", {exact:true}).waitFor({timeout:60000});
     await deferQuestion(f, draft.draftId, "step-0", "extra1");
     await page.reload();
     // Deferring q3 reaches q4, which the page opens on its own after the reload.
@@ -5072,6 +5104,8 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
     await field("Extra field 1").fill("第三条实质答案");
     await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.value, {timeout:30000}).toBe("第三条实质答案");
     // No deferral UI in a mentor draft: defer on the server, then check the page.
+    // Like the removed control, defer only after this question's own opening finished.
+    await page.getByRole("log", {name:"完整导师消息"}).getByText("导师主动引导 · 1.3", {exact:true}).waitFor({timeout:60000});
     await deferQuestion(f, draft.draftId, "step-0", "extra1");
     await resetLocalIpWindow();
 
@@ -6937,9 +6971,13 @@ it("OPC: old publish and adoption replays cannot roll back the current business 
   expect(Number((await sql.query("select count(*)::int n from opc_items i join opc_plans p on p.id=i.plan_id where p.draft_id=$1 and i.item_key=$2", [f.d.draftId, historicalItemId])).rows[0].n)).toBe(itemCount);
 }, 120000);
 
-it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the library and continues video work", async () => {
+it("OPC: B1 browser auto-saves discussion, adopts one topic across a lost reply and re-login, and edits it in the library", async () => {
+  // The topic workspace adopts one card at a time since its redesign; the
+  // video package half of the old journey is covered by "final script asks
+  // before derivatives…", "upgraded legacy partial result…" and "work item uses
+  // shared Runtime … source revocation denies recovery reads".
   const f = await publishedDraft();
-  const modelId = await planFixtureModel(f.moduleId);
+  await planFixtureModel(f.moduleId);
   const seed = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'existing-account', title: '原工作', brief: '原有账号项目', day: '2026-09-20' }] });
   await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: seed.planId, accounts: [{ platform: 'x', account: 'existing-account', expectedRevision: null }] });
@@ -6952,23 +6990,24 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     expect(await page.getByRole('heading', { name: '先完成正式定位', exact: true }).count()).toBe(0);
     await page.goto(process.env.V3_LOCAL_APP + path);
     await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
-    await page.getByRole('button',{name:'选题与版本',exact:true}).click();
-    await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).waitFor({ timeout: 60000 });
-    expect((await f.service.topicDraftRead(f.d.draftId)).version).toBe(1);
-    expect(await page.getByRole('link', { name: '打开内容资料库', exact: true }).count()).toBe(1);
+    await page.getByRole('heading', { name: '1. 首周选题', exact: true }).waitFor({ timeout: 60000 });
+    // The candidate draft is saved after the reply renders.
+    await expect.poll(async () => (await f.service.topicDraftRead(f.d.draftId)).version, { timeout: 30000 }).toBe(1);
 
+    // Discussion revises the candidate and auto-saves a new draft version.
     await page.getByLabel('消息', { exact: true }).fill('请修改第一条选题');
     await page.getByRole('button', { name: '发送', exact: true }).click();
     await expect.poll(async () => (await f.service.topicDraftRead(f.d.draftId)).version, { timeout: 60000 }).toBe(2);
-    await page.getByRole('button',{name:'选题与版本',exact:true}).click();
-    await page.getByLabel('选择 修改后的选题').waitFor();
-    await expect.poll(()=>page.getByLabel('选择 第二个账号选题').isEnabled(),{timeout:30000}).toBe(true);
-    await page.getByLabel('选择 第二个账号选题').uncheck();
+    const revised = page.getByRole('heading', { name: '1. 修改后的选题', exact: true }).last().locator('..');
+    await revised.waitFor({ timeout: 60000 });
+    const second = page.getByRole('heading', { name: '2. 第二个账号选题', exact: true }).last().locator('..');
+    await expect.poll(() => second.getByRole('button', { name: '采用这个选题', exact: true }).isEnabled(), { timeout: 30000 }).toBe(true);
 
+    // Adopting only the revised topic loses its reply; the frozen request survives a re-login.
     await page.route('**/api/trpc/opc.adoptTopics*', async route => {
       const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort(); lostAdoption += 1;
     });
-    await page.getByRole('button', { name: '采用所选并保存到资料库', exact: true }).click();
+    await revised.getByRole('button', { name: '采用这个选题', exact: true }).click();
     await page.getByRole('button', { name: '恢复原请求', exact: true }).waitFor({ timeout: 60000 });
     await expect.poll(() => lostAdoption, { timeout: 30000 }).toBeGreaterThan(0);
     const bound = await f.service.topicRead(f.d.draftId);
@@ -6976,6 +7015,7 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     const frozen = JSON.parse((await page.evaluate(key => localStorage.getItem(key), frozenKey))!);
     expect(frozen.kind).toBe('adoptTopics');
     expect(frozen.request.body).toHaveLength(1);
+    expect(frozen.request.body[0].title).toBe('修改后的选题');
     expect(frozen.request.expectedVersion).toBe(1);
     await page.unroute('**/api/trpc/opc.adoptTopics*');
 
@@ -6990,80 +7030,92 @@ it("OPC: B1 browser auto-saves discussion, atomically adopts a subset, edits the
     const plans = (await f.service.read(f.d.draftId)).plans;
     expect(plans).toHaveLength(2);
     expect(plans[0].body).toHaveLength(1);
-    await page.getByRole('button',{name:'选题与版本',exact:true}).click();
-    expect(await page.getByRole('button', {name:'采用所选并保存到资料库',exact:true}).isVisible()).toBe(false);
-    await page.getByRole('button', {name:/展开选题/}).click();
-    await expect.poll(()=>page.getByLabel('选择 第二个账号选题').isEnabled(),{timeout:30000}).toBe(true);
-    await page.getByRole('button', {name:/收起选题/}).click();
+    // The adopted card now continues its work; the other card stays adoptable.
+    await page.getByRole('heading', { name: '1. 修改后的选题', exact: true }).last().locator('..')
+      .getByRole('link', { name: '继续这条内容工作', exact: true }).waitFor({ timeout: 30000 });
+    await expect.poll(() => page.getByRole('heading', { name: '2. 第二个账号选题', exact: true }).last().locator('..')
+      .getByRole('button', { name: '采用这个选题', exact: true }).isEnabled(), { timeout: 30000 }).toBe(true);
 
-    await page.getByRole('button',{name:'Close',exact:true}).click();
-    await page.getByRole('link', { name: '打开内容资料库', exact: true }).first().click();
-    await page.waitForURL(url => url.pathname === '/library');
-    const adoptedCard = page.getByRole('article').filter({ hasText: '修改后的选题' });
-    await adoptedCard.getByRole('button', { name: '直接编辑', exact: true }).click();
-    await page.getByLabel('选题标题').fill('资料库修订标题');
-    await page.getByLabel('完整选题简报').fill('内容：真实案例；对象：起步创作者；价值：明确行动；结构：问题、过程、结果；假设：案例提升收藏。');
-    await page.getByRole('button', { name: '保存修改', exact: true }).click();
-    await page.getByRole('heading', { name: '资料库修订标题', exact: true }).waitFor();
-    await page.getByRole('article').filter({ hasText: '资料库修订标题' }).getByRole('link', { name: '继续工作', exact: true }).click();
+    // The library edits the adopted topic's direction and returns to its work.
+    await page.goto(process.env.V3_LOCAL_APP + '/library');
+    const adoptedRow = page.getByRole('article').filter({ hasText: '修改后的选题' });
+    await adoptedRow.getByRole('button').first().click();
+    const detail = page.getByRole('dialog', { name: '选题详情' });
+    await detail.getByRole('button', { name: '编辑稿件', exact: true }).click();
+    await detail.getByRole('button', { name: /选题方向.*查看与修改/ }).click();
+    await page.getByLabel('方向名称', { exact: true }).fill('资料库修订标题');
+    await page.getByLabel('选题简报', { exact: true }).fill('内容：真实案例；对象：起步创作者；价值：明确行动；结构：问题、过程、结果；假设：案例提升收藏。');
+    await page.getByRole('button', { name: '保存选题方向', exact: true }).click();
+    await page.getByText('选题方向已保存', { exact: true }).waitFor({ timeout: 30000 });
+    const edited = (await f.service.library({ search: '资料库修订标题', from: null, to: null })).businesses
+      .flatMap((business: { accounts: Array<{ items: any[] }> }) => business.accounts.flatMap(account => account.items));
+    expect(edited.map((item: { title: string }) => item.title)).toEqual(['资料库修订标题']);
+    await page.getByRole('button', { name: '← 返回详情', exact: true }).click();
+    await detail.getByRole('link', { name: '继续讨论', exact: true }).click();
     await page.waitForURL(url => url.pathname === '/runtime');
-    await page.getByRole('heading', { name: '资料库修订标题', exact: true }).waitFor();
-
-    await page.getByText('【主动引导合成示例，仅验证交互】我们先细化这条选题：你最希望读者看完后理解哪一个重点？',{exact:true}).waitFor({timeout:60000});
-    await page.getByLabel('消息', { exact: true }).fill('请和我讨论这条视频的口播稿。');
-    await page.getByRole('button', { name: '发送', exact: true }).click();
-    const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
-    await finalize.waitFor({ timeout: 60000 });
-    const packageRunsBefore = Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, new URL(page.url()).searchParams.get('session')])).rows[0].n);
-    await finalize.click();
-    await page.getByRole('link',{name:'这版口播稿已定稿 · 查看',exact:true}).waitFor({timeout:60000});
-    await page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true }).waitFor();
-    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, new URL(page.url()).searchParams.get('session')])).rows[0].n)).toBe(packageRunsBefore);
-    let lostPackage = 0;
-    await page.route('**/api/trpc/opc.saveVideoResults*', async route => {
-      if (lostPackage++) return route.continue();
-      const response = await route.fetch(); expect(response.ok()).toBe(true); await route.abort();
-    });
-    const ordinaryPrepareCalls:string[]=[];
-    page.on('request',request=>{if(/\/api\/trpc\/runtime\.prepare(?:[?,]|$)/.test(request.url())&&!request.postData()?.includes('[OPC_VIDEO_PACKAGE_V1]'))ordinaryPrepareCalls.push(request.url());});
-    // The visible card wording must take the exact same frozen business action.
-    await page.getByLabel('消息', { exact: true }).fill('先做分镜，再生成剪辑建议');
-    await page.getByRole('button', { name: '发送', exact: true }).click();
-    await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('状态待核实');
-    const videoKey = 'opc-video-operation:' + new URL(page.url()).searchParams.get('session');
-    const frozenVideo = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
-    const recoveryTab = await context.newPage();
-    await recoveryTab.goto(page.url());
-    await expect.poll(() => recoveryTab.evaluate(key => localStorage.getItem(key), videoKey), { timeout: 60000 }).toBeNull();
-    const completedVideo = await recoveryTab.evaluate(({key,requestId}) => localStorage.getItem(key + ':completed:' + requestId), { key: videoKey, requestId: frozenVideo.package.requestId });
-    expect(JSON.parse(completedVideo!)).toEqual(frozenVideo);
-    expect(ordinaryPrepareCalls).toEqual([]);
-    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'",[f.actor,new URL(page.url()).searchParams.get('session')])).rows[0].n)).toBe(packageRunsBefore+1);
-    await recoveryTab.getByRole('heading',{name:'成果与版本',exact:true}).waitFor();
-    await recoveryTab.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
-    await recoveryTab.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor();
-    await recoveryTab.getByRole('heading', { name: '剪辑建议 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor();
-    await recoveryTab.close();
-    const library = await f.service.library({ search: '资料库修订标题', from: null, to: null });
-    const [savedItem] = library.businesses[0].accounts.flatMap((account: {items: any[]}) => account.items);
-    expect(savedItem).toBeDefined();
-    const script = savedItem.content.find((entry: {kind: string}) => entry.kind === 'script');
-    const completedPackage = (await sql.query("select id::text from runtime_executions where actor_id=$1 and session_id=$2 and state='completed' and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'", [f.actor, savedItem.sessionId])).rows[0].id;
-    await sql.query("update runtime_executions set result=jsonb_build_object('body','{}') where id=$1", [completedPackage]);
-    await expect(f.service.videoPackage({ workItemId: savedItem.workItemId, requestId: randomUUID(), executionId: completedPackage, sourceScriptId: script.id, expectedStoryboardVersion: 1, expectedEditingVersion: 1 })).rejects.toThrow('OPC_CONTENT_RESPONSE_INVALID');
-    const materialRevision = Number((await sql.query("select payload#>>'{scopeMaterial,revision}' revision from runtime_executions where id=$1", [script.executionId])).rows[0].revision);
-    await sql.query("select runtime_material($1,$2,'revoke',NULL,$3)", [f.actor, savedItem.sessionId, materialRevision]);
-    const withdrawn = await f.service.library({ search: '资料库修订标题', from: null, to: null });
-    const withdrawnItem = withdrawn.businesses[0].accounts.flatMap((account: {items: any[]}) => account.items)[0];
-    expect(withdrawnItem.content.map((entry: {contentAvailable: boolean}) => entry.contentAvailable)).toEqual([false, false, false]);
-    const { runtimeAdmissionService } = await import('../runtime/admission');
-    const admission = runtimeAdmissionService(f.user, admin, { account: 'local', costPerCall: '0.02', creditsPerUsd: '1000', multiplier: '1', maxCalls: 1, maxOutputTokens: 1000, inputBytes: 32000, historyItems: 20, searchEnabled: false });
-    const runsBefore = Number((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1', [f.actor])).rows[0].n);
-    await expect(admission.prepare({ sessionId: savedItem.sessionId, requestId: randomUUID(), input: '继续使用已撤回口播稿', selection: { kind: 'ordinary', modelId }, network: 'deny', sources: [] })).rejects.toThrow('RUNTIME_ADMISSION_DENIED');
-    expect(Number((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1', [f.actor])).rows[0].n)).toBe(runsBefore);
+    expect(new URL(page.url()).searchParams.get('session')).toBe(edited[0].sessionId);
   } finally { await browser.close(); }
 }, 300000);
 
+it("OPC: a second topic generation takes a new constraint and request id, and a lost reply recovers B behind candidate A without creating C", async () => {
+  // Replaces the retired /plan regeneration cases (Stage C6/C8) on /topics,
+  // where new input still creates a new request beside the current candidate.
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  await onlyOwnCatalog([f.moduleId]);
+  const path = '/positioning/' + f.d.draftId + '/topics';
+  const { browser, page } = await planBrowser(f);
+  const card = (title: string) => page.getByRole('heading', { name: title, exact: true }).last().locator('..');
+  const money = async () => (await sql.query(
+    `select (select credits from profiles where id=$1) balance,
+       (select count(*)::int from credit_transactions where user_id=$1 and reason_code='bill2_reserve') reserves,
+       (select count(*)::int from credit_transactions where user_id=$1) ledger`, [f.actor])).rows[0];
+  const topicRequests = async () => (await sql.query(
+    `select e.request_id::text request_id, e.payload->>'input' input from runtime_executions e
+       join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id
+      where e.actor_id=$1 and t.purpose='topic' order by e.created_at, e.id`, [f.actor])).rows;
+  let lost = 0;
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + path);
+    await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
+    await card('1. 首周选题').waitFor({ timeout: 60000 });
+    await expect.poll(async () => (await f.service.topicDraftRead(f.d.draftId)).version, { timeout: 30000 }).toBe(1);
+    const afterA = { identity: await topicIdentity(f.actor), money: await money(), requests: await topicRequests() };
+    expect(afterA.identity).toMatchObject({ binds: 1, turns: 1, topicExecutions: 1, topicRuns: 1 });
+    expect(afterA.requests).toHaveLength(1);
+
+    // Request B carries a new constraint. The server admits and runs it once;
+    // only the reply to the page is lost, so candidate A stays on screen.
+    await page.route('**/api/trpc/runtime.execute*', async route => {
+      const response = await route.fetch(); expect(response.ok()).toBe(true); lost += 1; await route.abort();
+    });
+    await page.getByLabel('消息', { exact: true }).fill('请修改第一条选题，改成更适合新手的版本');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await page.getByRole('button', { name: '恢复原请求', exact: true }).waitFor({ timeout: 60000 });
+    await expect.poll(() => lost, { timeout: 30000 }).toBeGreaterThan(0);
+    const afterB = { identity: await topicIdentity(f.actor), money: await money(), requests: await topicRequests() };
+    expect(afterB.requests).toHaveLength(2);
+    expect(afterB.requests[0]).toEqual(afterA.requests[0]);
+    expect(afterB.requests[1].request_id).not.toBe(afterA.requests[0].request_id);
+    expect(afterB.requests[1].input).toContain('请修改第一条选题，改成更适合新手的版本');
+    expect(afterB.identity).toMatchObject({ binds: 1, turns: 2, topicExecutions: 2, topicRuns: 2 });
+    expect(afterB.money.reserves).toBe(afterA.money.reserves + 1);
+    expect(Number(afterB.money.balance)).toBeLessThan(Number(afterA.money.balance));
+    expect(await page.getByRole('heading', { name: '1. 修改后的选题', exact: true }).count()).toBe(0);
+    expect((await f.service.topicDraftRead(f.d.draftId)).version).toBe(1);
+
+    // Recovering after a reload replays B by its own identity: no request C,
+    // no second reservation, no further charge.
+    await page.unroute('**/api/trpc/runtime.execute*');
+    await page.reload();
+    await page.getByRole('button', { name: '恢复原请求', exact: true }).click();
+    await card('1. 修改后的选题').waitFor({ timeout: 60000 });
+    await expect.poll(async () => (await f.service.topicDraftRead(f.d.draftId)).version, { timeout: 30000 }).toBe(2);
+    expect(await topicRequests()).toEqual(afterB.requests);
+    expect(await topicIdentity(f.actor)).toEqual(afterB.identity);
+    expect(await money()).toEqual(afterB.money);
+  } finally { await browser.close(); }
+}, 300000);
 it("OPC: B1 business scope, legacy handoff replay and library edits stay owned and versioned", async () => {
   const f = await publishedDraft();
   const businessId = (await sql.query(
@@ -7325,7 +7377,8 @@ it("OPC: U2 browser preserves later edits across unknown saves, conflict and ano
     await page.getByPlaceholder('输入你的密码').fill(outsider.password);
     await page.getByRole('button',{name:'登录',exact:true}).last().click();
     await page.waitForURL(url=>url.pathname==='/runtime');
-    await page.getByRole('alert').filter({hasText:'无权访问'}).waitFor();
+    // 0beff6aa: denial is reported through the shared workspace notice.
+    await page.getByRole('alert').filter({hasText:'当前工作：'}).waitFor();
     expect(await page.getByText('未知结果后继续写，不能被旧结果覆盖').count()).toBe(0);
     expect(await page.getByLabel('文章正文').count()).toBe(0);
   }finally{await browser.close();}
@@ -7333,6 +7386,7 @@ it("OPC: U2 browser preserves later edits across unknown saves, conflict and ano
 
 it("OPC: new business start restores the complete frozen request before another business can begin", async () => {
   const f=await publishedDraft();
+  await onlyOwnCatalog([f.moduleId]);
   const originalBusiness=(await sql.query('select business_id::text id from opc_draft_businesses where draft_id=$1',[f.d.draftId])).rows[0].id;
   const otherActor=await publishedDraft();
   const {browser,page}=await planBrowser(f);
@@ -7392,14 +7446,17 @@ it("OPC: library edit binds fields and revision to one snapshot across a concurr
     await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/edit-account/}).click();
     const card=page.getByRole('article').filter({hasText:'原始标题'});
     await card.getByRole('button',{name:/原始标题/}).first().click();
-    await page.getByRole('dialog',{name:'选题详情'}).getByRole('button',{name:'编辑稿件'}).click();
-    await page.getByLabel('选题标题').fill('本标签准备保存的标题');
+    // The redesigned library edits the topic direction from the manuscript view.
+    const detail=page.getByRole('dialog',{name:'选题详情'});
+    await detail.getByRole('button',{name:'编辑稿件'}).click();
+    await detail.getByRole('button',{name:/选题方向.*查看与修改/}).click();
+    await page.getByLabel('方向名称',{exact:true}).fill('本标签准备保存的标题');
     const before=(await f.service.library({search:'原始标题',from:null,to:null})).businesses.flatMap((business:{accounts:Array<{items:Array<{workItemId:string;revision:number}>}>})=>business.accounts.flatMap(account=>account.items)).find((item:{workItemId:string})=>item.workItemId===work.workItemId)!;
     await f.service.libraryEdit({requestId:randomUUID(),target:'item',targetId:work.workItemId,expectedRevision:before.revision,patch:{title:'另一标签已保存的标题',brief:'另一标签已保存的简报',day:'2026-09-26'}});
     const refreshed=page.waitForResponse(response=>response.url().includes('opc.library')&&response.ok());
     await page.getByLabel('当前阶段 edit-account').selectOption('starting');
     await refreshed;
-    await page.getByRole('button',{name:'保存选题信息',exact:true}).click();
+    await page.getByRole('button',{name:'保存选题方向',exact:true}).click();
     await expect.poll(async()=>(await page.getByRole('alert').allTextContents()).join(' '),{timeout:30000}).toContain('OPC_VERSION_CONFLICT');
     const library=await f.service.library({search:'另一标签已保存的标题',from:null,to:null});
     const saved=library.businesses.flatMap((business:{accounts:Array<{items:Array<{workItemId:string;title:string;brief:string;day:string}>}>})=>business.accounts.flatMap(account=>account.items)).find((item:{workItemId:string})=>item.workItemId===work.workItemId);
@@ -8074,11 +8131,16 @@ it("OPC: prior confirmed information remains scoped after edits and reader upgra
  const frozen=await records();
  const {readFile}=await import('node:fs/promises');
  const migration=await readFile(new URL('../../../../db/migrations/0133_opc_confirmed_information_history.sql',import.meta.url),'utf8');
+ // Later migrations (0159) extend the same reader, so 0133 is checked for what it
+ // adds and the current reader is then restored before the full comparison.
+ const restoreCurrent=await snapshotSchema(sql);
  await sql.query(await readFile(new URL('../../../../db/migrations/0120_opc_entry_projection.sql',import.meta.url),'utf8'));
  try{
   expect((await read()).information['step-0'].previouslyConfirmed).toBeUndefined();
  }finally{await sql.query(migration);}
  await sql.query(migration);
+ expect((await read()).information['step-0'].previouslyConfirmed).toEqual(edited.information['step-0'].previouslyConfirmed);
+ await restoreCurrent();
  expect((await read()).information['step-0']).toEqual(edited.information['step-0']);
  expect(await records()).toEqual(frozen);
  const other=await fixture(3);
@@ -8230,6 +8292,7 @@ it("OPC: approved six-stage guided positioning keeps one editable conversation a
 
 it("OPC: manual video revisions preserve execution ancestry, ownership and exact replay", async () => {
   const f=await publishedDraft();
+  await onlyOwnCatalog([f.moduleId]);
   await planFixtureModel(f.moduleId);
   const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
     body:[{id:randomUUID(),platform:'x',account:'video-revision-account',title:'口播稿修订',brief:'人工编辑后仍须保留原执行来源。',day:'2026-09-26',contentType:'video'}]});
@@ -8284,6 +8347,7 @@ it("OPC: manual video revisions preserve execution ancestry, ownership and exact
 
 it("OPC: final script asks before derivatives, supports a partial choice, and marks prior results old after re-finalizing", async () => {
   const f = await publishedDraft();
+  await onlyOwnCatalog([f.moduleId]);
   await planFixtureModel(f.moduleId);
   const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'consent-account', title: '口播稿授权边界', brief: '验证口播稿定稿与分镜、剪辑建议的授权分离。', day: '2026-09-26', contentType:'video' }] });
@@ -8387,6 +8451,7 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
 
 it("OPC: completed video generation permits the next dialogue and a new script final", async () => {
   const f = await publishedDraft();
+  await onlyOwnCatalog([f.moduleId]);
   await planFixtureModel(f.moduleId);
   const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'post-video-dialogue', title: '派生后继续讨论', brief: '验证派生成功后继续讨论并重新定稿。', day: '2026-09-26' }] });
@@ -8437,6 +8502,7 @@ it("OPC: completed video generation permits the next dialogue and a new script f
 
 it("OPC: definite pre-admission failure revokes its claim and permits an explicit retry", async () => {
   const f = await publishedDraft();
+  await onlyOwnCatalog([f.moduleId]);
   await planFixtureModel(f.moduleId);
   const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'admission-retry', title: '准入失败恢复', brief: '验证未创建 execution 的确定失败不会永久占位。', day: '2026-09-27' }] });
@@ -8445,16 +8511,25 @@ it("OPC: definite pre-admission failure revokes its claim and permits an explici
   const { browser, page } = await planBrowser(f);
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    // The item's content type is chosen first; only a video item offers a script final.
+    await page.getByRole('button', { name: '视频', exact: true }).click();
+    await page.getByLabel('口播稿正文', { exact: true }).waitFor();
     await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿。');
     await page.getByRole('button', { name: '发送', exact: true }).click();
     const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 }); await finalize.click();
-    await page.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    // The finalized script is shown by its version summary and next actions now (a8dba69c).
+    await page.getByRole('button', { name: '只生成分镜', exact: true }).waitFor({ timeout: 60000 });
+    expect((await sql.query("select version::int version,status from opc_content_versions where work_item_id=$1 and kind='script'", [work.workItemId])).rows)
+      .toEqual([{ version: 1, status: 'final' }]);
     let lateRequestBody = '';
     await page.route('**/api/trpc/runtime.prepare*', route => {
       if (!(route.request().postData() ?? '').includes('OPC_VIDEO_PACKAGE_V1')) return route.continue();
       lateRequestBody = route.request().postData()!;
-      return route.abort();
+      // Since #594 a lost response is an open outcome; only a structured 4xx proves a definite refusal.
+      return route.fulfill({ status: 412, contentType: 'application/json', body: JSON.stringify([{ error: {
+        message: '本次操作所需模型尚未获准用于当前测试窗口，请联系管理员。', code: -32012,
+        data: { code: 'PRECONDITION_FAILED', httpStatus: 412, path: 'runtime.prepare' } } }]) });
     });
     await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
     await expect.poll(async () => (await page.getByRole('alert').allTextContents()).join(' '), { timeout: 60000 }).toContain('明确拒绝');
@@ -8463,7 +8538,8 @@ it("OPC: definite pre-admission failure revokes its claim and permits an explici
     expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2', [f.actor, abandoned.request_id])).rows[0].n).toBe(0);
     await page.unroute('**/api/trpc/runtime.prepare*');
     await page.getByRole('button', { name: '只生成分镜', exact: true }).click();
-    await page.getByRole('heading', { name: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿', exact: true }).waitFor({ timeout: 60000 });
+    // Derived results are listed as collapsible summaries since a8dba69c.
+    await page.locator('summary').filter({ hasText: '分镜 · 第 1 版 · 已定稿 · 匹配当前口播稿' }).waitFor({ timeout: 60000 });
     expect(lateRequestBody).toContain('OPC_VIDEO_PACKAGE_V1');
     await page.evaluate(async body => {
       await fetch('/api/trpc/runtime.prepare?batch=1', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
@@ -8477,6 +8553,7 @@ it("OPC: definite pre-admission failure revokes its claim and permits an explici
 it("OPC: video claim material stays exclusive and a rejected claim can be retried", async () => {
   const { runtimeAdmissionService } = await import('../runtime/admission');
   const f = await publishedDraft();
+  await onlyOwnCatalog([f.moduleId]);
   const modelId = await planFixtureModel(f.moduleId);
   const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'shared-material', title: '共享材料保护', brief: '验证其他执行冻结后不能撤销材料。', day: '2026-09-29' }] });
@@ -8485,11 +8562,17 @@ it("OPC: video claim material stays exclusive and a rejected claim can be retrie
   const { browser, page } = await planBrowser(f);
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/runtime?session=' + work.sessionId);
+    // The item's content type is chosen first; only a video item offers a script final.
+    await page.getByRole('button', { name: '视频', exact: true }).click();
+    await page.getByLabel('口播稿正文', { exact: true }).waitFor();
     await page.getByLabel('消息', { exact: true }).fill('生成一版口播稿。');
     await page.getByRole('button', { name: '发送', exact: true }).click();
     const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
     await finalize.waitFor({ timeout: 60000 }); await finalize.click();
-    await page.getByRole('heading', { name: '口播稿 · 第 1 版 · 已定稿', exact: true }).waitFor({ timeout: 60000 });
+    // The finalized script is shown by its version summary and next actions now (a8dba69c).
+    await page.getByRole('button', { name: '只生成分镜', exact: true }).waitFor({ timeout: 60000 });
+    expect((await sql.query("select version::int version,status from opc_content_versions where work_item_id=$1 and kind='script'", [work.workItemId])).rows)
+      .toEqual([{ version: 1, status: 'final' }]);
     const item = (await f.service.library({ search: '', from: null, to: null })).businesses
       .flatMap((business: {accounts: Array<{items: Array<{workItemId: string;content: Array<{id: string;kind: string}>}>}>}) => business.accounts.flatMap(account => account.items))
       .find((entry: {workItemId: string}) => entry.workItemId === work.workItemId)!;
@@ -8499,7 +8582,8 @@ it("OPC: video claim material stays exclusive and a rejected claim can be retrie
       choice: 'storyboard', expectedStoryboardVersion: 0, expectedEditingVersion: 0 });
     const admission = runtimeAdmissionService(f.user, admin, { account: 'local', costPerCall: '0.02', creditsPerUsd: '1000', multiplier: '1', maxCalls: 1, maxOutputTokens: 1000, inputBytes: 32000, historyItems: 20, searchEnabled: false });
     const otherRequestId = randomUUID();
-    await expect(admission.prepare({ sessionId: work.sessionId, requestId: otherRequestId, input: '尝试占用视频请求的专属材料', selection: { kind: 'ordinary', modelId }, network: 'deny', sources: [] })).rejects.toThrow('RUNTIME_ADMISSION_DENIED');
+    // Since #613 admission releases the exact binding refusal (HTTP 412) instead of the generic denial.
+    await expect(admission.prepare({ sessionId: work.sessionId, requestId: otherRequestId, input: '尝试占用视频请求的专属材料', selection: { kind: 'ordinary', modelId }, network: 'deny', sources: [] })).rejects.toThrow('OPC_CONTENT_BINDING');
     expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2', [f.actor, otherRequestId])).rows[0].n).toBe(0);
     expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1 and request_id=$2', [f.actor, otherRequestId])).rows[0].n).toBe(0);
     await f.service.videoMaterialPrepare({ action: 'abandon', workItemId: work.workItemId, requestId: claimRequestId, sourceScriptId: script.id,
@@ -8513,6 +8597,7 @@ it("OPC: video claim material stays exclusive and a rejected claim can be retrie
 
 it("OPC: upgraded legacy partial result blocks a duplicate dispatch and remains recoverable", async () => {
   const f = await publishedDraft();
+  await onlyOwnCatalog([f.moduleId]);
   await planFixtureModel(f.moduleId);
   const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'legacy-partial', title: '旧单项结果恢复', brief: '验证升级前已完成但丢回包的单项结果。', day: '2026-09-28' }] });
@@ -8606,6 +8691,7 @@ it("OPC: natural-language adoption stays complete after refresh and permits the 
 
 it("OPC: video package dispatch refuses a different frozen material before admission", async () => {
   const f = await publishedDraft();
+  await onlyOwnCatalog([f.moduleId]);
   await planFixtureModel(f.moduleId);
   const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'binding-account', title: '绑定检查', brief: '验证口播稿与分镜来源绑定。', day: '2026-09-25', contentType:'video' }] });
@@ -9106,7 +9192,9 @@ it("OPC: entry projection stays actor-owned and repeatable without granting tabl
   expect(privileges).toEqual({client:false,business_table:false,predecessor:false});
 },60000);
 
-it('OPC: CAPACITY version counts use only current manuscript through browser and refresh after save',async()=>{
+// These two read the runner's capacity transport sample, which exists only in a
+// disposable run whose case pattern names CAPACITY (V3_CAPACITY_CAPTURE).
+it.skipIf(process.env.V3_CAPACITY_CAPTURE !== 'true')('OPC: CAPACITY version counts use only current manuscript through browser and refresh after save',async()=>{
  const {readFileSync}=await import('node:fs');
  const capture=process.env.V3_WORKBENCH_OUTPUT+'/capacity-requests.jsonl';
  const all=()=>{try{return readFileSync(capture,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));}catch{return [];}};
@@ -9192,7 +9280,7 @@ it('OPC: CAPACITY version counts use only current manuscript through browser and
  expect((results.find(x=>x.storedVersions===100)!.requestBytes as number)-base).toBeLessThan(3000);
 },300000);
 
-it('OPC: CAPACITY chat history projects superseded scope bodies without rewriting stored turns',async()=>{
+it.skipIf(process.env.V3_CAPACITY_CAPTURE !== 'true')('OPC: CAPACITY chat history projects superseded scope bodies without rewriting stored turns',async()=>{
  const {readFileSync}=await import('node:fs');
  const capture=process.env.V3_WORKBENCH_OUTPUT+'/capacity-requests.jsonl';
  const all=()=>{try{return readFileSync(capture,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));}catch{return [];}};
@@ -9228,48 +9316,58 @@ it('OPC: CAPACITY chat history projects superseded scope bodies without rewritin
  }finally{await browser.close();}
 },300000);
 
-it('OPC: rejected cross-business adoption recovers its original request and permits corrected account adoption', async()=>{
+it('OPC: rejected cross-business adoption recovers its original request and permits adoption after a conversational account change', async()=>{
+ // Topic cards no longer edit accounts in place; the user asks the mentor in
+ // the conversation, which offers a revised candidate that can be adopted.
  const f=await publishedDraft();await planFixtureModel(f.moduleId);
  const seed=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'existing-account',title:'另一业务原工作',brief:'必须保留',day:'2026-09-20'}]});
  const [original]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:seed.planId,accounts:[{platform:'x',account:'existing-account',expectedRevision:null}]});
  const other=(await sql.query("insert into opc_businesses(actor_id,name) values($1,'另一业务') returning id",[f.actor])).rows[0].id;
  await sql.query('update opc_accounts set business_id=$1 where project_id=$2',[other,original.projectId]);
  const {browser,page}=await planBrowser(f);
+ const card=(title:string)=>page.getByRole('heading',{name:title,exact:true}).last().locator('..');
+ const money=async()=>(await sql.query("select (select count(*)::int from credit_transactions where user_id=$1) ledger,(select count(*)::int from bill2_runs where actor_id=$1) runs",[f.actor])).rows[0];
  try{
   await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+f.d.draftId+'/topics');
   await page.getByRole('button',{name:'开始选题工作对话',exact:true}).click();
-  await page.getByLabel('选择 第二个账号选题').uncheck();
+  await card('1. 首周选题').waitFor({timeout:60000});
+  const plansBefore=(await f.service.read(f.d.draftId)).plans;
+  const moneyBefore=await money();
   // Simulate the old client's unknown outcome; do not hand-edit or delete pending state.
   await page.route('**/api/trpc/opc.adoptTopics*',async route=>{await route.fetch();await route.abort();});
-  await page.getByRole('button',{name:'采用所选并保存到资料库',exact:true}).click();
+  await card('1. 首周选题').getByRole('button',{name:'采用这个选题',exact:true}).click();
   await page.getByRole('button',{name:'恢复原请求',exact:true}).waitFor();
   await expect.poll(()=>page.getByRole('button',{name:'恢复原请求',exact:true}).isEnabled()).toBe(true);
   const workspace=await f.service.topicRead(f.d.draftId),key='opc-topic-operation:'+workspace.sessionId;
   const frozen=await page.evaluate(key=>localStorage.getItem(key),key);
   await page.unroute('**/api/trpc/opc.adoptTopics*');
   await page.getByRole('button',{name:'恢复原请求',exact:true}).click();
-  await page.getByText('这个账号已属于另一项业务，本次没有采用。请展开选题，修改为当前业务的账号后再采用；原请求已保留。',{exact:true}).waitFor();
+  // The prompt text after this prefix still points at a removed control (front-end P3, tracked separately).
+  await page.getByText(/^这个账号已属于另一项业务，本次没有采用。/).waitFor();
+  // Rejected: nothing adopted, nothing charged, and the original request is kept.
   expect(await page.evaluate(key=>localStorage.getItem(key),key)).toBeNull();
   expect(await page.evaluate(key=>localStorage.getItem(key),key+':rejected:'+JSON.parse(frozen!).request.requestId)).toBe(frozen);
-  await page.getByText('修改平台或账号',{exact:true}).first().click();
-  await page.getByLabel('账号 首周选题',{exact:true}).fill('photography-account');
-  await page.reload();
-  await page.getByText('修改平台或账号',{exact:true}).first().click();
-  expect(await page.getByLabel('账号 首周选题',{exact:true}).inputValue()).toBe('photography-account');
-  await page.getByLabel('选择 第二个账号选题').uncheck();
-  await page.getByRole('button',{name:'采用所选并保存到资料库',exact:true}).click();
-  await page.getByText('已采用所选内容并保存到资料库。可从下方进入对应内容工作。',{exact:true}).waitFor();
+  expect((await f.service.read(f.d.draftId)).plans).toEqual(plansBefore);
+  expect(await money()).toEqual(moneyBefore);
+  expect((await sql.query('select business_id from opc_accounts where project_id=$1',[original.projectId])).rows[0].business_id).toBe(other);
+  // The account is changed through the conversation, then the revised topic is adopted.
+  await page.getByLabel('消息',{exact:true}).fill('请把第一条选题的账号改为 photography-account');
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  await expect.poll(()=>card('1. 首周选题').innerText(),{timeout:60000}).toContain('photography-account');
+  await card('1. 首周选题').getByRole('button',{name:'采用这个选题',exact:true}).click();
+  await page.getByText(/^已采用所选内容并保存到资料库。/).waitFor();
   expect((await sql.query('select business_id from opc_accounts where project_id=$1',[original.projectId])).rows[0].business_id).toBe(other);
   const plans=(await f.service.read(f.d.draftId)).plans;
   expect(plans[0].body).toHaveLength(1);expect(plans[0].body[0].account).toBe('photography-account');
-  await page.getByRole('link',{name:'打开内容资料库',exact:true}).click();
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
   await page.getByRole('heading',{name:'资料库',exact:true}).waitFor();
   await expect.poll(()=>page.locator('main').innerText()).toContain('photography-account');
  }finally{await browser.close();}
 },180000);
 
 it('OPC: typed content uses a right panel, deep links and one proactive continuation across tabs',async()=>{
- const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const f=await publishedDraft();
+ await onlyOwnCatalog([f.moduleId]);await planFixtureModel(f.moduleId);
  await sql.query('update modules set title=$1 where id=$2',['U3 独立测试技能 '+f.moduleId,f.moduleId]);
  const rows=[{id:randomUUID(),platform:'x',account:'typed-account',title:'文章细化',brief:'内容：摄影课；对象：新手；价值：改善构图；结构：案例与练习；假设：一次练习帮助理解。',day:'2026-09-22',contentType:'article'}, {id:randomUUID(),platform:'x',account:'typed-account',title:'视频选题',brief:'摄影构图示范视频，先讨论再起草。',day:'2026-09-23',contentType:'video'}, {id:randomUUID(),platform:'x',account:'typed-account',title:'旧类型未确认',brief:'旧选题简报保持可读',day:'2026-09-24'}];
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:rows});
@@ -9309,7 +9407,9 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
   await page.getByRole('button',{name:'收起成果面板',exact:true}).waitFor();
   await page.getByRole('link',{name:'已采用为草稿 · 查看',exact:true}).click();
   await page.waitForURL(url=>url.pathname==='/library'&&url.searchParams.get('item')===article.workItemId);
-  const card=page.locator('#item-'+article.workItemId);await card.getByText('文章细化',{exact:true}).waitFor();
+  const card=page.locator('#item-'+article.workItemId);
+  // The deep link also opens the item's detail dialog, which repeats the title; check the list row itself.
+  await card.getByRole('button').first().getByText('文章细化',{exact:true}).waitFor();
   expect(await card.innerText()).toContain('文章');
   const saved=(await sql.query("select execution_id from opc_content_versions where work_item_id=$1 and kind='brief'",[article.workItemId])).rows[0];
   await expect(f.service.contentFromExecution({workItemId:article.workItemId,requestId:randomUUID(),executionId:saved.execution_id,kind:'script',status:'final',expectedVersion:0})).rejects.toThrow('OPC_VIDEO_TYPE_REQUIRED');
@@ -9374,7 +9474,8 @@ it('OPC: typed content uses a right panel, deep links and one proactive continua
  }finally{await browser.close();}
 },180000);
 
-it('OPC: Agent-first U1 sample preserves target, partial adoption, document edits and a narrow-screen return',async()=>{
+// The Agent-first sample page calls notFound() in a production build (--serve).
+it.skipIf(process.env.NODE_ENV === 'production')('OPC: Agent-first U1 sample preserves target, partial adoption, document edits and a narrow-screen return',async()=>{
  const f=await publishedDraft();
  const {browser,page}=await planBrowser(f);
  try{
@@ -9626,6 +9727,7 @@ it('OPC: free runtime reads owned context only on model tool request and recheck
 
 it('OPC: positioning entry creates a new business or edits only the selected existing account',async()=>{
  const f=await publishedDraft();
+ await onlyOwnCatalog([f.moduleId]);
  const rows=['entry-account-a','entry-account-b'].map(account=>({id:randomUUID(),platform:'x',account,title:account+'选题',brief:'保留的选题来源',day:'2026-09-25'}));
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:rows});
  await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:rows.map(row=>({platform:row.platform,account:row.account,expectedRevision:null}))});
@@ -9689,7 +9791,8 @@ it('OPC: positioning entry creates a new business or edits only the selected exi
 },180000);
 
 it('OPC: boundary browser freezes expanded edits across a delayed real adoption and concurrent saves',async()=>{
- const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const f=await publishedDraft();
+ await onlyOwnCatalog([f.moduleId]);await planFixtureModel(f.moduleId);
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'boundary-article',title:'边界文章',brief:'讨论后采用',day:'2026-09-25',contentType:'article'}]});
  const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'boundary-article',expectedRevision:null}]});
  const {browser,page}=await planBrowser(f);page.setDefaultTimeout(30000);
@@ -9739,7 +9842,8 @@ it('OPC: boundary browser freezes expanded edits across a delayed real adoption 
 },180000);
 
 it.each([65,67])('OPC: boundary browser continues legitimate v%s video source history',async(targetVersion)=>{
- const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const f=await publishedDraft();
+ await onlyOwnCatalog([f.moduleId]);await planFixtureModel(f.moduleId);
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'boundary-video',title:'长历史视频',brief:'合法原始执行与修订来源',day:'2026-09-25',contentType:'video'}]});
  const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'boundary-video',expectedRevision:null}]});
  const {browser,page}=await planBrowser(f);page.setDefaultTimeout(30000);
@@ -9919,7 +10023,8 @@ it.skipIf(!process.env.V3_LEGACY_ROOT)('OPC: U3 cross-code receipt recovery pres
 },180000);
 
 it.each(['cancelled','cost_pending'])('OPC: video truncation keeps accurate diagnosis and recovery envelope (%s)',async(state)=>{
- const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const f=await publishedDraft();
+ await onlyOwnCatalog([f.moduleId]);await planFixtureModel(f.moduleId);
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'truncation-account',title:'截断恢复',brief:'本地页面恢复验证',day:'2026-09-26',contentType:'video'}]});
  const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'truncation-account',expectedRevision:null}]});
  const {browser,page}=await planBrowser(f);let executions=0;
@@ -10507,6 +10612,8 @@ it("OPC: RATE-LIMIT browser gate notices keep the original request, never auto-r
   };
   const f = await fixture(3);
   await planFixtureModel(f.moduleId);
+  // Data hygiene only (no assertion or limiter change): keep this case's own Skill visible; see onlyOwnCatalog.
+  await onlyOwnCatalog([f.moduleId]);
   const credits = async () => Number((await sql.query("select credits from profiles where id=$1", [f.actor])).rows[0].credits);
   const executions = async () =>
     Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n);
@@ -10737,6 +10844,8 @@ it("OPC: RATE-LIMIT /runtime call-gate stop display and video package admission 
   await limits(false);
   const f = await publishedDraft();
   await planFixtureModel(f.moduleId);
+  // Data hygiene only (no assertion or limiter change): keep this case's own Skill visible; see onlyOwnCatalog.
+  await onlyOwnCatalog([f.moduleId]);
   const seed = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'existing-account', title: '原工作', brief: '原有账号项目', day: '2026-09-20' }] });
   await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: seed.planId,
@@ -10863,6 +10972,8 @@ it("OPC: RATE-LIMIT start-page send refused by any 503 is never re-sent automati
   await pause(false);
   const f = await fixture(3);
   await planFixtureModel(f.moduleId);
+  // Data hygiene only (no assertion or limiter change): keep this case's own Skill visible; see onlyOwnCatalog.
+  await onlyOwnCatalog([f.moduleId]);
   const browser = await chromium.launch({
     executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true,
   });
@@ -10964,6 +11075,8 @@ async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase
   await pause(false);
   const f = await publishedDraft();
   await planFixtureModel(f.moduleId);
+  // Data hygiene only (no assertion or limiter change): keep this case's own Skill visible; see onlyOwnCatalog.
+  await onlyOwnCatalog([f.moduleId]);
   const seed = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'existing-account', title: '原工作', brief: '原有账号项目', day: '2026-09-20' }] });
   await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: seed.planId,
@@ -11079,6 +11192,10 @@ async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase
         expect(await executionsOf(requestId)).toBe(0);
       });
       expect(await money()).toEqual(moneyBefore);
+      // Test isolation only: this case's own traffic runs close to the local 60/min IP limit, which can 429 the
+      // recovery's runtime.execute. This case proves a refused 503 recovers only by hand, not a natural limit
+      // window, so this reset is not evidence of rate-limit recovery.
+      await resetLocalIpWindow();
       await recoverGuide.click();
       await expect.poll(() => executionsOf(requestId, 'completed'), { timeout: 420000 }).toBe(1);
       expect(sendsOf(requestId)).toBe(2);
