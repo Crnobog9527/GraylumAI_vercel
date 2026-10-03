@@ -56,6 +56,24 @@
 | 定价与核对 | contract/adapter 版本、模型/工具/线路 ID、冻结兑换率/倍率/报价/上限、usage、覆盖组、最终性、冲突观测、结果/取消事实、查询尝试/来源/时间、收据验证及完整性摘要 | 提示词、原回答、工具参数/结果正文、URL 查询串、Skill 中混入的用户内容、SDK response 的 choices/message/reasoning |
 | 来源保护 | 原始预扣关联、grant/周期、reversed/quarantine/termination 状态、退款和冲正关系、一次终态/一次消费标识 | 与解释本笔收费无关的其他用户数据 |
 
+PAY-COMMON PR-1（暂定迁移 `0161_pay_common_contract.sql`）追加如下受限白名单：
+
+- `payment_orders`：`payment_channel`、`merchant_namespace`、`payment_mode`、`purchase_request_id`、
+  `purchase_payload_hash`、`purchase_snapshot`、`subscription_id`、`source_order_id`、`payment_amount_facts`。
+- `user_subscriptions`：渠道/命名空间/模式与 `contract_snapshot`；`subscription_credit_grants`：
+  `subscription_id`、`source_order_id`、`grant_snapshot`，保留原 grant、幂等身份和来源账务关系。
+- 快照只含契约版本、商品类型/内部 ID/更新时间版本、周期、币种/单位、精确价格/折扣、税处理、积分/赠送；
+  金额事实只含种类、精确十进制字符串或 unknown（JSON null）、币种/单位、无正文证据编号。
+  禁止原始回调、联系信息、支付工具和自由正文。未知金额不能写 0，已有事实只能追加。
+- `payment_provider_refs`：渠道、非敏感商户命名空间、模式、对象类型、外部对象编号、内部商品/订单/订阅关联、
+  周期与创建时间；共享商品 price 映射不随单一主体注销删除，其余按原交易 `T_fin` 保留。
+
+这三张原财务表的主体 FK 改为 RESTRICT，新映射和订单/订阅/grant 关联同为 RESTRICT；
+不得先删主体或提前 SET NULL。封闭后允许服务端追加原订单核对事实，但不得恢复登录或使用权。
+保留期仍为对应交易年度结束起 3 年；未决项先隔离核对。先清映射及 grant/退款对子订单、订阅的依赖，
+再按原订单引用从子到父清订单/订阅，最后清无引用主体。此清单与次序交接 #611；
+PR-1 不修改其注销控制器，也不授权执行到期清理或现金退款。
+
 原始证据与财务投影须分开：保留官方金额字段的原始精确表示、来源、验证方式及必要签名证据；清正文前核验财务投影能复算且不破坏收据冲突检测。原完整证据的 hash 与脱敏财务投影的 hash 分开命名，不假称脱敏后仍是原文；hash 不是备份、更不能代替缺失官方证据。`payload_hash` 等幂等证据仍按受限财务数据处理，不能公开或称匿名。
 
 #### 3.2 未决执行与晚到结果
@@ -274,12 +292,13 @@ PR-A 留给后续 PR 的必做事项：
 |ai_usage_logs ([0001][m0001],[0068][m0068],[0105][m0105])|M 最少成本/去重结果码；D IP/UA/error_message/自由 metadata|user/conversation SET NULL 不会擦正文；generation/run FK 默认 NO ACTION，须 detach 或保留 tombstone|
 |diagnostic_results ([0005][m0005],[0048][m0048])|D message/details/run_by；仅留不可反推的聚合时延|run_by 默认 NO ACTION，profile 前断链|
 |application_logs ([0006][m0006],[0048][m0048])|D message/context/user/request 关联；可留无正文统计|user SET NULL 不等于脱敏；account 删除显式扫 request/execution 关联|
-|payment_orders ([0012][m0012],[0041][m0041],[0043][m0043])|M 订单金额币种状态/支付发票订阅退款事件编号/履约时间；清 metadata 私文|user SET NULL；退款 JSON 中必要事件白名单单列留存|
-|user_subscriptions ([0012][m0012],[0037][m0037],[0042][m0042],[0053][m0053])|M 订阅/周期/终止时点原因码事件 ID；删私文|有效订阅按已决定 E4/E5 处理；profile CASCADE 需改|
+|payment_orders ([0012][m0012],[0041][m0041],[0043][m0043]、PAY-COMMON 暂定 0161)|M 原财务列及 §3.1 渠道、命名空间、模式、请求身份/摘要、冻结快照、精确金额事实、订阅/原订单关联；清 metadata 私文|主体及新增关联 RESTRICT；先映射/grant/退款依赖，再子订单→父订单/订阅，最后主体；不提前 SET NULL|
+|payment_provider_refs（PAY-COMMON 暂定 0161）|M §3.1 外部身份与订单/订阅关联；共享商品映射为 P，无私文|无主体 CASCADE；各目标 FK RESTRICT；财务映射在原交易保留期及核对结束后先于订单/订阅清，共享商品映射不随账号清|
+|user_subscriptions ([0012][m0012],[0037][m0037],[0042][m0042],[0053][m0053]、PAY-COMMON 暂定 0161)|M 原订阅事实及 §3.1 渠道/命名空间/模式/合同快照；删私文|主体 FK RESTRICT；先处理映射、grant 和订单依赖；有效订阅按已定 E4/E5 处理|
 |user_checkins ([0013][m0013],[0048][m0048])|D 签到记录；奖励 ledger 留 M|profile 前，现有 CASCADE；防刷不默认保留签到历史|
 |conversation_context_snapshots ([0014][m0014])|D content/metadata，滚动摘要/搜索摘要均删|message source SET NULL 不会清摘要；conversation 前|
 |scheduled_job_runs ([0017][m0017]、[0018][m0018b])|D summary/error 中用户 ID/正文；保留不含用户的任务计数和时间|无用户 FK 也必须按关联扫描|
-|subscription_credit_grants ([0045][m0045],[0052][m0052],[0053][m0053],[0060][m0060])|M 周期键、发放/消耗/扣回数、终止/会计复核、幂等和 ledger 编号|profile CASCADE 需改；未对账前不能删，否则退款恢复契约失效|
+|subscription_credit_grants ([0045][m0045],[0052][m0052],[0053][m0053],[0060][m0060]、PAY-COMMON 暂定 0161)|M 原周期/来源事实及内部订阅/原订单关联、grant_snapshot|主体和新增财务关联 FK RESTRICT；核对和保留期结束后，先清依赖再清 grant，最后父订单/订阅；未对账前不能删|
 |skills ([0062][m0062],[0064][m0064])|P 平台 Skill，清操作者身份/审计私文|created/updated/published/archived_by 默认 NO ACTION 且状态 CHECK 要求 actor；须将非账务操作者改可空 SET NULL，并同步状态 CHECK；保留发布事实，不长期保留身份占位|
 |skill_revisions ([0062][m0062])|P 发布物内容；操作者脱敏|published_by NOT NULL 默认 NO ACTION，immutable；受限擦除改可空归属，同步 guard，不删发布物|
 |skill_packages ([0064][m0064])|P manifest 与资源完整性|actor_id NOT NULL 默认 NO ACTION、immutable；受限断开上传人引用，如含用户私有上传则那份 D|
@@ -364,7 +383,7 @@ PR-A 留给后续 PR 的必做事项：
 5. **旧对话/执行**：slice_calls 的财务证据先隔离并保留原调用身份，正文清后处理 slice_executions；chat_summaries → chat_turns → artifact_chats；conversation_context_snapshots 在 messages/conversations 前处理。ordinary_chat_requests 的未决原身份保留无正文壳，终态后才能最终脱离/删除 conversation。先消除 token_stats 的会话 CASCADE 风险，不能顺手抹掉消费。
 6. **成果/研究**：token_stats/ai_usage_logs 对 generation 的引用受控脱链或保留财务壳；generations 清正文保留账务。其 candidate 关联处理后才能清 candidates；confirmations/requests/versions（所有 source_version 关系先处理）→ rounds；evidence 的 supersedes 后代先于祖先，引用解除后 → projects（source_project 自引用后代先）。research_operations 被 evidence 引用，先处理 evidence 后才能到期清 operations → plans。仍有未决财务时保留无正文父壳，不靠删父解决未决。
 7. **账号**：清测试窗口中的本 actor（最后一人按 §4 停用），保留窗口预算链；清工单（对象 → replies → tickets）、行为/应用日志、签到、邀请码（records/奖励脱敏 → invitations）、共享配置操作者引用。profiles 财务占位保留，Auth 关系按 §3.3 解除后用 Auth API 删登录。包含他人邀请奖励/共享配置时只清本人的身份，不误删他人账项。
-8. **财务到期（另一时间点）**：完成核对并到 `T_fin` 后，先处理 runtime/legacy 留存壳和 usage/ledger 对 run 的引用；receipts/provider_ids → calls → runs → billing_history。subscription_credit_grants、billing_history 对 credit_transactions 的引用先清/脱链再删流水；依赖 payment_orders/subscription 的行先处理；最后才删不再被引用的 profiles。未满足保留期的行继续留，无正文且不可消费；不能先删 profile 触发 [0001][m0001]/[0012][m0012]/[0045][m0045] 的财务 CASCADE。
+8. **财务到期（另一时间点）**：完成核对并到 `T_fin` 后，先处理 runtime/legacy 留存壳和 usage/ledger 对 run 的引用；receipts/provider_ids → calls → runs → billing_history。PAY-COMMON 映射及 grant/退款对订单、订阅的依赖先清；子订单先于原始父订单，订单先于关联订阅。subscription_credit_grants、billing_history 对 credit_transactions 的引用先清/脱链再删流水；依赖 payment_orders/subscription 的行先处理；最后才删不再被引用的 profiles。未满足保留期的行继续留，无正文且不可消费；不能先删 profile 触发 [0001][m0001]/[0012][m0012]/[0045][m0045] 的财务 CASCADE。
 
 这是约束依赖顺序，不是可直接复制执行的 SQL。基线缺失部分须 T01 补证再生成完整拓扑；循环/不能断开的关系用无正文壳而非关约束。当前 no-action FK、immutable guard、NOT NULL/CHECK 需同一实现方案处理，测试实际行数与拒绝读取。
 
