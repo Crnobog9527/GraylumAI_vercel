@@ -1037,7 +1037,7 @@ P0-1、CI-TRUST-1 ─→ AGENT-CORE（AC-0 → AC-1 → AC-2、AC-3 → AC-5 →
 DATA-ERASURE 删除规则设计 ─→ AC-2
 AGENT-CORE 稳定 ─→ RUNTIME-PROD 其余项（④ 的 BILL-PAYG 按下方主线提前）；MODEL-REASONING、BILL-UNIT、MODEL-PRICING-SYNC 已完成
 RESEARCH-0 + AC-1 + RUNTIME-PROD + DATA-ERASURE ─→ RESEARCH-TOOLS（原先接封闭内测，已取消，第 50 项）
-REPORT-GEN + BILL-PAYG + PAY-COMMON → PAY-WAFFO + ENTITLEMENTS + Owner 调整后的付费墙预览版 ─→ PAYWALL（第 7.4 节 N3 批次，排在 PAY-WAFFO 之后）
+REPORT-GEN + BILL-PAYG + PAY-COMMON → PAY-WAFFO + ENTITLEMENTS + 付费墙设计定稿入库 ─→ PAYWALL（第 7.4 节 N3 批次，排在 PAY-WAFFO 之后）
 PAYWALL + DATA-ERASURE ─→ EXPERT-CONSULT（第 7.4 节 N3 批次）
 D1 范围全部完成（第 0–4 阶段：上线基础含 RESEARCH-TOOLS；FUSION-REVIEW、LIB-DOCS、VOICE、UI-A—UI-FINISH、FUSION-COMPARE；PAY-COMMON → PAY-WAFFO、PAYWALL、EXPERT-CONSULT、LEGACY-CLOSE）─→ V3-M3 ─→ REL-1 ─→ 公开上线售卖（生产另行批准）
 公开上线前 ─→ Owner 决定 MODERATION 正式实现时间（暂缓，不作封闭内测前提；默认放行的检查点已随 #594 接线）
@@ -1086,7 +1086,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | N1c 完整定位流程 | DATA-ERASURE 删除规则设计、AC-2（含 CONVERSATION-DRIVEN-CAPTURE B1/B2）、AC-3、AC-5 及其对应的 AGENT-CORE-UI 部分（本步小结卡、右侧面板和进度条）；CHAT-NATIVE-OUTPUT、REPORT-GEN（暂列，待 Owner 选定批次） | Owner 从进入到定稿完整走通并验收 |
 | N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；CONTENT-CONVERSATION-DRIVEN（暂列，方案待写，待 Owner 选定批次）；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
 | N2 上线基础 | RUNTIME-PROD（含 BILL-UNIT、BILL-PAYG）、PROMPT-CACHE、PROMPT-CACHE-HISTORY、RATE-LIMIT 接线（含默认放行的 MODERATION-HOOK）、DB-BASELINE、RESEARCH-TOOLS、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON。2026-10-03：BILL-UNIT、PROMPT-CACHE、RATE-LIMIT、ENTITLEMENTS、MODEL-PRICING-SYNC 已完成，PROMPT-CACHE-HISTORY H1 已合并；钱路线已由 Owner 批准并行开工（第 46 项） | 上线基础完成。原定此后先做 5–10 人封闭内测（D8），2026-10-03 已取消（第 2.1 节第 50 项），按 D1 范围完成后直接公开上线售卖 |
-| N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO（含微信一次性会员）；PAYWALL（依赖 REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-WAFFO、ENTITLEMENTS 和 Owner 调整后的预览版，须在 REL-1 之前完成）；EXPERT-CONSULT（依赖 PAYWALL、DATA-ERASURE，须在 REL-1 之前完成） | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
+| N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO（含微信一次性会员）；PAYWALL（依赖 REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-WAFFO、ENTITLEMENTS 和已入库的付费墙设计定稿，须在 REL-1 之前完成）；EXPERT-CONSULT（依赖 PAYWALL、DATA-ERASURE，须在 REL-1 之前完成） | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
 | N4 收口 | LEGACY-CLOSE、V3-M3；公开上线前请 Owner 决定 MODERATION 正式实现时间 | 完整验收；REL-1 和生产另行批准 |
 
 每批由 Owner 选定后开工，批次内由 Agent 自主排序、测试、修复，完成后停下，不自动开始下一批（AGENTS 第 5 节）。
@@ -1309,7 +1309,7 @@ Owner 于 2026-09-27 确认 D1–D17（D6 在 Fable 评估后改为不含 PDF；
 | staging 服务商回调地址（2026-10-01） | 旧域名已删除（第 37 项）；Stripe / Waffo 沙箱回调和 Supabase Site URL 待 Owner 自行检查确认 | 支付或邮件回调相关的 staging 验证前（建议） |
 | 上线前配置与产品数值复核（2026-10-01，2026-10-03 更新） | 正式环境 Upstash 上线前配置，Vercel Pro 已决定升级但仍待执行；staging 的 q=100/m=3 已按 Owner 批准修改（第 39 项）；套餐价格和每月积分已定（Pro $29 / 3,480、Gold $69 / 8,970，年付 $279 / $621，第 51 项），积分包比例已定（第 50 项），需要单独批准的只是实际写入配置；真正待定的只有开户赠送积分、$9.90 以外的积分包档位和 Gold 积分包折扣比例（见下方"定价占位值"），邀请奖励 50/30 按 m=6 复核 | 具体执行前批准；上线前完成（第 7.6 节） |
 | 对话原生体验的续写次数（2026-10-03） | #604 方案第一版推荐每次回答最多自动续写 3 次、单次上限保持 8192；方案还在审查 | #604 审查干净后由总控交 Owner |
-| 付费墙视觉风格（2026-10-04） | Owner 认为现有 8 个界面的视觉要改，将自行调整预览版（[记录 N](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972956845)）；规则以 artifact `MW9Ja3xTfLNbzraTudi2X7` 为准 | PAYWALL 代码实施开工前；在此之前不安排 PAYWALL 实施 |
+| 付费墙视觉风格（2026-10-04） | Owner 认为现有 8 个界面的视觉要改，将自行调整预览版（[记录 N](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972956845)）；规则以 artifact `MW9Ja3xTfLNbzraTudi2X7` 为准 | PAYWALL 代码实施开工前；定稿后由总控导出 HTML 和截图入库（第 51 项），在此之前不安排 PAYWALL 实施 |
 | 定价占位值（2026-10-04） | 开户赠送积分、积分包 $9.90 以外的档位、Gold 积分包折扣比例（折扣不宜超过约 23%，[记录 B](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5971895597)）仍是占位（第 51 项） | PAYWALL 实施时按实测定，配置修改前批准 |
 | Pro 升 Gold 差价（2026-10-04） | 交给 PAY-WAFFO 方案定（[记录 J](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972539553)） | PAY-WAFFO 方案 |
 | 工作室版价格和权益（2026-10-04） | 方向已定，上线只放"联系我们"；正式价格和权益未定（[记录 L](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972732100)） | 开发团队功能时 |
