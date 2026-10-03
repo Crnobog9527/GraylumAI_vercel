@@ -1,3 +1,5 @@
+import {vi} from 'vitest';
+import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeAll, afterAll, it, expect } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
@@ -628,7 +630,7 @@ it("OPC: real SDK HTTP result becomes a candidate on original draft; restart/rep
     const addr = server.address();
     if (!addr || typeof addr === "string") throw new Error("local endpoint");
     const endpoint = "http://127.0.0.1:" + addr.port;
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint,
@@ -650,7 +652,7 @@ it("OPC: real SDK HTTP result becomes a candidate on original draft; restart/rep
     await expect(
       f.service.planResult(d.draftId, prepared.executionId),
     ).rejects.toThrow("DENIED");
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint,
@@ -1188,7 +1190,7 @@ it("OPC: work item uses shared Runtime and saves non-workflow Skill artifact onc
     if (!address || typeof address === "string")
       throw new Error("local server");
     const endpoint = "http://127.0.0.1:" + address.port;
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint,
@@ -1201,7 +1203,7 @@ it("OPC: work item uses shared Runtime and saves non-workflow Skill artifact onc
       network: "deny",
       sources: [],
     });
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint,
@@ -1278,7 +1280,7 @@ it("OPC: work item uses shared Runtime and saves non-workflow Skill artifact onc
     await expect(
       f.artifacts.report(saved.artifactId, saved.artifactId),
     ).rejects.toThrow("DENIED"); // Dedicated result projection above is readable; workflow mutation/export entry stays closed.
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint,
@@ -1498,7 +1500,7 @@ it("OPC: plan generation uses the original SDK session and returns a separate bo
     if (!address || typeof address === "string")
       throw new Error("local server");
     const endpoint = "http://127.0.0.1:" + address.port;
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint,
@@ -1518,7 +1520,7 @@ it("OPC: plan generation uses the original SDK session and returns a separate bo
     expect((await f.service.prepareStep(request)).executionId).toBe(
       prepared.executionId,
     );
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint,
@@ -1766,7 +1768,7 @@ it.skipIf(!process.env.V3_REAL_SKILL_INPUT)(
     expect(frozen.instructions).toContain("不编造数据");
     expect(frozen.request.sessionId).toBe(d.sessionId);
     const { runtimeExecutor } = await import("../runtime/execute");
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint: process.env.V3_RUNTIME_LOCAL_ENDPOINT!,
@@ -3004,7 +3006,7 @@ it('OPC: CAPACITY tool continuation measures each complete SDK request and cap b
    const seed=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'HISTORY_CANARY_'+ '旧讨论'.repeat(400),selection:{kind:'ordinary',modelId},network:'deny'});
    const seedServer=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;const request=JSON.parse(JSON.parse(raw).input);const id='seed-'+randomUUID();res.setHeader('content-type','application/json');res.end(JSON.stringify({id,model:request.model,final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:request.model,choices:[{index:0,message:{role:'assistant',content:'必要约束已保留'},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));});
    await new Promise<void>(resolve=>seedServer.listen(0,'127.0.0.1',resolve));
-   try{const address=seedServer.address();if(!address||typeof address==='string')throw new Error('seed server');const executor=runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});expect(await executor.execute(seed.executionId)).toMatchObject({state:'completed'});}
+   try{const address=seedServer.address();if(!address||typeof address==='string')throw new Error('seed server');const executor=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});expect(await executor.execute(seed.executionId)).toMatchObject({state:'completed'});}
    finally{await new Promise<void>((resolve,reject)=>seedServer.close(error=>error?reject(error):resolve()));}
   }
   const prepared=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'请读取我的长来源并回答',selection:{kind:'ordinary',modelId},network:'deny'});
@@ -3025,7 +3027,7 @@ it('OPC: CAPACITY tool continuation measures each complete SDK request and cap b
     if(interrupted&&name==='runtime_session_items'&&args.p_action==='append')return {data:null,error:{message:'synthetic interruption after tool-loop receipts'}};
     return admin.rpc(name,args);
    }};
-   const executor=runtimeExecutor({database,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
+   const executor=runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
    let result=await executor.execute(prepared.executionId);
    if(interrupt){
     expect(result).toMatchObject({state:'pending'});expect(requests).toHaveLength(3);
@@ -3098,7 +3100,7 @@ it('OPC: CAPACITY interrupted request retains frozen manuscript after a new save
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{
   const address=server.address();if(!address||typeof address==='string')throw new Error('local server');
-  const executor=runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
+  const executor=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
   expect(await executor.execute(prepared.executionId)).toMatchObject({state:'pending'});
   const historyBefore=(await sql.query('select count(*)::int n from runtime_session_history where session_id=$1',[work.sessionId])).rows[0].n;
   await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:1,sourceContentId:first.id,kind:'brief',status:'final',title:'恢复隔离稿',body:'CAPACITY_NEW_V2_正文'});
@@ -3179,7 +3181,7 @@ for (const sample of [
   try {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("local server");
-    const executor = runtimeExecutor({ database: admin, actor: async () => f.actor, endpoint: "http://127.0.0.1:" + address.port });
+    const executor = runtimeExecutor({callGate:allowTestCalls, database: admin, actor: async () => f.actor, endpoint: "http://127.0.0.1:" + address.port });
     expect(await executor.execute(prepared.executionId)).toEqual({ state: "completed", body: primaryBody, summary: extractionBody });
     expect(requests.map(item => item.model)).toEqual([frozen.model, frozen.attachedOrganizer.model]);
     // Inspect the real SDK wire after admission, freezing and execution, not
@@ -3324,7 +3326,7 @@ it("OPC: the Agent opens the current question once per entry and plans without u
   try {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("local server");
-    const executor = runtimeExecutor({
+    const executor = runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint: "http://127.0.0.1:" + address.port,
@@ -3499,7 +3501,7 @@ it("OPC: a confirmed positioning produces an editable first-week plan candidate 
   try {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("local server");
-    await runtimeExecutor({
+    await runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint: "http://127.0.0.1:" + address.port,
@@ -3606,7 +3608,7 @@ it("OPC: a revised round opens the same question under its own identity without 
   try {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("local server");
-    const executor = runtimeExecutor({
+    const executor = runtimeExecutor({callGate:allowTestCalls,
       database: admin,
       actor: async () => f.actor,
       endpoint: "http://127.0.0.1:" + address.port,
@@ -9129,7 +9131,7 @@ it.each([[2, "same"], [2, "draft"], [2, "published"], [3, "published"]] as const
     mark('unadmitted-verified');
     const prepared = await f.service.prepareStep(envelope.request);
     const { runtimeExecutor } = await import("../runtime/execute");
-    await runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:process.env.V3_RUNTIME_LOCAL_ENDPOINT!}).execute(prepared.executionId);
+    await runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actor,endpoint:process.env.V3_RUNTIME_LOCAL_ENDPOINT!}).execute(prepared.executionId);
     mark('receipt-saved');
     let resultLost = 0;
     await page.route('**/api/trpc/opc.planResult*', async route => { await route.fetch(); await route.abort(); resultLost += 1; });
@@ -9407,6 +9409,14 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
   const modelId=await planFixtureModel(f.moduleId);
   await sql.query('update modules set active=false where id<>$1',[f.moduleId]);
   const saved={credentials:{email:f.email,password:f.password},actor:f.actor,moduleId:f.moduleId,modelId};
+  // Every local browser request shares 127.0.0.1, and the website's IP limiter (#488) allows 60 per
+  // minute. This journey with #595's history polling exceeds that, which is not what it verifies:
+  // start a fresh local window before each phase. Only the disposable local Redis is flushed.
+  const {execFileSync}=await import('node:child_process');
+  const freshLimitWindow=()=>{
+    const tag=process.env.V3_RATE_LIMIT_TAG;
+    if(tag&&/^[a-z0-9][a-z0-9-]{0,80}$/.test(tag))expect(execFileSync('docker',['exec',tag+'-redis','redis-cli','FLUSHDB'],{encoding:'utf8'}).trim()).toBe('OK');
+  };
   const {chromium}=await import('../../../../../apps/web/node_modules/@playwright/test');
   const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
   const context=await browser.newContext();
@@ -9463,6 +9473,7 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
     ];
     const confirm=page.getByRole('button',{name:'确认当前信息，继续',exact:true});
     for(const [label,value] of answers){
+      freshLimitWindow();
       await confirm.click();
       await page.getByRole('textbox',{name:label,exact:true}).fill(value);
       await page.getByText('已自动保存',{exact:true}).waitFor();
@@ -9471,6 +9482,7 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
         await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/delivered-positioning-stage3-1600x900.png'});
       }
     }
+    freshLimitWindow();
     await confirm.click();
     const positioningUrl=page.url();
     const confirmed=await f.service.read(draftId);
@@ -9488,6 +9500,7 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
     await second.getByRole('link',{name:'继续这条内容工作',exact:true}).waitFor();
     const adopted=await f.service.library({search:'',from:null,to:null});
     expect(adopted.businesses.flatMap((business:{accounts:Array<{items:Array<{title:string}>}>})=>business.accounts.flatMap(account=>account.items.map(item=>item.title)))).toEqual(['第二个账号选题']);
+    freshLimitWindow();
     await second.getByRole('link',{name:'继续这条内容工作',exact:true}).click();
     await page.waitForURL(url=>url.pathname==='/runtime');
     await page.getByLabel('消息',{exact:true}).fill('请根据这条选题给我一版文章正文建议，先不要定稿。');
@@ -9518,7 +9531,8 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
     await page.getByRole('button',{name:'关闭窗口',exact:true}).click();
     await page.getByRole('link',{name:'返回当前工作',exact:true}).last().click();
     await page.waitForURL(url=>url.pathname==='/runtime');
-    expect(page.url()).toBe(contentUrl);
+    // The page consumes the one-shot continue marker after it loads; compare once it is gone.
+    await expect.poll(()=>page.url(),{timeout:60000}).toBe(contentUrl);
     await page.reload();
     await page.getByLabel('文章正文').waitFor();
     await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/default-content-journey.png',fullPage:true});
@@ -10043,7 +10057,7 @@ it('OPC: free runtime reads owned context only on model tool request and recheck
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{
   const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
-  const executor=runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
+  const executor=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
   const unrelated=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'Give general travel packing tips',selection:{kind:'ordinary',modelId},network:'deny'});
   expect(await executor.execute(unrelated.executionId)).toMatchObject({state:'completed'});
   expect(JSON.stringify(requests[0])).not.toContain(secret);expect(JSON.stringify(requests[0])).not.toContain('context-account');
@@ -10341,7 +10355,7 @@ it.skipIf(!process.env.V3_LEGACY_ROOT)('OPC: U3 cross-code receipt recovery pres
    if(mode!=='unknown')expect(JSON.stringify(before.receipts)).toContain('合成回复');
    await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:version,sourceContentId:second.id,kind:'brief',status:'final',title:'升级恢复稿',body:'UPGRADE_AFTER_INTERRUPT_'+mode});
    const observed={rpc:async(name:string,args:Record<string,unknown>)=>{const r=await admin.rpc(name,args);if(r.error)errors.push(r.error.message);return r;}};
-   const executor=runtimeExecutor({database:observed,actor:async()=>f.actor,endpoint});
+   const executor=runtimeExecutor({callGate:allowTestCalls,database:observed,actor:async()=>f.actor,endpoint});
    const recovered=await executor.execute(prepared.executionId);
    console.info('U3_UPGRADE_RESULT',JSON.stringify({legacyRef:process.env.V3_LEGACY_REF,mode,recovered,errors,dispatches:requests.length-beforeDispatch,requestBytes:Buffer.byteLength(sent),requestHash:before.calls[0].payload.requestHash}));
    if(mode==='marked'||!process.env.V3_LEGACY_REF?.startsWith('6d70caf'))expect(errors).toEqual([]);
@@ -10397,7 +10411,7 @@ it.each(['true','omitted','false'] as const)('OPC: stopped pending cost unlocks 
  const server=createServer(async(req,res)=>{for await(const _ of req){/* local only */}posts++;res.destroy();});
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
  const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
- const executor=runtimeExecutor({database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
+ const executor=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actor,endpoint:'http://127.0.0.1:'+address.port});
  const {browser,page}=await planBrowser({...f,d:draft});
  const key='opc-step:'+draft.draftId+':step-0';
  try{
@@ -10840,7 +10854,7 @@ for (const sample of [
   try {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("local server");
-    const executor = runtimeExecutor({ database: admin, actor: async () => f.actor, endpoint: "http://127.0.0.1:" + address.port });
+    const executor = runtimeExecutor({callGate:allowTestCalls, database: admin, actor: async () => f.actor, endpoint: "http://127.0.0.1:" + address.port });
     expect(await executor.execute(prepared.executionId)).toEqual({ state: "completed", body: primaryBody, summary: extractionBody });
     expect(requests.map(item => item.model)).toEqual([frozen.model, frozen.attachedOrganizer.model]);
     // Inspect the real SDK wire after admission, freezing and execution, not
@@ -10913,3 +10927,809 @@ for (const sample of [
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
 }, 90000);
+
+vi.mock('../runtime/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../runtime/newWorkGate')>(),
+ ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
+}));
+
+// RATE-LIMIT front end (plan section 9, A segment), positioning page only: real website,
+// PostgreSQL, BILL2, local Redis + SRH and the synthetic provider. Limits and the pause are
+// written directly to system_settings, not through the admin card; A0/A2/A6 button/A10,
+// A5 (/runtime) and A5b (topics) are not covered here (see the PR's Validation handoff).
+it("OPC: RATE-LIMIT browser gate notices keep the original request, never auto-retry and charge nothing", async () => {
+  const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const { execFileSync } = await import("node:child_process");
+  const tag = process.env.V3_RATE_LIMIT_TAG;
+  if (!tag || !/^[a-z0-9][a-z0-9-]{0,80}$/.test(tag)) throw new Error("local rate limit required");
+  const docker = (...args: string[]) => execFileSync("docker", args, { encoding: "utf8" }).trim();
+  const flush = () => expect(docker("exec", tag + "-redis", "redis-cli", "FLUSHDB")).toBe("OK");
+  const notice = {
+    minute: "操作过于频繁，请稍后再试。本次被拦截的调用不扣积分。",
+    paused: "AI服务暂时暂停新调用，请稍后再试。本次被拦截的调用不扣积分。",
+    unavailable: "暂时无法确认使用额度，请稍后再试。本次被拦截的调用不扣积分。",
+  };
+  const limits = (patch: Record<string, unknown> = {}) => sql.query(
+    "insert into system_settings(key,value) values('runtime_rate_limits',$1::jsonb) on conflict(key) do update set value=excluded.value",
+    [JSON.stringify({ version: 1, admissionPerMinute: 10, admissionPer24Hours: 200, callsPerMinute: 30,
+      callsPer24Hours: 600, stopNewCalls: false, ...patch })]);
+  const storedLimits = async () => {
+    const raw = (await sql.query("select value from system_settings where key='runtime_rate_limits'")).rows[0]?.value;
+    return typeof raw === "string" ? JSON.parse(raw) : raw;
+  };
+  const f = await fixture(3);
+  await planFixtureModel(f.moduleId);
+  const credits = async () => Number((await sql.query("select credits from profiles where id=$1", [f.actor])).rows[0].credits);
+  const executions = async () =>
+    Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n);
+  const executionsFor = async (requestId: string) => Number((await sql.query(
+    "select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2", [f.actor, requestId])).rows[0].n);
+  await limits();
+  flush();
+  const browser = await chromium.launch({
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true,
+  });
+  let paused = false;
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", route => {
+      const u = new URL(route.request().url());
+      return ["127.0.0.1", "localhost"].includes(u.hostname) || ["data:", "blob:"].includes(u.protocol)
+        ? route.continue() : route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(90000);
+    const errors: string[] = [];
+    page.on("pageerror", e => errors.push(e.message));
+    // Every browser send of a mentor turn, by its user input: proves the page never re-sends by itself.
+    const sent: string[] = [];
+    page.on("request", request => {
+      if (!request.url().includes("/api/trpc/opc.mentorTurnStream")) return;
+      for (const item of Object.values(JSON.parse(request.postData() ?? "{}")) as Array<{ input?: string }>)
+        if (item?.input) sent.push(item.input);
+    });
+    const sends = (input: string) => sent.filter(value => value === input).length;
+    const ready = page.waitForResponse(r => r.url().includes("/api/trpc/settings.getSystemSettings") && r.ok());
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=/positioning");
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", { name: "登录", exact: true }).last().click();
+    await page.waitForURL(url => url.pathname === "/positioning", { timeout: 90000 });
+    const draft = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: "mentor", businessName: "限流测试业务" });
+    await page.goto(process.env.V3_LOCAL_APP + "/positioning/" + draft.draftId);
+    const chat = page.getByRole("log", { name: "完整导师消息" });
+    await chat.getByText("导师主动引导 · 1.1", { exact: true }).waitFor({ timeout: 60000 });
+    const box = page.getByRole("textbox", { name: "给导师的回复", exact: true });
+    const send = page.getByRole("button", { name: "发送", exact: true });
+    const labels = chat.getByText(/^导师 · /);
+    const alert = (text: string) => page.getByRole("alert").filter({ hasText: text });
+    // #595's single retry line for a retained request that was never admitted.
+    const retry = page.locator("p", { hasText: "上一条回复还没确认完成" }).getByRole("button", { name: "重试", exact: true });
+    const minuteWindow = () => Math.floor(Date.now() / 60000);
+    async function sendTurn(text: string) {
+      await box.fill(text);
+      await expect.poll(() => send.isEnabled(), { timeout: 30000 }).toBe(true);
+      const window = minuteWindow();
+      await send.click();
+      return window;
+    }
+    const completedTurns = async () => Number((await sql.query(
+      "select count(*)::int n from runtime_executions where actor_id=$1 and state='completed'", [f.actor])).rows[0].n);
+    // Counts completed executions (opening included): a stopped turn also renders a mentor bubble.
+    async function expectReply(count: number) {
+      await expect.poll(completedTurns, { timeout: 60000 }).toBe(count);
+      await expect.poll(async () => (await sql.query(
+        "select count(*)::int n from runtime_executions where actor_id=$1 and state not in ('completed','cancelled')", [f.actor],
+      )).rows[0].n, { timeout: 60000 }).toBe(0);
+    }
+    /** The request id of the retained step envelope, as the page persisted it. */
+    async function retainedRequestId() {
+      const raw = await page.evaluate(prefix => {
+        const key = Object.keys(sessionStorage).find(name => name.startsWith(prefix));
+        return key ? sessionStorage.getItem(key) : null;
+      }, "opc-step:" + draft.draftId + ":");
+      return raw ? JSON.parse(raw).request.requestId as string : null;
+    }
+    /**
+     * A refused message: one browser send, no new execution or charge, and the page keeps
+     * the same request id without sending again, also once its retry line is shown.
+     */
+    async function expectRefusedAndRetained(input: string, before: { credits: number; executions: number }, text: string) {
+      await alert(text).waitFor();
+      const requestId = await retainedRequestId();
+      expect(requestId).toBeTruthy();
+      await retry.waitFor({ timeout: 90000 });
+      expect(sends(input)).toBe(1);
+      expect(await executions()).toBe(before.executions);
+      expect(await executionsFor(requestId!)).toBe(0);
+      await expect.poll(credits, { timeout: 30000 }).toBe(before.credits);
+      expect(await retainedRequestId()).toBe(requestId);
+      expect(await page.getByText(/结果未知|状态待核实/).count()).toBe(0);
+      return requestId!;
+    }
+    /** The explicit retry sends the retained request once more, under the same request id. */
+    async function retryOnce(input: string, requestId: string, completed: number) {
+      await retry.click();
+      await expectReply(completed);
+      expect(sends(input)).toBe(2);
+      expect(await executionsFor(requestId)).toBe(1);
+      await expect.poll(retainedRequestId, { timeout: 30000 }).toBeNull();
+    }
+    const snapshot = async () => ({ credits: await credits(), executions: await executions() });
+    await expect.poll(completedTurns, { timeout: 60000 }).toBe(1);
+    // Upstash sliding windows weight the previous fixed window and round down, so a round
+    // straddling a minute boundary may not count. Bucket-filling steps start a fresh window,
+    // and each refusal asserts that both sends really fell into the same window.
+    async function atWindowStart() {
+      const into = Date.now() % 60000;
+      if (into > 10000) await page.waitForTimeout(60000 - into + 300);
+      flush();
+    }
+
+    // A3: with one message per minute, the second message in the same window is refused.
+    await sendTurn("第一轮正常对话");
+    await expectReply(2);
+    await limits({ admissionPerMinute: 1 });
+    await atWindowStart();
+    const filled = await sendTurn("限流前的一轮");
+    await expectReply(3);
+    let before = await snapshot();
+    expect(await sendTurn("第二轮会被限流")).toBe(filled);
+    const refusedA3 = await expectRefusedAndRetained("第二轮会被限流", before, notice.minute);
+    // A4: FLUSHDB simulates the window expiring (no real one-minute wait); the retry reuses the request id.
+    flush();
+    await retryOnce("第二轮会被限流", refusedA3, 4);
+    const counted = await fetch(process.env.V3_LOCAL_REST! + "/__runtime_count", { headers: { "x-local-control": process.env.V3_LOCAL_CONTROL! } });
+    expect(((await counted.json()).userRequests as string[]).filter(input => input === "第二轮会被限流")).toHaveLength(1);
+
+    // A6: pause refuses the new message without spending; the explicit retry continues after it ends.
+    await limits({ stopNewCalls: true });
+    before = await snapshot();
+    await sendTurn("暂停期间的消息");
+    const refusedA6 = await expectRefusedAndRetained("暂停期间的消息", before, notice.paused);
+    await limits();
+    flush();
+    await retryOnce("暂停期间的消息", refusedA6, 5);
+
+    // A8: a round needing two calls (reply + organizer) exceeds a one-call limit: configuration refusal.
+    // Sent as typed text, not through an answer card.
+    await limits({ callsPerMinute: 1 });
+    before = await snapshot();
+    await sendTurn("单轮调用超过上限");
+    await alert(notice.unavailable).waitFor();
+    await page.waitForTimeout(3000);
+    expect(sends("单轮调用超过上限")).toBe(1);
+    expect(await executions()).toBe(before.executions + 1);
+    await expect.poll(credits, { timeout: 30000 }).toBe(before.credits);
+    expect((await sql.query("select state from runtime_executions where actor_id=$1 order by created_at desc limit 1", [f.actor]))
+      .rows[0].state).toBe("cancelled");
+
+    // A7: the call bucket refuses the next round after one two-call round in this window;
+    // every earlier reply body and organizer result stays exactly as it was.
+    await limits({ callsPerMinute: 2 });
+    await atWindowStart();
+    const bucket = await sendTurn("调用桶第一轮");
+    await expectReply(6);
+    const results = () => sql.query(
+      "select id, result::text from runtime_executions where actor_id=$1 and state='completed' order by created_at", [f.actor])
+      .then(r => r.rows);
+    const shownReplies = async () => {
+      await expect.poll(() => labels.count(), { timeout: 60000 }).toBeGreaterThanOrEqual(5);
+      return Promise.all((await labels.all()).map(label => label.locator("..").innerText()));
+    };
+    await page.reload();
+    const repliesBefore = await shownReplies(), resultsBefore = await results();
+    const informationBefore = (await f.service.read(draft.draftId)).information;
+    before = await snapshot();
+    expect(await sendTurn("调用桶第二轮")).toBe(bucket);
+    await alert(notice.minute).waitFor();
+    await page.waitForTimeout(3000);
+    expect(sends("调用桶第二轮")).toBe(1);
+    expect(await executions()).toBe(before.executions + 1);
+    await expect.poll(credits, { timeout: 30000 }).toBe(before.credits);
+    await page.reload();
+    expect((await shownReplies()).slice(0, repliesBefore.length)).toEqual(repliesBefore);
+    expect(await results()).toEqual(resultsBefore);
+    expect((await f.service.read(draft.draftId)).information).toEqual(informationBefore);
+
+    // A9: the SRH stops answering. The website IP limiter (#488) shares this Redis and fails
+    // closed first with a plain 503 outside tRPC, so the page keeps its generic retained-request
+    // notice instead of the gate text (controller decision). Refused, uncharged, retained, recoverable.
+    await limits();
+    flush();
+    docker("pause", tag + "-srh");
+    paused = true;
+    before = await snapshot();
+    await sendTurn("缓存故障时的消息");
+    const refusedA9 = await expectRefusedAndRetained("缓存故障时的消息", before, "操作未完成");
+    docker("unpause", tag + "-srh");
+    paused = false;
+    await retryOnce("缓存故障时的消息", refusedA9, 7);
+    expect(errors).toEqual([]);
+
+    // A1: an ordinary user cannot open the admin settings or call the admin procedures.
+    await page.goto(process.env.V3_LOCAL_APP + "/admin/settings");
+    await page.waitForURL(url => url.pathname === "/access-denied", { timeout: 60000 });
+    expect(await page.getByText("AI使用额度").count()).toBe(0);
+    // Called from the signed-in page so the request carries the user's own session cookies.
+    const call = (path: string, body?: unknown) => page.evaluate(async ([target, payload]) => {
+      const response = await fetch("/api/trpc/" + target, payload === undefined ? {} : {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+      return { status: response.status, text: await response.text() };
+    }, [path, body] as const);
+    const denied = [await call("runtimeRateLimits.get"),
+      await call("runtimeRateLimits.update", { ...await storedLimits(), stopNewCalls: true })];
+    for (const response of denied) {
+      expect(response.status).toBe(403);
+      expect(response.text).toContain("FORBIDDEN");
+    }
+    expect((await storedLimits()).stopNewCalls).toBe(false);
+  } finally {
+    if (paused) docker("unpause", tag + "-srh");
+    await sql.query("delete from system_settings where key='runtime_rate_limits'");
+    await browser.close();
+  }
+}, 900000);
+
+// /runtime on one video work item. First, a round cancelled by the call gate shows only its
+// fixed notice, also after a reload, never a "verifying" reply. Then (review P2 on #594) a video
+// package refused by the new-work gate at admission keeps its material and request id, is not
+// resumed automatically after a reload, and the explicit retry sends that same request once.
+it("OPC: RATE-LIMIT /runtime call-gate stop display and video package admission hold", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const tag = process.env.V3_RATE_LIMIT_TAG;
+  if (!tag || !/^[a-z0-9][a-z0-9-]{0,80}$/.test(tag)) throw new Error("local rate limit required");
+  expect(execFileSync("docker", ["exec", tag + "-redis", "redis-cli", "FLUSHDB"], { encoding: "utf8" }).trim()).toBe("OK");
+  const paused = "AI服务暂时暂停新调用，请稍后再试。本次被拦截的调用不扣积分。";
+  const limits = (stopNewCalls: boolean, callsPerMinute = 180) => sql.query(
+    "insert into system_settings(key,value) values('runtime_rate_limits',$1::jsonb) on conflict(key) do update set value=excluded.value",
+    [JSON.stringify({ version: 1, admissionPerMinute: 60, admissionPer24Hours: 5000, callsPerMinute,
+      callsPer24Hours: 15000, stopNewCalls })]);
+  await limits(false);
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const seed = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'existing-account', title: '原工作', brief: '原有账号项目', day: '2026-09-20' }] });
+  await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: seed.planId,
+    accounts: [{ platform: 'x', account: 'existing-account', expectedRevision: null }] });
+  const { browser, page } = await planBrowser(f);
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + f.d.draftId + '/topics');
+    await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
+    // The video topic on the existing account; each candidate card adopts on its own.
+    const card = page.getByRole('heading', { name: '1. 首周选题', exact: true }).first().locator('..');
+    await card.getByRole('button', { name: '采用这个选题', exact: true }).click({ timeout: 60000 });
+    await card.getByRole('link', { name: '继续这条内容工作', exact: true }).click({ timeout: 60000 });
+    await page.waitForURL(url => url.pathname === '/runtime');
+    await page.getByText('【主动引导合成示例，仅验证交互】', { exact: false }).first().waitFor({ timeout: 60000 });
+    await page.getByLabel('消息', { exact: true }).fill('请和我讨论这条视频的口播稿。');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true });
+    await finalize.waitFor({ timeout: 60000 });
+    await finalize.click();
+    await page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true }).waitFor({ timeout: 60000 });
+    const sessionId = new URL(page.url()).searchParams.get('session')!;
+    const videoKey = 'opc-video-operation:' + sessionId;
+    const packageRuns = async () => Number((await sql.query(
+      "select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and payload->>'input' like '[OPC_VIDEO_PACKAGE_V1]%'",
+      [f.actor, sessionId])).rows[0].n);
+    const credits = async () => Number((await sql.query("select credits from profiles where id=$1", [f.actor])).rows[0].credits);
+    // Earlier rounds may still settle (release unused reservations); take baselines only once
+    // nothing runs and the balance holds still, so a later change belongs to the step under test.
+    async function settledCredits() {
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const busy = Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and state not in ('completed','cancelled')",
+          [f.actor])).rows[0].n);
+        const first = await credits();
+        await page.waitForTimeout(2000);
+        if (!busy && first === await credits()) return first;
+      }
+      throw new Error('credits did not settle');
+    }
+    const packagePrepares: string[] = [], abandons: string[] = [];
+    page.on('request', request => {
+      const body = request.postData() ?? '';
+      if (/\/api\/trpc\/runtime\.prepare(?:[?,]|$)/.test(request.url()) && body.includes('[OPC_VIDEO_PACKAGE_V1]'))
+        packagePrepares.push(body);
+      if (request.url().includes('opc.prepareVideoMaterial') && body.includes('abandon')) abandons.push(body);
+    });
+
+    // A /runtime round needs 3 calls; a 2-call limit cancels it before its first call.
+    const unavailable = '暂时无法确认使用额度，请稍后再试。本次被拦截的调用不扣积分。';
+    const stoppedRounds = async () => Number((await sql.query(
+      "select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and state='cancelled'", [f.actor, sessionId])).rows[0].n);
+    const stoppedBefore = await stoppedRounds(), creditsAtStop = await settledCredits();
+    await limits(false, 2);
+    await page.getByLabel('消息', { exact: true }).fill('调用闸门下的一轮');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: unavailable }).waitFor({ timeout: 60000 });
+    await expect.poll(stoppedRounds, { timeout: 30000 }).toBe(stoppedBefore + 1);
+    const transcript = page.getByLabel('对话记录', { exact: true });
+    await transcript.getByRole('status').filter({ hasText: unavailable }).waitFor({ timeout: 30000 });
+    expect(await page.getByText('正在核实结果，请保留原任务。', { exact: true }).count()).toBe(0);
+    expect(await credits()).toBe(creditsAtStop);
+    await page.reload();
+    await transcript.getByRole('status').filter({ hasText: unavailable }).waitFor({ timeout: 60000 });
+    expect(await page.getByText('正在核实结果，请保留原任务。', { exact: true }).count()).toBe(0);
+    await limits(false);
+
+    const runsBefore = await packageRuns(), creditsBefore = await settledCredits();
+
+    await limits(true);
+    await page.getByLabel('消息', { exact: true }).fill('先做分镜，再生成剪辑建议');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: paused }).waitFor({ timeout: 60000 });
+    expect(await page.getByText(/视频工作请求状态待核实|原视频工作请求已明确拒绝/).count()).toBe(0);
+    const held = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
+    expect(held.held).toBe(true);
+    expect(held.followup.executionId).toBeUndefined();
+    expect(packagePrepares).toHaveLength(1);
+    expect(abandons).toEqual([]);
+    expect(await packageRuns()).toBe(runsBefore);
+    expect(await credits()).toBe(creditsBefore);
+
+    // A reload must not resume the held request by itself.
+    await page.reload();
+    await page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true }).waitFor({ timeout: 60000 });
+    await page.waitForTimeout(5000);
+    expect(packagePrepares).toHaveLength(1);
+    expect(JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!)).toEqual(held);
+
+    // The explicit retry after the pause ends sends the same request id once and completes.
+    await limits(false);
+    await page.getByLabel('消息', { exact: true }).fill('先做分镜，再生成剪辑建议');
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await expect.poll(() => page.evaluate(key => localStorage.getItem(key), videoKey), { timeout: 90000 }).toBeNull();
+    expect(packagePrepares).toHaveLength(2);
+    for (const body of packagePrepares) expect(body).toContain(held.followup.requestId);
+    expect(abandons).toEqual([]);
+    expect(await packageRuns()).toBe(runsBefore + 1);
+    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2",
+      [f.actor, held.followup.requestId])).rows[0].n)).toBe(1);
+    const completed = await page.evaluate(({ key, requestId }) => localStorage.getItem(key + ':completed:' + requestId),
+      { key: videoKey, requestId: held.package.requestId });
+    expect(JSON.parse(completed!).followup.requestId).toBe(held.followup.requestId);
+    expect((await sql.query("select state from runtime_executions where actor_id=$1 and request_id=$2",
+      [f.actor, held.followup.requestId])).rows[0].state).toBe('completed');
+  } finally {
+    await sql.query("delete from system_settings where key='runtime_rate_limits'");
+    await browser.close();
+  }
+}, 600000);
+
+// Review P2-1 on #594 (d8846b48): a send started on the start page is attempted once on /runtime.
+// Whatever refuses it (the gate's whitelisted 503, an unknown structured 503 or a plain non-tRPC
+// 503), a reload and a later recovery never send it again by themselves; input and request id stay
+// for the user's explicit send.
+it("OPC: RATE-LIMIT start-page send refused by any 503 is never re-sent automatically", async () => {
+  const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const { execFileSync } = await import("node:child_process");
+  const tag = process.env.V3_RATE_LIMIT_TAG;
+  if (!tag || !/^[a-z0-9][a-z0-9-]{0,80}$/.test(tag)) throw new Error("local rate limit required");
+  expect(execFileSync("docker", ["exec", tag + "-redis", "redis-cli", "FLUSHDB"], { encoding: "utf8" }).trim()).toBe("OK");
+  const pause = (stopNewCalls: boolean) => sql.query(
+    "insert into system_settings(key,value) values('runtime_rate_limits',$1::jsonb) on conflict(key) do update set value=excluded.value",
+    [JSON.stringify({ version: 1, admissionPerMinute: 60, admissionPer24Hours: 5000, callsPerMinute: 180,
+      callsPer24Hours: 15000, stopNewCalls })]);
+  await pause(false);
+  const f = await fixture(3);
+  await planFixtureModel(f.moduleId);
+  const browser = await chromium.launch({
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true,
+  });
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", route => {
+      const u = new URL(route.request().url());
+      return ["127.0.0.1", "localhost"].includes(u.hostname) || ["data:", "blob:"].includes(u.protocol)
+        ? route.continue() : route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(90000);
+    const ready = page.waitForResponse(r => r.url().includes("/api/trpc/settings.getSystemSettings") && r.ok());
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=/positioning");
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", { name: "登录", exact: true }).last().click();
+    await page.waitForURL(url => url.pathname === "/positioning", { timeout: 90000 });
+    // Every browser prepare, by the request id it carries.
+    const prepares: string[] = [];
+    page.on("request", request => {
+      if (/\/api\/trpc\/runtime\.prepare(?:[?,]|$)/.test(request.url())) prepares.push(request.postData() ?? "");
+    });
+    const sendsOf = (requestId: string) => prepares.filter(body => body.includes(requestId)).length;
+    const unknown503 = JSON.stringify([{ error: { message: "internal diagnostic: upstream unavailable", code: -32603,
+      data: { code: "SERVICE_UNAVAILABLE", httpStatus: 503, path: "runtime.prepare" } } }]);
+    const plain503 = JSON.stringify({ error: "Service Unavailable", message: "服务暂时繁忙，请稍后再试", retryAfter: 60 });
+    const cases = [
+      { name: "paused", refuse: () => pause(true), recover: () => pause(false),
+        notice: "AI服务暂时暂停新调用，请稍后再试。本次被拦截的调用不扣积分。" },
+      { name: "unknown structured 503", body: unknown503, notice: "请求状态待核实" },
+      { name: "plain non-tRPC 503", body: plain503, notice: "请求状态待核实" },
+    ];
+    for (const item of cases) {
+      const input = "开始页发送：" + item.name;
+      let blocking = Boolean(item.body);
+      if (item.body) await page.route("**/api/trpc/runtime.prepare*", route => blocking
+        ? route.fulfill({ status: 503, contentType: "application/json", body: item.body! }) : route.continue());
+      await item.refuse?.();
+      await page.goto(process.env.V3_LOCAL_APP + "/positioning");
+      await page.getByLabel("新任务内容", { exact: true }).fill(input);
+      await page.getByRole("button", { name: "发送", exact: true }).first().click();
+      await page.waitForURL(url => url.pathname === "/runtime" && Boolean(url.searchParams.get("request")), { timeout: 90000 });
+      const url = new URL(page.url()), sessionId = url.searchParams.get("session")!, requestId = url.searchParams.get("request")!;
+      await page.getByRole("alert").filter({ hasText: item.notice }).waitFor({ timeout: 60000 });
+      expect(sendsOf(requestId)).toBe(1);
+      expect(await page.evaluate(key => sessionStorage.getItem(key), "opc-runtime-send:" + sessionId)).toBeNull();
+      // A reload while still refused: no automatic send; input and request id are kept.
+      await page.reload();
+      await expect.poll(() => page.getByLabel("消息", { exact: true }).inputValue(), { timeout: 60000 }).toBe(input);
+      await page.waitForTimeout(5000);
+      expect(sendsOf(requestId)).toBe(1);
+      expect(new URL(page.url()).searchParams.get("request")).toBe(requestId);
+      // After recovery and another reload: still nothing sent by itself.
+      blocking = false;
+      await item.recover?.();
+      await page.reload();
+      await expect.poll(() => page.getByLabel("消息", { exact: true }).inputValue(), { timeout: 60000 }).toBe(input);
+      await page.waitForTimeout(5000);
+      expect(sendsOf(requestId)).toBe(1);
+      expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2",
+        [f.actor, requestId])).rows[0].n)).toBe(0);
+      // The user's explicit send uses the same request id once.
+      await page.getByRole("button", { name: "发送", exact: true }).click();
+      await expect.poll(async () => Number((await sql.query(
+        "select count(*)::int n from runtime_executions where actor_id=$1 and request_id=$2", [f.actor, requestId])).rows[0].n),
+      { timeout: 60000 }).toBe(1);
+      expect(sendsOf(requestId)).toBe(2);
+      // The next case may reuse this Session; let the explicit round finish first.
+      await expect.poll(async () => (await sql.query(
+        "select state from runtime_executions where actor_id=$1 and request_id=$2", [f.actor, requestId])).rows[0]?.state,
+      { timeout: 90000 }).toBe("completed");
+      if (item.body) await page.unroute("**/api/trpc/runtime.prepare*");
+    }
+  } finally {
+    await sql.query("delete from system_settings where key='runtime_rate_limits'");
+    await browser.close();
+  }
+}, 600000);
+
+// Review 5958591969 (P2-1, P2-2): on a video work item, the continue-work guidance and the video
+// package both hold every request that was not admitted, whatever refused it: the gate's whitelisted
+// 503 (pause), an unknown structured 503, a plain non-tRPC 503, and for the package also a shared
+// failure of material preparation and admission. Reloads during the refusal and after recovery send
+// nothing by themselves; the user's explicit retry sends the same request id once and completes it.
+// Guidance runs its three cases on one fixture; each package case gets its own fixture.
+async function runtimeHoldCase(part: 'guidance' | 'video' | 'refusal', videoCase = -1,
+  refusalCase: '' | 'guidance403' | 'video412' | 'video412AbandonFails' | 'materialRefusedOnRecovery' = '') {
+  const { execFileSync } = await import("node:child_process");
+  const tag = process.env.V3_RATE_LIMIT_TAG;
+  if (!tag || !/^[a-z0-9][a-z0-9-]{0,80}$/.test(tag)) throw new Error("local rate limit required");
+  expect(execFileSync("docker", ["exec", tag + "-redis", "redis-cli", "FLUSHDB"], { encoding: "utf8" }).trim()).toBe("OK");
+  const pausedNotice = "AI服务暂时暂停新调用，请稍后再试。本次被拦截的调用不扣积分。";
+  const pause = (stopNewCalls: boolean) => sql.query(
+    "insert into system_settings(key,value) values('runtime_rate_limits',$1::jsonb) on conflict(key) do update set value=excluded.value",
+    [JSON.stringify({ version: 1, admissionPerMinute: 60, admissionPer24Hours: 5000, callsPerMinute: 180,
+      callsPer24Hours: 15000, stopNewCalls })]);
+  await pause(false);
+  const f = await publishedDraft();
+  await planFixtureModel(f.moduleId);
+  const seed = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
+    body: [{ id: randomUUID(), platform: 'x', account: 'existing-account', title: '原工作', brief: '原有账号项目', day: '2026-09-20' }] });
+  await f.service.handoff({ draftId: f.d.draftId, requestId: randomUUID(), planId: seed.planId,
+    accounts: [{ platform: 'x', account: 'existing-account', expectedRevision: null }] });
+  const { browser, page } = await planBrowser(f);
+  const unknown503 = JSON.stringify([{ error: { message: "internal diagnostic: upstream unavailable", code: -32603,
+    data: { code: "SERVICE_UNAVAILABLE", httpStatus: 503, path: "runtime.prepare" } } }]);
+  const plain503 = JSON.stringify({ error: "Service Unavailable", message: "服务暂时繁忙，请稍后再试", retryAfter: 60 });
+  // Every browser prepare (guidance and package) and every material call, with the request id each carries.
+  const prepares: Array<{ kind: 'guide' | 'package' | 'other'; requestId: string }> = [];
+  const abandons: string[] = [];
+  page.on('request', request => {
+    const body = request.postData() ?? '';
+    if (/\/api\/trpc\/runtime\.prepare(?:[?,]|$)/.test(request.url())) {
+      const input = Object.values(JSON.parse(body || '{}'))[0] as { requestId?: string; input?: string } | undefined;
+      prepares.push({ requestId: input?.requestId ?? '', kind: input?.input?.startsWith('[OPC_WORK_CONTINUE_V1]') ? 'guide'
+        : input?.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]') ? 'package' : 'other' });
+    }
+    if (request.url().includes('opc.prepareVideoMaterial') && body.includes('abandon')) abandons.push(body);
+  });
+  const sendsOf = (requestId: string) => prepares.filter(item => item.requestId === requestId).length;
+  const executionsOf = async (requestId: string, state?: string) => Number((await sql.query(
+    "select count(*)::int n from runtime_executions where actor_id=$1 and request_id::text=$2 and ($3::text is null or state=$3)",
+    [f.actor, requestId, state ?? null])).rows[0].n);
+  /** Credits and BILL2 runs/reservations, read once nothing runs and the values hold still across 2 seconds. */
+  async function money() {
+    const read = async () => (await sql.query(
+      "select (select credits from profiles where id=$1)::text credits,(select count(*) from bill2_runs where actor_id=$1)::int runs," +
+      "(select count(*) from credit_transactions where user_id=$1 and reason_code='bill2_reserve')::int reserves," +
+      "(select count(*) from runtime_executions where actor_id=$1 and state not in ('completed','cancelled'))::int busy", [f.actor])).rows[0];
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const first = await read();
+      await page.waitForTimeout(2000);
+      const second = await read();
+      if (!first.busy && JSON.stringify(first) === JSON.stringify(second)) return { credits: first.credits, runs: first.runs, reserves: first.reserves };
+    }
+    throw new Error('credits and reservations did not settle');
+  }
+  type Refusal = { name: string; on: () => Promise<void>; off: () => Promise<void> };
+  const fulfil = (pattern: string | RegExp, body: string): Refusal['on'] => () => page.route(pattern,
+    route => route.fulfill({ status: 503, contentType: 'application/json', body }));
+  const refusals: Array<Refusal & { gate: boolean }> = [
+    { name: 'paused', gate: true, on: () => pause(true).then(() => undefined), off: () => pause(false).then(() => undefined) },
+    { name: 'unknown structured 503', gate: false, on: fulfil('**/api/trpc/runtime.prepare*', unknown503),
+      off: () => page.unroute('**/api/trpc/runtime.prepare*') },
+    { name: 'plain non-tRPC 503', gate: false, on: fulfil('**/api/trpc/runtime.prepare*', plain503),
+      off: () => page.unroute('**/api/trpc/runtime.prepare*') },
+  ];
+  try {
+    await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + f.d.draftId + '/topics');
+    await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
+    const card = page.getByRole('heading', { name: '1. 首周选题', exact: true }).first().locator('..');
+    await card.getByRole('button', { name: '采用这个选题', exact: true }).click({ timeout: 420000 });
+    const link = card.getByRole('link', { name: '继续这条内容工作', exact: true });
+    await link.waitFor({ timeout: 420000 });
+    const continueUrl = new URL(await link.getAttribute('href') ?? '', process.env.V3_LOCAL_APP).toString();
+    expect(new URL(continueUrl).searchParams.get('continue')).toBe('1');
+    const sessionId = new URL(continueUrl).searchParams.get('session')!;
+    const transcript = page.getByLabel('对话记录', { exact: true });
+    const recoverGuide = page.getByRole('button', { name: '恢复引导请求', exact: true });
+    const videoKey = 'opc-video-operation:' + sessionId;
+    const finalPrompt = page.getByRole('heading', { name: '口播稿已定稿。要先制作分镜脚本吗？', exact: true });
+    const scripts = async () => Number((await sql.query(
+      "select count(*)::int n from runtime_executions where actor_id=$1 and session_id=$2 and state='completed' and payload->>'input' not like '[OPC_%'",
+      [f.actor, sessionId])).rows[0].n);
+    let script = 0;
+    /** A new finalized script version: a new guidance stage, and a script without a package yet. */
+    async function finalizeNewScript() {
+      script += 1;
+      const before = await scripts();
+      await page.getByLabel('消息', { exact: true }).fill('请和我讨论这条视频的口播稿，第 ' + script + ' 版。');
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      await expect.poll(scripts, { timeout: 420000 }).toBe(before + 1);
+      const finalize = page.getByRole('button', { name: '将这条回复定稿为口播稿', exact: true }).last();
+      await finalize.waitFor({ timeout: 420000 });
+      // Read the database directly: this long case outlives the fixture client's session.
+      const finals = async () => Number((await sql.query(
+        "select count(*)::int n from opc_content_versions where actor_id=$1 and kind='script' and status='final'", [f.actor])).rows[0].n);
+      const finalsBefore = await finals();
+      await finalize.click();
+      await expect.poll(finals, { timeout: 420000 }).toBe(finalsBefore + 1);
+      // The finalize UI refresh is not under test here, and an overloaded local stack can drop that read: reload.
+      await page.reload();
+      await finalPrompt.waitFor({ timeout: 420000 }).catch(async error => {
+        const text = await page.locator('body').innerText();
+        throw new Error('no final-script prompt; page tail: ' + text.slice(-900) + ' / ' + error);
+      });
+    }
+    async function quietAfterReload(check: () => Promise<void>) {
+      await page.reload();
+      await transcript.waitFor({ timeout: 420000 });
+      await page.waitForTimeout(5000);
+      await check();
+    }
+
+    // P2-1: the continue-work guidance.
+    for (const [index, refusal] of (part === 'guidance' ? refusals : []).entries()) {
+      if (index > 0) await finalizeNewScript();
+      const moneyBefore = await money();
+      const sent = prepares.length;
+      await refusal.on();
+      await page.goto(continueUrl);
+      await page.getByRole('alert').filter({ hasText: refusal.gate ? pausedNotice : '引导请求待恢复' }).waitFor({ timeout: 420000 });
+      const guides = prepares.slice(sent).filter(item => item.kind === 'guide');
+      expect(guides).toHaveLength(1);
+      const requestId = guides[0].requestId;
+      expect(new URL(page.url()).searchParams.has('continue')).toBe(false);
+      await recoverGuide.waitFor({ timeout: 30000 });
+      await quietAfterReload(async () => { expect(sendsOf(requestId)).toBe(1); });
+      await refusal.off();
+      await quietAfterReload(async () => {
+        expect(sendsOf(requestId)).toBe(1);
+        expect(await executionsOf(requestId)).toBe(0);
+      });
+      expect(await money()).toEqual(moneyBefore);
+      await recoverGuide.click();
+      await expect.poll(() => executionsOf(requestId, 'completed'), { timeout: 420000 }).toBe(1);
+      expect(sendsOf(requestId)).toBe(2);
+      expect(await executionsOf(requestId)).toBe(1);
+    }
+
+    // P2-2: the video package, including a shared failure of material preparation and admission.
+    const both = /\/api\/trpc\/(?:runtime\.prepare|opc\.prepareVideoMaterial)(?:[?,]|$)/;
+    const videoRefusals: Array<Refusal & { gate: boolean; admissionSent: boolean }> = [
+      ...refusals.map(refusal => ({ ...refusal, admissionSent: true })),
+      { name: 'material and admission both fail', gate: false, admissionSent: false,
+        on: fulfil(both, plain503), off: () => page.unroute(both) },
+    ];
+    if (part === 'video') {
+      // Enter the work as the user does (the guidance completes), then finalize the first script.
+      await page.goto(continueUrl);
+      await page.getByText('【主动引导合成示例，仅验证交互】', { exact: false }).first().waitFor({ timeout: 420000 });
+    }
+    // One video case per fixture: a long Session history slows every later round on a local stack.
+    for (const refusal of part === 'video' ? [videoRefusals[videoCase]] : []) {
+      const choice = '先做分镜，再生成剪辑建议';
+      await finalizeNewScript();
+      await finalPrompt.waitFor({ timeout: 420000 });
+      const moneyBefore = await money();
+      const sent = prepares.length;
+      await refusal.on();
+      await page.getByLabel('消息', { exact: true }).fill(choice);
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      await page.getByRole('alert').filter({ hasText: refusal.gate ? pausedNotice : '视频工作请求状态待核实' }).waitFor({ timeout: 420000 });
+      const held = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
+      expect(held.held).toBe(true);
+      expect(held.followup.executionId).toBeUndefined();
+      const requestId = held.followup.requestId as string;
+      const admissions = refusal.admissionSent ? 1 : 0;
+      expect(prepares.slice(sent).filter(item => item.kind === 'package').map(item => item.requestId))
+        .toEqual(Array(admissions).fill(requestId));
+      expect(abandons).toEqual([]);
+      const stillHeld = async () => {
+        expect(sendsOf(requestId)).toBe(admissions);
+        expect(abandons).toEqual([]);
+        expect(JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!)).toEqual(held);
+        expect(await executionsOf(requestId)).toBe(0);
+      };
+      await quietAfterReload(stillHeld);
+      await refusal.off();
+      await quietAfterReload(stillHeld);
+      expect(await money()).toEqual(moneyBefore);
+      await page.getByLabel('消息', { exact: true }).fill(choice);
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      await expect.poll(() => page.evaluate(key => localStorage.getItem(key), videoKey), { timeout: 420000 }).toBeNull();
+      expect(sendsOf(requestId)).toBe(admissions + 1);
+      expect(await executionsOf(requestId, 'completed')).toBe(1);
+      expect(await executionsOf(requestId)).toBe(1);
+      expect(abandons).toEqual([]);
+    }
+
+    // Definite 4xx refusals before admission: the guidance drops its recovery control; a package refused by admission
+    // releases its material claim (abandon) so the work can continue. Nothing else is taken as proof of release.
+    const prepareRoute = /\/api\/trpc\/runtime\.prepare(?:[?,]|$)/;
+    const refusal412 = JSON.stringify([{ error: { message: '本次操作所需模型尚未获准用于当前测试窗口，请联系管理员。', code: -32012,
+      data: { code: 'PRECONDITION_FAILED', httpStatus: 412, path: 'runtime.prepare' } } }]);
+    const refusal403 = JSON.stringify([{ error: { message: '当前环境不允许访问此工作空间。', code: -32003,
+      data: { code: 'FORBIDDEN', httpStatus: 403, path: 'runtime.prepare' } } }]);
+    async function ordinaryChatWorks(text: string) {
+      const before = await scripts();
+      await page.getByLabel('消息', { exact: true }).fill(text);
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      await expect.poll(scripts, { timeout: 420000 }).toBe(before + 1);
+    }
+    if (refusalCase === 'guidance403') {
+      const moneyBefore = await money();
+      const sent = prepares.length;
+      await page.route(prepareRoute, route => route.fulfill({ status: 403, contentType: 'application/json', body: refusal403 }));
+      await page.goto(continueUrl);
+      await page.getByRole('alert').filter({ hasText: '引导请求已明确拒绝' }).waitFor({ timeout: 420000 });
+      const guides = prepares.slice(sent).filter(item => item.kind === 'guide');
+      expect(guides).toHaveLength(1);
+      const requestId = guides[0].requestId;
+      expect(new URL(page.url()).searchParams.has('continue')).toBe(false);
+      await page.unroute(prepareRoute);
+      await quietAfterReload(async () => {
+        expect(sendsOf(requestId)).toBe(1);
+        expect(await recoverGuide.count()).toBe(0);
+        expect(await executionsOf(requestId)).toBe(0);
+        // The refused guidance keeps its record, and the active recovery record is gone.
+        const guideKey = 'opc-work-guide:' + sessionId + ':' + requestId;
+        expect(JSON.parse((await page.evaluate(key => localStorage.getItem(key), guideKey + ':rejected'))!).requestId).toBe(requestId);
+        expect(await page.evaluate(key => localStorage.getItem(key), guideKey)).toBeNull();
+      });
+      expect(await money()).toEqual(moneyBefore);
+      await ordinaryChatWorks('引导被拒后继续普通对话。');
+      expect(sendsOf(requestId)).toBe(1);
+    }
+    if (refusalCase === 'video412' || refusalCase === 'video412AbandonFails') {
+      await page.goto(continueUrl);
+      await page.getByText('【主动引导合成示例，仅验证交互】', { exact: false }).first().waitFor({ timeout: 420000 });
+      await finalizeNewScript();
+      const choice = '先做分镜，再生成剪辑建议';
+      const moneyBefore = await money();
+      const sent = prepares.length;
+      const material = /\/api\/trpc\/opc\.prepareVideoMaterial(?:[?,]|$)/;
+      await page.route(prepareRoute, route => route.fulfill({ status: 412, contentType: 'application/json', body: refusal412 }));
+      if (refusalCase === 'video412AbandonFails') await page.route(material, route => (route.request().postData() ?? '').includes('abandon')
+        ? route.fulfill({ status: 503, contentType: 'application/json', body: plain503 }) : route.continue());
+      await page.getByLabel('消息', { exact: true }).fill(choice);
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      if (refusalCase === 'video412') {
+        await page.getByRole('alert').filter({ hasText: '原视频工作请求已明确拒绝' }).waitFor({ timeout: 420000 });
+        const packages = prepares.slice(sent).filter(item => item.kind === 'package');
+        expect(packages).toHaveLength(1);
+        const requestId = packages[0].requestId;
+        expect(abandons).toHaveLength(1);
+        expect(await page.evaluate(key => localStorage.getItem(key), videoKey)).toBeNull();
+        await page.unroute(prepareRoute);
+        await quietAfterReload(async () => {
+          expect(sendsOf(requestId)).toBe(1);
+          expect(await executionsOf(requestId)).toBe(0);
+          expect(await page.evaluate(key => localStorage.getItem(key), videoKey)).toBeNull();
+        });
+        expect(await money()).toEqual(moneyBefore);
+        // The released claim no longer blocks the work: ordinary dialogue is admitted again.
+        await ordinaryChatWorks('视频包被拒后继续普通对话。');
+        expect(sendsOf(requestId)).toBe(1);
+      } else {
+        await page.getByRole('alert').filter({ hasText: '视频工作请求状态待核实' }).waitFor({ timeout: 420000 });
+        const held = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
+        expect(held.held).toBe(true);
+        const requestId = held.followup.requestId as string;
+        expect(abandons).toHaveLength(1);
+        await page.unroute(prepareRoute);
+        await page.unroute(material);
+        await quietAfterReload(async () => {
+          expect(sendsOf(requestId)).toBe(1);
+          expect(await executionsOf(requestId)).toBe(0);
+          expect(JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!)).toEqual(held);
+        });
+        expect(await money()).toEqual(moneyBefore);
+        await page.getByLabel('消息', { exact: true }).fill(choice);
+        await page.getByRole('button', { name: '发送', exact: true }).click();
+        await expect.poll(() => page.evaluate(key => localStorage.getItem(key), videoKey), { timeout: 420000 }).toBeNull();
+        expect(sendsOf(requestId)).toBe(2);
+        expect(await executionsOf(requestId, 'completed')).toBe(1);
+      }
+    }
+    // Review 5965199920: a held request whose material replay is refused (412, for example "sign in again") still
+    // owns its earlier claim. It must stay held under the same identity, then complete once the condition clears.
+    if (refusalCase === 'materialRefusedOnRecovery') {
+      await page.goto(continueUrl);
+      await page.getByText('【主动引导合成示例，仅验证交互】', { exact: false }).first().waitFor({ timeout: 420000 });
+      await finalizeNewScript();
+      const choice = '先做分镜，再生成剪辑建议';
+      const moneyBefore = await money();
+      const material = /\/api\/trpc\/opc\.prepareVideoMaterial(?:[?,]|$)/;
+      const signIn412 = JSON.stringify([{ error: { message: '登录会话剩余时间不足，请重新登录后继续原请求。', code: -32012,
+        data: { code: 'PRECONDITION_FAILED', httpStatus: 412, path: 'opc.prepareVideoMaterial' } } }]);
+      // 1. The material is bound, then admission fails uncertainly: held.
+      await page.route(prepareRoute, route => route.fulfill({ status: 503, contentType: 'application/json', body: plain503 }));
+      await page.getByLabel('消息', { exact: true }).fill(choice);
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      await page.getByRole('alert').filter({ hasText: '视频工作请求状态待核实' }).waitFor({ timeout: 420000 });
+      const held = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
+      expect(held.held).toBe(true);
+      const requestId = held.followup.requestId as string;
+      await page.unroute(prepareRoute);
+      // 2. The explicit recovery replays the material call, which policy now refuses with a structured 412.
+      await page.route(material, route => route.fulfill({ status: 412, contentType: 'application/json', body: signIn412 }));
+      await page.getByLabel('消息', { exact: true }).fill(choice);
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      await page.getByRole('alert').filter({ hasText: '请重新登录后继续原请求' }).waitFor({ timeout: 420000 });
+      expect(await page.getByRole('alert').filter({ hasText: '原视频工作请求已明确拒绝' }).count()).toBe(0);
+      const stillHeld = JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!);
+      expect(stillHeld.held).toBe(true);
+      expect(stillHeld.followup.requestId).toBe(requestId);
+      expect(abandons).toEqual([]);
+      await quietAfterReload(async () => {
+        expect(sendsOf(requestId)).toBe(1);
+        expect(await executionsOf(requestId)).toBe(0);
+        expect(JSON.parse((await page.evaluate(key => localStorage.getItem(key), videoKey))!).followup.requestId).toBe(requestId);
+      });
+      expect(await money()).toEqual(moneyBefore);
+      // 3. Once the condition clears, the same request completes exactly once, and ordinary dialogue continues.
+      await page.unroute(material);
+      await page.getByLabel('消息', { exact: true }).fill(choice);
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      await expect.poll(() => page.evaluate(key => localStorage.getItem(key), videoKey), { timeout: 420000 }).toBeNull();
+      expect(await executionsOf(requestId, 'completed')).toBe(1);
+      expect(await executionsOf(requestId)).toBe(1);
+      expect(abandons).toEqual([]);
+      await ordinaryChatWorks('视频包恢复后继续普通对话。');
+    }
+  } finally {
+    await sql.query("delete from system_settings where key='runtime_rate_limits'");
+    await browser.close();
+  }
+}
+it("OPC: RATE-LIMIT /runtime guidance holds every unadmitted 503 for an explicit retry", () => runtimeHoldCase('guidance'), 2700000);
+it.each([[0, 'paused'], [1, 'unknown structured 503'], [2, 'plain non-tRPC 503'], [3, 'material and admission both fail']] as const)(
+  "OPC: RATE-LIMIT /runtime video package holds an unadmitted request for an explicit retry (%i: %s)",
+  videoCase => runtimeHoldCase('video', videoCase), 1200000);
+it.each(['guidance403', 'video412', 'video412AbandonFails', 'materialRefusedOnRecovery'] as const)(
+  "OPC: RATE-LIMIT /runtime definite 4xx refusal before admission ends or holds by what it proves (%s)",
+  refusalCase => runtimeHoldCase('refusal', -1, refusalCase), 1200000);

@@ -123,3 +123,8 @@ it('keeps ordinary Skill caching without host rules and derives current prefix l
  expect(AGENT_TURN_STABLE_PREFIX_CHARS).toBe(AGENT_TURN_STABLE_PREFIX.length);
  expect(AGENT_TURN_STABLE_PREFIX).toBe(host().slice(0,AGENT_TURN_STABLE_PREFIX_CHARS));
 });
+
+vi.mock('./newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('./newWorkGate')>(),
+ ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
+}));

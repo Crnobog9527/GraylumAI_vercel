@@ -4,8 +4,7 @@ import {
   readRuntimeRateLimits, runtimeRateLimitsSchema, saveRuntimeRateLimits,
 } from '../services/runtime/rateLimitSettings';
 
-// Configuration can be prepared independently. Do not advertise enforcement before host wiring.
-const enforcement = { admission: false, calls: false, pause: false } as const;
+const enforcement = { admission: true, calls: true, pause: true } as const;
 export const runtimeRateLimitsRouter = router({
   get: adminProcedure.query(async ({ ctx }) => ({
     ...await readRuntimeRateLimits(ctx.supabase), enforcement,
