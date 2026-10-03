@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
 import {rpc} from '../erasure-b2a/cases.mjs';
 import {conserved,financial} from './core.mjs';
 
@@ -39,6 +40,36 @@ export async function concurrencyCases({db,Client,connectionString,report,create
     const history = (await db.query("SELECT count(*)::int n FROM billing_history WHERE metadata->>'preDeductId'=(SELECT pre_deduct_id::text FROM bill2_calls WHERE id=$1)",[c.id])).rows[0];
     assert.equal(history.n,1);
     report.checks.push('two-backend repeated receipt and finalize settle exactly once');
+
+    const monitored = await createFixture(db,{empirical:true});
+    const mc = await claim(db,monitored,1,true);
+    const waitingRun = await rpc(db,'bill2_prepare',monitored.actor,randomUUID(),monitored.payload);
+    const waitingFixture = {...monitored,run:waitingRun.id};
+    const waitingPid = (await writers[1].query('SELECT pg_backend_pid() pid')).rows[0].pid;
+    await writers[0].query('BEGIN');
+    let pendingClaim;
+    try {
+      await receipt(writers[0],monitored,mc,'0.00001',{inputTokens:80,outputTokens:0});
+      pendingClaim = claim(writers[1],waitingFixture,1,false).then(
+        value=>({ok:true,value}),error=>({ok:false,error}),
+      );
+      let waiting=false;
+      for(let i=0;i<100&&!waiting;i++) {
+        waiting=(await db.query("SELECT wait_event='advisory' waiting FROM pg_stat_activity WHERE pid=$1",[waitingPid])).rows[0]?.waiting===true;
+        if(!waiting) await new Promise(resolve=>setTimeout(resolve,10));
+      }
+      assert.equal(waiting,true,'other run must wait on the held model advisory lock');
+      assert.equal((await db.query('SELECT count(*)::int n FROM bill2_calls WHERE run_id=$1',[waitingRun.id])).rows[0].n,0);
+      await writers[0].query('COMMIT');
+      const resumed=await pendingClaim;
+      assert.equal(resumed.ok,false);
+      assert.match(resumed.error.message,/METERING_BLOCKED|POLICY_DENIED|MODEL_DENIED/);
+      assert.equal((await db.query('SELECT count(*)::int n FROM bill2_calls WHERE run_id=$1',[waitingRun.id])).rows[0].n,0);
+    } finally {
+      await writers[0].query('ROLLBACK');
+      await pendingClaim;
+    }
+    report.checks.push('model-lock race: second run waits for uncommitted threshold receipt, then refuses without a hold');
 
     const cancelling = await createFixture(db);
     const pending = await claim(db,cancelling,1,true);
