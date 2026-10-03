@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/dialog';
 import { trpc } from '@/trpc/client';
 import { summaryStat } from './summaryStat';
-import { SummaryRetryButton, useCreditsSummary } from './SummaryRetry';
+import { CREDITS_SUMMARY_QUERY_OPTIONS, SummaryRetryButton } from './SummaryRetry';
 import { logClientDevError } from '@/lib/client-log';
 import { createClient } from '@/lib/supabase';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
@@ -294,7 +294,7 @@ export const CreditsAndSubscriptionCards = memo(function CreditsAndSubscriptionC
 }) {
   const credits = typeof user?.credits === 'number' ? user.credits : null;
   const hasVerifiedBalance = credits !== null;
-  const monthlySummary = useCreditsSummary('month'); // 失败时有限次自动重试，之后显示"重试"
+  const monthlySummary = trpc.credits.getCreditsSummary.useQuery({ period: 'month' }, CREDITS_SUMMARY_QUERY_OPTIONS); // 失败时有限次自动重试，之后显示"重试"
   const monthlyUsed = summaryStat(monthlySummary, (summary) => summary.totalSpent);
 
   const tierLabels: Record<string, string> = {

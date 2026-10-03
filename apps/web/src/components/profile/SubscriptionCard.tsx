@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { trpc } from '@/trpc/client';
-import { useCreditsSummary } from './useCreditsSummary';
+import { CREDITS_SUMMARY_QUERY_OPTIONS } from './creditsSummaryQuery';
 import { SummaryStatValue } from './SummaryRetry';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import { formatCreditsBalance } from '@/components/credits/balancePresentation';
@@ -903,8 +903,8 @@ export const CreditStatsCard = memo(function CreditStatsCard({ user }: { user: M
   const hasVerifiedBalance = credits !== null;
   const createCheckoutSession = trpc.payments.createCheckoutSession.useMutation();
   // 从 API 获取积分统计数据
-  const monthlySummary = useCreditsSummary('month');
-  const allTimeSummary = useCreditsSummary('all');
+  const monthlySummary = trpc.credits.getCreditsSummary.useQuery({ period: 'month' }, CREDITS_SUMMARY_QUERY_OPTIONS);
+  const allTimeSummary = trpc.credits.getCreditsSummary.useQuery({ period: 'all' }, CREDITS_SUMMARY_QUERY_OPTIONS);
 
   const handlePackageBuy = async (pkg: { id: string; name?: string; credits: number; bonus_credits: number; price: number; checkout_ready?: boolean }) => {
     const totalCredits = pkg.credits + (pkg.bonus_credits ?? 0);

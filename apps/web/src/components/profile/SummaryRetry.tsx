@@ -4,7 +4,7 @@
 import { Loader2, RefreshCw } from 'lucide-react';
 import { summaryStat } from './summaryStat';
 
-export { useCreditsSummary } from './useCreditsSummary';
+export { CREDITS_SUMMARY_QUERY_OPTIONS } from './creditsSummaryQuery';
 
 interface RetryableQuery<T> {
   data?: T | null;

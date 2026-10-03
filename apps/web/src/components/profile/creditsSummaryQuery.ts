@@ -1,7 +1,4 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-'use client';
-
-import { trpc } from '@/trpc/client';
 import { isUnauthorizedError } from '@/lib/auth-recovery';
 
 /** Retries after the first failure; a failed summary then waits for the "重试" button. */
@@ -19,14 +16,13 @@ export function creditsSummaryRetryDelay(failureCount: number): number {
 }
 
 /**
- * Several profile cards read the same summary. Without `retryOnMount: false` every card that
- * mounts after a failure starts a new round of requests, so a summary that keeps failing
- * would be requested again and again instead of showing the error.
+ * Query options for `credits.getCreditsSummary`. Several profile cards read the same summary.
+ * Without `retryOnMount: false` every card that mounts after a failure starts a new round of
+ * requests, so a summary that keeps failing would be requested again and again instead of
+ * showing the error.
  */
-export function useCreditsSummary(period: 'month' | 'all') {
-  return trpc.credits.getCreditsSummary.useQuery({ period }, {
-    retry: creditsSummaryRetry,
-    retryDelay: creditsSummaryRetryDelay,
-    retryOnMount: false,
-  });
-}
+export const CREDITS_SUMMARY_QUERY_OPTIONS = {
+  retry: creditsSummaryRetry,
+  retryDelay: creditsSummaryRetryDelay,
+  retryOnMount: false,
+};

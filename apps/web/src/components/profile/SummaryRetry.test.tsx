@@ -25,12 +25,12 @@ describe('summary value with retry', () => {
     const html = render({ isError: true });
     expect(html).toContain('读取失败');
     expect(html).toMatch(/<button[^>]*type="button"[^>]*>.*重试<\/button>/);
-    expect(html).not.toContain('disabled');
+    expect(html).not.toContain('disabled=""');
   });
 
   it('disables the button while the manual retry runs', () => {
     const html = render({ isError: true, isFetching: true });
     expect(html).toContain('正在重试');
-    expect(html).toContain('disabled');
+    expect(html).toContain('disabled=""');
   });
 });

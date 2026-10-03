@@ -2,10 +2,9 @@
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/trpc/client', () => ({ trpc: {} }));
-const { CREDITS_SUMMARY_MAX_RETRIES, creditsSummaryRetry, creditsSummaryRetryDelay } = await import('./useCreditsSummary');
-
-const options = { retry: creditsSummaryRetry, retryDelay: creditsSummaryRetryDelay, retryOnMount: false };
+import {
+  CREDITS_SUMMARY_MAX_RETRIES, CREDITS_SUMMARY_QUERY_OPTIONS as options, creditsSummaryRetry, creditsSummaryRetryDelay,
+} from './creditsSummaryQuery';
 
 describe('credit summary retry policy', () => {
   it('backs off exponentially and caps the wait', () => {

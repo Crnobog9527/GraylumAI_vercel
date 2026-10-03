@@ -3,7 +3,7 @@
 import { memo, useMemo } from 'react';
 import { Zap, TrendingDown, Package, RefreshCw, Crown, CheckCircle2, Settings, Loader2 } from 'lucide-react';
 import { trpc } from '@/trpc/client';
-import { useCreditsSummary } from './useCreditsSummary';
+import { CREDITS_SUMMARY_QUERY_OPTIONS } from './creditsSummaryQuery';
 import { SummaryStatValue } from './SummaryRetry';
 import { formatCreditsBalance } from '@/components/credits/balancePresentation';
 import {
@@ -145,8 +145,8 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
   const credits = typeof user?.credits === 'number' ? user.credits : null;
 
   // 从 API 获取积分统计数据
-  const monthlySummary = useCreditsSummary('month');
-  const allTimeSummary = useCreditsSummary('all');
+  const monthlySummary = trpc.credits.getCreditsSummary.useQuery({ period: 'month' }, CREDITS_SUMMARY_QUERY_OPTIONS);
+  const allTimeSummary = trpc.credits.getCreditsSummary.useQuery({ period: 'all' }, CREDITS_SUMMARY_QUERY_OPTIONS);
 
   // 从 API 获取交易记录
   const { data: transactionsData, isLoading: isLoadingTx } = trpc.credits.getCreditTransactions.useQuery({ limit: 50 });
