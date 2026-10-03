@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { AgentTurnEvent, AgentTurnOutcome, QuestionAnswerSource } from "@repo/api/src/shared/agentTurn";
 import { OPENING_INPUT, openingRequestId } from "@repo/api/src/shared/opcQuestions";
-import { gateResultNotice } from "@/lib/runtime-gate-notice";
+import { gateResultNotice, PROVIDER_HISTORY_NOTICE } from "@/lib/runtime-gate-notice";
 
 /** One mentor turn as sent to `opc.mentorTurnStream` (same input as `opc.prepareStep`). */
 export type MentorRequest = {
@@ -192,7 +192,7 @@ export async function readAgentTurn(
 export function turnResultNotice(result: AgentTurnOutcome): string | null {
   if (result.unavailable === "output_truncated") return null;
   if (result.unavailable === "provider_history")
-    return "历史消息格式暂不兼容，本次执行已停止。原记录已保留；请联系支持检查历史兼容性，不要重复发送这条请求。";
+    return PROVIDER_HISTORY_NOTICE;
   if (result.unavailable === "preflight") return "本次执行在模型派发前检查失败，已停止并保留原记录。请核对服务状态后再继续，不会自动重放。";
   return gateResultNotice(result.unavailable);
 }

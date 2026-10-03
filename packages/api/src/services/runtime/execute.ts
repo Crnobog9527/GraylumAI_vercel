@@ -8,6 +8,7 @@ import {publicAgentText,publicMentorText,type RuntimeProgress} from './progress'
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import {logger} from '../../lib/logger';
+import {recoverOpenRouterHistory} from './historyRecovery';
 import {projectOpenRouterItemsForSizing} from './openRouterHistory';
 import {AGENT_TURN_REQUEST_FORMAT,validReasoningFormat,
  STREAMING_FORMATS,historyToolNames,openRouterRequestBody} from './providerRequest';
@@ -59,11 +60,14 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    return rpc<{executionId:string;runId:string;state:string;billing:unknown}>('runtime_financial_recovery',{...args,p_finish:true});
   },
   async execute(executionId:string,onProgress?:(event:RuntimeProgress)=>void){
-  type Execution={executionId:string;sessionId:string;runId:string;live:boolean;cancelRequested:boolean;state:string;context:unknown;billing:FrozenRun;result:{kind:string;evidenceRef:string;evidenceHash:string;body:string;summary?:string}|null};
+  type Execution={executionId:string;sessionId:string;runId:string;live:boolean;cancelRequested:boolean;state:string;
+   unavailableReason?:string;historyFrozen?:boolean;context:unknown;billing:FrozenRun;
+   result:{kind:string;evidenceRef:string;evidenceHash:string;body:string;summary?:string}|null};
   const args={p_execution_id:z.string().uuid().parse(executionId)};
   budget.timing?.enter('execute');
   const execution=await rpc<Execution>('runtime_execution',{...args,p_action:'begin'});
-  if(execution.state==='cancelled')return {state:'cancelled' as const};
+  if(execution.state==='cancelled')return {state:'cancelled' as const,
+   ...(execution.unavailableReason==='provider_history'?{unavailable:'provider_history' as const}:{})};
   if(execution.cancelRequested){
    await billing.recoverReceipts(execution.runId);
    const recovered=await rpc<{state:string}>('runtime_financial_recovery',{...args,p_finish:true});
@@ -273,17 +277,26 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      onToolCallsDropped:(dropped:number)=>logger.warn('api','runtime_tool_calls_dropped',{executionId,dropped}),
      ...(context.tools.includes(ASK_QUESTION_TOOL)?{stopAtToolNames:[ASK_QUESTION_TOOL]}:{})}:{}),
     input:runtimeScopeInput(context.input,context.scopeMaterial,context.hostTurnContext),session,tools,selectHistory:async(history,incoming)=>{
+    const originalCount=history.length;
+    if(normalized&&execution.live&&execution.historyFrozen===false){
+     history=recoverOpenRouterHistory(history,historyToolNames(context.providerRequestFormat));
+    }
+    if(history.length<originalCount){
+     logger.warn('api','runtime_history_prefix_omitted',{executionId,omittedItems:originalCount-history.length});
+    }
     const selectionOptions={instructions:effective.instructions,inputBytes:Math.min(primaryPolicy.inputLimit,context.purposeBudget?.inputBytes??Infinity),
      historyItems:context.historyItems,toolBytes,...sizing,
      projectHistoryItem:(item:unknown)=>context.hostTurnContext?
       projectHostTurnItem(item,context.scopeMaterial,preserveHistoricalMaterial,projectSupersededScopeItem):
       legacyInput||preserveHistoricalMaterial?item:projectSupersededScopeItem(item,context.scopeMaterial)};
     const selected=context.historySelection?selectBlockHistory(history,incoming,{...selectionOptions,
-     historySelection:context.historySelection,revisions:session.getHistoryRevisions()}):selectRuntimeHistory(history,incoming,selectionOptions);
+     historySelection:context.historySelection,revisions:session.getHistoryRevisions().slice(originalCount-history.length),
+    }):selectRuntimeHistory(history,incoming,selectionOptions);
     selectedHistoryCount=selected.length-incoming.length;
     // Freeze the exact first-call history members. Later tool calls may use a
     // subset, but never acquire a new Session dependency during this execution.
-    await session.freezeHistoryItems(selected.slice(0,selectedHistoryCount));return selected;
+    await session.freezeHistoryItems(selected.slice(0,selectedHistoryCount));
+    execution.historyFrozen=true;return selected;
    },filterModelInput:legacyInput?undefined:(items,instructions)=>context.historySelection?validateBlockCall(items,selectedHistoryCount,{
     instructions,inputBytes:Math.min(primaryPolicy.inputLimit,context.purposeBudget?.inputBytes??Infinity),
     toolBytes,historyItems:context.historyItems,historySelection:context.historySelection,...sizing,
@@ -405,7 +418,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    // It may observe an unfinished response, but must leave shared state alone.
    if(!execution.live)return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{})};
    // A lost durable response is inspected by later recovery, never a network retry.
-   const failed=await rpc<{state:string}>('runtime_execution',{...args,p_action:'fail_before_dispatch'}).catch(()=>null);
+   const failed=await rpc<{state:string}>('runtime_execution',{...args,p_action:'fail_before_dispatch',
+    ...(preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?{p_result:{unavailable_reason:'provider_history'}}:{})}).catch(()=>null);
    if(failed?.state==='cancelled'){
     const unavailable:GateRejection|'provider_history'|'preflight'|'capacity'|undefined=gateRejection??(preflightFailure?
      preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?'provider_history':'preflight':capacity?'capacity':undefined);

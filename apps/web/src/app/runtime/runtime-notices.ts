@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice';
-import { OUTPUT_TRUNCATED_NOTICE } from '@/lib/runtime-gate-notice';
+import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE } from '@/lib/runtime-gate-notice';
 
 /** A frozen guidance request without its execution, waiting for the user's explicit retry. */
 export const GUIDE_HELD_NOTICE = '引导请求待恢复。点“重试”会沿用原请求，不会另开一次。';
@@ -31,6 +31,8 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
   const id = (suffix: string) => turn.executionId + ':' + suffix;
   const notices: ChatNotice[] = [];
   if (turn.primaryBody && !turn.organizerComplete) notices.push({ id: id('organizer'), tone: 'status', text: '主回复已保存，附属整理未完成。' });
+  if (turn.unavailableReason === 'provider_history')
+    return [{ id: id('history'), tone: 'warning', text: PROVIDER_HISTORY_NOTICE }];
   if (turn.state === 'cancelled')
     notices.push(ctx.gateStop ? { id: id('cancelled'), tone: 'warning', text: ctx.gateStop }
       : ctx.userStopped ? { id: id('cancelled'), tone: 'status', text: USER_STOP_NOTICE } : { id: id('cancelled'), tone: 'warning', text: ENDED_NOTICE });

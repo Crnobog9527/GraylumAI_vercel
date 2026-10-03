@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from "vitest";
-import { OUTPUT_TRUNCATED_NOTICE } from "@/lib/runtime-gate-notice";
+import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE } from "@/lib/runtime-gate-notice";
 import { CAPACITY_NOTICE, ENDED_NOTICE, GUIDE_HELD_NOTICE, USER_STOP_NOTICE, runtimeTailNotices, runtimeTurnNotices, type RuntimeTurn } from "./runtime-notices";
 
 const turn = (extra: Partial<RuntimeTurn> = {}): RuntimeTurn => ({
@@ -80,4 +80,16 @@ describe("runtimeTailNotices", () => {
     expect(runtimeTailNotices({ error: "", heldGuide: false, busy: true, onGuide }).map(notice => notice.id)).toEqual(["busy"]);
     expect(runtimeTailNotices({ error: "", heldGuide: false, busy: true, onGuide, lastTurn: { open: true, texts: [] } })).toEqual([]);
   });
+});
+
+it('uses the persisted history reason after reload, ahead of a stale local stop marker', () => {
+ for (const context of [ctx(),ctx({userStopped:true}),ctx({gateStop:'stale gate'})]) {
+  const notices=runtimeTurnNotices(turn({state:'cancelled',unavailableReason:'provider_history'}),context);
+  expect(notices).toHaveLength(1);
+  expect(notices[0].text).toBe(PROVIDER_HISTORY_NOTICE);
+  expect(notices[0].text).not.toContain('已停止');
+  expect(notices[0].actions).toBeUndefined();
+  expect(runtimeTailNotices({error:PROVIDER_HISTORY_NOTICE,heldGuide:false,busy:false,onGuide:vi.fn(),
+   lastTurn:{open:false,texts:notices.map(n=>String(n.text))}})).toEqual([]);
+ }
 });

@@ -316,3 +316,31 @@ it('rejects a tool result whose name differs from its call',()=>{
  const items=askHistory();(items[3] as {name:string}).name='read_skill_file';
  expect(()=>projectOpenRouterItemsForSizing(items,0,AGENT_TOOL_NAMES)).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
 });
+
+it('projects observed signed Anthropic text metadata without forwarding private reasoning or signatures',()=>{
+ const detail={type:'reasoning.text',format:'anthropic-claude-v1',index:0,text:'SYNTHETIC_PRIVATE',signature:'SYNTHETIC_SIGNATURE'};
+ const item={type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:'Public answer',
+  providerData:{role:'assistant',refusal:null,reasoning:'SYNTHETIC_PRIVATE',reasoning_details:[detail]}}]};
+ expect(projectOpenRouterItemsForSizing([item])).toEqual([{role:'assistant',content:'Public answer'}]);
+ const request={messages:[{role:'assistant',content:[{type:'text',text:'Public answer',reasoning_details:[detail]}]}]};
+ normalizeOpenRouterHistory(request);
+ expect(request.messages).toEqual([{role:'assistant',content:'Public answer'}]);
+ expect(item.content[0]!.providerData.reasoning_details).toEqual([detail]);
+});
+
+it.each([
+ {format:'anthropic-claude-v1',signature:null},
+ {format:'anthropic-claude-v1',signature:''},
+ {format:'anthropic-claude-v1',signature:'ok',unknown:true},
+ {format:'unknown',signature:'ok'},
+ {format:'future-provider',signature:'ok'},
+])('still denies malformed or unknown signed metadata %j',extra=>{
+ const details=[{type:'reasoning.text',index:0,text:'Synthetic',...extra}];
+ expect(()=>normalizeOpenRouterHistory({messages:[{role:'assistant',content:'Answer',reasoning_details:details}]}))
+  .toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+});
+it('denies signed tool continuations even when the duplicated call matches',()=>{
+ const details=[{type:'reasoning.text',format:'anthropic-claude-v1',index:0,text:'Synthetic',signature:'Signature'}];
+ expect(()=>normalizeOpenRouterHistory({messages:[{role:'assistant',content:'Answer',reasoning_details:details,tool_calls:[sourceCall]}]}))
+  .toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+});
