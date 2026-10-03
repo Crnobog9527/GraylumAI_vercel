@@ -369,7 +369,7 @@ node packages/db/tests/v3/run-workbench.mjs --opc-only --staging-host --with-sta
 
 ## 9. 合并后的 staging 实测：新的授权，不继承 #490 剩余次数
 
-先核对部署包含本 PR squash 提交及后续相关改动、真实请求仍绑定正确模型/线路/冻结 reasoning。入口为 [staging 定位分析](https://graylumai-staging.vercel.app) → 从头分析新定位。两个测试身份通过私密渠道提供，一个在测试名单内，一个明确不在名单内。
+先核对部署包含本 PR squash 提交及后续相关改动、真实请求仍绑定正确模型/线路/冻结 reasoning。入口为 [staging 定位分析](https://auth-staging.graylum.com) → 从头分析新定位。两个测试身份通过私密渠道提供，一个在测试名单内，一个明确不在名单内。
 
 | 场景 | 验收 | 正常真实调用 |
 | --- | --- | --- |
