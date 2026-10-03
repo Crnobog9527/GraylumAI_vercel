@@ -20,6 +20,7 @@ const runtimeReport = (extra = [], failed = 0) => ({
     file(runtime.files[1], [pass('RUNTIME: streaming saved receipt replays')]),
     file(runtime.files[2], [pass('RUNTIME: terminal paid reply cancels once')]),
     file(runtime.files[3], [pass('RUNTIME: H1 frozen history replays')]),
+    file(runtime.files[4], [pass('RUNTIME: capture batch counts')]),
   ],
 });
 
@@ -37,7 +38,7 @@ test('name patterns select the suite prefix and exclude exactly the app-only cas
 test('verification passes only when every non-excluded case passed', () => {
   const result = verifyWithoutAppResults('runtime', runtimeReport());
   assert.deepEqual(result.errors, []);
-  assert.equal(result.passed, 4);
+  assert.equal(result.passed, 5);
   assert.equal(result.skipped, 5);
 });
 

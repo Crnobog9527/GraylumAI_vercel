@@ -9372,7 +9372,8 @@ it("OPC: mentor lost reply still projects once from its unchanged frozen informa
     const input = page.getByRole('textbox', { name: '给导师的回复', exact: true });
     await expect.poll(() => input.isEnabled(), { timeout: 30000 }).toBe(true);
     await page.route('**/api/trpc/runtime.view*', route => route.abort());
-    await page.route('**/api/trpc/runtime.execute*', async route => {
+    // A mentor turn is one opc.mentorTurnStream request (U2); lose its reply.
+    await page.route('**/api/trpc/opc.mentorTurnStream*', async route => {
       const response = await route.fetch(); expect(response.ok()).toBe(true);
       reached(); await held;
       await route.abort(); lost += 1;
@@ -9388,7 +9389,7 @@ it("OPC: mentor lost reply still projects once from its unchanged frozen informa
     const identity = await planIdentityRows(f.actor);
     expect(identity).toHaveLength(2);
     expect((await f.service.read(d.draftId)).information['step-0'].values?.goal?.value ?? '').toBe('');
-    await page.unroute('**/api/trpc/runtime.execute*');
+    await page.unroute('**/api/trpc/opc.mentorTurnStream*');
     await page.unroute('**/api/trpc/runtime.view*');
     await page.reload();
     await expect.poll(async () => (await f.service.read(d.draftId)).information['step-0'].values?.goal?.value, { timeout: 30000 }).toBe(reply);
