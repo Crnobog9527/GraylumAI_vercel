@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
 import {beforeAll, afterAll, it, expect} from 'vitest';
 import {randomUUID, createHash} from 'node:crypto';
 import pg from 'pg';
@@ -150,7 +151,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA === 'true').each(cases)(
       }
       return admin.rpc(name, args);
     }};
-    const host = () => runtimeExecutor({database, actor: async () => f.actorId, adapter});
+    const host = () => runtimeExecutor({callGate:allowTestCalls,database, actor: async () => f.actorId, adapter});
     const snapshot = async () => (await db.query(
       'select state,payload,result,primary_result from runtime_executions where id=$1', [f.execution.executionId],
     )).rows[0];
@@ -178,7 +179,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA === 'true').each(cases)(
     expect(calls.map(call => call.payload.requestHash)).toEqual(frozenRequests.map(hash));
     expect(calls.map(call => call.provider_id)).toEqual(calls.map((_, index) =>
       'gen-terminal-' + f.execution.executionId + '-' + (index + 1)));
-    expect((await db.query('select count(*)::int n from bill2_receipts where call_id=any($1::uuid[])',
+    expect((await db.query("select count(*)::int n from bill2_receipts where call_id=any($1::uuid[]) and payload ? 'transport'",
       [calls.map(call => call.id)])).rows[0].n).toBe(expectedCalls);
     expect((await db.query('select state,closed,charged,actual_restore from bill2_runs where id=$1',
       [f.execution.runId])).rows[0]).toEqual({state: 'settled', closed: true,

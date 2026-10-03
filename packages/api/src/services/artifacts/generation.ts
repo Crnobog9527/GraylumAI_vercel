@@ -12,6 +12,7 @@ import o200k from 'js-tiktoken/ranks/o200k_base';
 import { isEmailVerified } from '../../lib/auth';
 import { checkInputSecurity, checkRateLimitAsync, preAICallSecurityChecks } from '../../middleware/securityChecks';
 import { filterAIOutput } from '../aiOutputFilter';
+import { requireLegacyCallsEnabled } from '../runtime/newWorkGate';
 import { calculateTokenCostWithPricing, estimatePreDeductCredits, getBillingRuntimeSettings, getModelPricing } from '../billing';
 import { databaseSkillSource } from '../skills/databaseSource';
 import { activateSkill, identityOf, sha256 } from '../skills/loader';
@@ -334,6 +335,7 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
       }
       // Replays of durable results stay recoverable; every expensive preparation,
       // including invalid quotes and prepared retries, consumes one rate slot.
+      await requireLegacyCallsEnabled(privateClient!);
       await checkRateLimitAsync(await actor(), 'ai');
       const ready = await prepare(generationQuoteInput.parse({ projectId: v.projectId, roundId: v.roundId, stepId: v.stepId, instruction: v.instruction, expectedSteps: v.expectedSteps, conversationId: v.conversationId, turnId: v.turnId, purpose: v.purpose }));
       if (v.purpose === 'summary') {

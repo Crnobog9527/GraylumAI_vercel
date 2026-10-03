@@ -1,4 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { throwOpcRpcError } from "./contentBindingError";
+import { capturePending, capturePendingInput, captureResolveInput } from "./capture";
+import { opcInformation } from "./information";
+export { opcInformation } from "./information";
 import { z } from "zod";
 import { DatabaseReadError } from "../../lib/databaseReadError";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -44,30 +48,6 @@ const TOPIC_WORKSPACE_INSTRUCTION =
   "This turn runs inside the user's first-week topic workspace and may continue into later dated ranges. Work conversationally in the user's own language and treat the confirmed positioning content supplied as scope material as the only established facts about the business, accounts, audience and goals. Ask one focused question when required information is missing; do not force a fixed seven-item week. " +
   "You may propose concrete topics, dates, titles and complete briefs. Every brief must state what the content covers, who it is for, why it matters now, a useful structure, and the hypothesis to validate. A proposed account name is not a registered, existing or verified external account and you must never imply otherwise. Never invent traction, results, audience data or platform rules. " +
   "Answer the user's actual message first. When offering or revising topics, end with exactly one JSON code block containing only an array with id (UUID), platform, account, title, brief, day and contentType (article, image_text, video or unknown; ask when the intended form is unclear). When the user explicitly says to adopt all or a subset of the most recent offered topics, end with exactly one JSON code block containing only {\"action\":\"adopt\",\"itemIds\":[UUIDs]}; do this only for clear adoption, never for vague agreement, questions, later, close, or opening a link. The host persists the draft and performs the business action; never claim it succeeded yourself. Do not create external accounts, publish, generate media or claim an external action occurred. ";
-export const opcInformation = z
-  .object({
-    draftId: uuid,
-    stepId: z.string().min(1).max(64),
-    requestId: uuid,
-    expectedVersion: z.number().int().nonnegative(),
-    values: z.record(
-      z.string().max(64),
-      z
-        .object({
-          status: z.enum([
-            "unknown",
-            "unclear",
-            "provisional",
-            "confirmed",
-            "deferred",
-          ]),
-          nature: z.enum(["fact", "decision", "hypothesis", "unknown"]),
-          value: z.string().max(400),
-        })
-        .strict(),
-    ),
-  })
-  .strict();
 export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:StagingPolicy) {
   async function rpc(name: string, args: Record<string, unknown>) {
     const a = await user.auth.getUser();
@@ -76,14 +56,19 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
     const r = await admin
       .rpc(name, { ...args, p_actor_id: a.data.user.id })
       .abortSignal(AbortSignal.timeout(10000));
-    if (r.error) {
-      // Retain bounded business refusal codes used by request recovery.
-      if (/^(?:OPC|RUNTIME)_[A-Z_]+$/.test(r.error.message)) throw new Error(r.error.message);
-      throw new DatabaseReadError("OPC_UNAVAILABLE", r.error.code);
-    }
+    if (r.error) throwOpcRpcError(r.error);
     return r.data;
   }
   return {
+    capturePending: (value: unknown) => capturePending(rpc, capturePendingInput.parse(value).draftId),
+    captureResolve: (value: unknown) => {
+      const v = captureResolveInput.parse(value);
+      return rpc("opc_capture_resolve", {
+        p_draft_id: v.draftId, p_request_id: v.requestId, p_step_id: v.stepId,
+        p_field_id: v.fieldId, p_execution_id: v.executionId, p_hash: v.hash,
+        p_action: v.action, p_expected_version: v.expectedVersion,
+      });
+    },
     information: async (value: unknown) => {
       const v = opcInformation.parse(value);
       return rpc("opc_information", {
@@ -95,9 +80,9 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       });
     },
     async prepareStep(value: unknown) {
-      const v = opcGenerate.parse(value),
-        d = await rpc("opc_query", { p_draft_id: v.draftId });
-      const snapshot = await workbenchService(user, admin).read(
+      const v = opcGenerate.parse(value);
+      let d = await rpc("opc_query", { p_draft_id: v.draftId });
+      let snapshot = await workbenchService(user, admin).read(
         d.projectId,
         d.roundId,
       );
@@ -124,24 +109,6 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       if (opening && v.organizeAfter) throw new Error("OPC_STEP_DENIED");
       // Keep the original request identity; only new admissions attach opening extraction.
       const organizeAfter = opening || v.organizeAfter;
-      const state = d.information[v.stepId];
-      const question = displayedQuestion(state.schema, state.values, v.questionId);
-      // The host owns the question's display identity. It is derived from the
-      // pinned method's declared step/field order and handed to the model so the
-      // mentor prose never invents or recomputes a question number.
-      const questionStepIndex = snapshot.workflow.steps.findIndex(
-        (candidate: { id: string }) => candidate.id === v.stepId,
-      );
-      const questionDisplayLabel =
-        question && questionStepIndex >= 0
-          ? questionLabel(questionStepIndex, state.schema, question.id)
-          : null;
-      // A question outside the reached set is refused, but only for a NEW turn:
-      // an already admitted request keeps its frozen identity, so a changed
-      // question is reported as a conflict below instead.
-      const questionNotReached = Boolean(
-        v.questionId && (v.purpose !== "mentor" || question?.id !== v.questionId),
-      );
       const runtimeRequest = {
         sessionId: d.sessionId,
         organizeAfter: v.organizeAfter,
@@ -177,6 +144,33 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         });
         return replay.data;
       }
+      if (v.purpose === "mentor") {
+        const pending = await capturePending(rpc, v.draftId);
+        if (pending.hasMore) throw new Error("OPC_CAPTURE_PENDING");
+        // Re-read snapshot and question state only after all writes are committed.
+        if (pending.processed.length) {
+          d = await rpc("opc_query", { p_draft_id: v.draftId });
+          snapshot = await workbenchService(user, admin).read(d.projectId, d.roundId);
+        }
+      }
+      const state = d.information[v.stepId];
+      const question = displayedQuestion(state.schema, state.values, v.questionId);
+      // The host owns the question's display identity. It is derived from the
+      // pinned method's declared step/field order and handed to the model so the
+      // mentor prose never invents or recomputes a question number.
+      const questionStepIndex = snapshot.workflow.steps.findIndex(
+        (candidate: { id: string }) => candidate.id === v.stepId,
+      );
+      const questionDisplayLabel =
+        question && questionStepIndex >= 0
+          ? questionLabel(questionStepIndex, state.schema, question.id)
+          : null;
+      // A question outside the reached set is refused, but only for a NEW turn:
+      // an already admitted request keeps its frozen identity, so a changed
+      // question is reported as a conflict below instead.
+      const questionNotReached = Boolean(
+        v.questionId && (v.purpose !== "mentor" || question?.id !== v.questionId),
+      );
       const answeredCard = v.answerSource
         ? resolveAnswerCard(await rpc("runtime_view", { p_session_id: d.sessionId }), v) : undefined;
       if (answeredCard && (v.purpose !== "mentor" || opening)) throw new Error("OPC_ANSWER_SOURCE_DENIED");

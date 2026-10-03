@@ -1,6 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
-import {freezePromptCache,PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
+import {freezePromptCache,freezeHostPromptCache,PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
+import {hostTurnContextSchema,freezeHistorySelection,type HostTurnContext} from './hostTurn';
+import {currentInputBytes} from './historySelection';
+import {requestsHistoricalComparison} from './context';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isEmailVerified } from '../../lib/auth';
@@ -9,6 +12,7 @@ import { activateSkill, identityOf } from '../skills/loader';
 import { summaryPolicy, assertSeparateSummaryModel } from '../artifacts/summaryPolicy';
 import { aggregateCredits, decimal } from '../bill2/decimal';
 import type {StagingPolicy} from './stagingPolicy';
+import { throwIfContentBindingRefused } from '../opc/contentBindingError';
 import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
 import type {FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
@@ -23,6 +27,8 @@ import {currentRequestTiming} from './timing';
 import {readPurposeBudgets} from './purposeBudgets';
 import {assertFrozenPayloads} from './payloadSize';
 import {freezeWindowBillingUnit} from './billingUnitAdmission';
+import {newWorkGate,readNewWorkSettings,requireNewWork} from './newWorkGate';
+import {requireAllowedInput} from './moderation';
 import {admitPricing} from './pricingAdmission';
 
 const uuid=z.string().uuid();
@@ -38,6 +44,7 @@ export const runtimeAdmission=z.object({sessionId:uuid,requestId:uuid,input:z.st
 /** Deployment policy is server configuration, never request input.
  * Real admission requires the separately loaded, enabled Staging window. */
 export type LocalRuntimePolicy={
+ hostTurnContext?:HostTurnContext;
  purposeBudgets?:boolean;real?:StagingPolicy;account:string;costPerCall:string;creditsPerUsd:string;multiplier:string;
  maxCalls:number;maxOutputTokens:number;inputBytes:number;historyItems:number;
  expectedMaterialRevision?:number;opcTurnToken?:string;mentorStream?:boolean;organizeOpening?:boolean;
@@ -76,6 +83,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
  async function actor(){const a=await user.auth.getUser();if(a.error||!a.data.user||!isEmailVerified(a.data.user))throw new Error('RUNTIME_AUTH_REQUIRED');return a.data.user.id;}
  async function query(name:string,args:Record<string,unknown>){
   const r=await admin.rpc(name,{...args,p_actor_id:await actor()});
+  if(r.error)throwIfContentBindingRefused(r.error);
   if(r.error)throw new Error(name==='runtime_admit'&&r.error.message==='OPC_ANSWER_SOURCE_DENIED'
    ?'OPC_ANSWER_SOURCE_DENIED':'RUNTIME_ADMISSION_DENIED');
   return r.data;
@@ -86,15 +94,25 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
   revokeMaterial(sessionId:string,revision:number){return query('runtime_material',{p_session_id:uuid.parse(sessionId),p_action:'revoke',p_expected_revision:z.number().int().positive().parse(revision)});},
   prepare:(value:unknown)=>timedAdmission(async()=>{
    const request=runtimeAdmission.parse(value);
-   const input=policy.resolvedInput === undefined ? request : {...request,input:policy.resolvedInput};await actor();
+   const input=policy.resolvedInput === undefined ? request : {...request,input:policy.resolvedInput};
+   const actorId=await actor();
    if(policy.real&&(input.network!=='deny'||policy.searchEnabled))throw new Error('RUNTIME_REAL_SEARCH_DISABLED');
    if(input.network==='require_latest'&&!policy.searchEnabled)throw new Error('RUNTIME_SEARCH_UNAVAILABLE');
    const session=await query('runtime_session_context',{p_session_id:input.sessionId});
    // Resolve replay before model or revision freshness changes produce another budget.
+   const settings=readNewWorkSettings(admin);
    const replay=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:request});
    if(replay)return replay;
+   const leaveRateLimit=currentRequestTiming()?.enter('rateLimit');
+   try{requireNewWork(await newWorkGate(admin,policy.real?'staging':'local').message(actorId,settings));}
+   finally{leaveRateLimit?.();}
    const mentorStream=Boolean(policy.opcTurnToken&&policy.mentorStream);
    if(policy.organizeOpening&&(!mentorStream||!isOpeningInput(input.input)))throw new Error('RUNTIME_CONTEXT_INVALID');
+   const hostParsed=hostTurnContextSchema.safeParse(policy.hostTurnContext);
+   if(policy.hostTurnContext!==undefined&&(!hostParsed.success||!mentorStream||input.selection.kind!=='skill'||
+    hostParsed.data.opening!==isOpeningInput(input.input)))throw new Error('RUNTIME_CONTEXT_INVALID');
+   const hostTurnContext=policy.hostTurnContext===undefined?undefined:hostParsed.data;
+   const historySelection=hostTurnContext?freezeHistorySelection():undefined;
    const organizeAfter=input.organizeAfter||Boolean(policy.organizeOpening);
    if(mentorStream&&(input.network!=='deny'||input.sources.length||input.selection.kind==='auto'||policy.workspaceContext))
     throw new Error('RUNTIME_CONTEXT_INVALID');
@@ -166,10 +184,17 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const candidates=input.selection.kind==='auto'?await discoverRuntimeCandidates(
     user,admin,{...policy,inputBytes,maxOutputTokens:configuredOutput??policy.maxOutputTokens,...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(inputBytes,q.inputLimit),outputLimit:outputCapacity(row,Infinity,configuredOutput)};}}:{})}):[];
    if(policy.additionalInstructions)instructions+='\n'+z.string().max(budgets?inputBytes:8000).parse(policy.additionalInstructions);
-   const promptCache=freezePromptCache({real:Boolean(policy.real),role:input.selection.kind,model:row.data.model_id,
+   let promptCache=hostTurnContext?undefined:freezePromptCache({real:Boolean(policy.real),role:input.selection.kind,model:row.data.model_id,
     cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined,
     instructions,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions});
    if(mentorStream)instructions+='\n'+QUESTION_CONTRACT_INSTRUCTIONS;
+   const currentInput=runtimeScopeInput(input.input,session.scopeMaterial,hostTurnContext);
+   if(hostTurnContext)promptCache=freezeHostPromptCache({real:Boolean(policy.real),role:input.selection.kind,
+    model:row.data.model_id,cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined,
+    instructions,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions,
+    additionalInstructions:policy.additionalInstructions,mentor:mentorStream,
+    historyMarker:!hostTurnContext.opening&&!requestsHistoricalComparison(input.input)&&
+     currentInputBytes([{role:'user',content:currentInput}])<=historySelection!.currentReserveBytes});
    const searchAllowed=Boolean(policy.searchEnabled&&input.network!=='deny');
    let workspaceContext=false;
    if(policy.workspaceContext&&!policy.opcTurnToken&&!input.sources.length&&input.selection.kind!=='organizer'){
@@ -187,8 +212,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const inputLimit=inputCapacity(row.data,maxOutputTokens,inputBytes);
    if(candidates.length)selectRuntimeHistory([],[{role:'user',content:matchingInput(input.input,candidates)}],{instructions:MATCH_INSTRUCTIONS,inputBytes:inputLimit,historyItems:0,toolBytes:0});
    const admissionToolBytes=(mentorStream?askQuestionToolBytes(true):policy.searchEnabled?2048:0)+
-    (promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0);
-   selectRuntimeHistory([], [{role:'user',content:runtimeScopeInput(input.input,session.scopeMaterial)}],
+    (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
+   selectRuntimeHistory([], [{role:'user',content:currentInput}],
     {instructions,inputBytes:inputLimit,historyItems:0,toolBytes:admissionToolBytes});
    // New mentor turns use the interactive format; replays returned before this branch.
    // A host-opened mentor turn (the user has not spoken) never gets a question card.
@@ -202,7 +227,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const organizerFormat=Boolean(policy.real&&!mentorStream&&(organize||attachedOrganizer));
    if(organizerFormat&&!reasoning)reasoning={parameter:'none'};
    const providerRequestFormat=mentorStream?'agent-turn-v5-stream':organizerFormat?'serial-tools-v6-reasoning':'serial-tools-v2';
-   const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:'scope-projection-v1',
+   const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:hostTurnContext?'scope-projection-v2':'scope-projection-v1',
+    ...(hostTurnContext?{hostTurnContext,historySelection}:{}),
     ...(promptCache?{promptCache}:{}),
     ...(mentorStream?{questionContract:QUESTION_CONTRACT}:{}),
     ...(policy.real||mentorStream?{providerRequestFormat}:{}),...(reasoning?{reasoning}:{}),role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
@@ -244,6 +270,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    }
    // Both SQL CHECKs measure jsonb::text, not JSON.stringify or model input.
    // This runs before runtime_admit, which atomically creates the execution/reservation.
+   await requireAllowedInput({actorId,sessionId:input.sessionId,requestId:input.requestId,
+    text:input.input,opening});
    assertFrozenPayloads(context,billing);
    try{return await query('runtime_admit',{p_session_id:input.sessionId,p_request_id:input.requestId,p_payload:context,p_billing:billing});}
    catch(error){

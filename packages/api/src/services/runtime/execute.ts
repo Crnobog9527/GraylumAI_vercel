@@ -1,52 +1,42 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {promptCachePolicy,PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
+import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
+import {runtimeContext} from './runtimeContext';
+export {runtimeContext} from './runtimeContext';
+import {projectHostTurnItem} from './hostTurn';
+import {selectBlockHistory,validateBlockCall} from './historySelection';
 import {publicAgentText,publicMentorText,type RuntimeProgress} from './progress';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import {logger} from '../../lib/logger';
 import {projectOpenRouterItemsForSizing} from './openRouterHistory';
-import {AGENT_TURN_REQUEST_FORMAT,PROVIDER_REQUEST_FORMATS,validReasoningFormat,
+import {AGENT_TURN_REQUEST_FORMAT,validReasoningFormat,
  STREAMING_FORMATS,historyToolNames,openRouterRequestBody} from './providerRequest';
 import {agentTurnResult} from './agentTurnResult';
 import {terminalAgentReplyFailure} from './terminalAgentReply';
-import {askQuestionTool,askQuestionToolBytes,questionMessageFromArguments,QUESTION_CONTRACT,LEGACY_QUESTION_CONTRACT} from './agentTools';
+import {askQuestionTool,askQuestionToolBytes,questionMessageFromArguments,QUESTION_CONTRACT} from './agentTools';
 import {ASK_QUESTION_TOOL,INVALID_REPLY_NOTICE} from '../../shared/agentTurn';
 import { authoritativeBilling, type FrozenRun, type FrozenCall, type BillingTransport } from '../bill2/service';
 import {OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
-import {frozenPurposeBudget,FROZEN_OUTPUT_CAP} from './purposeBudgets';
 import {createRuntimeBudget,type RuntimeBudget} from './budget';
 import {expiringAuthAfterProvider} from './authReuse';
 import { localFixtureAdapter } from '../bill2/fixtureAdapter';
 import { PostgresSession, type SessionRpc } from './session';
 import { runRuntime, type RuntimeTool } from './runner';
 import { selectRuntimeHistory, selectRuntimeCallInput, projectSupersededScopeItem, requestsHistoricalComparison, assertRuntimeRequestCapacity, runtimeScopeInput } from './context';
-import { matchingPlan, matchingInput, MATCH_INSTRUCTIONS, parseMatch, type MatchCandidate } from './matching';
-import { reasoningPolicy } from './reasoningPolicy';
+import { matchingInput, MATCH_INSTRUCTIONS, parseMatch, type MatchCandidate } from './matching';
 import { callBillingUnit } from './billingUnitAdmission';
+import type {RuntimeCallGate,GateRejection} from './newWorkGate';
+import {allowedOutput} from './moderation';
 const preflightCodes=new Set(['RUNTIME_TIME_BUDGET_EXHAUSTED','RUNTIME_PROVIDER_HISTORY_DENIED','RUNTIME_PROVIDER_BINDING_DENIED','BILL2_PROVIDER_REQUEST_DENIED','BILL2_PROVIDER_CREDENTIAL_UNAVAILABLE','BILL2_PROVIDER_IDENTITY_DENIED','BILL2_PROVIDER_MODEL_DENIED','BILL2_PROVIDER_QUOTE_REQUIRED','BILL2_PROVIDER_QUOTE_CONFLICT']);
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
-export const runtimeContext=z.object({
- version:z.literal('runtime.v1'),sdkVersion:z.literal('0.18.0'),role:z.enum(['ordinary','skill','organizer']),
- input:z.string().min(1).max(20000),instructions:z.string().max(262144),model:z.string().min(1),
- maxOutputTokens:z.number().int().positive().max(FROZEN_OUTPUT_CAP),maxTurns:z.number().int().min(1).max(32),
- inputSelection:z.literal('scope-projection-v1').optional(),
- providerRequestFormat:z.enum(PROVIDER_REQUEST_FORMATS).optional(),promptCache:promptCachePolicy.optional(),
- questionContract:z.enum([LEGACY_QUESTION_CONTRACT,QUESTION_CONTRACT]).optional(),reasoning:reasoningPolicy.optional(),
- historyItems:z.number().int().min(0).max(1000),purposeBudget:frozenPurposeBudget.optional(),
- tools:z.array(z.enum(['search','read_source',ASK_QUESTION_TOOL])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
- modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
- attachedOrganizer:z.object({
-  modelId:z.string().uuid(),model:z.string().min(1),
-  maxOutputTokens:z.number().int().positive(),inputBytes:z.number().int().positive().optional(),
-  historyItems:z.number().int().min(0).max(1000).optional(),reasoning:reasoningPolicy.optional(),instructions:z.string().max(12000).optional(),input:z.string().max(24000).optional()}).strict().optional(),
- workspaceContext:z.boolean().optional(),opcTurnToken:z.string().uuid().optional(),matching:matchingPlan.optional(),scopeMaterial:z.unknown().optional(),
- answeredCard:z.unknown().optional(),request:z.unknown().optional(),moduleId:z.string().uuid().optional(),skillId:z.string().uuid().optional(),revisionId:z.string().uuid().optional(),sources:z.array(z.unknown()).optional(),
-}).strict();
 /** Trusted server host only. The public admission layer must construct this context.
  * The default transport is local-only; the Staging host must explicitly supply
  * its allowlisted official adapter and frozen price policy.
  */
-export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionRpc;actor:()=>Promise<string>;endpoint?:string;adapter?:BillingTransport;activateSkill?:(candidate:MatchCandidate)=>Promise<string>}){
+type RuntimeExecutorOptions={budget?:RuntimeBudget;database:SessionRpc;actor:()=>Promise<string>;
+ callGate:RuntimeCallGate;endpoint?:string;adapter?:BillingTransport;activateSkill?:(candidate:MatchCandidate)=>Promise<string>};
+export function runtimeExecutor(options:RuntimeExecutorOptions){
+ if(typeof options.callGate!=='function')throw new Error('RUNTIME_CALL_GATE_REQUIRED');
  const budget=options.budget??createRuntimeBudget();
  const adapter=expiringAuthAfterProvider(options.adapter ?? localFixtureAdapter(options.endpoint??''),budget.auth);
  const billing=authoritativeBilling({admin:options.database,actor:options.actor,adapter,budget});
@@ -102,6 +92,8 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
   const session=new PostgresSession(options.database,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
   let transportNotStarted=false;
   let terminalReplyFailure=false;
+  let gateChecked=false,moderationBlocked=false;
+  let gateRejection:GateRejection|undefined;
   const checkAgentReply=(response:unknown,organizer=false)=>{
    if(agentTurn&&terminalAgentReplyFailure(response,organizer,context.tools.includes(ASK_QUESTION_TOOL))){
     // Only inspect a complete response returned from durable runtime_response.
@@ -144,6 +136,16 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
        ...(selectedPolicy.providerLimits?{providerLimits:selectedPolicy.providerLimits}:{}),phase,requestHash,upperUsd:selectedPolicy.upperUsd,inputLimit:selectedPolicy.inputLimit,outputLimit:selectedPolicy.outputLimit,
        automaticRetry:false,hiddenTools:false,lookupSupported:selectedPolicy.lookupSupported,
        ...callBillingUnit(execution.billing.rules,selectedPolicy)};
+      // Every new claim path must pass this once-per-round gate before BILL2.
+      if(!gateChecked){
+       const leaveRateLimit=budget.timing?.enter('rateLimit');
+       try{
+        const verdict=await options.callGate(await options.actor(),execution.billing.limits.maxCalls);
+        if(!verdict.ok){gateRejection=verdict.reason;throw new Error('RUNTIME_NEW_CALL_DENIED');}
+        gateChecked=true;
+       }catch(error){gateRejection??='limit_unavailable';throw error;}
+       finally{leaveRateLimit?.();}
+      }
       const claim=await billing.claimCall(execution.runId,sequence,call);
       if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
       else budget.assertCanStart(5000);
@@ -238,7 +240,7 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
     }});
    const toolBytes=(agentTurn?askQuestionToolBytes(fiveFields):
     Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description})))))+
-    (context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0);
+    (context.historySelection?.markerReserveBytes??(context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
    const preserveHistoricalMaterial=Boolean(context.sources?.length)||requestsHistoricalComparison(context.input);
    const primarySequence=callSequence;
    let agentText="";
@@ -270,15 +272,23 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
     ...(agentTurn?{allowEmptyResult:true,commitSessionOnSuccess:true,firstToolCallOnly:true,
      onToolCallsDropped:(dropped:number)=>logger.warn('api','runtime_tool_calls_dropped',{executionId,dropped}),
      ...(context.tools.includes(ASK_QUESTION_TOOL)?{stopAtToolNames:[ASK_QUESTION_TOOL]}:{})}:{}),
-    input:runtimeScopeInput(context.input,context.scopeMaterial),session,tools,selectHistory:async(history,incoming)=>{
-    const selected=selectRuntimeHistory(history,incoming,{instructions:effective.instructions,inputBytes:Math.min(primaryPolicy.inputLimit,context.purposeBudget?.inputBytes??Infinity),
+    input:runtimeScopeInput(context.input,context.scopeMaterial,context.hostTurnContext),session,tools,selectHistory:async(history,incoming)=>{
+    const selectionOptions={instructions:effective.instructions,inputBytes:Math.min(primaryPolicy.inputLimit,context.purposeBudget?.inputBytes??Infinity),
      historyItems:context.historyItems,toolBytes,...sizing,
-     projectHistoryItem:item=>legacyInput||preserveHistoricalMaterial?item:projectSupersededScopeItem(item,context.scopeMaterial)});
+     projectHistoryItem:(item:unknown)=>context.hostTurnContext?
+      projectHostTurnItem(item,context.scopeMaterial,preserveHistoricalMaterial,projectSupersededScopeItem):
+      legacyInput||preserveHistoricalMaterial?item:projectSupersededScopeItem(item,context.scopeMaterial)};
+    const selected=context.historySelection?selectBlockHistory(history,incoming,{...selectionOptions,
+     historySelection:context.historySelection,revisions:session.getHistoryRevisions()}):selectRuntimeHistory(history,incoming,selectionOptions);
     selectedHistoryCount=selected.length-incoming.length;
     // Freeze the exact first-call history members. Later tool calls may use a
     // subset, but never acquire a new Session dependency during this execution.
     await session.freezeHistoryItems(selected.slice(0,selectedHistoryCount));return selected;
-   },filterModelInput:legacyInput?undefined:(items,instructions)=>selectRuntimeCallInput(items,selectedHistoryCount,{
+   },filterModelInput:legacyInput?undefined:(items,instructions)=>context.historySelection?validateBlockCall(items,selectedHistoryCount,{
+    instructions,inputBytes:Math.min(primaryPolicy.inputLimit,context.purposeBudget?.inputBytes??Infinity),
+    toolBytes,historyItems:context.historyItems,historySelection:context.historySelection,...sizing,
+    projectHistoryItem:item=>projectHostTurnItem(item,context.scopeMaterial,preserveHistoricalMaterial,projectSupersededScopeItem),
+   }) as typeof items:selectRuntimeCallInput(items,selectedHistoryCount,{
     instructions,inputBytes:Math.min(primaryPolicy.inputLimit,context.purposeBudget?.inputBytes??Infinity),
     toolBytes,currentMaterial:context.scopeMaterial,preserveHistoricalMaterial,...sizing,
    }) as typeof items,
@@ -344,6 +354,11 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
       return JSON.stringify(response);
      }});
    }
+   // This is after organizer spend and streamed text. Real moderation must decide
+   // whether to buffer/retract output or check the primary reply before organizing.
+   if(execution.live&&!await allowedOutput({actorId:await options.actor(),executionId,body,summary})){
+    moderationBlocked=true;throw new Error('RUNTIME_MODERATION_BLOCKED');
+   }
    const result={kind:'usable_result',evidenceRef:executionId,
     evidenceHash:hash(JSON.stringify({body,summary,...turnMetadata})),body,...turnMetadata,...(summary?{summary}:{})};
    progress({type:'phase',phase:'saving'});
@@ -353,6 +368,12 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
    // The SDK may wrap the error; rely on the latch. Every Runtime write now
    // refuses this actor, so leave settlement to trusted financial recovery.
    if(accountClosed)return {state:'pending' as const};
+   if(moderationBlocked){
+    // A cancellation failure propagates; never rewrite a moderation block as pending
+    // or retry an ambiguous durable cancellation here.
+    const stopped=await rpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
+    return {state:stopped.state};
+   }
    if(terminalReplyFailure){
     // The persisted reply proves this execution cannot continue, including a
     // replay after owner loss. Cancellation retains receipts/checkpoints and
@@ -385,7 +406,11 @@ export function runtimeExecutor(options:{budget?:RuntimeBudget;database:SessionR
    if(!execution.live)return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{})};
    // A lost durable response is inspected by later recovery, never a network retry.
    const failed=await rpc<{state:string}>('runtime_execution',{...args,p_action:'fail_before_dispatch'}).catch(()=>null);
-   if(failed?.state==='cancelled')return {state:'cancelled' as const,...(preflightFailure?{unavailable:preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?'provider_history' as const:'preflight' as const}:capacity?{unavailable:'capacity' as const}:{})};
+   if(failed?.state==='cancelled'){
+    const unavailable:GateRejection|'provider_history'|'preflight'|'capacity'|undefined=gateRejection??(preflightFailure?
+     preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?'provider_history':'preflight':capacity?'capacity':undefined);
+    return {state:'cancelled' as const,...(unavailable?{unavailable}:{})};
+   }
    await rpc('runtime_execution',{...args,p_action:'interrupt'}).catch(()=>{});
    return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{})};
   }

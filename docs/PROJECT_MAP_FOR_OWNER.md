@@ -39,6 +39,14 @@
 
 两套共用同一个积分余额和流水，没有第二个钱包。
 
+缓存代码位置：当前 Runtime 使用 `packages/api/src/services/runtime/promptCache.ts`；
+旧诊断仍引用 `services/promptCacheBuilder.ts`。没有调用方的旧 `services/promptCache.ts`
+及其专属测试已删除，不影响上述两个模块。
+
+后台诊断的“速率限制”只检查本地限流器，“消费熔断”只读取旧配置及默认值；
+两项都不证明请求链路已强制执行，报告明确标为警告。RLS 的服务端表可访问性检查
+同样不构成用户隔离验证。
+
 ## 4) 数据库核心表（按业务看）
 
 - 用户与会员：`profiles`（含会员等级）、`membership_plans`、`credit_packages`、积分流水

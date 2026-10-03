@@ -2,9 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { pricingConfig } from '../services/__tests__/fixtures/runtimePricing';
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
-const mocks = vi.hoisted(() => ({ realOpc: false, realAdmission: false, prepareStep: vi.fn(), catalog: vi.fn(), list: vi.fn(), library: vi.fn(), start: vi.fn(), info: vi.fn(), error: vi.fn() }));
+const mocks = vi.hoisted(() => ({ realOpc: false, realAdmission: false, prepareStep: vi.fn(), catalog: vi.fn(), list: vi.fn(), library: vi.fn(), captureResolve: vi.fn(), start: vi.fn(), info: vi.fn(), error: vi.fn() }));
 vi.mock('../lib/logger', () => ({ logger: { info: mocks.info, error: mocks.error, warn: vi.fn() } }));
-vi.mock('../services/opc/service', async original => { const actual = await original<typeof import('../services/opc/service')>(); return { ...actual, opcService: (...args: Parameters<typeof actual.opcService>) => mocks.realOpc ? actual.opcService(...args) : ({ catalog: mocks.catalog, list: mocks.list, library: mocks.library, prepareStep: mocks.realAdmission ? async (input:{requestId:string;input:string;organizeAfter:boolean}) => (await import('../services/runtime/admission')).runtimeAdmissionService(args[0],args[1],{real:args[2],account:'synthetic',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:100,inputBytes:8000,historyItems:20}).prepare({sessionId:actor,requestId:input.requestId,input:input.input,organizeAfter:input.organizeAfter,selection:{kind:'ordinary',modelId:actor},network:'deny'}) : mocks.prepareStep }) }; });
+vi.mock('../services/opc/service', async original => { const actual = await original<typeof import('../services/opc/service')>(); return { ...actual, opcService: (...args: Parameters<typeof actual.opcService>) => mocks.realOpc ? actual.opcService(...args) : ({ catalog: mocks.catalog, list: mocks.list, library: mocks.library, captureResolve: mocks.captureResolve, prepareStep: mocks.realAdmission ? async (input:{requestId:string;input:string;organizeAfter:boolean}) => (await import('../services/runtime/admission')).runtimeAdmissionService(args[0],args[1],{real:args[2],account:'synthetic',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:100,inputBytes:8000,historyItems:20}).prepare({sessionId:actor,requestId:input.requestId,input:input.input,organizeAfter:input.organizeAfter,selection:{kind:'ordinary',modelId:actor},network:'deny'}) : mocks.prepareStep }) }; });
 vi.mock('../services/runtime/admission', async original => {const actual=await original<typeof import('../services/runtime/admission')>();return {...actual,runtimeAdmissionService:(...args:Parameters<typeof actual.runtimeAdmissionService>)=>mocks.realAdmission?actual.runtimeAdmissionService(...args):{start:mocks.start}};});
 import { opcRouter } from './opc';
 import { runtimeRouter } from './runtime';
@@ -159,6 +159,38 @@ describe('downstream real-model admission after a valid remote window',()=>{
   expect(admitted[1].p_payload.modelId).toBe(actor);expect(admitted[1].p_payload.attachedOrganizer.modelId).toBe(summaryId);
   expect(admitted[1].p_billing.callPolicy.map((call:{modelId:string})=>call.modelId)).toEqual([actor,summaryId]);
  });
+ it('returns HTTP 412 with the binding code from actual runtime admission', async () => {
+  configure(true);
+  const normalRpc = rpc.getMockImplementation()!;
+  rpc.mockImplementation(async (name: string, ...args: unknown[]) => name === 'runtime_admit'
+   ? { data: null, error: { code: 'P0001', message: 'OPC_CONTENT_BINDING' } }
+   : normalRpc(name, ...args));
+  const response = await post('runtime.prepare', runtimeInput);
+  const body = await response.json();
+  expect(response.status).toBe(412);
+  expect(body.error.data).toMatchObject({ code: 'PRECONDITION_FAILED', httpStatus: 412 });
+  expect(body.error.message).toBe('OPC_CONTENT_BINDING');
+  expect(rpc.mock.calls.filter(([name]) => name === 'runtime_admit')).toHaveLength(1);
+ });
+ it.each(['prepareVideoMaterial', 'checkVideoExecution', 'saveVideoPackage', 'saveVideoResults'] as const)(
+  'returns HTTP 412 with the binding code from actual OPC %s', async route => {
+   mocks.realOpc = true;
+   rpc.mockImplementation((name: string) => Object.assign(Promise.resolve(
+    name === 'runtime_test_policy' ? { data: policy, error: null }
+     : { data: null, error: { code: 'P0001', message: 'OPC_CONTENT_BINDING' } }
+   ), { abortSignal() { return this; } }));
+   const base = { workItemId: actor, sourceScriptId: actor };
+   const versions = { expectedStoryboardVersion: 0, expectedEditingVersion: 0 };
+   const input = route === 'checkVideoExecution' ? { ...base, executionId: actor }
+    : route === 'prepareVideoMaterial' ? { ...base, ...versions, requestId: actor, choice: 'both' }
+     : { ...base, ...versions, requestId: actor, executionId: actor,
+      ...(route === 'saveVideoResults' ? { choice: 'both' } : {}) };
+   const response = await post('opc.' + route, input);
+   const body = await response.json();
+   expect(response.status).toBe(412);
+   expect(body.error.data).toMatchObject({ code: 'PRECONDITION_FAILED', httpStatus: 412 });
+   expect(body.error.message).toBe('OPC_CONTENT_BINDING');
+  });
  it.each(['inactive','PGRST116','same_model','missing_summary'])('reports known %s model configuration as unavailable without admitting',async fault=>{
   configure(true);if(['inactive','PGRST116'].includes(fault))modelFault=fault;else summaryModel=fault==='same_model'?actor:'';
   const response=await post('opc.prepareStep',stepInput);expect(response.status).toBe(503);expect((await response.json()).error.message).toContain('模型配置暂不可用');
@@ -183,3 +215,21 @@ describe('downstream real-model admission after a valid remote window',()=>{
   expect(JSON.stringify(body)+JSON.stringify(mocks.error.mock.calls)).not.toContain('SYNTHETIC_PRIVATE_UNEXPECTED_BODY');
  });
 });
+
+it('capture resolve requires the same open test window as information and read errors stay sanitized', async () => {
+  const input = { draftId: actor, requestId: actor, stepId: 'step-0', fieldId: 'goal',
+    executionId: actor, hash: 'hash', action: 'accept' as const, expectedVersion: 0 };
+  rpc.mockImplementation(async (name: string) => name === 'runtime_test_actor_access'
+    ? { data: true, error: null } : { data: null, error: { code: '42501', message: 'RUNTIME_TEST_WINDOW_DENIED' } });
+  await expect(app.createCaller(context()).opc.captureResolve(input)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+  expect(mocks.captureResolve).not.toHaveBeenCalled();
+  mocks.library.mockRejectedValueOnce(new Error('OPC_PRIVATE_REFUSAL'));
+  await expect(app.createCaller(context()).opc.library(libraryInput)).rejects.toMatchObject({ message: expect.not.stringContaining('OPC_PRIVATE_REFUSAL') });
+  rpc.mockImplementation(async (name: string) => ({ data: name === 'runtime_test_policy' ? policy : true, error: null }));
+  mocks.captureResolve.mockResolvedValueOnce({ version: 1, result: 'accept' });
+  await expect(app.createCaller(context()).opc.captureResolve(input)).resolves.toEqual({ version: 1, result: 'accept' });
+});
+vi.mock('../services/runtime/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../services/runtime/newWorkGate')>(),
+ ...(await import('../services/__tests__/fixtures/runtimeGates')).testAdmissionGates,
+}));

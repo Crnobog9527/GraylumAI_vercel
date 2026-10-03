@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { beforeAll, afterAll, it, expect, vi } from 'vitest';
 import {logger} from '../../lib/logger';
@@ -11,6 +12,8 @@ import { runRuntime } from './runner';
 import {readRuntimeView,retainedOutputReason} from './view';
 import { runtimeExecutor } from './execute';
 import './promptCache.integration';
+import './gateWiring.integration';
+import {registerAdmissionGateTests} from './admissionGate.integration';
 import {createRuntimeBudget,withRuntimeBudget} from './budget';
 import {runtimeActor} from './actor';
 import {postgresJsonbBytes,assertFrozenPayloads} from './payloadSize';
@@ -91,7 +94,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['legacy','serial-to
    if(name==='runtime_execution'&&args.p_action==='complete'&&failCompletion){failCompletion=false;return {data:null,error:{message:'synthetic completion write failure'}};}
    return admin.rpc(name,args);
   }};
-  const host=runtimeExecutor({database,actor:async()=>f.actorId,endpoint,adapter});
+  const host=runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,endpoint,adapter});
   expect(await host.execute(e.executionId)).toMatchObject({state:'pending'});
   const originalCall=(await db.query('select payload from bill2_calls where run_id=$1',[e.runId])).rows[0].payload;
   expect(originalCall.requestHash).toBe(sentHash);
@@ -131,7 +134,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([{runM:'1.5',credits
   const address=server.address();if(!address||typeof address==='string')throw new Error('local server');
   const endpoint='http://127.0.0.1:'+address.port;
   const adapter=openRouterAdapter({allowWorkspaceRead:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>fetch(endpoint,init)});
-  const host=runtimeExecutor({database:admin,actor:async()=>f.actorId,endpoint,adapter});
+  const host=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,endpoint,adapter});
   expect(await host.execute(e.executionId)).toMatchObject({state:'completed',body:'BILL-UNIT answer'});
   const call=(await db.query('select payload from bill2_calls where run_id=$1',[e.runId])).rows[0].payload;
   expect(call.billingUnit).toEqual({modelId:realModel,multiplier:'1.5',source:'global'});
@@ -170,7 +173,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['plain','reasoning'
     if(name==='runtime_execution'&&args.p_action==='complete'&&failCompletion){failCompletion=false;return {data:null,error:{message:'synthetic completion failure'}};}
     return admin.rpc(name,args);
    }};
-   const host=runtimeExecutor({database,actor:async()=>f.actorId,adapter});
+   const host=runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,adapter});
    let result=await host.execute(e.executionId);
    if(shape==='unsupported'&&turn===1){
     expect(result).toEqual({state:'cancelled',unavailable:'provider_history'});expect(await host.execute(e.executionId)).toEqual({state:'cancelled'});expect(bodies).toHaveLength(1);
@@ -225,7 +228,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['valid','malformed'
     if(name==='runtime_execution'&&args.p_action==='complete'&&failCompletion){failCompletion=false;return {data:null,error:{message:'synthetic completion failure'}};}
     return admin.rpc(name,args);
    }};
-   const host=runtimeExecutor({database,actor:async()=>f.actorId,adapter});
+   const host=runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,adapter});
    let result=await host.execute(e.executionId);
    if(turn===1&&shape!=='valid'){
     expect(result).toEqual({state:'cancelled',unavailable:'provider_history'});expect(await host.execute(e.executionId)).toEqual({state:'cancelled'});
@@ -273,7 +276,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool-turn','fast-t
    const result=mode==='delayed-cancel'&&name==='bill2_revoke_unstarted_dispatch'&&!args.p_inspect?(await Promise.all([admin.rpc(name,args),admin.rpc('runtime_cancel',{p_actor_id:f.actorId,p_execution_id:e.executionId})]))[0]:await admin.rpc(name,args);
    if(mode==='delayed-response-loss'&&name==='bill2_revoke_unstarted_dispatch'&&!args.p_inspect&&!revocationResponseLost){revocationResponseLost=true;return {...result,error:{message:'Synthetic lost revoke response'}};}
    if(mode==='delayed-second-writer'&&name==='bill2_dispatch'&&result.data?.dispatch){
-    expect((await runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,budget}).execute(e.executionId)).state).toBe('pending');
+    expect((await runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter,budget}).execute(e.executionId)).state).toBe('pending');
     const existing=(await db.query('select payload from bill2_calls where id=$1',[args.p_call_id])).rows[0].payload;
     const secondClaim=await admin.rpc('bill2_claim',{p_actor_id:f.actorId,p_run_id:e.runId,p_sequence:1,p_payload:existing});
     expect(secondClaim.error).toBeNull();expect(secondClaim.data.dispatchToken).toBeNull();
@@ -287,11 +290,11 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool-turn','fast-t
   const adapter=openRouterAdapter({budget,allowWorkspaceRead:true,credential:async()=> 'SYNTHETIC',transport:async(_url,init)=>fetch(endpoint,init)});
   const authClient=createClient('http://127.0.0.1','SYNTHETIC',{auth:{persistSession:false,autoRefreshToken:false},global:{fetch:async(url)=>{expect(String(url)).toBe('http://127.0.0.1/auth/v1/user');authTimes.push(elapsed);return new Response(JSON.stringify({id:f.actorId}),{headers:{'content-type':'application/json'}});}}});
   const actor=mode==='late-receipt'?runtimeActor(authClient.auth,f.actorId,budget,'Bearer e30.'+Buffer.from(JSON.stringify({exp:Math.floor(Date.now()/1000)+3600})).toString('base64url')+'.synthetic'):async()=>f.actorId;
-  const host=runtimeExecutor({database,actor,adapter,budget});
+  const host=runtimeExecutor({callGate:allowTestCalls,database,actor,adapter,budget});
   if(mode==='late-receipt'){
    const shortJwt='e30.'+Buffer.from(JSON.stringify({exp:Math.floor(Date.now()/1000)+150})).toString('base64url')+'.synthetic';
    const shortActor=runtimeActor(authClient.auth,f.actorId,budget,'Bearer '+shortJwt);
-   await expect(runtimeExecutor({database,actor:shortActor,adapter,budget}).execute(e.executionId)).rejects.toThrow('RUNTIME_STAGING_AUTH_REFRESH_REQUIRED');
+   await expect(runtimeExecutor({callGate:allowTestCalls,database,actor:shortActor,adapter,budget}).execute(e.executionId)).rejects.toThrow('RUNTIME_STAGING_AUTH_REFRESH_REQUIRED');
    expect(persistence).toEqual([]);expect(posts).toBe(0);expect(authTimes).toEqual([]);
    expect((await db.query('select request_id,pre_deduct_id,payload from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual(original);
   }
@@ -322,7 +325,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool-turn','fast-t
   const history=(await db.query('select revision,item from runtime_session_history where session_id=$1 order by revision',[f.s.sessionId])).rows;
   // A genuinely fresh adapter/budget must still replay only the original calls.
   const recoveryAdapter=openRouterAdapter({allowWorkspaceRead:true,credential:async()=> 'SYNTHETIC',transport:async(_url,init)=>fetch(endpoint,init)});
-  const recovery=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter:recoveryAdapter});
+  const recovery=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter:recoveryAdapter});
   expect((await recovery.execute(e.executionId)).state).toBe(result.state);expect(posts).toBe(expectedPosts);
   await db.query('update runtime_test_windows set enabled=false where id=$1',[windowId]);
   await host.cancel(e.executionId);
@@ -370,12 +373,17 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['header','timeout',
  try{
   const address=server.address();if(!address||typeof address==='string')throw new Error('local server');const endpoint='http://127.0.0.1:'+address.port;
   const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(url,init)=>fetch(endpoint+new URL(String(url)).pathname+new URL(String(url)).search,init)});
-  const host=()=>runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter});
+  const host=()=>runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter});
   expect(await host().execute(e.executionId)).toEqual({state:'pending'});
   const original=(await db.query('select request_id,pre_deduct_id,payload from bill2_runs where id=$1',[e.runId])).rows[0];
-  const call=(await db.query('select id,payload,provider_id from bill2_calls where run_id=$1',[e.runId])).rows[0];
-  expect(call.payload.requestHash).toBe(sentHash);expect(call.provider_id).toBe(['absent','response-mismatch'].includes(mode)?null:providerId);
-  const receipt=(await db.query('select payload from bill2_receipts where call_id=$1',[call.id])).rows[0].payload;
+  const call=(await db.query('select id,payload,provider_id,selected_cost_usd from bill2_calls where run_id=$1',[e.runId])).rows[0];
+  expect(call.payload.requestHash).toBe(sentHash);expect(call.provider_id).toBe(mode==='absent'?null:providerId);
+  // An early reliable header remains evidence, but a later mismatch prohibits its use for recovery or settlement.
+  if(mode==='response-mismatch'){
+   expect((await db.query('select conflict from bill2_runs where id=$1',[e.runId])).rows[0].conflict).toBe(true);
+   expect(call.selected_cost_usd).toBeNull();
+  }
+  const receipt=(await db.query("select payload from bill2_receipts where call_id=$1 and payload ? 'transport'",[call.id])).rows[0].payload;
   expect(receipt).toMatchObject({cost:null,final:false});
   if(mode!=='response-mismatch')expect(receipt.transport).toMatchObject({rawBody:' '.repeat(165),complete:false,transportIssue:mode==='timeout'?'body_timeout':'body_interrupted'});
   const history=(await db.query('select revision,item from runtime_session_history where session_id=$1 order by revision',[f.s.sessionId])).rows;
@@ -385,7 +393,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['header','timeout',
   expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(80);
   for(let i=0;i<4;i++)expect((await host().recoverFinancial(e.executionId)).state).toBe(recovered?'cancelled':'cost_pending');
   const run=(await db.query('select state,charged,provider_cost_usd::text cost,conflict from bill2_runs where id=$1',[e.runId])).rows[0];
-  expect(run).toEqual(recovered?{state:'settled',charged:3,cost:'0.003',conflict:false}:{state:mode==='absent'?'unknown':mode==='response-mismatch'?'dispatched':'cost_pending',charged:null,cost:null,conflict:mode.endsWith('mismatch')});
+  expect(run).toEqual(recovered?{state:'settled',charged:3,cost:'0.003',conflict:false}:{state:mode==='absent'?'unknown':'cost_pending',charged:null,cost:null,conflict:mode.endsWith('mismatch')});
   expect(posts).toBe(1);expect(lookups).toBe(mode==='lookup-pending'?3:['header','timeout','lookup-mismatch'].includes(mode)?1:0);
   expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(recovered?97:80);
   expect((await db.query("select reason_code from credit_transactions where bill2_run_id=$1 order by reason_code",[e.runId])).rows.map(row=>row.reason_code)).toEqual(recovered?['bill2_release','bill2_reserve','bill2_spend']:['bill2_reserve']);
@@ -424,7 +432,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['disabled','expired
   const address=server.address();if(!address||typeof address==='string')throw new Error('local server');
   const endpoint='http://127.0.0.1:'+address.port;
   const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(url,init)=>fetch(endpoint+new URL(String(url)).pathname+new URL(String(url)).search,init)});
-  const host=()=>runtimeExecutor({database:admin,actor:async()=>f.actorId,endpoint,adapter});
+  const host=()=>runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,endpoint,adapter});
   const first=await host().execute(e.executionId);expect(first).toMatchObject({state:'cost_pending',body:'Original answer without cost'});
   if(!('body' in first))throw new Error('expected preserved response');
   const original=(await db.query('select request_id,pre_deduct_id,payload from bill2_runs where id=$1',[e.runId])).rows[0];
@@ -441,7 +449,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['disabled','expired
   const originalPolicy=await loadStagingRecoveryPolicy(admin,f.actorId,e.executionId,env);
   expect(originalPolicy.callPolicies).toEqual([policy]);
   await expect(loadStagingRecoveryPolicy(admin,randomUUID(),e.executionId,env)).rejects.toThrow('RECOVERY_DENIED');
-  const maintenance=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter:{dispatch:async()=>{throw new Error('NO_NEW_DISPATCH');},lookup:adapter.lookup}});
+  const maintenance=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter:{dispatch:async()=>{throw new Error('NO_NEW_DISPATCH');},lookup:adapter.lookup}});
   const caller=runtimeRouter.createCaller(await createTRPCContext({headers:new Headers(),supabaseAuth:user}));
   const hostEnv={...env};
   if(stopped==='rollover'){
@@ -498,7 +506,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: staging window 
  const loser=1-winner;expect(String((results[loser] as PromiseRejectedResult).reason)).toContain('TEST_BUDGET_EXHAUSTED');
  let requests=0;
  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_ONLY',transport:async()=>{requests++;return new Response('{"id":"gen-unknown-original","model":"test/unknown"}',{status:500});}});
- const host=()=>runtimeExecutor({database:admin,actor:async()=>actors[winner]!.actorId,endpoint:'http://127.0.0.1:1',adapter});
+ const host=()=>runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>actors[winner]!.actorId,endpoint:'http://127.0.0.1:1',adapter});
  await host().execute(e.executionId);await host().execute(e.executionId);
  expect(requests).toBe(1);
  expect((await db.query('select provider_id,selected_cost_usd from bill2_calls where run_id=$1',[e.runId])).rows).toEqual([{provider_id:'gen-unknown-original',selected_cost_usd:null}]);
@@ -540,7 +548,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['missing','mismatch
  const real=await loadStagingPolicy(admin,f.actorId,{V3_RUNTIME_STAGING_ENABLED:'true',VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'graylumai-staging.vercel.app',VERCEL_GIT_COMMIT_REF:'staging',VERCEL_GIT_REPO_OWNER:'Crnobog9527',VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',V3_RUNTIME_STAGING_PROJECT_ID:'synthetic-project',VERCEL_PROJECT_ID:'synthetic-project',NEXT_PUBLIC_SUPABASE_URL:'https://synthetic.supabase.co',V3_RUNTIME_STAGING_DATABASE_HOST:'synthetic.supabase.co',V3_RUNTIME_STAGING_WINDOW_ID:windowId});
  const adapter=stagingTransport(admin,real);
  const diagnostic=vi.spyOn(logger,'error');
- const result=await runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter}).execute(e.executionId);
+ const result=await runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter}).execute(e.executionId);
  const recorded=diagnostic.mock.calls.filter(call=>call[1]==='runtime_provider_preflight_failed');diagnostic.mockRestore();
  expect(recorded).toEqual([['api','runtime_provider_preflight_failed',{executionId:e.executionId,code:'RUNTIME_PROVIDER_BINDING_DENIED'}]]);
  expect(result).toEqual({state:'cancelled',unavailable:'preflight'});
@@ -663,15 +671,15 @@ it.each(['none','session','result_before','result_after','receipt_before','recei
    return admin.rpc(name,args);
   }};
   const options={database,actor:async()=>f.actorId,endpoint:'http://127.0.0.1:'+address.port};
-  const first=await runtimeExecutor(options).execute(e.executionId);
+  const first=await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId);
   if(!['none','receipt_before','receipt_after'].includes(fault)){expect(injected).toBe(true);expect(first).toEqual({state:'pending'});expect(requests).toBe(1);expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(fault==='result_after'?97:80);}
   else expect(first).toEqual({state:'completed',body:'Original durable answer'});
   if(fault==='receipt_unavailable'){
    // Every bounded persistence attempt is unavailable; process-local evidence
    // cannot be reconstructed by a new host if no storage accepted it.
-   expect(await runtimeExecutor(options).execute(e.executionId)).toEqual({state:'pending'});
-   expect((await runtimeExecutor(options).cancel(e.executionId)).state).toBe('cost_pending');
-   expect((await runtimeExecutor(options).execute(e.executionId)).state).toBe('cost_pending');
+   expect(await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId)).toEqual({state:'pending'});
+   expect((await runtimeExecutor({...options,callGate:allowTestCalls}).cancel(e.executionId)).state).toBe('cost_pending');
+   expect((await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId)).state).toBe('cost_pending');
    expect(requests).toBe(1);
    const run=(await db.query('select request_id,session_ref,scope from bill2_runs where id=$1',[e.runId])).rows[0];
    expect(run).toEqual({request_id:f.admit.p_request_id,session_ref:f.s.sessionId,scope:f.s.scope});
@@ -692,27 +700,27 @@ it.each(['none','session','result_before','result_after','receipt_before','recei
    await expect(rpc('runtime_receipt_saved',{...inspection,p_call_id:randomUUID()})).rejects.toThrow('DENIED');
    const anonymous=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
    expect((await anonymous.rpc('runtime_receipt_saved',inspection)).error).not.toBeNull();
-   await expect(runtimeExecutor(options).execute(e.executionId)).rejects.toThrow('UNAVAILABLE');
-   const financial=await runtimeExecutor(options).recoverFinancial(e.executionId);
+   await expect(runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId)).rejects.toThrow('UNAVAILABLE');
+   const financial=await runtimeExecutor({...options,callGate:allowTestCalls}).recoverFinancial(e.executionId);
    expect(financial.state).toBe('cancelled');expect(JSON.stringify(financial)).not.toContain('Original durable answer');
-   expect(await runtimeExecutor(options).recoverFinancial(e.executionId)).toEqual(financial);
+   expect(await runtimeExecutor({...options,callGate:allowTestCalls}).recoverFinancial(e.executionId)).toEqual(financial);
    expect(requests).toBe(1);
    expect((await db.query('select count(*)::int n from runtime_session_history where session_id=$1',[f.s.sessionId])).rows[0].n).toBe(0);
    expect((await db.query("select credits,(select count(*)::int from billing_history where user_id=$1 and operation_type='settle') terminals from profiles where id=$1",[f.actorId])).rows[0]).toEqual({credits:97,terminals:1});
    return;
   }
   if(fault==='result_revoked'){
-   await expect(runtimeExecutor(options).execute(e.executionId)).rejects.toThrow('UNAVAILABLE');
+   await expect(runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId)).rejects.toThrow('UNAVAILABLE');
    const saved=(await db.query('select item from runtime_session_history where session_id=$1 order by revision',[f.s.sessionId])).rows;
    expect(saved).toHaveLength(2);expect(JSON.stringify(saved)).toContain('Original durable answer');
    expect((await db.query('select result from runtime_executions where id=$1',[e.executionId])).rows[0].result).toBeNull();
-   const financial=await runtimeExecutor(options).recoverFinancial(e.executionId);expect(financial.state).toBe('cancelled');
+   const financial=await runtimeExecutor({...options,callGate:allowTestCalls}).recoverFinancial(e.executionId);expect(financial.state).toBe('cancelled');
    expect(JSON.stringify(financial)).not.toContain('Original durable answer');
-   expect(await runtimeExecutor(options).recoverFinancial(e.executionId)).toEqual(financial);
+   expect(await runtimeExecutor({...options,callGate:allowTestCalls}).recoverFinancial(e.executionId)).toEqual(financial);
    await expect(new PostgresSession(admin,{actorId:f.actorId,sessionId:f.s.sessionId,executionId:e.executionId}).getItems()).rejects.toThrow('UNAVAILABLE');
    expect((await db.query('select item from runtime_session_history where session_id=$1 order by revision',[f.s.sessionId])).rows).toEqual(saved);
   }else{
-   const recovered=await runtimeExecutor(options).execute(e.executionId);
+   const recovered=await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId);
    expect(recovered).toEqual({state:'completed',body:'Original durable answer'});
   }
   expect(requests).toBe(1);
@@ -752,14 +760,14 @@ it.each(['before_dispatch','before_tool'] as const)('RUNTIME: concurrent replay 
   if(mode==='before_dispatch'&&name==='runtime_execution'&&args.p_action==='begin'&&result.data?.live){signalReady();await held;}
   return result;
  }};
- const original=runtimeExecutor({database,actor,endpoint}).execute(e.executionId);
+ const original=runtimeExecutor({callGate:allowTestCalls,database,actor,endpoint}).execute(e.executionId);
  try{
   await ready;
-  expect((await runtimeExecutor({database:admin,actor,endpoint}).execute(e.executionId)).state).toBe('pending');
+  expect((await runtimeExecutor({callGate:allowTestCalls,database:admin,actor,endpoint}).execute(e.executionId)).state).toBe('pending');
   expect((await db.query('select state from runtime_executions where id=$1',[e.executionId])).rows[0].state).toBe('running');
   expect(posts).toBe(mode==='before_dispatch'?0:1);
   release();expect(await original).toEqual({state:'completed',body:'Original concurrent answer'});
-  expect((await runtimeExecutor({database:admin,actor,endpoint}).execute(e.executionId)).state).toBe('completed');
+  expect((await runtimeExecutor({callGate:allowTestCalls,database:admin,actor,endpoint}).execute(e.executionId)).state).toBe('completed');
   expect(posts).toBe(mode==='before_dispatch'?1:3);
   expect((await db.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actorId])).rows[0].n).toBe(1);
   expect((await db.query('select session_ref from bill2_runs where id=$1',[e.runId])).rows[0].session_ref).toBe(f.s.sessionId);
@@ -843,15 +851,15 @@ it.each(['allow','deny','require_latest','require_latest_no_search'] as const)('
  try{
   const address=server.address();if(!address||typeof address==='string')throw new Error('local fixture');
   const options={database:admin,actor:async()=>f.actorId,endpoint:'http://127.0.0.1:'+address.port};
-  const first=await runtimeExecutor(options).execute(e.executionId);
+  const first=await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId);
   if(mode==='require_latest_no_search'){
    expect(first).toEqual({state:'cancelled',unavailable:'latest'});expect(requests).toBe(1);expect(searchRequests).toBe(0);
    const view=await rpc('runtime_view',{p_actor_id:f.actorId,p_session_id:f.s.sessionId});
    expect(view.executions[0].unavailableReason).toBe('latest_unavailable');expect(view.executions[0].body).toBeNull();expect(view.executions[0].contentAvailable).toBe(false);
-   expect((await runtimeExecutor(options).execute(e.executionId)).state).toBe('cancelled');expect(requests).toBe(1);
+   expect((await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId)).state).toBe('cancelled');expect(requests).toBe(1);
    const next=await rpc('runtime_admit',{...f.admit,p_request_id:randomUUID()});
    expect(await new PostgresSession(admin,{actorId:f.actorId,sessionId:f.s.sessionId,executionId:next.executionId}).getItems()).toEqual([]);
-   await runtimeExecutor(options).cancel(next.executionId);
+   await runtimeExecutor({...options,callGate:allowTestCalls}).cancel(next.executionId);
    expect((await db.query('select credits,(select sum(amount)::int from credit_transactions where user_id=$1) ledger from profiles where id=$1',[f.actorId])).rows[0]).toEqual({credits:97,ledger:97});
    expect((await db.query('select count(*)::int n from runtime_session_history where execution_id=$1',[e.executionId])).rows[0].n).toBe(2);
   }else if(network!=='deny'){
@@ -859,7 +867,7 @@ it.each(['allow','deny','require_latest','require_latest_no_search'] as const)('
    expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(91);
    expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1',[e.runId])).rows[0].n).toBe(3);
    expect((await db.query('select result from runtime_tool_calls where execution_id=$1',[e.executionId])).rows[0].result.sources[0].version).toBe('v1');
-   await runtimeExecutor(options).execute(e.executionId);expect(requests).toBe(3);
+   await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId);expect(requests).toBe(3);
    if(mode==='allow'){
     // Actual persisted SDK history ends in call/result/answer. A two-item
     // suffix would orphan the result; execute the next turn through SDK/HTTP
@@ -868,18 +876,18 @@ it.each(['allow','deny','require_latest','require_latest_no_search'] as const)('
     expect(original.rows.some(row=>row.item.type==='function_call')).toBe(true);
     expect(original.rows.some(row=>row.item.type==='function_call_result')).toBe(true);
     const next=await rpc('runtime_admit',{...f.admit,p_request_id:randomUUID(),p_payload:{...context,input:'Follow up',historyItems:2},p_billing:{...billing,input:{...context,input:'Follow up',historyItems:2}}});
-    expect(await runtimeExecutor(options).execute(next.executionId)).toEqual({state:'completed',body:'Answer with isolated source'});
+    expect(await runtimeExecutor({...options,callGate:allowTestCalls}).execute(next.executionId)).toEqual({state:'completed',body:'Answer with isolated source'});
     expect(requests).toBe(4);expect(searchRequests).toBe(1);
     const messages=observedInputs.at(-1)!.messages as Array<Record<string,unknown>>;
     expect(messages.some(message=>message.role==='tool'||message.tool_calls)).toBe(false);
     expect(JSON.stringify(messages)).toContain('Follow up');expect(JSON.stringify(messages)).toContain('Answer with isolated source');
     expect((await db.query('select item from runtime_session_history where execution_id=$1 order by revision',[e.executionId])).rows).toEqual(original.rows);
-    await runtimeExecutor(options).execute(next.executionId);expect(requests).toBe(4);
+    await runtimeExecutor({...options,callGate:allowTestCalls}).execute(next.executionId);expect(requests).toBe(4);
     expect((await db.query('select credits,(select sum(amount)::int from credit_transactions where user_id=$1) ledger from profiles where id=$1',[f.actorId])).rows[0]).toEqual({credits:88,ledger:88});
    }
   }else{
    expect(first.state).toBe('pending');expect(requests).toBe(1);expect(searchRequests).toBe(0);
-   await runtimeExecutor(options).execute(e.executionId);expect(requests).toBe(1);
+   await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId);expect(requests).toBe(1);
   }
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 });
@@ -905,7 +913,7 @@ it('RUNTIME: ordinary, document Skill without workflow, and separate organizer u
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{
   const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
-  const executor=runtimeExecutor({database:admin,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port});
+  const executor=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port});
   const previousCapacity=(await db.query('select input_limit from ai_models where id=$1',[skillModel])).rows[0].input_limit;
   await db.query('update ai_models set input_limit=200 where id=$1',[skillModel]);
   await expect(service.prepare({sessionId:start.sessionId,requestId:randomUUID(),input:'Please work',selection:{kind:'skill',moduleId,revisionId:pack.revisionId}})).rejects.toThrow('RUNTIME_MODEL_CAPACITY');
@@ -978,11 +986,11 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    start:{prelude:2,policy:0,host:1},
-   ordinary:{prelude:2,policy:0,host:0,admission:6},
-   stream:{prelude:2,policy:0,host:0,execute:6,provider:5},
-   skill:{prelude:2,policy:0,host:0,admission:13},
-   execute:{prelude:2,policy:0,host:0,execute:6,provider:5},
-   skillWarm:{prelude:2,policy:0,host:0,admission:11},
+   ordinary:{prelude:2,policy:0,host:0,admission:6,rateLimit:0},
+   stream:{prelude:2,policy:0,host:0,execute:6,provider:5,rateLimit:0},
+   skill:{prelude:2,policy:0,host:0,admission:13,rateLimit:0},
+   execute:{prelude:2,policy:0,host:0,execute:6,provider:5,rateLimit:0},
+   skillWarm:{prelude:2,policy:0,host:0,admission:11,rateLimit:0},
   });
   // AC-0c: Auth verifies once per invocation and credential, plus once again
   // after the provider response (AC-0 baseline was 2/6/9/12/9).
@@ -1031,7 +1039,7 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
 /** AC-1: a mentor draft on a published three-step positioning Skill, run
  * through the real routers with Bearer credentials and a private fixture
  * provider that can hold one response. */
-async function mentorTurnFixture(){
+async function mentorTurnFixture(withTopics=false){
  const password='Local-'+randomUUID()+'!',email=randomUUID()+'@example.test';
  const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
  const actor=created.data.user.id;await db.query("insert into profiles(id,email,credits,role) values($1,$2,1000,'user')",[actor,email]);
@@ -1040,6 +1048,7 @@ async function mentorTurnFixture(){
  const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
  const owner=randomUUID();await db.query("insert into profiles(id,role) values($1,'admin')",[owner]);
  const pack=makePackage(),moduleId=randomUUID(),registration='ac1-'+randomUUID(),flow=makeWorkflow(3),mentorModel=randomUUID(),organizerModel=randomUUID();
+ if(withTopics)flow.planResources=['SKILL.md'];
  flow.steps.forEach((step,index)=>{step.information=[{id:'goal',title:'目标 '+index,required:true,profileKey:'goal_'+index}];});
  await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[pack.id,registration,owner]);
  await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'AC-1 mentor','ac1-mentor','fixture','true',1000,32000),($2,'AC-1 organizer','ac1-organizer','fixture','true',1000,32000)",[mentorModel,organizerModel]);
@@ -1050,8 +1059,9 @@ async function mentorTurnFixture(){
  const bearer='Bearer '+login.data.session!.access_token;
  const context=async(budget=createRuntimeBudget(),authorization:string|null=bearer)=>createTRPCContext({headers:new Headers(authorization?{Authorization:authorization}:{}),runtimeBudget:budget});
  const draft=async()=>(await opcRouter.createCaller(await context()).start({requestId:randomUUID(),registration,mode:'mentor',businessName:'Graylum AI'})) as {draftId:string};
- return {actor,context,draft};
+ return {actor,context,draft,user,admin,flow,registration};
 }
+registerAdmissionGateTests(db,()=>mentorTurnFixture(true),()=>modelId);
 type ProviderCall={model:string;release:()=>void};
 async function heldProvider(){
  const calls:ProviderCall[]=[];let hold=false;
@@ -1109,15 +1119,17 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    // Attached organizers now skip one Session history read in each invocation.
    // The first prepare of this new package misses the Skill file cache (AC-0c).
-   oldPrepareOpening:{prelude:2,policy:0,host:5,admission:16},
-   oldStreamOpening:{prelude:2,policy:0,host:0,execute:6,provider:13},
-   oldPrepareAnswer:{prelude:2,policy:0,host:5,admission:12},
-   oldStreamAnswer:{prelude:2,policy:0,host:0,execute:6,provider:13},
+   oldPrepareOpening:{prelude:2,policy:0,host:6,admission:16,rateLimit:0},
+   oldStreamOpening:{prelude:2,policy:0,host:1,execute:6,provider:13,rateLimit:0},
+   oldPrepareAnswer:{prelude:2,policy:0,host:6,admission:12,rateLimit:0},
+   oldStreamAnswer:{prelude:2,policy:0,host:1,execute:6,provider:13,rateLimit:0},
    // One invocation: one prelude instead of two; admission and execution unchanged.
-   opening:{prelude:2,policy:0,host:5,admission:12,execute:6,provider:13},
-   answer:{prelude:2,policy:0,host:5,admission:12,execute:6,provider:13},
+   opening:{prelude:2,policy:0,host:7,admission:12,execute:6,provider:13,rateLimit:0},
+   answer:{prelude:2,policy:0,host:7,admission:12,execute:6,provider:13,rateLimit:0},
   });
+  // Empty backlog: exactly one pre-admission RPC and one completion capture RPC.
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
+  expect(label('rpc/opc_capture_apply')).toEqual({oldPrepareOpening:1,oldStreamOpening:1,oldPrepareAnswer:1,oldStreamAnswer:1,opening:2,answer:2});
   // Auth verifies once per invocation, and again after each provider response.
   expect(label('auth/v1/user')).toEqual({oldPrepareOpening:1,oldStreamOpening:3,oldPrepareAnswer:1,oldStreamAnswer:3,opening:3,answer:3});
   expect(label('rest/profiles')).toEqual({oldPrepareOpening:1,oldStreamOpening:1,oldPrepareAnswer:1,oldStreamAnswer:1,opening:1,answer:1});
@@ -1268,7 +1280,7 @@ it('RUNTIME: authenticated work item runs actual SDK and HTTP then restores only
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{
   const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
-  const executor=runtimeExecutor({database:admin,actor:async()=>{const auth=await user.auth.getUser();if(auth.error||!auth.data.user)throw new Error('AUTH');return auth.data.user.id;},endpoint:'http://127.0.0.1:'+address.port});
+  const executor=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>{const auth=await user.auth.getUser();if(auth.error||!auth.data.user)throw new Error('AUTH');return auth.data.user.id;},endpoint:'http://127.0.0.1:'+address.port});
   expect(await executor.execute(e.executionId)).toEqual({state:'completed',body:'Saved work item answer'});
   await user.auth.signOut();await user.auth.signInWithPassword({email,password});
   expect(await executor.execute(e.executionId)).toEqual({state:'completed',body:'Saved work item answer'});expect(requests).toBe(1);
@@ -1420,24 +1432,24 @@ it.each(['none','profile','draft','cancel'])('RUNTIME: pending cost with %s revo
  try{
   const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
   const options={database:admin,actor:async()=>f.actorId,endpoint:'http://127.0.0.1:'+address.port};
-  const first=await runtimeExecutor(options).execute(e.executionId);
+  const first=await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId);
   expect(first).toEqual({body:'Saved before cost',state:'cost_pending'});
   expect(posts).toBe(1);expect(lookups).toBe(0);
   expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(80);
   if(revocation==='profile')await db.query("update profiles set status='disabled' where id=$1",[f.actorId]);
   if(revocation==='draft')await rpc('bill2_revoke_draft',{p_actor_id:f.actorId,p_draft_id:f.s.scope.draftId});
   if(revocation==='cancel'){
-   expect((await runtimeExecutor(options).cancel(e.executionId)).state).toBe('cost_pending');
+   expect((await runtimeExecutor({...options,callGate:allowTestCalls}).cancel(e.executionId)).state).toBe('cost_pending');
    expect((await db.query('select outcome from bill2_runs where id=$1',[e.runId])).rows[0].outcome).toBe('delivered');
   }
   if(revocation==='profile'||revocation==='draft'){
-   await expect(runtimeExecutor(options).execute(e.executionId)).rejects.toThrow('UNAVAILABLE');
+   await expect(runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId)).rejects.toThrow('UNAVAILABLE');
    await expect(new PostgresSession(admin,{actorId:f.actorId,sessionId:f.s.sessionId,executionId:e.executionId}).getItems()).rejects.toThrow('UNAVAILABLE');
    await expect(rpc('runtime_financial_recovery',{p_actor_id:randomUUID(),p_execution_id:e.executionId})).rejects.toThrow('DENIED');
   }
   const recover=async()=>{
-   if(revocation==='none'||revocation==='cancel')return {state:(await runtimeExecutor(options).execute(e.executionId)).state};
-   const financial=await runtimeExecutor(options).recoverFinancial(e.executionId);
+   if(revocation==='none'||revocation==='cancel')return {state:(await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId)).state};
+   const financial=await runtimeExecutor({...options,callGate:allowTestCalls}).recoverFinancial(e.executionId);
    expect(Object.keys(financial).sort()).toEqual(['billing','executionId','runId','state']);
    expect(JSON.stringify(financial)).not.toContain('Saved before cost');expect(JSON.stringify(financial)).not.toContain('Fixture instruction');
    return {state:financial.state};
@@ -1454,11 +1466,11 @@ it.each(['none','profile','draft','cancel'])('RUNTIME: pending cost with %s revo
   const competing=await Promise.all([recover(),recover()]);
   expect(competing.some(r=>r.state==='completed')).toBe(true);
   expect(await recover()).toEqual({state:'completed'});
-  if(revocation==='cancel')expect(await runtimeExecutor(options).execute(e.executionId)).toEqual({state:'completed',body:'Saved before cost'});
+  if(revocation==='cancel')expect(await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId)).toEqual({state:'completed',body:'Saved before cost'});
   if(next){
    expect((await rpc('runtime_view',{p_actor_id:f.actorId,p_session_id:f.s.sessionId})).activeExecution).toBe(next.executionId);
    await expect(rpc('runtime_session_items',{p_actor_id:f.actorId,p_session_id:f.s.sessionId,p_execution_id:e.executionId,p_action:'append',p_batch:2,p_items:[{role:'assistant',content:'Late duplicate'}]})).rejects.toThrow();
-   await runtimeExecutor(options).cancel(next.executionId);
+   await runtimeExecutor({...options,callGate:allowTestCalls}).cancel(next.executionId);
   }
   expect(posts).toBe(1);expect(lookups).toBeGreaterThanOrEqual(2);expect(lookups).toBeLessThanOrEqual(3);
   expect((await db.query('select b.id,b.pre_deduct_id,c.id call_id,c.provider_id from bill2_runs b join bill2_calls c on c.run_id=b.id where b.id=$1',[e.runId])).rows).toEqual(original);
@@ -1481,10 +1493,10 @@ it('RUNTIME: lost dispatch commit response preserves unknown identity without ne
    return admin.rpc(name,args);
   }};
   const options={database,actor:async()=>f.actorId,endpoint:'http://127.0.0.1:'+address.port};
-  expect(await runtimeExecutor(options).execute(e.executionId)).toEqual({state:'pending'});expect(injected).toBe(true);
+  expect(await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId)).toEqual({state:'pending'});expect(injected).toBe(true);
   const snapshot=async()=>(await db.query('select b.id,b.pre_deduct_id,b.state,b.payload,c.id call_id,c.provider_id,c.dispatched_at,e.result,e.payload execution_input from bill2_runs b join bill2_calls c on c.run_id=b.id join runtime_executions e on e.billing_run_id=b.id where b.id=$1',[e.runId])).rows;
   const original=await snapshot();expect(original[0].dispatched_at).not.toBeNull();expect(original[0].provider_id).toBeNull();
-  await Promise.all([runtimeExecutor(options).execute(e.executionId),runtimeExecutor(options).execute(e.executionId)]);
+  await Promise.all([runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId),runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId)]);
   expect(await snapshot()).toEqual(original);expect(requests).toBe(0);
   expect(original[0].execution_input.input).toBe('original unknown input');
   expect((await db.query('select credits,(select sum(amount)::int from credit_transactions where user_id=$1) ledger from profiles where id=$1',[f.actorId])).rows[0]).toEqual({credits:80,ledger:80});
@@ -1538,7 +1550,7 @@ it('RUNTIME: real published source revocation excludes derived Session history w
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{
   const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
-  const executor=runtimeExecutor({database:admin,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port});
+  const executor=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port});
   const ids:string[]=[];
   for(let i=0;i<2;i++){
    const admitted=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'Use the permitted context',selection:{kind:'ordinary',modelId},sources:i===0?[selected]:[]});ids.push(admitted.executionId);
@@ -1575,7 +1587,7 @@ it('RUNTIME: real published source revocation excludes derived Session history w
    if(name==='runtime_session_items'&&args.p_action==='read'&&JSON.stringify(result.data).includes(canary))readPrivateHistory=true;
    return result;
   }};
-  const racing=runtimeExecutor({database:guarded,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port}).execute(raced.executionId);
+  const racing=runtimeExecutor({callGate:allowTestCalls,database:guarded,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port}).execute(raced.executionId);
   await ready;expect(readPrivateHistory).toBe(true);
   await db.query('update artifact_reference_configs set enabled=false where id=$1',[configId]);
   release();expect((await racing).state).toBe('pending');expect(requests).toHaveLength(5);
@@ -1645,14 +1657,14 @@ it.each([{searchEnabled:false,stopAfterPrimary:false},{searchEnabled:true,stopAf
    const r=await admin.rpc(name,args);if(r.error)errors.push({name,message:r.error.message});return r;
   }};
   const options={database,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port};
-  expect(await runtimeExecutor(options).execute(e.executionId)).toEqual({state:'pending'});
+  expect(await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId)).toEqual({state:'pending'});
   if(stopAfterPrimary){
    expect(injected).toBe(true);expect(requests.map(r=>r.model)).toEqual(['runtime-m']);
-   expect(await runtimeExecutor(options).execute(e.executionId)).toEqual({state:'pending'});
+   expect(await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId)).toEqual({state:'pending'});
    const stage=(await db.query('select primary_result,result from runtime_executions where id=$1',[e.executionId])).rows[0];
    expect(stage).toEqual({primary_result:{body:'Primary result',lastSequence:1},result:null});
-   expect((await runtimeExecutor(options).cancel(e.executionId)).state).toBe('cancelled');
-   expect((await runtimeExecutor(options).cancel(e.executionId)).state).toBe('cancelled');
+   expect((await runtimeExecutor({...options,callGate:allowTestCalls}).cancel(e.executionId)).state).toBe('cancelled');
+   expect((await runtimeExecutor({...options,callGate:allowTestCalls}).cancel(e.executionId)).state).toBe('cancelled');
    await expect(rpc('runtime_execution',{p_actor_id:actor,p_execution_id:e.executionId,p_action:'complete',p_result:{kind:'usable_result',body:'Primary result',summary:'Late summary'}})).rejects.toThrow();
    await expect(rpc('runtime_session_items',{p_actor_id:actor,p_session_id:session.sessionId,p_execution_id:e.executionId,p_action:'append',p_batch:1,p_items:[{role:'assistant',content:'Late summary'}]})).rejects.toThrow();
    const view=await rpc('runtime_view',{p_actor_id:actor,p_session_id:session.sessionId});
@@ -1661,12 +1673,12 @@ it.each([{searchEnabled:false,stopAfterPrimary:false},{searchEnabled:true,stopAf
    expect((await db.query('select count(*)::int n from runtime_session_history where session_id=$1',[session.sessionId])).rows[0].n).toBe(2);
    expect((await db.query('select credits,(select sum(amount)::int from credit_transactions where user_id=$1) ledger from profiles where id=$1',[actor])).rows[0]).toEqual({credits:97,ledger:97});
    const next=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'Next work',selection:{kind:'ordinary',modelId}});
-   await runtimeExecutor(options).cancel(e.executionId);
+   await runtimeExecutor({...options,callGate:allowTestCalls}).cancel(e.executionId);
    expect((await rpc('runtime_view',{p_actor_id:actor,p_session_id:session.sessionId})).activeExecution).toBe(next.executionId);
    return;
   }
   expect({injected,requests:requests.map(r=>r.model??r.tool)}).toEqual({injected:true,requests:searchEnabled?['runtime-m','search','runtime-m','attached-summary']:['runtime-m','attached-summary']});
-  const recovered=await runtimeExecutor(options).execute(e.executionId);
+  const recovered=await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId);
   expect({recovered,errors}).toEqual({recovered:{state:'completed',body:'Primary result',summary:'Organized primary result'},errors:[]});
   expect(requests.map(r=>r.model??r.tool)).toEqual(searchEnabled?['runtime-m','search','runtime-m','attached-summary']:['runtime-m','attached-summary']);expect(JSON.stringify(requests.at(-1)!.messages)).toContain('Primary result');
   const result=(await db.query('select result from runtime_executions where id=$1',[e.executionId])).rows[0].result;
@@ -1680,11 +1692,11 @@ it.each([{searchEnabled:false,stopAfterPrimary:false},{searchEnabled:true,stopAf
   expect(await viewHttp()).toEqual(visible); // refresh uses the persisted, authorized projection.
   await browserClient.auth.signOut();cookies.clear();expect((await browserClient.auth.signInWithPassword({email,password})).error).toBeNull();
   expect(await viewHttp()).toEqual(visible);
-  expect(await runtimeExecutor(options).execute(e.executionId)).toEqual(recovered);
+  expect(await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId)).toEqual(recovered);
   await db.query("update ai_models set is_active='false' where id=$1",[summaryModel]);
   const hidden=await viewHttp();expect(hidden.executions[0]).toMatchObject({body:null,summary:null,contentAvailable:false});
   expect(JSON.stringify(hidden)).not.toContain('Organized primary result');
-  await expect(runtimeExecutor(options).execute(e.executionId)).rejects.toThrow('UNAVAILABLE');
+  await expect(runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId)).rejects.toThrow('UNAVAILABLE');
   expect((await db.query('select result from runtime_executions where id=$1',[e.executionId])).rows[0].result).toEqual(result);
   await db.query("update ai_models set is_active='true' where id=$1",[summaryModel]);
   expect(await viewHttp()).toEqual(visible);
@@ -1759,7 +1771,7 @@ it.each(['selected','none','checkpoint_loss','none_checkpoint','result_loss','in
    if(mode==='result_loss'&&!injected&&name==='runtime_execution'&&args.p_action==='complete'){injected=true;return {data:null,error:{message:'synthetic result write failure'}};}
    const r=await admin.rpc(name,args);if((mode==='checkpoint_loss'||mode==='none_checkpoint')&&!injected&&name==='runtime_execution'&&args.p_action==='checkpoint_match'&&!r.error){injected=true;return {data:null,error:{message:'synthetic checkpoint commit response loss'}};}return r;
   }};
-  const executor=runtimeExecutor({database,actor:async()=>actor,endpoint:'http://127.0.0.1:'+addr.port,activateSkill:c=>activateRuntimeCandidate(user,admin,c)});
+  const executor=runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>actor,endpoint:'http://127.0.0.1:'+addr.port,activateSkill:c=>activateRuntimeCandidate(user,admin,c)});
   let result=await executor.execute(e.executionId);
   if(mode==='result_loss'){expect(result.state).toBe('pending');expect(requests).toHaveLength(2);result=await executor.execute(e.executionId);}
   expect(JSON.stringify(requests[0])).not.toContain('METHOD_CANARY');expect(JSON.stringify(requests[0])).not.toContain(pack.revisionId);expect(JSON.stringify(requests[0])).not.toContain('packageHash');
@@ -1902,7 +1914,7 @@ it('RUNTIME: work ownership and selected Skills stay separate with bounded actua
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{
   const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
-  const executor=runtimeExecutor({database:admin,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port,activateSkill:c=>activateRuntimeCandidate(user,admin,c)});
+  const executor=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port,activateSkill:c=>activateRuntimeCandidate(user,admin,c)});
   for(const chosen of [a,b]){
    const e=await admission.prepare({...input,requestId:randomUUID(),selection:{kind:'skill',moduleId:chosen.moduleId,revisionId:chosen.pack.revisionId}});ids.push(e.executionId);
    expect((await executor.execute(e.executionId)).state).toBe('completed');
@@ -1948,7 +1960,7 @@ it('RUNTIME: historical revision admission and another Session dispatch never in
  let posts=0;const server=createServer(async(req,res)=>{for await(const _ of req){}posts++;const id='lock-'+randomUUID();res.setHeader('content-type','application/json');res.end(JSON.stringify({id,model:'runtime-m',final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:'runtime-m',choices:[{index:0,message:{role:'assistant',content:'Keep this history'},finish_reason:'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7}}}}));});await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
  const holder=new pg.Client({connectionString}),waiter=new pg.Client({connectionString});await Promise.all([holder.connect(),waiter.connect()]);
  try{
-  const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');expect((await runtimeExecutor({database:admin,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port}).execute(old.executionId)).state).toBe('completed');
+  const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');expect((await runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port}).execute(old.executionId)).state).toBe('completed');
   const pending=await admission.prepare({sessionId:other.sessionId,requestId:randomUUID(),input:'Concurrent Skill',selection:choice});
   const frozen=(await db.query('select payload from bill2_runs where id=$1',[pending.runId])).rows[0].payload;
   const call={...frozen.callPolicy[0],phase:'reply',requestHash:createHash('sha256').update('never resent').digest('hex')};delete call.modelId;
@@ -1988,7 +2000,7 @@ it('RUNTIME: opposite Skill history dependencies allow concurrent claim and disp
  let posts=0;const server=createServer(async(req,res)=>{for await(const _ of req){}posts++;const id='lock-'+randomUUID();res.setHeader('content-type','application/json');res.end(JSON.stringify({id,model:'runtime-m',final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:'runtime-m',choices:[{index:0,message:{role:'assistant',content:'Keep this history'},finish_reason:'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7}}}}));});await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
  const clients=[new pg.Client({connectionString}),new pg.Client({connectionString})];await Promise.all(clients.map(c=>c.connect()));
  try{
-  const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');const executor=runtimeExecutor({database:admin,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port});
+  const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');const executor=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port});
   for(const e of [old,oldB])expect((await executor.execute(e.executionId)).state).toBe('completed');
   const pending=[await admission.prepare({sessionId:s.sessionId,requestId:randomUUID(),input:'A history with B',selection:choiceB}),await admission.prepare({sessionId:other.sessionId,requestId:randomUUID(),input:'B history with A',selection:choice})];
   const frozen=[];const calls:Record<string,unknown>[]=[];
@@ -2057,7 +2069,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['complete','missing
   if(name==='runtime_cancel'&&failCancel){failCancel=false;if(mode==='cancel-response-loss')await admin.rpc(name,args);return {data:null,error:{message:'synthetic cancellation outage'}};}
   return admin.rpc(name,args);
  }};
- const host=runtimeExecutor({database,actor:async()=>f.actorId,adapter});
+ const host=runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,adapter});
  for(let turn=0;turn<2;turn++){
   const requestId=randomUUID(),context={scopeMaterial:material,version:'runtime.v1',sdkVersion:'0.18.0',providerRequestFormat:'serial-tools-v2',role:'ordinary',input:'Original synthetic request '+turn,instructions:'Answer',model:'test/mentor',modelId:mentorId,maxOutputTokens:1000,maxTurns:1,historyItems:10,network:'deny',tools:[],request:{sessionId:f.s.sessionId,requestId},attachedOrganizer:{modelId:organizerId,model:'test/organizer',maxOutputTokens:1000}};
   const billing={...f.billing,mode:'staging_test',testWindowId:windowId,modelId:mentorId,input:context,callPolicy:policies,rules:{...f.billing.rules,version:'runtime-staging-v1',quoteVersion:windowId},limits:{...f.billing.limits,costUsd:'0.04',credits:40,maxPreDeduct:40,maxCalls:2}};
@@ -2107,7 +2119,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: unstarted revoc
   const address=server.address();if(!address||typeof address==='string')throw new Error('local server');
   const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport:async(_url,init)=>fetch('http://127.0.0.1:'+address.port,init)});
   const database={rpc:vi.fn((name:string,args:Record<string,unknown>)=>admin.rpc(name,args))};
-  const host=runtimeExecutor({database,actor:async()=>f.actorId,adapter});
+  const host=runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,adapter});
   expect((await host.execute(e.executionId)).state).toBe('pending');expect(posts).toBe(1);
   expect(database.rpc.mock.calls.some(([name])=>name==='bill2_revoke_unstarted_dispatch')).toBe(false);
   await host.cancel(e.executionId);await host.recoverFinancial(e.executionId);
@@ -2138,7 +2150,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: stopped unknown
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{
   const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
-  const host=()=>runtimeExecutor({database:admin,actor:async()=>f.actorId,endpoint:'http://127.0.0.1:'+address.port});
+  const host=()=>runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,endpoint:'http://127.0.0.1:'+address.port});
   expect((await host().execute(e.executionId)).state).toBe('pending');expect(posts).toBe(1);
   const nextContext={...context,input:'New independent turn'};
   const nextArgs={...f.admit,p_request_id:randomUUID(),p_payload:nextContext,p_billing:{...f.billing,input:nextContext}};
@@ -2242,3 +2254,8 @@ it('RUNTIME: price renewal uses real version conditions and preserves a concurre
  expect(saved.pricing.fetchedAt).toBe(new Date(now).toISOString());
  await expect(admitPricing(admin,[{...quote,providerLimits:{...quote.providerLimits,promptUsdPerMillion:'0.9'}}])).rejects.toThrow('RUNTIME_PRICE_INCREASED');
 },30000);
+
+vi.mock('./newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('./newWorkGate')>(),
+ ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
+}));

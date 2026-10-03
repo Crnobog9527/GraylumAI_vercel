@@ -17,7 +17,7 @@ beforeAll(async () => {
     import {useState,useSyncExternalStore} from 'react';
     let data = {config: {version:1, admissionPerMinute:10, admissionPer24Hours:200,
       callsPerMinute:30, callsPer24Hours:600, stopNewCalls:false}, source:'default',
-      enforcement:{admission:false,calls:false,pause:false}};
+      enforcement:window.fixtureEnforcement};
     const listeners = new Set();
     const subscribe = fn => {listeners.add(fn);return () => listeners.delete(fn)};
     window.savedLimits = [];
@@ -28,11 +28,15 @@ beforeAll(async () => {
         get:{useQuery:()=>({data:useSyncExternalStore(subscribe,()=>data),error:null,refetch:async()=>({data})})},
         update:{useMutation:options=>{
           const [isPending,setPending]=useState(false),[error,setError]=useState(null);
-          return {isPending,error,reset:()=>setError(null),mutate:input=>{
+          return {isPending,error,reset:()=>setError(null),mutate:(input,call)=>{
             setPending(true);window.savedLimits.push(input);
             window.finishSave=()=>{
               if(window.failSave)setError(new Error('private raw failure'));
-              else options.onSuccess({config:input,source:'configured',enforcement:data.enforcement});
+              else {
+                // The server read-back may differ from the submitted value; the card must show it.
+                const result={config:{...input,...window.readBack},source:'configured',enforcement:data.enforcement};
+                options.onSuccess(result);call?.onSuccess?.(result);
+              }
               setPending(false);
             };
           }};
@@ -64,17 +68,25 @@ beforeAll(async () => {
 }, 30000);
 afterAll(async () => { await browser?.close(); });
 
-it('validates, preserves in-flight edits, reads back saves and never implies enforcement', async () => {
+async function openCard(enforcement: boolean) {
   const page = await browser.newPage();
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', route => route.abort());
+  await page.setContent('<div id="root"></div>');
+  await page.evaluate(value => {
+    (window as unknown as {fixtureEnforcement: unknown}).fixtureEnforcement = value;
+  }, {admission:enforcement,calls:enforcement,pause:enforcement});
+  await page.addScriptTag({ content: code });
+  return { page, errors };
+}
+
+it('validates, preserves in-flight edits, reads back saves and never implies enforcement', async () => {
+  const { page, errors } = await openCard(false);
   try {
-    await page.setContent('<div id="root"></div>');
-    await page.addScriptTag({ content: code });
     await browserExpect(page.getByText('保护尚未接线：当前只能准备配置，保存不会启用限流或暂停模型调用。')).toBeVisible();
     await browserExpect(page.getByRole('button', {name:'一键暂停（待接线）'})).toBeDisabled();
-    const minute = page.getByLabel('新对话：每分钟', {exact:true});
+    const minute = page.getByLabel('新消息（每轮消息）：每分钟', {exact:true});
     const save = page.getByRole('button', {name:'保存额度配置'});
     await minute.fill('0');
     await browserExpect(save).toBeDisabled();
@@ -94,6 +106,58 @@ it('validates, preserves in-flight edits, reads back saves and never implies enf
     await browserExpect(page.getByRole('alert')).toHaveText('保存或回读失败，请重新读取核对；未确认保存成功。');
     await browserExpect(page.getByText('配置已保存并回读；保护仍未接线。')).toHaveCount(0);
     await browserExpect(minute).toHaveValue('7');
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 15000);
+
+it('shows wired protection, pauses with the read-back value and keeps unsaved limit edits', async () => {
+  const { page, errors } = await openCard(true);
+  try {
+    await browserExpect(page.getByText('已接线：保存后，下一条新消息或新一轮的第一次模型调用就按新配置检查。')).toBeVisible();
+    await browserExpect(page.getByText('保护尚未接线', {exact:false})).toHaveCount(0);
+    await browserExpect(page.getByText('每轮开始时按这一轮最多可用的调用数一次性预扣（导师 1–2 次，/runtime 3 次）', {exact:false}))
+      .toBeVisible();
+    await browserExpect(page.getByText('都不能低于单轮最多调用数（当前 3）', {exact:false})).toBeVisible();
+    await browserExpect(page.getByText('暂停设置：未暂停')).toBeVisible();
+    const minute = page.getByLabel('新消息（每轮消息）：每分钟', {exact:true});
+    await minute.fill('9');
+    const pause = page.getByRole('button', {name:'一键暂停'});
+    await browserExpect(pause).toBeEnabled();
+    await pause.click();
+    await page.evaluate('window.finishSave()');
+    // Only the pause flag is submitted; the unsaved limit edit is not saved and stays in the form.
+    expect(await page.evaluate('window.savedLimits[0]')).toMatchObject({ admissionPerMinute:10, stopNewCalls:true });
+    await browserExpect(page.getByText('暂停设置：已暂停新调用')).toBeVisible();
+    await browserExpect(page.getByText('已暂停新调用（已回读）。已经开始的一轮会跑完。')).toBeVisible();
+    await browserExpect(minute).toHaveValue('9');
+    // A save that the server reads back as not paused must show not paused.
+    await page.evaluate('window.readBack={stopNewCalls:false}');
+    await page.getByRole('button', {name:'恢复新调用'}).click();
+    await page.evaluate('window.finishSave()');
+    await browserExpect(page.getByText('暂停设置：未暂停')).toBeVisible();
+    await browserExpect(page.getByText('已恢复新调用（已回读）。')).toBeVisible();
+    // Saving limits displays the read-back value, not the submitted one.
+    await page.evaluate('window.readBack={admissionPerMinute:7}');
+    await page.getByRole('button', {name:'保存额度配置'}).click();
+    await page.evaluate('window.finishSave()');
+    await browserExpect(page.getByText('配置已保存并回读。', {exact:true})).toBeVisible();
+    await browserExpect(minute).toHaveValue('7');
+    await page.getByLabel('模型调用：每分钟', {exact:true}).fill('2');
+    await browserExpect(page.getByText('当前“模型调用：每分钟”低于 3，/runtime 的每一轮都会被拒绝。')).toBeVisible();
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 15000);
+
+it('keeps every line of the card inside a 375px screen', async () => {
+  const { page, errors } = await openCard(true);
+  try {
+    await page.setViewportSize({ width: 375, height: 800 });
+    await browserExpect(page.getByText('runtime_rate_limit_backend_unavailable_denying_request')).toBeVisible();
+    const overflowing = await page.evaluate(() => [...document.querySelectorAll('p, label, code, button')]
+      .filter(node => node.scrollWidth > node.clientWidth + 1 || node.getBoundingClientRect().right > window.innerWidth + 1)
+      .map(node => node.textContent?.slice(0, 40)));
+    expect(overflowing).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 15000);

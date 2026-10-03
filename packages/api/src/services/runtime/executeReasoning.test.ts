@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
 import {it,expect,vi} from 'vitest';
 import {runtimeExecutor,runtimeContext} from './execute';
 const id='10000000-0000-4000-8000-000000000001';
@@ -12,7 +13,7 @@ it.each([
 ])('executor refuses incompatible reasoning before billing or SDK %#',async patch=>{
  const database={rpc:vi.fn(async()=>({data:{state:'running',context:{...base,...patch}},error:null}))};
  const adapter={dispatch:vi.fn()};
- await expect(runtimeExecutor({database,actor:async()=>id,adapter:adapter as any}).execute(id)).rejects.toThrow('RUNTIME_CONTEXT_INVALID');
+ await expect(runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>id,adapter:adapter as any}).execute(id)).rejects.toThrow('RUNTIME_CONTEXT_INVALID');
  expect(database.rpc).toHaveBeenCalledTimes(1);expect(adapter.dispatch).not.toHaveBeenCalled();
 });
 it.each([{effort:'none'},{parameter:'none'},{parameter:'reasoning',value:{enabled:false}},{parameter:'reasoning',value:{effort:'max'}},{parameter:'reasoning',value:{max_tokens:2048}}])('context parses frozen policy %# including attached organizer',reasoning=>{
