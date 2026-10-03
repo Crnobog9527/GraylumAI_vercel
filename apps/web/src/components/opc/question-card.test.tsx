@@ -3,7 +3,7 @@ import { createElement, isValidElement, type ReactElement, type ReactNode } from
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { UNSURE_INPUT } from "@repo/api/src/shared/agentTurn";
-import { OTHER_LABEL, QuestionCardView } from "./question-card";
+import { OpenQuestionRecord, OTHER_LABEL, QuestionCardView } from "./question-card";
 
 const card = { question: "你的内容主要写给谁？", options: ["刚入行的新人", "有经验的同行", "想转行的人"], recommended: null };
 type Props = Parameters<typeof QuestionCardView>[0];
@@ -130,5 +130,67 @@ describe("QuestionCardView: recommendation reason", () => {
     expect(html).not.toContain("推荐");
     expect(html).not.toContain("<p id=");
     expect(html).not.toContain("aria-describedby");
+  });
+});
+
+describe("QuestionCardView: compact history record", () => {
+  it("shows the question and the user's answer, with the options folded away", () => {
+    const html = render({ card: { ...card, recommended: 0 }, answered: true, answer: "想转行的人" });
+    expect(html).toMatch(/<p[^>]*><span>你的回答<\/span>想转行的人<\/p><details[^>]*><summary>查看选项<\/summary><ul/);
+    expect(html).not.toContain("<details open");
+  });
+
+  it("shows no answer line for a card that ended without a reply", () => {
+    expect(render({ card, answered: true, answer: null })).not.toContain("你的回答");
+  });
+});
+
+describe("QuestionCardView: docked to the message box", () => {
+  it("keeps every option, Other and the recommendation, and adds a fold button after them", () => {
+    const html = render({ card: { ...card, recommended: 1, recommendationReason: "已有相关经验" },
+      answered: false, docked: true, onAnswer: () => {}, onDismiss: () => {} });
+    expect(html).toContain('data-question-card="open"');
+    for (const option of card.options) expect(html).toContain(option);
+    expect(html).toMatch(/有经验的同行<span[^>]*>推荐<\/span><\/button><p[^>]*>已有相关经验<\/p>/);
+    expect(html.indexOf(`>${OTHER_LABEL}</button>`)).toBeLessThan(html.indexOf('aria-label="收起提问"'));
+  });
+
+  it("answers and folds through separate buttons; the first button is still the first option", () => {
+    const onAnswer = vi.fn();
+    const onDismiss = vi.fn();
+    const buttons = clickables(tree({ card, answered: false, docked: true, onAnswer, onDismiss }));
+    expect(buttons).toHaveLength(card.options.length + 2);
+    buttons[0].click();
+    buttons.at(-1)!.click();
+    expect(onAnswer.mock.calls).toEqual([["刚入行的新人", 0]]);
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it("has no fold button outside the dock or without a handler", () => {
+    expect(render({ card, answered: false, onAnswer: () => {}, onDismiss: () => {} })).not.toContain("收起提问");
+    expect(render({ card, answered: false, docked: true, disabled: true })).not.toContain("收起提问");
+  });
+});
+
+describe("OpenQuestionRecord", () => {
+  const record = (props: Parameters<typeof OpenQuestionRecord>[0]) => renderToStaticMarkup(createElement(OpenQuestionRecord, props));
+
+  it("records the open question in the conversation without its options", () => {
+    const html = record({ card });
+    expect(html).toContain('aria-label="导师提问记录"');
+    expect(html).toContain(card.question);
+    expect(html).toContain("待回答");
+    for (const option of card.options) expect(html).not.toContain(option);
+    expect(html).not.toContain("<button");
+  });
+
+  it("offers to show the options again after the docked card was folded", () => {
+    const onShow = vi.fn();
+    let captured: ReactNode = null;
+    renderToStaticMarkup(createElement(() => (captured = OpenQuestionRecord({ card, hidden: true, onShow }))));
+    const buttons = clickables(captured);
+    expect(buttons.map(button => button.label)).toEqual(["显示选项"]);
+    buttons[0].click();
+    expect(onShow).toHaveBeenCalledTimes(1);
   });
 });

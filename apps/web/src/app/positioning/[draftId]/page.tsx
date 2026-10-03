@@ -1,7 +1,7 @@
 "use client";
 import { readAgentTurnBody } from "@repo/api/src/shared/agentTurn";
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { use, useEffect, useRef, useState } from "react";
+import { use, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -17,7 +17,8 @@ import { readPlanEnvelope, type PlanEnvelope, type PlanRequest } from "./plan-en
 import { admissionMessage } from "./admission-message";
 import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-response";
 import { focusReply, liveReplyAfter, livePhaseNotice, mentorReplyDisplay, questionCardStatus, startLiveReply, type LiveReply } from "./agent-turn-display";
-import { OTHER_PLACEHOLDER, QuestionCardView } from "@/components/opc/question-card";
+import { OpenQuestionRecord, OTHER_PLACEHOLDER, QuestionCardView } from "@/components/opc/question-card";
+import { isDefiniteConfirmConflict } from "./confirm-conflict";
 import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
 import type { AgentTurnEvent, AgentTurnOutcome } from "@repo/api/src/shared/agentTurn";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
@@ -87,23 +88,6 @@ type ConfirmStepEnvelope = {
   };
 };
 
-function isDefiniteConfirmConflict(cause: unknown) {
-  if (!(cause instanceof Error)) return false;
-  const data = "data" in cause ? cause.data : undefined;
-  // workbench.execute translates internal errors into public messages. Its
-  // structured CONFLICT response proves a rejected transaction; a timeout,
-  // missing response or another route does not. Keep unknown requests frozen.
-  if (
-    data && typeof data === "object" &&
-    "code" in data && data.code === "CONFLICT" &&
-    "path" in data && data.path === "workbench.execute"
-  ) return true;
-  return [
-    "OPC_INFORMATION_CONFLICT",
-    "ARTIFACT_VERSION_CONFLICT",
-    "ARTIFACT_REVIEW_REQUIRED",
-  ].some((code) => cause.message.includes(code));
-}
 type StepEnvelope = MentorStepEnvelope<ConfirmStepEnvelope["information"]>;
 type ConfirmEnvelopeState =
   | { kind: "none" }
@@ -173,6 +157,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const prepareStep = trpc.opc.prepareStep.useMutation();
   const [liveReply,setLiveReply]=useState<LiveReply|null>(null);
   const [pendingBubble,setPendingBubble]=useState<MentorRequest|null>(null);
+  const [foldedCard,setFoldedCard]=useState(''); // Execution whose docked question card the user folded away.
   const mentorSendInFlight=useRef(false);
   /** One turn's events: a resumed execution passes its id, a new turn learns it from `admitted`. */
   const streamTurn=async(open:()=>Promise<AsyncIterable<AgentTurnEvent>>,executionId?:string,onAdmitted?:(id:string)=>void)=>{
@@ -1714,6 +1699,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const hasPendingConfirmation = steps.some(step => Boolean(pendingConfirmationFor(step.id)));
   /** A streaming reply whose execution is not in history yet. */
   const liveOnly = liveReply && !mentorExecutions.some(e => e.executionId === liveReply.executionId) ? liveReply : null;
+  // The one open question card, docked to the message box. Set while the conversation renders.
+  let dock: ReactNode = liveOnly?.card ? <QuestionCardView key="live" card={liveOnly.card} answered={false} disabled docked/> : null;
   // A retained mentor envelope can exist before its execution is visible in
   // history (or after a lost reply), so recovery is driven by the envelope
   // itself rather than the execution list.
@@ -1900,6 +1887,11 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                         reply: next ? { ...mentorTurns.get(next.executionId), input: isOpeningInput(next.input) ? null : next.input }
                           : pendingBubble && { ...pendingBubble, roundId: d.roundId } });
                       const cardLocked = !cardStatus.onShownQuestion || execution.state !== "completed" || sendLocked || snap.state !== "draft" || reviewOnly;
+                      if (reply.card && !cardStatus.answered && !liveOnly && foldedCard !== execution.executionId) {
+                        dock = <QuestionCardView key={execution.executionId} card={reply.card} answered={false} disabled={cardLocked} docked
+                          onAnswer={(input, optionIndex) => void ask(step, activeQuestion.id, input, {executionId: execution.executionId, optionIndex})}
+                          onOther={focusReply} onDismiss={() => setFoldedCard(execution.executionId)}/>;
+                      }
                       const proposed = Object.entries(accepted).filter(([id, value]) =>
                         reachedQuestions(d.information[parsed.targetStepId]?.schema ?? [], d.information[parsed.targetStepId]?.values).some(f => f.id === id) &&
                         value.value !== (infoEdits[parsed.targetStepId]?.[id] ?? d.information[parsed.targetStepId]?.values?.[id])?.value);
@@ -1922,10 +1914,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                             </span>
                             <MessageMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={reply.text} streaming={Boolean(live)}/>
                           </div>}
-                          {reply.card && <QuestionCardView card={reply.card} answered={cardStatus.answered} answer={cardStatus.answer}
-                            disabled={cardLocked} onAnswer={(input, optionIndex) => {
-                              void ask(step, activeQuestion.id, input, {executionId: execution.executionId, optionIndex});
-                            }} onOther={focusReply}/>}
+                          {reply.card && (cardStatus.answered ? <QuestionCardView card={reply.card} answered answer={cardStatus.answer}/>
+                            : <OpenQuestionRecord card={reply.card} hidden={foldedCard === execution.executionId} onShow={() => setFoldedCard("")}/>)}
                           {parsed.message && execution.unavailableReason === 'output_truncated' && <p role="status">本次模型调用达到长度上限，未返回该阶段正文。已生成内容和原请求已保留，不会自动重试。</p>}
                           {execution.state === "completed" && target && latestSuggestion.get(target.id) === execution.executionId && proposed.length > 0 && (
                             <div className={resultStyles.suggestionCard}>
@@ -1958,7 +1948,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     })}
                     {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<div data-message-role="user" data-request-id={pendingBubble.requestId} className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3"><span>你 · {d.information[pendingBubble.stepId]?.schema.find((f:{id:string;title:string})=>f.id===pendingBubble.questionId)?.title}</span><p className="whitespace-pre-wrap">{pendingBubble.input}</p><small role="status">{running?'发送中 · 等待服务器确认':'尚未确认保存 · 原请求已保留'}</small></div>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="导师正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>导师</span>{liveOnly.text?<MessageMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={liveOnly.text} streaming/>:<p className={`mt-1 ${resultStyles.messageBody}`}>导师正在思考…</p>}</div>}
-                  {liveOnly?.card&&<QuestionCardView card={liveOnly.card} answered={false} disabled/>}
+                  {liveOnly?.card&&<OpenQuestionRecord card={liveOnly.card}/>}
                   {liveReply&&<p role="status">{livePhaseNotice(liveReply.phase)}</p>}
                   {!manualEntry && snap.state === "draft" && !reviewOnly && <section className={resultStyles.currentAction} aria-label="当前问题操作">
                     <strong>当前核对：{activeQuestion.title}</strong>
@@ -1971,7 +1961,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   {recoveryNeedsUser[0] && !busy && <p role="status" aria-label="恢复提示" className={resultStyles.recoveryLine}>
                     {recoveryNeedsUser[0].readable ? '上一条回复还没确认完成，原请求已保留，重试不会重复扣费。' : '上一条请求无法读取，原始记录已保留。'}
                     <button type="button" onClick={() => void recoverPendingStep(recoveryNeedsUser[0]!.step)}>重试</button></p>}
-                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} note={hasPendingStepRequest && !recoveryNeedsUser.length ? "正在回复…" : undefined} maxLength={8000} disabled={snap.state!=="draft"||reviewOnly} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step,activeQuestion.id);}}/>
+                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} note={hasPendingStepRequest && !recoveryNeedsUser.length ? "正在回复…" : undefined} maxLength={8000} disabled={snap.state!=="draft"||reviewOnly} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step,activeQuestion.id);}}/>
                   {free.error&&<p role="alert">{free.error}</p>}
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
