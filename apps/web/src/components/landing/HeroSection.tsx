@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRight, TrendingUp, Users, Zap } from 'lucide-react';
+import { ArrowRight, Zap } from 'lucide-react';
 import { buildAuthHref } from '@/lib/site-config';
 
 export default function HeroSection() {
@@ -82,25 +82,6 @@ export default function HeroSection() {
           >
             了解更多
           </a>
-        </div>
-
-        {/* Stats */}
-        <div className="landing-fade-in-up landing-delay-400 mx-auto grid max-w-3xl grid-cols-1 gap-8 sm:grid-cols-3">
-          <div className="flex flex-col items-center p-6 rounded-2xl bg-[#1A1A1A]/50 border border-[#333333] hover:border-[#FFD700]/30 transition-colors">
-            <Users className="w-8 h-8 text-[#FFD700] mb-3" />
-            <div className="text-3xl font-bold text-white mb-1">10K+</div>
-            <div className="text-sm text-[#808080]">活跃用户</div>
-          </div>
-          <div className="flex flex-col items-center p-6 rounded-2xl bg-[#1A1A1A]/50 border border-[#333333] hover:border-[#FFD700]/30 transition-colors">
-            <TrendingUp className="w-8 h-8 text-[#FFD700] mb-3" />
-            <div className="text-3xl font-bold text-white mb-1">300%</div>
-            <div className="text-sm text-[#808080]">平均增长率</div>
-          </div>
-          <div className="flex flex-col items-center p-6 rounded-2xl bg-[#1A1A1A]/50 border border-[#333333] hover:border-[#FFD700]/30 transition-colors">
-            <Zap className="w-8 h-8 text-[#FFD700] mb-3" />
-            <div className="text-3xl font-bold text-white mb-1">1M+</div>
-            <div className="text-sm text-[#808080]">内容生成</div>
-          </div>
         </div>
       </div>
 

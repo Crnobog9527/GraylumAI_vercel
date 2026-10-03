@@ -53,6 +53,8 @@ const nextConfig: NextConfig = {
         // Start with 30 days on this host only; preload is difficult to undo.
         { key: "Strict-Transport-Security", value: "max-age=2592000" },
         { key: "Content-Security-Policy-Report-Only", value: reportOnlyCsp },
+        // Keep every host out of search and AI indexes until the redesigned public site launches.
+        { key: "X-Robots-Tag", value: "noindex, nofollow" },
       ],
     }, {
       // Only content-addressed font resources are immutable, not the notices.
