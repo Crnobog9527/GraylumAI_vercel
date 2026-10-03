@@ -114,7 +114,7 @@ export function priceIncreases(
 }
 
 /** List prices and the upper bound share the exact snapshot and base inheritance. */
-export function deriveListPrices(endpoint: PricedEndpoint, pricingHash: string): NominalPricing | DeriveRefusal {
+export function deriveListPrices(endpoint: PricedEndpoint, pricingHash: string, model: string): NominalPricing | DeriveRefusal {
   if (!endpoint.admissible) return "NOT_ADMISSIBLE";
   if (endpoint.unknownKeys.length) return "UNKNOWN_PRICE_FIELD";
   const read = (layer: PriceLayer) => {
@@ -122,8 +122,13 @@ export function deriveListPrices(endpoint: PricedEndpoint, pricingHash: string):
     const completion = inheritedPrice(endpoint, layer, "completion");
     const reasoning = inheritedPrice(endpoint, layer, "internal_reasoning");
     if (prompt === undefined || completion === undefined) return null;
+    const cacheRead = inheritedPrice(endpoint, layer, "input_cache_read");
+    const write = inheritedPrice(endpoint, layer, "input_cache_write");
+    const cacheWrite = write === undefined ? undefined : text(cacheWriteIsAdditive(model, units(prompt), units(write))
+      ? units(prompt) + units(write) : units(write));
     return { prompt, completion, request: inheritedPrice(endpoint, layer, "request") ?? "0",
-      ...(reasoning === undefined ? {} : { internalReasoning: reasoning }) };
+      ...(reasoning === undefined ? {} : { internalReasoning: reasoning }),
+      ...(cacheRead === undefined ? {} : { cacheRead }), ...(cacheWrite === undefined ? {} : { cacheWrite }) };
   };
   const base = read(endpoint.base);
   if (!base) return "NOT_ADMISSIBLE";

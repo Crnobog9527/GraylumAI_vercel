@@ -47,6 +47,7 @@ describe('billing unit setting validation', () => {
     ['billing_credits_per_usd', '0'], ['billing_credits_per_usd', '-1'], ['billing_credits_per_usd', '1e3'],
     ['billing_token_price_multiplier', '0'], ['billing_token_price_multiplier', '20.01'],
     ['billing_token_price_multiplier', '1.234'], ['billing_token_price_multiplier', ''], ['billing_token_price_multiplier', null],
+    ['billing_platform_absorb_alert', {}], ['billing_platform_absorb_ack', {}],
     ['billing_provider_prices', '{"version":1,"entries":[]}'],
   ])('rejects %s=%j before any write, without rounding', async (key, value) => {
     const upsert = vi.fn();

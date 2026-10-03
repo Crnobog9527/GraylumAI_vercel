@@ -84,6 +84,9 @@ const systemSettingInputSchema = z.object({
   key: z.string().trim().min(1),
   value: z.any(),
 }).superRefine((setting, ctx) => {
+  if (['billing_platform_absorb_alert', 'billing_platform_absorb_ack'].includes(setting.key)) {
+    ctx.addIssue({ code: 'custom', path: ['key'], message: '平台承担提醒请通过专用接口保存' });
+  }
   if (setting.key === RUNTIME_RATE_LIMIT_KEY) {
     ctx.addIssue({ code: 'custom', path: ['key'], message: '使用额度请通过专用管理接口保存' });
   }

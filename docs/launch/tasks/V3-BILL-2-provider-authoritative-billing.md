@@ -1,9 +1,83 @@
 # V3-BILL-2 — Provider-authoritative 统一计费开工契约
-该脚本已于 2026-09-29 删除（已失效）
 
 任务身份：`V3-BILL-2`；依赖：`BILL-1`；后继：`V3-RUNTIME`。任务映射见 [OPC 实施映射](V3-OPC-implementation.md)，产品规则来自[架构 §11](V3-OPC-growth-agent-architecture.md#11-provider-authoritative-聚合计费)与 [Master Plan 修订 §7](../Graylum_Master_Plan_v10.2_OPC_Growth_Agent_Amendment.md#7-provider-authoritative-原子计费)。
 
-状态：**开工规格，功能 NOT_RUN**。当前仅文档交付；功能须 Owner 另行选择。本任务未来实现风险为 **high**（计费/权限/前向数据库迁移），本次不改代码、SQL 或任何远端配置。以下接口名表示实施契约，不声称仓库已经提供这些函数，也不预占迁移编号。
+状态：本文保留 BILL2 v1 原始开工契约，并于 2026-10-03 同步 **BILL-PAYG PR-A（high）计费核心**的 v2 契约。
+依据为 [PAYG 第七版方案与 PR-A 实施说明](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553)
+及 Owner 本次实施更新；当前交付记录见 [draft PR #617](https://github.com/Crnobog9527/GraylumAI_vercel/pull/617)。
+本文不代表迁移已经应用、Runtime 已切流或验证全部完成；实际验证、候选和阻塞以该 PR 的 Handoff 为准。
+下文第 1–8 节保留 v1 历史设计与验收背景；涉及 v2 时，以第 0 节的版本差异为准。
+
+## 0. BILL-PAYG PR-A：v1 保留、v2 逐调用预留
+
+### 0.1 本次范围与默认入口
+
+PR-A 仅实现 SQL 和 BILL2 服务、账务兼容、平台承担报表及其管理员提醒接口。
+新 run 的默认合同仍为 **v1**；**v2 只能由测试创建**，不能把核心能力存在解释为已经向用户启用。
+Runtime 接线属于 PR-B，价格变动提醒属于 PR-C；等待积分、继续按钮及后台提醒页面均不在本次。
+不调用真实模型、不使用 OpenRouter 测试余额，不修改 staging 的费率、倍数、门槛、额度、提醒值或模型配置。
+不新增表、钱包、队列、定时任务；复用现有 run/call、来源分配和流水。
+
+| 契约 | v1（默认及旧运行单） | v2（PR-A 测试入口） |
+| --- | --- | --- |
+| 预留身份 | run 与一份预扣一对一 | run 不做预扣；每个 call 各绑定一份预扣；零 call 可以零 hold |
+| 领取调用 | 沿用冻结的整 run 预算与原规则 | 原子读取可用积分 A；A≥启动门槛 L 才可领取；G=ceil(q×U×m)，H=min(G,A) |
+| 用户费用 | 保留原官方成本及冻结合同 | 以每次调用的名义费用 n 和冻结倍数计算累计应计积分，再取差额 |
+| 结算 | 沿用原 run 终结语义 | 已结算前缀逐 call 落账；run 统计仅汇总，不能再写一笔 run 消费 |
+
+### 0.2 实际成本、名义费用与守恒
+
+供应商实际费用 **c** 始终完整保留，未知为 `null`，不能用估价或零代替。
+用户计价基准 **n** 为全部输入 token（含缓存读写）乘输入标价，加输出 token（含思考）乘输出标价，
+再加请求标价；单价按百万 token 单位换算。n 不使用缓存折扣价或供应商 discount，
+长上下文按实际输入 P 选档，有分时价的线路按最高时段标价计费。
+报价冻结名义价格表和来源，v2 缺少必需报价证据拒绝领取；v1 不因缺少 v2 字段而改价。
+
+q 与逐 call 倍数 m 沿原操作冻结；尚未领取的供应商报价按获准规则重读，不能用新商业倍数重解释旧操作。
+若可靠 token 不全而 c 已知，n 取 `min(c,U)`，标记 `actual_fallback`；c 也未知则保留 hold、进入 `cost_pending`。
+迟到 token 只用于核对，不重算已收消费、不补扣；首版不自动补偿这种名义与实际兜底的差异。
+
+累计 `W=Σ(n_i×m_i)`，理论积分 `N=ceil(q×W)`；本次 `Δ_i=N_after−N_before`，
+用户实扣 `D_i=min(Δ_i,H_i)`，未向用户收取的部分由平台自动承担，分为余额封顶 `e_cap` 和估算超界 `e_bound`。
+结算前缀保持 **C+E=N**（C=ΣD，E=Σ(e_cap+e_bound)）；用户余额不扣成负数，E 不成为充值后追收的欠款。
+只在累计应计积分处向上取整，不逐 call 独立进位后相加；名义费用与加权中间量保留所需精度。
+余额封顶本身不设置 `budget_conflict`；成本、输入或名义费用超界按估算异常停止新派发并保留完整证据。
+
+平台差额 **g=n−c** 可正可负，满足 `Σc+Σg=Σn`；缓存读取、缓存写入溢价和其他差额分开呈现，
+`actual_fallback` 单列。E 是未收取的名义积分收入，不是现金亏损；其美元等值按各 call 的冻结 q×m 折算，
+精确汇总后才在展示时舍入。报表按精确模型、用途和 UTC 结算日汇总；已消费补偿单列实际恢复额，
+净扣为 D 减实际补偿，保留 gross C/E/N 和供应商成本证据。
+
+### 0.3 释放、故障与注销
+
+未派发或已有可靠撤权证明的调用，可撤销派发权并按原来源规则释放 hold，一次且仅一次。
+已派发但费用未知的调用继续保留各自 hold，并转 `cost_pending`；超时、注销或恢复任务执行不等于费用为零。
+已结算前缀不重扣、不因后续未知调用消失；零 call、零 hold 的 run 直接收尾，不制造退款。
+已确认平台或供应商故障且整个操作无可用交付时，先关闭新派发，再按原来源释放未结 hold，
+对已收 D 做关联原消费的唯一补偿；实际恢复继续服从 grant 过期、reversed 和 quarantine 保护。
+供应商费用未知仍明确记录，迟到成本只作平台核对，不重新向用户扣款。
+
+注销适配由 PR-A 承担：`bill2_erasure_closed` 及其调用点同时识别 v1 run 预扣和 v2 call 预扣。
+函数防漂移检查以 0160 之后、开工时 staging 的实际定义为准，包括 `bill2_read`、
+`runtime_financial_recovery` 和 `bill2_revoke_unstarted_dispatch`；已注销账号未发出的 v2 call 撤权释放一次，
+已派发未知费用则保留 hold。旧公开终结入口不得绕过 BILL2 消费 v1 或 v2 的绑定预扣。
+
+### 0.4 管理提醒、迁移与验证边界
+
+平台承担提醒在读取时按精确模型和最近 7 个 UTC 结算日聚合，不进入结算事务、不拦截调用。
+读取时使用当前默认设定值或模型覆盖；没有设置返回“未启用”。只比较 E 的冻结费率美元等值，g 不触发该提醒。
+管理员配置和“已知悉”复用私有 `system_settings`；知悉日期用条件更新、冲突重读合并，
+同模型只保留较晚日期，通用设置接口不可覆盖这两个受保护键。页面展示留待前端任务。
+
+PR-A 原预留迁移编号为 0162，0161 由并行 #612 使用；如果 #612 先合并或者顺序变化，
+合并前由后合并的一方核对连续编号、必要时改号，并重新生成 `built-fingerprint.json`。
+在最新有效基线上追加迁移；不得改已应用迁移，不在本任务应用 staging 迁移或合并 PR。
+
+本机离线验证须包含 PR-A 必测、v1 回归、注销未派发/未知费用分支、幂等和真实并发，
+以及 [工程规范第 7 节](../../ENGINEERING.md#7-测试与验证) 的 API 测试、类型检查、lint、代码大小检查、
+两条计费/恢复集成测试命令和空库建库、baseline 重放（`--write-built` 并提交指纹）。
+通过 required CI/Security 后保留 draft，注明精确 head 可审查，由总控安排独立审查。
+此处是要求清单，不是这些检查已经通过的记录。
 
 ## 1. 当前代码与复用边界
 
@@ -44,7 +118,7 @@
 | local call | call ID、run ID、单调 sequence、role/phase、provider+调用账户命名空间+模型、冻结请求 hash、输入/输出/工具上限、精确成本上界、dispatch capability/版本、已发出标记、取消/响应事实和时间 |
 | receipt | receipt ID、local call、provider/account、实际 generation/response ID（可未知）、币种/单位、官方成本原始十进制及精确规范值、usage/cost details、覆盖组/总项或子项类型、完整性/冲突状态、取得方式、adapter 协议版本、来源与 hash/时间 |
 
-`UNIQUE(actor, request_id)` 绑定完整冻结负载；同 ID 同负载返回原状态，不再预扣或 dispatch；不同负载/作用域/模型/revision 必须冲突拒绝。run/pre_deduct 一对一；`UNIQUE(run, sequence)` 与 call ID 唯一。provider generation 唯一性按 provider+账户命名空间，不用 API key 明文作命名空间；一次外部调用只归一条 local call。不同查询来源的同 generation 可有多份收据观测，但只选一个权威成本用于结算。
+`UNIQUE(actor, request_id)` 绑定完整冻结负载；同 ID 同负载返回原状态，不再预扣或 dispatch；不同负载/作用域/模型/revision 必须冲突拒绝。v1 的 run/pre_deduct 一对一；v2 则为 call/pre_deduct 一对一、run 无预扣（见第 0 节）；`UNIQUE(run, sequence)` 与 call ID 唯一。provider generation 唯一性按 provider+账户命名空间，不用 API key 明文作命名空间；一次外部调用只归一条 local call。不同查询来源的同 generation 可有多份收据观测，但只选一个权威成本用于结算。
 
 输入 hash 不是恢复内容。原输入/固定版本和已保存结果以权限保护的引用保留；日志/公开账单只保留脱敏定位信息。作用域删除或撤权禁止再次执行/读取私有正文，不能抹掉未决账务关联。
 
@@ -78,7 +152,7 @@ Fusion：整次 Fusion 调用可只对应一条 local call 和一份官方总收
 - 计算 `C = ceil(sum(不重叠官方成本组的精确 USD) × frozen creditsPerUsd × frozen multiplier)`，只在整个 run 最后进位一次。子项不能独立取整后求和；零成本保持零。
 - 例（仅逻辑 fixture，不是生产价格）：成本 `0.0004 + 0.0004 USD`，兑换 `1000`、倍率 `1.5`，最终 `ceil(1.2)=2`。逐项进位结果虽此例相同，须另测三个 `0.0001 USD`：聚合 `ceil(0.45)=1`，不能逐项得到 3。倍率中途变 2 不改变旧 run。
 
-## 4. 预算和预留
+## 4. v1 整 run 预算和预留（v2 差异见第 0 节）
 
 每张 run 一次原子预留 R，并冻结用户可理解的最高积分/成本预算、最大调用数（含工具/整理）、每调用输出/输入容量与总截止时间。服务端选择的上界不得超过本次批准预算。预算增加需要新的明确确认，本批不实现动态自动扩额；预算不足拒绝下一次 dispatch，不换模型、不另开 run 绕过。
 
@@ -86,7 +160,7 @@ Fusion：整次 Fusion 调用可只对应一条 local call 和一份官方总收
 
 `maxPreDeduct` 是限制，不是截断后仍放行的理由。余额错误 fail closed；available credits 以原子预扣和 REFUND-1B quarantine 判断为准，不信 UI 缓存。多个 run 同时争用余额也不能超留或负数。
 
-若已发出调用的官方成本异常超过冻结上界：停止后续 dispatch，保存完整真实成本并进入 budget conflict 核对，不静默 Math.min 截成“精准已结算”，不自动超额补扣。用户最高批准额不可突破；该异常的核销/平台承担差额按既有人工授权处理，本批不增设自动亏损政策。
+若已发出调用的官方成本异常超过冻结上界：停止后续 dispatch，保存完整真实成本并进入 budget conflict 核对，不静默 Math.min 截成“精准已结算”，不自动超额补扣。用户最高批准额不可突破；这是 v1 原设计的异常处理边界；v2 已按 PAYG Owner 决定自动承担未收部分，遵守第 0 节的封顶和异常规则，不沿用此处的人工承担前提。
 
 ## 5. 唯一钱路、事务和幂等
 

@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { buildPaygReport, type PaygReportFields } from './bill2PaygReport';
 import { usdToPico } from './reportUsd';
 import { formatWeightedUsd, weightedDeltaCredits } from './bill2/weighted';
 import { parseMultiplier } from './billingUnit';
@@ -10,10 +11,10 @@ import { parseMultiplier } from './billingUnit';
  * - new contract (per-call m_i): each call's cumulative difference Δ_i = ceil(q×W_after) − ceil(q×W_before)
  *   in sequence order, when the whole run is in the window, every cost is known and ΣΔ equals the charge;
  * - old contract: the whole charge, when the whole run is in the window and used one model.
- * Everything else is reported as unallocated. 0157 settles all-or-conflict, so there is no
- * platform-absorbed amount yet (BILL-PAYG adds it).
+ * Everything else is reported as unallocated. PAYG v2 uses settled call deltas directly;
+ * its nominal fees, absorption and signed supplier-cost differences are exposed separately in payg.
  */
-export type Bill2CallReportRow = {
+export type Bill2CallReportRow = PaygReportFields & {
   call_id: string;
   run_id: string;
   call_sequence: number;
@@ -101,6 +102,7 @@ const groupLines = (groups: Map<string, { calls: number; unknownCostCalls: numbe
       weightedUsd: g.unknownCostCalls ? null : formatWeightedUsd(g.weighted) }));
 
 export function buildBill2ModelReport(rows: readonly Bill2CallReportRow[], limit: number) {
+  const payg = buildPaygReport(rows);
   const lines = new Map<string, ModelReportLine & { cost: bigint; weighted: bigint }>();
   const runs = new Map<string, { row: Bill2CallReportRow; calls: Parsed[]; invalid: boolean }>();
   const byPurpose = new Map<string, { calls: number; unknownCostCalls: number; cost: bigint; weighted: bigint }>();
@@ -130,6 +132,18 @@ export function buildBill2ModelReport(rows: readonly Bill2CallReportRow[], limit
   let refundedRuns = 0;
   let unsettledRuns = 0;
   for (const run of runs.values()) {
+    if (String(run.row.contract_version) === '2' || run.row.contract_version === 'v2') {
+      const valid = payg.calls.filter(call => run.calls.some(p => p.row.call_id === call.callId));
+      for (const call of valid) {
+        chargedCredits += call.chargedCredits;
+        const line = lines.get(`${call.provider}\u0000${call.model}`);
+        if (line) line.attributedChargedCredits += call.chargedCredits;
+        else unallocatedChargedCredits += call.chargedCredits;
+      }
+      if (run.row.run_state !== 'settled' && run.row.run_state !== 'refunded') unsettledRuns += 1;
+      if (run.row.run_state === 'refunded') refundedRuns += 1;
+      continue;
+    }
     if (run.row.run_state === 'refunded') { refundedRuns += 1; continue; }
     if (run.row.run_state !== 'settled') unsettledRuns += 1;
     const charged = run.row.run_charged ?? 0;
@@ -158,6 +172,7 @@ export function buildBill2ModelReport(rows: readonly Bill2CallReportRow[], limit
   const unknownCostCalls = models.reduce((sum, line) => sum + line.unknownCostCalls, 0);
   return {
     models,
+    payg,
     byPurpose: groupLines(byPurpose),
     byDate: groupLines(byDate),
     totals: {
@@ -173,7 +188,9 @@ export function buildBill2ModelReport(rows: readonly Bill2CallReportRow[], limit
       weightedUsd: unknownCostCalls || unparsableCalls ? null : formatWeightedUsd(totalWeighted),
       chargedCredits,
       unallocatedChargedCredits,
-      platformAbsorbedCredits: null,
+      paygRefundedCredits: payg.refundedCredits,
+      paygNetChargedCredits: payg.netChargedCredits,
+      platformAbsorbedCredits: payg.calls.length || payg.invalidCalls ? payg.platformAbsorbedCredits : null,
     },
     truncated: rows.length >= limit,
   };
