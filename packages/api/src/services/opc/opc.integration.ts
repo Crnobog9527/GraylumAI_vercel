@@ -9202,20 +9202,23 @@ it.skipIf(process.env.V3_CAPACITY_CAPTURE !== 'true')('OPC: CAPACITY chat histor
  }finally{await browser.close();}
 },300000);
 
-it('OPC: rejected cross-business adoption recovers its original request and permits adopting a topic of this business', async()=>{
- // Topic cards are adopted one at a time and no longer offer an in-place account
- // edit; the correction is to adopt a topic whose account belongs to this business.
+it('OPC: rejected cross-business adoption recovers its original request and permits adoption after a conversational account change', async()=>{
+ // Topic cards no longer edit accounts in place; the user asks the mentor in
+ // the conversation, which offers a revised candidate that can be adopted.
  const f=await publishedDraft();await planFixtureModel(f.moduleId);
  const seed=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'existing-account',title:'另一业务原工作',brief:'必须保留',day:'2026-09-20'}]});
  const [original]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:seed.planId,accounts:[{platform:'x',account:'existing-account',expectedRevision:null}]});
  const other=(await sql.query("insert into opc_businesses(actor_id,name) values($1,'另一业务') returning id",[f.actor])).rows[0].id;
  await sql.query('update opc_accounts set business_id=$1 where project_id=$2',[other,original.projectId]);
  const {browser,page}=await planBrowser(f);
+ const card=(title:string)=>page.getByRole('heading',{name:title,exact:true}).last().locator('..');
+ const money=async()=>(await sql.query("select (select count(*)::int from credit_transactions where user_id=$1) ledger,(select count(*)::int from bill2_runs where actor_id=$1) runs",[f.actor])).rows[0];
  try{
   await page.goto(process.env.V3_LOCAL_APP+'/positioning/'+f.d.draftId+'/topics');
   await page.getByRole('button',{name:'开始选题工作对话',exact:true}).click();
-  const card=(title:string)=>page.getByRole('heading',{name:title,exact:true}).last().locator('..');
   await card('1. 首周选题').waitFor({timeout:60000});
+  const plansBefore=(await f.service.read(f.d.draftId)).plans;
+  const moneyBefore=await money();
   // Simulate the old client's unknown outcome; do not hand-edit or delete pending state.
   await page.route('**/api/trpc/opc.adoptTopics*',async route=>{await route.fetch();await route.abort();});
   await card('1. 首周选题').getByRole('button',{name:'采用这个选题',exact:true}).click();
@@ -9225,18 +9228,26 @@ it('OPC: rejected cross-business adoption recovers its original request and perm
   const frozen=await page.evaluate(key=>localStorage.getItem(key),key);
   await page.unroute('**/api/trpc/opc.adoptTopics*');
   await page.getByRole('button',{name:'恢复原请求',exact:true}).click();
+  // The prompt text after this prefix still points at a removed control (front-end P3, tracked separately).
   await page.getByText(/^这个账号已属于另一项业务，本次没有采用。/).waitFor();
+  // Rejected: nothing adopted, nothing charged, and the original request is kept.
   expect(await page.evaluate(key=>localStorage.getItem(key),key)).toBeNull();
   expect(await page.evaluate(key=>localStorage.getItem(key),key+':rejected:'+JSON.parse(frozen!).request.requestId)).toBe(frozen);
-  await page.reload();
-  await card('2. 第二个账号选题').getByRole('button',{name:'采用这个选题',exact:true}).click();
+  expect((await f.service.read(f.d.draftId)).plans).toEqual(plansBefore);
+  expect(await money()).toEqual(moneyBefore);
+  expect((await sql.query('select business_id from opc_accounts where project_id=$1',[original.projectId])).rows[0].business_id).toBe(other);
+  // The account is changed through the conversation, then the revised topic is adopted.
+  await page.getByLabel('消息',{exact:true}).fill('请把第一条选题的账号改为 photography-account');
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  await expect.poll(()=>card('1. 首周选题').innerText(),{timeout:60000}).toContain('photography-account');
+  await card('1. 首周选题').getByRole('button',{name:'采用这个选题',exact:true}).click();
   await page.getByText(/^已采用所选内容并保存到资料库。/).waitFor();
   expect((await sql.query('select business_id from opc_accounts where project_id=$1',[original.projectId])).rows[0].business_id).toBe(other);
   const plans=(await f.service.read(f.d.draftId)).plans;
-  expect(plans[0].body).toHaveLength(1);expect(plans[0].body[0].account).toBe('proposed-account');
+  expect(plans[0].body).toHaveLength(1);expect(plans[0].body[0].account).toBe('photography-account');
   await page.goto(process.env.V3_LOCAL_APP+'/library');
   await page.getByRole('heading',{name:'资料库',exact:true}).waitFor();
-  await expect.poll(()=>page.locator('main').innerText()).toContain('proposed-account');
+  await expect.poll(()=>page.locator('main').innerText()).toContain('photography-account');
  }finally{await browser.close();}
 },180000);
 
