@@ -18,6 +18,7 @@ import { admissionMessage } from "./admission-message";
 import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-response";
 import { focusReply, liveReplyAfter, livePhaseNotice, mentorReplyDisplay, questionCardStatus, startLiveReply, type LiveReply } from "./agent-turn-display";
 import { OTHER_PLACEHOLDER, QuestionCardView } from "@/components/opc/question-card";
+import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
 import type { AgentTurnEvent, AgentTurnOutcome } from "@repo/api/src/shared/agentTurn";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, readAgentTurn,
@@ -1917,10 +1918,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                           )}
                           {reply.text && <div data-message-role="assistant" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
                             <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>
-                              {openingTurn ? "导师主动引导" : "导师"}
-                              {turnLabel ? ` · ${turnLabel}` : turnStep ? ` · ${turnStep.title}` : ""}
+                              {openingTurn ? "导师主动引导" : "导师"}{turnLabel ? ` · ${turnLabel}` : turnStep ? ` · ${turnStep.title}` : ""}
                             </span>
-                            <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>{reply.text}</p>
+                            <MessageMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={reply.text} streaming={Boolean(live)}/>
                           </div>}
                           {reply.card && <QuestionCardView card={reply.card} answered={cardStatus.answered} answer={cardStatus.answer}
                             disabled={cardLocked} onAnswer={(input, optionIndex) => {
@@ -1957,7 +1957,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                       );
                     })}
                     {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<div data-message-role="user" data-request-id={pendingBubble.requestId} className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3"><span>你 · {d.information[pendingBubble.stepId]?.schema.find((f:{id:string;title:string})=>f.id===pendingBubble.questionId)?.title}</span><p className="whitespace-pre-wrap">{pendingBubble.input}</p><small role="status">{running?'发送中 · 等待服务器确认':'尚未确认保存 · 原请求已保留'}</small></div>}
-                  {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="导师正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>导师</span><p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>{liveOnly.text||'导师正在思考…'}</p></div>}
+                  {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="导师正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>导师</span>{liveOnly.text?<MessageMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={liveOnly.text} streaming/>:<p className={`mt-1 ${resultStyles.messageBody}`}>导师正在思考…</p>}</div>}
                   {liveOnly?.card&&<QuestionCardView card={liveOnly.card} answered={false} disabled/>}
                   {liveReply&&<p role="status">{livePhaseNotice(liveReply.phase)}</p>}
                   {!manualEntry && snap.state === "draft" && !reviewOnly && <section className={resultStyles.currentAction} aria-label="当前问题操作">
