@@ -152,8 +152,30 @@
    - 同时冻结与它匹配的思考设置（v4 属于 `REASONING_FORMATS`），附属整理器保持非流式。
    - 现有流式格式只要有一种无法表达这些路径的工具约束，实施 PR 就停下报告，不自行新增格式。
 2. **前端**：`step` 回复已经通过 `executeStream` 调用，补上与导师相同的 `LiveReply` 渲染即可。实时文字只来自 `publicMentorText` 的 `message` 投影。
-3. **重放**：旧 execution 按冻结格式重放，字节不变。
-4. **计费**：不变。流式回执解析（`openRouterStream.ts`）已在导师路径上线。C0 的集成测试要证明流式和非流式的账单证据等价。
+   - `publicMentorText` 现在把实时文字截到 4000 字符（`progress.ts`），对冻结了新上限的 execution 改为按 4.3 的保存上限约束。
+3. **增量传输**（首版必做，是放开单次上限的前提）：
+   - **问题**：现在每个 text 事件都带**累计全文**，每 100ms 发一次（`executionStream.ts` 的 `TEXT_EVENT_INTERVAL_MS`）。服务端每收到一个片段，还要把累计原文重新解析一遍（`publicMentorText`、`publicAgentText`）。单次上限提高到 32768 后，传输量和解析量都会随回答长度按平方增长。
+   - **新事件**：对冻结了新上限的 execution，改发 `{type:'textDelta', offset, text}`。
+     - `offset` 是这段增量之前已经发出的可见正文码点数，`text` 是新增部分；
+     - 服务端在节流间隔内把多个片段合并成一个增量，仍然是每 100ms 最多一次，总传输量与回答长度成正比；
+     - 旧 execution 和旧客户端继续使用原来的 `text` 全文事件，不变。
+   - **服务端增量解析**：`publicMentorText` 改为保留扫描位置的增量解析器（只处理新到的原文），`publicAgentText` 同理，避免每个片段都重新扫描全文。
+   - **客户端**：`offset` 等于本地已显示的码点数时追加；不相等（漏帧、乱序）时丢弃这一帧并等待下一次快照。
+   - **断线重连和补齐**：
+     - 每一次新的流（刷新、断线后重新调用 `executeStream`，或者首次连接）的**第一个**文字事件，是 `offset:0` 的完整快照，内容等于服务端当前的可见正文；之后才是增量。
+     - 已完成的 execution 重放时，只发一个完整快照。
+     - 客户端发现 offset 不连续时，可以主动重新调用 `executeStream` 拿一次快照（现有恢复是幂等的），不需要新增接口。
+     - 停止用的 `stopAt` 取客户端已显示的码点数（4.2），和增量的 offset 是同一种计数。
+4. **T2 的"message 在第一个"约定**：
+   - `publicMentorText` 只认 `{"message": "...` 开头的输出。新准入在冻结上下文里加 `envelopeOrder:'message-first-v1'`；
+   - T2 的提示词和输出 schema 说明都写明"`message` 必须是第一个属性"。
+   - 完成时，宿主检查原始 body 是否以 `{"message":` 开头（与 `publicMentorText` 用同一个正则）。
+     - 不符合时**不判为失败**（避免把内容正确的回复变成错误）；
+     - 这次回复写的过程中本来就没有实时文字，退回到"完成后再显示"；
+     - 结果元数据记 `messageFirst:false`，只用于日志排查，不做统计系统。
+   - 不符合约定的回复写的过程中没有可见正文；这时点停止，`stopAt=0`，按 4.2 (e) 处理。
+5. **重放**：旧 execution 按冻结格式重放，字节不变。
+6. **计费**：不变。流式回执解析（`openRouterStream.ts`）已在导师路径上线。C0 的集成测试要证明流式和非流式的账单证据等价。
 
 ## 3. 统一输出上限（C1）
 
@@ -293,7 +315,7 @@ O = min( 全站统一上限 CHAT_OUTPUT_CAP（按环境取值）,
    - **非信封纯文本**：`body` 取投影的前 `stopAt` 个码点。
    - **信封**（T1 导师、T2）：
      - 用该格式正常完成时的同一个解析函数解析完整 body；
-     - 把 `message` 截到前 `stopAt` 个码点，其余字段原样保留，重建信封；
+     - 把 `message` 截到前 `stopAt` 个码点（只去掉尾部空白，保证仍是原文的前缀），其余字段按 4.3 的 T2 白名单规则保留，重建信封；
      - 用同一个校验函数检查。
      - **T1 带卡片**：卡片只在**没有发生截断**时保留。截断时 `card=null`，因为用户没看完正文，卡片也没有显示过。
      - **T2**：模型输出本身解析失败，或者截断后校验不通过时，不保存坏的协议 JSON，按 (e) 处理。
@@ -301,8 +323,11 @@ O = min( 全站统一上限 CHAT_OUTPUT_CAP（按环境取值）,
 5. **`complete` 分支在 `paused_reason='user_stop'` 下的规则**（同一张追加迁移；不在 `user_stop` 下的执行保持 0106 现状）：
    - **R1**：结果必须带 `stopped:true`。
    - **R2 正文**：
-     - 已有 `primary_result` 时，沿用 `0106:452`：body 必须等于 primary 的 body，不做 `stopAt` 计数（主回复已经全部写完并显示）。
-     - 没有 `primary_result` 时，可见正文的 `char_length` 不能超过登记的 `stopAt`。
+     - **一律按 `stopAt` 计数**，包括已有 `primary_result` 的情况：可见正文的 `char_length` 不能超过登记的 `stopAt`。
+       - 原因：主回复 checkpoint 的时候，客户端不一定已经看到完整主回复。`execute.ts` 把最后一次进度入队后紧接着就 checkpoint，而流式传输有缓冲和节流。
+     - **已有 `primary_result` 时**：把 `0106:452` 的"body 必须等于 primary 的 body"放宽为"保存的可见正文是 primary 可见正文的**前缀**"。
+       - 信封取两边的 `message` 比较；非信封直接比较 body。
+       - 放宽**只**在 `paused_reason='user_stop'` 下生效。其他情况仍然要求完全相等。
        - 信封：把 `p_result->>'body'` 解析为 jsonb，取 `->>'message'` 再计数。解析失败、或者 `message` 不是字符串时，拒绝。
        - 非信封：直接对 body 计数。
        - 是不是信封，由冻结上下文的 `providerRequestFormat` 决定，不由结果自报。
@@ -317,8 +342,10 @@ O = min( 全站统一上限 CHAT_OUTPUT_CAP（按环境取值）,
    - 除 R1–R4 外，其余检查（`kind`、`active_execution`、Session 批次、结果冲突）与 0106 相同。`stop` 动作本身不调用 `complete`，所有收尾都由宿主提交。`checkpoint_primary` 不改。
 6. **带附属整理器的执行被停止**：
    - **主回复还在写**：这次调用落库后，宿主**不再** checkpoint primary，也不派发整理器（claim 已被拒）。按"没有 primary"的规则保存，`summary:""`、`organized:false`。
-   - **主回复已完成，整理器还没派发**：取消这个 call 并释放冻结。按 (b) 保存：body 用 primary 的 body，`summary:""`、`organized:false`、`completeness:'complete'`。
-   - **整理器已在途**：按 (c)，等回执落库后正常带摘要完成。结果为 `stopped:true`、`completeness:'complete'`、`organized:true`。
+   - **主回复已完成，整理器还没派发**：取消这个 call 并释放冻结。按 (b) 保存：可见正文取 primary 的可见正文截到 `stopAt`，`summary:""`、`organized:false`。没有发生截断时 `completeness:'complete'`，否则为 `'stopped'`。
+   - **整理器已在途**：按 (c)，等回执落库后收尾。可见正文同样截到 `stopAt`。
+     - 没有发生截断（`stopAt` ≥ primary 可见正文的长度）：保留摘要，结果为 `stopped:true`、`completeness:'complete'`、`organized:true`；
+     - 发生了截断：摘要是根据用户没看完的完整主回复整理的，所以不保存，记 `summary:""`、`organized:false`、`completeness:'stopped'`。整理器调用照常结算一次。
    - **`organized:false` 时**：这一轮右侧信息不更新，B1 capture 不执行；界面在回答下方显示"已停止，本轮未整理"。不自动补整理，也不在下一轮补做这一轮的整理。
 7. **不重复扣费的保证**：
    - 每次调用只由自己的回执结算一次（BILL2 幂等）。
@@ -361,6 +388,12 @@ O = min( 全站统一上限 CHAT_OUTPUT_CAP（按环境取值）,
   - 最终保存前（带整理器时，是在 checkpoint 前），按实际 `bytes(result)` 检查，超过 262144 时按固定顺序截短。
   - 截短都在 Unicode 码点边界进行，每截一次就重新封装、重新计量。
   - **无卡片的结果**：截短可见正文。信封截 `message` 后重新封装。
+  - **T2 信封的白名单**（所有 T2 保存都适用，不只是停止）：
+    1. 保存前，按该格式正常完成时的 schema **只保留已校验的字段**重建信封，未知字段一律丢弃；
+    2. 截短 `message`，直到整个结果不超过 262144；
+    3. 如果去掉 `message` 之后，私有字段本身仍然放不下（极端情况），退到**紧凑结果**：信封只保留公开的 `message`（照样截到放得下），结果记 `envelopeCompact:true`、`completeness:'length_limit'`；
+    - 紧凑结果不再经过 T2 的完整 schema，只校验 `message` 是字符串，所以一定能保存、调用一定能收尾；
+    - 紧凑结果不被结构化解析、报告候选和 B1 采用，私有字段的原文仍然在回执里。
   - **带卡片的导师回合**：
     1. 先截短 `message`。信封顶层的 `message` 和 `card.message` 截成同一个值，保持 `agentTurnResult` 的"两份一致"；
     2. 仍然超出时，截短 `recommendationReason`。
@@ -516,6 +549,15 @@ REPORT-GEN R-A / R-B 按 #547 原顺序，用统一上限
 - **流式（C0）**：
   - `step` 回复（带整理器和不带整理器）能边写边出，写的过程中只显示 `message`，不显示 JSON；
   - plan、runtime 页、选题页仍然整段缓冲，完成后显示；
+  - **增量传输**：
+    - O=32768 写满时，总传输字节数与回答长度成正比（与累计全文方式对照）；
+    - 服务端解析是增量的，不会在每个片段重新扫描全文；
+    - 每次新流的第一个文字事件是 `offset:0` 的完整快照；
+    - 断线后重新调用能补齐，补齐后与服务端的可见正文逐字相同；
+    - 客户端遇到 offset 不连续的帧时丢弃，并重新拿快照；
+    - 旧 execution 和旧客户端仍然收到原来的 `text` 全文事件；
+    - `stopAt` 与增量 offset 的计数一致；
+  - **message 第一个**：符合约定时，T2 边写边显示；不符合时不判失败，完成后再显示，并记 `messageFirst:false`；这时停止按 (e) 处理；
   - 旧 execution 按原格式重放，字节不变；
   - 流式和非流式的账单证据等价；
   - #594 的闸门回归：未准入的 held、429、各类 503、结果未知时，不自动重新准入；确定的结构化 4xx 按 abandon 释放；首次调用闸门取消时显示固定提示。
@@ -569,6 +611,14 @@ REPORT-GEN R-A / R-B 按 #547 原顺序，用统一上限
     - 整理器在途：正常带摘要完成，结果为 `stopped:true`、`complete`、`organized:true`；
     - R1 和 R3 的拒绝组合；
     - 未停止的执行缺摘要时，仍报 `RUNTIME_ORGANIZER_PENDING`。
+  - **整理器运行期间停止**（primary 已 checkpoint，但客户端只显示到一部分）：
+    - 保存的可见正文截到 `stopAt`，是 primary 的前缀；
+    - R2 的"前缀"放宽只在 user_stop 下生效，非停止的执行仍然要求完全相等；
+    - 截断时不保存摘要（`organized:false`），整理器只结算一次；
+    - 停止后气泡里不会出现停止之后才到的文字；
+  - **T2 白名单**：
+    - 带未知字段的信封保存时丢弃未知字段；
+    - 私有字段本身超过上限时，退到紧凑结果（`envelopeCompact:true`、`length_limit`），保存成功、调用收尾，结构化消费者不采用；
   - B1：只在 `complete` 且（带整理器时）`organized:true` 时执行一次，重放不会产生第二份。
   - 旧 execution 的 `runtime_cancel` 行为不变。
 
@@ -622,6 +672,10 @@ REPORT-GEN R-A / R-B 按 #547 原顺序，用统一上限
 | 机器人第七轮 P1（整理器摘要的序列化大小，线程 4173706457） | 4.3：checkpoint 之前先为摘要预留 `SUMMARY_RESERVE`=65536 字节，主回复超出就在 checkpoint 前截短；摘要超出预留时保存 `summary:""`、`organized:false`、`summaryOmitted:true`（现有 0106:453 接受空字符串），保证一定能收尾；补必测 |
 | 机器人第七轮 P1（暂停后恢复绕过限流窗口，线程 4173706459） | 只在有续写时成立，已移到第二版；第 13 节记下约束：恢复时不能只凭"已有 claim"跳过闸门，必须按限流窗口的实际有效期重新校验，或者只为新派发的调用扣额度 |
 | 机器人第八轮 P1（回执落库后、结果写入前停止，线程 4173778352） | 4.2：`stop` 动作只记录停止，从不在 SQL 里收尾；"调用已关闭但还没有结果"视为等待宿主重建，由停止请求的宿主只读重放回执，提交截到 `stopAt` 的结果后再收尾；与原 HTTP 的结果逐字相同、只收尾一次；宿主崩溃时由现有恢复路径收尾；补必测 |
+| 机器人第九轮 P1（整理器运行期间停止，线程 4173825851） | 4.2：停止结果一律按 `stopAt` 截断，包括已有 primary 的情况；R2 只在 user_stop 下把 0106:452 的"完全相等"放宽为"前缀"；截断后不保存摘要，`organized:false`；补必测 |
+| 机器人第九轮 P1（T2 信封的大小，线程 4173825854） | 4.3：T2 保存前按白名单只保留已校验字段；仍然超出时退到只含 `message` 的紧凑结果，标 `envelopeCompact:true`，保证一定能收尾；补必测 |
+| 机器人第九轮 P1（累计全文传输，线程 4173825856） | 2.2 第 3 项：改为 `textDelta`（offset + 增量），服务端增量解析；每次新的流以完整快照开始；客户端 offset 不连续时重新拿快照；列入 C0 首版；补必测 |
+| 机器人第九轮 P2（message 第一个属性，线程 4173825859） | 2.2 第 4 项：冻结 `envelopeOrder:'message-first-v1'`，提示词和 schema 说明都写明；不符合时不判失败，退回完成后显示，记 `messageFirst:false` |
 
 ## 13. 第二版设计：自动续写（不在首版实施）
 
