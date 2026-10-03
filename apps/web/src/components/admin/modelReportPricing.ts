@@ -26,7 +26,7 @@ export function priceStatusReason(status: string): string {
 /** Where the "从 OpenRouter 读取" button is, relative to a read-only panel. */
 export const READ_HINT = {
   dialog: '点上面的"重新读取"',
-  form: '在这个模型的"思考设置"里点"重新读取"',
+  form: '点本区的"读取价格和容量"',
 } as const;
 export type ReadHintPlace = keyof typeof READ_HINT;
 

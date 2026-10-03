@@ -9,7 +9,7 @@ export const UNIT_SOURCE_LABEL = {
   configured: '已配置', default: '未配置，按缺省值', invalid: '配置值无效（新计费会拒绝）', unknown: '来源未知',
 } as const;
 
-const WINDOWS = [7, 30, 90] as const;
+const WINDOWS = [1, 7, 30, 90] as const;
 const SOURCE = { call: '调用冻结', run: '运行单（旧合同）' } as const;
 
 export function Bill2ModelReportCard() {

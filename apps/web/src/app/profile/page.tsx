@@ -61,9 +61,9 @@ function ProfilePageContent() {
     error: creditsError,
     refetch: refetchCreditsBalance,
   } = useCreditsBalance();
-  const { data: creditsSummary, isLoading: isSummaryLoading } = trpc.credits.getCreditsSummary.useQuery({ period: 'month' });
-
-  const isLoading = isProfileLoading || isBalanceLoading || isSummaryLoading;
+  // The credit summary is read by the cards that show it. It must not hold the whole page: a
+  // failing summary would keep the spinner up and remount those cards into another request.
+  const isLoading = isProfileLoading || isBalanceLoading;
 
   // Log errors for debugging
   useEffect(() => {
@@ -83,13 +83,11 @@ function ProfilePageContent() {
     full_name: userProfile?.full_name ?? userProfile?.nickname ?? '用户',
     avatar_url: userProfile?.avatar_url ?? '',
     credits: creditsStatus === 'ready' && credits !== null ? credits : undefined,
-    total_credits_used: creditsSummary?.totalSpent,
-    total_credits_purchased: creditsSummary?.totalEarned,
     subscription_tier: (userProfile as any)?.membership_level ?? 'free',
     auth_provider: (userProfile as any)?.auth_provider ?? 'email',
     email_verified: (userProfile as any)?.email_verified ?? false,
     created_date: userProfile?.created_at ?? new Date().toISOString(),
-  }), [userProfile, credits, creditsStatus, creditsSummary]);
+  }), [userProfile, credits, creditsStatus]);
 
   const [localUser, setLocalUser] = useState<MockUser | null>(null);
 

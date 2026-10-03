@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dialog';
 import { trpc } from '@/trpc/client';
 import { summaryStat } from './summaryStat';
+import { SummaryRetryButton, useCreditsSummary } from './SummaryRetry';
 import { logClientDevError } from '@/lib/client-log';
 import { createClient } from '@/lib/supabase';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
@@ -293,9 +294,7 @@ export const CreditsAndSubscriptionCards = memo(function CreditsAndSubscriptionC
 }) {
   const credits = typeof user?.credits === 'number' ? user.credits : null;
   const hasVerifiedBalance = credits !== null;
-
-  // 从 API 获取本月消耗数据
-  const monthlySummary = trpc.credits.getCreditsSummary.useQuery({ period: 'month' });
+  const monthlySummary = useCreditsSummary('month'); // 失败时有限次自动重试，之后显示"重试"
   const monthlyUsed = summaryStat(monthlySummary, (summary) => summary.totalSpent);
 
   const tierLabels: Record<string, string> = {
@@ -334,6 +333,7 @@ export const CreditsAndSubscriptionCards = memo(function CreditsAndSubscriptionC
         </div>
         <div className="text-sm mb-4 flex-1" style={{ color: 'var(--text-tertiary)' }}>
           {hasVerifiedBalance ? (monthlySummary.isError ? '本月消耗暂时无法读取' : `本月已消耗 ${monthlyUsed} 积分`) : '余额暂不可用'}
+          {hasVerifiedBalance && <SummaryRetryButton query={monthlySummary} />}
         </div>
         {hasVerifiedBalance && (
           <Button
