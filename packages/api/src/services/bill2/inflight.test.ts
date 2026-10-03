@@ -93,20 +93,20 @@ it.each(['slow','failure'])( 'early observation never delays chunk emission and 
  const early=f.rpc.mock.calls.find(([name,args])=>name==='bill2_record'&&(args.p_evidence as {providerId?:string}).providerId==='first-id');
  if(mode==='slow')expect(early?.[1].p_evidence).toMatchObject({providerId:'first-id',final:false,cost:null});
 });
-it('persists after the real runtimeActor getUser chain starts rejecting the original token',async()=>{
+it.each([401,500])('persists original financial evidence while getUser fails with status %s',async(status)=>{
  const {runtimeActor}=await import('../runtime/actor');
  const {createRuntimeBudget}=await import('../runtime/budget');
  const f=setup();let revoked=false;
  const jwt='test.'+Buffer.from(JSON.stringify({exp:Math.floor(Date.now()/1000)+3600})).toString('base64url')+'.test';
  const auth={getSession:vi.fn(async()=>({data:{session:{access_token:jwt}},error:null})),
-  getUser:vi.fn(async()=>({data:{user:revoked?null:{id:f.actorId}},error:revoked?{message:'revoked'}:null}))};
+  getUser:vi.fn(async()=>({data:{user:revoked?null:{id:f.actorId}},error:revoked?{message:'synthetic Auth failure',status}:null}))};
  const actor=runtimeActor(auth as unknown as Parameters<typeof runtimeActor>[0],f.actorId,createRuntimeBudget());
  const api=authoritativeBilling({admin:{rpc:f.rpc},actor,
   adapter:{...f.adapter,dispatch:async()=>{revoked=true;return f.observation;}}});
  await api.claimCall(f.runId,1,f.frozen);await api.dispatchOnce(f.callId,body);
- await expect(actor()).rejects.toThrow('RUNTIME_DENIED');
+ await expect(actor()).rejects.toThrow(status===401?'RUNTIME_DENIED':'RUNTIME_AUTH_UNAVAILABLE');
  await api.closeRun(f.runId,'cancelled');await api.finalizeRun(f.runId);
- await expect(api.claimCall(f.runId,2,f.frozen)).rejects.toThrow('RUNTIME_DENIED');
+ await expect(api.claimCall(f.runId,2,f.frozen)).rejects.toThrow(status===401?'RUNTIME_DENIED':'RUNTIME_AUTH_UNAVAILABLE');
  expect(auth.getUser).toHaveBeenCalledWith(jwt);
  expect(f.rpc.mock.calls.map(([name])=>name)).toEqual([
   'bill2_claim','bill2_dispatch','bill2_record','bill2_close','bill2_finalize',
