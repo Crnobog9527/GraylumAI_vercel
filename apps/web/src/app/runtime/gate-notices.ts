@@ -54,6 +54,24 @@ export function gateStopNotices(storage: GateStopStorage | null, sessionId: stri
   return notices;
 }
 
+const userStopKey = (sessionId: string, executionId: string) => 'opc-runtime-user-stop:' + sessionId + ':' + executionId;
+
+/**
+ * The server keeps no "the user asked" flag in the view, so this browser remembers the stops its user
+ * requested; only those cancelled rounds say 已停止. Call it before the cancel request.
+ */
+export function rememberUserStop(storage: GateStopStorage | null, sessionId: string, executionId: string) {
+  try { storage?.setItem(userStopKey(sessionId, executionId), '1'); } catch { /* The round then shows the neutral ended notice. */ }
+}
+
+/** Execution ids of rounds whose stop this browser's user requested. */
+export function userStopIds(storage: GateStopStorage | null, sessionId: string, executions: ReadonlyArray<{ executionId: string }>) {
+  return executions.flatMap(execution => {
+    try { return storage?.getItem(userStopKey(sessionId, execution.executionId)) === '1' ? [execution.executionId] : []; }
+    catch { return []; }
+  });
+}
+
 /** A cancelled round with no saved body is finished: there is nothing left to verify or show. */
 export function showsReply(execution: { state: string; body: string | null; primaryBody: string | null }) {
   return !(execution.state === 'cancelled' && !(execution.body ?? execution.primaryBody));

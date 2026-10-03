@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from "vitest";
 import { OUTPUT_TRUNCATED_NOTICE } from "@/lib/runtime-gate-notice";
-import { CAPACITY_NOTICE, GUIDE_HELD_NOTICE, runtimeTailNotices, runtimeTurnNotices, type RuntimeTurn } from "./runtime-notices";
+import { CAPACITY_NOTICE, ENDED_NOTICE, GUIDE_HELD_NOTICE, USER_STOP_NOTICE, runtimeTailNotices, runtimeTurnNotices, type RuntimeTurn } from "./runtime-notices";
 
 const turn = (extra: Partial<RuntimeTurn> = {}): RuntimeTurn => ({
   executionId: "e1", state: "completed", primaryBody: null, organizerComplete: null, needsTask: false, unavailableReason: null, ...extra,
@@ -34,9 +34,13 @@ describe("runtimeTurnNotices", () => {
     expect(labels(notice)).toEqual(["停止"]);
   });
 
-  it("shows a gate stop or a plain stop under a cancelled turn", () => {
+  it("says 已停止 only for a stop this browser's user asked for", () => {
     expect(runtimeTurnNotices(turn({ state: "cancelled" }), ctx({ gateStop: "请求太频繁" }))[0]).toMatchObject({ tone: "warning", text: "请求太频繁" });
-    expect(runtimeTurnNotices(turn({ state: "cancelled" }), ctx())[0].text).toBe("已停止，保留原记录。");
+    expect(runtimeTurnNotices(turn({ state: "cancelled" }), ctx({ userStopped: true }))[0]).toMatchObject({ tone: "status", text: USER_STOP_NOTICE });
+    // A turn the server ended (refusal, failed or timed-out call, recovery) is not a user stop.
+    const ended = runtimeTurnNotices(turn({ state: "cancelled" }), ctx())[0];
+    expect(ended).toMatchObject({ tone: "warning", text: ENDED_NOTICE });
+    expect(ended.text).not.toContain("已停止");
   });
 
   it("shows output truncation once, with the shared wording", () => {

@@ -16,7 +16,8 @@ import workStyles from './runtime-work.module.css';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { trpc } from '@/trpc/client';
 import {
- OUTPUT_TRUNCATED_NOTICE, definiteRefusal, gateStopNotices, rememberGateStop, runtimeAdmissionNotice, runtimeExecutionNotice, showsReply,
+ OUTPUT_TRUNCATED_NOTICE, definiteRefusal, gateStopNotices, rememberGateStop, rememberUserStop, userStopIds,
+ runtimeAdmissionNotice, runtimeExecutionNotice, showsReply,
  videoGateError, videoGateNotice,
 } from './gate-notices';
 import { GUIDE_HELD_NOTICE, isOpenTurn, runtimeTailNotices, runtimeTurnNotices, type RuntimeTurn } from './runtime-notices';
@@ -59,6 +60,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  // The user's message, shown at once until the server records its turn.
  const [outgoing,setOutgoing]=useState<{text:string;executionId?:string}|null>(null);
  const [gateStops,setGateStops]=useState<Record<string,string>>({});
+ const [userStops,setUserStops]=useState<string[]>([]);
  const capacityKey=(executionId:string)=>'opc-runtime-capacity:'+sessionId+':'+executionId;
  function markCapacity(executionId:string){try{sessionStorage.setItem(capacityKey(executionId),'1');}catch{/* The current alert still explains the failure. */}setCapacityIds(ids=>ids.includes(executionId)?ids:[...ids,executionId]);}
  const [storedModule,setStoredModule]=useState('');
@@ -238,11 +240,13 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[sessionId,workItem?.workItemId,view.data,videoBusy]);
 
- async function stop(executionId:string){setError('');try{await cancel.mutateAsync({executionId});await view.refetch();}catch{setError('取消状态待核实，请读取原任务。');}}
+ async function stop(executionId:string){setError('');rememberUserStop(browserSession(),sessionId,executionId);
+  setUserStops(ids=>ids.includes(executionId)?ids:[...ids,executionId]);
+  try{await cancel.mutateAsync({executionId});await view.refetch();}catch{setError('取消状态待核实，请读取原任务。');}}
  async function recover(executionId:string){setError('');try{const executed=await execute.mutateAsync({executionId});if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(executionId);setError('原请求的必要材料超过模型输入容量，无法继续发送。已有内容已保留；请点“停止”后缩短材料再发送。');}await view.refetch();}catch{setError('暂时无法恢复，请保留原任务。');}}
  const executions=view.data?.executions as Array<{executionId:string;createdAt?:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;contentAvailable:boolean}>|undefined;
  const capacitySignature=executions?.map(e=>e.executionId+':'+e.state).join('|');
- useEffect(()=>{setGateStops(gateStopNotices(browserSession(),sessionId,executions??[]));
+ useEffect(()=>{setGateStops(gateStopNotices(browserSession(),sessionId,executions??[]));setUserStops(userStopIds(browserSession(),sessionId,executions??[]));
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[sessionId,capacitySignature]);
  useEffect(()=>{const ids:string[]=[];for(const e of executions??[]){const key=capacityKey(e.executionId);if(e.state==='completed'||e.state==='cancelled'){try{sessionStorage.removeItem(key);}catch{/* No local marker to remove. */}}else try{if(sessionStorage.getItem(key)==='1')ids.push(e.executionId);}catch{/* Current request can still show the alert. */}}setCapacityIds(current=>current.join('|')===ids.join('|')?current:ids);
@@ -288,6 +292,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[workItem,view.data,choices.data,contentType,videoBusy]);
  const turnNotices=(e:RuntimeTurn)=>runtimeTurnNotices(e,{busy,capacity:capacityIds.includes(e.executionId),gateStop:gateStops[e.executionId],
+  userStopped:userStops.includes(e.executionId),
   stopping:cancel.isPending,onRetry:()=>void recover(e.executionId),onStop:()=>void stop(e.executionId)});
  const lastExecution=executions?.at(-1);
  const lastTurn=lastExecution&&{open:isOpenTurn(lastExecution.state),texts:turnNotices(lastExecution).map(notice=>String(notice.text))};
