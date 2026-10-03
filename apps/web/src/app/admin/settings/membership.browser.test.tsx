@@ -18,16 +18,18 @@ const shots = process.env.ENTITLEMENTS_SCREENSHOTS;
 
 const mock = `
   import React from 'react';
+  import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
   const plan = (level, review, compare, bytes) => ({ id: '00000000-0000-4000-8000-00000000000' + ['free', 'pro', 'gold'].indexOf(level),
     name: level.toUpperCase() + ' 会员', level, allow_export: 'false', allow_batch_export: 'false', allow_fusion_review: review,
     allow_fusion_compare: compare, library_storage_bytes: bytes, monthly_price: 0, sort_order: 0 });
   const srv = window.__srv = {
     plans: [plan('free', false, false, 50000000), plan('pro', true, true, 500000000), plan('gold', true, true, 2000000000)],
-    settings: { fusion_compare_max_models: 4 }, planCalls: [], settingCalls: [], failNextSave: null, failNextRead: false, version: 0,
+    settings: { fusion_compare_max_models: 4 }, planCalls: [], settingCalls: [], failNextSave: null, failNextRead: false,
+    failFirstRead: false, reads: 0,
   };
-  const listeners = new Set();
-  const bump = () => { srv.version++; listeners.forEach((fn) => fn()); };
-  window.__bump = bump;
+  // A real TanStack Query client, so a failed refetch puts the dashboard query into its error state.
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
+  export const TestProvider = ({ children }) => React.createElement(QueryClientProvider, { client }, children);
   const badRequest = (message) => ({ message: JSON.stringify([{ code: 'custom', path: ['value'], message }]), data: { code: 'BAD_REQUEST' } });
   // Same limits as admin.updateMembershipPlan and settings.updateSystemSettings (PR-1).
   const checkPlan = (input) => Number.isSafeInteger(input.libraryStorageBytes) && input.libraryStorageBytes >= 0
@@ -50,20 +52,18 @@ const mock = `
     } };
   };
   const dashboard = () => ({ systemSettings: { ...srv.settings }, membershipPlans: srv.plans.map((p) => ({ ...p })) });
-  let snapshot = dashboard();
+  const readDashboard = async () => {
+    await new Promise((r) => setTimeout(r, 20));
+    const fail = srv.reads++ === 0 ? srv.failFirstRead : srv.failNextRead;
+    if (fail) { srv.failNextRead = false; throw new Error('读取设置页数据失败，请稍后重试'); }
+    return dashboard();
+  };
   const generic = new Proxy({}, { get: (_, key) => key === 'useQuery' ? () => ({ data: undefined, isLoading: false, error: null,
     refetch: async () => ({}) }) : key === 'useMutation' ? () => ({ mutate() {}, mutateAsync: async () => ({}), isPending: false, error: null,
     reset() {} }) : key === 'useUtils' ? () => generic : typeof key === 'string' && key.startsWith('invalidate') ? async () => {} : generic });
   export const trpc = new Proxy({
     admin: new Proxy({
-      getSettingsDashboard: { useQuery: () => {
-        React.useSyncExternalStore((fn) => { listeners.add(fn); return () => listeners.delete(fn); }, () => srv.version);
-        return { data: snapshot, error: null, isLoading: false, refetch: async () => {
-          await new Promise((r) => setTimeout(r, 20));
-          if (srv.failNextRead) { srv.failNextRead = false; return { error: { message: 'read failed' } }; }
-          snapshot = dashboard(); bump(); return { error: null };
-        } };
-      } },
+      getSettingsDashboard: { useQuery: () => useQuery({ queryKey: ['settingsDashboard'], queryFn: readDashboard }) },
       updateMembershipPlan: { useMutation: mutation(srv.planCalls, checkPlan, (input) => {
         const row = srv.plans.find((p) => p.id === input.id);
         Object.assign(row, { allow_export: input.allowExport, allow_batch_export: input.allowBatchExport,
@@ -94,7 +94,9 @@ beforeAll(async () => {
       if (id === '\0membership-trpc') return mock;
       if (id === entry) return `import React from 'react'; import { createRoot } from 'react-dom/client';
         import ${JSON.stringify(styles)}; import Page from ${JSON.stringify(source)};
-        window.__mount = () => createRoot(document.getElementById('root')).render(React.createElement(Page));
+        import { TestProvider } from '@/trpc/client';
+        window.__mount = () => createRoot(document.getElementById('root'))
+          .render(React.createElement(TestProvider, null, React.createElement(Page)));
         window.__mount();`;
     } }],
     build: { write: false, minify: false, cssCodeSplit: false, lib: { entry, name: 'MembershipTest', formats: ['iife'] } },
@@ -205,6 +207,9 @@ describe('admin membership permissions in Chromium', () => {
       await page.evaluate('window.__srv.failNextRead = true');
       await page.getByTestId('membership-plan-save-free').click();
       await browserExpect(row.getByRole('alert')).toContainText('重新读取失败');
+      // The dashboard query is really in its error state, yet the editors stay mounted.
+      await browserExpect(page.getByTestId('admin-settings-reread-failed')).toBeVisible();
+      await browserExpect(page.getByTestId('admin-settings-membership-section')).toBeVisible();
       expect(await srv(page, 'plans[0].library_storage_bytes')).toBe(60_000_000);
       // The saved value stays on screen; nothing in the row can be edited or resubmitted.
       await browserExpect(page.getByTestId(`${free}-storage`)).toHaveValue('60');
@@ -220,6 +225,7 @@ describe('admin membership permissions in Chromium', () => {
       // A successful read unlocks the row with the server's values.
       await page.getByTestId(`${free}-reread`).click();
       await browserExpect(row).toContainText('已保存并读回');
+      await browserExpect(page.getByTestId('admin-settings-reread-failed')).toHaveCount(0);
       await browserExpect(page.getByTestId(`${free}-storage`)).toBeEnabled();
       await browserExpect(page.getByTestId(`${free}-storage`)).toHaveValue('60');
       // Editing another field afterwards keeps the saved storage.
@@ -282,6 +288,32 @@ describe('admin membership permissions in Chromium', () => {
       await page.getByRole('tab', { name: '会员权限' }).click();
       await browserExpect(page.getByTestId('admin-setting-fusion-compare')).toHaveValue('');
       await browserExpect(page.getByTestId('admin-settings-fusion-section').getByRole('alert')).toContainText('当前没有有效的配置');
+    } finally { await page.close(); }
+  }, 30000);
+
+  it('keeps unsaved edits in other tabs when the Fusion limit is saved and re-read', async () => {
+    const { page, errors } = await open();
+    try {
+      await page.getByRole('tab', { name: '基础设置' }).click();
+      await page.getByTestId('admin-setting-site_name').fill('未保存的名称');
+      await page.getByRole('tab', { name: '会员权限' }).click();
+      await page.getByTestId('admin-setting-fusion-compare').fill('7');
+      await page.getByTestId('admin-setting-fusion-compare-save').click();
+      await browserExpect(page.getByTestId('admin-settings-fusion-section')).toContainText('已保存并读回');
+      await page.getByRole('tab', { name: '基础设置' }).click();
+      await browserExpect(page.getByTestId('admin-setting-site_name')).toHaveValue('未保存的名称');
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30000);
+
+  it('still shows the full-page error when the first load fails', async () => {
+    const page = await browser.newPage();
+    try {
+      await page.route('**/*', (route) => route.abort());
+      await page.setContent(`<html><head><style>${css}</style></head><body><div id="root"></div></body></html>`);
+      await page.addScriptTag({ content: code.replace('failFirstRead: false', 'failFirstRead: true') });
+      await browserExpect(page.getByText('读取设置页数据失败，请稍后重试')).toBeVisible();
+      await browserExpect(page.getByTestId('admin-settings-membership-section')).toHaveCount(0);
     } finally { await page.close(); }
   }, 30000);
 

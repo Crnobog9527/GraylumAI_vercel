@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { trpc } from '@/trpc/client';
 import {
   Save, RefreshCw, Settings, CreditCard, Gift, Users, Sliders, Crown,
@@ -19,7 +19,7 @@ import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import AdminSettingsLoadError from '@/components/admin/AdminErrorState';
 import { RuntimeRateLimitSettings, RuntimeRateLimitTabTrigger } from '@/components/admin/RuntimeRateLimitSettings';
 import { MentorBudgetTabContent, MentorBudgetTabTrigger } from '@/components/admin/MentorBudgetSettings';
-import { changedSettings } from './changedSettings';
+import { changedSettings, mergeReadSettings } from './changedSettings';
 import { MembershipPlanPermissions } from '@/components/admin/MembershipPlanPermissions';
 import { FUSION_COMPARE_SETTING_KEY, FusionCompareSetting } from '@/components/admin/FusionCompareSetting';
 import type { MembershipPlanRow } from '@/components/admin/membershipEntitlementDraft';
@@ -131,20 +131,12 @@ export default function AdminSettingsPage() {
   // Entitlement editors show only values read back from the server after a save.
   const reloadDashboard = async () => !(await refetchDashboard()).error;
 
-  // 合并默认设置和已保存的设置
+  // 合并默认设置和已保存的设置；重新读取时保留管理员还没保存的修改
+  const previousSaved = useRef<Record<string, unknown> | undefined>(undefined);
   useEffect(() => {
-    const mergedSettings = { ...defaultSettings };
-    if (savedSettings) {
-      Object.entries(savedSettings).forEach(([key, value]) => {
-        if (mergedSettings[key]) {
-          mergedSettings[key] = {
-            ...mergedSettings[key],
-            value: String(value),
-          };
-        }
-      });
-    }
-    setSettings(mergedSettings);
+    const previous = previousSaved.current;
+    previousSaved.current = savedSettings;
+    setSettings(current => mergeReadSettings(defaultSettings, savedSettings, current, previous));
   }, [savedSettings]);
 
   const handleSaveAll = async () => {
@@ -259,7 +251,8 @@ export default function AdminSettingsPage() {
     );
   }
 
-  if (dashboardError) {
+  // Only a failed first load replaces the page; a failed re-read keeps the editors (and their state).
+  if (dashboardError && !dashboard) {
     return (
       <AdminSettingsLoadError
         error={dashboardError}
@@ -291,6 +284,13 @@ export default function AdminSettingsPage() {
         </Button>
       </div>
 
+      {dashboardError ? (
+        <div role="alert" data-testid="admin-settings-reread-failed" className="flex flex-wrap items-center gap-2 rounded-lg p-3 text-sm"
+          style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)', color: 'var(--error)' }}>
+          最新设置读取失败，页面上可能不是最新的值。
+          <Button size="sm" variant="outline" onClick={() => { void refetchDashboard(); }}>重新读取</Button>
+        </div>
+      ) : null}
       {/* Settings Tabs */}
       <Tabs value={tab} onValueChange={setTab} className="space-y-6">
         <TabsList
