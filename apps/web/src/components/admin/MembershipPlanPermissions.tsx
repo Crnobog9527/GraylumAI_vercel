@@ -85,20 +85,28 @@ export function MembershipPlanPermissions({ plans, onSaved }: { plans: Membershi
 
 function PlanPermissionRow({ plan, onSaved }: { plan: MembershipPlanRow; onSaved: () => Promise<boolean> }) {
   const [draft, setDraft] = useState<PlanDraft | null>(null);
-  const [saved, setSaved] = useState<'read' | 'unread' | null>(null);
-  const update = trpc.admin.updateMembershipPlan.useMutation({
-    onSuccess: async () => {
-      // Show the values read back from the server, never the local draft.
-      const readBack = await onSaved();
-      setDraft(null);
-      setSaved(readBack ? 'read' : 'unread');
-    },
-  });
+  const [saved, setSaved] = useState(false);
+  // Saved, but the read-back failed: the row keeps the saved values and stays locked until a read
+  // succeeds, so a later edit cannot resubmit the old snapshot and silently undo the save.
+  const [unread, setUnread] = useState(false);
+  const [rereading, setRereading] = useState(false);
+  const readBack = async () => {
+    const ok = await onSaved();
+    if (ok) setDraft(null);
+    setUnread(!ok);
+    setSaved(ok);
+  };
+  const update = trpc.admin.updateMembershipPlan.useMutation({ onSuccess: readBack });
+  const reread = async () => {
+    setRereading(true);
+    try { await readBack(); } finally { setRereading(false); }
+  };
+  const locked = update.isPending || unread || rereading;
   const view = draft ?? planDraftFromRow(plan);
   const problem = storageProblem(view);
   const bytes = mbTextToBytes(view.storageMb);
   const edit = (next: Partial<PlanDraft>) => {
-    setSaved(null);
+    setSaved(false);
     if (update.error) update.reset();
     setDraft({ ...view, ...next });
   };
@@ -118,7 +126,7 @@ function PlanPermissionRow({ plan, onSaved }: { plan: MembershipPlanRow; onSaved
           data-testid={`membership-plan-save-${plan.level}`}
           size="sm"
           onClick={save}
-          disabled={update.isPending || !draft || Boolean(problem)}
+          disabled={locked || !draft || Boolean(problem)}
           className="w-full bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90 md:w-auto"
         >
           {update.isPending ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Save className="mr-1 h-3 w-3" />}
@@ -134,7 +142,7 @@ function PlanPermissionRow({ plan, onSaved }: { plan: MembershipPlanRow; onSaved
                 id={`${id}-${testId}`}
                 data-testid={`${id}-${testId}`}
                 checked={view[field]}
-                disabled={update.isPending}
+                disabled={locked}
                 onCheckedChange={checked => edit({ [field]: checked })}
               />
               <span className="w-12 text-sm" style={{ color: view[field] ? 'var(--success)' : 'var(--text-disabled)' }}>
@@ -150,7 +158,7 @@ function PlanPermissionRow({ plan, onSaved }: { plan: MembershipPlanRow; onSaved
             data-testid={`${id}-storage`}
             inputMode="decimal"
             value={view.storageMb}
-            disabled={update.isPending}
+            disabled={locked}
             aria-invalid={Boolean(problem)}
             onChange={event => edit({ storageMb: event.target.value })}
             className="w-full md:max-w-xs"
@@ -161,14 +169,20 @@ function PlanPermissionRow({ plan, onSaved }: { plan: MembershipPlanRow; onSaved
         </div>
       </div>
       <div className="mt-3 text-xs" aria-live="polite">
-        {update.error ? (
+        {unread ? (
+          <div role="alert" className="flex flex-wrap items-center gap-2" style={{ color: 'var(--error)' }}>
+            <span>已提交保存，但重新读取失败。为避免用旧值覆盖，这一行暂时不能修改。</span>
+            <Button data-testid={`${id}-reread`} size="sm" variant="outline" disabled={rereading} onClick={() => void reread()}>
+              {rereading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+              重新读取
+            </Button>
+          </div>
+        ) : update.error ? (
           <p role="alert" style={{ color: 'var(--error)' }}>{saveErrorText(update.error)}</p>
         ) : draft ? (
           <p style={{ color: 'var(--text-tertiary)' }}>有未保存的修改</p>
-        ) : saved === 'read' ? (
+        ) : saved ? (
           <p role="status" style={{ color: 'var(--success)' }}>已保存并读回</p>
-        ) : saved === 'unread' ? (
-          <p role="alert" style={{ color: 'var(--error)' }}>已提交保存，但重新读取失败；请刷新页面确认当前值。</p>
         ) : null}
       </div>
     </div>

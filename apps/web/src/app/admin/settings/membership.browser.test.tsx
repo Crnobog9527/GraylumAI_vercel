@@ -197,6 +197,57 @@ describe('admin membership permissions in Chromium', () => {
     } finally { await page.close(); }
   }, 30000);
 
+  it('keeps a saved row locked after a failed read-back so a later edit cannot undo the save', async () => {
+    const { page, errors } = await open();
+    const row = page.getByTestId(free);
+    try {
+      await page.getByTestId(`${free}-storage`).fill('60');
+      await page.evaluate('window.__srv.failNextRead = true');
+      await page.getByTestId('membership-plan-save-free').click();
+      await browserExpect(row.getByRole('alert')).toContainText('重新读取失败');
+      expect(await srv(page, 'plans[0].library_storage_bytes')).toBe(60_000_000);
+      // The saved value stays on screen; nothing in the row can be edited or resubmitted.
+      await browserExpect(page.getByTestId(`${free}-storage`)).toHaveValue('60');
+      await browserExpect(page.getByTestId(`${free}-storage`)).toBeDisabled();
+      await browserExpect(page.getByTestId(`${free}-allow-fusion-review`)).toBeDisabled();
+      await browserExpect(page.getByTestId('membership-plan-save-free')).toBeDisabled();
+      await browserExpect(row).not.toContainText('已保存并读回');
+      // A failed re-read keeps the lock.
+      await page.evaluate('window.__srv.failNextRead = true');
+      await page.getByTestId(`${free}-reread`).click();
+      await browserExpect(page.getByTestId(`${free}-reread`)).toBeEnabled();
+      await browserExpect(page.getByTestId(`${free}-storage`)).toBeDisabled();
+      // A successful read unlocks the row with the server's values.
+      await page.getByTestId(`${free}-reread`).click();
+      await browserExpect(row).toContainText('已保存并读回');
+      await browserExpect(page.getByTestId(`${free}-storage`)).toBeEnabled();
+      await browserExpect(page.getByTestId(`${free}-storage`)).toHaveValue('60');
+      // Editing another field afterwards keeps the saved storage.
+      await page.getByTestId(`${free}-allow-fusion-review`).click();
+      await page.getByTestId('membership-plan-save-free').click();
+      await browserExpect(row).toContainText('已保存并读回');
+      expect(await srv(page, 'plans[0].library_storage_bytes')).toBe(60_000_000);
+      expect(await srv(page, 'plans[0].allow_fusion_review')).toBe(true);
+      expect(((await srv(page, 'planCalls')) as Array<{ libraryStorageBytes: number }>).map((c) => c.libraryStorageBytes))
+        .toEqual([60_000_000, 60_000_000]);
+
+      // The compare limit behaves the same way.
+      const section = page.getByTestId('admin-settings-fusion-section');
+      await page.getByTestId('admin-setting-fusion-compare').fill('6');
+      await page.evaluate('window.__srv.failNextRead = true');
+      await page.getByTestId('admin-setting-fusion-compare-save').click();
+      await browserExpect(section.getByRole('alert')).toContainText('重新读取失败');
+      await browserExpect(page.getByTestId('admin-setting-fusion-compare')).toHaveValue('6');
+      await browserExpect(page.getByTestId('admin-setting-fusion-compare')).toBeDisabled();
+      await page.getByTestId('admin-setting-fusion-compare-reread').click();
+      await browserExpect(section).toContainText('已保存并读回');
+      await browserExpect(page.getByTestId('admin-setting-fusion-compare')).toHaveValue('6');
+      await browserExpect(page.getByTestId('admin-setting-fusion-compare')).toBeEnabled();
+      expect(await srv(page, 'settings.fusion_compare_max_models')).toBe(6);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30000);
+
   it('saves the compare limit 2–8 as a number and refuses other values', async () => {
     const { page, errors } = await open();
     const input = page.getByTestId('admin-setting-fusion-compare');

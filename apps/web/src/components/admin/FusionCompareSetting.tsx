@@ -22,14 +22,22 @@ const cardStyle = { background: 'var(--bg-secondary)', border: '1px solid var(--
 export function FusionCompareSetting({ saved, onSaved }: { saved: unknown; onSaved: () => Promise<boolean> }) {
   const current = readFusionCompareLimit(saved);
   const [draft, setDraft] = useState<string | null>(null);
-  const [result, setResult] = useState<'read' | 'unread' | null>(null);
-  const update = trpc.settings.updateSystemSettings.useMutation({
-    onSuccess: async () => {
-      const readBack = await onSaved();
-      setDraft(null);
-      setResult(readBack ? 'read' : 'unread');
-    },
-  });
+  const [readOk, setReadOk] = useState(false);
+  // Saved but not read back: keep the saved value on screen and lock editing until a read succeeds.
+  const [unread, setUnread] = useState(false);
+  const [rereading, setRereading] = useState(false);
+  const readBack = async () => {
+    const ok = await onSaved();
+    if (ok) setDraft(null);
+    setUnread(!ok);
+    setReadOk(ok);
+  };
+  const update = trpc.settings.updateSystemSettings.useMutation({ onSuccess: readBack });
+  const reread = async () => {
+    setRereading(true);
+    try { await readBack(); } finally { setRereading(false); }
+  };
+  const locked = update.isPending || unread || rereading;
   const text = draft ?? (current === null ? '' : String(current));
   const value = fusionCompareInput(text);
   const problem = draft !== null && value === null ? `须为 ${FUSION_COMPARE_MIN} 至 ${FUSION_COMPARE_MAX} 的整数` : null;
@@ -54,10 +62,10 @@ export function FusionCompareSetting({ saved, onSaved }: { saved: unknown; onSav
             inputMode="numeric"
             value={text}
             placeholder="未配置"
-            disabled={update.isPending}
+            disabled={locked}
             aria-invalid={Boolean(problem)}
             onChange={event => {
-              setResult(null);
+              setReadOk(false);
               if (update.error) update.reset();
               setDraft(event.target.value);
             }}
@@ -66,7 +74,7 @@ export function FusionCompareSetting({ saved, onSaved }: { saved: unknown; onSav
           <Button
             data-testid="admin-setting-fusion-compare-save"
             size="sm"
-            disabled={update.isPending || draft === null || value === null}
+            disabled={locked || draft === null || value === null}
             onClick={() => { if (value !== null) update.mutate({ key: FUSION_COMPARE_SETTING_KEY, value }); }}
             className="w-full bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90 sm:w-auto"
           >
@@ -75,13 +83,21 @@ export function FusionCompareSetting({ saved, onSaved }: { saved: unknown; onSav
           </Button>
         </div>
         <div className="text-xs" aria-live="polite">
-          {problem ? <p role="alert" style={{ color: 'var(--error)' }}>{problem}</p>
+          {unread ? (
+            <div role="alert" className="flex flex-wrap items-center gap-2" style={{ color: 'var(--error)' }}>
+              <span>已提交保存，但重新读取失败。为避免用旧值覆盖，暂时不能修改。</span>
+              <Button data-testid="admin-setting-fusion-compare-reread" size="sm" variant="outline" disabled={rereading}
+                onClick={() => void reread()}>
+                {rereading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                重新读取
+              </Button>
+            </div>
+          ) : problem ? <p role="alert" style={{ color: 'var(--error)' }}>{problem}</p>
             : update.error ? <p role="alert" style={{ color: 'var(--error)' }}>{update.error.data?.code === 'BAD_REQUEST'
               ? `服务端拒绝了这个值：须为 ${FUSION_COMPARE_MIN} 至 ${FUSION_COMPARE_MAX} 的整数。`
               : getSafeErrorMessage(update.error, '保存 Fusion 设置失败，请稍后重试')}</p>
             : draft !== null ? <p style={{ color: 'var(--text-tertiary)' }}>有未保存的修改</p>
-            : result === 'read' ? <p role="status" style={{ color: 'var(--success)' }}>已保存并读回</p>
-            : result === 'unread' ? <p role="alert" style={{ color: 'var(--error)' }}>已提交保存，但重新读取失败；请刷新页面确认当前值。</p>
+            : readOk ? <p role="status" style={{ color: 'var(--success)' }}>已保存并读回</p>
             : current === null ? (
               <p role="alert" style={{ color: 'var(--error)' }}>
                 当前没有有效的配置，Fusion 上线后新的对比请求会被拒绝；请填写并保存。
