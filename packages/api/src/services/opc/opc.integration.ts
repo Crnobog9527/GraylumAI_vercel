@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { beforeAll, afterAll, afterEach, it, expect } from "vitest";
+import { beforeAll, afterAll, afterEach, it, expect, onTestFinished } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import { createClient } from "@supabase/supabase-js";
@@ -3939,6 +3939,23 @@ async function deferQuestion(
   const state = (await f.artifacts.read(saved.projectId, saved.roundId)).steps[stepId];
   await f.artifacts.execute({ action: "confirm", projectId: saved.projectId, roundId: saved.roundId, requestId: randomUUID(), stepId,
     expectedVersion: state.version, expectedReviewVersion: state.reviewVersion });
+}
+/**
+ * Test data hygiene, not product behaviour. Every case registers its own
+ * fixture module and enabled workflow, and product reads cap them:
+ * runtime.choices sees only userVisibleModules(limit:64), unordered, so a work
+ * item's own Skill can be missing and its turn runs as ordinary chat; the
+ * catalog query raises 'registry capacity' above 100 enabled workflows. A case
+ * that depends on its own Skill or method keeps only its modules enabled. The
+ * ids it disables are recorded and restored when this case finishes, pass or fail.
+ */
+async function onlyOwnCatalog(moduleIds: string[]) {
+  const modules = (await sql.query("update modules set active=false where active and id<>all($1::uuid[]) returning id", [moduleIds])).rows.map(row => row.id);
+  const workflows = (await sql.query("update artifact_workflows set enabled=false where enabled and module_id<>all($1::uuid[]) returning id", [moduleIds])).rows.map(row => row.id);
+  onTestFinished(async () => {
+    await sql.query("update modules set active=true where id=any($1::uuid[])", [modules]);
+    await sql.query("update artifact_workflows set enabled=true where id=any($1::text[])", [workflows]);
+  });
 }
 async function planFixtureModel(moduleId: string) {
   const model = randomUUID();
@@ -8199,6 +8216,7 @@ it("OPC: approved six-stage guided positioning keeps one editable conversation a
 
 it("OPC: manual video revisions preserve execution ancestry, ownership and exact replay", async () => {
   const f=await publishedDraft();
+  await onlyOwnCatalog([f.moduleId]);
   await planFixtureModel(f.moduleId);
   const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
     body:[{id:randomUUID(),platform:'x',account:'video-revision-account',title:'口播稿修订',brief:'人工编辑后仍须保留原执行来源。',day:'2026-09-26',contentType:'video'}]});
@@ -8253,6 +8271,7 @@ it("OPC: manual video revisions preserve execution ancestry, ownership and exact
 
 it("OPC: final script asks before derivatives, supports a partial choice, and marks prior results old after re-finalizing", async () => {
   const f = await publishedDraft();
+  await onlyOwnCatalog([f.moduleId]);
   await planFixtureModel(f.moduleId);
   const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'consent-account', title: '口播稿授权边界', brief: '验证口播稿定稿与分镜、剪辑建议的授权分离。', day: '2026-09-26', contentType:'video' }] });
@@ -8356,6 +8375,7 @@ it("OPC: final script asks before derivatives, supports a partial choice, and ma
 
 it("OPC: completed video generation permits the next dialogue and a new script final", async () => {
   const f = await publishedDraft();
+  await onlyOwnCatalog([f.moduleId]);
   await planFixtureModel(f.moduleId);
   const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'post-video-dialogue', title: '派生后继续讨论', brief: '验证派生成功后继续讨论并重新定稿。', day: '2026-09-26' }] });
@@ -8406,6 +8426,7 @@ it("OPC: completed video generation permits the next dialogue and a new script f
 
 it("OPC: definite pre-admission failure revokes its claim and permits an explicit retry", async () => {
   const f = await publishedDraft();
+  await onlyOwnCatalog([f.moduleId]);
   await planFixtureModel(f.moduleId);
   const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'admission-retry', title: '准入失败恢复', brief: '验证未创建 execution 的确定失败不会永久占位。', day: '2026-09-27' }] });
@@ -8452,6 +8473,7 @@ it("OPC: definite pre-admission failure revokes its claim and permits an explici
 it("OPC: video claim material stays exclusive and a rejected claim can be retried", async () => {
   const { runtimeAdmissionService } = await import('../runtime/admission');
   const f = await publishedDraft();
+  await onlyOwnCatalog([f.moduleId]);
   const modelId = await planFixtureModel(f.moduleId);
   const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'shared-material', title: '共享材料保护', brief: '验证其他执行冻结后不能撤销材料。', day: '2026-09-29' }] });
@@ -8494,6 +8516,7 @@ it("OPC: video claim material stays exclusive and a rejected claim can be retrie
 
 it("OPC: upgraded legacy partial result blocks a duplicate dispatch and remains recoverable", async () => {
   const f = await publishedDraft();
+  await onlyOwnCatalog([f.moduleId]);
   await planFixtureModel(f.moduleId);
   const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'legacy-partial', title: '旧单项结果恢复', brief: '验证升级前已完成但丢回包的单项结果。', day: '2026-09-28' }] });
@@ -8587,6 +8610,7 @@ it("OPC: natural-language adoption stays complete after refresh and permits the 
 
 it("OPC: video package dispatch refuses a different frozen material before admission", async () => {
   const f = await publishedDraft();
+  await onlyOwnCatalog([f.moduleId]);
   await planFixtureModel(f.moduleId);
   const plan = await f.service.savePlan({ draftId: f.d.draftId, requestId: randomUUID(), expectedVersion: 0, sourceVersionId: f.sourceVersionId,
     body: [{ id: randomUUID(), platform: 'x', account: 'binding-account', title: '绑定检查', brief: '验证口播稿与分镜来源绑定。', day: '2026-09-25', contentType:'video' }] });
@@ -9255,7 +9279,8 @@ it('OPC: rejected cross-business adoption recovers its original request and perm
 },180000);
 
 it('OPC: typed content uses a right panel, deep links and one proactive continuation across tabs',async()=>{
- const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const f=await publishedDraft();
+ await onlyOwnCatalog([f.moduleId]);await planFixtureModel(f.moduleId);
  await sql.query('update modules set title=$1 where id=$2',['U3 独立测试技能 '+f.moduleId,f.moduleId]);
  const rows=[{id:randomUUID(),platform:'x',account:'typed-account',title:'文章细化',brief:'内容：摄影课；对象：新手；价值：改善构图；结构：案例与练习；假设：一次练习帮助理解。',day:'2026-09-22',contentType:'article'}, {id:randomUUID(),platform:'x',account:'typed-account',title:'视频选题',brief:'摄影构图示范视频，先讨论再起草。',day:'2026-09-23',contentType:'video'}, {id:randomUUID(),platform:'x',account:'typed-account',title:'旧类型未确认',brief:'旧选题简报保持可读',day:'2026-09-24'}];
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:rows});
@@ -9613,6 +9638,7 @@ it('OPC: free runtime reads owned context only on model tool request and recheck
 
 it('OPC: positioning entry creates a new business or edits only the selected existing account',async()=>{
  const f=await publishedDraft();
+ await onlyOwnCatalog([f.moduleId]);
  const rows=['entry-account-a','entry-account-b'].map(account=>({id:randomUUID(),platform:'x',account,title:account+'选题',brief:'保留的选题来源',day:'2026-09-25'}));
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:rows});
  await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:rows.map(row=>({platform:row.platform,account:row.account,expectedRevision:null}))});
@@ -9676,7 +9702,8 @@ it('OPC: positioning entry creates a new business or edits only the selected exi
 },180000);
 
 it('OPC: boundary browser freezes expanded edits across a delayed real adoption and concurrent saves',async()=>{
- const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const f=await publishedDraft();
+ await onlyOwnCatalog([f.moduleId]);await planFixtureModel(f.moduleId);
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'boundary-article',title:'边界文章',brief:'讨论后采用',day:'2026-09-25',contentType:'article'}]});
  const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'boundary-article',expectedRevision:null}]});
  const {browser,page}=await planBrowser(f);page.setDefaultTimeout(30000);
@@ -9726,7 +9753,8 @@ it('OPC: boundary browser freezes expanded edits across a delayed real adoption 
 },180000);
 
 it.each([65,67])('OPC: boundary browser continues legitimate v%s video source history',async(targetVersion)=>{
- const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const f=await publishedDraft();
+ await onlyOwnCatalog([f.moduleId]);await planFixtureModel(f.moduleId);
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'boundary-video',title:'长历史视频',brief:'合法原始执行与修订来源',day:'2026-09-25',contentType:'video'}]});
  const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'boundary-video',expectedRevision:null}]});
  const {browser,page}=await planBrowser(f);page.setDefaultTimeout(30000);
@@ -9906,7 +9934,8 @@ it.skipIf(!process.env.V3_LEGACY_ROOT)('OPC: U3 cross-code receipt recovery pres
 },180000);
 
 it.each(['cancelled','cost_pending'])('OPC: video truncation keeps accurate diagnosis and recovery envelope (%s)',async(state)=>{
- const f=await publishedDraft();await planFixtureModel(f.moduleId);
+ const f=await publishedDraft();
+ await onlyOwnCatalog([f.moduleId]);await planFixtureModel(f.moduleId);
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,body:[{id:randomUUID(),platform:'x',account:'truncation-account',title:'截断恢复',brief:'本地页面恢复验证',day:'2026-09-26',contentType:'video'}]});
  const [work]=await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'truncation-account',expectedRevision:null}]});
  const {browser,page}=await planBrowser(f);let executions=0;
