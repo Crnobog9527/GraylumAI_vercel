@@ -7,7 +7,7 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 DO $$ BEGIN
- IF md5(pg_get_functiondef('public.bill2_record(uuid,uuid,uuid,jsonb)'::regprocedure)) NOT IN ('347c4ed918e43f9759cd040554fe091d','9646b0198f31b1d64e75e956e47e5f32') THEN
+ IF md5(pg_get_functiondef('public.bill2_record(uuid,uuid,uuid,jsonb)'::regprocedure)) NOT IN ('347c4ed918e43f9759cd040554fe091d','01a84f34074933b35416bee547bfaa0b') THEN
   RAISE EXCEPTION 'PROVIDER_REJECTION_SOURCE_MISMATCH: bill2_record(uuid,uuid,uuid,jsonb)';END IF;
  IF md5(pg_get_functiondef('public.bill2_payg_finalize(uuid,uuid)'::regprocedure)) NOT IN ('1625da8f6a13a74250f7c454e84319ea','9ddbd0ebb4d5972fe24fa4aab4ad61dd') THEN
   RAISE EXCEPTION 'PROVIDER_REJECTION_SOURCE_MISMATCH: bill2_payg_finalize(uuid,uuid)';END IF;
@@ -181,15 +181,14 @@ BEGIN
    IF other_id IS DISTINCT FROM c.id THEN RAISE EXCEPTION 'BILL2_REJECTION_PROOF_DENIED';END IF;
    UPDATE bill2_calls SET provider_id=p_evidence->>'providerId' WHERE id=c.id;
   END IF;
-  IF erasing OR pending_rejection THEN
+  -- All strict refusals discard private provider fields after full validation.
    -- Reuse the existing content-free projection, then restore only verified refusal fields.
    p_evidence:=bill2_financial_projection(p_evidence-'evidenceKind')||jsonb_build_object('evidenceKind',p_evidence->>'evidenceKind',
     'usage',NULL,'requestHash',c.payload->>'requestHash','limitSource',rejection#>>'{error,metadata,limit_source}');
    projection_hash:=encode(sha256(convert_to(p_evidence::text,'utf8')),'hex');
-  END IF;
   INSERT INTO bill2_receipts(call_id,payload,payload_hash,conflict,financial_projection_hash,
    financial_projection_version,financial_projected_at)
-  VALUES(c.id,p_evidence,h,false,projection_hash,CASE WHEN erasing OR pending_rejection THEN 1 END,CASE WHEN erasing OR pending_rejection THEN clock_timestamp() END);
+  VALUES(c.id,p_evidence,h,false,projection_hash,1,clock_timestamp());
   IF NOT pending_rejection THEN
    UPDATE bill2_calls SET provider_rejected=true,selected_cost_usd=0,state='responded' WHERE id=c.id;
   END IF;

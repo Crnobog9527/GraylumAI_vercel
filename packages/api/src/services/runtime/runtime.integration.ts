@@ -1349,7 +1349,7 @@ it('RUNTIME: material revoke and actual dispatch serialize on the original versi
  const material=(await rpc('runtime_session_context',{p_actor_id:f.actorId,p_session_id:f.s.sessionId})).scopeMaterial;
  const context={version:'runtime.v1',scopeMaterial:material};
  const e=await rpc('runtime_admit',{...f.admit,p_payload:context,p_billing:{...f.billing,input:context}});
- const call={...f.billing.callPolicy[0],phase:'ordinary',requestHash:'a'.repeat(64)};
+ const call={...f.billing.callPolicy[0],protocol:'fixture-cost-v1' as const,phase:'ordinary',requestHash:'a'.repeat(64)};
  const c=await rpc('bill2_claim',{p_actor_id:f.actorId,p_run_id:e.runId,p_sequence:1,p_payload:call});
  const dispatch=new pg.Client({connectionString}),revoke=new pg.Client({connectionString});await dispatch.connect();await revoke.connect();
  try{
@@ -2349,7 +2349,7 @@ it('RUNTIME: insufficient admission credits is a definite refusal with no execut
 
 it('RUNTIME: automatic pending inventory isolates actors, covers unknown live calls and excludes expired or leased calls',async()=>{
  const f=await fixture(),other=await fixture(),e=await rpc('runtime_admit',f.admit);
- const call={...f.billing.callPolicy[0],phase:'ordinary',requestHash:'a'.repeat(64)};
+ const call={...f.billing.callPolicy[0],protocol:'fixture-cost-v1' as const,phase:'ordinary',requestHash:'a'.repeat(64)};
  const c=await rpc('bill2_claim',{p_actor_id:f.actorId,p_run_id:e.runId,p_sequence:1,p_payload:call});
  await rpc('bill2_dispatch',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:c.id,p_token:c.dispatchToken});
  const {fixtureEvidence}=await import('../bill2/fixtureAdapter');
@@ -2376,7 +2376,7 @@ it('RUNTIME: automatic pending inventory isolates actors, covers unknown live ca
 
 it('RUNTIME: admission and background recovery share a claim and settle a synthetic pending call only once',async()=>{
  const f=await fixture(),e=await rpc('runtime_admit',f.admit);
- const call={...f.billing.callPolicy[0],phase:'ordinary',requestHash:'b'.repeat(64)};
+ const call={...f.billing.callPolicy[0],protocol:'fixture-cost-v1' as const,phase:'ordinary',requestHash:'b'.repeat(64)};
  const c=await rpc('bill2_claim',{p_actor_id:f.actorId,p_run_id:e.runId,p_sequence:1,p_payload:call});
  await rpc('bill2_dispatch',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:c.id,p_token:c.dispatchToken});
  const {fixtureEvidence}=await import('../bill2/fixtureAdapter');
@@ -2404,7 +2404,7 @@ it('RUNTIME: admission and background recovery share a claim and settle a synthe
 
 it('RUNTIME: automatic recovery finishes a durable cost receipt after the original finalization was interrupted',async()=>{
  const f=await fixture(),e=await rpc('runtime_admit',f.admit);
- const call={...f.billing.callPolicy[0],phase:'ordinary',requestHash:'c'.repeat(64)};
+ const call={...f.billing.callPolicy[0],protocol:'fixture-cost-v1' as const,phase:'ordinary',requestHash:'c'.repeat(64)};
  const c=await rpc('bill2_claim',{p_actor_id:f.actorId,p_run_id:e.runId,p_sequence:1,p_payload:call});
  await rpc('bill2_dispatch',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:c.id,p_token:c.dispatchToken});
  await rpc('runtime_cancel',{p_actor_id:f.actorId,p_execution_id:e.executionId});

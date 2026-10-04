@@ -31,6 +31,11 @@ export async function providerRejectionCases({db,Client,connectionString}){
   await rpc(db,'bill2_record',f.actor,f.run,c.id,e);
   assert.equal((await rpc(db,'bill2_read',f.actor,f.run)).state,'refunded');
   assert.equal(await balance(db,f),100);
+  const projected=(await db.query('select payload,financial_projection_version version from bill2_receipts where call_id=$1',[c.id])).rows;
+  assert.equal(projected.length,1);assert.equal(projected[0].version,1);
+  assert.doesNotMatch(JSON.stringify(projected),/rawBody|user_id|"transport"|synthetic-user|Synthetic refusal/);
+  assert.equal(projected[0].payload.limitSource,'openrouter_key_limit');
+  assert.equal(projected[0].payload.requestHash,f.claimPayload.requestHash);
   const snapshot=(await db.query('select id,amount from credit_transactions where bill2_run_id=$1 order by id',[f.run])).rows;
   await rpc(db,'bill2_record',f.actor,f.run,c.id,e);
   await rpc(db,'bill2_cancel',f.actor,f.run);await rpc(db,'bill2_finalize',f.actor,f.run);
@@ -62,8 +67,8 @@ export async function providerRejectionCases({db,Client,connectionString}){
    await rpc(db,'bill2_record',erased.actor,erased.run,ec.id,evidence);
    assert.equal(await balance(db,erased),100);
    const stored=(await db.query('select payload from bill2_receipts where call_id=$1',[ec.id])).rows;
-   if(erasureFirst)assert.doesNotMatch(JSON.stringify(stored),/rawBody|transport|Synthetic refusal/);
-   else assert.equal(stored.length,1); // Existing pre-erasure receipts await the separately planned B2b scrub.
+   assert.doesNotMatch(JSON.stringify(stored),/rawBody|user_id|"transport"|Synthetic refusal/);
+   assert.equal(stored.length,1);
   }
 
   // Unknown transport results have no refusal evidence in either billing contract.
