@@ -85,3 +85,73 @@ describe('platform alert endpoint permissions', () => {
     expect(f.calls).toEqual([]);
   });
 });
+
+const callId = '11111111-1111-4111-8111-111111111111';
+const auditId = '22222222-2222-4222-8222-222222222222';
+const reviewInput = {
+  callId, requestId: auditId,
+  review: { expectedEvidenceHash: 'a'.repeat(64), profileVersion: 'profile-1', evidenceVersion: 'evidence-1',
+    reviewReference: 'Approved synthetic profile revalidation', humanReviewed: true as const },
+};
+const reviewResult = { callId, auditId, reviewed: true };
+const snapshot = { callId, evidenceHash: 'a'.repeat(64), profileVersion: 'profile-1', evidenceVersion: 'evidence-1',
+  reviewable: true, budgetConflict: false, meteringMissing: true, meteringExit: false, auditId: null };
+
+describe('manual metering review endpoints', () => {
+  it('binds review actor to authenticated context and delegates atomic audit to SQL once', async () => {
+    const f = harness('admin', { data: reviewResult, error: null });
+    await expect(f.caller.reviewMetering(reviewInput)).resolves.toEqual(reviewResult);
+    expect(f.calls).toEqual([{ fn: 'bill2_payg_review_metering', args: {
+      p_actor_id: 'actor', p_call_id: callId, p_request_id: auditId, p_review: reviewInput.review,
+    } }]);
+  });
+  it('reads only the requested call snapshot through the administrator RPC', async () => {
+    const f = harness('admin', { data: snapshot, error: null });
+    await expect(f.caller.meteringReviewSnapshot({ callId })).resolves.toEqual(snapshot);
+    expect(f.calls).toEqual([{ fn: 'bill2_payg_metering_review_snapshot', args: { p_actor_id: 'actor', p_call_id: callId } }]);
+  });
+  it.each(['user', 'anonymous'] as const)('denies %s both read and write', async role => {
+    const f = harness(role, { data: reviewResult, error: null });
+    const code = role === 'anonymous' ? 'UNAUTHORIZED' : 'FORBIDDEN';
+    await expect(f.caller.reviewMetering(reviewInput)).rejects.toMatchObject({ code });
+    await expect(f.caller.meteringReviewSnapshot({ callId })).rejects.toMatchObject({ code });
+    expect(f.calls).toEqual([]);
+  });
+  it.each([
+    { ...reviewInput, actorId: 'forged' },
+    { ...reviewInput, review: { ...reviewInput.review, humanReviewed: false } },
+    { ...reviewInput, review: { ...reviewInput.review, reviewReference: ' ' } },
+    { ...reviewInput, review: { ...reviewInput.review, expectedEvidenceHash: 'bad' } },
+    { ...reviewInput, review: { ...reviewInput.review, profileVersion: '' } },
+    { ...reviewInput, review: { ...reviewInput.review, resetConflict: true } },
+  ])('rejects forged identity or incomplete human evidence %#', async input => {
+    const f = harness('admin', { data: reviewResult, error: null });
+    await expect(f.caller.reviewMetering(input as typeof reviewInput)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.calls).toEqual([]);
+  });
+  it.each([
+    ['BILL2_METERING_REVIEW_DENIED', 'FORBIDDEN'],
+    ['BILL2_METERING_REVIEW_CONFLICT', 'CONFLICT'],
+    ['BILL2_METERING_REVIEW_NOT_READY', 'CONFLICT'],
+  ])('maps %s without retry', async (message, code) => {
+    const f = harness('admin', { data: null, error: { message, details: 'private database details' } });
+    await expect(f.caller.reviewMetering(reviewInput)).rejects.toMatchObject({ code, message });
+    expect(f.calls).toHaveLength(1);
+  });
+  it('does not expose arbitrary database error text', async () => {
+    const f = harness('admin', { data: null, error: { message: 'private database details' } });
+    await expect(f.caller.reviewMetering(reviewInput)).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE', message: 'BILL2_METERING_REVIEW_UNAVAILABLE',
+    });
+  });
+  it.each([null, { ...reviewResult, callId: auditId }, { ...reviewResult, reviewed: false },
+    { ...reviewResult, extra: 'untrusted' }])('fails closed on invalid write result %#', async data => {
+    const f = harness('admin', { data, error: null });
+    await expect(f.caller.reviewMetering(reviewInput)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+  });
+  it.each([null, { ...snapshot, callId: auditId }, { ...snapshot, evidenceHash: 'bad' }])(
+    'fails closed on invalid snapshot %#', async data => {
+      const f = harness('admin', { data, error: null });
+      await expect(f.caller.meteringReviewSnapshot({ callId })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    });
+});

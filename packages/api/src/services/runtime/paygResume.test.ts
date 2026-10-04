@@ -23,7 +23,7 @@ describe('explicit original-execution resume', () => {
   it('counts only remaining calls and passes the exact CAS token', async () => {
     const f = fixture();
     const result = await beginPaygExecution(f);
-    expect(f.callGate).toHaveBeenCalledExactlyOnceWith(id, 1);
+    expect(f.callGate).toHaveBeenCalledExactlyOnceWith(id, 1, 'bill2.v2');
     expect(f.read).toHaveBeenLastCalledWith('payg_resume', { cursor: 3, epoch: 2 });
     expect(result).toMatchObject({ resumedGate: true, execution: { live: true, epoch: 3 } });
   });
@@ -56,4 +56,41 @@ describe('explicit original-execution resume', () => {
     expect((await beginPaygExecution(fixture('waiting_resume', true))).wait?.unavailable).toBe('RUNTIME_PRICE_UNCONFIRMED');
     await expect(beginPaygExecution(fixture('running'))).rejects.toThrow('RUNTIME_RESUME_CONFLICT');
   });
+});
+it.each(['waiting_credits', 'waiting_resume'])('keeps %s and its CAS token for quota adjustment', async state => {
+  const f = fixture(state);
+  const rejected = await beginPaygExecution({ ...f, callGate: async () => ({
+    ok: false, reason: 'usage_configuration_required', retryAfter: 0,
+  }) });
+  expect(rejected.wait).toMatchObject({ state, code: 'RUNTIME_USAGE_CONFIGURATION_REQUIRED',
+    unavailable: 'usage_configuration_required', cursor: 3, epoch: 2, body: 'saved reply' });
+  expect(f.read).toHaveBeenCalledExactlyOnceWith('read');
+  expect((await beginPaygExecution(f)).resumedGate).toBe(true);
+});
+it.each(['prepared', 'running', 'interrupted', 'completed', 'waiting_credits', 'waiting_resume'])
+('rejects v1 resume in %s without mutation or calls consumption', async state => {
+  const f = fixture(state);
+  f.execution.billing.contractVersion = 'bill2.v1';
+  await expect(beginPaygExecution(f)).rejects.toThrow('RUNTIME_RESUME_CONFLICT');
+  expect(f.read).toHaveBeenCalledExactlyOnceWith('read');
+  expect(f.callGate).not.toHaveBeenCalled();
+});
+
+it('uses the existing cursor/epoch CAS to close a settled exhausted wait without calls or prices',async()=>{
+ const f=fixture('waiting_resume',true);f.execution.remainingCalls=0;
+ const closed={...f.execution,state:'cancelled',cancelRequested:true};
+ f.read.mockImplementation(async action=>action==='payg_resume'?closed:f.execution);
+ const actor=vi.fn(async()=>id),resumePricing=vi.fn();
+ expect(await beginPaygExecution({...f,actor,resumePricing})).toEqual({execution:closed,resumedGate:false});
+ expect(actor).toHaveBeenCalledTimes(1);
+ expect(f.read).toHaveBeenLastCalledWith('payg_resume',{cursor:3,epoch:2});
+ expect(f.callGate).not.toHaveBeenCalled();expect(resumePricing).not.toHaveBeenCalled();
+});
+it('does not close exhausted waiting on stale ownership or unresolved SQL settlement',async()=>{
+ const f=fixture('waiting_resume');f.execution.remainingCalls=0;
+ await expect(beginPaygExecution({...f,resume:{...f.resume,epoch:1}})).rejects.toThrow('RUNTIME_RESUME_CONFLICT');
+ expect(f.read).toHaveBeenCalledExactlyOnceWith('read');
+ f.read.mockImplementation(async action=>{if(action==='payg_resume')throw Error('RUNTIME_CHECKPOINT_PENDING');return f.execution;});
+ await expect(beginPaygExecution(f)).rejects.toThrow('RUNTIME_CHECKPOINT_PENDING');
+ expect(f.callGate).not.toHaveBeenCalled();
 });

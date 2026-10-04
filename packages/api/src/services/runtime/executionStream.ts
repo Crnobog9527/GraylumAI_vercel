@@ -7,14 +7,14 @@ import type {RuntimeProgress} from './progress';
 import type {AgentTurnOutcome} from '../../shared/agentTurn';
 import type {RuntimeBudget} from './budget';
 import {loadStagingPolicy,loadStagingRecoveryPolicy} from './stagingPolicy';
-import {stagingProcedureError,stagingRpcFailure} from './stagingErrors';
+import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from './stagingErrors';
 import {stagingTransport} from './stagingTransport';
 import {retainedOutputReason} from './view';
 import {runtimeExecutor} from './execute';
 import {runtimeActor} from './actor';
 import {activateRuntimeCandidate} from './matching';
 import {newWorkGate,denyNewCalls} from './newWorkGate';
-import {inflightFinancialHost} from './inflightFinancial';
+import {inflightFinancialHost,finishErasedWaiting} from './inflightFinancial';
 import {localFixtureAdapter} from '../bill2/fixtureAdapter';
 import type {BillingTransport} from '../bill2/service';
 
@@ -44,7 +44,9 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   host.budget?.timing?.tagExecution(executionId);host.budget?.timing?.enter('policy');
   const actor=runtimeActor(host.user.auth,host.actorId,host.budget,host.authorization);
   const activateSkill=(candidate:Parameters<typeof activateRuntimeCandidate>[2])=>activateRuntimeCandidate(host.user,host.admin,candidate);
-  const outcome=async<T extends {state:string}>(result:T)=>{
+  let erasedWaitingClosed=false;
+  const outcome=async<T extends {state:AgentTurnOutcome['state']}>(result:T)=>{
+   if(erasedWaitingClosed)return {state:result.state};
    if(result.state==='completed'&&'summary' in result){
     host.budget?.timing?.finishProvider();
     const leave=host.budget?.timing?.enter('host');
@@ -57,10 +59,21 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   const financial=inflightFinancialHost({database:host.admin,actorId:host.actorId,executionId,actor,budget:host.budget});
   const base={database:financial.database,budget:host.budget,actor};
   const publicProgress=(event:RuntimeProgress)=>{if(!financial.isAccountClosed())onProgress?.(event);};
+  const closeWaiting=async()=>{
+   const closed=await finishErasedWaiting({database:host.admin,actorId:host.actorId,executionId,budget:host.budget});
+   if(closed)erasedWaitingClosed=true;return closed;
+  };
   const run=async(adapter:BillingTransport,execute:()=>Promise<AgentTurnOutcome>)=>{
    let result:AgentTurnOutcome|undefined;
-   try{result=await execute();}
-   finally{
+   try{result=await execute();
+    if(['waiting_credits','waiting_resume'].includes(result.state))result=await closeWaiting()??result;
+   }catch(error){
+    if(error instanceof StagingAccessError
+     &&['RUNTIME_RESUME_CONFLICT','RUNTIME_STAGING_AUTH_REFRESH_REQUIRED'].includes(error.reason))throw error;
+    // Best-effort erased-account maintenance must not replace the original
+    // execution failure with a secondary storage/binding failure.
+    const closed=await closeWaiting().catch(()=>null);if(closed)return closed;throw error;
+   }finally{
     const recovered=result&&['completed','waiting_credits','waiting_resume'].includes(result.state)&&!financial.isAccountClosed()
      ?undefined:await financial.finish(adapter);
     if(financial.isAccountClosed()&&recovered)
@@ -73,6 +86,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
     ...base,endpoint:host.maintenanceEndpoint,activateSkill,
     callGate:newWorkGate(host.admin,'local').calls}).execute(executionId,publicProgress,resume)));
   try{await loadStagingPolicy(host.admin,host.actorId,process.env);}catch{
+   const closed=await closeWaiting();if(closed)return closed;
    const observed=await host.admin.rpc('runtime_execution',{
     p_actor_id:host.actorId,p_execution_id:executionId,p_action:'read',
    });

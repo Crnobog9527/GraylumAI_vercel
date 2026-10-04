@@ -20,7 +20,8 @@ export async function beginPaygExecution(input: {
   const execution = await input.read(input.resume ? 'read' : 'begin');
   const wait = (unavailable?: PaygWait['unavailable']): PaygWait => ({
     state: execution.state as PaygWait['state'],
-    code: execution.state === 'waiting_credits' ? 'RUNTIME_WAITING_CREDITS' : 'RUNTIME_WAITING_RESUME',
+    code: unavailable === 'usage_configuration_required' ? 'RUNTIME_USAGE_CONFIGURATION_REQUIRED'
+      : execution.state === 'waiting_credits' ? 'RUNTIME_WAITING_CREDITS' : 'RUNTIME_WAITING_RESUME',
     executionId: input.executionId, cursor: execution.cursor!, epoch: execution.epoch!, remainingCalls: execution.remainingCalls!,
     ...(execution.primaryResult ? { body: execution.primaryResult.body } : {}), ...(unavailable ? { unavailable } : {}),
   });
@@ -28,9 +29,15 @@ export async function beginPaygExecution(input: {
     if (!input.resume) return { execution, resumedGate: false, wait: wait() };
     if (input.resume.executionId !== input.executionId || input.resume.cursor !== execution.cursor
       || input.resume.epoch !== execution.epoch) throw new StagingAccessError('RUNTIME_RESUME_CONFLICT');
-    if (execution.remainingCalls === 0) throw new StagingAccessError('RUNTIME_CALL_LIMIT_REACHED');
+    if (execution.remainingCalls === 0) {
+      // Exhaustion is terminal maintenance, not another model attempt. SQL
+      // checks cursor/epoch and settled calls before using existing cancellation.
+      await input.actor();
+      return {execution:await input.read('payg_resume', {cursor:input.resume.cursor,epoch:input.resume.epoch}),
+        resumedGate:false};
+    }
     let verdict;
-    try { verdict = await input.callGate(await input.actor(), execution.remainingCalls!); }
+    try { verdict = await input.callGate(await input.actor(), execution.remainingCalls!, 'bill2.v2'); }
     catch { return { execution, resumedGate: false, wait: wait('limit_unavailable') }; }
     if (!verdict.ok) return { execution, resumedGate: false, wait: wait(verdict.reason) };
     if (execution.billing.mode === 'staging_test') {

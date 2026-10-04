@@ -202,7 +202,9 @@ describe('downstream real-model admission after a valid remote window',()=>{
   expect(JSON.stringify(mocks.error.mock.calls)).toContain('XX000');expect(rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
  });
  it('maps execute recovery denial after maintenance initialization',async()=>{
-  rpc.mockImplementation(async(name:string)=>name==='runtime_test_actor_access'?{data:true,error:null}:{data:null,error:{code:'42501',message:name==='runtime_test_policy'?'RUNTIME_TEST_WINDOW_DENIED':'RUNTIME_TEST_RECOVERY_DENIED'}});
+  rpc.mockImplementation(async(name:string)=>name==='runtime_test_actor_access'?{data:true,error:null}
+   :name==='runtime_financial_recovery'?{data:null,error:{message:'RUNTIME_EXECUTION_STILL_ALLOWED'}}
+   :{data:null,error:{code:'42501',message:name==='runtime_test_policy'?'RUNTIME_TEST_WINDOW_DENIED':'RUNTIME_TEST_RECOVERY_DENIED'}});
   const response=await post('runtime.execute',{executionId:actor});expect(response.status).toBe(403);expect((await response.json()).error.message).toContain('无法恢复');
  });
  it('preserves bounded OPC recovery refusals and sanitizes unexpected downstream exceptions',async()=>{

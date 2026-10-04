@@ -13,9 +13,10 @@ const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')
 function fixture() {
   let replay: {executionId?:string}|null = null;
   let config: unknown = defaults;
+  let waitingOrganizer: unknown;
   let failure = false, hanging = false;
   const rpc = vi.fn(async (name: string, args: Record<string, unknown>): Promise<{data: {executionId?: string;payload?: unknown;scope?: unknown}|null;error: {code:string;message:string}|null}> => {
-    if (name === 'runtime_session_context') return { data: { scope: { kind: 'positioning_draft', draftId: id(2) } }, error: null };
+    if (name === 'runtime_session_context') return { data: { scope: { kind: 'positioning_draft', draftId: id(2) },...(waitingOrganizer?{waitingOrganizer}:{}) }, error: null };
     if (name === 'runtime_admission_replay') return { data: replay, error: null };
     if (name === 'runtime_admit') return { data: { executionId: id(4), payload: args.p_payload }, error: null };
     throw new Error(name);
@@ -34,6 +35,7 @@ function fixture() {
   const input = { sessionId: id(2), requestId: id(4), input: 'synthetic', selection: { kind: 'ordinary', modelId: id(3) }, network: 'deny' };
   return { rpc, read, input, policy, admin, user: user as unknown as SupabaseClient,
     replay: (value: {executionId?:string}|null) => { replay = value; }, config: (value: unknown) => { config = value; },
+    waiting: (value:unknown) => { waitingOrganizer = value; },
     fail: () => { failure = true; }, hang: () => { hanging = true; } };
 }
 beforeEach(() => {
@@ -71,7 +73,7 @@ it('counts verified actor once, passes resolved card text, then admits unchanged
   const timing = createRequestTiming();
   const result = await timing.run(() => runtimeAdmissionService(f.user, f.admin, { ...f.policy, resolvedInput: 'resolved card text' })
     .prepare(f.input));
-  expect(mock.redis).toHaveBeenCalledExactlyOnceWith(id(1), 'admission', defaults, 'local', 1);
+  expect(mock.redis).toHaveBeenCalledExactlyOnceWith(id(1), 'admission', defaults, 'local', 1, 'bill2.v1');
   expect(moderation).toHaveBeenCalledExactlyOnceWith({ actorId: id(1), sessionId: id(2), requestId: id(4),
     text: 'resolved card text', opening: false });
   expect((result.payload as {input:string}).input).toBe('resolved card text');
@@ -85,7 +87,7 @@ it('uses the staging namespace only when the authenticated host supplies a real 
   await expect(runtimeAdmissionService(f.user, f.admin, { ...f.policy, real: {
     id: id(6), expiresAt: '2099-01-01T00:00:00Z', creditsPerUsd: '1000', multiplier: '1', callPolicies: [],
   } }).prepare(f.input)).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
-  expect(mock.redis).toHaveBeenCalledExactlyOnceWith(id(1), 'admission', defaults, 'staging', 1);
+  expect(mock.redis).toHaveBeenCalledExactlyOnceWith(id(1), 'admission', defaults, 'staging', 1, 'bill2.v1');
 });
 it.each(['block', 'throw'])('input moderation %s prevents execution and reservation', async mode => {
   const f = fixture();
@@ -164,4 +166,33 @@ it('keeps default admission v1 and selects v2 only through trusted server policy
  const billing=f.rpc.mock.calls.find(([n])=>n==='runtime_admit')![1].p_billing;
  expect(billing).toMatchObject({contractVersion:'bill2.v2',limits:{credits:0,maxCalls:3},callPolicy:[policy]});
  await expect(runtimeAdmissionService(f.user,f.admin,f.policy).prepare({...f.input,payg:true})).rejects.toThrow();
+});
+
+it('waiting organizer blocks a new message before rate limits, model reads or reservations',async()=>{
+ const f=fixture();
+ f.waiting({executionId:id(9),state:'waiting_credits',cursor:1,epoch:1,remainingCalls:1});
+ const resume=vi.fn().mockResolvedValue({state:'waiting_credits',code:'RUNTIME_WAITING_CREDITS',
+  executionId:id(9),cursor:2,epoch:2,remainingCalls:1});
+ const result=await runtimeAdmissionService(f.user,f.admin,{...f.policy,resumeWaitingOrganizer:resume}).prepare(f.input);
+ expect(result).toMatchObject({admitted:false,blockedRequestId:f.input.requestId,executionId:id(9),cursor:2});
+ expect(mock.redis).not.toHaveBeenCalled();
+ expect(f.rpc.mock.calls.map(([name])=>name)).not.toContain('runtime_admit');
+});
+it('original request replay does not resume another waiting organizer',async()=>{
+ const f=fixture();f.replay({executionId:id(4)});
+ f.waiting({executionId:id(9),state:'waiting_credits',cursor:1,epoch:1,remainingCalls:1});
+ const resume=vi.fn();
+ expect(await runtimeAdmissionService(f.user,f.admin,{...f.policy,resumeWaitingOrganizer:resume}).prepare(f.input))
+  .toEqual({executionId:id(4)});
+ expect(resume).not.toHaveBeenCalled();
+});
+it('new admission re-reads session after completing the previous organizer',async()=>{
+ const f=fixture();
+ f.waiting({executionId:id(9),state:'waiting_credits',cursor:1,epoch:1,remainingCalls:1});
+ const resume=vi.fn(async()=>{f.waiting(undefined);return {state:'completed' as const};});
+ await runtimeAdmissionService(f.user,f.admin,{...f.policy,resumeWaitingOrganizer:resume}).prepare(f.input);
+ expect(f.rpc.mock.calls.map(([name])=>name).slice(0,3))
+  .toEqual(['runtime_session_context','runtime_admission_replay','runtime_session_context']);
+ expect(f.rpc.mock.calls.map(([name])=>name)).toContain('runtime_admit');
+ expect(resume).toHaveBeenCalledTimes(1);
 });

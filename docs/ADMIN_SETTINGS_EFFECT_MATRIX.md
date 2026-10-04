@@ -78,7 +78,7 @@ The PR 2A billing runtime settings affect the AI chat main path for both pre-ded
 
 When `billing_require_model_pricing=true`, missing model pricing or zero input/output model pricing rejects the AI request before pre-deduct, so no credits are charged. The same missing/zero-price guard now applies before `settleAbort` calls `atomic_abort_settle`, so an interrupted request cannot silently settle against `MODEL_PRICING`.
 
-`MODEL_PRICING`, `calculateTokenCost`, `estimateRequestCost`, and `costCalculator.ts` remain in code as legacy / explicit fallback / test-only estimator paths. They must not be used as the default production billing path.
+`MODEL_PRICING`, `calculateTokenCost`, and `estimateRequestCost` remain in code as legacy / explicit fallback / test-only estimator paths. They must not be used as the default production billing path. The unused legacy `costCalculator.ts` and `streamHandler.ts` modules were removed by DEBT-QUICK.
 
 Remaining PR 2B debt: `atomic_abort_settle` does not accept arbitrary metadata, so `billing_history.abort_settle.metadata` cannot yet persist a pricing snapshot through the RPC path without a future migration. The TypeScript fallback path and abort usage log can carry the pricing/settings snapshot, but RPC-level abort-settle metadata remains a follow-up item.
 
