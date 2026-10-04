@@ -566,7 +566,7 @@
     - **Bright Data**：作为第三方数据的备用渠道，主要覆盖海外平台，取代第 3.7 节和 D13 中"每类一家、没有备用"的说法。Facebook 公开数据由 Bright Data 抓取（TikHub 不覆盖 Facebook）。
     - **接入要求**：计费按 D14 的用量口径；接入前先做一次小额实测（预算需另行批准）；密钥由 Owner 自己配置，不经过任何窗口；读完并核对 Bright Data 的条款原文。付费墙或常见问题中"Facebook 也能查公开数据"的说法，以接入后的实测结果为准，未实测前不对外承诺。
     - **背景**（定价窗口核实，不是 Owner 原话）：2024-01-23 Meta v. Bright Data 一案，Bright Data 胜诉（未登录抓取公开数据并出售不违反 Meta 条款）；Bright Data 的 Facebook 抓取每月 5,000 条免费，之后约 $0.75/千条起（定价窗口当时的说法，未核实；Bright Data 产品页目前标价可能更高，以接入前核对的实际价格为准）。
-    - **海外平台以 Post for Me 支持的 9 个为准**（定价窗口记录，Owner 已定；评论里没有附 Owner 原话）：TikTok、Instagram、YouTube、Facebook、X、Threads、LinkedIn、Pinterest、Bluesky，用于发布和查看用户自己授权账号的作品数据；Reddit 的公开数据只有 TikHub 能查。这会影响"多平台发布和数据监控"，由 PUBLISH-MONITOR 负责（第 2.1 节第 51 项、第 7.1 节，[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）。
+    - **海外平台以 Post for Me 支持的 9 个为准**（定价窗口记录，Owner 已定；评论里没有附 Owner 原话）：TikTok、Instagram、YouTube、Facebook、X、Threads、LinkedIn、Pinterest、Bluesky，用于发布和查看用户自己授权账号的作品数据；Reddit 的公开数据只有 TikHub 能查（定价窗口当时的说法；Reddit 不在 [RESEARCH-TOOLS](tasks/RESEARCH-TOOLS.md) 已验证的平台清单里，实测并加入清单之前按"取不到数据"处理，不对外承诺）。这会影响"多平台发布和数据监控"，由 PUBLISH-MONITOR 负责（第 2.1 节第 51 项、第 7.1 节，[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）。
     - **实施分工**：Bright Data 接入归 RESEARCH-TOOLS（增加备用线路）；本项只改规划，实测预算、密钥配置和条款核对各自另行批准。
 
 ### 2.2 被本版取代的旧规则
