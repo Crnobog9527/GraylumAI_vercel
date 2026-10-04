@@ -26,6 +26,8 @@ const open = (state: string) => state !== 'completed' && state !== 'cancelled';
  */
 export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
   busy: boolean; capacity: boolean; gateStop?: string; userStopped?: boolean; stopping: boolean;
+  /** The execute call for this turn already returned a final state; the view has not caught up yet. */
+  finished?: boolean;
   onRetry: () => void; onStop: () => void;
 }): ChatNotice[] {
   const id = (suffix: string) => turn.executionId + ':' + suffix;
@@ -46,8 +48,8 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
   if (!open(turn.state)) return notices;
   const capacity = ctx.capacity;
   const stop = { label: CHAT_ACTION.stop, onClick: ctx.onStop, disabled: ctx.stopping };
-  const retry = { label: CHAT_ACTION.retry, onClick: ctx.onRetry, disabled: ctx.busy };
-  const running = ctx.busy && !capacity && turn.state !== 'cost_pending';
+  const retry = { label: CHAT_ACTION.retry, onClick: ctx.onRetry, disabled: ctx.busy || Boolean(ctx.finished) };
+  const running = (ctx.busy || Boolean(ctx.finished)) && !capacity && turn.state !== 'cost_pending';
   notices.push({
     id: id('open'),
     tone: running ? 'status' : 'warning',

@@ -12,6 +12,7 @@ import {
   livePhaseNotice,
   mentorReplyDisplay,
   questionCardStatus,
+  showsTurnState,
   startLiveReply,
   type MentorReplySource,
 } from "./agent-turn-display";
@@ -271,4 +272,22 @@ it('keeps history omission visible alongside output truncation',()=>{
  }));
  expect(shown.notice?.text).toContain(OUTPUT_TRUNCATED_NOTICE);
  expect(shown.notice?.text).toContain(HISTORY_OMITTED_NOTICE);
+});
+
+it('keeps the turn state ahead of the older-history notice when there is no reply yet', () => {
+  const running = mentorReplyDisplay(source(null, { state: 'running', historyOmitted: true, active: true, busy: true }));
+  expect(running.notice).toMatchObject({ tone: 'status', busy: true });
+  expect(running.notice?.text.split('\n')).toEqual(['正在回复…', HISTORY_OMITTED_NOTICE]);
+  const cost = mentorReplyDisplay(source(null, { state: 'cost_pending', historyOmitted: true }));
+  expect(cost.notice?.tone).toBe('warning');
+  expect(cost.notice?.text).toContain('费用仍待核实');
+  expect(cost.notice?.text).toContain(HISTORY_OMITTED_NOTICE);
+  expect(showsTurnState(running.notice)).toBe(true);
+});
+
+it('does not let the older-history notice alone hide the tail progress notice', () => {
+  const shown = mentorReplyDisplay(source(agentTurnBody('Saved answer', null), { historyOmitted: true }));
+  expect(showsTurnState(shown.notice)).toBe(false);
+  expect(showsTurnState(undefined)).toBe(false);
+  expect(showsTurnState({ tone: 'warning', text: OUTPUT_TRUNCATED_NOTICE })).toBe(true);
 });

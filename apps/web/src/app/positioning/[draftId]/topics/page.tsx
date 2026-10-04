@@ -26,7 +26,8 @@ import topicStyles from './topic-candidates.module.css';
 import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 import { consentedTopicIds } from './adoption-consent';
-import { topicExecutionNotice, topicFailureMessage } from './topic-notices';
+import { topicExecutionNotice, topicFailureMessage, topicOpenTurnNotice } from './topic-notices';
+import { finishedExecution } from '@/lib/finished-execution';
 
 type PlanItem = {
   id: string;
@@ -501,14 +502,8 @@ export default function TopicWorkspacePage() {
     ...(error ? [{ id: 'error', tone: 'error' as const, text: error }] : []),
     ...(free.error ? [{ id: 'free', tone: 'error' as const, text: free.error }] : []),
   ];
-  const openTurnNotice = (e: { executionId: string; state: string }): ChatNotice | null => {
-    if (e.state === 'completed' || e.state === 'cancelled') return null;
-    const running = busy && e.state !== 'cost_pending';
-    return { id: e.executionId, tone: running ? 'status' : 'warning', busy: running,
-      text: e.state === 'cost_pending' ? '费用待核实；重试只核对原调用。' : running ? '正在回复…' : '回复尚未完成，原请求已保留。',
-      actions: [{ label: CHAT_ACTION.retry, disabled: busy, onClick: () => void recover(e.executionId) },
-        { label: CHAT_ACTION.stop, disabled: cancel.isPending, onClick: () => void stop(e.executionId) }] };
-  };
+  const openTurnNotice = (e: { executionId: string; state: string }) => topicOpenTurnNotice(e, { busy, finished: finishedExecution(execute),
+    stopping: cancel.isPending, onRetry: () => void recover(e.executionId), onStop: () => void stop(e.executionId) });
   const adoptedTopics = [...new Map([...plans.flatMap(plan => plan.body ?? []), ...(candidate?.body ?? [])].filter(item => adoptedItemIds.has(item.id)).map(item => [item.id, item])).values()];
 
   return (

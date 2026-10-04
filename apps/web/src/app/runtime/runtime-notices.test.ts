@@ -99,3 +99,27 @@ it('shows the persisted older-history notice without blocking the completed repl
  expect(notices).toEqual([{id:'e1:history-omitted',tone:'status',text:HISTORY_OMITTED_NOTICE}]);
  expect(notices[0].actions).toBeUndefined();
 });
+
+it('keeps 正在回复… while the view still shows a turn whose execute call already finished', () => {
+ // The execute call returned; busy is off but the view has not been re-read yet.
+ const [notice]=runtimeTurnNotices(turn({state:'running'}),ctx({finished:true}));
+ expect(notice).toMatchObject({tone:'status',busy:true,text:'正在回复…'});
+ expect(notice.text).not.toContain('回复尚未完成');
+ expect(notice.actions!.map(action=>action.disabled)).toEqual([true,false]);
+ // A finished turn's re-read view shows no open notice at all.
+ expect(runtimeTurnNotices(turn({state:'completed'}),ctx({finished:true}))).toEqual([]);
+ // Cost verification and capacity keep their own notices.
+ expect(runtimeTurnNotices(turn({state:'cost_pending'}),ctx({finished:true}))[0].text).toBe('费用待核实；重试只核对原调用。');
+ expect(runtimeTurnNotices(turn({state:'running'}),ctx({finished:true,capacity:true}))[0].text).toBe(CAPACITY_NOTICE);
+});
+
+it('still says 回复尚未完成 when the server left the turn unfinished', () => {
+ // A pending execute result is never recorded as finished (finishedExecution), so finished stays false.
+ const [notice]=runtimeTurnNotices(turn({state:'interrupted'}),ctx({finished:false}));
+ expect(notice).toMatchObject({tone:'warning',text:'回复尚未完成，原请求已保留。'});
+});
+
+it('shows the older-history notice and the running state together', () => {
+ const texts=runtimeTurnNotices(turn({state:'running',historyOmitted:true}),ctx({busy:true})).map(n=>n.text);
+ expect(texts).toEqual([HISTORY_OMITTED_NOTICE,'正在回复…']);
+});
