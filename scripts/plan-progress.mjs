@@ -13,7 +13,8 @@ import { dirname, join, relative, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parsePlan } from './plan-progress/parse-plan.mjs';
 import { derive } from './plan-progress/derive.mjs';
-import { renderHtml, renderMarkdown } from './plan-progress/render.mjs';
+import { renderMarkdown } from './plan-progress/render.mjs';
+import { renderHtml } from './plan-progress/render-html.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');

@@ -7,7 +7,8 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { parsePlan } from '../plan-progress/parse-plan.mjs';
 import { derive, isPlanTitle, namesInBody, namesInTitle } from '../plan-progress/derive.mjs';
-import { renderHtml, renderMarkdown } from '../plan-progress/render.mjs';
+import { renderMarkdown } from '../plan-progress/render.mjs';
+import { renderHtml } from '../plan-progress/render-html.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const script = join(repoRoot, 'scripts/plan-progress.mjs');
@@ -118,12 +119,16 @@ test('derive 报告历史对照里读不到的 PR 和完成后仍在途的 PR', 
   assert.ok(report.warnings.some((warning) => warning.includes('CORE-A 标为完成')));
 });
 
-test('页面把 PR 标题当数据，不能提前结束脚本', () => {
-  const report = derive({ plan: parsePlan(PLAN), prs: PRS, since: null, generatedAt: 'T', sourceRef: 'test' });
+test('页面在生成时渲染完整内容，不执行脚本也能看到；PR 标题被转义', () => {
+  const report = derive({ plan: parsePlan(PLAN), prs: PRS, since: '2026-09-27', generatedAt: 'T', sourceRef: 'test' });
   const html = renderHtml(report, template);
-  const data = html.match(/<script type="application\/json" id="plan-progress-data">([\s\S]*?)<\/script>/)[1];
-  assert.ok(!data.includes('</script>'));
-  assert.equal(JSON.parse(data).tasks.length, 7);
+  const withoutScripts = html.replace(/<script[\s\S]*?<\/script>/g, '');
+  assert.match(withoutScripts, /<span class="big">17%<\/span>/);
+  assert.match(withoutScripts, /<h2>卡在哪里<\/h2>/);
+  assert.match(withoutScripts, /PAY-WAFFO<\/span> 等依赖完成：PAY-BASE（实施中）/);
+  assert.equal((withoutScripts.match(/<article class="card /g) ?? []).length, 7);
+  assert.ok(!html.includes('</script><b>'));
+  assert.match(html, /&lt;\/script&gt;&lt;b&gt;x&lt;\/b&gt;/);
   assert.match(renderMarkdown(report), /\| PAY-WAFFO \| 被阻塞 \|/);
 });
 
@@ -141,7 +146,9 @@ test('命令行离线运行，结果只写到仓库外；输出目录在仓库�
   assert.match(out, /# Master Plan 进度/);
   const report = JSON.parse(readFileSync(join(dir, 'out', 'plan-progress.json'), 'utf8'));
   assert.ok(report.tasks.length > 40);
-  assert.match(readFileSync(join(dir, 'out', 'plan-progress.html'), 'utf8'), /<title>Graylum 施工进度<\/title>/);
+  const page = readFileSync(join(dir, 'out', 'plan-progress.html'), 'utf8');
+  assert.match(page, /<title>Graylum 施工进度<\/title>/);
+  assert.match(page, /<article class="card s-已完成" data-status="已完成">/);
 
   const inside = spawnSync(process.execPath, [script, '--prs-file', prsFile, '--out-dir', join(repoRoot, 'scripts')], { encoding: 'utf8' });
   assert.equal(inside.status, 1);

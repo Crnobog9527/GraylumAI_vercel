@@ -1,5 +1,4 @@
-// 终端 Markdown 和静态页面。页面模板在同目录 page.html，数据以 JSON 内嵌。
-import { readFileSync } from 'node:fs';
+// 终端 Markdown。静态页面见 render-html.mjs。
 import { STATUSES } from './derive.mjs';
 
 const cell = (text) => String(text ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
@@ -35,12 +34,4 @@ export function renderMarkdown(report) {
     for (const warning of report.warnings) out.push(`- ${warning}`);
   }
   return `${out.join('\n')}\n`;
-}
-
-// JSON 放进 <script type="application/json">；转义 < 防止 PR 标题里的 </script> 提前结束脚本。
-export function renderHtml(report, templatePath) {
-  const template = readFileSync(templatePath, 'utf8');
-  const json = JSON.stringify(report).replace(/</g, '\\u003c');
-  if (!template.includes('__PLAN_PROGRESS_DATA__')) throw new Error('页面模板缺少数据占位符');
-  return template.replace('__PLAN_PROGRESS_DATA__', () => json);
 }

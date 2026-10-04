@@ -45,7 +45,9 @@
   .chip:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
   .num { font-variant-numeric: tabular-nums; color: var(--muted); }
+  .phases { display: grid; gap: 28px; }
   section.phase { display: grid; gap: 12px; }
+  [hidden] { display: none !important; }
   .phase-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
   .phase-head h2 { margin: 0; font-size: 1.1rem; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: 12px; }
@@ -86,198 +88,35 @@
 </style>
 
 <div class="wrap">
-  <header>
-    <h1>Graylum 施工进度</h1>
-    <div class="meta" id="meta"></div>
-    <div class="summary" id="summary"></div>
-    <div class="bar" id="bar" role="img"></div>
-    <div class="filters" id="filters" aria-label="按状态筛选"></div>
-  </header>
-  <section class="extra warn" id="blocked" hidden></section>
-  <main id="phases"></main>
-  <section class="extra" id="unplanned"></section>
-  <section class="extra warn" id="warnings" hidden></section>
+__PLAN_PROGRESS_BODY__
 </div>
 
-<script type="application/json" id="plan-progress-data">__PLAN_PROGRESS_DATA__</script>
 <script>
+  // 只做可选的按状态筛选；内容已在生成时渲染好，不执行脚本也能完整显示。
   (function () {
-    var data = JSON.parse(document.getElementById('plan-progress-data').textContent);
-    var STATUSES = ['已完成', '实施中', '方案中', '被阻塞', '未开始', '已关闭'];
-    var COLORS = { '已完成': '--done', '实施中': '--doing', '方案中': '--plan', '被阻塞': '--blocked', '未开始': '--todo', '已关闭': '--closed' };
-    var byName = {};
-    data.tasks.forEach(function (t) { byName[t.name] = t; });
     var active = {};
     try { active = JSON.parse(localStorage.getItem('plan-progress-filter') || '{}') || {}; } catch (e) { active = {}; }
-
-    function el(tag, cls, text) {
-      var node = document.createElement(tag);
-      if (cls) node.className = cls;
-      if (text !== undefined) node.textContent = text;
-      return node;
+    var chips = Array.prototype.slice.call(document.querySelectorAll('.chip[data-status]'));
+    function apply() {
+      var any = chips.some(function (chip) { return active[chip.dataset.status]; });
+      chips.forEach(function (chip) { chip.setAttribute('aria-pressed', active[chip.dataset.status] ? 'true' : 'false'); });
+      document.querySelectorAll('section.phase').forEach(function (section) {
+        var shown = 0;
+        section.querySelectorAll('.card').forEach(function (card) {
+          var visible = !any || Boolean(active[card.dataset.status]);
+          card.hidden = !visible;
+          if (visible) shown += 1;
+        });
+        section.querySelector('.empty').hidden = shown > 0;
+      });
     }
-    function prLink(pr) {
-      var a = el('a', pr.state, '#' + pr.number);
-      a.href = pr.url;
-      a.target = '_blank';
-      a.rel = 'noopener';
-      var tags = [pr.state === 'open' ? (pr.draft ? '在途（草稿）' : '在途') : pr.state === 'merged' ? '已合并' : '已关闭未合并'];
-      if (pr.plan) tags.push('方案');
-      a.title = pr.title + '（' + tags.join('，') + '）';
-      return a;
-    }
-
-    var when = new Date(data.generatedAt);
-    var meta = document.getElementById('meta');
-    meta.append('生成时间 ' + when.toLocaleString('zh-CN', { hour12: false }) + ' · 任务表来源 ');
-    meta.append(el('code', '', data.sourceRef));
-    meta.append(' · 状态由 PR 自动推导，Master Plan 不再手写进度');
-
-    var summary = document.getElementById('summary');
-    summary.append(el('span', 'big', data.percent + '%'));
-    summary.append(el('span', '', '已完成 ' + data.counts['已完成'] + ' / ' + data.total + ' 个任务（已关闭的不计入）'));
-
-    var bar = document.getElementById('bar');
-    bar.setAttribute('aria-label', STATUSES.map(function (s) { return s + ' ' + data.counts[s]; }).join('，'));
-    STATUSES.forEach(function (s) {
-      if (!data.counts[s]) return;
-      var seg = el('span');
-      seg.style.width = (data.counts[s] / data.tasks.length * 100) + '%';
-      seg.style.background = 'var(' + COLORS[s] + ')';
-      seg.title = s + ' ' + data.counts[s];
-      bar.append(seg);
-    });
-
-    var filters = document.getElementById('filters');
-    STATUSES.forEach(function (s) {
-      var chip = el('button', 'chip');
-      chip.type = 'button';
-      chip.id = 'filter-' + s;
-      var dot = el('span', 'dot');
-      dot.style.background = 'var(' + COLORS[s] + ')';
-      chip.append(dot, s + ' ', el('span', 'num', String(data.counts[s])));
-      chip.setAttribute('aria-pressed', active[s] ? 'true' : 'false');
+    chips.forEach(function (chip) {
       chip.addEventListener('click', function () {
-        active[s] = !active[s];
-        chip.setAttribute('aria-pressed', active[s] ? 'true' : 'false');
+        active[chip.dataset.status] = !active[chip.dataset.status];
         try { localStorage.setItem('plan-progress-filter', JSON.stringify(active)); } catch (e) { /* 本机便利项，失败不影响显示 */ }
-        render();
+        apply();
       });
-      filters.append(chip);
     });
-
-    function card(t) {
-      var c = el('article', 'card s-' + t.status);
-      var top = el('div', 'card-top');
-      top.append(el('span', 'name', t.name), el('span', 'pill', t.status));
-      c.append(top);
-      if (t.reason) c.append(el('div', 'reason', t.reason));
-      if (t.deps.length || t.depPrs.length) {
-        var deps = el('div', 'row');
-        deps.append(el('span', 'label', '依赖'));
-        t.deps.forEach(function (d) {
-          var met = byName[d] && byName[d].status === '已完成';
-          deps.append(el('span', 'dep ' + (met ? 'ok' : 'no'), (met ? '✓ ' : '') + d));
-        });
-        t.depPrs.forEach(function (n) {
-          var met = t.unmetDeps.indexOf('#' + n) < 0;
-          deps.append(el('span', 'dep ' + (met ? 'ok' : 'no'), (met ? '✓ ' : '') + '#' + n));
-        });
-        c.append(deps);
-      }
-      if (t.depsNote && t.depsNote !== '—') {
-        var pre = el('details');
-        pre.append(el('summary', '', '依赖原文（含 Owner 和外部前提）'), el('p', '', t.depsNote));
-        c.append(pre);
-      }
-      var prs = el('div', 'row prs');
-      prs.append(el('span', 'label', 'PR'));
-      if (t.prs.length === 0) prs.append(el('span', 'label', '暂无'));
-      t.prs.forEach(function (pr) { prs.append(prLink(pr)); });
-      c.append(prs);
-      var meta = el('div', 'row');
-      meta.append(el('span', 'label', '风险 ' + (t.risk || '—') + ' · 规模 ' + (t.size || '—')));
-      c.append(meta);
-      var more = el('details');
-      more.append(el('summary', '', '任务内容'), el('p', '', t.content));
-      c.append(more);
-      return c;
-    }
-
-    function render() {
-      var anyActive = STATUSES.some(function (s) { return active[s]; });
-      var root = document.getElementById('phases');
-      root.replaceChildren();
-      root.style.display = 'grid';
-      root.style.gap = '28px';
-      data.phases.forEach(function (phase) {
-        var tasks = data.tasks.filter(function (t) { return t.phase === phase; });
-        var shown = tasks.filter(function (t) { return !anyActive || active[t.status]; });
-        var done = tasks.filter(function (t) { return t.status === '已完成'; }).length;
-        var sec = el('section', 'phase');
-        var head = el('div', 'phase-head');
-        head.append(el('h2', '', phase), el('span', 'num', '完成 ' + done + ' / ' + tasks.length));
-        sec.append(head);
-        if (shown.length === 0) sec.append(el('div', 'empty', '这个阶段没有符合筛选条件的任务'));
-        else {
-          var grid = el('div', 'grid');
-          shown.forEach(function (t) { grid.append(card(t)); });
-          sec.append(grid);
-        }
-        root.append(sec);
-      });
-    }
-    render();
-
-    var blocked = data.tasks.filter(function (t) { return t.status === '被阻塞'; });
-    if (blocked.length) {
-      var box = document.getElementById('blocked');
-      box.hidden = false;
-      box.append(el('h2', '', '卡在哪里'));
-      [['owner', '等 Owner 决定或外部事项'], ['deps', '等其他任务']].forEach(function (group) {
-        var items = blocked.filter(function (t) { return t.blockedBy === group[0]; });
-        if (!items.length) return;
-        box.append(el('div', 'label', group[1] + '（' + items.length + '）'));
-        var list = el('ul');
-        items.forEach(function (t) {
-          var li = el('li');
-          li.append(el('span', 'name', t.name), ' ' + t.reason);
-          if (t.blockedBy === 'deps' && t.depsNote && t.depsNote !== '—') li.append(el('div', 'reason', '依赖原文：' + t.depsNote));
-          list.append(li);
-        });
-        box.append(list);
-      });
-    }
-
-    var un = document.getElementById('unplanned');
-    var others = data.unplanned.filter(function (p) { return !p.planDoc; });
-    var docs = data.unplanned.filter(function (p) { return p.planDoc; });
-    un.append(el('h2', '', '计划外工作'));
-    un.append(el('div', 'meta', data.since + ' 起合并进 staging、标题和正文都没有对上任务名的 PR：' + others.length + ' 个；规划文档同步 ' + docs.length + ' 个'));
-    var det = el('details');
-    det.append(el('summary', '', '展开列表'));
-    var ul = el('ul');
-    others.forEach(function (p) {
-      var li = el('li');
-      li.append(prLink(p), ' ' + p.title);
-      ul.append(li);
-    });
-    det.append(ul);
-    if (docs.length) {
-      var dl = el('p', '');
-      dl.append('规划文档：');
-      docs.forEach(function (p) { dl.append(prLink(p), ' '); });
-      det.append(dl);
-    }
-    un.append(det);
-
-    if (data.warnings.length) {
-      var w = document.getElementById('warnings');
-      w.hidden = false;
-      w.append(el('h2', '', '需要核对'));
-      var wl = el('ul');
-      data.warnings.forEach(function (m) { wl.append(el('li', '', m)); });
-      w.append(wl);
-    }
+    apply();
   })();
 </script>
