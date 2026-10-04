@@ -67,7 +67,8 @@ The broad archived old-staging suite retains original application code except lo
 
 仅接收 OpenRouter 完整 HTTP 402 JSON：数字 `error.code=402`，明确
 `metadata.limit_source` 为 `openrouter_key_limit`、`openrouter_credits` 或
-`openrouter_in_flight_budget`，且无生成 ID、usage、输出或已有矛盾回执。
+`openrouter_in_flight_budget`。允许顶层可选 `user_id` 和 metadata 可选 `provider_name`
+（仅字符串或 null），其他字段白名单不变；仍需无生成 ID、usage、cost、输出或已有矛盾回执。
 依据：[官方错误语义](https://openrouter.ai/docs/api_reference/errors-and-debugging)、
 [额度拒绝来源](https://openrouter.ai/docs/api_reference/limits)。HTTP 200 内嵌错误、
 SSE 错误、超时、断线、5xx 与不完整证据仍走原有核实流程，不能视作免费。
@@ -87,3 +88,12 @@ Runtime 复用取消同步执行终态与会话占用；财务层 unknown 仍对
 
 回滚应追加迁移恢复来源函数，保留拒绝事实、回执及已完成账目，不重扣已释放积分。
 旧历史冻结需另行逐调用核对证据及批准后恢复，本迁移没有历史回填。
+
+
+总控实测形状回归使用合成 user_id、正文及响应头 ID，绝不复制真实身份或凭据。
+含生成 ID 的 402 仍交原有恢复路径：当前官方说明不足以把这类已识别调用一律判为免费。
+[生成查询接口](https://openrouter.ai/docs/api/api-reference/generations/get-request-&-usage-metadata-for-a-generation)
+的 404 仅表示未找到资源，不是已确认无计费。只有原有解析器接受的匹配 ID/模型、
+终态和明确成本证据才能结算；零成本与非零成本分别按原有规则处理。
+缺失成本、非终态、ID 冲突、查询失败继续保留冻结，绝不把缺失值补成零。
+因此本修复兼容真实正文形状，但不宣称仅凭已有生成 ID 的 402 即可释放历史事件。

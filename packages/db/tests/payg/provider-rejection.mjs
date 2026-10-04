@@ -5,7 +5,8 @@ import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 import {createFixture,claim,receipt} from './fixture.mjs';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const proof=f=>{
- const rawBody=JSON.stringify({error:{code:402,message:'Synthetic refusal',metadata:{limit_source:'openrouter_key_limit'}}});
+ const rawBody=JSON.stringify({user_id:'synthetic-user',error:{code:402,message:'Synthetic refusal',
+  metadata:{limit_source:'openrouter_key_limit',provider_name:null}}});
  return {provider:'openrouter',account:'sandbox',model:f.claimPayload.model,protocol:'openrouter-chat-v1',
   evidenceKind:'provider_rejection',requestHash:f.claimPayload.requestHash,providerId:null,cost:null,final:false,
   currency:'USD',source:'response',coverage:'request_total',observedAt:'2026-10-04T00:00:00Z',
@@ -73,6 +74,28 @@ export async function providerRejectionCases({db,Client,connectionString}){
    assert.notEqual((await rpc(db,'bill2_read',unknown.actor,unknown.run)).state,'refunded');
   }
 
+  // An ID already bound by a transport receipt is not proof of no charge.
+  const identified=await fixture(db,version),ic=await claim(db,identified),ie=proof(identified);
+  const held=await balance(db,identified);
+  await rpc(db,'bill2_record',identified.actor,identified.run,ic.id,{...ie,
+   evidenceKind:'transport_observation',providerId:'gen-synthetic-'+ic.id});
+  await assert.rejects(rpc(db,'bill2_record',identified.actor,identified.run,ic.id,ie),/REJECTION_PROOF_DENIED/);
+  await rpc(db,'bill2_cancel',identified.actor,identified.run);await rpc(db,'bill2_finalize',identified.actor,identified.run);
+  assert.equal(await balance(db,identified),held);
+  assert.equal((await rpc(db,'bill2_read',identified.actor,identified.run)).state,'cost_pending');
+  const zeroBody=JSON.stringify({data:{id:'gen-synthetic-'+ic.id,model:identified.claimPayload.model,
+   finish_reason:'stop',total_cost:0,native_tokens_prompt:0,native_tokens_completion:0}});
+  const zero={...ie,evidenceKind:undefined,providerId:'gen-synthetic-'+ic.id,source:'lookup',
+   rawBody:zeroBody,sourceHash:hash(zeroBody),transport:undefined,
+   cost:'0',final:true,usage:{inputTokens:0,outputTokens:0}};
+  await rpc(db,'bill2_record',identified.actor,identified.run,ic.id,zero);
+  await rpc(db,'bill2_finalize',identified.actor,identified.run);
+  assert.equal(await balance(db,identified),100,'only explicit matching final zero evidence releases this identified call');
+  await rpc(db,'bill2_record',identified.actor,identified.run,ic.id,zero);
+  await rpc(db,'bill2_finalize',identified.actor,identified.run);
+  assert.equal(await balance(db,identified),100);
+
+
   // Real overlap: hold the run lock until both rejection and cancellation queue.
   const race=await fixture(db,version),rc=await claim(db,race);
   const lock=new Client({connectionString}),a=new Client({connectionString}),b=new Client({connectionString});
@@ -102,6 +125,8 @@ export async function providerRejectionCases({db,Client,connectionString}){
  await assert.rejects(claim(db,v2,2),/BILL2_CALL_PENDING/);
  for(const patch of [{requestHash:'f'.repeat(64)},{providerId:'gen-conflict'},{cost:'0'},
   {transport:{httpStatus:500,complete:true}},{rawBody:'{"error":{"code":402}}'},
+  ...['cost','usage','output'].map(key=>({rawBody:JSON.stringify({user_id:'synthetic-user',[key]:0,
+   error:{code:402,message:'synthetic',metadata:{limit_source:'openrouter_key_limit',provider_name:null}}})})),
   {rawBody:JSON.stringify({error:{code:402,message:'synthetic',metadata:{limit_source:'other'}}})},
   {rawBody:JSON.stringify({id:'gen-conflict',error:{code:402,message:'synthetic',metadata:{limit_source:'openrouter_key_limit'}}})}]){
   const invalid=await fixture(db,'v2'),call=await claim(db,invalid),held=await balance(db,invalid);

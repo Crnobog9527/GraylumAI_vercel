@@ -5,9 +5,9 @@ import { parseExactJson } from './decimal';
 import { decodeOpenRouterStreamObservation } from './openRouterEvidence';
 import { unknownEvidence, type CallIdentity, type TransportObservation } from './fixtureAdapter';
 
-const rejection = z.object({error:z.object({code:z.literal(402),message:z.string(),metadata:z.object({
+const rejection = z.object({user_id:z.string().nullable().optional(),error:z.object({code:z.literal(402),message:z.string(),metadata:z.object({
   limit_source:z.enum(['openrouter_key_limit','openrouter_credits','openrouter_in_flight_budget']),
-  reason:z.string().optional(),remedy_hint:z.string().optional(),
+  reason:z.string().optional(),remedy_hint:z.string().optional(),provider_name:z.string().nullable().optional(),
 }).strict()}).strict()}).strict();
 
 /** Only the complete official POST refusal, never a lookup or an SSE error.

@@ -2074,7 +2074,7 @@
   "fn:bill2_private_input(uuid,uuid)": "213098910da3",
   "fn:bill2_public(bill2_runs)": "56429305d4e5",
   "fn:bill2_read(uuid,uuid)": "176d8fd845f7",
-  "fn:bill2_record(uuid,uuid,uuid,jsonb)": "2df23f91a273",
+  "fn:bill2_record(uuid,uuid,uuid,jsonb)": "5135a5051297",
   "fn:bill2_recovery_claim(uuid,uuid,uuid)": "2fe2d395ec29",
   "fn:bill2_revoke_draft(uuid,uuid)": "661ad1745bcd",
   "fn:bill2_revoke_unstarted_dispatch(uuid,uuid,uuid,uuid,text,boolean)": "e8d056e17c4d",

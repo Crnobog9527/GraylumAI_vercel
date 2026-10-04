@@ -7,7 +7,7 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 DO $$ BEGIN
- IF md5(pg_get_functiondef('public.bill2_record(uuid,uuid,uuid,jsonb)'::regprocedure)) NOT IN ('347c4ed918e43f9759cd040554fe091d','2df23f91a2732aa3644ff391760cf0b7') THEN
+ IF md5(pg_get_functiondef('public.bill2_record(uuid,uuid,uuid,jsonb)'::regprocedure)) NOT IN ('347c4ed918e43f9759cd040554fe091d','5135a50512977a2bd6df3ede3662e6e6') THEN
   RAISE EXCEPTION 'PROVIDER_REJECTION_SOURCE_MISMATCH: bill2_record(uuid,uuid,uuid,jsonb)';END IF;
  IF md5(pg_get_functiondef('public.bill2_payg_finalize(uuid,uuid)'::regprocedure)) NOT IN ('1625da8f6a13a74250f7c454e84319ea','9ddbd0ebb4d5972fe24fa4aab4ad61dd') THEN
   RAISE EXCEPTION 'PROVIDER_REJECTION_SOURCE_MISMATCH: bill2_payg_finalize(uuid,uuid)';END IF;
@@ -64,15 +64,17 @@ BEGIN
    OR EXISTS(SELECT 1 FROM bill2_receipts WHERE call_id=c.id)
   THEN RAISE EXCEPTION 'BILL2_REJECTION_PROOF_DENIED';END IF;
   rejection:=(p_evidence->>'rawBody')::jsonb;
-  IF rejection-ARRAY['error']<>'{}'::jsonb
+  IF rejection-ARRAY['error','user_id']<>'{}'::jsonb
+   OR (rejection ? 'user_id' AND jsonb_typeof(rejection->'user_id') NOT IN ('string','null'))
    OR jsonb_typeof(rejection->'error') IS DISTINCT FROM 'object'
    OR (rejection->'error')-ARRAY['code','message','metadata']<>'{}'::jsonb
    OR rejection#>'{error,code}' IS DISTINCT FROM '402'::jsonb
    OR jsonb_typeof(rejection#>'{error,message}') IS DISTINCT FROM 'string'
    OR jsonb_typeof(rejection#>'{error,metadata}') IS DISTINCT FROM 'object'
-   OR (rejection#>'{error,metadata}')-ARRAY['limit_source','reason','remedy_hint']<>'{}'::jsonb
+   OR (rejection#>'{error,metadata}')-ARRAY['limit_source','reason','remedy_hint','provider_name']<>'{}'::jsonb
    OR coalesce(rejection#>>'{error,metadata,limit_source}','') NOT IN
     ('openrouter_key_limit','openrouter_credits','openrouter_in_flight_budget')
+   OR (rejection#>'{error,metadata}' ? 'provider_name' AND jsonb_typeof(rejection#>'{error,metadata,provider_name}') NOT IN ('string','null'))
    OR (rejection#>'{error,metadata}' ? 'reason' AND jsonb_typeof(rejection#>'{error,metadata,reason}')<>'string')
    OR (rejection#>'{error,metadata}' ? 'remedy_hint' AND jsonb_typeof(rejection#>'{error,metadata,remedy_hint}')<>'string')
   THEN RAISE EXCEPTION 'BILL2_REJECTION_PROOF_DENIED';END IF;

@@ -36,3 +36,17 @@ it.each([
 ])('rejects bodies without exclusive no-generation evidence %#',body=>{
  expect(openRouterRejection(observation(body),identity,requestHash)).toBeNull();
 });
+
+// Structural replay of the audited incident; every value is synthetic.
+it('accepts audited harmless envelope fields without dropping financial guards',()=>{
+ const body={...error(),user_id:'synthetic-user',error:{...error().error,
+  metadata:{limit_source:'openrouter_key_limit',provider_name:null}}};
+ for(const stream of [false,true]){
+  expect(openRouterRejection(observation(body,stream),identity,requestHash)).toMatchObject({evidenceKind:'provider_rejection'});
+  expect(openRouterRejection({...observation(body,stream),generationId:'gen-synthetic'},identity,requestHash)).toBeNull();
+ }
+ for(const value of [{...body,cost:0},{...body,usage:{}},{...body,output:[]},
+  {...body,user_id:{usage:{cost:0}}},{...body,error:{...body.error,metadata:{...body.error.metadata,cost:0}}}]){
+  expect(openRouterRejection(observation(value),identity,requestHash)).toBeNull();
+ }
+});

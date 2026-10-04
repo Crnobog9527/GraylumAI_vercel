@@ -935,7 +935,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([false,true])(
 
 it.each(['rejected','timeout','5xx','started'] as const)('RUNTIME: provider refusal boundary %s preserves original execution',async(kind)=>{
  const f=await fixture('serial-tools-v4-stream',false);let sends=0;
- const error={error:{code:402,message:'Synthetic refusal',metadata:{limit_source:'openrouter_key_limit'}}};
+ const error={user_id:'synthetic-user',error:{code:402,message:'Synthetic refusal',
+  metadata:{limit_source:'openrouter_key_limit',provider_name:null}}};
  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
   if(init?.method==='GET')return new Response('{}',{status:503});
   sends++;
@@ -957,4 +958,37 @@ it.each(['rejected','timeout','5xx','started'] as const)('RUNTIME: provider refu
  expect(run.state).toBe(kind==='rejected'?'refunded':kind==='started'?'cost_pending':'unknown');
  if(kind==='rejected')expect(run).toMatchObject({charged:0,actual_restore:20});
  else expect(run.actual_restore).toBeNull();
+});
+
+
+it.each(['not-found','zero','positive','missing-cost','mismatched-id'] as const)(
+ 'RUNTIME: audited 402 with header identity needs independent cost evidence (%s)',async(kind)=>{
+ const f=await fixture('serial-tools-v4-stream',false),id='gen-synthetic-'+f.execution.executionId;
+ let posts=0,lookups=0;
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  if(init?.method==='GET'){
+   lookups++;
+   if(kind==='not-found')return new Response(JSON.stringify({error:{code:404,message:'Synthetic missing'}}),{status:404});
+   return new Response(JSON.stringify({data:{id:kind==='mismatched-id'?'gen-synthetic-other':id,
+    model:'synthetic/mentor',finish_reason:'stop',native_tokens_prompt:0,native_tokens_completion:0,
+    ...(kind==='missing-cost'?{}:{total_cost:kind==='positive'?0.003:0})}}));
+  }
+  posts++;
+  return new Response(JSON.stringify({user_id:'synthetic-user',error:{code:402,message:'Synthetic limit',
+   metadata:{limit_source:'openrouter_key_limit',provider_name:null}}}),
+   {status:402,headers:{'content-type':'application/json','x-generation-id':id}});
+ }});
+ const executor=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,callGate:allowTestCalls});
+ await executor.execute(f.execution.executionId);
+ await executor.cancel(f.execution.executionId);
+ const recovered=await executor.recoverFinancial(f.execution.executionId);
+ const confirmed=kind==='zero'||kind==='positive';
+ expect(recovered.state).toBe(confirmed?'cancelled':'cost_pending');
+ expect(posts).toBe(1);expect(lookups).toBeGreaterThan(0);
+ const run=(await db.query('select charged,actual_restore from bill2_runs where id=$1',[f.execution.runId])).rows[0];
+ expect(run.actual_restore).toBe(confirmed?(kind==='zero'?20:17):null);
+ const call=(await db.query('select provider_id,provider_rejected from bill2_calls where run_id=$1',[f.execution.runId])).rows[0];
+ expect(call).toMatchObject({provider_id:id,provider_rejected:false});
+ await executor.recoverFinancial(f.execution.executionId);
+ expect(posts).toBe(1);
 });
