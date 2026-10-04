@@ -449,11 +449,6 @@
       "count": 1
     }
   },
-  "src/services/costCalculator.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
   "src/services/creditBalance.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
@@ -559,11 +554,6 @@
     },
     "@typescript-eslint/no-unused-vars": {
       "count": 1
-    }
-  },
-  "src/services/streamHandler.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 4
     }
   },
   "src/services/stripe.ts": {
