@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { TRPCError } from '@trpc/server';
 import { createHash } from 'node:crypto';
 import {freezePromptCache,freezeHostPromptCache,PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 import {hostTurnContextSchema,freezeHistorySelection,type HostTurnContext} from './hostTurn';
@@ -84,6 +85,10 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
  async function query(name:string,args:Record<string,unknown>){
   const r=await admin.rpc(name,{...args,p_actor_id:await actor()});
   if(r.error)throwIfContentBindingRefused(r.error);
+  if(name==='runtime_admit'&&r.error&&['P0001','PT400'].includes(r.error.code)&&
+   (['400: insufficient credits','insufficient credits'].includes(r.error.message)||
+    /^积分不足: 需要 [0-9]+, 当前 [0-9]+$/.test(r.error.message)))
+   throw new TRPCError({code:'BAD_REQUEST',message:'BILL2_INSUFFICIENT_CREDITS'});
   if(r.error)throw new Error(name==='runtime_admit'&&r.error.message==='OPC_ANSWER_SOURCE_DENIED'
    ?'OPC_ANSWER_SOURCE_DENIED':'RUNTIME_ADMISSION_DENIED');
   return r.data;
