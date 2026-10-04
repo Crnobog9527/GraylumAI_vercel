@@ -41,7 +41,6 @@
     "src/services/__tests__/billing.security.test.ts",
     "src/services/__tests__/billing.test.ts",
     "src/services/__tests__/contentModerator.test.ts",
-    "src/services/__tests__/costCalculator.test.ts",
     "src/services/__tests__/diagnostics.test.ts",
     "src/services/__tests__/invitationColumnGrants.integration.ts",
     "src/services/__tests__/invitationRuntime.test.ts",
