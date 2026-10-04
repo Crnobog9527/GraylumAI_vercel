@@ -11,10 +11,10 @@ vi.mock('../redisRateLimiter', () => ({ checkRuntimeRateLimit: mock.redis }));
 vi.mock('./automaticRecovery', () => ({ runAutomaticFinancialRecovery: mock.recovery }));
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 function fixture() {
-  let replay: unknown = null;
+  let replay: {executionId?:string}|null = null;
   let config: unknown = defaults;
   let failure = false, hanging = false;
-  const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
+  const rpc = vi.fn(async (name: string, args: Record<string, unknown>): Promise<{data: {executionId?: string;payload?: unknown;scope?: unknown}|null;error: {code:string;message:string}|null}> => {
     if (name === 'runtime_session_context') return { data: { scope: { kind: 'positioning_draft', draftId: id(2) } }, error: null };
     if (name === 'runtime_admission_replay') return { data: replay, error: null };
     if (name === 'runtime_admit') return { data: { executionId: id(4), payload: args.p_payload }, error: null };
@@ -33,7 +33,7 @@ function fixture() {
     maxCalls: 3, maxOutputTokens: 1000, inputBytes: 32000, historyItems: 10 };
   const input = { sessionId: id(2), requestId: id(4), input: 'synthetic', selection: { kind: 'ordinary', modelId: id(3) }, network: 'deny' };
   return { rpc, read, input, policy, admin, user: user as unknown as SupabaseClient,
-    replay: (value: unknown) => { replay = value; }, config: (value: unknown) => { config = value; },
+    replay: (value: {executionId?:string}|null) => { replay = value; }, config: (value: unknown) => { config = value; },
     fail: () => { failure = true; }, hang: () => { hanging = true; } };
 }
 beforeEach(() => {
@@ -74,7 +74,7 @@ it('counts verified actor once, passes resolved card text, then admits unchanged
   expect(mock.redis).toHaveBeenCalledExactlyOnceWith(id(1), 'admission', defaults, 'local', 1);
   expect(moderation).toHaveBeenCalledExactlyOnceWith({ actorId: id(1), sessionId: id(2), requestId: id(4),
     text: 'resolved card text', opening: false });
-  expect(result.payload.input).toBe('resolved card text');
+  expect((result.payload as {input:string}).input).toBe('resolved card text');
   const args = f.rpc.mock.calls.find(([name]) => name === 'runtime_admit')![1];
   expect((args.p_billing as { input: unknown }).input).toEqual(args.p_payload);
   expect(timing.summary().phases.rateLimit).toBeDefined();
@@ -99,14 +99,46 @@ it.each(['block', 'throw'])('input moderation %s prevents execution and reservat
   expect(f.rpc.mock.calls.map(([name]) => name)).not.toContain('runtime_admit');
 });
 
-it('awaits only the authenticated actor recovery before the atomic admission balance check', async () => {
-  const f = fixture(); f.config(null);
-  let release!: () => void;
-  mock.recovery.mockImplementation(() => new Promise<void>(resolve => { release = resolve; }));
-  const prepare = runtimeAdmissionService(f.user, f.admin, f.policy).prepare(f.input);
-  await vi.waitFor(() => expect(mock.recovery).toHaveBeenCalledWith(f.admin, id(1)));
-  expect(f.rpc.mock.calls.some(([name]) => name === 'runtime_admit')).toBe(false);
-  release();
-  await prepare;
-  expect(f.rpc.mock.calls.some(([name]) => name === 'runtime_admit')).toBe(true);
+it('admits the normal path without any recovery inventory round trip', async () => {
+ const f=fixture();
+ await runtimeAdmissionService(f.user,f.admin,f.policy).prepare(f.input);
+ expect(mock.recovery).not.toHaveBeenCalled();
+ expect(f.rpc.mock.calls.map(([name])=>name)).not.toContain('runtime_pending_financial_batch');
+ expect(f.rpc.mock.calls.filter(([name])=>name==='runtime_admit')).toHaveLength(1);
+});
+
+it.each(['success','insufficient','unknown','committed'])('recovers once after insufficient credits then handles %s', async mode => {
+ const f=fixture(),original=f.rpc.getMockImplementation()!;let attempts=0;
+ f.rpc.mockImplementation(async(name,args)=>{
+  if(name==='runtime_admit'){
+   attempts++;
+   if(attempts===1||mode==='insufficient')return {data:null,error:{code:'P0001',message:'400: insufficient credits'}};
+   if(mode==='unknown'||mode==='committed'){
+    if(mode==='committed')f.replay({executionId:id(4)});
+    return {data:null,error:{code:'XX000',message:'synthetic ambiguous response'}};
+   }
+  }
+  return original(name,args);
+ });
+ let release!:()=>void;
+ mock.recovery.mockImplementation(()=>new Promise<void>(resolve=>{release=resolve;}));
+ const result=runtimeAdmissionService(f.user,f.admin,f.policy).prepare(f.input).then(value=>({value,error:null}),error=>({value:null,error}));
+ await vi.waitFor(()=>expect(mock.recovery).toHaveBeenCalledExactlyOnceWith(f.admin,id(1)));
+ expect(attempts).toBe(1);release();
+ const settled=await result;
+ expect(attempts).toBe(2);expect(mock.recovery).toHaveBeenCalledTimes(1);
+ const calls=f.rpc.mock.calls.filter(([name])=>name==='runtime_admit');
+ expect(calls[1][1]).toEqual(calls[0][1]);
+ expect(calls[1][1].p_request_id).toBe(f.input.requestId);
+ if(mode==='success'||mode==='committed')expect(settled.value).toMatchObject({executionId:id(4)});
+ else expect(settled.error).toMatchObject({message:mode==='insufficient'?'BILL2_INSUFFICIENT_CREDITS':'RUNTIME_ADMISSION_DENIED'});
+});
+
+it('never retries an ambiguous first admission or starts recovery for it', async () => {
+ const f=fixture(),original=f.rpc.getMockImplementation()!;
+ f.rpc.mockImplementation(async(name,args)=>name==='runtime_admit'
+  ?{data:null,error:{code:'XX000',message:'synthetic timeout'}}:original(name,args));
+ await expect(runtimeAdmissionService(f.user,f.admin,f.policy).prepare(f.input)).rejects.toThrow('RUNTIME_ADMISSION_DENIED');
+ expect(mock.recovery).not.toHaveBeenCalled();
+ expect(f.rpc.mock.calls.filter(([name])=>name==='runtime_admit')).toHaveLength(1);
 });

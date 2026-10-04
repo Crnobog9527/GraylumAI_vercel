@@ -1026,11 +1026,11 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    start:{prelude:2,policy:0,host:1},
-   ordinary:{prelude:2,policy:0,host:0,admission:7,rateLimit:0},
+   ordinary:{prelude:2,policy:0,host:0,admission:6,rateLimit:0},
    stream:{prelude:2,policy:0,host:0,execute:6,provider:5,rateLimit:0},
-   skill:{prelude:2,policy:0,host:0,admission:14,rateLimit:0},
+   skill:{prelude:2,policy:0,host:0,admission:13,rateLimit:0},
    execute:{prelude:2,policy:0,host:0,execute:6,provider:5,rateLimit:0},
-   skillWarm:{prelude:2,policy:0,host:0,admission:12,rateLimit:0},
+   skillWarm:{prelude:2,policy:0,host:0,admission:11,rateLimit:0},
   });
   // AC-0c: Auth verifies once per invocation and credential, plus once again
   // after the provider response (AC-0 baseline was 2/6/9/12/9).
@@ -1159,13 +1159,13 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    // Attached organizers now skip one Session history read in each invocation.
    // The first prepare of this new package misses the Skill file cache (AC-0c).
-   oldPrepareOpening:{prelude:2,policy:0,host:6,admission:17,rateLimit:0},
+   oldPrepareOpening:{prelude:2,policy:0,host:6,admission:16,rateLimit:0},
    oldStreamOpening:{prelude:2,policy:0,host:1,execute:6,provider:13,rateLimit:0},
-   oldPrepareAnswer:{prelude:2,policy:0,host:6,admission:13,rateLimit:0},
+   oldPrepareAnswer:{prelude:2,policy:0,host:6,admission:12,rateLimit:0},
    oldStreamAnswer:{prelude:2,policy:0,host:1,execute:6,provider:13,rateLimit:0},
    // One invocation: one prelude instead of two; admission and execution unchanged.
-   opening:{prelude:2,policy:0,host:7,admission:13,execute:6,provider:13,rateLimit:0},
-   answer:{prelude:2,policy:0,host:7,admission:13,execute:6,provider:13,rateLimit:0},
+   opening:{prelude:2,policy:0,host:7,admission:12,execute:6,provider:13,rateLimit:0},
+   answer:{prelude:2,policy:0,host:7,admission:12,execute:6,provider:13,rateLimit:0},
   });
   // Empty backlog: exactly one pre-admission RPC and one completion capture RPC.
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
@@ -2418,4 +2418,43 @@ it('RUNTIME: automatic recovery finishes a durable cost receipt after the origin
  expect(await recoverPendingFinancials({database:admin,actorId:f.actorId,budget:erasureFinancialBudget(8_000),
   adapter:()=>({dispatch:denied,lookup:denied})})).toMatchObject({selected:1,settled:1,failed:0});
  expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(97);
+});
+
+
+it('RUNTIME: insufficient credits recovers an old hold then admits the same request exactly once',async()=>{
+ const f=await fixture();
+ const oldBilling={...f.billing,callPolicy:[{...f.billing.callPolicy[0],upperUsd:'0.1'}],
+  limits:{...f.billing.limits,costUsd:'0.1',credits:100,maxPreDeduct:100}};
+ const old=await rpc('runtime_admit',{...f.admit,p_billing:oldBilling});
+ const call={...oldBilling.callPolicy[0],protocol:'fixture-cost-v1' as const,phase:'ordinary',requestHash:'d'.repeat(64)};
+ const c=await rpc('bill2_claim',{p_actor_id:f.actorId,p_run_id:old.runId,p_sequence:1,p_payload:call});
+ await rpc('bill2_dispatch',{p_actor_id:f.actorId,p_run_id:old.runId,p_call_id:c.id,p_token:c.dispatchToken});
+ await rpc('runtime_cancel',{p_actor_id:f.actorId,p_execution_id:old.executionId});
+ const {fixtureEvidence}=await import('../bill2/fixtureAdapter');
+ await rpc('bill2_record',{p_actor_id:f.actorId,p_run_id:old.runId,p_call_id:c.id,
+  p_evidence:fixtureEvidence(JSON.stringify({id:'synthetic-admission-'+c.id,model:'runtime-m',final:true,
+   cost:'0',currency:'USD',coverage:'request_total'}),call,'lookup')});
+ expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(0);
+ const events:string[]=[];const admits:Record<string,unknown>[]=[];
+ const database=new Proxy(admin,{get(target,key){
+  if(key==='rpc')return (name:string,args:Record<string,unknown>)=>{
+   events.push(name);if(name==='runtime_admit')admits.push(args);
+   return target.rpc(name,args);
+  };
+  const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value;
+ }});
+ const user={auth:{getUser:async()=>({data:{user:{id:f.actorId,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
+ const service=runtimeAdmissionService(user,database,{account:'sandbox',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',
+  maxCalls:1,maxOutputTokens:1000,inputBytes:10000,historyItems:0});
+ const request={sessionId:f.s.sessionId,requestId:randomUUID(),input:'synthetic retry',selection:{kind:'ordinary',modelId},network:'deny'};
+ const admitted=await service.prepare(request);
+ expect(admits).toHaveLength(2);expect(admits[1]).toEqual(admits[0]);
+ expect(events.indexOf('runtime_pending_financial_batch')).toBeGreaterThan(events.indexOf('runtime_admit'));
+ expect(events.filter(name=>name==='runtime_pending_financial_batch')).toHaveLength(1);
+ expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(80);
+ expect((await db.query('select id from runtime_executions where actor_id=$1 and request_id=$2',[f.actorId,request.requestId])).rows)
+  .toEqual([{id:admitted.executionId}]);
+ expect((await db.query("select count(*)::int n from credit_transactions where bill2_run_id=$1 and reason_code='bill2_reserve'",[admitted.runId])).rows[0].n).toBe(1);
+ expect((await service.prepare(request)).executionId).toBe(admitted.executionId);
+ expect(admits).toHaveLength(2);
 });
