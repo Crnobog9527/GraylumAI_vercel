@@ -26,3 +26,13 @@ it.each([{ data: { total_cost: 0 } }, { data: { finish_reason: 'stop' } }, { usa
   '{"error":{"code":404,"code":404,"message":"synthetic"}}'])('does not count records or unrecognized bodies %j', body => {
   expect(openRouterNotFound(observation(body), identity)).toBeNull();
 });
+
+it.each([undefined, null])('accepts a matched official record with no total cost (%s)', total_cost => {
+ const obs={...observation({data:{id:'gen-synthetic',model:identity.model,finish_reason:'stop',total_cost}}),httpStatus:200};
+ expect(openRouterNotFound(obs,identity,'gen-synthetic')).toMatchObject({lookupOutcome:'no_cost',providerId:'gen-synthetic'});
+});
+it.each([{total_cost:0},{total_cost:0.003},{total_cost:'invalid'},{usage:{}},{output:'text'},
+ {native_tokens_completion:1},{id:'gen-other'},{model:'other/model'},{unrecognized:1}])('does not forgive other evidence %j', patch => {
+ const obs={...observation({data:{id:'gen-synthetic',model:identity.model,...patch}}),httpStatus:200};
+ expect(openRouterNotFound(obs,identity,'gen-synthetic')).toBeNull();
+});

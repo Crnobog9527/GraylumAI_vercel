@@ -62,7 +62,7 @@ export type AuthReuse=ReturnType<typeof createAuthReuse>;
 export function expiringAuthAfterProvider<T extends BillingTransport>(adapter:T,auth:AuthReuse|undefined):T{
  if(!auth)return adapter;
  const after=<R>(pending:Promise<R>)=>pending.finally(()=>auth.expire());
- return {...adapter,dispatch:(body,identity)=>after(adapter.dispatch(body,identity)),lookup:(id,identity)=>after(adapter.lookup(id,identity))};
+ return {...adapter,dispatch:(body,identity)=>after(adapter.dispatch(body,identity)),lookup:(id,identity,options)=>after(adapter.lookup(id,identity,options))};
 }
 function replay(verdict:Verdict){
  return new Response(verdict.body,{status:verdict.status,statusText:verdict.statusText,headers:verdict.headers});

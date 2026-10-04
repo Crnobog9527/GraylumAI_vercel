@@ -61,7 +61,7 @@ export interface BillingTransport {
   * encloses the exact validated request and credential for one send. */
  prepareDispatch?(body:unknown,identity:CallIdentity,onChunk?:(chunk:string)=>void,onIdentity?:(id:string)=>void):Promise<()=>Promise<TransportObservation>>;
  dispatch(body:unknown, identity:CallIdentity):Promise<TransportObservation>;
- lookup(providerId:string, identity:CallIdentity):Promise<TransportObservation>;
+ lookup(providerId:string, identity:CallIdentity, options?:{timeoutMs?:number}):Promise<TransportObservation>;
 }
 function providerEvidence(observation:TransportObservation,identity:CallIdentity,source:'response'|'lookup',expectedProviderId?:string){
  if(identity.protocol==='openrouter-chat-v1') {
@@ -131,22 +131,32 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
     }
     return state;
   }
-  async function recoverReceipts(runId: string) {
+  async function recoverReceipts(runId: string, options: {timeoutMs?:number;callId?:string;immediate?:boolean} = {}) {
       const calls = await rpc<string[]>('bill2_pending_calls', { p_run_id: uuid.parse(runId) });
-      for (const callId of calls.slice(0, 32)) {
-        try{deps.budget?.assertCanStart(OPENROUTER_LOOKUP_TIMEOUT_MS);}catch{break;} // Do not spend a recovery claim when no lookup fits.
+      for (const callId of calls.filter(id => !options.callId || id === options.callId).slice(0, 32)) {
+        try{deps.budget?.assertCanStart(options.timeoutMs ?? OPENROUTER_LOOKUP_TIMEOUT_MS);}catch{break;} // Do not spend a recovery claim when no lookup fits.
         const identity = await rpc<(CallIdentity & { providerId: string; rejectionRecovery?: RejectionRecovery }) | null>(
           'bill2_recovery_claim', { p_run_id: runId, p_call_id: callId });
         if (!identity) continue;
         let evidence;
+        const queryTimes: string[] = [];
+        const queryOutcomes: string[] = [];
         try {
-          const observation = await deps.adapter.lookup(identity.providerId, identity);
-          evidence = (identity.rejectionRecovery ? openRouterNotFound(observation, identity) : null)
-            ?? providerEvidence(observation, identity, 'lookup', identity.providerId);
+          for (let attempt = 0; attempt < (options.immediate ? 2 : 1); attempt++) {
+            queryTimes.push(new Date().toISOString());
+            queryOutcomes.push('other');
+            const observation = await deps.adapter.lookup(identity.providerId, identity, {timeoutMs: options.timeoutMs});
+            const absent = identity.rejectionRecovery ? openRouterNotFound(observation, identity, identity.providerId) : null;
+            queryOutcomes[attempt] = absent?.lookupOutcome ?? 'other';
+            evidence = absent ?? providerEvidence(observation, identity, 'lookup', identity.providerId);
+            if (!absent || !options.immediate || attempt === 1) break;
+            await new Promise(resolve => setTimeout(resolve, 250));
+          }
         } catch {
           if (!identity.rejectionRecovery) continue;
           evidence = { ...unknownEvidence(identity), source: 'lookup', evidenceKind: 'transport_observation' };
         }
+        if (identity.rejectionRecovery) Object.assign(identity.rejectionRecovery, {queryCount: queryTimes.length, queryTimes, queryOutcomes});
         // SQL owns claim identity/time and keeps only a financial projection for this path.
         await recordReceipt(runId, callId, { ...evidence, expectedProviderId: identity.providerId,
           ...(identity.rejectionRecovery ? { rejectionRecovery: identity.rejectionRecovery } : {}) });
@@ -242,6 +252,10 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       try {
         const saved = await recordReceipt(capability.runId, callId, evidence);
         if (saved.accountClosed) return { dispatched: true, accountClosed: true as const };
+        if ('evidenceKind' in evidence && evidence.evidenceKind === 'provider_rejection_pending') {
+          // Only this strict refusal gets a bounded immediate lookup; never retry generation.
+          await recoverReceipts(capability.runId, {callId, timeoutMs: 1_500, immediate: true});
+        }
       }
       catch { return { dispatched: true,
         providerRejected: 'evidenceKind' in evidence &&

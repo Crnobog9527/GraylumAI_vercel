@@ -962,7 +962,7 @@ it.each(['rejected','timeout','5xx','started'] as const)('RUNTIME: provider refu
 
 
 it.each(['not-found','zero','positive','missing-cost','mismatched-id'] as const)(
- 'RUNTIME: audited 402 with header identity needs independent cost evidence (%s)',async(kind)=>{
+ 'RUNTIME: strict 402 with header identity is queried immediately (%s)',async(kind)=>{
  const f=await fixture('serial-tools-v4-stream',false),id='gen-synthetic-'+f.execution.executionId;
  let posts=0,lookups=0;
  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
@@ -982,19 +982,19 @@ it.each(['not-found','zero','positive','missing-cost','mismatched-id'] as const)
  await executor.execute(f.execution.executionId);
  await executor.cancel(f.execution.executionId);
  const recovered=await executor.recoverFinancial(f.execution.executionId);
- const confirmed=kind==='zero'||kind==='positive';
+ const confirmed=kind!=='mismatched-id';
  expect(recovered.state).toBe(confirmed?'cancelled':'cost_pending');
  expect(posts).toBe(1);expect(lookups).toBeGreaterThan(0);
  const run=(await db.query('select charged,actual_restore from bill2_runs where id=$1',[f.execution.runId])).rows[0];
- expect(run.actual_restore).toBe(confirmed?(kind==='zero'?20:17):null);
+ expect(run.actual_restore).toBe(confirmed?(kind==='positive'?17:20):null);
  const call=(await db.query('select provider_id,provider_rejected from bill2_calls where run_id=$1',[f.execution.runId])).rows[0];
- expect(call).toMatchObject({provider_id:id,provider_rejected:false});
+ expect(call).toMatchObject({provider_id:id,provider_rejected:kind==='not-found'||kind==='missing-cost'});
  await executor.recoverFinancial(f.execution.executionId);
  expect(posts).toBe(1);
 });
 
 it.each(['missing','cost','terminal-no-cost','nonterminal-cost','timeout','5xx'] as const)(
- 'RUNTIME: strict 402 needs three distinct spaced 404 queries (%s)',async(kind)=>{
+ 'RUNTIME: strict 402 uses two immediate bounded queries (%s)',async(kind)=>{
  const f=await fixture('serial-tools-v4-stream',false),id='gen-synthetic-'+f.execution.executionId;
  let posts=0,lookups=0;
  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
@@ -1017,26 +1017,19 @@ it.each(['missing','cost','terminal-no-cost','nonterminal-cost','timeout','5xx']
  }});
  const executor=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,callGate:allowTestCalls});
  await executor.execute(f.execution.executionId);
- for(let i=1;i<=3;i++){
-  if(i>1){
-   const before=lookups;await executor.recoverFinancial(f.execution.executionId);
-   expect(lookups).toBe(before); // SQL denies early attempts; callers cannot bypass spacing.
-   await db.query("update bill2_calls set rejection_recovery_at=clock_timestamp()-interval '5 minutes' where run_id=$1",[f.execution.runId]);
-  }
-  await executor.recoverFinancial(f.execution.executionId);
-  if(kind==='cost'&&i===2)break;
- }
  const state=(await db.query('select provider_rejected,recovery_attempts from bill2_calls where run_id=$1',[f.execution.runId])).rows[0];
- expect(state.provider_rejected).toBe(kind==='missing');
- expect(state.recovery_attempts).toBe(kind==='cost'?2:3);
- expect(lookups).toBe(kind==='cost'?2:3);expect(posts).toBe(1);
+ expect(state.provider_rejected).toBe(kind==='missing'||kind==='terminal-no-cost');
+ expect(state.recovery_attempts).toBe(1);
+ expect(lookups).toBe(2);expect(posts).toBe(1);
  const run=(await db.query('select charged,actual_restore from bill2_runs where id=$1',[f.execution.runId])).rows[0];
- expect(run.actual_restore).toBe(kind==='missing'?20:kind==='cost'?17:null);
+ expect(run.actual_restore).toBe(['missing','terminal-no-cost'].includes(kind)?20:kind==='cost'?17:null);
  const receipts=(await db.query('select r.payload from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1',[f.execution.runId])).rows;
  expect(JSON.stringify(receipts)).not.toMatch(/SYNTHETIC_PRIVATE|rawBody|"transport"/);
  const audits=receipts.map(r=>r.payload.rejectionRecovery).filter(Boolean);
- expect(audits.filter(a=>a.notFound).length).toBe(kind==='missing'?3:kind==='cost'?1:2);
+ expect(audits).toHaveLength(1);
+ expect(audits[0].queryCount).toBe(2);
+ expect(audits[0].queryTimes).toHaveLength(2);
  for(const audit of audits){expect(audit.claimedAt).toBeTruthy();expect(audit.observedAt).toBeTruthy();}
  await executor.recoverFinancial(f.execution.executionId);
- expect(lookups).toBe(kind==='cost'?2:3);expect(posts).toBe(1);
+ expect(lookups).toBe(2);expect(posts).toBe(1);
 });

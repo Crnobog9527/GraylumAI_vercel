@@ -210,11 +210,16 @@ it('BILL2: lost dispatch commit response never sends HTTP or permits redispatch'
  await expect(s.dispatchOnce(c.id,'hello')).rejects.toThrow('UNAVAILABLE');expect((await db.query('select state from bill2_calls where id=$1',[c.id])).rows[0].state).toBe('dispatched');
  expect(await s.dispatchOnce(c.id,'hello')).toEqual({dispatched:false});expect(await s.rotatePrepared(r.id,c.id,frozenCall())).toBe(false);await s.recoverRun(r.id);expect(providerCount).toBe(before);expect((await conservation(f.actor)).credits).toBe(80);
 });
-it('BILL2: recovery only uses a captured provider ID and is bounded to three requests',async()=>{
+it('BILL2: recovery uses a captured provider ID with a shared minute lease',async()=>{
  const f=await fixture(),r=await f.prepare(),id=await call(f.actor,r.id),s=authoritativeBilling({admin,actor:async()=>f.actor,adapter:localFixtureAdapter(endpoint)});
  const before=lookupCount;await s.recoverRun(r.id);expect(lookupCount).toBe(before);await receipt(f.actor,r.id,id,null);
  raw='{"id":"generation-'+id+'","model":"m","final":false,"cost":null,"currency":"USD","coverage":"request_total"}';
- for(let i=0;i<5;i++)await s.recoverRun(r.id);expect(lookupCount-before).toBe(3);expect((await conservation(f.actor)).credits).toBe(80);
+ for(let i=0;i<5;i++)await s.recoverRun(r.id);expect(lookupCount-before).toBe(1);
+ for(let i=0;i<4;i++){
+  await db.query("update bill2_calls set rejection_recovery_at=clock_timestamp()-interval '61 seconds' where id=$1",[id]);
+  await s.recoverRun(r.id);
+ }
+ expect(lookupCount-before).toBe(5);expect((await conservation(f.actor)).credits).toBe(80);
 });
 it('BILL2: existing readiness audit sees coherent new holds and terminal ledger rows',async()=>{
  for(const finish of [false,true]){const f=await fixture(),r=await f.prepare();if(finish){const id=await call(f.actor,r.id);await receipt(f.actor,r.id,id);await close(f.actor,r.id);await sqlRpc('bill2_finalize',[f.actor,r.id]);}
@@ -398,6 +403,7 @@ it.each(['with_id','no_id','invalid','oversize','binary'])('BILL2: error transpo
   // Failed lookup lacking ID or carrying diagnostic final cost cannot invalidate a later trustworthy receipt.
   raw='{"error":"PRIVATE_HTTP_ERROR"}';httpStatus=503;try{await s.recoverRun(r.id);}finally{httpStatus=200;}
   expect((await s.readRun(r.id)).conflict).toBe(false);expect(await conservation(f.actor)).toMatchObject({credits:80,terminals:0});
+  await db.query("update bill2_calls set rejection_recovery_at=clock_timestamp()-interval '61 seconds' where run_id=$1",[r.id]);
   raw=JSON.stringify({id,model:'m',final:true,cost:0.007,currency:'USD',coverage:'request_total'});await s.recoverRun(r.id);expect((await s.readRun(r.id)).chargedCredits).toBeNull(); // cost alone does not prove delivery
   await s.closeRun(r.id,'delivered',result());await s.finalizeRun(r.id);await s.recoverRun(r.id);expect(await conservation(f.actor)).toMatchObject({credits:93,terminals:1,spend:7});expect(lookupCount-lookups).toBe(2);
  }else{await s.recoverRun(r.id);expect(lookupCount).toBe(lookups);expect(await conservation(f.actor)).toMatchObject({credits:80,terminals:0});}

@@ -435,7 +435,11 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     // The original grant was atomically revoked and BILL2 finalized. Reuse
     // normal cancellation to synchronize this execution and release Session.
     const stopped=await rpc<{state:'cancelled'|'completed'|'cost_pending'}>('runtime_cancel',args).catch(()=>null);
-    if(stopped)return {state:stopped.state};
+    if(stopped){
+     const billingState=providerRejected?await billing.readRun(execution.runId).catch(()=>null):null;
+     const noCharge=billingState?.chargedCredits===0&&['refunded','settled'].includes(billingState.state);
+     return {state:stopped.state,...(noCharge?{unavailable:'provider_rejected' as const}:{})};
+    }
    }
    // A replay has no authority to cancel or interrupt the still-live owner.
    // It may observe an unfinished response, but must leave shared state alone.

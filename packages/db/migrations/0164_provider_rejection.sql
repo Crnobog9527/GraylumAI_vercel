@@ -7,13 +7,13 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 DO $$ BEGIN
- IF md5(pg_get_functiondef('public.bill2_record(uuid,uuid,uuid,jsonb)'::regprocedure)) NOT IN ('347c4ed918e43f9759cd040554fe091d','af7fa58b9000837c03e3e59e52ff3707') THEN
+ IF md5(pg_get_functiondef('public.bill2_record(uuid,uuid,uuid,jsonb)'::regprocedure)) NOT IN ('347c4ed918e43f9759cd040554fe091d','9646b0198f31b1d64e75e956e47e5f32') THEN
   RAISE EXCEPTION 'PROVIDER_REJECTION_SOURCE_MISMATCH: bill2_record(uuid,uuid,uuid,jsonb)';END IF;
  IF md5(pg_get_functiondef('public.bill2_payg_finalize(uuid,uuid)'::regprocedure)) NOT IN ('1625da8f6a13a74250f7c454e84319ea','9ddbd0ebb4d5972fe24fa4aab4ad61dd') THEN
   RAISE EXCEPTION 'PROVIDER_REJECTION_SOURCE_MISMATCH: bill2_payg_finalize(uuid,uuid)';END IF;
  IF md5(pg_get_functiondef('public.bill2_finalize(uuid,uuid)'::regprocedure)) NOT IN ('4b188addd7ab9ab612d11f76ac6f82c2','5d31cead022196a89aed8e3d4d11458b') THEN
   RAISE EXCEPTION 'PROVIDER_REJECTION_SOURCE_MISMATCH: bill2_finalize(uuid,uuid)';END IF;
- IF md5(pg_get_functiondef('public.bill2_recovery_claim(uuid,uuid,uuid)'::regprocedure)) NOT IN ('2fe2d395ec29da937121faf957245f4c','7319df76a4ea58cb5584ee313817a74e') THEN
+ IF md5(pg_get_functiondef('public.bill2_recovery_claim(uuid,uuid,uuid)'::regprocedure)) NOT IN ('2fe2d395ec29da937121faf957245f4c','f32d401cae96f9a2758c7d5345375d5b') THEN
   RAISE EXCEPTION 'PROVIDER_REJECTION_SOURCE_MISMATCH: bill2_recovery_claim(uuid,uuid,uuid)';END IF;
 END $$;
 ALTER TABLE public.bill2_calls ADD COLUMN IF NOT EXISTS provider_rejected boolean NOT NULL DEFAULT false;
@@ -25,7 +25,7 @@ CREATE OR REPLACE FUNCTION public.bill2_record(p_actor_id uuid, p_run_id uuid, p
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE r bill2_runs;c bill2_calls;other_id uuid;h text;raw_cost numeric;cost numeric;bad boolean:=false;prior jsonb;currency text;piece jsonb;parts numeric:=0;detail_total numeric;total_observation jsonb;erasing boolean;projection_hash text;rejection jsonb;pending_rejection boolean;lookup_audit jsonb;missing_count integer;
+DECLARE r bill2_runs;c bill2_calls;other_id uuid;h text;raw_cost numeric;cost numeric;bad boolean:=false;prior jsonb;currency text;piece jsonb;parts numeric:=0;detail_total numeric;total_observation jsonb;erasing boolean;projection_hash text;rejection jsonb;pending_rejection boolean;lookup_audit jsonb;missing_count integer;query_times jsonb;query_outcomes jsonb;query_missing integer;query_count integer;query_time timestamptz;previous_query timestamptz;
 BEGIN
  SELECT * INTO r FROM bill2_runs WHERE id=p_run_id AND actor_id=p_actor_id FOR UPDATE;
  PERFORM bill2_payg_lock_models(r);
@@ -57,21 +57,44 @@ BEGIN
    OR EXISTS(SELECT 1 FROM bill2_receipts WHERE call_id=c.id
      AND payload#>'{rejectionRecovery,attempt}'=to_jsonb(c.recovery_attempts))
   THEN RAISE EXCEPTION 'BILL2_REJECTION_LOOKUP_DENIED';END IF;
-  SELECT count(DISTINCT payload#>>'{rejectionRecovery,attempt}') INTO missing_count
-   FROM bill2_receipts WHERE call_id=c.id AND NOT conflict
-    AND payload->>'evidenceKind'='provider_rejection_lookup';
-  lookup_audit:=jsonb_build_object('notFoundCount',missing_count+
-   CASE WHEN p_evidence->>'evidenceKind'='provider_rejection_lookup' THEN 1 ELSE 0 END,
+  SELECT coalesce(max((payload#>>'{rejectionRecovery,notFoundCount}')::int),0) INTO missing_count
+   FROM bill2_receipts WHERE call_id=c.id AND NOT conflict;
+  query_times:=coalesce(p_evidence#>'{rejectionRecovery,queryTimes}',jsonb_build_array(clock_timestamp()));
+  IF jsonb_typeof(query_times)<>'array' OR jsonb_array_length(query_times) NOT BETWEEN 1 AND 2
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements(query_times) v WHERE jsonb_typeof(v)<>'string')
+   OR (p_evidence#>'{rejectionRecovery,queryCount}' IS NOT NULL AND
+    p_evidence#>'{rejectionRecovery,queryCount}' IS DISTINCT FROM to_jsonb(jsonb_array_length(query_times)))
+  THEN RAISE EXCEPTION 'BILL2_REJECTION_LOOKUP_DENIED';END IF;
+  query_count:=jsonb_array_length(query_times);
+  query_outcomes:=coalesce(p_evidence#>'{rejectionRecovery,queryOutcomes}',
+   jsonb_build_array(coalesce(p_evidence->>'lookupOutcome','other')));
+  IF jsonb_typeof(query_outcomes)<>'array' OR jsonb_array_length(query_outcomes)<>query_count
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements(query_outcomes) v
+    WHERE jsonb_typeof(v)<>'string' OR v#>>'{}' NOT IN ('not_found','no_cost','other'))
+   OR query_outcomes->>-1 IS DISTINCT FROM coalesce(p_evidence->>'lookupOutcome','other')
+  THEN RAISE EXCEPTION 'BILL2_REJECTION_LOOKUP_DENIED';END IF;
+  SELECT count(*) INTO query_missing FROM jsonb_array_elements_text(query_outcomes) v WHERE v='not_found';
+  previous_query:=c.rejection_recovery_at-interval '1 second';
+  FOR query_time IN SELECT value::timestamptz FROM jsonb_array_elements_text(query_times) LOOP
+   IF query_time<previous_query OR query_time>clock_timestamp()+interval '1 second'
+    OR query_time>c.rejection_recovery_at+interval '55 seconds'
+   THEN RAISE EXCEPTION 'BILL2_REJECTION_LOOKUP_DENIED';END IF;
+   previous_query:=query_time;
+  END LOOP;
+  lookup_audit:=jsonb_build_object('notFoundCount',missing_count+query_missing,
    'attempt',c.recovery_attempts,'claimedAt',c.rejection_recovery_at,
-   'observedAt',clock_timestamp(),'notFound',coalesce(p_evidence->>'evidenceKind'='provider_rejection_lookup',false),
+   'observedAt',clock_timestamp(),'notFound',coalesce(p_evidence->>'lookupOutcome'='not_found',false),
+   'lookupOutcome',p_evidence->>'lookupOutcome','queryCount',query_count,'queryTimes',query_times,'queryOutcomes',query_outcomes,
    'httpStatus',CASE WHEN p_evidence#>>'{transport,httpStatus}' ~ '^[1-5][0-9]{2}$'
     THEN (p_evidence#>>'{transport,httpStatus}')::integer END);
   IF p_evidence->>'evidenceKind'='provider_rejection_lookup' THEN
-   IF p_evidence#>'{transport,httpStatus}' IS DISTINCT FROM '404'::jsonb
+   IF NOT coalesce((p_evidence->>'lookupOutcome'='not_found'
+     AND p_evidence#>'{transport,httpStatus}'='404'::jsonb AND p_evidence->>'providerId' IS NULL)
+    OR (p_evidence->>'lookupOutcome'='no_cost' AND p_evidence#>'{transport,httpStatus}'='200'::jsonb
+     AND p_evidence->>'providerId'=c.provider_id),false)
     OR p_evidence#>'{transport,complete}' IS DISTINCT FROM 'true'::jsonb
     OR p_evidence#>>'{transport,transportIssue}' IS NOT NULL
     OR p_evidence->>'cost' IS NOT NULL OR p_evidence->'final' IS DISTINCT FROM 'false'::jsonb
-    OR p_evidence->>'providerId' IS NOT NULL
     OR p_evidence->'usage' IS NOT NULL AND p_evidence->'usage'<>'null'::jsonb
    THEN RAISE EXCEPTION 'BILL2_REJECTION_LOOKUP_DENIED';END IF;
    p_evidence:=bill2_financial_projection(p_evidence-'evidenceKind')||jsonb_build_object(
@@ -80,17 +103,13 @@ BEGIN
    INSERT INTO bill2_receipts(call_id,payload,payload_hash,conflict,financial_projection_hash,
     financial_projection_version,financial_projected_at)
    VALUES(c.id,p_evidence,h,false,projection_hash,1,clock_timestamp());
-   SELECT count(DISTINCT payload#>>'{rejectionRecovery,attempt}') INTO missing_count
-    FROM bill2_receipts WHERE call_id=c.id AND NOT conflict
-     AND payload->>'evidenceKind'='provider_rejection_lookup'
-     AND payload#>'{rejectionRecovery,notFound}'='true'::jsonb;
-   IF missing_count=3 AND c.recovery_attempts=3 AND c.selected_cost_usd IS NULL
+   IF c.selected_cost_usd IS NULL
     AND NOT c.provider_rejected AND NOT r.conflict AND r.state NOT IN ('settled','refunded')
     AND r.outcome IS DISTINCT FROM 'delivered'
     AND NOT EXISTS(SELECT 1 FROM bill2_receipts WHERE call_id=c.id AND
      (conflict OR payload->>'cost' IS NOT NULL OR payload->'final'='true'::jsonb
       OR payload->'usage' IS NOT NULL AND payload->'usage'<>'null'::jsonb
-      OR (payload->>'source'='lookup' AND payload->>'evidenceKind' IS DISTINCT FROM 'provider_rejection_lookup'))) THEN
+)) THEN
     UPDATE bill2_calls SET provider_rejected=true,selected_cost_usd=0,state='responded' WHERE id=c.id;
     PERFORM bill2_cancel(p_actor_id,r.id);
     PERFORM bill2_finalize(p_actor_id,r.id);
@@ -99,7 +118,9 @@ BEGIN
    RETURN bill2_erasure_view(r,erasing);
   END IF;
   -- Any other result uses ordinary cost/conflict handling. Its claim cannot also count as 404.
-  p_evidence:=bill2_financial_projection(p_evidence)||jsonb_build_object('rejectionRecovery',lookup_audit);
+  p_evidence:=bill2_financial_projection(p_evidence)||jsonb_build_object('rejectionRecovery',lookup_audit)
+   ||CASE WHEN p_evidence->'usage' IS NULL OR p_evidence->'usage'='null'::jsonb
+    THEN jsonb_build_object('usage',NULL) ELSE '{}'::jsonb END;
   projection_hash:=encode(sha256(convert_to(p_evidence::text,'utf8')),'hex');
  ELSIF p_evidence->>'evidenceKind'='provider_rejection_lookup' THEN
   RAISE EXCEPTION 'BILL2_REJECTION_LOOKUP_DENIED';
@@ -185,7 +206,9 @@ BEGIN
   -- Keep the conflict fact, never an arbitrary mismatching model string.
   IF p_evidence->>'model' IS DISTINCT FROM c.model THEN p_evidence:=jsonb_set(p_evidence,'{model}','null'::jsonb);END IF;
   p_evidence:=bill2_financial_projection(p_evidence)||CASE WHEN lookup_audit IS NULL THEN '{}'::jsonb
-   ELSE jsonb_build_object('rejectionRecovery',lookup_audit) END;
+   ELSE jsonb_build_object('rejectionRecovery',lookup_audit) END
+   ||CASE WHEN lookup_audit IS NOT NULL AND (p_evidence->'usage' IS NULL OR p_evidence->'usage'='null'::jsonb)
+    THEN jsonb_build_object('usage',NULL) ELSE '{}'::jsonb END;
   projection_hash:=encode(sha256(convert_to(p_evidence::text,'utf8')),'hex');
  END IF;
  IF p_evidence->>'providerId' IS NOT NULL THEN
@@ -460,15 +483,15 @@ BEGIN
  SELECT * INTO r FROM bill2_runs WHERE id=p_run_id AND actor_id=p_actor_id FOR UPDATE;
  IF r.id IS NULL THEN RAISE EXCEPTION 'BILL2_RUN_DENIED' USING ERRCODE='42501';END IF;
  SELECT * INTO c FROM bill2_calls WHERE id=p_call_id AND run_id=r.id FOR UPDATE;
- IF c.id IS NULL OR c.dispatched_at IS NULL OR c.provider_id IS NULL OR (c.selected_cost_usd IS NOT NULL AND (r.contract_version='bill2.v1' OR c.settled_at IS NOT NULL)) OR c.recovery_attempts>=3
+ IF c.id IS NULL OR c.dispatched_at IS NULL OR c.provider_id IS NULL OR (c.selected_cost_usd IS NOT NULL AND (r.contract_version='bill2.v1' OR c.settled_at IS NOT NULL))
  OR clock_timestamp()>(CASE WHEN r.contract_version='bill2.v2' THEN c.created_at+interval '24 hours' ELSE r.deadline+interval '24 hours' END) OR c.payload->>'lookupSupported' IS DISTINCT FROM 'true' OR r.conflict THEN RETURN NULL;END IF;
  SELECT EXISTS(SELECT 1 FROM bill2_receipts WHERE call_id=c.id AND NOT conflict
   AND payload->>'evidenceKind'='provider_rejection_pending') INTO candidate;
  claimed_at:=clock_timestamp();
- IF candidate AND c.rejection_recovery_at IS NOT NULL
-  AND claimed_at<c.rejection_recovery_at+interval '5 minutes' THEN RETURN NULL;END IF;
+ IF c.rejection_recovery_at IS NOT NULL
+  AND claimed_at<c.rejection_recovery_at+interval '60 seconds' THEN RETURN NULL;END IF;
  UPDATE bill2_calls SET recovery_attempts=recovery_attempts+1,
-  rejection_recovery_at=CASE WHEN candidate THEN claimed_at ELSE rejection_recovery_at END WHERE id=c.id;
+  rejection_recovery_at=claimed_at WHERE id=c.id;
  RETURN jsonb_build_object('id',c.id,'providerId',c.provider_id,'provider',c.provider,'account',c.account_namespace,'model',c.model,'protocol',c.payload->>'protocol')||CASE WHEN candidate THEN
   jsonb_build_object('rejectionRecovery',jsonb_build_object('attempt',c.recovery_attempts+1,'claimedAt',claimed_at))
   ELSE '{}'::jsonb END;

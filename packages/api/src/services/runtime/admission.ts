@@ -31,6 +31,7 @@ import {freezeWindowBillingUnit} from './billingUnitAdmission';
 import {newWorkGate,readNewWorkSettings,requireNewWork} from './newWorkGate';
 import {requireAllowedInput} from './moderation';
 import {admitPricing} from './pricingAdmission';
+import {runAutomaticFinancialRecovery} from './automaticRecovery';
 
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
@@ -278,6 +279,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    await requireAllowedInput({actorId,sessionId:input.sessionId,requestId:input.requestId,
     text:input.input,opening});
    assertFrozenPayloads(context,billing);
+   await runAutomaticFinancialRecovery(admin,actorId);
    try{return await query('runtime_admit',{p_session_id:input.sessionId,p_request_id:input.requestId,p_payload:context,p_billing:billing});}
    catch(error){
     // A competing identical request may have frozen its deadline/config first,

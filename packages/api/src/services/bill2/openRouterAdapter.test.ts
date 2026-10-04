@@ -97,13 +97,13 @@ it.each(['complete','timeout'])('bounds the full response, not each keepalive (%
   expect(adapter.evidence(observed,identity,'response')).toMatchObject({providerId:'gen-late',cost:null,final:false});
  }finally{timeout.mockRestore();vi.useRealTimers();}
 });
-it('keeps lookup timeout bounded separately and does not retry it',async()=>{
+it.each([1_500,45_000])('keeps lookup timeout bounded to %i ms and does not retry it',async(timeoutMs)=>{
  vi.useFakeTimers();const timeout=vi.spyOn(AbortSignal,'timeout').mockImplementation(ms=>{const c=new AbortController();setTimeout(()=>c.abort(),ms);return c.signal;});
  const transport=vi.fn<typeof fetch>(async(_url,init)=>new Response(new ReadableStream({start(controller){init!.signal!.addEventListener('abort',()=>controller.error(new Error('stopped')),{once:true});}})));
  try{
-  const pending=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport}).lookup('gen-local',identity);
-  await vi.advanceTimersByTimeAsync(45_000);expect(await pending).toMatchObject({complete:false,transportIssue:'body_timeout'});
-  expect(timeout).toHaveBeenCalledWith(45_000);expect(transport).toHaveBeenCalledTimes(1);
+  const pending=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport}).lookup('gen-local',identity,{timeoutMs});
+  await vi.advanceTimersByTimeAsync(timeoutMs);expect(await pending).toMatchObject({complete:false,transportIssue:'body_timeout'});
+  expect(timeout).toHaveBeenCalledWith(timeoutMs);expect(transport).toHaveBeenCalledTimes(1);
  }finally{timeout.mockRestore();vi.useRealTimers();}
 });
 it('retains only the bounded generation header when the network interrupts a body',async()=>{
@@ -243,4 +243,18 @@ it('v2 binds actual tool parameter and response format schema bytes',async()=>{
  await adapter.prepareDispatch({input:wire},v2);
  expect(credential).toHaveBeenCalledTimes(1);expect(transport).not.toHaveBeenCalled();
  await expect(adapter.prepareDispatch({input:wire},{...v2,payg:{...payg,schemaBytes:0}})).rejects.toThrow('QUOTE_CONFLICT');
+});
+
+it('bounds short lookup credential reads before any GET is sent',async()=>{
+ vi.useFakeTimers();
+ const timeout=vi.spyOn(AbortSignal,'timeout').mockImplementation(ms=>{
+  const controller=new AbortController();setTimeout(()=>controller.abort(new Error('synthetic timeout')),ms);return controller.signal;
+ });
+ const transport=vi.fn<typeof fetch>();
+ try{
+  const adapter=openRouterAdapter({credential:async()=>new Promise<string>(()=>{}),transport});
+  const result=adapter.lookup('gen-synthetic',identity,{timeoutMs:1_500}).catch(error=>error);
+  await vi.advanceTimersByTimeAsync(1_500);
+  expect(await result).toBeInstanceOf(Error);expect(transport).not.toHaveBeenCalled();
+ }finally{timeout.mockRestore();vi.useRealTimers();}
 });

@@ -6,8 +6,9 @@ import { allowAllModeration } from './moderation';
 import { DEFAULT_RUNTIME_RATE_LIMITS as defaults } from './rateLimitSettings';
 import { createRequestTiming } from './timing';
 import { OPENING_INPUT } from '../../shared/opcQuestions';
-const mock = vi.hoisted(() => ({ redis: vi.fn() }));
+const mock = vi.hoisted(() => ({ redis: vi.fn(), recovery: vi.fn() }));
 vi.mock('../redisRateLimiter', () => ({ checkRuntimeRateLimit: mock.redis }));
+vi.mock('./automaticRecovery', () => ({ runAutomaticFinancialRecovery: mock.recovery }));
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 function fixture() {
   let replay: unknown = null;
@@ -35,7 +36,10 @@ function fixture() {
     replay: (value: unknown) => { replay = value; }, config: (value: unknown) => { config = value; },
     fail: () => { failure = true; }, hang: () => { hanging = true; } };
 }
-beforeEach(() => { mock.redis.mockReset().mockResolvedValue({ success: true }); });
+beforeEach(() => {
+  mock.redis.mockReset().mockResolvedValue({ success: true });
+  mock.recovery.mockReset().mockResolvedValue({ failed: 0 });
+});
 afterEach(() => vi.restoreAllMocks());
 it.each(['paused', 'failed', 'hanging'])('returns replay without a gate or moderation even with %s settings', async mode => {
   const f = fixture(); f.replay({ executionId: id(4) });
@@ -93,4 +97,16 @@ it.each(['block', 'throw'])('input moderation %s prevents execution and reservat
     .rejects.toThrow('RUNTIME_MODERATION_BLOCKED');
   expect(check.mock.calls[0][0].opening).toBe(true);
   expect(f.rpc.mock.calls.map(([name]) => name)).not.toContain('runtime_admit');
+});
+
+it('awaits only the authenticated actor recovery before the atomic admission balance check', async () => {
+  const f = fixture(); f.config(null);
+  let release!: () => void;
+  mock.recovery.mockImplementation(() => new Promise<void>(resolve => { release = resolve; }));
+  const prepare = runtimeAdmissionService(f.user, f.admin, f.policy).prepare(f.input);
+  await vi.waitFor(() => expect(mock.recovery).toHaveBeenCalledWith(f.admin, id(1)));
+  expect(f.rpc.mock.calls.some(([name]) => name === 'runtime_admit')).toBe(false);
+  release();
+  await prepare;
+  expect(f.rpc.mock.calls.some(([name]) => name === 'runtime_admit')).toBe(true);
 });
