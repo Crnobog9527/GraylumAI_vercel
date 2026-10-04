@@ -1702,7 +1702,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   /** A streaming reply whose execution is not in history yet. */
   const liveOnly = liveReply && !mentorExecutions.some(e => e.executionId === liveReply.executionId) ? liveReply : null;
   // The one open question card, docked to the message box. Set while the conversation renders.
-  let chatShown = false, lastTurnNotice = false;
+  let chatShown = false, lastTurnNotice = false, lastTurnText = "";
   let dock: ReactNode = liveOnly?.card ? <QuestionCardView key="live" card={liveOnly.card} disabled docked/> : null;
   // A retained mentor envelope can exist before its execution is visible in
   // history (or after a lost reply), so recovery is driven by the envelope
@@ -1882,7 +1882,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                         legacyMessage: parsed.message, liveText: live?.text, liveCard: live?.card,
                         active: execution.executionId === history.data?.activeExecution, busy: busy || awaitingReply });
                       const next = mentorExecutions[executionIndex + 1];
-                      if (!next) lastTurnNotice = showsTurnState(reply.notice);
+                      if (!next) { lastTurnNotice = showsTurnState(reply.notice); lastTurnText = reply.notice?.text ?? ""; }
                       const cardStatus = questionCardStatus({ isLatest: !next, turn,
                         shown: { roundId: d.roundId, stepId: step.id, questionId: activeQuestion.id },
                         reply: next ? { ...mentorTurns.get(next.executionId), input: isOpeningInput(next.input) ? null : next.input }
@@ -1936,7 +1936,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<div data-message-role="user" data-request-id={pendingBubble.requestId} className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3"><span>你 · {d.information[pendingBubble.stepId]?.schema.find((f:{id:string;title:string})=>f.id===pendingBubble.questionId)?.title}</span><p className={`whitespace-pre-wrap ${resultStyles.messageBody}`}>{pendingBubble.input}</p><ChatPendingStatus sending={running}/></div>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="导师正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>导师</span>{liveOnly.text?<MessageMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={liveOnly.text} streaming/>:<p className={`mt-1 ${resultStyles.messageBody}`}>导师正在思考…</p>}</div>}
                   <ChatNoticeList notices={mentorTailNotices({ livePhase: liveReply?.phase ?? null, saving: hasUnsavedInformation,
-                    error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice,
+                    error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice, lastTurnText,
                     recovery: recoveryNeedsUser[0] && !busy
                       ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })}/>
                   {!manualEntry && snap.state === "draft" && !reviewOnly && <section className={resultStyles.currentAction} aria-label="当前问题操作">

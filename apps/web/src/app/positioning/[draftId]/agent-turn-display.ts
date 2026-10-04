@@ -6,7 +6,7 @@ import {
   type AgentTurnEvent,
   type QuestionCard,
 } from "@repo/api/src/shared/agentTurn";
-import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
+import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
 
 /** Shown instead of a body above the contract's parse limit. */
 export const OVERSIZED_REPLY_NOTICE = "本次回复内容过长，页面暂时无法展示。原记录已保留，你可以继续对话。";
@@ -73,6 +73,8 @@ export type ReplyNotice = { tone: "status" | "warning"; text: string; busy?: boo
 function unavailableNotice(source: MentorReplySource): ReplyNotice {
   if (source.state === "cost_pending" && !source.active)
     return { tone: "warning", text: "本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。" };
+  if (source.state === "cancelled" && source.unavailableReason === "provider_rejected")
+    return { tone: "warning", text: PROVIDER_REJECTED_NOTICE };
   if (source.state === "cancelled")
     return { tone: "warning", text: "本次执行已停止，未取得可用回复。原记录已保留；请查看错误提示或继续讨论，系统不会自动重放这条请求。" };
   return source.busy ? { tone: "status", text: "正在回复…", busy: true } : { tone: "warning", text: "回复暂未完成，请继续核对。" };

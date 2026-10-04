@@ -26,7 +26,7 @@ import topicStyles from './topic-candidates.module.css';
 import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 import { consentedTopicIds } from './adoption-consent';
-import { topicExecutionNotice, topicFailureMessage, topicOpenTurnNotice } from './topic-notices';
+import { topicExecutionNotice, topicFailureMessage, topicOpenTurnNotice, topicRejectedTurn, topicTurnShows } from './topic-notices';
 import { finishedExecution } from '@/lib/finished-execution';
 
 type PlanItem = {
@@ -252,7 +252,7 @@ export default function TopicWorkspacePage() {
         input: string | null;
         body: string | null;
         primaryBody: string | null;
-        contentAvailable: boolean;
+        contentAvailable: boolean; unavailableReason?: string | null;
       }>
     | undefined;
 
@@ -499,7 +499,7 @@ export default function TopicWorkspacePage() {
       text: '上一项操作的结果尚未确认（完整原请求已冻结）。重试会核对原消息、保存或采纳，不新建身份。' }] : []),
     ...(busy && !lastOpen ? [{ id: 'busy', tone: 'status' as const, busy: true, text: '正在处理，请稍候…' }] : []),
     ...(notice ? [{ id: 'notice', tone: 'success' as const, text: notice }] : []),
-    ...(error ? [{ id: 'error', tone: 'error' as const, text: error }] : []),
+    ...(error && !topicTurnShows(executions?.at(-1), error) ? [{ id: 'error', tone: 'error' as const, text: error }] : []),
     ...(free.error ? [{ id: 'free', tone: 'error' as const, text: free.error }] : []),
   ];
   const openTurnNotice = (e: { executionId: string; state: string }) => topicOpenTurnNotice(e, { busy, finished: finishedExecution(execute, view),
@@ -567,8 +567,8 @@ export default function TopicWorkspacePage() {
                     <img className={topicStyles.agentAvatar} src="/graylum-logo.png" alt="" />
                     <div className={topicStyles.assistantMessage}>
                       <span className={topicStyles.agentName}>Graylum · 增长顾问</span>
-                      <MessageMarkdown className={topicStyles.reply}
-                        text={e.contentAvailable ? replyProse(e.body ?? e.primaryBody) : '来源已不可用，暂不展示此内容。'} />
+                      {!(topicRejectedTurn(e) && !(e.body ?? e.primaryBody)) && <MessageMarkdown className={topicStyles.reply}
+                        text={e.contentAvailable ? replyProse(e.body ?? e.primaryBody) : '来源已不可用，暂不展示此内容。'} />}
                       <ChatNoticeList notices={[openTurnNotice(e)]} />
                       {e.state === 'completed' &&
                         (() => {
