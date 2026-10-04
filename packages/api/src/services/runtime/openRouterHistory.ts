@@ -6,9 +6,15 @@ import {toolCallFor} from '../bill2/openRouterAdapter';
 import {OPENROUTER_RESPONSE_BYTE_LIMIT} from '../bill2/responseCapacity';
 import {SOURCE_TOOL_NAMES} from './agentTools';
 
-const reasoningDetails=z.array(z.discriminatedUnion('type',[
+const reasoningDetails=z.array(z.union([
  z.object({type:z.literal('reasoning.text'),text:z.string(),
   index:z.number().int().nonnegative(),format:z.literal('unknown'),
+ }).strict(),
+ // Observed Claude signed thinking. Storage-only metadata for completed text;
+ // never forward the signature or claim to support signed tool continuations.
+ z.object({type:z.literal('reasoning.text'),text:z.string().max(OPENROUTER_RESPONSE_BYTE_LIMIT),
+  index:z.number().int().nonnegative(),format:z.literal('anthropic-claude-v1'),
+  signature:z.string().min(1).max(OPENROUTER_RESPONSE_BYTE_LIMIT),
  }).strict(),
  // OpenRouter's summary schema permits an omitted/null id. Accept only the
  // observed OpenAI format; summaries stay private alongside encrypted data.
@@ -22,7 +28,8 @@ const reasoningDetails=z.array(z.discriminatedUnion('type',[
   id:z.string().min(1).max(256).nullable(),data:z.string().min(1).max(OPENROUTER_RESPONSE_BYTE_LIMIT),index:z.number().int().nonnegative().optional(),
  }).strict(),
 ])).nullish();
-const hasOpenAIReasoning=(details:unknown)=>Array.isArray(details)&&details.some(detail=>detail?.type==='reasoning.encrypted'||detail?.type==='reasoning.summary');
+const requiresOriginalReasoning=(details:unknown)=>Array.isArray(details)&&details.some(detail=>
+ detail?.type==='reasoning.encrypted'||detail?.type==='reasoning.summary'||detail?.format==='anthropic-claude-v1');
 const reasoning=z.string().nullish();
 const textParts=(toolNames:ReadonlySet<string>)=>z.array(z.object({type:z.literal('text'),text:z.string(),role:z.literal('assistant').optional(),
  // SDK 0.18 streaming always attaches an empty annotations list. Only this
@@ -43,13 +50,13 @@ export function normalizeOpenRouterHistory(request:{messages?:unknown},toolNames
   const normalized={...message};
   if(!reasoning.safeParse(message.reasoning).success||!reasoningDetails.safeParse(message.reasoning_details).success)
    throw new Error('RUNTIME_PROVIDER_HISTORY_DENIED');
-  let openAIReasoning=hasOpenAIReasoning(message.reasoning_details);
+  let signedReasoning=requiresOriginalReasoning(message.reasoning_details);
   delete normalized.reasoning;delete normalized.reasoning_details;
   if(Array.isArray(message.content)){
    const parsed=textParts(toolNames).safeParse(message.content);
    if(!parsed.success)throw new Error('RUNTIME_PROVIDER_HISTORY_DENIED');
    for(const part of parsed.data){
-    openAIReasoning ||=hasOpenAIReasoning(part.reasoning_details);
+    signedReasoning ||=requiresOriginalReasoning(part.reasoning_details);
     // A duplicated tool field is removable only when the actual top-level calls
     // are identical. Unknown or parallel calls remain for the adapter to reject.
     if(part.tool_calls?.length&&!isDeepStrictEqual(part.tool_calls,message.tool_calls))
@@ -58,9 +65,9 @@ export function normalizeOpenRouterHistory(request:{messages?:unknown},toolNames
    normalized.content=parsed.data.map(part=>part.text).join('');
   }
   // This compatibility path is for completed text from the tool-free
-  // organizer. OpenAI reasoning tool continuations need their provider's original
+  // organizer. Signed reasoning tool continuations need their provider's original
   // reasoning, which this text-only projection does not claim to support.
-  if(openAIReasoning&&message.tool_calls!=null&&(!Array.isArray(message.tool_calls)||message.tool_calls.length>0))
+  if(signedReasoning&&message.tool_calls!=null&&(!Array.isArray(message.tool_calls)||message.tool_calls.length>0))
    throw new Error('RUNTIME_PROVIDER_HISTORY_DENIED');
   return normalized;
  });

@@ -16,7 +16,7 @@ import {
   type MentorReplySource,
 } from "./agent-turn-display";
 import { readWorkflowMentorExecution } from "./mentor-response";
-import { OUTPUT_TRUNCATED_NOTICE } from "@/lib/runtime-gate-notice";
+import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
 
 const fields = { audience: { schema: [{ id: "who" }] } };
 const card = { question: "你的内容主要写给谁？", options: ["刚入行的新人", "有经验的同行"], recommended: 0 };
@@ -247,4 +247,28 @@ describe("questionCardStatus", () => {
     expect(status({ stepId: "audience", questionId: "who" })).toBe(false);
     expect(status(undefined)).toBe(false);
   });
+});
+
+it('keeps provider_history on reload instead of showing a generic stopped message',()=>{
+ const shown=mentorReplyDisplay(source(null,{state:'cancelled',unavailableReason:'provider_history'}));
+ expect(shown.text).toBe('');expect(shown.card).toBeNull();
+ expect(shown.notice?.text).toBe(PROVIDER_HISTORY_NOTICE);
+ expect(shown.notice?.text).not.toContain('已停止');
+});
+
+it('keeps the older-history notice with a usable saved or live reply after reload',()=>{
+ for(const body of [agentTurnBody('Saved answer',null),'Saved answer']) {
+  const shown=mentorReplyDisplay(source(body,{historyOmitted:true}));
+  expect(shown.text).toBe('Saved answer');expect(shown.notice).toEqual({tone:'status',text:HISTORY_OMITTED_NOTICE});
+ }
+ const live=mentorReplyDisplay(source(null,{liveText:'Live answer',historyOmitted:true}));
+ expect(live.text).toBe('Live answer');expect(live.notice?.text).toBe(HISTORY_OMITTED_NOTICE);
+});
+
+it('keeps history omission visible alongside output truncation',()=>{
+ const shown=mentorReplyDisplay(source(agentTurnBody('Partial answer',null),{
+  historyOmitted:true,unavailableReason:'output_truncated',
+ }));
+ expect(shown.notice?.text).toContain(OUTPUT_TRUNCATED_NOTICE);
+ expect(shown.notice?.text).toContain(HISTORY_OMITTED_NOTICE);
 });

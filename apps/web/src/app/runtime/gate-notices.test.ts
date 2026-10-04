@@ -120,3 +120,8 @@ describe('user stops', () => {
     expect(userStopIds(broken, 's1', [{ executionId: 'e1' }])).toEqual([]);
   });
 });
+
+it('explains a pre-dispatch history refusal with an actionable next step', () => {
+ const notice=runtimeExecutionNotice({state:'cancelled',unavailable:'provider_history'});
+ expect(notice).toContain('请新开一个对话');expect(notice).not.toContain('已停止');
+});

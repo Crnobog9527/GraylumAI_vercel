@@ -1878,8 +1878,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                       const openingTurn = turn?.kind === "opening" || isOpeningInput(execution.input);
                       const target = steps.find(candidate => candidate.id === parsed.targetStepId);
                       const live = liveReply?.executionId === execution.executionId ? liveReply : null;
-                      const reply = mentorReplyDisplay({ body: execution.body ?? execution.primaryBody, legacyMessage: parsed.message,
-                        liveText: live?.text, liveCard: live?.card, state: execution.state, unavailableReason: execution.unavailableReason,
+                      const reply = mentorReplyDisplay({ ...execution, body: execution.body ?? execution.primaryBody,
+                        legacyMessage: parsed.message, liveText: live?.text, liveCard: live?.card,
                         active: execution.executionId === history.data?.activeExecution, busy: busy || awaitingReply });
                       const next = mentorExecutions[executionIndex + 1];
                       if (!next) lastTurnNotice = Boolean(reply.notice);
