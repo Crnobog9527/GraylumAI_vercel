@@ -932,3 +932,104 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([false,true])(
   expect((await db.query('select actual_restore from bill2_runs where id=$1',[f.execution.runId])).rows[0].actual_restore).toBeNull();
  }
 });
+
+it.each(['rejected','timeout','5xx','started'] as const)('RUNTIME: provider refusal boundary %s preserves original execution',async(kind)=>{
+ const f=await fixture('serial-tools-v4-stream',false);let sends=0;
+ const error={user_id:'synthetic-user',error:{code:402,message:'Synthetic refusal',
+  metadata:{limit_source:'openrouter_key_limit',provider_name:null}}};
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  if(init?.method==='GET')return new Response('{}',{status:503});
+  sends++;
+  if(kind==='timeout')throw new Error('synthetic timeout');
+  if(kind==='started')return new Response('data: '+JSON.stringify({id:'gen-started',model:'synthetic/mentor',
+   choices:[{index:0,delta:{content:'partial'},finish_reason:null}]})+'\n\ndata: '+JSON.stringify(error)+'\n\n',
+   {status:200,headers:{'content-type':'text/event-stream'}});
+  return new Response(JSON.stringify(error),{status:kind==='5xx'?503:402,headers:{'content-type':'application/json'}});
+ }});
+ const executor=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,callGate:allowTestCalls});
+ await executor.execute(f.execution.executionId);
+ // Cancellation/recovery never issues another provider POST, including a fresh process composition.
+ await executor.cancel(f.execution.executionId);
+ const recovered=await runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,callGate:allowTestCalls})
+  .recoverFinancial(f.execution.executionId);
+ expect(recovered.state).toBe(kind==='rejected'?'cancelled':'cost_pending');
+ expect(sends).toBe(1);
+ const run=(await db.query('select state,charged,actual_restore from bill2_runs where id=$1',[f.execution.runId])).rows[0];
+ expect(run.state).toBe(kind==='rejected'?'refunded':kind==='started'?'cost_pending':'unknown');
+ if(kind==='rejected')expect(run).toMatchObject({charged:0,actual_restore:20});
+ else expect(run.actual_restore).toBeNull();
+});
+
+
+it.each(['not-found','zero','positive','missing-cost','mismatched-id'] as const)(
+ 'RUNTIME: strict 402 with header identity is queried immediately (%s)',async(kind)=>{
+ const f=await fixture('serial-tools-v4-stream',false),id='gen-synthetic-'+f.execution.executionId;
+ let posts=0,lookups=0;
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  if(init?.method==='GET'){
+   lookups++;
+   if(kind==='not-found')return new Response(JSON.stringify({error:{code:404,message:'Synthetic missing'}}),{status:404});
+   return new Response(JSON.stringify({data:{id:kind==='mismatched-id'?'gen-synthetic-other':id,
+    model:'synthetic/mentor',finish_reason:'stop',native_tokens_prompt:0,native_tokens_completion:0,
+    ...(kind==='missing-cost'?{}:{total_cost:kind==='positive'?0.003:0})}}));
+  }
+  posts++;
+  return new Response(JSON.stringify({user_id:'synthetic-user',error:{code:402,message:'Synthetic limit',
+   metadata:{limit_source:'openrouter_key_limit',provider_name:null}}}),
+   {status:402,headers:{'content-type':'application/json','x-generation-id':id}});
+ }});
+ const executor=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,callGate:allowTestCalls});
+ await executor.execute(f.execution.executionId);
+ await executor.cancel(f.execution.executionId);
+ const recovered=await executor.recoverFinancial(f.execution.executionId);
+ const confirmed=kind!=='mismatched-id';
+ expect(recovered.state).toBe(confirmed?'cancelled':'cost_pending');
+ expect(posts).toBe(1);expect(lookups).toBeGreaterThan(0);
+ const run=(await db.query('select charged,actual_restore from bill2_runs where id=$1',[f.execution.runId])).rows[0];
+ expect(run.actual_restore).toBe(confirmed?(kind==='positive'?17:20):null);
+ const call=(await db.query('select provider_id,provider_rejected from bill2_calls where run_id=$1',[f.execution.runId])).rows[0];
+ expect(call).toMatchObject({provider_id:id,provider_rejected:kind==='not-found'||kind==='missing-cost'});
+ await executor.recoverFinancial(f.execution.executionId);
+ expect(posts).toBe(1);
+});
+
+it.each(['missing','cost','terminal-no-cost','nonterminal-cost','timeout','5xx'] as const)(
+ 'RUNTIME: strict 402 uses two immediate bounded queries (%s)',async(kind)=>{
+ const f=await fixture('serial-tools-v4-stream',false),id='gen-synthetic-'+f.execution.executionId;
+ let posts=0,lookups=0;
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  if(init?.method==='GET'){
+   lookups++;
+   if(lookups===2){
+    if(kind==='timeout')throw new Error('Synthetic query failure');
+    if(kind==='5xx')return new Response('{}',{status:503});
+    if(['cost','terminal-no-cost','nonterminal-cost'].includes(kind))return new Response(JSON.stringify({data:{
+     id,model:'synthetic/mentor',user_id:'SYNTHETIC_PRIVATE',
+     finish_reason:kind==='nonterminal-cost'?null:'stop',
+     ...(kind==='terminal-no-cost'?{}:{total_cost:0.003})}}));
+   }
+   return new Response(JSON.stringify({user_id:'SYNTHETIC_PRIVATE',error:{code:404,message:'SYNTHETIC_PRIVATE'}}),{status:404});
+  }
+  posts++;
+  return new Response(JSON.stringify({user_id:'SYNTHETIC_PRIVATE',error:{code:402,message:'SYNTHETIC_PRIVATE',
+   metadata:{limit_source:'openrouter_key_limit',provider_name:null}}}),
+   {status:402,headers:{'content-type':'application/json','x-generation-id':id}});
+ }});
+ const executor=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,callGate:allowTestCalls});
+ await executor.execute(f.execution.executionId);
+ const state=(await db.query('select provider_rejected,recovery_attempts from bill2_calls where run_id=$1',[f.execution.runId])).rows[0];
+ expect(state.provider_rejected).toBe(kind==='missing'||kind==='terminal-no-cost');
+ expect(state.recovery_attempts).toBe(1);
+ expect(lookups).toBe(2);expect(posts).toBe(1);
+ const run=(await db.query('select charged,actual_restore from bill2_runs where id=$1',[f.execution.runId])).rows[0];
+ expect(run.actual_restore).toBe(['missing','terminal-no-cost'].includes(kind)?20:kind==='cost'?17:null);
+ const receipts=(await db.query('select r.payload from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1',[f.execution.runId])).rows;
+ expect(JSON.stringify(receipts)).not.toMatch(/SYNTHETIC_PRIVATE|rawBody|"transport"/);
+ const audits=receipts.map(r=>r.payload.rejectionRecovery).filter(Boolean);
+ expect(audits).toHaveLength(1);
+ expect(audits[0].queryCount).toBe(2);
+ expect(audits[0].queryTimes).toHaveLength(2);
+ for(const audit of audits){expect(audit.claimedAt).toBeTruthy();expect(audit.observedAt).toBeTruthy();}
+ await executor.recoverFinancial(f.execution.executionId);
+ expect(lookups).toBe(2);expect(posts).toBe(1);
+});

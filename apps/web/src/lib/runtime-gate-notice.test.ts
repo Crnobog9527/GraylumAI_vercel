@@ -31,6 +31,9 @@ describe('gateAdmissionNotice', () => {
 });
 
 describe('gateResultNotice', () => {
+  it('shows the confirmed no-charge refusal without suggesting financial recovery', () => {
+    expect(gateResultNotice('provider_rejected')).toBe('服务暂时不可用，没有扣积分。');
+  });
   it('maps the three execution result reasons; call_limited always uses the minute text', () => {
     expect(gateResultNotice('call_limited')).toBe(runtimeGateMessages.minute);
     expect(gateResultNotice('paused')).toBe(runtimeGateMessages.paused);

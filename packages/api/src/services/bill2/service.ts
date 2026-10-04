@@ -7,6 +7,8 @@ import { paygStablePolicy, paygCallQuote } from './paygPolicy';
 import { MULTIPLIER_PATTERN } from '../billingUnit';
 import { frozenBillingUnit } from '../runtime/billingUnitAdmission';
 import type {RuntimeBudget} from '../runtime/budget';
+import { openRouterRejection } from './openRouterRejection';
+import { openRouterNotFound, type RejectionRecovery } from './openRouterNotFound';
 import { openRouterEvidence } from './openRouterEvidence';
 import {consumeOpenRouterNotStarted} from './openRouterAdapter';
 import { aggregateCredits } from './decimal';
@@ -59,7 +61,7 @@ export interface BillingTransport {
   * encloses the exact validated request and credential for one send. */
  prepareDispatch?(body:unknown,identity:CallIdentity,onChunk?:(chunk:string)=>void,onIdentity?:(id:string)=>void):Promise<()=>Promise<TransportObservation>>;
  dispatch(body:unknown, identity:CallIdentity):Promise<TransportObservation>;
- lookup(providerId:string, identity:CallIdentity):Promise<TransportObservation>;
+ lookup(providerId:string, identity:CallIdentity, options?:{timeoutMs?:number}):Promise<TransportObservation>;
 }
 function providerEvidence(observation:TransportObservation,identity:CallIdentity,source:'response'|'lookup',expectedProviderId?:string){
  if(identity.protocol==='openrouter-chat-v1') {
@@ -129,16 +131,35 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
     }
     return state;
   }
-  async function recoverReceipts(runId: string) {
+  async function recoverReceipts(runId: string, options: {timeoutMs?:number;callId?:string;immediate?:boolean} = {}) {
       const calls = await rpc<string[]>('bill2_pending_calls', { p_run_id: uuid.parse(runId) });
-      for (const callId of calls.slice(0, 32)) {
-        try{deps.budget?.assertCanStart(OPENROUTER_LOOKUP_TIMEOUT_MS);}catch{break;} // Do not spend a recovery claim when no lookup fits.
-        const identity = await rpc<(CallIdentity & { providerId: string }) | null>('bill2_recovery_claim', { p_run_id: runId, p_call_id: callId });
+      for (const callId of calls.filter(id => !options.callId || id === options.callId).slice(0, 32)) {
+        try{deps.budget?.assertCanStart(options.timeoutMs ?? OPENROUTER_LOOKUP_TIMEOUT_MS);}catch{break;} // Do not spend a recovery claim when no lookup fits.
+        const identity = await rpc<(CallIdentity & { providerId: string; rejectionRecovery?: RejectionRecovery }) | null>(
+          'bill2_recovery_claim', { p_run_id: runId, p_call_id: callId });
         if (!identity) continue;
         let evidence;
-        try { evidence = providerEvidence(await deps.adapter.lookup(identity.providerId,identity), identity, 'lookup',identity.providerId); }
-        catch { continue; } // No receipt is not evidence of zero cost. SQL enforces attempt/time bounds.
-        await recordReceipt(runId, callId, { ...evidence, expectedProviderId: identity.providerId });
+        const queryTimes: string[] = [];
+        const queryOutcomes: string[] = [];
+        try {
+          for (let attempt = 0; attempt < (options.immediate ? 2 : 1); attempt++) {
+            queryTimes.push(new Date().toISOString());
+            queryOutcomes.push('other');
+            const observation = await deps.adapter.lookup(identity.providerId, identity, {timeoutMs: options.timeoutMs});
+            const absent = identity.rejectionRecovery ? openRouterNotFound(observation, identity, identity.providerId) : null;
+            queryOutcomes[attempt] = absent?.lookupOutcome ?? 'other';
+            evidence = absent ?? providerEvidence(observation, identity, 'lookup', identity.providerId);
+            if (!absent || !options.immediate || attempt === 1) break;
+            await new Promise(resolve => setTimeout(resolve, 250));
+          }
+        } catch {
+          if (!identity.rejectionRecovery) continue;
+          evidence = { ...unknownEvidence(identity), source: 'lookup', evidenceKind: 'transport_observation' };
+        }
+        if (identity.rejectionRecovery) Object.assign(identity.rejectionRecovery, {queryCount: queryTimes.length, queryTimes, queryOutcomes});
+        // SQL owns claim identity/time and keeps only a financial projection for this path.
+        await recordReceipt(runId, callId, { ...evidence, expectedProviderId: identity.providerId,
+          ...(identity.rejectionRecovery ? { rejectionRecovery: identity.rejectionRecovery } : {}) });
       }
   }
   return {
@@ -202,7 +223,11 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       financialActors.set(capability.runId,actorId);
       let evidence;
       let observation: TransportObservation | undefined;
-      try { observation = await send(); evidence = providerEvidence(observation, identity, 'response'); }
+      try {
+       observation = await send();
+       evidence = openRouterRejection(observation,identity,capability.frozen.requestHash)
+        ?? providerEvidence(observation, identity, 'response');
+      }
       catch(error) {
        if(consumeOpenRouterNotStarted(error,capability.frozen.requestHash,send)){
         const args={p_run_id:capability.runId,p_call_id:callId,p_token:capability.token,p_request_hash:capability.frozen.requestHash};
@@ -227,11 +252,20 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       try {
         const saved = await recordReceipt(capability.runId, callId, evidence);
         if (saved.accountClosed) return { dispatched: true, accountClosed: true as const };
+        if ('evidenceKind' in evidence && evidence.evidenceKind === 'provider_rejection_pending') {
+          // Only this strict refusal gets a bounded immediate lookup; never retry generation.
+          await recoverReceipts(capability.runId, {callId, timeoutMs: 1_500, immediate: true});
+        }
       }
-      catch { return { dispatched: true, pendingReceipt: { runId: capability.runId, callId, evidence } }; }
+      catch { return { dispatched: true,
+        providerRejected: 'evidenceKind' in evidence &&
+          ['provider_rejection', 'provider_rejection_pending'].includes(String(evidence.evidenceKind)),
+        pendingReceipt: { runId: capability.runId, callId, evidence } }; }
       // Confirmation can still commit after this receipt. Every later Runtime
       // read/write then refuses the actor (bill2_actor), so no content reaches SDK/history/result.
-      return { dispatched: true, observation }; // Private server composition only; never a public route result.
+      return { dispatched: true, observation,
+        providerRejected: 'evidenceKind' in evidence &&
+          ['provider_rejection', 'provider_rejection_pending'].includes(String(evidence.evidenceKind)) };
     },
     closeRun: (runId: string, outcome: 'delivered' | 'confirmed_failure' | 'cancelled' | 'unknown', result: unknown = null) =>
       rpc<RunView>('bill2_close', { p_run_id: uuid.parse(runId), p_outcome: outcome, p_result: result }),

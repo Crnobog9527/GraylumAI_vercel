@@ -63,17 +63,17 @@ function agentHistoryPaired(messages:RequestMessage[]):boolean{
 /** Private trusted composition. No environment fallback, browser endpoint or automatic retry.
  * `allowAgentTools` admits the interactive Agent turn tools; the frozen Runtime
  * context separately decides which format and tools one execution may use. */
-export function openRouterAdapter(options:{credential:(identity:OpenRouterIdentity)=>Promise<string>;transport?:typeof fetch;
+export function openRouterAdapter(options:{credential:(identity:OpenRouterIdentity,signal?:AbortSignal)=>Promise<string>;transport?:typeof fetch;
  allowWorkspaceRead?:boolean;allowAgentTools?:boolean;budget?:RuntimeBudget}) {
  const transport=options.budget?withRuntimeBudget(options.budget,options.transport??fetch):options.transport??fetch;
- async function credential(identity:OpenRouterIdentity){
-  const key=await options.credential(identity);
+ async function credential(identity:OpenRouterIdentity,signal?:AbortSignal){
+  const key=await options.credential(identity,signal);
   if(!key.trim() || /[\r\n]/.test(key))throw new Error('BILL2_PROVIDER_CREDENTIAL_UNAVAILABLE');
   return key;
  }
  async function request(path:string,key:string,body?:string,send?:()=>Promise<TransportObservation>,streamModel?:string,
-  onChunk?:(chunk:string)=>void,agentTurn=false,onIdentity?:(id:string)=>void):Promise<TransportObservation> {
-  let timeout=OPENROUTER_LOOKUP_TIMEOUT_MS;
+  onChunk?:(chunk:string)=>void,agentTurn=false,onIdentity?:(id:string)=>void,lookupTimeoutMs=OPENROUTER_LOOKUP_TIMEOUT_MS):Promise<TransportObservation> {
+  let timeout=lookupTimeoutMs;
   try{if(body===undefined)options.budget?.assertCanStart(timeout);
    else timeout=options.budget?.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS)??OPENROUTER_RESPONSE_TIMEOUT_MS;}
   catch(error){
@@ -187,11 +187,21 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
  }
  return {protocol:'openrouter-chat-v1' as const,lookupSupported:true,evidence:openRouterEvidence,prepareDispatch,
   async dispatch(input:unknown,identity:CallIdentity){return (await prepareDispatch(input,identity))();},
-  async lookup(providerId:string,identity:CallIdentity){
+  async lookup(providerId:string,identity:CallIdentity,lookupOptions?:{timeoutMs?:number}){
+   const timeout=Math.min(OPENROUTER_LOOKUP_TIMEOUT_MS,Math.max(1,lookupOptions?.timeoutMs??OPENROUTER_LOOKUP_TIMEOUT_MS));
    if(identity.provider!=='openrouter'||identity.protocol!=='openrouter-chat-v1')throw new Error('BILL2_PROVIDER_IDENTITY_DENIED');
-   options.budget?.assertCanStart(OPENROUTER_LOOKUP_TIMEOUT_MS);
+   options.budget?.assertCanStart(timeout);
    if(!providerId || providerId.length>256)throw new Error('BILL2_PROVIDER_ID_INVALID');
-   return request('generation?id='+encodeURIComponent(providerId),await credential({...identity,provider:'openrouter',protocol:'openrouter-chat-v1'}));
+   const started=performance.now(),signal=AbortSignal.timeout(timeout);
+   let abort:()=>void=()=>{};
+   try {
+    const key=await Promise.race([credential({...identity,provider:'openrouter',protocol:'openrouter-chat-v1'},signal),
+     new Promise<never>((_,reject)=>{abort=()=>reject(signal.reason);signal.addEventListener('abort',abort,{once:true});})]);
+    signal.throwIfAborted();
+    const remaining=Math.max(1,Math.floor(timeout-(performance.now()-started)));
+    return await request('generation?id='+encodeURIComponent(providerId),key,
+     undefined,undefined,undefined,undefined,false,undefined,remaining);
+   } finally {signal.removeEventListener('abort',abort);}
   }
  };
 }

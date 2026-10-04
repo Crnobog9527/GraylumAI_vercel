@@ -31,6 +31,7 @@ import {freezeWindowBillingUnit} from './billingUnitAdmission';
 import {newWorkGate,readNewWorkSettings,requireNewWork} from './newWorkGate';
 import {requireAllowedInput} from './moderation';
 import {admitPricing} from './pricingAdmission';
+import {runAutomaticFinancialRecovery} from './automaticRecovery';
 
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
@@ -278,11 +279,22 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    await requireAllowedInput({actorId,sessionId:input.sessionId,requestId:input.requestId,
     text:input.input,opening});
    assertFrozenPayloads(context,billing);
-   try{return await query('runtime_admit',{p_session_id:input.sessionId,p_request_id:input.requestId,p_payload:context,p_billing:billing});}
+   const admit=()=>query('runtime_admit',{
+    p_session_id:input.sessionId,p_request_id:input.requestId,p_payload:context,p_billing:billing});
+   try{
+    try{return await admit();}
+    catch(error){
+     // A definite SQL refusal rolled back the execution and reservation. Recover
+     // once, then reuse the exact request and frozen payload; never retry ambiguity.
+     if(!(error instanceof TRPCError)||error.code!=='BAD_REQUEST'||error.message!=='BILL2_INSUFFICIENT_CREDITS')throw error;
+     await runAutomaticFinancialRecovery(admin,actorId);
+     return await admit();
+    }
+   }
    catch(error){
     // A competing identical request may have frozen its deadline/config first,
     // or the commit response may have been lost. Read its immutable identity;
-    // never retry admission/reservation or replace the winner's frozen context.
+    // never repeat an uncertain admission or replace the winner's frozen context.
     const committed=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:request});
     if(committed)return committed;
     throw error;

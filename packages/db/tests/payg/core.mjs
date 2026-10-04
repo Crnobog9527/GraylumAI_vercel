@@ -112,6 +112,7 @@ export async function coreCases(db,report,createFixture,claim,receipt) {
   await receipt(db,lookup,lc,'0.003',{});
   assert.equal((await db.query('SELECT settled_at FROM bill2_calls WHERE id=$1',[lc.id])).rows[0].settled_at,null);
   for (let i=0;i<3;i++) {
+    if(i) await db.query("UPDATE bill2_calls SET rejection_recovery_at=clock_timestamp()-interval '61 seconds' WHERE id=$1",[lc.id]);
     assert.ok(await rpc(db,'bill2_recovery_claim',lookup.actor,lookup.run,lc.id));
     await rpc(db,'bill2_finalize',lookup.actor,lookup.run);
     if(i<2) assert.equal((await db.query('SELECT settled_at FROM bill2_calls WHERE id=$1',[lc.id])).rows[0].settled_at,null);

@@ -433,7 +433,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['header','timeout',
   for(let i=0;i<4;i++)expect((await host().recoverFinancial(e.executionId)).state).toBe(recovered?'cancelled':'cost_pending');
   const run=(await db.query('select state,charged,provider_cost_usd::text cost,conflict from bill2_runs where id=$1',[e.runId])).rows[0];
   expect(run).toEqual(recovered?{state:'settled',charged:3,cost:'0.003',conflict:false}:{state:mode==='absent'?'unknown':'cost_pending',charged:null,cost:null,conflict:mode.endsWith('mismatch')});
-  expect(posts).toBe(1);expect(lookups).toBe(mode==='lookup-pending'?3:['header','timeout','lookup-mismatch'].includes(mode)?1:0);
+  expect(posts).toBe(1);expect(lookups).toBe(mode==='lookup-pending'?1:['header','timeout','lookup-mismatch'].includes(mode)?1:0);
   expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(recovered?97:80);
   expect((await db.query("select reason_code from credit_transactions where bill2_run_id=$1 order by reason_code",[e.runId])).rows.map(row=>row.reason_code)).toEqual(recovered?['bill2_release','bill2_reserve','bill2_spend']:['bill2_reserve']);
   expect((await db.query('select request_id,pre_deduct_id,payload from bill2_runs where id=$1',[e.runId])).rows[0]).toEqual(original);
@@ -509,6 +509,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['disabled','expired
     return previousFetch(input,init);
    };
    Object.assign(process.env,hostEnv);
+   await db.query("update bill2_calls set rejection_recovery_at=clock_timestamp()-interval '61 seconds' where run_id=$1",[e.runId]);
    expect(await caller.execute({executionId:e.executionId})).toMatchObject({state:'completed'});
   }finally{
    globalThis.fetch=previousFetch;
@@ -1348,7 +1349,7 @@ it('RUNTIME: material revoke and actual dispatch serialize on the original versi
  const material=(await rpc('runtime_session_context',{p_actor_id:f.actorId,p_session_id:f.s.sessionId})).scopeMaterial;
  const context={version:'runtime.v1',scopeMaterial:material};
  const e=await rpc('runtime_admit',{...f.admit,p_payload:context,p_billing:{...f.billing,input:context}});
- const call={...f.billing.callPolicy[0],phase:'ordinary',requestHash:'a'.repeat(64)};
+ const call={...f.billing.callPolicy[0],protocol:'fixture-cost-v1' as const,phase:'ordinary',requestHash:'a'.repeat(64)};
  const c=await rpc('bill2_claim',{p_actor_id:f.actorId,p_run_id:e.runId,p_sequence:1,p_payload:call});
  const dispatch=new pg.Client({connectionString}),revoke=new pg.Client({connectionString});await dispatch.connect();await revoke.connect();
  try{
@@ -1502,6 +1503,8 @@ it.each(['none','profile','draft','cancel'])('RUNTIME: pending cost with %s revo
   const nextArgs={...f.admit,p_request_id:randomUUID(),p_payload:{...context,input:'Later turn'},p_billing:{...f.billing,input:{...context,input:'Later turn'}}};
   const next=revocation==='cancel'&&process.env.V3_LOCAL_STAGING_SCHEMA==='true'?await rpc('runtime_admit',nextArgs):null;
   finalCostAvailable=true;
+  // Advance only the disposable database clock beyond the shared recovery lease.
+  await db.query("update bill2_calls set rejection_recovery_at=clock_timestamp()-interval '61 seconds' where run_id=$1",[e.runId]);
   const competing=await Promise.all([recover(),recover()]);
   expect(competing.some(r=>r.state==='completed')).toBe(true);
   expect(await recover()).toEqual({state:'completed'});
@@ -2342,4 +2345,116 @@ it('RUNTIME: insufficient admission credits is a definite refusal with no execut
  expect((await db.query('select id from bill2_runs where actor_id=$1',[f.actorId])).rows).toEqual([]);
  expect((await db.query("select id from credit_transactions where user_id=$1 and reason_code='bill2_reserve'",[f.actorId])).rows).toEqual([]);
  expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(0);
+});
+
+it('RUNTIME: automatic pending inventory isolates actors, covers unknown live calls and excludes expired or leased calls',async()=>{
+ const f=await fixture(),other=await fixture(),e=await rpc('runtime_admit',f.admit);
+ const call={...f.billing.callPolicy[0],protocol:'fixture-cost-v1' as const,phase:'ordinary',requestHash:'a'.repeat(64)};
+ const c=await rpc('bill2_claim',{p_actor_id:f.actorId,p_run_id:e.runId,p_sequence:1,p_payload:call});
+ await rpc('bill2_dispatch',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:c.id,p_token:c.dispatchToken});
+ const {fixtureEvidence}=await import('../bill2/fixtureAdapter');
+ const evidence=fixtureEvidence(JSON.stringify({id:'synthetic-auto-'+c.id,model:'runtime-m',final:false,
+  cost:null,currency:'USD',coverage:'request_total'}),call,'response');
+ await rpc('bill2_record',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:c.id,p_evidence:evidence});
+ const inventory=(actorId:string)=>rpc('runtime_pending_financial_batch',{p_actor_id:actorId,p_limit:20});
+ expect(await inventory(other.actorId)).toEqual([]);
+ expect(await inventory(f.actorId)).toMatchObject([{actorId:f.actorId,runId:e.runId,finishAllowed:false}]);
+ expect((await db.query("select has_function_privilege('authenticated','runtime_pending_financial_batch(uuid,integer)','EXECUTE') allowed")).rows[0].allowed).toBe(false);
+ await expect(rpc('runtime_pending_financial_batch',{p_actor_id:f.actorId,p_limit:21})).rejects.toThrow('LIMIT_INVALID');
+ // The inventory never closes an execution or changes a balance.
+ expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(80);
+ await rpc('runtime_cancel',{p_actor_id:f.actorId,p_execution_id:e.executionId});
+ expect(await inventory(f.actorId)).toMatchObject([{finishAllowed:true}]);
+ await rpc('bill2_recovery_claim',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:c.id});
+ expect(await inventory(f.actorId)).toEqual([]);
+ await db.query("update bill2_calls set rejection_recovery_at=clock_timestamp()-interval '61 seconds',recovery_attempts=5 where id=$1",[c.id]);
+ expect(await inventory(f.actorId)).toHaveLength(1);
+ await db.query("update bill2_runs set deadline=clock_timestamp()-interval '25 hours' where id=$1",[e.runId]);
+ expect(await inventory(f.actorId)).toEqual([]);
+ expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(80);
+});
+
+it('RUNTIME: admission and background recovery share a claim and settle a synthetic pending call only once',async()=>{
+ const f=await fixture(),e=await rpc('runtime_admit',f.admit);
+ const call={...f.billing.callPolicy[0],protocol:'fixture-cost-v1' as const,phase:'ordinary',requestHash:'b'.repeat(64)};
+ const c=await rpc('bill2_claim',{p_actor_id:f.actorId,p_run_id:e.runId,p_sequence:1,p_payload:call});
+ await rpc('bill2_dispatch',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:c.id,p_token:c.dispatchToken});
+ const {fixtureEvidence}=await import('../bill2/fixtureAdapter');
+ const raw=(cost:string|null,final:boolean)=>JSON.stringify({id:'synthetic-recovery-'+c.id,
+  model:'runtime-m',final,cost,currency:'USD',coverage:'request_total'});
+ await rpc('bill2_record',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:c.id,
+  p_evidence:fixtureEvidence(raw(null,false),call,'response')});
+ await rpc('runtime_cancel',{p_actor_id:f.actorId,p_execution_id:e.executionId});
+ const {recoverPendingFinancials}=await import('./automaticRecovery');
+ const {erasureFinancialBudget}=await import('../accountErasure/financialRecovery');
+ let lookups=0;
+ const lookup=async()=>{lookups++;const body=raw('0.003',true);return {rawBody:body,
+  rawBodyBase64:Buffer.from(body).toString('base64'),sourceHash:createHash('sha256').update(body).digest('hex'),
+  httpStatus:200,complete:true,transportIssue:null};};
+ const input={database:admin,actorId:f.actorId,budget:erasureFinancialBudget(8_000),adapter:()=>({
+  dispatch:async()=>{throw new Error('No generation allowed');},lookup})};
+ const results=await Promise.all([recoverPendingFinancials(input),recoverPendingFinancials(input)]);
+ expect(results.every(result=>result.failed===0)).toBe(true);
+ expect(lookups).toBe(1);
+ expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(97);
+ expect((await db.query("select reason_code,count(*)::int n from credit_transactions where bill2_run_id=$1 group by reason_code order by reason_code",[e.runId])).rows)
+  .toEqual([{reason_code:'bill2_release',n:1},{reason_code:'bill2_reserve',n:1},{reason_code:'bill2_spend',n:1}]);
+ await recoverPendingFinancials(input);expect(lookups).toBe(1);
+});
+
+it('RUNTIME: automatic recovery finishes a durable cost receipt after the original finalization was interrupted',async()=>{
+ const f=await fixture(),e=await rpc('runtime_admit',f.admit);
+ const call={...f.billing.callPolicy[0],protocol:'fixture-cost-v1' as const,phase:'ordinary',requestHash:'c'.repeat(64)};
+ const c=await rpc('bill2_claim',{p_actor_id:f.actorId,p_run_id:e.runId,p_sequence:1,p_payload:call});
+ await rpc('bill2_dispatch',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:c.id,p_token:c.dispatchToken});
+ await rpc('runtime_cancel',{p_actor_id:f.actorId,p_execution_id:e.executionId});
+ const {fixtureEvidence}=await import('../bill2/fixtureAdapter');
+ await rpc('bill2_record',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:c.id,
+  p_evidence:fixtureEvidence(JSON.stringify({id:'synthetic-durable-'+c.id,model:'runtime-m',final:true,
+   cost:'0.003',currency:'USD',coverage:'request_total'}),call,'lookup')});
+ const {recoverPendingFinancials}=await import('./automaticRecovery');
+ const {erasureFinancialBudget}=await import('../accountErasure/financialRecovery');
+ const denied=async()=>{throw new Error('No provider work needed');};
+ expect(await recoverPendingFinancials({database:admin,actorId:f.actorId,budget:erasureFinancialBudget(8_000),
+  adapter:()=>({dispatch:denied,lookup:denied})})).toMatchObject({selected:1,settled:1,failed:0});
+ expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(97);
+});
+
+
+it('RUNTIME: insufficient credits recovers an old hold then admits the same request exactly once',async()=>{
+ const f=await fixture();
+ const oldBilling={...f.billing,callPolicy:[{...f.billing.callPolicy[0],upperUsd:'0.1'}],
+  limits:{...f.billing.limits,costUsd:'0.1',credits:100,maxPreDeduct:100}};
+ const old=await rpc('runtime_admit',{...f.admit,p_billing:oldBilling});
+ const call={...oldBilling.callPolicy[0],protocol:'fixture-cost-v1' as const,phase:'ordinary',requestHash:'d'.repeat(64)};
+ const c=await rpc('bill2_claim',{p_actor_id:f.actorId,p_run_id:old.runId,p_sequence:1,p_payload:call});
+ await rpc('bill2_dispatch',{p_actor_id:f.actorId,p_run_id:old.runId,p_call_id:c.id,p_token:c.dispatchToken});
+ await rpc('runtime_cancel',{p_actor_id:f.actorId,p_execution_id:old.executionId});
+ const {fixtureEvidence}=await import('../bill2/fixtureAdapter');
+ await rpc('bill2_record',{p_actor_id:f.actorId,p_run_id:old.runId,p_call_id:c.id,
+  p_evidence:fixtureEvidence(JSON.stringify({id:'synthetic-admission-'+c.id,model:'runtime-m',final:true,
+   cost:'0',currency:'USD',coverage:'request_total'}),call,'lookup')});
+ expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(0);
+ const events:string[]=[];const admits:Record<string,unknown>[]=[];
+ const database=new Proxy(admin,{get(target,key){
+  if(key==='rpc')return (name:string,args:Record<string,unknown>)=>{
+   events.push(name);if(name==='runtime_admit')admits.push(args);
+   return target.rpc(name,args);
+  };
+  const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value;
+ }});
+ const user={auth:{getUser:async()=>({data:{user:{id:f.actorId,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
+ const service=runtimeAdmissionService(user,database,{account:'sandbox',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',
+  maxCalls:1,maxOutputTokens:1000,inputBytes:10000,historyItems:0});
+ const request={sessionId:f.s.sessionId,requestId:randomUUID(),input:'synthetic retry',selection:{kind:'ordinary',modelId},network:'deny'};
+ const admitted=await service.prepare(request);
+ expect(admits).toHaveLength(2);expect(admits[1]).toEqual(admits[0]);
+ expect(events.indexOf('runtime_pending_financial_batch')).toBeGreaterThan(events.indexOf('runtime_admit'));
+ expect(events.filter(name=>name==='runtime_pending_financial_batch')).toHaveLength(1);
+ expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(80);
+ expect((await db.query('select id from runtime_executions where actor_id=$1 and request_id=$2',[f.actorId,request.requestId])).rows)
+  .toEqual([{id:admitted.executionId}]);
+ expect((await db.query("select count(*)::int n from credit_transactions where bill2_run_id=$1 and reason_code='bill2_reserve'",[admitted.runId])).rows[0].n).toBe(1);
+ expect((await service.prepare(request)).executionId).toBe(admitted.executionId);
+ expect(admits).toHaveLength(2);
 });

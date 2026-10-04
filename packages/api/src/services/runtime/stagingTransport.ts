@@ -9,12 +9,14 @@ import type {StagingPolicy} from './stagingPolicy';
  * key fallback. The namespace binds recovery to the exact original credential.
  */
 export function stagingTransport(admin:SupabaseClient,policy:StagingPolicy,budget?:RuntimeBudget){
- return openRouterAdapter({allowWorkspaceRead:true,allowAgentTools:true,budget,credential:async identity=>{
+ return openRouterAdapter({allowWorkspaceRead:true,allowAgentTools:true,budget,credential:async (identity,signal)=>{
   const quotes=policy.callPolicies.filter(q=>q.account===identity.account&&q.model===identity.model);
   if(quotes.length!==1)throw new Error('RUNTIME_PROVIDER_BINDING_DENIED');
   budget?.assertCanPersist();
   const query=admin.from('ai_models').select('id,model_id,provider,api_endpoint,api_key').eq('id',quotes[0]!.modelId);
-  const row=await (budget?query.abortSignal(AbortSignal.timeout(Math.max(1,Math.ceil(budget.remainingPersistence())))):query).single();
+  const deadline=budget?AbortSignal.timeout(Math.max(1,Math.ceil(budget.remainingPersistence()))):undefined;
+  const bounded=signal&&deadline?AbortSignal.any([signal,deadline]):signal??deadline;
+  const row=await (bounded?query.abortSignal(bounded):query).single();
   const model=row.data,key=model?.api_key?.trim();
   if(row.error||model?.model_id!==identity.model||!key||!isOpenRouterEndpoint(resolveOpenAICompatibleEndpoint(model.provider,model.api_endpoint)??'')||
    'openrouter-key:'+createHash('sha256').update(key).digest('hex')!==identity.account)

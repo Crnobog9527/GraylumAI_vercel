@@ -24,6 +24,7 @@ export function isRuntimeGateReason(value: unknown): value is RuntimeGateReason 
 
 /** Execution result reason. `call_limited` carries no window, so it always uses the minute text. */
 export function gateResultNotice(unavailable: unknown): string | null {
+  if (unavailable === 'provider_rejected') return '服务暂时不可用，没有扣积分。';
   if (unavailable === 'call_limited') return runtimeGateMessages.minute;
   if (unavailable === 'paused') return runtimeGateMessages.paused;
   if (unavailable === 'limit_unavailable') return runtimeGateMessages.limit_unavailable;

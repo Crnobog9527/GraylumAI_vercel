@@ -61,3 +61,59 @@ Follow-up compatibility commands (all local-only):
 - `node packages/db/tests/v3/run-workbench.mjs --bill2-upgrade-only --with-bill2-schema --legacy-ref=<exact SHA>`: start archived old code before 0105, create old in-flight pre-deductions through its actual BillingService, apply 0105 twice without recreating DB, finish old requests, start candidate, create new unresolved records, stop that process and boot old code, exercise old requests/readers, assert unchanged new identities/evidence, prove the unpatched finance-reader limitation, restart the explicitly patched rollback bundle and verify mixed finance/history, then return to candidate and recover once. Both the old staging SHA above and main `ecf4c6a347038f9352477a98d4171a8ef00c85de` are tested separately. Main has no SDK slice/durable ordinary request APIs; these are not claimed as main features.
 
 The broad archived old-staging suite retains original application code except local model/search transport substitutions. The upgrade/rollback test first proves the untouched old finance reader rejects the mixed ledger, then adds the already-valid `consumption` and `adjustment` transaction types to its enum and restarts; HTTP 500 remains because `cached_tokens=NULL` is still rejected. It then applies the second and final reader change to that archived runtime and restarts it: `cached_tokens: z.number().finite(),` becomes `cached_tokens: z.number().finite().nullable(),` in `packages/api/src/routers/admin.ts`. The runner records the complete `legacy-reader-compat.patch` and its SHA-256. This is the supported old-ref-plus-patch rollback bundle, not proof that an unmodified old commit is fully compatible. The current candidate includes both decoder changes. The canonical usage row retains official cost and unknown counters, and the finance overview counts the new spend once. Its old catalog-model list does not attribute `bill2.aggregate` costs to an individual model; that list is not a complete supplier-cost report. This endpoint does not aggregate or return cache counters, and the database NULL is preserved. Both normal-user denial and administrator access are tested over actual Auth/HTTP/PostgREST. No fake zero or hidden usage row closes the compatibility gap. In particular, old finalizers reject duplicate direct terminal requests; the test checks that their rejection preserves state rather than inventing an idempotent return contract. Compatibility evidence records the same database OID and old/new pre-deduction/run/call IDs throughout version changes. This is distinct from merely reinstantiating the candidate service.
+
+
+## 生成前明确拒绝（0164）
+
+仅接收 OpenRouter 完整 HTTP 402 JSON：数字 `error.code=402`，明确
+`metadata.limit_source` 为 `openrouter_key_limit`、`openrouter_credits` 或
+`openrouter_in_flight_budget`。允许顶层可选 `user_id` 和 metadata 可选 `provider_name`
+（仅字符串或 null），其他字段白名单不变；仍需无 usage、cost、输出或已有矛盾回执。
+依据：[官方错误语义](https://openrouter.ai/docs/api_reference/errors-and-debugging)、
+[额度拒绝来源](https://openrouter.ai/docs/api_reference/limits)。HTTP 200 内嵌错误、
+SSE 错误、超时、断线、5xx 与不完整证据仍走原有核实流程，不能视作免费。
+
+无生成 ID：服务端完整响应 → 请求及响应哈希绑定的 `provider_rejection` →
+既有 `bill2_record` 验证并保存调用拒绝标志 → 原有取消及 v1/v2 结算。
+有生成 ID：严格证明先保存为脱敏 `provider_rejection_pending`，当场通过原领取函数查询。
+最多两个 GET，每个 GET（含凭据读取）预算 1.5 秒，两次间隔 250 毫秒；服务商查询预算上限
+3.25 秒，另加数据库持久化和网络返回时间。首次可靠 404 或匹配 ID/model 的无成本记录
+短暂重查一次；最后仍为有效 404/无成本时按本次拒绝释放。费用（含零）、usage、输出或
+矛盾字段一律交原证据规则；失败、超时、5xx 不等于无成本。无成本支持 absent/null
+`total_cost`，不接受其他成本字段、未知字段或正 token 数。
+这是 [Owner 最新业务决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/627#issuecomment-5980668159)，
+不代表服务商保证零费用；后到实际费用保留矛盾回执，由平台承担，不重扣用户。
+
+删除旧五分钟/三次404门槛。普通待核实调用复用 `bill2_recovery_claim`，60 秒领取间隔防并发，
+不再以三次总尝试永久耗尽；v1 窗口仍为 run deadline +24h，v2 为 call 创建 +24h。
+已有 PAYG 已知实际成本但缺 token 时的三次后 nominal fallback 保留，不是404释放门槛。
+原始超时/5xx/已输出的调用，缺证据仍保留冻结，不适用严格402例外。
+
+0165 只新增 service_role 的只读候选枚举：已有注销 batch 只处理已删除账号，不能覆盖正常账号。
+新枚举复用现有 run/call/execution 数据，账本与领取函数仍是唯一财务依据，无新表或队列。
+常规接入不查询候选清单。仅 runtime_admit 明确返回积分不足时，核实已认证用户自己的窗口内调用
+（单轮预算8秒），再以同一 requestId 和冻结参数重新接入一次；不循环重试。SQL明确拒绝会回滚
+执行与冻结，重试仍受原请求唯一性和重放保护约束；不确定错误只查重放，不重复接入。
+`/api/cron/runtime-recovery` 复用现有 cron 鉴权，单轮55秒。两入口各批20个 run、每run最多32次
+GET、单GET2秒，理论单轮最多640次；实际受时间预算约束。无待核实调用时0次服务商GET。
+同一call每60秒最多一次普通领取；并发争抢不会重复扣费/释放。仍运行的执行只查询，不取消。
+
+Owner 已确认两项目所属团队为免费 Hobby；API核验两项目同团队，但连接器不提供套餐字段，
+CLI套餐读取403，因此实际套餐依据标为 Owner 确认。
+[官方频率限制](https://vercel.com/docs/cron-jobs/usage-and-pricing)：Hobby每天最多一次，
+Pro/Enterprise最短每分钟。当前未向 vercel.json 写入不能部署的分钟表达式；cron route已准备，
+分钟自动调度 BLOCKED。升级并获配置授权后可增加每分钟触发，最多1440轮/环境/天，两个环境
+各自查自己的数据库与原凭据；实际查询量受候选数和预算限制。当前没有新增调度或外部调用。
+
+保留 dispatched_at；不伪造生成 ID，不使用整单 confirmed_failure 补偿此前消费。
+v1 原整笔预冻结算保留未知兄弟调用的冻结；v2 释放本次调用的预扣。
+新候选及查询回执只保留财务投影、证据哈希、领取序号、每次查询时间及结果类别、有效404数，
+不保存错误原文、密钥、私人身份或查询链接。重复/并发回执不重复释放。
+
+0164 核对四个来源函数和自身目标指纹；0165预检复用恢复函数指纹，两次本地回放验证。
+本地测试均使用合成值，不代表远端迁移或真实服务商验收。
+回滚需另追加迁移恢复来源函数，保留拒绝事实、回执及已完成账目，不重扣已释放积分。
+
+窗口到期处理仅方案：输出最小财务清单（调用标识、冻结额、最后查询时间/结果），由总控核对
+服务商账单，再交Owner决定平台承担后释放还是继续保留；执行前另审计幂等键、原冻结和相关
+兄弟调用，执行后对账。没有到期自动释放、延期查询或历史回填代码；历史指定运行不处理。
