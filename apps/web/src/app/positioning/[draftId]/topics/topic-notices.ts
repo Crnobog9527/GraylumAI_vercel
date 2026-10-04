@@ -37,10 +37,12 @@ export function topicOpenTurnNotice(e: { executionId: string; state: string }, c
   busy: boolean; finished: string | null; stopping: boolean; onRetry: () => void; onStop: () => void;
 }): ChatNotice | null {
   if (e.state === 'completed' || e.state === 'cancelled') return null;
-  const running = (ctx.busy || ctx.finished === e.executionId) && e.state !== 'cost_pending';
+  // A finished call matters only until the view catches up; a re-read cost_pending turn keeps its own retry.
+  const settling = ctx.finished === e.executionId && e.state !== 'cost_pending';
+  const running = (ctx.busy || settling) && e.state !== 'cost_pending';
   return { id: e.executionId, tone: running ? 'status' : 'warning', busy: running,
     text: e.state === 'cost_pending' ? '费用待核实；重试只核对原调用。'
       : running ? '正在回复…' : '回复尚未完成，原请求已保留。',
-    actions: [{ label: CHAT_ACTION.retry, disabled: ctx.busy || ctx.finished === e.executionId, onClick: ctx.onRetry },
+    actions: [{ label: CHAT_ACTION.retry, disabled: ctx.busy || settling, onClick: ctx.onRetry },
       { label: CHAT_ACTION.stop, disabled: ctx.stopping, onClick: ctx.onStop }] };
 }

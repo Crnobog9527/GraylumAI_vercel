@@ -45,7 +45,10 @@ it('keeps 正在回复… for a turn whose execute call finished before the view
   expect(notice).toMatchObject({ tone: 'status', busy: true, text: '正在回复…' });
   expect(notice?.actions?.map(action => action.disabled)).toEqual([true, false]);
   expect(open('completed', { finished: 'e1' })).toBeNull();
-  expect(open('cost_pending', { finished: 'e1' })?.text).toBe('费用待核实；重试只核对原调用。');
+  // execute returned cost_pending and the view re-read it: the cost check stays available.
+  const cost = open('cost_pending', { finished: 'e1' });
+  expect(cost?.text).toBe('费用待核实；重试只核对原调用。');
+  expect(cost?.actions?.map(action => action.disabled)).toEqual([false, false]);
 });
 
 it('says 回复尚未完成 for an open turn nothing is running, including another finished execution', () => {

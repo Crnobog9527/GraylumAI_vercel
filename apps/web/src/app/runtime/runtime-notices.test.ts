@@ -109,7 +109,10 @@ it('keeps 正在回复… while the view still shows a turn whose execute call a
  // A finished turn's re-read view shows no open notice at all.
  expect(runtimeTurnNotices(turn({state:'completed'}),ctx({finished:true}))).toEqual([]);
  // Cost verification and capacity keep their own notices.
- expect(runtimeTurnNotices(turn({state:'cost_pending'}),ctx({finished:true}))[0].text).toBe('费用待核实；重试只核对原调用。');
+ // execute returned cost_pending and the view re-read it: the cost check stays available.
+ const [cost]=runtimeTurnNotices(turn({state:'cost_pending'}),ctx({finished:true}));
+ expect(cost.text).toBe('费用待核实；重试只核对原调用。');
+ expect(cost.actions!.map(action=>action.disabled)).toEqual([false,false]);
  expect(runtimeTurnNotices(turn({state:'running'}),ctx({finished:true,capacity:true}))[0].text).toBe(CAPACITY_NOTICE);
 });
 
