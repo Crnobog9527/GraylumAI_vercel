@@ -8,6 +8,7 @@ const refusal = (code: string, message: string, path = 'runtime.prepare') =>
 
 describe('gateAdmissionNotice', () => {
   it.each([
+    ['BAD_REQUEST', 'BILL2_INSUFFICIENT_CREDITS', '积分不足'],
     ['TOO_MANY_REQUESTS', runtimeGateMessages.minute, runtimeGateMessages.minute],
     ['TOO_MANY_REQUESTS', runtimeGateMessages.day, runtimeGateMessages.day],
     ['TOO_MANY_REQUESTS', '请求过于频繁，请在 42 秒后重试', runtimeGateMessages.minute],
@@ -23,6 +24,8 @@ describe('gateAdmissionNotice', () => {
     expect(gateAdmissionNotice(refusal('TOO_MANY_REQUESTS', runtimeGateMessages.minute, 'runtime.execute'), ['runtime.prepare']))
       .toBeNull();
     expect(gateAdmissionNotice(new Error(runtimeGateMessages.minute), ['runtime.prepare'])).toBeNull();
+    expect(gateAdmissionNotice(refusal('INTERNAL_SERVER_ERROR', 'BILL2_INSUFFICIENT_CREDITS'), ['runtime.prepare'])).toBeNull();
+    expect(gateAdmissionNotice(refusal('BAD_REQUEST', 'BILL2_INSUFFICIENT_CREDITS extra'), ['runtime.prepare'])).toBeNull();
     expect(gateAdmissionNotice('TOO_MANY_REQUESTS', ['runtime.prepare'])).toBeNull();
   });
 });
