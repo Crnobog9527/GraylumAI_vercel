@@ -2230,7 +2230,7 @@
   "fn:runtime_test_recovery_policy(uuid,uuid)": "b11f1066ff1d",
   "fn:runtime_test_window_allowed(uuid,jsonb)": "4c8f063a4287",
   "fn:runtime_tool(uuid,uuid,text,text,jsonb,text,jsonb)": "771f5ebb7e59",
-  "fn:runtime_view(uuid,uuid)": "d08c7da6fe58",
+  "fn:runtime_view(uuid,uuid)": "e7ee4aa5d28b",
   "fn:runtime_work_projection(uuid,uuid,uuid)": "fcb191fa3d91",
   "fn:runtime_work_projection_before_opc(uuid,uuid,uuid)": "96650f24836b",
   "fn:runtime_workspace_session(uuid,uuid)": "4ada62e9e6a2",
