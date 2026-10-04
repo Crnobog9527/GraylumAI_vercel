@@ -65,6 +65,38 @@ it.each(['waiting_credits','waiting_resume'])('keeps %s when the original stagin
   actorId:'actor',budget:createRuntimeBudget()},'execution');
  expect(result).toMatchObject({state,unavailable:'RUNTIME_PRICE_CONFIGURATION_PENDING'});
  expect(mock.recover).not.toHaveBeenCalled();
- expect(rpc.mock.calls).toHaveLength(1);
+ expect(rpc.mock.calls).toHaveLength(2);
  expect(execute).toHaveBeenCalledExactlyOnceWith('execution');
+});
+it.each(['auth', 'waiting', 'window'])('finishes erased waiting v2 when %s expires without new generation', async mode => {
+  vi.stubEnv('V3_RUNTIME_STAGING_ENABLED', 'false');
+  if (mode === 'window') mock.policy.mockRejectedValue(Error('expired window'));
+  const execute = mode === 'auth' ? vi.fn(async () => { throw Error('RUNTIME_DENIED'); })
+    : vi.fn(async () => ({ state: 'waiting_credits', body: 'PRIVATE_CANARY' }));
+  mock.factory.mockReturnValue({ execute, recoverFinancial: mock.recover });
+  const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
+    if (name !== 'runtime_financial_recovery') throw Error('UNEXPECTED_RPC');
+    return { data: { state: args.p_finish ? 'cancelled' : 'waiting_credits',
+      billing: { contractVersion: 'bill2.v2', accountClosed: true }, body: 'PRIVATE_CANARY' }, error: null };
+  });
+  const getUser = vi.fn(async () => { throw Error('AUTH_REVOKED'); });
+  expect(await executeOriginalExecution({ admin: { rpc } as never, user: { auth: { getUser } } as never,
+    actorId: 'actor', budget: createRuntimeBudget(),
+    ...(mode === 'window' ? {} : { maintenanceEndpoint: 'http://127.0.0.1:1' }) }, 'execution'))
+    .toEqual({ state: 'cancelled' });
+  expect(rpc.mock.calls.map(([, args]) => args.p_finish)).toEqual([false, true]);
+  expect(mock.recover).not.toHaveBeenCalled(); expect(getUser).not.toHaveBeenCalled();
+  if (mode === 'window') expect(execute).not.toHaveBeenCalled();
+});
+
+it('preserves the original execution failure when erased-waiting maintenance also fails',async()=>{
+ const original=Error('RUNTIME_ORIGINAL_FAILURE');
+ mock.factory.mockReturnValue({execute:async()=>{throw original;},recoverFinancial:mock.recover});
+ const rpc=vi.fn(async()=>({data:null,error:{code:'08006',message:'synthetic storage failure'}}));
+ await expect(executeOriginalExecution({admin:{rpc} as never,user:{auth:{}} as never,
+  actorId:'actor',budget:createRuntimeBudget(),maintenanceEndpoint:'http://127.0.0.1:1'},'execution'))
+  .rejects.toBe(original);
+ expect(rpc).toHaveBeenCalledExactlyOnceWith('runtime_financial_recovery',{
+  p_actor_id:'actor',p_execution_id:'execution',p_finish:false,
+ });
 });

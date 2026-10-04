@@ -840,3 +840,41 @@ vi.mock('../runtime/newWorkGate', async importOriginal => ({
   ...await importOriginal<typeof import('../runtime/newWorkGate')>(),
   ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
+
+
+it('RUNTIME: Q1 pending organizer guards OPC material and new admission while allowing original replay', async () => {
+  const f = await fixture();
+  const executionId = await f.seed();
+  const saved = (await db.query(`select e.*,r.payload billing from runtime_executions e
+    join bill2_runs r on r.id=e.billing_run_id where e.id=$1`, [executionId])).rows[0];
+  // DB-only synthetic waiting fixture, built from the real OPC admission above.
+  // The seed already cancelled/refunded its v1 reservation; no provider runs.
+  await db.query(`update bill2_runs set contract_version='bill2.v2',reserved=0,pre_deduct_id=null,
+    cancel_requested=false,closed=false,runtime_cursor=1,runtime_epoch=1 where id=$1`, [saved.billing_run_id]);
+  await db.query(`update runtime_executions set state='waiting_credits',result=null,
+    primary_result=$2,unavailable_reason=null where id=$1`, [executionId, {body:'Synthetic mentor'}]);
+  const snapshot = async () => (await db.query(`select
+    (select to_jsonb(s) from runtime_sessions s where id=$1) session,
+    (select coalesce(jsonb_agg(to_jsonb(m) order by revision),'[]') from runtime_scope_material m where session_id=$1) material,
+    (select coalesce(jsonb_agg(to_jsonb(t) order by request_id),'[]') from opc_turns t where session_id=$1) turns,
+    (select to_jsonb(r) from artifact_rounds r where id=$2) round`, [f.d.sessionId, f.d.roundId])).rows[0];
+  const before = await snapshot();
+  const newRequestId = randomUUID();
+  for (const state of ['waiting_credits','waiting_resume','running','interrupted','cost_pending']) {
+    await db.query('update runtime_executions set state=$2 where id=$1', [executionId,state]);
+    const context = await rpc('runtime_session_context',{p_actor_id:f.actor,p_session_id:f.d.sessionId});
+    expect(context.waitingOrganizer).toMatchObject({executionId,state,cursor:1,epoch:1});
+    await expect(rpc('opc_step_material',{p_actor_id:f.actor,p_draft_id:f.draft.draftId,
+      p_request_id:newRequestId,p_step_id:'step-0',p_purpose:'mentor',p_input:'New message'}))
+      .rejects.toThrow('RUNTIME_ORGANIZER_PENDING');
+    await expect(rpc('runtime_admit',{p_actor_id:f.actor,p_session_id:f.d.sessionId,p_request_id:newRequestId,
+      p_payload:saved.payload,p_billing:saved.billing})).rejects.toThrow('RUNTIME_ORGANIZER_PENDING');
+    expect(await snapshot()).toEqual(before);
+    expect(await rpc('runtime_admission_replay',{p_actor_id:f.actor,p_request_id:saved.request_id,
+      p_request:saved.payload.request})).toMatchObject({executionId});
+    expect(await rpc('opc_step_material',{p_actor_id:f.actor,p_draft_id:f.draft.draftId,
+      p_request_id:saved.request_id,p_step_id:'step-0',p_purpose:'mentor',p_input:saved.payload.request.input}))
+      .toMatchObject({turnToken:saved.payload.opcTurnToken});
+    expect(await snapshot()).toEqual(before);
+  }
+});

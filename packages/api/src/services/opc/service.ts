@@ -1,4 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {finishWaitingOrganizer,type ResumeWaitingOrganizer} from "../runtime/waitingOrganizer";
+import {StagingAccessError} from "../runtime/stagingErrors";
+import {TOPIC_WORKSPACE_INSTRUCTION} from "./topicInstructions";
 import { throwOpcRpcError } from "./contentBindingError";
 import { capturePending, capturePendingInput, captureResolveInput } from "./capture";
 import { opcInformation } from "./information";
@@ -39,16 +42,7 @@ export const opcSaveResult = z
 export const opcTopicBind = z
   .object({ draftId: uuid, requestId: uuid, sourceVersionId: uuid })
   .strict();
-/**
- * The host owns the topic workspace rules. The confirmed positioning content is
- * the only established fact set; candidate rows are proposals the user still
- * has to accept, and a proposed account name is never an existing account.
- */
-const TOPIC_WORKSPACE_INSTRUCTION =
-  "This turn runs inside the user's first-week topic workspace and may continue into later dated ranges. Work conversationally in the user's own language and treat the confirmed positioning content supplied as scope material as the only established facts about the business, accounts, audience and goals. Ask one focused question when required information is missing; do not force a fixed seven-item week. " +
-  "You may propose concrete topics, dates, titles and complete briefs. Every brief must state what the content covers, who it is for, why it matters now, a useful structure, and the hypothesis to validate. A proposed account name is not a registered, existing or verified external account and you must never imply otherwise. Never invent traction, results, audience data or platform rules. " +
-  "Answer the user's actual message first. When offering or revising topics, end with exactly one JSON code block containing only an array with id (UUID), platform, account, title, brief, day and contentType (article, image_text, video or unknown; ask when the intended form is unclear). When the user explicitly says to adopt all or a subset of the most recent offered topics, end with exactly one JSON code block containing only {\"action\":\"adopt\",\"itemIds\":[UUIDs]}; do this only for clear adoption, never for vague agreement, questions, later, close, or opening a link. The host persists the draft and performs the business action; never claim it succeeded yourself. Do not create external accounts, publish, generate media or claim an external action occurred. ";
-export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:StagingPolicy) {
+export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:StagingPolicy, resumeWaitingOrganizer?:ResumeWaitingOrganizer) {
   async function rpc(name: string, args: Record<string, unknown>) {
     const a = await user.auth.getUser();
     if (a.error || !a.data.user || !isEmailVerified(a.data.user))
@@ -56,6 +50,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
     const r = await admin
       .rpc(name, { ...args, p_actor_id: a.data.user.id })
       .abortSignal(AbortSignal.timeout(10000));
+    if (r.error?.message === "RUNTIME_ORGANIZER_PENDING") throw new StagingAccessError('RUNTIME_ORGANIZER_PENDING');
     if (r.error) throwOpcRpcError(r.error);
     return r.data;
   }
@@ -136,13 +131,18 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       if (replay.error) throw new Error("OPC_REQUEST_CONFLICT");
       if (replay.data) {
         // Validate the original host step/purpose as well as Runtime identity.
-        // 0155 binds selected request.input to the saved option before admission.
-        // Replay has verified those original bytes; no visible history is needed.
         await rpc("opc_step_material", {
           p_draft_id: v.draftId, p_request_id: v.requestId,
           p_step_id: v.stepId, p_purpose: v.purpose, p_input: v.input,
         });
         return replay.data;
+      }
+      const session = await rpc("runtime_session_context", { p_session_id: d.sessionId });
+      const blocked = await finishWaitingOrganizer(session, v.requestId, resumeWaitingOrganizer);
+      if (blocked) return blocked;
+      if (session.waitingOrganizer) {
+        d = await rpc("opc_query", { p_draft_id: v.draftId });
+        snapshot = await workbenchService(user, admin).read(d.projectId, d.roundId);
       }
       if (v.purpose === "mentor") {
         const pending = await capturePending(rpc, v.draftId);

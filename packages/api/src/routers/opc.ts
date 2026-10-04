@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import type { AgentTurnEvent } from "../shared/agentTurn";
 import { capturePendingInput, captureResolveInput } from "../services/opc/capture";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
@@ -29,7 +30,7 @@ import {
 } from "../services/opc/service";
 const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
   ctx.runtimeBudget?.timing?.enter('policy');
-  let real;
+  let real:Awaited<ReturnType<typeof loadStagingPolicy>>|undefined;
   try {
     if (!ctx.supabaseAdmin || !ctx.hasSupabaseAdminPrivileges)
       throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
@@ -40,7 +41,11 @@ const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
     if (!local) real = await loadStagingPolicy(ctx.supabaseAdmin, ctx.user.id, process.env);
   } catch (cause) { throw stagingProcedureError(cause, path); }
   ctx.runtimeBudget?.timing?.enter('host');
-  const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin, real), stagingPolicy: real } });
+  const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin, real,
+    token => executeOriginalExecution({
+      admin: ctx.supabaseAdmin, user: ctx.userScopedSupabase, actorId: ctx.user.id, budget: ctx.runtimeBudget,
+      authorization: ctx.headers?.get("Authorization"), maintenanceEndpoint: real ? undefined : runtimeLocalEndpoint(),
+    }, token.executionId, undefined, token)), stagingPolicy: real } });
   if (!result.ok && !isOpcRefusal(result.error.cause)) throw stagingProcedureError(result.error, path);
   return result;
 });
@@ -79,7 +84,7 @@ export const opcRouter = router({
   // Replay, reservation and replay-only recovery are those two paths'.
   mentorTurnStream: procedure
     .input(opcGenerate)
-    .mutation(async function* ({ ctx, input, path }) {
+    .mutation(async function* ({ ctx, input, path }): AsyncGenerator<AgentTurnEvent> {
       // The route returns before this stream ends; release this stream's reference.
       const timing = ctx.runtimeBudget?.timing;
       try {
@@ -95,8 +100,12 @@ export const opcRouter = router({
             catch { await assertStagingReadAccess(ctx.supabaseAdmin, ctx.user.id, process.env); }
           }
           const prepare = () => ctx.opc.prepareStep(input);
-          admitted = z.object({ executionId: z.string().uuid() }).passthrough()
-            .parse(timing ? await timing.run(prepare) : await prepare());
+          const prepared = timing ? await timing.run(prepare) : await prepare();
+          if (prepared.admitted === false) {
+            yield { type: "result" as const, result: prepared };
+            return;
+          }
+          admitted = z.object({ executionId: z.string().uuid() }).passthrough().parse(prepared);
         } catch (cause) {
           throw isOpcRefusal(cause) ? cause : stagingProcedureError(cause, path);
         }

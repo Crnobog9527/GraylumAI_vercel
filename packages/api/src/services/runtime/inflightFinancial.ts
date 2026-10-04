@@ -36,6 +36,29 @@ export async function finishOriginalFinancial(input: {
   }
 }
 
+/** SQL proves erasure and the original binding before a waiting v2 execution can close.
+ * No Auth refresh, price-window check, new dispatch or private result is needed. */
+export async function finishErasedWaiting(input: {
+  database: BillingRpc; actorId: string; executionId: string; budget: RuntimeBudget;
+}): Promise<{ state: 'completed' | 'cancelled' | 'cost_pending' } | undefined> {
+  const inspected = await input.database.rpc('runtime_financial_recovery', {
+    p_actor_id: input.actorId, p_execution_id: input.executionId, p_finish: false,
+  });
+  if (inspected.error) {
+    if (typeof inspected.error === 'object' && 'message' in inspected.error
+      && inspected.error.message === 'RUNTIME_EXECUTION_STILL_ALLOWED') return undefined;
+    throw new Error('ERASURE_FINANCIAL_BINDING_OR_STORAGE_FAILED');
+  }
+  const state = inspected.data as { state?: string; billing?: { accountClosed?: boolean; contractVersion?: string } };
+  if (state?.billing?.accountClosed !== true || state.billing.contractVersion !== 'bill2.v2'
+    || !['waiting_credits', 'waiting_resume'].includes(state.state ?? '')) return undefined;
+  const result = await finishOriginalFinancial(input);
+  const stateName = result.state;
+  if (stateName !== 'completed' && stateName !== 'cancelled' && stateName !== 'cost_pending')
+    throw new Error('ERASURE_FINANCIAL_FINISH_FAILED');
+  return { state: stateName };
+}
+
 /** Original invocation only. A successful SQL dispatch establishes the financial binding;
  * neither browser input nor a failed/rotated dispatch can establish it. Business Auth stays intact. */
 export function inflightFinancialHost(input: {

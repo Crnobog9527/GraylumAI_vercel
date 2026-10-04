@@ -2,6 +2,9 @@
 import { z } from 'zod';
 import { router, adminProcedure } from '../trpc';
 import { logger } from '../lib/logger';
+import {
+  meteringReviewInput, reviewMetering, meteringReviewSnapshotInput, meteringReviewSnapshot,
+} from '../services/bill2/meteringReview';
 import { buildBill2ModelReport, type Bill2CallReportRow } from '../services/bill2ModelReport';
 
 import {
@@ -14,6 +17,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 // BILL-UNIT: admin-only BILL2 cost per model with frozen multipliers (via bill2_admin_call_report).
 export const billingReportRouter = router({
+  meteringReviewSnapshot: adminProcedure.input(meteringReviewSnapshotInput)
+    .query(({ ctx, input }) => meteringReviewSnapshot(ctx.supabase, ctx.user.id, input.callId)),
+  reviewMetering: adminProcedure.input(meteringReviewInput)
+    .mutation(({ ctx, input }) => reviewMetering(ctx.supabase, ctx.user.id, input)),
   platformAbsorbConfig: adminProcedure.query(({ ctx }) => readAbsorbConfig(ctx.supabase)),
   savePlatformAbsorbConfig: adminProcedure.input(absorbConfigSchema)
     .mutation(({ ctx, input }) => saveAbsorbConfig(ctx.supabase, input)),

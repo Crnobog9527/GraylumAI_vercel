@@ -5,6 +5,8 @@ import { logger } from '../../lib/logger';
 import { DatabaseReadError } from '../../lib/databaseReadError';
 
 const failures = {
+  RUNTIME_ORGANIZER_PENDING: ['PRECONDITION_FAILED', 'RUNTIME_ORGANIZER_PENDING：上一轮整理尚未完成，新消息尚未准入，请先处理原任务。'],
+  RUNTIME_USAGE_CONFIGURATION_REQUIRED: ['PRECONDITION_FAILED', 'RUNTIME_USAGE_CONFIGURATION_REQUIRED：使用额度配置低于本任务剩余调用数，需要管理员调整使用额度；也可取消原任务。'],
   RUNTIME_PRICE_CONFIGURATION_PENDING: ['PRECONDITION_FAILED', 'RUNTIME_PRICE_CONFIGURATION_PENDING：原测试窗口或报价不可用，请管理员处理；原任务保持等待。'],
   RUNTIME_RESUME_CONFLICT: ['PRECONDITION_FAILED', 'RUNTIME_RESUME_CONFLICT：任务状态已更新，请刷新原任务后继续。'],
   RUNTIME_RESUME_SOURCE_CHANGED: ['PRECONDITION_FAILED', 'RUNTIME_RESUME_SOURCE_CHANGED：资料或会话已变化，请在原任务处理冲突；已完成内容和费用保留。'],

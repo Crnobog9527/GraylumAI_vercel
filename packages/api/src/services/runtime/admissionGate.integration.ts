@@ -67,7 +67,7 @@ export function registerAdmissionGateTests(db:pg.Client,fixture:()=>Promise<Fixt
      limit.mockResolvedValue({success:false,reason:'rate_limited',retryAfter:30,window:'minute'});
      await expect(submit(rejected)).rejects.toMatchObject({code:'TOO_MANY_REQUESTS'});
      expect(await counts()).toEqual(before);
-     expect(limit).toHaveBeenLastCalledWith(f.actor,'admission',expect.any(Object),'local',1);
+     expect(limit).toHaveBeenLastCalledWith(f.actor,'admission',expect.any(Object),'local',1,'bill2.v1');
      if(entry==='runtime'||entry==='stream')break;
      const material=(await db.query('select request_id,material_revision from opc_turns where draft_id=$1 order by request_id',
       [d.draftId])).rows;

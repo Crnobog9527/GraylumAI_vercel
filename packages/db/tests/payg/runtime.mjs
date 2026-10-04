@@ -4,19 +4,23 @@ import {randomUUID} from 'node:crypto';
 import {rpc} from '../erasure-b2a/cases.mjs';
 import {createFixture} from './fixture.mjs';
 import {runtimeOwnerCases} from './runtime-owner.mjs';
+import {runtimeExhaustedCases} from './runtime-exhausted.mjs';
+import {runtimeErasureCases} from './runtime-erasure.mjs';
 export async function runtimeCases({db,Client,connectionString,report}) {
-  async function setup(extraContext={}) {
+  async function setup(extraContext={},maxCalls=8) {
     const f=await createFixture(db,{credits:0,threshold:1});
     const session=await rpc(db,'runtime_start',f.actor,randomUUID(),{scope:f.payload.scope});
     const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'synthetic input',instructions:'Answer',
       model:f.claimPayload.model,modelId:f.payload.modelId,maxOutputTokens:1000,maxTurns:1,historyItems:0,tools:[],sources:[],network:'deny',...extraContext};
-    const payload={...f.payload,input:context};
+    const payload={...f.payload,input:context,limits:{...f.payload.limits,maxCalls}};
     const admitted=await rpc(db,'runtime_admit',f.actor,session.sessionId,randomUUID(),context,payload);
     const begin=await rpc(db,'runtime_execution',f.actor,admitted.executionId,'begin',null);
     assert.equal(begin.live,true);assert.equal(begin.epoch,1);
     return {...f,run:admitted.runId,execution:admitted.executionId,session:session.sessionId,context,payload};
   }
+  await runtimeExhaustedCases({db,Client,connectionString,report,setup});
   await runtimeOwnerCases({db,Client,connectionString,report,setup});
+  await runtimeErasureCases({db,report,setup});
   const lost=await setup();
   await db.query("UPDATE bill2_runs SET runtime_dispatch_deadline=clock_timestamp()-interval '1 second' WHERE id=$1",[lost.run]);
   const recoverable=await rpc(db,'runtime_execution',lost.actor,lost.execution,'read',null);
