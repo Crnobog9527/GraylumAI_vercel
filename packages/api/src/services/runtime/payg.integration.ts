@@ -6,8 +6,9 @@ import { createClient } from '@supabase/supabase-js';
 import { expect, it, vi } from 'vitest';
 import { finishWaitingOrganizer } from './waitingOrganizer';
 import { runtimeExecutor } from './execute';
+import { createRuntimeBudget } from './budget';
 
-it('RUNTIME: PAYG SDK organizer waits and original cursor resumes without duplicate primary charges or session items', async () => {
+it.each([false,true])('RUNTIME: PAYG SDK organizer waits and original cursor resumes without duplicate primary charges or session items (exhausted=%s)', async exhausted => {
   const connectionString = process.env.V3_LOCAL_DB;
   if (!connectionString?.startsWith('postgres://postgres@127.0.0.1:')
     || !connectionString.endsWith('/v3_disposable')) throw new Error('isolated runner required');
@@ -89,7 +90,16 @@ it('RUNTIME: PAYG SDK organizer waits and original cursor resumes without duplic
     const gate = vi.fn(async (verifiedActor: string, calls: number) => {
       expect(verifiedActor).toBe(actor); expect(calls).toBeGreaterThan(0); return { ok: true as const };
     });
-    const host = runtimeExecutor({ database: admin, actor: async () => actor, callGate: gate,
+    let elapsed=0,exhaustAfterClaim=false;
+    const budget=createRuntimeBudget(()=>elapsed);
+    const database={rpc:async(name:string,args:Record<string,unknown>)=>{
+      const result=await admin.rpc(name,args);
+      if(exhaustAfterClaim&&name==='bill2_claim'&&args.p_sequence===2&&result.data?.id){
+        elapsed=budget.workDeadline;exhaustAfterClaim=false;
+      }
+      return result;
+    }};
+    const host = runtimeExecutor({ database, budget, actor: async () => actor, callGate: gate,
       endpoint: 'http://127.0.0.1:' + address.port });
     const waiting = await host.execute(admitted.executionId);
     expect(waiting).toMatchObject({ state: 'waiting_credits', code: 'RUNTIME_WAITING_CREDITS',
@@ -128,6 +138,40 @@ it('RUNTIME: PAYG SDK organizer waits and original cursor resumes without duplic
       idempotency_key,balance_before,balance_after) values($1,100,'addition','grant','opening_grant','system',$2,97,197)`,
     [actor, 'payg-sdk-resume:' + actor]);
     await db.query('update profiles set credits=197 where id=$1', [actor]);
+    if(exhausted){
+      exhaustAfterClaim=true;
+      expect(await finishWaitingOrganizer(await sessionContext(),nextRequestId,resumeOrganizer))
+        .toMatchObject({state:'waiting_resume',admitted:false,remainingCalls:0});
+      expect(requests.map(r=>r.model)).toEqual([model]);
+      const financial=async()=>(await db.query(`select credits,
+        (select sum(amount)::int from credit_transactions where user_id=$1) ledger,
+        (select jsonb_agg(jsonb_build_object('state',state,'charged',charged_delta,'settled',settled_at)
+          order by sequence) from bill2_calls where run_id=$2) calls from profiles where id=$1`,
+        [actor,admitted.runId])).rows[0];
+      const before=await financial();
+      expect(before).toMatchObject({credits:197,ledger:197,calls:[{charged:3},{state:'cancelled',charged:0}]});
+      const freshHost=runtimeExecutor({database:admin,actor:async()=>actor,callGate:gate,
+        endpoint:'http://127.0.0.1:'+address.port});
+      const token=(await sessionContext()).waitingOrganizer;
+      await expect(freshHost.execute(admitted.executionId,undefined,{...token,epoch:token.epoch-1}))
+        .rejects.toThrow('RUNTIME_RESUME_CONFLICT');
+      const callsBefore=gate.mock.calls.length;
+      expect(await finishWaitingOrganizer(await sessionContext(),nextRequestId,
+        value=>freshHost.execute(value.executionId,undefined,value))).toBeNull();
+      expect(gate.mock.calls).toHaveLength(callsBefore);
+      expect(await freshHost.execute(admitted.executionId)).toMatchObject({state:'cancelled'});
+      expect(await financial()).toEqual(before);
+      expect((await sessionContext()).waitingOrganizer).toBeNull();
+      expect((await db.query('select primary_result from runtime_executions where id=$1',
+        [admitted.executionId])).rows[0].primary_result.body).toBe('Preserved primary result');
+      const nextContext={...context,input:'Next after exhausted organizer',attachedOrganizer:undefined,
+        request:{sessionId:session.sessionId,requestId:nextRequestId}};
+      const next=await rpc('runtime_admit',{p_actor_id:actor,p_session_id:session.sessionId,
+        p_request_id:nextRequestId,p_payload:nextContext,p_billing:{...billing,input:nextContext}});
+      expect(await freshHost.execute(next.executionId)).toMatchObject({state:'completed'});
+      expect(requests.map(r=>r.model)).toEqual([model,model]);
+      return;
+    }
     expect(await finishWaitingOrganizer(await sessionContext(),nextRequestId,resumeOrganizer)).toBeNull();
     const completed = await host.execute(admitted.executionId);
     expect(completed).toMatchObject({ state: 'completed', body: 'Preserved primary result',

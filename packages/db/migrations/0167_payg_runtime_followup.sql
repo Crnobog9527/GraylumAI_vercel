@@ -10,19 +10,53 @@ DO $$ BEGIN
   RAISE EXCEPTION 'PAYG_B2_SOURCE_MISMATCH: opc_step_material(uuid,uuid,uuid,text,text,text)';END IF;
  IF md5(pg_get_functiondef('public.runtime_session_context(uuid,uuid)'::regprocedure)) NOT IN ('9a159d2e2cbf6f6bcc151410fc57564d','67b8e8ca0a4f07c95e5758676a1a803c') THEN
   RAISE EXCEPTION 'PAYG_B2_SOURCE_MISMATCH: runtime_session_context(uuid,uuid)';END IF;
- IF md5(pg_get_functiondef('public.bill2_payg_claim(uuid,uuid,integer,jsonb)'::regprocedure)) NOT IN ('a67839c4bbbe56e72cebf972a2d19ff5','ae19763d7257cb9174806907a716a602') THEN
+ IF md5(pg_get_functiondef('public.bill2_payg_claim(uuid,uuid,integer,jsonb)'::regprocedure)) NOT IN ('a67839c4bbbe56e72cebf972a2d19ff5','ca126fb624fb5b755471f9e26dfc37db') THEN
   RAISE EXCEPTION 'PAYG_B2_SOURCE_MISMATCH: bill2_payg_claim(uuid,uuid,integer,jsonb)';END IF;
+ IF md5(pg_get_functiondef('public.runtime_execution(uuid,uuid,text,jsonb)'::regprocedure)) NOT IN ('6d3ae6342bf0eaaf1899da954203f658','fb0a164b29dfd4ae43f7c9059473c053') THEN
+  RAISE EXCEPTION 'PAYG_B2_SOURCE_MISMATCH: runtime_execution(uuid,uuid,text,jsonb)';END IF;
 END $$;
 -- The audit table already owns administrator history. This pointer grants only
 -- a reviewed exception to the model-level new-claim block, never a new money fact.
 ALTER TABLE bill2_calls ADD COLUMN IF NOT EXISTS metering_review_audit_id uuid
  REFERENCES user_activity_logs(id);
+-- Only unresolved anomalies enter the model gate. Approved history is absent
+-- from this index and claim never hashes historical payloads or receipts.
+CREATE INDEX IF NOT EXISTS bill2_payg_unreviewed_model ON bill2_calls(model)
+ WHERE (budget_conflict OR metering_missing OR metering_exit) AND metering_review_audit_id IS NULL;
+CREATE OR REPLACE FUNCTION public.bill2_payg_review_invalidate_call() RETURNS trigger
+LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+BEGIN
+ IF ROW(NEW.id,NEW.run_id,NEW.model,NEW.payload,NEW.budget_conflict,NEW.metering_missing,NEW.metering_exit,
+   NEW.settled_at,NEW.selected_cost_usd,NEW.nominal_cost_usd,NEW.nominal_reconstructed_usd,NEW.charged_delta)
+  IS DISTINCT FROM ROW(OLD.id,OLD.run_id,OLD.model,OLD.payload,OLD.budget_conflict,OLD.metering_missing,OLD.metering_exit,
+   OLD.settled_at,OLD.selected_cost_usd,OLD.nominal_cost_usd,OLD.nominal_reconstructed_usd,OLD.charged_delta)
+ THEN NEW.metering_review_audit_id:=NULL;END IF;
+ RETURN NEW;
+END $$;
+CREATE OR REPLACE FUNCTION public.bill2_payg_review_invalidate_receipt() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ -- Receipts are immutable: a newly inserted receipt is the only evidence change.
+ -- The existing writer already holds the run/model locks, also used by review.
+ UPDATE bill2_calls SET metering_review_audit_id=NULL
+ WHERE id=NEW.call_id AND metering_review_audit_id IS NOT NULL;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.bill2_payg_review_invalidate_call(),public.bill2_payg_review_invalidate_receipt()
+ FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS bill2_payg_review_call_changed ON bill2_calls;
+CREATE TRIGGER bill2_payg_review_call_changed BEFORE UPDATE ON bill2_calls
+ FOR EACH ROW WHEN (OLD.metering_review_audit_id IS NOT NULL)
+ EXECUTE FUNCTION public.bill2_payg_review_invalidate_call();
+DROP TRIGGER IF EXISTS bill2_payg_review_receipt_added ON bill2_receipts;
+CREATE TRIGGER bill2_payg_review_receipt_added AFTER INSERT ON bill2_receipts
+ FOR EACH ROW EXECUTE FUNCTION public.bill2_payg_review_invalidate_receipt();
 CREATE OR REPLACE FUNCTION public.bill2_payg_metering_hash(c bill2_calls) RETURNS text
 LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
  SELECT encode(sha256(convert_to(jsonb_build_object(
   'callId',c.id,'runId',c.run_id,'payloadHash',encode(sha256(convert_to(c.payload::text,'utf8')),'hex'),
   'budgetConflict',c.budget_conflict,'meteringMissing',c.metering_missing,'meteringExit',c.metering_exit,
-  'settledAt',c.settled_at,'selectedCost',c.selected_cost_usd,'nominalCost',c.nominal_cost_usd,
+  'settledAt',extract(epoch FROM c.settled_at),'selectedCost',c.selected_cost_usd,'nominalCost',c.nominal_cost_usd,
   'nominalReconstructed',c.nominal_reconstructed_usd,'chargedDelta',c.charged_delta,
   'receipts',coalesce((SELECT jsonb_agg(jsonb_build_object('id',r.id,'hash',r.payload_hash,
    'financialHash',r.financial_projection_hash,'conflict',r.conflict) ORDER BY r.id)
@@ -325,10 +359,7 @@ BEGIN
    OR p->>'phase' IS DISTINCT FROM r.runtime_checkpoint->>'phase')
  THEN RAISE EXCEPTION 'RUNTIME_CHECKPOINT_CONFLICT';END IF;
  IF EXISTS(SELECT 1 FROM bill2_calls x WHERE x.model=p->>'model'
-  AND (x.budget_conflict OR x.metering_missing OR x.metering_exit)
-  AND NOT EXISTS(SELECT 1 FROM user_activity_logs review WHERE review.id=x.metering_review_audit_id
-   AND review.action='bill2_metering_review' AND review.details->>'callId'=x.id::text
-   AND review.details->>'evidenceHash'=bill2_payg_metering_hash(x))) THEN RAISE EXCEPTION 'BILL2_PAYG_METERING_BLOCKED';END IF;
+  AND (x.budget_conflict OR x.metering_missing OR x.metering_exit) AND x.metering_review_audit_id IS NULL) THEN RAISE EXCEPTION 'BILL2_PAYG_METERING_BLOCKED';END IF;
  IF EXISTS(SELECT 1 FROM bill2_calls WHERE run_id=rid AND settled_at IS NULL) THEN RAISE EXCEPTION 'BILL2_CALL_PENDING';END IF;
  u:=bill2_decimal(p->'upperUsd');
  SELECT count(*),coalesce(sum(CASE WHEN state='cancelled' AND dispatched_at IS NULL THEN 0 ELSE coalesce(selected_cost_usd,upper_usd) END),0)
@@ -383,6 +414,213 @@ BEGIN
  jsonb_build_object('contractVersion','bill2.v2','preDeductId',q.pre_deduct_id,'G',g::text,'H',h,'A',avail,'L',threshold->'credits','thresholdVersion',cfg->>'version'));
  UPDATE bill2_runs SET paused_reason=NULL,version=version+1 WHERE id=rid;
  RETURN jsonb_build_object('id',c.id,'state',c.state,'dispatchToken',c.token);
+END $function$
+
+;
+CREATE OR REPLACE FUNCTION public.runtime_execution(p_actor_id uuid, p_execution_id uuid, p_action text, p_result jsonb DEFAULT NULL::jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE s runtime_sessions;e runtime_executions;b bill2_runs;live boolean:=false;v jsonb;next_seq integer;pending_call bill2_calls;
+BEGIN
+ PERFORM bill2_actor(p_actor_id);
+ SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND actor_id=p_actor_id;
+ IF e.id IS NULL THEN RAISE EXCEPTION 'RUNTIME_EXECUTION_DENIED';END IF;
+ SELECT * INTO s FROM runtime_sessions WHERE id=e.session_id AND actor_id=p_actor_id FOR UPDATE;
+ SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id FOR UPDATE;
+ SELECT * INTO b FROM bill2_runs WHERE id=e.billing_run_id FOR UPDATE;
+ IF s.id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,s.scope),false) THEN RAISE EXCEPTION 'RUNTIME_SCOPE_DENIED';END IF;
+ IF e.unavailable_reason IS NOT NULL AND p_action IN ('begin','read') THEN
+  RETURN jsonb_build_object('executionId',e.id,'sessionId',s.id,'runId',b.id,'state',e.state,'live',false,'cancelRequested',true,'result',NULL,'unavailableReason',e.unavailable_reason);
+ END IF;
+ IF NOT runtime_history_available(e.id) THEN RAISE EXCEPTION 'RUNTIME_CONTEXT_REVOKED';END IF;
+ PERFORM runtime_billing_allowed(p_actor_id,b.payload,b.id);
+ IF p_action IN ('fail_before_dispatch','interrupt','checkpoint_match','checkpoint_primary','check_latest','complete',
+  'owner_cancel','owner_session','owner_tool') AND b.contract_version='bill2.v2' THEN
+  IF coalesce(p_result->>'epoch','') !~ '^[1-9][0-9]*$'
+   OR (p_result->>'epoch')::bigint IS DISTINCT FROM b.runtime_epoch
+   OR e.state IN ('prepared','waiting_credits','waiting_resume','cancelled')
+   OR EXISTS(SELECT 1 FROM jsonb_object_keys(p_result) k WHERE k NOT IN ('epoch','value'))
+  THEN RAISE EXCEPTION 'RUNTIME_RESUME_CONFLICT';END IF;
+  p_result:=nullif(p_result->'value','null'::jsonb);
+ END IF;
+ -- These three bounded delegates hold the same Session/execution/run locks as
+ -- resume. No asynchronous check-then-write gap, new RPC family or new authority.
+ IF p_action IN ('owner_cancel','owner_session','owner_tool') THEN
+  IF b.contract_version<>'bill2.v2' THEN RAISE EXCEPTION 'RUNTIME_ACTION_DENIED';END IF;
+  IF p_action='owner_cancel' THEN
+   RETURN runtime_cancel(p_actor_id,e.id);
+  ELSIF p_action='owner_session' THEN
+   IF coalesce(p_result->>'action','') NOT IN ('freeze','append') THEN RAISE EXCEPTION 'RUNTIME_ACTION_DENIED';END IF;
+   RETURN runtime_session_items(p_actor_id,s.id,e.id,p_result->>'action',nullif(p_result->'items','null'::jsonb),
+    (p_result->>'limit')::int,(p_result->>'batch')::int);
+  ELSE
+   IF coalesce(p_result->>'action','') NOT IN ('claim','complete') THEN RAISE EXCEPTION 'RUNTIME_ACTION_DENIED';END IF;
+   RETURN runtime_tool(p_actor_id,e.id,p_result->>'callId',p_result->>'name',p_result->'arguments',
+    p_result->>'action',nullif(p_result->'result','null'::jsonb));
+  END IF;
+ END IF;
+
+ IF b.contract_version='bill2.v2' AND p_action IN ('begin','read')
+  AND e.state IN ('running','interrupted') AND b.runtime_dispatch_deadline<=clock_timestamp()
+  AND NOT b.closed AND NOT b.cancel_requested AND NOT b.conflict THEN
+  SELECT * INTO pending_call FROM bill2_calls WHERE run_id=b.id AND state='prepared' AND dispatched_at IS NULL
+   AND settled_at IS NULL ORDER BY sequence DESC LIMIT 1 FOR UPDATE;
+  IF pending_call.id IS NOT NULL AND pending_call.runtime_epoch=b.runtime_epoch AND pending_call.dispatch_deadline<=clock_timestamp() THEN
+   UPDATE bill2_calls SET state='cancelled',token=gen_random_uuid(),runtime_retryable=true WHERE id=pending_call.id;
+   PERFORM bill2_finalize(p_actor_id,b.id);
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM bill2_calls WHERE run_id=b.id AND settled_at IS NULL) THEN
+   SELECT count(*)+1 INTO next_seq FROM bill2_calls WHERE run_id=b.id;
+    UPDATE bill2_runs SET runtime_cursor=runtime_cursor+1,paused_reason='http_budget',runtime_dispatch_deadline=NULL,
+     runtime_checkpoint=jsonb_strip_nulls(jsonb_build_object('sequence',next_seq,'requestHash',pending_call.payload->>'requestHash',
+      'phase',pending_call.payload->>'phase','sessionRevision',s.revision,
+      'materialRevision',coalesce((SELECT max(revision) FROM runtime_scope_material WHERE session_id=s.id),0)))
+     WHERE id=b.id RETURNING * INTO b;
+    UPDATE runtime_executions SET state='waiting_resume' WHERE id=e.id RETURNING * INTO e;
+    UPDATE runtime_sessions SET active_execution=NULL WHERE id=s.id AND active_execution=e.id;
+  END IF;
+ END IF;
+ IF b.contract_version='bill2.v2' AND p_action IN ('payg_wait','payg_resume') THEN
+  IF b.closed OR b.cancel_requested OR b.conflict THEN RAISE EXCEPTION 'RUNTIME_RESUME_CLOSED';END IF;
+  IF p_action='payg_wait' THEN
+   IF e.state<>'running' OR s.active_execution IS DISTINCT FROM e.id
+    OR coalesce(p_result->>'epoch','') !~ '^[1-9][0-9]*$'
+    OR (p_result->>'epoch')::bigint IS DISTINCT FROM b.runtime_epoch
+    OR p_result->>'state' IS NULL OR p_result->>'state' NOT IN ('waiting_credits','waiting_resume')
+    OR coalesce(p_result->>'sequence','') !~ '^[1-9][0-9]*$'
+    OR coalesce(p_result->>'requestHash','') !~ '^[a-f0-9]{64}$'
+    OR coalesce(p_result->>'phase','')='' OR length(p_result->>'phase')>64
+    OR EXISTS(SELECT 1 FROM jsonb_object_keys(p_result) k WHERE k NOT IN ('epoch','state','sequence','requestHash','phase'))
+   THEN RAISE EXCEPTION 'RUNTIME_CHECKPOINT_DENIED';END IF;
+   SELECT * INTO pending_call FROM bill2_calls WHERE run_id=b.id AND sequence=(p_result->>'sequence')::int FOR UPDATE;
+   IF pending_call.id IS NOT NULL THEN
+    IF p_result->>'state'<>'waiting_resume' OR pending_call.dispatched_at IS NOT NULL
+     OR NOT ((pending_call.state='prepared' AND pending_call.settled_at IS NULL) OR (pending_call.state='cancelled' AND pending_call.runtime_retryable AND pending_call.settled_at IS NOT NULL))
+     OR pending_call.runtime_epoch<>b.runtime_epoch
+     OR pending_call.payload->>'requestHash' IS DISTINCT FROM p_result->>'requestHash'
+     OR pending_call.payload->>'phase' IS DISTINCT FROM p_result->>'phase'
+    THEN RAISE EXCEPTION 'RUNTIME_CHECKPOINT_PENDING';END IF;
+    UPDATE bill2_calls SET state='cancelled',token=gen_random_uuid(),runtime_retryable=true WHERE id=pending_call.id;
+    PERFORM bill2_finalize(p_actor_id,b.id);
+   END IF;
+   SELECT count(*)+1 INTO next_seq FROM bill2_calls WHERE run_id=b.id;
+   IF (p_result->>'sequence')::int<>(next_seq-CASE WHEN pending_call.id IS NOT NULL THEN 1 ELSE 0 END)
+    OR EXISTS(SELECT 1 FROM bill2_calls WHERE run_id=b.id AND settled_at IS NULL)
+   THEN RAISE EXCEPTION 'RUNTIME_CHECKPOINT_PENDING';END IF;
+   UPDATE bill2_runs SET runtime_cursor=runtime_cursor+1,
+    paused_reason=CASE WHEN p_result->>'state'='waiting_credits' THEN 'insufficient_credits' ELSE 'http_budget' END,
+    runtime_checkpoint=jsonb_build_object('sequence',next_seq,'requestHash',p_result->>'requestHash',
+      'phase',p_result->>'phase','sessionRevision',s.revision,
+      'materialRevision',coalesce((SELECT max(revision) FROM runtime_scope_material WHERE session_id=s.id),0)),
+    runtime_dispatch_deadline=NULL WHERE id=b.id RETURNING * INTO b;
+   UPDATE runtime_executions SET state=p_result->>'state' WHERE id=e.id RETURNING * INTO e;
+   UPDATE runtime_sessions SET active_execution=NULL WHERE id=s.id AND active_execution=e.id;
+  ELSE
+   IF e.state NOT IN ('waiting_credits','waiting_resume') OR s.active_execution IS NOT NULL
+    OR coalesce(p_result->>'epoch','') !~ '^[1-9][0-9]*$'
+    OR coalesce(p_result->>'cursor','') !~ '^[1-9][0-9]*$'
+    OR (p_result->>'epoch')::bigint IS DISTINCT FROM b.runtime_epoch
+    OR (p_result->>'cursor')::bigint IS DISTINCT FROM b.runtime_cursor
+    OR EXISTS(SELECT 1 FROM jsonb_object_keys(p_result) k WHERE k NOT IN ('epoch','cursor'))
+   THEN RAISE EXCEPTION 'RUNTIME_RESUME_CONFLICT';END IF;
+   -- Exhausted pre-transport cancellation cannot mint another call. Use the
+   -- existing cancellation/financial authority under the original cursor/epoch CAS.
+   IF (SELECT count(*) FROM bill2_calls WHERE run_id=b.id)>=b.max_calls THEN
+    IF EXISTS(SELECT 1 FROM bill2_calls WHERE run_id=b.id AND settled_at IS NULL)
+     THEN RAISE EXCEPTION 'RUNTIME_CHECKPOINT_PENDING';END IF;
+    PERFORM runtime_cancel(p_actor_id,e.id);
+    RETURN runtime_execution(p_actor_id,e.id,'read',NULL);
+   END IF;
+   IF b.runtime_checkpoint->>'sessionRevision' IS DISTINCT FROM s.revision::text
+    OR b.runtime_checkpoint->>'materialRevision' IS DISTINCT FROM
+      coalesce((SELECT max(revision) FROM runtime_scope_material WHERE session_id=s.id),0)::text
+   THEN RAISE EXCEPTION 'RUNTIME_RESUME_SOURCE_CHANGED';END IF;
+   IF EXISTS(SELECT 1 FROM bill2_calls WHERE run_id=b.id AND settled_at IS NULL)
+    THEN RAISE EXCEPTION 'RUNTIME_CHECKPOINT_PENDING';END IF;
+   PERFORM runtime_test_window_allowed(p_actor_id,b.payload);
+   UPDATE bill2_runs SET runtime_epoch=runtime_epoch+1,paused_reason=NULL,
+    runtime_dispatch_deadline=clock_timestamp()+interval '265 seconds' WHERE id=b.id RETURNING * INTO b;
+   UPDATE runtime_executions SET state='running' WHERE id=e.id RETURNING * INTO e;
+   UPDATE runtime_sessions SET active_execution=e.id WHERE id=s.id;
+   live:=true;
+  END IF;
+ ELSIF p_action='begin' THEN
+  IF e.state='prepared' AND s.active_execution=e.id THEN
+   UPDATE runtime_executions SET state='running' WHERE id=e.id RETURNING * INTO e;live:=true;
+   IF b.contract_version='bill2.v2' THEN
+    UPDATE bill2_runs SET runtime_epoch=runtime_epoch+1,
+     runtime_dispatch_deadline=clock_timestamp()+interval '265 seconds' WHERE id=b.id RETURNING * INTO b;
+   END IF;
+  END IF;
+ ELSIF p_action='fail_before_dispatch' THEN
+  IF p_result IS NOT NULL AND p_result IS DISTINCT FROM '{"unavailable_reason":"provider_history"}'::jsonb THEN
+   RAISE EXCEPTION 'RUNTIME_FAILURE_REASON_DENIED';
+  END IF;
+  IF e.state IN ('prepared','running','interrupted') AND NOT EXISTS(SELECT 1 FROM bill2_calls WHERE run_id=b.id AND dispatched_at IS NOT NULL) THEN
+   v:=bill2_cancel(p_actor_id,b.id);v:=bill2_finalize(p_actor_id,b.id);
+   -- The reason is set atomically only on a proven pre-dispatch cancellation.
+   -- This column revokes this failed execution's content, never earlier turns.
+   UPDATE runtime_executions SET state='cancelled',
+    unavailable_reason=coalesce(e.unavailable_reason,p_result->>'unavailable_reason')
+   WHERE id=e.id RETURNING * INTO e;
+   UPDATE runtime_sessions SET active_execution=NULL WHERE id=s.id;
+  END IF;
+ ELSIF p_action='interrupt' THEN
+  IF e.state='running' THEN UPDATE runtime_executions SET state='interrupted' WHERE id=e.id RETURNING * INTO e;END IF;
+ ELSIF p_action='checkpoint_match' THEN
+  IF s.active_execution IS DISTINCT FROM e.id OR b.closed OR b.cancel_requested
+   OR e.state NOT IN ('running','interrupted') OR NOT (e.payload ? 'matching')
+   OR jsonb_typeof(p_result) IS DISTINCT FROM 'object' OR NOT (p_result ? 'key')
+   OR EXISTS(SELECT 1 FROM jsonb_object_keys(p_result) k WHERE k<>'key')
+   OR (p_result->'key'<>'null'::jsonb AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(e.payload->'matching'->'candidates') c WHERE c->'key'=p_result->'key'))
+   OR NOT EXISTS(SELECT 1 FROM runtime_session_batches WHERE execution_id=e.id AND batch=0)
+  THEN RAISE EXCEPTION 'RUNTIME_MATCH_DENIED';END IF;
+  IF e.match_result IS NOT NULL AND e.match_result IS DISTINCT FROM p_result THEN RAISE EXCEPTION 'RUNTIME_MATCH_CONFLICT';END IF;
+  UPDATE runtime_executions SET match_result=p_result WHERE id=e.id RETURNING * INTO e;
+ ELSIF p_action='check_latest' THEN
+  IF e.payload->>'network'='require_latest' AND NOT EXISTS(SELECT 1 FROM runtime_tool_calls WHERE execution_id=e.id AND name='search' AND result IS NOT NULL) THEN
+   v:=bill2_cancel(p_actor_id,b.id);v:=bill2_finalize(p_actor_id,b.id);
+   UPDATE runtime_executions SET unavailable_reason='latest_unavailable',state=CASE WHEN v->>'state' IN ('settled','refunded') THEN 'cancelled' ELSE 'cost_pending' END WHERE id=e.id RETURNING * INTO e;
+   IF e.state='cancelled' THEN UPDATE runtime_sessions SET active_execution=NULL WHERE id=s.id AND active_execution=e.id;END IF;
+   RETURN jsonb_build_object('state',e.state,'unavailable',true);
+  END IF;
+ ELSIF p_action='checkpoint_primary' THEN
+  IF s.active_execution IS DISTINCT FROM e.id OR b.closed OR b.cancel_requested
+   OR e.state NOT IN ('running','interrupted') OR NOT (e.payload ? 'attachedOrganizer')
+   OR jsonb_typeof(p_result) IS DISTINCT FROM 'object' OR jsonb_typeof(p_result->'body') IS DISTINCT FROM 'string'
+   OR length(p_result->>'body')=0 OR octet_length(p_result::text)>262144
+   OR jsonb_typeof(p_result->'lastSequence') IS DISTINCT FROM 'number'
+   OR coalesce(p_result->>'lastSequence','') !~ '^[1-9][0-9]*$'
+   OR (p_result->>'lastSequence')::int<1
+   OR (p_result->>'lastSequence')::int>(SELECT count(*) FROM bill2_calls WHERE run_id=b.id)
+   OR NOT EXISTS(SELECT 1 FROM runtime_session_batches WHERE execution_id=e.id)
+  THEN RAISE EXCEPTION 'RUNTIME_CHECKPOINT_DENIED';END IF;
+  IF e.primary_result IS NOT NULL AND e.primary_result IS DISTINCT FROM p_result THEN RAISE EXCEPTION 'RUNTIME_CHECKPOINT_CONFLICT';END IF;
+  UPDATE runtime_executions SET primary_result=p_result WHERE id=e.id RETURNING * INTO e;
+ ELSIF p_action='complete' THEN
+  IF b.cancel_requested THEN RAISE EXCEPTION 'RUNTIME_EXECUTION_CANCELLED';END IF;
+  IF e.payload->>'network'='require_latest' AND NOT EXISTS(SELECT 1 FROM runtime_tool_calls WHERE execution_id=e.id AND name='search' AND result IS NOT NULL) THEN RAISE EXCEPTION 'RUNTIME_LATEST_UNAVAILABLE';END IF;
+  IF e.primary_result IS NOT NULL AND e.primary_result->>'body' IS DISTINCT FROM p_result->>'body' THEN RAISE EXCEPTION 'RUNTIME_CHECKPOINT_CONFLICT';END IF;
+  IF e.payload ? 'attachedOrganizer' AND (e.primary_result IS NULL OR jsonb_typeof(p_result->'summary') IS DISTINCT FROM 'string') THEN RAISE EXCEPTION 'RUNTIME_ORGANIZER_PENDING';END IF;
+  IF e.state='completed' THEN
+   IF e.result IS DISTINCT FROM p_result THEN RAISE EXCEPTION 'RUNTIME_RESULT_CONFLICT';END IF;
+  ELSE
+   IF s.active_execution IS DISTINCT FROM e.id OR jsonb_typeof(p_result) IS DISTINCT FROM 'object'
+    OR p_result->>'kind' IS DISTINCT FROM 'usable_result' THEN RAISE EXCEPTION 'RUNTIME_RESULT_DENIED';END IF;
+   IF NOT EXISTS(SELECT 1 FROM runtime_session_batches WHERE execution_id=e.id) THEN RAISE EXCEPTION 'RUNTIME_SESSION_PENDING';END IF;
+   v:=bill2_close(p_actor_id,b.id,'delivered',p_result);
+   v:=bill2_finalize(p_actor_id,b.id);
+   IF e.result IS NOT NULL AND e.result IS DISTINCT FROM p_result THEN RAISE EXCEPTION 'RUNTIME_RESULT_CONFLICT';END IF;
+   UPDATE runtime_executions SET state=CASE WHEN v->>'state' IN ('settled','refunded') THEN 'completed' ELSE 'cost_pending' END,result=p_result WHERE id=e.id RETURNING * INTO e;
+   IF e.state='completed' THEN UPDATE runtime_sessions SET active_execution=NULL WHERE id=s.id AND active_execution=e.id;END IF;
+  END IF;
+ ELSIF p_action<>'read' THEN RAISE EXCEPTION 'RUNTIME_ACTION_DENIED';END IF;
+ RETURN jsonb_build_object('executionId',e.id,'sessionId',s.id,'runId',b.id,'state',e.state,
+  'cursor',b.runtime_cursor,'epoch',b.runtime_epoch,'remainingCalls',b.max_calls-(SELECT count(*) FROM bill2_calls WHERE run_id=b.id),
+  'live',live,'cancelRequested',b.cancel_requested,'context',e.payload,'billing',b.payload,'result',e.result,'primaryResult',e.primary_result,'matchResult',e.match_result,'historyFrozen',e.selected_history IS NOT NULL,'historyOmitted',e.history_omitted,'unavailableReason',e.unavailable_reason);
 END $function$
 
 ;

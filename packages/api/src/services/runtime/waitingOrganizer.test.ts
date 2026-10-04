@@ -44,3 +44,10 @@ it.each(['running','interrupted','cost_pending'])(
   .rejects.toMatchObject({reason:'RUNTIME_ORGANIZER_PENDING'});
  expect(resume).not.toHaveBeenCalled();
 });
+
+it('allows the new message only after an exhausted original wait has been cancelled',async()=>{
+ const resume=vi.fn().mockResolvedValue({state:'cancelled'});
+ expect(await finishWaitingOrganizer({waitingOrganizer:{...waiting,remainingCalls:0}},requestId,resume)).toBeNull();
+ expect(await finishWaitingOrganizer({waitingOrganizer:waiting},requestId,resume))
+  .toMatchObject({admitted:false,state:'cancelled'});
+});

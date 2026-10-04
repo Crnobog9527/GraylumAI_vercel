@@ -19,10 +19,10 @@ it('uses defaults for a missing row and the same identity across hosts and messa
   expect(await gate.message('actor')).toEqual({ ok: true });
   expect(await gate.calls('actor', 2)).toEqual({ ok: true });
   expect(mock.redis.mock.calls).toEqual([
-    ['actor', 'admission', defaults, 'local', 1], ['actor', 'calls', defaults, 'local', 2],
+    ['actor', 'admission', defaults, 'local', 1, 'bill2.v1'], ['actor', 'calls', defaults, 'local', 2, 'bill2.v1'],
   ]);
   await newWorkGate(db(), 'staging').message('other');
-  expect(mock.redis).toHaveBeenLastCalledWith('other', 'admission', defaults, 'staging', 1);
+  expect(mock.redis).toHaveBeenLastCalledWith('other', 'admission', defaults, 'staging', 1, 'bill2.v1');
 });
 it('reads each request, pauses before Redis, and covers legacy entry points', async () => {
   const database = db({ ...defaults, stopNewCalls: true });
@@ -62,7 +62,18 @@ it('recovery-only gate always denies and preserves old RateLimitError defaults',
 });
 it('exposes a distinct configuration diagnostic without a retry-later hint', async () => {
   mock.redis.mockResolvedValue({ success: false, reason: 'usage_configuration_required', retryAfter: 0, window: 'minute' });
-  const result = await newWorkGate(db(), 'local').calls('actor', 31);
+  const result = await newWorkGate(db(), 'local').calls('actor', 31, 'bill2.v2');
+  expect(mock.redis).toHaveBeenLastCalledWith('actor', 'calls', defaults, 'local', 31, 'bill2.v2');
   expect(result).toEqual({ ok: false, reason: 'usage_configuration_required', retryAfter: 0, window: 'minute' });
   expect(() => requireNewWork(result)).toThrow('RUNTIME_USAGE_CONFIGURATION_REQUIRED');
+});
+
+it.each([undefined, 'bill2.v1'] as const)('keeps the existing public notice for %s oversized v1 rounds', async version => {
+  mock.redis.mockResolvedValue({ success: false, reason: 'unavailable', retryAfter: 60 });
+  const result = await newWorkGate(db(), 'local').calls('actor', 31, version);
+  expect(mock.redis).toHaveBeenLastCalledWith('actor', 'calls', defaults, 'local', 31, 'bill2.v1');
+  expect(result).toMatchObject({ ok: false, reason: 'limit_unavailable', retryAfter: 60 });
+  expect(() => requireNewWork(result)).toThrowError(expect.objectContaining({
+    code: 'SERVICE_UNAVAILABLE', message: runtimeGateMessages.limit_unavailable,
+  }));
 });

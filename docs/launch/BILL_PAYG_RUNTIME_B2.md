@@ -29,6 +29,9 @@ execution ID、cursor、epoch CAS 完成整理。继续前仍通过 B1 的余额
 | `RUNTIME_ORGANIZER_PENDING` | 原整理尚未完成，当前不能准入新消息 |
 | `RUNTIME_RESUME_CONFLICT` | v1、过期 cursor/epoch 或不允许的状态；拒绝续跑 |
 
+仅 v2 使用新增配置不足诊断。v1 超出分钟/每日容量仍返回 `limit_unavailable`，
+保留原固定提示与视频明确拒绝；不改前端。
+
 配置不足保留 waiting 状态，`unavailable: usage_configuration_required`；不消耗 Redis
 额度，不绕过 calls 闸门。普通窗口耗尽仍按既有重试时间处理。CHAT-NATIVE-OUTPUT
 #604 C2 可使用既有 waiting_resume / executionId / cursor / epoch 协议；这里没有
@@ -43,7 +46,9 @@ profileVersion / evidenceVersion、人工复核参考 reviewReference、`humanRe
 请求中的 actor 不受客户端控制。前端管理界面不在此 PR。
 
 每条异常 call 单独复核；只有已结算、财务绑定完整且无 receipt/run conflict 才允许。
-审核使用既有 run / model / call 锁，证据变化使旧审核失效。audit 和 call 的审核引用
+审核使用既有 run / model / call 锁，证据变化通过 call 字段更新或不可变 receipt 插入触发器清除旧审核指针。
+claim 只查询模型上指针为空的异常部分索引，不遍历已审核历史或计算历史哈希。
+审核时摘要的 settledAt 使用 UTC epoch，跨会话时区一致。audit 和 call 的审核引用
 在同一事务提交；重复 requestId 只接受完全相同的请求。新异常仍阻断后续 claim。
 旧 run 的异常退出状态、原费用、回执与全部计量标记保持不变；审核不重新启用模型、
 不重写价格配置、不自动恢复旧 run，也不能绕过窗口和余额检查。
@@ -55,7 +60,8 @@ profileVersion / evidenceVersion、人工复核参考 reviewReference、`humanRe
 
 沿用 `user_activity_logs` 作为管理员操作记录。现有 best-effort 日志 helper 吞掉失败，
 不足以保证解除阻断与审计原子提交，因此由受限 SQL RPC 在同一事务写入现有审计表。
-新增 call 上一个 audit 外键指针及读取/人工复核两个专用 RPC；不新增表、审计系统、
+新增 call 上一个 audit 外键指针、只覆盖未解除异常的模型部分索引、两个证据失效触发器，
+以及读取/人工复核两个专用 RPC；不新增表、审计系统、
 队列或平行财务账本。BILL2 call/receipt 仍为计量和财务事实权威，既有审计记录只授予
 对精确证据的模型级新 claim 阻断例外。私有证据摘要函数不对客户端或 service_role 开放。
 
@@ -77,10 +83,34 @@ profileVersion / evidenceVersion、人工复核参考 reviewReference、`humanRe
 | opc_step_material(uuid,uuid,uuid,text,text,text) | 05865c9d70bf4f4bc3ea383d556b2125 |
 | runtime_session_context(uuid,uuid) | 9a159d2e2cbf6f6bcc151410fc57564d |
 | bill2_payg_claim(uuid,uuid,integer,jsonb) | a67839c4bbbe56e72cebf972a2d19ff5 |
+| runtime_execution(uuid,uuid,text,jsonb) | 6d3ae6342bf0eaaf1899da954203f658 |
 
-0167 在任何 DDL 之前检查四个函数的源/目标 MD5，允许相同迁移重放，拒绝漂移。
+0167 在任何 DDL 之前检查五个函数的源/目标 MD5，允许相同迁移重放，拒绝漂移。
 事务失败回滚整个迁移。部署时必须先 SQL 后应用；默认 v1 不变。
 需要回退时以追加迁移撤回审核入口并恢复相应函数，保留审核指针、审计、异常和金融事实，
 不得删除历史费用或将已生效审核解释为退款。B1 原 execution 续跑与财务恢复仍保留。
 
 验证结果、精确 head 与独立审查以 PR #632 的 Handoff 为准。本文件不是远端迁移授权。
+
+## 总控增量修复
+
+审计评论：5982516631，旧 head `6f841c6bd5a14ade555bbbd235ebf3d4dd69610a`。
+
+- P2-1：版本隔离诊断，v1 沿用既有拒绝码，v2 才给额度配置诊断。
+- P2-2：选择证据写入时撤销复核指针，而不是 claim 持锁遍历历史。新增触发器复用现有
+  call/receipt 写入事务和 run/model 锁，不新增事实权威；历史 audit 与金融数据完整保留。
+  部分索引只包含有异常且未审核的行，已审核异常不增加 gate 的扫描集合。
+- P2-3：可复现最后一次整理 claim 后、传输开始前取消，剩余次数为零。原 `payg_resume`
+  在 Session/execution/run 锁内验证原 cursor/epoch 和所有 call 已结算后，委派既有
+  `runtime_cancel` 收尾；无新增预算、派发或重复退款。Q1 看到原零剩余整理已取消后，
+  重新读取 Session 准入新消息。旧主回复和已结算前缀保留，过期/并发 token 仍拒绝。
+- P3-4：二次注销探测失败时保留原执行错误，不让维护异常覆盖根因。
+- P3-5：摘要时间使用 UTC epoch，跨时区一致。
+- P3-6：未另改幂等协议；原审核 requestId 仍只代表其已提交事务。证据变化后因 P2-2
+  清空指针，既有 pointer 校验自然拒绝旧审核重放；同证据重放仍幂等。审计事实不删除。
+- P3-7：保留每轮一次上下文读取与明确恢复的 calls 闸门；前者避免写入新材料前漏掉 Q1，
+  后者防止恢复绕过额度。性能优化或前端交互另行安排，本次不变更其语义。
+
+0167 尚未应用远端，按 Owner 明确指令直接修订原文件。新增 runtime_execution 源 MD5
+同样来自开工 staging 的本地 PG17 重建；更新 claim/runtime_execution 目标 MD5 和 built
+指纹。上述修复不代表已通过总控增量复核，最终状态以 PR Handoff 为准。

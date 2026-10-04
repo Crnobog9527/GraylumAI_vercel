@@ -70,7 +70,9 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    }catch(error){
     if(error instanceof StagingAccessError
      &&['RUNTIME_RESUME_CONFLICT','RUNTIME_STAGING_AUTH_REFRESH_REQUIRED'].includes(error.reason))throw error;
-    const closed=await closeWaiting();if(closed)return closed;throw error;
+    // Best-effort erased-account maintenance must not replace the original
+    // execution failure with a secondary storage/binding failure.
+    const closed=await closeWaiting().catch(()=>null);if(closed)return closed;throw error;
    }finally{
     const recovered=result&&['completed','waiting_credits','waiting_resume'].includes(result.state)&&!financial.isAccountClosed()
      ?undefined:await financial.finish(adapter);

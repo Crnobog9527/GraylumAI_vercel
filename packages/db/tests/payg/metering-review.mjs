@@ -111,9 +111,34 @@ export async function meteringReviewCases({db,Client,connectionString,report}) {
   assert.equal((await rpc(db,'bill2_dispatch',first.f.actor,first.f.run,blockedOriginal.id,blockedOriginal.dispatchToken)).dispatch,false);
   report.checks.push('metering review: audit failure rolls back; service role success, exact idempotency, immutable financial facts and old-run dispatch denial');
 
+  const originalReceipt=(await db.query('SELECT payload FROM bill2_receipts WHERE call_id=$1 ORDER BY id LIMIT 1',
+    [first.c.id])).rows[0].payload;
+  await rpc(db,'bill2_record',first.f.actor,first.f.run,first.c.id,originalReceipt);
+  assert.equal((await snapshot(db,first.c)).auditId,requestId,'exact receipt replay retains review');
+  assert.deepEqual((await db.query('SELECT * FROM user_activity_logs WHERE id=$1',[requestId])).rows[0],log);
+  await db.query('BEGIN');
+  try {
+    const hashes=[];
+    for(const zone of ['UTC','Asia/Shanghai','America/Los_Angeles']) {
+      await db.query('SELECT set_config($1,$2,true)',['TimeZone',zone]);
+      hashes.push((await snapshot(db,first.c)).evidenceHash);
+    }
+    assert.equal(new Set(hashes).size,1,'settledAt hashes the instant independently of session timezone');
+  } finally {await db.query('ROLLBACK');}
+  await db.query('BEGIN');
+  try {
+    await db.query('UPDATE bill2_calls SET metering_exit=true WHERE id=$1',[first.c.id]);
+    assert.equal((await snapshot(db,first.c)).auditId,null,'changed call abnormality invalidates review');
+    assert.deepEqual((await db.query('SELECT * FROM user_activity_logs WHERE id=$1',[requestId])).rows[0],log);
+  } finally {await db.query('ROLLBACK');}
+  report.checks.push('review pointer: exact evidence replay preserves it; changed call facts clear it without rewriting audit; timezone invariant hash');
+
   // A newly appended receipt invalidates the exact review, even with the same total cost.
   await lateReceipt(db,first.f,first.c);
   assert.notEqual((await snapshot(db,first.c)).evidenceHash,first.input.expectedEvidenceHash);
+  assert.equal((await snapshot(db,first.c)).auditId,null,'new immutable receipt clears review pointer');
+  await assert.rejects(review(db,first.c,first.input,requestId),/REVIEW_CONFLICT/);
+  assert.deepEqual((await db.query('SELECT * FROM user_activity_logs WHERE id=$1',[requestId])).rows[0],log);
   const afterLate=await newRun(first.f);
   await assert.rejects(claim(db,afterLate,1,false),/METERING_BLOCKED/);
   const freshReview=await inputFor(first.c);
@@ -124,6 +149,44 @@ export async function meteringReviewCases({db,Client,connectionString,report}) {
   const afterNew=await newRun(first.f);
   await assert.rejects(claim(db,afterNew,1,false),/METERING_BLOCKED/);
   report.checks.push('metering review: late evidence and later call anomalies re-block the model; no model-wide temporal waiver');
+
+  // Keep several genuinely settled/reviewed anomalous calls with large immutable receipts.
+  const historical=await createFixture(db,{lookupSupported:false});
+  for(let i=0;i<6;i++) {
+    const run=i===0?historical:await newRun(historical);
+    const c=await claim(db,run);
+    await rpc(db,'bill2_record',run.actor,run.run,c.id,{
+      provider:run.claimPayload.provider,account:'sandbox',model:run.claimPayload.model,
+      protocol:run.claimPayload.protocol,providerId:'generation-'+c.id,source:'response',
+      sourceHash:randomUUID().replaceAll('-','').repeat(2),observedAt:new Date().toISOString(),
+      coverage:'request_total',final:true,cost:'0.001',currency:'USD',usage:{},rawBody:'S'.repeat(48000),
+    });
+    await rpc(db,'bill2_finalize',run.actor,run.run);
+    await review(db,c,await inputFor(c));
+  }
+  const historicalCount=(await db.query(`SELECT count(*)::int n FROM bill2_calls
+    WHERE model=$1 AND metering_missing AND metering_review_audit_id IS NOT NULL`,[historical.claimPayload.model])).rows[0].n;
+  assert.equal(historicalCount,6);
+  const fresh=await newRun(historical);
+  await db.query('BEGIN');
+  try {
+    // Any historical evidence hashing during claim now causes a deterministic failure.
+    await db.query(`CREATE OR REPLACE FUNCTION public.bill2_payg_metering_hash(c bill2_calls) RETURNS text
+      LANGUAGE plpgsql STABLE SET search_path=public,pg_temp AS
+      $$BEGIN RAISE EXCEPTION 'test_claim_must_not_hash_history';END$$`);
+    assert.ok((await claim(db,fresh,1,false)).id);
+    await db.query('SET LOCAL enable_seqscan=off');
+    const plan=(await db.query(`EXPLAIN (ANALYZE,FORMAT JSON) SELECT 1 FROM bill2_calls
+      WHERE model=$1 AND (budget_conflict OR metering_missing OR metering_exit)
+      AND metering_review_audit_id IS NULL LIMIT 1`,[historical.claimPayload.model])).rows[0]['QUERY PLAN'][0].Plan;
+    const nodes=[];
+    const collect=node=>{nodes.push(node);for(const child of node.Plans??[])collect(child);};
+    collect(plan);
+    assert.ok(nodes.some(n=>n['Index Name']==='bill2_payg_unreviewed_model'));
+    assert.ok(!nodes.some(n=>n['Node Type']==='Seq Scan'));
+    assert.equal(plan['Actual Rows'],0,'reviewed anomalous history is absent from the unresolved index result');
+  } finally {await db.query('ROLLBACK');}
+  report.checks.push('claim skips six reviewed anomalies with large receipts without any evidence hash call; unresolved gate uses partial index');
 
   const legacy=await v1Fixture(db);
   const legacyCall=await v1Call(db,legacy,1,false);

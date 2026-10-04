@@ -73,7 +73,7 @@ it('counts verified actor once, passes resolved card text, then admits unchanged
   const timing = createRequestTiming();
   const result = await timing.run(() => runtimeAdmissionService(f.user, f.admin, { ...f.policy, resolvedInput: 'resolved card text' })
     .prepare(f.input));
-  expect(mock.redis).toHaveBeenCalledExactlyOnceWith(id(1), 'admission', defaults, 'local', 1);
+  expect(mock.redis).toHaveBeenCalledExactlyOnceWith(id(1), 'admission', defaults, 'local', 1, 'bill2.v1');
   expect(moderation).toHaveBeenCalledExactlyOnceWith({ actorId: id(1), sessionId: id(2), requestId: id(4),
     text: 'resolved card text', opening: false });
   expect((result.payload as {input:string}).input).toBe('resolved card text');
@@ -87,7 +87,7 @@ it('uses the staging namespace only when the authenticated host supplies a real 
   await expect(runtimeAdmissionService(f.user, f.admin, { ...f.policy, real: {
     id: id(6), expiresAt: '2099-01-01T00:00:00Z', creditsPerUsd: '1000', multiplier: '1', callPolicies: [],
   } }).prepare(f.input)).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
-  expect(mock.redis).toHaveBeenCalledExactlyOnceWith(id(1), 'admission', defaults, 'staging', 1);
+  expect(mock.redis).toHaveBeenCalledExactlyOnceWith(id(1), 'admission', defaults, 'staging', 1, 'bill2.v1');
 });
 it.each(['block', 'throw'])('input moderation %s prevents execution and reservation', async mode => {
   const f = fixture();

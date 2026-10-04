@@ -120,13 +120,13 @@ it('rejects invalid thresholds and namespaces before Redis', async () => {
 it.each([{ minute: 2, day: 4 }, { minute: 2, day: 2 }])('diagnoses insufficient capacity without Redis: %j', async limits => {
   const { checkRuntimeRateLimit: check } = await import('./redisRateLimiter');
   const config = { ...defaults, callsPerMinute: limits.minute, callsPer24Hours: limits.day };
-  expect(await check('actor', 'calls', config, 'local', 3)).toMatchObject({
+  expect(await check('actor', 'calls', config, 'local', 3, 'bill2.v2')).toMatchObject({
     success: false, reason: 'usage_configuration_required', retryAfter: 0,
   });
   expect(mock.redis).not.toHaveBeenCalled();
   expect(mock.remaining).not.toHaveBeenCalled();
   expect(mock.limit).not.toHaveBeenCalled();
-  expect(await check('actor', 'calls', { ...config, callsPerMinute: 3, callsPer24Hours: 4 }, 'local', 3))
+  expect(await check('actor', 'calls', { ...config, callsPerMinute: 3, callsPer24Hours: 4 }, 'local', 3, 'bill2.v2'))
     .toEqual({ success: true });
 });
 it.each([{ callsPerMinute: 2, callsPer24Hours: 4 }, { callsPerMinute: 2, callsPer24Hours: 2 }])
@@ -144,4 +144,15 @@ it.each(['minute', 'day'])('ordinary %s window exhaustion remains retryable afte
   expect(mock.limit).not.toHaveBeenCalled();
   mock.remaining.mockResolvedValue({ remaining: 30, reset: Date.now() + 60000 });
   expect(await check('actor', 'calls', defaults, 'local', 2)).toEqual({ success: true });
+});
+
+it.each([undefined, 'bill2.v1'] as const)('preserves v1 unavailable for %s contract and oversized minute/day budget', async version => {
+  const { checkRuntimeRateLimit: check } = await import('./redisRateLimiter');
+  for (const callsPer24Hours of [2, 4]) {
+    expect(await check('actor', 'calls', { ...defaults, callsPerMinute: 2, callsPer24Hours }, 'local', 3, version))
+      .toEqual({ success: false, reason: 'unavailable', retryAfter: 60 });
+  }
+  expect(mock.redis).not.toHaveBeenCalled();
+  expect(mock.remaining).not.toHaveBeenCalled();
+  expect(mock.limit).not.toHaveBeenCalled();
 });

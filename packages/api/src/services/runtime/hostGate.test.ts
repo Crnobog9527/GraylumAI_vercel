@@ -88,3 +88,15 @@ it.each(['auth', 'waiting', 'window'])('finishes erased waiting v2 when %s expir
   expect(mock.recover).not.toHaveBeenCalled(); expect(getUser).not.toHaveBeenCalled();
   if (mode === 'window') expect(execute).not.toHaveBeenCalled();
 });
+
+it('preserves the original execution failure when erased-waiting maintenance also fails',async()=>{
+ const original=Error('RUNTIME_ORIGINAL_FAILURE');
+ mock.factory.mockReturnValue({execute:async()=>{throw original;},recoverFinancial:mock.recover});
+ const rpc=vi.fn(async()=>({data:null,error:{code:'08006',message:'synthetic storage failure'}}));
+ await expect(executeOriginalExecution({admin:{rpc} as never,user:{auth:{}} as never,
+  actorId:'actor',budget:createRuntimeBudget(),maintenanceEndpoint:'http://127.0.0.1:1'},'execution'))
+  .rejects.toBe(original);
+ expect(rpc).toHaveBeenCalledExactlyOnceWith('runtime_financial_recovery',{
+  p_actor_id:'actor',p_execution_id:'execution',p_finish:false,
+ });
+});
