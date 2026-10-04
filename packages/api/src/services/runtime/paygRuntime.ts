@@ -15,7 +15,7 @@ export const resumeInput = z.object({
 export type ResumeInput = z.infer<typeof resumeInput>;
 export type PaygWait = {
   state: 'waiting_credits' | 'waiting_resume';
-  code: 'RUNTIME_WAITING_CREDITS' | 'RUNTIME_WAITING_RESUME';
+  code: 'RUNTIME_WAITING_CREDITS' | 'RUNTIME_WAITING_RESUME' | 'RUNTIME_USAGE_CONFIGURATION_REQUIRED';
   executionId: string; cursor: number; epoch: number; remainingCalls: number;
   body?: string; unavailable?: AgentTurnUnavailable;
 };

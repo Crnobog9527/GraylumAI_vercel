@@ -79,9 +79,14 @@ export async function cases(db,report){
  assert.equal(ustate.credits,70);assert.equal(ustate.terminals,0);
  const pending=await fixture(db);const pc=await call(db,pending);await closeAccount(db,pending);
  await rpc(db,'bill2_record',pending.actor,pending.run,pc.id,evidence(pc,null));
- for(let n=0;n<3;n++)assert.ok(await rpc(db,'bill2_recovery_claim',pending.actor,pending.run,pc.id));
+ for(let n=0;n<3;n++) {
+  assert.ok(await rpc(db,'bill2_recovery_claim',pending.actor,pending.run,pc.id));
+  assert.equal(await rpc(db,'bill2_recovery_claim',pending.actor,pending.run,pc.id),null,'active recovery lease excludes overlap');
+  await db.query("UPDATE bill2_calls SET rejection_recovery_at=clock_timestamp()-interval '61 seconds' WHERE id=$1",[pc.id]);
+ }
+ await db.query("UPDATE bill2_runs SET deadline=clock_timestamp()-interval '25 hours' WHERE id=$1",[pending.run]);
  assert.equal(await rpc(db,'bill2_recovery_claim',pending.actor,pending.run,pc.id),null);
- report.checks.push('unknown no ID retains original reservation; reliable lookup remains bounded at three');
+ report.checks.push('unknown no ID retains reservation; reliable lookup lease excludes overlap and recovery deadline rejects expiry');
  const failure=await fixture(db);const fc=await call(db,failure);await closeAccount(db,failure);
  await rpc(db,'bill2_close',failure.actor,failure.run,'confirmed_failure',{...outcome,kind:'confirmed_delivery_failure'});
  assert.equal((await rpc(db,'bill2_finalize',failure.actor,failure.run)).state,'refunded');

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {readFileSync,readdirSync} from 'node:fs';
+import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
@@ -52,6 +52,30 @@ try {
   installPgCronStub(root,name,(args,input)=>ok(docker(['exec',...args],input)));
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const objectSql = fingerprint.slice(0,fingerprint.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
+  // Validate 0162 drift at its historical position, before later authorized
+  // migrations replace its functions. Latest-schema behavior is tested below.
+  const verifyHistoricalDrift=migration=>{
+  const once=JSON.parse(ok(sql(objectSql)));
+  for (const [signature,expected] of [
+    ['public.bill2_read(uuid,uuid)',/PAYG_SOURCE_MISMATCH/],
+    ['public.bill2_payg_claim(uuid,uuid,integer,jsonb)',/PAYG_TARGET_MISMATCH/],
+    ['public.bill2_payg_validate_quote(bill2_runs,jsonb)',/PAYG_TARGET_MISMATCH/],
+  ]) {
+    const original=ok(sql(`SELECT pg_get_functiondef('${signature}'::regprocedure);`));
+    assert.match(original,/AS \$function\$/);
+    ok(sql(original.replace('AS $function$','AS $function$\n-- intentional local drift\n')));
+    const drift=JSON.parse(ok(sql(objectSql)));
+    assert.notDeepEqual(drift,once);
+    const refused=sql(migration);
+    assert.notEqual(refused.status,0);
+    assert.match(refused.stderr,expected);
+    assert.deepEqual(JSON.parse(ok(sql(objectSql))),drift,'mismatch must leave the catalog untouched');
+    ok(sql(original));
+    assert.deepEqual(JSON.parse(ok(sql(objectSql))),once,'restore only the intentional test drift');
+    report.checks.push(`PAYG drift rejects ${signature} before catalog change; restoration matches exactly`);
+  }
+  };
+  let driftChecked=false;
   let rollbackChecked=false;
   report.build = buildFromFiles(root,{
     applyFile:path=>{
@@ -67,33 +91,16 @@ try {
         rollbackChecked=true;
         report.checks.push('0162 failure before COMMIT rolls back all DDL and ACL to the exact pre-migration catalog');
       }
-      return outcome(sql(migration));
+      const applied=outcome(sql(migration));
+      if(applied.ok&&path.endsWith('_bill_payg.sql')&&!driftChecked){
+        verifyHistoricalDrift(migration);driftChecked=true;
+      }
+      return applied;
     },
     applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','payg','-v','ON_ERROR_STOP=1','-c',input])),
     fingerprint:development?undefined:()=>JSON.parse(ok(sql(objectSql))),
   });
   assert.equal(report.build.failed,null,JSON.stringify(report.build.failed));
-  const migration=readdirSync(resolve(root,'packages/db/migrations')).find(file=>/^\d{4}_bill_payg\.sql$/.test(file));
-  assert.ok(migration);
-  const once=JSON.parse(ok(sql(objectSql)));
-  for (const [signature,expected] of [
-    ['public.bill2_read(uuid,uuid)',/PAYG_SOURCE_MISMATCH/],
-    ['public.bill2_payg_claim(uuid,uuid,integer,jsonb)',/PAYG_TARGET_MISMATCH/],
-    ['public.bill2_payg_validate_quote(bill2_runs,jsonb)',/PAYG_TARGET_MISMATCH/],
-  ]) {
-    const original=ok(sql(`SELECT pg_get_functiondef('${signature}'::regprocedure);`));
-    assert.match(original,/AS \$function\$/);
-    ok(sql(original.replace('AS $function$','AS $function$\n-- intentional local drift\n')));
-    const drift=JSON.parse(ok(sql(objectSql)));
-    assert.notDeepEqual(drift,once);
-    const refused=sql(read('packages/db/migrations/'+migration));
-    assert.notEqual(refused.status,0);
-    assert.match(refused.stderr,expected);
-    assert.deepEqual(JSON.parse(ok(sql(objectSql))),drift,'mismatch must leave the catalog untouched');
-    ok(sql(original));
-    assert.deepEqual(JSON.parse(ok(sql(objectSql))),once,'restore only the intentional test drift');
-    report.checks.push(`PAYG drift rejects ${signature} before catalog change; restoration matches exactly`);
-  }
   const require = createRequire(resolve(root,'packages/api/package.json'));
   const {Client} = require('pg');
   const address = ok(docker(['port',name,'5432/tcp']));

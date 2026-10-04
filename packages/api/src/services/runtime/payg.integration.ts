@@ -4,9 +4,11 @@ import { createServer } from 'node:http';
 import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { expect, it, vi } from 'vitest';
+import { finishWaitingOrganizer } from './waitingOrganizer';
 import { runtimeExecutor } from './execute';
+import { createRuntimeBudget } from './budget';
 
-it('RUNTIME: PAYG SDK organizer waits and original cursor resumes without duplicate primary charges or session items', async () => {
+it.each([false,true])('RUNTIME: PAYG SDK organizer waits and original cursor resumes without duplicate primary charges or session items (exhausted=%s)', async exhausted => {
   const connectionString = process.env.V3_LOCAL_DB;
   if (!connectionString?.startsWith('postgres://postgres@127.0.0.1:')
     || !connectionString.endsWith('/v3_disposable')) throw new Error('isolated runner required');
@@ -88,7 +90,16 @@ it('RUNTIME: PAYG SDK organizer waits and original cursor resumes without duplic
     const gate = vi.fn(async (verifiedActor: string, calls: number) => {
       expect(verifiedActor).toBe(actor); expect(calls).toBeGreaterThan(0); return { ok: true as const };
     });
-    const host = runtimeExecutor({ database: admin, actor: async () => actor, callGate: gate,
+    let elapsed=0,exhaustAfterClaim=false;
+    const budget=createRuntimeBudget(()=>elapsed);
+    const database={rpc:async(name:string,args:Record<string,unknown>)=>{
+      const result=await admin.rpc(name,args);
+      if(exhaustAfterClaim&&name==='bill2_claim'&&args.p_sequence===2&&result.data?.id){
+        elapsed=budget.workDeadline;exhaustAfterClaim=false;
+      }
+      return result;
+    }};
+    const host = runtimeExecutor({ database, budget, actor: async () => actor, callGate: gate,
       endpoint: 'http://127.0.0.1:' + address.port });
     const waiting = await host.execute(admitted.executionId);
     expect(waiting).toMatchObject({ state: 'waiting_credits', code: 'RUNTIME_WAITING_CREDITS',
@@ -101,13 +112,68 @@ it('RUNTIME: PAYG SDK organizer waits and original cursor resumes without duplic
     expect(savedHistory.length).toBeGreaterThanOrEqual(2);
     expect(savedHistory.length).toBeLessThanOrEqual(3);
     expect((await db.query('select credits from profiles where id=$1', [actor])).rows[0].credits).toBe(97);
+    // Q1: the next user message first attempts the original organizer. Low
+    // credits retain both requests without another admission or primary call.
+    const nextRequestId = randomUUID();
+    const blockedContext={...context,request:{sessionId:session.sessionId,requestId:nextRequestId}};
+    await expect(rpc('runtime_admit',{p_actor_id:actor,p_session_id:session.sessionId,
+      p_request_id:nextRequestId,p_payload:blockedContext,p_billing:{...billing,input:blockedContext}}))
+      .rejects.toThrow('RUNTIME_ORGANIZER_PENDING');
+    // Exact original admission replay is still allowed before the pending guard.
+    expect(await rpc('runtime_admit',{p_actor_id:actor,p_session_id:session.sessionId,
+      p_request_id:requestId,p_payload:context,p_billing:billing})).toMatchObject({executionId:admitted.executionId});
+    expect(await rpc('runtime_admission_replay',{p_actor_id:actor,p_request_id:requestId,p_request:context.request}))
+      .toMatchObject({executionId:admitted.executionId});
+    const sessionContext = () => rpc('runtime_session_context', {p_actor_id:actor,p_session_id:session.sessionId});
+    const resumeOrganizer = (token: {executionId:string;cursor:number;epoch:number}) =>
+      host.execute(token.executionId, undefined, token);
+    expect(await finishWaitingOrganizer(await sessionContext(),nextRequestId,resumeOrganizer)).toMatchObject({
+      admitted:false,blockedRequestId:nextRequestId,executionId:admitted.executionId,state:'waiting_credits',cursor:2,epoch:2,
+    });
+    expect(requests.map(r => r.model)).toEqual([model]);
+    expect((await db.query('select count(*)::int n from runtime_executions where session_id=$1',
+      [session.sessionId])).rows[0].n).toBe(1);
     // Synthetic local grant keeps the fixture ledger balanced; no payment provider is involved.
     await db.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,
       idempotency_key,balance_before,balance_after) values($1,100,'addition','grant','opening_grant','system',$2,97,197)`,
     [actor, 'payg-sdk-resume:' + actor]);
     await db.query('update profiles set credits=197 where id=$1', [actor]);
-    const completed = await host.execute(admitted.executionId, undefined,
-      { executionId: admitted.executionId, cursor: 1, epoch: 1 });
+    if(exhausted){
+      exhaustAfterClaim=true;
+      expect(await finishWaitingOrganizer(await sessionContext(),nextRequestId,resumeOrganizer))
+        .toMatchObject({state:'waiting_resume',admitted:false,remainingCalls:0});
+      expect(requests.map(r=>r.model)).toEqual([model]);
+      const financial=async()=>(await db.query(`select credits,
+        (select sum(amount)::int from credit_transactions where user_id=$1) ledger,
+        (select jsonb_agg(jsonb_build_object('state',state,'charged',charged_delta,'settled',settled_at)
+          order by sequence) from bill2_calls where run_id=$2) calls from profiles where id=$1`,
+        [actor,admitted.runId])).rows[0];
+      const before=await financial();
+      expect(before).toMatchObject({credits:197,ledger:197,calls:[{charged:3},{state:'cancelled',charged:0}]});
+      const freshHost=runtimeExecutor({database:admin,actor:async()=>actor,callGate:gate,
+        endpoint:'http://127.0.0.1:'+address.port});
+      const token=(await sessionContext()).waitingOrganizer;
+      await expect(freshHost.execute(admitted.executionId,undefined,{...token,epoch:token.epoch-1}))
+        .rejects.toThrow('RUNTIME_RESUME_CONFLICT');
+      const callsBefore=gate.mock.calls.length;
+      expect(await finishWaitingOrganizer(await sessionContext(),nextRequestId,
+        value=>freshHost.execute(value.executionId,undefined,value))).toBeNull();
+      expect(gate.mock.calls).toHaveLength(callsBefore);
+      expect(await freshHost.execute(admitted.executionId)).toMatchObject({state:'cancelled'});
+      expect(await financial()).toEqual(before);
+      expect((await sessionContext()).waitingOrganizer).toBeNull();
+      expect((await db.query('select primary_result from runtime_executions where id=$1',
+        [admitted.executionId])).rows[0].primary_result.body).toBe('Preserved primary result');
+      const nextContext={...context,input:'Next after exhausted organizer',attachedOrganizer:undefined,
+        request:{sessionId:session.sessionId,requestId:nextRequestId}};
+      const next=await rpc('runtime_admit',{p_actor_id:actor,p_session_id:session.sessionId,
+        p_request_id:nextRequestId,p_payload:nextContext,p_billing:{...billing,input:nextContext}});
+      expect(await freshHost.execute(next.executionId)).toMatchObject({state:'completed'});
+      expect(requests.map(r=>r.model)).toEqual([model,model]);
+      return;
+    }
+    expect(await finishWaitingOrganizer(await sessionContext(),nextRequestId,resumeOrganizer)).toBeNull();
+    const completed = await host.execute(admitted.executionId);
     expect(completed).toMatchObject({ state: 'completed', body: 'Preserved primary result',
       summary: 'Organized primary result' });
     const completedHistory = await history();
@@ -115,12 +181,21 @@ it('RUNTIME: PAYG SDK organizer waits and original cursor resumes without duplic
     expect(completedHistory.slice(0, 2)).toEqual(savedHistory.slice(0, 2));
     expect(await host.execute(admitted.executionId)).toEqual(completed);
     expect(requests.map(r => r.model)).toEqual([model, summaryModel]);
-    expect(gate.mock.calls.map(call => call[1])).toEqual([2, 1]);
+    expect(gate.mock.calls.map(call => call[1])).toEqual([2, 1, 1]);
     expect(await history()).toEqual(completedHistory);
     expect((await db.query(`select count(*)::int n,sum(charged_delta)::int charged
       from bill2_calls where run_id=$1`, [admitted.runId])).rows[0]).toEqual({ n: 2, charged: 6 });
     expect((await db.query(`select credits,(select sum(amount)::int from credit_transactions where user_id=$1) ledger
       from profiles where id=$1`, [actor])).rows[0]).toEqual({ credits: 194, ledger: 194 });
+    // Only after the original organization completed may the same blocked
+    // request ID admit the next user message. The SDK order proves no primary replay.
+    const nextContext={...context,input:'Next user message',attachedOrganizer:undefined,
+      request:{sessionId:session.sessionId,requestId:nextRequestId}};
+    const next=await rpc('runtime_admit',{p_actor_id:actor,p_session_id:session.sessionId,
+      p_request_id:nextRequestId,p_payload:nextContext,p_billing:{...billing,input:nextContext}});
+    expect(next.executionId).not.toBe(admitted.executionId);
+    expect(await host.execute(next.executionId)).toMatchObject({state:'completed',body:'Preserved primary result'});
+    expect(requests.map(r=>r.model)).toEqual([model,summaryModel,model]);
   } finally {
     if (server.listening) await new Promise<void>((resolve, reject) => server.close(e => e ? reject(e) : resolve()));
     await db.end();

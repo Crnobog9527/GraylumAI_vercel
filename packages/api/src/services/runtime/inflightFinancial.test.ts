@@ -100,3 +100,24 @@ it.each([
     expect(rpc.mock.calls.filter(([name]) => name === 'runtime_cancel')).toHaveLength(0);
   }
 });
+
+it.each(['waiting_credits', 'waiting_resume'])('closes erased %s without dispatch, Auth or output', async state => {
+  const { finishErasedWaiting } = await import('./inflightFinancial');
+  const rpc = vi.fn(async (_name: string, input: Record<string, unknown>) => ({ data: {
+    executionId, runId, state: input.p_finish ? 'cancelled' : state,
+    billing: { accountClosed: true, contractVersion: 'bill2.v2' }, body: 'PRIVATE_CANARY',
+  }, error: null }));
+  expect(await finishErasedWaiting({ database: { rpc }, actorId, executionId, budget: createRuntimeBudget() }))
+    .toEqual({ state: 'cancelled' });
+  expect(rpc.mock.calls.map(([, args]) => args.p_finish)).toEqual([false, true]);
+});
+it.each(['active', 'v1', 'foreign'])('never closes %s through waiting-erasure recovery', async mode => {
+  const { finishErasedWaiting } = await import('./inflightFinancial');
+  const rpc = vi.fn(async () => ({ data: { state: 'waiting_resume', billing: {
+    accountClosed: mode !== 'active', contractVersion: mode === 'v1' ? 'bill2.v1' : 'bill2.v2',
+  } }, error: mode === 'foreign' ? { message: 'RUNTIME_BINDING_DENIED' } : null }));
+  const result = finishErasedWaiting({ database: { rpc }, actorId, executionId, budget: createRuntimeBudget() });
+  if (mode === 'foreign') await expect(result).rejects.toThrow('ERASURE_FINANCIAL_BINDING_OR_STORAGE_FAILED');
+  else expect(await result).toBeUndefined();
+  expect(rpc).toHaveBeenCalledTimes(1);
+});

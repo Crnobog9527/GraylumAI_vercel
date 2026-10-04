@@ -62,7 +62,7 @@ it.each(['call_limited', 'paused', 'limit_unavailable'] as const)('RUNTIME: %s b
   const f = await fixture(), execution = await f.admit();
   const gate = vi.fn<RuntimeCallGate>().mockResolvedValue({ ok: false, reason, retryAfter: 60 });
   expect(await f.host(gate).execute(execution.executionId)).toEqual({ state: 'cancelled', unavailable: reason });
-  expect(gate).toHaveBeenCalledExactlyOnceWith(f.actorId, 2); expect(f.transport).not.toHaveBeenCalled();
+  expect(gate).toHaveBeenCalledExactlyOnceWith(f.actorId, 2, 'bill2.v1'); expect(f.transport).not.toHaveBeenCalled();
   expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1', [execution.runId])).rows[0].n).toBe(0);
   expect((await db.query('select credits from profiles where id=$1', [f.actorId])).rows[0].credits).toBe(100);
   const run = (await db.query('select charged,actual_restore from bill2_runs where id=$1', [execution.runId])).rows[0];
@@ -78,7 +78,7 @@ it('RUNTIME: a started primary+organizer finishes and replay never counts or che
   const host = f.host(gate), result = await host.execute(execution.executionId);
   expect(result).toMatchObject({ state: 'completed', body: 'Synthetic reply', summary: 'Synthetic reply' });
   expect(await host.execute(execution.executionId)).toEqual(result);
-  expect(gate).toHaveBeenCalledExactlyOnceWith(f.actorId, 2); expect(output).toHaveBeenCalledTimes(1);
+  expect(gate).toHaveBeenCalledExactlyOnceWith(f.actorId, 2, 'bill2.v1'); expect(output).toHaveBeenCalledTimes(1);
   expect(f.transport).toHaveBeenCalledTimes(2);
   expect((await db.query('select credits from profiles where id=$1', [f.actorId])).rows[0].credits).toBe(94);
 });

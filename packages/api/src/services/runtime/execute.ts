@@ -180,7 +180,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       if(!gateChecked){
        const leaveRateLimit=budget.timing?.enter('rateLimit');
        try{
-        const verdict=await options.callGate(await options.actor(),isPayg?execution.remainingCalls!:execution.billing.limits.maxCalls);
+        const verdict=await options.callGate(await options.actor(),isPayg?execution.remainingCalls!:execution.billing.limits.maxCalls,
+          isPayg?'bill2.v2':'bill2.v1');
         if(!verdict.ok){gateRejection=verdict.reason;throw new Error('RUNTIME_NEW_CALL_DENIED');}
         gateChecked=true;
        }catch(error){gateRejection??='limit_unavailable';throw error;}
