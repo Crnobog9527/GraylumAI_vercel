@@ -5,7 +5,7 @@ import { beforeAll, afterAll, it, expect, vi } from 'vitest';
 import {logger} from '../../lib/logger';
 import { randomUUID, createHash } from 'node:crypto';
 import pg from 'pg';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { PostgresSession } from './session';
 import {assertLongSessionPerformance} from './runtimePerformance.integration';
 import { runRuntime } from './runner';
