@@ -73,7 +73,6 @@ checkpoint 与 pausedReason 的 JSONB 文本合计不超过 65536 字节。它�
 | `bill2_payg_finalize(uuid,uuid)` | `9ddbd0ebb4d5972fe24fa4aab4ad61dd` |
 | `runtime_test_window_allowed(uuid,jsonb)` | `ac72346ea6a895fc568247ac2cef3db6` |
 | `runtime_view(uuid,uuid)` | `5671d0de602bf6e9c2ac4c7621fb5139` |
-
 | `runtime_pending_financial_batch(uuid,integer)` | `48965682aa5d34a4d5fafa0bed90c732` |
 
 迁移执行在单一事务，失败回滚结构、函数、ACL；测试覆盖每个源函数漂移拒绝、事务故障回滚、
