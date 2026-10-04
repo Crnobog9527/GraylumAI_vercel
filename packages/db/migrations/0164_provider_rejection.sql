@@ -7,7 +7,7 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 DO $$ BEGIN
- IF md5(pg_get_functiondef('public.bill2_record(uuid,uuid,uuid,jsonb)'::regprocedure)) NOT IN ('347c4ed918e43f9759cd040554fe091d','6d7306b3db56834df178db3f82fa332c') THEN
+ IF md5(pg_get_functiondef('public.bill2_record(uuid,uuid,uuid,jsonb)'::regprocedure)) NOT IN ('347c4ed918e43f9759cd040554fe091d','2df23f91a2732aa3644ff391760cf0b7') THEN
   RAISE EXCEPTION 'PROVIDER_REJECTION_SOURCE_MISMATCH: bill2_record(uuid,uuid,uuid,jsonb)';END IF;
  IF md5(pg_get_functiondef('public.bill2_payg_finalize(uuid,uuid)'::regprocedure)) NOT IN ('1625da8f6a13a74250f7c454e84319ea','9ddbd0ebb4d5972fe24fa4aab4ad61dd') THEN
   RAISE EXCEPTION 'PROVIDER_REJECTION_SOURCE_MISMATCH: bill2_payg_finalize(uuid,uuid)';END IF;
@@ -77,7 +77,8 @@ BEGIN
    OR (rejection#>'{error,metadata}' ? 'remedy_hint' AND jsonb_typeof(rejection#>'{error,metadata,remedy_hint}')<>'string')
   THEN RAISE EXCEPTION 'BILL2_REJECTION_PROOF_DENIED';END IF;
   IF erasing THEN
-   p_evidence:=bill2_financial_projection(p_evidence)||jsonb_build_object('evidenceKind','provider_rejection',
+   -- Reuse the existing content-free projection, then restore only verified refusal fields.
+   p_evidence:=bill2_financial_projection(p_evidence-'evidenceKind')||jsonb_build_object('evidenceKind','provider_rejection',
     'requestHash',c.payload->>'requestHash','limitSource',rejection#>>'{error,metadata,limit_source}');
    projection_hash:=encode(sha256(convert_to(p_evidence::text,'utf8')),'hex');
   END IF;

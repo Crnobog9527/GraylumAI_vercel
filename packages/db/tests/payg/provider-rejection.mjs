@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
-import {rpc} from '../erasure-b2a/cases.mjs';
+import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 import {createFixture,claim,receipt} from './fixture.mjs';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const proof=f=>{
@@ -46,6 +46,22 @@ export async function providerRejectionCases({db,Client,connectionString}){
   assert.equal(await balance(db,prior),99,'previous paid call is never compensated');
   assert.equal((await rpc(db,'bill2_read',prior.actor,prior.run)).state,'settled');
   assert.equal((await db.query("select count(*)::int n from credit_transactions where bill2_run_id=$1 and reason_code='bill2_compensation'",[prior.run])).rows[0].n,0);
+
+  for(const erasureFirst of [true,false]){
+   const erased=await fixture(db,version),evidence=proof(erased);
+   const execution=(await db.query('select b2a_test.bind($1) id',[erased])).rows[0].id;
+   const ec=await claim(db,erased);
+   if(erasureFirst)await closeAccount(db,erased);
+   await rpc(db,'bill2_record',erased.actor,erased.run,ec.id,evidence);
+   if(!erasureFirst)await closeAccount(db,erased);
+   await rpc(db,'runtime_financial_recovery',erased.actor,execution,true);
+   await rpc(db,'account_erasure_scrub_runtime',erased.actor);
+   await rpc(db,'bill2_record',erased.actor,erased.run,ec.id,evidence);
+   assert.equal(await balance(db,erased),100);
+   const stored=(await db.query('select payload from bill2_receipts where call_id=$1',[ec.id])).rows;
+   if(erasureFirst)assert.doesNotMatch(JSON.stringify(stored),/rawBody|transport|Synthetic refusal/);
+   else assert.equal(stored.length,1); // Existing pre-erasure receipts await the separately planned B2b scrub.
+  }
 
   // Unknown transport results have no refusal evidence in either billing contract.
   for(const status of [null,503,200]){
