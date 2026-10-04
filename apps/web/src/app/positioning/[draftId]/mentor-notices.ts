@@ -11,13 +11,15 @@ type Action = { onClick: () => void; disabled?: boolean };
  * Notices under the last mentor turn, in the conversation: stream progress, the pending reply,
  * unsaved form edits, the retry of a retained request, and the page's error and notice.
  * One event is one notice: "正在回复…" only when no open turn or live stream already says so,
- * and a failed retry's error is not repeated under its retry notice.
+ * and an error is not repeated under its retry notice or under the last turn that already shows it.
  */
 export function mentorTailNotices(ctx: {
   livePhase: string | null;
   replying: boolean;
   /** The last turn already shows its own state notice (for example 正在回复…). */
   lastTurnOpen: boolean;
+  /** Text of the last turn's own notice; an error it already shows is not repeated here. */
+  lastTurnText?: string;
   saving: boolean;
   recovery: (Action & { readable: boolean }) | null;
   error: string;
@@ -34,7 +36,8 @@ export function mentorTailNotices(ctx: {
     notices.push({ id: "recovery", tone: "warning", label: "恢复提示",
       text: ctx.recovery.readable ? "上一条回复还没确认完成，原请求已保留，重试不会重复扣费。" : "上一条请求无法读取，原始记录已保留。",
       actions: [{ label: CHAT_ACTION.retry, onClick: ctx.recovery.onClick, disabled: ctx.recovery.disabled }] });
-  if (ctx.error && !(ctx.recovery && ctx.error === RETRY_PENDING_NOTICE)) notices.push({ id: "error", tone: "error", text: ctx.error });
+  const shownByTurn = Boolean(ctx.error && ctx.lastTurnText?.split("\n").includes(ctx.error));
+  if (ctx.error && !shownByTurn && !(ctx.recovery && ctx.error === RETRY_PENDING_NOTICE)) notices.push({ id: "error", tone: "error", text: ctx.error });
   if (ctx.notice) notices.push({ id: "notice", tone: "warning", text: ctx.notice });
   if (ctx.freeError) notices.push({ id: "free", tone: "error", text: ctx.freeError });
   return notices;

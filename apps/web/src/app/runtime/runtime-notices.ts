@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice';
-import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, HISTORY_OMITTED_NOTICE } from '@/lib/runtime-gate-notice';
+import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from '@/lib/runtime-gate-notice';
 
 /** A frozen guidance request without its execution, waiting for the user's explicit retry. */
 export const GUIDE_HELD_NOTICE = '引导请求待恢复。点“重试”会沿用原请求，不会另开一次。';
@@ -39,8 +39,10 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
     return [{ id: id('history'), tone: 'warning', text: PROVIDER_HISTORY_NOTICE }];
   if (turn.historyOmitted)
     notices.push({ id: id('history-omitted'), tone: 'status', text: HISTORY_OMITTED_NOTICE });
+  // The view names a whole-turn provider refusal; the same text the execute result showed live.
   if (turn.state === 'cancelled')
     notices.push(ctx.gateStop ? { id: id('cancelled'), tone: 'warning', text: ctx.gateStop }
+      : turn.unavailableReason === 'provider_rejected' ? { id: id('cancelled'), tone: 'warning', text: PROVIDER_REJECTED_NOTICE }
       : ctx.userStopped ? { id: id('cancelled'), tone: 'status', text: USER_STOP_NOTICE } : { id: id('cancelled'), tone: 'warning', text: ENDED_NOTICE });
   if (turn.needsTask)
     notices.push({ id: id('task'), tone: 'warning', text: '当前入口暂不支持这个 Skill 的任务选择。可点“停止”后使用普通对话。' });

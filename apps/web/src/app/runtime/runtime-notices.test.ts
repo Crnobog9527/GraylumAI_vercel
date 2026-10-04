@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from "vitest";
-import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
+import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
 import { CAPACITY_NOTICE, ENDED_NOTICE, GUIDE_HELD_NOTICE, USER_STOP_NOTICE, runtimeTailNotices, runtimeTurnNotices, type RuntimeTurn } from "./runtime-notices";
 
 const turn = (extra: Partial<RuntimeTurn> = {}): RuntimeTurn => ({
@@ -132,4 +132,16 @@ it('still says 回复尚未完成 when the server left the turn unfinished', () 
 it('shows the older-history notice and the running state together', () => {
  const texts=runtimeTurnNotices(turn({state:'running',historyOmitted:true}),ctx({busy:true})).map(n=>n.text);
  expect(texts).toEqual([HISTORY_OMITTED_NOTICE,'正在回复…']);
+});
+it('keeps the provider refusal notice for a cancelled turn after a reload, without actions', () => {
+  const [notice] = runtimeTurnNotices(turn({ state: 'cancelled', unavailableReason: 'provider_rejected' }), ctx());
+  expect(notice).toMatchObject({ tone: 'warning', text: PROVIDER_REJECTED_NOTICE });
+  expect(notice.actions).toBeUndefined();
+  // Unknown reasons and no reason keep the neutral ended notice.
+  for (const unavailableReason of ['something_new', null])
+    expect(runtimeTurnNotices(turn({ state: 'cancelled', unavailableReason }), ctx())[0].text).toBe(ENDED_NOTICE);
+  // The live execute error is not repeated once the turn shows it.
+  const texts = runtimeTurnNotices(turn({ state: 'cancelled', unavailableReason: 'provider_rejected' }), ctx()).map(n => String(n.text));
+  expect(runtimeTailNotices({ error: PROVIDER_REJECTED_NOTICE, heldGuide: false, busy: false, onGuide: vi.fn(),
+    lastTurn: { open: false, texts } })).toEqual([]);
 });
