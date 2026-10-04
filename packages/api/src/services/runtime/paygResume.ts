@@ -20,7 +20,8 @@ export async function beginPaygExecution(input: {
   const execution = await input.read(input.resume ? 'read' : 'begin');
   const wait = (unavailable?: PaygWait['unavailable']): PaygWait => ({
     state: execution.state as PaygWait['state'],
-    code: execution.state === 'waiting_credits' ? 'RUNTIME_WAITING_CREDITS' : 'RUNTIME_WAITING_RESUME',
+    code: unavailable === 'usage_configuration_required' ? 'RUNTIME_USAGE_CONFIGURATION_REQUIRED'
+      : execution.state === 'waiting_credits' ? 'RUNTIME_WAITING_CREDITS' : 'RUNTIME_WAITING_RESUME',
     executionId: input.executionId, cursor: execution.cursor!, epoch: execution.epoch!, remainingCalls: execution.remainingCalls!,
     ...(execution.primaryResult ? { body: execution.primaryResult.body } : {}), ...(unavailable ? { unavailable } : {}),
   });

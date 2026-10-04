@@ -322,7 +322,7 @@ type RuntimeEnvironment = 'staging' | 'production' | 'local';
 type RuntimeWindow = 'day' | 'minute';
 type RuntimeLimitResult =
   | { success: true }
-  | { success: false; reason: 'rate_limited' | 'unavailable'; window?: RuntimeWindow; retryAfter: number };
+  | { success: false; reason: 'rate_limited' | 'unavailable' | 'usage_configuration_required'; window?: RuntimeWindow; retryAfter: number };
 const runtimeLimiters = new Map<string, {
   perMinute: number; perDay: number; minute: Ratelimit; day: Ratelimit;
 }>();
@@ -340,7 +340,8 @@ export async function checkRuntimeRateLimit(
     if (!Number.isSafeInteger(rate) || rate < 1) throw new Error('INVALID_RUNTIME_RATE');
     if (rate > perMinute || rate > perDay) {
       logger.error('security', 'runtime_rate_limit_round_exceeds_limit', { bucket });
-      return { success: false, reason: 'unavailable', retryAfter: 60 };
+      return { success: false, reason: 'usage_configuration_required', retryAfter: 0,
+        window: rate > perMinute ? 'minute' : 'day' };
     }
     backendStarted = true;
     const key = `${environment}:${bucket}`;

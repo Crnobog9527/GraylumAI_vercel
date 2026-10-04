@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {finishWaitingOrganizer,type ResumeWaitingOrganizer} from './waitingOrganizer';
 import { TRPCError } from '@trpc/server';
 import { createHash } from 'node:crypto';
 import {freezePromptCache,freezeHostPromptCache,PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
@@ -49,6 +50,7 @@ export const runtimeAdmission=z.object({sessionId:uuid,requestId:uuid,input:z.st
 export type LocalRuntimePolicy={
  /** Trusted composition only; no public request or environment switch selects v2. */
  payg?: {callPolicies: FrozenPaygRun['callPolicy']; billingUnit: NonNullable<FrozenPaygRun['rules']['billingUnit']>};
+ resumeWaitingOrganizer?:ResumeWaitingOrganizer;
  hostTurnContext?:HostTurnContext;
  purposeBudgets?:boolean;real?:StagingPolicy;account:string;costPerCall:string;creditsPerUsd:string;multiplier:string;
  maxCalls:number;maxOutputTokens:number;inputBytes:number;historyItems:number;
@@ -93,6 +95,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    (['400: insufficient credits','insufficient credits'].includes(r.error.message)||
     /^积分不足: 需要 [0-9]+, 当前 [0-9]+$/.test(r.error.message)))
    throw new TRPCError({code:'BAD_REQUEST',message:'BILL2_INSUFFICIENT_CREDITS'});
+  if(r.error?.message==='RUNTIME_ORGANIZER_PENDING')throw new StagingAccessError('RUNTIME_ORGANIZER_PENDING');
   if(r.error)throw new Error(name==='runtime_admit'&&r.error.message==='OPC_ANSWER_SOURCE_DENIED'
    ?'OPC_ANSWER_SOURCE_DENIED':'RUNTIME_ADMISSION_DENIED');
   return r.data;
@@ -107,11 +110,14 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const actorId=await actor();
    if(policy.real&&(input.network!=='deny'||policy.searchEnabled))throw new Error('RUNTIME_REAL_SEARCH_DISABLED');
    if(input.network==='require_latest'&&!policy.searchEnabled)throw new Error('RUNTIME_SEARCH_UNAVAILABLE');
-   const session=await query('runtime_session_context',{p_session_id:input.sessionId});
+   let session=await query('runtime_session_context',{p_session_id:input.sessionId});
    // Resolve replay before model or revision freshness changes produce another budget.
    const settings=readNewWorkSettings(admin);
    const replay=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:request});
    if(replay)return replay;
+   const blocked=await finishWaitingOrganizer(session,input.requestId,policy.resumeWaitingOrganizer);
+   if(blocked)return blocked;
+   if(session.waitingOrganizer)session=await query('runtime_session_context',{p_session_id:input.sessionId});
    const leaveRateLimit=currentRequestTiming()?.enter('rateLimit');
    try{requireNewWork(await newWorkGate(admin,policy.real?'staging':'local').message(actorId,settings));}
    finally{leaveRateLimit?.();}

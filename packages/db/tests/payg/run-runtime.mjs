@@ -9,6 +9,7 @@ import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runtimeCases} from './runtime.mjs';
+import {meteringReviewCases} from './metering-review.mjs';
 
 const development = process.argv.slice(2).join(' ')==='--local-only --development';
 if ((!development&&process.argv.slice(2).join(' ')!=='--local-only')||process.env.CI) throw Error('Require --local-only outside CI');
@@ -45,14 +46,14 @@ try {
   report.build = buildFromFiles(root,{
     applyFile:path=>{
       const migration=read(path);
-      if (path.endsWith('0166_payg_runtime.sql')&&!rollbackChecked) {
+      if (path.endsWith('0167_payg_runtime_followup.sql')&&!rollbackChecked) {
         const before=JSON.parse(ok(sql(objectSql)));
         assert.match(migration,/COMMIT;\s*$/);
         const interrupted=sql(migration.replace(/COMMIT;\s*$/,
           "DO $$ BEGIN RAISE EXCEPTION 'PAYG_RUNTIME_TEST_ROLLBACK'; END $$; COMMIT;"));
         assert.notEqual(interrupted.status,0);
         assert.match(interrupted.stderr,/PAYG_RUNTIME_TEST_ROLLBACK/);
-        assert.deepEqual(JSON.parse(ok(sql(objectSql))),before,'failed 0166 restores the complete pre-migration catalog');
+        assert.deepEqual(JSON.parse(ok(sql(objectSql))),before,'failed 0167 restores the complete pre-migration catalog');
         const signatures=[...migration.matchAll(/public\.([^']+)'::regprocedure/g)].map(m=>m[1]);
         for(const signature of signatures){
           const source=before['fn:'+signature];
@@ -61,14 +62,14 @@ try {
           const drifted=JSON.parse(ok(sql(objectSql)));
           const refused=sql(migration);
           assert.notEqual(refused.status,0);
-          assert.match(refused.stderr,/PAYG_RUNTIME_SOURCE_MISMATCH/);
+          assert.match(refused.stderr,/PAYG_B2_SOURCE_MISMATCH/);
           assert.deepEqual(JSON.parse(ok(sql(objectSql))),drifted,'md5 refusal makes no partial schema change');
           ok(sql(source+';'));
           assert.deepEqual(JSON.parse(ok(sql(objectSql))),before);
         }
         report.checks.push('every replaced function rejects synthetic source drift before DDL');
         rollbackChecked=true;
-        report.checks.push('0166 failure before COMMIT rolls back all DDL and ACL to the exact pre-migration catalog');
+        report.checks.push('0167 failure before COMMIT rolls back all DDL and ACL to the exact pre-migration catalog');
       }
       return outcome(sql(migration));
     },
@@ -85,6 +86,7 @@ try {
   await db.connect();
   await db.query(read('packages/db/tests/erasure-b2a/fixture.sql'));
   await runtimeCases({db,Client,connectionString,report});
+  await meteringReviewCases({db,Client,connectionString,report});
 } catch (error) {
   report.failed = String(error.stack??error);
   report.databaseError = {code:error.code,detail:error.detail,where:error.where,position:error.position};

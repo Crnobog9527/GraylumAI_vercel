@@ -36,7 +36,7 @@ it.each(['minute', 'day'])('does not charge either bucket when %s remaining is i
   });
   expect(mock.limit).not.toHaveBeenCalled();
 });
-it.each([0, -1, 1.5, NaN, Infinity, 31])('rejects invalid or impossible rate %s before Redis', async rate => {
+it.each([0, -1, 1.5, NaN, Infinity])('rejects invalid or impossible rate %s before Redis', async rate => {
   const { checkRuntimeRateLimit: check } = await import('./redisRateLimiter');
   expect(await check('actor', 'calls', defaults, 'local', rate)).toMatchObject({ reason: 'unavailable' });
   expect(mock.redis).not.toHaveBeenCalled();
@@ -116,4 +116,32 @@ it('rejects invalid thresholds and namespaces before Redis', async () => {
   await check('a', 'admission', { ...defaults, admissionPerMinute: 0 }, 'staging');
   await check('a', 'admission', defaults, 'arbitrary' as never);
   expect(mock.redis).not.toHaveBeenCalled();
+});
+it.each([{ minute: 2, day: 4 }, { minute: 2, day: 2 }])('diagnoses insufficient capacity without Redis: %j', async limits => {
+  const { checkRuntimeRateLimit: check } = await import('./redisRateLimiter');
+  const config = { ...defaults, callsPerMinute: limits.minute, callsPer24Hours: limits.day };
+  expect(await check('actor', 'calls', config, 'local', 3)).toMatchObject({
+    success: false, reason: 'usage_configuration_required', retryAfter: 0,
+  });
+  expect(mock.redis).not.toHaveBeenCalled();
+  expect(mock.remaining).not.toHaveBeenCalled();
+  expect(mock.limit).not.toHaveBeenCalled();
+  expect(await check('actor', 'calls', { ...config, callsPerMinute: 3, callsPer24Hours: 4 }, 'local', 3))
+    .toEqual({ success: true });
+});
+it.each([{ callsPerMinute: 2, callsPer24Hours: 4 }, { callsPerMinute: 2, callsPer24Hours: 2 }])
+('accepts equality with minute/day configured capacity: %j', async limits => {
+  const { checkRuntimeRateLimit: check } = await import('./redisRateLimiter');
+  expect(await check('actor', 'calls', { ...defaults, ...limits }, 'local', 2)).toEqual({ success: true });
+  expect(mock.limit).toHaveBeenCalledTimes(2);
+});
+it.each(['minute', 'day'])('ordinary %s window exhaustion remains retryable after reset', async window => {
+  const { checkRuntimeRateLimit: check } = await import('./redisRateLimiter');
+  mock.remaining.mockImplementation(async options => ({
+    remaining: options.prefix.includes(`:${window}:`) ? 1 : 30, reset: Date.now() + 60000,
+  }));
+  expect(await check('actor', 'calls', defaults, 'local', 2)).toMatchObject({ reason: 'rate_limited', window });
+  expect(mock.limit).not.toHaveBeenCalled();
+  mock.remaining.mockResolvedValue({ remaining: 30, reset: Date.now() + 60000 });
+  expect(await check('actor', 'calls', defaults, 'local', 2)).toEqual({ success: true });
 });

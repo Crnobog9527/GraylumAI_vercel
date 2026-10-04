@@ -60,3 +60,9 @@ it('recovery-only gate always denies and preserves old RateLimitError defaults',
   expect(new RateLimitError('unavailable').message).toBe('服务暂时繁忙，请稍后再试');
   expect(new RateLimitError('rate_limited', 10).message).toBe('请求过于频繁，请在 10 秒后重试');
 });
+it('exposes a distinct configuration diagnostic without a retry-later hint', async () => {
+  mock.redis.mockResolvedValue({ success: false, reason: 'usage_configuration_required', retryAfter: 0, window: 'minute' });
+  const result = await newWorkGate(db(), 'local').calls('actor', 31);
+  expect(result).toEqual({ ok: false, reason: 'usage_configuration_required', retryAfter: 0, window: 'minute' });
+  expect(() => requireNewWork(result)).toThrow('RUNTIME_USAGE_CONFIGURATION_REQUIRED');
+});

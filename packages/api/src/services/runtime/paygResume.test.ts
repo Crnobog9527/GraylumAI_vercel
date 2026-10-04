@@ -57,3 +57,21 @@ describe('explicit original-execution resume', () => {
     await expect(beginPaygExecution(fixture('running'))).rejects.toThrow('RUNTIME_RESUME_CONFLICT');
   });
 });
+it.each(['waiting_credits', 'waiting_resume'])('keeps %s and its CAS token for quota adjustment', async state => {
+  const f = fixture(state);
+  const rejected = await beginPaygExecution({ ...f, callGate: async () => ({
+    ok: false, reason: 'usage_configuration_required', retryAfter: 0,
+  }) });
+  expect(rejected.wait).toMatchObject({ state, code: 'RUNTIME_USAGE_CONFIGURATION_REQUIRED',
+    unavailable: 'usage_configuration_required', cursor: 3, epoch: 2, body: 'saved reply' });
+  expect(f.read).toHaveBeenCalledExactlyOnceWith('read');
+  expect((await beginPaygExecution(f)).resumedGate).toBe(true);
+});
+it.each(['prepared', 'running', 'interrupted', 'completed', 'waiting_credits', 'waiting_resume'])
+('rejects v1 resume in %s without mutation or calls consumption', async state => {
+  const f = fixture(state);
+  f.execution.billing.contractVersion = 'bill2.v1';
+  await expect(beginPaygExecution(f)).rejects.toThrow('RUNTIME_RESUME_CONFLICT');
+  expect(f.read).toHaveBeenCalledExactlyOnceWith('read');
+  expect(f.callGate).not.toHaveBeenCalled();
+});

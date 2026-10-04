@@ -4,6 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {rpc} from '../erasure-b2a/cases.mjs';
 import {createFixture} from './fixture.mjs';
 import {runtimeOwnerCases} from './runtime-owner.mjs';
+import {runtimeErasureCases} from './runtime-erasure.mjs';
 export async function runtimeCases({db,Client,connectionString,report}) {
   async function setup(extraContext={}) {
     const f=await createFixture(db,{credits:0,threshold:1});
@@ -17,6 +18,7 @@ export async function runtimeCases({db,Client,connectionString,report}) {
     return {...f,run:admitted.runId,execution:admitted.executionId,session:session.sessionId,context,payload};
   }
   await runtimeOwnerCases({db,Client,connectionString,report,setup});
+  await runtimeErasureCases({db,report,setup});
   const lost=await setup();
   await db.query("UPDATE bill2_runs SET runtime_dispatch_deadline=clock_timestamp()-interval '1 second' WHERE id=$1",[lost.run]);
   const recoverable=await rpc(db,'runtime_execution',lost.actor,lost.execution,'read',null);

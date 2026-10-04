@@ -127,11 +127,13 @@ export type AgentTurnState = 'waiting_credits' | 'waiting_resume' | "completed" 
  * value to a fixed notice; none of them may be retried automatically.
  */
 export type AgentTurnUnavailable = "provider_rejected" | "output_truncated" | "provider_history" | "preflight" | "capacity" | "latest"
-  | "call_limited" | "paused" | "limit_unavailable" | "RUNTIME_PRICE_UNCONFIRMED" | "RUNTIME_PRICE_CONFIGURATION_PENDING";
+  | "call_limited" | "paused" | "limit_unavailable" | "usage_configuration_required" | "RUNTIME_PRICE_UNCONFIRMED" | "RUNTIME_PRICE_CONFIGURATION_PENDING";
 
 /** The execution outcome. `body` is the stored reply body; read it with `readAgentTurnBody`. */
 export type AgentTurnOutcome = {
-  code?: 'RUNTIME_WAITING_CREDITS' | 'RUNTIME_WAITING_RESUME';
+  /** Q1: the new request remains with its caller while the original organizer waits. */
+  admitted?: false; blockedRequestId?: string;
+  code?: 'RUNTIME_WAITING_CREDITS' | 'RUNTIME_WAITING_RESUME' | 'RUNTIME_USAGE_CONFIGURATION_REQUIRED';
   executionId?: string; cursor?: number; epoch?: number; remainingCalls?: number;
   state: AgentTurnState;
   body?: string;
@@ -144,6 +146,8 @@ export type AgentTurnOutcome = {
  *
  *   admitted → (phase | text)* → card? → result
  *
+ * - Q1 may return only `result` with `admitted: false` and `blockedRequestId`.
+ *   Retain the new input and request ID; it has not entered execution.
  * - `admitted` comes first and only from the single-request turn. It carries
  *   the execution id; store it so a reload can resume that same execution
  *   instead of sending the request again.
