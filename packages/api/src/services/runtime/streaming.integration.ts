@@ -1,4 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {jsonbBytes,fitNativeResult,attachNativeSummary} from './resultCapacity';
+import {streamOriginalExecution,type ExecutionStreamEvent} from './executionStream';
 import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
 import {beforeAll,afterAll,it,expect,vi} from 'vitest';
 import {logger} from '../../lib/logger';
@@ -32,7 +34,7 @@ const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 async function rpc(name:string,args:Record<string,unknown>){const result=await admin.rpc(name,args);if(result.error)throw new Error(result.error.message);return result.data;}
 function latch(){let release!:()=>void;const promise=new Promise<void>(resolve=>{release=resolve;});return {promise,release};}
 async function until(test:()=>boolean){const deadline=Date.now()+5000;while(!test()){if(Date.now()>deadline)throw new Error('synthetic progress deadline');await new Promise(resolve=>setTimeout(resolve,10));}}
-async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial-tools-v4-stream'|'agent-turn-v5-stream'|'serial-tools-v6-reasoning',organize=false,outputLimit=100,tool=false,reasoning?:{primary:ReasoningPolicy;organizer:ReasoningPolicy},opening=false,inputLimit=10000,fiveFields:boolean|'legacy'=false){
+async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial-tools-v4-stream'|'agent-turn-v5-stream'|'serial-tools-v6-reasoning',organize=false,outputLimit=100,tool=false,reasoning?:{primary:ReasoningPolicy;organizer:ReasoningPolicy},opening=false,inputLimit=10000,fiveFields:boolean|'legacy'=false,native=false){
  const actorId=randomUUID(),mentorId=randomUUID(),organizerId=randomUUID(),windowId=randomUUID(),requestId=randomUUID();
  await db.query('insert into profiles(id,credits) values($1,100)',[actorId]);
  await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,100,'addition','grant','opening_grant','system',$2,0,100)",[actorId,'stream-opening:'+actorId]);
@@ -40,7 +42,7 @@ async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial
  const policies=[[mentorId,'synthetic/mentor'],[organizerId,'synthetic/organizer']].map(([modelId,model])=>({modelId,model,provider:'openrouter',account:'synthetic-stream',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:inputLimit>10000?40000:10000,promptUsdPerMillion:inputLimit>10000?'0.5':'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
  for(const policy of policies)await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic streaming integration',$2,'openrouter','true')",[policy.modelId,policy.model]);
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.10,3,now()+interval '2 hours')",[windowId,[actorId],JSON.stringify(policies)]);
- const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',inputSelection:'scope-projection-v1',providerRequestFormat:format,...(fiveFields?{questionContract:fiveFields==='legacy'?LEGACY_QUESTION_CONTRACT:QUESTION_CONTRACT}:{}),...(reasoning?{reasoning:reasoning.primary}:format==='serial-tools-v4-stream'||format==='agent-turn-v5-stream'?{reasoning:{effort:'none'}}:{}),input:opening?'HOST_OPEN_CURRENT_QUESTION':'Synthetic original input',instructions:'Return the public mentor message in the message property; keep protocol fields private.',model:policies[0]!.model,modelId:mentorId,maxOutputTokens:outputLimit,maxTurns:1,historyItems:20,network:'deny',tools:format==='agent-turn-v5-stream'?(fiveFields&&opening?[]:['ask_question']):tool?['read_source']:[],...(tool?{workspaceContext:true,maxToolCalls:1,maxTurns:2}:{}),request:{sessionId:session.sessionId,requestId,organizeAfter:false},...(organize?{attachedOrganizer:{modelId:organizerId,model:policies[1]!.model,maxOutputTokens:reasoning?outputLimit:100,...(reasoning?{reasoning:reasoning.organizer}:{}),instructions:'Synthetic organizer only',input:'Synthetic original input'}}:{})};
+ const context={...(native?{nativeOutput:'native-output-v1',...(format==='serial-tools-v4-stream'?{envelopeOrder:'message-first-v1'}:{})}:{}),version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',inputSelection:'scope-projection-v1',providerRequestFormat:format,...(fiveFields?{questionContract:fiveFields==='legacy'?LEGACY_QUESTION_CONTRACT:QUESTION_CONTRACT}:{}),...(reasoning?{reasoning:reasoning.primary}:format==='serial-tools-v4-stream'||format==='agent-turn-v5-stream'?{reasoning:{effort:'none'}}:{}),input:opening?'HOST_OPEN_CURRENT_QUESTION':'Synthetic original input',instructions:'Return the public mentor message in the message property; keep protocol fields private.',model:policies[0]!.model,modelId:mentorId,maxOutputTokens:outputLimit,maxTurns:1,historyItems:20,network:'deny',tools:format==='agent-turn-v5-stream'?(fiveFields&&opening?[]:['ask_question']):tool?['read_source']:[],...(tool?{workspaceContext:true,maxToolCalls:1,maxTurns:2}:{}),request:{sessionId:session.sessionId,requestId,organizeAfter:false},...(organize?{attachedOrganizer:{modelId:organizerId,model:policies[1]!.model,maxOutputTokens:reasoning?outputLimit:100,...(reasoning?{reasoning:reasoning.organizer}:{}),instructions:'Synthetic organizer only',input:'Synthetic original input'}}:{})};
  const billing={contractVersion:'bill2.v1',mode:'staging_test',testWindowId:windowId,scope:session.scope,operation:'question',modelId:mentorId,sourceHash:hash('synthetic-stream'),input:context,callPolicy:organize?policies:[policies[0]],rules:{version:'runtime-staging-v1',quoteVersion:windowId,creditsPerUsd:'1000',multiplier:'1',fx:{}},limits:{costUsd:tool?'0.06':organize?'0.04':'0.02',credits:tool?60:organize?40:20,maxPreDeduct:tool?60:organize?40:20,maxCalls:tool?3:organize?2:1,deadline:new Date(Date.now()+3600000).toISOString()}};
  const execution=await rpc('runtime_admit',{p_actor_id:actorId,p_session_id:session.sessionId,p_request_id:requestId,p_payload:context,p_billing:billing});
  return {actorId,context,execution,session,billing};
@@ -1032,4 +1034,75 @@ it.each(['missing','cost','terminal-no-cost','nonterminal-cost','timeout','5xx']
  for(const audit of audits){expect(audit.claimedAt).toBeTruthy();expect(audit.observedAt).toBeTruthy();}
  await executor.recoverFinancial(f.execution.executionId);
  expect(lookups).toBe(2);expect(posts).toBe(1);
+});
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['step','fallback','card','length'] as const)(
+ 'RUNTIME: native C0 C1 %s streams safely and replays a terminal snapshot without redispatch',async mode=>{
+ const agent=mode==='card'||mode==='length';
+ const f=await fixture(agent?'agent-turn-v5-stream':'serial-tools-v4-stream',false,8192,false,undefined,false,30000,agent,true);
+ const card={question:'Private question?',options:['First','Second'],recommended:0,message:'公开😀正文',recommendationReason:'Private reason'};
+ const text=mode==='length'?'长正文😀':card.message;
+ const body=agent?text:JSON.stringify(mode==='fallback'?{informationPatch:{},message:text}:{message:text,informationPatch:{}});
+ const gate=latch(),started=latch();let posts=0;
+ const server=createServer(async(req,res)=>{
+  posts++;let raw='';for await(const part of req)raw+=part;
+  const request=JSON.parse(raw),id='gen-native-'+f.execution.executionId;
+  res.setHeader('content-type','text/event-stream');
+  chunk(res,id,request.model,{role:'assistant',content:mode==='card'?'Earlier prose':body.slice(0,body.length-2)});
+  started.release();await gate.promise;
+  if(mode==='card'){
+   const args=JSON.stringify(card);
+   chunk(res,id,request.model,{tool_calls:[{index:0,id:'native-card',type:'function',function:{name:'ask_question',arguments:''}}]});
+   for(const char of args)chunk(res,id,request.model,{tool_calls:[{index:0,function:{arguments:char}}]});
+  }else chunk(res,id,request.model,{content:body.slice(-2)});
+  chunk(res,id,request.model,{},mode==='card'?'tool_calls':mode==='length'?'length':'stop');
+  res.end('data: '+JSON.stringify({id,model:request.model,choices:[],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}})+'\n\ndata: [DONE]\n\n');
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const address=server.address();if(!address||typeof address==='string')throw new Error('local listener required');
+ const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',
+  transport:async(_url,init)=>fetch(`http://127.0.0.1:${address.port}`,init)});
+ const host=()=>runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter});
+ const events:ExecutionStreamEvent[]=[];
+ const running=(async()=>{for await(const e of streamOriginalExecution(cb=>host().execute(f.execution.executionId,cb),undefined,'test',undefined,'textDelta-v1'))events.push(e);})();
+ try{
+  await started.promise;
+  const pendingEvents:RuntimeProgress[]=[];
+  expect(await host().execute(f.execution.executionId,e=>pendingEvents.push(e))).toEqual({state:'pending'});
+  expect(pendingEvents.filter(e=>e.type==='text')).toEqual([]);
+  if(mode==='fallback')expect(events.filter((e)=>e.type==='textDelta')).toEqual([]);
+  else await until(()=>events.some((e)=>e.type==='textDelta'));
+  gate.release();await running;
+  const frames=events.filter((e)=>e.type==='textDelta') as Array<{offset:number;rev:number;text:string}>;
+  let displayed='';let rev=0;
+  for(const frame of frames){
+   if(frame.offset===0){displayed=frame.text;rev=frame.rev;}
+   else{expect(frame.rev).toBe(rev);expect(frame.offset).toBe(Array.from(displayed).length);displayed+=frame.text;}
+  }
+  expect(displayed).toBe(text);
+  const terminal=events.at(-1);if(terminal?.type!=='result')throw new Error('missing terminal');
+  const result=terminal.result;
+  expect(result).toMatchObject({state:'completed',completeness:mode==='length'?'length_limit':'complete'});
+  if(!agent)expect(result.messageFirst).toBe(mode!=='fallback');
+  expect(JSON.parse(result.body!).message).toBe(text);
+  const replay=[];for await(const e of streamOriginalExecution(cb=>host().execute(f.execution.executionId,cb),undefined,'test',undefined,'textDelta-v1'))replay.push(e);
+  expect(replay).toEqual([{type:'textDelta',offset:0,rev:0,text},{type:'result',result}]);
+  expect(posts).toBe(1);
+  const saved=(await db.query('select result,octet_length(result::text) bytes from runtime_executions where id=$1',[f.execution.executionId])).rows[0];
+  expect(saved.bytes).toBe(jsonbBytes(saved.result));expect(saved.bytes).toBeLessThanOrEqual(262144);
+  const charges=await db.query('select count(*)::int n from bill2_calls where run_id=$1',[f.execution.runId]);
+  expect(charges.rows[0].n).toBe(1);
+ }finally{gate.release();await running;server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: native capacity matches PostgreSQL jsonb bytes with escaped Unicode and summary omission',async()=>{
+ for(const message of ['😀中\\\"\n'.repeat(60000),'x'.repeat(300000)]){
+  const primary=fitNativeResult({body:JSON.stringify({message}),n:1e21,small:1e-7},{attachedOrganizer:true});
+  const result=attachNativeSummary(primary,'summary');
+  const measured=await db.query('select octet_length($1::jsonb::text) bytes',[JSON.stringify(result)]);
+  expect(measured.rows[0].bytes).toBe(jsonbBytes(result));
+  expect(measured.rows[0].bytes).toBeLessThanOrEqual(262144);
+  expect(result.body).toBe(primary.body);expect(result.summaryOmitted).toBe(true);
+ }
 });

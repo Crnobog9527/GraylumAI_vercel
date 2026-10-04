@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {NativeTextTransport,type NativeTextDelta} from './nativeProgress';
 import type {ResumeInput} from './paygRuntime';
 import {admitPricing} from './pricingAdmission';
 import {captureCompleted} from '../opc/capture';
@@ -124,9 +125,9 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    callGate:newWorkGate(host.admin,'staging').calls}).execute(executionId,publicProgress,resume)));
 }
 export type OriginalExecutionOutcome=AgentTurnOutcome;
-export type ExecutionStreamEvent=RuntimeProgress|{type:'result';result:OriginalExecutionOutcome};
+export type ExecutionStreamEvent=RuntimeProgress|NativeTextDelta|{type:'result';result:OriginalExecutionOutcome};
 
-/** Minimum spacing of text events. Each one carries the whole public text, so
+/** Minimum spacing of text events. Legacy events carry the whole public text, so
  * one event per provider delta would grow transfer with the square of the
  * reply length. The first text is sent at once; the final text always
  * precedes the result. */
@@ -135,13 +136,18 @@ export const TEXT_EVENT_INTERVAL_MS=100;
 /** Bounded ephemeral delivery of one execution's progress. SQL remains the
  * execution and billing authority. Disconnect discards display progress, not
  * provider evidence: the execution always runs to its own end. Only the latest
- * text and phase are kept; each text event carries the whole public text. */
+ * text and phase are kept; negotiated native events carry queued deltas. */
 export async function* streamOriginalExecution(run:(onProgress:(event:RuntimeProgress)=>void)=>Promise<OriginalExecutionOutcome>,
- timing:RuntimeBudget['timing']|undefined,path:string,now:()=>number=()=>performance.now()):AsyncGenerator<ExecutionStreamEvent>{
+ timing:RuntimeBudget['timing']|undefined,path:string,now:()=>number=()=>performance.now(),textProtocol?:'textDelta-v1'):AsyncGenerator<ExecutionStreamEvent>{
+ const transport=new NativeTextTransport();
+ let nativePending=false;
  let textEvent:ExecutionStreamEvent|undefined,phaseEvent:ExecutionStreamEvent|undefined,resultEvent:ExecutionStreamEvent|undefined;
  let cardEvent:ExecutionStreamEvent|undefined,cardSeen=false;
  let done=false,failure:unknown,wake:()=>void=()=>{},lastText:number|undefined;
- const pending=run(event=>{if(event.type==='text')textEvent=event;
+ const pending=run(event=>{if(event.type==='text'){
+   if(textProtocol&&'delta' in event){transport.push(event);nativePending=true;textEvent=event;}
+   else textEvent={type:'text',text:event.text};
+  }
   else if(event.type==='card'){if(!cardSeen){cardSeen=true;cardEvent=event;}}else phaseEvent=event;wake();})
   .then(result=>{resultEvent={type:'result',result};},error=>{failure=error;}).finally(()=>{done=true;wake();});
  const idle=(ms?:number)=>new Promise<void>(resolve=>{
@@ -151,10 +157,10 @@ export async function* streamOriginalExecution(run:(onProgress:(event:RuntimePro
  try{
   while(!done||textEvent||cardEvent||phaseEvent||resultEvent){
    if(textEvent){
-    const wait=done||lastText===undefined?0:lastText+TEXT_EVENT_INTERVAL_MS-now();
+    const wait=(done&&!nativePending)||lastText===undefined?0:lastText+TEXT_EVENT_INTERVAL_MS-now();
     if(wait>0){await idle(wait);continue;}
-    const event=textEvent;textEvent=undefined;lastText=now();
-    if(event.type==='text'&&event.text)timing?.mark('firstPublicText');
+    const event=nativePending?transport.flush()!:textEvent;nativePending=false;textEvent=undefined;lastText=now();
+    if((event.type==='text'||event.type==='textDelta')&&event.text)timing?.mark('firstPublicText');
     yield event;
    }
    else if(cardEvent){const event=cardEvent;cardEvent=undefined;yield event;}

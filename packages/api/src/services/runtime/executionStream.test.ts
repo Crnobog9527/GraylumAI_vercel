@@ -108,3 +108,28 @@ describe('runtimeLocalEndpoint',()=>{
   }
  });
 });
+
+it('negotiates native deltas while legacy clients receive whole-text replacements',async()=>{
+ for(const protocol of [undefined,'textDelta-v1'] as const){
+  const c=controlled(),stream=streamOriginalExecution(c.run,undefined,'test',undefined,protocol);
+  const first=stream.next();c.emit({type:'text',text:'😀a',delta:'😀a',replace:true});
+  expect((await first).value).toEqual(protocol?{type:'textDelta',offset:0,rev:0,text:'😀a'}:{type:'text',text:'😀a'});
+  c.emit({type:'text',text:'😀ab',delta:'b',replace:false});
+  c.emit({type:'text',text:'card',delta:'card',replace:true});c.finish({state:'completed'});
+  const rest=[];for await(const event of stream)rest.push(event);
+  expect(rest[0]).toEqual(protocol?{type:'textDelta',offset:0,rev:1,text:'card'}:{type:'text',text:'card'});
+ }
+});
+
+it('holds even the terminal native snapshot until the 100ms window ends',async()=>{
+ const c=controlled();let clock=0;
+ const stream=streamOriginalExecution(c.run,undefined,'test',()=>clock,'textDelta-v1');
+ const first=stream.next();c.emit({type:'text',text:'a',delta:'a',replace:true});await first;
+ clock=50;c.emit({type:'text',text:'ab',delta:'b',replace:false});c.finish({state:'completed'});
+ const second=stream.next();let delivered=false;void second.then(()=>{delivered=true;});
+ await tick();expect(delivered).toBe(false);
+ clock=100;await new Promise(resolve=>setTimeout(resolve,100));
+ expect((await second).value).toEqual({type:'textDelta',offset:1,rev:0,text:'b'});
+ expect((await stream.next()).value).toEqual({type:'result',result:{state:'completed'}});
+ await stream.next();
+});

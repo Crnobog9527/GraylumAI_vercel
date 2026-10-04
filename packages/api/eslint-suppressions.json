@@ -152,11 +152,6 @@
       "count": 1
     }
   },
-  "src/routers/opc.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
   "src/routers/openRouterSearch.integration.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 9
