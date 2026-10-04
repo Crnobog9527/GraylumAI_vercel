@@ -2,6 +2,7 @@
 import {it,expect,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {createHash} from 'node:crypto';
+import {stagingProcedureError} from './stagingErrors';
 import {runtimeAdmissionService} from './admission';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 // The window/configuration consistency of BILL-UNIT is covered in billingUnitAdmission.test.ts.
@@ -79,13 +80,18 @@ it.each(['test/unverified','constructor','__proto__'])('real mentor admission fa
 });
 
 it.each([
+ ['runtime_admit','400: insufficient credits','BILL2_INSUFFICIENT_CREDITS'],
+ ['runtime_admit','insufficient credits','BILL2_INSUFFICIENT_CREDITS'],
+ ['runtime_admit','积分不足: 需要 20, 当前 0','BILL2_INSUFFICIENT_CREDITS'],
+ ['runtime_admit','400: insufficient credits: private','RUNTIME_ADMISSION_DENIED'],
+ ['runtime_session_context','400: insufficient credits','RUNTIME_ADMISSION_DENIED'],
  ['runtime_admit','OPC_ANSWER_SOURCE_DENIED','OPC_ANSWER_SOURCE_DENIED'],
  ['runtime_admit','OPC_ANSWER_SOURCE_DENIED: private','RUNTIME_ADMISSION_DENIED'],
  ['runtime_admit','OTHER_SQL_SECRET','RUNTIME_ADMISSION_DENIED'],
  ['runtime_session_context','OPC_ANSWER_SOURCE_DENIED','RUNTIME_ADMISSION_DENIED'],
 ])('only the exact source refusal from %s is public (%s)',async(failingRpc,message,expected)=>{
  const rpc=vi.fn(async(name:string)=>{
-  if(name===failingRpc)return {data:null,error:{message}};
+  if(name===failingRpc)return {data:null,error:{code:'P0001',message}};
   if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:sessionId}},error:null};
   if(name==='runtime_admission_replay')return {data:null,error:null};
   throw new Error(name);
@@ -94,7 +100,10 @@ it.each([
  const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
  const admin={rpc,from:()=>query} as unknown as SupabaseClient;
  const service=runtimeAdmissionService(user,admin,{account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:1000,inputBytes:32000,historyItems:10});
- await expect(service.prepare({sessionId,requestId,input:'test',selection:{kind:'ordinary',modelId},network:'deny'})).rejects.toThrow(expected!);
+ const failure=await service.prepare({sessionId,requestId,input:'test',selection:{kind:'ordinary',modelId},network:'deny'}).catch(e=>e);
+ expect(failure.message).toBe(expected);
+ if(expected==='BILL2_INSUFFICIENT_CREDITS')expect(stagingProcedureError(failure,'runtime.prepare'))
+  .toMatchObject({code:'BAD_REQUEST',message:expected});
 });
 
 vi.mock('./newWorkGate', async importOriginal => ({

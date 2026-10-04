@@ -5,7 +5,7 @@ import { beforeAll, afterAll, it, expect, vi } from 'vitest';
 import {logger} from '../../lib/logger';
 import { randomUUID, createHash } from 'node:crypto';
 import pg from 'pg';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { PostgresSession } from './session';
 import {assertLongSessionPerformance} from './runtimePerformance.integration';
 import { runRuntime } from './runner';
@@ -2327,4 +2327,19 @@ it('RUNTIME: history refusal reason is service-only, atomic and stable on repeat
  // Existing callers and a new turn in the same Session remain usable.
  const next=await rpc('runtime_admit',{...f.admit,p_request_id:randomUUID()});
  expect(await rpc('runtime_execution',{...args,p_execution_id:next.executionId})).toMatchObject({state:'cancelled',unavailableReason:null});
+});
+
+
+it('RUNTIME: insufficient admission credits is a definite refusal with no execution or hold',async()=>{
+ const f=await fixture();
+ await db.query('update profiles set credits=0 where id=$1',[f.actorId]);
+ const user={auth:{getUser:async()=>({data:{user:{id:f.actorId,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
+ const service=runtimeAdmissionService(user,admin,{account:'sandbox',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',
+  maxCalls:1,maxOutputTokens:1000,inputBytes:10000,historyItems:0});
+ const request={sessionId:f.s.sessionId,requestId:randomUUID(),input:'local test',selection:{kind:'ordinary',modelId},network:'deny'};
+ for(let i=0;i<2;i++)await expect(service.prepare(request)).rejects.toMatchObject({code:'BAD_REQUEST',message:'BILL2_INSUFFICIENT_CREDITS'});
+ expect((await db.query('select id from runtime_executions where actor_id=$1',[f.actorId])).rows).toEqual([]);
+ expect((await db.query('select id from bill2_runs where actor_id=$1',[f.actorId])).rows).toEqual([]);
+ expect((await db.query("select id from credit_transactions where user_id=$1 and reason_code='bill2_reserve'",[f.actorId])).rows).toEqual([]);
+ expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(0);
 });

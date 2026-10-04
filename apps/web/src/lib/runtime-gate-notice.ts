@@ -40,6 +40,7 @@ export function gateAdmissionNotice(cause: unknown, paths: readonly string[]): s
   if (!(cause instanceof Error) || !('data' in cause) || !cause.data || typeof cause.data !== 'object') return null;
   const data = cause.data as { code?: unknown; path?: unknown };
   if (!paths.includes(String(data.path))) return null;
+  if (data.code === 'BAD_REQUEST' && cause.message === 'BILL2_INSUFFICIENT_CREDITS') return '积分不足';
   if (data.code === 'TOO_MANY_REQUESTS')
     return cause.message === runtimeGateMessages.day ? runtimeGateMessages.day : runtimeGateMessages.minute;
   if (data.code !== 'SERVICE_UNAVAILABLE') return null;
