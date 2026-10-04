@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { parseExactJson } from './decimal';
-import { decodeOpenRouterStreamObservation } from './openRouterEvidence';
+import { decodeOpenRouterStreamObservation, validGenerationId } from './openRouterEvidence';
 import { unknownEvidence, type CallIdentity, type TransportObservation } from './fixtureAdapter';
 
 const rejection = z.object({user_id:z.string().nullable().optional(),error:z.object({code:z.literal(402),message:z.string(),metadata:z.object({
@@ -16,7 +16,8 @@ const rejection = z.object({user_id:z.string().nullable().optional(),error:z.obj
 export function openRouterRejection(observation:TransportObservation, identity:CallIdentity, requestHash:string) {
   if(identity.provider!=='openrouter'||identity.protocol!=='openrouter-chat-v1'||
     observation.httpStatus!==402||!observation.complete||observation.transportIssue||
-    observation.generationId!==undefined||!/^[a-f0-9]{64}$/.test(requestHash))return null;
+    (observation.generationId!==undefined&&!validGenerationId(observation.generationId))||
+    !/^[a-f0-9]{64}$/.test(requestHash))return null;
   try {
     const bytes=observation.rawBodyEncoding==='gzip-base64'?decodeOpenRouterStreamObservation(observation)
       :Buffer.from(observation.rawBodyBase64,'base64');
@@ -30,6 +31,8 @@ export function openRouterRejection(observation:TransportObservation, identity:C
     const sourceHash=createHash('sha256').update(bytes).digest('hex');
     if(sourceHash!==observation.sourceHash)return null;
     return {...unknownEvidence(identity),source:'response',sourceHash,rawBody:raw,
-      evidenceKind:'provider_rejection' as const,requestHash,transport:observation};
+      providerId:observation.generationId??null,
+      evidenceKind:observation.generationId?'provider_rejection_pending' as const:'provider_rejection' as const,
+      requestHash,transport:observation};
   } catch { return null; }
 }

@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
 import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 import {createFixture,claim,receipt} from './fixture.mjs';
+import {providerRejectionLookupCases} from './provider-rejection-lookup.mjs';
 const hash=value=>createHash('sha256').update(value).digest('hex');
-const proof=f=>{
+export const proof=f=>{
  const rawBody=JSON.stringify({user_id:'synthetic-user',error:{code:402,message:'Synthetic refusal',
   metadata:{limit_source:'openrouter_key_limit',provider_name:null}}});
  return {provider:'openrouter',account:'sandbox',model:f.claimPayload.model,protocol:'openrouter-chat-v1',
@@ -12,9 +13,9 @@ const proof=f=>{
   currency:'USD',source:'response',coverage:'request_total',observedAt:'2026-10-04T00:00:00Z',
   rawBody,sourceHash:hash(rawBody),transport:{httpStatus:402,complete:true,transportIssue:null,sourceHash:hash(rawBody)}};
 };
-const balance=async(db,f)=>(await db.query('select credits from profiles where id=$1',[f.actor])).rows[0].credits;
-async function fixture(db,version){
- const f=await createFixture(db,{empirical:true,bytes:2000});
+export const balance=async(db,f)=>(await db.query('select credits from profiles where id=$1',[f.actor])).rows[0].credits;
+export async function fixture(db,version){
+ const f=await createFixture(db,{empirical:true,bytes:2000,lookupSupported:true});
  if(version==='v1'){
   await rpc(db,'bill2_cancel',f.actor,f.run);await rpc(db,'bill2_finalize',f.actor,f.run);
   f.payload={...f.payload,contractVersion:'bill2.v1',limits:{...f.payload.limits,credits:100,maxPreDeduct:100}};
@@ -23,6 +24,7 @@ async function fixture(db,version){
  return f;
 }
 export async function providerRejectionCases({db,Client,connectionString}){
+ await providerRejectionLookupCases({db,Client,connectionString});
  for(const version of ['v1','v2']){
   const f=await fixture(db,version),c=await claim(db,f),e=proof(f);
   assert.ok(await balance(db,f)<100);

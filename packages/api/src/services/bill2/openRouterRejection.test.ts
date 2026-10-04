@@ -22,7 +22,7 @@ it.each([400,401,403,408,429,500,502,503,200])('never turns HTTP %s into a zero 
  expect(openRouterRejection({...observation(error()),httpStatus},identity,requestHash)).toBeNull();
 });
 it.each([
- {complete:false},{transportIssue:'body_timeout'},{transportIssue:'body_interrupted'},{generationId:'gen-1'},
+ {complete:false},{transportIssue:'body_timeout'},{transportIssue:'body_interrupted'},{generationId:'invalid id'},
  {sourceHash:'b'.repeat(64)},
 ])('rejects incomplete or contradictory transport %j',patch=>{
  expect(openRouterRejection({...observation(error()),...patch},identity,requestHash)).toBeNull();
@@ -43,7 +43,8 @@ it('accepts audited harmless envelope fields without dropping financial guards',
   metadata:{limit_source:'openrouter_key_limit',provider_name:null}}};
  for(const stream of [false,true]){
   expect(openRouterRejection(observation(body,stream),identity,requestHash)).toMatchObject({evidenceKind:'provider_rejection'});
-  expect(openRouterRejection({...observation(body,stream),generationId:'gen-synthetic'},identity,requestHash)).toBeNull();
+  expect(openRouterRejection({...observation(body,stream),generationId:'gen-synthetic'},identity,requestHash))
+   .toMatchObject({evidenceKind:'provider_rejection_pending',providerId:'gen-synthetic',cost:null,final:false});
  }
  for(const value of [{...body,cost:0},{...body,usage:{}},{...body,output:[]},
   {...body,user_id:{usage:{cost:0}}},{...body,error:{...body.error,metadata:{...body.error.metadata,cost:0}}}]){
