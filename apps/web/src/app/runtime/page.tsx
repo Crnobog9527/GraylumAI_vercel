@@ -293,7 +293,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[workItem,view.data,choices.data,contentType,videoBusy]);
  const turnNotices=(e:RuntimeTurn)=>runtimeTurnNotices(e,{busy,capacity:capacityIds.includes(e.executionId),gateStop:gateStops[e.executionId],
-  userStopped:userStops.includes(e.executionId),finished:finishedExecution(execute)===e.executionId,
+  userStopped:userStops.includes(e.executionId),finished:finishedExecution(execute,view)===e.executionId,
   stopping:cancel.isPending,onRetry:()=>void recover(e.executionId),onStop:()=>void stop(e.executionId)});
  const lastExecution=executions?.at(-1);
  const lastTurn=lastExecution&&{open:isOpenTurn(lastExecution.state),texts:turnNotices(lastExecution).map(notice=>String(notice.text))};

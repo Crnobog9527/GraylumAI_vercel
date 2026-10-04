@@ -502,7 +502,7 @@ export default function TopicWorkspacePage() {
     ...(error ? [{ id: 'error', tone: 'error' as const, text: error }] : []),
     ...(free.error ? [{ id: 'free', tone: 'error' as const, text: free.error }] : []),
   ];
-  const openTurnNotice = (e: { executionId: string; state: string }) => topicOpenTurnNotice(e, { busy, finished: finishedExecution(execute),
+  const openTurnNotice = (e: { executionId: string; state: string }) => topicOpenTurnNotice(e, { busy, finished: finishedExecution(execute, view),
     stopping: cancel.isPending, onRetry: () => void recover(e.executionId), onStop: () => void stop(e.executionId) });
   const adoptedTopics = [...new Map([...plans.flatMap(plan => plan.body ?? []), ...(candidate?.body ?? [])].filter(item => adoptedItemIds.has(item.id)).map(item => [item.id, item])).values()];
 
