@@ -1,4 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {paygOwnerDatabase} from './paygOwner';
+import {StagingAccessError, type StagingFailure} from './stagingErrors';
+import {runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
+import {beginPaygExecution, type RuntimeExecution} from './paygResume';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 import {runtimeContext} from './runtimeContext';
 export {runtimeContext} from './runtimeContext';
@@ -35,18 +39,25 @@ const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
  * its allowlisted official adapter and frozen price policy.
  */
 type RuntimeExecutorOptions={budget?:RuntimeBudget;database:SessionRpc;actor:()=>Promise<string>;
+ resumePricing?:(policies:FrozenRun['callPolicy'])=>Promise<void>;
  callGate:RuntimeCallGate;endpoint?:string;adapter?:BillingTransport;activateSkill?:(candidate:MatchCandidate)=>Promise<string>};
 export function runtimeExecutor(options:RuntimeExecutorOptions){
  if(typeof options.callGate!=='function')throw new Error('RUNTIME_CALL_GATE_REQUIRED');
  const budget=options.budget??createRuntimeBudget();
  const adapter=expiringAuthAfterProvider(options.adapter ?? localFixtureAdapter(options.endpoint??''),budget.auth);
  const billing=authoritativeBilling({admin:options.database,actor:options.actor,adapter,budget});
- async function rpc<T>(name:string,args:Record<string,unknown>):Promise<T>{
-  const result=await options.database.rpc(name,{...args,p_actor_id:z.string().uuid().parse(await options.actor())});
+ async function rpc<T>(name:string,args:Record<string,unknown>,database=options.database):Promise<T>{
+  const result=await database.rpc(name,{...args,p_actor_id:z.string().uuid().parse(await options.actor())});
   if(result.error){
    // A private, exact identity mismatch permits only the bounded legacy replay
    // below. Authorization, storage and all other failures never trigger it.
    if(name==='runtime_response'&&typeof result.error==='object'&&'message' in result.error&&result.error.message==='RUNTIME_RESPONSE_CONFLICT')throw new Error('RUNTIME_RESPONSE_CONFLICT');
+   const message=typeof result.error==='object'&&'message' in result.error?result.error.message:undefined;
+   if(message==='RUNTIME_TEST_WINDOW_DENIED'||message==='RUNTIME_TEST_MODEL_DENIED')
+    throw new StagingAccessError('RUNTIME_PRICE_CONFIGURATION_PENDING');
+   if(typeof message==='string'&&['RUNTIME_RESUME_CONFLICT','RUNTIME_RESUME_SOURCE_CHANGED',
+    'RUNTIME_RESUME_CLOSED','RUNTIME_CHECKPOINT_PENDING','RUNTIME_CALL_LIMIT_REACHED'].includes(message))
+    throw new StagingAccessError(message as StagingFailure);
    throw new Error('RUNTIME_DATABASE_UNAVAILABLE');
   }return result.data as T;
  }
@@ -59,18 +70,22 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    await billing.recoverReceipts(current.runId);
    return rpc<{executionId:string;runId:string;state:string;billing:unknown}>('runtime_financial_recovery',{...args,p_finish:true});
   },
-  async execute(executionId:string,onProgress?:(event:RuntimeProgress)=>void){
-  type Execution={executionId:string;sessionId:string;runId:string;live:boolean;cancelRequested:boolean;state:string;
-   unavailableReason?:string;historyFrozen?:boolean;historyOmitted?:boolean;context:unknown;billing:FrozenRun;
-   result:{kind:string;evidenceRef:string;evidenceHash:string;body:string;summary?:string}|null};
+  async execute(executionId:string,onProgress?:(event:RuntimeProgress)=>void,resume?:ResumeInput){
   const args={p_execution_id:z.string().uuid().parse(executionId)};
   budget.timing?.enter('execute');
-  const execution=await rpc<Execution>('runtime_execution',{...args,p_action:'begin'});
+  const started=await beginPaygExecution({executionId,resume,actor:options.actor,callGate:options.callGate,
+   resumePricing:options.resumePricing,read:(action,value)=>rpc<RuntimeExecution>('runtime_execution',
+    {...args,p_action:action,...(value?{p_result:value}:{})})});
+  if(started.wait)return started.wait;
+  const {execution,resumedGate}=started;
+  const isPayg=execution.billing?.contractVersion==='bill2.v2';
+  const ownerDatabase=isPayg?paygOwnerDatabase(options.database,{executionId,epoch:execution.epoch!}):options.database;
+  const ownerRpc=<T>(name:string,value:Record<string,unknown>)=>rpc<T>(name,value,ownerDatabase);
   if(execution.state==='cancelled')return {state:'cancelled' as const,
    ...(execution.unavailableReason==='provider_history'?{unavailable:'provider_history' as const}:{})};
   if(execution.cancelRequested){
    await billing.recoverReceipts(execution.runId);
-   const recovered=await rpc<{state:string}>('runtime_financial_recovery',{...args,p_finish:true});
+   const recovered=await ownerRpc<{state:string}>('runtime_financial_recovery',{...args,p_finish:true});
    return {state:recovered.state as 'completed'|'cancelled'|'cost_pending',...(execution.result?{body:execution.result.body,...(execution.result.summary!==undefined?{summary:execution.result.summary}:{})}:{})};
   }
   if(execution.state==='completed')return {body:execution.result?.body,...(execution.result?.summary!==undefined?{summary:execution.result.summary}:{}),state:'completed' as const};
@@ -78,7 +93,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    // Saved SDK output is immutable. Recover only the original billed calls;
    // this branch never starts the SDK or appends Session messages again.
    await billing.recoverRun(execution.runId);
-   const recovered=await rpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:execution.result});
+   const recovered=await ownerRpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:execution.result});
    return {body:execution.result.body,...(execution.result.summary!==undefined?{summary:execution.result.summary}:{}),state:recovered.state};
   }
   const context=runtimeContext.parse(execution.context);
@@ -93,10 +108,11 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   if(!agentTurn&&context.tools.includes(ASK_QUESTION_TOOL))throw new Error('RUNTIME_CONTEXT_INVALID');
   const policy=execution.billing.callPolicy.find(p=>p.model===context.model);
   if(!policy)throw new Error('RUNTIME_MODEL_DENIED');
-  const session=new PostgresSession(options.database,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
+  const session=new PostgresSession(ownerDatabase,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
   let transportNotStarted=false,providerRejected=false;
   let terminalReplyFailure=false;
-  let gateChecked=false,moderationBlocked=false;
+  let gateChecked=resumedGate,moderationBlocked=false;
+  let waitPoint:{epoch:number;sequence:number;requestHash:string;phase:string;state:PaygWait['state']}|undefined;
   let gateRejection:GateRejection|undefined;
   const checkAgentReply=(response:unknown,organizer=false)=>{
    if(agentTurn&&terminalAgentReplyFailure(response,organizer,context.tools.includes(ASK_QUESTION_TOOL))){
@@ -134,37 +150,52 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      request=openRouterRequestBody(request,{context,policy:selectedPolicy,phase,primaryDialogue:phase===effective.role&&selectedPolicy===primaryPolicy});
     const configuredInput=phase==='attached_organizer'?context.attachedOrganizer?.inputBytes:context.purposeBudget?.inputBytes;
     assertRuntimeRequestCapacity(request,Math.min(selectedPolicy.inputLimit,configuredInput??Infinity));
-    const sequence=++callSequence;
+    let sequence=++callSequence;
      const requestHash=hash(request);
-     const existing=await rpc<{callId:string;state:string;rawBody:string|null}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash}).catch(error=>{
+     const pause=(state:PaygWait['state']):never=>{
+      waitPoint={epoch:execution.epoch!,sequence,requestHash,phase,state};
+      throw new Error(state==='waiting_credits'?'RUNTIME_WAITING_CREDITS':'RUNTIME_WAITING_RESUME');
+     };
+     let existing=await ownerRpc<{callId:string;state:string;rawBody:string|null;retryable?:boolean}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash}).catch(error=>{
       responseConflict=error instanceof Error&&error.message==='RUNTIME_RESPONSE_CONFLICT';throw error;
      });
+     while(isPayg&&existing?.retryable){
+      sequence=++callSequence;
+      existing=await ownerRpc('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash});
+     }
      let raw=existing?.rawBody;
      if(!raw){
       // Recovery is replay-only, even when a later step had not yet been sent.
       if(!execution.live||existing?.state==='dispatched'||existing?.state==='unknown'||existing?.state==='responded')throw new Error('RUNTIME_RESPONSE_PENDING');
-      if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
-      else budget.assertCanStart(5000);
-      const call:FrozenCall={provider:selectedPolicy.provider,account:selectedPolicy.account,model:selectedPolicy.model,protocol:selectedPolicy.protocol,
+      try{
+       if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
+       else budget.assertCanStart(5000);
+      }catch(error){if(isPayg)pause('waiting_resume');throw error;}
+      let call:FrozenCall={provider:selectedPolicy.provider,account:selectedPolicy.account,model:selectedPolicy.model,protocol:selectedPolicy.protocol,
        ...(selectedPolicy.providerLimits?{providerLimits:selectedPolicy.providerLimits}:{}),phase,requestHash,upperUsd:selectedPolicy.upperUsd,inputLimit:selectedPolicy.inputLimit,outputLimit:selectedPolicy.outputLimit,
        automaticRetry:false,hiddenTools:false,lookupSupported:selectedPolicy.lookupSupported,
        ...callBillingUnit(execution.billing.rules,selectedPolicy)};
+      if(isPayg)call=runtimePaygCall(request,phase,selectedPolicy,execution.billing.rules,execution.epoch!).call;
       // Every new claim path must pass this once-per-round gate before BILL2.
       if(!gateChecked){
        const leaveRateLimit=budget.timing?.enter('rateLimit');
        try{
-        const verdict=await options.callGate(await options.actor(),execution.billing.limits.maxCalls);
+        const verdict=await options.callGate(await options.actor(),isPayg?execution.remainingCalls!:execution.billing.limits.maxCalls);
         if(!verdict.ok){gateRejection=verdict.reason;throw new Error('RUNTIME_NEW_CALL_DENIED');}
         gateChecked=true;
        }catch(error){gateRejection??='limit_unavailable';throw error;}
        finally{leaveRateLimit?.();}
       }
-      const claim=await billing.claimCall(execution.runId,sequence,call);
-      if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
-      else budget.assertCanStart(5000);
-      const dispatch=await billing.dispatchOnce(claim.id,request,onChunk);
-      if(dispatch.transportNotStarted){transportNotStarted=true;throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');}
-      if(!dispatch.dispatched)throw new Error('RUNTIME_RESPONSE_PENDING');
+      const claim=isPayg?await billing.claimPaygCall(execution.runId,sequence,call)
+       :await billing.claimCall(execution.runId,sequence,call);
+      if(claim.id===null)pause('waiting_credits');
+      try{
+       if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
+       else budget.assertCanStart(5000);
+      }catch(error){if(isPayg)pause('waiting_resume');throw error;}
+      const dispatch=await billing.dispatchOnce(claim.id!,request,onChunk);
+      if(dispatch.transportNotStarted){if(isPayg)pause('waiting_resume');transportNotStarted=true;throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');}
+      if(!dispatch.dispatched){if(isPayg)pause('waiting_resume');throw new Error('RUNTIME_RESPONSE_PENDING');}
       // The receipt was stored as a financial projection only. Never read back
       // provider content or hand it to the SDK, Session or stream.
       if(dispatch.accountClosed)closed();
@@ -174,7 +205,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
        // a confirmed missing response permits bounded idempotent receipt replay.
        const pending=dispatch.pendingReceipt;
        for(let attempt=0;attempt<2;attempt++){
-        const savedReceipt=await rpc<boolean>('runtime_receipt_saved',{...args,p_run_id:pending.runId,p_call_id:pending.callId,p_evidence:pending.evidence});
+        const savedReceipt=await ownerRpc<boolean>('runtime_receipt_saved',
+         {...args,p_run_id:pending.runId,p_call_id:pending.callId,p_evidence:pending.evidence});
         if(savedReceipt)break;
         let saved;
         try{saved=await billing.recordReceipt(pending.runId,pending.callId,pending.evidence);}
@@ -184,10 +216,11 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
        }
       }
       if(dispatch.providerRejected){providerRejected=true;throw new Error('RUNTIME_PROVIDER_REJECTED');}
-      const saved=await rpc<{rawBody:string|null}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash});
+      const saved=await ownerRpc<{rawBody:string|null}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash});
       raw=saved?.rawBody;
      }
      if(!raw)throw new Error('RUNTIME_RESPONSE_PENDING');
+     if(isPayg)await billing.finalizeRun(execution.runId);
      const decoded=JSON.parse(raw);
      return selectedPolicy.protocol==='openrouter-chat-v1' ? {usage:{sdkResponse:decoded}} : decoded;
     }catch(error){
@@ -216,7 +249,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       return JSON.stringify(response);
      }});
     const selected=parseMatch(matched,plan.candidates);
-    await rpc('runtime_execution',{...args,p_action:'checkpoint_match',p_result:selected});
+    await ownerRpc('runtime_execution',{...args,p_action:'checkpoint_match',p_result:selected});
     const candidate=plan.candidates.find(c=>c.key===selected.key);
     if(candidate){
      if(!options.activateSkill)throw new Error('RUNTIME_SKILL_ACTIVATION_UNAVAILABLE');
@@ -233,18 +266,18 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     execute:async(arguments_,callId)=>{
      budget.assertCanStart();
      const toolArgs={...args,p_call_id:callId,p_name:name,p_arguments:arguments_};
-     const saved=await rpc<{execute:boolean;result:unknown}>('runtime_tool',{...toolArgs,p_action:'claim'});
+     const saved=await ownerRpc<{execute:boolean;result:unknown}>('runtime_tool',{...toolArgs,p_action:'claim'});
      if(name==='read_source'){
       if(context.workspaceContext){
        if(saved.result!==null)return JSON.stringify(saved.result);
-       const source=await rpc<unknown>('runtime_workspace_source',{p_session_id:execution.sessionId,p_query:typeof arguments_.query==='string'?arguments_.query:''});
-       const committed=await rpc<{result:unknown}>('runtime_tool',{...toolArgs,p_action:'complete',p_result:source});
+       const source=await ownerRpc<unknown>('runtime_workspace_source',{p_session_id:execution.sessionId,p_query:typeof arguments_.query==='string'?arguments_.query:''});
+       const committed=await ownerRpc<{result:unknown}>('runtime_tool',{...toolArgs,p_action:'complete',p_result:source});
        return JSON.stringify(committed.result);
       }
       if(!context.sources?.length||Object.keys(arguments_).length)throw new Error('RUNTIME_SOURCE_ARGUMENT_DENIED');
-      const source=await rpc<unknown>('runtime_source',{p_source:context.sources[0]});
+      const source=await ownerRpc<unknown>('runtime_source',{p_source:context.sources[0]});
       if(saved.result!==null){if(JSON.stringify(saved.result)!==JSON.stringify(source))throw new Error('RUNTIME_SOURCE_CHANGED');return JSON.stringify(source);}
-      await rpc('runtime_tool',{...toolArgs,p_action:'complete',p_result:source});
+      await ownerRpc('runtime_tool',{...toolArgs,p_action:'complete',p_result:source});
       return JSON.stringify(source);
      }
      // Increment/replay the original billed tool phase even when the result was saved.
@@ -253,7 +286,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      if(saved.result!==null)return JSON.stringify(saved.result);
      if(!execution.live&&!saved.execute&& !envelope.usage?.toolResult)throw new Error('RUNTIME_TOOL_PENDING');
      const result=z.object({body:z.string().max(20000),sources:z.array(z.object({id:z.string(),version:z.string(),status:z.literal('available')}).strict()).max(32)}).strict().parse(envelope.usage?.toolResult);
-     const committed=await rpc<{result:unknown}>('runtime_tool',{...toolArgs,p_action:'complete',p_result:result});
+     const committed=await ownerRpc<{result:unknown}>('runtime_tool',{...toolArgs,p_action:'complete',p_result:result});
      // Use the persisted JSON representation on first execution as on replay.
      // JSONB reorders object keys; serializing the pre-write object would alter
      // the next SDK request bytes after recovery despite identical tool data.
@@ -356,7 +389,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     body=await runPrimary(true);
    }
    if(context.network==='require_latest'){
-    const latest=await rpc<{state:'cancelled'|'cost_pending';unavailable?:boolean}>('runtime_execution',{...args,p_action:'check_latest'});
+    const latest=await ownerRpc<{state:'cancelled'|'cost_pending';unavailable?:boolean}>('runtime_execution',{...args,p_action:'check_latest'});
     if(latest.unavailable)return {state:latest.state,unavailable:'latest' as const};
    }
    budget.timing?.mark('fullModelReply');
@@ -372,7 +405,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    let summary:string|undefined;
    if(context.attachedOrganizer){
     progress({type:"phase",phase:"organizer"});
-    await rpc('runtime_execution',{...args,p_action:'checkpoint_primary',p_result:{body,lastSequence:callSequence,...turnMetadata}});
+    await ownerRpc('runtime_execution',{...args,p_action:'checkpoint_primary',p_result:{body,lastSequence:callSequence,...turnMetadata}});
     const organizer=context.attachedOrganizer,organizerPolicy=execution.billing.callPolicy.find(p=>p.modelId===organizer.modelId&&p.model===organizer.model);
     if(!organizerPolicy)throw new Error('RUNTIME_ORGANIZER_DENIED');
     const instructions=organizer.instructions ?? 'Organize this operation result. Preserve provenance and uncertainty. Do not add new facts.';
@@ -398,16 +431,23 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    const result={kind:'usable_result',evidenceRef:executionId,
     evidenceHash:hash(JSON.stringify({body,summary,...turnMetadata})),body,...turnMetadata,...(summary?{summary}:{})};
    progress({type:'phase',phase:'saving'});
-   const completed=await rpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
+   const completed=await ownerRpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
    return {body,...(summary!==undefined?{summary}:{}),state:completed.state};
   }catch(error){
+   if(waitPoint){
+    const saved=await ownerRpc<PaygPosition & {state:PaygWait['state'];primaryResult?:{body:string}}>(
+     'runtime_execution',{...args,p_action:'payg_wait',p_result:waitPoint});
+    return {state:saved.state,code:saved.state==='waiting_credits'?'RUNTIME_WAITING_CREDITS':'RUNTIME_WAITING_RESUME',
+     executionId,cursor:saved.cursor,epoch:saved.epoch,remainingCalls:saved.remainingCalls,
+     ...(saved.primaryResult?{body:saved.primaryResult.body}:{})} as PaygWait;
+   }
    // The SDK may wrap the error; rely on the latch. Every Runtime write now
    // refuses this actor, so leave settlement to trusted financial recovery.
    if(accountClosed)return {state:'pending' as const};
    if(moderationBlocked){
     // A cancellation failure propagates; never rewrite a moderation block as pending
     // or retry an ambiguous durable cancellation here.
-    const stopped=await rpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
+    const stopped=await ownerRpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
     return {state:stopped.state};
    }
    if(terminalReplyFailure){
@@ -415,7 +455,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     // replay after owner loss. Cancellation retains receipts/checkpoints and
     // settles known costs once; unknown transport outcomes never reach here.
     try{
-     const stopped=await rpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
+     const stopped=await ownerRpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
      return {state:stopped.state};
     }catch{/* Reconcile the original execution on recovery; never redispatch. */}
    }
@@ -426,7 +466,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     // path. Retain its response receipt and charges; do not dispatch organizer.
     // An uncertain cancellation response remains recoverable, never retried here.
     try{
-     const stopped=await rpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
+     const stopped=await ownerRpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
      return {state:stopped.state,unavailable:'output_truncated' as const};
     }catch{/* Inspect the original state through normal recovery after an outage. */}
    }
@@ -434,7 +474,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    if((transportNotStarted||providerRejected)&&execution.live){
     // The original grant was atomically revoked and BILL2 finalized. Reuse
     // normal cancellation to synchronize this execution and release Session.
-    const stopped=await rpc<{state:'cancelled'|'completed'|'cost_pending'}>('runtime_cancel',args).catch(()=>null);
+    const stopped=await ownerRpc<{state:'cancelled'|'completed'|'cost_pending'}>('runtime_cancel',args).catch(()=>null);
     if(stopped){
      const billingState=providerRejected?await billing.readRun(execution.runId).catch(()=>null):null;
      const noCharge=billingState?.chargedCredits===0&&['refunded','settled'].includes(billingState.state);
@@ -445,14 +485,14 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    // It may observe an unfinished response, but must leave shared state alone.
    if(!execution.live)return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{})};
    // A lost durable response is inspected by later recovery, never a network retry.
-   const failed=await rpc<{state:string}>('runtime_execution',{...args,p_action:'fail_before_dispatch',
+   const failed=await ownerRpc<{state:string}>('runtime_execution',{...args,p_action:'fail_before_dispatch',
     ...(preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?{p_result:{unavailable_reason:'provider_history'}}:{})}).catch(()=>null);
    if(failed?.state==='cancelled'){
     const unavailable:GateRejection|'provider_history'|'preflight'|'capacity'|undefined=gateRejection??(preflightFailure?
      preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?'provider_history':'preflight':capacity?'capacity':undefined);
     return {state:'cancelled' as const,...(unavailable?{unavailable}:{})};
    }
-   await rpc('runtime_execution',{...args,p_action:'interrupt'}).catch(()=>{});
+   await ownerRpc('runtime_execution',{...args,p_action:'interrupt'}).catch(()=>{});
    return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{})};
   }
  }};

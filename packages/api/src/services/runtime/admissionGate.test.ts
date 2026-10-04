@@ -142,3 +142,26 @@ it('never retries an ambiguous first admission or starts recovery for it', async
  expect(mock.recovery).not.toHaveBeenCalled();
  expect(f.rpc.mock.calls.filter(([name])=>name==='runtime_admit')).toHaveLength(1);
 });
+
+it('keeps default admission v1 and selects v2 only through trusted server policy', async () => {
+ const f=fixture();
+ await runtimeAdmissionService(f.user,f.admin,f.policy).prepare(f.input);
+ expect((f.rpc.mock.calls.find(([n])=>n==='runtime_admit')![1].p_billing as {contractVersion:string}).contractVersion).toBe('bill2.v1');
+ const hash='a'.repeat(64);
+ const nominalPricing={version:'nominal-v1' as const,pricingHash:hash,endpointTag:'local',
+  tiers:[{minPromptTokens:0,prompt:'1',completion:'1',request:'0'}],timeOfDay:[]};
+ const policy={modelId:id(3),model:'fixture',provider:'fixture',account:'local',protocol:'fixture-cost-v1' as const,
+  multiplier:'1',upperUsd:'0.1',inputLimit:32000,outputLimit:1000,automaticRetry:false as const,
+  hiddenTools:false as const,lookupSupported:true,
+  providerLimits:{providerSlug:'local',contextTokens:100000,promptUsdPerMillion:'1',completionUsdPerMillion:'1',requestUsd:'0'},
+  payg:{policyId:'local',version:'1',profileVersion:'1',evidenceVersion:'1',pricingHash:hash,endpointTag:'local',
+   nominalPricing,templateTokens:4096,marginTokens:4096,admissionPath:'fixture' as const,maxBytes:32000,
+   maxMessages:32,maxTools:2,maxSchemaBytes:16384,purposes:['ordinary'],expiresAt:'2099-01-01T00:00:00Z'}};
+ f.rpc.mockClear();
+ await runtimeAdmissionService(f.user,f.admin,{...f.policy,payg:{callPolicies:[policy],billingUnit:{
+  version:'bill-unit-v2',creditsPerUsd:'1000',defaultMultiplier:'1',hash,
+  models:{[id(3)]:{multiplier:'1',source:'global'}},providers:{}}}}).prepare(f.input);
+ const billing=f.rpc.mock.calls.find(([n])=>n==='runtime_admit')![1].p_billing;
+ expect(billing).toMatchObject({contractVersion:'bill2.v2',limits:{credits:0,maxCalls:3},callPolicy:[policy]});
+ await expect(runtimeAdmissionService(f.user,f.admin,f.policy).prepare({...f.input,payg:true})).rejects.toThrow();
+});
