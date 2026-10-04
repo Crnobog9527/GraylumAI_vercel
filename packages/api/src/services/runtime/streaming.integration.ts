@@ -1151,7 +1151,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: native length b
  const host=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter});
  const result=await host.execute(f.execution.executionId);
  expect(result).toMatchObject({state:'completed',summary:'',completeness:'length_limit',organized:false,summaryOmitted:true});
- expect(JSON.parse(result.body!).message).toBe(message);
+ if (!('body' in result) || typeof result.body!=='string') throw new Error('Expected saved primary body');
+ expect(JSON.parse(result.body).message).toBe(message);
  expect(await host.execute(f.execution.executionId)).toEqual(result);expect(posts).toBe(1);
  const saved=(await db.query('select primary_result,result from runtime_executions where id=$1',[f.execution.executionId])).rows[0];
  expect(saved.primary_result.body).toBe(saved.result.body);expect(jsonbBytes(saved.result)).toBeLessThanOrEqual(262144);
