@@ -17,7 +17,7 @@ class CIWorkflowsTest < Minitest::Test
            'build'=>['Build Check','build-and-e2e'], 'security-e2e-tests'=>['Security E2E Tests','build-and-e2e']}.freeze
   INTEGRATION_RUNS = ['node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files',
                       'node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files',
-                      'node packages/db/tests/run-db-baseline-replay.mjs --ci --after packages/db/tests/baseline/credit-guard-paths.sql'].freeze
+                      'node packages/db/tests/run-db-baseline-replay.mjs --ci --after packages/db/tests/baseline/credit-guard-paths.sql,packages/db/tests/pay-common/purchase-admission.sql'].freeze
   def test_required_context_names_unique
     names = [@ci, @security].flat_map { |w| w.fetch('jobs').values.map { |j| j.fetch('name') } }
     (GATES.values.map(&:first) + ['Dependency Audit','Code Security Scan','Workflow Policy Check','Secret Scan']).each do |name|
