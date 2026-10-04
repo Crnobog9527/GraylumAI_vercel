@@ -78,7 +78,21 @@ export async function createFixture(db,options={}) {
 }
 
 export async function claim(db,f,sequence=1,dispatch=true,patch={}) {
-  const c = await rpc(db,'bill2_claim',f.actor,f.run,sequence,{...f.claimPayload,...patch});
+  // b2a_test.bind historically seeds an interrupted execution without acquiring a
+  // runtime owner. Start that synthetic v2 fixture through the real epoch RPC.
+  const linked=(await db.query(`SELECT e.id,r.runtime_epoch FROM runtime_executions e
+    JOIN bill2_runs r ON r.id=e.billing_run_id
+    WHERE r.id=$1 AND r.contract_version='bill2.v2' AND r.session_ref IS NOT NULL`,[f.run])).rows[0];
+  let runtime={};
+  if(linked){
+    const initial=String(linked.runtime_epoch)==='0';
+    if(initial)await db.query(`UPDATE runtime_executions SET state='prepared'
+      WHERE id=$1 AND state='interrupted'
+      AND NOT EXISTS(SELECT 1 FROM bill2_calls WHERE run_id=$2)`,[linked.id,f.run]);
+    const execution=await rpc(db,'runtime_execution',f.actor,linked.id,initial?'begin':'read',null);
+    runtime={runtimeEpoch:execution.epoch};
+  }
+  const c = await rpc(db,'bill2_claim',f.actor,f.run,sequence,{...f.claimPayload,...runtime,...patch});
   if (dispatch) assert.equal((await rpc(db,'bill2_dispatch',f.actor,f.run,c.id,c.dispatchToken)).dispatch,true);
   return c;
 }

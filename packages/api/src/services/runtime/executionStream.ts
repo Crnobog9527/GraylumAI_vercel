@@ -1,11 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import type {ResumeInput} from './paygRuntime';
+import {admitPricing} from './pricingAdmission';
 import {captureCompleted} from '../opc/capture';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import type {RuntimeProgress} from './progress';
 import type {AgentTurnOutcome} from '../../shared/agentTurn';
 import type {RuntimeBudget} from './budget';
 import {loadStagingPolicy,loadStagingRecoveryPolicy} from './stagingPolicy';
-import {stagingProcedureError} from './stagingErrors';
+import {stagingProcedureError,stagingRpcFailure} from './stagingErrors';
 import {stagingTransport} from './stagingTransport';
 import {retainedOutputReason} from './view';
 import {runtimeExecutor} from './execute';
@@ -36,7 +38,7 @@ export type OriginalExecutionHost={
 /** Runs or recovers one admitted execution under its original frozen policy.
  * Shared by `runtime.execute`, `runtime.executeStream` and `opc.mentorTurnStream`. */
 export async function executeOriginalExecution(host:OriginalExecutionHost,executionId:string,
- onProgress?:(event:RuntimeProgress)=>void):Promise<AgentTurnOutcome>{
+ onProgress?:(event:RuntimeProgress)=>void,resume?:ResumeInput):Promise<AgentTurnOutcome>{
   // Original test-window and recovery policy reads count as policy; the
   // executor enters its own phase when it begins.
   host.budget?.timing?.tagExecution(executionId);host.budget?.timing?.enter('policy');
@@ -59,7 +61,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    let result:AgentTurnOutcome|undefined;
    try{result=await execute();}
    finally{
-    const recovered=result?.state==='completed'&&!financial.isAccountClosed()
+    const recovered=result&&['completed','waiting_credits','waiting_resume'].includes(result.state)&&!financial.isAccountClosed()
      ?undefined:await financial.finish(adapter);
     if(financial.isAccountClosed()&&recovered)
      result={state:recovered.state as 'completed'|'cancelled'|'cost_pending'};
@@ -69,8 +71,21 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   if(host.maintenanceEndpoint)
    return outcome(await run(localFixtureAdapter(host.maintenanceEndpoint),()=>runtimeExecutor({
     ...base,endpoint:host.maintenanceEndpoint,activateSkill,
-    callGate:newWorkGate(host.admin,'local').calls}).execute(executionId,publicProgress)));
+    callGate:newWorkGate(host.admin,'local').calls}).execute(executionId,publicProgress,resume)));
   try{await loadStagingPolicy(host.admin,host.actorId,process.env);}catch{
+   const observed=await host.admin.rpc('runtime_execution',{
+    p_actor_id:host.actorId,p_execution_id:executionId,p_action:'read',
+   });
+   if(observed.error&&observed.error.code!=='42501')stagingRpcFailure(observed.error);
+   if(!observed.error&&observed.data?.billing?.contractVersion==='bill2.v2'
+    &&['waiting_credits','waiting_resume'].includes(observed.data.state)){
+    const disabled={dispatch:async()=>{throw new Error('RUNTIME_DISPATCH_DISABLED');},
+     lookup:async()=>{throw new Error('RUNTIME_DISPATCH_DISABLED');}};
+    const waiting=await runtimeExecutor({...base,adapter:disabled,callGate:denyNewCalls}).execute(executionId);
+    return ['waiting_credits','waiting_resume'].includes(waiting.state)
+     ?{...waiting,unavailable:'RUNTIME_PRICE_CONFIGURATION_PENDING'}:waiting;
+   }
+
    const original=await loadStagingRecoveryPolicy(host.admin,host.actorId,executionId,process.env);
    // This branch never constructs/runs an SDK request. It only looks up the
    // persisted original provider ID and finishes existing financial state.
@@ -91,7 +106,8 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   const original=await loadStagingRecoveryPolicy(host.admin,host.actorId,executionId,process.env);
   const adapter=stagingTransport(host.admin,original,host.budget);
   return outcome(await run(adapter,()=>runtimeExecutor({...base,adapter,activateSkill,
-   callGate:newWorkGate(host.admin,'staging').calls}).execute(executionId,publicProgress)));
+   resumePricing:policies=>admitPricing(host.admin,policies),
+   callGate:newWorkGate(host.admin,'staging').calls}).execute(executionId,publicProgress,resume)));
 }
 export type OriginalExecutionOutcome=AgentTurnOutcome;
 export type ExecutionStreamEvent=RuntimeProgress|{type:'result';result:OriginalExecutionOutcome};

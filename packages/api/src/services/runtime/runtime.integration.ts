@@ -12,6 +12,7 @@ import { runRuntime } from './runner';
 import {readRuntimeView,retainedOutputReason} from './view';
 import { runtimeExecutor } from './execute';
 import './promptCache.integration';
+import './payg.integration';
 import './gateWiring.integration';
 import {registerAdmissionGateTests} from './admissionGate.integration';
 import {createRuntimeBudget,withRuntimeBudget} from './budget';

@@ -1,4 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {StagingAccessError, type StagingFailure} from './stagingErrors';
+import {runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
+import {beginPaygExecution, type RuntimeExecution} from './paygResume';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 import {runtimeContext} from './runtimeContext';
 export {runtimeContext} from './runtimeContext';
@@ -35,6 +38,7 @@ const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
  * its allowlisted official adapter and frozen price policy.
  */
 type RuntimeExecutorOptions={budget?:RuntimeBudget;database:SessionRpc;actor:()=>Promise<string>;
+ resumePricing?:(policies:FrozenRun['callPolicy'])=>Promise<void>;
  callGate:RuntimeCallGate;endpoint?:string;adapter?:BillingTransport;activateSkill?:(candidate:MatchCandidate)=>Promise<string>};
 export function runtimeExecutor(options:RuntimeExecutorOptions){
  if(typeof options.callGate!=='function')throw new Error('RUNTIME_CALL_GATE_REQUIRED');
@@ -47,6 +51,12 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    // A private, exact identity mismatch permits only the bounded legacy replay
    // below. Authorization, storage and all other failures never trigger it.
    if(name==='runtime_response'&&typeof result.error==='object'&&'message' in result.error&&result.error.message==='RUNTIME_RESPONSE_CONFLICT')throw new Error('RUNTIME_RESPONSE_CONFLICT');
+   const message=typeof result.error==='object'&&'message' in result.error?result.error.message:undefined;
+   if(message==='RUNTIME_TEST_WINDOW_DENIED'||message==='RUNTIME_TEST_MODEL_DENIED')
+    throw new StagingAccessError('RUNTIME_PRICE_CONFIGURATION_PENDING');
+   if(typeof message==='string'&&['RUNTIME_RESUME_CONFLICT','RUNTIME_RESUME_SOURCE_CHANGED',
+    'RUNTIME_RESUME_CLOSED','RUNTIME_CHECKPOINT_PENDING','RUNTIME_CALL_LIMIT_REACHED'].includes(message))
+    throw new StagingAccessError(message as StagingFailure);
    throw new Error('RUNTIME_DATABASE_UNAVAILABLE');
   }return result.data as T;
  }
@@ -59,13 +69,15 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    await billing.recoverReceipts(current.runId);
    return rpc<{executionId:string;runId:string;state:string;billing:unknown}>('runtime_financial_recovery',{...args,p_finish:true});
   },
-  async execute(executionId:string,onProgress?:(event:RuntimeProgress)=>void){
-  type Execution={executionId:string;sessionId:string;runId:string;live:boolean;cancelRequested:boolean;state:string;
-   unavailableReason?:string;historyFrozen?:boolean;historyOmitted?:boolean;context:unknown;billing:FrozenRun;
-   result:{kind:string;evidenceRef:string;evidenceHash:string;body:string;summary?:string}|null};
+  async execute(executionId:string,onProgress?:(event:RuntimeProgress)=>void,resume?:ResumeInput){
   const args={p_execution_id:z.string().uuid().parse(executionId)};
   budget.timing?.enter('execute');
-  const execution=await rpc<Execution>('runtime_execution',{...args,p_action:'begin'});
+  const started=await beginPaygExecution({executionId,resume,actor:options.actor,callGate:options.callGate,
+   resumePricing:options.resumePricing,read:(action,value)=>rpc<RuntimeExecution>('runtime_execution',
+    {...args,p_action:action,...(value?{p_result:value}:{})})});
+  if(started.wait)return started.wait;
+  const {execution,resumedGate}=started;
+  const isPayg=execution.billing?.contractVersion==='bill2.v2';
   if(execution.state==='cancelled')return {state:'cancelled' as const,
    ...(execution.unavailableReason==='provider_history'?{unavailable:'provider_history' as const}:{})};
   if(execution.cancelRequested){
@@ -96,7 +108,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const session=new PostgresSession(options.database,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
   let transportNotStarted=false,providerRejected=false;
   let terminalReplyFailure=false;
-  let gateChecked=false,moderationBlocked=false;
+  let gateChecked=resumedGate,moderationBlocked=false;
+  let waitPoint:{epoch:number;sequence:number;requestHash:string;phase:string;state:PaygWait['state']}|undefined;
   let gateRejection:GateRejection|undefined;
   const checkAgentReply=(response:unknown,organizer=false)=>{
    if(agentTurn&&terminalAgentReplyFailure(response,organizer,context.tools.includes(ASK_QUESTION_TOOL))){
@@ -134,37 +147,52 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      request=openRouterRequestBody(request,{context,policy:selectedPolicy,phase,primaryDialogue:phase===effective.role&&selectedPolicy===primaryPolicy});
     const configuredInput=phase==='attached_organizer'?context.attachedOrganizer?.inputBytes:context.purposeBudget?.inputBytes;
     assertRuntimeRequestCapacity(request,Math.min(selectedPolicy.inputLimit,configuredInput??Infinity));
-    const sequence=++callSequence;
+    let sequence=++callSequence;
      const requestHash=hash(request);
-     const existing=await rpc<{callId:string;state:string;rawBody:string|null}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash}).catch(error=>{
+     const pause=(state:PaygWait['state']):never=>{
+      waitPoint={epoch:execution.epoch!,sequence,requestHash,phase,state};
+      throw new Error(state==='waiting_credits'?'RUNTIME_WAITING_CREDITS':'RUNTIME_WAITING_RESUME');
+     };
+     let existing=await rpc<{callId:string;state:string;rawBody:string|null;retryable?:boolean}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash}).catch(error=>{
       responseConflict=error instanceof Error&&error.message==='RUNTIME_RESPONSE_CONFLICT';throw error;
      });
+     while(isPayg&&existing?.retryable){
+      sequence=++callSequence;
+      existing=await rpc('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash});
+     }
      let raw=existing?.rawBody;
      if(!raw){
       // Recovery is replay-only, even when a later step had not yet been sent.
       if(!execution.live||existing?.state==='dispatched'||existing?.state==='unknown'||existing?.state==='responded')throw new Error('RUNTIME_RESPONSE_PENDING');
-      if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
-      else budget.assertCanStart(5000);
-      const call:FrozenCall={provider:selectedPolicy.provider,account:selectedPolicy.account,model:selectedPolicy.model,protocol:selectedPolicy.protocol,
+      try{
+       if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
+       else budget.assertCanStart(5000);
+      }catch(error){if(isPayg)pause('waiting_resume');throw error;}
+      let call:FrozenCall={provider:selectedPolicy.provider,account:selectedPolicy.account,model:selectedPolicy.model,protocol:selectedPolicy.protocol,
        ...(selectedPolicy.providerLimits?{providerLimits:selectedPolicy.providerLimits}:{}),phase,requestHash,upperUsd:selectedPolicy.upperUsd,inputLimit:selectedPolicy.inputLimit,outputLimit:selectedPolicy.outputLimit,
        automaticRetry:false,hiddenTools:false,lookupSupported:selectedPolicy.lookupSupported,
        ...callBillingUnit(execution.billing.rules,selectedPolicy)};
+      if(isPayg)call=runtimePaygCall(request,phase,selectedPolicy,execution.billing.rules,execution.epoch!).call;
       // Every new claim path must pass this once-per-round gate before BILL2.
       if(!gateChecked){
        const leaveRateLimit=budget.timing?.enter('rateLimit');
        try{
-        const verdict=await options.callGate(await options.actor(),execution.billing.limits.maxCalls);
+        const verdict=await options.callGate(await options.actor(),isPayg?execution.remainingCalls!:execution.billing.limits.maxCalls);
         if(!verdict.ok){gateRejection=verdict.reason;throw new Error('RUNTIME_NEW_CALL_DENIED');}
         gateChecked=true;
        }catch(error){gateRejection??='limit_unavailable';throw error;}
        finally{leaveRateLimit?.();}
       }
-      const claim=await billing.claimCall(execution.runId,sequence,call);
-      if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
-      else budget.assertCanStart(5000);
-      const dispatch=await billing.dispatchOnce(claim.id,request,onChunk);
-      if(dispatch.transportNotStarted){transportNotStarted=true;throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');}
-      if(!dispatch.dispatched)throw new Error('RUNTIME_RESPONSE_PENDING');
+      const claim=isPayg?await billing.claimPaygCall(execution.runId,sequence,call)
+       :await billing.claimCall(execution.runId,sequence,call);
+      if(claim.id===null)pause('waiting_credits');
+      try{
+       if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
+       else budget.assertCanStart(5000);
+      }catch(error){if(isPayg)pause('waiting_resume');throw error;}
+      const dispatch=await billing.dispatchOnce(claim.id!,request,onChunk);
+      if(dispatch.transportNotStarted){if(isPayg)pause('waiting_resume');transportNotStarted=true;throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');}
+      if(!dispatch.dispatched){if(isPayg)pause('waiting_resume');throw new Error('RUNTIME_RESPONSE_PENDING');}
       // The receipt was stored as a financial projection only. Never read back
       // provider content or hand it to the SDK, Session or stream.
       if(dispatch.accountClosed)closed();
@@ -188,6 +216,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       raw=saved?.rawBody;
      }
      if(!raw)throw new Error('RUNTIME_RESPONSE_PENDING');
+     if(isPayg)await billing.finalizeRun(execution.runId);
      const decoded=JSON.parse(raw);
      return selectedPolicy.protocol==='openrouter-chat-v1' ? {usage:{sdkResponse:decoded}} : decoded;
     }catch(error){
@@ -401,6 +430,13 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    const completed=await rpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
    return {body,...(summary!==undefined?{summary}:{}),state:completed.state};
   }catch(error){
+   if(waitPoint){
+    const saved=await rpc<PaygPosition & {state:PaygWait['state'];primaryResult?:{body:string}}>(
+     'runtime_execution',{...args,p_action:'payg_wait',p_result:waitPoint});
+    return {state:saved.state,code:saved.state==='waiting_credits'?'RUNTIME_WAITING_CREDITS':'RUNTIME_WAITING_RESUME',
+     executionId,cursor:saved.cursor,epoch:saved.epoch,remainingCalls:saved.remainingCalls,
+     ...(saved.primaryResult?{body:saved.primaryResult.body}:{})} as PaygWait;
+   }
    // The SDK may wrap the error; rely on the latch. Every Runtime write now
    // refuses this actor, so leave settlement to trusted financial recovery.
    if(accountClosed)return {state:'pending' as const};

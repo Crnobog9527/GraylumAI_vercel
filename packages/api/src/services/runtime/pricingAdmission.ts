@@ -21,9 +21,9 @@ import { StagingAccessError, stagingRpcFailure } from './stagingErrors';
 export const PRICE_SNAPSHOT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // D1
 export const PRICE_REFRESH_COOLDOWN_MS = 60_000;
 
-type Quote = { modelId: string; model: string; providerLimits?: OpenRouterLimits };
+export type PricingQuote = { modelId: string; model: string; providerLimits?: OpenRouterLimits };
 type Row = { id: string; model_id: string; config: unknown; updated_at: string };
-type Deps = { read?: (model: string) => Promise<PricingSnapshot>; now?: () => number };
+export type PricingDeps = { read?: (model: string) => Promise<PricingSnapshot>; now?: () => number };
 
 /** Per server process: a model whose renewal failed is not re-read for 60 s, so an
  * OpenRouter outage does not add a 15 s wait to every request (plan 3.4). */
@@ -44,7 +44,8 @@ function log(row: Row, outcome: string, extra: Record<string, unknown> = {}) {
  * otherwise this admission compares against the snapshot it just read, without
  * writing it. Returns the row the checks must run against.
  */
-async function renew(admin: SupabaseClient, row: Row, previous: PricingSnapshot, deps: Required<Deps>): Promise<{ row: Row; snapshot: PricingSnapshot }> {
+async function renew(admin: SupabaseClient, row: Row, previous: PricingSnapshot,
+  deps: Required<PricingDeps>, storedOnly: boolean): Promise<{ row: Row; snapshot: PricingSnapshot }> {
   const now = deps.now();
   if (now - (failedAt.get(row.id) ?? -Infinity) < PRICE_REFRESH_COOLDOWN_MS) throw new StagingAccessError('RUNTIME_PRICE_SNAPSHOT_STALE');
   let fresh: PricingSnapshot;
@@ -73,11 +74,12 @@ async function renew(admin: SupabaseClient, row: Row, previous: PricingSnapshot,
   log(current, written.error ? 'write_failed' : 'write_conflict', {
     previousHash: previous.pricingHash, pricingHash: fresh.pricingHash, changed, ...details, used: useStored ? 'stored' : 'fresh_unwritten',
   });
+  if (storedOnly && !useStored) throw new StagingAccessError('RUNTIME_PRICE_SNAPSHOT_STALE');
   return { row: current, snapshot: useStored ? stored! : fresh };
 }
 
 /** The checks of plan 3.4 step 1 and 3, against the row the snapshot belongs to. */
-function check(row: Row, snapshot: PricingSnapshot, quote: Quote) {
+export function pricingEndpoint(row: Row, snapshot: PricingSnapshot, quote: PricingQuote) {
   const limits = quote.providerLimits;
   const catalog = readReasoningConfig(row.config).catalog;
   // The price route is the window quote's providerSlug, not reasoning.route (that one is checked only for
@@ -86,12 +88,18 @@ function check(row: Row, snapshot: PricingSnapshot, quote: Quote) {
   const endpoint = snapshot.endpoints.find(item => item.tag === tag);
   if (!limits || snapshot.model !== row.model_id || quote.model !== row.model_id || !catalog || catalog.model !== row.model_id
     || !catalog.endpoints.some(item => item.tag === tag) || !endpoint) throw new StagingAccessError('RUNTIME_PRICE_SNAPSHOT_MISSING');
+  return endpoint;
+}
+
+function check(row: Row, snapshot: PricingSnapshot, quote: PricingQuote) {
+  const endpoint = pricingEndpoint(row, snapshot, quote);
+  const limits = quote.providerLimits!;
   const derived = deriveFrozenPrices(row.model_id, endpoint, limits.contextTokens);
   if (derived === 'UNKNOWN_PRICE_FIELD') throw new StagingAccessError('RUNTIME_PRICE_UNKNOWN_FIELD'); // D5
   if (derived === 'NOT_ADMISSIBLE') throw new StagingAccessError('RUNTIME_PRICE_SNAPSHOT_MISSING');
   const increases = priceIncreases(limits, derived);
   if (increases.length) {
-    logger.warn('api', 'model_price_increased', { modelId: row.id, model: row.model_id, route: tag, pricingHash: snapshot.pricingHash, increases });
+    logger.warn('api', 'model_price_increased', { modelId: row.id, model: row.model_id, route: endpoint.tag, pricingHash: snapshot.pricingHash, increases });
     throw new StagingAccessError('RUNTIME_PRICE_INCREASED');
   }
 }
@@ -103,8 +111,9 @@ function check(row: Row, snapshot: PricingSnapshot, quote: Quote) {
  * Any model failing a check refuses the whole admission, including one auto
  * candidate: the frozen run reserves the highest quote of all candidates.
  */
-export async function admitPricing(admin: SupabaseClient, quotes: readonly Quote[], deps: Deps = {}): Promise<void> {
-  const resolved: Required<Deps> = { read: deps.read ?? (model => readOpenRouterPricing(model)), now: deps.now ?? Date.now };
+export async function readPricingStates(admin: SupabaseClient, quotes: readonly PricingQuote[],
+  deps: PricingDeps = {}, storedOnly = false) {
+  const resolved: Required<PricingDeps> = { read: deps.read ?? (model => readOpenRouterPricing(model)), now: deps.now ?? Date.now };
   const ids = [...new Set(quotes.map(quote => quote.modelId))];
   const rows = await admin.from('ai_models').select(ROW_COLUMNS).in('id', ids);
   if (rows.error) stagingRpcFailure(rows.error);
@@ -115,11 +124,24 @@ export async function admitPricing(admin: SupabaseClient, quotes: readonly Quote
     if (!row) throw new StagingAccessError('RUNTIME_STAGING_MODEL_DENIED');
     const snapshot = readPricingSnapshot(row.config);
     if (!snapshot) throw new StagingAccessError('RUNTIME_PRICE_SNAPSHOT_MISSING');
-    return isStale(snapshot, now) ? renew(admin, row, snapshot, resolved) : { row, snapshot };
+    const state = isStale(snapshot, now) ? await renew(admin, row, snapshot, resolved, storedOnly) : { row, snapshot };
+    if (storedOnly && isStale(state.snapshot, resolved.now())) throw new StagingAccessError('RUNTIME_PRICE_SNAPSHOT_STALE');
+    return state;
   }));
-  const state = new Map(ids.map((id, index) => [id, states[index]!]));
+  return new Map(ids.map((id, index) => [id, states[index]!]));
+}
+
+/** Returns the exact checked snapshots, including the existing staging renewal fallback. */
+export async function admitPricingSnapshots(admin: SupabaseClient, quotes: readonly PricingQuote[], deps: PricingDeps = {}) {
+  const state = await readPricingStates(admin, quotes, deps);
   for (const quote of quotes) {
     const { row, snapshot } = state.get(quote.modelId)!;
     check(row, snapshot, quote);
   }
+  return state;
+}
+
+/** The v1 entry point intentionally retains its void result and staging behavior. */
+export async function admitPricing(admin: SupabaseClient, quotes: readonly PricingQuote[], deps: PricingDeps = {}): Promise<void> {
+  await admitPricingSnapshots(admin, quotes, deps);
 }

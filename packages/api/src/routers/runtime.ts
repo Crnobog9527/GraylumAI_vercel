@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {resumeInput} from '../services/runtime/paygRuntime';
 import type {inferProcedureBuilderResolverOptions} from '@trpc/server';
 import type {RuntimeProgress} from '../services/runtime/progress';
 import { z } from 'zod';
@@ -92,6 +93,10 @@ export const runtimeRouter=router({
   const r=await ctx.supabaseAdmin!.rpc('runtime_cancel',{p_actor_id:ctx.user.id,p_execution_id:input.executionId});
   if(r.error)throw new Error('RUNTIME_CANCEL_DENIED');return r.data;
  }),
+ resume:maintenanceProcedure.input(resumeInput).mutation(({ctx,input})=>executeOriginalExecution({
+  admin:ctx.supabaseAdmin!,user:ctx.userScopedSupabase,actorId:ctx.user.id,budget:ctx.runtimeBudget,
+  authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint,
+ },input.executionId,undefined,input)),
  execute:executionProcedure.mutation(options=>executeOriginal(options)),
  executeStream:executionProcedure.mutation(async function*(options){
   // The route returns before this stream ends; release this stream's reference.

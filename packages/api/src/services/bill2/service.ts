@@ -39,7 +39,7 @@ const frozenPayg = frozen.extend({
 }).refine(value => value.callPolicy.every(policy => policy.payg !== undefined) && value.rules.billingUnit !== undefined);
 export type FrozenPaygRun = z.infer<typeof frozenPayg>;
 export type FrozenRun = z.infer<typeof frozen>;
-const call = z.object({ payg: paygCallQuote.optional(),
+const call = z.object({ runtimeEpoch: z.number().int().positive().optional(), payg: paygCallQuote.optional(),
   provider: z.string().min(1).max(128), account: z.string().min(1).max(128), model: z.string().min(1).max(256),
   protocol: z.enum(['fixture-cost-v1','openrouter-chat-v1']), providerLimits:openRouterLimits.optional(), requestHash: z.string().regex(/^[a-f0-9]{64}$/), upperUsd: z.string(),
   inputLimit: z.number().int().positive().max(1_000_000), outputLimit: z.number().int().positive().max(1_000_000),
@@ -162,6 +162,14 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
           ...(identity.rejectionRecovery ? { rejectionRecovery: identity.rejectionRecovery } : {}) });
       }
   }
+  async function claimPaygCall(runId: string, sequence: number, value: FrozenCall) {
+      const parsed = call.parse(value);
+      const actorId=uuid.parse(await deps.actor());
+      const claimed = await rpcAs<DispatchClaim>('bill2_claim', { p_run_id: uuid.parse(runId), p_sequence: z.number().int().positive().parse(sequence), p_payload: parsed },actorId);
+      if (claimed.state === 'waiting_credits') return { id: null, state: 'waiting_credits' as const };
+      if (claimed.dispatchToken) capabilities.set(claimed.id, { token: claimed.dispatchToken, frozen: parsed, runId, actorId });
+      return { id: claimed.id, state: claimed.state };
+    }
   return {
     readRun, finalizeRun, recoverReceipts,
     /** Trusted server recovery of a retained transport observation; never exposed as a client receipt endpoint. */
@@ -177,13 +185,11 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       if (aggregateCredits([parsed.limits.costUsd], parsed.rules.creditsPerUsd, parsed.rules.multiplier) > parsed.limits.credits || parsed.limits.credits > parsed.limits.maxPreDeduct) throw new Error('BILL2_BUDGET_REJECTED');
       return rpc<RunView>('bill2_prepare', { p_request_id: uuid.parse(requestId), p_payload: parsed });
     },
+    claimPaygCall,
     async claimCall(runId: string, sequence: number, value: FrozenCall) {
-      const parsed = call.parse(value);
-      const actorId=uuid.parse(await deps.actor());
-      const claimed = await rpcAs<DispatchClaim>('bill2_claim', { p_run_id: uuid.parse(runId), p_sequence: z.number().int().positive().parse(sequence), p_payload: parsed },actorId);
-      if (claimed.state === 'waiting_credits') throw new Error('BILL2_INSUFFICIENT_CREDITS');
-      if (claimed.dispatchToken) capabilities.set(claimed.id, { token: claimed.dispatchToken, frozen: parsed, runId, actorId });
-      return { id: claimed.id, state: claimed.state };
+      const result = await claimPaygCall(runId, sequence, value);
+      if (result.id === null) throw new Error('BILL2_INSUFFICIENT_CREDITS');
+      return { id: result.id, state: result.state };
     },
     async rotatePrepared(runId: string, callId: string, value: FrozenCall) {
       const parsed = call.parse(value);

@@ -120,17 +120,19 @@ export function parseQuestionCard(value: unknown): QuestionCard | null {
 export type AgentTurnPhase = "mentor" | "reading" | "organizer" | "saving";
 
 /** Final execution state carried by the `result` event. */
-export type AgentTurnState = "completed" | "cancelled" | "cost_pending" | "pending";
+export type AgentTurnState = 'waiting_credits' | 'waiting_resume' | "completed" | "cancelled" | "cost_pending" | "pending";
 
 /**
  * Why a finished or stopped execution has no usable body. The page maps each
  * value to a fixed notice; none of them may be retried automatically.
  */
 export type AgentTurnUnavailable = "provider_rejected" | "output_truncated" | "provider_history" | "preflight" | "capacity" | "latest"
-  | "call_limited" | "paused" | "limit_unavailable";
+  | "call_limited" | "paused" | "limit_unavailable" | "RUNTIME_PRICE_UNCONFIRMED" | "RUNTIME_PRICE_CONFIGURATION_PENDING";
 
 /** The execution outcome. `body` is the stored reply body; read it with `readAgentTurnBody`. */
 export type AgentTurnOutcome = {
+  code?: 'RUNTIME_WAITING_CREDITS' | 'RUNTIME_WAITING_RESUME';
+  executionId?: string; cursor?: number; epoch?: number; remainingCalls?: number;
   state: AgentTurnState;
   body?: string;
   summary?: string;

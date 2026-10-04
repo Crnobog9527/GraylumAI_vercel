@@ -15,7 +15,7 @@ import { aggregateCredits, decimal } from '../bill2/decimal';
 import type {StagingPolicy} from './stagingPolicy';
 import { throwIfContentBindingRefused } from '../opc/contentBindingError';
 import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
-import type {FrozenRun} from '../bill2/service';
+import {frozenCallPolicy, type FrozenPaygRun, type FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
 import { discoverRuntimeCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
 import { type ReasoningPolicy } from './reasoningPolicy';
@@ -31,6 +31,7 @@ import {freezeWindowBillingUnit} from './billingUnitAdmission';
 import {newWorkGate,readNewWorkSettings,requireNewWork} from './newWorkGate';
 import {requireAllowedInput} from './moderation';
 import {admitPricing} from './pricingAdmission';
+import {freezeStagingPaygPricing} from './paygPricing';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
 
 const uuid=z.string().uuid();
@@ -46,6 +47,8 @@ export const runtimeAdmission=z.object({sessionId:uuid,requestId:uuid,input:z.st
 /** Deployment policy is server configuration, never request input.
  * Real admission requires the separately loaded, enabled Staging window. */
 export type LocalRuntimePolicy={
+ /** Trusted composition only; no public request or environment switch selects v2. */
+ payg?: {callPolicies: FrozenPaygRun['callPolicy']; billingUnit: NonNullable<FrozenPaygRun['rules']['billingUnit']>};
  hostTurnContext?:HostTurnContext;
  purposeBudgets?:boolean;real?:StagingPolicy;account:string;costPerCall:string;creditsPerUsd:string;multiplier:string;
  maxCalls:number;maxOutputTokens:number;inputBytes:number;historyItems:number;
@@ -252,7 +255,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const credits=aggregateCredits(costUsd,policy.creditsPerUsd,policy.multiplier);
    const total=decimal(costPerCall)*BigInt(policy.maxCalls);
    const cost=(total/1_000_000_000_000n).toString()+'.'+(total%1_000_000_000_000n).toString().padStart(12,'0');
-   const billing:FrozenRun={contractVersion:'bill2.v1',mode:policy.real?'staging_test':'isolated',...(policy.real?{testWindowId:policy.real.id}:{}),scope:session.scope,operation:input.selection.kind==='organizer'?'organize':'question',modelId,
+   let billing:FrozenRun|FrozenPaygRun={contractVersion:'bill2.v1',mode:policy.real?'staging_test':'isolated',...(policy.real?{testWindowId:policy.real.id}:{}),scope:session.scope,operation:input.selection.kind==='organizer'?'organize':'question',modelId,
     ...(revisionId?{moduleId,skillId,revisionId}:{}),sourceHash:createHash('sha256').update(JSON.stringify(context)).digest('hex'),input:context,
     callPolicy:[{modelId,provider:'fixture',account:policy.account,model:row.data.model_id,protocol:'fixture-cost-v1',upperUsd:policy.costPerCall,inputLimit,outputLimit:maxOutputTokens,automaticRetry:false,hiddenTools:false,lookupSupported:true}],
     rules:{version:policy.real?'runtime-staging-v1':'runtime-local-v1',quoteVersion:policy.real?.id??'runtime-local-v1',creditsPerUsd:policy.creditsPerUsd,multiplier:policy.multiplier,fx:{}},
@@ -263,7 +266,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     if(!billing.callPolicy.some(p=>p.modelId===candidate.modelId))billing.callPolicy.push({...billing.callPolicy[0],modelId:candidate.modelId,model:candidate.model,inputLimit:candidate.inputLimit,outputLimit:candidate.outputLimit});
    }
    // MODEL-PRICING-SYNC: every selected quote must still cover its route's current OpenRouter prices.
-   if(realCalls)await admitPricing(admin,realCalls);
+   if(realCalls&&!policy.payg)await admitPricing(admin,realCalls);
    if(realCalls)billing.callPolicy=realCalls;
    // BILL-UNIT: the window must match the current q and each selected model's m_i (0157 claim/finalize).
    if(realCalls)billing.rules.billingUnit=await freezeWindowBillingUnit(admin,policy.real!,realCalls);
@@ -273,6 +276,15 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     selectRuntimeHistory([], [{role:'user',content:attachedOrganizer.input??''}],{
      instructions:attachedOrganizer.instructions??'',inputBytes:attachedInputLimit!,historyItems:0,toolBytes:0,
     });
+   }
+   if(policy.payg){
+    const templates=policy.payg.callPolicies.filter(p=>selectedIds.has(p.modelId));
+    const callPolicy=realCalls
+     ?await freezeStagingPaygPricing(admin,realCalls.map(p=>({...p,payg:templates.find(t=>t.modelId===p.modelId)?.payg})))
+     :templates.map(p=>frozenCallPolicy.parse(p));
+    if(callPolicy.length!==selectedIds.size||callPolicy.some(p=>!p.payg))throw new Error('BILL2_PAYG_QUOTE_INVALID');
+    billing={...billing,contractVersion:'bill2.v2',callPolicy,
+     rules:{...billing.rules,billingUnit:realCalls?billing.rules.billingUnit!:policy.payg.billingUnit},limits:{...billing.limits,credits:0}};
    }
    // Both SQL CHECKs measure jsonb::text, not JSON.stringify or model input.
    // This runs before runtime_admit, which atomically creates the execution/reservation.

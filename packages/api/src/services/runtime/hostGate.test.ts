@@ -24,7 +24,7 @@ afterEach(() => vi.unstubAllEnvs());
 it.each(['local', 'staging', 'recovery'])('wires the %s host gate explicitly', async mode => {
   vi.stubEnv('V3_RUNTIME_STAGING_ENABLED', 'true');
   if (mode === 'recovery') mock.policy.mockRejectedValue(new Error('not enabled'));
-  await executeOriginalExecution({ admin: {} as never, user: { auth: {} } as never,
+  await executeOriginalExecution({ admin: {rpc:async()=>({data:null,error:null})} as never, user: { auth: {} } as never,
     actorId: 'actor', budget: createRuntimeBudget(),
     ...(mode === 'local' ? { maintenanceEndpoint: 'http://127.0.0.1:1' } : {}) }, 'execution');
   const options = mock.factory.mock.calls[0][0];
@@ -53,4 +53,18 @@ it('no production source imports the test-only allowing gate', () => {
     }
   }
   visit(root);
+});
+
+it.each(['waiting_credits','waiting_resume'])('keeps %s when the original staging window closes',async state=>{
+ vi.stubEnv('V3_RUNTIME_STAGING_ENABLED','false');
+ mock.policy.mockRejectedValue(Error('window unavailable'));
+ const execute=vi.fn(async()=>({state,code:state==='waiting_credits'?'RUNTIME_WAITING_CREDITS':'RUNTIME_WAITING_RESUME'}));
+ mock.factory.mockReturnValue({execute,recoverFinancial:mock.recover});
+ const rpc=vi.fn(async()=>({data:{state,billing:{contractVersion:'bill2.v2'}},error:null}));
+ const result=await executeOriginalExecution({admin:{rpc} as never,user:{auth:{}} as never,
+  actorId:'actor',budget:createRuntimeBudget()},'execution');
+ expect(result).toMatchObject({state,unavailable:'RUNTIME_PRICE_CONFIGURATION_PENDING'});
+ expect(mock.recover).not.toHaveBeenCalled();
+ expect(rpc.mock.calls).toHaveLength(1);
+ expect(execute).toHaveBeenCalledExactlyOnceWith('execution');
 });
