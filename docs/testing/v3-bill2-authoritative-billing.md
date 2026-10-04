@@ -61,3 +61,27 @@ Follow-up compatibility commands (all local-only):
 - `node packages/db/tests/v3/run-workbench.mjs --bill2-upgrade-only --with-bill2-schema --legacy-ref=<exact SHA>`: start archived old code before 0105, create old in-flight pre-deductions through its actual BillingService, apply 0105 twice without recreating DB, finish old requests, start candidate, create new unresolved records, stop that process and boot old code, exercise old requests/readers, assert unchanged new identities/evidence, prove the unpatched finance-reader limitation, restart the explicitly patched rollback bundle and verify mixed finance/history, then return to candidate and recover once. Both the old staging SHA above and main `ecf4c6a347038f9352477a98d4171a8ef00c85de` are tested separately. Main has no SDK slice/durable ordinary request APIs; these are not claimed as main features.
 
 The broad archived old-staging suite retains original application code except local model/search transport substitutions. The upgrade/rollback test first proves the untouched old finance reader rejects the mixed ledger, then adds the already-valid `consumption` and `adjustment` transaction types to its enum and restarts; HTTP 500 remains because `cached_tokens=NULL` is still rejected. It then applies the second and final reader change to that archived runtime and restarts it: `cached_tokens: z.number().finite(),` becomes `cached_tokens: z.number().finite().nullable(),` in `packages/api/src/routers/admin.ts`. The runner records the complete `legacy-reader-compat.patch` and its SHA-256. This is the supported old-ref-plus-patch rollback bundle, not proof that an unmodified old commit is fully compatible. The current candidate includes both decoder changes. The canonical usage row retains official cost and unknown counters, and the finance overview counts the new spend once. Its old catalog-model list does not attribute `bill2.aggregate` costs to an individual model; that list is not a complete supplier-cost report. This endpoint does not aggregate or return cache counters, and the database NULL is preserved. Both normal-user denial and administrator access are tested over actual Auth/HTTP/PostgREST. No fake zero or hidden usage row closes the compatibility gap. In particular, old finalizers reject duplicate direct terminal requests; the test checks that their rejection preserves state rather than inventing an idempotent return contract. Compatibility evidence records the same database OID and old/new pre-deduction/run/call IDs throughout version changes. This is distinct from merely reinstantiating the candidate service.
+
+
+## 生成前明确拒绝（0164）
+
+仅接收 OpenRouter 完整 HTTP 402 JSON：数字 `error.code=402`，明确
+`metadata.limit_source` 为 `openrouter_key_limit`、`openrouter_credits` 或
+`openrouter_in_flight_budget`，且无生成 ID、usage、输出或已有矛盾回执。
+依据：[官方错误语义](https://openrouter.ai/docs/api_reference/errors-and-debugging)、
+[额度拒绝来源](https://openrouter.ai/docs/api_reference/limits)。HTTP 200 内嵌错误、
+SSE 错误、超时、断线、5xx 与不完整证据仍走原有核实流程，不能视作免费。
+
+数据流：服务端完整响应 → 请求及原始响应哈希绑定的 `provider_rejection` →
+既有 `bill2_record` 验证并保存 receipt/call 拒绝标志 → 原有取消及 v1/v2 结算。
+保留 dispatched_at；不伪造生成 ID，也不使用整单 confirmed_failure 补偿此前消费。
+v1 保留其他未知调用的冻结；v2 释放本次调用的预扣。重复回执及恢复不重复释放。
+Runtime 复用取消同步执行终态与会话占用；财务层 unknown 仍对应执行层 cost_pending。
+
+迁移只追加文件，先核对三个来源函数指纹，再更新现有函数；接受自身目标指纹以支持重放。
+本地文件建库 runner 连续应用两次；BILL2 core 集成包含 v1/v2 拒绝、已消费前缀、
+未知前缀、取消竞态、重复证据及晚到矛盾成本；Runtime 集成包含拒绝与不确定传输。
+这些测试使用本地合成身份与响应，不代表远端迁移或真实服务商验收。
+
+回滚应追加迁移恢复来源函数，保留拒绝事实、回执及已完成账目，不重扣已释放积分。
+旧历史冻结需另行逐调用核对证据及批准后恢复，本迁移没有历史回填。

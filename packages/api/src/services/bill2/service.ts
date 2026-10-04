@@ -7,6 +7,7 @@ import { paygStablePolicy, paygCallQuote } from './paygPolicy';
 import { MULTIPLIER_PATTERN } from '../billingUnit';
 import { frozenBillingUnit } from '../runtime/billingUnitAdmission';
 import type {RuntimeBudget} from '../runtime/budget';
+import { openRouterRejection } from './openRouterRejection';
 import { openRouterEvidence } from './openRouterEvidence';
 import {consumeOpenRouterNotStarted} from './openRouterAdapter';
 import { aggregateCredits } from './decimal';
@@ -202,7 +203,11 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       financialActors.set(capability.runId,actorId);
       let evidence;
       let observation: TransportObservation | undefined;
-      try { observation = await send(); evidence = providerEvidence(observation, identity, 'response'); }
+      try {
+       observation = await send();
+       evidence = openRouterRejection(observation,identity,capability.frozen.requestHash)
+        ?? providerEvidence(observation, identity, 'response');
+      }
       catch(error) {
        if(consumeOpenRouterNotStarted(error,capability.frozen.requestHash,send)){
         const args={p_run_id:capability.runId,p_call_id:callId,p_token:capability.token,p_request_hash:capability.frozen.requestHash};
@@ -228,10 +233,13 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
         const saved = await recordReceipt(capability.runId, callId, evidence);
         if (saved.accountClosed) return { dispatched: true, accountClosed: true as const };
       }
-      catch { return { dispatched: true, pendingReceipt: { runId: capability.runId, callId, evidence } }; }
+      catch { return { dispatched: true,
+        providerRejected: 'evidenceKind' in evidence && evidence.evidenceKind === 'provider_rejection',
+        pendingReceipt: { runId: capability.runId, callId, evidence } }; }
       // Confirmation can still commit after this receipt. Every later Runtime
       // read/write then refuses the actor (bill2_actor), so no content reaches SDK/history/result.
-      return { dispatched: true, observation }; // Private server composition only; never a public route result.
+      return { dispatched: true, observation,
+        providerRejected: 'evidenceKind' in evidence && evidence.evidenceKind === 'provider_rejection' };
     },
     closeRun: (runId: string, outcome: 'delivered' | 'confirmed_failure' | 'cancelled' | 'unknown', result: unknown = null) =>
       rpc<RunView>('bill2_close', { p_run_id: uuid.parse(runId), p_outcome: outcome, p_result: result }),

@@ -932,3 +932,29 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([false,true])(
   expect((await db.query('select actual_restore from bill2_runs where id=$1',[f.execution.runId])).rows[0].actual_restore).toBeNull();
  }
 });
+
+it.each(['rejected','timeout','5xx','started'] as const)('RUNTIME: provider refusal boundary %s preserves original execution',async(kind)=>{
+ const f=await fixture('serial-tools-v4-stream',false);let sends=0;
+ const error={error:{code:402,message:'Synthetic refusal',metadata:{limit_source:'openrouter_key_limit'}}};
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  if(init?.method==='GET')return new Response('{}',{status:503});
+  sends++;
+  if(kind==='timeout')throw new Error('synthetic timeout');
+  if(kind==='started')return new Response('data: '+JSON.stringify({id:'gen-started',model:'synthetic/mentor',
+   choices:[{index:0,delta:{content:'partial'},finish_reason:null}]})+'\n\ndata: '+JSON.stringify(error)+'\n\n',
+   {status:200,headers:{'content-type':'text/event-stream'}});
+  return new Response(JSON.stringify(error),{status:kind==='5xx'?503:402,headers:{'content-type':'application/json'}});
+ }});
+ const executor=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,callGate:allowTestCalls});
+ await executor.execute(f.execution.executionId);
+ // Cancellation/recovery never issues another provider POST, including a fresh process composition.
+ await executor.cancel(f.execution.executionId);
+ const recovered=await runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,callGate:allowTestCalls})
+  .recoverFinancial(f.execution.executionId);
+ expect(recovered.state).toBe(kind==='rejected'?'cancelled':'cost_pending');
+ expect(sends).toBe(1);
+ const run=(await db.query('select state,charged,actual_restore from bill2_runs where id=$1',[f.execution.runId])).rows[0];
+ expect(run.state).toBe(kind==='rejected'?'refunded':kind==='started'?'cost_pending':'unknown');
+ if(kind==='rejected')expect(run).toMatchObject({charged:0,actual_restore:20});
+ else expect(run.actual_restore).toBeNull();
+});

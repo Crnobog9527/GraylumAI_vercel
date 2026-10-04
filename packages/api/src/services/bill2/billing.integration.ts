@@ -522,3 +522,9 @@ it('BILL2: PAYG v2 money paths, erasure, nominal pricing and real concurrency re
     writeFileSync(resolve(process.env.V3_WORKBENCH_OUTPUT!,'payg-regression.json'),JSON.stringify(report,null,2));
   }
 },60000);
+
+it('BILL2: provider rejection v1/v2 preserves paid calls and refunds once under cancellation races',async()=>{
+ const base=new URL('../../../../db/tests/payg/',import.meta.url);
+ const {providerRejectionCases}=await import(/* @vite-ignore */new URL('provider-rejection.mjs',base).href);
+ await providerRejectionCases({db,Client:pg.Client,connectionString});
+},60000);

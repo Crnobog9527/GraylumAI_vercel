@@ -94,7 +94,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const policy=execution.billing.callPolicy.find(p=>p.model===context.model);
   if(!policy)throw new Error('RUNTIME_MODEL_DENIED');
   const session=new PostgresSession(options.database,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
-  let transportNotStarted=false;
+  let transportNotStarted=false,providerRejected=false;
   let terminalReplyFailure=false;
   let gateChecked=false,moderationBlocked=false;
   let gateRejection:GateRejection|undefined;
@@ -183,6 +183,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
         break;
        }
       }
+      if(dispatch.providerRejected){providerRejected=true;throw new Error('RUNTIME_PROVIDER_REJECTED');}
       const saved=await rpc<{rawBody:string|null}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash});
       raw=saved?.rawBody;
      }
@@ -430,7 +431,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     }catch{/* Inspect the original state through normal recovery after an outage. */}
    }
    const capacity=error instanceof Error&&['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY'].includes(error.message);
-   if(transportNotStarted&&execution.live){
+   if((transportNotStarted||providerRejected)&&execution.live){
     // The original grant was atomically revoked and BILL2 finalized. Reuse
     // normal cancellation to synchronize this execution and release Session.
     const stopped=await rpc<{state:'cancelled'|'completed'|'cost_pending'}>('runtime_cancel',args).catch(()=>null);
