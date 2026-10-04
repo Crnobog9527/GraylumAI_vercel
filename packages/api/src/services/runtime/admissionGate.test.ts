@@ -133,14 +133,14 @@ it.each(['success','insufficient','unknown','committed'])('recovers once after i
  expect(calls[1][1]).toEqual(calls[0][1]);
  expect(calls[1][1].p_request_id).toBe(f.input.requestId);
  if(mode==='success'||mode==='committed')expect(settled.value).toMatchObject({executionId:id(4)});
- else expect(settled.error).toMatchObject({message:mode==='insufficient'?'BILL2_INSUFFICIENT_CREDITS':'RUNTIME_ADMISSION_DENIED'});
+ else expect(settled.error).toMatchObject({message:mode==='insufficient'?'BILL2_INSUFFICIENT_CREDITS':'RUNTIME_STAGING_INTERNAL_ERROR'});
 });
 
 it('never retries an ambiguous first admission or starts recovery for it', async () => {
  const f=fixture(),original=f.rpc.getMockImplementation()!;
  f.rpc.mockImplementation(async(name,args)=>name==='runtime_admit'
   ?{data:null,error:{code:'XX000',message:'synthetic timeout'}}:original(name,args));
- await expect(runtimeAdmissionService(f.user,f.admin,f.policy).prepare(f.input)).rejects.toThrow('RUNTIME_ADMISSION_DENIED');
+ await expect(runtimeAdmissionService(f.user,f.admin,f.policy).prepare(f.input)).rejects.toThrow('RUNTIME_STAGING_INTERNAL_ERROR');
  expect(mock.recovery).not.toHaveBeenCalled();
  expect(f.rpc.mock.calls.filter(([name])=>name==='runtime_admit')).toHaveLength(1);
 });

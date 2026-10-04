@@ -17,3 +17,11 @@ it('old read projection remains compatible without a diagnosis',async()=>{
  const rpc=vi.fn().mockResolvedValueOnce({data:{sessionId:'session'},error:null}).mockResolvedValueOnce({data:{executions:[{executionId:'execution',unavailableReason:null}]},error:null});
  expect(await retainedOutputReason({rpc},'actor','execution')).toBeUndefined();
 });
+it('returns a persisted provider rejection unchanged through the existing view RPC',async()=>{
+ const {readRuntimeView}=await import('./view');
+ const data={sessionId:'session',executions:[{executionId:'execution',unavailableReason:'provider_rejected',billing:{chargedCredits:0}}]};
+ const rpc=vi.fn().mockResolvedValue({data,error:null});
+ expect(await readRuntimeView({rpc},'actor','session')).toEqual(data);
+ expect(rpc).toHaveBeenCalledWith('runtime_view',{p_actor_id:'actor',p_session_id:'session'});
+ expect(rpc).toHaveBeenCalledTimes(1);
+});

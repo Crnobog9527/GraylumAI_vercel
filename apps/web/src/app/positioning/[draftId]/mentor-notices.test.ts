@@ -52,3 +52,9 @@ describe("mentorTurnNotice", () => {
     expect(mentorTurnNotice("e1", undefined, null)).toBeNull();
   });
 });
+
+it("does not repeat an error the last turn already shows", () => {
+  const error = "服务暂时不可用，没有扣积分。";
+  expect(mentorTailNotices({ ...base, error, lastTurnText: error + "\n较早的部分对话记录无法使用，本轮回复未参考它们" })).toEqual([]);
+  expect(mentorTailNotices({ ...base, error, lastTurnText: "本次执行已停止" }).map(notice => notice.id)).toEqual(["error"]);
+});

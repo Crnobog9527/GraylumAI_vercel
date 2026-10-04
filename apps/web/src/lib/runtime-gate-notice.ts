@@ -14,6 +14,9 @@ export const HISTORY_OMITTED_NOTICE = '较早的部分对话记录无法使用�
 
 export const PROVIDER_HISTORY_NOTICE = '这条对话的历史记录格式不兼容，本轮无法继续。请新开一个对话，并重新提供需要参考的内容。';
 
+/** The provider refused the whole turn before any charge; shown live and, after a reload, from the view. */
+export const PROVIDER_REJECTED_NOTICE = '服务暂时不可用，没有扣积分。';
+
 export type RuntimeGateReason = 'call_limited' | 'paused' | 'limit_unavailable';
 
 const gateReasons: readonly string[] = ['call_limited', 'paused', 'limit_unavailable'];
@@ -24,7 +27,7 @@ export function isRuntimeGateReason(value: unknown): value is RuntimeGateReason 
 
 /** Execution result reason. `call_limited` carries no window, so it always uses the minute text. */
 export function gateResultNotice(unavailable: unknown): string | null {
-  if (unavailable === 'provider_rejected') return '服务暂时不可用，没有扣积分。';
+  if (unavailable === 'provider_rejected') return PROVIDER_REJECTED_NOTICE;
   if (unavailable === 'call_limited') return runtimeGateMessages.minute;
   if (unavailable === 'paused') return runtimeGateMessages.paused;
   if (unavailable === 'limit_unavailable') return runtimeGateMessages.limit_unavailable;
