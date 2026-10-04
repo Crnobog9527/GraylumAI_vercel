@@ -1134,3 +1134,28 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: native streamin
  }
  expect(settlements).toEqual(Array(2).fill({state:'settled',closed:true,charged:3,actual_restore:17,cost:'0.003'}));
 });
+
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: native length body completes without dispatching an unusable attached organizer',async()=>{
+ const f=await fixture('agent-turn-v5-stream',true,8192,false,undefined,false,30000,true,true);
+ const message='x'.repeat(35000);let posts=0;
+ const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  posts++;const request=JSON.parse(String(init?.body));
+  expect(request.model).toBe('synthetic/mentor');
+  const id='gen-omit-'+f.execution.executionId;
+  return new Response('data: '+JSON.stringify({id,model:request.model,choices:[{index:0,
+   delta:{role:'assistant',content:message},finish_reason:'length'}],
+   usage:{prompt_tokens:10,completion_tokens:8192,total_tokens:8202,cost:0.003}})+'\n\ndata: [DONE]\n\n',
+   {status:200,headers:{'content-type':'text/event-stream'}});
+ }});
+ const host=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter});
+ const result=await host.execute(f.execution.executionId);
+ expect(result).toMatchObject({state:'completed',summary:'',completeness:'length_limit',organized:false,summaryOmitted:true});
+ expect(JSON.parse(result.body!).message).toBe(message);
+ expect(await host.execute(f.execution.executionId)).toEqual(result);expect(posts).toBe(1);
+ const saved=(await db.query('select primary_result,result from runtime_executions where id=$1',[f.execution.executionId])).rows[0];
+ expect(saved.primary_result.body).toBe(saved.result.body);expect(jsonbBytes(saved.result)).toBeLessThanOrEqual(262144);
+ expect((await db.query('select state,closed,charged,actual_restore,provider_cost_usd::text cost from bill2_runs where id=$1',[f.execution.runId])).rows[0])
+  .toEqual({state:'settled',closed:true,charged:3,actual_restore:37,cost:'0.003'});
+ expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1',[f.execution.runId])).rows[0].n).toBe(1);
+});

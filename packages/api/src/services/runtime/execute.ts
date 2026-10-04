@@ -4,7 +4,7 @@ import {NativeProgressProjection} from './nativeProgress';
 import {nativeVisible,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
  completedOutput,finalizeNativeSummary} from './nativeOutput';
 import {paygOwnerDatabase} from './paygOwner';
-import {executorRpc,preflightCodes,hash,progressEmitter,type RuntimeExecutorOptions} from './executorRpc';
+import {executorRpc,recoverExecutorFinancial,preflightCodes,hash,progressEmitter,type RuntimeExecutorOptions} from './executorRpc';
 import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
@@ -44,12 +44,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
  return {
   cancel:(executionId:string)=>rpc<{state:string}>('runtime_cancel',{p_execution_id:z.string().uuid().parse(executionId)}),
   /** Trusted maintenance only: caller supplies a verified original actor; no UI route. */
-  async recoverFinancial(executionId:string){
-   const args={p_execution_id:z.string().uuid().parse(executionId)};
-   const current=await rpc<{runId:string}>('runtime_financial_recovery',args);
-   await billing.recoverReceipts(current.runId);
-   return rpc<{executionId:string;runId:string;state:string;billing:unknown}>('runtime_financial_recovery',{...args,p_finish:true});
-  },
+  recoverFinancial:(executionId:string)=>recoverExecutorFinancial(rpc,billing,executionId),
   async execute(executionId:string,onProgress?:(event:RuntimeProgress)=>void,resume?:ResumeInput){
   const args={p_execution_id:z.string().uuid().parse(executionId)};
   budget.timing?.enter('execute');
@@ -405,6 +400,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    if(context.attachedOrganizer){
     progress({type:"phase",phase:"organizer"});
     await ownerRpc('runtime_execution',{...args,p_action:'checkpoint_primary',p_result:{body,lastSequence:callSequence,...turnMetadata}});
+    if(native&&(turnMetadata.completeness==='length_limit'||turnMetadata.envelopeCompact))summary='';
+    else {
     const organizer=context.attachedOrganizer,organizerPolicy=execution.billing.callPolicy.find(p=>p.modelId===organizer.modelId&&p.model===organizer.model);
     if(!organizerPolicy)throw new Error('RUNTIME_ORGANIZER_DENIED');
     const instructions=organizer.instructions ?? 'Organize this operation result. Preserve provenance and uncertainty. Do not add new facts.';
@@ -420,7 +417,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       if(!response||response.model!==organizer.model||response.choices?.length!==1)throw new Error('RUNTIME_RESPONSE_INVALID');
       checkAgentReply(response,true);
       return JSON.stringify(response);
-     }});
+     }});}
    }
    // This is after organizer spend and streamed text. Real moderation must decide
    // whether to buffer/retract output or check the primary reply before organizing.

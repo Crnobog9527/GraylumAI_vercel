@@ -37,6 +37,8 @@
 
 结果按 PostgreSQL jsonb 实际序列化字节计量，限制 262144；先预留整理空间，截短按码点前缀并重验 schema。
 不可保留全部私有 T2 字段时退到紧凑信封。整理摘要超限或正文不完整时省略，checkpoint 正文保持不变。
+对已经明确 length_limit 或 envelopeCompact 的新主回复，checkpoint 后不派发不可采用的整理调用，
+以空摘要、未整理标记完成原计费关单，按现有规则释放未用预留。正常完整回复的整理及未知费用恢复保持原路径。
 Session 正文与已存结果同步；供应商回执不裁切。旧冻结执行不套用新裁切规则。
 结果读取复用 runtime_view 授权和 runtime_execution(read)，不扩大表权限。元数据补充增加 1+N 次 RPC，
 N 为可见且非空的去重 execution 数，每批最多 8 次；既有 read 锁可能令同会话读取串行，长历史仍有性能代价。

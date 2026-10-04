@@ -54,3 +54,11 @@ export function progressEmitter(onProgress:((event:RuntimeProgress)=>void)|undef
     catch{/* UI disconnect never interrupts receipt persistence. */}
   };
 }
+
+export async function recoverExecutorFinancial(rpc:ReturnType<typeof executorRpc>,
+  billing:{recoverReceipts:(id:string)=>Promise<unknown>},executionId:string) {
+  const args={p_execution_id:z.string().uuid().parse(executionId)};
+  const current=await rpc<{runId:string}>('runtime_financial_recovery',args);
+  await billing.recoverReceipts(current.runId);
+  return rpc<{executionId:string;runId:string;state:string;billing:unknown}>('runtime_financial_recovery',{...args,p_finish:true});
+}
