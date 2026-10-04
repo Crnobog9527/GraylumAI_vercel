@@ -49,6 +49,10 @@ it('keeps 正在回复… for a turn whose execute call finished before the view
   const cost = open('cost_pending', { finished: 'e1' });
   expect(cost?.text).toBe('费用待核实；重试只核对原调用。');
   expect(cost?.actions?.map(action => action.disabled)).toEqual([false, false]);
+  const interrupted = open('interrupted', { finished: 'e1' });
+  expect(interrupted).toMatchObject({ tone: 'warning', text: '回复尚未完成，原请求已保留。' });
+  expect(interrupted?.actions?.map(action => action.disabled)).toEqual([false, false]);
+  expect(open('prepared', { finished: 'e1' })?.text).toBe('正在回复…');
 });
 
 it('says 回复尚未完成 for an open turn nothing is running, including another finished execution', () => {

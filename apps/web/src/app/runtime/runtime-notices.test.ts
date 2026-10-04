@@ -113,6 +113,13 @@ it('keeps 正在回复… while the view still shows a turn whose execute call a
  const [cost]=runtimeTurnNotices(turn({state:'cost_pending'}),ctx({finished:true}));
  expect(cost.text).toBe('费用待核实；重试只核对原调用。');
  expect(cost.actions!.map(action=>action.disabled)).toEqual([false,false]);
+ // Any other re-read open state ends the marker too: the retry is available again.
+ for(const state of ['interrupted','unknown_state']){
+  const [notice]=runtimeTurnNotices(turn({state}),ctx({finished:true}));
+  expect(notice).toMatchObject({tone:'warning',text:'回复尚未完成，原请求已保留。'});
+  expect(notice.actions!.map(action=>action.disabled)).toEqual([false,false]);
+ }
+ expect(runtimeTurnNotices(turn({state:'prepared'}),ctx({finished:true}))[0].text).toBe('正在回复…');
  expect(runtimeTurnNotices(turn({state:'running'}),ctx({finished:true,capacity:true}))[0].text).toBe(CAPACITY_NOTICE);
 });
 

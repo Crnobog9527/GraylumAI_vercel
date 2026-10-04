@@ -19,6 +19,8 @@ export type RuntimeTurn = {
 };
 
 const open = (state: string) => state !== 'completed' && state !== 'cancelled';
+/** Execution states the view shows while a call is about to run or running. */
+export const inFlight = (state: string) => state === 'prepared' || state === 'running';
 
 /**
  * Notices shown under one turn, in the conversation. Every still-open turn gets one notice
@@ -48,8 +50,9 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
   if (!open(turn.state)) return notices;
   const capacity = ctx.capacity;
   const stop = { label: CHAT_ACTION.stop, onClick: ctx.onStop, disabled: ctx.stopping };
-  // A finished call matters only until the view catches up; a re-read cost_pending turn keeps its own retry.
-  const settling = Boolean(ctx.finished) && turn.state !== 'cost_pending';
+  // A finished call matters only while the view still shows the turn in flight; any other re-read
+  // state (interrupted, cost_pending, …) keeps its own notice and retry.
+  const settling = Boolean(ctx.finished) && inFlight(turn.state);
   const retry = { label: CHAT_ACTION.retry, onClick: ctx.onRetry, disabled: ctx.busy || settling };
   const running = (ctx.busy || settling) && !capacity && turn.state !== 'cost_pending';
   notices.push({
