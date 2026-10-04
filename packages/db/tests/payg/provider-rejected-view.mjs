@@ -7,7 +7,7 @@ import {claim,receipt} from './fixture.mjs';
 import {fixture,proof} from './provider-rejection.mjs';
 
 const read=name=>readFileSync(new URL('../../migrations/'+name,import.meta.url),'utf8');
-const migration=read('0169_runtime_provider_rejected_view.sql');
+const migration=read('0168_runtime_provider_rejected_view.sql');
 const predecessor=read('0166_payg_runtime.sql');
 const original=predecessor.slice(predecessor.indexOf('CREATE OR REPLACE FUNCTION public.runtime_view('),
  predecessor.indexOf('\n;\nCOMMIT;'));
