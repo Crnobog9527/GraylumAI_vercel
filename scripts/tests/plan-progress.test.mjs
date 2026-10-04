@@ -98,7 +98,10 @@ test('derive 推导阶段、阻塞原因和计划外工作', () => {
   assert.equal(status['PAY-BASE'].status, '实施中');
   assert.deepEqual(status['PAY-BASE'].prs.map((item) => [item.number, item.plan]), [[11, true], [16, false]]);
   assert.equal(status['PAY-WAFFO'].status, '被阻塞');
-  assert.match(status['PAY-WAFFO'].reason, /PAY-BASE/);
+  assert.match(status['PAY-WAFFO'].reason, /PAY-BASE（实施中）/);
+  assert.equal(status['PAY-WAFFO'].blockedBy, 'deps');
+  assert.equal(status.MOD.blockedBy, 'owner');
+  assert.match(status['LIB-EXT'].reason, /CORE-A-UI（实施中）/);
   assert.equal(status.MOD.status, '被阻塞');
   assert.equal(status['OLD-TRY'].status, '已关闭');
   assert.equal(status['LIB-EXT'].status, '被阻塞');

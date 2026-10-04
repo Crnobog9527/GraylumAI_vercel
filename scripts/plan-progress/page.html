@@ -93,6 +93,7 @@
     <div class="bar" id="bar" role="img"></div>
     <div class="filters" id="filters" aria-label="按状态筛选"></div>
   </header>
+  <section class="extra warn" id="blocked" hidden></section>
   <main id="phases"></main>
   <section class="extra" id="unplanned"></section>
   <section class="extra warn" id="warnings" hidden></section>
@@ -184,6 +185,11 @@
         });
         c.append(deps);
       }
+      if (t.depsNote && t.depsNote !== '—') {
+        var pre = el('details');
+        pre.append(el('summary', '', '依赖原文（含 Owner 和外部前提）'), el('p', '', t.depsNote));
+        c.append(pre);
+      }
       var prs = el('div', 'row prs');
       prs.append(el('span', 'label', 'PR'));
       if (t.prs.length === 0) prs.append(el('span', 'label', '暂无'));
@@ -222,6 +228,26 @@
       });
     }
     render();
+
+    var blocked = data.tasks.filter(function (t) { return t.status === '被阻塞'; });
+    if (blocked.length) {
+      var box = document.getElementById('blocked');
+      box.hidden = false;
+      box.append(el('h2', '', '卡在哪里'));
+      [['owner', '等 Owner 决定或外部事项'], ['deps', '等其他任务']].forEach(function (group) {
+        var items = blocked.filter(function (t) { return t.blockedBy === group[0]; });
+        if (!items.length) return;
+        box.append(el('div', 'label', group[1] + '（' + items.length + '）'));
+        var list = el('ul');
+        items.forEach(function (t) {
+          var li = el('li');
+          li.append(el('span', 'name', t.name), ' ' + t.reason);
+          if (t.blockedBy === 'deps' && t.depsNote && t.depsNote !== '—') li.append(el('div', 'reason', '依赖原文：' + t.depsNote));
+          list.append(li);
+        });
+        box.append(list);
+      });
+    }
 
     var un = document.getElementById('unplanned');
     var others = data.unplanned.filter(function (p) { return !p.planDoc; });

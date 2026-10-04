@@ -1,5 +1,5 @@
 // 把任务定义和 PR 列表合成每个任务的阶段。纯函数，便于测试。
-import { findTaskNames } from './parse-plan.mjs';
+import { findTaskNames, plainText } from './parse-plan.mjs';
 
 export const STATUSES = ['已完成', '实施中', '方案中', '被阻塞', '未开始', '已关闭'];
 
@@ -110,10 +110,22 @@ export function derive({ plan, prs, since, generatedAt, sourceRef }) {
       task.status = '方案中';
     } else if (task.unmetDeps.length > 0) {
       task.status = '被阻塞';
-      task.reason = `等依赖完成：${task.unmetDeps.join('、')}`;
+      task.blockedBy = 'deps';
     } else {
       task.status = '未开始';
     }
+  }
+
+  // 第二遍：所有状态都定了以后，写明卡在哪个依赖、那个依赖现在处于什么阶段。
+  for (const task of tasks) {
+    if (task.annotation?.kind === '阻塞') task.blockedBy = 'owner';
+    if (task.blockedBy !== 'deps') continue;
+    const parts = task.unmetDeps.map((dep) => {
+      if (dep.startsWith('#')) return `${dep}（未合并）`;
+      const target = byName.get(dep);
+      return target ? `${dep}（${target.status}）` : dep;
+    });
+    task.reason = `等依赖完成：${parts.join('、')}`;
   }
 
   const sinceTime = since ? Date.parse(`${since}T00:00:00Z`) : 0;
@@ -134,7 +146,7 @@ export function derive({ plan, prs, since, generatedAt, sourceRef }) {
     counts,
     total,
     percent: total === 0 ? 0 : Math.round((counts['已完成'] / total) * 100),
-    tasks: tasks.map(({ depsText, ...task }) => task),
+    tasks: tasks.map(({ depsText, ...task }) => ({ ...task, depsNote: plainText(depsText) })),
     unplanned,
     warnings,
   };
