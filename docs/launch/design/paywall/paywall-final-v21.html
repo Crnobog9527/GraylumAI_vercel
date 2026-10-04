@@ -1,0 +1,1052 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Graylum 付费墙 v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;900&family=Noto+Sans+SC:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: prototype chrome (scene tabs, demo switches) above a scaled product frame; design notes below.
+   Chrome follows the viewer theme. The product frame is the light Graylum workbench; paywall heroes use a dark
+   "strategy dossier" surface (ink + gold foil). */
+:root{
+  --bg:#efede8; --panel:#fbfaf7; --fg:#1f1d1a; --muted:#6c675e; --line:#d8d4cb; --accent:#9a6512; --accent-soft:#f3e7cf; --chip:#e4e0d7;
+  --serif:'Noto Serif SC','Songti SC','STSong',serif;
+  --sans:'Noto Sans SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',-apple-system,sans-serif;
+  --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  --p-canvas:#f4f3f0; --p-text:#24221f; --p-muted:#77736b; --p-faint:#a19c92; --p-line:#ebe8e2; --p-line2:#dfdbd2;
+  --ink:#1b1916; --ink-2:#2a2621; --gold:#c8963e; --gold-hi:#e9c27a; --gold-deep:#a8721c; --gold-tint:#fbf3e3;
+  --ok:#2f6a3b; --ok-bg:#eef6ef; --save:#1f7a3a;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161513;--panel:#201e1b;--fg:#ece9e3;--muted:#a39d92;--line:#3a3631;--accent:#e2b467;--accent-soft:#3b301d;--chip:#2c2925;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#161513;--panel:#201e1b;--fg:#ece9e3;--muted:#a39d92;--line:#3a3631;--accent:#e2b467;--accent-soft:#3b301d;--chip:#2c2925;color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:400 14px/1.6 var(--sans)}
+.wrap{max-width:1240px;margin:0 auto;padding-inline:16px;padding-block:20px 64px}
+button,input,select,textarea{font:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sr{position:absolute;left:-9999px}
+
+/* chrome */
+.top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:10px 24px;margin-bottom:14px}
+.top h1{margin:0;font:700 21px/1.3 var(--sans)}
+.top p{margin:4px 0 0;color:var(--muted);font-size:13px;max-width:74ch}
+.ver{font:500 11px var(--mono);color:var(--muted)}
+.controls{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;flex:1 1 620px;min-width:0}
+.tabs button{display:flex;gap:6px;align-items:baseline;padding:7px 11px;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:13px;cursor:pointer}
+.tabs button b{font:500 11px var(--mono)}
+.tabs button[aria-selected="true"]{background:var(--accent-soft);color:var(--fg);font-weight:600}
+.seg{display:inline-flex;padding:3px;border-radius:9px;background:var(--chip)}
+.seg button{padding:5px 12px;border:0;border-radius:7px;background:transparent;color:var(--muted);font-size:13px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--panel);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.demos{display:flex;flex-wrap:wrap;gap:6px 18px;margin:10px 2px 0;color:var(--muted);font-size:12.5px}
+.demos label{display:flex;align-items:center;gap:6px;cursor:pointer}
+.sceneline{margin:12px 2px 10px;color:var(--muted);font-size:13px}
+.sceneline strong{color:var(--fg)}
+.stage{display:flex;justify-content:center;padding:16px 0;border-radius:14px;background:repeating-linear-gradient(45deg,transparent 0 10px,rgba(127,127,127,.05) 10px 11px)}
+.holder{position:relative;overflow:hidden;border-radius:14px;box-shadow:0 0 0 1px var(--line),0 18px 40px rgba(0,0,0,.14)}
+.holder.m{border-radius:30px}
+.frame{position:absolute;left:0;top:0;transform-origin:0 0;container-type:inline-size;overflow:hidden;background:var(--p-canvas);color:var(--p-text);font:400 14px/1.6 var(--sans);color-scheme:light}
+.frame.d{width:1360px;height:920px}
+.frame.m{width:390px;height:844px}
+
+/* fake app */
+.app{position:absolute;inset:0;display:flex;flex-direction:column}
+.g{flex:none;display:flex;align-items:center;gap:36px;height:58px;padding:0 24px;background:#fff;border-bottom:1px solid var(--p-line)}
+.brand{display:flex;align-items:center;gap:9px;font-size:19px;font-weight:700}
+.brand i{display:grid;place-items:center;width:28px;height:28px;border-radius:7px;background:var(--ink);color:var(--gold-hi);font-style:normal;font-size:14px}
+.g nav{display:flex;gap:22px;color:#777;font-size:14px}
+.appbody{flex:1;display:grid;grid-template-columns:250px 1fr 320px;gap:8px;padding:8px}
+.appbody > div{border-radius:12px;background:#fff}
+.appbody .l{background:transparent}
+.ghostline{height:12px;margin:14px 16px;border-radius:6px;background:#efede8}
+.ghostline.s{width:55%}.ghostline.m{width:75%}
+@container (max-width:600px){.g nav{display:none}.appbody{grid-template-columns:1fr}.appbody .l,.appbody .r{display:none}}
+
+/* modal shell */
+.scrim{position:absolute;inset:0;z-index:50;display:grid;place-items:center;padding:22px;background:rgba(20,18,15,.52);backdrop-filter:blur(4px)}
+.dlg{position:relative;display:grid;grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr);grid-template-rows:minmax(0,1fr);width:min(1120px,100%);height:calc(100% - 20px);max-height:880px;overflow:hidden;border-radius:20px;background:#fff;box-shadow:0 30px 80px rgba(0,0,0,.35)}
+.dlg.narrow{display:block;width:min(560px,100%);overflow:auto}
+.x{position:absolute;top:12px;right:12px;z-index:3;display:grid;place-items:center;width:34px;height:34px;border:0;border-radius:9px;background:rgba(255,255,255,.9);color:#333;cursor:pointer}
+
+/* dossier */
+.dossier{position:relative;min-height:0;overflow-y:auto;scrollbar-width:thin;padding:28px 28px 24px;display:grid;align-content:start;gap:16px;color:#efe7d6;background:radial-gradient(120% 70% at 0% 0%,rgba(200,150,62,.22),transparent 60%),linear-gradient(160deg,var(--ink-2),var(--ink) 55%)}
+.d-eb{display:flex;justify-content:space-between;gap:10px;font:500 11px var(--mono);letter-spacing:.14em;color:var(--gold-hi);text-transform:uppercase}
+.d-title{margin:0;font:900 28px/1.25 var(--serif);color:#fff6e4;text-wrap:balance}
+.d-sub{margin:-6px 0 0;color:#cfc3ab;font-size:14px;line-height:1.7}
+.d-sub q{color:#fff2d6;quotes:"“" "”"}
+.mine3{display:flex;flex-wrap:wrap;gap:6px}
+.mine3 span{padding:4px 10px;border-radius:999px;background:rgba(159,211,168,.13);color:#b6e2bd;font-size:12.5px}
+.mine3 span.todo{background:rgba(255,255,255,.06);color:#8f846f}
+.grp{display:grid;gap:8px}
+.dlv{margin:0;padding:0;list-style:none;display:grid;gap:0;position:relative}
+.dlv li{position:relative;display:grid;grid-template-columns:30px minmax(0,1fr);gap:12px;padding:0 0 14px}
+.dlv li:not(:last-child)::after{content:"";position:absolute;left:14px;top:30px;bottom:0;width:2px;background:rgba(233,194,122,.25)}
+.dlv i{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:rgba(233,194,122,.15);border:1px solid rgba(233,194,122,.45);color:var(--gold-hi);font:600 13px var(--mono);font-style:normal}
+.dlv b{display:block;color:#fff2d6;font-size:14.5px;line-height:30px}
+.dlv small{display:block;margin-top:-4px;color:#b7ab93;font-size:12.5px;line-height:1.55}
+.why1{margin:0 0 4px;padding:10px 12px;border-radius:10px;background:rgba(233,194,122,.1);color:#e6dcc8;font-size:12.5px;line-height:1.65}
+.why1 b{color:var(--gold-hi);margin-right:4px}
+.dlv .only{display:inline-block;margin-top:4px;padding:1px 8px;border-radius:6px;background:rgba(159,211,168,.12);color:#b6e2bd;font-size:11.5px;line-height:1.6}
+.dnote{margin:0;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);color:#cfc3ab;font-size:12.5px}
+.grp-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:12px;color:#b7ab93}
+.grp-h b{font:600 13px var(--sans);color:#fff2d6}
+.gcard{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 12px;align-items:start;padding:11px 13px;border:1px solid rgba(233,194,122,.16);border-radius:12px;background:rgba(255,255,255,.03)}
+.gcard i{font:600 11px var(--mono);color:var(--gold);font-style:normal;margin-top:3px}
+.gcard div{min-width:0}
+.gcard b{display:block;color:#fff2d6;font-size:14px;font-weight:600}
+.gcard small{display:block;color:#a99d86;font-size:12.5px;line-height:1.55}
+.gcard em{font-style:normal;font:500 11px var(--mono);color:var(--gold-hi);white-space:nowrap;margin-top:3px}
+.sample{display:grid;gap:10px;padding:14px;border-radius:14px;border:1px solid rgba(233,194,122,.3);background:rgba(233,194,122,.05);font-size:12.5px;color:#d9ccb2;line-height:1.65}
+.sh{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;align-items:center}
+.sh b{color:#fff2d6;font-size:14px}
+.stabs{display:flex;flex-wrap:wrap;gap:6px}
+.stabs button{padding:4px 10px;border:1px solid rgba(233,194,122,.25);border-radius:999px;background:transparent;color:#cfc3ab;font-size:12px;cursor:pointer}
+.stabs button[aria-selected="true"]{background:var(--gold-hi);color:#2a1d06;border-color:var(--gold-hi);font-weight:600}
+.st{width:100%;border-collapse:collapse;font-size:12px}
+.st th{text-align:left;color:var(--gold-hi);font-weight:600;padding:4px 6px;border-bottom:1px solid rgba(233,194,122,.25)}
+.st td{padding:6px;border-bottom:1px solid rgba(255,255,255,.06);vertical-align:top;color:#e6dcc8}
+.sw{margin:0;color:#e6dcc8}
+.sm{margin:0;padding-left:18px;display:grid;gap:6px;color:#e6dcc8}
+.sm b{color:#fff2d6}
+.slink{justify-self:start;padding:0;border:0;background:none;color:var(--gold-hi);font-size:12.5px;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.sample b{color:var(--gold-hi);font-weight:600}
+.sample .tag{display:inline-block;margin-left:6px;padding:0 6px;border-radius:5px;background:rgba(255,255,255,.08);color:#a99d86;font:500 10.5px var(--mono)}
+.sample ol{margin:6px 0 0;padding-left:18px}
+.founderline{display:flex;gap:10px;align-items:center;padding-top:12px;border-top:1px solid rgba(233,194,122,.14);font-size:12.5px;color:#cfc3ab}
+.founderline i{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:#efe7d6;color:var(--ink);font:700 14px var(--serif);font-style:normal}
+.founderline button{margin-left:auto;padding:0;border:0;background:none;color:var(--gold-hi);font-size:12.5px;text-decoration:underline;text-underline-offset:3px;cursor:pointer;white-space:nowrap}
+.up2{display:grid;gap:6px;padding:14px;border-radius:12px;border:1px solid rgba(233,194,122,.3);background:rgba(233,194,122,.07);font-size:12.5px;color:#d9ccb2;line-height:1.65}
+.up2 b{color:#fff2d6;font-size:14px}
+.up2 button{justify-self:start;padding:6px 12px;border:0;border-radius:9px;background:var(--gold-hi);color:#2a1d06;font-weight:600;font-size:12.5px;cursor:pointer}
+.memgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.mem{padding:12px;border:1px solid rgba(233,194,122,.18);border-radius:12px;background:rgba(255,255,255,.03)}
+.mem b{display:block;font:600 20px/1.2 var(--mono);color:var(--gold-hi)}
+.mem span{font-size:12px;color:#b7ab93}
+
+/* checkout */
+.co{display:flex;flex-direction:column;min-height:0;overflow-y:auto;scrollbar-width:thin;padding:26px 28px 20px;gap:14px}
+.founder{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:10px 12px;border-radius:12px;background:linear-gradient(90deg,#fff3dc,#fffaf0);border:1px solid #f0d9a8;color:#6a4a12;font-size:13px}
+.founder b{font-weight:700}
+.founder .flast{flex-basis:100%;font-size:12px;color:#8a6a2a}
+.founder .slots{margin-left:auto;display:flex;align-items:center;gap:8px;font:500 12px var(--mono);white-space:nowrap}
+.founder .meter{width:80px;height:6px;border-radius:999px;background:#f2dfb5;overflow:hidden}
+.founder .meter i{display:block;height:100%;background:linear-gradient(90deg,var(--gold-deep),var(--gold))}
+.co h2{margin:0;font:700 24px/1.3 var(--sans);text-wrap:balance}
+.co .lede{margin:-6px 0 0;color:var(--p-muted);font-size:14px}
+.anchor{display:grid;gap:4px;padding:10px 12px;border-radius:10px;background:#f7f6f2;font-size:13px}
+.anchor div{display:flex;justify-content:space-between;gap:12px}
+.anchor div span:first-child{color:var(--p-muted)}
+.anchor div b{font-variant-numeric:tabular-nums}
+.anchor div.us b{color:var(--save)}
+.anchor small{color:var(--p-faint);font-size:11px}
+.anchor small a,.src a{color:inherit}
+.bill{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:4px;border-radius:12px;background:#f1efea}
+.bill label{position:relative;display:flex;justify-content:center;align-items:center;gap:8px;padding:9px 10px;border-radius:9px;font-size:14px;color:#5d584f;cursor:pointer}
+.bill input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}
+.bill label:has(input:checked){background:#fff;color:var(--p-text);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.bill label:has(input:focus-visible){outline:2px solid var(--gold-deep);outline-offset:1px}
+.save{padding:1px 8px;border-radius:999px;background:var(--save);color:#fff;font-size:11.5px;font-weight:600;white-space:nowrap}
+.plans{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.plan{position:relative;display:grid;gap:3px;align-content:start;padding:13px 14px 12px;border:1.5px solid var(--p-line2);border-radius:14px;cursor:pointer;background:#fff}
+.plan input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}
+.plan:has(input:checked){border-color:var(--ink);box-shadow:0 0 0 3px rgba(27,25,22,.08)}
+.plan:has(input:focus-visible){outline:2px solid var(--gold-deep);outline-offset:2px}
+.plan .nm{display:flex;justify-content:space-between;align-items:center;gap:6px;font-weight:700;font-size:15px}
+.plan .nm span{padding:1px 8px;border-radius:999px;background:var(--gold-tint);color:var(--gold-deep);font-size:11px;font-weight:600;white-space:nowrap}
+.plan .fit{color:#5d584f;font-size:12.5px;line-height:1.5}
+.plan .prow{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 10px;margin-top:2px}
+.plan .sv{font-style:normal;color:var(--save);font-weight:700;font-size:13px;white-space:nowrap}
+.plan .pr{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.plan .pr s{color:var(--p-faint);font-size:14px}
+.plan .pr b{font:700 26px/1.1 var(--sans);font-variant-numeric:tabular-nums}
+.plan .pr i{font-style:normal;color:var(--p-muted);font-size:12.5px}
+.plan .was{color:var(--p-muted);font-size:12px}
+.plan .was em{font-style:normal;color:var(--save);font-weight:600}
+.plan .cr{color:#5d584f;font-size:12.5px}
+.plan .cr.gd{color:var(--gold-deep)}
+.plan .cr.no{color:var(--p-faint)}
+.pay{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pay label{position:relative;display:grid;gap:1px;padding:9px 12px;border:1px solid var(--p-line2);border-radius:10px;font-size:13px;cursor:pointer}
+.pay label small{color:var(--p-faint);font-size:11.5px}
+.pay input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}
+.pay label:has(input:checked){border-color:var(--ink);background:#faf9f6}
+.cta{display:grid;gap:2px;justify-items:center;width:100%;padding:13px 16px;border:0;border-radius:14px;cursor:pointer;color:#fff7e6;background:linear-gradient(180deg,#2c2822,var(--ink));box-shadow:inset 0 1px 0 rgba(233,194,122,.35),0 8px 20px rgba(27,25,22,.25)}
+.cta b{font:700 16.5px/1.3 var(--sans)}
+.cta span{font-size:12.5px;color:var(--gold-hi)}
+.cta.gold{color:#2a1d06;background:linear-gradient(180deg,var(--gold-hi),var(--gold));box-shadow:0 8px 20px rgba(168,114,28,.25)}
+.cta.gold span{color:#5a3e0c}
+.trust{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;color:var(--p-muted);font-size:12px}
+.trust span{display:flex;gap:5px;align-items:center}
+.fine{margin:0;color:var(--p-faint);font-size:11.5px;line-height:1.6;text-align:center}
+.later{align-self:center;justify-self:center;padding:4px 8px;border:0;background:none;color:var(--p-muted);font-size:13px;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.chip{display:inline-flex;padding:0 6px;border:1px dashed #c9a34e;border-radius:5px;background:#fffaf0;color:#8a5a00;font:500 10.5px/1.7 var(--mono);vertical-align:middle;white-space:nowrap}
+.frule{margin:-2px 0 0;padding:10px 12px;border-radius:10px;background:var(--gold-tint);color:#6a4a12;font-size:12.5px;line-height:1.6}
+.cmp{display:grid;gap:8px;padding:12px 14px;border:1px solid var(--p-line2);border-radius:14px;background:#fcfbf8}
+.cmp-h{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 10px;align-items:baseline}
+.cmp-h b{font-size:14px}.cmp-h span{color:var(--save);font-size:12.5px;font-weight:600}
+.cmp table{width:100%;border-collapse:collapse;font-size:12.5px}
+.cmp th{font-weight:600;text-align:left;color:var(--p-muted);padding:2px 6px 6px}
+.cmp td{padding:5px 6px;border-top:1px solid var(--p-line);vertical-align:top}
+.cmp td:first-child{color:#5d584f}
+.cmp td em{font-style:normal;color:var(--save);font-weight:600}
+.cmp td i{font-style:normal;font-size:10.5px;color:var(--gold-deep)}
+.cyes{color:var(--save);font-weight:700}.cno{color:var(--p-faint)}
+.fu{display:grid;gap:8px;padding:14px;border-radius:14px;color:#efe7d6;background:radial-gradient(110% 80% at 100% 0%,rgba(200,150,62,.28),transparent 60%),linear-gradient(160deg,var(--ink-2),var(--ink))}
+.fu .hd{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:700;font-size:14.5px;color:#fff3dc}
+.fu .hd span{padding:1px 8px;border-radius:999px;background:rgba(233,194,122,.2);color:var(--gold-hi);font-size:11px;font-weight:600}
+.fu ul{margin:0;padding:0;list-style:none;display:grid;gap:6px;font-size:12.5px;color:#d9ccb2}
+.fu li{display:flex;gap:7px}
+.fu li b{color:#fff3dc;font-weight:600}
+
+/* narrow modals */
+.tu{display:grid;gap:15px;padding:28px 28px 22px}
+.tu h2{margin:0;font:700 22px/1.3 var(--sans);text-wrap:balance}
+.tu .lede{margin:-8px 0 0;color:var(--p-muted);font-size:13.5px}
+.saved{display:grid;gap:10px;padding:16px;border-radius:14px;background:var(--ink);color:#eadfca}
+.saved .row{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:#cfc3ab}
+.saved .row b{color:var(--gold-hi);font:600 13px var(--mono)}
+.bar{height:8px;border-radius:999px;background:rgba(255,255,255,.1);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--gold),var(--gold-hi))}
+.saved ul{margin:0;padding:0;list-style:none;display:grid;gap:5px;font-size:12.5px}
+.saved li{display:flex;gap:8px}
+.saved li.d{color:#b6e2bd}.saved li.n{color:#8f846f}
+.mini{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mini label{position:relative;display:grid;gap:2px;padding:12px;border:1.5px solid var(--p-line2);border-radius:12px;cursor:pointer}
+.mini input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}
+.mini label:has(input:checked){border-color:var(--ink);box-shadow:0 0 0 3px rgba(27,25,22,.08)}
+.mini b{font-size:15px}
+.mini .p{font:700 20px var(--sans);font-variant-numeric:tabular-nums}
+.mini .p s{font-size:13px;font-weight:400;color:var(--p-faint);margin-right:4px}
+.mini small{color:var(--p-muted);font-size:12px;line-height:1.5}
+.packs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.pk{position:relative;display:grid;gap:2px;padding:12px;border:1.5px solid var(--p-line2);border-radius:12px;cursor:pointer;text-align:center}
+.pk input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}
+.pk:has(input:checked){border-color:var(--ink);box-shadow:0 0 0 3px rgba(27,25,22,.08)}
+.pk b{font:700 19px var(--sans);font-variant-numeric:tabular-nums}
+.pk s{color:var(--p-faint);font-size:12px}
+.pk span{color:var(--p-muted);font-size:12px}
+.bal{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-radius:12px;background:#f7f6f2;font-size:13px;color:var(--p-muted)}
+.bal b{color:var(--p-text);font:700 20px var(--sans)}
+.done{display:grid;justify-items:center;gap:8px;text-align:center;padding:10px 0}
+.done .ok{display:grid;place-items:center;width:48px;height:48px;border-radius:50%;background:var(--ok-bg);color:var(--ok)}
+.done h3{margin:0;font:700 20px var(--sans)}
+.done p{margin:0;color:var(--p-muted);font-size:13.5px;max-width:42ch}
+.profs{display:grid;gap:6px}
+.prof{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--p-line);border-radius:10px;font-size:13.5px}
+.prof small{color:var(--p-faint);font-size:12px}
+.prof .plats{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+.prof .plats span{padding:0 6px;border-radius:5px;background:#f3f1ec;color:#5d584f;font-size:11px}
+.slotbar{display:flex;gap:4px}
+.slotbar i{flex:1;height:6px;border-radius:3px;background:var(--ink)}
+.opt{display:grid;gap:4px;padding:14px;border:1.5px solid var(--ink);border-radius:14px}
+.opt .t{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-weight:700;font-size:15px}
+.opt p{margin:0;color:var(--p-muted);font-size:13px}
+.form{display:grid;gap:10px}
+.form label{display:grid;gap:4px;font-size:13px;color:#4d4941}
+.form input,.form select,.form textarea{width:100%;padding:9px 11px;border:1px solid var(--p-line2);border-radius:10px;background:#fff;color:var(--p-text);font-size:14px}
+.form textarea{min-height:80px;resize:vertical}
+.form .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.form .fh{margin:6px 0 -2px;padding-top:8px;border-top:1px solid var(--p-line);font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--gold-deep)}
+.form .fh:first-child{border-top:0;padding-top:0;margin-top:0}
+.form .lt{display:block}
+.form .share{margin:0;padding:10px 12px;border-radius:10px;background:#f6f3ec;color:#5d584f;font-size:12.5px;line-height:1.6}
+.form i.rq{font-style:normal;color:#c0533a}
+.form i.op{font-style:normal;font-size:11px;font-weight:400;color:var(--p-faint)}
+@container (max-width:480px){.form .two{grid-template-columns:1fr}}
+.form .ck{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;color:#5d584f}
+.form .ck input{width:auto;margin-top:3px}
+.expert{display:flex;gap:12px;align-items:center;padding:12px;border-radius:12px;background:#f7f6f2}
+.expert i{flex:none;display:grid;place-items:center;width:44px;height:44px;border-radius:50%;background:var(--ink);color:var(--gold-hi);font:700 16px var(--serif);font-style:normal}
+.expert div{min-width:0;font-size:13px;color:#5d584f}
+.expert b{display:block;color:var(--p-text);font-size:14px}
+.cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.col{display:grid;gap:6px;padding:10px;border:1px solid rgba(233,194,122,.22);border-radius:10px;background:rgba(255,255,255,.03);font-size:12px}
+.col b{font:600 11px var(--mono);color:var(--gold-hi);letter-spacing:.06em}
+.col i{display:block;height:6px;border-radius:3px;background:rgba(255,255,255,.12)}
+.col i.s{width:70%}.col i.m{width:88%}
+.col.pick{border-color:var(--gold-hi);box-shadow:0 0 0 1px var(--gold-hi) inset}
+.demo2{display:grid;gap:10px}
+.dq{display:flex;gap:10px;align-items:flex-start}
+.dq span{flex:none;padding:2px 8px;border-radius:999px;background:#efe7d6;color:var(--ink);font-size:11.5px;font-weight:600}
+.dq p{margin:0;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.07);color:#fff2d6;font-size:13.5px}
+.dstep{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--gold-hi)}
+.dstep i{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;border:1px solid rgba(233,194,122,.5);font:600 11px var(--mono);font-style:normal}
+.dcols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.dc{padding:10px;border:1px solid rgba(233,194,122,.2);border-radius:10px;background:rgba(255,255,255,.03);animation:dIn .5s ease both}
+.dc:nth-child(2){animation-delay:.25s}.dc:nth-child(3){animation-delay:.5s}
+.dc b{display:block;font:600 11px var(--mono);color:var(--gold-hi);margin-bottom:4px}
+.dc p{margin:0;color:#e6dcc8;font-size:12px;line-height:1.55}
+.dcrit{display:grid;gap:6px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);font-size:12.5px;color:#d9ccb2;animation:dIn .5s .8s ease both}
+.dcrit p{margin:0}.dcrit b{color:#fff2d6}
+.dfinal{padding:12px;border-radius:12px;border:1px solid var(--gold-hi);background:rgba(233,194,122,.1);color:#fff2d6;font-size:13px;line-height:1.65;animation:dIn .5s 1.1s ease both}
+.dfinal p{margin:0}
+.rvlink,.rvlink2{all:unset;cursor:pointer}
+.fu .rvlink{color:#fff3dc;font-weight:700;font-size:14.5px}.fu .rvlink:hover{color:var(--gold-hi)}
+.plan .rvlink{display:block;width:fit-content;text-decoration:underline;text-decoration-color:rgba(176,122,42,.4);text-underline-offset:3px}
+.rvlink2{color:inherit;text-decoration:underline;text-underline-offset:3px;text-decoration-color:rgba(0,0,0,.25)}
+.rvlink3{color:inherit;text-decoration:underline;text-underline-offset:3px;text-decoration-color:rgba(233,194,122,.5)}
+.rf{display:grid;gap:0;justify-items:stretch}
+.rf-n{padding:10px 12px;border-radius:12px;border:1px solid rgba(233,194,122,.22);background:rgba(255,255,255,.04);color:#e6dcc8;font-size:12.5px;line-height:1.55;animation:dIn .5s ease both}
+.rf-n b{display:block;color:#fff2d6;font-size:13px}
+.rf-n i{display:block;font:500 10.5px var(--mono);font-style:normal;color:var(--gold-hi);margin:1px 0 4px}
+.rf-n p{margin:0}.rf-n small{display:block;margin-top:4px;color:#a99d85;font-size:11.5px}
+.rf-q{display:grid;gap:2px;color:#fff2d6;font-size:13.5px}
+.rf-q span{width:fit-content;padding:1px 8px;border-radius:999px;background:#efe7d6;color:var(--ink);font-size:11px;font-weight:600}
+.rf-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.rf-m{border-top:3px solid rgba(233,194,122,.55)}
+.rf-row .rf-m:nth-child(2){border-top-color:#7fb7d9}.rf-row .rf-m:nth-child(3){border-top-color:#8fd1a2}
+.rf-c{background:rgba(233,120,90,.08);border-color:rgba(233,140,110,.3)}
+.rf-c b{color:#f3b9a6;font-size:12px}
+.rf-out{border-color:var(--gold-hi);background:rgba(233,194,122,.12);animation-delay:1.6s}
+.rf-out b{color:var(--gold-hi)}
+.rf-ar{position:relative;display:flex;justify-content:center;padding:18px 0 14px}
+.rf-ar::before{content:"";position:absolute;left:50%;top:2px;bottom:2px;width:2px;background:rgba(233,194,122,.35)}
+.rf-ar::after{content:"";position:absolute;left:calc(50% - 5px);bottom:0;border:5px solid transparent;border-top:7px solid rgba(233,194,122,.6)}
+.rf-ar span{position:relative;z-index:1;padding:2px 10px;border-radius:999px;background:#2a2620;border:1px solid rgba(233,194,122,.3);color:var(--gold-hi);font-size:11.5px}
+.rvs{display:grid;grid-template-columns:1fr;gap:10px;margin-top:4px}
+.rvs div{display:grid;gap:4px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);font-size:12px;line-height:1.6;color:#b7ab93}
+.rvs b{color:#d9ccb2;font-size:13px}
+.rvs .us{gap:10px;padding:16px 16px 14px}
+.rvs .us p{margin:0;font-size:12.5px;line-height:1.75}
+.rvs .us em{font-style:normal;color:#fff2d6;font-weight:600}
+.rvs .hook{display:grid;gap:6px;margin-top:2px;padding:12px 14px;border-left:3px solid var(--gold-hi);border-radius:0 10px 10px 0;background:rgba(233,194,122,.1)}
+.rvs .hook .hq{color:#fff6e4;font-size:14.5px;font-weight:700;line-height:1.5}
+.rvs .hook .hc{color:var(--gold-hi);font-weight:600}
+.rvs .us{border-color:var(--gold-hi);background:rgba(233,194,122,.1);color:#e6dcc8}.rvs .us b{color:var(--gold-hi)}
+@container (max-width:600px){.rf-row{grid-template-columns:1fr}}
+@keyframes dIn{from{opacity:.25;transform:translateY(4px)}to{opacity:1;transform:none}}
+@container (max-width:600px){.dcols{grid-template-columns:1fr}}
+.merge{padding:10px 12px;border-radius:10px;background:rgba(233,194,122,.12);color:#fff0d2;font-size:12.5px}
+
+/* pricing page */
+.pp{position:absolute;inset:0;overflow:auto;background:#fff}
+.pp .in{max-width:1140px;margin:0 auto;padding:34px 32px 56px;display:grid;gap:28px}
+.hero{display:grid;gap:14px;justify-items:center;text-align:center}
+.hero .eb{font:500 11px var(--mono);letter-spacing:.14em;color:var(--gold-deep);text-transform:uppercase}
+.hero h2{margin:0;font:900 40px/1.2 var(--serif);white-space:nowrap}
+.hero .h2line{margin:-4px 0 0;font:700 22px/1.4 var(--sans);color:var(--gold-deep);max-width:none}
+.hero p{margin:0;color:#5d584f;font-size:15.5px;max-width:58ch;line-height:1.75}
+.hero .pts{display:flex;flex-wrap:wrap;justify-content:center;gap:8px 10px}
+.hero .pts span{display:flex;gap:6px;align-items:center;padding:6px 12px;border-radius:999px;background:#f7f6f2;font-size:13px;color:#3d3a34}
+.pp .bill{width:min(400px,100%);justify-self:center}
+.tiers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:stretch}
+.tier{display:flex;flex-direction:column;gap:11px;padding:22px;border:1px solid var(--p-line);border-radius:18px;background:#fff;min-width:0}
+.tier.feat{color:#efe7d6;border-color:transparent;background:radial-gradient(120% 60% at 100% 0%,rgba(200,150,62,.25),transparent 60%),linear-gradient(160deg,var(--ink-2),var(--ink))}
+.tier h3{margin:0;display:flex;justify-content:space-between;align-items:center;gap:8px;font:700 18px var(--sans)}
+.tier h3 span{padding:1px 9px;border-radius:999px;font-size:11px;font-weight:600;background:var(--gold-tint);color:var(--gold-deep);white-space:nowrap}
+.tier.feat h3 span{background:rgba(233,194,122,.18);color:var(--gold-hi)}
+.tier .who{margin:-4px 0 0;font-size:13px;opacity:.8;line-height:1.5}
+.tier .prow{display:flex;align-items:baseline;justify-content:space-between;gap:4px 10px;flex-wrap:wrap}
+.tier .sv{font-style:normal;color:#2e9a4c;font-weight:700;font-size:13.5px;white-space:nowrap}
+.tier.feat .sv{color:#8fe0a5}
+.tier .pr{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.tier .pr s{font-size:16px;opacity:.55}
+.tier .pr b{font:700 34px/1 var(--sans);font-variant-numeric:tabular-nums}
+.tier .pr i{font-style:normal;font-size:13px;opacity:.7}
+.tier .was{font-size:12.5px;opacity:.85}
+.tier .was em{font-style:normal;color:#2e9a4c;font-weight:600}
+.tier.feat .was em{color:#8fe0a5}
+.tier h4{margin:6px 0 0;font:600 11.5px var(--mono);letter-spacing:.08em;opacity:.6}
+.tier ul{margin:0;padding:0;list-style:none;display:grid;gap:7px;font-size:13.5px}
+.tier li{display:flex;gap:8px;align-items:flex-start}
+.tier li svg{flex:none;margin-top:4px}
+.tier li.no{opacity:.45}
+.tier li .soon{margin-left:4px;padding:0 5px;border-radius:4px;font-size:10.5px;background:rgba(168,114,28,.14);color:var(--gold-deep)}
+.tier.feat li .soon{background:rgba(233,194,122,.18);color:var(--gold-hi)}
+.tier .btn{margin-top:auto;padding:11px;border-radius:11px;border:1px solid var(--p-line2);background:#fff;color:var(--p-text);font-weight:600;cursor:pointer}
+.tier.feat .btn{border:0;background:linear-gradient(180deg,var(--gold-hi),var(--gold));color:#2a1d06}
+.fsec{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:22px;padding:26px;border-radius:20px;color:#efe7d6;background:radial-gradient(120% 70% at 0% 0%,rgba(200,150,62,.25),transparent 60%),linear-gradient(160deg,var(--ink-2),var(--ink))}
+.fsec h3{margin:0;font:900 26px/1.3 var(--serif);color:#fff6e4}
+.fsec p{margin:0;color:#cfc3ab;font-size:14px;line-height:1.75}
+.fsec .eb{font:500 11px var(--mono);letter-spacing:.14em;color:var(--gold-hi)}
+.fsec ul{margin:0;padding:0;list-style:none;display:grid;gap:8px;font-size:13.5px}
+.fsec li{display:flex;gap:8px}
+.fsec li b{color:#fff2d6}
+.flow{display:grid;gap:10px}
+.flow ol{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;counter-reset:f}
+.flow li{position:relative;display:grid;gap:4px;padding:12px;border:1px solid rgba(233,194,122,.22);border-radius:12px;background:rgba(255,255,255,.03);font-size:12.5px;color:#d9ccb2;line-height:1.5}
+.flow li::before{counter-increment:f;content:counter(f);font:600 11px var(--mono);color:var(--gold)}
+.flow li b{color:#fff2d6;font-size:13.5px}
+.flow .anim{display:flex;gap:8px;align-items:center;padding:10px 12px;border-radius:10px;border:1px dashed rgba(233,194,122,.35);font-size:12px;color:var(--gold-hi)}
+.vs{display:grid;grid-template-columns:1fr 1fr;gap:1px;overflow:hidden;border:1px solid var(--p-line);border-radius:16px;background:var(--p-line)}
+.vs div{padding:16px 18px;background:#fff;display:grid;gap:4px}
+.vs b{font-size:20px;font-variant-numeric:tabular-nums}
+.vs span{color:var(--p-muted);font-size:13px}
+.vs .us{background:var(--gold-tint)}
+.vs .us b{color:var(--save)}
+.src{margin:-16px 0 0;color:var(--p-faint);font-size:11.5px;text-align:center}
+.why{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.why div{display:grid;gap:6px;align-content:start;padding:18px;border:1px solid var(--p-line);border-radius:16px}
+.why b{font-size:15px}
+.why span{color:var(--p-muted);font-size:13px;line-height:1.65}
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.fdr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;padding:28px;border-radius:20px;background:linear-gradient(135deg,#fff6e3,#fffdf8 60%);border:1px solid #efd9a6}
+.fdr .eb{font:500 11px var(--mono);letter-spacing:.14em;color:var(--gold-deep)}
+.fdr h3{margin:8px 0 12px;font:900 24px/1.35 var(--serif);text-wrap:balance}
+.fdr .letter{margin:0;padding:18px 20px;border-left:3px solid var(--gold);background:#fff;border-radius:0 12px 12px 0;font:600 15px/1.85 var(--serif);color:#3d3a34}
+.fdr .letter .tbd{display:inline-block;margin:0 0 8px;padding:0 6px;border:1px dashed #c9a34e;border-radius:5px;background:#fffaf0;color:#8a5a00;font:500 11px var(--mono)}
+.fdr .letter span{display:block;margin-top:8px;font:400 13px var(--sans);color:var(--p-muted)}
+.fdr ul{margin:0;padding:0;list-style:none;display:grid;gap:7px;font-size:13.5px}
+.fdr li{display:flex;gap:8px;align-items:flex-start}
+.fdr li svg{flex:none;margin-top:4px}
+.fprice s{margin-right:8px;color:var(--p-faint);font-size:18px}
+.fprice b{font:700 34px var(--sans)}
+.fprice span{margin-left:6px;color:var(--p-muted);font-size:13px}
+.fstat{display:grid;gap:6px;font:500 12.5px var(--mono);color:#6a4a12}
+.meter2{height:8px;border-radius:999px;background:#f2dfb5;overflow:hidden}
+.meter2 i{display:block;height:100%;background:linear-gradient(90deg,var(--gold-deep),var(--gold))}
+.feed{padding:10px 12px !important;border-radius:10px;background:#fff;font-size:12.5px !important;color:#5d584f}
+.fnote{margin:-6px 0 0;color:var(--p-faint);font-size:11.5px}
+.fdr .btn{display:grid;gap:2px;justify-items:center;padding:13px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--gold-hi),var(--gold));color:#2a1d06;cursor:pointer;box-shadow:0 8px 20px rgba(168,114,28,.25)}
+.fdr .btn b{font-size:16px}.fdr .btn span{font-size:12px;color:#5a3e0c}
+.faq details p b{color:var(--p-text)}
+.tbc{display:inline-flex;margin-left:6px;padding:0 6px;border:1px dashed #c9a34e;border-radius:5px;background:#fffaf0;color:#8a5a00;font:500 10.5px/1.7 var(--mono)}
+@container (max-width:600px){.fdr{grid-template-columns:1fr;padding:18px}}
+.big{display:flex;flex-direction:column;gap:14px;padding:26px;border-radius:20px;min-width:0}
+.big.studio{background:linear-gradient(160deg,#20303a,#14191d);color:#e6eef2}
+.big.consult{background:linear-gradient(160deg,#3a2a20,#1d1611);color:#f2ebe4}
+.big .eb{font:500 11px var(--mono);letter-spacing:.14em;opacity:.7}
+.big h3{margin:0;font:900 24px/1.3 var(--serif)}
+.big .lead2{margin:-4px 0 0;font-size:14px;opacity:.82;line-height:1.7}
+.big .who{display:grid;gap:8px}
+.big .who div{padding:12px 14px;border-radius:12px;background:rgba(255,255,255,.06);font-size:13px;line-height:1.65}
+.big .who div b{display:block;font-size:13.5px;margin-bottom:2px}
+.big ul{margin:0;padding:0;list-style:none;display:grid;gap:8px;font-size:13.5px}
+.big li{display:flex;gap:8px;align-items:flex-start}
+.big li svg{flex:none;margin-top:4px}
+.big .btn{margin-top:auto;padding:12px 18px;border-radius:12px;border:0;font-weight:700;cursor:pointer}
+.big.studio .btn{background:#e6eef2;color:#14191d}
+.big.consult .btn{background:var(--gold-hi);color:#2a1d06}
+.big .note{font-size:12px;opacity:.65}
+.faq{display:grid;gap:8px}
+.faq h3{margin:0 0 4px;font:700 18px var(--sans)}
+.faq details{border:1px solid var(--p-line);border-radius:12px}
+.faq summary{padding:12px 16px;cursor:pointer;font-size:14px}
+.faq details p{margin:0;padding:0 16px 14px;color:#5d584f;font-size:13.5px}
+
+@container (max-width:600px){
+  .scrim{place-items:end stretch;padding:0}
+  .dlg,.dlg.narrow{display:block;width:100%;height:auto;max-height:calc(100% - 24px);overflow-y:auto;border-radius:20px 20px 0 0}
+  .dossier{padding:22px 18px 16px}
+  .d-title{font-size:22px}
+  .co{padding:18px 16px;gap:12px}
+  .co h2{font-size:20px}
+  .tu{padding:22px 16px 18px}
+  .pp .in{padding:24px 16px 40px}
+  .hero h2{font-size:24px;white-space:normal}
+  .hero .h2line{font-size:17px}
+  .tiers,.fsec,.vs,.why,.duo{grid-template-columns:1fr}
+  .rf-row,.rvs{grid-template-columns:1fr}
+  .memgrid{grid-template-columns:1fr 1fr}
+}
+
+/* notes */
+.notes{margin-top:34px;display:grid;gap:28px}
+.notes h2{margin:0 0 10px;font:700 18px var(--sans)}
+.lead{margin:0 0 10px;color:var(--muted);max-width:80ch}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.tbl table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:680px}
+.tbl th,.tbl td{padding:10px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.tbl th{color:var(--muted);font-weight:500;font-size:12.5px}
+.tbl tr:last-child td{border-bottom:0}
+.rules{margin:0;padding-left:18px;display:grid;gap:4px;font-size:13.5px;max-width:86ch}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Graylum 付费墙 v2</h1>
+      <p><b>唯一版本来源</b>（取代设计窗口的定稿 QLdBcaYM…，那份留作历史）。八个触发场景，价格都是 Owner 定的实际售价；只有注册赠送积分和 $9.90 以外的积分包档位还是占位。标"待定"的是本轮新提的方案，等 Owner 确认。</p>
+    </div>
+    <span class="ver">唯一版本 v21 · 更新于 2026-10-04 · 不含产品代码</span>
+  </header>
+
+  <div class="controls">
+    <div class="tabs" role="tablist" aria-label="场景" id="tabs"></div>
+    <div class="seg" role="group" aria-label="设备">
+      <button type="button" id="dev-d" aria-pressed="true">电脑</button>
+      <button type="button" id="dev-m" aria-pressed="false">手机</button>
+    </div>
+  </div>
+  <div class="demos">
+    <label><input type="checkbox" id="opt-new" checked> 演示：这个账号从没买过 Gold（显示首月 $49）</label>
+    <label>创始名额：<select id="opt-slots"><option value="50">刚开放，还没人加入</option><option value="37" selected>已加入 13 位</option><option value="0">50 个已售罄</option></select></label>
+    <label><input type="checkbox" id="opt-review"> 演示：上线时"报告评审"未开放</label>
+    <label>场景 3 的会员：<select id="opt-tier"><option value="pro">Pro（积分包 9.5 折）</option><option value="gold">Gold（积分包 9 折）</option></select></label>
+    <label>场景 7 的用户：<select id="opt-who"><option value="free">免费（1/1）</option><option value="pro" selected>Pro（3/3）</option><option value="gold">Gold（6/6）</option></select></label>
+  </div>
+  <p class="sceneline" id="sceneline"></p>
+  <div class="stage" id="stage"><div class="holder" id="holder"><div class="frame d" id="frame"></div></div></div>
+
+  <section class="notes">
+    <div>
+      <h2>全部已定（唯一版本）</h2>
+      <div class="tbl"><table>
+        <thead><tr><th>项目</th><th>已定内容</th></tr></thead>
+        <tbody>
+          <tr><td>价格</td><td>月付 Pro $29、Gold $69；年付 Pro $279（月付 × 12 = $348 的 8 折，省 $69）、Gold $621（$828 的 7.5 折，省 $207）。只显示美元。年付标签：创始名额没卖完、且用银行卡付款时写"最高省 40%"（创始价 $496 对比 Gold 月付 × 12 的 $828），卖完后写"最高省 25%"。</td></tr>
+          <tr><td>积分</td><td>每月 Pro 3,480、Gold 8,970；年付每月积分和月付相同，按月发放；积分永不过期。</td></tr>
+          <tr><td>Gold 首月 $49</td><td>只给任何渠道都没买过 Gold 的账号（年付、创始会员也算买过）；银行卡和微信都适用；Pro 没有首月价，也不写退款承诺（Owner：引导用户升 Gold）；不和年付、创始会员叠加。</td></tr>
+          <tr><td>创始会员</td><td>Gold 6 折 $496/年（月付 × 12 = $828 的 6 折），第一年起；限 50 名，显示真实剩余名额；只限银行卡订阅；连续续费不中断就一直 6 折，取消或续费失败后再开通按正常价。卖完后模块消失，Gold 年付回到 $621。</td></tr>
+          <tr><td>积分包</td><td>只卖给会员；每 1 美元 100 积分，最小 $9.90；Pro 会员 9.5 折，Gold 会员 9 折（10-04 新定）。买多少次都不提示升级。</td></tr>
+          <tr><td>客服响应（10-04 新定）</td><td>免费 48 小时内、Pro 24 小时内、Gold 2 小时内。</td></tr>
+          <tr><td>新功能内测（10-04 新定）</td><td>Gold 会员优先体验内测中的新功能。</td></tr>
+          <tr><td>微信一次性</td><td>和银行卡同价（1 个月 $29 / $69，第一次买 Gold $49；1 年 $279 / $621），不自动续费，不参加创始会员。</td></tr>
+          <tr><td>付款选择</td><td>弹窗里完整展示月付/年付、Pro/Gold、银行卡/微信；每个方案写一句"适合谁"；默认选中月付；按钮旁写首期价、续费价、周期和取消方式。</td></tr>
+          <tr><td>对比文案</td><td>"雇佣一位社交媒体顾问：$2,000 – $10,000 / 月"对比"雇佣 Graylum AI 社交媒体策略师：$29 / 月起"。来源 HawkSEM（2026-07-27），原文："if you're looking to have a consultant on retainer, you could expect to pay a fixed monthly rate of between $2,000 and $10,000 per month." 和 ChatGPT 的对比、FAQ 放在价格页，不放进弹窗。</td></tr>
+          <tr><td>多模型专家评审团</td><td>Gold 专属；"报告评审"跟随后台评审开关（D12），"多模型对比"跟随对比开关。价格页要放使用演示动画（开发时做）。</td></tr>
+          <tr><td>定位档案</td><td>免费 1 个、Pro 3 个、Gold 6 个。一个档案 = 一个品牌；每个平台挂 1 个账号，平台数不限；降级后超出额度的档案只读。</td></tr>
+          <tr><td>工作室版、真人专家咨询</td><td>价格页两张并排的大卡片，写买家关心的事。工作室版 10 个品牌、5 位成员起，上线时只放"联系我们"；专家咨询只做预约入口，Owner 本人做专家，线上远程会议 $300/小时起，会员不打折，咨询费用 Stripe 或线下收。</td></tr>
+          <tr><td>不做</td><td>7 天退款保证、假原价、会重置的倒计时、虚构的用户数或效果承诺。</td></tr>
+          <tr><td>仍是占位</td><td>注册赠送积分、积分包 $9.90 以外的档位。</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <div>
+      <h2>10-04 晚新定</h2>
+      <ul class="rules">
+        <li><b>多平台发布和数据监控</b>：海外平台以 Post for Me 支持的 9 个为准（TikTok、Instagram、YouTube、Facebook、X、Threads、LinkedIn、Pinterest、Bluesky），国内平台不支持发布和自己作品数据。Pro = 一键发布 + 自己作品近 30 天数据；Gold = 再加对标账号监控、90 天趋势、每周自动复盘。都按积分计费，不限条数；上线前接入（会改变 D1 的上线范围）。</li>
+        <li><b>客服</b>：免费 48 小时、Pro 24 小时、Gold 工作时间内 2 小时回复。</li>
+        <li><b>付费墙 Pro/Gold 对比</b>：方案卡下面加"Gold 比 Pro 多什么"表，和价格页一致；"适合谁"：Pro"刚起步、先专心做好 1 个账号"，Gold"布局多个平台、多个账号，需要多角度专业运营方案"；微信付款时年付标签为"最高省 25%"。</li>
+        <li><b>报告示例</b>：用"看看报告里写什么"三个页签（对标分析、运营手册、变现路径）加"查看完整示例报告"，正式版必须换成真实生成的脱敏报告。</li>
+        <li><b>真人专家诊断</b>：只面向已有数据积累、增长遇到瓶颈的账号，不引导新手；线上远程会议，与创始人 1 对 1；卡片和弹窗不写价格，写"预约咨询，免费询价"，按诊断内容报价（内部起步 $300/小时），会员不打折。</li>
+        <li><b>创始会员</b>：写明"为什么只有 50 个"；权益：享受终身 6 折续费 Gold（括号解释条件）、每年一次与创始人 1 对 1 账号诊断（不另收费，待 Owner 确认）、创始会员社群（即时反馈功能建议、优先技术支持）、徽章；加入动态显示脱敏邮箱（只显示同意公开的）；价格页 Gold 年付卡片在名额卖完前直接显示 <s>$828</s> $496。</li>
+        <li><b>工作室版</b>：标题"同时服务多个品牌，团队共享知识库"；10 个品牌档案起，5 个席位起，可按需增加席位。</li>
+        <li><b>FAQ</b>：18 条，按创始人口吻；平台、升级、客服、收据、注销已按 Owner 回答定稿，删掉了训练数据一条；只剩积分用量等实测。</li>
+        <li><b>Pro 升 Gold</b>：不退差价（订阅本质是更便宜的积分，Pro 当期积分已到账）；按 Gold 价格付款（第一次买 Gold 享首月 $49），再加 8,970 积分，Gold 权益立即生效。</li>
+      </ul>
+    </div>
+
+    <div>
+      <h2>实现说明</h2>
+      <ul class="rules">
+        <li><b>首月资格由服务端判断</b>：账号在任何渠道都没买过 Gold，就选 Waffo 的"新用户"产品（订阅用"前 N 期特价"），否则选正价产品；前端只显示服务端返回的价格。</li>
+        <li><b>创始名额由服务端计数</b>：剩余数实时读取；结账开始时先占，没付成功就释放；全额退款放回，主动取消或续费失败不放回。年付标签"最高省 40% / 25%"也按名额状态切换。</li>
+        <li><b>积分包折扣按会员档位</b>由服务端计算后返回，前端只显示。</li>
+        <li><b>只显示已上线的功能</b>：评审团两种模式、多平台发布、数据监控、资料库容量，都按后台开关显示；还没上线的功能不写进权益，或标"即将上线"。</li>
+        <li><b>报告预览</b>只显示用户已确认的信息和章节说明，不调用模型；"示例片段"必须来自演示账号并标明是示例。步骤和章节取自定位 Skill 2.6.0，实现时从当前绑定的 Skill 读取。</li>
+        <li><b>到期弹窗</b>的数字（档案、资料、复盘次数）从用户真实数据读取；某项为 0 就不显示那一项。</li>
+        <li><b>划线价只用真实价格</b>；不做假原价、不做重置倒计时；续费说明写在付款按钮旁边。</li>
+        <li><b>规划要同步的</b>：D4 改为评审团 Gold 专属；第 50 项删掉"Pro 买 2 次积分包提示 Gold"；积分包会员折扣、客服时效、内测优先；多平台发布和数据监控提前到上线前（会改变 D1 的上线范围）。</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+const S={scene:1,device:'d',bill:'month',plan:'pro',pay:'card',pack:0,paid:false,newGold:true,soldout:false,who:'pro',tier:'pro',reviewOff:false,sent:false,mini:'gold'};
+const $=s=>document.querySelector(s);
+const frame=$('#frame'),holder=$('#holder'),stage=$('#stage');
+let SLOTS_LEFT=37;const SLOTS=50;
+const PRICE={pro:{m:29,y:279,cr:3480,prof:3},gold:{m:69,y:621,cr:8970,prof:6}};
+const GOLD_INTRO=49,FOUNDER=496;
+const PACK_OFF={pro:.95,gold:.90};
+const money=n=>'$'+(Number.isInteger(n)?n.toLocaleString('en-US'):n.toFixed(2));
+const num=n=>n.toLocaleString('en-US');
+const founderOn=()=>SLOTS_LEFT>0;
+const yearBadge=()=>(founderOn()&&S.pay==='card')?'最高省 40%':'最高省 25%';
+
+function quote(k){
+  const p=PRICE[k],y=S.bill==='year',card=S.pay==='card';
+  if(!y){
+    if(k==='gold'&&S.newGold) return {now:GOLD_INTRO,was:p.m,per:card?'首月':'1 个月',tag:'新用户首月',note:card?`首月 ${money(GOLD_INTRO)}，之后每月 ${money(p.m)}`:`首次购买价，之后再买 ${money(p.m)}`,renew:card?`首月 ${money(GOLD_INTRO)}，之后每月 ${money(p.m)} 自动续费，可随时在个人中心取消。`:`一次性付款，不自动续费，1 个月后到期；首次购买价 ${money(GOLD_INTRO)}，再次购买 ${money(p.m)}。`};
+    return {now:p.m,was:null,per:card?'/ 月':'/ 1 个月',tag:null,note:'',renew:card?`每月自动续费 ${money(p.m)}，可随时在个人中心取消。`:'一次性付款，不自动续费，1 个月后到期。'};
+  }
+  if(k==='gold'&&card&&founderOn()) return {now:FOUNDER,was:p.m*12,per:'/ 年',tag:'创始会员 · 终身 6 折',note:`比按月付省 ${money(p.m*12-FOUNDER)} · 相当于 ${money(+(FOUNDER/12).toFixed(2))}/月`,renew:`首年 ${money(FOUNDER)}，之后每年自动续费，可随时在个人中心取消。`,founder:true};
+  return {now:p.y,was:p.m*12,per:card?'/ 年':'/ 1 年',tag:null,note:`省 ${money(p.m*12-p.y)} · 相当于 ${money(+(p.y/12).toFixed(2))}/月`,renew:card?`每年自动续费 ${money(p.y)}，可随时在个人中心取消。积分分 12 个月按月发放。`:'一次性付款，不自动续费，1 年后到期。积分分 12 个月按月发放。'};
+}
+
+const IC={
+  ck:(c='#2f6a3b')=>`<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5l3.2 3L13 4.5" stroke="${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  dash:()=>`<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`,
+  x:()=>`<svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`,
+  lock:()=>`<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2" stroke="currentColor" stroke-width="1.5"/></svg>`,
+  star:()=>`<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.8l1.8 3.9 4.2.5-3.1 2.9.8 4.2L8 11.2l-3.7 2.1.8-4.2L2 6.2l4.2-.5L8 1.8z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>`,
+};
+
+const SCENES=[
+  {id:1,short:'做完定位点生成报告',title:'免费用户做完定位，点"生成报告"',trig:'主付费墙。'},
+  {id:2,short:'定位中途积分用完',title:'免费用户做到第 2 步，赠送积分用完',trig:'让他知道前面的时间没白费、现在开通值得。'},
+  {id:3,short:'会员积分用完',title:'会员积分用完',trig:'客观提醒充值，不推销升级。'},
+  {id:4,short:'会员到期',title:'会员到期的用户回来',trig:'针对"有点用、但还在犹豫"的用户，给续费的理由。'},
+  {id:5,short:'价格页',title:'价格页',trig:'从落地页、个人中心、积分卡片进入。'},
+  {id:6,short:'点专家评审团',title:'免费或 Pro 用户点"多模型专家评审团"',trig:'评审团是 Gold 专属，这里只卖 Gold。'},
+  {id:7,short:'定位档案已满',title:'新建定位档案时额度已满',trig:'免费 1/1 推荐会员；Pro 3/3 推荐 Gold；Gold 6/6 引导到工作室版。'},
+  {id:8,short:'预约专家诊断',title:'预约真人专家诊断',trig:'只面向已有数据积累的账号；Owner 本人线下跟进。'},
+  {id:9,short:'工作室版咨询',title:'联系我们，了解工作室版',trig:'B 端团队留资；按团队规模报价。'},
+];
+
+const USER={acct:'小林的职场穿搭号',pos:'给 25–35 岁通勤女性的平价职场穿搭',mins:38};
+/* positioning Skill 2.6.0: 3 steps / 14 items; report = one-line conclusion + 13 sections, grouped for reading */
+const STEPS=[['了解你',7],['诊断与平台对标',3],['定位与执行方案',4]];
+const DELIVER=[
+  ['一句话定位','你是谁、做给谁看、凭什么让人关注','别再今天跟风这个、明天模仿那个：方向定下来，每条内容都在给同一批人留下印象'],
+  ['账号三件套','名称、头像、简介，复制过去就能用','陌生人点进主页 3 秒就知道"这个号对我有用"，愿意点关注'],
+  ['3–10 个对标账号','学谁、学他哪一点，避开哪些坑','照着已经跑通的人走，少花几个月自己试错'],
+  ['第一个 30 天行动表','每周发什么、怎么发、看哪个数据','每天打开就知道今天发什么，不用再对着空白页发愁'],
+  ['变现路线图','粉丝到多少做什么，一步步把流量变成收入','做了半年不知道怎么赚钱的坑，提前帮你绕开：每到一个粉丝量都知道下一步怎么变现'],
+];
+const GROUPS=[
+  ['看清你现在的位置','一句话结论 · 现状盘点 · 目标和可行性','这条路能不能走通、为什么、要多久','约 1,000 字'],
+  ['找准人和平台','受众 · 平台选择 · 对标账号分析','谁会看、谁会买；3–10 个对标账号拆给你看','约 2,400 字'],
+  ['把账号立起来','账号定位 · 账号三件套','名称、头像、简介直接能用','约 1,100 字'],
+  ['照着做就行','内容规划 · 运营手册 · 变现路径','每周做什么、怎么发、怎么一步步变现','约 5,700 字'],
+  ['提前避坑','合规提醒 · 见效时间 · 待验证的假设','哪些是风险、多久见效、先验证什么','约 1,250 字'],
+];
+
+function tabs(){
+  $('#tabs').innerHTML=SCENES.map(s=>`<button type="button" role="tab" id="tab-${s.id}" aria-selected="${S.scene===s.id}"><b>${s.id}</b>${s.short}</button>`).join('');
+  SCENES.forEach(s=>$('#tab-'+s.id).onclick=()=>{Object.assign(S,{scene:s.id,paid:false,sent:false,pickOpen:false,plan:s.id===6?'gold':'pro',bill:'month',pay:'card',pack:0,mini:'gold'});render();});
+  const sc=SCENES[S.scene-1];
+  $('#sceneline').innerHTML=`<strong>场景 ${sc.id}：${sc.title}</strong> · ${sc.trig}`;
+  $('#dev-d').setAttribute('aria-pressed',S.device==='d');$('#dev-m').setAttribute('aria-pressed',S.device==='m');
+}
+
+function appBg(){
+  return `<div class="app" inert><header class="g"><span class="brand"><i>G</i>Graylum</span><nav><span>首页</span><span>对话</span><span>资料库</span><span>个人中心</span></nav></header>
+  <div class="appbody"><div class="l"><div class="ghostline m"></div><div class="ghostline s"></div></div><div><div class="ghostline m"></div><div class="ghostline"></div><div class="ghostline s"></div></div><div class="r"><div class="ghostline s"></div><div class="ghostline m"></div></div></div></div>`;
+}
+
+function founderLine(){
+  return `<div class="founderline"><i>灰</i><span>这套定位方法由 Graylum 创始人设计，需要时可以预约他一对一聊。</span><button type="button" data-scene="8">预约咨询</button></div>`;
+}
+
+function sampleReport(){
+  const tabs=[['bench','对标账号分析'],['plan','运营手册 · 第 1 周'],['money','变现路径']];
+  const t=S.stab||'bench';
+  const body={
+    bench:`<table class="st"><thead><tr><th>对标账号</th><th>粉丝</th><th>近 30 天更新</th><th>播放中位数</th><th>为什么值得学</th></tr></thead><tbody>
+      <tr><td>@通勤衣橱 A</td><td>8.2 万</td><td>18 条</td><td>3.1 万</td><td>一衣多穿合集，收藏率高</td></tr>
+      <tr><td>@职场穿搭 B</td><td>2.4 万</td><td>12 条</td><td>1.2 万</td><td>同量级，3 个月起号</td></tr>
+      <tr><td>@平价搭配 C</td><td>45 万</td><td>9 条</td><td>12 万</td><td>头部，可学选题不学拍法</td></tr></tbody></table>
+      <p class="sw">结论：同类账号大多拍贵价单品，"300 元内一周 5 套"这个空位还没人占。先学 B 的更新节奏，再学 A 的合集形式。</p>`,
+    plan:`<table class="st"><thead><tr><th>时间</th><th>做什么</th><th>为什么</th></tr></thead><tbody>
+      <tr><td>周一</td><td>发"周一开会穿什么"，标题前 12 个字写场景</td><td>通勤人群周一搜索最集中</td></tr>
+      <tr><td>周三</td><td>发"一件衬衫 3 种穿法"</td><td>合集类内容更容易被收藏</td></tr>
+      <tr><td>周五</td><td>发本周 5 套汇总，结尾提问"下周想看什么"</td><td>用评论收集下周选题</td></tr>
+      <tr><td>周日</td><td>看收藏率，低于 3% 换封面模板</td><td>先改封面，选题不轻易换</td></tr></tbody></table>`,
+    money:`<ol class="sm"><li><b>0–1 万粉</b>：好物分享链接，验证粉丝愿不愿意按你的推荐买</li><li><b>1–5 万粉</b>：接平价服饰品牌合作，报价参考同量级账号</li><li><b>5 万粉以后</b>：自有选品或穿搭课程，前提是复购数据证明粉丝信任你</li></ol>
+      <p class="sw">每一阶段都写了进入下一阶段的条件，不到条件不建议提前做。</p>`}[t];
+  return `<div class="sample"><div class="sh"><b>看看报告里写什么</b><span class="tag">示例 · 正式版用真实脱敏报告替换</span></div>
+    <div class="stabs" role="tablist">${tabs.map(([k,n])=>`<button type="button" role="tab" data-stab="${k}" aria-selected="${t===k}">${n}</button>`).join('')}</div>
+    ${body}
+    <button type="button" class="slink" data-toast="原型：打开一份完整的脱敏示例报告（14 个部分）">查看一份完整示例报告 →</button></div>`;
+}
+function reportDossier(){
+  return `<aside class="dossier" aria-label="报告预览">
+    <div class="d-eb"><span>运营策略报告 · 草稿</span><span>${USER.acct}</span></div>
+    <h3 class="d-title">你的运营策略报告，只差最后一步</h3>
+    <p class="d-sub">你已经确认：<q>${USER.pos}</q>。花了 ${USER.mins} 分钟，3 步 14 项信息都在，免费保留、可以导出。策略的每一部分都会基于你的真实需求和信息做深度研究。</p>
+    <div class="mine3">${STEPS.map(([t,n])=>`<span>✓ ${t} · ${n} 项</span>`).join('')}</div>
+    <div class="grp"><div class="grp-h"><b>报告直接交给你 5 样东西，拿来就能用</b></div>
+      <p class="why1"><b>为什么问 ChatGPT 得不到？</b>通用 AI 凭记忆给你一份"谁都适用"的建议；Graylum 先去平台抓取真实账号和数据，再按资深策略师的方法论，只为你这个账号推导。</p>
+      <ol class="dlv">${DELIVER.map(([t,d,w],k)=>`<li><i>${k+1}</i><div><b>${t}</b><small>${d}</small><span class="only">${w}</span></div></li>`).join('')}</ol>
+    </div>
+  </aside>`;
+}
+
+function reviewFlow(){
+  const off=S.reviewOff;
+  const M=[['模型 A','开头抛场景："周一开会穿什么？"3 秒内亮出完整穿搭。'],
+           ['模型 B','先打价格字幕"300 元搞定一周"，再快剪 5 套。'],
+           ['模型 C','用"同事问我衬衫哪买的"制造好奇，第 2 秒给答案。']];
+  const C=[['模型 B 挑模型 A','场景抓得准，但没提"平价"，和你的定位脱节。'],
+           ['模型 C 挑模型 B','数字错了：你的资料写的是每周预算 500 元，不是 300。'],
+           ['模型 A 挑模型 C','新账号没人认识你，铺垫太长，观众 3 秒内看不到衣服就划走。']];
+  return `<div class="rf">
+    <div class="rf-n rf-q"><span>你</span>下周 3 条通勤穿搭视频，开头 3 秒怎么写？<small>连同你的定位、受众和预算资料一起发出</small></div>
+    <div class="rf-ar"><span>同时发给 3 个以上的顶级模型，各答各的，互相看不到</span></div>
+    <div class="rf-row">${M.map(([n,t],k)=>`<div class="rf-n rf-m" style="animation-delay:${.2+k*.2}s"><b>${n}</b><p>${t}</p></div>`).join('')}</div>
+    ${off?`<div class="rf-ar"><span>3 个答案并排放在一起，差别一眼看清</span></div>
+    <div class="rf-n rf-out"><b>你挑一个接着用</b><p>选中最合适的那个，接回主对话继续改。</p></div>`:`<div class="rf-ar"><span>交叉评审：每个模型专挑别人的错</span></div>
+    <div class="rf-row">${C.map(([n,t],k)=>`<div class="rf-n rf-c" style="animation-delay:${.9+k*.2}s"><b>${n}</b><p>${t}</p></div>`).join('')}</div>
+    <div class="rf-ar"><span>合并各自的长处，修掉被挑出的问题</span></div>
+    <div class="rf-n rf-out"><b>最终版 · 发现并修正 3 处问题</b><p>第 1 秒打字幕"500 元一周 5 套"+ 场景问题"周一开会穿什么"，同时出第一套穿搭。</p><small>保留模型 A 的场景、模型 B 的价格点（数字已改对），去掉模型 C 的长铺垫。</small></div>`}
+  </div>`;
+}
+function reviewVs(){
+  return `<div class="rvs"><div><b>让一个 AI 扮演 3 个专家</b><span>其实是同一个大脑换了三种口气：知识和盲点完全一样，它自己没发现的错，换个角色也发现不了，还容易互相附和。</span></div>
+    <div class="us"><b>多模型专家评审团</b>
+      <p>不同的顶级大模型，擅长和盲点各不相同。评审团先让每位专家<em>隔离作答</em>；再从不同角度<em>交叉挑刺</em>，多轮讨论直到达成共识。</p>
+      <p>交到你手上的，是被几位眼光毒辣的专家轮番挑过错、修正过的方案：<em>更贴近事实，策略更完整。</em></p>
+      <div class="hook"><p class="hq">你手上那份方案，经得起几位专家轮番挑刺吗？</p><p>一个模型看不见的漏洞，往往要等你照着做了几周才暴露。</p><p class="hc">不如现在就让评审团替你诊断一遍，避免浪费宝贵的时间和精力在错误的方向探索。</p></div></div></div>`;
+}
+function reviewLeft(){
+  return `<aside class="dossier" aria-label="多模型专家评审团演示"><div class="d-eb"><span>Gold 专属</span><span>功能演示</span></div>
+    <h3 class="d-title">重要的决定，别只听一个 AI 的</h3>
+    ${reviewFlow()}
+    ${reviewVs()}
+    <p class="d-foot" style="margin:0;color:#9d927c;font-size:11.5px">演示内容为示例，不代表真实回答；实际用哪几个模型由系统自动搭配。</p></aside>`;
+}
+function reviewMini(){
+  return `<div class="fu"><div class="hd"><button type="button" class="rvlink" data-review="1">多模型专家评审团 · 看它怎么工作 →</button><span>Gold 专属</span></div><ul>
+    ${S.reviewOff?'':`<li>✦ <span><b>报告评审</b>：几个顶尖模型分别挑你报告的问题，多轮讨论后给出修订后的最终版</span></li>`}
+    <li>✦ <span><b>多模型对比</b>：同一个问题让几个模型并排回答，挑最合适的那个接着用</span></li></ul></div>`;
+}
+function per1k(k){const q=quote(k);const cr=PRICE[k].cr*(S.bill==='year'?12:1);return q.now/cr*1000;}
+function compareBox(){
+  const gp=per1k('gold'),pp=per1k('pro');
+  const row=(t,a,b)=>`<tr><td>${t}</td><td>${a}</td><td>${b}</td></tr>`;
+  const no='<span class="cno">—</span>',yes='<span class="cyes">✓</span>';
+  return `<div class="cmp"><table><thead><tr><th>Pro 和 Gold 对比</th><th>Pro</th><th>Gold</th></tr></thead><tbody>
+    ${row('每月积分',num(PRICE.pro.cr),`<b>${num(PRICE.gold.cr)}</b>`)}
+    ${row('每 1,000 积分单价',money(+pp.toFixed(2)),`<b>${money(+gp.toFixed(2))}</b>`)}
+    ${row('定位档案','3 个','<b>6 个</b>')}
+    ${row('<button type="button" class="rvlink2" data-review="1">多模型专家评审团 →</button>',no,yes)}
+    ${row('对标账号监控、90 天趋势、每周自动复盘',no,yes+' <i>即将上线</i>')}
+    ${row('积分包','9.5 折','<b>9 折</b>')}
+    ${row('客服','24 小时内','<b>工作时间内 2 小时</b>')}
+    ${row('优先体验内测新功能',no,yes)}
+    </tbody></table></div>`;
+}
+const FEED=[['第 13 位','li***@gmail.com','美国','2 小时前'],['第 12 位','ma***@outlook.com','加拿大','昨天'],['第 11 位','ke***@qq.com','新加坡','2 天前']];
+function founderBar(){
+  if(!founderOn()) return '';
+  const joined=SLOTS-SLOTS_LEFT, pct=Math.round(joined/SLOTS*100);
+  const last=joined?FEED[0]:null;
+  return `<div class="founder"><span>${IC.star()}</span><span><b>Gold 创始会员 · 年付终身 6 折</b></span><span class="slots">${joined?`<span class="meter"><i style="width:${pct}%"></i></span>已加入 ${joined} 位 · 还剩 ${SLOTS_LEFT}`:'首批开放 · 共 50 个名额'}</span>${last?`<span class="flast">最近加入：${last[1]} · 来自${last[2]} · ${last[3]}</span>`:''}</div>`;
+}
+function founderSection(){
+  if(!founderOn()) return '';
+  const joined=SLOTS-SLOTS_LEFT;
+  const feed=joined?FEED.map(([n,e,c,t])=>`<li><b>${n}创始会员</b> · ${e} · 来自${c} · ${t}</li>`).join(''):'';
+  return `<div class="fdr"><div><span class="eb">GOLD 创始会员 · 只有 50 位</span><h3>前 50 位创始会员，和我一起决定 Graylum 下一步做什么</h3>
+      <p class="letter"><span class="tbd">寄语待定，后续再定稿</span>我做 Graylum，是想让每个认真做内容的人，不用再一个人摸索"下一条发什么"。<br><br>前 50 位创始会员，我会在社群里直接回你的消息；你提的功能需求，优先排进开发。<br><br>只开 50 位，是因为我一个人只照顾得过来这么多人，我不想答应了却做不到。名额满了就关闭，这个价格和这些权益不会再有。<span>—— Graylum 创始人</span></p></div>
+    <div style="display:grid;gap:12px;align-content:start">
+      <div class="fprice"><s>${money(PRICE.gold.m*12)}</s><b>${money(FOUNDER)}</b><span>/ 年</span></div>
+      <ul><li>${IC.ck('#2f6a3b')}<span><b>享受终身 6 折续费 Gold 会员</b>（只要连续续费不中断，每年都按当时 Gold 按月付 12 个月价格的 6 折续费，目前是 ${money(FOUNDER)}/年）</span></li>
+        <li>${IC.ck('#2f6a3b')}<span><b>在会员社群里直接和创始人沟通</b></span></li>
+        <li>${IC.ck('#2f6a3b')}<span><b>每半个月一次社群内部直播</b>：拆解会员的真实案例，聊社媒增长、出海变现和 AI 趋势，和一群同路人一起进步</span></li>
+        <li>${IC.ck('#2f6a3b')}<span><b>创始会员展示墙</b>：在 Graylum 官网展示你的社媒账号卡片或你正在做的产品，免费获得曝光和导流</span></li>
+        <li>${IC.ck('#2f6a3b')}<span>你的功能建议会直接送到开发团队优先评估，享受优先技术支持</span></li>
+        <li>${IC.ck('#2f6a3b')}<span>创始会员徽章，以及 Gold 的全部权益</span></li></ul>
+      <div class="fstat">${joined?`<div class="meter2"><i style="width:${Math.round(joined/SLOTS*100)}%"></i></div><span>已加入 ${joined} 位 · 还剩 ${SLOTS_LEFT} 位</span>`:'<span>首批开放 · 共 50 个名额</span>'}</div>
+      ${feed?`<ul class="feed">${feed}</ul><p class="fnote">只显示同意公开的会员，邮箱已脱敏。</p>`:''}
+      <button class="btn" type="button" data-founder="1"><b>锁定终身 6 折 · ${money(FOUNDER)}/年</b><span>${joined?`只剩 ${SLOTS_LEFT} 个名额`:'首批 50 个名额'}，满了就关闭</span></button>
+    </div></div>`;
+}
+const FIT={pro:'适合刚起步、先专心做好 1 个账号的人',gold:'适合布局多个平台、多个账号，需要多角度专业运营方案的人'};
+function planCard(k){
+  const q=quote(k),p=PRICE[k],y=S.bill==='year';
+  const save=y?(q.was?`比按月付省 ${money(q.was-q.now)}`:''):(q.tag==='新用户首月'?`首月省 ${money(q.was-q.now)}`:'');
+  const sub=y?`相当于 ${money(+(q.now/12).toFixed(2))}/月`:(q.tag==='新用户首月'?`首月 ${money(GOLD_INTRO)}，之后每月 ${money(p.m)}`:'');
+  return `<label class="plan"><input type="radio" name="plan" id="pl-${k}" value="${k}" ${S.plan===k?'checked':''}>
+    <span class="nm">${k==='pro'?'Pro':'Gold'}${q.tag?`<span>${q.tag}</span>`:(k==='gold'?'<span>功能最全</span>':'')}</span>
+    <span class="fit">${FIT[k]}</span>
+    <span class="prow"><span class="pr">${q.was?`<s>${money(q.was)}</s>`:''}<b>${money(q.now)}</b><i>${q.per}</i></span>${save?`<em class="sv">${save}</em>`:''}</span>
+    ${sub?`<span class="was">${sub}</span>`:''}
+    <span class="cr">每月 ${num(p.cr)} 积分 · ${p.prof} 个定位档案</span>
+    ${k==='gold'?'<button type="button" class="cr gd rvlink" data-review="1">✦ 含多模型专家评审团 · 了解 →</button><span class="cr gd">客服工作时间内 2 小时回复</span>':'<span class="cr no">不含多模型专家评审团</span>'}</label>`;
+}
+function checkout(mode){
+  const k=S.plan,nm=k==='pro'?'Pro':'Gold',q=quote(k),card=S.pay==='card',y=S.bill==='year';
+  const H={
+    full:{h:'生成你的完整运营策略报告',l:'开通会员，导师马上把你确认的信息写成完整报告，之后每一步都可以接着问。',cta:`生成我的完整报告 · ${money(q.now)}`},
+    back:{h:'续费，让它接着陪你往下做',l:'',cta:`续费 ${nm} · ${money(q.now)}`},
+    pick:{h:`开通 ${nm} 会员`,l:'选择付款方式，然后跳转到支付页。',cta:`开通 ${nm} · ${money(q.now)}`},
+    review:{h:'升级 Gold，请多模型专家评审团帮你把关',l:'一个模型难免有盲点。让几个顶尖模型一起答、一起挑错，你只挑最好的。',cta:`升级 Gold · ${money(q.now)}`},
+  }[mode];
+  const plans=mode==='review'?planCard('gold'):planCard('pro')+planCard('gold');
+  const ctaSub=q.was?(q.tag==='新用户首月'?`首月省 ${money(q.was-q.now)}，之后 ${money(q.was)}/月`:`比原价省 ${money(q.was-q.now)}`):'付款后立即生效';
+  return `<div class="co">
+    ${k==='gold'&&card&&founderOn()?founderBar():''}
+    <h2 id="dlg-t">${H.h}</h2>${H.l?`<p class="lede">${H.l}</p>`:''}
+    ${k==='gold'?reviewMini():''}
+    <div class="anchor"><div><span>雇佣一位社交媒体顾问</span><b>$2,000 – $10,000 / 月</b></div><div class="us"><span>雇佣 Graylum AI 社交媒体策略师</span><b>$29 / 月起</b></div><small>来源：<a href="https://hawksem.com/blog/social-media-consultant/" target="_blank" rel="noopener">HawkSEM</a>（2026-07-27）："…a fixed monthly rate of between $2,000 and $10,000 per month."</small></div>
+    <fieldset style="border:0;margin:0;padding:0;display:grid;gap:10px;min-width:0"><legend class="sr">计费周期、方案和付款方式</legend>
+      <div class="bill" role="radiogroup" aria-label="计费周期"><label><input type="radio" name="bill" id="b-m" value="month" ${!y?'checked':''}>${card?'月付':'1 个月'}</label><label><input type="radio" name="bill" id="b-y" value="year" ${y?'checked':''}>${card?'年付':'1 年'} <span class="save">${yearBadge()}</span></label></div>
+      <div class="plans" ${mode==='review'?'style="grid-template-columns:1fr"':''}>${plans}</div>
+      ${q.founder?`<p class="frule">创始会员终身 6 折：只要连续续费不中断，以后每年都按当时 Gold 按月付 12 个月价格的 6 折续费（目前 ${money(FOUNDER)}/年）；取消或续费失败后再开通，按当时的正常价。</p>`:''}
+      ${mode==='review'?'':compareBox()}
+      <div class="pay" role="radiogroup" aria-label="付款方式"><label><input type="radio" name="pay" id="p-card" value="card" ${card?'checked':''}>银行卡<small>订阅，可随时取消</small></label><label><input type="radio" name="pay" id="p-wx" value="wx" ${!card?'checked':''}>微信<small>一次性，不自动续费${y&&k==='gold'?'；创始价不适用':''}</small></label></div>
+    </fieldset>
+    <button class="cta" type="button" data-toast="原型：跳转到 Waffo 支付页"><b>${H.cta}</b><span>${ctaSub}</span></button>
+    <p class="fine">${q.renew}</p>
+    <div class="trust"><span>${IC.ck('#77736b')}随时取消</span><span>${IC.ck('#77736b')}积分永不过期</span><span>${IC.ck('#77736b')}已确认信息永久免费保留</span></div>
+    <button class="later" type="button" data-close>${mode==='full'?'先免费导出已确认的信息':(mode==='back'?'暂不续费':'暂不开通')}</button>
+  </div>`;
+}
+
+function modal(left,mode){return `<div class="scrim"><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-t" tabindex="-1" id="dlg"><button class="x" type="button" aria-label="关闭" data-close>${IC.x()}</button>${left}${checkout(mode)}</div></div>`;}
+function narrow(inner){return `<div class="scrim"><div class="dlg narrow" role="dialog" aria-modal="true" aria-labelledby="dlg-t" tabindex="-1" id="dlg"><button class="x" type="button" aria-label="关闭" data-close>${IC.x()}</button><div class="tu">${inner}</div></div></div>`;}
+
+/* scene 2: credits ran out mid-onboarding */
+function midway(){
+  const g=quote('gold'); const pick=S.mini;
+  return narrow(`<h2 id="dlg-t">别让刚才这 21 分钟白费</h2>
+    <p class="lede">免费积分用完了。你刚才说的每一句都已保存，开通后从第 2 步接着聊，不用重来。</p>
+    <div class="saved"><div class="row"><span>${USER.acct}</span><b>已完成 1/3 步</b></div><div class="bar"><i style="width:34%"></i></div>
+      <ul><li class="d">✓ 了解你：目标、赛道、受众、平台等 7 项都已确认</li><li class="n">→ 诊断与平台对标：约 10 分钟</li><li class="n">→ 定位与执行方案：约 10 分钟，做完就能生成你的完整运营策略报告</li></ul></div>
+    <div class="mini" role="radiogroup" aria-label="选择会员">
+      <label><input type="radio" name="mini" id="mn-pro" value="pro" ${pick==='pro'?'checked':''}><b>Pro</b><span class="p">${money(PRICE.pro.m)}<small> / 月</small></span><small>${FIT.pro}</small></label>
+      <label><input type="radio" name="mini" id="mn-gold" value="gold" ${pick==='gold'?'checked':''}><b>Gold ${S.newGold?'· 新用户首月':''}</b><span class="p">${S.newGold?`<s>${money(PRICE.gold.m)}</s>${money(GOLD_INTRO)}`:money(PRICE.gold.m)}<small> ${S.newGold?'首月':'/ 月'}</small></span><small>几个顶尖 AI 一起给你出主意、互相挑错，方案更周全</small></label>
+    </div>
+    <button class="cta ${pick==='gold'?'gold':''}" type="button" data-toast="原型：跳转到 Waffo 支付页"><b>开通 ${pick==='gold'?'Gold':'Pro'}，接着做第 2 步</b><span>${pick==='gold'&&S.newGold?`首月 ${money(GOLD_INTRO)}，之后每月 ${money(PRICE.gold.m)}，可随时取消`:`每月 ${money(PRICE[pick].m)}，可随时取消`}</span></button>
+    <p class="fine">刚才那条消息没有发送，也没有扣积分。年付和微信付款在下一步可选。</p>
+    <button class="later" type="button" data-close>先免费导出已确认的信息</button>`);
+}
+
+/* scene 3: member out of credits */
+function topup(){
+  const off=PACK_OFF[S.tier], base=[[9.9,990],[19.9,1990],[49.9,4990]];
+  const packs=base.map(([p,c])=>[p,+(p*off).toFixed(2),c]);
+  if(S.paid) return narrow(`<div class="done"><span class="ok">${IC.ck('#2f6a3b')}</span><h3 id="dlg-t">+${num(packs[S.pack][2])} 积分已到账</h3><p>可以接着刚才的内容继续了。</p></div><button class="cta" type="button" data-close><b>继续</b><span>回到刚才的位置</span></button>`);
+  return narrow(`<h2 id="dlg-t">积分用完了，请充值</h2>
+    <p class="lede">刚才的内容已保存，充值后从断点继续，不会重复扣积分。</p>
+    <div class="bal"><span>当前余额</span><b>12 积分</b></div>
+    <div class="packs" role="radiogroup" aria-label="积分包">${packs.map(([p,now,c],i)=>`<label class="pk"><input type="radio" name="pack" id="pk-${i}" value="${i}" ${S.pack===i?'checked':''}><s>${money(p)}</s><b>${money(now)}</b><span>${num(c)} 积分</span></label>`).join('')}</div>
+    <p class="fine" style="margin-top:-6px">${S.tier==='gold'?'Gold 会员积分包 9 折':'Pro 会员积分包 9.5 折'}。<span class="chip">$9.90 以外的档位待定</span></p>
+    <div class="pay" role="radiogroup" aria-label="付款方式"><label><input type="radio" name="tpay" id="tp-card" value="card" checked>银行卡<small>一次性付款</small></label><label><input type="radio" name="tpay" id="tp-wx" value="wx">微信<small>一次性付款</small></label></div>
+    <button class="cta" type="button" id="paynow"><b>充值 ${money(packs[S.pack][1])}</b><span>积分永不过期</span></button>
+    <p class="fine">每 1 美元 100 积分。实际按用量扣除，没用完的冻结额度会退回。</p>
+    <button class="later" type="button" data-close>稍后再说</button>`);
+}
+
+/* scene 4: membership expired, for users who got some value but are unsure */
+function backLeft(){
+  return `<aside class="dossier" aria-label="你的积累">
+    <div class="d-eb"><span>欢迎回来</span><span>${USER.acct}</span></div>
+    <h3 class="d-title">它已经认识你 34 天了</h3>
+    <p class="d-sub">你的定位、资料和每一次复盘，都还在你的资料库里。续费后不用从头讲起，它接着上次的地方陪你往下做。</p>
+    <div class="memgrid">
+      <div class="mem"><b>2</b><span>份运营策略报告</span></div><div class="mem"><b>14</b><span>份资料和文风样本</span></div>
+      <div class="mem"><b>46</b><span>次对话，它记得你的情况</span></div><div class="mem"><b>1,240</b><span>积分仍可用，不过期</span></div>
+    </div>
+    <div class="grp"><div class="grp-h"><b>觉得效果还不明显？</b></div>
+      <div class="gcard"><i>01</i><div><b>先做一次复盘</b><small>把这 30 天发过的内容和数据交给它，看清问题出在选题、发布节奏还是账号定位。</small></div><em></em></div>
+      <div class="gcard"><i>02</i><div><b>拿到下一步的调整方案</b><small>不是泛泛的建议，是基于你自己的资料和数据：先改什么、为什么、怎么做。</small></div><em></em></div>
+      <div class="gcard"><i>03</i><div><b>想先少花一点？</b><small>可以只续一个月，看完复盘再决定。</small></div><em></em></div>
+    </div>
+    <div class="up2"><b>复盘后还是突破不了？</b><span>AI 教练解决不了的瓶颈，可以升级为真人专家诊断：资深策略师看你的真实数据，一对一找出卡点，给你定制化的突破方案。</span><button type="button" data-scene="8">预约专家诊断 · 免费询价</button></div>
+  </aside>`;
+}
+
+function profilesFull(){
+  const who=S.who,used={free:1,pro:3,gold:6}[who];
+  const names={free:['小林的职场穿搭号'],pro:['小林的职场穿搭号','小林的读书分享','通勤好物测评'],gold:['小林的职场穿搭号','客户：森林咖啡','客户：Mia 瑜伽馆','客户：老周修车','客户：北辰宠物','客户：一禾烘焙']}[who];
+  const plats=[['小红书','抖音','YouTube'],['Instagram','TikTok'],['小红书'],['抖音'],['Instagram','小红书'],['TikTok','YouTube']];
+  const list=names.map((n,i)=>`<div class="prof"><span>${n}<small style="display:block">${i===0?'当前定位 v5':'当前定位 v1'}</small></span><span class="plats">${plats[i].map(p=>`<span>${p}</span>`).join('')}</span></div>`).join('');
+  const q=quote('gold');
+  const offer={
+    free:`<div class="opt"><div class="t">开通会员<b>Pro 3 个 · Gold 6 个</b></div><p>会员可以为每个品牌各建一份定位、分别生成报告。你现在这份档案完整保留。</p></div><button class="cta" type="button" data-scene="5"><b>查看会员方案</b><span>Pro ${money(PRICE.pro.m)}/月起</span></button>`,
+    pro:`<div class="opt"><div class="t">升级 Gold<b>${q.was?`<s style="color:var(--p-faint);font-weight:400;margin-right:6px">${money(q.was)}</s>`:''}${money(q.now)}${q.per==='首月'?' 首月':' / 月'}</b></div><p>6 个定位档案，含多模型专家评审团，每月 ${num(PRICE.gold.cr)} 积分，工作时间内客服 2 小时回复。</p></div><button class="cta gold" type="button" data-toast="原型：跳转到 Waffo 支付页"><b>升级 Gold，再建 3 个档案</b><span>${q.tag==='新用户首月'?`首月 ${money(GOLD_INTRO)}，之后每月 ${money(PRICE.gold.m)}，可随时取消`:`每月 ${money(PRICE.gold.m)}，可随时取消`}</span></button>`,
+    gold:`<div class="opt"><div class="t">工作室版<b>10 个品牌、5 位成员起</b></div><p>团队共用一个工作空间，客户资料、定位、报告和数据都在一处。</p></div><button class="cta" type="button" data-scene="9"><b>联系我们，了解工作室版</b><span>我们会通过邮箱联系你</span></button>`}[who];
+  return narrow(`<h2 id="dlg-t">${who==='free'?'开通会员，为新的品牌建一份定位':`${used} 个定位档案都在用`}</h2>
+    <p class="lede">一个档案对应一个品牌，档案里的定位版本和历史都不另算；每个平台可以挂 1 个账号，平台数量不限。${who==='free'?'免费用户可以建 1 个档案。':'想再建一个，可以升级，或者先删掉一个不用的档案。'}</p>
+    <div class="slotbar">${Array.from({length:used},()=>'<i></i>').join('')}</div><div class="profs">${list}</div>${offer}
+    ${who==='free'?'':'<button class="later" type="button" data-toast="原型：打开档案管理，删除一个旧档案后释放名额">先删掉一个旧档案</button>'}
+    <p class="fine">会员到期后，超出免费额度的档案改为只读（能看、能导出），由你选哪一个继续可用。</p>`);
+}
+
+function studio(){
+  if(S.sent) return narrow(`<div class="done"><span class="ok">${IC.ck('#2f6a3b')}</span><h3 id="dlg-t">已收到</h3><p>我们会通过你留的邮箱联系你，按你的团队规模给出方案和报价。</p></div><button class="cta" type="button" data-close><b>好的</b><span>回到原页面</span></button>`);
+  return narrow(`<h2 id="dlg-t">了解工作室版</h2>
+    <p class="lede">告诉我们你的团队情况，我们按规模给你方案和报价。</p>
+    <form class="form" id="sform">
+      <h4 class="fh">联系方式</h4>
+      <div class="two">
+        <label><span class="lt">你的称呼 <i class="rq">*</i></span><input id="s-name" required placeholder="例如：王总 / Lily"></label>
+        <label><span class="lt">你的职位</span><select id="s-role"><option>创始人 / 老板</option><option>运营或内容负责人</option><option>运营 / 内容人员</option><option>其他</option></select></label>
+      </div>
+      <div class="two">
+        <label><span class="lt">工作邮箱 <i class="rq">*</i></span><input id="s-mail" type="email" required placeholder="you@studio.com"></label>
+        <label><span class="lt">微信或电话 <i class="op">选填</i></span><input id="s-im" placeholder="方便的话，沟通更快"></label>
+      </div>
+      <h4 class="fh">团队和业务</h4>
+      <label><span class="lt">团队或公司名称 <i class="rq">*</i></span><input id="s-org" required placeholder="例如：某某内容工作室"></label>
+      <div class="two">
+        <label><span class="lt">业务类型</span><select id="s-type"><option>代运营 / 营销公司</option><option>MCN / 达人经纪</option><option>品牌方自己的运营团队</option><option>个人工作室</option><option>其他</option></select></label>
+        <label><span class="lt">公司规模</span><select id="s-size"><option>1–5 人</option><option>6–20 人</option><option>21–50 人</option><option>51–200 人</option><option>200 人以上</option></select></label>
+      </div>
+      <div class="two">
+        <label><span class="lt">年营收（美元）</span><select id="s-rev"><option>10 万以下</option><option>10 万 – 50 万</option><option>50 万 – 200 万</option><option>200 万以上</option><option>不方便透露</option></select></label>
+        <label><span class="lt">同时服务多少个品牌</span><select id="s-brands"><option>10 个以内</option><option>10–30 个</option><option>30 个以上</option></select></label>
+      </div>
+      <div class="two">
+        <label><span class="lt">需要几个席位</span><select id="s-seats"><option>5 个以内</option><option>5–15 个</option><option>15 个以上</option></select></label>
+        <label><span class="lt">打算什么时候开始用</span><select id="s-when"><option>马上</option><option>1 个月内</option><option>1–3 个月内</option><option>先了解一下</option></select></label>
+      </div>
+      <label><span class="lt">主要做哪些平台</span><input id="s-plat" placeholder="例如：小红书、抖音、TikTok、Instagram"></label>
+      <h4 class="fh">小调研 <i class="op">选填</i></h4>
+      <label><span class="lt">你们做社交媒体，现在工作流程里最大的卡点或痛点是什么？</span><textarea id="s-pain" placeholder="例如：每个品牌都要从头做定位和对标，太耗人；选题靠拍脑袋；数据分散在各个平台后台，复盘很费时间……"></textarea></label>
+      <button class="cta" type="submit"><b>提交，获取方案和报价</b><span>按团队规模报价</span></button>
+      <p class="fine" style="margin:0">带 <i class="rq">*</i> 的必填。信息只用来给你出方案和报价。</p>
+    </form>`);
+}
+function consult(){
+  if(S.sent) return narrow(`<div class="done"><span class="ok">${IC.ck('#2f6a3b')}</span><h3 id="dlg-t">预约已提交</h3><p>我们会通过你留的邮箱联系你，确认时间和费用。有运营策略报告的话，可以导出后直接回复到那封邮件里。</p></div><button class="cta" type="button" data-close><b>好的</b><span>回到原页面</span></button>`);
+  return narrow(`<h2 id="dlg-t">预约专家一对一诊断</h2>
+    <p class="lede">适合已经发过内容、有数据积累，但增长卡在瓶颈的账号。</p>
+    <div class="expert"><i>灰</i><div><b>与 Graylum 创始人 1 对 1 诊断</b>会前先看你的账号数据和你发来的资料，找出卡点，给你定制化的突破方案。</div></div>
+    <form class="form" id="cform">
+      <h4 class="fh">联系方式</h4>
+      <div class="two">
+        <label><span class="lt">怎么称呼你 <i class="rq">*</i></span><input id="c-name" required placeholder="小林"></label>
+        <label><span class="lt">邮箱 <i class="rq">*</i></span><input id="c-mail" type="email" required placeholder="you@example.com"></label>
+      </div>
+      <div class="two">
+        <label><span class="lt">微信或电话 <i class="op">选填</i></span><input id="c-im" placeholder="方便的话，约时间更快"></label>
+        <label><span class="lt">方便开会的时间</span><input id="c-time" placeholder="例如：北京时间工作日晚上 8 点后"></label>
+      </div>
+      <h4 class="fh">你的账号</h4>
+      <div class="two">
+        <label><span class="lt">主要平台</span><select id="c-plat"><option>抖音</option><option>小红书</option><option>视频号</option><option>B 站</option><option>TikTok</option><option>Instagram</option><option>YouTube</option><option>其他</option></select></label>
+        <label><span class="lt">粉丝量</span><select id="c-fans"><option>1,000 以下</option><option>1,000 – 1 万</option><option>1 万 – 10 万</option><option>10 万以上</option></select></label>
+      </div>
+      <label><span class="lt">账号主页链接或账号名 <i class="rq">*</i></span><input id="c-link" required placeholder="专家会前要看你的真实数据"></label>
+      <div class="two">
+        <label><span class="lt">做了多久</span><select id="c-age"><option>3 个月以内</option><option>3 – 6 个月</option><option>6 – 12 个月</option><option>1 年以上</option></select></label>
+        <label><span class="lt">更新频率</span><select id="c-freq"><option>每周不到 1 条</option><option>每周 1 – 3 条</option><option>每周 4 条以上</option></select></label>
+      </div>
+      <div class="two">
+        <label><span class="lt">你现在的阶段</span><select id="c-stage"><option>稳定更新，但涨得慢</option><option>涨粉了，但变现不了</option><option>已经有收入，想规模化</option><option>代运营 / 工作室</option></select></label>
+        <label><span class="lt">现在的收入情况</span><select id="c-inc"><option>还没有收入</option><option>偶尔有收入</option><option>每月有稳定收入</option><option>不方便透露</option></select></label>
+      </div>
+      <h4 class="fh">你的问题</h4>
+      <label><span class="lt">想解决什么问题 <i class="rq">*</i></span><textarea id="c-need" required placeholder="例如：账号做了 3 个月，播放卡在 500，不知道该不该换方向"></textarea></label>
+      <label><span class="lt">已经试过哪些办法 <i class="op">选填</i></span><textarea id="c-tried" placeholder="例如：换过 2 次封面风格、试过蹭热点，播放没明显变化"></textarea></label>
+      <label><span class="lt">诊断后希望达到什么目标 <i class="op">选填</i></span><input id="c-goal" placeholder="例如：3 个月内做到 1 万粉，接到第一个品牌合作"></label>
+      <p class="share">有运营策略报告的话，确认时间后可以导出发到邮件里，会前我先看。发不发由你决定，我们不会直接调取你账号里的内容。</p>
+      <button class="cta" type="submit"><b>预约咨询，免费询价</b><span>线上远程会议 · 根据诊断内容报价</span></button>
+    </form>
+    <p class="fine">带 * 的必填。提交后我们会看你的情况，通过邮箱发报价；确认后单独付款，不走会员结账。</p>`);
+}
+
+function pricing(){
+  const y=S.bill==='year';
+  const tierCard=(k,feat)=>{
+    const p=PRICE[k],save=p.m*12-p.y,c=feat?'#8fe0a5':'#2f6a3b';
+    const fd=k==='gold'&&y&&founderOn();
+    const yp=fd?FOUNDER:p.y,intro=k==='gold'&&S.newGold&&!y;
+    const priceHtml=y?`<s>${money(p.m*12)}</s><b>${money(yp)}</b><i>/ 年</i>`:(intro?`<s>${money(p.m)}</s><b>${money(GOLD_INTRO)}</b><i>首月</i>`:`<b>${money(p.m)}</b><i>/ 月</i>`);
+    const sv=y?`比按月付省 ${money(p.m*12-yp)}`:(intro?`首月省 ${money(p.m-GOLD_INTRO)}`:'');
+    const sub=y?`相当于 ${money(+(yp/12).toFixed(2))}/月${fd?` · <em>创始会员 · 终身 6 折</em> · 还剩 ${SLOTS_LEFT} 个名额`:''}`:(intro?`新用户首月价，之后 ${money(p.m)}/月`:'');
+    const li=(t,on=true,soon=false)=>`<li class="${on?'':'no'}">${on?IC.ck(c):IC.dash()}<span>${t}${soon?'<span class="soon">即将上线</span>':''}</span></li>`;
+    const g=k==='gold';
+    return `<div class="tier ${feat?'feat':''}"><h3>${g?'Gold':'Pro'}<span>${g?'功能最全':'适合起步'}</span></h3>
+      <p class="who">${FIT[k]}</p>
+      <div class="prow"><div class="pr">${priceHtml}</div>${sv?`<em class="sv">${sv}</em>`:''}</div>${sub?`<div class="was">${sub}</div>`:''}
+      <h4>策略与报告</h4><ul>
+        ${li('完整运营策略报告，到期也能看、能导出')}
+        ${li(`${p.prof} 个定位档案`)}
+        ${li(g?'<a href="#rv-sec" class="rvlink3">多模型专家评审团 →</a>':'多模型专家评审团',g)}
+      </ul>
+      <h4>发布与数据</h4><ul>
+        ${li('一键发布到海外 9 个平台（TikTok、Instagram、YouTube 等）',true,true)}
+        ${li('支持查看海外平台自有账号近 30 天数据',true,true)}
+        ${li('对标账号监控、90 天趋势、每周自动复盘',g,true)}
+      </ul>
+      <h4>积分与服务</h4><ul>
+        ${li(`每月 ${num(p.cr)} 积分，永不过期`)}
+        ${li(`积分包 ${g?'9':'9.5'} 折`)}
+        ${li(g?'客服工作时间内 2 小时回复':'客服 24 小时内回复')}
+        ${li('优先体验内测新功能',g)}
+      </ul>
+      <button class="btn" type="button" data-plan="${k}">开通 ${g?'Gold':'Pro'}</button></div>`;
+  };
+  return `<div class="pp"><div class="in">
+    ${founderOn()?`<div style="justify-self:center;width:min(640px,100%)">${founderBar()}</div>`:''}
+    <div class="hero"><span class="eb">Graylum 会员</span>
+      <h2 class="h1line">全年无休的 AI 社交媒体教练</h2>
+      <p class="h2line">不用学运营，聊着天就把账号做起来</p>
+      <p>不用研究平台规则和流量逻辑。告诉它你想做什么，它帮你定方向、出选题、看数据、做复盘，每一步都说清楚做什么、为什么、下一步怎么做。</p>
+      <div class="pts"><span>${IC.ck()}定位和完整策略报告</span><span>${IC.ck()}每一步都讲清楚理由</span><span>${IC.ck()}数据复盘和下一步方案</span><span>${IC.ck()}资料越多越懂你</span></div>
+    </div>
+    <div class="bill" role="radiogroup" aria-label="计费周期"><label><input type="radio" name="pbill" id="pb-m" value="month" ${!y?'checked':''}>月付</label><label><input type="radio" name="pbill" id="pb-y" value="year" ${y?'checked':''}>年付 <span class="save">${yearBadge()}</span></label></div>
+    <div class="tiers">
+      <div class="tier"><h3>免费</h3><p class="who">先体验，看看它懂不懂你</p><div class="pr"><b>$0</b></div><div class="was">注册即送体验积分 <span class="chip">数量待定</span></div>
+        <h4>可以做</h4><ul><li>${IC.ck()}<span>做完报告前的全部定位步骤</span></li><li>${IC.ck()}<span>查看、导出已确认的定位信息</span></li><li>${IC.ck()}<span>1 个定位档案</span></li><li>${IC.ck()}<span>客服 48 小时内回复</span></li></ul>
+        <h4>不包含</h4><ul><li class="no">${IC.dash()}<span>完整运营策略报告</span></li><li class="no">${IC.dash()}<span>购买积分包</span></li><li class="no">${IC.dash()}<span>多模型专家评审团</span></li></ul>
+        <button class="btn" type="button">免费开始</button></div>
+      ${tierCard('pro',false)}${tierCard('gold',true)}
+    </div>
+    ${founderSection()}
+    <div class="fsec" id="rv-sec">
+      <div style="display:grid;gap:12px;align-content:start"><span class="eb">GOLD 专属</span><h3>多模型专家评审团</h3>
+        <p>一个模型的回答再好，也有它自己发现不了的盲点。评审团把同一份资料交给几个不同公司的顶尖模型，各自独立作答、再互相挑错，最后合成一份修正过的结果，并告诉你改了什么。</p>
+        <ul>${S.reviewOff?'':'<li>✦ <span><b>报告评审</b>：运营策略报告出来后，几个模型分别指出问题和修改建议，多轮讨论后给你修订后的最终版和修改说明。</span></li>'}
+          <li>✦ <span><b>多模型对比</b>：写选题、改脚本、想标题时，同一个问题几个模型并排回答，挑最合适的接着聊。</span></li></ul></div>
+      <div class="flow">${reviewFlow()}${reviewVs()}</div>
+    </div>
+    <div class="vs"><div><span>雇佣一位社交媒体顾问</span><b>$2,000 – $10,000 / 月</b></div><div class="us"><span>雇佣 Graylum AI 社交媒体策略师</span><b>$29 / 月起</b></div></div>
+    <p class="src">来源：<a href="https://hawksem.com/blog/social-media-consultant/" target="_blank" rel="noopener">HawkSEM</a>, Social Media Consultants: What They Do, Costs + How to Hire One（2026-07-27）："if you're looking to have a consultant on retainer, you could expect to pay a fixed monthly rate of between $2,000 and $10,000 per month."</p>
+    <div class="why">
+      <div><b>ChatGPT 是通才，Graylum 是社媒专才</b><span>通用 AI 什么都懂一点，遇到具体的运营问题常说正确的废话。Graylum 用资深社媒专家写的方法论、SOP 和一线案例做知识库，从定位、选题、发布到数据复盘全程打通。</span></div>
+      <div><b>越用越懂你，形成增长飞轮</b><span>每一次选题、发布和复盘都沉淀进你的知识库，它越来越了解你的品牌，下一轮方案也越来越准。</span></div>
+      <div><b>建议基于真实数据</b><span>需要时它会去查平台和对标账号的真实情况，查不到会直说，不编数字。</span></div>
+    </div>
+    <div class="duo">
+      <div class="big studio"><span class="eb">工作室版 · B 端</span><h3>同时服务多个品牌，团队共享知识库</h3>
+        <p class="lead2">给代运营工作室、MCN 和品牌内容团队。</p>
+        <ul>
+          <li>${IC.ck('#9fd0e6')}<span><b>10 个品牌档案起</b>：一个客户品牌一个档案，定位、资料、报告各自独立，绑定该品牌在各平台的账号</span></li>
+          <li>${IC.ck('#9fd0e6')}<span><b>5 个席位起</b>，可以按需增加席位</span></li>
+          <li>${IC.ck('#9fd0e6')}<span><b>一个共享工作空间</b>：客户资料、定位、报告、数据都在同一个后台，换人接手不丢资料，不用来回同步</span></li>
+          <li>${IC.ck('#9fd0e6')}<span><b>团队成员分权限</b>，每个人只看自己负责的客户</span></li>
+          <li>${IC.ck('#9fd0e6')}<span><b>按客户统计积分消耗</b>，给客户报价心里有数</span></li>
+          <li>${IC.ck('#9fd0e6')}<span><b>报告换成你的品牌</b>，直接交付客户；客户不用注册也能看</span></li>
+          <li>${IC.ck('#9fd0e6')}<span>含多模型专家评审团，按量计价，单价比 Gold 更低</span></li>
+        </ul>
+        <button class="btn" type="button" data-scene="9">联系我们</button><span class="note">按团队规模报价</span></div>
+      <div class="big consult"><span class="eb">真人专家 · 一对一诊断</span><h3>增长遇到瓶颈？让资深策略师一对一诊断</h3>
+        <p class="lead2">AI 教练给的方案也突破不了的时候，由真人专家看你的真实数据，找出卡点，给你定制化的突破方案。</p>
+        <div class="who">
+          <div><b>适合谁</b>已经在持续发内容、有数据积累，但涨粉、播放或转化停滞的账号。</div>
+          <div><b>还没开始做账号？</b>建议先用 AI 教练实战一段时间，有了数据再来诊断，效果更好。</div>
+        </div>
+        <ul>
+          <li>${IC.ck('#f0cf8c')}<span><b>与 Graylum 创始人 1 对 1 诊断</b></span></li>
+          <li>${IC.ck('#f0cf8c')}<span>线上远程会议，会前先看你的账号数据和你发来的资料</span></li>
+          <li>${IC.ck('#f0cf8c')}<span>根据诊断内容报价，不需要会员也能预约</span></li>
+        </ul>
+        <button class="btn" type="button" data-scene="8">预约咨询，免费询价</button><span class="note">提交后通过邮箱确认时间和报价；咨询费单独付款，不走会员结账</span></div>
+    </div>
+    <div class="faq"><h3>常见问题</h3><details><summary>它和 ChatGPT 这类 AI 有什么区别？</summary><p>ChatGPT、Claude 这些通用大模型像一个什么都懂一点的实习生，遇到社媒运营的具体问题，常常只能说些正确的废话。Graylum 的 AI 教练背后，是资深社媒专家共同编写的方法论和 SOP，以及一线运营积累的数据和案例；从定位、选题创作，到发布、数据回流和复盘优化，整条链路都打通了。你用得越久，积累的选题、发布和数据越多，它就越懂你的品牌，形成一个越转越快的增长飞轮。</p></details><details><summary>AI 的建议靠谱吗？会不会编数据、编案例？</summary><p>我给它定了一条硬规矩：对标分析只能用真实查到的数据，查不到就直说"取不到"，不编账号、不编数字。报告最后还有一节"待验证的假设"，把哪些是判断、需要你先去验证的写清楚。AI 也会犯错，所以重要的决定可以用 Gold 的多模型专家评审团再让几个模型一起把关。</p></details><details><summary>能保证涨粉或赚钱吗？多久能看到效果？</summary><p>不能保证，任何人跟你保证都不可信。社媒结果取决于你执行了多少、赛道竞争有多激烈。我能保证的是：方向想清楚、每一步有理由、做完有复盘。报告里有一节专门写"见效时间和投入"，按你的情况给一个现实的预期。</p></details><details><summary>我是完全的新手，还没有账号，能用吗？</summary><p>能，新手正是我最想帮的人。定位流程从"你想得到什么、你手上有什么"开始问，不需要你已经有账号或粉丝。</p></details><details><summary>支持哪些平台？</summary><p>定位和策略适用于主流社交平台。<b>国内</b>：抖音、视频号、小红书、B 站，可以查公开数据做对标分析。<b>海外</b>：TikTok、Instagram、YouTube、Facebook、X、Threads、LinkedIn、Pinterest、Bluesky、Reddit。前 9 个连接你的账号后可以一键发布、看自己作品的数据；TikTok、Instagram、YouTube、Facebook、X、Threads、LinkedIn、Reddit 还能查公开数据做对标分析。某个平台临时取不到数据时，它会如实告诉你，不会编。</p></details><details><summary>一份报告、一次对话大概用多少积分？3,480 积分够用多久？</summary><p>按实际用量扣积分，问得越长、资料越多，用得越多。一份完整运营策略报告大约用 [实测后补] 积分；日常一次对话大约 [实测后补] 积分。<span class="tbc">待确认</span> 每次扣多少都会显示出来，不会悄悄扣。</p></details><details><summary>积分用完会自动扣钱吗？</summary><p>不会。积分用完时，任务会在两步之间停下来提醒你，余额永远不会变成负数。你充值后它从断点接着做，已经完成的部分不会重复扣积分。积分包只在你手动购买时才付款。</p></details><details><summary>Pro 和 Gold 怎么选？中途能换吗？</summary><p>刚起步、先认真做好 1 个账号，选 Pro；已经在接合作、要做多个账号，或者想让报告经过多模型专家评审团把关，选 Gold。<b>中途可以随时从 Pro 升级到 Gold</b>：订阅本质上是更便宜的积分，你这个月 Pro 的 3,480 积分已经到账、照样能用，所以升级时不退差价；按 Gold 的价格付款后（第一次买 Gold 首月 $49），账上再加 8,970 积分，Gold 的权益马上生效。</p></details><details><summary>以后会涨价吗？</summary><p>订阅价格如果调整，会提前通知。创始会员只要连续续费，一直按 6 折。另外，积分是按模型的官方标价换算的，模型服务商调价时，每次对话扣的积分可能跟着变，扣多少都会显示给你看。</p></details><details><summary>能退款吗？</summary><p>原则上付款后不退款，所以开通前请先用免费额度体验，确认它对你有用。如果遇到特殊情况，直接联系我，我会逐个看。</p></details><details><summary>怎么取消订阅？取消后还能用多久？</summary><p>银行卡订阅随时可以在个人中心取消，取消后用到当期结束，不会再扣款。用微信一次性购买的不会自动续费，到期就结束。</p></details><details><summary>年付用到一半不想用了，剩下的钱能退吗？</summary><p>年付同样原则上不退款。年付的积分是分 12 个月按月发的，取消后当期照常用完。有特殊情况可以联系我。</p></details><details><summary>会员到期或取消后，我的东西还在吗？</summary><p>在。已经生成的报告随时能看、能导出；积分永不过期，一直留着；定位档案超出免费额度的部分改为只读，你自己选保留哪一个继续用。只是不能再生成新报告、不能买积分包。</p></details><details><summary>我的数据安全吗？谁能看到？</summary><p>你的资料只属于你。账号之间相互隔离，其他用户看不到你的任何内容；数据在传输和存储时都经过加密。你可以随时导出报告和定位资料，注销账号后内容会立即删除。需要我们帮你看的时候（比如预约专家诊断、反馈使用问题），由你自己导出后发给我们，发什么由你决定。</p></details><details><summary>注销账号后，我的数据会删掉吗？</summary><p>会。二次确认后立即注销，你的账号内容会被删除。</p></details><details><summary>客服怎么联系？</summary><p>通过客服邮箱联系，中文和英文都可以。免费用户 48 小时内回复，Pro 24 小时内，Gold 在工作时间内 2 小时回复。</p></details><details><summary>能开发票或收据吗？</summary><p>付款由支付服务商 Waffo 代收，付款后 Waffo 会把收据发给你。</p></details><details><summary>真人专家诊断怎么收费？</summary><p>由我本人通过线上远程会议进行，根据诊断内容报价，提交预约后免费询价。它适合已经有数据积累、但增长卡在瓶颈的账号；还没开始做账号的话，建议先用 AI 教练实战一段时间。咨询费单独付款，不需要会员也能预约。</p></details><p class="fine" style="text-align:left">以上由创始人口吻回答；积分用量一条等实测后补数字。</p>
+    </div>
+  </div></div>`;
+}
+
+function body(){
+  if(S.scene===5) return pricing()+(S.pickOpen?modal(reportDossier(),'pick'):'');
+  const m={1:()=>modal(reportDossier(),'full'),2:midway,3:topup,4:()=>modal(backLeft(),'back'),6:()=>modal(reviewLeft(),'review'),7:profilesFull,8:consult,9:studio}[S.scene];
+  return appBg()+m();
+}
+function render(){
+  frame.className='frame '+S.device;holder.className='holder '+(S.device==='m'?'m':'');
+  frame.innerHTML=body()+'<div id="toastslot"></div>';tabs();fit();wire();
+}
+function fit(){const W=S.device==='d'?1360:390,H=S.device==='d'?920:844;const sc=Math.min(1,(stage.clientWidth-8)/W);frame.style.transform=`scale(${sc})`;holder.style.width=W*sc+'px';holder.style.height=H*sc+'px';}
+function toast(t){const slot=frame.querySelector('#toastslot');slot.innerHTML=`<div role="status" style="position:absolute;left:50%;bottom:26px;z-index:90;transform:translateX(-50%);max-width:calc(100% - 32px);padding:9px 14px;border-radius:10px;background:#24221f;color:#fff;font-size:13px">${t}</div>`;clearTimeout(toast.t);toast.t=setTimeout(()=>{slot.innerHTML=''},2200);}
+function wire(){
+  frame.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>{if(S.scene===5){S.pickOpen=false;render();}else toast('原型：弹窗关闭，回到原页面');});
+  frame.querySelectorAll('[data-toast]').forEach(b=>b.onclick=()=>toast(b.dataset.toast));
+  frame.querySelectorAll('[data-scene]').forEach(b=>b.onclick=()=>{S.scene=+b.dataset.scene;S.sent=false;render();});
+  frame.querySelectorAll('input[name="plan"]').forEach(i=>i.onchange=()=>{S.plan=i.value;render();});
+  frame.querySelectorAll('input[name="bill"],input[name="pbill"]').forEach(i=>i.onchange=()=>{S.bill=i.value;render();});
+  frame.querySelectorAll('input[name="pay"]').forEach(i=>i.onchange=()=>{S.pay=i.value;render();});
+  frame.querySelectorAll('input[name="pack"]').forEach(i=>i.onchange=()=>{S.pack=+i.value;render();});
+  frame.querySelectorAll('input[name="mini"]').forEach(i=>i.onchange=()=>{S.mini=i.value;render();});
+  frame.querySelectorAll('[data-plan]').forEach(b=>b.onclick=()=>{S.plan=b.dataset.plan;S.pickOpen=true;render();});
+  frame.querySelectorAll('[data-founder]').forEach(b=>b.onclick=()=>{Object.assign(S,{plan:'gold',bill:'year',pay:'card',pickOpen:true});render();});
+  frame.querySelectorAll('[data-review]').forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();Object.assign(S,{scene:6,plan:'gold',pickOpen:false});render();});
+  frame.querySelectorAll('.rvlink3').forEach(a=>a.onclick=e=>{e.preventDefault();frame.querySelector('#rv-sec').scrollIntoView({behavior:'smooth',block:'start'});});
+  frame.querySelectorAll('[data-stab]').forEach(b=>b.onclick=()=>{S.stab=b.dataset.stab;render();});
+  const pay=frame.querySelector('#paynow');if(pay)pay.onclick=()=>{S.paid=true;render();};
+  ['#cform','#sform'].forEach(id=>{const f=frame.querySelector(id);if(f)f.addEventListener('submit',e=>{e.preventDefault();S.sent=true;render();});});
+}
+$('#dev-d').onclick=()=>{S.device='d';render();};
+$('#dev-m').onclick=()=>{S.device='m';render();};
+$('#opt-new').onchange=e=>{S.newGold=e.target.checked;render();};
+$('#opt-slots').onchange=e=>{SLOTS_LEFT=+e.target.value;render();};
+$('#opt-review').onchange=e=>{S.reviewOff=e.target.checked;render();};
+$('#opt-tier').onchange=e=>{S.tier=e.target.value;S.scene=3;S.paid=false;render();};
+$('#opt-who').onchange=e=>{S.who=e.target.value;S.scene=7;render();};
+addEventListener('resize',fit);
+render();
+})();
+</script>
+
+</body></html>
