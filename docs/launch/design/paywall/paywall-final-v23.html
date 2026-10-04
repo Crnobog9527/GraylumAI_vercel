@@ -249,6 +249,7 @@ button,input,select,textarea{font:inherit}
 .form .fh{margin:6px 0 -2px;padding-top:8px;border-top:1px solid var(--p-line);font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--gold-deep)}
 .form .fh:first-child{border-top:0;padding-top:0;margin-top:0}
 .form .lt{display:block}
+.pk .bonus{font-style:normal;font-size:11px;color:var(--save);font-weight:600}
 .form .share{margin:0;padding:10px 12px;border-radius:10px;background:#f6f3ec;color:#5d584f;font-size:12.5px;line-height:1.6}
 .form i.rq{font-style:normal;color:#c0533a}
 .form i.op{font-style:normal;font-size:11px;font-weight:400;color:var(--p-faint)}
@@ -457,9 +458,9 @@ button,input,select,textarea{font:inherit}
   <header class="top">
     <div>
       <h1>Graylum 付费墙 v2</h1>
-      <p><b>唯一版本来源</b>（取代设计窗口的定稿 QLdBcaYM…，那份留作历史）。八个触发场景，价格都是 Owner 定的实际售价；只有注册赠送积分和 $9.90 以外的积分包档位还是占位。标"待定"的是本轮新提的方案，等 Owner 确认。</p>
+      <p><b>唯一版本来源</b>（取代设计窗口的定稿 QLdBcaYM…，那份留作历史）。八个触发场景，价格都是 Owner 定的实际售价；注册赠送 500 积分、积分包三档已于 10-04 定（实测后可能再调）。标"待定"的是本轮新提的方案，等 Owner 确认。</p>
     </div>
-    <span class="ver">唯一版本 v21 · 更新于 2026-10-04 · 不含产品代码</span>
+    <span class="ver">唯一版本 v23 · 更新于 2026-10-04 · 不含产品代码</span>
   </header>
 
   <div class="controls">
@@ -499,7 +500,7 @@ button,input,select,textarea{font:inherit}
           <tr><td>定位档案</td><td>免费 1 个、Pro 3 个、Gold 6 个。一个档案 = 一个品牌；每个平台挂 1 个账号，平台数不限；降级后超出额度的档案只读。</td></tr>
           <tr><td>工作室版、真人专家咨询</td><td>价格页两张并排的大卡片，写买家关心的事。工作室版 10 个品牌、5 位成员起，上线时只放"联系我们"；专家咨询只做预约入口，Owner 本人做专家，线上远程会议 $300/小时起，会员不打折，咨询费用 Stripe 或线下收。</td></tr>
           <tr><td>不做</td><td>7 天退款保证、假原价、会重置的倒计时、虚构的用户数或效果承诺。</td></tr>
-          <tr><td>仍是占位</td><td>注册赠送积分、积分包 $9.90 以外的档位。</td></tr>
+          <tr><td>注册赠送 / 积分包档位（10-04 定）</td><td>注册送 500 积分。积分包三档：$9.90 / 990 积分、$29.90 / 2,990 积分、$99.90 / 9,990 + 赠送 1,000 = 10,990 积分；会员折扣打在价格上，折后价向下抹到角（如 $9.41 收 $9.40）。开发完成后 Owner 实测再决定是否调整。</td></tr>
         </tbody>
       </table></div>
     </div>
@@ -791,14 +792,14 @@ function midway(){
 
 /* scene 3: member out of credits */
 function topup(){
-  const off=PACK_OFF[S.tier], base=[[9.9,990],[19.9,1990],[49.9,4990]];
-  const packs=base.map(([p,c])=>[p,+(p*off).toFixed(2),c]);
+  const off=PACK_OFF[S.tier], base=[[9.9,990,0],[29.9,2990,0],[99.9,9990,1000]];
+  const packs=base.map(([p,c,b])=>[p,Math.floor(p*off*10+1e-6)/10,c+b,b]);
   if(S.paid) return narrow(`<div class="done"><span class="ok">${IC.ck('#2f6a3b')}</span><h3 id="dlg-t">+${num(packs[S.pack][2])} 积分已到账</h3><p>可以接着刚才的内容继续了。</p></div><button class="cta" type="button" data-close><b>继续</b><span>回到刚才的位置</span></button>`);
   return narrow(`<h2 id="dlg-t">积分用完了，请充值</h2>
     <p class="lede">刚才的内容已保存，充值后从断点继续，不会重复扣积分。</p>
     <div class="bal"><span>当前余额</span><b>12 积分</b></div>
-    <div class="packs" role="radiogroup" aria-label="积分包">${packs.map(([p,now,c],i)=>`<label class="pk"><input type="radio" name="pack" id="pk-${i}" value="${i}" ${S.pack===i?'checked':''}><s>${money(p)}</s><b>${money(now)}</b><span>${num(c)} 积分</span></label>`).join('')}</div>
-    <p class="fine" style="margin-top:-6px">${S.tier==='gold'?'Gold 会员积分包 9 折':'Pro 会员积分包 9.5 折'}。<span class="chip">$9.90 以外的档位待定</span></p>
+    <div class="packs" role="radiogroup" aria-label="积分包">${packs.map(([p,now,c,b],i)=>`<label class="pk"><input type="radio" name="pack" id="pk-${i}" value="${i}" ${S.pack===i?'checked':''}><s>${money(p)}</s><b>${money(now)}</b><span>${num(c)} 积分${b?`<br><em class="bonus">含赠送 ${num(b)}</em>`:''}</span></label>`).join('')}</div>
+    <p class="fine" style="margin-top:-6px">${S.tier==='gold'?'Gold 会员积分包 9 折':'Pro 会员积分包 9.5 折'}。</p>
     <div class="pay" role="radiogroup" aria-label="付款方式"><label><input type="radio" name="tpay" id="tp-card" value="card" checked>银行卡<small>一次性付款</small></label><label><input type="radio" name="tpay" id="tp-wx" value="wx">微信<small>一次性付款</small></label></div>
     <button class="cta" type="button" id="paynow"><b>充值 ${money(packs[S.pack][1])}</b><span>积分永不过期</span></button>
     <p class="fine">每 1 美元 100 积分。实际按用量扣除，没用完的冻结额度会退回。</p>
@@ -957,7 +958,7 @@ function pricing(){
     </div>
     <div class="bill" role="radiogroup" aria-label="计费周期"><label><input type="radio" name="pbill" id="pb-m" value="month" ${!y?'checked':''}>月付</label><label><input type="radio" name="pbill" id="pb-y" value="year" ${y?'checked':''}>年付 <span class="save">${yearBadge()}</span></label></div>
     <div class="tiers">
-      <div class="tier"><h3>免费</h3><p class="who">先体验，看看它懂不懂你</p><div class="pr"><b>$0</b></div><div class="was">注册即送体验积分 <span class="chip">数量待定</span></div>
+      <div class="tier"><h3>免费</h3><p class="who">先体验，看看它懂不懂你</p><div class="pr"><b>$0</b></div><div class="was">注册即送 500 积分</div>
         <h4>可以做</h4><ul><li>${IC.ck()}<span>做完报告前的全部定位步骤</span></li><li>${IC.ck()}<span>查看、导出已确认的定位信息</span></li><li>${IC.ck()}<span>1 个定位档案</span></li><li>${IC.ck()}<span>客服 48 小时内回复</span></li></ul>
         <h4>不包含</h4><ul><li class="no">${IC.dash()}<span>完整运营策略报告</span></li><li class="no">${IC.dash()}<span>购买积分包</span></li><li class="no">${IC.dash()}<span>多模型专家评审团</span></li></ul>
         <button class="btn" type="button">免费开始</button></div>
