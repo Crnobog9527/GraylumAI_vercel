@@ -10,6 +10,10 @@
 `{ executionId, cursor, epoch }`；三个字段来自原 execution 的服务端结果或 `runtime.view`。
 这不是新消息：不重复 admission 桶，但在获得新 epoch 之前按剩余可领取 call 数重新经过 calls 桶。
 拒绝或限流服务失败时保持原等待及已收费前缀。两个并发继续请求只有一个 CAS 成功。
+同一 epoch 还约束执行者的失败、检查点、完成、内部取消、Session 与工具写入；
+这些操作复用 `runtime_execution`，在同一 Session/execution/run 锁内核验 `{epoch,value}`，
+再调用原 Session/tool/cancel 能力。旧执行者迟到不能改写新执行者的状态、hold 或内容。
+用户主动取消和 receipt/财务收尾保持各自原权限；不以旧执行者的 epoch 阻断收款事实落地。
 
 | state / code | 含义和调用方动作 |
 | --- | --- |
@@ -77,6 +81,8 @@ checkpoint 与 pausedReason 的 JSONB 文本合计不超过 65536 字节。它�
 
 迁移执行在单一事务，失败回滚结构、函数、ACL；测试覆盖每个源函数漂移拒绝、事务故障回滚、
 历史位置连续两次回放、双连接 CAS、相同 claim 幂等、旧 epoch/token 拒绝、原载荷不变、65536/+1边界。
+双客户端还覆盖新 epoch 已领取 hold 后的 11 类旧执行者迟到写入拒绝；
+核对 Session、执行状态、call/hold 和工具事实不变，并证明新 owner 仍可写入和派发。
 应用后的回退用向前迁移停掉新的 v2 准入/继续并保留新增列和旧函数的财务恢复能力，
 不得直接覆盖回 v1-only 函数、删列或删除已发生的费用。v1 可继续使用。
 B1 自身具备完整 per-call 钱路；B2 只叠加产品和管理员处理，不是 B1 结算的前提。

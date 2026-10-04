@@ -34,7 +34,7 @@ function fixture() {
     if (args.p_action === 'payg_resume') Object.assign(execution, { state: 'running', live: true, epoch: execution.epoch + 1 });
     if (args.p_action === 'payg_wait') Object.assign(execution, { state: (args.p_result as {state:string}).state,
       cursor: execution.cursor + 1, live: false, remainingCalls: 2 - raw.size });
-    if (args.p_action === 'checkpoint_primary') execution.primaryResult = args.p_result as {body:string};
+    if (args.p_action === 'checkpoint_primary') execution.primaryResult = (args.p_result as {value:{body:string}}).value;
     if (args.p_action === 'complete') return { data: { state: 'completed' }, error: null };
     return { data: structuredClone(execution), error: null };
   }) };
@@ -68,6 +68,10 @@ it('persists organizer waiting despite SDK wrapping; resume replays the saved pr
   expect(result).toMatchObject({ state: 'completed', body: 'body', summary: 'summary' });
   expect(mock.billing.dispatchOnce.mock.calls.map(([id]) => id)).toEqual(['1', '2']);
   expect(f.gate.mock.calls.map((args: unknown[]) => args[1])).toEqual([2, 1]);
+  expect(f.database.rpc.mock.calls.filter(([, a]) => a.p_action === 'checkpoint_primary')
+    .map(([, a]) => (a.p_result as {epoch:number}).epoch)).toEqual([1, 2]);
+  expect(f.database.rpc.mock.calls.find(([, a]) => a.p_action === 'complete')?.[1].p_result)
+    .toMatchObject({epoch:2,value:{body:'body',summary:'summary'}});
 });
 it('time exhaustion before the next call is waiting_resume, never cancellation or automatic continuation', async () => {
   const f = fixture();
@@ -89,4 +93,55 @@ it('time exhausted after claim preserves task and atomically retires its prepare
  expect(f.database.rpc.mock.calls.find(([,a])=>a.p_action==='payg_wait')?.[1].p_result)
   .toMatchObject({sequence:1,state:'waiting_resume'});
  expect(f.database.rpc.mock.calls.some(([,a])=>a.p_action==='fail_before_dispatch')).toBe(false);
+});
+it('public cancellation and financial recovery do not acquire or reuse a runtime owner epoch', async () => {
+  const f = fixture(), host = runtimeExecutor(f.options);
+  await host.cancel(id);
+  expect(f.database.rpc).toHaveBeenLastCalledWith('runtime_cancel', { p_execution_id: id, p_actor_id: id });
+  await host.recoverFinancial(id);
+  expect(f.database.rpc.mock.calls.filter(([name]) => name === 'runtime_financial_recovery').map(([, args]) => args))
+    .toEqual([{ p_execution_id: id, p_actor_id: id }, { p_execution_id: id, p_actor_id: id, p_finish: true }]);
+  expect(f.database.rpc.mock.calls.some(([, args]) => args.p_action === 'owner_cancel')).toBe(false);
+});
+it('a suspended epoch-1 owner cannot fail or interrupt the resumed epoch-2 execution', async () => {
+  const f = fixture();
+  let reachedGate!: () => void, releaseGate!: () => void;
+  const gated = new Promise<void>(resolve => { reachedGate = resolve; });
+  const released = new Promise<void>(resolve => { releaseGate = resolve; });
+  const current = { epoch: 1, state: 'running', hold: 0, session: ['primary'] };
+  const ownerWrites: Array<{ action: string; epoch: unknown }> = [];
+  const database = { rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
+    if (name === 'runtime_cancel') {
+      current.state = 'cancelled'; current.hold = 0;
+    }
+    if (name === 'runtime_execution' && ['fail_before_dispatch', 'interrupt'].includes(String(args.p_action))) {
+      const epoch = (args.p_result as { epoch?: unknown } | undefined)?.epoch;
+      ownerWrites.push({ action: String(args.p_action), epoch });
+      if (epoch !== current.epoch) return { data: null, error: { message: 'RUNTIME_RESUME_CONFLICT' } };
+      current.state = args.p_action === 'interrupt' ? 'interrupted' : 'cancelled';
+      current.hold = 0;
+    }
+    return f.database.rpc(name, args);
+  }) };
+  const callGate = async () => {
+    reachedGate();
+    await released;
+    throw new Error('synthetic delayed gate failure');
+  };
+  const oldRequest = runtimeExecutor({ ...f.options, database, callGate }).execute(id);
+  await gated;
+  expect(f.database.rpc.mock.calls[0]?.[1].p_action).toBe('begin');
+  // Another HTTP invocation has already committed resume and reserved its next call.
+  Object.assign(f.execution, { epoch: 2, state: 'running', live: true });
+  Object.assign(current, { epoch: 2, hold: 12, session: ['primary', 'new owner input'] });
+  const resumed = structuredClone(current);
+  releaseGate();
+  expect(await oldRequest).toEqual({ state: 'pending' });
+  expect(ownerWrites).toEqual([
+    { action: 'fail_before_dispatch', epoch: 1 }, { action: 'interrupt', epoch: 1 },
+  ]);
+  expect(current).toEqual(resumed);
+  expect(database.rpc.mock.calls.some(([name]) => name === 'runtime_cancel')).toBe(false);
+  expect(mock.billing.claimPaygCall).not.toHaveBeenCalled();
+  expect(mock.billing.dispatchOnce).not.toHaveBeenCalled();
 });

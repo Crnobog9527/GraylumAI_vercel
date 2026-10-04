@@ -4,7 +4,7 @@
 BEGIN;
 SET LOCAL lock_timeout='5s';
 DO $$ BEGIN
- IF md5(pg_get_functiondef('public.runtime_execution(uuid,uuid,text,jsonb)'::regprocedure)) NOT IN ('f497b1c3d026b7182a98c15d4def9dba','6c1a38e2e600f3996b52e41495e50136') THEN
+ IF md5(pg_get_functiondef('public.runtime_execution(uuid,uuid,text,jsonb)'::regprocedure)) NOT IN ('f497b1c3d026b7182a98c15d4def9dba','6d3ae6342bf0eaaf1899da954203f658') THEN
   RAISE EXCEPTION 'PAYG_RUNTIME_SOURCE_MISMATCH: runtime_execution(uuid,uuid,text,jsonb)';END IF;
  IF md5(pg_get_functiondef('public.bill2_payg_claim(uuid,uuid,integer,jsonb)'::regprocedure)) NOT IN ('0e9af3688e33e3adc1d1400a3561b01e','a67839c4bbbe56e72cebf972a2d19ff5') THEN
   RAISE EXCEPTION 'PAYG_RUNTIME_SOURCE_MISMATCH: bill2_payg_claim(uuid,uuid,integer,jsonb)';END IF;
@@ -61,6 +61,32 @@ BEGIN
  END IF;
  IF NOT runtime_history_available(e.id) THEN RAISE EXCEPTION 'RUNTIME_CONTEXT_REVOKED';END IF;
  PERFORM runtime_billing_allowed(p_actor_id,b.payload,b.id);
+ IF p_action IN ('fail_before_dispatch','interrupt','checkpoint_match','checkpoint_primary','check_latest','complete',
+  'owner_cancel','owner_session','owner_tool') AND b.contract_version='bill2.v2' THEN
+  IF coalesce(p_result->>'epoch','') !~ '^[1-9][0-9]*$'
+   OR (p_result->>'epoch')::bigint IS DISTINCT FROM b.runtime_epoch
+   OR e.state IN ('prepared','waiting_credits','waiting_resume','cancelled')
+   OR EXISTS(SELECT 1 FROM jsonb_object_keys(p_result) k WHERE k NOT IN ('epoch','value'))
+  THEN RAISE EXCEPTION 'RUNTIME_RESUME_CONFLICT';END IF;
+  p_result:=nullif(p_result->'value','null'::jsonb);
+ END IF;
+ -- These three bounded delegates hold the same Session/execution/run locks as
+ -- resume. No asynchronous check-then-write gap, new RPC family or new authority.
+ IF p_action IN ('owner_cancel','owner_session','owner_tool') THEN
+  IF b.contract_version<>'bill2.v2' THEN RAISE EXCEPTION 'RUNTIME_ACTION_DENIED';END IF;
+  IF p_action='owner_cancel' THEN
+   RETURN runtime_cancel(p_actor_id,e.id);
+  ELSIF p_action='owner_session' THEN
+   IF coalesce(p_result->>'action','') NOT IN ('freeze','append') THEN RAISE EXCEPTION 'RUNTIME_ACTION_DENIED';END IF;
+   RETURN runtime_session_items(p_actor_id,s.id,e.id,p_result->>'action',nullif(p_result->'items','null'::jsonb),
+    (p_result->>'limit')::int,(p_result->>'batch')::int);
+  ELSE
+   IF coalesce(p_result->>'action','') NOT IN ('claim','complete') THEN RAISE EXCEPTION 'RUNTIME_ACTION_DENIED';END IF;
+   RETURN runtime_tool(p_actor_id,e.id,p_result->>'callId',p_result->>'name',p_result->'arguments',
+    p_result->>'action',nullif(p_result->'result','null'::jsonb));
+  END IF;
+ END IF;
+
  IF b.contract_version='bill2.v2' AND p_action IN ('begin','read')
   AND e.state IN ('running','interrupted') AND b.runtime_dispatch_deadline<=clock_timestamp()
   AND NOT b.closed AND NOT b.cancel_requested AND NOT b.conflict THEN
