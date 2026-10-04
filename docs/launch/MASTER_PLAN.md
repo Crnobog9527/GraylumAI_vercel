@@ -402,7 +402,7 @@
         - **FUSION-COMPARE**：对比默认勾选、用户可改、最少勾选数参数。
         - **不对应开发任务**：默认 m=6 是后台配置修改，执行前另获 Owner 批准（第 39 项的做法）；会员余额不足时的暂停和继续沿用 BILL-PAYG；积分不过期和退款规则沿用现有规则；取消封闭内测体现在第 7.2、7.4 节的排期里，发布仍走 V3-M3 → REL-1；首发目标用户用于宣传和落地页文案。
 
-51. **定价、付费墙细则和定位档案数量**（Owner 2026-10-04；#618 合并后由总控记在 #618 评论里，每条都附原话，下文按"记录 X"引用）。多数决定是 Owner 在定价策略审阅窗口做的、由该窗口转述原话，记录 J、M、N、O 是 Owner 在总控窗口的原话；记录 P 是总控对 Owner 更正的整理，评论里没有附原话；记录 Q 是定价窗口逐字转述的原话，记录 R 是 Owner 在总控窗口的确认；记录 S、T 是定价窗口逐字转述的原话；记录 U 是 Owner 在总控窗口的原话；记录 V、W 是定价窗口逐字转述的原话；记录 X、Z、AA 是 Owner 在总控窗口的原话；记录 Y 是定价窗口逐字转述的原话。同一事项前后不一致时以较晚的记录为准，下面逐条注明被取代的写法。付费墙设计的唯一依据是仓库里的 [`docs/launch/design/paywall/`](design/paywall/README.md)：Owner 定稿的 v25（artifact `MW9Ja3xTfLNbzraTudi2X7` 第 36 版，版本号 `1791131430-4177`，[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)；此前 v24 依据 [记录 V](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981192614)；此前 v23 依据 [记录 T](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980843167)；2026-10-04 导出的 HTML 和 9 个场景的桌面、手机截图，各截图来自哪个版本见 README），README 记有场景清单、Owner 的文案规则和仍待定的事项；artifact 只是来源，实施以仓库里的导出为准。**设计稿与本项冲突时以本项为准**（例如创始名额只在 Waffo 权威确认会话关闭或过期后才释放；未上线的功能直接隐藏、不标"即将上线"），已知冲突列在 README 的"与规划冲突时以规划为准"一节。原 PAYWALL-DESIGN 定稿 `QLdBcaYMUSRQHa1YPQa2VQ` 只留作历史，不再作为实施依据（记录 M）。本项只改规划；staging 和正式环境的价格、套餐、积分包、会员权限和 Waffo 产品配置，实际修改前仍须 Owner 另行批准。
+51. **定价、付费墙细则和定位档案数量**（Owner 2026-10-04；#618 合并后由总控记在 #618 评论里，每条都附原话，下文按"记录 X"引用）。多数决定是 Owner 在定价策略审阅窗口做的、由该窗口转述原话，记录 J、M、N、O 是 Owner 在总控窗口的原话；记录 P 是总控对 Owner 更正的整理，评论里没有附原话；记录 Q 是定价窗口逐字转述的原话，记录 R 是 Owner 在总控窗口的确认；记录 S、T 是定价窗口逐字转述的原话；记录 U 是 Owner 在总控窗口的原话；记录 V、W 是定价窗口逐字转述的原话；记录 X、Z、AA、AB 是 Owner 在总控窗口的原话；记录 Y 是定价窗口逐字转述的原话。同一事项前后不一致时以较晚的记录为准，下面逐条注明被取代的写法。付费墙设计的唯一依据是仓库里的 [`docs/launch/design/paywall/`](design/paywall/README.md)：Owner 定稿的 v25（artifact `MW9Ja3xTfLNbzraTudi2X7` 第 36 版，版本号 `1791131430-4177`，[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)；此前 v24 依据 [记录 V](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981192614)；此前 v23 依据 [记录 T](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980843167)；2026-10-04 导出的 HTML 和 9 个场景的桌面、手机截图，各截图来自哪个版本见 README），README 记有场景清单、Owner 的文案规则和仍待定的事项；artifact 只是来源，实施以仓库里的导出为准。**设计稿与本项冲突时以本项为准**（例如创始名额只在 Waffo 权威确认会话关闭或过期后才释放；未上线的功能直接隐藏、不标"即将上线"），已知冲突列在 README 的"与规划冲突时以规划为准"一节。原 PAYWALL-DESIGN 定稿 `QLdBcaYMUSRQHa1YPQa2VQ` 只留作历史，不再作为实施依据（记录 M）。本项只改规划；staging 和正式环境的价格、套餐、积分包、会员权限和 Waffo 产品配置，实际修改前仍须 Owner 另行批准。
 
     记录出处（均为 [#618](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618) 的总控评论，按时间）：
     [B 门槛原则](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5971895597)、
@@ -430,7 +430,8 @@
     [X 拒付冻结和续费提醒提前到上线前](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)、
     [Y 退款规则参照 Higgsfield](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)、
     [Z 积分包被拒付的处理](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)、
-    [AA 退款细则确认](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982129081)。
+    [AA 退款细则确认](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982129081)、
+    [AB 升级退款后恢复 Pro 的含义](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982435235)。
     合并记录（[A](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5970619921)）另记 Owner 确认积分有效期维持原规则：积分永不过期，只有会员等级会过期。
 
     Owner 原话（摘录，完整原话见各记录）：
@@ -489,6 +490,8 @@
 
     > 同意两项推荐：从这次付款起账户没有任何积分消耗才算"没用过"；付费墙卡片不写 7 天退款，只写在常见问题和条款里。（记录 AA）
 
+    > 同意恢复 Pro 按推荐：恢复到原 Pro 已付期限的原到期日为止，不延长不缩短；原 Pro 订阅保持停止续费、不自动恢复扣费，到期前提醒用户自己重新订阅；年付 Pro 没发完的按月积分继续发到原到期日。（记录 AB）
+
     整理（总控记录和唯一来源设计稿的含义，不是 Owner 原话）：
 
     - **月付**（记录 F）：Pro $29/月、Gold $69/月，这是实际售价。每月积分 = 售价 × 每美元积分：Pro 3,480（×120）、Gold 8,970（×130）。取代第 50 项"数值怎么定"中"月价 = 实测用量 ÷ 每美元积分"的算法。
@@ -529,7 +532,7 @@
     - **定价窗口的毛利估算**（记录 F，按积分全部用完估算，仅供参考）：月付约 74%，Pro 年付约 71%，Gold 年付约 67%，创始会员按 $496 估算约 60%（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)：定价窗口按积分全部用完、6 倍加价、Waffo 手续费 3.9% + $0.50 估算，不是 Owner 给的数字；取代按已作废的 $372.60 估算的约 48%）。
     - **待观察**（记录 B）：限流（每天 200 条新消息、600 次调用，所有档位一样）可能卡住重度付费用户；上线后看数据，再考虑是否按档位放宽。现在不改。
     - **退款规则**（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)；取代"默认不退款、Owner 逐笔批准人工例外"，即 DATA-ERASURE E5 和 PAY-COMMON 已定 E5 中的这部分）：参照 Higgsfield 服务条款。
-        - 首次购买会员（月付、年付、创始会员、微信一次性）、积分包、Pro 升 Gold：购买后 7 天内，并且这次买到的积分没有用过，可以申请退款；法律允许时可扣不超过 6% 的手续费。Pro 升 Gold 退的是这笔 Gold 付款：扣回 8,970 积分，恢复 Pro。
+        - 首次购买会员（月付、年付、创始会员、微信一次性）、积分包、Pro 升 Gold：购买后 7 天内，并且这次买到的积分没有用过，可以申请退款；法律允许时可扣不超过 6% 的手续费。Pro 升 Gold 退的是这笔 Gold 付款：扣回 8,970 积分，恢复 Pro。恢复 Pro 的含义（[记录 AB](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982435235)）：恢复到原 Pro 已付期限的原到期日为止，不延长也不缩短；原 Pro 订阅保持停止续费、不自动恢复扣费，到期前提醒用户自己重新订阅；年付 Pro 没发完的按月积分继续发到原到期日。退款时原到期日已经过了的，没有可恢复的 Pro 期限。
         - 不退：自动续费的各期、超过 7 天、这次的积分已经用过。取消订阅用到当期结束，不按比例退款。
         - 平台大幅缩减付费功能，或没有正当理由终止用户账号：按剩余时间退款；没有正当理由终止账号的，还要退没用完的已购积分。用户违规被终止账号（可以包括恶意拒付）：不退款，积分作废，不许换号重新注册。
         - 积分永不过期的规则不变。服务条款和退款政策的原文由 Owner 准备，不在规划范围内。
