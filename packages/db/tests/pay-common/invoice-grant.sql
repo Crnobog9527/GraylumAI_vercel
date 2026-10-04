@@ -32,6 +32,7 @@ BEGIN
   SELECT credits INTO initial_balance FROM profiles WHERE id=actor;
   SET LOCAL ROLE service_role;
   SELECT * INTO result FROM atomic_grant_subscription_invoice_credits(
+    p_metadata=>jsonb_build_object('stripeSubscriptionStatus','active','stripeSubscriptionUserId',actor),
     p_user_id=>actor,p_membership_plan_id=>plan,p_stripe_subscription_id=>'sub_invoice_fixture',
     p_stripe_invoice_id=>'in_initial_fixture',p_source_order_id=>original.id,p_amount_total=>1999,
     p_grant_period_key=>'invoice:in_initial_fixture',p_period_start=>'2026-10-05T00:00:00Z',
@@ -47,6 +48,7 @@ BEGIN
   PERFORM pg_temp.assert_true((SELECT credits=initial_balance+120 AND membership_level='pro' FROM profiles WHERE id=actor),
     'balance and membership level commit together');
   SELECT * INTO result FROM atomic_grant_subscription_invoice_credits(
+    p_metadata=>jsonb_build_object('stripeSubscriptionStatus','active','stripeSubscriptionUserId',actor),
     p_user_id=>actor,p_membership_plan_id=>plan,p_stripe_subscription_id=>'sub_invoice_fixture',
     p_stripe_invoice_id=>'in_initial_fixture',p_source_order_id=>original.id,p_amount_total=>1999,
     p_grant_period_key=>'invoice:in_initial_fixture',p_period_start=>'2026-10-05T00:00:00Z',
@@ -55,6 +57,7 @@ BEGIN
   PERFORM pg_temp.assert_true(result.is_idempotent AND NOT result.granted,'invoice replay grants once');
   refused:=false;
   BEGIN PERFORM atomic_grant_subscription_invoice_credits(
+    p_metadata=>jsonb_build_object('stripeSubscriptionStatus','active','stripeSubscriptionUserId',other_actor),
     p_user_id=>other_actor,p_membership_plan_id=>plan,p_stripe_subscription_id=>'sub_invoice_fixture',
     p_stripe_invoice_id=>'in_other_fixture',p_source_order_id=>original.id,p_amount_total=>1999,
     p_grant_period_key=>'invoice:in_other_fixture',p_period_start=>'2026-11-05T00:00:00Z',
@@ -67,6 +70,7 @@ BEGIN
   UPDATE profiles SET is_deleted='true',membership_level='free' WHERE id=actor;
   SET LOCAL ROLE service_role;
   SELECT * INTO result FROM atomic_grant_subscription_invoice_credits(
+    p_metadata=>jsonb_build_object('stripeSubscriptionStatus','active','stripeSubscriptionUserId',actor),
     p_user_id=>actor,p_membership_plan_id=>plan,p_stripe_subscription_id=>'sub_invoice_fixture',
     p_stripe_invoice_id=>'in_renewal_fixture',p_source_order_id=>original.id,p_amount_total=>1999,
     p_grant_period_key=>'invoice:in_renewal_fixture',p_period_start=>'2026-11-05T00:00:00Z',

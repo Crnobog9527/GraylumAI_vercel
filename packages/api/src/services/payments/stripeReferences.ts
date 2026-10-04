@@ -47,3 +47,33 @@ export async function resolveStripeOrderIds<T extends { id?: string | null; pric
   return { ...order, stripe_price_id: price.data.external_id as string,
     stripe_checkout_session_id: one('checkout'), stripe_invoice_id: one('invoice'), stripe_subscription_id: subscription };
 }
+
+export async function loadCurrentStripeSubscription(supabase: Db, userId: string, scope: StripeScope, statuses: string[]) {
+  const result = await supabase.from('user_subscriptions')
+    .select(`id,membership_plan_id,payment_channel,merchant_namespace,payment_mode,status,billing_cycle,
+      current_period_start,cancel_at_period_end,stripe_customer_id`)
+    .eq('user_id', userId).in('status', statuses).limit(2);
+  if (result.error || !Array.isArray(result.data)) throw new Error('PAY_COMMON_MAPPING_READ_FAILED');
+  if (result.data.length > 1) throw new Error('PAY_COMMON_MEMBERSHIP_FACTS_UNKNOWN');
+  const subscription = result.data[0];
+  if (!subscription) return null;
+  if (subscription.payment_channel !== 'stripe' || subscription.merchant_namespace !== scope.merchant
+    || subscription.payment_mode !== scope.mode) throw new Error('PAY_COMMON_SUBSCRIPTION_SCOPE_MISMATCH');
+  if (!subscription.current_period_start || !subscription.membership_plan_id
+    || !['monthly', 'yearly'].includes(subscription.billing_cycle)) throw new Error('PAY_COMMON_MEMBERSHIP_FACTS_UNKNOWN');
+  const grants = await supabase.from('subscription_credit_grants').select('source_order_id')
+    .eq('subscription_id', subscription.id).eq('membership_plan_id', subscription.membership_plan_id)
+    .eq('billing_cycle', subscription.billing_cycle).eq('period_start', subscription.current_period_start)
+    .eq('status', 'granted').limit(2);
+  if (grants.error || !Array.isArray(grants.data) || grants.data.length !== 1 || !grants.data[0].source_order_id) {
+    throw new Error('PAY_COMMON_MEMBERSHIP_FACTS_UNKNOWN');
+  }
+  const paid = await supabase.from('payment_orders').select('*').eq('user_id', userId)
+    .eq('id', grants.data[0].source_order_id).eq('subscription_id', subscription.id)
+    .eq('item_id', subscription.membership_plan_id).eq('billing_cycle', subscription.billing_cycle)
+    .eq('status', 'completed').eq('payment_status', 'paid').not('fulfilled_at', 'is', null).maybeSingle();
+  if (paid.error || !paid.data) throw new Error('PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING');
+  const ids = await resolveStripeOrderIds(supabase, paid.data);
+  return { ...subscription, stripe_subscription_id: ids.stripe_subscription_id,
+    stripe_price_id: ids.stripe_price_id };
+}

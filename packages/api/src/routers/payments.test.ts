@@ -298,7 +298,7 @@ function createSubscriptionChangeGuardHarness(options: {
   )));
   const local: any = { user_id: 'user-1', payment_channel: 'stripe', merchant_namespace: 'acct_fixture', payment_mode: 'test', id: 'sub-row-1', membership_plan_id: currentPlanId, stripe_subscription_id: 'sub_test_active',
     stripe_customer_id: 'cus_test_active', stripe_price_id: 'price_test_old', status: 'active',
-    billing_cycle: options.currentCycle ?? 'monthly', cancel_at_period_end: 'false', metadata: {} };
+    current_period_start: '2026-01-01T00:00:00Z', billing_cycle: options.currentCycle ?? 'monthly', cancel_at_period_end: 'false', metadata: {} };
   const remote: any = { livemode: false, id: 'sub_test_active', customer: 'cus_test_active', status: 'active',
     cancel_at_period_end: false, cancel_at: null, collection_method: 'charge_automatically',
     metadata: { userId: 'user-1' }, items: { has_more: false, data: [{ id: 'si_test_current', quantity: 1,
@@ -336,6 +336,13 @@ function createSubscriptionChangeGuardHarness(options: {
     item_id: currentPlanId, subscription_id: local.id, billing_cycle: local.billing_cycle, purchase_action: 'checkout',
     payment_channel: 'stripe', merchant_namespace: 'acct_fixture', payment_mode: 'test', price_ref_id: 'ref-old-price',
     status: 'completed', payment_status: 'paid', fulfilled_at: '2026-01-01T00:00:00Z', metadata: {} };
+  const grants: Record<string, unknown>[] = [{ source_order_id: baseOrder.id, subscription_id: local.id,
+    membership_plan_id: currentPlanId, billing_cycle: local.billing_cycle, period_start: local.current_period_start, status: 'granted' }];
+  function grantsBuilder() {
+    const filters: Array<[string, unknown]> = [];
+    return { select() { return this; }, eq(key: string, value: unknown) { filters.push([key, value]); return this; },
+      limit: async (count: number) => ({ data: grants.filter(row => filters.every(([key, value]) => row[key] === value)).slice(0, count), error: null }) };
+  }
   function mappingBuilder() {
     const filters: Array<[string, unknown]> = [];
     const result = () => {
@@ -426,13 +433,14 @@ function createSubscriptionChangeGuardHarness(options: {
     }, from(table: string) {
     if (table === 'payment_orders') return ordersBuilder();
     if (table === 'payment_provider_refs') return mappingBuilder();
+    if (table === 'subscription_credit_grants') return grantsBuilder();
     if (table === 'user_subscriptions') return { select() { return this; }, eq() { return this; }, in() { return this; },
       limit: async () => ({ data: [local], error: null }) };
     throw new Error(`Unexpected admin write ${table}`);
   } };
   return { caller: createProtectedCaller({ supabase: userSupabase, supabaseAdmin: adminSupabase }),
     targetPlanId, subscriptionRetrieve, subscriptionUpdate, priceRetrieve, targetPrice, invoicePreview, invoiceRetrieve, invoiceList, remote, local, plan,
-    rows, orderInserts, orderUpdates, userTableReads, adminSupabase, targetPriceIds, fullPricePreview,
+    rows, baseOrder, grants, orderInserts, orderUpdates, userTableReads, adminSupabase, targetPriceIds, fullPricePreview,
     setInsertError: (e: any) => { insertError = e; } };
 }
 
@@ -1305,6 +1313,32 @@ describe('paymentsRouter error sanitization', () => {
       expect(syncSubscriptionState).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    ['gold', 'monthly', 'gold', 'yearly'],
+    ['pro', 'yearly', 'gold', 'yearly'],
+  ] as const)('ignores later-arriving prior Pro monthly payment for current %s %s upgrade', async (currentLevel, currentCycle, targetLevel, billingCycle) => {
+    const h = createSubscriptionChangeGuardHarness({ currentLevel, currentCycle, targetLevel });
+    h.rows.push({ ...h.baseOrder, id: 'late-prior-pro-payment', item_id: 'old-pro-plan', billing_cycle: 'monthly',
+      price_ref_id: 'ref-stale-price', fulfilled_at: '2026-12-01T00:00:00Z' });
+    h.grants.push({ ...h.grants[0], source_order_id: 'late-prior-pro-payment', membership_plan_id: 'old-pro-plan',
+      billing_cycle: 'monthly', period_start: '2025-12-01T00:00:00Z' });
+    const input = { planId: h.targetPlanId, billingCycle };
+    const quote = await getQuote(h, input);
+    await h.caller.changeSubscriptionPlan({ ...input, expected: quote });
+    expect(h.subscriptionUpdate).toHaveBeenCalledOnce();
+    expect(h.orderInserts[0].purchase_change_request.originalPrice).toBe('price_test_old');
+  });
+
+  it.each(['missing', 'ambiguous'] as const)('rejects %s current paid-term source before provider dispatch', async (state) => {
+    const h = createSubscriptionChangeGuardHarness();
+    if (state === 'missing') h.grants.splice(0);
+    else h.grants.push({ ...h.grants[0], source_order_id: 'second-invoice-same-period' });
+    await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle: 'monthly' }))
+      .rejects.toBeInstanceOf(TRPCError);
+    expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+    expect(h.invoicePreview).not.toHaveBeenCalled();
+  });
 
   it.each([
     ['pro', 'monthly', 'gold', 'monthly'], ['pro', 'monthly', 'pro', 'yearly'],
@@ -3455,6 +3489,11 @@ describe('PAY-1 Customer Portal', () => {
             limit: () => builder, maybeSingle: async () => ({ data: row, error: null }) };
           return builder;
         }
+        if (table === 'subscription_credit_grants') {
+          const builder = { select: () => builder, eq: () => builder,
+            limit: async () => ({ data: [{ source_order_id: 'order-pay1' }], error: null }) };
+          return builder;
+        }
         if (table === 'payment_provider_refs') {
           const refs = [ { id: 'price-ref-pay1', object_type: 'price', external_id: 'price_pay1' },
             { subscription_id: 'mirror_pay1', object_type: 'subscription', external_id: 'sub_pay1' } ]
@@ -3470,7 +3509,7 @@ describe('PAY-1 Customer Portal', () => {
         const builder = {
           select: () => builder, not: () => builder, order: () => builder, in: () => builder,
           eq(column: string, value: unknown) { filters.push([column, value]); return builder; },
-          limit: async () => ({ data: options.noSubscription ? [] : [{ id: 'mirror_pay1', payment_channel: 'stripe', merchant_namespace: 'acct_fixture', payment_mode: 'test', status: 'active', stripe_customer_id: 'cus_pay1', stripe_subscription_id: 'sub_pay1' }], error: options.readError ? { message: 'db failed' } : null }),
+          limit: async () => ({ data: options.noSubscription ? [] : [{ id: 'mirror_pay1', payment_channel: 'stripe', merchant_namespace: 'acct_fixture', payment_mode: 'test', status: 'active', membership_plan_id: 'plan-pay1', billing_cycle: 'monthly', current_period_start: '2026-01-01T00:00:00Z', stripe_customer_id: 'cus_pay1', stripe_subscription_id: 'sub_pay1' }], error: options.readError ? { message: 'db failed' } : null }),
         };
         return builder;
       },

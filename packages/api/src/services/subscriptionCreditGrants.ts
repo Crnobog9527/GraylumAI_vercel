@@ -4,10 +4,10 @@
  * This code is proprietary and confidential.
  */
 
-import { recordStripeInvoiceConflict } from './payments/stripeConflictEvidence';
+import { validateInvoiceSource } from './payments/stripeInvoiceEvidence';
 import { freezePurchaseSnapshot } from './payments/contracts';
 import { findStripeReference, resolveStripeOrderIds } from './payments/stripeReferences';
-import { snapshotAmountDue, type StripeScope } from './payments/purchaseFacts';
+import { type StripeScope } from './payments/purchaseFacts';
 import { logger } from '../lib/logger';
 import { normalizePaymentOrderStatus } from './paymentOrderStatus';
 import {
@@ -38,6 +38,7 @@ interface PaymentOrderRow {
   payment_mode?: string | null;
   purchase_snapshot?: unknown;
   purchase_membership_level?: string | null;
+  purchase_closed_at?: string | null;
   id?: string | null;
   user_id?: string | null;
   item_id?: string | null;
@@ -142,11 +143,15 @@ interface GrantSubscriptionCreditsInput extends GrantPeriod {
   invoicePaymentStatus?: string | null;
   invoiceStripeCustomerId?: string | null;
   membershipLevel?: string | null;
+  providerSubscriptionStatus?: string;
+  providerSubscriptionUserId?: string;
   canPromoteCheckoutOrder?: boolean;
   now?: string;
 }
 
 export interface FulfillMembershipInvoiceWithCreditGrantsInput {
+  providerSubscriptionStatus?: string;
+  providerSubscriptionUserId?: string;
   scope?: StripeScope;
   expectedSourceOrderId?: string;
   expectedSourcePriceId?: string;
@@ -812,7 +817,7 @@ async function getExistingInvoiceOrder(supabase: SupabaseLikeClient, invoiceId: 
   if (!reference?.order_id) return null;
   const query = supabase
     .from('payment_orders')
-    .select('price_ref_id,subscription_id,payment_channel,merchant_namespace,payment_mode,purchase_snapshot, purchase_membership_level, id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, stripe_invoice_id, stripe_subscription_id, payment_status, fulfilled_at, created_at, metadata')
+    .select('price_ref_id,subscription_id,payment_channel,merchant_namespace,payment_mode,purchase_snapshot, purchase_membership_level, purchase_closed_at, id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, stripe_invoice_id, stripe_subscription_id, payment_status, fulfilled_at, created_at, metadata')
     .eq('id', reference.order_id);
   const orderedQuery = typeof query.order === 'function'
     ? query.order('created_at', { ascending: true })
@@ -922,6 +927,7 @@ function pickSubscriptionSourceOrder(
   options: {
     invoiceCreatedAt?: string | null;
     periodStart?: string | null;
+    expectedSourceOrderId?: string;
     expectedSourcePriceId?: string;
     excludeSubscriptionPlanChangeOrders?: boolean;
   },
@@ -930,7 +936,7 @@ function pickSubscriptionSourceOrder(
   let blockedReason: string | null = null;
 
   for (const order of orders) {
-    if (order.status === 'failed'
+    if (order.purchase_closed_at || (order.status === 'failed' && order.id !== options.expectedSourceOrderId)
       || (options.expectedSourcePriceId && order.stripe_price_id !== options.expectedSourcePriceId)
       || (options.excludeSubscriptionPlanChangeOrders && isSubscriptionPlanChangeOrder(order) && !order.fulfilled_at)
       || !isUsableSourceForInvoice(order, options)) {
@@ -977,14 +983,14 @@ async function getLatestSubscriptionOrder(
   if (options.expectedSourcePriceId && !priceRef) throw new Error('PAY_COMMON_PRICE_MAPPING_MISSING');
   const query = supabase
     .from('payment_orders')
-    .select('price_ref_id,subscription_id,payment_channel,merchant_namespace,payment_mode,purchase_snapshot, purchase_membership_level, id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, payment_status, fulfilled_at, created_at, metadata')
+    .select('price_ref_id,subscription_id,payment_channel,merchant_namespace,payment_mode,purchase_snapshot, purchase_membership_level, purchase_closed_at, id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, payment_status, fulfilled_at, created_at, metadata')
     .eq(options.expectedSourceOrderId ? 'id' : 'subscription_id', options.expectedSourceOrderId ?? subscriptionRef!.subscription_id);
   const priceQuery = options.expectedSourcePriceId ? query.eq('price_ref_id', priceRef!.id) : query;
   const exactSourceQuery = options.expectedSourceOrderId ? priceQuery.eq('id', options.expectedSourceOrderId) : priceQuery;
   const cutoffQuery = sourceCutoff && typeof priceQuery.lte === 'function'
     ? exactSourceQuery.lte('created_at', sourceCutoff)
     : exactSourceQuery;
-  const filteredQuery = typeof cutoffQuery.neq === 'function'
+  const filteredQuery = !options.expectedSourceOrderId && typeof cutoffQuery.neq === 'function'
     ? cutoffQuery.neq('status', 'failed')
     : cutoffQuery;
   const orderedQuery = filteredQuery
@@ -2105,6 +2111,8 @@ async function applyInvoiceGrantAdmission(
     p_source_type: input.sourceType,
     p_source_id: input.sourceId ?? input.stripeInvoiceId ?? input.stripeSubscriptionId,
     p_metadata: {
+      stripeSubscriptionStatus: input.providerSubscriptionStatus,
+      stripeSubscriptionUserId: input.providerSubscriptionUserId,
       subscriptionId: input.stripeSubscriptionId,
       invoiceId: input.stripeInvoiceId ?? null,
       grantType: input.grantType,
@@ -2291,20 +2299,7 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
     );
   }
 
-  if (!input.scope || sourceOrder.payment_channel !== 'stripe' || sourceOrder.merchant_namespace !== input.scope.merchant
-    || sourceOrder.payment_mode !== input.scope.mode) throw new Error('PAY_COMMON_INVOICE_SOURCE_MISMATCH');
-  const snapshot = freezePurchaseSnapshot(sourceOrder.purchase_snapshot);
-  if (snapshot.item_type !== 'membership_plan' || snapshot.item_id !== sourceOrder.item_id
-    || snapshot.billing_cycle !== sourceOrder.billing_cycle
-    || !['pro', 'gold'].includes(sourceOrder.purchase_membership_level ?? '')) {
-    throw new Error('PAY_COMMON_GRANT_SNAPSHOT_MISMATCH');
-  }
-  if (input.paymentStatus !== 'paid' || input.currency !== snapshot.currency
-    || input.amountTotal !== snapshotAmountDue(snapshot)
-    || (sourceOrder.stripe_customer_id && input.stripeCustomerId !== sourceOrder.stripe_customer_id)) {
-    await recordStripeInvoiceConflict({ db: supabase, scope: input.scope, invoiceId: input.invoiceId, sourceOrderId: sourceOrder.id });
-    throw new Error('PAY_COMMON_INVOICE_RECEIPT_MISMATCH');
-  }
+  const snapshot = await validateInvoiceSource(supabase, input, sourceOrder);
   const membershipLevel = sourceOrder.purchase_membership_level!;
   const plan = { id: snapshot.item_id, name: String(sourceOrder.metadata?.productName ?? 'Membership'),
     yearly_credits: snapshot.credits, monthly_credits: snapshot.credits, monthly_bonus_credits: snapshot.bonus_credits };
@@ -2355,6 +2350,8 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
     subscriptionTermStart: termStart,
     subscriptionTermEnd: termEnd,
     membershipLevel,
+    providerSubscriptionStatus: input.providerSubscriptionStatus,
+    providerSubscriptionUserId: input.providerSubscriptionUserId,
     canPromoteCheckoutOrder: Boolean(
       sourceOrder.stripe_checkout_session_id
       && !sourceOrder.stripe_invoice_id

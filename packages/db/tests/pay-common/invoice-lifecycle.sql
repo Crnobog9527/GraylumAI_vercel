@@ -32,6 +32,7 @@ BEGIN
   SELECT credits INTO initial_balance FROM profiles WHERE id=actor;
   SET LOCAL ROLE service_role;
   SELECT * INTO result FROM atomic_grant_subscription_invoice_credits(
+    p_metadata=>jsonb_build_object('stripeSubscriptionStatus','active','stripeSubscriptionUserId',actor),
     p_user_id=>actor,p_membership_plan_id=>plan,p_stripe_subscription_id=>'sub_invoice_fixture',
     p_stripe_invoice_id=>'in_initial_fixture',p_source_order_id=>original.id,p_amount_total=>1999,
     p_stripe_customer_id=>'cus_fixture',
@@ -58,6 +59,7 @@ BEGIN
       refused:=false;
       BEGIN
         PERFORM atomic_grant_subscription_invoice_credits(
+    p_metadata=>jsonb_build_object('stripeSubscriptionStatus','active','stripeSubscriptionUserId',actor),
           p_user_id=>actor,p_membership_plan_id=>plan,p_stripe_subscription_id=>'sub_invoice_fixture',
           p_stripe_invoice_id=>'in_invalid_receipt',p_source_order_id=>original.id,p_amount_total=>1999,
           p_stripe_customer_id=>candidate.customer,p_grant_period_key=>'invoice:in_invalid_receipt',
@@ -93,6 +95,7 @@ BEGIN
     PERFORM pg_temp.assert_true((SELECT membership_level='free' FROM profiles WHERE id=actor),
       'cancellation status and membership downgrade commit together');
     SELECT * INTO result FROM atomic_grant_subscription_invoice_credits(
+    p_metadata=>jsonb_build_object('stripeSubscriptionStatus','active','stripeSubscriptionUserId',actor),
       p_user_id=>actor,p_membership_plan_id=>plan,p_stripe_subscription_id=>'sub_invoice_fixture',
       p_stripe_invoice_id=>'in_paid_after_cancellation',p_source_order_id=>original.id,p_amount_total=>1999,
       p_stripe_customer_id=>'cus_fixture',p_grant_period_key=>'invoice:in_paid_after_cancellation',
@@ -102,6 +105,7 @@ BEGIN
       AND (SELECT status='canceled' FROM user_subscriptions WHERE id=sub),
       'late paid invoice settles owed credits without resurrecting canceled membership');
     SELECT * INTO result FROM atomic_grant_subscription_invoice_credits(
+    p_metadata=>jsonb_build_object('stripeSubscriptionStatus','active','stripeSubscriptionUserId',actor),
       p_user_id=>actor,p_membership_plan_id=>plan,p_stripe_subscription_id=>'sub_invoice_fixture',
       p_stripe_invoice_id=>'in_month_anchor_restored',p_source_order_id=>original.id,p_amount_total=>1999,
       p_stripe_customer_id=>'cus_fixture',p_grant_period_key=>'invoice:in_month_anchor_restored',
@@ -117,12 +121,38 @@ BEGIN
     VALUES('stripe','acct_fixture','test','price','price_year_lifecycle',plan,'yearly',true);
   SET LOCAL ROLE service_role;
   original:=pay_common_create_purchase(other_actor,'membership_plan',plan,'yearly','acct_fixture','test','free');
-  DECLARE term_end timestamptz;
+  DECLARE term_end timestamptz; cancellation jsonb;
   BEGIN
+    cancellation:=jsonb_build_object('id','sub_year_lifecycle','object','subscription','livemode',false,
+      'user_id',other_actor,'customer',NULL,'status','canceled','cancel_at_period_end',false,
+      'period_start','2027-03-01T00:00:00Z');
+    refused:=false;
+    BEGIN PERFORM pay_common_sync_subscription('acct_fixture','test',cancellation);
+      EXCEPTION WHEN OTHERS THEN IF SQLERRM='PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING' THEN refused:=true; ELSE RAISE; END IF;
+    END;
+    PERFORM pg_temp.assert_true(refused,'cancellation arriving before the initial invoice mapping must retry');
+    refused:=false;
+    BEGIN
+      PERFORM atomic_grant_subscription_invoice_credits(
+        p_user_id=>other_actor,p_membership_plan_id=>plan,p_stripe_subscription_id=>'sub_year_lifecycle',
+        p_stripe_invoice_id=>'in_year_lifecycle',p_source_order_id=>original.id,p_amount_total=>19990);
+      EXCEPTION WHEN OTHERS THEN IF SQLERRM='PAY_COMMON_SUBSCRIPTION_RECEIPT_MISMATCH' THEN refused:=true; ELSE RAISE; END IF;
+    END;
+    PERFORM pg_temp.assert_true(refused,'missing fresh subscription status is rejected without defaulting to active');
+    refused:=false;
+    BEGIN
+      PERFORM atomic_grant_subscription_invoice_credits(
+        p_metadata=>jsonb_build_object('stripeSubscriptionStatus','active','stripeSubscriptionUserId',actor),
+        p_user_id=>other_actor,p_membership_plan_id=>plan,p_stripe_subscription_id=>'sub_year_lifecycle',
+        p_stripe_invoice_id=>'in_year_lifecycle',p_source_order_id=>original.id,p_amount_total=>19990);
+      EXCEPTION WHEN OTHERS THEN IF SQLERRM='PAY_COMMON_SUBSCRIPTION_RECEIPT_MISMATCH' THEN refused:=true; ELSE RAISE; END IF;
+    END;
+    PERFORM pg_temp.assert_true(refused,'fresh subscription owner must match the admitted payment owner');
     FOREACH term_end IN ARRAY ARRAY['2028-02-28T00:00:00Z'::timestamptz,'2028-02-29T01:00:00Z'::timestamptz] LOOP
       refused:=false;
       BEGIN
         PERFORM atomic_grant_subscription_invoice_credits(
+    p_metadata=>jsonb_build_object('stripeSubscriptionStatus','active','stripeSubscriptionUserId',other_actor),
           p_user_id=>other_actor,p_membership_plan_id=>plan,p_stripe_subscription_id=>'sub_year_lifecycle',
           p_stripe_invoice_id=>'in_year_lifecycle',p_source_order_id=>original.id,p_amount_total=>19990,
           p_grant_period_key=>'annual:2027-03-01T00:00:00.000Z:01',p_period_start=>'2027-03-01T00:00:00Z',
@@ -134,6 +164,7 @@ BEGIN
       PERFORM pg_temp.assert_true(refused,'annual short duration and changed UTC time rejected');
     END LOOP;
     SELECT * INTO result FROM atomic_grant_subscription_invoice_credits(
+    p_metadata=>jsonb_build_object('stripeSubscriptionStatus','canceled','stripeSubscriptionUserId',other_actor),
       p_user_id=>other_actor,p_membership_plan_id=>plan,p_stripe_subscription_id=>'sub_year_lifecycle',
       p_stripe_invoice_id=>'in_year_lifecycle',p_source_order_id=>original.id,p_amount_total=>19990,
       p_grant_period_key=>'annual:2027-03-01T00:00:00.000Z:01',p_period_start=>'2027-03-01T00:00:00Z',
@@ -141,6 +172,12 @@ BEGIN
       p_grant_type=>'annual_monthly_release',p_period_index=>1,p_total_periods=>12,
       p_idempotency_key=>'subscription_grant:annual:year_lifecycle');
     PERFORM pg_temp.assert_true(result.granted,'annual leap-year 366-day term accepted');
+    PERFORM pg_temp.assert_true((SELECT membership_level='free' FROM profiles WHERE id=other_actor)
+      AND (SELECT status='canceled' FROM user_subscriptions WHERE id=(SELECT subscription_id FROM payment_orders WHERE id=original.id))
+      AND (SELECT payment_status='paid' AND fulfilled_at IS NOT NULL FROM payment_orders WHERE id=original.id),
+      'first paid invoice after provider cancellation closes finances without granting active membership');
+    PERFORM pg_temp.assert_true(pay_common_sync_subscription('acct_fixture','test',cancellation),
+      'retried cancellation succeeds after invoice establishes the original subscription mapping');
   END;
   RESET ROLE;
 END $$;

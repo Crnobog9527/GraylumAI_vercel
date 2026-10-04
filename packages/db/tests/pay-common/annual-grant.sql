@@ -32,6 +32,7 @@ BEGIN
   SELECT credits INTO initial_balance FROM profiles WHERE id=actor;
   SET LOCAL ROLE service_role;
   SELECT * INTO result FROM atomic_grant_subscription_invoice_credits(
+    p_metadata=>jsonb_build_object('stripeSubscriptionStatus','active','stripeSubscriptionUserId',actor),
     p_user_id=>actor,p_membership_plan_id=>plan,p_stripe_subscription_id=>'sub_invoice_fixture',
     p_stripe_invoice_id=>'in_initial_fixture',p_source_order_id=>original.id,p_amount_total=>1999,
     p_grant_period_key=>'annual:2026-10-05T00:00:00.000Z:01',p_billing_cycle=>'yearly',
@@ -52,7 +53,7 @@ BEGIN
     p_stripe_invoice_id=>'in_initial_fixture',p_source_order_id=>original.id,
     p_grant_period_key=>'annual:2026-10-05T00:00:00.000Z:02',p_period_start=>'2026-11-05T00:00:00Z',
     p_period_end=>'2026-12-05T00:00:00Z',p_period_index=>2,p_total_periods=>12,p_credits_granted=>101,
-    p_idempotency_key=>'annual-fixture-period-02',p_description=>'Fixture release',p_source_type=>'stripe_invoice',
+    p_idempotency_key=>'annual-02',p_description=>'Fixture release',p_source_type=>'stripe_invoice',
     p_source_id=>'in_initial_fixture',p_now=>'2026-11-05T00:00:00Z');
   PERFORM pg_temp.assert_true(result.granted AND result.credits_granted=101,'cron uses period-01 frozen annual total');
   PERFORM pg_temp.assert_true((SELECT grant_snapshot=original.purchase_snapshot AND subscription_id=sub
@@ -62,7 +63,7 @@ BEGIN
     p_stripe_invoice_id=>'in_initial_fixture',p_source_order_id=>original.id,
     p_grant_period_key=>'annual:2026-10-05T00:00:00.000Z:02',p_period_start=>'2026-11-05T00:00:00Z',
     p_period_end=>'2026-12-05T00:00:00Z',p_period_index=>2,p_total_periods=>12,p_credits_granted=>101,
-    p_idempotency_key=>'annual-fixture-period-02',p_description=>'Fixture release',p_source_type=>'stripe_invoice',
+    p_idempotency_key=>'annual-02',p_description=>'Fixture release',p_source_type=>'stripe_invoice',
     p_source_id=>'in_initial_fixture',p_now=>'2026-11-05T00:00:00Z');
   PERFORM pg_temp.assert_true(result.is_idempotent AND NOT result.granted,'same annual period settles once');
   refused:=false;
@@ -71,7 +72,7 @@ BEGIN
     p_stripe_invoice_id=>'in_initial_fixture',p_source_order_id=>original.id,
     p_grant_period_key=>'annual:2026-10-05T00:00:00.000Z:03',p_period_start=>'2026-12-05T00:00:00Z',
     p_period_end=>'2027-01-05T00:00:00Z',p_period_index=>3,p_total_periods=>12,p_credits_granted=>999,
-    p_idempotency_key=>'annual-fixture-period-03',p_description=>'Fixture release',p_source_type=>'stripe_invoice',
+    p_idempotency_key=>'annual-03',p_description=>'Fixture release',p_source_type=>'stripe_invoice',
     p_source_id=>'in_initial_fixture',p_now=>'2026-12-05T00:00:00Z');
     EXCEPTION WHEN OTHERS THEN IF SQLERRM='PAY_COMMON_GRANT_SNAPSHOT_MISMATCH' THEN refused:=true; ELSE RAISE; END IF;
   END;

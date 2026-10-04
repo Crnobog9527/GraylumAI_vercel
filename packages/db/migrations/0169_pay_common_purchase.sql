@@ -75,7 +75,7 @@ WITH rel AS (
 )
 SELECT md5(string_agg(k || '=' || coalesce(d, '<null>'), E'\n' ORDER BY k)) INTO actual FROM grouped WHERE g ~ '^[^:]+:(payment_orders|user_subscriptions|subscription_credit_grants|payment_provider_refs|credit_packages|membership_plans)$' OR g ~ '^fn(acl)?:(pay_common_|atomic_fulfill_credit_package|atomic_grant_subscription_invoice_credits|atomic_grant_annual_subscription_credits)';
 
-  IF actual = 'e060ee227b95867256bf157be0fb9793' THEN RETURN; END IF;
+  IF actual = 'edbdc6f3ec8e03b1b21c428b6044b9ee' THEN RETURN; END IF;
   IF actual IS DISTINCT FROM 'dc3f51dcc333026ecde8a87f26e96d5e' THEN
     RAISE EXCEPTION 'PAY_COMMON_PURCHASE_SCHEMA_DRIFT';
   END IF;
@@ -677,6 +677,11 @@ DECLARE
   v_transaction_id UUID;
   v_grant_id UUID;
 BEGIN
+  IF p_metadata->>'stripeSubscriptionStatus' IS NULL OR p_metadata->>'stripeSubscriptionStatus'
+    NOT IN ('active','trialing','past_due','unpaid','incomplete','canceled','incomplete_expired','paused')
+    OR p_metadata->>'stripeSubscriptionUserId' IS DISTINCT FROM p_user_id::text THEN
+    RAISE EXCEPTION 'PAY_COMMON_SUBSCRIPTION_RECEIPT_MISMATCH';
+  END IF;
   IF p_user_id IS NULL OR p_membership_plan_id IS NULL
      OR NULLIF(btrim(COALESCE(p_stripe_subscription_id, '')), '') IS NULL
      OR NULLIF(btrim(COALESCE(p_stripe_invoice_id, '')), '') IS NULL
@@ -838,7 +843,7 @@ BEGIN
     INSERT INTO user_subscriptions(user_id,membership_plan_id,stripe_subscription_id,stripe_customer_id,stripe_price_id,
       billing_cycle,status,current_period_start,current_period_end,payment_channel,merchant_namespace,payment_mode,contract_snapshot)
     VALUES(p_user_id,p_membership_plan_id,p_stripe_subscription_id,p_stripe_customer_id,v_source_price_id,p_billing_cycle,
-      'active',p_period_start,p_period_end,v_source.payment_channel,v_source.merchant_namespace,v_source.payment_mode,v_source.purchase_snapshot)
+      p_metadata->>'stripeSubscriptionStatus',p_period_start,p_period_end,v_source.payment_channel,v_source.merchant_namespace,v_source.payment_mode,v_source.purchase_snapshot)
     RETURNING id INTO v_mirror_id;
     INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,subscription_id)
     VALUES(v_source.payment_channel,v_source.merchant_namespace,v_source.payment_mode,'subscription',p_stripe_subscription_id,v_mirror_id);
@@ -883,6 +888,7 @@ BEGIN
   UPDATE profiles
   SET credits = v_balance_after,
       membership_level = CASE WHEN status='active' AND is_deleted='false'
+        AND p_metadata->>'stripeSubscriptionStatus' IN ('active','trialing')
         AND (v_subscription.id IS NULL OR v_subscription.status NOT IN ('canceled','cancelled','incomplete_expired'))
         AND NOT EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=p_user_id)
         AND (v_subscription.current_period_start IS NULL OR p_period_start>=v_subscription.current_period_start)
@@ -1208,7 +1214,7 @@ BEGIN
   SELECT s.id,s.user_id INTO internal_id,owner_id FROM user_subscriptions s JOIN payment_provider_refs r ON r.subscription_id=s.id
     WHERE r.channel='stripe' AND r.merchant_namespace=p_merchant_namespace AND r.mode=p_payment_mode
       AND r.object_type='subscription' AND r.external_id=p_evidence->>'id';
-  IF NOT FOUND THEN RETURN false; END IF;
+  IF NOT FOUND THEN RAISE EXCEPTION 'PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING'; END IF;
   PERFORM 1 FROM profiles WHERE id=owner_id FOR UPDATE;
   SELECT * INTO local_sub FROM user_subscriptions WHERE id=internal_id FOR UPDATE;
   IF p_evidence->>'object' IS DISTINCT FROM 'subscription'

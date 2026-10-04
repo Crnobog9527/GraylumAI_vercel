@@ -4,12 +4,11 @@
  * This code is proprietary and confidential.
  */
 
+import { retrievePaidStripeInvoice, retrieveInvoiceSubscription } from './payments/stripeInvoiceEvidence';
 import { recordStripeInvoiceConflict } from './payments/stripeConflictEvidence';
 import type Stripe from 'stripe';
 import { logger } from '../lib/logger';
-import {
-  type PaymentOrderStatusLike,
-} from './paymentOrderStatus';
+import { type PaymentOrderStatusLike } from './paymentOrderStatus';
 import { getStripeClient } from './stripe';
 import { findStripeReference, resolveStripeOrderIds } from './payments/stripeReferences';
 import { recordStripeCheckout, resolveStripeScope } from './payments/stripeCheckoutPersistence';
@@ -2035,13 +2034,7 @@ export async function fulfillMembershipInvoice(
 ) {
   const stripe = getStripeClient();
   const scope = await resolveStripeScope(stripe);
-  const requestedId = invoice.id;
-  invoice = await stripe.invoices.retrieve(requestedId);
-  if (invoice.id !== requestedId || invoice.object !== 'invoice' || invoice.livemode !== (scope.mode === 'live')
-    || invoice.status !== 'paid' || invoice.currency !== 'usd' || invoice.amount_paid !== invoice.amount_due) {
-    await recordStripeInvoiceConflict({ db: supabase, scope, invoiceId: requestedId });
-    throw new Error('PAY_COMMON_INVOICE_RECEIPT_MISMATCH');
-  }
+  invoice = await retrievePaidStripeInvoice(supabase, stripe, scope, invoice.id);
   const subscriptionId = getInvoiceSubscriptionId(invoice);
   const invoiceId = invoice.id;
 
@@ -2053,6 +2046,9 @@ export async function fulfillMembershipInvoice(
       { invoiceId: maskIdentifier(invoiceId) },
     );
   }
+
+  const providerSubscription = await retrieveInvoiceSubscription(stripe, scope, subscriptionId);
+  const providerSubscriptionUserId = providerSubscription.metadata.userId;
 
   // Upgrade invoices must bind to the exact durable source, never whichever
   // attempt happens to be newest when a delayed invoice is delivered.
@@ -2068,7 +2064,11 @@ export async function fulfillMembershipInvoice(
     const lookup = await supabase.from('payment_orders').select('*')
       .eq('id', attemptId).eq('subscription_id', subscriptionRef.subscription_id).maybeSingle();
     const source = lookup.data ? await resolveStripeOrderIds(supabase, lookup.data) : null;
-    if (lookup.error || !source || source.status === 'failed' || (!isSubscriptionPlanChangeOrder(source) && !asRecord(source.metadata).upgradeAttempt)
+    if (lookup.error || !source || source.purchase_closed_at != null
+      || ['refunded', 'partially_refunded'].includes(String(source.status))
+      || ['refunded', 'partially_refunded'].includes(String(source.payment_status))
+      || (source.stripe_invoice_id && source.stripe_invoice_id !== invoice.id)
+      || (!isSubscriptionPlanChangeOrder(source) && !asRecord(source.metadata).upgradeAttempt)
       || source.stripe_price_id !== details.metadata?.priceId
       || (source.billing_cycle !== 'monthly' && source.billing_cycle !== 'yearly')
       || source.user_id !== details.metadata?.userId || source.item_id !== details.metadata?.itemId
@@ -2133,7 +2133,7 @@ export async function fulfillMembershipInvoice(
   }
 
   const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
-    scope,
+    scope, providerSubscriptionStatus: providerSubscription.status, providerSubscriptionUserId,
     expectedSourceOrderId: upgradeSource?.id ?? (invoice.billing_reason === 'subscription_create'
       ? invoice.parent?.subscription_details?.metadata?.orderId : undefined),
     expectedSourcePriceId: servicePeriod.priceId,

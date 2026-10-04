@@ -61,6 +61,11 @@ function receiptInvoice(invoice: Stripe.Invoice, db?: unknown) {
 }
 const fulfillMembershipInvoice: typeof realFulfillMembershipInvoice = async (db, invoice, options) => {
   providerState.invoice.mockResolvedValue(receiptInvoice(invoice, db));
+  const tables = (db as { tables?: Record<string, RefundWebhookRow[]> }).tables;
+  const subscriptionId = invoice.parent?.subscription_details?.subscription ?? (invoice as unknown as { subscription?: string }).subscription;
+  const source = tables?.payment_orders.find(row => row.stripe_subscription_id === subscriptionId);
+  providerState.subscription.mockResolvedValue({ id: subscriptionId, object: 'subscription', livemode: false, status: 'active',
+    metadata: { userId: source?.user_id ?? 'user-line-fixture' } });
   return realFulfillMembershipInvoice(db, invoice, options);
 };
 const markMembershipInvoicePaymentFailed: typeof realMarkMembershipInvoicePaymentFailed = async (db, invoice, options) => {
@@ -78,7 +83,7 @@ const upsertPaymentOrderBySession: typeof realUpsertPaymentOrderBySession = asyn
   return realUpsertPaymentOrderBySession(db, session, options);
 };
 const fulfillPaidMembershipCheckoutSession: typeof realFulfillPaidMembershipCheckoutSession = async (db, stripe, session) => {
-  providerState.subscription.mockImplementation(async id => ({ object: 'subscription', livemode: false,
+  providerState.subscription.mockImplementation(async id => ({ id, object: 'subscription', livemode: false, status: 'active',
     metadata: { userId: session.metadata?.userId },
     ...(await stripe.subscriptions.retrieve(id) ?? (typeof session.subscription === 'object' ? session.subscription : {})) }));
   providerState.invoice.mockImplementation(async id => {
@@ -770,7 +775,7 @@ function createRefundWebhookSupabase(
               membership_plan_id: payload.p_membership_plan_id,
               stripe_subscription_id: payload.p_stripe_subscription_id,
               billing_cycle: payload.p_billing_cycle,
-              status: 'active',
+              status: payload.p_metadata?.stripeSubscriptionStatus,
               current_period_start: payload.p_period_start,
               current_period_end: payload.p_period_end,
               metadata: {
@@ -919,7 +924,8 @@ function createRefundWebhookSupabase(
           };
         }
 
-        if (name === 'atomic_grant_subscription_invoice_credits' && profile && profile.is_deleted !== 'true') {
+        if (name === 'atomic_grant_subscription_invoice_credits' && profile && profile.is_deleted !== 'true'
+          && ['active', 'trialing'].includes(payload.p_metadata?.stripeSubscriptionStatus)) {
           profile.membership_level = payload.p_membership_level;
         }
         const completedInvoiceOrder = invoiceOrder ?? sourceOrder;
@@ -1210,6 +1216,35 @@ describe('stripe fulfillment helpers', () => {
     loggerState.error.mockReset();
     loggerState.info.mockReset();
     loggerState.warn.mockReset();
+  });
+
+  it.each([{ id: 'sub_other' }, { object: 'customer' }, { livemode: true },
+    { status: 'unknown' }, { metadata: {} }, { metadata: { userId: 'another-user' } }])('rejects invalid fresh subscription evidence before paid invoice effects: %j', async patch => {
+    const { supabase, invoice } = monthlyInvoiceFixture();
+    providerState.invoice.mockResolvedValue(receiptInvoice(invoice, supabase));
+    providerState.subscription.mockResolvedValue({ id: 'sub_monthly', object: 'subscription', livemode: false,
+      status: 'active', metadata: { userId: 'user-monthly' }, ...patch });
+    const before = structuredClone(supabase.tables);
+    await expect(realFulfillMembershipInvoice(supabase, invoice)).rejects.toThrow('PAY_COMMON_SUBSCRIPTION_RECEIPT_MISMATCH');
+    expect(supabase.tables).toEqual(before);
+  });
+
+  it('records a paid initial invoice after cancellation without granting membership', async () => {
+    const { supabase, invoice } = monthlyInvoiceFixture();
+    expect(supabase.tables.user_subscriptions).toEqual([]);
+    expect(supabase.tables.payment_provider_refs.some(row => row.object_type === 'subscription')).toBe(false);
+    providerState.invoice.mockResolvedValue(receiptInvoice(invoice, supabase));
+    providerState.subscription.mockResolvedValue({ id: 'sub_monthly', object: 'subscription', livemode: false,
+      status: 'canceled', metadata: { userId: 'user-monthly' } });
+    const rpc = vi.spyOn(supabase, 'rpc');
+    await realFulfillMembershipInvoice(supabase, invoice);
+    expect(rpc).toHaveBeenCalledWith('atomic_grant_subscription_invoice_credits', expect.objectContaining({
+      p_metadata: expect.objectContaining({ stripeSubscriptionStatus: 'canceled', stripeSubscriptionUserId: 'user-monthly' }),
+    }));
+    expect(supabase.tables.payment_orders[0]).toMatchObject({ status: 'completed', payment_status: 'paid' });
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({ status: 'canceled' });
+    expect(supabase.tables.profiles[0].membership_level).toBe('free');
+    expect(rpc.mock.calls.map(([name]) => name)).not.toContain('pay_common_sync_subscription');
   });
 
   it('syncs only the authoritative mapped subscription when legacy duplicate rows exist', async () => {
@@ -5527,6 +5562,29 @@ describe('PAY-1 exact-source paid upgrade invoices', () => {
       ] } } as unknown as Stripe.Invoice;
     return { supabase, invoice, source, start, end, targetAmount, historicalGrant, historicalTransaction, retrievePrice };
   }
+  it('recovers a temporarily failed upgrade only for the original open attempt and invoice', async () => {
+    const { supabase, invoice, retrievePrice } = fixture('monthly');
+    const source = supabase.tables.payment_orders[0];
+    Object.assign(source, { status: 'failed', payment_status: 'open', stripe_invoice_id: invoice.id, purchase_closed_at: null });
+    seedPaymentCommonFixture(supabase.tables);
+    await fulfillMembershipInvoice(supabase, invoice, { retrievePrice });
+    expect(source).toMatchObject({ status: 'completed', payment_status: 'paid', stripe_invoice_id: invoice.id });
+    expect(supabase.tables.profiles[0]).toMatchObject({ membership_level: 'gold', credits: 717 });
+    await fulfillMembershipInvoice(supabase, invoice, { retrievePrice });
+    expect(supabase.tables.credit_transactions).toHaveLength(2);
+  });
+  it.each(['closed', 'refunded', 'different-invoice'] as const)('rejects failed upgrade recovery for %s', async problem => {
+    const { supabase, invoice, retrievePrice } = fixture('monthly');
+    const source = supabase.tables.payment_orders[0];
+    source.status = 'failed';
+    if (problem === 'closed') source.purchase_closed_at = '2026-09-04T00:00:00.000Z';
+    if (problem === 'refunded') source.payment_status = 'refunded';
+    if (problem === 'different-invoice') source.stripe_invoice_id = 'in_other';
+    seedPaymentCommonFixture(supabase.tables);
+    const before = structuredClone(supabase.tables);
+    await expect(fulfillMembershipInvoice(supabase, invoice, { retrievePrice })).rejects.toThrow('upgrade_invoice_source_mismatch');
+    expect(supabase.tables).toEqual(before);
+  });
   it.each([{ livemode: true }, { object: 'product' }, { billing_scheme: 'tiered' }])(
     'rejects unsupported upgrade price evidence %j', async patch => {
       const { supabase, invoice, retrievePrice } = fixture('monthly');
@@ -5576,11 +5634,11 @@ describe('PAY-1 exact-source paid upgrade invoices', () => {
     });
     expect(supabase.tables).toEqual(before);
   });
-  it.each(['wrong-price', 'wrong-customer', 'failed-source', 'missing-source', 'unpaid', 'changed-amount'])('rejects %s before grants or rights writes', async problem => {
+  it.each(['wrong-price', 'wrong-customer', 'closed-source', 'missing-source', 'unpaid', 'changed-amount'])('rejects %s before grants or rights writes', async problem => {
     const { supabase, invoice, retrievePrice } = fixture('monthly');
     if (problem === 'wrong-price') invoice.parent!.subscription_details!.metadata!.priceId = 'price_wrong';
     if (problem === 'wrong-customer') invoice.customer = 'cus_wrong';
-    if (problem === 'failed-source') supabase.tables.payment_orders[0].status = 'failed';
+    if (problem === 'closed-source') Object.assign(supabase.tables.payment_orders[0], { status: 'failed', purchase_closed_at: '2026-09-04T00:00:00.000Z' });
     if (problem === 'missing-source') delete invoice.parent!.subscription_details!.metadata!.upgradeAttemptId;
     if (problem === 'unpaid') invoice.status = 'open';
     if (problem === 'changed-amount') invoice.amount_due++;
@@ -5595,6 +5653,7 @@ describe('PAY-1 exact-source paid upgrade invoices', () => {
     await markMembershipInvoicePaymentFailed(supabase, failed);
     expect(supabase.tables.payment_orders.find(row => row.id === 'upgrade-source')).toMatchObject({ status: 'failed', stripe_checkout_session_id: null });
     expect(supabase.tables.payment_orders.find(row => row.id === 'new-source')?.status).toBe('pending');
+    invoice.id = 'in_different_paid_upgrade';
     const before = structuredClone(supabase.tables);
     await expect(fulfillMembershipInvoice(supabase, invoice, { retrievePrice })).rejects.toBeDefined();
     expect(supabase.tables).toEqual(before);

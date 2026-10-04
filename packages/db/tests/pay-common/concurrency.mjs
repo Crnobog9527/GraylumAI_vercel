@@ -73,6 +73,7 @@ export async function testConcurrency({ endpoint, name, sql, ok }) {
         'billingCycle','yearly','priceId','price_concurrency'),
       'amount_total',1999,'currency','usd','payment_status','paid','status','complete','invoice','in_concurrency'));`));
   const invoice = `SELECT row_to_json(r) FROM atomic_grant_subscription_invoice_credits(
+    p_metadata=>jsonb_build_object('stripeSubscriptionStatus','active','stripeSubscriptionUserId','${actor}'),
     p_user_id=>'${actor}',p_membership_plan_id=>'${plan}',p_stripe_subscription_id=>'sub_concurrency',
     p_stripe_invoice_id=>'in_concurrency',p_source_order_id=>'${order}',p_amount_total=>1999,
     p_grant_period_key=>'annual:2026-10-05T00:00:00.000Z:01',p_billing_cycle=>'yearly',

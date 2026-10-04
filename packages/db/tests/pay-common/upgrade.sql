@@ -32,6 +32,7 @@ BEGIN
   SELECT credits INTO initial_balance FROM profiles WHERE id=actor;
   SET LOCAL ROLE service_role;
   SELECT * INTO result FROM atomic_grant_subscription_invoice_credits(
+    p_metadata=>jsonb_build_object('stripeSubscriptionStatus','active','stripeSubscriptionUserId',actor),
     p_user_id=>actor,p_membership_plan_id=>plan,p_stripe_subscription_id=>'sub_invoice_fixture',
     p_stripe_invoice_id=>'in_initial_fixture',p_source_order_id=>original.id,p_amount_total=>1999,
     p_grant_period_key=>'invoice:in_initial_fixture',p_period_start=>'2026-10-05T00:00:00Z',
@@ -99,6 +100,7 @@ BEGIN
     next_order:=pay_common_prepare_change(actor,sub,gold,'monthly','price_gold_fixture',request,'{}');
     PERFORM pg_temp.assert_true(next_order.id<>change_order.id,'verified rejected attempt permits a new identity');
     SELECT * INTO result FROM atomic_grant_subscription_invoice_credits(
+    p_metadata=>jsonb_build_object('stripeSubscriptionStatus','active','stripeSubscriptionUserId',actor),
       p_user_id=>actor,p_membership_plan_id=>gold,p_stripe_subscription_id=>'sub_invoice_fixture',
       p_stripe_invoice_id=>'in_upgrade_fixture',p_source_order_id=>next_order.id,p_amount_total=>2999,
       p_grant_period_key=>'invoice:in_upgrade_fixture',p_period_start=>'2026-11-01T00:00:00Z',
@@ -111,6 +113,7 @@ BEGIN
       FROM user_subscriptions WHERE id=sub),'opening contract remains immutable across an upgrade');
     -- Late settlement is newer by arrival time but belongs to the old Pro contract.
     SELECT * INTO result FROM atomic_grant_subscription_invoice_credits(
+    p_metadata=>jsonb_build_object('stripeSubscriptionStatus','active','stripeSubscriptionUserId',actor),
       p_user_id=>actor,p_membership_plan_id=>plan,p_stripe_subscription_id=>'sub_invoice_fixture',
       p_stripe_invoice_id=>'in_old_pro_late',p_source_order_id=>original.id,p_amount_total=>1999,
       p_grant_period_key=>'invoice:in_old_pro_late',p_period_start=>'2026-09-05T00:00:00Z',

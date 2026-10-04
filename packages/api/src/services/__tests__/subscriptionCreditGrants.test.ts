@@ -1040,7 +1040,8 @@ function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
 ) {
   const sources = db.tables.payment_orders.filter(row => row.stripe_subscription_id === input.subscriptionId);
   const initialSource = db.tables.user_subscriptions.length === 0 && sources.length === 1 ? sources[0].id : undefined;
-  return fulfillMappedInvoice(db, { scope: paymentFixtureScope, expectedSourceOrderId: initialSource, ...input });
+  return fulfillMappedInvoice(db, { scope: paymentFixtureScope, expectedSourceOrderId: initialSource,
+    providerSubscriptionStatus: 'active', providerSubscriptionUserId: db.tables.payment_orders[0]?.user_id, ...input });
 }
 
 function seedPaidAnnualOpening(supabase: ReturnType<typeof createMockSupabase>) {
@@ -1906,6 +1907,23 @@ describe('subscription credit grants', () => {
       metadata: { source: 'legacy_refund_marker' },
     });
     expect(supabase.tables.payment_orders[0]).not.toHaveProperty('fulfilled_at');
+  });
+
+  it('recovers the exact first invoice after a temporary payment failure without creating a new purchase', async () => {
+    const db = createInvoiceAdmissionRaceHarness({});
+    const source = db.tables.payment_orders[0];
+    source.status = 'failed'; source.payment_status = 'open';
+    const input = { expectedSourceOrderId: source.id, expectedSourcePriceId: source.stripe_price_id,
+      invoiceId: 'in_failure_recovery', subscriptionId: 'sub_v6_race', stripeCustomerId: 'cus_v6_race',
+      amountTotal: 9900, currency: 'usd', paymentStatus: 'paid',
+      periodStart: '2026-08-01T00:00:00.000Z', periodEnd: '2026-09-01T00:00:00.000Z' };
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(db, input);
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(db, input);
+    expect(db.tables.payment_orders).toHaveLength(1);
+    expect(db.tables.payment_orders[0]).toMatchObject({ id: source.id, status: 'completed', payment_status: 'paid' });
+    expect(db.tables.subscription_credit_grants).toHaveLength(1);
+    expect(db.tables.credit_transactions).toHaveLength(1);
+    expect(db.tables.profiles[0].credits).toBe(100);
   });
 
   it.each([

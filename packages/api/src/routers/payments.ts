@@ -40,7 +40,7 @@ import {
 } from '../services/subscriptionPlanChangeLock';
 import { STRIPE_MANAGED_ACTIVE_SUBSCRIPTION_STATUSES } from '../services/subscriptionOverrides';
 import { addUtcCalendarMonthsClamped } from '../services/subscriptionCreditGrants';
-import { findStripeReference, resolveStripeOrderIds } from '../services/payments/stripeReferences';
+import { findStripeReference, resolveStripeOrderIds, loadCurrentStripeSubscription } from '../services/payments/stripeReferences';
 import { loadCurrentStripePrices } from '../services/payments/stripeCatalog';
 import { createDurableStripeCheckout, resolveStripeScope } from '../services/payments/stripeCheckoutPersistence';
 
@@ -620,23 +620,8 @@ function throwNonUpgradeEligibilityError(result: MembershipEligibilityResult): n
 }
 
 async function loadCurrentStripeManagedSubscription(supabase: SupabaseClient, userId: string) {
-  const result = await supabase.from('user_subscriptions')
-    .select('id,membership_plan_id,payment_channel,merchant_namespace,payment_mode,status,billing_cycle,cancel_at_period_end,stripe_customer_id')
-    .eq('user_id', userId).in('status', [...STRIPE_MANAGED_ACTIVE_SUBSCRIPTION_STATUSES]).limit(2);
-  if (result.error || !Array.isArray(result.data)) throw createPaymentOperationError('读取当前订阅', result.error);
-  if (result.data.length > 1) throw new Error('PAY_COMMON_MEMBERSHIP_FACTS_UNKNOWN');
-  const subscription = result.data[0];
-  if (!subscription) return null;
-  const scope = await resolveStripeScope(getStripeClient());
-  if (subscription.payment_channel !== 'stripe' || subscription.merchant_namespace !== scope.merchant
-    || subscription.payment_mode !== scope.mode) throw new Error('PAY_COMMON_SUBSCRIPTION_SCOPE_MISMATCH');
-  const paid = await supabase.from('payment_orders').select('*').eq('user_id', userId)
-    .eq('subscription_id', subscription.id).not('fulfilled_at', 'is', null)
-    .order('fulfilled_at', { ascending: false }).limit(1).maybeSingle();
-  if (paid.error || !paid.data) throw new Error('PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING');
-  const ids = await resolveStripeOrderIds(supabase, paid.data);
-  return { ...subscription, stripe_subscription_id: ids.stripe_subscription_id,
-    stripe_price_id: ids.stripe_price_id } as StripeManagedSubscriptionRow;
+  return await loadCurrentStripeSubscription(supabase, userId, await resolveStripeScope(getStripeClient()),
+    [...STRIPE_MANAGED_ACTIVE_SUBSCRIPTION_STATUSES]) as StripeManagedSubscriptionRow | null;
 }
 
 function isUniqueConstraintViolation(error: unknown) {
