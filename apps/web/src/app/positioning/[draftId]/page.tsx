@@ -16,7 +16,7 @@ import { mergeInformation } from "./information-merge";
 import { readPlanEnvelope, type PlanEnvelope, type PlanRequest } from "./plan-envelope";
 import { admissionMessage } from "./admission-message";
 import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-response";
-import { focusReply, liveReplyAfter, mentorReplyDisplay, questionCardStatus, startLiveReply, type LiveReply } from "./agent-turn-display";
+import { focusReply, liveReplyAfter, mentorReplyDisplay, questionCardStatus, showsTurnState, startLiveReply, type LiveReply } from "./agent-turn-display";
 import { OpenQuestionRecord, OTHER_PLACEHOLDER, QuestionCardView } from "@/components/opc/question-card";
 import { isDefiniteConfirmConflict } from "./confirm-conflict";
 import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
@@ -1882,7 +1882,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                         legacyMessage: parsed.message, liveText: live?.text, liveCard: live?.card,
                         active: execution.executionId === history.data?.activeExecution, busy: busy || awaitingReply });
                       const next = mentorExecutions[executionIndex + 1];
-                      if (!next) lastTurnNotice = Boolean(reply.notice);
+                      if (!next) lastTurnNotice = showsTurnState(reply.notice);
                       const cardStatus = questionCardStatus({ isLatest: !next, turn,
                         shown: { roundId: d.roundId, stepId: step.id, questionId: activeQuestion.id },
                         reply: next ? { ...mentorTurns.get(next.executionId), input: isOpeningInput(next.input) ? null : next.input }

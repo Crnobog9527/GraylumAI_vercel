@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { runtimeGateMessages } from '../../../../../../../packages/api/src/shared/runtimeGateMessages';
-import { topicExecutionNotice, topicFailureMessage } from './topic-notices';
+import { topicExecutionNotice, topicFailureMessage, topicOpenTurnNotice } from './topic-notices';
 
 const turnRefusal = (code: string, message: string) =>
   Object.assign(new Error(message), { data: { code, path: 'opc.topicTurn', retryAfter: 60 } });
@@ -35,4 +35,28 @@ it('shows nothing for a normal or other execute result', () => {
   expect(topicExecutionNotice({ state: 'completed' })).toBeNull();
   expect(topicExecutionNotice({ state: 'cancelled', unavailable: 'capacity' })).toBeNull();
   expect(topicExecutionNotice(undefined)).toBeNull();
+});
+
+const open = (state: string, extra: { busy?: boolean; finished?: string | null } = {}) =>
+  topicOpenTurnNotice({ executionId: 'e1', state }, { busy: false, finished: null, stopping: false, onRetry: vi.fn(), onStop: vi.fn(), ...extra });
+
+it('keeps 正在回复… for a turn whose execute call finished before the view is re-read', () => {
+  const notice = open('running', { finished: 'e1' });
+  expect(notice).toMatchObject({ tone: 'status', busy: true, text: '正在回复…' });
+  expect(notice?.actions?.map(action => action.disabled)).toEqual([true, false]);
+  expect(open('completed', { finished: 'e1' })).toBeNull();
+  // execute returned cost_pending and the view re-read it: the cost check stays available.
+  const cost = open('cost_pending', { finished: 'e1' });
+  expect(cost?.text).toBe('费用待核实；重试只核对原调用。');
+  expect(cost?.actions?.map(action => action.disabled)).toEqual([false, false]);
+  const interrupted = open('interrupted', { finished: 'e1' });
+  expect(interrupted).toMatchObject({ tone: 'warning', text: '回复尚未完成，原请求已保留。' });
+  expect(interrupted?.actions?.map(action => action.disabled)).toEqual([false, false]);
+  expect(open('prepared', { finished: 'e1' })?.text).toBe('正在回复…');
+});
+
+it('says 回复尚未完成 for an open turn nothing is running, including another finished execution', () => {
+  for (const notice of [open('interrupted'), open('running', { finished: 'other' })])
+    expect(notice).toMatchObject({ tone: 'warning', busy: false, text: '回复尚未完成，原请求已保留。' });
+  expect(open('running', { busy: true })?.text).toBe('正在回复…');
 });
