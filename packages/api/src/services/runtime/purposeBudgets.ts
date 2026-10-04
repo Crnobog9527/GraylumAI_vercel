@@ -66,7 +66,7 @@ export async function readPurposeBudgetView(db: SupabaseClient) {
   const summary = await db.from('system_settings').select('value').eq('key', 'v3_summary_max_tokens').maybeSingle();
   if (summary.error) throw new Error('RUNTIME_BUDGET_CONFIG_UNAVAILABLE');
   const maxOutputTokens = z.coerce.number().int().min(128).max(4096).parse(summary.data?.value ?? 2048);
-  return { version: 1 as const, schemaVersion: 2 as const, globalOutputCap: PURPOSE_OUTPUT_CAP, config,
+  return { version: 1 as const, config,
     source: config ? 'configured' as const : 'legacy' as const,
     limits: { inputBytes: PURPOSE_INPUT_CAPS, maxOutputTokens: PURPOSE_OUTPUT_CAP, historyItems: PURPOSE_HISTORY_CAP },
     organizeOutput: { source: 'v3_summary_max_tokens' as const, maxOutputTokens },

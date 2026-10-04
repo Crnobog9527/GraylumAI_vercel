@@ -1707,7 +1707,7 @@ it.each([{searchEnabled:false,stopAfterPrimary:false},{searchEnabled:true,stopAf
    expect(injected).toBe(true);expect(requests.map(r=>r.model)).toEqual(['runtime-m']);
    expect(await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId)).toEqual({state:'pending'});
    const stage=(await db.query('select primary_result,result from runtime_executions where id=$1',[e.executionId])).rows[0];
-   expect(stage).toEqual({primary_result:{body:'Primary result',lastSequence:1},result:null});
+   expect(stage).toEqual({primary_result:{body:'Primary result',lastSequence:1,completeness:'complete'},result:null});
    expect((await runtimeExecutor({...options,callGate:allowTestCalls}).cancel(e.executionId)).state).toBe('cancelled');
    expect((await runtimeExecutor({...options,callGate:allowTestCalls}).cancel(e.executionId)).state).toBe('cancelled');
    await expect(rpc('runtime_execution',{p_actor_id:actor,p_execution_id:e.executionId,p_action:'complete',p_result:{kind:'usable_result',body:'Primary result',summary:'Late summary'}})).rejects.toThrow();
@@ -1724,7 +1724,7 @@ it.each([{searchEnabled:false,stopAfterPrimary:false},{searchEnabled:true,stopAf
   }
   expect({injected,requests:requests.map(r=>r.model??r.tool)}).toEqual({injected:true,requests:searchEnabled?['runtime-m','search','runtime-m','attached-summary']:['runtime-m','attached-summary']});
   const recovered=await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId);
-  expect({recovered,errors}).toEqual({recovered:{state:'completed',body:'Primary result',summary:'Organized primary result'},errors:[]});
+  expect({recovered,errors}).toEqual({recovered:{state:'completed',body:'Primary result',summary:'Organized primary result',completeness:'complete',organized:true},errors:[]});
   expect(requests.map(r=>r.model??r.tool)).toEqual(searchEnabled?['runtime-m','search','runtime-m','attached-summary']:['runtime-m','attached-summary']);expect(JSON.stringify(requests.at(-1)!.messages)).toContain('Primary result');
   const result=(await db.query('select result from runtime_executions where id=$1',[e.executionId])).rows[0].result;
   expect(result.summary).toBe('Organized primary result');
@@ -1733,7 +1733,7 @@ it.each([{searchEnabled:false,stopAfterPrimary:false},{searchEnabled:true,stopAf
   const browserClient=createServerClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{cookies:{getAll:()=>[...cookies].map(([name,value])=>({name,value})),setAll:(items:Array<{name:string;value:string}>)=>items.forEach(c=>cookies.set(c.name,c.value))}});
   async function viewHttp(){const response=await fetch(process.env.V3_LOCAL_APP!+'/api/trpc/runtime.view?input='+encodeURIComponent(JSON.stringify({sessionId:session.sessionId})),{headers:{Cookie:[...cookies].map(([k,v])=>k+'='+v).join('; ')}});expect(response.status).toBe(200);return (await response.json()).result.data;}
   expect((await browserClient.auth.signInWithPassword({email,password})).error).toBeNull();
-  const visible=await viewHttp();expect(visible.executions[0]).toMatchObject({body:'Primary result',summary:'Organized primary result',organizerComplete:true});
+  const visible=await viewHttp();expect(visible.executions[0]).toMatchObject({body:'Primary result',summary:'Organized primary result',organizerComplete:true,completeness:'complete',organized:true});
   expect(await viewHttp()).toEqual(visible); // refresh uses the persisted, authorized projection.
   await browserClient.auth.signOut();cookies.clear();expect((await browserClient.auth.signInWithPassword({email,password})).error).toBeNull();
   expect(await viewHttp()).toEqual(visible);

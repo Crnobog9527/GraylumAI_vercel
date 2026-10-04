@@ -2,8 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { nativeMetadata } from './nativeOutput';
 
-const columns = 'id,completeness:result->completeness,organized:result->organized,' +
-  'summaryOmitted:result->summaryOmitted,messageFirst:result->messageFirst,envelopeCompact:result->envelopeCompact';
+const READ_BATCH_SIZE = 8;
 function object(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
@@ -21,16 +20,26 @@ export async function readNativeRuntimeView(database: SupabaseClient, actorId: s
       && typeof execution.executionId === 'string' ? [execution.executionId] : [];
   });
   if (!ids.length) return view.data;
-  // Never fetch result body, summary, payload or any other private execution columns.
-  const saved = await database.from('runtime_executions').select(columns)
-    .eq('actor_id', actorId).eq('session_id', sessionId).in('id', ids);
-  if (saved.error || !Array.isArray(saved.data)) throw new Error('RUNTIME_VIEW_DENIED');
-  const permitted = new Set(ids);
-  const metadata = new Map(saved.data.flatMap(row => {
-    const value = object(row);
-    return value && typeof value.id === 'string' && permitted.has(value.id)
-      ? [[value.id, nativeMetadata(value)] as const] : [];
-  }));
+  // service_role has no table SELECT grant. Reuse the existing scoped read RPC.
+  // It returns private context/billing too: keep only the explicit result metadata whitelist.
+  // One read per visible execution, bounded to eight outstanding calls per batch.
+  const uniqueIds = [...new Set(ids)];
+  const metadata = new Map<string, ReturnType<typeof nativeMetadata>>();
+  for (let offset = 0; offset < uniqueIds.length; offset += READ_BATCH_SIZE) {
+    const batch = uniqueIds.slice(offset, offset + READ_BATCH_SIZE);
+    const reads = await Promise.all(batch.map(async executionId => {
+      const saved = await database.rpc('runtime_execution', {
+        p_actor_id: actorId, p_execution_id: executionId, p_action: 'read',
+      });
+      const execution = object(saved.data);
+      const result = object(execution?.result);
+      if (saved.error || execution?.executionId !== executionId || execution.sessionId !== sessionId || !result) {
+        throw new Error('RUNTIME_VIEW_DENIED');
+      }
+      return [executionId, nativeMetadata(result)] as const;
+    }));
+    for (const [executionId, value] of reads) metadata.set(executionId, value);
+  }
   return { ...view.data, executions: executions.map(value => {
     const execution = object(value);
     if (!execution || execution.contentAvailable !== true || typeof execution.body !== 'string'

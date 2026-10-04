@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
 import type { AgentInputItem, Session } from '@openai/agents';
+import { recoverOpenRouterHistory } from './historyRecovery';
 import { NativeSession } from './nativeSession';
 import { jsonbBytes, RESULT_BYTE_LIMIT } from './resultCapacity';
 function fixture() {
@@ -59,4 +60,39 @@ it('retries a lost append acknowledgement with the exact projection', async () =
   await expect(f.session.finish('saved', false)).rejects.toThrow('lost');
   await f.session.finish('changed after lost response', false);
   expect(f.saved[1]).toEqual(f.saved[0]);
+});
+
+
+it.each([false, true])('preserves valid SDK tool-call history copies (rewrite=%s)', async rewrite => {
+  const f = fixture();
+  const originalCard = { message: 'long original message', question: 'Q', options: ['A', 'B'],
+    recommended: 0, recommendationReason: 'long original reason' };
+  // Whitespace deliberately differs from JSON.stringify to prove untouched call bytes stay untouched.
+  const arguments_ = JSON.stringify(originalCard, null, 1);
+  const call = { id: 'call', type: 'function', function: { name: 'ask_question', arguments: arguments_ } };
+  const history: AgentInputItem[] = [
+    { role: 'user', content: 'Latest user turn' },
+    { type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'Companion prose',
+      providerData: { role: 'assistant', refusal: null, tool_calls: [call] } }] },
+    { type: 'function_call', callId: 'call', name: 'ask_question', arguments: arguments_, providerData: call },
+    { type: 'function_call_result', callId: 'call', name: 'ask_question', status: 'completed',
+      output: { type: 'text', text: JSON.stringify({ card: 'question', ...originalCard }) } },
+  ];
+  const receiptBytes = JSON.stringify(history);
+  expect(recoverOpenRouterHistory(history, new Set(['ask_question']))).toEqual(history);
+  await f.session.addItems(history);
+  const card = rewrite ? { ...originalCard, message: 'long', recommendationReason: 'long' } : originalCard;
+  await f.session.finish(JSON.stringify({ message: card.message, card }), true, rewrite);
+  const stored = f.saved.flat();
+  expect(recoverOpenRouterHistory(stored, new Set(['ask_question']))).toEqual(stored);
+  expect(JSON.stringify(history)).toBe(receiptBytes);
+  if (!rewrite) expect(JSON.stringify(stored)).toBe(receiptBytes);
+  else {
+    const args = JSON.stringify(card);
+    expect(stored[1]).toMatchObject({ content: [{ providerData: { tool_calls: [
+      { id: 'call', function: { name: 'ask_question', arguments: args } },
+    ] } }] });
+    expect(stored[2]).toMatchObject({ arguments: args, providerData: { function: { arguments: args } } });
+    expect(stored[3]).toMatchObject({ output: { text: JSON.stringify({ card: 'question', ...card }) } });
+  }
 });
