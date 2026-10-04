@@ -402,7 +402,7 @@
         - **FUSION-COMPARE**：对比默认勾选、用户可改、最少勾选数参数。
         - **不对应开发任务**：默认 m=6 是后台配置修改，执行前另获 Owner 批准（第 39 项的做法）；会员余额不足时的暂停和继续沿用 BILL-PAYG；积分不过期和退款规则沿用现有规则；取消封闭内测体现在第 7.2、7.4 节的排期里，发布仍走 V3-M3 → REL-1；首发目标用户用于宣传和落地页文案。
 
-51. **定价、付费墙细则和定位档案数量**（Owner 2026-10-04；#618 合并后由总控记在 #618 评论里，每条都附原话，下文按"记录 X"引用）。多数决定是 Owner 在定价策略审阅窗口做的、由该窗口转述原话，记录 J、M、N 是 Owner 在总控窗口的原话。同一事项前后不一致时以较晚的记录为准，下面逐条注明被取代的写法。付费墙设计以唯一来源 artifact `MW9Ja3xTfLNbzraTudi2X7`（定价策略审阅窗口维护，"全部已定"清单，2026-10-04 唯一版本 v3）为准；原 PAYWALL-DESIGN 定稿 `QLdBcaYMUSRQHa1YPQa2VQ` 只留作历史，不再作为实施依据（记录 M）。artifact 无法从 GitHub 恢复：Owner 调整完预览版、定稿之后，由总控把定稿 HTML 和截图导出进仓库（例如 `docs/launch/design/paywall/`，附版本号和日期），作为 PAYWALL 的实施依据；本项不导出。本项只改规划；staging 和正式环境的价格、套餐、积分包、会员权限和 Waffo 产品配置，实际修改前仍须 Owner 另行批准。
+51. **定价、付费墙细则和定位档案数量**（Owner 2026-10-04；#618 合并后由总控记在 #618 评论里，每条都附原话，下文按"记录 X"引用）。多数决定是 Owner 在定价策略审阅窗口做的、由该窗口转述原话，记录 J、M、N、O 是 Owner 在总控窗口的原话。同一事项前后不一致时以较晚的记录为准，下面逐条注明被取代的写法。付费墙设计以唯一来源 artifact `MW9Ja3xTfLNbzraTudi2X7`（定价策略审阅窗口维护，"全部已定"清单，2026-10-04 唯一版本 v3）为准；原 PAYWALL-DESIGN 定稿 `QLdBcaYMUSRQHa1YPQa2VQ` 只留作历史，不再作为实施依据（记录 M）。artifact 无法从 GitHub 恢复：Owner 调整完预览版、定稿之后，由总控把定稿 HTML 和截图导出进仓库（例如 `docs/launch/design/paywall/`，附版本号和日期），作为 PAYWALL 的实施依据；本项不导出。本项只改规划；staging 和正式环境的价格、套餐、积分包、会员权限和 Waffo 产品配置，实际修改前仍须 Owner 另行批准。
 
     记录出处（均为 [#618](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618) 的总控评论，按时间）：
     [B 门槛原则](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5971895597)、
