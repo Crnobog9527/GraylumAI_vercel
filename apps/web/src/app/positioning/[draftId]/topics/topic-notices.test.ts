@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
 import { runtimeGateMessages } from '../../../../../../../packages/api/src/shared/runtimeGateMessages';
-import { topicExecutionNotice, topicFailureMessage, topicOpenTurnNotice } from './topic-notices';
+import { topicExecutionNotice, topicFailureMessage, topicOpenTurnNotice, topicRejectedTurn, topicTurnShows } from './topic-notices';
+import { PROVIDER_REJECTED_NOTICE } from '@/lib/runtime-gate-notice';
 
 const turnRefusal = (code: string, message: string) =>
   Object.assign(new Error(message), { data: { code, path: 'opc.topicTurn', retryAfter: 60 } });
@@ -59,4 +60,22 @@ it('says 回复尚未完成 for an open turn nothing is running, including anoth
   for (const notice of [open('interrupted'), open('running', { finished: 'other' })])
     expect(notice).toMatchObject({ tone: 'warning', busy: false, text: '回复尚未完成，原请求已保留。' });
   expect(open('running', { busy: true })?.text).toBe('正在回复…');
+});
+it('shows the provider refusal under a cancelled turn after a reload, without actions', () => {
+  const refused = topicOpenTurnNotice({ executionId: 'e', state: 'cancelled', unavailableReason: 'provider_rejected' },
+    { busy: false, finished: null, stopping: false, onRetry: vi.fn(), onStop: vi.fn() });
+  expect(refused).toEqual({ id: 'e', tone: 'warning', text: PROVIDER_REJECTED_NOTICE });
+  expect(topicRejectedTurn({ state: 'cancelled', unavailableReason: 'provider_rejected' })).toBe(true);
+  for (const unavailableReason of ['something_new', null, undefined]) {
+    expect(topicOpenTurnNotice({ executionId: 'e', state: 'cancelled', unavailableReason },
+      { busy: false, finished: null, stopping: false, onRetry: vi.fn(), onStop: vi.fn() })).toBeNull();
+    expect(topicRejectedTurn({ state: 'cancelled', unavailableReason })).toBe(false);
+  }
+  expect(topicExecutionNotice({ unavailable: 'provider_rejected' })).toBe(PROVIDER_REJECTED_NOTICE);
+});
+it('does not repeat the live refusal error once the last turn shows it', () => {
+  expect(topicTurnShows({ state: 'cancelled', unavailableReason: 'provider_rejected' }, PROVIDER_REJECTED_NOTICE)).toBe(true);
+  expect(topicTurnShows({ state: 'cancelled', unavailableReason: 'provider_rejected' }, '其他错误')).toBe(false);
+  expect(topicTurnShows({ state: 'cancelled', unavailableReason: null }, PROVIDER_REJECTED_NOTICE)).toBe(false);
+  expect(topicTurnShows(undefined, PROVIDER_REJECTED_NOTICE)).toBe(false);
 });

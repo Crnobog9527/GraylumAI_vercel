@@ -17,7 +17,7 @@ import {
   type MentorReplySource,
 } from "./agent-turn-display";
 import { readWorkflowMentorExecution } from "./mentor-response";
-import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
+import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
 
 const fields = { audience: { schema: [{ id: "who" }] } };
 const card = { question: "你的内容主要写给谁？", options: ["刚入行的新人", "有经验的同行"], recommended: 0 };
@@ -290,4 +290,12 @@ it('does not let the older-history notice alone hide the tail progress notice', 
   expect(showsTurnState(shown.notice)).toBe(false);
   expect(showsTurnState(undefined)).toBe(false);
   expect(showsTurnState({ tone: 'warning', text: OUTPUT_TRUNCATED_NOTICE })).toBe(true);
+});
+it('keeps the provider refusal notice for a cancelled turn without a body after a reload', () => {
+ expect(mentorReplyDisplay(source(null,{state:'cancelled',unavailableReason:'provider_rejected'})))
+  .toEqual({text:'',card:null,notice:{tone:'warning',text:PROVIDER_REJECTED_NOTICE}});
+ for (const unavailableReason of ['something_new',null])
+  expect(mentorReplyDisplay(source(null,{state:'cancelled',unavailableReason})).notice?.text).toContain('本次执行已停止，未取得可用回复');
+ const omitted=mentorReplyDisplay(source(null,{state:'cancelled',unavailableReason:'provider_rejected',historyOmitted:true}));
+ expect(omitted.notice?.text).toBe(PROVIDER_REJECTED_NOTICE+'\n'+HISTORY_OMITTED_NOTICE);
 });

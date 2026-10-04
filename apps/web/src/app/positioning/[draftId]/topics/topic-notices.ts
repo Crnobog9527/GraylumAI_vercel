@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice';
-import { gateAdmissionNotice, gateResultNotice } from '@/lib/runtime-gate-notice';
+import { PROVIDER_REJECTED_NOTICE, gateAdmissionNotice, gateResultNotice } from '@/lib/runtime-gate-notice';
 import { inFlight } from '@/app/runtime/runtime-notices';
 
 /** Fixed wording for a failed topic operation; the pending operation itself is kept by the caller. */
@@ -29,14 +29,26 @@ export function topicExecutionNotice(result: unknown): string | null {
   return gateResultNotice(result.unavailable);
 }
 
+/** A cancelled turn the provider refused before any charge: the live notice, kept after a reload. */
+export function topicRejectedTurn(e: { state: string; unavailableReason?: string | null }) {
+  return e.state === 'cancelled' && e.unavailableReason === 'provider_rejected';
+}
+
+/** Once the view names the refusal, the last turn shows it; the live error is not repeated below it. */
+export function topicTurnShows(last: { state: string; unavailableReason?: string | null } | undefined, error: string) {
+  return Boolean(last && topicRejectedTurn(last) && error === PROVIDER_REJECTED_NOTICE);
+}
+
 /**
- * The notice under an open topic turn, with its "重试" and "停止". `finished` is the execution
+ * The notice under a topic turn. An open turn carries its "重试" and "停止"; a provider-refused
+ * turn only its fixed notice, like any other finished turn. `finished` is the execution
  * whose execute call already returned a final state (finishedExecution): until the view catches
  * up it still reads as running, never as 回复尚未完成.
  */
-export function topicOpenTurnNotice(e: { executionId: string; state: string }, ctx: {
+export function topicOpenTurnNotice(e: { executionId: string; state: string; unavailableReason?: string | null }, ctx: {
   busy: boolean; finished: string | null; stopping: boolean; onRetry: () => void; onStop: () => void;
 }): ChatNotice | null {
+  if (topicRejectedTurn(e)) return { id: e.executionId, tone: 'warning', text: PROVIDER_REJECTED_NOTICE };
   if (e.state === 'completed' || e.state === 'cancelled') return null;
   // A finished call matters only while the view still shows the turn in flight (inFlight).
   const settling = ctx.finished === e.executionId && inFlight(e.state);

@@ -534,3 +534,9 @@ it('BILL2: provider rejection v1/v2 preserves paid calls and refunds once under 
  const {providerRejectionCases}=await import(/* @vite-ignore */new URL('provider-rejection.mjs',base).href);
  await providerRejectionCases({db,Client:pg.Client,connectionString});
 },60000);
+
+it('BILL2: persistent provider rejection view preserves history, permissions and migration guards',async()=>{
+ const moduleUrl=new URL('../../../../db/tests/payg/provider-rejected-view.mjs',import.meta.url);
+ const {providerRejectedViewCases}=await import(/* @vite-ignore */moduleUrl.href);
+ await providerRejectedViewCases(db);
+},60000);
