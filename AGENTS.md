@@ -222,6 +222,11 @@ its affected safety boundary, external/production relevance, and recovery or
 compatibility considerations where applicable. Link a product specification or
 Issue only when it helps review. No fixed seven-section template is required.
 
+PR titles carry the task name from the Master Plan task table
+(`docs/launch/MASTER_PLAN.md` section 7, format in section 7.0). Task progress is
+generated read-only by `scripts/plan-progress.mjs`; do not hand-write progress
+into the Master Plan.
+
 Independent semantic review remains mandatory. The reviewer is a context
 separate from the implementation writer, routed under Section 12; the
 implementer never reviews its own candidate. The reviewer independently verifies
