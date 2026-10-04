@@ -29,7 +29,12 @@ vi.mock('../services/stripe', () => ({
   calculateDiscountedAmountCents: stripeState.calculateDiscountedAmountCents,
   getOrCreateStripeCustomerId: stripeState.getOrCreateStripeCustomerId,
   getStripeAppUrl: stripeState.getStripeAppUrl,
-  getStripeClient: stripeState.getStripeClient,
+  getStripeClient: () => {
+    const stripe = stripeState.getStripeClient();
+    stripe.accounts ??= { retrieveCurrent: async () => ({ id: 'acct_fixture' }) };
+    stripe.balance ??= { retrieve: async () => ({ livemode: false }) };
+    return stripe;
+  },
 }));
 
 vi.mock('../lib/logger', () => ({
@@ -45,6 +50,7 @@ vi.mock('../services/stripeFulfillment', () => ({
 }));
 
 import { paymentsRouter } from './payments';
+import { installPurchaseFixture } from './__tests__/paymentPurchaseFixture';
 import {
   fulfillMembershipInvoice,
   fulfillPaidMembershipCheckoutSession,
@@ -200,6 +206,20 @@ function createUpdateBuilder(result: Promise<unknown>, updates: unknown[]) {
   };
 }
 
+type MembershipFixtureRow = Record<string, unknown>;
+type MembershipFixtureResult = { data: MembershipFixtureRow | MembershipFixtureRow[] | null; error?: unknown };
+type MembershipFixtureQuery = PromiseLike<MembershipFixtureResult> & {
+  select(columns: string): MembershipFixtureQuery;
+  eq(column: string, value: unknown): MembershipFixtureQuery;
+  order(column: string, options: { ascending: boolean }): MembershipFixtureQuery;
+  limit(count: number): MembershipFixtureQuery;
+  maybeSingle(): Promise<MembershipFixtureResult>;
+};
+type MembershipFixtureDb = {
+  from(table: string): MembershipFixtureQuery;
+  rpc?: (name: string, args?: Record<string, unknown>) => Promise<unknown>;
+};
+
 function createProtectedCaller(options: {
   supabase: {
     from(table: string): unknown;
@@ -208,6 +228,28 @@ function createProtectedCaller(options: {
     from(table: string): unknown;
   };
 }) {
+  // Fixture implementation of the safe projection RPC. Financial mutations remain explicit below.
+  const userDb = options.supabase as MembershipFixtureDb;
+  const hadRpc = Boolean(userDb.rpc);
+  if (!userDb.rpc) userDb.rpc = async (name: string) => {
+    if (name !== 'pay_common_membership_facts') throw new Error(`Unexpected RPC ${name}`);
+    const subQuery = userDb.from('user_subscriptions').select('*').eq('user_id', 'user-1').order('created_at', { ascending: false }).limit(2);
+    const orderQuery = userDb.from('payment_orders').select('*').eq('user_id', 'user-1').eq('item_type', 'membership_plan')
+      .order('created_at', { ascending: false }).limit(1);
+    const [subscriptions, orders] = await Promise.all([
+      typeof subQuery.then === 'function' ? subQuery : subQuery.maybeSingle(),
+      typeof orderQuery.maybeSingle === 'function' ? orderQuery.maybeSingle() : orderQuery,
+    ]);
+    const rows = Array.isArray(subscriptions.data) ? subscriptions.data : subscriptions.data ? [subscriptions.data] : [];
+    return { error: subscriptions.error ?? orders.error, data: {
+      subscriptions: rows.map(row => ({ ...row, payment_channel: row.stripe_subscription_id ? 'stripe' : null,
+        mapping_state: row.stripe_subscription_id ? 'mapped' : 'none' })),
+      latest_order: Array.isArray(orders.data) ? orders.data[0] ?? null : orders.data,
+    } };
+  };
+  const adminDb = (options.supabaseAdmin ?? options.supabase) as MembershipFixtureDb;
+  if ((!options.supabaseAdmin && !hadRpc) || !adminDb.rpc) installPurchaseFixture(userDb as unknown as Parameters<typeof installPurchaseFixture>[0],
+    adminDb as unknown as Parameters<typeof installPurchaseFixture>[1], () => stripeState.getStripeClient());
   return paymentsRouter.createCaller({
     headers: new Headers(),
     user: {
@@ -244,19 +286,20 @@ function createSubscriptionChangeGuardHarness(options: {
     stripe_yearly_price_id: 'yearlyPrice' in options ? options.yearlyPrice : targetPriceIds.yearly };
   const targetPrice = (billingCycle: 'monthly' | 'yearly') => ({
     id: billingCycle === 'yearly' ? plan.stripe_yearly_price_id : plan.stripe_monthly_price_id,
+    object: 'price', livemode: false, billing_scheme: 'per_unit', tax_behavior: 'unspecified',
     active: true,
     type: 'recurring',
     currency: 'usd',
     unit_amount: billingCycle === 'yearly' ? plan.yearly_price : plan.monthly_price,
-    recurring: { interval: billingCycle === 'yearly' ? 'year' : 'month', interval_count: 1 },
+    recurring: { interval: billingCycle === 'yearly' ? 'year' : 'month', interval_count: 1, usage_type: 'licensed' },
   });
   const priceRetrieve = vi.fn().mockImplementation(async (priceId: string) => structuredClone(targetPrice(
     priceId === plan.stripe_yearly_price_id ? 'yearly' : 'monthly',
   )));
-  const local: any = { id: 'sub-row-1', membership_plan_id: currentPlanId, stripe_subscription_id: 'sub_test_active',
+  const local: any = { user_id: 'user-1', payment_channel: 'stripe', merchant_namespace: 'acct_fixture', payment_mode: 'test', id: 'sub-row-1', membership_plan_id: currentPlanId, stripe_subscription_id: 'sub_test_active',
     stripe_customer_id: 'cus_test_active', stripe_price_id: 'price_test_old', status: 'active',
     billing_cycle: options.currentCycle ?? 'monthly', cancel_at_period_end: 'false', metadata: {} };
-  const remote: any = { id: 'sub_test_active', customer: 'cus_test_active', status: 'active',
+  const remote: any = { livemode: false, id: 'sub_test_active', customer: 'cus_test_active', status: 'active',
     cancel_at_period_end: false, cancel_at: null, collection_method: 'charge_automatically',
     metadata: { userId: 'user-1' }, items: { has_more: false, data: [{ id: 'si_test_current', quantity: 1,
       price: { id: 'price_test_old' }, current_period_start: 1700000000, current_period_end: 2000000000 }] } };
@@ -286,12 +329,41 @@ function createSubscriptionChangeGuardHarness(options: {
   const orderInserts: any[] = []; const rows: any[] = []; const orderUpdates: any[] = [];
   const userTableReads: string[] = []; let profileReadCount = 0;
   let insertError: any = null;
-  stripeState.getStripeClient.mockReturnValue({ subscriptions: { retrieve: subscriptionRetrieve, update: subscriptionUpdate }, prices: { retrieve: priceRetrieve },
+  stripeState.getStripeClient.mockReturnValue({ accounts: { retrieveCurrent: async () => ({ id: 'acct_fixture' }) },
+    balance: { retrieve: async () => ({ livemode: false }) }, subscriptions: { retrieve: subscriptionRetrieve, update: subscriptionUpdate }, prices: { retrieve: priceRetrieve },
     invoices: { createPreview: invoicePreview, retrieve: invoiceRetrieve, list: invoiceList } });
+  const baseOrder: Record<string, unknown> = { id: 'base-paid-order', user_id: 'user-1', item_type: 'membership_plan',
+    item_id: currentPlanId, subscription_id: local.id, billing_cycle: local.billing_cycle, purchase_action: 'checkout',
+    payment_channel: 'stripe', merchant_namespace: 'acct_fixture', payment_mode: 'test', price_ref_id: 'ref-old-price',
+    status: 'completed', payment_status: 'paid', fulfilled_at: '2026-01-01T00:00:00Z', metadata: {} };
+  function mappingBuilder() {
+    const filters: Array<[string, unknown]> = [];
+    const result = () => {
+      const common = { channel: 'stripe', merchant_namespace: 'acct_fixture', mode: 'test' };
+      const refs = [
+        { ...common, id: 'ref-subscription', object_type: 'subscription', subscription_id: local.id, external_id: local.stripe_subscription_id },
+        { ...common, id: 'ref-old-price', object_type: 'price', external_id: 'price_test_old' },
+        ...(['monthly', 'yearly'] as const).map(cycle => ({ ...common, id: `ref-${cycle}`, object_type: 'price',
+          membership_plan_id: plan.id, billing_cycle: cycle, is_current: true,
+          external_id: cycle === 'monthly' ? plan.stripe_monthly_price_id : plan.stripe_yearly_price_id })),
+      ].filter(row => typeof row.external_id === 'string' && row.external_id.trim());
+      return { data: refs.filter(row => filters.every(([key, value]) => {
+        const candidate = (row as Record<string, unknown>)[key];
+        return Array.isArray(value) ? value.includes(candidate) : candidate === value;
+      })), error: null };
+    };
+    return { select() { return this; }, eq(k: string, v: unknown) { filters.push([k, v]); return this; },
+      in(k: string, v: unknown) { filters.push([k, v]); return this; }, limit() { return this; },
+      maybeSingle: async () => ({ ...result(), data: result().data[0] ?? null }),
+      then<T>(resolve: (value: ReturnType<typeof result>) => T, reject: (reason: unknown) => T) {
+        return Promise.resolve(result()).then(resolve, reject);
+      } };
+  }
   function ordersBuilder() {
     const filters: Array<[string, unknown]> = []; let values: any = null;
     const result = () => {
-      const found = rows.filter(row => filters.every(([key, value]) => key === 'metadata'
+      const available = filters.some(([key]) => key === 'fulfilled_at:not') ? [baseOrder, ...rows] : rows;
+      const found = available.filter(row => filters.every(([key, value]) => key === 'fulfilled_at:not' ? row.fulfilled_at != null : key === 'metadata'
         ? isDeepStrictEqual(row.metadata, JSON.parse(value as string)) : value === null ? row[key] == null : row[key] === value));
       if (values) { orderUpdates.push(values); found.forEach(row => Object.assign(row, values)); }
       return { data: structuredClone(found), error: null };
@@ -299,6 +371,7 @@ function createSubscriptionChangeGuardHarness(options: {
     return {
       select() { return this; }, eq(k: string, v: unknown) { filters.push([k, v]); return this; },
       is(k: string, v: unknown) { filters.push([k, v]); return this; },
+      not(k: string) { filters.push([`${k}:not`, null]); return this; },
       order() { return this; }, limit() { return this; },
       update(v: any) { values = v; return this; },
       maybeSingle: async () => options.eligibilityOrderResult?.() ?? { ...result(), data: result().data[0] ?? null },
@@ -322,8 +395,39 @@ function createSubscriptionChangeGuardHarness(options: {
     if (table === 'payment_orders') return ordersBuilder();
     throw new Error(`Unexpected user table ${table}`);
   } };
-  const adminSupabase = { from(table: string) {
+  const adminSupabase = {
+    async rpc(name: string, payload: Record<string, unknown>) {
+      if (name === 'pay_common_prepare_change') {
+        if (insertError) return { data: null, error: insertError };
+        if (rows.some(row => !row.fulfilled_at && !row.purchase_closed_at)) return { data: null, error: { code: '23505' } };
+        const row = { ...baseOrder, id: `order-change-${rows.length + 1}`, item_id: plan.id,
+          billing_cycle: payload.p_cycle, purchase_action: 'subscription_change', fulfilled_at: null,
+          price_ref_id: `ref-${payload.p_cycle}`, stripe_price_id: payload.p_price_id, stripe_subscription_id: remote.id,
+          stripe_checkout_session_id: null, status: 'pending', payment_status: 'unpaid', purchase_closed_at: null,
+          metadata: { ...structuredClone(payload.p_metadata as Record<string, unknown>), source: 'changeSubscriptionPlan',
+            previousMembershipPlanId: local.membership_plan_id, previousBillingCycle: local.billing_cycle, productName: plan.name }, purchase_change_request: structuredClone(payload.p_request) };
+        rows.push(row); orderInserts.push(row);
+        return { data: structuredClone(row), error: null };
+      }
+      if (name === 'pay_common_finish_change') {
+        const row = rows.find(row => row.id === payload.p_order_id);
+        if (!row || row.fulfilled_at || row.purchase_closed_at || !isDeepStrictEqual(row.metadata, payload.p_previous)) {
+          return { data: false, error: null };
+        }
+        row.metadata = payload.p_next;
+        if (payload.p_outcome !== 'release') {
+          row.purchase_closed_at = new Date().toISOString(); row.purchase_close_reason = payload.p_outcome;
+          row.status = 'failed';
+        }
+        orderUpdates.push(structuredClone(row));
+        return { data: true, error: null };
+      }
+      throw new Error(`Unexpected RPC ${name}`);
+    }, from(table: string) {
     if (table === 'payment_orders') return ordersBuilder();
+    if (table === 'payment_provider_refs') return mappingBuilder();
+    if (table === 'user_subscriptions') return { select() { return this; }, eq() { return this; }, in() { return this; },
+      limit: async () => ({ data: [local], error: null }) };
     throw new Error(`Unexpected admin write ${table}`);
   } };
   return { caller: createProtectedCaller({ supabase: userSupabase, supabaseAdmin: adminSupabase }),
@@ -361,7 +465,7 @@ describe('paymentsRouter error sanitization', () => {
     vi.mocked(fulfillMembershipInvoice).mockReset();
     vi.mocked(fulfillPaidMembershipCheckoutSession).mockReset();
     vi.mocked(syncSubscriptionState).mockReset();
-    vi.mocked(upsertPaymentOrderBySession).mockReset();
+    vi.mocked(upsertPaymentOrderBySession).mockReset().mockImplementation(async (_db, session) => session);
     stripeState.getOrCreateStripeCustomerId.mockResolvedValue('cus_123');
     stripeState.getStripeAppUrl.mockReturnValue('http://localhost:3000');
     stripeState.buildStripeMetadata.mockReturnValue({});
@@ -688,11 +792,11 @@ describe('paymentsRouter error sanitization', () => {
     );
   });
 
-  it('uses the service-role client for checkout customer lookup and order insert', async () => {
+  it('admits the order through the service-role client before creating Stripe checkout', async () => {
     const sessionCreate = vi.fn().mockResolvedValue({
       id: 'cs_test_123',
       url: 'https://checkout.stripe.com/c/pay/cs_test_123',
-      payment_status: 'paid',
+      payment_status: 'unpaid',
     });
     const orderInserts: unknown[] = [];
     stripeState.getStripeClient.mockReturnValue({
@@ -768,19 +872,14 @@ describe('paymentsRouter error sanitization', () => {
       sessionId: 'cs_test_123',
     });
 
-    expect(stripeState.getOrCreateStripeCustomerId).toHaveBeenCalledWith(
-      expect.objectContaining({
-        supabase: adminSupabase,
-        userId: 'user-1',
-      }),
-    );
+    expect(stripeState.getOrCreateStripeCustomerId).not.toHaveBeenCalled();
     expect(orderInserts).toHaveLength(1);
     expect(orderInserts[0]).toMatchObject({
       user_id: 'user-1',
       item_type: 'credit_package',
       item_id: '123e4567-e89b-42d3-a456-426614174000',
       status: 'pending',
-      payment_status: 'paid',
+      payment_status: 'unpaid',
     });
   });
 
@@ -1496,7 +1595,7 @@ describe('paymentsRouter error sanitization', () => {
     if (evidence === 'read-error') h.subscriptionRetrieve.mockRejectedValue(new Error('timeout'));
     await expect(h.caller.previewSubscriptionPlanChange(input)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
     await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
-    expect(h.rows[0].status).toBe('pending'); expect(h.rows[0].stripe_checkout_session_id).not.toBeNull();
+    expect(h.rows[0].status).toBe('pending'); expect(h.rows[0].purchase_closed_at).toBeNull();
     expect(h.orderInserts).toHaveLength(1); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1);
   });
 
@@ -1834,21 +1933,13 @@ describe('paymentsRouter error sanitization', () => {
       sessionId: 'cs_test_membership',
     });
 
-    expect(stripeState.getOrCreateStripeCustomerId).toHaveBeenCalledWith(
-      expect.objectContaining({
-        supabase: adminSupabase,
-        userId: 'user-1',
-      }),
-    );
+    expect(stripeState.getOrCreateStripeCustomerId).not.toHaveBeenCalled();
     expect(sessionCreate).toHaveBeenCalledOnce();
     expect(orderInserts[0]).toMatchObject({
       user_id: 'user-1',
       item_type: 'membership_plan',
       item_id: '123e4567-e89b-42d3-a456-426614174222',
       billing_cycle: 'yearly',
-      stripe_customer_id: 'cus_123',
-      stripe_subscription_id: 'sub_test_membership',
-      stripe_price_id: 'price_test_gold_yearly',
       amount_total: 29900,
     });
   });
@@ -1951,21 +2042,13 @@ describe('paymentsRouter error sanitization', () => {
       sessionId: 'cs_test_stale_admin_override',
     });
 
-    expect(stripeState.getOrCreateStripeCustomerId).toHaveBeenCalledWith(
-      expect.objectContaining({
-        supabase: adminSupabase,
-        userId: 'user-1',
-      }),
-    );
+    expect(stripeState.getOrCreateStripeCustomerId).not.toHaveBeenCalled();
     expect(sessionCreate).toHaveBeenCalledOnce();
     expect(orderInserts[0]).toMatchObject({
       user_id: 'user-1',
       item_type: 'membership_plan',
       item_id: '123e4567-e89b-42d3-a456-426614174555',
       billing_cycle: 'monthly',
-      stripe_customer_id: 'cus_123',
-      stripe_subscription_id: 'sub_test_stale_admin_override',
-      stripe_price_id: 'price_test_pro_monthly',
       amount_total: 990,
     });
   });
@@ -2222,7 +2305,7 @@ describe('paymentsRouter error sanitization', () => {
         retrieve: vi.fn(),
       },
     });
-    vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
+    vi.mocked(upsertPaymentOrderBySession).mockImplementation(async (_db, session) => session);
     vi.mocked(fulfillPaidMembershipCheckoutSession).mockResolvedValue({
       fulfilled: true,
       reason: null,
@@ -2257,6 +2340,9 @@ describe('paymentsRouter error sanitization', () => {
             Promise.resolve({
               data: {
                 status: 'completed',
+                  id: 'sync-order-1', price_ref_id: 'price-ref-sync-order-1',
+                  payment_channel: 'stripe', merchant_namespace: 'acct_fixture', payment_mode: 'test',
+                  subscription_id: 'sub-ref-sub_test_sync',
                 payment_status: 'paid',
                 fulfilled_at: '2026-05-22T16:10:00.000Z',
                 stripe_subscription_id: 'sub_test_sync',
@@ -2345,7 +2431,7 @@ describe('paymentsRouter error sanitization', () => {
       invoices: {},
       subscriptions: {},
     });
-    vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
+    vi.mocked(upsertPaymentOrderBySession).mockImplementation(async (_db, session) => session);
     vi.mocked(fulfillPaidMembershipCheckoutSession).mockResolvedValue({
       fulfilled: true,
       reason: null,
@@ -2381,6 +2467,9 @@ describe('paymentsRouter error sanitization', () => {
               data: [
                 {
                   status: 'completed',
+                  id: 'sync-order-1', price_ref_id: 'price-ref-sync-order-1',
+                  payment_channel: 'stripe', merchant_namespace: 'acct_fixture', payment_mode: 'test',
+                  subscription_id: 'sub-ref-sub_test_sync_duplicate',
                   payment_status: 'paid',
                   fulfilled_at: '2026-07-04T00:00:02.000Z',
                   stripe_subscription_id: 'sub_test_sync_duplicate',
@@ -2388,6 +2477,9 @@ describe('paymentsRouter error sanitization', () => {
                 },
                 {
                   status: 'completed',
+                  id: 'sync-order-2', price_ref_id: 'price-ref-sync-order-2',
+                  payment_channel: 'stripe', merchant_namespace: 'acct_fixture', payment_mode: 'test',
+                  subscription_id: 'sub-ref-sub_test_sync_duplicate',
                   payment_status: 'paid',
                   fulfilled_at: '2026-07-04T00:00:03.000Z',
                   stripe_subscription_id: 'sub_test_sync_duplicate',
@@ -2462,7 +2554,7 @@ describe('paymentsRouter error sanitization', () => {
         retrieve: vi.fn(),
       },
     });
-    vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
+    vi.mocked(upsertPaymentOrderBySession).mockImplementation(async (_db, session) => session);
     vi.mocked(fulfillPaidMembershipCheckoutSession).mockResolvedValue({
       fulfilled: false,
       reason: 'paid_invoice_missing',
@@ -2557,7 +2649,7 @@ describe('paymentsRouter error sanitization', () => {
         retrieve: vi.fn(),
       },
     });
-    vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
+    vi.mocked(upsertPaymentOrderBySession).mockImplementation(async (_db, session) => session);
     vi.mocked(fulfillMembershipInvoice).mockResolvedValue(undefined);
     vi.mocked(syncSubscriptionState).mockResolvedValue(undefined);
 
@@ -2588,6 +2680,9 @@ describe('paymentsRouter error sanitization', () => {
             Promise.resolve({
               data: {
                 status: 'canceled',
+                  id: 'sync-order-1', price_ref_id: 'price-ref-sync-order-1',
+                  payment_channel: 'stripe', merchant_namespace: 'acct_fixture', payment_mode: 'test',
+                  subscription_id: null,
                 payment_status: 'unpaid',
                 fulfilled_at: null,
                 stripe_subscription_id: null,
@@ -2679,7 +2774,7 @@ describe('paymentsRouter error sanitization', () => {
         retrieve: vi.fn(),
       },
     });
-    vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
+    vi.mocked(upsertPaymentOrderBySession).mockImplementation(async (_db, session) => session);
     vi.mocked(fulfillPaidMembershipCheckoutSession).mockRejectedValue(
       Object.assign(new Error(`invoice audit already blocked for user@example.com ${session.id}`), {
         stage: 'checkout_paid_invoice_resolution',
@@ -2863,7 +2958,7 @@ describe('paymentsRouter error sanitization', () => {
         retrieve: vi.fn(),
       },
     });
-    vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
+    vi.mocked(upsertPaymentOrderBySession).mockImplementation(async (_db, session) => session);
     vi.mocked(fulfillPaidMembershipCheckoutSession).mockRejectedValue(
       Object.assign(new Error('Failed to fulfill membership invoice for user@example.com in cs_test_sync_rpc_failure'), {
         stage: 'fulfill_membership_invoice_rpc',
@@ -3140,10 +3235,10 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
     expect(harness.sessionCreate).toHaveBeenCalledWith(expect.objectContaining({
       mode: kind === 'credit_package' ? 'payment' : 'subscription',
       payment_method_types: kind === 'credit_package' ? ['card', 'alipay'] : ['card'],
-    }));
+    }), { idempotencyKey: expect.stringContaining('checkout:') });
     expect(stripeState.assertCheckoutRateLimit).toHaveBeenCalledOnce();
     expect(stripeState.assertCheckoutRateLimit.mock.invocationCallOrder[0])
-      .toBeLessThan(stripeState.getOrCreateStripeCustomerId.mock.invocationCallOrder[0]);
+      .toBeLessThan(harness.sessionCreate.mock.invocationCallOrder[0]);
     expect(harness.orderInserts).toHaveLength(1);
   });
 
@@ -3151,7 +3246,7 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
     const harness = createGuardHarness({ kind: 'membership_plan', alipaySubscriptionEnabled: enabled });
     harness.sessionCreate.mockResolvedValue({ id: 'cs_flag', url: 'https://checkout.stripe.com/test', payment_status: 'unpaid' });
     await harness.caller.createCheckoutSession({ kind: 'membership_plan', planId, billingCycle: 'yearly' });
-    expect(harness.sessionCreate).toHaveBeenCalledWith(expect.objectContaining({ mode: 'subscription', payment_method_types: ['card'] }));
+    expect(harness.sessionCreate).toHaveBeenCalledWith(expect.objectContaining({ mode: 'subscription', payment_method_types: ['card'] }), { idempotencyKey: expect.any(String) });
   });
 
   function expectNoCheckoutWrites(harness: {
@@ -3350,14 +3445,32 @@ describe('PAY-1 Customer Portal', () => {
     const create = vi.fn().mockResolvedValue({ url: 'https://billing.stripe.com/p/session/test' });
     const retrieve = vi.fn().mockResolvedValue({ id: 'sub_pay1', cancel_at: options.scheduled ? 2000000000 : null, customer: options.wrongCustomer ? 'cus_other' : 'cus_pay1', metadata: { userId: 'user-1' } });
     const filters: Array<[string, unknown]> = [];
-    const supabase = {
+    const supabase = { rpc: async () => { throw new Error('Unexpected Portal RPC'); },
       from(table: string) {
         if (table === 'profiles') return createSingleQueryBuilder(Promise.resolve({ data: { id: 'user-1', role: 'user', status: 'active', nickname: 'User', email: 'user@example.com' }, error: null }));
+        if (table === 'payment_orders') {
+          const row = { id: 'order-pay1', payment_channel: 'stripe', merchant_namespace: 'acct_fixture',
+            payment_mode: 'test', price_ref_id: 'price-ref-pay1', subscription_id: 'mirror_pay1' };
+          const builder = { select: () => builder, eq: () => builder, not: () => builder, order: () => builder,
+            limit: () => builder, maybeSingle: async () => ({ data: row, error: null }) };
+          return builder;
+        }
+        if (table === 'payment_provider_refs') {
+          const refs = [ { id: 'price-ref-pay1', object_type: 'price', external_id: 'price_pay1' },
+            { subscription_id: 'mirror_pay1', object_type: 'subscription', external_id: 'sub_pay1' } ]
+            .map(ref => ({ ...ref, channel: 'stripe', merchant_namespace: 'acct_fixture', mode: 'test' }));
+          const selected: Array<[string, unknown]> = [];
+          const result = () => ({ data: refs.filter(row => selected.every(([key, value]) => (row as Record<string, unknown>)[key] === value)), error: null });
+          const builder = { select: () => builder, eq: (key: string, value: unknown) => { selected.push([key, value]); return builder; },
+            limit: () => builder, maybeSingle: async () => ({ data: result().data[0] ?? null, error: null }),
+            then: <T>(resolve: (value: ReturnType<typeof result>) => T) => Promise.resolve(result()).then(resolve) };
+          return builder;
+        }
         if (table !== 'user_subscriptions') throw new Error(`unexpected table ${table}`);
         const builder = {
-          select: () => builder, not: () => builder, order: () => builder,
+          select: () => builder, not: () => builder, order: () => builder, in: () => builder,
           eq(column: string, value: unknown) { filters.push([column, value]); return builder; },
-          limit: async () => ({ data: options.noSubscription ? [] : [{ id: 'mirror_pay1', status: 'active', stripe_customer_id: 'cus_pay1', stripe_subscription_id: 'sub_pay1' }], error: options.readError ? { message: 'db failed' } : null }),
+          limit: async () => ({ data: options.noSubscription ? [] : [{ id: 'mirror_pay1', payment_channel: 'stripe', merchant_namespace: 'acct_fixture', payment_mode: 'test', status: 'active', stripe_customer_id: 'cus_pay1', stripe_subscription_id: 'sub_pay1' }], error: options.readError ? { message: 'db failed' } : null }),
         };
         return builder;
       },

@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
+import { testConcurrency } from './concurrency.mjs';
 
 if (process.argv.slice(2).join(' ') !== '--local-only' || process.env.CI) {
   throw new Error('Require local-only; no remote database input accepted');
@@ -18,7 +19,7 @@ const root = resolve(import.meta.dirname, '../../../..');
 const read = path => readFileSync(resolve(root, path), 'utf8');
 const run = (args, input) => spawnSync('docker', args, { cwd: root, input, encoding: 'utf8',
   env: { PATH: process.env.PATH, HOME: process.env.HOME }, maxBuffer: 64 * 1024 * 1024, timeout: 300000 });
-const ok = r => { if (r.status !== 0 || r.error) throw new Error((r.stderr || String(r.error)).slice(-4000)); return r.stdout.trim(); };
+const ok = r => { if (r.status !== 0 || r.error) throw new Error((r.stderr || String(r.error)).slice(0, 5000)); return r.stdout.trim(); };
 const endpoint = ok(run(['context', 'inspect', '--format', '{{.Endpoints.docker.Host}}']));
 assert.ok(endpoint.startsWith('unix:///') && !endpoint.includes('\n'));
 const docker = (args, input) => run(['--host', endpoint, ...args], input);
@@ -36,7 +37,9 @@ try {
     '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', POSTGRES_IMAGE]));
   let ready = false;
   for (let i = 0; i < 300 && !ready; i++) {
-    ready = docker(['exec', name, 'pg_isready', '-U', 'postgres', '-d', 'paycommon']).status === 0;
+    // The image starts a temporary init server before exec'ing the final postmaster.
+    ready = docker(['exec', name, 'cat', '/proc/1/comm']).stdout.trim() === 'postgres'
+      && docker(['exec', name, 'pg_isready', '-U', 'postgres', '-d', 'paycommon']).status === 0;
     if (!ready) await new Promise(done => setTimeout(done, 200));
   }
   assert.ok(ready);
@@ -85,9 +88,10 @@ try {
   };
   let purchaseTested = false;
   const testPurchase = () => {
-    const path = 'packages/db/migrations/0168_pay_common_purchase.sql';
+    const path = 'packages/db/migrations/0169_pay_common_purchase.sql';
     const catalog = read('packages/db/tests/pay-common/purchase-catalog.sql');
     const before = ok(sql(catalog));
+    report.purchaseCatalog = { before };
     const initial = snapshot();
     const rejectDrift = () => {
       const result = sql('BEGIN; ALTER TABLE payment_orders ADD COLUMN unexpected_drift text;\n' + read(path));
@@ -99,6 +103,7 @@ try {
     ok(sql(read(path)));
     const after = ok(sql(catalog));
     const applied = snapshot();
+    report.purchaseCatalog = { before, after };
     ok(sql(read(path)));
     assert.deepEqual(snapshot(), applied);
     rejectDrift();
@@ -113,7 +118,7 @@ try {
         contractTested = true;
         return { ok: true };
       }
-      if (path.endsWith('/0168_pay_common_purchase.sql') && !purchaseTested) {
+      if (path.endsWith('/0169_pay_common_purchase.sql') && !purchaseTested) {
         testPurchase();
         purchaseTested = true;
         return { ok: true };
@@ -125,6 +130,21 @@ try {
   assert.equal(report.build.failed, null);
   ok(sql(read('packages/db/tests/pay-common/purchase-admission.sql')));
   report.checks.push('PR-2 purchase admission: free/paid eligibility, mapping ambiguity, protected closure and expiry retry');
+  ok(sql(read('packages/db/tests/pay-common/checkout-persistence.sql')));
+  report.checks.push('PR-2 checkout persistence, mismatch evidence, frozen package grant and callback replay');
+  ok(sql(read('packages/db/tests/pay-common/catalog-write.sql')));
+  report.checks.push('PR-2 current catalog mapping rotation, amount rejection and atomic rollback');
+  ok(sql(read('packages/db/tests/pay-common/membership-facts.sql')));
+  report.checks.push('PR-2 owner-only channel-aware facts and no private mapping exposure');
+  ok(sql(read('packages/db/tests/pay-common/invoice-grant.sql')));
+  report.checks.push('PR-2 frozen invoice grant, replay, renewal and closed-subject financial settlement');
+  ok(sql(read('packages/db/tests/pay-common/annual-grant.sql')));
+  report.checks.push('PR-2 frozen annual period-01 contract, cron replay and amount denial');
+  ok(sql(read('packages/db/tests/pay-common/upgrade.sql')));
+  report.checks.push('PR-2 real upgrade identity, verified closure/retry and immutable opening contract');
+  ok(sql(read('packages/db/tests/pay-common/invoice-lifecycle.sql')));
+  report.checks.push('PR-2 failure ordering, unpaid renewal identity and atomic cancellation lifecycle');
+  report.checks.push(await testConcurrency({ endpoint, name, sql, ok }));
 
 } catch (error) { report.failed = String(error.stack ?? error); process.exitCode = 1; }
 finally {

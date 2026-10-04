@@ -351,7 +351,7 @@ jobs:
       # packages/db/baseline -> every migration) in the pinned PostgreSQL image and require the
       # committed built fingerprint, the account-open audit and the credit-guard paths to hold.
       - name: Integration — Empty-database build from files
-        run: node packages/db/tests/run-db-baseline-replay.mjs --ci --after packages/db/tests/baseline/credit-guard-paths.sql,packages/db/tests/pay-common/purchase-admission.sql
+        run: node packages/db/tests/run-db-baseline-replay.mjs --ci --after packages/db/tests/baseline/credit-guard-paths.sql,packages/db/tests/pay-common/purchase-admission.sql,packages/db/tests/pay-common/checkout-persistence.sql,packages/db/tests/pay-common/catalog-write.sql,packages/db/tests/pay-common/membership-facts.sql,packages/db/tests/pay-common/invoice-grant.sql,packages/db/tests/pay-common/annual-grant.sql,packages/db/tests/pay-common/upgrade.sql,packages/db/tests/pay-common/invoice-lifecycle.sql
 
   lint-check:
     name: Lint & Type Check

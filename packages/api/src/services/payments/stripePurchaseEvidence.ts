@@ -72,3 +72,20 @@ export async function closeExpiredStripeCheckout(input: {
   if (typeof result.data !== 'boolean') throw new Error('PAY_COMMON_ATTEMPT_CLOSE_FAILED');
   return result.data;
 }
+
+export function isExpectedRecurringUpgradePrice(price: Stripe.Price, input: {
+  mode: 'test' | 'live';
+  priceId: string;
+  amount: number;
+  currency: string;
+  billingCycle: 'monthly' | 'yearly';
+}) {
+  return price.id === input.priceId && price.object === 'price' && price.livemode === (input.mode === 'live')
+    && price.billing_scheme === 'per_unit' && !price.custom_unit_amount && !price.transform_quantity && !price.tiers_mode
+    && (price.tax_behavior ?? 'unspecified') === 'unspecified' && price.recurring?.usage_type === 'licensed'
+    && price.type === 'recurring'
+    && price.currency === input.currency
+    && price.unit_amount === input.amount
+    && price.recurring?.interval === (input.billingCycle === 'yearly' ? 'year' : 'month')
+    && price.recurring.interval_count === 1;
+}

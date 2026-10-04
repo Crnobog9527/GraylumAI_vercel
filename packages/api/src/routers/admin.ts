@@ -5,6 +5,7 @@ import { ANNOUNCEMENT_LINK_ERROR, resolveAnnouncementLink } from '../shared/anno
 import { parseSearchSurcharge } from '../services/searchPricing';
 import { router, adminProcedure } from '../trpc';
 import { z } from 'zod';
+import { hydrateStripeCatalogPrices, saveStripeCatalog } from '../services/payments/stripeCatalog';
 import { TRPCError } from '@trpc/server';
 import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
@@ -1481,8 +1482,8 @@ export const adminRouter = router({
       );
 
       return {
-        packages: packagesResult.data,
-        membershipPlans: membershipPlansResult.data,
+        packages: await hydrateStripeCatalogPrices({ db: ctx.supabaseAdmin, kind: 'credit_package', rows: packagesResult.data }),
+        membershipPlans: await hydrateStripeCatalogPrices({ db: ctx.supabaseAdmin, kind: 'membership_plan', rows: membershipPlansResult.data }),
       };
     }),
 
@@ -1501,20 +1502,17 @@ export const adminRouter = router({
       active: z.enum(['true', 'false']).default('true'),
     }))
     .mutation(async ({ ctx, input }) => {
-      const { data, error } = await ctx.supabase
-        .from('credit_packages')
-        .insert({
+      const { data, error } = await saveStripeCatalog({ db: ctx.supabaseAdmin, kind: 'credit_package',
+        prices: { one_time: input.stripePriceId }, values: {
           name: input.name,
           price: input.price,
           credits_amount: input.creditsAmount,
           bonus_credits: input.bonusCredits,
-          stripe_price_id: input.stripePriceId ?? null,
           sort_order: input.sortOrder,
           is_popular: input.isPopular,
           active: input.active,
-        })
-        .select()
-        .single();
+        },
+      });
 
       if (error) {
         throw createAdminOperationError('创建积分包', error);
@@ -1544,17 +1542,13 @@ export const adminRouter = router({
       if (input.price) updateData.price = input.price;
       if (input.creditsAmount) updateData.credits_amount = input.creditsAmount;
       if (input.bonusCredits !== undefined) updateData.bonus_credits = input.bonusCredits;
-      if (input.stripePriceId !== undefined) updateData.stripe_price_id = input.stripePriceId || null;
       if (input.sortOrder !== undefined) updateData.sort_order = input.sortOrder;
       if (input.isPopular) updateData.is_popular = input.isPopular;
       if (input.active) updateData.active = input.active;
 
-      const { data, error } = await ctx.supabase
-        .from('credit_packages')
-        .update(updateData)
-        .eq('id', input.id)
-        .select()
-        .single();
+      const { data, error } = await saveStripeCatalog({ db: ctx.supabaseAdmin, kind: 'credit_package',
+        id: input.id, values: updateData, prices: { one_time: input.stripePriceId },
+      });
 
       if (error) {
         throw createAdminOperationError('更新积分包', error);
@@ -2452,7 +2446,7 @@ export const adminRouter = router({
         systemSettings: Object.fromEntries(
           systemSettingsResult.data.map((setting) => [setting.key, setting.value]),
         ),
-        membershipPlans: membershipPlansResult.data,
+        membershipPlans: await hydrateStripeCatalogPrices({ db: ctx.supabaseAdmin, kind: 'membership_plan', rows: membershipPlansResult.data }),
       };
     }),
 

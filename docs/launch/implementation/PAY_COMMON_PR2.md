@@ -1,115 +1,100 @@
-# PAY-COMMON PR-2 implementation
+# PAY-COMMON PR-2：Stripe 公共购买与履约
 
-Risk: high — payment identity, fulfillment, membership and database transaction boundaries.
-This slice implements section 6 PR-2 of `docs/launch/tasks/PAY-COMMON.md`.
+风险 **high**：修改支付身份、会员权益、数据库权限与金融事务边界。范围为
+`docs/launch/tasks/PAY-COMMON.md` 第 6 节 PR-2；保持 draft，不执行远端数据库访问、
+远端迁移、配置变更、真实付款、ready 或合并。
 
-## Scope and delivery boundary
+## 实现与权威来源
 
-- Stripe checkout intent is persisted before dispatch, with a stable order-derived identity.
-- Payment readers and writers switch together to `payment_provider_refs` authority;
-  compatibility columns are derived in the same transaction.
-- Callback, return, renewal, cancellation, receipt and grant paths preserve original channel
-  and frozen purchase facts. Existing payment transactions and ledger remain authoritative.
-- No new channel setting, Waffo, refund policy, Runtime or BILL2 consumer changes.
-- Migration starts at 0168; 0167 belongs to PR #632. Recheck numbers and regenerate the
-  built fingerprint against the actual merge order before delivery.
-- Draft only. No remote database, remote migration, configuration, ready transition or merge.
+- 下单先在现有 `payment_orders` 落单，冻结价格、折扣、积分、会员等级、商品版本和精确请求。
+  Stripe 幂等键由订单身份派生。重试复用请求，丢失响应先查原会话；固定到期时间防止
+  Stripe 的幂等保留窗口过去后产生第二次扣款。未知结果不释放尝试。
+- `payment_provider_refs` 是价格、Checkout、invoice、payment、subscription 的外部身份权威。
+  目录写入、履约和生命周期事务同时写映射与旧列派生值；普通服务端写旧列会被拒绝。
+  原客户绑定仍作为订单/订阅事实核对，不新增客户或钱包系统。
+- 回调和返回页都重新读取 Stripe；页面参数不是付款凭证。核对对象、商户、模式、归属、
+  金额、币种和服务行；原支付 RPC 原子提交余额、账本、快照、订阅和订单完成事实。
+  同账单不同事件、返回页/回调重放走同一事务。迟到失败不翻转付款终态，迟到旧周期不回退现行合同。
+- 初次、续费、升级、年付发放使用冻结事实；原开通 `contract_snapshot` 不随升级修改。
+  月付转年付及 Pro 升 Gold 保持原有允许路径。取消先到、付款后到不重新提升会员。
+  年付沿用原 UTC 锚点、余数分配与每期唯一发放。
+- 会员事实用受权限约束的只读投影解析，私有映射不返回客户端。目录展示只返回购买就绪状态；
+  凭证、取消和原订阅操作使用原映射，不能被当前目录价格替换。
+- 付款金额事实和冲突证据有界、追加、去重；未知手续费和净额保留 null，不伪造为 0。
+  冲突只记录外部证据引用及固定原因，不保存完整供应商对象或用户正文。
 
-## Recovery
+架构增量：复用已有订单、订阅、发放与账本，没有新持久化表、队列或第二份会员真相。
+原直接写表无法保证“先落单、冻结请求、映射和旧列同时提交”，因此仅增加这些既有实体的
+窄事务 RPC，并局部扩展原支付函数。Runtime、BILL2 消费核心、退款规则、渠道选择和 Waffo 不变。
 
-Preserve orders, mappings, snapshots and grants; repair forward. Do not delete financial
-facts or roll the application back to independent writes of legacy Stripe columns.
-Unknown provider outcomes retain the original attempt and require reconciliation.
+## 中途审计 5982770208
 
-## Validation record
+- **P2-1 已处理**：免费用户仍可按原价买积分包，会员沿用折扣。
+  **“积分包只卖会员”移交 PAYWALL**，本 PR 不提前接入。
+- **P2-2 已处理**：`is_current` + 部分唯一索引限定渠道/商户/模式/商品/周期的当前价格。
+  无行 `PAY_COMMON_PRICE_MAPPING_MISSING`，多行 `PAY_COMMON_PRICE_MAPPING_AMBIGUOUS`。
+  历史映射保留；订单冻结 `price_ref_id`，派发前核对 Stripe 原标价与快照，折扣另外计算。
+- **P2-3 已处理**：适配层处理 expired 回调或原单恢复时重新查询 Stripe，确认原会话 expired/unpaid
+  及全部身份事实，由受保护 RPC 写关闭时间、原因和引用。取消页面、超时、查询失败不能关闭。
+  付款终态不可过期覆盖，重复关闭幂等，关闭后新尝试使用新身份。
+- **P2-4 已处理**：购买准入和其余 PR-2 SQL 用例接入本机运行器与 CI 的空库 `--after` 列表；
+  工作流合约锁定这些入口。本机运行器另执行真实 PostgreSQL 并发测试。
+- **P3 已处理**：精确源/重放结构漂移拒绝；商品版本统一数据库更新时间；价格引用冻结外键；
+  profile 优先锁序；未映射且未履约旧订单以 `PAY_COMMON_LEGACY_ORDER_UNRESOLVED` 阻止新购买。
+  不根据当前商品或可变 metadata 猜测旧订单财务事实。
 
-Implementation and validation are in progress. Local results belong to their exact candidate. The previous candidate failed CI because 0167 was missing;
-PR #632 has now merged. Refresh staging, rebuild the fingerprint and run full CI before reporting a new result.
-The PR Handoff records actual commands and results; fixture tests do not establish a real
-Stripe sandbox end-to-end result. Existing Stripe regressions, new denial/replay/order tests,
-local empty-database replay twice, types, lint, code size and required CI remain to run.
+## 兼容、应用前提和恢复
 
-## Current implementation checkpoint (incomplete)
+旧 Stripe 列继续保留给尚未迁移的消费方，同事务派生；不改 BILL2 消费 join。
+新旧支付应用不能混跑。已有未映射历史必须先核对原商户、模式、付款和合同；未知事实拒绝，
+不能直接把当前商品配置补成历史购买快照。当前迁移不凭空回填旧历史，也不授权远端核对或应用。
 
-The current draft adds **only an unconnected foundation**:
+出现问题保留订单、映射、发放与账本，采用前向修复。不能删除金融事实、取消保护或回滚应用到
+独立写旧列的版本。创建成功但本地响应丢失时保留原身份；返回页和回调都可恢复原事务。
+只有供应商权威确认未付款且尝试关闭后才允许新身份。应用到 staging 与合并仍须 Owner 单独批准。
 
-- `pay_common_create_purchase` serializes an existing subject's checkout intent under the
-  profile lock, requires an existing Stripe price mapping, freezes server-side product facts,
-  and reuses the unresolved order. It makes no provider call.
-- 0168 adds the missing server-maintained package version timestamp. A small admission RPC
-  is necessary because existing direct order inserts cannot atomically freeze and reuse an
-  unresolved intent. Orders remain the sole purchase authority; no new state table is added.
-- Pure helpers validate exact USD cents, receipt amount/mode/currency, frozen credit totals
-  and an order-derived provider key. No existing caller uses them yet.
+## 迁移顺序与历史证据
 
-**Do not deploy this as PR-2 completion or enable a partial mapping switch.** The following
-work is still required together on this branch:
+- 旧候选曾因缺 0167 导致账本检查失败，后续 API/迁移回放被跳过；当时本地结果不等于 CI。
+- #632 合并后已同步其 0167；#637 后占用 0168。Owner 评论 5983152730 和本轮授权允许
+  #633 按实际顺序顺延为 **0169**，未修改已合并迁移。
+- 当前同步基线为 `staging@482664400670e87e1247fd37bcf2d5f4e3477095`。
+  0169 源结构摘要 `dc3f51dcc333026ecde8a87f26e96d5e`，重放摘要 `e060ee227b95867256bf157be0fb9793`。
+  `built-fingerprint.json` 由本机空库重建生成。
+- 旧远端 `fb9d526` 检查通过仅证明旧基础检查点，不能证明本轮接线候选。
 
-1. Connect checkout dispatch/recovery to durable orders; preserve the exact request envelope
-   across retries and explicitly reconcile provider expiry/unknown outcomes.
-2. Switch all payment readers/writers, including catalog administration, to authoritative
-   provider refs with transactionally derived legacy columns. Resolve current catalog-price
-   selection without discarding prior price mappings. Never invent external identities.
-3. Extend the existing fulfillment RPCs for order/grant snapshots, immutable renewal contracts,
-   original-channel receipts/cancellation, lifecycle ordering and closed-account handling.
-4. Make membership facts explicitly channel-aware without changing Runtime consumers.
-5. Add full callback replay/out-of-order/duplicate/concurrency/recovery coverage, then run the
-   complete final candidate validation. Foundation tests do not prove these behaviors.
+## 交付清单
 
-The admission function is not yet the complete membership eligibility check; connection must
-preserve all existing allowed/denied semantics and recheck relevant facts inside the transaction.
-Do not call it as a replacement for the existing eligibility service as currently written.
+- [x] 下单先落单、精确请求与稳定幂等、丢响应恢复和过期新尝试。
+- [x] Webhook 验签边缘保留；权威查询、订单归属/模式/金额/币种/服务行校验。
+- [x] 金额与冲突事实追加，未知手续费/净额不伪零。
+- [x] 返回页与 webhook 共用原子履约；同 invoice 重复事件、已完成重放和迟到失败保护。
+- [x] 目录、购买、回调、续费、取消、凭证接到映射；旧列同事务派生。
+- [x] 改计划订单稳定身份和冻结报价；月付转年付与 Pro→Gold 兼容。
+- [x] 会员事实解析、首次/续费快照、年付原渠道发放；原合同不可改写。
+- [x] 本机真实双连接重复 invoice、invoice/cron 同期双向竞争、重复 cron、profile 优先锁测试。
+- [x] 原有退款/注销边界回归及本机 SQL 关闭主体收尾；不改变退款产品规则。
+- [x] 0169 编号、空库建库、重复回放及 built fingerprint 重建。
+- [ ] 最终候选全部 CI/Security，按精确 head 在 PR 记录结果。
+- [ ] 最终候选独立语义审查。
+- [ ] 真实 Stripe 沙箱端到端；当前为实施交付阻塞，不以 fixture 替代。
 
+## 验证与 Handoff
 
-## 2026-10-05 中途审计修正与剩余清单
+**PASS（本机）**：172/172 空库步骤、103 次迁移重复；8 组 PR-2 SQL 与真实数据库并发；
+完整 API 4579 项通过、支付前端 23 项通过；API/Web 类型检查、API/Web lint、代码规模通过。
+最终远端 head 和检查状态见 PR。
+付款恢复、授权拒绝、冻结快照、重复/乱序与退款兼容都有确定性覆盖。
 
-依据：PR #633 评论 5982770208。先修正 P2-1–4，再接业务路径；不叠在 #632 分支上。
+**FAIL（已修复的过程中结果）**：旧缺号账本失败；请求白名单 JSON 运算优先级问题；
+旧测试夹具未接权威映射/RPC；升级来源与取消乱序问题。修复后对应本地 SQL/API 回归已通过。
+工作流合约使用提交中的迁移文件，0169 改号提交前仍看到旧 0168 重号；提交后须重跑。
 
-- P2-1：免费用户仍可买积分包，按原价；已有会员按现行折扣。**“积分包只卖会员”移交 PAYWALL**，
-  本 PR 不提前改变购买准入。其他原有退款/冲突/账号封闭拒绝仍须保持。
-- P2-2：`payment_provider_refs.is_current` 只标记当前目录价格；同渠道、商户、模式、商品、周期
-  用部分唯一索引保证至多一个。旧映射保留供原订单使用；0 行报 `PAY_COMMON_PRICE_MAPPING_MISSING`，
-  多行报 `PAY_COMMON_PRICE_MAPPING_AMBIGUOUS`，不泄漏 P0002/P0003。
-  订单冻结 `price_ref_id`；派发前 Stripe price 的身份、模式、币种、标价、计价方式和周期必须与快照一致。
-  会员折扣比较的是原标价与冻结折扣，不能拿优惠后实付去校验原 price。
-- P2-3：关闭方为 Stripe 适配层，处理 `checkout.session.expired` 或原单恢复查询时，必须重新读取
-  原映射会话并确认 expired/unpaid、原主体/订单/商户/模式及金额；查询失败、页面取消和本地超时不关闭。
-  关闭事实放在受保护的订单列，由专用 RPC 写原因与原会话引用；直接 metadata 更新不能解除原意图。
-  已付款/已履约/退款终态拒绝过期覆盖；过期重复关闭幂等，之后新购买获得新订单/请求身份。
-- P2-4：`purchase-admission.sql` 接入 pay-common 运行器，并加入 CI 原有空库检查的 `--after` 列表；
-  CI 合约测试同时锁定这一入口。0161 的历史测试在它的真实历史位置运行，再执行后续迁移。
-- P3：两种商品版本时间统一由数据库维护；priceRefId 从 metadata 移到冻结外键。
-  未映射且未履约的旧订单拒绝新购买并报 `PAY_COMMON_LEGACY_ORDER_UNRESOLVED`，不猜关联或丢账。
-  迁移已增加精确源结构和重放结构的漂移预检；履约 profile→order 锁序随最终函数接线完成，尚未验证。
+**SKIPPED**：API 原有 12 项；支付前端 3 项浏览器用例。不能计作通过。
 
-完整 PR-2 尚须实现并验证以下事项，基础 helper 或 SQL fixture 不代表它们已经接通：
+**NOT_RUN／阻塞**：真实 Stripe sandbox E2E。现有文件没有可用 test key，未发送供应商请求。
+现有 preview smoke 不能证明付款/履约，且默认 setup 会写远端设置，当前禁止运行。
+按方案 §7 保留确定性验证结果和明确阻塞，不请求 Owner 代替技术验证，不改环境或供应商配置。
 
-- [ ] Webhook 验签后权威查询，核对主体、商户/模式、对象类型、商品、金额、币种、周期。
-- [ ] 冲突证据与付款金额事实按身份锁内追加/去重，128 条边界明确拒绝；手续费/净额未知保留 unknown。
-- [ ] 返回页不作为付款证明；返回页与 webhook 并发只履约一次。
-- [ ] 同发票的 invoice.paid/payment_succeeded 去重；迟到 pending/failed 不覆盖终态。
-- [ ] 所有目录、下单、回调、续费、取消和凭证读写接到映射；旧列只作同事务派生。
-- [ ] Pro→Gold 的 changeSubscriptionPlan、待生效改计划订单也使用新身份/映射与冻结购买事实。
-- [ ] 首次/续费使用冻结合同；年付 cron 按原渠道、内部订阅及 grant_snapshot 发放，webhook/cron 同期一次。
-- [ ] 派发前调用价格校验；expired 回调与恢复查询调用受保护关闭入口，覆盖真实路由允许/拒绝。
-- [ ] profile→order→subscription/grant 锁序、并发双击/履约/退款/注销及崩溃恢复验证。
-- [ ] Stripe sandbox 端到端证明；本地 fixture 不冒充供应商测试交易。
-- [ ] #632 合并后同步 staging、保持正确迁移编号、重新生成 built-fingerprint，运行全部 required CI/Security。
-
-缺 0167 导致账本检查失败是已知前置阻塞，不复制 #632 的迁移、不降检查、不据本地结果宣称 CI 通过。
-
-### 本轮本地验证记录（P2 修正阶段）
-
-- PASS：API typecheck、lint；新增证据/金额测试 39 项；代码规模检查。
-- PASS：本机临时 PostgreSQL 空库完整建库，170 步、101 次迁移重放；购买准入 SQL 全部通过。
-- FAIL：同步 staging 前 CI 工作流合约测试 9 项中 1 项因缺 0167 失败；不是支付断言失败。
-- NOT_RUN：实际业务接线后的全量 Stripe 回归、真实 Stripe 沙箱端到端、最终候选 CI/Security。
-- #632 已合并，缺 0167 为旧候选的已知失败；同步 staging 后重新验证，不把旧失败直接改写为通过。
-
-### 已同步 staging 的检查点
-
-已接收 #632 合并后的 staging，0167 来自该合并，PR-2 保持 0168。built-fingerprint 已在本机重新生成并再回放核对；无 runtime/BILL2 自有 diff。
-
-- PASS：完整 API 4501 项通过、12 项跳过；typecheck、lint、代码规模；工作流合约 9 项/341 断言。
-- PASS：新基线空库 171 步、102 次重复迁移；0168 源结构/重放漂移拒绝、准入/过期新尝试 SQL；第二次完整空库指纹一致。
-- NOT_RUN：该检查点的远端 CI/Security（推送后读取）；实际业务接线与沙箱端到端仍未完成。
+Handoff：实现和本机验证已接入；下一步读取精确候选 CI/Security、完成独立审查和同范围修复。
+沙箱 E2E 未完成前不是 clean candidate。保持 draft，不应用迁移、不合并。

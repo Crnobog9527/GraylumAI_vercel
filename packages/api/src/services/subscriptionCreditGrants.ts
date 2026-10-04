@@ -4,20 +4,18 @@
  * This code is proprietary and confidential.
  */
 
-import { createHash } from 'crypto';
+import { recordStripeInvoiceConflict } from './payments/stripeConflictEvidence';
+import { freezePurchaseSnapshot } from './payments/contracts';
+import { findStripeReference, resolveStripeOrderIds } from './payments/stripeReferences';
+import { snapshotAmountDue, type StripeScope } from './payments/purchaseFacts';
 import { logger } from '../lib/logger';
 import { normalizePaymentOrderStatus } from './paymentOrderStatus';
 import {
-  buildSubscriptionPlanChangeLockKey,
   isSubscriptionPlanChangeOrder,
 } from './subscriptionPlanChangeLock';
 
 type SupabaseLikeClient = any;
 const STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS = 999;
-const DETERMINISTIC_UUID_NAMESPACES = {
-  subscriptionMirror: 'graylum:user_subscriptions:stripe_subscription_id:v1',
-  invoicePaymentOrder: 'graylum:payment_orders:stripe_invoice_id:v1',
-} as const;
 
 export type SubscriptionBillingCycle = 'monthly' | 'yearly';
 export type SubscriptionGrantType = 'monthly_invoice' | 'annual_monthly_release';
@@ -33,6 +31,13 @@ interface MembershipPlanRow {
 }
 
 interface PaymentOrderRow {
+  price_ref_id?: string | null;
+  subscription_id?: string | null;
+  payment_channel?: string | null;
+  merchant_namespace?: string | null;
+  payment_mode?: string | null;
+  purchase_snapshot?: unknown;
+  purchase_membership_level?: string | null;
   id?: string | null;
   user_id?: string | null;
   item_id?: string | null;
@@ -51,6 +56,9 @@ interface PaymentOrderRow {
 }
 
 interface SubscriptionRow {
+  payment_channel?: string | null;
+  merchant_namespace?: string | null;
+  payment_mode?: string | null;
   id?: string | null;
   user_id?: string | null;
   membership_plan_id?: string | null;
@@ -72,6 +80,9 @@ interface SubscriptionRow {
 }
 
 interface SubscriptionCreditGrantRow {
+  subscription_id?: string | null;
+  source_order_id?: string | null;
+  grant_snapshot?: unknown;
   id?: string | null;
   user_id?: string | null;
   membership_plan_id?: string | null;
@@ -93,11 +104,6 @@ interface SubscriptionCreditGrantRow {
   metadata?: Record<string, unknown> | null;
   created_at?: string | null;
   updated_at?: string | null;
-}
-
-interface CreditTransactionRow {
-  id?: string | null;
-  amount?: number | string | null;
 }
 
 interface ProfileCreditRow {
@@ -141,6 +147,7 @@ interface GrantSubscriptionCreditsInput extends GrantPeriod {
 }
 
 export interface FulfillMembershipInvoiceWithCreditGrantsInput {
+  scope?: StripeScope;
   expectedSourceOrderId?: string;
   expectedSourcePriceId?: string;
   excludeSubscriptionPlanChangeSources?: boolean;
@@ -342,14 +349,6 @@ export function addUtcCalendarMonthsClamped(anchor: Date, offset: number): Date 
 
 function normalizeBillingCycle(value: string | null | undefined): SubscriptionBillingCycle {
   return value === 'yearly' ? 'yearly' : 'monthly';
-}
-
-function shouldInitializeMirrorStatus(value: string | null | undefined): boolean {
-  return !value?.trim();
-}
-
-function shouldInitializeCancelAtPeriodEnd(value: string | boolean | null | undefined): boolean {
-  return value === null || value === undefined || value === '';
 }
 
 function buildMonthlyGrantPeriodKey(invoiceId: string) {
@@ -788,35 +787,6 @@ function asPaymentOrderRows(data: PaymentOrderRow | PaymentOrderRow[] | null | u
   return Array.isArray(data) ? data : [data];
 }
 
-function buildDeterministicUuid(namespace: string, value: string) {
-  const bytes = Uint8Array.from(createHash('sha256').update(`${namespace}:${value}`).digest().subarray(0, 16));
-  bytes[6] = (bytes[6] & 0x0f) | 0x50;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-
-  return [
-    hex.slice(0, 8),
-    hex.slice(8, 12),
-    hex.slice(12, 16),
-    hex.slice(16, 20),
-    hex.slice(20),
-  ].join('-');
-}
-
-function buildSubscriptionMirrorId(subscriptionId: string) {
-  return buildDeterministicUuid(DETERMINISTIC_UUID_NAMESPACES.subscriptionMirror, subscriptionId);
-}
-
-function buildInvoicePaymentOrderId(invoiceId: string) {
-  return buildDeterministicUuid(DETERMINISTIC_UUID_NAMESPACES.invoicePaymentOrder, invoiceId);
-}
-
-function isUniqueViolationError(error: { code?: unknown; message?: unknown } | null | undefined) {
-  return error?.code === '23505'
-    || /duplicate key value violates unique constraint/i.test(String(error?.message ?? ''));
-}
-
 function asSubscriptionRows(data: SubscriptionRow | SubscriptionRow[] | null | undefined): SubscriptionRow[] {
   if (!data) {
     return [];
@@ -837,23 +807,13 @@ function preferCanonicalSubscriptionMirror(subscriptions: SubscriptionRow[]) {
     ?? null;
 }
 
-function logDuplicateSubscriptionMirrors(subscriptionId: string, subscriptions: SubscriptionRow[]) {
-  if (subscriptions.length <= 1) {
-    return;
-  }
-
-  logger.warn('billing', 'subscription_mirror_duplicate_detected', {
-    subscriptionId: maskIdentifier(subscriptionId),
-    subscriptionCount: subscriptions.length,
-    canonicalSubscriptionId: maskIdentifier(preferCanonicalSubscriptionMirror(subscriptions)?.id),
-  });
-}
-
-async function getExistingInvoiceOrder(supabase: SupabaseLikeClient, invoiceId: string): Promise<PaymentOrderRow | null> {
+async function getExistingInvoiceOrder(supabase: SupabaseLikeClient, invoiceId: string, scope: StripeScope): Promise<PaymentOrderRow | null> {
+  const reference = await findStripeReference(supabase, 'invoice', invoiceId, scope);
+  if (!reference?.order_id) return null;
   const query = supabase
     .from('payment_orders')
-    .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, stripe_invoice_id, stripe_subscription_id, payment_status, fulfilled_at, created_at, metadata')
-    .eq('stripe_invoice_id', invoiceId);
+    .select('price_ref_id,subscription_id,payment_channel,merchant_namespace,payment_mode,purchase_snapshot, purchase_membership_level, id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, stripe_invoice_id, stripe_subscription_id, payment_status, fulfilled_at, created_at, metadata')
+    .eq('id', reference.order_id);
   const orderedQuery = typeof query.order === 'function'
     ? query.order('created_at', { ascending: true })
     : query;
@@ -880,7 +840,8 @@ async function getExistingInvoiceOrder(supabase: SupabaseLikeClient, invoiceId: 
     });
   }
 
-  return preferCanonicalInvoiceOrder(rows);
+  const order = preferCanonicalInvoiceOrder(rows);
+  return order ? await resolveStripeOrderIds(supabase, order) : null;
 }
 
 function isUsableMembershipSourceOrder(
@@ -971,7 +932,7 @@ function pickSubscriptionSourceOrder(
   for (const order of orders) {
     if (order.status === 'failed'
       || (options.expectedSourcePriceId && order.stripe_price_id !== options.expectedSourcePriceId)
-      || (options.excludeSubscriptionPlanChangeOrders && isSubscriptionPlanChangeOrder(order))
+      || (options.excludeSubscriptionPlanChangeOrders && isSubscriptionPlanChangeOrder(order) && !order.fulfilled_at)
       || !isUsableSourceForInvoice(order, options)) {
       continue;
     }
@@ -1001,6 +962,7 @@ async function getLatestSubscriptionOrder(
   supabase: SupabaseLikeClient,
   subscriptionId: string,
   options: {
+    scope?: StripeScope;
     expectedSourceOrderId?: string;
     expectedSourcePriceId?: string;
     invoiceCreatedAt?: string | null;
@@ -1009,11 +971,15 @@ async function getLatestSubscriptionOrder(
   } = {},
 ): Promise<SubscriptionSourceOrderLookupResult> {
   const sourceCutoff = getInvoiceSourceQueryCutoff(options);
+  const subscriptionRef = options.expectedSourceOrderId ? null : await findStripeReference(supabase, 'subscription', subscriptionId, options.scope);
+  if (!options.expectedSourceOrderId && !subscriptionRef?.subscription_id) throw new Error('PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING');
+  const priceRef = options.expectedSourcePriceId ? await findStripeReference(supabase, 'price', options.expectedSourcePriceId, options.scope) : null;
+  if (options.expectedSourcePriceId && !priceRef) throw new Error('PAY_COMMON_PRICE_MAPPING_MISSING');
   const query = supabase
     .from('payment_orders')
-    .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, payment_status, created_at, metadata')
-    .eq('stripe_subscription_id', subscriptionId);
-  const priceQuery = options.expectedSourcePriceId ? query.eq('stripe_price_id', options.expectedSourcePriceId) : query;
+    .select('price_ref_id,subscription_id,payment_channel,merchant_namespace,payment_mode,purchase_snapshot, purchase_membership_level, id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, payment_status, fulfilled_at, created_at, metadata')
+    .eq(options.expectedSourceOrderId ? 'id' : 'subscription_id', options.expectedSourceOrderId ?? subscriptionRef!.subscription_id);
+  const priceQuery = options.expectedSourcePriceId ? query.eq('price_ref_id', priceRef!.id) : query;
   const exactSourceQuery = options.expectedSourceOrderId ? priceQuery.eq('id', options.expectedSourceOrderId) : priceQuery;
   const cutoffQuery = sourceCutoff && typeof priceQuery.lte === 'function'
     ? exactSourceQuery.lte('created_at', sourceCutoff)
@@ -1041,11 +1007,11 @@ async function getLatestSubscriptionOrder(
   }
 
   if (Array.isArray(result.data)) {
-    return pickSubscriptionSourceOrder(result.data as PaymentOrderRow[], options);
+    return pickSubscriptionSourceOrder(await Promise.all((result.data as PaymentOrderRow[]).map(row => resolveStripeOrderIds(supabase, row))), options);
   }
 
   const order = result.data as PaymentOrderRow | null;
-  return pickSubscriptionSourceOrder(order ? [order] : [], options);
+  return pickSubscriptionSourceOrder(order ? [await resolveStripeOrderIds(supabase, order)] : [], options);
 }
 
 function isCreatedNoLaterThanWithTolerance(
@@ -1110,42 +1076,6 @@ function isUsableSourceForInvoice(
   );
 }
 
-async function getResidualSubscriptionPlanChangeLock(input: {
-  supabase: SupabaseLikeClient;
-  subscriptionId: string;
-  expectedSourceOrderId: string;
-  sourceCutoff?: string | null;
-}): Promise<PaymentOrderRow | null> {
-  const lockKey = buildSubscriptionPlanChangeLockKey(input.subscriptionId);
-  const result = await input.supabase
-    .from('payment_orders')
-    .select('id, stripe_checkout_session_id, status, payment_status, fulfilled_at, created_at, metadata')
-    .eq('stripe_subscription_id', input.subscriptionId)
-    .eq('stripe_checkout_session_id', lockKey)
-    .eq('id', input.expectedSourceOrderId)
-    .maybeSingle();
-
-  if (result.error) {
-    throwGrantError(
-      'subscription_plan_change_lock_lookup',
-      SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
-      result.error,
-      { subscriptionId: maskIdentifier(input.subscriptionId) },
-    );
-  }
-
-  const order = result.data as PaymentOrderRow | null;
-  if (!order || !isSubscriptionPlanChangeOrder(order)) {
-    return null;
-  }
-
-  return isCreatedNoLaterThanWithTolerance(
-    order.created_at,
-    input.sourceCutoff,
-    STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS,
-  ) ? order : null;
-}
-
 async function getMembershipPlan(
   supabase: SupabaseLikeClient,
   planId: string,
@@ -1177,54 +1107,17 @@ async function getMembershipPlan(
   return result.data;
 }
 
-function requireMembershipPlanLevel(plan: MembershipPlanRow, context: Record<string, unknown>): string {
-  const level = plan.level?.trim();
-  if (!level) {
-    throwGrantError(
-      'subscription_membership_plan_level_missing',
-      SUBSCRIPTION_GRANT_ERRORS.missingMembershipPlanLevel,
-      new Error('membership plan level missing'),
-      context,
-    );
-  }
-
-  return level;
-}
-
-async function syncProfileMembershipLevel(input: {
-  supabase: SupabaseLikeClient;
-  userId: string;
-  membershipLevel: string;
-  subscriptionId: string;
-  invoiceId: string;
-}) {
-  const result = await input.supabase
-    .from('profiles')
-    .update({ membership_level: input.membershipLevel })
-    .eq('id', input.userId)
-    .select('id')
-    .maybeSingle();
-
-  if (result.error || !result.data?.id) {
-    throwGrantError(
-      'subscription_profile_membership_level_update',
-      result.error ? SUBSCRIPTION_GRANT_ERRORS.profileWrite : SUBSCRIPTION_GRANT_ERRORS.missingProfile,
-      result.error ?? new Error('profile missing for membership invoice fulfillment'),
-      {
-        userId: maskIdentifier(input.userId),
-        subscriptionId: maskIdentifier(input.subscriptionId),
-        invoiceId: maskIdentifier(input.invoiceId),
-      },
-    );
-  }
-}
-
 async function hasSubscriptionFullRefund(
   supabase: SupabaseLikeClient,
   input: { subscriptionId: string; invoiceId?: string | null },
 ): Promise<boolean> {
   const subscriptionId = input.subscriptionId;
   const invoiceId = input.invoiceId?.trim() || null;
+  const ref = await findStripeReference(supabase, 'subscription', subscriptionId);
+  if (!ref?.subscription_id) throw new Error('PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING');
+  const invoiceRef = invoiceId ? await findStripeReference(supabase, 'invoice', invoiceId,
+    { merchant: ref.merchant_namespace, mode: ref.mode as 'test' | 'live' }) : null;
+  if (invoiceId && !invoiceRef?.order_id) throw new Error('PAY_COMMON_INVOICE_MAPPING_MISSING');
   const statusChecks = [
     { stage: 'subscription_full_refund_status_lookup', column: 'status', value: 'refunded' },
     { stage: 'subscription_full_refund_payment_status_lookup', column: 'payment_status', value: 'refunded' },
@@ -1246,10 +1139,10 @@ async function hasSubscriptionFullRefund(
     const query = supabase
       .from('payment_orders')
       .select('id')
-      .eq('stripe_subscription_id', subscriptionId)
+      .eq('subscription_id', ref.subscription_id)
       .eq(check.column, check.value);
     const result = await (invoiceId
-      ? query.eq('stripe_invoice_id', invoiceId)
+      ? query.eq('id', invoiceRef!.order_id)
       : query
     ).limit(1);
 
@@ -1292,7 +1185,7 @@ async function hasSubscriptionFullRefund(
     const result = await supabase
       .from('payment_orders')
       .select('id')
-      .eq('stripe_subscription_id', subscriptionId)
+      .eq('subscription_id', ref.subscription_id)
       .contains('metadata', check.marker)
       .limit(1);
 
@@ -1311,13 +1204,6 @@ async function hasSubscriptionFullRefund(
   }
 
   return false;
-}
-
-function getAnnualReleaseInvoiceId(subscription: SubscriptionRow) {
-  const invoiceId = subscription.metadata?.lastInvoiceId;
-  return typeof invoiceId === 'string' && invoiceId.trim()
-    ? invoiceId.trim()
-    : null;
 }
 
 /**
@@ -1488,10 +1374,12 @@ async function loadSubscriptionMirrorForRefund(
   supabase: SupabaseLikeClient,
   input: { subscriptionId: string },
 ): Promise<SubscriptionRow | null> {
+  const ref = await findStripeReference(supabase, 'subscription', input.subscriptionId);
+  if (!ref?.subscription_id) return null;
   const result = await supabase
     .from('user_subscriptions')
     .select('id, user_id, membership_plan_id, stripe_subscription_id, billing_cycle, status, current_period_start, current_period_end, credit_release_terminated_at, credit_release_terminated_reason, credit_release_terminated_event_id, credit_release_terminated_period_key')
-    .eq('stripe_subscription_id', input.subscriptionId)
+    .eq('id', ref.subscription_id)
     .limit(1);
 
   if (result.error) {
@@ -1503,7 +1391,8 @@ async function loadSubscriptionMirrorForRefund(
     );
   }
 
-  return asSubscriptionRows(result.data as SubscriptionRow | SubscriptionRow[] | null)[0] ?? null;
+  const row = asSubscriptionRows(result.data as SubscriptionRow | SubscriptionRow[] | null)[0];
+  return row ? { ...row, stripe_subscription_id: ref.external_id } : null;
 }
 
 async function getSubscriptionRefundOrder(
@@ -1512,7 +1401,7 @@ async function getSubscriptionRefundOrder(
 ): Promise<PaymentOrderRow> {
   const result = await supabase
     .from('payment_orders')
-    .select('id, user_id, status, payment_status, stripe_invoice_id, stripe_subscription_id, metadata')
+    .select('*')
     .eq('id', input.orderId)
     .maybeSingle();
 
@@ -1534,6 +1423,7 @@ async function getSubscriptionRefundOrder(
     );
   }
 
+  result.data = await resolveStripeOrderIds(supabase, result.data);
   if (result.data.stripe_subscription_id && result.data.stripe_subscription_id !== input.subscriptionId) {
     throwGrantError(
       'subscription_refund_order_subscription_mismatch',
@@ -1648,10 +1538,12 @@ async function loadAllSubscriptionCreditGrants(
   supabase: SupabaseLikeClient,
   input: { subscriptionId: string },
 ): Promise<SubscriptionCreditGrantRow[]> {
+  const ref = await findStripeReference(supabase, 'subscription', input.subscriptionId);
+  if (!ref?.subscription_id) throw new Error('PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING');
   const result = await supabase
     .from('subscription_credit_grants')
-    .select('id, user_id, membership_plan_id, stripe_subscription_id, stripe_invoice_id, billing_cycle, grant_type, grant_period_key, period_start, period_end, period_index, total_periods, credits_granted, consumed_amount, accounting_state, accounting_review_reason, status, credit_transaction_id, metadata, created_at')
-    .eq('stripe_subscription_id', input.subscriptionId);
+    .select('subscription_id, source_order_id, grant_snapshot, id, user_id, membership_plan_id, stripe_subscription_id, stripe_invoice_id, billing_cycle, grant_type, grant_period_key, period_start, period_end, period_index, total_periods, credits_granted, consumed_amount, accounting_state, accounting_review_reason, status, credit_transaction_id, metadata, created_at')
+    .eq('subscription_id', ref.subscription_id);
 
   if (result.error) {
     throwGrantError(
@@ -1662,7 +1554,16 @@ async function loadAllSubscriptionCreditGrants(
     );
   }
 
-  return result.data ?? [];
+  return await Promise.all((result.data ?? []).map(async (row: SubscriptionCreditGrantRow) => {
+    if (!row.source_order_id) return { ...row, stripe_subscription_id: ref.external_id, stripe_invoice_id: null };
+    const invoice = await supabase.from('payment_provider_refs').select('external_id').eq('order_id', row.source_order_id)
+      .eq('object_type', 'invoice').eq('channel', 'stripe').eq('merchant_namespace', ref.merchant_namespace)
+      .eq('mode', ref.mode).limit(2);
+    if (invoice.error || !Array.isArray(invoice.data) || invoice.data.length !== 1) {
+      throw new Error('PAY_COMMON_INVOICE_MAPPING_MISSING');
+    }
+    return { ...row, stripe_subscription_id: ref.external_id, stripe_invoice_id: invoice.data[0].external_id };
+  }));
 }
 
 function getRefundInvoiceScope(order: PaymentOrderRow, input: ReconcileSubscriptionRefundCreditGrantsInput) {
@@ -2097,171 +1998,6 @@ export async function reconcileSubscriptionRefundCreditGrants(
   };
 }
 
-async function getExistingCreditGrant(
-  supabase: SupabaseLikeClient,
-  idempotencyKey: string,
-) {
-  const result = await supabase
-    .from('subscription_credit_grants')
-    .select('id, credit_transaction_id, credits_granted, status')
-    .eq('idempotency_key', idempotencyKey)
-    .maybeSingle();
-
-  if (result.error) {
-    throwGrantError(
-      'subscription_credit_grant_lookup',
-      SUBSCRIPTION_GRANT_ERRORS.creditGrantLookup,
-      result.error,
-      { idempotencyKey },
-    );
-  }
-
-  return result.data ?? null;
-}
-
-async function applyCreditLedgerGrant(
-  supabase: SupabaseLikeClient,
-  input: GrantSubscriptionCreditsInput & { idempotencyKey: string },
-) {
-  const description = getGrantDescription(input);
-  const result = await supabase.rpc('atomic_apply_credit_ledger_entry', {
-    p_user_id: input.userId,
-    p_amount: input.creditsGranted,
-    p_type: 'addition',
-    p_description: description,
-    p_idempotency_key: input.idempotencyKey,
-  });
-
-  if (result.error) {
-    throwGrantError(
-      'subscription_credit_grant_rpc',
-      SUBSCRIPTION_GRANT_ERRORS.creditGrantRpc,
-      result.error,
-      {
-        userId: maskIdentifier(input.userId),
-        subscriptionId: maskIdentifier(input.stripeSubscriptionId),
-        grantPeriodKey: input.grantPeriodKey,
-      },
-    );
-  }
-
-  const row = getFirstRpcRow<{
-    transaction_id?: string | null;
-    is_idempotent?: boolean | null;
-  }>(result.data);
-  if (!row?.transaction_id) {
-    throwGrantError(
-      'subscription_credit_grant_rpc_result',
-      SUBSCRIPTION_GRANT_ERRORS.creditGrantRpc,
-      new Error('credit grant RPC returned no transaction id'),
-      {
-        userId: maskIdentifier(input.userId),
-        subscriptionId: maskIdentifier(input.stripeSubscriptionId),
-        grantPeriodKey: input.grantPeriodKey,
-      },
-    );
-  }
-
-  return row;
-}
-
-async function updateCreditTransactionSemantics(
-  supabase: SupabaseLikeClient,
-  input: GrantSubscriptionCreditsInput & {
-    idempotencyKey: string;
-    creditTransactionId: string;
-  },
-) {
-  const result = await supabase
-    .from('credit_transactions')
-    .update({
-      ledger_type: 'grant',
-      reason_code: getGrantReasonCode(input.grantType),
-      counts_as_spend: false,
-      source_type: input.sourceType,
-      source_id: input.sourceId ?? input.stripeInvoiceId ?? input.stripeSubscriptionId,
-      source_order_id: input.sourceOrderId ?? null,
-      grant_period_key: input.grantPeriodKey,
-      metadata: {
-        subscriptionId: input.stripeSubscriptionId,
-        invoiceId: input.stripeInvoiceId ?? null,
-        grantType: input.grantType,
-        billingCycle: input.billingCycle,
-        periodIndex: input.periodIndex,
-        totalPeriods: input.totalPeriods,
-        idempotencyKey: input.idempotencyKey,
-      },
-    })
-    .eq('id', input.creditTransactionId)
-    .select('id')
-    .maybeSingle();
-
-  if (result.error) {
-    throwGrantError(
-      'subscription_credit_transaction_update',
-      SUBSCRIPTION_GRANT_ERRORS.creditTransactionUpdate,
-      result.error,
-      {
-        transactionId: maskIdentifier(input.creditTransactionId),
-        grantPeriodKey: input.grantPeriodKey,
-      },
-    );
-  }
-}
-
-async function insertSubscriptionCreditGrant(
-  supabase: SupabaseLikeClient,
-  input: GrantSubscriptionCreditsInput & {
-    idempotencyKey: string;
-    creditTransactionId: string;
-  },
-) {
-  const result = await supabase
-    .from('subscription_credit_grants')
-    .insert({
-      user_id: input.userId,
-      membership_plan_id: input.membershipPlanId,
-      stripe_subscription_id: input.stripeSubscriptionId,
-      stripe_invoice_id: input.stripeInvoiceId ?? null,
-      billing_cycle: input.billingCycle,
-      grant_type: input.grantType,
-      grant_period_key: input.grantPeriodKey,
-      period_start: input.periodStart,
-      period_end: input.periodEnd,
-      period_index: input.periodIndex,
-      total_periods: input.totalPeriods,
-      credits_granted: input.creditsGranted,
-      status: 'granted',
-      idempotency_key: input.idempotencyKey,
-      credit_transaction_id: input.creditTransactionId,
-      metadata: {
-        sourceType: input.sourceType,
-        sourceId: input.sourceId ?? input.stripeInvoiceId ?? input.stripeSubscriptionId,
-      },
-    })
-    .select('id, credit_transaction_id, credits_granted, status')
-    .maybeSingle();
-
-  if (result.error) {
-    if (result.error.code === '23505') {
-      return getExistingCreditGrant(supabase, input.idempotencyKey);
-    }
-
-    throwGrantError(
-      'subscription_credit_grant_insert',
-      SUBSCRIPTION_GRANT_ERRORS.creditGrantInsert,
-      result.error,
-      {
-        userId: maskIdentifier(input.userId),
-        subscriptionId: maskIdentifier(input.stripeSubscriptionId),
-        grantPeriodKey: input.grantPeriodKey,
-      },
-    );
-  }
-
-  return result.data;
-}
-
 async function applyAnnualGrantAdmission(
   supabase: SupabaseLikeClient,
   input: GrantSubscriptionCreditsInput & { idempotencyKey: string },
@@ -2439,21 +2175,6 @@ export async function grantSubscriptionCredits(
 
   const idempotencyKey = buildGrantIdempotencyKey(input);
   const mustUseTransactionalAdmission = input.enforceTerminationBarrier === true;
-  const existingGrant = mustUseTransactionalAdmission
-    ? null
-    : await getExistingCreditGrant(supabase, idempotencyKey);
-  if (existingGrant) {
-    return {
-      granted: false,
-      creditsGranted: existingGrant.credits_granted ?? 0,
-      creditTransactionId: existingGrant.credit_transaction_id ?? null,
-      idempotencyKey,
-      grantId: existingGrant.id ?? null,
-      invoiceOrderId: null,
-      blockedByTermination: false,
-    };
-  }
-
   if (mustUseTransactionalAdmission && input.transactionalInvoiceCompletion === true) {
     const admission = await applyInvoiceGrantAdmission(supabase, {
       ...input,
@@ -2496,444 +2217,15 @@ export async function grantSubscriptionCredits(
     };
   }
 
-  const ledgerEntry = await applyCreditLedgerGrant(supabase, {
-    ...input,
-    idempotencyKey,
-  });
-  const creditTransactionId = ledgerEntry.transaction_id as string;
-
-  await updateCreditTransactionSemantics(supabase, {
-    ...input,
-    idempotencyKey,
-    creditTransactionId,
-  });
-
-  const insertedGrant = await insertSubscriptionCreditGrant(supabase, {
-    ...input,
-    idempotencyKey,
-    creditTransactionId,
-  });
-
-  return {
-    granted: true,
-    creditsGranted: input.creditsGranted,
-    creditTransactionId,
-    idempotencyKey,
-    grantId: insertedGrant?.id ?? null,
-    invoiceOrderId: null,
-    blockedByTermination: false,
-  };
-}
-
-async function upsertSubscriptionMirror(input: {
-  supabase: SupabaseLikeClient;
-  sourceOrder: PaymentOrderRow;
-  plan: MembershipPlanRow;
-  subscriptionId: string;
-  stripeCustomerId?: string | null;
-  periodStart?: string | null;
-  periodEnd?: string | null;
-  billingCycle: SubscriptionBillingCycle;
-  transactionId?: string | null;
-  now: string;
-  invoiceId: string;
-  paymentStatus?: string | null;
-}) {
-  const readSubscriptionMirrorCandidates = async () => {
-    const existingQuery = input.supabase
-      .from('user_subscriptions')
-      .select('id, status, cancel_at_period_end, metadata, created_at')
-      .eq('stripe_subscription_id', input.subscriptionId);
-    const orderedExistingQuery = typeof existingQuery.order === 'function'
-      ? existingQuery.order('created_at', { ascending: true })
-      : existingQuery;
-    const limitedExistingQuery = typeof orderedExistingQuery.limit === 'function'
-      ? orderedExistingQuery.limit(10)
-      : orderedExistingQuery;
-    const existingResult = typeof limitedExistingQuery.then === 'function'
-      ? await limitedExistingQuery
-      : await limitedExistingQuery.maybeSingle();
-
-    if (existingResult.error) {
-      throwGrantError(
-        'subscription_mirror_lookup',
-        SUBSCRIPTION_GRANT_ERRORS.subscriptionWrite,
-        existingResult.error,
-        { subscriptionId: maskIdentifier(input.subscriptionId) },
-      );
-    }
-
-    return asSubscriptionRows(existingResult.data as SubscriptionRow | SubscriptionRow[] | null);
-  };
-
-  const buildPayload = (subscription: SubscriptionRow | null): SubscriptionRow => {
-    const payload: SubscriptionRow = {
-      user_id: input.sourceOrder.user_id,
-      membership_plan_id: input.plan.id,
-      stripe_customer_id: input.sourceOrder.stripe_customer_id ?? input.stripeCustomerId ?? null,
-      stripe_price_id: input.sourceOrder.stripe_price_id ?? null,
-      billing_cycle: input.billingCycle,
-      current_period_start: input.periodStart ?? null,
-      current_period_end: input.periodEnd ?? null,
-      metadata: {
-        ...asRecord(subscription?.metadata),
-        lastInvoiceId: input.invoiceId,
-        lastInvoicePaymentStatus: input.paymentStatus ?? 'paid',
-        transactionId: input.transactionId ?? null,
-        fulfillmentSource: 'subscription_credit_grants',
-      },
-      updated_at: input.now,
-    };
-
-    if (subscription?.id && shouldInitializeMirrorStatus(subscription.status)) {
-      payload.status = 'active';
-    }
-
-    if (subscription?.id && shouldInitializeCancelAtPeriodEnd(subscription.cancel_at_period_end)) {
-      payload.cancel_at_period_end = 'false';
-    }
-
-    return payload;
-  };
-
-  const updateExistingSubscription = async (subscription: SubscriptionRow) => {
-    const updateResult = await input.supabase
-      .from('user_subscriptions')
-      .update(buildPayload(subscription))
-      .eq('id', subscription.id)
-      .select('id')
-      .maybeSingle();
-
-    if (updateResult.error) {
-      throwGrantError(
-        'subscription_mirror_update',
-        SUBSCRIPTION_GRANT_ERRORS.subscriptionWrite,
-        updateResult.error,
-        { subscriptionId: maskIdentifier(input.subscriptionId) },
-      );
-    }
-  };
-
-  const existingSubscriptions = await readSubscriptionMirrorCandidates();
-  logDuplicateSubscriptionMirrors(input.subscriptionId, existingSubscriptions);
-
-  const existingSubscription = preferCanonicalSubscriptionMirror(existingSubscriptions);
-  if (existingSubscription?.id) {
-    await updateExistingSubscription(existingSubscription);
-
-    return;
-  }
-
-  const recheckedSubscriptions = await readSubscriptionMirrorCandidates();
-  logDuplicateSubscriptionMirrors(input.subscriptionId, recheckedSubscriptions);
-  const recheckedSubscription = preferCanonicalSubscriptionMirror(recheckedSubscriptions);
-  if (recheckedSubscription?.id) {
-    await updateExistingSubscription(recheckedSubscription);
-
-    return;
-  }
-
-  const insertResult = await input.supabase
-    .from('user_subscriptions')
-    .insert({
-      id: buildSubscriptionMirrorId(input.subscriptionId),
-      ...buildPayload(null),
-      stripe_subscription_id: input.subscriptionId,
-      status: 'active',
-      cancel_at_period_end: 'false',
-    })
-    .select('id')
-    .maybeSingle();
-
-  if (insertResult.error) {
-    if (isUniqueViolationError(insertResult.error)) {
-      logger.warn('billing', 'subscription_mirror_insert_conflict', {
-        subscriptionId: maskIdentifier(input.subscriptionId),
-      });
-
-      const conflictedSubscriptions = await readSubscriptionMirrorCandidates();
-      logDuplicateSubscriptionMirrors(input.subscriptionId, conflictedSubscriptions);
-      const conflictedSubscription = preferCanonicalSubscriptionMirror(conflictedSubscriptions);
-      if (conflictedSubscription?.id) {
-        await updateExistingSubscription(conflictedSubscription);
-
-        return;
-      }
-    }
-
-    throwGrantError(
-      'subscription_mirror_insert',
-      SUBSCRIPTION_GRANT_ERRORS.subscriptionWrite,
-      insertResult.error,
-      { subscriptionId: maskIdentifier(input.subscriptionId) },
-    );
-  }
-}
-
-async function writeCompletedInvoiceOrder(input: {
-  supabase: SupabaseLikeClient;
-  existingInvoiceOrder: PaymentOrderRow | null;
-  sourceOrder: PaymentOrderRow;
-  plan: MembershipPlanRow;
-  subscriptionId: string;
-  invoiceId: string;
-  amountTotal: number | null;
-  currency?: string | null;
-  paymentStatus?: string | null;
-  stripeCustomerId?: string | null;
-  billingCycle: SubscriptionBillingCycle;
-  fulfilledAt: string;
-  grantedCredits: number;
-  creditTransactionId: string | null;
-  grantId: string | null;
-}) {
-  const canPromoteCheckoutOrder = Boolean(
-    input.sourceOrder.id
-    && input.sourceOrder.stripe_checkout_session_id
-    && !input.sourceOrder.stripe_invoice_id
-    && !isSubscriptionPlanChangeOrder(input.sourceOrder),
-  );
-  const metadata = {
-    ...asRecord(input.existingInvoiceOrder?.metadata ?? (canPromoteCheckoutOrder ? input.sourceOrder.metadata : null)),
-    source: 'invoice.payment_succeeded',
-    transactionId: input.creditTransactionId,
-    subscriptionCreditGrantId: input.grantId,
-    grantedCredits: input.grantedCredits,
-    fulfillmentSource: 'subscription_credit_grants',
-  };
-
-  const payload = {
-    user_id: input.sourceOrder.user_id,
-    item_type: 'membership_plan',
-    item_id: input.plan.id,
-    billing_cycle: input.billingCycle,
-    stripe_subscription_id: input.subscriptionId,
-    stripe_customer_id: input.sourceOrder.stripe_customer_id ?? input.stripeCustomerId ?? null,
-    stripe_price_id: input.sourceOrder.stripe_price_id ?? null,
-    amount_total: input.amountTotal,
-    currency: input.currency ?? 'usd',
-    mode: 'subscription',
-    status: 'completed',
-    payment_status: input.paymentStatus ?? 'paid',
-    fulfilled_at: input.fulfilledAt,
-    stripe_invoice_id: input.invoiceId,
-    metadata,
-    updated_at: input.fulfilledAt,
-  };
-
-  if (input.existingInvoiceOrder?.id) {
-    const updateResult = await input.supabase
-      .from('payment_orders')
-      .update(payload)
-      .eq('id', input.existingInvoiceOrder.id)
-      .select('id')
-      .maybeSingle();
-
-    if (updateResult.error) {
-      throwGrantError(
-        'subscription_invoice_order_update',
-        SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
-        updateResult.error,
-        { invoiceId: maskIdentifier(input.invoiceId) },
-      );
-    }
-
-    return updateResult.data?.id ?? input.existingInvoiceOrder.id;
-  }
-
-  const recheckedInvoiceOrder = await getExistingInvoiceOrder(input.supabase, input.invoiceId);
-  if (recheckedInvoiceOrder?.id) {
-    const updateResult = await input.supabase
-      .from('payment_orders')
-      .update({
-        ...payload,
-        metadata: {
-          ...asRecord(recheckedInvoiceOrder.metadata),
-          source: 'invoice.payment_succeeded',
-          transactionId: input.creditTransactionId,
-          subscriptionCreditGrantId: input.grantId,
-          grantedCredits: input.grantedCredits,
-          fulfillmentSource: 'subscription_credit_grants',
-        },
-      })
-      .eq('id', recheckedInvoiceOrder.id)
-      .select('id')
-      .maybeSingle();
-
-    if (updateResult.error) {
-      throwGrantError(
-        'subscription_invoice_order_update',
-        SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
-        updateResult.error,
-        { invoiceId: maskIdentifier(input.invoiceId) },
-      );
-    }
-
-    return updateResult.data?.id ?? recheckedInvoiceOrder.id;
-  }
-
-  if (canPromoteCheckoutOrder && input.sourceOrder.id) {
-    const promotionQuery = input.supabase
-      .from('payment_orders')
-      .update(payload)
-      .eq('id', input.sourceOrder.id);
-    const guardedPromotionQuery = typeof promotionQuery.is === 'function'
-      ? promotionQuery.is('stripe_invoice_id', null)
-      : promotionQuery.eq('stripe_invoice_id', null);
-    const updateResult = typeof guardedPromotionQuery?.select === 'function'
-      ? await guardedPromotionQuery
-        .select('id')
-        .maybeSingle()
-      : await guardedPromotionQuery;
-
-    if (updateResult.error) {
-      throwGrantError(
-        'subscription_invoice_order_update',
-        SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
-        updateResult.error,
-        { invoiceId: maskIdentifier(input.invoiceId) },
-      );
-    }
-
-    if (updateResult.data?.id) {
-      return updateResult.data.id;
-    }
-
-    logger.warn('billing', 'subscription_invoice_order_checkout_promotion_stale', {
-      invoiceId: maskIdentifier(input.invoiceId),
-      sourceOrderId: maskIdentifier(input.sourceOrder.id),
-    });
-
-    const claimedInvoiceOrder = await getExistingInvoiceOrder(input.supabase, input.invoiceId);
-    if (claimedInvoiceOrder?.id) {
-      const claimedUpdateResult = await input.supabase
-        .from('payment_orders')
-        .update({
-          ...payload,
-          metadata: {
-            ...asRecord(claimedInvoiceOrder.metadata),
-            source: 'invoice.payment_succeeded',
-            transactionId: input.creditTransactionId,
-            subscriptionCreditGrantId: input.grantId,
-            grantedCredits: input.grantedCredits,
-            fulfillmentSource: 'subscription_credit_grants',
-          },
-        })
-        .eq('id', claimedInvoiceOrder.id)
-        .select('id')
-        .maybeSingle();
-
-      if (claimedUpdateResult.error) {
-        throwGrantError(
-          'subscription_invoice_order_update',
-          SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
-          claimedUpdateResult.error,
-          { invoiceId: maskIdentifier(input.invoiceId) },
-        );
-      }
-
-      return claimedUpdateResult.data?.id ?? claimedInvoiceOrder.id;
-    }
-  }
-
-  const insertResult = await input.supabase
-    .from('payment_orders')
-    .insert({
-      id: buildInvoicePaymentOrderId(input.invoiceId),
-      ...payload,
-    })
-    .select('id')
-    .maybeSingle();
-
-  if (insertResult.error) {
-    if (isUniqueViolationError(insertResult.error)) {
-      logger.warn('billing', 'subscription_invoice_order_insert_conflict', {
-        invoiceId: maskIdentifier(input.invoiceId),
-      });
-
-      const conflictedInvoiceOrder = await getExistingInvoiceOrder(input.supabase, input.invoiceId);
-      if (conflictedInvoiceOrder?.id) {
-        const conflictUpdateResult = await input.supabase
-          .from('payment_orders')
-          .update({
-            ...payload,
-            metadata: {
-              ...asRecord(conflictedInvoiceOrder.metadata),
-              source: 'invoice.payment_succeeded',
-              transactionId: input.creditTransactionId,
-              subscriptionCreditGrantId: input.grantId,
-              grantedCredits: input.grantedCredits,
-              fulfillmentSource: 'subscription_credit_grants',
-            },
-          })
-          .eq('id', conflictedInvoiceOrder.id)
-          .select('id')
-          .maybeSingle();
-
-        if (conflictUpdateResult.error) {
-          throwGrantError(
-            'subscription_invoice_order_update',
-            SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
-            conflictUpdateResult.error,
-            { invoiceId: maskIdentifier(input.invoiceId) },
-          );
-        }
-
-        return conflictUpdateResult.data?.id ?? conflictedInvoiceOrder.id;
-      }
-    }
-
-    throwGrantError(
-      'subscription_invoice_order_insert',
-      SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
-      insertResult.error,
-      { invoiceId: maskIdentifier(input.invoiceId) },
-    );
-  }
-
-  return insertResult.data?.id ?? null;
-}
-
-async function releaseSubscriptionPlanChangeLock(input: {
-  supabase: SupabaseLikeClient;
-  sourceOrder: PaymentOrderRow;
-  fulfilledAt: string;
-  paymentStatus?: string | null;
-}) {
-  if (!input.sourceOrder.id || !isSubscriptionPlanChangeOrder(input.sourceOrder)) {
-    return;
-  }
-
-  const result = await input.supabase
-    .from('payment_orders')
-    .update({
-      stripe_checkout_session_id: null,
-      status: 'completed',
-      payment_status: input.paymentStatus ?? 'paid',
-      fulfilled_at: input.fulfilledAt,
-      updated_at: input.fulfilledAt,
-    })
-    .eq('id', input.sourceOrder.id)
-    .neq('status', 'refunded')
-    .neq('status', 'partially_refunded')
-    .neq('payment_status', 'refunded')
-    .neq('payment_status', 'partially_refunded');
-
-  if (result.error) {
-    throwGrantError(
-      'subscription_plan_change_lock_release',
-      SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
-      result.error,
-      { sourceOrderId: maskIdentifier(input.sourceOrder.id) },
-    );
-  }
+  throw new Error('PAY_COMMON_TRANSACTIONAL_GRANT_REQUIRED');
 }
 
 export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
   supabase: SupabaseLikeClient,
   input: FulfillMembershipInvoiceWithCreditGrantsInput,
 ) {
-  const existingInvoiceOrder = await getExistingInvoiceOrder(supabase, input.invoiceId);
+  if (!input.scope) throw new Error('PAY_COMMON_PROVIDER_SCOPE_UNKNOWN');
+  const existingInvoiceOrder = await getExistingInvoiceOrder(supabase, input.invoiceId, input.scope);
   const refundBlockReason = getInvoiceOrderRefundBlockReason(existingInvoiceOrder);
   if (refundBlockReason) {
     logger.warn('billing', 'subscription_invoice_fulfillment_refund_blocked', {
@@ -2954,33 +2246,6 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
     };
   }
 
-  if (existingInvoiceOrder?.fulfilled_at) {
-    if (input.expectedSourceOrderId) {
-      const residualPlanChangeLock = await getResidualSubscriptionPlanChangeLock({
-        supabase,
-        subscriptionId: input.subscriptionId,
-        expectedSourceOrderId: input.expectedSourceOrderId,
-        sourceCutoff: getInvoiceSourceCutoff(input),
-      });
-      if (residualPlanChangeLock) {
-        await releaseSubscriptionPlanChangeLock({
-          supabase,
-          sourceOrder: residualPlanChangeLock,
-          fulfilledAt: existingInvoiceOrder.fulfilled_at,
-          paymentStatus: existingInvoiceOrder.payment_status ?? input.paymentStatus,
-        });
-      }
-    }
-
-    return {
-      fulfilledAt: existingInvoiceOrder.fulfilled_at,
-      alreadyFulfilled: true,
-      grantedCredits: 0,
-      creditTransactionId: null,
-      invoiceOrderId: existingInvoiceOrder.id ?? null,
-    };
-  }
-
   const sourceLookup = !input.expectedSourceOrderId && isUsableMembershipSourceOrder(existingInvoiceOrder)
     && (!input.expectedSourcePriceId || existingInvoiceOrder?.stripe_price_id === input.expectedSourcePriceId)
     ? {
@@ -2989,6 +2254,7 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
       blockedReason: null,
     }
     : await getLatestSubscriptionOrder(supabase, input.subscriptionId, {
+      scope: input.scope,
       expectedSourceOrderId: input.expectedSourceOrderId,
       expectedSourcePriceId: input.expectedSourcePriceId,
       invoiceCreatedAt: input.invoiceCreatedAt,
@@ -3025,13 +2291,24 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
     );
   }
 
-  const plan = await getMembershipPlan(supabase, sourceOrder.item_id);
-  const membershipLevel = requireMembershipPlanLevel(plan, {
-    membershipPlanId: maskIdentifier(plan.id),
-    subscriptionId: maskIdentifier(input.subscriptionId),
-    invoiceId: maskIdentifier(input.invoiceId),
-  });
-  const billingCycle = normalizeBillingCycle(sourceOrder.billing_cycle);
+  if (!input.scope || sourceOrder.payment_channel !== 'stripe' || sourceOrder.merchant_namespace !== input.scope.merchant
+    || sourceOrder.payment_mode !== input.scope.mode) throw new Error('PAY_COMMON_INVOICE_SOURCE_MISMATCH');
+  const snapshot = freezePurchaseSnapshot(sourceOrder.purchase_snapshot);
+  if (snapshot.item_type !== 'membership_plan' || snapshot.item_id !== sourceOrder.item_id
+    || snapshot.billing_cycle !== sourceOrder.billing_cycle
+    || !['pro', 'gold'].includes(sourceOrder.purchase_membership_level ?? '')) {
+    throw new Error('PAY_COMMON_GRANT_SNAPSHOT_MISMATCH');
+  }
+  if (input.paymentStatus !== 'paid' || input.currency !== snapshot.currency
+    || input.amountTotal !== snapshotAmountDue(snapshot)
+    || (sourceOrder.stripe_customer_id && input.stripeCustomerId !== sourceOrder.stripe_customer_id)) {
+    await recordStripeInvoiceConflict({ db: supabase, scope: input.scope, invoiceId: input.invoiceId, sourceOrderId: sourceOrder.id });
+    throw new Error('PAY_COMMON_INVOICE_RECEIPT_MISMATCH');
+  }
+  const membershipLevel = sourceOrder.purchase_membership_level!;
+  const plan = { id: snapshot.item_id, name: String(sourceOrder.metadata?.productName ?? 'Membership'),
+    yearly_credits: snapshot.credits, monthly_credits: snapshot.credits, monthly_bonus_credits: snapshot.bonus_credits };
+  const billingCycle = normalizeBillingCycle(snapshot.billing_cycle);
   const fulfilledAt = input.now ?? new Date().toISOString();
   const termStart = input.periodStart ?? fulfilledAt;
   const termEnd = input.periodEnd ?? termStart;
@@ -3105,81 +2382,12 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
     };
   }
 
-  await syncProfileMembershipLevel({
-    supabase,
-    userId: sourceOrder.user_id,
-    membershipLevel,
-    subscriptionId: input.subscriptionId,
-    invoiceId: input.invoiceId,
-  });
-
-  // The candidate RPC always returns this identity in production. This guarded
-  // legacy response path is retained solely for compatible test doubles and
-  // never makes the V6 admission result authoritative over a refund state.
-  let invoiceOrderId = grant.invoiceOrderId;
-  if (!invoiceOrderId) {
-    await upsertSubscriptionMirror({
-      supabase,
-      sourceOrder,
-      plan,
-      subscriptionId: input.subscriptionId,
-      stripeCustomerId: input.stripeCustomerId,
-      periodStart: input.periodStart,
-      periodEnd: input.periodEnd,
-      billingCycle,
-      transactionId: grant.creditTransactionId,
-      now: fulfilledAt,
-      invoiceId: input.invoiceId,
-      paymentStatus: input.paymentStatus,
-    });
-
-    invoiceOrderId = await writeCompletedInvoiceOrder({
-      supabase,
-      existingInvoiceOrder,
-      sourceOrder,
-      plan,
-      subscriptionId: input.subscriptionId,
-      invoiceId: input.invoiceId,
-      amountTotal: input.amountTotal,
-      currency: input.currency,
-      paymentStatus: input.paymentStatus,
-      stripeCustomerId: input.stripeCustomerId,
-      billingCycle,
-      fulfilledAt,
-      grantedCredits: grant.creditsGranted,
-      creditTransactionId: grant.creditTransactionId,
-      grantId: grant.grantId,
-    });
-
-    if (grant.creditTransactionId && invoiceOrderId) {
-      await updateCreditTransactionSemantics(supabase, {
-        ...grantPeriod,
-        userId: sourceOrder.user_id,
-        membershipPlanId: plan.id,
-        stripeSubscriptionId: input.subscriptionId,
-        stripeInvoiceId: input.invoiceId,
-        billingCycle,
-        grantType: billingCycle === 'yearly' ? 'annual_monthly_release' : 'monthly_invoice',
-        sourceType: 'stripe_invoice',
-        sourceId: input.invoiceId,
-        sourceOrderId: invoiceOrderId,
-        planName: plan.name,
-        idempotencyKey: grant.idempotencyKey,
-        creditTransactionId: grant.creditTransactionId,
-      });
-    }
-  }
-
-  await releaseSubscriptionPlanChangeLock({
-    supabase,
-    sourceOrder,
-    fulfilledAt,
-    paymentStatus: input.paymentStatus,
-  });
+  const invoiceOrderId = grant.invoiceOrderId;
+  if (!invoiceOrderId) throw new Error('PAY_COMMON_INVOICE_COMPLETION_MISSING');
 
   return {
-    fulfilledAt,
-    alreadyFulfilled: false,
+    fulfilledAt: existingInvoiceOrder?.fulfilled_at ?? fulfilledAt,
+    alreadyFulfilled: Boolean(existingInvoiceOrder?.fulfilled_at),
     grantedCredits: grant.creditsGranted,
     creditTransactionId: grant.creditTransactionId,
     invoiceOrderId,
@@ -3189,7 +2397,7 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
 async function loadAnnualSubscriptions(supabase: SupabaseLikeClient): Promise<SubscriptionRow[]> {
   const result = await supabase
     .from('user_subscriptions')
-    .select('id, user_id, membership_plan_id, stripe_subscription_id, stripe_customer_id, stripe_price_id, billing_cycle, status, cancel_at_period_end, current_period_start, current_period_end, credit_release_terminated_at, metadata')
+    .select('payment_channel,merchant_namespace,payment_mode,id, user_id, membership_plan_id, stripe_subscription_id, stripe_customer_id, stripe_price_id, billing_cycle, status, cancel_at_period_end, current_period_start, current_period_end, credit_release_terminated_at, metadata')
     .eq('billing_cycle', 'yearly');
 
   if (result.error) {
@@ -3200,7 +2408,16 @@ async function loadAnnualSubscriptions(supabase: SupabaseLikeClient): Promise<Su
     );
   }
 
-  return result.data ?? [];
+  return await Promise.all((result.data ?? []).map(async (row: SubscriptionRow) => {
+    if (row.payment_channel !== 'stripe') return { ...row, stripe_subscription_id: null };
+    const refs = await supabase.from('payment_provider_refs').select('external_id').eq('subscription_id', row.id)
+      .eq('object_type', 'subscription').eq('channel', 'stripe').eq('merchant_namespace', row.merchant_namespace)
+      .eq('mode', row.payment_mode).limit(2);
+    if (refs.error || !Array.isArray(refs.data) || refs.data.length !== 1) {
+      throw new Error('PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING');
+    }
+    return { ...row, stripe_subscription_id: refs.data[0].external_id };
+  }));
 }
 
 export async function releaseDueAnnualSubscriptionCredits(
@@ -3223,7 +2440,12 @@ export async function releaseDueAnnualSubscriptionCredits(
       continue;
     }
 
-    const invoiceId = getAnnualReleaseInvoiceId(subscription);
+    if (!shouldReleaseAnnualSubscriptionCredits({ billingCycle: subscription.billing_cycle, status: subscription.status,
+      currentPeriodEnd: subscription.current_period_end, creditReleaseTerminatedAt: subscription.credit_release_terminated_at ?? null,
+      hasFullRefund: false, now })) {
+      summary.skippedSubscriptions += 1;
+      continue;
+    }
     const existingGrants = await loadAllSubscriptionCreditGrants(supabase, { subscriptionId });
     if (existingGrants.some((grant) =>
       grant.accounting_state !== undefined && grant.accounting_state !== 'trusted'
@@ -3231,6 +2453,17 @@ export async function releaseDueAnnualSubscriptionCredits(
       summary.skippedSubscriptions += 1;
       continue;
     }
+    const openingGrants = existingGrants.filter(grant => grant.subscription_id === subscription.id
+      && grant.period_index === 1 && parseTime(grant.period_start) !== null
+      && parseTime(grant.period_start) === parseTime(subscription.current_period_start)
+      && grant.status === 'granted' && grant.source_order_id);
+    if (openingGrants.length !== 1) throw new Error('PAY_COMMON_ANNUAL_CONTRACT_UNKNOWN');
+    const openingGrant = openingGrants[0]!;
+    const snapshot = freezePurchaseSnapshot(openingGrant.grant_snapshot);
+    if (snapshot.item_id !== subscription.membership_plan_id || snapshot.billing_cycle !== 'yearly'
+      || snapshot.item_type !== 'membership_plan') throw new Error('PAY_COMMON_GRANT_SNAPSHOT_MISMATCH');
+    const plan = { id: snapshot.item_id, yearly_credits: snapshot.credits, name: 'Membership' };
+    const invoiceId = openingGrant.stripe_invoice_id;
     const hasFullRefund = await hasSubscriptionFullRefund(supabase, {
       subscriptionId,
       invoiceId,
@@ -3247,7 +2480,6 @@ export async function releaseDueAnnualSubscriptionCredits(
       continue;
     }
 
-    const plan = await getMembershipPlan(supabase, subscription.membership_plan_id);
     const periods = getDueAnnualGrantPeriods({
       yearlyCredits: plan.yearly_credits ?? 0,
       stripeSubscriptionId: subscriptionId,
@@ -3267,6 +2499,7 @@ export async function releaseDueAnnualSubscriptionCredits(
         grantType: 'annual_monthly_release',
         sourceType: invoiceId ? 'stripe_invoice' : 'system',
         sourceId: invoiceId ?? subscriptionId,
+        sourceOrderId: openingGrant.source_order_id,
         planName: plan.name,
         now: now.toISOString(),
         enforceTerminationBarrier: true,
@@ -3419,10 +2652,12 @@ async function loadSubscriptionMirrorForPreview(
   supabase: SupabaseLikeClient,
   subscriptionId: string,
 ): Promise<SubscriptionRow | null> {
+  const ref = await findStripeReference(supabase, 'subscription', subscriptionId);
+  if (!ref?.subscription_id) return null;
   const result = await supabase
     .from('user_subscriptions')
     .select('id, user_id, membership_plan_id, stripe_subscription_id, billing_cycle, status, current_period_start, current_period_end, credit_release_terminated_at, credit_release_terminated_reason, credit_release_terminated_event_id, credit_release_terminated_period_key, created_at')
-    .eq('stripe_subscription_id', subscriptionId)
+    .eq('id', ref.subscription_id)
     .order('created_at', { ascending: true })
     .limit(10);
 
@@ -3435,9 +2670,8 @@ async function loadSubscriptionMirrorForPreview(
     );
   }
 
-  return preferCanonicalSubscriptionMirror(
-    asSubscriptionRows(result.data as SubscriptionRow | SubscriptionRow[] | null),
-  );
+  const row = preferCanonicalSubscriptionMirror(asSubscriptionRows(result.data as SubscriptionRow | SubscriptionRow[] | null));
+  return row ? { ...row, stripe_subscription_id: ref.external_id } : null;
 }
 
 async function loadInFlightReservationsForPreview(input: {

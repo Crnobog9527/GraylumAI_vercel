@@ -102,6 +102,7 @@ describe('stripe webhook route', () => {
     };
 
     stripeServiceMocks.getStripeClient.mockReturnValue(stripe);
+    stripeFulfillmentMocks.upsertPaymentOrderBySession.mockResolvedValue(session);
 
     await handleStripeWebhookEvent(supabase, event as any);
 

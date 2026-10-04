@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isStripeCheckoutConfigured } from '../services/stripe';
+import { loadConfiguredStripePrices } from '../services/payments/stripeCatalog';
 import {
   LAUNCH_BASELINE_SETTING_KEY,
   parseLaunchBaselineAt,
@@ -49,7 +50,6 @@ const creditPackageCatalogRowSchema = z.object({
   bonus_credits: z.number().int().nonnegative().nullable(),
   is_popular: z.enum(['true', 'false']).nullable(),
   sort_order: z.number().int().nonnegative(),
-  stripe_price_id: z.string().nullable(),
 });
 
 const membershipPlanCatalogRowSchema = z.object({
@@ -65,8 +65,6 @@ const membershipPlanCatalogRowSchema = z.object({
   yearly_credits: z.number().int().nonnegative().nullable(),
   package_discount: z.number().int().min(0).max(100).nullable(),
   features: z.array(z.string()).nullable(),
-  stripe_monthly_price_id: z.string().nullable(),
-  stripe_yearly_price_id: z.string().nullable(),
 }).passthrough();
 
 const CATALOG_UNAVAILABLE_MESSAGE = '套餐服务暂不可用，请稍后重试';
@@ -337,7 +335,7 @@ export const settingsRouter = router({
     try {
       result = await readClient
         .from('credit_packages')
-        .select('id, name, price, credits_amount, bonus_credits, is_popular, sort_order, stripe_price_id')
+        .select('id, name, price, credits_amount, bonus_credits, is_popular, sort_order')
         .eq('active', 'true')
         .order('sort_order', { ascending: true })
         .order('price', { ascending: true });
@@ -363,6 +361,11 @@ export const settingsRouter = router({
       'credit_packages',
     );
 
+    const priceRefs = stripeReady && ctx.hasSupabaseAdminPrivileges
+      ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin,
+        kind: 'credit_package', ids: packages.map(pkg => pkg.id) }).catch(error => {
+          throw createSafeServiceUnavailableError(error, CATALOG_UNAVAILABLE_MESSAGE);
+        }) : new Map<string, string>();
     // 映射字段名以兼容前端
     return packages.map(pkg => ({
       id: pkg.id,
@@ -371,7 +374,7 @@ export const settingsRouter = router({
       bonus_credits: pkg.bonus_credits ?? 0,
       price: (pkg.price ?? 0) / 100, // 从分转换为美元
       is_popular: pkg.is_popular === 'true',
-      checkout_ready: stripeReady && pkg.price > 0 && hasConfiguredStripePriceId(pkg.stripe_price_id),
+      checkout_ready: stripeReady && pkg.price > 0 && hasConfiguredStripePriceId(priceRefs.get(`${pkg.id}:one_time`) ?? null),
     }));
   }),
 
@@ -412,6 +415,11 @@ export const settingsRouter = router({
       'membership_plans',
     );
 
+    const priceRefs = stripeReady && ctx.hasSupabaseAdminPrivileges
+      ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin,
+        kind: 'membership_plan', ids: plans.map(plan => plan.id) }).catch(error => {
+          throw createSafeServiceUnavailableError(error, CATALOG_UNAVAILABLE_MESSAGE);
+        }) : new Map<string, string>();
     // 映射字段名以兼容前端
     return plans.map(plan => ({
       id: plan.id,
@@ -437,8 +445,8 @@ export const settingsRouter = router({
       recommended: plan.level === 'gold',
       highlight: plan.level === 'gold',
       checkoutReady: {
-        monthly: stripeReady && plan.level !== 'free' && plan.monthly_price > 0 && hasConfiguredStripePriceId(plan.stripe_monthly_price_id),
-        yearly: stripeReady && plan.level !== 'free' && plan.yearly_price > 0 && hasConfiguredStripePriceId(plan.stripe_yearly_price_id),
+        monthly: stripeReady && plan.level !== 'free' && plan.monthly_price > 0 && hasConfiguredStripePriceId(priceRefs.get(`${plan.id}:monthly`) ?? null),
+        yearly: stripeReady && plan.level !== 'free' && plan.yearly_price > 0 && hasConfiguredStripePriceId(priceRefs.get(`${plan.id}:yearly`) ?? null),
       },
     }));
   }),
