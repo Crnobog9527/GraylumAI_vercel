@@ -105,3 +105,11 @@ Do not call it as a replacement for the existing eligibility service as currentl
 - FAIL：同步 staging 前 CI 工作流合约测试 9 项中 1 项因缺 0167 失败；不是支付断言失败。
 - NOT_RUN：实际业务接线后的全量 Stripe 回归、真实 Stripe 沙箱端到端、最终候选 CI/Security。
 - #632 已合并，缺 0167 为旧候选的已知失败；同步 staging 后重新验证，不把旧失败直接改写为通过。
+
+### 已同步 staging 的检查点
+
+已接收 #632 合并后的 staging，0167 来自该合并，PR-2 保持 0168。built-fingerprint 已在本机重新生成并再回放核对；无 runtime/BILL2 自有 diff。
+
+- PASS：完整 API 4501 项通过、12 项跳过；typecheck、lint、代码规模；工作流合约 9 项/341 断言。
+- PASS：新基线空库 171 步、102 次重复迁移；0168 源结构/重放漂移拒绝、准入/过期新尝试 SQL；第二次完整空库指纹一致。
+- NOT_RUN：该检查点的远端 CI/Security（推送后读取）；实际业务接线与沙箱端到端仍未完成。
