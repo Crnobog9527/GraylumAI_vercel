@@ -68,32 +68,39 @@ The broad archived old-staging suite retains original application code except lo
 仅接收 OpenRouter 完整 HTTP 402 JSON：数字 `error.code=402`，明确
 `metadata.limit_source` 为 `openrouter_key_limit`、`openrouter_credits` 或
 `openrouter_in_flight_budget`。允许顶层可选 `user_id` 和 metadata 可选 `provider_name`
-（仅字符串或 null），其他字段白名单不变；仍需无生成 ID、usage、cost、输出或已有矛盾回执。
+（仅字符串或 null），其他字段白名单不变；仍需无 usage、cost、输出或已有矛盾回执。
 依据：[官方错误语义](https://openrouter.ai/docs/api_reference/errors-and-debugging)、
 [额度拒绝来源](https://openrouter.ai/docs/api_reference/limits)。HTTP 200 内嵌错误、
 SSE 错误、超时、断线、5xx 与不完整证据仍走原有核实流程，不能视作免费。
 
-数据流：服务端完整响应 → 请求及原始响应哈希绑定的 `provider_rejection` →
-既有 `bill2_record` 验证并保存 receipt/call 拒绝标志 → 原有取消及 v1/v2 结算。
-保留 dispatched_at；不伪造生成 ID，也不使用整单 confirmed_failure 补偿此前消费。
-v1 保留其他未知调用的冻结；v2 释放本次调用的预扣。重复回执及恢复不重复释放。
-Runtime 复用取消同步执行终态与会话占用；财务层 unknown 仍对应执行层 cost_pending。
-账户删除后的拒绝回执先经严格证明验证，再复用现有去内容财务投影；仅补回固定拒绝类型、
-请求哈希与已验证的额度来源。保留原始证据哈希以支持重复处理，不保留响应原文。
+无生成 ID：服务端完整响应 → 请求及响应哈希绑定的 `provider_rejection` →
+既有 `bill2_record` 验证并保存调用拒绝标志 → 原有取消及 v1/v2 结算。
+有生成 ID：严格证明先保存为脱敏 `provider_rejection_pending`，关闭后续调用但保留冻结；
+再由原有恢复入口领取并查询，三个不同领取均取得完整 HTTP 404 JSON，才标记本调用拒绝。
+这是 [Owner 的业务决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/627#issuecomment-5980132609)，
+不代表服务商保证零费用；若后到实际费用，保留矛盾回执，由平台承担，不重扣用户。
 
-迁移只追加文件，先核对三个来源函数指纹，再更新现有函数；接受自身目标指纹以支持重放。
-本地文件建库 runner 连续应用两次；BILL2 core 集成包含 v1/v2 拒绝、已消费前缀、
-未知前缀、取消竞态、重复证据及晚到矛盾成本；Runtime 集成包含拒绝与不确定传输。
-这些测试使用本地合成身份与响应，不代表远端迁移或真实服务商验收。
-
-回滚应追加迁移恢复来源函数，保留拒绝事实、回执及已完成账目，不重扣已释放积分。
-旧历史冻结需另行逐调用核对证据及批准后恢复，本迁移没有历史回填。
-
-
-总控实测形状回归使用合成 user_id、正文及响应头 ID，绝不复制真实身份或凭据。
-含生成 ID 的 402 仍交原有恢复路径：当前官方说明不足以把这类已识别调用一律判为免费。
+复用原有 3 次总尝试预算和有效期（v1：run deadline + 24h；v2：call 创建 + 24h）。
+原领取函数没有间隔保护，0164 在同一函数内仅为严格 402 候选补上数据库时间控制的
+5 分钟最小领取间隔；首查可立即进行，第三次判定最早为派发后 10 分钟加响应和落库耗时。
+GET 超时仍为 45 秒。没有新调度器或队列；普通恢复仍需既有入口触发，10 分钟不是自动退款时限。
+失败、超时、5xx、非终态费用、终态无费用及任何非有效 404 不增加 404 数，仍消耗原尝试额度。
+任何费用或终态记录继续走原规则；三次预算耗尽却不足三个有效 404 时，继续待核实。
 [生成查询接口](https://openrouter.ai/docs/api/api-reference/generations/get-request-&-usage-metadata-for-a-generation)
-的 404 仅表示未找到资源，不是已确认无计费。只有原有解析器接受的匹配 ID/模型、
-终态和明确成本证据才能结算；零成本与非零成本分别按原有规则处理。
-缺失成本、非终态、ID 冲突、查询失败继续保留冻结，绝不把缺失值补成零。
-因此本修复兼容真实正文形状，但不宣称仅凭已有生成 ID 的 402 即可释放历史事件。
+的单次 404 不是已确认无计费，不能将缺失成本补成零。
+
+保留 dispatched_at；不伪造生成 ID，不使用整单 confirmed_failure 补偿此前消费。
+v1 原整笔预冻结算保留未知兄弟调用的冻结；v2 释放本次调用的预扣。重复/并发回执不重复释放。
+Runtime 复用取消同步执行与会话状态；财务 unknown 仍对应执行 cost_pending。
+新候选及查询回执仅保留财务投影、原证据哈希、领取序号、累计有效 404 数、数据库领取及
+观察时间、HTTP 状态。领取与回执在数据库绑定，不保存错误原文、密钥、私人身份或查询链接。
+
+迁移仅追加文件，核对四个来源函数和自身目标指纹：`bill2_record`、`bill2_recovery_claim`、
+v1/v2 finalizer；在已有 call 上增加拒绝标志及最后领取时间，无新表、RPC 或权限。
+本地文件建库 runner 连续应用两次。BILL2 core 覆盖 v1/v2 三次 404、最小间隔、费用优先、
+失败不计数、已消费/未知前缀、并发领取和回执幂等、删除后的脱敏投影。
+Runtime 覆盖真实 adapter/执行器/本地数据库与合成 402、404、费用、终态缺成本、超时、5xx。
+全部使用合成值，不代表远端迁移或真实服务商验收。
+
+回滚需另追加迁移恢复来源函数，保留拒绝事实、回执及已完成账目，不重扣已释放积分。
+历史冻结需另行逐调用核对并授权处理；本迁移不回填历史，不把此前人工查询计入恢复次数。
