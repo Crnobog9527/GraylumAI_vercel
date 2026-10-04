@@ -7,7 +7,7 @@
 //   node scripts/plan-progress.mjs --out-dir <目录>     # 换输出目录（必须在仓库外）
 //   node scripts/plan-progress.mjs --prs-file <json>    # 不访问网络，用保存好的 PR 列表（测试用）
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -69,12 +69,16 @@ function fetchPrs(limit) {
   }
 }
 
+// 先找到最近的已存在上级目录再判断，避免被拒绝的仓库内目录先被创建出来。
 function assertOutsideRepo(dir) {
-  mkdirSync(dir, { recursive: true });
-  const rel = relative(realpathSync(repoRoot), realpathSync(dir));
+  let existing = dir;
+  while (!existsSync(existing)) existing = dirname(existing);
+  const target = join(realpathSync(existing), relative(existing, dir));
+  const rel = relative(realpathSync(repoRoot), target);
   if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) {
     throw new Error(`输出目录 ${dir} 在仓库里面；生成结果不能写进仓库，请换到仓库外`);
   }
+  mkdirSync(dir, { recursive: true });
 }
 
 function main() {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -22,7 +22,7 @@ const PLAN = `# 测试规划
 
 | 阶段 | 任务 | 内容 | 依赖 | 风险 | 规模 / 预计 PR | 标注 |
 | --- | --- | --- | --- | --- | --- | --- |
-| **0 马上** | CORE-A | 第一个任务 | — | 高 | 小 | 完成 |
+| **0 马上** | CORE-A | 第一个任务 | — | 高 | 小 | 完成：不含正式环境部分 |
 | | CORE-A-UI | 前端 | CORE-A | 普通 | 小 | — |
 | **1 下一步** | PAY-BASE → PAY-WAFFO | 钱路线 | CORE-A；#12 | 高 | 大 | — |
 | | MOD | 暂缓 | — | 高 | 待定 | 阻塞：Owner 决定暂缓 |
@@ -58,6 +58,7 @@ const PRS = [
   pr(15, 'docs(plan): 同步规划'),
   pr(16, 'feat(api): 支付</script><b>x</b>', { body: '说明\n任务：PAY-BASE\n' }),
   pr(17, 'fix: 很早以前', { mergedAt: '2026-09-01T00:00:00Z' }),
+  pr(19, 'fix(OLD-TRY): 同步到 main', { baseRefName: 'main' }),
 ];
 
 test('parsePlan 读出任务名、阶段、依赖和标注', () => {
@@ -95,6 +96,8 @@ test('derive 推导阶段、阻塞原因和计划外工作', () => {
   const report = derive({ plan: parsePlan(PLAN), prs: PRS, since: '2026-09-27', generatedAt: 'T', sourceRef: 'test' });
   const status = Object.fromEntries(report.tasks.map((task) => [task.name, task]));
   assert.equal(status['CORE-A'].status, '已完成');
+  assert.equal(status['CORE-A'].reason, '不含正式环境部分');
+  assert.deepEqual(status['OLD-TRY'].prs, []);
   assert.equal(status['CORE-A-UI'].status, '实施中');
   assert.equal(status['PAY-BASE'].status, '实施中');
   assert.deepEqual(status['PAY-BASE'].prs.map((item) => [item.number, item.plan]), [[11, true], [16, false]]);
@@ -150,7 +153,9 @@ test('命令行离线运行，结果只写到仓库外；输出目录在仓库�
   assert.match(page, /<title>Graylum 施工进度<\/title>/);
   assert.match(page, /<article class="card s-已完成" data-status="已完成">/);
 
-  const inside = spawnSync(process.execPath, [script, '--prs-file', prsFile, '--out-dir', join(repoRoot, 'scripts')], { encoding: 'utf8' });
+  const insideDir = join(repoRoot, 'scripts', `plan-progress-should-not-exist-${process.pid}`, 'out');
+  const inside = spawnSync(process.execPath, [script, '--prs-file', prsFile, '--out-dir', insideDir], { encoding: 'utf8' });
   assert.equal(inside.status, 1);
   assert.match(inside.stderr, /在仓库里面/);
+  assert.equal(existsSync(dirname(insideDir)), false);
 });

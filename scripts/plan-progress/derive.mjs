@@ -61,7 +61,8 @@ export function derive({ plan, prs, since, generatedAt, sourceRef }) {
   const links = new Map(plan.tasks.map((task) => [task.name, new Map()]));
   const matched = new Set();
 
-  for (const pr of prs) {
+  // 只有指向 staging 的 PR 按标题和正文归到任务；指向 main 的同步或紧急 PR 不重复计入。历史对照里点名的 PR 不受限。
+  for (const pr of prs.filter((item) => item.baseRefName === 'staging')) {
     const hits = new Set([...namesInTitle(pr.title, names), ...namesInBody(pr.body, names)]);
     for (const name of hits) {
       links.get(name).set(pr.number, toLink(pr, isPlanTitle(pr.title)));
@@ -96,6 +97,7 @@ export function derive({ plan, prs, since, generatedAt, sourceRef }) {
     const note = task.annotation;
     if (note?.kind === '完成') {
       task.status = '已完成';
+      if (note.reason) task.reason = note.reason;
       if (open.length > 0) warnings.push(`${task.name} 标为完成，但还有在途 PR：${open.map((pr) => `#${pr.number}`).join('、')}`);
     } else if (note?.kind === '关闭') {
       task.status = '已关闭';
