@@ -102,7 +102,18 @@ export function mentorReplyDisplay(source: MentorReplySource): { text: string; c
   let stored = source.legacyMessage;
   if (body.kind === "invalid") stored = INVALID_REPLY_NOTICE;
   else if (body.kind === "oversized") stored = OVERSIZED_REPLY_NOTICE;
-  return withNotice(stored, truncated ?? historyNotice ?? (stored || card ? undefined : unavailableNotice(source)));
+  // The turn's own state (正在回复…, 费用待核实, 已停止) comes first; the omitted-history note is added under it.
+  const state = stored || card ? undefined : unavailableNotice(source);
+  const stateNotice = state && historyNotice ? { ...state, text: state.text + "\n" + historyNotice.text } : state ?? historyNotice;
+  return withNotice(stored, truncated ?? stateNotice);
+}
+
+/**
+ * True when `notice` reports the turn's own state, so the tail does not repeat "正在回复…".
+ * The omitted-history note alone is not a state and never hides the tail's progress notice.
+ */
+export function showsTurnState(notice: ReplyNotice | undefined) {
+  return Boolean(notice && notice.text !== HISTORY_OMITTED_NOTICE);
 }
 
 /** Where a turn was asked: a revision opens a new round that reuses step and question ids. */
