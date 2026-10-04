@@ -1106,3 +1106,31 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: native capacity
   expect(result.body).toBe(primary.body);expect(result.summaryOmitted).toBe(true);
  }
 });
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: native streaming and frozen buffered calls settle identical billing evidence',async()=>{
+ const settlements:unknown[]=[];
+ for(const streamed of [false,true]){
+  const f=await fixture(streamed?'serial-tools-v4-stream':'serial-tools-v2',false,8192,false,undefined,false,30000,false,streamed);
+  const body='{"message":"Identical billed answer"}';let posts=0;
+  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+   posts++;const request=JSON.parse(String(init?.body)),id='gen-equal-'+f.execution.executionId;
+   expect(request.stream).toBe(streamed);
+   if(!streamed)return new Response(completion(id,request.model,body),{status:200,headers:{'content-type':'application/json'}});
+   const chunks:string[]=[];
+   const res={write:(part:string)=>chunks.push(part),end:(part:string)=>chunks.push(part)} as unknown as ServerResponse;
+   chunk(res,id,request.model,{role:'assistant',content:body});endStream(res,id,request.model);
+   return new Response(chunks.join(''),{status:200,headers:{'content-type':'text/event-stream'}});
+  }});
+  const host=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter});
+  expect(await host.execute(f.execution.executionId)).toMatchObject({state:'completed',body});
+  const evidence=(await db.query('select state,closed,charged,actual_restore,provider_cost_usd::text cost from bill2_runs where id=$1',[f.execution.runId])).rows[0];
+  settlements.push(evidence);
+  const calls=(await db.query('select id,selected_cost_usd::text cost from bill2_calls where run_id=$1',[f.execution.runId])).rows;
+  expect(calls).toHaveLength(1);expect(calls[0].cost).toBe('0.003');
+  const receipts=(await db.query('select payload_hash,payload from bill2_receipts where call_id=$1 order by id',[calls[0].id])).rows;
+  await host.execute(f.execution.executionId);
+  expect((await db.query('select payload_hash,payload from bill2_receipts where call_id=$1 order by id',[calls[0].id])).rows).toEqual(receipts);
+  expect(posts).toBe(1);
+ }
+ expect(settlements).toEqual(Array(2).fill({state:'settled',closed:true,charged:3,actual_restore:17,cost:'0.003'}));
+});

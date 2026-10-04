@@ -99,7 +99,7 @@ it('deduplicates execution reads and never exceeds eight outstanding RPCs', asyn
     await new Promise(resolve => setTimeout(resolve, 0));
     try { return await original(name, args); }
     finally { outstanding--; }
-  }) as typeof f.db.rpc;
+  }) as unknown as typeof f.db.rpc;
   const result = await readNativeRuntimeView(f.db, actor, session);
   expect(reads).toBe(19);
   expect(maximum).toBe(8);
