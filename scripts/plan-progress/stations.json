@@ -1,0 +1,419 @@
+{
+  "说明": "上线路线图的站点。每个站是用户能感受到的一项功能，按先后顺序排列；afterLaunch 为 true 的画在终点站后面。tasks 里的名字必须是 MASTER_PLAN 第 7.1 节的任务名，每个任务只能出现在一个站里。站的状态由任务自动推导；waitingForOwner 只在对应任务还没完成时显示。 doneNote 只在任务标注写成\"完成：不含…\"时显示，说明这一站还差什么。 note 是站点的固定说明，写了 note 的站不显示任务状态。 任务上的 note 是\"还没开始\"时显示在卡片下面的固定说明。",
+  "stations": [
+    {
+      "id": "foundation",
+      "name": "先把地基打牢",
+      "plain": "关掉会乱扣积分的旧接口，计费和限流的关键检查每次改代码都自动跑，不让漏洞带上线。",
+      "tasks": [
+        {
+          "name": "P0-1",
+          "plain": "导师不再一直“思考”半天不出字。",
+          "doneNote": "导师出字速度还没有从美国实际测过、确认达标。"
+        },
+        {
+          "name": "P0-2",
+          "plain": "关掉没人用却还能扣积分的旧接口，删掉会动积分的临时脚本。"
+        },
+        {
+          "name": "P0-3",
+          "plain": "把整体规划整理成一份总计划。"
+        },
+        {
+          "name": "P0-4",
+          "plain": "修好一个已经过时的自动测试。"
+        },
+        {
+          "name": "CI-TRUST-1",
+          "plain": "计费和恢复的关键测试，每次改代码都自动跑。"
+        },
+        {
+          "name": "CI-TRUST",
+          "plain": "代码检查覆盖到全部前后端代码。"
+        },
+        {
+          "name": "DEBT-QUICK",
+          "plain": "清理没人用的旧代码。"
+        },
+        {
+          "name": "SEC-RATELIMIT",
+          "plain": "限流服务出故障时宁可拒绝，也不放行。"
+        },
+        {
+          "name": "PII-REGEX",
+          "plain": "隐私信息过滤更快，不会被特殊输入拖慢。"
+        },
+        {
+          "name": "COST-REPORT",
+          "plain": "后台成本报表的金额算对。"
+        },
+        {
+          "name": "RATE-LIMIT",
+          "plain": "防止有人刷接口，出问题时能一键停掉新的 AI 调用。",
+          "doneNote": "正式网站的限流服务还没配置，上线前做。"
+        },
+        {
+          "name": "INVITE-ABUSE",
+          "plain": "防止用小号反复刷邀请奖励。"
+        }
+      ]
+    },
+    {
+      "id": "mentor",
+      "name": "导师像真人一样聊",
+      "plain": "定位导师用聊天的方式提问，给出可点选的选项卡，后台随时能换模型。",
+      "tasks": [
+        {
+          "name": "AGENT-CORE",
+          "plain": "定位流程从“逐题填表”改成和导师对话。"
+        },
+        {
+          "name": "AGENT-CORE-UI",
+          "plain": "选项卡片、回复排版和对话提示的显示。"
+        },
+        {
+          "name": "MENTOR-PROMPT-V2",
+          "plain": "整理信息时不再照抄用户原话、不再写错地方。"
+        },
+        {
+          "name": "MENTOR-BUDGET",
+          "plain": "导师每次能说多长、等多久，在后台设置。"
+        },
+        {
+          "name": "MODEL-REASONING",
+          "plain": "每个模型的思考强度在后台选，不写死在代码里。"
+        },
+        {
+          "name": "STG-MENTOR-MODEL",
+          "plain": "导师模型对比测试（已定用 Claude Sonnet，不再做）。"
+        }
+      ]
+    },
+    {
+      "id": "billing",
+      "name": "积分扣得准、更省钱",
+      "plain": "按模型的真实价格扣积分，重复的内容走缓存更便宜，长对话也不变慢。",
+      "tasks": [
+        {
+          "name": "BILL-UNIT",
+          "plain": "所有成本统一换成美元再换算积分，每个模型可以单独设倍数。"
+        },
+        {
+          "name": "MODEL-PRICING-SYNC",
+          "plain": "模型价格自动从 OpenRouter 读取。"
+        },
+        {
+          "name": "PROMPT-CACHE",
+          "plain": "固定的说明文字走缓存，八轮对话实测省了约三成费用。"
+        },
+        {
+          "name": "PROMPT-CACHE-HISTORY",
+          "plain": "聊天记录也走缓存，进一步省钱。"
+        },
+        {
+          "name": "RUNTIME-VIEW-PERF",
+          "plain": "长对话打开不再变慢。"
+        }
+      ]
+    },
+    {
+      "id": "payg",
+      "name": "余额不够能暂停，充值后继续",
+      "plain": "积分快用完时停在两步之间，充值后接着做，不会扣成负数，也不会重复扣。",
+      "tasks": [
+        {
+          "name": "BILL-PAYG",
+          "plain": "每次调用 AI 前只冻结这一次的费用，用多少扣多少。"
+        }
+      ]
+    },
+    {
+      "id": "streaming",
+      "name": "回复边写边显示",
+      "plain": "用户不用干等，导师说一句就能看到一句。",
+      "tasks": [
+        {
+          "name": "CHAT-NATIVE-OUTPUT",
+          "plain": "全站对话统一边写边显示，统一回复长度上限。"
+        }
+      ]
+    },
+    {
+      "id": "conversation",
+      "name": "边聊边整理，选题写作也靠聊",
+      "plain": "聊到哪，右边的定位信息就记到哪；定位之后，选题和写内容也像聊天一样推进。",
+      "tasks": [
+        {
+          "name": "CONVERSATION-DRIVEN-CAPTURE",
+          "plain": "右侧信息跟着对话自动填，不用按固定顺序一题一题答。"
+        },
+        {
+          "name": "CONTENT-CONVERSATION-DRIVEN",
+          "plain": "选题和写作改成自由对话，需要时自动用上对应平台的写作技巧。"
+        }
+      ]
+    },
+    {
+      "id": "report",
+      "name": "一键生成完整报告",
+      "plain": "所有步骤确认后，导师根据全部信息写一份完整的运营策略报告。",
+      "tasks": [
+        {
+          "name": "REPORT-GEN",
+          "plain": "由 AI 按模板写完整报告，和普通对话一样按实际用量扣积分。"
+        }
+      ]
+    },
+    {
+      "id": "account",
+      "name": "账号安全、能注销能删数据",
+      "plain": "忘了密码能用邮件找回；用户能自己注销账号，个人数据会被删除。",
+      "tasks": [
+        {
+          "name": "FORGOT-PASSWORD",
+          "plain": "忘记密码时用邮件链接重设。"
+        },
+        {
+          "name": "DATA-ERASURE",
+          "plain": "注销账号、删除对话和成果，正在进行的扣费也能正确收尾。"
+        }
+      ]
+    },
+    {
+      "id": "realdata",
+      "name": "正式站能用 AI、查真实数据",
+      "plain": "正式网站能真实调用 AI，并能查到各社媒平台的真实数据做对标。",
+      "tasks": [
+        {
+          "name": "RUNTIME-PROD",
+          "plain": "正式环境开放真实 AI 调用，带每日花费上限和告警。"
+        },
+        {
+          "name": "RESEARCH-0",
+          "plain": "实测各家搜索服务，选定数据供应商。"
+        },
+        {
+          "name": "RESEARCH-TOOLS",
+          "plain": "接入搜索和对标研究，取不到数据时如实告诉用户。"
+        }
+      ]
+    },
+    {
+      "id": "library",
+      "name": "资料库、我的文风、更好用的输入框",
+      "plain": "用户上传自己的文档，AI 学会用户的文风；输入框能引用资料、加附件。",
+      "tasks": [
+        {
+          "name": "LIB-DOCS",
+          "plain": "上传和管理自己的文档。"
+        },
+        {
+          "name": "VOICE",
+          "plain": "根据用户的文章总结文风，写作时照着写。"
+        },
+        {
+          "name": "UI-A",
+          "plain": "输入框换成更好用的编辑器。"
+        },
+        {
+          "name": "UI-MODEL",
+          "plain": "输入框里显示当前模型（先固定为自动）。"
+        },
+        {
+          "name": "UI-B",
+          "plain": "在输入框里 @ 引用资料库的内容。"
+        },
+        {
+          "name": "UI-C",
+          "plain": "在输入框里加附件。"
+        },
+        {
+          "name": "UI-FINISH",
+          "plain": "导航、手机适配和整体界面验收。"
+        }
+      ]
+    },
+    {
+      "id": "fusion",
+      "name": "多模型专家评审团",
+      "plain": "几个 AI 一起评审报告、一起回答问题，用户能对比着看（Gold 会员专属）。",
+      "tasks": [
+        {
+          "name": "FUSION-REVIEW",
+          "plain": "多个模型一起评审定稿报告。"
+        },
+        {
+          "name": "FUSION-COMPARE",
+          "plain": "同一个问题让几个模型分别回答，放在一起对比。"
+        }
+      ]
+    },
+    {
+      "id": "paywall",
+      "name": "付费墙和会员",
+      "plain": "用户能用 Waffo 买会员和积分包；免费用户能做到报告前一步，生成报告需要会员。",
+      "tasks": [
+        {
+          "name": "ENTITLEMENTS",
+          "plain": "后台设置每种会员能用哪些功能。"
+        },
+        {
+          "name": "PAY-COMMON",
+          "plain": "订单、付款和发放权益的公共部分。"
+        },
+        {
+          "name": "PAY-WAFFO",
+          "plain": "接入 Waffo 收款：银行卡订阅、微信一次性会员、创始会员名额。"
+        },
+        {
+          "name": "PAYWALL",
+          "plain": "价格页、付费弹窗和会员检查。"
+        },
+        {
+          "name": "EXPERT-CONSULT",
+          "plain": "报告末尾加“预约真人专家咨询”的入口。"
+        }
+      ],
+      "waitingForOwner": [
+        {
+          "task": "PAY-WAFFO",
+          "text": "等你：开通 Waffo 商户，并在 Waffo 后台建好会员和积分包产品（实际配置前会再请你确认）。"
+        }
+      ]
+    },
+    {
+      "id": "publish",
+      "name": "一键发布、看作品数据",
+      "plain": "用户把内容一键发到 9 个海外社媒平台，并看到自己作品的数据。",
+      "tasks": [
+        {
+          "name": "PUBLISH-MONITOR",
+          "plain": "接入 Post for Me 做多平台发布和数据监控。"
+        }
+      ],
+      "waitingForOwner": [
+        {
+          "task": "PUBLISH-MONITOR",
+          "text": "等你：Post for Me 实测和条款核对通过之前，这项功能不上线。"
+        }
+      ]
+    },
+    {
+      "id": "launch",
+      "name": "正式上线",
+      "plain": "清掉旧版对话、搭好正式数据库、做完整验收，然后对外开放售卖。",
+      "terminal": true,
+      "tasks": [
+        {
+          "name": "DB-BASELINE",
+          "plain": "正式数据库能从仓库里的文件一步建出来。"
+        },
+        {
+          "name": "STAGING-HOST-CLEANUP",
+          "plain": "清理测试站旧网址的残留。"
+        },
+        {
+          "name": "MODERATION",
+          "plain": "内容审核（目前暂缓，只留了接口）。"
+        },
+        {
+          "name": "LEGACY-CLOSE",
+          "plain": "删掉旧版聊天的代码。"
+        },
+        {
+          "name": "V3-M3",
+          "plain": "上线前的完整验收。",
+          "note": "前面所有站都做完之后才开始。"
+        },
+        {
+          "name": "REL-1",
+          "plain": "发布到正式环境。"
+        }
+      ],
+      "waitingForOwner": [
+        {
+          "task": "MODERATION",
+          "text": "等你：公开上线前决定内容审核什么时候做。"
+        },
+        {
+          "task": "REL-1",
+          "text": "等你：上线前升级 Vercel Pro、准备客服邮箱、生成隐私条款和服务条款，最后批准上线。"
+        }
+      ]
+    },
+    {
+      "id": "continuation",
+      "name": "长回复自动接着写",
+      "plain": "回复写到长度上限时自动接着写完，用户不用点“继续”。",
+      "afterLaunch": true,
+      "tasks": [],
+      "note": "第二版功能，方案已写好，上线后再做。"
+    },
+    {
+      "id": "chargeback",
+      "name": "拒付处理",
+      "plain": "用户找银行拒付时，系统帮你整理申诉材料，判输后扣回对应的积分。",
+      "afterLaunch": true,
+      "tasks": [
+        {
+          "name": "CHARGEBACK",
+          "plain": "拒付结果出来后的处理和申诉材料导出。"
+        }
+      ],
+      "waitingForOwner": [
+        {
+          "task": "CHARGEBACK",
+          "text": "等你：向 Waffo 核实拒付怎么通知、要哪些材料、期限和手续费。"
+        }
+      ]
+    },
+    {
+      "id": "integrations",
+      "name": "连接飞书和社媒账号",
+      "plain": "连上飞书和用户的社媒账号，自动同步数据。",
+      "afterLaunch": true,
+      "tasks": [
+        {
+          "name": "INTEGRATION-BASE",
+          "plain": "连接外部服务的公共部分。"
+        },
+        {
+          "name": "V3-FEISHU",
+          "plain": "连接飞书。"
+        },
+        {
+          "name": "SOCIAL-SYNC",
+          "plain": "自动同步社媒账号的数据。"
+        }
+      ]
+    },
+    {
+      "id": "learning",
+      "name": "越用越懂用户",
+      "plain": "在用户同意的前提下，用真实使用情况改进导师。",
+      "afterLaunch": true,
+      "tasks": [
+        {
+          "name": "LEARN-1",
+          "plain": "整理用户同意分享的使用记录。"
+        },
+        {
+          "name": "LEARN-2",
+          "plain": "用这些记录改进导师。"
+        }
+      ]
+    },
+    {
+      "id": "library-more",
+      "name": "资料库支持更多格式",
+      "plain": "能上传 PDF、图片和音频，也能从 Google Drive、Notion 导入。",
+      "afterLaunch": true,
+      "tasks": [
+        {
+          "name": "LIB-EXT",
+          "plain": "更多文件格式、全文搜索和外部导入。"
+        }
+      ]
+    }
+  ]
+}
