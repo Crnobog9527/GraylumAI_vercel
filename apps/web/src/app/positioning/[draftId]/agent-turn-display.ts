@@ -38,6 +38,8 @@ export type LiveTextSource = "assistant" | "message" | "final";
 export type LiveReply = {
   executionId: string; text: string; phase: string; card: QuestionCard | null;
   rev: number; points: number; stalled: boolean; source?: LiveTextSource; stopped?: boolean;
+  /** The stream already delivered the final result; the saved reply replaces this copy next. */
+  finished?: boolean;
 };
 
 const knownPhases = new Set(["mentor", "reading", "organizer", "saving"]);
@@ -196,6 +198,8 @@ export function mentorReplyDisplay(source: MentorReplySource): { text: string; c
   const body = readAgentTurnBody(source.body);
   const card = stoppedCut(source) ? null : body.card ?? source.liveCard ?? null;
   if (source.liveText) return { text: source.liveText, card, ...(historyNotice ? { notice: historyNotice } : {}) };
+  // While a stop is saving, only what this tab froze is shown, never the unseen full checkpoint (primaryBody).
+  if (stopSaving(source)) return { text: "", card: null, notice: unavailableNotice(source) };
   const cut = source.unavailableReason === "output_truncated" ? OUTPUT_TRUNCATED_NOTICE
     : source.completeness === "length_limit" ? LENGTH_LIMIT_NOTICE : null;
   const stopped = stoppedResultNotice(source);

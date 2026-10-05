@@ -147,6 +147,8 @@ export function liveReplyController(options: {
         // without a completed result says so. A BILL-PAYG pause is not unfinished: history shows its notice.
         if (id && result?.state !== "completed" && !isPaygWaiting(result?.state))
           live.mark(id, !result || result.state === "pending" || result.state === "stopping" ? "waiting" : "incomplete");
+        // The result is stored: 停止 would change nothing any more, so it goes away at once, before history catches up.
+        else if (id && current?.executionId === id) show({ ...current, finished: true });
       }
     },
   };

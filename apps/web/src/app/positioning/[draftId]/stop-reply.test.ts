@@ -78,6 +78,16 @@ describe("stopping a live reply", () => {
     expect(stopAvailable(reply("saving"), undefined, true)).toBe(false);
     expect(stopAvailable(reply("mentor"), { state: "interrupted", userStopPending: true }, false)).toBe(false);
     expect(stopAvailable(null, undefined, false)).toBe(false);
+    expect(stopAvailable({ ...reply("saving"), finished: true }, undefined, false)).toBe(false);
+  });
+
+  it("a completed stream result hides stop at once, before history catches up", async () => {
+    const draftId = newDraft(), live = controller(draftId, new TabStorage());
+    await live.stream(async () => events([{ type: "admitted", executionId }, delta("全文", 0, 0, "assistant"),
+      { type: "result", result: { state: "completed" } }]), {});
+    expect(live.current()).toMatchObject({ text: "全文", finished: true });
+    expect(stopAvailable(live.current(), undefined, false)).toBe(false);
+    expect(live.stop(executionId)).not.toBeNull(); // the controller itself stays permissive; the page gates on stopAvailable
   });
 
   it("freezes the shown text at once: later text and a card are ignored", () => {
@@ -233,6 +243,11 @@ describe("bill2.v1 history: userStopPending without a pause reason (runtime_view
       expect(stopFollowUpTarget(view(state, true), () => false)).toBe(executionId);
       const shown = mentorReplyDisplay({ body: null, legacyMessage: "", active: true, busy: false, ...v1(state, true) });
       expect(shown.notice).toEqual({ tone: "status", text: STOP_SAVING_NOTICE, busy: true });
+      // Another tab never sees the unseen full checkpoint while the stop saves.
+      const checkpoint = mentorReplyDisplay({ body: agentTurnBody("完整的主回复，用户没看完", null), legacyMessage: "完整的主回复，用户没看完",
+        active: true, busy: false, ...v1(state, true) });
+      expect(checkpoint.text).toBe("");
+      expect(checkpoint.card).toBeNull();
     }
   });
 
