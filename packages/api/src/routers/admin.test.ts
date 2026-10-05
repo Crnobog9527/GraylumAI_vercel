@@ -2,6 +2,11 @@ import { pricedModel } from '../shared/__tests__/modelPriceFixture';
 import { TRPCError } from '@trpc/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../services/stripe', () => ({ getStripeClient: () => ({
+  accounts: { retrieveCurrent: async () => ({ id: 'acct_fixture' }) },
+  balance: { retrieve: async () => ({ livemode: false }) },
+}) }));
+
 import { adminRouter } from './admin';
 
 function createAwaitableQueryBuilder(result: Promise<unknown>) {
@@ -65,6 +70,15 @@ function createAdminCaller(
   adminSupabase: Record<string, unknown>,
   options: { role?: 'user' | 'admin' } = {},
 ) {
+  if (!adminSupabase.rpc) adminSupabase.rpc = async (name: string) => {
+    if (name !== 'pay_common_membership_facts') throw new Error(`Unexpected RPC ${name}`);
+    const client = adminSupabase as { from: (table: string) => { select: () => {
+      maybeSingle: () => Promise<{ data: Record<string, unknown> | null; error: unknown }> } } };
+    const [sub, order] = await Promise.all(['user_subscriptions', 'payment_orders'].map(table =>
+      client.from(table).select().maybeSingle()));
+    return { data: { subscriptions: sub.data ? [{ ...sub.data, payment_channel: 'stripe', mapping_state: 'mapped' }] : [],
+      latest_order: order.data }, error: sub.error ?? order.error };
+  };
   const role = options.role ?? 'admin';
   const userScopedSupabase = {
     from(table: string) {
@@ -1834,6 +1848,9 @@ describe('adminRouter lightweight admin dashboards', () => {
 
     const adminSupabase = {
       from(table: string) {
+        if (table === 'payment_provider_refs') return {
+          select() { return this; }, eq() { return this; }, in: async () => ({ data: [], error: null }),
+        };
         adminQueries.push(table);
 
         const execute = async () => {
@@ -1947,6 +1964,9 @@ describe('adminRouter lightweight admin dashboards', () => {
 
     const adminSupabase = {
       from(table: string) {
+        if (table === 'payment_provider_refs') return {
+          select() { return this; }, eq() { return this; }, in: async () => ({ data: [], error: null }),
+        };
         adminQueries.push(table);
 
         const execute = async () => {
@@ -1964,6 +1984,7 @@ describe('adminRouter lightweight admin dashboards', () => {
             return {
               data: [{
                 id: 'plan-1',
+                stripe_monthly_price_id: null, stripe_yearly_price_id: null,
                 name: 'Pro',
                 level: 'pro',
                 allow_export: 'true',
@@ -2011,6 +2032,7 @@ describe('adminRouter lightweight admin dashboards', () => {
       },
       membershipPlans: [{
         id: 'plan-1',
+        stripe_monthly_price_id: null, stripe_yearly_price_id: null,
         name: 'Pro',
         level: 'pro',
         allow_export: 'true',

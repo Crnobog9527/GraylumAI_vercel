@@ -13,43 +13,15 @@ function createEligibilitySupabase(options: {
   order?: Record<string, unknown> | null;
   orderError?: Record<string, unknown> | null;
 }) {
-  const subscriptionResult = Promise.resolve({
-    data: Array.isArray(options.subscription)
-      ? options.subscription
-      : options.subscription
-        ? [options.subscription]
-        : [],
-    error: options.subscriptionError ?? null,
-  });
-  const orderResult = Promise.resolve({
-    data: options.order ?? null,
-    error: options.orderError ?? null,
-  });
-
+  const subscriptions = Array.isArray(options.subscription) ? options.subscription
+    : options.subscription ? [options.subscription] : [];
   return {
-    from(table: string) {
-      const result = table === 'user_subscriptions' ? subscriptionResult : orderResult;
-
-      return {
-        select() {
-          return this;
-        },
-        eq() {
-          return this;
-        },
-        order() {
-          return this;
-        },
-        limit() {
-          return this;
-        },
-        maybeSingle() {
-          return result;
-        },
-        then: result.then.bind(result),
-        catch: result.catch.bind(result),
-        finally: result.finally.bind(result),
-      };
+    async rpc(name: string) {
+      if (name !== 'pay_common_membership_facts') throw new Error('Unexpected RPC');
+      return { data: { subscriptions: subscriptions.map(row => ({
+        payment_channel: row.stripe_subscription_id ? 'stripe' : null,
+        mapping_state: row.stripe_subscription_id ? 'mapped' : 'none', ...row,
+      })), latest_order: options.order ?? null }, error: options.subscriptionError ?? options.orderError ?? null };
     },
   };
 }
@@ -75,6 +47,27 @@ describe('resolveMembershipEligibility', () => {
       reasonCode: 'READ_FAILED',
       safeMessage: '会员状态暂不可用，请稍后重试。',
     });
+  });
+
+  it.each([
+    { payment_channel: 'stripe', mapping_state: 'unknown' },
+    { payment_channel: 'waffo', mapping_state: 'mapped' },
+    { payment_channel: null, mapping_state: 'unknown' },
+    { payment_channel: 'stripe', mapping_state: 'none' },
+  ])('refuses unresolved channel facts %j without treating the subject as free', async facts => {
+    const result = await resolveMembershipEligibility({
+      supabase: createEligibilitySupabase({ subscription: { id: 'internal_subscription', status: 'active', ...facts } }),
+      userId: 'fixture_user', profile: { membership_level: 'pro' }, action: 'create_credit_package_checkout',
+    });
+    expect(result).toMatchObject({ allowed: false, state: 'inconsistent', reasonCode: 'ENTITLEMENT_CONFLICT' });
+  });
+  it('refuses two mapped active subscriptions instead of choosing one by recency', async () => {
+    const result = await resolveMembershipEligibility({
+      supabase: createEligibilitySupabase({ subscription: ['first', 'second'].map(id => ({ id,
+        payment_channel: 'stripe', mapping_state: 'mapped', status: 'active', billing_cycle: 'monthly' })) }),
+      userId: 'fixture_user', profile: { membership_level: 'pro' }, action: 'create_credit_package_checkout',
+    });
+    expect(result).toMatchObject({ allowed: false, state: 'inconsistent', reasonCode: 'ENTITLEMENT_CONFLICT' });
   });
 
   it('allows free users with no active subscription to create a membership checkout', async () => {

@@ -4,15 +4,15 @@
  * This code is proprietary and confidential.
  */
 
+import { retrievePaidStripeInvoice, retrieveInvoiceSubscription } from './payments/stripeInvoiceEvidence';
+import { recordStripeInvoiceConflict } from './payments/stripeConflictEvidence';
 import type Stripe from 'stripe';
 import { logger } from '../lib/logger';
-import {
-  mergePaymentOrderStatus,
-  normalizePaymentOrderStatus,
-  resolveCheckoutSessionOrderStatus,
-  type PaymentOrderStatusLike,
-} from './paymentOrderStatus';
+import { type PaymentOrderStatusLike } from './paymentOrderStatus';
 import { getStripeClient } from './stripe';
+import { findStripeReference, resolveStripeOrderIds } from './payments/stripeReferences';
+import { recordStripeCheckout, resolveStripeScope } from './payments/stripeCheckoutPersistence';
+import { closeExpiredStripeCheckout, isExpectedRecurringUpgradePrice } from './payments/stripePurchaseEvidence';
 import {
   addUtcCalendarMonthsClamped,
   fulfillMembershipInvoiceWithSubscriptionCreditGrants,
@@ -75,7 +75,6 @@ type StripeRefundWebhookEvent =
   | (Stripe.Event & { type: 'charge.refund.updated' | 'refund.failed'; data: { object: Stripe.Refund } })
   | (Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } });
 
-const STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS = 999;
 const STRIPE_LIST_PAGE_SIZE = 100;
 const STRIPE_LIST_MAX_PAGES = 10;
 const STRIPE_LIST_MAX_ITEMS = 1_000;
@@ -461,10 +460,12 @@ async function recordCheckoutFulfillmentAudit(input: {
   now?: string;
 }) {
   try {
+    const ref = await findStripeReference(input.supabase, 'checkout', input.session.id, await resolveStripeScope(getStripeClient()));
+    if (!ref?.order_id) return;
     const lookup = await input.supabase
       .from('payment_orders')
       .select('id, metadata')
-      .eq('stripe_checkout_session_id', input.session.id)
+      .eq('id', ref.order_id)
       .maybeSingle();
 
     if (lookup.error) {
@@ -664,20 +665,6 @@ async function listStripeInvoiceLines(invoiceId: string, startingAfter: string) 
   });
 }
 
-function isExpectedRecurringUpgradePrice(price: Stripe.Price, input: {
-  priceId: string;
-  amount: number;
-  currency: string;
-  billingCycle: 'monthly' | 'yearly';
-}) {
-  return price.id === input.priceId
-    && price.type === 'recurring'
-    && price.currency === input.currency
-    && price.unit_amount === input.amount
-    && price.recurring?.interval === (input.billingCycle === 'yearly' ? 'year' : 'month')
-    && price.recurring.interval_count === 1;
-}
-
 async function getInvoiceSubscriptionServicePeriod(
   invoice: Stripe.Invoice,
   subscriptionId: string,
@@ -748,10 +735,18 @@ async function getInvoiceSubscriptionServicePeriod(
         || Boolean(line.pretax_credit_amounts?.length) || Boolean(line.taxes?.length)) {
         throw new Error('upgrade_invoice_full_target_line_mismatch');
       }
-    } else if (lineSubscriptionId !== subscriptionId || details?.proration === true
-      || typeof linePriceId !== 'string'
-      || typeof start !== 'number' || typeof end !== 'number' || end <= start) {
-      continue;
+    } else {
+      if (lineSubscriptionId !== subscriptionId || details?.proration === true
+        || typeof linePriceId !== 'string'
+        || typeof start !== 'number' || typeof end !== 'number' || end <= start) continue;
+      const amount = invoice.status === 'paid' ? invoice.amount_paid : invoice.amount_due;
+      if (details?.proration !== false || line.quantity !== 1 || line.amount !== amount
+        || line.subtotal !== amount || line.currency !== invoice.currency
+        || Boolean(line.discount_amounts?.length) || Boolean(line.discounts?.length)
+        || Boolean(line.pretax_credit_amounts?.length) || Boolean(line.taxes?.length)) {
+        throw new Error('PAY_COMMON_INVOICE_LINE_MISMATCH');
+      }
+      if (periods.size > 0) throw new Error('invoice_subscription_service_period_not_unique');
     }
 
     periods.set(`${start}:${end}:${linePriceId}`, { start, end, priceId: linePriceId });
@@ -770,30 +765,6 @@ async function getInvoiceSubscriptionServicePeriod(
   }
 
   return [...periods.values()][0];
-}
-
-function getInvoicePaymentIntentId(invoice: Stripe.Invoice) {
-  const invoiceRecord = invoice as Stripe.Invoice & {
-    payment_intent?: string | Stripe.PaymentIntent | null;
-  };
-
-  if (typeof invoiceRecord.payment_intent === 'string') {
-    return invoiceRecord.payment_intent;
-  }
-
-  if (invoiceRecord.payment_intent && typeof invoiceRecord.payment_intent === 'object') {
-    return invoiceRecord.payment_intent.id ?? null;
-  }
-
-  return null;
-}
-
-function getInvoiceCustomerId(invoice: Stripe.Invoice) {
-  return typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id ?? null;
-}
-
-function getFailedInvoiceAmount(invoice: Stripe.Invoice) {
-  return invoice.amount_due ?? invoice.amount_remaining ?? invoice.amount_paid ?? null;
 }
 
 function getExpandableId(value: string | { id?: string | null } | null | undefined) {
@@ -888,14 +859,6 @@ function getInvoiceSubscriptionIdFromUnknown(value: unknown) {
   }
 
   return getInvoiceSubscriptionId(value as Stripe.Invoice);
-}
-
-function getPaymentIntentInvoiceIdFromUnknown(value: unknown) {
-  if (!value || typeof value !== 'object') {
-    return null;
-  }
-
-  return getPaymentIntentInvoiceId(value as Stripe.PaymentIntent);
 }
 
 function buildChargeRefundFacts(input: Extract<RefundReconciliationInput, { charge: Stripe.Charge }>): RefundFacts {
@@ -1016,111 +979,23 @@ function buildRefundIdempotencyKey(facts: RefundFacts) {
   return `stripe_refund_order:${facts.eventType}:${facts.amountRefunded ?? 0}`;
 }
 
-function isUuid(value: string | null | undefined) {
-  return Boolean(value
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value));
-}
-
-async function maybeFindRefundOrder(
-  queryName: string,
-  buildQuery: () => Promise<{ data?: RefundPaymentOrder | null; error?: unknown }>,
-  safeContext: Record<string, unknown>,
-) {
-  const result = await buildQuery();
-
-  if (result.error) {
-    throwFulfillmentError(
-      `refund_order_lookup_${queryName}`,
-      STRIPE_FULFILLMENT_ERRORS.refundOrderLookup,
-      result.error,
-      safeContext,
-    );
+async function findRefundPaymentOrder(supabase: SupabaseLikeClient, facts: RefundFacts): Promise<RefundPaymentOrder | null> {
+  const scope = await resolveStripeScope(getStripeClient());
+  let orderId: string | null = null;
+  for (const [kind, external] of [['invoice', facts.invoiceId], ['checkout', facts.checkoutSessionId],
+    ['payment', facts.paymentIntentId]] as const) {
+    if (!external) continue;
+    const ref = await findStripeReference(supabase, kind, external, scope);
+    if (!ref?.order_id) continue;
+    if (orderId && orderId !== ref.order_id) throw new Error('PAY_COMMON_REFUND_IDENTITY_MISMATCH');
+    orderId = ref.order_id;
   }
-
+  if (!orderId) return null;
+  if (facts.orderId && facts.orderId !== orderId) throw new Error('PAY_COMMON_REFUND_IDENTITY_MISMATCH');
+  const result = await supabase.from('payment_orders').select('id,item_type,fulfilled_at,amount_total,metadata')
+    .eq('id', orderId).maybeSingle();
+  if (result.error) throw new Error('PAY_COMMON_MAPPING_READ_FAILED', { cause: result.error });
   return result.data ?? null;
-}
-
-async function findRefundPaymentOrder(
-  supabase: SupabaseLikeClient,
-  facts: RefundFacts,
-): Promise<RefundPaymentOrder | null> {
-  const safeContext = {
-    eventId: maskIdentifier(facts.eventId),
-    eventType: facts.eventType,
-    refundId: maskIdentifier(facts.refundId),
-    chargeId: maskIdentifier(facts.chargeId),
-    invoiceId: maskIdentifier(facts.invoiceId),
-    paymentIntentId: maskIdentifier(facts.paymentIntentId),
-    checkoutSessionId: maskIdentifier(facts.checkoutSessionId),
-    subscriptionId: maskIdentifier(facts.subscriptionId),
-  };
-
-  if (isUuid(facts.orderId)) {
-    const order = await maybeFindRefundOrder(
-      'order_id',
-      () => supabase
-        .from('payment_orders')
-        .select('id, item_type, fulfilled_at, amount_total, metadata')
-        .eq('id', facts.orderId)
-        .maybeSingle(),
-      safeContext,
-    );
-    if (order) return order;
-  }
-
-  if (facts.invoiceId) {
-    const order = await maybeFindRefundOrder(
-      'invoice_id',
-      () => supabase
-        .from('payment_orders')
-        .select('id, item_type, fulfilled_at, amount_total, metadata')
-        .eq('stripe_invoice_id', facts.invoiceId)
-        .maybeSingle(),
-      safeContext,
-    );
-    if (order) return order;
-  }
-
-  if (facts.checkoutSessionId) {
-    const order = await maybeFindRefundOrder(
-      'checkout_session_id',
-      () => supabase
-        .from('payment_orders')
-        .select('id, item_type, fulfilled_at, amount_total, metadata')
-        .eq('stripe_checkout_session_id', facts.checkoutSessionId)
-        .maybeSingle(),
-      safeContext,
-    );
-    if (order) return order;
-  }
-
-  if (facts.paymentIntentId) {
-    const order = await maybeFindRefundOrder(
-      'payment_intent_id',
-      () => supabase
-        .from('payment_orders')
-        .select('id, item_type, fulfilled_at, amount_total, metadata')
-        .eq('metadata->>paymentIntentId', facts.paymentIntentId)
-        .maybeSingle(),
-      safeContext,
-    );
-    if (order) return order;
-  }
-
-  if (facts.chargeId) {
-    const order = await maybeFindRefundOrder(
-      'charge_id',
-      () => supabase
-        .from('payment_orders')
-        .select('id, item_type, fulfilled_at, amount_total, metadata')
-        .eq('metadata->>chargeId', facts.chargeId)
-        .maybeSingle(),
-      safeContext,
-    );
-    if (order) return order;
-  }
-
-  return null;
 }
 
 function isFullStripeRefundForOrder(facts: RefundFacts, order: RefundPaymentOrder) {
@@ -1364,11 +1239,9 @@ async function getSubscriptionRefundOrderByInvoice(
     eventType: string;
   },
 ): Promise<SubscriptionRefundOrderRow | null> {
-  const result = await supabase
-    .from('payment_orders')
-    .select(SUBSCRIPTION_REFUND_ORDER_SELECT)
-    .eq('stripe_invoice_id', input.invoiceId)
-    .maybeSingle();
+  const ref = await findStripeReference(supabase, 'invoice', input.invoiceId, await resolveStripeScope(getStripeClient()));
+  if (!ref?.order_id) return null;
+  const result = await supabase.from('payment_orders').select('*').eq('id', ref.order_id).maybeSingle();
 
   if (result.error) {
     throwFulfillmentError(
@@ -1379,7 +1252,7 @@ async function getSubscriptionRefundOrderByInvoice(
     );
   }
 
-  return result.data ?? null;
+  return result.data ? await resolveStripeOrderIds(supabase, result.data) : null;
 }
 
 async function getSubscriptionRefundOrderByMetadataReference(
@@ -1630,557 +1503,77 @@ async function recordSubscriptionRefundWebhookAudit(input: {
   }
 }
 
-async function backfillCheckoutOrderFulfillment(
-  supabase: SupabaseLikeClient,
-  subscriptionId: string,
-  fulfilledAt: string,
-) {
-  const query = supabase
-    .from('payment_orders')
-    .update({
-      fulfilled_at: fulfilledAt,
-      status: 'completed',
-      payment_status: 'paid',
-      updated_at: fulfilledAt,
-    })
-    .eq('stripe_subscription_id', subscriptionId)
-    .like('stripe_checkout_session_id', 'cs_%')
-    .is('stripe_invoice_id', null);
-  const result = typeof query.neq === 'function'
-    ? await query.neq('status', 'failed')
-    : await query;
-
-  if (result.error) {
-    throwFulfillmentError(
-      'backfill_checkout_order',
-      STRIPE_FULFILLMENT_ERRORS.backfillCheckoutOrder,
-      result.error,
-      { subscriptionId: maskIdentifier(subscriptionId) },
-    );
-  }
-}
-
 export async function upsertPaymentOrderBySession(
   supabase: SupabaseLikeClient,
   session: Stripe.Checkout.Session,
-  options: {
-    orderStatus?: PaymentOrderStatusLike;
-    eventType?: string;
-    now?: string;
-  } = {},
+  options: { orderStatus?: PaymentOrderStatusLike; eventType?: string; now?: string } = {},
 ) {
-  const metadata = session.metadata ?? {};
-  const existing = await supabase
-    .from('payment_orders')
-    .select('id, status, fulfilled_at, metadata')
-    .eq('stripe_checkout_session_id', session.id)
-    .maybeSingle();
-
-  if (existing.error) {
-    throwFulfillmentError(
-      'upsert_payment_order_lookup',
-      STRIPE_FULFILLMENT_ERRORS.checkoutOrderLookup,
-      existing.error,
-      { checkoutSessionId: maskIdentifier(session.id) },
-    );
+  const stripe = getStripeClient();
+  const scope = await resolveStripeScope(stripe);
+  // Signed event payloads and browser parameters identify what to retrieve, never prove payment.
+  const authoritative = await stripe.checkout.sessions.retrieve(session.id);
+  if (authoritative.id !== session.id) throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
+  const mapped = await supabase.from('payment_provider_refs').select('order_id, mode')
+    .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant)
+    .eq('object_type', 'checkout').eq('external_id', authoritative.id).maybeSingle();
+  if (mapped.error) throw new Error('PAY_COMMON_MAPPING_READ_FAILED', { cause: mapped.error });
+  if (mapped.data && mapped.data.mode !== scope.mode) throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
+  const orderId = mapped.data?.order_id ?? authoritative.metadata?.orderId;
+  if (typeof orderId !== 'string' || !/^[0-9a-f-]{36}$/i.test(orderId)) throw new Error('PAY_COMMON_ORDER_UNKNOWN');
+  // Callback-before-dispatch-write recovery can bind only the already admitted local order.
+  // The RPC validates all frozen facts and commits the ref and derived columns together.
+  await recordStripeCheckout(supabase, orderId, scope, authoritative, options.eventType);
+  if (authoritative.status === 'expired') {
+    const order = await supabase.from('payment_orders')
+      .select('id, user_id, payment_channel, merchant_namespace, payment_mode, purchase_snapshot')
+      .eq('id', orderId).maybeSingle();
+    if (order.error || !order.data) throw new Error('PAY_COMMON_ORDER_UNKNOWN');
+    await closeExpiredStripeCheckout({ stripe, supabase, order: order.data, mappedSessionId: authoritative.id, scope });
   }
-
-  const nextStatus = mergePaymentOrderStatus({
-    existingStatus: existing.data?.status,
-    fulfilledAt: existing.data?.fulfilled_at,
-    nextStatus: resolveCheckoutSessionOrderStatus(session, {
-      orderStatus: options.orderStatus,
-    }),
-  });
-  const now = options.now ?? new Date().toISOString();
-  const orderMetadata = {
-    ...asRecord(existing.data?.metadata),
-    ...metadata,
-    ...(getExpandableId(session.payment_intent)
-      ? { paymentIntentId: getExpandableId(session.payment_intent) }
-      : {}),
-    checkoutStatus: session.status ?? null,
-    paymentStatus: session.payment_status ?? null,
-    lastPaymentOrderStatus: nextStatus,
-    lastPaymentOrderStatusSource: options.eventType ?? 'checkout.session.sync',
-    lastPaymentOrderStatusAt: now,
-  };
-
-  const payload = {
-    user_id: metadata.userId ?? session.client_reference_id ?? null,
-    item_type: metadata.itemType ?? null,
-    item_id: metadata.itemId ?? null,
-    billing_cycle: metadata.billingCycle ?? 'one_time',
-    stripe_checkout_session_id: session.id,
-    stripe_customer_id: typeof session.customer === 'string' ? session.customer : null,
-    stripe_subscription_id: getCheckoutSessionSubscriptionId(session),
-    stripe_price_id: metadata.priceId ?? null,
-    amount_total: session.amount_total,
-    currency: session.currency ?? 'usd',
-    mode: session.mode,
-    status: nextStatus,
-    payment_status: session.payment_status ?? null,
-    metadata: orderMetadata,
-    updated_at: now,
-  };
-
-  if (existing.data?.id) {
-    const isCreditPackage = session.mode === 'payment' && metadata.itemType === 'credit_package';
-    // The fulfillment RPC commits credits, ledger, metadata and fulfilled_at
-    // together. A Checkout replay must never replace that financial snapshot.
-    if (isCreditPackage && existing.data.fulfilled_at) return;
-    const query = supabase
-      .from('payment_orders')
-      .update(payload)
-      .eq('id', existing.data.id);
-    const result = isCreditPackage
-      ? await query.is('fulfilled_at', null)
-      : await query;
-
-    if (result.error) {
-      throwFulfillmentError(
-        'upsert_payment_order_update',
-        STRIPE_FULFILLMENT_ERRORS.checkoutOrderUpdate,
-        result.error,
-        {
-          checkoutSessionId: maskIdentifier(session.id),
-          subscriptionId: maskIdentifier(payload.stripe_subscription_id),
-          orderId: maskIdentifier(existing.data.id),
-        },
-      );
-    }
-
-    return;
-  }
-
-  if (!payload.user_id || !payload.item_type || !payload.item_id) {
-    throwFulfillmentError(
-      'upsert_payment_order_metadata',
-      STRIPE_FULFILLMENT_ERRORS.missingCheckoutMetadata,
-      new Error('missing checkout session metadata'),
-      {
-        checkoutSessionId: maskIdentifier(session.id),
-        hasUserId: Boolean(payload.user_id),
-        hasItemType: Boolean(payload.item_type),
-        hasItemId: Boolean(payload.item_id),
-      },
-    );
-  }
-
-  const result = await supabase.from('payment_orders').insert(payload);
-  if (result.error) {
-    throwFulfillmentError(
-      'upsert_payment_order_insert',
-      STRIPE_FULFILLMENT_ERRORS.checkoutOrderInsert,
-      result.error,
-      {
-        checkoutSessionId: maskIdentifier(session.id),
-        subscriptionId: maskIdentifier(payload.stripe_subscription_id),
-      },
-    );
-  }
-}
-
-const FAILED_INVOICE_ORDER_SELECT = [
-  'id',
-  'user_id',
-  'item_type',
-  'item_id',
-  'billing_cycle',
-  'stripe_checkout_session_id',
-  'stripe_invoice_id',
-  'stripe_subscription_id',
-  'stripe_customer_id',
-  'stripe_price_id',
-  'status',
-  'fulfilled_at',
-  'created_at',
-  'metadata',
-].join(',');
-
-async function findInvoiceFailureOrders(
-  supabase: SupabaseLikeClient,
-  invoice: Stripe.Invoice,
-  subscriptionId: string | null,
-  sourcePriceId?: string,
-) {
-  const invoiceId = invoice.id;
-  const existingInvoiceOrder = await supabase
-    .from('payment_orders')
-    .select(FAILED_INVOICE_ORDER_SELECT)
-    .eq('stripe_invoice_id', invoiceId)
-    .maybeSingle();
-
-  if (existingInvoiceOrder.error) {
-    throwFulfillmentError(
-      'invoice_payment_failed_lookup',
-      STRIPE_FULFILLMENT_ERRORS.invoicePaymentFailedLookup,
-      existingInvoiceOrder.error,
-      {
-        invoiceId: maskIdentifier(invoiceId),
-        subscriptionId: maskIdentifier(subscriptionId),
-      },
-    );
-  }
-
-  if (existingInvoiceOrder.data?.id || !subscriptionId) {
-    return {
-      invoiceOrder: existingInvoiceOrder.data ?? null,
-      subscriptionOrder: null,
-    };
-  }
-
-  if (invoice.billing_reason === 'subscription_update') {
-    const details = invoice.parent?.subscription_details;
-    const attemptId = details?.metadata?.upgradeAttemptId;
-    if (!attemptId) return { invoiceOrder: null, subscriptionOrder: null };
-    const exact = await supabase.from('payment_orders').select(FAILED_INVOICE_ORDER_SELECT)
-      .eq('id', attemptId).eq('stripe_subscription_id', subscriptionId).maybeSingle();
-    if (exact.error) throw new Error('upgrade_failed_invoice_source_read');
-    const order = exact.data;
-    if (!order || order.stripe_price_id !== details.metadata?.priceId
-      || order.user_id !== details.metadata?.userId || order.stripe_customer_id !== getInvoiceCustomerId(invoice)) {
-      return { invoiceOrder: null, subscriptionOrder: null };
-    }
-    return { invoiceOrder: null, subscriptionOrder: order };
-  }
-
-  const sourceCutoff = getFailedInvoiceSourceQueryCutoff(invoice);
-  const subscriptionOrderQuery = supabase
-    .from('payment_orders')
-    .select(FAILED_INVOICE_ORDER_SELECT)
-    .eq('stripe_subscription_id', subscriptionId);
-  const priceSubscriptionOrderQuery = sourcePriceId
-    ? subscriptionOrderQuery.eq('stripe_price_id', sourcePriceId)
-    : subscriptionOrderQuery;
-  const cutoffSubscriptionOrderQuery = sourceCutoff && typeof priceSubscriptionOrderQuery.lte === 'function'
-    ? priceSubscriptionOrderQuery.lte('created_at', sourceCutoff)
-    : priceSubscriptionOrderQuery;
-  const filteredSubscriptionOrderQuery = typeof cutoffSubscriptionOrderQuery.neq === 'function'
-    ? cutoffSubscriptionOrderQuery.neq('status', 'failed')
-    : cutoffSubscriptionOrderQuery;
-  const orderedSubscriptionOrderQuery = filteredSubscriptionOrderQuery
-    .order('created_at', { ascending: false });
-  const canApplyLimitBeforeInvoiceFilter = !sourceCutoff || typeof subscriptionOrderQuery.lte === 'function';
-  const limitedSubscriptionOrderQuery = canApplyLimitBeforeInvoiceFilter
-    && typeof orderedSubscriptionOrderQuery.limit === 'function'
-    ? orderedSubscriptionOrderQuery.limit(1)
-    : orderedSubscriptionOrderQuery;
-  const subscriptionOrder = await limitedSubscriptionOrderQuery.maybeSingle();
-
-  if (subscriptionOrder.error) {
-    throwFulfillmentError(
-      'invoice_payment_failed_subscription_lookup',
-      STRIPE_FULFILLMENT_ERRORS.invoicePaymentFailedLookup,
-      subscriptionOrder.error,
-      {
-        invoiceId: maskIdentifier(invoiceId),
-        subscriptionId: maskIdentifier(subscriptionId),
-      },
-    );
-  }
-
-  if (isSubscriptionPlanChangeOrder(subscriptionOrder.data)) {
-    logger.info('billing', 'stripe_invoice_payment_failed_plan_change_lock_preserved', {
-      invoiceId: maskIdentifier(invoiceId),
-      subscriptionId: maskIdentifier(subscriptionId),
-      orderId: maskIdentifier(subscriptionOrder.data.id),
-      sourceOrderCreatedAt: subscriptionOrder.data.created_at ?? null,
-      invoiceCreatedAt: getFailedInvoiceSourceCutoff(invoice),
-    });
-    return { invoiceOrder: null, subscriptionOrder: null };
-  }
-
-  return {
-    invoiceOrder: null,
-    subscriptionOrder: subscriptionOrder.data ?? null,
-  };
-}
-
-function isPendingCheckoutOrderForFirstInvoice(order: any) {
-  return Boolean(order?.id)
-    && normalizePaymentOrderStatus(order.status) === 'pending'
-    && !order.fulfilled_at
-    && !order.stripe_invoice_id;
-}
-
-function isCreatedNoLaterThan(
-  createdAt: string | null | undefined,
-  referenceAt: string | null,
-  toleranceMs = 0,
-) {
-  if (!createdAt || !referenceAt) {
-    return false;
-  }
-
-  const createdTime = Date.parse(createdAt);
-  const referenceTime = Date.parse(referenceAt);
-
-  return Number.isFinite(createdTime)
-    && Number.isFinite(referenceTime)
-    && createdTime <= referenceTime + toleranceMs;
-}
-
-function getFailedInvoiceSourceCutoff(invoice: Stripe.Invoice) {
-  return asIsoTimestamp(invoice.created) ?? asIsoTimestamp(invoice.period_start);
-}
-
-function getFailedInvoiceSourceQueryCutoff(invoice: Stripe.Invoice) {
-  const sourceCutoff = getFailedInvoiceSourceCutoff(invoice);
-  if (!sourceCutoff) {
-    return null;
-  }
-
-  const parsedCutoff = Date.parse(sourceCutoff);
-  return Number.isFinite(parsedCutoff)
-    ? new Date(parsedCutoff + STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS).toISOString()
-    : sourceCutoff;
-}
-
-function isSourceOrderKnownForFailedInvoice(order: any, invoice: Stripe.Invoice) {
-  const sourceCutoff = getFailedInvoiceSourceCutoff(invoice);
-  if (!sourceCutoff) {
-    return true;
-  }
-
-  return isCreatedNoLaterThan(
-    order.created_at,
-    sourceCutoff,
-    STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS,
-  );
-}
-
-function buildFailedInvoiceOrderMetadata(input: {
-  existingMetadata?: unknown;
-  invoice: Stripe.Invoice;
-  invoiceId: string;
-  subscriptionId: string | null;
-  now: string;
-}) {
-  return {
-    ...asRecord(input.existingMetadata),
-    source: 'invoice.payment_failed',
-    invoiceId: input.invoiceId,
-    subscriptionId: input.subscriptionId,
-    invoiceStatus: input.invoice.status ?? null,
-    paymentIntentId: getInvoicePaymentIntentId(input.invoice),
-    lastPaymentOrderStatus: 'failed',
-    lastPaymentOrderStatusSource: 'invoice.payment_failed',
-    lastPaymentOrderStatusAt: input.now,
-  };
-}
-
-function buildFailedInvoiceOrderPayload(input: {
-  sourceOrder: any;
-  invoice: Stripe.Invoice;
-  invoiceId: string;
-  subscriptionId: string | null;
-  now: string;
-}) {
-  return {
-    user_id: input.sourceOrder.user_id,
-    item_type: 'membership_plan',
-    item_id: input.sourceOrder.item_id,
-    billing_cycle: input.sourceOrder.billing_cycle ?? 'monthly',
-    stripe_invoice_id: input.invoiceId,
-    stripe_subscription_id: input.subscriptionId,
-    stripe_customer_id: getInvoiceCustomerId(input.invoice) ?? input.sourceOrder.stripe_customer_id ?? null,
-    stripe_price_id: input.sourceOrder.stripe_price_id ?? null,
-    amount_total: getFailedInvoiceAmount(input.invoice),
-    currency: input.invoice.currency ?? 'usd',
-    mode: 'subscription',
-    status: 'failed',
-    payment_status: input.invoice.status ?? 'payment_failed',
-    metadata: buildFailedInvoiceOrderMetadata({
-      existingMetadata: input.sourceOrder.metadata,
-      invoice: input.invoice,
-      invoiceId: input.invoiceId,
-      subscriptionId: input.subscriptionId,
-      now: input.now,
-    }),
-    updated_at: input.now,
-  };
-}
-
-function getMissingFailedInvoiceOrderFields(sourceOrder: any) {
-  const missingFields: string[] = [];
-
-  if (!sourceOrder?.user_id) {
-    missingFields.push('user_id');
-  }
-
-  if (!sourceOrder?.item_id) {
-    missingFields.push('item_id');
-  }
-
-  if (sourceOrder?.item_type && sourceOrder.item_type !== 'membership_plan') {
-    missingFields.push('item_type');
-  }
-
-  return missingFields;
-}
-
-async function insertFailedInvoiceOrder(
-  supabase: SupabaseLikeClient,
-  invoice: Stripe.Invoice,
-  subscriptionOrder: any,
-  subscriptionId: string | null,
-) {
-  const invoiceId = invoice.id;
-  const missingFields = getMissingFailedInvoiceOrderFields(subscriptionOrder);
-
-  if (missingFields.length > 0) {
-    logger.warn('billing', 'stripe_invoice_payment_failed_order_inference_incomplete', {
-      invoiceId: maskIdentifier(invoiceId),
-      subscriptionId: maskIdentifier(subscriptionId),
-      sourceOrderId: maskIdentifier(subscriptionOrder?.id),
-      sourceOrderStatus: subscriptionOrder?.status ?? null,
-      missingFields,
-    });
-    return;
-  }
-
-  const now = new Date().toISOString();
-  const payload = buildFailedInvoiceOrderPayload({
-    sourceOrder: subscriptionOrder,
-    invoice,
-    invoiceId,
-    subscriptionId,
-    now,
-  });
-
-  const result = await supabase
-    .from('payment_orders')
-    .insert(payload);
-
-  if (result.error) {
-    throwFulfillmentError(
-      'invoice_payment_failed_insert',
-      STRIPE_FULFILLMENT_ERRORS.invoicePaymentFailedInsert,
-      result.error,
-      {
-        invoiceId: maskIdentifier(invoiceId),
-        subscriptionId: maskIdentifier(subscriptionId),
-        sourceOrderId: maskIdentifier(subscriptionOrder.id),
-      },
-    );
-  }
+  return authoritative;
 }
 
 export async function markMembershipInvoicePaymentFailed(
   supabase: SupabaseLikeClient,
-  invoice: Stripe.Invoice,
+  eventInvoice: Stripe.Invoice,
   options: {
-    listInvoiceLines?: (
-      invoiceId: string,
-      startingAfter: string,
-    ) => Promise<StripeListPage<Stripe.InvoiceLineItem>>;
+    listInvoiceLines?: (invoiceId: string, startingAfter: string) => Promise<StripeListPage<Stripe.InvoiceLineItem>>;
     paginationLimits?: StripePaginationLimits;
   } = {},
 ) {
-  const invoiceId = invoice.id;
+  const stripe = getStripeClient();
+  const scope = await resolveStripeScope(stripe);
+  const invoice = await stripe.invoices.retrieve(eventInvoice.id);
+  if (invoice.id !== eventInvoice.id || invoice.object !== 'invoice' || invoice.livemode !== (scope.mode === 'live')) {
+    throw new Error('PAY_COMMON_INVOICE_RECEIPT_MISMATCH');
+  }
+  if (invoice.status === 'paid') return await fulfillMembershipInvoice(supabase, invoice, options);
   const subscriptionId = getInvoiceSubscriptionId(invoice);
-  let sourcePriceId: string | undefined;
-  if (subscriptionId && invoice.billing_reason !== 'subscription_update') {
-    try {
-      sourcePriceId = (await getInvoiceSubscriptionServicePeriod(invoice, subscriptionId, options)).priceId;
-    } catch (error) {
-      throwFulfillmentError(
-        'invoice_payment_failed_service_period',
-        STRIPE_FULFILLMENT_ERRORS.invoicePaymentFailedLookup,
-        error,
-        { invoiceId: maskIdentifier(invoiceId), subscriptionId: maskIdentifier(subscriptionId) },
-      );
-    }
+  if (!subscriptionId) throw new Error('PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING');
+  const period = await getInvoiceSubscriptionServicePeriod(invoice, subscriptionId, options);
+  const price = await findStripeReference(supabase, 'price', period.priceId, scope);
+  if (!price) throw new Error('PAY_COMMON_PRICE_MAPPING_MISSING');
+  const invoiceRef = await findStripeReference(supabase, 'invoice', invoice.id, scope);
+  const metadata = invoice.parent?.subscription_details?.metadata;
+  const sourceId = invoiceRef?.order_id ?? (invoice.billing_reason === 'subscription_update'
+    ? metadata?.upgradeAttemptId : invoice.billing_reason === 'subscription_create' ? metadata?.orderId : null);
+  let query = supabase.from('payment_orders').select('id').eq('payment_channel', 'stripe')
+    .eq('merchant_namespace', scope.merchant).eq('payment_mode', scope.mode).eq('price_ref_id', price.id);
+  if (sourceId) query = query.eq('id', sourceId);
+  else {
+    const ref = await findStripeReference(supabase, 'subscription', subscriptionId, scope);
+    if (!ref?.subscription_id) throw new Error('PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING');
+    query = query.eq('subscription_id', ref.subscription_id).not('fulfilled_at', 'is', null);
   }
-  const { invoiceOrder, subscriptionOrder } = await findInvoiceFailureOrders(
-    supabase,
-    invoice,
-    subscriptionId,
-    sourcePriceId,
-  );
-  const existingOrder = invoiceOrder ?? subscriptionOrder;
-
-  if (!existingOrder?.id) {
-    logger.warn('billing', 'stripe_invoice_payment_failed_order_missing', {
-      invoiceId: maskIdentifier(invoiceId),
-      subscriptionId: maskIdentifier(subscriptionId),
-    });
-    return;
-  }
-
-  if (!invoiceOrder && !isSourceOrderKnownForFailedInvoice(existingOrder, invoice)) {
-    const isPlanChangeLock = isSubscriptionPlanChangeOrder(existingOrder);
-    logger.info('billing', isPlanChangeLock
-      ? 'stripe_invoice_payment_failed_plan_change_lock_preserved'
-      : 'stripe_invoice_payment_failed_stale_source_preserved', {
-      invoiceId: maskIdentifier(invoiceId),
-      subscriptionId: maskIdentifier(subscriptionId),
-      orderId: maskIdentifier(existingOrder.id),
-      sourceOrderCreatedAt: existingOrder.created_at ?? null,
-      invoiceCreatedAt: getFailedInvoiceSourceCutoff(invoice),
-    });
-    return;
-  }
-
-  if (!invoiceOrder && !isPendingCheckoutOrderForFirstInvoice(subscriptionOrder)) {
-    await insertFailedInvoiceOrder(supabase, invoice, subscriptionOrder, subscriptionId);
-    return;
-  }
-
-  const nextStatus = mergePaymentOrderStatus({
-    existingStatus: existingOrder.status,
-    fulfilledAt: existingOrder.fulfilled_at,
-    nextStatus: 'failed',
+  const source = await query.order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (source.error || !source.data) throw new Error('PAY_COMMON_INVOICE_SOURCE_MISMATCH');
+  const result = await supabase.rpc('pay_common_record_failed_invoice', {
+    p_source_order_id: source.data.id, p_merchant_namespace: scope.merchant, p_payment_mode: scope.mode,
+    p_evidence: { id: invoice.id, object: invoice.object, livemode: invoice.livemode,
+      user_id: metadata?.userId, subscription_id: subscriptionId, price_id: period.priceId,
+      amount_due: invoice.amount_due, currency: invoice.currency, status: invoice.status },
   });
-
-  if (nextStatus !== 'failed') {
-    logger.info('billing', 'stripe_invoice_payment_failed_order_preserved', {
-      invoiceId: maskIdentifier(invoiceId),
-      subscriptionId: maskIdentifier(subscriptionId),
-      orderId: maskIdentifier(existingOrder.id),
-      existingStatus: normalizePaymentOrderStatus(existingOrder.status),
-    });
-    return;
-  }
-
-  const now = new Date().toISOString();
-  const metadata = buildFailedInvoiceOrderMetadata({
-    existingMetadata: existingOrder.metadata,
-    invoice,
-    invoiceId,
-    subscriptionId,
-    now,
-  });
-  const shouldReleasePlanChangeLock = isSubscriptionPlanChangeOrder(existingOrder);
-
-  const result = await supabase
-    .from('payment_orders')
-    .update({
-      stripe_invoice_id: invoiceId,
-      ...(shouldReleasePlanChangeLock ? { stripe_checkout_session_id: null } : {}),
-      stripe_subscription_id: subscriptionId,
-      amount_total: getFailedInvoiceAmount(invoice),
-      currency: invoice.currency ?? 'usd',
-      status: 'failed',
-      payment_status: invoice.status ?? 'payment_failed',
-      metadata,
-      updated_at: now,
-    })
-    .eq('id', existingOrder.id);
-
-  if (result.error) {
-    throwFulfillmentError(
-      'invoice_payment_failed_update',
-      STRIPE_FULFILLMENT_ERRORS.invoicePaymentFailedUpdate,
-      result.error,
-      {
-        invoiceId: maskIdentifier(invoiceId),
-        subscriptionId: maskIdentifier(subscriptionId),
-        orderId: maskIdentifier(existingOrder.id),
-      },
-    );
-  }
+  if (result.error) throw new Error('PAY_COMMON_INVOICE_FAILURE_WRITE_FAILED', { cause: result.error });
 }
 
 export async function fulfillCreditPackageOrder(
@@ -2196,25 +1589,8 @@ export async function fulfillCreditPackageOrder(
     return;
   }
 
-  const { data: existingOrder, error: existingOrderError } = await supabase
-    .from('payment_orders')
-    .select('id, fulfilled_at')
-    .eq('stripe_checkout_session_id', session.id)
-    .maybeSingle();
-
-  if (existingOrderError) {
-    throwFulfillmentError(
-      'credit_order_lookup',
-      STRIPE_FULFILLMENT_ERRORS.creditOrderLookup,
-      existingOrderError,
-      { checkoutSessionId: maskIdentifier(session.id) },
-    );
-  }
-
-  if (existingOrder?.fulfilled_at) {
-    return;
-  }
-
+  // The original RPC owns lookup, profile/order locks and fulfillment deduplication. A
+  // read-before-write shortcut here could hide incomplete transactional recovery.
   const { data, error } = await supabase.rpc('atomic_fulfill_credit_package', {
     p_checkout_session_id: session.id,
     p_payment_status: session.payment_status ?? 'paid',
@@ -2656,6 +2032,9 @@ export async function fulfillMembershipInvoice(
     paginationLimits?: StripePaginationLimits;
   } = {},
 ) {
+  const stripe = getStripeClient();
+  const scope = await resolveStripeScope(stripe);
+  invoice = await retrievePaidStripeInvoice(supabase, stripe, scope, invoice.id);
   const subscriptionId = getInvoiceSubscriptionId(invoice);
   const invoiceId = invoice.id;
 
@@ -2668,6 +2047,9 @@ export async function fulfillMembershipInvoice(
     );
   }
 
+  const providerSubscription = await retrieveInvoiceSubscription(stripe, scope, subscriptionId);
+  const providerSubscriptionUserId = providerSubscription.metadata.userId;
+
   // Upgrade invoices must bind to the exact durable source, never whichever
   // attempt happens to be newest when a delayed invoice is delivered.
   let upgradeSource: { id: string; stripe_price_id: string; amountDue: number; currency: string; billingCycle: 'monthly' | 'yearly' } | undefined;
@@ -2677,18 +2059,23 @@ export async function fulfillMembershipInvoice(
     if (!attemptId || invoice.status !== 'paid') {
       throw new Error('upgrade_invoice_paid_source_missing');
     }
-    const lookup = await supabase.from('payment_orders')
-      .select('id, user_id, item_id, billing_cycle, stripe_price_id, stripe_customer_id, status, created_at, metadata')
-      .eq('id', attemptId).eq('stripe_subscription_id', subscriptionId).maybeSingle();
-    const source = lookup.data;
-    if (lookup.error || !source || source.status === 'failed' || (!isSubscriptionPlanChangeOrder(source) && !asRecord(source.metadata).upgradeAttempt)
+    const subscriptionRef = await findStripeReference(supabase, 'subscription', subscriptionId, scope);
+    if (!subscriptionRef?.subscription_id) throw new Error('PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING');
+    const lookup = await supabase.from('payment_orders').select('*')
+      .eq('id', attemptId).eq('subscription_id', subscriptionRef.subscription_id).maybeSingle();
+    const source = lookup.data ? await resolveStripeOrderIds(supabase, lookup.data) : null;
+    if (lookup.error || !source || source.purchase_closed_at != null
+      || ['refunded', 'partially_refunded'].includes(String(source.status))
+      || ['refunded', 'partially_refunded'].includes(String(source.payment_status))
+      || (source.stripe_invoice_id && source.stripe_invoice_id !== invoice.id)
+      || (!isSubscriptionPlanChangeOrder(source) && !asRecord(source.metadata).upgradeAttempt)
       || source.stripe_price_id !== details.metadata?.priceId
       || (source.billing_cycle !== 'monthly' && source.billing_cycle !== 'yearly')
       || source.user_id !== details.metadata?.userId || source.item_id !== details.metadata?.itemId
       || source.stripe_customer_id !== getExpandableId(invoice.customer)) {
       throw new Error('upgrade_invoice_source_mismatch');
     }
-    const attempt = asRecord(asRecord(source.metadata).upgradeAttempt);
+    const attempt = asRecord(source.purchase_change_request);
     const quote = asRecord(attempt.quote);
     if (!Number.isSafeInteger(quote.amountDue) || (quote.amountDue as number) <= 0 || quote.currency !== 'usd'
       || quote.amountDue !== invoice.amount_due || quote.amountDue !== invoice.amount_paid
@@ -2702,7 +2089,7 @@ export async function fulfillMembershipInvoice(
       const targetPrice = await (options.retrievePrice
         ?? ((priceId: string) => getStripeClient().prices.retrieve(priceId)))(validatedUpgradeSource.stripe_price_id);
       if (!isExpectedRecurringUpgradePrice(targetPrice, {
-        priceId: validatedUpgradeSource.stripe_price_id,
+        mode: scope.mode, priceId: validatedUpgradeSource.stripe_price_id,
         amount: validatedUpgradeSource.amountDue,
         currency: validatedUpgradeSource.currency,
         billingCycle: validatedUpgradeSource.billingCycle,
@@ -2731,6 +2118,12 @@ export async function fulfillMembershipInvoice(
       requiredPriceId: upgradeSource?.stripe_price_id, requiredAmount: upgradeSource?.amountDue,
       requiredCurrency: upgradeSource?.currency, requiredBillingCycle: upgradeSource?.billingCycle });
   } catch (error) {
+    if (error instanceof Error && ['PAY_COMMON_INVOICE_LINE_MISMATCH', 'invoice_subscription_service_period_missing',
+      'invoice_subscription_service_period_not_unique', 'upgrade_invoice_full_target_line_mismatch',
+      'upgrade_invoice_full_target_line_not_unique', 'upgrade_invoice_adjustment_mismatch'].includes(error.message)) {
+      await recordStripeInvoiceConflict({ db: supabase, scope, invoiceId,
+        sourceOrderId: upgradeSource?.id ?? invoice.parent?.subscription_details?.metadata?.orderId });
+    }
     throwFulfillmentError(
       'invoice_subscription_service_period',
       STRIPE_FULFILLMENT_ERRORS.fulfillMembershipInvoice,
@@ -2740,7 +2133,9 @@ export async function fulfillMembershipInvoice(
   }
 
   const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
-    expectedSourceOrderId: upgradeSource?.id,
+    scope, providerSubscriptionStatus: providerSubscription.status, providerSubscriptionUserId,
+    expectedSourceOrderId: upgradeSource?.id ?? (invoice.billing_reason === 'subscription_create'
+      ? invoice.parent?.subscription_details?.metadata?.orderId : undefined),
     expectedSourcePriceId: servicePeriod.priceId,
     excludeSubscriptionPlanChangeSources: !upgradeSource,
     amountTotal: invoice.amount_paid,
@@ -2770,7 +2165,6 @@ export async function fulfillMembershipInvoice(
     );
   }
 
-  await backfillCheckoutOrderFulfillment(supabase, subscriptionId, result.fulfilledAt);
 }
 
 export async function fulfillPaidMembershipCheckoutSession(
@@ -2858,20 +2252,6 @@ export async function fulfillPaidMembershipCheckoutSession(
     );
   }
 
-  try {
-    await syncSubscriptionState(supabase, subscription);
-  } catch (error) {
-    await recordCheckoutFulfillmentException({
-      supabase,
-      session,
-      subscriptionId,
-      stage: 'sync_subscription_state',
-      reason: 'subscription_state_sync_failed',
-      error,
-    });
-    throw error;
-  }
-
   let invoiceResolution: PaidCheckoutInvoiceResolution;
   try {
     invoiceResolution = await resolvePaidCheckoutInvoice({
@@ -2951,6 +2331,20 @@ export async function fulfillPaidMembershipCheckoutSession(
     throw error;
   }
 
+  try {
+    await syncSubscriptionState(supabase, subscription);
+  } catch (error) {
+    await recordCheckoutFulfillmentException({
+      supabase,
+      session,
+      subscriptionId,
+      stage: 'sync_subscription_state',
+      reason: 'subscription_state_sync_failed',
+      error,
+    });
+    throw error;
+  }
+
   return {
     fulfilled: true,
     reason: null,
@@ -2977,152 +2371,22 @@ function isScheduledAtCurrentPeriodEnd(subscription: Stripe.Subscription): boole
 
 export async function syncSubscriptionState(
   supabase: SupabaseLikeClient,
-  subscription: Stripe.Subscription,
+  eventSubscription: Stripe.Subscription,
 ) {
-  const subscriptionId = subscription.id;
-  const primaryItem = subscription.items.data[0];
-  const currentPeriodStart = asIsoTimestamp(primaryItem?.current_period_start ?? null);
-  const currentPeriodEnd = asIsoTimestamp(primaryItem?.current_period_end ?? null);
-  const cancelAtPeriodEnd = isScheduledAtCurrentPeriodEnd(subscription) ? 'true' : 'false';
-
-  const existingSubscriptionQuery = supabase
-    .from('user_subscriptions')
-    .select('id, user_id, membership_plan_id, stripe_price_id, status, current_period_start, current_period_end, credit_release_terminated_at, created_at')
-    .eq('stripe_subscription_id', subscriptionId);
-  const orderedExistingSubscriptionQuery = typeof existingSubscriptionQuery.order === 'function'
-    ? existingSubscriptionQuery.order('created_at', { ascending: true })
-    : existingSubscriptionQuery;
-  const limitedExistingSubscriptionQuery = typeof orderedExistingSubscriptionQuery.limit === 'function'
-    ? orderedExistingSubscriptionQuery.limit(10)
-    : orderedExistingSubscriptionQuery;
-  const { data: existingSubscriptionData, error: existingSubscriptionError } =
-    typeof limitedExistingSubscriptionQuery.then === 'function'
-      ? await limitedExistingSubscriptionQuery
-      : await limitedExistingSubscriptionQuery.maybeSingle();
-
-  if (existingSubscriptionError) {
-    throwFulfillmentError(
-      'subscription_state_lookup',
-      STRIPE_FULFILLMENT_ERRORS.subscriptionLookup,
-      existingSubscriptionError,
-      { subscriptionId: maskIdentifier(subscriptionId) },
-    );
+  const stripe = getStripeClient();
+  const scope = await resolveStripeScope(stripe);
+  const subscription = await stripe.subscriptions.retrieve(eventSubscription.id);
+  const item = subscription.items.data[0];
+  if (subscription.id !== eventSubscription.id || subscription.object !== 'subscription'
+    || subscription.livemode !== (scope.mode === 'live') || subscription.items.data.length !== 1) {
+    throw new Error('PAY_COMMON_SUBSCRIPTION_RECEIPT_MISMATCH');
   }
-
-  const existingSubscriptions = Array.isArray(existingSubscriptionData)
-    ? existingSubscriptionData
-    : existingSubscriptionData
-      ? [existingSubscriptionData]
-      : [];
-  const existingSubscription = existingSubscriptions[0] ?? null;
-  if (existingSubscriptions.length > 1) {
-    logger.warn('billing', 'subscription_state_duplicate_mirror_detected', {
-      subscriptionId: maskIdentifier(subscriptionId),
-      subscriptionCount: existingSubscriptions.length,
-      canonicalSubscriptionId: maskIdentifier(existingSubscription?.id),
-    });
-  }
-
-  const pendingPaidUpgrade = Boolean(subscription.metadata?.upgradeAttemptId
-    && (subscription.metadata?.itemId !== existingSubscription?.membership_plan_id
-      || subscription.metadata?.priceId !== existingSubscription?.stripe_price_id));
-
-  const incomingStartMs = currentPeriodStart ? Date.parse(currentPeriodStart) : Number.NaN;
-  const incomingEndMs = currentPeriodEnd ? Date.parse(currentPeriodEnd) : Number.NaN;
-  const existingStartMs = existingSubscription?.current_period_start
-    ? Date.parse(existingSubscription.current_period_start)
-    : Number.NaN;
-  const existingEndMs = existingSubscription?.current_period_end
-    ? Date.parse(existingSubscription.current_period_end)
-    : Number.NaN;
-  const staleTermSnapshot = Number.isFinite(incomingStartMs)
-    && Number.isFinite(incomingEndMs)
-    && Number.isFinite(existingStartMs)
-    && Number.isFinite(existingEndMs)
-    && (incomingStartMs < existingStartMs || incomingEndMs < existingEndMs);
-
-  // Stripe events are not guaranteed to arrive in subscription-term order.
-  // A stale snapshot must not regress a renewed mirror, and skipping the
-  // update also preserves REFUND-1B termination fields (which this writer
-  // never owns or clears).
-  if (staleTermSnapshot) {
-    logger.warn('billing', 'subscription_state_stale_term_ignored', {
-      subscriptionId: maskIdentifier(subscriptionId),
-      hasTermination: Boolean(existingSubscription?.credit_release_terminated_at),
-    });
-    return;
-  }
-
-  // Bind write eligibility to the exact mirror term that was read above. A
-  // concurrent invoice admission can advance the term while this webhook is
-  // waiting to update; PostgreSQL re-evaluates these predicates after it
-  // obtains the row lock, so the stale writer then safely matches zero rows.
-  const expectedCurrentPeriodStart = existingSubscription?.current_period_start ?? null;
-  const expectedCurrentPeriodEnd = existingSubscription?.current_period_end ?? null;
-  const updateQuery = supabase
-    .from('user_subscriptions')
-    .update({
-      status: subscription.status,
-      cancel_at_period_end: cancelAtPeriodEnd,
-      // A subscription.updated event can beat the paid invoice. Keep the paid
-      // term (and annual release authority) until invoice admission promotes it.
-      current_period_start: pendingPaidUpgrade ? existingSubscription?.current_period_start : currentPeriodStart,
-      current_period_end: pendingPaidUpgrade ? existingSubscription?.current_period_end : currentPeriodEnd,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('stripe_subscription_id', subscriptionId);
-  const startGuardedUpdateQuery = expectedCurrentPeriodStart === null
-    ? updateQuery.is('current_period_start', null)
-    : updateQuery.eq('current_period_start', expectedCurrentPeriodStart);
-  const termGuardedUpdateQuery = expectedCurrentPeriodEnd === null
-    ? startGuardedUpdateQuery.is('current_period_end', null)
-    : startGuardedUpdateQuery.eq('current_period_end', expectedCurrentPeriodEnd);
-  const updateResult = await termGuardedUpdateQuery.select('id');
-
-  if (updateResult.error) {
-    throwFulfillmentError(
-      'subscription_state_update',
-      STRIPE_FULFILLMENT_ERRORS.subscriptionUpdate,
-      updateResult.error,
-      { subscriptionId: maskIdentifier(subscriptionId) },
-    );
-  }
-
-  if (!Array.isArray(updateResult.data) || updateResult.data.length === 0) {
-    logger.warn('billing', 'subscription_state_term_cas_lost', {
-      subscriptionId: maskIdentifier(subscriptionId),
-      expectedCurrentPeriodStart,
-      expectedCurrentPeriodEnd,
-    });
-    if (existingSubscription) {
-      throwFulfillmentError(
-        'subscription_state_term_cas_lost',
-        STRIPE_FULFILLMENT_ERRORS.subscriptionUpdate,
-        new Error('subscription mirror term changed during compare-and-swap'),
-        {
-          subscriptionId: maskIdentifier(subscriptionId),
-          expectedCurrentPeriodStart,
-          expectedCurrentPeriodEnd,
-          retryable: true,
-        },
-      );
-    }
-    return;
-  }
-
-  if (subscription.status === 'canceled' && existingSubscription?.user_id) {
-    const profileResult = await supabase
-      .from('profiles')
-      .update({ membership_level: 'free' })
-      .eq('id', existingSubscription.user_id);
-
-    if (profileResult.error) {
-      throwFulfillmentError(
-        'subscription_canceled_profile_update',
-        STRIPE_FULFILLMENT_ERRORS.canceledProfileDowngrade,
-        profileResult.error,
-        { subscriptionId: maskIdentifier(subscriptionId) },
-      );
-    }
-  }
+  const result = await supabase.rpc('pay_common_sync_subscription', {
+    p_merchant_namespace: scope.merchant, p_payment_mode: scope.mode,
+    p_evidence: { id: subscription.id, object: subscription.object, livemode: subscription.livemode,
+      user_id: subscription.metadata?.userId, customer: getExpandableId(subscription.customer),
+      status: subscription.status, cancel_at_period_end: isScheduledAtCurrentPeriodEnd(subscription),
+      period_start: asIsoTimestamp(item?.current_period_start ?? null) },
+  });
+  if (result.error) throw new Error('PAY_COMMON_SUBSCRIPTION_SYNC_FAILED', { cause: result.error });
 }

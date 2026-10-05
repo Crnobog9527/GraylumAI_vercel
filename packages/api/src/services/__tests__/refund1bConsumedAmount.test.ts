@@ -7,6 +7,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
+import { seedPaymentCommonFixture } from './paymentCommonFixture';
 import {
   computePreDeductPeriodBinding,
   computeSettleAllocation,
@@ -19,6 +20,7 @@ import {
 } from '../subscriptionCreditGrants';
 
 type TableName =
+  | 'payment_provider_refs'
   | 'payment_orders'
   | 'membership_plans'
   | 'subscription_credit_grants'
@@ -542,6 +544,7 @@ function createRefund1bSupabase(
 ) {
   const writes: Array<{ table: TableName; mode: 'insert' | 'update' }> = [];
   const tables: Record<TableName, Row[]> = {
+    payment_provider_refs: seed.payment_provider_refs ?? [],
     payment_orders: seed.payment_orders ?? [],
     membership_plans: seed.membership_plans ?? [],
     subscription_credit_grants: seed.subscription_credit_grants ?? [],
@@ -550,6 +553,8 @@ function createRefund1bSupabase(
     profiles: seed.profiles ?? [],
     billing_history: seed.billing_history ?? [],
   };
+
+  seedPaymentCommonFixture(tables);
 
   const supabase = {
     tables,
@@ -815,6 +820,7 @@ describe('REFUND-1B refund reconciliation integration', () => {
     return createRefund1bSupabase({
       payment_orders: [{
         id: 'order-f3',
+        item_id: 'plan-f3',
         user_id: 'user-f3',
         item_type: 'membership_plan',
         billing_cycle: 'monthly',
@@ -905,6 +911,7 @@ describe('REFUND-1B refund reconciliation integration', () => {
     const annualPeriodKey = 'annual:2026-01-01T00:00:00.000Z:01';
     const annualIdempotencyKey = 'annual-grant:sub_f3:01';
     const interleavedSupabase = createRefund1bSupabase({
+      payment_provider_refs: supabase.tables.payment_provider_refs,
       payment_orders: supabase.tables.payment_orders,
       user_subscriptions: supabase.tables.user_subscriptions,
       membership_plans: supabase.tables.membership_plans,
@@ -1500,6 +1507,7 @@ describe('REFUND-1B refund operator preview', () => {
     const supabase = createRefund1bSupabase({
       payment_orders: [{
         id: 'order-preview',
+        item_id: 'plan-preview',
         user_id: 'user-preview',
         item_type: 'membership_plan',
         billing_cycle: 'yearly',
@@ -2296,10 +2304,18 @@ describe('REFUND-1B migration 0056 service-role select contract', () => {
       .map((column) => column.trim())
       .filter(Boolean)
       .sort();
+    const commonMigration = readFileSync(
+      join(__dirname, '../../../../db/migrations/0161_pay_common_contract.sql'), 'utf8',
+    );
+    const commonGrant = commonMigration.match(
+      /GRANT SELECT \(([^)]+)\),\s*INSERT \([^)]*\),\s*UPDATE \([^)]*\) ON public\.subscription_credit_grants TO service_role;/,
+    );
+    expect(commonGrant).not.toBeNull();
     const grantedColumns = new Set([
       ...extractGrantColumns(fulfillmentGrantMigration),
       ...extractGrantColumns(aclRepairMigration),
       ...extractGrantColumns(forwardRepairMigration),
+      ...(commonGrant?.[1] ?? '').split(',').map((column) => column.trim()),
     ]);
 
     expect(runtimeColumns.filter((column) => !grantedColumns.has(column))).toEqual([]);

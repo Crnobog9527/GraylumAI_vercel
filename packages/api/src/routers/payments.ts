@@ -7,6 +7,7 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
 import type Stripe from 'stripe';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { protectedProcedure, router } from '../trpc';
 import { logger } from '../lib/logger';
@@ -16,8 +17,6 @@ import {
   assertCheckoutRateLimit,
   assertSubscriptionChangeRateLimit,
   buildStripeMetadata,
-  calculateDiscountedAmountCents,
-  getOrCreateStripeCustomerId,
   getStripeAppUrl,
   getStripeClient,
   getStripePortalReturnUrl,
@@ -25,7 +24,6 @@ import {
 import {
   fulfillCreditPackageOrder,
   fulfillPaidMembershipCheckoutSession,
-  syncSubscriptionState,
   upsertPaymentOrderBySession,
 } from '../services/stripeFulfillment';
 import {
@@ -38,11 +36,13 @@ import {
   type MembershipBillingCycle,
 } from '../services/membershipEligibility';
 import {
-  buildSubscriptionPlanChangeLockKey,
   isSubscriptionPlanChangeOrder,
 } from '../services/subscriptionPlanChangeLock';
-import { isStripeManagedSubscriptionActive } from '../services/subscriptionOverrides';
+import { STRIPE_MANAGED_ACTIVE_SUBSCRIPTION_STATUSES } from '../services/subscriptionOverrides';
 import { addUtcCalendarMonthsClamped } from '../services/subscriptionCreditGrants';
+import { findStripeReference, resolveStripeOrderIds, loadCurrentStripeSubscription } from '../services/payments/stripeReferences';
+import { loadCurrentStripePrices } from '../services/payments/stripeCatalog';
+import { createDurableStripeCheckout, resolveStripeScope } from '../services/payments/stripeCheckoutPersistence';
 
 const createCheckoutInput = z.discriminatedUnion('kind', [
   z.object({
@@ -93,6 +93,12 @@ type BillingRecord = {
 };
 
 type PaymentOrderBillingRow = {
+  user_id?: string;
+  payment_channel?: string | null;
+  merchant_namespace?: string | null;
+  payment_mode?: string | null;
+  price_ref_id?: string | null;
+  subscription_id?: string | null;
   id: string;
   item_id: string;
   item_type: 'credit_package' | 'membership_plan' | string;
@@ -357,13 +363,13 @@ async function readSubscriptionChangeData<T>(input: {
   return result.data;
 }
 
-function getCheckoutSessionSubscriptionId(session: any) {
+function getCheckoutSessionSubscriptionId(session: Stripe.Checkout.Session) {
   return typeof session.subscription === 'string'
     ? session.subscription
     : session.subscription?.id ?? null;
 }
 
-function getCheckoutSessionInvoiceId(session: any) {
+function getCheckoutSessionInvoiceId(session: Stripe.Checkout.Session) {
   return typeof session.invoice === 'string'
     ? session.invoice
     : session.invoice?.id ?? null;
@@ -482,8 +488,8 @@ function buildSyncCheckoutRouterFailureAudit(input: {
 }
 
 async function recordSyncCheckoutFailureAudit(input: {
-  supabase: any;
-  session: any;
+  supabase: SupabaseClient;
+  session: Stripe.Checkout.Session;
   syncInput: z.infer<typeof syncCheckoutInput>;
   stage: string;
   error: unknown;
@@ -494,10 +500,13 @@ async function recordSyncCheckoutFailureAudit(input: {
     const invoiceResolutionAudit = buildSyncCheckoutInvoiceResolutionAudit(input.error);
     const reason = errorSummary.stage ?? errorSummary.code ?? errorSummary.message ?? 'sync_checkout_failed';
 
+    const reference = await findStripeReference(input.supabase, 'checkout', input.session.id,
+      await resolveStripeScope(getStripeClient()));
+    if (!reference?.order_id) return;
     const lookup = await input.supabase
       .from('payment_orders')
       .select('id, metadata')
-      .eq('stripe_checkout_session_id', input.session.id)
+      .eq('id', reference.order_id)
       .maybeSingle();
 
     if (lookup.error || !lookup.data?.id) {
@@ -610,45 +619,9 @@ function throwNonUpgradeEligibilityError(result: MembershipEligibilityResult): n
   throwMembershipEligibilityError(result);
 }
 
-function getMembershipPlanPriceId(
-  plan: MembershipPlanPaymentRow,
-  billingCycle: MembershipBillingCycle,
-) {
-  return billingCycle === 'monthly'
-    ? plan.stripe_monthly_price_id
-    : plan.stripe_yearly_price_id;
-}
-
-function normalizeSubscriptionRows(value: unknown): StripeManagedSubscriptionRow[] {
-  if (!value) {
-    return [];
-  }
-
-  if (Array.isArray(value)) {
-    return value.filter(Boolean) as StripeManagedSubscriptionRow[];
-  }
-
-  return [value as StripeManagedSubscriptionRow];
-}
-
-async function loadCurrentStripeManagedSubscription(supabase: any, userId: string) {
-  const result = await supabase
-    .from('user_subscriptions')
-    .select('id, membership_plan_id, stripe_subscription_id, stripe_customer_id, stripe_price_id, status, billing_cycle, cancel_at_period_end')
-    .eq('user_id', userId)
-    .not('stripe_subscription_id', 'is', null)
-    .order('updated_at', { ascending: false })
-    .limit(10);
-
-  if (result.error) {
-    throw createPaymentOperationError('读取当前订阅', result.error);
-  }
-
-  return normalizeSubscriptionRows(result.data)
-    .find((subscription) => isStripeManagedSubscriptionActive({
-      stripeSubscriptionId: subscription.stripe_subscription_id,
-      status: subscription.status,
-    })) ?? null;
+async function loadCurrentStripeManagedSubscription(supabase: SupabaseClient, userId: string) {
+  return await loadCurrentStripeSubscription(supabase, userId, await resolveStripeScope(getStripeClient()),
+    [...STRIPE_MANAGED_ACTIVE_SUBSCRIPTION_STATUSES]) as StripeManagedSubscriptionRow | null;
 }
 
 function isUniqueConstraintViolation(error: unknown) {
@@ -665,7 +638,7 @@ function toPendingSubscriptionPlanChangeError() {
 }
 
 async function recordSubscriptionPlanChangeOrder(input: {
-  supabase: any;
+  supabase: SupabaseClient;
   userId: string;
   plan: MembershipPlanPaymentRow;
   billingCycle: MembershipBillingCycle;
@@ -674,34 +647,14 @@ async function recordSubscriptionPlanChangeOrder(input: {
   stripeSubscription: Stripe.Subscription;
   metadata: Record<string, unknown>;
 }) {
-  const result = await input.supabase
-    .from('payment_orders')
-    .insert({
-      user_id: input.userId,
-      item_type: 'membership_plan',
-      item_id: input.plan.id,
-      billing_cycle: input.billingCycle,
-      stripe_subscription_id: input.stripeSubscription.id,
-      stripe_checkout_session_id: buildSubscriptionPlanChangeLockKey(input.stripeSubscription.id),
-      stripe_customer_id: input.subscription.stripe_customer_id,
-      stripe_price_id: input.stripePriceId,
-      amount_total: null,
-      currency: 'usd',
-      mode: 'subscription',
-      status: 'pending',
-      payment_status: input.stripeSubscription.status,
-      metadata: {
-        ...input.metadata,
-        source: 'changeSubscriptionPlan',
-        previousMembershipPlanId: input.subscription.membership_plan_id,
-        previousBillingCycle: input.subscription.billing_cycle,
-      },
-    })
-    .select('id')
-    .single();
+  const result = await input.supabase.rpc('pay_common_prepare_change', {
+    p_user_id: input.userId, p_subscription_id: input.subscription.id, p_plan_id: input.plan.id,
+    p_cycle: input.billingCycle, p_price_id: input.stripePriceId,
+    p_request: input.metadata.upgradeAttempt, p_metadata: input.metadata,
+  });
 
   if (result.error) {
-    if (isUniqueConstraintViolation(result.error)) {
+    if (isUniqueConstraintViolation(result.error) || result.error.message === 'PAY_COMMON_PURCHASE_PENDING') {
       throw toPendingSubscriptionPlanChangeError();
     }
 
@@ -713,54 +666,39 @@ async function recordSubscriptionPlanChangeOrder(input: {
 }
 
 async function markSubscriptionPlanChangeOrderFailed(input: {
-  supabase: any;
+  supabase: SupabaseClient;
   orderId: string | null;
   stripeSubscriptionId: string;
 }) {
   if (!input.orderId) return;
 
-  const result = await input.supabase
-    .from('payment_orders')
-    .update({
-      status: 'failed',
-      payment_status: 'failed',
-      stripe_checkout_session_id: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', input.orderId)
-    .eq('stripe_subscription_id', input.stripeSubscriptionId)
-    .eq('status', 'pending');
+  const lookup = await input.supabase.from('payment_orders').select('metadata').eq('id', input.orderId).maybeSingle();
+  if (lookup.error || !lookup.data) throw toSubscriptionChangeUnavailableError();
+  const result = await input.supabase.rpc('pay_common_finish_change', {
+    p_order_id: input.orderId, p_previous: lookup.data.metadata, p_next: lookup.data.metadata,
+    p_outcome: 'stripe_upgrade_rejected',
+  });
 
-  if (result.error) {
+  if (result.error || result.data !== true) {
     throw createPaymentOperationError('标记订阅升级记录失败', result.error);
   }
 }
 
 async function loadPendingSubscriptionPlanChangeOrder(
-  supabase: any,
+  supabase: SupabaseClient,
   subscriptionId: string,
 ): Promise<PendingUpgradeOrder[]> {
-  const query = supabase
-    .from('payment_orders')
-    .select('id, item_id, billing_cycle, status, stripe_price_id, stripe_checkout_session_id, metadata')
-    .eq('stripe_subscription_id', subscriptionId)
-    .eq('item_type', 'membership_plan')
-    .eq('status', 'pending')
-    .order('updated_at', { ascending: false })
-    .limit(10);
-  const result = typeof query.then === 'function'
-    ? await query
-    : await query.maybeSingle();
+  const reference = await findStripeReference(supabase, 'subscription', subscriptionId,
+    await resolveStripeScope(getStripeClient()));
+  if (!reference?.subscription_id) throw new Error('PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING');
+  const result = await supabase.from('payment_orders').select('*').eq('subscription_id', reference.subscription_id)
+    .eq('purchase_action', 'subscription_change').is('purchase_closed_at', null).is('fulfilled_at', null).limit(2);
+  if (result.error || !Array.isArray(result.data)) throw createPaymentOperationError('读取待处理订阅升级记录', result.error);
+  return await Promise.all(result.data.map(async (row: PendingUpgradeOrder & { purchase_change_request: UpgradeAttempt }) => ({
+    ...await resolveStripeOrderIds(supabase, row),
+    metadata: { ...row.metadata, upgradeAttempt: row.purchase_change_request },
+  })));
 
-  if (result.error) {
-    throw createPaymentOperationError('读取待处理订阅升级记录', result.error);
-  }
-
-  if (Array.isArray(result.data)) {
-    return result.data;
-  }
-
-  return result.data ? [result.data] : [];
 }
 
 type UpgradeAttempt = {
@@ -825,7 +763,7 @@ function assertUpgradeableRemote(remote: Stripe.Subscription, local: StripeManag
   }
 }
 async function validateSubscriptionUpgrade(ctx: {
-  supabase: any; supabaseAdmin: any; profileId: string; headers: Headers; hasSupabaseAdminPrivileges: boolean;
+  supabase: SupabaseClient; supabaseAdmin: SupabaseClient; profileId: string; headers: Headers; hasSupabaseAdminPrivileges: boolean;
 }, input: ChangeSubscriptionPlanInput) {
   assertPaymentPersistenceConfigured(ctx.hasSupabaseAdminPrivileges);
   const profile = await readSubscriptionChangeData<{ membership_level: string }>({
@@ -837,7 +775,9 @@ async function validateSubscriptionUpgrade(ctx: {
       .select('id, name, level, is_active, stripe_monthly_price_id, stripe_yearly_price_id, monthly_price, yearly_price')
       .eq('id', input.planId).maybeSingle(), changeInput: input, stage: 'plan_read', operation: '会员套餐服务' });
   if (!plan) throw new TRPCError({ code: 'NOT_FOUND', message: '会员套餐不存在' });
-  const priceId = normalizeCheckoutPriceId(getMembershipPlanPriceId(plan, input.billingCycle));
+  const scope = await resolveStripeScope(getStripeClient());
+  const prices = await loadCurrentStripePrices({ db: ctx.supabaseAdmin, scope, kind: 'membership_plan', ids: [plan.id] });
+  const priceId = prices.get(`${plan.id}:${input.billingCycle}`) ?? null;
   const amount = input.billingCycle === 'monthly' ? plan.monthly_price : plan.yearly_price;
   if (plan.is_active !== 'true' || plan.level === 'free' || !priceId
     || typeof amount !== 'number' || !Number.isSafeInteger(amount) || amount <= 0) throw toItemUnavailableError();
@@ -850,17 +790,16 @@ async function validateSubscriptionUpgrade(ctx: {
     throw createSafeServiceUnavailableError(error, '会员状态暂不可用，请稍后重试');
   }
   if (eligibility.action !== 'changeSubscriptionPlan') throwNonUpgradeEligibilityError(eligibility);
-  const local = await loadCurrentStripeManagedSubscription(ctx.supabase, ctx.profileId);
+  const local = await loadCurrentStripeManagedSubscription(ctx.supabaseAdmin, ctx.profileId);
   if (!local?.stripe_subscription_id || !local.stripe_price_id) throw toSubscriptionChangeUnavailableError();
   if (local.cancel_at_period_end === 'true' || local.cancel_at_period_end === true) {
     throw new TRPCError({ code: 'BAD_REQUEST', message: renewalRestoreMessage });
   }
   if (local.membership_plan_id === plan.id && local.billing_cycle === input.billingCycle) throw priceChangedError();
-  const pendingOrders = await loadPendingSubscriptionPlanChangeOrder(ctx.supabase, local.stripe_subscription_id);
+  const pendingOrders = await loadPendingSubscriptionPlanChangeOrder(ctx.supabaseAdmin, local.stripe_subscription_id);
   const pending = pendingOrders[0];
   if (pendingOrders.length > 1 || (pending && (pending.item_id !== plan.id
-    || pending.billing_cycle !== input.billingCycle || pending.stripe_price_id !== priceId
-    || pending.stripe_checkout_session_id !== buildSubscriptionPlanChangeLockKey(local.stripe_subscription_id)))) {
+    || pending.billing_cycle !== input.billingCycle || pending.stripe_price_id !== priceId))) {
     throw toPendingSubscriptionPlanChangeError();
   }
   const attemptSchema = z.object({ quote: upgradeQuoteSchema, originalPrice: z.string().min(1),
@@ -874,6 +813,7 @@ async function validateSubscriptionUpgrade(ctx: {
   let remote: Stripe.Subscription;
   try { remote = await stripe.subscriptions.retrieve(local.stripe_subscription_id); }
   catch { throw toSubscriptionChangeUnavailableError(); }
+  if (remote.livemode !== (scope.mode === 'live')) throw toSubscriptionChangeUnavailableError();
   assertUpgradeableRemote(remote, local, ctx.profileId);
   const item = remote.items.data[0];
   if (item.price.id !== local.stripe_price_id && !(attempt && item.price.id === priceId)) throw priceChangedError();
@@ -881,7 +821,8 @@ async function validateSubscriptionUpgrade(ctx: {
   let targetPrice: Stripe.Price;
   try { targetPrice = await stripe.prices.retrieve(priceId); }
   catch { throw toSubscriptionChangeUnavailableError(); }
-  if (!isExpectedRecurringUpgradePrice(targetPrice, { priceId, amount, billingCycle: input.billingCycle }, true)) {
+  if (targetPrice.livemode !== (scope.mode === 'live')
+    || !isExpectedRecurringUpgradePrice(targetPrice, { priceId, amount, billingCycle: input.billingCycle }, true)) {
     throw priceChangedError();
   }
   return { stripe, remote, local, item, plan, priceId, amount, input, pending, attempt, userId: ctx.profileId };
@@ -897,13 +838,15 @@ function isExpectedRecurringUpgradePrice(price: Stripe.Price, change: {
   amount: number;
   billingCycle: MembershipBillingCycle;
 }, requireActive: boolean) {
-  return price.id === change.priceId
+  return price.object === 'price' && price.id === change.priceId
+    && price.billing_scheme === 'per_unit' && !price.custom_unit_amount && !price.transform_quantity && !price.tiers_mode
+    && (price.tax_behavior ?? 'unspecified') === 'unspecified'
     && (!requireActive || price.active)
     && price.type === 'recurring'
     && price.currency === UPGRADE_CURRENCY
     && price.unit_amount === change.amount
     && price.recurring?.interval === (change.billingCycle === 'yearly' ? 'year' : 'month')
-    && price.recurring.interval_count === 1;
+    && price.recurring.interval_count === 1 && price.recurring.usage_type === 'licensed';
 }
 
 function assertFullPriceUpgradePreview(invoice: Stripe.Invoice, change: ValidatedUpgrade) {
@@ -1000,31 +943,28 @@ async function inspectUpgradeOutcome(change: ValidatedUpgrade, orderId: string, 
 
 // Serialize recovery/retirement against active calls using the existing durable row.
 // A crashed holder stays locked for inspection; a timeout must never imply a lease expiry.
-async function claimUpgradeRecovery(change: ValidatedUpgrade, supabase: any) {
+async function claimUpgradeRecovery(change: ValidatedUpgrade, supabase: SupabaseClient) {
   const pending = change.pending!;
   const previous = pending.metadata!;
   if (previous.upgradeExecution) throw toSubscriptionChangeUnavailableError();
   const claimed = { ...previous, upgradeExecution: randomUUID() };
   const result = await supabase.from('payment_orders').update({ metadata: claimed })
     .eq('id', pending.id).eq('status', 'pending').is('fulfilled_at', null)
-    .eq('stripe_checkout_session_id', buildSubscriptionPlanChangeLockKey(change.remote.id))
+    .eq('purchase_action', 'subscription_change').is('purchase_closed_at', null)
     .eq('metadata', JSON.stringify(previous)).select('id');
   if (result.error || result.data?.length !== 1) throw toSubscriptionChangeUnavailableError();
   return { previous, claimed };
 }
-async function finishUpgradeRecovery(change: ValidatedUpgrade, supabase: any,
+async function finishUpgradeRecovery(change: ValidatedUpgrade, supabase: SupabaseClient,
   claim: { previous: Record<string, unknown>; claimed: Record<string, unknown> }, retire = false) {
-  const result = await supabase.from('payment_orders').update({ metadata: claim.previous,
-    ...(retire ? { status: 'failed', payment_status: 'failed', stripe_checkout_session_id: null,
-      updated_at: new Date().toISOString() } : {}) })
-    .eq('id', change.pending!.id).eq('status', 'pending').is('fulfilled_at', null)
-    .eq('stripe_checkout_session_id', buildSubscriptionPlanChangeLockKey(change.remote.id))
-    .eq('metadata', JSON.stringify(claim.claimed)).select('id');
-  if (result.error) throw toSubscriptionChangeUnavailableError();
-  // A webhook or another state transition may have won; never overwrite it.
-  if (retire && result.data?.length !== 1) throw toSubscriptionChangeUnavailableError();
+  const result = await supabase.rpc('pay_common_finish_change', {
+    p_order_id: change.pending!.id, p_previous: claim.claimed, p_next: claim.previous,
+    p_outcome: retire ? 'stripe_upgrade_not_applied' : 'release',
+  });
+  if (result.error || (retire && result.data !== true)) throw toSubscriptionChangeUnavailableError();
+
 }
-async function recoverUpgradeAttempt(change: ValidatedUpgrade, supabase: any,
+async function recoverUpgradeAttempt(change: ValidatedUpgrade, supabase: SupabaseClient,
   claim: Awaited<ReturnType<typeof claimUpgradeRecovery>>) {
   const outcome = await inspectUpgradeOutcome(change, change.pending!.id, change.attempt!);
   if (outcome === 'applied') return 'applied';
@@ -1039,7 +979,7 @@ async function recoverUpgradeAttempt(change: ValidatedUpgrade, supabase: any,
 }
 
 async function loadPaymentItemNames(
-  supabase: any,
+  supabase: SupabaseClient,
   orders: Array<{ item_id: string; item_type: string }>
 ): Promise<{
   creditPackageNames: Map<string, string>;
@@ -1085,7 +1025,7 @@ async function loadPaymentItemNames(
   };
 }
 
-async function loadStripeBillingDocument(stripe: ReturnType<typeof getStripeClient> | null, order: any) {
+async function loadStripeBillingDocument(stripe: ReturnType<typeof getStripeClient> | null, supabase: SupabaseClient, order: PaymentOrderBillingRow) {
   const emptyDocument = {
     invoiceNumber: null,
     invoicePdfUrl: null,
@@ -1098,12 +1038,18 @@ async function loadStripeBillingDocument(stripe: ReturnType<typeof getStripeClie
   }
 
   try {
-    if (isSubscriptionPlanChangeOrder(order)) {
-      return emptyDocument;
+    if ((isSubscriptionPlanChangeOrder(order) && !order.fulfilled_at) || order.payment_channel == null) return emptyDocument;
+    const scope = await resolveStripeScope(stripe);
+    if (order.payment_channel !== 'stripe' || order.merchant_namespace !== scope.merchant || order.payment_mode !== scope.mode) {
+      throw new Error('PAY_COMMON_ORDER_IDENTITY_UNKNOWN');
     }
-
+    order = await resolveStripeOrderIds(supabase, order);
     if (order.stripe_invoice_id) {
       const invoice = await stripe.invoices.retrieve(order.stripe_invoice_id);
+      if (invoice.id !== order.stripe_invoice_id || invoice.livemode !== (scope.mode === 'live')
+        || invoice.amount_paid !== Number(order.amount_total) || invoice.currency !== order.currency) {
+        throw new Error('PAY_COMMON_INVOICE_RECEIPT_MISMATCH');
+      }
       return {
         invoiceNumber: invoice.number ?? null,
         invoicePdfUrl: invoice.invoice_pdf ?? null,
@@ -1120,6 +1066,11 @@ async function loadStripeBillingDocument(stripe: ReturnType<typeof getStripeClie
       expand: ['payment_intent.latest_charge'],
     });
 
+    if (session.id !== order.stripe_checkout_session_id || session.metadata?.userId !== order.user_id
+      || session.metadata?.orderId !== order.id || session.livemode !== (scope.mode === 'live')
+      || session.amount_total !== Number(order.amount_total) || session.currency !== order.currency) {
+      throw new Error('PAY_COMMON_RECEIPT_MISMATCH');
+    }
     const paymentIntent = typeof session.payment_intent === 'object'
       ? session.payment_intent
       : null;
@@ -1151,22 +1102,18 @@ async function loadStripeBillingDocument(stripe: ReturnType<typeof getStripeClie
   }
 }
 
-function createStripeBillingDocumentLoader(stripe: ReturnType<typeof getStripeClient> | null) {
+function createStripeBillingDocumentLoader(stripe: ReturnType<typeof getStripeClient> | null, supabase: SupabaseClient) {
   const documentCache = new Map<string, Promise<Awaited<ReturnType<typeof loadStripeBillingDocument>>>>();
 
-  return async (order: any) => {
-    const cacheKey = order.stripe_invoice_id
-      ? `invoice:${order.stripe_invoice_id}`
-      : order.stripe_checkout_session_id
-        ? `session:${order.stripe_checkout_session_id}`
-        : `order:${order.id}`;
+  return async (order: PaymentOrderBillingRow) => {
+    const cacheKey = `order:${order.id}`;
 
     const cached = documentCache.get(cacheKey);
     if (cached) {
       return cached;
     }
 
-    const promise = loadStripeBillingDocument(stripe, order);
+    const promise = loadStripeBillingDocument(stripe, supabase, order);
     documentCache.set(cacheKey, promise);
     return promise;
   };
@@ -1196,7 +1143,7 @@ function shouldListBillingOrder(order: PaymentOrderBillingRow) {
 
 export const paymentsRouter = router({
   getSubscriptionManagement: protectedProcedure.query(async ({ ctx }) => {
-    const subscription = await loadCurrentStripeManagedSubscription(ctx.supabase, ctx.profileId);
+    const subscription = await loadCurrentStripeManagedSubscription(ctx.supabaseAdmin, ctx.profileId);
     return { available: Boolean(subscription?.stripe_customer_id && subscription.stripe_subscription_id) };
   }),
   createCustomerPortalSession: protectedProcedure
@@ -1204,7 +1151,7 @@ export const paymentsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const returnUrl = getStripePortalReturnUrl(input?.returnUrl);
       assertPaymentPersistenceConfigured(ctx.hasSupabaseAdminPrivileges);
-      const subscription = await loadCurrentStripeManagedSubscription(ctx.supabase, ctx.profileId);
+      const subscription = await loadCurrentStripeManagedSubscription(ctx.supabaseAdmin, ctx.profileId);
       if (!subscription?.stripe_customer_id || !subscription.stripe_subscription_id) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '当前没有可管理的订阅' });
       }
@@ -1213,7 +1160,7 @@ export const paymentsRouter = router({
         const remote = await stripe.subscriptions.retrieve(subscription.stripe_subscription_id);
         const customerId = typeof remote.customer === 'string' ? remote.customer : remote.customer.id;
         if (customerId !== subscription.stripe_customer_id
-          || (remote.metadata.userId && remote.metadata.userId !== ctx.profileId)) {
+          || remote.metadata.userId !== ctx.profileId) {
           throw new Error('Portal subscription ownership mismatch');
         }
         const configurations = await stripe.billingPortal.configurations.list({ is_default: true, limit: 1 });
@@ -1362,7 +1309,6 @@ export const paymentsRouter = router({
         if (!attempt) {
           attempt = { quote, originalPrice: change.item.price.id, itemId: change.item.id,
             createdAt: Date.now(), stripeMetadata: {
-              ...change.remote.metadata,
               ...buildStripeMetadata({ itemType: 'membership_plan', itemId: change.plan.id,
                 userId: ctx.profileId, priceId: change.priceId, billingCycle: input.billingCycle }),
               changeSource: 'graylum_change_subscription_plan',
@@ -1370,7 +1316,7 @@ export const paymentsRouter = router({
           orderId = await recordSubscriptionPlanChangeOrder({ supabase: ctx.supabaseAdmin,
             userId: ctx.profileId, plan: change.plan, billingCycle: input.billingCycle,
             subscription: change.local, stripePriceId: change.priceId, stripeSubscription: change.remote,
-            metadata: { ...attempt.stripeMetadata, upgradeAttempt: attempt, upgradeExecution: 'initial_request' } });
+            metadata: { ...attempt.stripeMetadata, productName: change.plan.name, upgradeAttempt: attempt, upgradeExecution: 'initial_request' } });
         }
         if (!quoteIsFresh(attempt.quote)) throw quoteExpiredError();
         try {
@@ -1387,7 +1333,8 @@ export const paymentsRouter = router({
           if (rejected?.type === 'StripeCardError' && rejected.statusCode === 402) {
             await markSubscriptionPlanChangeOrderFailed({ supabase: ctx.supabaseAdmin,
               orderId: orderId!, stripeSubscriptionId: change.remote.id });
-            throw new TRPCError({ code: 'BAD_REQUEST', message: '升级付款未完成，原套餐保持不变。请先在订阅管理中处理付款方式。' });
+            throw new TRPCError({ code: 'BAD_REQUEST',
+              message: '升级付款未完成，原套餐保持不变。请先在订阅管理中处理付款方式。' });
           }
           // Transport/5xx/unknown outcomes keep the lock. A later identical request can
           // recover using this SAME order/key after a fresh remote inspection.
@@ -1400,7 +1347,7 @@ export const paymentsRouter = router({
       } finally {
         if (claim) await finishUpgradeRecovery(change, ctx.supabaseAdmin, claim);
         else if (orderId && attempt) {
-          const previous = { ...attempt.stripeMetadata, upgradeAttempt: attempt,
+          const previous = { ...attempt.stripeMetadata, productName: change.plan.name, upgradeAttempt: attempt,
             source: 'changeSubscriptionPlan', previousMembershipPlanId: change.local.membership_plan_id,
             previousBillingCycle: change.local.billing_cycle };
           await finishUpgradeRecovery({ ...change, pending: { id: orderId } as PendingUpgradeOrder },
@@ -1443,399 +1390,64 @@ export const paymentsRouter = router({
         });
       }
 
-      let checkoutContext: {
-        customerId: string;
-        successUrl: string;
-        cancelUrl: string;
-      } | null = null;
-
-      const getCheckoutContext = async () => {
-        if (checkoutContext) {
-          return checkoutContext;
-        }
-
-        await assertCheckoutRateLimit(ctx.profileId, ctx.headers);
-
-        let customerId;
-        try {
-          customerId = await getOrCreateStripeCustomerId({
-            supabase: ctx.supabaseAdmin,
-            userId: ctx.profileId,
-            email: profile.email ?? ctx.user.email ?? null,
-            nickname: profile.nickname ?? null,
-          });
-        } catch (error) {
-          logCheckoutStageFailure('customer_lookup', input, error);
-          throw createPaymentOperationError('创建支付会话', error);
-        }
-
-        let appUrl;
-        try {
-          appUrl = getStripeAppUrl(ctx.headers);
-        } catch (error) {
-          logCheckoutStageFailure('checkout_url', input, error);
-          throw toCheckoutUnavailableError();
-        }
-
-        checkoutContext = {
-          customerId,
-          successUrl: `${appUrl}/profile?tab=subscription&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-          cancelUrl: `${appUrl}/profile?tab=subscription&checkout=canceled&session_id={CHECKOUT_SESSION_ID}`,
-        };
-
-        return checkoutContext;
-      };
-
-      if (input.kind === 'credit_package') {
-        const creditPackage = await readCheckoutData<{
-          id: string;
-          name: string;
-          active: string;
-          stripe_price_id: string | null;
-          price: number | null;
-        }>({
-          query: ctx.supabase
-            .from('credit_packages')
-            .select('id, name, active, stripe_price_id, price')
-            .eq('id', input.packageId)
-            .maybeSingle(),
-          checkoutInput: input,
-          stage: 'package_read',
-          operation: '积分包服务',
-        });
-
-        if (!creditPackage) {
-          throw new TRPCError({
-            code: 'NOT_FOUND',
-            message: '积分包不存在',
-          });
-        }
-
-        if (creditPackage.active !== 'true') {
-          throw toCheckoutConfigError('该积分包当前未上架');
-        }
-
-        const selectedPriceId = normalizeCheckoutPriceId(creditPackage.stripe_price_id);
-
-        if (!selectedPriceId) {
-          throw toItemUnavailableError();
-        }
-
-        if (
-          typeof creditPackage.price !== 'number'
-          || !Number.isInteger(creditPackage.price)
-          || creditPackage.price <= 0
-        ) {
-          throw toItemUnavailableError();
-        }
-
-        let eligibility;
-
-        try {
-          eligibility = await resolveMembershipEligibility({
-            supabase: ctx.supabase,
-            userId: ctx.profileId,
-            profile,
-            action: 'create_credit_package_checkout',
-          });
-        } catch (error) {
-          logCheckoutStageFailure('eligibility_read', input, error);
-          throw createSafeServiceUnavailableError(
-            error,
-            '会员状态暂不可用，请稍后重试',
-          );
-        }
-
-        if (!eligibility.allowed) {
-          throwMembershipEligibilityError(eligibility);
-        }
-
-        const membershipPlan =
-          eligibility.level !== 'free'
-            ? await readCheckoutData<{
-                id: string;
-                level: string;
-                package_discount: number | null;
-              }>({
-                query: ctx.supabase
-                  .from('membership_plans')
-                  .select('id, level, package_discount')
-                  .eq('level', eligibility.level)
-                  .eq('is_active', 'true')
-                  .limit(1)
-                  .maybeSingle(),
-                checkoutInput: input,
-                stage: 'plan_discount_read',
-                operation: '会员折扣服务',
-                extra: {
-                  priceId: maskIdentifier(selectedPriceId),
-                  hasPriceId: true,
-                },
-              })
-            : null;
-
-        if (eligibility.level !== 'free' && !membershipPlan) {
-          throw createSafeServiceUnavailableError(
-            new Error('Active membership discount plan not found'),
-            '会员折扣服务暂不可用，请稍后重试',
-          );
-        }
-
-        const { baseAmountCents, discountedAmountCents, normalizedDiscount } =
-          calculateDiscountedAmountCents({
-            amountCents: creditPackage.price,
-            packageDiscount: membershipPlan?.package_discount,
-          });
-
-        if (discountedAmountCents <= 0) {
-          throw toItemUnavailableError();
-        }
-
-        const metadata = {
-          ...buildStripeMetadata({
-            itemType: 'credit_package',
-            itemId: creditPackage.id,
-            userId: ctx.profileId,
-            priceId: selectedPriceId,
-            billingCycle: 'one_time',
-          }),
-          membershipLevel: eligibility.level,
-          packageDiscount: String(normalizedDiscount),
-          basePriceCents: String(baseAmountCents),
-          discountedPriceCents: String(discountedAmountCents),
-        };
-
-        const lineItems =
-          discountedAmountCents === baseAmountCents
-            ? [
-                {
-                  price: selectedPriceId,
-                  quantity: 1,
-                },
-              ]
-            : [
-                {
-                  price_data: {
-                    currency: 'usd',
-                    unit_amount: discountedAmountCents,
-                    product_data: {
-                      name: creditPackage.name,
-                    },
-                  },
-                  quantity: 1,
-                },
-              ];
-
-        const checkout = await getCheckoutContext();
-        let session;
-        try {
-          session = await stripe.checkout.sessions.create({
-            mode: 'payment',
-            payment_method_types: ['card', 'alipay'],
-            customer: checkout.customerId,
-            client_reference_id: ctx.profileId,
-            line_items: lineItems,
-            success_url: checkout.successUrl,
-            cancel_url: checkout.cancelUrl,
-            metadata,
-            payment_intent_data: { metadata },
-          });
-        } catch (error) {
-          logCheckoutStageFailure('stripe_session_create', input, error, {
-            priceId: maskIdentifier(selectedPriceId),
-            hasPriceId: true,
-          });
-          throw createPaymentOperationError('创建支付会话', error);
-        }
-
-        const { error: orderError } = await ctx.supabaseAdmin.from('payment_orders').insert({
-          user_id: ctx.profileId,
-          item_type: 'credit_package',
-          item_id: creditPackage.id,
-          billing_cycle: 'one_time',
-          stripe_checkout_session_id: session.id,
-          stripe_customer_id: checkout.customerId,
-          stripe_price_id: selectedPriceId,
-          amount_total: discountedAmountCents,
-          currency: 'usd',
-          mode: 'payment',
-          status: 'pending',
-          payment_status: session.payment_status,
-          metadata,
-        });
-
-        if (orderError) {
-          logCheckoutStageFailure('order_insert', input, orderError, {
-            priceId: maskIdentifier(selectedPriceId),
-            hasPriceId: true,
-          });
-          throw createPaymentOperationError('保存支付订单', orderError);
-        }
-
-        if (!session.url) {
-          throw createPaymentOperationError('创建支付会话', new Error('Stripe checkout URL missing'));
-        }
-
-        return {
-          checkoutUrl: session.url,
-          sessionId: session.id,
-        };
-      }
-
-      const plan = await readCheckoutData<{
-        id: string;
-        name: string;
-        level: string;
-        is_active: string;
-        stripe_monthly_price_id: string | null;
-        stripe_yearly_price_id: string | null;
-        monthly_price: number | null;
-        yearly_price: number | null;
-      }>({
-        query: ctx.supabase
-          .from('membership_plans')
-          .select('id, name, level, is_active, stripe_monthly_price_id, stripe_yearly_price_id, monthly_price, yearly_price')
-          .eq('id', input.planId)
-          .maybeSingle(),
-        checkoutInput: input,
-        stage: 'plan_read',
-        operation: '会员套餐服务',
+      const itemId = input.kind === 'credit_package' ? input.packageId : input.planId;
+      const product = await readCheckoutData<{ id: string; name: string; level?: string; is_active?: string; active?: string }>({
+        query: ctx.supabase.from(input.kind === 'credit_package' ? 'credit_packages' : 'membership_plans')
+          .select(input.kind === 'credit_package' ? 'id, name, active' : 'id, name, level, is_active')
+          .eq('id', itemId).maybeSingle(),
+        checkoutInput: input, stage: input.kind === 'credit_package' ? 'package_read' : 'plan_read',
+        operation: input.kind === 'credit_package' ? '积分包服务' : '会员套餐服务',
       });
-
-      if (!plan) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: '会员套餐不存在',
-        });
-      }
-
-      if (plan.is_active !== 'true') {
-        throw toCheckoutConfigError('该会员套餐当前未启用');
-      }
-
-      if (plan.level === 'free') {
-        throw toCheckoutConfigError('免费套餐无需创建支付会话');
-      }
-
-      const selectedPriceId = normalizeCheckoutPriceId(
-        input.billingCycle === 'monthly'
-          ? plan.stripe_monthly_price_id
-          : plan.stripe_yearly_price_id,
-      );
-
-      if (!selectedPriceId) {
-        throw toItemUnavailableError('该会员套餐暂不可购买，请稍后重试');
-      }
-
-      const selectedAmount = input.billingCycle === 'monthly'
-        ? plan.monthly_price
-        : plan.yearly_price;
-
-      if (
-        typeof selectedAmount !== 'number'
-        || !Number.isInteger(selectedAmount)
-        || selectedAmount <= 0
-      ) {
-        throw toItemUnavailableError('该会员套餐暂不可购买，请稍后重试');
-      }
-
+      if (!product) throw new TRPCError({ code: 'NOT_FOUND', message: input.kind === 'credit_package' ? '积分包不存在' : '会员套餐不存在' });
+      if (input.kind === 'credit_package' && product.active !== 'true') throw toCheckoutConfigError('该积分包当前未上架');
+      if (input.kind === 'membership_plan' && product.is_active !== 'true') throw toCheckoutConfigError('该会员套餐当前未启用');
+      if (product.level === 'free') throw toCheckoutConfigError('免费套餐无需创建支付会话');
       let eligibility;
-
       try {
-        eligibility = await resolveMembershipEligibility({
-          supabase: ctx.supabase,
-          userId: ctx.profileId,
-          profile,
-          action: 'create_membership_checkout',
-          targetPlan: plan,
-          targetBillingCycle: input.billingCycle,
+        eligibility = await resolveMembershipEligibility({ supabase: ctx.supabase, userId: ctx.profileId, profile,
+          action: input.kind === 'credit_package' ? 'create_credit_package_checkout' : 'create_membership_checkout',
+          ...(input.kind === 'membership_plan' ? { targetPlan: product, targetBillingCycle: input.billingCycle } : {}),
         });
       } catch (error) {
-        logCheckoutStageFailure('eligibility_read', input, error, {
-          priceId: maskIdentifier(selectedPriceId),
-          hasPriceId: true,
-        });
-        throw createSafeServiceUnavailableError(
-          error,
-          '会员状态暂不可用，请稍后重试',
-        );
+        logCheckoutStageFailure('eligibility_read', input, error);
+        throw createSafeServiceUnavailableError(error, '会员状态暂不可用，请稍后重试');
       }
-
-      if (!eligibility.allowed) {
-        throwMembershipEligibilityError(eligibility);
-      }
-
-      const metadata = buildStripeMetadata({
-        itemType: 'membership_plan',
-        itemId: plan.id,
-        userId: ctx.profileId,
-        priceId: selectedPriceId,
-        billingCycle: input.billingCycle,
-      });
-
-      const checkout = await getCheckoutContext();
-      let session;
+      if (!eligibility.allowed) throwMembershipEligibilityError(eligibility);
+      await assertCheckoutRateLimit(ctx.profileId, ctx.headers);
       try {
-        session = await stripe.checkout.sessions.create({
-          mode: 'subscription',
-          // alipay_subscription_enabled is a future placeholder, never a recurring payment switch.
-          payment_method_types: ['card'],
-          customer: checkout.customerId,
-          client_reference_id: ctx.profileId,
-          line_items: [
-            {
-              price: selectedPriceId,
-              quantity: 1,
-            },
-          ],
-          success_url: checkout.successUrl,
-          cancel_url: checkout.cancelUrl,
-          metadata,
-          subscription_data: {
-            metadata,
-          },
+        const scope = await resolveStripeScope(stripe);
+        const appUrl = getStripeAppUrl(ctx.headers);
+        const session = await createDurableStripeCheckout({ db: ctx.supabaseAdmin, stripe, scope,
+          userId: ctx.profileId, expectedLevel: eligibility.level,
+          action: { itemType: input.kind, itemId, billingCycle: input.kind === 'credit_package' ? 'one_time' : input.billingCycle },
+          appUrl,
         });
+        // A recovered paid session returns through the existing authoritative fulfillment path.
+        if (session.payment_status === 'paid') {
+          if (session.mode === 'payment') await fulfillCreditPackageOrder(ctx.supabaseAdmin, session);
+          else await fulfillPaidMembershipCheckoutSession(ctx.supabaseAdmin, stripe, session);
+          return { checkoutUrl: `${appUrl}/profile?tab=subscription&checkout=success&session_id=${encodeURIComponent(session.id)}`,
+            sessionId: session.id };
+        }
+        if (!session.url) throw new Error('Stripe checkout URL missing');
+        return { checkoutUrl: session.url, sessionId: session.id };
       } catch (error) {
-        logCheckoutStageFailure('stripe_session_create', input, error, {
-          priceId: maskIdentifier(selectedPriceId),
-          hasPriceId: Boolean(selectedPriceId),
-        });
+        logCheckoutStageFailure('stripe_session_create', input, error);
+        const reason = error instanceof Error ? error.message : '';
+        if (['PAY_COMMON_PRICE_MAPPING_MISSING', 'PAY_COMMON_PRICE_MAPPING_AMBIGUOUS', 'PAY_COMMON_PRICE_MISMATCH',
+          'PAY_COMMON_AMOUNT_INVALID', 'PAY_COMMON_PRODUCT_UNAVAILABLE'].includes(reason)) {
+          throw toItemUnavailableError(input.kind === 'membership_plan' ? '该会员套餐暂不可购买，请稍后重试' : undefined);
+        }
+        if (['PAY_COMMON_PURCHASE_PENDING', 'PAY_COMMON_LEGACY_ORDER_UNRESOLVED',
+          'PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED'].includes(reason)) {
+          throw new TRPCError({ code: 'CONFLICT', message: '已有付款正在核对，请先完成原订单。', cause: error });
+        }
+        if (['PAY_COMMON_PURCHASE_ACTOR_DENIED', 'PAY_COMMON_MEMBERSHIP_FACTS_UNKNOWN', 'ENTITLEMENT_CONFLICT',
+          'REFUNDED_ORDER_REQUIRES_POLICY', 'ACTIVE_SUBSCRIPTION_EXISTS', 'UPGRADE_DOWNGRADE_UNSUPPORTED'].includes(reason)) {
+          throw new TRPCError({ code: 'PRECONDITION_FAILED', message: '购买资格已变化，请刷新后重试。', cause: error });
+        }
         throw createPaymentOperationError('创建支付会话', error);
       }
-
-      const { error: orderError } = await ctx.supabaseAdmin.from('payment_orders').insert({
-        user_id: ctx.profileId,
-        item_type: 'membership_plan',
-        item_id: plan.id,
-        billing_cycle: input.billingCycle,
-        stripe_checkout_session_id: session.id,
-        stripe_customer_id: checkout.customerId,
-        stripe_subscription_id: typeof session.subscription === 'string' ? session.subscription : null,
-        stripe_price_id: selectedPriceId,
-        amount_total: selectedAmount,
-        currency: 'usd',
-        mode: 'subscription',
-        status: 'pending',
-        payment_status: session.payment_status,
-        metadata,
-      });
-
-      if (orderError) {
-        logCheckoutStageFailure('order_insert', input, orderError, {
-          priceId: maskIdentifier(selectedPriceId),
-          hasPriceId: Boolean(selectedPriceId),
-        });
-        throw createPaymentOperationError('保存支付订单', orderError);
-      }
-
-      if (!session.url) {
-        throw createPaymentOperationError('创建支付会话', new Error('Stripe checkout URL missing'));
-      }
-
-      return {
-        checkoutUrl: session.url,
-        sessionId: session.id,
-      };
     }),
   syncCheckoutSession: protectedProcedure
     .input(syncCheckoutInput)
@@ -1900,7 +1512,7 @@ export const paymentsRouter = router({
 
       try {
         logSyncCheckoutStage(syncStage, input, syncStageContext);
-        await upsertPaymentOrderBySession(ctx.supabaseAdmin, session, isCanceledCheckoutState(input.checkoutState)
+        session = await upsertPaymentOrderBySession(ctx.supabaseAdmin, session, isCanceledCheckoutState(input.checkoutState)
           ? {
               orderStatus: 'canceled',
               eventType: 'checkout.return.canceled',
@@ -1968,10 +1580,13 @@ export const paymentsRouter = router({
         throw createPaymentOperationError('同步支付会话', error);
       }
 
+      const scope = await resolveStripeScope(stripe);
+      const reference = await findStripeReference(ctx.supabaseAdmin, 'checkout', session.id, scope);
+      if (!reference?.order_id) throw new Error('PAY_COMMON_MAPPING_READ_FAILED');
       const syncedOrderQuery = ctx.supabaseAdmin
         .from('payment_orders')
-        .select('status, payment_status, fulfilled_at, stripe_subscription_id, stripe_invoice_id')
-        .eq('stripe_checkout_session_id', session.id);
+        .select('*')
+        .eq('id', reference.order_id).eq('user_id', ctx.profileId);
       const orderedSyncedOrderQuery = typeof syncedOrderQuery.order === 'function'
         ? syncedOrderQuery.order('created_at', { ascending: true })
         : syncedOrderQuery;
@@ -1995,7 +1610,7 @@ export const paymentsRouter = router({
         : syncedOrderData
           ? [syncedOrderData]
           : [];
-      const syncedOrder = syncedOrders[0] ?? null;
+      const syncedOrder = syncedOrders[0] ? await resolveStripeOrderIds(ctx.supabaseAdmin, syncedOrders[0]) : null;
       if (syncedOrders.length > 1) {
         logger.warn('billing', 'payments_sync_checkout_duplicate_order_detected', {
           checkoutSessionId: maskIdentifier(session.id),
@@ -2026,15 +1641,16 @@ export const paymentsRouter = router({
     }),
   listBillingRecords: protectedProcedure
     .query(async ({ ctx }) => {
-      const { data: orders, error } = await ctx.supabase
+      assertPaymentPersistenceConfigured(ctx.hasSupabaseAdminPrivileges);
+      const { data: orders, error } = await ctx.supabaseAdmin
         .from('payment_orders')
         .select([
           'id',
           'item_id',
           'item_type',
           'billing_cycle',
-          'stripe_checkout_session_id',
-          'stripe_invoice_id',
+          'user_id', 'payment_channel', 'merchant_namespace', 'payment_mode',
+          'price_ref_id', 'subscription_id',
           'amount_total',
           'currency',
           'status',
@@ -2062,7 +1678,7 @@ export const paymentsRouter = router({
       } catch {
         stripe = null;
       }
-      const loadBillingDocument = createStripeBillingDocumentLoader(stripe);
+      const loadBillingDocument = createStripeBillingDocumentLoader(stripe, ctx.supabaseAdmin);
 
       let records;
       try {

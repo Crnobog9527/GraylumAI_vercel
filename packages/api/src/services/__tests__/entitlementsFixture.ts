@@ -24,6 +24,29 @@ export function fixture(level: 'free' | 'pro' | 'gold' = 'pro') {
   const reads: Array<{ table: string; column: string; value: unknown }> = [];
   const writes: Array<{ table: string; value: unknown }> = [];
   const client = {
+    async rpc(name: string, args: Record<string, unknown>) {
+      if (name === 'pay_common_membership_facts') {
+        reads.push({ table: name, column: 'p_user_id', value: args.p_user_id });
+        if (failures.has('user_subscriptions') || failures.has('payment_orders')) {
+          return { data: null, error: { message: 'PRIVATE_DATABASE_ERROR' } };
+        }
+        return { data: {
+          subscriptions: rows.user_subscriptions!.filter(row => row.user_id === args.p_user_id).map(row => ({
+            payment_channel: row.stripe_subscription_id ? 'stripe' : null,
+            mapping_state: row.stripe_subscription_id ? 'mapped' : 'none', ...row,
+          })),
+          latest_order: rows.payment_orders!.find(row => row.user_id === args.p_user_id && row.item_type === 'membership_plan') ?? null,
+        }, error: null };
+      }
+      if (name === 'pay_common_save_catalog') {
+        const table = args.p_kind === 'membership_plan' ? 'membership_plans' : 'credit_packages';
+        const query = args.p_id ? client.from(table).update({ ...args.p_values as Row, updated_at: new Date().toISOString() }).eq('id', args.p_id)
+          : client.from(table).insert(args.p_values as Row);
+        if (args.p_expected_level) query.eq('level', args.p_expected_level);
+        return await query.select().single();
+      }
+      throw new Error('Unexpected RPC');
+    },
     from(table: string) {
       const filters: Array<(row: Row) => boolean> = [];
       let single = false;
