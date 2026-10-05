@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { parsePlan } from '../plan-progress/parse-plan.mjs';
 import { derive, isPlanTitle, namesInBody, namesInTitle } from '../plan-progress/derive.mjs';
 import { renderMarkdown } from '../plan-progress/render.mjs';
-import { renderHtml } from '../plan-progress/render-html.mjs';
+import { renderDetailHtml, renderHtml } from '../plan-progress/render-html.mjs';
 import { buildStations } from '../plan-progress/stations.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -159,18 +159,33 @@ test('路线图：站点状态、现在在哪一站、等你、排在之后', ()
   assert.ok(missing.warnings.some((warning) => warning.includes('CORE-A 没有放进路线图')));
 });
 
-test('页面在生成时渲染完整内容，不执行脚本也能看到；PR 标题被转义', () => {
+test('Owner 页面只有路线图和任务卡片，明细在另一个页面；不执行脚本也能看到，PR 标题被转义', () => {
   const report = derive({ plan: parsePlan(PLAN), prs: PRS, since: '2026-09-27', generatedAt: 'T', sourceRef: 'test' });
-  const html = renderHtml(report, template, buildStations(STATIONS, report));
-  const withoutScripts = html.replace(/<script[\s\S]*?<\/script>/g, '');
-  assert.match(withoutScripts, /现在走到第 2 站：<strong>界面<\/strong>/);
-  assert.match(withoutScripts, /<b>等你<\/b>开通 Waffo 商户。/);
-  assert.match(withoutScripts, /终点站 · 正式上线/);
-  assert.match(withoutScripts, /<details class="later-block"><summary>正式上线以后再做（1 站）<\/summary>/);
-  assert.match(withoutScripts, /<span class="big">17%<\/span>/);
-  assert.equal((withoutScripts.match(/<article class="card /g) ?? []).length, 7);
-  assert.ok(!html.includes('</script><b>'));
-  assert.match(html, /&lt;\/script&gt;&lt;b&gt;x&lt;\/b&gt;/);
+  const roadmap = buildStations(STATIONS, report);
+  const strip = (html) => html.replace(/<script[\s\S]*?<\/script>/g, '');
+  const owner = strip(renderHtml(report, template, roadmap));
+  assert.match(owner, /<title>Graylum 上线路线图<\/title>/);
+  assert.match(owner, /现在走到第 2 站：<strong>界面<\/strong>/);
+  assert.match(owner, /<b>等你<\/b>开通 Waffo 商户。/);
+  assert.match(owner, /终点站 · 正式上线/);
+  assert.match(owner, /<details class="later-block"><summary>正式上线以后再做（1 站）<\/summary>/);
+  assert.ok(!owner.includes('<article class="card'));
+  // 付费站：等你的卡片在最前面，下面一行写等你做什么；做完的收进"已完成"折叠。
+  const pay = owner.slice(owner.indexOf('id="station-pay"'), owner.indexOf('id="station-end"'));
+  assert.ok(pay.indexOf('t-ask') < pay.indexOf('t-doing'));
+  assert.match(pay, /<p class="tsub">等你：开通 Waffo 商户。<\/p>/);
+  assert.match(pay, /相关改动（2）/);
+  const base = owner.slice(owner.indexOf('id="station-base"'), owner.indexOf('id="station-ui"'));
+  assert.match(base, /<details class="tdone"><summary>已完成（2 项）<\/summary>/);
+  assert.match(base, /还差：还差美国实测。/);
+  assert.match(owner, /&lt;\/script&gt;&lt;b&gt;x&lt;\/b&gt;/);
+
+  const detail = renderDetailHtml(report, template);
+  const detailText = strip(detail);
+  assert.match(detail, /<title>Graylum 施工明细<\/title>/);
+  assert.match(detailText, /<span class="big">17%<\/span>/);
+  assert.equal((detailText.match(/<article class="card /g) ?? []).length, 7);
+  assert.ok(!detail.includes('</script><b>'));
   assert.match(renderMarkdown(report), /\| PAY-WAFFO \| 被阻塞 \|/);
 });
 
@@ -197,7 +212,8 @@ test('命令行离线运行，结果只写到仓库外；输出目录在仓库�
   assert.ok(report.tasks.length > 40);
   const page = readFileSync(join(dir, 'out', 'plan-progress.html'), 'utf8');
   assert.match(page, /<title>Graylum 上线路线图<\/title>/);
-  assert.match(page, /<article class="card s-已完成" data-status="已完成">/);
+  assert.match(readFileSync(join(dir, 'out', 'plan-progress-detail.html'), 'utf8'), /<title>Graylum 施工明细<\/title>/);
+  assert.match(page, /class="tcard /);
 
   const insideDir = join(repoRoot, 'scripts', `plan-progress-should-not-exist-${process.pid}`, 'out');
   const inside = spawnSync(process.execPath, [script, '--prs-file', prsFile, '--out-dir', insideDir], { encoding: 'utf8' });

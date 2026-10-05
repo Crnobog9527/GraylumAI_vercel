@@ -4,6 +4,16 @@ export const STATION_STATUS = { done: '已到站', doing: '正在做', todo: '�
 
 const TASK_WORDS = { 已完成: '做完了', 实施中: '在做', 方案中: '在出方案', 被阻塞: '还没开始', 未开始: '还没开始', 已关闭: '不做了' };
 
+function afterText(task, station, stationOf, taskOf) {
+  const others = task.deps
+    .map((dep) => stationOf.get(dep))
+    .filter((target) => target && target !== station && target.status !== 'done')
+    .sort((a, b) => b.index - a.index);
+  if (others.length) return `排在「${others[0].name}」之后`;
+  const sameStation = task.deps.map((dep) => taskOf.get(dep)).find((dep) => dep && stationOf.get(dep.name) === station);
+  return sameStation ? `要等本站的「${sameStation.plain.replace(/[。.]$/, '')}」先做完` : '';
+}
+
 export function buildStations(stationData, report) {
   const byName = new Map(report.tasks.map((task) => [task.name, task]));
   const owner = new Map();
@@ -30,7 +40,7 @@ export function buildStations(stationData, report) {
     const waits = (station.waitingForOwner ?? [])
       .filter((wait) => byName.get(wait.task)?.status !== '已完成')
       .map((wait) => wait.text);
-    const waitingTasks = new Set((station.waitingForOwner ?? []).map((wait) => wait.task));
+    const waitText = new Map((station.waitingForOwner ?? []).map((wait) => [wait.task, wait.text.replace(/^等你[：:]\s*/, '')]));
     const shortOf = tasks
       .filter((item) => item.task.status === '已完成' && item.task.reason && item.doneNote)
       .map((item) => item.doneNote);
@@ -48,8 +58,11 @@ export function buildStations(stationData, report) {
       tasks: tasks.map((item) => ({
         name: item.name,
         plain: item.plain,
-        word: waitingTasks.has(item.name) && item.task.status !== '已完成' && item.task.status !== '实施中'
+        word: waitText.has(item.name) && item.task.status !== '已完成' && item.task.status !== '实施中'
           ? '等你' : TASK_WORDS[item.task.status],
+        waitText: waitText.get(item.name) ?? '',
+        doneNote: item.task.status === '已完成' && item.task.reason && item.doneNote ? item.doneNote : '',
+        fixedNote: item.note ?? '',
         status: item.task.status,
         prs: item.task.prs,
         deps: item.task.unmetDeps,
@@ -71,6 +84,18 @@ export function buildStations(stationData, report) {
       }
     }
     station.after = [...after.entries()].sort((a, b) => a[0] - b[0]).map(([, name]) => name);
+  }
+
+  // 每个小任务卡片下面的一行小字：等你做什么、还差什么、排在谁之后。
+  const taskOf = new Map();
+  stations.forEach((station) => station.tasks.forEach((task) => taskOf.set(task.name, task)));
+  for (const station of stations) {
+    for (const task of station.tasks) {
+      if (task.word === '等你') task.sub = `等你：${task.waitText}`;
+      else if (task.doneNote) task.sub = `还差：${task.doneNote}`;
+      else if (task.word === '还没开始') task.sub = task.fixedNote || afterText(task, station, stationOf, taskOf);
+      else task.sub = '';
+    }
   }
 
   const main = stations.filter((station) => !station.afterLaunch);

@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { parsePlan } from './plan-progress/parse-plan.mjs';
 import { derive } from './plan-progress/derive.mjs';
 import { renderMarkdown } from './plan-progress/render.mjs';
-import { renderHtml } from './plan-progress/render-html.mjs';
+import { renderDetailHtml, renderHtml } from './plan-progress/render-html.mjs';
 import { buildStations } from './plan-progress/stations.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -105,14 +105,18 @@ function main() {
   const roadmap = buildStations(stationData, report);
   report.warnings.push(...roadmap.warnings);
   report.roadmap = roadmap;
-  const html = renderHtml(report, join(here, 'plan-progress', 'page.html'), roadmap);
+  const template = join(here, 'plan-progress', 'page.html');
+  const html = renderHtml(report, template, roadmap);
+  const detailHtml = renderDetailHtml(report, template);
   assertOutsideRepo(args.outDir);
   const jsonPath = join(args.outDir, 'plan-progress.json');
   const htmlPath = join(args.outDir, 'plan-progress.html');
   writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`);
+  const detailPath = join(args.outDir, 'plan-progress-detail.html');
   writeFileSync(htmlPath, html);
+  writeFileSync(detailPath, detailHtml);
   process.stdout.write(renderMarkdown(report));
-  process.stdout.write(`\nJSON：${jsonPath}\n页面：${htmlPath}\n`);
+  process.stdout.write(`\nJSON：${jsonPath}\n路线图（给 Owner）：${htmlPath}\n明细（给主窗口）：${detailPath}\n`);
 }
 
 try {

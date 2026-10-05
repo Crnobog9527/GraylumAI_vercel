@@ -22,15 +22,35 @@ function notes(station) {
   return lines.join('');
 }
 
-function prLinks(station) {
-  const prs = new Map();
-  station.tasks.forEach((task) => task.prs.filter((pr) => pr.state !== 'closed').forEach((pr) => prs.set(pr.number, pr)));
-  if (prs.size === 0) return '';
-  const links = [...prs.values()]
-    .sort((a, b) => a.number - b.number)
-    .map((pr) => `<a href="${escapeHtml(safeUrl(pr.url))}" target="_blank" rel="noopener" title="${escapeHtml(pr.title)}">#${pr.number}</a>`)
-    .join(' ');
-  return `<div class="prs-small">相关改动记录：${links}</div>`;
+const ORDER = { 等你: 0, 在做: 1, 在出方案: 1, 还没开始: 2, 做完了: 3, 不做了: 4 };
+const TAG_CLASS = { 等你: 'ask', 在做: 'doing', 在出方案: 'doing', 还没开始: 'todo', 做完了: 'done', 不做了: 'closed' };
+
+// 每个任务一张小卡片：状态标签、一句话、必要时一行小字；改动记录收在卡片右下角的小折叠里。
+function taskCard(task) {
+  const prs = task.prs.filter((pr) => pr.state !== 'closed').sort((a, b) => a.number - b.number);
+  const prBlock = prs.length
+    ? `<details class="tprs"><summary>相关改动（${prs.length}）</summary><ul>${prs
+      .map((pr) => `<li><a href="${escapeHtml(safeUrl(pr.url))}" target="_blank" rel="noopener">#${pr.number}</a> ${escapeHtml(pr.title)}</li>`)
+      .join('')}</ul></details>`
+    : '';
+  const sub = task.sub ? `<p class="tsub">${escapeHtml(task.sub)}</p>` : '';
+  return `<li class="tcard t-${TAG_CLASS[task.word] ?? 'todo'}">
+        <span class="tag">${escapeHtml(task.word)}</span>
+        <div class="tbody"><p class="ttext">${escapeHtml(task.plain)}</p>${sub}</div>
+        ${prBlock}
+      </li>`;
+}
+
+// 先放等你、在做、还没开始；做完了和不做了的收进"已完成"小折叠。
+function taskList(station) {
+  const sorted = [...station.tasks].sort((a, b) => (ORDER[a.word] ?? 9) - (ORDER[b.word] ?? 9));
+  const open = sorted.filter((task) => (ORDER[task.word] ?? 9) < 3);
+  const finished = sorted.filter((task) => (ORDER[task.word] ?? 9) >= 3);
+  const openList = open.length ? `<ul class="tcards">${open.map(taskCard).join('')}</ul>` : '';
+  const doneList = finished.length
+    ? `<details class="tdone"><summary>已完成（${finished.length} 项）</summary><ul class="tcards">${finished.map(taskCard).join('')}</ul></details>`
+    : '';
+  return openList + doneList;
 }
 
 function classes(base, station, isCurrent) {
@@ -41,11 +61,6 @@ function classes(base, station, isCurrent) {
 function stationItem(station, number, currentId) {
   const isCurrent = station.id === currentId;
   const cls = classes('station', station, isCurrent);
-  const tasks = station.tasks.length
-    ? `<ul class="tasks">${station.tasks
-      .map((task) => `<li><span class="tword w-${escapeHtml(task.word)}">${escapeHtml(task.word)}</span>${escapeHtml(task.plain)}</li>`)
-      .join('')}</ul>`
-    : '';
   // 上线后的站只显示站名，用途放进点开以后，让整页更短。
   const plain = station.afterLaunch ? '' : `<span class="splain">${escapeHtml(station.plain)}</span>`;
   const laterPlain = station.afterLaunch ? `<p class="splain">${escapeHtml(station.plain)}</p>` : '';
@@ -57,7 +72,7 @@ function stationItem(station, number, currentId) {
         <span class="sline"><span class="snum">${number}</span><span class="sname">${label}</span>${badge(station, isCurrent)}${plain}</span>
         ${notes(station)}
       </summary>
-      <div class="inner">${laterPlain}${tasks}${prLinks(station)}</div>
+      <div class="inner">${laterPlain}${taskList(station)}</div>
     </details>
   </li>`;
 }
