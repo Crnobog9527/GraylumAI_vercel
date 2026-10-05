@@ -153,24 +153,31 @@ export function startedExecution(result: unknown): string | null {
   return typeof id === "string" && uuid.test(id) ? id : null;
 }
 
-/**
- * What `runtime.reportLatest` said: not answered yet, failed, or the round's newest report (or
- * none). `answeredAt` is when that answer arrived (the query's dataUpdatedAt).
- */
-export type ServerReport = { kind: "pending" } | { kind: "failed" } | { kind: "known"; executionId: string | null; answeredAt: number };
+/** What the page's `runtime.reportLatest` query said: not answered yet, failed, or the round's newest report (or none). */
+export type ServerReport = { kind: "pending" } | { kind: "failed" } | { kind: "known"; executionId: string | null };
 
-/** An execution this page just started, and when (same clock as `answeredAt`). */
-export type ReportPin = { executionId: string; since: number };
+/**
+ * Generations order a pin against reads: each pin and each explicit `reportLatest` read takes the
+ * next number from one counter, the read before its request is sent. So a read that started
+ * before a start can never pass for a read made after it, however late it answers.
+ */
+export type ReportPin = { executionId: string; generation: number };
+export type FreshRead = { executionId: string | null; generation: number };
+
+/** Keep the newer of two explicit reads; a late answer of an older read never replaces a newer one. */
+export function newerRead(current: FreshRead | null, next: FreshRead): FreshRead {
+  return current && current.generation >= next.generation ? current : next;
+}
 
 /**
  * The report this page shows. The server is the authority, so a cleared storage or another device
- * still finds it. An execution this page just started is shown only while the server is catching
- * up: once a server answer that arrived after the pin names another execution (a replacement made
- * in another tab), that one is shown. The local pointer only stands in while the server cannot be read.
+ * still finds it. An execution this page just started is shown until a read that started after it
+ * names another report (a replacement made in another tab); a read that started earlier, or one
+ * that finds none yet, keeps the pin. The local pointer only stands in while the server cannot be read.
  */
-export function shownExecution(pin: ReportPin | null, server: ServerReport, local: ReportRecord | null): string | null {
-  const caughtUp = server.kind === "known" && server.executionId !== null && server.answeredAt > (pin?.since ?? -Infinity);
-  if (pin && !caughtUp) return pin.executionId;
+export function shownExecution(pin: ReportPin | null, server: ServerReport, local: ReportRecord | null,
+  fresh: FreshRead | null = null): string | null {
+  if (pin) return fresh && fresh.executionId && fresh.generation > pin.generation ? fresh.executionId : pin.executionId;
   if (server.kind === "known") return server.executionId;
   return local?.executionId ?? null;
 }
