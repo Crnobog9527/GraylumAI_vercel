@@ -51,7 +51,7 @@ type Requirement = { modelId: string; phase: z.infer<typeof phase>; outputLimit:
  * Off/missing -> v1. An enabled but invalid configuration refuses admission, never silently bills v1.
  * Do not call from execute/resume: their frozen contract is the only billing authority. */
 export async function readPaygHostPolicies(admin: SupabaseClient, window: StagingPolicy,
-  policies: FrozenRun['callPolicy'], requirements: Requirement[], env = process.env,
+  policies: FrozenRun['callPolicy'], requirements: Requirement[], env: Record<string, string | undefined> = process.env,
 ) {
   if (stagingRuntimeWindow(env) !== window.id) throw new StagingAccessError('RUNTIME_STAGING_TARGET_DENIED');
   const { data, error } = await admin.from('system_settings').select('value').eq('key', PAYG_HOST_SETTING).maybeSingle();

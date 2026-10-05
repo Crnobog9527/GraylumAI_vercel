@@ -27,13 +27,14 @@ it.each([
   const actor = randomUUID(), primary = randomUUID(), organizer = randomUUID();
   const model = 'payg-sdk-' + primary, summaryModel = 'payg-sdk-' + organizer;
   const requests: Array<{ model: string }> = [];
+  const primaryBody=stop?JSON.stringify({message:'Preserved primary result'}):'Preserved primary result';
   const server = createServer(async (req, res) => {
     let raw = '';
     for await (const chunk of req) raw += chunk;
     const input = JSON.parse(JSON.parse(raw).input);
     requests.push(input);
     const id = 'payg-sdk-' + randomUUID();
-    const content = input.model === model ? 'Preserved primary result' : 'Organized primary result';
+    const content = input.model === model ? primaryBody : 'Organized primary result';
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify({ id, model: input.model, final: true, cost: '0.003', currency: 'USD',
       coverage: 'request_total', usage: { inputTokens: 3000, outputTokens: 4, sdkResponse: { id, object: 'chat.completion', created: 1,
@@ -74,7 +75,8 @@ it.each([
     const session = await rpc('runtime_start', { p_actor_id: actor, p_request_id: randomUUID(),
       p_payload: { scope: { kind: 'positioning_draft' } } });
     const requestId = randomUUID();
-    const context = { ...(native?{nativeOutput:'native-output-v1',envelopeOrder:'message-first-v1'}:{}), version: 'runtime.v1', sdkVersion: '0.18.0', role: 'ordinary', input: 'Answer and organize',
+    const context = { ...(native?{nativeOutput:'native-output-v1',envelopeOrder:'message-first-v1'}:{}),
+      ...(stop?{providerRequestFormat:'serial-tools-v4-stream',reasoning:{parameter:'none'}}:{}), version: 'runtime.v1', sdkVersion: '0.18.0', role: 'ordinary', input: 'Answer and organize',
       instructions: 'Synthetic local response', model, maxOutputTokens: 1000, maxTurns: 1,
       historyItems: 0, tools: [], sources: [], network: 'deny', request: { sessionId: session.sessionId, requestId },
       attachedOrganizer: { modelId: organizer, model: summaryModel, maxOutputTokens: 1000 } };
@@ -110,7 +112,7 @@ it.each([
       runtimeExecutor(options).execute(...args)};
     const waiting = await host.execute(admitted.executionId);
     expect(waiting).toMatchObject({ state: 'waiting_credits', code: 'RUNTIME_WAITING_CREDITS',
-      executionId: admitted.executionId, cursor: 1, epoch: 1, remainingCalls: 1, body: 'Preserved primary result' });
+      executionId: admitted.executionId, cursor: 1, epoch: 1, remainingCalls: 1, body: primaryBody });
     expect(requests.map(r => r.model)).toEqual([model]);
     expect(await host.execute(admitted.executionId)).toEqual(waiting);
     const history = async () => (await db.query(
@@ -121,11 +123,11 @@ it.each([
     expect((await db.query('select credits from profiles where id=$1', [actor])).rows[0].credits).toBe(97);
     if(stop){
       await rpc('runtime_execution',{p_actor_id:actor,p_execution_id:admitted.executionId,
-        p_action:'stop',p_result:{stopAt:24}});
+        p_action:'stop',p_result:{stopAt:24,source:'message'}});
       const fresh=()=>runtimeExecutor({database:admin,actor:async()=>actor,callGate:gate,
         endpoint:'http://127.0.0.1:'+address.port});
       const result=await fresh().execute(admitted.executionId);
-      expect(result).toMatchObject({state:'completed',stopped:true,body:'Preserved primary result'});
+      expect(result).toMatchObject({state:'completed',stopped:true,body:primaryBody});
       expect(await fresh().execute(admitted.executionId)).toEqual(result);
       await fresh().execute(admitted.executionId,undefined,{executionId:admitted.executionId,cursor:1,epoch:1})
         .catch(error=>expect(error.message).toMatch(/RUNTIME_RESUME_CONFLICT/));
@@ -186,7 +188,7 @@ it.each([
       expect(await financial()).toEqual(before);
       expect((await sessionContext()).waitingOrganizer).toBeNull();
       expect((await db.query('select primary_result from runtime_executions where id=$1',
-        [admitted.executionId])).rows[0].primary_result.body).toBe('Preserved primary result');
+        [admitted.executionId])).rows[0].primary_result.body).toBe(primaryBody);
       const nextContext={...context,input:'Next after exhausted organizer',attachedOrganizer:undefined,
         request:{sessionId:session.sessionId,requestId:nextRequestId}};
       const next=await rpc('runtime_admit',{p_actor_id:actor,p_session_id:session.sessionId,
@@ -198,7 +200,7 @@ it.each([
     expect(await finishWaitingOrganizer(await sessionContext(),nextRequestId,resumeOrganizer)).toBeNull();
     const completed = await runtimeExecutor({database:admin,actor:async()=>actor,callGate:gate,
       endpoint:'http://127.0.0.1:'+address.port}).execute(admitted.executionId);
-    expect(completed).toMatchObject({ state: 'completed', body: 'Preserved primary result',
+    expect(completed).toMatchObject({ state: 'completed', body: primaryBody,
       summary: 'Organized primary result' });
     const completedHistory = await history();
     expect(completedHistory).toHaveLength(4);
@@ -218,7 +220,7 @@ it.each([
     const next=await rpc('runtime_admit',{p_actor_id:actor,p_session_id:session.sessionId,
       p_request_id:nextRequestId,p_payload:nextContext,p_billing:{...billing,input:nextContext}});
     expect(next.executionId).not.toBe(admitted.executionId);
-    expect(await host.execute(next.executionId)).toMatchObject({state:'completed',body:'Preserved primary result'});
+    expect(await host.execute(next.executionId)).toMatchObject({state:'completed',body:primaryBody});
     expect(requests.map(r=>r.model)).toEqual([model,summaryModel,model]);
   } finally {
     if (server.listening) await new Promise<void>((resolve, reject) => server.close(e => e ? reject(e) : resolve()));
