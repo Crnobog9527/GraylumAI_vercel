@@ -146,7 +146,7 @@
   "packages/api/src/services/skills/localSource.ts": {"longLines":1},
   "packages/api/src/services/skills/modulePublication.ts": {"longLines":2},
   "packages/api/src/services/stripeFulfillment.ts": {"lines":2392},
-  "packages/api/src/services/subscriptionCreditGrants.ts": {"lines":2862,"longLines":6},
+  "packages/api/src/services/subscriptionCreditGrants.ts": {"lines":2846,"longLines":6},
   "packages/db/schema.ts": {"lines":594},
   "scripts/check-staging-db-readiness.mjs": {"lines":789},
   "scripts/check-stripe-readiness.mjs": {"lines":678}

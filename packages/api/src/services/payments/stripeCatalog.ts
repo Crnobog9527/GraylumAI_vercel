@@ -7,6 +7,9 @@ import { resolveStripeScope } from './stripeCheckoutPersistence';
 import type { StripeScope } from './purchaseFacts';
 
 type Cycle = 'monthly' | 'yearly' | 'one_time';
+const priceReplacementRequired = () => new TRPCError({
+  code: 'BAD_REQUEST', message: '修改金额时请同时更新对应的 Stripe 价格，或清除该价格以暂停购买。',
+});
 export async function saveStripeCatalog(input: {
   db: Pick<SupabaseClient, 'rpc'>;
   kind: 'credit_package' | 'membership_plan';
@@ -29,14 +32,17 @@ export async function saveStripeCatalog(input: {
       const price = await stripe.prices.retrieve(id!).catch(error => {
         throw createSafeServiceUnavailableError(error, '支付价格暂时无法验证，请稍后重试');
       });
+      const amountField = cycle === 'one_time' ? 'price' : `${cycle}_price`;
+      const requestedAmount = input.values[amountField];
       if (price.id !== id || price.object !== 'price' || !price.active || price.currency !== 'usd'
         || price.livemode !== (scope.mode === 'live') || !Number.isSafeInteger(price.unit_amount)
+        || (typeof requestedAmount === 'number' && price.unit_amount !== requestedAmount)
         || price.billing_scheme !== 'per_unit' || price.custom_unit_amount || price.transform_quantity || price.tiers_mode
         || (price.tax_behavior ?? 'unspecified') !== 'unspecified'
         || (cycle === 'one_time' ? price.type !== 'one_time' || price.recurring !== null
           : price.type !== 'recurring' || price.recurring?.interval !== (cycle === 'yearly' ? 'year' : 'month')
             || price.recurring.interval_count !== 1 || price.recurring.usage_type !== 'licensed')) {
-        throw new Error('PAY_COMMON_PRICE_MISMATCH');
+        throw priceReplacementRequired();
       }
       prices[cycle] = { external_id: id, unit_amount: price.unit_amount,
         currency: price.currency, mode: scope.mode, billing_cycle: cycle };
@@ -47,8 +53,9 @@ export async function saveStripeCatalog(input: {
     p_merchant_namespace: scope?.merchant ?? null, p_payment_mode: scope?.mode ?? null,
     p_expected_level: input.expectedLevel ?? null,
   });
-  if (result.error?.message === 'PAY_COMMON_PRICE_REPLACEMENT_REQUIRED') {
-    throw new TRPCError({ code: 'BAD_REQUEST', message: '修改金额时请同时更新对应的 Stripe 价格，或清除该价格以暂停购买。' });
+  if (result.error?.message === 'PAY_COMMON_PRICE_REPLACEMENT_REQUIRED'
+    || result.error?.message === 'PAY_COMMON_PRICE_MISMATCH') {
+    throw priceReplacementRequired();
   }
   return result;
 }

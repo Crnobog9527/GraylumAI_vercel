@@ -75,7 +75,7 @@ WITH rel AS (
 )
 SELECT md5(string_agg(k || '=' || coalesce(d, '<null>'), E'\n' ORDER BY k)) INTO actual FROM grouped WHERE g ~ '^[^:]+:(payment_orders|user_subscriptions|subscription_credit_grants|payment_provider_refs|credit_packages|membership_plans)$' OR g ~ '^fn(acl)?:(pay_common_|atomic_fulfill_credit_package|atomic_grant_subscription_invoice_credits|atomic_grant_annual_subscription_credits)';
 
-  IF actual = '63550c91138128be0bd85d450646c9e8' THEN RETURN; END IF;
+  IF actual = 'a7c58c62142b1985fd13b867ede26d09' THEN RETURN; END IF;
   IF actual IS DISTINCT FROM 'dc3f51dcc333026ecde8a87f26e96d5e' THEN
     RAISE EXCEPTION 'PAY_COMMON_PURCHASE_SCHEMA_DRIFT';
   END IF;
@@ -104,7 +104,7 @@ ALTER TABLE public.payment_orders
   ADD COLUMN IF NOT EXISTS price_ref_id uuid REFERENCES public.payment_provider_refs(id) ON DELETE RESTRICT,
   ADD COLUMN IF NOT EXISTS purchase_action text CHECK(purchase_action IN ('checkout','subscription_change','renewal')),
   ADD COLUMN IF NOT EXISTS purchase_closed_at timestamptz,
-  ADD COLUMN IF NOT EXISTS purchase_close_reason text CHECK(purchase_close_reason IN ('stripe_checkout_expired','stripe_checkout_never_created')),
+  ADD COLUMN IF NOT EXISTS purchase_close_reason text CHECK(purchase_close_reason IN ('stripe_checkout_expired','stripe_checkout_never_created','stripe_checkout_not_prepared')),
   ADD COLUMN IF NOT EXISTS purchase_close_ref text;
 DROP TRIGGER IF EXISTS pay_common_purchase_freeze ON public.payment_orders;
 CREATE TRIGGER pay_common_purchase_freeze BEFORE UPDATE ON public.payment_orders FOR EACH ROW
@@ -247,7 +247,7 @@ CREATE OR REPLACE FUNCTION public.pay_common_close_checkout(
 ) RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $fn$
 DECLARE intent public.payment_orders; close_reason text;
 BEGIN
-  IF p_checkout_status IS NULL OR p_checkout_status NOT IN ('expired','never_created')
+  IF p_checkout_status IS NULL OR p_checkout_status NOT IN ('expired','never_created','not_prepared')
     OR p_payment_status IS DISTINCT FROM 'unpaid' THEN
     RAISE EXCEPTION 'PAY_COMMON_ATTEMPT_NOT_TERMINAL' USING ERRCODE='23514';
   END IF;
@@ -259,7 +259,18 @@ BEGIN
     OR intent.payment_mode IS DISTINCT FROM p_payment_mode OR intent.purchase_action IS DISTINCT FROM 'checkout' THEN
     RAISE EXCEPTION 'PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH' USING ERRCODE='23514';
   END IF;
-  IF p_checkout_status='never_created' THEN
+  IF p_checkout_status='not_prepared' THEN
+    -- Profile/order locks serialize this with request freezing. Without a committed
+    -- envelope the adapter cannot have dispatched; a competing prepare must win first.
+    IF p_session_id IS NOT NULL OR intent.checkout_request IS NOT NULL
+      OR EXISTS(SELECT 1 FROM public.payment_provider_refs WHERE order_id=intent.id
+        AND object_type IN ('checkout','payment_intent','invoice','subscription'))
+      OR intent.stripe_checkout_session_id IS NOT NULL
+      OR intent.payment_status IS DISTINCT FROM 'unpaid' THEN
+      RAISE EXCEPTION 'PAY_COMMON_ATTEMPT_NOT_TERMINAL' USING ERRCODE='23514';
+    END IF;
+    close_reason:='stripe_checkout_not_prepared';
+  ELSIF p_checkout_status='never_created' THEN
     -- Only the service adapter can attest a complete, empty Stripe list after the immutable
     -- expiry plus one hour. Any known provider object or payment evidence forbids this path.
     IF p_session_id IS NOT NULL OR intent.checkout_request->>'expires_at' IS NULL
@@ -1278,7 +1289,7 @@ CREATE TRIGGER pay_common_change_request_freeze BEFORE UPDATE ON payment_orders
   FOR EACH ROW EXECUTE FUNCTION pay_common_frozen_guard('purchase_change_request');
 ALTER TABLE payment_orders DROP CONSTRAINT payment_orders_purchase_close_reason_check;
 ALTER TABLE payment_orders ADD CONSTRAINT payment_orders_purchase_close_reason_check CHECK(purchase_close_reason IN
-  ('stripe_checkout_expired','stripe_checkout_never_created','stripe_upgrade_rejected','stripe_upgrade_not_applied'));
+  ('stripe_checkout_expired','stripe_checkout_never_created','stripe_checkout_not_prepared','stripe_upgrade_rejected','stripe_upgrade_not_applied'));
 CREATE FUNCTION public.pay_common_prepare_change(p_user_id uuid,p_subscription_id uuid,p_plan_id uuid,p_cycle text,
   p_price_id text,p_request jsonb,p_metadata jsonb) RETURNS public.payment_orders
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $fn$

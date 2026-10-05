@@ -185,4 +185,55 @@ BEGIN
     RESET ROLE;
   END LOOP;
 END $$;
+-- An unprepared attempt may be closed; the same lock boundary blocks a racing prepare.
+DO $$
+DECLARE buyer uuid:=gen_random_uuid(); package uuid; intent payment_orders; replay payment_orders;
+BEGIN
+  INSERT INTO profiles(id) VALUES(buyer);
+  INSERT INTO credit_packages(name,price,credits_amount,active) VALUES('Unprepared',1000,100,'true') RETURNING id INTO package;
+  INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,credit_package_id,billing_cycle,is_current)
+    VALUES('stripe','acct_unprepared','test','price','price_unprepared',package,'one_time',true);
+  SET LOCAL ROLE service_role;
+  intent:=pay_common_create_purchase(buyer,'credit_package',package,'one_time','acct_unprepared','test','free');
+  PERFORM pg_temp.denied(format('UPDATE payment_orders SET purchase_close_reason=''stripe_checkout_not_prepared'' WHERE id=%L',intent.id),'42501');
+  PERFORM pg_temp.assert_true(pay_common_close_checkout(buyer,intent.id,NULL,'acct_unprepared','test','not_prepared','unpaid'),
+    'unprepared attempt closes immediately without provider evidence');
+  PERFORM pg_temp.assert_true(NOT pay_common_close_checkout(buyer,intent.id,NULL,'acct_unprepared','test','not_prepared','unpaid'),
+    'unprepared close replay is idempotent');
+  PERFORM pg_temp.assert_true((SELECT purchase_close_reason='stripe_checkout_not_prepared' AND purchase_close_ref IS NULL
+    FROM payment_orders WHERE id=intent.id),'protected reason is persisted');
+  PERFORM pg_temp.denied(format('SELECT pay_common_prepare_checkout(%L,%L,''{}'')',buyer,intent.id),
+    '23514','PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
+  replay:=pay_common_create_purchase(buyer,'credit_package',package,'one_time','acct_unprepared','test','free');
+  PERFORM pg_temp.assert_true(replay.id<>intent.id,'new attempt follows safe close');
+  RESET ROLE;
+  UPDATE payment_orders SET checkout_request=jsonb_build_object('expires_at',floor(extract(epoch FROM now()))+3600) WHERE id=replay.id;
+  SET LOCAL ROLE service_role;
+  PERFORM pg_temp.denied(format('SELECT pay_common_close_checkout(%L,%L,NULL,''acct_unprepared'',''test'',''not_prepared'',''unpaid'')',
+    buyer,replay.id),'23514','PAY_COMMON_ATTEMPT_NOT_TERMINAL');
+  SET LOCAL ROLE authenticated;
+  PERFORM pg_temp.denied(format('SELECT pay_common_close_checkout(%L,%L,NULL,''acct_unprepared'',''test'',''not_prepared'',''unpaid'')',
+    buyer,replay.id),'42501');
+  RESET ROLE;
+  -- Even an unprepared row with a known provider reference or paid fact cannot be retired this way.
+  buyer:=gen_random_uuid(); INSERT INTO profiles(id) VALUES(buyer);
+  SET LOCAL ROLE service_role;
+  intent:=pay_common_create_purchase(buyer,'credit_package',package,'one_time','acct_unprepared','test','free');
+  RESET ROLE;
+  INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,order_id)
+    VALUES('stripe','acct_unprepared','test','checkout','cs_known_unprepared',intent.id);
+  SET LOCAL ROLE service_role;
+  PERFORM pg_temp.denied(format('SELECT pay_common_close_checkout(%L,%L,NULL,''acct_unprepared'',''test'',''not_prepared'',''unpaid'')',
+    buyer,intent.id),'23514','PAY_COMMON_ATTEMPT_NOT_TERMINAL');
+  RESET ROLE;
+  buyer:=gen_random_uuid(); INSERT INTO profiles(id) VALUES(buyer);
+  SET LOCAL ROLE service_role;
+  intent:=pay_common_create_purchase(buyer,'credit_package',package,'one_time','acct_unprepared','test','free');
+  RESET ROLE;
+  UPDATE payment_orders SET payment_status='paid',status='completed' WHERE id=intent.id;
+  SET LOCAL ROLE service_role;
+  PERFORM pg_temp.denied(format('SELECT pay_common_close_checkout(%L,%L,NULL,''acct_unprepared'',''test'',''not_prepared'',''unpaid'')',
+    buyer,intent.id),'23514','PAY_COMMON_ATTEMPT_NOT_TERMINAL');
+  RESET ROLE;
+END $$;
 ROLLBACK;

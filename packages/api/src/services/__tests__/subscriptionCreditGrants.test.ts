@@ -4,7 +4,9 @@
  * This code is proprietary and confidential.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { logger } from '../../lib/logger';
+import { ANNUAL_RELEASE_REVIEW_REQUIRED } from '../payments/annualReleaseContract';
 import {
   addUtcCalendarMonthsClamped,
   calculateAnnualMonthlyGrantSchedule,
@@ -1074,6 +1076,69 @@ function seedPaidAnnualOpening(supabase: ReturnType<typeof createMockSupabase>) 
   const profile = tables.profiles.find(row => row.id === sub.user_id);
   if (profile) profile.credits = Number(profile.credits ?? 0) + first.creditsGranted;
 }
+
+describe('annual release isolates malformed individual contracts', () => {
+  afterEach(() => vi.restoreAllMocks());
+  function annualFixture(hooks: MockSupabaseHooks = {}) {
+    const plan = '9f2e1baa-fc8f-5131-8ba5-69dc9475edb0';
+    const supabase = createMockSupabase({
+      user_subscriptions: ['broken', 'healthy'].map(label => ({ id: `mirror_${label}`, user_id: `user_${label}`,
+        membership_plan_id: plan, stripe_subscription_id: `sub_${label}`, billing_cycle: 'yearly', status: 'active',
+        cancel_at_period_end: 'false', current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z', metadata: { lastInvoiceId: `in_${label}` } })),
+      membership_plans: [{ id: plan, name: 'Gold', yearly_credits: 120 }],
+      profiles: ['broken', 'healthy'].map(label => ({ id: `user_${label}`, credits: 0 })),
+    }, hooks);
+    seedPaidAnnualOpening(supabase);
+    supabase.tables.user_subscriptions.reverse();
+    seedPaidAnnualOpening(supabase);
+    supabase.tables.user_subscriptions.reverse();
+    return supabase;
+  }
+
+  it.each(['zero', 'multiple', 'snapshot-null', 'snapshot-schema', 'snapshot-product', 'mapping-zero', 'mapping-multiple'])(
+    'skips %s anomaly first, alerts, and releases the later healthy subscription exactly once', async anomaly => {
+      const alarm = vi.spyOn(logger, 'error').mockImplementation(() => {});
+      const supabase = annualFixture();
+      const broken = supabase.tables.subscription_credit_grants.find(row => row.subscription_id === 'mirror_broken')!;
+      if (anomaly === 'zero') broken.status = 'reversed';
+      if (anomaly === 'multiple') supabase.tables.subscription_credit_grants.push({ ...broken, id: 'duplicate-opening' });
+      if (anomaly === 'snapshot-null') broken.grant_snapshot = null;
+      if (anomaly === 'snapshot-schema') broken.grant_snapshot = { ...broken.grant_snapshot, credits: 'unknown' };
+      if (anomaly === 'snapshot-product') broken.grant_snapshot = { ...broken.grant_snapshot, item_id: '11111111-1111-4111-8111-111111111111' };
+      const refs = supabase.tables.payment_provider_refs;
+      const mapping = refs.findIndex(row => row.object_type === 'subscription' && row.subscription_id === 'mirror_broken');
+      if (anomaly === 'mapping-zero') refs.splice(mapping, 1);
+      if (anomaly === 'mapping-multiple') refs.push({ ...refs[mapping], id: 'duplicate-map', external_id: 'sub_ambiguous' });
+      const before = structuredClone(supabase.tables);
+      const result = await releaseDueAnnualSubscriptionCredits(supabase, { now: new Date('2026-02-15T00:00:00Z') });
+      expect(result).toEqual({ scannedSubscriptions: 2, skippedSubscriptions: 1, releasedGrantCount: 1, releasedCredits: 10 });
+      expect(supabase.tables.profiles.find(row => row.id === 'user_broken')).toEqual(before.profiles.find(row => row.id === 'user_broken'));
+      expect(supabase.tables.subscription_credit_grants.filter(row => row.subscription_id === 'mirror_broken'))
+        .toEqual(before.subscription_credit_grants.filter(row => row.subscription_id === 'mirror_broken'));
+      expect(supabase.tables.credit_transactions).toHaveLength(before.credit_transactions.length + 1);
+      expect(supabase.tables.profiles.find(row => row.id === 'user_healthy')?.credits).toBe(20);
+      expect(alarm).toHaveBeenCalledWith('billing', 'annual_subscription_credit_release_skipped', expect.objectContaining({
+        code: ANNUAL_RELEASE_REVIEW_REQUIRED,
+      }));
+      const replay = await releaseDueAnnualSubscriptionCredits(supabase, { now: new Date('2026-02-15T00:00:00Z') });
+      expect(replay.releasedGrantCount).toBe(0);
+      expect(supabase.tables.credit_transactions).toHaveLength(before.credit_transactions.length + 1);
+    },
+  );
+
+  it('does not swallow a database transport failure as an individual malformed contract', async () => {
+    const alarm = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    const supabase = annualFixture({ beforeExecute: ({ table }) => {
+      if (table === 'payment_provider_refs') throw new Error('database unavailable');
+    } });
+    const before = structuredClone(supabase.tables);
+    await expect(releaseDueAnnualSubscriptionCredits(supabase, { now: new Date('2026-02-15T00:00:00Z') }))
+      .rejects.toThrow('database unavailable');
+    expect(supabase.tables).toEqual(before);
+    expect(alarm).not.toHaveBeenCalled();
+  });
+});
 
 describe('subscription credit grants', () => {
   it('splits yearly credits into 12 predictable periods that sum to yearly_credits', () => {

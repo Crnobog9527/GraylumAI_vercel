@@ -95,6 +95,22 @@ export async function createDurableStripeCheckout(input: {
       || order.merchant_namespace !== scope.merchant || order.payment_mode !== scope.mode) {
       throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
     }
+    const snapshot = freezePurchaseSnapshot(order.purchase_snapshot);
+    const changingItem = snapshot.item_id !== action.itemId || snapshot.item_type !== action.itemType
+      || snapshot.billing_cycle !== action.billingCycle;
+    const closeUnmappedAttempt = async (status: 'not_prepared' | 'never_created') => {
+      const closed = await db.rpc('pay_common_close_checkout', {
+        p_user_id: order.user_id, p_order_id: order.id, p_session_id: null,
+        p_merchant_namespace: scope.merchant, p_payment_mode: scope.mode,
+        p_checkout_status: status, p_payment_status: 'unpaid',
+      });
+      if (closed.error || closed.data !== true) throw new Error('PAY_COMMON_ATTEMPT_CLOSE_FAILED');
+    };
+    if (order.checkout_request === null && changingItem) {
+      // The transaction arbitrates concurrent prepare/payment; only its confirmed closure allows a new admission.
+      await closeUnmappedAttempt('not_prepared');
+      continue;
+    }
     const mapping = await db.from('payment_provider_refs').select('external_id, channel, merchant_namespace, mode')
       .eq('id', order.price_ref_id).eq('object_type', 'price').maybeSingle();
     if (mapping.error) throw new Error('PAY_COMMON_MAPPING_READ_FAILED', { cause: mapping.error });
@@ -103,11 +119,7 @@ export async function createDurableStripeCheckout(input: {
     if (price.channel !== 'stripe' || price.merchant_namespace !== scope.merchant || price.mode !== scope.mode) {
       throw new Error('PAY_COMMON_PRICE_MAPPING_MISMATCH');
     }
-    const snapshot = freezePurchaseSnapshot(order.purchase_snapshot);
-    const changingItem = snapshot.item_id !== action.itemId || snapshot.item_type !== action.itemType
-      || snapshot.billing_cycle !== action.billingCycle;
     let request = order.checkout_request;
-    if (!request && changingItem) throw new Error('PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED');
     if (!request) {
       const prepared = await db.rpc('pay_common_prepare_checkout', {
         p_user_id: input.userId, p_order_id: order.id,
@@ -124,14 +136,7 @@ export async function createDurableStripeCheckout(input: {
       intent: { id: order.id, userId: order.user_id, scope, snapshot: order.purchase_snapshot,
         priceId: price.external_id, request, sessionId: sessionId ?? null, recover: Boolean(order.checkout_request) },
       createIfMissing: !changingItem,
-      closeNeverCreated: async () => {
-        const closed = await db.rpc('pay_common_close_checkout', {
-          p_user_id: order.user_id, p_order_id: order.id, p_session_id: null,
-          p_merchant_namespace: scope.merchant, p_payment_mode: scope.mode,
-          p_checkout_status: 'never_created', p_payment_status: 'unpaid',
-        });
-        if (closed.error || closed.data !== true) throw new Error('PAY_COMMON_ATTEMPT_CLOSE_FAILED');
-      },
+      closeNeverCreated: () => closeUnmappedAttempt('never_created'),
       persistSession: session => recordStripeCheckout(db, order.id, scope, session),
     });
     if (!session) continue;

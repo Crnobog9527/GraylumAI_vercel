@@ -30,7 +30,7 @@ describe('Stripe catalog authority', () => {
     { recurring: { interval: 'month', interval_count: 2, usage_type: 'licensed' } },
     { tax_behavior: 'inclusive' }, { billing_scheme: 'tiered' }])('refuses unsupported provider evidence %j', async patch => {
     mocks.retrieve.mockResolvedValue({ ...await mocks.retrieve(), ...patch });
-    await expect(save()).rejects.toThrow('PAY_COMMON_PRICE_MISMATCH');
+    await expect(save()).rejects.toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('更新对应的 Stripe 价格') });
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
   it('does not call Stripe when no price mapping changes', async () => {
@@ -43,9 +43,35 @@ describe('Stripe catalog authority', () => {
     expect(mocks.retrieve).not.toHaveBeenCalled();
     expect(mocks.rpc).toHaveBeenCalledWith('pay_common_save_catalog', expect.objectContaining({ p_prices: { monthly: null } }));
   });
-  it('propagates a transaction rejection instead of claiming a saved catalog', async () => {
-    mocks.rpc.mockResolvedValue({ data: null, error: { message: 'PAY_COMMON_PRICE_MISMATCH' } });
-    await expect(save()).resolves.toEqual({ data: null, error: { message: 'PAY_COMMON_PRICE_MISMATCH' } });
+  it('shows the same safe admin correction when SQL rejects price evidence against stored catalog terms', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { message: 'PAY_COMMON_PRICE_MISMATCH', details: 'private database detail' } });
+    await expect(save()).rejects.toMatchObject({ code: 'BAD_REQUEST',
+      message: '修改金额时请同时更新对应的 Stripe 价格，或清除该价格以暂停购买。' });
+    expect(mocks.rpc).toHaveBeenCalledOnce();
+  });
+  it.each([
+    ['credit_package', 'one_time', { price: 2999 }],
+    ['membership_plan', 'monthly', { monthly_price: 2999 }],
+    ['membership_plan', 'yearly', { yearly_price: 29999 }],
+  ] as const)('rejects a changed amount with the old provider price before dispatching the %s catalog write', async (kind, cycle, values) => {
+    const original = await mocks.retrieve();
+    mocks.retrieve.mockResolvedValue({ ...original,
+      type: cycle === 'one_time' ? 'one_time' : 'recurring',
+      recurring: cycle === 'one_time' ? null : { ...original.recurring, interval: cycle === 'yearly' ? 'year' : 'month' } });
+    await expect(saveStripeCatalog({ db: { rpc: mocks.rpc }, id: 'fixture_product', kind, values,
+      prices: { [cycle]: 'price_fixture' } })).rejects.toMatchObject({ code: 'BAD_REQUEST',
+      message: '修改金额时请同时更新对应的 Stripe 价格，或清除该价格以暂停购买。' });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it('keeps provider transport details private instead of converting them to editable price errors', async () => {
+    mocks.retrieve.mockRejectedValue(new Error('private provider detail'));
+    await expect(save()).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', message: '支付价格暂时无法验证，请稍后重试' });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it('leaves other SQL rejections to the existing caller error boundary', async () => {
+    const rejected = { data: null, error: { message: 'PAY_COMMON_PRODUCT_UNAVAILABLE' } };
+    mocks.rpc.mockResolvedValue(rejected);
+    await expect(save()).resolves.toEqual(rejected);
   });
   it.each([
     ['credit_package', { price: 2999 }],

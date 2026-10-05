@@ -146,11 +146,52 @@ describe('Stripe checkout persistence boundary', () => {
     expect(t.create).toHaveBeenCalledOnce();
     expect(t.rpc.mock.calls.filter(([name]) => name === 'pay_common_close_checkout')).toHaveLength(1);
   });
-  it('never prepares or dispatches an unprepared attempt for a different item', async () => {
+  it('closes an unprepared old item before admitting a replacement without touching its provider state', async () => {
     const t = replacementFixture(); t.order.checkout_request = null;
+    await expect(createDurableStripeCheckout(t.args)).resolves.toMatchObject({ id: 'cs_fixture' });
+    expect(t.rpc).toHaveBeenCalledWith('pay_common_close_checkout', {
+      p_user_id: t.args.userId, p_order_id: t.oldId, p_session_id: null,
+      p_merchant_namespace: scope.merchant, p_payment_mode: scope.mode,
+      p_checkout_status: 'not_prepared', p_payment_status: 'unpaid',
+    });
+    expect(t.rpc.mock.calls.filter(([name]) => name === 'pay_common_prepare_checkout')).toHaveLength(1);
+    expect(t.rpc).toHaveBeenCalledWith('pay_common_prepare_checkout', expect.objectContaining({ p_order_id: t.order.id }));
+    expect(t.create).toHaveBeenCalledOnce();
+    expect(t.create.mock.calls[0][0].metadata?.itemId).toBe(t.args.action.itemId);
+    expect(t.list).not.toHaveBeenCalled();
+    expect(t.retrieve).not.toHaveBeenCalled();
+    expect(t.expire).not.toHaveBeenCalled();
+    expect(t.operations.slice(0, 3)).toEqual(['pay_common_create_purchase', 'pay_common_close_checkout', 'pay_common_create_purchase']);
+  });
+  it.each(['error', 'already-closed', 'concurrent-prepare', 'paid'] as const)(
+    'does not admit or dispatch a replacement when unprepared closure is rejected: %s', async reason => {
+      const t = replacementFixture();
+      const frozenRequest = t.order.checkout_request;
+      t.order.checkout_request = null;
+      const original = t.rpc.getMockImplementation()!;
+      t.rpc.mockImplementation(async (name, args) => {
+        if (name !== 'pay_common_close_checkout') return original(name, args);
+        expect(args.p_checkout_status).toBe('not_prepared');
+        // Model the protected RPC's refusal after a competing transaction committed.
+        if (reason === 'concurrent-prepare') t.order.checkout_request = frozenRequest;
+        return { data: reason === 'already-closed' ? false : null,
+          error: reason === 'already-closed' ? null : { message: reason } };
+      });
+      await expect(createDurableStripeCheckout(t.args)).rejects.toThrow('PAY_COMMON_ATTEMPT_CLOSE_FAILED');
+      expect(t.rpc.mock.calls.map(([name]) => name)).toEqual(['pay_common_create_purchase', 'pay_common_close_checkout']);
+      expect(t.from).not.toHaveBeenCalled();
+      expect(t.create).not.toHaveBeenCalled();
+      expect(t.list).not.toHaveBeenCalled();
+      expect(t.retrieve).not.toHaveBeenCalled();
+      expect(t.expire).not.toHaveBeenCalled();
+    });
+  it('keeps the absence grace for a frozen old request when switching products', async () => {
+    const t = replacementFixture();
+    t.order.checkout_request!.expires_at = Math.floor(Date.now() / 1000) - 100;
+    t.list.mockResolvedValue({ data: [], has_more: false });
     await expect(createDurableStripeCheckout(t.args)).rejects.toThrow('RECONCILIATION_REQUIRED');
-    expect(t.create).not.toHaveBeenCalled();
     expect(t.rpc.mock.calls.map(([name]) => name)).toEqual(['pay_common_create_purchase']);
+    expect(t.create).not.toHaveBeenCalled();
   });
   it('releases a never-created original after grace using the existing protected closure RPC', async () => {
     const t = replacementFixture();

@@ -5,7 +5,7 @@
  */
 
 import { validateInvoiceSource } from './payments/stripeInvoiceEvidence';
-import { freezePurchaseSnapshot } from './payments/contracts';
+import { resolveAnnualReleaseContract, resolveAnnualSubscriptionRefs } from './payments/annualReleaseContract';
 import { findStripeReference, resolveStripeOrderIds } from './payments/stripeReferences';
 import { type StripeScope } from './payments/purchaseFacts';
 import { logger } from '../lib/logger';
@@ -2405,16 +2405,7 @@ async function loadAnnualSubscriptions(supabase: SupabaseLikeClient): Promise<Su
     );
   }
 
-  return await Promise.all((result.data ?? []).map(async (row: SubscriptionRow) => {
-    if (row.payment_channel !== 'stripe') return { ...row, stripe_subscription_id: null };
-    const refs = await supabase.from('payment_provider_refs').select('external_id').eq('subscription_id', row.id)
-      .eq('object_type', 'subscription').eq('channel', 'stripe').eq('merchant_namespace', row.merchant_namespace)
-      .eq('mode', row.payment_mode).limit(2);
-    if (refs.error || !Array.isArray(refs.data) || refs.data.length !== 1) {
-      throw new Error('PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING');
-    }
-    return { ...row, stripe_subscription_id: refs.data[0].external_id };
-  }));
+  return await resolveAnnualSubscriptionRefs(supabase, (result.data ?? []) as SubscriptionRow[]);
 }
 
 export async function releaseDueAnnualSubscriptionCredits(
@@ -2450,16 +2441,9 @@ export async function releaseDueAnnualSubscriptionCredits(
       summary.skippedSubscriptions += 1;
       continue;
     }
-    const openingGrants = existingGrants.filter(grant => grant.subscription_id === subscription.id
-      && grant.period_index === 1 && parseTime(grant.period_start) !== null
-      && parseTime(grant.period_start) === parseTime(subscription.current_period_start)
-      && grant.status === 'granted' && grant.source_order_id);
-    if (openingGrants.length !== 1) throw new Error('PAY_COMMON_ANNUAL_CONTRACT_UNKNOWN');
-    const openingGrant = openingGrants[0]!;
-    const snapshot = freezePurchaseSnapshot(openingGrant.grant_snapshot);
-    if (snapshot.item_id !== subscription.membership_plan_id || snapshot.billing_cycle !== 'yearly'
-      || snapshot.item_type !== 'membership_plan') throw new Error('PAY_COMMON_GRANT_SNAPSHOT_MISMATCH');
-    const plan = { id: snapshot.item_id, yearly_credits: snapshot.credits, name: 'Membership' };
+    const contract = resolveAnnualReleaseContract(subscription, existingGrants);
+    if (!contract) { summary.skippedSubscriptions += 1; continue; }
+    const { openingGrant, plan } = contract;
     const invoiceId = openingGrant.stripe_invoice_id;
     const hasFullRefund = await hasSubscriptionFullRefund(supabase, {
       subscriptionId,
