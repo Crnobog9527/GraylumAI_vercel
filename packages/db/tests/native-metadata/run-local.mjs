@@ -6,7 +6,7 @@ import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 import { providerRejectedViewCases } from '../payg/provider-rejected-view.mjs';
 const db = await localDb();
 const c = db.client;
-const migration = read('packages/db/migrations/0170_runtime_native_metadata.sql');
+const migration = read('packages/db/migrations/0169_runtime_native_metadata.sql');
 const definition = async () => (await c.query("SELECT pg_get_functiondef('public.runtime_view(uuid,uuid)'::regprocedure) v")).rows[0].v;
 const fp = read('packages/db/tests/baseline/fingerprint.sql');
 const catalogSql = fp.slice(0, fp.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
@@ -156,7 +156,7 @@ try {
   report.checks.push('paired warm-cache SQL timings at 15/100/300/1000 turns; one view query; every old truncation marker retained');
   await c.query(read('packages/db/tests/erasure-b2a/fixture.sql'));
   await providerRejectedViewCases(c);
-  report.checks.push('existing 0168 provider-rejected historical regression passes and restores final 0170 view');
+  report.checks.push('existing 0168 provider-rejected historical regression passes and restores final 0169 view');
 } catch (error) {
   report.failed = String(error.stack ?? error);
   process.exitCode = 1;
