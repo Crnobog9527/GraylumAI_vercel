@@ -80,6 +80,16 @@ export function rememberStop(storage: TabStore | null, draftId: string, executio
   }
 }
 
+/**
+ * 停止 is offered on a live reply until a result is final, including the
+ * `saving` phase just before the result is stored: a stop recorded then still
+ * cuts the saved text at `stopAt`. Not on a reply already stopped (here or as
+ * history shows) or one that ended without a result.
+ */
+export function stopAvailable(reply: LiveReply | null, recorded: StopView | undefined, settled: boolean) {
+  return Boolean(reply && !reply.stopped && reply.phase !== "incomplete" && !settled && !stopSaving(recorded));
+}
+
 /** True when a `runtime.cancel` stop answer still waits for the in-flight call (`stopping`). */
 export function stopStillSaving(response: unknown) {
   return Boolean(response && typeof response === "object" && (response as { state?: unknown }).state === "stopping");

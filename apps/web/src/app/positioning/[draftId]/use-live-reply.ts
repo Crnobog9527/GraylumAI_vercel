@@ -6,7 +6,7 @@ import { liveReplyController, type LiveReplyController } from "./live-reply-cont
 import { readAgentTurn, TEXT_PROTOCOL } from "./mentor-turn";
 import { executionSettled, RecoveryTimers, type RecoveryHistory, type RecoveryExecution } from "./step-recovery";
 import {
-  rememberStop, sendStop, STOP_UNCONFIRMED_NOTICE, stopFollowUpDelay, stopFollowUpTarget, stoppedHere, stopSaving,
+  rememberStop, sendStop, STOP_UNCONFIRMED_NOTICE, stopFollowUpDelay, stopFollowUpTarget, stopAvailable, stoppedHere,
 } from "./stop-reply";
 
 function tabStorage() {
@@ -89,13 +89,17 @@ export function useLiveReply(draftId: string, history: RecoveryHistory | undefin
   }, [followUp, round, utils]);
 
   const recorded = reply ? history?.executions?.find(execution => execution.executionId === reply.executionId) : undefined;
-  const canStop = Boolean(reply && !reply.stopped && !["incomplete", "saving"].includes(reply.phase)
-    && !(recorded && (executionSettled(history, recorded.executionId) || stopSaving(recorded as RecoveryExecution))));
+  const canStop = stopAvailable(reply, recorded as RecoveryExecution | undefined,
+    Boolean(recorded && executionSettled(history, recorded.executionId)));
   const stop = async (executionId: string) => {
     const request = live.stop(executionId);
     if (request) rememberStop(tabStorage(), draftId, executionId);
     const outcome = await sendStop(request, next => cancel.mutateAsync(next));
-    if (outcome === "unconfirmed") onError(STOP_UNCONFIRMED_NOTICE);
+    // A failed request leaves the reply frozen: it says the stop is unconfirmed instead of saving.
+    if (outcome === "unconfirmed") {
+      setUnconfirmed(executionId);
+      onError(STOP_UNCONFIRMED_NOTICE);
+    }
     if (outcome) await utils.runtime.view.invalidate();
   };
   return {

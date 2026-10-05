@@ -8,7 +8,7 @@ import { mentorTailNotices, turnNeedsRetry } from "./mentor-notices";
 import { isCompleteResult, isTerminalTurn } from "./mentor-turn";
 import { envelopeRecovery, historyPollInterval, HISTORY_POLL_MS, type StoredStepEnvelope } from "./step-recovery";
 import {
-  rememberStop, sendStop, stoppedHere, STOP_FOLLOW_UP_DELAYS_MS, STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE, STOPPED_EMPTY_NOTICE, STOPPED_NOTICE, STOPPED_UNORGANIZED_NOTICE,
+  rememberStop, sendStop, stopAvailable, stoppedHere, STOP_FOLLOW_UP_DELAYS_MS, STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE, STOPPED_EMPTY_NOTICE, STOPPED_NOTICE, STOPPED_UNORGANIZED_NOTICE,
   stopFollowUpDelay, stopFollowUpTarget, stopRequestFor, stopSaving, userStopped,
 } from "./stop-reply";
 
@@ -70,6 +70,16 @@ describe("stop request (CHAT-NATIVE-OUTPUT §4.2 C2)", () => {
 });
 
 describe("stopping a live reply", () => {
+  it("offers stop through the saving phase until the result is final", () => {
+    const reply = (phase: string, stopped = false): LiveReply => ({ ...startLiveReply(executionId), phase, stopped });
+    for (const phase of ["mentor", "reading", "organizer", "saving", "waiting"]) expect(stopAvailable(reply(phase), undefined, false)).toBe(true);
+    expect(stopAvailable(reply("incomplete"), undefined, false)).toBe(false);
+    expect(stopAvailable(reply("saving", true), undefined, false)).toBe(false);
+    expect(stopAvailable(reply("saving"), undefined, true)).toBe(false);
+    expect(stopAvailable(reply("mentor"), { state: "interrupted", userStopPending: true }, false)).toBe(false);
+    expect(stopAvailable(null, undefined, false)).toBe(false);
+  });
+
   it("freezes the shown text at once: later text and a card are ignored", () => {
     const draftId = newDraft(), storage = new TabStorage(), live = controller(draftId, storage);
     live.begin(executionId);
