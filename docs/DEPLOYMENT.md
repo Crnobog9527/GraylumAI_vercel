@@ -98,7 +98,7 @@ pnpm release:preflight:destructive -- --preview-url <preview-url> --bypass-cooki
 
 先核对故障部署与拟恢复版本。Vercel 的部署提升/回滚属于外部变更，须按 [AGENTS.md](../AGENTS.md) 取得对应环境和操作的授权；生产操作不能沿用 staging 合并批准。
 
-代码回滚在独立任务分支生成 revert 提交，通过 PR、验证和审查后由 Owner 批准合并。不得直接推送 `staging` 或 `main`。部署回滚不自动撤销数据库迁移；数据库恢复需单独评估兼容性、数据影响及授权。
+代码回滚在独立任务分支生成 revert 提交，通过 PR、验证和审查后合并：进 `staging` 由 AI 自己合并，进 `main` 须 Owner 批准（AGENTS.md 第 1 节）。不得直接推送 `staging` 或 `main`。部署回滚不自动撤销数据库迁移；数据库恢复需单独评估兼容性、数据影响及授权。
 
 ## 历史风险记录
 
