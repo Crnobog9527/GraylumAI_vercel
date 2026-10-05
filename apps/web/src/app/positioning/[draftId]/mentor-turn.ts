@@ -222,6 +222,8 @@ export type MentorExecution = PaygViewFields & {
     /** Native-output result metadata; present only when the history carries it. */
     completeness?: "complete" | "stopped" | "length_limit";
     stopped?: boolean;
+    /** A user stop is recorded and its result is not saved yet (runtime_view, every billing version). */
+    userStopPending?: boolean;
     organized?: boolean;
     billing?: { pausedReason?: string | null; cancelRequested?: boolean; closed?: boolean } | null;
     envelopeCompact?: boolean;

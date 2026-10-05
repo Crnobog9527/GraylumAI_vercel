@@ -8,7 +8,7 @@ import { mentorTailNotices, turnNeedsRetry } from "./mentor-notices";
 import { isCompleteResult, isTerminalTurn } from "./mentor-turn";
 import { envelopeRecovery, historyPollInterval, HISTORY_POLL_MS, type StoredStepEnvelope } from "./step-recovery";
 import {
-  sendStop, STOP_FOLLOW_UP_DELAYS_MS, STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE, STOPPED_EMPTY_NOTICE, STOPPED_NOTICE, STOPPED_UNORGANIZED_NOTICE,
+  rememberStop, sendStop, stoppedHere, STOP_FOLLOW_UP_DELAYS_MS, STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE, STOPPED_EMPTY_NOTICE, STOPPED_NOTICE, STOPPED_UNORGANIZED_NOTICE,
   stopFollowUpDelay, stopFollowUpTarget, stopRequestFor, stopSaving, userStopped,
 } from "./stop-reply";
 
@@ -175,7 +175,7 @@ describe("a stopped turn while it saves", () => {
       expect(mentorReplyDisplay({ ...base, state }).notice).toEqual({ tone: "status", text: STOP_SAVING_NOTICE, busy: true });
     expect(mentorReplyDisplay({ ...base, state: "cancelled", active: false }).notice).toEqual({ tone: "status", text: STOPPED_EMPTY_NOTICE });
     // After the bounded follow-up gives up, the turn says the stop is not confirmed instead of spinning.
-    expect(mentorReplyDisplay({ ...base, stopUnconfirmed: true }).notice).toEqual({ tone: "warning", text: STOP_UNCONFIRMED_NOTICE });
+    expect(mentorReplyDisplay({ ...base, stopLocal: "unconfirmed" }).notice).toEqual({ tone: "warning", text: STOP_UNCONFIRMED_NOTICE });
   });
 
   it("the tail notice offers 停止 only while the live reply can be stopped", () => {
@@ -205,6 +205,56 @@ describe("a stopped turn while it saves", () => {
   it("a stopping answer keeps the retained request; the saved result releases it", () => {
     expect(isTerminalTurn({ state: "stopping" })).toBe(false);
     expect(isTerminalTurn({ state: "completed", stopped: true })).toBe(true);
+  });
+});
+
+describe("bill2.v1 history: userStopPending without a pause reason (runtime_view 0172)", () => {
+  const v1 = (state: string, userStopPending: boolean) =>
+    ({ executionId, state, userStopPending, billing: { cancelRequested: false }, request: { requestId: "r1" } });
+  const view = (state: string, pending: boolean) => ({ activeExecution: executionId, executions: [v1(state, pending)] });
+  const envelope: StoredStepEnvelope = { stepId: "s", raw: "{}",
+    parsed: { request: { requestId: "r1" }, executionId } as unknown as StoredStepEnvelope["parsed"] };
+
+  it("a pending v1 stop shows saving, offers no retry and is a follow-up target", () => {
+    for (const state of ["interrupted", "cost_pending"]) {
+      expect(stopSaving(v1(state, true))).toBe(true);
+      expect(turnNeedsRetry(v1(state, true))).toBe(false);
+      expect(envelopeRecovery(view(state, true), envelope, 60000)).toBe("stopped");
+      expect(stopFollowUpTarget(view(state, true), () => false)).toBe(executionId);
+      const shown = mentorReplyDisplay({ body: null, legacyMessage: "", active: true, busy: false, ...v1(state, true) });
+      expect(shown.notice).toEqual({ tone: "status", text: STOP_SAVING_NOTICE, busy: true });
+    }
+  });
+
+  it("the field wins over a stale pause reason; false means nothing is pending", () => {
+    expect(userStopped({ state: "interrupted", userStopPending: false, billing: stopBilling })).toBe(false);
+    expect(turnNeedsRetry(v1("interrupted", false))).toBe(true);
+    expect(stopFollowUpTarget(view("interrupted", false), () => false)).toBeNull();
+  });
+
+  it("once saved (userStopPending false, completed) the saved result shows", () => {
+    const card = { question: "选哪个？", options: ["A", "B"], recommended: 0 };
+    const shown = mentorReplyDisplay({ body: agentTurnBody("停在这里", card), legacyMessage: "", active: false, busy: false,
+      ...v1("completed", false), stopped: true, completeness: "stopped" });
+    expect(shown).toEqual({ text: "停在这里", card: null, notice: { tone: "status", text: STOPPED_NOTICE } });
+    expect(stopFollowUpTarget(view("completed", false), () => false)).toBeNull();
+  });
+
+  it("a v1 stop that saved nothing reads as stopped only in the tab that stopped it", () => {
+    const base = { body: null, legacyMessage: "", active: false, busy: false, ...v1("cancelled", false) };
+    expect(mentorReplyDisplay({ ...base, stopLocal: "stopped" }).notice).toEqual({ tone: "status", text: STOPPED_EMPTY_NOTICE });
+    expect(mentorReplyDisplay(base).notice?.text).not.toBe(STOPPED_EMPTY_NOTICE);
+  });
+
+  it("this tab's stop record is kept, bounded and tolerant of bad storage", () => {
+    const storage = new TabStorage(), draftId = newDraft();
+    for (let index = 0; index < 25; index++) rememberStop(storage, draftId, `e${index}`);
+    rememberStop(storage, draftId, "e24");
+    expect(stoppedHere(storage, draftId)).toHaveLength(20);
+    expect(stoppedHere(storage, draftId).at(-1)).toBe("e24");
+    storage.setItem("opc-stopped:" + draftId, "{bad");
+    expect(stoppedHere(storage, draftId)).toEqual([]);
+    expect(stoppedHere(null, draftId)).toEqual([]);
   });
 });
 

@@ -23,11 +23,23 @@ export function stopRequestFor(reply: LiveReply): StopRequest {
   return { executionId: reply.executionId, stopAt: Array.from(reply.text).length, ...(reply.source ? { source: reply.source } : {}) };
 }
 
-type StopView = { state: string; billing?: { pausedReason?: string | null; cancelRequested?: boolean } | null };
+type StopView = {
+  state: string;
+  /** runtime_view: a user stop is recorded and its result is not saved yet (every billing version). */
+  userStopPending?: boolean;
+  billing?: { pausedReason?: string | null; cancelRequested?: boolean } | null;
+};
 
-/** The server recorded a user stop for this execution (BILL-PAYG pause reason `user_stop`). */
+/**
+ * The server recorded a user stop for this execution and has not saved its
+ * result yet. `userStopPending` is the signal; only a history without that
+ * field falls back to the pause reason, which runtime_view shows for
+ * bill2.v2 runs alone.
+ */
 export function userStopped(execution: StopView | null | undefined) {
-  return execution?.billing?.pausedReason === "user_stop" && execution.billing.cancelRequested !== true;
+  if (!execution) return false;
+  if (typeof execution.userStopPending === "boolean") return execution.userStopPending;
+  return execution.billing?.pausedReason === "user_stop" && execution.billing.cancelRequested !== true;
 }
 
 /**
@@ -37,6 +49,35 @@ export function userStopped(execution: StopView | null | undefined) {
  */
 export function stopSaving(execution: StopView | null | undefined) {
   return userStopped(execution) && !["completed", "cancelled"].includes(execution!.state);
+}
+
+/**
+ * Executions this tab stopped, so a stop that saved nothing (`cancelled`)
+ * still reads as stopped after `userStopPending` turns false. Display only,
+ * in this tab's sessionStorage; another tab shows the ordinary cancelled notice.
+ */
+export function stoppedHereKey(draftId: string) {
+  return "opc-stopped:" + draftId;
+}
+const STOPPED_HERE_LIMIT = 20;
+type TabStore = Pick<Storage, "getItem" | "setItem">;
+
+export function stoppedHere(storage: TabStore | null, draftId: string): string[] {
+  try {
+    const value = JSON.parse(storage?.getItem(stoppedHereKey(draftId)) ?? "[]") as unknown;
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function rememberStop(storage: TabStore | null, draftId: string, executionId: string) {
+  const ids = [...stoppedHere(storage, draftId).filter(id => id !== executionId), executionId].slice(-STOPPED_HERE_LIMIT);
+  try {
+    storage?.setItem(stoppedHereKey(draftId), JSON.stringify(ids));
+  } catch {
+    /* Without storage only the notice of a stop that saved nothing is lost. */
+  }
 }
 
 /** True when a `runtime.cancel` stop answer still waits for the in-flight call (`stopping`). */

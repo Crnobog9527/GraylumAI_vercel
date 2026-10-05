@@ -5,7 +5,9 @@ import type { LiveReply } from "./agent-turn-display";
 import { liveReplyController, type LiveReplyController } from "./live-reply-controller";
 import { readAgentTurn, TEXT_PROTOCOL } from "./mentor-turn";
 import { executionSettled, RecoveryTimers, type RecoveryHistory, type RecoveryExecution } from "./step-recovery";
-import { sendStop, STOP_UNCONFIRMED_NOTICE, stopFollowUpDelay, stopFollowUpTarget, userStopped } from "./stop-reply";
+import {
+  rememberStop, sendStop, STOP_UNCONFIRMED_NOTICE, stopFollowUpDelay, stopFollowUpTarget, stoppedHere, stopSaving,
+} from "./stop-reply";
 
 function tabStorage() {
   try {
@@ -25,8 +27,8 @@ function tabStorage() {
 export function useLiveReply(draftId: string, history: RecoveryHistory | undefined, onError: (text: string) => void):
   LiveReplyController & {
     reply: LiveReply | null; phase: string | null; stopAction: { onClick: () => void } | null;
-    /** The stopped execution this page gave up re-reading, if any. */
-    stopUnconfirmed: string | null;
+    /** This tab's own knowledge of its stop of `executionId` (MentorReplySource.stopLocal). */
+    stopLocal: (executionId: string) => "unconfirmed" | "stopped" | undefined;
   } {
   const [reply, setReply] = useState<LiveReply | null>(null);
   const live = useMemo(() => liveReplyController({ draftId, storage: tabStorage, show: setReply }), [draftId]);
@@ -88,16 +90,19 @@ export function useLiveReply(draftId: string, history: RecoveryHistory | undefin
 
   const recorded = reply ? history?.executions?.find(execution => execution.executionId === reply.executionId) : undefined;
   const canStop = Boolean(reply && !reply.stopped && !["incomplete", "saving"].includes(reply.phase)
-    && !(recorded && (executionSettled(history, recorded.executionId) || userStopped(recorded as RecoveryExecution))));
+    && !(recorded && (executionSettled(history, recorded.executionId) || stopSaving(recorded as RecoveryExecution))));
   const stop = async (executionId: string) => {
-    const outcome = await sendStop(live.stop(executionId), request => cancel.mutateAsync(request));
+    const request = live.stop(executionId);
+    if (request) rememberStop(tabStorage(), draftId, executionId);
+    const outcome = await sendStop(request, next => cancel.mutateAsync(next));
     if (outcome === "unconfirmed") onError(STOP_UNCONFIRMED_NOTICE);
     if (outcome) await utils.runtime.view.invalidate();
   };
   return {
     ...live, reply,
     phase: reply ? (reply.stopped ? (unconfirmed === reply.executionId ? "stop_unconfirmed" : "stopped") : reply.phase) : null,
-    stopUnconfirmed: unconfirmed,
+    stopLocal: (executionId: string) => unconfirmed === executionId ? "unconfirmed"
+      : stoppedHere(tabStorage(), draftId).includes(executionId) ? "stopped" : undefined,
     stopAction: canStop && reply ? { onClick: () => void stop(reply.executionId) } : null,
   };
 }

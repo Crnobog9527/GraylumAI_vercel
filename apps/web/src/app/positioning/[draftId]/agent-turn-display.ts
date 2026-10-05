@@ -8,7 +8,7 @@ import {
 } from "@repo/api/src/shared/agentTurn";
 import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
 import { isPaygWaiting } from "@/lib/payg-wait";
-import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE, STOPPED_EMPTY_NOTICE, stoppedCut, stoppedResultNotice, stopSaving, userStopped } from "./stop-reply";
+import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE, STOPPED_EMPTY_NOTICE, stoppedCut, stoppedResultNotice, stopSaving } from "./stop-reply";
 
 /** Under a reply that stopped at the single-answer length limit (completeness `length_limit`), outside its text. */
 export const LENGTH_LIMIT_NOTICE = "这次回答达到单次长度上限，已在这里结束。需要的话，可以发送“继续”让我接着写。";
@@ -129,8 +129,13 @@ export type MentorReplySource = {
   completeness?: string;
   stopped?: boolean;
   organized?: boolean;
-  /** This page stopped re-reading the stopped turn without a result (stop-reply.ts). */
-  stopUnconfirmed?: boolean;
+  /**
+   * What this tab knows about its own stop of this turn (use-live-reply.ts): `unconfirmed` once it
+   * gave up re-reading without a result, `stopped` when it stopped the turn.
+   */
+  stopLocal?: "unconfirmed" | "stopped";
+  /** runtime_view: a user stop is recorded and its result is not saved yet. */
+  userStopPending?: boolean;
   /** The run's public billing view; `pausedReason: "user_stop"` marks a turn the user stopped. */
   billing?: { pausedReason?: string | null; cancelRequested?: boolean } | null;
   /** This execution owns the server execution slot. */
@@ -144,8 +149,10 @@ export type ReplyNotice = { tone: "status" | "warning"; text: string; busy?: boo
 function unavailableNotice(source: MentorReplySource): ReplyNotice {
   // A stopped turn is saving what was shown, never failed, until its result is final.
   if (stopSaving(source))
-    return source.stopUnconfirmed ? { tone: "warning", text: STOP_UNCONFIRMED_NOTICE } : { tone: "status", text: STOP_SAVING_NOTICE, busy: true };
-  if (source.state === "cancelled" && userStopped(source)) return { tone: "status", text: STOPPED_EMPTY_NOTICE };
+    return source.stopLocal === "unconfirmed" ? { tone: "warning", text: STOP_UNCONFIRMED_NOTICE } : { tone: "status", text: STOP_SAVING_NOTICE, busy: true };
+  // userStopPending is false once the stop is cancelled; this tab's own record (or a v2 pause reason) says it was a stop.
+  if (source.state === "cancelled" && (source.stopLocal || (source.billing?.pausedReason === "user_stop" && !source.billing.cancelRequested)))
+    return { tone: "status", text: STOPPED_EMPTY_NOTICE };
   if (source.state === "cost_pending" && !source.active)
     return { tone: "warning", text: "本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。" };
   if (source.state === "cancelled" && source.unavailableReason === "provider_rejected")

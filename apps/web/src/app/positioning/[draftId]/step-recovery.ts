@@ -29,6 +29,8 @@ export type RecoveryExecution = {
   state: string;
   request?: { requestId?: string } | null;
   billing?: { pausedReason?: string | null; cancelRequested?: boolean } | null;
+  /** A user stop is recorded and its result is not saved yet (stop-reply.ts). */
+  userStopPending?: boolean;
 };
 export type RecoveryHistory = {
   activeExecution?: string | null;

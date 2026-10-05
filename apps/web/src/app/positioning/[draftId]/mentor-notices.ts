@@ -58,6 +58,6 @@ export function mentorTurnNotice(id: string, reply: ReplyNotice | undefined, sta
  * The session's open turn that stopped advancing and needs the user's "重试". A turn the user
  * stopped is still saving what was shown (stop-reply.ts): it offers no retry.
  */
-export function turnNeedsRetry(execution: { state: string; billing?: { pausedReason?: string | null; cancelRequested?: boolean } | null }) {
+export function turnNeedsRetry(execution: Parameters<typeof stopSaving>[0] & { state: string }) {
   return !["completed", "cancelled", "running"].includes(execution.state) && !stopSaving(execution);
 }
