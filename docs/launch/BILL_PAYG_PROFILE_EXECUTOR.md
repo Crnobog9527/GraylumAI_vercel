@@ -1,6 +1,6 @@
 # BILL-PAYG profile 执行器交接（仅准备）
 
-**r4/r5 准备完成，等待复核。** 旧批次已锁定；本轮不发送模型请求、不访问远端数据库、不改配置。
+**r5b 准备完成，等待复核。原 r5 作废，不执行。** 旧批次已锁定；本轮不发送模型请求、不访问远端数据库、不改配置。
 本页不是执行批准；必须先收到主窗口对本 PR 最终版本和 manifest 的审阅通过及执行通知。
 
 ## 入口
@@ -13,10 +13,14 @@
 批准后，从本 PR 工作区执行（下列命令在第一步没有运行）：
 
 ```bash
+set +x
+set -a
+. ~/.graylum/secrets/payg-profile.env
+set +a
 NODE_USE_ENV_PROXY=1 NO_PROXY= no_proxy= https_proxy= node scripts/payg-profile-execute.mjs execute-approved \
   scripts/payg-profile/plan-prices.json \
-  docs/launch/evidence/payg-profile-20261006-r4.manifest.json \
-  04e92dfa3a33a49090c853da83cf088b5d83555ac447b92760a5b3461725f1db \
+  docs/launch/evidence/payg-profile-20261006-r5b.manifest.json \
+  4f8002e7989930cbf5cddd6ea2cae04e46548a196a885ac607a9b5f579b2990d \
   owner-approved-test-balance-only
 ```
 
@@ -31,15 +35,20 @@ NODE_USE_ENV_PROXY=1 NO_PROXY= no_proxy= https_proxy= node scripts/payg-profile-
 本地费用计算复用 openRouterCallBound，发送和查账复用现有 openRouterAdapter/openRouterEvidence；
 无 SDK 自动重试、无 fallback、固定 OpenRouter URL、禁止重定向。工具样本只带合成历史，不执行真实工具。
 
-## r4/r5 范围与费用
+## r5b 范围与费用
 
-上面的入口是 r4；r5 必须单独复核及通知，届时用 `evidence/payg-profile-20261006-r5.manifest.json`
-（完整路径前缀同 r4）和 hash `72a8bc28bbd64a8c1139afafbdec71d8631ac1ceabfec35dbeca7e6dca51c97a`。不能把 r4 授权当作 r5 授权。
-详见 [两批预演与逐条费用](BILL_PAYG_PROFILE_R4_R5.md)。先前批次不能由当前执行器重跑。
-前三批已入账 $4.8101395；累计预留包含 r4 和 r5 全部上界，共 $10.799494625，必须小于 $25。
-同一用户依序运行；兄弟批次已加锁但无最终报告、费用未知或超过其预留时，在加锁和网络前停止，不自动恢复。
-输出压力 Sonnet O=2048，Luna/Gemini O=512；原生 completion（含 reasoning）必须等于 O 且 finish_reason=length。
-否则即使费用和 token 未超界，也为 OUTPUT_CAP_NOT_REACHED 停批，不补跑。小上限证明截断语义，见下述字段区分。
+当前执行器只接受 r5b 的精确审阅清单；原 r4 已锁定，原 r5 明确作废，旧 hash 均不能启动。
+详见 [r5b 预演、逐条费用及 Luna 路由缺口](BILL_PAYG_PROFILE_R5B.md)。
+Gemini 76 + Luna 整理适配补测16 + Sonnet新输出压力4，共96条；本批上界$5.39640075。
+前四批已入账$4.989307965；本批累计上界$10.385708715 < $25，不再为已作废r5重复预留。
+
+凭据/代理/加锁前核对本机已有旧锁对应的报告，按 manifest 绑定的批次、样本ID、requestHash、原始UNKNOWN状态和
+Owner确认记录逐一对账。r1首条、r2第49条、r4第77条仅这三个固定例外按$0入账，原始report/events不写回。
+未知数量、样本身份、已知小计、实际总额或金额汇总不匹配即 PRIOR_ACCOUNTING_MISMATCH，不接收临时豁免参数。
+原r5若意外出现attempted.lock，停止为SUPERSEDED_BATCH_ATTEMPTED，不能视作未执行。没有本机旧锁时以清单引用的已审计证据为依据。
+
+输出压力Sonnet O=2048、Gemini O=512，两种设置各两条；原生completion（含reasoning）必须等于O且finish_reason=length，
+否则OUTPUT_CAP_NOT_REACHED停批。Luna补测O=1024只验证整理适配，复用r4已成立的512输出语义，不能冒充新增触顶证据。
 
 finish_reason=content_filter 或 native_finish_reason=refusal（response 或原 ID lookup）立即记
 PROVIDER_CONTENT_REFUSED 并停批；response 已识别时不再查账，lookup 识别后不再继续查账。
@@ -118,7 +127,7 @@ POST 最多一次；超时/断线无原 ID 时保留未知费用并停止，不�
 32 条旧执行不受放宽；无数据重写、新表、权限变化。开启新 profile 前必须先完成迁移，不能仅设置开关。
 有活动 128 条执行时，恢复方式是关闭新准入并完成旧执行；不直接回退 SQL 上限造成在途执行拒绝。
 
-迁移顺序按主窗口 2026-10-05 审计更新：#666 使用 0172；本 PR 在采样结束、最终合并前改为 0175，
+迁移顺序按主窗口 2026-10-05 审计更新：#666 使用 0172；本 PR 在采样结束、最终合并前改为 0176，
 以届时 staging 重建指纹。在此之前若产生账本编号/跳号失败应如实记录，不加入占位迁移或放宽 CI。
 
 ## 历史：代理与第二批（2026-10-05）
@@ -153,7 +162,7 @@ Google 页面覆盖 Gemini API，不是 OpenRouter Vertex 路由的可用性承�
 依据 [主窗口诊断](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5997378844)，
 旧第三方国家查询被限流/质询；切换同域 trace，无新增查询回退入口。主窗口报告的 loc=US
 不代替本执行器下一次启动时的检查。本轮只做合成测试，不查询真实出口或发送模型请求。
-清单 `596c57a3…a10ef7`、样本及费用上界保持不变。最终迁移编号按最新安排为 0175，本轮不改迁移。
+清单 `596c57a3…a10ef7`、样本及费用上界保持不变。最终迁移编号按最新安排为 0176，本轮不改迁移。
 
 ## 输出语义证据与 profile 上限（2026-10-06）
 

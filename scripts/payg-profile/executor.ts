@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
-import {batchId,createSamplePlan,priceSchema,recordSamples} from './sampling';
+import {priceSchema,recordSamples} from './sampling';
+import {createR5bPlan,R5B_ID} from './batch-r5b';
 import {openRouterAdapter} from '../../packages/api/src/services/bill2/openRouterAdapter';
 import {decimal} from '../../packages/api/src/services/bill2/decimal';
 import type {CallIdentity,TransportObservation} from '../../packages/api/src/services/bill2/fixtureAdapter';
@@ -9,7 +10,7 @@ import type {OpenRouterIdentity} from '../../packages/api/src/services/bill2/ope
 import type {OpenRouterLimits} from '../../packages/api/src/services/bill2/openRouterPolicy';
 import {decodeOpenRouterStreamObservation} from '../../packages/api/src/services/bill2/openRouterEvidence';
 
-export type Plan=ReturnType<typeof createSamplePlan>;
+export type Plan=ReturnType<typeof createR5bPlan>;
 export type Sample=Plan['manifest']['samples'][number];
 export type Event=Record<string,unknown>;
 export type Journal={append:(event:Event)=>Promise<void>;events:Event[];
@@ -20,9 +21,8 @@ const integer=(value:unknown):number|null=>typeof value==='string'&&/^\d+$/.test
 
 export function verifiedPlan(prices:unknown,manifest:unknown,approvedHash:string){
  const id=(manifest as {batch?:{id?:string}}|null)?.batch?.id;
- const selected=id===batchId('r4')?'r4':id===batchId('r5')?'r5':null;
- if(!selected)throw new Error('APPROVED_MANIFEST_MISMATCH');
- const plan=createSamplePlan(prices,selected);
+ if(id!==R5B_ID)throw new Error('APPROVED_MANIFEST_MISMATCH');
+ const plan=createR5bPlan(prices);
  if(!isDeepStrictEqual(plan.manifest,manifest)||approvedHash!==plan.manifest.manifestHash)
   throw new Error('APPROVED_MANIFEST_MISMATCH');
  if(!plan.manifest.currentPricesVerified||decimal(plan.manifest.cumulativeUpperUsd)>=decimal('25')
@@ -34,7 +34,7 @@ export function verifiedPlan(prices:unknown,manifest:unknown,approvedHash:string
 
 // Only exact, known codes may reach public output; never emit upstream error text.
 const failureCodes=new Set([
- 'SIBLING_BATCH_UNSETTLED','SIBLING_BATCH_BUDGET_EXCEEDED',
+ 'SIBLING_BATCH_UNSETTLED','SIBLING_BATCH_BUDGET_EXCEEDED','PRIOR_ACCOUNTING_MISMATCH','SUPERSEDED_BATCH_ATTEMPTED',
  'PROXY_REQUIRED','PROXY_INVALID','PROXY_BYPASS_NOT_ALLOWED','PROXY_COUNTRY_CHECK_FAILED','PROXY_COUNTRY_NOT_ALLOWED',
  'EXECUTION_AUTHORIZATION_REQUIRED','APPROVED_TEST_CREDENTIAL_MISSING','APPROVED_MANIFEST_MISMATCH',
  'PLAN_NOT_EXECUTABLE','DUPLICATE_SAMPLE','BATCH_ALREADY_ATTEMPTED_NO_AUTOMATIC_RESUME',

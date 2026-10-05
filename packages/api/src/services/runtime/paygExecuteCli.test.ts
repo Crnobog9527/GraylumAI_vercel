@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {mkdtemp,readFile,readdir,rm,writeFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,readdir,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import manifest from '../../../../../docs/launch/evidence/payg-profile-20261006-r4.manifest.json';
+import manifest from '../../../../../docs/launch/evidence/payg-profile-20261006-r5b.manifest.json';
 const state=vi.hoisted(()=>({home:''}));
 vi.mock('node:os',async(importOriginal)=>({...await importOriginal<typeof import('node:os')>(),homedir:()=>state.home}));
 vi.mock('../../../../../scripts/payg-profile/executor',async(importOriginal)=>({
@@ -13,11 +13,11 @@ vi.mock('../../../../../scripts/payg-profile/executor',async(importOriginal)=>({
 }));
 vi.mock('../../../../../scripts/payg-profile/proxy-preflight',()=>({verifyProxyCountry:vi.fn()}));
 import {verifyProxyCountry} from '../../../../../scripts/payg-profile/proxy-preflight';
-import {main,checkSibling} from '../../../../../scripts/payg-profile/execute-cli';
+import {main} from '../../../../../scripts/payg-profile/execute-cli';
 import {executePlan,verifyCatalog} from '../../../../../scripts/payg-profile/executor';
 const root=fileURLToPath(new URL('../../../../../',import.meta.url));
 const args=['execute-approved',resolve(root,'scripts/payg-profile/plan-prices.json'),
- resolve(root,'docs/launch/evidence/payg-profile-20261006-r4.manifest.json'),manifest.manifestHash,'owner-approved-test-balance-only'];
+ resolve(root,'docs/launch/evidence/payg-profile-20261006-r5b.manifest.json'),manifest.manifestHash,'owner-approved-test-balance-only'];
 let cwd:string,exitCode:typeof process.exitCode;
 beforeEach(async()=>{
  state.home=await mkdtemp(join(tmpdir(),'payg-cli-test-'));cwd=process.cwd();process.chdir(root);exitCode=process.exitCode;
@@ -71,18 +71,9 @@ it.each(['PROXY_REQUIRED','PROXY_COUNTRY_NOT_ALLOWED','PROXY_COUNTRY_CHECK_FAILE
  expect(verifyCatalog).not.toHaveBeenCalled();expect(executePlan).not.toHaveBeenCalled();
 },30000);
 
-it('a used sibling must be settled within its reserved upper before any further batch',async()=>{
- const h='a'.repeat(64);
- await checkSibling(state.home,h,'1');
- await writeFile(join(state.home,'attempted.lock'),'locked');
- await expect(checkSibling(state.home,h,'1')).rejects.toThrow('SIBLING_BATCH_UNSETTLED');
- const save=(value:unknown)=>writeFile(join(state.home,'report.json'),JSON.stringify(value));
- await save(null);
- await expect(checkSibling(state.home,h,'1')).rejects.toThrow('SIBLING_BATCH_UNSETTLED');
- await save({manifestHash:h,actualUsd:null,knownUsd:'0',unknownCostSamples:1});
- await expect(checkSibling(state.home,h,'1')).rejects.toThrow('SIBLING_BATCH_UNSETTLED');
- await save({manifestHash:h,actualUsd:'1.1',knownUsd:'1.1',unknownCostSamples:0});
- await expect(checkSibling(state.home,h,'1')).rejects.toThrow('SIBLING_BATCH_BUDGET_EXCEEDED');
- await save({manifestHash:h,actualUsd:'0.1',knownUsd:'0.1',unknownCostSamples:0});
- await expect(checkSibling(state.home,h,'1')).resolves.toBeUndefined();
+it('an attempted retired r5 stops before proxy, credential use or any new claim',async()=>{
+ const dir=join(state.home,'.local/state/graylum/payg-profile',manifest.supersedes[0]);
+ await mkdir(dir,{recursive:true});await writeFile(join(dir,'attempted.lock'),'preserved');
+ await expect(main(args)).rejects.toThrow('SUPERSEDED_BATCH_ATTEMPTED');
+ expect(verifyProxyCountry).not.toHaveBeenCalled();expect(executePlan).not.toHaveBeenCalled();
 });

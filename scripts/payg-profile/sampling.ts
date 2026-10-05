@@ -40,8 +40,9 @@ function sized(seed:string,bytes:number){
  for(const character of seed){const n=Buffer.byteLength(character);if(n>rest)break;tail+=character;rest-=n;}
  return seed.repeat(count)+tail+'x'.repeat(rest);
 }
-function requestFor(r:Route,category:typeof categories[number],target:number,variant:number,O:number,
- reasoning:ReasoningPolicy,messageCount?:number,neutralJson=false,outputStress=false){
+export function requestFor(r:Route,category:typeof categories[number],target:number,variant:number,O:number,
+ reasoning:ReasoningPolicy,messageCount?:number,neutralJson=false,outputStress=false,
+ scope?:{phase:'organizer'|'attached_organizer';format:'serial-tools-v6-reasoning'|'serial-tools-v4-stream'|'agent-turn-v5-stream'}){
  const providerLimits={providerSlug:r.endpointTag,contextTokens:r.contextTokens,promptUsdPerMillion:r.prompt,
   completionUsdPerMillion:r.completion,requestUsd:r.request,...(r.write?{cacheWriteUsdPerMillion:r.write}:{})};
  const policy={modelId:'10000000-0000-4000-8000-000000000001',model:r.model,provider:'openrouter',account:'offline-only',
@@ -52,9 +53,10 @@ function requestFor(r:Route,category:typeof categories[number],target:number,var
   '"000001 | item 000001 | quantity 17 | color blue | status available". '+
   'Increment both row numbers. Produce every row explicitly; do not summarize, use ellipses, or add a conclusion. '+
   'Do not stop early. Start row 000001 immediately and continue until the output limit stops generation. ';
- const instructions=outputStress?outputInstruction:target>4096?sized('Analyze the following synthetic dataset. Preserve its provenance.\n',8192):
+ const instructions=scope?`Organize synthetic records ${scope.phase}/${scope.format}. Preserve provenance and uncertainty. Do not add facts.`:
+  outputStress?outputInstruction:target>4096?sized('Analyze the following synthetic dataset. Preserve its provenance.\n',8192):
   'Analyze the following synthetic dataset. Preserve provenance and uncertainty.';
- const promptCache=freezePromptCache({real:true,role:'skill',model:r.model,cacheWriteUsdPerMillion:r.write,
+ const promptCache=freezePromptCache({real:true,role:scope?.phase??'skill',model:r.model,cacheWriteUsdPerMillion:r.write,
   instructions,skillChars:instructions.length});
  const toolSample=category==='tools';
  const parameters={type:'object',properties:{query:{type:'string',description:'Find the requested synthetic record.'}},additionalProperties:false};
@@ -85,8 +87,9 @@ function requestFor(r:Route,category:typeof categories[number],target:number,var
    outputInstruction:''}${data}`;
   return openRouterRequestBody(JSON.stringify({model:r.model,messages,store:false,max_tokens:O,...frozenReasoningFields(reasoning),
    ...(toolSample?{tools:[{type:'function',function:{name:'read_source',description:'Read a synthetic owned record',parameters}}]}:{})}),
-  {context:{providerRequestFormat:'serial-tools-v6-reasoning',tools:toolSample?['read_source']:[],workspaceContext:toolSample,
-   network:'deny',reasoning,promptCache},policy,phase:'skill',primaryDialogue:true});
+  {context:{providerRequestFormat:scope?.format??'serial-tools-v6-reasoning',tools:toolSample?['read_source']:[],workspaceContext:toolSample,
+   network:'deny',reasoning,promptCache,...(scope?.phase==='attached_organizer'?{attachedOrganizer:{reasoning}}:{})},
+   policy,phase:scope?.phase??'skill',primaryDialogue:scope?.phase!=='attached_organizer'});
  };
  const base=serialize('');
  if(target===0)return {body:base,providerLimits};
@@ -166,7 +169,7 @@ export function createSamplePlan(input:unknown,selected:SamplingBatch='r4'){
 function promptCacheLabel(r:Route){return r.model.startsWith('anthropic/')?'explicit-ephemeral':'repeated-system-prefix';}
 /** Offline projection only: unknown/native-token conflicts remain unknown, never pass as zero.
  * Input receipts must already have been obtained by an separately authorized sampling executor. */
-export function recordSamples(manifest:ReturnType<typeof createSamplePlan>['manifest'],receipts:unknown[]){
+export function recordSamples(manifest:Pick<ReturnType<typeof createSamplePlan>['manifest'],'manifestHash'|'samples'>,receipts:unknown[]){
  const {manifestHash,...contents}=manifest;
  if(hash(JSON.stringify(contents))!==manifestHash)throw new Error('MANIFEST_HASH_MISMATCH');
  const receipt=z.object({sampleId:z.string(),requestHash:z.string(),model:z.string(),endpointTag:z.string(),

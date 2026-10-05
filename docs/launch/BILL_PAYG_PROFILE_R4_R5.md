@@ -1,6 +1,6 @@
 # BILL-PAYG r4/r5 离线预演（2026-10-06）
 
-**预演记录；r4 已授权执行，最新结果见 PR。r5 未执行、不得执行。** 两批分别授权。
+**历史预演：r4 已执行并锁定；原 r5 已作废，不执行。当前方案见 [r5b](BILL_PAYG_PROFILE_R5B.md)。**
 依据：[主窗口技术决定与第三批审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5999267254)。
 
 ## 小输出上限与验收

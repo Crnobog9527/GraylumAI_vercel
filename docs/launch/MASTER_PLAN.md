@@ -659,6 +659,13 @@ PURPOSE_OUTPUT_CAP（8192）。证据分别记录 testedOutputLimit 与允许的
 取代上一条“profile 只能填写较小 outputLimit、不放行更大请求”的限制；输入、缓存、费用和思考设置覆盖要求不变。
 本轮只授权 r4，r5 不得执行；任何停止不补跑，配置建议只写 PR，由主窗口决定应用。累计预算仍 $25。
 
+**2026-10-06：BILL-PAYG r4费用确认与r5b准备**
+
+依据：[Owner后台核实](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6000132517)。
+r4第77条未收费，按$0入账；r4已入账$0.179168465，前四批累计$4.989307965，原始UNKNOWN回执不改写。
+本次Owner要求原r5作废，改为r5b的Gemini76条、Sonnet新ID输出4条，并补齐Luna整理用途/格式缺口。
+取代此前r5独立执行安排，累计限额仍$25；只准备，主窗口复核通知前不得发送真实请求。
+
 ### 2.2 被本版取代的旧规则
 
 | 旧规则 | 出处 | 本版处理 |
