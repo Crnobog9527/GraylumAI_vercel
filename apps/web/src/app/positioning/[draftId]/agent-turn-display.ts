@@ -152,14 +152,19 @@ function unavailableNotice(source: MentorReplySource): ReplyNotice {
 }
 
 /**
- * A native-output envelope without a card may hold more than the shared display
- * limit (its size is bounded by the stored result instead); show all of it.
+ * The envelope's own `message` is what the turn shows. With a card it is the
+ * mentor's analysis followed by the card's words (Owner decision A, §2.3), so
+ * it is never swapped for the card's `message`: the shared parser prefers that
+ * one, which would drop the analysis after a reload. Older card turns stored
+ * the card's words as `message`, so they look the same. A native-output
+ * envelope may hold more than the shared display limit (its size is bounded by
+ * the stored result instead); show all of it.
  */
 function envelopeText(raw: string | null | undefined, body: ReturnType<typeof readAgentTurnBody>) {
-  if (!body.truncated || body.card || !raw) return body.message;
+  if (!raw || (!body.truncated && !body.card)) return body.message;
   try {
     const message = (JSON.parse(raw) as { message?: unknown }).message;
-    return typeof message === "string" ? message.trim() : body.message;
+    return typeof message === "string" && message.trim() ? message.trim() : body.message;
   } catch {
     return body.message;
   }
