@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Conservative reviewed subset, not a complete provider availability list. Sources are in the execution guide.
 const allowedCountries=new Set(['US','CA','GB','DE','FR','NL','JP','SG','AU','KR','TW']);
-export function requireProxy(env:NodeJS.ProcessEnv=process.env){
+export function requireProxy(env:Record<string,string|undefined>=process.env){
  if(env.NODE_USE_ENV_PROXY!=='1'||!env.HTTPS_PROXY?.trim())throw new Error('PROXY_REQUIRED');
  let proxy:URL;
  try{proxy=new URL(env.HTTPS_PROXY);}catch{throw new Error('PROXY_INVALID');}
