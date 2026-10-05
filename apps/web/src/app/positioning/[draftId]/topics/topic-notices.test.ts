@@ -79,3 +79,8 @@ it('does not repeat the live refusal error once the last turn shows it', () => {
   expect(topicTurnShows({ state: 'cancelled', unavailableReason: null }, PROVIDER_REJECTED_NOTICE)).toBe(false);
   expect(topicTurnShows(undefined, PROVIDER_REJECTED_NOTICE)).toBe(false);
 });
+
+it('leaves a paused topic turn to its pause notice', () => {
+  for (const state of ['waiting_credits', 'waiting_resume'])
+    expect(topicOpenTurnNotice({ executionId: 'e', state }, { busy: false, finished: null, stopping: false, onRetry: vi.fn(), onStop: vi.fn() })).toBeNull();
+});

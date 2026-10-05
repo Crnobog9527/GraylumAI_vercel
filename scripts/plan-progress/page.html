@@ -1,0 +1,215 @@
+<title>__PLAN_PROGRESS_TITLE__</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+  /* 布局：顶部摘要（分段进度条 + 状态筛选），下面按 Master Plan 阶段分组的任务卡片网格，最后是计划外工作 */
+  :root {
+    --bg: #f5f6f8; --surface: #ffffff; --line: #dde1e8; --fg: #1b2230; --muted: #5d6779;
+    --accent: #2f5bd3;
+    --done: #1f8a52; --doing: #2f5bd3; --plan: #7a4fc4; --blocked: #b86e00; --todo: #8a93a3; --closed: #a3a9b4;
+    --done-bg: #e3f4ea; --doing-bg: #e5ecfb; --plan-bg: #efe8fa; --blocked-bg: #fbefdc; --todo-bg: #eceef2; --closed-bg: #f0f1f3;
+    --font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151b; --surface: #1a1f28; --line: #2c3340; --fg: #e6e9ef; --muted: #9aa3b2; --accent: #7d9cf0;
+      --done: #4cc585; --doing: #7d9cf0; --plan: #b394ec; --blocked: #f0a83c; --todo: #8a93a3; --closed: #6c7380;
+      --done-bg: #173325; --doing-bg: #1c2a4a; --plan-bg: #2a2142; --blocked-bg: #3a2a12; --todo-bg: #232833; --closed-bg: #20242c;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151b; --surface: #1a1f28; --line: #2c3340; --fg: #e6e9ef; --muted: #9aa3b2; --accent: #7d9cf0;
+    --done: #4cc585; --doing: #7d9cf0; --plan: #b394ec; --blocked: #f0a83c; --todo: #8a93a3; --closed: #6c7380;
+    --done-bg: #173325; --doing-bg: #1c2a4a; --plan-bg: #2a2142; --blocked-bg: #3a2a12; --todo-bg: #232833; --closed-bg: #20242c;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.55 var(--font-ui); }
+  .wrap { max-width: 1180px; margin: 0 auto; padding-inline: 16px; padding-block: 24px 48px; display: grid; gap: 28px; }
+  header { display: grid; gap: 14px; }
+  h1 { margin: 0; font-size: 1.6rem; letter-spacing: 0.01em; text-wrap: balance; }
+  .meta { color: var(--muted); font-size: 0.85rem; }
+  .meta code { font-family: var(--font-mono); }
+  .summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+  .big { font-size: 2.4rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+  .bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--line); }
+  .bar span { display: block; height: 100%; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--fg); font: inherit; font-size: 0.85rem; cursor: pointer;
+  }
+  .chip[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .chip:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .num { font-variant-numeric: tabular-nums; color: var(--muted); }
+  .phases { display: grid; gap: 28px; }
+  section.phase { display: grid; gap: 12px; }
+  [hidden] { display: none !important; }
+  .phase-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  .phase-head h2 { margin: 0; font-size: 1.1rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: 12px; }
+  .card {
+    min-width: 0; display: grid; gap: 8px; align-content: start; padding: 12px 14px; background: var(--surface);
+    border: 1px solid var(--line); border-left: 4px solid var(--status); border-radius: 8px;
+  }
+  .card-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .name { font-family: var(--font-mono); font-weight: 600; font-size: 0.92rem; overflow-wrap: anywhere; }
+  .pill { flex: none; padding: 1px 8px; border-radius: 999px; font-size: 0.78rem; color: var(--status); background: var(--status-bg); font-weight: 600; }
+  .reason { color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; }
+  .row { display: flex; flex-wrap: wrap; gap: 4px 6px; font-size: 0.8rem; align-items: baseline; }
+  .label { color: var(--muted); }
+  .dep { font-family: var(--font-mono); padding: 0 6px; border-radius: 4px; background: var(--todo-bg); }
+  .dep.ok { color: var(--done); background: var(--done-bg); }
+  .dep.no { color: var(--blocked); background: var(--blocked-bg); }
+  .prs a { color: var(--accent); text-decoration: none; font-variant-numeric: tabular-nums; }
+  .prs a:hover { text-decoration: underline; }
+  .prs a.open { font-weight: 700; }
+  .prs a.closed { color: var(--muted); text-decoration: line-through; }
+  details { font-size: 0.82rem; }
+  details summary { cursor: pointer; color: var(--muted); }
+  details p { margin: 6px 0 0; overflow-wrap: anywhere; }
+  .s-已完成 { --status: var(--done); --status-bg: var(--done-bg); }
+  .s-实施中 { --status: var(--doing); --status-bg: var(--doing-bg); }
+  .s-方案中 { --status: var(--plan); --status-bg: var(--plan-bg); }
+  .s-被阻塞 { --status: var(--blocked); --status-bg: var(--blocked-bg); }
+  .s-未开始 { --status: var(--todo); --status-bg: var(--todo-bg); }
+  .s-已关闭 { --status: var(--closed); --status-bg: var(--closed-bg); }
+  .extra { display: grid; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+  .extra h2 { margin: 0; font-size: 1.05rem; }
+  .extra ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
+  .extra li { overflow-wrap: anywhere; }
+  .extra a { color: var(--accent); }
+  .warn { border-color: var(--blocked); }
+  .empty { color: var(--muted); font-size: 0.85rem; }
+  @media (prefers-reduced-motion: no-preference) { .bar span { transition: width 0.3s ease; } }
+  /* 路线图：竖向地铁线，左边一条线串起站点圆点；电脑上顶部另有一条可横向滚动的线路一览 */
+  .roadmap { display: grid; gap: 18px; }
+  .hero { display: grid; gap: 6px; }
+  .hero h1 { margin: 0; font-size: 1.55rem; letter-spacing: 0.01em; text-wrap: balance; }
+  .now { margin: 0; font-size: 1.15rem; }
+  .now strong { color: var(--doing); }
+  .sub { margin: 0; color: var(--muted); font-size: 0.85rem; max-width: 65ch; }
+  .asks { margin-top: 6px; padding: 10px 12px; border-radius: 8px; background: var(--blocked-bg); color: var(--fg); font-size: 0.9rem; }
+  .asks ul { margin: 4px 0 0; padding-left: 1.2em; display: grid; gap: 2px; }
+  .strip { display: none; list-style: none; margin: 0; padding: 4px 2px 10px; overflow-x: auto; gap: 0; }
+  @media (min-width: 760px) { .strip { display: flex; } }
+  .mini { flex: none; position: relative; width: 112px; }
+  .mini a { display: grid; justify-items: center; gap: 6px; text-decoration: none; color: var(--fg); padding-top: 2px; }
+  .mini::before { content: ""; position: absolute; top: 9px; left: -50%; width: 100%; height: 4px; background: var(--line); z-index: 0; }
+  .mini:first-child::before { display: none; }
+  .mini.st-done::before, .mini.current::before { background: var(--done); }
+  .mdot { position: relative; z-index: 1; width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--todo); background: var(--surface); }
+  .mini.st-done .mdot { background: var(--done); border-color: var(--done); }
+  .mini.st-doing .mdot { border-color: var(--doing); }
+  .mini.current .mdot { background: var(--doing); border-color: var(--doing); box-shadow: 0 0 0 5px var(--doing-bg); }
+  .mini.terminal .mdot { width: 22px; height: 22px; margin-top: -2px; border-width: 5px; }
+  .mlabel { font-size: 0.75rem; text-align: center; line-height: 1.3; padding: 0 4px; }
+  .mini.current .mlabel { font-weight: 700; color: var(--doing); }
+  .mini.later { opacity: 0.45; }
+  .mini.divider { width: 96px; display: grid; place-items: start center; color: var(--muted); font-size: 0.72rem; padding-top: 1px; }
+  .mini.divider::before { background: repeating-linear-gradient(90deg, var(--line) 0 6px, transparent 6px 10px); }
+  .line { list-style: none; margin: 0; padding: 0 0 0 4px; display: grid; }
+  .station { position: relative; padding: 0 0 6px 30px; }
+  .station::before { content: ""; position: absolute; left: 7px; top: 0; bottom: 0; width: 4px; background: var(--line); }
+  .station.st-done::before { background: var(--done); }
+  .station:first-child::before { top: 10px; }
+  .station.terminal::before { bottom: auto; height: 12px; }
+  .station .dot { position: absolute; left: 0; top: 4px; width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--todo); background: var(--surface); z-index: 1; }
+  .station.st-done .dot { background: var(--done); border-color: var(--done); }
+  .station.st-doing .dot { border-color: var(--doing); }
+  .station.current .dot { background: var(--doing); border-color: var(--doing); box-shadow: 0 0 0 5px var(--doing-bg); }
+  .station.terminal .dot { width: 22px; height: 22px; left: -2px; top: 2px; border-width: 5px; }
+  .station.later { opacity: 0.55; }
+  .station.later::before { background: repeating-linear-gradient(180deg, var(--line) 0 6px, transparent 6px 10px); }
+  .station > details > summary { list-style: none; cursor: pointer; display: grid; gap: 2px; padding: 2px 0 2px; }
+  .station > details > summary::-webkit-details-marker { display: none; }
+  .station.current > details > summary { background: var(--doing-bg); border-radius: 8px; padding: 6px 10px; margin-left: -6px; }
+  .sline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+  .snum { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 0.8rem; }
+  .sname { font-weight: 700; font-size: 1.05rem; }
+  .sname::after { content: " ▸"; color: var(--muted); font-weight: 400; font-size: 0.8rem; }
+  details[open] > summary .sname::after { content: " ▾"; }
+  .splain { color: var(--muted); font-size: 0.88rem; max-width: 70ch; margin: 0; }
+  @media (min-width: 760px) { .sline .splain { flex: 1 1 24em; } }
+  .badge { font-size: 0.75rem; font-weight: 600; padding: 0 8px; border-radius: 999px; }
+  .b-done { color: var(--done); background: var(--done-bg); }
+  .b-now { color: var(--surface); background: var(--doing); }
+  .b-doing { color: var(--doing); background: var(--doing-bg); }
+  .b-todo { color: var(--muted); background: var(--todo-bg); }
+  .b-later { color: var(--muted); background: var(--closed-bg); }
+  .note { font-size: 0.82rem; color: var(--muted); }
+  .note.n-ask { color: var(--fg); }
+  .note.n-ask b { color: var(--blocked); background: var(--blocked-bg); padding: 0 6px; border-radius: 4px; margin-right: 6px; }
+  .note.n-short { color: var(--blocked); }
+  .inner { padding: 10px 0 14px; display: grid; gap: 10px; }
+  .tcards { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .tcard {
+    display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: start;
+    padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  }
+  .tag { grid-row: span 2; font-size: 0.78rem; font-weight: 700; padding: 2px 10px; border-radius: 999px; white-space: nowrap; }
+  .t-ask { border-color: var(--blocked); }
+  .t-ask .tag { color: var(--surface); background: var(--blocked); }
+  .t-doing .tag { color: var(--surface); background: var(--doing); }
+  .t-todo .tag { color: var(--muted); background: var(--todo-bg); }
+  .t-done .tag { color: var(--done); background: var(--done-bg); }
+  .t-closed .tag { color: var(--muted); background: var(--closed-bg); }
+  .t-done .ttext, .t-closed .ttext { color: var(--muted); }
+  .tbody { min-width: 0; display: grid; gap: 2px; }
+  .ttext { margin: 0; font-size: 0.95rem; line-height: 1.45; }
+  .tsub { margin: 0; font-size: 0.8rem; color: var(--muted); }
+  .t-ask .tsub { color: var(--blocked); font-weight: 600; }
+  .tprs { grid-column: 2; justify-self: end; font-size: 0.72rem; color: var(--muted); }
+  .tprs summary { cursor: pointer; }
+  .tprs ul { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; text-align: left; }
+  .tprs li { overflow-wrap: anywhere; }
+  .tprs a { color: var(--accent); }
+  .tdone > summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; padding: 2px 0 8px; }
+  @media (max-width: 480px) {
+    .tcard { grid-template-columns: minmax(0, 1fr); }
+    .tag { grid-row: auto; justify-self: start; }
+    .tprs { grid-column: 1; }
+  }
+  details.later-block { margin-left: 4px; padding-left: 30px; position: relative; }
+  details.later-block::before { content: ""; position: absolute; left: 7px; top: -6px; height: 22px; width: 4px;
+    background: repeating-linear-gradient(180deg, var(--line) 0 6px, transparent 6px 10px); }
+  details.later-block > summary { cursor: pointer; color: var(--muted); font-size: 0.88rem; padding: 2px 0 8px; }
+  details.later-block > .line { margin-left: -34px; }
+</style>
+
+<div class="wrap">
+__PLAN_PROGRESS_BODY__
+</div>
+
+<script>
+  // 只做可选的按状态筛选；内容已在生成时渲染好，不执行脚本也能完整显示。
+  (function () {
+    var active = {};
+    try { active = JSON.parse(localStorage.getItem('plan-progress-filter') || '{}') || {}; } catch (e) { active = {}; }
+    var chips = Array.prototype.slice.call(document.querySelectorAll('.chip[data-status]'));
+    function apply() {
+      var any = chips.some(function (chip) { return active[chip.dataset.status]; });
+      chips.forEach(function (chip) { chip.setAttribute('aria-pressed', active[chip.dataset.status] ? 'true' : 'false'); });
+      document.querySelectorAll('section.phase').forEach(function (section) {
+        var shown = 0;
+        section.querySelectorAll('.card').forEach(function (card) {
+          var visible = !any || Boolean(active[card.dataset.status]);
+          card.hidden = !visible;
+          if (visible) shown += 1;
+        });
+        section.querySelector('.empty').hidden = shown > 0;
+      });
+    }
+    chips.forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        active[chip.dataset.status] = !active[chip.dataset.status];
+        try { localStorage.setItem('plan-progress-filter', JSON.stringify(active)); } catch (e) { /* 本机便利项，失败不影响显示 */ }
+        apply();
+      });
+    });
+    apply();
+  })();
+</script>

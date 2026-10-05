@@ -22,6 +22,8 @@ import {
 } from './gate-notices';
 import { GUIDE_HELD_NOTICE, isOpenTurn, runtimeTailNotices, runtimeTurnNotices, type RuntimeTurn } from './runtime-notices';
 import { finishedExecution } from '@/lib/finished-execution';
+import { isOrganizerPendingError } from '@/lib/payg-wait';
+import { usePaygResume } from '@/lib/use-payg-resume';
 
 type VideoChoice='both'|'storyboard'|'editing';
 type VideoOperation={workItemId:string;choice?:VideoChoice;script:{requestId:string;executionId:string;expectedVersion:number};followup:{requestId:string;input:string;selection:{kind:'skill';moduleId:string;revisionId:string};executionId?:string};package:{requestId:string;expectedStoryboardVersion:number;expectedEditingVersion:number};sourceScriptId?:string;held?:boolean};
@@ -73,6 +75,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  function updateInput(value:string){setInput(value);if(sessionId)localStorage.setItem('opc-runtime-input:'+sessionId,value);}
  const choices=trpc.runtime.choices.useQuery(sessionId?{sessionId}:undefined);
  const view=trpc.runtime.view.useQuery({sessionId},{enabled:Boolean(sessionId),refetchInterval:5000});
+ const payg=usePaygResume(()=>view.refetch());
  const saved=trpc.opc.workResults.useQuery({sessionId},{enabled:Boolean(sessionId&&view.data?.scope?.kind==='work_item')});
  const saveWorkResult=trpc.opc.saveWorkResult.useMutation();
  const library=trpc.opc.library.useQuery({search:'',from:null,to:null},{enabled:Boolean(sessionId&&view.data?.scope?.kind==='work_item')});
@@ -86,7 +89,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   const stop=rememberGateStop(browserSession(),sessionId,executionId,result);if(stop)setGateStops(stops=>({...stops,[executionId]:stop}));
  }}),cancel=trpc.runtime.cancel.useMutation();
  const [videoBusy,setVideoBusy]=useState(false),[,setVideoUiRevision]=useState(0);
- const busy=start.isPending||prepare.isPending||execute.isPending||videoBusy||guiding;
+ const busy=start.isPending||prepare.isPending||execute.isPending||videoBusy||guiding||payg.busy;
  const ordinary=choices.data?.models[0]?.id??'';
  const moduleSelection=requestedModule||storedModule;
  const chosenModule=choices.data?.skills.find(skill=>skill.moduleId===moduleSelection);
@@ -145,6 +148,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   const submitted=input;if(!scriptRequest)setOutgoing({text:submitted});
   const admitted=await prepare.mutateAsync({sessionId,requestId,input:scriptRequest?'[OPC_SCRIPT_V1] 请基于当前选题简报讨论并给出可修改的口播稿。'+(submitted.trim()||'先给我一版口播稿。'):submitted,selection:selected,network:'deny',sources:[]});
   if(!alive.current)return;
+  // Q1: the previous organizer answered instead; this message was not stored. Input and request id stay.
+  if(!payg.admitted(admitted)){setOutgoing(null);await view.refetch();return;}
   setOutgoing(old=>old&&{...old,executionId:admitted.executionId});
   void utils.opc.conversations.invalidate();
   sessionStorage.removeItem('opc-runtime-send:'+sessionId);
@@ -154,6 +159,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   if(alive.current){if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(admitted.executionId);setError('本次必要材料超过模型输入容量。原请求和已完成内容已保留；请点“停止”后缩短材料再发送。');}await Promise.all([view.refetch(),utils.opc.conversations.invalidate()]);}
  }catch(cause){if(!alive.current)return;const gate=runtimeAdmissionNotice(cause);
   setOutgoing(old=>old?.executionId?old:null); // Not admitted: the text is still in the box.
+  if(isOrganizerPendingError(cause)){payg.block();await view.refetch();return;}
   setError(gate??'请求状态待核实。请读取原任务状态，不要重新发送相同内容。');await view.refetch();}}
  const initialSend=useRef(false);
  useEffect(()=>{
@@ -245,7 +251,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   setUserStops(ids=>ids.includes(executionId)?ids:[...ids,executionId]);
   try{await cancel.mutateAsync({executionId});await view.refetch();}catch{setError('取消状态待核实，请读取原任务。');}}
  async function recover(executionId:string){setError('');try{const executed=await execute.mutateAsync({executionId});if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(executionId);setError('原请求的必要材料超过模型输入容量，无法继续发送。已有内容已保留；请点“停止”后缩短材料再发送。');}await view.refetch();}catch{setError('暂时无法恢复，请保留原任务。');}}
- const executions=view.data?.executions as Array<{executionId:string;createdAt?:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;historyOmitted?:boolean;contentAvailable:boolean}>|undefined;
+ const executions=view.data?.executions as Array<{executionId:string;createdAt?:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;historyOmitted?:boolean;contentAvailable:boolean;cursor?:number|null;epoch?:number|null;remainingCalls?:number|null}>|undefined;
  const capacitySignature=executions?.map(e=>e.executionId+':'+e.state).join('|');
  useEffect(()=>{setGateStops(gateStopNotices(browserSession(),sessionId,executions??[]));setUserStops(userStopIds(browserSession(),sessionId,executions??[]));
  // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -318,14 +324,15 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
      {workItem&&e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&e.contentAvailable?<div className={workStyles.proposal}><div className={workStyles.proposalHead}><strong>建议稿</strong><span>{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?'已采用':'尚未采用'}</span></div><MessageMarkdown className={workStyles.reply} text={displayReply(e.input,e.body??e.primaryBody)}/></div>:showsReply(e)&&(e.contentAvailable?<MessageMarkdown className={workStyles.reply} text={displayReply(e.input,e.body??e.primaryBody)}/>:<p className={workStyles.reply}>来源已不可用，暂不展示此内容。</p>)}
      {workItem&&contentType!=='unknown'&&e.state==='completed'&&e.skillExecution&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&<div className="mt-3 flex flex-wrap gap-2">{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?<Link className="underline" href={'/library?item='+workItem.workItemId+'&return='+sessionId}>{isVideo?'这版口播稿已定稿':'已采用为草稿'} · 查看</Link>:<Button disabled={busy} onClick={()=>finalizeScript(e.executionId)}>{isVideo?'将这条回复定稿为口播稿':'采用为当前草稿'}</Button>}</div>}
      {workItem&&contentType==='unknown'&&e.state==='completed'&&e.skillExecution&&e.contentAvailable&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&<div className="mt-2">{saved.data?.find((result:{artifactId:string;version:number})=>result.artifactId===e.executionId)?<p role="status">已保存成果 · 第 {saved.data.find((result:{artifactId:string;version:number})=>result.artifactId===e.executionId)?.version} 版</p>:<Button variant="outline" disabled={saveWorkResult.isPending} onClick={()=>persistSkillResult(e.executionId)}>保存 Skill 成果</Button>}</div>}
-     <ChatNoticeList notices={turnNotices(e)}/>
+     <ChatNoticeList notices={[...turnNotices(e),...payg.turnNotices(e,busy)]}/>
     </div></div>
    </article></div>)}
    {isVideo&&currentScript&&videoPromptEnded&&(!currentStoryboard||!currentEditing)&&<Button variant="outline" onClick={()=>{localStorage.removeItem('opc-video-ended:'+currentScript.id);setVideoUiRevision(v=>v+1);}}>继续这版口播稿的分镜或剪辑</Button>}
    {isVideo&&currentScript&&!videoPromptEnded&&(!currentStoryboard||!currentEditing)&&<section aria-label="口播稿后续选择" className="space-y-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4"><h2 className="font-medium">{currentStoryboard?'分镜已保存。要基于这版分镜生成剪辑建议吗？':'口播稿已定稿。要先制作分镜脚本吗？'}</h2><p className="text-sm text-[var(--text-secondary)]">本次只绑定口播稿第 {currentScript.version} 版。选择后才会调用 Agent；以后重新定稿口播稿时不会自动生成。</p><div className="flex flex-wrap gap-2">{!currentStoryboard&&<Button disabled={busy||currentEditing} onClick={()=>chooseVideo('both')}>先做分镜，再生成剪辑建议</Button>}{!currentStoryboard&&<Button variant="outline" disabled={busy} onClick={()=>chooseVideo('storyboard')}>只生成分镜</Button>}{currentStoryboard&&<Button variant="outline" disabled={busy||currentEditing} onClick={()=>chooseVideo('editing')}>只生成剪辑建议</Button>}<Button variant="ghost" disabled={busy} onClick={()=>chooseVideo('end')}>暂时结束</Button></div><p className="text-xs text-[var(--text-tertiary)]">也可以在消息框输入同样的选择；提问卡和自然语言只执行同一个业务动作。</p></section>}
 {pendingOutgoing&&<article className={workStyles.turn} data-message-role="user"><p className={workStyles.userMessage}>{pendingOutgoing.text}
     <ChatPendingStatus sending={busy}/></p></article>}
-   <ChatNoticeList notices={runtimeTailNotices({error,heldGuide,busy,onGuide:()=>void guide(),lastTurn})}/></section>
+   <ChatNoticeList notices={[...payg.blockedNotices(executions,busy),...runtimeTailNotices({error,heldGuide,busy,onGuide:()=>void guide(),lastTurn})]}/>
+   </section>
   </div>
   {sessionId&&<footer className={`${composerStyles.zone} ${workStyles.composerZone}`}><div className={composerStyles.wrap}>
    {workItem&&isVideo&&<Button variant="outline" disabled={busy||Boolean(view.data?.activeExecution)||!choices.data?.defaultSkill} onClick={()=>send(true)}>{currentScript?'修改口播稿':'起草口播稿'}</Button>}

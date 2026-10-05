@@ -8,6 +8,7 @@
 > 进度同步：2026-10-02（PLAN-SYNC-1002），依据 staging `9cb6cb84cf096de70c4a5b3337db2f5b04406c22`，同步 #566 之后的 Owner 决定（第 2.1 节第 13、24、35–37 项）、#497 冻结 head、PROMPT-CACHE 立项和交付状态；来源及原话见第 2.1 节，合并提交见第 7.0 节。
 > 进度同步：2026-10-03（MASTER-PLAN-SYNC），依据 staging `1563a44d66d88faf7a9f69cd080e14b843382c16`（#613）和 GitHub 实时状态，同步 #570 之后到 #613 的合并、迁移 0155–0160 的 staging 应用记录、2026-10-02—03 的 Owner 决定（第 2.1 节第 38–49 项）和施工顺序；还在审或待写的方案标为"方向已定、方案待审/待写"。只记录已有的决定，不改变产品规则的含义。
 > 进度同步：2026-10-04（MASTER-PLAN-SYNC-1004），依据 staging `76fee31bd8b4d33c6f59074b2c3b3716efed650c`（#624），只同步 #618 合并后总控评论记录的 Owner 定价和付费墙决定（第 2.1 节第 51 项）及受影响的取代表、第 4 节、第 7.1、7.5、7.6 节任务行和第 10 节；不更新其他进度。
+> 进度改为自动生成（2026-10-05，PLAN-PROGRESS-AUTO）：本文从此不再手写进度，任务状态由 `scripts/plan-progress.mjs` 根据第 7.1 节任务表和 GitHub PR 生成（第 7.0 节）；上面各轮"进度同步"只作历史记录。
 > 本文是**唯一的当前产品规划**，取代 [v11](Graylum_Master_Plan_v11.md) 的施工顺序和状态描述。v11 及更早文档中仍然有效的详细要求，由第 9 节逐项列明继续适用。
 > 本文不授予任何执行权限。仓库操作、风险分级、审查和合并只按 [AGENTS.md](../../AGENTS.md)；具体功能要等 Owner 选定批次后才开工（第 7.4 节）。
 
@@ -31,16 +32,14 @@
 
 **Graylum 是什么**：给一人公司和社媒新手用的增长教练 Agent。主线是：业务定位 → 按周选题 → 写具体内容（文章 / 视频口播稿，视频再配分镜和剪辑建议）→ 用户发布 → 数据回流和复盘 → 调整下一轮。
 
-**现在到哪了**（2026-10-03）：AC1-4（#497）已合并，迁移 0155 已应用，staging 验收完成；导师用途当前计划在后台选 Claude Sonnet 5.5（第 38 项；模型以后台设置为准，第 50 项）。BILL-UNIT（#565，0157）、PROMPT-CACHE（#572 方案、#591 实施）、MODEL-PRICING-SYNC（#578、#580、#581、#597）、RATE-LIMIT 接线与默认放行的 MODERATION-HOOK（#573 方案、#594 联合候选，B 段 staging 冒烟 PASS）、RUNTIME-VIEW-PERF（#586，0158）、PROMPT-CACHE-HISTORY H1（#610，默认不激活）、ENTITLEMENTS PR-2（#609）、右侧整理 B1（#593，0159）都已合并；DATA-ERASURE B2a（#550，0156）和注销在途收尾（#611，0160）已合并。当前主线：**BILL-PAYG PR-A（#617，在途）→ PR-B → CHAT-NATIVE-OUTPUT 续写 C2 → REPORT-GEN**；钱路线 PAY-COMMON 按 #608 从 PR-1（#612）开始并行。新方向两项："对话原生体验"方向已定、方案待审（#604，第 44 项）；"内容创作改为对话驱动"方向已定、方案待写（第 45 项）。详细证据见第 7.0 节；代码合并、迁移应用和产品验收分开记录。
-
-以下是 2026-10-02 同步时的状态，保留作历史：N1a 仍差 staging 导师出字速度实测，N1b 仍剩 AC1-4（#497，Codex 唯一写入）和 AC1-5。#497 已声明冻结 head `f9afd0db`，带迁移 0155，合并前须 Owner 另外批准应用到 staging（第 7.0 节）。MENTOR-BUDGET（#542、#551、#564）已合并；主线为 **#497 → DATA-ERASURE B2a（#550）→ BILL-UNIT（#565）→ BILL-PAYG（#553）→ REPORT-GEN（#547）**；新增上线必做的 PROMPT-CACHE，排在 #497 合并之后、BILL-PAYG 定稿之前（第 35 项）。DB-BASELINE #539 / #556、ENTITLEMENTS PR-1 #540、邀请防刷 #560、认证 #548 / #552 已合并，迁移 0151–0154 已应用到 staging。RATE-LIMIT #562 仅准备切片已合并，限流和暂停开关须在内测前接线；#561 的实测预算 Owner 已批准，真实发送入口须总控先审，尚未执行（第 13 项）。忘记密码 FORGOT-PASSWORD（#567、#568）已合并，staging 交互验收完成；关联 Google 的账号也能在个人中心改密码（#569）已合并、验收通过（第 36 项）。staging 只保留 auth-staging 入口（第 37 项）。内容审核暂缓，不阻塞封闭内测；默认放行的接口随 RATE-LIMIT 接线（第 19 项）。详细证据见第 7.0 节；代码合并、配置应用和产品验收分开记录。
+**现在到哪了**：以 `node scripts/plan-progress.mjs --ref origin/staging` 生成的进度为准（第 7.0 节）；本文不再手写进度。
 
 最初的问题（2026-09-27）：计费、Runtime、持久会话、定位草稿、周选题和资料库查看编辑的代码都已合并（#419、#421、#422 以及之后 10 个修复 #434–#443）。但 Owner 实际体验后认为定位对话"没有 Agent 感、笨重、慢"。原因已经查清：实现把 Skill 的步骤写成了逐题确认的表单；导师模型默认按最高档思考，导致很久不出字。
 
 **接下来按这个顺序做**：
 
-1. **马上**（**已完成**，2026-09-28）：合并已经修好的"导师不出字"问题（PR #446）；关掉一个没人用但仍可调用的旧付费接口，删掉会扣积分的临时脚本；把计费和恢复的集成测试放进 CI。
-2. **核心体验重做，分几次给你试**（**进行中**，样片剩余 AC1-5；AC1-4 已于 2026-10-02 合并并完成 staging 验收）：先用真实模型验证"现在的模型能不能驱动提问卡"，做一个你能亲手试的样片；再做完整定位流程；最后推广到自由对话和其他 Skill。
+1. **马上**：合并已经修好的"导师不出字"问题（PR #446）；关掉一个没人用但仍可调用的旧付费接口，删掉会扣积分的临时脚本；把计费和恢复的集成测试放进 CI。
+2. **核心体验重做，分几次给你试**：先用真实模型验证"现在的模型能不能驱动提问卡"，做一个你能亲手试的样片；再做完整定位流程；最后推广到自由对话和其他 Skill。
 3. **上线基础**：正式环境能真实调用模型（含止损和 BILL-PAYG 逐次冻结、按名义费用结算）、后台配置模型思考强度、第三方搜索和对标研究（基于真实数据）、会员权限、限流修复、账号注销和数据删除。不再做封闭内测，按 D1 范围完成后直接公开上线售卖（2026-10-03，第 2.1 节第 50 项）。
 4. **差异化功能**：Fusion 多模型（定稿报告评审、多模型对比），个人资料库和语料库（学习用户文风），输入框的引用和附件。
 5. **收费和上线**：Waffo 支付、下线旧对话链路、完整验收、发布。
@@ -63,6 +62,8 @@
 
 <a id="status"></a>
 ## 1. 现状（2026-09-27 核实，2026-10-03 更新）
+
+> 本节是 2026-10-03 的快照，保留作背景，之后不再更新；当前进度以第 7.0 节的生成结果为准。
 
 | 类别 | 状态 |
 | --- | --- |
@@ -989,126 +990,32 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 <a id="construction"></a>
 ## 7. 施工顺序
 
-### 7.0 进度（2026-10-03 同步）
+### 7.0 进度
 
-依据 staging `1563a44d` 和 GitHub 实时状态（2026-10-02 一轮依据 `9cb6cb84`）。下表合并提交由 `git log origin/staging` 实际读取并与 PR mergeCommit 核对。迁移 0155–0160 的 staging 应用依据各 PR 的总控执行记录（下文逐条链接）和仓库 `packages/db/migrations`；本任务没有连接任何数据库，不代称 Owner 产品验收通过。
+本文不再手写进度。每个任务现在处于哪个阶段、对应哪些 PR，以只读脚本 `scripts/plan-progress.mjs` 的生成结果为准：
 
-| 批次 | 状态 | 已合并的 PR 和说明 |
-| --- | --- | --- |
-| N1a 止血和保护 | **未完全完成**：只差出口条件"导师出字速度在 staging 实测达标" | P0-1 #446、P0-2 #450、P0-4 #449、CI-TRUST-1 #452；P0-3 本规划 #448。"3 秒首字"尚未达标，改进工作在 N1b 进行（AC-0c #469/#470），需要在美国位置实测达标后 N1a 才算完成 |
-| N1b 体验样片 | **剩余 AC1-5；AC1-4 已合并并完成 staging 验收** | AC-0：计时 #454、模型对比脚本 #456/#473/#477、减少往返 #469/#470，结论“调整后可以”，历史上换成 deepseek（#481），现已由第 13 项放弃。RESEARCH-0：#457/#465/#466。AC1-1 #472、AC1-2 #475、AC1-3 #479。AGENT-CORE-UI：U1 #476、U2 #490。MODEL-REASONING：#480、#494、#495。**AC1-4**：[#497](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497) 2026-10-02 合并（`255259cf`），0155 合并前已应用到 staging（[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5940308782)、[合并记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5940400219)）；Gemini 思考签名流解析修复 #574 先行合并。staging 验收步骤 0–7、9 PASS，步骤 8（非法卡片降级）真实模型触发不了、只做记录（[总控审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5956578550)）。验收中发现的整理器照抄问题由 MENTOR-PROMPT-V2 #584、#582 处理，刷新恢复由 #589、#595 处理，滚动和推荐理由显示由 #587、#583 处理。导师模型定为 Claude Sonnet 5.5，#561 关闭（第 38 项）。AC1-5（读 Skill 文件的工具）未开始 |
-| N1c 完整定位流程 | 未开始 | 已满足：DATA-ERASURE 删除规则设计 #474、CI-TRUST-1、AC1-4。仍被阻塞：按第 7.2 节依赖图要等 AC1-5 完成。右侧整理按方向 B 重做（#588 方案，第 48 项）：B1 #593 已合并（`e122857f`，0159 已应用，[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/593#issuecomment-5967517876)），B2 待做。报告改为模型写（第 22 项），由 BILL-PAYG → CHAT-NATIVE-OUTPUT C2 → REPORT-GEN 先行准备 |
-| MENTOR-BUDGET / BILL-UNIT / PROMPT-CACHE / BILL-PAYG / REPORT-GEN | **MENTOR-BUDGET、BILL-UNIT、PROMPT-CACHE、PROMPT-CACHE-HISTORY H1 已合并；BILL-PAYG 方案定稿、PR-A 在途；REPORT-GEN 方案第七版在途** | MENTOR-BUDGET：#542、#551、#564 已合并（交互/报告 8192，单次接收 139264 bytes，报告入口尚未启用）。**BILL-UNIT** #565 已合并（`7909c118`），0157 已应用，staging 已按 Owner 批准改为 q=100、m=3（[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/565#issuecomment-5947049975)，第 39 项）。**PROMPT-CACHE** 方案 #572、实施 #591（`9600f2bc`）已合并；合并时缓存效果未验证（[合并记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5952224047)），之后付费验收 PASS（2026-10-02，v3 测试窗口，八轮 Sonnet 导师对话：缓存标记被 OpenRouter 和 Anthropic 接受，命中轮比不用缓存省 35–56%，八轮合计省 30.8%；执行记录 [5956489014](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5956489014)、[5956779675](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5956779675)，总控审计 [5956577683](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5956577683)、[5956865557](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5956865557)）。逐轮扣费当时因财务页问题 BLOCKED，之后由总控在数据库里只读逐轮核对：每个运行单只有一笔消费，等于 ceil(实际费用 × 100 × 3)（[#565 总控审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/565#issuecomment-5957431423)）。**PROMPT-CACHE-HISTORY**：方案 #601、H1 机制 #610（`7ebef331`，默认不激活，由 B2 激活）已合并（第 43 项）。**BILL-PAYG** [#553](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553) 第七版定稿（第 41 项），作为实施依据；#611 已合并，Codex 按 PR-A → PR-B 实施，PR-A [#617](https://github.com/Crnobog9527/GraylumAI_vercel/pull/617) 在途。**REPORT-GEN** [#547](https://github.com/Crnobog9527/GraylumAI_vercel/pull/547) 按 PAYG 第七版重写到第七版（[可以审查记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/547#issuecomment-5964804227)），D1 已由第 44 项取代，等 #604 定稿后小同步；方案不等于功能已交付 |
-| N1d 推广 | 未开始 | DEBT-QUICK 已做一部分：删除失效脚本 #482、文档纠错和脱敏 #483、无引用前端清理 #558、诊断结论修正和旧缓存模块删除 #607；CI 安装/缓存切片 #557 已合并。内容创作改为对话驱动（第 45 项）方向已定、方案待写 |
-| N2 上线基础 | 部分完成 | **已完成**：SEC-RATELIMIT #488（本机预览限流 #492）；PII-REGEX #500（关闭 #333）；COST-REPORT #513；CI-TRUST 其余部分 #511、#512、#523；S1 权限修复 #514、#519、#521。**DB-BASELINE**：PR-1 #528、PR-2a #532、PR-2b #535、PR-3 #536、#539（0152）、指纹收尾 #556 已合并；之后每个迁移都有 staging 指纹刷新 PR（#575、#577、#579、#592）。**DATA-ERASURE**：PR-A #526、PR-B1a #531（0149）、PR-B1b #537、PR-E #538（0151）、**B2a #550**（`7b880fc4`，0156 已应用，[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/550#issuecomment-5946373122)）已合并；注销期间在途执行与账务收尾方案 #598 已合并（第 42 项），实施 [#611](https://github.com/Crnobog9527/GraylumAI_vercel/pull/611) 已合并（`afbc42f6`，0160 已应用，[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/611#issuecomment-5968409118)）；之后 B2b → PR-C（删除 Auth 账号）；#538 第 ③ 步须等 PR-C 完成。**ENTITLEMENTS**：PR-1 #540（0153）、PR-2 后台会员权限与 Fusion 数量设置界面 #609（`52252eef`）已合并；合并后的 staging 冒烟由总控另行安排（[合并记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/609#issuecomment-5967219737)）。**INVITE-ABUSE**：#560（0154）。**RATE-LIMIT**：方案 #573、准备切片 #562、后端 #590 与前端 #594 联合候选已合并（`2259e895`，#590 关闭），MODERATION-HOOK 默认放行随之接线；B 段 staging 冒烟 B1–B4 全部 PASS，8 次真实调用 0.22676 美元，在 Owner 批准的预算内（[总控最终审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/594#issuecomment-5967196637)）；staging 的 Upstash 已配好，staging 上的开发和验收不再有限流前提；封闭内测在正式环境进行（第 49 项），正式环境 Upstash 列在上线前配置清单（第 7.6 节）。**MODEL-PRICING-SYNC**：方案 #578、价格快照 #580、准入价格检查与自动重读 #581、C1+C2 联合候选 #597（#596 关闭）已合并（第 40 项）。**RUNTIME-VIEW-PERF**：#586（`1736dc8f`，0158 已应用，[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/586#issuecomment-5951419420)）。**PAY-COMMON**：方案 #608 已合并（`6546f27d`，第 47 项），PR-1 [#612](https://github.com/Crnobog9527/GraylumAI_vercel/pull/612) 在途。**认证**：#543、#548、#552、FORGOT-PASSWORD #567、#568、#569 已合并并验收（第 36 项）。**STAGING-HOST-CLEANUP**：#571、#605 已合并，剩余见第 7.1 节。**后台修补**：#599、#600、#606（ordinary）。RUNTIME-PROD、RESEARCH-TOOLS 未开始 |
-| N3 差异化功能 | LIB-1 依赖切片已合并，上传功能未交付 | [#549](https://github.com/Crnobog9527/GraylumAI_vercel/pull/549)：DOCX 解析依赖及安全夹具；不等于 LIB-DOCS 全部完成。ENTITLEMENTS PR-2 #609 的后台 Fusion 数量设置只是配置界面，不等于 Fusion 已交付 |
-| N4 收口 | 部分提前完成 | LEGACY-CLOSE 的关入口 #507（标注 #508）；旧聊天关闭后的后台技能步骤测试 #515；过期端到端测试清理并入 #522 |
+```bash
+node scripts/plan-progress.mjs --ref origin/staging
+```
 
-规划类 PR：#509（2026-09-29 进度同步）、#530（Fusion 评审改用 OpenRouter Fusion，第 4 节）、[#545](https://github.com/Crnobog9527/GraylumAI_vercel/pull/545)（2026-09-30 规划同步）；另含 #559（PLAN-SYNC-1001），其内容审核方案 B 已由第 19 项“暂缓、只留接口”取代；#566（PLAN-SYNC-1001B）；#570（PLAN-SYNC-1002）。2026-10-01—03 合并的方案文档（只是方案，实施各自另审另批）：#572 PROMPT-CACHE、#573 RATE-LIMIT 接线、#578 MODEL-PRICING-SYNC、#588 右侧整理方向 B、#598 注销在途收尾、#601 PROMPT-CACHE-HISTORY、#608 PAY-COMMON。
+脚本读取第 7.1 节任务表和第 7.7 节历史 PR 对照，再用 `gh` 只读取 GitHub 上的 PR，在终端输出 Markdown 表，并在系统临时目录生成 JSON 和一个静态页面（不写进仓库）。规则：
 
-**在途 PR**（2026-10-03，按 `gh pr list --state open` 实时结果，不含本规划同步 PR）：
-- [#617](https://github.com/Crnobog9527/GraylumAI_vercel/pull/617) BILL-PAYG PR-A 计费核心（high，draft）；
-- [#612](https://github.com/Crnobog9527/GraylumAI_vercel/pull/612) PAY-COMMON PR-1 公共身份与冻结契约（Codex，draft）；
-- [#604](https://github.com/Crnobog9527/GraylumAI_vercel/pull/604) CHAT-NATIVE-OUTPUT 方案（仅方案，待审；方案中的续写次数待 Owner 决定）；
-- [#553](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553) BILL-PAYG 方案（第七版定稿，draft，作为实施依据）；
-- [#547](https://github.com/Crnobog9527/GraylumAI_vercel/pull/547) REPORT-GEN 方案（第七版，draft，等 #604 定稿后小同步）；
-- [#602](https://github.com/Crnobog9527/GraylumAI_vercel/pull/602)、[#603](https://github.com/Crnobog9527/GraylumAI_vercel/pull/603) OPC 浏览器集成用例修复（仅测试，draft）；
+- **任务名**：第 7.1 节"任务"列里的大写名字就是规范任务名（例如 `BILL-PAYG`、`PAY-COMMON`）。一格里写了多个名字的，`→` 表示后者依赖前者，`、` 表示并列；括号里的中文只是说明。
+- **PR 标题必须带任务名**，原样大写写在标题里，或写成约定式标题的范围，例如 `feat(BILL-PAYG): PR-B2 等待整理（high）`、`docs(PAYWALL): 付费墙实施方案（high，仅方案）`。一个 PR 涉及多个任务时都写上，或在正文单独一行写 `任务：A、B`。只做方案的 PR 在标题里写"仅方案"，例如 `（high，仅方案）`。规划本身的同步 PR 用 `docs(plan)`，不算任何任务。
+- **阶段怎么推导**：标注列写了"完成"的是**已完成**；写了"关闭：原因"的是**已关闭**（不计入完成比例）；写了"阻塞：原因"的是**被阻塞**；否则有在途或已合并的实施 PR 的是**实施中**，只有方案 PR（标题含"仅方案"，或 `docs` 类型且含"方案"，或第 7.7 节标了"方案"）的是**方案中**；还没有 PR、依赖列里的任务没完成（或依赖的 PR 没合并）的自动算**被阻塞**，其余是**未开始**。
+- **标注列只记三种事**：任务验收完成时写一次"完成"（不含的部分写在冒号后面，例如"完成：不含正式环境配置"）；任务放弃时写"关闭：原因"；被 Owner 决定或外部事项卡住时写"阻塞：原因"，事项解除时删掉。一格里有多个任务时可以写"任务名：完成"只标其中一个。其余进度（在途、已合并、部分完成）一律不写进本文。
+- **计划外工作**：v12 整理日期之后合并进 staging、标题和正文都没有对上任务名的 PR，脚本单独列出。
 
-#611（0160）、#613 已合并。正式站紧急 noindex：#615 已合并进 staging，#614 已关闭，正式站改由 Owner 在 Vercel 后台临时重定向（待操作），见第 8.5 节。
+方案在途或定稿都不等于功能生效、合并或配置变更授权。迁移在 staging 上的应用记录、产品验收结论和 Owner 批准仍以各 PR 上的总控记录为准；脚本只看 PR，不连接数据库，不代表产品验收通过。2026-10-05 之前各轮手写的进度表保留在本文的 Git 历史里（最后一版见 staging `470cef9a`）。
 
-方案在途或定稿都不等于功能生效、合并或配置变更授权。
-
-**审查路线备注（2026-10-01）**：Codex 审查机器人额度用完期间，Codex 实现的 PR 由全新的 Claude 会话独立审查，按当时的 AGENTS.md §12（2026-10-05 精简前）核验当前 GitHub 候选与有效政策；实现者不能自审，本备注不改写仓库政策。2026-10-03 已有 PR 由 Codex 审查机器人完成审查（例如 #593、#604）；各 PR 的审查以 PR 上的实际结论为准。
-
-**本轮核实的已合并提交（2026-10-01；2026-10-02 增补 #566–#569；2026-10-03 增补 #570–#615）**：
-
-| PR | staging 合并提交 |
-| --- | --- |
-| [#538](https://github.com/Crnobog9527/GraylumAI_vercel/pull/538) | `3c28e5ee` |
-| [#539](https://github.com/Crnobog9527/GraylumAI_vercel/pull/539) | `0470e7a7` |
-| [#540](https://github.com/Crnobog9527/GraylumAI_vercel/pull/540) | `ddd22a3c` |
-| [#548](https://github.com/Crnobog9527/GraylumAI_vercel/pull/548) | `38fa59f2` |
-| [#551](https://github.com/Crnobog9527/GraylumAI_vercel/pull/551) | `f546b58f` |
-| [#552](https://github.com/Crnobog9527/GraylumAI_vercel/pull/552) | `da4aa6be` |
-| [#554](https://github.com/Crnobog9527/GraylumAI_vercel/pull/554) | `02de1daa` |
-| [#555](https://github.com/Crnobog9527/GraylumAI_vercel/pull/555) | `29656fb9` |
-| [#556](https://github.com/Crnobog9527/GraylumAI_vercel/pull/556) | `d740f9dd` |
-| [#557](https://github.com/Crnobog9527/GraylumAI_vercel/pull/557) | `cb243667` |
-| [#558](https://github.com/Crnobog9527/GraylumAI_vercel/pull/558) | `8f69f306` |
-| [#559](https://github.com/Crnobog9527/GraylumAI_vercel/pull/559) | `2b665273` |
-| [#560](https://github.com/Crnobog9527/GraylumAI_vercel/pull/560) | `cb3a20c9` |
-| [#562](https://github.com/Crnobog9527/GraylumAI_vercel/pull/562) | `ef1d9f8a` |
-| [#563](https://github.com/Crnobog9527/GraylumAI_vercel/pull/563) | `a890501a` |
-| [#564](https://github.com/Crnobog9527/GraylumAI_vercel/pull/564) | `771d90a0` |
-| [#566](https://github.com/Crnobog9527/GraylumAI_vercel/pull/566) | `e220440d` |
-| [#567](https://github.com/Crnobog9527/GraylumAI_vercel/pull/567) | `c4b13758` |
-| [#568](https://github.com/Crnobog9527/GraylumAI_vercel/pull/568) | `74408bd1` |
-| [#569](https://github.com/Crnobog9527/GraylumAI_vercel/pull/569) | `9cb6cb84` |
-| [#570](https://github.com/Crnobog9527/GraylumAI_vercel/pull/570) | `2be631aa` |
-| [#571](https://github.com/Crnobog9527/GraylumAI_vercel/pull/571) | `3fbb7bae` |
-| [#574](https://github.com/Crnobog9527/GraylumAI_vercel/pull/574) | `916e1245` |
-| [#572](https://github.com/Crnobog9527/GraylumAI_vercel/pull/572) | `bcb8260c` |
-| [#573](https://github.com/Crnobog9527/GraylumAI_vercel/pull/573) | `8f53c5ce` |
-| [#497](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497) | `255259cf` |
-| [#575](https://github.com/Crnobog9527/GraylumAI_vercel/pull/575) | `a7460a95` |
-| [#550](https://github.com/Crnobog9527/GraylumAI_vercel/pull/550) | `7b880fc4` |
-| [#577](https://github.com/Crnobog9527/GraylumAI_vercel/pull/577) | `e7e818b1` |
-| [#565](https://github.com/Crnobog9527/GraylumAI_vercel/pull/565) | `7909c118` |
-| [#579](https://github.com/Crnobog9527/GraylumAI_vercel/pull/579) | `70cf69b3` |
-| [#578](https://github.com/Crnobog9527/GraylumAI_vercel/pull/578) | `fa0d167a` |
-| [#580](https://github.com/Crnobog9527/GraylumAI_vercel/pull/580) | `8865f864` |
-| [#583](https://github.com/Crnobog9527/GraylumAI_vercel/pull/583) | `dfdc1337` |
-| [#585](https://github.com/Crnobog9527/GraylumAI_vercel/pull/585) | `ecf73b42` |
-| [#584](https://github.com/Crnobog9527/GraylumAI_vercel/pull/584) | `e49dc92f` |
-| [#576](https://github.com/Crnobog9527/GraylumAI_vercel/pull/576) | `0a5a701c` |
-| [#587](https://github.com/Crnobog9527/GraylumAI_vercel/pull/587) | `de784460` |
-| [#582](https://github.com/Crnobog9527/GraylumAI_vercel/pull/582) | `0cbade58` |
-| [#586](https://github.com/Crnobog9527/GraylumAI_vercel/pull/586) | `1736dc8f` |
-| [#581](https://github.com/Crnobog9527/GraylumAI_vercel/pull/581) | `1d75b130` |
-| [#592](https://github.com/Crnobog9527/GraylumAI_vercel/pull/592) | `acd52307` |
-| [#589](https://github.com/Crnobog9527/GraylumAI_vercel/pull/589) | `da5b526d` |
-| [#591](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591) | `9600f2bc` |
-| [#588](https://github.com/Crnobog9527/GraylumAI_vercel/pull/588) | `4d805783` |
-| [#595](https://github.com/Crnobog9527/GraylumAI_vercel/pull/595) | `d7011b7b` |
-| [#597](https://github.com/Crnobog9527/GraylumAI_vercel/pull/597) | `c6441946` |
-| [#599](https://github.com/Crnobog9527/GraylumAI_vercel/pull/599) | `801e682e` |
-| [#600](https://github.com/Crnobog9527/GraylumAI_vercel/pull/600) | `34017395` |
-| [#594](https://github.com/Crnobog9527/GraylumAI_vercel/pull/594) | `2259e895` |
-| [#605](https://github.com/Crnobog9527/GraylumAI_vercel/pull/605) | `729e4ae1` |
-| [#607](https://github.com/Crnobog9527/GraylumAI_vercel/pull/607) | `01df7632` |
-| [#606](https://github.com/Crnobog9527/GraylumAI_vercel/pull/606) | `dd1deaaa` |
-| [#610](https://github.com/Crnobog9527/GraylumAI_vercel/pull/610) | `7ebef331` |
-| [#601](https://github.com/Crnobog9527/GraylumAI_vercel/pull/601) | `9446ce16` |
-| [#598](https://github.com/Crnobog9527/GraylumAI_vercel/pull/598) | `e0cddcf7` |
-| [#609](https://github.com/Crnobog9527/GraylumAI_vercel/pull/609) | `52252eef` |
-| [#608](https://github.com/Crnobog9527/GraylumAI_vercel/pull/608) | `6546f27d` |
-| [#593](https://github.com/Crnobog9527/GraylumAI_vercel/pull/593) | `e122857f` |
-| [#615](https://github.com/Crnobog9527/GraylumAI_vercel/pull/615) | `e39f1dc5` |
-| [#611](https://github.com/Crnobog9527/GraylumAI_vercel/pull/611) | `afbc42f6` |
-| [#613](https://github.com/Crnobog9527/GraylumAI_vercel/pull/613) | `1563a44d` |
-
-0151（#538）、0152（#539）、0153（#540）、0154（#560）已应用到 staging；#556、#563 为相应指纹收尾。#538 第 ③ 步仍等 PR-C 删除 Auth 账号完成，代码合并不表示该步骤已验收。
-
-2026-10-01—03 的迁移（仓库 `packages/db/migrations` 目前到 0160；每条都经 Owner 在总控窗口批准后由总控应用，记录见链接）：
-
-| 迁移 | PR | staging 应用记录 | 指纹刷新 |
-| --- | --- | --- | --- |
-| `0155_runtime_answer_source` | #497 | [5940308782](https://github.com/Crnobog9527/GraylumAI_vercel/pull/497#issuecomment-5940308782) | #575 |
-| `0156_erasure_b2a` | #550 | [5946373122](https://github.com/Crnobog9527/GraylumAI_vercel/pull/550#issuecomment-5946373122) | #577 |
-| `0157_bill_unit` | #565 | [5947049975](https://github.com/Crnobog9527/GraylumAI_vercel/pull/565#issuecomment-5947049975) | #579 |
-| `0158_runtime_view_perf` | #586 | [5951419420](https://github.com/Crnobog9527/GraylumAI_vercel/pull/586#issuecomment-5951419420) | #592 |
-| `0159_opc_capture` | #593 | [5967517876](https://github.com/Crnobog9527/GraylumAI_vercel/pull/593#issuecomment-5967517876) | 0159/0160 的 staging 指纹快照刷新待补（总控安排，统一提一个 PR） |
-| `0160_erasure_inflight_recovery` | #611 | [5968409118](https://github.com/Crnobog9527/GraylumAI_vercel/pull/611#issuecomment-5968409118) | 同上，待补 |
-
-#553 写明 PAYG 取 0160 之后的空号。迁移编号在实施时分配，本文不预占（第 7.5 节）。
-
-**已知问题和风险**：
+**已知问题和风险**（2026-10-03 记录，随对应任务的方案更新，不是进度）：
 - deepseek 的旧 JSON 问题保留为历史证据；导师用途当前计划选 Sonnet（第 38 项，后台配置），#582 盲评中 Sonnet、Gemini 都没达到出卡门槛，出卡分寸问题由右侧整理 B2 处理。
 - 首字时间：服务端从点击到首字约 3.4 秒，亚洲浏览器另加约 3 秒网络；3 秒目标（第 3.5 节）未达到，还需要从美国位置实测。
-- 模型写完整报告（12000 字）受 staging Hobby 函数最长 300 秒、冻结载荷 262144 字节、单次回复接收 139264 字节（#564）等限制；统一输出上限和自动续写由 CHAT-NATIVE-OUTPUT（#604，方案待审）解决，REPORT-GEN 排在其续写 C2 之后。方案中的容量估算不代表真实模型验证已通过。
+- 模型写完整报告（12000 字）受 staging Hobby 函数最长 300 秒、冻结载荷 262144 字节、单次回复接收 139264 字节（#564）等限制；统一输出上限和自动续写由 CHAT-NATIVE-OUTPUT（#604）解决，REPORT-GEN 排在其续写 C2 之后。方案中的容量估算不代表真实模型验证已通过。
 - 提示缓存（#591）只缓存固定前缀；用户停顿超过 5 分钟后缓存过期，下一轮会再付一次写入费（#591 审计 5956865557）。对话历史缓存由 PROMPT-CACHE-HISTORY 处理（第 43 项），1 小时缓存这次不做。
 - 正式环境价格全自动（第 40 项）时，平台没有事先固定的美元损失上限（#553 第 2 节已写明这一风险，单次仍受 `max_price` 和单次上界约束）。
 - 计划外完成的安全和清理工作见第 8.5 节。
+- 0159 及以后迁移的 staging 结构指纹快照刷新尚未做（最后一次刷新是 #592，对应 0158），由总控统一安排一个 PR，归 DB-BASELINE。
 
 ### 7.1 阶段和任务
 
@@ -1116,98 +1023,98 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 
 "规模"和"预计 PR 数"是实施前的粗略估计，用来判断大概要做多少事、你要批准多少次，实施方案里会细化。每个任务开工前必读的章节列在对应的实施说明里。
 
-| 阶段 | 任务 | 内容 | 依赖 | 风险 | 规模 / 预计 PR |
-| --- | --- | --- | --- | --- | --- |
-| **0 马上** | P0-1 | 完成 PR #446（第 3.6 节） | — | 高 | 小 / 1 |
-| | P0-2 | 关闭无人使用但仍可调用的旧付费接口 `ai.sendMessage`；删除会扣积分的临时脚本 `run_diag.ts`（扣后退回但不检查退回是否成功）和 `test_rpc.ts`（扣了不退） | — | 高 | 小 / 1 |
-| | P0-3 | 本规划（v12）审查合并 | — | 高 | 本 PR |
-| | P0-4 | 修复 #443 遗留的过期测试（它还在等已删除的"业务名称"弹窗） | — | 普通 | 小 / 1 |
-| | CI-TRUST-1 | 集成测试进 CI（计费、恢复等关键路径） | — | 高 | 中 / 1–2 |
-| **1 核心体验重做** | AGENT-CORE | AC-0 可行性验证；AC-1 提问卡和纯文本流式；AC-2 后台整理、Skill 模板、右侧数据沉淀区；AC-3 每步确认、模型根据全部信息写完整报告（第 2.1 节第 22 项；分工：REPORT-GEN 负责报告生成能力，AC-3 负责每步确认、定稿，并把报告接进流程）、定稿、承接第一周选题；AC-4 通用工作区和旧入口改指；AC-5 数据基础补缺，包括 D5 数据使用同意（勾选、撤回、按同意状态过滤记录）。见 [实施说明](tasks/AGENT-CORE.md) | P0-1；AC-2 另外依赖 CI-TRUST-1 和 DATA-ERASURE 的删除规则设计；AC-3 的报告部分依赖 REPORT-GEN | 高 | 大 / 12–16 |
-| | AGENT-CORE-UI | 从 AGENT-CORE 拆出的纯前端部分：提问卡和本步小结卡的显示、流式文字显示、右侧面板和进度条的布局、旧入口链接改指。只改前端，沿用现有接口；需要改接口、工具、数据库或计费的部分一律留在 AGENT-CORE | 与对应的 AGENT-CORE 子任务配合 | 普通 | 中 / 3–4 |
-| | MENTOR-BUDGET | Owner 2026-09-30 立项（第 2.1 节第 23 项）：导师每一轮的输入和输出预算按用途（交互对话、整理、报告）在后台配置，准入时冻结，不再写死在代码里；放宽我们代码里的单次模型调用超时和每次请求的时间预算（staging 上限受 Vercel Hobby 单次 300 秒约束，正式运营升级 Pro（2026-10-01，第 28 项））；评估提示缓存（已由第 35 项定为上线必做 PROMPT-CACHE）。**已合并**：服务端 [#542](https://github.com/Crnobog9527/GraylumAI_vercel/pull/542)、后台页 [#551](https://github.com/Crnobog9527/GraylumAI_vercel/pull/551)、输出容量 #564；交互/报告 8192，单次接收 139264 bytes，staging 用途预算已调至 8192，报告入口尚未启用 | —（Owner 批准先于 #497） | 高 | 中 / 1–2 |
-| | REPORT-GEN | Owner 2026-09-30 立项：所有步骤确认后，由模型根据全部信息写完整报告，结构由各自 Skill 的模板规定（第 2.1 节第 22 项）。先实现定位 Skill（当前 13 个部分、正文最多 12000 字），报告生成能力按通用方式设计，其他带步骤的 Skill 复用同一套能力；无步骤的 Skill 不受影响。收费按第 2.1 节第 25 项：扣费逻辑和正常对话一样，不做运行前预告。**方案第七版在途**（[#547](https://github.com/Crnobog9527/GraylumAI_vercel/pull/547)，按 BILL-PAYG 第七版重写，2026-10-03）：建立在 BILL-PAYG 上，一次调用一冻结、一结算；可用余额低于 L 时停在调用之间，充值后继续。原 D1（报告单独输出上限 24576）和"截断不自动续写"已由第 44 项的全站统一上限和自动续写取代，等 CHAT-NATIVE-OUTPUT（#604）定稿后小同步。FUSION-REVIEW 评审的就是这份报告 | MENTOR-BUDGET（已合并）、BILL-PAYG、CHAT-NATIVE-OUTPUT 续写 C2；主线 BILL-PAYG PR-A（#617）→ PR-B → C2 → 本任务 | 高 | 待实施方案细化 |
-| | STG-MENTOR-MODEL | 2026-10-01，[方案 #561](https://github.com/Crnobog9527/GraylumAI_vercel/pull/561)：staging 实测 Gemini 3.8 Flash、Claude Sonnet 5.5。**已关闭（2026-10-02，Owner 决定，第 38 项）**：导师模型定为 Sonnet（依据 #582 盲评），#561 不合并关闭，分支保留，不再发真实调用。以后要做导师模型评测，从最新 staging 另开任务 | — | 高 | 已关闭 |
-| | MENTOR-PROMPT-V2 | 2026-10-02：#497 验收中发现整理器照抄用户原话、写错字段。整理器输入加入已有值和导师回复（#584），宿主出卡规则与双模型重测（#582）。**已完成**（#584、#582 已合并）；出卡分寸问题并入 CONVERSATION-DRIVEN-CAPTURE B2（第 38 项） | #497 | 高 | 已合并 |
-| | CONVERSATION-DRIVEN-CAPTURE | 右侧信息跟着对话走（方向 B，第 48 项；[方案 #588](https://github.com/Crnobog9527/GraylumAI_vercel/pull/588) 已合并）：整理不再按固定题目顺序，由实际聊到的内容填写，最后收齐 Skill 要求的信息。**B1 数据库与写入已合并**（#593，0159 已应用）；**B2 待做**，同时处理 #582 的出卡分寸问题、激活 PROMPT-CACHE-HISTORY H1 | AC1-4；B2 在 B1 之后 | 高 | B1 已合并，B2 待做 |
-| | CHAT-NATIVE-OUTPUT | **方向已定、方案待审**（Owner 2026-10-03，第 44 项；[方案 #604](https://github.com/Crnobog9527/GraylumAI_vercel/pull/604)）：全站对话统一流式、统一输出上限（报告也用）、写到上限或快超时自动续写、用户无感，不按 Skill 区分。#604 第一版拆为 C0（前端统一走流式）、C1（统一上限）、C2（自动续写，复用 PAYG PR-B 的等待和继续）。**方案已合并**（#604，staging `95ecefd7`；首版范围以 Owner 决定为准：不做自动续写，正式环境单次上限 32768、staging 8192）。**实施前必须先解决**（[#604 总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/604#issuecomment-5971006438)，解决前相关实施 PR 不得合并）：C0 ① 可以出卡片的导师回合（非开场回合）目前完全缓冲，C0 要定义这类回合怎样流式输出权威文本并加入 C0 测试；② 调用进行中重连拿不到当前快照，C0 增量传输要持久化或共享当前投影，或者把承诺缩小为只重放终态并写明中间状态怎样显示；C2 ③ 结果已提交、还没送达时点停止，C2 要定义终态结果的交接规则并仍遵守 stopAt | C0/C1 在 #594 之后（已满足）；C2 在 BILL-PAYG PR-B 之后；REPORT-GEN 在 C2 之后 | 高 | 方案已合并 |
-| | CONTENT-CONVERSATION-DRIVEN | **方向已定、方案待写**（Owner 2026-10-03，第 45 项）：定位之后的选题和创作改为自由对话加轻引导、按意图加载平台技能；一窗口一选题（提醒式）；自由对话由用户手动"整理纪要"；是否存进资料库由用户决定。将取代视频线固定按钮流程和 D9"自由对话不自动整理"（第 2.2 节）；方案定稿和实施前现有流程照常。**方案已合并**（#621，staging `5c56fa4b`）。**实施前必须先解决**（[#621 总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/621#issuecomment-5971687700)，解决前相关实施 PR 不得合并）：① P1-A 必须把已保存的正文从常驻材料投影（`runtime_scope_material`）中移出，或停止注入这个投影，然后才能依赖按需注入；② 暴露"保存正文/简报"按钮之前，定义并迁移 `opc_content_versions.kind` 和 `opc_guard_content_kind` 缺少的类型，并同步 API schema；③ 提议是否已消耗按最新一次已准入的对话执行判断，不论这次执行成功、失败或停止，可用性只在展示提议时检查 | 排在 #604 定稿之后，和 CONVERSATION-DRIVEN-CAPTURE（#588 方向 B）合并设计 | 待方案定 | 待方案 |
-| | RESEARCH-0 | **已完成**（#457、#465、#466，2026-09-28）。第三方搜索供应商对比测试：同一组查询测每一家，记录平台覆盖、新鲜度、字段完整度、速度、单次成本、失败率、是否返回每次调用的官方成本；Owner 据此确定了供应商（第 3.7 节、D13，结论见 [实施说明](tasks/RESEARCH-TOOLS.md)） | —（可与 AC-0 同期） | 高（真实付费调用） | 小 / 0–1 |
-| | CI-TRUST | 其余部分：ESLint 覆盖 TS/TSX；网站单测统一入口；API 独立类型检查；删除 `@repo/ui` 空壳和未接入的 ESLint 配置包；依赖升级机器人改发到 staging 并清理指向 `main` 的旧升级 PR（第 8.4 节第 1–3 项）。**已完成**（#511、#512、#523，2026-09-29—30） | — | 高 | 中 / 3–4 |
-| | DEBT-QUICK | 第 8.3 节第 2 项的快速清理（只含普通改动）；关闭已解决和已废弃的问题单（第 8.4 节第 4–5 项）。**部分完成**：#482、#483、#558、#607（诊断结论修正、删除旧 `services/promptCache.ts`）已合并；第 8.4 节第 4–5 项的问题单已全部是关闭状态（#607 核对，本次 `gh issue view` 复核）。剩余 `costCalculator.ts`、`streamHandler.ts`：要改被 #603 占用的 ESLint 基线，待 #603 合并后删除（第 8.2 节） | — | 普通 | 小 / 剩余 1 |
-| **2 上线基础** | RUNTIME-PROD | 正式环境真实调用模型：① 模型报价的审批和开放机制；② BILL-UNIT 落实 q=100、默认倍数（2026-10-03 起为 m=6，第 50 项；BILL-UNIT 交付时为 3）与按模型/线路倍数，美元统一成本、调用时冻结（第 11、32–34 项、D16）；③ 后台界面；④ 由 BILL-PAYG 实现逐次冻结与实际结算（第 2.1 节第 26–27 项），可用余额低于按模型/用途配置的 L 时在两步之间暂停、充值续接、余额不为负，超出本次冻结额由平台承担；收费模型准入及超额对账见同两项；普通调用和 Fusion 共用基础机制，Fusion 多模型上界定义前不放行，评审运行前预告保持不变；⑤ 止损：每个用户每日上限、全站每日成本上限和告警、供应商余额告警、一键停止新调用的开关；⑥ 理清 `provider` 字段语义；⑦ 数据不用于训练由服务端强制：正式环境所有模型调用都发送 OpenRouter 的 `data_collection: deny`，只批准支持该设置的供应商线路，准入时拒绝不满足的线路；是否额外要求零数据保留（`zdr`）在实施时核对供应商能力后决定（DATA-ERASURE E10 已决定非 ZDR 线路可以启用；第 ⑦ 项本身是否保留待 Owner 确认，见第 10 节"待确认事项"）。验收包括一次有上限的真实小额对账。2026-10-03 状态：② 已由 BILL-UNIT #565 完成；① 的价格读取与准入检查由 MODEL-PRICING-SYNC 完成，正式环境按第 40 项价格全自动；④ 的 BILL-PAYG 方案已定稿待实施（收费基准为名义费用，第 41 项）；⑤ 中"一键停止新调用的开关"已随 RATE-LIMIT #594 交付，其余止损项未做 | ④ 按 BILL-PAYG 行提前实施；其余项依赖 AGENT-CORE 稳定 | 高 | 大 / 4–6 |
-| | BILL-UNIT | **已完成**（[#565](https://github.com/Crnobog9527/GraylumAI_vercel/pull/565)，`7909c118`，0157 已应用）：所有成本统一美元，q=100、交付时默认 m=3（2026-10-03 默认改为 6，第 50 项；修改配置须另获 Owner 批准）；后台按模型设置倍数，未设用默认值；逐调用冻结有效倍数后合计只进位一次（第 32–34 项）。staging 已按 Owner 批准改为 q=100、m=3（第 39 项）。套餐价格和每月积分已由第 51 项定下；开户赠送 500 积分和积分包三档已先定（第 51 项，记录 S、T），邀请奖励按 m=6 复核 | #497、#550（均已合并） | 高 | 已合并 |
-| | PROMPT-CACHE | **上线必做**（Owner 2026-10-01，第 35 项）。**已合并**：方案 #572、实施 #591（冻结前缀与请求缓存，`9600f2bc`）。付费验收 PASS（2026-10-02，v3 测试窗口，八轮 Sonnet 导师对话：缓存标记被 OpenRouter 和 Anthropic 接受，命中轮比不用缓存省 35–56%，八轮合计省 30.8%；执行记录 [5956489014](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5956489014)、[5956779675](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5956779675)，总控审计 [5956577683](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5956577683)、[5956865557](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5956865557)）。逐轮扣费当时因财务页问题 BLOCKED，之后由总控在数据库里只读逐轮核对：每个运行单只有一笔消费，等于 ceil(实际费用 × 100 × 3)（[#565 总控审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/565#issuecomment-5957431423)）。用户收费按名义费用（第 41 项），缓存节省不让给用户 | #497（已合并） | 高（Runtime 调用路径和费用上界） | 已合并，付费验收 PASS |
-| | PROMPT-CACHE-HISTORY | 对话历史也加缓存（Owner 2026-10-03，第 43 项；方案 #601 已合并）：H1 机制 #610 已合并（`7ebef331`，默认不激活），由 CONVERSATION-DRIVEN-CAPTURE B2 激活；这次不做 1 小时缓存；付费实测复用 B2 评测和 B2+F1 验证的预算 | #594（已合并）；激活随 B2 | 高 | H1 已合并，激活待 B2 |
-| | MODEL-PRICING-SYNC | 模型价格从 OpenRouter 自动读取（第 40 项）。**已完成**：方案 #578（D1–D7 按推荐）、价格快照与后台只读显示 #580、准入价格检查与自动重读 #581、C1+C2 联合候选 #597（#596 关闭）。正式环境价格全自动；staging 测试窗口继续锁价 | BILL-UNIT | 高 | 已合并 |
-| | RUNTIME-VIEW-PERF | 长会话权限检查优化。**已完成**（#586，`1736dc8f`，0158 已应用）。以后替换 `runtime_admit`、`runtime_view`、`runtime_session_items` 的迁移，源 MD5 要以 0158 之后的值为准 | #497 | 高 | 已合并 |
-| | BILL-PAYG | 2026-10-01（第 26–27 项），[方案 #553](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553) **第七版定稿**（2026-10-02，第 41 项）：余额封顶冻结和结算，收费基准为按标价计算的名义费用（缺 token 时按 `min(c, U)` 兜底、分时价取最高）；低于按模型/用途配置的 L 才暂停并提示充值，保留断点、不得负余额、不重复收费；正常余额封顶由平台承担，只有超出估算上界才异常停新调用；L 首版不随价格自动更新；价格变动和平台承担只提醒、不拦截。复用 BILL2 和 BILL-UNIT 的逐调用倍数，最终只进位一次。由 Codex 按 PR-A → PR-B 实施 | #611（#598 实施）已合并，PR-A [#617](https://github.com/Crnobog9527/GraylumAI_vercel/pull/617) 在途；PR-B 在 PROMPT-CACHE-HISTORY H1（#610，已合并）之后；之后接 CHAT-NATIVE-OUTPUT C2 → REPORT-GEN | 高 | 方案定稿，PR-A 在途 |
-| | DB-BASELINE | 按 Owner 2026-09-29 选择的 C3 方案 B（第 9.3 节）：① 先修完 S1（#498）查出的 staging 权限漂移；引入 `0000` 前，先完成与现有追加式迁移账本、检查器及 CI 的兼容过渡，涉及的治理变更单独按受保护流程先行交付，不得在新增基线的同一 PR 中修改检查器来放行自身；② 从 staging 导出只有结构的建库脚本作为核对来源，整理成只补缺失前置对象的 `0000` 基线，补上 16 张核心表及缺失的相关函数、触发器、扩展、存储桶、授权；已有迁移负责创建的 75 张表及其对象仍由原文件创建，不把完整 staging 结构直接放进 `0000`；③ 用空库按顺序跑完全部迁移，并跑完整测试；④ 退役 `db:push`，更新 `docs/ENGINEERING.md` 和 `docs/runbooks/STAGING_REPRODUCIBILITY.md`，这部分属于治理变更，按受保护流程走。必须在 V3-M3 / REL-1 之前完成。**进度**：S1 权限修复（#514、#519、#521）和 PR-1 #528、PR-2a #532、PR-2b #535、PR-3 #536 已合并；#539 已合并、0152 已应用，指纹收尾 #556 已合并（第 7.0 节） | S1 的权限修复 | 高 | 待实施方案细化 |
-| | MODERATION | **暂缓**（Owner 2026-10-01，第 19 项）：不再是封闭内测前提；正式功能何时实现，公开上线前再请 Owner 决定。此前不接 OpenAI Moderation、不需密钥、不核实价格。MODERATION-HOOK 的输入/输出检查点已随 RATE-LIMIT 接线（#594），默认放行；拦截后的不收费、独立终止状态与日志以后正式实现时补齐 | 正式功能待 Owner 决定 | 高 | 接口已接线（默认放行），正式功能暂缓 |
-| | MODEL-REASONING | ① 添加或编辑模型时，从 OpenRouter 公开模型目录读取该模型支持的思考档位、默认档位、能否关闭，保存快照并可"重新读取"；② 管理员按模型和用途（交互对话、整理、评审、写作）选择思考强度，选项只来自该模型支持的档位，外加"关闭"（允许时）和"用供应商默认"；③ 保存前检查所选供应商线路支持这个参数；④ 准入时把所选档位冻结进执行记录，重放用原值；⑤ 档位和回复长度上限联动校验；⑥ "试一次"按钮，用固定短问题真实调用一次，显示首字时间和是否有正文，费用由平台承担。取代 PR #446 里写死的对照表。**按 Owner 2026-09-28 决定，MODEL-REASONING 提前到 N1b，在 AC1-4 之前完成**（Owner 要求模型在后台随时切换、不绑在代码里）。**已完成**（#480、#494、#495，2026-09-29） | P0-1；和 RUNTIME-PROD 由同一个 writer 完成（同一个后台模型页） | 高 | 中 / 2–3 |
-| | ENTITLEMENTS | 会员权限配置：Fusion 两种模式的开关和上限、资料库总存储空间；服务端检查（系统级文件数量保护上限不属于会员权益，不在这里配置）。**已完成**：PR-1 #540（0153）、PR-2 后台会员权限与 Fusion 数量设置界面 #609（Owner 2026-10-03 批准合并）；合并后的 staging 冒烟由总控另行安排。2026-10-04 起 Fusion 默认只给 Gold、新增定位档案上限（第 51 项），由 PAYWALL 实施，本任务不重开 | —；和 PAY-COMMON 由同一条钱路线先后完成 | 高 | 已合并 |
-| | RESEARCH-TOOLS | 第三方搜索统一接口层和对标研究（第 3.7 节，见 [实施说明](tasks/RESEARCH-TOOLS.md)）：规则表和已验证平台清单、统一返回格式、美元成本接入 BILL2、确认失败时如实告知取不到数据（以后经批准增加备用线路后才换备用；2026-10-04 Owner 定 Bright Data 为备用渠道、Facebook 由它抓取，接入前实测和条款核对，第 52 项）、证据进资料库并接入账号注销、打开真实模型的搜索开关、对标流程的代码计算和表格写入限制。在封闭内测之前完成 | RESEARCH-0、AC-1、RUNTIME-PROD、DATA-ERASURE | 高 | 大 / 3–5 |
-| | RATE-LIMIT | **已完成**：方案 #573、准备切片 #562、后端 #590 与前端 #594 联合候选（2026-10-03 合并，`2259e895`，#590 关闭）；一轮只在第一次新调用前检查、按冻结的最多调用数一次性预扣；同一写入方留 MODERATION-HOOK 两个检查点，默认放行。初始新对话 10/分钟、200/天，模型调用 30/分钟、600/天（第 30 项）。B 段 staging 冒烟全部 PASS（8 次真实调用，0.22676 美元）。初始值按每条新消息计（第 49 项）。正式环境 Upstash 在封闭内测前配置并核对容量 | #497、#550（均已合并） | 高 | 已合并；staging 前提已满足，正式环境 Upstash 见第 7.6 节（封闭内测在正式环境，第 49 项） |
-| | INVITE-ABUSE | **已完成**（2026-10-01，#560、0154 已应用 staging）：首次正金额开户赠送的新账号才获邀请奖励、每账号仅绑定一次；不开消费返利；接受不同身份同一人无法识别（第 29 项） | #538 开户赠送资格 | 高 | 已合并 |
-| | SEC-RATELIMIT | 限流 fail-closed、Redis 超时放行、诊断计费探针。**已完成**（#488，2026-09-28） | — | 高 | 小 / 1–2 |
-| | FORGOT-PASSWORD | 忘记密码（Owner 2026-09-30 提出）：用户通过邮件验证重置密码；发送重置邮件时复用 #541 的隐形 hCaptcha；重置链接落到站内设置新密码的页面；**已注销或被封禁的账号不能靠重置密码恢复登录**，允许和拒绝两条路径都要测。**已完成**：Owner 2026-10-01 选定（[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/566#issuecomment-5930333333)），#567（`c4b13758`）、#568（`74408bd1`）已合并，staging 交互验收完成（[总控结论](https://github.com/Crnobog9527/GraylumAI_vercel/pull/568#issuecomment-5935583047)）；最后三组是 Owner 整组确认，没有逐项截图和部署 SHA 的同期记录。**追加**：关联 Google 的账号也能在个人中心改密码（第 36 项），#569（`9cb6cb84`）已合并，staging 交互验收通过（[总控结论](https://github.com/Crnobog9527/GraylumAI_vercel/pull/569#issuecomment-5935890997)）。正式环境上线另行批准 | #543、#548、#552（均已合并） | 高（认证和登录恢复） | 已合并（#567、#568、#569） |
-| | STAGING-HOST-CLEANUP | 2026-10-01（第 37 项）：清理残留的 `graylumai-staging.vercel.app` 引用。**部分完成**：#571（测试、脚本默认值、示例配置、部署文档）、#605（文档入口）已合并。staging `1563a44d` 上仍有 6 个跟踪文件含旧域名：`stagingEnvironment.ts` 的 staging 环境名单（删掉会改变测试窗口准入，属于高风险，要另开 high PR）及其测试 `stagingEnvironment.test.ts`、`stagingAdmission.test.ts`、`runtime.integration.ts`、`run-workbench.mjs`，以及本文中的 Owner 原话和历史记录（保留）。Stripe / Waffo 沙箱回调、Supabase Site URL 和邮件回调由 Owner 自行检查，待 Owner 确认 | — | 普通；`stagingEnvironment.ts` 部分为高 | 剩余 1 个 high PR |
-| | DATA-ERASURE | 账号注销与数据删除，以及 D7 承诺的单条删除（对话回答、会话、已保存成果），都在公开上线前完成并列入验收。**设计先行**：在 AC-2 新建任何表之前先写出删除规则，实现在公开上线前完成（**设计已完成**，#474，E1–E11 已决定，见第 2.1 节第 14 项）。见 [实施说明](tasks/DATA-ERASURE.md)。之后任何新增保存用户私有内容的任务，都要把新数据接入注销流程并列入验收。**实现进度**：PR-A #526、PR-B1a #531、PR-B1b #537、PR-E #538 已合并，0151 已应用；B2a #550 已合并（0156 已应用）；注销期间在途执行与账务收尾：方案 #598 已合并，实施 [#611](https://github.com/Crnobog9527/GraylumAI_vercel/pull/611) 已合并（`afbc42f6`，0160 已应用，[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/611#issuecomment-5968409118)），BILL-PAYG 实施的这一前置条件已满足（第 42 项）；之后 B2b → PR-C（删除 Auth 账号）；#538 第 ③ 步等 PR-C 完成（第 7.0 节），正式库建库约束见第 9.3 节 | —（设计部分先于 AC-2） | 高 | 大 / 3–5 |
-| | COST-REPORT | 后台成本报表的金额、估算和查询修正（原清单 06）。**已完成**（#513，2026-09-29） | — | 高 | 小 / 1 |
-| | PII-REGEX | 接手 PR #333（邮箱类个人信息匹配的性能加固，改的是安全过滤规则）：基于最新 staging 更新后重新审查、由 Owner 批准合并（第 8.4 节第 6 项）。**已完成**：由 #500 在最新 staging 上重新实现并合并，#333 已关闭 | — | 高 | 小 / 1 |
-| **3 差异化功能** | FUSION-REVIEW | 定稿报告多模型评审（第 4 节，见 [实施说明](tasks/FUSION.md)）；结果接入账号注销。对外名称"多模型专家评审团"，上线默认只给 Gold（第 51 项） | AC-3、REPORT-GEN、RUNTIME-PROD、ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 |
-| | LIB-DOCS | 资料库上传、"我的文档 / 语料库"、真正删除、按会员等级的总存储空间和系统级文件数量保护上限（见 [实施说明](tasks/LIBRARY-VOICE.md)）；接入账号注销；设计上传权限时一并整理共享 Storage 的授权（第 8.5 节）。LIB-1 依赖及安全夹具 #549 已合并，上传功能仍待实施；与 AC-2 设计定位导师查询工具（第 31 项） | ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 |
-| | VOICE | 文风画像生成、确认和写作注入；接入账号注销 | LIB-DOCS、AGENT-CORE、DATA-ERASURE、RUNTIME-PROD（资料内容发给模型前，"不用于训练"已由服务端强制） | 高 | 中 / 2–3 |
-| | UI-A | 输入框编辑内核（沿用 v11 §6.3，属于 `V3-OPC-UI`，不新建任务名）。需要编辑器依赖时（例如 Tiptap，先核实版本、许可和构建），第一个 PR 只引入这个依赖，按依赖变更由 Owner 批准合并；之后的 PR 只改前端并沿用现有请求接口 | AGENT-CORE | 高 | 中 / 3–4 |
-| | UI-MODEL | 输入框里的模型位置（Owner 2026-10-03，第 50 项）：保留位置，只显示 Auto，用户暂时不能切换；实际模型按用途由后台配置决定，不按会员档位区分 | UI-A、ENTITLEMENTS | 高 | 小 / 1–2 |
-| | FUSION-COMPARE | 输入框里的多模型对比；结果接入账号注销。每次打开默认勾选管理员在后台设定的一组模型；用户可以取消勾选、自己搭配，范围受管理员允许列表和会员权限限制；后台新增参数"每次对比最少要勾选几个模型"，由 Owner 调整，前端和服务端都按它校验，取值范围是 2 ≤ 最少勾选数 ≤ D3 的当前最多模型数，后台可调但不能低于 2（Owner 2026-10-03，第 50 项）。同步 [FUSION 实施说明](tasks/FUSION.md) 的对比模式描述。上线默认只给 Gold（第 51 项） | UI-A、FUSION-REVIEW、DATA-ERASURE（多模型勾选器属于本任务，不依赖 UI-MODEL） | 高 | 中 / 2–3 |
-| | UI-B | 输入框 @ 引用资料库内容：把用户私有资料读进模型上下文，涉及权限和上下文 | UI-A、LIB-DOCS、RUNTIME-PROD | 高 | 中 / 2 |
-| | UI-C | 输入框附件 = 上传进资料库再引用（不另建一套上传，只支持 D6 的文档类型） | UI-A、LIB-DOCS、RUNTIME-PROD | 高 | 中 / 2 |
-| | UI-FINISH | 导航、响应式、旧链接迁移、界面全验收（沿用 v11） | UI-B、UI-C | 普通 | 中 / 2–3 |
-| **4 收费和上线** | PAY-COMMON → PAY-WAFFO | 沿用 v11 §9 和第 11 节定义；上线只用 Waffo 收款（Owner 2026-10-03，第 50 项）：银行卡订阅只做月付和年付（不做季度）；微信只支持单笔，用于积分包和一次性会员；不支持支付宝，只用支付宝的用户付不了款；Stripe 不作为上线收款渠道，下面的手动渠道开关只作备用。一次性会员要做：微信单笔购买 1 个月或 1 年会员，期限到期自动失效、不自动续费、到期再买；成为会员后可以买积分包；1 年期积分按 12 个月分期发放；退款按 v11 §9.3 只处理这一期的积分。按 D17，PAY-COMMON 提供后台"新购买使用的渠道"设置（Waffo / Stripe，手动切换），订单记录成交渠道，续费、退款和凭证按原渠道处理。**PAY-COMMON 方案已合并**（[#608](https://github.com/Crnobog9527/GraylumAI_vercel/pull/608)，`6546f27d`；退款衔接 P1 已由 Owner 决定，第 47 项），由同一个 Codex writer 从 PR-1（[#612](https://github.com/Crnobog9527/GraylumAI_vercel/pull/612)，在途）开始实施，每个实施 PR 合并另需 Owner 批准。**PAY-WAFFO 补充（2026-10-04，第 51 项）**：价格 Pro $29/月、$279/年，Gold $69/月、$621/年，微信一次性与银行卡同价；Waffo 没有优惠券，按价格分别建产品（Gold 月付新用户首期 $49 之后 $69、Gold 月付正价、微信 1 个月 Gold 新用户 $49 和正价 $69、Gold 创始会员年付首年 $496、续费按续费时 Gold 月付 12 个月价格的 6 折且不写死，记录 P）；服务端判断首月资格（任何渠道从没买过 Gold，年付和创始会员也算买过；扩展 0151 的身份摘要机制，新增 Gold 专属的权威事实，例如 `purpose=gold_first_purchase`，带原子预留和认领，防注销重注册和并发结账重复领取，high 迁移；不直接复用开户赠送的判定；首月优惠的预留同样按结账会话幂等记录；只有 Waffo 权威确认该会话已关闭或已过期才释放（[PAY-COMMON 实施说明](tasks/PAY-COMMON.md)第 7 节"幂等"行）；预留有效期内到达的成功付款兑现 $49；释放之后才到达的成功付款不自动给首月价，按 PAY-COMMON 冲突回执的口径进入人工复核；同一用户在预留有效期内重新打开结账，复用同一预留，不因为自己放弃结账而失去资格）并选择产品，前端只显示服务端返回的价格；创始会员 50 个名额由服务端计数（结账开始占名额；名额预留按结账会话幂等记录；只有在 Waffo 权威确认该会话已关闭或已过期后才回收名额（关闭页面或本地超时都不算会话结束，[PAY-COMMON 实施说明](tasks/PAY-COMMON.md)第 7 节"幂等"行）；预留有效期内到达的成功付款一律兑现；回收之后才到达的成功付款不自动兑现创始价、不超卖，按 PAY-COMMON 冲突回执的口径进入人工复核；名额计数检查和预留在同一个加锁（或 serializable）的数据库操作里完成，同一买家已有有效预留时复用、不另占名额，验收包括"最后一个名额被多个会话并发抢占时只成功一个"；已售出的名额在任何情况下都不放回，包括退款、取消、续费失败，验收确认这些情况都不放回、并发不超过 50 个；银行卡和微信都算创始会员，[记录 V](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981192614)），满额后下架换回正价产品；Pro 中途升 Gold **已由 Owner 定（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）**：不退差价，按 Gold 价格付款（第一次买 Gold 享首月 $49），补发 8,970 积分并立即升级为 Gold 权益，按此实施（处理 #626 第 6 轮 P1"升级价格要在实施前锁定"）；升级后的计费周期也**已由 Owner 定（[记录 U](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980903324)）**：下次扣费日从升级当天重新算，Gold 从升级当天起单独计费，原 Pro 订阅停止续费、不退差价，Pro 年付没发完的积分继续按月发完；核实 Waffo"前 N 期特价"的配置位置和创始会员长期折扣价能否设置。在 Waffo 后台建产品由 Owner 操作，实际配置前单独批准。**方案必须先解决**（[#626 总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/626#issuecomment-5976838440)，解决前实施 PR 不得合并）：① Gold 首购身份摘要在注销后的保留期限和清理契约，同步修改 DATA-ERASURE，**Gold 购买记录的保留期限由 Owner 在方案阶段确认**；② 名额放回条件已由 [记录 V](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981192614) 取代：名额不放回，验收确认退款、取消、续费失败都不放回、并发不超过 50 个；③ 微信老创始会员的创始价续买资格判断（名额卖完后仍对有效期或宽限期内的老创始会员开放 $496，属于计费改动）；失去身份的前创始会员不能再按创始价购买，即使名额还没卖完；他已用掉的名额不放回、仍计入 50 个，他之后再买不按创始价，所以也不会占用新名额（名额按历史售出数计，不按当前有效会员数计）；创始价按账号资格加全局剩余名额由服务端判断；④ 银行卡年付续费前提醒和微信创始会员到期提醒共用一套机制，由系统自己发，上线前完成（[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)）；⑥ 付款同意记录：每次用户主动结账或授权扣款时一条只追加的记录（用户、时间、条款和退款政策版本号、当时的 IP 和浏览器信息、商品、金额、付款方式、Waffo 订单号），与订单绑定，银行卡自动续费账单关联到原来那条记录；IP 和设备证据的保留期限由本方案提出（参考卡组织拒付窗口加余量），Owner 批准后同步修订 DATA-ERASURE，**修订完成之前不开始收集**；⑦ 上线前接收并记录 Waffo 的拒付和争议事件，不能忽略（对齐 [PAY-COMMON 实施说明](tasks/PAY-COMMON.md) 已定的 E5），前提是 Owner 先向 Waffo 核实拒付通知的方式；收到拒付通知后按被拒付的订单先冻结，可以撤回：订阅冻结这份订阅的付费权益、暂停以后的积分发放，并同时取消这份订阅的自动续费（银行卡月付和年付；[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），拒付期间不会再扣款；微信一次性会员冻结这一期的会员权益，1 年期的还要暂停以后按月发放的积分（对齐记录 X"冻结会员权益和积分发放"）；订阅和微信一次性会员还要冻结这份付款已发放、还没用完的积分，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包冻结这个包里没用完的积分，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)），上线前完成（[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)；判输后的处理归 CHARGEBACK）；⑧ 退款规则按 [记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397) 实施，判定、手续费、执行路径和测试矩阵见 [PAY-COMMON 实施说明](tasks/PAY-COMMON.md) PR-4，开工前要确认的事项也列在那里；⑨ 所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；已经被拒付的订单禁止再手动退款，避免退两次钱；⑩ 待核实：工单分类和退款申请入口是否对得上；订阅管理页是否还跳转到 Stripe（上线只用 Waffo）；新建表前按 AGENTS.md 第 5 节说明理由（[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)，上线前，high）；⑤ 宽限期判断（银行卡扣款失败 7 天，微信到期后 7 天内续买），到期未续或例外退款时结束创始身份（第 51 项，[记录 V](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981192614)） | ENTITLEMENTS（已完成）之后，同一条钱路线；与 Runtime 主线并行（第 46 项）；Pro 升 Gold 规则已由 Owner 定（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)） | 高 | 大 / 7–10 |
-| | PAYWALL | 第 2.1 节第 50 项的付费墙和积分产品：会员检查只在服务端的报告生成入口和报告调用准入两处；免费用户可以开始带步骤的 Skill，并做完报告前的全部步骤。入口路由（不是付费限制）：带步骤的 Skill 只从自己的入口开始，新对话入口和以后的按意图选 Skill 不加载带步骤的 Skill，参照旧入口的 409；报告模板和写作规则只在报告用途加载，不放进 SKILL.md 和前置步骤资源；积分包只允许会员购买；订阅会员和微信一次性会员都算付费会员（报告门槛和积分包购买一致对待）；开户赠送改为 500 积分（[记录 S](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980831854)，迁移修改 0151 的固定 100，high，合并前 Owner 批准）；记录付费墙曝光；按第 50、51 项设定套餐和积分包数值；价格页只写积分和会员权益；（原"Pro 一个月买 2 次以上积分包时提示 Gold"已于 2026-10-04 取消，第 51 项）；会员到期后已生成的报告仍可看、可导出；免费用户的报告前信息导出（已确认、已整理的内容，可以看、可以导出，不收回，不检查会员）——现有导出只在"确认正式定位"发布之后才能用，导出的是由已确认步骤拼成的确定性报告（`workbench.export`，未发布时返回 NOT_PUBLISHED），不覆盖部分步骤已确认的情况；REPORT-GEN 改由模型写报告之后，这条导出路径也不能再代表免费可得的内容。所以要新增一个不依赖报告、不检查会员的前置信息导出，并在 REPORT-GEN 之后保留。**2026-10-04 补充（第 51 项）**：设计以仓库里导出的 v25 为唯一依据（[`docs/launch/design/paywall/`](design/paywall/README.md)，2026-10-04 入库；文案规则和待定事项见其 README）；报告对外叫"运营策略报告"；年付标签"最高省 40% / 25%"只按创始名额是否卖完切换（记录 V）；只用美元显示，年付写明比月付 × 12 省多少；付款按钮旁写首期价、续费价、周期和取消方式；付费墙用弹窗、默认选中月付；Gold 新用户首月 $49 和创始会员按服务端返回的价格和真实剩余名额展示；不做假原价、会重置的倒计时和 7 天退款保证；买积分包不提示升级会员；余额不足充值后由用户点"继续"、不显示还差多少积分；只显示已上线的功能，"报告评审"跟随 D12 开关；多模型专家评审团标"Gold 专属"并突出优势，Fusion 默认权限改为只给 Gold（实际修改配置前单独批准）；对比文案用 HawkSEM 定稿版；定位档案上限（免费 1 / Pro 3 / Gold 6；会员权益加"定位档案上限"字段，高风险迁移；服务端在新建业务时检查，数量检查和插入在同一个按用户加锁的数据库事务里完成（高风险迁移），验收包括同一用户用不同请求 id 并发新建时不超过上限；每个业务每个平台 1 个账号的约束；降级后超出额度的档案只读、由用户选哪几个继续可用；新增删除或归档定位档案并释放名额的功能，删除遵守 DATA-ERASURE 的保留规则，建议用归档（只读、可导出、不占名额），验收包括删除或归档后能再新建）；价格页放工作室版"联系我们"入口；付款前的条款同意勾选框（默认不勾，不勾不能付款，链接《服务条款》《退款政策》，按钮旁写价格、周期、是否自动续费、怎么取消和简短退款说明，订阅、积分包、微信一次性都要有；[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)，上线前，设计稿 v25 没有，按第 51 项做）。积分包会员折扣 Pro 9.5 折、Gold 9 折，客服时效免费 48 / Pro 24 / Gold 工作时间内 2 小时，Gold 优先内测（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）；积分包三档和会员价按第 51 项的表（[记录 S](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980831854)、[记录 T](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980843167)），注册赠送 500 积分；创始人寄语仍待定。**设计定稿 v25 已于 2026-10-04 入库**（[记录 N](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972956845) 的前提已满足）；代码实施仍须 Owner 选定批次。**方案必须先解决**（[#626 总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/626#issuecomment-5976838440)，解决前实施 PR 不得合并）：工作室版按客户单独覆盖档案上限（有上限范围）和后台入口，或者"联系我们"只收集意向、不承诺额度（第 51 项第 3 条） | REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-WAFFO（服务端选出的首月价、首月资格和创始名额计数由它提供）、ENTITLEMENTS；付费墙设计定稿已入库（v25，已满足） | 高 | 中 / 2–3 |
-| | EXPERT-CONSULT | 真人专家诊断的预约入口（第 2.1 节第 51 项，[记录 L](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972732100)、[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)、[记录 R](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980780017)）：放在报告末尾、价格页和工作室版联系入口；只面向已有数据基础的账号，卡片写"预约咨询，免费询价"，不写价格；用户填写需求和联系方式，提交后通知 Owner，由 Owner 线下跟进。不做"同意专家查看报告"的授权开关，资料由用户自己导出后发来；授权查看功能上线时不做。咨询费不进产品结账流程（Stripe 或线下收款，税务由 Owner 处理）。联系方式按个人数据处理，接入账号注销和数据保留规则 | PAYWALL（入口位置）、DATA-ERASURE | 高 | 小 / 1–2 |
-| | PUBLISH-MONITOR | **方向已定、方案待写**（Owner 2026-10-04，第 2.1 节第 51、52 项，[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）：上线前接入 Post for Me，提供多平台发布和数据监控，海外 9 个平台（TikTok、Instagram、YouTube、Facebook、X、Threads、LinkedIn、Pinterest、Bluesky），用户授权自己的账号。Pro：一键发布 + 自己作品近 30 天数据；Gold：另加对标账号监控、90 天趋势、每周自动复盘；两档都按积分计费、不限条数。**D1 范围变更**：这两项原不在上线范围（第 10 节 D1）。Post for Me 实测和条款核对通过之前，相关功能和说法不上线 | RESEARCH-TOOLS；Post for Me 实测和条款核对（第 52 项）；其余依赖由方案定 | 高 | 待方案 |
-| | LEGACY-CLOSE | 关入口已由 #507 提前完成（2026-09-29）：`/chat` 临时跳转 `/positioning`，`/api/ai/stream` 对新请求返回 410，8 处入口改指或禁用；本任务剩余工作是删除旧代码（`/chat` 页面与组件、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等；自研内容检查 `contentModerator.ts`、`aiOutputFilter.ts`、`streamingOutput.ts`，以及它们在 `agentSlice` 和旧 `workbench` 生成里的调用，不单独开任务）和功能对照检查记录。旧检查文件随 LEGACY-CLOSE 删除；删除前核实必要的凭证保护和用户数据隔离不受影响，不要求迁移旧的通用 PII 正则过滤。按 Owner 2026-09-29 决定不再提供旧对话只读查看入口（staging 和正式环境都没有真实用户，上线前清空数据），旧链接直接跳到 `/positioning`；旧对话不迁移、不删除 | AC-4 接管自由对话；入口改指已由 #507 满足；UI-MODEL、UI-B、UI-C、UI-FINISH 已交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 |
-| | V3-M3 → REL-1 | 完整验收和发布（第 9.3 节；正式环境没有真实用户，按新建环境发布，不做旧数据兼容和迁移） | 以上全部 | 高；生产另行批准 | 大 |
-| **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | 沿用 v11 §8（C1 套餐式自动追踪已确认） | 上线 | 高 | 大 |
-| | CHARGEBACK | **方向已定、方案待写**（Owner 2026-10-04，第 2.1 节第 51 项，[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)、[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)；**上线后任务，不阻塞上线**）：拒付最终判定输了，按商品分别处理：订阅按退款规则处理这一期（扣掉还没用完的积分、终止这份订阅以后的积分发放，是创始会员的立即结束创始身份，名额不放回）；微信一次性会员结束这一期，1 年期的终止以后按月发放的积分、扣掉这一期还没用完的积分（是创始会员的同样结束创始身份）；订阅和微信一次性会员被冻结的已发积分判输扣回、判赢解冻，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包扣回这个包里没用完的积分、判赢解冻，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）；所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；赢了就解除 PAY-WAFFO 的冻结、恢复，按幂等处理（拒付期间被暂停的按月积分，判赢后按原发放日逐期补发，幂等，不改变原会员期限和发放日期，不延到原到期日之后）；订阅判赢后不自动恢复扣费，提醒用户自己重新订阅；判输时订阅终止（[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），具体由 CHARGEBACK 方案提出、Owner 批准；一键导出申诉材料（用 PAY-WAFFO ⑥ 的同意记录和付款证据）；限制同一人反复拒付；信用卡账单商户名（由 Waffo 控制）。续费和到期提醒、拒付事件接收和可撤回冻结归 PAY-WAFFO，上线前完成。开工前 Owner 先向 Waffo 核实拒付通知、材料和期限、手续费、账单商户名 | PAY-WAFFO（含同意记录、拒付事件接收和冻结）；Waffo 核实结果 | 高 | 待方案 |
-| | LEARN-1、LEARN-2 | 第 6.3 节：读取用户数据、依赖数据使用同意 | 有真实用户 / SOCIAL-SYNC | 高 | 中 |
-| | 资料库扩展 | PDF 等其他格式、全文检索或 pgvector、图片和音频、Google Drive / Notion 导入 | LIB-DOCS | 高 | 大 |
+"任务"列是规范任务名，PR 标题按第 7.0 节的格式带上它；"标注"列只写"完成""关闭：原因"或"阻塞：原因"，其余进度由脚本生成（第 7.0 节）。
+
+| 阶段 | 任务 | 内容 | 依赖 | 风险 | 规模 / 预计 PR | 标注 |
+| --- | --- | --- | --- | --- | --- | --- |
+| **0 马上** | P0-1 | 完成 PR #446（第 3.6 节） | — | 高 | 小 / 1 | 完成：不含 N1a 出口标准（导师出字速度在 staging 实测达标，第 7.4 节），该标准尚未达到 |
+| | P0-2 | 关闭无人使用但仍可调用的旧付费接口 `ai.sendMessage`；删除会扣积分的临时脚本 `run_diag.ts`（扣后退回但不检查退回是否成功）和 `test_rpc.ts`（扣了不退） | — | 高 | 小 / 1 | 完成：不含 N1a 出口标准（导师出字速度在 staging 实测达标，第 7.4 节），该标准尚未达到 |
+| | P0-3 | 本规划（v12）审查合并 | — | 高 | 小 / 1 | 完成 |
+| | P0-4 | 修复 #443 遗留的过期测试（它还在等已删除的"业务名称"弹窗） | — | 普通 | 小 / 1 | 完成：不含 N1a 出口标准（导师出字速度在 staging 实测达标，第 7.4 节），该标准尚未达到 |
+| | CI-TRUST-1 | 集成测试进 CI（计费、恢复等关键路径） | — | 高 | 中 / 1–2 | 完成：不含 N1a 出口标准（导师出字速度在 staging 实测达标，第 7.4 节），该标准尚未达到 |
+| **1 核心体验重做** | AGENT-CORE | AC-0 可行性验证；AC-1 提问卡和纯文本流式；AC-2 后台整理、Skill 模板、右侧数据沉淀区；AC-3 每步确认、模型根据全部信息写完整报告（第 2.1 节第 22 项；分工：REPORT-GEN 负责报告生成能力，AC-3 负责每步确认、定稿，并把报告接进流程）、定稿、承接第一周选题；AC-4 通用工作区和旧入口改指；AC-5 数据基础补缺，包括 D5 数据使用同意（勾选、撤回、按同意状态过滤记录）。见 [实施说明](tasks/AGENT-CORE.md) | P0-1；AC-2 另外依赖 CI-TRUST-1 和 DATA-ERASURE 的删除规则设计；AC-3 的报告部分依赖 REPORT-GEN | 高 | 大 / 12–16 | — |
+| | AGENT-CORE-UI | 从 AGENT-CORE 拆出的纯前端部分：提问卡和本步小结卡的显示、流式文字显示、右侧面板和进度条的布局、旧入口链接改指。只改前端，沿用现有接口；需要改接口、工具、数据库或计费的部分一律留在 AGENT-CORE | 与对应的 AGENT-CORE 子任务配合 | 普通 | 中 / 3–4 | — |
+| | MENTOR-BUDGET | Owner 2026-09-30 立项（第 2.1 节第 23 项）：导师每一轮的输入和输出预算按用途（交互对话、整理、报告）在后台配置，准入时冻结，不再写死在代码里；放宽我们代码里的单次模型调用超时和每次请求的时间预算（staging 上限受 Vercel Hobby 单次 300 秒约束，正式运营升级 Pro（2026-10-01，第 28 项））；评估提示缓存（已由第 35 项定为上线必做 PROMPT-CACHE）。实施：服务端 [#542](https://github.com/Crnobog9527/GraylumAI_vercel/pull/542)、后台页 [#551](https://github.com/Crnobog9527/GraylumAI_vercel/pull/551)、输出容量 #564；交付参数为交互/报告 8192、单次接收 139264 bytes；报告入口由 REPORT-GEN 启用 | —（Owner 批准先于 #497） | 高 | 中 / 1–2 | 完成 |
+| | REPORT-GEN | Owner 2026-09-30 立项：所有步骤确认后，由模型根据全部信息写完整报告，结构由各自 Skill 的模板规定（第 2.1 节第 22 项）。先实现定位 Skill（当前 13 个部分、正文最多 12000 字），报告生成能力按通用方式设计，其他带步骤的 Skill 复用同一套能力；无步骤的 Skill 不受影响。收费按第 2.1 节第 25 项：扣费逻辑和正常对话一样，不做运行前预告。方案见 [#547](https://github.com/Crnobog9527/GraylumAI_vercel/pull/547)（第七版，按 BILL-PAYG 第七版重写）：建立在 BILL-PAYG 上，一次调用一冻结、一结算；可用余额低于 L 时停在调用之间，充值后继续。原 D1（报告单独输出上限 24576）和"截断不自动续写"已由第 44 项的全站统一上限和自动续写取代，按 CHAT-NATIVE-OUTPUT（#604）的定稿小同步。FUSION-REVIEW 评审的就是这份报告 | MENTOR-BUDGET、BILL-PAYG、CHAT-NATIVE-OUTPUT 续写 C2；顺序为 BILL-PAYG PR-A → PR-B → C2 → 本任务 | 高 | 待实施方案细化 | — |
+| | STG-MENTOR-MODEL | 2026-10-01，[方案 #561](https://github.com/Crnobog9527/GraylumAI_vercel/pull/561)：staging 实测 Gemini 3.8 Flash、Claude Sonnet 5.5。**已关闭（2026-10-02，Owner 决定，第 38 项）**：导师模型定为 Sonnet（依据 #582 盲评），#561 不合并关闭，分支保留，不再发真实调用。以后要做导师模型评测，从最新 staging 另开任务 | — | 高 | — | 关闭：Owner 2026-10-02 决定导师模型定为 Sonnet，#561 不合并（第 38 项） |
+| | MENTOR-PROMPT-V2 | 2026-10-02：#497 验收中发现整理器照抄用户原话、写错字段。整理器输入加入已有值和导师回复（#584），宿主出卡规则与双模型重测（#582）。由 #584、#582 实施；出卡分寸问题并入 CONVERSATION-DRIVEN-CAPTURE B2（第 38 项） | #497 | 高 | 小 / 2 | 完成 |
+| | CONVERSATION-DRIVEN-CAPTURE | 右侧信息跟着对话走（方向 B，第 48 项；[方案 #588](https://github.com/Crnobog9527/GraylumAI_vercel/pull/588)）：整理不再按固定题目顺序，由实际聊到的内容填写，最后收齐 Skill 要求的信息。分两步：B1 数据库与写入（#593，迁移 0159）；B2 同时处理 #582 的出卡分寸问题、激活 PROMPT-CACHE-HISTORY H1 | #497（AC1-4）；B2 在 B1 之后 | 高 | 中 / 2（B1、B2） | — |
+| | CHAT-NATIVE-OUTPUT | 方向（Owner 2026-10-03，第 44 项；[方案 #604](https://github.com/Crnobog9527/GraylumAI_vercel/pull/604)）：全站对话统一流式、统一输出上限（报告也用）、写到上限或快超时自动续写、用户无感，不按 Skill 区分。#604 第一版拆为 C0（前端统一走流式）、C1（统一上限）、C2（自动续写，复用 PAYG PR-B 的等待和继续）。方案 #604 的首版范围以 Owner 决定为准（不做自动续写，正式环境单次上限 32768、staging 8192）。**实施前必须先解决**（[#604 总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/604#issuecomment-5971006438)，解决前相关实施 PR 不得合并）：C0 ① 可以出卡片的导师回合（非开场回合）目前完全缓冲，C0 要定义这类回合怎样流式输出权威文本并加入 C0 测试；② 调用进行中重连拿不到当前快照，C0 增量传输要持久化或共享当前投影，或者把承诺缩小为只重放终态并写明中间状态怎样显示；C2 ③ 结果已提交、还没送达时点停止，C2 要定义终态结果的交接规则并仍遵守 stopAt | C0/C1 在 #594 之后；C2 在 BILL-PAYG PR-B 之后（REPORT-GEN 排在 C2 之后） | 高 | 待实施方案细化 | — |
+| | CONTENT-CONVERSATION-DRIVEN | 方向（Owner 2026-10-03，第 45 项）：定位之后的选题和创作改为自由对话加轻引导、按意图加载平台技能；一窗口一选题（提醒式）；自由对话由用户手动"整理纪要"；是否存进资料库由用户决定。将取代视频线固定按钮流程和 D9"自由对话不自动整理"（第 2.2 节）；方案定稿和实施前现有流程照常。方案见 #621。**实施前必须先解决**（[#621 总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/621#issuecomment-5971687700)，解决前相关实施 PR 不得合并）：① P1-A 必须把已保存的正文从常驻材料投影（`runtime_scope_material`）中移出，或停止注入这个投影，然后才能依赖按需注入；② 暴露"保存正文/简报"按钮之前，定义并迁移 `opc_content_versions.kind` 和 `opc_guard_content_kind` 缺少的类型，并同步 API schema；③ 提议是否已消耗按最新一次已准入的对话执行判断，不论这次执行成功、失败或停止，可用性只在展示提议时检查 | 排在 #604 定稿之后，和 CONVERSATION-DRIVEN-CAPTURE（#588 方向 B）合并设计 | 待方案定 | 待实施方案细化 | — |
+| | RESEARCH-0 | 由 #457、#465、#466 实施（2026-09-28）。第三方搜索供应商对比测试：同一组查询测每一家，记录平台覆盖、新鲜度、字段完整度、速度、单次成本、失败率、是否返回每次调用的官方成本；Owner 据此确定了供应商（第 3.7 节、D13，结论见 [实施说明](tasks/RESEARCH-TOOLS.md)） | —（可与 AC-0 同期） | 高（真实付费调用） | 小 / 0–1 | 完成 |
+| | CI-TRUST | 其余部分：ESLint 覆盖 TS/TSX；网站单测统一入口；API 独立类型检查；删除 `@repo/ui` 空壳和未接入的 ESLint 配置包；依赖升级机器人改发到 staging 并清理指向 `main` 的旧升级 PR（第 8.4 节第 1–3 项）。由 #511、#512、#523 实施 | — | 高 | 中 / 3–4 | 完成 |
+| | DEBT-QUICK | 第 8.3 节第 2 项的快速清理（只含普通改动）；关闭已解决和已废弃的问题单（第 8.4 节第 4–5 项）。由 #482、#483、#558、#607（诊断结论修正、删除旧 `services/promptCache.ts`）、#634（删除 `costCalculator.ts`、`streamHandler.ts`）实施；第 8.4 节第 4–5 项的问题单已核对为关闭状态 | — | 普通 | 小 | 完成 |
+| **2 上线基础** | RUNTIME-PROD | 正式环境真实调用模型：① 模型报价的审批和开放机制；② BILL-UNIT 落实 q=100、默认倍数（2026-10-03 起为 m=6，第 50 项；BILL-UNIT 交付时为 3）与按模型/线路倍数，美元统一成本、调用时冻结（第 11、32–34 项、D16）；③ 后台界面；④ 由 BILL-PAYG 实现逐次冻结与实际结算（第 2.1 节第 26–27 项），可用余额低于按模型/用途配置的 L 时在两步之间暂停、充值续接、余额不为负，超出本次冻结额由平台承担；收费模型准入及超额对账见同两项；普通调用和 Fusion 共用基础机制，Fusion 多模型上界定义前不放行，评审运行前预告保持不变；⑤ 止损：每个用户每日上限、全站每日成本上限和告警、供应商余额告警、一键停止新调用的开关；⑥ 理清 `provider` 字段语义；⑦ 数据不用于训练由服务端强制：正式环境所有模型调用都发送 OpenRouter 的 `data_collection: deny`，只批准支持该设置的供应商线路，准入时拒绝不满足的线路；是否额外要求零数据保留（`zdr`）在实施时核对供应商能力后决定（DATA-ERASURE E10 已决定非 ZDR 线路可以启用；第 ⑦ 项本身是否保留待 Owner 确认，见第 10 节"待确认事项"）。验收包括一次有上限的真实小额对账。分工：② 由 BILL-UNIT 交付；① 的价格读取与准入检查由 MODEL-PRICING-SYNC 交付，正式环境按第 40 项价格全自动；④ 由 BILL-PAYG 交付（收费基准为名义费用，第 41 项）；⑤ 中"一键停止新调用的开关"由 RATE-LIMIT 交付，其余止损项在本任务做 | ④ 按 BILL-PAYG 行提前实施；其余项依赖 AGENT-CORE 稳定 | 高 | 大 / 4–6 | — |
+| | BILL-UNIT | （[#565](https://github.com/Crnobog9527/GraylumAI_vercel/pull/565)，迁移 0157）：所有成本统一美元，q=100、交付时默认 m=3（2026-10-03 默认改为 6，第 50 项；修改配置须另获 Owner 批准）；后台按模型设置倍数，未设用默认值；逐调用冻结有效倍数后合计只进位一次（第 32–34 项）。staging 已按 Owner 批准改为 q=100、m=3（第 39 项）。套餐价格和每月积分已由第 51 项定下；开户赠送 500 积分和积分包三档已先定（第 51 项，记录 S、T），邀请奖励按 m=6 复核 | #497、#550 | 高 | 中 / 1 | 完成 |
+| | PROMPT-CACHE | **上线必做**（Owner 2026-10-01，第 35 项）。方案 #572、实施 #591（冻结前缀与请求缓存）。付费验收 PASS（2026-10-02，v3 测试窗口，八轮 Sonnet 导师对话：缓存标记被 OpenRouter 和 Anthropic 接受，命中轮比不用缓存省 35–56%，八轮合计省 30.8%；执行记录 [5956489014](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5956489014)、[5956779675](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5956779675)，总控审计 [5956577683](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5956577683)、[5956865557](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5956865557)）。逐轮扣费当时因财务页问题 BLOCKED，之后由总控在数据库里只读逐轮核对：每个运行单只有一笔消费，等于 ceil(实际费用 × 100 × 3)（[#565 总控审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/565#issuecomment-5957431423)）。用户收费按名义费用（第 41 项），缓存节省不让给用户 | #497 | 高（Runtime 调用路径和费用上界） | 中 / 2 | 完成 |
+| | PROMPT-CACHE-HISTORY | 对话历史也加缓存（Owner 2026-10-03，第 43 项；方案 #601）：H1 机制 #610（默认不激活），由 CONVERSATION-DRIVEN-CAPTURE B2 激活；这次不做 1 小时缓存；付费实测复用 B2 评测和 B2+F1 验证的预算 | #594；激活随 CONVERSATION-DRIVEN-CAPTURE B2 | 高 | 小 / 1（激活随 B2） | — |
+| | MODEL-PRICING-SYNC | 模型价格从 OpenRouter 自动读取（第 40 项）。方案 #578（D1–D7 按推荐）、价格快照与后台只读显示 #580、准入价格检查与自动重读 #581、C1+C2 联合候选 #597（#596 关闭）。正式环境价格全自动；staging 测试窗口继续锁价 | BILL-UNIT | 高 | 中 / 4 | 完成 |
+| | RUNTIME-VIEW-PERF | 长会话权限检查优化。（#586，迁移 0158）。以后替换 `runtime_admit`、`runtime_view`、`runtime_session_items` 的迁移，源 MD5 要以 0158 之后的值为准 | #497 | 高 | 小 / 1 | 完成 |
+| | BILL-PAYG | 2026-10-01（第 26–27 项），[方案 #553](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553) **第七版定稿**（2026-10-02，第 41 项）：余额封顶冻结和结算，收费基准为按标价计算的名义费用（缺 token 时按 `min(c, U)` 兜底、分时价取最高）；低于按模型/用途配置的 L 才暂停并提示充值，保留断点、不得负余额、不重复收费；正常余额封顶由平台承担，只有超出估算上界才异常停新调用；L 首版不随价格自动更新；价格变动和平台承担只提醒、不拦截。复用 BILL2 和 BILL-UNIT 的逐调用倍数，最终只进位一次。由 Codex 按 PR-A → PR-B 实施 | #611（#598 实施）；PR-B 在 #610（PROMPT-CACHE-HISTORY H1）之后（之后接 CHAT-NATIVE-OUTPUT C2 → REPORT-GEN） | 高 | 大（PR-A → PR-B 分段） | — |
+| | DB-BASELINE | 按 Owner 2026-09-29 选择的 C3 方案 B（第 9.3 节）：① 先修完 S1（#498）查出的 staging 权限漂移；引入 `0000` 前，先完成与现有追加式迁移账本、检查器及 CI 的兼容过渡，涉及的治理变更单独按受保护流程先行交付，不得在新增基线的同一 PR 中修改检查器来放行自身；② 从 staging 导出只有结构的建库脚本作为核对来源，整理成只补缺失前置对象的 `0000` 基线，补上 16 张核心表及缺失的相关函数、触发器、扩展、存储桶、授权；已有迁移负责创建的 75 张表及其对象仍由原文件创建，不把完整 staging 结构直接放进 `0000`；③ 用空库按顺序跑完全部迁移，并跑完整测试；④ 退役 `db:push`，更新 `docs/ENGINEERING.md` 和 `docs/runbooks/STAGING_REPRODUCIBILITY.md`，这部分属于治理变更，按受保护流程走。必须在 V3-M3 / REL-1 之前完成。每次结构变更后的 staging 指纹刷新 PR 也归在本任务 | S1 的权限修复 | 高 | 待实施方案细化 | — |
+| | MODERATION | **暂缓**（Owner 2026-10-01，第 19 项）：不再是封闭内测前提；正式功能何时实现，公开上线前再请 Owner 决定。此前不接 OpenAI Moderation、不需密钥、不核实价格。MODERATION-HOOK 的输入/输出检查点随 RATE-LIMIT 接线（#594），默认放行；拦截后的不收费、独立终止状态与日志以后正式实现时补齐 | 正式功能待 Owner 决定 | 高 | 待定 | 阻塞：Owner 2026-10-01 决定暂缓（第 19 项），公开上线前再请 Owner 决定 |
+| | MODEL-REASONING | ① 添加或编辑模型时，从 OpenRouter 公开模型目录读取该模型支持的思考档位、默认档位、能否关闭，保存快照并可"重新读取"；② 管理员按模型和用途（交互对话、整理、评审、写作）选择思考强度，选项只来自该模型支持的档位，外加"关闭"（允许时）和"用供应商默认"；③ 保存前检查所选供应商线路支持这个参数；④ 准入时把所选档位冻结进执行记录，重放用原值；⑤ 档位和回复长度上限联动校验；⑥ "试一次"按钮，用固定短问题真实调用一次，显示首字时间和是否有正文，费用由平台承担。取代 PR #446 里写死的对照表。**按 Owner 2026-09-28 决定，MODEL-REASONING 提前到 N1b，在 AC1-4 之前完成**（Owner 要求模型在后台随时切换、不绑在代码里）。由 #480、#494、#495 实施 | P0-1（和 RUNTIME-PROD 由同一个 writer 完成，同一个后台模型页） | 高 | 中 / 2–3 | 完成 |
+| | ENTITLEMENTS | 会员权限配置：Fusion 两种模式的开关和上限、资料库总存储空间；服务端检查（系统级文件数量保护上限不属于会员权益，不在这里配置）。PR-1 #540（迁移 0153）、PR-2 后台会员权限与 Fusion 数量设置界面 #609（Owner 2026-10-03 批准合并）；合并后的 staging 冒烟由总控另行安排。2026-10-04 起 Fusion 默认只给 Gold、新增定位档案上限（第 51 项），由 PAYWALL 实施，本任务不重开 | —（和 PAY-COMMON 由同一条钱路线先后完成） | 高 | 中 / 2 | 完成 |
+| | RESEARCH-TOOLS | 第三方搜索统一接口层和对标研究（第 3.7 节，见 [实施说明](tasks/RESEARCH-TOOLS.md)）：规则表和已验证平台清单、统一返回格式、美元成本接入 BILL2、确认失败时如实告知取不到数据（以后经批准增加备用线路后才换备用；2026-10-04 Owner 定 Bright Data 为备用渠道、Facebook 由它抓取，接入前实测和条款核对，第 52 项）、证据进资料库并接入账号注销、打开真实模型的搜索开关、对标流程的代码计算和表格写入限制。在封闭内测之前完成 | RESEARCH-0、AC-1、RUNTIME-PROD、DATA-ERASURE | 高 | 大 / 3–5 | — |
+| | RATE-LIMIT | 方案 #573、准备切片 #562、后端 #590 与前端 #594 联合候选（#590 并入 #594）；一轮只在第一次新调用前检查、按冻结的最多调用数一次性预扣；同一写入方留 MODERATION-HOOK 两个检查点，默认放行。初始新对话 10/分钟、200/天，模型调用 30/分钟、600/天（第 30 项）。B 段 staging 冒烟全部 PASS（8 次真实调用，0.22676 美元）。初始值按每条新消息计（第 49 项）。正式环境 Upstash 在封闭内测前配置并核对容量 | #497、#550 | 高 | 中 / 3（正式环境 Upstash 见第 7.6 节） | 完成：不含正式环境 Upstash 配置和容量核对（第 7.6 节，公开上线前做） |
+| | INVITE-ABUSE | （#560，迁移 0154）：首次正金额开户赠送的新账号才获邀请奖励、每账号仅绑定一次；不开消费返利；接受不同身份同一人无法识别（第 29 项） | #538 开户赠送资格 | 高 | 小 / 1 | 完成 |
+| | SEC-RATELIMIT | 限流 fail-closed、Redis 超时放行、诊断计费探针。（#488，本机预览 #492） | — | 高 | 小 / 1–2 | 完成 |
+| | FORGOT-PASSWORD | 忘记密码（Owner 2026-09-30 提出）：用户通过邮件验证重置密码；发送重置邮件时复用 #541 的隐形 hCaptcha；重置链接落到站内设置新密码的页面；**已注销或被封禁的账号不能靠重置密码恢复登录**，允许和拒绝两条路径都要测。Owner 2026-10-01 选定（[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/566#issuecomment-5930333333)），由 #567、#568 实施，staging 交互验收完成（[总控结论](https://github.com/Crnobog9527/GraylumAI_vercel/pull/568#issuecomment-5935583047)）；最后三组是 Owner 整组确认，没有逐项截图和部署 SHA 的同期记录。**追加**：关联 Google 的账号也能在个人中心改密码（第 36 项），由 #569 实施，staging 交互验收通过（[总控结论](https://github.com/Crnobog9527/GraylumAI_vercel/pull/569#issuecomment-5935890997)）。正式环境上线另行批准 | #543、#548、#552 | 高（认证和登录恢复） | 小 / 3 | 完成 |
+| | STAGING-HOST-CLEANUP | 2026-10-01（第 37 项）：清理残留的 `graylumai-staging.vercel.app` 引用。#571（测试、脚本默认值、示例配置、部署文档）、#605（文档入口）处理了大部分。剩余部分（staging `1563a44d` 核对）：6 个跟踪文件含旧域名：`stagingEnvironment.ts` 的 staging 环境名单（删掉会改变测试窗口准入，属于高风险，要另开 high PR）及其测试 `stagingEnvironment.test.ts`、`stagingAdmission.test.ts`、`runtime.integration.ts`、`run-workbench.mjs`，以及本文中的 Owner 原话和历史记录（保留）。Stripe / Waffo 沙箱回调、Supabase Site URL 和邮件回调由 Owner 自行检查，待 Owner 确认 | — | 普通；`stagingEnvironment.ts` 部分为高 | 小（剩余 1 个 high PR） | — |
+| | DATA-ERASURE | 账号注销与数据删除，以及 D7 承诺的单条删除（对话回答、会话、已保存成果），都在公开上线前完成并列入验收。**设计先行**：在 AC-2 新建任何表之前先写出删除规则，实现在公开上线前完成（设计 #474，E1–E11 已决定，见第 2.1 节第 14 项）。见 [实施说明](tasks/DATA-ERASURE.md)。之后任何新增保存用户私有内容的任务，都要把新数据接入注销流程并列入验收。**实施拆分**：PR-A、PR-B1a、PR-B1b、PR-E、B2a，注销期间在途执行与账务收尾（方案 #598、实施 #611，是 BILL-PAYG 实施的前置条件，第 42 项），之后 B2b → PR-C（删除 Auth 账号）；#538 第 ③ 步等 PR-C 完成；正式库建库约束见第 9.3 节 | —（设计部分先于 AC-2） | 高 | 大 / 3–5 | — |
+| | COST-REPORT | 后台成本报表的金额、估算和查询修正（原清单 06）。（#513） | — | 高 | 小 / 1 | 完成 |
+| | PII-REGEX | 接手 PR #333（邮箱类个人信息匹配的性能加固，改的是安全过滤规则）：基于最新 staging 更新后重新审查，按 AGENTS.md 第 4 节验证、审查后合入 staging（第 8.4 节第 6 项）。由 #500 在最新 staging 上重新实现，#333 关闭 | — | 高 | 小 / 1 | 完成 |
+| **3 差异化功能** | FUSION-REVIEW | 定稿报告多模型评审（第 4 节，见 [实施说明](tasks/FUSION.md)）；结果接入账号注销。对外名称"多模型专家评审团"，上线默认只给 Gold（第 51 项） | AC-3、REPORT-GEN、RUNTIME-PROD、ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 | — |
+| | LIB-DOCS | 资料库上传、"我的文档 / 语料库"、真正删除、按会员等级的总存储空间和系统级文件数量保护上限（见 [实施说明](tasks/LIBRARY-VOICE.md)）；接入账号注销；设计上传权限时一并整理共享 Storage 的授权（第 8.5 节）。第一步是 LIB-1 依赖及安全夹具（#549）；与 AC-2 设计定位导师查询工具（第 31 项） | ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 | — |
+| | VOICE | 文风画像生成、确认和写作注入；接入账号注销 | LIB-DOCS、AGENT-CORE、DATA-ERASURE、RUNTIME-PROD（资料内容发给模型前，"不用于训练"已由服务端强制） | 高 | 中 / 2–3 | — |
+| | UI-A | 输入框编辑内核（沿用 v11 §6.3，属于 `V3-OPC-UI`，不新建任务名）。需要编辑器依赖时（例如 Tiptap，先核实版本、许可和构建），第一个 PR 只引入这个依赖，按 AGENTS.md 第 4 节验证、审查后合入 staging；之后的 PR 只改前端并沿用现有请求接口 | AGENT-CORE | 高 | 中 / 3–4 | — |
+| | UI-MODEL | 输入框里的模型位置（Owner 2026-10-03，第 50 项）：保留位置，只显示 Auto，用户暂时不能切换；实际模型按用途由后台配置决定，不按会员档位区分 | UI-A、ENTITLEMENTS | 高 | 小 / 1–2 | — |
+| | FUSION-COMPARE | 输入框里的多模型对比；结果接入账号注销。每次打开默认勾选管理员在后台设定的一组模型；用户可以取消勾选、自己搭配，范围受管理员允许列表和会员权限限制；后台新增参数"每次对比最少要勾选几个模型"，由 Owner 调整，前端和服务端都按它校验，取值范围是 2 ≤ 最少勾选数 ≤ D3 的当前最多模型数，后台可调但不能低于 2（Owner 2026-10-03，第 50 项）。同步 [FUSION 实施说明](tasks/FUSION.md) 的对比模式描述。上线默认只给 Gold（第 51 项） | UI-A、FUSION-REVIEW、DATA-ERASURE（多模型勾选器属于本任务，不依赖 UI-MODEL） | 高 | 中 / 2–3 | — |
+| | UI-B | 输入框 @ 引用资料库内容：把用户私有资料读进模型上下文，涉及权限和上下文 | UI-A、LIB-DOCS、RUNTIME-PROD | 高 | 中 / 2 | — |
+| | UI-C | 输入框附件 = 上传进资料库再引用（不另建一套上传，只支持 D6 的文档类型） | UI-A、LIB-DOCS、RUNTIME-PROD | 高 | 中 / 2 | — |
+| | UI-FINISH | 导航、响应式、旧链接迁移、界面全验收（沿用 v11） | UI-B、UI-C | 普通 | 中 / 2–3 | — |
+| **4 收费和上线** | PAY-COMMON → PAY-WAFFO | 沿用 v11 §9 和第 11 节定义；上线只用 Waffo 收款（Owner 2026-10-03，第 50 项）：银行卡订阅只做月付和年付（不做季度）；微信只支持单笔，用于积分包和一次性会员；不支持支付宝，只用支付宝的用户付不了款；Stripe 不作为上线收款渠道，下面的手动渠道开关只作备用。一次性会员要做：微信单笔购买 1 个月或 1 年会员，期限到期自动失效、不自动续费、到期再买；成为会员后可以买积分包；1 年期积分按 12 个月分期发放；退款按 v11 §9.3 只处理这一期的积分。按 D17，PAY-COMMON 提供后台"新购买使用的渠道"设置（Waffo / Stripe，手动切换），订单记录成交渠道，续费、退款和凭证按原渠道处理。**PAY-COMMON 方案**（[#608](https://github.com/Crnobog9527/GraylumAI_vercel/pull/608)；退款衔接 P1 已由 Owner 决定，第 47 项），由同一个 Codex writer 从 PR-1（[#612](https://github.com/Crnobog9527/GraylumAI_vercel/pull/612)）开始实施，每个实施 PR 合并另需 Owner 批准。**PAY-WAFFO 补充（2026-10-04，第 51 项）**：价格 Pro $29/月、$279/年，Gold $69/月、$621/年，微信一次性与银行卡同价；Waffo 没有优惠券，按价格分别建产品（Gold 月付新用户首期 $49 之后 $69、Gold 月付正价、微信 1 个月 Gold 新用户 $49 和正价 $69、Gold 创始会员年付首年 $496、续费按续费时 Gold 月付 12 个月价格的 6 折且不写死，记录 P）；服务端判断首月资格（任何渠道从没买过 Gold，年付和创始会员也算买过；扩展 0151 的身份摘要机制，新增 Gold 专属的权威事实，例如 `purpose=gold_first_purchase`，带原子预留和认领，防注销重注册和并发结账重复领取，high 迁移；不直接复用开户赠送的判定；首月优惠的预留同样按结账会话幂等记录；只有 Waffo 权威确认该会话已关闭或已过期才释放（[PAY-COMMON 实施说明](tasks/PAY-COMMON.md)第 7 节"幂等"行）；预留有效期内到达的成功付款兑现 $49；释放之后才到达的成功付款不自动给首月价，按 PAY-COMMON 冲突回执的口径进入人工复核；同一用户在预留有效期内重新打开结账，复用同一预留，不因为自己放弃结账而失去资格）并选择产品，前端只显示服务端返回的价格；创始会员 50 个名额由服务端计数（结账开始占名额；名额预留按结账会话幂等记录；只有在 Waffo 权威确认该会话已关闭或已过期后才回收名额（关闭页面或本地超时都不算会话结束，[PAY-COMMON 实施说明](tasks/PAY-COMMON.md)第 7 节"幂等"行）；预留有效期内到达的成功付款一律兑现；回收之后才到达的成功付款不自动兑现创始价、不超卖，按 PAY-COMMON 冲突回执的口径进入人工复核；名额计数检查和预留在同一个加锁（或 serializable）的数据库操作里完成，同一买家已有有效预留时复用、不另占名额，验收包括"最后一个名额被多个会话并发抢占时只成功一个"；已售出的名额在任何情况下都不放回，包括退款、取消、续费失败，验收确认这些情况都不放回、并发不超过 50 个；银行卡和微信都算创始会员，[记录 V](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981192614)），满额后下架换回正价产品；Pro 中途升 Gold **已由 Owner 定（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）**：不退差价，按 Gold 价格付款（第一次买 Gold 享首月 $49），补发 8,970 积分并立即升级为 Gold 权益，按此实施（处理 #626 第 6 轮 P1"升级价格要在实施前锁定"）；升级后的计费周期也**已由 Owner 定（[记录 U](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980903324)）**：下次扣费日从升级当天重新算，Gold 从升级当天起单独计费，原 Pro 订阅停止续费、不退差价，Pro 年付没发完的积分继续按月发完；核实 Waffo"前 N 期特价"的配置位置和创始会员长期折扣价能否设置。在 Waffo 后台建产品由 Owner 操作，实际配置前单独批准。**方案必须先解决**（[#626 总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/626#issuecomment-5976838440)，解决前实施 PR 不得合并）：① Gold 首购身份摘要在注销后的保留期限和清理契约，同步修改 DATA-ERASURE，**Gold 购买记录的保留期限由 Owner 在方案阶段确认**；② 名额放回条件已由 [记录 V](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981192614) 取代：名额不放回，验收确认退款、取消、续费失败都不放回、并发不超过 50 个；③ 微信老创始会员的创始价续买资格判断（名额卖完后仍对有效期或宽限期内的老创始会员开放 $496，属于计费改动）；失去身份的前创始会员不能再按创始价购买，即使名额还没卖完；他已用掉的名额不放回、仍计入 50 个，他之后再买不按创始价，所以也不会占用新名额（名额按历史售出数计，不按当前有效会员数计）；创始价按账号资格加全局剩余名额由服务端判断；④ 银行卡年付续费前提醒和微信创始会员到期提醒共用一套机制，由系统自己发，上线前完成（[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)）；⑥ 付款同意记录：每次用户主动结账或授权扣款时一条只追加的记录（用户、时间、条款和退款政策版本号、当时的 IP 和浏览器信息、商品、金额、付款方式、Waffo 订单号），与订单绑定，银行卡自动续费账单关联到原来那条记录；IP 和设备证据的保留期限由本方案提出（参考卡组织拒付窗口加余量），Owner 批准后同步修订 DATA-ERASURE，**修订完成之前不开始收集**；⑦ 上线前接收并记录 Waffo 的拒付和争议事件，不能忽略（对齐 [PAY-COMMON 实施说明](tasks/PAY-COMMON.md) 已定的 E5），前提是 Owner 先向 Waffo 核实拒付通知的方式；收到拒付通知后按被拒付的订单先冻结，可以撤回：订阅冻结这份订阅的付费权益、暂停以后的积分发放，并同时取消这份订阅的自动续费（银行卡月付和年付；[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），拒付期间不会再扣款；微信一次性会员冻结这一期的会员权益，1 年期的还要暂停以后按月发放的积分（对齐记录 X"冻结会员权益和积分发放"）；订阅和微信一次性会员还要冻结这份付款已发放、还没用完的积分，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包冻结这个包里没用完的积分，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)），上线前完成（[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)；判输后的处理归 CHARGEBACK）；⑧ 退款规则按 [记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397) 实施，判定、手续费、执行路径和测试矩阵见 [PAY-COMMON 实施说明](tasks/PAY-COMMON.md) PR-4，开工前要确认的事项也列在那里；⑨ 所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；已经被拒付的订单禁止再手动退款，避免退两次钱；⑩ 待核实：工单分类和退款申请入口是否对得上；订阅管理页是否还跳转到 Stripe（上线只用 Waffo）；新建表前按 AGENTS.md 第 5 节说明理由（[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)，上线前，high）；⑤ 宽限期判断（银行卡扣款失败 7 天，微信到期后 7 天内续买），到期未续或例外退款时结束创始身份（第 51 项，[记录 V](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981192614)） | ENTITLEMENTS 之后，同一条钱路线；与 Runtime 主线并行（第 46 项）；Pro 升 Gold 规则已由 Owner 定（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)） | 高 | 大 / 7–10 | — |
+| | PAYWALL | 第 2.1 节第 50 项的付费墙和积分产品：会员检查只在服务端的报告生成入口和报告调用准入两处；免费用户可以开始带步骤的 Skill，并做完报告前的全部步骤。入口路由（不是付费限制）：带步骤的 Skill 只从自己的入口开始，新对话入口和以后的按意图选 Skill 不加载带步骤的 Skill，参照旧入口的 409；报告模板和写作规则只在报告用途加载，不放进 SKILL.md 和前置步骤资源；积分包只允许会员购买；订阅会员和微信一次性会员都算付费会员（报告门槛和积分包购买一致对待）；开户赠送改为 500 积分（[记录 S](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980831854)，迁移修改 0151 的固定 100，high，合并前 Owner 批准）；记录付费墙曝光；按第 50、51 项设定套餐和积分包数值；价格页只写积分和会员权益；（原"Pro 一个月买 2 次以上积分包时提示 Gold"已于 2026-10-04 取消，第 51 项）；会员到期后已生成的报告仍可看、可导出；免费用户的报告前信息导出（已确认、已整理的内容，可以看、可以导出，不收回，不检查会员）——现有导出只在"确认正式定位"发布之后才能用，导出的是由已确认步骤拼成的确定性报告（`workbench.export`，未发布时返回 NOT_PUBLISHED），不覆盖部分步骤已确认的情况；REPORT-GEN 改由模型写报告之后，这条导出路径也不能再代表免费可得的内容。所以要新增一个不依赖报告、不检查会员的前置信息导出，并在 REPORT-GEN 之后保留。**2026-10-04 补充（第 51 项）**：设计以仓库里导出的 v25 为唯一依据（[`docs/launch/design/paywall/`](design/paywall/README.md)，2026-10-04 入库；文案规则和待定事项见其 README）；报告对外叫"运营策略报告"；年付标签"最高省 40% / 25%"只按创始名额是否卖完切换（记录 V）；只用美元显示，年付写明比月付 × 12 省多少；付款按钮旁写首期价、续费价、周期和取消方式；付费墙用弹窗、默认选中月付；Gold 新用户首月 $49 和创始会员按服务端返回的价格和真实剩余名额展示；不做假原价、会重置的倒计时和 7 天退款保证；买积分包不提示升级会员；余额不足充值后由用户点"继续"、不显示还差多少积分；只显示已上线的功能，"报告评审"跟随 D12 开关；多模型专家评审团标"Gold 专属"并突出优势，Fusion 默认权限改为只给 Gold（实际修改配置前单独批准）；对比文案用 HawkSEM 定稿版；定位档案上限（免费 1 / Pro 3 / Gold 6；会员权益加"定位档案上限"字段，高风险迁移；服务端在新建业务时检查，数量检查和插入在同一个按用户加锁的数据库事务里完成（高风险迁移），验收包括同一用户用不同请求 id 并发新建时不超过上限；每个业务每个平台 1 个账号的约束；降级后超出额度的档案只读、由用户选哪几个继续可用；新增删除或归档定位档案并释放名额的功能，删除遵守 DATA-ERASURE 的保留规则，建议用归档（只读、可导出、不占名额），验收包括删除或归档后能再新建）；价格页放工作室版"联系我们"入口；付款前的条款同意勾选框（默认不勾，不勾不能付款，链接《服务条款》《退款政策》，按钮旁写价格、周期、是否自动续费、怎么取消和简短退款说明，订阅、积分包、微信一次性都要有；[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)，上线前，设计稿 v25 没有，按第 51 项做）。积分包会员折扣 Pro 9.5 折、Gold 9 折，客服时效免费 48 / Pro 24 / Gold 工作时间内 2 小时，Gold 优先内测（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）；积分包三档和会员价按第 51 项的表（[记录 S](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980831854)、[记录 T](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980843167)），注册赠送 500 积分；创始人寄语仍待定。设计定稿 v25 于 2026-10-04 入库（[记录 N](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972956845) 的前提）；代码实施须 Owner 选定批次。**方案必须先解决**（[#626 总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/626#issuecomment-5976838440)，解决前实施 PR 不得合并）：工作室版按客户单独覆盖档案上限（有上限范围）和后台入口，或者"联系我们"只收集意向、不承诺额度（第 51 项第 3 条） | REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-WAFFO（服务端选出的首月价、首月资格和创始名额计数由它提供）、ENTITLEMENTS；付费墙设计定稿 v25（`docs/launch/design/paywall/`） | 高 | 中 / 2–3 | — |
+| | EXPERT-CONSULT | 真人专家诊断的预约入口（第 2.1 节第 51 项，[记录 L](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972732100)、[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)、[记录 R](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980780017)）：放在报告末尾、价格页和工作室版联系入口；只面向已有数据基础的账号，卡片写"预约咨询，免费询价"，不写价格；用户填写需求和联系方式，提交后通知 Owner，由 Owner 线下跟进。不做"同意专家查看报告"的授权开关，资料由用户自己导出后发来；授权查看功能上线时不做。咨询费不进产品结账流程（Stripe 或线下收款，税务由 Owner 处理）。联系方式按个人数据处理，接入账号注销和数据保留规则 | PAYWALL（入口位置）、DATA-ERASURE | 高 | 小 / 1–2 | — |
+| | PUBLISH-MONITOR | 方向（Owner 2026-10-04，第 2.1 节第 51、52 项，[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）：上线前接入 Post for Me，提供多平台发布和数据监控，海外 9 个平台（TikTok、Instagram、YouTube、Facebook、X、Threads、LinkedIn、Pinterest、Bluesky），用户授权自己的账号。Pro：一键发布 + 自己作品近 30 天数据；Gold：另加对标账号监控、90 天趋势、每周自动复盘；两档都按积分计费、不限条数。**D1 范围变更**：这两项原不在上线范围（第 10 节 D1）。Post for Me 实测和条款核对通过之前，相关功能和说法不上线 | RESEARCH-TOOLS；Post for Me 实测和条款核对（第 52 项）；其余依赖由方案定 | 高 | 待实施方案细化 | — |
+| | LEGACY-CLOSE | 关入口由 #507 提前实施（2026-09-29）：`/chat` 临时跳转 `/positioning`，`/api/ai/stream` 对新请求返回 410，8 处入口改指或禁用；本任务剩余工作是删除旧代码（`/chat` 页面与组件、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等；自研内容检查 `contentModerator.ts`、`aiOutputFilter.ts`、`streamingOutput.ts`，以及它们在 `agentSlice` 和旧 `workbench` 生成里的调用，不单独开任务）和功能对照检查记录。旧检查文件随 LEGACY-CLOSE 删除；删除前核实必要的凭证保护和用户数据隔离不受影响，不要求迁移旧的通用 PII 正则过滤。按 Owner 2026-09-29 决定不再提供旧对话只读查看入口（staging 和正式环境都没有真实用户，上线前清空数据），旧链接直接跳到 `/positioning`；旧对话不迁移、不删除 | AC-4 接管自由对话；入口改指（#507）；UI-MODEL、UI-B、UI-C、UI-FINISH 交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 | — |
+| | V3-M3 → REL-1 | 完整验收和发布（第 9.3 节；正式环境没有真实用户，按新建环境发布，不做旧数据兼容和迁移） | 以上全部 | 高；生产另行批准 | 大 | V3-M3：阻塞：等第 0–4 阶段的 D1 范围全部完成（依赖"以上全部"） |
+| **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | 沿用 v11 §8（C1 套餐式自动追踪已确认） | REL-1 上线 | 高 | 大 | — |
+| | CHARGEBACK | 方向（Owner 2026-10-04，第 2.1 节第 51 项，[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)、[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)；**上线后任务，不阻塞上线**）：拒付最终判定输了，按商品分别处理：订阅按退款规则处理这一期（扣掉还没用完的积分、终止这份订阅以后的积分发放，是创始会员的立即结束创始身份，名额不放回）；微信一次性会员结束这一期，1 年期的终止以后按月发放的积分、扣掉这一期还没用完的积分（是创始会员的同样结束创始身份）；订阅和微信一次性会员被冻结的已发积分判输扣回、判赢解冻，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包扣回这个包里没用完的积分、判赢解冻，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）；所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；赢了就解除 PAY-WAFFO 的冻结、恢复，按幂等处理（拒付期间被暂停的按月积分，判赢后按原发放日逐期补发，幂等，不改变原会员期限和发放日期，不延到原到期日之后）；订阅判赢后不自动恢复扣费，提醒用户自己重新订阅；判输时订阅终止（[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），具体由 CHARGEBACK 方案提出、Owner 批准；一键导出申诉材料（用 PAY-WAFFO ⑥ 的同意记录和付款证据）；限制同一人反复拒付；信用卡账单商户名（由 Waffo 控制）。续费和到期提醒、拒付事件接收和可撤回冻结归 PAY-WAFFO，上线前完成。开工前 Owner 先向 Waffo 核实拒付通知、材料和期限、手续费、账单商户名 | PAY-WAFFO（含同意记录、拒付事件接收和冻结）；Waffo 核实结果 | 高 | 待实施方案细化 | — |
+| | LEARN-1、LEARN-2 | 第 6.3 节：读取用户数据、依赖数据使用同意 | 有真实用户 / SOCIAL-SYNC | 高 | 中 | — |
+| | LIB-EXT（资料库扩展） | PDF 等其他格式、全文检索或 pgvector、图片和音频、Google Drive / Notion 导入 | LIB-DOCS | 高 | 大 | — |
 
 ### 7.2 依赖简图
 
 ```text
-P0-1、CI-TRUST-1 ─→ AGENT-CORE（AC-0 → AC-1 → AC-2、AC-3 → AC-5 → AC-4）；AC1-4（#497）已合并，AC1-5 未开始
+P0-1、CI-TRUST-1 ─→ AGENT-CORE（AC-0 → AC-1 → AC-2、AC-3 → AC-5 → AC-4）
 DATA-ERASURE 删除规则设计 ─→ AC-2
-AGENT-CORE 稳定 ─→ RUNTIME-PROD 其余项（④ 的 BILL-PAYG 按下方主线提前）；MODEL-REASONING、BILL-UNIT、MODEL-PRICING-SYNC 已完成
+AGENT-CORE 稳定 ─→ RUNTIME-PROD 其余项（④ 的 BILL-PAYG 按下方主线提前；MODEL-REASONING、BILL-UNIT、MODEL-PRICING-SYNC 先行）
 RESEARCH-0 + AC-1 + RUNTIME-PROD + DATA-ERASURE ─→ RESEARCH-TOOLS（原先接封闭内测，已取消，第 50 项）
-REPORT-GEN + BILL-PAYG + PAY-COMMON → PAY-WAFFO + ENTITLEMENTS + 付费墙设计定稿入库（v25，已满足） ─→ PAYWALL（第 7.4 节 N3 批次，排在 PAY-WAFFO 之后）
+REPORT-GEN + BILL-PAYG + PAY-COMMON → PAY-WAFFO + ENTITLEMENTS + 付费墙设计定稿 v25 ─→ PAYWALL（第 7.4 节 N3 批次，排在 PAY-WAFFO 之后）
 PAYWALL + DATA-ERASURE ─→ EXPERT-CONSULT（第 7.4 节 N3 批次）
-RESEARCH-TOOLS + Post for Me 实测和条款核对 ─→ PUBLISH-MONITOR（方向已定、方案待写；第 7.4 节 N3 批次）
-PAY-WAFFO（含付款同意记录）+ Waffo 核实结果 ─→ CHARGEBACK（方向已定、方案待写；上线后）
+RESEARCH-TOOLS + Post for Me 实测和条款核对 ─→ PUBLISH-MONITOR（第 7.4 节 N3 批次）
+PAY-WAFFO（含付款同意记录）+ Waffo 核实结果 ─→ CHARGEBACK（上线后）
 D1 范围全部完成（第 0–4 阶段：上线基础含 RESEARCH-TOOLS；FUSION-REVIEW、LIB-DOCS、VOICE、UI-A—UI-FINISH、FUSION-COMPARE；PAY-COMMON → PAY-WAFFO、PAYWALL、EXPERT-CONSULT、PUBLISH-MONITOR、LEGACY-CLOSE）─→ V3-M3 ─→ REL-1 ─→ 公开上线售卖（生产另行批准）
-公开上线前 ─→ Owner 决定 MODERATION 正式实现时间（暂缓，不作封闭内测前提；默认放行的检查点已随 #594 接线）
+公开上线前 ─→ Owner 决定 MODERATION 正式实现时间（暂缓；默认放行的检查点随 #594 接线）
 S1 权限修复 ─→ DB-BASELINE ─→ V3-M3 ─→ REL-1
-已完成：#497 → #550 B2a（0156）→ BILL-UNIT #565（0157）；PROMPT-CACHE #591；RUNTIME-VIEW-PERF #586（0158）；RATE-LIMIT #590+#594（含 MODERATION-HOOK）；PROMPT-CACHE-HISTORY H1 #610；右侧整理 B1 #593（0159）
-当前主线（Runtime 线）：
-  #611 注销在途收尾（0160，已合并）─→ BILL-PAYG PR-A（#617，在途）─→ BILL-PAYG PR-B ─→ CHAT-NATIVE-OUTPUT 续写 C2 ─→ REPORT-GEN（#547）
-  BILL-PAYG PR-B 的前置"PROMPT-CACHE-HISTORY H1 先写 execute.ts"已满足（#610）
-  CHAT-NATIVE-OUTPUT 方向已定、方案待审（#604）；C0/C1 在 #594 之后（已满足），C2 在 PAYG PR-B 之后
-钱路线（与主线并行，第 46 项）：ENTITLEMENTS（PR-1 #540、PR-2 #609 已完成）─→ PAY-COMMON（方案 #608 已合并；PR-1 #612 在途）─→ PAY-WAFFO
-右侧整理：CONVERSATION-DRIVEN-CAPTURE B1（#593，已合并）─→ B2（处理出卡分寸、激活 PROMPT-CACHE-HISTORY H1）
-#604 定稿 ─→ CONTENT-CONVERSATION-DRIVEN 方案（方向已定、方案待写，与 #588 方向 B 合并设计）
-MENTOR-BUDGET（已合并）+ BILL-PAYG + CHAT-NATIVE-OUTPUT C2 ─→ REPORT-GEN ─→ FUSION-REVIEW
-PROMPT-CACHE（#591）─→ 缓存付费验收（已完成，PASS，八轮合计省 30.8%）
-DATA-ERASURE B2a（#550）+ #611（均已合并）─→ B2b ─→ PR-C（删除 Auth 账号）─→ #538 第 ③ 步
+Runtime 主线：
+  #611 注销在途收尾 ─→ BILL-PAYG PR-A ─→ BILL-PAYG PR-B ─→ CHAT-NATIVE-OUTPUT 续写 C2 ─→ REPORT-GEN
+  BILL-PAYG PR-B 的前置：PROMPT-CACHE-HISTORY H1 先写 execute.ts（#610）
+  CHAT-NATIVE-OUTPUT：C0/C1 在 #594 之后，C2 在 PAYG PR-B 之后
+钱路线（与主线并行，第 46 项）：ENTITLEMENTS ─→ PAY-COMMON ─→ PAY-WAFFO
+右侧整理：CONVERSATION-DRIVEN-CAPTURE B1 ─→ B2（处理出卡分寸、激活 PROMPT-CACHE-HISTORY H1）
+#604 定稿 ─→ CONTENT-CONVERSATION-DRIVEN（与 #588 方向 B 合并设计）
+MENTOR-BUDGET + BILL-PAYG + CHAT-NATIVE-OUTPUT C2 ─→ REPORT-GEN ─→ FUSION-REVIEW
+PROMPT-CACHE（#591）─→ 缓存付费验收
+DATA-ERASURE B2a（#550）+ #611 ─→ B2b ─→ PR-C（删除 Auth 账号）─→ #538 第 ③ 步
 REPORT-GEN ─→ AC-3（报告部分）
 RUNTIME-PROD + ENTITLEMENTS + DATA-ERASURE ─→ FUSION-REVIEW
 ENTITLEMENTS + DATA-ERASURE ─→ LIB-DOCS ─→ VOICE（另需 RUNTIME-PROD）
 AGENT-CORE ─→ UI-A ─→ UI-MODEL（只显示 Auto）；UI-A ─→ FUSION-COMPARE（多模型勾选器自带，不依赖 UI-MODEL）
 LIB-DOCS + UI-A + RUNTIME-PROD ─→ UI-B、UI-C ─→ UI-FINISH
-SEC-RATELIMIT、COST-REPORT、PII-REGEX、CI-TRUST 其余部分（已完成）；DEBT-QUICK 剩余项（等 #603 合并）
-#543 + #548 + #552 ─→ FORGOT-PASSWORD（#567、#568）─→ Google 账号个人中心改密码（#569）（均已合并并验收）
-STAGING-HOST-CLEANUP 剩余：stagingEnvironment.ts 名单及相关测试（另开 high PR）
+#543 + #548 + #552 ─→ FORGOT-PASSWORD（#567、#568）─→ Google 账号个人中心改密码（#569）
+STAGING-HOST-CLEANUP 的 stagingEnvironment.ts 名单及相关测试（另开 high PR）
 AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLOSE ─→ V3-M3 ─→ REL-1
 ```
 
@@ -1216,11 +1123,11 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 
 | 线 | 内容 | 写入面 |
 | --- | --- | --- |
-| Runtime 线（一个 writer） | P0-1 → AGENT-CORE → RUNTIME-PROD + MODEL-REASONING → FUSION；当前主线 BILL-PAYG PR-A（#617）→ PR-B（#611 已合并） → CHAT-NATIVE-OUTPUT C2 → REPORT-GEN（#547）。#611 和 BILL-PAYG 实施由 Codex 写（第 41、42 项）；其后各任务的写入方由总控按任务指派 | Runtime、BILL2 接入、定位和工作区页面 |
+| Runtime 线（一个 writer） | P0-1 → AGENT-CORE → RUNTIME-PROD + MODEL-REASONING → FUSION；主线 BILL-PAYG PR-A → PR-B → CHAT-NATIVE-OUTPUT C2 → REPORT-GEN。#611 和 BILL-PAYG 实施由 Codex 写（第 41、42 项）；其后各任务的写入方由总控按任务指派 | Runtime、BILL2 接入、定位和工作区页面 |
 | 检查线 | CI-TRUST、DEBT-QUICK | CI 配置、ESLint、测试入口、死代码；和 Runtime 线不改同一个文件 |
-| 资料线 | LIB-DOCS → VOICE（ENTITLEMENTS 已交付） | 新数据表、存储、资料库页面；VOICE 接入 Runtime 时和 Runtime 线协调 |
-| 右侧整理线 | CONVERSATION-DRIVEN-CAPTURE B2；之后与 CONTENT-CONVERSATION-DRIVEN 合并设计 | OPC 整理、右侧面板；B1（#593，0159）和 #611（0160）都已合并，两者的迁移编号和 `executionStream.ts` 已由后合并的 #611 同步（第 42 项） |
-| 钱路线（一个 writer） | ENTITLEMENTS（已完成）→ PAY-COMMON（PR-1 #612 在途，Codex）→ PAY-WAFFO；与 Runtime 主线并行（第 46 项） | 会员计划、支付、订单、权益 |
+| 资料线 | LIB-DOCS → VOICE（在 ENTITLEMENTS 之后） | 新数据表、存储、资料库页面；VOICE 接入 Runtime 时和 Runtime 线协调 |
+| 右侧整理线 | CONVERSATION-DRIVEN-CAPTURE B2；之后与 CONTENT-CONVERSATION-DRIVEN 合并设计 | OPC 整理、右侧面板；B1（#593，0159）和 #611（0160）的迁移编号和 `executionStream.ts` 由后合并的 #611 同步（第 42 项） |
+| 钱路线（一个 writer） | ENTITLEMENTS → PAY-COMMON（Codex）→ PAY-WAFFO；与 Runtime 主线并行（第 46 项） | 会员计划、支付、订单、权益 |
 
 同一个文件、同一张表、同一个共享配置只能由一条线修改；共享部分先由一方交付，另一方再使用（AGENTS 第 3 节）。
 
@@ -1231,9 +1138,9 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | N1a 止血和保护 | P0-1、P0-2、P0-4、CI-TRUST-1 | 导师出字速度在 staging 实测达标；计费和恢复测试进入 CI |
 | N1b 体验样片 | AC-0、AC-1 及其对应的 AGENT-CORE-UI 部分；RESEARCH-0（和 AC-0 同期）；MODEL-REASONING（按 Owner 2026-09-28 决定提前，在 AC1-4 之前完成） | Owner 在 staging 用真实模型走完定位第一步，决定继续、调整还是换模型；右侧整理这一阶段沿用旧做法 |
 | N1c 完整定位流程 | DATA-ERASURE 删除规则设计、AC-2（含 CONVERSATION-DRIVEN-CAPTURE B1/B2）、AC-3、AC-5 及其对应的 AGENT-CORE-UI 部分（本步小结卡、右侧面板和进度条）；CHAT-NATIVE-OUTPUT、REPORT-GEN（暂列，待 Owner 选定批次） | Owner 从进入到定稿完整走通并验收 |
-| N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；CONTENT-CONVERSATION-DRIVEN（暂列，方案待写，待 Owner 选定批次）；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
-| N2 上线基础 | RUNTIME-PROD（含 BILL-UNIT、BILL-PAYG）、PROMPT-CACHE、PROMPT-CACHE-HISTORY、RATE-LIMIT 接线（含默认放行的 MODERATION-HOOK）、DB-BASELINE、RESEARCH-TOOLS、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON。2026-10-03：BILL-UNIT、PROMPT-CACHE、RATE-LIMIT、ENTITLEMENTS、MODEL-PRICING-SYNC 已完成，PROMPT-CACHE-HISTORY H1 已合并；钱路线已由 Owner 批准并行开工（第 46 项） | 上线基础完成。原定此后先做 5–10 人封闭内测（D8），2026-10-03 已取消（第 2.1 节第 50 项），按 D1 范围完成后直接公开上线售卖 |
-| N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO（含微信一次性会员）；PAYWALL（依赖 REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-WAFFO、ENTITLEMENTS 和已入库的付费墙设计定稿 v25，须在 REL-1 之前完成）；EXPERT-CONSULT（依赖 PAYWALL、DATA-ERASURE，须在 REL-1 之前完成）；PUBLISH-MONITOR（方向已定、方案待写；依赖 RESEARCH-TOOLS 和 Post for Me 实测、条款核对，须在 REL-1 之前完成，D1 范围变更） | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
+| N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；CONTENT-CONVERSATION-DRIVEN（暂列，待 Owner 选定批次）；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
+| N2 上线基础 | RUNTIME-PROD（含 BILL-UNIT、BILL-PAYG）、PROMPT-CACHE、PROMPT-CACHE-HISTORY、RATE-LIMIT 接线（含默认放行的 MODERATION-HOOK）、DB-BASELINE、RESEARCH-TOOLS、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON。钱路线已由 Owner 批准并行开工（第 46 项） | 上线基础完成。原定此后先做 5–10 人封闭内测（D8），2026-10-03 已取消（第 2.1 节第 50 项），按 D1 范围完成后直接公开上线售卖 |
+| N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO（含微信一次性会员）；PAYWALL（依赖 REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-WAFFO、ENTITLEMENTS 和已入库的付费墙设计定稿 v25，须在 REL-1 之前完成）；EXPERT-CONSULT（依赖 PAYWALL、DATA-ERASURE，须在 REL-1 之前完成）；PUBLISH-MONITOR（依赖 RESEARCH-TOOLS 和 Post for Me 实测、条款核对，须在 REL-1 之前完成，D1 范围变更） | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
 | N4 收口 | LEGACY-CLOSE、V3-M3；公开上线前请 Owner 决定 MODERATION 正式实现时间 | 完整验收；REL-1 和生产另行批准 |
 
 每批由 Owner 选定后开工，批次内由 Agent 自主排序、测试、修复，完成后停下，不自动开始下一批（AGENTS.md 第 2 节）。
@@ -1244,7 +1151,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 - `V3-WORKBENCH` 的 SCOPE / AGENT / ENTRY / CONTENT：代码已随 #422 合并；未完成的 VERIFY 和 Owner 体验验收并入 AGENT-CORE。
 - `V3-OPC-UI` 的 A / B / C / FINISH：改称 UI-A / UI-B / UI-C / UI-FINISH，UI-C 改为复用 LIB-DOCS。
 - `V3-GOLD`：改名 FUSION，拆成 FUSION-REVIEW 和 FUSION-COMPARE。
-- 新增：AGENT-CORE（含 AC-0）、AGENT-CORE-UI（从 AGENT-CORE 拆出的纯前端部分）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的输入框模型位置，上线只显示 Auto）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX（接手 PR #333）、RESEARCH-0、RESEARCH-TOOLS、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2；2026-09-30 新增 MENTOR-BUDGET、REPORT-GEN、FORGOT-PASSWORD；2026-10-01 新增 BILL-PAYG（承接 RUNTIME-PROD ④）、BILL-UNIT（#565，含按模型倍数）、RATE-LIMIT（#562 准备完成，接线待做）、STG-MENTOR-MODEL（#561）、INVITE-ABUSE（#560 已完成）；2026-10-01—02 新增 PROMPT-CACHE（上线必做，第 35 项）、STAGING-HOST-CLEANUP（第 37 项）；2026-10-02—03 新增 MODEL-PRICING-SYNC（第 40 项）、MENTOR-PROMPT-V2、RUNTIME-VIEW-PERF、CONVERSATION-DRIVEN-CAPTURE（第 48 项）、PROMPT-CACHE-HISTORY（第 43 项）、CHAT-NATIVE-OUTPUT（第 44 项，方案待审）、CONTENT-CONVERSATION-DRIVEN（第 45 项，方案待写）；STG-MENTOR-MODEL 已关闭（第 38 项）；2026-10-03 新增 PAYWALL（第 50 项）；2026-10-04 新增 EXPERT-CONSULT（第 51 项）。
+- 新增：AGENT-CORE（含 AC-0）、AGENT-CORE-UI（从 AGENT-CORE 拆出的纯前端部分）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的输入框模型位置，上线只显示 Auto）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX（接手 PR #333）、RESEARCH-0、RESEARCH-TOOLS、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2；2026-09-30 新增 MENTOR-BUDGET、REPORT-GEN、FORGOT-PASSWORD；2026-10-01 新增 BILL-PAYG（承接 RUNTIME-PROD ④）、BILL-UNIT（#565，含按模型倍数）、RATE-LIMIT、STG-MENTOR-MODEL（#561）、INVITE-ABUSE；2026-10-01—02 新增 PROMPT-CACHE（上线必做，第 35 项）、STAGING-HOST-CLEANUP（第 37 项）；2026-10-02—03 新增 MODEL-PRICING-SYNC（第 40 项）、MENTOR-PROMPT-V2、RUNTIME-VIEW-PERF、CONVERSATION-DRIVEN-CAPTURE（第 48 项）、PROMPT-CACHE-HISTORY（第 43 项）、CHAT-NATIVE-OUTPUT（第 44 项）、CONTENT-CONVERSATION-DRIVEN（第 45 项）；STG-MENTOR-MODEL 已关闭（第 38 项）；2026-10-03 新增 PAYWALL（第 50 项）；2026-10-04 新增 EXPERT-CONSULT（第 51 项）、PUBLISH-MONITOR、CHARGEBACK；2026-10-05 起"资料库扩展"的规范任务名为 LIB-EXT。
 - 迁移编号在实际实施时分配，本文不预占。
 
 ### 7.6 Owner 需要提前启动的事项
@@ -1263,6 +1170,38 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | staging 服务商回调地址（2026-10-01） | 旧域名已删除（第 37 项）；Stripe / Waffo 沙箱回调地址、Supabase Site URL 和邮件 Redirect URLs 是否已不再指向旧域名，待 Owner 自行检查确认（#605 列出了待核对位置，没有读取外部配置） |
 | 正式站临时重定向（2026-10-03） | 待 Owner 在 Vercel 正式项目后台把 `www.graylum.com` 临时 307 到 `app.graylum.com`，操作后总控线上复核；新落地页上线时先撤回这条重定向，再去掉代码里的 noindex（第 8.5 节，[#614 总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/614#issuecomment-5968241886)） |
 | 客服邮箱 | 上线发布条件之一（v11 §13.3） |
+
+### 7.7 历史 PR 对照
+
+2026-10-05 之前合并或打开的 PR，有些标题里没有规范任务名。下表把它们一次性归到任务（核对到 staging `470cef9a`），供脚本使用；之后的 PR 按第 7.0 节在标题里写任务名，不再往本表追加。标"（方案）"的是只含方案的 PR。
+
+| 任务 | PR |
+| --- | --- |
+| P0-1 | #446 |
+| P0-3 | #448 |
+| DEBT-QUICK | #482、#483 |
+| INVITE-ABUSE | #560 |
+| AGENT-CORE | #454、#456、#467、#468、#469、#470、#472、#473、#475、#477、#479、#481、#497 |
+| AGENT-CORE-UI | #619、#620、#623、#624、#628 |
+| MENTOR-BUDGET | #564 |
+| STG-MENTOR-MODEL | #561（方案） |
+| CONVERSATION-DRIVEN-CAPTURE | #588（方案） |
+| CI-TRUST | #511、#512 |
+| BILL-UNIT | #565 |
+| MODEL-PRICING-SYNC | #580、#581 |
+| BILL-PAYG | #625、#627、#629 |
+| DB-BASELINE | #539、#556、#563、#575、#577、#579、#592 |
+| MODERATION | #573（方案）、#594 |
+| MODEL-REASONING | #495 |
+| RATE-LIMIT | #590 |
+| SEC-RATELIMIT | #492 |
+| FORGOT-PASSWORD | #567、#568、#569 |
+| STAGING-HOST-CLEANUP | #571 |
+| DATA-ERASURE | #474（方案）、#550 |
+| COST-REPORT | #513 |
+| PII-REGEX | #333、#500 |
+| LIB-DOCS | #549 |
+| LEGACY-CLOSE | #507、#515 |
 
 <a id="debt"></a>
 ## 8. 技术债：核实结果与清理顺序
@@ -1298,7 +1237,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | 05 | 模型配置失败被硬编码默认模型掩盖 | 属实，发生在 `/chat` | P2 | 随 LEGACY-CLOSE 解决；如果下线推迟再单独修 |
 | 06 | 成本报表金额和查询问题 | 属实，例如美元均价被取整成 0 | P2 | COST-REPORT（改变金额展示，属于高风险） |
 | 07 | 临时诊断脚本 | 属实，而且更危险（见 8.1） | **P1** | P0-2 |
-| 08–11 | 旧 costCalculator、StreamHandler、useStreamResponse、promptCache | 属实，都没有生产调用 | P3 | DEBT-QUICK 删除。**进度（2026-10-03）**：useStreamResponse 已由 #558 删除，旧 `services/promptCache.ts` 已由 #607 删除（`runtime/promptCache.ts` 是现行代码，保留）；`costCalculator.ts`、`streamHandler.ts` 仍有 `services/index.ts` 导出和 ESLint 基线条目，要改被 #603 占用的 `packages/api/eslint-suppressions.json`，待 #603 合并后再删 |
+| 08–11 | 旧 costCalculator、StreamHandler、useStreamResponse、promptCache | 属实，都没有生产调用 | P3 | DEBT-QUICK 删除（`runtime/promptCache.ts` 是现行代码，保留） |
 | 12 | `@repo/ui` 空壳包 | 属实 | P3 | 删除会改动工作区依赖和锁文件，属于高风险，放进 CI-TRUST（它本来就要删除未接入的 `eslint-config-custom` 依赖） |
 | 13 | 多代 AI 路由并存 | 属实 | P2 | `ai` 路由在 P0-2 关闭；其余在 LEGACY-CLOSE 统一下线 |
 | 14 | 定位页 2860 行 | 属实 | — | **不重构**，由 AGENT-CORE 整体替换 |
@@ -1315,7 +1254,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 ### 8.3 清理顺序
 
 1. **立即（P0-2，高风险）**：关闭 `ai.sendMessage` 接口；删除两个会扣积分的临时脚本。
-2. **快速清理（DEBT-QUICK，普通）**：诊断报告修正、死代码和无引用组件删除（2026-10-03：诊断结论修正和大部分死代码已完成，见 #607；剩余见第 8.2 节第 08–11 行）。头像上传保留按钮，以后单独按高风险立项（第 8.5 节），不纳入普通快速清理。只包含普通改动：凡是动到依赖或锁文件、鉴权权限、存储策略、计费、金额展示或 CI 的部分，一律移到对应的高风险任务（成本报表修正单独为 COST-REPORT），不走 staging 自动交付授权。
+2. **快速清理（DEBT-QUICK，普通）**：诊断报告修正、死代码和无引用组件删除。头像上传保留按钮，以后单独按高风险立项（第 8.5 节），不纳入普通快速清理。只包含普通改动：凡是动到依赖或锁文件、鉴权权限、存储策略、计费、金额展示或 CI 的部分，一律移到对应的高风险任务（成本报表修正单独为 COST-REPORT），不走 staging 自动交付授权。
 3. **CI 可信度（CI-TRUST-1 先行，其余随后，高风险）**：ESLint 覆盖 TS/TSX、网站单测统一入口、API 独立类型检查、集成测试进 CI，以及删除 `@repo/ui` 空壳包和未接入的 `eslint-config-custom`（都改依赖和锁文件）。**在 AGENT-CORE 改 Runtime 之前或同时完成**，让计费和恢复的关键测试先保护起来。
 4. **安全修复（SEC-RATELIMIT，高风险，上线前必须）**：限流 fail-closed、Redis 超时、诊断计费探针。
 5. **随主线处理**：`provider` 语义随 RUNTIME-PROD；定位页随 AGENT-CORE 替换；`/chat` 的入口和发送接口已由 #507 提前关闭；旧代码在 AC-4 接管自由对话之后由 LEGACY-CLOSE 统一删除；集成测试大文件在 AGENT-CORE 完成后拆分。
@@ -1340,9 +1279,11 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 
 新增小任务 PII-REGEX（高风险，改的是安全过滤规则）：
 
-6. 接手 PR #333，基于最新 staging 更新后重新审查，由 Owner 批准合并。
+6. 接手 PR #333，基于最新 staging 更新后重新审查，按 AGENTS.md 第 4 节验证、审查后合入 staging。
 
 ### 8.5 计划外完成的安全和清理（2026-09-28—10-03）
+
+> 本表记录到 2026-10-03；之后的计划外工作由 `scripts/plan-progress.mjs` 自动列出（第 7.0 节）。
 
 这些工作不在第 7 节的批次里，由 Owner 另行安排，都已合并：
 
