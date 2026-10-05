@@ -10,8 +10,8 @@ const migration=read('packages/db/migrations/0171_runtime_native_stop.sql');
 const report={checks:[],failed:null};
 try{
  await db.query(read('packages/db/tests/erasure-b2a/fixture.sql'));
- async function setup(extra={},operation='question'){
-  const f=await createFixture(db);
+ async function setup(extra={},operation='question',fixtureOptions={}){
+  const f=await createFixture(db,fixtureOptions);
   const session=await rpc(db,'runtime_start',f.actor,randomUUID(),{scope:f.payload.scope});
   const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'input',instructions:'Answer',
    model:f.claimPayload.model,modelId:f.payload.modelId,maxOutputTokens:1000,maxTurns:1,historyItems:0,
@@ -33,6 +33,9 @@ try{
  const f=await setup();
  const c=await claim(db,f);
  assert.equal((await stopped(f)).state,'stopping');
+ assert.equal((await action(f,'read',null)).stopCalls[0].responsePending,true);
+ await db.query("UPDATE bill2_calls SET dispatched_at=clock_timestamp()-interval '301 seconds' WHERE id=$1",[c.id]);
+ assert.equal((await action(f,'read',null)).stopCalls[0].responsePending,false);
  const held=await db.query('SELECT state,reserved_credits,settled_at FROM bill2_calls WHERE id=$1',[c.id]);
  assert.equal(held.rows[0].state,'dispatched');assert.equal(held.rows[0].settled_at,null);
  assert.ok(held.rows[0].reserved_credits>0);
@@ -180,6 +183,8 @@ try{
  const financial=await setup();const financialCall=await claim(db,financial);
  await receipt(db,financial,financialCall);await rpc(db,'bill2_finalize',financial.actor,financial.run);
  assert.equal((await stopped(financial)).state,'stopped_pending_result');
+ const settledStopCall=(await action(financial,'read',null)).stopCalls[0];
+ assert.equal(settledStopCall.settled,true);assert.equal(settledStopCall.responsePending,true);
  const beforeRecovery=await facts(financial);
  for(const finish of [false,true]){
   assert.equal((await rpc(db,'runtime_financial_recovery',financial.actor,financial.execution,finish)).state,'cost_pending');
@@ -189,6 +194,33 @@ try{
  assert.equal(batch.find(item=>item.executionId===financial.execution).userStop,true);
  assert.equal((await complete(financial,null)).state,'cancelled');
  report.checks.push('settled receipt without raw prose requests host completion; financial recovery preserves unsaved stop; batch exposes userStop');
+ const cancelledStop=await setup({},'question',{lookupSupported:true});const cancelledCall=await claim(db,cancelledStop);
+ assert.equal((await stopped(cancelledStop)).state,'stopping');
+ assert.equal((await rpc(db,'runtime_cancel',cancelledStop.actor,cancelledStop.execution)).state,'cost_pending');
+ const cancelledInventory=()=>rpc(db,'runtime_pending_financial_batch',cancelledStop.actor,20);
+ // Ordinary cancellation removes the stopped-host override; no receipt and no lookup means no batch candidate yet.
+ assert.equal((await cancelledInventory()).find(item=>item.executionId===cancelledStop.execution),undefined);
+ await rpc(db,'bill2_record',cancelledStop.actor,cancelledStop.run,cancelledCall.id,{
+  provider:cancelledStop.claimPayload.provider,account:'sandbox',model:cancelledStop.claimPayload.model,
+  protocol:cancelledStop.claimPayload.protocol,providerId:'generation-'+cancelledCall.id,source:'response',
+  sourceHash:'e'.repeat(64),observedAt:new Date().toISOString(),coverage:'request_total',final:false,cost:null,currency:'USD'});
+ const cancelledEntry=(await cancelledInventory()).find(item=>item.executionId===cancelledStop.execution);
+ assert.equal(cancelledEntry.userStop,false);assert.equal(cancelledEntry.finishAllowed,true);
+ await receipt(db,cancelledStop,cancelledCall);
+ assert.equal((await facts(cancelledStop)).b.state,'settled');
+ const settledCancelledEntry=(await cancelledInventory()).find(item=>item.executionId===cancelledStop.execution);
+ assert.equal(settledCancelledEntry.userStop,false);assert.equal(settledCancelledEntry.finishAllowed,true);
+ assert.equal((await rpc(db,'runtime_financial_recovery',cancelledStop.actor,cancelledStop.execution,true)).state,'cancelled');
+ assert.equal((await action(cancelledStop,'read',null)).result,null);
+ const cancelledRun=(await facts(cancelledStop)).b;
+ assert.equal(cancelledRun.cancel_requested,true);assert.equal(cancelledRun.state,'settled');assert.equal(cancelledRun.charged,1);
+ assert.equal((await db.query('SELECT active_execution FROM runtime_sessions WHERE id=$1',[cancelledStop.session])).rows[0].active_execution,null);
+ const cancelledOnce=await facts(cancelledStop);
+ assert.equal((await rpc(db,'runtime_financial_recovery',cancelledStop.actor,cancelledStop.execution,true)).state,'cancelled');
+ assert.deepEqual((await facts(cancelledStop)).ledger,cancelledOnce.ledger);
+ assert.deepEqual((await facts(cancelledStop)).history,cancelledOnce.history);
+ assert.equal((await cancelledInventory()).find(item=>item.executionId===cancelledStop.execution),undefined);
+ report.checks.push('stop then ordinary cancellation: no stopped override; late receipt reaches terminal cancelled and charges once');
  const organized=await setup({attachedOrganizer:{modelId:randomUUID(),model:'organizer',maxOutputTokens:100}});
  const mainCall=await claim(db,organized);await receipt(db,organized,mainCall);await rpc(db,'bill2_finalize',organized.actor,organized.run);
  await rpc(db,'runtime_session_items',organized.actor,organized.session,organized.execution,'append',

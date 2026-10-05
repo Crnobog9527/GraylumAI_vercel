@@ -1217,19 +1217,21 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['plan','workspace',
  }finally{release.release();await run;}
 });
 
-it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['assistant','message','zero','normal','receipt'] as const)(
- 'RUNTIME: C2 real stream stops in %s stage and competing receipt hosts persist identical text once',async stage=>{
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([
+ ...['assistant','message','zero','normal','receipt'].map(stage=>({stage,whitespace:'',withCard:true})),
+ ...['\n',' '].flatMap(whitespace=>[false,true].map(withCard=>({stage:'assistant',whitespace,withCard}))),
+])('RUNTIME: C2 real stream stop $stage whitespace=$whitespace card=$withCard persists identical text once',async({stage,whitespace,withCard})=>{
  const f=await fixture('agent-turn-v5-stream',false,8192,false,undefined,false,30000,true,'append');
- const analysis='长分析😀'.repeat(1000),card={question:'问题？',options:['甲','乙'],recommended:0,message:'接下来的问题。',recommendationReason:'原因'};
+ const analysis='长分析😀'.repeat(1000)+whitespace,card={question:'问题？',options:['甲','乙'],recommended:0,message:'接下来的问题。',recommendationReason:'原因'};
  const toolGate=latch(),endGate=latch();let posts=0;
  const server=createServer(async(req,res)=>{
   posts++;let raw='';for await(const part of req)raw+=part;const request=JSON.parse(raw),id='gen-c2-'+f.execution.executionId;
   res.setHeader('content-type','text/event-stream');
   chunk(res,id,request.model,{role:'assistant',content:analysis});
   await toolGate.promise;
-  chunk(res,id,request.model,{tool_calls:[{index:0,id:'card',type:'function',function:{name:'ask_question',arguments:JSON.stringify(card)}}]});
+  if(withCard)chunk(res,id,request.model,{tool_calls:[{index:0,id:'card',type:'function',function:{name:'ask_question',arguments:JSON.stringify(card)}}]});
   await endGate.promise;
-  chunk(res,id,request.model,{},'tool_calls');
+  chunk(res,id,request.model,{},withCard?'tool_calls':'stop');
   res.end('data: '+JSON.stringify({id,model:request.model,choices:[],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}})+'\n\ndata: [DONE]\n\n');
  });
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -1252,8 +1254,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['assistant','messag
  const updates:RuntimeProgress[]=[];
  const running=host().execute(f.execution.executionId,event=>updates.push(event));
  try{
-  await until(()=>updates.some(e=>e.type==='text'&&e.text===analysis));
-  let stopAt=stage==='zero'?0:Array.from(analysis).length;
+  await until(()=>updates.some(e=>e.type==='text'&&e.text===analysis.trimEnd()));
+  let stopAt=stage==='zero'?0:whitespace?5:Array.from(analysis).length;
   if(stage==='message'||stage==='normal'){
    toolGate.release();await until(()=>updates.some(e=>e.type==='text'&&e.text===analysis+'\n\n'+card.message));
    stopAt+=4;
@@ -1262,6 +1264,10 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['assistant','messag
   if(stage!=='normal')expect(await rpc('runtime_execution',{p_actor_id:f.actorId,p_execution_id:f.execution.executionId,
    p_action:'stop',p_result:{stopAt,source:'assistant'}}))
    .toMatchObject({state:stage==='receipt'?'stopped_pending_result':'stopping'});
+  if(stage!=='normal'&&stage!=='receipt'){
+   for(let attempt=0;attempt<4;attempt++)expect(await host().execute(f.execution.executionId)).toEqual({state:'stopping'});
+   expect(submissions).toEqual([]);
+  }
   toolGate.release();endGate.release();receiptGate.release();
   if(stage!=='normal')await until(()=>submissions.length===1);
   const recovering=stage==='normal'?running.then(()=>host().execute(f.execution.executionId)):host().execute(f.execution.executionId);
@@ -1271,7 +1277,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['assistant','messag
   expect(recovered).toEqual(winner);expect(posts).toBe(1);
   if(stage==='zero')expect(winner.state).toBe('cancelled');
   else{
-   const expected=stage==='normal'?analysis+'\n\n'+card.message:Array.from(analysis+'\n\n'+card.message).slice(0,stopAt).join('').trimEnd();
+   const full=analysis.trimEnd()+(withCard?'\n\n'+card.message:'');
+   const expected=stage==='normal'?full:Array.from(full).slice(0,stopAt).join('').trimEnd();
    if(!('body' in winner))throw new Error('missing saved body');
    expect(JSON.parse(winner.body!)).toMatchObject({message:expected,card:stage==='normal'?card:null});
    if(stage!=='normal')expect(winner).toMatchObject({stopped:true,completeness:'stopped'});

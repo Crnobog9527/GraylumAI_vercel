@@ -7,7 +7,8 @@ export function mentorText(assistant: string, message: string): string {
 
 /** A possible repeated suffix is buffered until disambiguated, without replacing assistant prose. */
 export function streamingMentorText(assistant: string, message: string): string {
-  const after = message.trimStart();
+  assistant = assistant.trimEnd();
+  const after = message.trim();
   if (!assistant) return after;
   if (!after || assistant.includes(after.trimEnd())) return assistant;
   return assistant + '\n\n' + after;

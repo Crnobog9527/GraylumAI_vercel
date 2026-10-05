@@ -6,7 +6,7 @@ DO $migration$
 DECLARE definition text; source_md5 text;
 BEGIN
  definition:=pg_get_functiondef('public.runtime_execution(uuid,uuid,text,jsonb)'::regprocedure);source_md5:=md5(definition);
- IF source_md5='33b75218ba3751ab8a2b31a1b133b796' THEN RETURN;END IF;
+ IF source_md5='67ffdd7c15cdb851afd2acc9dcc6cd79' THEN RETURN;END IF;
  IF source_md5<>'fb0a164b29dfd4ae43f7c9059473c053' THEN RAISE EXCEPTION 'NATIVE_STOP_SOURCE_MISMATCH: runtime_execution(uuid,uuid,text,jsonb)';END IF;
  definition:=$definition$CREATE OR REPLACE FUNCTION public.runtime_execution(p_actor_id uuid, p_execution_id uuid, p_action text, p_result jsonb DEFAULT NULL::jsonb)
  RETURNS jsonb
@@ -299,12 +299,13 @@ BEGIN
   'pausedReason',b.paused_reason,'stop',b.runtime_checkpoint->'stop',
   'stopCalls',CASE WHEN b.paused_reason='user_stop' THEN (SELECT coalesce(jsonb_agg(jsonb_build_object(
    'sequence',c.sequence,'requestHash',c.payload->>'requestHash','phase',c.payload->>'phase',
-   'dispatched',c.dispatched_at IS NOT NULL,'settled',c.settled_at IS NOT NULL OR (b.contract_version<>'bill2.v2' AND c.selected_cost_usd IS NOT NULL)) ORDER BY c.sequence),'[]'::jsonb)
+   'dispatched',c.dispatched_at IS NOT NULL,'settled',c.settled_at IS NOT NULL OR (b.contract_version<>'bill2.v2' AND c.selected_cost_usd IS NOT NULL),
+   'responsePending',c.dispatched_at IS NOT NULL AND clock_timestamp()<c.dispatched_at+interval '300 seconds') ORDER BY c.sequence),'[]'::jsonb)
    FROM bill2_calls c WHERE c.run_id=b.id) END,
   'live',live,'cancelRequested',b.cancel_requested,'context',e.payload,'billing',b.payload,'result',e.result,'primaryResult',e.primary_result,'matchResult',e.match_result,'historyFrozen',e.selected_history IS NOT NULL,'historyOmitted',e.history_omitted,'unavailableReason',e.unavailable_reason);
 END $function$
 $definition$;
- IF md5(definition)<>'33b75218ba3751ab8a2b31a1b133b796' THEN RAISE EXCEPTION 'NATIVE_STOP_TARGET_MISMATCH';END IF;
+ IF md5(definition)<>'67ffdd7c15cdb851afd2acc9dcc6cd79' THEN RAISE EXCEPTION 'NATIVE_STOP_TARGET_MISMATCH';END IF;
  EXECUTE definition;
 END $migration$;
 DO $migration$
@@ -589,7 +590,7 @@ DO $migration$
 DECLARE definition text; source_md5 text;
 BEGIN
  definition:=pg_get_functiondef('public.runtime_financial_recovery(uuid,uuid,boolean)'::regprocedure);source_md5:=md5(definition);
- IF source_md5='037d9c0d55bcb9f39921f0cbe36a9048' THEN RETURN;END IF;
+ IF source_md5='fa660423495727443728499f7a4186e7' THEN RETURN;END IF;
  IF source_md5<>'8b4ef3b787caf790ab5510c61dd07883' THEN RAISE EXCEPTION 'NATIVE_STOP_SOURCE_MISMATCH: runtime_financial_recovery(uuid,uuid,boolean)';END IF;
  definition:=$definition$CREATE OR REPLACE FUNCTION public.runtime_financial_recovery(p_actor_id uuid, p_execution_id uuid, p_finish boolean DEFAULT false)
  RETURNS jsonb
@@ -606,7 +607,7 @@ BEGIN
  SELECT * INTO b FROM bill2_runs WHERE id=e.billing_run_id AND actor_id=p_actor_id FOR UPDATE;
  IF s.id IS NULL OR b.id IS NULL OR b.session_ref IS DISTINCT FROM e.session_id THEN RAISE EXCEPTION 'RUNTIME_BINDING_DENIED';END IF;
  erasing:=bill2_erasure_closed(p_actor_id,coalesce(b.pre_deduct_id,b.id));
- IF NOT erasing AND b.paused_reason='user_stop' AND e.result IS NULL AND runtime_history_available(e.id) THEN
+ IF NOT erasing AND b.paused_reason='user_stop' AND NOT b.cancel_requested AND e.result IS NULL AND runtime_history_available(e.id) THEN
   -- Only the receipt reconstruction host can decide whether stopped content is usable.
   RETURN jsonb_build_object('executionId',e.id,'runId',b.id,'state','cost_pending','billing',bill2_public(b));
  END IF;
@@ -646,14 +647,14 @@ BEGIN
  RETURN jsonb_build_object('executionId',e.id,'runId',b.id,'state',e.state,'billing',v);
 END $function$
 $definition$;
- IF md5(definition)<>'037d9c0d55bcb9f39921f0cbe36a9048' THEN RAISE EXCEPTION 'NATIVE_STOP_TARGET_MISMATCH';END IF;
+ IF md5(definition)<>'fa660423495727443728499f7a4186e7' THEN RAISE EXCEPTION 'NATIVE_STOP_TARGET_MISMATCH';END IF;
  EXECUTE definition;
 END $migration$;
 DO $migration$
 DECLARE definition text; source_md5 text;
 BEGIN
  definition:=pg_get_functiondef('public.runtime_pending_financial_batch(uuid,integer)'::regprocedure);source_md5:=md5(definition);
- IF source_md5='c69b5746050fa186c5b413c1ff1ace5d' THEN RETURN;END IF;
+ IF source_md5='86ede9a1aad7e8e8c3506adaf918f32f' THEN RETURN;END IF;
  IF source_md5<>'ef9b72eae775774021ef2b5e40be68a4' THEN RAISE EXCEPTION 'NATIVE_STOP_SOURCE_MISMATCH: runtime_pending_financial_batch(uuid,integer)';END IF;
  definition:=$definition$CREATE OR REPLACE FUNCTION public.runtime_pending_financial_batch(p_actor_id uuid DEFAULT NULL::uuid, p_limit integer DEFAULT 20)
  RETURNS jsonb
@@ -670,7 +671,7 @@ BEGIN
  FROM (
   SELECT r.id run_id, pending.last_lookup,
    jsonb_build_object('actorId',r.actor_id,'executionId',e.id,'runId',r.id,
-    'userStop',coalesce((r.paused_reason='user_stop' AND e.result IS NULL AND runtime_history_available(e.id) AND NOT bill2_erasure_closed(r.actor_id,coalesce(r.pre_deduct_id,r.id))),false),
+    'userStop',coalesce((r.paused_reason='user_stop' AND NOT r.cancel_requested AND e.result IS NULL AND runtime_history_available(e.id) AND NOT bill2_erasure_closed(r.actor_id,coalesce(r.pre_deduct_id,r.id))),false),
     'finishAllowed',(e.state IN ('cost_pending','cancelled') OR e.result IS NOT NULL),
     'recoveryPolicy',jsonb_build_object('id',r.test_window_id,'expiresAt',r.deadline,
      'creditsPerUsd',r.credits_per_usd::text,'multiplier',r.multiplier::text,
@@ -686,7 +687,7 @@ BEGIN
     AND clock_timestamp()<=CASE WHEN r.contract_version='bill2.v2'
      THEN coalesce(c.recovery_deadline,c.created_at+interval '24 hours') ELSE r.deadline+interval '24 hours' END
     AND (c.rejection_recovery_at IS NULL OR c.rejection_recovery_at<=clock_timestamp()-interval '60 seconds')
-   HAVING (r.paused_reason='user_stop' AND e.result IS NULL AND runtime_history_available(e.id) AND NOT bill2_erasure_closed(r.actor_id,coalesce(r.pre_deduct_id,r.id))) OR count(*)>0 OR (r.closed AND (e.state IN ('cost_pending','cancelled') OR e.result IS NOT NULL)
+   HAVING (r.paused_reason='user_stop' AND NOT r.cancel_requested AND e.result IS NULL AND runtime_history_available(e.id) AND NOT bill2_erasure_closed(r.actor_id,coalesce(r.pre_deduct_id,r.id))) OR count(*)>0 OR (r.closed AND (e.state IN ('cost_pending','cancelled') OR e.result IS NOT NULL)
     AND NOT EXISTS(
     SELECT 1 FROM bill2_calls unknown_call WHERE unknown_call.run_id=r.id
      AND unknown_call.dispatched_at IS NOT NULL AND unknown_call.selected_cost_usd IS NULL)
@@ -696,13 +697,14 @@ BEGIN
      ELSE clock_timestamp()<=r.deadline+interval '24 hours' END)
   ) pending
   WHERE (p_actor_id IS NULL OR r.actor_id=p_actor_id) AND NOT r.conflict
-   AND r.state NOT IN ('settled','refunded')
+   AND (r.state NOT IN ('settled','refunded')
+    OR (r.paused_reason='user_stop' AND r.cancel_requested AND e.state='cost_pending'))
   ORDER BY pending.last_lookup NULLS FIRST,r.id LIMIT p_limit
  ) chosen;
  RETURN result;
 END $function$
 $definition$;
- IF md5(definition)<>'c69b5746050fa186c5b413c1ff1ace5d' THEN RAISE EXCEPTION 'NATIVE_STOP_TARGET_MISMATCH';END IF;
+ IF md5(definition)<>'86ede9a1aad7e8e8c3506adaf918f32f' THEN RAISE EXCEPTION 'NATIVE_STOP_TARGET_MISMATCH';END IF;
  EXECUTE definition;
 END $migration$;
 COMMIT;

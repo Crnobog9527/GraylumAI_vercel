@@ -2508,6 +2508,12 @@ it.each(['durable-response','unknown-lookup','settled-lookup-only'] as const)(
   });
   const recover=()=>runtimeExecutor({database:admin,actor:async()=>f.actor,callGate:gate,
    adapter:{dispatch,lookup}}).execute(execution.executionId);
+  if(scenario!=='durable-response'){
+   for(let attempt=0;attempt<4;attempt++)expect(await recover()).toEqual({state:'stopping'});
+   expect(lookup).not.toHaveBeenCalled();
+   // Model the lost HTTP's exhausted 300-second lifetime using only local facts.
+   await db.query("update bill2_calls set dispatched_at=now()-interval '301 seconds' where id=$1",[call.id]);
+  }
   const result=await recover();
   const state=async()=>(await db.query(`select e.state,e.result,b.closed,b.cancel_requested,b.paused_reason,
    c.settled_at,c.charged_delta,c.reserved_credits from runtime_executions e

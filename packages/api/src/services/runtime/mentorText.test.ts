@@ -14,7 +14,7 @@ it.each([
   ['分析\n\n问题', '问题', '分析\n\n问题'], ['分析问题', '问题继续', '分析问题\n\n问题继续'],
   ['前😀后', '😀后', '前😀后'], ['分析问题尾', '问题', '分析问题尾\n\n问题'],
 ])('uses exact whole-message suffix deduplication (%s)',(a,b,saved)=>expect(mentorText(a,b)).toBe(saved));
-it.each(['分析'.repeat(5000),'',card.message,'分析\n\n'+card.message])('saves and streams the same monotonic body',assistant=>{
+it.each(['分析'.repeat(5000),'',card.message,'分析\n\n'+card.message,'Analysis.\n','Analysis. ','Analysis.\n\n'])('saves and streams the same monotonic body',assistant=>{
   const result=agentTurnResult(assistant,output,true,card.message,true,true);
   expect(result.message).toBe(mentorText(assistant,card.message));
   expect(result.card).toEqual(card);

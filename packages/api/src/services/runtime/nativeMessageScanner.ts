@@ -3,6 +3,7 @@
 export class NativeTextAccumulator {
   text = '';
   private high = '';
+  private trailing = '';
   private started = false;
   private count = 0;
 
@@ -25,8 +26,13 @@ export class NativeTextAccumulator {
       if (code >= 0xd800 && code <= 0xdbff) this.high = unit;
       else added += this.accept(code >= 0xdc00 && code <= 0xdfff ? '\ufffd' : unit);
     }
-    this.text += added;
-    return added;
+    // Final envelopes trim their message. Keep a whitespace suffix off the wire
+    // until another public character proves it belongs inside the saved prose.
+    const pending = this.trailing + added;
+    const visible = pending.trimEnd();
+    this.trailing = pending.slice(visible.length);
+    this.text += visible;
+    return visible;
   }
 
   private accept(point: string): string {

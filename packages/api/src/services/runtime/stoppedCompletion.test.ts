@@ -2,6 +2,7 @@
 import {expect,it,vi} from 'vitest';
 import {stoppedCompletion,type StopExecution} from './stoppedCompletion';
 import type {authoritativeBilling} from '../bill2/service';
+import {QUESTION_CONTRACT} from './agentTools';
 import {agentTurnBody} from '../../shared/agentTurn';
 const id='10000000-0000-4000-8000-000000000001';
 function fixture(){
@@ -109,4 +110,30 @@ it('does not save a fallback notice for an empty length-limited mentor receipt',
  const f=fixture();f.execution.context={...f.execution.context as object,providerRequestFormat:'agent-turn-v5-stream',envelopeOrder:undefined};
  f.execution.stop!.source='final';f.raws.set(1,JSON.stringify({model:'model',choices:[{finish_reason:'length',message:{content:''}}]}));
  expect(await f.complete(id)).toEqual({state:'cancelled'});
+});
+
+it.each(['\n',' '])('trailing whitespace preserves assistant stop source (%j)',async whitespace=>{
+ for(const withCard of [false,true]){
+  const f=fixture();f.execution.context={...f.execution.context as object,providerRequestFormat:'agent-turn-v5-stream',
+   envelopeOrder:undefined,tools:['ask_question'],questionContract:QUESTION_CONTRACT,mentorText:'append-card-v1'};
+  const card={message:'Pick one'+whitespace,question:'Q',options:['A','B'],recommended:0,recommendationReason:'Reason'};
+  f.execution.stop={stopAt:5,source:'assistant'};
+  f.raws.set(1,JSON.stringify({model:'model',choices:[{finish_reason:withCard?'tool_calls':'stop',message:{content:'Hello world'+whitespace,
+   ...(withCard?{tool_calls:[{id:'card',function:{name:'ask_question',arguments:JSON.stringify(card)}}]}:{})}}]}));
+  expect(await f.complete(id)).toMatchObject({state:'completed',body:agentTurnBody('Hello',null),stopped:true});
+ }
+});
+it.each([false,true])('waits for the original HTTP response before financial lookup (settled=%s)',async settled=>{
+ const f=fixture();f.raws.clear();Object.assign(f.execution.stopCalls![0],{settled,responsePending:true});
+ for(let attempt=0;attempt<4;attempt++)expect(await f.complete(id)).toEqual({state:'stopping'});
+ expect(f.billing.recoverReceipts).not.toHaveBeenCalled();expect(f.billing.finalizeRun).not.toHaveBeenCalled();
+ expect(f.results).toEqual([]);
+ f.raws.set(1,f.response('{"message":"中😀后","inputKind":"answer"}'));
+ expect(await f.complete(id)).toMatchObject({state:'completed',stopped:true});
+});
+
+it('ordinary cancellation after stop delegates to existing financial recovery',async()=>{
+ const f=fixture();f.execution.cancelRequested=true;
+ expect(await f.complete(id)).toBeNull();expect(f.results).toEqual([]);
+ expect(f.billing.recoverReceipts).not.toHaveBeenCalled();
 });

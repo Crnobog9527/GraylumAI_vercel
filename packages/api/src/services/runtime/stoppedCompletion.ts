@@ -13,7 +13,7 @@ import type { authoritativeBilling } from '../bill2/service';
 import type { RuntimeExecution } from './paygResume';
 import type { RuntimeProgress } from './progress';
 
-type StopCall = {sequence:number;requestHash:string;phase:string;dispatched:boolean;settled:boolean};
+type StopCall = {sequence:number;requestHash:string;phase:string;dispatched:boolean;settled:boolean;responsePending?:boolean};
 export type StopExecution = RuntimeExecution & {
   pausedReason?:string;stop?:{stopAt:number;source?:NativeTextSource};stopCalls?:StopCall[];
 };
@@ -27,19 +27,28 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
     if(execution.pausedReason!=='user_stop')return null;
     if(execution.state==='completed')return completedOutput(execution.result,execution.context,onProgress);
     if(execution.state==='cancelled')return {state:'cancelled' as const};
+    if(execution.cancelRequested)return null; // Ordinary cancellation owns financial-only recovery.
     const raws=new Map<number,unknown>();
+    let responsePending=false;
     const collect=async()=>{
-      let unknown=false;
+      let unknown=false;responsePending=false;
       for(const call of execution.stopCalls??[]){
         if(!call.dispatched)continue;
         const response=await rpc<{rawBody:string|null}|null>('runtime_response',{
           ...args,p_sequence:call.sequence,p_request_hash:call.requestHash});
         if(response?.rawBody){try{raws.set(call.sequence,JSON.parse(response.rawBody));}catch{/* Invalid stored output cannot be saved. */}}
-        else if(!call.settled)unknown=true;
+        else {
+          if(call.responsePending)responsePending=true;
+          if(!call.settled)unknown=true;
+        }
       }
       return unknown;
     };
-    if(await collect()){
+    const unknown=await collect();
+    // Refresh/maintenance must not spend lookup attempts or cancel a result while
+    // the original HTTP can still persist its response, even if cost arrived first.
+    if(responsePending)return {state:'stopping' as const};
+    if(unknown){
       await billing.recoverReceipts(execution.runId,lookupTimeoutMs===undefined?undefined:{timeoutMs:lookupTimeoutMs});
       if(execution.billing.contractVersion==='bill2.v2')await billing.finalizeRun(execution.runId);
       execution=await rpc<StopExecution>('runtime_execution',{...args,p_action:'read'});

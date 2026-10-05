@@ -164,3 +164,14 @@ it('source survives batching, while two provider exchanges can share the same so
   expect(displayed!.source).toBe(later!.source);
   expect(displayed!.text).not.toBe(later!.text);
 });
+
+it('buffers suffix whitespace until internal, and never needs a trim-only final replacement',()=>{
+ for(const mode of ['agent','message-first'] as const){
+  const p=new NativeProgressProjection({mode,appendCard:true});
+  if(mode==='message-first')p.appendText('{"message":"');
+  expect(p.appendText('Hello ')).toMatchObject({text:'Hello',delta:'Hello'});
+  expect(p.appendText(mode==='agent'?'\n':'\\n')).toBeNull();
+  expect(p.appendText('world ')).toMatchObject({text:'Hello \nworld',delta:' \nworld'});
+  expect(p.finish('Hello \nworld')).toBeNull();
+ }
+});

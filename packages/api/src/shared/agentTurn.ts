@@ -120,7 +120,7 @@ export function parseQuestionCard(value: unknown): QuestionCard | null {
 export type AgentTurnPhase = "mentor" | "reading" | "organizer" | "saving";
 
 /** Final execution state carried by the `result` event. */
-export type AgentTurnState = 'waiting_credits' | 'waiting_resume' | "completed" | "cancelled" | "cost_pending" | "pending";
+export type AgentTurnState = 'stopping' | 'waiting_credits' | 'waiting_resume' | "completed" | "cancelled" | "cost_pending" | "pending";
 
 /**
  * Why a finished or stopped execution has no usable body. The page maps each
