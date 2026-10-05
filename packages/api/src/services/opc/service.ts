@@ -231,7 +231,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         p_input: v.input,
       });
       return runtimeAdmissionService(user, admin, {
-        ...(real?{real}:{}),
+        ...(real?{real,paygHost:true}:{}),
         account: "runtime-local",
         additionalInstructions, stableAdditionalInstructions: v.purpose === "mentor" ? AGENT_TURN_STABLE_PREFIX : undefined,
         costPerCall: "0.02",
@@ -400,7 +400,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       if (replay.error) throw new Error("OPC_REQUEST_CONFLICT");
       if (replay.data) return replay.data;
       return runtimeAdmissionService(user, admin, {
-        ...(real ? { real } : {}),
+        ...(real ? { real, paygHost: true } : {}),
         account: "runtime-local",
         additionalInstructions: TOPIC_WORKSPACE_INSTRUCTION,
         costPerCall: "0.02",

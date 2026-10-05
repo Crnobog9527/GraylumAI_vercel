@@ -1,4 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
+-- PR-3 uses 0173 after 0172_runtime_user_stop_view.sql; no runtime_view changes.
 -- No settings are seeded. Missing selection means Waffo, currently unavailable.
 -- Recovery: preserve orders and select Waffo to stop fresh sales; forward-fix only.
 BEGIN;

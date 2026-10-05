@@ -4,7 +4,8 @@ import { createSafeServiceUnavailableError } from '../../lib/publicError';
 import { projectOrderPayment, type PaymentOrderBillingRow } from './orderProjection';
 import { normalizePaymentOrderStatus } from '../paymentOrderStatus';
 
-type Documents = { invoiceNumber: string | null; invoicePdfUrl: string | null; hostedInvoiceUrl: string | null; receiptUrl: string | null };
+type Documents = { documentStatus?: 'unknown'; invoiceNumber: string | null; invoicePdfUrl: string | null;
+  hostedInvoiceUrl: string | null; receiptUrl: string | null };
 export async function listAdminPaymentOrders(db: Pick<SupabaseClient, 'from'>,
   input: { offset: number; limit: number }, loadDocument: (order: PaymentOrderBillingRow) => Promise<Documents>) {
   const result = await db.from('payment_orders').select([

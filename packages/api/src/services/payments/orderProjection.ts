@@ -2,7 +2,7 @@
 import { paymentAmountFactsSchema } from './contracts';
 
 type Order = { payment_channel?: string | null; payment_mode?: string | null; payment_amount_facts?: unknown };
-type Documents = { invoicePdfUrl: string | null; hostedInvoiceUrl: string | null; receiptUrl: string | null };
+type Documents = { documentStatus?: 'unknown'; invoicePdfUrl: string | null; hostedInvoiceUrl: string | null; receiptUrl: string | null };
 
 export function projectOrderPayment(order: Order, documents?: Documents) {
   const channel = order.payment_channel === 'stripe' || order.payment_channel === 'waffo' ? order.payment_channel : null;
@@ -14,7 +14,8 @@ export function projectOrderPayment(order: Order, documents?: Documents) {
     // Never expose internal evidence references or infer unknown fees/net amounts as zero.
     amountFacts: parsed.success ? parsed.data.map(({ kind, amount, currency, unit }) => ({ kind, amount, currency, unit })) : [],
     documentSource: channel,
-    documentStatus: !channel ? 'unknown' as const
+    documentStatus: !channel || documents?.documentStatus === 'unknown' || (channel === 'stripe' && !documents)
+      ? 'unknown' as const
       : documents && (documents.invoicePdfUrl || documents.hostedInvoiceUrl || documents.receiptUrl)
         ? 'available' as const : 'unavailable' as const,
   };

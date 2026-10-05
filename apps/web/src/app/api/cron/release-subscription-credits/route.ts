@@ -35,8 +35,16 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('release-subscription-credits', 'started');
-    const summary = await releaseDueAnnualSubscriptionCredits(supabase);
-    reportAnnualReleaseAnomalies(summary.anomalies);
+    const result = await releaseDueAnnualSubscriptionCredits(supabase);
+    reportAnnualReleaseAnomalies(result.anomalies);
+    const summary = {
+      scannedSubscriptions: result.scannedSubscriptions,
+      releasedGrantCount: result.releasedGrantCount,
+      skippedSubscriptions: result.skippedSubscriptions,
+      releasedCredits: result.releasedCredits,
+      anomalyCount: result.anomalies.length,
+      anomalyReasons: [...new Set(result.anomalies.map(({ reason }) => reason))],
+    };
 
     logger.system.cronJob(
       'release-subscription-credits',

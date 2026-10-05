@@ -89,7 +89,7 @@ function createQueryBuilder(result: Promise<unknown>) {
   };
 }
 
-function createPublicCatalogCaller(table: string, result: Promise<unknown>, selection: unknown = { channel: 'stripe', version: 1 }) {
+function createPublicCatalogCaller(table: string, result: Promise<unknown>, selection: unknown = { channel: 'stripe', version: 1 }, privileged: boolean | 'missing' = true) {
   return settingsRouter.createCaller({
     supabase: {},
     supabasePublic: {
@@ -98,7 +98,9 @@ function createPublicCatalogCaller(table: string, result: Promise<unknown>, sele
         return createQueryBuilder(result);
       },
     },
-    supabaseAdmin: { from(actualTable: string) {
+    supabaseAdmin: privileged === 'missing' ? null : { from(actualTable: string) {
+      expect(privileged).toBe(true);
+      if (selection instanceof Error) throw selection;
       if (actualTable === 'system_settings') return { select() { return this; }, eq() { return this; },
         maybeSingle: async () => ({ data: selection === null ? null : { value: selection }, error: null }) };
       expect(actualTable).toBe('payment_provider_refs');
@@ -108,7 +110,7 @@ function createPublicCatalogCaller(table: string, result: Promise<unknown>, sele
           : ['monthly', 'yearly'].flatMap(cycle => row[`stripe_${cycle}_price_id`]
             ? [{ membership_plan_id: row.id, billing_cycle: cycle, external_id: row[`stripe_${cycle}_price_id`] }] : [])), error: null })));
     } },
-    hasSupabaseAdminPrivileges: true,
+    hasSupabaseAdminPrivileges: privileged !== false,
   } as any);
 }
 
@@ -777,4 +779,21 @@ describe('selected channel catalog readiness', () => {
       Promise.resolve({ data: [validMembershipPlan], error: null }), selection).getMembershipPlans();
     expect(plans[0]).toMatchObject({ paymentChannel: 'waffo', checkoutReady: { monthly: false, yearly: false } });
   });
+});
+
+it.each([
+  [{ channel: 'other', version: 1 }, true],
+  [{ channel: 'stripe', version: 0 }, true],
+  [new Error('unavailable'), true],
+  [{ channel: 'stripe', version: 1 }, false],
+  [{ channel: 'stripe', version: 1 }, 'missing'],
+] as const)('keeps the public catalog visible when channel access fails: %j / %s', async (selection, privileged) => {
+  const packages = await createPublicCatalogCaller('credit_packages',
+    Promise.resolve({ data: [validCreditPackage], error: null }), selection, privileged).getCreditPackages();
+  expect(packages).toHaveLength(1);
+  expect(packages[0]).toMatchObject({ paymentChannel: null, checkout_ready: false });
+  const plans = await createPublicCatalogCaller('membership_plans',
+    Promise.resolve({ data: [validMembershipPlan], error: null }), selection, privileged).getMembershipPlans();
+  expect(plans).toHaveLength(1);
+  expect(plans[0]).toMatchObject({ paymentChannel: null, checkoutReady: { monthly: false, yearly: false } });
 });

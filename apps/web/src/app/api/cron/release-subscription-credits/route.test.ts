@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ release: vi.fn(), capture: vi.fn(), auth: vi.fn(), create: vi.fn() }));
+const mocks = vi.hoisted(() => ({ cron: vi.fn(), release: vi.fn(), capture: vi.fn(), auth: vi.fn(), create: vi.fn() }));
 vi.mock('@repo/api/src/services/subscriptionCreditGrants', () => ({ releaseDueAnnualSubscriptionCredits: mocks.release }));
-vi.mock('@repo/api/src/services', () => ({ logger: { system: { cronJob: vi.fn() } } }));
+vi.mock('@repo/api/src/services', () => ({ logger: { system: { cronJob: mocks.cron } } }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.create }));
 vi.mock('@sentry/nextjs', () => ({ captureMessage: mocks.capture }));
 vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth }));
@@ -19,7 +19,11 @@ it('returns anomalies and emits a single fixed-code alert without subject identi
   mocks.release.mockResolvedValue({ anomalies, releasedGrantCount: 1 });
   const response = await GET(new Request('https://fixture.invalid'));
   expect(response.status).toBe(200);
-  expect((await response.json()).summary.anomalies).toEqual(anomalies);
+  const body = await response.json();
+  expect(body.summary).toMatchObject({ anomalyCount: 1, anomalyReasons: ['PAY_COMMON_ANNUAL_CONTRACT_UNKNOWN'] });
+  expect(body.summary).not.toHaveProperty('anomalies');
+  expect(JSON.stringify(body)).not.toContain('private-subject');
+  expect(JSON.stringify(mocks.cron.mock.calls)).not.toContain('private-subject');
   expect(mocks.capture).toHaveBeenCalledTimes(1);
   expect(mocks.capture).toHaveBeenCalledWith('PAY_COMMON_ANNUAL_RELEASE_REVIEW_REQUIRED', expect.objectContaining({
     extra: { count: 1, reasons: ['PAY_COMMON_ANNUAL_CONTRACT_UNKNOWN'] },

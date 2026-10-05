@@ -84,7 +84,7 @@
   "packages/api/src/routers/chat.ts": {"lines":607,"longLines":1},
   "packages/api/src/routers/model.ts": {"longLines":2},
   "packages/api/src/routers/opc.ts": {"longLines":5},
-  "packages/api/src/routers/payments.ts": {"lines":1697},
+  "packages/api/src/routers/payments.ts": {"lines":1593},
   "packages/api/src/routers/runtime.ts": {"longLines":7},
   "packages/api/src/routers/skills.ts": {"longLines":1},
   "packages/api/src/routers/workbench.ts": {"longLines":9},

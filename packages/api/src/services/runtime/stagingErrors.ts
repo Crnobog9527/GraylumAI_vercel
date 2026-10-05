@@ -5,6 +5,8 @@ import { logger } from '../../lib/logger';
 import { DatabaseReadError } from '../../lib/databaseReadError';
 
 const failures = {
+  RUNTIME_PAYG_CONFIG_UNAVAILABLE: ['SERVICE_UNAVAILABLE', '计费准入设置暂不可用，请稍后重试。'],
+  RUNTIME_PAYG_PROFILE_REQUIRED: ['PRECONDITION_FAILED', '当前模型用途尚未完成逐次计费验证，请管理员核对配置；未发起模型调用。'],
   RUNTIME_ORGANIZER_PENDING: ['PRECONDITION_FAILED', 'RUNTIME_ORGANIZER_PENDING：上一轮整理尚未完成，新消息尚未准入，请先处理原任务。'],
   RUNTIME_USAGE_CONFIGURATION_REQUIRED: ['PRECONDITION_FAILED', 'RUNTIME_USAGE_CONFIGURATION_REQUIRED：使用额度配置低于本任务剩余调用数，需要管理员调整使用额度；也可取消原任务。'],
   RUNTIME_PRICE_CONFIGURATION_PENDING: ['PRECONDITION_FAILED', 'RUNTIME_PRICE_CONFIGURATION_PENDING：原测试窗口或报价不可用，请管理员处理；原任务保持等待。'],

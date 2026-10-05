@@ -33,6 +33,8 @@ import {newWorkGate,readNewWorkSettings,requireNewWork} from './newWorkGate';
 import {requireAllowedInput} from './moderation';
 import {admitPricing} from './pricingAdmission';
 import {freezeStagingPaygPricing} from './paygPricing';
+import {freezePaygMessageBudget} from './paygMessageBudget';
+import {readPaygHostPolicies} from './paygHostPolicy';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
 
 const uuid=z.string().uuid();
@@ -48,7 +50,8 @@ export const runtimeAdmission=z.object({sessionId:uuid,requestId:uuid,input:z.st
 /** Deployment policy is server configuration, never request input.
  * Real admission requires the separately loaded, enabled Staging window. */
 export type LocalRuntimePolicy={
- /** Trusted composition only; no public request or environment switch selects v2. */
+ /** Real hosts opt into the server-side staging setting; client input cannot select v2. */
+ paygHost?: boolean;
  payg?: {callPolicies: FrozenPaygRun['callPolicy']; billingUnit: NonNullable<FrozenPaygRun['rules']['billingUnit']>};
  resumeWaitingOrganizer?:ResumeWaitingOrganizer;
  hostTurnContext?:HostTurnContext;
@@ -281,7 +284,15 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     if(!billing.callPolicy.some(p=>p.modelId===candidate.modelId))billing.callPolicy.push({...billing.callPolicy[0],modelId:candidate.modelId,model:candidate.model,inputLimit:candidate.inputLimit,outputLimit:candidate.outputLimit});
    }
    // MODEL-PRICING-SYNC: every selected quote must still cover its route's current OpenRouter prices.
-   if(realCalls&&!policy.payg)await admitPricing(admin,realCalls);
+   const hostPayg=realCalls&&policy.paygHost?await readPaygHostPolicies(admin,policy.real!,realCalls,[
+    {modelId,phase:context.role,outputLimit:maxOutputTokens,requestFormat:providerRequestFormat,reasoning},
+    ...(attachedOrganizer?[{modelId:attachedOrganizer.modelId,phase:'attached_organizer' as const,
+     outputLimit:attachedOrganizer.maxOutputTokens,requestFormat:providerRequestFormat,reasoning:attachedOrganizer.reasoning}]:[]),
+    ...(candidates.length?[{modelId,phase:'skill_matching' as const,outputLimit:maxOutputTokens,requestFormat:providerRequestFormat}]:[]),
+    ...candidates.map(c=>({modelId:c.modelId,phase:'skill' as const,outputLimit:c.outputLimit,requestFormat:providerRequestFormat})),
+   ],process.env,billing.limits.deadline):undefined;
+   const paygTemplates=hostPayg??policy.payg?.callPolicies;
+   if(realCalls&&!paygTemplates)await admitPricing(admin,realCalls);
    if(realCalls)billing.callPolicy=realCalls;
    // BILL-UNIT: the window must match the current q and each selected model's m_i (0157 claim/finalize).
    if(realCalls)billing.rules.billingUnit=await freezeWindowBillingUnit(admin,policy.real!,realCalls);
@@ -292,14 +303,16 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
      instructions:attachedOrganizer.instructions??'',inputBytes:attachedInputLimit!,historyItems:0,toolBytes:0,
     });
    }
-   if(policy.payg){
-    const templates=policy.payg.callPolicies.filter(p=>selectedIds.has(p.modelId));
+   if(paygTemplates){
+    freezePaygMessageBudget(context,paygTemplates);
+    billing.sourceHash=createHash('sha256').update(JSON.stringify(context)).digest('hex');
+    const templates=paygTemplates.filter(p=>selectedIds.has(p.modelId));
     const callPolicy=realCalls
      ?await freezeStagingPaygPricing(admin,realCalls.map(p=>({...p,payg:templates.find(t=>t.modelId===p.modelId)?.payg})))
      :templates.map(p=>frozenCallPolicy.parse(p));
     if(callPolicy.length!==selectedIds.size||callPolicy.some(p=>!p.payg))throw new Error('BILL2_PAYG_QUOTE_INVALID');
     billing={...billing,contractVersion:'bill2.v2',callPolicy,
-     rules:{...billing.rules,billingUnit:realCalls?billing.rules.billingUnit!:policy.payg.billingUnit},limits:{...billing.limits,credits:0}};
+     rules:{...billing.rules,billingUnit:realCalls?billing.rules.billingUnit!:policy.payg!.billingUnit},limits:{...billing.limits,credits:0}};
    }
    // Both SQL CHECKs measure jsonb::text, not JSON.stringify or model input.
    // This runs before runtime_admit, which atomically creates the execution/reservation.

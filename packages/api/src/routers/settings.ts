@@ -1,4 +1,5 @@
 import { PAYMENT_CHANNEL_KEY, paymentChannelSettingSchema, readPaymentChannel } from '../services/payments/channelSettings';
+import {PAYG_HOST_SETTING,paygHostSettingWrite} from '../services/runtime/paygHostPolicy';
 import {
   entitlementRowShape, FUSION_COMPARE_SETTING, fusionCompareLimitSchema,
 } from '../services/membershipEntitlementConfig';
@@ -97,6 +98,9 @@ const systemSettingInputSchema = z.object({
   }
   if (setting.key === 'runtime_purpose_budgets') {
     ctx.addIssue({ code: 'custom', path: ['key'], message: '用途预算请通过专用管理接口保存' });
+  }
+  if (setting.key === PAYG_HOST_SETTING && !paygHostSettingWrite.safeParse(setting.value).success) {
+    ctx.addIssue({code:'custom',path:['value'],message:'PAYG 设置须为有效对象，关闭可保存 {enabled:false}'});
   }
   if (setting.key === FUSION_COMPARE_SETTING && !fusionCompareLimitSchema.safeParse(setting.value).success) {
     ctx.addIssue({ code: 'custom', path: ['value'], message: '对比模型上限须为 2 至 8 的整数' });
@@ -336,8 +340,9 @@ export const settingsRouter = router({
    * 返回活跃的积分加油包供用户购买
    */
   getCreditPackages: publicProcedure.query(async ({ ctx }) => {
-    const selectedChannel = await readPaymentChannel(ctx.supabaseAdmin);
-    const stripeReady = selectedChannel.channel === 'stripe' && isStripeCheckoutConfigured();
+    const selectedChannel = ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin
+      ? await readPaymentChannel(ctx.supabaseAdmin).catch(() => null) : null;
+    const stripeReady = selectedChannel?.channel === 'stripe' && isStripeCheckoutConfigured();
     const readClient = getPublicReadClient(ctx);
     let result;
 
@@ -383,7 +388,7 @@ export const settingsRouter = router({
       bonus_credits: pkg.bonus_credits ?? 0,
       price: (pkg.price ?? 0) / 100, // 从分转换为美元
       is_popular: pkg.is_popular === 'true',
-      paymentChannel: selectedChannel.channel,
+      paymentChannel: selectedChannel?.channel ?? null,
       checkout_ready: stripeReady && pkg.price > 0 && hasConfiguredStripePriceId(priceRefs.get(`${pkg.id}:one_time`) ?? null),
     }));
   }),
@@ -393,8 +398,9 @@ export const settingsRouter = router({
    * 返回所有会员等级供用户查看和订阅
    */
   getMembershipPlans: publicProcedure.query(async ({ ctx }) => {
-    const selectedChannel = await readPaymentChannel(ctx.supabaseAdmin);
-    const stripeReady = selectedChannel.channel === 'stripe' && isStripeCheckoutConfigured();
+    const selectedChannel = ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin
+      ? await readPaymentChannel(ctx.supabaseAdmin).catch(() => null) : null;
+    const stripeReady = selectedChannel?.channel === 'stripe' && isStripeCheckoutConfigured();
     const readClient = getPublicReadClient(ctx);
     let result;
 
@@ -455,7 +461,7 @@ export const settingsRouter = router({
       // 使用 level 判断推荐：gold 为推荐/高亮
       recommended: plan.level === 'gold',
       highlight: plan.level === 'gold',
-      paymentChannel: selectedChannel.channel,
+      paymentChannel: selectedChannel?.channel ?? null,
       checkoutReady: {
         monthly: stripeReady && plan.level !== 'free' && plan.monthly_price > 0 && hasConfiguredStripePriceId(priceRefs.get(`${plan.id}:monthly`) ?? null),
         yearly: stripeReady && plan.level !== 'free' && plan.yearly_price > 0 && hasConfiguredStripePriceId(priceRefs.get(`${plan.id}:yearly`) ?? null),

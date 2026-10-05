@@ -1,3 +1,4 @@
+import { createStripeBillingDocumentLoader } from '../services/payments/stripeBillingDocument';
 import { listAdminPaymentOrders } from '../services/payments/adminOrders';
 import { projectOrderPayment, type BillingRecord, type PaymentOrderBillingRow } from '../services/payments/orderProjection';
 import { assertCheckoutChannel } from '../services/payments/channelSettings';
@@ -45,6 +46,7 @@ import { STRIPE_MANAGED_ACTIVE_SUBSCRIPTION_STATUSES } from '../services/subscri
 import { addUtcCalendarMonthsClamped } from '../services/subscriptionCreditGrants';
 import { findStripeReference, resolveStripeOrderIds, loadCurrentStripeSubscription } from '../services/payments/stripeReferences';
 import { loadCurrentStripePrices } from '../services/payments/stripeCatalog';
+import { mapPurchaseCheckoutError } from '../services/payments/purchaseCheckoutError';
 import { createDurableStripeCheckout, resolveStripeScope } from '../services/payments/stripeCheckoutPersistence';
 
 const createCheckoutInput = z.discriminatedUnion('kind', [
@@ -989,100 +991,6 @@ async function loadPaymentItemNames(
   };
 }
 
-async function loadStripeBillingDocument(stripe: ReturnType<typeof getStripeClient> | null, supabase: SupabaseClient, order: PaymentOrderBillingRow) {
-  const emptyDocument = {
-    invoiceNumber: null,
-    invoicePdfUrl: null,
-    hostedInvoiceUrl: null,
-    receiptUrl: null,
-  };
-
-  if (!stripe) {
-    return emptyDocument;
-  }
-
-  try {
-    if ((isSubscriptionPlanChangeOrder(order) && !order.fulfilled_at) || order.payment_channel !== 'stripe') return emptyDocument;
-    const scope = await resolveStripeScope(stripe);
-    if (order.payment_channel !== 'stripe' || order.merchant_namespace !== scope.merchant || order.payment_mode !== scope.mode) {
-      throw new Error('PAY_COMMON_ORDER_IDENTITY_UNKNOWN');
-    }
-    order = await resolveStripeOrderIds(supabase, order);
-    if (order.stripe_invoice_id) {
-      const invoice = await stripe.invoices.retrieve(order.stripe_invoice_id);
-      if (invoice.id !== order.stripe_invoice_id || invoice.livemode !== (scope.mode === 'live')
-        || invoice.amount_paid !== Number(order.amount_total) || invoice.currency !== order.currency) {
-        throw new Error('PAY_COMMON_INVOICE_RECEIPT_MISMATCH');
-      }
-      return {
-        invoiceNumber: invoice.number ?? null,
-        invoicePdfUrl: invoice.invoice_pdf ?? null,
-        hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
-        receiptUrl: null,
-      };
-    }
-
-    if (!order.stripe_checkout_session_id) {
-      return emptyDocument;
-    }
-
-    const session = await stripe.checkout.sessions.retrieve(order.stripe_checkout_session_id, {
-      expand: ['payment_intent.latest_charge'],
-    });
-
-    if (session.id !== order.stripe_checkout_session_id || session.metadata?.userId !== order.user_id
-      || session.metadata?.orderId !== order.id || session.livemode !== (scope.mode === 'live')
-      || session.amount_total !== Number(order.amount_total) || session.currency !== order.currency) {
-      throw new Error('PAY_COMMON_RECEIPT_MISMATCH');
-    }
-    const paymentIntent = typeof session.payment_intent === 'object'
-      ? session.payment_intent
-      : null;
-    const latestCharge = paymentIntent?.latest_charge;
-    const receiptUrl =
-      latestCharge && typeof latestCharge === 'object' && 'receipt_url' in latestCharge
-        ? latestCharge.receipt_url ?? null
-        : null;
-
-    return {
-      invoiceNumber: null,
-      invoicePdfUrl: null,
-      hostedInvoiceUrl: null,
-      receiptUrl,
-    };
-  } catch (error) {
-    logger.warn('billing', 'payments_billing_document_lookup_failed', {
-      orderId: order.id,
-      stripeInvoiceId: order.stripe_invoice_id ?? null,
-      stripeCheckoutSessionId: order.stripe_checkout_session_id ?? null,
-      message: error instanceof Error ? error.message : String(error),
-    });
-    return {
-      invoiceNumber: null,
-      invoicePdfUrl: null,
-      hostedInvoiceUrl: null,
-      receiptUrl: null,
-    };
-  }
-}
-
-function createStripeBillingDocumentLoader(stripe: ReturnType<typeof getStripeClient> | null, supabase: SupabaseClient) {
-  const documentCache = new Map<string, Promise<Awaited<ReturnType<typeof loadStripeBillingDocument>>>>();
-
-  return async (order: PaymentOrderBillingRow) => {
-    const cacheKey = `order:${order.id}`;
-
-    const cached = documentCache.get(cacheKey);
-    if (cached) {
-      return cached;
-    }
-
-    const promise = loadStripeBillingDocument(stripe, supabase, order);
-    documentCache.set(cacheKey, promise);
-    return promise;
-  };
-}
-
 function shouldListBillingOrder(order: PaymentOrderBillingRow) {
   if (isSubscriptionPlanChangeOrder(order) && !order.stripe_invoice_id && order.amount_total == null) {
     return false;
@@ -1405,20 +1313,8 @@ export const paymentsRouter = router({
         return { checkoutUrl: session.url, sessionId: session.id };
       } catch (error) {
         logCheckoutStageFailure('stripe_session_create', input, error);
-        const reason = error instanceof Error ? error.message : '';
-        if (['PAY_COMMON_PRICE_MAPPING_MISSING', 'PAY_COMMON_PRICE_MAPPING_AMBIGUOUS', 'PAY_COMMON_PRICE_MISMATCH',
-          'PAY_COMMON_AMOUNT_INVALID', 'PAY_COMMON_PRODUCT_UNAVAILABLE', 'PAY_COMMON_CHANNEL_NOT_READY',
-          'PAY_COMMON_LIVE_PURCHASE_DISABLED', 'PAY_COMMON_CHANNEL_SETTING_INVALID'].includes(reason)) {
-          throw toItemUnavailableError(input.kind === 'membership_plan' ? '该会员套餐暂不可购买，请稍后重试' : undefined);
-        }
-        if (['PAY_COMMON_PURCHASE_PENDING', 'PAY_COMMON_LEGACY_ORDER_UNRESOLVED',
-          'PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED'].includes(reason)) {
-          throw new TRPCError({ code: 'CONFLICT', message: '已有付款正在核对，请先完成原订单。', cause: error });
-        }
-        if (['PAY_COMMON_PURCHASE_ACTOR_DENIED', 'PAY_COMMON_MEMBERSHIP_FACTS_UNKNOWN', 'ENTITLEMENT_CONFLICT',
-          'REFUNDED_ORDER_REQUIRES_POLICY', 'ACTIVE_SUBSCRIPTION_EXISTS', 'UPGRADE_DOWNGRADE_UNSUPPORTED'].includes(reason)) {
-          throw new TRPCError({ code: 'PRECONDITION_FAILED', message: '购买资格已变化，请刷新后重试。', cause: error });
-        }
+        const mappedError = mapPurchaseCheckoutError(error, input.kind);
+        if (mappedError) throw mappedError;
         throw createPaymentOperationError('创建支付会话', error);
       }
     }),
