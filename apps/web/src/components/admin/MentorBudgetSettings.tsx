@@ -13,7 +13,7 @@ import { TabsContent, TabsTrigger } from '@/components/ui/tabs';
 import AdminErrorState from './AdminErrorState';
 import {
   BUDGET_PURPOSES, FIELD_LABELS, PURPOSE_TITLES,
-  budgetErrorMessage, describeLegacy, draftProblems, fieldProblem, fieldRange, fieldUnit, fieldsOf, toBudgetDraft, toBudgetInput,
+  BUDGET_FIELDS, budgetErrorMessage, describeLegacy, draftProblems, fieldProblem, fieldRange, fieldUnit, toBudgetDraft, toBudgetInput,
   type BudgetDraft, type BudgetField, type BudgetPurpose, type BudgetView,
 } from './mentorBudgetDraft';
 
@@ -68,7 +68,7 @@ export function MentorBudgetTabContent({ onOpenFeatures }: { onOpenFeatures: () 
       if (save.error) save.reset();
       setDraft(next);
     },
-    onSave: current => save.mutate(toBudgetInput(current)),
+    onSave: (current, outputCap) => save.mutate(toBudgetInput(current, outputCap)),
   };
   const openSummaryLimit = () => {
     onOpenFeatures();
@@ -89,7 +89,8 @@ export type BudgetEditor = {
   saveError: string | null;
   saved: boolean;
   onEdit: (draft: BudgetDraft) => void;
-  onSave: (draft: BudgetDraft) => void;
+  /** `outputCap` is the server's site-wide output cap, stored in the version 1 output fields. */
+  onSave: (draft: BudgetDraft, outputCap: number) => void;
 };
 
 export function MentorBudgetSettings({ editor, onOpenSummaryLimit }: { editor: BudgetEditor; onOpenSummaryLimit: () => void }) {
@@ -108,6 +109,7 @@ export function MentorBudgetSettings({ editor, onOpenSummaryLimit }: { editor: B
     );
   }
   const current = editor.draft ?? toBudgetDraft(view.data);
+  const outputCap = view.data.limits.maxOutputTokens;
   return (
     <MentorBudgetPanel
       view={view.data}
@@ -115,7 +117,7 @@ export function MentorBudgetSettings({ editor, onOpenSummaryLimit }: { editor: B
       onChange={(purpose, field, value) => {
         editor.onEdit({ ...current, [purpose]: { ...current[purpose], [field]: value } });
       }}
-      onSave={() => editor.onSave(current)}
+      onSave={() => editor.onSave(current, outputCap)}
       saving={editor.saving}
       saveError={editor.saveError}
       saved={editor.saved}
@@ -146,8 +148,8 @@ export function MentorBudgetPanel(props: PanelProps) {
           <SourceBadge source={view.source} />
         </CardTitle>
         <CardDescription style={{ color: 'var(--text-tertiary)' }}>
-          按用途限制每次模型调用的输入大小、回答长度和带入的历史条数。
-          输入按字节计，回答按 token 计（token 不等于字数）。
+          按用途限制每次模型调用的输入大小和带入的历史条数。输入按字节计。
+          回答长度使用全站统一的单次上限，按 token 计（token 不等于字数），这里只读显示。
           本页单独保存，右上角“保存所有设置”不会保存这里的内容。
         </CardDescription>
       </CardHeader>
@@ -207,8 +209,8 @@ function SourceNote({ view }: { view: BudgetView }) {
         {describeLegacy(view).map(line => <li key={line}>{line}</li>)}
       </ul>
       <p className="mt-2" style={{ color: 'var(--warning)' }}>
-        第一次保存后，三项用途都改为按这里填写的数值执行（交互回答上限不再按上面的默认规则取值），
-        本页不能再切回“沿用默认”。
+        第一次保存后，三项用途的输入上限和历史条数改为按这里填写的数值执行，
+        本页不能再切回“沿用默认”。回答上限始终是全站统一值。
       </p>
     </div>
   );
@@ -224,10 +226,10 @@ function PurposeGroup({ purpose, view, draft, onChange, saving, onOpenSummaryLim
         </p>
       </div>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {fieldsOf(purpose).map(field => (
+        {BUDGET_FIELDS.map(field => (
           <BudgetInputField key={field} purpose={purpose} field={field} view={view} draft={draft} onChange={onChange} saving={saving} />
         ))}
-        {purpose === 'organize' && <OrganizeOutput view={view} onOpenSummaryLimit={onOpenSummaryLimit} />}
+        {purpose === 'organize' ? <OrganizeOutput view={view} onOpenSummaryLimit={onOpenSummaryLimit} /> : <SiteOutputCap view={view} purpose={purpose} />}
       </div>
     </section>
   );
@@ -241,7 +243,7 @@ function BudgetInputField({ purpose, field, view, draft, onChange, saving }: {
   const id = `mentor-budget-${purpose}-${field}`;
   const [min, max] = fieldRange(view, purpose, field);
   const unit = fieldUnit(field);
-  const value = (draft[purpose] as Partial<Record<BudgetField, string>>)[field] ?? '';
+  const value = draft[purpose][field] ?? '';
   const problem = fieldProblem(view, draft, purpose, field);
   return (
     <div className="space-y-1">
@@ -265,6 +267,21 @@ function BudgetInputField({ purpose, field, view, draft, onChange, saving }: {
         系统上限 {max} {unit}（可填 {min}–{max}）
       </p>
       {problem && <p className="text-xs" data-testid={`${id}-problem`} style={{ color: 'var(--warning)' }}>{problem}</p>}
+    </div>
+  );
+}
+
+/** The site-wide single-answer cap (CHAT-NATIVE-OUTPUT §3.2): the same for every conversation, not editable here. */
+function SiteOutputCap({ view, purpose }: { view: BudgetView; purpose: BudgetPurpose }) {
+  return (
+    <div className="space-y-1" data-testid={`mentor-budget-${purpose}-output`}>
+      <Label style={{ color: 'var(--text-secondary)' }}>回答上限（token，只读）</Label>
+      <p className="rounded-md border px-3 py-2 text-sm" style={{ borderColor: 'var(--border-primary)', color: 'var(--text-primary)' }}>
+        {view.limits.maxOutputTokens} token
+      </p>
+      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+        全站统一的单次回答上限，所有对话相同，不按用途设置。
+      </p>
     </div>
   );
 }

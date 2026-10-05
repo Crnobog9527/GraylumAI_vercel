@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { AGENT_TURN_BODY_LIMIT } from "@repo/api/src/shared/agentTurn";
 
 export type MentorSuggestion = {
   value: string;
@@ -42,6 +43,11 @@ const inputKinds = new Set<MentorInputKind>([
 ]);
 /** Missing classification stays permissive so already saved replies keep working. */
 const DEFAULT_INPUT_KIND: MentorInputKind = "answer";
+/**
+ * Display bound of a mentor message. Native-output replies are bounded by the
+ * stored result size (CHAT-NATIVE-OUTPUT §4.3), not by the old 4000 characters.
+ */
+export const MENTOR_MESSAGE_LIMIT = AGENT_TURN_BODY_LIMIT;
 const INVALID_PUBLIC_REPLY = "本次回复格式不完整，暂时无法展示正文。原记录已保留，请核对执行状态。";
 
 function normalizeUtterance(value: string) {
@@ -69,7 +75,7 @@ export function readMentorTurn(
       throw new Error("invalid response");
     const message =
       typeof parsed.message === "string" && parsed.message.trim()
-        ? parsed.message.trim().slice(0, 4000)
+        ? parsed.message.trim().slice(0, MENTOR_MESSAGE_LIMIT)
         : INVALID_PUBLIC_REPLY;
     const inputKind =
       typeof parsed.inputKind === "string" && inputKinds.has(parsed.inputKind as MentorInputKind)

@@ -146,6 +146,9 @@ export function settleEnvelope(
   return after.release;
 }
 
+/** Requested on every mentor stream; only native-output executions answer with `textDelta` (older ones keep `text`). */
+export const TEXT_PROTOCOL = "textDelta-v1" as const;
+
 export const STREAM_INTERRUPTED = "OPC_EXECUTION_STREAM_INTERRUPTED";
 
 /**
@@ -208,7 +211,20 @@ export type MentorExecution = {
     primaryBody: string | null;
     summary: string | null;
     state: string;
+    /** Native-output result metadata; present only when the history carries it. */
+    completeness?: "complete" | "length_limit";
+    organized?: boolean;
+    envelopeCompact?: boolean;
   };
+
+/**
+ * A reply that may feed an adoptable candidate: not cut at the length limit,
+ * not a compact envelope, not left unorganized. Missing metadata (older
+ * replies) keeps the existing behaviour.
+ */
+export function isCompleteResult(execution: Pick<MentorExecution, "completeness" | "organized" | "envelopeCompact">) {
+  return execution.completeness !== "length_limit" && execution.envelopeCompact !== true && execution.organized !== false;
+}
 
 /** Exact JSON identity, including nested source and extra keys; property order is irrelevant. */
 export function sameRequest(a: unknown, b: unknown): boolean {

@@ -6,14 +6,11 @@ import { getSafeErrorMessage } from '@/lib/safe-error-message';
 export type BudgetView = inferRouterOutputs<AppRouter>['mentorBudget']['get'];
 export type BudgetInput = inferRouterInputs<AppRouter>['mentorBudget']['update'];
 export type BudgetPurpose = 'interactive' | 'organize' | 'report';
-export type BudgetField = 'inputBytes' | 'maxOutputTokens' | 'historyItems';
+/** Editable per purpose. The answer length is the site-wide output cap, shown read-only (CHAT-NATIVE-OUTPUT §3.2). */
+export type BudgetField = 'inputBytes' | 'historyItems';
 
 /** Form state keeps raw text so a half-typed number is not silently rewritten. */
-export type BudgetDraft = {
-  interactive: Record<BudgetField, string>;
-  organize: Record<'inputBytes' | 'historyItems', string>;
-  report: Record<BudgetField, string>;
-};
+export type BudgetDraft = Record<BudgetPurpose, Record<BudgetField, string>>;
 
 // Mirrors the server schema's lower bound; limits.inputBytes only carries the upper caps.
 export const MIN_INPUT_BYTES = 1024;
@@ -25,47 +22,34 @@ export const PURPOSE_TITLES: Record<BudgetPurpose, string> = {
 };
 export const FIELD_LABELS: Record<BudgetField, string> = {
   inputBytes: '输入上限（字节）',
-  maxOutputTokens: '回答上限（token）',
   historyItems: '历史条数上限',
 };
+/** Validation messages from an older form may still name the retired output field. */
+const LEGACY_FIELD_LABELS: Record<string, string> = { ...FIELD_LABELS, maxOutputTokens: '回答上限（token）' };
 
-export function fieldsOf(purpose: BudgetPurpose): BudgetField[] {
-  return purpose === 'organize' ? ['inputBytes', 'historyItems'] : ['inputBytes', 'maxOutputTokens', 'historyItems'];
-}
+export const BUDGET_FIELDS: BudgetField[] = ['inputBytes', 'historyItems'];
 
 /** Configured values when present; an unconfigured budget starts empty instead of inventing defaults. */
 export function toBudgetDraft(view: BudgetView): BudgetDraft {
   const text = (value: number | undefined) => (value === undefined ? '' : String(value));
   const config = view.config;
-  return {
-    interactive: {
-      inputBytes: text(config?.interactive.inputBytes),
-      maxOutputTokens: text(config?.interactive.maxOutputTokens),
-      historyItems: text(config?.interactive.historyItems),
-    },
-    organize: { inputBytes: text(config?.organize.inputBytes), historyItems: text(config?.organize.historyItems) },
-    report: {
-      inputBytes: text(config?.report.inputBytes),
-      maxOutputTokens: text(config?.report.maxOutputTokens),
-      historyItems: text(config?.report.historyItems),
-    },
-  };
+  const fields = (purpose: BudgetPurpose) => ({
+    inputBytes: text(config?.[purpose].inputBytes), historyItems: text(config?.[purpose].historyItems),
+  });
+  return { interactive: fields('interactive'), organize: fields('organize'), report: fields('report') };
 }
 
 export function fieldRange(view: BudgetView, purpose: BudgetPurpose, field: BudgetField): [number, number] {
   if (field === 'inputBytes') return [MIN_INPUT_BYTES, view.limits.inputBytes[purpose]];
-  if (field === 'maxOutputTokens') return [1, view.limits.maxOutputTokens];
   return [0, view.limits.historyItems];
 }
 
 export function fieldUnit(field: BudgetField): string {
-  if (field === 'inputBytes') return '字节';
-  if (field === 'maxOutputTokens') return 'token';
-  return '条';
+  return field === 'inputBytes' ? '字节' : '条';
 }
 
 function draftValue(draft: BudgetDraft, purpose: BudgetPurpose, field: BudgetField): string {
-  return (draft[purpose] as Partial<Record<BudgetField, string>>)[field] ?? '';
+  return draft[purpose][field] ?? '';
 }
 
 /** Front-end pre-check only; the server schema stays the final authority. */
@@ -84,7 +68,7 @@ export function fieldProblem(view: BudgetView, draft: BudgetDraft, purpose: Budg
 export function draftProblems(view: BudgetView, draft: BudgetDraft): string[] {
   const problems: string[] = [];
   for (const purpose of BUDGET_PURPOSES) {
-    for (const field of fieldsOf(purpose)) {
+    for (const field of BUDGET_FIELDS) {
       const problem = fieldProblem(view, draft, purpose, field);
       if (problem) problems.push(`${PURPOSE_TITLES[purpose]} · ${FIELD_LABELS[field]}：${problem}`);
     }
@@ -92,22 +76,21 @@ export function draftProblems(view: BudgetView, draft: BudgetDraft): string[] {
   return problems;
 }
 
-/** The complete strict object the update procedure accepts. */
-export function toBudgetInput(draft: BudgetDraft): BudgetInput {
+/**
+ * The complete strict object the update procedure accepts. The server still
+ * stores the version 1 shape for rollback; its output fields carry the
+ * site-wide cap (`view.limits.maxOutputTokens`) and are ignored on admission.
+ */
+export function toBudgetInput(draft: BudgetDraft, outputCap: number): BudgetInput {
   const n = (value: string) => Number(value.trim());
+  const fields = (purpose: BudgetPurpose) => ({
+    inputBytes: n(draft[purpose].inputBytes), historyItems: n(draft[purpose].historyItems),
+  });
   return {
     version: 1,
-    interactive: {
-      inputBytes: n(draft.interactive.inputBytes),
-      maxOutputTokens: n(draft.interactive.maxOutputTokens),
-      historyItems: n(draft.interactive.historyItems),
-    },
-    organize: { inputBytes: n(draft.organize.inputBytes), historyItems: n(draft.organize.historyItems) },
-    report: {
-      inputBytes: n(draft.report.inputBytes),
-      maxOutputTokens: n(draft.report.maxOutputTokens),
-      historyItems: n(draft.report.historyItems),
-    },
+    interactive: { ...fields('interactive'), maxOutputTokens: outputCap },
+    organize: fields('organize'),
+    report: { ...fields('report'), maxOutputTokens: outputCap },
   };
 }
 
@@ -116,7 +99,7 @@ type Issue = { code?: string; path?: unknown[]; maximum?: unknown; minimum?: unk
 function issuePlace(path: unknown[] | undefined): string {
   const [purpose, field] = path ?? [];
   const title = PURPOSE_TITLES[purpose as BudgetPurpose];
-  const label = FIELD_LABELS[field as BudgetField];
+  const label = LEGACY_FIELD_LABELS[field as string];
   if (title && label) return `${title} · ${label}`;
   if (title) return title;
   return path && path.length ? path.join('.') : '预算配置';
@@ -152,8 +135,8 @@ export function budgetErrorMessage(error: { message: string; data?: { code?: str
 /** Chinese reading of the server's legacy description; unknown wording is shown as-is. */
 export function describeLegacy(view: BudgetView): string[] {
   const { interactive, organize, report } = view.legacy;
-  const realOutput = interactive.realOutput === 'min(approved quote, model, 20000)'
-    ? '取“批准报价输出上限、模型输出上限、20000”三者中最小的' : interactive.realOutput;
+  const realOutput = interactive.realOutput === 'min(approved quote, model, global output cap)'
+    ? '取“批准报价输出上限、模型输出上限、全站统一上限”三者中最小的' : interactive.realOutput;
   return [
     `交互对话：输入上限 ${interactive.inputBytes} 字节，历史 ${interactive.historyItems} 条；`
       + `回答上限${realOutput} token（测试替身固定 ${interactive.fixtureMaxOutputTokens} token）。`,

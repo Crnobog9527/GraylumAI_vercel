@@ -16,16 +16,17 @@ import { mergeInformation } from "./information-merge";
 import { readPlanEnvelope, type PlanEnvelope, type PlanRequest } from "./plan-envelope";
 import { admissionMessage } from "./admission-message";
 import { applyMentorTurnRules, readWorkflowMentorExecution } from "./mentor-response";
-import { focusReply, liveReplyAfter, mentorReplyDisplay, questionCardStatus, showsTurnState, startLiveReply, type LiveReply } from "./agent-turn-display";
+import { focusReply, mentorReplyDisplay, questionCardStatus, showsTurnState } from "./agent-turn-display";
 import { OpenQuestionRecord, OTHER_PLACEHOLDER, QuestionCardView } from "@/components/opc/question-card";
 import { isDefiniteConfirmConflict } from "./confirm-conflict";
 import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
 import { CHAT_ACTION, ChatInlineNotice, ChatNoticeList, ChatPendingStatus } from "@/components/chat/ChatInlineNotice";
 import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE } from "./mentor-notices";
-import type { AgentTurnEvent, AgentTurnOutcome } from "@repo/api/src/shared/agentTurn";
+import type { AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
-import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, readAgentTurn,
-  retainExecution, settleEnvelope, turnResultNotice } from "./mentor-turn";
+import { useLiveReply } from "./use-live-reply";
+import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope,
+  isCompleteResult, retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice } from "./mentor-turn";
 import type { MentorRequest, MentorStepEnvelope, MentorTurn, MentorExecution } from "./mentor-turn";
 import {
   confirmationActionIsRedundant,
@@ -157,29 +158,18 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const discussionAccount = discussionAccounts.length===1?discussionAccounts[0]:undefined;
   const list = trpc.opc.list.useQuery();
   const prepareStep = trpc.opc.prepareStep.useMutation();
-  const [liveReply,setLiveReply]=useState<LiveReply|null>(null);
   const [pendingBubble,setPendingBubble]=useState<MentorRequest|null>(null);
   const [foldedCard,setFoldedCard]=useState(''); // Execution whose docked question card the user folded away.
   const mentorSendInFlight=useRef(false);
   /** One turn's events: a resumed execution passes its id, a new turn learns it from `admitted`. */
-  const streamTurn=async(open:()=>Promise<AsyncIterable<AgentTurnEvent>>,executionId?:string,onAdmitted?:(id:string)=>void)=>{
-    let current=executionId,result:AgentTurnOutcome|undefined;
-    if(executionId)setLiveReply(startLiveReply(executionId));
-    try{
-      ({result}=await readAgentTurn(await open(),{executionId,onAdmitted:id=>{current=id;setLiveReply(startLiveReply(id));onAdmitted?.(id);},
-        onProgress:(id,event)=>setLiveReply(old=>liveReplyAfter(old,id,event)),onFinished:()=>void utils.credits.getBalance.invalidate()}));
-      const notice=turnResultNotice(result);if(notice)setError(notice);
-      return result;
-    }finally{
-      // A failed/unfinished transport must not leave an endless generating label.
-      const id=current;
-      if(result?.state!=='completed'&&id)setLiveReply(old=>old?.executionId===id?{...old,phase:'incomplete'}:old);
-    }
-  };
-  const execute={mutateAsync:(input:{executionId:string})=>streamTurn(()=>utils.client.runtime.executeStream.mutate(input),input.executionId)};
+  const streamTurn=(open:()=>Promise<AsyncIterable<AgentTurnEvent>>,executionId?:string,onAdmitted?:(id:string)=>void)=>
+    live.stream(open,{executionId,onAdmitted,onFinished:()=>void utils.credits.getBalance.invalidate(),
+      onResult:result=>{const notice=turnResultNotice(result);if(notice)setError(notice);}});
+  const execute={mutateAsync:(input:{executionId:string})=>
+    streamTurn(()=>utils.client.runtime.executeStream.mutate({...input,textProtocol:TEXT_PROTOCOL}),input.executionId)};
   /** A mentor turn in one request: admission, then the same execution stream (AC-1). */
   const mentorTurn=(request:MentorRequest,onAdmitted?:(id:string)=>void)=>
-    streamTurn(()=>utils.client.opc.mentorTurnStream.mutate(request),undefined,onAdmitted);
+    streamTurn(()=>utils.client.opc.mentorTurnStream.mutate({...request,textProtocol:TEXT_PROTOCOL}),undefined,onAdmitted);
   const information = trpc.opc.information.useMutation();
   const [infoEdits, setInfoEdits] = useState<
     Record<string, Record<string, Information>>
@@ -225,6 +215,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [planDays, setPlanDays] = useState(7);
   const history = trpc.runtime.view.useQuery({ sessionId: read.data?.sessionId ?? "" },
     { enabled: Boolean(read.data?.sessionId), refetchInterval: useHistoryPolling(draftId, read.data?.snapshot?.workflow.steps ?? []) });
+  const live = useLiveReply(draftId, history.data), liveReply = live.reply;
   const [activeStep, setActiveStep] = useState<string | null>(null);
   const [activeQuestions, setActiveQuestions] = useState<Record<string, string>>({});
   const [confirmingQuestion, setConfirmingQuestion] = useState(false);
@@ -773,7 +764,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         if (draftRead.error || !draftRead.data || historyRead.error || !historyRead.data)
           throw new Error("OPC_OPENING_READBACK_UNAVAILABLE");
         sessionStorage.removeItem(key);
-        setNotice("");setLiveReply(null);
+        setNotice("");live.clear();
       } catch {
         // The Agent's opening is a convenience, never a gate on the form. The
         // entry identity is deterministic, so a later retry reuses the same
@@ -928,7 +919,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     const result = executionId ? await execute.mutateAsync({ executionId })
       : await mentorTurn(request, id => { executionId = id; retainExecution(sessionStorage, key, request.requestId, id); }).catch(async cause => {
         if (releaseRejectedAnswer(sessionStorage, key, request.requestId, cause)) {
-          setPendingBubble(old => old?.requestId === request.requestId ? null : old); setLiveReply(null);
+          setPendingBubble(old => old?.requestId === request.requestId ? null : old); live.clear();
           await Promise.all([read.refetch(), history.refetch()]);
         }
         throw cause;
@@ -942,7 +933,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     // A still-running execution keeps its envelope and pending bubble until an explicit resume sees a terminal result.
     if (!settleEnvelope(sessionStorage, key, request.requestId, executionId, result)) return;
     setPendingBubble(old=>old?.requestId===request.requestId?null:old);
-    setLiveReply(null);
+    live.clear();
   }
   async function resumeInterruptedOpening() {
     // An Agent opening interrupted by a reload can still own the session's
@@ -1682,7 +1673,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const latestSuggestion = new Map<string, string>();
   for (const execution of mentorExecutions) {
     const turn = mentorTurns.get(execution.executionId);
-    if (!turn || execution.state !== "completed") continue;
+    // A reply cut at the length limit, compacted or left unorganized never offers adoptable changes.
+    if (!turn || execution.state !== "completed" || !isCompleteResult(execution)) continue;
     const parsed = readWorkflowMentorExecution(execution.body ?? execution.primaryBody, execution.summary, turn.stepId, d.information);
     if (Object.keys(applyMentorTurnRules(parsed, execution.input ?? "")).length) latestSuggestion.set(parsed.targetStepId, execution.executionId);
   }

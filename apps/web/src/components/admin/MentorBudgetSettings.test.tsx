@@ -32,7 +32,7 @@ describe('MentorBudgetPanel', () => {
     expect(markup).toContain('沿用默认');
     expect(markup).toContain('mentor-budget-legacy');
     expect(markup).toContain('输入上限 64000 字节，历史 100 条');
-    expect(markup).toContain('还不能保存：8 项需要修改');
+    expect(markup).toContain('还不能保存：6 项需要修改');
     expect(markup).toMatch(/data-testid="mentor-budget-save"[^>]*disabled/);
   });
 
@@ -42,7 +42,11 @@ describe('MentorBudgetPanel', () => {
     expect(markup).not.toContain('mentor-budget-legacy');
     expect(markup).toContain('系统上限 90000 字节');
     expect(markup).toContain('系统上限 112000 字节');
-    expect(markup).toContain('系统上限 8192 token');
+    expect(markup).not.toContain('系统上限 8192 token');
+    expect(markup).not.toContain('mentor-budget-interactive-maxOutputTokens');
+    expect(markup).toMatch(/data-testid="mentor-budget-interactive-output"[\s\S]*?8192 token/);
+    expect(markup).toMatch(/data-testid="mentor-budget-report-output"[\s\S]*?8192 token/);
+    expect(markup).toContain('全站统一的单次回答上限');
     expect(markup).toContain('系统上限 1000 条');
     expect(markup).not.toContain('mentor-budget-organize-maxOutputTokens');
     expect(markup).toContain('2048 token');
@@ -63,7 +67,7 @@ describe('MentorBudgetPanel', () => {
   it('disables every budget input while a save is in flight', () => {
     const inputs = (markup: string) => markup.match(/<input[^>]*data-testid="mentor-budget-[a-z]+-[a-zA-Z]+"[^>]*>/g) ?? [];
     const saving = inputs(render(configuredView, { saving: true }));
-    expect(saving).toHaveLength(8);
+    expect(saving).toHaveLength(6);
     for (const input of saving) expect(input).toMatch(/ disabled=""/);
     for (const input of inputs(render(configuredView))) expect(input).not.toMatch(/ disabled=""/);
   });
@@ -86,7 +90,7 @@ describe('MentorBudgetSettings', () => {
   it('keeps inputs and the save button disabled when remounted while the parent save is still pending', () => {
     const markup = renderSettings({ saving: true });
     const inputs = markup.match(/<input[^>]*data-testid="mentor-budget-[a-z]+-[a-zA-Z]+"[^>]*>/g) ?? [];
-    expect(inputs).toHaveLength(8);
+    expect(inputs).toHaveLength(6);
     for (const input of inputs) expect(input).toMatch(/ disabled=""/);
     expect(markup).toMatch(/<button[^>]*data-testid="mentor-budget-save"[^>]*disabled=""/);
     expect(markup).toContain('保存中...');
