@@ -145,3 +145,21 @@ it('keeps the provider refusal notice for a cancelled turn after a reload, witho
   expect(runtimeTailNotices({ error: PROVIDER_REJECTED_NOTICE, heldGuide: false, busy: false, onGuide: vi.fn(),
     lastTurn: { open: false, texts } })).toEqual([]);
 });
+
+describe("BILL-PAYG turns", () => {
+  it("leaves a paused turn to its pause notice: no 重试 or 停止", () => {
+    for (const state of ["waiting_credits", "waiting_resume"])
+      expect(runtimeTurnNotices(turn({ state, cursor: 1, epoch: 1 }), ctx())).toEqual([]);
+  });
+
+  it("keeps the saved-main-reply status above a paused organizer", () => {
+    const notices = runtimeTurnNotices(turn({ state: "waiting_credits", primaryBody: "主回复", organizerComplete: false }), ctx());
+    expect(notices.map(n => n.text)).toEqual(["主回复已保存，附属整理未完成。"]);
+  });
+
+  it("does not call a quietly closed organizer an ended turn", () => {
+    const skipped = turn({ state: "cancelled", primaryBody: "主回复", organizerComplete: false, remainingCalls: 0 });
+    expect(runtimeTurnNotices(skipped, ctx())).toEqual([]);
+    expect(runtimeTurnNotices({ ...skipped, remainingCalls: 1 }, ctx()).map(n => n.text)).toContain(ENDED_NOTICE);
+  });
+});

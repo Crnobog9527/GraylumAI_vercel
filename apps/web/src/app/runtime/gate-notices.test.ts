@@ -125,3 +125,11 @@ it('explains a pre-dispatch history refusal with an actionable next step', () =>
  const notice=runtimeExecutionNotice({state:'cancelled',unavailable:'provider_history'});
  expect(notice).toContain('请新开一个对话');expect(notice).not.toContain('已停止');
 });
+
+describe('paused rounds', () => {
+  it('show no reply until a body is saved', () => {
+    expect(showsReply({ state: 'waiting_credits', body: null, primaryBody: null })).toBe(false);
+    expect(showsReply({ state: 'waiting_resume', body: null, primaryBody: null })).toBe(false);
+    expect(showsReply({ state: 'waiting_credits', body: null, primaryBody: '主回复' })).toBe(true);
+  });
+});

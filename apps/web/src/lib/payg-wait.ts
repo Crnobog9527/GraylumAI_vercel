@@ -17,13 +17,13 @@ export const RESUMING_NOTICE = '正在继续…';
 /** A new message refused because this session's previous organizer has not finished. */
 export const ORGANIZER_PENDING_NOTICE = '上一轮的整理还没完成，这条消息还没有发出，内容已保留。请先点“继续”或等它完成，再发送。';
 /** The paused organizer ran out of calls and was closed: the main reply stays. */
-export const ORGANIZER_SKIPPED_NOTICE = '本轮未整理：整理所需的调用次数已用完，主回复已保留。';
+export const ORGANIZER_SKIPPED_NOTICE = '本轮没有整理右侧信息，主回复已保留。';
 export const RESUME_ADMIN_NOTICE = '暂时无法继续：需要管理员调整配置，这一步保持暂停，已完成的内容不受影响。';
 export const RESUME_CONFLICT_NOTICE = '这一步的状态已经更新，页面已重新读取，请按最新状态操作。';
 export const RESUME_SOURCE_CHANGED_NOTICE = '资料或对话已经变化，这一步不能接着做。已完成的内容和费用都已保留。';
 export const RESUME_CLOSED_NOTICE = '这一步已经结束，不能再继续。已完成的内容已保留。';
 export const RESUME_CHECKPOINT_NOTICE = '上一次调用的费用还在核对，请稍后再点“继续”，不会重复扣费。';
-export const RESUME_LIMIT_NOTICE = '这一步已达到调用次数上限，不能再继续。已完成的内容已保留。';
+export const RESUME_LIMIT_NOTICE = '这一步已经到了能继续的上限，不能再继续。已完成的内容已保留。';
 export const RESUME_UNKNOWN_NOTICE = '继续的结果暂未确认，页面已重新读取。请稍后再点“继续”，不会重复扣费。';
 
 export const PAYG_ACTION = { resume: '继续', topUp: '去充值' } as const;
