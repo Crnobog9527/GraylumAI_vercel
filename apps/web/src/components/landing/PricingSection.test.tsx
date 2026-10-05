@@ -71,6 +71,17 @@ describe('PricingSection catalog availability', () => {
     expect(markup).not.toContain('action=signup');
   });
 
+  it.each([null, 'waffo'])('still renders the catalog when the selected channel is %j and nothing is purchasable', (paymentChannel) => {
+    const markup = renderPricing('available', [{
+      ...plan, paymentChannel, checkoutReady: { monthly: false, yearly: false },
+    } as typeof plan]);
+
+    expect(markup).toContain('Pro');
+    expect(markup).toContain('$12.50');
+    expect(markup).not.toContain('立即订阅');
+    expect(markup).not.toContain('action=signup');
+  });
+
   it.each([0, -1, null, undefined])('has no purchase link for invalid amounts %j despite stale readiness flags', (amount) => {
     const markup = renderPricing('available', [{ ...plan, price: { monthly: amount, yearly: amount } } as any]);
     expect(markup).not.toContain('立即订阅');
