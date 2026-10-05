@@ -1039,7 +1039,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | **3 差异化功能** | FUSION-REVIEW | 定稿报告多模型评审（第 4 节，见 [实施说明](tasks/FUSION.md)）；结果接入账号注销。对外名称"多模型专家评审团"，上线默认只给 Gold（第 51 项） | AC-3、REPORT-GEN、RUNTIME-PROD、ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 | — |
 | | LIB-DOCS | 资料库上传、"我的文档 / 语料库"、真正删除、按会员等级的总存储空间和系统级文件数量保护上限（见 [实施说明](tasks/LIBRARY-VOICE.md)）；接入账号注销；设计上传权限时一并整理共享 Storage 的授权（第 8.5 节）。第一步是 LIB-1 依赖及安全夹具（#549）；与 AC-2 设计定位导师查询工具（第 31 项） | ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 | — |
 | | VOICE | 文风画像生成、确认和写作注入；接入账号注销 | LIB-DOCS、AGENT-CORE、DATA-ERASURE、RUNTIME-PROD（资料内容发给模型前，"不用于训练"已由服务端强制） | 高 | 中 / 2–3 | — |
-| | UI-A | 输入框编辑内核（沿用 v11 §6.3，属于 `V3-OPC-UI`，不新建任务名）。需要编辑器依赖时（例如 Tiptap，先核实版本、许可和构建），第一个 PR 只引入这个依赖，按依赖变更由 Owner 批准合并；之后的 PR 只改前端并沿用现有请求接口 | AGENT-CORE | 高 | 中 / 3–4 | — |
+| | UI-A | 输入框编辑内核（沿用 v11 §6.3，属于 `V3-OPC-UI`，不新建任务名）。需要编辑器依赖时（例如 Tiptap，先核实版本、许可和构建），第一个 PR 只引入这个依赖，按 AGENTS.md 第 4 节验证、审查后合入 staging；之后的 PR 只改前端并沿用现有请求接口 | AGENT-CORE | 高 | 中 / 3–4 | — |
 | | UI-MODEL | 输入框里的模型位置（Owner 2026-10-03，第 50 项）：保留位置，只显示 Auto，用户暂时不能切换；实际模型按用途由后台配置决定，不按会员档位区分 | UI-A、ENTITLEMENTS | 高 | 小 / 1–2 | — |
 | | FUSION-COMPARE | 输入框里的多模型对比；结果接入账号注销。每次打开默认勾选管理员在后台设定的一组模型；用户可以取消勾选、自己搭配，范围受管理员允许列表和会员权限限制；后台新增参数"每次对比最少要勾选几个模型"，由 Owner 调整，前端和服务端都按它校验，取值范围是 2 ≤ 最少勾选数 ≤ D3 的当前最多模型数，后台可调但不能低于 2（Owner 2026-10-03，第 50 项）。同步 [FUSION 实施说明](tasks/FUSION.md) 的对比模式描述。上线默认只给 Gold（第 51 项） | UI-A、FUSION-REVIEW、DATA-ERASURE（多模型勾选器属于本任务，不依赖 UI-MODEL） | 高 | 中 / 2–3 | — |
 | | UI-B | 输入框 @ 引用资料库内容：把用户私有资料读进模型上下文，涉及权限和上下文 | UI-A、LIB-DOCS、RUNTIME-PROD | 高 | 中 / 2 | — |
