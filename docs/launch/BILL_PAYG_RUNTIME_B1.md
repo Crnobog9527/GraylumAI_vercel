@@ -1,7 +1,7 @@
 # BILL-PAYG Runtime B1
 
 按 [#553 实施说明](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553) 和 Owner 的 B1/B2 拆分落地。
-风险 high；默认准入仍为 BILL2 v1。只有可信服务端组合传入 `LocalRuntimePolicy.payg` 才创建 v2，浏览器不能选择合同或报价，没有新增环境开关。
+风险 high；默认准入仍为 BILL2 v1。只有可信服务端组合传入 `LocalRuntimePolicy.payg` 才创建 v2，浏览器不能选择合同或报价。真实宿主通过 [接线说明](BILL_PAYG_HOST_WIRING.md) 的服务端 staging 设置选择 v2，默认关闭。
 
 ## 状态及接入协议
 
