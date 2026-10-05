@@ -21,6 +21,7 @@ import { OpenQuestionRecord, OTHER_PLACEHOLDER, QuestionCardView } from "@/compo
 import { isDefiniteConfirmConflict } from "./confirm-conflict";
 import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
 import { CHAT_ACTION, ChatInlineNotice, ChatNoticeList, ChatPendingStatus } from "@/components/chat/ChatInlineNotice";
+import { useMentorLogScroll } from "./use-mentor-log-scroll";
 import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRetry } from "./mentor-notices";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { useLiveReply } from "./use-live-reply";
@@ -221,9 +222,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [confirmingQuestion, setConfirmingQuestion] = useState(false);
   const confirmationLock = useRef(false);
   // State, not a ref: on a client-side return cached history exists before the log mounts.
-  const [chatNode, attachChatScroll] = useState<HTMLDivElement|null>(null);
-  const chatRestored = useRef<HTMLDivElement|null>(null), chatFollow = useRef(true);
-  const chatKey = 'opc-position-chat-scroll:' + draftId;
   const [mentorInput, setMentorInput] = useState("");
   const free=useFreeConversation();
   const [manualMentorEnabled, setManualMentorEnabled] = useState(false);
@@ -443,16 +441,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       retained.kind === "envelope" ? retained.envelope.sourceRoundId :
       retained.kind === "unconsented" ? retained.sourceRoundId : null });
   }, [planView, hydratedDraft, draftId, d?.roundId]);
-  useEffect(() => {
-    const node=chatNode;
-    if(!node||!history.data)return;
-    if(chatRestored.current!==node){
-      const saved=sessionStorage.getItem(chatKey);
-      node.scrollTop=saved===null?node.scrollHeight:Number(saved)||0;
-      chatFollow.current=node.scrollHeight-node.clientHeight-node.scrollTop<64;
-      chatRestored.current=node;
-    }else if(chatFollow.current) node.scrollTop=node.scrollHeight;
-  }, [chatNode,history.data,chatKey,pendingBubble,liveReply]);
+  const { attach: attachChatScroll, follow: chatFollow, onScroll: onChatScroll } = useMentorLogScroll(draftId, history.data, pendingBubble, liveReply);
   function captureInformationBase(stepId: string) {
     const key = "opc-information-base:" + draftId + ":" + stepId;
     if (!sessionStorage.getItem(key)) sessionStorage.setItem(key, JSON.stringify(d.information[stepId].values ?? {}));
@@ -1842,7 +1831,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   </div>
                   <div
                     ref={attachChatScroll}
-                    onScroll={event=>{const node=event.currentTarget;chatFollow.current=node.scrollHeight-node.clientHeight-node.scrollTop<64;if(chatRestored.current===node)sessionStorage.setItem(chatKey,String(node.scrollTop));}}
+                    onScroll={onChatScroll}
                     role="log"
                     aria-label="完整导师消息"
                     aria-live="polite"
