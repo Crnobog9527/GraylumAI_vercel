@@ -13,6 +13,7 @@ import {readRuntimeView,retainedOutputReason} from './view';
 import { runtimeExecutor } from './execute';
 import './promptCache.integration';
 import './payg.integration';
+import './nativeStopView.integration';
 import {registerPaygHostTests} from './paygHost.integration';
 import './gateWiring.integration';
 import {registerAdmissionGateTests} from './admissionGate.integration';
