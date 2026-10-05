@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
+import { providerRejectedViewCases } from '../payg/provider-rejected-view.mjs';
 const db = await localDb();
 const c = db.client;
 const migration = read('packages/db/migrations/0170_runtime_native_metadata.sql');
@@ -153,6 +154,9 @@ try {
     console.log('PASS history', n, 'before/after ms', beforeMs, afterMs);
   }
   report.checks.push('paired warm-cache SQL timings at 15/100/300/1000 turns; one view query; every old truncation marker retained');
+  await c.query(read('packages/db/tests/erasure-b2a/fixture.sql'));
+  await providerRejectedViewCases(c);
+  report.checks.push('existing 0168 provider-rejected historical regression passes and restores final 0170 view');
 } catch (error) {
   report.failed = String(error.stack ?? error);
   process.exitCode = 1;
