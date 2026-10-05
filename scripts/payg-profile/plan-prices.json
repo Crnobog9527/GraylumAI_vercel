@@ -1,9 +1,168 @@
 {
-  "source": "BILL_PAYG_PLAN 2026-10-02 examples; NOT a current provider quote",
-  "currentVerified": false,
+  "source": "OpenRouter public models and exact endpoint catalogs, 2026-10-05; catalog-2026-10-05.json",
+  "currentVerified": true,
   "routes": [
-    {"model":"anthropic/claude-sonnet-5.5","endpointTag":"anthropic","contextTokens":250000,"prompt":"2","write":"2.5","completion":"10","request":"0","perCallCap":"0.50","modelCap":"30","reasoning":[{"parameter":"none"},{"effort":"low"}]},
-    {"model":"google/gemini-3.8-flash","endpointTag":"google-vertex/global","contextTokens":250000,"prompt":"0.75","completion":"3.75","request":"0","perCallCap":"0.25","modelCap":"15","reasoning":[{"parameter":"none"},{"effort":"low"}]},
-    {"model":"openai/gpt-6-luna","endpointTag":"openai","contextTokens":250000,"prompt":"0.10","write":"0.125","completion":"0.50","request":"0","perCallCap":"0.05","modelCap":"3","reasoning":[{"parameter":"none"}]}
-  ]
+    {
+      "model": "anthropic/claude-sonnet-5.5",
+      "endpointTag": "anthropic",
+      "contextTokens": 1000000,
+      "prompt": "2.000000000000",
+      "write": "2.500000000000",
+      "completion": "10.000000000000",
+      "request": "0",
+      "perCallCap": "0.50",
+      "modelCap": "30",
+      "reasoning": [
+        {
+          "parameter": "none"
+        },
+        {
+          "effort": "low"
+        }
+      ],
+      "read": "0.200000000000",
+      "matrixReasoning": {
+        "effort": "low"
+      },
+      "providerName": "Anthropic",
+      "maxCompletionTokens": 128000,
+      "supportedParameters": [
+        "reasoning",
+        "include_reasoning",
+        "max_tokens",
+        "stop",
+        "tools",
+        "tool_choice",
+        "structured_outputs",
+        "response_format",
+        "verbosity",
+        "reasoning_effort"
+      ],
+      "outputCapIncludesReasoning": true,
+      "outputCapEvidence": "https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#reasoning-tokens-and-max_tokens",
+      "catalogUrl": "https://openrouter.ai/api/v1/models/anthropic/claude-sonnet-5.5/endpoints",
+      "reasoningCatalog": {
+        "mandatory": true,
+        "supported_efforts": [
+          "max",
+          "xhigh",
+          "high",
+          "medium",
+          "low"
+        ],
+        "default_effort": "high"
+      },
+      "priceNotes": "Request fee absent in catalog = 0; no server tools, media or 1h cache.",
+      "outputCapBasis": "Documented combined reasoning + visible output; not yet verified on this exact route."
+    },
+    {
+      "model": "google/gemini-3.8-flash",
+      "endpointTag": "google-vertex/global",
+      "contextTokens": 1048576,
+      "prompt": "0.750000000000",
+      "completion": "3.750000000000",
+      "request": "0",
+      "perCallCap": "0.25",
+      "modelCap": "15",
+      "reasoning": [
+        {
+          "parameter": "none"
+        },
+        {
+          "effort": "low"
+        }
+      ],
+      "write": "0.041666666667",
+      "read": "0.075000000000",
+      "matrixReasoning": {
+        "effort": "low"
+      },
+      "providerName": "Google",
+      "maxCompletionTokens": 65536,
+      "supportedParameters": [
+        "reasoning",
+        "include_reasoning",
+        "max_tokens",
+        "seed",
+        "response_format",
+        "stop",
+        "structured_outputs",
+        "tools",
+        "tool_choice",
+        "reasoning_effort"
+      ],
+      "outputCapIncludesReasoning": true,
+      "outputCapEvidence": "https://ai.google.dev/gemini-api/docs/generate-content/thinking#token-limits-and-max_output_tokens",
+      "catalogUrl": "https://openrouter.ai/api/v1/models/google/gemini-3.8-flash/endpoints",
+      "reasoningCatalog": {
+        "mandatory": true,
+        "default_enabled": true,
+        "supported_efforts": [
+          "high",
+          "medium",
+          "low"
+        ],
+        "default_effort": "medium"
+      },
+      "priceNotes": "Request fee absent in catalog = 0; no server tools, media or 1h cache. Cache write rounded upwards at 12 decimal places; implicit caching only; no cache storage API.",
+      "outputCapBasis": "Documented combined reasoning + visible output; not yet verified on this exact route. Conflicting public observation: https://discuss.ai.google.dev/t/gemini-3-8-flash-high-does-maxoutputtokens-include-thinking-tokens/181077/4 ; output stress goes first, any overshoot fails unchanged O."
+    },
+    {
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "contextTokens": 1050000,
+      "prompt": "0.100000000000",
+      "write": "0.125000000000",
+      "completion": "0.500000000000",
+      "request": "0",
+      "perCallCap": "0.05",
+      "modelCap": "3",
+      "reasoning": [
+        {
+          "parameter": "none"
+        },
+        {
+          "effort": "low"
+        }
+      ],
+      "read": "0.010000000000",
+      "matrixReasoning": {
+        "effort": "low"
+      },
+      "providerName": "OpenAI",
+      "maxCompletionTokens": 128000,
+      "supportedParameters": [
+        "reasoning",
+        "include_reasoning",
+        "seed",
+        "max_tokens",
+        "response_format",
+        "structured_outputs",
+        "tools",
+        "tool_choice",
+        "verbosity",
+        "reasoning_effort"
+      ],
+      "outputCapIncludesReasoning": true,
+      "outputCapEvidence": "https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#reasoning-tokens-and-max_tokens",
+      "catalogUrl": "https://openrouter.ai/api/v1/models/openai/gpt-6-luna/endpoints",
+      "reasoningCatalog": {
+        "mandatory": false,
+        "default_enabled": true,
+        "supported_efforts": [
+          "max",
+          "xhigh",
+          "high",
+          "medium",
+          "low",
+          "none"
+        ],
+        "default_effort": "medium"
+      },
+      "priceNotes": "Request fee absent in catalog = 0; no server tools, media or 1h cache. Price tier starts at 272000 input tokens, above T<=204800; preflight refuses tier drift.",
+      "outputCapBasis": "Documented combined reasoning + visible output; not yet verified on this exact route."
+    }
+  ],
+  "retrievedAt": "2026-10-05T12:58:34.775279+00:00",
+  "catalogHash": "a12364d1cff339031ee34cf73b389e7cd1592b8eb7cce85c6510464fb59f91a7"
 }

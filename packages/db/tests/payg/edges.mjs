@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 import {rpc} from '../erasure-b2a/cases.mjs';
 import {conserved,financial} from './core.mjs';
 
@@ -85,6 +86,27 @@ export async function edgeCases(db,report,createFixture,claim,receipt) {
     jsonb_populate_record(r, jsonb_build_object('payload',$2::jsonb)), $3::jsonb)
     FROM bill2_runs r WHERE r.id=$1`,[missing.run,payload,quote]);
   await validate(missing.payload,missing.claimPayload);
+  for(const cap of [32,128]) {
+    const payload=structuredClone(missing.payload);
+    payload.callPolicy[0].payg.maxMessages=cap;
+    await validate(payload,{...missing.claimPayload,payg:{...missing.claimPayload.payg,messages:cap}});
+    await assert.rejects(validate(payload,{...missing.claimPayload,
+      payg:{...missing.claimPayload.payg,messages:cap+1}}),/BILL2_PAYG_QUOTE_INVALID/);
+  }
+  report.checks.push('128-message quotes accepted; 129 rejected; old frozen 32-message caps preserved');
+  const signature='public.bill2_payg_validate_quote(bill2_runs,jsonb)';
+  const original=(await db.query('SELECT pg_get_functiondef($1::regprocedure) AS definition',[signature])).rows[0].definition;
+  const migration=readFileSync(new URL('../../migrations/0173_payg_profile_messages.sql',import.meta.url),'utf8');
+  const guard=migration.slice(migration.indexOf('DO $migration$'),migration.indexOf('COMMIT;'));
+  await db.query('BEGIN');
+  try {
+    await db.query(original.replace('AS $function$','AS $function$\n-- intentional drift\n'));
+    await assert.rejects(db.query(guard),/PAYG_MESSAGES_SOURCE_MISMATCH/);
+  } finally {await db.query('ROLLBACK');}
+  assert.equal((await db.query('SELECT pg_get_functiondef($1::regprocedure) AS definition',[signature])).rows[0].definition,original);
+  report.checks.push('128-message migration refuses unexpected function drift and rollback restores exact original');
+
+
   for (const key of ['inputLimit','outputLimit']) {
     for (const nullValue of [false,true]) {
       const quote=structuredClone(missing.claimPayload);

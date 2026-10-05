@@ -19,7 +19,10 @@ export function freezePaygMessageBudget(context:Context,policies:ReadonlyArray<{
  const maximum=Math.min(limit(context.modelId),...(context.matching?.candidates.map(c=>limit(c.modelId))??[]));
  const reserved=2+4*Math.min(context.maxToolCalls,context.maxTurns-1);
  if(reserved>maximum)throw new Error('BILL2_INPUT_PROFILE_INVALID');
- context.historyItems=Math.min(context.historyItems,maximum-reserved);
+ // Keep the v1 selection ceiling (normally 100); the 128 profile only removes
+ // the old 32-message bottleneck. Existing byte trimming remains authoritative.
+ const historyCapacity=maximum-reserved;
+ context.historyItems=Math.min(context.historyItems,historyCapacity);
  if(context.purposeBudget)context.purposeBudget.historyItems=context.historyItems;
  if(context.attachedOrganizer){
   const organizer=context.attachedOrganizer;

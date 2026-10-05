@@ -22,7 +22,7 @@ it('real host admits v2, replays original admission across switch-off, then admi
     providerLimits,upperUsd:openRouterBound(providerLimits,8192).upperUsd,inputLimit:90000,outputLimit:8192,
     multiplier:'3',automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true};
   const profile={version:'test-only',policyId:id(5),profileVersion:'test-only',evidenceVersion:'test-only',
-    admissionPath:'empirical',templateTokens:4096,marginTokens:4096,maxBytes:196608,maxMessages:32,maxTools:2,
+    admissionPath:'empirical',templateTokens:4096,marginTokens:4096,maxBytes:196608,maxMessages:128,maxTools:2,
     maxSchemaBytes:16384,purposes:['ordinary'],expiresAt:'2099-01-01T00:00:00Z'};
   mocks.host.mockResolvedValue([{...quote,payg:profile}]);
   mocks.freeze.mockImplementation(async(_admin,policies)=>policies.map((p:typeof quote)=>({...p,payg:{...profile,

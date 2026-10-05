@@ -24,7 +24,7 @@ export const paygHostProfile = z.object({
   profileVersion: reference, evidenceVersion: reference,
   admissionPath: z.literal('empirical'),
   templateTokens: z.literal(4096), marginTokens: z.literal(4096),
-  maxBytes: z.literal(196608), maxMessages: z.literal(32),
+  maxBytes: z.literal(196608), maxMessages: z.literal(128),
   maxTools: z.literal(2), maxSchemaBytes: z.literal(16384),
   purposes: z.array(phase).min(1).max(5),
   requestFormats: z.array(z.enum(['serial-tools-v2', 'serial-tools-v4-stream',
@@ -39,7 +39,8 @@ export const paygHostProfile = z.object({
   expiresAt: z.string().datetime(),
   evidence: z.object({
     reference, manifestHash: z.string().regex(/^[a-f0-9]{64}$/),
-    distinctSamples: z.literal(60), completeCells: z.literal(15), variantsPerCell: z.literal(4),
+    distinctSamples: z.literal(60), messageStressSamples: z.literal(12), maxVerifiedMessages: z.literal(128),
+    completeCells: z.literal(15), variantsPerCell: z.literal(4),
     maxPromptToBytes: z.number().positive().max(0.7), maxPromptToUpper: z.number().positive().max(0.7),
     outputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
     includesReasoning: z.literal(true), cacheCovered: z.literal(true), costBoundPassed: z.literal(true),

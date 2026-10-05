@@ -47,9 +47,10 @@ profile 同时绑定协议、请求格式、用途、有效期、版本和输入
 启用前必须独立核对引用材料，不得将单元测试里的 synthetic profile 写入真实配置。
 
 `B` 来自最终规范化、缓存标记后的 UTF-8 请求，`T=B+4096+4096`。
-遵守 #553 的 196608 bytes / 32 messages / 2 tools / 16384 schema bytes 上界，
+遵守 #553 的 196608 bytes / 128 messages / 2 tools / 16384 schema bytes（2026-10-05 Owner 决定取代 32 条） 上界，
 且 60 个不同样本、15 格×4 变体、最大 P/B 与 P/T 均不超过 0.70；必须覆盖缓存和费用上界，
-输出硬限包括 reasoning。样本/模板/用途的具体覆盖仍以引用的实测清单为准。
+输出硬限包括 reasoning；另需 messageStressSamples=12、maxVerifiedMessages=128 的真实多消息证据摘要。
+样本/模板/用途的具体覆盖仍以引用的实测清单为准，详见 [新预演](BILL_PAYG_PROFILE_DRY_RUN.md)。
 
 准入证明最坏 `196608+4096+4096+O <= contextTokens`：
 O=8192 时需要至少 **212992** context tokens。达不到就拒绝该组合。

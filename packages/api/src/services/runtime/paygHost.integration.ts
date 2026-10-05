@@ -67,12 +67,12 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
   }
   const profiles=pairs.map(([,model,endpointTag])=>({model,endpointTag,protocol:'openrouter-chat-v1',
    profileVersion:'synthetic-only',evidenceVersion:'synthetic-only',admissionPath:'empirical',
-   templateTokens:4096,marginTokens:4096,maxBytes:196608,maxMessages:32,maxTools:2,maxSchemaBytes:16384,
+   templateTokens:4096,marginTokens:4096,maxBytes:196608,maxMessages:128,maxTools:2,maxSchemaBytes:16384,
    purposes:['ordinary','skill','organizer','skill_matching','attached_organizer'],
    requestFormats:['serial-tools-v2','serial-tools-v4-stream','serial-tools-v6-reasoning','agent-turn-v5-stream'],
    reasoningVariants:[{parameter:'none'},{effort:'low'}].map(reasoning=>({reasoning,outputLimit:8192,evidenceReference:'synthetic-only',
     manifestHash:'b'.repeat(64),outputStressSamples:2,includesReasoning:true})),outputLimit:8192,expiresAt,
-   evidence:{reference:'synthetic-only',manifestHash:'a'.repeat(64),distinctSamples:60,completeCells:15,variantsPerCell:4,
+   evidence:{reference:'synthetic-only',manifestHash:'a'.repeat(64),distinctSamples:60,messageStressSamples:12,maxVerifiedMessages:128,completeCells:15,variantsPerCell:4,
     maxPromptToBytes:0.5,maxPromptToUpper:0.4,outputLimit:8192,includesReasoning:true,cacheCovered:true,costBoundPassed:true}}));
   const values={runtime_payg_staging:{version:1,enabled:true,windowId,profiles},billing_credits_per_usd:'100',
    billing_token_price_multiplier:'3',billing_payg_start_thresholds:{version:'synthetic-only',

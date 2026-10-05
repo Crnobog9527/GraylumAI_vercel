@@ -13,12 +13,12 @@ const env = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.
 function fixture() {
   const profile: PaygHostProfile = { model: 'anthropic/claude-sonnet-5.5', endpointTag: 'anthropic', protocol:'openrouter-chat-v1',
     profileVersion: 'test-only', evidenceVersion: 'test-only', admissionPath:'empirical',
-    templateTokens:4096,marginTokens:4096,maxBytes:196608,maxMessages:32,maxTools:2,maxSchemaBytes:16384,
+    templateTokens:4096,marginTokens:4096,maxBytes:196608,maxMessages:128,maxTools:2,maxSchemaBytes:16384,
     purposes:['ordinary','skill','organizer','skill_matching','attached_organizer'],
     requestFormats:['serial-tools-v2','agent-turn-v5-stream','serial-tools-v4-stream','serial-tools-v6-reasoning'],
     reasoningVariants:[{reasoning:{parameter:'none'},outputLimit:8192,evidenceReference:'test-only',
       manifestHash:'b'.repeat(64),outputStressSamples:2,includesReasoning:true}],outputLimit:8192,expiresAt:'2099-01-01T00:00:00Z',
-    evidence:{reference:'test-only',manifestHash:'a'.repeat(64),distinctSamples:60,completeCells:15,variantsPerCell:4,
+    evidence:{reference:'test-only',manifestHash:'a'.repeat(64),distinctSamples:60,messageStressSamples:12,maxVerifiedMessages:128,completeCells:15,variantsPerCell:4,
       maxPromptToBytes:0.5,maxPromptToUpper:0.4,outputLimit:8192,includesReasoning:true,cacheCovered:true,costBoundPassed:true} };
   const policy: StagingPolicy['callPolicies'][number] = { modelId:id,model:profile.model,provider:'openrouter',
     account:'test-only',protocol:'openrouter-chat-v1',inputLimit:196608,outputLimit:8192,upperUsd:'1',
@@ -58,6 +58,7 @@ it.each([
   f=>{f.profile.requestFormats=['agent-turn-v5-stream'];},
   f=>{f.profile.expiresAt='2000-01-01T00:00:00Z';},
   f=>{f.profile.evidence.maxPromptToUpper=0.71;},
+  f=>{delete (f.profile.evidence as Partial<PaygHostProfile['evidence']>).maxVerifiedMessages;},
   f=>{f.config.profiles.push({...f.profile});},
   f=>{f.config.profiles=[];},
   f=>{f.config.windowId='20000000-0000-4000-8000-000000000002';},
