@@ -1112,7 +1112,7 @@ describe('annual release isolates malformed individual contracts', () => {
       if (anomaly === 'mapping-multiple') refs.push({ ...refs[mapping], id: 'duplicate-map', external_id: 'sub_ambiguous' });
       const before = structuredClone(supabase.tables);
       const result = await releaseDueAnnualSubscriptionCredits(supabase, { now: new Date('2026-02-15T00:00:00Z') });
-      expect(result).toEqual({ scannedSubscriptions: 2, skippedSubscriptions: 1, releasedGrantCount: 1, releasedCredits: 10 });
+      expect(result).toEqual({ anomalies: [{ subscriptionId: 'mirror_broken', reason: expect.any(String) }], scannedSubscriptions: 2, skippedSubscriptions: 1, releasedGrantCount: 1, releasedCredits: 10 });
       expect(supabase.tables.profiles.find(row => row.id === 'user_broken')).toEqual(before.profiles.find(row => row.id === 'user_broken'));
       expect(supabase.tables.subscription_credit_grants.filter(row => row.subscription_id === 'mirror_broken'))
         .toEqual(before.subscription_credit_grants.filter(row => row.subscription_id === 'mirror_broken'));
@@ -3870,6 +3870,7 @@ describe('subscription credit grants', () => {
     });
 
     expect(result).toMatchObject({
+      anomalies: [],
       scannedSubscriptions: 1,
       releasedGrantCount: 1,
       releasedCredits: 10,
@@ -3928,6 +3929,7 @@ describe('subscription credit grants', () => {
     });
 
     expect(result).toMatchObject({
+      anomalies: [],
       scannedSubscriptions: 1,
       releasedGrantCount: 0,
       releasedCredits: 0,
@@ -3976,6 +3978,7 @@ describe('subscription credit grants', () => {
     });
 
     expect(result).toMatchObject({
+      anomalies: [],
       scannedSubscriptions: 1,
       releasedGrantCount: 0,
       releasedCredits: 0,
@@ -4176,6 +4179,7 @@ describe('subscription credit grants', () => {
     });
 
     expect(result).toMatchObject({
+      anomalies: [],
       scannedSubscriptions: 1,
       releasedGrantCount: 0,
       releasedCredits: 0,
@@ -4237,6 +4241,7 @@ describe('subscription credit grants', () => {
     });
 
     expect(result).toMatchObject({
+      anomalies: [],
       scannedSubscriptions: 1,
       releasedGrantCount: 0,
       releasedCredits: 0,
@@ -4303,6 +4308,7 @@ describe('subscription credit grants', () => {
     });
 
     expect(result).toMatchObject({
+      anomalies: [],
       scannedSubscriptions: 1,
       releasedGrantCount: 1,
       releasedCredits: 10,

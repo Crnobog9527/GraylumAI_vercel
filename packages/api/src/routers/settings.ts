@@ -1,3 +1,4 @@
+import { PAYMENT_CHANNEL_KEY, paymentChannelSettingSchema, readPaymentChannel } from '../services/payments/channelSettings';
 import {PAYG_HOST_SETTING,paygHostSettingWrite} from '../services/runtime/paygHostPolicy';
 import {
   entitlementRowShape, FUSION_COMPARE_SETTING, fusionCompareLimitSchema,
@@ -85,6 +86,9 @@ const systemSettingInputSchema = z.object({
 }).superRefine((setting, ctx) => {
   if (['billing_platform_absorb_alert', 'billing_platform_absorb_ack'].includes(setting.key)) {
     ctx.addIssue({ code: 'custom', path: ['key'], message: '平台承担提醒请通过专用接口保存' });
+  }
+  if (setting.key === PAYMENT_CHANNEL_KEY && !paymentChannelSettingSchema.safeParse(setting.value).success) {
+    ctx.addIssue({ code: 'custom', path: ['value'], message: '支付渠道或版本无效，请刷新后重试' });
   }
   if (setting.key === RUNTIME_RATE_LIMIT_KEY) {
     ctx.addIssue({ code: 'custom', path: ['key'], message: '使用额度请通过专用管理接口保存' });
@@ -200,6 +204,9 @@ async function validateRoutingSelections(client: SupabaseClient<any, 'public', a
 }
 
 function throwSettingsWriteError(error: { code?: string }, fallback: string) {
+  if (error.code === '40001') {
+    throw new TRPCError({ code: 'CONFLICT', message: '支付渠道已被修改，请刷新后重新保存' });
+  }
   if (error.code === '23503') {
     throw new TRPCError({ code: 'BAD_REQUEST', message: '模型配置已变化，请刷新模型列表后重新选择' });
   }
@@ -207,6 +214,7 @@ function throwSettingsWriteError(error: { code?: string }, fallback: string) {
 }
 
 export const settingsRouter = router({
+  getPaymentChannel: adminProcedure.query(({ ctx }) => readPaymentChannel(ctx.supabase)),
   getRoutingModels: adminProcedure.query(async ({ ctx }) => {
     const { data, error } = await ctx.supabase.from('ai_models')
       .select('id,name,model_id').eq('is_active', 'true').order('name');
@@ -332,7 +340,9 @@ export const settingsRouter = router({
    * 返回活跃的积分加油包供用户购买
    */
   getCreditPackages: publicProcedure.query(async ({ ctx }) => {
-    const stripeReady = isStripeCheckoutConfigured();
+    const selectedChannel = ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin
+      ? await readPaymentChannel(ctx.supabaseAdmin).catch(() => null) : null;
+    const stripeReady = selectedChannel?.channel === 'stripe' && isStripeCheckoutConfigured();
     const readClient = getPublicReadClient(ctx);
     let result;
 
@@ -366,7 +376,7 @@ export const settingsRouter = router({
     );
 
     const priceRefs = stripeReady && ctx.hasSupabaseAdminPrivileges
-      ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin,
+      ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin, testOnly: true,
         kind: 'credit_package', ids: packages.map(pkg => pkg.id) }).catch(error => {
           throw createSafeServiceUnavailableError(error, CATALOG_UNAVAILABLE_MESSAGE);
         }) : new Map<string, string>();
@@ -378,6 +388,7 @@ export const settingsRouter = router({
       bonus_credits: pkg.bonus_credits ?? 0,
       price: (pkg.price ?? 0) / 100, // 从分转换为美元
       is_popular: pkg.is_popular === 'true',
+      paymentChannel: selectedChannel?.channel ?? null,
       checkout_ready: stripeReady && pkg.price > 0 && hasConfiguredStripePriceId(priceRefs.get(`${pkg.id}:one_time`) ?? null),
     }));
   }),
@@ -387,7 +398,9 @@ export const settingsRouter = router({
    * 返回所有会员等级供用户查看和订阅
    */
   getMembershipPlans: publicProcedure.query(async ({ ctx }) => {
-    const stripeReady = isStripeCheckoutConfigured();
+    const selectedChannel = ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin
+      ? await readPaymentChannel(ctx.supabaseAdmin).catch(() => null) : null;
+    const stripeReady = selectedChannel?.channel === 'stripe' && isStripeCheckoutConfigured();
     const readClient = getPublicReadClient(ctx);
     let result;
 
@@ -420,7 +433,7 @@ export const settingsRouter = router({
     );
 
     const priceRefs = stripeReady && ctx.hasSupabaseAdminPrivileges
-      ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin,
+      ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin, testOnly: true,
         kind: 'membership_plan', ids: plans.map(plan => plan.id) }).catch(error => {
           throw createSafeServiceUnavailableError(error, CATALOG_UNAVAILABLE_MESSAGE);
         }) : new Map<string, string>();
@@ -448,6 +461,7 @@ export const settingsRouter = router({
       // 使用 level 判断推荐：gold 为推荐/高亮
       recommended: plan.level === 'gold',
       highlight: plan.level === 'gold',
+      paymentChannel: selectedChannel?.channel ?? null,
       checkoutReady: {
         monthly: stripeReady && plan.level !== 'free' && plan.monthly_price > 0 && hasConfiguredStripePriceId(priceRefs.get(`${plan.id}:monthly`) ?? null),
         yearly: stripeReady && plan.level !== 'free' && plan.yearly_price > 0 && hasConfiguredStripePriceId(priceRefs.get(`${plan.id}:yearly`) ?? null),

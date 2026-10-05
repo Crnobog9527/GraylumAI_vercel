@@ -1,5 +1,11 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 BEGIN;
+-- Isolated test setup: explicitly select Stripe; the surrounding rollback restores the prior setting.
+INSERT INTO public.system_settings(key,value)
+SELECT 'payment_new_purchase_channel',jsonb_build_object('channel','stripe','version',
+  coalesce((SELECT (value->>'version')::bigint FROM public.system_settings WHERE key='payment_new_purchase_channel'),0)+1)
+ON CONFLICT(key) DO UPDATE SET value=jsonb_build_object('channel','stripe',
+  'version',(public.system_settings.value->>'version')::bigint+1);
 CREATE FUNCTION pg_temp.assert_true(v boolean,label text) RETURNS void LANGUAGE plpgsql AS $$
 BEGIN IF v IS DISTINCT FROM true THEN RAISE EXCEPTION 'ASSERT_FAILED: %',label; END IF; END $$;
 DO $$

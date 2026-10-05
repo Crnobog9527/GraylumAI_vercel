@@ -5,7 +5,8 @@
  */
 
 import { validateInvoiceSource } from './payments/stripeInvoiceEvidence';
-import { resolveAnnualReleaseContract, resolveAnnualSubscriptionRefs } from './payments/annualReleaseContract';
+import { resolveAnnualReleaseContract, resolveAnnualSubscriptionRefs,
+  type AnnualReleaseAnomaly, type AnnualReleaseResult } from './payments/annualReleaseContract';
 import { findStripeReference, resolveStripeOrderIds } from './payments/stripeReferences';
 import { type StripeScope } from './payments/purchaseFacts';
 import { logger } from '../lib/logger';
@@ -166,13 +167,6 @@ export interface FulfillMembershipInvoiceWithCreditGrantsInput {
   periodStart?: string | null;
   periodEnd?: string | null;
   now?: string;
-}
-
-export interface AnnualReleaseResult {
-  scannedSubscriptions: number;
-  releasedGrantCount: number;
-  releasedCredits: number;
-  skippedSubscriptions: number;
 }
 
 interface AnnualGrantAdmissionInput extends GrantSubscriptionCreditsInput {
@@ -2391,7 +2385,7 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
   };
 }
 
-async function loadAnnualSubscriptions(supabase: SupabaseLikeClient): Promise<SubscriptionRow[]> {
+async function loadAnnualSubscriptions(supabase: SupabaseLikeClient, anomalies: AnnualReleaseAnomaly[]): Promise<SubscriptionRow[]> {
   const result = await supabase
     .from('user_subscriptions')
     .select('payment_channel,merchant_namespace,payment_mode,id, user_id, membership_plan_id, stripe_subscription_id, stripe_customer_id, stripe_price_id, billing_cycle, status, cancel_at_period_end, current_period_start, current_period_end, credit_release_terminated_at, metadata')
@@ -2405,7 +2399,7 @@ async function loadAnnualSubscriptions(supabase: SupabaseLikeClient): Promise<Su
     );
   }
 
-  return await resolveAnnualSubscriptionRefs(supabase, (result.data ?? []) as SubscriptionRow[]);
+  return await resolveAnnualSubscriptionRefs(supabase, (result.data ?? []) as SubscriptionRow[], anomalies);
 }
 
 export async function releaseDueAnnualSubscriptionCredits(
@@ -2413,8 +2407,10 @@ export async function releaseDueAnnualSubscriptionCredits(
   options: { now?: Date } = {},
 ): Promise<AnnualReleaseResult> {
   const now = options.now ?? new Date();
-  const subscriptions = await loadAnnualSubscriptions(supabase);
+  const anomalies: AnnualReleaseAnomaly[] = [];
+  const subscriptions = await loadAnnualSubscriptions(supabase, anomalies);
   const summary: AnnualReleaseResult = {
+    anomalies,
     scannedSubscriptions: subscriptions.length,
     releasedGrantCount: 0,
     releasedCredits: 0,
@@ -2441,7 +2437,7 @@ export async function releaseDueAnnualSubscriptionCredits(
       summary.skippedSubscriptions += 1;
       continue;
     }
-    const contract = resolveAnnualReleaseContract(subscription, existingGrants);
+    const contract = resolveAnnualReleaseContract(subscription, existingGrants, anomalies);
     if (!contract) { summary.skippedSubscriptions += 1; continue; }
     const { openingGrant, plan } = contract;
     const invoiceId = openingGrant.stripe_invoice_id;

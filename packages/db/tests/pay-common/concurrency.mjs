@@ -62,10 +62,42 @@ export async function testConcurrency({ endpoint, name, sql, ok }) {
     INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,
       membership_plan_id,billing_cycle,is_current)
     VALUES('stripe','acct_concurrency','test','price','price_concurrency','${plan}','yearly',true);`));
+  const setChannel = channel => `UPDATE system_settings SET value=jsonb_build_object('channel','${channel}',
+    'version',(value->>'version')::bigint+1) WHERE key='payment_new_purchase_channel';`;
+  const switchFirst = worker('channel-switch-first');
+  switchFirst.send(`${setChannel('waffo')} SELECT 'holding';`);
+  await switchFirst.wait('holding');
+  const newPurchase = worker('channel-purchase-after-switch');
+  newPurchase.send(`DO $race$ BEGIN
+    PERFORM pay_common_create_purchase('${actor}','membership_plan','${plan}',
+      'yearly','acct_concurrency','test','free');
+    RAISE EXCEPTION 'Expected unavailable channel';
+    EXCEPTION WHEN check_violation THEN
+      IF SQLERRM <> 'PAY_COMMON_CHANNEL_NOT_READY' THEN RAISE; END IF;
+    END $race$; SELECT 'done';`);
+  await blockedBy(newPurchase, switchFirst);
+  await switchFirst.finish();
+  await newPurchase.wait('done');
+  await newPurchase.finish();
+  assert.equal(ok(sql(`SELECT count(*) FROM payment_orders WHERE user_id='${actor}';`)), '0');
+  ok(sql(setChannel('stripe')));
+  const purchaseFirst = worker('channel-purchase-first');
+  purchaseFirst.send(`SELECT (pay_common_create_purchase('${actor}','membership_plan','${plan}',
+    'yearly','acct_concurrency','test','free')).id; SELECT 'holding';`);
+  await purchaseFirst.wait('holding');
+  const switchAfter = worker('channel-switch-after-purchase');
+  switchAfter.send(`${setChannel('waffo')} SELECT 'done';`);
+  await blockedBy(switchAfter, purchaseFirst);
+  await purchaseFirst.finish();
+  await switchAfter.wait('done');
+  await switchAfter.finish();
+  assert.equal(ok(sql(`SELECT payment_channel FROM payment_orders WHERE user_id='${actor}';`)), 'stripe');
+  // The next admission below recovers this frozen Stripe intent while the default is Waffo.
   const initialBalance = Number(ok(sql(`SELECT credits FROM profiles WHERE id='${actor}';`)));
   const order = ok(sql(`SET ROLE service_role;
     SELECT (pay_common_create_purchase('${actor}','membership_plan','${plan}',
       'yearly','acct_concurrency','test','free')).id;`));
+  ok(sql(setChannel('stripe')));
   ok(sql(`SET ROLE service_role; SELECT pay_common_record_checkout('${order}','acct_concurrency','test',
     jsonb_build_object('id','cs_concurrency','object','checkout.session','livemode',false,'mode','subscription',
       'client_reference_id','${actor}','metadata',jsonb_build_object('orderId','${order}',
@@ -136,7 +168,7 @@ export async function testConcurrency({ endpoint, name, sql, ok }) {
       'fulfilled',(SELECT fulfilled_at IS NOT NULL FROM payment_orders WHERE id='${order}'));`)));
     assert.deepEqual(state, { balance: initialBalance + 202, grants: 2, ledger: 2,
       subscriptions: 1, invoices: 1, fulfilled: true });
-    return 'PR-2 real PostgreSQL concurrency: duplicate invoice/cron, invoice-cron period01 both orders, profile-first locks';
+    return 'PR-3 switch/purchase both orders; PR-2 real PostgreSQL concurrency: duplicate invoice/cron, invoice-cron period01 both orders, profile-first locks';
   } finally {
     // Also release blocked transactions after an assertion failure, before the
     // parent runner removes its isolated container and volume.

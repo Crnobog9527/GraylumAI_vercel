@@ -14,7 +14,8 @@ export function mapPurchaseCheckoutError(error: unknown, kind: 'credit_package' 
     return new TRPCError({ code: 'CONFLICT', message: '原订单的付款信息不一致，请通过工单联系我们核对。', cause: error });
   }
   if (['PAY_COMMON_PRICE_MAPPING_MISSING', 'PAY_COMMON_PRICE_MAPPING_AMBIGUOUS', 'PAY_COMMON_PRICE_MISMATCH',
-    'PAY_COMMON_AMOUNT_INVALID', 'PAY_COMMON_PRODUCT_UNAVAILABLE'].includes(reason)) {
+    'PAY_COMMON_AMOUNT_INVALID', 'PAY_COMMON_PRODUCT_UNAVAILABLE',
+    'PAY_COMMON_CHANNEL_NOT_READY', 'PAY_COMMON_LIVE_PURCHASE_DISABLED', 'PAY_COMMON_CHANNEL_SETTING_INVALID'].includes(reason)) {
     return new TRPCError({ code: 'BAD_REQUEST', message: kind === 'membership_plan'
       ? '该会员套餐暂不可购买，请稍后重试' : '该商品暂不可购买，请稍后重试' });
   }

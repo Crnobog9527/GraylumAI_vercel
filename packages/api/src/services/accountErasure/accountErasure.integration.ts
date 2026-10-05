@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Run only through packages/db/tests/run-account-erasure-close.mjs (local disposable containers).
-import { expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+import pg from 'pg';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 vi.mock('../redisRateLimiter', () => ({ checkRateLimitOrThrow: vi.fn().mockResolvedValue({ success: true }) }));
@@ -16,6 +17,11 @@ const authUrl = process.env.ERASURE_LOCAL_AUTH!;
 for (const url of [restUrl, authUrl]) {
   if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(url ?? '')) throw new Error('Account erasure isolated runner required');
 }
+const dbUrl = process.env.ERASURE_E_LOCAL_DB!;
+if (!/^postgres:\/\/postgres@127\.0\.0\.1:\d+\/erasure_e$/.test(dbUrl ?? '')) throw new Error('Local DB required');
+const db = new pg.Client({ connectionString: dbUrl });
+beforeAll(async () => { await db.connect(); });
+afterAll(async () => { await db.end(); });
 const nativeFetch = globalThis.fetch;
 // No Supabase gateway locally: route the two API prefixes to their disposable containers.
 const localFetch: typeof fetch = (input, init) => {
@@ -64,11 +70,25 @@ async function createRenewingSubscription(userId: string) {
     merchant_namespace: 'acct_erasure_fixture', mode: 'test', object_type: 'price', external_id: priceId,
     membership_plan_id: planId, billing_cycle: 'monthly', is_current: true });
   expect(reference.error).toBeNull();
-  const purchase = await admin.rpc('pay_common_create_purchase', { p_user_id: userId,
-    p_item_type: 'membership_plan', p_item_id: planId, p_billing_cycle: 'monthly',
-    p_merchant_namespace: 'acct_erasure_fixture', p_payment_mode: 'test', p_expected_level: 'free' });
-  expect(purchase.error).toBeNull();
-  const orderId = purchase.data.id;
+  // The selection and purchase share one local transaction, as in the SQL fixtures.
+  let orderId: string;
+  await db.query('BEGIN');
+  try {
+    await db.query(`INSERT INTO public.system_settings(key,value)
+      SELECT 'payment_new_purchase_channel',jsonb_build_object('channel','stripe','version',
+        coalesce((SELECT (value->>'version')::bigint FROM public.system_settings
+          WHERE key='payment_new_purchase_channel'),0)+1)
+      ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`);
+    await db.query("SET LOCAL ROLE service_role");
+    const purchase = await db.query(`SELECT id FROM public.pay_common_create_purchase(
+      $1,'membership_plan',$2,'monthly','acct_erasure_fixture','test','free')`, [userId, planId]);
+    orderId = purchase.rows[0].id;
+    expect(orderId).toBeTruthy();
+    await db.query('COMMIT');
+  } catch (error) {
+    await db.query('ROLLBACK');
+    throw error;
+  }
   const recorded = await admin.rpc('pay_common_record_checkout', { p_order_id: orderId,
     p_merchant_namespace: 'acct_erasure_fixture', p_payment_mode: 'test', p_session: {
       id: `cs_erasure_${providerSuffix}`, object: 'checkout.session', livemode: false, mode: 'subscription',
