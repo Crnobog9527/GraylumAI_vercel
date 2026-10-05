@@ -344,3 +344,12 @@ max(0,P-B)（逐消息模板所需余量）、费用、completion/reasoning 与�
 
 后续迁移顺序以 [主窗口审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5995575820) 为准：
 #666 使用 0172；本 PR 采样结束、最终合并前再改为 0173 并重建指纹，未提前修改迁移或应用远端。
+
+## 代理新批次预演
+
+旧清单和逐条费用表保留作为原批次证据。新清单为 `evidence/payg-profile-20261005-proxy-r2.manifest.json`，
+批次 ID `payg-profile-20261005-proxy-r2`，manifestHash
+`596c57a3839de657e46058d16d8a558af2c84d3ea4b79b74e80a9b96e4a10ef7`。
+228 条 samples 和单价完全不变；只新增批次及旧费用处理信息，版本升为 3。
+旧批次 UNKNOWN 保留，依主窗口决定按 $0 入账；新批及累计费用上界 $22.587902625000，均小于 $48。
+新批次尚未获执行通知，本轮仅准备。

@@ -1,6 +1,6 @@
 # BILL-PAYG profile 执行器交接（仅准备）
 
-**采样计划和执行器完成，等待审查后执行。** 本轮 0 次付费请求、0 远端数据库访问、0 环境配置写入。
+**重跑准备完成，等待复核。** 旧批次已锁定；本轮不发送模型请求、不访问远端数据库、不改配置。
 本页不是执行批准；必须先收到主窗口对本 PR 最终版本和 manifest 的审阅通过及执行通知。
 
 ## 入口
@@ -13,17 +13,20 @@
 批准后，从本 PR 工作区执行（下列命令在第一步没有运行）：
 
 ```bash
-node scripts/payg-profile-execute.mjs execute-approved \
+NODE_USE_ENV_PROXY=1 NO_PROXY= no_proxy= https_proxy= node scripts/payg-profile-execute.mjs execute-approved \
   scripts/payg-profile/plan-prices.json \
-  docs/launch/evidence/payg-profile-20261005.manifest.json \
-  4289cffc98ac5fda57b46e93e8a7e3d083b30ab71223428a961d118593bad9c5 \
+  docs/launch/evidence/payg-profile-20261005-proxy-r2.manifest.json \
+  596c57a3839de657e46058d16d8a558af2c84d3ea4b79b74e80a9b96e4a10ef7 \
   owner-approved-test-balance-only
 ```
 
 必须始终用同一个系统用户运行，**不用 sudo**，不切换 HOME 或复制工作区来绕过已有锁。
 
 入口重新生成全部请求和清单，与已批准 manifest 整体深比较；任何请求、价格、上限或样本顺序变化均拒绝。
-先检查专用密钥环境变量非空、完成首次目录预检，再创建锁和批次事件；之前失败不会消耗批次。
+先检查专用密钥，再检查代理和出口国家，完成首次模型目录预检，最后才建锁和批次事件。
+`HTTPS_PROXY` 必须预先指向 Owner 同意的本机代理；不得输出其值。命令只清空本进程的 bypass/小写覆盖，
+不改系统配置。必须在 Node 启动前设置 NODE_USE_ENV_PROXY=1（当前 Node 24.14.0）。
+代理和国家检查失败不创建锁、不发模型请求；不会查询第二个出口服务或自动重试。
 每条发送前仍重新 GET 精确模型 endpoint 目录，与冻结目录比较全部价格层和能力；漂移后须重新预演/审阅，不能继续。
 本地费用计算复用 openRouterCallBound，发送和查账复用现有 openRouterAdapter/openRouterEvidence；
 无 SDK 自动重试、无 fallback、固定 OpenRouter URL、禁止重定向。工具样本只带合成历史，不执行真实工具。
@@ -103,3 +106,28 @@ POST 最多一次；超时/断线无原 ID 时保留未知费用并停止，不�
 
 迁移顺序按主窗口 2026-10-05 审计更新：#666 使用 0172；本 PR 在采样结束、最终合并前改为 0173，
 以届时 staging 重建指纹。在此之前若产生账本编号/跳号失败应如实记录，不加入占位迁移或放宽 CI。
+
+## 代理与新批次（2026-10-05）
+
+新批次 ID：`payg-profile-20261005-proxy-r2`；旧 manifest `4289cffc…bad9c5` 的锁、日志和原回执保持不变。
+旧首条依 [主窗口审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5996661703)
+作为 Owner 接受的风险按 $0 入账；原始 UNKNOWN 保留，不伪造已结算回执。新批次 228 个样本、请求 hash、
+单价、逐条上界均与旧清单一致；新上界及两批累计上界都是 **$22.587902625000**，小于 $48。
+
+同一 Node 原生 fetch 用于出口检查、目录和模型/查账；代理由 Node 启动环境驱动，拒绝 NO_PROXY / no_proxy
+或冲突的 https_proxy，避免两类请求一部分直连。依据 [Node 环境代理文档](https://nodejs.org/api/cli.html#node_use_env_proxy1)。
+只 GET 一次 [ipapi 国家字段](https://ipapi.co/api/#location-of-clients-ip)，地址为 `https://ipapi.co/country/`，
+不携带模型凭据，不请求或记录 IP、城市、代理地址。只接受严格两位国家码，批次事件仅记录通过的国家码。
+当前使用保守的已核实子集 US/CA/GB/DE/FR/NL/JP/SG/AU/KR/TW；不声称这是全部可用地区。
+依据 [Anthropic](https://www.anthropic.com/supported-countries)、
+[OpenAI](https://help.openai.com/en/articles/5347006-openai-api-supported-countries-and-territories)、
+[Google Gemini](https://ai.google.dev/gemini-api/docs/available-regions) 的公开地区信息。
+Google 页面覆盖 Gemini API，不是 OpenRouter Vertex 路由的可用性承诺；端点仍可按其策略拒绝。
+未在已核实子集的国家停止为 PROXY_COUNTRY_NOT_ALLOWED；查询失败、重定向或无效响应为 PROXY_COUNTRY_CHECK_FAILED。
+代理分流规则必须使出口服务与 OpenRouter 使用相同节点；一次国家检查不能证明代理之后不换出口，
+也不能代替服务商实际准入。此轮只用合成数据测试，尚未实测本机代理出口。
+
+403 只有同时匹配 error.code=403 和 metadata.failed_routing_step 的
+`Gate Endpoints with Geo Restrictions` 才记为 PROVIDER_REGION_BLOCKED（结构取自旧批次私有回执，未上传原文）。
+它立即停批、无查账重试；其他 403 保持 UNKNOWN_OR_FAILED，不根据模糊错误文案认定地区问题。
+新的地区拒绝仍是费用未知，不能自动沿用旧批次的 Owner $0 决定。

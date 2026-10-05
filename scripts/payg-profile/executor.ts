@@ -22,7 +22,7 @@ export function verifiedPlan(prices:unknown,manifest:unknown,approvedHash:string
  const plan=createSamplePlan(prices);
  if(!isDeepStrictEqual(plan.manifest,manifest)||approvedHash!==plan.manifest.manifestHash)
   throw new Error('APPROVED_MANIFEST_MISMATCH');
- if(!plan.manifest.currentPricesVerified||decimal(plan.manifest.totalUsd)>decimal('48')
+ if(!plan.manifest.currentPricesVerified||decimal(plan.manifest.cumulativeUpperUsd)>decimal('48')
   ||plan.manifest.blockers.some(b=>!['REAL_SAMPLING_NOT_AUTHORIZED','PROFILE_EVIDENCE_NOT_COLLECTED'].includes(b)))
   throw new Error('PLAN_NOT_EXECUTABLE');
  if(new Set(plan.requests.map(r=>r.id)).size!==plan.requests.length)throw new Error('DUPLICATE_SAMPLE');
@@ -31,6 +31,7 @@ export function verifiedPlan(prices:unknown,manifest:unknown,approvedHash:string
 
 // Only exact, known codes may reach public output; never emit upstream error text.
 const failureCodes=new Set([
+ 'PROXY_REQUIRED','PROXY_INVALID','PROXY_BYPASS_NOT_ALLOWED','PROXY_COUNTRY_CHECK_FAILED','PROXY_COUNTRY_NOT_ALLOWED',
  'EXECUTION_AUTHORIZATION_REQUIRED','APPROVED_TEST_CREDENTIAL_MISSING','APPROVED_MANIFEST_MISMATCH',
  'PLAN_NOT_EXECUTABLE','DUPLICATE_SAMPLE','BATCH_ALREADY_ATTEMPTED_NO_AUTOMATIC_RESUME',
  'CATALOG_HASH_MISMATCH','CATALOG_BINDING_MISSING','CATALOG_PRICE_INVALID','PLAN_PRICE_CATALOG_MISMATCH',
@@ -105,28 +106,30 @@ function observationEvent(adapter:ReturnType<typeof openRouterAdapter>,observati
  identity:CallIdentity & OpenRouterIdentity,source:'response'|'lookup',sample:Sample,expectedId?:string){
  const evidence=adapter.evidence(observation,identity,source,expectedId);
  const usage=evidence.usage;
- let providerName:unknown=null,finishReason:unknown=null;
+ let providerName:unknown=null,finishReason:unknown=null,regionBlocked=false;
  try{
   const raw=observation.rawBodyEncoding?decodeOpenRouterStreamObservation(observation).toString('utf8'):observation.rawBody;
   const value=JSON.parse(raw);providerName=source==='lookup'?value.data?.provider_name:value.provider;
   finishReason=source==='lookup'?value.data?.finish_reason:value.choices?.[0]?.finish_reason;
+  regionBlocked=observation.httpStatus===403&&value.error?.code===403
+   &&value.error?.metadata?.failed_routing_step==='Gate Endpoints with Geo Restrictions';
  }catch{/* Unknown metadata is not a verified route. */}
  return {type:'observation',sampleId:sample.id,source,providerId:evidence.providerId,sourceHash:evidence.sourceHash,
   httpStatus:observation.httpStatus,complete:observation.complete,final:evidence.final,costUsd:evidence.cost,
   nativePromptTokens:integer(usage?.inputTokens),nativeCompletionTokens:integer(usage?.outputTokens),
   reasoningTokens:integer(usage?.reasoningTokens),cachedTokens:integer(usage?.cachedTokens),
   cacheWriteTokens:integer(usage?.cacheCreationTokens),providerName,finishReason,
-  rejected:'rejectedReason' in evidence?evidence.rejectedReason:null};
+  regionBlocked,rejected:'rejectedReason' in evidence?evidence.rejectedReason:null};
 }
 
 export async function executePlan(options:{prices:unknown;manifest:unknown;approvedHash:string;journal:Journal;
- credential:()=>Promise<string>;preflight:(model:string)=>Promise<void>;transport?:typeof fetch}){
+ credential:()=>Promise<string>;preflight:(model:string)=>Promise<void>;transport?:typeof fetch;egressCountry?:string}){
  const plan=verifiedPlan(options.prices,options.manifest,options.approvedHash);
  const {journal}=options;
  // A used directory never dispatches again: crashes and ambiguous sends need a human audit, not a resume loop.
  if(journal.events.length)throw new Error('BATCH_ALREADY_ATTEMPTED_NO_AUTOMATIC_RESUME');
  const append=async(event:Event)=>{await journal.append(event);journal.events.push(event);};
- await append({type:'batch',manifestHash:plan.manifest.manifestHash,totalCapUsd:plan.manifest.totalUsd,version:1});
+ await append({type:'batch',manifestHash:plan.manifest.manifestHash,totalCapUsd:plan.manifest.totalUsd,egressCountry:options.egressCountry,version:1});
  const adapter=openRouterAdapter({credential:options.credential,transport:options.transport,allowWorkspaceRead:true});
  const receipts:unknown[]=[];
  const generationIds=new Set<string>();
@@ -154,6 +157,9 @@ export async function executePlan(options:{prices:unknown;manifest:unknown;appro
   }catch{
    await append({type:'halt',sampleId:sample.id,reason:'AMBIGUOUS_SEND_NO_RETRY',actualUsd:null});
    break;
+  }
+  if(observations[0].regionBlocked){
+   await append({type:'halt',sampleId:sample.id,reason:'PROVIDER_REGION_BLOCKED',actualUsd:null});break;
   }
   const id=observations[0].providerId;
   if(id&&generationIds.has(id)){

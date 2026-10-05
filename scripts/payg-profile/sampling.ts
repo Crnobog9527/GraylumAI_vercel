@@ -119,7 +119,14 @@ export function createSamplePlan(input:unknown){
  }
  const totalUsd=money(Object.values(totals).reduce((sum,n)=>sum+decimal(n),0n));
  if(decimal(totalUsd)>decimal('48'))blockers.push('TOTAL_BUDGET_EXCEEDED');
- const manifest={version:2,pricesHash:hash(JSON.stringify(prices)),maxMessages:128,priceSource:prices.source,currentPricesVerified:prices.currentVerified,
+ const batch={id:'payg-profile-20261005-proxy-r2',
+  previous:{manifestHash:'4289cffc98ac5fda57b46e93e8a7e3d083b30ab71223428a961d118593bad9c5',
+   receiptStatus:'UNKNOWN',accountedUsd:'0.000000000000',
+   decision:'https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5996661703'}};
+ const cumulativeUpperUsd=money(decimal(totalUsd)+decimal(batch.previous.accountedUsd));
+ if(decimal(cumulativeUpperUsd)>decimal('48'))blockers.push('CUMULATIVE_BUDGET_EXCEEDED');
+ const manifest={version:3,batch,cumulativeUpperUsd,pricesHash:hash(JSON.stringify(prices)),maxMessages:128,
+  priceSource:prices.source,currentPricesVerified:prices.currentVerified,
   distinctMatrixSamples:180,messageStressSamples:samples.filter(s=>s.kind==='messages').length,
   outputStressSamples:samples.filter(s=>s.kind==='output').length,calls:samples.length,totals,totalUsd,
   actualCalls:0,actualUsd:'0',blockers,samples};

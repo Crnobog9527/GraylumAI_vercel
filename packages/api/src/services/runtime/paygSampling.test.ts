@@ -1,11 +1,17 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it,vi} from 'vitest';
+import previous from '../../../../../docs/launch/evidence/payg-profile-20261005.manifest.json';
 import prices from '../../../../../scripts/payg-profile/plan-prices.json';
 import {createSamplePlan,recordSamples} from '../../../../../scripts/payg-profile/sampling';
 it('offline matrix uses final cache-marked bytes, exact boundaries and conservative per-sample costs',()=>{
  const fetch=vi.spyOn(globalThis,'fetch').mockImplementation(()=>{throw new Error('NETWORK_FORBIDDEN');});
  try{
   const {manifest,requests}=createSamplePlan(prices);
+  expect(manifest.samples).toEqual(previous.samples);
+  expect(manifest.totals).toEqual(previous.totals);
+  expect(manifest.manifestHash).not.toBe(previous.manifestHash);
+  expect(manifest.cumulativeUpperUsd).toBe(previous.totalUsd);
+  expect(manifest.batch.previous).toMatchObject({receiptStatus:'UNKNOWN',accountedUsd:'0.000000000000'});
   expect(fetch).not.toHaveBeenCalled();expect(manifest.calls).toBe(228);expect(manifest.actualCalls).toBe(0);
   expect(new Set(manifest.samples.map(s=>s.requestHash)).size).toBe(228);
   expect(manifest.totalUsd).toBe('22.587902625000');

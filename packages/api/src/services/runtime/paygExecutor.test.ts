@@ -172,3 +172,14 @@ it('all three canonical provider names are also accepted from original-ID lookup
  expect(result.receipts.every(r=>(r as {source:string}).source==='lookup.native_tokens_prompt')).toBe(true);
  expect(f.events.filter(e=>e.type==='lookup-attempt')).toHaveLength(228);
 },30000);
+
+it.each([true,false])('only exact region-gate 403 yields PROVIDER_REGION_BLOCKED (region=%s)',async(region)=>{
+ const f=fixture();
+ f.transport.mockImplementation(async(_url,init)=>init?.method==='GET'?response({error:{}},404):
+  response({error:{code:403,metadata:{failed_routing_step:region?'Gate Endpoints with Geo Restrictions':'Other Gate'}}},403));
+ const result=await executePlan(f.options);
+ expect(f.events.at(-1)).toMatchObject({reason:region?'PROVIDER_REGION_BLOCKED':'UNKNOWN_OR_FAILED',actualUsd:null});
+ expect(result.actualUsd).toBeNull();
+ expect(f.transport.mock.calls.filter(([,init])=>init?.method==='POST')).toHaveLength(1);
+ expect(JSON.stringify(f.events)).not.toContain('Gate Endpoints');
+},30000);
