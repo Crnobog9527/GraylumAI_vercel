@@ -12,15 +12,47 @@ export function requireProxy(env:Record<string,string|undefined>=process.env){
  if((env.NODE_OPTIONS??'').includes('--no-use-env-proxy')||process.execArgv.includes('--no-use-env-proxy'))
   throw new Error('PROXY_REQUIRED');
 }
+// Stream-filter before decoding: retain only a loc= candidate, never other field values or the full trace.
+async function traceCountry(response:Response){
+ const reader=response.body?.getReader();
+ if(!reader)throw new Error();
+ const prefix=[108,111,99,61];
+ let position=0,ignored=false,tail:number[]=[],country:string|undefined,bytes=0;
+ const finish=()=>{
+  if(!ignored&&position>=4){
+   if(country!==undefined||!(tail.length===2||tail.length===3&&tail[2]===13)
+    ||tail[0]<65||tail[0]>90||tail[1]<65||tail[1]>90)throw new Error();
+   country=String.fromCharCode(tail[0],tail[1]);
+  }
+  position=0;ignored=false;tail=[];
+ };
+ try{
+  while(true){
+   const {done,value}=await reader.read();
+   if(done)break;
+   bytes+=value.byteLength;if(bytes>65536)throw new Error();
+   for(const byte of value){
+    if(byte===10){finish();continue;}
+    if(!ignored){
+     if(position<4){if(byte!==prefix[position])ignored=true;}
+     else{if(tail.length===3)throw new Error();tail.push(byte);}
+    }
+    position++;
+   }
+  }
+  if(position)finish();
+  if(country===undefined)throw new Error();
+  return country;
+ }finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
+}
 export async function verifyProxyCountry(transport:typeof fetch=fetch){
  requireProxy();
  let country:string;
  try{
-  const response=await transport('https://ipapi.co/country/',{redirect:'error',signal:AbortSignal.timeout(15000)});
+  const response=await transport('https://openrouter.ai/cdn-cgi/trace',{redirect:'error',signal:AbortSignal.timeout(15000)});
   if(!response.ok)throw new Error();
-  country=(await response.text()).trim();
+  country=await traceCountry(response);
  }catch{throw new Error('PROXY_COUNTRY_CHECK_FAILED');}
- if(!/^[A-Z]{2}$/.test(country))throw new Error('PROXY_COUNTRY_CHECK_FAILED');
  if(!allowedCountries.has(country))throw new Error('PROXY_COUNTRY_NOT_ALLOWED');
  return country;
 }

@@ -15,11 +15,11 @@ it.each([
  [{NODE_USE_ENV_PROXY:'1',HTTPS_PROXY:'http://localhost:9999',https_proxy:'http://other:9999'},'PROXY_BYPASS_NOT_ALLOWED'],
 ])('requires explicit non-bypassed native proxy: %j',(env,code)=>{expect(()=>requireProxy(env)).toThrow(code);});
 it('checks country exactly once without credentials, IP, redirect or model call',async()=>{
- const transport=vi.fn(async()=>new Response('US\n'));
+ const transport=vi.fn(async()=>new Response('ip=DO_NOT_PARSE_OR_SAVE\nloc=US\nother=IGNORED\n'));
  expect(await verifyProxyCountry(transport)).toBe('US');expect(transport).toHaveBeenCalledTimes(1);
- expect(transport).toHaveBeenCalledWith('https://ipapi.co/country/',{redirect:'error',signal:expect.any(AbortSignal)});
+ expect(transport).toHaveBeenCalledWith('https://openrouter.ai/cdn-cgi/trace',{redirect:'error',signal:expect.any(AbortSignal)});
 });
-it.each(['CN','HK','XX','{"ip":"private"}',''])('denies unsupported or invalid country: %s',async(country)=>{
+it.each(['loc=CN','loc=HK','loc=XX','loc=us','loc=USA','loc= US','loc=US\nloc=US','other=US',''])('denies unsupported or invalid country: %s',async(country)=>{
  const transport=vi.fn(async()=>new Response(country));
  await expect(verifyProxyCountry(transport)).rejects.toThrow(/^PROXY_COUNTRY_(NOT_ALLOWED|CHECK_FAILED)$/);
  expect(transport).toHaveBeenCalledTimes(1);
@@ -28,4 +28,20 @@ it('fails closed without retry or leaking network errors',async()=>{
  const transport=vi.fn(async()=>{throw new Error('sensitive proxy detail');});
  await expect(verifyProxyCountry(transport)).rejects.toThrow('PROXY_COUNTRY_CHECK_FAILED');
  expect(transport).toHaveBeenCalledTimes(1);
+});
+
+it('parses chunk boundaries and CRLF without calling full-response decoders',async()=>{
+ const chunks=['ip=DO_NOT_KEEP\r\nlo','c=U','S\r','\nother=IGNORED'];
+ const response=new Response(new ReadableStream({start(controller){
+  for(const part of chunks)controller.enqueue(new TextEncoder().encode(part));controller.close();
+ }}));
+ const text=vi.spyOn(response,'text'),json=vi.spyOn(response,'json');
+ expect(await verifyProxyCountry(async()=>response)).toBe('US');
+ expect(text).not.toHaveBeenCalled();expect(json).not.toHaveBeenCalled();
+});
+it.each([302,403,429,500])('rejects HTTP %s without reading the body or retrying',async(status)=>{
+ const response=new Response('loc=US',{status}),text=vi.spyOn(response,'text');
+ const transport=vi.fn(async()=>response);
+ await expect(verifyProxyCountry(transport)).rejects.toThrow('PROXY_COUNTRY_CHECK_FAILED');
+ expect(transport).toHaveBeenCalledTimes(1);expect(text).not.toHaveBeenCalled();
 });

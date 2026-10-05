@@ -116,18 +116,27 @@ POST 最多一次；超时/断线无原 ID 时保留未知费用并停止，不�
 
 同一 Node 原生 fetch 用于出口检查、目录和模型/查账；代理由 Node 启动环境驱动，拒绝 NO_PROXY / no_proxy
 或冲突的 https_proxy，避免两类请求一部分直连。依据 [Node 环境代理文档](https://nodejs.org/api/cli.html#node_use_env_proxy1)。
-只 GET 一次 [ipapi 国家字段](https://ipapi.co/api/#location-of-clients-ip)，地址为 `https://ipapi.co/country/`，
-不携带模型凭据，不请求或记录 IP、城市、代理地址。只接受严格两位国家码，批次事件仅记录通过的国家码。
+只 GET 一次同域入口 `https://openrouter.ai/cdn-cgi/trace`，不携带凭据，不跟随重定向、不重试。
+trace 响应可能包含其他字段；执行器按字节流跳过非 loc 行，不解码其字段值、不读取 ip 字段值，
+不记录或保存完整响应。只保留 loc= 后的严格两位大写国家码，拒绝重复、缺失或格式异常的 loc。
+批次事件仅记录通过的国家码。查询异常或 HTTP 非成功状态仍在建锁前停止。
 当前使用保守的已核实子集 US/CA/GB/DE/FR/NL/JP/SG/AU/KR/TW；不声称这是全部可用地区。
 依据 [Anthropic](https://www.anthropic.com/supported-countries)、
 [OpenAI](https://help.openai.com/en/articles/5347006-openai-api-supported-countries-and-territories)、
 [Google Gemini](https://ai.google.dev/gemini-api/docs/available-regions) 的公开地区信息。
 Google 页面覆盖 Gemini API，不是 OpenRouter Vertex 路由的可用性承诺；端点仍可按其策略拒绝。
 未在已核实子集的国家停止为 PROXY_COUNTRY_NOT_ALLOWED；查询失败、重定向或无效响应为 PROXY_COUNTRY_CHECK_FAILED。
-代理分流规则必须使出口服务与 OpenRouter 使用相同节点；一次国家检查不能证明代理之后不换出口，
+预检与模型请求现在同为 openrouter.ai，使用同一域名分流规则；一次国家检查不能证明代理之后不换出口，
 也不能代替服务商实际准入。此轮只用合成数据测试，尚未实测本机代理出口。
 
 403 只有同时匹配 error.code=403 和 metadata.failed_routing_step 的
 `Gate Endpoints with Geo Restrictions` 才记为 PROVIDER_REGION_BLOCKED（结构取自旧批次私有回执，未上传原文）。
 它立即停批、无查账重试；其他 403 保持 UNKNOWN_OR_FAILED，不根据模糊错误文案认定地区问题。
 新的地区拒绝仍是费用未知，不能自动沿用旧批次的 Owner $0 决定。
+
+### 同域 trace 预检修复
+
+依据 [主窗口诊断](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5997378844)，
+旧第三方国家查询被限流/质询；切换同域 trace，无新增查询回退入口。主窗口报告的 loc=US
+不代替本执行器下一次启动时的检查。本轮只做合成测试，不查询真实出口或发送模型请求。
+清单 `596c57a3…a10ef7`、样本及费用上界保持不变。最终迁移编号按最新安排为 0174，本轮不改迁移。
