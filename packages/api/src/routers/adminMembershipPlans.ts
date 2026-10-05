@@ -6,6 +6,7 @@ import { createSafeInternalError } from '../lib/publicError';
 import {
   defaultMembershipEntitlements, entitlementInputShape, membershipEntitlementPatch,
 } from '../services/membershipEntitlementConfig';
+import { saveStripeCatalog } from '../services/payments/stripeCatalog';
 import { assertExplicitEntitlementsOnLevelChange } from '../services/membershipPlanChanges';
 
 export const membershipPlanMutations = {
@@ -35,17 +36,15 @@ export const membershipPlanMutations = {
       sortOrder: z.number().int().min(0).default(0),
     }))
     .mutation(async ({ ctx, input }) => {
-      const { data, error } = await ctx.supabase
-        .from('membership_plans')
-        .insert({
+      const { data, error } = await saveStripeCatalog({ db: ctx.supabaseAdmin, kind: 'membership_plan',
+        prices: { monthly: input.stripeMonthlyPriceId, yearly: input.stripeYearlyPriceId },
+        values: {
           ...defaultMembershipEntitlements(input.level),
           ...membershipEntitlementPatch(input),
           name: input.name,
           level: input.level,
           monthly_price: input.monthlyPrice,
           yearly_price: input.yearlyPrice,
-          stripe_monthly_price_id: input.stripeMonthlyPriceId ?? null,
-          stripe_yearly_price_id: input.stripeYearlyPriceId ?? null,
           monthly_credits: input.monthlyCredits,
           yearly_credits: input.yearlyCredits,
           monthly_bonus_credits: input.monthlyBonusCredits,
@@ -54,9 +53,8 @@ export const membershipPlanMutations = {
           max_context_messages: input.maxContextMessages,
           is_active: 'true',
           sort_order: input.sortOrder,
-        })
-        .select()
-        .single();
+        },
+      });
 
       if (error?.code === '23505') {
         throw new TRPCError({ code: 'CONFLICT', message: '该会员等级已存在方案，请编辑现有方案。' });
@@ -96,14 +94,11 @@ export const membershipPlanMutations = {
       const previousLevel = await assertExplicitEntitlementsOnLevelChange(ctx.supabase, input);
       const updateData: Record<string, unknown> = {
         ...membershipEntitlementPatch(input),
-        updated_at: new Date().toISOString(),
       };
       if (input.name !== undefined) updateData.name = input.name;
       if (input.level !== undefined) updateData.level = input.level;
       if (input.monthlyPrice !== undefined) updateData.monthly_price = input.monthlyPrice;
       if (input.yearlyPrice !== undefined) updateData.yearly_price = input.yearlyPrice;
-      if (input.stripeMonthlyPriceId !== undefined) updateData.stripe_monthly_price_id = input.stripeMonthlyPriceId || null;
-      if (input.stripeYearlyPriceId !== undefined) updateData.stripe_yearly_price_id = input.stripeYearlyPriceId || null;
       if (input.monthlyCredits !== undefined) updateData.monthly_credits = input.monthlyCredits;
       if (input.yearlyCredits !== undefined) updateData.yearly_credits = input.yearlyCredits;
       if (input.monthlyBonusCredits !== undefined) updateData.monthly_bonus_credits = input.monthlyBonusCredits;
@@ -115,10 +110,10 @@ export const membershipPlanMutations = {
       if (input.isActive !== undefined) updateData.is_active = input.isActive;
       if (input.sortOrder !== undefined) updateData.sort_order = input.sortOrder;
 
-      const query = ctx.supabase.from('membership_plans').update(updateData).eq('id', input.id);
-      // A concurrent tier edit cannot bypass the explicit-entitlements requirement.
-      if (previousLevel !== undefined) query.eq('level', previousLevel);
-      const { data, error } = await query.select().single();
+      const { data, error } = await saveStripeCatalog({ db: ctx.supabaseAdmin, kind: 'membership_plan',
+        id: input.id, values: updateData, expectedLevel: previousLevel,
+        prices: { monthly: input.stripeMonthlyPriceId, yearly: input.stripeYearlyPriceId },
+      });
 
       if (error?.code === '23505') {
         throw new TRPCError({ code: 'CONFLICT', message: '该会员等级已存在方案，请编辑现有方案。' });

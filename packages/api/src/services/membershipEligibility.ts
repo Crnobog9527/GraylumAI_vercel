@@ -4,7 +4,7 @@
  * This code is proprietary and confidential.
  */
 
-import { isStripeManagedSubscriptionActive } from './subscriptionOverrides';
+import { STRIPE_MANAGED_ACTIVE_SUBSCRIPTION_STATUSES } from './subscriptionOverrides';
 import { isRefundPaymentOrderStatus } from './paymentOrderStatus';
 
 export type MembershipLevel = 'free' | 'pro' | 'gold';
@@ -61,7 +61,7 @@ export type MembershipEligibilityResult = {
 };
 
 type SupabaseLikeClient = {
-  from(table: string): any;
+  rpc(name: string, args: Record<string, unknown>): any;
 };
 
 type ProfileSnapshot = {
@@ -76,7 +76,8 @@ type MembershipPlanSnapshot = {
 type SubscriptionRow = {
   id?: string | null;
   membership_plan_id?: string | null;
-  stripe_subscription_id?: string | null;
+  payment_channel?: string | null;
+  mapping_state?: string | null;
   status?: string | null;
   cancel_at_period_end?: string | boolean | null;
   billing_cycle?: string | null;
@@ -111,7 +112,6 @@ type EntitlementSnapshot = {
 
 const PAYMENT_ATTENTION_STATUSES = new Set(['past_due', 'incomplete', 'unpaid']);
 const CANCELED_STATUSES = new Set(['canceled', 'cancelled']);
-const SUBSCRIPTION_CANDIDATE_LIMIT = 10;
 const MEMBERSHIP_LEVEL_RANK: Record<MembershipLevel, number> = {
   free: 0,
   pro: 1,
@@ -178,14 +178,8 @@ function hasAdminOverride(subscription: SubscriptionRow | null) {
 }
 
 function isManagedCurrentSubscription(subscription: SubscriptionRow | null) {
-  if (!subscription?.stripe_subscription_id) {
-    return false;
-  }
-
-  return isStripeManagedSubscriptionActive({
-    stripeSubscriptionId: subscription.stripe_subscription_id,
-    status: subscription.status,
-  });
+  return subscription?.payment_channel === 'stripe' && subscription.mapping_state === 'mapped'
+    && STRIPE_MANAGED_ACTIVE_SUBSCRIPTION_STATUSES.some(status => status === normalizeStatus(subscription.status));
 }
 
 function normalizeSubscriptionRows(value: unknown): SubscriptionRow[] {
@@ -201,7 +195,11 @@ function normalizeSubscriptionRows(value: unknown): SubscriptionRow[] {
 }
 
 function selectEntitlementSubscription(candidates: SubscriptionRow[]) {
-  return candidates.find(isManagedCurrentSubscription) ?? candidates[0] ?? null;
+  const uncertain = candidates.find(row => !['none', 'mapped'].includes(row.mapping_state ?? ''));
+  if (uncertain) return uncertain;
+  const managed = candidates.filter(isManagedCurrentSubscription);
+  if (managed.length > 1) return { ...managed[0], mapping_state: 'unknown' };
+  return managed[0] ?? candidates[0] ?? null;
 }
 
 function hasFullRefundSignal(order: PaymentOrderRow | null) {
@@ -231,7 +229,7 @@ function hasFullRefundSignal(order: PaymentOrderRow | null) {
 
 function buildDiagnostics(subscription: SubscriptionRow | null, order: PaymentOrderRow | null) {
   return {
-    subscriptionId: maskIdentifier(subscription?.stripe_subscription_id ?? null),
+    subscriptionId: maskIdentifier(subscription?.id ?? null),
     subscriptionStatus: subscription?.status ?? null,
     cancelAtPeriodEnd: subscription?.cancel_at_period_end ?? null,
     billingCycle: subscription?.billing_cycle ?? null,
@@ -381,11 +379,15 @@ export function getState(input: {
   }
 
   const subscriptionStatus = normalizeStatus(latestSubscription?.status);
-  const hasStripeSubscription = Boolean(latestSubscription?.stripe_subscription_id);
-  const isManagedActive = isStripeManagedSubscriptionActive({
-    stripeSubscriptionId: latestSubscription?.stripe_subscription_id,
-    status: latestSubscription?.status,
-  });
+  if (latestSubscription && (latestSubscription.mapping_state === 'unknown'
+    || !['none', 'mapped'].includes(latestSubscription.mapping_state ?? '')
+    || latestSubscription.mapping_state === 'mapped' && latestSubscription.payment_channel !== 'stripe'
+    || latestSubscription.mapping_state === 'none' && latestSubscription.payment_channel != null)) {
+    return { state: 'inconsistent', level: profileLevel,
+      billingCycle: normalizeBillingCycle(latestSubscription.billing_cycle), source: 'conflict', diagnostics };
+  }
+  const hasStripeSubscription = latestSubscription?.payment_channel === 'stripe' && latestSubscription.mapping_state === 'mapped';
+  const isManagedActive = isManagedCurrentSubscription(latestSubscription);
 
   if (hasStripeSubscription && isManagedActive) {
     if (profileLevel === 'free') {
@@ -477,53 +479,14 @@ export function getState(input: {
 }
 
 export async function loadLatestMembershipFacts(supabase: SupabaseLikeClient, userId: string) {
-  const subscriptionQuery = supabase
-    .from('user_subscriptions')
-    .select('id, membership_plan_id, stripe_subscription_id, status, cancel_at_period_end, billing_cycle, current_period_end, metadata')
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: false });
-
-  const [subscriptionResult, orderResult] = await Promise.all([
-    executeSubscriptionCandidatesQuery(subscriptionQuery),
-    supabase
-      .from('payment_orders')
-      .select('id, status, payment_status, metadata')
-      .eq('user_id', userId)
-      .eq('item_type', 'membership_plan')
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
-  const subscriptionCandidates = normalizeSubscriptionRows(subscriptionResult.data);
-
+  const result = await supabase.rpc('pay_common_membership_facts', { p_user_id: userId });
+  const facts = asRecord(result.data);
+  const valid = Array.isArray(facts.subscriptions) && Object.hasOwn(facts, 'latest_order');
   return {
-    latestSubscription: selectEntitlementSubscription(subscriptionCandidates),
-    latestMembershipOrder: orderResult.data as PaymentOrderRow | null,
-    error: subscriptionResult.error ?? orderResult.error ?? null,
+    latestSubscription: valid ? selectEntitlementSubscription(normalizeSubscriptionRows(facts.subscriptions)) : null,
+    latestMembershipOrder: valid ? facts.latest_order as PaymentOrderRow | null : null,
+    error: result.error ?? (valid ? null : new Error('PAY_COMMON_MEMBERSHIP_FACTS_UNKNOWN')),
   };
-}
-
-async function executeSubscriptionCandidatesQuery(query: any): Promise<{
-  data: unknown;
-  error: unknown;
-}> {
-  const limitedQuery = typeof query?.limit === 'function'
-    ? query.limit(SUBSCRIPTION_CANDIDATE_LIMIT)
-    : query;
-
-  if (typeof limitedQuery?.then === 'function') {
-    return limitedQuery;
-  }
-
-  if (typeof limitedQuery?.maybeSingle === 'function') {
-    const result = await limitedQuery.maybeSingle();
-    return {
-      data: normalizeSubscriptionRows(result.data),
-      error: result.error,
-    };
-  }
-
-  return limitedQuery;
 }
 
 export function evaluateAction(input: {

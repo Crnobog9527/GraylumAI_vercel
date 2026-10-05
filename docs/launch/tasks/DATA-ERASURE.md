@@ -68,6 +68,21 @@ PAY-COMMON PR-1（暂定迁移 `0161_pay_common_contract.sql`）追加如下受�
 - `payment_provider_refs`：渠道、非敏感商户命名空间、模式、对象类型、外部对象编号、内部商品/订单/订阅关联、
   周期与创建时间；共享商品 price 映射不随单一主体注销删除，其余按原交易 `T_fin` 保留。
 
+PAY-COMMON PR-2（迁移 `0170_pay_common_purchase.sql`）追加如下受限白名单；仍沿用 `T_fin`，
+不把整段请求 JSON 变成可无限保留的账务，也不改变注销权限或执行器：
+
+- `payment_orders`：`price_ref_id`、`purchase_action`、`purchase_membership_level`、`purchase_closed_at`、
+  `purchase_close_reason`、`purchase_close_ref`，用于追溯原价格、购买动作和受保护的关闭证据。
+- `checkout_request`：只保留模式、付款方式类别、客户创建策略、内部主体/订单/商品编号、数量、
+  原价格编号或金额/币种、到期时间，以及与这些相同的 `metadata`、`subscription_data.metadata`、
+  `payment_intent_data.metadata`。`product_data` 只允许固定目录商品名称；不得夹带用户自由文本。
+  成功/取消跳转 URL、URL 查询串及额外身份信息不属于财务保留字段。
+- `purchase_change_request`：只保留原价格/订阅项编号、创建时间、报价的金额/币种/报价时间及
+  完整性校验值、受限商品/主体 metadata。不得保留密钥、支付凭证或供应商完整对象。
+- `payment_provider_refs.is_current` 与既有映射身份共同解释当时的目录选择；订单按冻结 `price_ref_id`
+  回溯，不得在注销时改指现价。以上 JSON 字段清理须遵守不可变财务事实边界，不能用普通旧列更新绕过保护。
+  本段是财务保留范围交接，不宣称本 PR 新增了按保留期清理这些列的执行器。
+
 这三张原财务表的主体 FK 改为 RESTRICT，新映射和订单/订阅/grant 关联同为 RESTRICT；
 不得先删主体或提前 SET NULL。封闭后允许服务端追加原订单核对事实，但不得恢复登录或使用权。
 保留期仍为对应交易年度结束起 3 年；未决项先隔离核对。先清映射及 grant/退款对子订单、订阅的依赖，

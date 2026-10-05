@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../services/stripe', () => ({
   isStripeCheckoutConfigured: () => true,
+  getStripeClient: () => ({ accounts: { retrieveCurrent: async () => ({ id: 'acct_fixture' }) },
+    balance: { retrieve: async () => ({ livemode: false }) } }),
 }));
 import { getPublicReadClient, settingsRouter } from './settings';
 
@@ -96,8 +98,15 @@ function createPublicCatalogCaller(table: string, result: Promise<unknown>) {
         return createQueryBuilder(result);
       },
     },
-    supabaseAdmin: {},
-    hasSupabaseAdminPrivileges: false,
+    supabaseAdmin: { from(actualTable: string) {
+      expect(actualTable).toBe('payment_provider_refs');
+      return createQueryBuilder(result.then(value => ({ data: ((value as { data?: Array<Record<string, unknown>> }).data ?? []).flatMap(row =>
+        table === 'credit_packages'
+          ? (row.stripe_price_id ? [{ credit_package_id: row.id, billing_cycle: 'one_time', external_id: row.stripe_price_id }] : [])
+          : ['monthly', 'yearly'].flatMap(cycle => row[`stripe_${cycle}_price_id`]
+            ? [{ membership_plan_id: row.id, billing_cycle: cycle, external_id: row[`stripe_${cycle}_price_id`] }] : [])), error: null })));
+    } },
+    hasSupabaseAdminPrivileges: true,
   } as any);
 }
 
