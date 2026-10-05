@@ -111,11 +111,17 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
    };
    const e=await rpc('runtime_execution',{p_execution_id:admitted.executionId,p_action:'begin'});
    const billing=e.billing as FrozenPaygRun,c=runtimeContext.parse(e.context);
-   expect(billing.contractVersion).toBe('bill2.v2');expect(c.historyItems).toBeLessThanOrEqual(30);
+   expect(billing.contractVersion).toBe('bill2.v2');expect(c.historyItems).toBe(100);
    const policy=billing.callPolicy.find(p=>p.modelId===c.modelId)!;
-   const request=openRouterRequestBody(JSON.stringify({model:policy.model,messages:[{role:'user',content:'Synthetic claim'}],
+   const request=openRouterRequestBody(JSON.stringify({model:policy.model,messages:[{role:'system',content:'Synthetic instructions'},
+     ...Array.from({length:126},(_,i)=>({role:i%2?'assistant':'user',content:'Synthetic history'})),
+     {role:'user',content:'Synthetic claim'}],
     max_tokens:c.maxOutputTokens,...frozenReasoningFields(c.reasoning)}),{context:c,policy,phase:c.role,primaryDialogue:true});
    const {call}=runtimePaygCall(request,c.role,policy,billing.rules,e.epoch,true);
+   expect(call.payg?.messages).toBe(128);
+   const excessive=JSON.parse(request);excessive.messages.push({role:'user',content:'One too many'});
+   expect(()=>runtimePaygCall(JSON.stringify(excessive),c.role,policy,billing.rules,e.epoch,true))
+    .toThrow('BILL2_INPUT_PROFILE_INVALID');
    const claimed=await rpc('bill2_claim',{p_run_id:e.runId,p_sequence:1,p_payload:call});
    expect(claimed.id).toEqual(expect.any(String));
    expect((await rpc('bill2_claim',{p_run_id:e.runId,p_sequence:1,p_payload:call})).id).toBe(claimed.id);

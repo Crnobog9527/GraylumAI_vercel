@@ -37,5 +37,6 @@ it('offline matrix uses final cache-marked bytes, exact boundaries and conservat
   expect(recordSamples(manifest,[receipt,receipt])[0]).toMatchObject({P:null,status:'CONFLICT'});
   expect(recordSamples(manifest,[{...receipt,endpointTag:'wrong'}])[0]).toMatchObject({P:null,status:'IDENTITY_MISMATCH'});
   expect(recordSamples(manifest,[{...receipt,nativePromptTokens:999999}])[0]).toMatchObject({status:'BOUND_FAILED'});
+  expect(recordSamples(manifest,[{...receipt,cachedTokens:90,cacheWriteTokens:20}])[0]).toMatchObject({status:'BOUND_FAILED'});
  }finally{fetch.mockRestore();}
 });

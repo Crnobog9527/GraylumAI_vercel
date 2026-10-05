@@ -145,7 +145,10 @@ export function recordSamples(manifest:ReturnType<typeof createSamplePlan>['mani
   const P=r.nativePromptTokens,rB=P/Number(sample.B),rT=P/Number(sample.T);
   return {...sample,P,rB,rT,templateExcessTokens:Math.max(0,P-Number(sample.B)),cachedTokens:r.cachedTokens,
    cacheWriteTokens:r.cacheWriteTokens,costUsd:r.costUsd,
-   status:rB<=0.7&&rT<=0.7&&decimal(r.costUsd)<=decimal(String(sample.upperUsd))&&r.nativeCompletionTokens<=Number(sample.O)
+   status:rB<=0.7&&rT<=0.7&&(r.cachedTokens===null||r.cachedTokens<=P)
+    &&(r.cacheWriteTokens===null||r.cacheWriteTokens<=P)
+    &&(r.cachedTokens===null||r.cacheWriteTokens===null||r.cachedTokens+r.cacheWriteTokens<=P)
+    &&decimal(r.costUsd)<=decimal(String(sample.upperUsd))&&r.nativeCompletionTokens<=Number(sample.O)
     ?'SAMPLE_WITHIN_BOUNDS':'BOUND_FAILED'};
  });
 }

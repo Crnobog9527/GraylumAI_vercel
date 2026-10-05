@@ -56,6 +56,10 @@ export async function verifyCatalog(prices:unknown,catalog:unknown,model:string,
  const data=await response.json() as {data?:{id?:string;endpoints?:Array<Record<string,unknown>>}};
  const matches=data.data?.endpoints?.filter(e=>e.tag===route.endpointTag)??[];
  if(data.data?.id!==model||matches.length!==1)throw new Error('CATALOG_ROUTE_MISMATCH');
+ // A base slug can match new regional variants. Tier endpoints require opt-in and are excluded.
+ if(!route.endpointTag.includes('/')&&data.data.endpoints?.some(e=>typeof e.tag==='string'
+  &&e.tag.startsWith(route.endpointTag+'/')&&!/\/(fast|flex|priority)$/.test(e.tag)))
+  throw new Error('CATALOG_AMBIGUOUS_BASE_SLUG');
  for(const key of ['pricing','context_length','max_completion_tokens','max_prompt_tokens','supported_parameters','tag','provider_name'])
   if(!isDeepStrictEqual(matches[0][key],saved.endpoint[key]))throw new Error('CATALOG_DRIFT_REPLAN_REQUIRED');
  if(matches[0].status!==0)throw new Error('CATALOG_ROUTE_UNAVAILABLE');
@@ -185,6 +189,15 @@ export async function executePlan(options:{prices:unknown;manifest:unknown;appro
  });
  const known=amounts.reduce((sum,cost)=>sum+(cost===null?0n:decimal(cost)),0n);
  const knownUsd=`${known/1000000000000n}.${String(known%1000000000000n).padStart(12,'0')}`;
- return {manifestHash:plan.manifest.manifestHash,receipts,report:recordSamples(plan.manifest,receipts),
+ const report=recordSamples(plan.manifest,receipts).map(row=>{
+  const attempted=journal.events.some(e=>e.type==='attempt'&&e.sampleId===row.id);
+  const observed=journal.events.filter(e=>e.type==='observation'&&e.sampleId===row.id&&e.final);
+  const costs=[...new Set(observed.map(e=>e.costUsd))];
+  const halt=journal.events.find(e=>e.type==='halt'&&e.sampleId===row.id);
+  const actualUsd=halt?.reason==='RECEIPT_CONFLICT'||halt?.reason==='REUSED_GENERATION_ID'?null:
+   costs.length===1?costs[0]:attempted?null:'0';
+  return {...row,status:row.status==='MISSING'?(attempted?'UNKNOWN':'NOT_RUN'):row.status,actualUsd};
+ });
+ return {manifestHash:plan.manifest.manifestHash,receipts,report,
   actualUsd:amounts.includes(null)?null:knownUsd,knownUsd,unknownCostSamples:amounts.filter(v=>v===null).length,events:journal.events};
 }

@@ -5,6 +5,7 @@ import prices from '../../../../../scripts/payg-profile/plan-prices.json';
 import catalog from '../../../../../scripts/payg-profile/catalog-2026-10-05.json';
 import {createSamplePlan} from '../../../../../scripts/payg-profile/sampling';
 import {executePlan,verifiedPlan,verifyCatalog,type Event,type Plan} from '../../../../../scripts/payg-profile/executor';
+// Full 228-request regeneration is CPU-bound; shared CI runners exceed Vitest's 5s default.
 let plan:Plan;
 beforeAll(()=>{plan=createSamplePlan(prices);});
 const response=(body:Record<string,unknown>,status=200)=>new Response(JSON.stringify(body),{status});
@@ -29,7 +30,7 @@ it('checks exact manifest before credential or network; refuses budget/catalog/c
  expect(f.credential).not.toHaveBeenCalled();expect(f.transport).not.toHaveBeenCalled();
  const manifest=structuredClone(plan.manifest);manifest.samples[0].upperUsd='0.55';
  expect(()=>verifiedPlan(prices,manifest,plan.manifest.manifestHash)).toThrow('APPROVED_MANIFEST_MISMATCH');
-});
+},30000);
 it('real adapter sends every frozen hash once, under its own cap, with canonical receipts',async()=>{
  const f=fixture();const result=await executePlan(f.options);
  expect(f.transport).toHaveBeenCalledTimes(228);expect(result.receipts).toHaveLength(228);
@@ -46,18 +47,20 @@ it('real adapter sends every frozen hash once, under its own cap, with canonical
  expect(JSON.stringify(result)).not.toContain('LOCAL_SYNTHETIC_KEY');
  await expect(executePlan(f.options)).rejects.toThrow('BATCH_ALREADY_ATTEMPTED');
  expect(f.transport).toHaveBeenCalledTimes(228);
-});
+},30000);
 it('ambiguous send never retries, never marks zero cost, never dispatches the next sample',async()=>{
  const f=fixture();f.transport.mockRejectedValue(new Error('private transport detail'));
- await executePlan(f.options);
+ const result=await executePlan(f.options);
  expect(f.transport).toHaveBeenCalledTimes(1);
+ expect(result.report[0]).toMatchObject({status:'UNKNOWN',actualUsd:null});
+ expect(result.report[1]).toMatchObject({status:'NOT_RUN',actualUsd:'0'});
  expect(f.events.at(-1)).toMatchObject({type:'halt',reason:'AMBIGUOUS_SEND_NO_RETRY',actualUsd:null});
  expect(JSON.stringify(f.events)).not.toContain('private transport detail');
-});
+},30000);
 it('fsync/claim failure prevents dispatch',async()=>{
  const f=fixture();f.options.journal.append=async e=>{if(e.type==='attempt')throw new Error('disk full');};
  await expect(executePlan(f.options)).rejects.toThrow('disk full');expect(f.transport).not.toHaveBeenCalled();
-});
+},30000);
 it('missing usage looks up only the original ID three times and never resends or refills',async()=>{
  const f=fixture();f.transport.mockImplementation(async(_url,init)=>init?.method==='POST'
   ?response({id:'synthetic-original',model:prices.routes[0].model,choices:[{finish_reason:'stop'}]})
@@ -68,14 +71,14 @@ it('missing usage looks up only the original ID three times and never resends or
  for(const [url,init] of f.transport.mock.calls)if(init?.method==='GET')
   expect(url).toBe('https://openrouter.ai/api/v1/generation?id=synthetic-original');
  expect(f.events.at(-1)).toMatchObject({reason:'UNKNOWN_OR_FAILED',actualUsd:null});
-});
+},30000);
 it('an incomplete response with a header ID may lookup, but never repeats POST',async()=>{
  const f=fixture();f.transport.mockImplementation(async(_url,init)=>init?.method==='POST'
   ?new Response('broken json',{headers:{'x-generation-id':'synthetic-header'}}):response({error:{}},404));
  await executePlan(f.options);
  expect(f.transport).toHaveBeenCalledTimes(4);
  expect(f.events.filter(e=>e.type==='lookup-attempt').every(e=>e.providerId==='synthetic-header')).toBe(true);
-});
+},30000);
 it('over-bound cost remains failed at the original bound and halts the batch',async()=>{
  const f=fixture();f.transport.mockImplementation(async()=>response({id:'synthetic-over',model:prices.routes[0].model,
   provider:'Anthropic',choices:[{finish_reason:'stop'}],usage:{cost:1,prompt_tokens:100,completion_tokens:10}}));
@@ -83,13 +86,13 @@ it('over-bound cost remains failed at the original bound and halts the batch',as
  expect(f.transport).toHaveBeenCalledTimes(1);expect(result.report[0].status).toBe('BOUND_FAILED');
  expect(f.events.at(-1)).toMatchObject({reason:'BOUND_FAILED_NO_REFILL',actualUsd:'1'});
  expect(result.report[0].upperUsd).toBe(plan.manifest.samples[0].upperUsd);
-});
+},30000);
 it('provider/identity mismatch cannot be used as a matching-route receipt',async()=>{
  const f=fixture();f.transport.mockImplementation(async()=>response({id:'synthetic-wrong',model:'wrong/model',
   provider:'Anthropic',choices:[{finish_reason:'stop'}],usage:{cost:0.001,prompt_tokens:100,completion_tokens:10}}));
  await executePlan(f.options);expect(f.transport).toHaveBeenCalledTimes(1);
  expect(f.events.at(-1)).toMatchObject({reason:'RECEIPT_CONFLICT',actualUsd:null});
-});
+},30000);
 it('live read-only preflight requires exact snapshot including prices, route and supported parameters',async()=>{
  const route=catalog.routes[2];
  const transport=vi.fn(async()=>response({data:{id:route.model,endpoints:[route.endpoint]}}));
@@ -99,4 +102,21 @@ it('live read-only preflight requires exact snapshot including prices, route and
  transport.mockResolvedValue(response({data:{id:route.model,endpoints:[changed]}}));
  await expect(verifyCatalog(prices,catalog,route.model,transport)).rejects.toThrow('CATALOG_DRIFT');
  await expect(verifyCatalog(prices,{},route.model,transport)).rejects.toThrow('CATALOG_HASH');
-});
+},30000);
+
+it('catalog drift stops before credentials and the first paid request',async()=>{
+ const f=fixture();f.preflight.mockRejectedValue(new Error('CATALOG_DRIFT_REPLAN_REQUIRED'));
+ await expect(executePlan(f.options)).rejects.toThrow('CATALOG_DRIFT');
+ expect(f.credential).not.toHaveBeenCalled();expect(f.transport).not.toHaveBeenCalled();
+ expect(f.events.filter(e=>e.type==='attempt')).toHaveLength(0);
+},30000);
+it('conflicting response and lookup costs never choose the cheaper receipt',async()=>{
+ const f=fixture();f.transport.mockImplementation(async(_url,init)=>init?.method==='POST'
+  ?response({id:'synthetic-conflict',model:prices.routes[0].model,choices:[{finish_reason:'stop'}],
+   usage:{cost:0.001,prompt_tokens:100,completion_tokens:10}})
+  :response({data:{id:'synthetic-conflict',model:prices.routes[0].model,provider_name:'Anthropic',
+   finish_reason:'stop',total_cost:0.002,native_tokens_prompt:100,native_tokens_completion:10}}));
+ const result=await executePlan(f.options);
+ expect(f.transport).toHaveBeenCalledTimes(2);expect(result.actualUsd).toBeNull();
+ expect(f.events.at(-1)).toMatchObject({reason:'RECEIPT_CONFLICT',actualUsd:null});
+},30000);
