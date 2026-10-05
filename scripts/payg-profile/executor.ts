@@ -88,7 +88,7 @@ export async function verifyCatalog(prices:unknown,catalog:unknown,model:string,
  if(matches[0].status!==0)throw new Error('CATALOG_ROUTE_UNAVAILABLE');
 }
 
-function identityFor(sample:Sample,prices:unknown):CallIdentity & OpenRouterIdentity {
+export function identityFor(sample:Sample,prices:unknown):CallIdentity & OpenRouterIdentity {
  const route=priceSchema.parse(prices).routes.find(r=>r.model===sample.model)!;
  const limits:OpenRouterLimits={providerSlug:route.endpointTag,contextTokens:route.contextTokens,
   promptUsdPerMillion:route.prompt,completionUsdPerMillion:route.completion,requestUsd:route.request,
@@ -136,7 +136,6 @@ export async function executePlan(options:{prices:unknown;manifest:unknown;appro
  if(journal.events.length)throw new Error('BATCH_ALREADY_ATTEMPTED_NO_AUTOMATIC_RESUME');
  const append=async(event:Event)=>{await journal.append(event);journal.events.push(event);};
  await append({type:'batch',manifestHash:plan.manifest.manifestHash,totalCapUsd:plan.manifest.totalUsd,egressCountry:options.egressCountry,version:1});
- const adapter=openRouterAdapter({credential:options.credential,transport:options.transport,allowWorkspaceRead:true});
  const receipts:unknown[]=[];
  const generationIds=new Set<string>();
  let committed=0n;
@@ -149,6 +148,8 @@ export async function executePlan(options:{prices:unknown;manifest:unknown;appro
   try{await options.preflight(String(sample.model));}
   catch(error){await append({type:'halt',reason:failureCode(error)});break;}
   const identity=identityFor(sample,options.prices);
+  const adapter=openRouterAdapter({credential:options.credential,transport:options.transport,allowWorkspaceRead:true,
+   allowAgentTools:sample.requestFormat==='agent-turn-v5-stream'});
   // prepareDispatch is structural/credential-only. It never sends; send is a one-use capability.
   const send=await adapter.prepareDispatch({input:body},identity);
   committed+=cap;

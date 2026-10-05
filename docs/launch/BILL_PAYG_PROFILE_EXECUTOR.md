@@ -1,6 +1,6 @@
 # BILL-PAYG profile 执行器交接（仅准备）
 
-**r7 准备完成，等待复核。r6 未执行并作废；r5作废，r5b已停批，旧清单均不得重跑。** 旧批次已锁定；本轮不发送模型请求、不访问远端数据库、不改配置。
+**r8 准备完成，等待复核（含单条预算阻塞）。r7已完成；r6未执行并作废，旧批次均不得重跑。** 旧批次已锁定；本轮不发送模型请求、不访问远端数据库、不改配置。
 本页不是执行批准；必须先收到主窗口对本 PR 最终版本和 manifest 的审阅通过及执行通知。
 
 ## 入口
@@ -10,19 +10,9 @@
 凭据选择必须由执行窗口核实属于 Owner 批准的测试余额；环境变量名本身不证明归属。
 没有足够余额时报错停止，不改用另一凭据。
 
-批准后，从本 PR 工作区执行（下列命令在第一步没有运行）：
+r7已完成，旧命令已移除，禁止重复运行。r8仅离线准备且保留单条预算阻塞；执行入口尚未切换。
+详见 [r8清单、费用与阻塞](BILL_PAYG_PROFILE_R8.md)。审批和新hash复核完成前没有可运行的r8命令。
 
-```bash
-set +x
-set -a
-. ~/.graylum/secrets/payg-profile.env
-set +a
-NODE_USE_ENV_PROXY=1 NO_PROXY= no_proxy= https_proxy= node scripts/payg-profile-execute.mjs execute-approved \
-  scripts/payg-profile/plan-prices.json \
-  docs/launch/evidence/payg-profile-20261006-r7.manifest.json \
-  72e0b6a4a347d816b06de0752f823a4a3cf9318ef1b5e3732c0bc49fd9b012b2 \
-  owner-approved-test-balance-only
-```
 
 必须始终用同一个系统用户运行，**不用 sudo**，不切换 HOME 或复制工作区来绕过已有锁。
 
