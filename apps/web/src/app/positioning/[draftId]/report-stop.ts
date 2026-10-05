@@ -4,7 +4,8 @@ import { sendStop, stopFollowUpDelay, stopRequestFor, type StopRequest } from ".
 
 /**
  * 停止 for a report (CHAT-NATIVE-OUTPUT C2 rules), without React so the rules are testable. The
- * first press fixes one stop request (stopAt/source of what was shown); a retry after an
+ * first press on an execution fixes one stop request (stopAt/source of what was shown); a press on
+ * another execution (after 重新生成) starts over with that execution's own request. A retry after an
  * unconfirmed answer resends exactly that request, never an ordinary cancel and never a new
  * generation. After every send the saved status is re-read on the bounded
  * STOP_FOLLOW_UP_DELAYS_MS schedule until it is completed or cancelled.
@@ -41,17 +42,26 @@ export function reportStopController(deps: {
   };
   const send = async () => {
     if (!request || phase === "sending" || phase === "settled") return;
+    const sent = request;
     set("sending");
-    const outcome = await sendStop(request, deps.cancel);
+    const outcome = await sendStop(sent, deps.cancel);
+    // A late answer for an earlier execution's stop never changes the current one.
+    if (request !== sent) return;
     set(outcome === "unconfirmed" ? "unconfirmed" : outcome === "saving" ? "saving" : "settled");
     follow(++chain, 0);
   };
   return {
     phase: () => phase,
     request: () => request,
-    /** 停止 on the shown reply: fixes the request once, then sends it. */
+    /** The execution the fixed request belongs to. */
+    executionId: () => request?.executionId ?? null,
+    /** 停止 on the shown reply: fixes the request once per execution, then sends it. */
     stop(reply: LiveReply) {
-      if (!request) request = stopRequestFor(reply);
+      if (request?.executionId !== reply.executionId) {
+        request = stopRequestFor(reply);
+        chain++;
+        set("idle");
+      }
       return send();
     },
     /** 停止 again after an unconfirmed answer: the same request. */

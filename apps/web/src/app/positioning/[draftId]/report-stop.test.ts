@@ -74,3 +74,50 @@ it("a retry restarts the follow-up and retires the older chain", async () => {
   await s.tick();
   expect(s.reread).toHaveBeenCalledOnce();
 });
+
+it("after 重新生成, 停止 sends a stop for the new execution, not the first one", async () => {
+  const s = setup(async () => ({ state: "completed" }));
+  // The first execution is stopped before any text arrived.
+  const first: LiveReply = { ...startLiveReply(id), text: "", points: 0 };
+  await s.stop.stop(first);
+  expect(s.stop.phase()).toBe("settled");
+  const second = "99999999-2222-4333-8444-555555555555";
+  await s.stop.stop({ ...reply, executionId: second });
+  expect(s.cancel).toHaveBeenCalledTimes(2);
+  expect(s.cancel.mock.calls[0]![0]).toEqual({ executionId: id, stopAt: 0 });
+  expect(s.cancel.mock.calls[1]![0]).toEqual({ executionId: second, stopAt: 7, source: "final" });
+  expect(s.stop.executionId()).toBe(second);
+  expect(s.stop.phase()).toBe("settled");
+});
+
+it("an unconfirmed stop of the first execution does not carry over to the second", async () => {
+  let fail = true;
+  const s = setup(async () => { if (fail) throw new Error("network"); return { state: "completed" }; });
+  await s.stop.stop(reply);
+  expect(s.stop.phase()).toBe("unconfirmed");
+  fail = false;
+  const second = "99999999-2222-4333-8444-555555555555";
+  await s.stop.stop({ ...reply, executionId: second, text: "新", points: 1 });
+  expect(s.cancel.mock.calls[1]![0]).toEqual({ executionId: second, stopAt: 1, source: "final" });
+  // The first execution's follow-up no longer reads.
+  const reads = s.reread.mock.calls.length;
+  await s.tick();
+  expect(s.reread.mock.calls.length).toBe(reads);
+});
+
+it("a late answer for the first execution's stop does not change the second execution's stop", async () => {
+  let release: (value: unknown) => void = () => undefined;
+  const calls: Array<() => Promise<unknown>> = [
+    () => new Promise(resolve => { release = resolve; }),
+    async () => { throw new Error("network"); },
+  ];
+  const s = setup(async () => calls.shift()!());
+  const firstStop = s.stop.stop(reply);
+  const second = "99999999-2222-4333-8444-555555555555";
+  await s.stop.stop({ ...reply, executionId: second });
+  expect(s.stop.phase()).toBe("unconfirmed");
+  release({ state: "completed" });
+  await firstStop;
+  expect(s.stop.phase()).toBe("unconfirmed");
+  expect(s.stop.executionId()).toBe(second);
+});

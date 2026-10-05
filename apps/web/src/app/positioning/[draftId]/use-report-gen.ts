@@ -159,7 +159,7 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     restart: () => void run("restart"),
     stop: () => void stop(),
     /** The stop request was not confirmed: 停止 resends the same request. */
-    stopUnconfirmed: stopPhase === "unconfirmed",
+    stopUnconfirmed: stopPhase === "unconfirmed" && stopper.executionId() === executionId,
     retryStop: () => void stopper.retry(),
   };
 }
