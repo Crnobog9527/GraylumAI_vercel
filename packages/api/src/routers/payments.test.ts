@@ -3276,6 +3276,19 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
     expect(harness.orderInserts).toHaveLength(1);
   });
 
+  it.each([
+    ['PAY_COMMON_ATTEMPT_NOT_TERMINAL', 'CONFLICT', '原订单的付款结果尚未确认，请稍后重试或在账单中查看。'],
+    ['PAY_COMMON_ATTEMPT_CLOSE_FAILED', 'CONFLICT', '原订单的付款结果尚未确认，请稍后重试或在账单中查看。'],
+    ['PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH', 'CONFLICT', '原订单的付款信息不一致，请通过工单联系我们核对。'],
+    ['PAY_COMMON_RECEIPT_MISMATCH', 'CONFLICT', '原订单的付款信息不一致，请通过工单联系我们核对。'],
+    ['PAY_COMMON_ATTEMPT_EVIDENCE_UNAVAILABLE', 'SERVICE_UNAVAILABLE', '暂时无法核对原订单的付款结果，请稍后重试。'],
+  ])('maps purchase recovery error %s to a safe actionable response', async (reason, code, message) => {
+    const harness = createGuardHarness({ kind: 'credit_package' });
+    harness.sessionCreate.mockRejectedValue(new Error(reason));
+    await expect(harness.caller.createCheckoutSession({ kind: 'credit_package', packageId }))
+      .rejects.toMatchObject({ code, message });
+  });
+
   it.each([false, true])('keeps membership card-only with alipay_subscription_enabled=%s', async (enabled) => {
     const harness = createGuardHarness({ kind: 'membership_plan', alipaySubscriptionEnabled: enabled });
     harness.sessionCreate.mockResolvedValue({ id: 'cs_flag', url: 'https://checkout.stripe.com/test', payment_status: 'unpaid' });
