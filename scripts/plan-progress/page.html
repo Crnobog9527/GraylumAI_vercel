@@ -109,7 +109,7 @@
   .mlabel { font-size: 0.75rem; text-align: center; line-height: 1.3; padding: 0 4px; }
   .mini.current .mlabel { font-weight: 700; color: var(--doing); }
   .mini.later { opacity: 0.45; }
-  .mini.divider { width: 56px; display: grid; place-items: start center; color: var(--muted); font-size: 0.72rem; padding-top: 1px; }
+  .mini.divider { width: 96px; display: grid; place-items: start center; color: var(--muted); font-size: 0.72rem; padding-top: 1px; }
   .mini.divider::before { background: repeating-linear-gradient(90deg, var(--line) 0 6px, transparent 6px 10px); }
   .line { list-style: none; margin: 0; padding: 0 0 0 4px; display: grid; }
   .station { position: relative; padding: 0 0 6px 30px; }
@@ -154,9 +154,11 @@
   .tasks-empty { margin: 0; color: var(--muted); font-size: 0.85rem; }
   .prs-small { font-size: 0.72rem; color: var(--muted); overflow-wrap: anywhere; }
   .prs-small a { color: var(--muted); }
-  .divider-row { list-style: none; padding: 6px 0 10px 30px; color: var(--muted); font-size: 0.8rem; position: relative; }
-  .divider-row::before { content: ""; position: absolute; left: 7px; top: 0; bottom: 0; width: 4px;
+  details.later-block { margin-left: 4px; padding-left: 30px; position: relative; }
+  details.later-block::before { content: ""; position: absolute; left: 7px; top: -6px; height: 22px; width: 4px;
     background: repeating-linear-gradient(180deg, var(--line) 0 6px, transparent 6px 10px); }
+  details.later-block > summary { cursor: pointer; color: var(--muted); font-size: 0.88rem; padding: 2px 0 8px; }
+  details.later-block > .line { margin-left: -34px; }
   details.raw { border-top: 1px solid var(--line); padding-top: 12px; }
   details.raw > summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
   .raw-body { display: grid; gap: 28px; margin-top: 16px; }

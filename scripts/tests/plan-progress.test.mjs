@@ -166,7 +166,7 @@ test('页面在生成时渲染完整内容，不执行脚本也能看到；PR �
   assert.match(withoutScripts, /现在走到第 2 站：<strong>界面<\/strong>/);
   assert.match(withoutScripts, /<b>等你<\/b>开通 Waffo 商户。/);
   assert.match(withoutScripts, /终点站 · 正式上线/);
-  assert.match(withoutScripts, /正式上线以后再做/);
+  assert.match(withoutScripts, /<details class="later-block"><summary>正式上线以后再做（1 站）<\/summary>/);
   assert.match(withoutScripts, /<span class="big">17%<\/span>/);
   assert.equal((withoutScripts.match(/<article class="card /g) ?? []).length, 7);
   assert.ok(!html.includes('</script><b>'));

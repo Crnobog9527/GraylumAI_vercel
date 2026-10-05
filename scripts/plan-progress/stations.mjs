@@ -39,6 +39,7 @@ export function buildStations(stationData, report) {
       index,
       name: station.name,
       plain: station.plain,
+      note: station.note ?? '',
       terminal: Boolean(station.terminal),
       afterLaunch: Boolean(station.afterLaunch),
       status,

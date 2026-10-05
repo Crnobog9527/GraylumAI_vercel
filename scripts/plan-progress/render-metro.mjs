@@ -4,6 +4,7 @@ import { escapeHtml } from './render-html.mjs';
 const safeUrl = (url) => (/^https:\/\//.test(url ?? '') ? url : '#');
 
 function badge(station, isCurrent) {
+  if (station.note) return '<span class="badge b-later">上线后再做</span>';
   if (station.afterLaunch && station.status !== 'done') return '<span class="badge b-later">上线后再做</span>';
   if (station.status === 'done') return '<span class="badge b-done">已到站</span>';
   if (isCurrent) return '<span class="badge b-now">正在做 · 现在在这一站</span>';
@@ -13,6 +14,7 @@ function badge(station, isCurrent) {
 
 function notes(station) {
   const lines = [];
+  if (station.note) lines.push(`<span class="note">${escapeHtml(station.note)}</span>`);
   for (const wait of station.waits) lines.push(`<span class="note n-ask"><b>等你</b>${escapeHtml(wait.replace(/^等你[：:]\s*/, ''))}</span>`);
   // 只写最晚完成的那一个前置站：它到站了，这一站才能开始。
   if (station.after.length) lines.push(`<span class="note">排在「${escapeHtml(station.after[station.after.length - 1])}」之后</span>`);
@@ -43,7 +45,7 @@ function stationItem(station, number, currentId) {
     ? `<ul class="tasks">${station.tasks
       .map((task) => `<li><span class="tword w-${escapeHtml(task.word)}">${escapeHtml(task.word)}</span>${escapeHtml(task.plain)}</li>`)
       .join('')}</ul>`
-    : '<p class="tasks-empty">还没有拆成具体任务。</p>';
+    : '';
   // 上线后的站只显示站名，用途放进点开以后，让整页更短。
   const plain = station.afterLaunch ? '' : `<span class="splain">${escapeHtml(station.plain)}</span>`;
   const laterPlain = station.afterLaunch ? `<p class="splain">${escapeHtml(station.plain)}</p>` : '';
@@ -62,16 +64,14 @@ function stationItem(station, number, currentId) {
 
 function strip(roadmap) {
   const items = [];
-  let dividerShown = false;
+  const laterCount = roadmap.stations.filter((station) => station.afterLaunch).length;
   roadmap.stations.forEach((station, index) => {
-    if (station.afterLaunch && !dividerShown) {
-      items.push('<li class="mini divider" aria-hidden="true"><span>上线后</span></li>');
-      dividerShown = true;
-    }
+    if (station.afterLaunch) return;
     const cls = classes('mini', station, station.id === roadmap.currentId);
     const label = `<span class="mlabel">${index + 1}. ${escapeHtml(station.name)}</span>`;
     items.push(`<li class="${cls}"><a href="#station-${escapeHtml(station.id)}"><span class="mdot"></span>${label}</a></li>`);
   });
+  if (laterCount) items.push(`<li class="mini divider later" aria-hidden="true"><span>上线后还有 ${laterCount} 站</span></li>`);
   return `<ol class="strip" aria-label="整条路线一览">${items.join('')}</ol>`;
 }
 
@@ -92,15 +92,15 @@ export function renderMetro(roadmap, generatedAt) {
       .map((ask) => `<li>${escapeHtml(ask.replace(/^等你[：:]\s*/, ''))}</li>`)
       .join('')}</ul></div>`
     : '';
-  const items = [];
-  let dividerShown = false;
+  const main = [];
+  const later = [];
   roadmap.stations.forEach((station, index) => {
-    if (station.afterLaunch && !dividerShown) {
-      items.push('<li class="divider-row"><span>正式上线以后再做</span></li>');
-      dividerShown = true;
-    }
-    items.push(stationItem(station, index + 1, roadmap.currentId));
+    (station.afterLaunch ? later : main).push(stationItem(station, index + 1, roadmap.currentId));
   });
+  // 上线后的站默认收起，主线保持在一屏多一点。
+  const laterBlock = later.length
+    ? `<details class="later-block"><summary>正式上线以后再做（${later.length} 站）</summary><ol class="line">${later.join('\n')}</ol></details>`
+    : '';
   return `<section class="roadmap">
   <div class="hero">
     <h1>Graylum 上线路线图</h1>
@@ -110,6 +110,7 @@ export function renderMetro(roadmap, generatedAt) {
     ${askBlock}
   </div>
   ${strip(roadmap)}
-  <ol class="line">${items.join('\n')}</ol>
+  <ol class="line">${main.join('\n')}</ol>
+  ${laterBlock}
 </section>`;
 }
