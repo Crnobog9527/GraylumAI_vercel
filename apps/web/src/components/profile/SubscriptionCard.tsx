@@ -23,6 +23,7 @@ import {
   type MembershipPlanEligibilityEntry,
 } from './subscriptionPlanButtonState';
 import { invalidatePostCheckoutMembershipQueries } from './checkoutSyncInvalidations';
+import { CreditPackagePriceTag, formatUsd, getCreditPackagePrice } from './creditPackagePrice';
 
 interface MockUser {
   subscription_tier?: 'free' | 'basic' | 'pro' | 'enterprise';
@@ -176,11 +177,10 @@ export function ProfileCatalogState({
 
 // 积分加油包区块
 export const CreditPackagesSection = memo(function CreditPackagesSection({
-  onBuyClick,
-  pendingPackageId,
+  onBuyClick, pendingPackageId, membershipLevel,
 }: {
   onBuyClick?: (pkg: { id: string; name?: string; credits: number; bonus_credits: number; price: number; checkout_ready?: boolean }) => void;
-  pendingPackageId?: string | null;
+  pendingPackageId?: string | null; membershipLevel?: string | null;
 }) {
   // 从 API 获取积分加油包数据
   const {
@@ -260,9 +260,7 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
                 +{pkg.bonus_credits} 赠送
               </div>
             )}
-            <div className="text-lg font-medium mb-3" style={{ color: 'var(--text-secondary)' }}>
-              ${Number.isFinite(pkg.price) ? pkg.price.toFixed(1) : '—'}
-            </div>
+            <CreditPackagePriceTag listUsd={pkg.price} membershipLevel={membershipLevel} />
             <div
               data-testid="profile-credit-package-name"
               className="text-sm font-medium mb-3"
@@ -901,19 +899,20 @@ export const CreditStatsCard = memo(function CreditStatsCard({ user }: { user: M
   const [pendingCheckoutPackageId, setPendingCheckoutPackageId] = useState<string | null>(null);
   const credits = typeof user?.credits === 'number' ? user.credits : null;
   const hasVerifiedBalance = credits !== null;
-  const createCheckoutSession = trpc.payments.createCheckoutSession.useMutation();
+  const createCheckoutSession = trpc.payments.createCheckoutSession.useMutation(), plans = trpc.settings.getMembershipPlans.useQuery();
   // 从 API 获取积分统计数据
   const monthlySummary = trpc.credits.getCreditsSummary.useQuery({ period: 'month' }, CREDITS_SUMMARY_QUERY_OPTIONS);
   const allTimeSummary = trpc.credits.getCreditsSummary.useQuery({ period: 'all' }, CREDITS_SUMMARY_QUERY_OPTIONS);
 
   const handlePackageBuy = async (pkg: { id: string; name?: string; credits: number; bonus_credits: number; price: number; checkout_ready?: boolean }) => {
     const totalCredits = pkg.credits + (pkg.bonus_credits ?? 0);
+    const shownPrice = formatUsd(getCreditPackagePrice(pkg.price, user?.subscription_tier, plans.data).payableUsd);
 
     if (!pkg.checkout_ready || !Number.isFinite(pkg.price) || pkg.price <= 0) {
       setPurchaseIntent({
         kind: 'package',
         title: pkg.name || `${pkg.credits.toLocaleString()} 积分包`,
-        summary: `当前展示价格为 $${Number.isFinite(pkg.price) ? pkg.price.toFixed(1) : '—'}，共 ${totalCredits.toLocaleString()} 积分（含赠送），但该积分包的 Stripe 支付配置尚未完整启用。`,
+        summary: `当前展示价格为 ${shownPrice}，共 ${totalCredits.toLocaleString()} 积分（含赠送），但该积分包的 Stripe 支付配置尚未完整启用。`,
       });
       return;
     }
@@ -1001,7 +1000,8 @@ export const CreditStatsCard = memo(function CreditStatsCard({ user }: { user: M
 
       {/* 积分加油包 */}
       {hasVerifiedBalance && (
-        <CreditPackagesSection onBuyClick={handlePackageBuy} pendingPackageId={pendingCheckoutPackageId} />
+        <CreditPackagesSection onBuyClick={handlePackageBuy} pendingPackageId={pendingCheckoutPackageId}
+          membershipLevel={user?.subscription_tier} />
       )}
 
       {pendingCheckoutPackageId && (

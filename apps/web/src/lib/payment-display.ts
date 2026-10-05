@@ -52,23 +52,38 @@ export function formatAmountFact(amount: string | null | undefined, currency: st
 export type AmountFactRow = { kind: string; label: string; value: string };
 
 /**
- * Rows for display. `required` kinds always appear and show unknown when the fact is missing.
+ * Rows for display, one per kind. `required` kinds always appear and show unknown when the fact is missing.
  * `allowed` limits which kinds appear at all (undefined = every kind).
+ *
+ * One order's facts all describe that order's payment, and the same payment can be recorded once per
+ * provider source (a subscription's checkout session and its first invoice both record paid/fee/net).
+ * Equal values therefore show once, and a known value replaces an unknown one. Different known values
+ * of one kind are all kept, numbered, so a real discrepancy is never hidden.
  */
 export function buildAmountFactRows(
   facts: readonly AmountFact[] | null | undefined,
   options: { allowed?: readonly string[]; required?: readonly string[] } = {},
 ): AmountFactRow[] {
   const list = Array.isArray(facts) ? facts : [];
-  const rows: AmountFactRow[] = [];
-  const seen = new Set<string>();
+  const values = new Map<string, string[]>();
   for (const fact of list) {
     if (options.allowed && !options.allowed.includes(fact.kind)) continue;
-    seen.add(fact.kind);
-    rows.push({ kind: fact.kind, label: getAmountFactLabel(fact.kind), value: formatAmountFact(fact.amount, fact.currency) });
+    const value = formatAmountFact(fact.amount, fact.currency);
+    const known = values.get(fact.kind) ?? [];
+    if (!known.includes(value)) known.push(value);
+    values.set(fact.kind, known);
+  }
+  const rows: AmountFactRow[] = [];
+  for (const [kind, all] of values) {
+    const shown = all.length > 1 ? all.filter(value => value !== UNKNOWN_AMOUNT) : all;
+    shown.forEach((value, index) => rows.push({
+      kind,
+      label: shown.length > 1 ? `${getAmountFactLabel(kind)}（第 ${index + 1} 条记录）` : getAmountFactLabel(kind),
+      value,
+    }));
   }
   for (const kind of options.required ?? []) {
-    if (!seen.has(kind)) rows.push({ kind, label: getAmountFactLabel(kind), value: UNKNOWN_AMOUNT });
+    if (!values.has(kind)) rows.push({ kind, label: getAmountFactLabel(kind), value: UNKNOWN_AMOUNT });
   }
   return rows;
 }
