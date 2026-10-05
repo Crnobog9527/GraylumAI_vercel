@@ -4,7 +4,7 @@ import {mkdtemp,mkdir,readFile,readdir,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import manifest from '../../../../../docs/launch/evidence/payg-profile-20261006-r6.manifest.json';
+import manifest from '../../../../../docs/launch/evidence/payg-profile-20261006-r7.manifest.json';
 const state=vi.hoisted(()=>({home:''}));
 vi.mock('node:os',async(importOriginal)=>({...await importOriginal<typeof import('node:os')>(),homedir:()=>state.home}));
 vi.mock('../../../../../scripts/payg-profile/executor',async(importOriginal)=>({
@@ -17,7 +17,7 @@ import {main} from '../../../../../scripts/payg-profile/execute-cli';
 import {executePlan,verifyCatalog} from '../../../../../scripts/payg-profile/executor';
 const root=fileURLToPath(new URL('../../../../../',import.meta.url));
 const args=['execute-approved',resolve(root,'scripts/payg-profile/plan-prices.json'),
- resolve(root,'docs/launch/evidence/payg-profile-20261006-r6.manifest.json'),manifest.manifestHash,'owner-approved-test-balance-only'];
+ resolve(root,'docs/launch/evidence/payg-profile-20261006-r7.manifest.json'),manifest.manifestHash,'owner-approved-test-balance-only'];
 let cwd:string,exitCode:typeof process.exitCode;
 beforeEach(async()=>{
  state.home=await mkdtemp(join(tmpdir(),'payg-cli-test-'));cwd=process.cwd();process.chdir(root);exitCode=process.exitCode;
@@ -71,8 +71,8 @@ it.each(['PROXY_REQUIRED','PROXY_COUNTRY_NOT_ALLOWED','PROXY_COUNTRY_CHECK_FAILE
  expect(verifyCatalog).not.toHaveBeenCalled();expect(executePlan).not.toHaveBeenCalled();
 },30000);
 
-it('an attempted retired r5 stops before proxy, credential use or any new claim',async()=>{
- const dir=join(state.home,'.local/state/graylum/payg-profile',manifest.supersedes[0]);
+it.each(manifest.supersedes)('an attempted retired batch %s stops before proxy or any new claim',async(retired)=>{
+ const dir=join(state.home,'.local/state/graylum/payg-profile',retired);
  await mkdir(dir,{recursive:true});await writeFile(join(dir,'attempted.lock'),'preserved');
  await expect(main(args)).rejects.toThrow('SUPERSEDED_BATCH_ATTEMPTED');
  expect(verifyProxyCountry).not.toHaveBeenCalled();expect(executePlan).not.toHaveBeenCalled();

@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 import type {Session} from '@openai/agents';
 import {createR5bPlan,lunaScopes} from '../../../../../scripts/payg-profile/batch-r5b';
 import {checkPriorAccounting} from '../../../../../scripts/payg-profile/prior-accounting';
-import prices from '../../../../../scripts/payg-profile/plan-prices.json';
+import prices from '../../../../../scripts/payg-profile/plan-prices-vertex-2026-10-05.json';
 import saved from '../../../../../docs/launch/evidence/payg-profile-20261006-r5b.manifest.json';
 import r5 from '../../../../../docs/launch/evidence/payg-profile-20261006-r5.manifest.json';
 import {decimal} from '../bill2/decimal';

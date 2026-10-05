@@ -2,14 +2,14 @@
 import {beforeAll,expect,it,vi} from 'vitest';
 import {createHash} from 'node:crypto';
 import prices from '../../../../../scripts/payg-profile/plan-prices.json';
-import catalog from '../../../../../scripts/payg-profile/catalog-2026-10-05.json';
-import {createR6Plan} from '../../../../../scripts/payg-profile/batch-r6';
+import catalog from '../../../../../scripts/payg-profile/catalog-2026-10-06-r7.json';
+import {createR7Plan} from '../../../../../scripts/payg-profile/batch-r7';
 import r5 from '../../../../../docs/launch/evidence/payg-profile-20261006-r5.manifest.json';
 import {executePlan,verifiedPlan,verifyCatalog,failureCode,type Event,type Plan} from '../../../../../scripts/payg-profile/executor';
-// Full 95-request regeneration is CPU-bound; shared CI runners exceed Vitest's 5s default.
+// Full 96-request regeneration is CPU-bound; shared CI runners exceed Vitest's 5s default.
 let plan:Plan;
 const firstRoute=prices.routes.find(r=>r.model.startsWith('google/'))!;
-beforeAll(()=>{plan=createR6Plan(prices);});
+beforeAll(()=>{plan=createR7Plan(prices);},30000);
 const response=(body:Record<string,unknown>,status=200)=>new Response(JSON.stringify(body),{status});
 function fixture(){
  const active=plan;
@@ -17,7 +17,7 @@ function fixture(){
  const transport=vi.fn(async(_url:Parameters<typeof fetch>[0],init?:RequestInit)=>{
   const request=JSON.parse(String(init?.body));
   const route=prices.routes.find(r=>r.model===request.model)!;
-  return response({id:'synthetic-'+createHash('sha256').update(String(init?.body)).digest('hex'),model:request.model,provider:({'anthropic':'Anthropic','google-vertex/global':'Google','openai':'OpenAI'} as Record<string,string>)[route.endpointTag],
+  return response({id:'synthetic-'+createHash('sha256').update(String(init?.body)).digest('hex'),model:request.model,provider:({'anthropic':'Anthropic','google-ai-studio':'Google AI Studio','openai':'OpenAI'} as Record<string,string>)[route.endpointTag],
    choices:[{finish_reason:'length'}],usage:{cost:0.001,prompt_tokens:100,completion_tokens:request.max_tokens,
     prompt_tokens_details:{cached_tokens:20,cache_write_tokens:10},completion_tokens_details:{reasoning_tokens:50}}});
  });
@@ -36,10 +36,10 @@ it('checks exact manifest before credential or network; refuses budget/catalog/c
 },30000);
 it('real adapter sends every frozen hash once, under its own cap, with canonical receipts',async()=>{
  const f=fixture();const result=await executePlan(f.options);
- expect(f.transport).toHaveBeenCalledTimes(95);expect(result.receipts).toHaveLength(95);
+ expect(f.transport).toHaveBeenCalledTimes(96);expect(result.receipts).toHaveLength(96);
  expect(result.report.every(s=>s.status==='SAMPLE_WITHIN_BOUNDS')).toBe(true);
- expect(f.observations).toHaveLength(95);
- for(let i=0;i<95;i++){
+ expect(f.observations).toHaveLength(96);
+ for(let i=0;i<96;i++){
   const [url,init]=f.transport.mock.calls[i];const sample=plan.manifest.samples[i];
   expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
   expect(createHash('sha256').update(String(init?.body)).digest('hex')).toBe(sample.requestHash);
@@ -49,7 +49,7 @@ it('real adapter sends every frozen hash once, under its own cap, with canonical
  expect(result.report[0]).toMatchObject({P:100,cachedTokens:20,cacheWriteTokens:10});
  expect(JSON.stringify(result)).not.toContain('LOCAL_SYNTHETIC_KEY');
  await expect(executePlan(f.options)).rejects.toThrow('BATCH_ALREADY_ATTEMPTED');
- expect(f.transport).toHaveBeenCalledTimes(95);
+ expect(f.transport).toHaveBeenCalledTimes(96);
 },30000);
 it('ambiguous send never retries, never marks zero cost, never dispatches the next sample',async()=>{
  const f=fixture();f.transport.mockRejectedValue(new Error('private transport detail'));
@@ -142,8 +142,8 @@ it('catalog transport and malformed JSON never expose upstream messages',async()
   .rejects.toThrow('CATALOG_INVALID_RESPONSE');
  expect(failureCode(new Error('CATALOG_UNAVAILABLE extra private detail'))).toBe('PAYG_EXECUTOR_STOPPED');
 });
-it.each(['Google Vertex','Google AI Studio','google-vertex/global','unverified-provider'])(
- 'does not admit an unverified Vertex receipt name: %s',async(provider)=>{
+it.each(['Google Vertex','Google','google-ai-studio','unverified-provider'])(
+ 'does not admit an unverified AI Studio receipt name: %s',async(provider)=>{
  const f=fixture(),send=f.transport.getMockImplementation()!;
  f.transport.mockImplementation(async(url,init)=>{
   if(init?.method==='GET')return response({error:{}},404);
@@ -171,9 +171,9 @@ it('all three canonical provider names are also accepted from original-ID lookup
   return response(withoutProvider);
  });
  const result=await executePlan(f.options);
- expect(result.receipts).toHaveLength(95);
+ expect(result.receipts).toHaveLength(96);
  expect(result.receipts.every(r=>(r as {source:string}).source==='lookup.native_tokens_prompt')).toBe(true);
- expect(f.events.filter(e=>e.type==='lookup-attempt')).toHaveLength(95);
+ expect(f.events.filter(e=>e.type==='lookup-attempt')).toHaveLength(96);
 },30000);
 
 it.each([true,false])('only exact region-gate 403 yields PROVIDER_REGION_BLOCKED (region=%s)',async(region)=>{
@@ -219,9 +219,10 @@ it('refusal first observed in lookup stops further lookups and dispatch',async()
 },30000);
 it('lowered cumulative cap refuses plans even when each call stays within its cap',()=>{
  const changed=structuredClone(prices);
- for(const r of changed.routes){r.prompt=String(Number(r.prompt)*5);if(r.write)r.write=String(Number(r.write)*5);
+ for(const r of changed.routes.filter(r=>r.model.startsWith('google/'))){r.prompt=String(Number(r.prompt)*20);
+  if(r.write)r.write=String(Number(r.write)*20);
   r.perCallCap='100';r.modelCap='100';}
- expect(()=>createR6Plan(changed)).toThrow('CUMULATIVE_BUDGET_EXCEEDED');
+ expect(()=>createR7Plan(changed)).toThrow('CUMULATIVE_BUDGET_EXCEEDED');
 },30000);
 
 it.each([{finish:'stop',completion:512},{finish:'length',completion:460}])(
@@ -229,17 +230,17 @@ it.each([{finish:'stop',completion:512},{finish:'length',completion:460}])(
  const f=fixture();f.transport.mockResolvedValueOnce(response({id:'synthetic-small',model:firstRoute.model,
  provider:firstRoute.providerName,choices:[{finish_reason:finish}],usage:{cost:0.001,prompt_tokens:100,completion_tokens:completion}}));
  const result=await executePlan(f.options);
- expect(f.transport).toHaveBeenCalledTimes(95);expect(result.report[0].status).toBe('OUTPUT_CAP_NOT_REACHED');
+ expect(f.transport).toHaveBeenCalledTimes(96);expect(result.report[0].status).toBe('OUTPUT_CAP_NOT_REACHED');
  expect(result.report.slice(1).every(r=>r.status==='SAMPLE_WITHIN_BOUNDS')).toBe(true);
  expect(f.events.some(e=>e.type==='halt')).toBe(false);
- expect(result.actualUsd).toBe('0.095000000000');expect(result.unknownCostSamples).toBe(0);
+ expect(result.actualUsd).toBe('0.096000000000');expect(result.unknownCostSamples).toBe(0);
 },30000);
 it.each([461,508,512])('length completion %s within 90 to 100 percent continues as qualified',async(completion)=>{
  const f=fixture();f.transport.mockResolvedValueOnce(response({id:'synthetic-near-cap',model:firstRoute.model,
  provider:firstRoute.providerName,choices:[{finish_reason:'length'}],usage:{cost:0.001,prompt_tokens:100,completion_tokens:completion,
  completion_tokens_details:{reasoning_tokens:400}}}));
  const result=await executePlan(f.options);
- expect(f.transport).toHaveBeenCalledTimes(95);expect(result.report[0].status).toBe('SAMPLE_WITHIN_BOUNDS');
+ expect(f.transport).toHaveBeenCalledTimes(96);expect(result.report[0].status).toBe('SAMPLE_WITHIN_BOUNDS');
  expect(f.events.find(e=>e.type==='result')).toMatchObject({outputCapReached:true});
 },30000);
 it('small cap includes reasoning and does not allow a one-token overrun',async()=>{

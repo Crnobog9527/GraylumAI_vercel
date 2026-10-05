@@ -117,3 +117,25 @@ it('each requested reasoning setting independently needs two semantic probes',as
  const f=fixture();f.profile.reasoningVariants.push({...f.profile.reasoningVariants[0],reasoning:{effort:'low'},outputStressSamples:1});
  await expect(f.run()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
 });
+
+it.each([
+ ['google-ai-studio','google-ai-studio',true],
+ ['google-vertex/global','google-vertex/global',false],
+ ['google-ai-studio/flex','google-ai-studio/flex',false],
+ ['google-ai-studio/priority','google-ai-studio/priority',false],
+ ['google-ai-studio','google-vertex/global',false],
+ ['google-vertex/global','google-ai-studio',false],
+] as const)('Gemini exact route binding: profile %s / policy %s',async(profileTag,policyTag,accepted)=>{
+ const f=fixture();f.profile.model=f.policy.model='google/gemini-3.8-flash';
+ f.profile.endpointTag=profileTag;f.policy.providerLimits!.providerSlug=policyTag;
+ const frozen=structuredClone(f.policy);
+ if(accepted)expect(await f.run()).toBeDefined();
+ else await expect(f.run()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ expect(f.policy).toEqual(frozen);
+});
+it('AI Studio still refuses incomplete output evidence',async()=>{
+ const f=fixture();f.profile.model=f.policy.model='google/gemini-3.8-flash';
+ f.profile.endpointTag=f.policy.providerLimits!.providerSlug='google-ai-studio';
+ f.profile.reasoningVariants[0].outputStressSamples=1;
+ await expect(f.run()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});

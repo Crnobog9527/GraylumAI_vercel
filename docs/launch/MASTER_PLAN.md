@@ -668,6 +668,14 @@ PURPOSE_OUTPUT_CAP（8192）。证据分别记录 testedOutputLimit 与允许的
 r5b首条508/512、length作为合格证据保留，原始停批记录不改写；其余95条原请求准备r6，当前已入账$4.991984715。
 累计限额仍$25；本轮只准备，主窗口复核通知前不发送任何真实请求。
 
+**2026-10-06：BILL-PAYG Gemini采样改用AI Studio（Owner决定）**
+
+依据：[Owner原话](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6001418763)：
+“665切换为Google AI Studio 的线路测试， Gemini 的 Vertex 线路太不稳定。”
+取代此前Gemini固定google-vertex/global采样的决定，改为完整tag google-ai-studio，不加/flex或/priority。
+Vertex首条不能移作AI Studio证据，完整76条重新准备；r6不执行，Luna整理16和Sonnet输出4原请求保留为r7。
+已入账$4.991984715，累计仍不得达$25；本轮只准备不执行，未来实际路由配置由主窗口另行处理。
+
 **2026-10-06：BILL-PAYG r4费用确认与r5b准备**
 
 依据：[Owner后台核实](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6000132517)。

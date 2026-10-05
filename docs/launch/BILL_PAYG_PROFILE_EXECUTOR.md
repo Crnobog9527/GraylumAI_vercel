@@ -1,6 +1,6 @@
 # BILL-PAYG profile 执行器交接（仅准备）
 
-**r6 准备完成，等待复核。原 r5 作废，r5b 已执行停批，均不再执行。** 旧批次已锁定；本轮不发送模型请求、不访问远端数据库、不改配置。
+**r7 准备完成，等待复核。r6 未执行并作废；r5作废，r5b已停批，旧清单均不得重跑。** 旧批次已锁定；本轮不发送模型请求、不访问远端数据库、不改配置。
 本页不是执行批准；必须先收到主窗口对本 PR 最终版本和 manifest 的审阅通过及执行通知。
 
 ## 入口
@@ -19,8 +19,8 @@ set -a
 set +a
 NODE_USE_ENV_PROXY=1 NO_PROXY= no_proxy= https_proxy= node scripts/payg-profile-execute.mjs execute-approved \
   scripts/payg-profile/plan-prices.json \
-  docs/launch/evidence/payg-profile-20261006-r6.manifest.json \
-  abf06bcc4c8db71f2f121fcd58de75e6996dd54f8666dc3c60fb6455945f55a2 \
+  docs/launch/evidence/payg-profile-20261006-r7.manifest.json \
+  72e0b6a4a347d816b06de0752f823a4a3cf9318ef1b5e3732c0bc49fd9b012b2 \
   owner-approved-test-balance-only
 ```
 
@@ -35,18 +35,19 @@ NODE_USE_ENV_PROXY=1 NO_PROXY= no_proxy= https_proxy= node scripts/payg-profile-
 本地费用计算复用 openRouterCallBound，发送和查账复用现有 openRouterAdapter/openRouterEvidence；
 无 SDK 自动重试、无 fallback、固定 OpenRouter URL、禁止重定向。工具样本只带合成历史，不执行真实工具。
 
-## r6 范围与费用
+## r7 范围与费用
 
-当前执行器只接受 r6 的精确审阅清单；旧批次 hash 均不能启动。原 r5 从未执行并已作废。
-详见 [r6 预演与逐条上界](BILL_PAYG_PROFILE_R6.md)。
-r5b 首条已按新标准合格，保留证据，不重发；r6 原样接续剩余95条（Gemini75、Luna整理16、Sonnet输出4）。
-本批上界 $5.385264750000；前五批已入账 $4.991984715000，累计上界 $10.377249465000 < $25。
-样本ID保留其来源后缀，批次ID为 payg-profile-20261006-r6；requestHash、单价和逐条上界未改。
+当前执行器只接受 r7 的精确审阅清单；r6未执行并作废，旧批次hash不能启动。
+详见 [r7 预演、公开目录和逐条上界](BILL_PAYG_PROFILE_R7.md)。
+Gemini改为精确google-ai-studio，重新生成完整76条（60矩阵、12多消息、4输出压力）；Vertex首条不能计入AI Studio证据。
+Luna整理16条、Sonnet输出4条的请求、hash和上界与r6一致，共96条。
+本批上界$5.396385750000；已入账$4.991984715000，累计上界$10.388370465000 < $25。
+Gemini样本ID带r7后缀，其他20条保留来源ID。旧价格冻结为plan-prices-vertex-2026-10-05.json，只用于历史离线复现。
 
 凭据/代理/加锁前核对本机已有旧锁对应的报告，按 manifest 绑定的批次、样本ID、requestHash、原始UNKNOWN状态和
 Owner确认记录逐一对账。r1首条、r2第49条、r4第77条仅这三个固定例外按$0入账，原始report/events不写回。
 未知数量、样本身份、已知小计、实际总额或金额汇总不匹配即 PRIOR_ACCOUNTING_MISMATCH，不接收临时豁免参数。
-原r5若意外出现attempted.lock，停止为SUPERSEDED_BATCH_ATTEMPTED，不能视作未执行。没有本机旧锁时以清单引用的已审计证据为依据。
+原r5或r6若意外出现attempted.lock，停止为SUPERSEDED_BATCH_ATTEMPTED，不能视作未执行。没有本机旧锁时以清单引用的已审计证据为依据。
 
 输出压力Sonnet O=2048、Gemini O=512，两种设置各两条；原生completion（含reasoning）必须满足 0.9O ≤ completion ≤ O 且 finish_reason=length。
 OUTPUT_CAP_NOT_REACHED 如实记录费用和未合格判定后继续；不得补发，不得计入合格输出证据。completion > O 仍立即停批。Luna补测O=1024只验证整理适配，复用r4已成立的512输出语义，不能冒充新增触顶证据。
@@ -86,14 +87,14 @@ POST 最多一次；超时/断线无原 ID 时保留未知费用并停止，不�
 4. 修复失败原因后仍由原系统用户启动。目录漂移必须先重新预演并交主窗口复核；未获执行通知仍不得启动。
    只要存在一次 attempt（即使费用显示为零），就不适用该恢复方法，不能换目录或换用户续发。
 
-### provider 字段的公开核实（2026-10-05）
+### provider 字段的公开核实（Gemini于2026-10-06更新）
 
 公开 [provider 目录](https://openrouter.ai/api/v1/providers) 和三条模型 endpoint 目录给出一致的 API 名称：
 
 | 精确线路 tag | API provider 名称（严格相等） |
 | --- | --- |
 | `anthropic` | `Anthropic` |
-| `google-vertex/global` | `Google` |
+| `google-ai-studio` | `Google AI Studio` |
 | `openai` | `OpenAI` |
 
 模型目录分别为 [Sonnet](https://openrouter.ai/api/v1/models/anthropic/claude-sonnet-5.5/endpoints)、
@@ -103,15 +104,17 @@ POST 最多一次；超时/断线无原 ID 时保留未知费用并停止，不�
 也区分 `Google` 与 `Google AI Studio`；网页显示的 Google Vertex 不是这里的 API 名称。
 官方 [generation 回执类型](https://github.com/OpenRouterTeam/typescript-sdk/blob/50486fa616c04f3d036d0c45166b80f9bff15e13/src/models/generationresponse.ts)
 将 `provider_name` 定义为实际服务请求的 provider 名称。
-因此保留 response.provider / lookup.provider_name 与冻结 providerName 严格相等；
-不增加 Google Vertex、Google AI Studio、线路 tag 或任意字符串别名。固定 only、禁 fallback 和逐次目录预检保持不变。
-这是公开契约核实，**没有声称已取得真实回执**；response 缺字段时仍仅按原 ID 查账最多三次，未知值不放行。
+依据[Provider Routing](https://openrouter.ai/docs/guides/routing/provider-selection)，服务档位需显式选择，
+裸google-ai-studio不选入flex/priority；请求无service_tier且禁fallback。出现新的非服务档位后缀时目录预检拒绝，防止裸tag扩选。
+response.provider / lookup.provider_name 与冻结 providerName 严格相等；
+Gemini只接受Google AI Studio，不接受Google、Google Vertex、线路tag或任意别名。固定 only、禁 fallback 和逐次目录预检保持不变。
+这是公开契约核实，**没有声称已取得AI Studio真实回执**；response 缺字段时仍仅按原 ID 查账最多三次，未知值不放行。
 
 
 查账和 response 的成本必须一致；P 用原生总 prompt token，缓存读写不从 P 扣除。
 实际总额为已确认样本费用的精确十进制和；任一已尝试样本费用未知时 actualUsd=null，另报 knownUsd。
 缓存字段缺失保持 null。输出压力需核对 finishReason、outputCapReached 和 reasoning 用量；
-r6 的 outputCapReached 表示满足清单中的 90%–100% 判定，不代表精确等于 O；旧回执字段原样保留。
+r6起的 outputCapReached 表示满足清单中的 90%–100% 判定，不代表精确等于 O；旧回执字段原样保留。
 “未超界”不等于“已触及并证明 8192 的输出边界”。
 
 ## 公开报告与配置建议

@@ -2,7 +2,7 @@
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import {priceSchema,recordSamples,outputPressurePassed} from './sampling';
-import {createR6Plan,R6_ID} from './batch-r6';
+import {createR7Plan,R7_ID} from './batch-r7';
 import {openRouterAdapter} from '../../packages/api/src/services/bill2/openRouterAdapter';
 import {decimal} from '../../packages/api/src/services/bill2/decimal';
 import type {CallIdentity,TransportObservation} from '../../packages/api/src/services/bill2/fixtureAdapter';
@@ -10,7 +10,7 @@ import type {OpenRouterIdentity} from '../../packages/api/src/services/bill2/ope
 import type {OpenRouterLimits} from '../../packages/api/src/services/bill2/openRouterPolicy';
 import {decodeOpenRouterStreamObservation} from '../../packages/api/src/services/bill2/openRouterEvidence';
 
-export type Plan=ReturnType<typeof createR6Plan>;
+export type Plan=ReturnType<typeof createR7Plan>;
 export type Sample=Plan['manifest']['samples'][number];
 export type Event=Record<string,unknown>;
 export type Journal={append:(event:Event)=>Promise<void>;events:Event[];
@@ -21,8 +21,8 @@ const integer=(value:unknown):number|null=>typeof value==='string'&&/^\d+$/.test
 
 export function verifiedPlan(prices:unknown,manifest:unknown,approvedHash:string){
  const id=(manifest as {batch?:{id?:string}}|null)?.batch?.id;
- if(id!==R6_ID)throw new Error('APPROVED_MANIFEST_MISMATCH');
- const plan=createR6Plan(prices);
+ if(id!==R7_ID)throw new Error('APPROVED_MANIFEST_MISMATCH');
+ const plan=createR7Plan(prices);
  if(!isDeepStrictEqual(plan.manifest,manifest)||approvedHash!==plan.manifest.manifestHash)
   throw new Error('APPROVED_MANIFEST_MISMATCH');
  if(!plan.manifest.currentPricesVerified||decimal(plan.manifest.cumulativeUpperUsd)>=decimal('25')
@@ -176,7 +176,7 @@ export async function executePlan(options:{prices:unknown;manifest:unknown;appro
    await append({type:'halt',sampleId:sample.id,reason:'REUSED_GENERATION_ID',actualUsd:null});break;
   }
   if(id)generationIds.add(id);
-  // Public /providers and model /endpoints use Google for google-vertex/global, not the UI label.
+  // Exact public endpoint provider_name: AI Studio must not accept a Vertex receipt.
   // See BILL_PAYG_PROFILE_EXECUTOR.md. Keep exact names; an unverified alias is not a matching receipt.
   const providerName=priceSchema.parse(options.prices).routes.find(r=>r.model===sample.model)!.providerName;
   const complete=(o:ReturnType<typeof observationEvent>)=>o.final&&o.nativePromptTokens!==null

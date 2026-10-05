@@ -5,7 +5,7 @@ import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {checkPriorAccounting} from '../../../../../scripts/payg-profile/prior-accounting';
-import prices from '../../../../../scripts/payg-profile/plan-prices.json';
+import prices from '../../../../../scripts/payg-profile/plan-prices-vertex-2026-10-05.json';
 import frozen from '../../../../../docs/launch/evidence/payg-profile-20261006-r6.manifest.json';
 import prior from '../../../../../docs/launch/evidence/payg-profile-20261006-r5b.manifest.json';
 import measured from '../../../../../scripts/payg-profile/r5b-evidence.json';

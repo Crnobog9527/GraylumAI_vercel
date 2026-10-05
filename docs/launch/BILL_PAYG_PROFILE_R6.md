@@ -1,5 +1,7 @@
 # BILL-PAYG r6 离线预演
 
+> 已作废且未执行：Owner要求Gemini改AI Studio，后续只准备 [r7](BILL_PAYG_PROFILE_R7.md)。本页为历史离线记录，不得执行；历史复现须使用 plan-prices-vertex-2026-10-05.json。
+
 **r6 准备完成，等待复核。真实请求 NOT_RUN。**
 
 依据：[主窗口审计与判定决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6000858032)。风险 high；本轮只准备，不访问远端数据库、不改配置、不合并。
@@ -141,7 +143,7 @@ Gemini的64/96/128多消息仍须本批完成后判定。Sonnet/Luna已有60矩�
 离线复现：
 
 ```bash
-node scripts/payg-profile.mjs plan scripts/payg-profile/plan-prices.json /tmp/payg-r6-manifest.json r6
+node scripts/payg-profile.mjs plan scripts/payg-profile/plan-prices-vertex-2026-10-05.json /tmp/payg-r6-manifest.json r6
 ```
 
 执行入口见[执行器文档](BILL_PAYG_PROFILE_EXECUTOR.md)，本轮没有运行。旧批次锁和记录保持原样，最终迁移0176另由主窗口安排。

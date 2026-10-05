@@ -13,7 +13,7 @@ export const PAYG_HOST_SETTING = 'runtime_payg_staging';
 const reference = z.string().trim().min(1).max(128);
 const admittedRoutes: Readonly<Record<string,string>> = {
   'anthropic/claude-sonnet-5.5':'anthropic',
-  'google/gemini-3.8-flash':'google-vertex/global',
+  'google/gemini-3.8-flash':'google-ai-studio',
   'openai/gpt-6-luna':'openai',
 };
 const phase = z.enum(['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer', 'report']);

@@ -35,7 +35,10 @@
 不把设置、窗口身份或完整请求写进公开 PR。
 
 首版只认 #553 的精确候选：Claude Sonnet 5.5 / anthropic、Gemini 3.8 Flash /
- google-vertex/global、GPT-6 Luna / openai。不按模型前缀授权。
+ google-ai-studio、GPT-6 Luna / openai。不按模型前缀授权。
+Gemini绑定依[Owner线路决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6001418763)更新：
+仅新准入接受AI Studio精确tag，Vertex和flex/priority拒绝；不改实际路由/设置，不重写旧执行的冻结报价。
+Vertex证据不计入AI Studio。未来配置仍须使实际路由tag与profile相同，由主窗口另行处理。
 每个模型/完整线路只有一个 profile；`reasoningVariants` 列出多种思考参数及各自的
 `outputLimit/testedOutputLimit/evidenceReference/manifestHash/outputStressSamples/includesReasoning`。
 每种实际使用的 reasoning 必须有至少两个 length 且 0.9O ≤ completion ≤ O 的输出压力样本，completion 包含 reasoning。

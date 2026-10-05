@@ -4,7 +4,6 @@ import {createHash} from 'node:crypto';
 import {homedir} from 'node:os';
 import {join,resolve} from 'node:path';
 export {failureCode} from './executor';
-import {retiredR5} from './batch-r5b';
 import {checkPriorAccounting} from './prior-accounting';
 import {verifyProxyCountry} from './proxy-preflight';
 import {executePlan,verifiedPlan,verifyCatalog,type Event} from './executor';
@@ -17,11 +16,13 @@ export async function main(args:string[]){
  const manifest=JSON.parse(await readFile(manifestPath,'utf8'));
  const plan=verifiedPlan(prices,manifest,approvedHash);
  const stateRoot=join(homedir(),'.local','state','graylum','payg-profile');
- // Retired r5 is never dispatched; a surprising old attempt would change the approved total.
- try{await readFile(join(stateRoot,retiredR5,'attempted.lock'));throw new Error('SUPERSEDED_BATCH_ATTEMPTED');}
- catch(error){if((error as {code?:string}).code!=='ENOENT')throw error;}
+ // Never assume a superseded but unaccounted batch remained unattempted.
+ for(const retired of plan.manifest.supersedes){
+  try{await readFile(join(stateRoot,retired,'attempted.lock'));throw new Error('SUPERSEDED_BATCH_ATTEMPTED');}
+  catch(error){if((error as {code?:string}).code!=='ENOENT')throw error;}
+ }
  await checkPriorAccounting(stateRoot,plan.manifest.batch.previous);
- const catalog=JSON.parse(await readFile(resolve('scripts/payg-profile/catalog-2026-10-05.json'),'utf8'));
+ const catalog=JSON.parse(await readFile(resolve('scripts/payg-profile/catalog-2026-10-06-r7.json'),'utf8'));
  // Validate without creating any persistent claim or loading a fallback credential.
  const key=process.env.GRAYLUM_PAYG_TEST_OPENROUTER_KEY;
  if(!key?.trim())throw new Error('APPROVED_TEST_CREDENTIAL_MISSING');

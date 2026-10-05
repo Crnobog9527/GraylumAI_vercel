@@ -3,7 +3,7 @@ import {expect,it,vi} from 'vitest';
 import previous from '../../../../../docs/launch/evidence/payg-profile-20261006-r3.manifest.json';
 import r4 from '../../../../../docs/launch/evidence/payg-profile-20261006-r4.manifest.json';
 import r5 from '../../../../../docs/launch/evidence/payg-profile-20261006-r5.manifest.json';
-import prices from '../../../../../scripts/payg-profile/plan-prices.json';
+import prices from '../../../../../scripts/payg-profile/plan-prices-vertex-2026-10-05.json';
 import {createSamplePlan,recordSamples} from '../../../../../scripts/payg-profile/sampling';
 import {decimal} from '../bill2/decimal';
 it('independent batches preserve completed evidence and untouched requests; reserve both under 25',()=>{
