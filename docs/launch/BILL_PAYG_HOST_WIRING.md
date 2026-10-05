@@ -24,7 +24,9 @@
 复用管理员设置权限及原 `system_settings`，没有新表、RPC、钱包、服务或调度器。
 现有窗口只有稳定报价，不能表达独立回退开关与已验证 profile，因此新增一个窗口绑定的设置值。
 计费事实权威仍为 BILL2 run/call/receipt 和原账本。设置只是新准入配置，不是第二份账务。
-本 PR 不改设置路由，避免与 PAY-COMMON PR-3 的共享写入范围重叠。
+审计修复在设置路由增加此键的 schema 校验，单项/批量共用，拒绝字符串保存。
+`{enabled:false}` 可独立关闭，读取兼容旧 JSON 字符串中的布尔 false；字符串 false 不视为布尔值。
+已核对 #661 的服务端停笔交接：本次仅负责 PAYG 键，保留其支付渠道键的独立改动，不改其分支或前端。
 
 ## Profile 与证据要求
 
@@ -34,7 +36,13 @@
 
 首版只认 #553 的精确候选：Claude Sonnet 5.5 / anthropic、Gemini 3.8 Flash /
  google-vertex/global、GPT-6 Luna / openai。不按模型前缀授权。
-每个模型/完整线路的 profile 绑定协议、请求格式、思考参数、用途、有效期、版本和实测材料引用/hash。
+每个模型/完整线路只有一个 profile；`reasoningVariants` 列出多种思考参数及各自的
+`outputLimit/evidenceReference/manifestHash/outputStressSamples/includesReasoning`。
+每种实际使用的 reasoning 必须有至少两个输出压力样本，证据包含 reasoning 且覆盖该用途的 O。
+普通调用的无参数 `{parameter:"none"}` 与导师 low/medium 可共存；未列出的组合直接拒绝。
+profile 同时绑定协议、请求格式、用途、有效期、版本和输入计量实测材料引用/hash。
+用途统一为 `ordinary / skill / organizer / skill_matching / attached_organizer`，不使用 matching。
+有效期必须覆盖冻结的 run deadline；只能有效到当前时刻之后仍不足以准入。
 配置中的样本统计是管理员核验实测材料后的摘要；它本身不能证明测试真的运行过。
 启用前必须独立核对引用材料，不得将单元测试里的 synthetic profile 写入真实配置。
 
@@ -47,6 +55,10 @@
 O=8192 时需要至少 **212992** context tokens。达不到就拒绝该组合。
 本次实际用途的 O 还必须不超过 profile 的 O，profile 的 O 不超过实测证据的 O。
 1024 证据不能启用 8192；可以在已有模型/用途配置中缩小 O 后重新核对，不能扩大实测范围。
+准入同时收紧冻结历史条数：保留一个系统消息、一个当前输入，以及每个可执行工具轮次四个 SDK item 的余量
+（reasoning、assistant text、function call、result）；所有候选模型取最小消息上限。无法容纳必需轮次就拒绝准入。
+附带整理独立冻结至多 `maxMessages-2` 条历史，其输入包含主回复，不能沿用未收紧的历史配置。
+之后只会因字节预算进一步裁剪历史，不扩大冻结条数。已有 v1/v2 执行的 context 不被重写。
 派发前原 `runtimePaygCall` 与 SQL 再检查实际 B、T、O、报价和本次冻结；原计量异常监控保持不变。
 
 **当前证据状态：未取得可核验的真实模型 profile 材料，没有预置获准的 profile。**
@@ -85,3 +97,17 @@ O=8192 时需要至少 **212992** context tokens。达不到就拒绝该组合�
 前端交接给 Claude：本任务没有改 apps/web。等待 UI 沿用 #658，按上述评论验收；
 如需要可见的一键开关，在既有后台增加此设置的启用/关闭操作，关闭只写 `enabled:false`，
 不得顺便关闭测试窗口。开关 UI 和真实页面验证不是本 PR 已完成事项。
+
+## 无网络 profile 采样工具与审计修复
+
+见 [采样预演](BILL_PAYG_PROFILE_DRY_RUN.md)。工具只生成本地清单并统计已取得的回执，不含发送、重试、
+查账或配置写入代码。工具输出不是 profile 准入证明，真实采样等待主窗口通知。
+
+本机回归覆盖宿主生成合同，经真实 PostgREST/SQL 准入及重复领取：普通、工作、导师、步骤、计划、选题；
+无 mock 准入、profile、定价或 SQL。导师/步骤用 low，普通用无参数，同一模型/线路 profile 同时覆盖。
+另测 100 条历史、真实 SDK read_source 第二轮、整理独立历史预算、无法容纳必需轮次的准入拒绝、
+skill_matching 阶段、profile 到期早于 run、设置单项/批量和旧字符串快速关闭。
+已有原生输出等待/充值/恢复/停止/一次结算和 402 测试保持。
+
+上线后再看：关闭状态每次新准入多一次设置读取；先保留即时回退语义，实测延迟后再决定是否优化。
+实测统计摘要仍需人工核验原始材料；本任务没有引入证据服务或把摘要自动当作真实成绩。

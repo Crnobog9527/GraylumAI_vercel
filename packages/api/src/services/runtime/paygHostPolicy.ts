@@ -16,7 +16,7 @@ const admittedRoutes: Readonly<Record<string,string>> = {
   'google/gemini-3.8-flash':'google-vertex/global',
   'openai/gpt-6-luna':'openai',
 };
-const phase = z.enum(['ordinary', 'skill', 'organizer', 'matching', 'attached_organizer']);
+const phase = z.enum(['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer']);
 /** Trusted admin configuration, never a browser admission field. Evidence references
  * must identify independently checked real samples; fixture results are not evidence. */
 export const paygHostProfile = z.object({
@@ -29,7 +29,12 @@ export const paygHostProfile = z.object({
   purposes: z.array(phase).min(1).max(5),
   requestFormats: z.array(z.enum(['serial-tools-v2', 'serial-tools-v4-stream',
     'agent-turn-v5-stream', 'serial-tools-v6-reasoning'])).min(1).max(4),
-  reasoning: reasoningPolicy,
+  reasoningVariants: z.array(z.object({
+    reasoning: reasoningPolicy,
+    outputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
+    evidenceReference: reference, manifestHash: z.string().regex(/^[a-f0-9]{64}$/),
+    outputStressSamples: z.number().int().min(2), includesReasoning: z.literal(true),
+  }).strict()).min(1).max(16),
   outputLimit: z.number().int().min(1).max(PURPOSE_OUTPUT_CAP),
   expiresAt: z.string().datetime(),
   evidence: z.object({
@@ -40,10 +45,12 @@ export const paygHostProfile = z.object({
     includesReasoning: z.literal(true), cacheCovered: z.literal(true), costBoundPassed: z.literal(true),
   }).strict(),
 }).strict().refine(p => p.outputLimit <= p.evidence.outputLimit, { message: 'PAYG_OUTPUT_EVIDENCE_REQUIRED' });
-const settings = z.object({
+export const paygHostSettings = z.object({
   version: z.literal(1), enabled: z.boolean(), windowId: z.string().uuid(),
   profiles: z.array(paygHostProfile).max(16),
 }).strict();
+// A minimal object can always disable new admissions, regardless of stale evidence.
+export const paygHostSettingWrite = z.union([z.object({enabled:z.literal(false)}).strict(), paygHostSettings]);
 export type PaygHostProfile = z.infer<typeof paygHostProfile>;
 type Requirement = { modelId: string; phase: z.infer<typeof phase>; outputLimit: number; requestFormat: string; reasoning?: ReasoningPolicy };
 
@@ -52,14 +59,17 @@ type Requirement = { modelId: string; phase: z.infer<typeof phase>; outputLimit:
  * Do not call from execute/resume: their frozen contract is the only billing authority. */
 export async function readPaygHostPolicies(admin: SupabaseClient, window: StagingPolicy,
   policies: FrozenRun['callPolicy'], requirements: Requirement[], env: Record<string, string | undefined> = process.env,
+  deadline: string = window.expiresAt,
 ) {
   if (stagingRuntimeWindow(env) !== window.id) throw new StagingAccessError('RUNTIME_STAGING_TARGET_DENIED');
   const { data, error } = await admin.from('system_settings').select('value').eq('key', PAYG_HOST_SETTING).maybeSingle();
   if (error) throw new StagingAccessError('RUNTIME_PAYG_CONFIG_UNAVAILABLE');
   if (!data || data.value === null) return undefined;
+  let value:unknown=data.value;
+  if(typeof value==='string'){try{value=JSON.parse(value);}catch{throw new StagingAccessError('RUNTIME_PAYG_PROFILE_REQUIRED');}}
   // Turning off remains possible even if profile evidence has expired or is incomplete.
-  if (typeof data.value === 'object' && data.value.enabled === false) return undefined;
-  const parsed = settings.safeParse(data.value);
+  if (value !== null && typeof value === 'object' && 'enabled' in value && value.enabled === false) return undefined;
+  const parsed = paygHostSettings.safeParse(value);
   if (!parsed.success || parsed.data.windowId !== window.id) throw new StagingAccessError('RUNTIME_PAYG_PROFILE_REQUIRED');
   const config = parsed.data;
   if (!config.enabled) return undefined;
@@ -68,10 +78,11 @@ export async function readPaygHostPolicies(admin: SupabaseClient, window: Stagin
     const profile = matches.length === 1 ? matches[0] : undefined;
     const uses = requirements.filter(r => r.modelId === policy.modelId);
     if (!profile || admittedRoutes[profile.model] !== profile.endpointTag || policy.protocol !== profile.protocol || !policy.providerLimits || !uses.length
-      || Date.parse(profile.expiresAt) <= Date.now()
+      || Date.parse(profile.expiresAt) <= Date.now() || Date.parse(profile.expiresAt) < Date.parse(deadline)
       || profile.maxBytes + profile.templateTokens + profile.marginTokens + profile.outputLimit > policy.providerLimits.contextTokens
       || uses.some(r => !profile.purposes.includes(r.phase) || !profile.requestFormats.some(format => format === r.requestFormat)
-        || !isDeepStrictEqual(frozenReasoningFields(profile.reasoning), frozenReasoningFields(r.reasoning))
+        || !profile.reasoningVariants.some(v => isDeepStrictEqual(frozenReasoningFields(v.reasoning), frozenReasoningFields(r.reasoning))
+          && v.outputLimit >= r.outputLimit && v.outputLimit <= profile.evidence.outputLimit)
         || r.outputLimit > profile.outputLimit)) throw new StagingAccessError('RUNTIME_PAYG_PROFILE_REQUIRED');
     // Retain the window's exact quote (SQL compares entry-minus-payg). Actual request O
     // is already capped by admission and is remeasured before every claim.

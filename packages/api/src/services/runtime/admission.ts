@@ -33,6 +33,7 @@ import {newWorkGate,readNewWorkSettings,requireNewWork} from './newWorkGate';
 import {requireAllowedInput} from './moderation';
 import {admitPricing} from './pricingAdmission';
 import {freezeStagingPaygPricing} from './paygPricing';
+import {freezePaygMessageBudget} from './paygMessageBudget';
 import {readPaygHostPolicies} from './paygHostPolicy';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
 
@@ -287,9 +288,9 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     {modelId,phase:context.role,outputLimit:maxOutputTokens,requestFormat:providerRequestFormat,reasoning},
     ...(attachedOrganizer?[{modelId:attachedOrganizer.modelId,phase:'attached_organizer' as const,
      outputLimit:attachedOrganizer.maxOutputTokens,requestFormat:providerRequestFormat,reasoning:attachedOrganizer.reasoning}]:[]),
-    ...(candidates.length?[{modelId,phase:'matching' as const,outputLimit:maxOutputTokens,requestFormat:providerRequestFormat}]:[]),
+    ...(candidates.length?[{modelId,phase:'skill_matching' as const,outputLimit:maxOutputTokens,requestFormat:providerRequestFormat}]:[]),
     ...candidates.map(c=>({modelId:c.modelId,phase:'skill' as const,outputLimit:c.outputLimit,requestFormat:providerRequestFormat})),
-   ]):undefined;
+   ],process.env,billing.limits.deadline):undefined;
    const paygTemplates=hostPayg??policy.payg?.callPolicies;
    if(realCalls&&!paygTemplates)await admitPricing(admin,realCalls);
    if(realCalls)billing.callPolicy=realCalls;
@@ -303,6 +304,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     });
    }
    if(paygTemplates){
+    freezePaygMessageBudget(context,paygTemplates);
+    billing.sourceHash=createHash('sha256').update(JSON.stringify(context)).digest('hex');
     const templates=paygTemplates.filter(p=>selectedIds.has(p.modelId));
     const callPolicy=realCalls
      ?await freezeStagingPaygPricing(admin,realCalls.map(p=>({...p,payg:templates.find(t=>t.modelId===p.modelId)?.payg})))
