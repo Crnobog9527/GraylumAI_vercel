@@ -6,11 +6,11 @@ import type { PaygWait, ResumeInput } from './paygRuntime';
 
 export type RuntimeExecution = {
   executionId: string; sessionId: string; runId: string; live: boolean; cancelRequested: boolean; state: string;
-  unavailableReason?: string; historyFrozen?: boolean; historyOmitted?: boolean; context: unknown;
+  pausedReason?: string; unavailableReason?: string; historyFrozen?: boolean; historyOmitted?: boolean; context: unknown;
   billing: FrozenRun | FrozenPaygRun;
   cursor?: number; epoch?: number; remainingCalls?: number; primaryResult?: { body: string };
   result: { kind: string; evidenceRef: string; evidenceHash: string; body: string; summary?: string;
-    completeness?: "complete" | "length_limit"; organized?: boolean;
+    stopped?: boolean; completeness?: "complete" | "stopped" | "length_limit"; organized?: boolean;
     summaryOmitted?: boolean; messageFirst?: boolean; envelopeCompact?: boolean } | null;
 };
 export async function beginPaygExecution(input: {
@@ -27,6 +27,7 @@ export async function beginPaygExecution(input: {
     executionId: input.executionId, cursor: execution.cursor!, epoch: execution.epoch!, remainingCalls: execution.remainingCalls!,
     ...(execution.primaryResult ? { body: execution.primaryResult.body } : {}), ...(unavailable ? { unavailable } : {}),
   });
+  if (execution.pausedReason === 'user_stop') return {execution, resumedGate: false};
   if (execution.billing?.contractVersion === 'bill2.v2' && ['waiting_credits', 'waiting_resume'].includes(execution.state)) {
     if (!input.resume) return { execution, resumedGate: false, wait: wait() };
     if (input.resume.executionId !== input.executionId || input.resume.cursor !== execution.cursor

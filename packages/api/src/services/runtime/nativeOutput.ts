@@ -19,7 +19,7 @@ const patches = z.record(z.string(), z.unknown()).transform(value => Object.from
   }),
 ));
 export const stepEnvelope = z.object({
-  message: z.string().describe('Public reply. This must be the first JSON property.'),
+  message: z.string().trim().describe('Public reply. This must be the first JSON property.'),
   inputKind: z.enum(['answer', 'acknowledgement', 'uncertainty', 'request', 'revision_request']).optional().catch(undefined),
   informationPatch: patches.optional().catch(undefined),
   targetStepId: z.string().min(1).optional().catch(undefined),
@@ -33,10 +33,11 @@ export function nativeVisible(body:string):string {
   } catch { return fallback(); }
 }
 export function nativeMetadata(result:Record<string,unknown>|null|undefined
-):Pick<AgentTurnOutcome,'completeness'|'organized'|'summaryOmitted'|'messageFirst'|'envelopeCompact'> {
+):Pick<AgentTurnOutcome,'stopped'|'completeness'|'organized'|'summaryOmitted'|'messageFirst'|'envelopeCompact'> {
   if(!result)return {};
   return {
-    ...(result.completeness==='complete'||result.completeness==='length_limit'?{completeness:result.completeness}:{}),
+    ...(result.stopped===true?{stopped:true}:{}),
+    ...(result.completeness==='complete'||result.completeness==='length_limit'||result.completeness==='stopped'?{completeness:result.completeness}:{}),
     ...(typeof result.organized==='boolean'?{organized:result.organized}:{}),
     ...(typeof result.summaryOmitted==='boolean'?{summaryOmitted:result.summaryOmitted}:{}),
     ...(typeof result.messageFirst==='boolean'?{messageFirst:result.messageFirst}:{}),
@@ -46,7 +47,7 @@ export function nativeMetadata(result:Record<string,unknown>|null|undefined
 
 
 export function prepareNativePrimary(body:string,metadata:Record<string,unknown>,options:{
-  envelopeOrder?:string;length:boolean;attachedOrganizer:boolean;executionId:string;
+  envelopeOrder?:string;appendCard?:boolean;length:boolean;attachedOrganizer:boolean;executionId:string;
 }) {
   let validEnvelope = false;
   if(options.envelopeOrder){
@@ -58,7 +59,8 @@ export function prepareNativePrimary(body:string,metadata:Record<string,unknown>
   }
   const fitted=fitNativeResult({kind:'usable_result',evidenceRef:options.executionId,evidenceHash:'0'.repeat(64),body,
     ...metadata,completeness:options.length?'length_limit' as const:'complete' as const},
-    {attachedOrganizer:options.attachedOrganizer,...(validEnvelope?{validateEnvelope:(value:unknown)=>stepEnvelope.parse(value)}:{})});
+    {attachedOrganizer:options.attachedOrganizer,preserveCardMessage:options.appendCard,
+      ...(validEnvelope?{validateEnvelope:(value:unknown)=>stepEnvelope.parse(value)}:{})});
   let envelope:Record<string,unknown>|null=null;
   try{envelope=JSON.parse(fitted.body);}catch{/* Plain T1 body. */}
   if(!options.envelopeOrder && envelope?.card)questionToolCardSchema.parse(envelope.card);
@@ -80,7 +82,7 @@ export function completedOutput(result:({body:string;summary?:string}&Record<str
   context:unknown,onProgress?: (update:NativeTextUpdate)=>void) {
   const saved=context as {nativeOutput?:string;envelopeOrder?:string;providerRequestFormat?:string};
   if(saved.nativeOutput&&(saved.envelopeOrder||saved.providerRequestFormat==='agent-turn-v5-stream')&&result?.body){
-    const text=nativeVisible(result.body);onProgress?.({type:'text',text,delta:text,replace:true});
+    const text=nativeVisible(result.body);onProgress?.({type:'text',text,delta:text,replace:true,source:'final'});
   }
   return {...nativeMetadata(result),body:result?.body,
     ...(result?.summary!==undefined?{summary:result.summary}:{}),state:'completed' as const};

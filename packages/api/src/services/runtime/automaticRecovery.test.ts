@@ -63,3 +63,24 @@ it('queries unknown live calls without closing or cancelling their execution', a
   expect(mocks.recover).toHaveBeenCalledTimes(1);
   expect(f.rpc).not.toHaveBeenCalledWith('runtime_financial_recovery', expect.anything());
 });
+
+it('routes stopped inventory through receipt reconstruction instead of cancelling content',async()=>{
+ const f=fixture([{...item,userStop:true}]);
+ f.rpc.mockImplementation(async name=>({data:name==='runtime_pending_financial_batch'?[{...item,userStop:true}]
+  :{pausedReason:'user_stop',state:'completed',context:{},result:{body:'saved',stopped:true}},error:null}));
+ expect(await recoverPendingFinancials(f.input)).toMatchObject({settled:1,failed:0});
+ expect(f.rpc.mock.calls.map(([name])=>name)).toContain('runtime_execution');
+ expect(f.rpc.mock.calls.map(([name])=>name)).not.toContain('runtime_financial_recovery');
+ expect(mocks.recover).not.toHaveBeenCalled();
+});
+
+it('leaves a stopped call inside its HTTP response window untouched across repeated batches',async()=>{
+ const f=fixture([{...item,userStop:true}]);
+ f.rpc.mockImplementation(async name=>({data:name==='runtime_pending_financial_batch'?[{...item,userStop:true}]
+  :name==='runtime_response'?{rawBody:null}:{pausedReason:'user_stop',state:'interrupted',stopCalls:[
+   {sequence:1,requestHash:'synthetic',dispatched:true,settled:false,responsePending:true}]},error:null}));
+ for(let attempt=0;attempt<4;attempt++)
+  expect(await recoverPendingFinancials(f.input)).toMatchObject({processed:1,pending:1,settled:0,failed:0});
+ expect(mocks.recover).not.toHaveBeenCalled();
+ expect(f.rpc.mock.calls.map(([name])=>name)).not.toContain('runtime_financial_recovery');
+});

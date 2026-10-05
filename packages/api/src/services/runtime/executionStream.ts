@@ -39,7 +39,7 @@ export type OriginalExecutionHost={
 /** Runs or recovers one admitted execution under its original frozen policy.
  * Shared by `runtime.execute`, `runtime.executeStream` and `opc.mentorTurnStream`. */
 export async function executeOriginalExecution(host:OriginalExecutionHost,executionId:string,
- onProgress?:(event:RuntimeProgress)=>void,resume?:ResumeInput):Promise<AgentTurnOutcome>{
+ onProgress?:(event:RuntimeProgress)=>void,resume?:ResumeInput,replayOnly=false):Promise<AgentTurnOutcome>{
   // Original test-window and recovery policy reads count as policy; the
   // executor enters its own phase when it begins.
   host.budget?.timing?.tagExecution(executionId);host.budget?.timing?.enter('policy');
@@ -85,7 +85,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   if(host.maintenanceEndpoint)
    return outcome(await run(localFixtureAdapter(host.maintenanceEndpoint),()=>runtimeExecutor({
     ...base,endpoint:host.maintenanceEndpoint,activateSkill,
-    callGate:newWorkGate(host.admin,'local').calls}).execute(executionId,publicProgress,resume)));
+    callGate:replayOnly?denyNewCalls:newWorkGate(host.admin,'local').calls}).execute(executionId,publicProgress,resume)));
   try{await loadStagingPolicy(host.admin,host.actorId,process.env);}catch{
    const closed=await closeWaiting();if(closed)return closed;
    const observed=await host.admin.rpc('runtime_execution',{
@@ -102,6 +102,12 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    }
 
    const original=await loadStagingRecoveryPolicy(host.admin,host.actorId,executionId,process.env);
+   if(observed.data?.pausedReason==='user_stop'){
+    const recoveryAdapter=stagingTransport(host.admin,original,host.budget);
+    return outcome(await runtimeExecutor({...base,adapter:{
+     dispatch:async()=>{throw new Error('RUNTIME_DISPATCH_DISABLED');},lookup:recoveryAdapter.lookup,
+    },callGate:denyNewCalls}).execute(executionId));
+   }
    // This branch never constructs/runs an SDK request. It only looks up the
    // persisted original provider ID and finishes existing financial state.
    if(process.env.V3_RUNTIME_STAGING_ENABLED!=='true'){
@@ -122,7 +128,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   const adapter=stagingTransport(host.admin,original,host.budget);
   return outcome(await run(adapter,()=>runtimeExecutor({...base,adapter,activateSkill,
    resumePricing:policies=>admitPricing(host.admin,policies),
-   callGate:newWorkGate(host.admin,'staging').calls}).execute(executionId,publicProgress,resume)));
+   callGate:replayOnly?denyNewCalls:newWorkGate(host.admin,'staging').calls}).execute(executionId,publicProgress,resume)));
 }
 export type OriginalExecutionOutcome=AgentTurnOutcome;
 export type ExecutionStreamEvent=RuntimeProgress|NativeTextDelta|{type:'result';result:OriginalExecutionOutcome};

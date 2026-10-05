@@ -68,7 +68,7 @@ export class NativeSession implements Session {
   private projected: AgentInputItem[][] | null = null;
   private appended = 0;
   private finished = false;
-  constructor(private readonly inner: Session) {}
+  constructor(private readonly inner: Session, private readonly appendCard = false) {}
   getSessionId() { return this.inner.getSessionId(); }
   getItems(limit?: number) { return this.inner.getItems(limit); }
   popItem() { return this.inner.popItem(); }
@@ -105,6 +105,15 @@ export class NativeSession implements Session {
       card = envelope.card ?? null;
     }
     const all = this.pending.flat() as Item[];
+    if (agentTurn && this.appendCard) {
+      // The question tool is presentation-only. Its original call/result live in the receipt;
+      // Session carries exactly the saved public answer, with no duplicate tool-message prose.
+      const items = all.filter(item => item.role !== 'assistant'
+        && !(item.name === 'ask_question' && ['function_call', 'function_call_result'].includes(String(item.type))));
+      items.push({role: 'assistant', status: 'completed', content: [{type: 'output_text', text: message}]});
+      if (items.some(item => fitNativeSessionItem(item) === null)) throw new Error('RUNTIME_SESSION_CAPACITY');
+      return [items as AgentInputItem[]];
+    }
     const cardCalls = new Map(all.filter(item => rewrite && card && item.type === 'function_call'
       && item.name === 'ask_question').map(item => [item.callId, JSON.stringify(card)]));
     const lastAssistant = all.findLastIndex(item => item.role === 'assistant');

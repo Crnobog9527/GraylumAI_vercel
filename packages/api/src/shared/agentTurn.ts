@@ -120,7 +120,7 @@ export function parseQuestionCard(value: unknown): QuestionCard | null {
 export type AgentTurnPhase = "mentor" | "reading" | "organizer" | "saving";
 
 /** Final execution state carried by the `result` event. */
-export type AgentTurnState = 'waiting_credits' | 'waiting_resume' | "completed" | "cancelled" | "cost_pending" | "pending";
+export type AgentTurnState = 'stopping' | 'waiting_credits' | 'waiting_resume' | "completed" | "cancelled" | "cost_pending" | "pending";
 
 /**
  * Why a finished or stopped execution has no usable body. The page maps each
@@ -138,7 +138,7 @@ export type AgentTurnOutcome = {
   state: AgentTurnState;
   body?: string;
   summary?: string;
-  completeness?: "complete" | "length_limit";
+  stopped?: boolean; completeness?: "complete" | "stopped" | "length_limit";
   organized?: boolean; summaryOmitted?: boolean; envelopeCompact?: boolean; messageFirst?: boolean;
   unavailable?: AgentTurnUnavailable;
 };
@@ -165,7 +165,7 @@ export type AgentTurnEvent =
   | { type: "admitted"; executionId: string }
   | { type: "phase"; phase: AgentTurnPhase }
   | { type: "text"; text: string }
-  | { type: "textDelta"; text: string; offset: number; rev: number }
+  | { type: "textDelta"; text: string; offset: number; rev: number; source?: "assistant" | "message" | "final" }
   | { type: "card"; card: QuestionCard }
   | { type: "result"; result: AgentTurnOutcome };
 

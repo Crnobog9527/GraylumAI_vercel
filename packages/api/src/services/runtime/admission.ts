@@ -252,7 +252,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:hostTurnContext?'scope-projection-v2':'scope-projection-v1',
     ...(hostTurnContext?{hostTurnContext,historySelection}:{}),
     ...(promptCache?{promptCache}:{}),
-    ...(mentorStream?{questionContract:QUESTION_CONTRACT}:{}),
+    ...(mentorStream?{questionContract:QUESTION_CONTRACT,mentorText:'append-card-v1'}:{}),
     nativeOutput:'native-output-v1',...(stepStream?{envelopeOrder:'message-first-v1'}:{}),
     ...(policy.real||mentorStream||stepStream?{providerRequestFormat}:{}),...(reasoning?{reasoning}:{}),
     role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
