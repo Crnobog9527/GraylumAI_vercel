@@ -44,15 +44,25 @@ function parseArgs(argv) {
   return args;
 }
 
-function readPlan(ref) {
-  if (!ref) return { markdown: readFileSync(join(repoRoot, PLAN_PATH), 'utf8'), sourceRef: `工作区 ${PLAN_PATH}` };
-  const sha = execFileSync('git', ['rev-parse', '--short=8', `${ref}^{commit}`], { cwd: repoRoot, encoding: 'utf8' }).trim();
-  const markdown = execFileSync('git', ['show', `${ref}:${PLAN_PATH}`], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  return { markdown, sourceRef: `${ref} ${sha}` };
+// 任务表和路线图站点从同一个来源读取：不给 --ref 时都用工作区，给了 --ref 时都用那个提交。
+function readSources(ref) {
+  const stationsPath = 'scripts/plan-progress/stations.json';
+  if (!ref) {
+    return {
+      markdown: readFileSync(join(repoRoot, PLAN_PATH), 'utf8'),
+      stations: readFileSync(join(repoRoot, stationsPath), 'utf8'),
+      sourceRef: `工作区 ${PLAN_PATH}`,
+    };
+  }
+  const git = (args) => execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const sha = git(['rev-parse', '--short=8', `${ref}^{commit}`]).trim();
+  let stations;
+  try {
+    stations = git(['show', `${ref}:${stationsPath}`]);
+  } catch {
+    throw new Error(`${ref} 里没有 ${stationsPath}；路线图站点必须和任务表来自同一个提交`);
+  }
+  return { markdown: git(['show', `${ref}:${PLAN_PATH}`]), stations, sourceRef: `${ref} ${sha}` };
 }
 
 function fetchPrs(limit) {
@@ -88,7 +98,7 @@ function main() {
     process.stdout.write(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 9).join('\n') + '\n');
     return;
   }
-  const { markdown, sourceRef } = readPlan(args.ref);
+  const { markdown, stations, sourceRef } = readSources(args.ref);
   const plan = parsePlan(markdown);
   const prs = args.prsFile ? JSON.parse(readFileSync(args.prsFile, 'utf8')) : fetchPrs(args.limit);
   if (!args.prsFile && prs.length >= args.limit) {
@@ -101,7 +111,7 @@ function main() {
     generatedAt: new Date().toISOString(),
     sourceRef,
   });
-  const stationData = JSON.parse(readFileSync(join(here, 'plan-progress', 'stations.json'), 'utf8'));
+  const stationData = JSON.parse(stations);
   const roadmap = buildStations(stationData, report);
   report.warnings.push(...roadmap.warnings);
   report.roadmap = roadmap;

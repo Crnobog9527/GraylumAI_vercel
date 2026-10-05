@@ -76,6 +76,7 @@ const PRS = [
   pr(16, 'feat(api): 支付</script><b>x</b>', { body: '说明\n任务：PAY-BASE\n' }),
   pr(17, 'fix: 很早以前', { mergedAt: '2026-09-01T00:00:00Z' }),
   pr(19, 'fix(OLD-TRY): 同步到 main', { baseRefName: 'main' }),
+  pr(20, 'docs(plan): CORE-A-UI 进度同步'),
 ];
 
 test('parsePlan 读出任务名、阶段、依赖和标注', () => {
@@ -115,6 +116,7 @@ test('derive 推导阶段、阻塞原因和计划外工作', () => {
   assert.equal(status['CORE-A'].status, '已完成');
   assert.equal(status['CORE-A'].reason, '不含正式环境部分');
   assert.deepEqual(status['OLD-TRY'].prs, []);
+  assert.ok(!status['CORE-A-UI'].prs.some((item) => item.number === 20));
   assert.equal(status['CORE-A-UI'].status, '实施中');
   assert.equal(status['PAY-BASE'].status, '实施中');
   assert.deepEqual(status['PAY-BASE'].prs.map((item) => [item.number, item.plan]), [[11, true], [16, false]]);
@@ -126,7 +128,7 @@ test('derive 推导阶段、阻塞原因和计划外工作', () => {
   assert.equal(status.MOD.status, '被阻塞');
   assert.equal(status['OLD-TRY'].status, '已关闭');
   assert.equal(status['LIB-EXT'].status, '被阻塞');
-  assert.deepEqual(report.unplanned.map((item) => [item.number, item.planDoc]), [[15, true], [14, false], [12, false]]);
+  assert.deepEqual(report.unplanned.map((item) => [item.number, item.planDoc]), [[20, true], [15, true], [14, false], [12, false]]);
   assert.equal(report.total, 6);
   assert.equal(report.percent, 17);
 });
@@ -216,6 +218,9 @@ test('命令行离线运行，结果只写到仓库外；输出目录在仓库�
   assert.match(page, /class="tcard /);
 
   const insideDir = join(repoRoot, 'scripts', `plan-progress-should-not-exist-${process.pid}`, 'out');
+  const fromRef = execFileSync(process.execPath, [script, '--ref', 'HEAD', '--prs-file', prsFile, '--out-dir', join(dir, 'ref')], { encoding: 'utf8' });
+  assert.match(fromRef, /任务表来源 HEAD /);
+
   const inside = spawnSync(process.execPath, [script, '--prs-file', prsFile, '--out-dir', insideDir], { encoding: 'utf8' });
   assert.equal(inside.status, 1);
   assert.match(inside.stderr, /在仓库里面/);

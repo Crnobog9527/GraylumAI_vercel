@@ -62,7 +62,8 @@ export function derive({ plan, prs, since, generatedAt, sourceRef }) {
   const matched = new Set();
 
   // 只有指向 staging 的 PR 按标题和正文归到任务；指向 main 的同步或紧急 PR 不重复计入。历史对照里点名的 PR 不受限。
-  for (const pr of prs.filter((item) => item.baseRefName === 'staging')) {
+  // 规划同步 PR（docs(plan) / docs(master-plan)）按第 7.0 节不算任何任务，即使标题提到任务名。
+  for (const pr of prs.filter((item) => item.baseRefName === 'staging' && !PLAN_DOC_TITLE.test(item.title))) {
     const hits = new Set([...namesInTitle(pr.title, names), ...namesInBody(pr.body, names)]);
     for (const name of hits) {
       links.get(name).set(pr.number, toLink(pr, isPlanTitle(pr.title)));
