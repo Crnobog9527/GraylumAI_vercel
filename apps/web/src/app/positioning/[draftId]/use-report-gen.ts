@@ -7,8 +7,8 @@ import { readAgentTurn, TEXT_PROTOCOL } from "./mentor-turn";
 import { reportStopController, type ReportStopPhase } from "./report-stop";
 import { RecoveryTimers } from "./step-recovery";
 import {
-  attachRetryDelay, generationOffer, readReportRecord, reportAttachable, reportProgressing, reportRecordKey, reportResultRefusal,
-  reportStartRefusal, shownExecution, startedExecution, writeReportRecord, type ReportRecord, type ServerReport, type StartRefusal,
+  attachRetryDelay, generationOffer, nextRequestId, readReportRecord, reportAttachable, reportProgressing, reportRecordKey,
+  reportResultRefusal, reportStartRefusal, shownExecution, startedExecution, writeReportRecord, type ReportRecord, type ServerReport, type StartRefusal,
 } from "./report-gen";
 
 function localStore() {
@@ -116,8 +116,8 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   const run = async (kind: "start" | "restart") => {
     if (working || offer !== kind) return;
     setRefusal(null);
-    // A start whose answer was lost resends the same request; a restart is a new one.
-    const requestId = kind === "start" && record && !record.executionId ? record.requestId : crypto.randomUUID();
+    // A start or 重新生成 whose answer never came resends the same request until the server answers.
+    const requestId = nextRequestId(record, () => crypto.randomUUID());
     save({ requestId });
     try {
       const id = startedExecution(await start.mutateAsync({ sessionId, projectId, roundId, requestId }));

@@ -5,7 +5,7 @@ import {
   readReportRecord, REPORT_DISABLED_NOTICE, REPORT_EMPTY_NOTICE, REPORT_INCOMPLETE_NOTICE, REPORT_INTRO, REPORT_STOPPED_NOTICE,
   REPORT_TRUNCATED_NOTICE, REPORT_UNCONFIRMED_NOTICE, reportAttachable, reportCanStart, reportProgressing, reportRecordKey,
   reportResultRefusal, reportStartRefusal, reportView, startedExecution, writeReportRecord, type ReportStatus,
-  ATTACH_RETRY_DELAYS_MS, attachRetryDelay, generationOffer, shownExecution,
+  ATTACH_RETRY_DELAYS_MS, attachRetryDelay, generationOffer, nextRequestId, REPORT_ALREADY_EXISTS_NOTICE, shownExecution,
 } from "./report-gen";
 
 const id = "11111111-2222-4333-8444-555555555555";
@@ -167,5 +167,22 @@ describe("restoring and offering", () => {
   it("bounds the attach retries", () => {
     expect(ATTACH_RETRY_DELAYS_MS.map((_, attempt) => attachRetryDelay(attempt))).toEqual(ATTACH_RETRY_DELAYS_MS);
     expect(attachRetryDelay(ATTACH_RETRY_DELAYS_MS.length)).toBeNull();
+  });
+});
+
+describe("one report per round", () => {
+  it("opens the existing report when the server refuses a second one", () => {
+    expect(reportStartRefusal(new Error("REPORT_ALREADY_EXISTS"))).toEqual({ text: REPORT_ALREADY_EXISTS_NOTICE, opened: true });
+    expect(REPORT_ALREADY_EXISTS_NOTICE).not.toMatch(/积分|模型|管理员/);
+  });
+  it("resends a pending request on 重新生成 until the server answers with an execution", () => {
+    const mint = () => "22222222-2222-4333-8444-555555555555";
+    // The restart's admission answer was lost: only its requestId was kept.
+    expect(nextRequestId({ requestId: id }, mint)).toBe(id);
+    // Clicked again and lost again: still the same request.
+    expect(nextRequestId({ requestId: id }, mint)).toBe(id);
+    // The server answered with an execution (which later ended empty): only now a new request.
+    expect(nextRequestId({ requestId: id, executionId: id }, mint)).toBe(mint());
+    expect(nextRequestId(null, mint)).toBe(mint());
   });
 });

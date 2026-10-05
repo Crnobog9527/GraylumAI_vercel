@@ -19,6 +19,7 @@ export const REPORT_STOPPED_NOTICE = "停止的报告不能作为正式报告。
 export const REPORT_EMPTY_NOTICE = "这次没有生成报告。";
 export const REPORT_UNCONFIRMED_NOTICE = "开始生成的结果暂未确认。再点一次“生成完整报告”会接着同一次请求，不会重复扣费。";
 export const REPORT_DISABLED_NOTICE = "报告生成暂未开放。";
+export const REPORT_ALREADY_EXISTS_NOTICE = "这一轮已经有报告了，已为你打开。";
 
 const startRefusals: Record<string, string> = {
   REPORT_DISABLED: REPORT_DISABLED_NOTICE,
@@ -30,9 +31,11 @@ const startRefusals: Record<string, string> = {
   REPORT_PAYG_REQUIRED: "报告生成暂时不可用，报告没有开始生成。请稍后再试。",
   REPORT_FACTS_TOO_LARGE: "确认的信息太长，暂时无法一次写成报告。",
   OPC_CAPTURE_PENDING: "右侧信息还在整理，请等整理完成后再生成。",
+  REPORT_ALREADY_EXISTS: REPORT_ALREADY_EXISTS_NOTICE,
 };
 
-export type StartRefusal = { text: string; membership?: true; hideEntry?: true };
+/** `opened`: the round already has its report on the server; the page shows that one instead. */
+export type StartRefusal = { text: string; membership?: true; hideEntry?: true; opened?: true };
 
 /** Fixed text for a refused or lost `reportStart`; server text is never shown. */
 export function reportStartRefusal(cause: unknown): StartRefusal {
@@ -41,6 +44,7 @@ export function reportStartRefusal(cause: unknown): StartRefusal {
   if (!text) return { text: REPORT_UNCONFIRMED_NOTICE };
   if (message === "REPORT_MEMBERSHIP_REQUIRED") return { text, membership: true };
   if (message === "REPORT_DISABLED") return { text, hideEntry: true };
+  if (message === "REPORT_ALREADY_EXISTS") return { text, opened: true };
   return { text };
 }
 
@@ -132,6 +136,15 @@ export function writeReportRecord(storage: RecordStorage | null, key: string, re
   } catch {
     /* Private mode or full storage: the in-memory record still serves this page. */
   }
+}
+
+/**
+ * The requestId of the next paid start. A request the server has not answered with an execution
+ * (its answer was lost, or it was refused) is sent again with the same id, so a lost admission
+ * can never become a second charge; a new id only after the last request has its execution.
+ */
+export function nextRequestId(record: ReportRecord | null, mint: () => string) {
+  return record && !record.executionId ? record.requestId : mint();
 }
 
 /** The executionId `reportStart` returned, or null for an unexpected answer. */

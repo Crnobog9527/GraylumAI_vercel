@@ -16,7 +16,16 @@ export const REPORT_REQUEST_INPUT = 'Generate the confirmed report.';
 const REPORT_LATEST_CANDIDATES = 20;
 export const reportCodes = new Set(['REPORT_DISABLED', 'REPORT_MEMBERSHIP_REQUIRED', 'REPORT_ENTITLEMENTS_UNAVAILABLE',
   'REPORT_SOURCE_CONFLICT', 'REPORT_CONFIRMATION_REQUIRED', 'REPORT_FACTS_TOO_LARGE', 'REPORT_MANIFEST_REQUIRED',
-  'REPORT_PAYG_REQUIRED', 'OPC_CAPTURE_PENDING', 'REPORT_EXECUTION_REQUIRED', 'REPORT_REQUEST_CONFLICT']);
+  'REPORT_PAYG_REQUIRED', 'OPC_CAPTURE_PENDING', 'REPORT_EXECUTION_REQUIRED', 'REPORT_REQUEST_CONFLICT', 'REPORT_ALREADY_EXISTS']);
+/**
+ * A saved report execution blocks a new paid start unless it ended with no text (failed or
+ * cancelled empty): any text (complete, length_limit, stopped) or a run still going or waiting
+ * for credits/resume keeps the round's one report.
+ */
+export function reportBlocksNewStart(saved: { state?: string; result?: { body?: string } | null }) {
+  if (typeof saved.result?.body === 'string' && saved.result.body.length > 0) return true;
+  return !['completed', 'cancelled'].includes(String(saved.state));
+}
 export function reportError(error: unknown): never {
   const message = error instanceof Error ? error.message : typeof error === 'object' && error && 'message' in error ? error.message : null;
   throw new TRPCError({ code: message === 'REPORT_MEMBERSHIP_REQUIRED' ? 'FORBIDDEN' : 'BAD_REQUEST',
@@ -40,6 +49,28 @@ export function reportService(user: SupabaseClient, admin: SupabaseClient, polic
     if (result.error) reportError(result.error);
     return result.data;
   }
+  /**
+   * The newest report execution of this project/round in the session and its saved row, or null.
+   * Read only, through the granted runtime RPCs (the tables are not readable directly):
+   * runtime_view proves the actor owns the session and lists its executions; executions carrying
+   * the report's own request text are then confirmed by their frozen report identity, the same
+   * read reportStatus uses.
+   */
+  async function findLatest(input: z.infer<typeof reportLocate>) {
+    const actorId = await actor();
+    let view: { executions: Array<{ executionId?: unknown; input?: unknown; request?: unknown; createdAt?: unknown }> };
+    try { view = await readNativeRuntimeView(admin, actorId, input.sessionId); } catch { reportError(new Error('REPORT_UNAVAILABLE')); }
+    const candidates = view.executions
+      .filter(item => item.input === REPORT_REQUEST_INPUT && item.request == null && typeof item.executionId === 'string')
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, REPORT_LATEST_CANDIDATES);
+    for (const item of candidates) {
+      const saved = await rpc('runtime_execution', { p_execution_id: item.executionId, p_action: 'read' });
+      const frozen = frozenReport.safeParse(saved?.context?.reportGeneration);
+      if (frozen.success && frozen.data.projectId === input.projectId && frozen.data.roundId === input.roundId)
+        return { executionId: item.executionId as string, saved: saved as { state?: string; result?: { body?: string } | null } };
+    }
+    return null;
+  }
   return {
     async start(value: unknown) {
       const input = reportStart.parse(value);
@@ -52,6 +83,11 @@ export function reportService(user: SupabaseClient, admin: SupabaseClient, polic
         const source = await rpc('report_source', {
           p_session_id: input.sessionId, p_project_id: input.projectId, p_round_id: input.roundId,
         });
+        // One paid report per round: a stale tab or device with a new requestId gets the existing one.
+        // After report_source, so ownership and source refusals keep their own codes.
+        // Simultaneous starts are already serialized by the session's active-execution lock.
+        const existing = await findLatest(input);
+        if (existing && reportBlocksNewStart(existing.saved)) throw new Error('REPORT_ALREADY_EXISTS');
         const snapshot = snapshotSchema.parse(source.snapshot);
         const workflow = workflowSchema.parse(source.workflow);
         if (!workflow.reportGeneration) throw new Error('REPORT_MANIFEST_REQUIRED');
@@ -76,27 +112,9 @@ export function reportService(user: SupabaseClient, admin: SupabaseClient, polic
           organizeAfter: false, sources: [], network: 'deny' });
       } catch (error) { reportError(error); }
     },
-    /**
-     * The newest report execution of this project/round in the session, or null. Read only, through
-     * the granted runtime RPCs (the tables are not readable directly): runtime_view proves the actor
-     * owns the session and lists its executions; executions carrying the report's own request text
-     * are then confirmed by their frozen report identity, the same read reportStatus uses.
-     */
+    /** The newest report execution of this project/round in the session (see findLatest), or null. */
     async latest(value: unknown) {
-      const input = reportLocate.parse(value);
-      const actorId = await actor();
-      let view: { executions: Array<{ executionId?: unknown; input?: unknown; request?: unknown; createdAt?: unknown }> };
-      try { view = await readNativeRuntimeView(admin, actorId, input.sessionId); } catch { reportError(new Error('REPORT_UNAVAILABLE')); }
-      const candidates = view.executions
-        .filter(item => item.input === REPORT_REQUEST_INPUT && item.request == null && typeof item.executionId === 'string')
-        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, REPORT_LATEST_CANDIDATES);
-      for (const item of candidates) {
-        const saved = await rpc('runtime_execution', { p_execution_id: item.executionId, p_action: 'read' });
-        const frozen = frozenReport.safeParse(saved?.context?.reportGeneration);
-        if (frozen.success && frozen.data.projectId === input.projectId && frozen.data.roundId === input.roundId)
-          return { executionId: item.executionId as string };
-      }
-      return { executionId: null };
+      return { executionId: (await findLatest(reportLocate.parse(value)))?.executionId ?? null };
     },
     async status(executionId: string) {
       // No membership check on saved output. Existing SQL checks actor, scope and source permissions.

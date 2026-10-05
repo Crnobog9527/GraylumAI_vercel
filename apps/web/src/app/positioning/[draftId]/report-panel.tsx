@@ -58,7 +58,9 @@ function ReportDialog({ report, busy, onClose }: { report: ReturnType<typeof use
   else if (view?.kind === "report") view.notices.forEach((text, index) => notices.push({ id: "report-note-" + index, tone: "warning", text }));
   else if (view?.kind === "empty") notices.push({ id: "report-empty", tone: "warning", text: view.notice });
   if (status && view?.kind === "waiting") notices.push(...report.payg.turnNotices(status, busy || working));
-  if (report.refusal) notices.push({ id: "report-refusal", tone: "warning", text: report.refusal.text,
+  // An existing report still being written already says so; the "opened" line would only repeat it.
+  const repeats = report.refusal?.opened && (view?.kind === "progress" || Boolean(report.live));
+  if (report.refusal && !repeats) notices.push({ id: "report-refusal", tone: "warning", text: report.refusal.text,
     ...(report.refusal.membership ? { actions: [{ label: REPORT_ACTION.membership,
       onClick: () => void window.open(profileTabHref("subscription"), "_blank", "noopener") }] } : {}) });
   const first = !report.executionId;

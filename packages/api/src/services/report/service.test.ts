@@ -114,3 +114,53 @@ it('latest rejects extra input such as a requestId', async () => {
   const { admin } = latestAdmin([], {});
   await expect(reportService(user as unknown as SupabaseClient, admin, policy).latest({ ...locate, requestId: id })).rejects.toThrow();
 });
+function startAdmin(executions: unknown[], saved: Record<string, { state: string; result: unknown; context: unknown }>) {
+  const past = { reached: false };
+  const rpc = vi.fn(async (name: string, args: { p_execution_id?: string }) => {
+    if (name === 'runtime_admission_replay' || name === 'report_membership_check') return { data: null, error: null };
+    if (name === 'runtime_view') return { data: { sessionId: id, executions }, error: null };
+    if (name === 'runtime_execution') return { data: saved[args.p_execution_id!], error: null };
+    // The source read comes first; reading its snapshot means the one-report check let the start through.
+    if (name === 'report_source') return { data: { get snapshot() { past.reached = true; return null; } }, error: null };
+    return { data: null, error: { message: 'UNEXPECTED_RPC' } };
+  });
+  const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: { value: { enabled: true } }, error: null }) };
+  return { admin: { rpc, from: () => query } as unknown as SupabaseClient, rpc, past };
+}
+const startInput = { ...locate, requestId: randomUUID() };
+it.each([
+  ['a complete report', 'completed', { body: '## One\nx', completeness: 'complete' }],
+  ['a truncated report', 'completed', { body: '## One\nx', completeness: 'length_limit' }],
+  ['a stopped report with text', 'completed', { body: 'x', completeness: 'stopped' }],
+  ['a running report', 'running', null], ['a report waiting for credits', 'waiting_credits', null],
+  ['a report waiting to resume', 'waiting_resume', null], ['a report settling its cost', 'cost_pending', null],
+])('a stale tab with a new requestId is refused when the round has %s', async (_name, state, result) => {
+  const existing = run(REPORT_REQUEST_INPUT, '2026-10-02T00:00:00Z');
+  const { admin, past } = startAdmin([existing], { [existing.executionId]: { state, result, context: frozen(locate.projectId, locate.roundId) } });
+  await expect(reportService(user as unknown as SupabaseClient, admin, policy).start(startInput))
+    .rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'REPORT_ALREADY_EXISTS' });
+  expect(past.reached).toBe(false);
+});
+it.each([['cancelled', null], ['completed', { body: '', completeness: 'complete' }], ['completed', null]])(
+  'a round whose last report ended %s without text still allows a new start', async (state, result) => {
+    const existing = run(REPORT_REQUEST_INPUT, '2026-10-02T00:00:00Z');
+    const { admin, past } = startAdmin([existing], { [existing.executionId]: { state, result, context: frozen(locate.projectId, locate.roundId) } });
+    await expect(reportService(user as unknown as SupabaseClient, admin, policy).start(startInput)).rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
+    expect(past.reached).toBe(true);
+  });
+it('a report of another round or project does not block this round', async () => {
+  const otherRound = run(REPORT_REQUEST_INPUT, '2026-10-02T00:00:00Z'), otherProject = run(REPORT_REQUEST_INPUT, '2026-10-03T00:00:00Z');
+  const done = { state: 'completed', result: { body: 'x', completeness: 'complete' } };
+  const { admin, past } = startAdmin([otherRound, otherProject], {
+    [otherRound.executionId]: { ...done, context: frozen(locate.projectId, randomUUID()) },
+    [otherProject.executionId]: { ...done, context: frozen(randomUUID(), locate.roundId) } });
+  await expect(reportService(user as unknown as SupabaseClient, admin, policy).start(startInput)).rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
+  expect(past.reached).toBe(true);
+});
+it('the same requestId replays the existing execution before any one-report check', async () => {
+  const replayed = { executionId: id, runId: id, state: 'completed' };
+  const rpc = vi.fn(async () => ({ data: replayed, error: null }));
+  const service = reportService(user as unknown as SupabaseClient, { rpc } as unknown as SupabaseClient, policy);
+  expect(await service.start(startInput)).toEqual(replayed);
+  expect(rpc).toHaveBeenCalledOnce();
+});

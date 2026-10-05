@@ -84,9 +84,15 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
         expect(frozen.instructions.match(/Synthetic confirmed fact/g)).toHaveLength(3);
         expect(frozen.request.input).toBe('Generate the confirmed report.');
         if (scenario === 'cancelled') {
+          // A stale tab with a new requestId cannot start a second paid report while the first is admitted.
+          await expect(service.start({ ...input, requestId: randomUUID() })).rejects.toThrow('REPORT_ALREADY_EXISTS');
           const cancelled = await f.admin.rpc('runtime_cancel', { p_actor_id: f.actor, p_execution_id: admitted.executionId });
           expect(cancelled.error).toBeNull(); expect(cancelled.data.state).toBe('cancelled');
-          expect(calls).toBe(0); expect((await service.status(admitted.executionId)).body).toBeNull(); return;
+          expect(calls).toBe(0); expect((await service.status(admitted.executionId)).body).toBeNull();
+          // The round's last report ended without text: a new request is admitted again.
+          const again = await service.start({ ...input, requestId: randomUUID() });
+          expect(again.executionId).not.toBe(admitted.executionId); expect(calls).toBe(0);
+          return;
         }
         if (scenario === 'off_after') await db.query("update system_settings set value='{\"enabled\":false}' where key='runtime_report_generation'");
         if (scenario === 'expired') await db.query("update profiles set membership_level='free' where id=$1", [f.actor]);
@@ -154,6 +160,12 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
           (select count(*)::int from bill2_calls where run_id=$2) calls`, [admitted.executionId, admitted.runId])).rows[0];
         expect(counts).toEqual({ history: 0, batches: 1, calls: 1 });
         expect((await db.query('select revision from runtime_sessions where id=$1', [detail.sessionId])).rows[0].revision).toBe(historyBefore);
+        // One paid report per round: a stale tab's new requestId is refused, the same one replays.
+        // (With the switch off, REPORT_DISABLED answers first; off_after covers that.)
+        if (scenario !== 'off_after')
+          await expect(service.start({ ...input, requestId: randomUUID() })).rejects.toThrow('REPORT_ALREADY_EXISTS');
+        expect(await service.start(input)).toMatchObject({ executionId: admitted.executionId });
+        expect(calls).toBe(1);
         await db.query("update profiles set membership_level='free' where id=$1", [f.actor]);
         const read = await service.status(admitted.executionId);
         expect(read.body).toContain('Report body'); expect(read.candidate).toBe(scenario !== 'length');
