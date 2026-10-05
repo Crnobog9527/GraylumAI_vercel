@@ -1,5 +1,5 @@
 "use client";
-import { readAgentTurnBody } from "@repo/api/src/shared/agentTurn";
+import { readAgentTurnBody, type AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { use, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -22,12 +22,11 @@ import { isDefiniteConfirmConflict } from "./confirm-conflict";
 import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
 import { CHAT_ACTION, ChatInlineNotice, ChatNoticeList, ChatPendingStatus } from "@/components/chat/ChatInlineNotice";
 import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE } from "./mentor-notices";
-import type { AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { useLiveReply } from "./use-live-reply";
-import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope,
-  isCompleteResult, retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice } from "./mentor-turn";
-import type { MentorRequest, MentorStepEnvelope, MentorTurn, MentorExecution } from "./mentor-turn";
+import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, type MentorRequest, type MentorStepEnvelope,
+  isCompleteResult, retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
+import { usePaygResume } from "@/lib/use-payg-resume";
 import {
   confirmationActionIsRedundant,
   confirmQuestionValues,
@@ -216,6 +215,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const history = trpc.runtime.view.useQuery({ sessionId: read.data?.sessionId ?? "" },
     { enabled: Boolean(read.data?.sessionId), refetchInterval: useHistoryPolling(draftId, read.data?.snapshot?.workflow.steps ?? []) });
   const live = useLiveReply(draftId, history.data), liveReply = live.reply;
+  const payg = usePaygResume(() => Promise.all([read.refetch(), history.refetch(), utils.credits.getBalance.invalidate()]));
   const [activeStep, setActiveStep] = useState<string | null>(null);
   const [activeQuestions, setActiveQuestions] = useState<Record<string, string>>({});
   const [confirmingQuestion, setConfirmingQuestion] = useState(false);
@@ -311,7 +311,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     revise.isPending ||
     change.isPending ||
     savePlan.isPending ||
-    handoff.isPending;
+    handoff.isPending || payg.busy;
   useEffect(() => {
     // Hydrate before persisting: initial/StrictMode effects must not overwrite
     // a saved buffer with the render's empty initial state.
@@ -930,9 +930,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     const [draftRead, historyRead] = await Promise.all([read.refetch(), history.refetch()]);
     if (draftRead.error || !draftRead.data || historyRead.error || !historyRead.data)
       throw new Error('OPC_MENTOR_READBACK_UNAVAILABLE');
-    // A still-running execution keeps its envelope and pending bubble until an explicit resume sees a terminal result.
+    // A running execution keeps envelope and bubble until a resume sees a terminal result; a Q1 refusal refills the box.
     if (!settleEnvelope(sessionStorage, key, request.requestId, executionId, result)) return;
-    setPendingBubble(old=>old?.requestId===request.requestId?null:old);
+    setPendingBubble(old=>old?.requestId===request.requestId?null:old);if(!payg.admitted(result))setMentorInput(old=>old.trim()?old:request.input);
     live.clear();
   }
   async function resumeInterruptedOpening() {
@@ -1919,7 +1919,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                             </div>
                           )}
                           {/* Polling follows a running turn; the retry is for one that stopped advancing. */}
-                          <ChatNoticeList notices={[mentorTurnNotice(execution.executionId, reply.notice,
+                          <ChatNoticeList notices={[...payg.turnNotices(execution, busy), mentorTurnNotice(execution.executionId, reply.notice,
                             !busy && execution.executionId === history.data?.activeExecution && !["completed", "cancelled", "running"].includes(execution.state)
                             ? { onClick: () => void run(() => execute.mutateAsync({ executionId: execution.executionId })) } : null)]}/>
                         </div>
@@ -1927,10 +1927,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     })}
                     {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<div data-message-role="user" data-request-id={pendingBubble.requestId} className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3"><span>你 · {d.information[pendingBubble.stepId]?.schema.find((f:{id:string;title:string})=>f.id===pendingBubble.questionId)?.title}</span><p className={`whitespace-pre-wrap ${resultStyles.messageBody}`}>{pendingBubble.input}</p><ChatPendingStatus sending={running}/></div>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="导师正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>导师</span>{liveOnly.text?<MessageMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={liveOnly.text} streaming/>:<p className={`mt-1 ${resultStyles.messageBody}`}>导师正在思考…</p>}</div>}
-                  <ChatNoticeList notices={mentorTailNotices({ livePhase: liveReply?.phase ?? null, saving: hasUnsavedInformation,
-                    error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice, lastTurnText,
+                  <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy), ...mentorTailNotices({ livePhase: liveReply?.phase ?? null,
+                    saving: hasUnsavedInformation, error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice, lastTurnText,
                     recovery: recoveryNeedsUser[0] && !busy
-                      ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })}/>
+                      ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })]}/>
                   {!manualEntry && snap.state === "draft" && !reviewOnly && <section className={resultStyles.currentAction} aria-label="当前问题操作">
                     <strong>当前核对：{activeQuestion.title}</strong>
                     <p>{(infoEdits[step.id]?.[activeQuestion.id] ?? d.information[step.id].values?.[activeQuestion.id])?.value || '先讨论当前问题，或在右侧填写答案。'}</p>

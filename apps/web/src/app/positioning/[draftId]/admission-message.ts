@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {isAnswerSourceDenied} from "./mentor-turn";
 import {gateAdmissionNotice} from "@/lib/runtime-gate-notice";
+import {isOrganizerPendingError,ORGANIZER_PENDING_NOTICE} from "@/lib/payg-wait";
 const admissionPaths=['opc.prepareStep','opc.mentorTurnStream','runtime.prepare'];
 const retained=' 原请求与输入已保留；条件恢复后可继续核对同一请求。';
 /** Only an explicit admission response can replace the unknown-outcome notice.
@@ -10,6 +11,7 @@ const retained=' 原请求与输入已保留；条件恢复后可继续核对同
  * its server text, nor a rate-limit notice it is not. */
 export function admissionMessage(cause:unknown):string|null {
  if(isAnswerSourceDenied(cause))return '这张卡已经过期，请看最新的回复。';
+ if(isOrganizerPendingError(cause))return ORGANIZER_PENDING_NOTICE;
  const gate=gateAdmissionNotice(cause,admissionPaths);
  if(gate)return gate;
  if(!(cause instanceof Error)||!('data' in cause)||!cause.data||typeof cause.data!=='object')return null;

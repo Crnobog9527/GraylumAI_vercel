@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, gateAdmissionNotice, gateResultNotice, isRuntimeGateReason } from '@/lib/runtime-gate-notice';
+import { isPaygWaiting } from '@/lib/payg-wait';
 
 export { OUTPUT_TRUNCATED_NOTICE };
 const videoGatePrefix = 'OPC_CONTENT_GATE_';
@@ -73,9 +74,12 @@ export function userStopIds(storage: GateStopStorage | null, sessionId: string, 
   });
 }
 
-/** A cancelled round with no saved body is finished: there is nothing left to verify or show. */
+/**
+ * A cancelled round with no saved body is finished: there is nothing left to verify or show.
+ * A paused round without a saved body shows only its pause notice.
+ */
 export function showsReply(execution: { state: string; body: string | null; primaryBody: string | null }) {
-  return !(execution.state === 'cancelled' && !(execution.body ?? execution.primaryBody));
+  return !((execution.state === 'cancelled' || isPaygWaiting(execution.state)) && !(execution.body ?? execution.primaryBody));
 }
 
 /**

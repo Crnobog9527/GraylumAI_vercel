@@ -15,8 +15,11 @@ export const UNMATCHED_POLL_MS = 30000;
 export const HISTORY_RETRY_MS = 5000;
 export const HISTORY_RETRY_LIMIT = 10;
 
-/** Execution states that will not change any more (see runtime_sessions' state check). */
-const TERMINAL_STATES = ["completed", "cancelled", "cost_pending"];
+/**
+ * Execution states that will not change any more (see runtime_sessions' state check). A BILL-PAYG
+ * pause only changes on the user's explicit "继续" (runtime.resume), never through an envelope.
+ */
+const TERMINAL_STATES = ["completed", "cancelled", "cost_pending", "waiting_credits", "waiting_resume"];
 /** States the server is still advancing by itself. `interrupted` waits for an explicit resume. */
 const PROGRESSING_STATES = ["prepared", "running"];
 

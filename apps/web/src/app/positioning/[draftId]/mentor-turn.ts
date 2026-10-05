@@ -2,6 +2,7 @@
 import type { AgentTurnEvent, AgentTurnOutcome, QuestionAnswerSource } from "@repo/api/src/shared/agentTurn";
 import { OPENING_INPUT, openingRequestId } from "@repo/api/src/shared/opcQuestions";
 import { gateResultNotice, PROVIDER_HISTORY_NOTICE } from "@/lib/runtime-gate-notice";
+import { blockedAdmission, type PaygViewFields } from "@/lib/payg-wait";
 
 /** One mentor turn as sent to `opc.mentorTurnStream` (same input as `opc.prepareStep`). */
 export type MentorRequest = {
@@ -96,10 +97,12 @@ export function openingRequest(draftId: string, roundId: string, stepId: string,
 /**
  * True once the execution will not change any more. `pending` means another
  * reader (for example the interrupted first stream) still owns a running
- * execution: its result is not known yet.
+ * execution: its result is not known yet. A Q1 refusal (`admitted: false`,
+ * #632) is final for this request: it was never stored, so nothing remains to
+ * recover and its envelope is released (the page puts the text back).
  */
 export function isTerminalTurn(result: AgentTurnOutcome) {
-  return result.state !== "pending";
+  return result.admitted === false || result.state !== "pending";
 }
 
 /**
@@ -184,6 +187,9 @@ export async function readAgentTurn(
   } finally {
     handlers.onFinished?.();
   }
+  // Q1: the previous organizer answered with only a result; the new request has no execution.
+  const blocked = result && blockedAdmission(result);
+  if (blocked && !executionId) return { executionId: blocked.executionId, result: result! };
   if (!executionId || !result) throw new Error(STREAM_INTERRUPTED);
   return { executionId, result };
 }
@@ -193,7 +199,8 @@ export async function readAgentTurn(
  * Output truncation has none: the turn itself shows it once (mentorReplyDisplay).
  */
 export function turnResultNotice(result: AgentTurnOutcome): string | null {
-  if (result.unavailable === "output_truncated") return null;
+  // A Q1 refusal is shown with its "继续" by the page's pause notices (payg-wait.ts).
+  if (result.unavailable === "output_truncated" || blockedAdmission(result)) return null;
   if (result.unavailable === "provider_history")
     return PROVIDER_HISTORY_NOTICE;
   if (result.unavailable === "preflight") return "本次执行在模型派发前检查失败，已停止并保留原记录。请核对服务状态后再继续，不会自动重放。";
@@ -201,7 +208,7 @@ export function turnResultNotice(result: AgentTurnOutcome): string | null {
 }
 
 export type MentorTurn = { executionId: string; roundId?: string | null; stepId: string; questionId: string | null; kind: string };
-export type MentorExecution = {
+export type MentorExecution = PaygViewFields & {
     request?: MentorRequest | null;
     unavailableReason?: string | null;
     historyOmitted?: boolean;
