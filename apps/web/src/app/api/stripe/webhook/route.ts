@@ -14,6 +14,8 @@ import {
   syncSubscriptionState,
   upsertPaymentOrderBySession,
 } from '@repo/api/src/services/stripeFulfillment';
+import { reportPaymentEvidenceConflict } from '@/lib/payment-alert.mjs';
+import { PAYMENT_EVIDENCE_CONFLICT, stripeWebhookErrorCode } from '@repo/api/src/services/payments/stripeWebhookError';
 import { logServerError } from '@/lib/server-log';
 
 export const runtime = 'nodejs';
@@ -28,8 +30,7 @@ export async function handleStripeWebhookEvent(
 ) {
   switch (event.type) {
     case 'checkout.session.completed': {
-      const session = event.data.object;
-      await upsertPaymentOrderBySession(supabase, session, {
+      const session = await upsertPaymentOrderBySession(supabase, event.data.object, {
         eventType: event.type,
       });
       if (session.mode === 'payment' && session.payment_status === 'paid') {
@@ -41,8 +42,7 @@ export async function handleStripeWebhookEvent(
       break;
     }
     case 'checkout.session.async_payment_succeeded': {
-      const session = event.data.object;
-      await upsertPaymentOrderBySession(supabase, session, {
+      const session = await upsertPaymentOrderBySession(supabase, event.data.object, {
         eventType: event.type,
       });
       await fulfillCreditPackageOrder(supabase, session);
@@ -111,10 +111,14 @@ export async function POST(request: Request) {
 
   try {
     await handleStripeWebhookEvent(supabase, event);
-  } catch {
-    logServerError('billing', 'stripe_webhook_handler_failed', {
-      eventType: event.type,
-    });
+  } catch (error) {
+    const code = stripeWebhookErrorCode(error);
+    logServerError('billing', 'stripe_webhook_handler_failed', { eventType: event.type, code });
+    if (code === PAYMENT_EVIDENCE_CONFLICT) {
+      // This error is caught here, so Next's uncaught request-error hook does not report it.
+      // Emit only a fixed message and structural tags; never send the payment payload.
+      reportPaymentEvidenceConflict(event.type);
+    }
     return new Response('Webhook handler failed', { status: 500 });
   }
 

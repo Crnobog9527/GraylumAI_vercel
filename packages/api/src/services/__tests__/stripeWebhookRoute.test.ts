@@ -5,6 +5,10 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import Stripe from 'stripe';
+
+const alertMocks = vi.hoisted(() => ({ captureMessage: vi.fn(), logServerError: vi.fn() }));
+vi.mock('../../../../../apps/web/node_modules/@sentry/nextjs', () => ({ captureMessage: alertMocks.captureMessage }));
 
 const stripeServiceMocks = vi.hoisted(() => ({
   createServiceRoleSupabaseClient: vi.fn(),
@@ -25,15 +29,68 @@ const stripeFulfillmentMocks = vi.hoisted(() => ({
 vi.mock('@repo/api/src/services/stripe', () => stripeServiceMocks);
 vi.mock('@repo/api/src/services/stripeFulfillment', () => stripeFulfillmentMocks);
 vi.mock('@/lib/server-log', () => ({
-  logServerError: vi.fn(),
+  logServerError: alertMocks.logServerError,
 }));
 
-import { handleStripeWebhookEvent } from '../../../../../apps/web/src/app/api/stripe/webhook/route';
+import { handleStripeWebhookEvent, POST } from '../../../../../apps/web/src/app/api/stripe/webhook/route';
 
 describe('stripe webhook route', () => {
   beforeEach(() => {
+    Object.values(alertMocks).forEach((mock) => mock.mockReset());
     Object.values(stripeServiceMocks).forEach((mock) => mock.mockReset());
     Object.values(stripeFulfillmentMocks).forEach((mock) => mock.mockReset());
+  });
+
+  it.each(['PAY_COMMON_RECEIPT_MISMATCH', 'PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH'])(
+    'reports signed payment evidence conflict %s through existing logs and Sentry', async (reason) => {
+      const event = { type: 'checkout.session.completed', data: { object: { id: 'cs_fixture' } } };
+      const stripe = new Stripe('fixture-client');
+      const rawBody = JSON.stringify(event);
+      const signature = stripe.webhooks.generateTestHeaderString({ payload: rawBody, secret: 'fixture-signature-secret' });
+      const constructEvent = vi.fn(stripe.webhooks.constructEvent.bind(stripe.webhooks));
+      stripeServiceMocks.getStripeClient.mockReturnValue({ webhooks: { constructEvent } });
+      stripeServiceMocks.getStripeWebhookSecret.mockReturnValue('fixture-signature-secret');
+      stripeFulfillmentMocks.upsertPaymentOrderBySession.mockRejectedValue(new Error('write failed', { cause: { message: reason } }));
+      const response = await POST(new Request('https://example.test/api/stripe/webhook', {
+        method: 'POST', headers: { 'stripe-signature': signature }, body: rawBody,
+      }));
+      expect(constructEvent).toHaveBeenCalledWith(rawBody, signature, 'fixture-signature-secret');
+      expect(response.status).toBe(500);
+      expect(alertMocks.logServerError).toHaveBeenCalledWith('billing', 'stripe_webhook_handler_failed', {
+        code: 'PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT', eventType: event.type,
+      });
+      expect(alertMocks.captureMessage).toHaveBeenCalledWith('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT', {
+        level: 'error', fingerprint: ['PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT'],
+        tags: { category: 'billing', code: 'PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT', eventType: event.type },
+      });
+      expect(stripeFulfillmentMocks.fulfillCreditPackageOrder).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects an invalid signature without classifying untrusted content as a financial conflict', async () => {
+    stripeServiceMocks.getStripeClient.mockReturnValue(new Stripe('fixture-client'));
+    stripeServiceMocks.getStripeWebhookSecret.mockReturnValue('fixture-signature-secret');
+    const response = await POST(new Request('https://example.test/api/stripe/webhook', {
+      method: 'POST', headers: { 'stripe-signature': 'invalid' }, body: 'untrusted',
+    }));
+    expect(response.status).toBe(400);
+    expect(alertMocks.logServerError).toHaveBeenCalledWith('billing', 'stripe_webhook_invalid_signature');
+    expect(alertMocks.captureMessage).not.toHaveBeenCalled();
+    expect(stripeServiceMocks.createServiceRoleSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it('keeps a signed event transport failure retryable without a payment conflict alarm', async () => {
+    const event = { type: 'invoice.paid', data: { object: { id: 'in_fixture' } } };
+    stripeServiceMocks.getStripeClient.mockReturnValue({ webhooks: { constructEvent: () => event } });
+    stripeFulfillmentMocks.fulfillMembershipInvoice.mockRejectedValue(new Error('ETIMEDOUT'));
+    const response = await POST(new Request('https://example.test/api/stripe/webhook', {
+      method: 'POST', headers: { 'stripe-signature': 'fixture-signature' }, body: 'fixture-body',
+    }));
+    expect(response.status).toBe(500);
+    expect(alertMocks.logServerError).toHaveBeenCalledWith('billing', 'stripe_webhook_handler_failed', {
+      code: 'PAY_COMMON_WEBHOOK_HANDLER_FAILED', eventType: 'invoice.paid',
+    });
+    expect(alertMocks.captureMessage).not.toHaveBeenCalled();
   });
 
   it.each(['refund.created', 'refund.updated', 'refund.failed', 'charge.refund.updated', 'charge.refunded'])(
@@ -102,6 +159,7 @@ describe('stripe webhook route', () => {
     };
 
     stripeServiceMocks.getStripeClient.mockReturnValue(stripe);
+    stripeFulfillmentMocks.upsertPaymentOrderBySession.mockResolvedValue(session);
 
     await handleStripeWebhookEvent(supabase, event as any);
 

@@ -33,15 +33,61 @@ const admin = client(process.env.ERASURE_SERVICE_JWT!);
 const anonKey = process.env.ERASURE_ANON_JWT!;
 const PASSWORD = 'fixture-password-1';
 
-async function createAccount(label: string, role: 'user' | 'admin' = 'user', nickname: string = label) {
+async function createAccount(label: string, role: 'user' | 'admin' = 'user', nickname: string = label, credits = 40) {
   const email = `${label}-${crypto.randomUUID().slice(0, 8)}@example.test`;
   const { data, error } = await admin.auth.admin.createUser({ email, password: PASSWORD, email_confirm: true });
   if (error || !data.user) throw error ?? new Error('createUser');
   const { error: profileError } = await admin.from('profiles').insert({
-    id: data.user.id, email, nickname, role, status: 'active', membership_level: 'free', credits: 40,
+    id: data.user.id, email, nickname, role, status: 'active', membership_level: 'free', credits,
   });
   if (profileError) throw profileError;
   return { id: data.user.id, email };
+}
+
+// Use the same transaction boundary as purchases; derived Stripe columns are protected.
+// All clients above are restricted to the disposable local PostgREST/Auth endpoints.
+async function createRenewingSubscription(userId: string) {
+  const found = await admin.from('membership_plans').select('id').eq('level', 'pro').maybeSingle();
+  expect(found.error).toBeNull();
+  const values = { name: 'Erasure fixture', level: 'pro', monthly_price: 100, monthly_credits: 1,
+    monthly_bonus_credits: 0, is_active: 'true', allow_fusion_review: false,
+    allow_fusion_compare: false, library_storage_bytes: 0 };
+  const saved = found.data
+    ? await admin.from('membership_plans').update(values).eq('id', found.data.id).select('id').single()
+    : await admin.from('membership_plans').insert(values).select('id').single();
+  expect(saved.error).toBeNull();
+  const planId = saved.data!.id;
+  const providerSuffix = userId.replaceAll('-', '');
+  const priceId = `price_erasure_${providerSuffix}`;
+  const invoiceId = `in_erasure_${providerSuffix}`;
+  const reference = await admin.from('payment_provider_refs').insert({ channel: 'stripe',
+    merchant_namespace: 'acct_erasure_fixture', mode: 'test', object_type: 'price', external_id: priceId,
+    membership_plan_id: planId, billing_cycle: 'monthly', is_current: true });
+  expect(reference.error).toBeNull();
+  const purchase = await admin.rpc('pay_common_create_purchase', { p_user_id: userId,
+    p_item_type: 'membership_plan', p_item_id: planId, p_billing_cycle: 'monthly',
+    p_merchant_namespace: 'acct_erasure_fixture', p_payment_mode: 'test', p_expected_level: 'free' });
+  expect(purchase.error).toBeNull();
+  const orderId = purchase.data.id;
+  const recorded = await admin.rpc('pay_common_record_checkout', { p_order_id: orderId,
+    p_merchant_namespace: 'acct_erasure_fixture', p_payment_mode: 'test', p_session: {
+      id: `cs_erasure_${providerSuffix}`, object: 'checkout.session', livemode: false, mode: 'subscription',
+      client_reference_id: userId, metadata: { orderId, userId, itemId: planId,
+        itemType: 'membership_plan', billingCycle: 'monthly', priceId },
+      amount_total: 100, currency: 'usd', payment_status: 'paid', status: 'complete', invoice: invoiceId,
+    } });
+  expect(recorded.error).toBeNull();
+  expect(recorded.data).toMatchObject({ ok: true });
+  const granted = await admin.rpc('atomic_grant_subscription_invoice_credits', {
+    p_user_id: userId, p_membership_plan_id: planId, p_stripe_subscription_id: `sub_erasure_${providerSuffix}`,
+    p_stripe_invoice_id: invoiceId, p_source_order_id: orderId, p_amount_total: 100,
+    p_grant_period_key: `invoice:${invoiceId}`, p_period_start: '2026-09-30T00:00:00Z',
+    p_period_end: '2026-10-30T00:00:00Z', p_credits_granted: 1, p_membership_level: 'pro',
+    p_idempotency_key: `erasure-invoice:${invoiceId}`,
+    p_metadata: { stripeSubscriptionStatus: 'active', stripeSubscriptionUserId: userId },
+  });
+  expect(granted.error).toBeNull();
+  expect(granted.data).toMatchObject([{ granted: true }]);
 }
 
 async function signIn(email: string) {
@@ -91,7 +137,8 @@ it('P1 regression: after the migration a signed-in user still updates their own 
 });
 
 it('T09/T11: renewal blocks, fresh password re-auth closes, Auth access and client reads end', async () => {
-  const owner = await createAccount('owner');
+  // The one-credit fixture purchase brings this account to the original 40-credit baseline.
+  const owner = await createAccount('owner', 'user', 'owner', 39);
   const bystander = await createAccount('bystander');
   const { session, tokens } = await signIn(owner.email);
   const other = await signIn(bystander.email);
@@ -100,9 +147,7 @@ it('T09/T11: renewal blocks, fresh password re-auth closes, Auth access and clie
   const { data: convo, error: convoError } = await session.from('conversations')
     .insert({ user_id: owner.id, title: 'Synthetic PR-A conversation' }).select('id').single();
   expect(convoError).toBeNull();
-  await admin.from('user_subscriptions').insert({
-    user_id: owner.id, stripe_subscription_id: `sub_${owner.id}`, status: 'active', current_period_end: '2026-10-30T00:00:00Z',
-  });
+  await createRenewingSubscription(owner.id);
 
   const account = caller(owner.id, session);
   await expect(account.erasurePreview()).resolves.toMatchObject({ credits: 40, subscriptionRenewing: true, closed: false });

@@ -16,7 +16,7 @@ for (const path of ['.env', '.env.local', 'apps/web/.env.local', 'packages/api/.
 }
 const env = { PATH: process.env.PATH, HOME: process.env.HOME };
 const command = (cmd, args, input) => execFileSync(cmd, args, {
-  cwd: root, env, input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+  cwd: root, env, input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024,
 }).trim();
 const endpoint = command('docker', ['context', 'inspect', '--format', '{{.Endpoints.docker.Host}}']);
 if (!endpoint.startsWith('unix:///') || endpoint.includes('\n')) throw new Error('Require local Unix Docker');

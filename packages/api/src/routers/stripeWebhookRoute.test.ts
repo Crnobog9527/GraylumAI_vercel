@@ -219,7 +219,7 @@ describe('stripe webhook route refund routing', () => {
     expect(routeMocks.logServerError).toHaveBeenCalledWith(
       'billing',
       'stripe_webhook_handler_failed',
-      { eventType: 'customer.subscription.deleted' },
+      { eventType: 'customer.subscription.deleted', code: 'PAY_COMMON_WEBHOOK_HANDLER_FAILED' },
     );
   });
 
@@ -254,7 +254,7 @@ describe('stripe webhook route refund routing', () => {
     expect(routeMocks.logServerError).toHaveBeenCalledWith(
       'billing',
       'stripe_webhook_handler_failed',
-      { eventType: 'refund.created' },
+      { eventType: 'refund.created', code: 'PAY_COMMON_WEBHOOK_HANDLER_FAILED' },
     );
   });
 });

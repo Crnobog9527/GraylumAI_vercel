@@ -174,9 +174,6 @@
     }
   },
   "src/routers/payments.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 16
-    },
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
@@ -355,7 +352,7 @@
   },
   "src/services/__tests__/stripeFulfillment.test.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 30
+      "count": 26
     }
   },
   "src/services/__tests__/stripeWebhookRoute.test.ts": {
@@ -471,7 +468,7 @@
   },
   "src/services/membershipEligibility.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 2
+      "count": 1
     }
   },
   "src/services/opc/opc.integration.ts": {
@@ -558,9 +555,6 @@
   },
   "src/services/stripeFulfillment.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 6
-    },
-    "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
