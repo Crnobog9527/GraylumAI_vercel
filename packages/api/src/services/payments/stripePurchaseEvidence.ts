@@ -39,10 +39,72 @@ type EvidenceDb = {
   rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }>;
 };
 
+function objectId(value: string | { id: string } | null) {
+  return typeof value === 'string' ? value : value?.id ?? null;
+}
+
+async function assertUnpaidIntent(input: {
+  stripe: Pick<Stripe, 'paymentIntents' | 'charges'>;
+  session: Stripe.Checkout.Session;
+  order: CheckoutEvidenceOrder;
+  scope: StripeScope;
+}) {
+  const { stripe, session, order, scope } = input;
+  const intentId = objectId(session.payment_intent);
+  if (!intentId) throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
+  // Use the same authenticated client as the original scoped Checkout read. Expanded
+  // objects, last_payment_error and a browser cancellation are not payment evidence.
+  const intent = await stripe.paymentIntents.retrieve(intentId);
+  if (intent.id !== intentId || intent.object !== 'payment_intent'
+    || intent.metadata?.orderId !== order.id || intent.metadata?.userId !== order.user_id
+    || objectId(intent.customer) !== objectId(session.customer)) {
+    throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
+  }
+  assertPurchaseReceipt({ snapshot: order.purchase_snapshot, amount: intent.amount,
+    currency: intent.currency, livemode: intent.livemode, scope });
+  if (!(intent.status === 'canceled' || (session.status === 'expired' && intent.status === 'requires_payment_method'))
+    || intent.amount_received !== 0 || intent.amount_capturable !== 0) {
+    throw new Error('PAY_COMMON_ATTEMPT_NOT_TERMINAL');
+  }
+  const snapshot = freezePurchaseSnapshot(order.purchase_snapshot);
+  if (intent.metadata.itemId !== snapshot.item_id || intent.metadata.itemType !== snapshot.item_type
+    || intent.metadata.billingCycle !== snapshot.billing_cycle
+    || !intent.metadata.priceId || intent.metadata.priceId !== session.metadata?.priceId) {
+    throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
+  }
+  const latestCharge = objectId(intent.latest_charge);
+  let latestSeen = latestCharge === null;
+  let cursor: string | undefined;
+  // A failed latest charge alone does not prove the absence of earlier successful charges.
+  // Bound the scan; an incomplete or malformed response leaves the purchase unresolved.
+  for (let page = 0; page < 10; page++) {
+    const charges = await stripe.charges.list({ payment_intent: intentId, limit: 100,
+      ...(cursor ? { starting_after: cursor } : {}) });
+    if (!Array.isArray(charges.data) || typeof charges.has_more !== 'boolean') break;
+    for (const charge of charges.data) {
+      if (charge.object !== 'charge' || !charge.id || objectId(charge.payment_intent) !== intentId
+        || charge.livemode !== (scope.mode === 'live') || charge.currency !== intent.currency
+        || charge.amount !== intent.amount || objectId(charge.customer) !== objectId(intent.customer)
+        || charge.status !== 'failed' || charge.paid !== false || charge.amount_captured !== 0) {
+        throw new Error('PAY_COMMON_ATTEMPT_NOT_TERMINAL');
+      }
+      if (charge.id === latestCharge) latestSeen = true;
+    }
+    if (!charges.has_more) {
+      if (latestSeen) return;
+      break;
+    }
+    const next = charges.data.at(-1)?.id;
+    if (!next || next === cursor) break;
+    cursor = next;
+  }
+  throw new Error('PAY_COMMON_ATTEMPT_NOT_TERMINAL');
+}
+
 // The caller supplies the original order and its mapped external session, never a browser's
 // claim that checkout was canceled. Network failure leaves the original intent unresolved.
 export async function closeExpiredStripeCheckout(input: {
-  stripe: Pick<Stripe, 'checkout'>;
+  stripe: Pick<Stripe, 'checkout' | 'paymentIntents' | 'charges'>;
   supabase: EvidenceDb;
   order: CheckoutEvidenceOrder;
   mappedSessionId: string;
@@ -55,7 +117,7 @@ export async function closeExpiredStripeCheckout(input: {
   if (session.id !== input.mappedSessionId || session.object !== 'checkout.session'
     || session.client_reference_id !== order.user_id || session.metadata?.orderId !== order.id
     || session.metadata?.userId !== order.user_id || session.status !== 'expired'
-    || session.payment_status !== 'unpaid' || session.payment_intent || session.subscription) {
+    || session.payment_status !== 'unpaid' || session.subscription) {
     throw new Error('PAY_COMMON_ATTEMPT_NOT_TERMINAL');
   }
   const snapshot = assertPurchaseReceipt({ snapshot: order.purchase_snapshot, amount: session.amount_total,
@@ -63,6 +125,7 @@ export async function closeExpiredStripeCheckout(input: {
   if (session.mode !== (snapshot.item_type === 'membership_plan' ? 'subscription' : 'payment')) {
     throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
   }
+  if (session.payment_intent) await assertUnpaidIntent({ ...input, session });
   const result = await input.supabase.rpc('pay_common_close_checkout', {
     p_user_id: order.user_id, p_order_id: order.id, p_session_id: session.id,
     p_merchant_namespace: scope.merchant, p_payment_mode: scope.mode,

@@ -35,7 +35,7 @@ describe('authoritative Stripe purchase evidence', () => {
   function fixture(value: unknown = session) {
     const retrieve = vi.fn().mockResolvedValue(value);
     const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
-    return { retrieve, rpc, args: { stripe: { checkout: { sessions: { retrieve } } } as unknown as Pick<Stripe, 'checkout'>,
+    return { retrieve, rpc, args: { stripe: { checkout: { sessions: { retrieve } } } as unknown as Pick<Stripe, 'checkout' | 'paymentIntents' | 'charges'>,
       supabase: { rpc }, order, mappedSessionId: session.id, scope } };
   }
   it('retrieves the mapped session and closes only after verified expiry', async () => {
