@@ -21,6 +21,9 @@ B2 在 OPC 导师准入传入 H1 已导出的 `hostTurnContextSchema`，固定 s
 兼容机制，不删已捕获内容、不回退数据库。已冻结请求由既有 Runtime 续完，新请求恢复旧宿主路径。
 B2+F1 应相邻发布/整体协调撤回：仅后端就绪不代表旧逐题界面已完成产品验收。
 
+v2 历史解析使用共享只读解析器，返回独立 capture 投影；旧 informationPatch 留空，避免旧浏览器自动写回。
+旧 targetStepId/informationPatch 仍按原路径读取。SQL/TS 对照覆盖格式拒绝、非法状态、字段定位与 Unicode 字符边界。
+
 无新表、RPC、迁移、持久化框架。0176 留给 #665；本 PR 不占用0177，与 #674 无迁移编号竞争。
 不改 #665 的采样、报价及宿主预算文件；与 #672 仅共享代码尺寸基线文件，不同条目（本 PR 降低 OPC
 service 条目），后合并者同步。Runtime 既有集成测试的开场标识与有界 RPC 次数随真实行为更新。
@@ -31,8 +34,8 @@ service 条目），后合并者同步。Runtime 既有集成测试的开场标�
 - PASS：API 单测5020，跳过12；API/Web类型检查、API lint及修改的Web文件lint；Web历史解析单测18项。
 - PASS：完整普通/开场/卡片回答 wire 快照。
 - PASS：H1 前缀相关回归、冻结材料与焦点、旧请求/修改输入拒绝、完整清单、整理容量保护。
-- PASS：B2核心一次性 PostgreSQL/PostgREST Runtime 回归343项、跳过5项（原配置的浏览器/HTTP专属用例）。
-- 新增SQL/TS解析对照后的本机完整回归进行中，最终结果以PR更新为准。
+- PASS：最终一次性 PostgreSQL/PostgREST Runtime 回归343项、跳过5项（原配置的浏览器/HTTP专属用例），含SQL/TS解析对照。
+- CI：最后观察仍在排队，不能记为通过。最终远程检查与独立审查以PR当前版本为准。
 - NOT_RUN：真实模型质量、真实缓存命中、独立语义审查、B2+F1 staging 浏览器验收。
 - 远端数据库、环境配置、充值和合并：未执行。
 
