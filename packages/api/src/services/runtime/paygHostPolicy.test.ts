@@ -16,10 +16,10 @@ function fixture() {
     templateTokens:4096,marginTokens:4096,maxBytes:196608,maxMessages:128,maxTools:2,maxSchemaBytes:16384,
     purposes:['ordinary','skill','organizer','skill_matching','attached_organizer'],
     requestFormats:['serial-tools-v2','agent-turn-v5-stream','serial-tools-v4-stream','serial-tools-v6-reasoning'],
-    reasoningVariants:[{reasoning:{parameter:'none'},outputLimit:8192,evidenceReference:'test-only',
+    reasoningVariants:[{reasoning:{parameter:'none'},outputLimit:8192,testedOutputLimit:512,evidenceReference:'test-only',
       manifestHash:'b'.repeat(64),outputStressSamples:2,includesReasoning:true}],outputLimit:8192,expiresAt:'2099-01-01T00:00:00Z',
     evidence:{reference:'test-only',manifestHash:'a'.repeat(64),distinctSamples:60,messageStressSamples:12,maxVerifiedMessages:128,completeCells:15,variantsPerCell:4,
-      maxPromptToBytes:0.5,maxPromptToUpper:0.4,outputLimit:8192,includesReasoning:true,cacheCovered:true,costBoundPassed:true} };
+      maxPromptToBytes:0.5,maxPromptToUpper:0.4,outputLimit:8192,testedOutputLimit:512,outputSemantics:'max-tokens-includes-reasoning',includesReasoning:true,cacheCovered:true,costBoundPassed:true} };
   const policy: StagingPolicy['callPolicies'][number] = { modelId:id,model:profile.model,provider:'openrouter',
     account:'test-only',protocol:'openrouter-chat-v1',inputLimit:196608,outputLimit:8192,upperUsd:'1',
     automaticRetry:false,hiddenTools:false,lookupSupported:true,
@@ -94,11 +94,26 @@ it('legacy serialized emergency off is honored, while malformed string values fa
  await expect(f.run()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
 });
 
-it('512-token evidence admits 512 but never extrapolates to 8192',async()=>{
- const f=fixture();f.profile.outputLimit=512;f.profile.evidence.outputLimit=512;
- f.profile.reasoningVariants[0].outputLimit=512;
- await expect(f.run('ordinary',512)).resolves.toBeDefined();
- await expect(f.run('ordinary',8192)).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
- f.profile.reasoningVariants[0].outputLimit=8192;
- await expect(f.run('ordinary',512)).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+it.each([512,2048])('strict truncation semantics tested at %i permit the authorized 8192 cap',async tested=>{
+ const f=fixture();f.profile.evidence.testedOutputLimit=tested;
+ f.profile.reasoningVariants[0].testedOutputLimit=tested;
+ await expect(f.run('ordinary',8192)).resolves.toBeDefined();
+ await expect(f.run('ordinary',8193)).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});
+it.each([
+ (f:ReturnType<typeof fixture>)=>{delete (f.profile.evidence as Partial<PaygHostProfile['evidence']>).testedOutputLimit;},
+ f=>{delete (f.profile.evidence as Partial<PaygHostProfile['evidence']>).outputSemantics;},
+ f=>{f.profile.evidence.testedOutputLimit=2048;},
+ f=>{f.profile.reasoningVariants[0].testedOutputLimit=0;},
+ f=>{f.profile.reasoningVariants[0].testedOutputLimit=8193;},
+ f=>{f.profile.reasoningVariants[0].outputStressSamples=1;},
+ f=>{Reflect.set(f.profile.reasoningVariants[0],'includesReasoning',false);},
+ f=>{Reflect.set(f.profile.evidence,'outputSemantics','completion-excludes-reasoning');},
+ f=>{f.profile.outputLimit=8193;},
+])('rejects missing or inconsistent semantic evidence (%#)',async mutate=>{
+ const f=fixture();mutate(f);await expect(f.run()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});
+it('each requested reasoning setting independently needs two semantic probes',async()=>{
+ const f=fixture();f.profile.reasoningVariants.push({...f.profile.reasoningVariants[0],reasoning:{effort:'low'},outputStressSamples:1});
+ await expect(f.run()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
 });

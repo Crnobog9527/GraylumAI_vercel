@@ -19,6 +19,8 @@ const admittedRoutes: Readonly<Record<string,string>> = {
 const phase = z.enum(['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer', 'report']);
 /** Trusted admin configuration, never a browser admission field. Evidence references
  * must identify independently checked real samples; fixture results are not evidence. */
+// Small-cap probes establish truncation semantics; outputLimit is the separately authorized profile cap.
+// Each reasoning variant still needs two exact-length hits at the recorded testedOutputLimit.
 export const paygHostProfile = z.object({
   model: reference, endpointTag: reference, protocol: z.literal('openrouter-chat-v1'),
   profileVersion: reference, evidenceVersion: reference,
@@ -32,6 +34,7 @@ export const paygHostProfile = z.object({
   reasoningVariants: z.array(z.object({
     reasoning: reasoningPolicy,
     outputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
+    testedOutputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
     evidenceReference: reference, manifestHash: z.string().regex(/^[a-f0-9]{64}$/),
     outputStressSamples: z.number().int().min(2), includesReasoning: z.literal(true),
   }).strict()).min(1).max(16),
@@ -43,10 +46,13 @@ export const paygHostProfile = z.object({
     completeCells: z.literal(15), variantsPerCell: z.literal(4),
     maxPromptToBytes: z.number().positive().max(0.7), maxPromptToUpper: z.number().positive().max(0.7),
     outputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
+    testedOutputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
+    outputSemantics: z.literal('max-tokens-includes-reasoning'),
     includesReasoning: z.literal(true), cacheCovered: z.literal(true), costBoundPassed: z.literal(true),
   }).strict(),
 }).strict().refine(p => p.outputLimit <= p.evidence.outputLimit
-  && p.reasoningVariants.every(v => v.outputLimit <= p.evidence.outputLimit),
+  && p.reasoningVariants.every(v => v.outputLimit <= p.evidence.outputLimit
+    && v.testedOutputLimit === p.evidence.testedOutputLimit),
 { message: 'PAYG_OUTPUT_EVIDENCE_REQUIRED' });
 export const paygHostSettings = z.object({
   version: z.literal(1), enabled: z.boolean(), windowId: z.string().uuid(),

@@ -39,7 +39,7 @@ NODE_USE_ENV_PROXY=1 NO_PROXY= no_proxy= https_proxy= node scripts/payg-profile-
 前三批已入账 $4.8101395；累计预留包含 r4 和 r5 全部上界，共 $10.799494625，必须小于 $25。
 同一用户依序运行；兄弟批次已加锁但无最终报告、费用未知或超过其预留时，在加锁和网络前停止，不自动恢复。
 输出压力 Sonnet O=2048，Luna/Gemini O=512；原生 completion（含 reasoning）必须等于 O 且 finish_reason=length。
-否则即使费用和 token 未超界，也为 OUTPUT_CAP_NOT_REACHED 停批，不补跑。profile 上限不得外推到 8192。
+否则即使费用和 token 未超界，也为 OUTPUT_CAP_NOT_REACHED 停批，不补跑。小上限证明截断语义，见下述字段区分。
 
 finish_reason=content_filter 或 native_finish_reason=refusal（response 或原 ID lookup）立即记
 PROVIDER_CONTENT_REFUSED 并停批；response 已识别时不再查账，lookup 识别后不再继续查账。
@@ -154,3 +154,12 @@ Google 页面覆盖 Gemini API，不是 OpenRouter Vertex 路由的可用性承�
 旧第三方国家查询被限流/质询；切换同域 trace，无新增查询回退入口。主窗口报告的 loc=US
 不代替本执行器下一次启动时的检查。本轮只做合成测试，不查询真实出口或发送模型请求。
 清单 `596c57a3…a10ef7`、样本及费用上界保持不变。最终迁移编号按最新安排为 0175，本轮不改迁移。
+
+## 输出语义证据与 profile 上限（2026-10-06）
+
+依据[主窗口决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5999661106)，
+`evidence.testedOutputLimit` 和各 reasoning variant 的 `testedOutputLimit` 记录实际探针上限；同一模型本轮使用相同上限。
+每种参数至少两条 length 且 completion（含 reasoning）精确等于测试上限，才能声明 `outputSemantics=max-tokens-includes-reasoning`。
+`evidence.outputLimit`、variant/outputLimit、profile/outputLimit 则记录经审查允许的用途上限，可为 PURPOSE_OUTPUT_CAP=8192。
+输入矩阵、多消息、缓存、费用、线路、有效期及逐种 reasoning 覆盖仍须全部合格；不能把小上限样本称作 8192 触顶。
+缺少新字段的旧启用配置拒绝，关闭配置和已有冻结执行不受影响。配置建议只写 PR，不自动应用。

@@ -651,6 +651,14 @@ REPORT-GEN 后端现在开工，标明“未完成、默认关闭”，报告入
 不外推放行更大请求。r4 为 Luna 剩余样本和 Sonnet 新输出压力，r5 为 Gemini 剩余样本；两批单独授权，
 Gemini 等原 google-vertex/global 线路恢复，不换线路。累计限额仍 $25，当前已入账 $4.8101395；本轮只准备。
 
+**2026-10-06：BILL-PAYG 输出语义与用途上限分开（主窗口技术决定）**
+
+依据：[#665 r4 复核及执行授权](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5999661106)。
+小 max_tokens 样本证明严格截断且 completion 包含 reasoning；每种设置至少两条成立后，profile 的 outputLimit 可用
+PURPOSE_OUTPUT_CAP（8192）。证据分别记录 testedOutputLimit 与允许的 outputLimit，不把小上限触顶冒称 8192 实测。
+取代上一条“profile 只能填写较小 outputLimit、不放行更大请求”的限制；输入、缓存、费用和思考设置覆盖要求不变。
+本轮只授权 r4，r5 不得执行；任何停止不补跑，配置建议只写 PR，由主窗口决定应用。累计预算仍 $25。
+
 ### 2.2 被本版取代的旧规则
 
 | 旧规则 | 出处 | 本版处理 |

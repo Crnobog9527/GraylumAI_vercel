@@ -1,6 +1,6 @@
 # BILL-PAYG r4/r5 离线预演（2026-10-06）
 
-**r4/r5 准备完成，等待复核。** 两批本轮均未发送真实请求；分别审阅和授权，不能用 r4 的授权执行 r5。
+**预演记录；r4 已授权执行，最新结果见 PR。r5 未执行、不得执行。** 两批分别授权。
 依据：[主窗口技术决定与第三批审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5999267254)。
 
 ## 小输出上限与验收
@@ -25,10 +25,13 @@ Luna 现有目录没有公开最小思考 token 字段，因此取 512 作为待
 离线 record 和真实执行使用同一严格判定，未带 finishReason 的输出回执不能冒充触顶证据。
 原来 1 条 8192 触顶仍作为历史观测保留；不能替代本次每种设置两条小上限样本。
 
-host profile 的 evidence.outputLimit、reasoningVariants[].outputLimit 和 profile.outputLimit 如实填写对应 512 或 2048；
-禁止用小上限证明外推 8192。校验拒绝 variant 上限超过证据，也拒绝用途请求超过 profile/variant 上限。
-现有需要 8192 的用途不会因此获准执行；本轮不降低全局运行配置、不自动修改用途输出上限。
-只有其余矩阵、多消息、缓存等证据也完整合格时才可在 PR 提出配置建议；当前仍为 `[]`。
+依据[主窗口后续技术决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5999661106)，
+小上限证明执行语义，而非限制 profile 的业务上限。`evidence.testedOutputLimit` 与每个 `reasoningVariants[].testedOutputLimit`
+如实填写该模型统一使用的 512 或 2048；各变体至少两条严格触顶、completion 包含 reasoning。
+`evidence.outputSemantics` 固定为 `max-tokens-includes-reasoning`，`evidence.outputLimit`、variant/outputLimit 和 profile/outputLimit
+记录经审查允许的用途上限，可为 PURPOSE_OUTPUT_CAP（8192）。测试上限与允许上限分开，不能把 512 写成实测 8192。
+旧证据缺少新字段时启用校验拒绝；紧急关闭和已冻结执行不变。其余矩阵、多消息、缓存和费用要求不变。
+配置只是建议，须主窗口核验材料后应用；本轮不修改实际设置。
 
 ## 独立批次与已完成证据
 

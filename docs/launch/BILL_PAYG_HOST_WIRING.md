@@ -37,8 +37,11 @@
 首版只认 #553 的精确候选：Claude Sonnet 5.5 / anthropic、Gemini 3.8 Flash /
  google-vertex/global、GPT-6 Luna / openai。不按模型前缀授权。
 每个模型/完整线路只有一个 profile；`reasoningVariants` 列出多种思考参数及各自的
-`outputLimit/evidenceReference/manifestHash/outputStressSamples/includesReasoning`。
-每种实际使用的 reasoning 必须有至少两个输出压力样本，证据包含 reasoning 且覆盖该用途的 O。
+`outputLimit/testedOutputLimit/evidenceReference/manifestHash/outputStressSamples/includesReasoning`。
+每种实际使用的 reasoning 必须有至少两个严格触顶样本，completion 包含 reasoning。
+`testedOutputLimit` 记录测试上限；profile、variant 和 evidence 的 `outputLimit` 记录允许上限（最多 8192）。
+同一模型的测试上限须一致，evidence.outputSemantics 必须为 `max-tokens-includes-reasoning`；
+小上限可证明该执行语义，不冒称已实测 8192，依据主窗口 2026-10-06 决定（#665 评论 5999661106）。
 普通调用的无参数 `{parameter:"none"}` 与导师 low/medium 可共存；未列出的组合直接拒绝。
 profile 同时绑定协议、请求格式、用途、有效期、版本和输入计量实测材料引用/hash。
 用途统一为 `ordinary / skill / organizer / skill_matching / attached_organizer`，不使用 matching。
