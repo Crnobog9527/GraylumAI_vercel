@@ -1,4 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {reportService} from '../services/report/service';
+import {reportStart} from '../services/report/contract';
 import {readNativeRuntimeView} from '../services/runtime/nativeView';
 import {resumeInput} from '../services/runtime/paygRuntime';
 import type {inferProcedureBuilderResolverOptions} from '@trpc/server';
@@ -39,16 +41,18 @@ const procedure=protectedProcedure.use(async({ctx,next,path})=>{
   try{endpoint=runtimeLocalEndpoint();}catch{real=await loadStagingPolicy(ctx.supabaseAdmin,ctx.user.id,process.env);}
   ctx.runtimeBudget?.timing?.enter('host');
   const actor=runtimeActor(ctx.userScopedSupabase.auth,ctx.user.id,ctx.runtimeBudget,ctx.headers?.get('Authorization'));
-  const admission=runtimeAdmissionService(ctx.userScopedSupabase,ctx.supabaseAdmin,{
-   ...(real?{real,paygHost:true}:{}),resumeWaitingOrganizer:token=>executeOriginalExecution({
+  const admissionPolicy={
+   ...(real?{real,paygHost:true}:{}),resumeWaitingOrganizer:(token:import('../services/runtime/paygRuntime').ResumeInput)=>executeOriginalExecution({
    admin:ctx.supabaseAdmin!,user:ctx.userScopedSupabase,actorId:ctx.user.id,budget:ctx.runtimeBudget,
    authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:endpoint,
-  },token.executionId,undefined,token),purposeBudgets:true,account:'runtime-local',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:100,searchEnabled:!real,workspaceContext:true});
+  },token.executionId,undefined,token),purposeBudgets:true,account:'runtime-local',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:100,searchEnabled:!real,workspaceContext:true};
+  const admission=runtimeAdmissionService(ctx.userScopedSupabase,ctx.supabaseAdmin,admissionPolicy);
+  const report=reportService(ctx.userScopedSupabase,ctx.supabaseAdmin,admissionPolicy);
   const executor=runtimeExecutor({database:ctx.supabaseAdmin,budget:ctx.runtimeBudget,actor,endpoint,
    callGate:newWorkGate(ctx.supabaseAdmin,endpoint?'local':'staging').calls,
    ...(real?{adapter:stagingTransport(ctx.supabaseAdmin,real,ctx.runtimeBudget)}:{}),
    activateSkill:c=>activateRuntimeCandidate(ctx.userScopedSupabase,ctx.supabaseAdmin!,c)});
-  const result=await next({ctx:{...ctx,admission,executor,real}});
+  const result=await next({ctx:{...ctx,admission,executor,real,report}});
   if(!result.ok)throw result.error;
   return result;
  }catch(cause){throw stagingProcedureError(cause,path);}
@@ -60,6 +64,10 @@ function executeOriginal({ctx,input}:inferProcedureBuilderResolverOptions<typeof
   authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint},input.executionId,onProgress);
 }
 export const runtimeRouter=router({
+ reportStart:procedure.input(reportStart).mutation(({ctx,input})=>ctx.report.start(input)),
+ reportStatus:maintenanceProcedure.input(z.object({executionId:z.string().uuid()}).strict()).query(({ctx,input})=>
+  reportService(ctx.userScopedSupabase,ctx.supabaseAdmin!,{account:'read-only',costPerCall:'0',creditsPerUsd:'100',
+    multiplier:'6',maxCalls:1,maxOutputTokens:1,inputBytes:1024,historyItems:0}).status(input.executionId)),
  choices:procedure.input(z.object({sessionId:z.string().uuid().optional()}).optional()).query(async({ctx,input})=>{
   let work=false;let workModuleId:string|null=null;let workRevisionId:string|null=null;
   if(input?.sessionId){const listing=await ctx.supabaseAdmin!.rpc('opc_query',{p_actor_id:ctx.user.id});if(!listing.error){const item=(listing.data.accounts??[]).flatMap((a:{items:Array<{sessionId:string;workItemId:string;moduleId?:string;methodRevisionId?:string}>})=>a.items).find((i:{sessionId:string})=>i.sessionId===input.sessionId);work=Boolean(item);if(item){workModuleId=item.moduleId??null;workRevisionId=item.methodRevisionId??null;}}}

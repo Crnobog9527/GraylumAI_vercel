@@ -16,7 +16,7 @@ const admittedRoutes: Readonly<Record<string,string>> = {
   'google/gemini-3.8-flash':'google-vertex/global',
   'openai/gpt-6-luna':'openai',
 };
-const phase = z.enum(['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer']);
+const phase = z.enum(['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer', 'report']);
 /** Trusted admin configuration, never a browser admission field. Evidence references
  * must identify independently checked real samples; fixture results are not evidence. */
 export const paygHostProfile = z.object({
@@ -26,7 +26,7 @@ export const paygHostProfile = z.object({
   templateTokens: z.literal(4096), marginTokens: z.literal(4096),
   maxBytes: z.literal(196608), maxMessages: z.literal(128),
   maxTools: z.literal(2), maxSchemaBytes: z.literal(16384),
-  purposes: z.array(phase).min(1).max(5),
+  purposes: z.array(phase).min(1).max(6),
   requestFormats: z.array(z.enum(['serial-tools-v2', 'serial-tools-v4-stream',
     'agent-turn-v5-stream', 'serial-tools-v6-reasoning'])).min(1).max(4),
   reasoningVariants: z.array(z.object({

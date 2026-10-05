@@ -1,7 +1,9 @@
 'use client';
 
-import { ExternalLink, FileText, Receipt, ScrollText } from 'lucide-react';
+import { ScrollText } from 'lucide-react';
 import { trpc } from '@/trpc/client';
+import { AmountFactList, DocumentStatusBadge, PaymentDocumentLinks } from '@/components/payments/PaymentDocumentLinks';
+import { USER_AMOUNT_FACT_KINDS, buildAmountFactRows, getPaymentChannelLabel } from '@/lib/payment-display';
 import { getBillingRecordStatusPresentation } from './billingRecordStatus';
 
 function formatMoney(amount: number, currency: string) {
@@ -23,7 +25,7 @@ function formatDate(value: string) {
 }
 
 export default function BillingRecordsCard() {
-  const { data: records = [], isLoading } = trpc.payments.listBillingRecords.useQuery();
+  const { data: records = [], isLoading, isError, refetch } = trpc.payments.listBillingRecords.useQuery();
 
   return (
     <div
@@ -46,7 +48,7 @@ export default function BillingRecordsCard() {
             账单记录
           </h3>
           <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-            查看 Stripe 订单状态、发票 PDF、在线发票和收据链接。
+            查看每笔订单的状态、支付渠道，以及支付渠道提供的发票和收据。
           </p>
         </div>
       </div>
@@ -55,12 +57,24 @@ export default function BillingRecordsCard() {
         <div className="py-8 text-center text-sm" style={{ color: 'var(--text-tertiary)' }}>
           正在加载账单记录...
         </div>
+      ) : isError ? (
+        <div
+          role="alert"
+          data-testid="billing-records-error"
+          className="rounded-xl border px-4 py-6 text-center text-sm"
+          style={{ background: 'var(--bg-primary)', borderColor: 'rgba(255,255,255,0.08)', color: 'var(--text-tertiary)' }}
+        >
+          账单记录暂时读取失败，这不代表你没有订单。
+          <button type="button" className="ml-2 underline" style={{ color: 'var(--color-primary)' }} onClick={() => void refetch()}>
+            重新加载
+          </button>
+        </div>
       ) : records.length === 0 ? (
         <div
           className="rounded-xl border px-4 py-6 text-center text-sm"
           style={{ background: 'var(--bg-primary)', borderColor: 'rgba(255,255,255,0.08)', color: 'var(--text-tertiary)' }}
         >
-          暂无可展示的 Stripe 账单记录。创建支付会话后，这里会自动同步订单状态。
+          暂无账单记录。完成购买后，这里会显示订单状态和凭证。
         </div>
       ) : (
         <div className="space-y-4">
@@ -97,6 +111,7 @@ export default function BillingRecordsCard() {
                       >
                         {statusPresentation.label}
                       </span>
+                      <DocumentStatusBadge status={record.documentStatus} />
                     </div>
 
                     <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
@@ -106,50 +121,14 @@ export default function BillingRecordsCard() {
                     <div className="flex flex-wrap gap-4 text-sm" style={{ color: 'var(--text-tertiary)' }}>
                       <span>{formatMoney(record.amountTotal, record.currency)}</span>
                       <span>{formatDate(record.fulfilledAt ?? record.createdAt)}</span>
+                      <span>支付渠道 {getPaymentChannelLabel(record.paymentChannelLabel)}</span>
                       {record.invoiceNumber && <span>发票号 {record.invoiceNumber}</span>}
                     </div>
+                    <AmountFactList rows={buildAmountFactRows(record.amountFacts, { allowed: USER_AMOUNT_FACT_KINDS })} />
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    {record.invoicePdfUrl && (
-                      <a
-                        href={record.invoicePdfUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium"
-                        style={{ background: 'rgba(255,215,0,0.12)', color: '#facc15' }}
-                      >
-                        <FileText className="h-4 w-4" />
-                        PDF 发票
-                        <ExternalLink className="h-4 w-4" />
-                      </a>
-                    )}
-                    {record.hostedInvoiceUrl && (
-                      <a
-                        href={record.hostedInvoiceUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium"
-                        style={{ background: 'rgba(59,130,246,0.12)', color: '#60a5fa' }}
-                      >
-                        <ScrollText className="h-4 w-4" />
-                        在线发票
-                        <ExternalLink className="h-4 w-4" />
-                      </a>
-                    )}
-                    {record.receiptUrl && (
-                      <a
-                        href={record.receiptUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium"
-                        style={{ background: 'rgba(34,197,94,0.12)', color: '#4ade80' }}
-                      >
-                        <Receipt className="h-4 w-4" />
-                        Stripe 收据
-                        <ExternalLink className="h-4 w-4" />
-                      </a>
-                    )}
+                    <PaymentDocumentLinks record={record} />
                   </div>
                 </div>
               </div>

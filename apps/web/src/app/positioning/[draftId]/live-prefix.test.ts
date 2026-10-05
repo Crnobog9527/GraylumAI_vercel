@@ -244,6 +244,7 @@ describe("live reply stream", () => {
     { onAdmitted: id => admitted.push(id) });
     expect(admitted).toEqual([executionId]);
     expect(result).toEqual({ state: "completed", completeness: "complete" });
-    expect(views.map(view => [view?.text, Boolean(view?.card)])).toEqual([["", false], ["正", false], ["正文", false], ["正文", true]]);
+    expect(views.map(view => [view?.text, Boolean(view?.card)])).toEqual([["", false], ["正", false], ["正文", false], ["正文", true],
+      ["正文", true]]); // the last view marks the reply finished (停止 goes away)
   });
 });

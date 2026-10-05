@@ -128,6 +128,11 @@ try {
     applyServerOnly: text => outcome(sql(text)), fingerprint: snapshot,
   });
   assert.equal(report.build.failed, null);
+  ok(sql(read('packages/db/tests/pay-common/channel-settings.sql')));
+  report.checks.push('PR-3 channel defaults, enum/version, atomic batch, direct-role denial, original intent and live denial');
+  // PR-2 regressions intentionally select test Stripe in this disposable database only.
+  ok(sql(`INSERT INTO system_settings(key,value) VALUES
+    ('payment_new_purchase_channel','{"channel":"stripe","version":1}');`));
   ok(sql(read('packages/db/tests/pay-common/purchase-admission.sql')));
   report.checks.push('PR-2 purchase admission: free/paid eligibility, mapping ambiguity, protected closure and expiry retry');
   ok(sql(read('packages/db/tests/pay-common/checkout-persistence.sql')));

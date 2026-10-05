@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {frozenReport} from '../report/contract';
 import {z} from 'zod';
 import {promptCachePolicy} from './promptCache';
 import {hostTurnContextSchema,historySelectionSchema} from './hostTurn';
@@ -12,6 +13,7 @@ export const runtimeContext=z.object({
  version:z.literal('runtime.v1'),sdkVersion:z.literal('0.18.0'),role:z.enum(['ordinary','skill','organizer']),
  input:z.string().min(1).max(20000),instructions:z.string().max(262144),model:z.string().min(1),
  maxOutputTokens:z.number().int().positive().max(FROZEN_OUTPUT_CAP),maxTurns:z.number().int().min(1).max(32),
+ reportGeneration:frozenReport.optional(),
  mentorText:z.literal('append-card-v1').optional(),
  nativeOutput:z.literal('native-output-v1').optional(),envelopeOrder:z.literal('message-first-v1').optional(),
  inputSelection:z.enum(['scope-projection-v1','scope-projection-v2']).optional(),
@@ -31,6 +33,11 @@ export const runtimeContext=z.object({
  answeredCard:z.unknown().optional(),request:z.unknown().optional(),
  moduleId:z.string().uuid().optional(),skillId:z.string().uuid().optional(),revisionId:z.string().uuid().optional(),sources:z.array(z.unknown()).optional(),
 }).strict().superRefine((context, ctx) => {
+ if (context.reportGeneration && (context.role !== 'skill' || context.historyItems !== 0 || context.maxTurns !== 1
+   || context.tools.length || context.maxToolCalls || context.network !== 'deny' || context.attachedOrganizer
+   || context.scopeMaterial || context.workspaceContext || context.promptCache || context.hostTurnContext
+   || context.historySelection || context.sources?.length || context.purposeBudget?.purpose !== 'report'))
+  ctx.addIssue({code:'custom',message:'REPORT_CONTEXT_INVALID'});
  const host = context.hostTurnContext !== undefined;
  if (host !== (context.inputSelection === 'scope-projection-v2') || host !== (context.historySelection !== undefined) ||
      host && (context.role !== 'skill' || context.providerRequestFormat !== 'agent-turn-v5-stream') ||

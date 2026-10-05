@@ -133,7 +133,8 @@ export type AgentTurnUnavailable = "provider_rejected" | "output_truncated" | "p
 export type AgentTurnOutcome = {
   /** Q1: the new request remains with its caller while the original organizer waits. */
   admitted?: false; blockedRequestId?: string;
-  code?: 'RUNTIME_WAITING_CREDITS' | 'RUNTIME_WAITING_RESUME' | 'RUNTIME_USAGE_CONFIGURATION_REQUIRED';
+  code?: 'REPORT_MEMBERSHIP_REQUIRED' | 'REPORT_ENTITLEMENTS_UNAVAILABLE' | 'REPORT_SOURCE_CONFLICT'
+    | 'RUNTIME_WAITING_CREDITS' | 'RUNTIME_WAITING_RESUME' | 'RUNTIME_USAGE_CONFIGURATION_REQUIRED';
   executionId?: string; cursor?: number; epoch?: number; remainingCalls?: number;
   state: AgentTurnState;
   body?: string;

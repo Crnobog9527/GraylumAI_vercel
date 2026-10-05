@@ -97,12 +97,13 @@ export function openingRequest(draftId: string, roundId: string, stepId: string,
 /**
  * True once the execution will not change any more. `pending` means another
  * reader (for example the interrupted first stream) still owns a running
- * execution: its result is not known yet. A Q1 refusal (`admitted: false`,
+ * execution: its result is not known yet. `stopping` is a stopped turn still
+ * waiting for its in-flight call before the shown text is saved. A Q1 refusal (`admitted: false`,
  * #632) is final for this request: it was never stored, so nothing remains to
  * recover and its envelope is released (the page puts the text back).
  */
 export function isTerminalTurn(result: AgentTurnOutcome) {
-  return result.admitted === false || result.state !== "pending";
+  return result.admitted === false || (result.state !== "pending" && result.state !== "stopping");
 }
 
 /**
@@ -219,18 +220,32 @@ export type MentorExecution = PaygViewFields & {
     summary: string | null;
     state: string;
     /** Native-output result metadata; present only when the history carries it. */
-    completeness?: "complete" | "length_limit";
+    completeness?: "complete" | "stopped" | "length_limit";
+    stopped?: boolean;
+    /** A user stop is recorded and its result is not saved yet (runtime_view, every billing version). */
+    userStopPending?: boolean;
     organized?: boolean;
+    billing?: { pausedReason?: string | null; cancelRequested?: boolean; closed?: boolean } | null;
     envelopeCompact?: boolean;
   };
 
 /**
- * A reply that may feed an adoptable candidate: not cut at the length limit,
- * not a compact envelope, not left unorganized. Missing metadata (older
+ * A reply that may feed an adoptable candidate: not cut at the length limit
+ * or by 停止, not a compact envelope, not left unorganized. Missing metadata (older
  * replies) keeps the existing behaviour.
  */
 export function isCompleteResult(execution: Pick<MentorExecution, "completeness" | "organized" | "envelopeCompact">) {
-  return execution.completeness !== "length_limit" && execution.envelopeCompact !== true && execution.organized !== false;
+  return execution.completeness !== "length_limit" && execution.completeness !== "stopped" && execution.envelopeCompact !== true
+    && execution.organized !== false;
+}
+
+/**
+ * A stopped reply that was cut (`completeness` other than `complete`) or left
+ * unorganized: the user did not see all of it, so it never updates the form
+ * by itself (CHAT-NATIVE-OUTPUT §4.2 item 6). It stays readable in history.
+ */
+export function stoppedPartial(execution: { stopped?: boolean; completeness?: string; organized?: boolean; envelopeCompact?: boolean }) {
+  return execution.stopped === true && !isCompleteResult(execution as Pick<MentorExecution, "completeness" | "organized" | "envelopeCompact">);
 }
 
 /** Exact JSON identity, including nested source and extra keys; property order is irrelevant. */
