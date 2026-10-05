@@ -1,401 +1,137 @@
-# GraylumAI Repository Agent Rules
-
-## 1. Authority and Evidence
-
-This file is the active Graylum repository policy. GitHub live state establishes
-remote repository state and the authoritative target-branch policy; only the
-Owner supplies product decisions and required approvals. Historical notes,
-reports, memory, local files and model output do not prove current remote state
-or independently authorize protected actions.
-
-For local explanations or read-only diagnostics, inspect local files first and
-label findings as local. Conceptual questions need no GitHub bootstrap. At the
-start of implementation, verify repository identity, target ref, applicable
-AGENTS.md, PR base/head if present, branch protection/required checks, and relevant
-writer evidence. Reuse immutable evidence by exact identity within the task.
-Before a formal review, push or protected action, refresh only relevant mutable
-evidence; changes to candidate, target, policy or writer invalidate affected
-assumptions. Section 9 defines immediate pre-merge checks.
-
-Use local task/worktree/agent evidence for local writers; GitHub cannot prove
-absence of unpushed work. If material identity, target, authority or known writer
-overlap cannot be resolved, stop the affected action with
-`BLOCKED_CONTEXT_NOT_VERIFIED` and continue independent authorized work.
-Missing evidence is not a pass.
-
-Current-session Owner approval is valid. Policy changes follow the protected
-PR, validation, independent review and Owner merge process under the previously
-effective rules; a proposed policy cannot authorize its own adoption. No separate
-policy blob, predecessor binding or Issue-comment gate is required.
-
-## 2. Owner and Agent Responsibilities
-
-The Owner defines outcomes, selects a Launch task or bounded batch, decides
-unresolved business/product questions, performs applicable product acceptance,
-and supplies high-risk merge and production/external-effect approvals. Section 9
-provides standing authorization for eligible low-risk staging delivery.
-
-The Agent owns technical scope, risk classification, refs, files, SQL, tests,
-CI/review interpretation, remediation and merge mechanics. Do not make the Owner
-choose technical identifiers or procedures. Resolve reversible technical choices
-within scope. Ask only when missing evidence materially changes product outcome,
-permissions, cost, data safety or irreversible impact; continue independent work.
-Explain the concrete issue, risk and recommended decision, with one copyable
-natural-language authorization sentence when approval is needed.
-
-## 3. Branches and Writers
-
-New implementation tasks normally start from fresh current staging on a dedicated
-task branch and PR targeting staging. Continue existing authorized tasks on their
-established branch. Emergency production procedures require explicit Owner
-authorization. Never push directly to a protected branch or force-push; do not
-bundle unrelated work.
-
-Keep one writer per overlapping task, branch, PR or protected mutation surface.
-Clearly disjoint work may run in parallel. At task start or handoff, inspect
-relevant open PRs and available local task/worktree state. Retain that writer
-assignment during continuation unless new tasks, conflicting edits, branch or
-remote updates indicate overlap; refresh relevant evidence before push/merge.
-
-Do not poll unrelated tasks or demand a complete writer inventory. An empty PR
-list, idle task or isolated worktree does not resolve a known conflict. Resolve
-concrete overlaps; otherwise stop the affected mutation under Section 1.
-Do not create a writer registry or coordination harness.
-
-## 4. Risk and Authorization
-
-Before mutation, classify the actual product/security behavior changed and
-record the result in the PR. `ordinary` means bounded, reversible code, prose or
-tests without a high-risk change or an unapproved protected effect. Already-authorized commits,
-pushes, PR operations and eligible staging delivery do not by themselves turn
-ordinary code into high risk; authorization for each action still applies.
-
-`high` includes material changes to:
-
-- governance, security controls, workflows, required checks or supply-chain controls;
-- dependency versions/resolution, auth, permissions, secrets or credentials;
-- database schema, migrations, RLS, grants, RPC or destructive data operations;
-- billing, payments, refunds, cancellation or monetary behavior;
-- main, production, real-user state, provider/project/environment configuration; or
-- another irreversible or durable external effect beyond authorized delivery.
-
-Pure explanatory prose mentioning a sensitive topic is not automatically high
-risk. Changes to executable instructions, policy, product/payment commitments,
-authorization or actual behavior still use the applicable high-risk rules.
-Investigate uncertain classification technically; do not ask the Owner to choose
-it. High-risk code may be implemented and safely tested on a task branch.
-
-Implementation authorization covers same-scope local edits/tests, commits,
-pushes to the dedicated non-protected branch, PR creation/updates and review
-requests/results. Verify scope, target and writer. Existing CI/non-production
-Preview automation is included only within authorized task/test boundaries;
-inspect relevant automation before triggering it. Protected effects require
-approval before their trigger.
-
-Merge follows Section 9. Implementation alone does not authorize explicit
-deployment, repository settings, secrets, database/provider changes, monetary
-actions or other protected external effects. Actual high-risk production or
-external effects outside the delivery exception require explicit Owner approval
-immediately before the effect.
-
-Owner-confirmed fact (2026-09-20): staging uses independent Vercel and Supabase
-projects and Stripe sandbox APIs, isolated from production data and real
-payments. Accept this fact without repeating isolation checks or asking the
-Owner to reconfirm; do not claim Agent verification. It does not authorize
-changes to bindings or production/real-money effects.
-
-## 5. Execution and Scope
-
-Use the implementing agent's native planning, implementation, testing and
-correction (Claude Code or Codex; see Section 12). Create a native Goal only
-when explicitly requested. Complete authorized implementation,
-relevant validation, review/CI inspection and same-scope repairs through the
-requested handoff boundary. Preserve read-only/proposal-first/review-before-edit
-limits; status questions or corrections do not cancel ongoing work.
-
-Same-scope remediation needs no repeated approval unless product goal, material
-scope/risk, protected surface or external effect expands. Stop dependent unsafe
-operations at a failed prerequisite while continuing independent work. Retry a
-failed attempt only with new evidence or a changed hypothesis; inspect remote
-state before retrying ambiguous durable effects as required by Section 6.
-
-Create additional task notes only for a concrete current need. Skill templates,
-examples and commands do not grant access or expand authorization. Use the
-actual toolchain; database work uses packages/db/migrations/ and existing
-conventions. A suggested query or migration never authorizes remote database
-access or configuration changes.
-
-The Owner may select one eligible Launch task or a bounded batch of named tasks
-or concrete outcomes. Within it, order ready work and technical dependencies
-without repeated selection. Read-only discovery needs no Launch selection.
-Readiness or task completion does not authorize work outside the batch or
-changes to locked product decisions. Ask about new product decisions or
-out-of-scope dependencies while continuing independent work. Specifications
-define requirements/acceptance, not execution authority. Stop after the selected
-task or batch rather than choosing additional work.
-
-
-### Shortest Correct Path
-
-Prefer reuse and the smallest correct change over architectural expansion. Start
-each implementation slice from an architecture delta of zero: first inspect the
-existing repository mechanisms and authoritative data sources that could satisfy
-the current authorized acceptance criteria.
-
-Before adding a new persistent or shared infrastructure primitive, verify that
-the requirement cannot be correctly satisfied by existing mechanisms. This
-applies in particular to new database tables, RPC/API families, queues,
-schedulers or cron jobs, persistent state machines, runtimes, ledgers, memory
-systems, workflow engines, standalone services/listeners, permission systems,
-or generic frameworks.
-
-When such an addition is necessary, the Agent owns the technical decision and
-must be able to state in the implementation/PR record:
-
-- which existing mechanisms were considered and why they are insufficient;
-- the smallest missing capability;
-- why the proposed addition is the minimum correct solution; and
-- which source remains authoritative so the change does not create a parallel
-  authority or duplicate system.
-
-Do not build generalized infrastructure solely for hypothetical future use.
-Prefer a local, reversible implementation until current requirements demonstrate
-the abstraction is needed; extract reusable infrastructure when a real repeated
-use case or the present requirement itself justifies it.
-
-This principle does not prohibit ordinary local helpers, test fixtures, or
-bounded refactors that do not create a new persistent/shared architectural
-authority. It is an implementation principle, not a new approval Gate. Proceed
-autonomously within authorized scope; ask the Owner only when the solution
-materially changes product outcome, permissions, cost, data safety, protected
-external effects, or another Owner decision.
-
-## 6. Required Validation
-
-Run validation relevant to the changed scope plus all repository-required remote
-checks.
-
-Required CI and Security checks must pass on the exact current candidate.
-Equivalent checks may share one actual execution for that candidate; a dependent
-status must fail if its prerequisite fails, is cancelled, or is unexpectedly
-skipped. CI runs the complete configured checks for every covered event,
-including documentation changes; there is no documentation fast path.
-Equivalent API subsets need not run again after the same configured full suite.
-Keep distinct Web/integration coverage and secret/policy checks.
-
-Never claim a check that was not actually run. Distinguish passed, failed,
-skipped, and blocked/not-run validation.
-
-After relevant validation and required checks pass, broaden or repeat testing
-only for new changes, failures, or unresolved concrete concerns.
-
-Runtime or UI changes require appropriate preview, staging, smoke, or browser
-validation.
-
-Auth or permission changes must test both allowed and denied paths using
-non-production or test identities.
-
-Database, schema, RLS, RPC, or migration changes must be validated in
-non-production and must address compatibility, idempotency, data-loss risk, and
-recovery or rollback as applicable.
-
-Payment, billing, or refund changes must use test mode and appropriate
-idempotency protections before any real-money action.
-
-Secrets and security-control changes must run the applicable leak, static, and
-security checks.
-
-Provider or runtime configuration changes must be validated in preview, staging,
-or test environments first when available.
-
-After a timeout, error, or uncertain result from payment, refund, deployment, or
-another durable external action, inspect the actual remote state before retrying.
-
-Never blindly retry an ambiguous durable external result.
-
-## 7. Pull Requests and Semantic Review
-
-Keep PR descriptions proportional to the change. Record the concrete outcome,
-risk classification, validation results, and remaining material risk. A short
-paragraph is enough for an ordinary change; high-risk work additionally states
-its affected safety boundary, external/production relevance, and recovery or
-compatibility considerations where applicable. Link a product specification or
-Issue only when it helps review. No fixed seven-section template is required.
-
-Independent semantic review remains mandatory. The reviewer is a context
-separate from the implementation writer, routed under Section 12; the
-implementer never reviews its own candidate. The reviewer independently verifies
-the relevant live GitHub candidate and authoritative policy through a read-only
-API/CLI or its native GitHub integration. Schedule final review after
-implementation and local fixes stabilize. One valid independent review is enough;
-do not add a second review merely because another native or cloud entry exists.
-
-Initially review the complete intended base-to-head change. After a small,
-bounded follow-up, an independent reviewer may reuse the earlier review of
-unchanged content and review the exact old-head-to-new-head delta plus affected
-interactions. The reviewer must verify the earlier review and exact identities,
-confirm unchanged base and scope, and state that the combined coverage applies
-to the complete final candidate. Missing prior evidence, base drift, material
-scope/architecture changes, or uncertain interactions require full review again.
-High-risk deltas must cover their security, data, or monetary implications; a
-small line count alone does not make a change low risk. The implementer cannot
-self-certify unchanged review coverage.
-
-When the Codex GitHub review bot (`chatgpt-codex-connector[bot]`) is the
-reviewer, its completed review of the exact current head with no unresolved P0
-or P1 finding is the passing independent conclusion, and its own PR review or
-summary is the attributed record. A P0/P1 finding is resolved only by a fix
-that the bot then reviews on a new head, or by explicit Owner acceptance with
-the stated reason. The implementer adds a short PR comment linking that review
-with exact base/head and how lower-priority findings were handled, without
-restating it as its own review. A pending, failed or stale-head bot review is
-not a pass; request a fresh one by commenting `@codex review`.
-
-Record the attributed conclusion, findings, validation limits, exact base/final
-head, and any reused review/previous head on the PR. A new candidate always
-requires a new independent conclusion; reuse reduces repeated reading, not the
-coverage requirement. Metadata or green CI alone is not semantic review; blocked
-review must not be recorded as passed.
-
-The Agent handles same-scope CI, test, and review remediation until no concrete
-blocker remains.
-
-The Owner operating workflow may additionally request one fresh independent
-ChatGPT web audit immediately before merge.
-
-That ChatGPT audit is not repository runtime authority, a Gate, a persisted
-canonical report, or a separate lifecycle stage.
-
-## 8. Clean Candidate and Handoff
-
-A candidate is clean only when relevant technical validation (including required
-runtime proof) and required CI/Security pass, attributed independent review
-covers the full current candidate under Section 7, no actionable blocker remains,
-and remaining material risk is stated accurately.
-
-Report the outcome, check/review results, remaining risk and useful product-test
-entry. Request an exact next reply only for a required product decision/approval;
-standing-authorized delivery gets a completion report. Agent technical validation
-and Owner product acceptance are distinct; missing technical proof is not clean
-and must not be delegated to the Owner.
-
-## 9. Merge
-
-The Owner grants standing authorization to deliver already-requested low-risk
-changes into the isolated `staging` environment after the candidate is clean.
-Do not request an extra "同意合并" for each such change. Policy adoption remains
-subject to Section 1.
-
-For this exception, low-risk means a bounded, reversible `ordinary` change within
-the Owner's requested outcome, with no unapproved business/product decision and
-no high-risk change under Section 4. Record why it qualifies. Changes to governance
-(including this file), CI/checks, dependency resolution, auth/permissions,
-schema/migrations, billing/payment behavior, secrets or provider/environment
-configuration are excluded.
-Uncertain cases use the explicit-approval path; the Agent determines technical
-classification rather than asking the Owner to classify it.
-
-High-risk or otherwise excluded staging merges still require explicit Owner
-approval for the described candidate. `同意合并` authorizes the clearly identified
-current PR into `staging` only, provided the exact live candidate remains clean.
-
-Immediately before either kind of merge, fresh-check current base/head, required
-CI/Security, current full-candidate semantic review coverage, mergeability,
-applicable Owner authorization, and relevant writer evidence. Use
-`expected_head_sha`, compare-and-swap, or equivalent stale-head protection.
-Candidate drift requires appropriate fresh validation and a new independent
-review conclusion under Section 7.
-
-Use an explicit Agent-executed merge, not GitHub auto-merge or a background queue.
-For standing-authorized delivery, notify the Owner after completion with the
-result, validation, and any useful preview entry. Do not make technical checks
-contingent on the Owner testing the product; unresolved product decisions still
-need Owner input. Same-scope technical remediation needs no repeated approval;
-ask again only if the product decision, material scope/risk, target, or external
-authorization changes. No staging approval authorizes `main` or production.
-
-## 10. Main, Production, and Durable External Effects
-
-A staging merge is not production authorization.
-
-Explicit Owner approval is required before:
-
-- promotion or merge to `main`;
-- production deployment or production smoke;
-- access to or mutation of production databases or real-user data;
-- secrets or credential changes;
-- real payment, refund, cancellation, or checkout actions;
-- production auth or account-state changes; or
-- provider, project, environment, or configuration changes with real external
-  effect.
-
-`同意上线` applies only to one clearly described production candidate after the
-Agent completes technical preflight.
-
-Material candidate or impact drift invalidates production approval and requires a
-new Owner decision.
-
-Emergency direct-main work is exceptional, requires explicit Owner authorization,
-and must be synchronized back to `staging` through the protected PR flow.
-
-## 11. Product Authority and Historical Guidance
-
-Preserve the Frozen Master Plan, Launch task graph/readiness, stable
-specifications, acceptance criteria, Definition of Done and locked decisions.
-Governance cleanup must not change product semantics without separate scope.
-
-Retired governance artifacts and historical skills have no runtime authority.
-Do not automatically route current work to the memory skills
-`graylum-governed-pr-mutation`, `graylum-high-risk-github-audit` or
-`graylum-readonly-staging-worktree`; use them only for explicitly requested
-historical inspection, never to restore obsolete gates or approval stages.
-
-No separate Task Issue, Contract, Gate, receipt, Evaluator or Release Auditor
-pipeline is required. Do not create a duplicate execution/coordination framework
-unless a concrete current problem cannot be handled adequately by native agent
-execution (Claude Code or Codex), GitHub controls and these rules, and the Owner
-explicitly authorizes that architecture work.
-
-## 12. Implementing Agents, Review Routing and Handoff
-
-Claude Code and Codex are interchangeable implementing agents under these same
-rules. This file is the only repository policy for both; a tool-specific entry
-file such as `CLAUDE.md` may only point here and must not add or change rules.
-Tool-private memory and chat history are context only under Section 1.
-
-Default review routing:
-
-- Claude Code implements: Codex reviews, normally through the Codex GitHub
-  review bot, triggered by opening a non-draft PR, marking a draft ready for
-  review, or commenting `@codex review` on the current head.
-- Codex implements: a fresh-context Codex reviewer separate from the
-  implementation writer, the Codex GitHub review bot, or Claude Code in a
-  separate session.
-
-The implementer triggers review and reads its result from GitHub; the Owner
-does not relay prompts or reports between tools.
-
-Keep every task resumable from GitHub alone. Open a draft PR early on the task
-branch, push each coherent verified step, and keep a short `Handoff` section in
-the PR description: done, next step, open blockers, and validation actually run
-with results. Either agent may continue an existing task by reading its PR and
-branch. Switching agents is a writer handoff under Section 3: the previous
-writer stops mutating once the handoff is recorded, and the new writer resumes
-from current remote refs, not an older local checkout.
-
-## 13. Engineering Conventions
-
-This policy adopts [docs/ENGINEERING.md](docs/ENGINEERING.md) as the engineering
-reference for every implementing agent and human contributor: stack, code
-layout, size and format limits, frontend, backend and AI-feature conventions,
-and validation commands. Read it before implementation and apply it to new or
-modified code. It does not change the governance, risk or approval rules in this
-file; on conflict, this file wins.
-
-`node scripts/check-code-size.mjs` enforces its file-size and line-width ratchet
-in CI. Splitting a file to stay within the limits is part of the smallest correct
-change under Section 5. Lowering baseline entries with `--update` is routine and
-does not by itself change risk classification. Raise or add a baseline entry only
-for a file on a high-risk surface when splitting it would expand that change's
-risk, and state the reason in the PR. Changes to `docs/ENGINEERING.md` or to the
-checker's limits or scope are governance changes under Section 9.
+# Graylum 仓库规则（给 Claude Code 和 Codex）
+
+## 0. 这是什么项目
+
+一人公司。Owner 不写代码，全部开发由 AI 完成。
+Owner 的时间和注意力最贵：规则的目标是**少打扰 Owner，同时守住钱、数据、正式环境和产品方向**。
+
+目前正式站没有真实用户。staging 使用独立的 Vercel、Supabase 项目和 Stripe 沙盒，跟正式数据和真钱隔离
+（Owner 已确认，不用反复证明）。但每次远程操作仍要用指定的测试项目；目标或绑定变了、或者看到矛盾的迹象时，
+只核实受影响的那部分。
+
+## 1. 只有一道门需要 Owner 点头
+
+下面这些事，必须在动手前得到 Owner 在当前对话里的明确同意：
+
+- 合并到 `main`、部署或测试正式环境
+- 读写正式数据库或真实用户数据
+- 新增、修改或删除密钥和凭证
+- 任何真钱操作：付款、退款、取消订阅；超出已批准测试预算的付费调用或充值
+- 修改 Vercel、Supabase、Stripe、OpenRouter 等平台在正式环境的设置，或改变 staging 绑定的项目
+- 向外部账号发送或发布内容
+- **规则变更**：修改本文件、`docs/ENGINEERING.md`，或任何放宽授权、分支保护、CI 和安全检查的改动，
+  不管它写在哪个文件或平台设置里
+- 新的产品决定，或推翻已有的产品决定
+
+除此以外，AI 自己判断、自己做完，不要问 Owner。Owner 没回复不等于同意。
+`同意上线` 只对当时说清楚的那一个版本有效；版本变了要重新问。
+修改规则必须按**修改前**的规则审查和批准，新规则不能批准它自己。
+
+## 2. 只做被选中的任务，按 Owner 的意思做
+
+- 只做 Owner 选中的任务或一批任务。做完就停，不自己挑下一件。
+- Owner 的明确要求决定这次的目标和权限。"只读""先出方案""不要改代码"这类限制必须守住。
+- 动手前，在 PR 描述里用几句话写清楚：这次要做到什么、怎样算做完、不做什么。
+  这段话只能把 Owner 的要求和已确认的规划、设计**写得更细**，不能替换、删减或降低它们。AI 可以自己加技术验证。
+- 做着做着发现别的问题，记进 PR 的"发现的问题"清单，汇报给 Owner，不要自己扩大范围。
+- 以 `docs/launch/MASTER_PLAN.md` 和已确认的设计为准。这些需要问 Owner：价格、权益、主要流程、权限、
+  对外承诺，以及对已定设计的实质改动。不改变意思的文案润色和技术细节，AI 自己处理。
+- 任务变大但目标、授权、预算和安全边界没变：告诉 Owner 一声，继续做。
+  碰到新的产品决定、额外费用或没授权的操作：只暂停这一部分，等 Owner 批准，其他部分照做。
+- "代码能跑"不等于"Owner 要的效果做到了"。技术验证由 AI 负责；产品是否满意由 Owner 验收。
+
+## 3. staging 上 AI 全权负责
+
+- 新任务从最新的 `staging` 拉新分支；接着做没完成的任务，沿用原来的分支和 PR。
+- 不直接推送 `staging` 或 `main`，不强推。一个 PR 只做一件事。
+- 同一件事同一时间只有一个 AI 在写。
+- 数据库结构、依赖、计费逻辑等改动，**在 staging 上**也由 AI 验证后自己合并。
+  这些改动以后上正式环境时，仍然走第 1 节。
+- staging 上测试付费模型和其他付费接口，只能在已批准的测试预算内进行；没有预算时用模拟测试，
+  不自己充值，不扩大调用量。
+- 付款、部署这类对外操作，结果不确定时（超时、报错），先查实际状态再决定要不要重试。
+- 密钥、令牌和敏感数据不能写进仓库、PR、日志或公开截图。仓库是公开的。
+
+## 4. 合并前必须满足
+
+1. CI 和安全检查全部通过。没跑过的检查不能说通过。
+2. 不能为了通过检查而新增没批准的豁免、删掉必要的测试，或者伪造检查结果。
+   等效的测试维护和新增检查，不需要额外批准。
+3. 实际验证：
+   - 页面和交互改动，在**包含这次改动**的 preview 或 staging 上，用真实浏览器操作一遍。
+   - 后台逻辑，用对应的接口、集成或数据库测试验证；需要时再补浏览器测试。
+   - 登录或权限改动，"允许"和"拒绝"两种情况都要测。
+   - 数据库改动，按 `docs/ENGINEERING.md` 的要求验证：新旧代码能兼容、可以重复执行、出问题怎么恢复。
+     需要保留的数据不能用"撤回代码"代替恢复；明确可以丢弃的测试数据可以重建。
+   - 支付和计费改动，在测试模式下验证这次影响到的正常、重复提交、并发和失败几种情况。
+   - 记录做了哪些操作、实际结果是什么。
+4. 独立审查：写代码的 AI 不能审自己。Claude 写的由 Codex 审查机器人审；Codex 写的由另一个窗口或机器人审。
+5. **CI、审查和实际验证都必须对应最终要合并的那个版本。** 审查之后又改了代码，要复核改动的部分和它影响到的地方，
+   不用从头全部重审。
+
+**审查次数：**默认一轮完整审查，加一轮修改后的复核。
+风格偏好、假想的扩展、说不出具体后果的意见，任何一轮都不挡合并，写进 PR 的"上线后再看"清单。
+两轮之后仍然挡合并的只有：安全问题、丢失或泄露数据、账务错误、没授权的行为、必需检查没通过，
+以及这次确认过的关键验收没做到。不能因为"已经两轮了"就自己放行这些问题。
+两轮的上限只算同一个范围；Owner 后来新加的要求，不算超出轮次。
+
+没做完、但默认关闭、不影响现有功能的分阶段代码，可以合进 staging，但要明确标成"未完成"，
+不能说成已经验收。
+
+## 5. 不追求完美
+
+- **5 美元损失线：**偶发的、不能被反复利用的、同一个异常累计让 Graylum 损失低于 5 美元的情况，
+  记日志、人工处理，不为它建复杂的自动补偿系统。顺手就能修好的小问题照常修。
+- 下面这些情况**不适用**损失线，要先停掉受影响的操作并报告 Owner，再用最小的办法处理：
+  同一个问题反复出现、可能被人放大利用、损失算不清楚；多扣用户的钱、应该退却没退、
+  付了钱没给东西、用户的钱长期冻结用不了。
+- 损失线不能拿来删掉已有的保护：防重复扣费、并发扣费、预算和账务保护都要保留。
+  Graylum 明确承担、并且如实记账的损失，不算"钱对不上账"。
+- 优先复用已有的代码和数据。新加表、队列、定时任务、新服务之前，先确认现有的东西真的不够用，
+  并在 PR 里写一句理由。
+- 不为"以后可能用到"写通用框架。
+
+## 6. 方案和决定
+
+- 纯讨论的方案在聊天里和 Owner 商量，不单独开 PR 给机器人做代码级审查。
+- Owner 拍板后，把决定写进 `docs/launch/MASTER_PLAN.md` 第 2.1 节（Owner 的新决定）：日期、Owner 原话或出处、
+  取代了哪条旧决定。这个改动照常走 PR 和 CI，不直接推送。
+- 不能把 AI 自己的建议写成"已批准的决定"，也不能拿旧文档否定 Owner 新的明确要求。
+- 会被程序读取或执行的文档（比如 Skill、提示词、运行指令），按它实际影响的范围来审查和验证，
+  不因为是 `.md` 文件就免审。
+- 开始实施前，AI 先核对方案和现有代码能不能对上；有具体矛盾才解决，不把整个方案重审一遍。
+- 一次最多给 Owner 2–3 个选项，标明推荐哪一个和理由。技术问题 AI 自己决定，不让 Owner 选。
+
+## 7. 怎么跟 Owner 汇报
+
+用中文大白话，只讲三件事：
+
+1. 做完了什么（附可以点开看的地址）
+2. 需要 Owner 决定什么（如果要批准，给一句可以直接复制的话）
+3. 还有什么风险，哪些地方没验证
+
+staging 每合并一个 PR，用一两句话告诉 Owner 合了什么，方便 Owner 随时发现方向不对。
+不要出现 head、SHA、writer、候选这类词，除非 Owner 问起。
+
+## 8. 窗口和交接
+
+- 固定一个主窗口负责规划、派活、汇报，最多再开一个执行窗口。
+- 尽早开草稿 PR，做完一步就推送一步。PR 描述里保留一个简短的"交接"小节：
+  做完了什么、下一步、卡在哪里、哪些验证过了、哪些还没验证。
+- 换 AI 接手时：原来的 AI 停止写入。接手的 AI 从当前的 PR 和分支继续，但要**先看本机有没有没上传的改动**，
+  有的话先保留，再同步；不能直接覆盖或清理掉。
+- 只处理具体发生的冲突，不建立额外的人员登记或协调系统。
+- 额度用完就暂停或排队，不为此改流程。
+
+## 9. 写代码的规范
+
+按 `docs/ENGINEERING.md` 写，包括代码放在哪里、测试命令、迁移目录和文件长度规则。
+CI 里的 `node scripts/check-code-size.mjs` 会检查文件长度；文件太长就拆开。
+
+## 10. 本文件优先
+
+AI 的私人备忘、聊天记录和旧文档都只是参考；和本文件冲突时，以本文件为准。
+但 Owner 在当前对话里的明确要求，按第 1、2 节执行。
+其他文档里的审批和审查要求（例如"staging 上的高风险 PR 要单独请 Owner 批准"）和本文件冲突时，以本文件为准；
+这些文档里记录的产品决定不受影响。
+`CLAUDE.md` 只能指向本文件，不能加规则。

@@ -11,7 +11,7 @@ manual.
 Use this document as the owner-facing checklist for rebuilding or auditing
 staging. The REL-1 section records file-built release database prerequisites;
 it does not authorize production access, database writes or deployment. Those
-effects still require the approvals in AGENTS.md sections 9 and 10.
+effects still require the Owner approvals in AGENTS.md section 1.
 
 ## Scope
 
