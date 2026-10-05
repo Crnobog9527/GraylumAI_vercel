@@ -9,9 +9,13 @@ some database bootstrap, RLS, grants, and non-secret seed steps were still
 manual.
 
 Use this document as the owner-facing checklist for rebuilding or auditing
-staging. The REL-1 section records file-built release database prerequisites;
-it does not authorize production access, database writes or deployment. Those
-effects still require the Owner approvals in AGENTS.md section 1.
+staging. Under AGENTS.md section 3, the agent performs staging rebuild,
+migration and seed steps itself after the verification described here. The
+REL-1 section records file-built release database prerequisites; it does not
+authorize production access, production database writes or production
+deployment. Those effects, secrets/credentials, changes to the staging project
+bindings and the other items in AGENTS.md section 1 still require Owner
+approval.
 
 ## Scope
 
@@ -69,8 +73,8 @@ any step points at production or requires unapproved writes.
      and `storage` schemas. The local stand-in is
      `packages/db/tests/baseline/platform-local.sql`; never apply it to staging
      or a release database.
-6. Build a fresh empty database from repository files, after explicit owner
-   approval for the database writes.
+6. Build a fresh empty database from repository files. The agent runs these
+   staging writes after steps 1-5 confirm the staging target.
    - Apply `packages/db/baseline/*.sql` in filename order (currently
      `0000_core_prerequisites.sql`), then every file in
      `packages/db/migrations` in filename order.
@@ -83,7 +87,8 @@ any step points at production or requires unapproved writes.
    - After building, capture a read-only fingerprint and compare it as described
      below before proceeding to seed or smoke checks.
 7. Apply non-secret staging seed data.
-   - This step requires explicit owner approval because it writes to the DB.
+   - The agent runs this staging write after the step 6 fingerprint comparison
+     passes.
    - Seeds must be idempotent and must not contain real API keys or production
      billing identifiers.
 8. Verify RLS, grants, and RPC/function readiness.
@@ -137,15 +142,16 @@ on the second run. The shared builder checks every migration from 0067 on;
 any genuine exception needs a documented reason in its `NOT_REPEATABLE` list
 and independent review (the list is currently empty).
 
-Before and after an approved migration application to staging, capture a fresh
+Before and after a migration application to staging, capture a fresh
 catalog-only fingerprint with `packages/db/tests/baseline/fingerprint.sql`
 inside a `BEGIN READ ONLY` transaction and end with `ROLLBACK`. From the repository
 root, after installing the locked dependencies, use the command below. Supply
-`DATABASE_URL` through the approved target's private environment; this command
+`DATABASE_URL` through the confirmed target's private environment; this command
 does not load an environment file or print connection details. Set `SNAPSHOT_OUT`
 to a new filename for each before/after capture (default: `snapshot.json`); it
-refuses to overwrite an existing file. Remote use still requires the applicable
-approval; use a local database for local validation.
+refuses to overwrite an existing file. The agent may run it against the
+confirmed staging target; any production use requires Owner approval under
+AGENTS.md section 1. Use a local database for local validation.
 
 The command reuses the existing CTE and group query from `fingerprint.sql`.
 It exports `groups` and per-object `objects`: `acl:` / `defacl:` values remain
@@ -278,8 +284,8 @@ packages/db/seeds/staging_non_secret_baseline.sql
 
 This seed is repo-owned, reviewed SQL for the non-secret readiness baseline. It
 is not an automatic migration and is not applied by CI, Vercel, or application
-startup. Applying it to staging is a database write and requires explicit owner
-approval before running any SQL.
+startup. Applying it to staging is a database write that the agent performs
+after confirming the staging target and the fingerprint check above.
 
 The seed covers:
 
@@ -299,7 +305,7 @@ Security boundaries:
   unless separately approved.
 - Real chat and billing smoke are outside this baseline.
 
-After the owner approves and applies the seed to staging, run the read-only
+After the agent applies the seed to staging, run the read-only
 readiness script to confirm counts and posture:
 
 ```bash
@@ -331,7 +337,7 @@ Codex may only report safe metadata:
 ## RLS, Grants, And RPC Reproducibility Checklist
 
 Future implementation phases should verify this checklist with read-only
-catalog queries before and after any approved staging write.
+catalog queries before and after any staging write.
 
 RPC/functions:
 
@@ -428,7 +434,7 @@ Output must avoid:
 ## Read-Only Readiness Script
 
 Use the Phase 2A readiness script when auditing staging drift or checking a
-fresh staging rebuild before any approved repair SQL is applied.
+fresh staging rebuild before any reviewed repair SQL is applied.
 
 ```bash
 node scripts/check-staging-db-readiness.mjs --env <staging-env-file> --confirm-staging
@@ -488,9 +494,10 @@ Exit codes:
 
 Readiness gaps are not automatically repaired by this script. Missing RPCs,
 policies, grants, or seed counts should feed the next reviewed #148 phase.
-Any SQL write, seed, migration, Supabase/Vercel setting change, secret
-configuration, or real chat/billing smoke still requires explicit owner
-approval.
+Staging SQL writes, seeds and migrations are done by the agent after this
+verification. Production access, secret configuration, changes to the staging
+project bindings, production Supabase/Vercel settings, and real chat/billing
+smoke still require explicit Owner approval.
 
 ## Smoke Checklist
 
@@ -595,7 +602,8 @@ Phase 2: migration/RPC/RLS reconciliation.
 
 - Add reviewed, idempotent SQL for missing or drifted repo-covered functions,
   RLS, grants, and hardening.
-- Requires owner approval before any DB write.
+- Staging DB writes are done by the agent after verification; production
+  writes require Owner approval.
 
 Phase 3: seed strategy.
 
