@@ -100,7 +100,7 @@ it('saves Stripe with the next version and confirms it by reading back', async (
     await browserExpect(save).toBeDisabled();
     await page.getByTestId('admin-payment-channel-option-stripe').click();
     await save.click();
-    await browserExpect(page.getByText('已保存，并已重新读取确认')).toBeVisible();
+    await browserExpect(page.getByText('已保存，重新读取确认无误。')).toBeVisible();
     await browserExpect(page.getByTestId('admin-payment-channel-current')).toHaveText('当前选择：Stripe');
     expect(await page.evaluate('window.saves')).toEqual([
       { key: 'payment_new_purchase_channel', value: { channel: 'stripe', version: 1 } },
@@ -127,7 +127,7 @@ it('on a conflict asks for a re-read, does not retry, and saves only after the a
     await page.getByTestId('admin-payment-channel-option-waffo').click();
     await browserExpect(page.getByText('保存后用户将无法发起新的购买', { exact: false })).toBeVisible();
     await page.getByTestId('admin-payment-channel-save').click();
-    await browserExpect(page.getByText('已保存，并已重新读取确认')).toBeVisible();
+    await browserExpect(page.getByText('已保存，重新读取确认无误。')).toBeVisible();
     expect(await page.evaluate('window.saves.map(s => s.value)')).toEqual([
       { channel: 'stripe', version: 4 }, { channel: 'waffo', version: 5 },
     ]);

@@ -153,7 +153,7 @@ export function PaymentChannelSetting() {
           ) : draft !== null && draft !== current?.channel ? (
             <p style={{ color: 'var(--text-tertiary)' }}>有未保存的修改</p>
           ) : readOk ? (
-            <p role="status" style={{ color: 'var(--success)' }}>已保存，并已重新读取确认</p>
+            <p role="status" style={{ color: 'var(--success)' }}>已保存，重新读取确认无误。</p>
           ) : null}
         </div>
       </CardContent>
