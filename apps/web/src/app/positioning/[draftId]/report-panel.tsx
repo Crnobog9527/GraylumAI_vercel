@@ -9,26 +9,27 @@ import { CHAT_ACTION, ChatNoticeList, type ChatNotice } from "@/components/chat/
 import { profileTabHref } from "@/lib/profile-tabs";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import {
-  REPORT_ACTION, REPORT_INTRO, REPORT_TITLE, REPORT_WRITING_NOTICE, reportCanStart, reportView,
+  REPORT_ACTION, REPORT_INTRO, REPORT_TITLE, REPORT_WRITING_NOTICE, reportView,
 } from "./report-gen";
 import { useReportGen } from "./use-report-gen";
 
 type Props = { draftId: string; sessionId: string; projectId: string; roundId: string; confirmed: boolean; busy: boolean };
 
 /**
- * The report entry of the positioning footer. Hidden unless the server switch is on and every
- * step is confirmed, so with the switch off the page is unchanged.
+ * The report entry of the positioning footer. A saved report of this round stays readable whatever
+ * the switch or membership is now; a new paid start needs the switch on and every step confirmed.
+ * With the switch off and no saved report, nothing renders, so the page is unchanged.
  */
 export function ReportEntry(props: Props) {
   const available = trpc.runtime.reportAvailable.useQuery(undefined, { enabled: props.confirmed, staleTime: 60_000 });
-  const active = props.confirmed && available.data?.enabled === true;
-  const report = useReportGen({ ...props, active });
+  const canGenerate = props.confirmed && available.data?.enabled === true;
+  const report = useReportGen({ ...props, canGenerate: canGenerate });
   const [open, setOpen] = useState(false);
-  if (!active || report.refusal?.hideEntry) return null;
+  if (!report.executionId && (!canGenerate || report.refusal?.hideEntry)) return null;
   return (
     <>
       <Button variant="outline" disabled={props.busy} onClick={() => setOpen(true)}>
-        {report.record?.executionId ? REPORT_TITLE : REPORT_ACTION.start}
+        {report.executionId ? REPORT_TITLE : REPORT_ACTION.start}
       </Button>
       {open && <ReportDialog report={report} busy={props.busy} onClose={() => setOpen(false)} />}
     </>
@@ -51,9 +52,7 @@ function ReportDialog({ report, busy, onClose }: { report: ReturnType<typeof use
   if (report.refusal) notices.push({ id: "report-refusal", tone: "warning", text: report.refusal.text,
     ...(report.refusal.membership ? { actions: [{ label: REPORT_ACTION.membership,
       onClick: () => void window.open(profileTabHref("subscription"), "_blank", "noopener") }] } : {}) });
-  // A record without a saved execution is a start whose answer was lost: the same request is sent again.
-  const first = !report.record?.executionId;
-  const canStart = !working && (first || (status !== null && reportCanStart(status)));
+  const first = !report.executionId;
   return (
     <div role="dialog" aria-modal="true" aria-label={REPORT_TITLE} tabIndex={-1}
       onKeyDown={event => { if (event.key === "Escape") onClose(); }}
@@ -68,10 +67,10 @@ function ReportDialog({ report, busy, onClose }: { report: ReturnType<typeof use
         {first && !working && <p>{REPORT_INTRO}</p>}
         {body && <MessageMarkdown className="mt-4" text={body} streaming={Boolean(report.live && !report.live.stopped)} />}
         <ChatNoticeList className="mt-4" notices={notices} />
-        {canStart && (
+        {report.offer && !report.refusal?.hideEntry && (
           <div className={resultStyles.consentActions}>
-            <Button disabled={busy} onClick={first ? report.start : report.restart}>
-              {first ? REPORT_ACTION.start : REPORT_ACTION.retry}
+            <Button disabled={busy} onClick={report.offer === "start" ? report.start : report.restart}>
+              {report.offer === "start" ? REPORT_ACTION.start : REPORT_ACTION.retry}
             </Button>
           </div>
         )}

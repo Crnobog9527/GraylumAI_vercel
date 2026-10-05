@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {reportEnabled,reportService} from '../services/report/service';
+import {reportEnabled,reportLocate,reportService} from '../services/report/service';
 import {reportStart} from '../services/report/contract';
 import {readNativeRuntimeView} from '../services/runtime/nativeView';
 import {resumeInput} from '../services/runtime/paygRuntime';
@@ -67,6 +67,9 @@ export const runtimeRouter=router({
  reportStart:procedure.input(reportStart).mutation(({ctx,input})=>ctx.report.start(input)),
  // Display only: whether the report entry is shown. reportStart checks the same switch again.
  reportAvailable:maintenanceProcedure.query(async({ctx})=>({enabled:await reportEnabled(ctx.supabaseAdmin!).catch(()=>false)})),
+ // Saved reports stay discoverable whatever the switch or membership is now.
+ reportLatest:maintenanceProcedure.input(reportLocate).query(({ctx,input})=>reportService(ctx.userScopedSupabase,ctx.supabaseAdmin!,
+  {account:'read-only',costPerCall:'0',creditsPerUsd:'100',multiplier:'6',maxCalls:1,maxOutputTokens:1,inputBytes:1024,historyItems:0}).latest(input)),
  reportStatus:maintenanceProcedure.input(z.object({executionId:z.string().uuid()}).strict()).query(({ctx,input})=>
   reportService(ctx.userScopedSupabase,ctx.supabaseAdmin!,{account:'read-only',costPerCall:'0',creditsPerUsd:'100',
     multiplier:'6',maxCalls:1,maxOutputTokens:1,inputBytes:1024,historyItems:0}).status(input.executionId)),

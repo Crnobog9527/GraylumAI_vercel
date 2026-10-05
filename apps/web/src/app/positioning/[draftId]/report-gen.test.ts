@@ -5,6 +5,7 @@ import {
   readReportRecord, REPORT_DISABLED_NOTICE, REPORT_EMPTY_NOTICE, REPORT_INCOMPLETE_NOTICE, REPORT_INTRO, REPORT_STOPPED_NOTICE,
   REPORT_TRUNCATED_NOTICE, REPORT_UNCONFIRMED_NOTICE, reportAttachable, reportCanStart, reportProgressing, reportRecordKey,
   reportResultRefusal, reportStartRefusal, reportView, startedExecution, writeReportRecord, type ReportStatus,
+  ATTACH_RETRY_DELAYS_MS, attachRetryDelay, generationOffer, shownExecution,
 } from "./report-gen";
 
 const id = "11111111-2222-4333-8444-555555555555";
@@ -127,5 +128,44 @@ describe("reportResultRefusal", () => {
   });
   it.each([{ code: "RUNTIME_WAITING_CREDITS" }, { state: "completed" }, null, "x"])("ignores %j", result => {
     expect(reportResultRefusal(result)).toBeNull();
+  });
+});
+
+describe("restoring and offering", () => {
+  const other = "99999999-2222-4333-8444-555555555555";
+  it("takes the server's report over a missing or stale local pointer", () => {
+    expect(shownExecution(null, { kind: "known", executionId: id }, null)).toBe(id);
+    expect(shownExecution(null, { kind: "known", executionId: id }, { requestId: other, executionId: other })).toBe(id);
+    expect(shownExecution(null, { kind: "known", executionId: null }, { requestId: other, executionId: other })).toBeNull();
+  });
+  it("keeps a just-started execution until the server read names it, and falls back to local only when the server is unreadable", () => {
+    expect(shownExecution(other, { kind: "known", executionId: id }, null)).toBe(other);
+    expect(shownExecution(null, { kind: "failed" }, { requestId: other, executionId: other })).toBe(other);
+    expect(shownExecution(null, { kind: "pending" }, null)).toBeNull();
+  });
+  const known = { kind: "known", executionId: null } as const;
+  it("offers a first start only for a round the server shows without a report", () => {
+    expect(generationOffer({ canGenerate: true, working: false, server: known, executionId: null, status: null })).toBe("start");
+    for (const server of [{ kind: "pending" }, { kind: "failed" }] as const)
+      expect(generationOffer({ canGenerate: true, working: false, server, executionId: null, status: null })).toBeNull();
+    expect(generationOffer({ canGenerate: false, working: false, server: known, executionId: null, status: null })).toBeNull();
+    expect(generationOffer({ canGenerate: true, working: true, server: known, executionId: null, status: null })).toBeNull();
+  });
+  it.each([
+    ["a saved report", status({})], ["a truncated report", status({ completeness: "length_limit", candidate: false })],
+    ["a running report", status({ state: "running", body: null })], ["a report waiting for credits", status({ state: "waiting_credits", body: null })],
+    ["a status still loading", null], ["a status of another execution", status({ executionId: other, body: null, state: "cancelled" })],
+  ])("never offers a paid start over %s", (_name, saved) => {
+    expect(generationOffer({ canGenerate: true, working: false, server: { kind: "known", executionId: id }, executionId: id, status: saved }))
+      .toBeNull();
+  });
+  it("offers a new request only after the round's last report ended without text", () => {
+    const empty = status({ state: "cancelled", body: null, completeness: null, candidate: false });
+    expect(generationOffer({ canGenerate: true, working: false, server: { kind: "known", executionId: id }, executionId: id, status: empty }))
+      .toBe("restart");
+  });
+  it("bounds the attach retries", () => {
+    expect(ATTACH_RETRY_DELAYS_MS.map((_, attempt) => attachRetryDelay(attempt))).toEqual(ATTACH_RETRY_DELAYS_MS);
+    expect(attachRetryDelay(ATTACH_RETRY_DELAYS_MS.length)).toBeNull();
   });
 });

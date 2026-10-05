@@ -75,3 +75,34 @@ it('reportEnabled fails closed on a read error', async () => {
   const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: null, error: { message: 'x' } }) };
   await expect(reportEnabled({ from: () => query } as unknown as SupabaseClient)).rejects.toThrow('REPORT_UNAVAILABLE');
 });
+function latestAdmin(view: unknown, row: { id: string } | null) {
+  const calls: unknown[][] = [];
+  const query = new Proxy({} as Record<string, unknown>, { get: (_t, name: string) => name === 'maybeSingle'
+    ? async () => ({ data: row, error: null }) : (...args: unknown[]) => { calls.push([name, ...args]); return query; } });
+  const rpc = vi.fn(async () => view === null ? { data: null, error: { message: 'RUNTIME_SCOPE_DENIED' } } : { data: view, error: null });
+  const from = vi.fn((table: string) => { calls.push(['from', table]); return query; });
+  return { admin: { rpc, from } as unknown as SupabaseClient, calls, from };
+}
+const locate = { sessionId: id, projectId: randomUUID(), roundId: randomUUID() };
+it('latest finds the newest report of this project and round in an owned session, without switch or membership reads', async () => {
+  const other = randomUUID();
+  const { admin, calls } = latestAdmin({ sessionId: id, executions: [] }, { id: other });
+  expect(await reportService(user as unknown as SupabaseClient, admin, policy).latest(locate)).toEqual({ executionId: other });
+  expect(calls).toEqual([['from', 'runtime_executions'], ['select', 'id'], ['eq', 'session_id', id],
+    ['filter', 'payload->reportGeneration->>projectId', 'eq', locate.projectId],
+    ['filter', 'payload->reportGeneration->>roundId', 'eq', locate.roundId],
+    ['order', 'created_at', { ascending: false }], ['limit', 1]]);
+});
+it('latest returns null when the round has no report', async () => {
+  const { admin } = latestAdmin({ sessionId: id, executions: [] }, null);
+  expect(await reportService(user as unknown as SupabaseClient, admin, policy).latest(locate)).toEqual({ executionId: null });
+});
+it('latest refuses a session the actor cannot view before reading executions', async () => {
+  const { admin, from } = latestAdmin(null, { id });
+  await expect(reportService(user as unknown as SupabaseClient, admin, policy).latest(locate)).rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
+  expect(from).not.toHaveBeenCalled();
+});
+it('latest rejects extra input such as a requestId', async () => {
+  const { admin } = latestAdmin({ sessionId: id, executions: [] }, null);
+  await expect(reportService(user as unknown as SupabaseClient, admin, policy).latest({ ...locate, requestId: id })).rejects.toThrow();
+});

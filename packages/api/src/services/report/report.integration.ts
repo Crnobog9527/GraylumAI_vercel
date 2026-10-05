@@ -107,6 +107,8 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
               creditsPerUsd:'100', multiplier:'6', maxCalls:1, maxOutputTokens:1000, inputBytes:196608, historyItems:0 });
             await expect(foreign.start(input)).rejects.toThrow('REPORT_SOURCE_CONFLICT');
             await expect(foreign.status(admitted.executionId)).rejects.toMatchObject({code:'BAD_REQUEST',message:'REPORT_UNAVAILABLE'});
+            await expect(foreign.latest({ sessionId: input.sessionId, projectId: input.projectId, roundId: input.roundId }))
+              .rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
             expect(calls).toBe(0);
           } finally {
             await db.query('update modules set active=false where id=(select module_id from artifact_workflows where id=$1)', [other.registration]);
@@ -155,6 +157,11 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
         await db.query("update profiles set membership_level='free' where id=$1", [f.actor]);
         const read = await service.status(admitted.executionId);
         expect(read.body).toContain('Report body'); expect(read.candidate).toBe(scenario !== 'length');
+        // A saved report is found from the server with the switch off and the membership lapsed.
+        await db.query("delete from system_settings where key='runtime_report_generation'");
+        const locate = { sessionId: input.sessionId, projectId: input.projectId, roundId: input.roundId };
+        expect(await service.latest(locate)).toEqual({ executionId: admitted.executionId });
+        expect(await service.latest({ ...locate, roundId: randomUUID() })).toEqual({ executionId: null });
       } finally {
         await db.query('update modules set active=false where id=(select module_id from artifact_workflows where id=$1)', [f.registration]);
         if (server.listening) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));

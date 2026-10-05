@@ -139,3 +139,39 @@ export function startedExecution(result: unknown): string | null {
   const id = result && typeof result === "object" ? (result as { executionId?: unknown }).executionId : null;
   return typeof id === "string" && uuid.test(id) ? id : null;
 }
+
+/** What `runtime.reportLatest` said: not answered yet, failed, or the round's newest report (or none). */
+export type ServerReport = { kind: "pending" } | { kind: "failed" } | { kind: "known"; executionId: string | null };
+
+/**
+ * The report this page shows. The server is the authority, so a cleared storage or another device
+ * still finds it; an execution this page just started wins until the server read catches up. The
+ * local pointer only stands in while the server cannot be read.
+ */
+export function shownExecution(pinned: string | null, server: ServerReport, local: ReportRecord | null): string | null {
+  if (pinned) return pinned;
+  if (server.kind === "known") return server.executionId;
+  return local?.executionId ?? null;
+}
+
+/**
+ * Which paid start the page offers, if any. Never while the server read is unknown or failed,
+ * never over a report that exists, runs or waits for credits: only for a round without a report
+ * (`start`) or after the last one ended with no text (`restart`, a new request).
+ */
+export function generationOffer(input: {
+  canGenerate: boolean; working: boolean; server: ServerReport; executionId: string | null; status: ReportStatus | null;
+}): "start" | "restart" | null {
+  if (!input.canGenerate || input.working || input.server.kind !== "known") return null;
+  if (!input.executionId) return "start";
+  return input.status && input.status.executionId === input.executionId && reportCanStart(input.status) ? "restart" : null;
+}
+
+/**
+ * Re-attach delays after the stream could not be opened (the request may never have reached the
+ * server). Bounded; each attach is the same execution, which the server replays, never a new run.
+ */
+export const ATTACH_RETRY_DELAYS_MS = [2000, 5000, 10000, 20000, 30000];
+export function attachRetryDelay(attempt: number) {
+  return ATTACH_RETRY_DELAYS_MS[attempt] ?? null;
+}
