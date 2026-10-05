@@ -5,7 +5,3 @@ a3bd63213d9860f82f3492b513e1f98d34c40242:packages/api/src/routers/payments.test.
 ccc58c3b70ab50d5b6b260ebb1ad503592b1681f:packages/db/tests/baseline/built-fingerprint.json:generic-api-key:1894
 # Generated catalog MD5 for subscription_credit_grants_user_id_fkey changed to ON DELETE RESTRICT; not a credential.
 7ea582bd4000e1ce364894713d5707e962da3f3f:packages/db/tests/baseline/built-fingerprint.json:generic-api-key:1858
-# Synthetic annual-release idempotency labels in SQL fixtures, not credentials; exact historical findings only.
-3e1b72e501e157520d6d0c8be7e5685a467560a4:packages/db/tests/pay-common/annual-grant.sql:generic-api-key:55
-3e1b72e501e157520d6d0c8be7e5685a467560a4:packages/db/tests/pay-common/annual-grant.sql:generic-api-key:65
-3e1b72e501e157520d6d0c8be7e5685a467560a4:packages/db/tests/pay-common/annual-grant.sql:generic-api-key:74

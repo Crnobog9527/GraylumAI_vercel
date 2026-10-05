@@ -32,8 +32,12 @@ export async function validateInvoiceSource(db: Db, input: FulfillMembershipInvo
   billing_cycle?: string | null; purchase_membership_level?: string | null; stripe_customer_id?: string | null;
 }) {
   if (!input.scope || source.payment_channel !== 'stripe' || source.merchant_namespace !== input.scope.merchant
-    || source.payment_mode !== input.scope.mode) throw new Error('PAY_COMMON_INVOICE_SOURCE_MISMATCH');
+    || source.payment_mode !== input.scope.mode) {
+    if (input.scope) await recordStripeInvoiceConflict({ db, scope: input.scope, invoiceId: input.invoiceId, sourceOrderId: source.id });
+    throw new Error('PAY_COMMON_INVOICE_SOURCE_MISMATCH');
+  }
   if (!statuses.includes(input.providerSubscriptionStatus ?? '') || input.providerSubscriptionUserId !== source.user_id) {
+    await recordStripeInvoiceConflict({ db, scope: input.scope, invoiceId: input.invoiceId, sourceOrderId: source.id });
     throw new Error('PAY_COMMON_SUBSCRIPTION_RECEIPT_MISMATCH');
   }
   const snapshot = freezePurchaseSnapshot(source.purchase_snapshot);

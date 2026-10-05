@@ -1226,7 +1226,14 @@ describe('stripe fulfillment helpers', () => {
       status: 'active', metadata: { userId: 'user-monthly' }, ...patch });
     const before = structuredClone(supabase.tables);
     await expect(realFulfillMembershipInvoice(supabase, invoice)).rejects.toThrow('PAY_COMMON_SUBSCRIPTION_RECEIPT_MISMATCH');
-    expect(supabase.tables).toEqual(before);
+    if (patch.metadata?.userId === 'another-user') {
+      expect(supabase.tables.payment_orders[0].metadata.paymentConflicts).toEqual([
+        { code: 'PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT', evidence_ref: invoice.id, reason: 'PAY_COMMON_INVOICE_EVIDENCE_REJECTED' },
+      ]);
+      const after = structuredClone(supabase.tables);
+      delete after.payment_orders[0].metadata.paymentConflicts;
+      expect(after).toEqual(before);
+    } else expect(supabase.tables).toEqual(before);
   });
 
   it('records a paid initial invoice after cancellation without granting membership', async () => {
@@ -4691,7 +4698,7 @@ describe('stripe fulfillment helpers', () => {
     const before = structuredClone(supabase.tables);
     await expect(fulfillMembershipInvoice(supabase, invoice)).rejects.toMatchObject({ stage: 'invoice_subscription_service_period' });
     expect(supabase.tables.payment_orders[0].metadata.paymentConflicts).toEqual([
-      { evidence_ref: invoice.id, reason: 'PAY_COMMON_INVOICE_EVIDENCE_REJECTED' },
+      { code: 'PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT', evidence_ref: invoice.id, reason: 'PAY_COMMON_INVOICE_EVIDENCE_REJECTED' },
     ]);
     const after = structuredClone(supabase.tables);
     delete after.payment_orders[0].metadata.paymentConflicts;

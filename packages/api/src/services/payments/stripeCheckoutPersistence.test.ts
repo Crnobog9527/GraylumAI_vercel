@@ -2,6 +2,7 @@
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { describe, expect, it, vi } from 'vitest';
+import { buildStripeCheckoutRequest } from './stripeCheckoutIntent';
 import { createDurableStripeCheckout, resolveStripeScope } from './stripeCheckoutPersistence';
 const scope = { merchant: 'acct_fixture', mode: 'test' as const };
 const snapshot = { version: 1, item_type: 'credit_package', item_id: '11111111-1111-4111-8111-111111111111',
@@ -11,7 +12,7 @@ function fixture() {
   const operations: string[] = [];
   const order = { id: '22222222-2222-4222-8222-222222222222', user_id: 'fixture_user',
     payment_channel: 'stripe', merchant_namespace: scope.merchant, payment_mode: scope.mode,
-    purchase_snapshot: snapshot, checkout_request: null, price_ref_id: 'fixture_price_ref',
+    purchase_snapshot: snapshot, checkout_request: null as Stripe.Checkout.SessionCreateParams | null, price_ref_id: 'fixture_price_ref',
     metadata: { productName: 'Fixture' } };
   const mapping = { external_id: 'price_fixture', channel: 'stripe', merchant_namespace: scope.merchant, mode: scope.mode };
   const rpc = vi.fn(async (name: string, args: Record<string, unknown>): Promise<{ data: unknown; error: unknown }> => {
@@ -73,6 +74,93 @@ describe('Stripe checkout persistence boundary', () => {
       ? { data: { ok: false, reason: 'PAY_COMMON_RECEIPT_MISMATCH' }, error: null } : original(name, args));
     await expect(createDurableStripeCheckout(t.args)).rejects.toThrow('PAY_COMMON_RECEIPT_MISMATCH');
     expect(t.create).toHaveBeenCalledTimes(1);
+  });
+  function replacementFixture() {
+    const t = fixture();
+    const oldId = t.order.id;
+    t.order.checkout_request = buildStripeCheckoutRequest({ orderId: oldId, userId: t.order.user_id, snapshot,
+      priceId: 'price_fixture', productName: 'Old', appUrl: t.args.appUrl, expiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    t.args.action.itemId = '33333333-3333-4333-8333-333333333333';
+    const oldSession = { id: 'cs_old', object: 'checkout.session', livemode: false, mode: 'payment',
+      status: 'open', payment_status: 'unpaid', amount_total: 1799, currency: 'usd',
+      client_reference_id: t.order.user_id, metadata: t.order.checkout_request.metadata };
+    const retrieve = vi.fn(async () => ({ ...oldSession }));
+    const expire = vi.fn(async () => { oldSession.status = 'expired'; return oldSession; });
+    const list = vi.fn().mockResolvedValue({ data: [oldSession], has_more: false });
+    Object.assign(t.args.stripe.checkout.sessions, { retrieve, expire, list });
+    const original = t.rpc.getMockImplementation()!;
+    t.rpc.mockImplementation(async (name, args) => {
+      if (name === 'pay_common_close_checkout') {
+        t.operations.push(name);
+        t.order.id = '44444444-4444-4444-8444-444444444444';
+        t.order.purchase_snapshot = { ...snapshot, item_id: t.args.action.itemId };
+        t.order.checkout_request = null;
+        return { data: true, error: null };
+      }
+      return original(name, args);
+    });
+    return { ...t, retrieve, expire, list, oldSession, oldId };
+  }
+  it('expires and re-reads the old unpaid session before admitting the explicitly selected replacement', async () => {
+    const t = replacementFixture();
+    await expect(createDurableStripeCheckout(t.args)).resolves.toMatchObject({ id: 'cs_fixture' });
+    expect(t.expire).toHaveBeenCalledExactlyOnceWith('cs_old');
+    expect(t.retrieve).toHaveBeenCalledTimes(2);
+    expect(t.rpc).toHaveBeenCalledWith('pay_common_close_checkout', expect.objectContaining({
+      p_order_id: t.oldId, p_session_id: 'cs_old', p_checkout_status: 'expired', p_payment_status: 'unpaid',
+    }));
+    expect(t.create).toHaveBeenCalledOnce();
+    expect(t.create.mock.calls[0][0].metadata).toMatchObject({ itemId: t.args.action.itemId });
+    expect(t.operations.indexOf('pay_common_close_checkout')).toBeLessThan(t.operations.indexOf('provider_create'));
+  });
+  it.each(['paid', 'complete-unpaid', 'expire-error', 'retrieve-error', 'paid-race', 'close-race'] as const)(
+    'does not create or return a replacement when original retirement is unsafe: %s', async reason => {
+      const t = replacementFixture();
+      if (reason === 'paid') t.oldSession.payment_status = 'paid';
+      if (reason === 'complete-unpaid') t.oldSession.status = 'complete';
+      if (reason === 'expire-error') t.expire.mockRejectedValue(new Error('network'));
+      if (reason === 'retrieve-error') t.retrieve.mockRejectedValueOnce(new Error('network'));
+      if (reason === 'paid-race') t.expire.mockImplementation(async () => {
+        t.oldSession.status = 'complete'; t.oldSession.payment_status = 'paid'; return t.oldSession;
+      });
+      if (reason === 'close-race') {
+        const original = t.rpc.getMockImplementation()!;
+        t.rpc.mockImplementation((name, args) => name === 'pay_common_close_checkout'
+          ? Promise.resolve({ data: false, error: null }) : original(name, args));
+      }
+      await expect(createDurableStripeCheckout(t.args)).rejects.toThrow();
+      expect(t.create).not.toHaveBeenCalled();
+      expect(t.rpc.mock.calls.filter(([name]) => name === 'pay_common_create_purchase')).toHaveLength(1);
+      if (['paid', 'complete-unpaid', 'retrieve-error'].includes(reason)) expect(t.expire).not.toHaveBeenCalled();
+    });
+  it('concurrent replacement requests cannot create twice when one original expiration loses the race', async () => {
+    const t = replacementFixture(); let expirationStarted = false;
+    t.expire.mockImplementation(async () => {
+      if (expirationStarted) throw new Error('session is no longer open');
+      expirationStarted = true;
+      t.oldSession.status = 'expired';
+      return t.oldSession;
+    });
+    const results = await Promise.allSettled([createDurableStripeCheckout(t.args), createDurableStripeCheckout(t.args)]);
+    expect(results.map(result => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect(t.create).toHaveBeenCalledOnce();
+    expect(t.rpc.mock.calls.filter(([name]) => name === 'pay_common_close_checkout')).toHaveLength(1);
+  });
+  it('never prepares or dispatches an unprepared attempt for a different item', async () => {
+    const t = replacementFixture(); t.order.checkout_request = null;
+    await expect(createDurableStripeCheckout(t.args)).rejects.toThrow('RECONCILIATION_REQUIRED');
+    expect(t.create).not.toHaveBeenCalled();
+    expect(t.rpc.mock.calls.map(([name]) => name)).toEqual(['pay_common_create_purchase']);
+  });
+  it('releases a never-created original after grace using the existing protected closure RPC', async () => {
+    const t = replacementFixture();
+    t.order.checkout_request!.expires_at = Math.floor(Date.now() / 1000) - 3600;
+    t.list.mockResolvedValue({ data: [], has_more: false });
+    await expect(createDurableStripeCheckout(t.args)).resolves.toMatchObject({ id: 'cs_fixture' });
+    expect(t.rpc).toHaveBeenCalledWith('pay_common_close_checkout', expect.objectContaining({
+      p_order_id: t.oldId, p_session_id: null, p_checkout_status: 'never_created', p_payment_status: 'unpaid',
+    }));
+    expect(t.expire).not.toHaveBeenCalled();
   });
   it('obtains original merchant and mode from the authenticated provider connection', async () => {
     const retrieveCurrent = vi.fn().mockResolvedValue({ id: 'acct_fixture' });

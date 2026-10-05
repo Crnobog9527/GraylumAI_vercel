@@ -36,7 +36,7 @@ describe('bounded invoice conflict evidence', () => {
     await recordStripeInvoiceConflict({ db: f.db, scope, invoiceId: 'in_fixture' });
     await recordStripeInvoiceConflict({ db: f.db, scope, invoiceId: 'in_fixture' });
     expect(f.read()).toEqual({ grantedCredits: 120, paymentConflicts: [
-      { evidence_ref: 'in_fixture', reason: 'PAY_COMMON_INVOICE_EVIDENCE_REJECTED' },
+      { code: 'PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT', evidence_ref: 'in_fixture', reason: 'PAY_COMMON_INVOICE_EVIDENCE_REJECTED' },
     ] });
     expect(f.writes()).toBe(1);
   });
@@ -54,7 +54,7 @@ describe('bounded invoice conflict evidence', () => {
   it('bounds contention and evidence history', async () => {
     const f = fixture(); f.race(4);
     await expect(recordStripeInvoiceConflict({ db: f.db, scope, invoiceId: 'in_fixture' }))
-      .rejects.toThrow('PAY_COMMON_CONFLICT_WRITE_RETRY_REQUIRED');
+      .rejects.toMatchObject({ message: 'PAY_COMMON_CONFLICT_WRITE_RETRY_REQUIRED', code: 'PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT' });
     expect(f.writes()).toBe(3);
     f.set({ paymentConflicts: Array.from({ length: 32 }, (_, n) => ({ evidence_ref: `in_old_${n}` })) });
     await expect(recordStripeInvoiceConflict({ db: f.db, scope, invoiceId: 'in_fixture' }))

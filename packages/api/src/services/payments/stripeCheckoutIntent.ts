@@ -57,8 +57,8 @@ export function buildStripeCheckoutRequest(input: {
   };
 }
 
-// A list miss never closes an attempt. The bounded scan is only for locating a lost
-// provider response; ambiguous or incomplete results require reconciliation.
+// Only a complete scoped scan can prove absence. An incomplete scan always requires reconciliation.
+export const CHECKOUT_ABSENCE_GRACE_SECONDS = 3600;
 async function findOriginalCheckout(stripe: Pick<Stripe, 'checkout'>, intent: StripeCheckoutIntent) {
   const expiry = intent.request.expires_at;
   if (!Number.isSafeInteger(expiry)) throw new Error('PAY_COMMON_CHECKOUT_REQUEST_INVALID');
@@ -67,6 +67,9 @@ async function findOriginalCheckout(stripe: Pick<Stripe, 'checkout'>, intent: St
   for (let page = 0; page < 10; page++) {
     const result = await stripe.checkout.sessions.list({ limit: 100,
       created: { gte: expiry! - 24 * 3600, lte: expiry! }, ...(cursor ? { starting_after: cursor } : {}) });
+    if (!Array.isArray(result.data) || typeof result.has_more !== 'boolean') {
+      throw new Error('PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED');
+    }
     for (const session of result.data) {
       if (session.metadata?.orderId !== intent.id) continue;
       if (found && found !== session.id) throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
@@ -88,6 +91,8 @@ export async function dispatchStripeCheckoutIntent(input: {
   scope: StripeScope;
   persistSession: (session: Stripe.Checkout.Session) => Promise<void>;
   now?: number;
+  createIfMissing?: boolean;
+  closeNeverCreated?: () => Promise<void>;
 }) {
   const { stripe, intent, scope } = input;
   checkoutIdempotencyKey(intent.id);
@@ -113,11 +118,16 @@ export async function dispatchStripeCheckoutIntent(input: {
     // Stripe may prune idempotency keys after 24h. A persisted absolute expiry prevents an old
     // attempt from becoming a fresh charge after that window, even after process restart.
     const now = input.now ?? Math.floor(Date.now() / 1000);
-    const recovered = intent.recover || (intent.request.expires_at ?? 0) <= now
+    const recovered = intent.recover || input.createIfMissing === false || (intent.request.expires_at ?? 0) <= now
       ? await findOriginalCheckout(stripe, intent) : null;
     if (recovered) session = recovered;
     else {
-      if (!Number.isSafeInteger(intent.request.expires_at) || intent.request.expires_at! <= now) {
+      if (Number.isSafeInteger(intent.request.expires_at)
+        && now >= intent.request.expires_at! + CHECKOUT_ABSENCE_GRACE_SECONDS && input.closeNeverCreated) {
+        await input.closeNeverCreated();
+        return null;
+      }
+      if (input.createIfMissing === false || !Number.isSafeInteger(intent.request.expires_at) || intent.request.expires_at! <= now) {
         throw new Error('PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED');
       }
       const price = await stripe.prices.retrieve(intent.priceId);

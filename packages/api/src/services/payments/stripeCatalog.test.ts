@@ -47,6 +47,27 @@ describe('Stripe catalog authority', () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { message: 'PAY_COMMON_PRICE_MISMATCH' } });
     await expect(save()).resolves.toEqual({ data: null, error: { message: 'PAY_COMMON_PRICE_MISMATCH' } });
   });
+  it.each([
+    ['credit_package', { price: 2999 }],
+    ['membership_plan', { monthly_price: 2999 }],
+    ['membership_plan', { yearly_price: 29999 }],
+  ] as const)('rejects amount-only updates rejected atomically for %s', async (kind, values) => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { message: 'PAY_COMMON_PRICE_REPLACEMENT_REQUIRED', code: '23514' } });
+    await expect(saveStripeCatalog({ db: { rpc: mocks.rpc }, id: 'fixture_product', kind, values, prices: {} }))
+      .rejects.toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('Stripe') });
+    expect(mocks.retrieve).not.toHaveBeenCalled();
+    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('pay_common_save_catalog', expect.objectContaining({
+      p_values: values, p_prices: {},
+    }));
+  });
+  it('allows an explicitly cleared price with a changed amount in one transaction', async () => {
+    await saveStripeCatalog({ db: { rpc: mocks.rpc }, id: 'fixture_product', kind: 'credit_package',
+      values: { price: 2999 }, prices: { one_time: null } });
+    expect(mocks.rpc).toHaveBeenCalledWith('pay_common_save_catalog', expect.objectContaining({
+      p_values: { price: 2999 }, p_prices: { one_time: null },
+    }));
+    expect(mocks.retrieve).not.toHaveBeenCalled();
+  });
   it('returns no current mapping for a missing price and refuses ambiguous or unreadable maps', async () => {
     type Query = { select: () => Query; eq: () => Query; in: ReturnType<typeof vi.fn> };
     const query: Query = { select: () => query, eq: () => query, in: vi.fn() };

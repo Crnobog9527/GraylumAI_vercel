@@ -55,6 +55,38 @@ describe('durable Stripe checkout dispatch', () => {
     await expect(dispatchStripeCheckoutIntent(t.args)).rejects.toThrow('PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED');
     expect(t.sessions.create).not.toHaveBeenCalled(); expect(t.persistSession).not.toHaveBeenCalled();
   });
+  it('closes a never-created attempt only after grace and a complete paginated absence scan', async () => {
+    const t = fixture(); t.args.now = 8600;
+    const closeNeverCreated = vi.fn().mockResolvedValue(undefined);
+    t.sessions.list.mockResolvedValueOnce({ data: [{ id: 'cs_unrelated', metadata: {} }], has_more: true })
+      .mockResolvedValueOnce({ data: [], has_more: false });
+    await expect(dispatchStripeCheckoutIntent({ ...t.args, closeNeverCreated })).resolves.toBeNull();
+    expect(t.sessions.list).toHaveBeenLastCalledWith(expect.objectContaining({ starting_after: 'cs_unrelated' }));
+    expect(closeNeverCreated).toHaveBeenCalledOnce();
+    expect(t.sessions.create).not.toHaveBeenCalled();
+  });
+  it.each(['grace', 'error', 'cursor', 'page-cap', 'malformed', 'found', 'closure-error'] as const)(
+    'cannot retire an unresolved attempt for %s', async reason => {
+      const t = fixture(); t.args.now = reason === 'grace' ? 8599 : 8600;
+      const closeNeverCreated = vi.fn().mockResolvedValue(undefined);
+      if (reason === 'error') t.sessions.list.mockRejectedValue(new Error('unavailable'));
+      if (reason === 'malformed') t.sessions.list.mockResolvedValue({ data: [] });
+      if (reason === 'cursor') t.sessions.list.mockResolvedValue({ data: [], has_more: true });
+      if (reason === 'page-cap') t.sessions.list.mockImplementation(async () => ({
+        data: [{ id: `cs_page_${t.sessions.list.mock.calls.length}`, metadata: {} }], has_more: true }));
+      if (reason === 'found') t.sessions.list.mockResolvedValue({ data: [t.session], has_more: false });
+      if (reason === 'closure-error') closeNeverCreated.mockRejectedValue(new Error('concurrent callback'));
+      const result = dispatchStripeCheckoutIntent({ ...t.args, closeNeverCreated });
+      if (reason === 'found') await expect(result).resolves.toEqual(t.session);
+      else await expect(result).rejects.toThrow();
+      if (reason !== 'closure-error') expect(closeNeverCreated).not.toHaveBeenCalled();
+      expect(t.sessions.create).not.toHaveBeenCalled();
+    });
+  it('does not create an old product session when only recovering it for replacement', async () => {
+    const t = fixture();
+    await expect(dispatchStripeCheckoutIntent({ ...t.args, createIfMissing: false })).rejects.toThrow('RECONCILIATION_REQUIRED');
+    expect(t.sessions.create).not.toHaveBeenCalled();
+  });
   it('finds a lost response after expiry without dispatching again', async () => {
     const t = fixture(); t.args.now = 100000;
     t.sessions.list.mockResolvedValue({ data: [t.session], has_more: false });

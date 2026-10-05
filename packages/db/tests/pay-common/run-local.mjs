@@ -88,7 +88,7 @@ try {
   };
   let purchaseTested = false;
   const testPurchase = () => {
-    const path = 'packages/db/migrations/0169_pay_common_purchase.sql';
+    const path = 'packages/db/migrations/0170_pay_common_purchase.sql';
     const catalog = read('packages/db/tests/pay-common/purchase-catalog.sql');
     const before = ok(sql(catalog));
     report.purchaseCatalog = { before };
@@ -118,7 +118,7 @@ try {
         contractTested = true;
         return { ok: true };
       }
-      if (path.endsWith('/0169_pay_common_purchase.sql') && !purchaseTested) {
+      if (path.endsWith('/0170_pay_common_purchase.sql') && !purchaseTested) {
         testPurchase();
         purchaseTested = true;
         return { ok: true };

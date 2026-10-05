@@ -51,6 +51,8 @@ BEGIN
     PERFORM pg_temp.assert_true(outcome->>'ok'='false','mismatch rejected with persisted conflict');
     PERFORM pg_temp.assert_true((SELECT jsonb_array_length(metadata->'paymentConflicts')=1 FROM payment_orders WHERE id=first_order.id),
       'safe conflict evidence persisted');
+    PERFORM pg_temp.assert_true((SELECT metadata->'paymentConflicts'->0->>'code'='PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT'
+      FROM payment_orders WHERE id=first_order.id),'conflict has stable alert code');
     outcome:=pay_common_record_checkout(first_order.id,'acct_fixture','test',evidence);
     PERFORM pg_temp.assert_true(outcome->>'ok'='true','authoritative session accepted');
     PERFORM pg_temp.assert_true((SELECT stripe_checkout_session_id='cs_extension_fixture' AND stripe_price_id='price_fixture'

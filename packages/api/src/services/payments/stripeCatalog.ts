@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSafeServiceUnavailableError } from '../../lib/publicError';
 import { getStripeClient } from '../stripe';
@@ -41,11 +42,15 @@ export async function saveStripeCatalog(input: {
         currency: price.currency, mode: scope.mode, billing_cycle: cycle };
     }
   }
-  return await input.db.rpc('pay_common_save_catalog', {
+  const result = await input.db.rpc('pay_common_save_catalog', {
     p_kind: input.kind, p_id: input.id ?? null, p_values: input.values, p_prices: prices,
     p_merchant_namespace: scope?.merchant ?? null, p_payment_mode: scope?.mode ?? null,
     p_expected_level: input.expectedLevel ?? null,
   });
+  if (result.error?.message === 'PAY_COMMON_PRICE_REPLACEMENT_REQUIRED') {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: '修改金额时请同时更新对应的 Stripe 价格，或清除该价格以暂停购买。' });
+  }
+  return result;
 }
 
 export async function loadCurrentStripePrices(input: {

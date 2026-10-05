@@ -109,4 +109,80 @@ BEGIN
     ''acct_fixture'',''test'',''pro'')',buyer,package),'42501');
   EXECUTE 'RESET ROLE';
 END $$;
+-- Closure and switching are exercised with real roles, locks and protected columns.
+DO $$
+DECLARE buyer uuid; package uuid; other_package uuid; intent payment_orders; replay payment_orders;
+  delay_seconds integer; old_status text;
+BEGIN
+  INSERT INTO credit_packages(name,price,credits_amount,active) VALUES('Closure',1000,100,'true') RETURNING id INTO package;
+  INSERT INTO credit_packages(name,price,credits_amount,active) VALUES('Replacement',2000,200,'true') RETURNING id INTO other_package;
+  INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,credit_package_id,billing_cycle,is_current)
+    VALUES('stripe','acct_closure','test','price','price_closure',package,'one_time',true),
+      ('stripe','acct_closure','test','price','price_replacement',other_package,'one_time',true);
+  -- One second inside grace is denied; one second beyond grace is allowed.
+  FOREACH delay_seconds IN ARRAY ARRAY[3599,3601] LOOP
+    buyer:=gen_random_uuid(); INSERT INTO profiles(id) VALUES(buyer);
+    SET LOCAL ROLE service_role;
+    intent:=pay_common_create_purchase(buyer,'credit_package',package,'one_time','acct_closure','test','free');
+    PERFORM pg_temp.denied(format('SELECT pay_common_close_checkout(%L,%L,NULL,''acct_closure'',''test'',''never_created'',''unpaid'')',
+      buyer,intent.id),'23514','PAY_COMMON_ATTEMPT_NOT_TERMINAL');
+    RESET ROLE;
+    -- Synthetic already elapsed immutable request; production preparation only accepts future expiry.
+    UPDATE payment_orders SET checkout_request=jsonb_build_object('expires_at',floor(extract(epoch FROM now()))-delay_seconds)
+      WHERE id=intent.id;
+    SET LOCAL ROLE service_role;
+    PERFORM pg_temp.denied(format('UPDATE payment_orders SET purchase_close_reason=''stripe_checkout_never_created'' WHERE id=%L',intent.id),'42501');
+    IF delay_seconds=3599 THEN
+      PERFORM pg_temp.denied(format('SELECT pay_common_close_checkout(%L,%L,NULL,''acct_closure'',''test'',''never_created'',''unpaid'')',
+        buyer,intent.id),'23514','PAY_COMMON_ATTEMPT_NOT_TERMINAL');
+    ELSE
+      PERFORM pg_temp.denied(format('SELECT pay_common_close_checkout(%L,%L,NULL,''acct_other'',''test'',''never_created'',''unpaid'')',
+        buyer,intent.id),'23514','PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
+      PERFORM pg_temp.assert_true(pay_common_close_checkout(buyer,intent.id,NULL,'acct_closure','test','never_created','unpaid'),
+        'complete absence after grace permits protected closure');
+      PERFORM pg_temp.assert_true(NOT pay_common_close_checkout(buyer,intent.id,NULL,'acct_closure','test','never_created','unpaid'),
+        'never-created closure is idempotent');
+      PERFORM pg_temp.assert_true((SELECT purchase_close_reason='stripe_checkout_never_created' AND purchase_close_ref IS NULL
+        FROM payment_orders WHERE id=intent.id),'distinct protected absence reason');
+      replay:=pay_common_create_purchase(buyer,'credit_package',other_package,'one_time','acct_closure','test','free');
+      PERFORM pg_temp.assert_true(replay.id<>intent.id AND replay.item_id=other_package,'absence closure permits new product');
+    END IF;
+    RESET ROLE;
+  END LOOP;
+  buyer:=gen_random_uuid(); INSERT INTO profiles(id) VALUES(buyer);
+  SET LOCAL ROLE service_role;
+  intent:=pay_common_create_purchase(buyer,'credit_package',package,'one_time','acct_closure','test','free');
+  replay:=pay_common_create_purchase(buyer,'credit_package',other_package,'one_time','acct_closure','test','free');
+  PERFORM pg_temp.assert_true(replay.id=intent.id AND replay.item_id=package,'switch returns existing intent for retirement, no second order');
+  RESET ROLE;
+  UPDATE payment_orders SET checkout_request=jsonb_build_object('expires_at',floor(extract(epoch FROM now()))-7200) WHERE id=intent.id;
+  INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,order_id)
+    VALUES('stripe','acct_closure','test','checkout','cs_switch',intent.id);
+  SET LOCAL ROLE service_role;
+  PERFORM pg_temp.denied(format('SELECT pay_common_close_checkout(%L,%L,NULL,''acct_closure'',''test'',''never_created'',''unpaid'')',
+    buyer,intent.id),'23514','PAY_COMMON_ATTEMPT_NOT_TERMINAL');
+  PERFORM pg_temp.denied(format('SELECT pay_common_close_checkout(%L,%L,''cs_switch'',''acct_closure'',''test'',''open'',''unpaid'')',
+    buyer,intent.id),'23514','PAY_COMMON_ATTEMPT_NOT_TERMINAL');
+  PERFORM pg_temp.denied(format('SELECT pay_common_close_checkout(%L,%L,''cs_switch'',''acct_closure'',''test'',''expired'',''paid'')',
+    buyer,intent.id),'23514','PAY_COMMON_ATTEMPT_NOT_TERMINAL');
+  PERFORM pay_common_close_checkout(buyer,intent.id,'cs_switch','acct_closure','test','expired','unpaid');
+  replay:=pay_common_create_purchase(buyer,'credit_package',other_package,'one_time','acct_closure','test','free');
+  PERFORM pg_temp.assert_true(replay.id<>intent.id AND replay.item_id=other_package,'confirmed unpaid expiry permits requested replacement');
+  RESET ROLE;
+  -- Historical terminal unpaid attempts no longer block unrelated new purchases; paid/unknown still do.
+  FOREACH old_status IN ARRAY ARRAY['expired','canceled','failed','pending','completed'] LOOP
+    buyer:=gen_random_uuid(); INSERT INTO profiles(id) VALUES(buyer);
+    INSERT INTO payment_orders(user_id,item_type,item_id,amount_total,currency,mode,status,payment_status)
+      VALUES(buyer,'credit_package',package,1000,'usd','payment',old_status,CASE WHEN old_status='completed' THEN 'paid' ELSE 'unpaid' END);
+    SET LOCAL ROLE service_role;
+    IF old_status IN ('pending','completed') THEN
+      PERFORM pg_temp.denied(format('SELECT pay_common_create_purchase(%L,''credit_package'',%L,''one_time'',''acct_closure'',''test'',''free'')',
+        buyer,package),'23514','PAY_COMMON_LEGACY_ORDER_UNRESOLVED');
+    ELSE
+      replay:=pay_common_create_purchase(buyer,'credit_package',package,'one_time','acct_closure','test','free');
+      PERFORM pg_temp.assert_true(replay.payment_channel='stripe','terminal unpaid legacy order does not block');
+    END IF;
+    RESET ROLE;
+  END LOOP;
+END $$;
 ROLLBACK;

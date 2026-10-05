@@ -75,7 +75,7 @@ WITH rel AS (
 )
 SELECT md5(string_agg(k || '=' || coalesce(d, '<null>'), E'\n' ORDER BY k)) INTO actual FROM grouped WHERE g ~ '^[^:]+:(payment_orders|user_subscriptions|subscription_credit_grants|payment_provider_refs|credit_packages|membership_plans)$' OR g ~ '^fn(acl)?:(pay_common_|atomic_fulfill_credit_package|atomic_grant_subscription_invoice_credits|atomic_grant_annual_subscription_credits)';
 
-  IF actual = 'edbdc6f3ec8e03b1b21c428b6044b9ee' THEN RETURN; END IF;
+  IF actual = '63550c91138128be0bd85d450646c9e8' THEN RETURN; END IF;
   IF actual IS DISTINCT FROM 'dc3f51dcc333026ecde8a87f26e96d5e' THEN
     RAISE EXCEPTION 'PAY_COMMON_PURCHASE_SCHEMA_DRIFT';
   END IF;
@@ -104,7 +104,7 @@ ALTER TABLE public.payment_orders
   ADD COLUMN IF NOT EXISTS price_ref_id uuid REFERENCES public.payment_provider_refs(id) ON DELETE RESTRICT,
   ADD COLUMN IF NOT EXISTS purchase_action text CHECK(purchase_action IN ('checkout','subscription_change','renewal')),
   ADD COLUMN IF NOT EXISTS purchase_closed_at timestamptz,
-  ADD COLUMN IF NOT EXISTS purchase_close_reason text CHECK(purchase_close_reason='stripe_checkout_expired'),
+  ADD COLUMN IF NOT EXISTS purchase_close_reason text CHECK(purchase_close_reason IN ('stripe_checkout_expired','stripe_checkout_never_created')),
   ADD COLUMN IF NOT EXISTS purchase_close_ref text;
 DROP TRIGGER IF EXISTS pay_common_purchase_freeze ON public.payment_orders;
 CREATE TRIGGER pay_common_purchase_freeze BEFORE UPDATE ON public.payment_orders FOR EACH ROW
@@ -155,7 +155,8 @@ BEGIN
   END IF;
   IF EXISTS(SELECT 1 FROM public.payment_orders o WHERE o.user_id=p_user_id
     AND o.item_type=p_item_type AND o.payment_channel IS NULL AND o.fulfilled_at IS NULL
-    AND o.status NOT IN ('refunded','partially_refunded')) THEN
+    AND (o.status NOT IN ('expired','canceled','cancelled','failed','refunded','partially_refunded')
+      OR o.payment_status='paid')) THEN
     RAISE EXCEPTION 'PAY_COMMON_LEGACY_ORDER_UNRESOLVED' USING ERRCODE='23514';
   END IF;
   PERFORM public.pay_common_assert_purchase_facts(p_user_id,p_item_type,actor.membership_level);
@@ -168,8 +169,8 @@ BEGIN
     AND o.purchase_closed_at IS NULL
     AND o.fulfilled_at IS NULL ORDER BY o.created_at LIMIT 1 FOR UPDATE;
   IF FOUND THEN
-    IF intent.purchase_payload_hash IS DISTINCT FROM request_hash
-      OR intent.merchant_namespace IS DISTINCT FROM p_merchant_namespace
+    -- Same-scope previous intent is returned for authoritative retirement on explicit item switch.
+    IF intent.merchant_namespace IS DISTINCT FROM p_merchant_namespace
       OR intent.payment_mode IS DISTINCT FROM p_payment_mode THEN
       RAISE EXCEPTION 'PAY_COMMON_PURCHASE_PENDING' USING ERRCODE='23514';
     END IF;
@@ -244,9 +245,10 @@ CREATE OR REPLACE FUNCTION public.pay_common_close_checkout(
   p_user_id uuid,p_order_id uuid,p_session_id text,p_merchant_namespace text,p_payment_mode text,
   p_checkout_status text,p_payment_status text
 ) RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $fn$
-DECLARE intent public.payment_orders;
+DECLARE intent public.payment_orders; close_reason text;
 BEGIN
-  IF p_checkout_status IS DISTINCT FROM 'expired' OR p_payment_status IS DISTINCT FROM 'unpaid' THEN
+  IF p_checkout_status IS NULL OR p_checkout_status NOT IN ('expired','never_created')
+    OR p_payment_status IS DISTINCT FROM 'unpaid' THEN
     RAISE EXCEPTION 'PAY_COMMON_ATTEMPT_NOT_TERMINAL' USING ERRCODE='23514';
   END IF;
   -- Lock order shared with admission and fulfillment: profile before order.
@@ -254,24 +256,42 @@ BEGIN
   SELECT * INTO intent FROM public.payment_orders WHERE id=p_order_id AND user_id=p_user_id FOR UPDATE;
   IF NOT FOUND OR intent.payment_channel IS DISTINCT FROM 'stripe'
     OR intent.merchant_namespace IS DISTINCT FROM p_merchant_namespace
-    OR intent.payment_mode IS DISTINCT FROM p_payment_mode OR intent.purchase_action IS DISTINCT FROM 'checkout'
-    OR NOT EXISTS(SELECT 1 FROM public.payment_provider_refs r WHERE r.order_id=intent.id
+    OR intent.payment_mode IS DISTINCT FROM p_payment_mode OR intent.purchase_action IS DISTINCT FROM 'checkout' THEN
+    RAISE EXCEPTION 'PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH' USING ERRCODE='23514';
+  END IF;
+  IF p_checkout_status='never_created' THEN
+    -- Only the service adapter can attest a complete, empty Stripe list after the immutable
+    -- expiry plus one hour. Any known provider object or payment evidence forbids this path.
+    IF p_session_id IS NOT NULL OR intent.checkout_request->>'expires_at' IS NULL
+      OR (intent.checkout_request->>'expires_at')::bigint + 3600 > extract(epoch FROM clock_timestamp())
+      OR EXISTS(SELECT 1 FROM public.payment_provider_refs WHERE order_id=intent.id
+        AND object_type IN ('checkout','payment_intent','invoice','subscription'))
+      OR intent.stripe_checkout_session_id IS NOT NULL
+      OR intent.payment_status IS DISTINCT FROM 'unpaid' THEN
+      RAISE EXCEPTION 'PAY_COMMON_ATTEMPT_NOT_TERMINAL' USING ERRCODE='23514';
+    END IF;
+    close_reason:='stripe_checkout_never_created';
+  ELSE
+    IF NOT EXISTS(SELECT 1 FROM public.payment_provider_refs r WHERE r.order_id=intent.id
       AND r.channel='stripe' AND r.merchant_namespace=p_merchant_namespace AND r.mode=p_payment_mode
       AND r.object_type='checkout' AND r.external_id=p_session_id) THEN
-    RAISE EXCEPTION 'PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH' USING ERRCODE='23514';
+      RAISE EXCEPTION 'PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH' USING ERRCODE='23514';
+    END IF;
+    close_reason:='stripe_checkout_expired';
   END IF;
   IF intent.fulfilled_at IS NOT NULL OR intent.payment_status IN ('paid','refunded','partially_refunded')
     OR intent.status IN ('completed','refunded','partially_refunded') THEN
     RAISE EXCEPTION 'PAY_COMMON_ATTEMPT_ALREADY_PAID' USING ERRCODE='23514';
   END IF;
   IF intent.purchase_closed_at IS NOT NULL THEN
-    IF intent.purchase_close_ref IS DISTINCT FROM p_session_id THEN
+    IF intent.purchase_close_ref IS DISTINCT FROM p_session_id
+      OR intent.purchase_close_reason IS DISTINCT FROM close_reason THEN
       RAISE EXCEPTION 'PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH' USING ERRCODE='23514';
     END IF;
     RETURN false;
   END IF;
   UPDATE public.payment_orders SET purchase_closed_at=clock_timestamp(),
-    purchase_close_reason='stripe_checkout_expired',purchase_close_ref=p_session_id,
+    purchase_close_reason=close_reason,purchase_close_ref=p_session_id,
     status='expired',updated_at=clock_timestamp() WHERE id=intent.id;
   RETURN true;
 END $fn$;
@@ -382,7 +402,7 @@ BEGIN
     fact:=jsonb_build_object('evidence_ref',session_id,'reason',reason);
     IF NOT conflicts @> jsonb_build_array(fact) THEN
       IF jsonb_array_length(conflicts)>=32 THEN RAISE EXCEPTION 'PAY_COMMON_CONFLICT_LIMIT'; END IF;
-      UPDATE payment_orders SET metadata=metadata||jsonb_build_object('paymentConflicts',conflicts||jsonb_build_array(fact))
+      UPDATE payment_orders SET metadata=metadata||jsonb_build_object('paymentConflicts',conflicts||jsonb_build_array(fact||jsonb_build_object('code','PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT')))
         WHERE id=intent.id;
     END IF;
     RETURN jsonb_build_object('ok',false,'reason',reason);
@@ -550,6 +570,18 @@ BEGIN
   IF p_id IS NOT NULL AND current_row IS NULL THEN RAISE EXCEPTION 'PAY_COMMON_PRODUCT_UNAVAILABLE'; END IF;
   IF p_expected_level IS NOT NULL AND current_row->>'level' IS DISTINCT FROM p_expected_level THEN
     RAISE EXCEPTION 'PAY_COMMON_CATALOG_CONFLICT' USING ERRCODE='40001';
+  END IF;
+  -- A catalog amount cannot leave the old current Stripe price buyable. Require an
+  -- explicitly supplied, validated price (or explicit removal) for each changed cycle.
+  IF current_row IS NOT NULL THEN
+    FOREACH cycle IN ARRAY CASE WHEN p_kind='credit_package' THEN ARRAY['one_time'] ELSE ARRAY['monthly','yearly'] END LOOP
+      IF p_values ? (CASE cycle WHEN 'monthly' THEN 'monthly_price' WHEN 'yearly' THEN 'yearly_price' ELSE 'price' END)
+        AND (p_values->(CASE cycle WHEN 'monthly' THEN 'monthly_price' WHEN 'yearly' THEN 'yearly_price' ELSE 'price' END))
+          IS DISTINCT FROM (current_row->(CASE cycle WHEN 'monthly' THEN 'monthly_price' WHEN 'yearly' THEN 'yearly_price' ELSE 'price' END))
+        AND NOT (p_prices ? cycle) THEN
+        RAISE EXCEPTION 'PAY_COMMON_PRICE_REPLACEMENT_REQUIRED' USING ERRCODE='23514';
+      END IF;
+    END LOOP;
   END IF;
   SELECT string_agg(quote_ident(k),',' ORDER BY k),string_agg('v.'||quote_ident(k),',' ORDER BY k)
     INTO cols,values_sql FROM jsonb_object_keys(p_values) k;
@@ -1246,7 +1278,7 @@ CREATE TRIGGER pay_common_change_request_freeze BEFORE UPDATE ON payment_orders
   FOR EACH ROW EXECUTE FUNCTION pay_common_frozen_guard('purchase_change_request');
 ALTER TABLE payment_orders DROP CONSTRAINT payment_orders_purchase_close_reason_check;
 ALTER TABLE payment_orders ADD CONSTRAINT payment_orders_purchase_close_reason_check CHECK(purchase_close_reason IN
-  ('stripe_checkout_expired','stripe_upgrade_rejected','stripe_upgrade_not_applied'));
+  ('stripe_checkout_expired','stripe_checkout_never_created','stripe_upgrade_rejected','stripe_upgrade_not_applied'));
 CREATE FUNCTION public.pay_common_prepare_change(p_user_id uuid,p_subscription_id uuid,p_plan_id uuid,p_cycle text,
   p_price_id text,p_request jsonb,p_metadata jsonb) RETURNS public.payment_orders
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $fn$

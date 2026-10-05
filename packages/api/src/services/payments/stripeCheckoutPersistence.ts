@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { freezePurchaseSnapshot } from './contracts';
 import { type StripeScope, type PurchaseAction } from './purchaseFacts';
 import { buildStripeCheckoutRequest, dispatchStripeCheckoutIntent } from './stripeCheckoutIntent';
 import { closeExpiredStripeCheckout, type CheckoutEvidenceOrder } from './stripePurchaseEvidence';
@@ -102,7 +103,11 @@ export async function createDurableStripeCheckout(input: {
     if (price.channel !== 'stripe' || price.merchant_namespace !== scope.merchant || price.mode !== scope.mode) {
       throw new Error('PAY_COMMON_PRICE_MAPPING_MISMATCH');
     }
+    const snapshot = freezePurchaseSnapshot(order.purchase_snapshot);
+    const changingItem = snapshot.item_id !== action.itemId || snapshot.item_type !== action.itemType
+      || snapshot.billing_cycle !== action.billingCycle;
     let request = order.checkout_request;
+    if (!request && changingItem) throw new Error('PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED');
     if (!request) {
       const prepared = await db.rpc('pay_common_prepare_checkout', {
         p_user_id: input.userId, p_order_id: order.id,
@@ -118,10 +123,25 @@ export async function createDurableStripeCheckout(input: {
     const session = await dispatchStripeCheckoutIntent({ stripe, scope,
       intent: { id: order.id, userId: order.user_id, scope, snapshot: order.purchase_snapshot,
         priceId: price.external_id, request, sessionId: sessionId ?? null, recover: Boolean(order.checkout_request) },
+      createIfMissing: !changingItem,
+      closeNeverCreated: async () => {
+        const closed = await db.rpc('pay_common_close_checkout', {
+          p_user_id: order.user_id, p_order_id: order.id, p_session_id: null,
+          p_merchant_namespace: scope.merchant, p_payment_mode: scope.mode,
+          p_checkout_status: 'never_created', p_payment_status: 'unpaid',
+        });
+        if (closed.error || closed.data !== true) throw new Error('PAY_COMMON_ATTEMPT_CLOSE_FAILED');
+      },
       persistSession: session => recordStripeCheckout(db, order.id, scope, session),
     });
-    if (session.status === 'expired') {
-      await closeExpiredStripeCheckout({ stripe, supabase: db, scope, order, mappedSessionId: session.id });
+    if (!session) continue;
+    if (changingItem && session.status === 'open' && session.payment_status === 'unpaid') {
+      // Ignore the mutation response. A separate authoritative read below must prove safe closure.
+      await stripe.checkout.sessions.expire(session.id);
+    }
+    if (session.status === 'expired' || changingItem) {
+      const closed = await closeExpiredStripeCheckout({ stripe, supabase: db, scope, order, mappedSessionId: session.id });
+      if (!closed) throw new Error('PAY_COMMON_ATTEMPT_CLOSE_FAILED');
       continue;
     }
     return session;
