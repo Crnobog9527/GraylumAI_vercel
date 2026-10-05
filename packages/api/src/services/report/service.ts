@@ -10,6 +10,10 @@ import { readNativeRuntimeView } from '../runtime/nativeView';
 import { completeReportCandidate, confirmedReportFacts, frozenReport, reportStart, REPORT_INPUT_BYTES, REPORT_SETTING } from './contract';
 
 export const reportLocate = reportStart.omit({ requestId: true });
+/** The fixed request text of every report execution; `latest` uses it to narrow the session's executions. */
+export const REPORT_REQUEST_INPUT = 'Generate the confirmed report.';
+/** At most this many newest candidates are confirmed by their frozen identity. */
+const REPORT_LATEST_CANDIDATES = 20;
 export const reportCodes = new Set(['REPORT_DISABLED', 'REPORT_MEMBERSHIP_REQUIRED', 'REPORT_ENTITLEMENTS_UNAVAILABLE',
   'REPORT_SOURCE_CONFLICT', 'REPORT_CONFIRMATION_REQUIRED', 'REPORT_FACTS_TOO_LARGE', 'REPORT_MANIFEST_REQUIRED',
   'REPORT_PAYG_REQUIRED', 'OPC_CAPTURE_PENDING', 'REPORT_EXECUTION_REQUIRED', 'REPORT_REQUEST_CONFLICT']);
@@ -67,26 +71,32 @@ export function reportService(user: SupabaseClient, admin: SupabaseClient, polic
         return await runtimeAdmissionService(user, admin, { ...policy, reportGeneration, maxCalls: 1,
           inputBytes: REPORT_INPUT_BYTES, historyItems: 0, searchEnabled: false, workspaceContext: false,
           skillResources: manifest.resources, additionalInstructions: instructions, purposeBudgets: true,
-        }).prepare({ sessionId: input.sessionId, requestId: input.requestId, input: 'Generate the confirmed report.',
+        }).prepare({ sessionId: input.sessionId, requestId: input.requestId, input: REPORT_REQUEST_INPUT,
           selection: { kind: 'skill', moduleId: source.moduleId, revisionId: snapshot.revisionId },
           organizeAfter: false, sources: [], network: 'deny' });
       } catch (error) { reportError(error); }
     },
     /**
-     * The newest report execution of this project/round in the session, or null. Read only:
-     * runtime_view first proves the actor owns the session and its scope; the id is then read
-     * by its frozen report identity, and reportStatus still checks the execution itself.
+     * The newest report execution of this project/round in the session, or null. Read only, through
+     * the granted runtime RPCs (the tables are not readable directly): runtime_view proves the actor
+     * owns the session and lists its executions; executions carrying the report's own request text
+     * are then confirmed by their frozen report identity, the same read reportStatus uses.
      */
     async latest(value: unknown) {
       const input = reportLocate.parse(value);
       const actorId = await actor();
-      try { await readNativeRuntimeView(admin, actorId, input.sessionId); } catch { reportError(new Error('REPORT_UNAVAILABLE')); }
-      const found = await admin.from('runtime_executions').select('id').eq('session_id', input.sessionId)
-        .filter('payload->reportGeneration->>projectId', 'eq', input.projectId)
-        .filter('payload->reportGeneration->>roundId', 'eq', input.roundId)
-        .order('created_at', { ascending: false }).limit(1).maybeSingle();
-      if (found.error) reportError(new Error('REPORT_UNAVAILABLE'));
-      return { executionId: (found.data?.id as string | undefined) ?? null };
+      let view: { executions: Array<{ executionId?: unknown; input?: unknown; request?: unknown; createdAt?: unknown }> };
+      try { view = await readNativeRuntimeView(admin, actorId, input.sessionId); } catch { reportError(new Error('REPORT_UNAVAILABLE')); }
+      const candidates = view.executions
+        .filter(item => item.input === REPORT_REQUEST_INPUT && item.request == null && typeof item.executionId === 'string')
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, REPORT_LATEST_CANDIDATES);
+      for (const item of candidates) {
+        const saved = await rpc('runtime_execution', { p_execution_id: item.executionId, p_action: 'read' });
+        const frozen = frozenReport.safeParse(saved?.context?.reportGeneration);
+        if (frozen.success && frozen.data.projectId === input.projectId && frozen.data.roundId === input.roundId)
+          return { executionId: item.executionId as string };
+      }
+      return { executionId: null };
     },
     async status(executionId: string) {
       // No membership check on saved output. Existing SQL checks actor, scope and source permissions.

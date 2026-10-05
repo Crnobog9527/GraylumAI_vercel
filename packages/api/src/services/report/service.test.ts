@@ -2,7 +2,7 @@
 import { expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { reportEnabled, reportService, reportError } from './service';
+import { REPORT_REQUEST_INPUT, reportEnabled, reportService, reportError } from './service';
 import { runtimeAdmissionService } from '../runtime/admission';
 const id = randomUUID();
 const input = { sessionId: id, projectId: id, roundId: id, requestId: id };
@@ -75,34 +75,42 @@ it('reportEnabled fails closed on a read error', async () => {
   const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: null, error: { message: 'x' } }) };
   await expect(reportEnabled({ from: () => query } as unknown as SupabaseClient)).rejects.toThrow('REPORT_UNAVAILABLE');
 });
-function latestAdmin(view: unknown, row: { id: string } | null) {
-  const calls: unknown[][] = [];
-  const query = new Proxy({} as Record<string, unknown>, { get: (_t, name: string) => name === 'maybeSingle'
-    ? async () => ({ data: row, error: null }) : (...args: unknown[]) => { calls.push([name, ...args]); return query; } });
-  const rpc = vi.fn(async () => view === null ? { data: null, error: { message: 'RUNTIME_SCOPE_DENIED' } } : { data: view, error: null });
-  const from = vi.fn((table: string) => { calls.push(['from', table]); return query; });
-  return { admin: { rpc, from } as unknown as SupabaseClient, calls, from };
-}
 const locate = { sessionId: id, projectId: randomUUID(), roundId: randomUUID() };
-it('latest finds the newest report of this project and round in an owned session, without switch or membership reads', async () => {
-  const other = randomUUID();
-  const { admin, calls } = latestAdmin({ sessionId: id, executions: [] }, { id: other });
-  expect(await reportService(user as unknown as SupabaseClient, admin, policy).latest(locate)).toEqual({ executionId: other });
-  expect(calls).toEqual([['from', 'runtime_executions'], ['select', 'id'], ['eq', 'session_id', id],
-    ['filter', 'payload->reportGeneration->>projectId', 'eq', locate.projectId],
-    ['filter', 'payload->reportGeneration->>roundId', 'eq', locate.roundId],
-    ['order', 'created_at', { ascending: false }], ['limit', 1]]);
-});
-it('latest returns null when the round has no report', async () => {
-  const { admin } = latestAdmin({ sessionId: id, executions: [] }, null);
-  expect(await reportService(user as unknown as SupabaseClient, admin, policy).latest(locate)).toEqual({ executionId: null });
-});
-it('latest refuses a session the actor cannot view before reading executions', async () => {
-  const { admin, from } = latestAdmin(null, { id });
-  await expect(reportService(user as unknown as SupabaseClient, admin, policy).latest(locate)).rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
+const frozen = (projectId: string, roundId: string) => ({ reportGeneration: { version: 1, projectId, roundId, snapshotHash: 'a'.repeat(64),
+  packageHash: 'b'.repeat(64), workflowHash: 'c'.repeat(64), templateHash: 'd'.repeat(64), sections: ['One'], maxCharacters: 12000 } });
+function latestAdmin(executions: unknown[] | null, contexts: Record<string, unknown>) {
+  const rpc = vi.fn(async (name: string, args: { p_execution_id?: string }) => name === 'runtime_view'
+    ? executions === null ? { data: null, error: { message: 'RUNTIME_SCOPE_DENIED' } } : { data: { sessionId: id, executions }, error: null }
+    : { data: { state: 'completed', context: contexts[args.p_execution_id!] ?? {} }, error: null });
+  const from = vi.fn(() => { throw new Error('NO_DIRECT_TABLE_READ'); });
+  return { admin: { rpc, from } as unknown as SupabaseClient, rpc, from };
+}
+const run = (input: string, createdAt: string, extra: Record<string, unknown> = {}) =>
+  ({ executionId: randomUUID(), input, request: null, createdAt, ...extra });
+it('latest returns the newest report of this project and round through granted RPCs only', async () => {
+  const older = run(REPORT_REQUEST_INPUT, '2026-10-01T00:00:00Z'), newer = run(REPORT_REQUEST_INPUT, '2026-10-02T00:00:00Z');
+  const otherRound = run(REPORT_REQUEST_INPUT, '2026-10-03T00:00:00Z'), chat = run('hello', '2026-10-04T00:00:00Z');
+  const { admin, rpc, from } = latestAdmin([older, chat, otherRound, newer], {
+    [older.executionId]: frozen(locate.projectId, locate.roundId), [newer.executionId]: frozen(locate.projectId, locate.roundId),
+    [otherRound.executionId]: frozen(locate.projectId, randomUUID()) });
+  expect(await reportService(user as unknown as SupabaseClient, admin, policy).latest(locate)).toEqual({ executionId: newer.executionId });
   expect(from).not.toHaveBeenCalled();
+  // The ordinary chat turn is never read; candidates are confirmed newest first.
+  expect(rpc.mock.calls.map(call => call[0] === 'runtime_view' ? 'view' : (call[1] as { p_execution_id: string }).p_execution_id))
+    .toEqual(['view', otherRound.executionId, newer.executionId]);
+});
+it('latest ignores a mentor turn even with the same text and returns null without a report', async () => {
+  const mentor = run(REPORT_REQUEST_INPUT, '2026-10-01T00:00:00Z', { request: { purpose: 'mentor' } });
+  const { admin, rpc } = latestAdmin([mentor], { [mentor.executionId]: frozen(locate.projectId, locate.roundId) });
+  expect(await reportService(user as unknown as SupabaseClient, admin, policy).latest(locate)).toEqual({ executionId: null });
+  expect(rpc).toHaveBeenCalledOnce();
+});
+it('latest refuses a session the actor cannot view before reading any execution', async () => {
+  const { admin, rpc } = latestAdmin(null, {});
+  await expect(reportService(user as unknown as SupabaseClient, admin, policy).latest(locate)).rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
+  expect(rpc).toHaveBeenCalledOnce();
 });
 it('latest rejects extra input such as a requestId', async () => {
-  const { admin } = latestAdmin({ sessionId: id, executions: [] }, null);
+  const { admin } = latestAdmin([], {});
   await expect(reportService(user as unknown as SupabaseClient, admin, policy).latest({ ...locate, requestId: id })).rejects.toThrow();
 });
