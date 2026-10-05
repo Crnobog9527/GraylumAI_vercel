@@ -707,7 +707,7 @@ it.each(['capture-first', 'admit-first'].flatMap(order => [false, true].map(revo
       .then(result => { settled = true; return result; });
     let blocked = false;
     for (let i = 0; i < 100; i++) {
-      blocked = (await db.query("select wait_event_type='Lock' waiting from pg_stat_activity where pid=$1", [pid])).rows[0]?.waiting;
+      blocked = (await db.query("select wait_event_type IS NOT DISTINCT FROM 'Lock' waiting from pg_stat_activity where pid=$1", [pid])).rows[0]?.waiting;
       if (blocked || settled) break;
       await new Promise(resolve => setTimeout(resolve, 20));
     }

@@ -9,7 +9,9 @@ export type RuntimeExecution = {
   unavailableReason?: string; historyFrozen?: boolean; historyOmitted?: boolean; context: unknown;
   billing: FrozenRun | FrozenPaygRun;
   cursor?: number; epoch?: number; remainingCalls?: number; primaryResult?: { body: string };
-  result: { kind: string; evidenceRef: string; evidenceHash: string; body: string; summary?: string } | null;
+  result: { kind: string; evidenceRef: string; evidenceHash: string; body: string; summary?: string;
+    completeness?: "complete" | "length_limit"; organized?: boolean;
+    summaryOmitted?: boolean; messageFirst?: boolean; envelopeCompact?: boolean } | null;
 };
 export async function beginPaygExecution(input: {
   executionId: string; resume?: ResumeInput;

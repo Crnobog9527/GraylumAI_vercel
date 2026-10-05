@@ -29,6 +29,11 @@ export type RecoveryHistory = {
   activeExecution?: string | null;
   executions?: RecoveryExecution[] | null;
 };
+/** True once history shows this execution terminal and no longer owning the session. */
+export function executionSettled(history: RecoveryHistory | undefined, executionId: string) {
+  const execution = history?.executions?.find(candidate => candidate.executionId === executionId);
+  return Boolean(execution && TERMINAL_STATES.includes(execution.state) && history?.activeExecution !== executionId);
+}
 export type StoredStepEnvelope = {
   stepId: string;
   raw: string;

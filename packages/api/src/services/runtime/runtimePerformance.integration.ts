@@ -2,6 +2,8 @@
 import {readFileSync} from 'node:fs';
 import {expect} from 'vitest';
 import type pg from 'pg';
+import type {SupabaseClient} from '@supabase/supabase-js';
+import {readNativeRuntimeView} from './nativeView';
 
 // Registered in runtime.integration.ts, so the existing CI Runtime suite runs it.
 // Same file-built fixture as the full local before/after benchmark; no provider calls.
@@ -11,6 +13,10 @@ export async function assertLongSessionPerformance(db: pg.Client) {
     await db.query("SET LOCAL track_functions='all'");
     await db.query(readFileSync(new URL('../../../../db/tests/runtime-view-perf/fixture.sql',import.meta.url),'utf8'));
     const f=(await db.query('select runtime_perf_test.seed(100) f')).rows[0].f;
+    await db.query(`UPDATE runtime_executions SET result=result || jsonb_build_object(
+      'completeness',CASE WHEN history_revision=495 THEN 'complete' ELSE 'length_limit' END,
+      'organized',false,'summaryOmitted',true,'messageFirst',true,'envelopeCompact',false)
+      WHERE session_id=$1`,[f.session]);
     await db.query('ANALYZE runtime_history_dependencies');
     await db.query('ANALYZE runtime_executions');
     const checks=async()=>Number((await db.query(
@@ -31,12 +37,29 @@ export async function assertLongSessionPerformance(db: pg.Client) {
     const view=(await db.query('select runtime_view($1,$2) v',[f.actor,f.session])).rows[0].v;
     expect(view.executions).toHaveLength(100);
     expect(view.executions.every((e:{contentAvailable:boolean})=>e.contentAvailable)).toBe(true);
+    let viewReads = 0;
+    const scoped = { rpc: async (name: string, args: Record<string, string>) => {
+      expect(name).toBe('runtime_view');
+      viewReads++;
+      return { error: null, data: (await db.query(
+        'select runtime_view($1,$2) v', [args.p_actor_id,args.p_session_id])).rows[0].v };
+    } } as unknown as SupabaseClient;
+    const nativeStarted = performance.now();
+    const nativeView = await readNativeRuntimeView(scoped,f.actor,f.session);
+    expect(performance.now()-nativeStarted).toBeLessThan(1000);
+    expect(viewReads).toBe(1);
+    expect(nativeView.executions.slice(0,-1).every((e:{completeness:string;organized:boolean;summaryOmitted:boolean})=>
+      e.completeness==='length_limit'&&!e.organized&&e.summaryOmitted)).toBe(true);
+    expect(nativeView.executions.at(-1).completeness).toBe('complete');
+    expect(nativeView).toEqual(view);
     await db.query(`update runtime_executions set unavailable_reason='source_revoked'
       where session_id=$1 and history_revision=0`,[f.session]);
     const denied=(await db.query('select runtime_view($1,$2) v',[f.actor,f.session])).rows[0].v;
     expect(denied.executions).toHaveLength(100);
     expect(denied.executions.every((e:{contentAvailable:boolean;body:null;input:null})=>
       !e.contentAvailable&&e.body===null&&e.input===null)).toBe(true);
+    expect(denied.executions.every((e:Record<string,unknown>)=>
+      !['completeness','organized','summaryOmitted','messageFirst','envelopeCompact'].some(key=>key in e))).toBe(true);
     await expect(db.query("select runtime_session_items($1,$2,$3,'read')",[f.actor,f.session,f.execution]))
       .rejects.toMatchObject({code:'P0001',message:'RUNTIME_HISTORY_UNAVAILABLE'});
   } finally {

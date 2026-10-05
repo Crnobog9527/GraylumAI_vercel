@@ -17,7 +17,7 @@ Stripe 兼容路径和后台渠道设置，但不能据此宣布 Waffo 已可收
 
 依据（均已读取）：
 
-- 当前 [AGENTS.md](../../../AGENTS.md) §1–9、12–13 与 [ENGINEERING.md](../../ENGINEERING.md)。
+- 当前 [AGENTS.md](../../../AGENTS.md) 与 [ENGINEERING.md](../../ENGINEERING.md)。
 - [MASTER_PLAN](../MASTER_PLAN.md) §7.1、§10 D17 / 待决事项、§11；[v11](../Graylum_Master_Plan_v11.md) §9。
 - [ENTITLEMENTS](ENTITLEMENTS.md) §5–8：已定权益、取消后保留原期、状态不确定拒绝新付费动作。
 - [DATA-ERASURE](DATA-ERASURE.md) §2–4、§9 E4/E5；[BILL-PAYG 当前方案](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553)。
@@ -251,7 +251,7 @@ PR-1 不写映射；PR-2 起旧列的短期派生只服务切片交接，按 §4
 恢复以暂停受影响渠道新销售、保留已生成订单/来源身份并前向修复为主；不把退回旧 Stripe 代码作为交付目标。
 已有交易的回调/退款/凭证仍须在线处理，不能 drop 财务列/表、重发 grants 或以切设置冒充账务回滚。
 每份迁移在历史位置连续执行两次，测试最小权限、无数据丢失及恢复；有结构变更才生成新的 built 指纹。
-远程迁移应用与配置均另经 Owner 批准，本方案不提供远程执行命令。
+staging 迁移应用由 AI 验证后执行；正式环境、密钥和支付平台设置按 AGENTS.md 第 1 节另经 Owner 批准。本方案不提供远程执行命令。
 
 ## 7. 必测矩阵与交付证明
 

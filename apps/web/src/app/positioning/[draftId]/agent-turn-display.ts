@@ -8,6 +8,9 @@ import {
 } from "@repo/api/src/shared/agentTurn";
 import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
 
+/** Under a reply that stopped at the single-answer length limit (completeness `length_limit`), outside its text. */
+export const LENGTH_LIMIT_NOTICE = "这次回答达到单次长度上限，已在这里结束。需要的话，可以发送“继续”让我接着写。";
+
 /** Shown instead of a body above the contract's parse limit. */
 export const OVERSIZED_REPLY_NOTICE = "本次回复内容过长，页面暂时无法展示。原记录已保留，你可以继续对话。";
 
@@ -19,24 +22,65 @@ export function focusReply() {
   document.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${MENTOR_REPLY_LABEL}"]`)?.focus();
 }
 
-/** Display-only progress of one streaming execution. Never business state. */
-export type LiveReply = { executionId: string; text: string; phase: string; card: QuestionCard | null };
+/**
+ * Display-only progress of one streaming execution. Never business state.
+ * `points` is the Unicode code point count of `text` (the unit of `textDelta`
+ * offsets); `rev` is the snapshot revision the text belongs to. A `stalled`
+ * reply stops growing until the next snapshot or the final result.
+ */
+export type LiveReply = {
+  executionId: string; text: string; phase: string; card: QuestionCard | null;
+  rev: number; points: number; stalled: boolean;
+};
 
 const knownPhases = new Set(["mentor", "reading", "organizer", "saving"]);
 
 export function startLiveReply(executionId: string): LiveReply {
-  return { executionId, text: "", phase: "mentor", card: null };
+  return { executionId, text: "", phase: "mentor", card: null, rev: 0, points: 0, stalled: false };
+}
+
+/** Code points, the unit of `textDelta` offsets (a lone surrogate counts as one). */
+export function codePoints(text: string) {
+  let count = 0;
+  for (let index = 0; index < text.length; index++) {
+    const unit = text.charCodeAt(index);
+    // A high surrogate followed by a low one is one code point.
+    if (unit >= 0xd800 && unit <= 0xdbff && index + 1 < text.length) {
+      const next = text.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) index++;
+    }
+    count++;
+  }
+  return count;
+}
+
+const isCount = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+
+/**
+ * Apply one `textDelta` (textDelta-v1). Offset 0 is a snapshot and replaces
+ * the whole text. Any other frame is appended only when it continues the shown
+ * text exactly (same `rev`, offset equal to the shown code points); otherwise
+ * it is dropped and the reply stops growing until the next snapshot or result.
+ */
+function afterDelta(old: LiveReply, event: { text: string; offset: number; rev: number }): LiveReply {
+  if (typeof event.text !== "string" || !isCount(event.offset) || !isCount(event.rev))
+    return old.stalled ? old : { ...old, stalled: true };
+  if (event.offset === 0) return { ...old, text: event.text, points: codePoints(event.text), rev: event.rev, stalled: false };
+  if (old.stalled) return old;
+  if (event.rev !== old.rev || event.offset !== old.points) return { ...old, stalled: true };
+  return { ...old, text: old.text + event.text, points: old.points + codePoints(event.text) };
 }
 
 /**
- * Apply one streamed event to the live reply of `executionId`. A `text` event
- * carries the whole reply so far and replaces the shown text. Unknown phases
- * and events are ignored, and a streamed card is validated again because it is
- * model output.
+ * Apply one streamed event to the live reply of `executionId`. A legacy `text`
+ * event carries the whole reply so far and replaces the shown text; a
+ * `textDelta` follows `afterDelta`. Unknown phases and events are ignored, and
+ * a streamed card is validated again because it is model output.
  */
 export function liveReplyAfter(old: LiveReply | null, executionId: string, event: AgentTurnEvent): LiveReply | null {
   if (!old || old.executionId !== executionId) return old;
-  if (event.type === "text") return { ...old, text: event.text };
+  if (event.type === "text") return { ...old, text: event.text, points: codePoints(event.text), stalled: false };
+  if (event.type === "textDelta") return afterDelta(old, event);
   if (event.type === "phase") return knownPhases.has(event.phase) ? { ...old, phase: event.phase } : old;
   if (event.type === "card") return { ...old, card: parseQuestionCard(event.card) ?? old.card };
   return old;
@@ -48,6 +92,7 @@ export function livePhaseNotice(phase: string) {
   if (phase === "organizer") return "正文已返回，正在整理待核对信息…";
   if (phase === "saving") return "正在保存结果并核对费用…";
   if (phase === "incomplete") return "回复尚未完成；原请求已保留，请按当前状态继续核对，不会自动重发。";
+  if (phase === "waiting") return "正在回复…";
   return "正在生成；部分正文尚未完成，费用尚未结算。";
 }
 
@@ -62,6 +107,8 @@ export type MentorReplySource = {
   state: string;
   unavailableReason?: string | null;
   historyOmitted?: boolean;
+  /** Result metadata of a native-output execution, when the history carries it. */
+  completeness?: string;
   /** This execution owns the server execution slot. */
   active: boolean;
   busy: boolean;
@@ -81,6 +128,20 @@ function unavailableNotice(source: MentorReplySource): ReplyNotice {
 }
 
 /**
+ * A native-output envelope without a card may hold more than the shared display
+ * limit (its size is bounded by the stored result instead); show all of it.
+ */
+function envelopeText(raw: string | null | undefined, body: ReturnType<typeof readAgentTurnBody>) {
+  if (!body.truncated || body.card || !raw) return body.message;
+  try {
+    const message = (JSON.parse(raw) as { message?: unknown }).message;
+    return typeof message === "string" ? message.trim() : body.message;
+  } catch {
+    return body.message;
+  }
+}
+
+/**
  * What one mentor message shows. Only the new envelope changes anything:
  * legacy JSON and plain bodies keep the existing parser's text, so saved
  * drafts look the same as before. Reasoning and raw JSON never reach the page.
@@ -95,12 +156,13 @@ export function mentorReplyDisplay(source: MentorReplySource): { text: string; c
   const body = readAgentTurnBody(source.body);
   const card = body.card ?? source.liveCard ?? null;
   if (source.liveText) return { text: source.liveText, card, ...(historyNotice ? { notice: historyNotice } : {}) };
+  const cut = source.unavailableReason === "output_truncated" ? OUTPUT_TRUNCATED_NOTICE
+    : source.completeness === "length_limit" ? LENGTH_LIMIT_NOTICE : null;
   const truncated: ReplyNotice | undefined =
-    source.unavailableReason === "output_truncated"
-      ? { tone: "warning", text: [OUTPUT_TRUNCATED_NOTICE, historyNotice?.text].filter(Boolean).join("\n") } : undefined;
+    cut ? { tone: "warning", text: [cut, historyNotice?.text].filter(Boolean).join("\n") } : undefined;
   const withNotice = (text: string, notice: ReplyNotice | undefined) => (notice ? { text, card, notice } : { text, card });
   // A valid envelope always has text, a card or both; a card alone needs no text.
-  if (body.kind === "envelope") return withNotice(body.message, truncated ?? historyNotice);
+  if (body.kind === "envelope") return withNotice(envelopeText(source.body, body), truncated ?? historyNotice);
   let stored = source.legacyMessage;
   if (body.kind === "invalid") stored = INVALID_REPLY_NOTICE;
   else if (body.kind === "oversized") stored = OVERSIZED_REPLY_NOTICE;

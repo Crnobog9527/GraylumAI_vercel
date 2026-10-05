@@ -23,6 +23,7 @@ export type RuntimeRunnerInput = {
    * During recovery this callback may only return the original stored response. */
   exchange: (sequence: number, body: string, onChunk?: (chunk: string) => void) => Promise<string>;
   stream?: boolean;
+  rejectTruncatedTools?: boolean;
   onText?: (delta:string)=>void;
   /** v5 only: a successfully completed empty reply is handled by the host fallback. */
   allowEmptyResult?: boolean;
@@ -55,7 +56,7 @@ function keepFirstCall<T extends {tool_calls?:ToolCalls}>(message:T,input:Runtim
  * arguments. The new format never executes it; older formats are unchanged. */
 function truncatedToolTurn(decoded:{choices?:Array<{finish_reason?:unknown;message?:{tool_calls?:ToolCalls}}>},input:RuntimeRunnerInput){
   const choice=decoded.choices?.[0],calls=choice?.message?.tool_calls;
-  return Boolean(input.firstToolCallOnly&&choice?.finish_reason==='length'&&Array.isArray(calls)&&calls.length);
+  return Boolean((input.firstToolCallOnly||input.rejectTruncatedTools)&&choice?.finish_reason==='length'&&Array.isArray(calls)&&calls.length);
 }
 /** Stream frames reach the SDK with only the first call's deltas (new format). */
 function firstCallFrame(chunk:string,input:RuntimeRunnerInput):string{

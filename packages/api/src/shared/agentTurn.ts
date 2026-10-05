@@ -138,6 +138,8 @@ export type AgentTurnOutcome = {
   state: AgentTurnState;
   body?: string;
   summary?: string;
+  completeness?: "complete" | "length_limit";
+  organized?: boolean; summaryOmitted?: boolean; envelopeCompact?: boolean; messageFirst?: boolean;
   unavailable?: AgentTurnUnavailable;
 };
 
@@ -163,6 +165,7 @@ export type AgentTurnEvent =
   | { type: "admitted"; executionId: string }
   | { type: "phase"; phase: AgentTurnPhase }
   | { type: "text"; text: string }
+  | { type: "textDelta"; text: string; offset: number; rev: number }
   | { type: "card"; card: QuestionCard }
   | { type: "result"; result: AgentTurnOutcome };
 
@@ -220,8 +223,8 @@ function limited(text: string, limit: number) {
  * invalid card or an over-long message: the caller builds the body from
  * already validated values, so a failure here is a host defect.
  */
-export function agentTurnBody(message: string, card: QuestionCard | null): string {
-  const text = z.string().max(AGENT_TURN_MESSAGE_LIMIT).parse(message.trim());
+export function agentTurnBody(message: string, card: QuestionCard | null, messageLimit = AGENT_TURN_MESSAGE_LIMIT): string {
+  const text = z.string().max(messageLimit).parse(message.trim());
   const envelope: AgentTurnEnvelope = {
     format: AGENT_TURN_FORMAT,
     message: text,

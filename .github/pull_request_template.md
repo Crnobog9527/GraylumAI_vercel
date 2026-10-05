@@ -1,43 +1,39 @@
 # Pull Request
 
-## Goal / Why
+<!-- 规则见 AGENTS.md。staging 合并由 AI 在 CI、独立审查和实际验证都通过后自己执行；
+     只有 AGENTS.md 第 1 节列出的事项需要 Owner 在对话里明确同意。 -->
 
-- Goal:
-- Why:
+## 目标
 
-## Risk
+- 这次要做到什么：
+- 怎样算做完：
+- 不做什么：
 
-- Classification: `ordinary` / `high`
-- High-risk surfaces, if any:
+## 改动
 
-## Candidate
+- 改了哪些地方：
+- 是否涉及 AGENTS.md 第 1 节事项（正式环境、密钥、真钱、平台设置或 staging 绑定、规则变更、产品决定）：`否` / 说明并附 Owner 同意记录
 
-- Base:
-- Head:
+## 验证
 
-## Scope
+- 做了哪些操作、实际结果：
+- 没跑或没验证的：
 
-- Changed files:
-- Summary:
+## 审查
 
-## Validation
+- 独立审查结果：
+- 修改后的复核：
 
-- Checks/tests run:
-- Not run / `NOT_APPLICABLE`:
+## 发现的问题
 
-## External / Production Relevance
+-
 
-- External effects: `none` or describe
-- Production relevance: `none` or describe
+## 上线后再看
 
-## Remaining Risk
+-
 
-- Remaining material risk:
+## 交接
 
-## Product Spec / Issue
-
-- Relevant specification / Issue, if useful:
-
-## Owner Merge Decision
-
-- Status: `awaiting Owner` / `authorized`
+- 做完了什么：
+- 下一步：
+- 卡在哪里：

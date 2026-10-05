@@ -1201,7 +1201,7 @@ it('RUNTIME: AC-1 mentorTurnStream disconnect, concurrent resend and later resen
   // Later resends and resume by execution id return the stored reply.
   const later=await collectTurn(await opcRouter.createCaller(await f.context()).mentorTurnStream(request));
   expect(later[0]).toEqual({type:'admitted',executionId:admitted.executionId});
-  expect(later.at(-1)).toEqual({type:'result',result:{state:'completed',body:agentTurnBody('导师回复 1',null),summary:'{"inputKind":"answer","informationPatch":{}}'}});
+  expect(later.at(-1)).toEqual({type:'result',result:{state:'completed',completeness:'complete',organized:true,body:agentTurnBody('导师回复 1',null),summary:'{"inputKind":"answer","informationPatch":{}}'}});
   const resumed=await collectTurn(await runtimeRouter.createCaller(await f.context()).executeStream({executionId:admitted.executionId}));
   expect(resumed.at(-1)).toEqual(later.at(-1));
   expect(provider.calls).toHaveLength(2);
@@ -1324,9 +1324,9 @@ it('RUNTIME: authenticated work item runs actual SDK and HTTP then restores only
  try{
   const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
   const executor=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>{const auth=await user.auth.getUser();if(auth.error||!auth.data.user)throw new Error('AUTH');return auth.data.user.id;},endpoint:'http://127.0.0.1:'+address.port});
-  expect(await executor.execute(e.executionId)).toEqual({state:'completed',body:'Saved work item answer'});
+  expect(await executor.execute(e.executionId)).toEqual({state:'completed',body:'Saved work item answer',completeness:'complete'});
   await user.auth.signOut();await user.auth.signInWithPassword({email,password});
-  expect(await executor.execute(e.executionId)).toEqual({state:'completed',body:'Saved work item answer'});expect(requests).toBe(1);
+  expect(await executor.execute(e.executionId)).toEqual({state:'completed',body:'Saved work item answer',completeness:'complete'});expect(requests).toBe(1);
   const binding=(await db.query('select session_ref,request_id,payload from bill2_runs where id=$1',[e.runId])).rows[0];
   expect(binding.session_ref).toBe(session.sessionId);expect(binding.request_id).toBe(input.requestId);expect(binding.payload.scope).toEqual(scope);
   expect((await db.query('select count(*)::int n from runtime_session_history where session_id=$1',[session.sessionId])).rows[0].n).toBe(2);
@@ -1707,7 +1707,7 @@ it.each([{searchEnabled:false,stopAfterPrimary:false},{searchEnabled:true,stopAf
    expect(injected).toBe(true);expect(requests.map(r=>r.model)).toEqual(['runtime-m']);
    expect(await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId)).toEqual({state:'pending'});
    const stage=(await db.query('select primary_result,result from runtime_executions where id=$1',[e.executionId])).rows[0];
-   expect(stage).toEqual({primary_result:{body:'Primary result',lastSequence:1},result:null});
+   expect(stage).toEqual({primary_result:{body:'Primary result',lastSequence:1,completeness:'complete'},result:null});
    expect((await runtimeExecutor({...options,callGate:allowTestCalls}).cancel(e.executionId)).state).toBe('cancelled');
    expect((await runtimeExecutor({...options,callGate:allowTestCalls}).cancel(e.executionId)).state).toBe('cancelled');
    await expect(rpc('runtime_execution',{p_actor_id:actor,p_execution_id:e.executionId,p_action:'complete',p_result:{kind:'usable_result',body:'Primary result',summary:'Late summary'}})).rejects.toThrow();
@@ -1724,7 +1724,7 @@ it.each([{searchEnabled:false,stopAfterPrimary:false},{searchEnabled:true,stopAf
   }
   expect({injected,requests:requests.map(r=>r.model??r.tool)}).toEqual({injected:true,requests:searchEnabled?['runtime-m','search','runtime-m','attached-summary']:['runtime-m','attached-summary']});
   const recovered=await runtimeExecutor({...options,callGate:allowTestCalls}).execute(e.executionId);
-  expect({recovered,errors}).toEqual({recovered:{state:'completed',body:'Primary result',summary:'Organized primary result'},errors:[]});
+  expect({recovered,errors}).toEqual({recovered:{state:'completed',body:'Primary result',summary:'Organized primary result',completeness:'complete',organized:true},errors:[]});
   expect(requests.map(r=>r.model??r.tool)).toEqual(searchEnabled?['runtime-m','search','runtime-m','attached-summary']:['runtime-m','attached-summary']);expect(JSON.stringify(requests.at(-1)!.messages)).toContain('Primary result');
   const result=(await db.query('select result from runtime_executions where id=$1',[e.executionId])).rows[0].result;
   expect(result.summary).toBe('Organized primary result');
@@ -1733,7 +1733,7 @@ it.each([{searchEnabled:false,stopAfterPrimary:false},{searchEnabled:true,stopAf
   const browserClient=createServerClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{cookies:{getAll:()=>[...cookies].map(([name,value])=>({name,value})),setAll:(items:Array<{name:string;value:string}>)=>items.forEach(c=>cookies.set(c.name,c.value))}});
   async function viewHttp(){const response=await fetch(process.env.V3_LOCAL_APP!+'/api/trpc/runtime.view?input='+encodeURIComponent(JSON.stringify({sessionId:session.sessionId})),{headers:{Cookie:[...cookies].map(([k,v])=>k+'='+v).join('; ')}});expect(response.status).toBe(200);return (await response.json()).result.data;}
   expect((await browserClient.auth.signInWithPassword({email,password})).error).toBeNull();
-  const visible=await viewHttp();expect(visible.executions[0]).toMatchObject({body:'Primary result',summary:'Organized primary result',organizerComplete:true});
+  const visible=await viewHttp();expect(visible.executions[0]).toMatchObject({body:'Primary result',summary:'Organized primary result',organizerComplete:true,completeness:'complete',organized:true});
   expect(await viewHttp()).toEqual(visible); // refresh uses the persisted, authorized projection.
   await browserClient.auth.signOut();cookies.clear();expect((await browserClient.auth.signInWithPassword({email,password})).error).toBeNull();
   expect(await viewHttp()).toEqual(visible);
@@ -1799,9 +1799,9 @@ it.each(['selected','none','checkpoint_loss','none_checkpoint','result_loss','in
  const chosen=payload.matching.candidates.find((c:any)=>c.moduleId===moduleId);expect(chosen).toBeTruthy();
  if(mode==='purpose-budget'){
   expect(payload.purposeBudget.inputBytes).toBe(90000);
-  expect(chosen.inputLimit).toBe(90000);
+  expect(chosen.inputLimit).toBe(90200-chosen.outputLimit);
   const frozen=(await db.query('select payload from bill2_runs where id=$1',[e.runId])).rows[0].payload;
-  expect(frozen.callPolicy.find((p:{modelId:string;inputLimit:number})=>p.modelId===modelId).inputLimit).toBe(64000);
+  expect(frozen.callPolicy.find((p:{modelId:string;inputLimit:number})=>p.modelId===modelId).inputLimit).toBe(64200-payload.maxOutputTokens);
  }
  const requests:any[]=[];let injected=false;
  const server=createServer(async(req,res)=>{
@@ -1834,7 +1834,7 @@ it.each(['selected','none','checkpoint_loss','none_checkpoint','result_loss','in
    await executor.cancel(e.executionId);
    expect((await db.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(97);
   }else{
-   expect(result).toEqual({body:'Auto matched answer',state:'completed'});expect(requests).toHaveLength(2);
+   expect(result).toEqual({body:'Auto matched answer',state:'completed',completeness:'complete'});expect(requests).toHaveLength(2);
    expect(requests[1].model).toBe(mode==='none'?'runtime-m':'auto-'+skillModel);
    if(mode==='purpose-budget')expect(Buffer.byteLength(JSON.stringify(requests[1]))).toBeGreaterThan(64000);
    if(mode!=='none')expect(JSON.stringify(requests[1])).toContain('METHOD_CANARY');

@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { runtimeExecutor } from './execute';
+import { NativeProgressProjection } from './nativeProgress';
 import { allowAllModeration } from './moderation';
 import { createRuntimeBudget } from './budget';
 import type { NewWorkGateResult } from './newWorkGate';
@@ -109,4 +110,39 @@ it('a moderation cancellation storage failure propagates without blind retry or 
   vi.spyOn(allowAllModeration, 'checkOutput').mockRejectedValue(new Error('private'));
   await expect(runtimeExecutor(f.options).execute(id)).rejects.toThrow('RUNTIME_DATABASE_UNAVAILABLE');
   expect(f.database.rpc.mock.calls.filter(([name]) => name === 'runtime_cancel')).toHaveLength(1);
+});
+
+it('forwards every native frame to the SDK even when public projection throws', async () => {
+  const f = fixture(false);
+  Object.assign(f.execution.context, { nativeOutput: 'native-output-v1', envelopeOrder: 'message-first-v1',
+    providerRequestFormat: 'serial-tools-v4-stream', reasoning: { effort: 'none' } });
+  const body = '{"message":"kept reply"}';
+  const chunks = [body.slice(0, 15), body.slice(15)];
+  const frames = chunks.map(content => JSON.stringify({ choices: [{ delta: { content } }] }));
+  const received: string[] = [];
+  const project = vi.spyOn(NativeProgressProjection.prototype, 'appendText')
+    .mockImplementationOnce(() => {
+      expect(received).toEqual([frames[0]]);
+      throw new Error('synthetic private projection failure');
+    });
+  mock.billing.dispatchOnce.mockImplementation(async (callId, _request, onChunk) => {
+    for (const frame of frames) onChunk(frame);
+    f.raw.set(Number(callId), JSON.stringify({ usage: { sdkResponse: {
+      model: 'primary', choices: [{ message: { role: 'assistant', content: body }, finish_reason: 'stop' }],
+    } } }));
+    return { dispatched: true };
+  });
+  mock.run.mockImplementation(async options => {
+    await options.exchange(1, JSON.stringify({ model: options.model }), (frame: string) => received.push(frame));
+    return received.map(frame => JSON.parse(frame).choices[0].delta.content).join('');
+  });
+  const progress = vi.fn();
+  const result = await runtimeExecutor(f.options).execute(id, progress);
+  expect(result).toMatchObject({ state: 'completed', body, completeness: 'complete' });
+  expect(received).toEqual(frames);
+  expect(project).toHaveBeenCalledTimes(2);
+  expect(f.database.rpc.mock.calls.find(([, args]) => args.p_action === 'complete')?.[1].p_result)
+    .toMatchObject({ body, completeness: 'complete' });
+  expect(progress.mock.calls.filter(([event]) => event.type === 'text').at(-1)?.[0])
+    .toMatchObject({ text: 'kept reply', replace: true });
 });
