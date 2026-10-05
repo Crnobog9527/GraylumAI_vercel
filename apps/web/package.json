@@ -78,7 +78,7 @@
     "zustand": "^5.0.13"
   },
   "devDependencies": {
-    "@playwright/test": "^1.60.0",
+    "@playwright/test": "^1.63.0",
     "@repo/eslint-config-custom": "workspace:*",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^24",
