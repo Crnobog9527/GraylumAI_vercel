@@ -17,7 +17,7 @@ Stripe 兼容路径和后台渠道设置，但不能据此宣布 Waffo 已可收
 
 依据（均已读取）：
 
-- 当前 [AGENTS.md](../../../AGENTS.md) §1–9、12–13 与 [ENGINEERING.md](../../ENGINEERING.md)。
+- 当前 [AGENTS.md](../../../AGENTS.md) 与 [ENGINEERING.md](../../ENGINEERING.md)。
 - [MASTER_PLAN](../MASTER_PLAN.md) §7.1、§10 D17 / 待决事项、§11；[v11](../Graylum_Master_Plan_v11.md) §9。
 - [ENTITLEMENTS](ENTITLEMENTS.md) §5–8：已定权益、取消后保留原期、状态不确定拒绝新付费动作。
 - [DATA-ERASURE](DATA-ERASURE.md) §2–4、§9 E4/E5；[BILL-PAYG 当前方案](https://github.com/Crnobog9527/GraylumAI_vercel/pull/553)。
