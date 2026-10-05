@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Local-only B2a migration verification; no database URL, environment secrets or remote host accepted.
+// Local-only B2b migration verification; no database URL, environment secrets or remote host accepted.
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
@@ -26,7 +26,7 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-const migrationPath='packages/db/migrations/0177_erasure_receipt_scrub.sql';
+const migrationPath='packages/db/migrations/0176_erasure_receipt_scrub.sql';
 const migration=read(migrationPath);
 const report={development,build:null,checks:[],failed:null};
 let client;
@@ -51,10 +51,10 @@ try {
   applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-c',input])),
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
- assert.ok(before,'0177 must be applied through the canonical build plan');
+ assert.ok(before,'0176 must be applied through the canonical build plan');
  const once=snapshot();
- ok(sql(migration));assert.deepEqual(snapshot(),once,'repeat 0177 is a structural no-op');
- report.checks.push('0177 canonical application/replay: identical full catalog');
+ ok(sql(migration));assert.deepEqual(snapshot(),once,'repeat 0176 is a structural no-op');
+ report.checks.push('0176 canonical application/replay: identical full catalog');
  // Refuse source drift before any lasting change, then verify exact no-data rollback.
  const original=ok(sql("SELECT pg_get_functiondef('bill2_evidence_immutable()'::regprocedure);"));
  ok(sql(original.replace('AS $function$', 'AS $function$\n-- deliberate local drift\n')));
