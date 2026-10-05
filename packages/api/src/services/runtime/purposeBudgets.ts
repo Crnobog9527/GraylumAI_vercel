@@ -19,42 +19,68 @@ const base = (max: number) => z.object({
   historyItems: z.number().int().min(0).max(PURPOSE_HISTORY_CAP),
 }).strict();
 const output = z.number().int().positive().max(PURPOSE_OUTPUT_CAP);
-export const purposeBudgetsSchema = z.object({
+const legacyPurposeBudgetsSchema = z.object({
   version: z.literal(1),
   interactive: base(PURPOSE_INPUT_CAPS.interactive).extend({ maxOutputTokens: output }).strict(),
   organize: base(PURPOSE_INPUT_CAPS.organize),
   report: base(PURPOSE_INPUT_CAPS.report).extend({ maxOutputTokens: output }).strict(),
 }).strict();
+export const purposeBudgetsV2Schema = z.object({
+  version: z.literal(2),
+  interactive: base(PURPOSE_INPUT_CAPS.interactive),
+  organize: base(PURPOSE_INPUT_CAPS.organize),
+  report: base(PURPOSE_INPUT_CAPS.report),
+}).strict();
+// Normalize both admin payloads to v2 internally; retain v1 storage for rollback compatibility.
+export const purposeBudgetsSchema = z.union([purposeBudgetsV2Schema, legacyPurposeBudgetsSchema]);
 export type PurposeBudgets = z.infer<typeof purposeBudgetsSchema>;
+export type PurposeBudgetsV2 = z.infer<typeof purposeBudgetsV2Schema>;
+export function normalizePurposeBudgets(input: PurposeBudgets): PurposeBudgetsV2 {
+  const parsed = purposeBudgetsSchema.parse(input);
+  const fields = (value: { inputBytes: number; historyItems: number }) => ({
+    inputBytes: value.inputBytes, historyItems: value.historyItems,
+  });
+  return { version: 2, interactive: fields(parsed.interactive),
+    organize: fields(parsed.organize), report: fields(parsed.report) };
+}
 export type BudgetPurpose = keyof typeof PURPOSE_INPUT_CAPS;
 export const frozenPurposeBudget = z.object({
   purpose: z.enum(['interactive', 'organize', 'report']), inputBytes: z.number().int().positive().max(112000),
   historyItems: z.number().int().min(0).max(PURPOSE_HISTORY_CAP),
 }).strict();
-export async function readPurposeBudgets(db: SupabaseClient): Promise<PurposeBudgets | null> {
+export async function readPurposeBudgets(db: SupabaseClient): Promise<PurposeBudgetsV2 | null> {
   const result = await db.from('system_settings').select('key,value').eq('key', PURPOSE_BUDGET_KEY).maybeSingle();
   if (result.error) throw new StagingAccessError('RUNTIME_BUDGET_CONFIG_UNAVAILABLE');
   if (!result.data) return null;
   try {
-    return purposeBudgetsSchema.parse(typeof result.data.value === 'string' ? JSON.parse(result.data.value) : result.data.value);
+    const value = typeof result.data.value === 'string' ? JSON.parse(result.data.value) : result.data.value;
+    return normalizePurposeBudgets(value);
   } catch { throw new StagingAccessError('RUNTIME_BUDGET_CONFIG_INVALID'); }
 }
 
+function rollbackCompatibleBudget(current: PurposeBudgetsV2) {
+  return { ...current, version: 1 as const,
+    interactive: { ...current.interactive, maxOutputTokens: PURPOSE_OUTPUT_CAP },
+    report: { ...current.report, maxOutputTokens: PURPOSE_OUTPUT_CAP } };
+}
+
 export async function readPurposeBudgetView(db: SupabaseClient) {
-  const config = await readPurposeBudgets(db);
+  const current = await readPurposeBudgets(db);
+  const config = current ? rollbackCompatibleBudget(current) : null;
   const summary = await db.from('system_settings').select('value').eq('key', 'v3_summary_max_tokens').maybeSingle();
   if (summary.error) throw new Error('RUNTIME_BUDGET_CONFIG_UNAVAILABLE');
   const maxOutputTokens = z.coerce.number().int().min(128).max(4096).parse(summary.data?.value ?? 2048);
-  return { version: 1 as const, config, source: config ? 'configured' as const : 'legacy' as const,
+  return { version: 1 as const, config,
+    source: config ? 'configured' as const : 'legacy' as const,
     limits: { inputBytes: PURPOSE_INPUT_CAPS, maxOutputTokens: PURPOSE_OUTPUT_CAP, historyItems: PURPOSE_HISTORY_CAP },
     organizeOutput: { source: 'v3_summary_max_tokens' as const, maxOutputTokens },
     legacy: { interactive: { inputBytes: 64000, historyItems: 100, fixtureMaxOutputTokens: 1000,
-      realOutput: 'min(approved quote, model, 20000)' }, organize: { historyItems: 0 }, report: { active: false } },
+      realOutput: 'min(approved quote, model, global output cap)' }, organize: { historyItems: 0 }, report: { active: false } },
   };
 }
 export async function savePurposeBudgets(db: SupabaseClient, input: PurposeBudgets) {
   const { error } = await db.from('system_settings').upsert({
-    key: PURPOSE_BUDGET_KEY, value: JSON.stringify(input),
+    key: PURPOSE_BUDGET_KEY, value: JSON.stringify(rollbackCompatibleBudget(normalizePurposeBudgets(input))),
   }, { onConflict: 'key' });
   if (error) throw new StagingAccessError('RUNTIME_BUDGET_CONFIG_UNAVAILABLE');
   return readPurposeBudgetView(db);

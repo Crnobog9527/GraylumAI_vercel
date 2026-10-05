@@ -1,4 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {jsonbBytes,fitNativeResult,attachNativeSummary} from './resultCapacity';
+import {streamOriginalExecution,type ExecutionStreamEvent} from './executionStream';
 import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
 import {beforeAll,afterAll,it,expect,vi} from 'vitest';
 import {logger} from '../../lib/logger';
@@ -32,7 +34,7 @@ const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 async function rpc(name:string,args:Record<string,unknown>){const result=await admin.rpc(name,args);if(result.error)throw new Error(result.error.message);return result.data;}
 function latch(){let release!:()=>void;const promise=new Promise<void>(resolve=>{release=resolve;});return {promise,release};}
 async function until(test:()=>boolean){const deadline=Date.now()+5000;while(!test()){if(Date.now()>deadline)throw new Error('synthetic progress deadline');await new Promise(resolve=>setTimeout(resolve,10));}}
-async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial-tools-v4-stream'|'agent-turn-v5-stream'|'serial-tools-v6-reasoning',organize=false,outputLimit=100,tool=false,reasoning?:{primary:ReasoningPolicy;organizer:ReasoningPolicy},opening=false,inputLimit=10000,fiveFields:boolean|'legacy'=false){
+async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial-tools-v4-stream'|'agent-turn-v5-stream'|'serial-tools-v6-reasoning',organize=false,outputLimit=100,tool=false,reasoning?:{primary:ReasoningPolicy;organizer:ReasoningPolicy},opening=false,inputLimit=10000,fiveFields:boolean|'legacy'=false,native=false){
  const actorId=randomUUID(),mentorId=randomUUID(),organizerId=randomUUID(),windowId=randomUUID(),requestId=randomUUID();
  await db.query('insert into profiles(id,credits) values($1,100)',[actorId]);
  await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,100,'addition','grant','opening_grant','system',$2,0,100)",[actorId,'stream-opening:'+actorId]);
@@ -40,7 +42,7 @@ async function fixture(format:'serial-tools-v2'|'serial-tools-v3-stream'|'serial
  const policies=[[mentorId,'synthetic/mentor'],[organizerId,'synthetic/organizer']].map(([modelId,model])=>({modelId,model,provider:'openrouter',account:'synthetic-stream',protocol:'openrouter-chat-v1',upperUsd:'0.02',inputLimit,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens:inputLimit>10000?40000:10000,promptUsdPerMillion:inputLimit>10000?'0.5':'2',completionUsdPerMillion:'0',requestUsd:'0'}}));
  for(const policy of policies)await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic streaming integration',$2,'openrouter','true')",[policy.modelId,policy.model]);
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.10,3,now()+interval '2 hours')",[windowId,[actorId],JSON.stringify(policies)]);
- const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',inputSelection:'scope-projection-v1',providerRequestFormat:format,...(fiveFields?{questionContract:fiveFields==='legacy'?LEGACY_QUESTION_CONTRACT:QUESTION_CONTRACT}:{}),...(reasoning?{reasoning:reasoning.primary}:format==='serial-tools-v4-stream'||format==='agent-turn-v5-stream'?{reasoning:{effort:'none'}}:{}),input:opening?'HOST_OPEN_CURRENT_QUESTION':'Synthetic original input',instructions:'Return the public mentor message in the message property; keep protocol fields private.',model:policies[0]!.model,modelId:mentorId,maxOutputTokens:outputLimit,maxTurns:1,historyItems:20,network:'deny',tools:format==='agent-turn-v5-stream'?(fiveFields&&opening?[]:['ask_question']):tool?['read_source']:[],...(tool?{workspaceContext:true,maxToolCalls:1,maxTurns:2}:{}),request:{sessionId:session.sessionId,requestId,organizeAfter:false},...(organize?{attachedOrganizer:{modelId:organizerId,model:policies[1]!.model,maxOutputTokens:reasoning?outputLimit:100,...(reasoning?{reasoning:reasoning.organizer}:{}),instructions:'Synthetic organizer only',input:'Synthetic original input'}}:{})};
+ const context={...(native?{nativeOutput:'native-output-v1',...(format==='serial-tools-v4-stream'?{envelopeOrder:'message-first-v1'}:{})}:{}),version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',inputSelection:'scope-projection-v1',providerRequestFormat:format,...(fiveFields?{questionContract:fiveFields==='legacy'?LEGACY_QUESTION_CONTRACT:QUESTION_CONTRACT}:{}),...(reasoning?{reasoning:reasoning.primary}:format==='serial-tools-v4-stream'||format==='agent-turn-v5-stream'?{reasoning:{effort:'none'}}:{}),input:opening?'HOST_OPEN_CURRENT_QUESTION':'Synthetic original input',instructions:'Return the public mentor message in the message property; keep protocol fields private.',model:policies[0]!.model,modelId:mentorId,maxOutputTokens:outputLimit,maxTurns:1,historyItems:20,network:'deny',tools:format==='agent-turn-v5-stream'?(fiveFields&&opening?[]:['ask_question']):tool?['read_source']:[],...(tool?{workspaceContext:true,maxToolCalls:1,maxTurns:2}:{}),request:{sessionId:session.sessionId,requestId,organizeAfter:false},...(organize?{attachedOrganizer:{modelId:organizerId,model:policies[1]!.model,maxOutputTokens:reasoning?outputLimit:100,...(reasoning?{reasoning:reasoning.organizer}:{}),instructions:'Synthetic organizer only',input:'Synthetic original input'}}:{})};
  const billing={contractVersion:'bill2.v1',mode:'staging_test',testWindowId:windowId,scope:session.scope,operation:'question',modelId:mentorId,sourceHash:hash('synthetic-stream'),input:context,callPolicy:organize?policies:[policies[0]],rules:{version:'runtime-staging-v1',quoteVersion:windowId,creditsPerUsd:'1000',multiplier:'1',fx:{}},limits:{costUsd:tool?'0.06':organize?'0.04':'0.02',credits:tool?60:organize?40:20,maxPreDeduct:tool?60:organize?40:20,maxCalls:tool?3:organize?2:1,deadline:new Date(Date.now()+3600000).toISOString()}};
  const execution=await rpc('runtime_admit',{p_actor_id:actorId,p_session_id:session.sessionId,p_request_id:requestId,p_payload:context,p_billing:billing});
  return {actorId,context,execution,session,billing};
@@ -53,8 +55,8 @@ function endStream(response:ServerResponse,id:string,model:string){
 }
 function completion(id:string,model:string,content:string){return JSON.stringify({id,object:'chat.completion',created:1,model,choices:[{index:0,message:{role:'assistant',content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}});}
 
-it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['serial-tools-v3-stream','serial-tools-v4-stream'] as const)('RUNTIME: streaming %s real SDK/executor/BILL2 delivers public text before model and organizer completion, preserving one dispatch and immutable request',async(format)=>{
- const f=await fixture(format,true),mentorGate=latch(),organizerGate=latch(),bodies:string[]=[],events:Array<{event:RuntimeProgress;at:number}>=[];
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([{format:'serial-tools-v3-stream' as const,native:false},{format:'serial-tools-v4-stream' as const,native:false},{format:'serial-tools-v4-stream' as const,native:true}])('RUNTIME: streaming $format native=$native real SDK/executor/BILL2 delivers public text before model and organizer completion, preserving one dispatch and immutable request',async({format,native})=>{
+ const f=await fixture(format,true,100,false,undefined,false,10000,false,native),mentorGate=latch(),organizerGate=latch(),bodies:string[]=[],events:Array<{event:RuntimeProgress;at:number}>=[];
  const publicMessage='已经知道你的产品名称。请说说它主要帮助谁。',body=JSON.stringify({message:publicMessage,patches:[],privateProtocol:'PRIVATE_PROTOCOL'}),organizer='{"patches":[],"private":"PRIVATE_ORGANIZER"}';
  let mentorFinished=false,organizerStarted=false,organizerFinished=false,finished=false;
  const server=createServer(async(req,res)=>{
@@ -85,11 +87,13 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['serial-tools-v3-st
   const firstTextMs=events.find(({event})=>event.type==='text')!.at;
   mentorGate.release();await until(()=>organizerStarted);
   expect(organizerFinished).toBe(false);expect(finished).toBe(false);
-  expect(events.filter(({event})=>event.type==='text').at(-1)?.event).toEqual({type:'text',text:publicMessage});
+  expect(events.filter(({event})=>event.type==='text').at(-1)?.event).toMatchObject({type:'text',text:publicMessage});
   expect(events.map(({event})=>event)).toContainEqual({type:'phase',phase:'organizer'});
   expect(JSON.stringify(events)).not.toMatch(/PRIVATE_|patches|reasoning|encrypted|"message"/);
-  organizerGate.release();expect(await running).toEqual({state:'completed',body,summary:organizer});
-  expect(await host.execute(f.execution.executionId)).toEqual({state:'completed',body,summary:organizer});
+  const expected={state:'completed',body:native?JSON.stringify({message:publicMessage}):body,summary:organizer,
+   ...(native?{completeness:'complete',messageFirst:true,organized:true}:{})};
+  organizerGate.release();expect(await running).toEqual(expected);
+  expect(await host.execute(f.execution.executionId)).toEqual(expected);
   expect(bodies).toHaveLength(2);expect(JSON.parse(bodies[0]!).stream).toBe(true);expect(JSON.parse(bodies[0]!).stream_options).toEqual({include_usage:true});
   expect(JSON.parse(bodies[1]!).stream).toBe(false);
   // Only the primary mentor call carries the frozen reasoning policy; the organizer keeps its bytes.
@@ -260,8 +264,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: streaming tool 
 });
 
 // Exercise the frozen v5 context through the real SDK, transport and database.
-it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool_calls','length'] as const)('RUNTIME: streaming Agent turn keeps the first of two question cards, bills one call and replays without POST (finish %s)',async(finish)=>{
- const f=await fixture('agent-turn-v5-stream'),bodies:string[]=[],events:RuntimeProgress[]=[],id='gen-agent-'+f.execution.executionId,model='synthetic/mentor';
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([{finish:'tool_calls',native:false},{finish:'length',native:false},{finish:'length',native:true}])('RUNTIME: streaming Agent turn keeps the first of two question cards, bills one call and replays without POST (finish $finish native=$native)',async({finish,native})=>{
+ const f=await fixture('agent-turn-v5-stream',false,100,false,undefined,false,10000,false,native),bodies:string[]=[],events:RuntimeProgress[]=[],id='gen-agent-'+f.execution.executionId,model='synthetic/mentor';
  const card={question:'你现在主要在哪个平台发内容？',options:['小红书','抖音'],recommended:null};
  const call=(index:number,callId:string,args:unknown)=>({tool_calls:[{index,id:callId,type:'function',function:{name:'ask_question',arguments:JSON.stringify(args)}}]});
  const server=createServer(async(req,res)=>{
@@ -283,7 +287,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool_calls','lengt
   expect(bodies).toHaveLength(1);expect(request).not.toHaveProperty('parallel_tool_calls');expect(request).not.toHaveProperty('tool_choice');
   expect(request).toMatchObject({stream:true,reasoning_effort:'none'});expect(request.tools.map((t:{function:{name:string}})=>t.function.name)).toEqual(['ask_question']);
   expect(JSON.stringify(events)).not.toMatch(/PRIVATE_|SECOND_CARD/);
-  expect(events.filter(event=>event.type==='text').at(-1)).toEqual({type:'text',text:'先了解一下你的情况。'});
+  expect(events.filter(event=>event.type==='text').at(-1)).toMatchObject({type:'text',text:native?INVALID_REPLY_NOTICE:'先了解一下你的情况。'});
   const call=(await db.query('select id,payload,provider_id from bill2_calls where run_id=$1',[f.execution.runId])).rows;
   expect(call).toHaveLength(1);expect(call[0].payload.requestHash).toBe(hash(bodies[0]!));
   // The provider response stays whole as evidence, including the dropped call.
@@ -299,6 +303,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['tool_calls','lengt
   }else{
    // A tool call cut off by the output limit is never executed or shown.
    expect(result).toMatchObject({unavailable:'output_truncated'});
+   expect((await db.query('select count(*)::int n from runtime_tool_calls where execution_id=$1',[f.execution.executionId])).rows[0].n).toBe(0);
+   expect(events.filter(event=>event.type==='card')).toEqual([]);
    expect(JSON.stringify((await db.query('select item from runtime_session_history where session_id=$1',[f.session.sessionId])).rows)).not.toContain('call_first');
   }
   // Replay after the outcome: the stored result, no further provider POST.
@@ -933,8 +939,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([false,true])(
  }
 });
 
-it.each(['rejected','timeout','5xx','started'] as const)('RUNTIME: provider refusal boundary %s preserves original execution',async(kind)=>{
- const f=await fixture('serial-tools-v4-stream',false);let sends=0;
+it.each(['rejected','timeout','5xx','started'].flatMap(kind=>[false,true].map(native=>({kind,native}))))('RUNTIME: provider refusal boundary $kind native=$native preserves original execution',async({kind,native})=>{
+ const f=await fixture('serial-tools-v4-stream',false,100,false,undefined,false,10000,false,native);let sends=0;
  const error={user_id:'synthetic-user',error:{code:402,message:'Synthetic refusal',
   metadata:{limit_source:'openrouter_key_limit',provider_name:null}}};
  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
@@ -947,6 +953,7 @@ it.each(['rejected','timeout','5xx','started'] as const)('RUNTIME: provider refu
   return new Response(JSON.stringify(error),{status:kind==='5xx'?503:402,headers:{'content-type':'application/json'}});
  }});
  const executor=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,callGate:allowTestCalls});
+ await executor.execute(f.execution.executionId);
  await executor.execute(f.execution.executionId);
  // Cancellation/recovery never issues another provider POST, including a fresh process composition.
  await executor.cancel(f.execution.executionId);
@@ -1032,4 +1039,180 @@ it.each(['missing','cost','terminal-no-cost','nonterminal-cost','timeout','5xx']
  for(const audit of audits){expect(audit.claimedAt).toBeTruthy();expect(audit.observedAt).toBeTruthy();}
  await executor.recoverFinancial(f.execution.executionId);
  expect(lookups).toBe(2);expect(posts).toBe(1);
+});
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['step','fallback','card','length','plain-step','confirmed','empty','invalid-length'] as const)(
+ 'RUNTIME: native C0 C1 %s streams safely and replays a terminal snapshot without redispatch',async mode=>{
+ const agent=mode==='card'||mode==='length';
+ const f=await fixture(agent?'agent-turn-v5-stream':'serial-tools-v4-stream',false,8192,false,undefined,false,30000,agent,true);
+ const card={question:'Private question?',options:['First','Second'],recommended:0,message:'公开😀正文',recommendationReason:'Private reason'};
+ const text=mode==='empty'?'':mode==='length'?'长正文😀':card.message;
+ const body=mode==='plain-step'?text:mode==='invalid-length'?'unfinished non-envelope':agent?text:JSON.stringify(
+  mode==='fallback'?{informationPatch:{},message:text}:mode==='confirmed'?{message:text,informationPatch:{audience:{value:'读者',status:'confirmed',nature:'fact'}}}:{message:text,informationPatch:{}});
+ const gate=latch(),started=latch();let posts=0;
+ const server=createServer(async(req,res)=>{
+  posts++;let raw='';for await(const part of req)raw+=part;
+  const request=JSON.parse(raw),id='gen-native-'+f.execution.executionId;
+  res.setHeader('content-type','text/event-stream');
+  chunk(res,id,request.model,{role:'assistant',content:mode==='card'?'Earlier prose':body.slice(0,body.length-2)});
+  started.release();await gate.promise;
+  if(mode==='card'){
+   const args=JSON.stringify(card);
+   chunk(res,id,request.model,{tool_calls:[{index:0,id:'native-card',type:'function',function:{name:'ask_question',arguments:''}}]});
+   for(const char of args)chunk(res,id,request.model,{tool_calls:[{index:0,function:{arguments:char}}]});
+  }else chunk(res,id,request.model,{content:body.slice(-2)});
+  chunk(res,id,request.model,{},mode==='card'?'tool_calls':mode==='length'||mode==='invalid-length'?'length':'stop');
+  res.end('data: '+JSON.stringify({id,model:request.model,choices:[],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}})+'\n\ndata: [DONE]\n\n');
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const address=server.address();if(!address||typeof address==='string')throw new Error('local listener required');
+ const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',
+  transport:async(_url,init)=>fetch(`http://127.0.0.1:${address.port}`,init)});
+ const host=()=>runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter});
+ const events:ExecutionStreamEvent[]=[];
+ const running=(async()=>{for await(const e of streamOriginalExecution(cb=>host().execute(f.execution.executionId,cb),undefined,'test',undefined,'textDelta-v1'))events.push(e);})();
+ try{
+  await started.promise;
+  const pendingEvents:RuntimeProgress[]=[];
+  expect(await host().execute(f.execution.executionId,e=>pendingEvents.push(e))).toEqual({state:'pending'});
+  expect(pendingEvents.filter(e=>e.type==='text')).toEqual([]);
+  if(['fallback','plain-step','empty','invalid-length'].includes(mode))expect(events.filter((e)=>e.type==='textDelta')).toEqual([]);
+  else await until(()=>events.some((e)=>e.type==='textDelta'));
+  gate.release();await running;
+  if(mode==='invalid-length'){
+   expect(events.at(-1)).toMatchObject({type:'result',result:{state:'cancelled',unavailable:'output_truncated'}});
+   expect((await db.query('select charged from bill2_runs where id=$1',[f.execution.runId])).rows[0].charged).toBe(3);
+   expect(posts).toBe(1);return;
+  }
+  const frames=events.filter((e)=>e.type==='textDelta') as Array<{offset:number;rev:number;text:string}>;
+  let displayed='';let rev=0;
+  for(const frame of frames){
+   if(frame.offset===0){displayed=frame.text;rev=frame.rev;}
+   else{expect(frame.rev).toBe(rev);expect(frame.offset).toBe(Array.from(displayed).length);displayed+=frame.text;}
+  }
+  expect(displayed).toBe(text);
+  const terminal=events.at(-1);if(terminal?.type!=='result')throw new Error('missing terminal');
+  const result=terminal.result;
+  expect(result).toMatchObject({state:'completed',completeness:mode==='length'?'length_limit':'complete'});
+  if(!agent)expect(result.messageFirst).toBe(!['fallback','plain-step'].includes(mode));
+  if(mode==='plain-step')expect(result.body).toBe(text);
+  else expect(JSON.parse(result.body!).message).toBe(text);
+  if(mode==='confirmed')expect(JSON.parse(result.body!).informationPatch.audience).toMatchObject({value:'读者',status:'provisional',nature:'fact'});
+  const replay=[];for await(const e of streamOriginalExecution(cb=>host().execute(f.execution.executionId,cb),undefined,'test',undefined,'textDelta-v1'))replay.push(e);
+  expect(replay).toEqual([{type:'textDelta',offset:0,rev:0,text},{type:'result',result}]);
+  expect(posts).toBe(1);
+  const saved=(await db.query('select result,octet_length(result::text) bytes from runtime_executions where id=$1',[f.execution.executionId])).rows[0];
+  expect(saved.bytes).toBe(jsonbBytes(saved.result));expect(saved.bytes).toBeLessThanOrEqual(262144);
+  const charges=await db.query('select count(*)::int n from bill2_calls where run_id=$1',[f.execution.runId]);
+  expect(charges.rows[0].n).toBe(1);
+ }finally{gate.release();await running;server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: native capacity matches PostgreSQL jsonb bytes with escaped Unicode and summary omission',async()=>{
+ for(const message of ['😀中\\\"\n'.repeat(60000),'x'.repeat(300000)]){
+  const primary=fitNativeResult({body:JSON.stringify({message}),n:1e21,small:1e-7},{attachedOrganizer:true});
+  const result=attachNativeSummary(primary,'summary');
+  const measured=await db.query('select octet_length($1::jsonb::text) bytes',[JSON.stringify(result)]);
+  expect(measured.rows[0].bytes).toBe(jsonbBytes(result));
+  expect(measured.rows[0].bytes).toBeLessThanOrEqual(262144);
+  expect(result.body).toBe(primary.body);expect(result.summaryOmitted).toBe(true);
+ }
+});
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: native streaming and frozen buffered calls settle identical billing evidence',async()=>{
+ const settlements:unknown[]=[];
+ for(const streamed of [false,true]){
+  const f=await fixture(streamed?'serial-tools-v4-stream':'serial-tools-v2',false,8192,false,undefined,false,30000,false,streamed);
+  const body='{"message":"Identical billed answer"}';let posts=0;
+  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+   posts++;const request=JSON.parse(String(init?.body)),id='gen-equal-'+f.execution.executionId;
+   expect(request.stream).toBe(streamed);
+   if(!streamed)return new Response(completion(id,request.model,body),{status:200,headers:{'content-type':'application/json'}});
+   const chunks:string[]=[];
+   const res={write:(part:string)=>chunks.push(part),end:(part:string)=>chunks.push(part)} as unknown as ServerResponse;
+   chunk(res,id,request.model,{role:'assistant',content:body});endStream(res,id,request.model);
+   return new Response(chunks.join(''),{status:200,headers:{'content-type':'text/event-stream'}});
+  }});
+  const host=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter});
+  expect(await host.execute(f.execution.executionId)).toMatchObject({state:'completed',body});
+  const evidence=(await db.query('select state,closed,charged,actual_restore,provider_cost_usd::text cost from bill2_runs where id=$1',[f.execution.runId])).rows[0];
+  settlements.push(evidence);
+  const calls=(await db.query('select id,selected_cost_usd::text cost from bill2_calls where run_id=$1',[f.execution.runId])).rows;
+  expect(calls).toHaveLength(1);expect(calls[0].cost).toBe('0.003');
+  const receipts=(await db.query('select payload_hash,payload from bill2_receipts where call_id=$1 order by id',[calls[0].id])).rows;
+  await host.execute(f.execution.executionId);
+  expect((await db.query('select payload_hash,payload from bill2_receipts where call_id=$1 order by id',[calls[0].id])).rows).toEqual(receipts);
+  expect(posts).toBe(1);
+ }
+ expect(settlements).toEqual(Array(2).fill({state:'settled',closed:true,charged:3,actual_restore:17,cost:'0.003'}));
+});
+
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: native length body completes without dispatching an unusable attached organizer',async()=>{
+ const f=await fixture('agent-turn-v5-stream',true,8192,false,undefined,false,30000,true,true);
+ const message='x'.repeat(35000);let posts=0;
+ const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  posts++;const request=JSON.parse(String(init?.body));
+  expect(request.model).toBe('synthetic/mentor');
+  const id='gen-omit-'+f.execution.executionId;
+  return new Response('data: '+JSON.stringify({id,model:request.model,choices:[{index:0,
+   delta:{role:'assistant',content:message},finish_reason:'length'}],
+   usage:{prompt_tokens:10,completion_tokens:8192,total_tokens:8202,cost:0.003}})+'\n\ndata: [DONE]\n\n',
+   {status:200,headers:{'content-type':'text/event-stream'}});
+ }});
+ const host=runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter});
+ const result=await host.execute(f.execution.executionId);
+ expect(result).toMatchObject({state:'completed',summary:'',completeness:'length_limit',organized:false,summaryOmitted:true});
+ if (!('body' in result) || typeof result.body!=='string') throw new Error('Expected saved primary body');
+ expect(JSON.parse(result.body).message).toBe(message);
+ expect(await host.execute(f.execution.executionId)).toEqual(result);expect(posts).toBe(1);
+ const saved=(await db.query('select primary_result,result from runtime_executions where id=$1',[f.execution.executionId])).rows[0];
+ expect(saved.primary_result.body).toBe(saved.result.body);expect(jsonbBytes(saved.result)).toBeLessThanOrEqual(262144);
+ expect((await db.query('select state,closed,charged,actual_restore,provider_cost_usd::text cost from bill2_runs where id=$1',[f.execution.runId])).rows[0])
+  .toEqual({state:'settled',closed:true,charged:3,actual_restore:37,cost:'0.003'});
+ expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1',[f.execution.runId])).rows[0].n).toBe(1);
+});
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['call_limited','paused','limit_unavailable'] as const)(
+ 'RUNTIME: native first-call gate %s cancels with stable reason and no provider call or retry',async reason=>{
+ const f=await fixture('serial-tools-v4-stream',false,100,false,undefined,false,10000,false,true);
+ let posts=0;const events:RuntimeProgress[]=[];
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async()=>{
+  posts++;throw new Error('gate must prevent transport');
+ }});
+ const gate=vi.fn(async()=>({ok:false as const,reason,retryAfter:60}));
+ const host=()=>runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,callGate:gate});
+ const result=await host().execute(f.execution.executionId,event=>events.push(event));
+ expect(result).toEqual({state:'cancelled',unavailable:reason});
+ expect(events.filter(event=>event.type==='text')).toEqual([]);
+ expect(await host().execute(f.execution.executionId)).toMatchObject({state:'cancelled'});
+ expect(posts).toBe(0);expect(gate).toHaveBeenCalledTimes(1);
+ expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1',[f.execution.runId])).rows[0].n).toBe(0);
+ expect((await db.query('select charged,actual_restore from bill2_runs where id=$1',[f.execution.runId])).rows[0])
+  .toEqual({charged:0,actual_restore:20});
+});
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['plan','workspace','topics'] as const)(
+ 'RUNTIME: native non-C0 %s remains fully buffered through executeStream',async mode=>{
+ const f=await fixture('serial-tools-v2',false,100,false,undefined,false,10000,false,true);
+ const body=mode==='workspace'?'Full workspace answer':JSON.stringify([{title:mode+' structured answer'}]);
+ const entered=latch(),release=latch();let posts=0,done=false;
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  posts++;const request=JSON.parse(String(init?.body));expect(request.stream).toBe(false);
+  expect(request.stream_options).toBeUndefined();entered.release();await release.promise;
+  return new Response(completion('gen-buffered-'+f.execution.executionId,request.model,body));
+ }});
+ const host=()=>runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,callGate:allowTestCalls});
+ const events:ExecutionStreamEvent[]=[];
+ const run=(async()=>{for await(const event of streamOriginalExecution(cb=>host().execute(f.execution.executionId,cb),
+  undefined,'runtime.executeStream',undefined,'textDelta-v1'))events.push(event);done=true;})();
+ try{
+  await entered.promise;expect(done).toBe(false);
+  expect(events.filter(event=>event.type==='text'||event.type==='textDelta')).toEqual([]);
+  release.release();await run;
+  expect(events.filter(event=>event.type==='text'||event.type==='textDelta')).toEqual([]);
+  expect(events.at(-1)).toMatchObject({type:'result',result:{state:'completed',body,completeness:'complete'}});
+  expect(posts).toBe(1);
+ }finally{release.release();await run;}
 });

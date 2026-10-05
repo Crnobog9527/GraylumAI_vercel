@@ -6,6 +6,13 @@ import {runtimeAdmissionService} from './admission';
 import {OPENING_INPUT} from '../../shared/opcQuestions';
 import {PURPOSE_OUTPUT_CAP} from './purposeBudgets';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
+import {packageHash,sha256,type SkillSource} from '../skills/loader';
+import {runtimeContext} from './runtimeContext';
+import {openRouterRequestBody,STREAMING_FORMATS} from './providerRequest';
+import {frozenReasoningFields} from './reasoningPolicy';
+import {openRouterBound} from '../bill2/openRouterPolicy';
+const admittedSkill = vi.hoisted(() => ({ source: undefined as SkillSource | undefined }));
+vi.mock('../skills/databaseSource', () => ({ databaseSkillSource: () => admittedSkill.source }));
 // The window/configuration consistency of BILL-UNIT is covered in billingUnitAdmission.test.ts.
 vi.mock('./billingUnitAdmission', async (original) => ({
   ...(await original<typeof import('./billingUnitAdmission')>()),
@@ -14,6 +21,8 @@ vi.mock('./billingUnitAdmission', async (original) => ({
 const actor='10000000-0000-4000-8000-000000000001',sessionId='10000000-0000-4000-8000-000000000002';
 const first='10000000-0000-4000-8000-000000000003',second='10000000-0000-4000-8000-000000000004',organizer='10000000-0000-4000-8000-000000000005';
 const requestId='10000000-0000-4000-8000-000000000006',nextId='10000000-0000-4000-8000-000000000007';
+const moduleId='10000000-0000-4000-8000-000000000008',skillId='10000000-0000-4000-8000-000000000009';
+const revisionId='10000000-0000-4000-8000-000000000010';
 function fixture(budgetConfig?:unknown){
  const models=[{id:first,model_id:'synthetic/first'}, {id:second,model_id:'synthetic/second'}, {id:organizer,model_id:'synthetic/organizer'}].map(m=>({...m,provider:'openrouter',is_active:'true',max_tokens:8192,input_limit:32000,config:configuredReasoning(m.model_id)}));
  models[1]!.config=configuredReasoning(models[1]!.model_id,{mode:'budget',maxTokens:2048});
@@ -32,7 +41,8 @@ function fixture(budgetConfig?:unknown){
  const admin={rpc,from:(table:string)=>{
   let id='';const q={select:(columns:string)=>{if(table==='ai_models')selectedColumns.push(columns);return q;},eq:(_key:string,value:string)=>{id=value;return q;},
    maybeSingle:async()=>({data:budgetConfig?{value:JSON.stringify(budgetConfig)}:null,error:null}),
-   single:async()=>{reads++;return {data:models.find(m=>m.id===id),error:null};},
+   single:async()=>{reads++;return {data:table==='modules'
+    ?{id,active:true,skill_id:skillId,model_id:first}:models.find(m=>m.id===id),error:null};},
    in:async()=>({data:table==='ai_models'?models:settings,error:null})};return q;
  }} as unknown as SupabaseClient;
  const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
@@ -178,7 +188,7 @@ it('configured budgets freeze separately from unchanged quotes and reservation a
  for(const q of f.policy.real.callPolicies){q.outputLimit=40000;q.providerLimits.contextTokens=128000;q.inputLimit=90000;}
  const service=runtimeAdmissionService(f.user,f.admin,{...f.policy,purposeBudgets:true});
  const original=await service.prepare(f.input);
- expect(original.context.maxOutputTokens).toBe(2000);
+ expect(original.context.maxOutputTokens).toBe(PURPOSE_OUTPUT_CAP);
  expect(original.context.purposeBudget).toEqual({purpose:'interactive',inputBytes:24000,historyItems:7});
  expect(original.context.attachedOrganizer).toMatchObject({maxOutputTokens:4096,inputBytes:16000,historyItems:0});
  expect(original.billing.callPolicy).toEqual(f.policy.real.callPolicies.filter(q=>q.modelId!==second));
@@ -191,7 +201,7 @@ it('configured budgets freeze separately from unchanged quotes and reservation a
  expect(await service.prepare(f.input)).toEqual(original);
 });
 
-it('legacy admission retains its old ceiling and replay ignores newly invalid configuration',async()=>{
+it('new admission uses unified ceiling and replay ignores newly invalid configuration',async()=>{
  const config={version:1,interactive:{inputBytes:24000,maxOutputTokens:2000,historyItems:7},
   organize:{inputBytes:16000,historyItems:3},report:{inputBytes:64000,maxOutputTokens:1000,historyItems:100}};
  const f=fixture(config),service=runtimeAdmissionService(f.user,f.admin,{...f.policy,purposeBudgets:true});
@@ -203,7 +213,7 @@ it('legacy admission retains its old ceiling and replay ignores newly invalid co
  for(const m of legacy.models)m.max_tokens=64000;
  for(const q of legacy.policy.real.callPolicies)q.outputLimit=40000;
  const legacyService=runtimeAdmissionService(legacy.user,legacy.admin,legacy.policy);
- expect((await legacyService.prepare(legacy.input)).context.maxOutputTokens).toBe(20000);
+ expect((await legacyService.prepare(legacy.input)).context.maxOutputTokens).toBe(PURPOSE_OUTPUT_CAP);
 });
 
 it.each([false,true])('zero history applies only to newly admitted positioning attachment (standalone=%s)',async standalone=>{
@@ -222,3 +232,78 @@ vi.mock('./newWorkGate', async importOriginal => ({
  ...await importOriginal<typeof import('./newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
+
+it('new model ceiling below quote remains admissible without changing v1 financial policy or replay', async () => {
+ const f=fixture();
+ f.models[0]!.max_tokens=4096;
+ const originalQuotes=structuredClone(f.policy.real.callPolicies);
+ const admitted=await f.service.prepare(f.input);
+ expect(admitted.context.maxOutputTokens).toBe(4096);
+ expect(admitted.billing.contractVersion).toBe('bill2.v1');
+ expect(admitted.billing.callPolicy).toEqual(originalQuotes.filter(q=>q.modelId!==second));
+ f.models[0]!.max_tokens=1024;
+ expect(await f.service.prepare(f.input)).toEqual(admitted);
+});
+
+
+function activateSyntheticStepSkill() {
+ const entry='---\nname: native-step-test\ndescription: Synthetic native step admission\n---\nFollow the step resources.';
+ const files={'SKILL.md':entry,'references/step.md':'Use the public message envelope.','references/plan.md':'Return a complete JSON plan array.'};
+ const descriptor={packageId:skillId,revisionId,directoryName:'native-step-test',
+  files:Object.entries(files).map(([path,content])=>({path,bytes:Buffer.byteLength(content),
+   sha256:sha256(content),mediaType:'text/markdown' as const,requires:[]})),
+  tasks:{},requiredCapabilities:[],packageHash:''};
+ descriptor.packageHash=packageHash(descriptor);
+ admittedSkill.source={list:async()=>[descriptor],state:async()=> 'enabled',
+  read:async({path})=>Buffer.from(files[path as keyof typeof files])};
+}
+it.each([false,true])('real Skill admission freezes step streaming and leaves plan buffered (step=%s)',async step=>{
+ activateSyntheticStepSkill();
+ const f=fixture();
+ f.models[0]!.config=configuredReasoning('synthetic/first',{mode:'budget',maxTokens:2048});
+ f.models[2]!.config=configuredReasoning('synthetic/organizer',{mode:'off',wire:'reasoning'},'organize');
+ for(const quote of f.policy.real.callPolicies)quote.upperUsd=openRouterBound(quote.providerLimits,quote.outputLimit).upperUsd;
+ const service=runtimeAdmissionService(f.user,f.admin,{...f.policy,mentorStream:false,stepStream:step,
+  skillResources:[step?'references/step.md':'references/plan.md']});
+ const input={...f.input,selection:{kind:'skill' as const,moduleId,revisionId}};
+ const admitted=await service.prepare(input);
+ const context=runtimeContext.parse(admitted.context);
+ expect(context).toMatchObject({role:'skill',moduleId,skillId,revisionId,nativeOutput:'native-output-v1',
+  providerRequestFormat:step?'serial-tools-v4-stream':'serial-tools-v6-reasoning',
+  reasoning:step?{parameter:'reasoning',value:{max_tokens:2048}}:{parameter:'none'},
+  attachedOrganizer:{modelId:organizer,reasoning:{parameter:'reasoning',value:{enabled:false}}},
+ });
+ expect(STREAMING_FORMATS.has(context.providerRequestFormat!)).toBe(step);
+ expect(context.envelopeOrder).toBe(step?'message-first-v1':undefined);
+ expect(context.instructions).toContain(step?'public message envelope':'complete JSON plan array');
+ const primaryPolicy=f.policy.real.callPolicies.find(quote=>quote.modelId===first)!;
+ const organizerPolicy=f.policy.real.callPolicies.find(quote=>quote.modelId===organizer)!;
+ const request=(model:string,reasoning:Parameters<typeof frozenReasoningFields>[0],stream:boolean)=>JSON.stringify({
+  model,messages:[{role:'user',content:'Synthetic authorized input'}],stream,...frozenReasoningFields(reasoning),
+ });
+ const primary=JSON.parse(openRouterRequestBody(request(context.model,context.reasoning,step),{
+  context,policy:primaryPolicy,phase:'primary',primaryDialogue:true}));
+ const attached=JSON.parse(openRouterRequestBody(request(context.attachedOrganizer!.model,context.attachedOrganizer!.reasoning,false),{
+  context,policy:organizerPolicy,phase:'attached_organizer',primaryDialogue:false}));
+ expect(primary.stream).toBe(step);
+ expect(attached.stream).toBe(false);
+ expect(attached.reasoning).toEqual({enabled:false});
+ if(step)expect(primary.reasoning).toEqual({max_tokens:2048});
+ expect(admitted.billing.sourceHash).toBe(createHash('sha256').update(JSON.stringify(admitted.context)).digest('hex'));
+ const bytes=JSON.stringify(admitted);
+ f.models[0]!.config.reasoning.purposes={};
+ expect(JSON.stringify(await service.prepare(input))).toBe(bytes);
+});
+
+it.each([8192,8193])('v1 native O is capped at 8192 for model/quote boundary %i with unchanged frozen charges', async limit => {
+ const f=fixture();
+ f.models[0]!.max_tokens=limit;
+ f.policy.real.callPolicies[0]!.outputLimit=limit;
+ const before=structuredClone(f.policy.real.callPolicies);
+ const result=await runtimeAdmissionService(f.user,f.admin,f.policy).prepare({...f.input,organizeAfter:false});
+ expect(result.context.nativeOutput).toBe('native-output-v1');
+ expect(result.context.maxOutputTokens).toBe(8192);
+ expect(result.billing.contractVersion).toBe('bill2.v1');
+ expect(result.billing.callPolicy).toEqual([before[0]]);
+ expect(result.billing.limits).toMatchObject({costUsd:'0.008000000000',credits:8,maxPreDeduct:8});
+});

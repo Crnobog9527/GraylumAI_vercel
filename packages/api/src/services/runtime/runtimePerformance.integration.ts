@@ -2,6 +2,8 @@
 import {readFileSync} from 'node:fs';
 import {expect} from 'vitest';
 import type pg from 'pg';
+import type {SupabaseClient} from '@supabase/supabase-js';
+import {readNativeRuntimeView} from './nativeView';
 
 // Registered in runtime.integration.ts, so the existing CI Runtime suite runs it.
 // Same file-built fixture as the full local before/after benchmark; no provider calls.
@@ -31,6 +33,21 @@ export async function assertLongSessionPerformance(db: pg.Client) {
     const view=(await db.query('select runtime_view($1,$2) v',[f.actor,f.session])).rows[0].v;
     expect(view.executions).toHaveLength(100);
     expect(view.executions.every((e:{contentAvailable:boolean})=>e.contentAvailable)).toBe(true);
+    let metadataReads = 0;
+    const scoped = { rpc: async (name: string, args: Record<string, string>) => {
+      if (name === 'runtime_view') return { error: null, data: (await db.query(
+        'select runtime_view($1,$2) v', [args.p_actor_id,args.p_session_id])).rows[0].v };
+      expect(name).toBe('runtime_execution');
+      expect(args.p_action).toBe('read');
+      metadataReads++;
+      return { error: null, data: (await db.query(
+        "select runtime_execution($1,$2,'read') v", [args.p_actor_id,args.p_execution_id])).rows[0].v };
+    } } as unknown as SupabaseClient;
+    const nativeStarted = performance.now();
+    const nativeView = await readNativeRuntimeView(scoped,f.actor,f.session);
+    expect(performance.now()-nativeStarted).toBeLessThan(1000);
+    expect(metadataReads).toBe(1);
+    expect(nativeView).toEqual(view);
     await db.query(`update runtime_executions set unavailable_reason='source_revoked'
       where session_id=$1 and history_revision=0`,[f.session]);
     const denied=(await db.query('select runtime_view($1,$2) v',[f.actor,f.session])).rows[0].v;
