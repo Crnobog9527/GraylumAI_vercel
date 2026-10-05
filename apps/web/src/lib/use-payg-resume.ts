@@ -8,15 +8,20 @@ import {
 
 /**
  * The page's BILL-PAYG pauses (see payg-wait.ts) bound to `runtime.resume` and React state.
- * `refetch` re-reads whatever the page shows of the session after every resume.
+ * `refetch` re-reads whatever the page shows of the session after every resume; `onResult`
+ * sees each resume's answer before that (the report page reads its refusal code from it).
  */
-export function usePaygResume(refetch: () => Promise<unknown>) {
+export function usePaygResume(refetch: () => Promise<unknown>, onResult?: (result: unknown) => void) {
   const resume = trpc.runtime.resume.useMutation();
-  const latest = useRef({ call: resume.mutateAsync, refetch });
-  latest.current = { call: resume.mutateAsync, refetch };
+  const latest = useRef({ call: resume.mutateAsync, refetch, onResult });
+  latest.current = { call: resume.mutateAsync, refetch, onResult };
   const [state, setState] = useState<PaygResumeState>({ resumingId: null, blockedId: null, outcomes: {} });
   const controller = useMemo(() => paygResumeController({
-    call: token => latest.current.call(token),
+    call: async token => {
+      const result = await latest.current.call(token);
+      latest.current.onResult?.(result);
+      return result;
+    },
     refetch: () => latest.current.refetch(),
     onChange: setState,
   }), []);

@@ -25,7 +25,8 @@ import { useMentorLogScroll } from "./use-mentor-log-scroll";
 import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRetry } from "./mentor-notices";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { useLiveReply } from "./use-live-reply";
-import { sameRequest, stoppedPartial, releaseRejectedAnswer, openingRequest, parseStepEnvelope, type MentorRequest, type MentorStepEnvelope,
+import { ReportEntry } from "./report-panel";
+import { sameRequest, stoppedPartial, releaseRejectedAnswer, openingRequest, parseStepEnvelope, type MentorRequest,
   isCompleteResult, retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
 import { usePaygResume } from "@/lib/use-payg-resume";
 import {
@@ -44,86 +45,9 @@ import {
 } from "@repo/api/src/shared/opcQuestions";
 import { isAgentProposal } from "@repo/api/src/shared/opcMethodPolicy";
 type Step = { id: string; title: string; dependsOn?: string[] };
-type Information = {
-  status: "unknown" | "unclear" | "provisional" | "confirmed" | "deferred";
-  nature: "fact" | "decision" | "hypothesis" | "unknown";
-  value: string;
-};
-type Item = {
-  id: string;
-  platform: string;
-  account: string;
-  title: string;
-  brief: string;
-  day: string;
-};
-type ConfirmStepEnvelope = {
-  phase: "information" | "save" | "confirm";
-  questionId?: string;
-  finishStep?: boolean;
-  values: Record<string, Information>;
-  editingSnapshot: string;
-  information: {
-    draftId: string;
-    stepId: string;
-    requestId: string;
-    expectedVersion: number;
-    values: Record<string, Information>;
-  };
-  save: {
-    action: "save";
-    projectId: string;
-    roundId: string;
-    requestId: string;
-    stepId: string;
-    expectedVersion: number | null;
-    body: string;
-    evidenceIds: string[];
-  };
-  confirm: {
-    action: "confirm";
-    projectId: string;
-    roundId: string;
-    requestId: string;
-    stepId: string;
-    expectedVersion: number | null;
-    expectedReviewVersion: number | null;
-  };
-};
-
-type StepEnvelope = MentorStepEnvelope<ConfirmStepEnvelope["information"]>;
-type ConfirmEnvelopeState =
-  | { kind: "none" }
-  | { kind: "valid"; envelope: ConfirmStepEnvelope; raw: string }
-  | { kind: "malformed"; raw: string };
-const confirmPhases: readonly string[] = ["information", "save", "confirm"];
-function isRecord(value: unknown): value is Record<string, any> {
-  return typeof value === "object" && value !== null;
-}
-/**
- * A pre-upgrade envelope has the same core fields as the current shape.
- * questionId/finishStep are optional, so a legacy envelope stays valid.
- */
-function isConfirmStepEnvelope(value: unknown): value is ConfirmStepEnvelope {
-  if (!isRecord(value) || !confirmPhases.includes(value.phase)) return false;
-  if (
-    !isRecord(value.values) ||
-    !isRecord(value.information) ||
-    !isRecord(value.save) ||
-    !isRecord(value.confirm)
-  )
-    return false;
-  return (
-    typeof value.information.draftId === "string" &&
-    typeof value.information.stepId === "string" &&
-    typeof value.information.requestId === "string" &&
-    typeof value.information.expectedVersion === "number" &&
-    value.save.action === "save" &&
-    typeof value.save.requestId === "string" &&
-    value.confirm.action === "confirm" &&
-    typeof value.confirm.requestId === "string"
-  );
-}
+import {
+  isConfirmStepEnvelope, isRecord, type ConfirmEnvelopeState, type ConfirmStepEnvelope, type Information, type Item, type StepEnvelope,
+} from "./confirm-envelope";
 /**
  * Provably definite rollbacks of the `opc_handoff` SQL function. Every code
  * below is raised before that function's single durable write, so an exception
@@ -2302,6 +2226,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           继续生成第一周选题
         </Button>
       )}
+      {!planView && read.data?.sessionId && <ReportEntry draftId={draftId} sessionId={read.data.sessionId}
+        projectId={d.projectId} roundId={d.roundId} busy={busy || hasUnsavedInformation || hasPendingStepRequest}
+        confirmed={!hasUnconfirmedRequired && !hasPendingConfirmation &&
+        !(d.accountRevision ? nextReviewStep : steps.some((step) => !snap.steps[step.id].valid))} />}
       </div><p>确认后保存为正式定位；生成选题将在下一步单独确认。</p>
       {d.report?.available && <Link href={`/positioning/${draftId}/topics`}>进入选题工作对话 →</Link>}
       </footer>}
