@@ -116,7 +116,8 @@ export function liveReplyController(options: {
       } finally {
         // A lost stream or a still-running execution waits; a finished one without a completed result says so.
         // A BILL-PAYG pause is not unfinished: the turn shows its pause notice once history is read.
-        if (id && result?.state !== "completed" && !isPaygWaiting(result?.state)) live.mark(id, !result || result.state === "pending" ? "waiting" : "incomplete");
+        if (id && result?.state !== "completed" && !isPaygWaiting(result?.state))
+          live.mark(id, !result || result.state === "pending" ? "waiting" : "incomplete");
       }
     },
   };
