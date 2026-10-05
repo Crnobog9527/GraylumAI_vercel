@@ -48,6 +48,15 @@ describe("pinToBottomOnGrowth in a real browser", () => {
     expect(await gap()).toBeLessThan(1);
   });
 
+  it("keeps a restored position near the bottom until something actually grows", async () => {
+    await setup(650); // 50px above the bottom: inside the follow threshold, so following.
+    expect(await page.evaluate(() => (window as unknown as { follow: boolean }).follow)).toBe(true);
+    expect(await gap()).toBe(50);
+    await page.evaluate(() => { document.getElementById("live")!.style.height = "450px"; });
+    await settle();
+    expect(await gap()).toBeLessThan(1);
+  });
+
   it("never pulls down a reader who scrolled up", async () => {
     await setup(120);
     expect(await page.evaluate(() => (window as unknown as { follow: boolean }).follow)).toBe(false);

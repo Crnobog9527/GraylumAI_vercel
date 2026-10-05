@@ -48,7 +48,18 @@ export function followTranscript(node: ScrollNode, state: ChatScrollState, key: 
  */
 export function pinToBottomOnGrowth(node: HTMLElement, following: () => boolean) {
   const pin = () => { if (following() && !isNearBottom(node, 1)) node.scrollTop = node.scrollHeight; };
-  const sizes = new ResizeObserver(pin);
+  // A ResizeObserver reports every element once when observed; only a later, real size change may pin,
+  // so a restored position near (but not at) the bottom is not overwritten.
+  const heights = new WeakMap<Element, number>();
+  const sizes = new ResizeObserver(entries => {
+    let grew = false;
+    for (const entry of entries) {
+      const before = heights.get(entry.target), height = entry.contentRect.height;
+      if (before !== undefined && before !== height) grew = true;
+      heights.set(entry.target, height);
+    }
+    if (grew) pin();
+  });
   const watch = () => {
     sizes.disconnect();
     sizes.observe(node);

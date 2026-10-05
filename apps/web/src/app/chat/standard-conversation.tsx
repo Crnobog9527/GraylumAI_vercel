@@ -251,8 +251,7 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
     }
   }, [activeConversationId, loadHistory]);
 
-  // Follow new messages and streaming text only while the reader is at the bottom; never pull them down after scrolling up.
-  const messagesScrollRef = useRef<HTMLDivElement>(null), followLatest = useRef(true);
+  const messagesScrollRef = useRef<HTMLDivElement>(null), followLatest = useRef(true); // Follow only while at the bottom.
   useEffect(() => { followLatest.current = true; }, [activeConversationId]);
   useEffect(() => { const node = messagesScrollRef.current; if (node && followLatest.current) node.scrollTop = node.scrollHeight; });
 
@@ -317,6 +316,7 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
         }
 
         const messageToSend = inputMessage;
+        followLatest.current = true; // A send shows the user's own message and the reply, even after scrolling up.
         await sendStreamingMessage(messageToSend, {
           modelId: showModelSelector && selectedModelId ? selectedModelId : undefined,
           moduleId,
