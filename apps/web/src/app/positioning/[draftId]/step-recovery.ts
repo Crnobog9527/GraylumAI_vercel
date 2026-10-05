@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { parseStepEnvelope, type MentorStepEnvelope } from "./mentor-turn";
+import { stopSaving } from "./stop-reply";
 
 /**
  * After a reload, a tab switch or a lost connection the page no longer owns
@@ -27,6 +28,9 @@ export type RecoveryExecution = {
   executionId: string;
   state: string;
   request?: { requestId?: string } | null;
+  billing?: { pausedReason?: string | null; cancelRequested?: boolean } | null;
+  /** A user stop is recorded and its result is not saved yet (stop-reply.ts). */
+  userStopPending?: boolean;
 };
 export type RecoveryHistory = {
   activeExecution?: string | null;
@@ -75,6 +79,9 @@ export function envelopeExecution(history: RecoveryHistory, envelope: MentorStep
  *   the session), or a request in flight may still be admitted. Poll.
  * - `auto`: its execution is terminal and no execution owns the session. The
  *   page may run the same idempotent recovery as the retry action by itself.
+ * - `stopped`: the user stopped its turn and it is still saving. The stop
+ *   follow-up (use-live-reply.ts) re-reads it a bounded number of times; the
+ *   envelope neither polls, recovers by itself nor asks for a retry.
  * - `user`: nothing will change by itself (unreadable envelope, interrupted
  *   execution, or a request that was never admitted), or the history cannot
  *   be read (a failed read, or none after the grace period). Ask the user;
@@ -85,7 +92,7 @@ export function envelopeRecovery(
   envelope: StoredStepEnvelope,
   elapsedMs: number,
   historyFailed = false,
-): "wait" | "auto" | "user" {
+): "wait" | "auto" | "user" | "stopped" {
   if (!envelope.parsed) return "user";
   if (!history) return historyFailed || elapsedMs >= UNMATCHED_POLL_MS ? "user" : "wait";
   const executions = history.executions ?? [];
@@ -93,6 +100,7 @@ export function envelopeRecovery(
     ? executions.find(execution => execution.executionId === history.activeExecution) ?? { state: "running" }
     : null;
   const execution = envelopeExecution(history, envelope.parsed);
+  if (execution && stopSaving(execution)) return "stopped";
   if (execution && PROGRESSING_STATES.includes(execution.state)) return "wait";
   if (active && PROGRESSING_STATES.includes(active.state)) return "wait";
   if (execution) return TERMINAL_STATES.includes(execution.state) && !active ? "auto" : "user";
