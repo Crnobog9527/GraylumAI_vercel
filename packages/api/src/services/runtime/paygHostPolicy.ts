@@ -45,7 +45,9 @@ export const paygHostProfile = z.object({
     outputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
     includesReasoning: z.literal(true), cacheCovered: z.literal(true), costBoundPassed: z.literal(true),
   }).strict(),
-}).strict().refine(p => p.outputLimit <= p.evidence.outputLimit, { message: 'PAYG_OUTPUT_EVIDENCE_REQUIRED' });
+}).strict().refine(p => p.outputLimit <= p.evidence.outputLimit
+  && p.reasoningVariants.every(v => v.outputLimit <= p.evidence.outputLimit),
+{ message: 'PAYG_OUTPUT_EVIDENCE_REQUIRED' });
 export const paygHostSettings = z.object({
   version: z.literal(1), enabled: z.boolean(), windowId: z.string().uuid(),
   profiles: z.array(paygHostProfile).max(16),

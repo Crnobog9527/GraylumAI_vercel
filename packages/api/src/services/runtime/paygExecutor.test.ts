@@ -5,11 +5,13 @@ import prices from '../../../../../scripts/payg-profile/plan-prices.json';
 import catalog from '../../../../../scripts/payg-profile/catalog-2026-10-05.json';
 import {createSamplePlan} from '../../../../../scripts/payg-profile/sampling';
 import {executePlan,verifiedPlan,verifyCatalog,failureCode,type Event,type Plan} from '../../../../../scripts/payg-profile/executor';
-// Full 183-request regeneration is CPU-bound; shared CI runners exceed Vitest's 5s default.
-let plan:Plan;
-beforeAll(()=>{plan=createSamplePlan(prices);});
+// Full 80-request regeneration is CPU-bound; shared CI runners exceed Vitest's 5s default.
+let plan:Plan,geminiPlan:Plan;
+const firstRoute=prices.routes.find(r=>r.model.startsWith('openai/'))!;
+beforeAll(()=>{plan=createSamplePlan(prices);geminiPlan=createSamplePlan(prices,'r5');});
 const response=(body:Record<string,unknown>,status=200)=>new Response(JSON.stringify(body),{status});
-function fixture(){
+function fixture(batch:'r4'|'r5'='r4'){
+ const active=batch==='r4'?plan:geminiPlan;
  const events:Event[]=[],observations:unknown[]=[];
  const transport=vi.fn(async(_url:Parameters<typeof fetch>[0],init?:RequestInit)=>{
   const request=JSON.parse(String(init?.body));
@@ -19,7 +21,7 @@ function fixture(){
     prompt_tokens_details:{cached_tokens:20,cache_write_tokens:10},completion_tokens_details:{reasoning_tokens:50}}});
  });
  const credential=vi.fn(async()=>'LOCAL_SYNTHETIC_KEY'),preflight=vi.fn(async()=>{});
- const options={prices,manifest:plan.manifest,approvedHash:plan.manifest.manifestHash,credential,preflight,transport,
+ const options={prices,manifest:active.manifest,approvedHash:active.manifest.manifestHash,credential,preflight,transport,
   journal:{events,append:async(event:Event)=>{expect(event).toBeDefined();},
    saveObservation:async(_id:string,_source:string,value:unknown)=>{observations.push(value);}}};
  return {options,events,observations,transport,credential,preflight};
@@ -33,10 +35,10 @@ it('checks exact manifest before credential or network; refuses budget/catalog/c
 },30000);
 it('real adapter sends every frozen hash once, under its own cap, with canonical receipts',async()=>{
  const f=fixture();const result=await executePlan(f.options);
- expect(f.transport).toHaveBeenCalledTimes(183);expect(result.receipts).toHaveLength(183);
+ expect(f.transport).toHaveBeenCalledTimes(80);expect(result.receipts).toHaveLength(80);
  expect(result.report.every(s=>s.status==='SAMPLE_WITHIN_BOUNDS')).toBe(true);
- expect(f.observations).toHaveLength(183);
- for(let i=0;i<183;i++){
+ expect(f.observations).toHaveLength(80);
+ for(let i=0;i<80;i++){
   const [url,init]=f.transport.mock.calls[i];const sample=plan.manifest.samples[i];
   expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
   expect(createHash('sha256').update(String(init?.body)).digest('hex')).toBe(sample.requestHash);
@@ -46,7 +48,7 @@ it('real adapter sends every frozen hash once, under its own cap, with canonical
  expect(result.report[0]).toMatchObject({P:100,cachedTokens:20,cacheWriteTokens:10});
  expect(JSON.stringify(result)).not.toContain('LOCAL_SYNTHETIC_KEY');
  await expect(executePlan(f.options)).rejects.toThrow('BATCH_ALREADY_ATTEMPTED');
- expect(f.transport).toHaveBeenCalledTimes(183);
+ expect(f.transport).toHaveBeenCalledTimes(80);
 },30000);
 it('ambiguous send never retries, never marks zero cost, never dispatches the next sample',async()=>{
  const f=fixture();f.transport.mockRejectedValue(new Error('private transport detail'));
@@ -63,7 +65,7 @@ it('fsync/claim failure prevents dispatch',async()=>{
 },30000);
 it('missing usage looks up only the original ID three times and never resends or refills',async()=>{
  const f=fixture();f.transport.mockImplementation(async(_url,init)=>init?.method==='POST'
-  ?response({id:'synthetic-original',model:prices.routes[0].model,choices:[{finish_reason:'stop'}]})
+  ?response({id:'synthetic-original',model:firstRoute.model,choices:[{finish_reason:'stop'}]})
   :response({error:{code:404}},404));
  await executePlan(f.options);
  expect(f.transport.mock.calls.filter(([,init])=>init?.method==='POST')).toHaveLength(1);
@@ -80,8 +82,8 @@ it('an incomplete response with a header ID may lookup, but never repeats POST',
  expect(f.events.filter(e=>e.type==='lookup-attempt').every(e=>e.providerId==='synthetic-header')).toBe(true);
 },30000);
 it('over-bound cost remains failed at the original bound and halts the batch',async()=>{
- const f=fixture();f.transport.mockImplementation(async()=>response({id:'synthetic-over',model:prices.routes[0].model,
-  provider:'Anthropic',choices:[{finish_reason:'stop'}],usage:{cost:1,prompt_tokens:100,completion_tokens:10}}));
+ const f=fixture();f.transport.mockImplementation(async()=>response({id:'synthetic-over',model:firstRoute.model,
+  provider:firstRoute.providerName,choices:[{finish_reason:'stop'}],usage:{cost:1,prompt_tokens:100,completion_tokens:10}}));
  const result=await executePlan(f.options);
  expect(f.transport).toHaveBeenCalledTimes(1);expect(result.report[0].status).toBe('BOUND_FAILED');
  expect(f.events.at(-1)).toMatchObject({reason:'BOUND_FAILED_NO_REFILL',actualUsd:'1'});
@@ -89,7 +91,7 @@ it('over-bound cost remains failed at the original bound and halts the batch',as
 },30000);
 it('provider/identity mismatch cannot be used as a matching-route receipt',async()=>{
  const f=fixture();f.transport.mockImplementation(async()=>response({id:'synthetic-wrong',model:'wrong/model',
-  provider:'Anthropic',choices:[{finish_reason:'stop'}],usage:{cost:0.001,prompt_tokens:100,completion_tokens:10}}));
+  provider:firstRoute.providerName,choices:[{finish_reason:'stop'}],usage:{cost:0.001,prompt_tokens:100,completion_tokens:10}}));
  await executePlan(f.options);expect(f.transport).toHaveBeenCalledTimes(1);
  expect(f.events.at(-1)).toMatchObject({reason:'RECEIPT_CONFLICT',actualUsd:null});
 },30000);
@@ -113,9 +115,9 @@ it('catalog drift stops before credentials and the first paid request',async()=>
 },30000);
 it('conflicting response and lookup costs never choose the cheaper receipt',async()=>{
  const f=fixture();f.transport.mockImplementation(async(_url,init)=>init?.method==='POST'
-  ?response({id:'synthetic-conflict',model:prices.routes[0].model,choices:[{finish_reason:'stop'}],
+  ?response({id:'synthetic-conflict',model:firstRoute.model,choices:[{finish_reason:'stop'}],
    usage:{cost:0.001,prompt_tokens:100,completion_tokens:10}})
-  :response({data:{id:'synthetic-conflict',model:prices.routes[0].model,provider_name:'Anthropic',
+  :response({data:{id:'synthetic-conflict',model:firstRoute.model,provider_name:firstRoute.providerName,
    finish_reason:'stop',total_cost:0.002,native_tokens_prompt:100,native_tokens_completion:10}}));
  const result=await executePlan(f.options);
  expect(f.transport).toHaveBeenCalledTimes(2);expect(result.actualUsd).toBeNull();
@@ -134,14 +136,14 @@ it.each(['CATALOG_UNAVAILABLE','CATALOG_DRIFT_REPLAN_REQUIRED','private network 
 },30000);
 it('catalog transport and malformed JSON never expose upstream messages',async()=>{
  const transport=vi.fn(async()=>{throw new Error('private network credentials detail');});
- await expect(verifyCatalog(prices,catalog,prices.routes[0].model,transport)).rejects.toThrow('CATALOG_UNAVAILABLE');
- await expect(verifyCatalog(prices,catalog,prices.routes[0].model,async()=>new Response('bad json')))
+ await expect(verifyCatalog(prices,catalog,firstRoute.model,transport)).rejects.toThrow('CATALOG_UNAVAILABLE');
+ await expect(verifyCatalog(prices,catalog,firstRoute.model,async()=>new Response('bad json')))
   .rejects.toThrow('CATALOG_INVALID_RESPONSE');
  expect(failureCode(new Error('CATALOG_UNAVAILABLE extra private detail'))).toBe('PAYG_EXECUTOR_STOPPED');
 });
 it.each(['Google Vertex','Google AI Studio','google-vertex/global','unverified-provider'])(
  'does not admit an unverified Vertex receipt name: %s',async(provider)=>{
- const f=fixture(),send=f.transport.getMockImplementation()!;
+ const f=fixture('r5'),send=f.transport.getMockImplementation()!;
  f.transport.mockImplementation(async(url,init)=>{
   if(init?.method==='GET')return response({error:{}},404);
   const result=await send(url,init),body=await result.json();
@@ -149,10 +151,10 @@ it.each(['Google Vertex','Google AI Studio','google-vertex/global','unverified-p
   return response(body);
  });
  const result=await executePlan(f.options);
- expect(result.receipts).toHaveLength(31);
+ expect(result.receipts).toHaveLength(0);
  expect(f.events.at(-1)).toMatchObject({reason:'UNKNOWN_OR_FAILED'});
  expect(f.events.filter(e=>e.type==='lookup-attempt')).toHaveLength(3);
- expect(f.events.filter(e=>e.type==='attempt')).toHaveLength(32);
+ expect(f.events.filter(e=>e.type==='attempt')).toHaveLength(1);
 },30000);
 it('all three canonical provider names are also accepted from original-ID lookup receipts',async()=>{
  const f=fixture(),send=f.transport.getMockImplementation()!;
@@ -168,9 +170,9 @@ it('all three canonical provider names are also accepted from original-ID lookup
   return response(withoutProvider);
  });
  const result=await executePlan(f.options);
- expect(result.receipts).toHaveLength(183);
+ expect(result.receipts).toHaveLength(80);
  expect(result.receipts.every(r=>(r as {source:string}).source==='lookup.native_tokens_prompt')).toBe(true);
- expect(f.events.filter(e=>e.type==='lookup-attempt')).toHaveLength(183);
+ expect(f.events.filter(e=>e.type==='lookup-attempt')).toHaveLength(80);
 },30000);
 
 it.each([true,false])('only exact region-gate 403 yields PROVIDER_REGION_BLOCKED (region=%s)',async(region)=>{
@@ -189,8 +191,8 @@ it.each([
  {finish_reason:'stop',native_finish_reason:'refusal'},
 ])('content refusal is a distinct immediate halt with no lookup: %j',async(choice)=>{
  const f=fixture();
- f.transport.mockResolvedValue(response({id:'synthetic-refused',model:prices.routes[0].model,
-  provider:'Anthropic',choices:[choice]}));
+ f.transport.mockResolvedValue(response({id:'synthetic-refused',model:firstRoute.model,
+  provider:firstRoute.providerName,choices:[choice]}));
  const result=await executePlan(f.options);
  expect(f.transport).toHaveBeenCalledTimes(1);
  expect(f.events.at(-1)).toMatchObject({reason:'PROVIDER_CONTENT_REFUSED',actualUsd:null});
@@ -199,8 +201,8 @@ it.each([
 },30000);
 it('a refusal with settled cost retains that cost and still stops',async()=>{
  const f=fixture();
- f.transport.mockResolvedValue(response({id:'synthetic-refused-cost',model:prices.routes[0].model,
-  provider:'Anthropic',choices:[{finish_reason:'content_filter'}],
+ f.transport.mockResolvedValue(response({id:'synthetic-refused-cost',model:firstRoute.model,
+  provider:firstRoute.providerName,choices:[{finish_reason:'content_filter'}],
   usage:{cost:0.002,prompt_tokens:100,completion_tokens:10}}));
  const result=await executePlan(f.options);
  expect(f.transport).toHaveBeenCalledTimes(1);expect(result.knownUsd).toBe('0.002000000000');
@@ -209,15 +211,31 @@ it('a refusal with settled cost retains that cost and still stops',async()=>{
 it('refusal first observed in lookup stops further lookups and dispatch',async()=>{
  const f=fixture();
  f.transport.mockImplementation(async(_url,init)=>init?.method==='POST'
-  ?response({id:'synthetic-refusal-lookup',model:prices.routes[0].model,choices:[{finish_reason:'stop'}]})
-  :response({data:{id:'synthetic-refusal-lookup',model:prices.routes[0].model,native_finish_reason:'refusal'}}));
+  ?response({id:'synthetic-refusal-lookup',model:firstRoute.model,choices:[{finish_reason:'stop'}]})
+  :response({data:{id:'synthetic-refusal-lookup',model:firstRoute.model,native_finish_reason:'refusal'}}));
  await executePlan(f.options);expect(f.transport).toHaveBeenCalledTimes(2);
  expect(f.events.at(-1)).toMatchObject({reason:'PROVIDER_CONTENT_REFUSED'});
 },30000);
 it('lowered cumulative cap refuses plans even when each call stays within its cap',()=>{
  const changed=structuredClone(prices);
- for(const r of changed.routes){r.prompt=String(Number(r.prompt)*2);if(r.write)r.write=String(Number(r.write)*2);}
+ for(const r of changed.routes){r.prompt=String(Number(r.prompt)*5);if(r.write)r.write=String(Number(r.write)*5);}
  const over=createSamplePlan(changed);
  expect(Number(over.manifest.cumulativeUpperUsd)).toBeGreaterThan(25);
  expect(()=>verifiedPlan(changed,over.manifest,over.manifest.manifestHash)).toThrow('PLAN_NOT_EXECUTABLE');
+},30000);
+
+it.each([{finish:'stop',completion:512},{finish:'length',completion:511}])(
+ 'output evidence requires exact small cap and length: %j',async({finish,completion})=>{
+ const f=fixture();f.transport.mockResolvedValue(response({id:'synthetic-small',model:firstRoute.model,
+ provider:firstRoute.providerName,choices:[{finish_reason:finish}],usage:{cost:0.001,prompt_tokens:100,completion_tokens:completion}}));
+ const result=await executePlan(f.options);
+ expect(f.transport).toHaveBeenCalledTimes(1);expect(result.report[0].status).toBe('OUTPUT_CAP_NOT_REACHED');
+ expect(f.events.at(-1)).toMatchObject({reason:'OUTPUT_CAP_NOT_REACHED'});
+},30000);
+it('small cap includes reasoning and does not allow a one-token overrun',async()=>{
+ const f=fixture();f.transport.mockResolvedValue(response({id:'synthetic-small-over',model:firstRoute.model,
+ provider:firstRoute.providerName,choices:[{finish_reason:'length'}],usage:{cost:0.001,prompt_tokens:100,completion_tokens:513,
+ completion_tokens_details:{reasoning_tokens:400}}}));
+ const result=await executePlan(f.options);expect(result.report[0].status).toBe('BOUND_FAILED');
+ expect(f.transport).toHaveBeenCalledTimes(1);
 },30000);

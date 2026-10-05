@@ -1,6 +1,6 @@
 # BILL-PAYG profile 执行器交接（仅准备）
 
-**第三批准备完成，等待复核。** 旧批次已锁定；本轮不发送模型请求、不访问远端数据库、不改配置。
+**r4/r5 准备完成，等待复核。** 旧批次已锁定；本轮不发送模型请求、不访问远端数据库、不改配置。
 本页不是执行批准；必须先收到主窗口对本 PR 最终版本和 manifest 的审阅通过及执行通知。
 
 ## 入口
@@ -15,8 +15,8 @@
 ```bash
 NODE_USE_ENV_PROXY=1 NO_PROXY= no_proxy= https_proxy= node scripts/payg-profile-execute.mjs execute-approved \
   scripts/payg-profile/plan-prices.json \
-  docs/launch/evidence/payg-profile-20261006-r3.manifest.json \
-  3cbeb87e1e9895527cf8e56c611337c897ef28bb7df637412724c05949be5e74 \
+  docs/launch/evidence/payg-profile-20261006-r4.manifest.json \
+  04e92dfa3a33a49090c853da83cf088b5d83555ac447b92760a5b3461725f1db \
   owner-approved-test-balance-only
 ```
 
@@ -31,18 +31,19 @@ NODE_USE_ENV_PROXY=1 NO_PROXY= no_proxy= https_proxy= node scripts/payg-profile-
 本地费用计算复用 openRouterCallBound，发送和查账复用现有 openRouterAdapter/openRouterEvidence；
 无 SDK 自动重试、无 fallback、固定 OpenRouter URL、禁止重定向。工具样本只带合成历史，不执行真实工具。
 
-## 第三批范围与费用
+## r4/r5 范围与费用
 
-详见 [R3 预演及逐条上界](BILL_PAYG_PROFILE_R3.md)。当前入口只接受重新生成且完整相等的第三批 manifest；
-旧清单不能由新执行器重跑。前两批共按 $2.5964977 入账，旧回执的 UNKNOWN 不改写。
-累计上界 = 2.5964977 + 新批次上界，必须小于 $25；代码和清单均强制校验。单条上限不变。
-已完成的 48 个原请求 hash 均不重发；其中 3 条虽未超界但未触及输出硬限，换新内容、新 ID 收集缺失的输出压力证据。
-输出提示要求按编号连续写满，但模型仍可能提前结束；每种 reasoning 必须取得至少两条触及 O 的真实回执，
-离线测试或提示词不能保证它会写满。证据不足则不生成可启用 profile，不临时补跑。
+上面的入口是 r4；r5 必须单独复核及通知，届时用 `evidence/payg-profile-20261006-r5.manifest.json`
+（完整路径前缀同 r4）和 hash `72a8bc28bbd64a8c1139afafbdec71d8631ac1ceabfec35dbeca7e6dca51c97a`。不能把 r4 授权当作 r5 授权。
+详见 [两批预演与逐条费用](BILL_PAYG_PROFILE_R4_R5.md)。先前批次不能由当前执行器重跑。
+前三批已入账 $4.8101395；累计预留包含 r4 和 r5 全部上界，共 $10.799494625，必须小于 $25。
+同一用户依序运行；兄弟批次已加锁但无最终报告、费用未知或超过其预留时，在加锁和网络前停止，不自动恢复。
+输出压力 Sonnet O=2048，Luna/Gemini O=512；原生 completion（含 reasoning）必须等于 O 且 finish_reason=length。
+否则即使费用和 token 未超界，也为 OUTPUT_CAP_NOT_REACHED 停批，不补跑。profile 上限不得外推到 8192。
 
 finish_reason=content_filter 或 native_finish_reason=refusal（response 或原 ID lookup）立即记
-PROVIDER_CONTENT_REFUSED 并停批；response 已识别时不再查账，lookup 识别后不再继续查账。没有有效费用仍为 null，
-不能自动按 $0 入账；有已结算费用则如实计入，但拒绝样本不成为合格证据。禁止补跑或重新发送。
+PROVIDER_CONTENT_REFUSED 并停批；response 已识别时不再查账，lookup 识别后不再继续查账。
+没有有效费用仍为 null，不能自动按 $0 入账；有已结算费用则如实计入，但拒绝样本不成为合格证据。
 
 ## 持久材料与停机
 

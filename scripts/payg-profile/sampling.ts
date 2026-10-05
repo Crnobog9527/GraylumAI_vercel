@@ -1,7 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
-import {priorBatch,retainedEvidence} from './batch-r3';
+import {priorBatch as earlierBatch,retainedEvidence as earlierEvidence} from './batch-r3';
+import r3Evidence from './r3-evidence.json';
+export type SamplingBatch='r4'|'r5';
+export const batchId=(batch:SamplingBatch)=>`payg-profile-20261006-${batch}`;
+const retainedEvidence=[...earlierEvidence,...r3Evidence];
+const priorBatch=[...earlierBatch,{
+ manifestHash:'3cbeb87e1e9895527cf8e56c611337c897ef28bb7df637412724c05949be5e74',accountedUsd:'2.213641800000',
+ decision:'https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5999267254'}];
 import {openRouterRequestBody} from '../../packages/api/src/services/runtime/providerRequest';
 import {freezePromptCache} from '../../packages/api/src/services/runtime/promptCache';
 import {reasoningPolicy,frozenReasoningFields,type ReasoningPolicy} from '../../packages/api/src/services/runtime/reasoningPolicy';
@@ -34,7 +41,7 @@ function sized(seed:string,bytes:number){
  return seed.repeat(count)+tail+'x'.repeat(rest);
 }
 function requestFor(r:Route,category:typeof categories[number],target:number,variant:number,O:number,
- reasoning:ReasoningPolicy,messageCount?:number,neutralJson=false){
+ reasoning:ReasoningPolicy,messageCount?:number,neutralJson=false,outputStress=false){
  const providerLimits={providerSlug:r.endpointTag,contextTokens:r.contextTokens,promptUsdPerMillion:r.prompt,
   completionUsdPerMillion:r.completion,requestUsd:r.request,...(r.write?{cacheWriteUsdPerMillion:r.write}:{})};
  const policy={modelId:'10000000-0000-4000-8000-000000000001',model:r.model,provider:'openrouter',account:'offline-only',
@@ -45,7 +52,7 @@ function requestFor(r:Route,category:typeof categories[number],target:number,var
   '"000001 | item 000001 | quantity 17 | color blue | status available". '+
   'Increment both row numbers. Produce every row explicitly; do not summarize, use ellipses, or add a conclusion. '+
   'Do not stop early. Start row 000001 immediately and continue until the output limit stops generation. ';
- const instructions=O===8192?outputInstruction:target>4096?sized('Analyze the following synthetic dataset. Preserve its provenance.\n',8192):
+ const instructions=outputStress?outputInstruction:target>4096?sized('Analyze the following synthetic dataset. Preserve its provenance.\n',8192):
   'Analyze the following synthetic dataset. Preserve provenance and uncertainty.';
  const promptCache=freezePromptCache({real:true,role:'skill',model:r.model,cacheWriteUsdPerMillion:r.write,
   instructions,skillChars:instructions.length});
@@ -74,7 +81,7 @@ function requestFor(r:Route,category:typeof categories[number],target:number,var
    for(let n=1;n<messages.length-1;n++)messages[n].content=`Record ${n}: ${data.slice((n-1)*each,n*each)}`;
    data=data.slice(each*(messageCount-2));
   }
-  messages[messages.length-1].content=`Category ${category}; variant ${variant}. ${O===8192?
+  messages[messages.length-1].content=`Category ${category}; variant ${variant}. ${outputStress?
    outputInstruction:''}${data}`;
   return openRouterRequestBody(JSON.stringify({model:r.model,messages,store:false,max_tokens:O,...frozenReasoningFields(reasoning),
    ...(toolSample?{tools:[{type:'function',function:{name:'read_source',description:'Read a synthetic owned record',parameters}}]}:{})}),
@@ -93,21 +100,25 @@ function requestFor(r:Route,category:typeof categories[number],target:number,var
  const data=sized(seed,low),body=serialize(data);
  return {body:serialize(data+'x'.repeat(target-Buffer.byteLength(body))),providerLimits};
 }
-export function createSamplePlan(input:unknown){
+export function createSamplePlan(input:unknown,selected:SamplingBatch='r4'){
+ if(!['r4','r5'].includes(selected))throw new Error('INVALID_SAMPLING_BATCH');
  const prices=priceSchema.parse(input),samples:Array<Record<string,unknown>&{id:string;upperUsd:string}>=[],requests:Array<{id:string;body:string}>=[];
  const totals:Record<string,string>={};const blockers=['REAL_SAMPLING_NOT_AUTHORIZED',
   'PROFILE_EVIDENCE_NOT_COLLECTED'];
  if(!prices.currentVerified)blockers.push('PRICES_AND_CONTEXT_ARE_PLAN_ASSUMPTIONS_NOT_CURRENT_QUOTES');
- for(const r of prices.routes){
+ const ordered=[...prices.routes].sort((a,b)=>{
+  const rank=(model:string)=>model.startsWith('openai/')?0:model.startsWith('anthropic/')?1:2;
+  return rank(a.model)-rank(b.model);
+ });
+ for(const r of ordered){
   let total=0n;
   const add=(category:typeof categories[number],band:string,variant:number,target:number,O:number,reasoning:ReasoningPolicy,kind:string,messageCount?:number)=>{
    const originalId=`${r.model}:${kind}:${category}:${band}:${variant}`;
-   const retained=retainedEvidence.find(s=>s.id===originalId);
-   if(retained&&(kind!=='output'||retained.outputCapReached))return;
-   const revised=kind==='output'||kind==='matrix'&&category==='json'&&band==='large';
-   const id=originalId+(revised?':r3':'');
+   const ownerBatch:SamplingBatch=r.model.startsWith('google/')?'r5':'r4';
+   const id=originalId+(kind==='output'?`:${ownerBatch}`:category==='json'&&band==='large'?':r3':'');
+   if(kind!=='output'&&retainedEvidence.some(s=>s.id===id))return;
    const {body,providerLimits}=requestFor(r,category,target,variant,O,reasoning,messageCount,
-    kind==='matrix'&&category==='json'&&band==='large');
+    kind==='matrix'&&category==='json'&&band==='large',kind==='output');
    const B=Buffer.byteLength(body),T=B+8192,parsed=JSON.parse(body);
    const schemaBytes=(parsed.tools??[]).reduce((n:number,t:{function:{parameters:unknown}})=>n+Buffer.byteLength(JSON.stringify(t.function.parameters)),0);
    if(B>196608||parsed.messages.length>128||schemaBytes>16384)throw new Error('SAMPLE_PROFILE_EXCEEDED');
@@ -121,7 +132,7 @@ export function createSamplePlan(input:unknown){
    requests.push({id,body});
   };
   for(const [index,reasoning] of r.reasoning.entries())for(let v=0;v<2;v++)
-   add(v?'code':'chinese','output-stress',index*2+v,4096,8192,reasoning,'output');
+   add(v?'code':'chinese','output-stress',index*2+v,4096,r.model.startsWith('anthropic/')?2048:512,reasoning,'output');
   for(const category of categories)for(const [band,maximum] of [['small',4096],['medium',32768],['large',196608]] as const)
    for(let variant=0;variant<4;variant++)add(category,band,variant,band==='small'&&variant===0?0:
     variant===3?maximum:Math.floor(maximum*(0.91+variant*0.025)),1024,r.matrixReasoning,'matrix');
@@ -130,20 +141,28 @@ export function createSamplePlan(input:unknown){
   totals[r.model]=money(total);
   if(total>decimal(r.modelCap))blockers.push(`MODEL_BUDGET_EXCEEDED:${r.model}`);
  }
- const totalUsd=money(Object.values(totals).reduce((sum,n)=>sum+decimal(n),0n));
- if(decimal(totalUsd)>=decimal('25'))blockers.push('TOTAL_BUDGET_EXCEEDED');
- const batch={id:'payg-profile-20261006-r3',previous:priorBatch};
- const cumulativeUpperUsd=money(decimal(totalUsd)+decimal('2.596497700000'));
+ const belongs=(model:unknown)=>String(model).startsWith('google/')?'r5':'r4';
+ const batchUpperUsd={r4:money(samples.filter(s=>belongs(s.model)==='r4').reduce((n,s)=>n+decimal(s.upperUsd),0n)),
+  r5:money(samples.filter(s=>belongs(s.model)==='r5').reduce((n,s)=>n+decimal(s.upperUsd),0n))};
+ const ownSamples=samples.filter(s=>belongs(s.model)===selected),totalUsd=batchUpperUsd[selected];
+ const priorAccountedUsd=money(priorBatch.reduce((n,b)=>n+decimal(b.accountedUsd),0n));
+ // Reserve both independent batches; never spend the same remaining allowance twice.
+ const cumulativeUpperUsd=money(decimal(priorAccountedUsd)+decimal(batchUpperUsd.r4)+decimal(batchUpperUsd.r5));
  if(decimal(cumulativeUpperUsd)>=decimal('25'))blockers.push('CUMULATIVE_BUDGET_EXCEEDED');
- const manifest={version:4,batch,cumulativeCapUsd:'25',priorAccountedUsd:'2.596497700000',cumulativeUpperUsd,
+ const manifest={version:5,batch:{id:batchId(selected),previous:priorBatch},cumulativeCapUsd:'25',priorAccountedUsd,
+  cumulativeUpperUsd,batchUpperUsd,standaloneCumulativeUpperUsd:money(decimal(priorAccountedUsd)+decimal(totalUsd)),
   retainedEvidence,retainedEvidenceHash:hash(JSON.stringify(retainedEvidence)),
   pricesHash:hash(JSON.stringify(prices)),maxMessages:128,
   priceSource:prices.source,currentPricesVerified:prices.currentVerified,
-  distinctMatrixSamples:samples.filter(s=>s.kind==='matrix').length,messageStressSamples:samples.filter(s=>s.kind==='messages').length,
-  outputStressSamples:samples.filter(s=>s.kind==='output').length,calls:samples.length,totals,totalUsd,
-  actualCalls:0,actualUsd:'0',blockers,samples};
- return {manifest:{...manifest,manifestHash:hash(JSON.stringify(manifest))},requests};
+  distinctMatrixSamples:ownSamples.filter(s=>s.kind==='matrix').length,
+  messageStressSamples:ownSamples.filter(s=>s.kind==='messages').length,
+  outputStressSamples:ownSamples.filter(s=>s.kind==='output').length,calls:ownSamples.length,
+  totals:Object.fromEntries(Object.entries(totals).filter(([model])=>belongs(model)===selected)),totalUsd,
+  actualCalls:0,actualUsd:'0',blockers,samples:ownSamples};
+ const ids=new Set(ownSamples.map(s=>s.id));
+ return {manifest:{...manifest,manifestHash:hash(JSON.stringify(manifest))},requests:requests.filter(r=>ids.has(r.id))};
 }
+
 function promptCacheLabel(r:Route){return r.model.startsWith('anthropic/')?'explicit-ephemeral':'repeated-system-prefix';}
 /** Offline projection only: unknown/native-token conflicts remain unknown, never pass as zero.
  * Input receipts must already have been obtained by an separately authorized sampling executor. */
@@ -153,7 +172,8 @@ export function recordSamples(manifest:ReturnType<typeof createSamplePlan>['mani
  const receipt=z.object({sampleId:z.string(),requestHash:z.string(),model:z.string(),endpointTag:z.string(),
   nativePromptTokens:z.number().int().nonnegative(),nativeCompletionTokens:z.number().int().nonnegative(),
   costUsd:amount,cachedTokens:z.number().int().nonnegative().nullable(),cacheWriteTokens:z.number().int().nonnegative().nullable(),
-  source:z.enum(['response.prompt_tokens','lookup.native_tokens_prompt']),includesReasoning:z.literal(true)}).strict();
+  source:z.enum(['response.prompt_tokens','lookup.native_tokens_prompt']),includesReasoning:z.literal(true),
+  finishReason:z.string().nullable().optional()}).strict();
  return manifest.samples.map(sample=>{
   const matching=receipts.filter(r=>typeof r==='object'&&r!==null&&(r as {sampleId?:unknown}).sampleId===sample.id);
   const valid=matching.length===1?receipt.safeParse(matching[0]):null;
@@ -168,6 +188,7 @@ export function recordSamples(manifest:ReturnType<typeof createSamplePlan>['mani
     &&(r.cacheWriteTokens===null||r.cacheWriteTokens<=P)
     &&(r.cachedTokens===null||r.cacheWriteTokens===null||r.cachedTokens+r.cacheWriteTokens<=P)
     &&decimal(r.costUsd)<=decimal(String(sample.upperUsd))&&r.nativeCompletionTokens<=Number(sample.O)
-    ?'SAMPLE_WITHIN_BOUNDS':'BOUND_FAILED'};
+    ?(sample.kind==='output'&&(r.finishReason!=='length'||r.nativeCompletionTokens!==Number(sample.O))
+      ?'OUTPUT_CAP_NOT_REACHED':'SAMPLE_WITHIN_BOUNDS'):'BOUND_FAILED'};
  });
 }

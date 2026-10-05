@@ -4,8 +4,23 @@ import {createHash} from 'node:crypto';
 import {homedir} from 'node:os';
 import {join,resolve} from 'node:path';
 export {failureCode} from './executor';
+import {createSamplePlan,batchId} from './sampling';
+import {decimal} from '../../packages/api/src/services/bill2/decimal';
 import {verifyProxyCountry} from './proxy-preflight';
 import {executePlan,verifiedPlan,verifyCatalog,type Event} from './executor';
+
+// The sibling's entire planned upper is reserved in both manifests. A used but
+// unsettled or over-reservation sibling cannot be silently treated as zero spend.
+export async function checkSibling(directory:string,expectedHash:string,upperUsd:string){
+ try{await readFile(join(directory,'attempted.lock'));}
+ catch(error){if((error as {code?:string}).code==='ENOENT')return;throw new Error('SIBLING_BATCH_UNSETTLED');}
+ let report:{manifestHash?:string;actualUsd?:string;knownUsd?:string;unknownCostSamples?:number};
+ try{report=JSON.parse(await readFile(join(directory,'report.json'),'utf8'));}
+ catch{throw new Error('SIBLING_BATCH_UNSETTLED');}
+ if(!report||report.manifestHash!==expectedHash||typeof report.actualUsd!=='string'||!/^\d+(\.\d{1,12})?$/.test(report.actualUsd)
+  ||report.actualUsd!==report.knownUsd||report.unknownCostSamples!==0)throw new Error('SIBLING_BATCH_UNSETTLED');
+ if(decimal(report.actualUsd)>decimal(upperUsd))throw new Error('SIBLING_BATCH_BUDGET_EXCEEDED');
+}
 
 export async function main(args:string[]){
  const [mode,pricesPath,manifestPath,approvedHash,authorization,...rest]=args;
@@ -14,6 +29,9 @@ export async function main(args:string[]){
  const prices=JSON.parse(await readFile(pricesPath,'utf8'));
  const manifest=JSON.parse(await readFile(manifestPath,'utf8'));
  const plan=verifiedPlan(prices,manifest,approvedHash);
+ const sibling=createSamplePlan(prices,plan.manifest.batch.id===batchId('r4')?'r5':'r4').manifest;
+ await checkSibling(join(homedir(),'.local','state','graylum','payg-profile',sibling.manifestHash),
+  sibling.manifestHash,sibling.totalUsd);
  const catalog=JSON.parse(await readFile(resolve('scripts/payg-profile/catalog-2026-10-05.json'),'utf8'));
  // Validate without creating any persistent claim or loading a fallback credential.
  const key=process.env.GRAYLUM_PAYG_TEST_OPENROUTER_KEY;

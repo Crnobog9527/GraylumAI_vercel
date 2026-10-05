@@ -93,3 +93,12 @@ it('legacy serialized emergency off is honored, while malformed string values fa
  f.single.mockResolvedValue({data:{value:'{"enabled":"false"}'},error:null});
  await expect(f.run()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
 });
+
+it('512-token evidence admits 512 but never extrapolates to 8192',async()=>{
+ const f=fixture();f.profile.outputLimit=512;f.profile.evidence.outputLimit=512;
+ f.profile.reasoningVariants[0].outputLimit=512;
+ await expect(f.run('ordinary',512)).resolves.toBeDefined();
+ await expect(f.run('ordinary',8192)).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ f.profile.reasoningVariants[0].outputLimit=8192;
+ await expect(f.run('ordinary',512)).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});

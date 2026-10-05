@@ -10,7 +10,7 @@ const viteRequire=createRequire(require.resolve('vite'));
 const {build}=await import(pathToFileURL(viteRequire.resolve('esbuild')).href);
 const [mode,input,output,receipts]=process.argv.slice(2);
 if(!['plan','record'].includes(mode)||!input||!output||(mode==='record'&&!receipts))
- throw new Error('Usage: node scripts/payg-profile.mjs plan prices.json manifest.json | record manifest.json report.json receipts.json');
+ throw new Error('Usage: node scripts/payg-profile.mjs plan prices.json manifest.json r4|r5 | record manifest.json report.json receipts.json');
 const temporary=await mkdtemp(join(tmpdir(),'graylum-payg-offline-'));
 try{
  const modulePath=join(temporary,'sampling.cjs');
@@ -18,7 +18,7 @@ try{
  process.env.NODE_ENV='test';
  const sampling=require(modulePath);
  const value=JSON.parse(await readFile(input,'utf8'));
- const result=mode==='plan'?sampling.createSamplePlan(value).manifest:
+ const result=mode==='plan'?sampling.createSamplePlan(value,receipts??'r4').manifest:
   sampling.recordSamples(value,JSON.parse(await readFile(receipts,'utf8')));
  await writeFile(output,JSON.stringify(result,null,2)+'\n',{mode:0o600});
  console.log(JSON.stringify(mode==='plan'?{calls:result.calls,totals:result.totals,totalUsd:result.totalUsd,

@@ -1,6 +1,6 @@
 # BILL-PAYG 第三批离线预演（2026-10-06）
 
-**第三批准备完成，等待复核。** 本轮没有发送真实请求，不读取专用凭据，不查询出口、目录、余额或回执。
+**历史第三批记录。当前准备见 [r4/r5](BILL_PAYG_PROFILE_R4_R5.md)；不再执行第三批。** 本轮没有发送真实请求，不读取专用凭据，不查询出口、目录、余额或回执。
 
 批次 `payg-profile-20261006-r3`；manifestHash：`3cbeb87e1e9895527cf8e56c611337c897ef28bb7df637412724c05949be5e74`。
 [完整 manifest](evidence/payg-profile-20261006-r3.manifest.json) 包含逐条 requestHash、B/T/O、线路、reasoning、单条限制、历史证据和费用。

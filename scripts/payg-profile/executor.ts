@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
-import {createSamplePlan,priceSchema,recordSamples} from './sampling';
+import {batchId,createSamplePlan,priceSchema,recordSamples} from './sampling';
 import {openRouterAdapter} from '../../packages/api/src/services/bill2/openRouterAdapter';
 import {decimal} from '../../packages/api/src/services/bill2/decimal';
 import type {CallIdentity,TransportObservation} from '../../packages/api/src/services/bill2/fixtureAdapter';
@@ -19,7 +19,10 @@ const integer=(value:unknown):number|null=>typeof value==='string'&&/^\d+$/.test
  &&Number.isSafeInteger(Number(value))?Number(value):null;
 
 export function verifiedPlan(prices:unknown,manifest:unknown,approvedHash:string){
- const plan=createSamplePlan(prices);
+ const id=(manifest as {batch?:{id?:string}}|null)?.batch?.id;
+ const selected=id===batchId('r4')?'r4':id===batchId('r5')?'r5':null;
+ if(!selected)throw new Error('APPROVED_MANIFEST_MISMATCH');
+ const plan=createSamplePlan(prices,selected);
  if(!isDeepStrictEqual(plan.manifest,manifest)||approvedHash!==plan.manifest.manifestHash)
   throw new Error('APPROVED_MANIFEST_MISMATCH');
  if(!plan.manifest.currentPricesVerified||decimal(plan.manifest.cumulativeUpperUsd)>=decimal('25')
@@ -31,6 +34,7 @@ export function verifiedPlan(prices:unknown,manifest:unknown,approvedHash:string
 
 // Only exact, known codes may reach public output; never emit upstream error text.
 const failureCodes=new Set([
+ 'SIBLING_BATCH_UNSETTLED','SIBLING_BATCH_BUDGET_EXCEEDED',
  'PROXY_REQUIRED','PROXY_INVALID','PROXY_BYPASS_NOT_ALLOWED','PROXY_COUNTRY_CHECK_FAILED','PROXY_COUNTRY_NOT_ALLOWED',
  'EXECUTION_AUTHORIZATION_REQUIRED','APPROVED_TEST_CREDENTIAL_MISSING','APPROVED_MANIFEST_MISMATCH',
  'PLAN_NOT_EXECUTABLE','DUPLICATE_SAMPLE','BATCH_ALREADY_ATTEMPTED_NO_AUTOMATIC_RESUME',
@@ -208,13 +212,15 @@ export async function executePlan(options:{prices:unknown;manifest:unknown;appro
    nativePromptTokens:valid.nativePromptTokens,nativeCompletionTokens:valid.nativeCompletionTokens,costUsd:valid.costUsd,
    cachedTokens:valid.cachedTokens??observations[0].cachedTokens,
    cacheWriteTokens:valid.cacheWriteTokens??observations[0].cacheWriteTokens,
-   source:valid.source==='response'?'response.prompt_tokens':'lookup.native_tokens_prompt',includesReasoning:true};
+   source:valid.source==='response'?'response.prompt_tokens':'lookup.native_tokens_prompt',includesReasoning:true,
+   finishReason:typeof valid.finishReason==='string'?valid.finishReason:null};
   receipts.push(receipt);
   const result=recordSamples(plan.manifest,receipts).find(s=>s.id===sample.id)!;
-  await append({type:'result',...result,receipt,finishReason:valid.finishReason,
-   outputCapReached:valid.finishReason==='length'&&valid.nativeCompletionTokens===Number(sample.O)});
+  const outputCapReached=valid.finishReason==='length'&&valid.nativeCompletionTokens===Number(sample.O);
+  await append({type:'result',...result,receipt,finishReason:valid.finishReason,outputCapReached});
   if(result.status!=='SAMPLE_WITHIN_BOUNDS'){
-   await append({type:'halt',sampleId:sample.id,reason:'BOUND_FAILED_NO_REFILL',actualUsd:valid.costUsd});break;
+   await append({type:'halt',sampleId:sample.id,reason:result.status==='OUTPUT_CAP_NOT_REACHED'?'OUTPUT_CAP_NOT_REACHED':'BOUND_FAILED_NO_REFILL',
+    actualUsd:valid.costUsd});break;
   }
  }
  const amounts=plan.manifest.samples.filter(s=>journal.events.some(e=>e.type==='attempt'&&e.sampleId===s.id)).map(s=>{

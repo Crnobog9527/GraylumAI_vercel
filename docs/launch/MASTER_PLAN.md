@@ -643,6 +643,14 @@ REPORT-GEN 后端现在开工，标明“未完成、默认关闭”，报告入
 由主窗口在实测前询问 Owner。本次不授权真实模型调用、远端数据库访问、应用迁移、环境配置或合并。
 依赖升级另作只读评估，不纳入本实现。
 
+**2026-10-06：BILL-PAYG 小输出硬限实测（主窗口技术决定）**
+
+依据：[#665 第三批审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5999267254)。
+后续每模型每种思考设置至少两条小 max_tokens 输出压力，要求 length 且原生 completion（含 reasoning）精确等于上限。
+取代“所有输出压力必须写到 8192”的采样标准；已有 8192 触顶保留为观测。host profile 如实填写所证明的较小 outputLimit，
+不外推放行更大请求。r4 为 Luna 剩余样本和 Sonnet 新输出压力，r5 为 Gemini 剩余样本；两批单独授权，
+Gemini 等原 google-vertex/global 线路恢复，不换线路。累计限额仍 $25，当前已入账 $4.8101395；本轮只准备。
+
 ### 2.2 被本版取代的旧规则
 
 | 旧规则 | 出处 | 本版处理 |
