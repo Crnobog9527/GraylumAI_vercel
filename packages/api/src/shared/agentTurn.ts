@@ -165,7 +165,7 @@ export type AgentTurnEvent =
   | { type: "admitted"; executionId: string }
   | { type: "phase"; phase: AgentTurnPhase }
   | { type: "text"; text: string }
-  | { type: "textDelta"; text: string; offset: number; rev: number }
+  | { type: "textDelta"; text: string; offset: number; rev: number; source?: "assistant" | "message" | "final" }
   | { type: "card"; card: QuestionCard }
   | { type: "result"; result: AgentTurnOutcome };
 

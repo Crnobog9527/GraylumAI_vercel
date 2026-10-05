@@ -6,7 +6,7 @@ import { jsonbBytes, RESULT_BYTE_LIMIT } from './resultCapacity';
 import { NativeTextTransport } from './nativeProgress';
 const base: StopProjectionInput = {
   executionId: '10000000-0000-4000-8000-000000000001', format: 'plain', body: '中😀\n文', stopAt: 3,
-  revisionMatches: true, primaryComplete: true, attachedOrganizer: false,
+  source: 'assistant', expectedSource: 'assistant', primaryComplete: true, attachedOrganizer: false,
 };
 it('counts Unicode points and trims only trailing whitespace', () => {
   expect(stoppedResult(base)).toMatchObject({ body: '中😀', stopped: true, completeness: 'stopped' });
@@ -15,8 +15,9 @@ it('counts Unicode points and trims only trailing whitespace', () => {
 it.each([0, 1])('empty or whitespace-only visible prefix becomes cancellation (%s)', stopAt => {
   expect(stoppedResult({ ...base, body: ' 后', stopAt })).toBeNull();
 });
-it('revision mismatch follows empty-result cancellation even with nonempty body', () => {
-  expect(stoppedResult({ ...base, revisionMatches: false })).toBeNull();
+it('source mismatch or an old client without source follows empty-result cancellation', () => {
+  expect(stoppedResult({ ...base, source: 'message' })).toBeNull();
+  expect(stoppedResult({ ...base, source: undefined })).toBeNull();
 });
 it.each([-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])('rejects invalid stop position %s', stopAt => {
   expect(() => stoppedResult({ ...base, stopAt })).toThrow('RUNTIME_STOP_POSITION_INVALID');

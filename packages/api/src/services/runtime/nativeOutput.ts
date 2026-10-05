@@ -80,7 +80,7 @@ export function completedOutput(result:({body:string;summary?:string}&Record<str
   context:unknown,onProgress?: (update:NativeTextUpdate)=>void) {
   const saved=context as {nativeOutput?:string;envelopeOrder?:string;providerRequestFormat?:string};
   if(saved.nativeOutput&&(saved.envelopeOrder||saved.providerRequestFormat==='agent-turn-v5-stream')&&result?.body){
-    const text=nativeVisible(result.body);onProgress?.({type:'text',text,delta:text,replace:true});
+    const text=nativeVisible(result.body);onProgress?.({type:'text',text,delta:text,replace:true,source:'final'});
   }
   return {...nativeMetadata(result),body:result?.body,
     ...(result?.summary!==undefined?{summary:result.summary}:{}),state:'completed' as const};

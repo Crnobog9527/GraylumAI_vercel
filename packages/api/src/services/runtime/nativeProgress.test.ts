@@ -98,16 +98,16 @@ describe('native delta transport', () => {
     const projection = new NativeProgressProjection({mode: 'agent', toolMessage: true});
     const transport = new NativeTextTransport();
     transport.push(projection.appendText('😀a')!);
-    expect(transport.flush()).toEqual({type: 'textDelta', offset: 0, text: '😀a', rev: 0});
+    expect(transport.flush()).toEqual({type: 'textDelta', offset: 0, text: '😀a', rev: 0, source: 'assistant'});
     transport.push(projection.appendText('b')!);
     expect(transport.flush()).toEqual({type: 'textDelta', offset: 2, text: 'b', rev: 0});
     transport.push(projection.appendText('discard')!);
     transport.push(projection.appendToolFrame(frame('{"message":"card', 'ask_question'))!);
     transport.push(projection.appendToolFrame(frame(' 😀"}'))!);
-    expect(transport.flush()).toEqual({type: 'textDelta', offset: 0, text: 'card 😀', rev: 1});
+    expect(transport.flush()).toEqual({type: 'textDelta', offset: 0, text: 'card 😀', rev: 1, source: 'message'});
     expect(transport.flush()).toBeNull();
     transport.push(projection.finish('invalid notice')!);
-    expect(transport.flush()).toEqual({type: 'textDelta', offset: 0, text: 'invalid notice', rev: 2});
+    expect(transport.flush()).toEqual({type: 'textDelta', offset: 0, text: 'invalid notice', rev: 2, source: 'final'});
   });
 
   it('uses initial revision zero when a switch precedes the first emitted event', () => {
@@ -115,7 +115,7 @@ describe('native delta transport', () => {
     const transport = new NativeTextTransport();
     transport.push(projection.appendText('discard')!);
     transport.push(projection.finish('authoritative')!);
-    expect(transport.flush()).toEqual({type: 'textDelta', offset: 0, text: 'authoritative', rev: 0});
+    expect(transport.flush()).toEqual({type: 'textDelta', offset: 0, text: 'authoritative', rev: 0, source: 'final'});
   });
 
   it('sends bytes proportional to answer length under batched flushing', () => {
@@ -144,6 +144,23 @@ describe('native delta transport', () => {
     transport.push(projection.appendText('old')!);
     transport.flush();
     transport.push(projection.finish('')!);
-    expect(transport.flush()).toEqual({type: 'textDelta', offset: 0, text: '', rev: 1});
+    expect(transport.flush()).toEqual({type: 'textDelta', offset: 0, text: '', rev: 1, source: 'final'});
   });
+});
+
+
+it('source survives batching, while two provider exchanges can share the same source category', () => {
+  const first = new NativeProgressProjection({mode: 'message-first'});
+  const second = new NativeProgressProjection({mode: 'message-first'});
+  const transport = new NativeTextTransport();
+  transport.push({...first.appendText('{"message":"before search"}')!, replace: true});
+  const displayed = transport.flush();
+  // execute.ts resets the projection for each primary SDK exchange. The next
+  // exchange may already be dispatched before its first public message arrives.
+  transport.push({...second.appendText('{"message":"after search"}')!, replace: true});
+  const later = transport.flush();
+  expect(displayed).toMatchObject({source: 'message', rev: 0, text: 'before search'});
+  expect(later).toMatchObject({source: 'message', rev: 1, text: 'after search'});
+  expect(displayed!.source).toBe(later!.source);
+  expect(displayed!.text).not.toBe(later!.text);
 });

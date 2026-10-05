@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { agentTurnBody, AGENT_TURN_FORMAT, questionCardSchema, questionToolCardSchema } from '../../shared/agentTurn';
 import { stepEnvelope } from './nativeOutput';
+import type { NativeTextSource } from './nativeProgress';
 import { attachNativeSummary, fitNativeResult } from './resultCapacity';
 
 export type StoppedResult = {
@@ -14,8 +15,9 @@ export type StopProjectionInput = {
   /** Trusted frozen format, never inferred from client input or the result itself. */
   format: 'plain' | 'agent' | 'step';
   body: string; stopAt: number;
-  /** The host must establish this against authoritative revision evidence before calling. */
-  revisionMatches: boolean;
+  /** Client source is optional for old clients; the expected source is receipt-derived. */
+  source?: NativeTextSource;
+  expectedSource: NativeTextSource;
   primaryComplete: boolean;
   attachedOrganizer: boolean;
   summary?: string;
@@ -25,7 +27,7 @@ export type StopProjectionInput = {
  * Null is §4.2(e), not a usable empty result. No clock, provider call or database write. */
 export function stoppedResult(input: StopProjectionInput): StoppedResult | null {
   if (!Number.isSafeInteger(input.stopAt) || input.stopAt < 0) throw new Error('RUNTIME_STOP_POSITION_INVALID');
-  if (!input.revisionMatches || input.stopAt === 0) return null;
+  if (!input.source || input.source !== input.expectedSource || input.stopAt === 0) return null;
   let visible = input.body;
   let rebuild = (message: string) => message;
   let validateEnvelope: ((value: unknown) => { message: string }) | undefined;

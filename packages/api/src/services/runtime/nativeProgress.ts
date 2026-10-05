@@ -1,7 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {NativeMessageScanner, NativeTextAccumulator} from './nativeMessageScanner';
 
+export type NativeTextSource = 'assistant' | 'message' | 'final';
 export type NativeTextUpdate = {
+  source?: NativeTextSource;
   type: 'text';
   /** Cumulative compatibility value for existing text subscribers. */
   text: string;
@@ -10,7 +12,7 @@ export type NativeTextUpdate = {
   /** Discard pending deltas and replace the visible source. */
   replace: boolean;
 };
-export type NativeTextDelta = {type: 'textDelta'; offset: number; text: string; rev: number};
+export type NativeTextDelta = {type: 'textDelta'; offset: number; text: string; rev: number; source?: NativeTextSource};
 
 type ToolFrame = {choices?: Array<{delta?: {tool_calls?: Array<{
   index?: number; function?: {name?: string; arguments?: string};
@@ -24,10 +26,12 @@ export class NativeProgressProjection {
   private toolName = '';
   private toolVisible = false;
   private visible = '';
+  private source: NativeTextSource;
 
   constructor(private readonly options: {
     mode: 'message-first' | 'agent'; toolMessage?: boolean; maxCodePoints?: number;
   }) {
+    this.source = options.mode === 'agent' ? 'assistant' : 'message';
     this.assistant = new NativeTextAccumulator(options.maxCodePoints);
     this.message = new NativeMessageScanner(true, options.maxCodePoints);
     this.tool = new NativeMessageScanner(false, options.maxCodePoints);
@@ -60,6 +64,7 @@ export class NativeProgressProjection {
     if (this.toolName !== 'ask_question' || !this.tool.text) return null;
     if (!this.toolVisible) {
       this.toolVisible = true;
+      this.source = 'message';
       return this.update(this.tool.text, this.tool.text, true);
     }
     return delta ? this.update(this.tool.text, delta, false) : null;
@@ -67,12 +72,14 @@ export class NativeProgressProjection {
 
   /** Call before card/result emission, including invalid-card or truncated-tool fallbacks. */
   finish(authoritative: string): NativeTextUpdate | null {
-    return authoritative === this.visible ? null : this.update(authoritative, authoritative, true);
+    if (authoritative === this.visible) return null;
+    this.source = 'final';
+    return this.update(authoritative, authoritative, true);
   }
 
   private update(text: string, delta: string, replace: boolean): NativeTextUpdate {
     this.visible = text;
-    return {type: 'text', text, delta, replace};
+    return {type: 'text', text, delta, replace, source: this.source};
   }
 }
 
@@ -83,8 +90,10 @@ export class NativeTextTransport {
   private sent = false;
   private offset = 0;
   private rev = 0;
+  private source: NativeTextSource | undefined;
 
   push(update: NativeTextUpdate): void {
+    if (update.source !== undefined) this.source = update.source;
     if (update.replace) {
       // No delta queued before a source switch may follow the replacement snapshot.
       this.pending = [update.text];
@@ -99,7 +108,8 @@ export class NativeTextTransport {
     const replace = this.snapshot || !this.sent;
     if (replace && this.sent) this.rev++;
     if (replace) this.offset = 0;
-    const event: NativeTextDelta = {type: 'textDelta', offset: this.offset, text, rev: this.rev};
+    const event: NativeTextDelta = {type: 'textDelta', offset: this.offset, text, rev: this.rev,
+      ...(replace && this.source ? {source: this.source} : {})};
     this.offset += Array.from(text).length;
     this.sent = true;
     this.snapshot = false;
