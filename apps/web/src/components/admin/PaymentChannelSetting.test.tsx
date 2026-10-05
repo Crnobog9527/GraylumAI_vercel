@@ -26,6 +26,8 @@ beforeAll(async () => {
     function query(get){
       const value = useSyncExternalStore(subscribe, get);
       return {...value, isError:Boolean(value.error), isLoading:false, refetch:async()=>{
+        if (window.readMode === 'throw') throw new Error('read failed');
+        if (window.readMode === 'hang') await new Promise(resolve => { window.finishRead = resolve; });
         snapshot = read(); notify(); const v = get(); return {...v, isError:Boolean(v.error)};
       }};
     }
@@ -37,18 +39,22 @@ beforeAll(async () => {
       getMembershipPlans:{useQuery:()=>query(()=>plans)},
       updateSystemSettings:{useMutation:options=>{
         const [isPending,setPending]=useState(false),[error,setError]=useState(null);
-        return {isPending,error,reset:()=>setError(null),mutate:input=>{
+        const mutateAsync = async input => {
           window.saves.push(input); setPending(true);
-          Promise.resolve().then(async()=>{
+          try {
+            if (window.saveMode === 'hang') await new Promise(resolve => { window.finishSave = resolve; });
+            if (window.saveMode === 'fail') throw Object.assign(new Error('raw server failure'),{data:{code:'INTERNAL_SERVER_ERROR'}});
+            if (window.saveMode === 'bad') throw Object.assign(new Error('raw validation'),{data:{code:'BAD_REQUEST'}});
             const expected = (window.stored?.version ?? 0) + 1;
-            if (input.value.version !== expected) {
-              const e = Object.assign(new Error('raw conflict'),{data:{code:'CONFLICT'}});
-              setError(e); setPending(false); options.onError?.(e); return;
-            }
+            if (input.value.version !== expected) throw Object.assign(new Error('raw conflict'),{data:{code:'CONFLICT'}});
             window.stored = input.value;
-            await options.onSuccess?.(); setPending(false);
-          });
-        }};
+            await options.onSuccess?.();
+            return [];
+          } catch(e) {setError(e); options.onError?.(e); throw e;}
+          finally {setPending(false);}
+        };
+        return {isPending,error,reset:()=>setError(null),mutateAsync,
+          mutate: input => {void mutateAsync(input).catch(()=>{});}};
       }},
     }};
   `;
@@ -146,4 +152,54 @@ it('shows a read failure or invalid value as an error and never as a saved defau
       expect(errors).toEqual([]);
     } finally { await page.close(); }
   }
+}, 15000);
+
+const unknownSave = '没能确认这次保存是否生效。请先点“重新读取”查看当前实际设置，再决定是否重新保存。';
+
+it.each(['fail', 'bad', 'hang'])('exits pending on %s, permits reread and never automatically retries', async mode => {
+  const { page, errors } = await open({ channel: 'stripe', version: 5 });
+  try {
+    await page.clock.install();
+    await page.evaluate(mode => { Object.assign(window, { saveMode: mode }); }, mode);
+    await page.getByTestId('admin-payment-channel-option-waffo').click();
+    await page.getByTestId('admin-payment-channel-save').click();
+    if (mode === 'hang') await page.clock.fastForward(10_001);
+    await browserExpect(page.getByText(unknownSave, { exact: true })).toBeVisible();
+    await browserExpect(page.getByTestId('admin-payment-channel-save')).not.toContainText('保存中');
+    await browserExpect(page.getByTestId('admin-payment-channel-reread')).toBeEnabled();
+    await browserExpect(page.getByTestId('admin-payment-channel-option-stripe')).toBeDisabled();
+    expect(await page.evaluate('window.saves.length')).toBe(1);
+    await page.getByTestId('admin-payment-channel-reread').click();
+    await browserExpect(page.getByText(unknownSave, { exact: true })).toHaveCount(0);
+    await browserExpect(page.getByTestId('admin-payment-channel-option-waffo')).toBeEnabled();
+    // A late result must not claim that the earlier read confirmed the save.
+    if (mode === 'hang') {
+      await page.evaluate('window.finishSave()');
+      await browserExpect(page.getByText('已保存，重新读取确认无误。')).toHaveCount(0);
+      await browserExpect(page.getByTestId('admin-payment-channel-current')).toContainText('Stripe');
+    }
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 15000);
+
+it.each(['throw', 'hang'])('recovers when save confirmation or reread %s', async mode => {
+  const { page, errors } = await open({ channel: 'stripe', version: 5 });
+  try {
+    await page.clock.install();
+    await page.evaluate(mode => { Object.assign(window, { readMode: mode }); }, mode);
+    await page.getByTestId('admin-payment-channel-option-waffo').click();
+    await page.getByTestId('admin-payment-channel-save').click();
+    await expect.poll(() => page.evaluate('window.stored.channel')).toBe('waffo');
+    if (mode === 'hang') await page.clock.fastForward(10_001);
+    await browserExpect(page.getByText(unknownSave, { exact: true })).toBeVisible();
+    await page.getByTestId('admin-payment-channel-reread').click();
+    if (mode === 'hang') await page.clock.fastForward(10_001);
+    await browserExpect(page.getByTestId('admin-payment-channel-reread')).toBeEnabled();
+    await page.evaluate(() => { Object.assign(window, { readMode: undefined }); });
+    await page.getByTestId('admin-payment-channel-reread').click();
+    await browserExpect(page.getByTestId('admin-payment-channel-current')).toContainText('Waffo');
+    await browserExpect(page.getByTestId('admin-payment-channel-option-stripe')).toBeEnabled();
+    expect(await page.evaluate('window.saves.length')).toBe(1);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
 }, 15000);

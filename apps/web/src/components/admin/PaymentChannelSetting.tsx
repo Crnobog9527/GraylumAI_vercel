@@ -1,15 +1,26 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CreditCard, Loader2, RefreshCw, Save } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   PAYMENT_CHANNEL_OPTIONS, PAYMENT_CHANNEL_SAVE_ERROR_TEXT, buildPaymentChannelSave, classifyPaymentChannelSaveError,
-  readPaymentChannelSetting, summarizePurchaseReadiness, type PaymentChannel, type PurchaseReadiness,
+  readPaymentChannelSetting, summarizePurchaseReadiness, type PaymentChannel, type PurchaseReadiness, type SaveErrorKind,
 } from './paymentChannelDraft';
+
+// Bound both the mutation and its confirming read; a timed-out write may still commit.
+const SAVE_WAIT_MS = 10_000;
+async function withinSaveWait<T>(work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([work, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('SAVE_RESULT_UNKNOWN')), SAVE_WAIT_MS);
+    })]);
+  } finally { clearTimeout(timer); }
+}
 
 const cardStyle = { background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' };
 
@@ -43,29 +54,67 @@ export function PaymentChannelSetting() {
   const [needsReread, setNeedsReread] = useState(false);
   const [rereading, setRereading] = useState(false);
 
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<SaveErrorKind | null>(null);
+  const operation = useRef(0);
+  useEffect(() => () => { operation.current += 1; }, []);
+  // Own the visible operation lifetime: React Query may still be awaiting a lost response.
+  const update = trpc.settings.updateSystemSettings.useMutation({ retry: false, networkMode: 'always' });
   const readBack = async () => {
-    const [channel] = await Promise.all([channelQuery.refetch(), packagesQuery.refetch(), plansQuery.refetch()]);
-    return !channel.isError && readPaymentChannelSetting(channel.data) !== null;
+    const channel = await channelQuery.refetch();
+    if (channel.isError || !readPaymentChannelSetting(channel.data)) throw new Error('CHANNEL_READ_FAILED');
+    // Start later so httpBatchLink cannot batch catalog work with the authoritative read.
+    void packagesQuery.refetch().catch(() => undefined);
+    void plansQuery.refetch().catch(() => undefined);
   };
-  const update = trpc.settings.updateSystemSettings.useMutation({
-    onSuccess: async () => {
-      const ok = await readBack();
-      setDraft(null);
-      setReadOk(ok);
-      setNeedsReread(!ok);
-    },
-    onError: () => setNeedsReread(true),
-  });
-  const reread = async () => {
-    setRereading(true);
+  const save = async () => {
+    if (!current || !draft || saving || rereading || needsReread) return;
+    const id = ++operation.current;
+    setSaving(true);
+    setReadOk(false);
+    setSaveError(null);
     try {
-      const ok = await readBack();
-      if (ok) {
-        update.reset();
-        setDraft(null);
-        setNeedsReread(false);
+      await withinSaveWait((async () => {
+        await update.mutateAsync(buildPaymentChannelSave(current, draft));
+        if (id !== operation.current) return;
+        await readBack();
+      })());
+      if (id !== operation.current) return;
+      setDraft(null);
+      setReadOk(true);
+    } catch (error) {
+      if (id !== operation.current) return;
+      const kind = classifyPaymentChannelSaveError(error as { data?: { code?: string } });
+      setSaveError(kind);
+      setNeedsReread(true);
+    } finally {
+      if (id === operation.current) {
+        operation.current += 1;
+        setSaving(false);
       }
-    } finally { setRereading(false); }
+    }
+  };
+  const reread = async () => {
+    const id = ++operation.current;
+    setRereading(true);
+    setReadOk(false);
+    try {
+      await withinSaveWait(readBack());
+      if (id !== operation.current) return;
+      update.reset();
+      setDraft(null);
+      setNeedsReread(false);
+      setSaveError(null);
+    } catch {
+      if (id !== operation.current) return;
+      setNeedsReread(true);
+      setSaveError('failed');
+    } finally {
+      if (id === operation.current) {
+        operation.current += 1;
+        setRereading(false);
+      }
+    }
   };
 
   const readiness = summarizePurchaseReadiness({
@@ -73,7 +122,7 @@ export function PaymentChannelSetting() {
     loading: packagesQuery.isLoading || plansQuery.isLoading, failed: packagesQuery.isError || plansQuery.isError,
   });
   const selected = draft ?? current?.channel ?? null;
-  const locked = !current || update.isPending || needsReread || rereading;
+  const locked = !current || saving || needsReread || rereading;
   const canSave = !locked && draft !== null && draft !== current?.channel;
   const currentLabel = PAYMENT_CHANNEL_OPTIONS.find(option => option.channel === current?.channel);
 
@@ -127,26 +176,26 @@ export function PaymentChannelSetting() {
             data-testid="admin-payment-channel-save"
             size="sm"
             disabled={!canSave}
-            onClick={() => { if (current && draft) update.mutate(buildPaymentChannelSave(current, draft)); }}
+            onClick={() => void save()}
             className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
           >
-            {update.isPending ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Save className="mr-1 h-3 w-3" />}
-            保存
+            {saving ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Save className="mr-1 h-3 w-3" />}
+            {saving ? '保存中…' : '保存'}
           </Button>
-          <Button data-testid="admin-payment-channel-reread" size="sm" variant="outline" disabled={rereading || update.isPending}
+          <Button data-testid="admin-payment-channel-reread" size="sm" variant="outline" disabled={rereading || saving}
             onClick={() => void reread()}>
             {rereading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
             重新读取
           </Button>
         </div>
         <div className="text-xs" aria-live="polite">
-          {update.error ? (
+          {saveError ? (
             <p role="alert" data-testid="admin-payment-channel-save-error" style={{ color: 'var(--error)' }}>
-              {PAYMENT_CHANNEL_SAVE_ERROR_TEXT[classifyPaymentChannelSaveError(update.error)]}
+              {PAYMENT_CHANNEL_SAVE_ERROR_TEXT[saveError]}
             </p>
           ) : needsReread ? (
             <p role="alert" style={{ color: 'var(--error)' }}>
-              已提交保存，但重新读取失败，暂时不能确认结果。为避免用旧值覆盖，请先点“重新读取”。
+              {PAYMENT_CHANNEL_SAVE_ERROR_TEXT.failed}
             </p>
           ) : draft === 'waffo' && current?.channel !== 'waffo' ? (
             <p style={{ color: 'var(--warning)' }}>Waffo 还没有接入。保存后用户将无法发起新的购买，已有订单不受影响。</p>

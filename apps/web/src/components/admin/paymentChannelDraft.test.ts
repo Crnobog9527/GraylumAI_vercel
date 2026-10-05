@@ -23,7 +23,7 @@ describe('payment channel setting', () => {
 
   it('classifies a stale version as a conflict that needs a re-read', () => {
     expect(classifyPaymentChannelSaveError({ data: { code: 'CONFLICT' } })).toBe('conflict');
-    expect(classifyPaymentChannelSaveError({ data: { code: 'BAD_REQUEST' } })).toBe('rejected');
+    expect(classifyPaymentChannelSaveError({ data: { code: 'BAD_REQUEST' } })).toBe('failed');
     expect(classifyPaymentChannelSaveError({ data: { code: 'INTERNAL_SERVER_ERROR' } })).toBe('failed');
     expect(classifyPaymentChannelSaveError(null)).toBe('failed');
   });

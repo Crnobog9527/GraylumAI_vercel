@@ -23,18 +23,16 @@ export function buildPaymentChannelSave(current: PaymentChannelSetting, channel:
   return { key: PAYMENT_CHANNEL_SETTING_KEY, value: { channel, version: current.version + 1 } };
 }
 
-export type SaveErrorKind = 'conflict' | 'rejected' | 'failed';
+export type SaveErrorKind = 'conflict' | 'failed';
 
 export function classifyPaymentChannelSaveError(error: { data?: { code?: string } | null } | null | undefined): SaveErrorKind {
   const code = error?.data?.code;
   if (code === 'CONFLICT') return 'conflict';
-  if (code === 'BAD_REQUEST') return 'rejected';
   return 'failed';
 }
 
 export const PAYMENT_CHANNEL_SAVE_ERROR_TEXT: Record<SaveErrorKind, string> = {
   conflict: '这个设置刚被其他人改过，你这次没有保存成功。请先点“重新读取”看最新的选择，再决定是否重新保存。',
-  rejected: '服务端拒绝了这次保存，设置没有改变。请点“重新读取”后再试。',
   // A lost response may hide a committed save, so the outcome is unknown until the authoritative value is reread.
   failed: '没能确认这次保存是否生效。请先点“重新读取”查看当前实际设置，再决定是否重新保存。',
 };
