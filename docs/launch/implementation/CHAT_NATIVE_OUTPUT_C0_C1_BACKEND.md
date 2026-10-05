@@ -47,10 +47,24 @@ status 除 unclear 外映射 provisional，basis 缺失/异常映射 user_statem
 对已经明确 length_limit 或 envelopeCompact 的新主回复，checkpoint 后不派发不可采用的整理调用，
 以空摘要、未整理标记完成原计费关单，按现有规则释放未用预留。正常完整回复的整理及未知费用恢复保持原路径。
 Session 正文与已存结果同步；供应商回执不裁切。旧冻结执行不套用新裁切规则。
-结果读取复用 runtime_view 授权和 runtime_execution(read)，不扩大表权限。元数据只补最新 1 个可见、非空、去重 execution；含 view 总共最多 2 次 RPC。
-更早历史保留 SQL 原形状，需要完整元数据时通过原 execute 读取终态。既有同会话锁仍可能串行；
-1000 条历史的模拟延迟测试验证新增开销有界；100 回合真实本地 PostgreSQL 测试验证补读最多 1 次、
-读取低于 1 秒、权限撤销仍生效。两者都不是实际 staging 耗时基准。
+结果读取由 `runtime_view` 单次查询返回所有可见执行的原生元数据；`nativeView` 不再调用
+`runtime_execution(read)`。0169 在 0168 的函数目标定义上追加五字段白名单：`completeness`
+只接受 `complete` / `length_limit`，`organized`、`summaryOmitted`、`messageFirst`、
+`envelopeCompact` 只接受布尔值。没有字段或类型无效时省略，旧执行保持原形状；不可见历史不返回这些字段。
+不新增表、锁或 RPC，现有正文权限和 BILL2 投影保持不变。来源/目标 MD5 防止覆盖漂移的函数定义。
+这是 #640 审计 P2-A 的后续修复，替代 #640 的“只补最新一条”做法。
+
+同批修复 P3-1：原生帧先原样交给 SDK，再进行公开文字投影；投影异常只记录固定事件及执行 ID，
+不记录帧或异常内容，不阻断后续帧。最终权威正文仍通过现有收尾快照校正。
+
+本地复验入口：`node packages/db/tests/native-metadata/run-local.mjs --local-only`，
+复用现有本地 Docker 建库器，覆盖迁移漂移、回滚、权限、历史元数据与 15/100/300/1000 回合性能。
+结构指纹及历史位置的连续两次回放由 `run-db-baseline-replay.mjs --local-only --write-built` 验证。
+测试不连接远端数据库，实际结果见后续 PR 交接记录。
+
+发布顺序：主窗口先应用迁移，再使新读取代码生效。旧代码与新视图兼容；若新代码先于迁移生效，
+接口仍能读取正文，但原生元数据提示会暂时缺失。代码回退可保留追加的视图字段；函数回退必须校验
+0169 目标 MD5 后恢复 0168 定义，不修改已保存的结果或账务数据。主窗口负责 staging 应用和合并。
 
 ## 验证与后续必测
 

@@ -11,6 +11,9 @@ const migration=read('0168_runtime_provider_rejected_view.sql');
 const predecessor=read('0166_payg_runtime.sql');
 const original=predecessor.slice(predecessor.indexOf('CREATE OR REPLACE FUNCTION public.runtime_view('),
  predecessor.indexOf('\n;\nCOMMIT;'));
+// Keep the historical 0168 assertion independent of later runtime_view migrations.
+const targetDefinition=original.replace(migration.match(/\$old\$([\s\S]*?)\$old\$/)[1],
+ migration.match(/\$new\$([\s\S]*?)\$new\$/)[1]);
 const definition=async db=>(await db.query("SELECT pg_get_functiondef('public.runtime_view(uuid,uuid)'::regprocedure) v")).rows[0].v;
 const acl=async db=>(await db.query("SELECT proacl,proowner,prosecdef,proconfig FROM pg_proc WHERE oid='public.runtime_view(uuid,uuid)'::regprocedure")).rows[0];
 async function bind(db,f){
@@ -49,8 +52,8 @@ export async function providerRejectedViewCases(db){
    "DO $$ BEGIN RAISE EXCEPTION 'VIEW_TEST_ROLLBACK'; END $$; COMMIT;")),/VIEW_TEST_ROLLBACK/);
   await db.query('ROLLBACK');assert.equal(await definition(db),original);
   assert.deepEqual(await acl(db),beforeAcl);
-  await db.query(migration);assert.equal(await definition(db),finalDefinition);
-  await db.query(migration);assert.equal(await definition(db),finalDefinition);
+  await db.query(migration);assert.equal(await definition(db),targetDefinition);
+  await db.query(migration);assert.equal(await definition(db),targetDefinition);
   assert.deepEqual(await facts(),priorFacts,'migration never writes execution or billing facts');
   assert.deepEqual(await acl(db),beforeAcl,'security definer, owner, search path and ACL stay identical');
   for(const f of historical){
@@ -129,7 +132,7 @@ export async function providerRejectedViewCases(db){
   assert.equal((await turn(db,dependent)).unavailableReason,null);
 
   // Source and already-applied target drift both fail before replacing any definition.
-  for(const source of [original,finalDefinition]){
+  for(const source of [original,targetDefinition]){
    const drift=source.replace('AS $function$','AS $function$\n-- deliberate local test drift');
    await db.query(drift);
    await assert.rejects(db.query(migration),/PROVIDER_REJECTED_VIEW_SOURCE_MISMATCH/);

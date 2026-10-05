@@ -347,7 +347,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      projection=new NativeProgressProjection({mode:agentTurn?'agent':'message-first',toolMessage:agentTurn&&fiveFields});
      const project=nativeFrameProjection(projection,progress);
      const envelope=await exchange(request,effective.role,primaryPolicy,nativeProgress&&execution.live&&onChunk?chunk=>{
-      project(chunk);onChunk(chunk);
+      onChunk(chunk);
+      try{project(chunk);}catch{logger.warn('api','runtime_native_projection_failed',{executionId});}
      }:onChunk);
      // Local fixture carries the SDK response as private usage evidence. It is
      // not an OpenRouter protocol capability or proof of real supplier costs.
