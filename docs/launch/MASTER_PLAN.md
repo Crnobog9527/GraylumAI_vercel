@@ -659,6 +659,15 @@ PURPOSE_OUTPUT_CAP（8192）。证据分别记录 testedOutputLimit 与允许的
 取代上一条“profile 只能填写较小 outputLimit、不放行更大请求”的限制；输入、缓存、费用和思考设置覆盖要求不变。
 本轮只授权 r4，r5 不得执行；任何停止不补跑，配置建议只写 PR，由主窗口决定应用。累计预算仍 $25。
 
+**2026-10-06：BILL-PAYG 输出压力判定调整（主窗口技术决定）**
+
+依据：[#665 r5b 审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6000858032)。
+主窗口原文：“通过标准改为：finish_reason=length，并且 completion（含 reasoning）≤ O，并且 ≥ 0.9 × O”；
+“OUTPUT_CAP_NOT_REACHED 改为记录后继续，不再停批”。取代上述小上限必须精确等于 O 和未触顶即停批的采样要求。
+超过 O、费用未知、越界、拒绝、线路/目录不可用、身份/hash失败仍停；未达标样本不成为合格 profile 证据，不补跑。
+r5b首条508/512、length作为合格证据保留，原始停批记录不改写；其余95条原请求准备r6，当前已入账$4.991984715。
+累计限额仍$25；本轮只准备，主窗口复核通知前不发送任何真实请求。
+
 **2026-10-06：BILL-PAYG r4费用确认与r5b准备**
 
 依据：[Owner后台核实](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6000132517)。

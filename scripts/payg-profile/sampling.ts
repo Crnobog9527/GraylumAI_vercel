@@ -169,7 +169,13 @@ export function createSamplePlan(input:unknown,selected:SamplingBatch='r4'){
 function promptCacheLabel(r:Route){return r.model.startsWith('anthropic/')?'explicit-ephemeral':'repeated-system-prefix';}
 /** Offline projection only: unknown/native-token conflicts remain unknown, never pass as zero.
  * Input receipts must already have been obtained by an separately authorized sampling executor. */
-export function recordSamples(manifest:Pick<ReturnType<typeof createSamplePlan>['manifest'],'manifestHash'|'samples'>,receipts:unknown[]){
+export const outputPressureCriterion='length-completion-including-reasoning-90-to-100-percent' as const;
+export function outputPressurePassed(finish:unknown,completion:number|null,O:number,criterion?:typeof outputPressureCriterion){
+ return completion!==null&&finish==='length'&&completion<=O&&(criterion===outputPressureCriterion?10*completion>=9*O:completion===O);
+}
+type RecordedManifest=Pick<ReturnType<typeof createSamplePlan>['manifest'],'manifestHash'|'samples'>
+ &{outputPressureCriterion?:typeof outputPressureCriterion};
+export function recordSamples(manifest:RecordedManifest,receipts:unknown[]){
  const {manifestHash,...contents}=manifest;
  if(hash(JSON.stringify(contents))!==manifestHash)throw new Error('MANIFEST_HASH_MISMATCH');
  const receipt=z.object({sampleId:z.string(),requestHash:z.string(),model:z.string(),endpointTag:z.string(),
@@ -191,7 +197,7 @@ export function recordSamples(manifest:Pick<ReturnType<typeof createSamplePlan>[
     &&(r.cacheWriteTokens===null||r.cacheWriteTokens<=P)
     &&(r.cachedTokens===null||r.cacheWriteTokens===null||r.cachedTokens+r.cacheWriteTokens<=P)
     &&decimal(r.costUsd)<=decimal(String(sample.upperUsd))&&r.nativeCompletionTokens<=Number(sample.O)
-    ?(sample.kind==='output'&&(r.finishReason!=='length'||r.nativeCompletionTokens!==Number(sample.O))
+    ?(sample.kind==='output'&&!outputPressurePassed(r.finishReason,r.nativeCompletionTokens,Number(sample.O),manifest.outputPressureCriterion)
       ?'OUTPUT_CAP_NOT_REACHED':'SAMPLE_WITHIN_BOUNDS'):'BOUND_FAILED'};
  });
 }

@@ -1,6 +1,6 @@
 # BILL-PAYG profile 执行器交接（仅准备）
 
-**r5b 准备完成，等待复核。原 r5 作废，不执行。** 旧批次已锁定；本轮不发送模型请求、不访问远端数据库、不改配置。
+**r6 准备完成，等待复核。原 r5 作废，r5b 已执行停批，均不再执行。** 旧批次已锁定；本轮不发送模型请求、不访问远端数据库、不改配置。
 本页不是执行批准；必须先收到主窗口对本 PR 最终版本和 manifest 的审阅通过及执行通知。
 
 ## 入口
@@ -19,8 +19,8 @@ set -a
 set +a
 NODE_USE_ENV_PROXY=1 NO_PROXY= no_proxy= https_proxy= node scripts/payg-profile-execute.mjs execute-approved \
   scripts/payg-profile/plan-prices.json \
-  docs/launch/evidence/payg-profile-20261006-r5b.manifest.json \
-  4f8002e7989930cbf5cddd6ea2cae04e46548a196a885ac607a9b5f579b2990d \
+  docs/launch/evidence/payg-profile-20261006-r6.manifest.json \
+  abf06bcc4c8db71f2f121fcd58de75e6996dd54f8666dc3c60fb6455945f55a2 \
   owner-approved-test-balance-only
 ```
 
@@ -35,20 +35,21 @@ NODE_USE_ENV_PROXY=1 NO_PROXY= no_proxy= https_proxy= node scripts/payg-profile-
 本地费用计算复用 openRouterCallBound，发送和查账复用现有 openRouterAdapter/openRouterEvidence；
 无 SDK 自动重试、无 fallback、固定 OpenRouter URL、禁止重定向。工具样本只带合成历史，不执行真实工具。
 
-## r5b 范围与费用
+## r6 范围与费用
 
-当前执行器只接受 r5b 的精确审阅清单；原 r4 已锁定，原 r5 明确作废，旧 hash 均不能启动。
-详见 [r5b 预演、逐条费用及 Luna 路由缺口](BILL_PAYG_PROFILE_R5B.md)。
-Gemini 76 + Luna 整理适配补测16 + Sonnet新输出压力4，共96条；本批上界$5.39640075。
-前四批已入账$4.989307965；本批累计上界$10.385708715 < $25，不再为已作废r5重复预留。
+当前执行器只接受 r6 的精确审阅清单；旧批次 hash 均不能启动。原 r5 从未执行并已作废。
+详见 [r6 预演与逐条上界](BILL_PAYG_PROFILE_R6.md)。
+r5b 首条已按新标准合格，保留证据，不重发；r6 原样接续剩余95条（Gemini75、Luna整理16、Sonnet输出4）。
+本批上界 $5.385264750000；前五批已入账 $4.991984715000，累计上界 $10.377249465000 < $25。
+样本ID保留其来源后缀，批次ID为 payg-profile-20261006-r6；requestHash、单价和逐条上界未改。
 
 凭据/代理/加锁前核对本机已有旧锁对应的报告，按 manifest 绑定的批次、样本ID、requestHash、原始UNKNOWN状态和
 Owner确认记录逐一对账。r1首条、r2第49条、r4第77条仅这三个固定例外按$0入账，原始report/events不写回。
 未知数量、样本身份、已知小计、实际总额或金额汇总不匹配即 PRIOR_ACCOUNTING_MISMATCH，不接收临时豁免参数。
 原r5若意外出现attempted.lock，停止为SUPERSEDED_BATCH_ATTEMPTED，不能视作未执行。没有本机旧锁时以清单引用的已审计证据为依据。
 
-输出压力Sonnet O=2048、Gemini O=512，两种设置各两条；原生completion（含reasoning）必须等于O且finish_reason=length，
-否则OUTPUT_CAP_NOT_REACHED停批。Luna补测O=1024只验证整理适配，复用r4已成立的512输出语义，不能冒充新增触顶证据。
+输出压力Sonnet O=2048、Gemini O=512，两种设置各两条；原生completion（含reasoning）必须满足 0.9O ≤ completion ≤ O 且 finish_reason=length。
+OUTPUT_CAP_NOT_REACHED 如实记录费用和未合格判定后继续；不得补发，不得计入合格输出证据。completion > O 仍立即停批。Luna补测O=1024只验证整理适配，复用r4已成立的512输出语义，不能冒充新增触顶证据。
 
 finish_reason=content_filter 或 native_finish_reason=refusal（response 或原 ID lookup）立即记
 PROVIDER_CONTENT_REFUSED 并停批；response 已识别时不再查账，lookup 识别后不再继续查账。
@@ -66,7 +67,9 @@ PROVIDER_CONTENT_REFUSED 并停批；response 已识别时不再查账，lookup 
 请求的费用预留只增加，不把便宜样本的余额转给后面的样本；每条预留为清单 upperUsd。
 POST 最多一次；超时/断线无原 ID 时保留未知费用并停止，不能推断未收费。
 有原 ID 但缺用量/费用/线路时最多 GET 三次，不重新发 POST、不更换 ID。
-出现身份/费用/token 冲突、超费用/输出边界或不合格样本即停，未执行样本保留未执行，不补跑凑满。
+费用未知、拒绝、线路/目录不可用、身份/hash校验失败、费用/token冲突或越界仍立即停止。
+唯一可继续的未合格判定为 OUTPUT_CAP_NOT_REACHED；批次跑完不等于所有样本合格，必须逐条核对。
+未执行样本保留未执行，不补跑凑满。
 进程重启、磁盘写失败和人工中止都不会自动续发。先审计已有事件及回执，再交主窗口处理。
 批次中途目录读取失败/漂移写入 `{type:"halt",reason:"固定原因码"}`，不写上游消息、响应或 URL。
 脚本输出同一原因码并以非零状态结束；未知异常仅输出 `PAYG_EXECUTOR_STOPPED`，不泄露原始错误。
@@ -108,6 +111,7 @@ POST 最多一次；超时/断线无原 ID 时保留未知费用并停止，不�
 查账和 response 的成本必须一致；P 用原生总 prompt token，缓存读写不从 P 扣除。
 实际总额为已确认样本费用的精确十进制和；任一已尝试样本费用未知时 actualUsd=null，另报 knownUsd。
 缓存字段缺失保持 null。输出压力需核对 finishReason、outputCapReached 和 reasoning 用量；
+r6 的 outputCapReached 表示满足清单中的 90%–100% 判定，不代表精确等于 O；旧回执字段原样保留。
 “未超界”不等于“已触及并证明 8192 的输出边界”。
 
 ## 公开报告与配置建议
@@ -168,7 +172,8 @@ Google 页面覆盖 Gemini API，不是 OpenRouter Vertex 路由的可用性承�
 
 依据[主窗口决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5999661106)，
 `evidence.testedOutputLimit` 和各 reasoning variant 的 `testedOutputLimit` 记录实际探针上限；同一模型本轮使用相同上限。
-每种参数至少两条 length 且 completion（含 reasoning）精确等于测试上限，才能声明 `outputSemantics=max-tokens-includes-reasoning`。
+依据[最新判定决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6000858032)，
+每种参数至少两条 length 且 completion（含 reasoning）在测试上限的 90%–100% 内，才能声明 `outputSemantics=max-tokens-includes-reasoning`。
 `evidence.outputLimit`、variant/outputLimit、profile/outputLimit 则记录经审查允许的用途上限，可为 PURPOSE_OUTPUT_CAP=8192。
 输入矩阵、多消息、缓存、费用、线路、有效期及逐种 reasoning 覆盖仍须全部合格；不能把小上限样本称作 8192 触顶。
 缺少新字段的旧启用配置拒绝，关闭配置和已有冻结执行不受影响。配置建议只写 PR，不自动应用。

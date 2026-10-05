@@ -38,7 +38,9 @@
  google-vertex/global、GPT-6 Luna / openai。不按模型前缀授权。
 每个模型/完整线路只有一个 profile；`reasoningVariants` 列出多种思考参数及各自的
 `outputLimit/testedOutputLimit/evidenceReference/manifestHash/outputStressSamples/includesReasoning`。
-每种实际使用的 reasoning 必须有至少两个严格触顶样本，completion 包含 reasoning。
+每种实际使用的 reasoning 必须有至少两个 length 且 0.9O ≤ completion ≤ O 的输出压力样本，completion 包含 reasoning。
+依据 [r6 判定决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6000858032)，超过 O 仍立即失败；
+未达到判定标准的样本只记失败与费用，不能计入 profile 的合格证据数量。
 `testedOutputLimit` 记录测试上限；profile、variant 和 evidence 的 `outputLimit` 记录允许上限（最多 8192）。
 同一模型的测试上限须一致，evidence.outputSemantics 必须为 `max-tokens-includes-reasoning`；
 小上限可证明该执行语义，不冒称已实测 8192，依据主窗口 2026-10-06 决定（#665 评论 5999661106）。

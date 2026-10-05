@@ -1,5 +1,7 @@
 # BILL-PAYG r5b 离线预演（2026-10-06）
 
+> 历史准备记录：r5b 已尝试首条并按当时规则停止；锁和原始记录保留。主窗口按新标准确认首条合格，剩余95条改为 [r6](BILL_PAYG_PROFILE_R6.md)，本页旧命令和清单不得重跑。
+
 **r5b 准备完成，等待复核。没有发送真实请求。** 原r5清单作废，执行入口拒绝旧hash。
 依据：[r4主窗口审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6000090284)、
 [Owner费用确认](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6000132517)。

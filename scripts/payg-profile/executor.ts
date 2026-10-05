@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
-import {priceSchema,recordSamples} from './sampling';
-import {createR5bPlan,R5B_ID} from './batch-r5b';
+import {priceSchema,recordSamples,outputPressurePassed} from './sampling';
+import {createR6Plan,R6_ID} from './batch-r6';
 import {openRouterAdapter} from '../../packages/api/src/services/bill2/openRouterAdapter';
 import {decimal} from '../../packages/api/src/services/bill2/decimal';
 import type {CallIdentity,TransportObservation} from '../../packages/api/src/services/bill2/fixtureAdapter';
@@ -10,7 +10,7 @@ import type {OpenRouterIdentity} from '../../packages/api/src/services/bill2/ope
 import type {OpenRouterLimits} from '../../packages/api/src/services/bill2/openRouterPolicy';
 import {decodeOpenRouterStreamObservation} from '../../packages/api/src/services/bill2/openRouterEvidence';
 
-export type Plan=ReturnType<typeof createR5bPlan>;
+export type Plan=ReturnType<typeof createR6Plan>;
 export type Sample=Plan['manifest']['samples'][number];
 export type Event=Record<string,unknown>;
 export type Journal={append:(event:Event)=>Promise<void>;events:Event[];
@@ -21,8 +21,8 @@ const integer=(value:unknown):number|null=>typeof value==='string'&&/^\d+$/.test
 
 export function verifiedPlan(prices:unknown,manifest:unknown,approvedHash:string){
  const id=(manifest as {batch?:{id?:string}}|null)?.batch?.id;
- if(id!==R5B_ID)throw new Error('APPROVED_MANIFEST_MISMATCH');
- const plan=createR5bPlan(prices);
+ if(id!==R6_ID)throw new Error('APPROVED_MANIFEST_MISMATCH');
+ const plan=createR6Plan(prices);
  if(!isDeepStrictEqual(plan.manifest,manifest)||approvedHash!==plan.manifest.manifestHash)
   throw new Error('APPROVED_MANIFEST_MISMATCH');
  if(!plan.manifest.currentPricesVerified||decimal(plan.manifest.cumulativeUpperUsd)>=decimal('25')
@@ -216,10 +216,10 @@ export async function executePlan(options:{prices:unknown;manifest:unknown;appro
    finishReason:typeof valid.finishReason==='string'?valid.finishReason:null};
   receipts.push(receipt);
   const result=recordSamples(plan.manifest,receipts).find(s=>s.id===sample.id)!;
-  const outputCapReached=valid.finishReason==='length'&&valid.nativeCompletionTokens===Number(sample.O);
+  const outputCapReached=outputPressurePassed(valid.finishReason,valid.nativeCompletionTokens,Number(sample.O),plan.manifest.outputPressureCriterion);
   await append({type:'result',...result,receipt,finishReason:valid.finishReason,outputCapReached});
-  if(result.status!=='SAMPLE_WITHIN_BOUNDS'){
-   await append({type:'halt',sampleId:sample.id,reason:result.status==='OUTPUT_CAP_NOT_REACHED'?'OUTPUT_CAP_NOT_REACHED':'BOUND_FAILED_NO_REFILL',
+  if(!['SAMPLE_WITHIN_BOUNDS','OUTPUT_CAP_NOT_REACHED'].includes(result.status)){
+   await append({type:'halt',sampleId:sample.id,reason:'BOUND_FAILED_NO_REFILL',
     actualUsd:valid.costUsd});break;
   }
  }
