@@ -140,3 +140,16 @@ it.each(['{"reasoning":"PRIVATE","informationPatch":{}}','{"message":null,"priva
  expect(result.message).not.toContain('PRIVATE');
  expect(result.message).toContain('回复格式不完整');
 });
+
+it('reads v2 cross-step extraction without authorizing legacy browser writes',()=>{
+ const fields={first:{schema:[{id:'goal'}]},later:{schema:[{id:'audience'}]}};
+ const patches=[{stepId:'first',fieldId:'goal',value:'目标',status:'provisional',nature:'fact',basis:'user_statement'},
+  {stepId:'later',fieldId:'audience',value:'受众',status:'unclear',nature:'hypothesis',basis:'agent_proposal'}];
+ const extraction=JSON.stringify({inputKind:'answer',patches,notes:[]});
+ const turn=readWorkflowMentorExecution('导师正文',extraction,'first',fields);
+ expect(turn.message).toBe('导师正文');expect(turn.informationPatch).toEqual({});
+ expect(turn.capture?.patches).toEqual(patches);
+ expect(applyMentorTurnRules(turn,'user')).toEqual({});
+ const invalid=readWorkflowMentorExecution('正文',JSON.stringify({patches:null,informationPatch:{goal:patches[0]}}),'first',fields);
+ expect(invalid.informationPatch).toEqual({});expect(invalid.capture).toBeUndefined();
+});

@@ -9,6 +9,7 @@ import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
 import { publishSkillPackage } from '../skills/publication';
 import { opcService } from './service';
 import { captureCompleted } from './capture';
+import { readCaptureOutput } from '../../shared/conversationCapture';
 import { runtimeExecutor } from '../runtime/execute';
 import { runtimeAdmissionService } from '../runtime/admission';
 
@@ -366,9 +367,17 @@ it('RUNTIME: capture v2 summary parsing accepts only strict objects', async () =
   for (const raw of ['```json\n' + output() + '\n```', '[]', 'null', '{}',
     JSON.stringify({ inputKind: 'answer', patches: {}, notes: [] }),
     output(Array.from({ length: 13 }, () => patch()))]) {
+    expect(readCaptureOutput(raw, f.d.information)).toBeNull();
     expect(await f.apply(await f.seed(raw))).toMatchObject({ result: 'invalid_output' });
   }
   expect(await f.apply(await f.seed(output([])))).toMatchObject({ result: 'suggested' });
+  for (const value of ['  ', '\t', '😀'.repeat(400), '😀'.repeat(401)]) {
+    const raw = output([patch(value), {...patch('bad'), status:'confirmed'}, patch('valid', 'step-1')]);
+    const parsed = readCaptureOutput(raw, f.d.information)!;
+    const result = await f.apply(await f.seed(raw));
+    expect(result.discarded.map((entry: {index: number}) => entry.index)).toEqual(parsed.discarded);
+    expect(parsed.patches.length + parsed.discarded.length).toBe(3);
+  }
 });
 
 it('RUNTIME: capture rollback rejects a second rollback, preserves values and protects A-B-A after reenabling', async () => {
@@ -911,7 +920,9 @@ it('RUNTIME: B2 answers inherit their source task after capture changes the focu
   })}]);
   await f.apply(source);
   const request = {draftId:f.draft.draftId,requestId:randomUUID(),stepId:'step-0',purpose:'mentor',
-    questionId:'other',input:'Client display text',answerSource:{executionId:source,optionIndex:1}};
+    questionId:'other',input:'B',answerSource:{executionId:source,optionIndex:1}};
+  await expect(f.service.prepareStep({...request,requestId:randomUUID(),input:'Client display text'}))
+    .rejects.toThrow('OPC_ANSWER_SOURCE_DENIED');
   const next = await f.service.prepareStep(request);
   const payload = (await db.query('select payload from runtime_executions where id=$1',[next.executionId])).rows[0].payload;
   expect(payload.request.selection.task).toBe('opc-question:goal');

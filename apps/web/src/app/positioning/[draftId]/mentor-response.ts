@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { AGENT_TURN_BODY_LIMIT } from "@repo/api/src/shared/agentTurn";
 
+import {readCaptureOutput, type CaptureFields, type CaptureOutput} from "@repo/api/src/shared/conversationCapture";
+
 export type MentorSuggestion = {
   value: string;
   status: "unclear" | "provisional";
@@ -31,6 +33,7 @@ export type MentorTurn = {
   inputKind: MentorInputKind;
   informationPatch: Record<string, MentorPatchEntry>;
   targetStepId: string | null;
+  capture?: CaptureOutput;
 };
 
 const natures = new Set(["fact", "decision", "hypothesis", "unknown"]);
@@ -67,6 +70,7 @@ function normalizeUtterance(value: string) {
 export function readMentorTurn(
   raw: string | null | undefined,
   allowedFieldIds: ReadonlySet<string>,
+  fields: CaptureFields = {},
 ): MentorTurn {
   if (!raw) return { message: "", inputKind: DEFAULT_INPUT_KIND, informationPatch: {}, targetStepId: null };
   try {
@@ -81,6 +85,12 @@ export function readMentorTurn(
       typeof parsed.inputKind === "string" && inputKinds.has(parsed.inputKind as MentorInputKind)
         ? (parsed.inputKind as MentorInputKind)
         : DEFAULT_INPUT_KIND;
+    if (Object.hasOwn(parsed, "patches")) {
+      const capture = readCaptureOutput(raw, fields);
+      if (!capture) throw new Error("invalid capture response");
+      // V2 writes belong to the server. Never feed them into legacy browser autosave.
+      return {message, inputKind: capture.inputKind, informationPatch: {}, targetStepId: null, capture};
+    }
     const candidate =
       parsed.informationPatch &&
       typeof parsed.informationPatch === "object" &&
@@ -225,7 +235,7 @@ export function readWorkflowMentorTurn(
   fields: Record<string, { schema: Array<{ id: string }> }>,
 ): Omit<MentorTurn, "targetStepId"> & { targetStepId: string } {
   const { targetStepId, allowed } = resolveTargetStep(raw, originalStepId, fields);
-  return { ...readMentorTurn(raw, allowed), targetStepId };
+  return { ...readMentorTurn(raw, allowed, fields), targetStepId };
 }
 
 /**

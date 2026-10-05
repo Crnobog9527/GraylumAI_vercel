@@ -28,9 +28,11 @@ service 条目），后合并者同步。Runtime 既有集成测试的开场标�
 
 ## 离线与本机验证
 
-- PASS：API 单测 5011，跳过12；API 类型检查、lint；完整普通/开场/卡片回答 wire 快照。
+- PASS：API 单测5020，跳过12；API/Web类型检查、API lint及修改的Web文件lint；Web历史解析单测18项。
+- PASS：完整普通/开场/卡片回答 wire 快照。
 - PASS：H1 前缀相关回归、冻结材料与焦点、旧请求/修改输入拒绝、完整清单、整理容量保护。
-- 本机一次性 PostgreSQL/PostgREST 完整 Runtime 回归：进行中，最终结果以 PR 更新为准。
+- PASS：B2核心一次性 PostgreSQL/PostgREST Runtime 回归343项、跳过5项（原配置的浏览器/HTTP专属用例）。
+- 新增SQL/TS解析对照后的本机完整回归进行中，最终结果以PR更新为准。
 - NOT_RUN：真实模型质量、真实缓存命中、独立语义审查、B2+F1 staging 浏览器验收。
 - 远端数据库、环境配置、充值和合并：未执行。
 
