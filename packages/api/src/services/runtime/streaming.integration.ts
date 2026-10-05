@@ -1217,7 +1217,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['plan','workspace',
  }finally{release.release();await run;}
 });
 
-it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['assistant','message','zero','normal'] as const)(
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['assistant','message','zero','normal','receipt'] as const)(
  'RUNTIME: C2 real stream stops in %s stage and competing receipt hosts persist identical text once',async stage=>{
  const f=await fixture('agent-turn-v5-stream',false,8192,false,undefined,false,30000,true,'append');
  const analysis='长分析😀'.repeat(1000),card={question:'问题？',options:['甲','乙'],recommended:0,message:'接下来的问题。',recommendationReason:'原因'};
@@ -1236,13 +1236,17 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['assistant','messag
  const address=server.address();if(!address||typeof address==='string')throw new Error('local listener required');
  const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',
   transport:async(_url,init)=>fetch(`http://127.0.0.1:${address.port}`,init)});
- const completeGate=latch(),submissions:string[]=[];
+ const completeGate=latch(),receiptGate=latch(),receiptReady=latch(),submissions:string[]=[];let receiptBlocked=false;
  const database={rpc:async(name:string,args:Record<string,unknown>)=>{
   if(stage!=='normal'&&name==='runtime_execution'&&args.p_action==='complete'){
    submissions.push(JSON.stringify(args.p_result));if(submissions.length===2)completeGate.release();
    await completeGate.promise;
   }
-  return admin.rpc(name,args);
+  const response=await admin.rpc(name,args);
+  if(stage==='receipt'&&name==='runtime_response'&&response.data?.rawBody&&!receiptBlocked){
+   receiptBlocked=true;receiptReady.release();await receiptGate.promise;
+  }
+  return response;
  }};
  const host=()=>runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,adapter});
  const updates:RuntimeProgress[]=[];
@@ -1254,9 +1258,11 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['assistant','messag
    toolGate.release();await until(()=>updates.some(e=>e.type==='text'&&e.text===analysis+'\n\n'+card.message));
    stopAt+=4;
   }
+  if(stage==='receipt'){toolGate.release();endGate.release();await receiptReady.promise;}
   if(stage!=='normal')expect(await rpc('runtime_execution',{p_actor_id:f.actorId,p_execution_id:f.execution.executionId,
-   p_action:'stop',p_result:{stopAt,source:'assistant'}})).toMatchObject({state:'stopping'});
-  toolGate.release();endGate.release();
+   p_action:'stop',p_result:{stopAt,source:'assistant'}}))
+   .toMatchObject({state:stage==='receipt'?'stopped_pending_result':'stopping'});
+  toolGate.release();endGate.release();receiptGate.release();
   if(stage!=='normal')await until(()=>submissions.length===1);
   const recovering=stage==='normal'?running.then(()=>host().execute(f.execution.executionId)):host().execute(f.execution.executionId);
   const winner=await running;
@@ -1283,5 +1289,59 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['assistant','messag
   const before=(await db.query('select to_jsonb(b) body from bill2_runs b where id=$1',[f.execution.runId])).rows;
   await host().execute(f.execution.executionId);
   expect((await db.query('select to_jsonb(b) body from bill2_runs b where id=$1',[f.execution.runId])).rows).toEqual(before);
- }finally{completeGate.release();toolGate.release();endGate.release();await running.catch(()=>{});server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+ }finally{receiptGate.release();completeGate.release();toolGate.release();endGate.release();await running.catch(()=>{});server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['primary','between','organizer','organizer-cut'] as const)(
+ 'RUNTIME: C2 attached organizer stop %s preserves only eligible paid output',async stage=>{
+ const f=await fixture('serial-tools-v4-stream',true,8192,false,undefined,false,30000,false,true);
+ const primaryGate=latch(),organizerGate=latch(),checkpointGate=latch(),checkpointReady=latch();
+ const text='正文😀完成',summary='已完成的整理';let organizerStarted=false,posts=0;
+ const server=createServer(async(req,res)=>{
+  posts++;let raw='';for await(const part of req)raw+=part;const request=JSON.parse(raw),id='gen-c2-organizer-'+f.execution.executionId+'-'+posts;
+  if(request.model==='synthetic/mentor'){
+   res.setHeader('content-type','text/event-stream');chunk(res,id,request.model,{role:'assistant',content:'{"message":"正文'});
+   await primaryGate.promise;chunk(res,id,request.model,{content:'😀完成"}'});endStream(res,id,request.model);
+  }else{
+   organizerStarted=true;await organizerGate.promise;
+   res.setHeader('content-type','application/json');res.end(completion(id,request.model,summary));
+  }
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const address=server.address();if(!address||typeof address==='string')throw new Error('local listener required');
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',
+  transport:async(_url,init)=>fetch(`http://127.0.0.1:${address.port}`,init)});
+ const database={rpc:async(name:string,args:Record<string,unknown>)=>{
+  const result=await admin.rpc(name,args);
+  if(stage==='between'&&name==='runtime_execution'&&args.p_action==='checkpoint_primary'){
+   checkpointReady.release();await checkpointGate.promise;
+  }
+  return result;
+ }};
+ const updates:RuntimeProgress[]=[];
+ const running=runtimeExecutor({callGate:allowTestCalls,database,actor:async()=>f.actorId,adapter})
+  .execute(f.execution.executionId,event=>updates.push(event));
+ try{
+  await until(()=>updates.some(e=>e.type==='text'&&e.text==='正文'));
+  if(stage!=='primary'){
+   primaryGate.release();
+   if(stage==='between')await checkpointReady.promise;else await until(()=>organizerStarted);
+  }
+  const stopAt=stage==='primary'||stage==='organizer-cut'?2:Array.from(text).length;
+  expect(await rpc('runtime_execution',{p_actor_id:f.actorId,p_execution_id:f.execution.executionId,
+   p_action:'stop',p_result:{stopAt,source:'message'}})).toMatchObject({state:stage==='between'?'stopped_pending_result':'stopping'});
+  let replay;
+  if(stage==='between')replay=await runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,
+   callGate:async()=>{throw new Error('No new calls during stop');}}).execute(f.execution.executionId);
+  checkpointGate.release();primaryGate.release();organizerGate.release();
+  const result=await running;
+  expect(result).toMatchObject({state:'completed',stopped:true,body:JSON.stringify({message:stopAt===2?'正文':text}),
+   completeness:stopAt===2?'stopped':'complete',organized:stage==='organizer',summary:stage==='organizer'?summary:''});
+  if(replay)expect(result).toEqual(replay);
+  expect(posts).toBe(stage==='primary'||stage==='between'?1:2);
+  expect((await db.query('select charged from bill2_runs where id=$1',[f.execution.runId])).rows[0].charged).toBe(posts*3);
+  const again=await runtimeExecutor({callGate:allowTestCalls,database:admin,actor:async()=>f.actorId,adapter}).execute(f.execution.executionId);
+  expect(again).toEqual(result);expect(posts).toBe(stage==='primary'||stage==='between'?1:2);
+ }finally{checkpointGate.release();primaryGate.release();organizerGate.release();await running.catch(()=>{});
+  server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });
