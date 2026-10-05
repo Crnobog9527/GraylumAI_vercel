@@ -5,7 +5,7 @@ import {
   readReportRecord, REPORT_DISABLED_NOTICE, REPORT_EMPTY_NOTICE, REPORT_INCOMPLETE_NOTICE, REPORT_INTRO, REPORT_STOPPED_NOTICE,
   REPORT_TRUNCATED_NOTICE, REPORT_UNCONFIRMED_NOTICE, reportAttachable, reportCanStart, reportProgressing, reportRecordKey,
   reportResultRefusal, reportStartRefusal, reportView, startedExecution, writeReportRecord, type ReportStatus,
-  ATTACH_RETRY_DELAYS_MS, attachRetryDelay, generationOffer, nextRequestId, REPORT_ALREADY_EXISTS_NOTICE, shownExecution,
+  ATTACH_RETRY_DELAYS_MS, attachRetryDelay, generationOffer, needsReattach, nextRequestId, REPORT_ALREADY_EXISTS_NOTICE, shownExecution,
 } from "./report-gen";
 
 const id = "11111111-2222-4333-8444-555555555555";
@@ -133,17 +133,27 @@ describe("reportResultRefusal", () => {
 
 describe("restoring and offering", () => {
   const other = "99999999-2222-4333-8444-555555555555";
+  const at = (executionId: string | null, answeredAt = 1) => ({ kind: "known", executionId, answeredAt }) as const;
   it("takes the server's report over a missing or stale local pointer", () => {
-    expect(shownExecution(null, { kind: "known", executionId: id }, null)).toBe(id);
-    expect(shownExecution(null, { kind: "known", executionId: id }, { requestId: other, executionId: other })).toBe(id);
-    expect(shownExecution(null, { kind: "known", executionId: null }, { requestId: other, executionId: other })).toBeNull();
+    expect(shownExecution(null, at(id), null)).toBe(id);
+    expect(shownExecution(null, at(id), { requestId: other, executionId: other })).toBe(id);
+    expect(shownExecution(null, at(null), { requestId: other, executionId: other })).toBeNull();
   });
-  it("keeps a just-started execution until the server read names it, and falls back to local only when the server is unreadable", () => {
-    expect(shownExecution(other, { kind: "known", executionId: id }, null)).toBe(other);
+  it("keeps a just-started execution while the server catches up, and falls back to local only when the server is unreadable", () => {
+    // An answer from before the pin still names the old report; an answer after it does not name one yet.
+    expect(shownExecution({ executionId: other, since: 10 }, at(id, 5), null)).toBe(other);
+    expect(shownExecution({ executionId: other, since: 10 }, at(null, 20), null)).toBe(other);
+    expect(shownExecution({ executionId: other, since: 10 }, { kind: "pending" }, null)).toBe(other);
     expect(shownExecution(null, { kind: "failed" }, { requestId: other, executionId: other })).toBe(other);
     expect(shownExecution(null, { kind: "pending" }, null)).toBeNull();
   });
-  const known = { kind: "known", executionId: null } as const;
+  it("follows the server when another tab made a replacement report after this tab's pin", () => {
+    const replacement = "33333333-2222-4333-8444-555555555555";
+    expect(shownExecution({ executionId: other, since: 10 }, at(replacement, 20), null)).toBe(replacement);
+    // The server caught up to this tab's own execution: the same one either way.
+    expect(shownExecution({ executionId: other, since: 10 }, at(other, 20), null)).toBe(other);
+  });
+  const known = { kind: "known", executionId: null, answeredAt: 1 } as const;
   it("offers a first start only for a round the server shows without a report", () => {
     expect(generationOffer({ canGenerate: true, working: false, server: known, executionId: null, status: null })).toBe("start");
     for (const server of [{ kind: "pending" }, { kind: "failed" }] as const)
@@ -156,13 +166,20 @@ describe("restoring and offering", () => {
     ["a running report", status({ state: "running", body: null })], ["a report waiting for credits", status({ state: "waiting_credits", body: null })],
     ["a status still loading", null], ["a status of another execution", status({ executionId: other, body: null, state: "cancelled" })],
   ])("never offers a paid start over %s", (_name, saved) => {
-    expect(generationOffer({ canGenerate: true, working: false, server: { kind: "known", executionId: id }, executionId: id, status: saved }))
+    expect(generationOffer({ canGenerate: true, working: false, server: { kind: "known", executionId: id, answeredAt: 1 }, executionId: id, status: saved }))
       .toBeNull();
   });
   it("offers a new request only after the round's last report ended without text", () => {
     const empty = status({ state: "cancelled", body: null, completeness: null, candidate: false });
-    expect(generationOffer({ canGenerate: true, working: false, server: { kind: "known", executionId: id }, executionId: id, status: empty }))
+    expect(generationOffer({ canGenerate: true, working: false, server: { kind: "known", executionId: id, answeredAt: 1 }, executionId: id, status: empty }))
       .toBe("restart");
+  });
+  it("re-attaches a stream that ended with the execution unfinished on the server", () => {
+    expect(needsReattach({ state: "pending" })).toBe(true);
+    expect(needsReattach({ state: "interrupted" })).toBe(true);
+    for (const state of ["completed", "cancelled", "waiting_credits", "waiting_resume", "cost_pending"])
+      expect(needsReattach({ state })).toBe(false);
+    expect(needsReattach(null)).toBe(false);
   });
   it("bounds the attach retries", () => {
     expect(ATTACH_RETRY_DELAYS_MS.map((_, attempt) => attachRetryDelay(attempt))).toEqual(ATTACH_RETRY_DELAYS_MS);

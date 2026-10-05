@@ -153,18 +153,34 @@ export function startedExecution(result: unknown): string | null {
   return typeof id === "string" && uuid.test(id) ? id : null;
 }
 
-/** What `runtime.reportLatest` said: not answered yet, failed, or the round's newest report (or none). */
-export type ServerReport = { kind: "pending" } | { kind: "failed" } | { kind: "known"; executionId: string | null };
+/**
+ * What `runtime.reportLatest` said: not answered yet, failed, or the round's newest report (or
+ * none). `answeredAt` is when that answer arrived (the query's dataUpdatedAt).
+ */
+export type ServerReport = { kind: "pending" } | { kind: "failed" } | { kind: "known"; executionId: string | null; answeredAt: number };
+
+/** An execution this page just started, and when (same clock as `answeredAt`). */
+export type ReportPin = { executionId: string; since: number };
 
 /**
  * The report this page shows. The server is the authority, so a cleared storage or another device
- * still finds it; an execution this page just started wins until the server read catches up. The
- * local pointer only stands in while the server cannot be read.
+ * still finds it. An execution this page just started is shown only while the server is catching
+ * up: once a server answer that arrived after the pin names another execution (a replacement made
+ * in another tab), that one is shown. The local pointer only stands in while the server cannot be read.
  */
-export function shownExecution(pinned: string | null, server: ServerReport, local: ReportRecord | null): string | null {
-  if (pinned) return pinned;
+export function shownExecution(pin: ReportPin | null, server: ServerReport, local: ReportRecord | null): string | null {
+  const caughtUp = server.kind === "known" && server.executionId !== null && server.answeredAt > (pin?.since ?? -Infinity);
+  if (pin && !caughtUp) return pin.executionId;
   if (server.kind === "known") return server.executionId;
   return local?.executionId ?? null;
+}
+
+/**
+ * A stream that ended with the execution still unfinished on the server (an ambiguous failure
+ * answers `pending` and leaves it `interrupted`): attach to the same execution again later.
+ */
+export function needsReattach(result: { state?: unknown } | null | undefined) {
+  return result?.state === "pending" || result?.state === "interrupted";
 }
 
 /**

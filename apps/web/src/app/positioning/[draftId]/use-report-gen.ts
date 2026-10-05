@@ -7,8 +7,9 @@ import { readAgentTurn, TEXT_PROTOCOL } from "./mentor-turn";
 import { reportStopController, type ReportStopPhase } from "./report-stop";
 import { RecoveryTimers } from "./step-recovery";
 import {
-  attachRetryDelay, generationOffer, nextRequestId, readReportRecord, reportAttachable, reportProgressing, reportRecordKey,
-  reportResultRefusal, reportStartRefusal, shownExecution, startedExecution, writeReportRecord, type ReportRecord, type ServerReport, type StartRefusal,
+  attachRetryDelay, generationOffer, needsReattach, nextRequestId, readReportRecord, reportAttachable, reportProgressing, reportRecordKey,
+  reportResultRefusal, reportStartRefusal, shownExecution, startedExecution, writeReportRecord,
+  type ReportPin, type ReportRecord, type ServerReport, type StartRefusal,
 } from "./report-gen";
 
 function localStore() {
@@ -39,10 +40,10 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     setRecord(next);
   };
   const latest = trpc.runtime.reportLatest.useQuery({ sessionId, projectId, roundId }, { retry: 1 });
-  const server: ServerReport = latest.isSuccess ? { kind: "known", executionId: latest.data.executionId }
+  const server: ServerReport = latest.isSuccess ? { kind: "known", executionId: latest.data.executionId, answeredAt: latest.dataUpdatedAt }
     : latest.isError ? { kind: "failed" } : { kind: "pending" };
   // The execution this page started, until the server read names it.
-  const [pinned, setPinned] = useState<string | null>(null);
+  const [pinned, setPinned] = useState<ReportPin | null>(null);
   const executionId = shownExecution(pinned, server, record);
   const start = trpc.runtime.reportStart.useMutation();
   const cancel = trpc.runtime.cancel.useMutation();
@@ -93,6 +94,8 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
         onFinished: () => void utils.credits.getBalance.invalidate(),
       });
       refuse(result);
+      // Still unfinished on the server (an ambiguous failure): attach to the same execution again.
+      if (needsReattach(result)) retryAttach(id);
     } catch {
       // Never opened: try the same execution again later. A lost open stream: the saved status tells.
       if (!events) retryAttach(id);
@@ -123,7 +126,7 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
       const id = startedExecution(await start.mutateAsync({ sessionId, projectId, roundId, requestId }));
       if (!id) throw new Error("REPORT_UNAVAILABLE");
       save({ requestId, executionId: id });
-      setPinned(id);
+      setPinned({ executionId: id, since: Date.now() });
       void latest.refetch();
       attached.current.add(id);
       await stream(id);
