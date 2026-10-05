@@ -19,7 +19,7 @@ const patches = z.record(z.string(), z.unknown()).transform(value => Object.from
   }),
 ));
 export const stepEnvelope = z.object({
-  message: z.string().describe('Public reply. This must be the first JSON property.'),
+  message: z.string().trim().describe('Public reply. This must be the first JSON property.'),
   inputKind: z.enum(['answer', 'acknowledgement', 'uncertainty', 'request', 'revision_request']).optional().catch(undefined),
   informationPatch: patches.optional().catch(undefined),
   targetStepId: z.string().min(1).optional().catch(undefined),

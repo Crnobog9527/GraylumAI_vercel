@@ -137,3 +137,17 @@ it('ordinary cancellation after stop delegates to existing financial recovery',a
  expect(await f.complete(id)).toBeNull();expect(f.results).toEqual([]);
  expect(f.billing.recoverReceipts).not.toHaveBeenCalled();
 });
+
+it.each(['\n',' ','\u3000'])('step whitespace %j preserves the message source when stopped',async whitespace=>{
+ for(const content of [whitespace+'Hello world','Hello world'+whitespace]){
+  const f=fixture();f.execution.stop={stopAt:5,source:'message'};
+  f.raws.set(1,f.response(JSON.stringify({message:content,inputKind:'answer'})));
+  expect(await f.complete(id)).toMatchObject({state:'completed',stopped:true,
+   body:JSON.stringify({message:'Hello',inputKind:'answer'})});
+ }
+});
+it('the original finished HTTP immediately looks up a missing receipt inside the response window',async()=>{
+ const f=fixture();f.raws.clear();Object.assign(f.execution.stopCalls![0],{settled:false,responsePending:true});
+ expect(await f.complete(id,undefined,undefined,true)).toEqual({state:'cost_pending'});
+ expect(f.billing.recoverReceipts).toHaveBeenCalledExactlyOnceWith(id,undefined);
+});

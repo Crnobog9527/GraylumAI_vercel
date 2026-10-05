@@ -1352,3 +1352,60 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['primary','between'
  }finally{checkpointGate.release();primaryGate.release();organizerGate.release();await running.catch(()=>{});
   server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });
+
+it.each(['\n',' ','\u3000'].flatMap(space=>[true,false].flatMap(leading=>[true,false].map(stop=>({space,leading,stop})))))(
+ 'RUNTIME: step whitespace leading=$leading stop=$stop space=$space saves the streamed source',async({space,leading,stop})=>{
+ const f=await fixture('serial-tools-v4-stream',false,100,false,undefined,false,10000,false,true);
+ const content=leading?space+'Hello world':'Hello world'+space,tail=latch();
+ const id='gen-step-space-'+f.execution.executionId;
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  expect(init?.method).toBe('POST');const request=JSON.parse(String(init?.body));
+  const frame=(delta:object,finish_reason:string|null=null)=>'data: '+JSON.stringify({id,model:request.model,
+   choices:[{index:0,delta,finish_reason}]})+'\n\n';
+  return new Response(new ReadableStream({async start(controller){
+   const send=(text:string)=>controller.enqueue(new TextEncoder().encode(text));
+   send(frame({role:'assistant',content:JSON.stringify({message:content})}));
+   await tail.promise;send(frame({},'stop'));
+   send('data: '+JSON.stringify({id,model:request.model,choices:[],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14,cost:0.003}})+'\n\ndata: [DONE]\n\n');
+   controller.close();
+  }}),{headers:{'content-type':'text/event-stream'}});
+ }});
+ const updates:RuntimeProgress[]=[];
+ const run=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,callGate:allowTestCalls})
+  .execute(f.execution.executionId,event=>updates.push(event));
+ try{
+  await until(()=>updates.some(e=>e.type==='text'&&e.text==='Hello world'));
+  if(stop)await rpc('runtime_execution',{p_actor_id:f.actorId,p_execution_id:f.execution.executionId,
+   p_action:'stop',p_result:{stopAt:5,source:'message'}});
+  tail.release();const result=await run;
+  expect(result).toMatchObject({state:'completed',body:JSON.stringify({message:stop?'Hello':'Hello world'})});
+  if(stop)expect(result).toMatchObject({stopped:true,completeness:'stopped'});
+  else expect(updates.filter(e=>e.type==='text').some(e=>'source' in e&&e.source==='final')).toBe(false);
+ }finally{tail.release();await run.catch(()=>{});}
+});
+
+it.each(['disconnect','5xx','rejected'] as const)('RUNTIME: original stopped HTTP finishes immediately after %s',async kind=>{
+ const f=await fixture('serial-tools-v4-stream',false,100,false,undefined,false,10000,false,true);
+ const sent=latch(),tail=latch();let lookups=0;const id='gen-stop-error-'+f.execution.executionId;
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
+  if(init?.method==='GET'){lookups++;return new Response(JSON.stringify({data:{id,model:'synthetic/mentor',total_cost:0.003,finish_reason:'stop'}}));}
+  if(kind!=='disconnect'){
+   sent.release();await tail.promise;
+   return new Response(JSON.stringify({error:{code:402,message:'Synthetic refusal',metadata:{limit_source:'openrouter_key_limit',provider_name:null}}}),
+    {status:kind==='5xx'?503:402,headers:{'content-type':'application/json'}});
+  }
+  return new Response(new ReadableStream({async start(controller){
+   controller.enqueue(new TextEncoder().encode('data: '+JSON.stringify({id,model:'synthetic/mentor',
+    choices:[{index:0,delta:{content:'{"message":"partial'},finish_reason:null}]})+'\n\n'));
+   sent.release();await tail.promise;controller.error(new Error('Synthetic disconnect'));
+  }}),{headers:{'content-type':'text/event-stream'}});
+ }});
+ const run=runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,callGate:allowTestCalls}).execute(f.execution.executionId);
+ try{
+  await sent.promise;
+  await rpc('runtime_execution',{p_actor_id:f.actorId,p_execution_id:f.execution.executionId,p_action:'stop',p_result:{stopAt:3,source:'message'}});
+  tail.release();const result=await run;
+  expect(['cancelled','cost_pending']).toContain(result.state);
+  if(kind==='disconnect')expect(lookups).toBe(1);
+ }finally{tail.release();await run.catch(()=>{});}
+});

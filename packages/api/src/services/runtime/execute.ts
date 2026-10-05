@@ -396,7 +396,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     if(nativeProgress){const final=projection.finish(nativeVisible(body));if(final)progress(final);}
     if(turn?.card)progress({type:'card',card:JSON.parse(body).card});
    }
-   if(nativeProgress&&!accountClosed&&!moderationBlocked){const stopped=await finishStop(executionId,onProgress);if(stopped)return stopped;}
+   if(nativeProgress&&!accountClosed&&!moderationBlocked){const done=await finishStop(executionId,onProgress,undefined,execution.live);if(done)return done;}
    await nativeSession?.finish(body,agentTurn,!agentTurn||turnMetadata.completeness==='length_limit');
    const publicBody=agentTurn||native?'':publicMentorText(body);if(publicBody)progress({type:'text',text:publicBody});
    let summary:string|undefined;
@@ -434,7 +434,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    const completed=await ownerRpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
    return {...nativeMetadata(result),body,...(summary!==undefined?{summary}:{}),state:completed.state};
   }catch(error){
-   if(nativeProgress&&!accountClosed&&!moderationBlocked){const stopped=await finishStop(executionId,onProgress);if(stopped)return stopped;}
+   if(nativeProgress&&!accountClosed&&!moderationBlocked){const done=await finishStop(executionId,onProgress,undefined,execution.live);if(done)return done;}
    if(nativeProgress&&execution.live&&projection.text&&!waitPoint){const correction=projection.finish(INVALID_REPLY_NOTICE);if(correction)progress(correction);}
    if(waitPoint){
     const saved=await ownerRpc<PaygPosition & {state:PaygWait['state'];primaryResult?:{body:string}}>(

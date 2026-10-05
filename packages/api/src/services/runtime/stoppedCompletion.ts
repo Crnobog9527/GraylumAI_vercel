@@ -21,7 +21,7 @@ export type StopExecution = RuntimeExecution & {
  * tools or provider dispatch: the normal parsers reconstruct only durable receipts. */
 export function stoppedCompletion(options: RuntimeExecutorOptions, billing: ReturnType<typeof authoritativeBilling>, lookupTimeoutMs?:number) {
   const rpc=executorRpc(options);
-  return async(executionId:string,onProgress?:(event:RuntimeProgress)=>void,observed?:StopExecution) => {
+  return async(executionId:string,onProgress?:(event:RuntimeProgress)=>void,observed?:StopExecution,responseFinished=false) => {
     const args={p_execution_id:executionId};
     let execution=observed??await rpc<StopExecution>('runtime_execution',{...args,p_action:'read'});
     if(execution.pausedReason!=='user_stop')return null;
@@ -47,7 +47,8 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
     const unknown=await collect();
     // Refresh/maintenance must not spend lookup attempts or cancel a result while
     // the original HTTP can still persist its response, even if cost arrived first.
-    if(responsePending)return {state:'stopping' as const};
+    // Only the live dispatch owner may bypass this after its provider interaction ends.
+    if(responsePending&&!responseFinished)return {state:'stopping' as const};
     if(unknown){
       await billing.recoverReceipts(execution.runId,lookupTimeoutMs===undefined?undefined:{timeoutMs:lookupTimeoutMs});
       if(execution.billing.contractVersion==='bill2.v2')await billing.finalizeRun(execution.runId);

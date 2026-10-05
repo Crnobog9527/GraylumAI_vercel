@@ -30,7 +30,7 @@ it('cleans model patches with the existing permissive frontend rules', () => {
       badNature: { value: 'no', nature: 'bad' }, scalar: 'no', array: [],
     },
   }), {}, options);
-  expect(JSON.parse(result.body)).toEqual({ message: ' kept ', informationPatch: {
+  expect(JSON.parse(result.body)).toEqual({ message: 'kept', informationPatch: {
     valid: { value: 'yes', status: 'provisional', nature: 'fact', basis: 'user_statement' },
     uncertain: { value: 'maybe', status: 'unclear', nature: 'hypothesis', basis: 'agent_proposal' },
   } });
@@ -106,4 +106,17 @@ it('projects preserved plain text and empty messages without exposing malformed 
   expect(nativeVisible('123')).toBe('123');
   expect(nativeVisible('{"message":""}')).toBe('');
   expect(nativeVisible('{"private":"unfinished')).not.toContain('private');
+});
+
+it.each(['\n',' ','\u3000'])('step normal completion trims %j without a final replacement',async whitespace=>{
+ const {NativeProgressProjection}=await import('./nativeProgress');
+ for(const content of [whitespace+'Hello world','Hello world'+whitespace]){
+  const raw=JSON.stringify({message:content,inputKind:'answer'});
+  const p=new NativeProgressProjection({mode:'message-first'});
+  for(const unit of raw)p.appendText(unit);
+  const result=prepareNativePrimary(raw,{},options);
+  expect(JSON.parse(result.body).message).toBe('Hello world');
+  expect(nativeVisible(result.body)).toBe(p.text);
+  expect(p.finish(nativeVisible(result.body))).toBeNull();
+ }
 });
