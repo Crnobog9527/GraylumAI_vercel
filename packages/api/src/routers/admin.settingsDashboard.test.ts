@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import { REPORT_SETTING } from '../services/report/contract';
+import { PAYG_START_THRESHOLDS_KEY } from '../services/bill2/settingKeys';
 import { adminRouter } from './admin';
 import { settingsRouter } from './settings';
 import { PAYMENT_CHANNEL_KEY } from '../services/payments/channelSettings';
@@ -11,6 +12,7 @@ import { PROVIDER_PRICES_KEY } from '../services/billingProviderPrices';
 import { ABSORB_CONFIG_KEY, ABSORB_ACK_KEY } from '../services/bill2PlatformAlerts';
 
 const structuredSettings = [
+  { key: PAYG_START_THRESHOLDS_KEY, value: { version: 'fixture', thresholds: [] } },
   { key: PAYMENT_CHANNEL_KEY, value: { channel: 'stripe', version: 3 } },
   { key: PAYG_HOST_SETTING, value: { enabled: false } },
   { key: REPORT_SETTING, value: { enabled: false } },
