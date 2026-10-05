@@ -1,3 +1,6 @@
+import { listAdminPaymentOrders } from '../services/payments/adminOrders';
+import { projectOrderPayment, type BillingRecord, type PaymentOrderBillingRow } from '../services/payments/orderProjection';
+import { assertCheckoutChannel } from '../services/payments/channelSettings';
 /*
  * Copyright (c) 2026 Grayscale Luminary LLC.
  * All rights reserved.
@@ -9,7 +12,7 @@ import { TRPCError } from '@trpc/server';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { protectedProcedure, router } from '../trpc';
+import { protectedProcedure, adminProcedure, router } from '../trpc';
 import { logger } from '../lib/logger';
 import { createSafeInternalError, createSafeServiceUnavailableError } from '../lib/publicError';
 import {
@@ -74,45 +77,6 @@ const upgradeQuoteSchema = z.object({
   freshnessProof: z.string().regex(/^[a-f0-9]{64}$/),
 }).strict();
 type UpgradeQuote = z.infer<typeof upgradeQuoteSchema>;
-
-type BillingRecord = {
-  id: string;
-  itemType: 'credit_package' | 'membership_plan';
-  title: string;
-  description: string;
-  status: string;
-  amountTotal: number;
-  currency: string;
-  billingCycle: 'one_time' | 'monthly' | 'yearly';
-  createdAt: string;
-  fulfilledAt: string | null;
-  invoiceNumber: string | null;
-  invoicePdfUrl: string | null;
-  hostedInvoiceUrl: string | null;
-  receiptUrl: string | null;
-};
-
-type PaymentOrderBillingRow = {
-  user_id?: string;
-  payment_channel?: string | null;
-  merchant_namespace?: string | null;
-  payment_mode?: string | null;
-  price_ref_id?: string | null;
-  subscription_id?: string | null;
-  id: string;
-  item_id: string;
-  item_type: 'credit_package' | 'membership_plan' | string;
-  billing_cycle: 'one_time' | 'monthly' | 'yearly' | null;
-  stripe_checkout_session_id: string | null;
-  stripe_invoice_id: string | null;
-  amount_total: number | string | null;
-  currency: string | null;
-  status: string;
-  payment_status: string | null;
-  fulfilled_at: string | null;
-  created_at: string;
-  metadata?: Record<string, unknown> | null;
-};
 
 type CreateCheckoutInput = z.infer<typeof createCheckoutInput>;
 type ChangeSubscriptionPlanInput = z.infer<typeof changeSubscriptionPlanInput>;
@@ -1038,7 +1002,7 @@ async function loadStripeBillingDocument(stripe: ReturnType<typeof getStripeClie
   }
 
   try {
-    if ((isSubscriptionPlanChangeOrder(order) && !order.fulfilled_at) || order.payment_channel == null) return emptyDocument;
+    if ((isSubscriptionPlanChangeOrder(order) && !order.fulfilled_at) || order.payment_channel !== 'stripe') return emptyDocument;
     const scope = await resolveStripeScope(stripe);
     if (order.payment_channel !== 'stripe' || order.merchant_namespace !== scope.merchant || order.payment_mode !== scope.mode) {
       throw new Error('PAY_COMMON_ORDER_IDENTITY_UNKNOWN');
@@ -1142,6 +1106,13 @@ function shouldListBillingOrder(order: PaymentOrderBillingRow) {
 }
 
 export const paymentsRouter = router({
+  listAdminOrders: adminProcedure.input(z.object({
+    offset: z.number().int().min(0).max(100000).default(0), limit: z.number().int().min(1).max(50).default(20),
+  }).default({ offset: 0, limit: 20 })).query(async ({ ctx, input }) => {
+    let stripe: ReturnType<typeof getStripeClient> | null = null;
+    try { stripe = getStripeClient(); } catch { /* Original credentials unavailable; keep the order visible. */ }
+    return listAdminPaymentOrders(ctx.supabase, input, createStripeBillingDocumentLoader(stripe, ctx.supabase));
+  }),
   getSubscriptionManagement: protectedProcedure.query(async ({ ctx }) => {
     const subscription = await loadCurrentStripeManagedSubscription(ctx.supabaseAdmin, ctx.profileId);
     return { available: Boolean(subscription?.stripe_customer_id && subscription.stripe_subscription_id) };
@@ -1414,6 +1385,7 @@ export const paymentsRouter = router({
       }
       if (!eligibility.allowed) throwMembershipEligibilityError(eligibility);
       await assertCheckoutRateLimit(ctx.profileId, ctx.headers);
+      await assertCheckoutChannel(ctx.supabaseAdmin, ctx.profileId, input.kind);
       try {
         const scope = await resolveStripeScope(stripe);
         const appUrl = getStripeAppUrl(ctx.headers);
@@ -1435,7 +1407,8 @@ export const paymentsRouter = router({
         logCheckoutStageFailure('stripe_session_create', input, error);
         const reason = error instanceof Error ? error.message : '';
         if (['PAY_COMMON_PRICE_MAPPING_MISSING', 'PAY_COMMON_PRICE_MAPPING_AMBIGUOUS', 'PAY_COMMON_PRICE_MISMATCH',
-          'PAY_COMMON_AMOUNT_INVALID', 'PAY_COMMON_PRODUCT_UNAVAILABLE'].includes(reason)) {
+          'PAY_COMMON_AMOUNT_INVALID', 'PAY_COMMON_PRODUCT_UNAVAILABLE', 'PAY_COMMON_CHANNEL_NOT_READY',
+          'PAY_COMMON_LIVE_PURCHASE_DISABLED', 'PAY_COMMON_CHANNEL_SETTING_INVALID'].includes(reason)) {
           throw toItemUnavailableError(input.kind === 'membership_plan' ? '该会员套餐暂不可购买，请稍后重试' : undefined);
         }
         if (['PAY_COMMON_PURCHASE_PENDING', 'PAY_COMMON_LEGACY_ORDER_UNRESOLVED',
@@ -1649,7 +1622,7 @@ export const paymentsRouter = router({
           'item_id',
           'item_type',
           'billing_cycle',
-          'user_id', 'payment_channel', 'merchant_namespace', 'payment_mode',
+          'user_id', 'payment_channel', 'merchant_namespace', 'payment_mode', 'payment_amount_facts',
           'price_ref_id', 'subscription_id',
           'amount_total',
           'currency',
@@ -1694,6 +1667,7 @@ export const paymentsRouter = router({
             const billingCycle: BillingRecord['billingCycle'] = order.billing_cycle ?? 'one_time';
 
             return {
+              ...projectOrderPayment(order, stripeDocuments),
               id: order.id,
               itemType,
               title,

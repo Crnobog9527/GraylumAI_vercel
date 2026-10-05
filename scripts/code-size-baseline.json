@@ -84,7 +84,7 @@
   "packages/api/src/routers/chat.ts": {"lines":607,"longLines":1},
   "packages/api/src/routers/model.ts": {"longLines":2},
   "packages/api/src/routers/opc.ts": {"longLines":5},
-  "packages/api/src/routers/payments.ts": {"lines":1723},
+  "packages/api/src/routers/payments.ts": {"lines":1697},
   "packages/api/src/routers/runtime.ts": {"longLines":7},
   "packages/api/src/routers/skills.ts": {"longLines":1},
   "packages/api/src/routers/workbench.ts": {"longLines":9},
@@ -146,7 +146,7 @@
   "packages/api/src/services/skills/localSource.ts": {"longLines":1},
   "packages/api/src/services/skills/modulePublication.ts": {"longLines":2},
   "packages/api/src/services/stripeFulfillment.ts": {"lines":2392},
-  "packages/api/src/services/subscriptionCreditGrants.ts": {"lines":2846,"longLines":6},
+  "packages/api/src/services/subscriptionCreditGrants.ts": {"lines":2842,"longLines":6},
   "packages/db/schema.ts": {"lines":594},
   "scripts/check-staging-db-readiness.mjs": {"lines":789},
   "scripts/check-stripe-readiness.mjs": {"lines":678}

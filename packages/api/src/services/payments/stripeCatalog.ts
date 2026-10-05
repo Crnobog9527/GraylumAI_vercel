@@ -81,9 +81,11 @@ export async function loadCurrentStripePrices(input: {
   return refs;
 }
 
-export async function loadConfiguredStripePrices(input: Omit<Parameters<typeof loadCurrentStripePrices>[0], 'scope'>) {
+export async function loadConfiguredStripePrices(input: Omit<Parameters<typeof loadCurrentStripePrices>[0], 'scope'> & { testOnly?: boolean }) {
   try {
-    return await loadCurrentStripePrices({ ...input, scope: await resolveStripeScope(getStripeClient()) });
+    const scope = await resolveStripeScope(getStripeClient());
+    if (input.testOnly && scope.mode !== 'test') return new Map<string, string>();
+    return await loadCurrentStripePrices({ ...input, scope });
   } catch (error) {
     throw createSafeServiceUnavailableError(error, '支付价格暂时无法读取，请稍后重试');
   }
