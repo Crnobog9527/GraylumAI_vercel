@@ -5,7 +5,7 @@ const executionId='10000000-0000-4000-8000-000000000001';
 const card={message:'正文',question:'在哪个平台？',options:['甲','乙'],recommended:0,recommendationReason:'理由'};
 const request=opcGenerate.parse({draftId:executionId,requestId:executionId,stepId:'step-0',input:'伪造文字',
  purpose:'mentor',questionId:'product',answerSource:{executionId,optionIndex:1}});
-const view=(value:unknown,state='completed')=>({executions:[{executionId,state,body:JSON.stringify({format:'agent-turn.v1',message:'正文',card:value})}]});
+const view=(value:unknown,state='completed')=>({executions:[{executionId,state,request:{draftId:executionId,stepId:'step-0',purpose:'mentor',questionId:'product'},body:JSON.stringify({format:'agent-turn.v1',message:'正文',card:value})}]});
 it('reads the saved option and organizer context, never the submitted option text',()=>{
  const answer=resolveAnswerCard(view(card),request);
  expect(answer.card.options[answer.optionIndex!]).toBe('乙');

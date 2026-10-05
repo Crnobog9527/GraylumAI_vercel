@@ -50,11 +50,11 @@ export function registerAdmissionGateTests(db:pg.Client,fixture:()=>Promise<Fixt
     runs:(await db.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actor])).rows[0].n,
     credits:(await db.query('select credits from profiles where id=$1',[f.actor])).rows[0].credits,
    });
-   const submit=async(requestId:string)=>{
+   const submit=async(requestId:string,opening=true)=>{
     if(entry==='runtime')return runtime.prepare({sessionId:session!.sessionId,requestId,input:'Synthetic input',
      selection:{kind:'ordinary',modelId:modelId()},network:'deny'});
     if(entry==='topic')return opc.topicTurn({draftId:d.draftId,requestId,input:'Synthetic topic'});
-    const input={draftId:d.draftId,stepId:'step-0',purpose:'mentor' as const,questionId:'goal',requestId,input:OPENING_INPUT};
+    const input={draftId:d.draftId,stepId:'step-0',purpose:'mentor' as const,questionId:'goal',requestId,input:opening?OPENING_INPUT:'Synthetic user turn'};
     if(entry==='mentor')return opc.prepareStep(input);
     const stream=await opc.mentorTurnStream(input);
     // A refused stream fails while preparing, before any execution event.
@@ -65,7 +65,7 @@ export function registerAdmissionGateTests(db:pg.Client,fixture:()=>Promise<Fixt
     for(const sameRequest of [true,false]){
      const rejected=randomUUID(),before=await counts();
      limit.mockResolvedValue({success:false,reason:'rate_limited',retryAfter:30,window:'minute'});
-     await expect(submit(rejected)).rejects.toMatchObject({code:'TOO_MANY_REQUESTS'});
+     await expect(submit(rejected,sameRequest)).rejects.toMatchObject({code:'TOO_MANY_REQUESTS'});
      expect(await counts()).toEqual(before);
      expect(limit).toHaveBeenLastCalledWith(f.actor,'admission',expect.any(Object),'local',1,'bill2.v1');
      if(entry==='runtime'||entry==='stream')break;
@@ -76,7 +76,7 @@ export function registerAdmissionGateTests(db:pg.Client,fixture:()=>Promise<Fixt
       (await service.read(d.draftId)).turns;
      expect(visible).toHaveLength(sameRequest?0:1);
      limit.mockResolvedValue({success:true});
-     const admitted=await submit(sameRequest?rejected:randomUUID());
+     const admitted=await submit(sameRequest?rejected:randomUUID(),sameRequest);
      expect((await counts()).executions).toBe(before.executions+1);
      const after=(await db.query('select request_id,material_revision from opc_turns where draft_id=$1 order by request_id',
       [d.draftId])).rows;

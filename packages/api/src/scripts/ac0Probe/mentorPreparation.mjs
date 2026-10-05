@@ -8,7 +8,7 @@ import {MemorySession} from '@openai/agents';
 import {prepareModuleSkill} from '../../services/skills/modulePublication.ts';
 import {activateSkill, identityOf} from '../../services/skills/loader.ts';
 import {runRuntime} from '../../services/runtime/runner.ts';
-import {agentTurnInstructions} from '../../services/opc/agentTurnPrompt.ts';
+import {agentTurnInstructions} from './legacyAgentTurnPrompt.ts';
 import {askQuestionTool, askQuestionToolBytes, QUESTION_CONTRACT_INSTRUCTIONS} from '../../services/runtime/agentTools.ts';
 import {agentTurnResult} from '../../services/runtime/agentTurnResult.ts';
 import {openRouterRequestBody} from '../../services/runtime/providerRequest.ts';

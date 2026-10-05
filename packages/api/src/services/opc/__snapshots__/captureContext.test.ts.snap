@@ -1,0 +1,97 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`all pinned steps and roles, protected states and values stay in their proper envelopes 1`] = `
+{
+  "captureFormat": "v2",
+  "checklist": [
+    {
+      "confirmed": false,
+      "fields": [
+        {
+          "elicit": "user_fact",
+          "id": "goal",
+          "nature": "unknown",
+          "protected": true,
+          "required": true,
+          "role": "user_fact",
+          "status": "draft",
+          "title": "Goal",
+          "value": "User fact",
+        },
+        {
+          "elicit": "user_fact",
+          "id": "audience",
+          "nature": "unknown",
+          "protected": false,
+          "required": true,
+          "role": "user_fact",
+          "status": "missing",
+          "title": "Audience",
+          "value": "",
+        },
+        {
+          "elicit": "agent_proposal",
+          "id": "proposal",
+          "nature": "unknown",
+          "protected": true,
+          "required": false,
+          "role": "agent_proposal",
+          "status": "missing",
+          "title": "proposal",
+          "value": "",
+        },
+      ],
+      "id": "first",
+      "notes": [],
+      "title": "First",
+    },
+    {
+      "confirmed": false,
+      "fields": [
+        {
+          "elicit": "user_fact",
+          "id": "goal",
+          "nature": "unknown",
+          "protected": true,
+          "required": true,
+          "role": "user_fact",
+          "status": "missing",
+          "title": "Goal",
+          "value": "",
+        },
+        {
+          "elicit": "user_fact",
+          "id": "audience",
+          "nature": "unknown",
+          "protected": true,
+          "required": true,
+          "role": "user_fact",
+          "status": "missing",
+          "title": "Audience",
+          "value": "",
+        },
+        {
+          "elicit": "agent_proposal",
+          "id": "proposal",
+          "nature": "unknown",
+          "protected": true,
+          "required": false,
+          "role": "agent_proposal",
+          "status": "draft",
+          "title": "proposal",
+          "value": "Tentative proposal",
+        },
+      ],
+      "id": "later",
+      "notes": [
+        {
+          "text": "Existing note",
+        },
+      ],
+      "title": "Later",
+    },
+  ],
+  "originalStepId": "first",
+  "userInput": "New audience",
+}
+`;

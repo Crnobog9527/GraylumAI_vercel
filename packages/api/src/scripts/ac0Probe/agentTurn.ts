@@ -3,7 +3,7 @@
 import {tool} from '@openai/agents';
 import {createRequire, registerHooks} from 'node:module';
 import type * as Tools from '../../services/runtime/agentTools.ts';
-import type * as Prompt from '../../services/opc/agentTurnPrompt.ts';
+import type * as Prompt from './legacyAgentTurnPrompt.ts';
 import type * as History from '../../services/runtime/openRouterHistory.ts';
 
 let loaded: {tools: typeof Tools; prompt: typeof Prompt; history?: typeof History} | undefined;
@@ -28,7 +28,7 @@ function runtime(includeHistory = false) {
   }});
   try {
     const require = createRequire(import.meta.url);
-    loaded ??= {tools: require('../../services/runtime/agentTools.ts'), prompt: require('../../services/opc/agentTurnPrompt.ts')};
+    loaded ??= {tools: require('../../services/runtime/agentTools.ts'), prompt: require('./legacyAgentTurnPrompt.ts')};
     if (includeHistory) loaded.history ??= require('../../services/runtime/openRouterHistory.ts');
     return loaded;
   } finally { hook.deregister(); }

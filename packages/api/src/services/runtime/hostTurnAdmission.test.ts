@@ -20,8 +20,7 @@ vi.mock('./billingUnitAdmission',async original=>({
 const actor='10000000-0000-4000-8000-000000000001',modelId='10000000-0000-4000-8000-000000000002';
 const revisionId='10000000-0000-4000-8000-000000000003',moduleId='10000000-0000-4000-8000-000000000004';
 const requestId='10000000-0000-4000-8000-000000000005';
-const host=()=>agentTurnInstructions({step:{id:'private-step',title:'Private title',schema:[]},question:null,
- questionLabel:null,workflowContext:{private:'user data'},opening:false});
+const host=()=>agentTurnInstructions();
 function fixture(model='anthropic/test',write:string|undefined='2.5',real=true,inputBytes=32000){
  const providerLimits={providerSlug:'synthetic/fp8',contextTokens:32000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',
   requestUsd:'0',...(write===undefined?{}:{cacheWriteUsdPerMillion:write})};

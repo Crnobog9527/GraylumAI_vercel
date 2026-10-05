@@ -29,10 +29,10 @@ describe('organizer complete-value context',()=>{
   it.each([
     ['audience answer', '先服务附近独自阅读的自由职业者，给他们安静的空间'],
     ['platform choice', '小红书'],
-  ])('freezes existing goal and off-topic %s separately without widening writable fields',async(_name,input)=>{
+  ])('freezes existing goal and off-topic %s separately with the complete declared checklist',async(_name,input)=>{
     const admin={rpc:vi.fn((name:string)=>{
       const data:Record<string,unknown>={opc_query:{projectId:id,roundId:id,sessionId:id,information:{current:{schema,values}}},
-        artifact_query:{moduleId:id,workflow:{steps:[{id:"current",resources:[]}] }},runtime_admission_replay:null,runtime_session_context:{waitingOrganizer:null},opc_capture_apply:{processed:[],remaining:0,hasMore:false},opc_step_material:{revision:1,turnToken:id}};
+        artifact_query:{moduleId:id,workflow:{steps:[{id:"current",resources:[]}] }},runtime_admission_replay:null,runtime_session_context:{waitingOrganizer:null,scopeMaterial:{revision:1,content:{work:{roundId:id,steps:{current:{information:values}}}}}},opc_capture_apply:{processed:[],remaining:0,hasMore:false},opc_step_material:{revision:1,turnToken:id}};
       if(!(name in data))throw new Error(name);
       const response=Promise.resolve({data:data[name],error:null});
       return Object.assign(response,{abortSignal:()=>response});
@@ -42,16 +42,17 @@ describe('organizer complete-value context',()=>{
       purpose:'mentor',organizeAfter:true,input});
     const frozen=JSON.parse(captured.policy!.organizerInput!);
     expect(frozen.userInput).toBe(input);
-    expect(frozen.currentStepMaterial).toEqual(organizerStepMaterial('current',schema,values));
-    expect(frozen.currentQuestion.id).toBe('goal');
-    expect(frozen.allowedWorkflow[0].fields).toEqual([{id:'goal',title:'目标与变现方式'}]);
-    expect(captured.policy!.organizerInstructions).toContain('return an empty informationPatch: do not put an audience answer or a platform choice');
-    expect(captured.policy!.additionalInstructions).toContain('If the user answers another topic, respond briefly');
-    expect(captured.policy!.additionalInstructions).toContain('never confirm or advance on their behalf');
+    expect(frozen.captureFormat).toBe('v2');
+    expect(frozen).not.toHaveProperty('currentQuestion');
+    expect(frozen.checklist[0].fields.map((f:{id:string})=>f.id)).toEqual(['goal','audience','platform']);
+    expect(frozen.checklist[0].fields[0].value).toBe(values.goal.value);
+    expect(captured.policy!.organizerInstructions).toContain('return empty patches');
+    expect(captured.policy!.additionalInstructions).toContain('Never pull the user back to a numbered question');
+
   });
   it('requires complete updates, unchanged-content empty patches, and provisional status',()=>{
     expect(ORGANIZER_INSTRUCTIONS).toContain('updated COMPLETE value, preserving valid information');
-    expect(ORGANIZER_INSTRUCTIONS).toContain('If there is no substantive change, return an empty informationPatch');
+    expect(ORGANIZER_INSTRUCTIONS).toContain('If there is no substantive change, return empty patches');
     expect(ORGANIZER_INSTRUCTIONS).toContain('only for an explicit correction or contradiction');
     expect(ORGANIZER_INSTRUCTIONS).toContain('Updates remain provisional');
     expect(ORGANIZER_INSTRUCTIONS).toContain('Never return confirmed or deferred');
