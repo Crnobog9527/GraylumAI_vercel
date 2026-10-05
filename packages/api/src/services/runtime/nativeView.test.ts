@@ -50,3 +50,12 @@ it('keeps a 1000-turn history to one query and retains every truncation marker',
   expect(result.executions.every((row: { completeness: string }) => row.completeness === 'length_limit')).toBe(true);
   expect(f.rpc).toHaveBeenCalledOnce();
 });
+it.each(['bill2.v1', 'bill2.v2'])('passes %s userStopPending through without relying on billing pausedReason', async contractVersion => {
+  const f = fixture([
+    { executionId: 'pending', userStopPending: true, body: null, billing: { contractVersion } },
+    { ...visible, executionId: 'saved', stopped: true, userStopPending: false, billing: { contractVersion } },
+    { executionId: 'cancelled', state: 'cancelled', userStopPending: false, billing: { contractVersion } },
+  ]);
+  expect(await readNativeRuntimeView(f.db, actor, session)).toEqual(f.view);
+  expect(f.rpc).toHaveBeenCalledOnce();
+});

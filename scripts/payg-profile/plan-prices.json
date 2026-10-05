@@ -1,0 +1,9 @@
+{
+  "source": "BILL_PAYG_PLAN 2026-10-02 examples; NOT a current provider quote",
+  "currentVerified": false,
+  "routes": [
+    {"model":"anthropic/claude-sonnet-5.5","endpointTag":"anthropic","contextTokens":250000,"prompt":"2","write":"2.5","completion":"10","request":"0","perCallCap":"0.50","modelCap":"30","reasoning":[{"parameter":"none"},{"effort":"low"}]},
+    {"model":"google/gemini-3.8-flash","endpointTag":"google-vertex/global","contextTokens":250000,"prompt":"0.75","completion":"3.75","request":"0","perCallCap":"0.25","modelCap":"15","reasoning":[{"parameter":"none"},{"effort":"low"}]},
+    {"model":"openai/gpt-6-luna","endpointTag":"openai","contextTokens":250000,"prompt":"0.10","write":"0.125","completion":"0.50","request":"0","perCallCap":"0.05","modelCap":"3","reasoning":[{"parameter":"none"}]}
+  ]
+}

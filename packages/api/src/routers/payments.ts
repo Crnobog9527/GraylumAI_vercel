@@ -42,6 +42,7 @@ import { STRIPE_MANAGED_ACTIVE_SUBSCRIPTION_STATUSES } from '../services/subscri
 import { addUtcCalendarMonthsClamped } from '../services/subscriptionCreditGrants';
 import { findStripeReference, resolveStripeOrderIds, loadCurrentStripeSubscription } from '../services/payments/stripeReferences';
 import { loadCurrentStripePrices } from '../services/payments/stripeCatalog';
+import { mapPurchaseCheckoutError } from '../services/payments/purchaseCheckoutError';
 import { createDurableStripeCheckout, resolveStripeScope } from '../services/payments/stripeCheckoutPersistence';
 
 const createCheckoutInput = z.discriminatedUnion('kind', [
@@ -1433,19 +1434,8 @@ export const paymentsRouter = router({
         return { checkoutUrl: session.url, sessionId: session.id };
       } catch (error) {
         logCheckoutStageFailure('stripe_session_create', input, error);
-        const reason = error instanceof Error ? error.message : '';
-        if (['PAY_COMMON_PRICE_MAPPING_MISSING', 'PAY_COMMON_PRICE_MAPPING_AMBIGUOUS', 'PAY_COMMON_PRICE_MISMATCH',
-          'PAY_COMMON_AMOUNT_INVALID', 'PAY_COMMON_PRODUCT_UNAVAILABLE'].includes(reason)) {
-          throw toItemUnavailableError(input.kind === 'membership_plan' ? '该会员套餐暂不可购买，请稍后重试' : undefined);
-        }
-        if (['PAY_COMMON_PURCHASE_PENDING', 'PAY_COMMON_LEGACY_ORDER_UNRESOLVED',
-          'PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED'].includes(reason)) {
-          throw new TRPCError({ code: 'CONFLICT', message: '已有付款正在核对，请先完成原订单。', cause: error });
-        }
-        if (['PAY_COMMON_PURCHASE_ACTOR_DENIED', 'PAY_COMMON_MEMBERSHIP_FACTS_UNKNOWN', 'ENTITLEMENT_CONFLICT',
-          'REFUNDED_ORDER_REQUIRES_POLICY', 'ACTIVE_SUBSCRIPTION_EXISTS', 'UPGRADE_DOWNGRADE_UNSUPPORTED'].includes(reason)) {
-          throw new TRPCError({ code: 'PRECONDITION_FAILED', message: '购买资格已变化，请刷新后重试。', cause: error });
-        }
+        const mappedError = mapPurchaseCheckoutError(error, input.kind);
+        if (mappedError) throw mappedError;
         throw createPaymentOperationError('创建支付会话', error);
       }
     }),

@@ -13,6 +13,8 @@ import {readRuntimeView,retainedOutputReason} from './view';
 import { runtimeExecutor } from './execute';
 import './promptCache.integration';
 import './payg.integration';
+import './nativeStopView.integration';
+import {registerPaygHostTests} from './paygHost.integration';
 import './gateWiring.integration';
 import {registerAdmissionGateTests} from './admissionGate.integration';
 import {createRuntimeBudget,withRuntimeBudget} from './budget';
@@ -1100,8 +1102,9 @@ async function mentorTurnFixture(withTopics=false){
  const bearer='Bearer '+login.data.session!.access_token;
  const context=async(budget=createRuntimeBudget(),authorization:string|null=bearer)=>createTRPCContext({headers:new Headers(authorization?{Authorization:authorization}:{}),runtimeBudget:budget});
  const draft=async()=>(await opcRouter.createCaller(await context()).start({requestId:randomUUID(),registration,mode:'mentor',businessName:'Graylum AI'})) as {draftId:string};
- return {actor,context,draft,user,admin,flow,registration};
+ return {actor,context,draft,user,admin,flow,registration,mentorModel,organizerModel};
 }
+registerPaygHostTests(db,()=>mentorTurnFixture(true));
 registerAdmissionGateTests(db,()=>mentorTurnFixture(true),()=>modelId);
 type ProviderCall={model:string;release:()=>void};
 async function heldProvider(){
