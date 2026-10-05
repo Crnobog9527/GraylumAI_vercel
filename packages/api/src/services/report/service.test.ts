@@ -2,7 +2,7 @@
 import { expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { reportService, reportError } from './service';
+import { reportEnabled, reportService, reportError } from './service';
 import { runtimeAdmissionService } from '../runtime/admission';
 const id = randomUUID();
 const input = { sessionId: id, projectId: id, roundId: id, requestId: id };
@@ -65,4 +65,13 @@ it('SQL OPC_CAPTURE_PENDING survives admission and the report error boundary', a
   await expect(admission.prepare({sessionId:id,requestId:id,input:'report',selection:{kind:'ordinary',modelId:id},
     organizeAfter:false,sources:[],network:'deny'}).catch(reportError))
     .rejects.toMatchObject({code:'BAD_REQUEST',message:'OPC_CAPTURE_PENDING'});
+});
+it.each([[{ enabled: true }, true], [null, false], [{ enabled: false }, false], ['{"enabled":true}', false], [{ enabled: true, extra: 1 }, false]])(
+  'reportEnabled reads the same strict switch as start (%j)', async (value, expected) => {
+    const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: value === null ? null : { value }, error: null }) };
+    expect(await reportEnabled({ from: () => query } as unknown as SupabaseClient)).toBe(expected);
+  });
+it('reportEnabled fails closed on a read error', async () => {
+  const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: null, error: { message: 'x' } }) };
+  await expect(reportEnabled({ from: () => query } as unknown as SupabaseClient)).rejects.toThrow('REPORT_UNAVAILABLE');
 });

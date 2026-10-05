@@ -16,6 +16,13 @@ export function reportError(error: unknown): never {
   throw new TRPCError({ code: message === 'REPORT_MEMBERSHIP_REQUIRED' ? 'FORBIDDEN' : 'BAD_REQUEST',
     cause: error, message: typeof message === 'string' && reportCodes.has(message) ? message : 'REPORT_UNAVAILABLE' });
 }
+/** The server switch: only a strict `{enabled:true}` setting enables NEW report admission. */
+export async function reportEnabled(admin: SupabaseClient) {
+  const setting = await admin.from('system_settings').select('value').eq('key', REPORT_SETTING).maybeSingle();
+  if (setting.error) throw new Error('REPORT_UNAVAILABLE');
+  const enabled: unknown = setting.data?.value;
+  return z.object({ enabled: z.literal(true) }).strict().safeParse(enabled).success;
+}
 export function reportService(user: SupabaseClient, admin: SupabaseClient, policy: LocalRuntimePolicy) {
   async function actor() {
     const auth = await user.auth.getUser();
@@ -33,10 +40,7 @@ export function reportService(user: SupabaseClient, admin: SupabaseClient, polic
       try {
         const replay = await rpc('runtime_admission_replay', { p_request_id: input.requestId, p_request: { reportStart: input } });
         if (replay) return replay;
-        const setting = await admin.from('system_settings').select('value').eq('key', REPORT_SETTING).maybeSingle();
-        if (setting.error) throw new Error('REPORT_UNAVAILABLE');
-        const enabled: unknown = setting.data?.value;
-        if (!z.object({ enabled: z.literal(true) }).strict().safeParse(enabled).success) throw new Error('REPORT_DISABLED');
+        if (!await reportEnabled(admin)) throw new Error('REPORT_DISABLED');
         // Entry check. The second check is inside the SQL call reservation transaction.
         await rpc('report_membership_check', {});
         const source = await rpc('report_source', {
