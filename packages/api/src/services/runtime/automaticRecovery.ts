@@ -1,5 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {stoppedCompletion} from './stoppedCompletion';
+import {denyNewCalls} from './newWorkGate';
 import { z } from 'zod';
 import { authoritativeBilling, type BillingRpc, type BillingTransport } from '../bill2/service';
 import { boundedFinancialDatabase, erasureFinancialBudget } from '../accountErasure/financialRecovery';
@@ -13,7 +15,7 @@ export const CRON_RECOVERY_MS = 55_000;
 export const RECOVERY_BATCH_SIZE = 20;
 const inventorySchema = z.array(z.object({
   actorId: z.string().uuid(), executionId: z.string().uuid(), runId: z.string().uuid(),
-  recoveryPolicy: z.unknown(), finishAllowed: z.boolean(),
+  recoveryPolicy: z.unknown(), finishAllowed: z.boolean(), userStop: z.boolean().optional(),
 })).max(RECOVERY_BATCH_SIZE);
 export type AutomaticRecoverySummary = {
   selected: number; processed: number; settled: number; pending: number; failed: number;
@@ -45,11 +47,15 @@ export async function recoverPendingFinancials(input: {
         };
         const billing = authoritativeBilling({ admin: input.database, actor: async () => item.actorId,
           budget: input.budget, adapter });
-        await billing.recoverReceipts(item.runId, { timeoutMs: AUTOMATIC_RECOVERY_LOOKUP_MS });
+        if (!item.userStop) await billing.recoverReceipts(item.runId, { timeoutMs: AUTOMATIC_RECOVERY_LOOKUP_MS });
         // Unknown calls can belong to an interrupted or still-live execution.
         // Query their existing generation safely without cancelling ongoing work.
         let state = 'cost_pending';
-        if (item.finishAllowed) {
+        if (item.userStop) {
+          const result = await stoppedCompletion({database:input.database, actor:async()=>item.actorId,
+            budget:input.budget, callGate:denyNewCalls, adapter}, billing, AUTOMATIC_RECOVERY_LOOKUP_MS)(item.executionId);
+          state = result?.state ?? 'cost_pending';
+        } else if (item.finishAllowed) {
           const finished = await input.database.rpc('runtime_financial_recovery', {
             p_actor_id: item.actorId, p_execution_id: item.executionId, p_finish: true,
           });

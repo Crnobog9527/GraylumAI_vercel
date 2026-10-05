@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {streamingMentorText} from './mentorText';
 import {NativeMessageScanner, NativeTextAccumulator} from './nativeMessageScanner';
 
 export type NativeTextSource = 'assistant' | 'message' | 'final';
@@ -29,7 +30,7 @@ export class NativeProgressProjection {
   private source: NativeTextSource;
 
   constructor(private readonly options: {
-    mode: 'message-first' | 'agent'; toolMessage?: boolean; maxCodePoints?: number;
+    mode: 'message-first' | 'agent'; toolMessage?: boolean; maxCodePoints?: number; appendCard?: boolean;
   }) {
     this.source = options.mode === 'agent' ? 'assistant' : 'message';
     this.assistant = new NativeTextAccumulator(options.maxCodePoints);
@@ -62,6 +63,12 @@ export class NativeProgressProjection {
       if (typeof call.function?.arguments === 'string') delta += this.tool.append(call.function.arguments);
     }
     if (this.toolName !== 'ask_question' || !this.tool.text) return null;
+    if (this.options.appendCard) {
+      this.toolVisible = true;
+      const text = streamingMentorText(this.assistant.text, this.tool.text);
+      const added = text.slice(this.visible.length);
+      return added ? this.update(text, added, false) : null;
+    }
     if (!this.toolVisible) {
       this.toolVisible = true;
       this.source = 'message';
@@ -73,6 +80,9 @@ export class NativeProgressProjection {
   /** Call before card/result emission, including invalid-card or truncated-tool fallbacks. */
   finish(authoritative: string): NativeTextUpdate | null {
     if (authoritative === this.visible) return null;
+    if (this.options.appendCard && authoritative.startsWith(this.visible)) {
+      return this.update(authoritative, authoritative.slice(this.visible.length), false);
+    }
     this.source = 'final';
     return this.update(authoritative, authoritative, true);
   }

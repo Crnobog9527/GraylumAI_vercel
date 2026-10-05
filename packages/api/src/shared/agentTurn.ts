@@ -138,7 +138,7 @@ export type AgentTurnOutcome = {
   state: AgentTurnState;
   body?: string;
   summary?: string;
-  completeness?: "complete" | "length_limit";
+  stopped?: boolean; completeness?: "complete" | "stopped" | "length_limit";
   organized?: boolean; summaryOmitted?: boolean; envelopeCompact?: boolean; messageFirst?: boolean;
   unavailable?: AgentTurnUnavailable;
 };

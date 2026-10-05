@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {stoppedCompletion} from './stoppedCompletion';
 import {NativeSession} from './nativeSession';
 import {NativeProgressProjection} from './nativeProgress';
 import {nativeVisible,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
@@ -41,6 +42,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
  const adapter=expiringAuthAfterProvider(options.adapter ?? localFixtureAdapter(options.endpoint??''),budget.auth);
  const billing=authoritativeBilling({admin:options.database,actor:options.actor,adapter,budget});
  const rpc=executorRpc(options);
+ const finishStop=stoppedCompletion(options,billing);
  return {
   cancel:(executionId:string)=>rpc<{state:string}>('runtime_cancel',{p_execution_id:z.string().uuid().parse(executionId)}),
   /** Trusted maintenance only: caller supplies a verified original actor; no UI route. */
@@ -53,6 +55,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     {...args,p_action:action,...(value?{p_result:value}:{})})});
   if(started.wait)return started.wait;
   const {execution,resumedGate}=started;
+  const stopped=await finishStop(executionId,onProgress,execution);if(stopped)return stopped;
   const isPayg=execution.billing?.contractVersion==='bill2.v2';
   const ownerDatabase=isPayg?paygOwnerDatabase(options.database,{executionId,epoch:execution.epoch!}):options.database;
   const ownerRpc=<T>(name:string,value:Record<string,unknown>)=>rpc<T>(name,value,ownerDatabase);
@@ -65,14 +68,12 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   }
   if(execution.state==='completed')return completedOutput(execution.result,execution.context,onProgress);
   if(execution.state==='cost_pending'&&execution.result){
-   // Saved SDK output is immutable. Recover only the original billed calls;
-   // this branch never starts the SDK or appends Session messages again.
+   // Immutable saved output: recover billed calls without the SDK or Session writes.
    await billing.recoverRun(execution.runId);
    const recovered=await ownerRpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:execution.result});
    return {...completedOutput(execution.result,execution.context,onProgress),state:recovered.state};
   }
   const context=runtimeContext.parse(execution.context);
-  // Validate both primary and attached settings before any SDK or billed call.
   if(!validReasoningFormat(context))throw new Error('RUNTIME_CONTEXT_INVALID');
   // The Agent turn format (AC-1) is interactive dialogue only: no automatic
   // Skill matching or workspace reads, and its only tool is the question card.
@@ -80,7 +81,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const fiveFields=Boolean(context.questionContract);
   const native=Boolean(context.nativeOutput);
   const nativeProgress=native&&(agentTurn||Boolean(context.envelopeOrder));
-  let projection=new NativeProgressProjection({mode:agentTurn?'agent':'message-first',toolMessage:agentTurn&&fiveFields});
+  const projectionOptions={mode:agentTurn?'agent' as const:'message-first' as const,toolMessage:agentTurn&&fiveFields,appendCard:Boolean(context.mentorText)};
+  let projection=new NativeProgressProjection(projectionOptions);
   let primaryLength=false;
   if(fiveFields&&!agentTurn)throw new Error('RUNTIME_CONTEXT_INVALID');
   if(agentTurn&&(context.matching||context.workspaceContext||context.tools.some(name=>name!==ASK_QUESTION_TOOL)))throw new Error('RUNTIME_CONTEXT_INVALID');
@@ -88,7 +90,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const policy=execution.billing.callPolicy.find(p=>p.model===context.model);
   if(!policy)throw new Error('RUNTIME_MODEL_DENIED');
   const session=new PostgresSession(ownerDatabase,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
-  const nativeSession=native?new NativeSession(session):undefined;
+  const nativeSession=native?new NativeSession(session,Boolean(context.mentorText)):undefined;
   let transportNotStarted=false,providerRejected=false;
   let terminalReplyFailure=false;
   let gateChecked=resumedGate,moderationBlocked=false;
@@ -204,8 +206,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      const decoded=JSON.parse(raw);
      return selectedPolicy.protocol==='openrouter-chat-v1' ? {usage:{sdkResponse:decoded}} : decoded;
     }catch(error){
-     // These exact codes originate before provider dispatch. The SDK wraps the
-     // exception later; retain a bounded diagnostic without request/error data.
+     // Retain exact pre-dispatch diagnostics outside SDK wrapping, without private data.
      if(selectedPolicy.protocol==='openrouter-chat-v1'&&error instanceof Error&&preflightCodes.has(error.message))
       {preflightFailure=error.message;logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});}
      throw error;
@@ -344,7 +345,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    },
     exchange:async(_sequence,request,onChunk)=>{
      partial="";
-     projection=new NativeProgressProjection({mode:agentTurn?'agent':'message-first',toolMessage:agentTurn&&fiveFields});
+     projection=new NativeProgressProjection(projectionOptions);
      const project=nativeFrameProjection(projection,progress);
      const envelope=await exchange(request,effective.role,primaryPolicy,nativeProgress&&execution.live&&onChunk?chunk=>{
       onChunk(chunk);
@@ -380,7 +381,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     if(latest.unavailable)return {state:latest.state,unavailable:'latest' as const};
    }
    budget.timing?.mark('fullModelReply');
-   const turn=agentTurn?agentTurnResult(agentText,body,agentToolCalled,agentCardMessage,native):null;
+   const turn=agentTurn?agentTurnResult(agentText,body,agentToolCalled,agentCardMessage,native,Boolean(context.mentorText)):null;
    if(turn){
     if(turn.card||turn.message!==INVALID_REPLY_NOTICE)budget.timing?.mark('firstValidContent');
     body=turn.body;
@@ -389,12 +390,13 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    }
    let turnMetadata:Record<string,unknown>=turn?{truncated:turn.truncated}:{};
    if(native){
-    const fitted=prepareNativePrimary(body,turnMetadata,{envelopeOrder:context.envelopeOrder,
+    const fitted=prepareNativePrimary(body,turnMetadata,{envelopeOrder:context.envelopeOrder,appendCard:Boolean(context.mentorText),
       length:primaryLength,attachedOrganizer:Boolean(context.attachedOrganizer),executionId});
      body=fitted.body;turnMetadata=fitted.metadata;
     if(nativeProgress){const final=projection.finish(nativeVisible(body));if(final)progress(final);}
     if(turn?.card)progress({type:'card',card:JSON.parse(body).card});
    }
+   if(nativeProgress&&!accountClosed&&!moderationBlocked){const stopped=await finishStop(executionId,onProgress);if(stopped)return stopped;}
    await nativeSession?.finish(body,agentTurn,!agentTurn||turnMetadata.completeness==='length_limit');
    const publicBody=agentTurn||native?'':publicMentorText(body);if(publicBody)progress({type:'text',text:publicBody});
    let summary:string|undefined;
@@ -432,6 +434,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    const completed=await ownerRpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
    return {...nativeMetadata(result),body,...(summary!==undefined?{summary}:{}),state:completed.state};
   }catch(error){
+   if(nativeProgress&&!accountClosed&&!moderationBlocked){const stopped=await finishStop(executionId,onProgress);if(stopped)return stopped;}
    if(nativeProgress&&execution.live&&projection.text&&!waitPoint){const correction=projection.finish(INVALID_REPLY_NOTICE);if(correction)progress(correction);}
    if(waitPoint){
     const saved=await ownerRpc<PaygPosition & {state:PaygWait['state'];primaryResult?:{body:string}}>(
@@ -480,8 +483,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      return {state:stopped.state,...(noCharge?{unavailable:'provider_rejected' as const}:{})};
     }
    }
-   // A replay has no authority to cancel or interrupt the still-live owner.
-   // It may observe an unfinished response, but must leave shared state alone.
+   // Replay observers leave unfinished shared state to the live owner.
    if(!execution.live)return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{})};
    // A lost durable response is inspected by later recovery, never a network retry.
    const failed=await ownerRpc<{state:string}>('runtime_execution',{...args,p_action:'fail_before_dispatch',

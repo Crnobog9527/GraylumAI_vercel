@@ -33,6 +33,7 @@ type NativeResult = { body: string; completeness?: 'complete' | 'stopped' | 'len
 type Envelope = Record<string, unknown> & { message: string; card?: Record<string, unknown> | null };
 type FitOptions = {
   attachedOrganizer?: boolean;
+  preserveCardMessage?: boolean;
   /** Normal completion schema parser: strips unknown T2 fields and validates rebuilt envelopes. */
   validateEnvelope?: (value: unknown) => Envelope;
 };
@@ -71,7 +72,7 @@ export function fitNativeResult<T extends NativeResult>(input: T, options: FitOp
   const original = envelope?.message ?? input.body;
   const card = envelope?.card && typeof envelope.card === 'object' ? { ...envelope.card } : null;
   const build = (message: string): string => envelope
-    ? JSON.stringify({ ...envelope, message, ...(card ? { card: { ...card, message } } : {}) }) : message;
+    ? JSON.stringify({ ...envelope, message, ...(card ? { card: options.preserveCardMessage ? card : { ...card, message } } : {}) }) : message;
   const accepts = (message: string) => jsonbBytes({ ...result, body: build(message) }) <= limit;
   const minimum = card || options.validateEnvelope ? 1 : 0;
   let message = fitPrefix(original, minimum, accepts);

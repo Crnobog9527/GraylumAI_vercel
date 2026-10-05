@@ -1160,14 +1160,15 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    // Q1 adds one host Session-context read before any new OPC material write.
    // Attached organizers skip one Session history read in each execution.
+   // C2 adds one read-only stop-intent check after the provider response, before completion.
    // The first prepare of this new package misses the Skill file cache (AC-0c).
    oldPrepareOpening:{prelude:2,policy:0,host:7,admission:16,rateLimit:0},
-   oldStreamOpening:{prelude:2,policy:0,host:1,execute:6,provider:13,rateLimit:0},
+   oldStreamOpening:{prelude:2,policy:0,host:1,execute:6,provider:14,rateLimit:0},
    oldPrepareAnswer:{prelude:2,policy:0,host:7,admission:12,rateLimit:0},
-   oldStreamAnswer:{prelude:2,policy:0,host:1,execute:6,provider:13,rateLimit:0},
+   oldStreamAnswer:{prelude:2,policy:0,host:1,execute:6,provider:14,rateLimit:0},
    // One invocation: one prelude instead of two; admission and execution unchanged.
-   opening:{prelude:2,policy:0,host:8,admission:12,execute:6,provider:13,rateLimit:0},
-   answer:{prelude:2,policy:0,host:8,admission:12,execute:6,provider:13,rateLimit:0},
+   opening:{prelude:2,policy:0,host:8,admission:12,execute:6,provider:14,rateLimit:0},
+   answer:{prelude:2,policy:0,host:8,admission:12,execute:6,provider:14,rateLimit:0},
   });
   // Empty backlog: exactly one pre-admission RPC and one completion capture RPC.
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
@@ -2461,3 +2462,81 @@ it('RUNTIME: insufficient credits recovers an old hold then admits the same requ
  expect((await service.prepare(request)).executionId).toBe(admitted.executionId);
  expect(admits).toHaveLength(2);
 });
+
+
+it.each(['durable-response','unknown-lookup','settled-lookup-only'] as const)(
+ 'RUNTIME: C2 fresh PAYG host recovers stop after original host loss (%s)',async scenario=>{
+  // Reuse the local SQL PAYG fixture: no configured provider, real account or external request.
+  const {createFixture,claim}=await import(new URL('../../../../db/tests/payg/fixture.mjs',import.meta.url).href);
+  const {fixtureEvidence}=await import('../bill2/fixtureAdapter');
+  const f=await createFixture(db,{lookupSupported:true});
+  f.claimPayload.phase='ordinary';
+  const policy=f.payload.callPolicy[0];policy.payg.purposes=['ordinary'];
+  await db.query(`insert into system_settings(key,value) values('billing_payg_start_thresholds',$1::jsonb)
+   on conflict(key) do update set value=jsonb_set(system_settings.value,'{thresholds}',
+    coalesce(system_settings.value->'thresholds','[]')||(excluded.value->'thresholds'))`,
+  [{version:'local-v1',thresholds:[{model:f.claimPayload.model,purpose:'ordinary',credits:1}]}]);
+  const session=await rpc('runtime_start',{p_actor_id:f.actor,p_request_id:randomUUID(),p_payload:{scope:f.payload.scope}});
+  const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'Synthetic stop recovery',
+   instructions:'Synthetic local response',model:f.claimPayload.model,modelId:policy.modelId,maxOutputTokens:1000,
+   maxTurns:1,historyItems:0,tools:[],sources:[],network:'deny',nativeOutput:'native-output-v1',
+   providerRequestFormat:'serial-tools-v4-stream',envelopeOrder:'message-first-v1'};
+  const execution=await rpc('runtime_admit',{p_actor_id:f.actor,p_session_id:session.sessionId,
+   p_request_id:randomUUID(),p_payload:context,p_billing:{...f.payload,input:context}});
+  const call=await claim(db,{...f,run:execution.runId});
+  const providerId='synthetic-stop-'+call.id;
+  const raw=(final:boolean,withText=false)=>JSON.stringify({id:providerId,model:f.claimPayload.model,
+   final,cost:final?'0.003':null,currency:'USD',coverage:'request_total',
+   ...(final?{usage:{inputTokens:3000,outputTokens:4,...(withText?{sdkResponse:{id:providerId,
+    object:'chat.completion',created:1,model:f.claimPayload.model,
+    choices:[{index:0,message:{role:'assistant',content:JSON.stringify({message:'已写😀后文'})},finish_reason:'stop'}]}}:{})}}:{})});
+  const initial=fixtureEvidence(raw(scenario==='durable-response',scenario==='durable-response'),f.claimPayload,'response');
+  // The lost HTTP retained a provider ID but no usable response body in the lookup cases.
+  await rpc('bill2_record',{p_actor_id:f.actor,p_run_id:execution.runId,p_call_id:call.id,
+   p_evidence:scenario==='durable-response'?initial:{...initial,rawBody:undefined}});
+  expect(await rpc('runtime_execution',{p_actor_id:f.actor,p_execution_id:execution.executionId,
+   p_action:'stop',p_result:{stopAt:3,source:'final'}}))
+   .toMatchObject({state:scenario==='durable-response'?'stopped_pending_result':'stopping'});
+  // Crash boundary: only committed SQL facts survive; every recovery below constructs a new host.
+  expect((await db.query('select result from runtime_executions where id=$1',[execution.executionId])).rows[0].result).toBeNull();
+  const dispatch=vi.fn(async()=>{throw new Error('Stopped recovery must never dispatch');});
+  const gate=vi.fn(async()=>{throw new Error('Stopped recovery must never admit new calls');});
+  const lookup=vi.fn(async()=>{
+   const rawBody=raw(scenario==='settled-lookup-only');
+   return {rawBody,rawBodyBase64:Buffer.from(rawBody).toString('base64'),
+    sourceHash:createHash('sha256').update(rawBody).digest('hex'),httpStatus:200,complete:true,transportIssue:null};
+  });
+  const recover=()=>runtimeExecutor({database:admin,actor:async()=>f.actor,callGate:gate,
+   adapter:{dispatch,lookup}}).execute(execution.executionId);
+  const result=await recover();
+  const state=async()=>(await db.query(`select e.state,e.result,b.closed,b.cancel_requested,b.paused_reason,
+   c.settled_at,c.charged_delta,c.reserved_credits from runtime_executions e
+   join bill2_runs b on b.id=e.billing_run_id join bill2_calls c on c.run_id=b.id where e.id=$1`,
+  [execution.executionId])).rows[0];
+  if(scenario==='unknown-lookup'){
+   expect(result).toEqual({state:'cost_pending'});expect(lookup).toHaveBeenCalledTimes(1);
+   expect(await state()).toMatchObject({state:'cost_pending',result:null,closed:false,cancel_requested:false,
+    paused_reason:'user_stop',settled_at:null});
+   expect((await state()).reserved_credits).toBeGreaterThan(0);
+   expect(await rpc('runtime_pending_financial_batch',{p_actor_id:f.actor,p_limit:20}))
+    .toEqual(expect.arrayContaining([expect.objectContaining({executionId:execution.executionId,userStop:true})]));
+   expect(await recover()).toEqual({state:'cost_pending'});expect(lookup).toHaveBeenCalledTimes(1);
+  }else{
+   if(scenario==='durable-response'){
+    expect(result).toMatchObject({state:'completed',body:JSON.stringify({message:'已写😀'}),stopped:true,completeness:'stopped'});
+    expect(lookup).not.toHaveBeenCalled();
+    expect((await db.query('select item from runtime_session_history where execution_id=$1 and not internal_control order by revision',
+     [execution.executionId])).rows.map(row=>row.item)).toEqual([
+      {role:'user',content:'Synthetic stop recovery'},{role:'assistant',content:JSON.stringify({message:'已写😀'})}]);
+   }else{
+    expect(result).toEqual({state:'cancelled'});expect(lookup).toHaveBeenCalledTimes(1);
+    expect((await state()).result).toBeNull();
+   }
+   expect(await state()).toMatchObject({closed:true,charged_delta:3});
+   const ledger=async()=>(await db.query('select * from credit_transactions where bill2_run_id=$1 order by id',[execution.runId])).rows;
+   const before=await ledger();expect(await recover()).toEqual(result);expect(await ledger()).toEqual(before);
+   expect((await db.query('select credits from profiles where id=$1',[f.actor])).rows[0].credits).toBe(97);
+  }
+  expect(dispatch).not.toHaveBeenCalled();expect(gate).not.toHaveBeenCalled();
+  expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1',[execution.runId])).rows[0].n).toBe(1);
+ },30000);

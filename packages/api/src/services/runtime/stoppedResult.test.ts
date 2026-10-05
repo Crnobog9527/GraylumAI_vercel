@@ -92,3 +92,7 @@ it('demonstrates why saved provider bytes alone cannot reconstruct transmitted r
   expect(early.flush()).toMatchObject({ text: 'card', rev: 1 });
   expect(buffered.flush()).toMatchObject({ text: 'card', rev: 0 });
 });
+
+it('retains the storage capacity marker when stopping a previously fitted primary',()=>{
+ expect(stoppedResult({...base,stopAt:100,capacityLimited:true})?.completeness).toBe('length_limit');
+});

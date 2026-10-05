@@ -33,10 +33,11 @@ export function nativeVisible(body:string):string {
   } catch { return fallback(); }
 }
 export function nativeMetadata(result:Record<string,unknown>|null|undefined
-):Pick<AgentTurnOutcome,'completeness'|'organized'|'summaryOmitted'|'messageFirst'|'envelopeCompact'> {
+):Pick<AgentTurnOutcome,'stopped'|'completeness'|'organized'|'summaryOmitted'|'messageFirst'|'envelopeCompact'> {
   if(!result)return {};
   return {
-    ...(result.completeness==='complete'||result.completeness==='length_limit'?{completeness:result.completeness}:{}),
+    ...(result.stopped===true?{stopped:true}:{}),
+    ...(result.completeness==='complete'||result.completeness==='length_limit'||result.completeness==='stopped'?{completeness:result.completeness}:{}),
     ...(typeof result.organized==='boolean'?{organized:result.organized}:{}),
     ...(typeof result.summaryOmitted==='boolean'?{summaryOmitted:result.summaryOmitted}:{}),
     ...(typeof result.messageFirst==='boolean'?{messageFirst:result.messageFirst}:{}),
@@ -46,7 +47,7 @@ export function nativeMetadata(result:Record<string,unknown>|null|undefined
 
 
 export function prepareNativePrimary(body:string,metadata:Record<string,unknown>,options:{
-  envelopeOrder?:string;length:boolean;attachedOrganizer:boolean;executionId:string;
+  envelopeOrder?:string;appendCard?:boolean;length:boolean;attachedOrganizer:boolean;executionId:string;
 }) {
   let validEnvelope = false;
   if(options.envelopeOrder){
@@ -58,7 +59,8 @@ export function prepareNativePrimary(body:string,metadata:Record<string,unknown>
   }
   const fitted=fitNativeResult({kind:'usable_result',evidenceRef:options.executionId,evidenceHash:'0'.repeat(64),body,
     ...metadata,completeness:options.length?'length_limit' as const:'complete' as const},
-    {attachedOrganizer:options.attachedOrganizer,...(validEnvelope?{validateEnvelope:(value:unknown)=>stepEnvelope.parse(value)}:{})});
+    {attachedOrganizer:options.attachedOrganizer,preserveCardMessage:options.appendCard,
+      ...(validEnvelope?{validateEnvelope:(value:unknown)=>stepEnvelope.parse(value)}:{})});
   let envelope:Record<string,unknown>|null=null;
   try{envelope=JSON.parse(fitted.body);}catch{/* Plain T1 body. */}
   if(!options.envelopeOrder && envelope?.card)questionToolCardSchema.parse(envelope.card);

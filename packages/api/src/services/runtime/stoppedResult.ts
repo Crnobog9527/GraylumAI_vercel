@@ -14,11 +14,12 @@ export type StopProjectionInput = {
   executionId: string;
   /** Trusted frozen format, never inferred from client input or the result itself. */
   format: 'plain' | 'agent' | 'step';
-  body: string; stopAt: number;
+  body: string; stopAt: number; appendCard?: boolean;
   /** Client source is optional for old clients; the expected source is receipt-derived. */
   source?: NativeTextSource;
   expectedSource: NativeTextSource;
   primaryComplete: boolean;
+  capacityLimited?: boolean;
   attachedOrganizer: boolean;
   summary?: string;
 };
@@ -42,7 +43,7 @@ export function stoppedResult(input: StopProjectionInput): StoppedResult | null 
       if (envelope?.format !== AGENT_TURN_FORMAT || typeof envelope.message !== 'string') return null;
       const card = envelope.card === null ? null
         : (envelope.card?.message === undefined ? questionCardSchema : questionToolCardSchema).parse(envelope.card);
-      if (card && 'message' in card && card.message !== envelope.message) return null;
+      if (!input.appendCard && card && 'message' in card && card.message !== envelope.message) return null;
       visible = envelope.message;
       rebuild = message => agentTurnBody(message, message === visible ? card : null, 262144);
     }
@@ -52,10 +53,10 @@ export function stoppedResult(input: StopProjectionInput): StoppedResult | null 
     const base: StoppedResult = {
       kind: 'usable_result', evidenceRef: input.executionId, evidenceHash: '0'.repeat(64),
       body: rebuild(message), stopped: true,
-      completeness: input.primaryComplete && !truncated ? 'complete' : 'stopped',
+      completeness: input.capacityLimited && !truncated ? 'length_limit' : input.primaryComplete && !truncated ? 'complete' : 'stopped',
     };
     let result: StoppedResult = fitNativeResult(base, {
-      attachedOrganizer: input.attachedOrganizer, ...(validateEnvelope ? { validateEnvelope } : {}),
+      attachedOrganizer: input.attachedOrganizer, preserveCardMessage: input.appendCard, ...(validateEnvelope ? { validateEnvelope } : {}),
     });
     // Capacity truncation also invalidates a question card and its unseen options.
     if (input.format === 'agent' && result.body !== base.body) {
