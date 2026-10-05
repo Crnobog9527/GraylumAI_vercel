@@ -3,7 +3,7 @@
 适用于所有实现代理（Claude Code、Codex）和人工开发。流程、风险分级和审批以
 [AGENTS.md](../AGENTS.md) 为准；本文件只规定代码怎么写、放在哪里、怎么检查，
 两者冲突时以 AGENTS.md 为准。修改本文件，或修改 `scripts/check-code-size.mjs`
-的限制和检查范围，属于治理变更，按 AGENTS.md 第 9 节由 Owner 批准合并。
+的限制和检查范围，属于规则变更，按 AGENTS.md 第 1 节由 Owner 批准合并。
 
 ## 1. 技术栈
 
@@ -22,7 +22,7 @@
 | 限流 | Upstash Redis（`@upstash/ratelimit`） | `packages/api` |
 | 日志与监控 | pino、Sentry、Vercel Analytics | `packages/api/src/lib/logger.ts` |
 | 测试 | Vitest 4、Playwright、node:test、Ruby minitest（CI 合约）、SQL 测试 | 见第 7 节 |
-| 部署 | Vercel；staging 与 production 使用各自独立的 Vercel 和 Supabase 项目 | AGENTS.md 第 4 节 |
+| 部署 | Vercel；staging 与 production 使用各自独立的 Vercel 和 Supabase 项目 | AGENTS.md 第 0 节 |
 
 ## 2. 代码放在哪里
 
@@ -57,9 +57,9 @@
 - 改小了基线里的文件后，运行 `node scripts/check-code-size.mjs --update`，把降低后的
   基线一起提交。这个命令只会降低或删除条目，永远不会调高。
 - 为了不超限而拆分文件，属于"最小正确改动"的一部分，不算扩大范围（AGENTS.md 第 5 节）。
-- 只有当文件属于高风险领域（AGENTS.md 第 4 节，例如计费、支付、鉴权、数据库），并且
-  在同一个改动里拆分会扩大这个改动的风险时，才可以手动调高或新增基线条目，同时在 PR
-  描述里写明原因。没有理由的调高是审查阻断项。
+- 手动调高或新增基线条目等于放宽检查，按 AGENTS.md 第 1 节需要 Owner 批准。只有当文件
+  属于计费、支付、鉴权、数据库等领域，并且在同一个改动里拆分会扩大这个改动的风险时，
+  才可以申请，同时在 PR 描述里写明原因。没有批准的调高是审查阻断项。
 - 移动或改名基线里的文件时，把它的条目原样挪到新路径。
 
 超限时怎么拆：
@@ -95,7 +95,7 @@
   不承载新的业务结构；基线和衔接脚本的例外规则见
   [baseline/README.md](../packages/db/baseline/README.md)。`db:push` 已退役。
   `packages/db/schema.ts` 只作类型参考，生产代码不引用它；结构以 `migrations/` 和
-  `baseline/` 为准。数据库改动属于高风险（AGENTS.md 第 4 节）。
+  `baseline/` 为准。数据库改动的验证要求见 AGENTS.md 第 4 节，上正式环境须 Owner 批准（第 1 节）。
 - 对外返回稳定的错误码（例如 `OPC_*`、`RUNTIME_*`），由前端映射成用户能看懂的提示；
   内部异常用 `packages/api/src/lib/publicError.ts` 包装，不把原始错误返回给前端。
 - 服务端日志用 `packages/api/src/lib/logger.ts`。新增必需的环境变量要加到
@@ -188,7 +188,7 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读
 - 新逻辑要配单元测试，放在源码旁边的 `*.test.ts`；已经使用 `__tests__/` 的目录沿用
   原来的写法。修 bug 时先写一个能复现问题的测试。
 - 运行时或界面改动还需要浏览器验证；数据库、权限、支付等改动的验证要求见 AGENTS.md
-  第 6 节。
+  第 4 节。
 
 ## 8. 文档同步
 

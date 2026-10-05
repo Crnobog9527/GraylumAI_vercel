@@ -920,9 +920,9 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 - 用户多了、超出包含额度以后，OpenAI Vector Store 每多 1 GB 的月费是 Supabase Storage 的 100 多倍，还按检索次数收费，并把数据锁在一家供应商。**不采用。**
 - 真正的成本在模型调用：生成文风画像（每个用户偶尔一次）；写作时多带约 2–3 千 token 的文风说明。这两项都走现有 BILL2，按 BILL-PAYG 名义费用规则计费（第 2.1 节第 41 项）。
 
-### 5.5 需要单独批准的高风险部分
+### 5.5 需要重点验证的敏感部分
 
-新数据表和存储桶策略（数据库迁移）、Word 文字提取库（新增依赖，解析不可信文件）、Runtime 读取文风画像（涉及上下文与计费）。这些 PR 实施时需要 Owner 回复"同意合并"。
+新数据表和存储桶策略（数据库迁移）、Word 文字提取库（新增依赖，解析不可信文件）、Runtime 读取文风画像（涉及上下文与计费）。这些 PR 按 AGENTS.md 第 4 节验证、审查后由 AI 合入 staging；上正式环境按第 1 节请 Owner 批准。
 
 <a id="learning"></a>
 ## 6. Skill 的数据基础与未来"自我进化"
@@ -991,7 +991,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 
 ### 7.1 阶段和任务
 
-"风险"一列按 AGENTS 第 4 节：**高** = 合并前需要 Owner 回复"同意合并"；**普通** = 质量达标后可按 staging 自动交付授权合并。每个任务只有一个风险级别；实施中如果普通任务需要出现高风险改动（依赖、权限、数据库、计费、金额、CI 等），把那部分拆成单独的高风险 PR，不混在普通 PR 里。
+"风险"一列标出任务是否涉及依赖、权限、数据库、计费、金额、CI 等敏感部分（**高**）或不涉及（**普通**），用来提醒按 AGENTS.md 第 4 节做对应的验证。staging 上的合并都由 AI 验证、审查后完成，不再按风险级别请 Owner 批准；上正式环境和放宽检查按 AGENTS.md 第 1 节由 Owner 批准（2026-10-05 规则精简）。实施中碰到敏感部分时，尽量拆成单独的 PR，方便审查。
 
 "规模"和"预计 PR 数"是实施前的粗略估计，用来判断大概要做多少事、你要批准多少次，实施方案里会细化。每个任务开工前必读的章节列在对应的实施说明里。
 
@@ -1035,7 +1035,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | STAGING-HOST-CLEANUP | 2026-10-01（第 37 项）：清理残留的 `graylumai-staging.vercel.app` 引用。#571（测试、脚本默认值、示例配置、部署文档）、#605（文档入口）处理了大部分。剩余部分（staging `1563a44d` 核对）：6 个跟踪文件含旧域名：`stagingEnvironment.ts` 的 staging 环境名单（删掉会改变测试窗口准入，属于高风险，要另开 high PR）及其测试 `stagingEnvironment.test.ts`、`stagingAdmission.test.ts`、`runtime.integration.ts`、`run-workbench.mjs`，以及本文中的 Owner 原话和历史记录（保留）。Stripe / Waffo 沙箱回调、Supabase Site URL 和邮件回调由 Owner 自行检查，待 Owner 确认 | — | 普通；`stagingEnvironment.ts` 部分为高 | 小（剩余 1 个 high PR） | — |
 | | DATA-ERASURE | 账号注销与数据删除，以及 D7 承诺的单条删除（对话回答、会话、已保存成果），都在公开上线前完成并列入验收。**设计先行**：在 AC-2 新建任何表之前先写出删除规则，实现在公开上线前完成（设计 #474，E1–E11 已决定，见第 2.1 节第 14 项）。见 [实施说明](tasks/DATA-ERASURE.md)。之后任何新增保存用户私有内容的任务，都要把新数据接入注销流程并列入验收。**实施拆分**：PR-A、PR-B1a、PR-B1b、PR-E、B2a，注销期间在途执行与账务收尾（方案 #598、实施 #611，是 BILL-PAYG 实施的前置条件，第 42 项），之后 B2b → PR-C（删除 Auth 账号）；#538 第 ③ 步等 PR-C 完成；正式库建库约束见第 9.3 节 | —（设计部分先于 AC-2） | 高 | 大 / 3–5 | — |
 | | COST-REPORT | 后台成本报表的金额、估算和查询修正（原清单 06）。（#513） | — | 高 | 小 / 1 | 完成 |
-| | PII-REGEX | 接手 PR #333（邮箱类个人信息匹配的性能加固，改的是安全过滤规则）：基于最新 staging 更新后重新审查、由 Owner 批准合并（第 8.4 节第 6 项）。由 #500 在最新 staging 上重新实现，#333 关闭 | — | 高 | 小 / 1 | 完成 |
+| | PII-REGEX | 接手 PR #333（邮箱类个人信息匹配的性能加固，改的是安全过滤规则）：基于最新 staging 更新后重新审查，按 AGENTS.md 第 4 节验证、审查后合入 staging（第 8.4 节第 6 项）。由 #500 在最新 staging 上重新实现，#333 关闭 | — | 高 | 小 / 1 | 完成 |
 | **3 差异化功能** | FUSION-REVIEW | 定稿报告多模型评审（第 4 节，见 [实施说明](tasks/FUSION.md)）；结果接入账号注销。对外名称"多模型专家评审团"，上线默认只给 Gold（第 51 项） | AC-3、REPORT-GEN、RUNTIME-PROD、ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 | — |
 | | LIB-DOCS | 资料库上传、"我的文档 / 语料库"、真正删除、按会员等级的总存储空间和系统级文件数量保护上限（见 [实施说明](tasks/LIBRARY-VOICE.md)）；接入账号注销；设计上传权限时一并整理共享 Storage 的授权（第 8.5 节）。第一步是 LIB-1 依赖及安全夹具（#549）；与 AC-2 设计定位导师查询工具（第 31 项） | ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 | — |
 | | VOICE | 文风画像生成、确认和写作注入；接入账号注销 | LIB-DOCS、AGENT-CORE、DATA-ERASURE、RUNTIME-PROD（资料内容发给模型前，"不用于训练"已由服务端强制） | 高 | 中 / 2–3 | — |
@@ -1115,7 +1115,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO（含微信一次性会员）；PAYWALL（依赖 REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-WAFFO、ENTITLEMENTS 和已入库的付费墙设计定稿 v25，须在 REL-1 之前完成）；EXPERT-CONSULT（依赖 PAYWALL、DATA-ERASURE，须在 REL-1 之前完成）；PUBLISH-MONITOR（依赖 RESEARCH-TOOLS 和 Post for Me 实测、条款核对，须在 REL-1 之前完成，D1 范围变更） | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
 | N4 收口 | LEGACY-CLOSE、V3-M3；公开上线前请 Owner 决定 MODERATION 正式实现时间 | 完整验收；REL-1 和生产另行批准 |
 
-每批由 Owner 选定后开工，批次内由 Agent 自主排序、测试、修复，完成后停下，不自动开始下一批（AGENTS 第 5 节）。
+每批由 Owner 选定后开工，批次内由 Agent 自主排序、测试、修复，完成后停下，不自动开始下一批（AGENTS.md 第 2 节）。
 
 ### 7.5 任务编号对照
 
@@ -1251,7 +1251,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 
 新增小任务 PII-REGEX（高风险，改的是安全过滤规则）：
 
-6. 接手 PR #333，基于最新 staging 更新后重新审查，由 Owner 批准合并。
+6. 接手 PR #333，基于最新 staging 更新后重新审查，按 AGENTS.md 第 4 节验证、审查后合入 staging。
 
 ### 8.5 计划外完成的安全和清理（2026-09-28—10-03）
 
@@ -1330,7 +1330,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
   > 接受 #538 机器人第二轮的 P1：正式库由迁移全新建立、不迁移 staging 测试数据，没有存量领取赠送的账号；staging 测试账号的缺口写进 README，不做回填。
 
   这项接受仅在正式库由迁移全新建立、不迁移已有用户数据的前提下成立，不是回填问题已修复。**如果以后改为迁移已有用户数据，本次接受失效，必须先补回填再上线**；不能将此接受用于其他防刷缺口。staging 的旧测试账号不做回填，缺口与验收边界已记录在 [PR-E README](../../packages/db/tests/erasure-e-README.md)。
-- **仍然保留**：正式环境密钥和配置逐项确认；上线当天有上限的真实小额支付、退款、模型调用和同日对账；AGENTS 第 10 节要求的上线前 Owner 明确批准。
+- **仍然保留**：正式环境密钥和配置逐项确认；上线当天有上限的真实小额支付、退款、模型调用和同日对账；AGENTS.md 第 1 节要求的上线前 Owner 明确批准。
 
 <a id="decisions"></a>
 ## 10. Owner 决定事项
