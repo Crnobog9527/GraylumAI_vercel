@@ -13,6 +13,8 @@ import type { LiveReply, LiveTextSource } from "./agent-turn-display";
 export const STOP_SAVING_NOTICE = "已停止，正在保存已显示的内容…";
 export const STOPPED_NOTICE = "已停止，保留了停止前显示的内容。";
 export const STOPPED_UNORGANIZED_NOTICE = "已停止，本轮未整理";
+/** Second line under STOPPED_NOTICE when a cut reply was also not organized. */
+export const UNORGANIZED_NOTICE = "本轮未整理";
 export const STOPPED_EMPTY_NOTICE = "已停止，本轮没有保存回复。";
 export const STOP_UNCONFIRMED_NOTICE = "停止请求暂未确认。已显示的内容保留，请稍后查看这条回复的结果，不会重复扣费。";
 
@@ -111,11 +113,15 @@ export function stopFollowUpDelay(attempt: number) {
   return STOP_FOLLOW_UP_DELAYS_MS[attempt] ?? null;
 }
 
-/** The notice of a stopped reply's saved result, or null. A cut reply never keeps its card. */
+/**
+ * The notice of a stopped reply's saved result, or null. A cut reply never keeps its card.
+ * A cut reply that was also not organized says both, the cut first.
+ */
 export function stoppedResultNotice(result: { stopped?: boolean; completeness?: string; organized?: boolean }) {
   if (result.stopped !== true) return null;
-  if (result.organized === false) return STOPPED_UNORGANIZED_NOTICE;
-  return result.completeness === "stopped" ? STOPPED_NOTICE : null;
+  const cut = result.completeness === "stopped";
+  if (result.organized === false) return cut ? STOPPED_NOTICE + "\n" + UNORGANIZED_NOTICE : STOPPED_UNORGANIZED_NOTICE;
+  return cut ? STOPPED_NOTICE : null;
 }
 
 /** A stopped reply that was cut before its end shows no question card. */

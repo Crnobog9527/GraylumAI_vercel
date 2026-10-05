@@ -197,7 +197,8 @@ export function mentorReplyDisplay(source: MentorReplySource): { text: string; c
     ? { tone: "status", text: HISTORY_OMITTED_NOTICE } : undefined;
   const body = readAgentTurnBody(source.body);
   const card = stoppedCut(source) ? null : body.card ?? source.liveCard ?? null;
-  if (source.liveText) return { text: source.liveText, card, ...(historyNotice ? { notice: historyNotice } : {}) };
+  // A live reply owns its notice in the tail (mentorTailNotices), even before its first text.
+  if (source.liveText !== undefined) return { text: source.liveText, card, ...(historyNotice ? { notice: historyNotice } : {}) };
   // While a stop is saving, only what this tab froze is shown, never the unseen full checkpoint (primaryBody).
   if (stopSaving(source)) return { text: "", card: null, notice: unavailableNotice(source) };
   const cut = source.unavailableReason === "output_truncated" ? OUTPUT_TRUNCATED_NOTICE
