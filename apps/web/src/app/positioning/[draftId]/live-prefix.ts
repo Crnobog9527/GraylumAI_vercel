@@ -1,12 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { codePoints, startLiveReply, type LiveReply } from "./agent-turn-display";
+import { codePoints, startLiveReply, type LiveReply, type LiveTextSource } from "./agent-turn-display";
 
 /**
  * Same-tab reload keeps the part of a streaming reply the user already saw
- * (CHAT-NATIVE-OUTPUT §2.4). Only displayed text and its `rev` are stored, in
- * this tab's sessionStorage; never a card, an option or a private field. The
- * stored prefix is display only: it is never sent to the server and the final
- * result always replaces it.
+ * (CHAT-NATIVE-OUTPUT §2.4). Only displayed text, its `rev` and the source of
+ * its latest snapshot are stored, in this tab's sessionStorage; never a card,
+ * an option or a private field. `stopped` marks a reply the user stopped, so a
+ * reload keeps it frozen and does not offer 停止 again. The stored prefix is
+ * display only and the final result always replaces it; only a stop pressed
+ * on the restored prefix sends its length and source (§2.4 item 4).
  *
  * Restoring needs proof that this tab itself reloaded. On `pagehide` the page
  * writes the latest prefix with `reload: true`. A duplicated tab or a window
@@ -15,7 +17,9 @@ import { codePoints, startLiveReply, type LiveReply } from "./agent-turn-display
  * a slow reload restores the prefix however long loading takes. The new page
  * consumes the mark at once, so a later copy of this tab cannot reuse it.
  */
-export type LivePrefix = { executionId: string; text: string; rev: number; reload?: true };
+export type LivePrefix = {
+  executionId: string; text: string; rev: number; reload?: true; source?: LiveTextSource; stopped?: true;
+};
 
 type PrefixStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
@@ -40,7 +44,8 @@ function remove(storage: PrefixStorage, key: string) {
  */
 export function saveLivePrefix(storage: PrefixStorage, draftId: string, reply: LiveReply, reload = false): boolean {
   const key = livePrefixKey(draftId);
-  const value: LivePrefix = { executionId: reply.executionId, text: reply.text, rev: reply.rev, ...(reload ? { reload: true } : {}) };
+  const value: LivePrefix = { executionId: reply.executionId, text: reply.text, rev: reply.rev, ...(reload ? { reload: true } : {}),
+    ...(reply.source ? { source: reply.source } : {}), ...(reply.stopped ? { stopped: true } : {}) };
   try {
     storage.setItem(key, JSON.stringify(value));
     return true;
@@ -60,7 +65,9 @@ function parsePrefix(raw: string | null): LivePrefix | null {
     const value = JSON.parse(raw) as Record<string, unknown>;
     if (!value || typeof value.executionId !== "string" || typeof value.text !== "string" ||
       !Number.isSafeInteger(value.rev) || (value.rev as number) < 0) return null;
-    return { executionId: value.executionId, text: value.text, rev: value.rev as number, ...(value.reload === true ? { reload: true } : {}) };
+    const source = value.source === "assistant" || value.source === "message" || value.source === "final" ? value.source : undefined;
+    return { executionId: value.executionId, text: value.text, rev: value.rev as number, ...(value.reload === true ? { reload: true } : {}),
+      ...(source ? { source } : {}), ...(value.stopped === true ? { stopped: true } : {}) };
   } catch {
     return null;
   }
@@ -72,7 +79,7 @@ function parsePrefix(raw: string | null): LivePrefix | null {
  * waiting state.
  */
 export function markLiveReload(storage: PrefixStorage, draftId: string, reply: LiveReply | null) {
-  if (!reply || !reply.text || reply.phase === "incomplete") return;
+  if (!reply || (!reply.text && !reply.stopped) || reply.phase === "incomplete") return;
   saveLivePrefix(storage, draftId, reply, true);
 }
 
@@ -106,12 +113,14 @@ export function takeLivePrefix(storage: PrefixStorage, draftId: string): LiveRep
   } catch {
     return null;
   }
-  if (!prefix?.reload || !prefix.text) {
+  // A stopped reply is kept even when nothing was shown yet: the reload must not offer 停止 again.
+  if (!prefix?.reload || (!prefix.text && !prefix.stopped)) {
     remove(storage, key);
     return null;
   }
   const reply: LiveReply = { ...startLiveReply(prefix.executionId), text: prefix.text, points: codePoints(prefix.text),
-    rev: prefix.rev, phase: "waiting", stalled: true };
+    rev: prefix.rev, phase: "waiting", stalled: true, ...(prefix.source ? { source: prefix.source } : {}),
+    ...(prefix.stopped ? { stopped: true } : {}) };
   if (!saveLivePrefix(storage, draftId, reply)) return null;
   return reply;
 }

@@ -8,6 +8,7 @@ import {
 } from "@repo/api/src/shared/agentTurn";
 import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
 import { isPaygWaiting } from "@/lib/payg-wait";
+import { STOP_SAVING_NOTICE, STOPPED_EMPTY_NOTICE, stoppedCut, stoppedResultNotice, stopSaving, userStopped } from "./stop-reply";
 
 /** Under a reply that stopped at the single-answer length limit (completeness `length_limit`), outside its text. */
 export const LENGTH_LIMIT_NOTICE = "这次回答达到单次长度上限，已在这里结束。需要的话，可以发送“继续”让我接着写。";
@@ -23,15 +24,20 @@ export function focusReply() {
   document.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${MENTOR_REPLY_LABEL}"]`)?.focus();
 }
 
+/** Where the shown text comes from, as named by its latest snapshot (offset 0); the stop request repeats it. */
+export type LiveTextSource = "assistant" | "message" | "final";
+
 /**
  * Display-only progress of one streaming execution. Never business state.
  * `points` is the Unicode code point count of `text` (the unit of `textDelta`
  * offsets); `rev` is the snapshot revision the text belongs to. A `stalled`
- * reply stops growing until the next snapshot or the final result.
+ * reply stops growing until the next snapshot or the final result. `source`
+ * comes from the latest snapshot. A `stopped` reply (the user pressed 停止)
+ * ignores every later event until the saved result replaces it.
  */
 export type LiveReply = {
   executionId: string; text: string; phase: string; card: QuestionCard | null;
-  rev: number; points: number; stalled: boolean;
+  rev: number; points: number; stalled: boolean; source?: LiveTextSource; stopped?: boolean;
 };
 
 const knownPhases = new Set(["mentor", "reading", "organizer", "saving"]);
@@ -63,10 +69,18 @@ const isCount = (value: unknown): value is number => Number.isSafeInteger(value)
  * text exactly (same `rev`, offset equal to the shown code points); otherwise
  * it is dropped and the reply stops growing until the next snapshot or result.
  */
-function afterDelta(old: LiveReply, event: { text: string; offset: number; rev: number }): LiveReply {
+const sources = new Set<unknown>(["assistant", "message", "final"]);
+
+function afterDelta(old: LiveReply, event: { text: string; offset: number; rev: number; source?: unknown }): LiveReply {
   if (typeof event.text !== "string" || !isCount(event.offset) || !isCount(event.rev))
     return old.stalled ? old : { ...old, stalled: true };
-  if (event.offset === 0) return { ...old, text: event.text, points: codePoints(event.text), rev: event.rev, stalled: false };
+  if (event.offset === 0) {
+    const next: LiveReply = { ...old, text: event.text, points: codePoints(event.text), rev: event.rev, stalled: false };
+    // A snapshot without a known source (an older server) leaves none: the stop then saves nothing (§4.2 e).
+    if (sources.has(event.source)) next.source = event.source as LiveTextSource;
+    else delete next.source;
+    return next;
+  }
   if (old.stalled) return old;
   if (event.rev !== old.rev || event.offset !== old.points) return { ...old, stalled: true };
   return { ...old, text: old.text + event.text, points: old.points + codePoints(event.text) };
@@ -76,10 +90,11 @@ function afterDelta(old: LiveReply, event: { text: string; offset: number; rev: 
  * Apply one streamed event to the live reply of `executionId`. A legacy `text`
  * event carries the whole reply so far and replaces the shown text; a
  * `textDelta` follows `afterDelta`. Unknown phases and events are ignored, and
- * a streamed card is validated again because it is model output.
+ * a streamed card is validated again because it is model output. A stopped
+ * reply keeps exactly what was on screen when 停止 was pressed.
  */
 export function liveReplyAfter(old: LiveReply | null, executionId: string, event: AgentTurnEvent): LiveReply | null {
-  if (!old || old.executionId !== executionId) return old;
+  if (!old || old.executionId !== executionId || old.stopped) return old;
   if (event.type === "text") return { ...old, text: event.text, points: codePoints(event.text), stalled: false };
   if (event.type === "textDelta") return afterDelta(old, event);
   if (event.type === "phase") return knownPhases.has(event.phase) ? { ...old, phase: event.phase } : old;
@@ -94,6 +109,7 @@ export function livePhaseNotice(phase: string) {
   if (phase === "saving") return "正在保存结果并核对费用…";
   if (phase === "incomplete") return "回复尚未完成；原请求已保留，请按当前状态继续核对，不会自动重发。";
   if (phase === "waiting") return "正在回复…";
+  if (phase === "stopped") return STOP_SAVING_NOTICE;
   return "正在生成；部分正文尚未完成，费用尚未结算。";
 }
 
@@ -110,6 +126,10 @@ export type MentorReplySource = {
   historyOmitted?: boolean;
   /** Result metadata of a native-output execution, when the history carries it. */
   completeness?: string;
+  stopped?: boolean;
+  organized?: boolean;
+  /** The run's public billing view; `pausedReason: "user_stop"` marks a turn the user stopped. */
+  billing?: { pausedReason?: string | null; cancelRequested?: boolean } | null;
   /** This execution owns the server execution slot. */
   active: boolean;
   busy: boolean;
@@ -119,6 +139,9 @@ export type MentorReplySource = {
 export type ReplyNotice = { tone: "status" | "warning"; text: string; busy?: boolean };
 
 function unavailableNotice(source: MentorReplySource): ReplyNotice {
+  // A stopped turn is saving what was shown, never failed, until its result is final.
+  if (stopSaving(source)) return { tone: "status", text: STOP_SAVING_NOTICE, busy: true };
+  if (source.state === "cancelled" && userStopped(source)) return { tone: "status", text: STOPPED_EMPTY_NOTICE };
   if (source.state === "cost_pending" && !source.active)
     return { tone: "warning", text: "本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。" };
   if (source.state === "cancelled" && source.unavailableReason === "provider_rejected")
@@ -155,12 +178,14 @@ export function mentorReplyDisplay(source: MentorReplySource): { text: string; c
   const historyNotice: ReplyNotice | undefined = source.historyOmitted
     ? { tone: "status", text: HISTORY_OMITTED_NOTICE } : undefined;
   const body = readAgentTurnBody(source.body);
-  const card = body.card ?? source.liveCard ?? null;
+  const card = stoppedCut(source) ? null : body.card ?? source.liveCard ?? null;
   if (source.liveText) return { text: source.liveText, card, ...(historyNotice ? { notice: historyNotice } : {}) };
   const cut = source.unavailableReason === "output_truncated" ? OUTPUT_TRUNCATED_NOTICE
     : source.completeness === "length_limit" ? LENGTH_LIMIT_NOTICE : null;
-  const truncated: ReplyNotice | undefined =
-    cut ? { tone: "warning", text: [cut, historyNotice?.text].filter(Boolean).join("\n") } : undefined;
+  const stopped = stoppedResultNotice(source);
+  const truncated: ReplyNotice | undefined = cut
+    ? { tone: "warning", text: [cut, stopped, historyNotice?.text].filter(Boolean).join("\n") }
+    : stopped ? { tone: "status", text: [stopped, historyNotice?.text].filter(Boolean).join("\n") } : undefined;
   const withNotice = (text: string, notice: ReplyNotice | undefined) => (notice ? { text, card, notice } : { text, card });
   // A valid envelope always has text, a card or both; a card alone needs no text.
   if (body.kind === "envelope") return withNotice(envelopeText(source.body, body), truncated ?? historyNotice);

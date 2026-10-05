@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { CHAT_ACTION, type ChatNotice } from "@/components/chat/ChatInlineNotice";
 import { livePhaseNotice, type ReplyNotice } from "./agent-turn-display";
+import { stopSaving } from "./stop-reply";
 
 /** The failed explicit retry of a retained request; the retry notice already says the same. */
 export const RETRY_PENDING_NOTICE = "原请求仍未确认结果，已继续保留。请稍后再点“重试”，不会重复发送或重复扣费。";
@@ -8,13 +9,15 @@ export const RETRY_PENDING_NOTICE = "原请求仍未确认结果，已继续保�
 type Action = { onClick: () => void; disabled?: boolean };
 
 /**
- * Notices under the last mentor turn, in the conversation: stream progress, the pending reply,
+ * Notices under the last mentor turn, in the conversation: stream progress (with 停止 while it can be stopped), the pending reply,
  * unsaved form edits, the retry of a retained request, and the page's error and notice.
  * One event is one notice: "正在回复…" only when no open turn or live stream already says so,
  * and an error is not repeated under its retry notice or under the last turn that already shows it.
  */
 export function mentorTailNotices(ctx: {
   livePhase: string | null;
+  /** 停止 for the live reply (use-live-reply.ts), or null. */
+  stop?: Action | null;
   replying: boolean;
   /** The last turn already shows its own state notice (for example 正在回复…). */
   lastTurnOpen: boolean;
@@ -29,7 +32,8 @@ export function mentorTailNotices(ctx: {
   const notices: ChatNotice[] = [];
   if (ctx.livePhase) {
     const incomplete = ctx.livePhase === "incomplete";
-    notices.push({ id: "live", tone: incomplete ? "warning" : "status", busy: !incomplete, text: livePhaseNotice(ctx.livePhase) });
+    notices.push({ id: "live", tone: incomplete ? "warning" : "status", busy: !incomplete, text: livePhaseNotice(ctx.livePhase),
+      ...(ctx.stop && !incomplete ? { actions: [{ label: CHAT_ACTION.stop, ...ctx.stop }] } : {}) });
   } else if (ctx.replying && !ctx.lastTurnOpen) notices.push({ id: "replying", tone: "status", busy: true, text: "正在回复…" });
   if (ctx.saving) notices.push({ id: "saving", tone: "status", text: "正在保存最新修改。保存完成前不会确认步骤或采用计划。" });
   if (ctx.recovery)
@@ -48,4 +52,12 @@ export function mentorTurnNotice(id: string, reply: ReplyNotice | undefined, sta
   const base = reply ?? (stalled ? { tone: "warning" as const, text: "回复暂未完成，请继续核对。" } : null);
   if (!base) return null;
   return { id, ...base, ...(stalled ? { actions: [{ label: CHAT_ACTION.retry, ...stalled }] } : {}) };
+}
+
+/**
+ * The session's open turn that stopped advancing and needs the user's "重试". A turn the user
+ * stopped is still saving what was shown (stop-reply.ts): it offers no retry.
+ */
+export function turnNeedsRetry(execution: { state: string; billing?: { pausedReason?: string | null; cancelRequested?: boolean } | null }) {
+  return !["completed", "cancelled", "running"].includes(execution.state) && !stopSaving(execution);
 }

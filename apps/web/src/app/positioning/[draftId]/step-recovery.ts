@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { parseStepEnvelope, type MentorStepEnvelope } from "./mentor-turn";
+import { stopSaving } from "./stop-reply";
 
 /**
  * After a reload, a tab switch or a lost connection the page no longer owns
@@ -27,7 +28,13 @@ export type RecoveryExecution = {
   executionId: string;
   state: string;
   request?: { requestId?: string } | null;
+  billing?: { pausedReason?: string | null; cancelRequested?: boolean } | null;
 };
+
+/** Still advancing: running, or stopped by the user and still saving the shown text (stop-reply.ts). */
+function progressing(execution: RecoveryExecution | { state: string }) {
+  return PROGRESSING_STATES.includes(execution.state) || stopSaving(execution);
+}
 export type RecoveryHistory = {
   activeExecution?: string | null;
   executions?: RecoveryExecution[] | null;
@@ -93,8 +100,8 @@ export function envelopeRecovery(
     ? executions.find(execution => execution.executionId === history.activeExecution) ?? { state: "running" }
     : null;
   const execution = envelopeExecution(history, envelope.parsed);
-  if (execution && PROGRESSING_STATES.includes(execution.state)) return "wait";
-  if (active && PROGRESSING_STATES.includes(active.state)) return "wait";
+  if (execution && progressing(execution)) return "wait";
+  if (active && progressing(active)) return "wait";
   if (execution) return TERMINAL_STATES.includes(execution.state) && !active ? "auto" : "user";
   return elapsedMs < UNMATCHED_POLL_MS ? "wait" : "user";
 }
@@ -117,7 +124,7 @@ export function historyPollInterval(
   if (!history) return failedReads > 0 && failedReads < HISTORY_RETRY_LIMIT ? HISTORY_RETRY_MS : false;
   if (history.activeExecution) {
     const active = (history.executions ?? []).find(execution => execution.executionId === history.activeExecution);
-    if (!active || PROGRESSING_STATES.includes(active.state)) return HISTORY_POLL_MS;
+    if (!active || progressing(active)) return HISTORY_POLL_MS;
   }
   return envelopes.some(envelope => envelopeRecovery(history, envelope, elapsedMs) === "wait") ? HISTORY_POLL_MS : false;
 }

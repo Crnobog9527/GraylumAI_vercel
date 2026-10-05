@@ -21,7 +21,7 @@ import { OpenQuestionRecord, OTHER_PLACEHOLDER, QuestionCardView } from "@/compo
 import { isDefiniteConfirmConflict } from "./confirm-conflict";
 import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
 import { CHAT_ACTION, ChatInlineNotice, ChatNoticeList, ChatPendingStatus } from "@/components/chat/ChatInlineNotice";
-import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE } from "./mentor-notices";
+import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRetry } from "./mentor-notices";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { useLiveReply } from "./use-live-reply";
 import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, type MentorRequest, type MentorStepEnvelope,
@@ -214,7 +214,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [planDays, setPlanDays] = useState(7);
   const history = trpc.runtime.view.useQuery({ sessionId: read.data?.sessionId ?? "" },
     { enabled: Boolean(read.data?.sessionId), refetchInterval: useHistoryPolling(draftId, read.data?.snapshot?.workflow.steps ?? []) });
-  const live = useLiveReply(draftId, history.data), liveReply = live.reply;
+  const live = useLiveReply(draftId, history.data, setError), liveReply = live.reply;
   const payg = usePaygResume(() => Promise.all([read.refetch(), history.refetch(), utils.credits.getBalance.invalidate()]));
   const [activeStep, setActiveStep] = useState<string | null>(null);
   const [activeQuestions, setActiveQuestions] = useState<Record<string, string>>({});
@@ -1920,14 +1920,14 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                           )}
                           {/* Polling follows a running turn; the retry is for one that stopped advancing. */}
                           <ChatNoticeList notices={[...payg.turnNotices(execution, busy), mentorTurnNotice(execution.executionId, reply.notice,
-                            !busy && execution.executionId === history.data?.activeExecution && !["completed", "cancelled", "running"].includes(execution.state)
+                            !busy && execution.executionId === history.data?.activeExecution && turnNeedsRetry(execution)
                             ? { onClick: () => void run(() => execute.mutateAsync({ executionId: execution.executionId })) } : null)]}/>
                         </div>
                       );
                     })}
                     {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<div data-message-role="user" data-request-id={pendingBubble.requestId} className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3"><span>你 · {d.information[pendingBubble.stepId]?.schema.find((f:{id:string;title:string})=>f.id===pendingBubble.questionId)?.title}</span><p className={`whitespace-pre-wrap ${resultStyles.messageBody}`}>{pendingBubble.input}</p><ChatPendingStatus sending={running}/></div>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="导师正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>导师</span>{liveOnly.text?<MessageMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={liveOnly.text} streaming/>:<p className={`mt-1 ${resultStyles.messageBody}`}>导师正在思考…</p>}</div>}
-                  <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy), ...mentorTailNotices({ livePhase: liveReply?.phase ?? null,
+                  <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy), ...mentorTailNotices({ livePhase: live.phase, stop: live.stopAction,
                     saving: hasUnsavedInformation, error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice, lastTurnText,
                     recovery: recoveryNeedsUser[0] && !busy
                       ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })]}/>

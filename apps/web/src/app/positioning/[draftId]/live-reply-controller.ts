@@ -7,6 +7,7 @@ import {
 } from "./live-prefix";
 import { readAgentTurn } from "./mentor-turn";
 import { isPaygWaiting } from "@/lib/payg-wait";
+import { stopRequestFor, type StopRequest } from "./stop-reply";
 
 type PrefixStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
@@ -17,6 +18,7 @@ type PrefixStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
  * growth is stored at most once a second, and `pagehide` stores the latest
  * text with the reload mark. A same-tab reload shows the stored prefix, not
  * growing, with the waiting state until the final reply replaces it.
+ * 停止 freezes the shown reply and stores it at once (stop-reply.ts).
  */
 export function liveReplyController(options: {
   draftId: string;
@@ -29,6 +31,13 @@ export function liveReplyController(options: {
   const now = options.now ?? Date.now;
   let current: LiveReply | null = null;
   let lastWrite = Number.NEGATIVE_INFINITY;
+  /** Executions whose stream this page is reading now. */
+  const reading = new Map<string, number>();
+  const read = (executionId: string, delta: number) => {
+    const count = (reading.get(executionId) ?? 0) + delta;
+    if (count > 0) reading.set(executionId, count);
+    else reading.delete(executionId);
+  };
   const show = (next: LiveReply | null) => {
     current = next;
     options.show(next);
@@ -40,6 +49,20 @@ export function liveReplyController(options: {
   };
   const live = {
     current: () => current,
+    /** True while this page reads the stream of `executionId`; it then delivers the result itself. */
+    streaming: (executionId: string) => reading.has(executionId),
+    /**
+     * 停止: freeze what is shown, store it at once and return the stop request
+     * (null when there is nothing live to stop or it was already stopped).
+     */
+    stop(executionId: string): StopRequest | null {
+      if (!current || current.executionId !== executionId || current.stopped || current.phase === "incomplete") return null;
+      const next: LiveReply = { ...current, stopped: true, stalled: true };
+      const target = storage();
+      if (target) saveLivePrefix(target, draftId, next);
+      show(next);
+      return stopRequestFor(next);
+    },
     /** Page load: show the prefix this same tab stored before reloading, if any. */
     restore() {
       const target = storage();
@@ -83,6 +106,8 @@ export function liveReplyController(options: {
      */
     mark(executionId: string, phase: "waiting" | "incomplete") {
       if (current?.executionId !== executionId) return;
+      // A stopped reply keeps what was shown until history holds its saved result.
+      if (current.stopped) phase = "waiting";
       if (phase === "incomplete") forget();
       show({ ...current, phase, stalled: true });
     },
@@ -91,9 +116,9 @@ export function liveReplyController(options: {
       forget();
       show(null);
     },
-    /** History shows `executionId` finished: a waiting copy of it gives way to the stored reply. */
+    /** History shows `executionId` finished: a waiting or stopped copy of it gives way to the stored reply. */
     settle(executionId: string) {
-      if (current?.executionId === executionId && current.phase === "waiting") live.clear();
+      if (current?.executionId === executionId && (current.phase === "waiting" || current.stopped)) live.clear();
     },
     /**
      * Read one turn's stream into the live reply and return its outcome. A
@@ -103,21 +128,25 @@ export function liveReplyController(options: {
       executionId?: string; onAdmitted?: (id: string) => void; onFinished?: () => void; onResult?: (result: AgentTurnOutcome) => void;
     }) {
       let id = handlers.executionId, result: AgentTurnOutcome | undefined;
-      if (id) live.begin(id);
+      if (id) {
+        live.begin(id);
+        read(id, 1);
+      }
       try {
         ({ result } = await readAgentTurn(await open(), {
           executionId: handlers.executionId,
-          onAdmitted: admitted => { id = admitted; live.begin(admitted); handlers.onAdmitted?.(admitted); },
+          onAdmitted: admitted => { id = admitted; read(admitted, 1); live.begin(admitted); handlers.onAdmitted?.(admitted); },
           onProgress: (execution, event) => live.apply(execution, event),
           onFinished: handlers.onFinished,
         }));
         handlers.onResult?.(result);
         return result;
       } finally {
-        // A lost stream or a still-running execution waits; a finished one without a completed result says so.
-        // A BILL-PAYG pause is not unfinished: the turn shows its pause notice once history is read.
+        if (id) read(id, -1);
+        // A lost stream or a still-running execution waits (a stopped turn still saving too); a finished one
+        // without a completed result says so. A BILL-PAYG pause is not unfinished: history shows its notice.
         if (id && result?.state !== "completed" && !isPaygWaiting(result?.state))
-          live.mark(id, !result || result.state === "pending" ? "waiting" : "incomplete");
+          live.mark(id, !result || result.state === "pending" || result.state === "stopping" ? "waiting" : "incomplete");
       }
     },
   };
