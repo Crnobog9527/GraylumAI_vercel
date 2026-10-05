@@ -6,7 +6,7 @@ export const legacyView: BudgetView = {
   version: 1,
   config: null,
   source: 'legacy',
-  limits: { inputBytes: { interactive: 90000, organize: 112000, report: 90000 }, maxOutputTokens: 8192, historyItems: 1000 },
+  limits: { inputBytes: { interactive: 90000, organize: 112000, report: 196608 }, maxOutputTokens: 8192, historyItems: 1000 },
   organizeOutput: { source: 'v3_summary_max_tokens', maxOutputTokens: 2048 },
   legacy: {
     interactive: { inputBytes: 64000, historyItems: 100, fixtureMaxOutputTokens: 1000, realOutput: 'min(approved quote, model, global output cap)' },

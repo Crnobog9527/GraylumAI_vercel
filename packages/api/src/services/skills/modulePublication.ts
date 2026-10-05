@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { reportManifest } from '../report/contract';
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -15,6 +16,7 @@ export const moduleSkillInput = z.object({
   kind: z.enum(['document', 'social']),
   directoryName: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(64),
   files: z.array(z.object({ path: z.string().max(240), base64: z.string().max(2_800_000) }).strict()).min(1).max(64),
+  reportGeneration:reportManifest.optional(),
   planResources:z.array(z.string().max(240)).min(1).max(64).optional(),
   steps: z.array(z.object({ title: label, information:z.array(informationSchema).max(24).optional(), resources: z.array(z.string().max(240)).min(1).max(64) }).strict()).min(1).max(32),
   resourcePlanReviewed: z.literal(true),
@@ -41,7 +43,8 @@ export function prepareModuleSkill(value: ModuleSkillInput) {
     try { manifestText = new TextDecoder('utf-8',{fatal:true}).decode(Buffer.from(manifestFile.base64,'base64')); }
     catch { throw new Error('workflow.yaml 必须使用 UTF-8 编码'); }
     const declared = parseWorkflowManifest(manifestText);
-    if (!isDeepStrictEqual(declared,JSON.parse(JSON.stringify({kind:input.kind,steps:input.steps,planResources:input.planResources}))))
+    if (!isDeepStrictEqual(declared,JSON.parse(JSON.stringify({kind:input.kind,steps:input.steps,
+      planResources:input.planResources,reportGeneration:input.reportGeneration}))))
       throw new Error('workflow.yaml 与提交的步骤或问题不一致，请重新导入 Skill 文件夹');
   }
   const descriptor: PackageDescriptor = {
@@ -62,7 +65,9 @@ export function prepareModuleSkill(value: ModuleSkillInput) {
     requiresEvidence: false, requiredCapabilities: ['documents.read'],
   }));
   const workflow = validateWorkflow({ id: `module-${input.moduleId.replaceAll('-', '')}`,
-    version: input.expectedVersion + 1, kind: input.kind, steps,...(input.planResources?{planResources:input.planResources}:{}),
+    version: input.expectedVersion + 1, kind: input.kind, steps,
+    ...(input.reportGeneration?{reportGeneration:input.reportGeneration}:{}),
+    ...(input.planResources?{planResources:input.planResources}:{}),
     report: { id: 'confirmed-report', version: input.expectedVersion + 1, title: input.module.title,
       sections: steps.map(step => ({ title: step.title, stepId: step.id })) },
   }, descriptor);
