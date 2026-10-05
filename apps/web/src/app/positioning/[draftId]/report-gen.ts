@@ -44,6 +44,16 @@ export function reportStartRefusal(cause: unknown): StartRefusal {
   return { text };
 }
 
+/**
+ * A run refused after admission (a resume or stream answer `code`): membership lapsed while
+ * waiting for credits, or the confirmed sources changed. Nothing new was called.
+ */
+export function reportResultRefusal(result: unknown): StartRefusal | null {
+  const code = result && typeof result === "object" ? (result as { code?: unknown }).code : null;
+  return typeof code === "string" && ["REPORT_MEMBERSHIP_REQUIRED", "REPORT_ENTITLEMENTS_UNAVAILABLE", "REPORT_SOURCE_CONFLICT"].includes(code)
+    ? reportStartRefusal(new Error(code)) : null;
+}
+
 /** Exactly `runtime.reportStatus`. */
 export type ReportStatus = {
   executionId: string; state: string; cursor?: number | null; epoch?: number | null;

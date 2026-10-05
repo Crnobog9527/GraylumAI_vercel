@@ -4,7 +4,7 @@ import { STOPPED_NOTICE } from "./stop-reply";
 import {
   readReportRecord, REPORT_DISABLED_NOTICE, REPORT_EMPTY_NOTICE, REPORT_INCOMPLETE_NOTICE, REPORT_INTRO, REPORT_STOPPED_NOTICE,
   REPORT_TRUNCATED_NOTICE, REPORT_UNCONFIRMED_NOTICE, reportAttachable, reportCanStart, reportProgressing, reportRecordKey,
-  reportStartRefusal, reportView, startedExecution, writeReportRecord, type ReportStatus,
+  reportResultRefusal, reportStartRefusal, reportView, startedExecution, writeReportRecord, type ReportStatus,
 } from "./report-gen";
 
 const id = "11111111-2222-4333-8444-555555555555";
@@ -115,5 +115,17 @@ describe("report record", () => {
     expect(startedExecution({ executionId: id, runId: id, state: "prepared" })).toBe(id);
     expect(startedExecution({ admitted: false })).toBeNull();
     expect(startedExecution(null)).toBeNull();
+  });
+});
+
+describe("reportResultRefusal", () => {
+  it("turns a lapsed membership on resume into the membership prompt", () => {
+    expect(reportResultRefusal({ state: "cancelled", code: "REPORT_MEMBERSHIP_REQUIRED" })).toMatchObject({ membership: true });
+  });
+  it.each(["REPORT_ENTITLEMENTS_UNAVAILABLE", "REPORT_SOURCE_CONFLICT"])("explains %s", code => {
+    expect(reportResultRefusal({ code })?.text).toBe(reportStartRefusal(new Error(code)).text);
+  });
+  it.each([{ code: "RUNTIME_WAITING_CREDITS" }, { state: "completed" }, null, "x"])("ignores %j", result => {
+    expect(reportResultRefusal(result)).toBeNull();
   });
 });

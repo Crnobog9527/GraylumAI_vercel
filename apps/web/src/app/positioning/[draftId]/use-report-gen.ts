@@ -6,7 +6,7 @@ import { liveReplyAfter, startLiveReply, type LiveReply } from "./agent-turn-dis
 import { readAgentTurn, TEXT_PROTOCOL } from "./mentor-turn";
 import { sendStop, stopRequestFor } from "./stop-reply";
 import {
-  readReportRecord, reportAttachable, reportProgressing, reportRecordKey, reportStartRefusal, startedExecution,
+  readReportRecord, reportAttachable, reportProgressing, reportRecordKey, reportResultRefusal, reportStartRefusal, startedExecution,
   writeReportRecord, type ReportRecord, type StartRefusal,
 } from "./report-gen";
 
@@ -46,18 +46,23 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     enabled: active && Boolean(executionId),
     refetchInterval: query => !streaming && reportProgressing(query.state.data) ? POLL_MS : false,
   });
-  const payg = usePaygResume(() => status.refetch());
+  const refuse = (result: unknown) => {
+    const refusal = reportResultRefusal(result);
+    if (refusal) setRefusal(refusal);
+  };
+  const payg = usePaygResume(() => status.refetch(), refuse);
 
   const stream = async (id: string) => {
     setStreaming(true);
     setLive(startLiveReply(id));
     try {
       const events = await utils.client.runtime.executeStream.mutate({ executionId: id, textProtocol: TEXT_PROTOCOL });
-      await readAgentTurn(events, {
+      const { result } = await readAgentTurn(events, {
         executionId: id,
         onProgress: (execution, event) => setLive(old => liveReplyAfter(old, execution, event)),
         onFinished: () => void utils.credits.getBalance.invalidate(),
       });
+      refuse(result);
     } catch {
       /* A lost stream: the saved status below tells what happened; polling takes over. */
     } finally {
