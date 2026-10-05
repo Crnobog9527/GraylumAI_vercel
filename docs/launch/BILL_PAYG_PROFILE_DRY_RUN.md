@@ -341,3 +341,6 @@ max(0,P-B)（逐消息模板所需余量）、费用、completion/reasoning 与�
 | openai/gpt-6-luna:messages:english:short-128:1 | 128 | 16384 | 1024 | 0.003584000000 | 0.05 |
 | openai/gpt-6-luna:messages:english:long-128:0 | 128 | 180000 | 1024 | 0.024036000000 | 0.05 |
 | openai/gpt-6-luna:messages:english:long-128:1 | 128 | 180000 | 1024 | 0.024036000000 | 0.05 |
+
+后续迁移顺序以 [主窗口审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5995575820) 为准：
+#666 使用 0172；本 PR 采样结束、最终合并前再改为 0173 并重建指纹，未提前修改迁移或应用远端。

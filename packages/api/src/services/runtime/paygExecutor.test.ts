@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import prices from '../../../../../scripts/payg-profile/plan-prices.json';
 import catalog from '../../../../../scripts/payg-profile/catalog-2026-10-05.json';
 import {createSamplePlan} from '../../../../../scripts/payg-profile/sampling';
-import {executePlan,verifiedPlan,verifyCatalog,type Event,type Plan} from '../../../../../scripts/payg-profile/executor';
+import {executePlan,verifiedPlan,verifyCatalog,failureCode,type Event,type Plan} from '../../../../../scripts/payg-profile/executor';
 // Full 228-request regeneration is CPU-bound; shared CI runners exceed Vitest's 5s default.
 let plan:Plan;
 beforeAll(()=>{plan=createSamplePlan(prices);});
@@ -14,7 +14,7 @@ function fixture(){
  const transport=vi.fn(async(_url:Parameters<typeof fetch>[0],init?:RequestInit)=>{
   const request=JSON.parse(String(init?.body));
   const route=prices.routes.find(r=>r.model===request.model)!;
-  return response({id:'synthetic-'+createHash('sha256').update(String(init?.body)).digest('hex'),model:request.model,provider:route.providerName,
+  return response({id:'synthetic-'+createHash('sha256').update(String(init?.body)).digest('hex'),model:request.model,provider:({'anthropic':'Anthropic','google-vertex/global':'Google','openai':'OpenAI'} as Record<string,string>)[route.endpointTag],
    choices:[{finish_reason:'length'}],usage:{cost:0.001,prompt_tokens:100,completion_tokens:request.max_tokens,
     prompt_tokens_details:{cached_tokens:20,cache_write_tokens:10},completion_tokens_details:{reasoning_tokens:50}}});
  });
@@ -106,7 +106,8 @@ it('live read-only preflight requires exact snapshot including prices, route and
 
 it('catalog drift stops before credentials and the first paid request',async()=>{
  const f=fixture();f.preflight.mockRejectedValue(new Error('CATALOG_DRIFT_REPLAN_REQUIRED'));
- await expect(executePlan(f.options)).rejects.toThrow('CATALOG_DRIFT');
+ await executePlan(f.options);
+ expect(f.events.at(-1)).toEqual({type:'halt',reason:'CATALOG_DRIFT_REPLAN_REQUIRED'});
  expect(f.credential).not.toHaveBeenCalled();expect(f.transport).not.toHaveBeenCalled();
  expect(f.events.filter(e=>e.type==='attempt')).toHaveLength(0);
 },30000);
@@ -119,4 +120,55 @@ it('conflicting response and lookup costs never choose the cheaper receipt',asyn
  const result=await executePlan(f.options);
  expect(f.transport).toHaveBeenCalledTimes(2);expect(result.actualUsd).toBeNull();
  expect(f.events.at(-1)).toMatchObject({reason:'RECEIPT_CONFLICT',actualUsd:null});
+},30000);
+
+it.each(['CATALOG_UNAVAILABLE','CATALOG_DRIFT_REPLAN_REQUIRED','private network credentials detail'])(
+ 'mid-batch preflight halt records only a safe code: %s',async(reason)=>{
+ const f=fixture();f.preflight.mockResolvedValueOnce().mockRejectedValue(new Error(reason));
+ const result=await executePlan(f.options);
+ expect(f.transport).toHaveBeenCalledTimes(1);
+ expect(f.events.at(-1)).toEqual({type:'halt',reason:reason.startsWith('CATALOG_')?reason:'PAYG_EXECUTOR_STOPPED'});
+ expect(result.report[1]).toMatchObject({status:'NOT_RUN',actualUsd:'0'});
+ expect(result.actualUsd).toBe('0.001000000000');
+ expect(JSON.stringify(result)).not.toContain('private network credentials detail');
+},30000);
+it('catalog transport and malformed JSON never expose upstream messages',async()=>{
+ const transport=vi.fn(async()=>{throw new Error('private network credentials detail');});
+ await expect(verifyCatalog(prices,catalog,prices.routes[0].model,transport)).rejects.toThrow('CATALOG_UNAVAILABLE');
+ await expect(verifyCatalog(prices,catalog,prices.routes[0].model,async()=>new Response('bad json')))
+  .rejects.toThrow('CATALOG_INVALID_RESPONSE');
+ expect(failureCode(new Error('CATALOG_UNAVAILABLE extra private detail'))).toBe('PAYG_EXECUTOR_STOPPED');
+});
+it.each(['Google Vertex','Google AI Studio','google-vertex/global','unverified-provider'])(
+ 'does not admit an unverified Vertex receipt name: %s',async(provider)=>{
+ const f=fixture(),send=f.transport.getMockImplementation()!;
+ f.transport.mockImplementation(async(url,init)=>{
+  if(init?.method==='GET')return response({error:{}},404);
+  const result=await send(url,init),body=await result.json();
+  if(body.model==='google/gemini-3.8-flash')body.provider=provider;
+  return response(body);
+ });
+ const result=await executePlan(f.options);
+ expect(result.receipts).toHaveLength(76);
+ expect(f.events.at(-1)).toMatchObject({reason:'UNKNOWN_OR_FAILED'});
+ expect(f.events.filter(e=>e.type==='lookup-attempt')).toHaveLength(3);
+ expect(f.events.filter(e=>e.type==='attempt')).toHaveLength(77);
+},30000);
+it('all three canonical provider names are also accepted from original-ID lookup receipts',async()=>{
+ const f=fixture(),send=f.transport.getMockImplementation()!;
+ const originals=new Map<string,{id:string;model:string;provider:string;usage:{completion_tokens:number}}>();
+ f.transport.mockImplementation(async(url,init)=>{
+  if(init?.method==='GET'){
+   const original=originals.get(new URL(String(url)).searchParams.get('id')!)!;
+   return response({data:{id:original.id,model:original.model,provider_name:original.provider,
+    finish_reason:'length',total_cost:0.001,native_tokens_prompt:100,native_tokens_completion:original.usage.completion_tokens}});
+  }
+  const raw=await send(url,init),body=await raw.json();originals.set(body.id,body);
+  const {provider:unused,...withoutProvider}=body;expect(unused).toBeTruthy();
+  return response(withoutProvider);
+ });
+ const result=await executePlan(f.options);
+ expect(result.receipts).toHaveLength(228);
+ expect(result.receipts.every(r=>(r as {source:string}).source==='lookup.native_tokens_prompt')).toBe(true);
+ expect(f.events.filter(e=>e.type==='lookup-attempt')).toHaveLength(228);
 },30000);

@@ -12,9 +12,12 @@ const require=createRequire(new URL('../packages/api/package.json',import.meta.u
 const viteRequire=createRequire(require.resolve('vite'));
 const {build}=await import(pathToFileURL(viteRequire.resolve('esbuild')).href);
 const temporary=await mkdtemp(join(tmpdir(),'graylum-payg-executor-'));
+let failureCode=()=> 'PAYG_EXECUTOR_STOPPED';
 try{
  const compiled=join(temporary,'execute.cjs');
  await build({entryPoints:[resolve('scripts/payg-profile/execute-cli.ts')],outfile:compiled,bundle:true,platform:'node',format:'cjs'});
- await require(compiled).main(args);
-}catch{console.error('PAYG_EXECUTOR_STOPPED: inspect the private journal; do not resend or replace failed samples.');process.exitCode=1;}
+ const executor=require(compiled);
+ failureCode=executor.failureCode;
+ await executor.main(args);
+}catch(error){console.error(failureCode(error));process.exitCode=1;}
 finally{await rm(temporary,{recursive:true,force:true});}

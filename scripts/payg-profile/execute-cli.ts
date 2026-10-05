@@ -3,6 +3,7 @@ import {mkdir,open,readFile,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {homedir} from 'node:os';
 import {join,resolve} from 'node:path';
+export {failureCode} from './executor';
 import {executePlan,verifiedPlan,verifyCatalog,type Event} from './executor';
 
 export async function main(args:string[]){
@@ -13,6 +14,10 @@ export async function main(args:string[]){
  const manifest=JSON.parse(await readFile(manifestPath,'utf8'));
  const plan=verifiedPlan(prices,manifest,approvedHash);
  const catalog=JSON.parse(await readFile(resolve('scripts/payg-profile/catalog-2026-10-05.json'),'utf8'));
+ // Validate without creating any persistent claim or loading a fallback credential.
+ const key=process.env.GRAYLUM_PAYG_TEST_OPENROUTER_KEY;
+ if(!key?.trim())throw new Error('APPROVED_TEST_CREDENTIAL_MISSING');
+ await verifyCatalog(prices,catalog,String(plan.manifest.samples[0].model));
  // Stable per-manifest location prevents a restart or changed output path from sending twice.
  const directory=join(homedir(),'.local','state','graylum','payg-profile',plan.manifest.manifestHash);
  await mkdir(directory,{recursive:true,mode:0o700});
@@ -29,13 +34,11 @@ export async function main(args:string[]){
   }};
  try{
   const result=await executePlan({prices,manifest,approvedHash,journal,
-   credential:async()=>{
-    // Supplied explicitly for the approved test balance. Never load project .env or fall back to another key.
-    const key=process.env.GRAYLUM_PAYG_TEST_OPENROUTER_KEY;
-    if(!key)throw new Error('APPROVED_TEST_CREDENTIAL_MISSING');return key;
-   },preflight:model=>verifyCatalog(prices,catalog,model)});
+   credential:async()=>key,preflight:model=>verifyCatalog(prices,catalog,model)});
   await writeFile(join(directory,'report.json'),JSON.stringify(result,null,2)+'\n',{mode:0o600,flag:'wx'});
+  const reason=events.findLast(e=>e.type==='halt')?.reason??null;
   console.log(JSON.stringify({manifestHash:approvedHash,attempts:events.filter(e=>e.type==='attempt').length,
-   halted:events.some(e=>e.type==='halt'),directory}));
+   halted:reason!==null,reason}));
+  if(reason!==null)process.exitCode=1;
  }finally{await log.close();}
 }

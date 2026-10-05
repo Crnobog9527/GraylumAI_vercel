@@ -29,6 +29,19 @@ export function verifiedPlan(prices:unknown,manifest:unknown,approvedHash:string
  return plan;
 }
 
+// Only exact, known codes may reach public output; never emit upstream error text.
+const failureCodes=new Set([
+ 'EXECUTION_AUTHORIZATION_REQUIRED','APPROVED_TEST_CREDENTIAL_MISSING','APPROVED_MANIFEST_MISMATCH',
+ 'PLAN_NOT_EXECUTABLE','DUPLICATE_SAMPLE','BATCH_ALREADY_ATTEMPTED_NO_AUTOMATIC_RESUME',
+ 'CATALOG_HASH_MISMATCH','CATALOG_BINDING_MISSING','CATALOG_PRICE_INVALID','PLAN_PRICE_CATALOG_MISMATCH',
+ 'PLAN_CAPABILITY_CATALOG_MISMATCH','REACHABLE_PRICE_TIER_REPLAN_REQUIRED','CATALOG_UNAVAILABLE',
+ 'CATALOG_INVALID_RESPONSE','CATALOG_ROUTE_MISMATCH','CATALOG_AMBIGUOUS_BASE_SLUG',
+ 'CATALOG_DRIFT_REPLAN_REQUIRED','CATALOG_ROUTE_UNAVAILABLE',
+]);
+export function failureCode(error:unknown){
+ return error instanceof Error&&failureCodes.has(error.message)?error.message:'PAYG_EXECUTOR_STOPPED';
+}
+
 /** Read-only catalog check immediately before each send; no credential, model or balance call. */
 export async function verifyCatalog(prices:unknown,catalog:unknown,model:string,transport:typeof fetch=fetch){
  const parsed=priceSchema.parse(prices);
@@ -51,9 +64,14 @@ export async function verifyCatalog(prices:unknown,catalog:unknown,model:string,
  const overrides=pricing.overrides as Array<{min_prompt_tokens?:number}>|undefined;
  if(overrides?.some(t=>t.min_prompt_tokens===undefined||t.min_prompt_tokens<=204800))throw new Error('REACHABLE_PRICE_TIER_REPLAN_REQUIRED');
 
- const response=await transport(route.catalogUrl,{redirect:'error',signal:AbortSignal.timeout(30000)});
+ let response:Response;
+ try{response=await transport(route.catalogUrl,{redirect:'error',signal:AbortSignal.timeout(30000)});}
+ catch{throw new Error('CATALOG_UNAVAILABLE');}
  if(!response.ok)throw new Error('CATALOG_UNAVAILABLE');
- const data=await response.json() as {data?:{id?:string;endpoints?:Array<Record<string,unknown>>}};
+ let data:{data?:{id?:string;endpoints?:Array<Record<string,unknown>>}};
+ try{data=await response.json();}
+ catch{throw new Error('CATALOG_INVALID_RESPONSE');}
+ if(!data||!Array.isArray(data.data?.endpoints))throw new Error('CATALOG_INVALID_RESPONSE');
  const matches=data.data?.endpoints?.filter(e=>e.tag===route.endpointTag)??[];
  if(data.data?.id!==model||matches.length!==1)throw new Error('CATALOG_ROUTE_MISMATCH');
  // A base slug can match new regional variants. Tier endpoints require opt-in and are excluded.
@@ -119,7 +137,8 @@ export async function executePlan(options:{prices:unknown;manifest:unknown;appro
   const cap=decimal(String(sample.spendCapUsd));
   if(cap!==decimal(String(sample.upperUsd))||cap>decimal(String(sample.approvedCap))
    ||committed+cap>decimal(plan.manifest.totalUsd))throw new Error('SAMPLE_BUDGET_EXCEEDED');
-  await options.preflight(String(sample.model));
+  try{await options.preflight(String(sample.model));}
+  catch(error){await append({type:'halt',reason:failureCode(error)});break;}
   const identity=identityFor(sample,options.prices);
   // prepareDispatch is structural/credential-only. It never sends; send is a one-use capability.
   const send=await adapter.prepareDispatch({input:body},identity);
@@ -141,6 +160,8 @@ export async function executePlan(options:{prices:unknown;manifest:unknown;appro
    await append({type:'halt',sampleId:sample.id,reason:'REUSED_GENERATION_ID',actualUsd:null});break;
   }
   if(id)generationIds.add(id);
+  // Public /providers and model /endpoints use Google for google-vertex/global, not the UI label.
+  // See BILL_PAYG_PROFILE_EXECUTOR.md. Keep exact names; an unverified alias is not a matching receipt.
   const providerName=priceSchema.parse(options.prices).routes.find(r=>r.model===sample.model)!.providerName;
   const complete=(o:ReturnType<typeof observationEvent>)=>o.final&&o.nativePromptTokens!==null
    &&o.nativeCompletionTokens!==null&&o.providerName===providerName;
