@@ -20,7 +20,7 @@ const phase = z.enum(['ordinary', 'skill', 'organizer', 'skill_matching', 'attac
 /** Trusted admin configuration, never a browser admission field. Evidence references
  * must identify independently checked real samples; fixture results are not evidence. */
 // Small-cap probes establish truncation semantics; outputLimit is the separately authorized profile cap.
-// Each reasoning variant still needs two exact-length hits at the recorded testedOutputLimit.
+// Each reasoning variant needs two length receipts within 90–100% of testedOutputLimit, including reasoning.
 export const paygHostProfile = z.object({
   model: reference, endpointTag: reference, protocol: z.literal('openrouter-chat-v1'),
   profileVersion: reference, evidenceVersion: reference,
