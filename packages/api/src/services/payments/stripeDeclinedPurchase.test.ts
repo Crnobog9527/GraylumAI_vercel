@@ -48,7 +48,8 @@ describe('declined purchase terminal evidence', () => {
     });
   it.each([{ amount_received: 1 }, { amount_received: undefined }, { amount_capturable: 1 },
     { id: 'pi_other' }, { object: 'unknown' }, { amount: 100 }, { currency: 'eur' }, { livemode: true },
-    { metadata: {} }, { metadata: { orderId: 'other', userId: 'fixture_user' } }, { customer: 'cus_other' }])(
+    { metadata: {} }, { metadata: { orderId: 'other', userId: 'fixture_user' } }, { customer: 'cus_other' },
+    { customer: undefined }, { latest_charge: undefined }])(
     'retains conflicting/unknown intent %j', async patch => {
       const t = fixture(); Object.assign(t.intent, patch);
       await expect(closeExpiredStripeCheckout(t.args)).rejects.toThrow();
@@ -56,7 +57,7 @@ describe('declined purchase terminal evidence', () => {
     });
   it.each([{ status: 'succeeded' }, { status: 'pending' }, { paid: true }, { paid: undefined },
     { amount_captured: 1 }, { payment_intent: 'pi_other' }, { livemode: true }, { currency: 'eur' },
-    { customer: 'cus_other' }])('retains conflicting/paid charge %j', async patch => {
+    { customer: 'cus_other' }, { customer: undefined }])('retains conflicting/paid charge %j', async patch => {
       const t = fixture(); Object.assign(t.charge, patch);
       await expect(closeExpiredStripeCheckout(t.args)).rejects.toThrow();
       expect(t.rpc).not.toHaveBeenCalled();
@@ -67,6 +68,24 @@ describe('declined purchase terminal evidence', () => {
       .mockResolvedValueOnce({ object: 'list', data: [{ ...t.charge, id: 'ch_earlier', status: 'succeeded', paid: true }], has_more: false });
     await expect(closeExpiredStripeCheckout(t.args)).rejects.toThrow();
     expect(t.listCharges).toHaveBeenLastCalledWith({ payment_intent: t.intent.id, limit: 100, starting_after: 'ch_fixture' });
+    expect(t.rpc).not.toHaveBeenCalled();
+  });
+  it('allows an explicitly empty charge history and null latest charge', async () => {
+    const t = fixture(); Object.assign(t.intent, { latest_charge: null });
+    t.listCharges.mockResolvedValue({ object: 'list', data: [], has_more: false });
+    await expect(closeExpiredStripeCheckout(t.args)).resolves.toBe(true);
+  });
+  it('rejects a null latest charge when charge history is nonempty', async () => {
+    const t = fixture(); Object.assign(t.intent, { latest_charge: null });
+    await expect(closeExpiredStripeCheckout(t.args)).rejects.toThrow();
+    expect(t.rpc).not.toHaveBeenCalled();
+  });
+  it('stops an incomplete scan without closing the purchase', async () => {
+    const t = fixture(); let page = 0;
+    t.listCharges.mockImplementation(async () => ({ object: 'list', has_more: true,
+      data: [{ ...t.charge, id: `ch_page_${page++}` }] }));
+    await expect(closeExpiredStripeCheckout(t.args)).rejects.toThrow('PAY_COMMON_ATTEMPT_NOT_TERMINAL');
+    expect(t.listCharges).toHaveBeenCalledTimes(10);
     expect(t.rpc).not.toHaveBeenCalled();
   });
   it.each(['intent-read', 'charge-read', 'incomplete', 'latest-missing'])('retains evidence on %s', async failure => {

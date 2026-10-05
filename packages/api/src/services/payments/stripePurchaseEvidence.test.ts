@@ -56,7 +56,7 @@ describe('authoritative Stripe purchase evidence', () => {
   it('does not close after a network timeout or scope mismatch', async () => {
     const test = fixture();
     test.retrieve.mockRejectedValue(new Error('timeout'));
-    await expect(closeExpiredStripeCheckout(test.args)).rejects.toThrow('timeout');
+    await expect(closeExpiredStripeCheckout(test.args)).rejects.toThrow('PAY_COMMON_ATTEMPT_EVIDENCE_UNAVAILABLE');
     expect(test.rpc).not.toHaveBeenCalled();
     await expect(closeExpiredStripeCheckout({ ...test.args, scope: { ...scope, merchant: 'acct_other' } })).rejects.toThrow();
     expect(test.retrieve).toHaveBeenCalledTimes(1);

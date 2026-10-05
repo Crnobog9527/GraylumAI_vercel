@@ -43,6 +43,12 @@ function objectId(value: string | { id: string } | null) {
   return typeof value === 'string' ? value : value?.id ?? null;
 }
 
+async function readClosureEvidence<T>(request: PromiseLike<T>): Promise<T> {
+  try { return await request; } catch (cause) {
+    throw new Error('PAY_COMMON_ATTEMPT_EVIDENCE_UNAVAILABLE', { cause });
+  }
+}
+
 async function assertUnpaidIntent(input: {
   stripe: Pick<Stripe, 'paymentIntents' | 'charges'>;
   session: Stripe.Checkout.Session;
@@ -54,9 +60,10 @@ async function assertUnpaidIntent(input: {
   if (!intentId) throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
   // Use the same authenticated client as the original scoped Checkout read. Expanded
   // objects, last_payment_error and a browser cancellation are not payment evidence.
-  const intent = await stripe.paymentIntents.retrieve(intentId);
+  const intent = await readClosureEvidence(stripe.paymentIntents.retrieve(intentId));
   if (intent.id !== intentId || intent.object !== 'payment_intent'
     || intent.metadata?.orderId !== order.id || intent.metadata?.userId !== order.user_id
+    || intent.customer === undefined || session.customer === undefined || intent.latest_charge === undefined
     || objectId(intent.customer) !== objectId(session.customer)) {
     throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
   }
@@ -78,13 +85,15 @@ async function assertUnpaidIntent(input: {
   // A failed latest charge alone does not prove the absence of earlier successful charges.
   // Bound the scan; an incomplete or malformed response leaves the purchase unresolved.
   for (let page = 0; page < 10; page++) {
-    const charges = await stripe.charges.list({ payment_intent: intentId, limit: 100,
-      ...(cursor ? { starting_after: cursor } : {}) });
-    if (!Array.isArray(charges.data) || typeof charges.has_more !== 'boolean') break;
+    const charges = await readClosureEvidence(stripe.charges.list({ payment_intent: intentId, limit: 100,
+      ...(cursor ? { starting_after: cursor } : {}) }));
+    if (charges.object !== 'list' || !Array.isArray(charges.data) || typeof charges.has_more !== 'boolean'
+      || (latestCharge === null && charges.data.length > 0)) break;
     for (const charge of charges.data) {
       if (charge.object !== 'charge' || !charge.id || objectId(charge.payment_intent) !== intentId
         || charge.livemode !== (scope.mode === 'live') || charge.currency !== intent.currency
-        || charge.amount !== intent.amount || objectId(charge.customer) !== objectId(intent.customer)
+        || charge.amount !== intent.amount || charge.customer === undefined
+        || objectId(charge.customer) !== objectId(intent.customer)
         || charge.status !== 'failed' || charge.paid !== false || charge.amount_captured !== 0) {
         throw new Error('PAY_COMMON_ATTEMPT_NOT_TERMINAL');
       }
@@ -113,7 +122,7 @@ export async function closeExpiredStripeCheckout(input: {
   const { order, scope } = input;
   if (order.payment_channel !== 'stripe' || order.merchant_namespace !== scope.merchant
     || order.payment_mode !== scope.mode) throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
-  const session = await input.stripe.checkout.sessions.retrieve(input.mappedSessionId);
+  const session = await readClosureEvidence(input.stripe.checkout.sessions.retrieve(input.mappedSessionId));
   if (session.id !== input.mappedSessionId || session.object !== 'checkout.session'
     || session.client_reference_id !== order.user_id || session.metadata?.orderId !== order.id
     || session.metadata?.userId !== order.user_id || session.status !== 'expired'
