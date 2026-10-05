@@ -31,3 +31,13 @@ it.each([-1,1.1,5])('rejects invalid option index %s',optionIndex=>{
 it('rejects an in-schema option beyond the stored options',()=>{
  expect(()=>resolveAnswerCard(view(card),{...request,answerSource:{executionId,optionIndex:4}})).toThrow('OPC_ANSWER_SOURCE_DENIED');
 });
+
+it('only validates the selected source binding in mixed legacy and non-mentor history',()=>{
+ const mixed=view(card);
+ const unrelated={executionId:'unrelated',state:'completed',body:'{}'};
+ expect(resolveAnswerCard({executions:[unrelated,{...unrelated,request:{purpose:'step',questionId:null}},
+  ...mixed.executions]},request).questionId).toBe('product');
+ for(const binding of [null,{purpose:'step'},{...mixed.executions[0]!.request,stepId:'another-step'}])
+  expect(()=>resolveAnswerCard({executions:[{...mixed.executions[0],request:binding}]},request))
+   .toThrow('OPC_ANSWER_SOURCE_DENIED');
+});

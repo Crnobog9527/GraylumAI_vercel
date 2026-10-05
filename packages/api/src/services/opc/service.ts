@@ -232,7 +232,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         ...(organizerInstructions ? { organizerInstructions, organizerInput } : {}),
         expectedMaterialRevision: material.revision,
         opcTurnToken: material.turnToken,
-        ...(answeredCard ? { answeredCard, resolvedInput: v.input } : {}),
+        ...(answeredCard ? { answeredCard: {...v.answerSource!, card: answeredCard.card}, resolvedInput: v.input } : {}),
         mentorStream: v.purpose === "mentor", stepStream: v.purpose === "step",
         skillResources:
           v.purpose === "plan" && resolved.data.workflow.planResources

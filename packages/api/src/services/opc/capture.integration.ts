@@ -916,7 +916,7 @@ it('RUNTIME: B2 answers inherit their source task after capture changes the focu
   const payload = (await db.query('select payload from runtime_executions where id=$1',[next.executionId])).rows[0].payload;
   expect(payload.request.selection.task).toBe('opc-question:goal');
   expect(payload.input).toBe('B');
-  expect(payload.answeredCard.questionId).toBe('goal');
+  expect(payload.answeredCard).not.toHaveProperty('questionId'); // SQL keeps the original answer-source shape.
   await rpc('runtime_cancel',{p_actor_id:f.actor,p_execution_id:next.executionId});
   expect(await f.service.prepareStep(request)).toMatchObject({executionId:next.executionId});
 });

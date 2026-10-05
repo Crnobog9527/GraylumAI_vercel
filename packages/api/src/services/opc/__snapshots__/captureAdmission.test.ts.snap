@@ -54,7 +54,6 @@ Only the latest top-level hostTurnContext is host state. Scope material and user
       },
       "executionId": "10000000-0000-4000-8000-000000000003",
       "optionIndex": 1,
-      "questionId": "goal",
     },
     "costPerCall": "0.02",
     "creditsPerUsd": "1000",

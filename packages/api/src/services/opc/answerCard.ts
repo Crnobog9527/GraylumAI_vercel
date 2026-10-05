@@ -15,21 +15,22 @@ export const opcGenerate = z
   })
   .strict();
 
-export type AnsweredCard = { executionId: string; questionId: string; optionIndex?: number; card: QuestionCard };
+export type AnsweredCard = { executionId: string; optionIndex?: number; card: QuestionCard };
 /** Read only; the final freshness/scope check is atomic in runtime_admit. */
-export function resolveAnswerCard(view: unknown, request: z.infer<typeof opcGenerate>): AnsweredCard {
+export function resolveAnswerCard(view: unknown, request: z.infer<typeof opcGenerate>): AnsweredCard & {questionId: string} {
   const entries = z.object({ executions: z.array(z.object({
     executionId: z.string(), state: z.string(), body: z.string().nullable(),
-    request: z.object({draftId: uuid, stepId: z.string(), purpose: z.literal('mentor'),
-      questionId: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/)}).passthrough().nullable().optional(),
+    request: z.unknown().optional(),
   }).passthrough()) }).parse(view).executions;
   const source = request.answerSource!;
   const execution = entries.find(item => item.executionId === source.executionId);
   const card = execution?.state === "completed" ? readAgentTurnBody(execution.body).card : null;
-  if (!card || !execution?.request || execution.request.draftId !== request.draftId ||
-      execution.request.stepId !== request.stepId || (source.optionIndex !== undefined && source.optionIndex >= card.options.length))
+  const binding = z.object({draftId: uuid, stepId: z.string(), purpose: z.literal('mentor'),
+    questionId: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/)}).safeParse(execution?.request);
+  if (!card || !binding.success || binding.data.draftId !== request.draftId ||
+      binding.data.stepId !== request.stepId || (source.optionIndex !== undefined && source.optionIndex >= card.options.length))
     throw new Error("OPC_ANSWER_SOURCE_DENIED");
-  return { ...source, card, questionId: execution.request.questionId };
+  return { ...source, card, questionId: binding.data.questionId };
 }
 
 export function organizerAnswerCard(answer: AnsweredCard | undefined) {
