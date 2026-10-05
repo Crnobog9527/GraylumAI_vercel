@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import { REPORT_SETTING } from './report/contract';
 import { PAYMENT_CHANNEL_KEY } from './payments/channelSettings';
 import { PAYG_HOST_SETTING } from './runtime/paygHostPolicy';
 import { RUNTIME_RATE_LIMIT_KEY } from './runtime/rateLimitSettings';
@@ -9,7 +10,7 @@ import { ABSORB_CONFIG_KEY, ABSORB_ACK_KEY } from './bill2PlatformAlerts';
 
 // Dedicated readers own these values and their validation, including serialized JSON.
 const dedicatedSettingKeys = new Set([
-  PAYMENT_CHANNEL_KEY, PAYG_HOST_SETTING, RUNTIME_RATE_LIMIT_KEY, PURPOSE_BUDGET_KEY,
+  PAYMENT_CHANNEL_KEY, PAYG_HOST_SETTING, REPORT_SETTING, RUNTIME_RATE_LIMIT_KEY, PURPOSE_BUDGET_KEY,
   PROVIDER_PRICES_KEY, ABSORB_CONFIG_KEY, ABSORB_ACK_KEY,
 ]);
 

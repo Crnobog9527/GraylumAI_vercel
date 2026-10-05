@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
+import { REPORT_SETTING } from '../services/report/contract';
 import { adminRouter } from './admin';
 import { settingsRouter } from './settings';
 import { PAYMENT_CHANNEL_KEY } from '../services/payments/channelSettings';
@@ -12,6 +13,7 @@ import { ABSORB_CONFIG_KEY, ABSORB_ACK_KEY } from '../services/bill2PlatformAler
 const structuredSettings = [
   { key: PAYMENT_CHANNEL_KEY, value: { channel: 'stripe', version: 3 } },
   { key: PAYG_HOST_SETTING, value: { enabled: false } },
+  { key: REPORT_SETTING, value: { enabled: false } },
   { key: RUNTIME_RATE_LIMIT_KEY, value: { stopNewCalls: true } },
   { key: PURPOSE_BUDGET_KEY, value: { version: 2, purposes: {} } },
   { key: PROVIDER_PRICES_KEY, value: { version: 1, entries: [] } },
