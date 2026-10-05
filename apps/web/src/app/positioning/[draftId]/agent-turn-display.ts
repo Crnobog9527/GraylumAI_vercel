@@ -7,6 +7,7 @@ import {
   type QuestionCard,
 } from "@repo/api/src/shared/agentTurn";
 import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
+import { isPaygWaiting } from "@/lib/payg-wait";
 
 /** Under a reply that stopped at the single-answer length limit (completeness `length_limit`), outside its text. */
 export const LENGTH_LIMIT_NOTICE = "这次回答达到单次长度上限，已在这里结束。需要的话，可以发送“继续”让我接着写。";
@@ -167,7 +168,8 @@ export function mentorReplyDisplay(source: MentorReplySource): { text: string; c
   if (body.kind === "invalid") stored = INVALID_REPLY_NOTICE;
   else if (body.kind === "oversized") stored = OVERSIZED_REPLY_NOTICE;
   // The turn's own state (正在回复…, 费用待核实, 已停止) comes first; the omitted-history note is added under it.
-  const state = stored || card ? undefined : unavailableNotice(source);
+  // A BILL-PAYG pause carries its own notice and actions (payg-wait.ts).
+  const state = stored || card || isPaygWaiting(source.state) ? undefined : unavailableNotice(source);
   const stateNotice = state && historyNotice ? { ...state, text: state.text + "\n" + historyNotice.text } : state ?? historyNotice;
   return withNotice(stored, truncated ?? stateNotice);
 }

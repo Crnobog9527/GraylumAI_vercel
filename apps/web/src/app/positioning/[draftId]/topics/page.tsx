@@ -28,6 +28,8 @@ import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTop
 import { consentedTopicIds } from './adoption-consent';
 import { topicExecutionNotice, topicFailureMessage, topicOpenTurnNotice, topicRejectedTurn, topicTurnShows } from './topic-notices';
 import { finishedExecution } from '@/lib/finished-execution';
+import { isOrganizerPendingError, isPaygWaiting, type PaygViewFields } from '@/lib/payg-wait';
+import { usePaygResume } from '@/lib/use-payg-resume';
 
 type PlanItem = {
   id: string;
@@ -156,6 +158,7 @@ export default function TopicWorkspacePage() {
   const bind = trpc.opc.consentTopicWorkspace.useMutation();
   const turn = trpc.opc.topicTurn.useMutation();
   const execute = trpc.runtime.execute.useMutation();
+  const payg = usePaygResume(() => view.refetch());
   const cancel = trpc.runtime.cancel.useMutation();
   const savePlan = trpc.opc.savePlan.useMutation();
   const handoff = trpc.opc.handoff.useMutation();
@@ -164,7 +167,7 @@ export default function TopicWorkspacePage() {
   const queryUtils = trpc.useUtils();
   const topicDraft = trpc.opc.topicDraft.useQuery({ draftId }, { enabled: Boolean(draftId && sessionId) });
 
-  const busy = working || turn.isPending || execute.isPending || bind.isPending || savePlan.isPending || handoff.isPending || saveDraft.isPending || adoptTopics.isPending;
+  const busy = working || turn.isPending || execute.isPending || bind.isPending || savePlan.isPending || handoff.isPending || saveDraft.isPending || adoptTopics.isPending || payg.busy;
   const storageKey = sessionId ? 'opc-topic-operation:' + sessionId : '';
   const candidateKey = sessionId ? 'opc-topic-candidate:' + sessionId : '';
   useEffect(() => {
@@ -238,22 +241,16 @@ export default function TopicWorkspacePage() {
    */
   const accountList = trpc.opc.list.useQuery();
   const accounts = (accountList.data?.accounts ?? []) as Array<{
-    platform: string;
-    account: string;
-    revision: number;
+    platform: string; account: string; revision: number;
   }>;
-
-
 
   const executions = view.data?.executions as
     | Array<{
         executionId: string;
         state: string;
-        input: string | null;
-        body: string | null;
-        primaryBody: string | null;
+        input: string | null; body: string | null; primaryBody: string | null;
         contentAvailable: boolean; unavailableReason?: string | null;
-      }>
+      } & PaygViewFields>
     | undefined;
 
   const scrollSignature=transcriptSignature(executions?.map(item=>[item.executionId,item.state,item.body,item.primaryBody].join(':')).join('|'),outgoing);
@@ -312,6 +309,8 @@ export default function TopicWorkspacePage() {
           if (op.kind === 'chat') {
             setOutgoing({ text: op.request.input });
             const admitted = await turn.mutateAsync(op.request);
+            // Q1: the previous organizer answered instead; nothing was stored and the input stays in the box.
+            if (!payg.admitted(admitted)) { setOutgoing(null); localStorage.removeItem(storageKey); setPending(null); return; }
             setOutgoing(old => old && { ...old, executionId: admitted.executionId });
             if (op.candidateAtSend) localStorage.setItem('opc-topic-adoption-context:'+sessionId+':'+admitted.executionId,JSON.stringify(op.candidateAtSend));
             const notice = topicExecutionNotice(await execute.mutateAsync({ executionId: admitted.executionId }));
@@ -346,7 +345,8 @@ export default function TopicWorkspacePage() {
             localStorage.removeItem(storageKey);
             setPending(null);
             setError(message === 'OPC_BUSINESS_CONFLICT' ? '这个账号已属于另一项业务，本次没有采用。请展开选题，修改为当前业务的账号后再采用；原请求已保留。' : '本次请求已明确拒绝（' + message + '），未提交此项修改。请核对刷新后的计划与账号，再明确重试。');
-          } else setError(topicFailureMessage(cause));
+          } else if (isOrganizerPendingError(cause)) { localStorage.removeItem(storageKey); setPending(null); payg.block(); }
+          else setError(topicFailureMessage(cause));
         }
         await Promise.all([read.refetch(), view.refetch(), accountList.refetch(), topicDraft.refetch()]);
       });
@@ -500,7 +500,7 @@ export default function TopicWorkspacePage() {
     ...(busy && !lastOpen ? [{ id: 'busy', tone: 'status' as const, busy: true, text: '正在处理，请稍候…' }] : []),
     ...(notice ? [{ id: 'notice', tone: 'success' as const, text: notice }] : []),
     ...(error && !topicTurnShows(executions?.at(-1), error) ? [{ id: 'error', tone: 'error' as const, text: error }] : []),
-    ...(free.error ? [{ id: 'free', tone: 'error' as const, text: free.error }] : []),
+    ...payg.blockedNotices(executions, busy), ...(free.error ? [{ id: 'free', tone: 'error' as const, text: free.error }] : []),
   ];
   const openTurnNotice = (e: { executionId: string; state: string }) => topicOpenTurnNotice(e, { busy, finished: finishedExecution(execute, view),
     stopping: cancel.isPending, onRetry: () => void recover(e.executionId), onStop: () => void stop(e.executionId) });
@@ -567,9 +567,9 @@ export default function TopicWorkspacePage() {
                     <img className={topicStyles.agentAvatar} src="/graylum-logo.png" alt="" />
                     <div className={topicStyles.assistantMessage}>
                       <span className={topicStyles.agentName}>Graylum · 增长顾问</span>
-                      {!(topicRejectedTurn(e) && !(e.body ?? e.primaryBody)) && <MessageMarkdown className={topicStyles.reply}
+                      {!((topicRejectedTurn(e) || isPaygWaiting(e.state)) && !(e.body ?? e.primaryBody)) && <MessageMarkdown className={topicStyles.reply}
                         text={e.contentAvailable ? replyProse(e.body ?? e.primaryBody) : '来源已不可用，暂不展示此内容。'} />}
-                      <ChatNoticeList notices={[openTurnNotice(e)]} />
+                      <ChatNoticeList notices={[openTurnNotice(e), ...payg.turnNotices(e, busy)]} />
                       {e.state === 'completed' &&
                         (() => {
                           const body = parseCandidate(e.body ?? e.primaryBody);

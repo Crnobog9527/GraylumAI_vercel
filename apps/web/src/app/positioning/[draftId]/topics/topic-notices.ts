@@ -2,6 +2,7 @@
 import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice';
 import { PROVIDER_REJECTED_NOTICE, gateAdmissionNotice, gateResultNotice } from '@/lib/runtime-gate-notice';
 import { inFlight } from '@/app/runtime/runtime-notices';
+import { isPaygWaiting } from '@/lib/payg-wait';
 
 /** Fixed wording for a failed topic operation; the pending operation itself is kept by the caller. */
 export function topicFailureMessage(cause: unknown) {
@@ -43,13 +44,13 @@ export function topicTurnShows(last: { state: string; unavailableReason?: string
  * The notice under a topic turn. An open turn carries its "重试" and "停止"; a provider-refused
  * turn only its fixed notice, like any other finished turn. `finished` is the execution
  * whose execute call already returned a final state (finishedExecution): until the view catches
- * up it still reads as running, never as 回复尚未完成.
+ * up it still reads as running, never as 回复尚未完成. A BILL-PAYG pause has its own notice (payg-wait.ts).
  */
 export function topicOpenTurnNotice(e: { executionId: string; state: string; unavailableReason?: string | null }, ctx: {
   busy: boolean; finished: string | null; stopping: boolean; onRetry: () => void; onStop: () => void;
 }): ChatNotice | null {
   if (topicRejectedTurn(e)) return { id: e.executionId, tone: 'warning', text: PROVIDER_REJECTED_NOTICE };
-  if (e.state === 'completed' || e.state === 'cancelled') return null;
+  if (e.state === 'completed' || e.state === 'cancelled' || isPaygWaiting(e.state)) return null;
   // A finished call matters only while the view still shows the turn in flight (inFlight).
   const settling = ctx.finished === e.executionId && inFlight(e.state);
   const running = (ctx.busy || settling) && e.state !== 'cost_pending';

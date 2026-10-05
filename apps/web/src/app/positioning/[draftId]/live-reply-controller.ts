@@ -6,6 +6,7 @@ import {
   unmarkLiveReload,
 } from "./live-prefix";
 import { readAgentTurn } from "./mentor-turn";
+import { isPaygWaiting } from "@/lib/payg-wait";
 
 type PrefixStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
@@ -114,7 +115,8 @@ export function liveReplyController(options: {
         return result;
       } finally {
         // A lost stream or a still-running execution waits; a finished one without a completed result says so.
-        if (id && result?.state !== "completed") live.mark(id, !result || result.state === "pending" ? "waiting" : "incomplete");
+        // A BILL-PAYG pause is not unfinished: the turn shows its pause notice once history is read.
+        if (id && result?.state !== "completed" && !isPaygWaiting(result?.state)) live.mark(id, !result || result.state === "pending" ? "waiting" : "incomplete");
       }
     },
   };

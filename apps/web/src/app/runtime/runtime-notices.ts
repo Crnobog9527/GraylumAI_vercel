@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice';
 import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from '@/lib/runtime-gate-notice';
+import { isPaygWaiting, organizerSkipped, type PaygViewFields } from '@/lib/payg-wait';
 
 /** A frozen guidance request without its execution, waiting for the user's explicit retry. */
 export const GUIDE_HELD_NOTICE = '引导请求待恢复。点“重试”会沿用原请求，不会另开一次。';
@@ -13,7 +14,7 @@ export const USER_STOP_NOTICE = '已停止，保留原记录。';
 export const ENDED_NOTICE = '这一轮没有完成，已结束。原记录已保留，不会自动重试；可以重新发送。';
 export const CAPACITY_NOTICE = '本次必要材料超过模型输入容量，原请求和已完成内容已保留。停止后可缩短材料再新发请求。';
 
-export type RuntimeTurn = {
+export type RuntimeTurn = PaygViewFields & {
   executionId: string; state: string; primaryBody: string | null; organizerComplete: boolean | null;
   needsTask: boolean; unavailableReason: string | null; historyOmitted?: boolean;
 };
@@ -25,6 +26,7 @@ export const inFlight = (state: string) => state === 'prepared' || state === 'ru
 /**
  * Notices shown under one turn, in the conversation. Every still-open turn gets one notice
  * carrying its "重试" (resume the same execution) and "停止" (cancel what remains) actions.
+ * A BILL-PAYG pause and a skipped organizer carry their own notices (payg-wait.ts) instead.
  */
 export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
   busy: boolean; capacity: boolean; gateStop?: string; userStopped?: boolean; stopping: boolean;
@@ -34,13 +36,14 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
 }): ChatNotice[] {
   const id = (suffix: string) => turn.executionId + ':' + suffix;
   const notices: ChatNotice[] = [];
-  if (turn.primaryBody && !turn.organizerComplete) notices.push({ id: id('organizer'), tone: 'status', text: '主回复已保存，附属整理未完成。' });
+  const skipped = organizerSkipped(turn);
+  if (turn.primaryBody && !turn.organizerComplete && !skipped) notices.push({ id: id('organizer'), tone: 'status', text: '主回复已保存，附属整理未完成。' });
   if (turn.unavailableReason === 'provider_history')
     return [{ id: id('history'), tone: 'warning', text: PROVIDER_HISTORY_NOTICE }];
   if (turn.historyOmitted)
     notices.push({ id: id('history-omitted'), tone: 'status', text: HISTORY_OMITTED_NOTICE });
   // The view names a whole-turn provider refusal; the same text the execute result showed live.
-  if (turn.state === 'cancelled')
+  if (turn.state === 'cancelled' && !skipped)
     notices.push(ctx.gateStop ? { id: id('cancelled'), tone: 'warning', text: ctx.gateStop }
       : turn.unavailableReason === 'provider_rejected' ? { id: id('cancelled'), tone: 'warning', text: PROVIDER_REJECTED_NOTICE }
       : ctx.userStopped ? { id: id('cancelled'), tone: 'status', text: USER_STOP_NOTICE } : { id: id('cancelled'), tone: 'warning', text: ENDED_NOTICE });
@@ -49,7 +52,7 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
   if (turn.unavailableReason === 'output_truncated') notices.push({ id: id('truncated'), tone: 'warning', text: OUTPUT_TRUNCATED_NOTICE });
   if (turn.unavailableReason === 'latest_unavailable')
     notices.push({ id: id('latest'), tone: 'warning', text: '本次未取得搜索资料，无法提供已核实的最新信息。' });
-  if (!open(turn.state)) return notices;
+  if (!open(turn.state) || isPaygWaiting(turn.state)) return notices;
   const capacity = ctx.capacity;
   const stop = { label: CHAT_ACTION.stop, onClick: ctx.onStop, disabled: ctx.stopping };
   // A finished call matters only while the view still shows the turn in flight; any other re-read
