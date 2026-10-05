@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { reportManifest } from '../report/contract';
 import { parseDocument } from 'yaml';
 import { z } from 'zod';
 
@@ -11,6 +12,7 @@ const informationSchema = z.object({
 }).strict();
 const manifestSchema = z.object({
   kind: z.enum(['document','social']),
+  reportGeneration: reportManifest.optional(),
   planResources: z.array(path).min(1).max(64).optional(),
   steps: z.array(z.object({
     title: label,

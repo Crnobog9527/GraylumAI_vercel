@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {type FrozenReport} from '../report/contract';
 import {finishWaitingOrganizer,type ResumeWaitingOrganizer} from './waitingOrganizer';
 import { TRPCError } from '@trpc/server';
 import { createHash } from 'node:crypto';
@@ -52,6 +53,7 @@ export const runtimeAdmission=z.object({sessionId:uuid,requestId:uuid,input:z.st
 export type LocalRuntimePolicy={
  /** Real hosts opt into the server-side staging setting; client input cannot select v2. */
  paygHost?: boolean;
+ reportGeneration?:FrozenReport;
  payg?: {callPolicies: FrozenPaygRun['callPolicy']; billingUnit: NonNullable<FrozenPaygRun['rules']['billingUnit']>};
  resumeWaitingOrganizer?:ResumeWaitingOrganizer;
  hostTurnContext?:HostTurnContext;
@@ -100,9 +102,10 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    throw new TRPCError({code:'BAD_REQUEST',message:'BILL2_INSUFFICIENT_CREDITS'});
   if(r.error?.message==='RUNTIME_ORGANIZER_PENDING')throw new StagingAccessError('RUNTIME_ORGANIZER_PENDING');
   if(r.error){
+   if(policy.reportGeneration&&r.error.message.startsWith('REPORT_'))throw new Error(r.error.message);
    if(name==='runtime_admit'&&r.error.message==='OPC_ANSWER_SOURCE_DENIED')throw new Error('OPC_ANSWER_SOURCE_DENIED');
    // Preserve SQL business/permission refusals; classify only operational failures.
-   if(['P0001','PT400','42501'].includes(r.error.code))throw new Error('RUNTIME_ADMISSION_DENIED');
+   if(['P0001','PT400','42501'].includes(r.error.code))throw new Error('RUNTIME_ADMISSION_DENIED',{cause:policy.reportGeneration?r.error:undefined});
    stagingRpcFailure(r.error);
   }
   return r.data;
@@ -122,6 +125,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const settings=readNewWorkSettings(admin);
    const replay=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:request});
    if(replay)return replay;
+   if(policy.reportGeneration&&session.waitingOrganizer)throw new Error('OPC_CAPTURE_PENDING');
    const blocked=await finishWaitingOrganizer(session,input.requestId,policy.resumeWaitingOrganizer);
    if(blocked)return blocked;
    if(session.waitingOrganizer)session=await query('runtime_session_context',{p_session_id:input.sessionId});
@@ -139,11 +143,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(mentorStream&&(input.network!=='deny'||input.sources.length||input.selection.kind==='auto'||policy.workspaceContext))
     throw new Error('RUNTIME_CONTEXT_INVALID');
    const budgets=policy.purposeBudgets?await readPurposeBudgets(admin):null;
-   const purpose=input.selection.kind==='organizer'?'organize':'interactive';
+   const purpose=policy.reportGeneration?'report':input.selection.kind==='organizer'?'organize':'interactive';
    const selectedBudget=budgets?.[purpose];
    const inputBytes=selectedBudget?.inputBytes??policy.inputBytes;
-   const historyItems=selectedBudget?.historyItems??policy.historyItems;
-   const configuredOutput=budgets&&purpose==='interactive'?PURPOSE_OUTPUT_CAP:undefined;
+   const historyItems=policy.reportGeneration?0:selectedBudget?.historyItems??policy.historyItems;
+   const configuredOutput=policy.reportGeneration||budgets&&purpose==='interactive'?PURPOSE_OUTPUT_CAP:undefined;
    const stepStream=Boolean(policy.opcTurnToken&&policy.stepStream);
    if(stepStream&&(mentorStream||input.selection.kind!=='skill'||input.network!=='deny'||input.sources.length))
     throw new Error('RUNTIME_CONTEXT_INVALID');
@@ -208,12 +212,13 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // call, and attached organization must remain inside this same frozen run.
    const candidates=input.selection.kind==='auto'?await discoverRuntimeCandidates(
     user,admin,{...policy,inputBytes,maxOutputTokens:configuredOutput??policy.maxOutputTokens,...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(inputBytes,q.inputLimit),outputLimit:outputCapacity(row,Infinity,configuredOutput)};}}:{})}):[];
-   if(policy.additionalInstructions)instructions+='\n'+z.string().max(budgets?inputBytes:8000).parse(policy.additionalInstructions);
-   let promptCache=hostTurnContext?undefined:freezePromptCache({real:Boolean(policy.real),role:input.selection.kind,model:row.data.model_id,
+   if(policy.additionalInstructions)instructions+='\n'+z.string().max(budgets||policy.reportGeneration?inputBytes:8000).parse(policy.additionalInstructions);
+   let promptCache=hostTurnContext||policy.reportGeneration?undefined:freezePromptCache({
+    real:Boolean(policy.real),role:input.selection.kind,model:row.data.model_id,
     cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined,
     instructions,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions});
    if(mentorStream)instructions+='\n'+QUESTION_CONTRACT_INSTRUCTIONS;
-   const currentInput=runtimeScopeInput(input.input,session.scopeMaterial,hostTurnContext);
+   const currentInput=runtimeScopeInput(input.input,policy.reportGeneration?undefined:session.scopeMaterial,hostTurnContext);
    if(hostTurnContext)promptCache=freezeHostPromptCache({real:Boolean(policy.real),role:input.selection.kind,
     model:row.data.model_id,cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined,
     instructions,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions,
@@ -246,23 +251,25 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(mentorStream&&candidates.length)throw new Error('RUNTIME_MODEL_DENIED');
    let reasoning:ReasoningPolicy|undefined;
    const organize=input.selection.kind==='organizer';
-   if((mentorStream||stepStream)&&!policy.real)reasoning={parameter:'none'};
-   if(policy.real&&(mentorStream||stepStream||organize))
+   if((mentorStream||stepStream||policy.reportGeneration)&&!policy.real)reasoning={parameter:'none'};
+   if(policy.real&&(mentorStream||stepStream||organize||policy.reportGeneration))
     reasoning=admitReasoning(row.data,organize?'organize':'interactive',realModel(row.data).providerLimits!.providerSlug,maxOutputTokens);
    const organizerFormat=Boolean(policy.real&&!mentorStream&&(organize||attachedOrganizer));
    if(organizerFormat&&!reasoning)reasoning={parameter:'none'};
-   const providerRequestFormat=mentorStream?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat?'serial-tools-v6-reasoning':'serial-tools-v2';
+   const providerRequestFormat=mentorStream||policy.reportGeneration?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat?'serial-tools-v6-reasoning':'serial-tools-v2';
    const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:hostTurnContext?'scope-projection-v2':'scope-projection-v1',
     ...(hostTurnContext?{hostTurnContext,historySelection}:{}),
+    ...(policy.reportGeneration?{reportGeneration:policy.reportGeneration}:{}),
     ...(promptCache?{promptCache}:{}),
     ...(mentorStream?{questionContract:QUESTION_CONTRACT,mentorText:'append-card-v1'}:{}),
     nativeOutput:'native-output-v1',...(stepStream?{envelopeOrder:'message-first-v1'}:{}),
-    ...(policy.real||mentorStream||stepStream?{providerRequestFormat}:{}),...(reasoning?{reasoning}:{}),
+    ...(policy.real||mentorStream||stepStream||policy.reportGeneration?{providerRequestFormat}:{}),...(reasoning?{reasoning}:{}),
     role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
-    ...(policy.opcTurnToken?{opcTurnToken:uuid.parse(policy.opcTurnToken)}:{}),...(candidates.length?{matching:{candidates}}:{}),...(session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...(workspaceContext?{workspaceContext:true}:{}),
+    ...(policy.opcTurnToken?{opcTurnToken:uuid.parse(policy.opcTurnToken)}:{}),...(candidates.length?{matching:{candidates}}:{}),
+    ...(!policy.reportGeneration&&session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...(workspaceContext?{workspaceContext:true}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems,network:input.network,
     // Freeze the purpose ceiling; each selected model keeps its own call-policy limit.
-    ...(budgets?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),
+    ...(budgets||policy.reportGeneration?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),
     tools:mentorStream?(opening?[]:[ASK_QUESTION_TOOL]):[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext?['read_source']:[])],maxToolCalls:mentorStream?(opening?0:1):(searchAllowed?1:0)+(workspaceContext?Math.min(2,primaryTurns-1):input.sources.length),
     request,...(policy.answeredCard?{answeredCard:policy.answeredCard}:{}),...(revisionId?{moduleId,skillId,revisionId}:{}),sources:input.sources};
    const selectedIds=new Set([modelId,...(attachedOrganizer?[attachedOrganizer.modelId]:[]),...candidates.map(c=>c.modelId)]);
@@ -285,13 +292,14 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    }
    // MODEL-PRICING-SYNC: every selected quote must still cover its route's current OpenRouter prices.
    const hostPayg=realCalls&&policy.paygHost?await readPaygHostPolicies(admin,policy.real!,realCalls,[
-    {modelId,phase:context.role,outputLimit:maxOutputTokens,requestFormat:providerRequestFormat,reasoning},
+    {modelId,phase:policy.reportGeneration?'report':context.role,outputLimit:maxOutputTokens,requestFormat:providerRequestFormat,reasoning},
     ...(attachedOrganizer?[{modelId:attachedOrganizer.modelId,phase:'attached_organizer' as const,
      outputLimit:attachedOrganizer.maxOutputTokens,requestFormat:providerRequestFormat,reasoning:attachedOrganizer.reasoning}]:[]),
     ...(candidates.length?[{modelId,phase:'skill_matching' as const,outputLimit:maxOutputTokens,requestFormat:providerRequestFormat}]:[]),
     ...candidates.map(c=>({modelId:c.modelId,phase:'skill' as const,outputLimit:c.outputLimit,requestFormat:providerRequestFormat})),
    ],process.env,billing.limits.deadline):undefined;
    const paygTemplates=hostPayg??policy.payg?.callPolicies;
+   if(policy.reportGeneration&&!paygTemplates)throw new Error('REPORT_PAYG_REQUIRED');
    if(realCalls&&!paygTemplates)await admitPricing(admin,realCalls);
    if(realCalls)billing.callPolicy=realCalls;
    // BILL-UNIT: the window must match the current q and each selected model's m_i (0157 claim/finalize).

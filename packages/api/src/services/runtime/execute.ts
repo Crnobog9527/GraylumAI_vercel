@@ -5,7 +5,8 @@ import {NativeProgressProjection} from './nativeProgress';
 import {nativeVisible,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
  completedOutput,finalizeNativeSummary} from './nativeOutput';
 import {paygOwnerDatabase} from './paygOwner';
-import {executorRpc,recoverExecutorFinancial,preflightCodes,hash,progressEmitter,type RuntimeExecutorOptions} from './executorRpc';
+import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,
+ preflightCodes,hash,progressEmitter,type RuntimeExecutorOptions} from './executorRpc';
 import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
@@ -21,7 +22,6 @@ import {projectOpenRouterItemsForSizing} from './openRouterHistory';
 import {AGENT_TURN_REQUEST_FORMAT,validReasoningFormat,
  STREAMING_FORMATS,historyToolNames,openRouterRequestBody} from './providerRequest';
 import {agentTurnResult} from './agentTurnResult';
-import {terminalAgentReplyFailure} from './terminalAgentReply';
 import {askQuestionTool,askQuestionToolBytes,questionMessageFromArguments,QUESTION_CONTRACT} from './agentTools';
 import {ASK_QUESTION_TOOL,INVALID_REPLY_NOTICE} from '../../shared/agentTurn';
 import { authoritativeBilling, type FrozenCall } from '../bill2/service';
@@ -90,20 +90,14 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const policy=execution.billing.callPolicy.find(p=>p.model===context.model);
   if(!policy)throw new Error('RUNTIME_MODEL_DENIED');
   const session=new PostgresSession(ownerDatabase,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
-  const nativeSession=native?new NativeSession(session,Boolean(context.mentorText)):undefined;
+  const nativeSession=native&&!context.reportGeneration?new NativeSession(session,Boolean(context.mentorText)):undefined;
   let transportNotStarted=false,providerRejected=false;
+  let reportFailure:'REPORT_MEMBERSHIP_REQUIRED'|'REPORT_ENTITLEMENTS_UNAVAILABLE'|'REPORT_SOURCE_CONFLICT'|undefined;
   let terminalReplyFailure=false;
   let gateChecked=resumedGate,moderationBlocked=false;
   let waitPoint:{epoch:number;sequence:number;requestHash:string;phase:string;state:PaygWait['state']}|undefined;
   let gateRejection:GateRejection|undefined;
-  const checkAgentReply=(response:unknown,organizer=false)=>{
-   if(agentTurn&&terminalAgentReplyFailure(response,organizer,context.tools.includes(ASK_QUESTION_TOOL))){
-    // Only inspect a complete response returned from durable runtime_response.
-    // Keep this verdict outside the SDK, which wraps provider/tool exceptions.
-    terminalReplyFailure=true;
-    throw new Error('RUNTIME_TERMINAL_REPLY');
-   }
-  };
+  const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;});
   let preflightFailure:string|undefined;
   const streaming=STREAMING_FORMATS.has(context.providerRequestFormat??'');
   // B2a: once BILL2 reports a confirmed erasure, nothing more reaches the client.
@@ -111,14 +105,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const closed=():never=>{accountClosed=true;throw new Error('RUNTIME_ACCOUNT_CLOSED');};
   const progress=progressEmitter(onProgress,()=>budget.timing?.mark('firstValidContent'),()=>accountClosed);
   const normalized=context.providerRequestFormat==='serial-tools-v2'||context.providerRequestFormat==='serial-tools-v6-reasoning'||streaming;
-  const historyChecked=<T>(check:()=>T):T=>{
-   try{return check();}catch(error){
-    if(error instanceof Error&&error.message==='RUNTIME_PROVIDER_HISTORY_DENIED'){
-     preflightFailure=error.message;logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});
-    }
-    throw error;
-   }
-  };
+  const historyChecked=historyGuard(executionId,code=>{preflightFailure=code;});
   try{
    let callSequence=0;
    // The SDK wraps fetch errors; retain only this verified database verdict.
@@ -168,7 +155,12 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
        }catch(error){gateRejection??='limit_unavailable';throw error;}
        finally{leaveRateLimit?.();}
       }
-      const claim=isPayg?await billing.claimPaygCall(execution.runId,sequence,call)
+      const claim=isPayg?await billing.claimPaygCall(execution.runId,sequence,call).catch(error=>{
+        if(context.reportGeneration&&error instanceof Error&&
+         (error.message==='REPORT_MEMBERSHIP_REQUIRED'||error.message==='REPORT_ENTITLEMENTS_UNAVAILABLE'
+          ||error.message==='REPORT_SOURCE_CONFLICT'))reportFailure=error.message;
+        throw error;
+       })
        :await billing.claimCall(execution.runId,sequence,call);
       if(claim.id===null)pause('waiting_credits');
       try{
@@ -290,8 +282,10 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     historyChecked(()=>projectOpenRouterItemsForSizing(items,historyCount,historyToolNames(context.providerRequestFormat)))}:{};
    let selectedHistoryCount=0,latestHistoryCount=0;
    let historyOmitted=execution.historyOmitted===true;
+   if(context.reportGeneration&&execution.live&&execution.historyFrozen===false)await session.freezeHistory(0);
    let partial="";progress({type:"phase",phase:"mentor"});
-   return runRuntime({...context,...effective,rejectTruncatedTools:native,stream:streaming,onText:delta=>{
+   return runRuntime({...context,...effective,...(context.reportGeneration?{persistSession:false,readSessionHistory:false}:{}),
+    rejectTruncatedTools:native,stream:streaming,onText:delta=>{
     if(delta)budget.timing?.mark('firstModelText');
     if(!native)partial+=delta;
     if(agentTurn)agentText+=delta;
@@ -347,7 +341,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      partial="";
      projection=new NativeProgressProjection(projectionOptions);
      const project=nativeFrameProjection(projection,progress);
-     const envelope=await exchange(request,effective.role,primaryPolicy,nativeProgress&&execution.live&&onChunk?chunk=>{
+     const envelope=await exchange(request,context.reportGeneration?'report':effective.role,primaryPolicy,nativeProgress&&execution.live&&onChunk?chunk=>{
       onChunk(chunk);
       try{project(chunk);}catch{logger.warn('api','runtime_native_projection_failed',{executionId});}
      }:onChunk);
@@ -381,7 +375,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     if(latest.unavailable)return {state:latest.state,unavailable:'latest' as const};
    }
    budget.timing?.mark('fullModelReply');
-   const turn=agentTurn?agentTurnResult(agentText,body,agentToolCalled,agentCardMessage,native,Boolean(context.mentorText)):null;
+   const turn=agentTurn&&!context.reportGeneration?agentTurnResult(agentText,body,agentToolCalled,agentCardMessage,native,Boolean(context.mentorText)):null;
    if(turn){
     if(turn.card||turn.message!==INVALID_REPLY_NOTICE)budget.timing?.mark('firstValidContent');
     body=turn.body;
@@ -397,6 +391,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     if(turn?.card)progress({type:'card',card:JSON.parse(body).card});
    }
    if(nativeProgress&&!accountClosed&&!moderationBlocked){const done=await finishStop(executionId,onProgress,undefined,execution.live);if(done)return done;}
+   if(context.reportGeneration)await session.addItems([]);
    await nativeSession?.finish(body,agentTurn,!agentTurn||turnMetadata.completeness==='length_limit');
    const publicBody=agentTurn||native?'':publicMentorText(body);if(publicBody)progress({type:'text',text:publicBody});
    let summary:string|undefined;
@@ -442,6 +437,10 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     return {state:saved.state,code:saved.state==='waiting_credits'?'RUNTIME_WAITING_CREDITS':'RUNTIME_WAITING_RESUME',
      executionId,cursor:saved.cursor,epoch:saved.epoch,remainingCalls:saved.remainingCalls,
      ...(saved.primaryResult?{body:saved.primaryResult.body}:{})} as PaygWait;
+   }
+   if(reportFailure){
+    const stopped=await ownerRpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
+    return {state:stopped.state,code:reportFailure};
    }
    // The SDK may wrap the error; rely on the latch. Every Runtime write now
    // refuses this actor, so leave settlement to trusted financial recovery.
