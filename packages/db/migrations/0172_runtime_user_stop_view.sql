@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- C2: v1/v2 history exposes pending user stop independently of bill2_public.
--- 0172 is reserved by PAY-COMMON; this patch depends only on the 0171 view.
+-- This patch depends on the 0171 runtime_view definition.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 DO $migration$

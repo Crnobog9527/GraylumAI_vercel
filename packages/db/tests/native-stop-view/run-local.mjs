@@ -17,7 +17,7 @@ try {
     report.checks.push(version + ': stop/save/cancel; read-only refresh; hidden/foreign/client/erased denied');
   }
 
-  const migration = read('packages/db/migrations/0173_runtime_user_stop_view.sql');
+  const migration = read('packages/db/migrations/0172_runtime_user_stop_view.sql');
   const rollback = read('packages/db/tests/native-stop-view/rollback.sql');
   const target = await definition();
   const old = migration.match(/\$old\$([\s\S]*?)\$old\$/)[1];
