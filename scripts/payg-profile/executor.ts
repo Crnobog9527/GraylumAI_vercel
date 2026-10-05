@@ -22,7 +22,7 @@ export function verifiedPlan(prices:unknown,manifest:unknown,approvedHash:string
  const plan=createSamplePlan(prices);
  if(!isDeepStrictEqual(plan.manifest,manifest)||approvedHash!==plan.manifest.manifestHash)
   throw new Error('APPROVED_MANIFEST_MISMATCH');
- if(!plan.manifest.currentPricesVerified||decimal(plan.manifest.cumulativeUpperUsd)>decimal('48')
+ if(!plan.manifest.currentPricesVerified||decimal(plan.manifest.cumulativeUpperUsd)>=decimal('25')
   ||plan.manifest.blockers.some(b=>!['REAL_SAMPLING_NOT_AUTHORIZED','PROFILE_EVIDENCE_NOT_COLLECTED'].includes(b)))
   throw new Error('PLAN_NOT_EXECUTABLE');
  if(new Set(plan.requests.map(r=>r.id)).size!==plan.requests.length)throw new Error('DUPLICATE_SAMPLE');
@@ -106,11 +106,13 @@ function observationEvent(adapter:ReturnType<typeof openRouterAdapter>,observati
  identity:CallIdentity & OpenRouterIdentity,source:'response'|'lookup',sample:Sample,expectedId?:string){
  const evidence=adapter.evidence(observation,identity,source,expectedId);
  const usage=evidence.usage;
- let providerName:unknown=null,finishReason:unknown=null,regionBlocked=false;
+ let providerName:unknown=null,finishReason:unknown=null,regionBlocked=false,contentRefused=false;
  try{
   const raw=observation.rawBodyEncoding?decodeOpenRouterStreamObservation(observation).toString('utf8'):observation.rawBody;
   const value=JSON.parse(raw);providerName=source==='lookup'?value.data?.provider_name:value.provider;
   finishReason=source==='lookup'?value.data?.finish_reason:value.choices?.[0]?.finish_reason;
+  const nativeFinish=source==='lookup'?value.data?.native_finish_reason:value.choices?.[0]?.native_finish_reason;
+  contentRefused=finishReason==='content_filter'||nativeFinish==='refusal';
   regionBlocked=observation.httpStatus===403&&value.error?.code===403
    &&value.error?.metadata?.failed_routing_step==='Gate Endpoints with Geo Restrictions';
  }catch{/* Unknown metadata is not a verified route. */}
@@ -119,7 +121,7 @@ function observationEvent(adapter:ReturnType<typeof openRouterAdapter>,observati
   nativePromptTokens:integer(usage?.inputTokens),nativeCompletionTokens:integer(usage?.outputTokens),
   reasoningTokens:integer(usage?.reasoningTokens),cachedTokens:integer(usage?.cachedTokens),
   cacheWriteTokens:integer(usage?.cacheCreationTokens),providerName,finishReason,
-  regionBlocked,rejected:'rejectedReason' in evidence?evidence.rejectedReason:null};
+  regionBlocked,contentRefused,rejected:'rejectedReason' in evidence?evidence.rejectedReason:null};
 }
 
 export async function executePlan(options:{prices:unknown;manifest:unknown;approvedHash:string;journal:Journal;
@@ -161,6 +163,10 @@ export async function executePlan(options:{prices:unknown;manifest:unknown;appro
   if(observations[0].regionBlocked){
    await append({type:'halt',sampleId:sample.id,reason:'PROVIDER_REGION_BLOCKED',actualUsd:null});break;
   }
+  if(observations[0].contentRefused){
+   await append({type:'halt',sampleId:sample.id,reason:'PROVIDER_CONTENT_REFUSED',
+    actualUsd:observations[0].costUsd});break;
+  }
   const id=observations[0].providerId;
   if(id&&generationIds.has(id)){
    await append({type:'halt',sampleId:sample.id,reason:'REUSED_GENERATION_ID',actualUsd:null});break;
@@ -180,9 +186,12 @@ export async function executePlan(options:{prices:unknown;manifest:unknown;appro
      await journal.saveObservation(String(sample.id),`lookup-${attempt}`,transport);
      const observed=observationEvent(adapter,transport,identity,'lookup',sample,id);
      observations.push(observed);await append(observed);
-     if(complete(observed)||observed.rejected==='identity_or_response_mismatch')break;
+     if(observed.contentRefused||complete(observed)||observed.rejected==='identity_or_response_mismatch')break;
     }catch{await append({type:'lookup-unknown',sampleId:sample.id,attempt});}
    }
+  }
+  if(observations.some(o=>o.contentRefused)){
+   await append({type:'halt',sampleId:sample.id,reason:'PROVIDER_CONTENT_REFUSED',actualUsd:null});break;
   }
   const finals=observations.filter(o=>o.final);
   const valid=observations.filter(complete).at(-1);

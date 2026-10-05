@@ -5,7 +5,7 @@ import prices from '../../../../../scripts/payg-profile/plan-prices.json';
 import catalog from '../../../../../scripts/payg-profile/catalog-2026-10-05.json';
 import {createSamplePlan} from '../../../../../scripts/payg-profile/sampling';
 import {executePlan,verifiedPlan,verifyCatalog,failureCode,type Event,type Plan} from '../../../../../scripts/payg-profile/executor';
-// Full 228-request regeneration is CPU-bound; shared CI runners exceed Vitest's 5s default.
+// Full 183-request regeneration is CPU-bound; shared CI runners exceed Vitest's 5s default.
 let plan:Plan;
 beforeAll(()=>{plan=createSamplePlan(prices);});
 const response=(body:Record<string,unknown>,status=200)=>new Response(JSON.stringify(body),{status});
@@ -33,10 +33,10 @@ it('checks exact manifest before credential or network; refuses budget/catalog/c
 },30000);
 it('real adapter sends every frozen hash once, under its own cap, with canonical receipts',async()=>{
  const f=fixture();const result=await executePlan(f.options);
- expect(f.transport).toHaveBeenCalledTimes(228);expect(result.receipts).toHaveLength(228);
+ expect(f.transport).toHaveBeenCalledTimes(183);expect(result.receipts).toHaveLength(183);
  expect(result.report.every(s=>s.status==='SAMPLE_WITHIN_BOUNDS')).toBe(true);
- expect(f.observations).toHaveLength(228);
- for(let i=0;i<228;i++){
+ expect(f.observations).toHaveLength(183);
+ for(let i=0;i<183;i++){
   const [url,init]=f.transport.mock.calls[i];const sample=plan.manifest.samples[i];
   expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
   expect(createHash('sha256').update(String(init?.body)).digest('hex')).toBe(sample.requestHash);
@@ -46,7 +46,7 @@ it('real adapter sends every frozen hash once, under its own cap, with canonical
  expect(result.report[0]).toMatchObject({P:100,cachedTokens:20,cacheWriteTokens:10});
  expect(JSON.stringify(result)).not.toContain('LOCAL_SYNTHETIC_KEY');
  await expect(executePlan(f.options)).rejects.toThrow('BATCH_ALREADY_ATTEMPTED');
- expect(f.transport).toHaveBeenCalledTimes(228);
+ expect(f.transport).toHaveBeenCalledTimes(183);
 },30000);
 it('ambiguous send never retries, never marks zero cost, never dispatches the next sample',async()=>{
  const f=fixture();f.transport.mockRejectedValue(new Error('private transport detail'));
@@ -149,10 +149,10 @@ it.each(['Google Vertex','Google AI Studio','google-vertex/global','unverified-p
   return response(body);
  });
  const result=await executePlan(f.options);
- expect(result.receipts).toHaveLength(76);
+ expect(result.receipts).toHaveLength(31);
  expect(f.events.at(-1)).toMatchObject({reason:'UNKNOWN_OR_FAILED'});
  expect(f.events.filter(e=>e.type==='lookup-attempt')).toHaveLength(3);
- expect(f.events.filter(e=>e.type==='attempt')).toHaveLength(77);
+ expect(f.events.filter(e=>e.type==='attempt')).toHaveLength(32);
 },30000);
 it('all three canonical provider names are also accepted from original-ID lookup receipts',async()=>{
  const f=fixture(),send=f.transport.getMockImplementation()!;
@@ -168,9 +168,9 @@ it('all three canonical provider names are also accepted from original-ID lookup
   return response(withoutProvider);
  });
  const result=await executePlan(f.options);
- expect(result.receipts).toHaveLength(228);
+ expect(result.receipts).toHaveLength(183);
  expect(result.receipts.every(r=>(r as {source:string}).source==='lookup.native_tokens_prompt')).toBe(true);
- expect(f.events.filter(e=>e.type==='lookup-attempt')).toHaveLength(228);
+ expect(f.events.filter(e=>e.type==='lookup-attempt')).toHaveLength(183);
 },30000);
 
 it.each([true,false])('only exact region-gate 403 yields PROVIDER_REGION_BLOCKED (region=%s)',async(region)=>{
@@ -182,4 +182,42 @@ it.each([true,false])('only exact region-gate 403 yields PROVIDER_REGION_BLOCKED
  expect(result.actualUsd).toBeNull();
  expect(f.transport.mock.calls.filter(([,init])=>init?.method==='POST')).toHaveLength(1);
  expect(JSON.stringify(f.events)).not.toContain('Gate Endpoints');
+},30000);
+
+it.each([
+ {finish_reason:'content_filter'},
+ {finish_reason:'stop',native_finish_reason:'refusal'},
+])('content refusal is a distinct immediate halt with no lookup: %j',async(choice)=>{
+ const f=fixture();
+ f.transport.mockResolvedValue(response({id:'synthetic-refused',model:prices.routes[0].model,
+  provider:'Anthropic',choices:[choice]}));
+ const result=await executePlan(f.options);
+ expect(f.transport).toHaveBeenCalledTimes(1);
+ expect(f.events.at(-1)).toMatchObject({reason:'PROVIDER_CONTENT_REFUSED',actualUsd:null});
+ expect(result.actualUsd).toBeNull();expect(result.report[0].status).toBe('UNKNOWN');
+ expect(result.report[1].status).toBe('NOT_RUN');
+},30000);
+it('a refusal with settled cost retains that cost and still stops',async()=>{
+ const f=fixture();
+ f.transport.mockResolvedValue(response({id:'synthetic-refused-cost',model:prices.routes[0].model,
+  provider:'Anthropic',choices:[{finish_reason:'content_filter'}],
+  usage:{cost:0.002,prompt_tokens:100,completion_tokens:10}}));
+ const result=await executePlan(f.options);
+ expect(f.transport).toHaveBeenCalledTimes(1);expect(result.knownUsd).toBe('0.002000000000');
+ expect(f.events.at(-1)).toMatchObject({reason:'PROVIDER_CONTENT_REFUSED'});
+},30000);
+it('refusal first observed in lookup stops further lookups and dispatch',async()=>{
+ const f=fixture();
+ f.transport.mockImplementation(async(_url,init)=>init?.method==='POST'
+  ?response({id:'synthetic-refusal-lookup',model:prices.routes[0].model,choices:[{finish_reason:'stop'}]})
+  :response({data:{id:'synthetic-refusal-lookup',model:prices.routes[0].model,native_finish_reason:'refusal'}}));
+ await executePlan(f.options);expect(f.transport).toHaveBeenCalledTimes(2);
+ expect(f.events.at(-1)).toMatchObject({reason:'PROVIDER_CONTENT_REFUSED'});
+},30000);
+it('lowered cumulative cap refuses plans even when each call stays within its cap',()=>{
+ const changed=structuredClone(prices);
+ for(const r of changed.routes){r.prompt=String(Number(r.prompt)*2);if(r.write)r.write=String(Number(r.write)*2);}
+ const over=createSamplePlan(changed);
+ expect(Number(over.manifest.cumulativeUpperUsd)).toBeGreaterThan(25);
+ expect(()=>verifiedPlan(changed,over.manifest,over.manifest.manifestHash)).toThrow('PLAN_NOT_EXECUTABLE');
 },30000);

@@ -1,6 +1,6 @@
 # BILL-PAYG profile 执行器交接（仅准备）
 
-**重跑准备完成，等待复核。** 旧批次已锁定；本轮不发送模型请求、不访问远端数据库、不改配置。
+**第三批准备完成，等待复核。** 旧批次已锁定；本轮不发送模型请求、不访问远端数据库、不改配置。
 本页不是执行批准；必须先收到主窗口对本 PR 最终版本和 manifest 的审阅通过及执行通知。
 
 ## 入口
@@ -15,8 +15,8 @@
 ```bash
 NODE_USE_ENV_PROXY=1 NO_PROXY= no_proxy= https_proxy= node scripts/payg-profile-execute.mjs execute-approved \
   scripts/payg-profile/plan-prices.json \
-  docs/launch/evidence/payg-profile-20261005-proxy-r2.manifest.json \
-  596c57a3839de657e46058d16d8a558af2c84d3ea4b79b74e80a9b96e4a10ef7 \
+  docs/launch/evidence/payg-profile-20261006-r3.manifest.json \
+  3cbeb87e1e9895527cf8e56c611337c897ef28bb7df637412724c05949be5e74 \
   owner-approved-test-balance-only
 ```
 
@@ -30,6 +30,19 @@ NODE_USE_ENV_PROXY=1 NO_PROXY= no_proxy= https_proxy= node scripts/payg-profile-
 每条发送前仍重新 GET 精确模型 endpoint 目录，与冻结目录比较全部价格层和能力；漂移后须重新预演/审阅，不能继续。
 本地费用计算复用 openRouterCallBound，发送和查账复用现有 openRouterAdapter/openRouterEvidence；
 无 SDK 自动重试、无 fallback、固定 OpenRouter URL、禁止重定向。工具样本只带合成历史，不执行真实工具。
+
+## 第三批范围与费用
+
+详见 [R3 预演及逐条上界](BILL_PAYG_PROFILE_R3.md)。当前入口只接受重新生成且完整相等的第三批 manifest；
+旧清单不能由新执行器重跑。前两批共按 $2.5964977 入账，旧回执的 UNKNOWN 不改写。
+累计上界 = 2.5964977 + 新批次上界，必须小于 $25；代码和清单均强制校验。单条上限不变。
+已完成的 48 个原请求 hash 均不重发；其中 3 条虽未超界但未触及输出硬限，换新内容、新 ID 收集缺失的输出压力证据。
+输出提示要求按编号连续写满，但模型仍可能提前结束；每种 reasoning 必须取得至少两条触及 O 的真实回执，
+离线测试或提示词不能保证它会写满。证据不足则不生成可启用 profile，不临时补跑。
+
+finish_reason=content_filter 或 native_finish_reason=refusal（response 或原 ID lookup）立即记
+PROVIDER_CONTENT_REFUSED 并停批；response 已识别时不再查账，lookup 识别后不再继续查账。没有有效费用仍为 null，
+不能自动按 $0 入账；有已结算费用则如实计入，但拒绝样本不成为合格证据。禁止补跑或重新发送。
 
 ## 持久材料与停机
 
@@ -104,10 +117,10 @@ POST 最多一次；超时/断线无原 ID 时保留未知费用并停止，不�
 32 条旧执行不受放宽；无数据重写、新表、权限变化。开启新 profile 前必须先完成迁移，不能仅设置开关。
 有活动 128 条执行时，恢复方式是关闭新准入并完成旧执行；不直接回退 SQL 上限造成在途执行拒绝。
 
-迁移顺序按主窗口 2026-10-05 审计更新：#666 使用 0172；本 PR 在采样结束、最终合并前改为 0173，
+迁移顺序按主窗口 2026-10-05 审计更新：#666 使用 0172；本 PR 在采样结束、最终合并前改为 0175，
 以届时 staging 重建指纹。在此之前若产生账本编号/跳号失败应如实记录，不加入占位迁移或放宽 CI。
 
-## 代理与新批次（2026-10-05）
+## 历史：代理与第二批（2026-10-05）
 
 新批次 ID：`payg-profile-20261005-proxy-r2`；旧 manifest `4289cffc…bad9c5` 的锁、日志和原回执保持不变。
 旧首条依 [主窗口审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5996661703)
@@ -127,7 +140,7 @@ trace 响应可能包含其他字段；执行器按字节流跳过非 loc 行，
 Google 页面覆盖 Gemini API，不是 OpenRouter Vertex 路由的可用性承诺；端点仍可按其策略拒绝。
 未在已核实子集的国家停止为 PROXY_COUNTRY_NOT_ALLOWED；查询失败、重定向或无效响应为 PROXY_COUNTRY_CHECK_FAILED。
 预检与模型请求现在同为 openrouter.ai，使用同一域名分流规则；一次国家检查不能证明代理之后不换出口，
-也不能代替服务商实际准入。此轮只用合成数据测试，尚未实测本机代理出口。
+也不能代替服务商实际准入。第二批已实测出口 US 并停批；第三批仍须在下一次获准执行时重新通过预检。
 
 403 只有同时匹配 error.code=403 和 metadata.failed_routing_step 的
 `Gate Endpoints with Geo Restrictions` 才记为 PROVIDER_REGION_BLOCKED（结构取自旧批次私有回执，未上传原文）。
@@ -139,4 +152,4 @@ Google 页面覆盖 Gemini API，不是 OpenRouter Vertex 路由的可用性承�
 依据 [主窗口诊断](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5997378844)，
 旧第三方国家查询被限流/质询；切换同域 trace，无新增查询回退入口。主窗口报告的 loc=US
 不代替本执行器下一次启动时的检查。本轮只做合成测试，不查询真实出口或发送模型请求。
-清单 `596c57a3…a10ef7`、样本及费用上界保持不变。最终迁移编号按最新安排为 0174，本轮不改迁移。
+清单 `596c57a3…a10ef7`、样本及费用上界保持不变。最终迁移编号按最新安排为 0175，本轮不改迁移。

@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
+import {priorBatch,retainedEvidence} from './batch-r3';
 import {openRouterRequestBody} from '../../packages/api/src/services/runtime/providerRequest';
 import {freezePromptCache} from '../../packages/api/src/services/runtime/promptCache';
 import {reasoningPolicy,frozenReasoningFields,type ReasoningPolicy} from '../../packages/api/src/services/runtime/reasoningPolicy';
@@ -33,14 +34,18 @@ function sized(seed:string,bytes:number){
  return seed.repeat(count)+tail+'x'.repeat(rest);
 }
 function requestFor(r:Route,category:typeof categories[number],target:number,variant:number,O:number,
- reasoning:ReasoningPolicy,messageCount?:number){
+ reasoning:ReasoningPolicy,messageCount?:number,neutralJson=false){
  const providerLimits={providerSlug:r.endpointTag,contextTokens:r.contextTokens,promptUsdPerMillion:r.prompt,
   completionUsdPerMillion:r.completion,requestUsd:r.request,...(r.write?{cacheWriteUsdPerMillion:r.write}:{})};
  const policy={modelId:'10000000-0000-4000-8000-000000000001',model:r.model,provider:'openrouter',account:'offline-only',
   protocol:'openrouter-chat-v1' as const,providerLimits,upperUsd:openRouterBound(providerLimits,O).upperUsd,
   inputLimit:196608,outputLimit:O,automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true};
  // Same substantive system prefix within a length/category cell; variants differ in user data.
- const instructions=target>4096?sized('Analyze the following synthetic dataset. Preserve its provenance.\n',8192):
+ const outputInstruction='Write numbered rows 000001 through 010000 inclusive. One row per line: '+
+  '"000001 | item 000001 | quantity 17 | color blue | status available". '+
+  'Increment both row numbers. Produce every row explicitly; do not summarize, use ellipses, or add a conclusion. '+
+  'Do not stop early. Start row 000001 immediately and continue until the output limit stops generation. ';
+ const instructions=O===8192?outputInstruction:target>4096?sized('Analyze the following synthetic dataset. Preserve its provenance.\n',8192):
   'Analyze the following synthetic dataset. Preserve provenance and uncertainty.';
  const promptCache=freezePromptCache({real:true,role:'skill',model:r.model,cacheWriteUsdPerMillion:r.write,
   instructions,skillChars:instructions.length});
@@ -70,7 +75,7 @@ function requestFor(r:Route,category:typeof categories[number],target:number,var
    data=data.slice(each*(messageCount-2));
   }
   messages[messages.length-1].content=`Category ${category}; variant ${variant}. ${O===8192?
-   'Output at least 12000 tokens of numbered synthetic records and explanations. Continue until the output limit. ':''}${data}`;
+   outputInstruction:''}${data}`;
   return openRouterRequestBody(JSON.stringify({model:r.model,messages,store:false,max_tokens:O,...frozenReasoningFields(reasoning),
    ...(toolSample?{tools:[{type:'function',function:{name:'read_source',description:'Read a synthetic owned record',parameters}}]}:{})}),
   {context:{providerRequestFormat:'serial-tools-v6-reasoning',tools:toolSample?['read_source']:[],workspaceContext:toolSample,
@@ -80,10 +85,12 @@ function requestFor(r:Route,category:typeof categories[number],target:number,var
  if(target===0)return {body:base,providerLimits};
  if(Buffer.byteLength(base)>target)throw new Error('SAMPLE_BASE_EXCEEDS_TARGET');
  // JSON escaping changes B; search on final normalized, cache-marked wire bytes.
+ const seed=messageCount?'Synthetic record 0123456789. ':neutralJson?
+  '{"sku":1001,"quantity":17,"price":24,"name":"notebook"}\n':text[category];
  let low=0,high=target;
  while(low<high){const mid=Math.ceil((low+high)/2);
-  if(Buffer.byteLength(serialize(sized(messageCount?'Synthetic record 0123456789. ':text[category],mid)))<=target)low=mid;else high=mid-1;}
- const data=sized(messageCount?'Synthetic record 0123456789. ':text[category],low),body=serialize(data);
+  if(Buffer.byteLength(serialize(sized(seed,mid)))<=target)low=mid;else high=mid-1;}
+ const data=sized(seed,low),body=serialize(data);
  return {body:serialize(data+'x'.repeat(target-Buffer.byteLength(body))),providerLimits};
 }
 export function createSamplePlan(input:unknown){
@@ -94,11 +101,17 @@ export function createSamplePlan(input:unknown){
  for(const r of prices.routes){
   let total=0n;
   const add=(category:typeof categories[number],band:string,variant:number,target:number,O:number,reasoning:ReasoningPolicy,kind:string,messageCount?:number)=>{
-   const {body,providerLimits}=requestFor(r,category,target,variant,O,reasoning,messageCount);
+   const originalId=`${r.model}:${kind}:${category}:${band}:${variant}`;
+   const retained=retainedEvidence.find(s=>s.id===originalId);
+   if(retained&&(kind!=='output'||retained.outputCapReached))return;
+   const revised=kind==='output'||kind==='matrix'&&category==='json'&&band==='large';
+   const id=originalId+(revised?':r3':'');
+   const {body,providerLimits}=requestFor(r,category,target,variant,O,reasoning,messageCount,
+    kind==='matrix'&&category==='json'&&band==='large');
    const B=Buffer.byteLength(body),T=B+8192,parsed=JSON.parse(body);
    const schemaBytes=(parsed.tools??[]).reduce((n:number,t:{function:{parameters:unknown}})=>n+Buffer.byteLength(JSON.stringify(t.function.parameters)),0);
    if(B>196608||parsed.messages.length>128||schemaBytes>16384)throw new Error('SAMPLE_PROFILE_EXCEEDED');
-   const upperUsd=openRouterCallBound(providerLimits,O,T).upperUsd,id=`${r.model}:${kind}:${category}:${band}:${variant}`;
+   const upperUsd=openRouterCallBound(providerLimits,O,T).upperUsd;
    const approvedCap=r.model==='anthropic/claude-sonnet-5.5'&&kind==='matrix'&&band==='large'&&variant>=2?'0.55':r.perCallCap;
    if(decimal(upperUsd)>decimal(approvedCap))blockers.push(`PER_CALL_BUDGET_EXCEEDED:${id}`);
    total+=decimal(upperUsd);
@@ -118,16 +131,15 @@ export function createSamplePlan(input:unknown){
   if(total>decimal(r.modelCap))blockers.push(`MODEL_BUDGET_EXCEEDED:${r.model}`);
  }
  const totalUsd=money(Object.values(totals).reduce((sum,n)=>sum+decimal(n),0n));
- if(decimal(totalUsd)>decimal('48'))blockers.push('TOTAL_BUDGET_EXCEEDED');
- const batch={id:'payg-profile-20261005-proxy-r2',
-  previous:{manifestHash:'4289cffc98ac5fda57b46e93e8a7e3d083b30ab71223428a961d118593bad9c5',
-   receiptStatus:'UNKNOWN',accountedUsd:'0.000000000000',
-   decision:'https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5996661703'}};
- const cumulativeUpperUsd=money(decimal(totalUsd)+decimal(batch.previous.accountedUsd));
- if(decimal(cumulativeUpperUsd)>decimal('48'))blockers.push('CUMULATIVE_BUDGET_EXCEEDED');
- const manifest={version:3,batch,cumulativeUpperUsd,pricesHash:hash(JSON.stringify(prices)),maxMessages:128,
+ if(decimal(totalUsd)>=decimal('25'))blockers.push('TOTAL_BUDGET_EXCEEDED');
+ const batch={id:'payg-profile-20261006-r3',previous:priorBatch};
+ const cumulativeUpperUsd=money(decimal(totalUsd)+decimal('2.596497700000'));
+ if(decimal(cumulativeUpperUsd)>=decimal('25'))blockers.push('CUMULATIVE_BUDGET_EXCEEDED');
+ const manifest={version:4,batch,cumulativeCapUsd:'25',priorAccountedUsd:'2.596497700000',cumulativeUpperUsd,
+  retainedEvidence,retainedEvidenceHash:hash(JSON.stringify(retainedEvidence)),
+  pricesHash:hash(JSON.stringify(prices)),maxMessages:128,
   priceSource:prices.source,currentPricesVerified:prices.currentVerified,
-  distinctMatrixSamples:180,messageStressSamples:samples.filter(s=>s.kind==='messages').length,
+  distinctMatrixSamples:samples.filter(s=>s.kind==='matrix').length,messageStressSamples:samples.filter(s=>s.kind==='messages').length,
   outputStressSamples:samples.filter(s=>s.kind==='output').length,calls:samples.length,totals,totalUsd,
   actualCalls:0,actualUsd:'0',blockers,samples};
  return {manifest:{...manifest,manifestHash:hash(JSON.stringify(manifest))},requests};
