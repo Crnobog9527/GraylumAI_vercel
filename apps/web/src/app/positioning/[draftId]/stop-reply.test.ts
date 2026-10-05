@@ -5,7 +5,7 @@ import { liveReplyAfter, mentorReplyDisplay, startLiveReply, type LiveReply, typ
 import { livePrefixKey, markLiveReload, takeLivePrefix } from "./live-prefix";
 import { liveReplyController } from "./live-reply-controller";
 import { mentorTailNotices, turnNeedsRetry } from "./mentor-notices";
-import { isCompleteResult, isTerminalTurn } from "./mentor-turn";
+import { isCompleteResult, isTerminalTurn, stoppedPartial } from "./mentor-turn";
 import { envelopeRecovery, historyPollInterval, HISTORY_POLL_MS, type StoredStepEnvelope } from "./step-recovery";
 import {
   rememberStop, sendStop, stopAvailable, stoppedHere, STOP_FOLLOW_UP_DELAYS_MS, STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE, STOPPED_EMPTY_NOTICE, STOPPED_NOTICE, STOPPED_UNORGANIZED_NOTICE,
@@ -289,6 +289,14 @@ describe("the saved result of a stopped turn", () => {
     expect(shown.notice).toEqual({ tone: "status", text: STOPPED_UNORGANIZED_NOTICE });
     expect(STOPPED_UNORGANIZED_NOTICE).toBe("已停止，本轮未整理");
     expect(isCompleteResult({ completeness: "stopped" })).toBe(false);
+  });
+
+  it("a cut or unorganized stopped reply never fills the form by itself", () => {
+    expect(stoppedPartial({ stopped: true, completeness: "stopped" })).toBe(true);
+    expect(stoppedPartial({ stopped: true, completeness: "complete", organized: false })).toBe(true);
+    expect(stoppedPartial({ stopped: true, completeness: "complete", organized: true })).toBe(false);
+    // Unstopped turns keep their existing behaviour, including length_limit.
+    expect(stoppedPartial({ completeness: "length_limit" })).toBe(false);
   });
 });
 

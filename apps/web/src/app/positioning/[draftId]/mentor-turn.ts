@@ -239,6 +239,15 @@ export function isCompleteResult(execution: Pick<MentorExecution, "completeness"
     && execution.organized !== false;
 }
 
+/**
+ * A stopped reply that was cut (`completeness` other than `complete`) or left
+ * unorganized: the user did not see all of it, so it never updates the form
+ * by itself (CHAT-NATIVE-OUTPUT §4.2 item 6). It stays readable in history.
+ */
+export function stoppedPartial(execution: { stopped?: boolean; completeness?: string; organized?: boolean; envelopeCompact?: boolean }) {
+  return execution.stopped === true && !isCompleteResult(execution as Pick<MentorExecution, "completeness" | "organized" | "envelopeCompact">);
+}
+
 /** Exact JSON identity, including nested source and extra keys; property order is irrelevant. */
 export function sameRequest(a: unknown, b: unknown): boolean {
   if (a === b) return true;

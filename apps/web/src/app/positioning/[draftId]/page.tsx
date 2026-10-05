@@ -24,7 +24,7 @@ import { CHAT_ACTION, ChatInlineNotice, ChatNoticeList, ChatPendingStatus } from
 import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRetry } from "./mentor-notices";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { useLiveReply } from "./use-live-reply";
-import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, type MentorRequest, type MentorStepEnvelope,
+import { sameRequest, stoppedPartial, releaseRejectedAnswer, openingRequest, parseStepEnvelope, type MentorRequest, type MentorStepEnvelope,
   isCompleteResult, retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
 import { usePaygResume } from "@/lib/use-payg-resume";
 import {
@@ -610,7 +610,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       input: string | null;
       body: string | null;
       primaryBody: string | null;
-      summary: string | null;
+      summary: string | null; stopped?: boolean; completeness?: string; organized?: boolean; envelopeCompact?: boolean;
     }>) {
       if (
         execution.state !== "completed" ||
@@ -636,7 +636,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       // A non-substantive user turn (an acknowledgement, an uncertainty or a
       // request for help) never becomes business content on its own.
       const accepted = applyMentorTurnRules(parsed, execution.input ?? "");
-      if (!Object.keys(accepted).length || parsed.targetStepId !== turn.stepId ||
+      if (!Object.keys(accepted).length || parsed.targetStepId !== turn.stepId || stoppedPartial(execution) ||
           d.snapshot.state !== "draft" || d.snapshot.steps[turn.stepId].valid) {
         appliedMentor.current.add(execution.executionId);
         continue;
