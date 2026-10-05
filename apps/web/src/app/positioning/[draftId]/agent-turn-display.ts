@@ -92,7 +92,7 @@ export function livePhaseNotice(phase: string) {
   if (phase === "organizer") return "正文已返回，正在整理待核对信息…";
   if (phase === "saving") return "正在保存结果并核对费用…";
   if (phase === "incomplete") return "回复尚未完成；原请求已保留，请按当前状态继续核对，不会自动重发。";
-  if (phase === "waiting") return "导师仍在回复，写完后会显示完整回复。";
+  if (phase === "waiting") return "正在回复…";
   return "正在生成；部分正文尚未完成，费用尚未结算。";
 }
 

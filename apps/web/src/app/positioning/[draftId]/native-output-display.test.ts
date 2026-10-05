@@ -69,7 +69,7 @@ describe("textDelta consumer (CHAT-NATIVE-OUTPUT §2.2)", () => {
   });
 
   it("has a waiting notice", () => {
-    expect(livePhaseNotice("waiting")).toBe("导师仍在回复，写完后会显示完整回复。");
+    expect(livePhaseNotice("waiting")).toBe("正在回复…");
   });
 });
 
