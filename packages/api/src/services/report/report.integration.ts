@@ -14,7 +14,7 @@ import type { FrozenPaygRun } from '../bill2/service';
 type Fixture = { actor: string; user: SupabaseClient; admin: SupabaseClient; registration: string;
   mentorModel: string; flow: ReturnType<typeof makeWorkflow> };
 export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixture>) {
-  it.each(['complete', 'length', 'waiting', 'expired', 'free', 'disabled', 'changed', 'equal', 'cancelled', 'off_after'] as const)(
+  it.each(['complete', 'length', 'waiting', 'expired', 'free', 'disabled', 'changed', 'equal', 'cancelled', 'off_after', 'missing', 'string_flag', 'foreign', 'waiting_expired'] as const)(
     'RUNTIME: REPORT-GEN real SQL and SDK %s', async scenario => {
       const f = await fixture(), opc = opcService(f.user, f.admin), artifacts = workbenchService(f.user, f.admin);
       const d = await opc.start({ requestId: randomUUID(), registration: f.registration, mode: 'manual' });
@@ -60,17 +60,20 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
             usage: { prompt_tokens: 3000, completion_tokens: 10, total_tokens: 3010 } } } }));
       });
       try {
-        for (const [key, value] of Object.entries({ runtime_report_generation: { enabled: scenario !== 'disabled' },
-          billing_payg_start_thresholds: { version: 'fixture', thresholds: [{ model, purpose: 'report', credits: scenario === 'waiting' ? 1001 : scenario === 'equal' ? 1000 : 1 }] } })) {
+        for (const [key, value] of Object.entries({ runtime_report_generation: scenario === 'string_flag' ? '{"enabled":true}' : { enabled: scenario !== 'disabled' },
+          billing_payg_start_thresholds: { version: 'fixture', thresholds: [{ model, purpose: 'report', credits: scenario.startsWith('waiting') ? 1001 : scenario === 'equal' ? 1000 : 1 }] } })) {
           await db.query('insert into system_settings(key,value) values($1,$2) on conflict(key) do update set value=excluded.value',
             [key, JSON.stringify(value)]);
         }
+        if (scenario === 'missing') await db.query("delete from system_settings where key='runtime_report_generation'");
         const service = reportService(f.user, f.admin, { payg: { callPolicies: [policy], billingUnit }, account: 'report-fixture',
           costPerCall: '0.3', creditsPerUsd: '100', multiplier: '6', maxCalls: 1, maxOutputTokens: 1000, inputBytes: 196608, historyItems: 0 });
         const input = { sessionId: detail.sessionId, projectId: detail.projectId, roundId: detail.roundId, requestId: randomUUID() };
-        if (scenario === 'free' || scenario === 'disabled') {
+        if (['free', 'disabled', 'missing', 'string_flag'].includes(scenario)) {
           await expect(service.start(input)).rejects.toThrow(scenario === 'free' ? 'REPORT_MEMBERSHIP_REQUIRED' : 'REPORT_DISABLED');
           expect((await db.query('select count(*)::int n from runtime_executions where request_id=$1', [input.requestId])).rows[0].n).toBe(0);
+          if (scenario !== 'free') await expect(db.query("select report_admission_check($1,$2,'{\"reportGeneration\":{}}','{}')",
+            [f.actor, detail.sessionId])).rejects.toThrow('REPORT_DISABLED');
           return;
         }
         const admitted = await service.start(input).catch(error => {
@@ -92,6 +95,24 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
           await artifacts.execute({ action: 'save', projectId: detail.projectId, roundId: detail.roundId, requestId: randomUUID(),
             stepId: f.flow.steps[0]!.id, body: 'Changed after admission', evidenceIds: [], expectedVersion: step.version });
         }
+        if (['expired', 'changed', 'off_after'].includes(scenario)) {
+          expect(await service.start(input)).toMatchObject({executionId: admitted.executionId, runId: admitted.runId});
+          await expect(service.start({...input, roundId: randomUUID()})).rejects.toThrow('REPORT_REQUEST_CONFLICT');
+        }
+        if (scenario === 'foreign') {
+          const other = await fixture();
+          try {
+            await db.query("update profiles set membership_level='pro' where id=$1", [other.actor]);
+            const foreign = reportService(other.user, other.admin, { account:'report-fixture', costPerCall:'0.3',
+              creditsPerUsd:'100', multiplier:'6', maxCalls:1, maxOutputTokens:1000, inputBytes:196608, historyItems:0 });
+            await expect(foreign.start(input)).rejects.toThrow('REPORT_SOURCE_CONFLICT');
+            await expect(foreign.status(admitted.executionId)).rejects.toMatchObject({code:'BAD_REQUEST',message:'REPORT_UNAVAILABLE'});
+            expect(calls).toBe(0);
+          } finally {
+            await db.query('update modules set active=false where id=(select module_id from artifact_workflows where id=$1)', [other.registration]);
+          }
+          return;
+        }
         await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
         const endpoint = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
         const run = () => runtimeExecutor({ database: f.admin, actor: async () => f.actor, endpoint,
@@ -104,17 +125,27 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
           expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1', [admitted.runId])).rows[0].n).toBe(0);
           return;
         }
-        if (scenario === 'waiting') {
+        if (scenario.startsWith('waiting')) {
           expect(result).toMatchObject({ state: 'waiting_credits', code: 'RUNTIME_WAITING_CREDITS' }); expect(calls).toBe(0);
           // Fulfillment is represented by a real local grant; do not alter the frozen threshold.
           await db.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
             values($1,100,'addition','grant','opening_grant','system',$2,1000,1100)`, [f.actor, 'report-refill:' + f.actor]);
           await db.query('update profiles set credits=1100 where id=$1', [f.actor]);
+          if (scenario === 'waiting_expired') await db.query("update profiles set membership_level='free' where id=$1", [f.actor]);
           const position = await service.status(admitted.executionId);
           result = await run().execute(admitted.executionId, undefined, { executionId: admitted.executionId, cursor: position.cursor, epoch: position.epoch });
         }
+        if (scenario === 'waiting_expired') {
+          expect(result).toMatchObject({code:'REPORT_MEMBERSHIP_REQUIRED'}); expect(calls).toBe(0);
+          expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1', [admitted.runId])).rows[0].n).toBe(0);
+          return;
+        }
         expect(result).toMatchObject({ state: 'completed', completeness: scenario === 'length' ? 'length_limit' : 'complete' });
         expect(calls).toBe(1);
+        if (scenario === 'length') {
+          expect((await db.query('select charged_delta from bill2_calls where run_id=$1', [admitted.runId])).rows[0].charged_delta).toBe(2);
+          expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(998);
+        }
         await run().execute(admitted.executionId); expect(calls).toBe(1);
         const counts = (await db.query(`select (select count(*)::int from runtime_session_history where execution_id=$1) history,
           (select count(*)::int from runtime_session_batches where execution_id=$1) batches,

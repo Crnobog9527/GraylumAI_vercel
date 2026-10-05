@@ -102,7 +102,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    throw new TRPCError({code:'BAD_REQUEST',message:'BILL2_INSUFFICIENT_CREDITS'});
   if(r.error?.message==='RUNTIME_ORGANIZER_PENDING')throw new StagingAccessError('RUNTIME_ORGANIZER_PENDING');
   if(r.error){
-   if(policy.reportGeneration&&r.error.message.startsWith('REPORT_'))throw new Error(r.error.message);
+   if(policy.reportGeneration&&(r.error.message.startsWith('REPORT_')||r.error.message==='OPC_CAPTURE_PENDING'))throw new Error(r.error.message);
    if(name==='runtime_admit'&&r.error.message==='OPC_ANSWER_SOURCE_DENIED')throw new Error('OPC_ANSWER_SOURCE_DENIED');
    // Preserve SQL business/permission refusals; classify only operational failures.
    if(['P0001','PT400','42501'].includes(r.error.code))throw new Error('RUNTIME_ADMISSION_DENIED',{cause:policy.reportGeneration?r.error:undefined});

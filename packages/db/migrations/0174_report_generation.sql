@@ -153,6 +153,9 @@ $sql$;
  ELSIF md5(definition)<>'c0128dea573b43ef813e49eaed9d5dc0' THEN RAISE EXCEPTION 'REPORT_CONTEXT_TARGET_MISMATCH';
  END IF;
  -- Reports bind to the confirmed artifact, not an OPC question token/material copy.
+ -- runtime_admit already froze session/project/round/module/revision and snapshot identity
+ -- through report_admission_check. This skips only the OPC turn-token binding;
+ -- common permissions above and report_source still apply to every read/call.
  -- Retain the common actor, scope, Skill/model and source checks before this branch.
  definition:=pg_get_functiondef('runtime_direct_billing_allowed_before_topic(uuid,jsonb,uuid)'::regprocedure);
  original:=' PERFORM runtime_direct_billing_allowed_before_opc(a,p,p_run_id);';
@@ -169,6 +172,21 @@ $sql$;
  ELSE
   IF md5(definition)<>'9546388594cea6731a021f68536492ad' THEN RAISE EXCEPTION 'REPORT_BINDING_SOURCE_MISMATCH';END IF;
   EXECUTE replace(definition,original,original||replacement);
+ END IF;
+ -- Reuse the existing replay authority without re-reading mutable report inputs.
+ definition:=pg_get_functiondef('runtime_admission_replay(uuid,uuid,jsonb)'::regprocedure);
+ original:=' IF e.payload->''request'' IS DISTINCT FROM p_request THEN RAISE EXCEPTION ''RUNTIME_REQUEST_CONFLICT'';END IF;';
+ replacement:=$sql$ IF p_request ? 'reportStart' THEN
+  IF jsonb_build_object('reportStart',jsonb_build_object('sessionId',e.session_id,'requestId',e.request_id,
+    'projectId',e.payload#>'{reportGeneration,projectId}','roundId',e.payload#>'{reportGeneration,roundId}'))
+    IS DISTINCT FROM p_request THEN RAISE EXCEPTION 'REPORT_REQUEST_CONFLICT';END IF;
+ ELSIF e.payload->'request' IS DISTINCT FROM p_request THEN RAISE EXCEPTION 'RUNTIME_REQUEST_CONFLICT';END IF;$sql$;
+ IF position(replacement in definition)>0 THEN
+  IF md5(replace(definition,replacement,original))<>'fc3312373cdf135150277b73edb764e8' THEN
+   RAISE EXCEPTION 'REPORT_REPLAY_TARGET_MISMATCH';END IF;
+ ELSE
+  IF md5(definition)<>'fc3312373cdf135150277b73edb764e8' THEN RAISE EXCEPTION 'REPORT_REPLAY_SOURCE_MISMATCH';END IF;
+  EXECUTE replace(definition,original,replacement);
  END IF;
 END $patch$;
 COMMIT;

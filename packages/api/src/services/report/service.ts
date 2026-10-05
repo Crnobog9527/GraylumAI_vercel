@@ -10,7 +10,7 @@ import { completeReportCandidate, confirmedReportFacts, frozenReport, reportStar
 
 export const reportCodes = new Set(['REPORT_DISABLED', 'REPORT_MEMBERSHIP_REQUIRED', 'REPORT_ENTITLEMENTS_UNAVAILABLE',
   'REPORT_SOURCE_CONFLICT', 'REPORT_CONFIRMATION_REQUIRED', 'REPORT_FACTS_TOO_LARGE', 'REPORT_MANIFEST_REQUIRED',
-  'REPORT_PAYG_REQUIRED', 'OPC_CAPTURE_PENDING']);
+  'REPORT_PAYG_REQUIRED', 'OPC_CAPTURE_PENDING', 'REPORT_EXECUTION_REQUIRED', 'REPORT_REQUEST_CONFLICT']);
 export function reportError(error: unknown): never {
   const message = error instanceof Error ? error.message : typeof error === 'object' && error && 'message' in error ? error.message : null;
   throw new TRPCError({ code: message === 'REPORT_MEMBERSHIP_REQUIRED' ? 'FORBIDDEN' : 'BAD_REQUEST',
@@ -31,10 +31,11 @@ export function reportService(user: SupabaseClient, admin: SupabaseClient, polic
     async start(value: unknown) {
       const input = reportStart.parse(value);
       try {
+        const replay = await rpc('runtime_admission_replay', { p_request_id: input.requestId, p_request: { reportStart: input } });
+        if (replay) return replay;
         const setting = await admin.from('system_settings').select('value').eq('key', REPORT_SETTING).maybeSingle();
         if (setting.error) throw new Error('REPORT_UNAVAILABLE');
-        let enabled: unknown = setting.data?.value;
-        if (typeof enabled === 'string') { try { enabled = JSON.parse(enabled); } catch { enabled = null; } }
+        const enabled: unknown = setting.data?.value;
         if (!z.object({ enabled: z.literal(true) }).strict().safeParse(enabled).success) throw new Error('REPORT_DISABLED');
         // Entry check. The second check is inside the SQL call reservation transaction.
         await rpc('report_membership_check', {});
@@ -68,7 +69,9 @@ export function reportService(user: SupabaseClient, admin: SupabaseClient, polic
     async status(executionId: string) {
       // No membership check on saved output. Existing SQL checks actor, scope and source permissions.
       const saved = await rpc('runtime_execution', { p_execution_id: z.string().uuid().parse(executionId), p_action: 'read' });
-      const report = frozenReport.parse(saved.context?.reportGeneration);
+      const parsed = frozenReport.safeParse(saved.context?.reportGeneration);
+      if (!parsed.success) reportError(new Error('REPORT_EXECUTION_REQUIRED'));
+      const report = parsed.data;
       const result = saved.result as { body?: string; completeness?: string } | null;
       return { executionId, state: saved.state, cursor: saved.cursor, epoch: saved.epoch,
         body: result?.body ?? null, completeness: result?.completeness ?? null,
