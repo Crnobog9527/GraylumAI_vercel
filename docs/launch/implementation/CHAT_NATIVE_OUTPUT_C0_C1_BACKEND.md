@@ -47,9 +47,9 @@ status 除 unclear 外映射 provisional，basis 缺失/异常映射 user_statem
 对已经明确 length_limit 或 envelopeCompact 的新主回复，checkpoint 后不派发不可采用的整理调用，
 以空摘要、未整理标记完成原计费关单，按现有规则释放未用预留。正常完整回复的整理及未知费用恢复保持原路径。
 Session 正文与已存结果同步；供应商回执不裁切。旧冻结执行不套用新裁切规则。
-结果读取复用 runtime_view 授权和 runtime_execution(read)，不扩大表权限。元数据只补最近 8 个可见、非空、去重 execution；含 view 总共最多 9 次 RPC。
+结果读取复用 runtime_view 授权和 runtime_execution(read)，不扩大表权限。元数据只补最近 4 个可见、非空、去重 execution；含 view 总共最多 5 次 RPC。
 更早历史保留 SQL 原形状，需要完整元数据时通过原 execute 读取终态。既有同会话锁仍可能串行；
-1000 条历史的模拟延迟测试验证新增开销有界；100 回合真实本地 PostgreSQL 测试验证补读最多 8 次、
+1000 条历史的模拟延迟测试验证新增开销有界；100 回合真实本地 PostgreSQL 测试验证补读最多 4 次、
 读取低于 1 秒、权限撤销仍生效。两者都不是实际 staging 耗时基准。
 
 ## 验证与后续必测

@@ -46,7 +46,7 @@ export async function assertLongSessionPerformance(db: pg.Client) {
     const nativeStarted = performance.now();
     const nativeView = await readNativeRuntimeView(scoped,f.actor,f.session);
     expect(performance.now()-nativeStarted).toBeLessThan(1000);
-    expect(metadataReads).toBe(8);
+    expect(metadataReads).toBe(4);
     expect(nativeView).toEqual(view);
     await db.query(`update runtime_executions set unavailable_reason='source_revoked'
       where session_id=$1 and history_revision=0`,[f.session]);
