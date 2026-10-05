@@ -7,8 +7,9 @@ import { readAgentTurn, TEXT_PROTOCOL } from "./mentor-turn";
 import { reportStopController, type ReportStopPhase } from "./report-stop";
 import { RecoveryTimers } from "./step-recovery";
 import {
-  attachRetryDelay, generationOffer, nextRequestId, readReportRecord, reportAttachable, reportProgressing, reportRecordKey,
-  reportResultRefusal, reportStartRefusal, shownExecution, startedExecution, writeReportRecord, type ReportRecord, type ServerReport, type StartRefusal,
+  attachRetryDelay, generationOffer, needsReattach, newerRead, nextRequestId, readReportRecord, reportAttachable, reportProgressing, reportRecordKey,
+  reportResultRefusal, reportStartRefusal, shownExecution, startedExecution, writeReportRecord,
+  type FreshRead, type ReportPin, type ReportRecord, type ServerReport, type StartRefusal,
 } from "./report-gen";
 
 function localStore() {
@@ -42,8 +43,21 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   const server: ServerReport = latest.isSuccess ? { kind: "known", executionId: latest.data.executionId }
     : latest.isError ? { kind: "failed" } : { kind: "pending" };
   // The execution this page started, until the server read names it.
-  const [pinned, setPinned] = useState<string | null>(null);
-  const executionId = shownExecution(pinned, server, record);
+  const [pinned, setPinned] = useState<ReportPin | null>(null);
+  // Explicit reads after a start or a refusal, ordered against the pin by generation (report-gen.ts).
+  const generation = useRef(0);
+  const [fresh, setFresh] = useState<FreshRead | null>(null);
+  const readLatest = async () => {
+    const own = ++generation.current;
+    try {
+      const data = await utils.client.runtime.reportLatest.query({ sessionId, projectId, roundId });
+      setFresh(current => newerRead(current, { executionId: data.executionId, generation: own }));
+      if (own === generation.current) utils.runtime.reportLatest.setData({ sessionId, projectId, roundId }, data);
+    } catch {
+      /* The page's own query and the next read take over. */
+    }
+  };
+  const executionId = shownExecution(pinned, server, record, fresh);
   const start = trpc.runtime.reportStart.useMutation();
   const cancel = trpc.runtime.cancel.useMutation();
   const [live, setLive] = useState<LiveReply | null>(null);
@@ -93,6 +107,8 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
         onFinished: () => void utils.credits.getBalance.invalidate(),
       });
       refuse(result);
+      // Still unfinished on the server (an ambiguous failure): attach to the same execution again.
+      if (needsReattach(result)) retryAttach(id);
     } catch {
       // Never opened: try the same execution again later. A lost open stream: the saved status tells.
       if (!events) retryAttach(id);
@@ -123,15 +139,15 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
       const id = startedExecution(await start.mutateAsync({ sessionId, projectId, roundId, requestId }));
       if (!id) throw new Error("REPORT_UNAVAILABLE");
       save({ requestId, executionId: id });
-      setPinned(id);
-      void latest.refetch();
+      setPinned({ executionId: id, generation: ++generation.current });
+      void readLatest();
       attached.current.add(id);
       await stream(id);
     } catch (cause) {
       // The same identity cannot be reused for this request; the next click forms a new one.
       if (cause instanceof Error && cause.message === "REPORT_REQUEST_CONFLICT") save({ requestId: crypto.randomUUID() });
       setRefusal(reportStartRefusal(cause));
-      void latest.refetch();
+      void readLatest();
     }
   };
 

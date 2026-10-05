@@ -153,18 +153,41 @@ export function startedExecution(result: unknown): string | null {
   return typeof id === "string" && uuid.test(id) ? id : null;
 }
 
-/** What `runtime.reportLatest` said: not answered yet, failed, or the round's newest report (or none). */
+/** What the page's `runtime.reportLatest` query said: not answered yet, failed, or the round's newest report (or none). */
 export type ServerReport = { kind: "pending" } | { kind: "failed" } | { kind: "known"; executionId: string | null };
 
 /**
- * The report this page shows. The server is the authority, so a cleared storage or another device
- * still finds it; an execution this page just started wins until the server read catches up. The
- * local pointer only stands in while the server cannot be read.
+ * Generations order a pin against reads: each pin and each explicit `reportLatest` read takes the
+ * next number from one counter, the read before its request is sent. So a read that started
+ * before a start can never pass for a read made after it, however late it answers.
  */
-export function shownExecution(pinned: string | null, server: ServerReport, local: ReportRecord | null): string | null {
-  if (pinned) return pinned;
+export type ReportPin = { executionId: string; generation: number };
+export type FreshRead = { executionId: string | null; generation: number };
+
+/** Keep the newer of two explicit reads; a late answer of an older read never replaces a newer one. */
+export function newerRead(current: FreshRead | null, next: FreshRead): FreshRead {
+  return current && current.generation >= next.generation ? current : next;
+}
+
+/**
+ * The report this page shows. The server is the authority, so a cleared storage or another device
+ * still finds it. An execution this page just started is shown until a read that started after it
+ * names another report (a replacement made in another tab); a read that started earlier, or one
+ * that finds none yet, keeps the pin. The local pointer only stands in while the server cannot be read.
+ */
+export function shownExecution(pin: ReportPin | null, server: ServerReport, local: ReportRecord | null,
+  fresh: FreshRead | null = null): string | null {
+  if (pin) return fresh && fresh.executionId && fresh.generation > pin.generation ? fresh.executionId : pin.executionId;
   if (server.kind === "known") return server.executionId;
   return local?.executionId ?? null;
+}
+
+/**
+ * A stream that ended with the execution still unfinished on the server (an ambiguous failure
+ * answers `pending` and leaves it `interrupted`): attach to the same execution again later.
+ */
+export function needsReattach(result: { state?: unknown } | null | undefined) {
+  return result?.state === "pending" || result?.state === "interrupted";
 }
 
 /**
