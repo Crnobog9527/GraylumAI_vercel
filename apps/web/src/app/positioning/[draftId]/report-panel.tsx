@@ -61,7 +61,7 @@ function ReportDialog({ report, busy, onClose }: { report: ReturnType<typeof use
       <div className={`${resultStyles.consentCard} !max-w-3xl`}>
         <header>
           <h2>{REPORT_TITLE}</h2>
-          <Button className={resultStyles.consentClose} variant="ghost" aria-label="关闭完整报告" onClick={onClose}>
+          <Button className={resultStyles.consentClose} variant="ghost" aria-label={"关闭" + REPORT_TITLE} onClick={onClose}>
             <X size={18} aria-hidden="true" />
           </Button>
         </header>

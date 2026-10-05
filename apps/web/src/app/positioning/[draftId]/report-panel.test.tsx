@@ -46,3 +46,8 @@ it("shows the entry once confirmed and enabled, without cost or model wording", 
   expect(html).toContain("生成完整报告");
   expect(html).not.toMatch(/积分|模型/);
 });
+it("uses the public report name, not the superseded 定位报告", async () => {
+  const { REPORT_TITLE } = await import("./report-gen");
+  expect(REPORT_TITLE).toContain("运营策略报告");
+  expect(REPORT_TITLE).not.toContain("定位报告");
+});
