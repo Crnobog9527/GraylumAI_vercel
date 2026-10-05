@@ -81,13 +81,13 @@
     "zustand": "^5.0.13"
   },
   "devDependencies": {
-    "@playwright/test": "^1.60.0",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "dotenv": "^17.4.2",
-    "eslint": "^10.4.0",
+    "eslint": "^10.11.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "tailwindcss": "^4",
     "typescript": "^6.0.3",
