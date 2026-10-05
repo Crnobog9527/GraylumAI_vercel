@@ -52,7 +52,8 @@ At the time this runbook was introduced:
 ## Fresh Staging Rebuild Order
 
 Use this order for a fresh staging rebuild or a staging drift recovery. Stop if
-any step points at production or requires unapproved writes.
+any step points at production or needs an AGENTS.md section 1 item that the
+Owner has not approved.
 
 1. Confirm the Git baseline.
    - `main` and `staging` should be synchronized for the intended release point.

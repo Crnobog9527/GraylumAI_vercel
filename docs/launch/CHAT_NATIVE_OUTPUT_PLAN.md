@@ -639,7 +639,7 @@ REPORT-GEN R-A / R-B 按 #547 原顺序，用统一上限
   - 已冻结的 execution 按冻结的 O 完成。
 - **C2**：
   - 前端停止改回调用原 `runtime_cancel`；
-  - 追加迁移的回退 SQL 草稿放在 migrations 目录之外，远程执行另取 Owner 批准。
+  - 追加迁移的回退 SQL 草稿放在 migrations 目录之外；在 staging 执行由 AI 验证后进行，在正式环境执行须 Owner 批准。
 
 ### 10.3 必测
 

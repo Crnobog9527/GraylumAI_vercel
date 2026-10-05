@@ -7,7 +7,9 @@
 -- Staging-only non-secret baseline seed for #148 Phase 3.
 --
 -- This file is not an automatic migration. It must be applied only to the
--- staging database, and only after explicit owner approval for that write.
+-- staging database. The agent applies it after confirming the staging target
+-- (see docs/runbooks/STAGING_REPRODUCIBILITY.md); production use requires
+-- Owner approval under AGENTS.md section 1.
 --
 -- Safety boundaries:
 -- - No real provider keys, Supabase keys, connection strings, auth material, or
