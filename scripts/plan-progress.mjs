@@ -15,6 +15,7 @@ import { parsePlan } from './plan-progress/parse-plan.mjs';
 import { derive } from './plan-progress/derive.mjs';
 import { renderMarkdown } from './plan-progress/render.mjs';
 import { renderHtml } from './plan-progress/render-html.mjs';
+import { buildStations } from './plan-progress/stations.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
@@ -100,7 +101,11 @@ function main() {
     generatedAt: new Date().toISOString(),
     sourceRef,
   });
-  const html = renderHtml(report, join(here, 'plan-progress', 'page.html'));
+  const stationData = JSON.parse(readFileSync(join(here, 'plan-progress', 'stations.json'), 'utf8'));
+  const roadmap = buildStations(stationData, report);
+  report.warnings.push(...roadmap.warnings);
+  report.roadmap = roadmap;
+  const html = renderHtml(report, join(here, 'plan-progress', 'page.html'), roadmap);
   assertOutsideRepo(args.outDir);
   const jsonPath = join(args.outDir, 'plan-progress.json');
   const htmlPath = join(args.outDir, 'plan-progress.html');

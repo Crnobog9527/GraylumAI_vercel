@@ -2,6 +2,7 @@
 // 页面里的脚本只负责按状态筛选这类可选交互。所有来自 PR 和规划的文字都经过转义。
 import { readFileSync } from 'node:fs';
 import { STATUSES } from './derive.mjs';
+import { renderMetro } from './render-metro.mjs';
 
 const COLORS = { 已完成: '--done', 实施中: '--doing', 方案中: '--plan', 被阻塞: '--blocked', 未开始: '--todo', 已关闭: '--closed' };
 
@@ -45,7 +46,7 @@ function header(report) {
   ).join('');
   const label = STATUSES.map((status) => `${status} ${report.counts[status]}`).join('，');
   return `<header>
-    <h1>Graylum 施工进度</h1>
+    <h2 class="raw-title">施工明细（按任务）</h2>
     <div class="meta">生成时间 ${dateText(report.generatedAt)} · 任务表来源 <code>${escapeHtml(report.sourceRef)}</code> · 状态由 PR 自动推导，Master Plan 不再手写进度</div>
     <div class="summary"><span class="big">${report.percent}%</span><span>已完成 ${report.counts['已完成']} / ${report.total} 个任务（已关闭的不计入）</span></div>
     <div class="bar" role="img" aria-label="${escapeHtml(label)}">${segments}</div>
@@ -130,11 +131,16 @@ function warnings(report) {
   return `<section class="extra warn"><h2>需要核对</h2><ul>${items}</ul></section>`;
 }
 
-export function renderHtml(report, templatePath) {
+// 页面上方是给 Owner 看的路线图；下方折叠区是按任务的明细，给主窗口核对用，默认收起。
+export function renderHtml(report, templatePath, roadmap) {
   const template = readFileSync(templatePath, 'utf8');
   if (!template.includes('__PLAN_PROGRESS_BODY__')) throw new Error('页面模板缺少内容占位符');
-  const body = [header(report), blockedSummary(report), `<main class="phases">${phases(report)}</main>`, unplanned(report), warnings(report)]
+  const detail = [header(report), blockedSummary(report), `<main class="phases">${phases(report)}</main>`, unplanned(report), warnings(report)]
     .filter(Boolean)
     .join('\n');
+  const body = `${renderMetro(roadmap, report.generatedAt)}
+<details class="raw"><summary>详细数据（按任务的明细，给主窗口核对用）</summary>
+<div class="raw-body">${detail}</div>
+</details>`;
   return template.replace('__PLAN_PROGRESS_BODY__', () => body);
 }

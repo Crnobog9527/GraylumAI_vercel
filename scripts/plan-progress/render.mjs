@@ -15,6 +15,11 @@ export function renderMarkdown(report) {
   out.push(`# Master Plan 进度（生成于 ${report.generatedAt}，任务表来源 ${report.sourceRef}）`, '');
   out.push(`完成 ${report.counts['已完成']} / ${report.total}（${report.percent}%，已关闭的任务不计入）`, '');
   out.push(STATUSES.map((status) => `${status} ${report.counts[status]}`).join(' · '), '');
+  if (report.roadmap) {
+    const { roadmap } = report;
+    const current = roadmap.stations.find((station) => station.id === roadmap.currentId);
+    out.push(`路线图：主线 ${roadmap.mainCount} 站，已到站 ${roadmap.doneCount} 站；现在在"${current ? current.name : '正式上线'}"`, '');
+  }
   for (const phase of report.phases) {
     out.push(`## ${phase}`, '', '| 任务 | 状态 | 说明 | PR |', '| --- | --- | --- | --- |');
     for (const task of report.tasks.filter((item) => item.phase === phase)) {

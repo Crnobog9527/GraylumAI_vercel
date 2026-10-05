@@ -1,4 +1,4 @@
-<title>Graylum 施工进度</title>
+<title>Graylum 上线路线图</title>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <style>
@@ -85,6 +85,82 @@
   .warn { border-color: var(--blocked); }
   .empty { color: var(--muted); font-size: 0.85rem; }
   @media (prefers-reduced-motion: no-preference) { .bar span { transition: width 0.3s ease; } }
+  /* 路线图：竖向地铁线，左边一条线串起站点圆点；电脑上顶部另有一条可横向滚动的线路一览 */
+  .roadmap { display: grid; gap: 18px; }
+  .hero { display: grid; gap: 6px; }
+  .hero h1 { margin: 0; font-size: 1.55rem; letter-spacing: 0.01em; text-wrap: balance; }
+  .now { margin: 0; font-size: 1.15rem; }
+  .now strong { color: var(--doing); }
+  .sub { margin: 0; color: var(--muted); font-size: 0.85rem; max-width: 65ch; }
+  .asks { margin-top: 6px; padding: 10px 12px; border-radius: 8px; background: var(--blocked-bg); color: var(--fg); font-size: 0.9rem; }
+  .asks ul { margin: 4px 0 0; padding-left: 1.2em; display: grid; gap: 2px; }
+  .strip { display: none; list-style: none; margin: 0; padding: 4px 2px 10px; overflow-x: auto; gap: 0; }
+  @media (min-width: 760px) { .strip { display: flex; } }
+  .mini { flex: none; position: relative; width: 112px; }
+  .mini a { display: grid; justify-items: center; gap: 6px; text-decoration: none; color: var(--fg); padding-top: 2px; }
+  .mini::before { content: ""; position: absolute; top: 9px; left: -50%; width: 100%; height: 4px; background: var(--line); z-index: 0; }
+  .mini:first-child::before { display: none; }
+  .mini.st-done::before, .mini.current::before { background: var(--done); }
+  .mdot { position: relative; z-index: 1; width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--todo); background: var(--surface); }
+  .mini.st-done .mdot { background: var(--done); border-color: var(--done); }
+  .mini.st-doing .mdot { border-color: var(--doing); }
+  .mini.current .mdot { background: var(--doing); border-color: var(--doing); box-shadow: 0 0 0 5px var(--doing-bg); }
+  .mini.terminal .mdot { width: 22px; height: 22px; margin-top: -2px; border-width: 5px; }
+  .mlabel { font-size: 0.75rem; text-align: center; line-height: 1.3; padding: 0 4px; }
+  .mini.current .mlabel { font-weight: 700; color: var(--doing); }
+  .mini.later { opacity: 0.45; }
+  .mini.divider { width: 56px; display: grid; place-items: start center; color: var(--muted); font-size: 0.72rem; padding-top: 1px; }
+  .mini.divider::before { background: repeating-linear-gradient(90deg, var(--line) 0 6px, transparent 6px 10px); }
+  .line { list-style: none; margin: 0; padding: 0 0 0 4px; display: grid; }
+  .station { position: relative; padding: 0 0 6px 30px; }
+  .station::before { content: ""; position: absolute; left: 7px; top: 0; bottom: 0; width: 4px; background: var(--line); }
+  .station.st-done::before { background: var(--done); }
+  .station:first-child::before { top: 10px; }
+  .station.terminal::before { bottom: auto; height: 12px; }
+  .station .dot { position: absolute; left: 0; top: 4px; width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--todo); background: var(--surface); z-index: 1; }
+  .station.st-done .dot { background: var(--done); border-color: var(--done); }
+  .station.st-doing .dot { border-color: var(--doing); }
+  .station.current .dot { background: var(--doing); border-color: var(--doing); box-shadow: 0 0 0 5px var(--doing-bg); }
+  .station.terminal .dot { width: 22px; height: 22px; left: -2px; top: 2px; border-width: 5px; }
+  .station.later { opacity: 0.55; }
+  .station.later::before { background: repeating-linear-gradient(180deg, var(--line) 0 6px, transparent 6px 10px); }
+  .station details > summary { list-style: none; cursor: pointer; display: grid; gap: 2px; padding: 2px 0 2px; }
+  .station details > summary::-webkit-details-marker { display: none; }
+  .station.current details > summary { background: var(--doing-bg); border-radius: 8px; padding: 6px 10px; margin-left: -6px; }
+  .sline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+  .snum { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 0.8rem; }
+  .sname { font-weight: 700; font-size: 1rem; }
+  .sname::after { content: " ▸"; color: var(--muted); font-weight: 400; font-size: 0.8rem; }
+  details[open] > summary .sname::after { content: " ▾"; }
+  .splain { color: var(--muted); font-size: 0.88rem; max-width: 70ch; margin: 0; }
+  @media (min-width: 760px) { .sline .splain { flex: 1 1 24em; } }
+  .badge { font-size: 0.75rem; font-weight: 600; padding: 0 8px; border-radius: 999px; }
+  .b-done { color: var(--done); background: var(--done-bg); }
+  .b-now { color: var(--surface); background: var(--doing); }
+  .b-doing { color: var(--doing); background: var(--doing-bg); }
+  .b-todo { color: var(--muted); background: var(--todo-bg); }
+  .b-later { color: var(--muted); background: var(--closed-bg); }
+  .note { font-size: 0.82rem; color: var(--muted); }
+  .note.n-ask { color: var(--fg); }
+  .note.n-ask b { color: var(--blocked); background: var(--blocked-bg); padding: 0 6px; border-radius: 4px; margin-right: 6px; }
+  .note.n-short { color: var(--blocked); }
+  .inner { padding: 4px 0 6px; display: grid; gap: 6px; }
+  .tasks { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 0.88rem; }
+  .tasks li { display: flex; gap: 8px; align-items: baseline; }
+  .tword { flex: none; min-width: 4.5em; font-size: 0.75rem; color: var(--muted); }
+  .w-做完了 { color: var(--done); }
+  .w-在做, .w-在出方案 { color: var(--doing); font-weight: 600; }
+  .w-等你 { color: var(--blocked); font-weight: 600; }
+  .tasks-empty { margin: 0; color: var(--muted); font-size: 0.85rem; }
+  .prs-small { font-size: 0.72rem; color: var(--muted); overflow-wrap: anywhere; }
+  .prs-small a { color: var(--muted); }
+  .divider-row { list-style: none; padding: 6px 0 10px 30px; color: var(--muted); font-size: 0.8rem; position: relative; }
+  .divider-row::before { content: ""; position: absolute; left: 7px; top: 0; bottom: 0; width: 4px;
+    background: repeating-linear-gradient(180deg, var(--line) 0 6px, transparent 6px 10px); }
+  details.raw { border-top: 1px solid var(--line); padding-top: 12px; }
+  details.raw > summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
+  .raw-body { display: grid; gap: 28px; margin-top: 16px; }
+  .raw-title { margin: 0; font-size: 1.2rem; }
 </style>
 
 <div class="wrap">
