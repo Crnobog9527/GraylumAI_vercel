@@ -30,11 +30,6 @@ export type RecoveryExecution = {
   request?: { requestId?: string } | null;
   billing?: { pausedReason?: string | null; cancelRequested?: boolean } | null;
 };
-
-/** Still advancing: running, or stopped by the user and still saving the shown text (stop-reply.ts). */
-function progressing(execution: RecoveryExecution | { state: string }) {
-  return PROGRESSING_STATES.includes(execution.state) || stopSaving(execution);
-}
 export type RecoveryHistory = {
   activeExecution?: string | null;
   executions?: RecoveryExecution[] | null;
@@ -82,6 +77,9 @@ export function envelopeExecution(history: RecoveryHistory, envelope: MentorStep
  *   the session), or a request in flight may still be admitted. Poll.
  * - `auto`: its execution is terminal and no execution owns the session. The
  *   page may run the same idempotent recovery as the retry action by itself.
+ * - `stopped`: the user stopped its turn and it is still saving. The stop
+ *   follow-up (use-live-reply.ts) re-reads it a bounded number of times; the
+ *   envelope neither polls, recovers by itself nor asks for a retry.
  * - `user`: nothing will change by itself (unreadable envelope, interrupted
  *   execution, or a request that was never admitted), or the history cannot
  *   be read (a failed read, or none after the grace period). Ask the user;
@@ -92,7 +90,7 @@ export function envelopeRecovery(
   envelope: StoredStepEnvelope,
   elapsedMs: number,
   historyFailed = false,
-): "wait" | "auto" | "user" {
+): "wait" | "auto" | "user" | "stopped" {
   if (!envelope.parsed) return "user";
   if (!history) return historyFailed || elapsedMs >= UNMATCHED_POLL_MS ? "user" : "wait";
   const executions = history.executions ?? [];
@@ -100,8 +98,9 @@ export function envelopeRecovery(
     ? executions.find(execution => execution.executionId === history.activeExecution) ?? { state: "running" }
     : null;
   const execution = envelopeExecution(history, envelope.parsed);
-  if (execution && progressing(execution)) return "wait";
-  if (active && progressing(active)) return "wait";
+  if (execution && stopSaving(execution)) return "stopped";
+  if (execution && PROGRESSING_STATES.includes(execution.state)) return "wait";
+  if (active && PROGRESSING_STATES.includes(active.state)) return "wait";
   if (execution) return TERMINAL_STATES.includes(execution.state) && !active ? "auto" : "user";
   return elapsedMs < UNMATCHED_POLL_MS ? "wait" : "user";
 }
@@ -124,7 +123,7 @@ export function historyPollInterval(
   if (!history) return failedReads > 0 && failedReads < HISTORY_RETRY_LIMIT ? HISTORY_RETRY_MS : false;
   if (history.activeExecution) {
     const active = (history.executions ?? []).find(execution => execution.executionId === history.activeExecution);
-    if (!active || progressing(active)) return HISTORY_POLL_MS;
+    if (!active || PROGRESSING_STATES.includes(active.state)) return HISTORY_POLL_MS;
   }
   return envelopes.some(envelope => envelopeRecovery(history, envelope, elapsedMs) === "wait") ? HISTORY_POLL_MS : false;
 }

@@ -8,7 +8,7 @@ import {
 } from "@repo/api/src/shared/agentTurn";
 import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
 import { isPaygWaiting } from "@/lib/payg-wait";
-import { STOP_SAVING_NOTICE, STOPPED_EMPTY_NOTICE, stoppedCut, stoppedResultNotice, stopSaving, userStopped } from "./stop-reply";
+import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE, STOPPED_EMPTY_NOTICE, stoppedCut, stoppedResultNotice, stopSaving, userStopped } from "./stop-reply";
 
 /** Under a reply that stopped at the single-answer length limit (completeness `length_limit`), outside its text. */
 export const LENGTH_LIMIT_NOTICE = "这次回答达到单次长度上限，已在这里结束。需要的话，可以发送“继续”让我接着写。";
@@ -110,6 +110,7 @@ export function livePhaseNotice(phase: string) {
   if (phase === "incomplete") return "回复尚未完成；原请求已保留，请按当前状态继续核对，不会自动重发。";
   if (phase === "waiting") return "正在回复…";
   if (phase === "stopped") return STOP_SAVING_NOTICE;
+  if (phase === "stop_unconfirmed") return STOP_UNCONFIRMED_NOTICE;
   return "正在生成；部分正文尚未完成，费用尚未结算。";
 }
 
@@ -128,6 +129,8 @@ export type MentorReplySource = {
   completeness?: string;
   stopped?: boolean;
   organized?: boolean;
+  /** This page stopped re-reading the stopped turn without a result (stop-reply.ts). */
+  stopUnconfirmed?: boolean;
   /** The run's public billing view; `pausedReason: "user_stop"` marks a turn the user stopped. */
   billing?: { pausedReason?: string | null; cancelRequested?: boolean } | null;
   /** This execution owns the server execution slot. */
@@ -140,7 +143,8 @@ export type ReplyNotice = { tone: "status" | "warning"; text: string; busy?: boo
 
 function unavailableNotice(source: MentorReplySource): ReplyNotice {
   // A stopped turn is saving what was shown, never failed, until its result is final.
-  if (stopSaving(source)) return { tone: "status", text: STOP_SAVING_NOTICE, busy: true };
+  if (stopSaving(source))
+    return source.stopUnconfirmed ? { tone: "warning", text: STOP_UNCONFIRMED_NOTICE } : { tone: "status", text: STOP_SAVING_NOTICE, busy: true };
   if (source.state === "cancelled" && userStopped(source)) return { tone: "status", text: STOPPED_EMPTY_NOTICE };
   if (source.state === "cost_pending" && !source.active)
     return { tone: "warning", text: "本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。" };

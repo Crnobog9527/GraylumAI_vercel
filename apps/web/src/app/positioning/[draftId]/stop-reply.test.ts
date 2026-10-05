@@ -8,7 +8,7 @@ import { mentorTailNotices, turnNeedsRetry } from "./mentor-notices";
 import { isCompleteResult, isTerminalTurn } from "./mentor-turn";
 import { envelopeRecovery, historyPollInterval, HISTORY_POLL_MS, type StoredStepEnvelope } from "./step-recovery";
 import {
-  sendStop, STOP_FOLLOW_UP_DELAYS_MS, STOP_SAVING_NOTICE, STOPPED_EMPTY_NOTICE, STOPPED_NOTICE, STOPPED_UNORGANIZED_NOTICE,
+  sendStop, STOP_FOLLOW_UP_DELAYS_MS, STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE, STOPPED_EMPTY_NOTICE, STOPPED_NOTICE, STOPPED_UNORGANIZED_NOTICE,
   stopFollowUpDelay, stopFollowUpTarget, stopRequestFor, stopSaving, userStopped,
 } from "./stop-reply";
 
@@ -157,14 +157,16 @@ describe("a stopped turn while it saves", () => {
     expect(userStopped({ state: "cost_pending", billing: { pausedReason: "user_stop", cancelRequested: true } })).toBe(false);
   });
 
-  it("keeps polling and never asks for the retry", () => {
+  it("never polls without end, recovers by itself or asks for the retry; the bounded follow-up drives it", () => {
     const envelope: StoredStepEnvelope = { stepId: "s", raw: "{}",
       parsed: { request: { requestId: "r1" }, executionId } as unknown as StoredStepEnvelope["parsed"] };
     for (const state of ["interrupted", "cost_pending"]) {
-      expect(historyPollInterval(history(state), [], 0)).toBe(HISTORY_POLL_MS);
-      expect(envelopeRecovery(history(state), envelope, 60000)).toBe("wait");
+      expect(historyPollInterval(history(state), [], 0)).toBe(false);
+      expect(historyPollInterval(history(state), [envelope], 0)).toBe(false);
+      expect(envelopeRecovery(history(state), envelope, 60000)).toBe("stopped");
     }
     expect(envelopeRecovery(history("interrupted", null), envelope, 60000)).toBe("user");
+    expect(historyPollInterval(history("running", null), [], 0)).toBe(HISTORY_POLL_MS);
   });
 
   it("shows the saving notice under the turn, never an error", () => {
@@ -172,6 +174,8 @@ describe("a stopped turn while it saves", () => {
     for (const state of ["interrupted", "cost_pending"])
       expect(mentorReplyDisplay({ ...base, state }).notice).toEqual({ tone: "status", text: STOP_SAVING_NOTICE, busy: true });
     expect(mentorReplyDisplay({ ...base, state: "cancelled", active: false }).notice).toEqual({ tone: "status", text: STOPPED_EMPTY_NOTICE });
+    // After the bounded follow-up gives up, the turn says the stop is not confirmed instead of spinning.
+    expect(mentorReplyDisplay({ ...base, stopUnconfirmed: true }).notice).toEqual({ tone: "warning", text: STOP_UNCONFIRMED_NOTICE });
   });
 
   it("the tail notice offers 停止 only while the live reply can be stopped", () => {
@@ -180,16 +184,22 @@ describe("a stopped turn while it saves", () => {
     expect(mentorTailNotices({ ...ctx, livePhase: "mentor", stop: { onClick } })[0]?.actions?.[0]?.label).toBe("停止");
     expect(mentorTailNotices({ ...ctx, livePhase: "incomplete", stop: { onClick } })[0]?.actions).toBeUndefined();
     expect(mentorTailNotices({ ...ctx, livePhase: "stopped", stop: null })[0]).toMatchObject({ text: STOP_SAVING_NOTICE, busy: true });
+    expect(mentorTailNotices({ ...ctx, livePhase: "stop_unconfirmed", stop: { onClick } })[0])
+      .toEqual({ id: "live", tone: "warning", busy: false, text: STOP_UNCONFIRMED_NOTICE });
   });
 
-  it("follows up only a saving turn this page does not stream, with growing delays", () => {
+  it("follows up only a saving turn this page does not stream, with growing delays and a limit", () => {
     const view = history("interrupted");
     expect(stopFollowUpTarget(view, () => false)).toBe(executionId);
     expect(stopFollowUpTarget(view, () => true)).toBeNull();
     expect(stopFollowUpTarget(history("completed"), () => false)).toBeNull();
     expect(stopFollowUpTarget(history("interrupted", null), () => false)).toBeNull();
     expect(STOP_FOLLOW_UP_DELAYS_MS.map((_, attempt) => stopFollowUpDelay(attempt))).toEqual(STOP_FOLLOW_UP_DELAYS_MS);
-    expect(stopFollowUpDelay(50)).toBe(STOP_FOLLOW_UP_DELAYS_MS.at(-1));
+    // Bounded: about 7 minutes in all, beyond the server's 300 s wait, then no more reads.
+    const total = STOP_FOLLOW_UP_DELAYS_MS.reduce((sum, value) => sum + value, 0);
+    expect(total).toBeGreaterThan(300000);
+    expect(total).toBeLessThanOrEqual(480000);
+    expect(stopFollowUpDelay(STOP_FOLLOW_UP_DELAYS_MS.length)).toBeNull();
   });
 
   it("a stopping answer keeps the retained request; the saved result releases it", () => {

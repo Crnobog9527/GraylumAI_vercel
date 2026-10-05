@@ -31,7 +31,7 @@ export function mentorTailNotices(ctx: {
 }): ChatNotice[] {
   const notices: ChatNotice[] = [];
   if (ctx.livePhase) {
-    const incomplete = ctx.livePhase === "incomplete";
+    const incomplete = ctx.livePhase === "incomplete" || ctx.livePhase === "stop_unconfirmed";
     notices.push({ id: "live", tone: incomplete ? "warning" : "status", busy: !incomplete, text: livePhaseNotice(ctx.livePhase),
       ...(ctx.stop && !incomplete ? { actions: [{ label: CHAT_ACTION.stop, ...ctx.stop }] } : {}) });
   } else if (ctx.replying && !ctx.lastTurnOpen) notices.push({ id: "replying", tone: "status", busy: true, text: "正在回复…" });

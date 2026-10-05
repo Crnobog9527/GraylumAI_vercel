@@ -214,7 +214,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [planDays, setPlanDays] = useState(7);
   const history = trpc.runtime.view.useQuery({ sessionId: read.data?.sessionId ?? "" },
     { enabled: Boolean(read.data?.sessionId), refetchInterval: useHistoryPolling(draftId, read.data?.snapshot?.workflow.steps ?? []) });
-  const live = useLiveReply(draftId, history.data, setError), liveReply = live.reply;
+  const live = useLiveReply(draftId, history.data, setError), liveReply = live.reply, stopUnconfirmed = live.stopUnconfirmed;
   const payg = usePaygResume(() => Promise.all([read.refetch(), history.refetch(), utils.credits.getBalance.invalidate()]));
   const [activeStep, setActiveStep] = useState<string | null>(null);
   const [activeQuestions, setActiveQuestions] = useState<Record<string, string>>({});
@@ -1871,7 +1871,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                       const target = steps.find(candidate => candidate.id === parsed.targetStepId);
                       const live = liveReply?.executionId === execution.executionId ? liveReply : null;
                       const reply = mentorReplyDisplay({ ...execution, body: execution.body ?? execution.primaryBody,
-                        legacyMessage: parsed.message, liveText: live?.text, liveCard: live?.card,
+                        legacyMessage: parsed.message, liveText: live?.text, liveCard: live?.card, stopUnconfirmed: stopUnconfirmed === execution.executionId,
                         active: execution.executionId === history.data?.activeExecution, busy: busy || awaitingReply });
                       const next = mentorExecutions[executionIndex + 1];
                       if (!next) { lastTurnNotice = showsTurnState(reply.notice); lastTurnText = reply.notice?.text ?? ""; }

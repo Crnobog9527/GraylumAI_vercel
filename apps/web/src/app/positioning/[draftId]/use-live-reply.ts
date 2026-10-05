@@ -19,9 +19,15 @@ function tabStorage() {
  * The page's live mentor reply (see live-reply-controller.ts) bound to React
  * state and page lifecycle events, with 停止 (stop-reply.ts). `phase` is the
  * live notice to show and `stopAction` the 停止 button, when one applies.
+ * A stopped turn that this page no longer streams is re-read a bounded number
+ * of times (STOP_FOLLOW_UP_DELAYS_MS), never polled without end.
  */
 export function useLiveReply(draftId: string, history: RecoveryHistory | undefined, onError: (text: string) => void):
-  LiveReplyController & { reply: LiveReply | null; phase: string | null; stopAction: { onClick: () => void } | null } {
+  LiveReplyController & {
+    reply: LiveReply | null; phase: string | null; stopAction: { onClick: () => void } | null;
+    /** The stopped execution this page gave up re-reading, if any. */
+    stopUnconfirmed: string | null;
+  } {
   const [reply, setReply] = useState<LiveReply | null>(null);
   const live = useMemo(() => liveReplyController({ draftId, storage: tabStorage, show: setReply }), [draftId]);
   const utils = trpc.useUtils();
@@ -46,14 +52,21 @@ export function useLiveReply(draftId: string, history: RecoveryHistory | undefin
 
   // A stopped turn that this page no longer streams (a reload, a lost connection) is re-read with
   // growing delays until history holds its result: the server rebuilds it from the saved receipt.
+  // The reads are bounded; after the last one the turn says its stop is not confirmed yet.
   const followUp = stopFollowUpTarget(history as { executions?: RecoveryExecution[] } | undefined, live.streaming);
   const attempts = useRef(new Map<string, number>());
   const [round, setRound] = useState(0);
+  const [unconfirmed, setUnconfirmed] = useState<string | null>(null);
   useEffect(() => {
     if (!followUp) return;
     const timers = new RecoveryTimers(), attempt = attempts.current.get(followUp) ?? 0;
+    const delay = stopFollowUpDelay(attempt);
+    if (delay === null) {
+      setUnconfirmed(followUp);
+      return;
+    }
     let disposed = false;
-    timers.schedule(stopFollowUpDelay(attempt), () => {
+    timers.schedule(delay, () => {
       attempts.current.set(followUp, attempt + 1);
       void (async () => {
         try {
@@ -83,7 +96,8 @@ export function useLiveReply(draftId: string, history: RecoveryHistory | undefin
   };
   return {
     ...live, reply,
-    phase: reply ? (reply.stopped ? "stopped" : reply.phase) : null,
+    phase: reply ? (reply.stopped ? (unconfirmed === reply.executionId ? "stop_unconfirmed" : "stopped") : reply.phase) : null,
+    stopUnconfirmed: unconfirmed,
     stopAction: canStop && reply ? { onClick: () => void stop(reply.executionId) } : null,
   };
 }

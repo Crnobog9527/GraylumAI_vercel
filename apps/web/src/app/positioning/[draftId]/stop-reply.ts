@@ -47,13 +47,16 @@ export function stopStillSaving(response: unknown) {
 /**
  * When the page that stopped no longer reads the original stream (a reload, a
  * lost connection), it re-reads the stopped execution so the server can
- * rebuild the result from the receipt. Never a new provider call. The last
- * delay repeats while the turn is still saving.
+ * rebuild the result from the receipt. Never a new provider call. The reads
+ * are bounded: about 7 minutes in all, past the server's 300-second wait for
+ * the in-flight call. After the last one the page stops reading by itself and
+ * says the stop is not confirmed yet (STOP_UNCONFIRMED_NOTICE).
  */
-export const STOP_FOLLOW_UP_DELAYS_MS = [3000, 10000, 20000, 30000, 60000];
+export const STOP_FOLLOW_UP_DELAYS_MS = [3000, 10000, 20000, 30000, 60000, 60000, 60000, 60000, 60000, 60000];
 
+/** Delay before re-read `attempt` (0-based), or null once the reads are used up. */
 export function stopFollowUpDelay(attempt: number) {
-  return STOP_FOLLOW_UP_DELAYS_MS[Math.min(attempt, STOP_FOLLOW_UP_DELAYS_MS.length - 1)]!;
+  return STOP_FOLLOW_UP_DELAYS_MS[attempt] ?? null;
 }
 
 /** The notice of a stopped reply's saved result, or null. A cut reply never keeps its card. */
