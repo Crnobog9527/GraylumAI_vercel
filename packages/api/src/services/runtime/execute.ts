@@ -1,15 +1,18 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {NativeSession} from './nativeSession';
+import {NativeProgressProjection} from './nativeProgress';
+import {nativeVisible,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
+ completedOutput,finalizeNativeSummary} from './nativeOutput';
 import {paygOwnerDatabase} from './paygOwner';
-import {StagingAccessError, type StagingFailure} from './stagingErrors';
-import {runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
+import {executorRpc,recoverExecutorFinancial,preflightCodes,hash,progressEmitter,type RuntimeExecutorOptions} from './executorRpc';
+import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 import {runtimeContext} from './runtimeContext';
-export {runtimeContext} from './runtimeContext';
+export {runtimeContext};
 import {projectHostTurnItem} from './hostTurn';
 import {selectBlockHistory,validateBlockCall} from './historySelection';
 import {publicAgentText,publicMentorText,type RuntimeProgress} from './progress';
-import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import {logger} from '../../lib/logger';
 import {recoverOpenRouterHistory,latestHistoryTurn,assertLatestHistoryRetained} from './historyRecovery';
@@ -20,56 +23,28 @@ import {agentTurnResult} from './agentTurnResult';
 import {terminalAgentReplyFailure} from './terminalAgentReply';
 import {askQuestionTool,askQuestionToolBytes,questionMessageFromArguments,QUESTION_CONTRACT} from './agentTools';
 import {ASK_QUESTION_TOOL,INVALID_REPLY_NOTICE} from '../../shared/agentTurn';
-import { authoritativeBilling, type FrozenRun, type FrozenCall, type BillingTransport } from '../bill2/service';
+import { authoritativeBilling, type FrozenCall } from '../bill2/service';
 import {OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
-import {createRuntimeBudget,type RuntimeBudget} from './budget';
+import {createRuntimeBudget} from './budget';
 import {expiringAuthAfterProvider} from './authReuse';
 import { localFixtureAdapter } from '../bill2/fixtureAdapter';
-import { PostgresSession, type SessionRpc } from './session';
+import { PostgresSession } from './session';
 import { runRuntime, type RuntimeTool } from './runner';
 import { selectRuntimeHistory, selectRuntimeCallInput, projectSupersededScopeItem, requestsHistoricalComparison, assertRuntimeRequestCapacity, runtimeScopeInput } from './context';
-import { matchingInput, MATCH_INSTRUCTIONS, parseMatch, type MatchCandidate } from './matching';
+import { matchingInput, MATCH_INSTRUCTIONS, parseMatch } from './matching';
 import { callBillingUnit } from './billingUnitAdmission';
-import type {RuntimeCallGate,GateRejection} from './newWorkGate';
+import type {GateRejection} from './newWorkGate';
 import {allowedOutput} from './moderation';
-const preflightCodes=new Set(['RUNTIME_TIME_BUDGET_EXHAUSTED','RUNTIME_PROVIDER_HISTORY_DENIED','RUNTIME_PROVIDER_BINDING_DENIED','BILL2_PROVIDER_REQUEST_DENIED','BILL2_PROVIDER_CREDENTIAL_UNAVAILABLE','BILL2_PROVIDER_IDENTITY_DENIED','BILL2_PROVIDER_MODEL_DENIED','BILL2_PROVIDER_QUOTE_REQUIRED','BILL2_PROVIDER_QUOTE_CONFLICT']);
-const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
-/** Trusted server host only. The public admission layer must construct this context.
- * The default transport is local-only; the Staging host must explicitly supply
- * its allowlisted official adapter and frozen price policy.
- */
-type RuntimeExecutorOptions={budget?:RuntimeBudget;database:SessionRpc;actor:()=>Promise<string>;
- resumePricing?:(policies:FrozenRun['callPolicy'])=>Promise<void>;
- callGate:RuntimeCallGate;endpoint?:string;adapter?:BillingTransport;activateSkill?:(candidate:MatchCandidate)=>Promise<string>};
 export function runtimeExecutor(options:RuntimeExecutorOptions){
  if(typeof options.callGate!=='function')throw new Error('RUNTIME_CALL_GATE_REQUIRED');
  const budget=options.budget??createRuntimeBudget();
  const adapter=expiringAuthAfterProvider(options.adapter ?? localFixtureAdapter(options.endpoint??''),budget.auth);
  const billing=authoritativeBilling({admin:options.database,actor:options.actor,adapter,budget});
- async function rpc<T>(name:string,args:Record<string,unknown>,database=options.database):Promise<T>{
-  const result=await database.rpc(name,{...args,p_actor_id:z.string().uuid().parse(await options.actor())});
-  if(result.error){
-   // A private, exact identity mismatch permits only the bounded legacy replay
-   // below. Authorization, storage and all other failures never trigger it.
-   if(name==='runtime_response'&&typeof result.error==='object'&&'message' in result.error&&result.error.message==='RUNTIME_RESPONSE_CONFLICT')throw new Error('RUNTIME_RESPONSE_CONFLICT');
-   const message=typeof result.error==='object'&&'message' in result.error?result.error.message:undefined;
-   if(message==='RUNTIME_TEST_WINDOW_DENIED'||message==='RUNTIME_TEST_MODEL_DENIED')
-    throw new StagingAccessError('RUNTIME_PRICE_CONFIGURATION_PENDING');
-   if(typeof message==='string'&&['RUNTIME_RESUME_CONFLICT','RUNTIME_RESUME_SOURCE_CHANGED',
-    'RUNTIME_RESUME_CLOSED','RUNTIME_CHECKPOINT_PENDING','RUNTIME_CALL_LIMIT_REACHED'].includes(message))
-    throw new StagingAccessError(message as StagingFailure);
-   throw new Error('RUNTIME_DATABASE_UNAVAILABLE');
-  }return result.data as T;
- }
+ const rpc=executorRpc(options);
  return {
   cancel:(executionId:string)=>rpc<{state:string}>('runtime_cancel',{p_execution_id:z.string().uuid().parse(executionId)}),
   /** Trusted maintenance only: caller supplies a verified original actor; no UI route. */
-  async recoverFinancial(executionId:string){
-   const args={p_execution_id:z.string().uuid().parse(executionId)};
-   const current=await rpc<{runId:string}>('runtime_financial_recovery',args);
-   await billing.recoverReceipts(current.runId);
-   return rpc<{executionId:string;runId:string;state:string;billing:unknown}>('runtime_financial_recovery',{...args,p_finish:true});
-  },
+  recoverFinancial:(executionId:string)=>recoverExecutorFinancial(rpc,billing,executionId),
   async execute(executionId:string,onProgress?:(event:RuntimeProgress)=>void,resume?:ResumeInput){
   const args={p_execution_id:z.string().uuid().parse(executionId)};
   budget.timing?.enter('execute');
@@ -88,13 +63,13 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    const recovered=await ownerRpc<{state:string}>('runtime_financial_recovery',{...args,p_finish:true});
    return {state:recovered.state as 'completed'|'cancelled'|'cost_pending',...(execution.result?{body:execution.result.body,...(execution.result.summary!==undefined?{summary:execution.result.summary}:{})}:{})};
   }
-  if(execution.state==='completed')return {body:execution.result?.body,...(execution.result?.summary!==undefined?{summary:execution.result.summary}:{}),state:'completed' as const};
+  if(execution.state==='completed')return completedOutput(execution.result,execution.context,onProgress);
   if(execution.state==='cost_pending'&&execution.result){
    // Saved SDK output is immutable. Recover only the original billed calls;
    // this branch never starts the SDK or appends Session messages again.
    await billing.recoverRun(execution.runId);
    const recovered=await ownerRpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:execution.result});
-   return {body:execution.result.body,...(execution.result.summary!==undefined?{summary:execution.result.summary}:{}),state:recovered.state};
+   return {...completedOutput(execution.result,execution.context,onProgress),state:recovered.state};
   }
   const context=runtimeContext.parse(execution.context);
   // Validate both primary and attached settings before any SDK or billed call.
@@ -103,12 +78,17 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   // Skill matching or workspace reads, and its only tool is the question card.
   const agentTurn=context.providerRequestFormat===AGENT_TURN_REQUEST_FORMAT;
   const fiveFields=Boolean(context.questionContract);
+  const native=Boolean(context.nativeOutput);
+  const nativeProgress=native&&(agentTurn||Boolean(context.envelopeOrder));
+  let projection=new NativeProgressProjection({mode:agentTurn?'agent':'message-first',toolMessage:agentTurn&&fiveFields});
+  let primaryLength=false;
   if(fiveFields&&!agentTurn)throw new Error('RUNTIME_CONTEXT_INVALID');
   if(agentTurn&&(context.matching||context.workspaceContext||context.tools.some(name=>name!==ASK_QUESTION_TOOL)))throw new Error('RUNTIME_CONTEXT_INVALID');
   if(!agentTurn&&context.tools.includes(ASK_QUESTION_TOOL))throw new Error('RUNTIME_CONTEXT_INVALID');
   const policy=execution.billing.callPolicy.find(p=>p.model===context.model);
   if(!policy)throw new Error('RUNTIME_MODEL_DENIED');
   const session=new PostgresSession(ownerDatabase,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
+  const nativeSession=native?new NativeSession(session):undefined;
   let transportNotStarted=false,providerRejected=false;
   let terminalReplyFailure=false;
   let gateChecked=resumedGate,moderationBlocked=false;
@@ -127,9 +107,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   // B2a: once BILL2 reports a confirmed erasure, nothing more reaches the client.
   let accountClosed=false;
   const closed=():never=>{accountClosed=true;throw new Error('RUNTIME_ACCOUNT_CLOSED');};
-  const progress=(event:RuntimeProgress)=>{
-   if(accountClosed)return;try{onProgress?.(event);}catch{/* UI disconnect never interrupts receipt persistence. */}
-  };
+  const progress=progressEmitter(onProgress,()=>budget.timing?.mark('firstValidContent'),()=>accountClosed);
   const normalized=context.providerRequestFormat==='serial-tools-v2'||context.providerRequestFormat==='serial-tools-v6-reasoning'||streaming;
   const historyChecked=<T>(check:()=>T):T=>{
    try{return check();}catch(error){
@@ -148,6 +126,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     try{
     if(selectedPolicy.protocol==='openrouter-chat-v1')
      request=openRouterRequestBody(request,{context,policy:selectedPolicy,phase,primaryDialogue:phase===effective.role&&selectedPolicy===primaryPolicy});
+    if(native)request=fitNativeRequestOutput(request,selectedPolicy);
     const configuredInput=phase==='attached_organizer'?context.attachedOrganizer?.inputBytes:context.purposeBudget?.inputBytes;
     assertRuntimeRequestCapacity(request,Math.min(selectedPolicy.inputLimit,configuredInput??Infinity));
     let sequence=++callSequence;
@@ -175,7 +154,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
        ...(selectedPolicy.providerLimits?{providerLimits:selectedPolicy.providerLimits}:{}),phase,requestHash,upperUsd:selectedPolicy.upperUsd,inputLimit:selectedPolicy.inputLimit,outputLimit:selectedPolicy.outputLimit,
        automaticRetry:false,hiddenTools:false,lookupSupported:selectedPolicy.lookupSupported,
        ...callBillingUnit(execution.billing.rules,selectedPolicy)};
-      if(isPayg)call=runtimePaygCall(request,phase,selectedPolicy,execution.billing.rules,execution.epoch!).call;
+      if(isPayg)call=runtimePaygCall(request,phase,selectedPolicy,execution.billing.rules,execution.epoch!,native).call;
       // Every new claim path must pass this once-per-round gate before BILL2.
       if(!gateChecked){
        const leaveRateLimit=budget.timing?.enter('rateLimit');
@@ -311,10 +290,11 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    let selectedHistoryCount=0,latestHistoryCount=0;
    let historyOmitted=execution.historyOmitted===true;
    let partial="";progress({type:"phase",phase:"mentor"});
-   return runRuntime({...context,...effective,stream:streaming,onText:delta=>{
+   return runRuntime({...context,...effective,rejectTruncatedTools:native,stream:streaming,onText:delta=>{
     if(delta)budget.timing?.mark('firstModelText');
-    partial+=delta;
+    if(!native)partial+=delta;
     if(agentTurn)agentText+=delta;
+    if(native)return;
     const text=agentTurn?publicAgentText(partial):publicMentorText(partial);
     if(text&&!(fiveFields&&context.tools.includes(ASK_QUESTION_TOOL))){
      budget.timing?.mark('firstValidContent');progress({type:"text",text});
@@ -323,7 +303,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     ...(agentTurn?{allowEmptyResult:true,commitSessionOnSuccess:true,firstToolCallOnly:true,
      onToolCallsDropped:(dropped:number)=>logger.warn('api','runtime_tool_calls_dropped',{executionId,dropped}),
      ...(context.tools.includes(ASK_QUESTION_TOOL)?{stopAtToolNames:[ASK_QUESTION_TOOL]}:{})}:{}),
-    input:runtimeScopeInput(context.input,context.scopeMaterial,context.hostTurnContext),session,tools,selectHistory:async(history,incoming)=>{
+    input:runtimeScopeInput(context.input,context.scopeMaterial,context.hostTurnContext),session:nativeSession??session,tools,selectHistory:async(history,incoming)=>{
     const originalHistory=history,originalCount=history.length;
     latestHistoryCount=latestHistoryTurn(history).length;
     if(normalized&&execution.live&&execution.historyFrozen===false){
@@ -364,12 +344,17 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    },
     exchange:async(_sequence,request,onChunk)=>{
      partial="";
-     const envelope=await exchange(request,effective.role,primaryPolicy,onChunk);
+     projection=new NativeProgressProjection({mode:agentTurn?'agent':'message-first',toolMessage:agentTurn&&fiveFields});
+     const project=nativeFrameProjection(projection,progress);
+     const envelope=await exchange(request,effective.role,primaryPolicy,nativeProgress&&execution.live&&onChunk?chunk=>{
+      project(chunk);onChunk(chunk);
+     }:onChunk);
      // Local fixture carries the SDK response as private usage evidence. It is
      // not an OpenRouter protocol capability or proof of real supplier costs.
      const response=envelope.usage?.sdkResponse;
      if(!response||response.model!==effective.model||response.choices?.length!==1)throw new Error('RUNTIME_RESPONSE_INVALID');
      checkAgentReply(response);
+     primaryLength=response.choices[0]?.finish_reason==='length';
      if(agentTurn)agentToolCalled=Boolean(response.choices[0]?.message?.tool_calls?.length);
      const firstCall=response.choices[0]?.message?.tool_calls?.[0];
      if(context.questionContract===QUESTION_CONTRACT&&firstCall?.function?.name===ASK_QUESTION_TOOL)
@@ -394,24 +379,34 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     if(latest.unavailable)return {state:latest.state,unavailable:'latest' as const};
    }
    budget.timing?.mark('fullModelReply');
-   const turn=agentTurn?agentTurnResult(agentText,body,agentToolCalled,agentCardMessage):null;
+   const turn=agentTurn?agentTurnResult(agentText,body,agentToolCalled,agentCardMessage,native):null;
    if(turn){
     if(turn.card||turn.message!==INVALID_REPLY_NOTICE)budget.timing?.mark('firstValidContent');
     body=turn.body;
-    if(turn.message)progress({type:'text',text:turn.message});
-    if(turn.card)progress({type:'card',card:turn.card});
+    if(!native&&turn.message)progress({type:'text',text:turn.message});
+    if(!native&&turn.card)progress({type:'card',card:turn.card});
    }
-   const turnMetadata=turn?{truncated:turn.truncated}:{};
-   const publicBody=agentTurn?'':publicMentorText(body);if(publicBody)progress({type:'text',text:publicBody});
+   let turnMetadata:Record<string,unknown>=turn?{truncated:turn.truncated}:{};
+   if(native){
+    const fitted=prepareNativePrimary(body,turnMetadata,{envelopeOrder:context.envelopeOrder,
+      length:primaryLength,attachedOrganizer:Boolean(context.attachedOrganizer),executionId});
+     body=fitted.body;turnMetadata=fitted.metadata;
+    if(nativeProgress){const final=projection.finish(nativeVisible(body));if(final)progress(final);}
+    if(turn?.card)progress({type:'card',card:JSON.parse(body).card});
+   }
+   await nativeSession?.finish(body,agentTurn,!agentTurn||turnMetadata.completeness==='length_limit');
+   const publicBody=agentTurn||native?'':publicMentorText(body);if(publicBody)progress({type:'text',text:publicBody});
    let summary:string|undefined;
    if(context.attachedOrganizer){
     progress({type:"phase",phase:"organizer"});
     await ownerRpc('runtime_execution',{...args,p_action:'checkpoint_primary',p_result:{body,lastSequence:callSequence,...turnMetadata}});
+    if(native&&(turnMetadata.completeness==='length_limit'||turnMetadata.envelopeCompact))summary='';
+    else {
     const organizer=context.attachedOrganizer,organizerPolicy=execution.billing.callPolicy.find(p=>p.modelId===organizer.modelId&&p.model===organizer.model);
     if(!organizerPolicy)throw new Error('RUNTIME_ORGANIZER_DENIED');
     const instructions=organizer.instructions ?? 'Organize this operation result. Preserve provenance and uncertainty. Do not add new facts.';
     const organizerInput=organizer.input ? organizer.input+'\n\nPrimary assistant reply:\n'+body : body;
-    summary=await runRuntime({model:organizer.model,instructions,input:organizerInput,session,maxOutputTokens:organizer.maxOutputTokens,maxTurns:1,tools:[],
+    summary=await runRuntime({model:organizer.model,instructions,input:organizerInput,session:nativeSession??session,maxOutputTokens:organizer.maxOutputTokens,maxTurns:1,tools:[],
      reasoning:organizer.reasoning,readSessionHistory:organizer.historyItems===0?false:undefined,
      // New explicit-zero organizers never read Session; older frozen values replay as before.
      selectHistory:async(history,incoming)=>selectRuntimeHistory(history,incoming,{
@@ -422,19 +417,21 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       if(!response||response.model!==organizer.model||response.choices?.length!==1)throw new Error('RUNTIME_RESPONSE_INVALID');
       checkAgentReply(response,true);
       return JSON.stringify(response);
-     }});
+     }});}
    }
    // This is after organizer spend and streamed text. Real moderation must decide
    // whether to buffer/retract output or check the primary reply before organizing.
    if(execution.live&&!await allowedOutput({actorId:await options.actor(),executionId,body,summary})){
     moderationBlocked=true;throw new Error('RUNTIME_MODERATION_BLOCKED');
    }
+   if(native&&summary!==undefined)({summary,metadata:turnMetadata}=finalizeNativeSummary(body,turnMetadata,summary));
    const result={kind:'usable_result',evidenceRef:executionId,
-    evidenceHash:hash(JSON.stringify({body,summary,...turnMetadata})),body,...turnMetadata,...(summary?{summary}:{})};
+    evidenceHash:hash(JSON.stringify({body,summary,...turnMetadata})),body,...turnMetadata,...((native?summary!==undefined:Boolean(summary))?{summary}:{})};
    progress({type:'phase',phase:'saving'});
    const completed=await ownerRpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
-   return {body,...(summary!==undefined?{summary}:{}),state:completed.state};
+   return {...nativeMetadata(result),body,...(summary!==undefined?{summary}:{}),state:completed.state};
   }catch(error){
+   if(nativeProgress&&execution.live&&projection.text&&!waitPoint){const correction=projection.finish(INVALID_REPLY_NOTICE);if(correction)progress(correction);}
    if(waitPoint){
     const saved=await ownerRpc<PaygPosition & {state:PaygWait['state'];primaryResult?:{body:string}}>(
      'runtime_execution',{...args,p_action:'payg_wait',p_result:waitPoint});

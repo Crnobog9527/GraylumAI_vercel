@@ -2,7 +2,6 @@
 import type { AgentTurnEvent } from "../shared/agentTurn";
 import { capturePendingInput, captureResolveInput } from "../services/opc/capture";
 import { z } from "zod";
-import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
 import {loadStagingPolicy,assertStagingReadAccess} from '../services/runtime/stagingPolicy';
 import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} from '../services/runtime/executionStream';
@@ -83,7 +82,7 @@ export const opcRouter = router({
   // original execution and progress delivery as runtime.executeStream.
   // Replay, reservation and replay-only recovery are those two paths'.
   mentorTurnStream: procedure
-    .input(opcGenerate)
+    .input(opcGenerate.extend({textProtocol:z.literal('textDelta-v1').optional()}))
     .mutation(async function* ({ ctx, input, path }): AsyncGenerator<AgentTurnEvent> {
       // The route returns before this stream ends; release this stream's reference.
       const timing = ctx.runtimeBudget?.timing;
@@ -99,7 +98,8 @@ export const opcRouter = router({
             try { maintenanceEndpoint = runtimeLocalEndpoint(); }
             catch { await assertStagingReadAccess(ctx.supabaseAdmin, ctx.user.id, process.env); }
           }
-          const prepare = () => ctx.opc.prepareStep(input);
+          const request=opcGenerate.parse(Object.fromEntries(Object.entries(input).filter(([key])=>key!=='textProtocol')));
+          const prepare = () => ctx.opc.prepareStep(request);
           const prepared = timing ? await timing.run(prepare) : await prepare();
           if (prepared.admitted === false) {
             yield { type: "result" as const, result: prepared };
@@ -113,7 +113,7 @@ export const opcRouter = router({
         yield* streamOriginalExecution((onProgress) => executeOriginalExecution({
           admin: ctx.supabaseAdmin, user: ctx.userScopedSupabase, actorId: ctx.user.id, budget: ctx.runtimeBudget,
           authorization: ctx.headers?.get("Authorization"), maintenanceEndpoint,
-        }, admitted.executionId, onProgress), timing, path);
+        }, admitted.executionId, onProgress), timing, path, undefined, input.textProtocol);
       } finally {
         timing?.release();
       }

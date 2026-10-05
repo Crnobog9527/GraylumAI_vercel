@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {readNativeRuntimeView} from '../services/runtime/nativeView';
 import {resumeInput} from '../services/runtime/paygRuntime';
 import type {inferProcedureBuilderResolverOptions} from '@trpc/server';
 import type {RuntimeProgress} from '../services/runtime/progress';
@@ -52,7 +53,7 @@ const procedure=protectedProcedure.use(async({ctx,next,path})=>{
  }catch(cause){throw stagingProcedureError(cause,path);}
 });
 
-const executionProcedure=maintenanceProcedure.input(z.object({executionId:z.string().uuid()}).strict());
+const executionProcedure=maintenanceProcedure.input(z.object({executionId:z.string().uuid(),textProtocol:z.literal('textDelta-v1').optional()}).strict());
 function executeOriginal({ctx,input}:inferProcedureBuilderResolverOptions<typeof executionProcedure>,onProgress?:(event:RuntimeProgress)=>void){
  return executeOriginalExecution({admin:ctx.supabaseAdmin!,user:ctx.userScopedSupabase,actorId:ctx.user.id,budget:ctx.runtimeBudget,
   authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint},input.executionId,onProgress);
@@ -104,10 +105,11 @@ export const runtimeRouter=router({
  executeStream:executionProcedure.mutation(async function*(options){
   // The route returns before this stream ends; release this stream's reference.
   const timing=options.ctx.runtimeBudget?.timing;
-  try{yield* streamOriginalExecution(onProgress=>executeOriginal(options,onProgress),timing,'runtime.executeStream');}
+  try{yield* streamOriginalExecution(onProgress=>executeOriginal(options,onProgress),timing,'runtime.executeStream',undefined,options.input.textProtocol);}
   finally{timing?.release();}
  }),
  view:maintenanceProcedure.input(z.object({sessionId:z.string().uuid()}).strict()).query(async({ctx,input})=>{
-  const result=await ctx.supabaseAdmin!.rpc('runtime_view',{p_actor_id:ctx.user.id,p_session_id:input.sessionId});if(result.error)throw new Error('RUNTIME_VIEW_DENIED');return {...result.data,mode:ctx.maintenanceEndpoint?'isolated':'staging_test'};
+  const view=await readNativeRuntimeView(ctx.supabaseAdmin!,ctx.user.id,input.sessionId);
+  return {...view,mode:ctx.maintenanceEndpoint?'isolated':'staging_test'};
  }),
 });

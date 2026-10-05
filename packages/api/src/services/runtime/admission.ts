@@ -26,7 +26,7 @@ import {ASK_QUESTION_TOOL,questionAnswerSourceSchema} from '../../shared/agentTu
 import {isOpeningInput} from '../../shared/opcQuestions';
 import {askQuestionToolBytes,QUESTION_CONTRACT,QUESTION_CONTRACT_INSTRUCTIONS} from './agentTools';
 import {currentRequestTiming} from './timing';
-import {readPurposeBudgets} from './purposeBudgets';
+import {PURPOSE_OUTPUT_CAP,readPurposeBudgets} from './purposeBudgets';
 import {assertFrozenPayloads} from './payloadSize';
 import {freezeWindowBillingUnit} from './billingUnitAdmission';
 import {newWorkGate,readNewWorkSettings,requireNewWork} from './newWorkGate';
@@ -52,7 +52,7 @@ export type LocalRuntimePolicy={
  payg?: {callPolicies: FrozenPaygRun['callPolicy']; billingUnit: NonNullable<FrozenPaygRun['rules']['billingUnit']>};
  resumeWaitingOrganizer?:ResumeWaitingOrganizer;
  hostTurnContext?:HostTurnContext;
- purposeBudgets?:boolean;real?:StagingPolicy;account:string;costPerCall:string;creditsPerUsd:string;multiplier:string;
+ stepStream?:boolean;purposeBudgets?:boolean;real?:StagingPolicy;account:string;costPerCall:string;creditsPerUsd:string;multiplier:string;
  maxCalls:number;maxOutputTokens:number;inputBytes:number;historyItems:number;
  expectedMaterialRevision?:number;opcTurnToken?:string;mentorStream?:boolean;organizeOpening?:boolean;
  additionalInstructions?:string;stableAdditionalInstructions?:string;skillResources?:readonly string[];searchEnabled?:boolean;workspaceContext?:boolean;
@@ -73,7 +73,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
   if(!quote)throw new StagingAccessError('RUNTIME_STAGING_MODEL_NOT_APPROVED');
   if(row.is_active!=='true'||quote.model!==row.model_id||!['openai','openrouter','anthropic'].includes(String(row.provider))||
    !quote.providerLimits||!Number.isSafeInteger(Number(row.input_limit))||!Number.isSafeInteger(Number(row.max_tokens))||
-   Number(row.input_limit)<quote.providerLimits.contextTokens||Number(row.max_tokens)<quote.outputLimit)
+   Number(row.input_limit)<quote.providerLimits.contextTokens||Number(row.max_tokens)<1)
    throw unavailableModel();
   return quote;
  }
@@ -81,7 +81,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
  // The local fixture default is not an additional ceiling on an approved real quote.
  function outputCapacity(row:Record<string,unknown>,organizerLimit=Infinity,configuredOutput?:number){
   return Math.min(policy.real?realModel(row).outputLimit:configuredOutput??policy.maxOutputTokens,
-   Number(row.max_tokens),organizerLimit,configuredOutput??20000);
+   Number(row.max_tokens),organizerLimit,PURPOSE_OUTPUT_CAP);
  }
  function inputCapacity(row:Record<string,unknown>,output:number,bytes=policy.inputBytes){
   return policy.real?Math.min(bytes,realModel(row).inputLimit):fixtureInputCapacity(Number(row.input_limit),output,bytes);
@@ -140,7 +140,10 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const selectedBudget=budgets?.[purpose];
    const inputBytes=selectedBudget?.inputBytes??policy.inputBytes;
    const historyItems=selectedBudget?.historyItems??policy.historyItems;
-   const configuredOutput=budgets&&purpose==='interactive'?budgets.interactive.maxOutputTokens:undefined;
+   const configuredOutput=budgets&&purpose==='interactive'?PURPOSE_OUTPUT_CAP:undefined;
+   const stepStream=Boolean(policy.opcTurnToken&&policy.stepStream);
+   if(stepStream&&(mentorStream||input.selection.kind!=='skill'||input.network!=='deny'||input.sources.length))
+    throw new Error('RUNTIME_CONTEXT_INVALID');
    if(policy.expectedMaterialRevision!==undefined&&session.materialRevision!==policy.expectedMaterialRevision)throw new Error('RUNTIME_MATERIAL_CONFLICT');
    for(const source of input.sources)await query('runtime_source',{p_source:source});
    let organizerOutput:number|undefined;
@@ -240,17 +243,19 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(mentorStream&&candidates.length)throw new Error('RUNTIME_MODEL_DENIED');
    let reasoning:ReasoningPolicy|undefined;
    const organize=input.selection.kind==='organizer';
-   if(mentorStream&&!policy.real)reasoning={parameter:'none'};
-   if(policy.real&&(mentorStream||organize))
+   if((mentorStream||stepStream)&&!policy.real)reasoning={parameter:'none'};
+   if(policy.real&&(mentorStream||stepStream||organize))
     reasoning=admitReasoning(row.data,organize?'organize':'interactive',realModel(row.data).providerLimits!.providerSlug,maxOutputTokens);
    const organizerFormat=Boolean(policy.real&&!mentorStream&&(organize||attachedOrganizer));
    if(organizerFormat&&!reasoning)reasoning={parameter:'none'};
-   const providerRequestFormat=mentorStream?'agent-turn-v5-stream':organizerFormat?'serial-tools-v6-reasoning':'serial-tools-v2';
+   const providerRequestFormat=mentorStream?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat?'serial-tools-v6-reasoning':'serial-tools-v2';
    const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:hostTurnContext?'scope-projection-v2':'scope-projection-v1',
     ...(hostTurnContext?{hostTurnContext,historySelection}:{}),
     ...(promptCache?{promptCache}:{}),
     ...(mentorStream?{questionContract:QUESTION_CONTRACT}:{}),
-    ...(policy.real||mentorStream?{providerRequestFormat}:{}),...(reasoning?{reasoning}:{}),role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
+    nativeOutput:'native-output-v1',...(stepStream?{envelopeOrder:'message-first-v1'}:{}),
+    ...(policy.real||mentorStream||stepStream?{providerRequestFormat}:{}),...(reasoning?{reasoning}:{}),
+    role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
     ...(policy.opcTurnToken?{opcTurnToken:uuid.parse(policy.opcTurnToken)}:{}),...(candidates.length?{matching:{candidates}}:{}),...(session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...(workspaceContext?{workspaceContext:true}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems,network:input.network,
     // Freeze the purpose ceiling; each selected model keeps its own call-policy limit.
