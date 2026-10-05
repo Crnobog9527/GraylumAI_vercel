@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
+import type { inferRouterContext } from '@trpc/server';
 import { settingsRouter } from './settings';
 import { paymentsRouter } from './payments';
 import { PAYMENT_CHANNEL_KEY } from '../services/payments/channelSettings';
@@ -13,7 +14,7 @@ function fixture(role = 'admin', error: unknown = null) {
     app_metadata: { provider: 'email' }, user_metadata: { email_verified: true } },
     isEmailVerified: true, authProvider: 'email', hasSupabaseAdminPrivileges: true,
     supabase: db, supabasePublic: db, supabaseAdmin: db,
-  } as unknown as Parameters<typeof settingsRouter.createCaller>[0];
+  } as unknown as inferRouterContext<typeof settingsRouter>;
   return { caller: settingsRouter.createCaller(context), context, upsert };
 }
 it.each(['single', 'bulk'])('validates channel enum/version for %s writes and blocks rate-limit overwrite', async mode => {
