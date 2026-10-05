@@ -317,6 +317,10 @@ describe("the saved result of a stopped turn", () => {
     const shown = mentorReplyDisplay({ body: null, legacyMessage: "", state: "interrupted", active: true, busy: true,
       billing: stopBilling, userStopPending: true, liveText: "" });
     expect(shown).toEqual({ text: "", card: null });
+    // A stored body that arrives behind the empty live prefix shows neither its text nor its card.
+    const card = { question: "选哪个？", options: ["A", "B"], recommended: 0 };
+    expect(mentorReplyDisplay({ body: agentTurnBody("没看到的正文", card), legacyMessage: "没看到的正文", state: "running",
+      active: true, busy: true, liveText: "" })).toEqual({ text: "", card: null });
     const tail = mentorTailNotices({ livePhase: "stopped", stop: null, replying: true, lastTurnOpen: false,
       saving: false, recovery: null, error: "", notice: "", freeError: "" });
     expect(tail.filter(notice => notice.text === STOP_SAVING_NOTICE)).toHaveLength(1);

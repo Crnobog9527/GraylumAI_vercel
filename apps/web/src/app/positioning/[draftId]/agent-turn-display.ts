@@ -198,7 +198,11 @@ export function mentorReplyDisplay(source: MentorReplySource): { text: string; c
   const body = readAgentTurnBody(source.body);
   const card = stoppedCut(source) ? null : body.card ?? source.liveCard ?? null;
   // A live reply owns its notice in the tail (mentorTailNotices), even before its first text.
-  if (source.liveText !== undefined) return { text: source.liveText, card, ...(historyNotice ? { notice: historyNotice } : {}) };
+  // Before that text it shows only its own streamed card, never one from an unseen stored body.
+  if (source.liveText !== undefined) {
+    const liveCard = source.liveText ? card : stoppedCut(source) || stopSaving(source) ? null : source.liveCard ?? null;
+    return { text: source.liveText, card: liveCard, ...(historyNotice ? { notice: historyNotice } : {}) };
+  }
   // While a stop is saving, only what this tab froze is shown, never the unseen full checkpoint (primaryBody).
   if (stopSaving(source)) return { text: "", card: null, notice: unavailableNotice(source) };
   const cut = source.unavailableReason === "output_truncated" ? OUTPUT_TRUNCATED_NOTICE
