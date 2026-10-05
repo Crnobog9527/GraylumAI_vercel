@@ -2495,7 +2495,7 @@ it.each(['durable-response','unknown-lookup','settled-lookup-only'] as const)(
   await rpc('bill2_record',{p_actor_id:f.actor,p_run_id:execution.runId,p_call_id:call.id,
    p_evidence:scenario==='durable-response'?initial:{...initial,rawBody:undefined}});
   expect(await rpc('runtime_execution',{p_actor_id:f.actor,p_execution_id:execution.executionId,
-   p_action:'stop',p_result:{stopAt:3,source:'final'}}))
+   p_action:'stop',p_result:{stopAt:3,source:'message'}}))
    .toMatchObject({state:scenario==='durable-response'?'stopped_pending_result':'stopping'});
   // Crash boundary: only committed SQL facts survive; every recovery below constructs a new host.
   expect((await db.query('select result from runtime_executions where id=$1',[execution.executionId])).rows[0].result).toBeNull();

@@ -64,7 +64,8 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
     let body=typeof message?.content==='string'?message.content:'';
     let source:NativeTextSource='final',capacityLimited=false;
     let valid=Boolean(primary&&response?.model===context.model&&response?.choices?.length===1&&message
-      &&['stop','length','tool_calls'].includes(choice?.finish_reason??''));
+      &&['stop','length','tool_calls'].includes(choice?.finish_reason??'')
+      &&!(choice?.finish_reason==='length'&&!body.trim()&&!message?.tool_calls?.length));
     if(valid&&agent){
       valid=!terminalAgentReplyFailure(response,false,context.tools.includes('ask_question'))
         &&!(choice?.finish_reason==='length'&&message?.tool_calls?.length);
@@ -98,10 +99,8 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
     const summary=organized?.model===context.attachedOrganizer?.model&&organized?.choices?.length===1
       &&organized.choices[0]?.finish_reason==='stop'&&!terminalAgentReplyFailure(organized,true)
       ?organized.choices[0]?.message?.content:undefined;
-    // A final snapshot always contains this authoritative primary projection, never organizer prose.
-    const expectedSource=execution.stop?.source==='final'?'final':source;
     let result=valid?stoppedResult({executionId,format:agent?'agent':step?'step':'plain',body,
-      appendCard:Boolean(context.mentorText),stopAt:execution.stop!.stopAt,source:execution.stop?.source,expectedSource,
+      appendCard:Boolean(context.mentorText),stopAt:execution.stop!.stopAt,source:execution.stop?.source,expectedSource:source,
       capacityLimited,primaryComplete:choice?.finish_reason!=='length',attachedOrganizer:Boolean(context.attachedOrganizer),
       ...(typeof summary==='string'?{summary}:{})}):null;
     if(result&&!await allowedOutput({actorId:await options.actor(),executionId,body:result.body,summary:result.summary}))result=null;

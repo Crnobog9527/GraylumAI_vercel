@@ -82,6 +82,8 @@ it('assistant receipt becomes a mentor envelope with the same normal parser',asy
 });
 it('final snapshots are authoritative and a malformed step cannot be saved as JSON fragments',async()=>{
  const f=fixture();f.execution.stop!.source='final';
+ expect(await f.complete(id)).toEqual({state:'cancelled'});
+ f.raws.set(1,f.response('{"inputKind":"answer","message":"中😀后"}'));
  expect(await f.complete(id)).toMatchObject({state:'completed'});
  f.raws.set(1,f.response('{"message":2}'));expect(await f.complete(id)).toEqual({state:'cancelled'});
 });
@@ -101,5 +103,10 @@ it('does not turn a truncated question tool into a usable card',async()=>{
   envelopeOrder:undefined,tools:['ask_question'],mentorText:'append-card-v1'};
  f.execution.stop!.source='assistant';f.raws.set(1,JSON.stringify({model:'model',choices:[{finish_reason:'length',message:{content:'analysis',
   tool_calls:[{id:'card',function:{name:'ask_question',arguments:JSON.stringify({question:'Q',options:['A','B'],recommended:0})}}]}}]}));
+ expect(await f.complete(id)).toEqual({state:'cancelled'});
+});
+it('does not save a fallback notice for an empty length-limited mentor receipt',async()=>{
+ const f=fixture();f.execution.context={...f.execution.context as object,providerRequestFormat:'agent-turn-v5-stream',envelopeOrder:undefined};
+ f.execution.stop!.source='final';f.raws.set(1,JSON.stringify({model:'model',choices:[{finish_reason:'length',message:{content:''}}]}));
  expect(await f.complete(id)).toEqual({state:'cancelled'});
 });
