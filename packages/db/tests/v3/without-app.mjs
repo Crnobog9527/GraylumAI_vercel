@@ -4,6 +4,7 @@
 // excluded by exact name here, and the Vitest result must match this list.
 
 export const WITHOUT_APP_SUITES = {
+  cdc: {files: ['src/scripts/cdcB2Eval.integration.ts'], prefix: 'CDC_EVAL: ', excluded: []},
   bill2: {
     files: ['src/services/bill2/billing.integration.ts'],
     prefix: 'BILL2: ',
