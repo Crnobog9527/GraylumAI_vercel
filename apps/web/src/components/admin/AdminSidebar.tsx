@@ -9,7 +9,7 @@ import { trpc } from '@/trpc/client';
 import {
   LayoutDashboard, Bot, Wand2, Package, Users,
   CreditCard, Settings, ChevronLeft, Shield, DollarSign,
-  Megaphone, Headphones, Gift, Activity, Stethoscope, BarChart3
+  Megaphone, Headphones, Gift, Activity, Stethoscope, BarChart3, Receipt
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 
@@ -27,6 +27,7 @@ const menuItems: MenuItem[] = [
   { name: '积分包', icon: Package, href: '/admin/packages' },
   { name: '用户管理', icon: Users, href: '/admin/users' },
   { name: '交易记录', icon: CreditCard, href: '/admin/transactions' },
+  { name: '支付订单', icon: Receipt, href: '/admin/orders' },
   { name: '财务统计', icon: DollarSign, href: '/admin/finance' },
   { name: '公告管理', icon: Megaphone, href: '/admin/announcements' },
   { name: '工单管理', icon: Headphones, href: '/admin/tickets' },

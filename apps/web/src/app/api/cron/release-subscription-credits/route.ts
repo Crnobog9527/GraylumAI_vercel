@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { releaseDueAnnualSubscriptionCredits } from '@repo/api/src/services/subscriptionCreditGrants';
 import { logger } from '@repo/api/src/services';
+import { reportAnnualReleaseAnomalies } from '@/lib/payment-alert.mjs';
 import { validateCronRequest } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
@@ -34,7 +35,16 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('release-subscription-credits', 'started');
-    const summary = await releaseDueAnnualSubscriptionCredits(supabase);
+    const result = await releaseDueAnnualSubscriptionCredits(supabase);
+    reportAnnualReleaseAnomalies(result.anomalies);
+    const summary = {
+      scannedSubscriptions: result.scannedSubscriptions,
+      releasedGrantCount: result.releasedGrantCount,
+      skippedSubscriptions: result.skippedSubscriptions,
+      releasedCredits: result.releasedCredits,
+      anomalyCount: result.anomalies.length,
+      anomalyReasons: [...new Set(result.anomalies.map(({ reason }) => reason))],
+    };
 
     logger.system.cronJob(
       'release-subscription-credits',

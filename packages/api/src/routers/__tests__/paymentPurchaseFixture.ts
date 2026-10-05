@@ -14,6 +14,20 @@ export function installPurchaseFixture(user: Db, admin: Db, getStripe: () => Str
   const refs: Row[] = [];
   const orders = new Map<string, Row>();
   admin.from = (table: string) => {
+    if (table === 'system_settings') return { select() { return this; }, eq() { return this; },
+      maybeSingle: async () => ({ data: { value: { channel: 'stripe', version: 1 } } }) } as unknown as Query;
+    if (table === 'payment_orders') {
+      const query = from(table);
+      const originalSelect = query.select;
+      const select = (...args: unknown[]) => (originalSelect as (...args: unknown[]) => Query).apply(query, args);
+      query.select = ((columns?: string) => {
+        if (columns !== 'payment_channel') return select(columns);
+        const pending = { eq() { return this; }, is() { return this; }, order() { return this; }, limit() { return this; },
+          maybeSingle: async () => ({ data: null, error: null }) };
+        return pending as unknown as Query;
+      }) as Query['select'];
+      return query;
+    }
     if (table !== 'payment_provider_refs') return from(table);
     const filters: Array<[string, unknown]> = [];
     const result = async () => {

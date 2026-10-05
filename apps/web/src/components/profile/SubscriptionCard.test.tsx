@@ -211,6 +211,16 @@ describe('SubscriptionCard catalog availability', () => {
     expect(markup).toContain('disabled=""');
   });
 
+  it.each([null, 'waffo'])('renders but disables purchase when the selected channel is %j', (paymentChannel) => {
+    componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 10, bonus_credits: 0, price: 9.9,
+      paymentChannel, checkout_ready: false }] });
+    componentState.plansQuery = queryState({ data: [{ ...plan, paymentChannel, checkoutReady: { monthly: false, yearly: false } }] });
+    expect(renderToStaticMarkup(createElement(CreditPackagesSection, {}))).toContain('暂不可购买');
+    const markup = renderSubscription();
+    expect(markup).toContain('Pro');
+    expect(markup).not.toContain('立即订阅');
+  });
+
   it('validates disabled plan/package actions and the Portal entry in a local browser', async () => {
     componentState.plansQuery = queryState({ data: [plan] });
     componentState.eligibilityQuery = queryState({ data: { entries: [{ planId: plan.id, billingCycle: 'monthly', action: 'changeSubscriptionPlan', allowed: true, state: 'active' }] } });
