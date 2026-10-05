@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { usePaygResume } from "@/lib/use-payg-resume";
 import { liveReplyAfter, startLiveReply, type LiveReply } from "./agent-turn-display";
 import { readAgentTurn, TEXT_PROTOCOL } from "./mentor-turn";
-import { sendStop, stopRequestFor } from "./stop-reply";
+import { reportStopController, type ReportStopPhase } from "./report-stop";
 import { RecoveryTimers } from "./step-recovery";
 import {
   attachRetryDelay, generationOffer, readReportRecord, reportAttachable, reportProgressing, reportRecordKey, reportResultRefusal,
@@ -135,12 +135,21 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     }
   };
 
+  // 停止: one fixed request per page, resent on an unconfirmed answer, then a bounded status follow-up.
+  const [stopPhase, setStopPhase] = useState<ReportStopPhase>("idle");
+  const latestStop = useRef({ cancel: cancel.mutateAsync, refetch: status.refetch });
+  latestStop.current = { cancel: cancel.mutateAsync, refetch: status.refetch };
+  const stopper = useMemo(() => reportStopController({
+    cancel: request => latestStop.current.cancel(request),
+    reread: async () => (await latestStop.current.refetch()).data?.state ?? null,
+    schedule: (delay, callback) => timers.current?.schedule(delay, callback),
+    onChange: setStopPhase,
+  }), []);
   const stop = async () => {
     if (!live || live.stopped) return;
     const frozen = { ...live, stopped: true, stalled: true };
     setLive(frozen);
-    await sendStop(stopRequestFor(frozen), request => cancel.mutateAsync(request));
-    await status.refetch();
+    await stopper.stop(frozen);
   };
 
   return {
@@ -149,5 +158,8 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     start: () => void run("start"),
     restart: () => void run("restart"),
     stop: () => void stop(),
+    /** The stop request was not confirmed: 停止 resends the same request. */
+    stopUnconfirmed: stopPhase === "unconfirmed",
+    retryStop: () => void stopper.retry(),
   };
 }

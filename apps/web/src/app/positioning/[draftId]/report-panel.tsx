@@ -12,6 +12,7 @@ import {
   REPORT_ACTION, REPORT_INTRO, REPORT_TITLE, REPORT_WRITING_NOTICE, reportView,
 } from "./report-gen";
 import { useReportGen } from "./use-report-gen";
+import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE } from "./stop-reply";
 
 type Props = { draftId: string; sessionId: string; projectId: string; roundId: string; confirmed: boolean; busy: boolean };
 
@@ -21,6 +22,11 @@ type Props = { draftId: string; sessionId: string; projectId: string; roundId: s
  * With the switch off and no saved report, nothing renders, so the page is unchanged.
  */
 export function ReportEntry(props: Props) {
+  // A new round (修订) is a new report: remount so no state of the old round's report survives.
+  return <RoundReportEntry key={props.projectId + ":" + props.roundId} {...props} />;
+}
+
+function RoundReportEntry(props: Props) {
   const available = trpc.runtime.reportAvailable.useQuery(undefined, { enabled: props.confirmed, staleTime: 60_000 });
   const canGenerate = props.confirmed && available.data?.enabled === true;
   const report = useReportGen({ ...props, canGenerate: canGenerate });
@@ -42,8 +48,11 @@ function ReportDialog({ report, busy, onClose }: { report: ReturnType<typeof use
   const working = report.starting || report.streaming;
   const body = report.live?.text || (view && (view.kind === "report" || view.kind === "progress") ? view.body : null);
   const notices: ChatNotice[] = [];
-  if (report.live) notices.push({ id: "report-live", tone: "status", busy: !report.live.stopped, text: REPORT_WRITING_NOTICE,
-    ...(report.live.stopped ? {} : { actions: [{ label: CHAT_ACTION.stop, onClick: report.stop }] }) });
+  if (report.stopUnconfirmed) notices.push({ id: "report-stop-unconfirmed", tone: "warning", text: STOP_UNCONFIRMED_NOTICE,
+    actions: [{ label: CHAT_ACTION.stop, onClick: report.retryStop }] });
+  else if (report.live?.stopped) notices.push({ id: "report-stopping", tone: "status", busy: true, text: STOP_SAVING_NOTICE });
+  else if (report.live) notices.push({ id: "report-live", tone: "status", busy: true, text: REPORT_WRITING_NOTICE,
+    actions: [{ label: CHAT_ACTION.stop, onClick: report.stop }] });
   else if (report.starting) notices.push({ id: "report-starting", tone: "status", busy: true, text: REPORT_WRITING_NOTICE });
   else if (view?.kind === "progress") notices.push({ id: "report-progress", tone: "status", busy: true, text: view.notice });
   else if (view?.kind === "report") view.notices.forEach((text, index) => notices.push({ id: "report-note-" + index, tone: "warning", text }));

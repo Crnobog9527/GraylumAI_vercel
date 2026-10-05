@@ -83,3 +83,11 @@ it("uses the public report name, not the superseded 定位报告", async () => {
   expect(REPORT_TITLE).toContain("运营策略报告");
   expect(REPORT_TITLE).not.toContain("定位报告");
 });
+it("remounts per project and round, so a revised round never shows the old round's report state", () => {
+  const first = ReportEntry({ ...props, confirmed: true }) as { key: string | null; type: unknown };
+  const revised = ReportEntry({ ...props, roundId: "r2", confirmed: true }) as { key: string | null; type: unknown };
+  expect(first.key).toBe("p:r");
+  expect(revised.key).toBe("p:r2");
+  expect(revised.type).toBe(first.type);
+  expect(ReportEntry({ ...props, projectId: "p2", confirmed: true })).toMatchObject({ key: "p2:r" });
+});
