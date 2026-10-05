@@ -2,7 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { nativeMetadata } from './nativeOutput';
 
-const MAX_METADATA_READS = 4;
+const MAX_METADATA_READS = 1;
 function object(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }

@@ -86,7 +86,7 @@ it('rejects a mismatched session view before metadata reads', async () => {
   expect(f.calls).toHaveLength(1);
 });
 
-it('caps long-history metadata work at the latest four distinct visible nonempty replies', async () => {
+it('caps long-history metadata work at the latest visible nonempty reply', async () => {
   vi.useFakeTimers();
   const entries = Array.from({ length: 1000 }, (_, index) => ({ ...visible, executionId: 'execution-' + index }));
   const hidden = { ...visible, executionId: 'hidden', contentAvailable: false };
@@ -111,15 +111,15 @@ it('caps long-history metadata work at the latest four distinct visible nonempty
     expect(settled).toBe(true);
     const result = await pending;
     expect(Date.now() - started).toBe(25);
-    expect(reads).toBe(4);
-    expect(maximum).toBe(4);
+    expect(reads).toBe(1);
+    expect(maximum).toBe(1);
     expect(outstanding).toBe(0);
-    expect(f.calls).toHaveLength(5); // One authorized view and at most four scoped reads.
+    expect(f.calls).toHaveLength(2); // One authorized view and at most one scoped read.
     const ids = f.calls.slice(1).map(call => (call[2] as { p_execution_id: string }).p_execution_id);
-    expect(new Set(ids)).toEqual(new Set(entries.slice(-4).map(entry => entry.executionId)));
+    expect(new Set(ids)).toEqual(new Set(entries.slice(-1).map(entry => entry.executionId)));
     expect(result.executions).toHaveLength(1003);
-    expect(result.executions[995]).toEqual(entries[995]);
-    expect(result.executions[996]).toMatchObject({ completeness: 'length_limit' });
+    expect(result.executions[998]).toEqual(entries[998]);
+    expect(result.executions[999]).toMatchObject({ completeness: 'length_limit' });
     expect(result.executions[1000]).toMatchObject({ completeness: 'length_limit' });
     expect(result.executions[1001]).toEqual(hidden);
     expect(result.executions[1002]).toEqual(empty);
