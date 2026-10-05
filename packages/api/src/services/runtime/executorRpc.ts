@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type {RuntimeProgress} from './progress';
 import {createHash} from 'node:crypto';
+import {terminalAgentReplyFailure} from './terminalAgentReply';
+import {logger} from '../../lib/logger';
 import {z} from 'zod';
 import {StagingAccessError,type StagingFailure} from './stagingErrors';
 import type {RuntimeBudget} from './budget';
@@ -61,4 +63,25 @@ export async function recoverExecutorFinancial(rpc:ReturnType<typeof executorRpc
   const current=await rpc<{runId:string}>('runtime_financial_recovery',args);
   await billing.recoverReceipts(current.runId);
   return rpc<{executionId:string;runId:string;state:string;billing:unknown}>('runtime_financial_recovery',{...args,p_finish:true});
+}
+
+export function historyGuard(executionId:string,failed:(code:string)=>void) {
+  return <T>(check:()=>T):T=>{
+    try{return check();}catch(error){
+      if(error instanceof Error&&error.message==='RUNTIME_PROVIDER_HISTORY_DENIED'){
+        failed(error.message);
+        logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});
+      }
+      throw error;
+    }
+  };
+}
+
+export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>void) {
+  return (response:unknown,organizer=false)=>{
+    if(active&&terminalAgentReplyFailure(response,organizer,allowsCard)){
+      failed();
+      throw new Error('RUNTIME_TERMINAL_REPLY');
+    }
+  };
 }

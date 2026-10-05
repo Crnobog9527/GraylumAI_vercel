@@ -93,7 +93,14 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
     // Supabase supports abortSignal; test doubles can return already-bounded promises.
     const remaining=Math.max(1,Math.floor(deps.budget?.remainingPersistence()??10_000));
     const result=await (financialNames.has(name)&&query.abortSignal ? query.abortSignal(AbortSignal.timeout(Math.min(10_000,remaining))) : query);
-    if (result.error) throw new Error('BILL2_DATABASE_UNAVAILABLE');
+    if (result.error) {
+      const code = typeof result.error === 'object' && 'message' in result.error ? result.error.message : null;
+      if (name === 'bill2_claim' && typeof code === 'string' &&
+        ['REPORT_MEMBERSHIP_REQUIRED', 'REPORT_ENTITLEMENTS_UNAVAILABLE', 'REPORT_SOURCE_CONFLICT'].includes(code)) {
+        throw new Error(code);
+      }
+      throw new Error('BILL2_DATABASE_UNAVAILABLE');
+    }
     return result.data as T;
   }
   const readRun = (id: string) => rpc<RunView>('bill2_read', { p_run_id: uuid.parse(id) });

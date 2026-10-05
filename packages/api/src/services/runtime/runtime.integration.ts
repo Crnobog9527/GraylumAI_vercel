@@ -14,6 +14,7 @@ import { runtimeExecutor } from './execute';
 import './promptCache.integration';
 import './payg.integration';
 import './nativeStopView.integration';
+import {registerReportTests} from '../report/report.integration';
 import {registerPaygHostTests} from './paygHost.integration';
 import './gateWiring.integration';
 import {registerAdmissionGateTests} from './admissionGate.integration';
@@ -1082,7 +1083,7 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
 /** AC-1: a mentor draft on a published three-step positioning Skill, run
  * through the real routers with Bearer credentials and a private fixture
  * provider that can hold one response. */
-async function mentorTurnFixture(withTopics=false){
+async function mentorTurnFixture(withTopics=false,withReport=false){
  const password='Local-'+randomUUID()+'!',email=randomUUID()+'@example.test';
  const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
  const actor=created.data.user.id;await db.query("insert into profiles(id,email,credits,role) values($1,$2,1000,'user')",[actor,email]);
@@ -1092,6 +1093,7 @@ async function mentorTurnFixture(withTopics=false){
  const owner=randomUUID();await db.query("insert into profiles(id,role) values($1,'admin')",[owner]);
  const pack=makePackage(),moduleId=randomUUID(),registration='ac1-'+randomUUID(),flow=makeWorkflow(3),mentorModel=randomUUID(),organizerModel=randomUUID();
  if(withTopics)flow.planResources=['SKILL.md'];
+ if(withReport)flow.reportGeneration={resources:['SKILL.md'],sections:['One','Two'],maxCharacters:12000};
  flow.steps.forEach((step,index)=>{step.information=[{id:'goal',title:'目标 '+index,required:true,profileKey:'goal_'+index}];});
  await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[pack.id,registration,owner]);
  await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'AC-1 mentor','ac1-mentor','fixture','true',1000,32000),($2,'AC-1 organizer','ac1-organizer','fixture','true',1000,32000)",[mentorModel,organizerModel]);
@@ -1104,6 +1106,7 @@ async function mentorTurnFixture(withTopics=false){
  const draft=async()=>(await opcRouter.createCaller(await context()).start({requestId:randomUUID(),registration,mode:'mentor',businessName:'Graylum AI'})) as {draftId:string};
  return {actor,context,draft,user,admin,flow,registration,mentorModel,organizerModel};
 }
+registerReportTests(db,()=>mentorTurnFixture(true,true));
 registerPaygHostTests(db,()=>mentorTurnFixture(true));
 registerAdmissionGateTests(db,()=>mentorTurnFixture(true),()=>modelId);
 type ProviderCall={model:string;release:()=>void};

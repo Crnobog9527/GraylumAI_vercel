@@ -31,6 +31,8 @@ export type RuntimeRunnerInput = {
   commitSessionOnSuccess?: boolean;
   /** Explicit-input attached organizer only; Session output persistence is unchanged. */
   readSessionHistory?: boolean;
+  /** Report calls use the SDK without a persistent Session. Host records an empty completion batch. */
+  persistSession?: boolean;
   selectHistory: (history: unknown[], incoming: unknown[]) => Promise<unknown[]>;
   filterModelInput?: (items: AgentInputItem[], instructions: string) => AgentInputItem[];
   tools: RuntimeTool[];
@@ -174,7 +176,7 @@ export async function runRuntime(input: RuntimeRunnerInput) {
        input.reasoning?.parameter==='reasoning'?{providerData:{reasoning:input.reasoning.value}}:{})}});
   const runner=new Runner({model,tracingDisabled:true,traceIncludeSensitiveData:false});
   try{
-    const options={session,maxTurns:input.maxTurns,
+    const options={...(input.persistSession===false?{}:{session}),maxTurns:input.maxTurns,
       signal:input.signal,sessionInputCallback:async(history:AgentInputItem[],incoming:AgentInputItem[])=>await input.selectHistory(history,incoming) as typeof history,
       ...(input.filterModelInput?{callModelInputFilter:({modelData}:{modelData:{input:AgentInputItem[];instructions?:string}})=>({
         ...modelData,input:input.filterModelInput!(modelData.input,modelData.instructions??input.instructions),
