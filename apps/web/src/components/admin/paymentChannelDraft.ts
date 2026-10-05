@@ -35,7 +35,8 @@ export function classifyPaymentChannelSaveError(error: { data?: { code?: string 
 export const PAYMENT_CHANNEL_SAVE_ERROR_TEXT: Record<SaveErrorKind, string> = {
   conflict: '这个设置刚被其他人改过，你这次没有保存成功。请先点“重新读取”看最新的选择，再决定是否重新保存。',
   rejected: '服务端拒绝了这次保存，设置没有改变。请点“重新读取”后再试。',
-  failed: '保存没有成功，设置没有改变。请稍后重试。',
+  // A lost response may hide a committed save, so the outcome is unknown until the authoritative value is reread.
+  failed: '没能确认这次保存是否生效。请先点“重新读取”查看当前实际设置，再决定是否重新保存。',
 };
 
 type CatalogPackage = { checkout_ready?: boolean | null };

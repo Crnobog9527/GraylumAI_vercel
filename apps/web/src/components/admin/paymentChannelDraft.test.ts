@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import {
-  PAYMENT_CHANNEL_OPTIONS, buildPaymentChannelSave, classifyPaymentChannelSaveError, readPaymentChannelSetting,
+  PAYMENT_CHANNEL_OPTIONS, PAYMENT_CHANNEL_SAVE_ERROR_TEXT, buildPaymentChannelSave, classifyPaymentChannelSaveError, readPaymentChannelSetting,
   summarizePurchaseReadiness,
 } from './paymentChannelDraft';
 
@@ -26,6 +26,11 @@ describe('payment channel setting', () => {
     expect(classifyPaymentChannelSaveError({ data: { code: 'BAD_REQUEST' } })).toBe('rejected');
     expect(classifyPaymentChannelSaveError({ data: { code: 'INTERNAL_SERVER_ERROR' } })).toBe('failed');
     expect(classifyPaymentChannelSaveError(null)).toBe('failed');
+  });
+
+  it('never claims an unconfirmed save left the setting unchanged', () => {
+    expect(PAYMENT_CHANNEL_SAVE_ERROR_TEXT.failed).not.toContain('没有改变');
+    expect(PAYMENT_CHANNEL_SAVE_ERROR_TEXT.failed).toContain('重新读取');
   });
 
   it('marks Waffo as not connected', () => {
