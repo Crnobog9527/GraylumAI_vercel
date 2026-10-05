@@ -1,11 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { useEffect, useRef, useState } from "react";
-import type { AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
+import type { AgentTurnEvent, AgentTurnOutcome } from "@repo/api/src/shared/agentTurn";
 import { liveReplyAfter, startLiveReply, type LiveReply } from "./agent-turn-display";
 import {
   forgetLivePrefix, markLiveReload, PREFIX_WRITE_INTERVAL_MS, releaseRestoredPrefix, restoreLivePrefix, saveLivePrefix,
   unmarkLiveReload,
 } from "./live-prefix";
+import { readAgentTurn } from "./mentor-turn";
 import { executionSettled, type RecoveryHistory } from "./step-recovery";
 
 type PrefixStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -64,7 +65,7 @@ export function useLiveReply(draftId: string, history: RecoveryHistory | undefin
     show(null);
   }, [settled, waitingId, draftId]);
 
-  return {
+  const live = {
     reply,
     /** A stream for `executionId` starts. The same execution keeps what it shows (a lost connection, a reload). */
     begin(executionId: string) {
@@ -109,5 +110,30 @@ export function useLiveReply(draftId: string, history: RecoveryHistory | undefin
       releaseRestoredPrefix(draftId);
       show(null);
     },
+    /**
+     * Read one turn's stream into the live reply and return its outcome. A
+     * resumed execution passes its id, a new turn learns it from `admitted`.
+     * A lost stream or a still-running execution waits without growing; a
+     * finished one without a completed result says so.
+     */
+    async stream(open: () => Promise<AsyncIterable<AgentTurnEvent>>, handlers: {
+      executionId?: string; onAdmitted?: (id: string) => void; onFinished?: () => void; onResult?: (result: AgentTurnOutcome) => void;
+    }) {
+      let current = handlers.executionId, result: AgentTurnOutcome | undefined;
+      if (current) live.begin(current);
+      try {
+        ({ result } = await readAgentTurn(await open(), {
+          executionId: handlers.executionId,
+          onAdmitted: id => { current = id; live.begin(id); handlers.onAdmitted?.(id); },
+          onProgress: (id, event) => live.apply(id, event),
+          onFinished: handlers.onFinished,
+        }));
+        handlers.onResult?.(result);
+        return result;
+      } finally {
+        if (current && result?.state !== "completed") live.mark(current, !result || result.state === "pending" ? "waiting" : "incomplete");
+      }
+    },
   };
+  return live;
 }

@@ -22,10 +22,10 @@ import { isDefiniteConfirmConflict } from "./confirm-conflict";
 import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
 import { CHAT_ACTION, ChatInlineNotice, ChatNoticeList, ChatPendingStatus } from "@/components/chat/ChatInlineNotice";
 import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE } from "./mentor-notices";
-import type { AgentTurnEvent, AgentTurnOutcome } from "@repo/api/src/shared/agentTurn";
+import type { AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { useLiveReply } from "./use-live-reply";
-import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, readAgentTurn,
+import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope,
   isCompleteResult, retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice } from "./mentor-turn";
 import type { MentorRequest, MentorStepEnvelope, MentorTurn, MentorExecution } from "./mentor-turn";
 import {
@@ -162,21 +162,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [foldedCard,setFoldedCard]=useState(''); // Execution whose docked question card the user folded away.
   const mentorSendInFlight=useRef(false);
   /** One turn's events: a resumed execution passes its id, a new turn learns it from `admitted`. */
-  const streamTurn=async(open:()=>Promise<AsyncIterable<AgentTurnEvent>>,executionId?:string,onAdmitted?:(id:string)=>void)=>{
-    let current=executionId,result:AgentTurnOutcome|undefined;
-    // Resuming the same execution keeps what is already shown (a lost connection or a same-tab reload).
-    if(executionId)live.begin(executionId);
-    try{
-      ({result}=await readAgentTurn(await open(),{executionId,onAdmitted:id=>{current=id;live.begin(id);onAdmitted?.(id);},
-        onProgress:(id,event)=>live.apply(id,event),onFinished:()=>void utils.credits.getBalance.invalidate()}));
-      const notice=turnResultNotice(result);if(notice)setError(notice);
-      return result;
-    }finally{
-      // A lost stream or a still-running execution waits without growing; a finished one without a reply says so.
-      const id=current;
-      if(result?.state!=='completed'&&id)live.mark(id,!result||result.state==='pending'?'waiting':'incomplete');
-    }
-  };
+  const streamTurn=(open:()=>Promise<AsyncIterable<AgentTurnEvent>>,executionId?:string,onAdmitted?:(id:string)=>void)=>
+    live.stream(open,{executionId,onAdmitted,onFinished:()=>void utils.credits.getBalance.invalidate(),
+      onResult:result=>{const notice=turnResultNotice(result);if(notice)setError(notice);}});
   const execute={mutateAsync:(input:{executionId:string})=>
     streamTurn(()=>utils.client.runtime.executeStream.mutate({...input,textProtocol:TEXT_PROTOCOL}),input.executionId)};
   /** A mentor turn in one request: admission, then the same execution stream (AC-1). */
