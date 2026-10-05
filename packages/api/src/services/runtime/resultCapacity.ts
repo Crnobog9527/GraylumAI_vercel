@@ -29,7 +29,7 @@ export function jsonbBytes(value: unknown): number {
   return Buffer.byteLength(encode(normalized), 'utf8');
 }
 
-type NativeResult = { body: string; completeness?: 'complete' | 'length_limit'; [key: string]: unknown };
+type NativeResult = { body: string; completeness?: 'complete' | 'stopped' | 'length_limit'; [key: string]: unknown };
 type Envelope = Record<string, unknown> & { message: string; card?: Record<string, unknown> | null };
 type FitOptions = {
   attachedOrganizer?: boolean;
