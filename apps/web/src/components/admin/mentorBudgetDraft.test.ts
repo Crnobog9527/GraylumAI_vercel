@@ -9,13 +9,13 @@ import { configuredView, legacyView } from './mentorBudgetFixtures';
 describe('mentor budget draft', () => {
   it('starts empty without a stored config instead of inventing defaults', () => {
     const draft = toBudgetDraft(legacyView);
-    expect(draft.interactive).toEqual({ inputBytes: '', maxOutputTokens: '', historyItems: '' });
+    expect(draft.interactive).toEqual({ inputBytes: '', historyItems: '' });
     expect(draft.organize).toEqual({ inputBytes: '', historyItems: '' });
-    expect(draftProblems(legacyView, draft)).toHaveLength(8);
+    expect(draftProblems(legacyView, draft)).toHaveLength(6);
   });
 
-  it('round-trips a stored config into the complete strict update object', () => {
-    const input = toBudgetInput(toBudgetDraft(configuredView));
+  it('round-trips a stored config into the complete strict version 1 update object', () => {
+    const input = toBudgetInput(toBudgetDraft(configuredView), configuredView.limits.maxOutputTokens);
     expect(input).toEqual(configuredView.config);
     expect(input.organize).not.toHaveProperty('maxOutputTokens');
     expect(draftProblems(configuredView, toBudgetDraft(configuredView))).toEqual([]);
@@ -27,16 +27,21 @@ describe('mentor budget draft', () => {
     expect(fieldProblem(configuredView, edit({ inputBytes: '90000' }), 'interactive', 'inputBytes')).toBeNull();
     expect(fieldProblem(configuredView, edit({ inputBytes: '90001' }), 'interactive', 'inputBytes')).toBe('不能超过系统上限 90000 字节');
     expect(fieldProblem(configuredView, edit({ inputBytes: '1023' }), 'interactive', 'inputBytes')).toBe('不能小于 1024 字节');
-    expect(fieldProblem(configuredView, edit({ maxOutputTokens: '8192' }), 'interactive', 'maxOutputTokens')).toBeNull();
-    expect(fieldProblem(configuredView, edit({ maxOutputTokens: '8193' }), 'interactive', 'maxOutputTokens'))
-      .toBe('不能超过系统上限 8192 token');
-    expect(fieldProblem(configuredView, edit({ maxOutputTokens: '0' }), 'interactive', 'maxOutputTokens')).toBe('不能小于 1 token');
     expect(fieldProblem(configuredView, edit({ historyItems: '1.5' }), 'interactive', 'historyItems')).toBe('请填写不带小数的非负整数');
     expect(fieldProblem(configuredView, edit({ historyItems: '-1' }), 'interactive', 'historyItems')).toBe('请填写不带小数的非负整数');
     expect(fieldProblem(configuredView, edit({ historyItems: '0' }), 'interactive', 'historyItems')).toBeNull();
     const organize = { ...draft, organize: { inputBytes: '112000', historyItems: '1001' } };
     expect(fieldProblem(configuredView, organize, 'organize', 'inputBytes')).toBeNull();
     expect(fieldProblem(configuredView, organize, 'organize', 'historyItems')).toBe('不能超过系统上限 1000 条');
+  });
+
+  it('saves the site-wide output cap in the version 1 output fields, whatever was stored before', () => {
+    const stored = { ...configuredView, config: { ...configuredView.config!,
+      interactive: { ...configuredView.config!.interactive, maxOutputTokens: 1000 } } };
+    const input = toBudgetInput(toBudgetDraft(stored), 8192);
+    expect(input.version).toBe(1);
+    expect(input.interactive).toEqual({ inputBytes: 64000, maxOutputTokens: 8192, historyItems: 100 });
+    expect(input.report).toEqual({ inputBytes: 90000, maxOutputTokens: 8192, historyItems: 1000 });
   });
 
   it('translates server validation issues into Chinese per purpose and field', () => {
@@ -60,7 +65,7 @@ describe('mentor budget draft', () => {
   it('describes the legacy behavior from the server fields in Chinese', () => {
     const lines = describeLegacy(legacyView).join('\n');
     expect(lines).toContain('输入上限 64000 字节，历史 100 条');
-    expect(lines).toContain('“批准报价输出上限、模型输出上限、20000”三者中最小的');
+    expect(lines).toContain('“批准报价输出上限、模型输出上限、全站统一上限”三者中最小的');
     expect(lines).toContain('测试替身固定 1000 token');
     expect(lines).toContain('报告：尚未启用');
     expect(lines).not.toContain('字数');
