@@ -214,7 +214,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [planDays, setPlanDays] = useState(7);
   const history = trpc.runtime.view.useQuery({ sessionId: read.data?.sessionId ?? "" },
     { enabled: Boolean(read.data?.sessionId), refetchInterval: useHistoryPolling(draftId, read.data?.snapshot?.workflow.steps ?? []) });
-  const live = useLiveReply(draftId, history.data, setError), liveReply = live.reply, stopLocal = live.stopLocal;
+  const live = useLiveReply(draftId, history.data), liveReply = live.reply, stopLocal = live.stopLocal;
   const payg = usePaygResume(() => Promise.all([read.refetch(), history.refetch(), utils.credits.getBalance.invalidate()]));
   const [activeStep, setActiveStep] = useState<string | null>(null);
   const [activeQuestions, setActiveQuestions] = useState<Record<string, string>>({});
