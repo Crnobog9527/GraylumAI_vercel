@@ -389,7 +389,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    let turnMetadata:Record<string,unknown>=turn?{truncated:turn.truncated}:{};
    if(native){
     const fitted=prepareNativePrimary(body,turnMetadata,{envelopeOrder:context.envelopeOrder,
-      length:primaryLength,attachedOrganizer:Boolean(context.attachedOrganizer),executionId,onInvalid:()=>{terminalReplyFailure=true;}});
+      length:primaryLength,attachedOrganizer:Boolean(context.attachedOrganizer),executionId});
      body=fitted.body;turnMetadata=fitted.metadata;
     if(nativeProgress){const final=projection.finish(nativeVisible(body));if(final)progress(final);}
     if(turn?.card)progress({type:'card',card:JSON.parse(body).card});

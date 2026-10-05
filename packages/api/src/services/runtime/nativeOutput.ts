@@ -5,18 +5,32 @@ import type {AgentTurnOutcome} from '../../shared/agentTurn';
 import {z} from 'zod';
 import {INVALID_REPLY_NOTICE,questionToolCardSchema} from '../../shared/agentTurn';
 
-/** Existing positioning envelope fields, with unknown model fields discarded. */
-const patch = z.object({value:z.string(),status:z.enum(['unclear','provisional']),
-  nature:z.enum(['fact','decision','hypothesis','unknown']),
-  basis:z.enum(['user_statement','agent_proposal']).optional()});
+/** Mirror the existing public reader: sanitize suggestions, never grant confirmation. */
+const patch = z.object({
+  value: z.string().refine(value => Boolean(value.trim()) && value.length <= 400).transform(value => value.trim()),
+  status: z.unknown().transform(value => value === 'unclear' ? 'unclear' as const : 'provisional' as const),
+  nature: z.enum(['fact', 'decision', 'hypothesis', 'unknown']),
+  basis: z.unknown().transform(value => value === 'agent_proposal' ? 'agent_proposal' as const : 'user_statement' as const),
+});
+const patches = z.record(z.string(), z.unknown()).transform(value => Object.fromEntries(
+  Object.entries(value).flatMap(([key, item]) => {
+    const parsed = patch.safeParse(item);
+    return parsed.success ? [[key, parsed.data]] : [];
+  }),
+));
 export const stepEnvelope = z.object({
-  message:z.string().min(1).describe('Public reply. This must be the first JSON property.'),
-  inputKind:z.enum(['answer','acknowledgement','uncertainty','request','revision_request']).optional(),
-  informationPatch:z.record(z.string(),patch).optional(),targetStepId:z.string().nullable().optional(),
+  message: z.string().describe('Public reply. This must be the first JSON property.'),
+  inputKind: z.enum(['answer', 'acknowledgement', 'uncertainty', 'request', 'revision_request']).optional().catch(undefined),
+  informationPatch: patches.optional().catch(undefined),
+  targetStepId: z.string().min(1).optional().catch(undefined),
 });
 export function nativeVisible(body:string):string {
-  try {const value=JSON.parse(body);return typeof value?.message==='string'?value.message:INVALID_REPLY_NOTICE;}
-  catch {return INVALID_REPLY_NOTICE;}
+  const fallback = () => /^[\s]*[\[{`]/.test(body) ? INVALID_REPLY_NOTICE : body;
+  try {
+    const value = JSON.parse(body);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return fallback();
+    return typeof value.message === 'string' ? value.message : INVALID_REPLY_NOTICE;
+  } catch { return fallback(); }
 }
 export function nativeMetadata(result:Record<string,unknown>|null|undefined
 ):Pick<AgentTurnOutcome,'completeness'|'organized'|'summaryOmitted'|'messageFirst'|'envelopeCompact'> {
@@ -32,22 +46,22 @@ export function nativeMetadata(result:Record<string,unknown>|null|undefined
 
 
 export function prepareNativePrimary(body:string,metadata:Record<string,unknown>,options:{
-  envelopeOrder?:string;length:boolean;attachedOrganizer:boolean;executionId:string;onInvalid?:()=>void;
+  envelopeOrder?:string;length:boolean;attachedOrganizer:boolean;executionId:string;
 }) {
+  let validEnvelope = false;
   if(options.envelopeOrder){
     metadata={...metadata,messageFirst:/^\s*\{\s*"message"\s*:/.test(body)};
     let value:unknown;try{value=JSON.parse(body);}catch{value=null;}
     const parsed=stepEnvelope.safeParse(value);
-    if(!parsed.success){if(!options.length)options.onInvalid?.();
-      throw new Error(options.length?'RUNTIME_OUTPUT_TRUNCATED':'RUNTIME_TERMINAL_REPLY');}
-    body=JSON.stringify(parsed.data);
+    if(options.length && (!parsed.success || !parsed.data.message.trim())) throw new Error('RUNTIME_OUTPUT_TRUNCATED');
+    if(parsed.success){body=JSON.stringify(parsed.data);validEnvelope=true;}
   }
   const fitted=fitNativeResult({kind:'usable_result',evidenceRef:options.executionId,evidenceHash:'0'.repeat(64),body,
     ...metadata,completeness:options.length?'length_limit' as const:'complete' as const},
-    {attachedOrganizer:options.attachedOrganizer,...(options.envelopeOrder?{validateEnvelope:(value:unknown)=>stepEnvelope.parse(value)}:{})});
+    {attachedOrganizer:options.attachedOrganizer,...(validEnvelope?{validateEnvelope:(value:unknown)=>stepEnvelope.parse(value)}:{})});
   let envelope:Record<string,unknown>|null=null;
   try{envelope=JSON.parse(fitted.body);}catch{/* Plain T1 body. */}
-  if(envelope?.card)questionToolCardSchema.parse(envelope.card);
+  if(!options.envelopeOrder && envelope?.card)questionToolCardSchema.parse(envelope.card);
   return {body:fitted.body,metadata:nativeMetadata(fitted)};
 }
 export function nativeFrameProjection(projection:NativeProgressProjection,progress:(update:NativeTextUpdate)=>void) {

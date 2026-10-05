@@ -12,7 +12,7 @@ function database(initial: unknown) {
   }) }), upsert: async (row: { value: string }) => { value = JSON.parse(row.value); return { error: null }; } }) };
   return { db: db as unknown as SupabaseClient, stored: () => value };
 }
-it('normalizes legacy reads and stores only v2 while the old admin view remains usable', async () => {
+it('normalizes legacy reads and stores rollback-compatible v1 while the old admin view remains usable', async () => {
   const f = database(old);
   const config = await readPurposeBudgets(f.db);
   expect(config).toEqual({ version: 2, interactive: { inputBytes: 24000, historyItems: 7 },
@@ -22,7 +22,9 @@ it('normalizes legacy reads and stores only v2 while the old admin view remains 
   expect(view.config?.version).toBe(1);
   expect(view.config?.interactive.maxOutputTokens).toBe(PURPOSE_OUTPUT_CAP);
   await savePurposeBudgets(f.db, old);
-  expect(f.stored()).toEqual(config);
+  expect(f.stored()).toEqual({ ...old, interactive: { ...old.interactive, maxOutputTokens: 8192 },
+    report: { ...old.report, maxOutputTokens: 8192 } });
+  expect(await readPurposeBudgets(f.db)).toEqual(config);
   expect((await readPurposeBudgetView(f.db)).config).toEqual(view.config);
 });
 it('accepts v2 without output controls and rejects unknown or out-of-bound configuration', () => {
@@ -30,4 +32,14 @@ it('accepts v2 without output controls and rejects unknown or out-of-bound confi
   expect(purposeBudgetsSchema.parse(v2)).toEqual(v2);
   expect(purposeBudgetsSchema.safeParse({ ...v2, interactive: { ...v2.interactive, maxOutputTokens: 1000 } }).success).toBe(false);
   expect(purposeBudgetsSchema.safeParse({ ...old, interactive: { ...old.interactive, maxOutputTokens: 8193 } }).success).toBe(false);
+});
+
+it('persists a v2 submission in the v1 shape that previous server releases accept', async () => {
+  const f = database(old);
+  const input = normalizePurposeBudgets(old);
+  input.interactive.inputBytes = 32000;
+  await savePurposeBudgets(f.db, input);
+  expect(f.stored()).toEqual({ version: 1, interactive: { ...input.interactive, maxOutputTokens: 8192 },
+    organize: input.organize, report: { ...input.report, maxOutputTokens: 8192 } });
+  expect(await readPurposeBudgets(f.db)).toEqual(input);
 });

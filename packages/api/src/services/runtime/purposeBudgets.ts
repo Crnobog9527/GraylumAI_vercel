@@ -31,7 +31,7 @@ export const purposeBudgetsV2Schema = z.object({
   organize: base(PURPOSE_INPUT_CAPS.organize),
   report: base(PURPOSE_INPUT_CAPS.report),
 }).strict();
-// Transport compatibility: old admin forms can still submit v1, but only v2 is persisted.
+// Normalize both admin payloads to v2 internally; retain v1 storage for rollback compatibility.
 export const purposeBudgetsSchema = z.union([purposeBudgetsV2Schema, legacyPurposeBudgetsSchema]);
 export type PurposeBudgets = z.infer<typeof purposeBudgetsSchema>;
 export type PurposeBudgetsV2 = z.infer<typeof purposeBudgetsV2Schema>;
@@ -58,11 +58,15 @@ export async function readPurposeBudgets(db: SupabaseClient): Promise<PurposeBud
   } catch { throw new StagingAccessError('RUNTIME_BUDGET_CONFIG_INVALID'); }
 }
 
+function rollbackCompatibleBudget(current: PurposeBudgetsV2) {
+  return { ...current, version: 1 as const,
+    interactive: { ...current.interactive, maxOutputTokens: PURPOSE_OUTPUT_CAP },
+    report: { ...current.report, maxOutputTokens: PURPOSE_OUTPUT_CAP } };
+}
+
 export async function readPurposeBudgetView(db: SupabaseClient) {
   const current = await readPurposeBudgets(db);
-  const config = current ? { ...current, version: 1 as const,
-    interactive: { ...current.interactive, maxOutputTokens: PURPOSE_OUTPUT_CAP },
-    report: { ...current.report, maxOutputTokens: PURPOSE_OUTPUT_CAP } } : null;
+  const config = current ? rollbackCompatibleBudget(current) : null;
   const summary = await db.from('system_settings').select('value').eq('key', 'v3_summary_max_tokens').maybeSingle();
   if (summary.error) throw new Error('RUNTIME_BUDGET_CONFIG_UNAVAILABLE');
   const maxOutputTokens = z.coerce.number().int().min(128).max(4096).parse(summary.data?.value ?? 2048);
@@ -76,7 +80,7 @@ export async function readPurposeBudgetView(db: SupabaseClient) {
 }
 export async function savePurposeBudgets(db: SupabaseClient, input: PurposeBudgets) {
   const { error } = await db.from('system_settings').upsert({
-    key: PURPOSE_BUDGET_KEY, value: JSON.stringify(normalizePurposeBudgets(input)),
+    key: PURPOSE_BUDGET_KEY, value: JSON.stringify(rollbackCompatibleBudget(normalizePurposeBudgets(input))),
   }, { onConflict: 'key' });
   if (error) throw new StagingAccessError('RUNTIME_BUDGET_CONFIG_UNAVAILABLE');
   return readPurposeBudgetView(db);

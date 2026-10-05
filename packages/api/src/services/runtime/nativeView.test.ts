@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readNativeRuntimeView } from './nativeView';
 const actor = '10000000-0000-4000-8000-000000000001';
@@ -86,23 +86,46 @@ it('rejects a mismatched session view before metadata reads', async () => {
   expect(f.calls).toHaveLength(1);
 });
 
-it('deduplicates execution reads and never exceeds eight outstanding RPCs', async () => {
-  const entries = Array.from({ length: 19 }, (_, index) => ({ ...visible, executionId: 'execution-' + index }));
-  const f = fixture([...entries, entries[0]], entries.map(entry => saved({ completeness: 'complete' }, entry.executionId)));
-  let outstanding = 0, maximum = 0, reads = 0;
+it('caps long-history metadata work at the latest eight distinct visible nonempty replies', async () => {
+  vi.useFakeTimers();
+  const entries = Array.from({ length: 1000 }, (_, index) => ({ ...visible, executionId: 'execution-' + index }));
+  const hidden = { ...visible, executionId: 'hidden', contentAvailable: false };
+  const empty = { ...visible, executionId: 'empty', body: '' };
+  const f = fixture([...entries, entries[999], hidden, empty],
+    entries.map(entry => saved({ completeness: 'length_limit' }, entry.executionId)));
+  let outstanding = 0, maximum = 0, reads = 0, settled = false;
   const original = f.db.rpc.bind(f.db);
   f.db.rpc = (async (name: string, args: Record<string, unknown>) => {
     if (name !== 'runtime_execution') return original(name, args);
     reads++;
     outstanding++;
     maximum = Math.max(maximum, outstanding);
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 25));
     try { return await original(name, args); }
     finally { outstanding--; }
   }) as unknown as typeof f.db.rpc;
-  const result = await readNativeRuntimeView(f.db, actor, session);
-  expect(reads).toBe(19);
-  expect(maximum).toBe(8);
-  expect(result.executions).toHaveLength(20);
-  expect(outstanding).toBe(0);
+  const started = Date.now();
+  const pending = readNativeRuntimeView(f.db, actor, session).then(result => { settled = true; return result; });
+  try {
+    await vi.advanceTimersByTimeAsync(25);
+    expect(settled).toBe(true);
+    const result = await pending;
+    expect(Date.now() - started).toBe(25);
+    expect(reads).toBe(8);
+    expect(maximum).toBe(8);
+    expect(outstanding).toBe(0);
+    expect(f.calls).toHaveLength(9); // One authorized view and at most eight scoped reads.
+    const ids = f.calls.slice(1).map(call => (call[2] as { p_execution_id: string }).p_execution_id);
+    expect(new Set(ids)).toEqual(new Set(entries.slice(-8).map(entry => entry.executionId)));
+    expect(result.executions).toHaveLength(1003);
+    expect(result.executions[991]).toEqual(entries[991]);
+    expect(result.executions[992]).toMatchObject({ completeness: 'length_limit' });
+    expect(result.executions[1000]).toMatchObject({ completeness: 'length_limit' });
+    expect(result.executions[1001]).toEqual(hidden);
+    expect(result.executions[1002]).toEqual(empty);
+  } finally {
+    await vi.runAllTimersAsync();
+    await pending;
+    vi.useRealTimers();
+  }
 });

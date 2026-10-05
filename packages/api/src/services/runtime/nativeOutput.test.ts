@@ -1,28 +1,46 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { expect, it, vi } from 'vitest';
+import { expect, it } from 'vitest';
 import { questionToolCardSchema } from '../../shared/agentTurn';
-import { finalizeNativeSummary, prepareNativePrimary, stepEnvelope } from './nativeOutput';
+import { finalizeNativeSummary, prepareNativePrimary, stepEnvelope, nativeVisible } from './nativeOutput';
 import { jsonbBytes, RESULT_BYTE_LIMIT, SUMMARY_RESERVE, META_RESERVE } from './resultCapacity';
 const executionId = '10000000-0000-4000-8000-000000000001';
 const options = { envelopeOrder: 'message-first-v1', length: false, attachedOrganizer: false, executionId };
 const saved = (body: string, metadata: Record<string, unknown>) => ({
   kind: 'usable_result', evidenceRef: executionId, evidenceHash: '0'.repeat(64), body, ...metadata,
 });
-it.each(['{"message":"unfinished', '{"message":""}', '{"message":2}', '[]'])
-  ('rejects invalid T2 and distinguishes length failure: %s', body => {
-    const onInvalid = vi.fn();
-    expect(() => prepareNativePrimary(body, {}, { ...options, onInvalid })).toThrow('RUNTIME_TERMINAL_REPLY');
-    expect(onInvalid).toHaveBeenCalledOnce();
-    onInvalid.mockClear();
-    expect(() => prepareNativePrimary(body, {}, { ...options, length: true, onInvalid })).toThrow('RUNTIME_OUTPUT_TRUNCATED');
-    expect(onInvalid).not.toHaveBeenCalled();
+it.each(['plain text reply', '{"message":"unfinished', '{"message":2}', '{"card":{"question":2}}', '[]'])
+  ('preserves legacy bodies without a usable envelope unless output reached length: %s', body => {
+    expect(prepareNativePrimary(body, {}, options).body).toBe(body);
+    expect(() => prepareNativePrimary(body, {}, { ...options, length: true }))
+      .toThrow('RUNTIME_OUTPUT_TRUNCATED');
   });
+it('keeps empty message on normal completion without charging a rejected reply', () => {
+  expect(prepareNativePrimary('{"message":""}', {}, options)).toEqual({
+    body: '{"message":""}', metadata: { completeness: 'complete', messageFirst: true },
+  });
+  expect(() => prepareNativePrimary('{"message":""}', {}, { ...options, length: true }))
+    .toThrow('RUNTIME_OUTPUT_TRUNCATED');
+});
+it('cleans model patches with the existing permissive frontend rules', () => {
+  const result = prepareNativePrimary(JSON.stringify({ message: ' kept ', inputKind: 'bogus', targetStepId: 2,
+    informationPatch: {
+      valid: { value: ' yes ', status: 'confirmed', nature: 'fact', basis: 'bad', private: true },
+      uncertain: { value: ' maybe ', status: 'unclear', nature: 'hypothesis', basis: 'agent_proposal' },
+      empty: { value: ' ', nature: 'fact' }, long: { value: 'x'.repeat(401), nature: 'fact' },
+      badNature: { value: 'no', nature: 'bad' }, scalar: 'no', array: [],
+    },
+  }), {}, options);
+  expect(JSON.parse(result.body)).toEqual({ message: ' kept ', informationPatch: {
+    valid: { value: 'yes', status: 'provisional', nature: 'fact', basis: 'user_statement' },
+    uncertain: { value: 'maybe', status: 'unclear', nature: 'hypothesis', basis: 'agent_proposal' },
+  } });
+});
 it('strips unknown top-level and nested private fields using the completed step schema', () => {
   const result = prepareNativePrimary(JSON.stringify({ message: 'public', inputKind: 'answer', unknown: 'private',
     informationPatch: { topic: { value: 'value', status: 'provisional', nature: 'fact', secret: 'private' } },
   }), {}, options);
   expect(JSON.parse(result.body)).toEqual({ message: 'public', inputKind: 'answer',
-    informationPatch: { topic: { value: 'value', status: 'provisional', nature: 'fact' } } });
+    informationPatch: { topic: { value: 'value', status: 'provisional', nature: 'fact', basis: 'user_statement' } } });
   expect(result.metadata).toEqual({ completeness: 'complete', messageFirst: true });
 });
 it('records messageFirst false without losing a valid buffered envelope', () => {
@@ -81,4 +99,11 @@ it('preserves primary bodies while omitting oversized or incomplete-result summa
     expect(result.summary).toBe('');
     expect(result.metadata).toMatchObject({ ...metadata, organized: false, summaryOmitted: true });
   }
+});
+
+it('projects preserved plain text and empty messages without exposing malformed JSON fields', () => {
+  expect(nativeVisible('plain text reply')).toBe('plain text reply');
+  expect(nativeVisible('123')).toBe('123');
+  expect(nativeVisible('{"message":""}')).toBe('');
+  expect(nativeVisible('{"private":"unfinished')).not.toContain('private');
 });

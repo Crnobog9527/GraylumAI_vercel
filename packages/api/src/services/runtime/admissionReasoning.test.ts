@@ -294,3 +294,16 @@ it.each([false,true])('real Skill admission freezes step streaming and leaves pl
  f.models[0]!.config.reasoning.purposes={};
  expect(JSON.stringify(await service.prepare(input))).toBe(bytes);
 });
+
+it.each([8192,8193])('v1 native O is capped at 8192 for model/quote boundary %i with unchanged frozen charges', async limit => {
+ const f=fixture();
+ f.models[0]!.max_tokens=limit;
+ f.policy.real.callPolicies[0]!.outputLimit=limit;
+ const before=structuredClone(f.policy.real.callPolicies);
+ const result=await runtimeAdmissionService(f.user,f.admin,f.policy).prepare({...f.input,organizeAfter:false});
+ expect(result.context.nativeOutput).toBe('native-output-v1');
+ expect(result.context.maxOutputTokens).toBe(8192);
+ expect(result.billing.contractVersion).toBe('bill2.v1');
+ expect(result.billing.callPolicy).toEqual([before[0]]);
+ expect(result.billing.limits).toMatchObject({costUsd:'0.008000000000',credits:8,maxPreDeduct:8});
+});
