@@ -22,7 +22,7 @@ const structuredSettings = [
 type Row = { key: string; value: unknown };
 function fixture(initial: Row[]) {
   const stored = new Map(initial.map(row => [row.key, structuredClone(row.value)]));
-  const profile = { id: 'fixture-admin', role: 'admin', status: 'active', is_deleted: 'false' };
+  const profile = { id: 'fixture-admin', role: 'admin', status: 'active', nickname: 'Fixture', is_deleted: 'false' };
   const upsert = vi.fn((rows: Row[], options: unknown) => {
     expect(options).toEqual({ onConflict: 'key' });
     for (const row of rows) stored.set(row.key, row.value);
