@@ -8,7 +8,7 @@ it.each([false,true])('PAYG settings validate single/bulk writes and accept emer
  const caller=settingsRouter.createCaller({headers:new Headers(),user:{id:profile.id,app_metadata:{provider:'email'},
   user_metadata:{email_verified:true}},isEmailVerified:true,authProvider:'email',hasSupabaseAdminPrivileges:true,
   supabase:client,supabasePublic:{},supabaseAdmin:{from:()=>({select(){return this;},eq(){return this;},
-   single:async()=>({data:null,error:{code:'42501'}})})}} as any);
+   single:async()=>({data:null,error:{code:'42501'}})})}} as unknown as Parameters<typeof settingsRouter.createCaller>[0]);
  const write=(value:unknown)=>bulk?caller.updateSystemSettingsBulk([{key:'runtime_payg_staging',value}]):
   caller.updateSystemSettings({key:'runtime_payg_staging',value});
  for(const value of ['{"enabled":false}','false',{enabled:'false'},{enabled:true},null])
