@@ -231,37 +231,3 @@ export function mentorReplyDisplay(source: MentorReplySource): { text: string; c
 export function showsTurnState(notice: ReplyNotice | undefined) {
   return Boolean(notice && notice.text !== HISTORY_OMITTED_NOTICE);
 }
-
-/** Where a turn was asked: a revision opens a new round that reuses step and question ids. */
-type TurnBinding = { roundId?: string | null; stepId?: string; questionId?: string | null };
-
-function sameQuestion(a: TurnBinding | null | undefined, b: TurnBinding | null | undefined) {
-  return Boolean(a?.roundId && a.stepId && a.questionId && a.roundId === b?.roundId && a.stepId === b?.stepId && a.questionId === b?.questionId);
-}
-
-/**
- * A card can be answered only on the newest turn. Any later turn turns it
- * into read-only history, and so does a send still waiting for the server.
- * `reply` is that later turn (or the waiting send). It counts as the card's
- * answer only when it was sent under the card's own round, step and question;
- * a host-opened step (`input: null`) or a turn for another question or round
- * closes the card without an answer.
- *
- * A reply is recorded against the question on screen in the current round, so
- * the card is only sendable while that is the question its turn was asked
- * under; after the user navigates elsewhere, or a revision starts a new round,
- * it stays visible but locked.
- */
-export function questionCardStatus(input: {
-  isLatest: boolean;
-  reply: (TurnBinding & { input: string | null }) | null;
-  turn: TurnBinding | undefined;
-  shown: { roundId: string | null; stepId: string; questionId: string };
-}) {
-  const answer = input.reply && sameQuestion(input.reply, input.turn) ? input.reply.input : null;
-  return {
-    answered: !input.isLatest || answer !== null,
-    answer,
-    onShownQuestion: sameQuestion(input.turn, input.shown),
-  };
-}
