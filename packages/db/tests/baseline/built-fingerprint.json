@@ -1980,7 +1980,7 @@
   "fn:account_erasure_profile_guard()": "aa79440147a6",
   "fn:account_erasure_renewing(uuid)": "50bb36b24528",
   "fn:account_erasure_scrub_content(uuid)": "8e265cafaa36",
-  "fn:account_erasure_scrub_receipts(uuid,uuid,integer)": "f6922abc2fc5",
+  "fn:account_erasure_scrub_receipts(uuid,uuid,integer)": "b4c2f5016338",
   "fn:account_erasure_scrub_runtime(uuid)": "ba0bef932692",
   "fn:admin_delete_unused_model(uuid,uuid)": "db11fb342cb1",
   "fn:admin_publish_skill_module(uuid,uuid,timestamp with time zone,jsonb,uuid,uuid,uuid,integer,jsonb,text,jsonb,jsonb)": "61e1ddae308a",
