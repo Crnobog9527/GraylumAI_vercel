@@ -13,6 +13,7 @@ import {inflightCases} from '../erasure-inflight/cases.mjs';
 import {createFixture,claim,receipt} from './fixture.mjs';
 import {legacyCases} from './legacy.mjs';
 import {coreCases} from './core.mjs';
+import {thresholdCases} from './thresholds.mjs';
 import {monitorCases} from './monitor.mjs';
 import {edgeCases} from './edges.mjs';
 import {grantCases} from './grants.mjs';
@@ -113,6 +114,7 @@ try {
   await inflightCases(db,report);
   await legacyCases(db,report,createFixture,claim);
   await coreCases(db,report,createFixture,claim,receipt);
+  await thresholdCases(db,report,createFixture,claim,receipt);
   await nominalCases(db,report,createFixture,claim,receipt);
   await grantCases(db,report,createFixture,claim,receipt);
   await edgeCases(db,report,createFixture,claim,receipt);

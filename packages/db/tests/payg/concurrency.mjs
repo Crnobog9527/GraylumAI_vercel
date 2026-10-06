@@ -10,12 +10,16 @@ export async function concurrencyCases({db,Client,connectionString,report,create
   try {
     await Promise.all(writers.map(w=>w.query("SET statement_timeout='10s'")));
     const duplicate = await createFixture(db);
+    await db.query(`UPDATE system_settings SET value=$1 WHERE key='billing_payg_start_thresholds'`,[
+      {version:'concurrent-typical-v1',thresholds:[{model:duplicate.claimPayload.model,purpose:'question',typicalUsd:'0.00028'}]},
+    ]);
     const raced = await Promise.all(writers.map(w=>claim(w,duplicate,1,false)));
     assert.equal(raced[0].id,raced[1].id);
     assert.equal(raced.filter(c=>c.dispatchToken).length,1,'one dispatch authority');
     assert.equal((await db.query('SELECT count(*)::int n FROM bill2_calls WHERE run_id=$1',[duplicate.run])).rows[0].n,1);
     await conserved(db,duplicate);
-    report.checks.push('two-backend duplicate claim returns one identity, one token, one hold');
+    assert.equal((await db.query('SELECT start_threshold FROM bill2_calls WHERE id=$1',[raced[0].id])).rows[0].start_threshold,1);
+    report.checks.push('two-backend typicalUsd duplicate claim returns one identity, one token, one hold and stored L');
 
     const shared = await createFixture(db,{credits:10,threshold:3});
     const other = await createFixture(db,{actor:shared.actor,threshold:3});
