@@ -60,6 +60,13 @@ export function createInformationAutosave(io: () => AutosaveIo) {
   const queued = new Map<string, Promise<void>>();
   /** What this page last wrote per step. Versions only grow, so a refresh that lands late cannot roll it back. */
   const written = new Map<string, StepView>();
+  /** A finished save left the refresh to a later queued task; whichever task ends the queue does it. */
+  let refreshOwed = false;
+  function settle(x: AutosaveIo) {
+    if (!refreshOwed || queued.size) return;
+    refreshOwed = false;
+    x.refreshLater();
+  }
   function newest(stepId: string, view: StepView | null) {
     const own = written.get(stepId);
     return own && (!view || own.version > view.version) ? own : view;
@@ -68,7 +75,7 @@ export function createInformationAutosave(io: () => AutosaveIo) {
   async function persist(stepId: string) {
     const x = io(), key = autosaveKey(x.draftId, stepId), baseKey = informationBaseKey(x.draftId, stepId);
     // A queued task may outlive the edit that scheduled it.
-    if (!x.edits()[stepId] && !x.storage.getItem(key)) return;
+    if (!x.edits()[stepId] && !x.storage.getItem(key)) return settle(x);
     let wanted = x.edits()[stepId];
     let retriedConflict = false;
     x.setSaveState(stepId, "saving");
@@ -82,7 +89,7 @@ export function createInformationAutosave(io: () => AutosaveIo) {
           throw new Error("OPC_AUTOSAVE_IDENTITY_UNREADABLE");
         }
         if (!fixed) {
-          if (!wanted) return;
+          if (!wanted) return settle(x);
           const current = newest(stepId, x.cached(stepId)) ?? await x.refetch(stepId);
           if (!current) throw new Error("OPC_UNAVAILABLE");
           const rawBase = x.storage.getItem(baseKey);
@@ -136,7 +143,8 @@ export function createInformationAutosave(io: () => AutosaveIo) {
         retriedConflict = false;
       }
       x.setSaveState(stepId, "saved");
-      if (!queued.size) x.refreshLater();
+      refreshOwed = true;
+      settle(x);
     } catch (cause) {
       x.setSaveState(stepId, "error");
       if (cause instanceof Error && /OPC_FIELD_CONFLICT|OPC_EDIT_BASE_MISSING/.test(cause.message)) x.onError(FIELD_CONFLICT);

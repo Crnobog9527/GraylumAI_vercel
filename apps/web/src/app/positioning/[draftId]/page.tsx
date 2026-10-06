@@ -195,6 +195,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [autosave] = useState(() => createInformationAutosave(() => autosaveIo.current));
   const flushInformation = autosave.flush;
   useEffect(() => {
+    // Mirror `infoEdits` before scheduling: the scheduler reads the ref.
+    infoEditsRef.current = infoEdits;
     if (planView || hydratedDraft !== draftId || composing.current) return;
     autosave.schedule();
     return autosave.cancel;
@@ -362,9 +364,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     mentorInput,
     manualMentorEnabled,
   ]);
-  useEffect(() => {
-    infoEditsRef.current = infoEdits;
-  }, [infoEdits]);
   useEffect(() => {
     if (hydratedDraft === draftId && !dirtyPlan && latest?.body)
       setItems(latest.body);

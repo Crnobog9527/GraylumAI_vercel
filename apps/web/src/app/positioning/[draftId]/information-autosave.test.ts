@@ -207,3 +207,21 @@ describe("late refresh", () => {
     expect(t.server().values).toEqual({ a: v("one"), b: v("two") });
   });
 });
+
+describe("background refresh", () => {
+  it("still refreshes once when a redundant queued save ends the queue", async () => {
+    const t = setup();
+    t.edit({ a: v("one") });
+    t.gate();
+    const first = t.autosave.enqueue("s1");
+    await vi.waitFor(() => expect(t.writes).toHaveLength(1));
+    // The user edits again and the timer queues a second save while the first is writing.
+    t.edit({ a: v("two") });
+    const second = t.autosave.enqueue("s1");
+    expect(second).not.toBe(first);
+    t.release();
+    await first; await second;
+    expect(t.writes.map(w => w.values.a)).toEqual([v("one"), v("two")]);
+    expect(t.io.refreshLater).toHaveBeenCalledTimes(1);
+  });
+});
