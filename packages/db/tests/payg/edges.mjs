@@ -96,7 +96,7 @@ export async function edgeCases(db,report,createFixture,claim,receipt) {
   report.checks.push('128-message quotes accepted; 129 rejected; old frozen 32-message caps preserved');
   const signature='public.bill2_payg_validate_quote(bill2_runs,jsonb)';
   const original=(await db.query('SELECT pg_get_functiondef($1::regprocedure) AS definition',[signature])).rows[0].definition;
-  const migration=readFileSync(new URL('../../migrations/0177_payg_profile_messages.sql',import.meta.url),'utf8');
+  const migration=readFileSync(new URL('../../migrations/0178_payg_profile_messages.sql',import.meta.url),'utf8');
   const guard=migration.slice(migration.indexOf('DO $migration$'),migration.indexOf('COMMIT;'));
   await db.query('BEGIN');
   try {

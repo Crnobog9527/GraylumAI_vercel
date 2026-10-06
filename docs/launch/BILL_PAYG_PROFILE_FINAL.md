@@ -32,7 +32,7 @@ mentor无历史、step无工具，report仅证明预期wire；报告执行链绑
 
 ## 迁移与恢复
 
-同步staging后，本PR使用 `0177_payg_profile_messages.sql`；选择时staging最新0176，#679尚未合并。
+同步staging f239b384后，本PR使用 `0178_payg_profile_messages.sql`；#679已合并并占用0177。
 只把 `bill2_payg_validate_quote` 的全局消息上限32提高至128；仍取它与每个冻结quote.maxMessages的较小值。
 旧32条冻结执行不受影响，无数据更新、新表或权限变更。源函数md5防漂移校验不变；重复执行保持相同结构。
 

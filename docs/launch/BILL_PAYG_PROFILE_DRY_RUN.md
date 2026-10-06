@@ -101,7 +101,7 @@ max(0,P-B)（逐消息模板所需余量）、费用、completion/reasoning 与�
 128 条上限贯穿 profile、稳定/逐次计费 schema、历史预留和 SQL 校验。
 普通历史原有 100 条不变；预留 system/current 两条和每个工具轮次四条，字节裁剪仍生效。
 旧冻结 maxMessages=32 继续严格受 32 限制；开关仍默认关闭。
-`0177_payg_profile_messages.sql` 仅改一处 SQL 的全局最大值，有前驱指纹防漂移，可重复执行，
+`0178_payg_profile_messages.sql` 仅改一处 SQL 的全局最大值，有前驱指纹防漂移，可重复执行，
 不改已有请求、表、授权或数据。没有应用到远端；以后开启前需由获准窗口应用迁移。
 回退优先关闭新准入，已有冻结执行收尾；不能在 128 条执行尚未结束时强降 SQL 上限。
 #661 也使用待合并的 0172，并更新 built-fingerprint；当前 staging 最新为 0171，迁移检查禁止跳号。
