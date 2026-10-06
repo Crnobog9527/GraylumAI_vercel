@@ -45,7 +45,7 @@ if (previewOptions.persistent) {
 // Resume defaults to the original schema/mode; it never guesses a new bootstrap.
 const args = previewState && !lifecycle.bootstrap && !structuralPreviewArgs(initialArgs).length
   ? [...initialArgs, ...previewState.structuralArgs] : initialArgs;
-if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!arg.startsWith('--case-pattern=')&&!arg.startsWith('--preview-id=')&&!arg.startsWith('--preview-action=')&&!arg.startsWith('--confirm-destroy=')&&!['--staging-host','--with-staging-schema','--with-opc-schema','--opc-only','--runtime-upgrade-only','--with-runtime-schema','--runtime-only','--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--bill2-core-only','--without-app','--bill2-only','--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve','--schema-from-files'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
+if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!arg.startsWith('--case-pattern=')&&!arg.startsWith('--preview-id=')&&!arg.startsWith('--preview-action=')&&!arg.startsWith('--confirm-destroy=')&&!['--cdc-b2-eval','--staging-host','--with-staging-schema','--with-opc-schema','--opc-only','--runtime-upgrade-only','--with-runtime-schema','--runtime-only','--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--bill2-core-only','--without-app','--bill2-only','--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve','--schema-from-files'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
 if (lifecycle.controlOnly) { controlPreview(previewOptions, previewState, docker); return; }
 if (previewState && !lifecycle.bootstrap) validateResumeState(previewState, structuralPreviewArgs(args));
 if(args.includes('--real-skill-only')&&lifecycle.runTests&&!process.env.V3_REAL_SKILL_INPUT)throw new Error('V3_REAL_SKILL_INPUT is required for real Skill acceptance');
@@ -73,7 +73,9 @@ const casePattern=args.find(arg=>arg.startsWith('--case-pattern='))?.slice(15);
 const capacityCapture=!previewOptions.persistent&&!stagingHost&&Boolean(casePattern?.includes('CAPACITY'));
 // CI path: database/API integration subsets without the local application or a browser.
 const withoutApp=args.includes('--without-app');
-const withoutAppSuite=!withoutApp?null:args.includes('--bill2-core-only')?'bill2':runtimeMode&&stagingSchema&&!opcMode?'runtime':null;
+const cdcEval=args.includes('--cdc-b2-eval');
+if(cdcEval&&(!withoutApp||!runtimeMode||!stagingSchema||!process.env.V3_REAL_SKILL_INPUT))throw new Error('CDC_LOCAL_INPUT_REQUIRED');
+const withoutAppSuite=!withoutApp?null:cdcEval?'cdc':args.includes('--bill2-core-only')?'bill2':runtimeMode&&stagingSchema&&!opcMode?'runtime':null;
 if(withoutApp&&(!withoutAppSuite||serve||legacyRef||casePattern))throw new Error('--without-app requires --bill2-core-only or --runtime-only --with-staging-schema, without preview, legacy ref or case pattern');
 // DB-BASELINE: build the schema from repository files only (baseline/build-from-files.mjs) instead of
 // the local fixture; database/API suites and explicitly bounded Runtime browser cases.
@@ -849,7 +851,7 @@ try {
     ...cleanEnv,
     ...(await localRateLimit?.start()),
     ...(args.includes('--reuse-only') ? {V3_REUSE_TEST:'1'} : {}),
-    ...((args.includes('--real-skill-only')||opcMode) ? {V3_REAL_SKILL_INPUT:process.env.V3_REAL_SKILL_INPUT} : {}),
+    ...((args.includes('--real-skill-only')||opcMode||cdcEval) ? {V3_REAL_SKILL_INPUT:process.env.V3_REAL_SKILL_INPUT} : {}),
     V3_LEGACY_ROOT:legacyRoot??'', V3_LEGACY_REF:legacyRef??'',
     NODE_ENV: serve ? "production" : "development",
     NODE_OPTIONS:`--require=${networkGuard}`,
@@ -968,7 +970,7 @@ try {
         ...(runtimeMode&&!withoutApp&&casePattern?.startsWith('^ERASURE_BROWSER:')
           ? ['src/services/runtime/erasureBrowser.integration.ts'] : []),
         ...(bill2Mode ? ['src/services/bill2/billing.integration.ts'] : []),
-        ...(runtimeMode ? WITHOUT_APP_SUITES.runtime.files : []),
+        ...(runtimeMode ? WITHOUT_APP_SUITES[cdcEval ? "cdc" : "runtime"].files : []),
         ...(opcMode ? ['src/services/opc/opc.integration.ts',...(mentorStreamTest?['src/services/opc/mentor-browser.integration.ts']:[])] : []),
         "--reporter",
         "verbose",

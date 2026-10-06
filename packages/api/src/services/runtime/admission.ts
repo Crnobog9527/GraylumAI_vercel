@@ -25,6 +25,7 @@ import { admitReasoning } from './reasoningAdmission';
 import type {AnsweredCard} from '../opc/answerCard';
 import {ASK_QUESTION_TOOL,questionAnswerSourceSchema} from '../../shared/agentTurn';
 import {isOpeningInput} from '../../shared/opcQuestions';
+import {groundedCardToolBytes} from './groundedCard';
 import {askQuestionToolBytes,QUESTION_CONTRACT,QUESTION_CONTRACT_INSTRUCTIONS} from './agentTools';
 import {currentRequestTiming} from './timing';
 import {PURPOSE_OUTPUT_CAP,readPurposeBudgets} from './purposeBudgets';
@@ -217,7 +218,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     real:Boolean(policy.real),role:input.selection.kind,model:row.data.model_id,
     cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined,
     instructions,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions});
-   if(mentorStream)instructions+='\n'+QUESTION_CONTRACT_INSTRUCTIONS;
+   if(mentorStream&&!hostTurnContext?.cardContract)instructions+='\n'+QUESTION_CONTRACT_INSTRUCTIONS;
    const currentInput=runtimeScopeInput(input.input,policy.reportGeneration?undefined:session.scopeMaterial,hostTurnContext);
    if(hostTurnContext)promptCache=freezeHostPromptCache({real:Boolean(policy.real),role:input.selection.kind,
     model:row.data.model_id,cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined,
@@ -241,7 +242,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(!Number.isSafeInteger(maxOutputTokens)||maxOutputTokens<1)throw new Error('RUNTIME_MODEL_CAPACITY');
    const inputLimit=inputCapacity(row.data,maxOutputTokens,inputBytes);
    if(candidates.length)selectRuntimeHistory([],[{role:'user',content:matchingInput(input.input,candidates)}],{instructions:MATCH_INSTRUCTIONS,inputBytes:inputLimit,historyItems:0,toolBytes:0});
-   const admissionToolBytes=(mentorStream?askQuestionToolBytes(true):policy.searchEnabled?2048:0)+
+   const admissionToolBytes=(mentorStream?(hostTurnContext?.cardContract?groundedCardToolBytes():askQuestionToolBytes(true)):policy.searchEnabled?2048:0)+
     (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
    selectRuntimeHistory([], [{role:'user',content:currentInput}],
     {instructions,inputBytes:inputLimit,historyItems:0,toolBytes:admissionToolBytes});

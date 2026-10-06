@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
+import {GROUNDED_CARD_CONTRACT} from './groundedCard';
 import {HISTORY_MARKER_RESERVE_BYTES} from './promptCache';
 
 export const HOST_TURN_DATA_NOTICE_V1 =
@@ -7,6 +8,7 @@ export const HOST_TURN_DATA_NOTICE_V1 =
 export const HOST_TURN_MAX_BYTES = 16000;
 // B2 supplies the pinned checklist and current statuses, never field values.
 export const hostTurnContextSchema = z.object({
+  cardContract: z.literal(GROUNDED_CARD_CONTRACT).optional(),
   stepId: z.string().min(1).max(128),
   opening: z.boolean(),
   checklist: z.array(z.object({

@@ -38,7 +38,7 @@ import {stagingTransport} from './stagingTransport';
 import {runtimeRouter} from '../../routers/runtime';
 import {opcRouter} from '../../routers/opc';
 import {agentTurnBody} from '../../shared/agentTurn';
-import {OPENING_INPUT} from '../../shared/opcQuestions';
+import {OPENING_INPUT,openingRequestId} from '../../shared/opcQuestions';
 import {createTRPCContext} from '../../trpc';
 const connectionString=process.env.V3_LOCAL_DB!;
 if(!connectionString?.startsWith('postgres://postgres@127.0.0.1:')||!connectionString.endsWith('/v3_disposable')) throw new Error('isolated runner required');
@@ -1114,7 +1114,10 @@ async function heldProvider(){
  const calls:ProviderCall[]=[];let hold=false;
  const server=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;const input=JSON.parse(JSON.parse(raw).input);
   let release=()=>{};const gate=hold?new Promise<void>(resolve=>{release=resolve;}):Promise.resolve();calls.push({model:input.model,release});await gate;
-  const id='ac1-'+randomUUID(),content=input.model==='ac1-organizer'?'{"inputKind":"answer","informationPatch":{}}':input.messages?.some((m:{role?:string;content?:unknown})=>m.role==='system'&&String(m.content).includes('Act as the single continuous mentor'))?'导师回复 '+calls.length:JSON.stringify({message:'导师回复 '+calls.length});
+  // These fixture models have fixed wire contracts. Prompt prose is not a protocol discriminator.
+  if(!['ac1-mentor','ac1-organizer'].includes(input.model))throw new Error('unexpected fixture model');
+  const id='ac1-'+randomUUID(),content=input.model==='ac1-organizer'
+   ?'{"inputKind":"answer","informationPatch":{}}':'导师回复 '+calls.length;
   res.setHeader('content-type','application/json');
   res.end(JSON.stringify({id,model:input.model,final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:input.model,choices:[{index:0,message:{role:'assistant',content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));
  });
@@ -1138,15 +1141,19 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
   return {result,summary:budget.timing.summary()};
  }
  try{
-  const turn=(draftId:string,input:string,organizeAfter=false)=>({draftId,stepId:'step-0',purpose:'mentor' as const,requestId:randomUUID(),input,questionId:'goal',organizeAfter});
+  const turn=async(draftId:string,input:string,organizeAfter=false)=>{
+   const detail=await opcRouter.createCaller(await f.context()).read({draftId});
+   return {draftId,stepId:'step-0',purpose:'mentor' as const,requestId:input===OPENING_INPUT
+    ?openingRequestId(draftId,detail.roundId,'step-0','goal'):randomUUID(),input,questionId:'goal',organizeAfter};
+  };
   // Before: prepareStep, then executeStream: two invocations per turn.
-  const before=await f.draft(),oldOpening=turn(before.draftId,OPENING_INPUT),oldAnswer=turn(before.draftId,'我做摄影入门课程',true);
+  const before=await f.draft(),oldOpening=await turn(before.draftId,OPENING_INPUT),oldAnswer=await turn(before.draftId,'我做摄影入门课程',true);
   const oldPrepareOpening=await measured(ctx=>opcRouter.createCaller(ctx).prepareStep(oldOpening));
   const oldStreamOpening=await measured(async ctx=>collectTurn(await runtimeRouter.createCaller(ctx).executeStream({executionId:(oldPrepareOpening.result as {executionId:string}).executionId})));
   const oldPrepareAnswer=await measured(ctx=>opcRouter.createCaller(ctx).prepareStep(oldAnswer));
   const oldStreamAnswer=await measured(async ctx=>collectTurn(await runtimeRouter.createCaller(ctx).executeStream({executionId:(oldPrepareAnswer.result as {executionId:string}).executionId})));
   // After: one streamed invocation per turn.
-  const after=await f.draft(),newOpening=turn(after.draftId,OPENING_INPUT),newAnswer=turn(after.draftId,'我做摄影入门课程',true);
+  const after=await f.draft(),newOpening=await turn(after.draftId,OPENING_INPUT),newAnswer=await turn(after.draftId,'我做摄影入门课程',true);
   const opening=await measured(async ctx=>collectTurn(await opcRouter.createCaller(ctx).mentorTurnStream(newOpening)));
   const answer=await measured(async ctx=>collectTurn(await opcRouter.createCaller(ctx).mentorTurnStream(newAnswer)));
   for(const [events,request] of [[opening.result,newOpening],[answer.result,newAnswer]] as const){
@@ -1164,22 +1171,22 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
   const all={oldPrepareOpening,oldStreamOpening,oldPrepareAnswer,oldStreamAnswer,opening,answer};
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
-   // Q1 adds one host Session-context read before any new OPC material write.
+   // B2 adds one frozen-material read and one canonical opening replay check; ordinary turns add only the material read.
    // Attached organizers skip one Session history read in each execution.
    // C2 adds one read-only stop-intent check after the provider response, before completion.
    // The first prepare of this new package misses the Skill file cache (AC-0c).
-   oldPrepareOpening:{prelude:2,policy:0,host:7,admission:16,rateLimit:0},
+   oldPrepareOpening:{prelude:2,policy:0,host:9,admission:16,rateLimit:0},
    oldStreamOpening:{prelude:2,policy:0,host:1,execute:6,provider:14,rateLimit:0},
-   oldPrepareAnswer:{prelude:2,policy:0,host:7,admission:12,rateLimit:0},
+   oldPrepareAnswer:{prelude:2,policy:0,host:8,admission:12,rateLimit:0},
    oldStreamAnswer:{prelude:2,policy:0,host:1,execute:6,provider:14,rateLimit:0},
    // One invocation: one prelude instead of two; admission and execution unchanged.
-   opening:{prelude:2,policy:0,host:8,admission:12,execute:6,provider:14,rateLimit:0},
-   answer:{prelude:2,policy:0,host:8,admission:12,execute:6,provider:14,rateLimit:0},
+   opening:{prelude:2,policy:0,host:10,admission:12,execute:6,provider:14,rateLimit:0},
+   answer:{prelude:2,policy:0,host:9,admission:12,execute:6,provider:14,rateLimit:0},
   });
   // Empty backlog: exactly one pre-admission RPC and one completion capture RPC.
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
   expect(label('rpc/opc_capture_apply')).toEqual({oldPrepareOpening:1,oldStreamOpening:1,oldPrepareAnswer:1,oldStreamAnswer:1,opening:2,answer:2});
-  expect(label('rpc/runtime_session_context')).toEqual({oldPrepareOpening:2,oldStreamOpening:0,oldPrepareAnswer:2,oldStreamAnswer:0,opening:2,answer:2});
+  expect(label('rpc/runtime_session_context')).toEqual({oldPrepareOpening:3,oldStreamOpening:0,oldPrepareAnswer:3,oldStreamAnswer:0,opening:3,answer:3});
   // Auth verifies once per invocation, and again after each provider response.
   expect(label('auth/v1/user')).toEqual({oldPrepareOpening:1,oldStreamOpening:3,oldPrepareAnswer:1,oldStreamAnswer:3,opening:3,answer:3});
   expect(label('rest/profiles')).toEqual({oldPrepareOpening:1,oldStreamOpening:1,oldPrepareAnswer:1,oldStreamAnswer:1,opening:1,answer:1});
@@ -1190,7 +1197,10 @@ async function collectTurn(events:AsyncIterable<unknown>){const all=[];for await
 it('RUNTIME: AC-1 mentorTurnStream disconnect, concurrent resend and later resend never dispatch twice',async()=>{
  const f=await mentorTurnFixture(),provider=await heldProvider();
  try{
-  const {draftId}=await f.draft(),request={draftId,stepId:'step-0',purpose:'mentor' as const,requestId:randomUUID(),input:OPENING_INPUT,questionId:'goal'};
+  const {draftId}=await f.draft();
+  const detail=await opcRouter.createCaller(await f.context()).read({draftId});
+  const request={draftId,stepId:'step-0',purpose:'mentor' as const,
+   requestId:openingRequestId(draftId,detail.roundId,'step-0','goal'),input:OPENING_INPUT,questionId:'goal'};
   provider.setHold(true);
   const first=(await opcRouter.createCaller(await f.context()).mentorTurnStream(request))[Symbol.asyncIterator]();
   const admitted=(await first.next()).value as {type:string;executionId:string};

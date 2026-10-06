@@ -42,6 +42,7 @@
     "./src/shared/opcQuestions": "./src/shared/opcQuestions.ts",
     "./src/shared/opcMethodPolicy": "./src/shared/opcMethodPolicy.ts",
     "./src/shared/agentTurn": "./src/shared/agentTurn.ts",
+    "./src/shared/conversationCapture": "./src/shared/conversationCapture.ts",
     "./src/shared/modelReasoning": "./src/shared/modelReasoning.ts",
     "./src/shared/modelPricing": "./src/shared/modelPricing.ts",
     "./src/services/streamingOutput": "./src/services/streamingOutput.ts",

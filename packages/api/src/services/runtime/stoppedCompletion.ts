@@ -81,12 +81,17 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
         &&!(choice?.finish_reason==='length'&&message?.tool_calls?.length);
       const tool=message?.tool_calls?.[0];
       let output=body;
-      if(tool){
+      if(tool&&context.hostTurnContext?.cardContract){
+        // Guarded card arguments never streamed as public text. A stop can keep already
+        // emitted assistant prose or a saved checked primary, never rebuild an unchecked card.
+        valid=Boolean(body.trim()||execution.primaryResult?.body);
+        body=execution.primaryResult?.body??agentTurnResult(body,body,false,undefined,true).body;
+      }else if(tool){
         try{output=await askQuestionTool(context.questionContract===QUESTION_CONTRACT)
           .execute(JSON.parse(tool.function?.arguments??''),tool.id??'');}
         catch{valid=false;}
       }
-      if(valid)body=agentTurnResult(body,output,Boolean(tool),tool
+      if(valid&&!(tool&&context.hostTurnContext?.cardContract))body=agentTurnResult(body,output,Boolean(tool),tool
         ?questionMessageFromArguments(tool.function?.arguments??''):undefined,true,Boolean(context.mentorText)).body;
     }else if(message?.tool_calls?.length)valid=false;
     try{
@@ -97,7 +102,7 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
         capacityLimited=fitted.metadata.completeness==='length_limit'&&choice?.finish_reason!=='length';
         if(agent||step){
           const projection=new NativeProgressProjection({mode:agent?'agent':'message-first',
-            toolMessage:agent&&Boolean(context.questionContract),appendCard:Boolean(context.mentorText)});
+            toolMessage:agent&&Boolean(context.questionContract)&&!context.hostTurnContext?.cardContract,appendCard:Boolean(context.mentorText)});
           let update=projection.appendText(message?.content??'');
           const tool=message?.tool_calls?.[0];
           if(tool)update=projection.appendToolFrame({choices:[{delta:{tool_calls:[{index:0,function:tool.function}]}}]})??update;

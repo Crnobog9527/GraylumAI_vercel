@@ -9,6 +9,7 @@ import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
 import { publishSkillPackage } from '../skills/publication';
 import { opcService } from './service';
 import { captureCompleted } from './capture';
+import { readCaptureOutput } from '../../shared/conversationCapture';
 import { runtimeExecutor } from '../runtime/execute';
 import { runtimeAdmissionService } from '../runtime/admission';
 
@@ -30,7 +31,7 @@ const patch = (value = 'A', stepId = 'step-0', fieldId = 'goal') =>
   ({ stepId, fieldId, value, status: 'provisional', nature: 'fact', basis: 'user_statement' });
 const output = (patches = [patch()]) => JSON.stringify({ inputKind: 'answer', patches, notes: [] });
 
-async function fixture(extraFields = 0, informationCounts?: number[]) {
+async function fixture(extraFields = 0, informationCounts?: number[], allRequired = false) {
   const owner = randomUUID(), model = randomUUID(), moduleId = randomUUID();
   const email = randomUUID() + '@example.test', password = 'Local-' + randomUUID() + '!';
   const made = await admin.auth.admin.createUser({ email, password, email_confirm: true });
@@ -44,7 +45,7 @@ async function fixture(extraFields = 0, informationCounts?: number[]) {
   await db.query('insert into modules(id,title,skill_id,model_id,active) values($1,$2,$3,$4,true)', [moduleId, registration, pack.id, model]);
   flow.steps.forEach((s, i) => { s.information = Array.from({ length: informationCounts?.[i] ?? 2 }, (_, field) =>
     field === 0 ? { id: 'goal', title: 'Goal', required: true, profileKey: 'goal_' + i }
-      : { id: field === 1 ? 'other' : 'extra' + field, title: 'Other', required: false }); });
+      : { id: field === 1 ? 'other' : 'extra' + field, title: 'Other', required: allRequired }); });
   for (let i = 0; i < extraFields; i++) flow.steps[0].information!.push({ id: 'extra' + i, title: 'Extra', required: false });
   await publishSkillPackage(admin, owner, pack);
   await db.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)', [registration, moduleId, pack.id, pack.revisionId, flow, registration]);
@@ -366,9 +367,17 @@ it('RUNTIME: capture v2 summary parsing accepts only strict objects', async () =
   for (const raw of ['```json\n' + output() + '\n```', '[]', 'null', '{}',
     JSON.stringify({ inputKind: 'answer', patches: {}, notes: [] }),
     output(Array.from({ length: 13 }, () => patch()))]) {
+    expect(readCaptureOutput(raw, f.d.information)).toBeNull();
     expect(await f.apply(await f.seed(raw))).toMatchObject({ result: 'invalid_output' });
   }
   expect(await f.apply(await f.seed(output([])))).toMatchObject({ result: 'suggested' });
+  for (const value of ['  ', '\t', '😀'.repeat(400), '😀'.repeat(401)]) {
+    const raw = output([patch(value), {...patch('bad'), status:'confirmed'}, patch('valid', 'step-1')]);
+    const parsed = readCaptureOutput(raw, f.d.information)!;
+    const result = await f.apply(await f.seed(raw));
+    expect(result.discarded.map((entry: {index: number}) => entry.index)).toEqual(parsed.discarded);
+    expect(parsed.patches.length + parsed.discarded.length).toBe(3);
+  }
 });
 
 it('RUNTIME: capture rollback rejects a second rollback, preserves values and protects A-B-A after reenabling', async () => {
@@ -877,4 +886,68 @@ it('RUNTIME: Q1 pending organizer guards OPC material and new admission while al
       .toMatchObject({turnToken:saved.payload.opcTurnToken});
     expect(await snapshot()).toEqual(before);
   }
+});
+
+it('RUNTIME: B2 admits any declared field, selects gaps from frozen material and restores task on replay', async () => {
+  const f = await fixture();
+  await f.save('Existing goal');
+  const request = {draftId:f.draft.draftId,requestId:randomUUID(),stepId:'step-0',purpose:'mentor',
+    questionId:'goal',input:'New material'};
+  const first = await f.service.prepareStep(request);
+  const payload = (await db.query('select payload from runtime_executions where id=$1',[first.executionId])).rows[0].payload;
+  expect(payload.request.selection.task).toBe('opc-question:goal');
+  // Goal is a draft, so it remains the first unconfirmed identity when there are no required gaps.
+  expect(payload.inputSelection).toBe('scope-projection-v2');
+  expect(payload.hostTurnContext.checklist).toHaveLength(3);
+  expect(payload.hostTurnContext.checklist[0].fields[0]).toMatchObject({status:'draft',protected:true});
+  expect(payload.scopeMaterial.content.work.steps['step-0'].information.goal.value).toBe('Existing goal');
+  await rpc('runtime_cancel',{p_actor_id:f.actor,p_execution_id:first.executionId});
+  await f.save('Updated manually');
+  expect(await f.service.prepareStep(request)).toMatchObject({executionId:first.executionId});
+  const second = await f.service.prepareStep({...request,requestId:randomUUID(),questionId:'other'});
+  expect(second.executionId).not.toBe(first.executionId);
+  await rpc('runtime_cancel',{p_actor_id:f.actor,p_execution_id:second.executionId});
+  await expect(f.service.prepareStep({...request,requestId:randomUUID(),questionId:'not-declared'}))
+    .rejects.toThrow('OPC_QUESTION_NOT_REACHED');
+});
+
+it('RUNTIME: B2 answers inherit their source task after capture changes the focus', async () => {
+  // Set the immutable workflow before publication; capture advances focus without changing the card identity.
+  const f = await fixture(0, undefined, true);
+  const source = await f.seed(output([patch('Goal now captured')]));
+  await db.query('update runtime_executions set result=result||$2::jsonb where id=$1',[source,{body:JSON.stringify({
+    format:'agent-turn.v1',message:'Choose a platform',card:{question:'Which platform?',options:['A','B'],recommended:null},
+  })}]);
+  await f.apply(source);
+  const request = {draftId:f.draft.draftId,requestId:randomUUID(),stepId:'step-0',purpose:'mentor',
+    questionId:'other',input:'B',answerSource:{executionId:source,optionIndex:1}};
+  await expect(f.service.prepareStep({...request,requestId:randomUUID(),input:'Client display text'}))
+    .rejects.toThrow('OPC_ANSWER_SOURCE_DENIED');
+  const next = await f.service.prepareStep(request);
+  const payload = (await db.query('select payload from runtime_executions where id=$1',[next.executionId])).rows[0].payload;
+  expect(payload.request.selection.task).toBe('opc-question:goal');
+  expect(payload.input).toBe('B');
+  expect(payload.answeredCard).not.toHaveProperty('questionId'); // SQL keeps the original answer-source shape.
+  await rpc('runtime_cancel',{p_actor_id:f.actor,p_execution_id:next.executionId});
+  expect(await f.service.prepareStep(request)).toMatchObject({executionId:next.executionId});
+});
+
+it('RUNTIME: B2 opens each step only once and freezes organizer v2 on the exact material', async () => {
+  const {OPENING_INPUT,openingRequestId} = await import('./questions');
+  const f = await fixture(), organizer = randomUUID();
+  await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Synthetic organizer','capture-organizer','fixture','true',2048,64000)",[organizer]);
+  await db.query("insert into system_settings(key,value) values('v3_summary_model_id',to_jsonb($1::text)),('v3_summary_max_tokens','2048') on conflict(key) do update set value=excluded.value",[organizer]);
+  const request = {draftId:f.draft.draftId,requestId:randomUUID(),stepId:'step-0',purpose:'mentor',questionId:'goal',input:OPENING_INPUT};
+  const first = await f.service.prepareStep(request);
+  const payload = (await db.query('select payload from runtime_executions where id=$1',[first.executionId])).rows[0].payload;
+  expect(payload.request.requestId).toBe(openingRequestId(f.draft.draftId,f.d.roundId,'step-0','goal'));
+  expect(payload.hostTurnContext.opening).toBe(true);
+  const input=JSON.parse(payload.attachedOrganizer.input);
+  expect(input.captureFormat).toBe('v2');expect(input.checklist).toHaveLength(3);
+  for (const step of input.checklist) for (const field of step.fields)
+    expect(field.value).toBe(payload.scopeMaterial.content.work.steps[step.id].information[field.id].value);
+  await rpc('runtime_cancel',{p_actor_id:f.actor,p_execution_id:first.executionId});
+  expect(await f.service.prepareStep({...request,requestId:randomUUID(),questionId:'other'}))
+    .toMatchObject({executionId:first.executionId});
+  expect((await db.query('select count(*)::int n from runtime_executions where session_id=$1',[f.d.sessionId])).rows[0].n).toBe(1);
 });
