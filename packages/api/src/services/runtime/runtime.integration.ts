@@ -1110,11 +1110,15 @@ registerReportTests(db,()=>mentorTurnFixture(true,true));
 registerPaygHostTests(db,()=>mentorTurnFixture(true));
 registerAdmissionGateTests(db,()=>mentorTurnFixture(true),()=>modelId);
 type ProviderCall={model:string;release:()=>void};
-async function heldProvider(){
+async function heldProvider(inference = false){
  const calls:ProviderCall[]=[];let hold=false;
  const server=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;const input=JSON.parse(JSON.parse(raw).input);
   let release=()=>{};const gate=hold?new Promise<void>(resolve=>{release=resolve;}):Promise.resolve();calls.push({model:input.model,release});await gate;
-  const id='ac1-'+randomUUID(),content=input.model==='ac1-organizer'?'{"inputKind":"answer","informationPatch":{}}':input.messages?.some((m:{role?:string;content?:unknown})=>m.role==='system'&&String(m.content).includes('Act as the single continuous mentor'))?'导师回复 '+calls.length:JSON.stringify({message:'导师回复 '+calls.length});
+  // These fixture models have fixed wire contracts. Prompt prose is not a protocol discriminator.
+  if(!['ac1-mentor','ac1-organizer'].includes(input.model))throw new Error('unexpected fixture model');
+  const reply='导师回复 '+calls.length;
+  const id='ac1-'+randomUUID(),content=input.model==='ac1-organizer'
+   ?'{"inputKind":"answer","informationPatch":{}}':inference?'我猜：'+reply+'。':reply;
   res.setHeader('content-type','application/json');
   res.end(JSON.stringify({id,model:input.model,final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:input.model,choices:[{index:0,message:{role:'assistant',content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));
  });
@@ -1129,8 +1133,8 @@ async function heldProvider(){
 async function requestEffects(requestId:string){
  return (await db.query('select e.id::text execution,e.state,r.id::text run,(select count(*)::int from bill2_calls c where c.run_id=r.id) calls from runtime_executions e join bill2_runs r on r.id=e.billing_run_id where e.request_id=$1',[requestId])).rows;
 }
-it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one invocation with the same effects as prepareStep then executeStream',async()=>{
- const f=await mentorTurnFixture(),provider=await heldProvider();
+it.each([false,true])('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one invocation with the same effects as prepareStep then executeStream (inference=%s)',async inference=>{
+ const f=await mentorTurnFixture(),provider=await heldProvider(inference);
  const phases=(s:{phases:Record<string,{rt:number}>})=>Object.fromEntries(Object.entries(s.phases).map(([phase,v])=>[phase,v.rt]));
  async function measured<T>(call:(ctx:Awaited<ReturnType<typeof f.context>>)=>Promise<T>){
   const budget=createRuntimeBudget();
@@ -1162,8 +1166,8 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
    expect(effects).toEqual([{execution:events[0]!.executionId,state:'completed',run:expect.any(String),calls:2}]);
   }
   for(const request of [oldOpening,oldAnswer])expect((await requestEffects(request.requestId)).map(e=>[e.state,e.calls])).toEqual([['completed',2]]);
-  expect(opening.result.at(-1)!.result!.body).toBe(agentTurnBody('导师回复 5',null));
-  expect(oldStreamOpening.result.at(-1)!.result!.body).toBe(agentTurnBody('导师回复 1',null));
+  expect(opening.result.at(-1)!.result!.body).toBe(agentTurnBody(inference?'我猜：导师回复 5，对吗？':'导师回复 5',null));
+  expect(oldStreamOpening.result.at(-1)!.result!.body).toBe(agentTurnBody(inference?'我猜：导师回复 1，对吗？':'导师回复 1',null));
   expect(provider.calls.map(c=>c.model)).toEqual(['ac1-mentor','ac1-organizer','ac1-mentor','ac1-organizer','ac1-mentor','ac1-organizer','ac1-mentor','ac1-organizer']);
   const all={oldPrepareOpening,oldStreamOpening,oldPrepareAnswer,oldStreamAnswer,opening,answer};
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
