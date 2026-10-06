@@ -2090,7 +2090,7 @@
   "fn:bill2_decimal(jsonb)": "978198ed2a10",
   "fn:bill2_dispatch(uuid,uuid,uuid,uuid,boolean,jsonb)": "fdba11e6df13",
   "fn:bill2_erasure_closed(uuid,uuid)": "f5347a577dce",
-  "fn:bill2_erasure_fields(jsonb,jsonb)": "85f38e568500",
+  "fn:bill2_erasure_fields(jsonb,jsonb)": "7615e8ca6c85",
   "fn:bill2_erasure_receipt_projection(jsonb,bill2_calls)": "9bcc9f7a8579",
   "fn:bill2_erasure_run_payload(jsonb)": "4882b4d1eb00",
   "fn:bill2_erasure_view(bill2_runs,boolean)": "6c7915dcbc1f",

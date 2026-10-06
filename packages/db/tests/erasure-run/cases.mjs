@@ -118,6 +118,30 @@ export async function runCases(db, report) {
   assert.ok((await db.query('SELECT erased_at FROM runtime_executions WHERE id=$1',[execution])).rows[0].erased_at);
   report.checks.push('original runtime recovery/B1b still works; refund once, late cost no re-debit; session binding unchanged');
 
+  for (const contract of ['v1','v2']) {
+    const seed = contract === 'v1' ? await fixture(db) : await createFixture(db);
+    const payload = structuredClone(seed.payload);
+    const identity = {provider:'fixture + version',account:'namespace + version',model:'model + version'};
+    await db.query('UPDATE ai_models SET provider=$2,model_id=$3 WHERE id=$1',
+      [payload.modelId,identity.provider,identity.model]);
+    payload.modelId = payload.modelId.toUpperCase();
+    payload.rules.version = '规则 + version';
+    payload.rules.quoteVersion = 'quote + version';
+    payload.callPolicy = payload.callPolicy.map(policy=>({...policy,...identity,modelId:payload.modelId}));
+    const created = await rpc(db,'bill2_prepare',seed.actor,randomUUID(),payload);
+    const accepted = {...seed,run:created.id,payload};
+    await rpc(db,'bill2_close',accepted.actor,accepted.run,'unknown',null);
+    await closeAccount(db,accepted);
+    assert.deepEqual(await scrub(db,accepted),{processed:1,remaining:0});
+    const projected = (await row(db,accepted)).payload;
+    assert.equal(projected.rules.version,payload.rules.version);
+    assert.equal(projected.rules.quoteVersion,payload.rules.quoteVersion);
+    assert.deepEqual(projected.callPolicy,payload.callPolicy);
+    assert.equal(projected.modelId,payload.modelId);
+    assert.equal(projected.input,undefined);
+  }
+  report.checks.push('v1/v2 legitimately admitted free-form financial identifiers and uppercase UUIDs remain erasable');
+
   const malformed = await fixture(db);
   await rpc(db,'bill2_close',malformed.actor,malformed.run,'unknown',null);
   await closeAccount(db,malformed);

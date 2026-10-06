@@ -575,7 +575,7 @@ it('BILL2: erased run content keeps original financial recovery and rejects late
   const {runConcurrency}=await import(/* @vite-ignore */new URL('concurrency.mjs',base).href);
   await runCases(db,report);
   await runConcurrency({db,Client:pg.Client,connectionString,report});
-  expect(report.checks).toHaveLength(7);
+  expect(report.checks).toHaveLength(8);
  }finally{
   await db.query('RESET ROLE');
   if(prior)await db.query("update system_settings set value=$1 where key='billing_payg_start_thresholds'",[prior.value]);

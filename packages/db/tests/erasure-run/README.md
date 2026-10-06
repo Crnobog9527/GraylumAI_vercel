@@ -14,7 +14,9 @@
 - payload：逐层白名单重建，清掉 input、scope、sessionRef、额外字段及嵌套正文。
   保留契约/规则版本、内部模型/工具版本编号、原 sourceHash、操作类别、冻结预算、时间、
   汇率、billingUnit 和调用策略；PAYG 的原 nominalPricing 阶梯、时段、缓存价格及报价上限
-  保持原精确表示。对象/数组不能藏进标量，非法财务值报错且整笔不改，不能假报完成。
+  保持原精确表示。财务标识沿用创建时的非空字符串规则，允许空格、符号和 Unicode；
+  UUID 接受大小写。不添加会卡住合法历史 run 的新字符限制。对象/数组不能藏进标量，
+  非法财务值报错且整笔不改，不能假报完成。
 - scope：清成空对象。session_ref 原列不变，解绑是后续独立边界。
 - result：复用 B2a outcome 投影（kind/evidenceHash/evidenceRefHash），既有投影不重复哈希。
   原结果引用可能含正文/URL，因此仅保留既有 B2a 摘要，不把摘要说成原始证据备份。

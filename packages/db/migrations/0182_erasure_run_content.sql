@@ -43,9 +43,11 @@ BEGIN
   IF typ = 'boolean' AND jsonb_typeof(v) = 'boolean' THEN RETURN v; END IF;
   IF typ = 'integer' AND jsonb_typeof(v) = 'number' AND s ~ '^(0|[1-9][0-9]*)$' THEN RETURN v; END IF;
   IF jsonb_typeof(v) IS DISTINCT FROM 'string' THEN RAISE EXCEPTION 'BILL2_ERASURE_INVALID_FINANCIAL_FIELD'; END IF;
-  IF typ = 'id' AND length(s) BETWEEN 1 AND 256 AND s ~ '^[A-Za-z0-9._:/-]+$' THEN RETURN v; END IF;
+  -- These financial identifiers are free-form nonempty strings in the creation contract.
+  -- Keep their exact value; constrain the containing paths and JSON types, not a new grammar.
+  IF typ = 'id' AND length(s) > 0 THEN RETURN v; END IF;
   IF typ = 'hash' AND s ~ '^[a-f0-9]{64}$' THEN RETURN v; END IF;
-  IF typ = 'uuid' AND s ~ '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$' THEN RETURN v; END IF;
+  IF typ = 'uuid' AND s ~* '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$' THEN RETURN v; END IF;
   IF typ = 'currency' AND s ~ '^[A-Z]{3}$' THEN RETURN v; END IF;
   IF typ = 'decimal' THEN PERFORM bill2_decimal(v); RETURN v; END IF;
   IF typ = 'timestamp' AND s ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9:.+-]+(Z)?$' THEN
