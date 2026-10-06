@@ -50,6 +50,38 @@ describe('amount facts', () => {
     expect(rows.map(row => row.kind)).toEqual(['paid']);
   });
 
+  it('shows a payment recorded by both checkout session and first invoice once', () => {
+    // Shape of the staging subscription orders: paid/fee/net from cs_ evidence, then again from in_ evidence.
+    const once = [{ kind: 'paid', amount: '29.90' }, { kind: 'fee', amount: null }, { kind: 'net', amount: null }]
+      .map(fact => ({ ...fact, currency: 'usd', unit: 'major' as const }));
+    const facts = [...once, ...once];
+    expect(buildAmountFactRows(facts, { required: ADMIN_REQUIRED_FACT_KINDS })).toEqual([
+      { kind: 'paid', label: '实付', value: 'USD 29.90' },
+      { kind: 'fee', label: '渠道手续费', value: UNKNOWN_AMOUNT },
+      { kind: 'net', label: '到账净额', value: UNKNOWN_AMOUNT },
+    ]);
+    expect(buildAmountFactRows(facts, { allowed: USER_AMOUNT_FACT_KINDS })).toEqual([
+      { kind: 'paid', label: '实付', value: 'USD 29.90' },
+    ]);
+  });
+
+  it('lets a later known value replace an unknown one of the same kind', () => {
+    const rows = buildAmountFactRows([{ kind: 'fee', amount: null, currency: 'usd', unit: 'major' },
+      { kind: 'fee', amount: '0.59', currency: 'usd', unit: 'major' }]);
+    expect(rows).toEqual([{ kind: 'fee', label: '渠道手续费', value: 'USD 0.59' }]);
+  });
+
+  it('keeps different known values of one kind, numbered, instead of dropping one', () => {
+    const rows = buildAmountFactRows([{ kind: 'paid', amount: '29.90', currency: 'usd', unit: 'major' },
+      { kind: 'paid', amount: null, currency: 'usd', unit: 'major' },
+      { kind: 'paid', amount: '9.90', currency: 'usd', unit: 'major' }]);
+    expect(rows).toEqual([
+      { kind: 'paid', label: '实付（第 1 条记录）', value: 'USD 29.90' },
+      { kind: 'paid', label: '实付（第 2 条记录）', value: 'USD 9.90' },
+    ]);
+    expect(new Set(rows.map(row => row.label)).size).toBe(rows.length);
+  });
+
   it('handles a missing facts list', () => {
     expect(buildAmountFactRows(undefined)).toEqual([]);
     expect(buildAmountFactRows(null, { required: ['net'] })).toEqual([{ kind: 'net', label: '到账净额', value: UNKNOWN_AMOUNT }]);

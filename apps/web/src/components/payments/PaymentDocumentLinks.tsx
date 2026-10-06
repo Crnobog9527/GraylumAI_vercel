@@ -61,7 +61,7 @@ export function AmountFactList({ rows, testId }: { rows: AmountFactRow[]; testId
   return (
     <dl data-testid={testId} className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
       {rows.map(row => (
-        <div key={row.kind} className="flex gap-1">
+        <div key={row.label} className="flex gap-1">
           <dt>{row.label}</dt>
           <dd style={{ color: 'var(--text-secondary)' }}>{row.value}</dd>
         </div>

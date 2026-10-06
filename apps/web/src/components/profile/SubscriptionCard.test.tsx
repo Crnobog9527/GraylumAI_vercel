@@ -211,6 +211,17 @@ describe('SubscriptionCard catalog availability', () => {
     expect(markup).toContain('disabled=""');
   });
 
+  it('shows a member the discounted price they pay, with the real list price struck through', () => {
+    componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 100, bonus_credits: 0, price: 1, checkout_ready: true }] });
+    componentState.plansQuery = queryState({ data: [{ ...plan, discount: 0.1 }, { ...plan, id: 'plan-gold', level: 'gold', discount: 0.2 }] });
+    const member = renderToStaticMarkup(createElement(CreditPackagesSection, { membershipLevel: 'pro' }));
+    expect(member).toMatch(/data-testid="profile-credit-package-price"[^>]*>\$0\.90<del/);
+    expect(member).toContain('<span class="sr-only">原价</span>$1.00</del>');
+    const free = renderToStaticMarkup(createElement(CreditPackagesSection, { membershipLevel: 'free' }));
+    expect(free).toMatch(/data-testid="profile-credit-package-price"[^>]*>\$1\.00<\/div>/);
+    expect(free).not.toContain('<del');
+  });
+
   it.each([null, 'waffo'])('renders but disables purchase when the selected channel is %j', (paymentChannel) => {
     componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 10, bonus_credits: 0, price: 9.9,
       paymentChannel, checkout_ready: false }] });
