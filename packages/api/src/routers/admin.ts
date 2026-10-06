@@ -1,3 +1,4 @@
+import { adminSettingsRowSchema, genericAdminSettingsRows } from '../services/adminSettings';
 import { modelPriceView } from '../shared/modelPriceView';
 import { membershipPlanMutations } from './adminMembershipPlans';
 import { entitlementRowShape } from '../services/membershipEntitlementConfig';
@@ -43,11 +44,6 @@ const adminFiniteNumericValueSchema = z.union([
     (value) => Number.isFinite(Number(value)),
     'Invalid admin numeric value',
   ),
-]);
-const adminScalarSettingValueSchema = z.union([
-  z.string(),
-  z.number().finite(),
-  z.boolean(),
 ]);
 const adminFinanceCreditTransactionRowSchema = z.object({
   amount: z.number().finite(),
@@ -150,10 +146,6 @@ const adminPackageMembershipPlanRowSchema = z.object({
   is_active: z.enum(['true', 'false']),
   sort_order: z.number().finite(),
   created_at: adminDateStringSchema,
-}).passthrough();
-const adminSettingsRowSchema = z.object({
-  key: z.string().trim().min(1),
-  value: adminScalarSettingValueSchema,
 }).passthrough();
 const adminSettingsMembershipPlanRowSchema = z.object({
   ...entitlementRowShape,
@@ -2429,8 +2421,9 @@ export const adminRouter = router({
         throw createAdminOperationError('读取会员方案列表', membershipPlansResult.error);
       }
 
+      const systemSettings = genericAdminSettingsRows(systemSettingsResult.data);
       assertValidAdminRows(
-        systemSettingsResult.data,
+        systemSettings,
         adminSettingsRowSchema,
         '读取设置页数据',
         'settings dashboard settings',
@@ -2444,7 +2437,7 @@ export const adminRouter = router({
 
       return {
         systemSettings: Object.fromEntries(
-          systemSettingsResult.data.map((setting) => [setting.key, setting.value]),
+          systemSettings.map((setting) => [setting.key, setting.value]),
         ),
         membershipPlans: await hydrateStripeCatalogPrices({ db: ctx.supabaseAdmin, kind: 'membership_plan', rows: membershipPlansResult.data }),
       };

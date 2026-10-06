@@ -204,7 +204,7 @@ async function validateRoutingSelections(client: SupabaseClient<any, 'public', a
 }
 
 function throwSettingsWriteError(error: { code?: string }, fallback: string) {
-  if (error.code === '40001') {
+  if (error.code === 'PT409' || error.code === '40001') {
     throw new TRPCError({ code: 'CONFLICT', message: '支付渠道已被修改，请刷新后重新保存' });
   }
   if (error.code === '23503') {

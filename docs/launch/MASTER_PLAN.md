@@ -82,7 +82,7 @@
 <a id="changes"></a><a id="conflicts"></a>
 ## 2. 本版的新决定和被取代的旧规则
 
-### 2.1 Owner 的新决定（2026-09-27 起，2026-10-05 更新）
+### 2.1 Owner 的新决定（2026-09-27 起，2026-10-06 更新）
 
 - **2026-10-06 BILL-PAYG r9（仅准备）**：主窗口技术决定原话：“Sonnet low 的输出语义改用同一线路的证据来证明，不再要求 low 自己触顶。”[出处](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6010007610)。仅Sonnet/anthropic/low采用 `outputSemanticsEvidence: same-route-none`、testedOutputLimit=2048，引用none直接触顶证据，low自身触顶数如实为0；取代对此设置要求两条自身触顶的旧限制，不改其他模型的证据要求或输出/费用硬限。r8第3条费用$0.0076005已确认、原UNKNOWN不计合格。r9只准备12条路由补测；已入账$6.537562065、累计上界<$25，三条Sonnet长样本沿用$0.60例外。
 
@@ -686,6 +686,21 @@ Vertex首条不能移作AI Studio证据，完整76条重新准备；r6不执行�
 r4第77条未收费，按$0入账；r4已入账$0.179168465，前四批累计$4.989307965，原始UNKNOWN回执不改写。
 本次Owner要求原r5作废，改为r5b的Gemini76条、Sonnet新ID输出4条，并补齐Luna整理用途/格式缺口。
 取代此前r5独立执行安排，累计限额仍$25；只准备，主窗口复核通知前不得发送真实请求。
+
+**2026-10-06：报告前端开工；写满截断照常收费并提示；D2、D3 定案**
+
+Owner 原话（[#667 记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/667#issuecomment-6000458917)）：
+
+> 开工一键报告页面（Claude）和依赖升级第一批 Next/React（Codex）；报告截断照常按实际收费并提示，staging 用 Claude 实测 3 份报告、额度 2 美元，staging 不调高 8192
+
+整理（不是 Owner 原话）：
+
+- 写满被截断（`length_limit`）的报告按实际用量照常收费，和 #667 后端现有做法一致，不改收费代码；
+  页面在正文外明确提示报告已截断。截断的报告不是候选，不能定稿。
+- D2：staging 用 Claude（Sonnet 5.5）实测 3 份报告，供应商费用合计不超过 2 美元，从已批准的 OpenRouter 测试余额里出。
+- D3：staging 不调高全站统一单次上限 8192。
+- 本项取代第 54 项和上一项里"D2、D3、写满截断怎么收费由主窗口在实测前询问 Owner"的待定安排。
+  报告前端仍跟随服务端开关 `runtime_report_generation`；开关和 BILL-PAYG 在 staging 的开启由主窗口执行。
 
 ### 2.2 被本版取代的旧规则
 

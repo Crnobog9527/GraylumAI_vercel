@@ -114,7 +114,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    const exchange=async(request:string,phase:string,selectedPolicy=primaryPolicy,onChunk?: (chunk:string)=>void)=>{
     try{
     if(selectedPolicy.protocol==='openrouter-chat-v1')
-     request=openRouterRequestBody(request,{context,policy:selectedPolicy,phase,primaryDialogue:phase===effective.role&&selectedPolicy===primaryPolicy});
+     request=openRouterRequestBody(request,{context,policy:selectedPolicy,phase,
+      primaryDialogue:phase===(context.reportGeneration?'report':effective.role)&&selectedPolicy===primaryPolicy});
     if(native)request=fitNativeRequestOutput(request,selectedPolicy);
     const configuredInput=phase==='attached_organizer'?context.attachedOrganizer?.inputBytes:context.purposeBudget?.inputBytes;
     assertRuntimeRequestCapacity(request,Math.min(selectedPolicy.inputLimit,configuredInput??Infinity));

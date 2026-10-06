@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from "vitest";
-import { followTranscript, transcriptSignature, type ChatScrollState } from "./chat-scroll";
+import { followTranscript, isNearBottom, transcriptSignature, type ChatScrollState } from "./chat-scroll";
 
 /** A long transcript, 2000px of content in a 600px viewport. */
 const node = (scrollTop: number) => ({ scrollTop, scrollHeight: 2000, clientHeight: 600 });
@@ -51,5 +51,14 @@ describe("followTranscript", () => {
     const fresh = node(0);
     expect(followTranscript(fresh, { key: "", follow: true, signature: "" }, "k", turns, () => null).follow).toBe(true);
     expect(fresh.scrollTop).toBe(2000);
+  });
+});
+
+describe("isNearBottom", () => {
+  it("follows only within the threshold of the bottom", () => {
+    expect(isNearBottom(node(1400))).toBe(true);
+    expect(isNearBottom(node(1321))).toBe(true);
+    expect(isNearBottom(node(1320))).toBe(false);
+    expect(isNearBottom(node(0))).toBe(false);
   });
 });

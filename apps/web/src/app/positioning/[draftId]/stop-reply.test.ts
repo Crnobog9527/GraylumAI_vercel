@@ -9,7 +9,7 @@ import { isCompleteResult, isTerminalTurn, stoppedPartial } from "./mentor-turn"
 import { envelopeRecovery, historyPollInterval, HISTORY_POLL_MS, type StoredStepEnvelope } from "./step-recovery";
 import {
   rememberStop, sendStop, stopAvailable, stoppedHere, STOP_FOLLOW_UP_DELAYS_MS, STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE, STOPPED_EMPTY_NOTICE, STOPPED_NOTICE, STOPPED_UNORGANIZED_NOTICE,
-  stopFollowUpDelay, stopFollowUpTarget, stopRequestFor, stopSaving, userStopped,
+  UNORGANIZED_NOTICE, stopFollowUpDelay, stopFollowUpTarget, stopRequestFor, stopSaving, userStopped,
 } from "./stop-reply";
 
 class TabStorage {
@@ -304,6 +304,26 @@ describe("the saved result of a stopped turn", () => {
     expect(shown.notice).toEqual({ tone: "status", text: STOPPED_UNORGANIZED_NOTICE });
     expect(STOPPED_UNORGANIZED_NOTICE).toBe("已停止，本轮未整理");
     expect(isCompleteResult({ completeness: "stopped" })).toBe(false);
+  });
+
+  it("a cut reply that was also not organized says both, the cut first", () => {
+    const shown = mentorReplyDisplay(done(agentTurnBody("分析到一半", card), { completeness: "stopped", organized: false }));
+    expect(shown).toEqual({ text: "分析到一半", card: null,
+      notice: { tone: "status", text: "已停止，保留了停止前显示的内容。\n本轮未整理" } });
+    expect(shown.notice?.text).toBe(STOPPED_NOTICE + "\n" + UNORGANIZED_NOTICE);
+  });
+
+  it("a stop before any text shows its saving notice once, in the tail", () => {
+    const shown = mentorReplyDisplay({ body: null, legacyMessage: "", state: "interrupted", active: true, busy: true,
+      billing: stopBilling, userStopPending: true, liveText: "" });
+    expect(shown).toEqual({ text: "", card: null });
+    // A stored body that arrives behind the empty live prefix shows neither its text nor its card.
+    const card = { question: "选哪个？", options: ["A", "B"], recommended: 0 };
+    expect(mentorReplyDisplay({ body: agentTurnBody("没看到的正文", card), legacyMessage: "没看到的正文", state: "running",
+      active: true, busy: true, liveText: "" })).toEqual({ text: "", card: null });
+    const tail = mentorTailNotices({ livePhase: "stopped", stop: null, replying: true, lastTurnOpen: false,
+      saving: false, recovery: null, error: "", notice: "", freeError: "" });
+    expect(tail.filter(notice => notice.text === STOP_SAVING_NOTICE)).toHaveLength(1);
   });
 
   it("a cut or unorganized stopped reply never fills the form by itself", () => {

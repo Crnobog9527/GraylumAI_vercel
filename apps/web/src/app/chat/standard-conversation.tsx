@@ -32,6 +32,7 @@ import { useStreamingChat, type StreamMessage } from '@/hooks/useStreamingChat';
 import { useCreditsBalance, type WarningLevel } from '@/hooks/use-credits';
 import { LowBalanceDialog } from '@/components/credits/LowBalanceDialog';
 import { CHAT_BALANCE_UNAVAILABLE_PRESENTATION, runChatBalancePreflight } from './balancePreflight';
+import { isNearBottom } from '@/components/chat/chat-scroll';
 
 interface Message {
   id: string;
@@ -250,11 +251,9 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
     }
   }, [activeConversationId, loadHistory]);
 
-  // Auto-scroll to bottom when messages change
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  const messagesScrollRef = useRef<HTMLDivElement>(null), followLatest = useRef(true); // Follow only while at the bottom.
+  useEffect(() => { followLatest.current = true; }, [activeConversationId]);
+  useEffect(() => { const node = messagesScrollRef.current; if (node && followLatest.current) node.scrollTop = node.scrollHeight; });
 
   // Mutations for conversation management
   const updateTitle = trpc.chat.updateConversationTitle.useMutation({
@@ -317,6 +316,7 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
         }
 
         const messageToSend = inputMessage;
+        followLatest.current = true; // A send shows the user's own message and the reply, even after scrolling up.
         await sendStreamingMessage(messageToSend, {
           modelId: showModelSelector && selectedModelId ? selectedModelId : undefined,
           moduleId,
@@ -497,7 +497,8 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
           )}
 
           {/* 消息区域 - 空状态或消息列表 */}
-          <div className="flex-1 flex flex-col overflow-y-auto relative z-10">
+          <div ref={messagesScrollRef} onScroll={event => { followLatest.current = isNearBottom(event.currentTarget); }}
+            className="flex-1 flex flex-col overflow-y-auto relative z-10">
             {!activeConversationId && messages.length === 0 ? (
               /* 空状态 - 开始新对话 */
               <div className="flex-1 flex flex-col items-center justify-center">
@@ -573,7 +574,6 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
                     </div>
                   ))
                 )}
-                <div ref={messagesEndRef} />
               </div>
             )}
           </div>

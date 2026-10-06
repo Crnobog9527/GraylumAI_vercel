@@ -7,6 +7,11 @@ type ScrollNode = { scrollTop: number; scrollHeight: number; clientHeight: numbe
 /** Within this many pixels of the bottom the transcript keeps following new content. */
 export const FOLLOW_THRESHOLD_PX = 80;
 
+/** Whether the reader is at (or within the follow threshold of) the bottom of the transcript. */
+export function isNearBottom(node: ScrollNode, threshold = FOLLOW_THRESHOLD_PX) {
+  return node.scrollHeight - node.clientHeight - node.scrollTop < threshold;
+}
+
 /**
  * What the transcript shows, for scroll follow: the server turns plus the optimistic user bubble.
  * The bubble is rendered before the server knows the turn, so it must count, or a send at the
@@ -33,4 +38,33 @@ export function followTranscript(node: ScrollNode, state: ChatScrollState, key: 
   if (state.signature === signature) return state;
   if (state.follow) node.scrollTop = node.scrollHeight;
   return { ...state, signature };
+}
+
+/**
+ * Keep a transcript pinned to the bottom when its content grows (or its own height shrinks), while
+ * `following()` says the reader is there. Watching the DOM instead of a list of React values covers
+ * everything that grows the transcript (streamed text, cards, notices, a docked composer shrinking it).
+ * Only a real size change pins: a DOM change that leaves the sizes alone, and the first report a
+ * ResizeObserver makes for every element, never move a restored position near (but not at) the bottom.
+ * `check` applies a pending size change now; `rebase` records the current sizes without pinning, for
+ * right after the caller sets the scroll position itself (restoring a saved one).
+ */
+export function pinToBottomOnGrowth(node: HTMLElement, following: () => boolean) {
+  let content = node.scrollHeight, view = node.clientHeight;
+  const rebase = () => { content = node.scrollHeight; view = node.clientHeight; };
+  const check = () => {
+    const grew = node.scrollHeight > content || node.clientHeight < view;
+    rebase();
+    if (grew && following() && !isNearBottom(node, 1)) node.scrollTop = node.scrollHeight;
+  };
+  const sizes = new ResizeObserver(check);
+  const watch = () => {
+    sizes.disconnect();
+    sizes.observe(node);
+    for (const child of Array.from(node.children)) sizes.observe(child);
+  };
+  const changes = new MutationObserver(() => { watch(); check(); });
+  watch();
+  changes.observe(node, { childList: true, subtree: true, characterData: true });
+  return { check, rebase, stop: () => { changes.disconnect(); sizes.disconnect(); } };
 }
