@@ -84,6 +84,41 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-10-07 更新）
 
+**2026-10-07：RUNTIME-PROD 正式准入生命周期**
+
+据[出处更正记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/701#issuecomment-6022130115)，Owner 实际原话为：
+
+- 2026-10-06（OpenRouter 上限）：
+  > 所有花费的上限源头都是我的 OpenRouter API，我做了限制，所以你这个测试窗口、准入名单的这些限制其实完全没有任何必要。
+- 2026-10-06（到期日与上限）：
+  > 同意把测试窗口和准入名单的到期日延到 2027 年底，花费和次数上限放开，以 OpenRouter 的限制为准。
+- 2026-10-06（门槛自动化，[#686](https://github.com/Crnobog9527/GraylumAI_vercel/pull/686)，按更正记录摘录，省略号保留）：
+  > 我觉得不要手动……这个门槛必须做成自动化适配的机制。
+
+m=6 来自 2026-10-03 本节第 50 项定价决定及其
+[确认记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5969267583)，
+不属于上述三段原话。
+
+2026-10-07 Owner 原话（[决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/701#issuecomment-6023526735)）：
+
+> 同意正式环境的模型准入不设固定到期日，只在换模型、换线路或实时计量检查异常时重新采样；联网搜索的每家第三方供应商（TikHub、Parallel、Firecrawl 等）各自在其平台设置硬上限（预付余额或平台限额），未设置前不开放对应的搜索调用。
+
+本决定明确正式环境的准入生命周期，取代此前将其记为主窗口归纳、尚待产品决定的表述；
+上方 10-06 关于 OpenRouter 和 2027 年底的原话保留为测试窗口背景，不作为正式准入的固定期限。
+这是已确认的产品要求；文档合并本身不修改现有行为，正式配置及开放仍按上线批准包执行。
+
+正式准入不沿用 staging 测试窗口和 PAYG profile 的固定 expiresAt 作为开放资格到期规则；
+仅在换模型、换线路或实时计量检查异常时重新采样，取代将本节 BILL-PAYG r8 测试有效期、`paygHostPolicy.ts`/`paygPolicy.ts`
+及 `bill2_payg_validate_quote` 的 expiresAt 契约直接沿用到正式资格的设想；
+这些现有 staging 实现仍须在后续实施中保持兼容，本文本同步本身不修改其行为。
+staging 测试窗口的到期日与预算、价格快照的新鲜度要求、每 call 执行/恢复时限均不改变。
+无到期不扩大既有证据覆盖范围；未覆盖的用途、格式、思考或容量仍不放行。
+经 OpenRouter 的正式模型流量采用 OpenRouter 每日限额；第三方搜索供应商（TikHub、Parallel、Firecrawl、
+Bright Data 等）各自在其平台设置硬上限（预付余额或平台限额），未设置前对应搜索调用保持关闭。
+各供应商具体金额列入上线批准包，不新增平台内部预算计数器；不再把 OpenRouter 限额视为站外费用的保护。
+本项只记录已确认的产品决定，不授权实现、生产访问、配置写入、部署或合并。实施边界见
+[RUNTIME-PROD 方案](RUNTIME_PROD_PLAN.md)。
+
 - **2026-10-06 BILL-PAYG r9（仅准备）**：主窗口技术决定原话：“Sonnet low 的输出语义改用同一线路的证据来证明，不再要求 low 自己触顶。”[出处](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6010007610)。仅Sonnet/anthropic/low采用 `outputSemanticsEvidence: same-route-none`、testedOutputLimit=2048，引用none直接触顶证据，low自身触顶数如实为0；取代对此设置要求两条自身触顶的旧限制，不改其他模型的证据要求或输出/费用硬限。r8第3条费用$0.0076005已确认、原UNKNOWN不计合格。r9只准备12条路由补测；已入账$6.537562065、累计上界<$25，三条Sonnet长样本沿用$0.60例外。
 
 - **2026-10-06 BILL-PAYG r8（仅准备）**：依据[主窗口技术决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6002163766)，允许 Luna purposes=[organizer, attached_organizer] 与三个已测格式交叉组合，Sonnet/Gemini按相同原则处理；统一有效期为 `2026-10-13T00:00:00Z`，覆盖测试窗口 `2026-10-09T15:59:59Z`。取代r7建议的24小时有效期及用途/格式必须逐对配置的建议限制，不改变真实输出证据要求。r8只准备、不发送；已入账$6.470137565，累计上界<$25。单条上限未因此放宽。
