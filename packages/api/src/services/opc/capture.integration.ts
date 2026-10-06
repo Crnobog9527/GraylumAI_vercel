@@ -31,7 +31,7 @@ const patch = (value = 'A', stepId = 'step-0', fieldId = 'goal') =>
   ({ stepId, fieldId, value, status: 'provisional', nature: 'fact', basis: 'user_statement' });
 const output = (patches = [patch()]) => JSON.stringify({ inputKind: 'answer', patches, notes: [] });
 
-async function fixture(extraFields = 0, informationCounts?: number[], allRequired = false) {
+async function fixture(extraFields = 0, informationCounts?: number[], allRequired = false, proposalField = false) {
   const owner = randomUUID(), model = randomUUID(), moduleId = randomUUID();
   const email = randomUUID() + '@example.test', password = 'Local-' + randomUUID() + '!';
   const made = await admin.auth.admin.createUser({ email, password, email_confirm: true });
@@ -47,6 +47,7 @@ async function fixture(extraFields = 0, informationCounts?: number[], allRequire
     field === 0 ? { id: 'goal', title: 'Goal', required: true, profileKey: 'goal_' + i }
       : { id: field === 1 ? 'other' : 'extra' + field, title: 'Other', required: allRequired }); });
   for (let i = 0; i < extraFields; i++) flow.steps[0].information!.push({ id: 'extra' + i, title: 'Extra', required: false });
+  if (proposalField) flow.steps[0].information![1]!.elicitation = "agent_proposal";
   await publishSkillPackage(admin, owner, pack);
   await db.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)', [registration, moduleId, pack.id, pack.revisionId, flow, registration]);
   const user = createClient(process.env.V3_LOCAL_REST!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false } });
@@ -981,7 +982,7 @@ it('RUNTIME: checklist save returns committed values and replay keeps the origin
 });
 it('RUNTIME: checklist notification shares normal admission billing and never writes extracted marker text',async()=>{
  const {checklistUpdatedInput}=await import('../../shared/opcQuestions');
- const f=await fixture(); await f.save('Saved manually');
+ const f=await fixture(0,undefined,false,true); await f.save('Saved manually');
  const organizer=randomUUID();
  await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Synthetic organizer','checklist-organizer','fixture','true',2048,64000)",[organizer]);
  await db.query("insert into system_settings(key,value) values('v3_summary_model_id',to_jsonb($1::text)),('v3_summary_max_tokens','2048') on conflict(key) do update set value=excluded.value",[organizer]);
@@ -1006,9 +1007,22 @@ it('RUNTIME: checklist notification shares normal admission billing and never wr
  const before=await f.steps();
  await db.query("update runtime_executions set state='completed',unavailable_reason=null,result=$2 where id=$1",
   [prepared.executionId,{body:'Received',summary:output([patch(request.input)])}]);
- expect(await f.apply(prepared.executionId)).toMatchObject({result:'host_checklist_updated'});
+ expect(await f.apply(prepared.executionId)).toMatchObject({discarded:[{reason:'host_checklist_updated'}]});
  expect(await f.steps()).toEqual(before);
- expect(await f.apply(prepared.executionId)).toMatchObject({result:'host_checklist_updated'});
+ expect(await f.apply(prepared.executionId)).toMatchObject({discarded:[{reason:'host_checklist_updated'}]});
+ const next=await f.service.prepareStep({...request,requestId:randomUUID()});
+ await rpc('runtime_cancel',{p_actor_id:f.actor,p_execution_id:next.executionId});
+ await db.query("update runtime_executions set state='completed',unavailable_reason=null,result=$2 where id=$1",
+  [next.executionId,{body:'A grounded recommendation',summary:output([
+   {...patch('Concrete mentor recommendation','step-0','other'),basis:'agent_proposal',nature:'decision'},
+   {...patch('Invented user fact'),basis:'agent_proposal'},
+   {...patch(request.input,'step-0','other'),basis:'agent_proposal'},
+  ])}]);
+ const applied=await f.apply(next.executionId);
+ expect(applied.discarded).toHaveLength(2);
+ expect((await f.steps())['step-0'].information.other.value).toBe('Concrete mentor recommendation');
+ expect((await f.steps())['step-0'].information.goal).toEqual(before['step-0'].information.goal);
+
 });
 it('RUNTIME: checklist read historical saturation has identical output with bounded work',async()=>{
  const f=await fixture(22);

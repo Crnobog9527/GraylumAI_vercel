@@ -155,8 +155,6 @@ BEGIN
    THEN code:='invalid_output';
   ELSIF jsonb_array_length(output->'patches')>12 THEN code:='invalid_output';END IF;
  END IF;
- IF code IS NULL AND ((e.payload#>>'{attachedOrganizer,input}')::jsonb#>>'{hostEvent,kind}')='checklist_updated'
- THEN code:='host_checklist_updated';END IF;
  IF code IS NULL THEN
   old_steps:=r.steps;
   material_changed:=EXISTS(SELECT 1 FROM jsonb_each(r.steps) s
@@ -172,6 +170,15 @@ BEGIN
     OR NOT EXISTS(SELECT 1 FROM jsonb_array_elements(r.workflow->'steps') s,jsonb_array_elements(s->'information') f
       WHERE s->>'id'=step_id AND f->>'id'=field_id)
    THEN discarded:=discarded||jsonb_build_array(jsonb_build_object('index',patch_index,'reason','invalid_patch'));CONTINUE;END IF;
+   -- Host notifications contain no user statement. Preserve only concrete mentor proposals
+   -- for fields explicitly declared as agent-owned by this pinned workflow.
+   IF ((e.payload#>>'{attachedOrganizer,input}')::jsonb#>>'{hostEvent,kind}')='checklist_updated'
+    AND (patch->>'basis'<>'agent_proposal' OR position('HOST_CHECKLIST_UPDATED:' in (patch->>'value'))>0
+     OR NOT EXISTS(SELECT 1 FROM jsonb_array_elements(r.workflow->'steps') s,
+      jsonb_array_elements(s->'information') f WHERE s->>'id'=step_id AND f->>'id'=field_id
+       AND f->>'elicitation'='agent_proposal'))
+   THEN discarded:=discarded||jsonb_build_array(jsonb_build_object('index',patch_index,'reason','host_checklist_updated'));
+    CONTINUE;END IF;
    value:=patch-ARRAY['stepId','fieldId','basis'];
    value:=jsonb_build_object('value',value->'value','status',value->'status','nature',value->'nature');
    meta:=coalesce(st->'fieldMeta'->field_id,'{}');

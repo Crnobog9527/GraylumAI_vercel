@@ -8,7 +8,7 @@
 
 点击“让导师接着聊”时，从 `@repo/api/src/shared/opcQuestions` 导入 `checklistUpdatedInput(fieldIds)`，把返回字符串作为普通 `opc.mentorTurnStream` 的 input，purpose 为 mentor；沿用当前 draftId/stepId 和普通发送的 requestId、organizeAfter 等参数。fieldIds 是当前步骤内已成功保存的字段 id（1–100 个、不能重复），不能传字段值。按钮每次明确点击生成新的 requestId；网络重试必须保留原 requestId 及原字段列表。不要传 answerSource，不使用 openingRequestId。后端不会因保存自动调用导师。
 
-通知只说明用户点击后报告的变更列表，不伪造逐字段变更审计。服务端从冻结的步骤内容读取真实当前值，拒绝未知字段。导师确认收到后依据已填内容追问缺口，已确认内容不擅自改写。附带整理仍走普通准入与计费，但该事件没有用户原话：organizer 的 userInput 为空、hostEvent.kind 为 checklist_updated；数据库拒绝该事件的所有提取补丁（记录 host_checklist_updated），避免重复写回已保存的表单。
+通知只说明用户点击后报告的变更列表，不伪造逐字段变更审计。服务端从冻结的步骤内容读取真实当前值，拒绝未知字段。导师确认收到后依据已填内容追问缺口，已确认内容不擅自改写。附带整理仍走普通准入与计费，但该事件没有用户原话：organizer 的 userInput 为空、hostEvent.kind 为 checklist_updated；数据库拒绝该事件的用户事实、user_statement 和通知标记补丁（记录 host_checklist_updated）；只允许向 Skill 明确声明的 agent_proposal 字段整理导师本轮具体建议，仍遵守原有保护字段/待采纳建议规则。
 
 ## 数据与容量边界
 
