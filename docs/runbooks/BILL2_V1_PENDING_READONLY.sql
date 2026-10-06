@@ -71,6 +71,7 @@ SELECT p.oid::regprocedure::text AS function_signature, md5(pg_get_functiondef(p
 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname = 'public' AND p.proname IN
   ('runtime_pending_financial_batch', 'runtime_financial_recovery', 'bill2_recovery_claim',
+   'bill2_read', 'bill2_pending_calls', 'bill2_record',
    'bill2_finalize', 'bill2_close', 'bill2_cancel', 'bill2_payg_metering_review_snapshot')
 ORDER BY function_signature;
 ROLLBACK;
