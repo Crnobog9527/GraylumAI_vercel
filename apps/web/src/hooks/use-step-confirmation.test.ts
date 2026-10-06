@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from "vitest";
 import { confirmKey, executeConfirmation, prepareConfirmation, type ConfirmationIo, type ConfirmRead } from "./use-step-confirmation";
-import { stepConfirmationValues, visibleStep, type FieldValue } from "@/components/opc/capture-state";
+import { stepConfirmationValues, visibleStep, type FieldValue, type VisibleStep } from "@/components/opc/capture-state";
 import type { ConfirmStepEnvelope } from "@/app/positioning/[draftId]/confirm-envelope";
 
 const v = (value: string, status: FieldValue["status"] = "provisional"): FieldValue => ({ value, status, nature: "decision" });
@@ -49,7 +49,7 @@ describe("prepareConfirmation", () => {
   it("stops with the fresh content when anything the user did not see arrived", async () => {
     const s = server({ goal: v("增加客流"), audience: v("自由职业者") });
     const seen = visibleStep((await s.io.refetch()).data!.information.s1);
-    for (const reviewed of [
+    for (const reviewed of <VisibleStep[]>[
       { ...seen, values: { ...seen.values, audience: v("别的受众") } },
       { ...seen, updates: {} },
       { ...seen, updates: { goal: "e1:h0" } },
