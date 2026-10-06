@@ -42,3 +42,16 @@ export function aggregate(scores) {
     points: scores.reduce((n, s) => n + s.checks.length, 0),
     pointsPassed: scores.reduce((n, s) => n + s.checks.filter(c => c.pass).length, 0) };
 }
+export function runStatistics(rows) {
+  const runs = [1, 2, 3].map(run => {
+    const selected = rows.filter(r => r.run === run);
+    return selected.length ? { run, complete: selected.length === 100, ...aggregate(selected) }
+      : { run, complete: false, count: 0, correct: null, accuracy: null };
+  });
+  const complete = runs.every(r => r.complete);
+  const meanCorrect = complete ? runs.reduce((n, r) => n + r.correct, 0) / 3 : null;
+  return { runs, meanCorrect,
+    minCorrect: complete ? Math.min(...runs.map(r => r.correct)) : null,
+    maxCorrect: complete ? Math.max(...runs.map(r => r.correct)) : null,
+    sampleSdCorrect: complete ? Math.sqrt(runs.reduce((n, r) => n + (r.correct - meanCorrect) ** 2, 0) / 2) : null };
+}

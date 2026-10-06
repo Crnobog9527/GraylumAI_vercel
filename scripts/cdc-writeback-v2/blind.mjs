@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { randomInt, randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { root, read, save, assert, hash } from './source.mjs';
-import { objectiveChecks, aggregate } from './score.mjs';
+import { objectiveChecks, aggregate, runStatistics } from './score.mjs';
 const [mode] = process.argv.slice(2);
 assert(['pack', 'report'].includes(mode), 'BLIND_USAGE');
 const path = name => join(root, name);
@@ -11,6 +11,10 @@ const fileHash = name => hash(readFileSync(path(name)));
 const manifest = read(path('manifest.json'));
 assert(manifest.casesHash === fileHash('cases.json'), 'GOLD_CHANGED');
 assert(read(path('replay-proof.json')).resultHash === fileHash('replay/reasoning-results.json'), 'REPLAY_CHANGED');
+const stopped = existsSync(path('sealed-stopped.json')) ? read(path('sealed-stopped.json')) : null;
+if (stopped) assert(read(path('replay-proof.json')).stoppedSealHash === fileHash('sealed-stopped.json') &&
+  stopped.responsesHash === fileHash('organizer-responses.jsonl') && stopped.budgetHash === fileHash('budget.jsonl'), 'STOPPED_SEAL_CHANGED');
+const expectedCount = stopped?.received ?? 300;
 const cases = read(path('cases.json')), replay = read(path('replay/reasoning-results.json'));
 const frozen = read(path('mentor/frozen-private.json'));
 assert(read(path('organizer-manifest.json')).frozenHash === fileHash('mentor/frozen-private.json'), 'FREEZE_CHANGED');
@@ -30,10 +34,11 @@ function shuffle(items) {
   return items;
 }
 if (mode === 'pack') {
-  assert(replay.length === 300, 'BLIND_INCOMPLETE');
+  assert(replay.length === expectedCount, 'BLIND_INCOMPLETE');
   const items = [], mapping = [];
   for (const c of cases) for (let run = 1; run <= 3; run++) {
     const row = replay.find(r => r.slot === c.id && r.effort === `run-${run}`);
+    if (!row && stopped) continue;
     const original = frozen.results.find(r => r.slot === c.id);
     assert(row && original?.before, 'BLIND_MISSING');
     const opaqueId = randomUUID(), { id, ...gold } = c;
@@ -43,7 +48,7 @@ if (mode === 'pack') {
       formatError: row.formatError, protectedDirectChanged: row.protectedDirectChanged,
       checks: objectiveChecks(c, original.before, row.after) }));
   }
-  // Validate all 300 items before creating one-shot outputs.
+  // Validate every available, sealed item before creating one-shot outputs.
   mkdirSync(path('blind'), { mode: 0o700 });
   save(path('private-mapping.json'), mapping);
   save(path('blind/packet.json'), { createdAt: new Date().toISOString(), goldHash: manifest.casesHash,
@@ -66,7 +71,7 @@ if (mode === 'pack') {
     Date.parse(lock.lockedAt) >= Date.parse(packet.createdAt) && Date.parse(lock.lockedAt) <= Date.now(), 'SCORE_LOCK');
   assert(packet.mappingHash === fileHash('private-mapping.json'), 'MAPPING_CHANGED');
   const scores = read(path('blind/scores.json')), mapping = read(path('private-mapping.json'));
-  assert(scores.length === 300 && new Set(scores.map(s => s.opaqueId)).size === 300, 'SCORE_COUNT');
+  assert(scores.length === expectedCount && new Set(scores.map(s => s.opaqueId)).size === expectedCount, 'SCORE_COUNT');
   const responses = readFileSync(path('organizer-responses.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
   const rows = mapping.map(m => {
     const score = scores.find(s => s.opaqueId === m.opaqueId), item = packet.items.find(i => i.opaqueId === m.opaqueId);
@@ -80,15 +85,11 @@ if (mode === 'pack') {
       checks: score.checks, unsupportedFact: score.unsupportedFact, failureTypes: score.failureTypes,
       costUsd: usage.cost, elapsedMs: raw.elapsedMs, reasoningTokens: usage.completion_tokens_details?.reasoning_tokens ?? null };
   });
-  const runs = [1, 2, 3].map(run => ({ run, ...aggregate(rows.filter(r => r.run === run)) }));
-  const mean = runs.reduce((n, r) => n + r.correct, 0) / 3;
-  const report = { unblindedAt: new Date().toISOString(), lock, rows, runs, meanCorrect: mean,
-    minCorrect: Math.min(...runs.map(r => r.correct)), maxCorrect: Math.max(...runs.map(r => r.correct)),
-    sampleSdCorrect: Math.sqrt(runs.reduce((n, r) => n + (r.correct - mean) ** 2, 0) / 2),
+  const report = { unblindedAt: new Date().toISOString(), lock, stopped, rows, ...runStatistics(rows),
     categories: [...new Set(cases.map(c => c.category))].map(category => ({ category,
       ...aggregate(rows.filter(r => r.category === category)) })),
     variableCases: cases.filter(c => new Set(rows.filter(r => r.caseId === c.id).map(r => r.correct)).size > 1).map(c => c.id) };
   save(path('report.json'), report);
-  console.log(JSON.stringify({ runs, meanCorrect: mean, range: [report.minCorrect, report.maxCorrect],
+  console.log(JSON.stringify({ runs: report.runs, meanCorrect: report.meanCorrect, range: [report.minCorrect, report.maxCorrect],
     sampleSdCorrect: report.sampleSdCorrect, variableCases: report.variableCases, categories: report.categories }, null, 2));
 }
