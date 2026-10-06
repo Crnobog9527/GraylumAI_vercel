@@ -2,10 +2,11 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { root } from './budget.mjs';
 import { assert, hash, read, save } from '../cdc-b2-eval/reasoningSource.mjs';
 export { assert, hash, read, save, root };
-export const repo = new URL('../..', import.meta.url).pathname;
+export const repo = fileURLToPath(new URL('../..', import.meta.url));
 export const skillPath = join(root, '../cdc-writeback-v2/skill-388fa8cc');
 export const profiles = {
   mentor: { model: 'anthropic/claude-sonnet-5.5', tag: 'anthropic', provider: 'Anthropic',
