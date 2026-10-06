@@ -225,3 +225,26 @@ describe("background refresh", () => {
     expect(t.io.refreshLater).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("saved fields", () => {
+  it("reports only the fields a committed write changed", async () => {
+    const t = setup();
+    const onSaved = vi.fn();
+    t.io.onSaved = onSaved;
+    t.edit({ a: v("new") });
+    await t.autosave.flush("s1");
+    expect(onSaved).toHaveBeenCalledWith("s1", ["a"]);
+  });
+
+  it("reports nothing when the write changed nothing and nothing for a failed write", async () => {
+    const t = setup();
+    const onSaved = vi.fn();
+    t.io.onSaved = onSaved;
+    t.edit({ a: v("old") });
+    await t.autosave.flush("s1");
+    t.edit({ b: v("x") });
+    (t.io.write as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("network"));
+    await expect(t.autosave.flush("s1")).rejects.toThrow("network");
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+});

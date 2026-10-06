@@ -27,9 +27,24 @@ export type AutosaveIo = {
   setEdits: (stepId: string, values: Values | null) => void;
   setSaveState: (stepId: string, state: SaveState) => void;
   setConflict: (stepId: string, conflict: { current: Values; fields: string[] }) => void;
+  /** Fields a committed write changed from the values it was based on. */
+  onSaved?: (stepId: string, fieldIds: string[]) => void;
   onError: (message: string) => void;
   newId: () => string;
 };
+
+/**
+ * "保留我的这些修改": the user's values for the conflicting fields over the server's current values.
+ * The user has compared these exact server values, so they become the edit base; later changes still conflict.
+ */
+export function keepConflictingEdits(storage: AutosaveIo["storage"], draftId: string, stepId: string, edited: Values,
+  conflict: { current: Values; fields: string[] }) {
+  const baseRaw = storage.getItem(informationBaseKey(draftId, stepId));
+  const values = { ...mergeInformation(baseRaw ? JSON.parse(baseRaw) : {}, edited, conflict.current).values } as Values;
+  for (const field of conflict.fields) values[field] = edited[field]!;
+  storage.setItem(informationBaseKey(draftId, stepId), JSON.stringify(conflict.current));
+  return values;
+}
 
 /** sessionStorage, looked up on use: the page also renders where it does not exist. */
 export const tabStorage: AutosaveIo["storage"] = {
@@ -42,6 +57,11 @@ const FIELD_CONFLICT = "其他窗口修改了相同信息。你的输入仍保�
 const autosaveKey = (draftId: string, stepId: string) => "opc-information-autosave:" + draftId + ":" + stepId;
 export const informationBaseKey = (draftId: string, stepId: string) => "opc-information-base:" + draftId + ":" + stepId;
 const confirmingKey = (draftId: string, stepId: string) => "opc-confirm-step:" + draftId + ":" + stepId;
+
+function sameValue(a: Information | undefined, b: Information | undefined) {
+  return (a?.value ?? "") === (b?.value ?? "") && (a?.status ?? "unknown") === (b?.status ?? "unknown") &&
+    (a?.nature ?? "unknown") === (b?.nature ?? "unknown");
+}
 
 function savedVersion(result: unknown) {
   const version = result && typeof result === "object" ? (result as { version?: unknown }).version : undefined;
@@ -81,7 +101,7 @@ export function createInformationAutosave(io: () => AutosaveIo) {
     x.setSaveState(stepId, "saving");
     try {
       for (;;) {
-        let fixed: Fixed | null = null;
+        let fixed: Fixed | null = null, before: Values | null = null;
         try {
           const raw = x.storage.getItem(key);
           if (raw) fixed = JSON.parse(raw);
@@ -102,6 +122,7 @@ export function createInformationAutosave(io: () => AutosaveIo) {
             x.setConflict(stepId, { current: current.values, fields: merged.conflicts });
             throw new Error("OPC_FIELD_CONFLICT:" + merged.conflicts.join(","));
           }
+          before = current.values;
           fixed = { draftId: x.draftId, stepId, requestId: x.newId(), expectedVersion: current.version,
             values: merged.values as Values, editingSnapshot: JSON.stringify(wanted) };
           x.storage.setItem(key, JSON.stringify(fixed));
@@ -122,6 +143,10 @@ export function createInformationAutosave(io: () => AutosaveIo) {
           throw cause;
         }
         x.storage.removeItem(key);
+        // A request retained from earlier was based on what the page holds now, at best.
+        before ??= newest(stepId, x.cached(stepId))?.values ?? {};
+        const changed = Object.keys(fixed.values).filter(id => !sameValue(fixed.values[id], before![id]));
+        if (changed.length) x.onSaved?.(stepId, changed);
         const version = savedVersion(result);
         if (version === null) await x.refetch(stepId);
         else {
