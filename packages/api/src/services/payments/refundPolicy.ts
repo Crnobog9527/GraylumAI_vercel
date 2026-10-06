@@ -78,7 +78,6 @@ export function evaluateRefundPolicy(raw: unknown): RefundPolicyResult {
   if (input.accountState === 'violation_terminated') return reject('violation_terminated');
   if (input.accountState === 'unknown') return review('account_unresolved');
   if (order.kind === 'unknown') return review('purchase_kind_unresolved');
-  if (input.feePermitted === 'unknown') return review('fee_requires_review');
   if (input.reason === 'ordinary') {
     if (order.kind === 'renewal') return reject('renewal');
     if (submitted - paid > REFUND_WINDOW_MICROSECONDS) return reject('outside_refund_window');
@@ -101,6 +100,7 @@ export function evaluateRefundPolicy(raw: unknown): RefundPolicyResult {
       return review('consumption_unresolved');
     }
   }
+  if (input.feePermitted === 'unknown') return review('fee_requires_review');
   let quote: RefundQuote;
   try {
     quote = { ...calculateRefundMoney({ paidMinor: order.paidMinor, refundedMinor: order.refundedMinor,

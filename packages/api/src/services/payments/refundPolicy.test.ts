@@ -106,6 +106,14 @@ describe('ordinary eligibility and evidence', () => {
     const input = fixture(); input.accountState = 'closed';
     expect(evaluateRefundPolicy(input)).toMatchObject({ status: 'eligible', executable: false });
   });
+  it.each([
+    ['renewal', (i: RefundPolicyInput) => { i.order.kind = 'renewal'; }],
+    ['outside_refund_window', (i: RefundPolicyInput) => { i.ticket.submittedAt = observedAt; }],
+    ['account_consumed_since_payment', (i: RefundPolicyInput) => { i.consumption.state = 'consumed'; }],
+  ] as const)('rejects known %s before unknown fee evidence', (reason, edit) => {
+    const input = fixture(); input.feePermitted = 'unknown'; edit(input);
+    expect(evaluateRefundPolicy(input)).toMatchObject({ status: 'rejected', reason, quote: null });
+  });
   it('invalid input fails closed without an exception', () => {
     for (const input of [null, {}, [], 'invalid']) expect(evaluateRefundPolicy(input).status).toBe('review_required');
   });
