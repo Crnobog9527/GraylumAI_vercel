@@ -56,9 +56,19 @@ describe('conversation checklist mentor prompt',()=>{
   expect(prompt).toContain('Never invent the user\'s experience, strengths, customers, prices, results, numbers or research findings');
   expect(prompt).toContain('total time across combined activities');
   expect(prompt).toContain('an occasional maximum is not a sustainable commitment');
-  expect(prompt).toContain('this overrides every case');
+  expect(prompt).toContain('not the confirmation gate');
   expect(prompt).toContain('with no card, follow-up question, confirmation request or next-topic invitation');
   expect(prompt).toContain('one main question about one gap in the current step');
   expect(prompt).toContain('acknowledge briefly without reopening it or offering to advance');
  });
+});
+
+it('confirmation gate overrides opening and question rules without turning assent into authorization',()=>{
+ expect(prompt).toContain('Step confirmation gate overrides opening, gap, card and no-question rules');
+ expect(prompt).toContain('never generate it or call ask_question for confirmation');
+ expect(prompt).toContain('snapshot and prerequisite-version checks');
+ expect(prompt).toContain('neither mentor nor extractor can confirm');
+ expect(prompt).toContain('volunteered later-step information');
+ for (const phrase of ['继续','下一步','没问题','好的']) expect(prompt).toContain(phrase);
+ expect(prompt).not.toContain('confirm this step in the right panel');
 });
