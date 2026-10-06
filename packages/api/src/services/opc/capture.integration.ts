@@ -31,7 +31,7 @@ const patch = (value = 'A', stepId = 'step-0', fieldId = 'goal') =>
   ({ stepId, fieldId, value, status: 'provisional', nature: 'fact', basis: 'user_statement' });
 const output = (patches = [patch()]) => JSON.stringify({ inputKind: 'answer', patches, notes: [] });
 
-async function fixture(extraFields = 0, informationCounts?: number[], allRequired = false) {
+async function fixture(extraFields = 0, informationCounts?: number[], allRequired = false, proposalField = false) {
   const owner = randomUUID(), model = randomUUID(), moduleId = randomUUID();
   const email = randomUUID() + '@example.test', password = 'Local-' + randomUUID() + '!';
   const made = await admin.auth.admin.createUser({ email, password, email_confirm: true });
@@ -47,6 +47,7 @@ async function fixture(extraFields = 0, informationCounts?: number[], allRequire
     field === 0 ? { id: 'goal', title: 'Goal', required: true, profileKey: 'goal_' + i }
       : { id: field === 1 ? 'other' : 'extra' + field, title: 'Other', required: allRequired }); });
   for (let i = 0; i < extraFields; i++) flow.steps[0].information!.push({ id: 'extra' + i, title: 'Extra', required: false });
+  if (proposalField) flow.steps[0].information![1]!.elicitation = "agent_proposal";
   await publishSkillPackage(admin, owner, pack);
   await db.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)', [registration, moduleId, pack.id, pack.revisionId, flow, registration]);
   const user = createClient(process.env.V3_LOCAL_REST!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false } });
@@ -215,10 +216,14 @@ it('RUNTIME: capture complete callback persists and new projection strips privat
   await f.save('user');
   await f.apply(await f.seed(output([patch('suggestion')])));
   const projection = (await db.query('select runtime_work_projection($1,$2,$3) v', [f.actor, f.d.sessionId, f.d.roundId])).rows[0].v;
-  expect(projection.steps['step-0'].fieldMeta.goal).toEqual({ protected: true });
+  expect(projection.steps['step-0'].fieldMeta.goal).toEqual({protected:true,source:'user',basis:'user_statement',hasPendingSuggestion:true});
   expect(projection.steps['step-0'].information.goal.value).toBe('user');
   const view = await f.read();
   expect(view.information['step-0'].meta.goal.suggestion.value).toBe('suggestion');
+  await db.query("update runtime_executions set unavailable_reason='revoked' where id=$1",
+    [view.information['step-0'].meta.goal.suggestion.executionId]);
+  const hidden=(await db.query('select runtime_work_projection($1,$2,$3) v',[f.actor,f.d.sessionId,f.d.roundId])).rows[0].v;
+  expect(hidden.steps['step-0'].fieldMeta.goal.hasPendingSuggestion).toBe(false);
 });
 
 it.each(['nonempty', 'cleared', 'confirmed', 'deferred', 'changed-fingerprint', 'missing-record', 'A-B-A', 'A-empty-A'])
@@ -385,6 +390,11 @@ it('RUNTIME: capture rollback rejects a second rollback, preserves values and pr
   await f.apply(await f.seed());
   const rollback = readFileSync(resolve('../../docs/launch/rollback/CONVERSATION_CAPTURE_B1.sql'), 'utf8');
   const forward = readFileSync(resolve('../db/migrations/0159_opc_capture.sql'), 'utf8');
+  // Exercise the historical rollback against its exact 0159 definitions, then restore current migration.
+  const latest = readFileSync(resolve('../db/migrations/0182_opc_mentor_checklist.sql'), 'utf8');
+  for (const name of ['opc_information','runtime_work_projection','opc_capture_apply']) {
+    await db.query(forward.match(new RegExp('CREATE OR REPLACE FUNCTION ' + name + '[\\s\\S]*?END \\$\\$;'))![0]);
+  }
   const definitions = async () => (await db.query(`select proname,pg_get_functiondef(oid) body from pg_proc
     where pronamespace='public'::regnamespace and proname in ('opc_information','opc_query','runtime_work_projection') order by proname`)).rows;
   try {
@@ -399,6 +409,7 @@ it('RUNTIME: capture rollback rejects a second rollback, preserves values and pr
   expect((await f.steps())['step-0'].information.goal.value).toBe('A');
   await db.query(forward);
   expect((await f.steps())['step-0'].information.goal.value).toBe('A');
+  await db.query(latest);
 });
 
 it('RUNTIME: capture information byte capacity falls back to suggestions', async () => {
@@ -425,7 +436,7 @@ it.each(['ascii', 'utf8'])('RUNTIME: full fields and protected markers fit 32768
     await f.service.information({ draftId: f.draft.draftId, requestId: randomUUID(), stepId, expectedVersion: step.version, values });
   }
   const root = resolve(import.meta.dirname, '../../../../..');
-  const forward = readFileSync(resolve(root, 'packages/db/migrations/0159_opc_capture.sql'), 'utf8');
+  const forward = readFileSync(resolve(root, 'packages/db/migrations/0182_opc_mentor_checklist.sql'), 'utf8');
   const rollback = readFileSync(resolve(root, 'docs/launch/rollback/CONVERSATION_CAPTURE_B1.sql'), 'utf8');
   const oldProjection = rollback.match(/CREATE OR REPLACE FUNCTION runtime_work_projection[\s\S]*?END \$\$;/)![0];
   let oldId: string;
@@ -446,7 +457,7 @@ it.each(['ascii', 'utf8'])('RUNTIME: full fields and protected markers fit 32768
   for (const step of Object.values(frozen.payload.scopeMaterial.content.work.steps) as Array<{ fieldMeta: Record<string, unknown>; information: Record<string, { value: string }> }>) {
     expect(Object.keys(step.fieldMeta).sort()).toEqual(Object.keys(step.information).sort());
     for (const [field, meta] of Object.entries(step.fieldMeta)) {
-      expect(meta).toEqual({ protected: true });
+      expect(meta).toMatchObject({protected:true,source:'user',hasPendingSuggestion:true});
       expect(step.information[field].value).toHaveLength(400); fields++;
     }
   }
@@ -800,7 +811,8 @@ it('RUNTIME: migration rejects an unexpected previous function definition before
     await db.query('rollback');
     expect((await db.query("select md5(pg_get_functiondef('opc_capture_apply(uuid,uuid,uuid)'::regprocedure)) h")).rows[0].h).toBe(before);
   } finally { await db.query('rollback'); await db.query(original); }
-  await db.query(forward);
+  const latest = readFileSync(resolve('../db/migrations/0182_opc_mentor_checklist.sql'), 'utf8');
+  await db.query(latest);
 });
 
 it('RUNTIME: rollback rejects drift in every replaced or removed definition without changing functions', async () => {
@@ -951,3 +963,89 @@ it('RUNTIME: B2 opens each step only once and freezes organizer v2 on the exact 
     .toMatchObject({executionId:first.executionId});
   expect((await db.query('select count(*)::int n from runtime_executions where session_id=$1',[f.d.sessionId])).rows[0].n).toBe(1);
 });
+
+it('RUNTIME: checklist save returns committed values and replay keeps the original version',async()=>{
+ const f=await fixture(); const current=await f.steps();
+ const request={draftId:f.draft.draftId,requestId:randomUUID(),stepId:'step-0',expectedVersion:current['step-0'].version,
+  values:{...current['step-0'].information,goal:tuple('User supplied fact','provisional','fact')}};
+ const saved=await f.service.information(request);
+ expect(saved).toEqual({version:request.expectedVersion+1,values:request.values});
+ await f.save('Later edit');
+ expect(await f.service.information(request)).toEqual(saved);
+ await expect(f.service.information({...request,values:{...request.values,goal:tuple('Conflict')}})).rejects.toThrow();
+ // Old successful requests still yield their own values, never a newer whole-form read.
+ const legacyId=randomUUID();
+ await db.query(`insert into artifact_requests(project_id,request_id,round_id,action,payload,response)
+  select project_id,$3,round_id,action,payload,response-'values' from artifact_requests
+  where project_id=$1 and request_id=$2`,[f.d.projectId,request.requestId,legacyId]);
+ expect(await f.service.information({...request,requestId:legacyId})).toEqual(saved);
+});
+it('RUNTIME: checklist notification shares normal admission billing and never writes extracted marker text',async()=>{
+ const {checklistUpdatedInput}=await import('../../shared/opcQuestions');
+ const f=await fixture(0,undefined,false,true); await f.save('Saved manually');
+ const organizer=randomUUID();
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Synthetic organizer','checklist-organizer','fixture','true',2048,64000)",[organizer]);
+ await db.query("insert into system_settings(key,value) values('v3_summary_model_id',to_jsonb($1::text)),('v3_summary_max_tokens','2048') on conflict(key) do update set value=excluded.value",[organizer]);
+ const request={draftId:f.draft.draftId,requestId:randomUUID(),stepId:'step-0',purpose:'mentor',
+  input:checklistUpdatedInput(['goal']),organizeAfter:true};
+ const prepared=await f.service.prepareStep(request);
+ expect(await f.service.prepareStep(request)).toEqual(prepared);
+ const row=(await db.query('select * from runtime_executions where id=$1',[prepared.executionId])).rows[0];
+ const financial=async()=>(await db.query(`select r.reserved,r.charged,r.pre_deduct_id,p.credits,
+  (select count(*)::int from bill2_runs where actor_id=$1) runs from bill2_runs r
+  join profiles p on p.id=r.actor_id where r.id=$2`,[f.actor,row.billing_run_id])).rows[0];
+ const admitted=await financial();expect(admitted.runs).toBe(1);
+ await f.service.prepareStep(request);expect(await financial()).toEqual(admitted);
+ expect(row.payload.hostTurnContext).toMatchObject({updatedFieldIds:['goal']});
+ expect(row.payload.hostTurnContext.checklist[0].fields[0]).toMatchObject({value:'Saved manually',source:'user',basis:'user_statement'});
+ expect(JSON.parse(row.payload.attachedOrganizer.input)).toMatchObject({userInput:'',hostEvent:{kind:'checklist_updated'}});
+ expect((await db.query('select count(*)::int n from runtime_executions where session_id=$1 and request_id=$2',
+  [f.d.sessionId,request.requestId])).rows[0].n).toBe(1);
+ await expect(f.service.prepareStep({...request,input:checklistUpdatedInput(['other'])})).rejects.toThrow('OPC_REQUEST_CONFLICT');
+ await rpc('runtime_cancel',{p_actor_id:f.actor,p_execution_id:prepared.executionId});
+ expect((await financial()).charged).toBe(0);
+ const before=await f.steps();
+ await db.query("update runtime_executions set state='completed',unavailable_reason=null,result=$2 where id=$1",
+  [prepared.executionId,{body:'Received',summary:output([patch(request.input)])}]);
+ expect(await f.apply(prepared.executionId)).toMatchObject({discarded:[{reason:'host_checklist_updated'}]});
+ expect(await f.steps()).toEqual(before);
+ expect(await f.apply(prepared.executionId)).toMatchObject({discarded:[{reason:'host_checklist_updated'}]});
+ const next=await f.service.prepareStep({...request,requestId:randomUUID()});
+ await rpc('runtime_cancel',{p_actor_id:f.actor,p_execution_id:next.executionId});
+ await db.query("update runtime_executions set state='completed',unavailable_reason=null,result=$2 where id=$1",
+  [next.executionId,{body:'A grounded recommendation',summary:output([
+   {...patch('Concrete mentor recommendation','step-0','other'),basis:'agent_proposal',nature:'decision'},
+   {...patch('Invented user fact'),basis:'agent_proposal'},
+   {...patch(request.input,'step-0','other'),basis:'agent_proposal'},
+  ])}]);
+ const applied=await f.apply(next.executionId);
+ expect(applied.discarded).toHaveLength(2);
+ expect((await f.steps())['step-0'].information.other.value).toBe('Concrete mentor recommendation');
+ expect((await f.steps())['step-0'].information.goal).toEqual(before['step-0'].information.goal);
+
+});
+it('RUNTIME: checklist read historical saturation has identical output with bounded work',async()=>{
+ const f=await fixture(22);
+ const states=await f.steps();
+ const values=Object.fromEntries(Object.keys(states['step-0'].information).map(id=>[id,tuple('Known','confirmed','fact')]));
+ await db.query(`insert into artifact_requests(project_id,request_id,round_id,action,payload,response)
+  select $1,gen_random_uuid(),$2,'opc_information',jsonb_build_object('stepId','step-0','expectedVersion',n,'values',$3::jsonb),'{}'
+  from generate_series(1,2000) n`,[f.d.projectId,f.d.roundId,values]);
+ const signature='opc_historical_reach(uuid,uuid,text)';
+ const current=(await db.query('select pg_get_functiondef($1::regprocedure) def',[signature])).rows[0].def;
+ const source=readFileSync(resolve('../db/migrations/0111_opc_historical_reach.sql'),'utf8');
+ const old=source.match(/CREATE OR REPLACE FUNCTION opc_historical_reach[\s\S]*?END \$\$;/)![0];
+ const sample=async()=>{
+  const times:number[]=[];let result;
+  for(let i=0;i<8;i++){
+   const start=performance.now();result=(await db.query('select opc_query($1,$2) v',[f.actor,f.draft.draftId])).rows[0].v;
+   if(i)times.push(performance.now()-start);
+  }
+  times.sort((a,b)=>a-b);return {medianMs:times[3]!,maxMs:times.at(-1)!,result};
+ };
+ let before:Awaited<ReturnType<typeof sample>>;
+ try {await db.query(old);before=await sample();}finally{await db.query(current);}
+ const after=await sample();expect(after.result).toEqual(before!.result);
+ console.info('CHECKLIST_READ_BENCHMARK',JSON.stringify({environment:'local disposable PostgreSQL',requests:2000,fields:24,
+  samples:7,before:{medianMs:before!.medianMs,maxMs:before!.maxMs},after:{medianMs:after.medianMs,maxMs:after.maxMs}}));
+},60000);

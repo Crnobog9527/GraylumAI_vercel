@@ -120,7 +120,7 @@
   "packages/api/src/services/diagnostics.ts": {"lines":1234,"longLines":1},
   "packages/api/src/services/membershipEligibility.ts": {"lines":727},
   "packages/api/src/services/modelRouter.ts": {"longLines":5},
-  "packages/api/src/services/opc/service.ts": {"lines":567,"longLines":12},
+  "packages/api/src/services/opc/service.ts": {"lines":562,"longLines":12},
   "packages/api/src/services/openRouterSearch.ts": {"longLines":1},
   "packages/api/src/services/providerUsage.ts": {"longLines":9},
   "packages/api/src/services/providerUtils.ts": {"longLines":1},
