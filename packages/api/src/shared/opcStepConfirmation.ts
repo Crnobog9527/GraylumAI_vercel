@@ -31,7 +31,8 @@ export function stepConfirmation(state: Information | undefined, valid: boolean)
     if (!hasContent(field.id) || meta?.source === 'user' ||
         value?.status === 'confirmed' || value?.status === 'deferred') return false;
     // Missing legacy provenance is not proof of manual entry. Never adopt pending suggestions here.
-    return (meta?.basis ?? value?.basis) === 'agent_proposal' || value?.status === 'provisional';
+    return (meta?.basis ?? value?.basis) === 'agent_proposal' || value?.status === 'provisional' ||
+      (meta?.source === 'capture' && value?.status === 'unclear');
   }).map(field => field.id);
   return {requiredComplete, stepConfirmed, stepReady: requiredComplete && !stepConfirmed, needsLookFieldIds};
 }

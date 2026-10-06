@@ -37,3 +37,12 @@ it('read projection uses each step validity and leaves stored data untouched', (
   }});
   expect(JSON.stringify(draft)).toBe(before);
 });
+
+it('flags known captured unclear values but not manual or provenance-free unclear values', () => {
+  const ids = ['captured', 'manual', 'legacy'];
+  const state = {schema: ids.map(id => ({id, required: true})),
+    values: Object.fromEntries(ids.map(id => [id, {value: 'Uncertain but substantive', status: 'unclear'}])),
+    meta: {captured: {source: 'capture', basis: 'user_statement'}, manual: {source: 'user'}}};
+  expect(stepConfirmation(state, false)).toEqual({requiredComplete: true, stepReady: true,
+    stepConfirmed: false, needsLookFieldIds: ['captured']});
+});

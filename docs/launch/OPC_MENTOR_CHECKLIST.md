@@ -49,7 +49,8 @@ hostTurnContext 的每个字段携带 value、nature、basis、source、protecte
   不等于整步确认；上游变化导致整步失效时返回 false。
 - `stepReady`：`requiredComplete && !stepConfirmed`，用于决定是否展示待确认卡；不是自动推进许可。
 - `needsLookFieldIds`：按 schema 顺序，仅当前步骤、非空、未 confirmed/deferred、非 `source=user` 的字段，
-  满足 `basis=agent_proposal`（meta 优先于 value）或 `status=provisional`。包含可选字段。
+  满足 `basis=agent_proposal`（meta 优先于 value）、`status=provisional`，
+  或已知 `source=capture` 且 `status=unclear`。包含可选字段。
   用户手填或已采纳为用户值的字段不标记；旧草稿缺少来源时，provisional 保守标记待看。
   整步已确认返回空列表。待采纳 suggestion 不当成当前值，不在这里自动采纳。
 
