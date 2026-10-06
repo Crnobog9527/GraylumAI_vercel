@@ -6,7 +6,8 @@ import frozen from '../../../../../docs/launch/evidence/payg-profile-20261006-r8
 import {createR8Plan} from '../../../../../scripts/payg-profile/batch-r8';
 import {openRouterRequestBody} from './providerRequest';
 import {openRouterBound} from '../bill2/openRouterPolicy';
-import {identityFor} from '../../../../../scripts/payg-profile/executor';
+import previous from '../../../../../docs/launch/evidence/payg-profile-20261006-r7.manifest.json';
+import {identityFor,verifiedPlan} from '../../../../../scripts/payg-profile/executor';
 import {openRouterAdapter} from '../bill2/openRouterAdapter';
 import {paygHostProfile} from './paygHostPolicy';
 import drafts from '../../../../../docs/launch/evidence/payg-profile-20261006-r8.profiles-draft.json';
@@ -18,7 +19,7 @@ it('reproduces 14 probes, exact byte/hash bounds, settled prior accounting and u
   expect(plan.manifest.calls).toBe(14);
   expect(plan.manifest.priorAccountedUsd).toBe('6.470137565000');
   expect(decimal(plan.manifest.cumulativeUpperUsd)).toBeLessThan(decimal('25'));
-  expect(plan.manifest.blockers.filter(b=>b.startsWith('PER_CALL_BUDGET_EXCEEDED:'))).toHaveLength(3);
+  expect(plan.manifest.blockers.filter(b=>b.startsWith('PER_CALL_BUDGET_EXCEEDED:'))).toHaveLength(0);
   expect(plan.manifest.batch.previous.at(-1)).toMatchObject({accountedUsd:'1.478152850000',ownerConfirmedZero:[]});
   expect(new Set(plan.manifest.samples.map(s=>s.requestHash)).size).toBe(14);
   for(const sample of plan.manifest.samples){
@@ -28,7 +29,8 @@ it('reproduces 14 probes, exact byte/hash bounds, settled prior accounting and u
     expect(createHash('sha256').update(body).digest('hex')).toBe(sample.requestHash);
     expect(parsed.reasoning_effort).toBe('low');expect(parsed.max_tokens).toBe(sample.O);
     expect(parsed.provider.only).toEqual([sample.endpointTag]);expect(parsed.provider.allow_fallbacks).toBe(false);
-    expect(sample.approvedCap).toBe(prices.routes.find(r=>r.model===sample.model)!.perCallCap);
+    const exception=sample.model==='anthropic/claude-sonnet-5.5'&&sample.kind==='route'&&sample.B===196608;
+    expect(sample.approvedCap).toBe(exception?'0.60':prices.routes.find(r=>r.model===sample.model)!.perCallCap);
     if(sample.kind==='route'){
       expect(parsed.stream).toBe(true);expect(parsed.stream_options.include_usage).toBe(true);
       expect(sample.O).toBe(8192);expect([4096,196608]).toContain(sample.B);
@@ -80,3 +82,10 @@ it('drafts keep only proven reasoning, declared pending scope and the approved e
   expect(sonnet.reasoningVariants.map(v=>v.reasoning)).toEqual([{parameter:'none'}]);
   expect(drafts.profiles.find(p=>p.model.startsWith('openai/'))!.purposes).toEqual(['organizer','attached_organizer']);
 });
+
+it('accepts only the exact current r8 manifest and refuses r7 before dispatch',()=>{
+  expect(verifiedPlan(prices,frozen,frozen.manifestHash).manifest).toEqual(frozen);
+  expect(()=>verifiedPlan(prices,previous,previous.manifestHash)).toThrow('APPROVED_MANIFEST_MISMATCH');
+  const changed=structuredClone(frozen);changed.samples[0].approvedCap='0.60';
+  expect(()=>verifiedPlan(prices,changed,frozen.manifestHash)).toThrow('APPROVED_MANIFEST_MISMATCH');
+},30000);

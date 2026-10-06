@@ -3,23 +3,40 @@ import {beforeAll,expect,it,vi} from 'vitest';
 import {createHash} from 'node:crypto';
 import prices from '../../../../../scripts/payg-profile/plan-prices.json';
 import catalog from '../../../../../scripts/payg-profile/catalog-2026-10-06-r7.json';
-import {createR7Plan} from '../../../../../scripts/payg-profile/batch-r7';
+import {createR8Plan} from '../../../../../scripts/payg-profile/batch-r8';
 import r5 from '../../../../../docs/launch/evidence/payg-profile-20261006-r5.manifest.json';
 import {executePlan,verifiedPlan,verifyCatalog,failureCode,type Event,type Plan} from '../../../../../scripts/payg-profile/executor';
-// Full 96-request regeneration is CPU-bound; shared CI runners exceed Vitest's 5s default.
+// Historical plus 14-request regeneration is CPU-bound; shared CI runners exceed Vitest's 5s default.
 let plan:Plan;
-const firstRoute=prices.routes.find(r=>r.model.startsWith('google/'))!;
-beforeAll(()=>{plan=createR7Plan(prices);},30000);
+const firstRoute=prices.routes.find(r=>r.model.startsWith('anthropic/'))!;
+beforeAll(()=>{plan=createR8Plan(prices);},30000);
 const response=(body:Record<string,unknown>,status=200)=>new Response(JSON.stringify(body),{status});
+function wire(body:Record<string,unknown>,init?:RequestInit){
+ if(init?.method==='POST'&&JSON.parse(String(init.body)).stream){
+  const usage=body.usage as {prompt_tokens:number;completion_tokens:number};
+  const chunk={...body,choices:[{index:0,delta:{role:'assistant',content:'Synthetic output'},finish_reason:'length'}],
+   usage:{...usage,total_tokens:usage.prompt_tokens+usage.completion_tokens}};
+  return new Response('data: '+JSON.stringify(chunk)+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
+ }
+ return response(body);
+}
+async function decoded(result:Response){
+ const text=await result.text();return JSON.parse(text.startsWith('data: ')?text.slice(6).split('\n\n')[0]:text);
+}
 function fixture(){
  const active=plan;
  const events:Event[]=[],observations:unknown[]=[];
+ const lookup=new Map<string,Record<string,unknown>>();
  const transport=vi.fn(async(_url:Parameters<typeof fetch>[0],init?:RequestInit)=>{
+  if(init?.method==='GET')return response({data:lookup.get(new URL(String(_url)).searchParams.get('id')!)});
   const request=JSON.parse(String(init?.body));
   const route=prices.routes.find(r=>r.model===request.model)!;
-  return response({id:'synthetic-'+createHash('sha256').update(String(init?.body)).digest('hex'),model:request.model,provider:({'anthropic':'Anthropic','google-ai-studio':'Google AI Studio','openai':'OpenAI'} as Record<string,string>)[route.endpointTag],
+  const body={id:'synthetic-'+createHash('sha256').update(String(init?.body)).digest('hex'),model:request.model,provider:({'anthropic':'Anthropic','google-ai-studio':'Google AI Studio','openai':'OpenAI'} as Record<string,string>)[route.endpointTag],
    choices:[{finish_reason:'length'}],usage:{cost:0.001,prompt_tokens:100,completion_tokens:request.max_tokens,
-    prompt_tokens_details:{cached_tokens:20,cache_write_tokens:10},completion_tokens_details:{reasoning_tokens:50}}});
+    prompt_tokens_details:{cached_tokens:20,cache_write_tokens:10},completion_tokens_details:{reasoning_tokens:50}}};
+  lookup.set(body.id,{id:body.id,model:body.model,provider_name:body.provider,finish_reason:'length',total_cost:0.001,
+   native_tokens_prompt:100,native_tokens_completion:request.max_tokens});
+  return wire(body,init);
  });
  const credential=vi.fn(async()=>'LOCAL_SYNTHETIC_KEY'),preflight=vi.fn(async()=>{});
  const options={prices,manifest:active.manifest,approvedHash:active.manifest.manifestHash,credential,preflight,transport,
@@ -36,11 +53,11 @@ it('checks exact manifest before credential or network; refuses budget/catalog/c
 },30000);
 it('real adapter sends every frozen hash once, under its own cap, with canonical receipts',async()=>{
  const f=fixture();const result=await executePlan(f.options);
- expect(f.transport).toHaveBeenCalledTimes(96);expect(result.receipts).toHaveLength(96);
+ expect(f.transport).toHaveBeenCalledTimes(26);expect(result.receipts).toHaveLength(14);
  expect(result.report.every(s=>s.status==='SAMPLE_WITHIN_BOUNDS')).toBe(true);
- expect(f.observations).toHaveLength(96);
- for(let i=0;i<96;i++){
-  const [url,init]=f.transport.mock.calls[i];const sample=plan.manifest.samples[i];
+ expect(f.observations).toHaveLength(26);
+ for(let i=0;i<14;i++){
+  const [url,init]=f.transport.mock.calls.filter(([,init])=>init?.method==='POST')[i];const sample=plan.manifest.samples[i];
   expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
   expect(createHash('sha256').update(String(init?.body)).digest('hex')).toBe(sample.requestHash);
   expect(init?.redirect).toBe('error');
@@ -49,7 +66,7 @@ it('real adapter sends every frozen hash once, under its own cap, with canonical
  expect(result.report[0]).toMatchObject({P:100,cachedTokens:20,cacheWriteTokens:10});
  expect(JSON.stringify(result)).not.toContain('LOCAL_SYNTHETIC_KEY');
  await expect(executePlan(f.options)).rejects.toThrow('BATCH_ALREADY_ATTEMPTED');
- expect(f.transport).toHaveBeenCalledTimes(96);
+ expect(f.transport).toHaveBeenCalledTimes(26);
 },30000);
 it('ambiguous send never retries, never marks zero cost, never dispatches the next sample',async()=>{
  const f=fixture();f.transport.mockRejectedValue(new Error('private transport detail'));
@@ -146,18 +163,21 @@ it.each(['Google Vertex','Google','google-ai-studio','unverified-provider'])(
  'does not admit an unverified AI Studio receipt name: %s',async(provider)=>{
  const f=fixture(),send=f.transport.getMockImplementation()!;
  f.transport.mockImplementation(async(url,init)=>{
-  if(init?.method==='GET')return response({error:{}},404);
-  const result=await send(url,init),body=await result.json();
+  if(init?.method==='GET'){
+   const prior=await send(url,init),data=(await prior.clone().json()).data;
+   return data?.model==='google/gemini-3.8-flash'?response({error:{}},404):prior;
+  }
+  const result=await send(url,init),body=await decoded(result);
   if(body.model==='google/gemini-3.8-flash')body.provider=provider;
-  return response(body);
+  return wire(body,init);
  });
  const result=await executePlan(f.options);
- expect(result.receipts).toHaveLength(0);
+ expect(result.receipts).toHaveLength(8);
  expect(f.events.at(-1)).toMatchObject({reason:'UNKNOWN_OR_FAILED'});
- expect(f.events.filter(e=>e.type==='lookup-attempt')).toHaveLength(3);
- expect(f.events.filter(e=>e.type==='attempt')).toHaveLength(1);
+ expect(f.events.filter(e=>e.type==='lookup-attempt')).toHaveLength(9);
+ expect(f.events.filter(e=>e.type==='attempt')).toHaveLength(9);
 },30000);
-it('all three canonical provider names are also accepted from original-ID lookup receipts',async()=>{
+it('both current canonical provider names are also accepted from original-ID lookup receipts',async()=>{
  const f=fixture(),send=f.transport.getMockImplementation()!;
  const originals=new Map<string,{id:string;model:string;provider:string;usage:{completion_tokens:number}}>();
  f.transport.mockImplementation(async(url,init)=>{
@@ -166,14 +186,14 @@ it('all three canonical provider names are also accepted from original-ID lookup
    return response({data:{id:original.id,model:original.model,provider_name:original.provider,
     finish_reason:'length',total_cost:0.001,native_tokens_prompt:100,native_tokens_completion:original.usage.completion_tokens}});
   }
-  const raw=await send(url,init),body=await raw.json();originals.set(body.id,body);
+  const raw=await send(url,init),body=await decoded(raw);originals.set(body.id,body);
   const {provider:unused,...withoutProvider}=body;expect(unused).toBeTruthy();
-  return response(withoutProvider);
+  return wire(withoutProvider,init);
  });
  const result=await executePlan(f.options);
- expect(result.receipts).toHaveLength(96);
+ expect(result.receipts).toHaveLength(14);
  expect(result.receipts.every(r=>(r as {source:string}).source==='lookup.native_tokens_prompt')).toBe(true);
- expect(f.events.filter(e=>e.type==='lookup-attempt')).toHaveLength(96);
+ expect(f.events.filter(e=>e.type==='lookup-attempt')).toHaveLength(14);
 },30000);
 
 it.each([true,false])('only exact region-gate 403 yields PROVIDER_REGION_BLOCKED (region=%s)',async(region)=>{
@@ -222,7 +242,7 @@ it('lowered cumulative cap refuses plans even when each call stays within its ca
  for(const r of changed.routes.filter(r=>r.model.startsWith('google/'))){r.prompt=String(Number(r.prompt)*20);
   if(r.write)r.write=String(Number(r.write)*20);
   r.perCallCap='100';r.modelCap='100';}
- expect(()=>createR7Plan(changed)).toThrow('CUMULATIVE_BUDGET_EXCEEDED');
+ expect(()=>createR8Plan(changed)).toThrow('CUMULATIVE_BUDGET_EXCEEDED');
 },30000);
 
 it.each([{finish:'stop',completion:512},{finish:'length',completion:460}])(
@@ -230,22 +250,22 @@ it.each([{finish:'stop',completion:512},{finish:'length',completion:460}])(
  const f=fixture();f.transport.mockResolvedValueOnce(response({id:'synthetic-small',model:firstRoute.model,
  provider:firstRoute.providerName,choices:[{finish_reason:finish}],usage:{cost:0.001,prompt_tokens:100,completion_tokens:completion}}));
  const result=await executePlan(f.options);
- expect(f.transport).toHaveBeenCalledTimes(96);expect(result.report[0].status).toBe('OUTPUT_CAP_NOT_REACHED');
+ expect(f.transport).toHaveBeenCalledTimes(26);expect(result.report[0].status).toBe('OUTPUT_CAP_NOT_REACHED');
  expect(result.report.slice(1).every(r=>r.status==='SAMPLE_WITHIN_BOUNDS')).toBe(true);
  expect(f.events.some(e=>e.type==='halt')).toBe(false);
- expect(result.actualUsd).toBe('0.096000000000');expect(result.unknownCostSamples).toBe(0);
+ expect(result.actualUsd).toBe('0.014000000000');expect(result.unknownCostSamples).toBe(0);
 },30000);
-it.each([461,508,512])('length completion %s within 90 to 100 percent continues as qualified',async(completion)=>{
+it.each([1844,2040,2048])('length completion %s within 90 to 100 percent continues as qualified',async(completion)=>{
  const f=fixture();f.transport.mockResolvedValueOnce(response({id:'synthetic-near-cap',model:firstRoute.model,
  provider:firstRoute.providerName,choices:[{finish_reason:'length'}],usage:{cost:0.001,prompt_tokens:100,completion_tokens:completion,
  completion_tokens_details:{reasoning_tokens:400}}}));
  const result=await executePlan(f.options);
- expect(f.transport).toHaveBeenCalledTimes(96);expect(result.report[0].status).toBe('SAMPLE_WITHIN_BOUNDS');
+ expect(f.transport).toHaveBeenCalledTimes(26);expect(result.report[0].status).toBe('SAMPLE_WITHIN_BOUNDS');
  expect(f.events.find(e=>e.type==='result')).toMatchObject({outputCapReached:true});
 },30000);
 it('small cap includes reasoning and does not allow a one-token overrun',async()=>{
  const f=fixture();f.transport.mockResolvedValue(response({id:'synthetic-small-over',model:firstRoute.model,
- provider:firstRoute.providerName,choices:[{finish_reason:'length'}],usage:{cost:0.001,prompt_tokens:100,completion_tokens:513,
+ provider:firstRoute.providerName,choices:[{finish_reason:'length'}],usage:{cost:0.001,prompt_tokens:100,completion_tokens:2049,
  completion_tokens_details:{reasoning_tokens:400}}}));
  const result=await executePlan(f.options);expect(result.report[0].status).toBe('BOUND_FAILED');
  expect(f.transport).toHaveBeenCalledTimes(1);

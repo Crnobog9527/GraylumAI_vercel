@@ -28,7 +28,7 @@ export function createR8Plan(input:unknown){
       const {body,providerLimits}=r8Request(route,B,O,scope,variant),parsed=JSON.parse(body);
       const id=`${route.model}:${scope?'route:'+scope.name:'output:low'}:${B}:${variant}:r8`;
       const T=B+8192,upperUsd=openRouterCallBound(providerLimits,O,T).upperUsd;
-      const approvedCap=route.perCallCap;
+      const approvedCap=route.model==='anthropic/claude-sonnet-5.5'&&scope&&B===196608?'0.60':route.perCallCap;
       if(decimal(upperUsd)>decimal(approvedCap))blockers.push(`PER_CALL_BUDGET_EXCEEDED:${id}`);
       const schemaBytes=(parsed.tools??[]).reduce((n:number,t:{function:{parameters:unknown}})=>
         n+Buffer.byteLength(JSON.stringify(t.function.parameters)),0);

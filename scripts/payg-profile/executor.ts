@@ -2,7 +2,7 @@
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import {priceSchema,recordSamples,outputPressurePassed} from './sampling';
-import {createR7Plan,R7_ID} from './batch-r7';
+import {createR8Plan,R8_ID} from './batch-r8';
 import {openRouterAdapter} from '../../packages/api/src/services/bill2/openRouterAdapter';
 import {decimal} from '../../packages/api/src/services/bill2/decimal';
 import type {CallIdentity,TransportObservation} from '../../packages/api/src/services/bill2/fixtureAdapter';
@@ -10,7 +10,7 @@ import type {OpenRouterIdentity} from '../../packages/api/src/services/bill2/ope
 import type {OpenRouterLimits} from '../../packages/api/src/services/bill2/openRouterPolicy';
 import {decodeOpenRouterStreamObservation} from '../../packages/api/src/services/bill2/openRouterEvidence';
 
-export type Plan=ReturnType<typeof createR7Plan>;
+export type Plan=ReturnType<typeof createR8Plan>;
 export type Sample=Plan['manifest']['samples'][number];
 export type Event=Record<string,unknown>;
 export type Journal={append:(event:Event)=>Promise<void>;events:Event[];
@@ -21,8 +21,8 @@ const integer=(value:unknown):number|null=>typeof value==='string'&&/^\d+$/.test
 
 export function verifiedPlan(prices:unknown,manifest:unknown,approvedHash:string){
  const id=(manifest as {batch?:{id?:string}}|null)?.batch?.id;
- if(id!==R7_ID)throw new Error('APPROVED_MANIFEST_MISMATCH');
- const plan=createR7Plan(prices);
+ if(id!==R8_ID)throw new Error('APPROVED_MANIFEST_MISMATCH');
+ const plan=createR8Plan(prices);
  if(!isDeepStrictEqual(plan.manifest,manifest)||approvedHash!==plan.manifest.manifestHash)
   throw new Error('APPROVED_MANIFEST_MISMATCH');
  if(!plan.manifest.currentPricesVerified||decimal(plan.manifest.cumulativeUpperUsd)>=decimal('25')

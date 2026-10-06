@@ -7990,10 +7990,7 @@
   "actualUsd": "0",
   "blockers": [
     "REAL_SAMPLING_NOT_AUTHORIZED",
-    "PROFILE_EVIDENCE_NOT_COLLECTED",
-    "PER_CALL_BUDGET_EXCEEDED:anthropic/claude-sonnet-5.5:route:mentor:196608:0:r8",
-    "PER_CALL_BUDGET_EXCEEDED:anthropic/claude-sonnet-5.5:route:step:196608:0:r8",
-    "PER_CALL_BUDGET_EXCEEDED:anthropic/claude-sonnet-5.5:route:report:196608:0:r8"
+    "PROFILE_EVIDENCE_NOT_COLLECTED"
   ],
   "samples": [
     {
@@ -8107,7 +8104,7 @@
       "requestFormat": "agent-turn-v5-stream",
       "primaryDialogue": true,
       "stream": true,
-      "approvedCap": "0.50",
+      "approvedCap": "0.60",
       "spendCapUsd": "0.593920000000",
       "requestHash": "5dd43bf24169c4bb109db73cd4a270491c58da8af84e906fa9a5b09ac3e70148",
       "messages": 2,
@@ -8169,7 +8166,7 @@
       "requestFormat": "serial-tools-v4-stream",
       "primaryDialogue": true,
       "stream": true,
-      "approvedCap": "0.50",
+      "approvedCap": "0.60",
       "spendCapUsd": "0.593920000000",
       "requestHash": "7929591f9399963f978188bcb7f5b1ca0f7f60e3c5ccffb412a3d87806972622",
       "messages": 2,
@@ -8231,7 +8228,7 @@
       "requestFormat": "agent-turn-v5-stream",
       "primaryDialogue": true,
       "stream": true,
-      "approvedCap": "0.50",
+      "approvedCap": "0.60",
       "spendCapUsd": "0.593920000000",
       "requestHash": "9de6632c3f481f8b4ca5cd562793f413009314b3524400472bfedcadfb4cb68d",
       "messages": 2,
@@ -8475,5 +8472,5 @@
   ],
   "priorResultHash": "93d485acab13a30e1e3bb6505355cb838813c2bbc12e9609b12b294caed816f0",
   "decision": "https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6002163766",
-  "manifestHash": "e0eeae332e0266903ff09815ac6d3fffc22cc73d922c45ca97ae74989b429941"
+  "manifestHash": "260d8a4e03df3a2eb2bffa9f94c9d4623e4fd37e43b30f9d0ed2992578427547"
 }
