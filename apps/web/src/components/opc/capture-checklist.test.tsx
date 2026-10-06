@@ -3,7 +3,7 @@ import { createElement, isValidElement, type ReactElement, type ReactNode } from
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { CaptureChecklist, type CaptureChecklistProps } from "./capture-checklist";
-import { StepReviewDialog, StepSummaryCard } from "./step-review-dialog";
+import { StepReviewDialog } from "./step-review-dialog";
 import { visibleStep, type FieldValue } from "./capture-state";
 
 const v = (value: string, status: FieldValue["status"] = "provisional"): FieldValue => ({ value, status, nature: "decision" });
@@ -129,12 +129,3 @@ describe("StepReviewDialog", () => {
   });
 });
 
-describe("StepSummaryCard", () => {
-  it("offers review or more conversation, with no model call", () => {
-    const onReview = vi.fn(), onMore = vi.fn();
-    const out = renderToStaticMarkup(createElement(StepSummaryCard, { title: "了解你", disabled: false, onReview, onMore }));
-    expect(out).toContain("“了解你”的信息已经齐了");
-    expect(out).toContain("核对并确认");
-    expect(out).toContain("我还要补充");
-  });
-});

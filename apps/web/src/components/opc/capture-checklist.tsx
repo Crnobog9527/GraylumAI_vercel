@@ -5,7 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ChatInlineNotice, CHAT_ACTION } from "@/components/chat/ChatInlineNotice";
 import styles from "./capture-checklist.module.css";
 import {
-  fieldMeta, fieldState, fieldStateLabel, needsReview, shownValue, stepProgress,
+  editedLocally, fieldMeta, fieldOrigin, fieldState, fieldStateLabel, needsReview, shownValue, stepProgress,
   type CaptureSuggestion, type FieldValue, type StepInformation,
 } from "./capture-state";
 
@@ -30,6 +30,8 @@ export type CaptureChecklistProps = {
   confirmation: (stepId: string) => ConfirmationState;
   saveState: Record<string, "idle" | "saving" | "saved" | "error">;
   conflicts: Record<string, { current: Record<string, FieldValue>; fields: string[] }>;
+  /** Field ids the confirmation card asked the user to look at (“我要改”). */
+  highlight?: readonly string[];
   /** `stepId:fieldId` of the update being adopted or ignored. */
   resolving: string | null;
   onEdit: (stepId: string, fieldId: string, value: string) => void;
@@ -86,10 +88,13 @@ function StepFields({ props, step }: { props: CaptureChecklistProps; step: Step 
         const meta = fieldMeta(info, field.id);
         const state = fieldState(value);
         return (
-          <div key={field.id} className={styles.field} data-field-state={state}>
+          <div key={field.id} className={styles.field} data-field-state={state}
+            data-highlight={props.highlight?.includes(field.id) || undefined}
+            data-origin={editedLocally(info, edits, field.id) ? "user" : fieldOrigin(field, meta)}>
             <div className={styles.fieldHead}>
               <label htmlFor={`${step.id}-${field.id}`}>{field.title}<small>{field.required ? "必需" : "选填"}</small></label>
-              <span className={styles.state}>{fieldStateLabel(value, meta)}</span>
+              <span className={styles.state}>
+                {editedLocally(info, edits, field.id) && state === "draft" ? "草稿 · 你填写的" : fieldStateLabel(value, meta, field)}</span>
             </div>
             {props.manual && <p className={styles.hint}>{field.elicitation === "agent_proposal"
               ? "这是导师要给出的成果建议：可以先请导师提出草案，你核对、修改即可。"

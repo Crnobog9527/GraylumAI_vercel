@@ -79,18 +79,3 @@ export function StepReviewDialog(props: StepReviewProps) {
     </div>
   );
 }
-
-/** Host-authored summary card in the chat once a step's required items all have content. No model call. */
-export function StepSummaryCard({ title, disabled, onReview, onMore }: {
-  title: string; disabled: boolean; onReview: () => void; onMore: () => void;
-}) {
-  return (
-    <div className={styles.summary} role="group" aria-label="本步小结">
-      <p>“{title}”的信息已经齐了：请在右侧核对，或继续补充。</p>
-      <div>
-        <Button disabled={disabled} onClick={onReview}>核对并确认</Button>
-        <Button variant="outline" onClick={onMore}>我还要补充</Button>
-      </div>
-    </div>
-  );
-}

@@ -18,8 +18,9 @@ import { readWorkflowMentorExecution } from "./mentor-response";
 import { focusReply, mentorReplyDisplay, showsTurnState } from "./agent-turn-display";
 import { OpenQuestionRecord, OTHER_PLACEHOLDER, QuestionCardView } from "@/components/opc/question-card";
 import { CaptureChecklist } from "@/components/opc/capture-checklist";
-import { StepReviewDialog, StepSummaryCard } from "@/components/opc/step-review-dialog";
-import { cardStatus, editedValue, fieldMeta, focusField, stepProgress, type StepInformation } from "@/components/opc/capture-state";
+import { StepReviewDialog } from "@/components/opc/step-review-dialog";
+import { confirmCardModel, focusChecklistField, StepConfirmCard } from "@/components/opc/step-confirm-card";
+import { cardStatus, editedValue, fieldMeta, focusField, type StepInformation } from "@/components/opc/capture-state";
 import { reviewedStep, useStepConfirmation } from "@/hooks/use-step-confirmation";
 import { useCaptureResolve } from "@/hooks/use-capture-resolve";
 import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
@@ -90,7 +91,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     savePlan = trpc.opc.savePlan.useMutation(),
     handoff = trpc.opc.handoff.useMutation();
   const [running, setRunning] = useState(false);
-  const [resultOpen,setResultOpen]=useState(true);
+  const [resultOpen,setResultOpen]=useState(true), [highlight,setHighlight]=useState<string[]>([]);
   const [workInfoOpen,setWorkInfoOpen]=useState(false);
   useEffect(()=>{if(!workInfoOpen)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape')setWorkInfoOpen(false);};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close);},[workInfoOpen]);
   const [resultBodyNode,setResultBodyNode]=useState<HTMLDivElement|null>(null);
@@ -1295,10 +1296,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if (d.accountRevision) return true;
     return step.dependsOn ? step.dependsOn.every(id => snap.steps[id]?.valid) : steps.indexOf(step) <= firstPending;
   }
-  function openReview(stepId: string) {
-    setActiveStep(stepId);
-    confirmation.open(stepId, d.information[stepId], infoEditsRef.current[stepId], snap.steps);
-  }
+  function openReview(stepId: string) { setActiveStep(stepId); confirmation.open(stepId, d.information[stepId], infoEditsRef.current[stepId], snap.steps); }
+  /** “我要改”: show the right checklist with these fields marked, cursor in the first. */
+  function highlightFields(stepId: string, ids: string[]) { setResultOpen(true); setHighlight(ids); focusChecklistField(stepId, ids[0]); }
   function retrySave(stepId: string) {
     const values = infoEditsRef.current[stepId];
     if (values) void enqueueInformation(stepId, values).catch(() => setError("自动保存仍未成功。内容已保留，请稍后重试。"));
@@ -1308,7 +1308,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     return {
       steps, information: d.information, edits: infoEdits, selectedStepId: selectedStep.id, editable: snap.state === "draft",
       valid: Object.fromEntries(steps.map(step => [step.id, Boolean(snap.steps[step.id].valid)])),
-      manual: manualEntry, locked, saveState, conflicts: informationConflicts, resolving: updates.resolving,
+      manual: manualEntry, locked, saveState, highlight, conflicts: informationConflicts, resolving: updates.resolving,
       confirmable: stepId => confirmableStep(steps.find(step => step.id === stepId)!),
       confirmation: stepId => confirmation.envelopeState(stepId).kind,
       onEdit: editField, onReview: openReview, onRecoverConfirmation: stepId => void confirmation.recoverMalformed(stepId),
@@ -1376,7 +1376,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           const s = snap.steps[step.id];
           const sendLocked = busy || Boolean(history.data?.activeExecution) || openingSteps.includes(step.id) || Boolean(pendingMentor) ||
             hasPendingConfirmation || hasPendingStepRequest || free.busy;
-          const progress = stepProgress(d.information[step.id], infoEdits[step.id]);
           chatShown = true; // Its message list carries the page's notices.
           return (
             <article key="positioning-workspace" className={`${resultStyles.stepArticle} space-y-3`}>
@@ -1457,10 +1456,11 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     saving: hasUnsavedInformation, error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice, lastTurnText,
                     recovery: recoveryNeedsUser[0] && !busy
                       ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })]}/>
-                  {!manualEntry && snap.state === "draft" && !s.valid && progress.ready && !hasPendingConfirmation && !awaitingReply && !pendingMentor && !liveOnly &&
-                    <StepSummaryCard title={step.title} disabled={busy || hasPendingStepRequest || !confirmableStep(step)}
-                      onReview={() => openReview(step.id)} onMore={focusReply}/>}
                   </div>
+                  {!manualEntry && snap.state === "draft" && !s.valid && <StepConfirmCard title={step.title} resuming={hasPendingConfirmation}
+                    model={confirmCardModel(d.information[step.id], infoEdits[step.id])} disabled={busy || hasPendingStepRequest} onReview={() => openReview(step.id)}
+                    canConfirm={confirmableStep(step) && !pendingMentor && !awaitingReply && !liveOnly} onEdit={ids => highlightFields(step.id, ids)}
+                    onConfirm={() => confirmation.confirmNow(step.id, d.information[step.id], infoEditsRef.current[step.id], snap.steps)}/>}
                   <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
