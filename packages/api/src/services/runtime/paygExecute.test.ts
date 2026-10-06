@@ -145,3 +145,35 @@ it('a suspended epoch-1 owner cannot fail or interrupt the resumed epoch-2 execu
   expect(mock.billing.claimPaygCall).not.toHaveBeenCalled();
   expect(mock.billing.dispatchOnce).not.toHaveBeenCalled();
 });
+
+it.each(['first', 'organizer', 'uncertain'] as const)('keeps a safe claim reason through SDK wrapping: %s', async mode => {
+  const f = fixture(); f.fund();
+  const { BillingClaimRejection } = await import('../bill2/claimFailure');
+  const claim = mock.billing.claimPaygCall.getMockImplementation()!;
+  mock.billing.claimPaygCall.mockImplementation(async (...args) => {
+    if (mode !== 'organizer' || args[1] === 2) throw new BillingClaimRejection('BILL2_START_THRESHOLD_UNCONFIGURED');
+    return claim(...args);
+  });
+  const rpc = f.database.rpc.getMockImplementation()!;
+  f.database.rpc.mockImplementation(async (name, args) => {
+    if (args.p_action === 'fail_before_dispatch') return mode === 'first'
+      ? { data: { state: 'cancelled' } as never, error: null }
+      : { data: null as never, error: { message: 'private database detail' } as never };
+    return rpc(name, args);
+  });
+  const result = await runtimeExecutor(f.options).execute(id);
+  expect(result).toMatchObject({ state: mode === 'first' ? 'cancelled' : 'pending',
+    notice: '计费配置待处理，暂时无法继续，请稍后重试或联系管理员。' });
+  expect(JSON.stringify(result)).not.toMatch(/BILL2_|private database/);
+  expect(mock.billing.dispatchOnce).toHaveBeenCalledTimes(mode === 'organizer' ? 1 : 0);
+  expect(f.database.rpc.mock.calls.filter(([, args]) => args.p_action === 'fail_before_dispatch')).toHaveLength(1);
+});
+
+it('unknown claim errors never become public notices', async () => {
+  const f = fixture();
+  mock.billing.claimPaygCall.mockRejectedValue(new Error('private SQL detail'));
+  const result = await runtimeExecutor(f.options).execute(id);
+  expect(result).not.toHaveProperty('notice');
+  expect(JSON.stringify(result)).not.toContain('private SQL');
+  expect(mock.billing.dispatchOnce).not.toHaveBeenCalled();
+});
