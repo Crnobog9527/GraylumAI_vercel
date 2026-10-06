@@ -1,19 +1,20 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {fieldElicitation, type MethodInformationField} from '../../shared/opcMethodPolicy';
 import {GROUNDED_CARD_CONTRACT} from '../runtime/groundedCard';
-import {hostTurnContextSchema, type HostTurnContext} from '../runtime/hostTurn';
+import {HOST_TURN_MAX_BYTES, hostTurnContextSchema, type HostTurnContext} from '../runtime/hostTurn';
 import {organizerAnswerCard, type AnsweredCard} from './answerCard';
 
 export type CaptureState = {
   schema: readonly MethodInformationField[];
-  values?: Record<string, {value?: unknown; status?: string; nature?: string}>;
-  meta?: Record<string, {protected?: boolean}>;
+  values?: Record<string, {value?: unknown; status?: string; nature?: string; basis?: string}>;
+  meta?: Record<string, {protected?: boolean; source?: string; basis?: string; hasPendingSuggestion?: boolean}>;
   notes?: unknown[];
 };
 type Step = {id: string; title: string};
 export function captureHostContext(steps: readonly Step[], information: Record<string, CaptureState>,
-  stepId: string, opening: boolean): HostTurnContext {
-  return hostTurnContextSchema.parse({cardContract: GROUNDED_CARD_CONTRACT, stepId, opening, checklist: steps.map(step => ({
+  stepId: string, opening: boolean, updatedFieldIds?: string[]): HostTurnContext {
+  const context: HostTurnContext = {cardContract: GROUNDED_CARD_CONTRACT, stepId, opening,
+    ...(updatedFieldIds ? {updatedFieldIds} : {}), checklist: steps.map(step => ({
     id: step.id, title: step.title,
     fields: (information[step.id]?.schema ?? []).map(field => {
       const state = information[step.id]!;
@@ -21,9 +22,22 @@ export function captureHostContext(steps: readonly Step[], information: Record<s
       const status = existing?.status === 'confirmed' || existing?.status === 'deferred'
         ? existing.status : typeof existing?.value === 'string' && existing.value.trim() ? 'draft' : 'missing';
       return {id: field.id, title: field.title ?? field.id, required: Boolean(field.required),
-        role: fieldElicitation(field), status, protected: state.meta?.[field.id]?.protected ?? true};
+        role: fieldElicitation(field), status, protected: state.meta?.[field.id]?.protected ?? true,
+        value: typeof existing?.value === 'string' ? existing.value : '', nature: existing?.nature ?? 'unknown',
+        source: state.meta?.[field.id]?.source ?? 'unknown',
+        basis: state.meta?.[field.id]?.source === 'user' ? 'user_statement'
+          : state.meta?.[field.id]?.basis ?? existing?.basis ?? 'unknown',
+        hasPendingSuggestion: Boolean(state.meta?.[field.id]?.hasPendingSuggestion)};
     }),
-  }))});
+  }))};
+  // Same compression order as capture: omit confirmed values first, then fail closed.
+  if (Buffer.byteLength(JSON.stringify(context)) > HOST_TURN_MAX_BYTES) {
+    for (const step of context.checklist) for (const field of step.fields) {
+      if (field.status === 'confirmed') { field.value = ''; field.valueOmitted = true; }
+    }
+  }
+  if (Buffer.byteLength(JSON.stringify(context)) > HOST_TURN_MAX_BYTES) throw new Error('OPC_CAPTURE_INPUT_LIMIT');
+  return hostTurnContextSchema.parse(context);
 }
 export function captureFocus(state: CaptureState): string {
   const missing = state.schema.find(field => field.required &&
@@ -35,13 +49,17 @@ export function captureFocus(state: CaptureState): string {
 export function captureOrganizerInput(host: HostTurnContext, information: Record<string, CaptureState>,
   confirmed: Record<string, boolean>, userInput: string, answer?: AnsweredCard): string {
   const checklist = host.checklist.map(step => ({...step, confirmed: Boolean(confirmed[step.id]),
-    fields: step.fields.map(field => ({...field, elicit: field.role,
+    fields: step.fields.map(field => ({id: field.id, title: field.title, required: field.required,
+      role: field.role, status: field.status, protected: field.protected, elicit: field.role,
       value: information[step.id]?.values?.[field.id]?.value ?? '',
       nature: information[step.id]?.values?.[field.id]?.nature ?? 'unknown',
     })),
     ...(!confirmed[step.id] ? {notes: information[step.id]?.notes ?? []} : {}),
   }));
-  const serialize = () => JSON.stringify({captureFormat: 'v2', userInput, ...organizerAnswerCard(answer),
+  const serialize = () => JSON.stringify({captureFormat: 'v2',
+    userInput: host.updatedFieldIds ? '' : userInput,
+    ...(host.updatedFieldIds ? {hostEvent: {kind: 'checklist_updated', fieldIds: host.updatedFieldIds}} : {}),
+    ...organizerAnswerCard(answer),
     originalStepId: host.stepId, checklist});
   let input = serialize();
   if (input.length > 24000) {

@@ -9,6 +9,7 @@ import { capturePending, capturePendingInput, captureResolveInput } from "./capt
 import { opcInformation } from "./information";
 export { opcInformation } from "./information";
 import { z } from "zod";
+import {readChecklistUpdatedInput} from "../../shared/opcQuestions";
 import { DatabaseReadError } from "../../lib/databaseReadError";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isEmailVerified } from "../../lib/auth";
@@ -25,18 +26,8 @@ export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTop
 import { opcGenerate, ANSWER_CARD_RULE, resolveAnswerCard, } from "./answerCard";
 export { opcGenerate } from "./answerCard";
 const uuid = z.string().uuid();
-export const opcStart = z
-  .object({
-    requestId: uuid,
-    registration: z.string().min(1).max(100),
-    mode: z.enum(["mentor", "manual"]),
-    businessId: uuid.nullable().optional(),
-    businessName: z.string().trim().min(1).max(120).optional(),
-  })
-  .strict();
-export const opcTopicBind = z
-  .object({ draftId: uuid, requestId: uuid, sourceVersionId: uuid })
-  .strict();
+import {opcStart, opcTopicBind} from './start';
+export {opcStart, opcTopicBind} from './start';
 export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:StagingPolicy, resumeWaitingOrganizer?:ResumeWaitingOrganizer) {
   async function rpc(name: string, args: Record<string, unknown>) {
     const a = await user.auth.getUser();
@@ -71,6 +62,8 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
     },
     async prepareStep(value: unknown) {
       const v = opcGenerate.parse(value);
+      const updatedFieldIds = readChecklistUpdatedInput(v.input);
+      if (updatedFieldIds && (v.purpose !== "mentor" || v.answerSource)) throw new Error("OPC_STEP_DENIED");
       let d = await rpc("opc_query", { p_draft_id: v.draftId });
       let snapshot = await workbenchService(user, admin).read(
         d.projectId,
@@ -143,6 +136,8 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         }
       }
       const state = d.information[v.stepId];
+      if (updatedFieldIds?.some(id => !state.schema.some((field: {id: string}) => field.id === id)))
+        throw new Error("OPC_INFORMATION_INVALID");
       if (opening && !v.questionId) throw new Error("OPC_QUESTION_NOT_REACHED");
       if (v.questionId && (v.purpose !== "mentor" ||
           !state.schema.some((field: {id: string}) => field.id === v.questionId)))
@@ -202,7 +197,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         if (!opening && !answeredCard) runtimeRequest.selection.task = questionTask(captureFocus(captureInformation[v.stepId]!));
       }
       const hostTurnContext = v.purpose === "mentor"
-        ? captureHostContext(snapshot.workflow.steps, captureInformation, v.stepId, opening) : undefined;
+        ? captureHostContext(snapshot.workflow.steps, captureInformation, v.stepId, opening, updatedFieldIds) : undefined;
       let organizerInstructions = v.purpose === "mentor" && organizeAfter
         ? ORGANIZER_INSTRUCTIONS : undefined;
       if (organizerInstructions) organizerInstructions += "\n" + ANSWER_CARD_RULE;

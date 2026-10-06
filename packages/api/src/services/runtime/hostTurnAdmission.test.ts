@@ -128,3 +128,27 @@ it('uses identical marker reservation at the admission byte boundary with and wi
   else expect((await service.prepare(sample.input)).context.historySelection.markerReserveBytes).toBe(150);
  }
 });
+
+it('keeps checklist values and update events outside the cached prefix and counts them at admission',async()=>{
+ const host:HostTurnContext={...hostState,updatedFieldIds:['goal'],checklist:[{id:'step',title:'Step',fields:[{
+  id:'goal',title:'Goal',required:true,role:'user_fact',status:'confirmed',protected:true,value:'手填事实'.repeat(100),
+  nature:'fact',basis:'user_statement',source:'user',hasPendingSuggestion:true,
+ }]}]};
+ const f=hostFixture();
+ const first=(await runtimeAdmissionService(f.user,f.admin,{...f.policy,hostTurnContext:host}).prepare(f.input)).context;
+ expect(first.instructions).not.toContain('手填事实');
+ expect(first.hostTurnContext).toEqual(host);
+ expect(runtimeScopeInput(first.input,first.scopeMaterial,first.hostTurnContext)).toContain('手填事实');
+ const {askQuestionToolBytes}=await import('./agentTools');
+ const edge=Buffer.byteLength(JSON.stringify({instructions:first.instructions,messages:[{role:'user',
+  content:runtimeScopeInput(first.input,first.scopeMaterial,first.hostTurnContext)}]}))+askQuestionToolBytes(true)+150+1024;
+ for(const delta of [0,-1]) {
+  const sample=hostFixture();
+  const prepare=()=>runtimeAdmissionService(sample.user,sample.admin,{...sample.policy,hostTurnContext:host,inputBytes:edge+delta})
+   .prepare(sample.input);
+  if(delta<0) {
+   await expect(prepare()).rejects.toThrow('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
+   expect(sample.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
+  } else expect((await prepare()).context.promptCache).toEqual(first.promptCache);
+ }
+});
