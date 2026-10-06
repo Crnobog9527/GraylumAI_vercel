@@ -2210,7 +2210,7 @@
   "fn:pay_common_amount_facts_valid(jsonb)": "c17c1a5e748f",
   "fn:pay_common_assert_purchase_facts(uuid,text,text)": "148b7faf27b3",
   "fn:pay_common_channel_setting_guard()": "a1698fd2f2c2",
-  "fn:pay_common_close_checkout(uuid,uuid,text,text,text,text,text)": "dbdb81e0a787",
+  "fn:pay_common_close_checkout(uuid,uuid,text,text,text,text,text)": "9149b76ed6f0",
   "fn:pay_common_conflict_append_guard()": "022bb9d56206",
   "fn:pay_common_create_purchase(uuid,text,uuid,text,text,text,text)": "8c991c72aa24",
   "fn:pay_common_derived_guard()": "2373a363e533",
