@@ -1182,9 +1182,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     });
   }
   /** A step can be confirmed once the steps it depends on are confirmed. */
-  function confirmableStep(step: Step) {
-    if (d.accountRevision) return true;
-    return step.dependsOn ? step.dependsOn.every(id => snap.steps[id]?.valid) : steps.indexOf(step) <= firstPending;
+  function confirmableStep(step: Step) { // Another step's unfinished confirmation is resumed first, never bypassed.
+    if (steps.some(other => other.id !== step.id && confirmation.envelopeState(other.id).kind === "valid")) return false;
+    return Boolean(d.accountRevision) || (step.dependsOn ? step.dependsOn.every(id => snap.steps[id]?.valid) : steps.indexOf(step) <= firstPending);
   }
   function openReview(stepId: string) { setActiveStep(stepId); confirmation.open(stepId, d.information[stepId], infoEditsRef.current[stepId], snap.steps); }
   const highlightFields = (step: string) => (ids: string[]) => { // “我要改”: show the checklist, mark these fields, cursor in the first.
