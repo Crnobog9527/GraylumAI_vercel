@@ -503,7 +503,7 @@ try {
       const id=serve ? 'local-runtime-'+randomUUID() : 'local-runtime-'+runtimeCalls.length;
       runtimeReceipts.set(id,request);
       appendFileSync(receiptFile,JSON.stringify({id,model:request.model})+'\n',{mode:0o600});
-      let content='Saved runtime answer '+runtimeCalls.length,agentCard;
+      let content='Saved runtime answer '+runtimeCalls.length,agentCard,mentorUserRequest;
       // A v5 mentor turn is recognised by its host prompt; host-opened turns carry no card tool.
       const offersCard=request.tools?.some(tool=>tool.function?.name==='ask_question');
       const agentTurn=offersCard||(request.messages??[]).some(m=>m.role==='system'&&typeof m.content==='string'&&
@@ -557,6 +557,7 @@ try {
               const {mentorQuestionFixture}=await import('./opc-mentor-fixture.mjs');
               const reply=mentorQuestionFixture(mentorInstructions,input.userRequest,stepIndex);
               content=agentTurn?reply.message:JSON.stringify(reply);
+              mentorUserRequest=input.userRequest;
               if(offersCard)agentCard={question:'请选择当前问题最接近的答案：',options:['我提供摄影入门练习课程，帮助相机初学者完成每周练习。','我提供设计咨询服务。'],recommended:0};
             }else content='【分步模拟，仅验证流程】第 '+(stepIndex+1)+' 步示例：'+(questions[stepIndex] ?? '这一步你最想确认什么？')+'\n你可以继续回复，也可以在表单里补充想法。此示例不会理解或评估你的答案。';
           }
@@ -622,18 +623,24 @@ try {
           if(agentCard){
             agentCard.message=content;agentCard.recommendationReason='建议从已经明确的业务范围开始。';
             if(invalidMentorCard)agentCard.options=[agentCard.options[0],agentCard.options[0]];
-            content='DISCARDED_SEPARATE_ASSISTANT_TEXT';
+            if(request.tools.some(tool=>tool.function?.name==='ask_question'&&tool.function.parameters?.properties?.intent)){
+              const {groundedMentorCardFixture}=await import('./opc-mentor-fixture.mjs');
+              agentCard=groundedMentorCardFixture(agentCard,mentorUserRequest,content);
+              // Valid B2 cards must have no separate prose. The invalid case keeps
+              // paid prose while the host rejects its duplicate options.
+              if(!invalidMentorCard)content='';
+            }else content='DISCARDED_SEPARATE_ASSISTANT_TEXT';
           }
           official.choices[0].message.content=content;
           const write=(delta,finish=null)=>res.write('data: '+JSON.stringify({id,object:'chat.completion.chunk',created:1,model:request.model,choices:[{index:0,delta,finish_reason:finish}]})+'\n\n');
           write({role:'assistant',reasoning:'PRIVATE_STREAM_REASONING'});
-          const cuts=[Math.min(content.length-1,18),Math.min(content.length-1,28),Math.min(content.length-1,38)];
+          const cuts=content?[Math.min(content.length-1,18),Math.min(content.length-1,28),Math.min(content.length-1,38)]:[];
           let releaseTurn;const released=new Promise(resolve=>{releaseTurn=resolve;});mentorStreamHeld.set(index,releaseTurn);
           let offset=0;
           for(const cut of cuts){write({content:content.slice(offset,cut)});offset=cut;entry.firstAt??=Date.now();await new Promise(resolve=>setTimeout(resolve,180));}
           await released;
           {
-            write({content:content.slice(offset)});
+            if(content)write({content:content.slice(offset)});
             if(agentCard)write({tool_calls:[{index:0,id:'question-'+index,type:'function',function:{name:'ask_question',arguments:JSON.stringify(agentCard)}}]});
             write({},agentCard?'tool_calls':'stop');
             res.write('data: '+JSON.stringify({id,model:request.model,choices:[],usage:{prompt_tokens:10,completion_tokens:5,total_tokens:15,cost:0.003}})+'\n\n');

@@ -184,7 +184,13 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   expect(await composer.getAttribute('placeholder')).toBe('其他：自己补充');
   expect(await composer.inputValue()).toBe('这是下一条尚未发送的新草稿');
   await page.reload();await poll(()=>send.isEnabled()).toBe(true);
-  await poll(()=>page.getByText(saved.message,{exact:true}).count()).toBeGreaterThan(0);
+  // B2 renders the canonical numbered message as an HTML list. Compare the
+  // entire persisted body, removing only Markdown's list markers and whitespace.
+  const persistedBody=log.locator('[data-message-role=assistant] [data-message-markdown]').last();
+  const normalized=(text:string)=>text.replace(/\s+/g,' ').trim();
+  const renderedMessage=saved.card?saved.message.replace(/^\d+\. /gm,''):saved.message;
+  await poll(async()=>normalized(await persistedBody.innerText())).toBe(normalized(renderedMessage));
+  if(saved.card)expect(await persistedBody.locator('ol > li').count()).toBe(saved.card.options.length);
   expect((await control()).length).toBe(4);
   await poll(async()=>(await f.service.read(d.draftId)).information['step-0'].values?.product?.status).toBe('provisional');timings.mentorCompleteToFieldReadMs=Date.now()-(await control())[2]!.finishedAt!;expect((await sql.query('select count(*)::int n from runtime_executions where actor_id=$1',[f.actor])).rows[0].n).toBe(2);expect((await sql.query('select count(*)::int n from opc_turns where draft_id=$1',[d.draftId])).rows[0].n).toBe(2);
   const calls=(await sql.query('select c.id,c.state,c.provider_id,c.payload from bill2_calls c join bill2_runs r on r.id=c.run_id where r.actor_id=$1 order by c.created_at',[f.actor])).rows;expect(calls).toHaveLength(4);expect(new Set(calls.map(c=>c.provider_id)).size).toBe(4);

@@ -87,3 +87,19 @@ export function mentorQuestionFixture(instructions, userRequest, stepIndex) {
     informationPatch: fieldId && text ? patch(text, "provisional", "hypothesis", "user_statement") : {},
   };
 }
+
+// Synthetic transport only: B2 owns the public prose and derives it from these
+// option reasons. The exact request quotation must come from the current user.
+export function groundedMentorCardFixture(card, userRequest, message) {
+  return {
+    intent: 'grounded_comparison',
+    requestQuote: userRequest,
+    basisQuotes: [userRequest],
+    question: card.question,
+    options: card.options.map((text, index) => ({
+      text,
+      reason: index === card.recommended ? message : '此模拟备选仅用于对比流程。',
+    })),
+    recommended: card.recommended,
+  };
+}

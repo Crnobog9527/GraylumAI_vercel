@@ -66,3 +66,17 @@ it("preserves explicitly requested cross-step revision as a separate proposal",(
  const r=mentorQuestionFixture(instructions,"模拟：修改第一步目标",1);assert.equal(r.targetStepId,"step-0");assert.deepEqual(Object.keys(r.informationPatch),["goal"]);
  assert.equal(r.inputKind,"revision_request");
 });
+
+it('grounds B2 card arguments in current user speech and leaves public prose to the host',async()=>{
+ const {groundedMentorCardFixture}=await import('./opc-mentor-fixture.mjs');
+ const request='我提供摄影入门练习课程，帮助相机初学者完成每周练习。';
+ const card={question:'请选择当前问题最接近的答案：',options:[request,'我提供设计咨询服务。'],recommended:0};
+ const result=groundedMentorCardFixture(card,request,'本地流式导师正文：建议从已经明确的业务范围开始。');
+ assert.deepEqual(Object.keys(result).sort(),['basisQuotes','intent','options','question','recommended','requestQuote']);
+ assert.equal(result.intent,'grounded_comparison');
+ assert.equal(result.requestQuote,request);
+ assert.deepEqual(result.basisQuotes,[request]);
+ assert.deepEqual(result.options.map(option=>option.text),card.options);
+ assert.ok(result.options.every(option=>typeof option.reason==='string'&&option.reason.length>0));
+ assert.match(result.options[result.recommended].reason,/本地流式导师正文：/);
+});
