@@ -188,6 +188,8 @@ describe("cached read helpers", () => {
     expect(next.projectId).toBe("p");
     expect(read.snapshot.steps.s1.version).toBe(2);
     expect(savedRead(undefined, "s1", {}, 3)).toBeUndefined();
+    // A replayed request returns its original, older version: the newer cache stays.
+    expect(savedRead(read, "s1", { a: v("old") }, 2)).toBe(read);
   });
 });
 

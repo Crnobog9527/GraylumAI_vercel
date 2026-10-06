@@ -200,6 +200,8 @@ export function stepView(read: unknown, stepId: string): StepView | null {
 export function savedRead<T>(read: T, stepId: string, values: Values, version: number): T {
   const old = read as DraftRead | undefined;
   if (!old?.information?.[stepId] || !old.snapshot?.steps?.[stepId]) return read;
+  // A replayed request answers with its original version: never older than what the cache holds.
+  if ((old.snapshot.steps[stepId].version ?? -1) >= version) return read;
   return { ...old,
     information: { ...old.information, [stepId]: { ...old.information[stepId], values } },
     snapshot: { ...old.snapshot, steps: { ...old.snapshot.steps, [stepId]: { ...old.snapshot.steps[stepId], version } } },
