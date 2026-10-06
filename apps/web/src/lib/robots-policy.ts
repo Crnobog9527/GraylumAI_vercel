@@ -32,7 +32,7 @@ export const SEARCH_CRAWLERS = [
 ] as const;
 
 export function isPublicIndexingEnabled(value: string | undefined): boolean {
-  return value?.trim() === 'public';
+  return value === 'public';
 }
 
 export function buildRobots(indexingValue: string | undefined): MetadataRoute.Robots {
