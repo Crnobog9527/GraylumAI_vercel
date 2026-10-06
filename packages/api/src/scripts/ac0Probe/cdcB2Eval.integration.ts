@@ -9,6 +9,7 @@ import {allowTestCalls} from '../../services/__tests__/fixtures/runtimeGates';
 import {historyItems} from './trial';
 import {hash,measure,profiles,type Role} from '../../../../../scripts/cdc-b2-eval/policy.ts';
 import {assertOutsideRepository} from './paths';
+import {replayReasoning} from '../../../../../scripts/cdc-b2-eval/reasoningReplay';
 
 // Disposable fixture has no remote Redis. External dispatch uses the separate $9 gate.
 vi.mock('../../services/runtime/newWorkGate',async original=>({
@@ -19,7 +20,9 @@ vi.mock('../../services/runtime/newWorkGate',async original=>({
 it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC and Runtime',async()=>{
  const path=process.env.V3_REAL_SKILL_INPUT!;assertOutsideRepository(path);
  const plan=JSON.parse(readFileSync(path,'utf8'));assertOutsideRepository(plan.output);
+ if(plan.reasoningReplay)assertOutsideRepository(plan.reasoningReplay);
  const f=await fixture(plan.moduleSkill),rows:Array<ReturnType<typeof measure>&{ordinal:number;category:string;role:Role;raw:string}>=[],results:unknown[]=[];
+ const reasoningResults:unknown[]=[];
  let active:{organize:boolean;dryPatches:unknown[];category:string;slot:string},currentExecution='',ordinal=0,phase=0;
  const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'LOCAL_BOUNDARY_ONLY',transport:async(url,init)=>{
   if(String(url)!=='https://openrouter.ai/api/v1/chat/completions')throw new Error('CDC_NO_LOOKUP_OR_RETRY');
@@ -84,17 +87,22 @@ it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC an
     const frozen=(await f.db.query('select payload from runtime_executions where id=$1',[currentExecution])).rows[0].payload;
     if(frozen.providerRequestFormat!==profiles.mentor.format||frozen.reasoning?.effort!=='low'||
      turn.organize&&frozen.attachedOrganizer?.reasoning?.parameter!=='none')throw new Error('CDC_FROZEN_FORMAT');
+    const beforeSteps=plan.reasoningReplay?(await f.db.query('select steps from artifact_rounds where id=$1',[initial.roundId])).rows[0].steps:null;
     const result=await runtimeExecutor({database:f.admin,actor:async()=>f.actor,adapter,callGate:allowTestCalls}).execute(currentExecution);
     if(result.state!=='completed'||phase!==(turn.organize?2:1))throw new Error('CDC_EXECUTION_INCOMPLETE');
     const capture=turn.organize?await f.service.capturePending({draftId:draft.draftId}):null;
     if(!plan.bridge&&capture&&(capture.processed.length!==1||
      !['applied','suggested'].includes(capture.processed[0]?.result)))throw new Error('CDC_DRY_CAPTURE');
-    results.push({slot:turn.slot,frozen,result,capture,after:await f.service.read(draft.draftId)});
+    const after=await f.service.read(draft.draftId);
+    results.push({slot:turn.slot,frozen,result,capture,after});
+    if(plan.reasoningReplay&&turn.organize)reasoningResults.push(...await replayReasoning(f,plan.reasoningReplay,turn.slot,
+     draft.draftId,currentExecution,beforeSteps,rows.at(-1)!.raw,after));
    }
   }
   if(rows.length!==100)throw new Error('CDC_ROSTER_INCOMPLETE');
   const privateOutput=JSON.stringify({inputHash:hash(readFileSync(path)),rows,results});
   writeFileSync(plan.output+'/frozen-private.json',privateOutput,{mode:0o600,flag:'wx'});
+  if(plan.reasoningReplay)writeFileSync(plan.output+'/reasoning-results.json',JSON.stringify(reasoningResults),{mode:0o600,flag:'wx'});
   const measures=rows.map((row)=>{const {raw,...safe}=row;void raw;return safe;});
   writeFileSync(plan.output+'/summary.json',JSON.stringify({mode:plan.bridge?'live':'freeze',dispatches:plan.bridge?100:0,
    privateHash:hash(privateOutput),rows:measures},null,2),{mode:0o600,flag:'wx'});
