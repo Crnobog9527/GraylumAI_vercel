@@ -7,11 +7,16 @@ import { parseWorkflowManifest, workflowManifestPath, type WorkflowManifest } fr
 
 export type SkillForm = {
   kind: 'document' | 'social'; directoryName: string; files: { path: string; base64: string }[];
-  planResources?: string[];
+  planResources?: string[]; reportGeneration?: WorkflowManifest['reportGeneration'];
   steps: { title: string; resources: string[]; information?: {id:string;title:string;required:boolean;profileKey?:string;elicitation?:'user_fact'|'agent_proposal'}[] }[]; reviewed: boolean;
 };
 export const emptySkillForm = (): SkillForm => ({ kind: 'document', directoryName: '', files: [],
   steps: [{ title: '', resources: ['SKILL.md'] }], reviewed: false });
+
+/** Package fields sent to skills.saveModule; optional workflow declarations are omitted when absent. */
+export const skillPublicationFields = (form: SkillForm) => ({ kind: form.kind, files: form.files, steps: form.steps,
+  ...(form.planResources ? { planResources: form.planResources } : {}),
+  ...(form.reportGeneration ? { reportGeneration: form.reportGeneration } : {}) });
 
 /** Only reads selected files. Never executes a package, follows links, or uploads on selection. */
 export async function readSkillFiles(files: FileList | File[]) {
@@ -50,7 +55,7 @@ export function ModuleSkillEditor({ value, onChange, error, onError, onReadingCh
     try {
       const result = await readSkillFiles(files);
       patch({ files:result.files, directoryName:result.directoryName || value.directoryName,
-        ...(result.workflow ? {...result.workflow,planResources:result.workflow.planResources} : {
+        ...(result.workflow ? {...result.workflow,planResources:result.workflow.planResources,reportGeneration:result.workflow.reportGeneration} : {
           steps:value.steps.map(step=>({ ...step,resources:step.resources.filter(path=>result.files.some(file=>file.path===path)) })),
         }),
       });
